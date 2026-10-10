@@ -125,13 +125,32 @@ test('tool calls, results and long messages open folded to one row; a short repl
 
 test('a Bash command holding a whole file in one string opens clipped to a few lines, with Show more under it and Show less in its place', async () => {
   // the chevron at the start of the head opens the record and folds it again, turned: a click on the same spot does both
+  // in place: the chevron, the head's words and the line number do not move, while the folded row keeps its height and
+  // the open record the height it had
   const caret = `${card(4)} .reader-fold-caret`
-  const shut = await box(caret)
+  const lineno = `${card(4)} .reader-lineno`
+  // where the head's words are drawn: the box of their text, whatever element holds it
+  const words = () =>
+    page.evaluate((s) => {
+      const head = document.querySelector(`${s} .reader-record-head`)!
+      const text = [...head.childNodes].find((n) => n.nodeType === Node.TEXT_NODE && n.textContent!.trim())!
+      const r = document.createRange()
+      r.selectNodeContents(text)
+      return r.getBoundingClientRect().toJSON() as DOMRect
+    }, card(4))
+  const [shut, shutHead, shutNo, shutRow] = [await box(caret), await words(), await box(lineno), await box(card(4))]
   const at = { x: shut.x + shut.width / 2, y: shut.y + shut.height / 2 }
   await page.mouse.click(at.x, at.y)
   assert.equal(await folded(4), false)
-  const open = await box(caret)
-  assert.ok(Math.abs(open.x - shut.x) < 1 && Math.abs(open.y - shut.y) <= 8, `the chevron stays at the head's start (${shut.x},${shut.y} folded, ${open.x},${open.y} open)`)
+  const [open, openHead, openNo, openRow] = [await box(caret), await words(), await box(lineno), await box(card(4))]
+  assert.ok(Math.abs(open.x - shut.x) < 1 && Math.abs(open.y - shut.y) < 1, `the chevron stays put (${shut.x},${shut.y} folded, ${open.x},${open.y} open)`)
+  assert.ok(Math.abs(openHead.x - shutHead.x) < 1 && Math.abs(openHead.y - shutHead.y) < 1, `the head's words stay put (${shutHead.x},${shutHead.y} folded, ${openHead.x},${openHead.y} open)`)
+  assert.ok(Math.abs(openNo.y - shutNo.y) < 1, `the line number stays put (${shutNo.y}, ${openNo.y})`)
+  assert.ok(shutRow.height <= 34, `the folded row is ${shutRow.height}px tall`)
+  // as tall as with its head under a record's 10px top padding: 10, the head's 24, a gap of 3, the body, 10 and the
+  // border; the 6px the head gave up above it are under the body
+  const body = await box(`${card(4)} .reader-record-body`)
+  assert.ok(Math.abs(openRow.height - body.height - 48) < 1, `the open record is its body and ${openRow.height - body.height}px`)
   await page.mouse.click(at.x, at.y)
   assert.equal(await folded(4), true, 'a second click on the same spot folds it')
   await page.mouse.click(at.x, at.y)

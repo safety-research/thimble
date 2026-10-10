@@ -293,7 +293,7 @@ export function RecordCard({ path, line, target, hit, className, header, text, c
     setFolded(f)
   }
   const banded = !!cb?.bands.some(Boolean)
-  const cls = ['reader-card', 'reader-record', className, isT && 'reader-target', isT && hit && 'reader-hit', marks.cells.length && 'has-gutter', marks.tint && 'has-tint', banded && 'has-cb', folded && 'is-folded'].filter(Boolean).join(' ')
+  const cls = ['reader-card', 'reader-record', className, isT && 'reader-target', isT && hit && 'reader-hit', marks.cells.length && 'has-gutter', marks.tint && 'has-tint', banded && 'has-cb', fold && 'has-fold', folded && 'is-folded'].filter(Boolean).join(' ')
   return (
     <div className={cls} data-line={line} data-anchor={`${path}#L${line}`} data-anchor-text={text || undefined} style={markStyle(marks)}>
       {banded && <EdgeBands bands={cb!.bands} />}
@@ -309,9 +309,11 @@ export function RecordCard({ path, line, target, hit, className, header, text, c
             <span className="reader-fold-text">{fold!.summary}</span>
           </button>
         ) : fold ? (
-          <button type="button" className="reader-record-head reader-fold-head mono" aria-expanded onClick={(e) => onFold(e, true)}>
-            <Icon name="chevron-down" size={12} className="reader-fold-caret" />
-            {header}
+          <button type="button" className="reader-fold-head" aria-expanded onClick={(e) => onFold(e, true)}>
+            <span className="reader-record-head mono">
+              <Icon name="chevron-down" size={12} className="reader-fold-caret" />
+              {header}
+            </span>
           </button>
         ) : (
           header != null && <div className="reader-record-head mono">{header}</div>
