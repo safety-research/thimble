@@ -474,7 +474,8 @@ def test_a_range_draws_a_dumbbell_per_item_from_its_before_ring_to_its_after_dot
     assert start["mark"] == {"type": "point", "style": kt.START_STYLE} and start["encoding"]["x"]["field"] == "base"
     assert end["mark"] == "point" and end["encoding"]["x"]["field"] == "tuned"
     assert all(l["encoding"]["x"]["title"] == "base \u2192 tuned" for l in spec["layer"])
-    assert all(l["encoding"]["x"]["scale"] == {"zero": False} for l in spec["layer"]), "the ends are places, not lengths"
+    assert all(l["encoding"]["x"]["scale"] == {"zero": False, "padding": kt.RANGE_PAD} for l in spec["layer"]), \
+        "the ends are places, not lengths, and the outermost clear the axis line"
     assert start["encoding"]["y"]["sort"] == ["m2", "m3", "m1"], "the largest after first"
     table = cite.chart_table(bundle)
     assert table.label == "model" and table.cells[table.labels.index("m2")] == ["0.55", "0.81"]
@@ -486,6 +487,12 @@ def test_a_range_draws_a_dumbbell_per_item_from_its_before_ring_to_its_after_dot
     s = spec_of("range", spans, marks={"freeze": "2026-08-05"})
     assert s["layer"][0]["layer"][1]["encoding"]["y"]["sort"] == ["b", "a"]
     assert s["layer"][0]["layer"][1]["encoding"]["x"]["type"] == "temporal" and s["layer"][1]["mark"] == "rule"
+    assert s["layer"][0]["layer"][0]["encoding"]["x"]["scale"] == {"padding": kt.RANGE_PAD}
+    # an item in several groups has their dumbbells side by side on its line, not one over another
+    per = spec_of("range", pd.DataFrame({"model": ["m1", "m1", "m2"], "base": [0.4, 0.5, 0.6], "tuned": [0.6, 0.55, 0.7],
+                                         "bench": ["math", "code", "math"]}))
+    assert all(l["encoding"]["yOffset"] == {"field": "bench", "type": "nominal", "sort": ["math", "code"]} for l in per["layer"])
+    assert "yOffset" not in grouped[1]["encoding"], "each item once: its line holds its one dumbbell"
     with pytest.raises(ValueError, match="the before and after both numbers or both times; `first` holds times and `n` numbers"):
         kt.chart("range", spans[["agent", "first"]].assign(n=[1, 2]))
 

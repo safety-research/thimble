@@ -93,7 +93,8 @@ steps; a group of more than 500 distinct values keeps 500 of them, evenly spread
 groups by their median, the least first, as their curves stand from the top.
 
 A range's rows are the frame's own. Its x axis is titled by the two columns, as in `base → tuned`, and the ends are
-places rather than lengths, so the axis spans them rather than starting at 0.
+places rather than lengths, so the axis spans them rather than starting at 0. An item in several groups has their
+dumbbells side by side on its line.
 
 ```python
 thimble.chart("range", evals[["model", "base", "tuned"]])

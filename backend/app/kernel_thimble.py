@@ -1184,6 +1184,7 @@ RIDGE_FROM = 5  # a density chart of this many groups draws them one over anothe
 RIDGE_RISE = 1.5  # how many baselines the highest ridge rises
 RIDGE_BASE, RIDGE_TOP = "__thimble_base", "__thimble_top"  # a ridge's baseline and its curve, in baselines from the bottom
 ECDF_STEPS_MAX = 500  # a group's cumulative share is kept at this many of its values at most, evenly spread
+RANGE_PAD = 8  # px a range's axis reaches past its outermost ends, so their marks clear the axis line
 FITS = ("linear", "smooth")  # the trend lines a scatter fits: least squares, or a local regression (LOESS)
 SMOOTH_SPAN = 0.75  # the share of the points each point of a smooth fit is fitted to (R's loess and ggplot's default)
 SMOOTH_AT = 200  # a smooth fit is computed at this many x values at most and read between them
@@ -2173,7 +2174,8 @@ def _ecdf_spec(df, opts: dict) -> dict:
 def _range_spec(df, opts: dict) -> dict:
     """A dumbbell per item lying down: a line from its before to its after, the before a ring and the after a dot, both
     numbers or both times; the x axis titled "before → after" by the columns' names. Items by their after, the largest
-    first, or with times by their before, the earliest first; a group column's groups in color."""
+    first, or with times by their before, the earliest first; a group column's groups in color, side by side on the
+    line of an item that is in several."""
     kind = "range"
     cols = list(df.columns)
     item, before, after = cols[:3]
@@ -2191,22 +2193,24 @@ def _range_spec(df, opts: dict) -> dict:
     order = _ordered(kind, df[item], ranked, opts.get("sort", _DEFAULT), None if grp else label, "items")
     rows = _chart_rows(df, kinds)
     xt, title = ("temporal" if xk == "time" else "quantitative"), f"{before} \u2192 {after}"
-    # the ends are places, not lengths from 0: the axis spans them
-    unzeroed = {"scale": {"zero": False}} if xk == "number" else {}
-    y = _enc(item, "nominal", sort=order)
+    # the ends are places, not lengths from 0: the axis spans them, with room for the marks at its ends
+    scale = {"scale": {"zero": False, "padding": RANGE_PAD} if xk == "number" else {"padding": RANGE_PAD}}
+    y = {"y": _enc(item, "nominal", sort=order)}
     color: dict = {}
     if grp:
-        color["color"] = _enc(grp, "nominal", sort=_ordered(kind, df[grp], _ranked(df[grp], df[grp].map(lambda _v: 1)),
-                                                             label=label))
+        groups = _ordered(kind, df[grp], _ranked(df[grp], df[grp].map(lambda _v: 1)), label=label)
+        color["color"] = _enc(grp, "nominal", sort=groups)
+        if df[item].duplicated().any():  # an item in several groups: their dumbbells side by side on its line
+            y["yOffset"] = {"field": _field(grp), "type": "nominal", "sort": groups}
     elif label is not None:
         color["color"] = _enc(item, "nominal", sort=order, legend=None)
     tip = _tooltip(df, kinds)
     spec = {"data": {"values": rows}, "layer": [
-        {"mark": "rule", "encoding": {"x": _enc(before, xt, title=title, **unzeroed), "x2": {"field": _field(after)}, "y": y,
+        {"mark": "rule", "encoding": {"x": _enc(before, xt, title=title, **scale), "x2": {"field": _field(after)}, **y,
                                       "tooltip": tip}},
         {"mark": {"type": "point", "style": START_STYLE},
-         "encoding": {"x": _enc(before, xt, title=title, **unzeroed), "y": y, **color, "tooltip": tip}},
-        {"mark": "point", "encoding": {"x": _enc(after, xt, title=title, **unzeroed), "y": y, **color, "tooltip": tip}},
+         "encoding": {"x": _enc(before, xt, title=title, **scale), **y, **color, "tooltip": tip}},
+        {"mark": "point", "encoding": {"x": _enc(after, xt, title=title, **scale), **y, **color, "tooltip": tip}},
     ]}
     return _with_marks(kind, spec, opts["marks"], before, xk) if opts.get("marks") is not None else spec
 
