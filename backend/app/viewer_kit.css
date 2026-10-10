@@ -1678,6 +1678,11 @@ button.thimble-card {
   white-space: pre;
   font: 400 var(--text-mono-sm) / 1 var(--font-mono);
 }
+.thimble-table-probe-heads {
+  position: absolute;
+  visibility: hidden;
+  width: max-content;
+}
 /* a row's columns in the side panel, each value whole */
 .thimble-table-fields {
   display: grid;
