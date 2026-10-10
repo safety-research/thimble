@@ -2882,11 +2882,11 @@ function windowTop(off, items, n, height, c, top0, free, focus) {
   return Math.max(0, Math.min(top, last))
 }
 
-// the track beside a list taller than its room (docs/terminal-views.md, "The list"): a column of the whole list, each
-// cell its rows' commonest Color by hue (`▌`), the part in view on the selection background; a list many times its
-// room adds the zoomed track at the outer edge, the part around the view at a finer scale; each of Color by's choices
-// past the first (`tracks`) a column of its own before them, in its own hues. A click goes there. `off` holds each
-// item's first line, so the track reads each item's value once, never a line at a time.
+// the track beside a list taller than its room (docs/terminal-views.md, "The list"): one column of the whole list at
+// every length, as the browser's strip is, each cell its rows' commonest Color by hue (`▌`), the part in view on the
+// selection background; each of Color by's choices past the first (`tracks`) a column of its own before it, in its own
+// hues. A click goes there. `off` holds each item's first line, so the track reads each item's value once, never a line
+// at a time.
 const TRACKS_MAX = 3
 /** A record's mark for each of Color by's choices past the first (`tracks`), as the browser's bands on its edge: `●` in
  *  the hue of its value of that choice (dim for a field's value with no hue of its own), a space where it has none or a
@@ -2937,32 +2937,22 @@ function drawTrack(d, y0, total, top, height, off, items, valueOf, hueOf, tracks
     const h = best ? hue(best) : null
     return h && h !== COLORS.dim ? { s: '▌', fg: h } : { s: '▌', d: true }
   }
-  const cellOf = (from, to) => cellIn(values, hueOf, from, to)
-  const zoom = total > rows * 16
-  const zFrom = Math.max(0, Math.min(total - rows * 4, top + height / 2 - rows * 2))
-  const zLen = Math.min(total, rows * 4)
+  const n = lanes.length
+  const x = d.cols - 1
   for (let k = 0; k < rows; k++) {
     const line = d.lines[y0 + k]
     if (!line) break
     const a = (k / rows) * total
     const b = ((k + 1) / rows) * total
     const inView = b > top && a < top + height
-    const cell = { ...cellOf(a, b), ...(inView ? { bg: COLORS.selected } : {}) }
-    const n = lanes.length
+    const sel = inView ? { bg: COLORS.selected } : {}
     const runs = clipLine(line.runs, d.cols - 3 - n)
-    const pad = d.cols - (zoom ? 2 : 1) - n - lineWidth(runs)
-    const cells = [cell]
-    if (zoom) {
-      const za = zFrom + (k / rows) * zLen
-      const zb = zFrom + ((k + 1) / rows) * zLen
-      cells.unshift({ ...cellOf(za, zb), ...(zb > top && za < top + height ? { bg: COLORS.selected } : {}) })
-    }
-    cells.unshift(...lanes.map((l) => ({ ...cellIn(l.values, l.hue, a, b), ...(inView ? { bg: COLORS.selected } : {}) })))
+    const pad = x - n - lineWidth(runs)
+    const cells = [...lanes.map((l) => ({ ...cellIn(l.values, l.hue, a, b), ...sel })), { ...cellIn(values, hueOf, a, b), ...sel }]
     line.runs = merged([...runs, { s: ' '.repeat(Math.max(0, pad)) }, ...cells])
-    for (let j = 0; j < n; j++) d.hits.push({ y: y0 + k, x0: d.cols - (zoom ? 2 : 1) - n + j, x1: d.cols - (zoom ? 2 : 1) - n + j + 1, on: () => go(Math.floor(a)), tip: `${lanes[j].title}: rows ${num(Math.floor(a) + 1)}-${num(Math.min(total, Math.ceil(b)))} of ${num(total)}` })
-    const x = d.cols - (zoom ? 2 : 1)
-    d.hits.push({ y: y0 + k, x0: x + (zoom ? 1 : 0), x1: x + (zoom ? 2 : 1), on: () => go(Math.floor(a)), tip: `rows ${num(Math.floor(a) + 1)}-${num(Math.min(total, Math.ceil(b)))} of ${num(total)}` })
-    if (zoom) d.hits.push({ y: y0 + k, x0: x, x1: x + 1, on: () => go(Math.floor(zFrom + (k / rows) * zLen)), tip: 'the rows around the view' })
+    const where = `rows ${num(Math.floor(a) + 1)}-${num(Math.min(total, Math.ceil(b)))} of ${num(total)}`
+    for (let j = 0; j < n; j++) d.hits.push({ y: y0 + k, x0: x - n + j, x1: x - n + j + 1, on: () => go(Math.floor(a)), tip: `${lanes[j].title}: ${where}` })
+    d.hits.push({ y: y0 + k, x0: x, x1: x + 1, on: () => go(Math.floor(a)), tip: where })
   }
 }
 

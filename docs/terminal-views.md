@@ -292,8 +292,8 @@ ran (`end(item)`), and `×` in red where most of a cell's records failed (`probl
   `onOpen(item)` hears it, to fetch what they show. `a` asks a side thread about the chosen row (`ask(item)`).
 - Each row starts with its mark in its Color by hue, then a mark for each choice past the first (`●` in the hue of the
   row's value of that choice, a space where it has none), as the browser's bands on a row's edge. A list taller than its rows has the colored track at its right
-  edge: each cell the commonest hue of the rows it stands for, the part in view on the selection background; one many
-  times taller adds the zoomed track beside it. A click on the track goes there; the wheel over the list moves its
+  edge, one column at every length: each cell the commonest hue of the rows it stands for, the part in view on the
+  selection background. A click on the track goes there; the wheel over the list moves its
   rows, and the rows of no other list (over a side pane's rows, those of the list the pane draws).
 - A list draws only its rows in view (and the chosen one): a list of 15,000 rows answers a key as one of 40 does. The
   rows an item's `body` takes are counted as it last drew them at that width, so `body` draws from the item and its

@@ -2,8 +2,8 @@
 // (src/files/Reader.tsx and its strip, src/files/Tracks.tsx) over a file of 15,000 records answered in the page, in its
 // Table and Transcript modes, and the view kit's strip (backend/app/viewer_colour.js) beside a list of 3,000 records.
 // Each is sampled after every painted frame during a steady drag of the strip's thumb and a steady wheel scroll. In the
-// frames where the pointer moved (or the list scrolled) the thumb and the loupe that stands at it (in the kit, the frame
-// and the lens) move too, never standing still to jump after (a step more than twice their share of the move and a
+// frames where the pointer moved (or the list scrolled) the thumb and the loupe that stands at it (in Files and in the
+// kit alike) move too, never standing still to jump after (a step more than twice their share of the move and a
 // pixel), the reader's records follow the drag rather than a page at a time, and a frame that draws only the strip takes
 // under 16 ms (in Chromium; headless WebKit's times are logged, its software drawing of the records spilling into the
 // frames around them); held there, the loupe's lines are the records around the thumb, each its number and the start of
@@ -335,13 +335,15 @@ async function kitPage(engine: BrowserType) {
   await page.setContent(KIT_VIEW())
   const frame = () => page.mainFrame()
   await page.waitForTimeout(300)
-  await frame().waitForSelector('.thimble-colour-lens', { state: 'attached' })
+  await frame().waitForSelector('.thimble-colour-thumb', { state: 'attached' })
   await page.waitForTimeout(300)
   return { browser, page, frame }
 }
 
-const kitSampling = (f: import('playwright').Frame) =>
-  f.evaluate(() => {
+/** As startSampling, over the kit's strip: its thumb, and while the loupe is open its part `lens` (the bracket beside the
+ * strip, or the loupe's box). */
+const kitSampling = (f: import('playwright').Frame, lens = '.thimble-colour-bracket') =>
+  f.evaluate((lens) => {
     const w = window as any
     w.__samples = []
     w.__moves = []
@@ -351,7 +353,7 @@ const kitSampling = (f: import('playwright').Frame) =>
     let t0 = 0
     ch.port1.onmessage = () => {
       const q = (s: string) => document.querySelector(s)?.getBoundingClientRect()
-      w.__samples.push({ t: t0, work: performance.now() - t0, frame: q('.thimble-colour-whole .thimble-colour-thumb')?.top ?? null, lens: q('.thimble-colour-lens')?.top ?? null, rec: null, recLine: null, st: (document.getElementById('list') as HTMLElement).scrollTop, top: Math.floor((document.getElementById('list') as HTMLElement).scrollTop / 30) })
+      w.__samples.push({ t: t0, work: performance.now() - t0, frame: q('.thimble-colour-thumb')?.top ?? null, lens: document.querySelector('.thimble-colour-loupe[data-open]') ? (q(lens)?.top ?? null) : null, rec: null, recLine: null, st: (document.getElementById('list') as HTMLElement).scrollTop, top: Math.floor((document.getElementById('list') as HTMLElement).scrollTop / 30) })
     }
     const tick = () => {
       if (!w.__sampling) return
@@ -360,17 +362,28 @@ const kitSampling = (f: import('playwright').Frame) =>
       requestAnimationFrame(tick)
     }
     requestAnimationFrame(tick)
-  })
+  }, lens)
 
 for (const [name, engine] of ENGINES) {
-  test(`${name}, the kit's strip: a steady drag of the overview's frame moves the frame, the lens and the list every frame`, async (ctx) => {
+  test(`${name}, the kit's strip: a steady drag of the thumb moves the thumb, the loupe at it and the list every frame`, async (ctx) => {
     if (!runs.get(name)) return ctx.skip()
     const { browser, page, frame } = await kitPage(engine)
-    const thumb = (await frame().locator('.thimble-colour-whole .thimble-colour-thumb').boundingBox())!
+    // from the middle of the list, where the loupe has room to follow the thumb
+    const strip = (await frame().locator('.thimble-colour-track').boundingBox())!
+    await page.mouse.click(strip.x + strip.width / 2, strip.y + strip.height * 0.4)
+    await page.waitForTimeout(400)
+    const thumb = (await frame().locator('.thimble-colour-thumb').boundingBox())!
     const x = thumb.x + thumb.width / 2
     let y = thumb.y + thumb.height / 2
     await page.mouse.move(x, y)
     await page.mouse.down()
+    // past the press's DRAG_PX, where the thumb and the loupe start to move together: the steady drag from there
+    for (let i = 0; i < 4; i++) {
+      y += 1
+      await page.mouse.move(x, y)
+      await page.waitForTimeout(8)
+    }
+    await page.waitForTimeout(50)
     await kitSampling(frame())
     for (let i = 0; i < 160; i++) {
       y += 1
@@ -382,13 +395,17 @@ for (const [name, engine] of ENGINES) {
       w.__sampling = false
       return { samples: w.__samples, moves: w.__moves }
     })
+    // held there, the loupe's lines are the records around the thumb, each its line and the start of its text
+    const lines = await frame().evaluate(() => [...document.querySelectorAll('.thimble-colour-loupe[data-open] .thimble-colour-loupe-row')].map((r) => ({ n: Number((r.querySelector('.thimble-colour-loupe-n')!.textContent ?? '').replace(/,/g, '')), text: r.querySelector('.thimble-colour-loupe-t')!.textContent ?? '' })))
     await page.mouse.up()
+    assert.equal(lines.length, 17)
+    assert.ok(lines.every((r, i) => (!i || r.n === lines[i - 1].n + 1) && r.text === `message ${r.n}`), `the records in order: ${JSON.stringify(lines)}`)
     const rows = motion(samples, moves)
     const driven = rows.filter((r) => Math.abs(r.dy) > 1e-3)
     const followed = driven.filter((r) => Math.abs(r.st) > 0).length / driven.length
     const f = report('drag', rows, 'frame', 'dy')
     const l = report('drag', rows, 'lens', 'dy')
-    console.log(`\n${name} kit, drag of the frame:\n  ${fmt(f)}\n  ${fmt(l)}\n  the list moved in ${pct(followed)} of the driven frames\n  ${timing(rows)}`)
+    console.log(`\n${name} kit, drag of the thumb:\n  ${fmt(f)}\n  ${fmt(l)}\n  the list moved in ${pct(followed)} of the driven frames\n  ${timing(rows)}`)
     smooth(f, `${name} kit`)
     smooth(l, `${name} kit`)
     assert.ok(followed >= 0.9, `the list moved in only ${pct(followed)} of the driven frames`)
@@ -396,12 +413,19 @@ for (const [name, engine] of ENGINES) {
     await browser.close()
   })
 
-  test(`${name}, the kit's strip: a steady wheel scroll moves the frame and the lens every frame the list scrolls`, async (ctx) => {
+  test(`${name}, the kit's strip: a steady wheel scroll over the strip moves the thumb and the loupe at it every frame the list scrolls`, async (ctx) => {
     if (!runs.get(name)) return ctx.skip()
     const { browser, page, frame } = await kitPage(engine)
-    const list = (await frame().locator('#list').boundingBox())!
-    await page.mouse.move(list.x + list.width / 2, list.y + list.height / 2)
-    await kitSampling(frame())
+    // in the middle of the list, the loupe open on the strip, then the wheel there: the list scrolls and the loupe goes
+    // to the thumb
+    const strip = (await frame().locator('.thimble-colour-track').boundingBox())!
+    await page.mouse.click(strip.x + strip.width / 2, strip.y + strip.height * 0.5)
+    await page.waitForTimeout(400)
+    await page.mouse.move(strip.x + strip.width / 2, strip.y + strip.height * 0.3)
+    await page.waitForTimeout(400)
+    await page.mouse.wheel(0, 6)
+    await page.waitForTimeout(100)
+    await kitSampling(frame(), '.thimble-colour-loupe-box')
     for (let i = 0; i < 160; i++) {
       await page.mouse.wheel(0, 6)
       await page.waitForTimeout(8)
@@ -474,9 +498,10 @@ for (const [name, engine] of ENGINES) {
     const page = await browser.newPage({ viewport: { width: 900, height: 700 }, deviceScaleFactor: 2 })
     // 200 records, so that one record has rows of the overview to itself
     await page.setContent(KIT_VIEW(200).replace("(i * 7) % 11 < 3 ? 'With links' : 'Text only'", "i === 120 ? 'With links' : 'Text only'"))
-    await page.waitForSelector('.thimble-colour-lens', { state: 'attached' })
+    await page.waitForSelector('.thimble-colour-thumb', { state: 'attached' })
     await page.waitForTimeout(400)
-    const patch = await lonePatch(page.mainFrame(), '.thimble-colour-whole canvas')
+    // the strip's one lane of colors, 3 px in and 7 px wide
+    const patch = await lonePatch(page.mainFrame(), '.thimble-colour-whole canvas', 6.5)
     assert.ok(patch, 'the overview draws the lone record in its color')
     for (const off of [2, -2]) {
       await page.evaluate(() => (document.getElementById('list')!.scrollTop = 0))
@@ -612,7 +637,7 @@ test("chromium, the kit's strip: a list of 4,458 rows drawn again as it scrolls 
   const browser = await chromium.launch({ headless: true })
   const page = await browser.newPage({ viewport: { width: 900, height: 700 }, deviceScaleFactor: 2 })
   await page.setContent(VIRTUAL())
-  await page.waitForSelector('.thimble-colour-lens', { state: 'attached' })
+  await page.waitForSelector('.thimble-colour-thumb', { state: 'attached' })
   await page.waitForTimeout(400)
   // a pixel of our own on the overview, which a drawing of the overview again would paint over
   const dot = () =>

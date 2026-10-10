@@ -62,8 +62,8 @@ the view as text, a glyph or a gray pattern, never in a second palette. Filter b
 - A view never scrolls sideways: the kit keeps the page to its pane's width (a long line of code wraps, a picture, a
   video and a canvas scale down), and the overview under the divider scrolls down only. The view checks note a page
   that is wider than its pane.
-- A long list of records gets two tracks in place of its scrollbar, as a music or video editor lays out its navigator
-  (below). A list of groups gets a plain scrollbar.
+- A long list of records gets a strip of its colors in place of its scrollbar, with a loupe on rest, as Files' reader
+  has (below). A list of groups gets a plain scrollbar.
 - Reset, at the end of the row, shows while the view is not as it opens and puts it back (below). While hidden it
   keeps its place unseen, so the chips fit the same width whether it shows or not and none moves behind "N more" when
   it shows. Only in a row too narrow for "N more" beside Color by does the hidden Reset give up its place.
@@ -146,45 +146,46 @@ load()
 ## A long list's tracks
 
 `strip: '#list'`, or `colour.strip('#list', {rows})` or `{whole: true}` for another list (see below), puts the list's
-scrollbar in tracks at its right edge:
+scrollbar in one strip at its right edge, at every length:
 
-- The overview track is the whole list in one lane for the first choice: each pixel row in the color of the value that
+- The strip is the whole list in one lane for the first choice: each pixel row in the color of the value that
   is on which most of the records there take, never two colors side by side. The records with no value ("No kind",
   "Not marked") and those of a value turned off are the gray the no-value chip has, and only where no record of the
   pixel row takes a value that is on, so a value is never hidden under them. Each of Color by's choices past the
   first has a lane of its own beside it, in its colors (a label's own, a field's values'), so that one choice is one
-  lane and two are two; a label that is on but no choice has no lane. Each lane names its choice on hover, and the
-  lanes narrow as more come (one is 12 px; more share 24 px, 3 px each at least). Only the first choice colors the
-  zoomed track and the records' bars. A dark frame as wide as the lanes outlines the part in view; drag it to move the
-  view.
-- A list at least 12 times the height of its box adds the zoomed track at the outer edge (it goes again below 10
-  times), where the overview cannot tell the list's rows apart. It magnifies the frame: the part around the view at a
-  finer scale, its colors faded beyond the part in view, which lies under a lens. Two lines join the frame's top and
-  bottom to the lens's. The lens stands as far down the zoomed track as the frame stands down the overview, so the two
-  move together.
-- Hovering the overview shows the records under the pointer in a preview, each a row with its color as a bar on its
-  left edge, its time and first line, without scrolling. A click on the overview sends the frame there, its middle
-  under the pointer; a click within 4 px of a thin patch of a color (8 px tall at most, such as a lone record of a
-  value) snaps to it: the list goes to the patch's first record and highlights it for a moment. A press becomes a drag
-  once the pointer moves 3 px, and a drag of the frame, or from where the press was, scrubs the list.
-- A drag on the zoomed track scrolls the list at the zoomed track's scale, as a scrollbar's thumb does: the lens
-  follows the pointer over records that hold still, and a pixel of the track is a few of the list. A press off the lens
-  brings the lens there first. Let go, the lens glides back to where the frame puts it.
-- The tracks move in the browser's animation frames with transforms alone, so they follow a scroll or a drag frame by
+  lane and two are two; a label that is on but no choice has no lane. Each lane names its choice on hover; each is 7
+  px wide, 2 px from the next. Only the first choice colors the records' bars. A thumb as wide as the strip frames the
+  part in view; drag it to move the view.
+- Where the strip draws a record shorter than 3 px, resting on it for 250 ms opens the loupe beside it: a short list,
+  a line per record around the pointer, each its line or key, a cell per lane in the record's color (an empty cell for
+  none) and the start of its text; the record under the pointer darker, those in view tinted, and a bracket beside the
+  strip over the stretch the loupe shows. It follows the pointer along the strip, and moves to the thumb only on a real
+  scroll: the wheel over the strip or the loupe, or a drag of the thumb. Once the pointer is in it, it holds still: a
+  click goes to that record, highlights it for a moment and leaves the loupe's rows where they are, and the wheel
+  scrolls the list, the rows following. A strip that tells every record apart names the record under the pointer on
+  rest instead, on one line. On a touch screen a press on the strip opens the loupe, a drag scrubs and the release goes
+  there.
+- A click on the strip sends the thumb there, its middle under the pointer; a click within 4 px of a thin patch of a
+  color (8 px tall at most, such as a lone record of a value) snaps to it: the list goes to the patch's first record
+  and highlights it for a moment. A press becomes a drag once the pointer moves 3 px, and a drag of the thumb, or from
+  where the press was, scrubs the list. The wheel over the strip scrolls the list.
+- The strip moves in the browser's animation frames with transforms alone, so it follows a scroll or a drag frame by
   frame; once still, every edge goes onto the device's pixel grid.
 
 For a list that draws only the rows in view, give every row's value in order: `colour.strip('#list', {rows: values})`,
-with `preview(i)` (what the preview says of row `i`: a string, or `{when, text}`), `refs` (each row's ref, which the
-labels' lanes read) and `records` (each row's record, which the lanes of fields past the first choice read). For a list of elements the preview reads each record's `<time>` and its text, or
-`preview(element)`. Call `strip` again with the same list when they change; rows given again unchanged, as a list
-drawn again on each scroll gives them, are not measured again.
+with `preview(i)` (what the loupe says of row `i`: a string, or `{when, text}`; without it, the text of the row's
+element where the page draws it), `refs` (each row's ref, which the labels' lanes read and whose line, `#L12`, or key
+the loupe's line starts with) and `records` (each row's record, which the lanes of fields past the first choice read).
+For a list of elements the loupe reads each record's `<time>` and its text, or `preview(element)`, and its
+`data-anchor`. Call `strip` again with the same list when they change; rows given again unchanged, as a list drawn
+again on each scroll gives them, are not measured again.
 
 The tracks show colors only on a list of the records the color marks, and only where they reflect the whole list:
 Color by's own `strip`, a list given `rows`, or another list whose elements are all of its records, which says so
 with `colour.strip('#other', {whole: true})`. Any other pane, such as a list of groups (pages, agents, runs), a view's
 second list or one that loads its records in pieces, gets a plain track: a scrollbar in the kit's style with no
-colors, no lanes and no zoomed track. So does a list none of whose records takes a color (Off, or every value turned
-off). A secondary pane is plain unless the page asks for its colors this way.
+colors and no lanes, its loupe with no cells. So does a list none of whose records takes a color (Off, or every value
+turned off). A secondary pane is plain unless the page asks for its colors this way.
 
 ## Details
 

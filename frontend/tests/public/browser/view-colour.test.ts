@@ -1,7 +1,8 @@
 // The view kit's Colour by (backend/app/viewer_colour.js) in a real browser: a page holds a view in a sandboxed frame,
 // and the bridge draws the chosen value's colour as a bar on each record's left edge and each chip shows it as a square;
 // the coloured scrollbar shows where each value's records are, each pixel row in the value most of its records have,
-// and scrolls the list; chips that do not fit go behind
+// and scrolls the list, one strip at every length whose loupe names the records under the pointer (their lines from
+// refs, their text from preview or the page); chips that do not fit go behind
 // "N more". Through the real ViewerFrame
 // the choice is kept per view and the page starts on it when it is built again. What the control decides without
 // layout is tests/public/colour-kit.test.ts.
@@ -123,6 +124,71 @@ describe('Colour by in a frame', () => {
       return { mid: at(0.85), end: at(0.97), strips: document.querySelectorAll('.thimble-colour-strip').length }
     })
     assert.deepEqual(px, { mid: [2, 90, 195], end: [208, 117, 10], strips: 1 }, 'the rows given, not the sixty drawn, and still one scrollbar')
+    await page.close()
+  })
+
+  /** the loupe as drawn: whether open and naming one record, and each row's line, cells and text */
+  const loupeRows = (frame: () => Frame) =>
+    frame().evaluate(() => {
+      const el = document.querySelector('.thimble-colour-loupe') as HTMLElement
+      return {
+        open: el.hasAttribute('data-open'),
+        one: el.hasAttribute('data-one'),
+        rows: [...el.querySelectorAll('.thimble-colour-loupe-row')].map((r) => ({
+          n: r.querySelector('.thimble-colour-loupe-n')!.textContent,
+          cells: r.querySelectorAll('.thimble-colour-loupe-c i').length,
+          who: r.querySelector('.thimble-colour-loupe-t b')?.textContent ?? '',
+          text: r.querySelector('.thimble-colour-loupe-t')!.textContent,
+        })),
+      }
+    })
+
+  test('a strip that tells every record apart names the record under the pointer on rest, on one line', async () => {
+    const { page, frame } = await framed()
+    const box = (await frame().locator('.thimble-colour-strip').boundingBox())!
+    // sixty records of 30 px in a box of 300: each takes about 5 px of the strip
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height * 0.9)
+    await page.waitForTimeout(300)
+    const l = await loupeRows(frame)
+    assert.deepEqual([l.open, l.one, l.rows.length], [true, true, 1], JSON.stringify(l))
+    const n = Number(l.rows[0].n)
+    assert.ok(Math.abs(n - 54) <= 2, `the record under the pointer: ${JSON.stringify(l.rows)}`)
+    assert.equal(l.rows[0].text, `message ${n}`)
+    assert.equal(l.rows[0].cells, 1)
+    await page.mouse.move(5, 5)
+    await page.waitForTimeout(80)
+    assert.equal((await loupeRows(frame)).open, false)
+    await page.close()
+  })
+
+  test("a list given its rows: the loupe's lines are their refs' lines and what preview(i) says, else the row's element where the page draws it", async () => {
+    const { page, frame } = await framed()
+    // 1,000 rows, each its ref, the first sixty of them drawn on the page (message 1 to 60)
+    await frame().evaluate(() => (window as any).colour.strip('#list', {
+      rows: Array.from({ length: 1000 }, (_, i) => (i < 900 ? 'Text only' : 'With links')),
+      refs: Array.from({ length: 1000 }, (_, i) => 'm.jsonl#L' + (i + 1)),
+      preview: (i: number) => ({ when: '10:' + String(i % 60).padStart(2, '0'), text: 'row ' + (i + 1) + ' said this' }),
+    }))
+    await page.waitForTimeout(150)
+    const box = (await frame().locator('.thimble-colour-strip').boundingBox())!
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height * 0.95)
+    await page.waitForTimeout(400)
+    const l = await loupeRows(frame)
+    assert.deepEqual([l.open, l.one, l.rows.length], [true, false, 17])
+    const mid = l.rows[8]
+    const n = Number(mid.n)
+    assert.ok(Math.abs(n - 950) <= 4, JSON.stringify(l.rows))
+    assert.equal(mid.who, '10:' + String((n - 1) % 60).padStart(2, '0'))
+    assert.equal(mid.text, mid.who + `row ${n} said this`)
+    await page.mouse.move(5, 5)
+    // no preview: the rows the page draws say their own text
+    await frame().evaluate(() => (window as any).colour.strip('#list', { preview: null }))
+    await page.waitForTimeout(150)
+    await page.mouse.move(box.x + box.width / 2, box.y + 2)
+    await page.waitForTimeout(400)
+    const top = await loupeRows(frame)
+    assert.equal(top.open, true)
+    assert.deepEqual(top.rows.map((r) => [r.n, r.text]), top.rows.map((_, k) => [String(k + 1), `message ${k + 1}`]))
     await page.close()
   })
 
@@ -628,7 +694,7 @@ describe("a lane of the tracks for each of Color by's choices past the first", (
     await frame().waitForFunction(() => document.querySelectorAll('.thimble-colour-lane').length === 0)
     await page.waitForTimeout(200)
     const one = await lanes(frame)
-    assert.equal(one.width, 12, 'one lane, as wide as the track always is')
+    assert.equal(one.width, 13, 'one lane, 7 px wide, 3 px in from the strip\'s edges')
     assert.equal(one.at[0][0], ORANGE)
     assert.notEqual(one.at[0][1], GREEN)
     await page.close()
@@ -690,11 +756,11 @@ describe('popovers beside the tracks', () => {
   })
 })
 
-describe('where the tracks show colours and the zoomed track', () => {
+describe('where the strip shows colours, and one strip at every length', () => {
   // n messages, the first half Text only, the second With links
   const msgs = (n: number, id = 'm') => Array.from({ length: n }, (_, i) => `<div class="msg" data-anchor="${id}.jsonl#L${i + 1}" data-colour="${i < n / 2 ? 'Text only' : 'With links'}">message ${i + 1}</div>`).join('')
   const SCRIPT = `window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }], strip: '#list' })`
-  /** each strip on the page: whether plain, whether its zoomed track shows, its width and the colours its overview draws */
+  /** each strip on the page: whether plain, whether a zoomed track shows, its width and the colours it draws */
   const strips = (frame: () => Frame) =>
     frame().evaluate(() =>
       [...document.querySelectorAll('.thimble-colour-strip')].map((el) => {
@@ -702,21 +768,43 @@ describe('where the tracks show colours and the zoomed track', () => {
         const data = cv.getContext('2d')!.getImageData(Math.floor(cv.width / 2), 0, 1, cv.height).data
         const colours = new Set<string>()
         for (let y = 0; y < cv.height; y++) if (data[y * 4] !== data[y * 4 + 2]) colours.add([data[y * 4], data[y * 4 + 1], data[y * 4 + 2]].join(','))
-        return { plain: el.hasAttribute('data-plain'), zoom: getComputedStyle(el.querySelector('.thimble-colour-zoom')!).display !== 'none', width: (el as HTMLElement).offsetWidth, colours: colours.size }
+        return { plain: el.hasAttribute('data-plain'), zoom: el.querySelectorAll('.thimble-colour-zoom, .thimble-colour-lens').length > 0, width: (el as HTMLElement).offsetWidth, colours: colours.size }
       }),
     )
 
-  test('the zoomed track shows on a list twenty times its box, not on one ten times it', async () => {
-    for (const [n, zoom] of [[100, false], [200, true]] as const) {
+  test('a list ten times its box and one twenty times it each get one strip, no zoomed track', async () => {
+    for (const n of [100, 200]) {
       const { page, frame } = await own(msgs(n), SCRIPT)
       await frame().waitForFunction(() => document.querySelector('.thimble-colour-strip') != null)
       await page.waitForTimeout(250)
       const [s] = await strips(frame)
-      assert.equal(s.zoom, zoom, `${n} records of 30 px in a box of 300: ${JSON.stringify(s)}`)
+      assert.equal(s.zoom, false, `${n} records of 30 px in a box of 300: ${JSON.stringify(s)}`)
+      assert.equal(s.width, 13)
       assert.equal(s.plain, false)
       assert.ok(s.colours >= 2, 'in the values\' colours')
       await page.close()
     }
+  })
+
+  test('a plain pane that has drawn only some of its records names one near the pointer, never one far from it', async () => {
+    // twenty records at the list's top, then 6,000 px it has not drawn
+    const body = `${msgs(20)}<div style="height:6000px"></div>`
+    const { page, frame } = await own(body, `window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }] }); colour.strip('#list')`)
+    await frame().waitForFunction(() => document.querySelector('.thimble-colour-strip') != null)
+    await page.waitForTimeout(250)
+    const box = (await frame().locator('.thimble-colour-strip').boundingBox())!
+    const named = () => frame().evaluate(() => {
+      const el = document.querySelector('.thimble-colour-loupe') as HTMLElement
+      return el.hasAttribute('data-open') ? [...el.querySelectorAll('.thimble-colour-loupe-t')].map((t) => t.textContent) : null
+    })
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height * 0.8)
+    await page.waitForTimeout(400)
+    assert.equal(await named(), null, 'nothing named far from the records drawn')
+    // 3 px down the strip is about 70 px down the list: its third record
+    await page.mouse.move(box.x + box.width / 2, box.y + 3)
+    await page.waitForTimeout(400)
+    assert.deepEqual(await named(), ['message 3'])
+    await page.close()
   })
 
   test("a second pane is a plain track unless the page says its records are all there, and so is a pane none of whose records takes a colour", async () => {
@@ -726,13 +814,26 @@ describe('where the tracks show colours and the zoomed track', () => {
     await frame().waitForFunction(() => document.querySelectorAll('.thimble-colour-strip').length === 2)
     await page.waitForTimeout(250)
     const [list, side] = await strips(frame)
-    assert.deepEqual([list.plain, list.zoom], [false, true], `Color by's own list: colours and the zoomed track ${JSON.stringify(list)}`)
-    assert.deepEqual([side.plain, side.zoom, side.colours, side.width], [true, false, 0, 12], `the second pane: a plain track ${JSON.stringify(side)}`)
+    assert.deepEqual([list.plain, list.zoom], [false, false], `Color by's own list: colours, one strip ${JSON.stringify(list)}`)
+    assert.deepEqual([side.plain, side.zoom, side.colours, side.width], [true, false, 0, 10], `the second pane: a plain track ${JSON.stringify(side)}`)
+    // its loupe lists its records, with no cells, as it draws no lane
+    const sb = (await frame().locator('.thimble-colour-strip').nth(1).boundingBox())!
+    await page.mouse.move(sb.x + sb.width / 2, sb.y + sb.height * 0.5)
+    await page.waitForTimeout(400)
+    const lp = await frame().evaluate(() => {
+      const el = [...document.querySelectorAll('.thimble-colour-loupe')].find((e) => e.hasAttribute('data-open'))!
+      return { bare: el.hasAttribute('data-bare'), cells: el.querySelectorAll('.thimble-colour-loupe-c i').length, rows: [...el.querySelectorAll('.thimble-colour-loupe-row')].map((r) => [r.querySelector('.thimble-colour-loupe-n')!.textContent, r.querySelector('.thimble-colour-loupe-t')!.textContent]) }
+    })
+    assert.equal(lp.bare, true)
+    assert.equal(lp.cells, 0)
+    assert.equal(lp.rows.length, 17)
+    assert.ok(lp.rows.every(([n, t]) => t === `message ${n}`), JSON.stringify(lp.rows))
+    await page.mouse.move(5, 5)
     // the page says the second pane's elements are all its records: its colours
     await frame().evaluate(() => (window as any).colour.strip('#side', { whole: true }))
     await page.waitForTimeout(250)
     const [, whole] = await strips(frame)
-    assert.deepEqual([whole.plain, whole.zoom], [false, true], JSON.stringify(whole))
+    assert.deepEqual([whole.plain, whole.zoom], [false, false], JSON.stringify(whole))
     assert.ok(whole.colours >= 2, JSON.stringify(whole))
     // a pane whose records take no value under the choice: plain, with no zoomed track
     await frame().evaluate(() => document.querySelectorAll('#side .msg').forEach((m) => m.removeAttribute('data-colour')))
