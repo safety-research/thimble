@@ -764,31 +764,67 @@ export function diagramLayout(g: GraphDataset, opts: DiagramLayoutOptions = {}):
   // own edge's; where no spot is that clear, one clear of the boxes and the labels does
   const clearOf = (bx: Box, own: Pt[], strict: boolean) =>
     !taken.some((t) => hits(t, bx)) && (!strict || !drawn.some((d) => d.line !== own && lineHits(d.line, bx)))
+  const ring = (s: Pt): Box => ({ x0: s.x - MARK_R, y0: s.y - MARK_R, x1: s.x + MARK_R, y1: s.y + MARK_R })
+  const overlap = (a: Box, b: Box) => Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)) * Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0))
+  const covered = (bx: Box) => taken.reduce((a, t) => a + overlap(t, bx), 0)
+  // where an edge's number sits: on the edge, at a label's spot or else at any point of its line nearest the first spot,
+  // clear as a label is; where no point is clear, the one that covers the least of what is placed
+  const markAt = (spots: Pt[], line: Pt[]): { spot: Pt; clear: boolean } => {
+    const dist = (p: Pt) => Math.hypot(p.x - spots[0].x, p.y - spots[0].y)
+    const along = [...spots, ...[...line].sort((p, q) => dist(p) - dist(q))]
+    const clear = along.find((s) => clearOf(ring(s), line, true)) ?? along.find((s) => clearOf(ring(s), line, false))
+    const spot = clear ?? along.reduce((m, s) => (covered(ring(s)) < covered(ring(m)) ? s : m))
+    taken.push(ring(spot))
+    return { spot, clear: !!clear }
+  }
+  // each edge in turn: a short label written on its edge, else beside it, where a spot is clear; a long one, or one that
+  // finds no spot, a note under the drawing, numbered on its edge. A number must sit on its own edge, where a label may
+  // sit beside it, so a number that finds no clear spot (a loop's two edges run close, and a label written across both
+  // leaves the other no room) is placed before every label, and all are placed again
+  const marks = new Map<number, Pt>()
+  const written = new Map<number, Pt>()
+  const first = new Set<number>()
+  for (;;) {
+    taken.splice(nodes.length)
+    marks.clear()
+    written.clear()
+    for (const i of first) marks.set(i, markAt(drawn[i].spots, drawn[i].line).spot)
+    const crowded: number[] = []
+    drawn.forEach(({ e, line, spots }, i) => {
+      const label = e.label.trim()
+      if (!label || first.has(i)) return
+      if (label.length <= INLINE_CHARS) {
+        const half = (label.length * LABEL_CW) / 2 + 4
+        // on the edge, else beside it at the right or the left, the line running past the label's end
+        const beside = [0, half + 3, -half - 3]
+        for (const strict of [true, false])
+          for (const dx of beside)
+            for (const s of spots) {
+              const x = s.x + dx
+              const bx = { x0: x - half, y0: s.y - LABEL_H / 2, x1: x + half, y1: s.y + LABEL_H / 2 }
+              if (bx.x0 < 0 || bx.x1 > W || !clearOf(bx, line, strict)) continue
+              taken.push(bx)
+              written.set(i, { x, y: s.y })
+              return
+            }
+      }
+      const { spot, clear } = markAt(spots, line)
+      marks.set(i, spot)
+      if (!clear) crowded.push(i)
+    })
+    if (!crowded.length) break
+    for (const i of crowded) first.add(i)
+  }
+  // the notes numbered in the edges' order
   const notes: DiagramNote[] = []
-  const edges: DiagramEdge[] = drawn.map(({ e, rev, path, line, spots }) => {
+  const edges: DiagramEdge[] = drawn.map(({ e, rev, path, line, spots }, i) => {
     const label = e.label.trim()
+    const text = written.get(i)
     if (!label) return { source: e.source, target: e.target, label: '', path, line, lx: spots[0].x, ly: spots[0].y, inline: true, rev }
-    // written on the edge when it is short and a spot along the edge is clear
-    if (label.length <= INLINE_CHARS) {
-      const half = (label.length * LABEL_CW) / 2 + 4
-      // on the edge, else beside it at the right or the left, the line running past the label's end
-      const beside = [0, half + 3, -half - 3]
-      for (const strict of [true, false])
-        for (const dx of beside)
-          for (const s of spots) {
-            const x = s.x + dx
-            const bx = { x0: x - half, y0: s.y - LABEL_H / 2, x1: x + half, y1: s.y + LABEL_H / 2 }
-            if (bx.x0 < 0 || bx.x1 > W || !clearOf(bx, line, strict)) continue
-            taken.push(bx)
-            return { source: e.source, target: e.target, label, path, line, lx: r1(x), ly: r1(s.y), inline: true, rev }
-          }
-    }
-    // else a number on the edge and the label in a note under the drawing
+    if (text) return { source: e.source, target: e.target, label, path, line, lx: r1(text.x), ly: r1(text.y), inline: true, rev }
     const n = notes.length + 1
     notes.push({ n, source: shortName(info.get(e.source)!.label), target: shortName(info.get(e.target)!.label), label })
-    const ring = (s: Pt): Box => ({ x0: s.x - MARK_R, y0: s.y - MARK_R, x1: s.x + MARK_R, y1: s.y + MARK_R })
-    const spot = spots.find((s) => clearOf(ring(s), line, true)) ?? spots.find((s) => clearOf(ring(s), line, false)) ?? spots[0]
-    taken.push(ring(spot))
+    const spot = marks.get(i)!
     return { source: e.source, target: e.target, label, path, line, lx: r1(spot.x), ly: r1(spot.y), inline: false, n, rev }
   })
   const height = rowY[depth] + rowH[depth]
