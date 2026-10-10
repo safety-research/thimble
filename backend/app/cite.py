@@ -657,8 +657,8 @@ def chart_table(bundle: Any) -> ChartTable | None:
 def chart_tables(bundle: Any) -> Iterator[ChartTable]:
     """The tables of a chart bundle, each read only when the one before it is done with: its own (chart_table) first,
     then that of each other part with inline rows of its own, in the order the spec writes them, so a ref into a layer's
-    rows (a shaded span's dates, a note's words) still finds its value though the chart's table is another part's. None
-    for a bundle that is no chart."""
+    rows (a shaded span's dates, a note's words) still finds its value though the chart's table is another part's.
+    Nothing for a bundle that is no chart or draws no inline rows."""
     spec = chart_spec(bundle)
     main = _main_part(spec) if spec is not None else None
     if main is None:

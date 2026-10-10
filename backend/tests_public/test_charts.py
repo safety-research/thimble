@@ -725,6 +725,9 @@ def test_a_chart_layered_in_plain_altair_cites_its_data_not_the_marks_on_it():
         ("2026-06-20", "card:q2#end/2026-06-16")]
     assert not res.stale and not res.unresolved
     assert cite.find_td([bundle], "end", "2026-06-16")[0] == "2026-06-20"
+    # a rule at a value drawn first, which Altair gives one empty row, is no table either
+    ruled = cite.chart_table({kt.VEGALITE_MIME: (alt.Chart().mark_rule().encode(y=alt.datum(3000)) + bars).to_dict()})
+    assert (ruled.label, ruled.columns) == ("day", ["saves"])
     # a panel of a concatenated chart is read the same way, the first panel first, and a facet by its data
     other = alt.Chart(POSTS).mark_bar().encode(x="agent", y="posts")
     side = cite.chart_table({kt.VEGALITE_MIME: alt.hconcat(layered, other).to_dict()})
