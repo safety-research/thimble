@@ -2141,14 +2141,14 @@ _FIGURE_FORMAT_SRC = ("import IPython.core.pylabtools as _pt\n"
                       "del _pt, _once\n")
 
 # matplotlib's defaults for a card's figure, read when a card imports matplotlib, so a kernel starts no slower.
-MATPLOTLIBRC = Path(__file__).with_name("matplotlibrc")
+MATPLOTLIBRC = Path(__file__).resolve().with_name("matplotlibrc")
 
 # The `thimble` module installed in the kernel: a module built from kernel_thimble.py, which the kernel reads in place
 # (a wrapped kernel too: _kernel_reads), with WS set, and registered in sys.modules. The command line names only the
 # file: a sandboxed kernel's whole command line is one shell argument of at most MAX_ARG_STRLEN bytes, which the
 # module's source would fill.
 MAX_ARG_STRLEN = 131072  # Linux's limit on one argument, which srt's wrapped command must fit (kernel_srt.mjs)
-THIMBLE_MODULE = Path(__file__).with_name("kernel_thimble.py")
+THIMBLE_MODULE = Path(__file__).resolve().with_name("kernel_thimble.py")
 _THIMBLE_INSTALL = ("import sys, types\nm = types.ModuleType('thimble')\nm.__file__, m.WS = PATH, WS\n"
                     "with open(PATH, encoding='utf-8') as f:\n    exec(compile(f.read(), PATH, 'exec'), m.__dict__)\n"
                     "sys.modules['thimble'] = m\n")
@@ -2539,7 +2539,8 @@ def _venv() -> Path | None:
 
 def _kernel_reads() -> list[Path]:
     """Files of the backend a wrapped kernel reads: the page's fonts (page_fonts), thimble's matplotlibrc and the
-    `thimble` module's source (startup_lines)."""
+    `thimble` module's source (startup_lines). Each is named by its real path, as the kernel opens it: srt hides the
+    install tree by its real path (_kernel_hides), so a path through a link into it would stay hidden."""
     return [page_fonts.FONTS_DIR, MATPLOTLIBRC, THIMBLE_MODULE]
 
 
