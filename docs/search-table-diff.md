@@ -94,7 +94,7 @@ stays at the top and hairline rows, one line each with a cell's overflow cut by 
   drawn) while a field is the color, and the strip shows every row's color, scrolled to or not. The table draws its
   rows again when Color by changes.
 - A click, or Enter on the chosen row, opens the row in `side` (`thimble.side`) and tells `onOpen`. ↑ and ↓ move the
-  chosen row while the table has the focus.
+  chosen row while the table has the focus, and an open side panel follows it.
 - With `filter` (`thimble.filterBy`) it leaves out the rows Filter by does not keep; call `table.draw()` in Filter by's
   `onChange`. With `search` the search finds in every row (above).
 

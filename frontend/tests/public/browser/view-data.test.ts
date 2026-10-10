@@ -177,6 +177,37 @@ describe('the table, with Color by and the search', () => {
   })
 })
 
+describe('the table in a narrow pane', () => {
+  test('columns given more width than the pane has give it up, so no cell is drawn over the next, and fit again as the pane widens', async () => {
+    const doc = page(`<div id="pane" style="width:380px;height:300px;display:flex"><div id="list" style="flex:1;min-height:0"></div></div>
+<script>
+window.table = thimble.table({ mount: '#list', rows: Array.from({ length: 200 }, (_, i) => ({ ref: 'm#L' + (i + 1), from: 'someone.with.a.long.name@example.org', subject: 'A subject that runs on ' + i, n: i * 1000, t: 1775000000 + i * 61 })),
+  columns: [{ name: 'from', title: 'From', width: 220 }, { name: 'subject', title: 'Subject' }, { name: 'n', title: 'Size', type: 'number' }, { name: 't', title: 'Date', type: 'time' }] })
+</script>`)
+    const { page: p, frame } = await framed(doc)
+    // each cell of a row ends where the next begins or before, and holds its own padding
+    const cells = () =>
+      frame().evaluate(() =>
+        [...document.querySelector('.thimble-table-row')!.children].map((c) => {
+          const r = c.getBoundingClientRect()
+          return [Math.round(r.left), Math.round(r.right)]
+        }),
+      )
+    const fits = (cs: number[][]) => cs.every(([l, r], i) => r - l >= 16 && (i === 0 || l >= cs[i - 1][1] - 1))
+    const narrow = await cells()
+    assert.ok(fits(narrow), JSON.stringify(narrow))
+    // the subject keeps a readable width rather than none
+    assert.ok(narrow[1][1] - narrow[1][0] >= 60, JSON.stringify(narrow))
+    // wider: the From column takes its width again
+    await frame().evaluate(() => ((document.getElementById('pane') as HTMLElement).style.width = '900px'))
+    await p.waitForTimeout(150)
+    const wide = await cells()
+    assert.ok(fits(wide), JSON.stringify(wide))
+    assert.equal(wide[0][1] - wide[0][0], 220)
+    await p.close()
+  })
+})
+
 describe('the search alone', () => {
   test('on a list with no Color by: a strip of its own with the lane of ticks, which a scroll to the match follows', async () => {
     const { page: p, frame } = await framed(CHAT)

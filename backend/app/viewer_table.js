@@ -20,8 +20,8 @@
 // Each row is a record: its data-anchor is its ref, so a label marks it, a ⌘-click asks about it and a citation reveals
 // it (table.reveal(ref)), and with the page's Color by its value's colour is the bar on its left edge; the list's strip
 // shows the colours of every row, scrolled to or not, and the chips count the rows. A click or Enter opens a row in the
-// side panel (`details`, by default its columns), ↑ and ↓ move the chosen row. thimble keeps the sort per view, and
-// Reset puts back the one it opens with.
+// side panel (`details`, by default its columns), ↑ and ↓ move the chosen row, which an open side panel follows.
+// thimble keeps the sort per view, and Reset puts back the one it opens with.
 ;(function () {
   'use strict'
   var kit = window.__thimbleKit
@@ -39,6 +39,7 @@
   var SORT_ROOM = 14 // px, the sort's arrow beside a head's title
   var MIN_W = 56 // px, the narrowest column of numbers or times, and the widest
   var MAX_W = 260
+  var MIN_TEXT = 64 // px, the narrowest a column of text gets in a table too narrow for the widths it was given
   var SAMPLE = 2000 // rows read to fit a column of numbers or times to its values
   var collator = typeof Intl !== 'undefined' ? new Intl.Collator('en', { numeric: true, sensitivity: 'base' }) : null
   var ARROW = {
@@ -53,9 +54,14 @@
   // have them (`secs`); a string as written
   function stamp(v, secs) {
     if (typeof v !== 'number' || !isFinite(v)) return v == null ? '' : String(v)
-    var d = new Date(v * 1000)
+    var d = new Date(seconds(v) * 1000)
     var s = d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate()) + ' ' + pad2(d.getUTCHours()) + ':' + pad2(d.getUTCMinutes())
     return secs ? s + ':' + pad2(d.getUTCSeconds()) : s
+  }
+  // a time in seconds: one past MS_FROM is read as milliseconds, which no time in seconds reaches before the year 5000
+  var MS_FROM = 1e11
+  function seconds(v) {
+    return Math.abs(v) >= MS_FROM ? v / 1000 : v
   }
   // markup's text, for the search of a column drawn as html
   function textOfHtml(h) {
@@ -156,8 +162,10 @@
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault()
         var to = at < 0 ? self.firstInView() : Math.max(0, Math.min(n - 1, at + (e.key === 'ArrowDown' ? 1 : -1)))
-        self.choose(to)
-        self.scrollTo(to, true)
+        self.scrollTo(to, false)
+        // while the side panel shows a row, it shows the chosen one
+        if (to !== at && self.side && self.side.isOpen) self.open(to)
+        else self.choose(to)
       } else if (e.key === 'Enter' && at >= 0) {
         e.preventDefault()
         self.open(at)
@@ -175,13 +183,17 @@
       },
       { passive: true },
     )
+    // a taller table draws more rows; a wider or narrower one, such as beside the side panel, fits its columns again
     if (typeof ResizeObserver === 'function') {
       var h = -1
       this.resized = new ResizeObserver(function () {
-        if (self.dead || self.mount.clientHeight === h) return
+        if (self.dead) return
+        if (self.body.clientWidth !== self.laidW) self.fit()
+        if (self.mount.clientHeight === h) return
         h = self.mount.clientHeight
         self.window()
-      }).observe(this.mount)
+      })
+      this.resized.observe(this.mount)
     }
     // Color by changed: the rows' bars, the chips' counts and the strip's colours drawn again
     shared.onColour(function () {
@@ -211,6 +223,7 @@
         delete ctl.kept(self.name).sort
         ctl.save()
         self.sort = self.initial
+        self.chosen = null
         self.draw()
       },
     })
@@ -253,8 +266,9 @@
     if (col.html) return String(ctl.safe(function () { return col.html(r) }, '') || '')
     return esc(this.text(col, r))
   }
-  // the columns' widths: a column's own, else for numbers and times as wide as their widest value or title, else an
-  // equal share of what is left
+  // The columns' widths: a column's own, else for numbers and times as wide as their widest value or title, else an
+  // equal share of what is left. In a table too narrow for them, such as one beside the side panel, the columns of text
+  // give up width in proportion, down to MIN_TEXT each, so that no cell is drawn over the next.
   Table.prototype.layout = function () {
     var self = this
     var charW = measureChar(this.mount) || CHAR
@@ -265,19 +279,47 @@
       c.secs = false
       for (var i = 0; i < self.all.length && !c.secs; i++) {
         var v = self.value(c, self.all[i])
-        c.secs = typeof v === 'number' && isFinite(v) && Math.floor(v) % 60 !== 0
+        c.secs = typeof v === 'number' && isFinite(v) && Math.floor(seconds(v)) % 60 !== 0
       }
     })
-    var tracks = this.columns.map(function (c) {
-      if (typeof c.width === 'number' && c.width > 0) return c.width + 'px'
+    // each column's width in px, or a CSS track for one that shares what is left
+    this.px = this.columns.map(function (c) {
+      if (typeof c.width === 'number' && c.width > 0) return c.width
       if (typeof c.width === 'string' && c.width) return c.width
-      if (c.type === 'text') return 'minmax(0, 1fr)'
+      if (c.type === 'text') return null
       var most = 0
       for (var i = 0; i < sample.length; i++) most = Math.max(most, self.text(c, sample[i]).length)
       var w = Math.max(most * charW + PAD, c.title.length * charW + PAD + SORT_ROOM)
-      return Math.round(Math.max(MIN_W, Math.min(MAX_W, w))) + 'px'
+      return Math.round(Math.max(MIN_W, Math.min(MAX_W, w)))
+    })
+    this.fit()
+  }
+  // the columns' tracks for the table's width, from the widths layout() found
+  Table.prototype.fit = function () {
+    var self = this
+    var px = this.px || []
+    var room = this.body.clientWidth
+    var fixed = 0
+    var spare = 0 // what the columns of text with a width in px can give up
+    var flex = 0
+    px.forEach(function (w, i) {
+      if (typeof w !== 'number') flex++
+      else {
+        fixed += w
+        if (self.columns[i].type === 'text') spare += Math.max(0, w - MIN_TEXT)
+      }
+    })
+    var over = room > 0 ? fixed + flex * MIN_TEXT - room : 0
+    var k = over > 0 && spare > 0 ? Math.min(1, over / spare) : 0
+    var tracks = px.map(function (w, i) {
+      // a share of what is left keeps MIN_TEXT, rather than growing to its longest cell
+      if (w == null) w = '1fr'
+      if (typeof w !== 'number') return /^\d*\.?\d+fr$/.test(w) ? 'minmax(' + MIN_TEXT + 'px, ' + w + ')' : w
+      if (k && self.columns[i].type === 'text' && w > MIN_TEXT) w -= (w - MIN_TEXT) * k
+      return Math.round(w) + 'px'
     })
     this.root.style.setProperty('--thimble-table-cols', tracks.join(' '))
+    this.laidW = room
   }
   Table.prototype.drawHead = function () {
     var s = this.sort

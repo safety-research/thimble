@@ -289,10 +289,12 @@ describe('the table', () => {
     expect(doc().querySelector('.thimble-side-body .mail')!.textContent).toBe('mail.jsonl#L3')
     expect(w.opened).toEqual(['mail.jsonl#L3'])
     expect(row(1).classList.contains('active')).toBe(true)
-    // ↓ moves the chosen row, Enter opens it
+    // ↓ moves the chosen row, and the open side panel follows it; Enter opens it
     const mount = doc().getElementById('list')!
     key(mount, 'ArrowDown')
     expect(w.table.selected).toBe('mail.jsonl#L4')
+    expect(w.side.ref).toBe('mail.jsonl#L4')
+    expect(w.opened).toEqual(['mail.jsonl#L3', 'mail.jsonl#L4'])
     key(mount, 'Enter')
     expect(w.side.ref).toBe('mail.jsonl#L4')
     // the search finds in every row, drawn or not, and a step brings the row in
@@ -331,12 +333,32 @@ describe('the table', () => {
     `)
     expect(w.table.sort).toEqual({ by: 'subject', desc: true })
     await wait(80)
+    ;(doc().querySelector('.thimble-table-row[data-thimble-row="2"]') as HTMLElement).click()
+    expect(w.table.selected).not.toBe(null)
     const reset = doc().querySelector('.thimble-reset') as HTMLButtonElement
     expect(reset.hidden).toBe(false)
     reset.click()
     await wait()
     expect(w.table.sort).toEqual({ by: 't', desc: true })
     expect(w.table.rows[0].ref).toBe('mail.jsonl#L50')
+    // and no row is left chosen
+    expect(w.table.selected).toBe(null)
+    expect(doc().querySelector('.thimble-table-row.active')).toBe(null)
+  })
+
+  test('times in milliseconds read as times; the checks count a list given refs only once its rows carry them', async () => {
+    await load(`<span id="colour"></span><div id="list" style="height:300px"></div><div id="other" style="height:300px;overflow:auto"><p>no anchor</p></div>`)
+    const w = win()
+    const t = Date.UTC(2026, 3, 1, 9, 30) / 1000
+    w.eval(`window.table = thimble.table({ mount: '#list', rows: [{ ref: 'a#L1', t: ${t} }, { ref: 'a#L2', t: ${t * 1000} }], columns: [{ name: 't', type: 'time' }] })`)
+    expect(texts('.thimble-table-row')).toEqual(['2026-04-01 09:30', '2026-04-01 09:30'])
+    expect(w.thimble.__held()).toBe(2)
+    // a strip given rows and refs on a list that anchors none of them is not counted
+    w.eval(`thimble.colorBy({ mount: '#colour' }).strip('#other', { rows: ['x', 'y', 'z'], refs: ['b#L1', 'b#L2', 'b#L3'] })`)
+    expect(w.thimble.__held()).toBe(2)
+    // and is once it draws them anchored
+    doc().getElementById('other')!.innerHTML = '<p data-anchor="b#L2">y</p>'
+    expect(w.thimble.__held()).toBe(5)
   })
 })
 

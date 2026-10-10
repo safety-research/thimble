@@ -1772,7 +1772,7 @@ button.thimble-card {
   background: rgba(var(--ink-rgb), 0.03);
 }
 .thimble-diff-w {
-  border-radius: 2px;
+  border-radius: var(--radius-hl);
   color: inherit;
   text-decoration: none;
 }
