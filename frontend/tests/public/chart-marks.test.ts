@@ -94,3 +94,20 @@ test("an area's hover points draw no dot", async () => {
   expect(points).toHaveLength(3)
   expect(points.every((p) => p.opacity === 0)).toBe(true)
 })
+
+test("a violin's curves each reach the same width at their widest, however tall their densities", async () => {
+  // as thimble.chart writes a violin's body (backend kernel_thimble _violin_spec): two curves, one ten times as tall
+  const rows = [0, 1, 2].flatMap((x) => [{ v: x, density: [0.1, 0.5, 0.1][x]!, g: 'wide' }, { v: x, density: [1, 5, 1][x]!, g: 'narrow' }])
+  const reach = 'datum["density"] / max(datum["__thimble_most"], 1e-300) * 0.45'
+  const marks = await scene({ data: { values: rows }, transform: [
+    { calculate: '1 - indexof(["wide", "narrow"], datum["g"])', as: '__thimble_base' },
+    { joinaggregate: [{ op: 'max', field: 'density', as: '__thimble_most' }], groupby: ['g'] },
+    { calculate: `datum["__thimble_base"] + ${reach}`, as: '__thimble_top' },
+    { calculate: `datum["__thimble_base"] - ${reach}`, as: '__thimble_low' },
+  ], mark: { type: 'area', style: 'thimble-box' }, encoding: { x: field('v', 'quantitative'), y: { field: '__thimble_top', type: 'quantitative', scale: { domain: [-0.5, 1.5], nice: false, zero: false } }, y2: { field: '__thimble_low' }, detail: { field: 'g', type: 'nominal' } } })
+  // a mark per curve, an item per point of it
+  const widest = marks.filter((m) => m.type === 'area').map((m) => Math.max(...m.items.map((p) => Math.abs(p.y2! - p.y))))
+  expect(widest).toHaveLength(2)
+  expect(widest[0]).toBeCloseTo(widest[1]!)
+  expect(widest[0]).toBeCloseTo(0.9 * 120 / 2)
+})

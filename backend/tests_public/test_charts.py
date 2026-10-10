@@ -567,7 +567,7 @@ def test_a_few_groups_overlap_lightly_and_many_stand_one_over_another_named_on_t
 def test_a_violin_mirrors_each_group_s_density_on_its_line_with_its_quartiles_in_ink():
     """Matt (2026-10-10): "You could also do something like a violin plot for densities, in addition to the existing one".
     Each group lies on its own line, as a box plot's, the largest median on top: its density curve, as a density chart
-    computes it, mirrored either side of the line, the curves scaled alike so the widest reaches VIOLIN_HALF of the way
+    computes it, mirrored either side of the line, each curve scaled so its widest point reaches VIOLIN_HALF of the way
     to the next line, its first to third quartile a line in ink and its median a mark in ink across it."""
     bundle = drawn("violin", MERGE)
     spec = bundle[kt.VEGALITE_MIME]
@@ -579,10 +579,13 @@ def test_a_violin_mirrors_each_group_s_density_on_its_line_with_its_quartiles_in
     order = density["encoding"]["color"]["sort"]
     assert order == ["b", "a"], "the largest median first"
     top = max(r["density"] for r in spec["data"]["values"])
+    # each curve as wide at its widest as the others, whatever its spread, so a narrow group does not shrink the rest
+    reach = f'datum["density"] / max(datum["{kt.VIOLIN_MOST}"], 1e-300) * {kt.VIOLIN_HALF}'
     assert body["transform"] == [
         {"calculate": f'1 - indexof({json.dumps(order)}, datum["agent"])', "as": kt.RIDGE_BASE},
-        {"calculate": f'datum["{kt.RIDGE_BASE}"] + datum["density"] / {top} * {kt.VIOLIN_HALF}', "as": kt.RIDGE_TOP},
-        {"calculate": f'datum["{kt.RIDGE_BASE}"] - datum["density"] / {top} * {kt.VIOLIN_HALF}', "as": kt.VIOLIN_LOW}]
+        {"joinaggregate": [{"op": "max", "field": "density", "as": kt.VIOLIN_MOST}], "groupby": ["agent"]},
+        {"calculate": f'datum["{kt.RIDGE_BASE}"] + {reach}', "as": kt.RIDGE_TOP},
+        {"calculate": f'datum["{kt.RIDGE_BASE}"] - {reach}', "as": kt.VIOLIN_LOW}]
     y = body["encoding"]["y"]
     assert (y["field"], body["encoding"]["y2"], body["encoding"]["detail"]["field"]) == (kt.RIDGE_TOP, {"field": kt.VIOLIN_LOW}, "agent")
     assert y["axis"] == {"values": [0, 1], "labelExpr": '["a", "b"][datum.value]', "grid": False} and y["title"] == "agent"
@@ -609,11 +612,35 @@ def test_a_violin_mirrors_each_group_s_density_on_its_line_with_its_quartiles_in
         kt.chart("violin", MERGE, panels=True)
 
 
+def test_a_violin_s_group_of_fewer_than_box_min_values_is_a_strip_of_its_dots_and_widens_no_other():
+    """A group of a few values, or of values that hardly spread, has a tall narrow curve: drawn to one scale with the
+    others it left every other violin a sliver (the gallery's eight runs, one of 2 values). A group of fewer than
+    BOX_MIN values is a strip of its dots, as in a box plot, those that would overlap moved across its line; every curve
+    reaches VIOLIN_HALF at its widest."""
+    few = pd.DataFrame({"minutes": [*MERGE["minutes"], 50, 51, 90], "agent": [*MERGE["agent"], "c", "c", "c"]})
+    spec = spec_of("violin", few)
+    body, _quartiles, _median, dots = spec["layer"]
+    assert {r["agent"] for r in spec["data"]["values"]} == {"a", "b"}, "the rows are the curves of the groups drawn as curves"
+    assert {r["agent"] for r in _quartiles["data"]["values"]} == {"a", "b"}
+    assert dots["data"]["values"] == [{"minutes": 50, "agent": "c"}, {"minutes": 51, "agent": "c"}, {"minutes": 90, "agent": "c"}]
+    assert dots["encoding"]["y"]["field"] == kt.RIDGE_BASE and dots["encoding"]["x"]["field"] == "minutes"
+    assert dots["transform"][0] == body["transform"][0], "on its own line, named on the y axis with the others"
+    assert dots["mark"] == {"type": "point", "yOffset": kt.DODGE_OFFSET}, "51 would overlap 50: it moves a step"
+    assert body["encoding"]["y"]["axis"]["labelExpr"] == '["a", "b", "c"][datum.value]', "c's median, 51, is the largest"
+    # a group's values that do not spread: still a curve, as wide at its widest as the others
+    flat = spec_of("violin", pd.DataFrame({"minutes": [*MERGE["minutes"], *[5] * 6], "agent": [*MERGE["agent"], *["c"] * 6]}))
+    assert len(flat["layer"]) == 3 and {r["agent"] for r in flat["data"]["values"]} == {"a", "b", "c"}
+    # every group too small for a curve: the dots alone, their rows the chart's
+    tiny = spec_of("violin", pd.DataFrame({"minutes": [3, 4, 9], "agent": ["a", "a", "b"]}))
+    assert [l["mark"] for l in tiny["layer"]] == ["point"] and tiny["data"]["values"] == tiny["layer"][0]["data"]["values"]
+
+
 def test_a_violin_takes_a_label_s_colors_and_keeps_its_median_order(label_ws):
-    act = pd.DataFrame({"records": [1, 2, 3, 4, 50, 60, 70, 80], "activity": ["money"] * 4 + ["captcha"] * 4})
-    body = spec_of("violin", act, label="activity type")["layer"][0]
-    assert body["encoding"]["color"] == {"field": "activity", "type": "nominal", "title": "activity",
-                                         "sort": ["captcha", "money"], "legend": None}
+    act = pd.DataFrame({"records": [1, 2, 3, 4, 5, 50, 60, 70, 80, 90, 7, 8],
+                        "activity": ["money"] * 5 + ["captcha"] * 5 + ["signup"] * 2})
+    layers = spec_of("violin", act, label="activity type")["layer"]
+    color = {"field": "activity", "type": "nominal", "title": "activity", "sort": ["captcha", "signup", "money"], "legend": None}
+    assert layers[0]["encoding"]["color"] == color and layers[-1]["encoding"]["color"] == color, "the curves and the dots"
     assert kt._LABELS_READ == [{"id": "k1", "rev": 0}]
 
 

@@ -11,8 +11,8 @@ thimble.chart("bar", posts.groupby("agent").size().rename("posts"))
 
 `data` is a DataFrame whose columns come in the kind's order. Their names are what the axes and the legend say. A
 Series is its index, then its values, so `value_counts()` and `groupby(...).size()` are bar charts as they are; a
-histogram, a density and an ecdf take a Series as its values, and a box plot its values grouped by its index when that
-is named (`df.set_index("model")["score"]`). A named index counts as the first columns.
+histogram, a density and an ecdf take a Series as its values, and a box plot or a violin its values grouped by its index
+when that is named (`df.set_index("model")["score"]`). A named index counts as the first columns.
 
 | kind | columns, in order | options | draws |
 |---|---|---|---|
@@ -24,7 +24,7 @@ is named (`df.set_index("model")["score"]`). A named index counts as the first c
 | `box` | value, group | sort, label | a box per group lying down, the largest median first, with whiskers and a dot for each value past them; a group of fewer than 5 values as a strip of its dots |
 | `histogram` | value[, group] | step, label, marks, panels | the values counted in bins of a round width, at most 20 bins; groups stacked in each bin |
 | `density` | value[, group] | bandwidth, sort, label, marks, panels | each group's values as a smooth curve; up to 4 groups overlap lightly, 5 or more stand one over another (a ridgeline), the largest median on top |
-| `violin` | value, group | bandwidth, sort, label | each group's density curve mirrored either side of its own line, lying down, with its quartiles; the largest median on top |
+| `violin` | value, group | bandwidth, sort, label | each group's density curve mirrored either side of its own line, lying down, with its quartiles; the largest median on top; a group of fewer than 5 values as a strip of its dots |
 | `ecdf` | value[, group] | label, marks | each group's cumulative share: at each value, the share of its values at or below it, such as the share of PRs merged within x minutes |
 | `range` | item, before, after[, group] | sort, label, marks | a dumbbell per item lying down, a line from its before to its after, each end a solid dot of its own color; the largest after first, or with times the earliest before |
 | `heatmap` | x, y, value | log | a cell per row, colored by its value; names by their totals, numbers and times in order |
@@ -91,8 +91,9 @@ With 5 or more groups and no panels, the groups stand one over another, each cur
 y axis, the curves scaled alike. The places of the ridges are laid out by the chart, not held in its rows.
 
 A violin's rows are the same points as a density's. Each group lies on its own line, as a box plot's does, its curve
-mirrored either side of the line, the curves scaled alike, with a line in ink from its first quartile to its third and
-its median as a mark in ink across it. The quartiles are in their layer's own rows.
+mirrored either side of the line, each curve as wide at its widest as the others, with a line in ink from its first
+quartile to its third and its median as a mark in ink across it. A group of fewer than 5 values is a strip of its dots,
+as in a box plot, and has no curve in the rows. The quartiles and the dots are in their layers' own rows.
 
 An ecdf's rows are each group's distinct values with `share`, the share of the group's values at or below it, drawn as
 steps; a group of more than 500 distinct values keeps 500 of them, evenly spread, the last at 100%. Its legend lists the
@@ -150,9 +151,9 @@ ink), `thimble-overlap` (areas side by side, and density curves), `thimble-fit` 
 its group colors it), `thimble-span` (a range's line, muted) and `thimble-end` (a range's ends, solid and larger than a
 dot). An interval is a rule, which the theme draws in its annotation ink. A bar is round at its end, away from its
 baseline, by 2 px (`--viz-bar-radius`), and a stacked bar at the end of its whole stack; a box plot's box is square.
-Dots that would overlap on their line, a dots chart's or a box plot's, move across it, each only as far as it needs,
-their values kept: a dot within 1.25% of the x axis's span of one already on the line moves 3.5 px up, else down, then
-twice that. A dots chart whose groups stand side by side on a row's line keeps its dots on their lines. A
+Dots that would overlap on their line, a dots chart's, a box plot's or a violin's, move across it, each only as far as
+it needs, their values kept: a dot within 1.25% of the x axis's span of one already on the line moves 3.5 px up, else
+down, then twice that. A dots chart whose groups stand side by side on a row's line keeps its dots on their lines. A
 chart colored by a label takes the label's colors because the call notes the label as read (as `thimble.labels` does),
 and the card gives a label it read its colors. The inline rows are the chart's table: the model reads them in the card's
 output and a takeaway cites a value by column and row, as for any chart. Times without a zone show as they are, and

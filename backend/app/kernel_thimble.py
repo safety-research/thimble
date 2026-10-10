@@ -1207,10 +1207,11 @@ RIDGE_FROM = 5  # a density chart of this many groups draws them one over anothe
 RIDGE_RISE = 1.5  # how many baselines the highest ridge rises
 RIDGE_BASE, RIDGE_TOP = "__thimble_base", "__thimble_top"  # a ridge's baseline and its curve, in baselines from the bottom
 VIOLIN_LOW = "__thimble_low"  # a violin's lower edge, as RIDGE_TOP is its upper edge and RIDGE_BASE its line
+VIOLIN_MOST = "__thimble_most"  # the largest density of a violin's curve, which its widest point is scaled to
 ECDF_STEPS_MAX = 500  # a group's cumulative share is kept at this many of its values at most, evenly spread
 RANGE_PAD = 8  # px a range's axis reaches past its outermost ends, so their marks clear the axis line
 RANGE_END = "__thimble_end"  # a range's end, as its before or after column's name
-VIOLIN_HALF = 0.45  # the widest violin reaches this far either side of its line, in lines, so neighbors never touch
+VIOLIN_HALF = 0.45  # a violin's widest point reaches this far either side of its line, in lines, so neighbors never touch
 TIME_TICKS_MAX = 40  # times more than a day apart (weeks, months) of a bar, line or area get a tick each up to this many
 FITS = ("linear", "smooth")  # the trend lines a scatter fits: least squares, or a local regression (LOESS)
 SMOOTH_SPAN = 0.75  # the share of the points each point of a smooth fit is fitted to (R's loess and ggplot's default)
@@ -2319,20 +2320,24 @@ def _density_spec(df, opts: dict) -> dict:
 
 def _violin_spec(df, opts: dict) -> dict:
     """Each group's values as a violin lying down: its density curve (_curve_rows, as a density chart's) mirrored either
-    side of the group's line, the curves scaled alike so the widest reaches VIOLIN_HALF of the way to the next line, its
-    first to third quartile a line in ink along it and its median a mark in ink across it; the groups one under another,
-    the largest median first, named on the y axis. The rows are the curves' points; the violins' places are laid out by
-    the chart, and the quartiles are their layer's own rows."""
+    side of the group's line, each curve scaled so its widest point reaches VIOLIN_HALF of the way to the next line, its
+    first to third quartile a line in ink along it and its median a mark in ink across it; a group of fewer than BOX_MIN
+    values a strip of its dots alone, as a box plot's, those that would overlap moved across the line (_dodge). The
+    groups one under another, the largest median first, named on the y axis. The rows are the curves' points; the
+    violins' places and widths are laid out by the chart, and the quartiles and the dots are their layers' own rows."""
     import numpy as np
 
     kind = "violin"
     val, grp, label, by, firsts = _value_groups(kind, df, opts)
     order = _ordered(kind, firsts, _by_median(by), opts.get("sort", _DEFAULT), what="groups")
-    rows, density = _curve_rows(kind, val, grp, by, order, opts)
-    n, top = len(order), max(r[density] for r in rows) or 1
+    curved = [g for g in order if len(by[json.dumps(g)][1]) >= BOX_MIN]
+    rows, density = _curve_rows(kind, val, grp, {json.dumps(g): by[json.dumps(g)] for g in curved}, curved, opts) \
+        if curved else ([], _free("density", [val, grp]))
+    n = len(order)
     line = [{"calculate": f"{n - 1} - indexof({json.dumps(order)}, datum[{json.dumps(grp)}])", "as": RIDGE_BASE}]
-    reach = f"datum[{json.dumps(density)}] / {top} * {VIOLIN_HALF}"
-    body = [*line, {"calculate": f"datum[{json.dumps(RIDGE_BASE)}] + {reach}", "as": RIDGE_TOP},
+    reach = f"datum[{json.dumps(density)}] / max(datum[{json.dumps(VIOLIN_MOST)}], 1e-300) * {VIOLIN_HALF}"
+    body = [*line, {"joinaggregate": [{"op": "max", "field": _field(density), "as": VIOLIN_MOST}], "groupby": [_field(grp)]},
+            {"calculate": f"datum[{json.dumps(RIDGE_BASE)}] + {reach}", "as": RIDGE_TOP},
             {"calculate": f"datum[{json.dumps(RIDGE_BASE)}] - {reach}", "as": VIOLIN_LOW}]
     names = [_text(g) for g in reversed(order)]
     # each group's line at a whole number, the top group's highest; the axis names the lines and draws no grid
@@ -2347,21 +2352,34 @@ def _violin_spec(df, opts: dict) -> dict:
         names_q.append(_free(c, [val, grp, *names_q]))
     q1, median, q3 = names_q
     quartiles = []
-    for g in order:
+    for g in curved:
         a, m, b = np.percentile(np.asarray(by[json.dumps(g)][1], dtype=float), [25, 50, 75]).tolist()
         quartiles.append({grp: g, q1: _num(a), median: _num(m), q3: _num(b)})
     qtip = [{"field": _field(c), "type": "nominal" if c == grp else "quantitative", "title": c}
             for c in (grp, q1, median, q3)]
     at = {**y, "field": RIDGE_BASE}
-    return {"data": {"values": rows}, "layer": [
-        {"transform": body, "mark": {"type": "area", "interpolate": "monotone", "style": BOX_STYLE},
-         "encoding": {"x": _enc(val, "quantitative"), "y": {**y, "field": RIDGE_TOP}, "y2": {"field": VIOLIN_LOW},
-                      "detail": {"field": _field(grp), "type": "nominal"}, **color, "tooltip": tip}},
-        {"data": {"values": quartiles}, "transform": line, "mark": "rule",
-         "encoding": {"x": _enc(q1, "quantitative", title=val), "x2": {"field": _field(q3)}, "y": at, "tooltip": qtip}},
-        {"data": {"values": quartiles}, "transform": line, "mark": {"type": "tick", "orient": "vertical", "style": MEDIAN_STYLE},
-         "encoding": {"x": _enc(median, "quantitative", title=val), "y": at, "tooltip": qtip}},
-    ]}
+    layer: list = []
+    if curved:
+        layer += [
+            {"transform": body, "mark": {"type": "area", "interpolate": "monotone", "style": BOX_STYLE},
+             "encoding": {"x": _enc(val, "quantitative"), "y": {**y, "field": RIDGE_TOP}, "y2": {"field": VIOLIN_LOW},
+                          "detail": {"field": _field(grp), "type": "nominal"}, **color, "tooltip": tip}},
+            {"data": {"values": quartiles}, "transform": line, "mark": "rule",
+             "encoding": {"x": _enc(q1, "quantitative", title=val), "x2": {"field": _field(q3)}, "y": at, "tooltip": qtip}},
+            {"data": {"values": quartiles}, "transform": line,
+             "mark": {"type": "tick", "orient": "vertical", "style": MEDIAN_STYLE},
+             "encoding": {"x": _enc(median, "quantitative", title=val), "y": at, "tooltip": qtip}},
+        ]
+    dots = [{val: _num(v), grp: g} for g in order if g not in curved for v in by[json.dumps(g)][1]]
+    if dots:
+        every = [v for _g, vs in by.values() for v in vs]
+        dodge = _dodged(_dodge([r[val] for r in dots], [json.dumps(r[grp]) for r in dots], max(every) - min(every)))
+        layer.append({"data": {"values": dots}, "transform": [*line, *dodge],
+                      "mark": {"type": "point", "yOffset": DODGE_OFFSET} if dodge else "point",
+                      "encoding": {"x": _enc(val, "quantitative"), "y": at, **color,
+                                   "tooltip": [{"field": _field(c), "type": "nominal" if c == grp else "quantitative",
+                                                "title": c} for c in (val, grp)]}})
+    return {"data": {"values": rows or dots}, "layer": layer}
 
 
 def _ecdf_spec(df, opts: dict) -> dict:
