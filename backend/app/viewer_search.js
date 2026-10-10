@@ -467,6 +467,7 @@
     this.last = null // the last search of the page's text, {idx, needle, hit}: `hit` the runs that hold its needle
     this.sized = null // the ResizeObserver of the root's width
     this.snapped = null // the record gone to whose words do not show, highlighted for a moment (snap)
+    this.drawn = null // the current match's element a list leaves undrawn out of view, drawn while it is current (draw)
     if (this.mount) {
       this.mount.classList.add('thimble-search-mount', 'thimble-part')
       this.mount.setAttribute('data-thimble-chrome', '')
@@ -556,6 +557,7 @@
     }
     this.marked = []
     this.snap(null)
+    this.draw(null)
   }
   // every list's box, which the search leaves out of the page's text: the list gives its rows instead
   Search.prototype.boxes = function () {
@@ -919,6 +921,7 @@
     this.paint()
     this.chrome()
     this.mark(ticks)
+    if (this.at < 0) this.draw(null)
     // the match typing goes to is brought into view, its fold opened
     if (going && this.at >= 0) this.go(this.at)
   }
@@ -1248,6 +1251,7 @@
     var t = target(m)
     var self = this
     this.snap(null)
+    this.draw(t && t.run ? t.run.cv : null)
     if (m.row != null) {
       var list = this.listOf(m.box)
       if (list) ctl.safe(function () { list.go(m.row) })
@@ -1282,6 +1286,18 @@
       sel2.addRange(t.range)
     }
     this.chrome()
+  }
+  // The element around the current match that a list leaves undrawn out of view (content-visibility: auto), such as a
+  // message, drawn while the match is current: measured undrawn, its box has a few lines' height, and a match low in it
+  // was scrolled to with its top above the list, where it stayed undrawn (live QA 3). The one drawn before goes back to
+  // the list's rule, keeping the height it was drawn at (contain-intrinsic-size: auto). A style that sets no display is
+  // no change the search or Color by hears. null only puts that one back
+  Search.prototype.draw = function (el) {
+    var was = this.drawn
+    if (was && was.el === el) return
+    if (was) was.el.style.contentVisibility = was.style
+    this.drawn = el && el.isConnected ? { el: el, style: el.style.contentVisibility } : null
+    if (this.drawn) el.style.contentVisibility = 'visible'
   }
   // A record gone to whose words do not show, highlighted for a moment as a cited record is; one at a time, so a step
   // on takes the highlight from the record before. null only takes it away

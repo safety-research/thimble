@@ -236,6 +236,54 @@ conv.draw(ms, { title: '# long' })
     assert.deepEqual(errors, [])
     await p.close()
   })
+
+  test('the search goes to a word low in a long message far down a long list, and the match is drawn on screen', async () => {
+    // messages of 11 long lines, under the fold but several times the list's height, which the list leaves undrawn out
+    // of view at a height of a few lines (content-visibility): a match measured low inside one was scrolled to with the
+    // message's top above the list, so the message stayed undrawn and the match unseen (live QA 3, Swarm Board)
+    const LONG = page(`<div class="top"><span id="search"></span></div><div id="msgs"></div>
+<script>
+const ms = []
+for (let i = 0; i < 400; i++) ms.push({ ref: 'h#L' + i, t: ${T0} + i * 97, author: 'agent-' + (i % 48),
+  text: Array.from({ length: 11 }, (_, k) => 'message ' + i + ' line ' + k + ' and its words'.repeat(24) + (k === 9 && i % 100 === 50 ? ' under a merge zanzibar' : '')).join('\\n') })
+window.search = thimble.search({ mount: '#search', in: '#msgs' })
+window.conv = thimble.messages({ mount: '#msgs', format: 'plain' })
+conv.draw(ms, { title: '# long' })
+</script>`)
+    const { page: p, frame, errors } = await framed(LONG)
+    const current = () =>
+      frame().evaluate(() => {
+        const r = [...CSS.highlights.get('thimble-search-current')!][0] as Range
+        const b = r.getBoundingClientRect()
+        const el = r.startContainer.parentElement!
+        const at = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)
+        const list = document.getElementById('msgs')!.getBoundingClientRect()
+        return {
+          count: document.querySelector('.thimble-search-count')!.textContent,
+          ref: el.closest('[data-anchor]')!.getAttribute('data-anchor'),
+          drawn: !!at && (el === at || el.contains(at) || at.contains(el)),
+          inList: b.top >= list.top && b.bottom <= list.bottom,
+        }
+      })
+    await frame().locator('.thimble-search-input').fill('zanzibar')
+    await p.waitForTimeout(400)
+    const seen = [await current()]
+    for (let i = 0; i < 3; i++) {
+      await frame().locator('.thimble-search-input').press('Enter')
+      await p.waitForTimeout(300)
+      seen.push(await current())
+    }
+    assert.deepEqual(seen.map((s) => [s.count, s.ref]), [['1 of 4', 'h#L50'], ['2 of 4', 'h#L150'], ['3 of 4', 'h#L250'], ['4 of 4', 'h#L350']])
+    for (const s of seen) assert.ok(s.drawn && s.inList, `the match is drawn in the list's box (${JSON.stringify(s)})`)
+    // one message at a time is drawn out of the list's rule, and none once the box is emptied
+    const forced = () => frame().evaluate(() => [...document.querySelectorAll<HTMLElement>('.thimble-msg')].filter((e) => e.style.contentVisibility).map((e) => e.getAttribute('data-anchor')))
+    assert.deepEqual(await forced(), ['h#L350'])
+    await frame().locator('.thimble-search-input').fill('')
+    await p.waitForTimeout(300)
+    assert.deepEqual(await forced(), [])
+    assert.deepEqual(errors, [])
+    await p.close()
+  })
 })
 
 describe('a boxed message', () => {
