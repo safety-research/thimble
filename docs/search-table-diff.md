@@ -164,12 +164,12 @@ const table = thimble.table({
 | `attrs(row)` | more attributes of a row's element, `{name: value}`, as `thimble.recordCard` takes them, such as `data-anchor-unmarked` for a row that stands for records and draws their labels' colors itself (`thimble.mix` in a cell) |
 | `key` | the name thimble keeps the sort under, the mount's id by default; give each table of a page its own |
 
-A column is `{name, title, type, width, min, drop, value(row), html(row), sub(row), sort}`:
+A column is `{name, title, type, width, min, drop, value(row), html(row), sub(row), days, sort}`:
 
 | key | what it is |
 |---|---|
 | `name` | the field as the records hold it |
-| `title` | its head, the name by default. A head is never cut: a column takes its title on one line while the table has room, wraps it to two lines in a narrower table, and keeps its title's width on two lines before it drops |
+| `title` | its head, the name by default. A head is never cut: a column takes its title on one line while the table has room, wraps it to two lines in a narrower table, and keeps its title's width on two lines before it drops; in a table too narrow even for the columns that never drop, it takes more lines |
 | `type` | `'text'` (the default), `'number'` (right-aligned, in the mono face, with thousands separators: `12,345`), `'id'` (a number that names a record, such as a pull request's, an issue's or a line's, written as it is: `67028`; laid out and sorted as a number) or `'time'` (seconds since 1970, shown as `2026-04-01 09:30` in UTC, with the seconds when the column's times have them; a string as written). A column of numbers whose name or title ends in a word that names an identifier, such as `id`, `key`, `number`, `PR`, `issue`, `line`, `#` or `year`, is written as `'id'` is. A column too narrow for its times leaves out the seconds, then the year when every row has the same one |
 | `width` | px or a CSS track such as `'2fr'` (text shares what is left; numbers and times fit their widest value) |
 | `min` | the px a column of text keeps before columns drop: 120 for the main column, the first column of text without a `width` in px (else the first column of text), and 64 for the others by default, and never more than its `width` |
@@ -177,6 +177,7 @@ A column is `{name, title, type, width, min, drop, value(row), html(row), sub(ro
 | `value(row)` | the value it shows and sorts by when it is not `row[name]` |
 | `html(row)` | the cell's markup in place of its value as text |
 | `sub(row)` | a second line under the cell's value in the secondary ink, text or `{html}`, such as an email's first words under its subject or a pull request's number, author and time under its title; with one, every row is two lines tall. The search finds it and the default `details` show it |
+| `days` | `true` for a column of times that writes a row's date only where it differs from the row above's, and the time on every row, as a log does. The date a row shares with the row above stays in its place unseen, so the times stand in one column and the search still finds it |
 | `sort` | `false` for a column a click does not sort |
 
 | member | what it gives |

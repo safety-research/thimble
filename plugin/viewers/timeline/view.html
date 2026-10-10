@@ -27,7 +27,7 @@
   .lhead span { flex: none; color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); font-variant-numeric: tabular-nums; }
   .lhead .btn { flex: none; margin-left: auto; }
   #list { flex: 1; min-height: 0; }
-  /* a failed outcome: ✕ and its kind in the problem red, as the lanes underline its mark in it */
+  /* a failed outcome: ✕ and its kind in the problem red, as the lanes mark it */
   .failed { color: var(--status-negative); }
   /* an event in the side panel: its words, the event it answers and those that answer it, then its record */
   .words { margin: 0 0 12px; }
@@ -141,7 +141,7 @@ const rows = thimble.rows({ mount: '#rows', fields: FIELDS, initial: 'source', o
 const range = thimble.timeRange({ mount: '#range', readout: '#read', onChange: draw })
 // the lanes and the table's strip draw each event in the value the reader gave it, which holds for a label too, whose
 // marks reach only the rows the table draws; a row's bar is Color by's own (attr). In the lanes a failed event is
-// underlined in the problem red, and the table's rows in view are a tint across them
+// a ✕ in the problem red, and the table's rows in view are a tint across them
 const painted = { keeps: () => true, valueOf: (e) => e.value, colourOf: (v) => colour.colourOf(v), attr: (e) => colour.attr(e) }
 const lanes = thimble.timeline({
   mount: '#lanes', keyMount: '#key', rows, range, colour: painted, names: 112, follow: '#list',
@@ -151,12 +151,13 @@ const lanes = thimble.timeline({
   onMark: (e) => show(e.r, true),
 })
 const side = thimble.side({ mount: '#body', onClose: () => { open = null } })
-// the events in the range as a table: the time, the source, the kind (✕ before a failure), the actor and the incident,
-// which a narrow table drops first, and the text; a row opens in the side panel, and ↑ ↓ move it to the next
+// the events in the range as a table: the time (the date on a day's first event), the source, the kind (✕ before a
+// failure), the actor and the incident, which a narrow table drops first, and the text; a row opens in the side panel,
+// and ↑ ↓ move it to the next
 const table = thimble.table({
   mount: '#list', side, search, colour: painted,
   columns: [
-    { name: 't', title: 'Time', type: 'time', drop: false },
+    { name: 't', title: 'Time', type: 'time', drop: false, days: true },
     { name: 'source', title: 'Source', width: 64 },
     { name: 'kind', title: 'Kind', width: 96, html: (e) => (FAILED(e) ? `<span class="failed" title="failed">✕ ${esc(e.kind)}</span>` : esc(e.kind)) },
     { name: 'actor', title: 'Actor', width: 110, drop: 2 },
@@ -251,7 +252,8 @@ async function show(r, keys) {
 }
 
 // an event's details, once the reader sends it whole: its words, the event it answers and those that answer it, each a
-// link that opens it, and its record, its fields and its lines as the file holds them under its citation
+// link that opens it, and its record under its citation: its fields but those the panel's title and sub give (the
+// source, the kind, the service, the time and the actor), and its lines as the file holds them, in mono
 async function details(body, e) {
   body.innerHTML = '<div class="event"></div>'
   let d
@@ -262,15 +264,16 @@ async function details(body, e) {
     throw err
   }
   if (open !== e.r || !d || !body.isConnected) return
-  const { text, ...fields } = d.record
+  const { text, source, kind, service, time, actor, ...fields } = d.record
   const link = (b) => `<div class="list-row" data-go="${b.r}" data-anchor="${esc(b.ref)}"><time>${range.format(b.t, 1)}</time><span class="what">${esc(b.source)} ${esc(b.kind)} · ${esc(b.actor)}</span><span class="text">${esc(b.text)}</span></div>`
   const box = body.firstElementChild
   box.innerHTML = '<div class="words"></div>' +
     (d.answers ? `<h4 data-thimble-chrome title="The event this one follows: the alert it resolves, the message its thread starts with, the ticket's first message, the deploy's start, or what set the agent off">Response to<span>${dur(fields.took)} earlier</span></h4>${link(d.answers)}` : '') +
     (d.answered.length ? `<h4 data-thimble-chrome title="The events that follow this one: the alert that resolves it, its thread's replies, the ticket's later messages, the deploy's later steps, the agents' actions it set off">Responses<span>${d.answered.length}</span></h4>${d.answered.map(link).join('')}` : '') +
     '<div class="rec"></div>'
-  thimble.text(box.querySelector('.words'), text || fields.kind, { format: 'plain' })
-  thimble.record({ mount: box.querySelector('.rec'), value: { ...fields, [d.raw.length > 1 ? 'lines' : 'line']: d.raw.map(([, s]) => s).join('\n') }, ref: d.ref })
+  thimble.text(box.querySelector('.words'), text || kind, { format: 'plain' })
+  // its bar the event's Color by value, which its fields may leave out
+  thimble.record({ mount: box.querySelector('.rec'), value: { ...fields, [d.raw.length > 1 ? 'lines' : 'line']: d.raw.map(([, s]) => s).join('\n') }, ref: d.ref, mono: ['line', 'lines'], colour: { attr: () => painted.attr(e) } })
 }
 $('body').addEventListener('click', (ev) => {
   const go = ev.target.closest('[data-go]')

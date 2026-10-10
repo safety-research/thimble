@@ -250,7 +250,7 @@ describe('Rows', () => {
 })
 
 describe('the lanes and their key', () => {
-  test("a failure is underlined in the problem red; the key's entries are toggles that hide their series; one that never shows is left out; Reset shows them again", async () => {
+  test("a failure is a ✕ in the problem red at its mark's foot, over every mark; the key's entries are toggles that hide their series; one that never shows is left out; Reset shows them again", async () => {
     await load()
     const w = win()
     w.CALLS = CALLS
@@ -263,9 +263,21 @@ describe('the lanes and their key', () => {
     `)
     await wait()
     expect(doc().querySelectorAll('.thimble-lane-bad')).toHaveLength(2)
-    // no band ever shows, so the key has no `running`; `failed` with its count
+    // each ✕ a halo of the paper under its red strokes, after the lane's marks, centered on the foot of its failed
+    // call's mark
+    for (const bad of doc().querySelectorAll('.thimble-lane-bad')) {
+      expect([...bad.children].map((p) => p.getAttribute('class'))).toEqual(['thimble-lane-bad-halo', 'thimble-lane-bad-x'])
+      expect(bad.nextElementSibling).toBe(null)
+      const d = bad.children[1].getAttribute('d')!
+      const [x0, y0, dx, dy] = (/^M([\d.]+) ([\d.]+)l([\d.]+) ([\d.]+)M/.exec(d) || []).slice(1).map(Number)
+      expect([dx, dy]).toEqual([6, 6])
+      const mark = [...bad.parentElement!.querySelectorAll('.thimble-lane-mark')].find((m) => Math.abs(Number(m.getAttribute('x')) + Number(m.getAttribute('width')) / 2 - (x0 + dx / 2)) < 0.15)
+      expect(mark, d).toBeTruthy()
+      expect(y0 + dy / 2).toBeCloseTo(Number(mark!.getAttribute('y')) + Number(mark!.getAttribute('height')), 5)
+    }
+    // no band ever shows, so the key has no `running`; `failed` with its count, its swatch a ✕
     expect(texts('.thimble-key-chip')).toEqual(['failed2'])
-    expect(doc().querySelector('.thimble-key-chip .thimble-key-problem')).not.toBe(null)
+    expect(doc().querySelector('.thimble-key-chip .thimble-key-problem svg path')).not.toBe(null)
     ;(doc().querySelector('.thimble-key-chip') as HTMLElement).click()
     await wait()
     expect(doc().querySelector('.thimble-key-chip')!.getAttribute('aria-pressed')).toBe('false')
@@ -450,6 +462,20 @@ describe('the timeline on its own', () => {
     expect(w.ranged.scale.unit).toBe('n')
   })
 
+  test('on plain numbers such as years: the axis and the tips write them as they are, without separators', async () => {
+    await load()
+    const w = win()
+    w.RELEASES = [2019, 2020, 2021, 2023, 2026].map((year) => ({ year, text: 'release ' + year }))
+    w.eval(`window.tl = thimble.timeline({ mount: '#lanes', unit: 'n', time: (r) => r.year }); window.tl.draw(window.RELEASES)`)
+    await wait()
+    const labels = texts('#lanes .thimble-lanes-axis .thimble-axis-lab')
+    expect(labels).toContain('2020')
+    expect(labels.every((l) => /^\d{4}$/.test(l))).toBe(true)
+    const lane = doc().querySelector('#lanes .thimble-lane')!
+    hover(lane, Number(lane.querySelector('.thimble-lane-mark')!.getAttribute('x')) + 1)
+    expect(tipOf()).toEqual(['2019', 'release 2019'])
+  })
+
   test("on plain numbers not all whole, such as scores: the axis in decimals and the tips as precise as four px; whole numbers never step under one", async () => {
     await load()
     const w = win()
@@ -478,6 +504,28 @@ describe('the timeline on its own', () => {
     expect(xs).toHaveLength(50)
     const gaps = xs.slice(1).map((x, i) => x - xs[i])
     expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThan(1)
+  })
+
+  test("Density with a failure in every bin: a ✕ at the foot of a bin, none over the ✕ of a bin just before, so a run of failing bins reads as ✕s one beside another", async () => {
+    await load()
+    const w = win()
+    w.eval(`thimble.timeline({ mount: '#lanes', unit: 'n', density: true, problem: (r) => r.bad }).draw(Array.from({ length: 3000 }, (_, i) => ({ t: i, bad: i % 2 === 0 })))`)
+    await wait()
+    const xs = [...doc().querySelectorAll('#lanes .thimble-lane-bar')].map((b) => Number(b.getAttribute('x')))
+    const bins = new Set(xs).size
+    const centers = [...doc().querySelectorAll('#lanes .thimble-lane-bad-x')].map((p) => {
+      const [x0, dx] = (/^M([\d.]+) [\d.]+l([\d.]+)/.exec(p.getAttribute('d')!) || []).slice(1).map(Number)
+      return x0 + dx / 2
+    })
+    // bins narrower than a ✕, each with a failure: a ✕ on every other bin, each 6 px wide and more than 6 px from the one
+    // before
+    expect(bins).toBeGreaterThan(60)
+    expect(xs[1] - xs[0]).toBeLessThan(6)
+    expect(centers.length).toBeGreaterThanOrEqual(Math.floor(bins / 2))
+    expect(centers.length).toBeLessThan(bins)
+    expect(centers.slice(1).every((x, i) => x - centers[i] > 6)).toBe(true)
+    // the key counts every failure all the same
+    expect(texts('.thimble-key-chip')).toEqual(['failed1,500'])
   })
 
   test("Density's tip gives a bin's day once: 16 May 09:00–09:01", async () => {

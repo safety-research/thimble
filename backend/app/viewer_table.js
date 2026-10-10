@@ -10,6 +10,7 @@
 //       { name: 'subject', title: 'Subject', min: 200 },     text takes the width left, at least `min`, cut with an ellipsis
 //       { name: 'subject', sub: (m) => m.snippet },        a second line under it, in the secondary ink: two-line rows
 //       { name: 't', title: 'Date', type: 'time' },          seconds since 1970, shown in UTC; or 'number', or 'id'
+//       { name: 't', type: 'time', days: true },              the date on a day's first row alone, the time on each
 //     ],
 //     rows: emails,                         plain records, each with its `ref`, which is its row's data-anchor
 //     sort: { by: 't', desc: true },        how it opens; a click on a column's head sorts by it, again the other way
@@ -27,12 +28,14 @@
 // shows the colours of every row, scrolled to or not, and the chips count the rows. A click or Enter opens a row in the
 // side panel (`details`, by default its columns), ↑ and ↓ move the chosen row, which an open side panel follows.
 // thimble keeps the sort per view, and Reset puts back the one it opens with. A table too narrow for its columns, such
-// as one beside the side panel, first writes its times shorter, then narrows its columns of text to their `min`, then
-// drops columns in `drop` order (with none, the rightmost first, the one the rows are sorted by last, and never the main
-// column, the first column of text that takes the width left), and draws them again when the room comes back. A head
-// never cuts its title: a column of text with a `width` narrower than its title widens to the title while the table has
-// room; in a column narrower than the title it wraps to two lines, and a column keeps the width of its title on two
-// lines, with room for the sort's arrow, before it drops.
+// as one beside the side panel, first writes its times shorter, then wraps the titles of its columns of numbers, then
+// narrows its columns of text to their `min`, then drops columns in `drop` order (with none, the rightmost first, the
+// one the rows are sorted by last, and never the main column, the first column of text that takes the width left), and
+// draws them again when the room comes back. A head never cuts its title: a column of text with a `width` narrower than
+// its title widens to the title while the table has room; in a column narrower than the title it wraps to two lines,
+// and a column keeps the width of its title on two lines, with room for the sort's arrow, before it drops; in a table
+// too narrow even for the columns that never drop, it takes more lines, breaking a word only in a column of text
+// narrower than the word, which never narrows under MIN_W, so a title never stands a letter a line.
 // A column of numbers writes amounts with thousands separators (12,345) and identifiers as they are (67028): a column of
 // `type: 'id'`, and one of numbers whose name or title names an identifier (ID_WORDS), such as an id, a key, a PR, issue
 // or line number, or a year, so the search finds an identifier as it is written.
@@ -159,6 +162,8 @@
           drop: c.drop === false ? false : typeof c.drop === 'number' && isFinite(c.drop) ? c.drop : null,
           min: typeof c.min === 'number' && c.min > 0 ? c.min : null,
           sub: typeof c.sub === 'function' ? c.sub : null,
+          // a column of times that writes a row's date only where it differs from the row above's, as a log does
+          days: type === 'time' && c.days === true,
         }
       })
     // the main column: the first column of text that takes the width left (no width in px), else the first column of
@@ -365,24 +370,33 @@
     if (v == null || v === '' || v === false) return ''
     return typeof v === 'object' && v.html != null ? String(v.html) : esc(v)
   }
-  // a cell's markup. A time in a column too narrow for its whole stamp keeps the year and the seconds it leaves out in
-  // the page, drawn 0 wide (.thimble-table-cut), so that the search finds the same text at every width.
-  Table.prototype.cell = function (col, r) {
+  // a cell's markup, `above` the row drawn over it. A time in a column too narrow for its whole stamp keeps the year and
+  // the seconds it leaves out in the page, drawn 0 wide (.thimble-table-cut), and in a column of `days` a date the row
+  // above has too is kept in its place unseen (.thimble-table-day), so its time stands under the time above it; the
+  // search finds the same text at every width and on every row.
+  Table.prototype.cell = function (col, r, above) {
     if (col.html) return String(ctl.safe(function () { return col.html(r) }, '') || '')
     var s = this.text(col, r)
-    var f = col.type === 'time' ? col.form : null
-    var v = f ? this.value(col, r) : null
-    if (!f || typeof v !== 'number' || !isFinite(v)) return esc(s)
+    var v = col.type === 'time' ? this.value(col, r) : null
+    if (typeof v !== 'number' || !isFinite(v)) return esc(s)
+    var f = col.form || { secs: true, year: true }
     var tail = col.secs ? 3 : 0 // :SS
     var head = s.length - 11 - tail // YYYY-, before MM-DD HH:MM
     var cut = function (t) {
       return t ? '<span class="thimble-table-cut">' + t + '</span>' : ''
     }
-    return cut(f.year ? '' : s.slice(0, head)) + s.slice(f.year ? 0 : head, s.length - (f.secs ? 0 : tail)) + cut(f.secs ? '' : s.slice(s.length - tail))
+    var date = (f.year ? s.slice(0, head) : cut(s.slice(0, head))) + s.slice(head, head + 6) // YYYY-MM-DD and its space
+    if (col.days && above != null) {
+      var u = this.value(col, above)
+      if (typeof u === 'number' && isFinite(u) && Math.floor(seconds(u) / 86400) === Math.floor(seconds(v) / 86400)) date = '<span class="thimble-table-day">' + date + '</span>'
+    }
+    return date + s.slice(head + 6, s.length - tail) + (f.secs ? s.slice(s.length - tail) : cut(s.slice(s.length - tail)))
   }
   // The columns' widths: a column's own, else for numbers and times as wide as their widest value or title, else an
   // equal share of what is left; and what each keeps in a table too narrow for them (fit): a column of text its `min`,
-  // a column of times its shortest form, a column of numbers its width. True when the columns drawn changed.
+  // a column of times its shortest form, a column of numbers its widest value, each with its title on two lines; and
+  // in a table too narrow even for the columns that never drop, a column its title's longest word (wordLeast), one of
+  // numbers or times its widest value too (tight). True when the columns drawn changed.
   Table.prototype.layout = function () {
     var self = this
     var charW = measureChar(this.mount) || CHAR
@@ -399,12 +413,20 @@
         titles.push(l[0], l[1])
       })
     })
+    // each title's words, as it wraps after a space, a slash or a hyphen inside a word
+    var words = this.columns.map(function (c) {
+      return c.title.replace(/([/-])(?=\S)/g, '$1 ').split(/\s+/).filter(Boolean)
+    })
+    words.forEach(function (ws) {
+      titles.push.apply(titles, ws)
+    })
     var widths = measureHeads(this.mount, titles)
     var wide = function (k) {
       return widths[k] || titles[k].length * charW
     }
     var heads = []
     var headLeast = [] // px a column keeps so that its head shows its whole title, with the cell's padding and the arrow
+    this.wordLeast = [] // px a column keeps before its head breaks its title's longest word
     var k = this.columns.length
     this.columns.forEach(function (c, i) {
       heads[i] = wide(i)
@@ -414,6 +436,13 @@
         k += 2
       })
       headLeast[i] = Math.ceil(two) + PAD + (c.sorts ? SORT_ROOM : 0)
+    })
+    this.columns.forEach(function (c, i) {
+      var word = 0
+      words[i].forEach(function () {
+        word = Math.max(word, wide(k++))
+      })
+      self.wordLeast[i] = Math.ceil(word) + PAD + (c.sorts ? SORT_ROOM : 0)
     })
     var sample = this.all.length > SAMPLE ? this.all.slice(0, SAMPLE) : this.all
     var fitW = function (w) {
@@ -443,6 +472,7 @@
     this.least = [] // px a column keeps before it drops
     this.ease = [] // px a column takes before the others give up width, for one that shares what is left
     this.forms = [] // a column of times: the forms it is written in as it narrows, [{secs, year, w}], the widest first
+    this.tight = [] // px a column of numbers or times keeps in a table too narrow even for the columns that never drop
     this.columns.forEach(function (c, i) {
       var w = (typeof c.width === 'number' && c.width > 0) || (typeof c.width === 'string' && c.width) ? c.width : null
       self.forms[i] = null
@@ -458,7 +488,7 @@
       }
       if (typeof w === 'string') {
         self.want[i] = w
-        self.least[i] = self.ease[i] = Math.max(MIN_W, headLeast[i])
+        self.least[i] = self.ease[i] = self.tight[i] = Math.max(MIN_W, headLeast[i])
         return
       }
       var most = 0
@@ -468,10 +498,15 @@
         most = Math.max(most, t.length)
         if (c.type === 'time' && t && typeof self.value(c, sample[k]) !== 'number') asWritten = Math.max(asWritten, t.length)
       }
+      // a column of numbers with no width of its own takes its title on one line while the table has room, and on two
+      // in a narrow table, before columns drop
+      var values = fitW(most * charW + PAD)
+      var own = w != null
       if (w == null) w = fitW(Math.max(most * charW + PAD, heads[i] + PAD + SORT_ROOM))
       w = Math.max(w, headLeast[i])
       self.want[i] = w
-      self.least[i] = w
+      self.least[i] = own ? w : Math.min(w, Math.max(values, headLeast[i]))
+      self.tight[i] = own ? w : Math.min(self.least[i], Math.max(values, self.wordLeast[i]))
       if (c.type !== 'time') return
       // the full stamp, then without the seconds, then without the year when the times share one: the first form is the
       // widest the column's width holds, each next one only when it is narrower
@@ -485,14 +520,19 @@
       })
       self.forms[i] = steps
       self.least[i] = steps[steps.length - 1].w
+      var last = forms[forms.length - 1]
+      var stampW = fitW(Math.max(asWritten, STAMP - (last.year ? 0 : 5)) * charW + PAD)
+      self.tight[i] = Math.min(self.least[i], Math.max(stampW, self.wordLeast[i]))
     })
     return this.fit()
   }
   // The columns' tracks for the table's width, from what layout() found. In a table too narrow for them, such as one
   // beside the side panel, the times are written shorter (without their seconds, then without their year), then the
-  // columns of text give up width in proportion down to what each keeps, the main column from EASE_MAIN; and when the
-  // columns need more than the table has even so, they drop in their order until the rest fit, so that no cell passes
-  // the table's edge. True when the columns drawn or the form of their times changed, which redrawColumns() then draws.
+  // columns of numbers give up width down to their titles on two lines, then the columns of text give up width in
+  // proportion down to what each keeps, the main column from EASE_MAIN; and when the columns need more than the table
+  // has even so, they drop in their order until the rest fit, so that no cell passes the table's edge, unless the
+  // columns that never drop pass it at their narrowest. True when the columns drawn or the form of their times changed,
+  // which redrawColumns() then draws.
   Table.prototype.fit = function () {
     var self = this
     var cols = this.columns
@@ -509,16 +549,31 @@
     if (room > 0) {
       var order = this.dropOrder()
       for (var d = 0, left = cols.length; d < order.length && left > 1 && need() > room; d++, left--) on[order[d]] = false
-      // the columns that never drop, still too wide: their text shares what the others leave
-      var lack = need() - room
-      var textLeast = 0
-      cols.forEach(function (c, i) {
-        if (on[i] && c.type === 'text') textLeast += least[i]
-      })
-      if (lack > 0 && textLeast > 0)
+      // the columns that never drop, still too wide: each gives up width in proportion down to `floor(c, i)`, its
+      // spare shared out by how much it has
+      var giveUp = function (floor) {
+        var lack = need() - room
+        var give = 0
         cols.forEach(function (c, i) {
-          if (on[i] && c.type === 'text') least[i] = Math.floor((least[i] * Math.max(0, textLeast - lack)) / textLeast)
+          if (on[i]) give += Math.max(0, least[i] - floor(c, i))
         })
+        if (lack <= 0 || give <= 0) return
+        var part = Math.min(1, lack / give)
+        cols.forEach(function (c, i) {
+          if (on[i]) least[i] = Math.floor(least[i] - Math.max(0, least[i] - floor(c, i)) * part)
+        })
+      }
+      // first down to the longest word of its title, which takes more lines, and a column of numbers or times to its
+      // widest value too; then a column of text down to MIN_W, its title breaking a word, never to a letter a line; past
+      // that, the columns pass the table's edge
+      var words = this.wordLeast || []
+      var tight = this.tight || []
+      giveUp(function (c, i) {
+        return c.type === 'text' ? Math.min(least[i], words[i] || 0) : tight[i] != null ? Math.min(least[i], tight[i]) : least[i]
+      })
+      giveUp(function (c, i) {
+        return c.type === 'text' ? Math.min(least[i], MIN_W) : least[i]
+      })
     }
     var width = [] // each column's width in px, a CSS track, or null for a share of what is left
     var share = [] // px a column that shares what is left (`1fr`) keeps of it
@@ -544,6 +599,21 @@
         stepped = true
       })
       if (!stepped) break
+    }
+    // then the columns of numbers and times with no width of their own give up width in proportion, down to what each
+    // keeps, their titles taking two lines (more in a table too narrow even for the columns that never drop)
+    if (over > 0) {
+      var given = 0
+      cols.forEach(function (c, i) {
+        if (on[i] && c.type !== 'text' && typeof width[i] === 'number') given += Math.max(0, width[i] - least[i])
+      })
+      var part = given > 0 ? Math.min(1, over / given) : 0
+      cols.forEach(function (c, i) {
+        if (!part || !on[i] || c.type === 'text' || typeof width[i] !== 'number' || width[i] <= least[i]) return
+        var cut = Math.min(width[i] - least[i], Math.ceil((width[i] - least[i]) * part))
+        width[i] -= cut
+        over -= cut
+      })
     }
     // then the columns of text give up width in proportion, down to what each keeps: one with a width from it, the main
     // column from the share it takes before the others give up theirs
@@ -811,7 +881,8 @@
       this.drawnCols
         .map(function (col) {
           var sub = col.sub ? self.subHtml(col, r) : ''
-          var body = col.sub ? '<div class="thimble-table-line">' + self.cell(col, r) + '</div>' + (sub ? '<div class="thimble-table-sub">' + sub + '</div>' : '') : self.cell(col, r)
+          var cell = self.cell(col, r, i > 0 ? self.shown[i - 1] : null)
+          var body = col.sub ? '<div class="thimble-table-line">' + cell + '</div>' + (sub ? '<div class="thimble-table-sub">' + sub + '</div>' : '') : cell
           return '<div class="thimble-table-td thimble-table-' + col.type + '" role="gridcell">' + body + '</div>'
         })
         .join('') +
