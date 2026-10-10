@@ -198,9 +198,10 @@ document.getElementById('b').innerHTML = thimble.text.html(${js(raw)}, { format:
   })
 
   test('a citation that quotes the source with its ** and list markers is found in the rendered text, and opens its fold', async () => {
-    const { page, frame } = await framed(doc(`<div id="pr"></div><div id="log"></div><script>
+    const { page, frame } = await framed(doc(`<div id="pr"></div><div id="log"></div><div id="log2"></div><script>
 thimble.text('#pr', ${js(BODY)}, { ref: ${js(REF)} })
-document.getElementById('log').innerHTML = thimble.text.html(${js(LONG)}, { ref: 'forge/prs.jsonl#L9' })</script>`))
+document.getElementById('log').innerHTML = thimble.text.html(${js(LONG)}, { ref: 'forge/prs.jsonl#L9' })
+document.getElementById('log2').innerHTML = thimble.text.html(${js(LONG)}, { ref: 'forge/prs.jsonl#L10' })</script>`))
     const quote = async (record: string, text: string) => {
       await page.evaluate(
         ([record, text]) => {
@@ -230,6 +231,12 @@ document.getElementById('log').innerHTML = thimble.text.html(${js(LONG)}, { ref:
       })(),
     }))
     assert.deepEqual(open, { more: 'Show less', shows: true })
+    // a passage that starts before the fold and ends in it opens it too
+    assert.deepEqual(await quote('forge/prs.jsonl#L10', '- step 11 of the crossing\n- step 12 of the crossing'), {
+      found: true,
+      lit: 'step 11 of the crossing step 12 of the crossing',
+    })
+    assert.equal(await frame().evaluate(() => document.querySelector('#log2 .thimble-text-more')!.textContent), 'Show less')
     await page.close()
   })
 

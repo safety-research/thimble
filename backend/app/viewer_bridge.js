@@ -1616,9 +1616,15 @@
   // the evidence highlight in ink, at the find's stronger step so it reads over the ring views draw around the record a
   // citation opened
   function showQuote(r) {
-    var at = r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentElement
-    var fold = at && at.closest('[data-thimble-fold]')
-    if (fold && fold.hidden) fold.dispatchEvent(new CustomEvent('thimble-unfold', { bubbles: true }))
+    // each fold the passage is in, or runs into, is opened by the part that folded it
+    var top = r.commonAncestorContainer.nodeType === 1 ? r.commonAncestorContainer : r.commonAncestorContainer.parentElement
+    var folds = top ? [].slice.call(top.querySelectorAll('[data-thimble-fold][hidden]')) : []
+    var around = top && top.closest('[data-thimble-fold]')
+    if (around) folds.unshift(around)
+    for (var f = 0; f < folds.length; f++) {
+      if (folds[f].hidden && (folds[f] === around || r.intersectsNode(folds[f])))
+        folds[f].dispatchEvent(new CustomEvent('thimble-unfold', { bubbles: true }))
+    }
     if (HL) {
       if (!quoteSheet) {
         quoteSheet = document.createElement('style')
