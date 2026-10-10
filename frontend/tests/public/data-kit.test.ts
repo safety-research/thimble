@@ -553,6 +553,35 @@ describe('the table', () => {
     expect(w.thimble.__held()).toBe(5)
   })
 
+  test("tabs of different lists and one search: it finds in the table of the tab in view, in the page's text while no table shows, and follows the tab shown", async () => {
+    await load(`<style>.tab:not(.on){display:none}</style><div class="top"><span id="search"></span></div>
+<div id="tabs"><div id="prs" class="tab on" style="height:300px"></div><div id="issues" class="tab" style="height:300px"></div><div id="agent" class="tab"></div></div>`)
+    const w = win()
+    const rows = (kind: string, titles: string[]) => titles.map((title, i) => ({ ref: `forge.db#${kind}/${i + 1}`, title }))
+    w.PRS = rows('prs', ['a gale at sea', 'calm'])
+    w.ISSUES = rows('issues', ['gale one', 'gale two', 'calm'])
+    w.TURNS = Array.from({ length: 4 }, (_, i) => ({ ref: `s.jsonl#L${i + 1}`, speaker: 'lead', kind: 'text', text: `the gale, turn ${i + 1}`, line: i + 1 }))
+    w.eval(`
+      window.search = thimble.search({ mount: '#search', in: '#tabs' })
+      const columns = [{ name: 'title', title: 'Title' }]
+      thimble.table({ mount: '#prs', rows: PRS, columns, search })
+      thimble.table({ mount: '#issues', rows: ISSUES, columns, search })
+      thimble.transcript({ mount: '#agent' }).draw(TURNS)
+    `)
+    const show = async (id: string) => {
+      doc().querySelectorAll('.tab').forEach((t) => t.classList.toggle('on', t.id === id))
+      await wait(120)
+      return w.search.count
+    }
+    // the pull requests' tab, though the issues' table gave its rows last
+    w.search.set('gale')
+    expect(w.search.count).toBe(1)
+    expect(await show('issues')).toBe(2)
+    // a tab with no table: the transcript's turns, in the page's text
+    expect(await show('agent')).toBe(4)
+    expect(await show('prs')).toBe(1)
+  })
+
   test("tabs of different records: Color by's chips count the records of the tab in view, a table's and the page's own alike, and follow the tab shown", async () => {
     await load(`<style>.tab:not(.on){display:none}</style><div class="top"><span id="colour"></span></div>
 <div id="prs" class="tab on" style="height:300px"></div><div id="issues" class="tab" style="height:300px"></div><div id="notes" class="tab"></div>`)

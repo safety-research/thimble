@@ -70,7 +70,8 @@ text: `search.rows({texts, refs, go, box})`, `texts` each row's text as it draws
 apart such as cells (a match never spans them), `refs` each row's ref, so the current match stays on its row when the
 rows are sorted again, `go(i)` to bring row `i` into view, and `box` the element that scrolls, whose strip gets the
 ticks. The rows on the page carry `data-thimble-row="<i>"`, so the matches in the rows drawn are washed. The kit's
-table does this itself when it is given the search.
+table does this itself when it is given the search. Lists in tabs, such as a table in each, each give their rows by
+their `box`: the search finds in the one that shows, and in the page's text while none does.
 
 ### Text folded away
 

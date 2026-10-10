@@ -231,6 +231,11 @@
     while (e && e !== root && INLINE[e.tagName]) e = e.parentElement
     return e
   }
+  // whether an element shows: neither it nor an element around it hidden or not displayed
+  function shows(el) {
+    for (var e = el; e && e.nodeType === 1; e = e.parentElement) if (e.hidden || getComputedStyle(e).display === 'none') return false
+    return true
+  }
   // whether a node is text, or an inline element, that runs on with the text beside it
   function runsOn(n) {
     return !!n && (n.nodeType === 3 ? /\S/.test(n.nodeValue) : n.nodeType === 1 && !!INLINE[n.tagName])
@@ -337,7 +342,8 @@
     this.matches = [] // {range, run, fold, row, k, rec}: a DOM match, or with `row` a match in a row of `source`
     this.at = -1
     this.key = null // what the current match is, to find it again once the page draws again: [record, k]
-    this.source = null // {texts, low, go, box}: the rows of a list that draws only those in view
+    this.source = null // {texts, low, go, box}: the rows of a list that draws only those in view, the one of `sources` that shows
+    this.sources = [] // every list's rows (rows), by its box
     this.more = false // more matches than MOST
     this.timer = null
     this.frame = null
@@ -475,16 +481,25 @@
     }
   }
   // the page's changes the observer heard: any that can change what the search finds has its elements read again
-  // (note), and one other than a class or a style finds the matches again in a frame
+  // (note), and one other than a class or a style, or a class or a style on an element that holds records, such as a
+  // tab, finds the matches again in a frame
   Search.prototype.heard = function (records) {
     var again = false
     for (var i = 0; i < records.length; i++) {
       var r = records[i]
       if (!this.counts(r)) continue
       this.note(r)
-      if (r.type !== 'attributes' || r.attributeName === 'hidden' || r.attributeName === DROP) again = true
+      if (r.type !== 'attributes' || r.attributeName === 'hidden' || r.attributeName === DROP || this.holds(r.target)) again = true
     }
     if (again && this.needle) this.soon()
+  }
+  // whether an element holds records or a list's rows, outside any record, so that a class or a style that shows or hides
+  // it, such as a tab's, finds the matches again; a class on a record, such as the chosen row's, does not
+  Search.prototype.holds = function (t) {
+    if (!t || t.nodeType !== 1 || t.closest('[data-anchor]')) return false
+    if (t.querySelector('[data-anchor]')) return true
+    for (var i = 0; i < this.sources.length; i++) if (this.sources[i].box && t.contains(this.sources[i].box)) return true
+    return false
   }
   // A change the index must take: the elements it touched to be read again before the next search, or the page read
   // again whole while it is being read, for a change of the root itself or of an element around it, or past UNITS
@@ -554,14 +569,16 @@
     this.run(true)
   }
   // the page drew again: its matches found again in the next frame; a list of rows only draws other rows, whose matches
-  // the search knows, so they are only highlighted
+  // the search knows, so they are only highlighted, unless another list shows now, such as a tab's
   Search.prototype.soon = function () {
     var self = this
     if (this.frame != null) return
     var go = function () {
       self.frame = null
       if (self.dead) return
-      if (self.source) self.paint()
+      var was = self.source
+      self.pick()
+      if (self.source && self.source === was) self.paint()
       else self.find(false)
     }
     this.frame = typeof requestAnimationFrame === 'function' ? requestAnimationFrame(go) : setTimeout(go, 16)
@@ -570,7 +587,9 @@
   // a search that waits for it runs once it is read. A page that changes while it is read is read again from the start,
   // and after READS starts the rest is read at once.
   Search.prototype.prepare = function () {
-    if (this.dead || this.source || this.reading != null) return
+    if (this.dead) return
+    this.pick()
+    if (this.source || this.reading != null) return
     var self = this
     var starts = 0
     var slice = function () {
@@ -651,6 +670,7 @@
   // view; then the highlights, the count and the strip's ticks.
   Search.prototype.find = function (go) {
     if (this.dead) return
+    this.pick()
     this.observe()
     var out = []
     var needle = this.needle
@@ -954,12 +974,13 @@
     this.find(!!text)
     if (changed && !quiet) this.tell()
   }
-  // the rows of a list that draws only those in view, or null for the page's text again
+  // the rows of a list that draws only those in view, kept by its box, so that lists in tabs each give theirs; null takes
+  // every list's away, for the page's text again
   Search.prototype.rows = function (src) {
     if (!src || !Array.isArray(src.texts)) {
-      this.source = null
+      this.sources = []
     } else {
-      this.source = {
+      var s = {
         texts: src.texts,
         low: src.texts.map(function (t) {
           return lower(t == null ? '' : String(t))
@@ -968,9 +989,23 @@
         go: typeof src.go === 'function' ? src.go : function () {},
         box: ctl.el(src.box) || null,
       }
-      if (this.source.box) shared.strip(this.source.box)
+      this.sources = this.sources.filter(function (x) {
+        return x.box && x.box !== s.box
+      })
+      this.sources.push(s)
+      if (s.box) shared.strip(s.box)
     }
     this.find(false)
+  }
+  // the list the search finds in: the one given last of those that show, such as the table of the tab in view; none
+  // while none shows, so the search finds in the page's text
+  Search.prototype.pick = function () {
+    this.sources = this.sources.filter(function (s) {
+      return !s.box || s.box.isConnected
+    })
+    var got = null
+    for (var i = this.sources.length - 1; i >= 0 && !got; i--) if (!this.sources[i].box || shows(this.sources[i].box)) got = this.sources[i]
+    this.source = got
   }
 
   // ⌘F or Ctrl+F in the view: the focus in the first search's box, its text chosen
