@@ -8,7 +8,7 @@
      .thimble-tree-*        a list of groups to navigate (viewer_tree.js), as Files' tree draws its folders
      .thimble-key-*         a key whose entries are toggles, each swatch drawn as its series is drawn
      .thimble-lanes-*,      the timeline's lanes: a name column with tree guides, a track per lane on one axis (the
-     .thimble-lane-*        range's scale, or an axis of its own), the problem red under a failure, the cursor line on
+     .thimble-lane-*        range's scale, or an axis of its own), a ✕ in the problem red on a failure, the cursor line on
                             hover, the tint of the list's rows in view
      .thimble-divider       the bar between the overview and the detail list
      .thimble-side-*        the side panel at the list's right, its edge a drag resizes
@@ -16,7 +16,7 @@
      .thimble-turn-*
      .thimble-msg-*         messages between people or agents, as a chat app draws them: an avatar in a rail, the
                             author and the time in a head, a date line for each day, a reply one level in, an event
-                            on one line, quoted mail behind "…" and a long body behind Show more
+                            on one line, a boxed message, quoted mail behind "…" and a long body behind Show more
      .thimble-record-*      a record's fields as a tree under its citation: a key and a value per row, a nested value
                             folded behind its key, a long string folded with Show more
      .thimble-chart-*       a chart in the canvas's theme (the drawing's own look is the chart style's, not CSS), and
@@ -283,9 +283,17 @@
   background: var(--c, var(--viz-ink-3, rgba(var(--ink-rgb), 0.5)));
 }
 .thimble-key-problem {
-  width: 12px;
-  height: 2px;
-  background: var(--status-negative);
+  width: 10px;
+  height: 10px;
+}
+.thimble-key-problem svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: var(--status-negative);
+  stroke-width: 1.75;
+  stroke-linecap: round;
 }
 .thimble-key-line {
   width: 12px;
@@ -455,9 +463,23 @@
   fill: var(--viz-ink-3, rgba(var(--ink-rgb), 0.5));
   cursor: pointer;
 }
-/* a failure: the problem red under its mark, beside the Color by colours */
+/* a failure: a ✕ in the problem red centered on the foot of its mark or bar, over a thin halo of the paper, so it reads
+   at a glance beside any Color by colour, light or dark, and a narrow mark keeps most of its colour; a click passes to
+   the mark under it */
 .thimble-lane-bad {
-  fill: var(--status-negative);
+  pointer-events: none;
+}
+.thimble-lane-bad path {
+  fill: none;
+  stroke-linecap: round;
+}
+.thimble-lane-bad-halo {
+  stroke: var(--surface-card);
+  stroke-width: 3;
+}
+.thimble-lane-bad-x {
+  stroke: var(--status-negative);
+  stroke-width: 1.75;
 }
 /* Density: taller lanes, so that the bars read; a bin's tip names its records per value */
 .thimble-lanes.is-density .thimble-lane {
@@ -1080,6 +1102,31 @@
 .thimble-msg-event .thimble-msg-body {
   margin-top: 2px;
 }
+/* a boxed message (`box`), as a forge draws a pull request's opening post and a mail app a message: a box beside the
+   avatar, its head on a light tint as an event's line (the author, what they did and the time at the right), the words
+   under it; the box takes the row's own background, so a message chosen or under the pointer shows through it */
+.thimble-msg.is-boxed {
+  padding-bottom: 8px;
+}
+.thimble-msg-box {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+}
+.thimble-msg-boxhead {
+  padding: 5px 10px;
+  background: rgba(var(--ink-rgb), 0.035);
+}
+.thimble-msg-boxhead:not(:last-child) {
+  border-bottom: 1px solid var(--border-subtle);
+}
+.thimble-msg-boxbody {
+  padding: 8px 10px 10px;
+}
+.thimble-msg-boxbody > .thimble-msg-body:first-child {
+  margin-top: 0;
+}
 .thimble-msg-none {
   padding: 28px 16px;
   color: var(--text-tertiary);
@@ -1176,6 +1223,10 @@ button.thimble-record-key:focus-visible {
 }
 .thimble-record-val.is-bool {
   color: var(--text-secondary);
+}
+/* a string under a field the page names in `mono`, such as a file's raw line or a command */
+.thimble-record-val.is-mono {
+  font: 400 var(--text-mono-sm) / 1.55 var(--font-mono);
 }
 .thimble-record-val.is-null,
 .thimble-record-val.is-empty {

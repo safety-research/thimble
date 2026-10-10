@@ -158,6 +158,25 @@ describe('thimble.record', () => {
     expect(doc().querySelector('#rec .thimble-record-cite')).toBeNull()
   })
 
+  test("draws the strings of the fields named in `mono`, and those under them, in the mono face, a long one folded as any other; a field of another name or a number as before", async () => {
+    await load()
+    const line = '{"ts": 1778910000000, "svc": "ferry-api", "state": "firing", "msg": "p99 latency over 2s"}'
+    const value = { id: 'alert-7', line, lines: [line, line + ' '.repeat(500) + 'tail'], took: 42 }
+    win().thimble.record({ mount: '#rec', value, ref: 'alerts/a.jsonl#L3', mono: ['line', 'lines'] })
+    const val = (key: string) => [...doc().querySelectorAll('#rec .thimble-record-row')].find((r) => r.querySelector('.thimble-record-key')?.textContent === key)!.querySelector('.thimble-record-val')!
+    expect(val('line').classList.contains('is-mono')).toBe(true)
+    expect(val('line').textContent).toBe(line)
+    expect(val('id').classList.contains('is-mono')).toBe(false)
+    expect(val('took').className).toBe('thimble-record-val is-num')
+    // under a list the page names, every item, the long one folded with Show more
+    const items = [...doc().querySelectorAll('#rec .thimble-record-kids .thimble-record-val')]
+    expect(items.map((v) => v.classList.contains('is-mono'))).toEqual([true, true])
+    expect(items[1].classList.contains('is-long')).toBe(true)
+    // without `mono`, drawn again in the body face
+    win().thimble.record({ mount: '#rec', value, ref: 'alerts/a.jsonl#L3' })
+    expect(doc().querySelectorAll('#rec .is-mono')).toHaveLength(0)
+  })
+
   test("names its citation as thimble's chips do", async () => {
     await load()
     const refs = ['runs/r1/explorer.jsonl#L12', 'runs/team-6/agents/a.jsonl#L3-L9', 'a/b/c/trial-03/x/y/notes.jsonl#L5.b2', 'deploys.csv#row=3',

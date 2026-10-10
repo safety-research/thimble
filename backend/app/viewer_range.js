@@ -68,10 +68,11 @@
   function num(n) {
     return Number(n || 0).toLocaleString('en-US')
   }
-  // a plain number as precise as `step` needs: 0.25 to a step of 0.05, 12 to a step of 1
-  function numTo(n, step) {
+  // a place on an axis of plain numbers, such as a turn, a line or a year, written as it is, without separators (2019),
+  // and as precise as `step` needs: 0.25 to a step of 0.05, 12 to a step of 1
+  function numAt(n, step) {
     var d = step > 0 && step < 1 ? Math.min(6, Math.ceil(-Math.log(step) / Math.LN10 - 1e-9)) : 0
-    return Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: d })
+    return Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: d, useGrouping: false })
   }
   function el(target) {
     if (typeof target === 'string') return document.querySelector(target)
@@ -171,7 +172,7 @@
   }
   // the readout of a range, as precise as its length needs; the year when the span crosses one: [start, end]
   Units.prototype.ends = function (a, b, years) {
-    if (!this.time) return [num(Math.round(a)), num(Math.round(b))]
+    if (!this.time) return [numAt(a, 1), numAt(b, 1)]
     var len = this.ms(b - a)
     if (len >= 3 * DAY) return [this.dm(a, years), this.dm(b - this.of(1), years)]
     var secs = len < 2 * MIN
@@ -184,12 +185,12 @@
   // the characters of the widest readout of a span to `hi` (to the minute; a range under two minutes, which adds the
   // seconds, wraps at its dash), and of the widest one end
   Units.prototype.widest = function (hi, years) {
-    var one = this.time ? 12 + (years ? 5 : 0) : num(Math.round(hi)).length + 1
+    var one = this.time ? 12 + (years ? 5 : 0) : numAt(hi, 1).length + 1
     return { all: 2 * one + 3, one: one }
   }
   // a moment, as precise as `step` (in the units) needs
   Units.prototype.at = function (t, step, years) {
-    if (!this.time) return this.fine ? numTo(t, step) : num(Math.round(t))
+    if (!this.time) return numAt(t, this.fine ? step : 1)
     var ms = this.ms(step || 0)
     if (ms >= DAY) return this.dm(t, years)
     return this.dm(t, years) + ' ' + this.hm(t, ms < MIN)
@@ -318,7 +319,7 @@
     var years = opts.years != null ? opts.years : u.time && u.parts(this.from).y !== u.parts(this.to).y
     var ms = typeof step === 'object' ? step.months * 30 * DAY : u.ms(step)
     var label = function (t) {
-      if (!u.time) return numTo(t, step)
+      if (!u.time) return numAt(t, step)
       var p = u.parts(t)
       if (typeof step === 'object') return p.mo === 0 || step.months >= 12 ? String(p.y) : MONTH[p.mo] + (years && p.mo === 0 ? ' ' + p.y : '')
       if (ms >= DAY) return p.d === 1 && ms <= 7 * DAY ? u.dm(t) : u.dm(t)
