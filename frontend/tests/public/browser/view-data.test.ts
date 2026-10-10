@@ -329,6 +329,8 @@ describe('the table beside the side panel', () => {
       assert.equal(got.cut, 0, `${width}px`)
       assert.ok(inside(got), `${width}px: ${JSON.stringify(got)}`)
       if (width > 200) assert.ok(got.cells.Title.w >= 120, `${width}px: ${JSON.stringify(got)}`)
+      // Title, which takes the width left, is the widest column of text: the others gave up width with it
+      if (width === 520) assert.ok(got.cells.Title.w > got.cells.Author.w, `${width}px: ${JSON.stringify(got)}`)
       // the search finds a time whole at every width, its year and seconds drawn or not: the three from 20:00 to 22:59
       if (opened) assert.equal(await march(), 3, `${width}px`)
       if (titles.includes('Opened')) assert.equal(await frame().evaluate(() => document.querySelector('.thimble-table-th.active')?.textContent), 'Opened', `${width}px`)
@@ -377,6 +379,7 @@ window.table = thimble.table({ mount: '#list', sort: { by: 't', desc: true },
     const { page: p, frame } = await framed(doc, 1048)
     const steps: [number, string[]][] = [
       [1000, ['From', 'Subject', 'Date']],
+      [500, ['From', 'Subject', 'Date']],
       [380, ['From', 'Subject', 'Date']],
       // the rows are sorted by Date, which drops after From
       [260, ['Subject', 'Date']],
@@ -390,6 +393,8 @@ window.table = thimble.table({ mount: '#list', sort: { by: 't', desc: true },
       assert.deepEqual(got.titles, titles, `${width}px: ${JSON.stringify(got)}`)
       assert.ok(inside(got), `${width}px: ${JSON.stringify(got)}`)
       assert.ok(got.cells.Subject.w >= Math.min(120, width), `${width}px: ${JSON.stringify(got)}`)
+      // beside a From of 200 px, Subject is the wider: From gives up width with it, and the dates their year
+      if (width === 500) assert.ok(got.cells.Subject.w > got.cells.From.w && /^\d\d-\d\d /.test(got.cells.Date.text), `${width}px: ${JSON.stringify(got)}`)
     }
     await p.close()
   })

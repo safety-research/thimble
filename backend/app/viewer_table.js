@@ -44,8 +44,10 @@
   var MAX_W = 260
   var MIN_TEXT = 64 // px, the narrowest a column of text gets in a table too narrow for its columns, unless it says (`min`)
   var MIN_MAIN = 120 // px, the same for the main column, which holds what a row is about
+  var EASE_MAIN = 240 // px the main column takes before the other columns give up width; below it, it gives up width with them
   var STAMP = 16 // characters of a time as the kit writes it, YYYY-MM-DD HH:MM; 3 more with the seconds, 5 fewer without the year
   var SAMPLE = 2000 // rows read to fit a column of numbers or times to its values
+  var FR = /^\d*\.?\d+fr$/ // a track that shares what is left
   var collator = typeof Intl !== 'undefined' ? new Intl.Collator('en', { numeric: true, sensitivity: 'base' }) : null
   var ARROW = {
     up: '<svg class="thimble-colour-ico thimble-table-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg>',
@@ -350,6 +352,7 @@
     })
     this.want = [] // px, a CSS track, or null for a share of what is left
     this.least = [] // px a column keeps before it drops
+    this.ease = [] // px a column takes before the others give up width, for one that shares what is left
     this.forms = [] // a column of times: the forms it is written in as it narrows, [{secs, year, w}], the widest first
     this.columns.forEach(function (c, i) {
       var w = (typeof c.width === 'number' && c.width > 0) || (typeof c.width === 'string' && c.width) ? c.width : null
@@ -358,11 +361,12 @@
         var keeps = c.min || (i === self.main ? MIN_MAIN : MIN_TEXT)
         self.want[i] = w
         self.least[i] = typeof w === 'number' ? Math.min(w, keeps) : keeps
+        self.ease[i] = i === self.main ? Math.max(keeps, EASE_MAIN) : keeps
         return
       }
       if (typeof w === 'string') {
         self.want[i] = w
-        self.least[i] = MIN_W
+        self.least[i] = self.ease[i] = MIN_W
         return
       }
       var most = 0
@@ -393,9 +397,9 @@
   }
   // The columns' tracks for the table's width, from what layout() found. In a table too narrow for them, such as one
   // beside the side panel, the times are written shorter (without their seconds, then without their year), then the
-  // columns of text with a width give it up in proportion down to what each keeps; and when the columns need more than
-  // the table has even so, they drop in their order until the rest fit, so that no cell passes the table's edge. True
-  // when the columns drawn or the form of their times changed, which redrawColumns() then draws.
+  // columns of text give up width in proportion down to what each keeps, the main column from EASE_MAIN; and when the
+  // columns need more than the table has even so, they drop in their order until the rest fit, so that no cell passes
+  // the table's edge. True when the columns drawn or the form of their times changed, which redrawColumns() then draws.
   Table.prototype.fit = function () {
     var self = this
     var cols = this.columns
@@ -424,13 +428,15 @@
         })
     }
     var width = [] // each column's width in px, a CSS track, or null for a share of what is left
+    var share = [] // px a column that shares what is left (`1fr`) keeps of it
     var step = [] // the form each column of times is written in
     var over = 0
     cols.forEach(function (c, i) {
       if (!on[i]) return
       width[i] = self.want[i]
       step[i] = 0
-      over += typeof width[i] === 'number' ? width[i] : least[i]
+      share[i] = width[i] == null || FR.test(width[i]) ? Math.max(least[i], self.ease[i] || 0) : least[i]
+      over += typeof width[i] === 'number' ? width[i] : share[i]
     })
     over = room > 0 ? over - room : 0
     // first the times written shorter, a step at a time in every column of times
@@ -446,15 +452,23 @@
       })
       if (!stepped) break
     }
-    // then the columns of text with a width give it up in proportion, down to what each keeps
+    // then the columns of text give up width in proportion, down to what each keeps: one with a width from it, the main
+    // column from the share it takes before the others give up theirs
     if (over > 0) {
+      var from = function (c, i) {
+        return !on[i] || c.type !== 'text' ? 0 : typeof width[i] === 'number' ? width[i] : width[i] == null || FR.test(width[i]) ? share[i] : 0
+      }
       var spare = 0
       cols.forEach(function (c, i) {
-        if (on[i] && c.type === 'text' && typeof width[i] === 'number') spare += Math.max(0, width[i] - least[i])
+        spare += Math.max(0, from(c, i) - least[i])
       })
       var k = spare > 0 ? Math.min(1, over / spare) : 0
       cols.forEach(function (c, i) {
-        if (k && on[i] && c.type === 'text' && typeof width[i] === 'number' && width[i] > least[i]) width[i] = Math.floor(width[i] - (width[i] - least[i]) * k)
+        var f = from(c, i)
+        if (!k || f <= least[i]) return
+        f = Math.floor(f - (f - least[i]) * k)
+        if (typeof width[i] === 'number') width[i] = f
+        else share[i] = f
       })
     }
     var tracks = []
@@ -463,8 +477,8 @@
     cols.forEach(function (c, i) {
       if (!on[i]) return
       var w = width[i] == null ? '1fr' : width[i]
-      // a share of what is left keeps what the column keeps, rather than growing to its longest cell
-      if (typeof w !== 'number') tracks.push(/^\d*\.?\d+fr$/.test(w) ? 'minmax(' + least[i] + 'px, ' + w + ')' : w)
+      // a share of what is left keeps its px, rather than growing to its longest cell
+      if (typeof w !== 'number') tracks.push(FR.test(w) ? 'minmax(' + share[i] + 'px, ' + w + ')' : w)
       else tracks.push(Math.round(w) + 'px')
       c.form = self.forms[i] ? self.forms[i][step[i]] : null
       drawn.push(c)
