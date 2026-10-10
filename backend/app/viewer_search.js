@@ -579,8 +579,8 @@
     return r ? scrollerOf(r) : true
   }
   // The box each result's tick stands in (find): a row's list's box; for a match in the page's text, the nearest box
-  // around it inside `in` with a strip of its own, such as a list Color by gives one, so that a list in it and the side
-  // panel beside it each tick their own, else the box `in` scrolls in
+  // around it inside `in` with a strip of its own, such as a thread beside a table that Color by gives one, else the box
+  // `in` scrolls in
   Search.prototype.boxesOf = function (ms) {
     var page = this.pageBox()
     var root = this.root()
