@@ -604,4 +604,33 @@ describe('the messages', () => {
     w.again.draw([{ ref: 'a#1', author: 'new', text: 'drawn' }])
     expect(texts('.thimble-msg-author')).toEqual(['new'])
   })
+
+  test('a loop of parents draws every message of it; an event with no author says what happened alone', async () => {
+    await load('<div id="c"></div>')
+    const w = win()
+    w.eval('window.conv = thimble.messages({ mount: "#c" })')
+    w.conv.draw([
+      { ref: 'l#1', t: T, author: 'ana', parent: 'l#2', text: 'a reply to the next' },
+      { ref: 'l#2', t: T + 60, author: 'bo', parent: 'l#1', text: 'a reply to the one before' },
+      { ref: 'l#3', t: T + 90, author: 'cy', parent: 'l#3', text: 'a reply to itself' },
+      { ref: 'l#4', t: T + 120, kind: 'event', icon: 'delete', said: 'Branch deleted' },
+    ])
+    // the loop's first message given stands as its root, the other under it
+    expect(heads()).toEqual([['l#1', 'head', ''], ['l#2', 'head', 'reply'], ['l#3', 'head', ''], ['l#4', 'head', '']])
+    expect(texts('[data-anchor="l#4"] .thimble-msg-said')).toEqual(['Branch deleted'])
+    expect(doc().querySelector('[data-anchor="l#4"]')!.getAttribute('data-anchor-text')).toBe('Branch deleted')
+  })
+
+  test('set: a new `to` draws the message after it again, which then names its own', async () => {
+    await load('<div id="c"></div>')
+    const w = win()
+    w.eval('window.conv = thimble.messages({ mount: "#c", format: "plain" })')
+    w.conv.draw([
+      { ref: 's#1', t: T, author: 'ana', to: 'bo', text: 'one' },
+      { ref: 's#2', t: T + 30, author: 'ana', to: 'bo', text: 'two, to the same' },
+    ])
+    expect(texts('.thimble-msg-to')).toEqual(['to bo'])
+    w.conv.set('s#1', { to: 'cy' })
+    expect(texts('.thimble-msg-to')).toEqual(['to cy', 'to bo'])
+  })
 })

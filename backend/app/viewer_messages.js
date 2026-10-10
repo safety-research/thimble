@@ -338,29 +338,43 @@
     var list = this.list
     var byRef = {}
     for (var i = 0; i < list.length; i++) if (list[i].ref != null && byRef[String(list[i].ref)] == null) byRef[String(list[i].ref)] = i
-    // the message a reply hangs under: its farthest drawn ancestor
+    // the message a reply hangs under: its farthest drawn ancestor; in a loop of parents, the loop's first message given,
+    // so every message of the loop is drawn
+    var roots = {}
     function rootOf(i) {
-      var seen = {}
+      var path = []
+      var place = {}
       var at = i
-      for (;;) {
-        seen[at] = true
+      var root = null
+      while (root == null) {
+        if (roots[at] != null) {
+          root = roots[at]
+          break
+        }
+        place[at] = path.length
+        path.push(at)
         var p = list[at].parent
         var up = p == null || p === '' ? null : byRef[String(p)]
-        if (up == null || seen[up]) return at
-        at = up
+        if (up == null) root = at
+        else if (place[up] != null) {
+          root = up
+          for (var c = place[up]; c < path.length; c++) root = Math.min(root, path[c])
+        } else at = up
       }
+      for (var q = 0; q < path.length; q++) roots[path[q]] = root
+      return root
     }
     var kids = {}
-    var roots = []
+    var tops = []
     for (var k = 0; k < list.length; k++) {
       var r = rootOf(k)
-      if (r === k) roots.push(k)
+      if (r === k) tops.push(k)
       else (kids[r] = kids[r] || []).push(k)
     }
     var order = [] // [index, reply]
-    for (var g = 0; g < roots.length; ) {
-      var run = [roots[g]]
-      while (g + run.length < roots.length && follows(list[run[run.length - 1]], list[roots[g + run.length]])) run.push(roots[g + run.length])
+    for (var g = 0; g < tops.length; ) {
+      var run = [tops[g]]
+      while (g + run.length < tops.length && follows(list[run[run.length - 1]], list[tops[g + run.length]])) run.push(tops[g + run.length])
       var replies = []
       run.forEach(function (idx) {
         order.push([idx, false])
@@ -447,10 +461,11 @@
   Messages.prototype.rowHtml = function (row, i) {
     var m = row.m
     var ev = isEvent(m)
-    var author = m.author == null || m.author === '' ? '(unsigned)' : String(m.author)
+    var signed = m.author != null && m.author !== ''
+    var author = signed ? String(m.author) : '(unsigned)'
     var cls = 'thimble-msg' + (ev ? ' thimble-msg-event' : '') + (row.cont ? ' is-cont' : '') + (row.reply ? ' is-reply' : '') + (this.onPick ? ' is-act' : '')
     var said = ev ? plainOf(m.said) : ''
-    var gist = ev ? author + ' ' + said + (textOf(m) ? ' ' + textOf(m) : '') : (m.title ? plainOf(m.title) + ' · ' : '') + textOf(m)
+    var gist = ev ? (signed ? author + ' ' : '') + said + (textOf(m) ? ' ' + textOf(m) : '') : (m.title ? plainOf(m.title) + ' · ' : '') + textOf(m)
     var attrs =
       ' data-msg="' + i + '"' +
       (row.key.charAt(0) !== '#' ? ' data-anchor="' + esc(row.key) + '" data-anchor-text="' + esc(gist.replace(/\s+/g, ' ').trim().slice(0, 300)) + '"' : '') +
@@ -459,11 +474,12 @@
       (this.onPick ? ' tabindex="0"' : '')
     var body = this.bodyHtml(row, textOf(m))
     if (ev) {
+      // an event with no author, such as a branch deleted, says what happened alone
       return (
         '<div class="' + cls + '"' + attrs + '>' +
         '<div class="thimble-msg-rail" data-thimble-chrome><svg class="thimble-msg-ico" viewBox="0 0 16 16" aria-hidden="true">' + (ICONS[m.icon] || DOT) + '</svg></div>' +
         '<div class="thimble-msg-main"><div class="thimble-msg-line">' +
-        '<span class="thimble-msg-said"><b class="thimble-msg-author" data-thimble-chrome>' + esc(author) + '</b> ' + words(m.said) + '</span>' +
+        '<span class="thimble-msg-said">' + (signed ? '<b class="thimble-msg-author" data-thimble-chrome>' + esc(author) + '</b> ' : '') + words(m.said) + '</span>' +
         timeHtml(row.s, 'thimble-msg-time', row.day) + '</div>' + body + '</div></div>'
       )
     }
@@ -600,10 +616,11 @@
     if (!row || !patch || typeof patch !== 'object') return
     var same = true
     for (var k in patch) {
-      if (k === 'author' || k === 't' || k === 'parent' || k === 'kind' || k === 'ref') same = same && patch[k] === row.m[k]
+      if (k === 'author' || k === 't' || k === 'parent' || k === 'kind' || k === 'ref' || k === 'to') same = same && patch[k] === row.m[k]
       row.m[k] = patch[k]
     }
-    // what places it (its author, time, parent or kind) draws them all again; anything else draws it alone
+    // what places it or the message after it (its author, time, parent, kind or `to`) draws them all again; anything
+    // else draws it alone
     if (same) this.redraw(row)
     else this.draw(this.list, this.o)
   }
