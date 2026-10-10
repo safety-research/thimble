@@ -191,11 +191,47 @@ test("thimble.chart's density, ecdf, ridgeline and range draw from their rows: o
   // a ridgeline's y is a place the chart computes, in no row: the rows' table rather than flat lines at 0
   const ridge = card({ data: { values: curves }, transform: [{ calculate: '1 - indexof(["a", "b"], datum["agent"])', as: '__thimble_base' }, { calculate: 'datum["__thimble_base"] + datum["density"] / 0.04 * 1.5', as: '__thimble_top' }], mark: { type: 'area', line: true }, encoding: { x, y: { field: '__thimble_top', type: 'quantitative' }, y2: { field: '__thimble_base' }, detail: { field: 'agent', type: 'nominal' } } })
   expect([ridge.kind, ridge.columns]).toEqual(['table', ['minutes', 'density', 'agent']])
-  // a range's dumbbells are layers: the rows' table
+  // a range's dumbbells are layers, a muted line and its two ends each named by its column: the rows' table
   const ends = [{ model: 'm1', base: 0.4, tuned: 0.5 }]
   const y = { field: 'model', type: 'nominal' }
-  const range = card({ data: { values: ends }, layer: [{ mark: 'rule', encoding: { x: { field: 'base', type: 'quantitative' }, x2: { field: 'tuned' }, y } }, { mark: { type: 'point', style: 'thimble-start' }, encoding: { x: { field: 'base', type: 'quantitative' }, y } }, { mark: 'point', encoding: { x: { field: 'tuned', type: 'quantitative' }, y } }] })
+  const end = (c: string) => ({ transform: [{ calculate: JSON.stringify(c), as: '__thimble_end' }], mark: { type: 'point', style: 'thimble-end' }, encoding: { x: { field: c, type: 'quantitative' }, y, color: { field: '__thimble_end', type: 'nominal', scale: { domain: ['base', 'tuned'] }, title: null } } })
+  const range = card({ data: { values: ends }, layer: [{ mark: { type: 'rule', style: 'thimble-span' }, encoding: { x: { field: 'base', type: 'quantitative' }, x2: { field: 'tuned' }, y } }, end('base'), end('tuned')] })
   expect([range.kind, range.columns, range.rows]).toEqual(['table', ['model', 'base', 'tuned'], [['m1', 0.4, 0.5]]])
+})
+
+test("thimble.chart's box, violin, a line's interval, an area and dots moved off their line draw from their rows as before", () => {
+  const card = (spec: unknown) => cardOfCell({ id: 'k1', kind: 'plot', title: 'q', outputs: [{ 'application/vnd.vegalite.v6.json': spec }] } as ThimbleCell).card
+  // a Tukey box per group (backend kernel_thimble _box_spec): its summary is the table, not the dots past its whiskers,
+  // which are a layer of their own rows, however many
+  const summary = [{ agent: 'b', n: 5, low: 10, q1: 20, median: 30, q3: 40, high: 50 }]
+  const y = { field: 'agent', type: 'nominal' }
+  const along = (f: string) => ({ field: f, type: 'quantitative' })
+  const past = [{ turns: 100, agent: 'b' }, { turns: 101, agent: 'b' }, { turns: 102, agent: 'b' }]
+  const box = card({ data: { values: summary }, layer: [
+    { mark: 'rule', encoding: { x: along('low'), x2: { field: 'q1' }, y } },
+    { mark: { type: 'bar', style: 'thimble-box' }, encoding: { x: along('q1'), x2: { field: 'q3' }, y } },
+    { mark: { type: 'tick', style: 'thimble-median' }, encoding: { x: along('median'), y } },
+    { data: { values: past }, transform: [{ window: [{ op: 'row_number', as: '__thimble_row' }] }, { lookup: '__thimble_row', from: { data: { values: [{ r: 2, d: -1 }] }, key: 'r', fields: ['d'] }, as: ['__thimble_dodge'], default: 0 }], mark: { type: 'point', yOffset: { expr: 'datum["__thimble_dodge"] * 3.5' } }, encoding: { x: along('turns'), y } },
+  ] })
+  expect([box.kind, box.columns, (box.rows as Cell[][]).length]).toEqual(['table', ['agent', 'n', 'low', 'q1', 'median', 'q3', 'high'], 1])
+  // a violin's places are computed, as a ridgeline's: its curves' table
+  const curves = [{ minutes: 0, density: 0.01, agent: 'a' }, { minutes: 10, density: 0.04, agent: 'a' }]
+  const violin = card({ data: { values: curves }, layer: [
+    { transform: [{ calculate: '0 - indexof(["a"], datum["agent"])', as: '__thimble_base' }], mark: { type: 'area', style: 'thimble-box' }, encoding: { x: along('minutes'), y: { field: '__thimble_top', type: 'quantitative' }, y2: { field: '__thimble_low' } } },
+    { data: { values: [{ agent: 'a', q1: 2, median: 5, q3: 8 }] }, mark: 'rule', encoding: { x: along('q1'), x2: { field: 'q3' }, y: { field: '__thimble_base', type: 'quantitative' } } },
+  ] })
+  expect([violin.kind, violin.columns]).toEqual(['table', ['minutes', 'density', 'agent']])
+  // a line with its interval under it, as a bar's interval: the rows' table, the ends among its columns
+  const hours = [{ hour: 1, share: 0.5, lo: 0.4, hi: 0.6 }, { hour: 2, share: 0.6, lo: 0.5, hi: 0.7 }]
+  const line = card({ data: { values: hours }, layer: [{ mark: 'rule', encoding: { x: along('hour'), y: along('lo'), y2: { field: 'hi' } } }, { mark: { type: 'line', point: true }, encoding: { x: along('hour'), y: along('share') } }] })
+  expect([line.kind, line.columns]).toEqual(['table', ['hour', 'share', 'lo', 'hi']])
+  // an area with a hover tip at each value and no dot is still a line card
+  const area = card({ data: { values: hours }, mark: { type: 'area', point: 'transparent' }, encoding: { x: along('hour'), y: along('share') } })
+  expect([area.kind, area.series?.[0]?.points]).toEqual(['line', [[1, 0.5], [2, 0.6]]])
+  // dots moved off their line keep their rows: a dots chart's table
+  const runs = [{ time: '2026-08-30T15:00:00', agent: 'agent-1' }, { time: '2026-08-30T15:00:00', agent: 'agent-1' }]
+  const dots = card({ data: { values: runs }, transform: [{ window: [{ op: 'row_number', as: '__thimble_row' }] }, { lookup: '__thimble_row', from: { data: { values: [{ r: 2, d: -1 }] }, key: 'r', fields: ['d'] }, as: ['__thimble_dodge'], default: 0 }], mark: { type: 'point', yOffset: { expr: 'datum["__thimble_dodge"] * 3.5' } }, encoding: { x: { field: 'time', type: 'temporal' }, y: { field: 'agent', type: 'nominal' } } })
+  expect([dots.kind, dots.columns, dots.rows]).toEqual(['table', ['time', 'agent'], [['2026-08-30T15:00:00', 'agent-1'], ['2026-08-30T15:00:00', 'agent-1']]])
 })
 
 test("a dots chart's rows are names down its y axis, which no line card draws: its rows' table", () => {
