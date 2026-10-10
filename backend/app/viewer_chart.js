@@ -70,7 +70,7 @@
     var go = function () {
       return seq === st.seq ? ask(kind, rows, options) : null
     }
-    var got = st.asking ? st.asking.then(go) : Promise.resolve(go())
+    var got = st.asking ? st.asking.then(go) : new Promise(function (resolve) { resolve(go()) })
     st.asking = got.then(
       function () {},
       function () {}

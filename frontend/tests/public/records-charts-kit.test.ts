@@ -294,6 +294,11 @@ describe('thimble.chart', () => {
     expect(of('fetch').length).toBe(asked)
     expect(win().__drawn.at(-1).spec).toMatchObject({ mark: 'bar', height: 90 })
     expect(doc().querySelector<HTMLElement>('#c .thimble-chart-note')!.hidden).toBe(true)
+    // rows that are no JSON say so in the chart's place too
+    const loop: Record<string, unknown> = { a: 'x' }
+    loop.self = loop
+    expect(await win().thimble.chart('#rec', 'bar', [loop])).toBeNull()
+    expect(texts('#rec .thimble-chart-note.is-error')[0]).toMatch(/^Chart failed: thimble\.chart: .*circular/i)
     // a spec written by hand with no schema is drawn as Vega-Lite, so it is fitted to its box as the others are
     const { $schema: _schema, ...bare } = BAR
     await win().thimble.chart('#c', bare)
