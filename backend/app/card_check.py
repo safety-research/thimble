@@ -717,15 +717,22 @@ def typed_numbers(code: str, shown: set[str]) -> list[str]:
 def shown_numbers(cell: dict[str, Any]) -> set[str]:
     """Every number the card's outputs show as text: a table's rows, a chart's data, a drawing's labels and printed
     output, as typed_numbers compares them (thousands separators dropped, a whole number without its `.0`). Images
-    are left out, since the digits of their encoding are no values."""
+    are left out, since the digits of their encoding are no values. A chart with rows of its own shows its table's rows
+    (cite.chart_table, the rows the card cites), not its settings or where the notes and rules over them stand: the
+    heights typed in to place three event notes over a chart's bars are no data (live QA 3, a merges chart)."""
+    from . import cite  # noqa: PLC0415
+
     out: set[str] = set()
     for o in cell.get("outputs") or []:
         bundle = o.get("data") if isinstance(o, dict) and isinstance(o.get("data"), dict) else o
         if not isinstance(bundle, dict):
             continue
+        table = cite.chart_table(bundle)
         for mime, v in bundle.items():
             if str(mime).startswith("image/"):
                 continue
+            if table is not None and "vega" in str(mime):
+                v = [table.labels, table.cells]
             text = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False, default=str)
             for m in _NUM_TEXT.finditer(text):
                 raw = m.group(0).replace(",", "")
