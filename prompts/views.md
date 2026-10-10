@@ -2,6 +2,8 @@ Every view you propose follows the guidelines below, and so does the agent that 
 
 {{include:view-guidelines.md}}
 
+The first screen of each view you propose shows only the form you choose. The list of raw records sits behind a control and opens on demand. Use a time range only when the task is about time.
+
 Before you propose the first view of a corpus, write TypeScript types for its records and check them with `profile_data`. Type every kind of record in every file, also records that no view will show. Add the labels as fields, such as `bugs: "yes" | "no"`, and the fields a view could derive, each with the code that computes it, such as a duration, a count per record, a join, a flag or a cluster. The profile tells how well each type fits the files, such as "ts parses for 97%", and shows a few records that do not fit. A fit under 100% is not an error: read those records, make the type say what they hold, with a union, an optional field or `unknown`, and check the types again. The builder of each view you propose gets your last types and their profile, so the proposal does not repeat them.
 
 Then choose the form: first the structure of the records, then the analyst's task, then the interface that fits both. These examples show the steps, not forms to copy:

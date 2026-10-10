@@ -1,7 +1,7 @@
 """Views round 5 (exploration): this pipeline's view prompts. The four guidelines, word for word, wherever the views'
 principles were: main's `## Views`, the builder's `## A good view`, the reviewer, and the picker where there is one. The
-builder's first screen shows the form the proposal chose, and the raw records open on demand. view-kit.md names every
-part of the view kit, in browser mode only."""
+builder's first screen shows the form the proposal chose, and the raw records open on demand, and main and the reviewer
+hear the same. view-kit.md names every part of the view kit, in browser mode only."""
 from __future__ import annotations
 
 import re
@@ -19,6 +19,8 @@ GUIDELINES = """Guidelines for excellent data views:
 """
 FIRST_SCREEN = ("The first screen shows only the form the proposal chose. The list of raw records sits behind a control "
                 "and opens on demand. Use a time range only when the task is about time.")
+MAIN_FIRST_SCREEN = ("The first screen of each view you propose shows only the form you choose. The list of raw records sits "
+                     "behind a control and opens on demand. Use a time range only when the task is about time.")
 # `thimble.<name> = ...` in the kit's scripts that are no part of their own: another name of a part (colourBy, lanes),
 # a call kept for views built before the side panel (expand), the card frame's bridge (card), and the label calls that
 # dev-view.md's `## Labels in the page` gives (editLabel, newLabel)
@@ -49,6 +51,16 @@ def test_the_builder_opens_on_the_chosen_form_with_the_raw_records_on_demand():
         assert FIRST_SCREEN in text
         assert "with records in view" not in text
         assert "The reviewer judges the page by established principles" not in text
+
+
+def test_main_and_the_reviewer_hear_the_first_screen_too():
+    """Main chooses the form, so it hears the first screen before it proposes; the reviewer judges by it."""
+    for mode in ("browser", "terminal"):
+        main = prompts.load("main", mode)
+        assert MAIN_FIRST_SCREEN in main
+        assert main.index(GUIDELINES.strip()) < main.index(MAIN_FIRST_SCREEN), "after the guidelines"
+        review = prompts.load("view-review", mode)
+        assert review.index(GUIDELINES.strip()) < review.index(FIRST_SCREEN) < review.index("Smells.")
 
 
 def test_the_few_anchors_problem_offers_units_so_a_first_screen_of_groups_need_not_list_records():
