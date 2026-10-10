@@ -79,17 +79,18 @@ def test_the_prompts_and_docs_are_written_in_american_english():
     assert not found, found
 
 
-# what a page or a terminal program calls in the view kits, by a British name: thimble's functions, the Color by option
+# what a page or a terminal program calls in the view kits, by a British name: thimble's functions, the Color by option,
+# the attribute that says a record's value, and the control's own name
 KIT_NAMES = re.compile(r"\b(?:colour_value|colour_on|setLabelColour|colourBy|(?:o|opts|options)\.colour)\b"
-                       r"|`colour`\s*(?:\(or|or `color`)|colour \(or color\)|`colour: false`")
+                       r"|`colour`\s*(?:\(or|or `color`)|colour \(or color\)|`colour: false`|data-colour|Colour by")
 KIT_USAGE = re.compile(r"thimble\.\w+\(|draw\(d, \{|^\W*opts:")  # a call shown, or a part's options listed
 
 
 def test_the_view_kits_doc_comments_name_the_american_api():
     """The view kits' doc comments (term_kit/kit.mjs, viewer_*.js) name thimble's API the American way: color_value,
-    color_on, setLabelColor and the Color by option `color`, a British name only on a line that says it is the British
-    spelling (or the same function). After the live QA of 0.7.0 (2026-10-10) they still named colour_value and the
-    `colour` option."""
+    color_on, setLabelColor, the Color by option `color`, the attribute data-color and the control Color by, a British
+    name only on a line that says it is the British spelling (or the same function). After the live QA of 0.7.0
+    (2026-10-10) they still named colour_value and the `colour` option."""
     app = Path(__file__).resolve().parents[1] / "app"
     found = []
     for p in [app / "term_kit" / "kit.mjs", *sorted(app.glob("viewer_*.js"))]:

@@ -779,7 +779,7 @@
     }
   }
   // The values of the records the page shows, each record once: those that elements which count their own records gave
-  // (held, such as the table of the tab in view), then for a field the other elements with data-colour, for a label the
+  // (held, such as the table of the tab in view), then for a field the other elements with data-color, for a label the
   // other anchored records, or the view's own units when it anchors no record. A record in an element that does not show,
   // such as a tab not in view, is not counted.
   Control.prototype.countDom = function () {
@@ -982,7 +982,7 @@
                 return off.indexOf(keyOf(v)) >= 0
               },
               // the choices past the first, a band each beside the first's on every record: a label's value from its
-              // mark, a field's from the record's data-colour-tracks (attr), at its place there
+              // mark, a field's from the record's data-color-tracks (attr), at its place there
               tracks: this.extra().map(function (x, at) {
                 return x.label
                   ? { label: String(x.label), name: x.title }
@@ -1000,7 +1000,7 @@
     )
   }
   // the choice or the values turned off changed: kept, drawn, and the page told once
-  // A record's data-colour is its value of the field coloured by, so a new choice takes every one off the page until
+  // A record's data-color is its value of the field coloured by, so a new choice takes every one off the page until
   // the page draws its records again (onChange): a value of the field before is never drawn, counted or given a colour
   // of the new one. The kit's own parts stamp theirs again at once (stampParts), before anything is counted, as they do
   // when the control is first mounted.
@@ -2198,7 +2198,7 @@
     var coloured = false
     for (var ci = 0; ci < recs.length && !coloured; ci++) coloured = !!recs[ci][2] && recs[ci][2] !== g
     // a lane for each of Color by's choices past the first: a label's records in its own colours, those it does not mark
-    // left out; a field's in its values' colours (the page's data-colour-tracks, or `records` for a list given rows).
+    // left out; a field's in its values' colours (the page's data-color-tracks, or `records` for a list given rows).
     // `by` gives each record's colour in the lane, which the loupe's cells read
     var lanes = []
     var extra = complete && !plain ? c.extra() : []
@@ -3264,7 +3264,7 @@
   // them by the page's Color by, mounted before or after it, unless it is given `color` (or `colour`, its British
   // spelling): false for none, or an object with Color by's calls to draw with. A part writes a record's attributes
   // with bars.attr(record) as it draws, and keeps them itself: when Color by's choices change, the control takes every
-  // data-colour off the page (forget) and has each part stamp the elements it drew again from their own records
+  // data-color off the page (forget) and has each part stamp the elements it drew again from their own records
   // (bars.watch), so the page draws again only its own markup, and a part's folds and scroll stay. A value turned off
   // or recolored changes no attribute: the bridge draws the bars again from the hook.
   var stampers = [] // [element, fn]: a part's element in the page and how it stamps its records again
@@ -3280,7 +3280,7 @@
   }
   var STAMP = /\s(data-colou?r(?:-tracks)?)="([^"]*)"/g
   var UNESC = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'" }
-  // an element's data-colour and data-colour-tracks set as `html` (what attr gives) writes them, each written only when
+  // an element's data-color and data-color-tracks set as `html` (what attr gives) writes them, each written only when
   // it differs, so stamping what is already there changes nothing the observers hear
   function stampAs(node, html) {
     var want = { 'data-color': null, 'data-color-tracks': null, 'data-colour': null, 'data-colour-tracks': null }

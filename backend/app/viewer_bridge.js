@@ -115,7 +115,7 @@
   var initFns = []
   var markFns = []
   // the view kit's own controls (viewer_colour.js): what they hear of the labels, which is not the page's onLabels and
-  // so leaves the label filter to thimble, and the Colour by choice that the marks are drawn by (colourHook)
+  // so leaves the label filter to thimble, and the Color by choice that the marks are drawn by (colourHook)
   var kitFns = []
   var colourHook = null
   var ownSize = false // the page said the height it needs, so the document's own height is no longer sent
@@ -791,7 +791,7 @@
   // and a bar in the first label's colour along its left edge, drawn as a box-shadow added to the view's own
   // (data-thimble-own): inset when the left padding has room or when a box that hides overflow, or the frame's edge,
   // would cut a bar outside it; else just outside. Only the outermost element carrying a record's ref takes the bar. Span labels are highlighted with the CSS Custom Highlight API, leaving the DOM as it is.
-  // With several choices of the kit's Colour by, the bar is a band per choice (bandsAt), side by side from the left in
+  // With several choices of the kit's Color by, the bar is a band per choice (bandsAt), side by side from the left in
   // the order of the strip's lanes, each in the colour of the record's value of that choice and empty where it has none,
   // as a slice of the strip: in the left padding a gradient behind the text (data-thimble-edge="bands"), so an empty
   // band shows the element's own background; with no room there, shadows just outside ("bands-out"), and on an element
@@ -1073,7 +1073,7 @@
     cut.set(a, left)
     return left
   }
-  // With `n` choices of Colour by past one, the bands take the bar's place (bandsW wide), and the element also gets how
+  // With `n` choices of Color by past one, the bands take the bar's place (bandsW wide), and the element also gets how
   // they are drawn (`bands`, the edge they take) and, for shadows, the colour behind the element (`gap`).
   function measure(el, cut, n) {
     var style = getComputedStyle(el)
@@ -1133,9 +1133,9 @@
     for (var a = el.parentElement; a; a = a.parentElement) if (a.getAttribute('data-anchor') === ref) return false
     return true
   }
-  // A record's bands for Colour by's choices (colourHook.tracks, the choices past the first): `first`, the first's
+  // A record's bands for Color by's choices (colourHook.tracks, the choices past the first): `first`, the first's
   // colour, then each other's: a label's value on the record (its mark), a field's value as the element says it in
-  // data-colour-tracks (the kit's attr) in that field's colour; null where the record has none. Null when none has a
+  // data-color-tracks (the kit's attr) in that field's colour; null where the record has none. Null when none has a
   // colour.
   function bandsAt(el, m, first, tracks) {
     var out = [typeof first === 'string' && COLOUR.test(first) ? first : null]
@@ -1182,15 +1182,15 @@
       return null
     }
   }
-  // With the view kit's Colour by in the page (colourHook, viewer_colour.js), the bar shows the one thing the analyst
+  // With the view kit's Color by in the page (colourHook, viewer_colour.js), the bar shows the one thing the analyst
   // colours by, on the records alone (the anchored elements). For a label, the outermost element of each anchored record
   // that label highlights takes the bar in its value's colour, with data-thimble-label as before. For a field of the
-  // view, every anchored element that says its value in data-colour takes the bar in that value's colour, with
+  // view, every anchored element that says its value in data-color takes the bar in that value's colour, with
   // data-thimble-colour (an SVG shape the page colours itself), and a group's row, which has no anchor, takes none; the
   // labels that are on then draw no bar, and their texts stay highlighted. An element whose value
   // the analyst turned off takes no bar, nor a band of the first choice, and stays: Color by only colors, and a label's
   // texts of that value take the plain ink (the hook's `off`). With Color by Off (mode 'off') no element takes a bar.
-  // One colour encoding: with Colour by in the page, only the chosen label's texts are highlighted in its colours; the
+  // One colour encoding: with Color by in the page, only the chosen label's texts are highlighted in its colours; the
   // texts of the other labels that are on, and every label's with a field or Off chosen, are highlighted in the plain
   // ink of a highlight (--hl-bg). A span names its label (`id`); one from before spans did is
   // the chosen label's when it has the colour of that label's value on the record.
@@ -1304,7 +1304,7 @@
     paintFrame = null
     var hook = colourHook && (colourHook.mode === 'label' || colourHook.mode === 'field') ? colourHook : null
     var plain = !!(colourHook && colourHook.mode === 'off') // Color by: Off, which draws no bar
-    // Colour by's choices past the first, each a band beside the first's; the elements are measured again when their
+    // Color by's choices past the first, each a band beside the first's; the elements are measured again when their
     // number changes, since the bands take more room than the bar
     var tracks = hook && Array.isArray(hook.tracks) ? hook.tracks : []
     var n = tracks.length + 1
@@ -1381,7 +1381,7 @@
       var cut = new Map()
       for (var c = 0; c < reads.length; c++) measured.set(reads[c], measure(reads[c], cut, n))
     }
-    // the texts of the span labels, each in its colour, or in the plain ink when it is not the Colour by choice
+    // the texts of the span labels, each in its colour, or in the plain ink when it is not the Color by choice
     var used = new Set()
     var usedOwn = new Set()
     var usedBands = new Set()
