@@ -1311,7 +1311,7 @@ def _altair(spec: dict):
     Altair's from_dict, which would make an object of every row (seconds for a few thousand): each inline `values` is
     held out under a name while the rest is read, then put back. No $schema, which Altair writes when it shows the chart
     and refuses in a layer. The chart's own rows keep a name of CHART_ROWS_NAME's (Altair leaves named rows inline), by
-    which they stay the table a takeaway cites wherever the chart stands among the code's layers (cite._inline_rows)."""
+    which they stay the table a takeaway cites wherever the chart stands among the code's layers (cite._main_part)."""
     import altair as alt
 
     own = spec["data"]["values"]
@@ -2288,7 +2288,9 @@ def _heatmap_spec(df, opts: dict) -> dict:
     rows = _chart_rows(df, {c: "number" if kinds[c] == "number" else "text" for c in df.columns})
     enc: dict = {}
     for ch, c in (("x", x), ("y", y)):
-        more: dict = {}
+        # the x ticks stand between the columns, so names that read across close together (`Jun 17 Jun 18`) each
+        # stand between two ticks rather than over one at the space inside them
+        axis: dict = {"tickBand": "extent"} if ch == "x" else {}
         if kinds[c] == "time":  # times as the text of their cells' places, in time order
             ts = _times(df[c])
             fmt = _time_format(ts)
@@ -2296,14 +2298,15 @@ def _heatmap_spec(df, opts: dict) -> dict:
             for r, t in zip(rows, labels):
                 r[c] = t
             order = sorted(set(t for t in labels if t is not None))
-            # the axis names them as a date axis does ("Jun 18"), short enough that a few weeks of days read across
-            more["axis"] = {"labelExpr": f"datum.value == null ? '' : utcFormat(utcParse(datum.value, '{fmt}'), "
-                                         f"'{_time_label_format(ts)}')"}
+            # the axis names them as a date axis does ("Jun 18"), short enough that a few weeks of days read across;
+            # the one tick more that ticks between columns take has no value, and so no name
+            axis["labelExpr"] = (f"datum.value == null ? '' : utcFormat(utcParse(datum.value, '{fmt}'), "
+                                 f"'{_time_label_format(ts)}')")
         elif kinds[c] == "number":
             order = sorted(_distinct(df[c].tolist()))
         else:
             order = _ordered(kind, df[c], _ranked(df[c], df[val]))
-        enc[ch] = _enc(c, "nominal" if kinds[c] == "text" else "ordinal", sort=order, **more)
+        enc[ch] = _enc(c, "nominal" if kinds[c] == "text" else "ordinal", sort=order, **({"axis": axis} if axis else {}))
     enc["color"] = _enc(val, "quantitative", **({"scale": {"type": "symlog"}} if log else {}))
     enc["tooltip"] = [{"field": _field(c), "type": "quantitative" if c == val else "nominal", "title": c} for c in (x, y, val)]
     return _unit(rows, "rect", enc)
