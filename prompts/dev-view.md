@@ -22,6 +22,7 @@ The rest is your judgment. Aim for the page a demanding designer would ship, one
 - The layout is fluid. The panel is 120 columns wide in a laptop's terminal and 200 columns on a large screen.
 {{end}}
 - Records from a system the analyst knows, such as a code forge, a message board or a chat, can be drawn the way that system draws them, in thimble's parts and colors, as `repository` draws a forge's pull requests and a board's threads.
+- When the proposal asks for a visual design, such as a dense grid in the style of a spreadsheet, build that design in its own colors and type even where it breaks a point here, and keep its text legible in the dark theme.
 - The page explains nothing in words. The analyst learns it by using it, so a line that explains the page, a hint or a caption is clutter, even where the proposal asks for one.
 - The reviewer judges the page by established principles, so design with them from the start: zoom and filter by acting on the data's own marks and axes, details that open in a side panel, each control once in the top row, one visual channel for each attribute with color only for the one the analyst colors by, one scale and mark for each quantity in every part, keys that match the marks, no ink that shows no data, each encoding's meaning one click away, and thimble's own parts and readers.
 
