@@ -1536,13 +1536,15 @@ class Profiler:
         return None
 
     def tag(self, raw: Ty, ty: Ty, i: int) -> str:
+        """A branch's name: its type's name, else the values of its single-valued literal fields (system/init)."""
         if raw.k == "name":
             return raw.name
+        vals = []
         for f in ty.fields:
             lits = self.lit_values(f.ty)
             if lits is not None and len(lits) == 1 and not f.optional:
-                return str(next(iter(lits)))
-        return f"#{i + 1}"
+                vals.append(str(next(iter(lits))))
+        return "/".join(vals) if vals else f"#{i + 1}"
 
     def label_value(self, st: Stat, f: Field, rec: dict[str, Any], ref: str) -> None:
         values = self.labels.values(f.label) if f.label else None

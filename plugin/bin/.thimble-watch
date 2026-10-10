@@ -679,10 +679,6 @@ def subagent_start(inp: dict) -> int:
     sf, ws = workspace(inp)
     if ws is None:
         return 0
-    # the Agent call that spawned it, read before the lock (views round 5: two builds of one turn took each other's view)
-    call = sf.wait_spawn_call(ws, inp) if hasattr(sf, "wait_spawn_call") else None
-    if call:
-        inp = {**inp, "spawn_call": call}
     with sf.update(ws) as state:
         entry = sf.register(state, inp)
     if entry is None:

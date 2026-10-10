@@ -426,11 +426,6 @@ def check_call(state: dict[str, Any], hook: dict[str, Any]) -> str | None:
         rid, req = found[-1]
         if role == "orientation" and running_role(state, "orientation") is not None:
             return hint("start_orientation-running")
-        if not plugin and _unstarted_twin(state, rid, kind):
-            # views round 5: two typed starts of one type claimed before either agent started can take each other's
-            # work (register cannot tell their agents apart), so the second waits: main makes its call again once the
-            # first has started, which Claude Code does as it runs the first call
-            return hint("agent-check-one-at-a-time", type=kind)
         key = str(req.get("key") or "")
         if role == "writer" and key and running_role(state, "writer", key) is not None:
             return hint("start_writing-running", doc=key.split(":", 1)[-1])
@@ -536,39 +531,6 @@ def register(state: dict[str, Any], hook: dict[str, Any]) -> dict[str, Any] | No
 
 
 CLAIM_WINDOW_S = 300.0  # a claimed start older than this that no agent took up is passed over (its agent never started)
-META_WAIT_S = 4.0  # with several claims of one type waiting, how long the SubagentStart hook waits for the meta.json
-META_POLL_S = 0.05
-
-
-def _unstarted_twin(state: dict[str, Any], rid: str, agent_type: str) -> bool:
-    """Whether another start of `agent_type` is claimed, recently, and no agent has taken it up yet."""
-    t = now()
-    return any(other != rid and isinstance(r, dict) and r.get("kind") == "start" and r.get("state") == "claimed"
-               and not r.get("agent") and (r.get("input") or {}).get("subagent_type") == agent_type
-               and t - float(r.get("claimed_at") or 0) <= CLAIM_WINDOW_S
-               for other, r in requests(state).items())
-
-
-def wait_spawn_call(ws: Path, hook: dict[str, Any]) -> str | None:
-    """spawn_call for the SubagentStart hook, before it takes subagents.json's lock: when more than one claimed start of
-    the agent's type waits for an agent, the meta.json that tells them apart can come a moment after the hook runs
-    (0.1 to 0.6 s in the views round-5 runs), so it waits for it, at most META_WAIT_S; else one look."""
-    agent_id = str(hook.get("agent_id") or "")
-    agent_type = str(hook.get("agent_type") or "")
-    if not agent_id or role_of(agent_type) is None:
-        return None
-    call = spawn_call(hook, agent_id)
-    if call is not None:
-        return call
-    state = read(ws)
-    waiting = [r for r in requests(state).values()
-               if isinstance(r, dict) and r.get("kind") == "start" and r.get("state") == "claimed" and not r.get("agent")
-               and (r.get("input") or {}).get("subagent_type") == agent_type]
-    end = time.monotonic() + (META_WAIT_S if len(waiting) > 1 else 0.0)
-    while call is None and time.monotonic() < end:
-        time.sleep(META_POLL_S)
-        call = spawn_call(hook, agent_id)
-    return call
 
 
 def spawn_call(hook: dict[str, Any], agent_id: str) -> str | None:
@@ -589,10 +551,12 @@ def spawn_call(hook: dict[str, Any], agent_id: str) -> str | None:
 
 def _claim_of(hook: dict[str, Any], agent_id: str, claimed: list[tuple[str, dict[str, Any]]]) -> tuple[str, dict]:
     """The claimed start a new agent of one of thimble's roles takes up, among those of its type no agent took up: the
-    one its own Agent call claimed (spawn_call), since main can start two agents of one type in one turn, such as two
-    views' builders, and Claude Code may spawn them together and in either order; else the oldest recent claim, as
-    calls are claimed in order; else the latest (views round 5: the latest alone gave two builds each other's view)."""
-    call = str(hook.get("spawn_call") or "") or spawn_call(hook, agent_id)
+    one its own Agent call claimed (spawn_call), when its meta.json is there already; else the oldest recent claim, as
+    calls are claimed in order; else the latest. Main can start two agents of one type in one turn, such as two views'
+    builders, and Claude Code may spawn them together and in either order, writing their meta.json after this hook, so
+    this can still give each the other's start: the mirror puts that right once main's call names its agent
+    (subagents.rebind; views round 5, where two builds took each other's view)."""
+    call = spawn_call(hook, agent_id)
     mine = [x for x in claimed if call and x[1].get("claimed_by") == call]
     if mine:
         return mine[0]
