@@ -673,6 +673,21 @@ def agent_check(inp: dict) -> int:
 SCRATCH_PREFIX = "tmp_"  # app/work_files.py: the scratch folders a run's end deletes
 
 
+DATA_BRIEF = "data-brief.md"  # app/dev.py's DATA_BRIEF
+
+
+def data_brief(entry: dict) -> str:
+    """Views round 5 (exploration): what a view's builder gets as context at its first start, the description of the
+    data and its profile that the server wrote in the build's work folder (app/dev.py write_data_brief); '' for any
+    other agent, a builder that starts again, or a build with no brief."""
+    if entry.get("descendant") or entry.get("role") != "view-builder" or int(entry.get("starts") or 0) != 1:
+        return ""
+    try:
+        return (Path(str(entry.get("work") or "")) / DATA_BRIEF).read_text("utf-8").strip() if entry.get("work") else ""
+    except OSError:
+        return ""
+
+
 def subagent_start(inp: dict) -> int:
     """The SubagentStart hook (module note): the agent registered, then the scratch line for a descendant of one of
     thimble's agents, a folder of its own in its ancestor's work folder (## session-scratch)."""
@@ -687,6 +702,10 @@ def subagent_start(inp: dict) -> int:
         spawn_local("started", inp)
     else:
         post("/api/subagents/started", {"cwd": folder(inp), "hook": inp})
+    brief = data_brief(entry)
+    if brief:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": brief}}))
+        return 0
     work = entry.get("work") if entry.get("descendant") else None
     agent = "".join(ch for ch in str(inp.get("agent_id") or "") if ch.isalnum() or ch in "-_")[:64]
     if work and agent:
