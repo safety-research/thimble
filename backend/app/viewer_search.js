@@ -4,17 +4,24 @@
 //
 //   const search = thimble.search({ mount: '#search', in: '#list', placeholder: 'Search messages' })
 //
-// Typing finds the text, case ignored, in the records under `in` (the page by default): every match on screen gets the
-// find's wash (::highlight(thimble-search)), the current one a stronger one, and the box says "3 of 120". Enter or ↓
-// goes to the next match, ⇧Enter or ↑ to the one before, wrapping at the ends; ⌘F or Ctrl+F puts the focus in the box;
-// Escape empties it. Typing goes to the first match at or after the top of what the list shows, as Files' find does.
-// The list's strip (viewer_colour.js) gets a lane of ticks in the ink at its left, one per match, like cue points, and
-// a click on a tick goes to that match; the loupe marks the records that hold one. Without Color by the list gets the
-// kit's strip with that lane alone.
+// Typing finds the text, case ignored, in the records under `in` (the page by default) and in the rows of every list
+// that gives them (below), every part on screen at once, such as a table and the messages in the side panel beside it,
+// in the order they stand in the page: every match on screen gets the find's wash (::highlight(thimble-search)), the
+// current one a stronger one, and the box says "3 of 120". Enter or ↓ goes to the next match, ⇧Enter or ↑ to the one
+// before, wrapping at the ends; ⌘F or Ctrl+F puts the focus in the box; Escape empties it. Typing goes to the first match
+// at or after the top of what the list shows, as Files' find does, and so does a paste; a match the page draws only in
+// reply to the text, such as rows it fetches for it, is gone to once it is drawn, as long as no match was. Each list's
+// strip (viewer_colour.js) gets a lane of ticks in the ink at its left, one per match in it, like cue points, and a click
+// on a tick goes to that match; the loupe marks the records that hold one. Without Color by the list gets the kit's strip
+// with that lane alone.
 //
 // A list that draws only the rows in view, such as thimble.table, gives the search every row's text instead:
 // search.rows({texts, refs, go, box}), each row's text as drawn ('\n' between parts drawn apart, such as cells), go(i) to
-// bring row i into view, and the box that scrolls; the rows on the page carry data-thimble-row="<i>". A part that folds
+// bring row i into view, and the box that scrolls, whose text the search leaves to the list; the rows on the page carry
+// data-thimble-row="<i>". A page that keeps records itself, by words its rows may not draw (a pull request its reader
+// kept for a comment), says which with search.kept(refs) once it has drawn them: the box then counts those records and
+// steps through them, each once, in place of the matches in them, and a record whose words do not show is highlighted
+// for a moment when gone to; until the page says what it kept for a new text, the box shows no count. A part that folds
 // text away, such as thimble.diff, thimble.transcript and thimble.record, keeps it in the page in an element with
 // data-thimble-fold, hidden: the search counts what it holds, ticks it where the fold stands, and sends the element a
 // `thimble-unfold` event when it goes to a match inside it, so the part opens it. A fold may hold another: the event goes
@@ -52,6 +59,7 @@
   var FOLD = 'data-thimble-fold'
   var DROP = 'data-thimble-drop'
   var UNFOLD_MAX = 32 // the times going to a match sends `thimble-unfold` at most, one fold level each
+  var SNAP_MS = 1600 // how long a record gone to whose words do not show keeps its highlight (viewer_kit.css [data-thimble-snap])
   var ICON = {
     search: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
     up: '<path d="M6 15l6-6 6 6"/>',
@@ -106,10 +114,11 @@
   // there would compute it: seconds over a long transcript. A page's own rows are read by their styles, which may hide a
   // part of a row, such as a cell a narrow layout leaves out. The search reads the page once into an index and finds in
   // it, reading again only the elements the page changes (patch); step(ms) reads it a slice at a time, so a long page is
-  // read without holding up typing.
-  function Index(root) {
+  // read without holding up typing. The boxes of the lists that give their rows (`skip`) are left out.
+  function Index(root, skip) {
     var self = this
     this.root = root
+    this.skip = skip || []
     this.runs = []
     this.done = !root
     this.last = null
@@ -126,7 +135,7 @@
   }
   Index.prototype.accept = function (n) {
     if (n.nodeType === 3) return NodeFilter.FILTER_ACCEPT
-    if (n.matches(SKIP)) return NodeFilter.FILTER_REJECT
+    if (n.matches(SKIP) || (this.skip.length && this.skip.indexOf(n) >= 0)) return NodeFilter.FILTER_REJECT
     if (this.light && !this.light.contains(n)) this.light = null
     if (this.cv && !this.cv.contains(n)) this.cv = null
     if (n.hasAttribute(FOLD)) return NodeFilter.FILTER_SKIP
@@ -199,7 +208,7 @@
       return true
     })
     for (var j = 0; j < us.length; j++) {
-      var got = readUnit(us[j], root)
+      var got = readUnit(us[j], root, this.skip)
       if (!got.length) continue
       // the first run after the unit in the page's order
       var lo = 0
@@ -215,8 +224,8 @@
   }
   // the runs of one element under `root`, read as the whole read reaches it: none when an element around it, or the
   // element itself, is left out
-  function readUnit(u, root) {
-    var x = new Index(u)
+  function readUnit(u, root, skip) {
+    var x = new Index(u, skip)
     var chain = []
     for (var e = u.parentElement; e && e !== root; e = e.parentElement) chain.push(e)
     for (var c = chain.length - 1; c >= 0; c--) if (x.accept(chain[c]) === NodeFilter.FILTER_REJECT) return []
@@ -327,7 +336,94 @@
     }
     if (box.top < 0 || box.bottom > innerHeight) window.scrollBy(0, box.top - (innerHeight - box.height) / 2)
   }
-
+  function sameList(a, b) {
+    if (!a || !b || a.length !== b.length) return false
+    for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+    return true
+  }
+  // the anchored elements around a run inside `root`, the innermost first, read once
+  function anchorsOf(run, root) {
+    if (run.anchors) return run.anchors
+    var out = []
+    for (var e = run.block; e && e.nodeType === 1; e = e.parentElement) {
+      if (e.hasAttribute('data-anchor')) out.push(e)
+      if (e === root) break
+    }
+    return (run.anchors = out)
+  }
+  // The page's own records among the index's runs that the page kept (`kept`, by ref): for each run, the outermost
+  // anchored element around it whose ref the page kept, when it is the first element to show that record and no list's
+  // row holds it (`claimed`), so a record shown again, such as in the side panel, counts its matches. {of: run →
+  // element, els: the elements in the page's order}
+  function keptOf(idx, kept, claimed) {
+    var of = new Map()
+    var els = []
+    var first = new Map()
+    for (var i = 0; i < idx.runs.length; i++) {
+      var as = anchorsOf(idx.runs[i], idx.root)
+      for (var q = as.length - 1; q >= 0; q--) {
+        var ref = as[q].getAttribute('data-anchor')
+        if (!kept.has(ref)) continue
+        if (claimed.has(ref)) break
+        if (!first.has(ref)) {
+          first.set(ref, as[q])
+          els.push(as[q])
+        }
+        if (first.get(ref) === as[q]) of.set(idx.runs[i], as[q])
+        break
+      }
+    }
+    return { of: of, els: els }
+  }
+  // where a match in the page's text stands in the page: a kept record's element, else its run's first text
+  function placeOf(m) {
+    return m.el || (m.run && m.run.nodes[0]) || null
+  }
+  // whether node `x` stands before element `y` in the page, or around it
+  function before(x, y) {
+    return !!(x && y && y.compareDocumentPosition(x) & Node.DOCUMENT_POSITION_PRECEDING)
+  }
+  // two lists of matches in the page's order, as one
+  function interleave(a, b) {
+    if (!b.length) return a
+    var out = []
+    var i = 0
+    for (var j = 0; j < b.length; j++) {
+      var at = placeOf(b[j])
+      while (i < a.length && before(placeOf(a[i]), at)) out.push(a[i++])
+      out.push(b[j])
+    }
+    while (i < a.length) out.push(a[i++])
+    return out
+  }
+  // the matches of the page's text and of each list (`parts`, {box, res} in the page's order), in the page's order: a
+  // list's where its box stands
+  function merge(dom, parts) {
+    if (!parts.length) return dom
+    var out = []
+    var d = 0
+    for (var p = 0; p < parts.length; p++) {
+      var box = parts[p].box
+      if (box) while (d < dom.length && before(placeOf(dom[d]), box)) out.push(dom[d++])
+      for (var k = 0; k < parts[p].res.length; k++) out.push(parts[p].res[k])
+    }
+    while (d < dom.length) out.push(dom[d++])
+    return out
+  }
+  // what of a result is a match in the page's text: the result itself, a kept record's first match, or null (a row, or a
+  // kept record whose words do not show)
+  function target(m) {
+    if (!m || m.row != null) return null
+    return m.kept ? m.ms[0] || null : m
+  }
+  // what a result is, to find it again once the page draws again: [record, k, the list it is in]
+  function keyOf(m) {
+    return [m.rec, m.k, m.row != null ? m.box || 'rows' : null]
+  }
+  function sameKey(m, key) {
+    var k = keyOf(m)
+    return k[0] === key[0] && k[1] === key[1] && k[2] === key[2]
+  }
   var all = [] // every search of the page, for ⌘F
 
   function Search(opts) {
@@ -339,15 +435,22 @@
     this.onChange = typeof opts.onChange === 'function' ? opts.onChange : null
     this.text = ''
     this.needle = ''
-    this.matches = [] // {range, run, fold, row, k, rec}: a DOM match, or with `row` a match in a row of `source`
+    // the results in the page's order: {run, a, b, fold, rec, k} a match in the page's text; {row, box, rec, k} a match
+    // in a row of a list; with `kept`, a record the page kept, {row, box, rec} a list's row or {el, rec, ms} its own
+    // element with the matches in it
+    this.matches = []
     this.at = -1
-    this.key = null // what the current match is, to find it again once the page draws again: [record, k]
-    this.source = null // {texts, low, go, box}: the rows of a list that draws only those in view, the one of `sources` that shows
-    this.sources = [] // every list's rows (rows), by its box
+    this.key = null // what the current result is, to find it again once the page draws again (keyOf)
+    this.sources = [] // every list's rows (rows), by its box: {texts, low, ids, go, box}
+    this.lists = [] // those that show, in the page's order
+    this.kept = null // the records the page keeps itself, {refs, text}: their refs, and the text it kept them for
+    this.seek = false // the text changed and no match was gone to yet: the first one the page draws is gone to
+    this.full = false // the page changed outside the lists since the last frame, so the matches are found again
     this.more = false // more matches than MOST
     this.timer = null
     this.frame = null
-    this.marked = null // the box whose strip has the ticks
+    this.marked = [] // the boxes whose strips have ticks
+    this.observed = null // the elements the observer watches
     this.idx = null // the page's text as the search last read it (Index), read again once the page changed (stale)
     this.stale = true
     this.units = [] // the elements the page changed since the index was read, read again before the next search
@@ -356,6 +459,7 @@
     this.waiting = false // a search waits for that index
     this.last = null // the last search of the page's text, {idx, needle, hit}: `hit` the runs that hold its needle
     this.sized = null // the ResizeObserver of the root's width
+    this.snapped = null // the record gone to whose words do not show, highlighted for a moment (snap)
     if (this.mount) {
       this.mount.classList.add('thimble-search-mount', 'thimble-part')
       this.mount.setAttribute('data-thimble-chrome', '')
@@ -422,7 +526,7 @@
     })
     all.push(this)
     // a strip on the list from the start, so the list's width does not change when the first match is found
-    var box = this.box()
+    var box = this.pageBox()
     if (box && box !== true) shared.strip(box)
   }
   Search.prototype.retire = function () {
@@ -439,38 +543,74 @@
       CSS.highlights.delete('thimble-search')
       CSS.highlights.delete('thimble-search-current')
     }
-    var strip = this.marked ? shared.strip(this.marked) : null
-    if (strip) strip.marks(null)
-    this.marked = null
+    for (var i = 0; i < this.marked.length; i++) {
+      var strip = shared.strip(this.marked[i])
+      if (strip) strip.marks(null)
+    }
+    this.marked = []
+    this.snap(null)
   }
-  // the element the search finds in
+  // every list's box, which the search leaves out of the page's text: the list gives its rows instead
+  Search.prototype.boxes = function () {
+    var out = []
+    for (var i = 0; i < this.sources.length; i++) if (this.sources[i].box) out.push(this.sources[i].box)
+    return out
+  }
+  // the element whose text the search finds in, `in` (the page by default), the lists' boxes in it left out; null while
+  // a list's box holds it, or a list with no box shows, so the lists' rows are all it finds
   Search.prototype.root = function () {
-    if (this.source && this.source.box) return this.source.box
-    return (this.within && ctl.el(this.within)) || document.body
+    var r = (this.within && ctl.el(this.within)) || document.body
+    for (var i = 0; i < this.sources.length; i++) {
+      var b = this.sources[i].box
+      if (b ? b.contains(r) : this.lists.indexOf(this.sources[i]) >= 0) return null
+    }
+    return r
   }
-  // the box whose strip gets the ticks: the rows' box, else the box `in` scrolls in
-  Search.prototype.box = function () {
-    if (this.source) return this.source.box || null
+  // the box whose strip gets the ticks of the matches in the page's text: the box `in` scrolls in, else the page (true)
+  Search.prototype.pageBox = function () {
     var r = this.within ? ctl.el(this.within) : null
     return r ? scrollerOf(r) : true
   }
+  // the box a result's tick stands in: its list's box, else the page text's
+  Search.prototype.boxOf = function (m) {
+    return m.row != null ? m.box : this.pageBox()
+  }
+  // the list that shows with this box
+  Search.prototype.listOf = function (box) {
+    for (var i = 0; i < this.lists.length; i++) if (this.lists[i].box === box) return this.lists[i]
+    return null
+  }
+  // the index as read fits the page as it is: the same root, the same lists' boxes left out
+  Search.prototype.fits = function (root) {
+    return !!this.idx && this.idx.root === root && sameList(this.idx.skip, this.boxes())
+  }
   Search.prototype.observe = function () {
     var r = this.root()
-    if (r === this.observed) return
+    // the root, and each list's box outside it
+    var targets = r ? [r] : []
+    for (var i = 0; i < this.sources.length; i++) {
+      var b = this.sources[i].box
+      if (b && !(r && r.contains(b))) targets.push(b)
+    }
+    if (sameList(targets, this.observed)) return
     var self = this
+    // the changes heard so far kept for the index, which a disconnect would drop
+    this.take()
     this.observer.disconnect()
     if (this.sized) this.sized.disconnect()
-    this.observed = r
-    if (!r) return
-    // `hidden` too: a fold opened or closed (the diff's Show more), an element the label filter hides; and a class or a
-    // style, which may show or hide an element, such as a tab
-    this.observer.observe(r, { childList: true, subtree: true, characterData: true, attributes: true, attributeOldValue: true, attributeFilter: ['hidden', DROP, 'class', 'style'] })
-    // and on the elements around it, whose class or style may hide a part of each record by the page's styles, such as
-    // a mode that leaves out the tool calls
-    for (var up = r.parentElement; up; up = up.parentElement) this.observer.observe(up, { attributes: true, attributeOldValue: true, attributeFilter: ['hidden', 'class', 'style'] })
+    this.sized = null
+    this.observed = targets
+    // the elements around each, whose class or style may hide a part of each record by the page's styles, such as a mode
+    // that leaves out the tool calls
+    for (var t = 0; t < targets.length; t++)
+      for (var up = targets[t].parentElement; up; up = up.parentElement) this.observer.observe(up, { attributes: true, attributeOldValue: true, attributeFilter: ['hidden', 'class', 'style'] })
+    // each itself, `hidden` too: a fold opened or closed (the diff's Show more), an element the label filter hides; and a
+    // class or a style, which may show or hide an element, such as a tab
+    for (var u = 0; u < targets.length; u++)
+      this.observer.observe(targets[u], { childList: true, subtree: true, characterData: true, attributes: true, attributeOldValue: true, attributeFilter: ['hidden', DROP, 'class', 'style'] })
     // a new width may show or hide a part of each record by the page's styles (a media or container query, such as a
     // narrow layout's cells): the page read again for the next search
-    if (typeof ResizeObserver === 'function') {
+    if (r && typeof ResizeObserver === 'function') {
       var width = null
       this.sized = new ResizeObserver(function (es) {
         var w = es[es.length - 1].contentRect.width
@@ -480,18 +620,47 @@
       this.sized.observe(r)
     }
   }
-  // the page's changes the observer heard: any that can change what the search finds has its elements read again
-  // (note), and one other than a class or a style, or a class or a style on an element that holds records, such as a
-  // tab, finds the matches again in a frame
+  // the page's changes the observer heard: a list drawing its rows has the matches on screen washed again in a frame;
+  // any other that can change what the search finds has its elements read again (note), and one other than a class or a
+  // style, or a class or a style on an element that holds records, such as a tab, finds the matches again in a frame
   Search.prototype.heard = function (records) {
     var again = false
+    var drawn = false
     for (var i = 0; i < records.length; i++) {
       var r = records[i]
       if (!this.counts(r)) continue
+      if (this.inList(r)) {
+        drawn = true
+        continue
+      }
       this.note(r)
       if (r.type !== 'attributes' || r.attributeName === 'hidden' || r.attributeName === DROP || this.holds(r.target)) again = true
     }
-    if (again && this.needle) this.soon()
+    if (this.needle && (again || drawn)) this.soon(again)
+  }
+  // whether a change is a list's own drawing inside its box, whose matches the search knows from the list's rows; a class
+  // or a style on the box itself, such as a tab's, may show or hide the list
+  Search.prototype.inList = function (rec) {
+    var t = rec.target
+    var e = t && (t.nodeType === 1 ? t : t.parentElement)
+    if (!e) return false
+    for (var i = 0; i < this.sources.length; i++) {
+      var b = this.sources[i].box
+      if (b && (e === b ? rec.type !== 'attributes' : b.contains(e))) return true
+    }
+    return false
+  }
+  // the changes the observer has not told yet, taken: those outside the lists noted; whether any can change what the
+  // search finds
+  Search.prototype.take = function () {
+    var rs = this.observer.takeRecords()
+    var any = false
+    for (var i = 0; i < rs.length; i++)
+      if (this.counts(rs[i])) {
+        any = true
+        if (!this.inList(rs[i])) this.note(rs[i])
+      }
+    return any
   }
   // whether an element holds records or a list's rows, outside any record, so that a class or a style that shows or hides
   // it, such as a tab's, finds the matches again; a class on a record, such as the chosen row's, does not
@@ -554,7 +723,9 @@
     var self = this
     this.prepare()
     clearTimeout(this.timer)
-    var wait = this.source && this.source.texts.length > BIG ? 2 * WAIT_MS : WAIT_MS
+    var rows = 0
+    for (var i = 0; i < this.lists.length; i++) rows += this.lists[i].texts.length
+    var wait = rows > BIG ? 2 * WAIT_MS : WAIT_MS
     this.timer = setTimeout(function () {
       self.timer = null
       if (!self.dead) self.run(true)
@@ -568,17 +739,21 @@
     this.timer = null
     this.run(true)
   }
-  // the page drew again: its matches found again in the next frame; a list of rows only draws other rows, whose matches
-  // the search knows, so they are only highlighted, unless another list shows now, such as a tab's
-  Search.prototype.soon = function () {
+  // The page drew again: its matches found again in the next frame. A list that only drew other rows (`full` false), whose
+  // matches the search knows, has them washed alone, unless another list shows now, such as a tab's
+  Search.prototype.soon = function (full) {
     var self = this
+    if (full) this.full = true
     if (this.frame != null) return
     var go = function () {
       self.frame = null
-      if (self.dead) return
-      var was = self.source
+      // a box the page took away, as when the view closes, has nothing to show
+      if (self.dead || (self.mount && !self.mount.isConnected)) return
+      var was = self.lists
+      var again = self.full
+      self.full = false
       self.pick()
-      if (self.source && self.source === was) self.paint()
+      if (!again && sameList(was, self.lists)) self.paint()
       else self.find(false)
     }
     this.frame = typeof requestAnimationFrame === 'function' ? requestAnimationFrame(go) : setTimeout(go, 16)
@@ -589,13 +764,14 @@
   Search.prototype.prepare = function () {
     if (this.dead) return
     this.pick()
-    if (this.source || this.reading != null) return
+    if (!this.root() || this.reading != null) return
     var self = this
     var starts = 0
     var slice = function () {
       self.reading = null
-      if (self.dead || self.source) return
-      if (self.stale || !self.idx || self.idx.root !== self.root()) {
+      var root = self.dead ? null : self.root()
+      if (!root) return
+      if (self.stale || !self.fits(root)) {
         self.fresh()
         starts++
       }
@@ -613,9 +789,8 @@
   // whether the index is read whole and current, once brought up to date with the elements the page changed since
   Search.prototype.upToDate = function () {
     // the changes the observer has not told yet, such as the page's own just before it calls set or refresh
-    var rs = this.observer.takeRecords()
-    for (var i = 0; i < rs.length; i++) if (this.counts(rs[i])) this.note(rs[i])
-    if (this.stale || !this.idx || !this.idx.done || this.idx.root !== this.root()) return false
+    this.take()
+    if (this.stale || !this.fits(this.root()) || !this.idx.done) return false
     if (!this.units.length && !this.gone) return true
     var ok = this.idx.patch(this.units)
     this.units = []
@@ -626,23 +801,33 @@
   }
   // a new index, to be read from the start
   Search.prototype.fresh = function () {
-    this.idx = new Index(this.root())
+    this.idx = new Index(this.root(), this.boxes())
     this.stale = false
     this.units = []
     this.gone = false
     this.last = null
   }
   // the page's text as an index, current: read at once where it is not read yet, brought up to date with the elements
-  // the page changed since, or read again whole when they are many
+  // the page changed since, or read again whole when they are many; null while the lists' rows are all the search finds
   Search.prototype.index = function () {
+    var root = this.root()
+    if (!root) return null
     if (this.upToDate()) return this.idx
-    if (this.stale || !this.idx || this.idx.root !== this.root()) this.fresh()
+    if (this.stale || !this.fits(root)) this.fresh()
     this.idx.step(Infinity)
     return this.idx
   }
   // whether a search must wait for the index being read a slice at a time
   Search.prototype.unread = function () {
-    return !this.source && this.reading != null && !!(this.input && this.input.value)
+    return this.reading != null && !!(this.input && this.input.value)
+  }
+  // the records the page kept for the text searched, a Set of refs; null while it keeps none itself or has not said yet
+  Search.prototype.keptNow = function () {
+    return this.kept && this.kept.text === this.text ? this.kept.refs : null
+  }
+  // whether the page keeps records itself and has not said which for the text searched yet
+  Search.prototype.pending = function () {
+    return !!this.kept && this.kept.text !== this.text
   }
   // the text changed: found, the first match at or after the top of the list made the current one, and the page told
   Search.prototype.run = function (go) {
@@ -656,6 +841,7 @@
     this.needle = lower(text)
     this.key = null
     this.at = -1
+    this.seek = !!this.needle
     this.find(go)
     if (changed) this.tell()
   }
@@ -665,86 +851,141 @@
     if (this.checkReset) this.checkReset()
     if (this.onChange) ctl.safe(function () { self.onChange(self.api) })
   }
-  // The matches found again: in the rows of `source`, or in the page's text under `root`. The current match is the one
-  // the key names when it still shows, else with `go` the first at or after the top of the list, which is brought into
-  // view; then the highlights, the count and the strip's ticks.
+  // The results found again: the matches in the rows of each list that shows and in the page's text under `root`, in the
+  // page's order, a record the page kept counting once. The current one is the one the key names when it still shows,
+  // else with `go`, or while the text has had no match gone to yet (seek), the first at or after the top of the list,
+  // which is brought into view; then the highlights, the count and the strips' ticks. While the page has not said what
+  // it kept for the text, nothing is gone to.
   Search.prototype.find = function (go) {
     if (this.dead) return
     this.pick()
     this.observe()
     var out = []
     var needle = this.needle
+    var left = { n: MOST }
     if (needle) {
-      if (this.source) {
-        var low = this.source.low
-        var ids = this.source.ids
-        for (var i = 0; i < low.length && out.length < MOST; i++) {
-          var ps = places(low[i], needle)
-          for (var k = 0; k < ps.length && out.length < MOST; k++) out.push({ row: i, k: k, rec: ids && ids[i] != null ? ids[i] : i })
-        }
-      } else {
-        var idx = this.index()
-        var rs = idx.runs
-        // a needle that holds the last one is only in the runs that held that one, so typing on searches fewer
-        var last = this.last
-        var from = last && last.idx === idx && needle.indexOf(last.needle) >= 0 ? last.hit : null
-        var hit = []
-        var perRec = new Map()
-        for (var f = 0, nf = from ? from.length : rs.length; f < nf; f++) {
-          var j = from ? from[f] : f
-          var run = rs[j]
-          if (run.low.indexOf(needle) < 0) continue
-          hit.push(j)
-          if (out.length >= MOST) continue
-          var hits = places(run.low, needle)
-          // the record it is in: its anchored element, known again by its ref once the page draws it again
-          if (run.rec === undefined) {
-            var el = (run.block && run.block.closest && run.block.closest('[data-anchor]')) || run.block
-            run.rec = el && el.getAttribute && el.getAttribute('data-anchor') ? el.getAttribute('data-anchor') : el
-          }
-          var rec = run.rec
-          for (var h = 0; h < hits.length && out.length < MOST; h++) {
-            var kk = perRec.get(rec) || 0
-            perRec.set(rec, kk + 1)
-            out.push({ run: run, a: hits[h][0], b: hits[h][1], fold: foldAt(run, hits[h][0], hits[h][1]), rec: rec, k: kk })
-          }
-        }
-        this.last = { idx: idx, needle: needle, hit: hit }
-      }
-    }
-    this.more = out.length >= MOST
+      var kept = this.keptNow()
+      var claimed = kept ? new Set() : null
+      var parts = []
+      for (var p = 0; p < this.lists.length; p++) parts.push({ box: this.lists[p].box, res: inRows(this.lists[p], needle, kept, claimed, left) })
+      out = merge(this.inPage(needle, kept, claimed, left), parts)
+    } else this.last = null
+    this.more = left.n <= 0
     this.matches = out
     this.at = -1
     if (this.key) {
-      for (var m = 0; m < out.length; m++) if (out[m].rec === this.key[0] && out[m].k === this.key[1]) this.at = m
+      for (var m = 0; m < out.length; m++) if (sameKey(out[m], this.key)) this.at = m
     }
+    var going = (go || this.seek) && !this.pending()
     var ticks = this.ticks()
-    if (this.at < 0 && out.length && (go || this.key)) this.at = this.firstFrom(ticks)
+    if (this.at < 0 && out.length && (going || this.key)) this.at = this.firstFrom(ticks)
     this.paint()
     this.chrome()
     this.mark(ticks)
     // the match typing goes to is brought into view, its fold opened
-    if (go && this.at >= 0) this.go(this.at)
+    if (going && this.at >= 0) this.go(this.at)
   }
-  // each match's [top, bottom] as fractions of its box's height: a row's place among the rows, a DOM match's (or its
-  // fold's) place in the box it scrolls in
+  // The results in a list's rows: each match in a row, or one for a row whose record the page kept (`kept`), the first
+  // list to hold it (`claimed`); `left` counts down from MOST
+  function inRows(list, needle, kept, claimed, left) {
+    var out = []
+    var low = list.low
+    var ids = list.ids
+    for (var i = 0; i < low.length && left.n > 0; i++) {
+      var id = ids && ids[i] != null ? ids[i] : null
+      if (kept && id != null && kept.has(String(id)) && !claimed.has(String(id))) {
+        claimed.add(String(id))
+        out.push({ box: list.box, row: i, k: 0, rec: id, kept: true })
+        left.n--
+        continue
+      }
+      var ps = places(low[i], needle)
+      for (var k = 0; k < ps.length && left.n > 0; k++, left.n--) out.push({ box: list.box, row: i, k: k, rec: id != null ? id : i })
+    }
+    return out
+  }
+  // The results in the page's text, in its order: each match, or one for an element of a record the page kept (keptOf),
+  // with the matches in it, whether its words show or not
+  Search.prototype.inPage = function (needle, kept, claimed, left) {
+    var idx = this.index()
+    if (!idx) {
+      this.last = null
+      return []
+    }
+    var rs = idx.runs
+    var own = kept ? keptOf(idx, kept, claimed) : null
+    var byEl = new Map()
+    // a needle that holds the last one is only in the runs that held that one, so typing on searches fewer
+    var last = this.last
+    var from = last && last.idx === idx && needle.indexOf(last.needle) >= 0 ? last.hit : null
+    var hit = []
+    var perRec = new Map()
+    var out = []
+    for (var f = 0, nf = from ? from.length : rs.length; f < nf; f++) {
+      var j = from ? from[f] : f
+      var run = rs[j]
+      if (run.low.indexOf(needle) < 0) continue
+      hit.push(j)
+      if (left.n <= 0) continue
+      var hits = places(run.low, needle)
+      var el = own ? own.of.get(run) : null
+      if (el) {
+        var r = byEl.get(el)
+        if (!r) {
+          r = { el: el, rec: el.getAttribute('data-anchor'), k: 0, kept: true, ms: [] }
+          byEl.set(el, r)
+          out.push(r)
+          left.n--
+        }
+        for (var q = 0; q < hits.length; q++) r.ms.push({ run: run, a: hits[q][0], b: hits[q][1], fold: foldAt(run, hits[q][0], hits[q][1]) })
+        continue
+      }
+      // the record it is in: its anchored element, known again by its ref once the page draws it again
+      if (run.rec === undefined) {
+        var at = (run.block && run.block.closest && run.block.closest('[data-anchor]')) || run.block
+        run.rec = at && at.getAttribute && at.getAttribute('data-anchor') ? at.getAttribute('data-anchor') : at
+      }
+      var rec = run.rec
+      for (var h = 0; h < hits.length && left.n > 0; h++, left.n--) {
+        var kk = perRec.get(rec) || 0
+        perRec.set(rec, kk + 1)
+        out.push({ run: run, a: hits[h][0], b: hits[h][1], fold: foldAt(run, hits[h][0], hits[h][1]), rec: rec, k: kk })
+      }
+    }
+    this.last = { idx: idx, needle: needle, hit: hit }
+    if (!own) return out
+    // the kept records whose words do not show, each in its place
+    var rest = []
+    for (var e = 0; e < own.els.length && left.n > 0; e++)
+      if (!byEl.has(own.els[e])) {
+        rest.push({ el: own.els[e], rec: own.els[e].getAttribute('data-anchor'), k: 0, kept: true, ms: [] })
+        left.n--
+      }
+    return interleave(out, rest)
+  }
+  // each result's [top, bottom] as fractions of its box's height: a row's place among its list's rows, a match's in the
+  // page's text (or its fold's, or its record's) in the box it scrolls in
   Search.prototype.ticks = function () {
     var ms = this.matches
     var out = []
-    if (this.source) {
-      var n = Math.max(1, this.source.texts.length)
-      for (var i = 0; i < ms.length; i++) out.push([ms[i].row / n, (ms[i].row + 1) / n])
-      return out
-    }
-    var box = this.box()
-    var page = box === true
-    var el = page ? document.scrollingElement || document.documentElement : box
-    var H = Math.max(1, el.scrollHeight)
-    var top0 = page ? -window.scrollY : el.getBoundingClientRect().top + el.clientTop - el.scrollTop
-    var places = new Map() // an element that stands for matches, measured once for all of them
-    for (var j = 0; j < ms.length; j++) {
-      var r = this.rectOf(ms[j], places)
-      out.push(r ? [(r.top - top0) / H, (r.bottom - top0) / H] : [0, 0])
+    var frame = null
+    var seen = new Map() // an element that stands for matches, measured once for all of them
+    for (var i = 0; i < ms.length; i++) {
+      var m = ms[i]
+      if (m.row != null) {
+        var list = this.listOf(m.box)
+        var n = Math.max(1, list ? list.texts.length : 1)
+        out.push([m.row / n, (m.row + 1) / n])
+        continue
+      }
+      if (!frame) {
+        var box = this.pageBox()
+        var page = box === true
+        var el = page ? document.scrollingElement || document.documentElement : box
+        frame = { H: Math.max(1, el.scrollHeight), top0: page ? -window.scrollY : el.getBoundingClientRect().top + el.clientTop - el.scrollTop }
+      }
+      var r = this.rectOf(m, seen)
+      out.push(r ? [(r.top - frame.top0) / frame.H, (r.bottom - frame.top0) / frame.H] : [0, 0])
     }
     return out
   }
@@ -754,13 +995,21 @@
   // leaves unlaid out of view (content-visibility: auto), the row's box, since measuring the text would lay the row out,
   // one row at a time. A match in an element whose content such a list may leave unrendered, such as a turn, stands at
   // that element's box, which the browser lays out without its content: asking where its text is would lay out every
-  // turn, again for each match. `places` keeps each element measured for the next match.
+  // turn, again for each match. A kept record stands at its first match, else at its element. `places` keeps each
+  // element measured for the next match.
   Search.prototype.rectOf = function (m, places) {
     var place = function (el) {
       if (places && places.has(el)) return places.get(el)
       var p = el.getBoundingClientRect()
       if (places) places.set(el, p)
       return p
+    }
+    if (m.kept) {
+      if (!m.ms.length) {
+        var whole = laidOut(m.el)
+        return whole ? place(whole) : null
+      }
+      m = m.ms[0]
     }
     if (m.run && m.run.cv && m.run.cv.isConnected) return place(m.run.cv)
     var at
@@ -787,61 +1036,78 @@
     }
     return at ? place(at) : null
   }
-  // the first match at or after the top of what the list shows, as Files' find; the first of all past the last
+  // the first result at or after the top of what its list shows, as Files' find; the first of all past the last
   Search.prototype.firstFrom = function (ticks) {
-    var box = this.box()
-    var from = 0
-    if (box === true) from = window.scrollY / Math.max(1, (document.scrollingElement || document.documentElement).scrollHeight)
-    else if (box) from = box.scrollTop / Math.max(1, box.scrollHeight)
-    for (var i = 0; i < ticks.length; i++) if (ticks[i][0] >= from - 1e-6) return i
+    var froms = new Map()
+    for (var i = 0; i < ticks.length; i++) {
+      var box = this.boxOf(this.matches[i])
+      var from = froms.get(box)
+      if (from === undefined) {
+        from = 0
+        if (box === true) from = window.scrollY / Math.max(1, (document.scrollingElement || document.documentElement).scrollHeight)
+        else if (box) from = box.scrollTop / Math.max(1, box.scrollHeight)
+        froms.set(box, from)
+      }
+      if (ticks[i][0] >= from - 1e-6) return i
+    }
     return ticks.length ? 0 : -1
   }
-  // the ticks on the box's strip, and none on a box that had them before
+  // the ticks on each box's strip, its own results', and none on a box that had them before
   Search.prototype.mark = function (ticks) {
     var self = this
-    var box = this.matches.length ? this.box() : null
-    if (box === true && document.documentElement.scrollHeight <= innerHeight) box = null
-    if (this.marked && this.marked !== box) {
-      var old = shared.strip(this.marked)
-      if (old) old.marks(null)
-    }
-    this.marked = box
-    if (!box) return
-    var strip = shared.strip(box)
-    if (!strip) return
-    // the records that hold a match, for the loupe's cell: a row by its place, an element by its ref or itself
-    var rows = new Set()
-    var recs = new Set()
+    var groups = new Map()
+    var page = this.pageBox()
+    if (page === true && document.documentElement.scrollHeight <= innerHeight) page = null
     for (var i = 0; i < this.matches.length; i++) {
       var m = this.matches[i]
-      if (m.row != null) rows.add(m.row)
-      else recs.add(m.rec)
+      var box = m.row != null ? m.box : page
+      if (!box) continue
+      var g = groups.get(box)
+      if (!g) groups.set(box, (g = { ticks: [], at: [], rows: new Set(), recs: new Set() }))
+      g.ticks.push(ticks[i])
+      g.at.push(i)
+      // the records that hold a result, for the loupe's cell: a row by its place, an element by its ref or itself
+      if (m.row != null) g.rows.add(m.row)
+      else g.recs.add(m.rec)
     }
-    strip.marks({
-      name: '“' + this.text + '”',
-      ticks: ticks,
-      has: function (t) {
-        if (typeof t === 'number') return rows.has(t)
-        if (!t || t.nodeType !== 1) return false
-        return recs.has(t) || recs.has(t.getAttribute('data-anchor'))
-      },
-      go: function (k) {
-        self.go(k)
-      },
+    for (var j = 0; j < this.marked.length; j++)
+      if (!groups.has(this.marked[j])) {
+        var old = shared.strip(this.marked[j])
+        if (old) old.marks(null)
+      }
+    this.marked = []
+    groups.forEach(function (g, box) {
+      self.marked.push(box)
+      var strip = shared.strip(box)
+      if (!strip) return
+      strip.marks({
+        name: '“' + self.text + '”',
+        ticks: g.ticks,
+        has: function (t) {
+          if (typeof t === 'number') return g.rows.has(t)
+          if (!t || t.nodeType !== 1) return false
+          return g.recs.has(t) || g.recs.has(t.getAttribute('data-anchor'))
+        },
+        go: function (k) {
+          self.go(g.at[k])
+        },
+      })
     })
   }
-  // the find's wash on every match on the page, the stronger one on the current match
+  // the find's wash on every match on the page, the stronger one on the current match (a kept record's first)
   Search.prototype.paint = function () {
     if (!HL) return
     var all = []
     var cur = null
     var cm = this.matches[this.at] || null
-    if (this.source) {
-      // the rows on the page: their matches in order, the k-th of a row its k-th match in the source
-      var root = this.root()
-      var rows = root ? root.querySelectorAll('[data-thimble-row]') : []
+    // each list's rows on the page: their matches in order, the k-th of a row its k-th match in the list's rows
+    for (var p = 0; p < this.lists.length && this.needle; p++) {
+      var list = this.lists[p]
+      var host = list.box || (this.within && ctl.el(this.within)) || document.body
+      var rows = host.querySelectorAll('[data-thimble-row]')
       for (var i = 0; i < rows.length; i++) {
         var row = Number(rows[i].getAttribute('data-thimble-row'))
+        var mine = cm && cm.row === row && cm.box === list.box
         var rs = runs(rows[i])
         var k = 0
         for (var j = 0; j < rs.length; j++) {
@@ -849,19 +1115,23 @@
           for (var h = 0; h < hits.length; h++, k++) {
             var r = rangeIn(rs[j], hits[h][0], hits[h][1])
             if (!r) continue
-            if (cm && cm.row === row && cm.k === k) cur = r
+            if (mine && cm.k === k) cur = r
             else all.push(r)
           }
         }
       }
-    } else {
-      for (var m = 0; m < this.matches.length; m++) {
-        var mt = this.matches[m]
-        if (mt.fold && mt.fold.hidden) continue
-        if (mt.range === undefined) mt.range = rangeIn(mt.run, mt.a, mt.b)
-        if (!mt.range) continue
-        if (m === this.at) cur = mt.range
-        else all.push(mt.range)
+    }
+    for (var m = 0; m < this.matches.length; m++) {
+      var mt = this.matches[m]
+      if (mt.row != null) continue
+      var ms = mt.kept ? mt.ms : [mt]
+      for (var q = 0; q < ms.length; q++) {
+        var t = ms[q]
+        if (t.fold && t.fold.hidden) continue
+        if (t.range === undefined) t.range = rangeIn(t.run, t.a, t.b)
+        if (!t.range) continue
+        if (m === this.at && q === 0) cur = t.range
+        else all.push(t.range)
       }
     }
     var reg = CSS.highlights
@@ -873,12 +1143,13 @@
     else reg.delete('thimble-search-current')
     this.current = cur
   }
-  // the count, the step buttons and the clear button as the search stands
+  // the count, the step buttons and the clear button as the search stands; no count while a key waits, or while the page
+  // has not said what it kept for the text
   Search.prototype.chrome = function () {
     if (!this.mount) return
     var typed = this.input.value
     var n = this.matches.length
-    var waiting = this.timer != null
+    var waiting = this.timer != null || this.pending()
     this.countEl.textContent = !typed || waiting ? '' : !n ? 'No results' : (this.at >= 0 ? num(this.at + 1) + ' of ' : '') + num(n) + (this.more ? '+' : '')
     this.countEl.classList.toggle('thimble-search-none', !!typed && !waiting && !n)
     for (var i = 0; i < this.steps.length; i++) {
@@ -887,7 +1158,7 @@
     }
     this.clearEl.hidden = !typed
   }
-  // the next match (dir 1) or the one before (-1), wrapping at the ends
+  // the next result (dir 1) or the one before (-1), wrapping at the ends
   Search.prototype.step = function (dir) {
     var n = this.matches.length
     if (!n) return
@@ -897,21 +1168,22 @@
   Search.prototype.go = function (k) {
     if (this.dead || k < 0 || k >= this.matches.length) return
     this.at = k
+    this.seek = false
     var m = this.matches[k]
-    this.key = [m.rec, m.k]
+    this.key = keyOf(m)
     // a match in a fold, or cut from view by its box's size: the part that folded it opens it, and the matches are found
     // again in what it drew; a part that opens one level at a time, such as a record's nested values, is sent the event
     // again while the match stays folded
-    var fold = this.closed(m)
+    var fold = this.closed(target(m))
     for (var tries = 0; fold && tries < UNFOLD_MAX; tries++) {
       fold.dispatchEvent(new CustomEvent('thimble-unfold', { bubbles: true }))
       // the page drew nothing again: no part opens it
-      if (!this.changed()) break
+      if (!this.take()) break
       this.find(false)
       m = this.matches[this.at]
       // the match not found again, or the same fold around it: the part did not open it
-      if (!m || m.rec !== this.key[0] || m.k !== this.key[1]) break
-      var next = this.closed(m)
+      if (!m || !sameKey(m, this.key)) break
+      var next = this.closed(target(m))
       if (next === fold) break
       fold = next
     }
@@ -925,41 +1197,68 @@
     if (m.range === undefined) m.range = rangeIn(m.run, m.a, m.b)
     return clipOf(m.range)
   }
-  // whether the page changed what the search finds since the observer last told, its changes taken from the observer
-  Search.prototype.changed = function () {
-    var rs = this.observer.takeRecords()
-    var any = false
-    for (var i = 0; i < rs.length; i++)
-      if (this.counts(rs[i])) {
-        this.note(rs[i])
-        any = true
-      }
-    return any
-  }
-  // the current match brought into view and drawn as current
+  // The current result brought into view and drawn as current: a row by its list, a match in the page's text by the
+  // boxes around it; a kept record whose words do not show is highlighted for a moment
   Search.prototype.show = function (paint) {
     var m = this.matches[this.at]
     if (!m) return
-    if (this.source) {
-      var src = this.source
-      ctl.safe(function () { src.go(m.row) })
+    var t = target(m)
+    var self = this
+    this.snap(null)
+    if (m.row != null) {
+      var list = this.listOf(m.box)
+      if (list) ctl.safe(function () { list.go(m.row) })
       this.paint()
       var cur = this.current
       if (cur && typeof cur.getBoundingClientRect === 'function') bringIntoView(cur.startContainer, function () { return cur.getBoundingClientRect() })
+      else if (m.kept && list) {
+        // its row, once the list has drawn it
+        var host = list.box || document
+        var sel = '[data-thimble-row="' + m.row + '"]'
+        var el = host.querySelector(sel)
+        if (el) this.snap(el)
+        else
+          setTimeout(function () {
+            if (self.matches[self.at] === m) self.snap(host.querySelector(sel))
+          }, 60)
+      }
     } else {
       if (paint) this.paint()
-      if (m.range === undefined) m.range = rangeIn(m.run, m.a, m.b)
-      var r = m.range
-      if (r && typeof r.getBoundingClientRect === 'function') bringIntoView(r.startContainer, function () { return r.getBoundingClientRect() })
+      if (t) {
+        if (t.range === undefined) t.range = rangeIn(t.run, t.a, t.b)
+        var r = t.range
+        if (r && typeof r.getBoundingClientRect === 'function') bringIntoView(r.startContainer, function () { return r.getBoundingClientRect() })
+      } else if (m.el && m.el.isConnected) {
+        bringIntoView(m.el, function () { return m.el.getBoundingClientRect() })
+        this.snap(m.el)
+      }
     }
-    if (!HL && m.range && window.getSelection) {
-      var sel = window.getSelection()
-      sel.removeAllRanges()
-      sel.addRange(m.range)
+    if (!HL && t && t.range && window.getSelection) {
+      var sel2 = window.getSelection()
+      sel2.removeAllRanges()
+      sel2.addRange(t.range)
     }
     this.chrome()
   }
-  // the box's text set from the page; `quiet` leaves the page untold (Reset, which tells it once)
+  // A record gone to whose words do not show, highlighted for a moment as a cited record is; one at a time, so a step
+  // on takes the highlight from the record before. null only takes it away
+  Search.prototype.snap = function (el) {
+    var was = this.snapped
+    if (was && was !== el) was.removeAttribute('data-thimble-snap')
+    this.snapped = null
+    clearTimeout(this.snapTimer)
+    if (!el || !el.setAttribute) return
+    var self = this
+    this.snapped = el
+    el.removeAttribute('data-thimble-snap')
+    void el.offsetWidth
+    el.setAttribute('data-thimble-snap', '')
+    this.snapTimer = setTimeout(function () {
+      el.removeAttribute('data-thimble-snap')
+      if (self.snapped === el) self.snapped = null
+    }, SNAP_MS)
+  }
+  // the box's text set from the page, as if typed; `quiet` leaves the page untold (Reset, which tells it once)
   Search.prototype.set = function (text, quiet) {
     text = text == null ? '' : String(text)
     if (this.input) this.input.value = text
@@ -971,8 +1270,20 @@
     this.needle = lower(text)
     this.key = null
     this.at = -1
+    this.seek = !!this.needle
     this.find(!!text)
     if (changed && !quiet) this.tell()
+  }
+  // the records the page keeps itself for the text searched, by ref; null for none, the matches counted again
+  Search.prototype.keep = function (refs) {
+    if (refs == null) this.kept = null
+    else {
+      var set = new Set()
+      var list = Array.isArray(refs) ? refs : Array.from(refs)
+      for (var i = 0; i < list.length; i++) if (list[i] != null) set.add(String(list[i]))
+      this.kept = { refs: set, text: this.text }
+    }
+    this.find(false)
   }
   // the rows of a list that draws only those in view, kept by its box, so that lists in tabs each give theirs; null takes
   // every list's away, for the page's text again
@@ -997,15 +1308,20 @@
     }
     this.find(false)
   }
-  // the list the search finds in: the one given last of those that show, such as the table of the tab in view; none
-  // while none shows, so the search finds in the page's text
+  // the lists the search finds in: those that show, in the page's order (one with no box first), such as the table of
+  // the tab in view; the page's text around them besides
   Search.prototype.pick = function () {
     this.sources = this.sources.filter(function (s) {
       return !s.box || s.box.isConnected
     })
-    var got = null
-    for (var i = this.sources.length - 1; i >= 0 && !got; i--) if (!this.sources[i].box || shows(this.sources[i].box)) got = this.sources[i]
-    this.source = got
+    var got = this.sources.filter(function (s) {
+      return !s.box || shows(s.box)
+    })
+    got.sort(function (a, b) {
+      if (!a.box || !b.box) return (a.box ? 1 : 0) - (b.box ? 1 : 0)
+      return a.box.compareDocumentPosition(b.box) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1
+    })
+    this.lists = got
   }
 
   // ⌘F or Ctrl+F in the view: the focus in the first search's box, its text chosen
@@ -1033,8 +1349,8 @@
       get text() {
         return s.text
       },
-      /** how many matches there are (MOST at most, the count then saying "+"), and the current one's place among them
-       *  from 0 (-1 for none) */
+      /** how many results there are, each a match or a record the page kept (MOST at most, the count then saying "+"),
+       *  and the current one's place among them from 0 (-1 for none) */
       get count() {
         return s.matches.length
       },
@@ -1045,7 +1361,7 @@
       set: function (text) {
         s.set(text)
       },
-      /** the next match (1) or the one before (-1), and match `k` */
+      /** the next result (1) or the one before (-1), and result `k` */
       step: function (dir) {
         s.now()
         s.step(dir < 0 ? -1 : 1)
@@ -1062,6 +1378,12 @@
        *  away */
       rows: function (src) {
         s.rows(src)
+        return s.api
+      },
+      /** the records the page keeps itself for the text, by ref, such as those its reader kept for words the rows do
+       *  not draw, once it has drawn them: the box counts them and steps through them; null counts the matches again */
+      kept: function (refs) {
+        s.keep(refs)
         return s.api
       },
       /** found again now, for a change of the page the search cannot see */

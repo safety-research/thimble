@@ -183,8 +183,9 @@ const FIELDS = [
   { name: 'area', title: 'Area', description: 'The part of the library: the first label, else the area of the issue it fixes' },
   { name: 'author', title: 'Author', description: 'Who opened the pull request or the issue, or started the thread' },
 ]
-// the search keeps the items whose words hold it, their records' words among them, and marks the words in the rows
-const search = thimble.search({ mount: '#search', placeholder: 'Search', onChange: draw })
+// the search keeps the items whose words hold it, their records' words among them, marks the words in the rows and in
+// the item's page beside them, and counts the items it keeps (draw)
+const search = thimble.search({ mount: '#search', in: '#body', placeholder: 'Search', onChange: draw })
 const filter = thimble.filterBy({ mount: '#filter', fields: FIELDS, onChange: load })
 const colour = thimble.colorBy({ mount: '#colour', fields: FIELDS, onChange: load })
 const side = thimble.side({ mount: '#body', width: 0.45, onClose: () => { open = null } })
@@ -347,6 +348,8 @@ function draw() {
   if (!data) return
   shown = data.items.filter((it) => search.has(it.search))
   list()
+  // an item kept for its records' words, which its row does not draw, counts as a result too
+  search.kept(shown.map((it) => it.ref))
 }
 
 // ------------------------------------------------------------------------------------------------ an item's page
@@ -360,7 +363,7 @@ const mentionsOf = (d) => [{ match: /#(\d+)\b/g, ref: (m) => (d.mentions[m[1]] ?
 const goTo = (b, what) => `<button type="button" class="go" data-go="${esc(b.key)}">${ico((STATE[TAB_OF[b.key.split('/')[1]]][b.state] || ['pr'])[0])}${what}</button>`
 const badge = (state, t) => { const [i, w] = STATE[t][state] || STATE[t].open; return `<span class="chip chip-sans chip-tone-neutral">${ico(i)}<span class="chip-text">${w}</span></span>` }
 const elsewhere = (d) => (d.elsewhere || []).filter((x) => x.run !== d.facts.run).map((x) => goTo(x, `${esc(x.run)} #${esc(x.key.split('/')[2])} ${esc(x.state)}`)).join('')
-const dl = (rows) => `<dl class="facts">${rows.filter((r) => r[1]).map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>`
+const dl = (rows) => `<dl class="facts">${rows.filter((r) => r[1]).map(([k, v]) => `<dt data-thimble-chrome>${k}</dt><dd>${v}</dd>`).join('')}</dl>`
 
 // One record on a conversation's timeline as thimble.messages takes it: an opening or a comment a message, any other
 // record an event on one line, its words under it
@@ -417,7 +420,7 @@ async function fill(body, key) {
       dl([['Fixes', d.fixes && goTo(d.fixes, `#${d.fixes.number} ${esc(d.fixes.title)}`)], ['In the other runs', elsewhere(d)],
         ['Reviews', `${esc(cap(f.review))} · ${f.approvals} of ${plural(f.need, 'approval')}${f.reviewers.length ? ` · ${f.reviewers.map(([w, v]) => `${esc(w)} ${esc((VERDICT[v] || VERDICT.commented)[1].replace(' these changes', ''))}`).join(', ')}` : ''}`],
         ['Flags', f.flags.map(esc).join(' · ')]]) +
-      `<div class="seg parts">${parts.map(([k, w, n]) => `<button type="button" class="seg-opt${open.part === k ? ' active' : ''}" data-part="${k}">${w} <span class="count">${n}</span></button>`).join('')}</div>` +
+      `<div class="seg parts" data-thimble-chrome>${parts.map(([k, w, n]) => `<button type="button" class="seg-opt${open.part === k ? ' active' : ''}" data-part="${k}">${w} <span class="count">${n}</span></button>`).join('')}</div>` +
       '<div class="part"></div>'
     if (open.part === 'files') {
       // each commit's patch, under its sha and message: the forge's diff of the files it changed
