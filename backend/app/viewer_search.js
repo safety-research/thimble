@@ -238,6 +238,14 @@
     this.observer.disconnect()
     clearTimeout(this.timer)
     this.timer = null
+    // its washes and its ticks go with it
+    if (HL && this.needle) {
+      CSS.highlights.delete('thimble-search')
+      CSS.highlights.delete('thimble-search-current')
+    }
+    var strip = this.marked ? shared.strip(this.marked) : null
+    if (strip) strip.marks(null)
+    this.marked = null
   }
   // the element the search finds in
   Search.prototype.root = function () {
@@ -255,7 +263,8 @@
     if (r === this.observed) return
     this.observer.disconnect()
     this.observed = r
-    if (r) this.observer.observe(r, { childList: true, subtree: true, characterData: true })
+    // `hidden` too: a fold opened or closed (the diff's Show more), an element the label filter hides
+    if (r) this.observer.observe(r, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['hidden'] })
   }
   // whether a change of the page can change what the search finds: one outside the kit's own parts
   Search.prototype.counts = function (rec) {
@@ -321,6 +330,7 @@
   // the key names when it still shows, else with `go` the first at or after the top of the list, which is brought into
   // view; then the highlights, the count and the strip's ticks.
   Search.prototype.find = function (go) {
+    if (this.dead) return
     this.observe()
     var out = []
     var needle = this.needle
@@ -361,7 +371,8 @@
     this.paint()
     this.chrome()
     this.mark(ticks)
-    if (go && this.at >= 0) this.show(false)
+    // the match typing goes to is brought into view, its fold opened
+    if (go && this.at >= 0) this.go(this.at)
   }
   // each match's [top, bottom] as fractions of its box's height: a row's place among the rows, a DOM match's (or its
   // fold's) place in the box it scrolls in
@@ -501,7 +512,7 @@
     this.go(k)
   }
   Search.prototype.go = function (k) {
-    if (k < 0 || k >= this.matches.length) return
+    if (this.dead || k < 0 || k >= this.matches.length) return
     this.at = k
     var m = this.matches[k]
     this.key = [m.rec, m.k]

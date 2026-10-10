@@ -171,6 +171,17 @@ describe('the search', () => {
     doc().getElementById('list')!.insertAdjacentHTML('beforeend', '<p hidden>gale</p>')
     await wait(60)
     expect(w.search.count).toBe(2)
+    // and is once it shows: the search hears `hidden` change
+    ;(doc().querySelector('#list > p[hidden]') as HTMLElement).hidden = false
+    await wait(60)
+    expect(w.search.count).toBe(3)
+    // typing goes to the first match, opening the fold it is in
+    const fold = doc().querySelector('[data-thimble-fold]') as HTMLElement
+    fold.hidden = true
+    w.opened = undefined
+    await type('more gale')
+    expect(w.search.at).toBe(0)
+    expect(w.opened).toBe(true)
   })
 
   test("Reset, in Color by's row, empties the box and tells the page once", async () => {
