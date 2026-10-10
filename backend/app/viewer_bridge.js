@@ -64,7 +64,7 @@
 //                          bridge sees (it stops the message before the view's own listeners)
 //   labelCall {id, key, op, args}
 //                          frame to page, answered by labelDone {id, error?}: the page's label controls (window.thimble
-//                          setLabel, setLabelColour, editLabel, mark and setFilter), each sent only while the frame has
+//                          setLabel, setLabelColor, editLabel, mark and setFilter), each sent only while the frame has
 //                          the analyst's transient user activation, which thimble checks again on its side; ops on,
 //                          colour, edit, mark and filter. edit's args are {id, anchor?, side?}: thimble opens the label
 //                          editor in a popover over the page, beside `anchor` {left, top, width, height} (the control
@@ -506,8 +506,8 @@
       }
     },
     /** the mark of the labels the page is given on one record or unit ref, {bar, names, values, spans, keep?}, or null:
-     *  `bar` the colour of the first label that highlights it, `values` [{id, label, value, colour}] each label that
-     *  does with its value; every colour one a canvas can draw (rgb(), or a hex) */
+     *  `bar` the color of the first label that highlights it, `values` [{id, label, value, color}] each label that
+     *  does with its value; every color one a canvas can draw (rgb(), or a hex) */
     markOf: function (ref) {
       return marks[String(ref)] || null
     },

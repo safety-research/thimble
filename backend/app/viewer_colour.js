@@ -2,19 +2,19 @@
 // viewer_bridge.js, whose marks it draws through, and before viewer_range.js (thimble.timeRange), which shares what it
 // keeps; viewer_kit.css styles them. A page calls it once:
 //
-//   const colour = thimble.colorBy({           thimble.colourBy is the same function
-//     mount: '#colour',                        an element in the view's top row, which the control fills
+//   const color = thimble.colorBy({            thimble.colourBy is the same function
+//     mount: '#color',                         an element in the view's top row, which the control fills
 //     fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }, { name: 'source' }],
-//                                              a declared value may name its palette colour: { name: 'Error', colour: 7 },
+//                                              a declared value may name its palette color: { name: 'Error', color: 7 },
 //                                              and what it means: { name: 'With links', meaning: 'links to a page' };
 //                                              `meanings` says what values mean without declaring them, so their
 //                                              order and colors stay the records': { meanings: { payments: 'the
 //                                              payments API' } }; `description` says what the field is; a chip's hover
 //                                              gives them
 //     strip: '#list',                          the list that gets the colored strip, or true for the page; another
-//                                              list gets it with colour.strip(el, {rows}) or {whole: true}, and is
+//                                              list gets it with color.strip(el, {rows}) or {whole: true}, and is
 //                                              a plain scrollbar otherwise
-//     onChange: (colour) => draw(),            the choice, a value turned on or off, or the label values changed; the
+//     onChange: (color) => draw(),             the choice, a value turned on or off, or the label values changed; the
 //                                              kit's parts keep their own bars, so it draws only the page's own markup
 //   })
 //
@@ -48,10 +48,10 @@
 // around the colour wheel (label_wheel.json, window.__thimbleLabelWheel); "N more" lists the chips it hides, each with
 // its box, its swatch (the picker under it) and its meaning on hover. The one picked
 // recolours the value everywhere in the view (its chip, the records' bars, the tracks, and what the page draws through
-// colourOf). A label's value keeps it through thimble.setLabelColour, so Files and every view show it; a field's value
+// colorOf). A label's value keeps it through thimble.setLabelColor, so Files and every view show it; a field's value
 // keeps it per view with the choice, and the palette's Reset colors gives the field's values their own colours back. On
 // a record, colour is always a bar on the left edge of its row or card (the bridge draws it on every element whose
-// data-colour is the value of the chosen field, and on every anchored record when a label is chosen), never coloured
+// data-color is the value of the chosen field, and on every anchored record when a label is chosen), never coloured
 // text or a fill; with several choices, a band per choice there, side by side in the order of the strip's lanes, each
 // in the record's value's colour of that choice and empty where it has none, as a slice of the strip.
 // The strip is a list's scrollbar as one strip at every length, as Files' reader draws it: the whole list in a lane for
@@ -1997,7 +1997,7 @@
     this.preview = opts && typeof opts.preview === 'function' ? opts.preview : null
     // each row's record, which the lanes of Color by's fields past the first read
     this.records = opts && Array.isArray(opts.records) ? opts.records : null
-    // a list whose part takes no Color by (`colour: false`): a plain scrollbar, as with Color by Off
+    // a list whose part takes no Color by (`color: false`): a plain scrollbar, as with Color by Off
     this.bare = !!(opts && opts.bare)
   }
   Strip.prototype.remove = function () {
@@ -3261,9 +3261,9 @@
 
   // ---------------------------------------------------------------- the bars of the kit's parts
   // Each part of the kit that draws records (the table, the transcript, the record, the cards, the timeline) colors
-  // them by the page's Color by, mounted before or after it, unless it is given `colour` (or `color`, the same option):
-  // false for none, or an object with Color by's calls to draw with. A part writes a record's attributes with
-  // bars.attr(record) as it draws, and keeps them itself: when Color by's choices change, the control takes every
+  // them by the page's Color by, mounted before or after it, unless it is given `color` (or `colour`, its British
+  // spelling): false for none, or an object with Color by's calls to draw with. A part writes a record's attributes
+  // with bars.attr(record) as it draws, and keeps them itself: when Color by's choices change, the control takes every
   // data-colour off the page (forget) and has each part stamp the elements it drew again from their own records
   // (bars.watch), so the page draws again only its own markup, and a part's folds and scroll stay. A value turned off
   // or recolored changes no attribute: the bridge draws the bars again from the hook.
@@ -3307,7 +3307,7 @@
     }
     return out
   }
-  /** a part's bars, from its options (above): `off` with `colour: false`; colour() the Color by they follow now, or
+  /** a part's bars, from its options (above): `off` with `color: false`; colour() the Color by they follow now, or
    *  null; attr(record) a record's attributes; stamp(el, record) an element's set again; watch(element, fn), called at
    *  each draw, has fn() stamp the part's elements again on each change of the choices while the element is in the
    *  page */
@@ -3336,7 +3336,7 @@
         stampAs(node, b.attr(record))
       },
       // an element holds one part: a part made again in an element takes the place of the one before there, or with
-      // `colour: false` leaves none, so the one before never stamps its records again
+      // `color: false` leaves none, so the one before never stamps its records again
       watch: function (node, fn) {
         if (!node) return
         var many = stampers.length >= STAMPERS_ROOM
@@ -3454,7 +3454,7 @@
         }
         c.refresh()
       },
-      /** the choice as the reader takes it with a fetch (thimble.colour_value in reader.py): {field} or {label, name};
+      /** the choice as the reader takes it with a fetch (thimble.color_value in reader.py): {field} or {label, name};
        *  null for Off. It names no value turned off, so a reader keeps and counts every record */
       query: function () {
         var ch = c.choice()
@@ -3594,7 +3594,7 @@
   // color as the bar on the card's left edge, and with several choices a band per choice there, in their order, a
   // label's from its mark on `ref`: a card takes no color of its own. It keeps its bars as Color by changes: the kit
   // keeps its record by its data-thimble-card and stamps the cards on the page again from their records (cards), and
-  // `colour: false` gives it none. `active` marks the chosen card,
+  // `color: false` gives it none. `active` marks the chosen card,
   // `act: false` a card a click does nothing on, and `attrs` ({name: value}) gives it more attributes, such as a key the
   // page's click reads; a `class` there is added to the card's own. (thimble.card is a card type's stored data, in a
   // card's frame: viewer_bridge.js.)
@@ -3691,7 +3691,7 @@
     onColour: function (fn) {
       colourFns.push(fn)
     },
-    // a part's bars, from its `colour` or `color` option (the bars of the kit's parts, above)
+    // a part's bars, from its `color` option (the bars of the kit's parts, above)
     bars: bars,
     // a Color by the page made, with colourOf when it gives colorOf (above)
     withColourOf: withColourOf,

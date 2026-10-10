@@ -8,13 +8,13 @@
 //
 //   side.open({ title, ref, render: (body) => thimble.record({ mount: body, value: rec, ref }) })
 //
-//   thimble.record({ mount, value, ref, open, find, mono, colour })   value: an object, a list, a plain value, or JSON
+//   thimble.record({ mount, value, ref, open, find, mono, color })    value: an object, a list, a plain value, or JSON
 //                                                              text; open: the levels of nested values open at first
 //                                                              (2); find: words whose matches are highlighted and
 //                                                              opened; mono: the fields whose strings are drawn in the
 //                                                              mono face, such as a file's raw line (['line']);
-//                                                              colour (or color): the Color by whose bar the record
-//                                                              takes, the page's by default; false for none
+//                                                              color: the Color by whose bar the record takes, the
+//                                                              page's by default; false for none
 //
 // Called again on the same mount with the same ref, it keeps what the analyst opened and folded. Its bar follows Color
 // by as it changes, with nothing drawn again. What a fold hides stays in the page, hidden, in an element with

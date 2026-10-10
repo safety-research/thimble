@@ -495,8 +495,8 @@
   // Filter by in the top row: its trigger with the choice in it, "Filter by: Outcome", and the chosen field's or label's
   // values as toggles (a box ticked while the value shows), "N more" for those that do not fit. A click turns a value
   // off or on; an Alt-click or a double click shows that value alone; hovering a value says what it means. The page
-  // hides a record whose value is off (keeps), or sends query() to its reader, which takes it with thimble.colour_value
-  // and colour_on. Filter by alone hides records: Color by only colors.
+  // hides a record whose value is off (keeps), or sends query() to its reader, which takes it with thimble.color_value
+  // and color_on. Filter by alone hides records: Color by only colors.
   function Filter(opts) {
     Choice.call(this, opts, typeof opts.key === 'string' ? 'filter:' + opts.key : 'filter')
     var self = this
@@ -864,7 +864,7 @@
     this.render()
   }
   Rows.prototype = Object.create(Choice.prototype)
-  // a record the reader gave its group under the choice (`group`, from thimble.colour_value(rows.query(), ref)) keeps
+  // a record the reader gave its group under the choice (`group`, from thimble.color_value(rows.query(), ref)) keeps
   // it: a label's value reaches the page only on the records it anchors
   Rows.prototype.valueOf = function (record, c) {
     var now = this.choice()
@@ -1025,7 +1025,7 @@
       groups: function (items) {
         return r.groups(items)
       },
-      /** the choice for the reader: {field}, {label, name}, or null; thimble.colour_value(rows, ref, record) gives a
+      /** the choice for the reader: {field}, {label, name}, or null; thimble.color_value(rows, ref, record) gives a
        *  record's group there */
       query: function () {
         var c = r.choice()
@@ -1150,8 +1150,8 @@
   // by), as wide as each ran (`end`), a band where the group ran (`band`), and a record that failed (`problem`)
   // a ✕ in the problem red. The axis is the time range's scale (`range`), else the records' own span in `unit`,
   // with an axis of its own under the lanes; with no `rows`, one lane with no name. It needs no other part of the kit,
-  // and it follows the page's Color by as it changes, or the `colour` (or `color`) it is given; `colour: false` draws
-  // its marks gray.
+  // and it follows the page's Color by as it changes, or the `color` it is given; `color: false` draws its marks
+  // gray.
   // Hovering a lane draws a thin cursor line across the lanes and a tip of the time and the record there;
   // never an inverted band. A click on a mark is onMark(record), on a lane's name onPick(group), which marks the lane
   // chosen; ▾ folds a parent's lanes into its own. The detail list's rows in view (`follow`, rows with data-t) are a
@@ -1287,7 +1287,7 @@
     this.body.className = 'thimble-lanes-body'
     this.mount.appendChild(this.body)
     if (foot) this.mount.appendChild(foot)
-    // the marks follow Color by as it changes, unless the lanes are given `colour: false`
+    // the marks follow Color by as it changes, unless the lanes are given `color: false`
     if (!this.bars.off)
       shared.onColour(function () {
         if (self.nodes.length && self.mount.isConnected) self.paint()

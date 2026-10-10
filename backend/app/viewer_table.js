@@ -16,8 +16,8 @@
 //     sort: { by: 't', desc: true },        how it opens; a click on a column's head sorts by it, again the other way
 //     side, details: (m) => ({ title: m.subject, sub: m.from, html: body(m) }),   a row opens in thimble.side
 //     search, filter,                       a thimble.search finds in its rows, a thimble.filterBy hides rows
-//     colour,                               the Color by of its bars and strip (or `color`), the page's by default;
-//                                           false for none
+//     color,                                the Color by of its bars and strip, the page's by default; false for
+//                                           none
 //     attrs: (r) => ({ 'data-anchor-unmarked': !!r.mix }),   more attributes of a row, as thimble.recordCard takes them
 //   })
 //   table.draw(rows)                        new rows, such as after a fetch; table.draw() after Filter by changed

@@ -3,7 +3,7 @@
 // and before viewer_range.js; viewer_parts.css styles it. A chart takes the kinds, the data and the options of a card's
 // thimble.chart (docs/charts.md) and is drawn as the canvas draws its charts, in the canvas's theme:
 //
-//   thimble.chart('#posts', 'bar', rows, { colour, onPick, height })   rows: [{agent: 'agent-1', posts: 3}, ...], each
+//   thimble.chart('#posts', 'bar', rows, { color, onPick, height })    rows: [{agent: 'agent-1', posts: 3}, ...], each
 //                                                                      row's keys in the kind's order, as a
 //                                                                      DataFrame's columns come
 //   thimble.chart('#mine', spec, { onPick, height })                  any other Vega-Lite spec, drawn the same way
@@ -15,7 +15,7 @@
 // style of lib/vizTheme read from the page's own tokens, the fixes of lib/chartDefaults, the fitting to the box). The
 // page names "vega-embed" in view.json's libs, which brings vega and vega-lite with it.
 //
-// Beside thimble.chart's options it takes three of its own: `colour` (or `color`), Color by, whose colours the group or
+// Beside thimble.chart's options it takes three of its own: `color`, Color by, whose colors the group or
 // series column's values take, in place of a legend, since Color by's chips are the key (gray with Off or for a value
 // turned off); `onPick(row)`, a mark clicked, with its row; and `height`, the plot's height in px (at most ROW_MOST a
 // row for rows named down its side). Called again on the same mount it replaces the chart, so a page draws it in its

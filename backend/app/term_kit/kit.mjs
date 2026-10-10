@@ -2318,8 +2318,8 @@ function hueFn(c) {
   return by ? (v) => by.colourOf(v) : () => null
 }
 
-// A part's Color by option: `colour` or `color`, the same option, as the browser kit takes them; a Color by the program
-// made of its own, such as {valueOf, colorOf}, with colourOf, which the parts call (withColourOf)
+// A part's Color by option: `color`, or `colour`, its British spelling, as the browser kit takes them; a Color by the
+// program made of its own, such as {valueOf, colorOf}, with colourOf, which the parts call (withColourOf)
 function colorOption(o) {
   return withColourOf(o && o.colour !== undefined ? o.colour : o ? o.color : undefined)
 }
@@ -2703,7 +2703,7 @@ export function list(opts = {}) {
      * Draw the list in the rows left (or `o.height`): `o.items` (an item with `heading` is a bold heading row no key
      * chooses), `o.row(item, r, {chosen, open})` adds the item's row to a Row started after its mark, `o.detail(item,
      * d)` draws its details into an inner drawing at A2, `o.value(item)` its Color by value (its mark and the track),
-     * `o.colour` (a Color by control, for the hues), `o.ask(item)` `{ref, text}` to ask about it, `o.onOpen(item)` when
+     * `o.color` (a Color by control, for the hues), `o.ask(item)` `{ref, text}` to ask about it, `o.onOpen(item)` when
      * its details open (fetch what they show), `o.header(r)` a row above the rows that does not scroll (a table's
      * columns' names), `o.empty` the words for no item.
      */
@@ -3591,7 +3591,7 @@ function chooser(opts, name, initial) {
  * Filter by: which rows show, by a field of the view or a label (docs/terminal-views.md, "Filter by and Rows"). In the
  * top row, `Filter by  Outcome` and the chosen one's values as toggles, `●` while a value shows and `○` while it is off,
  * never in a hue (only Color by colors); `f`, or a click on the choice, opens its menu. The page hides a record whose
- * value is off (`keeps`), or sends `query()` to its reader, which takes it with thimble.colour_value and colour_on.
+ * value is off (`keeps`), or sends `query()` to its reader, which takes it with thimble.color_value and color_on.
  * Filter by alone hides records: Color by only colors.
  *
  * opts: fields [{name, title, description?, values?, meanings?, value?(record), nameOf?(value)}], initial (a field's
@@ -3823,7 +3823,7 @@ export function rows(opts = {}) {
       for (const k of roots.sort(order)) walk(k, 0, '', true, null)
       return out
     },
-    /** The choice for the reader: `{field}`, `{label, name}`, or null; thimble.colour_value(rows, ref, record) gives a
+    /** The choice for the reader: `{field}`, `{label, name}`, or null; thimble.color_value(rows, ref, record) gives a
      *  record's group there. */
     query() {
       const b = ch.by()
@@ -3880,7 +3880,7 @@ export function rows(opts = {}) {
  * chooses the lane (`onPick`). The list's rows in view are on the selection background across the lanes (`span`, or a
  * list's `span()`). `legend()` is the key for `axis`, each entry a toggle that hides or shows its series.
  *
- * opts: rows (a Rows control, a field's name or a function of a record) or groups(items), colour (Color by; the view's
+ * opts: rows (a Rows control, a field's name or a function of a record) or groups(items), color (Color by; the view's
  * by default), time(item), end(item), unit ('s' or 'n', for an axis of its own), band(lane) [[start, end]],
  * problem(item), onPick(lane), onMark(item), words {band, problem, record}, key.
  */
@@ -4178,7 +4178,7 @@ const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Se
  * came back, an error in red), in place or in a side pane (`side`), `a` asks about it, and its track shows where the
  * Color by values are.
  *
- * opts: key (the list's), enter. draw(d, {turns, title, count, colour, side, onOpen, empty}): turns [{ref, t, speaker,
+ * opts: key (the list's), enter. draw(d, {turns, title, count, color, side, onOpen, empty}): turns [{ref, t, speaker,
  * kind (text | prompt | tool | thinking | system), tool, text, input, output, error}], `t` (or `time`) in seconds since
  * 1970 or a date such as an ISO time, one with no zone in UTC, as the browser's transcript reads it.
  */
