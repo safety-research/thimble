@@ -31,8 +31,6 @@ way.
   chart's axis a pin with its label at a readable size; hovering it lets the chart draw a faint guide line through
   itself.
 
-[plugin/viewers/timeline](../plugin/viewers/timeline) uses it above its lanes.
-
 ## Mount it
 
 ```html
