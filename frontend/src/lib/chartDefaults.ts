@@ -88,32 +88,77 @@ function longestLabel(rows: unknown[] | null, field: string): number | null {
 
 const DAY_MS = 86_400_000
 
-/** The d3-time-format pattern for a date axis over `field`, by the span of its values, or null when the rows hold no
- * time. Every label names its month (Vega-Lite's own labels mix weekdays and months on one axis); the hour shows only
- * within a few days. Values are read as Vega-Lite reads them, in local time. */
-export function timeFormat(rows: readonly unknown[] | null, field: string): string | null {
-  if (!rows) return null
+/** The format of an axis whose labels name days, which also gets ticks at least a day apart (dayTicks) */
+const DAY_FORMAT = '%b %-d'
+
+/** The d3-time-format pattern for a date axis over `fields` (its field and an x2's or y2's), by the span of their values,
+ * or null when the rows hold no time. Every label names its month (Vega-Lite's own labels mix weekdays and months on one
+ * axis); the hour shows only within a few days. Values are read as Vega-Lite reads them, in local time. */
+export function timeFormat(rows: readonly unknown[] | null, fields: string | readonly string[]): string | null {
+  return spanFormat([{ rows, fields: typeof fields === 'string' ? [fields] : fields }])
+}
+
+type TimeUse = { rows: readonly unknown[] | null; fields: readonly string[] }
+
+function spanFormat(uses: readonly TimeUse[]): string | null {
   let lo = Infinity
   let hi = -Infinity
-  for (const r of rows) {
-    const v = obj(r)?.[field]
-    const t = typeof v === 'number' ? v : typeof v === 'string' ? Date.parse(v) : NaN
-    if (!Number.isFinite(t)) continue
-    lo = Math.min(lo, t)
-    hi = Math.max(hi, t)
-  }
+  for (const { rows, fields } of uses)
+    for (const r of rows ?? [])
+      for (const field of fields) {
+        const v = obj(r)?.[field]
+        const t = typeof v === 'number' ? v : typeof v === 'string' ? Date.parse(v) : NaN
+        if (!Number.isFinite(t)) continue
+        lo = Math.min(lo, t)
+        hi = Math.max(hi, t)
+      }
   if (!Number.isFinite(lo)) return null
   const span = hi - lo
   if (span < DAY_MS && new Date(lo).toDateString() === new Date(hi).toDateString()) return '%H:%M'
   if (span < 3 * DAY_MS) return '%b %-d %H:%M'
-  if (span < 540 * DAY_MS) return '%b %-d'
+  if (span < 540 * DAY_MS) return DAY_FORMAT
   return '%b %Y'
 }
 
+/** Whether a channel's date axis takes its format from its values (timeFormat): a temporal field with no time unit and
+ * an axis that sets no format of its own. */
+const autoTime = (def: Spec | null): def is Spec => {
+  const axis = obj(def?.axis) ?? {}
+  return !!def && def.type === 'temporal' && !def.timeUnit && typeof def.field === 'string' && def.axis !== null && !('format' in axis) && !('labelExpr' in axis)
+}
+
+/** The fields a unit's date axis on `ch` spans: its own and its x2's or y2's. */
+function timeFields(enc: Spec, ch: 'x' | 'y'): string[] {
+  const def = obj(enc[ch])
+  const end = obj(enc[`${ch}2`])?.field
+  return [def?.field, end].filter((f): f is string => typeof f === 'string')
+}
+
+/** The formats of a layered chart's date axes, from the values of every layer that shares the axis (layers inside
+ * layers included), so a layer of a few marks (a shaded span) does not set the axis's labels by its own one or two
+ * times; null for a channel no layer formats from its values. */
+function layerTimes(s: Spec, root: Spec, inherited: unknown[] | null): Times {
+  const uses: Record<'x' | 'y', TimeUse[]> = { x: [], y: [] }
+  const visit = (u: Spec, rows: unknown[] | null): void => {
+    const own = rowsOf(u, root, rows)
+    const enc = obj(u.encoding)
+    if (enc) for (const ch of ['x', 'y'] as const) if (autoTime(obj(enc[ch]))) uses[ch].push({ rows: own, fields: timeFields(enc, ch) })
+    if (Array.isArray(u.layer)) for (const l of u.layer) if (obj(l)) visit(obj(l)!, own)
+  }
+  visit(s, inherited)
+  return { x: uses.x.length ? spanFormat(uses.x) : null, y: uses.y.length ? spanFormat(uses.y) : null }
+}
+
+type Times = { x: string | null; y: string | null }
+
+/** An axis whose labels name days with ticks at least a day apart: Vega would tick every 12 hours over a week and
+ * write each day twice. */
+const dayTicks = (axis: Spec, format: string): Spec => (format === DAY_FORMAT && !('tickMinStep' in axis) && !('tickCount' in axis) && !('values' in axis) ? { tickMinStep: DAY_MS } : {})
+
 /** A unit's encoding with its legends that repeat a facet's groups or the discrete axis's labels taken off, its binned
  * ticks written without trailing zeros, a long-labelled discrete y axis's title over its labels, and its short
- * discrete x labels turned to read across. */
-function fixUnit(enc: Spec, facetFields: ReadonlySet<string>, rows: unknown[] | null): Spec {
+ * discrete x labels turned to read across. `times` are the date formats of the layers it shares its axes with. */
+function fixUnit(enc: Spec, facetFields: ReadonlySet<string>, rows: unknown[] | null, times: Times | null = null): Spec {
   const out: Spec = { ...enc }
   const x = obj(enc.x)
   const y = obj(enc.y)
@@ -133,8 +178,8 @@ function fixUnit(enc: Spec, facetFields: ReadonlySet<string>, rows: unknown[] | 
     if ('format' in axis || 'labelExpr' in axis) continue
     if (def.bin) out[ch] = { ...def, axis: { ...axis, format: '~g' } }
     else if (def.type === 'temporal' && !def.timeUnit && typeof def.field === 'string') {
-      const format = timeFormat(rows, def.field)
-      if (format) out[ch] = { ...def, axis: { ...axis, format } }
+      const format = times?.[ch] ?? timeFormat(rows, timeFields(enc, ch))
+      if (format) out[ch] = { ...def, axis: { ...dayTicks(axis, format), ...axis, format } }
     } else if (wholeAxis(def, rows)) out[ch] = { ...def, axis: { tickMinStep: 1, format: ',d', ...axis } }
   }
   // a discrete y axis with long labels (a bar chart of named kinds) has its title over the label column, where Vega
@@ -436,7 +481,46 @@ function turnBars(unit: Spec, rows: unknown[] | null): Spec {
   return { ...unit, ...(mark ? { mark: { ...mark, ...orient } } : {}), encoding: turned }
 }
 
-function walk(s: Spec, root: Spec, facetFields: ReadonlySet<string>, inherited: unknown[] | null, opts: ChartOptions = {}): Spec {
+/** The title of a layered chart's axis on `ch`: the first one a layer (at any depth) names itself, else the first
+ * layer's own (titleOf, `own`); undefined when no layer encodes `ch`. */
+function layerTitle(layers: readonly unknown[], ch: 'x' | 'y'): { title: string | null | undefined; own: boolean } {
+  const named = (l: unknown): { title: string | null } | null => {
+    const ls = obj(l)
+    const def = obj(obj(ls?.encoding)?.[ch])
+    if (def && 'title' in def) return { title: def.title as string | null }
+    for (const sub of Array.isArray(ls?.layer) ? ls!.layer : []) {
+      const got = named(sub)
+      if (got) return got
+    }
+    return null
+  }
+  for (const l of layers) {
+    const got = named(l)
+    if (got) return { title: got.title, own: false }
+  }
+  const first = (l: unknown): Spec | null => obj(obj(obj(l)?.encoding)?.[ch]) ?? (Array.isArray(obj(l)?.layer) ? first((obj(l)!.layer as unknown[])[0]) : null)
+  return { title: titleOf(first(layers[0])), own: true }
+}
+
+/** A layer with its units' axes on x and y that name no title of their own titled `titles` (layers inside it included). */
+function titledLayer(l: unknown, titles: Partial<Record<'x' | 'y', string | null>>): unknown {
+  const ls = obj(l)
+  if (!ls) return l
+  const out: Spec = { ...ls }
+  const enc = obj(ls.encoding)
+  if (enc) {
+    const next: Spec = { ...enc }
+    for (const ch of ['x', 'y'] as const) {
+      const def = obj(enc[ch])
+      if (def && ch in titles && !('title' in def)) next[ch] = { ...def, title: titles[ch] }
+    }
+    out.encoding = next
+  }
+  if (Array.isArray(ls.layer)) out.layer = ls.layer.map((sub) => titledLayer(sub, titles))
+  return out
+}
+
+function walk(s: Spec, root: Spec, facetFields: ReadonlySet<string>, inherited: unknown[] | null, opts: ChartOptions = {}, times: Times | null = null): Spec {
   const rows = rowsOf(s, root, inherited)
   let out: Spec = { ...s }
   // a facet operator: its fields name the panels; a row facet takes the y title
@@ -467,21 +551,18 @@ function walk(s: Spec, root: Spec, facetFields: ReadonlySet<string>, inherited: 
     const walked = list.map((c) => (obj(c) ? walk(obj(c)!, root, facetFields, rows, opts) : c))
     out[key] = key === 'hconcat' ? alignRows(list, walked) : walked
   }
-  // layers: each fixed, and every layer's x and y titled as the first layer's, so the axis carries one title
+  // layers: each fixed, their date axes labeled from every layer's values, and every layer's x and y titled as one layer
+  // names them (the first that names a title, else the first), so the axis carries one title whichever layer comes
+  // first, a shaded span drawn behind the chart included
   if (Array.isArray(s.layer)) {
-    const layers = s.layer.map((c) => (obj(c) ? walk(obj(c)!, root, facetFields, rows, opts) : c))
-    const first = obj(obj(layers[0])?.encoding)
-    const titles = { x: titleOf(obj(first?.x)), y: titleOf(obj(first?.y)) }
+    const shared = times ?? layerTimes(s, root, inherited)
+    const layers = s.layer.map((c) => (obj(c) ? walk(obj(c)!, root, facetFields, rows, opts, shared) : c))
+    const found = { x: layerTitle(layers, 'x'), y: layerTitle(layers, 'y') }
     out.layer = layers.map((l, i) => {
-      const ls = obj(l)
-      const enc = obj(ls?.encoding)
-      if (!i || !ls || !enc) return l
-      const next: Spec = { ...enc }
-      for (const ch of ['x', 'y'] as const) {
-        const def = obj(enc[ch])
-        if (def && titles[ch] !== undefined && !('title' in def)) next[ch] = { ...def, title: titles[ch] }
-      }
-      return { ...ls, encoding: next }
+      // a title the first layer takes from its field stays Vega-Lite's own there ("Sum of n"), as it is drawn
+      const titles: Partial<Record<'x' | 'y', string | null>> = {}
+      for (const ch of ['x', 'y'] as const) if (found[ch].title !== undefined && (i || !found[ch].own)) titles[ch] = found[ch].title!
+      return titledLayer(l, titles)
     })
   }
   // a unit (or one faceted by its own channels): bars turned, label colours and folding applied first, so the fixes
@@ -489,7 +570,7 @@ function walk(s: Spec, root: Spec, facetFields: ReadonlySet<string>, inherited: 
   if (obj(out.encoding)) out = foldGroups(labelColours(turnBars(out, rows), rows, opts), rows, opts)
   const enc = obj(out.encoding)
   if (enc) {
-    let fixed = fixUnit(enc, facetFields, rows)
+    let fixed = fixUnit(enc, facetFields, rows, times)
     const row = obj(fixed.row)
     if (row) {
       const moved = yTitleOnce(row, fixed)

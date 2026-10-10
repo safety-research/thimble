@@ -42,3 +42,31 @@ test('a y axis that names each of its ticks (a ridgeline) gets ROW_STEP a name w
   const marked = { $schema: VL, data: { values: rows }, layer: [{ ...ridge(30), $schema: undefined, data: undefined }, { data: { values: [{ x: 1 }] }, mark: 'rule', encoding: { x: { field: 'x', type: 'quantitative' } } }] }
   expect((chartDefaults(marked) as Spec).height).toBe(31 * ROW_STEP)
 })
+
+test("a layered chart's date axis is labeled and titled from all its layers, so a shaded span may come first", () => {
+  const days = Array.from({ length: 21 }, (_, i) => ({ day: `2026-08-${String(i + 1).padStart(2, '0')}T00:00:00`, merged: i }))
+  const span = { data: { values: [{ a: '2026-08-08T00:00:00', b: '2026-08-12T00:00:00' }] }, mark: { type: 'rect', color: 'var(--viz-ink-4)' }, encoding: { x: { field: 'a', type: 'temporal' }, x2: { field: 'b' } } }
+  const bars = { data: { values: days, name: 'thimble-chart-0' }, mark: 'line', encoding: { x: { field: 'day', type: 'temporal', title: 'day' }, y: { field: 'merged', type: 'quantitative', title: 'merged' } } }
+  const out = chartDefaults({ $schema: VL, layer: [span, bars] }) as Spec
+  const [behind, line] = out.layer
+  // the span's one day would label the axis by the hour, and its field would join the title ("day, a")
+  expect(behind.encoding.x.axis.format).toBe('%b %-d')
+  expect(line.encoding.x.axis.format).toBe('%b %-d')
+  expect(behind.encoding.x.title).toBe('day')
+  // the day labels tick at least a day apart, so no day is named twice
+  expect(line.encoding.x.axis.tickMinStep).toBe(86_400_000)
+  // a title the first layer takes from its field stays Vega-Lite's own there, as before
+  const own = chartDefaults({ $schema: VL, layer: [{ ...span, encoding: { x: { field: 'a', type: 'temporal' } } }, { ...bars, encoding: { x: { field: 'day', type: 'temporal' } } }] }) as Spec
+  expect(own.layer[0].encoding.x.title).toBeUndefined()
+  expect(own.layer[1].encoding.x.title).toBe('a')
+})
+
+test("a date axis spans its x2's values too, as a range's dumbbells do", () => {
+  const ends = [
+    { agent: 'a1', first: '2026-08-02T09:00:00', last: '2026-08-09T00:00:00' },
+    { agent: 'a2', first: '2026-08-01T10:00:00', last: '2026-08-03T18:00:00' },
+  ]
+  const unit = chartDefaults({ $schema: VL, data: { values: ends }, mark: 'rule', encoding: { x: { field: 'first', type: 'temporal' }, x2: { field: 'last' }, y: { field: 'agent', type: 'nominal' } } }) as Spec
+  // the befores alone span under 3 days, which would name each label's hour
+  expect(unit.encoding.x.axis.format).toBe('%b %-d')
+})
