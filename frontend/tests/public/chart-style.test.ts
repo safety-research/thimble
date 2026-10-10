@@ -52,8 +52,9 @@ describe('the Vega-Lite theme', () => {
     expect(s['thimble-end'].color).toBeUndefined()
     expect(s['thimble-end'].filled).toBeUndefined()
     expect(s['thimble-end'].size as number).toBeGreaterThan(30)
-    // an area's hover points unseen and wider than a dot, its fill and its color kept for the tooltip's swatch
-    expect(s['thimble-hover']).toMatchObject({ fillOpacity: 0 })
+    // an area's hover points wider than a dot; the spec makes them unseen, as a style's fillOpacity would also empty the
+    // legend's swatches (chart-marks)
+    expect(s['thimble-hover'].fillOpacity).toBeUndefined()
     expect(s['thimble-hover'].size as number).toBeGreaterThan(4 * 30)
   })
 

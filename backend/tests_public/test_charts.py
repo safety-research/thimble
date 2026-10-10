@@ -467,13 +467,15 @@ def test_an_area_stacks_its_series_in_the_legend_s_order_overlaps_them_lightly_o
     spec = spec_of("area", posts)
     enc = spec["encoding"]
     # no dot at each value (Matt, 2026-10-10: "I don't know if we need a dot on every point"), but a hover tip at each:
-    # points the theme draws unseen and wider than a dot (HOVER_STYLE)
-    assert spec["mark"] == {"type": "area", "point": {"style": kt.HOVER_STYLE}} and enc["x"]["type"] == "temporal"
+    # points the theme draws wider than a dot (HOVER_STYLE), unseen by their own fillOpacity, which a style's would also
+    # give the legend's swatches
+    hover = {"style": kt.HOVER_STYLE, "fillOpacity": 0}
+    assert spec["mark"] == {"type": "area", "point": hover} and enc["x"]["type"] == "temporal"
     assert enc["color"] == {"field": "site", "type": "nominal", "title": "site", "sort": ["b", "a"]}
     assert enc["order"] == {"field": kt.STACK_FIELD, "type": "quantitative"}
     assert spec["transform"] == [{"calculate": 'indexof(["b", "a"], datum["site"])', "as": kt.STACK_FIELD}]
     over = spec_of("area", posts, stack=False)
-    assert over["mark"] == {"type": "area", "style": kt.OVERLAP_STYLE, "point": {"style": kt.HOVER_STYLE}}
+    assert over["mark"] == {"type": "area", "style": kt.OVERLAP_STYLE, "point": hover}
     assert over["encoding"]["y"]["stack"] is None and "order" not in over["encoding"]
     share = spec_of("area", posts, stack="share")["encoding"]["y"]
     assert share["stack"] == "normalize" and share["axis"] == {"format": "%"}

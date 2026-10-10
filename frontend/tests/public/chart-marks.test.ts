@@ -87,14 +87,30 @@ test("a range's ends are solid dots in two series colors, or the before end the 
   expect(steps.map((k) => [k.fill, k.opacity])).toEqual([[token('--viz-label'), 0.4], [token('--viz-label'), 1]])
 })
 
+// as thimble.chart writes an area's points (backend kernel_thimble _area_spec, HOVER_STYLE)
+const HOVER = { style: 'thimble-hover', fillOpacity: 0 }
+
 test("an area's hover points draw no dot, and are wider than a dot so a hover finds them", async () => {
   const rows = [1, 2, 3].map((x) => ({ x, y: x * 2 }))
-  const marks = await scene({ data: { values: rows }, mark: { type: 'area', point: { style: 'thimble-hover' } }, encoding: { x: field('x', 'quantitative'), y: field('y', 'quantitative'), tooltip: [field('y', 'quantitative')] } })
+  const marks = await scene({ data: { values: rows }, mark: { type: 'area', point: HOVER }, encoding: { x: field('x', 'quantitative'), y: field('y', 'quantitative'), tooltip: [field('y', 'quantitative')] } })
   const points = marks.find((m) => m.type === 'symbol')!.items as (Item & { fillOpacity?: number; tooltip?: unknown })[]
   expect(points).toHaveLength(3)
   expect(points.every((p) => p.fillOpacity === 0 && !(p as { stroke?: string }).stroke)).toBe(true)
   expect(points.every((p) => (p.size as number) > 4 * 30)).toBe(true)
   expect(points[0]!.tooltip).toBeTruthy()
+})
+
+test("areas' legend keeps its swatches, stacked or overlapping, under their unseen hover points", async () => {
+  const rows = [1, 2, 3].flatMap((x) => ['a', 'b'].map((g) => ({ x, y: x * 2 + (g === 'a' ? 1 : 0), g })))
+  const enc = { x: field('x', 'quantitative'), y: field('y', 'quantitative'), color: field('g', 'nominal'), tooltip: [field('y', 'quantitative')] }
+  for (const mark of [{ type: 'area', point: HOVER }, { type: 'area', style: 'thimble-overlap', point: HOVER }]) {
+    const marks = await scene({ data: { values: rows }, mark, encoding: { ...enc, y: { ...enc.y, stack: mark.style ? null : 'zero' } } })
+    const keys = marks.filter((m) => m.type === 'legend').flatMap((m) => m.items) as (Item & { fillOpacity?: number })[]
+    expect(keys.map((k) => k.fill)).toEqual([token('--viz-1'), token('--viz-2')])
+    expect(keys.every((k) => (k.fillOpacity ?? 1) > 0 && (k.opacity ?? 1) > 0), JSON.stringify(mark)).toBe(true)
+    const points = marks.find((m) => m.type === 'symbol')!.items as (Item & { fillOpacity?: number })[]
+    expect(points.every((p) => p.fillOpacity === 0)).toBe(true)
+  }
 })
 
 test("a range's line runs from one end's edge to the other's, whichever way it runs", async () => {

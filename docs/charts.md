@@ -149,7 +149,8 @@ job sets apart names that job as a Vega-Lite style, and the theme's `style` conf
 line's band of intervals), `thimble-box` (a box plot's boxes and a violin's body), `thimble-median` (their medians, in
 ink), `thimble-overlap` (areas side by side, and density curves), `thimble-fit` (a scatter's fitted line, in ink unless
 its group colors it), `thimble-span` (a range's line, muted), `thimble-end` (a range's ends, solid and larger than a
-dot) and `thimble-hover` (an area's points, unseen and wider than a dot, which show its values on hover). An interval is
+dot) and `thimble-hover` (an area's points, wider than a dot, which show its values on hover; the spec makes them unseen
+with the point's own `fillOpacity: 0`, as a style's would also empty the legend's swatches). An interval is
 a rule, which the theme draws in its annotation ink. A bar is round at its end, away from its
 baseline, by 2 px (`--viz-bar-radius`), and a stacked bar at the end of its whole stack; a box plot's box is square.
 Dots that would overlap on their line, a dots chart's, a box plot's or a violin's, move across it, each only as far as
