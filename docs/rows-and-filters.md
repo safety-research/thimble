@@ -17,7 +17,7 @@ these parts, so a page lays them out and fills them rather than drawing its own:
 | the cards | `thimble.recordCard` | a record as a card or a tile, its colors Color by's bars on its edge, one per choice |
 | the side panel | `thimble.side` | a record, or a row's children, in a wide panel beside the list |
 | the transcript | `thimble.transcript` | a transcript's turns, as the File browser's Transcript mode draws them |
-| the messages | `thimble.messages` | messages between people or agents, as a chat app, a forge's conversation or a mail thread draws them |
+| the messages | `thimble.messages` | any conversation between people or agents, as a chat app draws it: agents in a chat or on a board, a user and an assistant, a mail thread, a pull request's comments |
 | the record | `thimble.record` | one record's fields as a tree under its citation, such as in the side panel |
 | a chart | `thimble.chart` | a chart of a card's `thimble.chart` kinds, in the canvas's style ([charts.md](charts.md#in-a-view)) |
 
@@ -343,24 +343,30 @@ hears of a turn it opens.
 
 ## The messages
 
-`thimble.messages({mount, color, format, mentions, onPick})` draws messages between people or agents as a chat app, a
-forge's conversation or a mail thread draws them: each author's avatar in a rail at the left, a head with the author in
+`thimble.messages({mount, color, format, mentions, onPick})` draws any conversation between people or agents as a chat
+app draws it, such as agents in a chat or on a board, a user and an assistant, people by mail or a pull request's
+comments: each author's avatar in a rail at the left, a head with the author in
 bold and the time in mono (the full date and time on hover), a `title` such as a subject in bold over the words, `to` as
 a quiet line under the head, and the words drawn by `thimble.text` in `format` (`'markdown'`, the default, or `'plain'`
 for mail), with `mentions` as `thimble.text` takes them. One author's messages that follow each other within five
 minutes, with the same parent, share one head, each still its own record; a date line opens each day. A message with a
-`parent` is drawn under its parent's group, one level in, and a reply to a reply at that level too, as boards and forges
-draw threads. `kind: 'event'` is one line, an icon in the ink, the author, what they did (`said`) and the time at the
-right, as a forge's timeline draws it; `icon` is one of `comment`, `commit`, `pull`, `issue`, `merge`, `close`,
-`reopen`, `approve`, `changes`, `edit`, `delete` and `mail`. `box: true` draws a message in a box beside the author's
-avatar, as a forge draws a pull request's opening post or a comment and a mail app a message: the box's head names the
-author, what they did (`said`, such as "opened this pull request") and the time, over the `to`, the `title` and the
-words. A boxed message shares no head.
+`parent` is drawn under its parent's group, one level in, and a reply to a reply at that level too, as a board draws a
+thread. `kind: 'event'` is one line for something that happened rather than something said, such as a tool call, a
+task closed or a member who joined: an icon in the ink, the author, what they did (`said`) and the time at the right,
+with `text` under it, such as a tool call's output. `icon` is one of `note`, `start`, `change`, `done`, `stop`,
+`again`, `link`, `send`, `remove`, `warn` and `run`, or `{html}` for an icon of the page's own, such as an
+`<svg viewBox="0 0 16 16">`, which takes the ink and the stroke of the kit's; any other name is a dot, and a forge's
+names (`pull`, `commit`, `merge`, `close` and the like) draw the nearest of these. `box: true` draws a message in a box
+beside the author's avatar, for one that stands apart from the chat, such as a mail or a task's opening post: the box's
+head names the author, what they did (`said`, such as "wrote" or "opened this task") and the time, over the `to`, the
+`title` and the words. A boxed message shares no head.
 
 ```js
 const side = thimble.side({ mount: '#body' })
 const conv = thimble.messages({ mount: '#thread', onPick: (m) => side.open({ title: m.author, ref: m.ref, render: (body) => thimble.record({ mount: body, value: m, ref: m.ref }) }) })
 conv.draw(posts.filter((p) => p.thread === chosen).map((p) => ({ ref: p.ref, t: p.time, author: p.author, text: p.text, parent: p.reply_to })), { title: '# ' + names[chosen] })
+// a user and an assistant, its tool calls as events
+conv.draw(turns.map((t) => (t.tool ? { ref: t.ref, t: t.time, author: t.role, kind: 'event', icon: 'run', said: 'ran ' + t.tool, text: t.output } : { ref: t.ref, t: t.time, author: t.role, text: t.text })))
 ```
 
 A message is `{ref, t, author, text, title, to, parent, kind, icon, said, box, record}`, `t` in seconds since 1970 (or a
