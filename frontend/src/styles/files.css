@@ -2648,8 +2648,8 @@
 .reader-line.has-tint {
   background: color-mix(in oklab, var(--tint) 16%, transparent);
 }
-/* a text the focused label marks: its colour at 24% behind it, no underline; a text another label marks: a 2px
-   underline in its colour, the text as it is */
+/* a text the focused label marks: its colour at 24% behind it; a text another label marks: its colour faintly
+   behind it (10%), the text as it is */
 .reader-span {
   border-radius: 2px;
   background: color-mix(in oklab, var(--c) 24%, transparent);
@@ -2659,11 +2659,8 @@
   transition: background-color var(--dur-base) var(--ease-out);
 }
 .reader-span.is-under {
-  background: none;
+  background: color-mix(in oklab, var(--c) 10%, transparent);
   color: inherit;
-  text-decoration: underline 2px var(--c);
-  text-underline-offset: 3px;
-  text-decoration-skip-ink: none;
 }
 /* a line: the number in a gutter, the text beside it */
 .reader-line {
