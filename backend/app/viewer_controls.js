@@ -44,7 +44,7 @@
   var DENSE_H = 36 // px, a lane's height while the lanes draw density, so that the bars read
   var DENSE_BIN = 4 // px, a density bar's least width
   var MARK_MIN = 2 // px, a mark's least width
-  var BAD_X = 3.25 // px, half a failure's ✕, which stands at the foot of its mark or bar
+  var BAD_X = 3 // px, half a failure's ✕, centered on the foot of its mark or bar
   var HIT = 4 // px either side of a mark within which a click or the tip finds it
   var ICON = {
     down: 'M6 9l6 6 6-6',
@@ -1547,7 +1547,7 @@
             }
             if (bin.bad) {
               problems += bin.bad
-              if (self.on('problem')) bad += badX(bx0 + bw / 2, H)
+              if (self.on('problem')) bad += badX(bx0 + bw / 2, Math.min(H - 2, H - BAD_X))
             }
           })
           its = []
@@ -1572,7 +1572,7 @@
           svg += '<rect class="thimble-lane-mark" data-i="' + mk.i + '" x="' + mk.x.toFixed(1) + '" y="3" width="' + mk.w.toFixed(1) + '" height="' + (LANE_H - 6) + '"' + (c ? ' style="fill:' + esc(c) + '"' : '') + '/>'
           if (self.problem && safe(function () { return self.problem(mk.it) }, false)) {
             problems++
-            if (self.on('problem')) bad += badX(mk.x + mk.w / 2, LANE_H)
+            if (self.on('problem')) bad += badX(mk.x + mk.w / 2, LANE_H - 3)
           }
         }
         // the failures' ✕ over every mark, so no mark drawn later hides one
@@ -1616,9 +1616,9 @@
     }
     this.placeSpan()
   }
-  // a failure's ✕ centered on x at the foot of a lane `h` px tall, a halo of the paper under its red strokes
-  function badX(x, h) {
-    var y = h - 0.5 - BAD_X
+  // a failure's ✕ centered on (x, y), the foot of its mark, a thin halo of the paper under its red strokes: its arms
+  // stand out over the mark and the paper below it, and a narrow mark keeps most of its colour above it
+  function badX(x, y) {
     var d = 'M' + (x - BAD_X).toFixed(2) + ' ' + (y - BAD_X).toFixed(2) + 'l' + 2 * BAD_X + ' ' + 2 * BAD_X + 'M' + (x + BAD_X).toFixed(2) + ' ' + (y - BAD_X).toFixed(2) + 'l' + -2 * BAD_X + ' ' + 2 * BAD_X
     return '<g class="thimble-lane-bad"><path class="thimble-lane-bad-halo" d="' + d + '"/><path class="thimble-lane-bad-x" d="' + d + '"/></g>'
   }

@@ -463,8 +463,9 @@
   fill: var(--viz-ink-3, rgba(var(--ink-rgb), 0.5));
   cursor: pointer;
 }
-/* a failure: a ✕ in the problem red at the foot of its mark or bar, over a halo of the paper, so it reads at a glance
-   beside any Color by colour, light or dark; a click passes to the mark under it */
+/* a failure: a ✕ in the problem red centered on the foot of its mark or bar, over a thin halo of the paper, so it reads
+   at a glance beside any Color by colour, light or dark, and a narrow mark keeps most of its colour; a click passes to
+   the mark under it */
 .thimble-lane-bad {
   pointer-events: none;
 }
@@ -474,7 +475,7 @@
 }
 .thimble-lane-bad-halo {
   stroke: var(--surface-card);
-  stroke-width: 4;
+  stroke-width: 3;
 }
 .thimble-lane-bad-x {
   stroke: var(--status-negative);

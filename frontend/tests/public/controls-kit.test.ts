@@ -263,16 +263,17 @@ describe('the lanes and their key', () => {
     `)
     await wait()
     expect(doc().querySelectorAll('.thimble-lane-bad')).toHaveLength(2)
-    // each ✕ a halo of the paper under its red strokes, after the lane's marks, centered on its failed call's mark
+    // each ✕ a halo of the paper under its red strokes, after the lane's marks, centered on the foot of its failed
+    // call's mark
     for (const bad of doc().querySelectorAll('.thimble-lane-bad')) {
       expect([...bad.children].map((p) => p.getAttribute('class'))).toEqual(['thimble-lane-bad-halo', 'thimble-lane-bad-x'])
       expect(bad.nextElementSibling).toBe(null)
       const d = bad.children[1].getAttribute('d')!
       const [x0, y0, dx, dy] = (/^M([\d.]+) ([\d.]+)l([\d.]+) ([\d.]+)M/.exec(d) || []).slice(1).map(Number)
-      expect([dx, dy]).toEqual([6.5, 6.5])
-      expect(y0 + dy).toBeCloseTo(18 - 0.5, 5)
+      expect([dx, dy]).toEqual([6, 6])
       const mark = [...bad.parentElement!.querySelectorAll('.thimble-lane-mark')].find((m) => Math.abs(Number(m.getAttribute('x')) + Number(m.getAttribute('width')) / 2 - (x0 + dx / 2)) < 0.15)
       expect(mark, d).toBeTruthy()
+      expect(y0 + dy / 2).toBeCloseTo(Number(mark!.getAttribute('y')) + Number(mark!.getAttribute('height')), 5)
     }
     // no band ever shows, so the key has no `running`; `failed` with its count, its swatch a ✕
     expect(texts('.thimble-key-chip')).toEqual(['failed2'])
