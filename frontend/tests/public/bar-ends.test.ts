@@ -92,6 +92,12 @@ describe("a bar's round end is the end its value is at", () => {
     for (const spec of [horizontal, summedAcross]) expect((await bars({ data: { values: CHANGE }, ...spec })).map((b) => b.corners)).toEqual([RIGHT, LEFT])
   })
 
+  test("a column whose name has a dot, escaped as Vega reads it, as in an agent's summed bars", async () => {
+    const rows = CHANGE.map((r) => ({ 'model.name': r.model, 'change.pp': r.change }))
+    const spec = { mark: 'bar', encoding: { x: field('model\\.name', 'nominal'), y: field('change\\.pp', 'quantitative', { aggregate: 'sum' }) } }
+    expect((await bars({ data: { values: rows }, ...spec })).map((b) => b.corners)).toEqual([TOP, BOTTOM])
+  })
+
   test('a stack round at both ends when it holds values either side of zero', async () => {
     const got = await bars({ data: { values: MIXED }, ...mixed })
     expect(got.map((b) => b.corners)).toEqual([[R, R, R, R], TOP])

@@ -43,14 +43,15 @@ export function barEnds(vg: Record<string, unknown>): Record<string, unknown> {
     }
     return r > 0 ? r : 0
   }
-  // a position as an expression of its pixel: a signal, or a field (a plain name) or a number through a scale; else ''
+  // a position as an expression of its pixel: a signal, or a field (one name, whose dots and brackets a backslash
+  // escapes, as Vega reads it) or a number through a scale; else ''
   const px = (v: unknown): string => {
     const e = o(v)
     if (!e) return ''
     const n = Object.keys(e).length
     if (n === 1 && typeof e.signal === 'string') return `(${e.signal})`
     if (n !== 2 || typeof e.scale !== 'string') return ''
-    if (typeof e.field === 'string' && /^[^.[\]\\]+$/.test(e.field)) return `scale(${JSON.stringify(e.scale)},datum[${JSON.stringify(e.field)}])`
+    if (typeof e.field === 'string' && /^(?:[^.[\]\\]|\\.)+$/.test(e.field)) return `scale(${JSON.stringify(e.scale)},datum[${JSON.stringify(e.field.replace(/\\(.)/g, '$1'))}])`
     return typeof e.value === 'number' ? `scale(${JSON.stringify(e.scale)},${e.value})` : ''
   }
   // the zero of the scale a stack group's position signal reads, as a pixel
