@@ -254,6 +254,61 @@ Propose a view, a page that shows records in a form their files hide, or a viewe
 }
 ```
 
+## profile_data
+
+Check TypeScript types for the corpus's records against its files, and get a profile of every field. thimble keeps the last types you check, with their profile, and gives both to the builder of each view you propose.
+
+Write a type for each kind of record, across all the files. Before each type, `@records` says where its records are, as `apply_label`'s paths do: a glob for the lines of text files, such as `runs/*/events.jsonl`, or a glob with a record's place, such as `runs/*/forge.db#prs` for a table's rows or `results.json#/runs` for a JSON value's items. `@file` makes each file one record, such as a video. In a field, `Time` is a time in any format, `Other["key"]` joins to another type's key, a union of strings lists a category's values, `?` marks a field that some records lack, and `unknown` is a value you do not type. `@label` marks a label's value on the record, with the field named as the label. `@derived` gives the code of a field that the files do not hold: a function of the record and of all records by type.
+
+```ts
+/** @records threads/*.jsonl */
+type Post = {
+  id: string
+  thread: Thread["id"]
+  ts: Time
+  reply_to?: Post["id"]
+  /** @label */ asks_help: "yes" | "no"
+  /** @derived (p, all) => all.Post.filter((q) => q.reply_to === p.id).length */ replies: number
+}
+```
+
+The profile gives the records each type matched and, for each field, how well it fits, such as "ts parses as a time for 97%", with a few records that do not fit, then its distinct values, range, top values and nulls, and how well each join holds. On very large files it profiles a sample and says so.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "types": {"type": "string", "description": "The types, as TypeScript source."}
+  },
+  "required": ["types"]
+}
+```
+
+## pick_views
+
+Pick two of about eight concepts for a view. A picker that sees only the concepts and the guidelines keeps the two that best follow the guidelines and differ from each other in kind. Its result names the two, with a reason for each. Then propose both with `propose_view`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "concepts": {
+      "type": "array",
+      "description": "About eight concepts, each a different kind of form.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string", "description": "A short name in Title Case."},
+          "concept": {"type": "string", "description": "The form, what one mark or row stands for, what takes position, and the one question its first screen answers, in two or three sentences."}
+        },
+        "required": ["name", "concept"]
+      }
+    }
+  },
+  "required": ["concepts"]
+}
+```
+
 ## write_document
 
 Save a whole document as markdown in its type's form. To change one passage, use `edit_document`.
