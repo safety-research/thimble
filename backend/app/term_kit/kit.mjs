@@ -3928,19 +3928,25 @@ export function rows(opts = {}) {
  * The timeline: the overview as lanes on one axis of times or numbers (docs/terminal-views.md, "The timeline"; `lanes`
  * is its old name): a lane per group of `rows` (the Rows control, a field's name or a function of a record), its name in
  * the gutter at the left with its tree guide (a top group's `▾` `▸` folds the lanes under it into its own), its
- * records' bars in the Color by hues on one height, `─` in the rule gray where it ran (`band`) and in a record's hue
- * while that record ran (`end`), and `×` in red where most of a cell's records failed (`problem`). The axis is the
+ * records' bars in the Color by hues on one height, `─` in the rule gray where it ran (`band`, in Events only) and in a
+ * record's hue while that record ran (`end`), and `×` in red where most of a cell's records failed (`problem`). The axis is the
  * scale `draw` gets (the time range's), else the records' own span in `unit`, with an axis of its own under the lanes;
  * with no `rows`, one lane with no name. Under the pointer a lane marks only its cell, `┊` or the bar in the text color,
  * with the cell's time and records in the tip; a click opens the record nearest there (`onMark`), a click on a name
  * chooses the lane (`onPick`). The list's rows in view are on the selection background across the lanes (`span`, or a
  * list's `span()`). `legend()` is the key for `axis`, each entry a toggle that hides or shows its series.
+ * `drawLane(lane, ctx)` draws the view's own cells in each lane under its records' marks, as the browser's does:
+ * `ctx.span(t0, t1, {color, name, series})` a shaded span `░`, its name in the cells' tips, `ctx.put(x, run)` a cell,
+ * `ctx.x(t)` a time's cell, `ctx.colorOf(record)` its hue and `ctx.on(id)` whether a series of `series` shows.
  *
  * opts: rows (a Rows control, a field's name or a function of a record) or groups(items), color (Color by; the view's
  * by default), time(item), end(item), unit ('s' or 'n', for an axis of its own), band(lane) [[start, end]],
- * problem(item), onPick(lane), onMark(item), words {band, problem, record}, key.
+ * problem(item), onPick(lane), onMark(item), words {band, problem, record}, key, drawLane(lane, ctx), marks (false or
+ * a function of a record: whether Events draws its mark), series [{id, name, mark, color, glyph}].
  */
 const EVENT = '▌' // a lane's cell that holds a record, while the lanes draw Events rather than density
+// the key's glyph of a series of the view's own, by its mark as the browser's key draws it
+const SERIES_GLYPH = { band: '░', mark: '▌', line: '─', problem: '×' }
 
 // a record's place on the axis, a number in `unit`: a number as it is, a string that holds one as that number, and on
 // an axis of time a Date or a date as text too, such as an ISO time, one with no zone in UTC as the axis writes times
@@ -3979,7 +3985,11 @@ export function timeline(opts = {}) {
     top: 0,
     shown: [],
     counts: { band: 0, problem: 0 },
+    drawn: new Set(), // the ids of the view's own series a lane drew (drawLane)
   }
+  // the view's own series in the key, and whether Events draws a record's mark (`marks`)
+  const series = (Array.isArray(opts.series) ? opts.series : []).filter((s) => s && s.id !== null && s.id !== undefined && s.id !== 'band' && s.id !== 'problem')
+  const marksFn = opts.marks === false ? () => false : typeof opts.marks === 'function' ? opts.marks : null
   const words = { band: 'running', problem: 'failed', record: 'record', ...(opts.words || {}) }
   let unit = opts.unit === 'n' ? 'n' : 's'
   const at = typeof opts.time === 'function' ? opts.time : (it) => (it.t ?? it.time)
@@ -4041,7 +4051,8 @@ export function timeline(opts = {}) {
       if (b < scale.from || a > scale.to) return
       for (let x = scale.x(Math.max(a, scale.from)); x <= scale.x(Math.min(b, scale.to)); x++) if (!inGap(x)) out[x] = run
     }
-    if (typeof opts.band === 'function' && !(n.heading && !n.folded)) {
+    // a band where the lane ran, in Events only: Density draws its bars alone
+    if (typeof opts.band === 'function' && !dense && !(n.heading && !n.folded)) {
       const spans = opts.band(n) || []
       if (spans.length) st.counts.band++
       if (isOn('band')) for (const [a, b] of spans) fill(a, b, { s: '─', fg: COLORS.rule })
@@ -4054,8 +4065,49 @@ export function timeline(opts = {}) {
         const hue = colour ? colour.colourOf(colour.valueOf(it)) : null
         fill(t, e, hue && hue !== COLORS.dim ? { s: '─', fg: hue } : { s: '─', d: true })
       }
-    // each cell's records, those that failed and their Color by values, in one pass over the lane's records
+    // the view's own drawing (drawLane): its shaded spans and cells, under the records' marks
+    const named = new Array(scale.cols)
+    if (typeof opts.drawLane === 'function') {
+      const ctx = {
+        scale,
+        cols: scale.cols,
+        x: (t) => {
+          const p = placeOf(t, unit)
+          return p === null || p < scale.from || p > scale.to ? -1 : scale.x(p)
+        },
+        colorOf: (it) => {
+          const c = colour ? colour.colourOf(colour.valueOf(it)) : null
+          return c && c !== COLORS.dim ? c : null
+        },
+        on: (id) => {
+          st.drawn.add(String(id))
+          return isOn(String(id))
+        },
+        span: (t0, t1, o = {}) => {
+          if (o.series !== undefined && o.series !== null && !ctx.on(o.series)) return
+          let a = placeOf(t0, unit)
+          let b = t1 === undefined || t1 === null ? a : placeOf(t1, unit)
+          if (a === null || b === null) return
+          if (b < a) [a, b] = [b, a]
+          if (b < scale.from || a > scale.to) return
+          const c = o.color || o.colour
+          for (let x = scale.x(Math.max(a, scale.from)); x <= scale.x(Math.min(b, scale.to)); x++) {
+            if (inGap(x) || x < 0 || x >= scale.cols) continue
+            out[x] = { s: '░', fg: c || COLORS.rule }
+            if (o.name !== undefined && o.name !== null && o.name !== '') (named[x] || (named[x] = [])).push(String(o.name))
+          }
+        },
+        put: (x, run) => {
+          if (Number.isInteger(x) && x >= 0 && x < scale.cols && !inGap(x) && run && typeof run.s === 'string') out[x] = { ...run, s: [...run.s][0] || ' ' }
+        },
+      }
+      ctx.colourOf = ctx.colorOf
+      opts.drawLane(n, ctx)
+    }
+    // each cell's records, those that failed and their Color by values, in one pass over the lane's records; in Events
+    // the hue of a cell's mark is that of the records whose marks the kit draws (`marks`)
     const counts = new Int32Array(scale.cols)
+    const marked = new Int32Array(scale.cols)
     const failed = new Int32Array(scale.cols)
     const values = new Array(scale.cols)
     const problem = typeof opts.problem === 'function' ? opts.problem : null
@@ -4064,6 +4116,8 @@ export function timeline(opts = {}) {
       if (x < 0) continue
       counts[x]++
       if (problem && problem(it)) failed[x]++
+      if (!dense && marksFn && !marksFn(it)) continue
+      marked[x]++
       const v = colour ? colour.valueOf(it) : null
       const k = v === null || v === undefined ? '' : String(v)
       const m = values[x] || (values[x] = new Map())
@@ -4073,7 +4127,7 @@ export function timeline(opts = {}) {
     // Events: a mark in every cell that holds a record
     const hue = hueFn(colour)
     for (let x = 0; x < scale.cols; x++) {
-      if (!counts[x]) continue
+      if (!marked[x]) continue
       let best = ''
       let bn = 0
       for (const [v, m] of values[x]) if (v !== '' && m > bn && hue(v)) [best, bn] = [v, m]
@@ -4094,7 +4148,8 @@ export function timeline(opts = {}) {
     const tips = Array.from({ length: scale.cols }, (_, x) => {
       const k = counts[x]
       const bad = failed[x]
-      return `${bare ? '' : `${n.name} · `}${whens[x]}${k ? ` · ${plural(k, words.record)}` : ''}${bad ? ` · ${num(bad)} ${words.problem}` : ''}`
+      const own = named[x] ? ` · ${[...new Set(named[x])].join(', ')}` : ''
+      return `${bare ? '' : `${n.name} · `}${whens[x]}${k ? ` · ${plural(k, words.record)}` : ''}${bad ? ` · ${num(bad)} ${words.problem}` : ''}${own}`
     })
     return { runs: out, tips, its }
   }
@@ -4117,6 +4172,10 @@ export function timeline(opts = {}) {
       const out = []
       if (typeof opts.band === 'function' && st.counts.band) out.push({ id: 'band', glyph: '─', fg: COLORS.rule, name: words.band, on: isOn('band'), toggle: () => toggle('band') })
       if (typeof opts.problem === 'function' && st.counts.problem) out.push({ id: 'problem', glyph: '×', fg: COLORS.problem, name: words.problem, on: isOn('problem'), toggle: () => toggle('problem') })
+      for (const s of series) {
+        const id = String(s.id)
+        if (st.drawn.has(id)) out.push({ id, glyph: s.glyph || SERIES_GLYPH[s.mark || 'band'] || '░', fg: s.color || s.colour || COLORS.rule, name: String(s.name || id), on: isOn(id), toggle: () => toggle(id) })
+      }
       return out
     },
     /** Draw the lanes: `o.items` (those of the range; a record with no place on the axis is left out), `o.scale`
@@ -4133,7 +4192,7 @@ export function timeline(opts = {}) {
       const gutter = o.gutter || (bare ? 0 : 14)
       // an axis of its own takes a row under the lanes, and one more where its key has no room in the gutter; none
       // with no records to place
-      const keyW = [typeof opts.band === 'function' && `─ ${words.band}`, typeof opts.problem === 'function' && `× ${words.problem}`].filter(Boolean).reduce((w, s, i) => w + (i ? 2 : 0) + width(s), 0)
+      const keyW = [typeof opts.band === 'function' && `─ ${words.band}`, typeof opts.problem === 'function' && `× ${words.problem}`, ...series.map((s) => `░ ${s.name || s.id}`)].filter(Boolean).reduce((w, s, i) => w + (i ? 2 : 0) + width(s), 0)
       const ownAxis = !o.scale && items.length > 0
       const axisRows = ownAxis ? (keyW && keyW > gutter - 2 ? 2 : 1) : 0
       const room = Math.max(1, Math.min(o.room ?? d.left, d.left) - axisRows)
@@ -4143,6 +4202,7 @@ export function timeline(opts = {}) {
       const dense = o.density !== false
       const all = layout(items, room)
       st.counts = { band: 0, problem: 0 }
+      st.drawn = new Set()
       const groups = all.map((n) => n.items)
       const max = maxBin(scale, groups, time)
       const years = unit !== 'n' && yearOf(scale.from) !== yearOf(scale.to)

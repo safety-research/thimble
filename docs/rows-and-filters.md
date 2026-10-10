@@ -164,12 +164,15 @@ tl.draw(commits) // [{t: 1778922000, author: 'ana', text: 'Fix the parser'}]
 | `rows`, `range`, `color` | the lanes: the Rows control, a field's name or a function of a record; the time range (its `scale(width)`); and Color by (`color` or `colour`: the page's by default, `false` for gray marks) |
 | `time(item)`, `end(item)` | a record's place on the axis (`item.t` by default), a number, or a Date or an ISO time on an axis of time, else the record is left out; and its end, for a mark as wide as the record ran |
 | `unit` | the axis's unit with no range, as the time range's: `'s'` seconds since 1970 (the default), `'ms'`, or `'n'` a plain number such as a turn, a line or a score |
-| `band(lane)` | the spans the lane ran, `[[start, end]]`, drawn as a light band (the key's "running") |
+| `band(lane)` | the spans the lane ran, `[[start, end]]`, drawn as a light band in Events (the key's "running") |
 | `problem(item)` | whether a record failed: its mark takes a ✕ in the problem red at its foot (the key's "failed") |
 | `words` | the key's words: `{band, problem}` |
 | `keyMount` | where the key goes; at the lanes' top by default, or with no range beside the axis, under it where it has no room there |
 | `follow` | the detail list, whose rows carry `data-t`, as the table's, the transcript's and the messages' do: the rows in view, from the earliest of their times to the latest, are a light tint across the lanes |
-| `density` | a flag, or a function the page answers at each draw: each lane as bars on the scale's bins in place of marks (an Events \| Density choice) |
+| `density` | a flag, or a function the page answers at each draw: each lane as bars on the scale's bins in place of marks, with no band behind them (an Events \| Density choice) |
+| `drawLane(lane, ctx)` | the view's own marks in each lane, on the lanes' scale (below) |
+| `marks` | `false`, or a function of a record: whether Events draws the kit's mark of a record, for a view that draws its own; the tip and a click still find the record |
+| `series` | the key's entries of the view's own series, `[{id, name, mark, color}]`, `mark` as the key draws it (`band`, `mark`, `line`); an entry shows while a lane draws its series |
 | `anchor(lane)` | a lane's `data-anchor`, such as a session's unit |
 | `onPick(lane)`, `onMark(item)` | a lane's name clicked, which marks it chosen; a mark clicked |
 | `tip(item)` | the words of a record in the hover tip |
@@ -181,12 +184,37 @@ gives its time and its records per value, and a click opens its first record (`o
 as the list scrolls; where the time range marks a span on its own overview (`range.visible`), the lanes mark it there
 too.
 
+`drawLane(lane, ctx)` draws the view's own marks in each lane after the kit has drawn its own: shaded spans of time, a
+line or a small chart, or marks in place of the kit's (`marks: false`). It runs at each paint, so it follows Color by,
+the range, the key and the records the page draws (`lane.items`, those Filter by keeps). The tip and a click find the
+lane's records by their place on the axis, so marks the view draws itself answer them too.
+
+| `ctx` | what it is |
+|---|---|
+| `g`, `over` | SVG groups as tall as the lane, behind the kit's marks and over them (under the failures' ✕), which take SVG markup (`insertAdjacentHTML`) or elements |
+| `x(t)`, `scale`, `width`, `height` | a time's x on the lanes' scale (a number, a Date or an ISO time), the scale itself (`t(x)`, `from`, `to`), and the track's size in px |
+| `colorOf(record)` | the record's Color by color, null with Off or a value turned off |
+| `span(t0, t1, {color, name, series, over})` | a shaded span as tall as the lane (a moment, a line), light gray or `color` at a low opacity; `name` is said in the tip over it; with `series` it shows while that series is on |
+| `on(id)` | whether a series of `series` shows; asking puts its entry in the key |
+
+```js
+const tl = thimble.timeline({
+  mount: '#lanes', rows, range,
+  series: [{ id: 'freeze', name: 'deploy freeze' }],
+  drawLane: (lane, ctx) => {
+    for (const f of freezes) ctx.span(f.start, f.end, { name: f.reason, series: 'freeze' })   // across every lane
+    for (const c of lane.items.filter((c) => c.cost)) ctx.over.insertAdjacentHTML('beforeend',
+      `<circle cx="${ctx.x(c.t)}" cy="${ctx.height / 2}" r="2.5" fill="${ctx.colorOf(c) || 'gray'}"/>`)
+  },
+})
+```
+
 | member | what it gives |
 |---|---|
 | `draw(items)` | the lanes drawn with these records, those of the range the page shows |
 | `lanes`, `chosen`, `choose(key)` | the lanes as drawn, and the chosen one |
 | `visible(t0, t1)`, `visible(null)` | the span the list shows, for a list `follow` cannot read |
-| `isOn(series)` | whether `band` or `problem` shows |
+| `isOn(series)` | whether `band`, `problem` or one of `series` shows |
 | `scale` | the scale the lanes drew on |
 
 ## The key

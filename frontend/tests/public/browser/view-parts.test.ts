@@ -5,7 +5,9 @@
 // tint across the lanes that follows the list as it scrolls; a record opens in a side panel beside the list that starts
 // wide enough to read it, a drag of its edge resizes it, and the page built again opens it at that width; the divider's
 // drag gives the overview its height, kept too; a failure in the lanes is a ✕ in the problem red that stands out from
-// the marks and the paper, light and dark. What the controls decide without layout is tests/public/controls-kit.test.ts.
+// the marks and the paper, light and dark; in Density the lanes draw their bars alone, their names and tree guides as
+// tall as the taller lanes, and the tint keeps to the lanes' height there and back in Events. What the controls decide
+// without layout is tests/public/controls-kit.test.ts.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -113,6 +115,71 @@ window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'tool', tit
 window.lanes = thimble.timeline({ mount: '#lanes', rows: 'session', problem: (c) => c.outcome !== 'ok' })
 lanes.draw(calls)
 </script></body></html>`
+
+// a tree of sessions on the lanes in the theme's tokens, each session's band where it ran, Events or Density, and a
+// list under them whose rows carry data-t, so the tint of its rows in view shows across the lanes
+const dense = `<!doctype html><html><head><style>${THEME} html,body{margin:0} body{background:var(--surface-card)}
+#lanes{width:860px} #list{height:120px;overflow:auto} .row{height:24px}</style>${KIT}</head><body><span id="rows"></span><div id="lanes"></div><div id="list"></div>
+<script>
+const PARENT = { lead: null, explore: 'lead', grep: 'explore', test: 'lead' }
+const calls = []
+Object.keys(PARENT).forEach((s, si) => { for (let i = 0; i < 20; i++) calls.push({ ref: 'r1/' + s + '.jsonl#L' + (i + 1), t: ${T0} + si * 300 + i * 90, session: s }) })
+calls.sort((a, b) => a.t - b.t)
+window.dense = false
+window.rows = thimble.rows({ mount: '#rows', fields: [{ name: 'session', title: 'Session', parentOf: (k) => PARENT[k] }] })
+window.lanes = thimble.timeline({ mount: '#lanes', rows, names: 160, follow: '#list', density: () => window.dense,
+  band: (n) => (n.items.length ? [[n.items[0].t, n.items[n.items.length - 1].t]] : []) })
+lanes.draw(calls)
+document.getElementById('list').innerHTML = calls.map((c) => '<div class="row" data-t="' + c.t + '">' + c.ref + '</div>').join('')
+</script></body></html>`
+
+describe("the timeline's Density", () => {
+  test("its bars alone, with no band behind them; each tree guide as tall as its lane, so the guides meet as in Events; the tint of the list's rows in view as tall as the lanes, in Density and back in Events", async () => {
+    const page = await browser.newPage({ viewport: { width: 900, height: 500 } })
+    await page.setContent(dense)
+    await page.waitForSelector('.thimble-lane', { state: 'attached' })
+    const measure = () =>
+      page.evaluate(() => {
+        const lanes = [...document.querySelectorAll('.thimble-lane')]
+        const box = (e: Element) => e.getBoundingClientRect()
+        return {
+          bands: document.querySelectorAll('.thimble-lane-band').length,
+          bars: document.querySelectorAll('.thimble-lane-bar').length,
+          laneH: lanes.map((l) => Math.round(box(l).height)),
+          // each lane's name and guides against its lane's top and bottom
+          off: lanes.flatMap((l) => [l.querySelector('.thimble-lane-name')!, ...l.querySelectorAll('.thimble-lane-guide')].map((g) => Math.abs(box(g).top - box(l).top) + Math.abs(box(g).bottom - box(l).bottom))),
+          guides: lanes.map((l) => l.querySelectorAll('.thimble-lane-guide').length),
+          tint: Math.round(box(document.querySelector('.thimble-lanes-span')!).height),
+          lanes: Math.round(lanes.reduce((h, l) => h + box(l).height, 0)),
+        }
+      })
+    const events = await measure()
+    assert.ok(events.bands > 0 && events.bars === 0, JSON.stringify(events))
+    assert.deepEqual(events.guides, [0, 1, 2, 1])
+    assert.ok(Math.max(...events.off) <= 0.5, `names and guides as tall as their lanes: ${JSON.stringify(events)}`)
+    assert.equal(events.tint, events.lanes)
+    await page.evaluate(() => {
+      ;(window as any).dense = true
+      ;(window as any).lanes.draw()
+    })
+    await page.waitForTimeout(50)
+    const d = await measure()
+    assert.equal(d.bands, 0, 'no band behind the bars')
+    assert.ok(d.bars > 0)
+    assert.deepEqual(d.laneH, [36, 36, 36, 36])
+    assert.ok(Math.max(...d.off) <= 0.5, `names and guides as tall as Density's lanes: ${JSON.stringify(d)}`)
+    assert.equal(d.tint, d.lanes)
+    await page.evaluate(() => {
+      ;(window as any).dense = false
+      ;(window as any).lanes.draw()
+    })
+    await page.waitForTimeout(50)
+    const back = await measure()
+    assert.deepEqual(back.laneH, [18, 18, 18, 18])
+    assert.equal(back.tint, back.lanes, `the tint no taller than the lanes back in Events: ${JSON.stringify(back)}`)
+    await page.close()
+  })
+})
 
 describe('a failure in the lanes', () => {
   for (const dark of [false, true]) {
