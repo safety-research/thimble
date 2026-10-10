@@ -9,7 +9,7 @@ import { Fragment, memo, useEffect, useId, useLayoutEffect, useMemo, useRef, use
 import type { Cell, Concept, MimeBundle, OutputTruncation } from '../lib/types'
 import { frameStyle, frameTokens, useFrameFonts, withFrameStyle } from '../lib/frame'
 import { useTheme } from '../lib/theme'
-import { inkPair, token, vegaConfig, VIZ_NEUTRAL, VIZ_SERIES } from '../lib/vizTheme'
+import { token, vegaConfig, VIZ_NEUTRAL, VIZ_SERIES } from '../lib/vizTheme'
 import { useVisibleSize } from '../lib/visibleSize'
 import { rehypeNumericCells } from '../lib/markdownCells'
 import { tidyTable } from '../lib/tables'
@@ -356,28 +356,6 @@ export function onPaper(spec: unknown): unknown {
     }
   }
   return { ...s, background: 'transparent', ...(nextConfig ? { config: nextConfig } : {}) }
-}
-
-const COLOR_CHANNELS = ['color', 'fill', 'stroke']
-
-/**
- * One or two nominal groups take the ink ramp, not colour (`ramp`); the nominal hues are for three or more. A spec
- * that names its own range or scheme, or whose cardinality cannot be read, is left alone.
- */
-export function inkSmallNominal(spec: unknown, ramp: readonly string[]): unknown {
-  const s = obj(spec)
-  const enc = s ? obj(s.encoding) : null
-  if (!s || !enc) return spec
-  for (const ch of COLOR_CHANNELS) {
-    const def = obj(enc[ch])
-    if (!def || typeof def.field !== 'string' || (def.type ?? 'nominal') !== 'nominal') continue
-    const scale = obj(def.scale) ?? {}
-    if ('range' in scale || 'scheme' in scale || scale.domain != null) continue
-    const n = cardinality(def, s, s)
-    if (n == null || n > ramp.length) continue
-    return { ...s, encoding: { ...enc, [ch]: { ...def, scale: { ...scale, range: ramp.slice(0, n) } } } }
-  }
-  return spec
 }
 
 const CORNER_PROPS = ['cornerRadius', 'cornerRadiusEnd', 'cornerRadiusTopLeft', 'cornerRadiusTopRight', 'cornerRadiusBottomLeft', 'cornerRadiusBottomRight']
@@ -978,8 +956,8 @@ function Vega({ spec, fitWidth, card, labels }: { spec: unknown; fitWidth?: numb
     const embed = async (w: number | undefined, fit: Refit, tries: number, step?: { w: number; over: number }): Promise<void> => {
       // the palette is read per theme, so a folded group's grey and the kept groups' colours are the theme's
       const classes = (JSON.parse(colours) as [string, number][][]).map((k): LabelClassColour[] => k.map(([name, n]) => ({ name, colour: token(colourToken(n)), none: !n })))
-      const shown = chartDefaults(plain, { width: fitWidth ?? el.clientWidth, card, palette: VIZ_SERIES.map(token), other: token('--viz-ink-3'), labels: classes, neutral: VIZ_NEUTRAL.map(token) })
-      const sized = onPaper(applyRefit(inkSmallNominal(responsive(shown, w, w === fitWidth ? undefined : MIN_VIEW_REFIT), inkPair()), fit))
+      const shown = chartDefaults(plain, { width: fitWidth ?? el.clientWidth, card, palette: VIZ_SERIES.map(token), other: token('--viz-other'), labels: classes, neutral: VIZ_NEUTRAL.map(token) })
+      const sized = onPaper(applyRefit(responsive(shown, w, w === fitWidth ? undefined : MIN_VIEW_REFIT), fit))
       const m = await loadChunk(() => import('vega-embed'))
       if (!alive) return
       live.current?.finalize()

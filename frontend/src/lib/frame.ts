@@ -31,7 +31,30 @@ export function withFrameStyle(html: string, style: string): string {
   return style + html
 }
 
-export const FRAME_TOKENS = ['--text-primary', '--text-secondary', '--text-tertiary', '--surface-card', '--bg-sub', '--bg-sunken', '--border-subtle', '--accent', '--font-body', '--font-mono']
+/** The chart style (tokens.css, lib/vizTheme) a frame's html can draw a chart in: the series in order, the sequential and
+ * diverging ramps, the muted "other" and the highlight, the inks, the chrome, the faces and sizes, and a label's
+ * colors for a chart colored by a label. */
+export const CHART_TOKENS = [
+  ...[1, 2, 3, 4, 5, 6, 7].map((n) => `--viz-${n}`),
+  ...[1, 2, 3, 4, 5].map((n) => `--viz-seq-${n}`),
+  ...[1, 2, 3, 4, 5].map((n) => `--viz-div-${n}`),
+  '--viz-other',
+  '--viz-highlight',
+  ...[1, 2, 3, 4].map((n) => `--viz-ink-${n}`),
+  '--viz-grid',
+  '--viz-axis',
+  '--viz-label',
+  '--viz-annotation',
+  '--viz-font',
+  '--viz-font-label',
+  '--viz-size',
+  '--viz-size-title',
+  '--viz-line',
+  ...Array.from({ length: 18 }, (_, i) => `--label-${i + 1}`),
+  '--label-none',
+]
+
+export const FRAME_TOKENS = ['--text-primary', '--text-secondary', '--text-tertiary', '--surface-card', '--bg-sub', '--bg-sunken', '--border-subtle', '--accent', '--font-body', '--font-mono', ...CHART_TOKENS]
 
 /** The current values of the frame tokens, read from the document. */
 export function frameTokens(): Record<string, string> {
@@ -39,8 +62,8 @@ export function frameTokens(): Record<string, string> {
 }
 
 /** The tokens a view's page reads (views.frame_document; plugin/viewers use them with light fallbacks), those the parts
- * of backend/app/viewer_kit.css are drawn in (its Colour by menu among them), and the label palette the marks of the labels that are on are drawn in
- * (viewer_bridge.js), so they match the Labels pane's. */
+ * of backend/app/viewer_kit.css are drawn in (its Color by menu among them), and, with the frame's, the chart style and
+ * the label palette the marks of the labels that are on are drawn in (viewer_bridge.js), so they match the Labels pane's. */
 export const VIEW_TOKENS = [
   ...FRAME_TOKENS,
   '--ink-rgb',
@@ -88,36 +111,6 @@ export const VIEW_TOKENS = [
   '--status-positive',
   '--status-negative',
   '--status-warning',
-  '--viz-1',
-  '--viz-2',
-  '--viz-3',
-  '--viz-4',
-  '--viz-5',
-  '--viz-6',
-  '--viz-7',
-  '--viz-ink-1',
-  '--viz-ink-2',
-  '--viz-ink-3',
-  '--viz-ink-4',
-  '--label-1',
-  '--label-2',
-  '--label-3',
-  '--label-4',
-  '--label-5',
-  '--label-6',
-  '--label-7',
-  '--label-8',
-  '--label-9',
-  '--label-10',
-  '--label-11',
-  '--label-12',
-  '--label-13',
-  '--label-14',
-  '--label-15',
-  '--label-16',
-  '--label-17',
-  '--label-18',
-  '--label-none',
 ]
 
 /** The head for a view's page: NO_RTC, then the colour scheme and the tokens as CSS variables, and no font import,

@@ -484,6 +484,8 @@ const VIEW_TOKENS = [
   '--chip-bg-hover', '--text-xs', '--text-ui-sm', '--text-sm', '--text-lg', '--text-mono', '--text-mono-sm', '--h-chip', '--h-control', '--control-sm', '--h-row', '--radius-chip', '--radius-seg', '--radius-ui', '--radius-card', '--transition-color',
   '--accent-soft', '--hl-bg', '--hl-bg-strong', '--border-hairline', '--border-strong', '--bg-panel', '--status-positive', '--status-negative', '--status-warning',
   '--viz-1', '--viz-2', '--viz-3', '--viz-4', '--viz-5', '--viz-6', '--viz-7', '--viz-ink-1', '--viz-ink-2', '--viz-ink-3', '--viz-ink-4',
+  '--viz-seq-1', '--viz-seq-2', '--viz-seq-3', '--viz-seq-4', '--viz-seq-5', '--viz-div-1', '--viz-div-2', '--viz-div-3', '--viz-div-4', '--viz-div-5',
+  '--viz-other', '--viz-highlight', '--viz-grid', '--viz-axis', '--viz-label', '--viz-annotation', '--viz-font', '--viz-font-label', '--viz-size', '--viz-size-title', '--viz-line',
   '--label-1', '--label-2', '--label-3', '--label-4', '--label-5', '--label-6', '--label-7', '--label-8', '--label-9', '--label-10', '--label-11', '--label-12', '--label-13', '--label-14', '--label-15', '--label-16', '--label-17', '--label-18', '--label-none',
 ]
 // The app's faces (frontend/src/styles/fonts.css), latin subset, inlined as data URLs as ViewerFrame inlines them.
