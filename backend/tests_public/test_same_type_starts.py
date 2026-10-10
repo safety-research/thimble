@@ -171,6 +171,29 @@ def test_an_agent_whose_call_never_reports_takes_its_start_once_every_other_one_
     assert sf.registry(state)[mine[3]]["key"] == mine[1]
 
 
+def test_a_start_refused_and_started_again_is_never_taken_by_the_agent_that_waited_for_it():
+    """A build stopped while its agent waits (dev.stop_view refuses its request) and started again with Start it, the
+    same request claimed by the module's new call: the old agent waited for the old call, so it never takes the new
+    start, whatever ends meanwhile, and the new call's agent does."""
+    state: dict = {}
+    s0, s1 = _claim(state, 0), _claim(state, 1)
+    for *_, agent in (s0, s1):
+        assert sf.register(state, _start(agent)) is None
+    sf.requests(state)[s0[0]].update(state="refused", refused_kind="hook")
+    assert sf.eliminate(state) == []
+    assert sf.settle(state, s1[3], s1[2]) == [s1[3]]
+    assert sf.settle(state, s0[3], s0[2]) == [], "a refused start is no agent's"
+    sf.requests(state)[s0[0]].update(route="click", state="pending", claimed_by=None, reason=None, refused_kind=None)
+    again = "toolu_plugin_0again"
+    assert sf.check_call(state, {"hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_use_id": again,
+                                 "tool_input": sf.requests(state)[s0[0]]["input"]}) is None
+    assert sf.eliminate(state) == [], "the old agent takes no start"
+    new = "a00000000000again"
+    entry = sf.register(state, _start(new))
+    assert entry is not None and entry["request"] == s0[0], "the one start the new agent can have is its own"
+    assert s0[3] not in sf.registry(state)
+
+
 def test_an_agent_takes_its_start_from_its_meta_json_at_a_later_start(tmp_path):
     """Claude Code writes the agent's meta.json after its SubagentStart hooks end; once it is there, a later
     SubagentStart of the same agent (spawn_call) names its call."""

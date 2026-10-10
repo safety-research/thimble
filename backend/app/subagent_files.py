@@ -521,7 +521,10 @@ def register(state: dict[str, Any], hook: dict[str, Any], settled: list[str] | N
             own = _own_claim(state, hook, agent_id, claimed)
             if own is None:
                 before = unsettled(state, agent_id)
-                claims = (before or {}).get("claims") or [rid for rid, r in claimed if not r.get("spawned")]
+                # the calls that claimed the starts it could have, not the requests: a start refused and started again
+                # (Start it) is claimed by a new call, and is never an agent's that waited for the old one
+                claims = (before or {}).get("claims") or [str(r["claimed_by"]) for _, r in claimed
+                                                          if r.get("claimed_by") and not r.get("spawned")]
                 table = state.get(UNSETTLED)
                 if not isinstance(table, dict):
                     table = state[UNSETTLED] = {}
@@ -595,7 +598,8 @@ def _own_claim(state: dict[str, Any], hook: dict[str, Any], agent_id: str,
         return None
     # an unsettled agent's own start is among its claims: one that names this start may have it
     table = state.get(UNSETTLED)
-    if isinstance(table, dict) and any(free[0][0] in (u.get("claims") or []) for a, u in table.items()
+    call = free[0][1].get("claimed_by")
+    if isinstance(table, dict) and any(call in (u.get("claims") or []) for a, u in table.items()
                                        if a != agent_id and isinstance(u, dict)):
         return None
     return free[0]
@@ -635,8 +639,10 @@ def eliminate(state: dict[str, Any]) -> list[str]:
         for aid, u in table.items():
             if not isinstance(u, dict):
                 continue
-            open_ = {rid: r for rid, r in open_claims(state, u.get("type"))}
-            left[aid] = [rid for rid in u.get("claims") or [] if rid in open_ and not open_[rid].get("spawned")]
+            open_ = {str(r["claimed_by"]): (rid, r) for rid, r in open_claims(state, u.get("type"))
+                     if r.get("claimed_by")}
+            left[aid] = [open_[call][0] for call in u.get("claims") or []
+                         if call in open_ and not open_[call][1].get("spawned")]
         singles = [(aid, rids[0]) for aid, rids in left.items() if len(rids) == 1]
         pick = next(((aid, rid) for aid, rid in singles if sum(1 for _, r in singles if r == rid) == 1), None)
         if pick is None:
