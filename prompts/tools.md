@@ -1202,6 +1202,10 @@ Change nothing in it, since thimble lets only this call through, and end the tur
 
 thimble starts its agents, and passes messages on to them, only with the call its tool gave: make the call again exactly as the result of start_orientation, start_writing, propose_view, run_check or message_orientation gave it, with nothing changed, or make none if the analyst did not ask for it.
 
+## agent-check-one-at-a-time
+
+thimble starts one {type} at a time, and the one you started just before has not begun yet. Make this same Agent call again now, unchanged: by then the first has begun.
+
 ## agent-check-message
 
 thimble's agents continue only when the analyst asks. If they asked, call message_orientation and send what it gives; otherwise ask them first.

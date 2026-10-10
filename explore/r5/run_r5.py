@@ -77,7 +77,7 @@ SYSTEM_PATH = ("/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/usr/bin", "/s
 JPEG_QUALITY = 82
 MAIN_CALLS = ("propose_view", "profile_data", "pick_views")  # main's calls main-calls.json keeps
 WATCH_S = 2.0  # how often the watcher looks at the view's folder and its proposal
-NEUTRAL = "Propose a view that would best help me understand this data."  # requests.json's text, when it has none
+NEUTRAL = "Propose the view or views that would best help me understand this data."  # requests.json: same text
 FIXED = ("Call propose_view now with exactly these fields, unchanged, and then make the Agent call it returns. "
          "Do not explore the files first.\n{fields}")
 NUDGE = "Your choice; go ahead and propose it."
