@@ -496,6 +496,42 @@ test('a strip that tells every record apart opens no loupe, and names the record
   await pg.close()
 })
 
+test("the one line of a record whose text is long: no wider than the loupe, its whole number and its cell, its time and who said it in the quiet gray, its text alone cut", async () => {
+  const pg = await open(1, 150, true)
+  const over = (await pg.locator('.track-over').boundingBox())!
+  await pg.mouse.move(over.x + over.width / 2, over.y + (over.height * 69.5) / 150)
+  await pg.waitForTimeout(500)
+  const tip = await pg.evaluate(() => {
+    const el = document.querySelector('.reader-ruler-tip') as HTMLElement
+    const probe = document.createElement('span')
+    document.body.appendChild(probe)
+    probe.style.color = 'var(--text-tertiary)'
+    const gray = getComputedStyle(probe).color
+    probe.remove()
+    const n = el.querySelector('.tip-n') as HTMLElement
+    const t = el.querySelector('.tip-t') as HTMLElement
+    const meta = [...t.querySelectorAll('.tip-m')]
+    return {
+      width: el.getBoundingClientRect().width,
+      n: n.textContent,
+      nWhole: n.scrollWidth <= n.clientWidth,
+      cells: [...el.querySelectorAll('.tip-c i')].map((i) => i.getBoundingClientRect().width),
+      meta: meta.map((m) => m.textContent),
+      metaInk: meta.map((m) => getComputedStyle(m).color),
+      gray,
+      cut: t.scrollWidth > t.clientWidth,
+    }
+  })
+  assert.ok(tip.width <= 320, `as wide as the loupe at most: ${tip.width}`)
+  assert.equal(tip.n, '70')
+  assert.ok(tip.nWhole)
+  assert.deepEqual(tip.cells, [6])
+  assert.deepEqual(tip.meta, ['20:10:07', 'AgentRelent'])
+  assert.deepEqual(tip.metaInk, [tip.gray, tip.gray])
+  assert.ok(tip.cut, 'the text cut with an ellipsis')
+  await pg.close()
+})
+
 /** The report's ruler as laid out. */
 const ruler = (pg: Page) =>
   pg.evaluate(() => {

@@ -646,12 +646,12 @@ a.card:hover {
   white-space: pre-line;
 }
 /* a record on one line (files/Loupe RowLine): its number, a cell per lane that colors it, its metadata in the quiet
-   gray and the start of its text, the text cut with an ellipsis */
+   gray and the start of its text, the text cut with an ellipsis; at most as wide as the loupe (Loupe.tsx MAX_W) */
 .tip.tip-one {
   display: flex;
   align-items: center;
   gap: 8px;
-  max-width: min(360px, calc(100vw - 16px));
+  max-width: min(320px, calc(100vw - 16px));
   white-space: nowrap;
 }
 .tip-one .tip-n {
