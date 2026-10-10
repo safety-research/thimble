@@ -23,8 +23,8 @@
 // side panel (`details`, by default its columns), ↑ and ↓ move the chosen row, which an open side panel follows.
 // thimble keeps the sort per view, and Reset puts back the one it opens with. A table too narrow for its columns, such
 // as one beside the side panel, first writes its times shorter, then narrows its columns of text to their `min`, then
-// drops columns in `drop` order (with none, the rightmost first but never the first column of text), and draws them
-// again when the room comes back.
+// drops columns in `drop` order (with none, the rightmost first but never the main column, the first column of text that
+// takes the width left), and draws them again when the room comes back.
 ;(function () {
   'use strict'
   var kit = window.__thimbleKit
@@ -43,7 +43,7 @@
   var MIN_W = 56 // px, the narrowest column of numbers or times, and the widest
   var MAX_W = 260
   var MIN_TEXT = 64 // px, the narrowest a column of text gets in a table too narrow for its columns, unless it says (`min`)
-  var MIN_FIRST = 120 // px, the same for the first column of text, which holds what a row is about
+  var MIN_MAIN = 120 // px, the same for the main column, which holds what a row is about
   var STAMP = 16 // characters of a time as the kit writes it, YYYY-MM-DD HH:MM; 3 more with the seconds, 5 fewer without the year
   var SAMPLE = 2000 // rows read to fit a column of numbers or times to its values
   var collator = typeof Intl !== 'undefined' ? new Intl.Collator('en', { numeric: true, sensitivity: 'base' }) : null
@@ -112,8 +112,17 @@
           min: typeof c.min === 'number' && c.min > 0 ? c.min : null,
         }
       })
-    this.firstText = -1
-    for (var ci = 0; ci < this.columns.length && this.firstText < 0; ci++) if (this.columns[ci].type === 'text') this.firstText = ci
+    // the main column: the first column of text that takes the width left (no width in px), else the first column of
+    // text; it keeps MIN_MAIN in a narrow table and, without a `drop`, never drops
+    this.main = -1
+    var firstText = -1
+    for (var ci = 0; ci < this.columns.length && this.main < 0; ci++) {
+      var cc = this.columns[ci]
+      if (cc.type !== 'text') continue
+      if (firstText < 0) firstText = ci
+      if (!(typeof cc.width === 'number' && cc.width > 0)) this.main = ci
+    }
+    if (this.main < 0) this.main = firstText
     this.dropping = this.dropOrder()
     this.drawnCols = this.columns // the columns drawn, those that fit the table's width
     this.all = Array.isArray(opts.rows) ? opts.rows : []
@@ -265,16 +274,16 @@
     return v
   }
   // the order the columns drop in, in a table too narrow for them: those with a `drop` the highest first, then the others
-  // the rightmost first; never one with `drop: false`, nor the first column of text unless it has a `drop`
+  // the rightmost first; never one with `drop: false`, nor the main column unless it has a `drop`
   Table.prototype.dropOrder = function () {
     var cols = this.columns
-    var first = this.firstText
+    var main = this.main
     return cols
       .map(function (c, i) {
         return i
       })
       .filter(function (i) {
-        return cols[i].drop !== false && (cols[i].drop != null || i !== first)
+        return cols[i].drop !== false && (cols[i].drop != null || i !== main)
       })
       .sort(function (a, b) {
         var da = cols[a].drop
@@ -344,7 +353,7 @@
       var w = (typeof c.width === 'number' && c.width > 0) || (typeof c.width === 'string' && c.width) ? c.width : null
       self.forms[i] = null
       if (c.type === 'text') {
-        var keeps = c.min || (i === self.firstText ? MIN_FIRST : MIN_TEXT)
+        var keeps = c.min || (i === self.main ? MIN_MAIN : MIN_TEXT)
         self.want[i] = w
         self.least[i] = typeof w === 'number' ? Math.min(w, keeps) : keeps
         return

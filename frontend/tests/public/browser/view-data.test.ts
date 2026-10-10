@@ -356,6 +356,32 @@ describe('the table beside the side panel', () => {
     await p.close()
   })
 
+  test('an inbox whose From has a width: Subject, which takes the width left, is the main column, keeps 120 px and drops last', async () => {
+    const doc = page(`<div id="body" style="width:1000px"><div id="list"></div></div>
+<script>
+const T0 = Date.UTC(2026, 3, 1) / 1000
+window.table = thimble.table({ mount: '#list', sort: { by: 't', desc: true },
+  rows: Array.from({ length: 2000 }, (_, i) => ({ ref: 'mail.jsonl#L' + (i + 1), from: ['Ana Lopez <ana@harbor.org>', 'Bo Chen'][i % 2], subject: 'Re: Passage plan for the Thursday crossing ' + i, t: T0 + i * 60 })),
+  columns: [{ name: 'from', title: 'From', width: 200 }, { name: 'subject', title: 'Subject' }, { name: 't', title: 'Date', type: 'time' }] })
+</script>`)
+    const { page: p, frame } = await framed(doc, 1048)
+    const steps: [number, string[]][] = [
+      [1000, ['From', 'Subject', 'Date']],
+      [380, ['From', 'Subject', 'Date']],
+      [220, ['From', 'Subject']],
+      [150, ['Subject']],
+      [1000, ['From', 'Subject', 'Date']],
+    ]
+    for (const [width, titles] of steps) {
+      await frame().evaluate((w) => ((document.getElementById('body') as HTMLElement).style.width = w + 'px'), width)
+      await p.waitForTimeout(150)
+      const got = await columnsOf(frame)
+      assert.deepEqual(got.titles, titles, `${width}px: ${JSON.stringify(got)}`)
+      assert.ok(inside(got), `${width}px: ${JSON.stringify(got)}`)
+      assert.ok(got.cells.Subject.w >= Math.min(120, width), `${width}px: ${JSON.stringify(got)}`)
+    }
+    await p.close()
+  })
 })
 
 describe('the search alone', () => {

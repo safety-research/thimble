@@ -133,8 +133,8 @@ A column is `{name, title, type, width, min, drop, value(row), html(row), sort}`
 | `title` | its head, the name by default |
 | `type` | `'text'` (the default), `'number'` (right-aligned, in the mono face) or `'time'` (seconds since 1970, shown as `2026-04-01 09:30` in UTC, with the seconds when the column's times have them; a string as written). A column too narrow for its times leaves out the seconds, then the year when every row has the same one |
 | `width` | px or a CSS track such as `'2fr'` (text shares what is left; numbers and times fit their widest value) |
-| `min` | the px a column of text keeps before columns drop: 120 for the first column of text and 64 for the others by default, and never more than its `width` |
-| `drop` | in a table too narrow for its columns, such as one beside the side panel, the order they drop in until the rest fit, the highest first; `false` for one that never drops. A column without one drops after those with one, the rightmost first, and the first column of text never does. A dropped column comes back when the table widens, and the search and the default `details` still hold it |
+| `min` | the px a column of text keeps before columns drop: 120 for the main column, the first column of text without a `width` in px (else the first column of text), and 64 for the others by default, and never more than its `width` |
+| `drop` | in a table too narrow for its columns, such as one beside the side panel, the order they drop in until the rest fit, the highest first; `false` for one that never drops. A column without one drops after those with one, the rightmost first, and the main column never does. A dropped column comes back when the table widens, and the search and the default `details` still hold it |
 | `value(row)` | the value it shows and sorts by when it is not `row[name]` |
 | `html(row)` | the cell's markup in place of its value as text |
 | `sort` | `false` for a column a click does not sort |
