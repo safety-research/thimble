@@ -20,7 +20,7 @@ is named (`df.set_index("model")["score"]`). A named index counts as the first c
 | `line` | x, y[, series] | label, marks, panels | a line per series over numbers or times, with a dot at each value while a series has 30 or fewer |
 | `area` | x, y[, series] | stack, label, marks, panels | the series as areas stacked over numbers or times, the legend's first lowest, with a dot at each value while a series has 30 or fewer |
 | `scatter` | x, y[, group] | label, marks, fit, panels | a point per row |
-| `dots` | x, row[, group] | sort, label, marks, interval, panels | a point per row on its row's line, such as each agent's test runs over time; rows earliest first |
+| `dots` | x, row[, group] | sort, label, marks, interval, panels | a point per row on its row's line, such as each agent's test runs over time; rows earliest first, groups side by side on the line |
 | `box` | value, group | sort, label | a box per group lying down, the largest median first, over its values as faint dots; a group of fewer than 5 values as a strip of its dots |
 | `histogram` | value[, group] | step, label, marks, panels | the values counted in bins of a round width, at most 20 bins; groups stacked in each bin |
 | `density` | value[, group] | bandwidth, sort, label, marks, panels | each group's values as a smooth curve; up to 4 groups overlap lightly, 5 or more stand one over another (a ridgeline), the largest median on top |
@@ -54,8 +54,8 @@ values and leave out missing and infinite ones; the other kinds draw 5,000 rows 
 - `log`: `True` colors a heatmap's values on a log scale.
 - `interval`: `(lo, hi)`, the names of two more columns of a bar or dots chart's frame that hold each value's low and
   high ends, such as a Wilson interval's. Each value gets a line from its low end to its high end, in the theme's ink. A
-  bar chart's groups then go side by side, and a dots chart's groups side by side on their row's line, so no interval
-  covers another.
+  bar chart's groups then go side by side, as a dots chart's always do on their row's line, so no interval covers
+  another.
 
 ```python
 thimble.chart("bar", evals[["model", "accuracy", "condition", "lo", "hi"]], interval=("lo", "hi"))

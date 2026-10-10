@@ -606,7 +606,26 @@ export function labelTooltips(vg: Record<string, unknown>): Record<string, unkno
  * the globals its libs give it. */
 export interface VegaModule {
   default: (el: HTMLElement, spec: any, opts: any) => Promise<{ view: unknown; finalize: () => void }>
-  vega: { loader: () => any }
+  vega: { loader: () => any; logger: (level: number, method?: undefined, handler?: LogHandler) => unknown }
+}
+
+type LogHandler = (method: string, level: string, args: readonly unknown[]) => void
+
+/** The warning Vega-Lite gives every chart that fits its width to its box (responsive's fit-x) and sizes its rows by a
+ * step (a discrete y axis): it drops nothing, since the chart keeps fit-x (vega-lite's compile getTopLevelProperties
+ * warns for any fit beside a step height, then sets the fit it had), and no spec with both avoids it. */
+export const FIT_Y_DROPPED = 'Dropping "fit-y" because spec has discrete height.'
+/** vega's level for warnings and errors, vega-embed's own */
+const WARN = 2
+
+/** The logger a chart is embedded with: vega's own at vega-embed's level, which writes to the console, less
+ * FIT_Y_DROPPED, so a chart that draws as it should logs nothing. */
+export function chartLogger(vega: VegaModule['vega']): unknown {
+  if (typeof vega.logger !== 'function') return undefined
+  return vega.logger(WARN, undefined, (method, level, args) => {
+    if (args.length === 1 && args[0] === FIT_Y_DROPPED) return
+    ;(console as unknown as Record<string, (...a: unknown[]) => void>)[method](level, ...args)
+  })
 }
 
 /** A chart as drawChart left it in its box: its view, which a resize refits (refitChart), and how to take it away. */
@@ -652,7 +671,7 @@ export async function drawChart(el: HTMLElement, spec: Spec, load: () => Promise
     opts.replace?.()
     current = null
     // the spec's embed options are dropped and Vega fetches no URL but a data: one (lib/vegaLoader)
-    const r = await m.default(el, withoutEmbedOptions(sized) as any, { actions: false, config: vegaConfig() as any, patch: labelTooltips as any, loader: dataOnly(m.vega.loader()) })
+    const r = await m.default(el, withoutEmbedOptions(sized) as any, { actions: false, config: vegaConfig() as any, patch: labelTooltips as any, loader: dataOnly(m.vega.loader()), logger: chartLogger(m.vega) })
     if (!alive()) return r.finalize()
     const container = usesContainerWidth(sized)
     current = { view: r.view as unknown as FitView, finalize: r.finalize, container }

@@ -133,9 +133,11 @@ export function vegaConfig(): Record<string, unknown> {
     view: { stroke: null },
     axis: { domainColor: axis, tickColor: axis, gridColor: token('--viz-grid'), labelColor: label, titleColor: label, labelFont: mono, labelFontSize: size, titleFont: font, titleFontSize: size, titleFontWeight: 500, labelLimit: LABEL_LIMIT, labelOverlap: 'greedy', labelSeparation: 6 },
     axisX: { grid: false },
-    // numbers keep evenly spaced labels when some must go: 'greedy' drops them unevenly (0, 200 … 1,000, 1,400,
-    // 1,800), so the scale looks uneven
+    // numbers and times keep evenly spaced labels when some must go: 'greedy' drops them unevenly (0, 200 … 1,000,
+    // 1,400, 1,800; every day up to Aug 9, then every other day once two-digit dates no longer fit), so the scale looks
+    // uneven
     axisQuantitative: { labelOverlap: 'parity' },
+    axisTemporal: { labelOverlap: 'parity' },
     legend: { labelColor: label, titleColor: label, labelFont: mono, labelFontSize: size, titleFont: font, titleFontSize: size, titleFontWeight: 500, labelLimit: LABEL_LIMIT, symbolType: 'square' },
     // a facet's panels are named across, in the body face: a row's name over its panel at the left rather than turned
     // on end beside it, where it took the width and ran into the y title

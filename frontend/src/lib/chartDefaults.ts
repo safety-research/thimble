@@ -2,11 +2,13 @@
 // defaults reads well at a card's width. Pure.
 //
 // It fixes legends that squeeze the plot or repeat facet groups, rotated x labels, titles that repeat the card's
-// question, repeated facet y titles, merged layer axis titles, and y titles that overprint labels (Vega measures labels
-// narrower than it draws them). Legends past FOLD_GROUPS colours fold the rest into a grey "other (n)" without summing.
-// Long bar categories turn horizontal; whole-number axes step by whole numbers; discrete y axes get ROW_STEP per row, as
-// do the ticks a continuous y axis names (a ridgeline's); panels one under another get PANEL_HEIGHT each unless the
-// chart sizes them. A colour channel over a label's classes takes the label's colours (labelColours).
+// question, repeated facet y titles, merged layer axis titles, layers that give one axis two formats, and y titles that
+// overprint labels (Vega measures labels narrower than it draws them). Legends past FOLD_GROUPS colours fold the rest
+// into a grey "other (n)" without summing. Long bar categories turn horizontal; whole-number axes step by whole numbers;
+// discrete y axes get ROW_STEP per row, as do the ticks a continuous y axis names (a ridgeline's), and dots set side by
+// side by group get GROUP_STEP a group, the groups folded into "other" on one line; panels one under another get
+// PANEL_HEIGHT each unless the chart sizes them. A colour channel over a label's classes takes the label's colours
+// (labelColours).
 
 type Spec = Record<string, unknown>
 const obj = (v: unknown): Spec | null => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Spec) : null)
@@ -23,6 +25,9 @@ export const FOLD_FIELD = '__thimble_group'
  * and 6 px, lib/vizTheme, which the overlap rule measures), with a pixel to spare; an axis that sets its own label size
  * or separation gets a step of those (rowStep) */
 export const ROW_STEP = 18
+/** the least room a group of dots set side by side on a row's line takes (yOffset), px: a dot at Vega-Lite's size (6 px
+ * across) with a gap, so the dots of two groups next to each other never touch */
+export const GROUP_STEP = 8
 const LABEL_PX = 11
 const LABEL_GAP = 6
 /** the height of each panel of a chart faceted by rows when neither the chart nor its config names one, px: Vega-Lite's
@@ -134,22 +139,39 @@ function timeFields(enc: Spec, ch: 'x' | 'y'): string[] {
   return [def?.field, end].filter((f): f is string => typeof f === 'string')
 }
 
-/** The formats of a layered chart's date axes, from the values of every layer that shares the axis (layers inside
- * layers included), so a layer of a few marks (a shaded span) does not set the axis's labels by its own one or two
- * times; null for a channel no layer formats from its values. */
-function layerTimes(s: Spec, root: Spec, inherited: unknown[] | null): Times {
+/** What the layers of a layered chart share on each axis, so that the format each layer gives the axis is the same (two
+ * that differ are a conflict Vega-Lite warns about): `time`, the date format from the values of every layer on the axis
+ * (layers inside layers included), so a layer of a few marks (a shaded span) does not set the labels by its own one or
+ * two times, null when no layer formats the axis from its values; `own`, a layer names the axis's format itself, which
+ * then labels it for every layer; `bin`, a layer is binned, whose format then stands over a whole-number one (a rule at
+ * a whole value over a histogram). An axis the layers resolve apart (a second y axis) is each layer's own and shares
+ * nothing. */
+type Shared = Record<'x' | 'y', { time: string | null; own: boolean; bin: boolean }>
+
+function layerShared(s: Spec, root: Spec, inherited: unknown[] | null): Shared {
   const uses: Record<'x' | 'y', TimeUse[]> = { x: [], y: [] }
+  const out: Shared = { x: { time: null, own: false, bin: false }, y: { time: null, own: false, bin: false } }
   const visit = (u: Spec, rows: unknown[] | null): void => {
     const own = rowsOf(u, root, rows)
     const enc = obj(u.encoding)
-    if (enc) for (const ch of ['x', 'y'] as const) if (autoTime(obj(enc[ch]))) uses[ch].push({ rows: own, fields: timeFields(enc, ch) })
+    for (const ch of ['x', 'y'] as const) {
+      const def = obj(enc?.[ch])
+      if (!def || def.axis === null) continue
+      const axis = obj(def.axis) ?? {}
+      if ('format' in axis || 'labelExpr' in axis) out[ch].own = true
+      if (def.bin) out[ch].bin = true
+      if (autoTime(def)) uses[ch].push({ rows: own, fields: timeFields(enc!, ch) })
+    }
     if (Array.isArray(u.layer)) for (const l of u.layer) if (obj(l)) visit(obj(l)!, own)
   }
   visit(s, inherited)
-  return { x: uses.x.length ? spanFormat(uses.x) : null, y: uses.y.length ? spanFormat(uses.y) : null }
+  const resolve = obj(s.resolve)
+  for (const ch of ['x', 'y'] as const) {
+    if (obj(resolve?.scale)?.[ch] === 'independent' || obj(resolve?.axis)?.[ch] === 'independent') out[ch] = { time: null, own: false, bin: false }
+    else if (uses[ch].length) out[ch].time = spanFormat(uses[ch])
+  }
+  return out
 }
-
-type Times = { x: string | null; y: string | null }
 
 /** An axis whose labels name days with ticks at least a day apart: Vega would tick every 12 hours over a week and
  * write each day twice. */
@@ -157,8 +179,8 @@ const dayTicks = (axis: Spec, format: string): Spec => (format === DAY_FORMAT &&
 
 /** A unit's encoding with its legends that repeat a facet's groups or the discrete axis's labels taken off, its binned
  * ticks written without trailing zeros, a long-labelled discrete y axis's title over its labels, and its short
- * discrete x labels turned to read across. `times` are the date formats of the layers it shares its axes with. */
-function fixUnit(enc: Spec, facetFields: ReadonlySet<string>, rows: unknown[] | null, times: Times | null = null): Spec {
+ * discrete x labels turned to read across. `shared` is what the layers it is one of share on its axes (layerShared). */
+function fixUnit(enc: Spec, facetFields: ReadonlySet<string>, rows: unknown[] | null, shared: Shared | null = null): Spec {
   const out: Spec = { ...enc }
   const x = obj(enc.x)
   const y = obj(enc.y)
@@ -170,17 +192,17 @@ function fixUnit(enc: Spec, facetFields: ReadonlySet<string>, rows: unknown[] | 
     if (facetFields.has(def.field) || own.has(def.field) || axisFields.has(def.field)) out[ch] = { ...def, legend: null }
   }
   // a binned axis's ticks without the zeros Vega-Lite writes after a whole number ("4.0"), and a date axis's labels each
-  // naming their month (timeFormat)
+  // naming their month (timeFormat); none on an axis whose format a layer it shares names
   for (const ch of ['x', 'y'] as const) {
     const def = obj(out[ch])
     if (!def || def.axis === null) continue
     const axis = obj(def.axis) ?? {}
-    if ('format' in axis || 'labelExpr' in axis) continue
+    if ('format' in axis || 'labelExpr' in axis || shared?.[ch].own) continue
     if (def.bin) out[ch] = { ...def, axis: { ...axis, format: '~g' } }
     else if (def.type === 'temporal' && !def.timeUnit && typeof def.field === 'string') {
-      const format = times?.[ch] ?? timeFormat(rows, timeFields(enc, ch))
+      const format = shared?.[ch].time ?? timeFormat(rows, timeFields(enc, ch))
       if (format) out[ch] = { ...def, axis: { ...dayTicks(axis, format), ...axis, format } }
-    } else if (wholeAxis(def, rows)) out[ch] = { ...def, axis: { tickMinStep: 1, format: ',d', ...axis } }
+    } else if (!shared?.[ch].bin && wholeAxis(def, rows)) out[ch] = { ...def, axis: { tickMinStep: 1, format: ',d', ...axis } }
   }
   // a discrete y axis with long labels (a bar chart of named kinds) has its title over the label column, where Vega
   // would otherwise turn it beside labels it measured short and let the two overprint
@@ -256,6 +278,89 @@ function alignRows(before: unknown[], after: unknown[]): unknown[] {
     const step = typeof h === 'number' ? stepped.get(h) : undefined
     return o && step && typeof o.height === 'number' && y && discrete(y) ? { ...o, height: step } : v
   })
+}
+
+/** The marks a dots chart draws its values with. */
+const DOT_MARKS = new Set(['point', 'circle', 'square'])
+
+/** The dots of a view (a unit, or a layer at any depth) that set a discrete yOffset's groups side by side on the rows
+ * of a discrete y axis (thimble.chart's dots with a group), with the rows they draw; null when it has none. */
+function sideBySide(s: Spec, root: Spec, inherited: unknown[] | null): { unit: Spec; y: Spec; offset: Spec; rows: unknown[] | null } | null {
+  const rows = rowsOf(s, root, inherited)
+  const enc = obj(s.encoding)
+  const y = obj(enc?.y)
+  const offset = obj(enc?.yOffset)
+  if (DOT_MARKS.has(markType(s.mark)) && y && discrete(y) && y.axis !== null && offset && discrete(offset)) return { unit: s, y, offset, rows }
+  for (const l of Array.isArray(s.layer) ? s.layer : []) {
+    const found = obj(l) ? sideBySide(obj(l)!, root, rows) : null
+    if (found) return found
+  }
+  return null
+}
+
+/** The view with the rows of its discrete y axis on `field` parted by `padding` (a band's paddingInner), at any depth of
+ * its layers, where the axis's scale sets no padding of its own. */
+function rowsParted(s: Spec, field: string, padding: number): Spec {
+  const out: Spec = { ...s }
+  const enc = obj(s.encoding)
+  const y = obj(enc?.y)
+  const scale = obj(y?.scale) ?? {}
+  if (y && y.field === field && y.scale !== null && !('padding' in scale) && !('paddingInner' in scale)) out.encoding = { ...enc, y: { ...y, scale: { ...scale, paddingInner: padding } } }
+  if (Array.isArray(s.layer)) out.layer = s.layer.map((l) => (obj(l) ? rowsParted(obj(l)!, field, padding) : l))
+  return out
+}
+
+/** The groups foldGroups folded the dots' colour into, when the dots' yOffset sets the same field's groups side by side:
+ * the calculation that folds them and the folded groups, the grey "other (n)" last; null when the colour is not folded. */
+function foldedOffset(unit: Spec, offset: Spec): { calc: Spec; groups: unknown[] } | null {
+  const enc = obj(unit.encoding) ?? {}
+  const field = offset.field
+  if (typeof field !== 'string' || field === FOLD_FIELD || 'domain' in (obj(offset.scale) ?? {})) return null
+  const calc = (Array.isArray(unit.transform) ? unit.transform : []).map(obj).find((t) => t?.as === FOLD_FIELD && String(t.calculate).includes(`datum[${JSON.stringify(field)}]`))
+  for (const ch of COLOR_CHANNELS) {
+    const groups = obj(obj(enc[ch])?.scale)?.domain
+    if (calc && obj(enc[ch])?.field === FOLD_FIELD && Array.isArray(groups)) return { calc, groups }
+  }
+  return null
+}
+
+/** The view with every yOffset on `field`, at any depth of its layers (a dots chart's intervals), on the folded groups
+ * (foldedOffset), each such layer folding them as the dots do. */
+function offsetsFolded(s: Spec, field: string, folded: { calc: Spec; groups: unknown[] }): Spec {
+  const out: Spec = { ...s }
+  const enc = obj(s.encoding)
+  const offset = obj(enc?.yOffset)
+  if (enc && offset && offset.field === field) {
+    out.encoding = { ...enc, yOffset: { ...offset, field: FOLD_FIELD, sort: folded.groups } }
+    const own = Array.isArray(s.transform) ? s.transform : []
+    if (!own.some((t) => obj(t)?.as === FOLD_FIELD)) out.transform = [...own, folded.calc]
+  }
+  if (Array.isArray(s.layer)) out.layer = s.layer.map((l) => (obj(l) ? offsetsFolded(obj(l)!, field, folded) : l))
+  return out
+}
+
+/** A view whose rows set their groups' dots side by side (sideBySide) sized for them, or null for a view with no such
+ * dots: a height of GROUP_STEP a group, more when a row needs it for its label (rowStep), where Vega-Lite's 20 px a group
+ * (a step is the offset's when there is one) would make a row of three groups 60 px tall; and its rows parted by the room
+ * of one group more, so a dot reads as its own row's. A height the view names stands while it gives each row that room.
+ * Groups whose colour folds into the grey "other (n)" (foldGroups) share one line, as they share the colour, so a row
+ * has FOLD_GROUPS + 1 lines at most. */
+function groupRows(s: Spec, root: Spec, inherited: unknown[] | null): Spec | null {
+  const found = sideBySide(s, root, inherited)
+  if (!found) return null
+  const { unit, y, offset, rows } = found
+  const distinct = (f: unknown) => (rows ? new Set(rows.map((r) => obj(r)?.[String(f)]).filter((v) => v != null)).size : 0)
+  const folded = foldedOffset(unit, offset)
+  const view = folded ? offsetsFolded(s, String(offset.field), folded) : s
+  const listed = folded ? folded.groups : Array.isArray(offset.sort) ? offset.sort : obj(offset.scale)?.domain
+  const n = Array.isArray(listed) ? listed.length : distinct(offset.field)
+  if (!n) return null
+  if ('height' in s && typeof s.height !== 'number') return view
+  const step = Math.max(GROUP_STEP, Math.ceil(rowStep(y) / n))
+  // a row of n groups and the gap under it are n + 1 steps, the gap one of them; a row of one group needs no gap
+  const lines = n > 1 ? n + 1 : 1
+  const parted = rowsParted(view, String(y.field), (lines - n) / lines)
+  return typeof s.height === 'number' && distinct(y.field) * lines * step <= s.height ? parted : { ...parted, height: { step } }
 }
 
 /** Whether the chart's config names the height of its views (Altair's theme does). */
@@ -520,7 +625,8 @@ function titledLayer(l: unknown, titles: Partial<Record<'x' | 'y', string | null
   return out
 }
 
-function walk(s: Spec, root: Spec, facetFields: ReadonlySet<string>, inherited: unknown[] | null, opts: ChartOptions = {}, times: Times | null = null): Spec {
+/** `shared`: what the layers `s` is one of share on their axes (layerShared); null for a view that is no layer's. */
+function walk(s: Spec, root: Spec, facetFields: ReadonlySet<string>, inherited: unknown[] | null, opts: ChartOptions = {}, shared: Shared | null = null): Spec {
   const rows = rowsOf(s, root, inherited)
   let out: Spec = { ...s }
   // a facet operator: its fields name the panels; a row facet takes the y title
@@ -551,12 +657,12 @@ function walk(s: Spec, root: Spec, facetFields: ReadonlySet<string>, inherited: 
     const walked = list.map((c) => (obj(c) ? walk(obj(c)!, root, facetFields, rows, opts) : c))
     out[key] = key === 'hconcat' ? alignRows(list, walked) : walked
   }
-  // layers: each fixed, their date axes labeled from every layer's values, and every layer's x and y titled as one layer
-  // names them (the first that names a title, else the first), so the axis carries one title whichever layer comes
-  // first, a shaded span drawn behind the chart included
+  // layers: each fixed, their axes formatted alike (their date axes labeled from every layer's values), and every layer's
+  // x and y titled as one layer names them (the first that names a title, else the first), so the axis carries one title
+  // whichever layer comes first, a shaded span drawn behind the chart included
   if (Array.isArray(s.layer)) {
-    const shared = times ?? layerTimes(s, root, inherited)
-    const layers = s.layer.map((c) => (obj(c) ? walk(obj(c)!, root, facetFields, rows, opts, shared) : c))
+    const axes = shared ?? layerShared(s, root, inherited)
+    const layers = s.layer.map((c) => (obj(c) ? walk(obj(c)!, root, facetFields, rows, opts, axes) : c))
     const found = { x: layerTitle(layers, 'x'), y: layerTitle(layers, 'y') }
     out.layer = layers.map((l, i) => {
       // a title the first layer takes from its field stays Vega-Lite's own there ("Sum of n"), as it is drawn
@@ -570,7 +676,7 @@ function walk(s: Spec, root: Spec, facetFields: ReadonlySet<string>, inherited: 
   if (obj(out.encoding)) out = foldGroups(labelColours(turnBars(out, rows), rows, opts), rows, opts)
   const enc = obj(out.encoding)
   if (enc) {
-    let fixed = fixUnit(enc, facetFields, rows, times)
+    let fixed = fixUnit(enc, facetFields, rows, shared)
     const row = obj(fixed.row)
     if (row) {
       const moved = yTitleOnce(row, fixed)
@@ -579,7 +685,8 @@ function walk(s: Spec, root: Spec, facetFields: ReadonlySet<string>, inherited: 
     out.encoding = fixed
     if (row) out = panelHeight(out, root)
   }
-  return rowsHeight(out, rows)
+  // the height is a view's, not a layer's
+  return (shared ? null : groupRows(out, root, inherited)) ?? rowsHeight(out, rows)
 }
 
 /** the channels whose field a legend names */

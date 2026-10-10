@@ -1792,13 +1792,13 @@
     if (ref != null && ref !== '') {
       var s = String(ref)
       var m = /#L(\d+)/.exec(s)
-      if (m) return num(m[1])
+      if (m) return String(Number(m[1]))
       var h = s.lastIndexOf('#')
       if (h >= 0 && h < s.length - 1) return s.slice(h + 1)
       var sl = s.replace(/\/+$/, '').lastIndexOf('/')
       return sl >= 0 ? s.slice(sl + 1) : s
     }
-    return typeof at === 'number' ? num(at + 1) : ''
+    return typeof at === 'number' ? String(at + 1) : ''
   }
   // the first record a loupe of `n` rows shows around the unit `c`: its record in the middle row, kept within `total`
   function loupeStart(c, total, n) {

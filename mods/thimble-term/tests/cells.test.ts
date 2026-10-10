@@ -198,6 +198,22 @@ test("thimble.chart's density, ecdf, ridgeline and range draw from their rows: o
   expect([range.kind, range.columns, range.rows]).toEqual(['table', ['model', 'base', 'tuned'], [['m1', 0.4, 0.5]]])
 })
 
+test("a dots chart's rows are names down its y axis, which no line card draws: its rows' table", () => {
+  const card = (spec: unknown) => cardOfCell({ id: 'k1', kind: 'plot', title: 'q', outputs: [{ 'application/vnd.vegalite.v6.json': spec }] } as ThimbleCell).card
+  // thimble.chart("dots", frame) with a group column (backend kernel_thimble _xy_spec): a point per row on its agent's line
+  const runs = [
+    { time: '2026-08-30T15:00:00', agent: 'agent-1', action: 'claim' },
+    { time: '2026-08-30T15:00:00', agent: 'agent-1', action: 'review' },
+    { time: '2026-08-30T15:05:00', agent: 'agent-2', action: 'merge' },
+  ]
+  const group = { field: 'action', type: 'nominal' }
+  const dots = card({ data: { values: runs }, mark: 'point', encoding: { x: { field: 'time', type: 'temporal' }, y: { field: 'agent', type: 'nominal' }, color: group, yOffset: group } })
+  expect([dots.kind, dots.columns, (dots.rows as Cell[][]).length]).toEqual(['table', ['time', 'agent', 'action'], 3])
+  // a scatter's points are still a line card's
+  const scatter = card({ data: { values: [{ x: 1, y: 2 }, { x: 2, y: 3 }] }, mark: 'point', encoding: { x: { field: 'x', type: 'quantitative' }, y: { field: 'y', type: 'quantitative' } } })
+  expect(scatter.kind).toBe('line')
+})
+
 test("a chart the code layered its own marks on shows thimble.chart's rows as its table, wherever the chart stands", () => {
   const card = (spec: unknown) => cardOfCell({ id: 'k1', kind: 'plot', title: 'q', outputs: [{ 'application/vnd.vegalite.v6.json': spec }] } as ThimbleCell).card
   const span = { data: { name: 'data-1' }, mark: { type: 'rect' }, encoding: { x: { field: 'a', type: 'temporal' }, x2: { field: 'b' } } }

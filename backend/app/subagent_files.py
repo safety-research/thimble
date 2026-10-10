@@ -6,8 +6,8 @@ both (subagents.py has the design):
                   own start is not known yet (`unsettled`, by agent id: register), the per-run efforts the module's
                   step hook applies (`efforts`), the module's last hello (`module`), main's session and its moves
                   (`main`) and main's end (`main_end`)
-  callers.jsonl   one line per thimble tool call of a subagent: {tool_use_id, agent_id, agent_type, ts}, trimmed to the
-                  last CALLERS_KEEP_S
+  callers.jsonl   one line per thimble tool call: {tool_use_id, agent_id, agent_type, ts}, agent_id and agent_type
+                  empty for main's own call, trimmed to the last CALLERS_KEEP_S
   launch.json     what the launcher started main with (lane A writes it), with the session's mode (`mode`: browser or
                   terminal), which every process of the session reads here (session_mode)
 
@@ -893,9 +893,9 @@ def started_notes(state: dict[str, Any], session_mode: str | None = None) -> lis
 
 
 def add_caller(ws: Path, tool_use_id: str, agent_id: str, agent_type: str) -> None:
-    """One line of callers.jsonl (module note): the thimble call `tool_use_id` is the subagent `agent_id`'s. The file is
-    trimmed to CALLERS_KEEP_S once it grows past CALLERS_TRIM_BYTES."""
-    if not tool_use_id or not agent_id:
+    """One line of callers.jsonl (module note): the thimble call `tool_use_id` is the subagent `agent_id`'s, or main's own
+    with `agent_id` empty. The file is trimmed to CALLERS_KEEP_S once it grows past CALLERS_TRIM_BYTES."""
+    if not tool_use_id:
         return
     path = callers_path(ws)
     line = json.dumps({"tool_use_id": tool_use_id, "agent_id": agent_id, "agent_type": agent_type, "ts": now()}) + "\n"

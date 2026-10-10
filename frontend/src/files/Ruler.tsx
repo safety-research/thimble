@@ -284,7 +284,7 @@ const Marks = memo(function Marks({ columns }: { columns: RulerColumn[] }) {
 
 /** A mark's tooltip in the reader: the record it stands for (its lines until that is known), the lane and the value. */
 export function markText(col: RulerColumn, tick: RulerTick, line: number | null): string {
-  const where = line != null ? `Line ${line.toLocaleString()}` : `Lines ${tick.from.toLocaleString()}–${tick.to.toLocaleString()}`
+  const where = line != null ? `Line ${line}` : `Lines ${tick.from}–${tick.to}`
   return `${where} · ${col.name}${col.valued && tick.value ? `: ${tick.value}` : ''}`
 }
 

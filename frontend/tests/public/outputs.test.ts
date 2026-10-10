@@ -2,10 +2,13 @@
 // a chart before its text. A card type's graphic is the card's chart, drawn by the type's frame, and a citation of one
 // of its listing's lines opens the record that ends the line (src/canvas/TypeCard.tsx). What a card draws that a
 // document can show as a figure (figureKind).
-import { describe, expect, test } from 'vitest'
+import * as vega from 'vega'
+import { compile } from 'vega-lite'
+import { describe, expect, test, vi } from 'vitest'
 import { citedRecord } from '../../src/canvas/TypeCard.tsx'
 import { CARD_MIME, ERROR_MIME, figureKind, pickMime, primaryArtifact, responsive } from '../../src/components/Outputs.tsx'
 import { FRAME_MIME } from '../../src/lib/dataFrame.ts'
+import { chartLogger, FIT_Y_DROPPED } from '../../src/lib/vegaDraw.ts'
 import type { Cell, MimeBundle } from '../../src/lib/types.ts'
 import { cardShape } from '../../src/report/cards.ts'
 import { figureCandidates } from '../../src/report/model.ts'
@@ -76,6 +79,36 @@ describe('a composite chart fitted to its room', () => {
     for (const v of fitted.vconcat) {
       expect(v.width).toBeLessThan(640)
       expect(v.layer[1].encoding.x.value).toBe(v.width)
+    }
+  })
+})
+
+describe("a chart's log", () => {
+  // a bar chart of named categories, fitted to its box as every chart that is no composite is (responsive's fit-x)
+  const names = responsive({ $schema: 'https://vega.github.io/schema/vega-lite/v6.json', data: { values: [{ agent: 'a1', n: 3 }, { agent: 'a2', n: 5 }] }, mark: 'bar', encoding: { y: { field: 'agent', type: 'nominal' }, x: { field: 'n', type: 'quantitative' } } })
+
+  test("Vega-Lite's one warning for a fitted chart with names down its y axis drops nothing: the chart keeps fit-x", () => {
+    const warned: unknown[] = []
+    const log = { level: () => log, error: () => log, info: () => log, debug: () => log, warn: (...args: unknown[]) => (warned.push(...args), log) }
+    const vg = compile(names as never, { logger: log as never }).spec as { autosize?: unknown }
+    expect(warned).toEqual([FIT_Y_DROPPED])
+    expect(vg.autosize).toEqual({ type: 'fit-x', contains: 'padding' })
+  })
+
+  test('the logger a chart is drawn with leaves that warning out and writes every other one as Vega does', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const log = chartLogger(vega) as vega.LoggerInterface
+      log.warn(FIT_Y_DROPPED)
+      expect(warn).not.toHaveBeenCalled()
+      log.warn('Conflicting axis property "format" (",~r" and ",d"). Using ",~r".')
+      expect(warn).toHaveBeenCalledWith('WARN', 'Conflicting axis property "format" (",~r" and ",d"). Using ",~r".')
+      // vega-embed sets its level through it, as with vega's own
+      expect(log.level(0)).toBe(log)
+      log.warn('anything')
+      expect(warn).toHaveBeenCalledTimes(1)
+    } finally {
+      warn.mockRestore()
     }
   })
 })
