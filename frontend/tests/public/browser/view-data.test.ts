@@ -4,9 +4,11 @@
 // it takes, and its strip shows Color by's colours of every row; the search washes every match on screen and the current
 // one more strongly, puts a lane of ticks on the list's strip (with no Color by, on a strip of its own), and a click on a
 // tick goes to that match; it finds the words a transcript or a record folds away (viewer_transcript.js,
-// viewer_record.js), ticks them where they stand, and going to one opens its fold so the match shows; the diff sets the
-// two versions side by side, a changed line level with the line it became, inline in a narrow mount, and its tints
-// follow the paper. What the parts decide without layout is tests/public/data-kit.test.ts.
+// viewer_record.js), ticks them where they stand, and going to one opens its fold so the match shows; a table beside the
+// side panel keeps its main column of text, drops columns in their order rather than draw a cell under the strip, and
+// draws them again when the panel closes; the diff sets the two versions side by side, a changed line level with the line
+// it became, inline in a narrow mount, and its tints follow the paper. What the parts decide without layout is
+// tests/public/data-kit.test.ts.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -72,10 +74,10 @@ afterAll(async () => {
   cleanup()
 })
 
-/** A page holding `doc` in a sandboxed frame 1000 px wide. */
-async function framed(doc: string): Promise<{ page: Page; frame: () => Frame }> {
-  const p = await browser.newPage({ viewport: { width: 1040, height: 700 } })
-  await p.setContent(`<!doctype html><html><body style="margin:0"><iframe id="f" sandbox="allow-scripts" style="border:0;width:1000px;height:660px"></iframe></body></html>`)
+/** A page holding `doc` in a sandboxed frame `width` px wide, 1000 by default. */
+async function framed(doc: string, width = 1000): Promise<{ page: Page; frame: () => Frame }> {
+  const p = await browser.newPage({ viewport: { width: width + 40, height: 700 } })
+  await p.setContent(`<!doctype html><html><body style="margin:0"><iframe id="f" sandbox="allow-scripts" style="border:0;width:${width}px;height:660px"></iframe></body></html>`)
   await p.evaluate((d) => ((document.getElementById('f') as HTMLIFrameElement).srcdoc = d), doc)
   const frame = () => p.frames().find((f) => f !== p.mainFrame())!
   await p.waitForTimeout(400)
@@ -207,6 +209,195 @@ window.table = thimble.table({ mount: '#list', rows: Array.from({ length: 200 },
     const wide = await cells()
     assert.ok(fits(wide), JSON.stringify(wide))
     assert.equal(wide[0][1] - wide[0][0], 220)
+    await p.close()
+  })
+})
+
+// A forge's pull requests, five columns: their times share a year and have seconds
+const PULLS = (columns: object[], pane = '') =>
+  page(`<div class="top"><span id="search"></span><span id="colour"></span></div><div id="body" style="${pane}"><div id="list"></div></div>
+<script>
+const T0 = Date.UTC(2026, 3, 1) / 1000
+window.prs = Array.from({ length: 300 }, (_, i) => ({ ref: 'forge.db#prs/' + (65000 - i), number: 65000 - i, title: 'BUG: a title that says what the change fixes ' + i,
+  author: 'gh:contributor-' + (i % 17), state: ['open', 'merged', 'closed'][i % 3], t: T0 - i * 3607 }))
+window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'state', title: 'State' }] })
+window.side = thimble.side({ mount: '#body' })
+window.search = thimble.search({ mount: '#search' })
+window.table = thimble.table({ mount: '#list', rows: prs, side, search, sort: { by: 't', desc: true }, columns: ${JSON.stringify(columns)} })
+</script>`)
+/** the table's head titles, each cell's left and right edge in the head and the first row, the body's right edge, the
+ *  width and text of each cell of the first row by its column's title (as drawn: the parts of a time drawn 0 wide left
+ *  out), and the widest of those parts */
+const columnsOf = (frame: () => Frame) =>
+  frame().evaluate(() => {
+    const edges = (el: Element) => [...el.children].map((c) => [c.getBoundingClientRect().left, c.getBoundingClientRect().right])
+    const head = document.querySelector('.thimble-table-head')!
+    const row = document.querySelector('.thimble-table-row[data-thimble-row="0"]')!
+    const titles = [...head.children].map((c) => c.textContent!)
+    const drawn = (c: Element) => [...c.childNodes].map((n) => ((n as Element).classList?.contains('thimble-table-cut') ? '' : n.textContent)).join('')
+    const cells: Record<string, { w: number; text: string }> = {}
+    ;[...row.children].forEach((c, i) => (cells[titles[i]] = { w: c.getBoundingClientRect().width, text: drawn(c) }))
+    const cut = Math.max(0, ...[...document.querySelectorAll('.thimble-table-cut')].map((e) => e.getBoundingClientRect().width))
+    return { titles, head: edges(head), row: edges(row), body: document.querySelector('.thimble-table-body')!.getBoundingClientRect().right, cells, cut }
+  })
+type Columns = Awaited<ReturnType<typeof columnsOf>>
+/** no cell of the head or the row passes the body's right edge, so none is under the strip, and none is drawn over the next */
+const inside = (c: Columns) =>
+  [c.head, c.row].every((cs) => cs.length === c.titles.length && cs.every(([l, r], i) => r <= c.body + 0.5 && (i === 0 || l >= cs[i - 1][1] - 0.5)))
+
+describe('the table beside the side panel', () => {
+  test('five columns at 1048 px: the panel opens, the first column of text keeps its min, columns drop in their order and none is under the strip; they come back as it closes', async () => {
+    const MIN = 460
+    const doc = PULLS([
+      { name: 'number', title: '#', type: 'number' },
+      { name: 'title', title: 'Title', min: MIN },
+      { name: 'author', title: 'Author', width: 150, drop: 2 },
+      { name: 'state', title: 'State', width: 80, drop: 1 },
+      { name: 't', title: 'Opened', type: 'time', drop: 3 },
+    ])
+    const { page: p, frame } = await framed(doc, 1048)
+    const wide = await columnsOf(frame)
+    assert.deepEqual(wide.titles, ['#', 'Title', 'Author', 'State', 'Opened'])
+    assert.ok(inside(wide), JSON.stringify(wide))
+    assert.equal(wide.cells.Opened.text, '2026-04-01 00:00:00')
+    // the panel takes 0.4 of the mount: Opened drops first (3), then Author (2), and State (1) stays
+    await frame().evaluate(() => (window as any).table.open('forge.db#prs/65000'))
+    await p.waitForTimeout(150)
+    const beside = await columnsOf(frame)
+    assert.deepEqual(beside.titles, ['#', 'Title', 'State'], JSON.stringify(beside))
+    assert.ok(beside.cells.Title.w >= MIN, JSON.stringify(beside))
+    assert.ok(inside(beside), JSON.stringify(beside))
+    const held = await frame().evaluate(() => {
+      const w = window as any
+      // a dropped column is still searched, and the panel's default details still show it whole
+      w.search.set('gh:contributor-3')
+      const fields = [...document.querySelectorAll('.thimble-side .thimble-table-fields dt')].map((e) => [e.textContent, e.nextElementSibling!.textContent])
+      return { count: w.search.count, fields }
+    })
+    assert.equal(held.count, 18)
+    assert.deepEqual(held.fields, [['#', '65,000'], ['Title', 'BUG: a title that says what the change fixes 0'], ['Author', 'gh:contributor-0'], ['State', 'open'], ['Opened', '2026-04-01 00:00:00']])
+    // "o" is twice in each dropped Author and once in a State "open" or "closed": every one counts, and the current
+    // match, the first of the top row, is washed in its State cell
+    const shown = await frame().evaluate(() => {
+      const w = window as any
+      w.search.set('o')
+      const cur = [...(CSS as any).highlights.get('thimble-search-current')][0] as Range
+      const cell = cur.startContainer.parentElement!.closest('.thimble-table-td')!
+      return { count: w.search.count, at: w.search.at, cell: cell.textContent, row: cell.parentElement!.getAttribute('data-anchor') }
+    })
+    assert.deepEqual(shown, { count: 800, at: 0, cell: 'open', row: 'forge.db#prs/65000' })
+    // closed: every column is back
+    await frame().evaluate(() => (window as any).side.close())
+    await p.waitForTimeout(150)
+    const back = await columnsOf(frame)
+    assert.deepEqual(back.titles, ['#', 'Title', 'Author', 'State', 'Opened'])
+    assert.ok(inside(back), JSON.stringify(back))
+    assert.equal(await frame().evaluate(() => (window as any).search.count), 800)
+    await p.close()
+  })
+
+  test('with no drop given, a narrowing table writes its times shorter, then drops the rightmost columns, the one the rows are sorted by last, never the main column', async () => {
+    const doc = PULLS(
+      [
+        { name: 'number', title: '#', type: 'number' },
+        { name: 'title', title: 'Title' },
+        { name: 'author', title: 'Author', width: 150 },
+        { name: 'state', title: 'State', width: 80 },
+        { name: 't', title: 'Opened', type: 'time' },
+      ],
+      'width:1000px',
+    )
+    const { page: p, frame } = await framed(doc, 1048)
+    const at = async (width: number) => {
+      await frame().evaluate((w) => ((document.getElementById('body') as HTMLElement).style.width = w + 'px'), width)
+      await p.waitForTimeout(150)
+      return columnsOf(frame)
+    }
+    const steps: [number, string[], string | null][] = [
+      [1000, ['#', 'Title', 'Author', 'State', 'Opened'], '2026-04-01 00:00:00'],
+      // without the seconds, then without the year, which every row shares
+      [520, ['#', 'Title', 'Author', 'State', 'Opened'], '04-01 00:00'],
+      // the rows are sorted by Opened, which drops after the others and keeps its arrow
+      [380, ['#', 'Title', 'Author', 'Opened'], '04-01 00:00'],
+      [250, ['Title', 'Opened'], '04-01 00:00'],
+      [100, ['Title'], null],
+      [1000, ['#', 'Title', 'Author', 'State', 'Opened'], '2026-04-01 00:00:00'],
+    ]
+    const march = () => frame().evaluate(() => ((window as any).search.set('2026-03-31 2'), (window as any).search.count))
+    for (const [width, titles, opened] of steps) {
+      const got = await at(width)
+      assert.deepEqual(got.titles, titles, `${width}px: ${JSON.stringify(got)}`)
+      if (opened) assert.equal(got.cells.Opened.text, opened, `${width}px`)
+      assert.equal(got.cut, 0, `${width}px`)
+      assert.ok(inside(got), `${width}px: ${JSON.stringify(got)}`)
+      if (width > 200) assert.ok(got.cells.Title.w >= 120, `${width}px: ${JSON.stringify(got)}`)
+      // Title, which takes the width left, is the widest column of text: the others gave up width with it
+      if (width === 520) assert.ok(got.cells.Title.w > got.cells.Author.w, `${width}px: ${JSON.stringify(got)}`)
+      // the search finds a time whole at every width, its year and seconds drawn or not: the three from 20:00 to 22:59
+      if (opened) assert.equal(await march(), 3, `${width}px`)
+      if (titles.includes('Opened')) assert.equal(await frame().evaluate(() => document.querySelector('.thimble-table-th.active')?.textContent), 'Opened', `${width}px`)
+    }
+    // a click on Author's head sorts by it: Opened drops now, as the rightmost, and State is drawn again
+    await at(380)
+    await frame().evaluate(() => (document.querySelector('.thimble-table-th[data-col="author"]') as HTMLElement).click())
+    const byAuthor = await columnsOf(frame)
+    assert.deepEqual(byAuthor.titles, ['#', 'Title', 'Author', 'State'], JSON.stringify(byAuthor))
+    assert.ok(inside(byAuthor), JSON.stringify(byAuthor))
+    assert.equal(await frame().evaluate(() => document.querySelector('.thimble-table-th.active')!.textContent), 'Author')
+    await frame().evaluate(() => (window as any).table.sortBy('t', true))
+    // the current match is washed in the time it is in, where the time shows
+    const washed = await frame().evaluate(() => {
+      const w = window as any
+      ;(document.getElementById('body') as HTMLElement).style.width = '520px'
+      return new Promise<string>((done) =>
+        setTimeout(() => {
+          w.search.set('03-31 22:59')
+          const cur = [...(CSS as any).highlights.get('thimble-search-current')][0] as Range
+          done(cur.toString() + ' in ' + cur.startContainer.parentElement!.closest('.thimble-table-td')!.className)
+        }, 150),
+      )
+    })
+    assert.equal(washed, '03-31 22:59 in thimble-table-td thimble-table-time')
+    await frame().evaluate(() => (window as any).search.set(''))
+    // times that span two years keep the year
+    await frame().evaluate(() => {
+      const w = window as any
+      w.table.draw(w.prs.concat([{ ref: 'forge.db#prs/1', number: 1, title: 'Initial commit', author: 'gh:founder', state: 'merged', t: Date.UTC(2025, 0, 2) / 1000 }]))
+    })
+    const years = await at(520)
+    assert.equal(years.cells.Opened.text, '2026-04-01 00:00')
+    assert.ok(inside(years), JSON.stringify(years))
+    await p.close()
+  })
+
+  test('an inbox whose From has a width: Subject, which takes the width left, is the main column, keeps 120 px and drops last', async () => {
+    const doc = page(`<div id="body" style="width:1000px"><div id="list"></div></div>
+<script>
+const T0 = Date.UTC(2026, 3, 1) / 1000
+window.table = thimble.table({ mount: '#list', sort: { by: 't', desc: true },
+  rows: Array.from({ length: 2000 }, (_, i) => ({ ref: 'mail.jsonl#L' + (i + 1), from: ['Ana Lopez <ana@harbor.org>', 'Bo Chen'][i % 2], subject: 'Re: Passage plan for the Thursday crossing ' + i, t: T0 + i * 60 })),
+  columns: [{ name: 'from', title: 'From', width: 200 }, { name: 'subject', title: 'Subject' }, { name: 't', title: 'Date', type: 'time' }] })
+</script>`)
+    const { page: p, frame } = await framed(doc, 1048)
+    const steps: [number, string[]][] = [
+      [1000, ['From', 'Subject', 'Date']],
+      [500, ['From', 'Subject', 'Date']],
+      [380, ['From', 'Subject', 'Date']],
+      // the rows are sorted by Date, which drops after From
+      [260, ['Subject', 'Date']],
+      [150, ['Subject']],
+      [1000, ['From', 'Subject', 'Date']],
+    ]
+    for (const [width, titles] of steps) {
+      await frame().evaluate((w) => ((document.getElementById('body') as HTMLElement).style.width = w + 'px'), width)
+      await p.waitForTimeout(150)
+      const got = await columnsOf(frame)
+      assert.deepEqual(got.titles, titles, `${width}px: ${JSON.stringify(got)}`)
+      assert.ok(inside(got), `${width}px: ${JSON.stringify(got)}`)
+      assert.ok(got.cells.Subject.w >= Math.min(120, width), `${width}px: ${JSON.stringify(got)}`)
+      // beside a From of 200 px, Subject is the wider: From gives up width with it, and the dates their year
+      if (width === 500) assert.ok(got.cells.Subject.w > got.cells.From.w && /^\d\d-\d\d /.test(got.cells.Date.text), `${width}px: ${JSON.stringify(got)}`)
+    }
     await p.close()
   })
 })

@@ -6,8 +6,8 @@
 //   const table = thimble.table({
 //     mount: '#list',                       the element the table fills and scrolls in; the page gives it a height
 //     columns: [
-//       { name: 'from', title: 'From', width: 180 },
-//       { name: 'subject', title: 'Subject' },               text takes the width left, cut with an ellipsis
+//       { name: 'from', title: 'From', width: 180, drop: 1 },  the first to drop in a narrow table
+//       { name: 'subject', title: 'Subject', min: 200 },     text takes the width left, at least `min`, cut with an ellipsis
 //       { name: 't', title: 'Date', type: 'time' },          seconds since 1970, shown in UTC; or 'number'
 //     ],
 //     rows: emails,                         plain records, each with its `ref`, which is its row's data-anchor
@@ -21,7 +21,10 @@
 // it (table.reveal(ref)), and with the page's Color by its value's colour is the bar on its left edge; the list's strip
 // shows the colours of every row, scrolled to or not, and the chips count the rows. A click or Enter opens a row in the
 // side panel (`details`, by default its columns), ↑ and ↓ move the chosen row, which an open side panel follows.
-// thimble keeps the sort per view, and Reset puts back the one it opens with.
+// thimble keeps the sort per view, and Reset puts back the one it opens with. A table too narrow for its columns, such
+// as one beside the side panel, first writes its times shorter, then narrows its columns of text to their `min`, then
+// drops columns in `drop` order (with none, the rightmost first, the one the rows are sorted by last, and never the main
+// column, the first column of text that takes the width left), and draws them again when the room comes back.
 ;(function () {
   'use strict'
   var kit = window.__thimbleKit
@@ -39,8 +42,12 @@
   var SORT_ROOM = 14 // px, the sort's arrow beside a head's title
   var MIN_W = 56 // px, the narrowest column of numbers or times, and the widest
   var MAX_W = 260
-  var MIN_TEXT = 64 // px, the narrowest a column of text gets in a table too narrow for the widths it was given
+  var MIN_TEXT = 64 // px, the narrowest a column of text gets in a table too narrow for its columns, unless it says (`min`)
+  var MIN_MAIN = 120 // px, the same for the main column, which holds what a row is about
+  var EASE_MAIN = 240 // px the main column takes before the other columns give up width; below it, it gives up width with them
+  var STAMP = 16 // characters of a time as the kit writes it, YYYY-MM-DD HH:MM; 3 more with the seconds, 5 fewer without the year
   var SAMPLE = 2000 // rows read to fit a column of numbers or times to its values
+  var FR = /^\d*\.?\d+fr$/ // a track that shares what is left
   var collator = typeof Intl !== 'undefined' ? new Intl.Collator('en', { numeric: true, sensitivity: 'base' }) : null
   var ARROW = {
     up: '<svg class="thimble-colour-ico thimble-table-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg>',
@@ -103,8 +110,22 @@
           value: typeof c.value === 'function' ? c.value : null,
           html: typeof c.html === 'function' ? c.html : null,
           sorts: c.sort !== false,
+          drop: c.drop === false ? false : typeof c.drop === 'number' && isFinite(c.drop) ? c.drop : null,
+          min: typeof c.min === 'number' && c.min > 0 ? c.min : null,
         }
       })
+    // the main column: the first column of text that takes the width left (no width in px), else the first column of
+    // text; it keeps MIN_MAIN in a narrow table and, without a `drop`, never drops
+    this.main = -1
+    var firstText = -1
+    for (var ci = 0; ci < this.columns.length && this.main < 0; ci++) {
+      var cc = this.columns[ci]
+      if (cc.type !== 'text') continue
+      if (firstText < 0) firstText = ci
+      if (!(typeof cc.width === 'number' && cc.width > 0)) this.main = ci
+    }
+    if (this.main < 0) this.main = firstText
+    this.drawnCols = this.columns // the columns drawn, those that fit the table's width
     this.all = Array.isArray(opts.rows) ? opts.rows : []
     this.initial = this.sortOf(opts.sort)
     var kept = ctl.kept(this.name).sort
@@ -188,7 +209,7 @@
       var h = -1
       this.resized = new ResizeObserver(function () {
         if (self.dead) return
-        if (self.body.clientWidth !== self.laidW) self.fit()
+        if (self.body.clientWidth !== self.laidW && self.fit()) self.redrawColumns()
         if (self.mount.clientHeight === h) return
         h = self.mount.clientHeight
         self.window()
@@ -212,7 +233,7 @@
     // the columns of numbers and times fitted again once the page's faces have loaded, which are wider than the fallback
     if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === 'function')
       document.fonts.ready.then(function () {
-        if (!self.dead) self.layout()
+        if (!self.dead && self.layout()) self.redrawColumns()
       })
     // Reset puts back the sort the table opens with
     this.checkReset = shared.part({
@@ -253,6 +274,28 @@
     var v = col.value ? ctl.safe(function () { return col.value(r) }, null) : typeof r === 'object' ? r[col.name] : null
     return v
   }
+  // the order the columns drop in, in a table too narrow for them: those with a `drop` the highest first, then the others
+  // the rightmost first but the one the rows are sorted by last, so that the sort shows; never one with `drop: false`,
+  // nor the main column unless it has a `drop`
+  Table.prototype.dropOrder = function () {
+    var cols = this.columns
+    var main = this.main
+    var by = this.sort ? this.sort.by : null
+    return cols
+      .map(function (c, i) {
+        return i
+      })
+      .filter(function (i) {
+        return cols[i].drop !== false && (cols[i].drop != null || i !== main)
+      })
+      .sort(function (a, b) {
+        var da = cols[a].drop
+        var db = cols[b].drop
+        if ((da == null) !== (db == null)) return da == null ? 1 : -1
+        if (da == null && (cols[a].name === by) !== (cols[b].name === by)) return cols[a].name === by ? 1 : -1
+        return (da != null && db - da) || b - a
+      })
+  }
   // what a cell shows, as text
   Table.prototype.text = function (col, r) {
     if (col.html) return textOfHtml(ctl.safe(function () { return col.html(r) }, ''))
@@ -262,68 +305,205 @@
     if (col.type === 'number' && typeof v === 'number') return num(v)
     return typeof v === 'object' ? JSON.stringify(v) : String(v)
   }
+  // a cell's markup. A time in a column too narrow for its whole stamp keeps the year and the seconds it leaves out in
+  // the page, drawn 0 wide (.thimble-table-cut), so that the search finds the same text at every width.
   Table.prototype.cell = function (col, r) {
     if (col.html) return String(ctl.safe(function () { return col.html(r) }, '') || '')
-    return esc(this.text(col, r))
+    var s = this.text(col, r)
+    var f = col.type === 'time' ? col.form : null
+    var v = f ? this.value(col, r) : null
+    if (!f || typeof v !== 'number' || !isFinite(v)) return esc(s)
+    var tail = col.secs ? 3 : 0 // :SS
+    var head = s.length - 11 - tail // YYYY-, before MM-DD HH:MM
+    var cut = function (t) {
+      return t ? '<span class="thimble-table-cut">' + t + '</span>' : ''
+    }
+    return cut(f.year ? '' : s.slice(0, head)) + s.slice(f.year ? 0 : head, s.length - (f.secs ? 0 : tail)) + cut(f.secs ? '' : s.slice(s.length - tail))
   }
   // The columns' widths: a column's own, else for numbers and times as wide as their widest value or title, else an
-  // equal share of what is left. In a table too narrow for them, such as one beside the side panel, the columns of text
-  // give up width in proportion, down to MIN_TEXT each, so that no cell is drawn over the next.
+  // equal share of what is left; and what each keeps in a table too narrow for them (fit): a column of text its `min`,
+  // a column of times its shortest form, a column of numbers its width. True when the columns drawn changed.
   Table.prototype.layout = function () {
     var self = this
     var charW = measureChar(this.mount) || CHAR
     var sample = this.all.length > SAMPLE ? this.all.slice(0, SAMPLE) : this.all
-    // a column of times shows their seconds when one of them has any, so that every time in it reads alike
+    var fitW = function (w) {
+      return Math.round(Math.max(MIN_W, Math.min(MAX_W, w)))
+    }
+    // a column of times shows their seconds when one of them has any, so that every time in it reads alike; in a narrow
+    // table it leaves out the year when they all share one
     this.columns.forEach(function (c) {
       if (c.type !== 'time') return
       c.secs = false
-      for (var i = 0; i < self.all.length && !c.secs; i++) {
+      c.years = false
+      var from = null // the first time's year, from its first second to the next year's
+      var to = null
+      for (var i = 0; i < self.all.length && !(c.secs && c.years); i++) {
         var v = self.value(c, self.all[i])
-        c.secs = typeof v === 'number' && isFinite(v) && Math.floor(seconds(v)) % 60 !== 0
+        if (typeof v !== 'number' || !isFinite(v)) continue
+        var t = seconds(v)
+        if (Math.floor(t) % 60 !== 0) c.secs = true
+        if (from == null) {
+          var y = new Date(t * 1000).getUTCFullYear()
+          from = Date.UTC(y, 0, 1) / 1000
+          to = Date.UTC(y + 1, 0, 1) / 1000
+        } else if (t < from || t >= to) c.years = true
       }
     })
-    // each column's width in px, or a CSS track for one that shares what is left
-    this.px = this.columns.map(function (c) {
-      if (typeof c.width === 'number' && c.width > 0) return c.width
-      if (typeof c.width === 'string' && c.width) return c.width
-      if (c.type === 'text') return null
+    this.want = [] // px, a CSS track, or null for a share of what is left
+    this.least = [] // px a column keeps before it drops
+    this.ease = [] // px a column takes before the others give up width, for one that shares what is left
+    this.forms = [] // a column of times: the forms it is written in as it narrows, [{secs, year, w}], the widest first
+    this.columns.forEach(function (c, i) {
+      var w = (typeof c.width === 'number' && c.width > 0) || (typeof c.width === 'string' && c.width) ? c.width : null
+      self.forms[i] = null
+      if (c.type === 'text') {
+        var keeps = c.min || (i === self.main ? MIN_MAIN : MIN_TEXT)
+        self.want[i] = w
+        self.least[i] = typeof w === 'number' ? Math.min(w, keeps) : keeps
+        self.ease[i] = i === self.main ? Math.max(keeps, EASE_MAIN) : keeps
+        return
+      }
+      if (typeof w === 'string') {
+        self.want[i] = w
+        self.least[i] = self.ease[i] = MIN_W
+        return
+      }
       var most = 0
-      for (var i = 0; i < sample.length; i++) most = Math.max(most, self.text(c, sample[i]).length)
-      var w = Math.max(most * charW + PAD, c.title.length * charW + PAD + SORT_ROOM)
-      return Math.round(Math.max(MIN_W, Math.min(MAX_W, w)))
+      var asWritten = 0 // the longest time given as a string, which no form shortens
+      for (var k = 0; k < sample.length; k++) {
+        var t = self.text(c, sample[k])
+        most = Math.max(most, t.length)
+        if (c.type === 'time' && t && typeof self.value(c, sample[k]) !== 'number') asWritten = Math.max(asWritten, t.length)
+      }
+      if (w == null) w = fitW(Math.max(most * charW + PAD, c.title.length * charW + PAD + SORT_ROOM))
+      self.want[i] = w
+      self.least[i] = w
+      if (c.type !== 'time') return
+      // the full stamp, then without the seconds, then without the year when the times share one: the first form is the
+      // widest the column's width holds, each next one only when it is narrower
+      var forms = [{ secs: c.secs, year: true }, { secs: false, year: true }, { secs: false, year: c.years }]
+      var steps = []
+      forms.forEach(function (f, j) {
+        var fw = fitW(Math.max(asWritten, STAMP + (f.secs ? 3 : 0) - (f.year ? 0 : 5)) * charW + PAD)
+        if (!steps.length) {
+          if (fw <= w || j === forms.length - 1) steps.push({ secs: f.secs, year: f.year, w: w })
+        } else if (fw < steps[steps.length - 1].w) steps.push({ secs: f.secs, year: f.year, w: fw })
+      })
+      self.forms[i] = steps
+      self.least[i] = steps[steps.length - 1].w
     })
-    this.fit()
+    return this.fit()
   }
-  // the columns' tracks for the table's width, from the widths layout() found
+  // The columns' tracks for the table's width, from what layout() found. In a table too narrow for them, such as one
+  // beside the side panel, the times are written shorter (without their seconds, then without their year), then the
+  // columns of text give up width in proportion down to what each keeps, the main column from EASE_MAIN; and when the
+  // columns need more than the table has even so, they drop in their order until the rest fit, so that no cell passes
+  // the table's edge. True when the columns drawn or the form of their times changed, which redrawColumns() then draws.
   Table.prototype.fit = function () {
     var self = this
-    var px = this.px || []
+    var cols = this.columns
     var room = this.body.clientWidth
-    var fixed = 0
-    var spare = 0 // what the columns of text with a width in px can give up
-    var flex = 0
-    px.forEach(function (w, i) {
-      if (typeof w !== 'number') flex++
-      else {
-        fixed += w
-        if (self.columns[i].type === 'text') spare += Math.max(0, w - MIN_TEXT)
-      }
+    var least = (this.least || []).slice()
+    var on = cols.map(function () {
+      return true
     })
-    var over = room > 0 ? fixed + flex * MIN_TEXT - room : 0
-    var k = over > 0 && spare > 0 ? Math.min(1, over / spare) : 0
-    var tracks = px.map(function (w, i) {
-      // a share of what is left keeps MIN_TEXT, rather than growing to its longest cell
-      if (w == null) w = '1fr'
-      if (typeof w !== 'number') return /^\d*\.?\d+fr$/.test(w) ? 'minmax(' + MIN_TEXT + 'px, ' + w + ')' : w
-      if (k && self.columns[i].type === 'text' && w > MIN_TEXT) w -= (w - MIN_TEXT) * k
-      return Math.round(w) + 'px'
+    var need = function () {
+      var s = 0
+      for (var i = 0; i < cols.length; i++) if (on[i]) s += least[i]
+      return s
+    }
+    if (room > 0) {
+      var order = this.dropOrder()
+      for (var d = 0, left = cols.length; d < order.length && left > 1 && need() > room; d++, left--) on[order[d]] = false
+      // the columns that never drop, still too wide: their text shares what the others leave
+      var lack = need() - room
+      var textLeast = 0
+      cols.forEach(function (c, i) {
+        if (on[i] && c.type === 'text') textLeast += least[i]
+      })
+      if (lack > 0 && textLeast > 0)
+        cols.forEach(function (c, i) {
+          if (on[i] && c.type === 'text') least[i] = Math.floor((least[i] * Math.max(0, textLeast - lack)) / textLeast)
+        })
+    }
+    var width = [] // each column's width in px, a CSS track, or null for a share of what is left
+    var share = [] // px a column that shares what is left (`1fr`) keeps of it
+    var step = [] // the form each column of times is written in
+    var over = 0
+    cols.forEach(function (c, i) {
+      if (!on[i]) return
+      width[i] = self.want[i]
+      step[i] = 0
+      share[i] = width[i] == null || FR.test(width[i]) ? Math.max(least[i], self.ease[i] || 0) : least[i]
+      over += typeof width[i] === 'number' ? width[i] : share[i]
+    })
+    over = room > 0 ? over - room : 0
+    // first the times written shorter, a step at a time in every column of times
+    for (var s = 1; over > 0; s++) {
+      var stepped = false
+      cols.forEach(function (c, i) {
+        var f = self.forms[i]
+        if (!on[i] || !f || s >= f.length) return
+        over -= width[i] - f[s].w
+        width[i] = f[s].w
+        step[i] = s
+        stepped = true
+      })
+      if (!stepped) break
+    }
+    // then the columns of text give up width in proportion, down to what each keeps: one with a width from it, the main
+    // column from the share it takes before the others give up theirs
+    if (over > 0) {
+      var from = function (c, i) {
+        return !on[i] || c.type !== 'text' ? 0 : typeof width[i] === 'number' ? width[i] : width[i] == null || FR.test(width[i]) ? share[i] : 0
+      }
+      var spare = 0
+      cols.forEach(function (c, i) {
+        spare += Math.max(0, from(c, i) - least[i])
+      })
+      var k = spare > 0 ? Math.min(1, over / spare) : 0
+      cols.forEach(function (c, i) {
+        var f = from(c, i)
+        if (!k || f <= least[i]) return
+        f = Math.floor(f - (f - least[i]) * k)
+        if (typeof width[i] === 'number') width[i] = f
+        else share[i] = f
+      })
+    }
+    var tracks = []
+    var drawn = []
+    var key = []
+    cols.forEach(function (c, i) {
+      if (!on[i]) return
+      var w = width[i] == null ? '1fr' : width[i]
+      // a share of what is left keeps its px, rather than growing to its longest cell
+      if (typeof w !== 'number') tracks.push(FR.test(w) ? 'minmax(' + share[i] + 'px, ' + w + ')' : w)
+      else tracks.push(Math.round(w) + 'px')
+      c.form = self.forms[i] ? self.forms[i][step[i]] : null
+      drawn.push(c)
+      key.push(i + (c.form ? (c.form.secs ? 's' : '') + (c.form.year ? 'y' : '') : ''))
     })
     this.root.style.setProperty('--thimble-table-cols', tracks.join(' '))
     this.laidW = room
+    this.drawnCols = drawn
+    var changed = key.join(' ') !== this.colsKey
+    this.colsKey = key.join(' ')
+    return changed
+  }
+  // the columns drawn again after they changed: the head, the rows near the view and the search's rows
+  Table.prototype.redrawColumns = function () {
+    this.drawHead()
+    this.drawn.forEach(function (el) {
+      el.remove()
+    })
+    this.drawn.clear()
+    this.searchRows()
+    this.window()
   }
   Table.prototype.drawHead = function () {
     var s = this.sort
-    this.head.innerHTML = this.columns
+    this.head.innerHTML = this.drawnCols
       .map(function (c) {
         var on = s && s.by === c.name
         var sort = on ? (s.desc ? 'descending' : 'ascending') : 'none'
@@ -383,7 +563,6 @@
   // search's rows
   Table.prototype.draw = function () {
     if (!this.mount || this.dead) return
-    var self = this
     this.shown = this.order()
     this.layout()
     this.drawHead()
@@ -391,24 +570,33 @@
     this.none.hidden = this.shown.length > 0
     this.none.textContent = this.all.length ? 'Filter by hides every row' : 'No rows'
     this.recolour(false)
-    if (this.search && typeof this.search.rows === 'function') {
-      var cols = this.columns
-      this.search.rows({
-        texts: this.shown.map(function (r) {
-          return cols
-            .map(function (col) {
-              return self.text(col, r)
-            })
-            .join('\n')
-        }),
-        refs: this.shown.map(this.refOf),
-        go: function (i) {
-          self.scrollTo(i, true)
-        },
-        box: this.mount,
-      })
-    }
+    this.searchRows()
     this.window()
+  }
+  // the search's rows: each row's columns drawn, then those a narrow table dropped, which it still finds
+  Table.prototype.searchRows = function () {
+    if (!this.search || typeof this.search.rows !== 'function') return
+    var self = this
+    var drawn = this.drawnCols
+    var cols = drawn.concat(
+      this.columns.filter(function (c) {
+        return drawn.indexOf(c) < 0
+      }),
+    )
+    this.search.rows({
+      texts: this.shown.map(function (r) {
+        return cols
+          .map(function (col) {
+            return self.text(col, r)
+          })
+          .join('\n')
+      }),
+      refs: this.shown.map(this.refOf),
+      go: function (i) {
+        self.scrollTo(i, true)
+      },
+      box: this.mount,
+    })
   }
   // What Color by draws, drawn again: the chips count the rows while a field is the colour (a label's values reach only
   // the rows drawn), the strip shows every row's colour, and the rows near the view are drawn anew with their bars
@@ -499,7 +687,7 @@
     return (
       '<div class="thimble-table-row' + (this.same(r, this.chosen) ? ' active' : '') + '" role="row" data-thimble-row="' + i + '"' +
       (ref != null ? ' data-anchor="' + esc(ref) + '"' : '') + (c ? c.attr(r) : '') + ' style="top:' + i * this.rowH + 'px">' +
-      this.columns
+      this.drawnCols
         .map(function (col) {
           return '<div class="thimble-table-td thimble-table-' + col.type + '" role="gridcell">' + self.cell(col, r) + '</div>'
         })

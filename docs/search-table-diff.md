@@ -124,7 +124,7 @@ const table = thimble.table({
 | option | what it is |
 |---|---|
 | `mount` | the element the table fills and scrolls in |
-| `columns` | the columns in order, each `{name, title, type, width, value, html, sort}` (below) |
+| `columns` | the columns in order, each `{name, title, type, width, min, drop, value, html, sort}` (below) |
 | `rows` | the records, each with its `ref` |
 | `sort` | how it opens, `{by, desc}` or a column's name; the rows' own order by default |
 | `side` | a `thimble.side` that a row opens in |
@@ -133,12 +133,19 @@ const table = thimble.table({
 | `onOpen(row)` | a row opened, by a click or Enter |
 | `key` | the name thimble keeps the sort under, the mount's id by default; give each table of a page its own |
 
-A column is `{name, title, type, width, value(row), html(row), sort}`: `name` the field as the records hold it,
-`title` its head (the name by default); `type` `'text'` (the default), `'number'` (right-aligned, in the mono face) or
-`'time'` (seconds since 1970, shown as `2026-04-01 09:30` in UTC, with the seconds when the column's times have them;
-a string as written); `width` px or a CSS track such as `'2fr'` (text shares what is left; numbers and times fit their
-widest value); `value(row)` the value it shows and sorts by when it is not `row[name]`; `html(row)` the cell's markup
-in place of its value as text; `sort: false` for a column a click does not sort.
+A column is `{name, title, type, width, min, drop, value(row), html(row), sort}`:
+
+| key | what it is |
+|---|---|
+| `name` | the field as the records hold it |
+| `title` | its head, the name by default |
+| `type` | `'text'` (the default), `'number'` (right-aligned, in the mono face) or `'time'` (seconds since 1970, shown as `2026-04-01 09:30` in UTC, with the seconds when the column's times have them; a string as written). A column too narrow for its times leaves out the seconds, then the year when every row has the same one |
+| `width` | px or a CSS track such as `'2fr'` (text shares what is left; numbers and times fit their widest value) |
+| `min` | the px a column of text keeps before columns drop: 120 for the main column, the first column of text without a `width` in px (else the first column of text), and 64 for the others by default, and never more than its `width` |
+| `drop` | in a table too narrow for its columns, such as one beside the side panel, the order they drop in until the rest fit, the highest first; `false` for one that never drops. A column without one drops after those with one, the rightmost first but the one the rows are sorted by last, and the main column never does. A dropped column comes back when the table widens, and the search and the default `details` still hold it |
+| `value(row)` | the value it shows and sorts by when it is not `row[name]` |
+| `html(row)` | the cell's markup in place of its value as text |
+| `sort` | `false` for a column a click does not sort |
 
 | member | what it gives |
 |---|---|
