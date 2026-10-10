@@ -60,17 +60,20 @@ def test_a_check_s_color_and_its_british_alias(monkeypatch, tmp_path):
 
 
 BRITISH = re.compile(r"(?<![\w-])(colour\w*|grey\w*|behaviours?|centre[sd]?|neighbour\w*|labell(?:ed|ing)|organis\w*|"
-                     r"recognis\w*|summaris\w*|normalis\w*|favour\w*|licence)(?![\w-])", re.I)
+                     r"recognis\w*|summaris\w*|normalis\w*|favour\w*|licence|cancell(?:ed|ing)|signall(?:ed|ing)|"
+                     r"modell(?:ed|ing)|analys(?:e|ed|ing)|catalogue|judgement)(?![\w-])", re.I)
 CODE = re.compile(r"`[^`\n]*`|\{\w+\}")  # inline code (identifiers, the British aliases) and a prompt's {placeholders}
+# a short date with its day first (`18 Jun`, `24 May 12:30`), in code spans too, where the American order is `Jun 18`
+DAY_FIRST = re.compile(r"(?<![\w.:/-])\d{1,2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\b")
 
 
 def test_the_prompts_and_docs_are_written_in_american_english():
     """Matt (10-10): "Colour > Color (not british)". What the agents and the analyst read is spelled the American way;
-    an inline code span may still name a British alias."""
+    an inline code span may still name a British alias. A short date puts its month first, as thimble writes dates."""
     root = Path(__file__).resolve().parents[2]
     files = [*root.glob("prompts/**/*.md"), *root.glob("docs/*.md"), *root.glob("plugin/skills/**/*.md"),
              *root.glob("extensions/*/cards/*/card.md"), root / "mods/thimble-term/README.md",
              root / "mods/thimble-term/SPEC.md", root / "README.md", root / "INSTALL.md", root / "CONTRIBUTING.md"]
     found = [f"{p.relative_to(root)}:{n}: {m.group(0)}" for p in files for n, line in enumerate(p.read_text().splitlines(), 1)
-             for m in BRITISH.finditer(CODE.sub(" ", line))]
+             for m in [*BRITISH.finditer(CODE.sub(" ", line)), *DAY_FIRST.finditer(line)]]
     assert not found, found
