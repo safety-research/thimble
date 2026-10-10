@@ -92,7 +92,8 @@
     this.rows = opts.rows && typeof opts.rows.groups === 'function' ? opts.rows : null
     this.split = !this.rows && typeof opts.split === 'string' && opts.split ? opts.split : null
     this.count = opts.count === false ? false : typeof opts.count === 'function' ? opts.count : null
-    this.mix = opts.mix === true ? true : typeof opts.mix === 'function' ? opts.mix : null
+    // `mix: true` counts a group's records, which only Rows gives
+    this.mix = opts.mix === true ? (this.rows ? true : null) : typeof opts.mix === 'function' ? opts.mix : null
     this.anchor = typeof opts.anchor === 'function' ? opts.anchor : null
     this.onPick = typeof opts.onPick === 'function' ? opts.onPick : null
     this.items = Array.isArray(opts.items) ? opts.items : []
