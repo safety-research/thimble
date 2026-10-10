@@ -85,6 +85,16 @@ def test_the_search_table_and_diff_are_thimble_s_parts_too():
     ]
 
 
+def test_the_text_is_thimble_s_part_too():
+    """A page sets the text's width and place, but does not change how it or its links look."""
+    css = ("<style>#body .thimble-text { max-width: 720px; margin: 0 auto } .thimble-text-ref { color: crimson }"
+           " .post .thimble-text { font-family: serif }</style>")
+    assert views.own_parts(css) == [
+        "`.thimble-text-ref` sets color",
+        "`.post .thimble-text` sets font-family",
+    ]
+
+
 def test_the_note_names_them_and_the_worked_examples_get_none():
     note = views.own_parts_note(PAGE)
     assert "`.chip` sets border-radius" in note and "and 2 more" in note and "chip-key" in note

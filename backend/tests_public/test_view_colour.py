@@ -67,6 +67,28 @@ def test_the_search_table_and_diff_load_after_the_transcript_and_before_the_rang
     assert ".thimble-search-input" in doc and ".thimble-table-row" in doc and ".thimble-diff-row" in doc
 
 
+def test_the_text_loads_after_the_row_controls_with_its_parser_and_before_the_range(tmp_path, monkeypatch):
+    """viewer_text.js takes the bridge's part after the row controls (whose helpers it uses), with the markdown parser
+    of the built interface (views.KIT_MARKDOWN_JS) just before it, and before the side panel, the transcript and the
+    range; a checkout whose interface is not built gets the part without the parser, which then shows plain text."""
+    d = tmp_path / "view"
+    d.mkdir()
+    (d / views.VIEW_HTML).write_text("<script>const t = thimble.text('#t', 'a **b**')</script>")
+    dist = tmp_path / "dist"
+    (dist / "kit").mkdir(parents=True)
+    (dist / views.KIT_MARKDOWN_JS).write_text("window.__thimbleMarkdown = {render: String} /* the built parser */")
+    monkeypatch.setattr(config, "FRONTEND_DIST", dist)
+    doc = views.frame_document({"dir": str(d), "slug": "forge", "name": "Forge"})
+    order = [doc.index(s) for s in ("thimble.filterBy = function", "the built parser", "thimble.text = function",
+                                    "thimble.side = function", "thimble.transcript = function",
+                                    "thimble.timeRange = function", "const t = thimble.text(")]
+    assert order == sorted(order), order
+    assert ".thimble-text-ref" in doc, "viewer_parts.css styles it"
+    monkeypatch.setattr(config, "FRONTEND_DIST", tmp_path / "unbuilt")
+    doc = views.frame_document({"dir": str(d), "slug": "forge", "name": "Forge"})
+    assert "the built parser" not in doc and "thimble.text = function" in doc
+
+
 def test_a_page_that_mounts_colour_by_has_label_controls(tmp_path):
     """The control lists every label with its switch (data-label, thimble.setLabel), so a page that mounts it need not
     draw its own; a page that does neither has none."""
