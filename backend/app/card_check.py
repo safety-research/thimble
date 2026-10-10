@@ -15,7 +15,8 @@ new change to the card cancels a running check and starts the next. At most READ
    and kept only when the code runs clean and the card draws, as one undo step with actor `check`. A card that fails no
    criterion stays as it is, unless its links check found a value its code types in and the replacement's code
    changes (_problems). New code runs on the card's kernel, and in terminal mode, where the check runs in the shim,
-   through `thimble-run trial` in main's sandbox, as a card run would (cardrun.trial).
+   through `thimble-run trial` in main's sandbox, as a card run would (cardrun.trial). A replacement that left all the
+   card shows as it was (checkstore.shows_same) is one more version in the card's history, and the check ends `ok`.
 A check past check_timeout(effort) ends `error`; waits for API capacity are left out of that time. A trial run on the
 kernel is always settled, even when the check is stopped mid-trial. Timings go to
 workspaces/<c>/card-checks/timings.jsonl and pictures under workspaces/<c>/card-checks/<card>/. A refused reading
@@ -717,15 +718,22 @@ def typed_numbers(code: str, shown: set[str]) -> list[str]:
 def shown_numbers(cell: dict[str, Any]) -> set[str]:
     """Every number the card's outputs show as text: a table's rows, a chart's data, a drawing's labels and printed
     output, as typed_numbers compares them (thousands separators dropped, a whole number without its `.0`). Images
-    are left out, since the digits of their encoding are no values."""
+    are left out, since the digits of their encoding are no values. A chart with rows of its own shows its table's rows
+    (cite.chart_table, the rows the card cites), not its settings or where the notes and rules over them stand: the
+    heights typed in to place three event notes over a chart's bars are no data (live QA 3, a merges chart)."""
+    from . import cite  # noqa: PLC0415
+
     out: set[str] = set()
     for o in cell.get("outputs") or []:
         bundle = o.get("data") if isinstance(o, dict) and isinstance(o.get("data"), dict) else o
         if not isinstance(bundle, dict):
             continue
+        table = cite.chart_table(bundle)
         for mime, v in bundle.items():
             if str(mime).startswith("image/"):
                 continue
+            if table is not None and "vega" in str(mime):
+                v = [table.labels, table.cells]
             text = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False, default=str)
             for m in _NUM_TEXT.finditer(text):
                 raw = m.group(0).replace(",", "")
@@ -841,9 +849,11 @@ async def _replace(run: _Run, cell: dict[str, Any], patch: dict[str, Any], faile
             _gone(run)  # changed since the check began, or no longer the model's to change
             return
         # the record says `fixed` in the same turn the fix lands, so a Stop during the settle below cannot mark a card
-        # that was revised as stopped
-        timing["replacement"] = "applied"
-        _end(run, "fixed")
+        # that was revised as stopped; a fix that left all the card shows as it was is a version in the card's history
+        # alone, and the record says `ok`, as for a card the check did not revise (checkstore.apply_fix)
+        same = applied.get("state") == checkstore.SAME
+        timing["replacement"] = "same outputs" if same else "applied"
+        _end(run, "ok" if same else "fixed")
         await _settle(c, cid, tid, keep=True)
     finally:
         if not settled and tid:  # stopped or past its time before the settle began

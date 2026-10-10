@@ -2,7 +2,7 @@
 <html>
 <head>
 <style>
-  /* thimble's parts come with the frame: .field and .btn, Filter by, Rows and Color by, the time range, the lanes and
+  /* thimble's parts come with the frame: .btn, the search, Filter by, Rows and Color by, the time range, the lanes and
      their key, the divider, the side panel, the transcript, and the theme's tokens. This page lays them out: the top
      row, the sessions' lanes under the range, then the chosen session's transcript with what links it to the others */
   html, body { margin: 0; height: 100%; }
@@ -10,9 +10,9 @@
   * { box-sizing: border-box; }
   #view { height: 100%; display: flex; flex-direction: column; }
   .top { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 12px 16px 10px; border-bottom: 1px solid var(--border-subtle); }
-  #q { flex: 0 1 200px; min-width: 110px; }
+  #search { flex: 0 1 260px; min-width: 200px; }
   /* Color by takes the row's free width, and a row of its own where less than that is left, so the row never runs past the pane */
-  #colour { min-width: min(100%, 280px); }
+  #color { min-width: min(100%, 280px); }
   /* the overview: the range and its axis over the lanes, the names in a column at the left. It never scrolls, down or
      sideways, though the divider sets it to: the lanes take the height it has, the divider's or about half the page */
   #overview { flex: none; min-height: 0; overflow: hidden !important; }
@@ -24,9 +24,6 @@
   /* the session read: a tick on its parent's lane where it was started and one where its result came back */
   .ticks { position: absolute; left: 0; top: 0; width: 0; height: 0; pointer-events: none; }
   .ticks i { position: absolute; width: 2px; background: var(--text-primary); }
-  /* a failed call: a small ✕ in the problem red at the foot of its mark, as the transcript gives it before its tool; it
-     leaves the marks' Color by colors in view */
-  .fail-x { fill: none; stroke: var(--status-negative); stroke-width: 1.6; stroke-linecap: round; pointer-events: none; }
   /* the lanes past the room wait behind '… N more', a lane's height in the names' column */
   .more { display: block; height: 18px; margin: 0; padding: 0 0 0 8px; border: 0; background: none; color: var(--text-tertiary); font: 400 var(--text-ui-sm) / 18px var(--font-body); cursor: pointer; }
   .more:hover { color: var(--text-primary); }
@@ -47,10 +44,10 @@
 <body>
 <div id="view">
   <div class="top">
-    <input class="field" id="q" type="search" placeholder="Search the transcripts" aria-label="Search the transcripts">
+    <span id="search"></span>
     <span id="filter"></span>
     <span id="rows"></span>
-    <span id="colour"></span>
+    <span id="color"></span>
   </div>
   <div id="overview">
     <div class="time">
@@ -61,7 +58,7 @@
   </div>
   <div id="body">
     <div id="main">
-      <div id="rel"></div>
+      <div id="rel" data-thimble-chrome></div>
       <div id="turns"><div class="empty">Loading the sessions…</div></div>
     </div>
   </div>
@@ -89,7 +86,7 @@ const FILE_TYPES = {
   'test .json': 'A JSON file under tests/, such as a fixture', '.md': 'A Markdown file', '.toml': 'A TOML file, such as pyproject.toml',
 }
 
-let data = null // the reader's overview: {runs, sessions, spawns, items, counts, fcounts, colours, groups}
+let data = null // the reader's overview: {runs, sessions, spawns, items, counts, fcounts, colors, groups}
 let items = [] // the calls and messages the filters keep, in time order
 let chosen = null // the lane read in the transcript: a session's id, or a group's key under another Rows choice
 let drawn = '' // what the transcript last drew, so a redraw that changes nothing leaves it and its scroll alone
@@ -107,9 +104,12 @@ const ready = new Promise((ok) => { loaded = ok })
 const laneName = (id) => (S[id] ? (S[id].parent ? names[id] : `${runName(S[id].run)} · ${names[id]}`) : id)
 const runTitle = (id) => (teams[id] ? `${runName(id)} · ${teams[id]}` : runName(id))
 
+// the search finds the words in the transcript and in a subagent's beside it, folded calls among them, and opens what
+// holds them; the reader keeps only the turns that hold them, so the lanes show those alone
+const search = thimble.search({ mount: '#search', in: '#body', placeholder: 'Search the transcripts', onChange: () => load() })
 // Color by, the one color: the speaker, the tool, the file type, the outcome or a label that is on
-const colour = thimble.colorBy({
-  mount: '#colour',
+const color = thimble.colorBy({
+  mount: '#color',
   // each field says what it is, and `meanings` what the values the transcripts' format fixes mean (reader.py's notes),
   // which the menu and a chip's hover give
   fields: [
@@ -161,19 +161,20 @@ const rows = thimble.rows({
 // apart, and a viewfinder over the part the lanes and the transcript show
 const range = thimble.timeRange({ mount: '#range', readout: '#readout', gap: 1200, onChange: draw })
 // with a label chosen, a turn's value is the reader's, since the page holds a label's marks only for what it shows
-const valueOf = (it) => (colour.label ? (data && data.colours[it.ref]) ?? null : colour.valueOf(it))
-const laneColour = { keeps: () => true, valueOf, colourOf: (v) => colour.colourOf(v) }
+const valueOf = (it) => (color.label ? (data && data.colors[it.ref]) ?? null : color.valueOf(it))
+const laneColor = { keeps: () => true, valueOf, colorOf: (v) => color.colorOf(v) }
 const bySession = () => rows.field === 'session'
-// the lanes: each turn a mark as wide as its call took (a Task call as long as its subagent ran), a failed call a red
-// ✕ at its mark's foot (failMarks), always shown; the transcript's turns in view tinted across them; the groups of
-// Rows in the room the overview has
+// the lanes: each turn a mark as wide as its call took (a Task call as long as its subagent ran), a failed call a ✕
+// in the problem red at its mark's foot; the transcript's turns in view tinted across them; the groups of Rows in the
+// room the overview has
 const failed = (it) => it.kind === 'call' && it.outcome !== 'ok'
-const lanes = thimble.lanes({
-  mount: '#lanes', keyMount: '#key', range, colour: laneColour, names: NAMES,
+const lanes = thimble.timeline({
+  mount: '#lanes', keyMount: '#key', range, color: laneColor, names: NAMES,
   groups: (its) => fitted(rows.groups(its)),
   time: (it) => it.time,
   end: (it) => it.time + (it.duration || 0),
   follow: '#turns',
+  problem: failed, words: { problem: 'failed' },
   anchor: (lane) => (bySession() && S[lane.key] ? `view:${slug}/${lane.key}` : null),
   onPick: (lane) => read(String(lane.key)),
   onMark: (it) => goTo(it.ref),
@@ -181,20 +182,20 @@ const lanes = thimble.lanes({
 })
 // the transcript: a card per turn as the File browser draws it, a tool call folded to its line; a Task call opened
 // shows the subagent's transcript beside it in the side panel
-const tr = thimble.transcript({ mount: '#turns', colour, onOpen: (turn) => opened(turn) })
+const tr = thimble.transcript({ mount: '#turns', color, onOpen: (turn) => opened(turn) })
 const side = thimble.side({ mount: '#body', width: 0.42, key: 'subagent' })
 let sideTr = null
 
 async function load() {
   let got
   try {
-    got = await thimble.fetch({ op: 'overview', colour: colour.query(), filter: filter.query(), rows: rows.query(), search: $('q').value.trim() }, { key: 'overview' })
+    got = await thimble.fetch({ op: 'overview', color: color.query(), filter: filter.query(), rows: rows.query(), search: search.text.trim() }, { key: 'overview' })
   } catch (e) {
     if (e.name === 'AbortError') return
     throw e
   }
   data = got
-  colour.counts(data.counts)
+  color.counts(data.counts)
   filter.counts(data.fcounts)
   sessions()
   // under a label, a turn's lane is the reader's value of it (`group`); under a field, the page reads the field
@@ -353,7 +354,7 @@ $('lanes').addEventListener('click', (e) => {
 }, true)
 
 // once the lanes draw: a run folded by itself shows ▸ as one folded by hand does, the runs folded by hand are read
-// from what the lanes drew, a failed call gets its ✕ and the session read its ticks
+// from what the lanes drew, and the session read gets its ticks
 function painted() {
   const hand = new Set(fit.hand)
   for (const b of $('lanes').querySelectorAll('[data-fold]')) {
@@ -365,33 +366,12 @@ function painted() {
     } else if (b.getAttribute('aria-expanded') === 'false') hand.add(k)
     else hand.delete(k)
   }
-  failMarks()
   ticks()
   if ([...hand].sort().join(' ') === [...fit.hand].sort().join(' ')) return
   fit.hand = hand
   lanes.draw()
 }
 new MutationObserver(painted).observe($('lanes').querySelector('.thimble-lanes-body'), { childList: true })
-
-// a failed call's ✕ at the foot of its mark, in the problem red, over the mark's lower edge and the lane's bottom
-// padding, so no mark loses its color under it
-const SVG = 'http://www.w3.org/2000/svg'
-const X = 2.75 // px, half the ✕'s width
-function failMarks() {
-  const byKey = new Map(lanes.lanes.map((n) => [String(n.key), n.items || []]))
-  for (const svg of $('lanes').querySelectorAll('svg.thimble-lane-track:not([data-fails])')) {
-    svg.setAttribute('data-fails', '')
-    const its = byKey.get(svg.closest('.thimble-lane')?.getAttribute('data-key')) || []
-    for (const m of svg.querySelectorAll('.thimble-lane-mark[data-i]')) {
-      if (!failed(its[+m.getAttribute('data-i')] || {})) continue
-      const x = +m.getAttribute('x') + +m.getAttribute('width') / 2, y = +m.getAttribute('y') + +m.getAttribute('height') - 0.5
-      const path = document.createElementNS(SVG, 'path')
-      path.setAttribute('class', 'fail-x')
-      path.setAttribute('d', `M${x - X} ${y - X}L${x + X} ${y + X}M${x + X} ${y - X}L${x - X} ${y + X}`)
-      svg.appendChild(path)
-    }
-  }
-}
 
 // where the session read was started and where its result came back, a tick at each on its parent's lane, or on the lane
 // a folded run holds it in; the tree's guides show which session started which
@@ -427,7 +407,7 @@ function turnOf(it) {
   const call = it.kind === 'call'
   const w = whole.get(it.ref)
   return {
-    ...it, t: it.time, time: null, kind: call ? 'tool' : it.kind === 'prompt' ? 'prompt' : 'text',
+    ...it, t: it.time, kind: call ? 'tool' : it.kind === 'prompt' ? 'prompt' : 'text',
     input: call ? inputOf(it, w) : undefined, output: w ? w.output : undefined,
     error: failed(it) && it.outcome, sessionName: S[it.session] ? `${names[it.session]} · ${runTitle(S[it.session].run)}` : it.session,
   }
@@ -463,10 +443,26 @@ async function transcript() {
     turns.length < total ? `of ${total}` : '',
     session ? `${hms(session.start)} – ${hms(session.end)}` : `${new Set(turns.map((t) => t.session)).size} sessions`,
   ].filter(Boolean).join(' · ')
-  const sig = JSON.stringify([key, turns.map((t) => t.ref), colour.query()])
+  const sig = JSON.stringify([key, turns.map((t) => t.ref), color.query()])
   if (sig === drawn) return
   drawn = sig
   tr.draw(turns, { title, sub, empty: range.full ? 'No turn holds the search or passes the filters' : 'No turn in this time range' })
+  if (search.text.trim()) wholeFor(turns)
+}
+
+// The reader keeps the turns whose words hold the search, a call's whole input and what came back among them, while a
+// call shows only its input's first line until it opens: those calls fetched whole, so the search finds the words in
+// them and opens the call it goes to
+const WHOLE_MOST = 40 // calls fetched whole for one search at most
+async function wholeFor(turns) {
+  const q = search.text.trim().toLowerCase()
+  const want = turns.filter((t) => t.kind === 'tool' && !whole.has(t.ref) && !`${t.input}\n${t.output || ''}`.toLowerCase().includes(q)).slice(0, WHOLE_MOST)
+  const got = await Promise.all(want.map((t) => thimble.fetch({ op: 'record', ref: t.ref }).catch(() => null)))
+  want.forEach((t, i) => {
+    if (!got[i] || whole.has(t.ref)) return
+    whole.set(t.ref, got[i])
+    for (const x of [tr, sideTr]) if (x) x.set(t.ref, { input: inputOf(t, got[i]), output: got[i].output })
+  })
 }
 
 // what links the session read to the others: the session that started it and when, when its result came back, and
@@ -512,8 +508,9 @@ async function beside(id) {
     ref: `view:${slug}/${id}`,
     render: (body) => {
       body.innerHTML = `<div class="side-acts"><button class="btn btn-secondary btn-sm" data-read="${esc(id)}">Read ${esc(names[id])} here</button></div><div class="side-turns"></div>`
-      sideTr = thimble.transcript({ mount: body.querySelector('.side-turns'), colour, onOpen: (turn) => opened(turn) })
+      sideTr = thimble.transcript({ mount: body.querySelector('.side-turns'), color, onOpen: (turn) => opened(turn) })
       sideTr.draw(turns, { empty: 'No turn passes the filters' })
+      if (search.text.trim()) wholeFor(turns)
     },
   })
 }
@@ -540,9 +537,9 @@ async function read(key) {
 // a turn to show, from a lane's mark, a link or a citation: its session read, the turn opened and in the middle
 async function goTo(ref) {
   let it = items.find((x) => x.ref === ref)
-  if (!it && ($('q').value || filter.query())) {
+  if (!it && (search.text || filter.query())) {
     // a turn the search or Filter by hides: both put back, so it shows
-    $('q').value = ''
+    search.set('')
     if (filter.query()) filter.choose(null)
     await load()
     it = items.find((x) => x.ref === ref)
@@ -560,8 +557,6 @@ async function goTo(ref) {
   tr.reveal(ref)
 }
 
-let typing = null
-$('q').addEventListener('input', () => { clearTimeout(typing); typing = setTimeout(load, 250) })
 document.addEventListener('click', (e) => {
   const call = e.target.closest('[data-call]'), go = e.target.closest('[data-read]')
   if (call) goTo(call.dataset.call)
@@ -600,7 +595,7 @@ thimble.onLabels((state) => {
   if (labelFilter != null && now !== labelFilter) soon()
   labelFilter = now
 })
-thimble.onMarks(() => { if (colour.label || filter.label || rows.label) soon() })
+thimble.onMarks(() => { if (color.label || filter.label || rows.label) soon() })
 load()
 </script>
 </body>

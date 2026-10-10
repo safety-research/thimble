@@ -1,4 +1,4 @@
-# Rows, filters, lanes, the side panel and the transcript
+# Rows, filters, lanes, cards, the side panel and the transcript
 
 Most views share one layout: the top row with the controls that act on the whole view, an overview of the records on a
 time axis, the records themselves in a list under it, and the details of the record chosen. The view kit draws each of
@@ -10,11 +10,16 @@ these parts, so a page lays them out and fills them rather than drawing its own:
 | Rows | `thimble.rows` | in the top row: what the lanes or rows are grouped by, a field or a label |
 | Color by | `thimble.colorBy` | in the top row: the one color ([color.md](color.md)) |
 | the time range | `thimble.timeRange` | over the overview: the time the view shows ([time-range.md](time-range.md)) |
-| the lanes | `thimble.lanes` | the overview: a lane per group of Rows on the range's scale |
+| the timeline | `thimble.timeline` | the overview: a lane per group of Rows on one axis of times or numbers |
 | the key | `thimble.key` | the series the overview draws beside Color by's, each a toggle |
 | the divider | `thimble.divider` | the bar between the overview and the list, which a drag moves |
+| the tree | `thimble.tree` | a list of groups to navigate beside the records: channels, folders, files, pages |
+| the cards | `thimble.recordCard` | a record as a card or a tile, its colors Color by's bars on its edge, one per choice |
 | the side panel | `thimble.side` | a record, or a row's children, in a wide panel beside the list |
 | the transcript | `thimble.transcript` | a transcript's turns, as the File browser's Transcript mode draws them |
+| the messages | `thimble.messages` | any conversation between people or agents, as a chat app draws it: agents in a chat or on a board, a user and an assistant, a mail thread, a pull request's comments |
+| the record | `thimble.record` | one record's fields as a tree under its citation, such as in the side panel |
+| a chart | `thimble.chart` | a chart of a card's `thimble.chart` kinds, in the canvas's style ([charts.md](charts.md#in-a-view)) |
 
 Only Color by draws in colors, and only on the records. Filter by's toggles and the lanes' names are words; a failure
 may take the problem red beside the Color by colors, with a shape (✕ or an underline) so that it stays apart from a
@@ -26,7 +31,7 @@ from keywords.
 Every choice of each part must draw the view: None for Rows and Filter by, Off for Color by, each field and each
 label. The view checks try every choice the page's parts offer, and each part's first choice again after the others,
 and fail the view on the one whose drawing gives a script error, naming it ("Rows: None"). Read `rows.by`,
-`filter.by` and `colour.by` as what they are with None or Off, null, and draw the records in one group, unfiltered or
+`filter.by` and `color.by` as what they are with None or Off, null, and draw the records in one group, unfiltered or
 uncolored then.
 
 No part scrolls sideways: the kit keeps the page to its pane's width, and the overview under the divider scrolls down
@@ -42,7 +47,7 @@ Color by's row, turns every value and series back on and closes the side panel.
 <div id="view">
   <div class="top">
     <input class="field" id="q" type="search" placeholder="Search">
-    <span id="filter"></span><span id="rows"></span><span id="colour"></span>
+    <span id="filter"></span><span id="rows"></span><span id="color"></span>
   </div>
   <div id="overview">
     <div class="time"><div id="readout"></div><div id="range"></div><div id="key"></div><div id="axis"></div></div>
@@ -51,7 +56,7 @@ Color by's row, turns every value and series back on and closes the side panel.
   <div id="body"><div id="list"></div></div>
 </div>
 <script>
-const colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'tool', title: 'Tool' }], strip: '#list', onChange: draw })
+const color = thimble.colorBy({ mount: '#color', fields: [{ name: 'tool', title: 'Tool' }], strip: '#list', onChange: draw })
 const filter = thimble.filterBy({ mount: '#filter', fields: [{ name: 'outcome', title: 'Outcome', values: ['ok', 'error'] }], onChange: draw })
 const range = thimble.timeRange({ mount: '#range', readout: '#readout', times, onChange: draw })
 const rows = thimble.rows({
@@ -62,11 +67,11 @@ const rows = thimble.rows({
   ],
   onChange: draw,
 })
-const lanes = thimble.lanes({
+const lanes = thimble.timeline({
   mount: '#lanes', keyMount: '#key', rows, range, names: 200,
   end: (call) => call.t + call.duration,                 // a mark as wide as the call ran
   band: (lane) => [[lane.items[0].t, lane.items.at(-1).t]], // where the session ran
-  problem: (call) => call.outcome !== 'ok',              // a failure, underlined in the problem red
+  problem: (call) => call.outcome !== 'ok',              // a failure, a ✕ in the problem red
   follow: '#list',                                       // the list's rows in view, as a tint
   onPick: (lane) => { session = lane.key; draw() },      // a lane's name: its session's transcript
   onMark: (call) => show(call),                          // a mark: the call in the side panel
@@ -105,7 +110,7 @@ value's words where they are not the value.
 | `counts(map)` | the reader's counts of the choice's values, `''` for no value; without them, the records the page hands `keeps` and `valueOf` are counted |
 | `choose(name \| {label} \| null)`, `toggle(value)` | change it from the page |
 
-A reader that filters takes the query with `thimble.colour_on(f, thimble.colour_value(f, ref, r))`. Filter by is the
+A reader that filters takes the query with `thimble.color_on(f, thimble.color_value(f, ref, r))`. Filter by is the
 only part that hides records: Color by only colors.
 
 ## Rows
@@ -135,27 +140,39 @@ items}`:
   left-aligned on one edge.
 
 `groupOf(record)` is a record's group, `query()` the choice for the reader (`{field}`, `{label, name}`, or null), and
-`thimble.colour_value(rows, ref, record)` a record's group there. A label's value reaches the page only on the records
+`thimble.color_value(rows, ref, record)` a record's group there. A label's value reaches the page only on the records
 it anchors (the marks of `thimble.markOf`); a record the reader gave its group as `group` keeps it, for a view that does
 not anchor every record.
 
-## The lanes
+## The timeline
 
-`thimble.lanes(opts)` draws the overview in `mount`: a lane per group of `rows` (or of `groups(items)`), its name in a
-column `names` px wide (200 by default) with its tree guide, and its records on the time range's scale as marks in the
-Color by colors, gray with Off. Lay the range and its axis out over the lanes with the same names column, so the lanes
-stand under them.
+`thimble.timeline(opts)` draws the overview in `mount` as lanes on one axis of times or numbers: a lane per group of
+`rows` (or of `groups(items)`), its name in a column `names` px wide (200 by default; with no range, as wide as its
+longest name, up to 200 and a third of the width) with its tree guide, and its records as marks in the Color by colors,
+gray with Off. It needs no other part: with no `range` it lays out its records' whole span and draws its own axis under
+the lanes, with no `rows` it draws one lane and no names, and with no Color by its marks are gray. With a range, lay the
+range and its axis out over the lanes with the same names column, so the lanes stand under them. `thimble.lanes` is its
+old name.
+
+```js
+const tl = thimble.timeline({ mount: '#timeline', rows: 'author', onMark: (c) => show(c) })
+tl.draw(commits) // [{t: 1778922000, author: 'ana', text: 'Fix the parser'}]
+```
 
 | option | what it is |
 |---|---|
-| `rows`, `range`, `colour` | the Rows control, the time range (its `scale(width)`), and Color by (the page's by default) |
-| `time(item)`, `end(item)` | a record's time (`item.t` by default), and its end, for a mark as wide as the record ran |
-| `band(lane)` | the spans the lane ran, `[[start, end]]`, drawn as a light band (the key's "running") |
-| `problem(item)` | whether a record failed: its mark is underlined in the problem red (the key's "failed") |
+| `rows`, `range`, `color` | the lanes: the Rows control, a field's name or a function of a record; the time range (its `scale(width)`); and Color by (`color` or `colour`: the page's by default, `false` for gray marks) |
+| `time(item)`, `end(item)` | a record's place on the axis (`item.t` by default), a number, or a Date or an ISO time on an axis of time, else the record is left out; and its end, for a mark as wide as the record ran |
+| `unit` | the axis's unit with no range, as the time range's: `'s'` seconds since 1970 (the default), `'ms'`, or `'n'` a plain number such as a turn, a line or a score |
+| `band(lane)` | the spans the lane ran, `[[start, end]]`, drawn as a light band in Events (the key's "running") |
+| `problem(item)` | whether a record failed: its mark takes a ✕ in the problem red at its foot (the key's "failed") |
 | `words` | the key's words: `{band, problem}` |
-| `keyMount` | where the key goes; at the lanes' top by default |
-| `follow` | the detail list, whose rows carry `data-t`: the rows in view are a light tint across the lanes |
-| `density` | a flag, or a function the page answers at each draw: each lane as bars on the scale's bins in place of marks (an Events \| Density choice) |
+| `keyMount` | where the key goes; at the lanes' top by default, or with no range beside the axis, under it where it has no room there |
+| `follow` | the detail list, whose rows carry `data-t`, as the table's, the transcript's and the messages' do: the rows in view, from the earliest of their times to the latest, are a light tint across the lanes |
+| `density` | a flag, or a function the page answers at each draw: each lane as bars on the scale's bins in place of marks, with no band behind them (an Events \| Density choice) |
+| `drawLane(lane, ctx)` | the view's own marks in each lane, on the lanes' scale (below) |
+| `marks` | `false`, or a function of a record: whether Events draws the kit's mark of a record, for a view that draws its own; the tip and a click still find the record |
+| `series` | the key's entries of the view's own series, `[{id, name, mark, color}]`, `mark` as the key draws it (`band`, `mark`, `line`); an entry shows while a lane draws its series |
 | `anchor(lane)` | a lane's `data-anchor`, such as a session's unit |
 | `onPick(lane)`, `onMark(item)` | a lane's name clicked, which marks it chosen; a mark clicked |
 | `tip(item)` | the words of a record in the hover tip |
@@ -167,17 +184,43 @@ gives its time and its records per value, and a click opens its first record (`o
 as the list scrolls; where the time range marks a span on its own overview (`range.visible`), the lanes mark it there
 too.
 
+`drawLane(lane, ctx)` draws the view's own marks in each lane after the kit has drawn its own: shaded spans of time, a
+line or a small chart, or marks in place of the kit's (`marks: false`). `lane` is `{key, name, depth, heading, folded,
+items}`. It runs at each paint, in Events and in Density (a taller lane, every record in a bar), so it follows Color
+by, the range, the key and the records the page draws (`lane.items`, those Filter by keeps). The tip and a click find
+the lane's records by their place on the axis, so marks the view draws itself answer them too.
+
+| `ctx` | what it is |
+|---|---|
+| `g`, `over` | SVG elements the size of the lane's track, behind the kit's marks and over them (under the failures' ✕), which take SVG markup (`insertAdjacentHTML`) or elements; what falls outside the track is cut off |
+| `x(t)`, `scale`, `width`, `height` | a time's x on the lanes' scale (a number, a Date or an ISO time), the scale itself (`t(x)`, `from`, `to`), and the track's size in px |
+| `colorOf(record)` | the record's Color by color, null with Off or a value turned off |
+| `shade(t0, t1, {color, name, series, over})` | a shaded span as tall as the lane (a moment, a line), light gray or `color` at a low opacity; `name` is said in the tip over it; with `series` it shows while that series is on |
+| `on(id)` | whether a series of `series` shows; asking puts its entry in the key |
+
+```js
+const tl = thimble.timeline({
+  mount: '#lanes', rows, range,
+  series: [{ id: 'freeze', name: 'deploy freeze' }],
+  drawLane: (lane, ctx) => {
+    for (const f of freezes) ctx.shade(f.start, f.end, { name: f.reason, series: 'freeze' })   // across every lane
+    for (const c of lane.items.filter((c) => c.cost)) ctx.over.insertAdjacentHTML('beforeend',
+      `<circle cx="${ctx.x(c.t)}" cy="${ctx.height / 2}" r="2.5" fill="${ctx.colorOf(c) || 'gray'}"/>`)
+  },
+})
+```
+
 | member | what it gives |
 |---|---|
 | `draw(items)` | the lanes drawn with these records, those of the range the page shows |
 | `lanes`, `chosen`, `choose(key)` | the lanes as drawn, and the chosen one |
 | `visible(t0, t1)`, `visible(null)` | the span the list shows, for a list `follow` cannot read |
-| `isOn(series)` | whether `band` or `problem` shows |
+| `isOn(series)` | whether `band`, `problem` or one of `series` shows |
 | `scale` | the scale the lanes drew on |
 
 ## The key
 
-`thimble.key(mount, entries, {key, onChange})` draws a key whose entries are toggles: `[{id, name, mark, colour, n,
+`thimble.key(mount, entries, {key, onChange})` draws a key whose entries are toggles: `[{id, name, mark, color, n,
 count}]`, `mark` drawn as the series is drawn (`band`, `mark`, `problem`, `line`). A click hides or shows the series;
 an entry with `n` 0 is left out, so a key never names a series the view does not draw. `isOn(id)` says whether a series
 shows and `set(entries)` draws new ones. The lanes draw their own key with it.
@@ -187,6 +230,95 @@ shows and `set(entries)` draws new ones. The lanes draw their own key with it.
 `thimble.divider({top, key, min})` puts a bar under `top`, the overview's box, which a drag moves: the overview takes
 the height it leaves and scrolls down inside it, never sideways, and the list under it takes the rest. ↑ and ↓ move it while it has the
 focus, a double click or Home puts it back. thimble keeps its place per view as a share of the height the two share.
+
+## The tree
+
+`thimble.tree({mount, items, split, rows, count, mix, anchor, find, key, onPick})` lists groups to navigate beside the
+records, as Files' tree lists folders: a chat's channels, an inbox's folders, a repository's files, a wiki's pages under
+their wikis, agents and their sessions. It needs no other part, and it draws only the rows near its view, so 50,000
+nodes open at once. `mount` is the element it fills and scrolls in, which the page gives a height.
+
+```js
+const tree = thimble.tree({
+  mount: '#pages', split: '/', find: true,
+  items: pages.map((p) => ({ key: p.wiki + '/' + p.title, n: p.revisions })),   // 'dse/StartSeite'
+  anchor: (node) => node.item && 'view:wiki/' + node.key,
+  onPick: (node) => { page = node.key; draw() },
+})
+```
+
+`items` gives the nodes one of three ways:
+
+- `[{key, name, parent, n}]`, a tree as given. A `parent` that no item names is a folder named by its key.
+- With `split: '/'`, the keys are paths and the folders come from their prefixes, before the leaves, each in natural
+  order.
+- With `rows`, a `thimble.rows`, the items are records and the nodes are `rows.groups(items)`, each with its records, so
+  the tree and the lanes group alike. Draw it again with the records Filter by keeps in Rows' and Filter by's
+  `onChange`.
+
+A row is 24 px, indented by its depth, with a chevron that folds a folder. Its name is cut with an ellipsis and shown
+whole on hover, and its number stands right-aligned in mono after it, never under it: `n`, a group's records with
+`rows`, else the sum of a folder's children. `count(node)` gives another number, such as a folder's unread messages, and
+`count: false` none. A group takes no color of its own: `mix: (node) => counts` draws `thimble.mix` in its row, and with
+`rows`, `mix: true` counts each group's records by Color by. `anchor(node)` gives a row its `data-anchor`, such as a
+unit `view:<slug>/<key>`, so a label marks it and a ⌘-click asks about it. `find: true` puts a field over the tree that
+keeps the names that match, with the folders above them open; the page's `thimble.search` leaves the tree to it.
+
+A click or Enter picks a row: it is chosen (`.active`), a folder opens (a click on the chosen folder folds it), and
+`onPick(node)` hears it. ↑ and ↓ move, ← folds or goes to the parent, → opens. A node is `{key, name, parent, depth, children, n, item}`, and with `rows` also
+`items` and `value`, its group's records and value. A node's `key` is its item's key as given, and a folder's with `split`
+the path up to it. The tree opens with the folders that fit its height open. thimble
+keeps the folds and the chosen key per view (under `key`, else the mount's id); Reset puts back the folds the tree opened
+with and empties the find, and keeps the choice.
+
+| member | what it gives |
+|---|---|
+| `draw(items)` | the tree drawn with these items, the folds and the choice kept; `draw()` draws it again |
+| `chosen`, `choose(key)` | the chosen node's key, and a node chosen without telling the page |
+| `reveal(key)` | a node shown: its folders opened, scrolled to, chosen and highlighted for a moment |
+| `fold(key, on)` | a folder folded (`true`), opened (`false`) or turned over |
+| `nodes` | every node, in the order the tree lists them |
+
+## The cards
+
+A record drawn as a card or a tile, such as a pull request on a board's column or a tile in a grid, is the kit's card,
+`.thimble-card`: a hairline box on the paper with a chip's corners (`var(--radius-chip)`). A card takes no color of its
+own. Color by draws its value's color as the bar on the card's left edge, as on a row, and the card's left corners go
+square under the bar, so the bar stays straight. With several Color by choices each is a straight bar of its own, side
+by side from the edge in the order of the choices and as wide and as far apart as on a row, empty where the record has
+no value of that choice or its value's color is turned off; the card's left padding holds them and widens when more
+come than it holds, so its text never sits under a bar. Draw no side stripe, colored edge or corners of the page's own
+on it: the view checks note a rule that changes its edges, fills, corners, colors or type (views.own_parts).
+`thimble.recordCard` gives a card's html, and a page that builds its own markup uses the same classes:
+
+```js
+col.innerHTML = '<div class="thimble-cards">' + prs.map((pr) => thimble.recordCard({
+  ref: pr.ref,                     // its data-anchor
+  record: pr,                      // Color by reads its value: the bar on the card's edge
+  key: '#' + pr.number,            // the head's left, in mono
+  chips: [pr.claimedBy],           // the head's right, neutral chips; or meta: text or {html}
+  title: pr.title,                 // two lines at most
+  body: pr.summary,                // three lines at most, the secondary text
+  foot: { html: dots(pr.reviews) },
+  active: pr.ref === open,         // the chosen card
+})).join('') + '</div>'
+```
+
+```html
+<div class="thimble-card thimble-card-act" data-anchor="forge.db#prs/66599" data-color="agent-08">
+  <div class="thimble-card-head"><span class="thimble-card-key">#66599</span>
+    <span class="thimble-card-meta"><span class="chip chip-sans chip-tone-neutral"><span class="chip-text">agent-08</span></span></span></div>
+  <div class="thimble-card-title">DOC: fix url in concat docs to copy-on-write</div>
+  <div class="thimble-card-foot">13 reviews</div>
+</div>
+```
+
+Each part is text, which `recordCard` escapes, or `{html}`. `act: false` gives a card a click does nothing on, and
+`attrs` (`{name: value}`) more attributes, such as a key the page's click reads or a `class` of the page's, which joins
+the card's own. `.thimble-cards` stacks cards in a column with a gap between them, and `.thimble-cards-grid` lays them
+out as tiles at least `--thimble-tile-w` (220 px) wide. A list of records with no box is the kit's `.list-row` or
+`.table`. A card keeps its bars as Color by changes, so the page need not draw it again; `color: false`
+(or `colour: false`) gives it none.
 
 ## The side panel
 
@@ -211,24 +343,97 @@ double click on the edge puts it back, and thimble keeps its width per view. Esc
 
 ## The transcript
 
-`thimble.transcript({mount, colour, onOpen, fold})` draws a transcript's turns as the File browser's Transcript mode
+`thimble.transcript({mount, color, onOpen, fold})` draws a transcript's turns as the File browser's Transcript mode
 draws them: a card per turn, its number in a column at the left (a click opens its lines in the File browser), its
 speaker, tool and time in a mono head, its words under it; a tool call and what came back, and a system record, folded
-to one line until opened; a block longer than six lines folded with Expand; a thought quiet; an error in the problem
-red, a failed tool call's head with `✕` before its tool (`error` true, or the failure's word, which its hover gives); a
-line between sessions. Each turn is anchored with its ref and carries `data-t`, so a label marks it, a ⌘-click
-asks about it, Color by draws its bar and the lanes follow it.
+to one line until opened, a chevron at the start of its head that opens and folds it and turns as it does; a block
+longer than six lines folded with Show more under it, Show less in the same place once open; a thought quiet; an error
+in the problem red, a failed tool call's head with `✕` before its tool (`error` true, or the failure's word, which its
+hover gives); a line between sessions. Each turn is anchored with its ref and carries `data-t`, so a label marks it, a
+⌘-click asks about it, Color by draws its bar and the lanes follow it. Its bars are the page's Color by's, and it
+stamps them again when the choices change, its folds and scroll as they are. `color` is optional: give it (or
+`colour`, the same option) for another Color by, or `false` for no bars.
 
 ```js
-const tr = thimble.transcript({ mount: '#list', colour, onOpen: async (turn) => tr.set(turn.ref, await thimble.fetch({ op: 'turn', ref: turn.ref })) })
+const tr = thimble.transcript({ mount: '#list', onOpen: async (turn) => tr.set(turn.ref, await thimble.fetch({ op: 'turn', ref: turn.ref })) })
 tr.draw(turns.filter((t) => t.session === session), { title: `${names[session]} · ${runName}` })
 ```
 
-A turn is `{ref, t, speaker, kind, tool, text, input, output, error, session, sessionName, line}`, `kind` one of
-`text`, `prompt`, `tool`, `thinking` and `system`. `draw(turns, {title, sub, empty})` draws them, with a header that
-names what the list shows (the run, the session or the selection) and how many turns; `reveal(ref)` opens a cited turn
-and scrolls it to the middle, its highlight fading as Files' does; `open(ref, on)` folds or opens one; `set(ref, patch)`
-gives a turn its words once the reader sent them whole.
+A turn is `{ref, t, speaker, kind, tool, text, input, output, error, session, sessionName, line, record}`, `t` in seconds
+since 1970 or a date such as an ISO time (one with no zone in UTC), which the head writes as `2026-04-01 09:30:12` in
+UTC, and `kind` one of
+`text`, `prompt`, `tool`, `thinking` and `system`. Color by reads `record`, the record the turn shows, when it is given,
+so a field named as a turn's own, such as `kind`, colors it; else the turn. `draw(turns, {title, sub, empty})` draws
+them, with a header that names what the list shows (the run, the session or the selection) and how many turns;
+`reveal(ref)` opens a cited turn and scrolls it to the middle, its highlight fading as Files' does; `open(ref, on)`
+folds or opens one; `set(ref, patch)` gives a turn its words once the reader sent them whole. The search
+(`thimble.search`) finds the words a folded turn or a long block hides and opens them, as a click does, so `onOpen`
+hears of a turn it opens.
+
+## The messages
+
+`thimble.messages({mount, color, format, mentions, onPick})` draws any conversation between people or agents as a chat
+app draws it, such as agents in a chat or on a board, a user and an assistant, people by mail or a pull request's
+comments: each author's avatar in a rail at the left, a head with the author in
+bold and the time in mono (the full date and time on hover), a `title` such as a subject in bold over the words, `to` as
+a quiet line under the head, and the words drawn by `thimble.text` in `format` (`'markdown'`, the default, or `'plain'`
+for mail), with `mentions` as `thimble.text` takes them. One author's messages that follow each other within five
+minutes, with the same parent, share one head, each still its own record; a date line opens each day. A message with a
+`parent` is drawn under its parent's group, one level in, and a reply to a reply at that level too, as a board draws a
+thread. `kind: 'event'` is one line for something that happened rather than something said, such as a tool call, a
+task closed or a member who joined: an icon in the ink, the author, what they did (`said`) and the time at the right,
+with `text` under it, such as a tool call's output. `icon` is one of `note`, `start`, `change`, `done`, `stop`,
+`again`, `link`, `send`, `remove`, `warn` and `run`, or `{html}` for an icon of the page's own, such as an
+`<svg viewBox="0 0 16 16">`, which takes the ink and the stroke of the kit's; any other name is a dot, and a forge's
+names (`pull`, `commit`, `merge`, `close` and the like) draw the nearest of these. `box: true` draws a message in a box
+beside the author's avatar, for one that stands apart from the chat, such as a mail or a task's opening post: the box's
+head names the author, what they did (`said`, such as "wrote" or "opened this task") and the time, over the `to`, the
+`title` and the words. A boxed message shares no head.
+
+```js
+const side = thimble.side({ mount: '#body' })
+const conv = thimble.messages({ mount: '#thread', onPick: (m) => side.open({ title: m.author, ref: m.ref, render: (body) => thimble.record({ mount: body, value: m, ref: m.ref }) }) })
+conv.draw(posts.filter((p) => p.thread === chosen).map((p) => ({ ref: p.ref, t: p.time, author: p.author, text: p.text, parent: p.reply_to })), { title: '# ' + names[chosen] })
+// a user and an assistant, its tool calls as events
+conv.draw(turns.map((t) => (t.tool ? { ref: t.ref, t: t.time, author: t.role, kind: 'event', icon: 'run', said: 'ran ' + t.tool, text: '```\n' + t.output + '\n```' } : { ref: t.ref, t: t.time, author: t.role, text: t.text })))
+```
+
+A message is `{ref, t, author, text, title, to, parent, kind, icon, said, box, record}`, `t` in seconds since 1970 (or a
+date such as an ISO time, one with no zone in UTC, as the transcript reads it).
+Quoted mail, a run of lines that start with `>` with the "On … wrote:" line before it, folds behind
+a `…` button, and a body longer than twelve lines shows its first lines with Show more and Show less; both keep their
+text in the page, hidden, so `thimble.search` finds it and opens the fold. Each message is anchored with its ref and
+carries `data-t`, so a label marks it, a ⌘-click asks about it and the lanes follow it. Its bars are the page's Color
+by's and follow the choices as they change; `color` is optional: give it (or `colour`) for another Color by, or `false`
+for no bars. Color by reads `record`, the record the message shows, when it is given, so a field named as a message's
+own, such as `kind`, colors it; else the message. A click on a message, or Enter on it, calls `onPick(message)` and
+marks it as the chosen one until another is picked or Reset; ↑ and ↓ go to the message above or below.
+`draw(messages, {title, sub, empty})` draws them, with the transcript's header (the title and how many messages);
+`reveal(ref)` opens a cited message's folds and scrolls it to the middle, its highlight fading; `set(ref, patch)`
+changes one, such as its whole text once the reader sent it; `messages` gives them as last drawn.
+
+## The record
+
+`thimble.record({mount, value, ref, open, find, mono, color})` draws one record, a JSON value, in `mount` as a tree under
+its citation: a row per field, its key in mono at the left and its value at the right, each level's values lined up;
+numbers, `true`, `false` and `null` in mono; a nested object or list folded to one line that names its size and its
+first fields, which a click on its key opens. The record's fields and the level under them show at first (`open`, 2);
+a string longer than six lines or 480 characters folds to six lines with Show more and Show less, and a list of more
+than 110 items shows its first 100 with Show N more. `value` may be JSON text, such as the record's line, which draws as
+the object it holds. `mono` names the fields whose strings, and those under them, are drawn in the mono face, such as a
+file's raw line or a command (`mono: ['line']`).
+
+```js
+side.open({ title: 'Read · explorer', ref, render: (body) => thimble.record({ mount: body, value: rec, ref, find: q.value }) })
+```
+
+The record is anchored with `ref`, so a label marks it and a ⌘-click asks about it, and its citation opens it in the
+File browser. `find`, such as the search field's words, highlights their matches and opens what holds them. Its bar is
+the page's Color by's and follows the choices as they change. `color` is optional: give it (or `colour`) for another
+Color by, or `false` for no bar. Called again on the same mount with the same ref, it keeps what the analyst opened and
+folded, and with another ref it starts as it opens. It returns `{hits}`, how many places match `find`. The search
+(`thimble.search`) finds the words its folds hide and opens what holds them; a record keeps 200,000 characters of folded
+values and items in the page for it, and a word past them is found once its fold is opened by hand.
 
 ## What the list says it shows
 

@@ -1,28 +1,35 @@
-// The nominal chart colours (--viz-1 to --viz-7 in src/styles/tokens.css), which views, cards and charts take for
-// their categories: on every paper none is a red, which reads as an error, or a purple, the agents' colour, each reads
-// at 3:1 on the paper's grounds, and neighbours and the first three stay apart, also under protan and deutan vision.
-// The label colours (--label-1 to --label-12) hold to the same, all twelve stay apart pairwise, each place is on every
-// paper the hue show_label's name for it says (a stored color is a place, so a place never changes hue), the first five
-// new values take (LABEL_ORDER) are five hues, and Dark's chestnut, brown and navy, which a dark paper lightens, stay
-// apart from orange and sky.
+// The chart palette (src/styles/tokens.css, lib/vizTheme): seven color families, each in five steps from faint to
+// strong per paper, kept in one order that the accent rotates, so series one (--viz-1) is the accent's family and the
+// rest follow. On every paper and accent the series read at 3:1 on the paper's grounds, none is a red, which reads as an
+// error, and neighbors and the first three stay apart, also under protan, deutan and tritan vision; the sequential
+// ramp is the accent's family and the diverging ramp's ends stay apart; no step takes a label's hex; matplotlib's
+// defaults and the fallbacks are the Warm paper's with the default accent.
+// The label colors (--label-1 to --label-12) read at 3:1 on every paper, stay apart pairwise and from their
+// neighbors, also under protan and deutan vision, each place is on every paper the hue show_label's name for it says (a
+// stored color is a place, so a place never changes hue), the first five new values take (LABEL_ORDER) are five hues,
+// and Dark's chestnut, brown and navy, which a dark paper lightens, stay apart from orange and sky.
 import { readFileSync } from 'node:fs'
 import { describe, expect, test } from 'vitest'
 import { LABEL_ORDER, LABEL_WHEEL } from '../../src/files/labels.ts'
-import { MPL_CYCLE, restyle } from '../../src/lib/svg.ts'
-import { token } from '../../src/lib/vizTheme.ts'
+import { MPL_CYCLE, MPL_LABELS, restyle } from '../../src/lib/svg.ts'
+import { ACCENTS } from '../../src/lib/theme.ts'
+import { token, VIZ_DIV, VIZ_SEQ, VIZ_SERIES } from '../../src/lib/vizTheme.ts'
 
 const CSS = readFileSync(new URL('../../src/styles/tokens.css', import.meta.url), 'utf8')
-const SLOTS = ['--viz-1', '--viz-2', '--viz-3', '--viz-4', '--viz-5', '--viz-6', '--viz-7']
+const SLOTS = VIZ_SERIES
 
-/** the hex custom properties of each rule whose selector is exactly `selector`, later rules over earlier ones */
-function block(selector: string): Record<string, string> {
+/** the declarations of each rule whose selector, its whitespace collapsed, is `selector`, later rules over earlier
+ * ones: a hex value (`hex`) or the property a var() reads (`ref`) */
+function rule(selector: string, kind: 'hex' | 'ref'): Record<string, string> {
   const out: Record<string, string> = {}
+  const value = kind === 'hex' ? /(--[\w-]+):\s*(#[0-9a-fA-F]{6})\s*;/g : /(--[\w-]+):\s*var\((--[\w-]+)\)\s*;/g
   for (const m of CSS.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-    if (m[1].replace(/\/\*[\s\S]*?\*\//g, '').trim() !== selector) continue
-    for (const d of m[2].matchAll(/(--[\w-]+):\s*(#[0-9a-fA-F]{6})\s*;/g)) out[d[1]] = d[2].toLowerCase()
+    if (m[1].replace(/\/\*[\s\S]*?\*\//g, '').replace(/\s+/g, ' ').trim() !== selector) continue
+    for (const d of m[2].matchAll(value)) out[d[1]] = kind === 'hex' ? d[2].toLowerCase() : d[2]
   }
   return out
 }
+const block = (selector: string) => rule(selector, 'hex')
 
 const BASE = block(':root')
 const PAPERS: Record<string, Record<string, string>> = {
@@ -31,6 +38,21 @@ const PAPERS: Record<string, Record<string, string>> = {
   dark: { ...BASE, ...block(":root[data-paper='dark']") },
 }
 const GROUNDS = ['--white', '--paper-0', '--paper-1', '--paper-2']
+
+/** the families in their order, and the family each accent's series start at */
+const FAMILIES = ['violet', 'teal', 'orange', 'green', 'blue', 'pink', 'gold']
+const ACCENT_FAMILY: Record<string, string> = { iris: 'violet', pink: 'pink', orange: 'orange', yellow: 'gold', lime: 'green', blue: 'blue', graphite: 'blue' }
+/** what the default accent's rule reads (its selector is :root too) and what another accent's reads over it */
+const refs = (accent: string): Record<string, string> => ({ ...rule(':root', 'ref'), ...rule(":root, :root[data-accent='iris']", 'ref'), ...(accent === 'iris' ? {} : rule(`:root[data-accent='${accent}']`, 'ref')) })
+/** a token's hex on a paper with an accent, its var() references followed */
+function resolve(name: string, paper: string, accent: string): string {
+  const r = refs(accent)
+  let n = name
+  for (let i = 0; i < 6 && r[n] && !PAPERS[paper][n]; i++) n = r[n]
+  return PAPERS[paper][n]
+}
+const rotation = (family: string): string[] => FAMILIES.map((_, i) => FAMILIES[(FAMILIES.indexOf(family) + i) % FAMILIES.length])
+const VISIONS = ['protan', 'deutan', 'tritan']
 
 const linear = (hex: string): number[] =>
   [1, 3, 5].map((i) => {
@@ -63,6 +85,7 @@ function oklab([r, g, b]: number[]): number[] {
 const CVD: Record<string, number[][]> = {
   protan: [[0.152286, 1.052583, -0.204868], [0.114503, 0.786281, 0.099216], [-0.003882, -0.048116, 1.051998]],
   deutan: [[0.367322, 0.860646, -0.227968], [0.280085, 0.672501, 0.047413], [-0.01182, 0.04294, 0.968881]],
+  tritan: [[1.255528, -0.076749, -0.178779], [-0.078411, 0.930809, 0.147602], [0.004733, 0.691367, 0.3039]],
 }
 
 const seen = (hex: string, vision?: string): number[] => {
@@ -119,51 +142,125 @@ const FAMILY: Record<string, [number, number]> = {
   pink: [335, 360], 'dark pink': [335, 360],
 }
 
-test("matplotlib's colour cycle is the light paper's chart colours, and an inlined figure takes each as its token", () => {
-  const rc = readFileSync(new URL('../../../backend/app/matplotlibrc', import.meta.url), 'utf8')
-  const cycle = [...(/axes\.prop_cycle:.*/.exec(rc)?.[0] ?? '').matchAll(/'([0-9a-fA-F]{6})'/g)].map((m) => `#${m[1].toLowerCase()}`)
-  expect(cycle).toEqual(SLOTS.map((s) => BASE[s]))
-  expect(MPL_CYCLE).toEqual(cycle)
-  cycle.forEach((hex, i) => {
-    expect(restyle(`fill: ${hex}; stroke: ${hex.toUpperCase()}`)).toBe(` fill: var(--viz-${i + 1}); stroke: var(--viz-${i + 1})`)
-  })
+
+test('one order of the families, which each accent rotates to start at its own: the series are their third steps, the sequential ramp the five steps of the accent\'s family', () => {
+  expect(Object.keys(ACCENT_FAMILY).sort()).toEqual(ACCENTS.map((a) => a.id).sort())
+  for (const [accent, family] of Object.entries(ACCENT_FAMILY)) {
+    const r = refs(accent)
+    expect(SLOTS.map((s) => r[s]), accent).toEqual(rotation(family).map((f) => `--viz-${f}-3`))
+    expect(VIZ_SEQ.map((s) => r[s]), accent).toEqual([1, 2, 3, 4, 5].map((n) => `--viz-${family}-${n}`))
+    expect(r['--viz-highlight'], accent).toBe('--viz-1')
+  }
 })
 
-describe.each(Object.keys(PAPERS))('the chart colours on the %s paper', (paper) => {
+describe.each(Object.keys(PAPERS).flatMap((paper) => Object.keys(ACCENT_FAMILY).map((accent) => [paper, accent])))('the series on the %s paper with the %s accent', (paper, accent) => {
   const t = PAPERS[paper]
-  const colours = SLOTS.map((s) => t[s])
+  const colors = SLOTS.map((s) => resolve(s, paper, accent))
 
-  test('are seven colours, none of them a red or a purple', () => {
-    expect(colours.every(Boolean)).toBe(true)
-    for (const c of colours) {
+  test('are seven hues, none of them a red', () => {
+    expect(colors.every(Boolean)).toBe(true)
+    expect(new Set(colors).size).toBe(7)
+    for (const c of colors) {
       const [chroma, hue] = chromaHue(c)
-      expect(chroma, c).toBeGreaterThan(0.1)
-      expect(hue < 45 || hue >= 345, `${c} is a red (hue ${hue.toFixed(0)})`).toBe(false)
-      expect(hue >= 270 && hue < 345, `${c} is a purple (hue ${hue.toFixed(0)})`).toBe(false)
+      expect(chroma, c).toBeGreaterThanOrEqual(0.1)
+      expect(hue >= 10 && hue < 40, `${c} is a red (hue ${hue.toFixed(0)})`).toBe(false)
     }
   })
 
   test('each reads at 3:1 or more on every ground of the paper', () => {
-    for (const g of GROUNDS) {
-      for (const c of colours) expect(contrast(c, t[g]), `${c} on ${g} ${t[g]}`).toBeGreaterThanOrEqual(3)
-    }
+    for (const g of GROUNDS) for (const c of colors) expect(contrast(c, t[g]), `${c} on ${g} ${t[g]}`).toBeGreaterThanOrEqual(3)
   })
 
-  test('neighbours stay apart, also under protan and deutan vision', () => {
-    for (let i = 1; i < colours.length; i++) {
-      const [a, b] = [colours[i - 1], colours[i]]
+  // the dataviz validator's floors: 15 apart in OKLab for full-color readers, 8 under each simulated vision
+  test('neighbors stay apart, also under protan, deutan and tritan vision', () => {
+    for (let i = 1; i < colors.length; i++) {
+      const [a, b] = [colors[i - 1], colors[i]]
       expect(apart(a, b), `${a} and ${b}`).toBeGreaterThanOrEqual(15)
-      for (const v of ['protan', 'deutan']) expect(apart(a, b, v), `${a} and ${b} under ${v}`).toBeGreaterThanOrEqual(8)
+      for (const v of VISIONS) expect(apart(a, b, v), `${a} and ${b} under ${v}`).toBeGreaterThanOrEqual(8)
     }
   })
 
   test('the first three, which a scatter or a map of three groups shows side by side, stay apart pairwise', () => {
-    const [x, y, z] = colours
+    const [x, y, z] = colors
     for (const [a, b] of [[x, y], [x, z], [y, z]]) {
       expect(apart(a, b), `${a} and ${b}`).toBeGreaterThanOrEqual(15)
-      for (const v of ['protan', 'deutan']) expect(apart(a, b, v), `${a} and ${b} under ${v}`).toBeGreaterThanOrEqual(8)
+      for (const v of VISIONS) expect(apart(a, b, v), `${a} and ${b} under ${v}`).toBeGreaterThanOrEqual(8)
     }
   })
+
+  test("the diverging ramp's two sides stay apart, also under protan, deutan and tritan vision, with the gray nearest the paper between them", () => {
+    const [lo, loIn, gray, hiIn, hi] = VIZ_DIV.map((s) => resolve(s, paper, accent))
+    for (const v of [undefined, ...VISIONS]) {
+      expect(apart(lo, hi, v), `${lo} and ${hi} under ${v ?? 'full color'}`).toBeGreaterThanOrEqual(8)
+      expect(apart(loIn, hiIn, v), `${loIn} and ${hiIn} under ${v ?? 'full color'}`).toBeGreaterThanOrEqual(6)
+    }
+    const paperL = lightness(t['--white'])
+    const off = (c: string) => Math.abs(lightness(c) - paperL)
+    expect(off(gray)).toBeLessThan(Math.min(off(loIn), off(hiIn)))
+  })
+})
+
+describe.each(['warm', 'dark'])('the color families on the %s paper', (paper) => {
+  const t = PAPERS[paper]
+  test('each steps from faint, near the paper, to strong in one hue', () => {
+    for (const f of FAMILIES) {
+      const steps = [1, 2, 3, 4, 5].map((n) => t[`--viz-${f}-${n}`])
+      expect(steps.every(Boolean), f).toBe(true)
+      const ls = steps.map(lightness)
+      // the light papers step from light to dark, Dark from dark to light
+      for (let i = 1; i < 5; i++) expect(paper === 'dark' ? ls[i] - ls[i - 1] : ls[i - 1] - ls[i], `${f} steps ${i} and ${i + 1}`).toBeGreaterThanOrEqual(0.06)
+      const hue = chromaHue(steps[2])[1]
+      for (const c of steps) {
+        const d = Math.abs(chromaHue(c)[1] - hue)
+        expect(Math.min(d, 360 - d), `${c} is not ${f}`).toBeLessThanOrEqual(10)
+      }
+    }
+  })
+
+  test("no step takes a label's hex, so a figure's label colors and its series become their own tokens", () => {
+    const labels = new Set(Object.entries(t).filter(([k]) => k.startsWith('--label-')).map(([, v]) => v))
+    for (const f of FAMILIES) for (let n = 1; n <= 5; n++) expect(labels.has(t[`--viz-${f}-${n}`]), `--viz-${f}-${n}`).toBe(false)
+  })
+})
+
+/** a size of the semantic tokens in px, its var() followed */
+function px(name: string): number {
+  const decls = Object.fromEntries([...CSS.matchAll(/(--[\w-]+):\s*([^;{}]+);/g)].map((m) => [m[1], m[2].trim()]))
+  let v = decls[name]
+  for (let i = 0; i < 4 && /^var\(/.test(v); i++) v = decls[/^var\((--[\w-]+)\)/.exec(v)![1]]
+  return parseFloat(v)
+}
+
+test("matplotlib's defaults are the chart style: the default accent's series on the Warm paper, each of which an inlined figure takes as its series token, and the chart sizes in points", () => {
+  const rc = readFileSync(new URL('../../../backend/app/matplotlibrc', import.meta.url), 'utf8')
+  const cycle = [...(/axes\.prop_cycle:.*/.exec(rc)?.[0] ?? '').matchAll(/'([0-9a-fA-F]{6})'/g)].map((m) => `#${m[1].toLowerCase()}`)
+  expect(cycle).toEqual(SLOTS.map((s) => resolve(s, 'warm', 'iris')))
+  expect(MPL_CYCLE).toEqual(cycle)
+  cycle.forEach((hex, i) => {
+    expect(restyle(`fill: ${hex}; stroke: ${hex.toUpperCase()}`)).toBe(` fill: var(--viz-${i + 1}); stroke: var(--viz-${i + 1})`)
+  })
+  // a point is 4/3 px at a card's width (the matplotlibrc's note)
+  const pt = (key: string) => Number(new RegExp(`^${key.replace('.', '\\.')}:\\s*([\\d.]+)`, 'm').exec(rc)![1])
+  for (const key of ['font.size', 'axes.labelsize', 'xtick.labelsize', 'ytick.labelsize', 'legend.fontsize']) expect((pt(key) * 4) / 3, key).toBeCloseTo(px('--viz-size'), 5)
+  expect((pt('axes.titlesize') * 4) / 3).toBeCloseTo(px('--viz-size-title'), 5)
+  expect((pt('lines.linewidth') * 4) / 3).toBeCloseTo(px('--viz-line'), 5)
+})
+
+test("a figure colored by a label (thimble.colours) takes the label's tokens, and the neutral inks theirs, so it follows the paper as the Labels pane does", () => {
+  const py = readFileSync(new URL('../../../backend/app/kernel_thimble.py', import.meta.url), 'utf8')
+  const list = (name: string) => [...(new RegExp(`${name} = \\[[^\\]]*\\]`).exec(py)?.[0] ?? '').matchAll(/"(#[0-9a-fA-F]{6})"/g)].map((m) => m[1].toLowerCase())
+  expect(MPL_LABELS).toEqual(list('LABEL_COLOURS'))
+  MPL_LABELS.forEach((hex, i) => expect(restyle(`fill: ${hex}`), hex).toBe(` fill: var(--label-${i || 'none'})`))
+  expect(list('NEUTRAL_COLOURS').map((hex) => restyle(`stroke: ${hex}`))).toEqual([' stroke: var(--viz-ink-1)', ' stroke: var(--viz-ink-2)', ' stroke: var(--viz-grid)'])
+})
+
+test("the chart fallbacks, which a chart built with no document reads, are the Warm paper's with the default accent", () => {
+  for (const name of [...SLOTS, ...VIZ_SEQ, ...VIZ_DIV, '--viz-other', '--viz-highlight', '--viz-annotation', '--viz-ink-1', '--viz-ink-2', '--viz-ink-3', '--viz-ink-4'])
+    expect(token(name), name).toBe(resolve(name, 'warm', 'iris'))
+  expect(parseFloat(token('--viz-size'))).toBe(px('--viz-size'))
+  expect(parseFloat(token('--viz-size-title'))).toBe(px('--viz-size-title'))
+  expect(parseFloat(token('--viz-line'))).toBe(px('--viz-line'))
+  expect(parseFloat(token('--viz-bar-radius'))).toBe(px('--viz-bar-radius'))
 })
 
 const LABELS = Array.from({ length: 12 }, (_, i) => `--label-${i + 1}`)
@@ -178,7 +275,7 @@ test("the label colours' copies are the light paper's: the charts' fallbacks and
   // the product tour's example view carries a snapshot of the light paper's tokens
   const tour = readFileSync(new URL('../../public/tour/timeline/assets/frame-base.css', import.meta.url), 'utf8')
   const snap = Object.fromEntries([...tour.matchAll(/(--(?:label|viz)-[\w-]+):(#[0-9a-fA-F]{6})/g)].map((m) => [m[1], m[2].toLowerCase()]))
-  for (const name of [...SLOTS, ...LABELS, '--label-none']) expect(snap[name], `${name} in the tour's frame-base.css`).toBe(BASE[name])
+  for (const name of [...SLOTS, ...LABELS, '--label-none']) expect(snap[name], `${name} in the tour's frame-base.css`).toBe(resolve(name, 'warm', 'iris'))
 })
 
 test("thimble-term's copies: its picker's places around the wheel, show_label's names, and each place's hue the light paper's", () => {

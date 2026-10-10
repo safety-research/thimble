@@ -250,7 +250,8 @@
       "required": ["name"],
       "properties": {
         "name": {"type": "string", "minLength": 1},
-        "colour": {"type": "string"}
+        "color": {"type": "string"},
+        "colour": {"type": "string", "description": "The British spelling of color, kept as its alias."}
       },
       "additionalProperties": false
     }

@@ -9,7 +9,8 @@
 // open the label editor in a popover over the view, beside the control that asked (LabelEditor), so nothing moves.
 // The pane keeps the version of the view it opened (usePinnedView): a newer one, from a change, the review or the
 // orientation, never reloads under the analyst. The head says Updated with Reload, which loads it where they were: the
-// element they picked, the scroll positions, the fields and the label filter. Undo in the review's mark loads at once.
+// element they picked or the record the side panel shows (none once they closed it), the scroll positions, the fields
+// and the label filter. Undo in the review's mark loads at once.
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '../components/Button'
 import { CheckMark } from '../components/CheckMark'

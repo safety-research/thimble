@@ -1,13 +1,17 @@
-// The view kit's row controls (backend/app/viewer_controls.js: thimble.filterBy, rows, lanes, key, divider), its side
+// The view kit's row controls (backend/app/viewer_controls.js: thimble.filterBy, rows, timeline, key, divider), its side
 // panel (viewer_side.js, thimble.side) and its transcript (viewer_transcript.js, thimble.transcript), in a jsdom window
 // of their own with the bridge and Color by, as views.frame_document loads them: Filter by hides the rows whose value is
 // off and gives the reader its choice as Color by's query; Rows groups the records by a field, a tree of them with its
 // guides, or a label, every class of the label a group, so a class added to it is a new lane; the lanes draw a lane per
 // group, a failure underlined in the problem red, and the key's entries turn their series off and on, an entry whose
-// series never shows left out; Reset turns every value and series back on; each control's choice is kept through the
-// `colour` message; a transcript folds a tool call to one line until opened. Layout (the side panel's width, the
-// divider's drag, the lanes' cursor line and the tint of the list's rows in view) is
-// tests/public/browser/view-parts.test.ts.
+// series never shows left out; Density draws its bars with no band behind them; drawLane draws the page's own marks
+// in each lane on its scale (shaded spans named in the tip, Color by's colors, series of its own in the key), and marks:
+// false leaves the kit's marks to the page while the tip and a click still find the records; the timeline works alone,
+// on its records' own span of times or numbers with an axis of its own, its lanes from a field or a function; Reset
+// turns every value and series back on; each control's choice is kept through the `colour` message; a transcript folds
+// a tool call to one line until opened, opened and folded again by the chevron at the start of its head, and a long
+// block to six lines, with Show more under it and Show less in its place. Layout (the side panel's width, the divider's drag, the lanes' cursor line and the tint of the list's rows in
+// view) is tests/public/browser/view-parts.test.ts.
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { JSDOM } from 'jsdom'
@@ -248,7 +252,7 @@ describe('Rows', () => {
 })
 
 describe('the lanes and their key', () => {
-  test("a failure is underlined in the problem red; the key's entries are toggles that hide their series; one that never shows is left out; Reset shows them again", async () => {
+  test("a failure is a ✕ in the problem red at its mark's foot, over every mark; the key's entries are toggles that hide their series; one that never shows is left out; Reset shows them again", async () => {
     await load()
     const w = win()
     w.CALLS = CALLS
@@ -261,9 +265,21 @@ describe('the lanes and their key', () => {
     `)
     await wait()
     expect(doc().querySelectorAll('.thimble-lane-bad')).toHaveLength(2)
-    // no band ever shows, so the key has no `running`; `failed` with its count
+    // each ✕ a halo of the paper under its red strokes, after the lane's marks, centered on the foot of its failed
+    // call's mark
+    for (const bad of doc().querySelectorAll('.thimble-lane-bad')) {
+      expect([...bad.children].map((p) => p.getAttribute('class'))).toEqual(['thimble-lane-bad-halo', 'thimble-lane-bad-x'])
+      expect(bad.nextElementSibling).toBe(null)
+      const d = bad.children[1].getAttribute('d')!
+      const [x0, y0, dx, dy] = (/^M([\d.]+) ([\d.]+)l([\d.]+) ([\d.]+)M/.exec(d) || []).slice(1).map(Number)
+      expect([dx, dy]).toEqual([6, 6])
+      const mark = [...bad.parentElement!.querySelectorAll('.thimble-lane-mark')].find((m) => Math.abs(Number(m.getAttribute('x')) + Number(m.getAttribute('width')) / 2 - (x0 + dx / 2)) < 0.15)
+      expect(mark, d).toBeTruthy()
+      expect(y0 + dy / 2).toBeCloseTo(Number(mark!.getAttribute('y')) + Number(mark!.getAttribute('height')), 5)
+    }
+    // no band ever shows, so the key has no `running`; `failed` with its count, its swatch a ✕
     expect(texts('.thimble-key-chip')).toEqual(['failed2'])
-    expect(doc().querySelector('.thimble-key-chip .thimble-key-problem')).not.toBe(null)
+    expect(doc().querySelector('.thimble-key-chip .thimble-key-problem svg path')).not.toBe(null)
     ;(doc().querySelector('.thimble-key-chip') as HTMLElement).click()
     await wait()
     expect(doc().querySelector('.thimble-key-chip')!.getAttribute('aria-pressed')).toBe('false')
@@ -349,6 +365,358 @@ describe('the lanes and their key', () => {
   })
 })
 
+describe("the page's own marks in the lanes", () => {
+  const tipOf = () => {
+    const t = doc().querySelector('.thimble-tip') as HTMLElement | null
+    return t && t.style.display === 'block' ? [...t.children].map((c) => c.textContent) : null
+  }
+  const hover = (lane: Element, x: number) => lane.querySelector('svg')!.dispatchEvent(new dom.window.MouseEvent('pointermove', { bubbles: true, clientX: x }))
+  const lane = (key: string) => doc().querySelector(`.thimble-lane[data-key="${key}"]`)!
+  const BAND = `band: (n) => (n.items.length ? [[n.items[0].t, n.items[n.items.length - 1].t]] : [])`
+
+  test('Density draws its bars alone: no band behind them and no `running` in the key; Events draws both', async () => {
+    await load()
+    const w = win()
+    w.CALLS = CALLS
+    w.eval(`
+      window.range = thimble.timeRange({ mount: '#range', times: window.CALLS.map((c) => c.t) })
+      window.rows = thimble.rows({ mount: '#rows', fields: [{ name: 'session', title: 'Session' }] })
+      window.dense = false
+      window.lanes = thimble.timeline({ mount: '#lanes', rows: window.rows, range: window.range, ${BAND}, density: () => window.dense })
+      window.lanes.draw(window.CALLS)
+    `)
+    await wait()
+    expect(doc().querySelectorAll('.thimble-lane-band').length).toBeGreaterThan(0)
+    expect(texts('.thimble-key-chip')).toEqual(['running'])
+    w.dense = true
+    w.lanes.draw()
+    await wait()
+    expect(doc().querySelectorAll('.thimble-lane-bar').length).toBeGreaterThan(0)
+    expect(doc().querySelectorAll('.thimble-lane-band')).toHaveLength(0)
+    expect(texts('.thimble-key-chip')).toEqual([])
+    w.dense = false
+    w.lanes.draw()
+    await wait()
+    expect(doc().querySelectorAll('.thimble-lane-band').length).toBeGreaterThan(0)
+    expect(texts('.thimble-key-chip')).toEqual(['running'])
+  })
+
+  test("drawLane draws in each lane on its scale: a group behind the kit's marks and one over them, under the ✕; a shaded span named in the tip; Color by's colors; a series of its own in the key, which hides it, and Reset shows it; the lanes' anchors stay", async () => {
+    await load()
+    const w = win()
+    w.CALLS = CALLS
+    w.eval(`
+      window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'tool', title: 'Tool' }] })
+      window.range = thimble.timeRange({ mount: '#range', times: window.CALLS.map((c) => c.t) })
+      window.rows = thimble.rows({ mount: '#rows', fields: [{ name: 'session', title: 'Session' }] })
+      window.heard = []
+      window.dense = false
+      window.lanes = thimble.timeline({
+        mount: '#lanes', rows: window.rows, range: window.range, ${BAND},
+        problem: (c) => c.outcome !== 'ok', anchor: (l) => 'view:v/' + l.key, density: () => window.dense,
+        series: [{ id: 'freeze', name: 'freeze', color: '#aa0000' }, { id: 'unused', name: 'never drawn' }],
+        drawLane: (lane, ctx) => {
+          window.heard.push({ key: lane.key, n: lane.items.length, width: ctx.width, height: ctx.height, x: ctx.x(${T0 + 60}), iso: ctx.x('2026-05-16T09:01:00Z') })
+          if (lane.key === 'explore') ctx.shade(${T0 + 50}, ${T0 + 95}, { name: 'deploy freeze', series: 'freeze', color: '#aa0000' })
+          if (lane.key === 'lead') ctx.shade(${T0 - 5000}, ${T0 + 10})
+          for (const it of lane.items) ctx.over.insertAdjacentHTML('beforeend', '<circle class="own-dot" cx="' + ctx.x(it.t) + '" cy="9" r="2" style="fill:' + (ctx.colorOf(it) || 'gray') + '"/>')
+        },
+      })
+      window.lanes.draw(window.CALLS)
+    `)
+    await wait()
+    // once per lane per paint, with the lane, the track's width and height, and the lanes' scale (a time, or an ISO time)
+    const last = () => w.heard.slice(-4)
+    expect(last().map((h: any) => [h.key, h.n])).toEqual([['lead', 2], ['explore', 2], ['grep', 1], ['test', 1]])
+    expect(last()[0].width).toBe(w.lanes.scale.width)
+    expect(last()[0].height).toBe(18)
+    expect(last()[1].iso).toBeCloseTo(last()[1].x, 6)
+    const exMark = lane('explore').querySelector('.thimble-lane-mark[data-i]')!
+    expect(Number(exMark.getAttribute('x'))).toBeCloseTo(last()[1].x, 1)
+    // in each lane's track: the band, the group behind, the marks, the group over them, then the ✕ last
+    const order = [...lane('explore').querySelector('svg')!.children].map((c) => c.getAttribute('class'))
+    expect(order[0]).toBe('thimble-lane-band')
+    expect(order[1]).toBe('thimble-lane-own')
+    expect(order.slice(2, 4)).toEqual(['thimble-lane-mark', 'thimble-lane-mark'])
+    expect(order.slice(4)).toEqual(['thimble-lane-own is-over', 'thimble-lane-bad'])
+    // the shaded span: behind the marks, as tall as the lane, from its start to its end, in its color at a low opacity
+    const shade = lane('explore').querySelector('.thimble-lane-own > .thimble-lane-shade') as unknown as SVGElement
+    const sc = w.lanes.scale
+    expect(Number(shade.getAttribute('x'))).toBeCloseTo(sc.x(T0 + 50), 0)
+    expect(Number(shade.getAttribute('width'))).toBeCloseTo(sc.x(T0 + 95) - sc.x(T0 + 50), 0)
+    expect([shade.getAttribute('y'), shade.getAttribute('height')]).toEqual(['0', '18'])
+    expect([shade.style.fill, shade.style.fillOpacity]).toEqual(['rgb(170, 0, 0)', '0.16'])
+    // a span that starts before the scale starts at its edge
+    const leadShade = lane('lead').querySelector('.thimble-lane-shade')!
+    expect(Number(leadShade.getAttribute('x'))).toBe(0)
+    // the page's dots over the marks, each in its record's Color by color, as the kit's mark of that record
+    const dots = [...lane('explore').querySelectorAll<SVGElement>('.own-dot')]
+    const marks = [...lane('explore').querySelectorAll<SVGElement>('.thimble-lane-mark[data-i]')]
+    expect(dots.map((d) => d.style.fill)).toEqual(marks.map((m) => m.style.fill))
+    expect(dots[0].style.fill).not.toBe('')
+    // the tip over the span names it, beside the record there
+    hover(lane('explore'), 200 + Number(exMark.getAttribute('x')) + 1)
+    expect(tipOf()).toContain('deploy freeze')
+    // after the swatch of its key entry, in its color, so it reads apart from the record's words
+    expect((doc().querySelector('.thimble-tip .thimble-key-band') as HTMLElement).style.getPropertyValue('--c')).toBe('#aa0000')
+    hover(lane('explore'), 200 + sc.x(T0 + 200))
+    expect(tipOf()).not.toContain('deploy freeze')
+    // the key: the series drawn, never one no lane drew; a click hides its spans, and Reset shows them again
+    expect(texts('.thimble-key-chip')).toEqual(['running', 'failed2', 'freeze'])
+    expect((doc().querySelectorAll('.thimble-key-chip')[2].querySelector('.thimble-key-sw') as HTMLElement).style.getPropertyValue('--c')).toBe('#aa0000')
+    ;(doc().querySelectorAll('.thimble-key-chip')[2] as HTMLElement).click()
+    await wait()
+    expect(w.lanes.isOn('freeze')).toBe(false)
+    expect(lane('explore').querySelector('.thimble-lane-shade')).toBe(null)
+    expect(texts('.thimble-key-chip')).toEqual(['running', 'failed2', 'freeze'])
+    await wait(60)
+    ;(doc().querySelector('.thimble-reset') as HTMLElement).click()
+    await wait()
+    expect(w.lanes.isOn('freeze')).toBe(true)
+    expect(lane('explore').querySelector('.thimble-lane-shade')).not.toBe(null)
+    // the lanes keep their anchors, and in Density the page draws on the taller lanes
+    expect(lane('explore').getAttribute('data-anchor')).toBe('view:v/explore')
+    w.dense = true
+    w.lanes.draw()
+    await wait()
+    expect(last()[0].height).toBe(36)
+    expect(lane('explore').querySelector('.thimble-lane-shade')!.getAttribute('height')).toBe('36')
+    expect(lane('explore').querySelectorAll('.own-dot')).toHaveLength(2)
+  })
+
+  test('marks: false leaves every mark to the page, whose drawing still answers the tip and a click (onMark); a function of a record leaves those it says', async () => {
+    await load()
+    const w = win()
+    w.CALLS = CALLS
+    w.eval(`
+      window.range = thimble.timeRange({ mount: '#range', times: window.CALLS.map((c) => c.t) })
+      window.marked = []
+      window.own = thimble.timeline({
+        mount: '#lanes', rows: 'session', range: window.range, marks: false, onMark: (c) => window.marked.push(c.ref), tip: (c) => c.ref,
+        drawLane: (lane, ctx) => { for (const it of lane.items) ctx.g.insertAdjacentHTML('beforeend', '<path class="own-diamond" d="M' + ctx.x(it.t) + ' 3l4 6-4 6-4-6z"/>') },
+      })
+      window.own.draw(window.CALLS)
+    `)
+    await wait()
+    expect(doc().querySelectorAll('#lanes .thimble-lane-mark')).toHaveLength(0)
+    expect(doc().querySelectorAll('#lanes .own-diamond')).toHaveLength(6)
+    const x = w.own.scale.x(T0 + 300)
+    hover(lane('lead'), 200 + x)
+    expect(tipOf()).toEqual([expect.stringMatching(/^lead · /), 'r1/lead.jsonl#L9'])
+    lane('lead').querySelector('svg')!.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, clientX: 200 + x }))
+    expect(w.marked).toEqual(['r1/lead.jsonl#L9'])
+    // marks(record): the kit draws the marks of the records it says, the page the others
+    w.eval(`window.own2 = thimble.timeline({ mount: '#turns', rows: 'session', range: window.range, marks: (c) => c.outcome === 'ok' }); window.own2.draw(window.CALLS)`)
+    await wait()
+    expect([...doc().querySelectorAll('#turns .thimble-lane-mark[data-i]')].map((m) => m.closest('.thimble-lane')!.getAttribute('data-key'))).toEqual(['lead', 'lead', 'explore', 'grep'])
+  })
+})
+
+describe('the timeline on its own', () => {
+  const mount = (id: string) => doc().body.insertAdjacentHTML('beforeend', `<div id="${id}"></div>`)
+  const tipOf = () => {
+    const t = doc().querySelector('.thimble-tip') as HTMLElement | null
+    return t && t.style.display === 'block' ? [...t.children].map((c) => c.textContent) : null
+  }
+  const hover = (lane: Element, x: number) => lane.querySelector('svg')!.dispatchEvent(new dom.window.MouseEvent('pointermove', { bubbles: true, clientX: x }))
+
+  test("with no Color by, range or Rows: one lane with no name on its records' own span, with an axis of its own; a record with no place is left out; thimble.lanes is the same call", async () => {
+    await load()
+    const w = win()
+    w.eval(`
+      window.EVENTS = [
+        { ref: 'a#L1', t: '2026-05-16T09:00:00Z', text: 'opened' },
+        { ref: 'a#L2', t: ${T0 + 1800}, text: 'merged' },
+        { ref: 'a#L3', t: new Date(${(T0 + 3600) * 1000}), text: 'closed' },
+        { ref: 'a#L4', t: 'soon', text: 'no time' },
+      ]
+      window.tl = thimble.timeline({ mount: '#lanes' })
+      window.tl.draw(window.EVENTS)
+    `)
+    await wait()
+    expect(w.thimble.lanes).toBe(w.thimble.timeline)
+    expect(doc().querySelectorAll('#lanes .thimble-lane')).toHaveLength(1)
+    expect(doc().querySelector('#lanes .thimble-lane-name')).toBe(null)
+    expect(doc().querySelector('#lanes')!.classList.contains('is-nameless')).toBe(true)
+    // an ISO time, seconds since 1970 and a Date each placed, in order, a few px in from the axis's edges, in gray
+    const marks = [...doc().querySelectorAll('#lanes .thimble-lane-mark[data-i]')] as HTMLElement[]
+    const xs = marks.map((m) => Number(m.getAttribute('x')))
+    expect(w.tl.lanes[0].items.map((e: any) => e.ref)).toEqual(['a#L1', 'a#L2', 'a#L3'])
+    expect(xs).toHaveLength(3)
+    expect(xs[0]).toBeGreaterThan(2)
+    expect(xs[1] - xs[0]).toBeCloseTo(xs[2] - xs[1], 0)
+    expect(xs[2]).toBeLessThan(798)
+    expect(marks.every((m) => !m.style.fill)).toBe(true)
+    // its axis over the lane, in hours
+    const labels = texts('#lanes .thimble-lanes-axis .thimble-axis-lab')
+    expect(labels.length).toBeGreaterThan(2)
+    expect(labels).toContain('09:30')
+    // the tip's head is the time alone, as there is no lane to name; the record's words under it
+    hover(doc().querySelector('#lanes .thimble-lane')!, xs[1] + 1)
+    expect(tipOf()).toEqual([expect.stringMatching(/^May 16 09:30:/), 'merged'])
+  })
+
+  test('a Color by the page made with colorOf, the American name, colors its marks; a key entry takes its color or colour', async () => {
+    await load()
+    const w = win()
+    w.eval(`
+      window.tl = thimble.timeline({ mount: '#lanes', color: { valueOf: (e) => e.kind, colorOf: (v) => (v === 'a' ? '#123456' : null) } })
+      window.tl.draw([{ ref: 'a#L1', t: ${T0}, kind: 'a' }, { ref: 'a#L2', t: ${T0 + 60}, kind: 'b' }])
+      thimble.key('#rows', [{ id: 'x', name: 'X', color: '#123456' }, { id: 'y', name: 'Y', colour: '#654321' }])
+    `)
+    await wait()
+    expect([...doc().querySelectorAll<HTMLElement>('#lanes .thimble-lane-mark[data-i]')].map((m) => m.style.fill)).toEqual(['rgb(18, 52, 86)', ''])
+    expect([...doc().querySelectorAll<HTMLElement>('#rows .thimble-key-sw')].map((e) => e.style.getPropertyValue('--c'))).toEqual(['#123456', '#654321'])
+  })
+
+  test("its lanes from a field's name or a function of a record, with no Rows control: a lane per value as the records first take them, then the records with none", async () => {
+    await load()
+    const w = win()
+    w.CALLS = CALLS.concat([{ ref: 'x#L1', t: T0 + 50, tool: 'Read', outcome: 'ok' } as any])
+    mount('tl2')
+    w.eval(`
+      window.byField = thimble.timeline({ mount: '#lanes', rows: 'session' })
+      window.byField.draw(window.CALLS)
+      window.byFn = thimble.timeline({ mount: '#tl2', rows: (c) => (c.outcome === 'ok' ? 'ok' : 'failed') })
+      window.byFn.draw(window.CALLS)
+    `)
+    await wait()
+    expect(texts('#lanes .thimble-lane-name')).toEqual(['lead', 'explore', 'grep', 'test', 'No session'])
+    expect(w.byField.lanes.map((l: any) => l.items.length)).toEqual([2, 2, 1, 1, 1])
+    expect(doc().querySelector('#lanes')!.classList.contains('is-nameless')).toBe(false)
+    expect(texts('#tl2 .thimble-lane-name')).toEqual(['ok', 'failed'])
+    // a lane's name in its tip's head
+    hover(doc().querySelector('#tl2 .thimble-lane')!, 300)
+    expect(tipOf()![0]).toMatch(/^ok · May 16/)
+  })
+
+  test("on plain numbers (unit 'n'): the marks at their numbers, the axis and the tip in numbers; with a range of numbers it takes the range's unit and draws no axis of its own", async () => {
+    await load()
+    const w = win()
+    w.STEPS = [
+      { turn: 0, agent: 'lead', text: 'plan' },
+      { turn: 10, agent: 'sub', text: 'search' },
+      { turn: '20', agent: 'lead', text: 'edit' },
+      { turn: 40, agent: 'sub', text: 'done' },
+      { turn: '2026-05-16', agent: 'sub', text: 'a date is no turn' },
+    ]
+    w.eval(`window.tl = thimble.timeline({ mount: '#lanes', rows: 'agent', unit: 'n', time: (s) => s.turn }); window.tl.draw(window.STEPS)`)
+    await wait()
+    expect(w.tl.lanes.map((l: any) => l.items.map((s: any) => s.turn))).toEqual([[0, '20'], [10, 40]])
+    const x = (lane: number, i: number) => Number(doc().querySelectorAll('#lanes .thimble-lane')[lane].querySelectorAll('.thimble-lane-mark')[i].getAttribute('x'))
+    // one scale for every lane: 0 to 20 is two thirds of 10 to 40
+    expect(x(0, 1) - x(0, 0)).toBeCloseTo(((x(1, 1) - x(1, 0)) * 2) / 3, 0)
+    const labels = texts('#lanes .thimble-lanes-axis .thimble-axis-lab')
+    expect(labels.length).toBeGreaterThan(1)
+    expect(labels.every((l) => /^\d+$/.test(l))).toBe(true)
+    hover(doc().querySelectorAll('#lanes .thimble-lane')[0], 200 + x(0, 1) + 1)
+    expect(tipOf()).toEqual(['lead · 20', 'edit'])
+    // under a range of numbers: its scale and its unit, so the date is no turn there either; the range's axis is the page's
+    mount('tl3')
+    w.eval(`
+      window.range = thimble.timeRange({ mount: '#range', unit: 'n', times: [0, 10, 20, 40] })
+      window.ranged = thimble.timeline({ mount: '#tl3', range: window.range, rows: 'agent', time: (s) => s.turn })
+      window.ranged.draw(window.STEPS)
+    `)
+    await wait()
+    expect(w.ranged.lanes.flatMap((l: any) => l.items)).toHaveLength(4)
+    expect(doc().querySelector('#tl3 .thimble-lanes-axis')).toBe(null)
+    expect(w.ranged.scale.unit).toBe('n')
+  })
+
+  test('on plain numbers such as years: the axis and the tips write them as they are, without separators', async () => {
+    await load()
+    const w = win()
+    w.RELEASES = [2019, 2020, 2021, 2023, 2026].map((year) => ({ year, text: 'release ' + year }))
+    w.eval(`window.tl = thimble.timeline({ mount: '#lanes', unit: 'n', time: (r) => r.year }); window.tl.draw(window.RELEASES)`)
+    await wait()
+    const labels = texts('#lanes .thimble-lanes-axis .thimble-axis-lab')
+    expect(labels).toContain('2020')
+    expect(labels.every((l) => /^\d{4}$/.test(l))).toBe(true)
+    const lane = doc().querySelector('#lanes .thimble-lane')!
+    hover(lane, Number(lane.querySelector('.thimble-lane-mark')!.getAttribute('x')) + 1)
+    expect(tipOf()).toEqual(['2019', 'release 2019'])
+  })
+
+  test("on plain numbers not all whole, such as scores: the axis in decimals and the tips as precise as four px; whole numbers never step under one", async () => {
+    await load()
+    const w = win()
+    w.RUNS = [0.05, 0.31, 0.5, 0.72, 0.95].map((score, i) => ({ score, model: i % 2 ? 'b' : 'a', text: 'run ' + i }))
+    w.eval(`window.tl = thimble.timeline({ mount: '#lanes', rows: 'model', unit: 'n', time: (r) => r.score }); window.tl.draw(window.RUNS)`)
+    await wait()
+    const labels = texts('#lanes .thimble-lanes-axis .thimble-axis-lab')
+    expect(labels).toEqual(expect.arrayContaining(['0.2', '0.4', '0.6', '0.8']))
+    expect(new Set(labels).size).toBe(labels.length)
+    const lane = doc().querySelectorAll('#lanes .thimble-lane')[1]
+    hover(lane, 200 + Number(lane.querySelector('.thimble-lane-mark')!.getAttribute('x')) + 1)
+    expect(tipOf()).toEqual([expect.stringMatching(/^b · 0\.31\d$/), 'run 1'])
+    // turns 0 to 3 across the width: a tick at each whole turn, each once
+    mount('tl2')
+    w.eval(`thimble.timeline({ mount: '#tl2', unit: 'n', time: (r) => r.turn }).draw([0, 1, 2, 3].map((turn) => ({ turn })))`)
+    await wait()
+    expect(texts('#tl2 .thimble-axis-lab')).toEqual(['0', '1', '2', '3'])
+  })
+
+  test("Density on scores: a score that falls on a bin's edge starts that bin, so scores 0.02 apart stand evenly apart", async () => {
+    await load()
+    const w = win()
+    w.eval(`thimble.timeline({ mount: '#lanes', unit: 'n', density: true }).draw(Array.from({ length: 50 }, (_, i) => ({ t: i * 0.02 })))`)
+    await wait()
+    const xs = [...doc().querySelectorAll('#lanes .thimble-lane-bar')].map((b) => Number(b.getAttribute('x')))
+    expect(xs).toHaveLength(50)
+    const gaps = xs.slice(1).map((x, i) => x - xs[i])
+    expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThan(1)
+  })
+
+  test("Density with a failure in every bin: a ✕ at the foot of a bin, none over the ✕ of a bin just before, so a run of failing bins reads as ✕s one beside another", async () => {
+    await load()
+    const w = win()
+    w.eval(`thimble.timeline({ mount: '#lanes', unit: 'n', density: true, problem: (r) => r.bad }).draw(Array.from({ length: 3000 }, (_, i) => ({ t: i, bad: i % 2 === 0 })))`)
+    await wait()
+    const xs = [...doc().querySelectorAll('#lanes .thimble-lane-bar')].map((b) => Number(b.getAttribute('x')))
+    const bins = new Set(xs).size
+    const centers = [...doc().querySelectorAll('#lanes .thimble-lane-bad-x')].map((p) => {
+      const [x0, dx] = (/^M([\d.]+) [\d.]+l([\d.]+)/.exec(p.getAttribute('d')!) || []).slice(1).map(Number)
+      return x0 + dx / 2
+    })
+    // bins narrower than a ✕, each with a failure: a ✕ on every other bin, each 6 px wide and more than 6 px from the one
+    // before
+    expect(bins).toBeGreaterThan(60)
+    expect(xs[1] - xs[0]).toBeLessThan(6)
+    expect(centers.length).toBeGreaterThanOrEqual(Math.floor(bins / 2))
+    expect(centers.length).toBeLessThan(bins)
+    expect(centers.slice(1).every((x, i) => x - centers[i] > 6)).toBe(true)
+    // the key counts every failure all the same
+    expect(texts('.thimble-key-chip')).toEqual(['failed1,500'])
+  })
+
+  test("Density's tip gives a bin's day once: May 16 09:00–09:01", async () => {
+    await load()
+    const w = win()
+    w.eval(`
+      window.tl = thimble.timeline({ mount: '#lanes', density: true })
+      window.tl.draw(Array.from({ length: 120 }, (_, i) => ({ t: ${T0} + i * 30 })))
+    `)
+    await wait()
+    const bar = doc().querySelector('#lanes .thimble-lane-bar')!
+    hover(doc().querySelector('#lanes .thimble-lane')!, Number(bar.getAttribute('x')) + 1)
+    expect(tipOf()![0]).toMatch(/^May 16 \d\d:\d\d(:\d\d)?–\d\d:\d\d(:\d\d)?$/)
+  })
+
+  test('a mark as wide as its record ran: the longest drawn first, so that it never hides a short one under it', async () => {
+    await load()
+    const w = win()
+    w.eval(`
+      window.tl = thimble.timeline({ mount: '#lanes', end: (r) => r.end })
+      window.tl.draw([{ t: ${T0}, end: ${T0 + 5} }, { t: ${T0 + 1000}, end: ${T0 + 3000} }, { t: ${T0 + 1500} }])
+    `)
+    await wait()
+    const marks = [...doc().querySelectorAll('#lanes .thimble-lane-mark')]
+    expect(marks.map((m) => m.getAttribute('data-i'))).toEqual(['1', '0', '2'])
+    expect(Number(marks[0].getAttribute('width'))).toBeGreaterThan(400)
+  })
+})
+
 describe('the side panel and the transcript', () => {
   test('a record opens in the side panel beside the list, never under its row; Escape or × closes it; Reset closes it too', async () => {
     await load()
@@ -376,7 +744,36 @@ describe('the side panel and the transcript', () => {
     expect(w.side.isOpen).toBe(false)
   })
 
-  test("a transcript: speaker, tool and time in the head, a failed call's ✕ before its tool; a tool call folded to one line until opened; a long result folded to six lines; a cited turn opened", async () => {
+  test("what Reload opens on follows the side panel: the record it opened, by a click or not, and none once it closed, by hand or by the page", async () => {
+    await load()
+    const w = win()
+    w.eval(`window.side = thimble.side({ mount: '#body' })`)
+    const state = async () => {
+      fromPage({ type: 'thimble:state', id: of('state').length + 1 })
+      await wait(10)
+      return (of('state').at(-1)!.state as { ref: string | null }).ref
+    }
+    // thimble opens the view at a citation, which the page shows in the panel
+    fromPage({ type: 'thimble:open', open: { ref: 'r1/lead.jsonl#L3' } })
+    w.side.open({ title: 'Task', ref: 'r1/lead.jsonl#L3', html: '' })
+    expect(await state()).toBe('r1/lead.jsonl#L3')
+    // the page opens another record with no click, as ↑ and ↓ in a table do
+    w.side.open({ title: 'Grep', ref: 'r1/explore.jsonl#L2', html: '' })
+    expect(await state()).toBe('r1/explore.jsonl#L2')
+    // the page closes the panel itself, as a second click on the open row does: no record, not the citation
+    w.side.close()
+    expect(await state()).toBe(null)
+    // a click on a record names it again
+    doc().getElementById('list')!.innerHTML = '<div class="row" data-anchor="r1/test.jsonl#L2">Bash</div>'
+    ;(doc().querySelector('.row') as HTMLElement).click()
+    expect(await state()).toBe('r1/test.jsonl#L2')
+    // a new citation starts afresh
+    w.side.close()
+    fromPage({ type: 'thimble:open', open: { ref: 'r1/grep.jsonl#L2' } })
+    expect(await state()).toBe('r1/grep.jsonl#L2')
+  })
+
+  test("a transcript: speaker, tool and time in the head, a failed call's ✕ before its tool; a tool call folded to one line until opened, its head's chevron opening and folding it; a long result folded to six lines, Show more and Show less in one place under it; a cited turn opened", async () => {
     await load()
     const w = win()
     const long = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join('\n')
@@ -389,6 +786,10 @@ describe('the side panel and the transcript', () => {
     expect([texts('.thimble-transcript-title'), texts('.thimble-transcript-n')]).toEqual([['lead · Run 1'], ['3 turns']])
     expect(texts('.thimble-turn-head')).toEqual(['user · 2026-05-16 09:00:00', 'lead · ✕ Bash · 2026-05-16 09:00:05', 'lead · 2026-05-16 09:00:09'])
     expect(texts('.thimble-turn-line')).toEqual(['Bash pytest -q'])
+    // the turn that folds opens and folds by its head, a chevron at its start; a turn that does not fold has a plain head
+    const toggle = () => doc().querySelector<HTMLElement>('[data-anchor="s.jsonl#L2"] .thimble-turn-head')!
+    expect([toggle().tagName, toggle().getAttribute('aria-expanded'), !!toggle().querySelector('.thimble-turn-caret')]).toEqual(['BUTTON', 'false', true])
+    expect(doc().querySelectorAll('.thimble-turn-toggle')).toHaveLength(1)
     // a failed call: ✕ and its tool in the problem red in its head, folded or open, its hover the failure's word
     const failed = doc().querySelector('.thimble-turn-failed')!
     expect([failed.textContent, failed.getAttribute('title')]).toEqual(['✕ Bash', 'failed'])
@@ -404,20 +805,76 @@ describe('the side panel and the transcript', () => {
     ])
     ;(doc().querySelector('.thimble-turn-line') as HTMLElement).click()
     expect(w.opened).toEqual(['s.jsonl#L2'])
+    // open, the same head folds it, its chevron turned; nothing else closes the turn
+    expect([toggle().getAttribute('aria-expanded'), !!toggle().querySelector('.thimble-turn-caret')]).toEqual(['true', true])
+    expect(doc().querySelector('[data-close], .thimble-turn-close')).toBe(null)
+    expect(doc().getElementById('turns')!.textContent).not.toContain('Collapse')
     const call = doc().querySelector('.thimble-turn-call')!
     expect(call.querySelector('.thimble-turn-toolname')!.textContent).toBe('Bash')
     const result = doc().querySelector('.thimble-turn-result')!
     expect(result.classList.contains('is-error')).toBe(true)
     expect(result.parentElement!.classList.contains('is-folded')).toBe(true)
-    expect(texts('.thimble-turn-expand')[0]).toBe('Expand12 lines')
-    ;(doc().querySelector('[data-expand]') as HTMLElement).click()
+    // Show more under the cut text, and Show less in the same place once it is open; the control keeps the focus as its
+    // turn is drawn again
+    const more = () => doc().querySelector<HTMLElement>('.thimble-turn-more')!
+    const place = () => [texts('.thimble-turn-more'), more().getAttribute('aria-expanded'), more().previousElementSibling === doc().querySelector('.thimble-turn-result')]
+    expect(place()).toEqual([['Show more'], 'false', true])
+    more().focus()
+    more().click()
     expect(doc().querySelector('.thimble-turn-result')!.parentElement!.classList.contains('is-folded')).toBe(false)
-    ;(doc().querySelector('[data-close]') as HTMLElement).click()
+    expect(place()).toEqual([['Show less'], 'true', true])
+    expect(doc().activeElement).toBe(more())
+    more().click()
+    expect(doc().querySelector('.thimble-turn-result')!.parentElement!.classList.contains('is-folded')).toBe(true)
+    expect(place()).toEqual([['Show more'], 'false', true])
+    // the head folds the turn back to its line and keeps the focus, and opens it again
+    toggle().focus()
+    toggle().click()
+    expect(doc().querySelector('.thimble-turn-call')).toBe(null)
+    expect([toggle().getAttribute('aria-expanded'), doc().activeElement === toggle(), texts('.thimble-turn-line')]).toEqual(['false', true, ['Bash pytest -q']])
+    toggle().click()
+    expect(doc().querySelector('.thimble-turn-call')).not.toBe(null)
+    toggle().click()
     expect(doc().querySelector('.thimble-turn-call')).toBe(null)
     // a citation opens the turn it names
     expect(w.tr.reveal('s.jsonl#L2')).toBe(true)
     expect(doc().querySelector('.thimble-turn-call')).not.toBe(null)
     expect(doc().querySelector('.thimble-turn-hit')!.getAttribute('data-anchor')).toBe('s.jsonl#L2')
+  })
+
+  test("a transcript's head writes each turn's time as the kit writes times, in UTC, however the record gives it, a time with no zone in UTC on a machine in any zone; a time it cannot read as written", async () => {
+    const zone = process.env.TZ
+    // a machine seven hours behind UTC in May, where the browser reads a date with no zone in its own
+    process.env.TZ = 'America/Los_Angeles'
+    try {
+      await load()
+      const w = win()
+      const at = (i: number, t: unknown, key = 't') => ({ ref: `s.jsonl#L${i}`, [key]: t, speaker: 'lead', kind: 'text', text: 'ok', line: i })
+      const read = [
+        T0,
+        (T0 + 1) * 1000,
+        '2026-05-16T09:00:02.250000+00:00',
+        '2026-05-16T11:00:03+02:00',
+        '2026-05-16T09:00:04',
+        '2026-05-16 09:00:05',
+        String(T0 + 6),
+        '2026-05-16T09:00:07Z',
+        'Sat, 16 May 2026 09:00:08',
+        'Sat, 16 May 2026 02:00:09 -0700',
+        '2026/05/16 09:00:10',
+        '2026-05-16 09:00:11 UTC',
+      ]
+      w.TURNS = [...read.map((t, i) => at(i + 1, t, i === 7 ? 'time' : 't')), at(13, 'step 4'), at(14, null)]
+      w.eval(`thimble.transcript({ mount: '#turns' }).draw(window.TURNS)`)
+      expect(texts('.thimble-turn-head')).toEqual([...read.map((_, i) => `lead · 2026-05-16 09:00:${String(i).padStart(2, '0')}`), 'lead · step 4', 'lead'])
+      // the lanes follow a time given as text too, in seconds; a number as given
+      expect([...doc().querySelectorAll('.thimble-turn')].map((e) => e.getAttribute('data-t'))).toEqual(
+        [T0, (T0 + 1) * 1000, T0 + 2.25, ...read.slice(3).map((_, i) => T0 + 3 + i)].map(String).concat([null, null] as never[]),
+      )
+    } finally {
+      if (zone === undefined) delete process.env.TZ
+      else process.env.TZ = zone
+    }
   })
 })
 

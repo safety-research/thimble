@@ -1,18 +1,19 @@
-// The tracks' motion in a real browser, in Chromium and, where Playwright's WebKit starts, in WebKit: Files' reader
-// (src/files/Reader.tsx and its two tracks, src/files/Tracks.tsx) over a file of 15,000 records answered in the page,
-// in its Table and Transcript modes, and the view kit's strip (backend/app/viewer_colour.js) beside a list of 3,000
-// records. Each is sampled after every painted frame during a steady drag of the overview's frame and a steady wheel
-// scroll. In the frames where the pointer moved (or the list scrolled) the frame and the lens move too, never standing
-// still to jump after (a step more than twice their share of the move and a pixel), the reader's records follow the
-// drag rather than a page at a time, and a frame that draws only the tracks takes under 16 ms (in Chromium; headless
-// WebKit's times are logged, its software drawing of the records spilling into the frames around them). Each run logs
-// its numbers: the frames that moved, the largest step, and the frames' times. A click a pixel or two off a lone record
-// that Color by colors snaps to it: the reader goes there and chooses it, in Files and in the kit. In Files, two labels
-// that are Color by's choices are two lanes of the overview in their colors, and one turned off leaves one; a label on
-// that is no choice has no lane; a key checked after a label is a lane in its values' colors; and Off leaves the overview
-// plain, with no lane and no record's bar. In the kit, a list of 4,458 rows
-// drawn again as it scrolls, which gives the strip its rows again each time, is not measured or drawn again while its
-// rows stay the same.
+// The strip's motion in a real browser, in Chromium and, where Playwright's WebKit starts, in WebKit: Files' reader
+// (src/files/Reader.tsx and its strip, src/files/Tracks.tsx) over a file of 15,000 records answered in the page, in its
+// Table and Transcript modes, and the view kit's strip (backend/app/viewer_colour.js) beside a list of 3,000 records.
+// Each is sampled after every painted frame during a steady drag of the strip's thumb and a steady wheel scroll. In the
+// frames where the pointer moved (or the list scrolled) the thumb and the loupe that stands at it (in Files and in the
+// kit alike) move too, never standing still to jump after (a step more than twice their share of the move and a
+// pixel), the reader's records follow the drag rather than a page at a time, and a frame that draws only the strip takes
+// under 16 ms (in Chromium; headless WebKit's times are logged, its software drawing of the records spilling into the
+// frames around them); held there, the loupe's lines are the records around the thumb, each its number and the start of
+// its text. Each run logs its numbers: the frames that moved, the largest step, and the frames' times. A
+// click a pixel or two off a lone record that Color by colors snaps to it: the reader goes there and chooses it, in
+// Files and in the kit. In Files, two labels that are Color by's choices are two lanes of the strip in their colors, and
+// one turned off leaves one; a label on that is no choice has no lane; a key checked after a label is a lane in its
+// values' colors; and Off leaves the strip a plain scrollbar, with no lane and no record's bar. In the kit, a list of
+// 4,458 rows drawn again as it scrolls, which gives the strip its rows again each time, is not measured or drawn again
+// while its rows stay the same.
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import assert from 'node:assert/strict'
@@ -100,15 +101,17 @@ async function open(engine: BrowserType, query: string): Promise<{ browser: Brow
     return route.fulfill({ status: 404, body: '' })
   })
   await page.goto(`${ORIGIN}/${query}`)
-  await page.waitForSelector('.track-lens', { timeout: 20000 })
+  await page.waitForSelector('.track-frame-over', { timeout: 20000 })
+  await page.waitForSelector('.reader-card', { timeout: 20000 })
   await page.waitForTimeout(400)
   return { browser, page }
 }
 
-/** Start sampling the tracks once per painted frame: after each frame's rendering, the frame's and the lens's tops, the
- * top line's ends, the first zoomed record's top, the body's scrollTop, and the pointer's y as last seen. */
-const startSampling = (page: Page) =>
-  page.evaluate(() => {
+/** Start sampling the strip once per painted frame: after each frame's rendering, the thumb's top and that of the
+ * loupe's part `lens` while it is open (its bracket beside the strip, over the stretch it shows, or its box beside the strip),
+ * the body's scrollTop, its top record, and the pointer's y as last seen. */
+const startSampling = (page: Page, lens = '.loupe-bracket') =>
+  page.evaluate((lens) => {
     const w = window as any
     w.__samples = []
     w.__moves = []
@@ -118,17 +121,13 @@ const startSampling = (page: Page) =>
     let t0 = 0
     ch.port1.onmessage = () => {
       const q = (s: string) => document.querySelector(s)?.getBoundingClientRect()
-      const line = document.querySelector('.track-link line[data-edge="top"]')
-      const rec = document.querySelector('.track-zoom-faded .track-rec')
       w.__samples.push({
         t: t0,
         work: performance.now() - t0,
         frame: q('.track-frame-over')?.top ?? null,
-        lens: q('.track-lens')?.top ?? null,
-        y1: line ? Number(line.getAttribute('y1')) : null,
-        y2: line ? Number(line.getAttribute('y2')) : null,
-        rec: rec ? rec.getBoundingClientRect().top : null,
-        recLine: rec ? Number((rec as HTMLElement).dataset.line) : null,
+        lens: document.querySelector('.loupe[data-open]') ? (q(lens)?.top ?? null) : null,
+        rec: null,
+        recLine: null,
         st: (document.querySelector('.reader-body') as HTMLElement).scrollTop,
         top: Number(document.querySelector('.reader-body .reader-card')?.getAttribute('data-line') ?? 0),
       })
@@ -140,7 +139,7 @@ const startSampling = (page: Page) =>
       requestAnimationFrame(tick)
     }
     requestAnimationFrame(tick)
-  })
+  }, lens)
 
 const stopSampling = (page: Page) =>
   page.evaluate(() => {
@@ -159,7 +158,7 @@ function motion(samples: any[], moves: [number, number][]) {
   })
   return rows.slice(1).map((r, i) => {
     const a = rows[i]
-    return { dy: r.y - a.y, frame: r.frame - a.frame, lens: r.lens - a.lens, st: r.st - a.st, rec: r.rec != null && a.rec != null && r.recLine === a.recLine ? r.rec - a.rec : null, top: r.top !== a.top, gap: r.t - a.t, work: r.work }
+    return { dy: r.y - a.y, frame: r.frame - a.frame, lens: r.lens != null && a.lens != null ? r.lens - a.lens : null, st: r.st - a.st, rec: r.rec != null && a.rec != null && r.recLine === a.recLine ? r.rec - a.rec : null, top: r.top !== a.top, gap: r.t - a.t, work: r.work }
   })
 }
 
@@ -227,15 +226,25 @@ function smooth(r: ReturnType<typeof report>, at: string) {
 
 for (const [name, engine] of ENGINES) {
   for (const mode of ['table', 'transcript']) {
-    test(`${name}, Files' ${mode}: a steady drag of the overview's frame moves the frame, the lens and the records every frame`, async (ctx) => {
+    test(`${name}, Files' ${mode}: a steady drag of the strip's thumb moves the thumb, the loupe at it and the records every frame`, async (ctx) => {
       if (!runs.get(name)) return ctx.skip()
       const { browser, page } = await open(engine, `?mode=${mode}`)
       const over = (await page.locator('.track-over').boundingBox())!
+      // from the middle of the file, where the loupe has room to follow the thumb
+      await page.mouse.click(over.x + over.width / 2, over.y + over.height * 0.4)
+      await page.waitForTimeout(800)
       const frame = (await page.locator('.track-frame-over').boundingBox())!
       const x = over.x + over.width / 2
       let y = frame.y + frame.height / 2
       await page.mouse.move(x, y)
       await page.mouse.down()
+      // past the press's DRAG_PX, where the thumb and the loupe start to move together: the steady drag from there
+      for (let i = 0; i < 4; i++) {
+        y += 1
+        await page.mouse.move(x, y)
+        await page.waitForTimeout(8)
+      }
+      await page.waitForTimeout(50)
       await startSampling(page)
       for (let i = 0; i < 160; i++) {
         y += 1
@@ -243,37 +252,52 @@ for (const [name, engine] of ENGINES) {
         await page.waitForTimeout(8)
       }
       const { samples, moves } = await stopSampling(page)
+      // the loupe's lines once the records there are read: a line per record around the thumb, its number and the start
+      // of its text (in a transcript, its time and who said it first)
+      await page.waitForTimeout(400)
+      const lines = await page.evaluate(() => [...document.querySelectorAll('.loupe[data-open] .loupe-row')].map((r) => ({ n: Number((r.querySelector('.loupe-n')!.textContent ?? '').replace(/,/g, '')), text: r.querySelector('.loupe-t')!.textContent ?? '', seen: r.classList.contains('seen') })))
       await page.mouse.up()
+      assert.equal(lines.length, 17)
+      assert.ok(lines.every((r, i) => !i || r.n === lines[i - 1].n + 1), `numbered in order: ${lines.map((r) => r.n)}`)
+      for (const r of lines) assert.ok(mode === 'transcript' ? r.text.startsWith(`20:${String(r.n % 60).padStart(2, '0')}:00Agent${r.n % 4}message ${r.n} lorem`) : r.text.length > 0, `line ${r.n}: ${r.text}`)
       const rows = motion(samples, moves)
       const driven = rows.filter((r) => Math.abs(r.dy) > 1e-3)
       const followed = driven.filter((r) => r.top).length / driven.length
       const still = rows.filter((r) => !r.top)
       const f = report('drag', rows, 'frame', 'dy')
       const l = report('drag', rows, 'lens', 'dy')
-      console.log(`\n${name} Files ${mode}, drag of the frame:\n  ${fmt(f)}\n  ${fmt(l)}\n  the records changed in ${pct(followed)} of the driven frames\n  ${timing(rows)}; frames that drew only the tracks: work p90 ${workAt(still, 0.9).toFixed(1)} ms`)
+      console.log(`\n${name} Files ${mode}, drag of the thumb:\n  ${fmt(f)}\n  ${fmt(l)}\n  the records changed in ${pct(followed)} of the driven frames\n  ${timing(rows)}; frames that drew only the strip: work p90 ${workAt(still, 0.9).toFixed(1)} ms`)
       smooth(f, `${name} ${mode}`)
       smooth(l, `${name} ${mode}`)
       assert.ok(followed >= 0.2, `the records changed in only ${pct(followed)} of the driven frames`)
       // headless WebKit draws the records a frame shows in software, into the frames around it, and its times follow the
-      // machine's load: there its numbers are logged, and Chromium holds the frames that draw only the tracks to 16 ms
-      if (name === 'chromium') assert.ok(workAt(still, 0.9) < 16, `frames that drew only the tracks took ${workAt(still, 0.9)} ms at p90`)
+      // machine's load: there its numbers are logged, and Chromium holds the frames that draw only the strip to 16 ms
+      if (name === 'chromium') assert.ok(workAt(still, 0.9) < 16, `frames that drew only the strip took ${workAt(still, 0.9)} ms at p90`)
       await browser.close()
     })
   }
 
-  test(`${name}, Files: a steady wheel scroll moves the zoomed track's records every frame the reader scrolls`, async (ctx) => {
+  test(`${name}, Files: a steady wheel scroll over the strip moves the thumb and the loupe at it every frame the reader scrolls`, async (ctx) => {
     if (!runs.get(name)) return ctx.skip()
-    const { browser, page } = await open(engine, '?mode=table')
-    const body = (await page.locator('.reader-body').boundingBox())!
-    await page.mouse.move(body.x + body.width / 2, body.y + body.height / 2)
-    await startSampling(page)
+    // 1,500 records, so that a frame's scroll moves the thumb by more than WebKit's 1/64 px
+    const { browser, page } = await open(engine, '?mode=table&total=1500')
+    // in the middle of the file, the loupe open on the strip, then the wheel there: the reader scrolls and the loupe goes
+    // to the thumb
+    const over = (await page.locator('.track-over').boundingBox())!
+    await page.mouse.click(over.x + over.width / 2, over.y + over.height * 0.5)
+    await page.waitForTimeout(800)
+    await page.mouse.move(over.x + over.width / 2, over.y + over.height * 0.3)
+    await page.waitForTimeout(400)
+    await page.mouse.wheel(0, 6)
+    await page.waitForTimeout(100)
+    await startSampling(page, '.loupe-box')
     for (let i = 0; i < 160; i++) {
       await page.mouse.wheel(0, 6)
       await page.waitForTimeout(8)
     }
     const { samples, moves } = await stopSampling(page)
     const rows = motion(samples, moves)
-    const r = report('wheel', rows, 'rec', 'st')
+    const r = report('wheel', rows, 'frame', 'st')
     const l = report('wheel', rows, 'lens', 'st')
     console.log(`\n${name} Files, wheel:\n  ${fmt(r)}\n  ${fmt(l)}\n  ${timing(rows)}`)
     smooth(r, `${name} wheel`)
@@ -311,13 +335,15 @@ async function kitPage(engine: BrowserType) {
   await page.setContent(KIT_VIEW())
   const frame = () => page.mainFrame()
   await page.waitForTimeout(300)
-  await frame().waitForSelector('.thimble-colour-lens', { state: 'attached' })
+  await frame().waitForSelector('.thimble-colour-thumb', { state: 'attached' })
   await page.waitForTimeout(300)
   return { browser, page, frame }
 }
 
-const kitSampling = (f: import('playwright').Frame) =>
-  f.evaluate(() => {
+/** As startSampling, over the kit's strip: its thumb, and while the loupe is open its part `lens` (the bracket beside the
+ * strip, or the loupe's box). */
+const kitSampling = (f: import('playwright').Frame, lens = '.thimble-colour-bracket') =>
+  f.evaluate((lens) => {
     const w = window as any
     w.__samples = []
     w.__moves = []
@@ -327,7 +353,7 @@ const kitSampling = (f: import('playwright').Frame) =>
     let t0 = 0
     ch.port1.onmessage = () => {
       const q = (s: string) => document.querySelector(s)?.getBoundingClientRect()
-      w.__samples.push({ t: t0, work: performance.now() - t0, frame: q('.thimble-colour-whole .thimble-colour-thumb')?.top ?? null, lens: q('.thimble-colour-lens')?.top ?? null, rec: null, recLine: null, st: (document.getElementById('list') as HTMLElement).scrollTop, top: Math.floor((document.getElementById('list') as HTMLElement).scrollTop / 30) })
+      w.__samples.push({ t: t0, work: performance.now() - t0, frame: q('.thimble-colour-thumb')?.top ?? null, lens: document.querySelector('.thimble-colour-loupe[data-open]') ? (q(lens)?.top ?? null) : null, rec: null, recLine: null, st: (document.getElementById('list') as HTMLElement).scrollTop, top: Math.floor((document.getElementById('list') as HTMLElement).scrollTop / 30) })
     }
     const tick = () => {
       if (!w.__sampling) return
@@ -336,17 +362,28 @@ const kitSampling = (f: import('playwright').Frame) =>
       requestAnimationFrame(tick)
     }
     requestAnimationFrame(tick)
-  })
+  }, lens)
 
 for (const [name, engine] of ENGINES) {
-  test(`${name}, the kit's strip: a steady drag of the overview's frame moves the frame, the lens and the list every frame`, async (ctx) => {
+  test(`${name}, the kit's strip: a steady drag of the thumb moves the thumb, the loupe at it and the list every frame`, async (ctx) => {
     if (!runs.get(name)) return ctx.skip()
     const { browser, page, frame } = await kitPage(engine)
-    const thumb = (await frame().locator('.thimble-colour-whole .thimble-colour-thumb').boundingBox())!
+    // from the middle of the list, where the loupe has room to follow the thumb
+    const strip = (await frame().locator('.thimble-colour-track').boundingBox())!
+    await page.mouse.click(strip.x + strip.width / 2, strip.y + strip.height * 0.4)
+    await page.waitForTimeout(400)
+    const thumb = (await frame().locator('.thimble-colour-thumb').boundingBox())!
     const x = thumb.x + thumb.width / 2
     let y = thumb.y + thumb.height / 2
     await page.mouse.move(x, y)
     await page.mouse.down()
+    // past the press's DRAG_PX, where the thumb and the loupe start to move together: the steady drag from there
+    for (let i = 0; i < 4; i++) {
+      y += 1
+      await page.mouse.move(x, y)
+      await page.waitForTimeout(8)
+    }
+    await page.waitForTimeout(50)
     await kitSampling(frame())
     for (let i = 0; i < 160; i++) {
       y += 1
@@ -358,13 +395,17 @@ for (const [name, engine] of ENGINES) {
       w.__sampling = false
       return { samples: w.__samples, moves: w.__moves }
     })
+    // held there, the loupe's lines are the records around the thumb, each its line and the start of its text
+    const lines = await frame().evaluate(() => [...document.querySelectorAll('.thimble-colour-loupe[data-open] .thimble-colour-loupe-row')].map((r) => ({ n: Number((r.querySelector('.thimble-colour-loupe-n')!.textContent ?? '').replace(/,/g, '')), text: r.querySelector('.thimble-colour-loupe-t')!.textContent ?? '' })))
     await page.mouse.up()
+    assert.equal(lines.length, 17)
+    assert.ok(lines.every((r, i) => (!i || r.n === lines[i - 1].n + 1) && r.text === `message ${r.n}`), `the records in order: ${JSON.stringify(lines)}`)
     const rows = motion(samples, moves)
     const driven = rows.filter((r) => Math.abs(r.dy) > 1e-3)
     const followed = driven.filter((r) => Math.abs(r.st) > 0).length / driven.length
     const f = report('drag', rows, 'frame', 'dy')
     const l = report('drag', rows, 'lens', 'dy')
-    console.log(`\n${name} kit, drag of the frame:\n  ${fmt(f)}\n  ${fmt(l)}\n  the list moved in ${pct(followed)} of the driven frames\n  ${timing(rows)}`)
+    console.log(`\n${name} kit, drag of the thumb:\n  ${fmt(f)}\n  ${fmt(l)}\n  the list moved in ${pct(followed)} of the driven frames\n  ${timing(rows)}`)
     smooth(f, `${name} kit`)
     smooth(l, `${name} kit`)
     assert.ok(followed >= 0.9, `the list moved in only ${pct(followed)} of the driven frames`)
@@ -372,12 +413,19 @@ for (const [name, engine] of ENGINES) {
     await browser.close()
   })
 
-  test(`${name}, the kit's strip: a steady wheel scroll moves the frame and the lens every frame the list scrolls`, async (ctx) => {
+  test(`${name}, the kit's strip: a steady wheel scroll over the strip moves the thumb and the loupe at it every frame the list scrolls`, async (ctx) => {
     if (!runs.get(name)) return ctx.skip()
     const { browser, page, frame } = await kitPage(engine)
-    const list = (await frame().locator('#list').boundingBox())!
-    await page.mouse.move(list.x + list.width / 2, list.y + list.height / 2)
-    await kitSampling(frame())
+    // in the middle of the list, the loupe open on the strip, then the wheel there: the list scrolls and the loupe goes
+    // to the thumb
+    const strip = (await frame().locator('.thimble-colour-track').boundingBox())!
+    await page.mouse.click(strip.x + strip.width / 2, strip.y + strip.height * 0.5)
+    await page.waitForTimeout(400)
+    await page.mouse.move(strip.x + strip.width / 2, strip.y + strip.height * 0.3)
+    await page.waitForTimeout(400)
+    await page.mouse.wheel(0, 6)
+    await page.waitForTimeout(100)
+    await kitSampling(frame(), '.thimble-colour-loupe-box')
     for (let i = 0; i < 160; i++) {
       await page.mouse.wheel(0, 6)
       await page.waitForTimeout(8)
@@ -401,18 +449,21 @@ for (const [name, engine] of ENGINES) {
 // ---------------------------------------------------------------- a click snaps to a thin patch of color
 /** The y, in the page, of the overview's middle device row in a color unlike the track's first row's, and how many rows
  * it spans: where the lone record is drawn. */
-const lonePatch = (f: import('playwright').Frame, canvas: string) =>
-  f.evaluate((sel) => {
-    const cv = document.querySelector(sel) as HTMLCanvasElement
-    const data = cv.getContext('2d')!.getImageData(cv.width - 2, 0, 1, cv.height).data
+const lonePatch = (f: import('playwright').Frame, canvas: string, lane?: number) =>
+  f.evaluate(([sel, lane]) => {
+    const cv = document.querySelector(sel as string) as HTMLCanvasElement
+    const dpr0 = window.devicePixelRatio || 1
+    // the column at `lane` css px from the canvas's left (the middle of Files' lane), else its last but one
+    const col = lane != null ? Math.round((lane as number) * dpr0) : cv.width - 2
+    const data = cv.getContext('2d')!.getImageData(col, 0, 1, cv.height).data
     const px = (y: number) => Array.from(data.slice(y * 4, y * 4 + 4)).join(',')
     const ground = px(Math.floor(cv.height / 4))
     const odd: number[] = []
     for (let y = 0; y < cv.height; y++) if (data[y * 4 + 3] > 0 && px(y) !== ground) odd.push(y)
     const r = cv.getBoundingClientRect()
     const dpr = window.devicePixelRatio || 1
-    return odd.length ? { y: r.top + (odd[0] + odd[odd.length - 1] + 1) / 2 / dpr, rows: odd.length, x: r.right - 3 } : null
-  }, canvas)
+    return odd.length ? { y: r.top + (odd[0] + odd[odd.length - 1] + 1) / 2 / dpr, rows: odd.length, x: lane != null ? r.left + (lane as number) : r.right - 3 } : null
+  }, [canvas, lane] as const)
 
 for (const [name, engine] of ENGINES) {
   test(`${name}, Files: a click two pixels off a lone colored record snaps to it, and the reader goes there and chooses it`, async (ctx) => {
@@ -420,7 +471,8 @@ for (const [name, engine] of ENGINES) {
     const { browser, page } = await open(engine, '?mode=transcript&lone=9001')
     await page.waitForFunction(() => document.querySelector('.reader-colorbar') != null)
     await page.waitForTimeout(400)
-    const patch = await lonePatch(page.mainFrame(), '.track-over canvas')
+    // the strip's one lane of colors, 3 px in and 7 px wide
+    const patch = await lonePatch(page.mainFrame(), '.track-over canvas', 6.5)
     assert.ok(patch, 'the overview draws the lone record in its color')
     for (const off of [2, -2]) {
       // away from it first
@@ -446,9 +498,10 @@ for (const [name, engine] of ENGINES) {
     const page = await browser.newPage({ viewport: { width: 900, height: 700 }, deviceScaleFactor: 2 })
     // 200 records, so that one record has rows of the overview to itself
     await page.setContent(KIT_VIEW(200).replace("(i * 7) % 11 < 3 ? 'With links' : 'Text only'", "i === 120 ? 'With links' : 'Text only'"))
-    await page.waitForSelector('.thimble-colour-lens', { state: 'attached' })
+    await page.waitForSelector('.thimble-colour-thumb', { state: 'attached' })
     await page.waitForTimeout(400)
-    const patch = await lonePatch(page.mainFrame(), '.thimble-colour-whole canvas')
+    // the strip's one lane of colors, 3 px in and 7 px wide
+    const patch = await lonePatch(page.mainFrame(), '.thimble-colour-whole canvas', 6.5)
     assert.ok(patch, 'the overview draws the lone record in its color')
     for (const off of [2, -2]) {
       await page.evaluate(() => (document.getElementById('list')!.scrollTop = 0))
@@ -469,10 +522,15 @@ for (const [name, engine] of ENGINES) {
 }
 
 // ---------------------------------------------------------------- one lane per choice of Color by
-/** The overview's lanes as drawn: each lane's box and name, the overview's width, and the colors under it. */
+/** The strip's lanes as drawn: each lane of colors' box and name, the strip's width, and the colors under it; `plain`
+ * for a strip with no lane, a plain scrollbar. */
 const overview = (page: Page) =>
   page.evaluate(() => {
-    const cv = document.querySelector('.track-over canvas') as HTMLCanvasElement
+    const cv = document.querySelector('.track-over canvas') as HTMLCanvasElement | null
+    const strip = document.querySelector('.track-over') as HTMLElement
+    const trigger = document.querySelector('.reader-colorbar .colorby .colorby-trigger')?.textContent ?? null
+    const bars = document.querySelectorAll('.reader-record.has-cb').length
+    if (!cv) return { width: strip.offsetWidth, plain: true, marks: [], sample: [], one: [], oneGreen: [], blue: [], orange: [], green: [], bars, trigger }
     const ctx = cv.getContext('2d')!
     const dpr = window.devicePixelRatio || 1
     const real = (c: string) => {
@@ -485,21 +543,21 @@ const overview = (page: Page) =>
     }
     // the color at the middle of a lane (its left edge in css px), a share down the track
     const at = (left: number, w: number, f: number) => Array.from(ctx.getImageData(Math.floor((left + w / 2) * dpr), Math.floor(f * cv.height), 1, 1).data.slice(0, 3))
-    const marks = [...document.querySelectorAll('.track-lane')].map((e) => ({ left: (e as HTMLElement).offsetLeft, width: (e as HTMLElement).offsetWidth, title: e.getAttribute('title') }))
-    // the first lane down the whole track, a sample every 5%
-    const column = Array.from({ length: 20 }, (_, i) => at(0, marks[0]?.width ?? 12, (i + 0.5) / 20).join(','))
-    return { width: (document.querySelector('.track-over') as HTMLElement).offsetWidth, marks, blue: real('var(--label-1)'), orange: real('var(--label-2)'), green: real('var(--label-3)'), sample: marks.map((m) => [at(m.left, m.width, 0.105), at(m.left, m.width, 0.505), at(m.left, m.width, 0.25), at(m.left, m.width, 0.75)]), one: at(0, 12, 0.105), oneGreen: at(0, 12, 0.505), column, bars: document.querySelectorAll('.reader-record.has-cb').length, trigger: document.querySelector('.reader-colorbar .colorby .colorby-trigger')?.textContent ?? null }
+    const marks = [...document.querySelectorAll('.track-lane')].map((e) => ({ left: (e as HTMLElement).offsetLeft, width: (e as HTMLElement).offsetWidth, title: (e as HTMLElement).dataset.name ?? null }))
+    // with one lane of colors, it stands 3 px in, 7 px wide
+    return { width: strip.offsetWidth, plain: false, marks, blue: real('var(--label-1)'), orange: real('var(--label-2)'), green: real('var(--label-3)'), sample: marks.map((m) => [at(m.left, m.width, 0.105), at(m.left, m.width, 0.505), at(m.left, m.width, 0.25), at(m.left, m.width, 0.75)]), one: at(3, 7, 0.105), oneGreen: at(3, 7, 0.505), bars, trigger }
   })
 const near = (a: number[], b: number[]) => a.every((v, i) => Math.abs(v - b[i]) <= 3)
 
-test("Files: two labels that are Color by's choices are two lanes of the overview, each in its label's colors and named on hover; one turned off leaves one lane", async () => {
+test("Files: two labels that are Color by's choices are two lanes of the strip, each in its label's colors and named; one turned off leaves one lane", async () => {
   const { browser, page } = await open(chromium, '?mode=transcript&labels=1')
   await page.waitForFunction(() => document.querySelectorAll('.track-lane').length === 2, null, { timeout: 10000 })
   await page.waitForTimeout(300)
   const two = await overview(page)
-  assert.deepEqual(two.marks.map((m) => m.title), ['passed on', 'links'], 'each lane names its label on hover')
+  assert.deepEqual(two.marks.map((m) => m.title), ['passed on', 'links'], 'each lane names its label')
   assert.equal(two.trigger, 'Color by: passed on+1')
-  assert.ok(two.marks.every((m) => m.width >= 3 && m.width <= 12) && two.width <= 25, `the lanes narrower, the overview ${two.width} px: ${JSON.stringify(two.marks)}`)
+  // the scrollbar's lanes: 7 px each, 2 px apart, 3 px in from the strip's edges
+  assert.ok(two.marks.every((m) => m.width === 7) && two.width === 22, `the strip ${two.width} px: ${JSON.stringify(two.marks)}`)
   // the first lane in "passed on"'s orange where it marks, the second in "links"'s green where it marks, each blank where the other marks
   assert.ok(near(two.sample[0][0], two.orange), `the first lane orange at "passed on": ${two.sample[0][0]} against ${two.orange}`)
   assert.ok(near(two.sample[1][1], two.green), `the second lane green at "links": ${two.sample[1][1]} against ${two.green}`)
@@ -509,7 +567,7 @@ test("Files: two labels that are Color by's choices are two lanes of the overvie
   await page.waitForFunction(() => document.querySelectorAll('.track-lane').length === 0)
   await page.waitForTimeout(300)
   const one = await overview(page)
-  assert.equal(one.width, 12, 'one lane, as wide as the overview always is')
+  assert.equal(one.width, 13, 'one lane in the scrollbar')
   assert.ok(near(one.one, one.orange) && !near(one.oneGreen, one.green), `the one lane is "passed on": ${one.one} ${one.oneGreen}`)
   assert.equal(one.trigger, 'Color by: passed on')
   // "links" on again from elsewhere takes the color; "passed on" keeps its lane
@@ -519,7 +577,7 @@ test("Files: two labels that are Color by's choices are two lanes of the overvie
   await browser.close()
 })
 
-test("Files: a label on that is no choice has no lane; a key checked after a label is a lane in its values' colors; Off leaves the overview plain, with no lane and no record's bar", async () => {
+test("Files: a label on that is no choice has no lane; a key checked after a label is a lane in its values' colors; Off leaves the strip a plain scrollbar, with no lane and no record's bar", async () => {
   const { browser, page } = await open(chromium, '?mode=transcript&labels=1')
   await page.waitForFunction(() => document.querySelectorAll('.track-lane').length === 2, null, { timeout: 10000 })
   // "links" unchecked in the menu leaves the choices; the test's labels stay as they are (its toggle does nothing), so
@@ -541,14 +599,14 @@ test("Files: a label on that is no choice has no lane; a key checked after a lab
   await page.click('.colorby-menu .colorby-item[data-by="l:a"]')
   await page.waitForFunction(() => document.querySelectorAll('.track-lane').length === 0 && document.querySelectorAll('.reader-record.has-cb').length > 0)
   assert.equal((await overview(page)).trigger, 'Color by: speaker')
-  // Off: no lane, the overview one plain color top to bottom, no record's bar, no chip
+  // Off: no lane, a plain scrollbar, no record's bar, no chip
   await page.click('.colorby-menu .colorby-item[data-by="off"]')
   await page.waitForFunction(() => document.querySelectorAll('.track-lane').length === 0 && !document.querySelector('.colorby-menu'))
   await page.waitForTimeout(300)
   const off = await overview(page)
   assert.equal(off.trigger, 'Color by: Off')
-  assert.equal(off.width, 12)
-  assert.equal(new Set(off.column).size, 1, `the overview is plain: ${JSON.stringify(off.column)}`)
+  assert.equal(off.plain, true, 'a plain scrollbar')
+  assert.equal(off.width, 10)
   assert.equal(off.bars, 0)
   assert.equal(await page.locator('.reader-colorbar .colorby-chip').count(), 0)
   await browser.close()
@@ -579,7 +637,7 @@ test("chromium, the kit's strip: a list of 4,458 rows drawn again as it scrolls 
   const browser = await chromium.launch({ headless: true })
   const page = await browser.newPage({ viewport: { width: 900, height: 700 }, deviceScaleFactor: 2 })
   await page.setContent(VIRTUAL())
-  await page.waitForSelector('.thimble-colour-lens', { state: 'attached' })
+  await page.waitForSelector('.thimble-colour-thumb', { state: 'attached' })
   await page.waitForTimeout(400)
   // a pixel of our own on the overview, which a drawing of the overview again would paint over
   const dot = () =>

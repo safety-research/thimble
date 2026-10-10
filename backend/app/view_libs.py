@@ -37,7 +37,7 @@ from .ledger import atomic_write_text, write_json
 log = logging.getLogger("thimble.view_libs")
 
 LIB_DIR = "lib"  # in a view's folder
-LOCK_FILE = "libs.json"  # in LIB_DIR: {entry: {name, version, path, file, kind, global, bytes}}
+LOCK_FILE = "libs.json"  # in LIB_DIR: {entry: {name, version, path, file, kind, global, bytes, sha256}}
 BUILTIN = ("vega", "vega-lite", "vega-embed")
 NPM_TIMEOUT_S = 300.0
 ENTRY_RE = re.compile(r"^(?P<name>(?:@[a-z0-9][a-z0-9._~-]*/)?[a-z0-9][a-z0-9._~-]*)"
@@ -117,14 +117,18 @@ def lock(folder: Path) -> dict[str, dict[str, Any]]:
 
 
 def vendored(folder: Path, entry: str) -> tuple[str, str] | None:
-    """(kind, text) of an npm entry's bundle in the view's folder, None when it is not there."""
+    """(kind, text) of an npm entry's bundle in the view's folder, None when it is not there or its bytes are not the
+    ones the lock's sha256 names."""
     item = lock(folder).get(entry)
     if not item:
         return None
     f = folder / LIB_DIR / str(item.get("file") or "")
     if f.parent != folder / LIB_DIR or f.is_symlink() or not f.is_file():
         return None
-    return str(item.get("kind") or "js"), f.read_text("utf-8")
+    data = f.read_bytes()
+    if item.get("sha256") and hashlib.sha256(data).hexdigest() != item["sha256"]:
+        return None
+    return str(item.get("kind") or "js"), data.decode("utf-8")
 
 
 ESBUILD = config.REPO_ROOT / "frontend" / "node_modules" / "esbuild" / "bin" / "esbuild"
@@ -308,12 +312,13 @@ def _file_name(name: str, version: str, path: str, kind: str) -> str:
 
 # ---------------------------------------------------------------------------------------------------- vendoring
 
-async def ensure(c: str, slug: str, folder: Path, libs: Any, *, source: Path | None = None) -> dict[str, list[str]]:
+async def ensure(c: str, slug: str, folder: Path, libs: Any, *, source: Path | None = None,
+                 prune: bool = True) -> dict[str, list[str]]:
     """Every npm entry of `libs` bundled into the view's folder from the npm install the builder made in its own folder
     (`source`, by default dev.view_work_dir). {problems, notes}: a problem for an entry that could not be bundled (not
     installed there, another version, or esbuild's failure), a note for each one bundled now. Entries no longer listed
-    leave the folder. Nothing is installed here and nothing is asked: the builder's own install asked, as Claude Code
-    decides."""
+    leave the folder, unless `prune` is False (the custom cards' shared folder, card_libs). Nothing is installed here
+    and nothing is asked: the builder's own install asked, as Claude Code decides."""
     names = entries(libs)
     out: dict[str, list[str]] = {"problems": [], "notes": []}
     have = lock(folder)
@@ -341,13 +346,15 @@ async def ensure(c: str, slug: str, folder: Path, libs: Any, *, source: Path | N
         except RuntimeError as err:
             out["problems"].append(f"the package {raw} could not be bundled: {err}")
             continue
-        size = (folder / LIB_DIR / fname).stat().st_size
+        data = (folder / LIB_DIR / fname).read_bytes()
+        size = len(data)
         kept[raw] = {"name": e.name, "version": version, "path": e.path, "file": fname, "kind": kind,
-                     "global": global_name(e) if kind == "js" else None, "bytes": size}
+                     "global": global_name(e) if kind == "js" else None, "bytes": size,
+                     "sha256": hashlib.sha256(data).hexdigest()}
         how = (f"the page has it as `{global_name(e)}` and as thimble.lib({json.dumps(e.key)})" if kind == "js"
                else "its styles load before the page's")
         out["notes"].append(f"bundled {e.key} {version} into {LIB_DIR}/ ({size_words(size)}): {how}")
-    _write_lock(folder, {raw: kept[raw] for raw in names if raw in kept})
+    _write_lock(folder, {**({} if prune else have), **{raw: kept[raw] for raw in names if raw in kept}})
     return out
 
 

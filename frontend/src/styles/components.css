@@ -645,6 +645,45 @@ a.card:hover {
   max-width: min(360px, calc(100vw - 16px));
   white-space: pre-line;
 }
+/* a record on one line (files/Loupe RowLine): its number, a cell per lane that colors it, its metadata in the quiet
+   gray and the start of its text, the text cut with an ellipsis; at most as wide as the loupe (Loupe.tsx MAX_W) */
+.tip.tip-one {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(320px, calc(100vw - 16px));
+  white-space: nowrap;
+}
+.tip-one .tip-n {
+  flex: none;
+  color: var(--text-tertiary);
+  font: 400 var(--text-mono) / 1.35 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.tip-one .tip-c {
+  flex: none;
+  display: flex;
+  gap: 2px;
+}
+.tip-one .tip-c i {
+  flex: none;
+  width: 6px;
+  height: 11px;
+  border-radius: 1px;
+}
+.tip-one .tip-t {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tip-one .tip-m {
+  margin-right: 6px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.tip-one .tip-t.heading {
+  font-weight: 500;
+}
 /* the box a library's icon control sits in to take the tooltip (Tooltip.tsx Tipped): it lays out as the control did */
 .tipped {
   display: inline-flex;

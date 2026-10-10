@@ -338,7 +338,7 @@ colored is said under each.
 **Main's chat:**
 
 ```
-⏺ The dse wiki holds most of the corpus [ card ], and most of its edits came on one day, 18 June.
+⏺ The dse wiki holds most of the corpus [ card ], and most of its edits came on one day, June 18.
   ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
   │ How many pages does each wiki have?                                                                            │
   │                                                                                                                │
@@ -361,7 +361,7 @@ colored is said under each.
 The same reply's first row under the pointer, and a passage a thread was asked about:
 
 ```
-? The dse wiki holds most of the corpus [ card ], and most of its edits came on one day, 18 June.
+? The dse wiki holds most of the corpus [ card ], and most of its edits came on one day, June 18.
 ↳ Most of the deletions came later.
 ```
 
@@ -436,7 +436,12 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   the launcher puts the plugin copy's bin/ first on the session's PATH. thimble's tool results keep their card ids:
   main cites cards by them. Main's own `↳ thread <name>:` line names the thread by its first question in quotation
   marks, never its fork's slug, and is not drawn for a thread whose `↳` row thimble-term drew, which says the same
-  (ctrl+o's view still draws the reply's time and model over the hidden line: no hook reaches that header).
+  (ctrl+o's view still draws the reply's time and model over the hidden line: no hook reaches that header). A run of
+  one of thimble's agents reaches main twice, as its hand-back and as Claude Code's task notification, and main answers
+  each with a `↳` line (prompts/main.md); its line answering the second, after a row that said the first, is not drawn,
+  also atop main's reply to the analyst's next prompt when the notification started no turn of its own (in a reply to
+  several reports, a line each in their order, only that report's line), so `↳ The view builder finished; …` shows
+  once, as the browser shows neither.
 - Claude Code draws a hook's `systemMessage` as its own row under the hook's name (`⎿ UserPromptSubmit says: …`), which
   no render hook reaches. thimble's held hook prints there the lines of the events that reached main, so in terminal
   mode it shortens or leaves out those the chat's own rows already say: a thread's question (its fork's row and its `↳`
@@ -485,11 +490,18 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   of a whole runs on a `─` track to the whole. The total has its own row (`all  4,579`). A chart with a color field
   (two series or more) has one row per label, its series stacked on it in their hues in the data's order, the label's
   total against the right edge, and its key on a row under the bars (`● page saved  ● page deleted`); the readout names
-  the part under the pointer and its series (`24 May · page deleted  14 events`). Labels that are timestamps read as the
-  browser's date axis writes them, all in one form: `24 May`, the time only when one is not midnight (`24 May 12:30`),
+  the part under the pointer and its series (`May 24 · page deleted  14 events`). Labels that are timestamps read as the
+  browser's date axis writes them, all in one form: `May 24`, the time only when one is not midnight (`May 24 12:30`),
   the year only when they span more than one, never an ISO stamp.
-- A line chart: y labels right-aligned in a column, axes in the rule gray, x labels dim at the ends and the middle, a
-  legend row of `● series` entries; the pointer's column `┊` with its readout on the readout row.
+- A line chart (an area and a scatter too): axes in the rule gray, with a `┤` or `┬` at each tick and its label dim
+  beside or under it. Numbers tick at round steps, whole for whole data (`0 100 200 300 400`, never `209.5`), the y
+  labels right-aligned in a column and the x labels as many as fit with 2 cells between (`0 1 2 … 8`, never `4.024`),
+  without separators (`2019`, never `2,019`). Times tick as the browser's date axis names their span: `09:00` within a
+  day, `Aug 28 12:00` within three days, `May 24` within 540 days, else `Oct 2019`; seconds only over a few minutes;
+  where the span crosses a year, the first tick and the first of each new year name it (`Dec 1, 2019 … Jan 1, 2020 …
+  Feb 1`). An axis that names its own values (Vega-Lite's `axis.values`, as thimble.chart's weekly and monthly lines
+  do) ticks at those, as the browser's does, every second or third where they do not all fit. Categories stand at the
+  ends and the middle. A legend row of `● series` entries; the pointer's column `┊` with its readout on the readout row.
 - A table: the column names bold, a `─` rule under each name as wide as its column, the rows right under it; numbers
   right-aligned in the card's column formats, as the browser's table writes them (`1,446`). Markdown tables in a reply take the same header.
 - A timeline: the axis across the content with its `●` marks in hue on a rule-gray line, its two end times dim under
@@ -520,11 +532,11 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   ● Wiki Pages                                                                     pages.jsonl  new
 
   Documents (1)
-  ● On 18 June, agents rewrote the dse wiki's welcome page 2,299 times…                     report
+  ● On June 18, agents rewrote the dse wiki's welcome page 2,299 times…                     report
 
   Threads (2)  1 new
   ● "How many delete events are in events.jsonl? One number."                                new
-  ● "Which wiki got the most revisions on 18 June, and from how many labels?"
+  ● "Which wiki got the most revisions on June 18, and from how many labels?"
 
   Cards (12)
 ❯ ▾ Your work                                                                             3 cards
@@ -582,8 +594,8 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   main
 ❯ ├ "How many delete events are in events.jsonl? One number."                               new
   │ There are 5,217 delete events in events.jsonl.
-  └ "Which wiki got the most revisions on 18 June, and from how many labels?"
-    dse got the most revisions on 18 June: 5,884 of the 6,543.
+  └ "Which wiki got the most revisions on June 18, and from how many labels?"
+    dse got the most revisions on June 18: 5,884 of the 6,543.
   ──────────────────────────────────────────────────────────────────────────────────────────────
   about events.jsonl line 12
      11  {"event": "save", "page": "Welcome", "ts": "2026-06-16T08:59:58Z"}

@@ -216,8 +216,10 @@ async function paintedCount({ on, off, targets, tol }) {
 // What the page shows at the end, counted once per ref on the outermost visible element that carries it (not a canvas,
 // which takes no mark, and not one the bridge hid or dimmed for the filter): `records` and `units` anchored, `due` the
 // refs whose `marks` entry has a bar, other than those whose outermost element is data-anchor-unmarked (the page draws
-// the labels' colours on it itself), `drawn` those of them whose element carries the bridge's mark, and `unkept` the
-// records shown that the filter does not keep, other than those inside a unit it keeps. Runs in the frame.
+// the labels' colours on it itself), `drawn` those of them whose element carries the bridge's mark, `unkept` the
+// records shown that the filter does not keep, other than those inside a unit it keeps, and `held` the records the view
+// kit's lists that draw only the rows near their view hold, each row anchored as it is drawn (thimble.__held). Runs in
+// the frame.
 function shownCounts({ marks, record }) {
   const RECORD = new RegExp(record)
   const UNIT = /^view:[^/]+\/.+/
@@ -244,7 +246,7 @@ function shownCounts({ marks, record }) {
       own: (!was || was.own) && top.hasAttribute('data-anchor-unmarked'),
     })
   }
-  const out = { records: 0, units: 0, due: 0, drawn: 0, unkept: 0 }
+  const out = { records: 0, units: 0, due: 0, drawn: 0, unkept: 0, held: 0 }
   for (const [ref, { drawn, held, own }] of seen) {
     const record = RECORD.test(ref)
     if (record) out.records++
@@ -255,6 +257,11 @@ function shownCounts({ marks, record }) {
       if (drawn) out.drawn++
     }
     if (record && !held && !(m && m.keep)) out.unkept++
+  }
+  try {
+    out.held = window.thimble && typeof window.thimble.__held === 'function' ? Number(window.thimble.__held()) || 0 : 0
+  } catch {
+    out.held = 0
   }
   return out
 }
@@ -378,7 +385,9 @@ function layoutCounts() {
     if (![...el.childNodes].some((n) => n.nodeType === 3 && n.nodeValue.trim())) continue
     const cs = getComputedStyle(el)
     if (!['hidden', 'clip'].includes(cs.overflowX) || cs.textOverflow === 'ellipsis') continue
-    if (el.scrollWidth <= el.clientWidth + 2 || !visible(el)) continue
+    // the kit's table draws the year or the seconds a narrow column of times leaves out 0 wide on purpose; any other box
+    // squeezed to nothing still cuts its text off
+    if (el.classList.contains('thimble-table-cut') || el.scrollWidth <= el.clientWidth + 2 || !visible(el)) continue
     cut++
     if (cuts.length < EXAMPLES) cuts.push(el.textContent.replace(/\s+/g, ' ').trim().slice(0, 40))
   }
@@ -480,10 +489,12 @@ function findControl({ want, sel }) {
 // The tokens a view's page reads: frontend/src/lib/frame.ts VIEW_TOKENS, which this list follows.
 const VIEW_TOKENS = [
   '--text-primary', '--text-secondary', '--text-tertiary', '--surface-card', '--bg-sub', '--bg-sunken', '--border-subtle', '--accent', '--font-body', '--font-mono',
-  '--ink-rgb', '--accent-hover', '--text-accent', '--text-on-accent', '--text-on-inverse', '--text-placeholder', '--surface-hover', '--surface-selected', '--surface-inverse', '--raised-bg', '--raised-ring', '--track-bg', '--chip-edge', '--chip-bg', '--chip-edge-hover',
+  '--ink-rgb', '--accent-hover', '--text-accent', '--text-link', '--text-on-accent', '--text-on-inverse', '--text-placeholder', '--surface-hover', '--surface-selected', '--surface-inverse', '--raised-bg', '--raised-ring', '--track-bg', '--chip-edge', '--chip-bg', '--chip-edge-hover',
   '--chip-bg-hover', '--text-xs', '--text-ui-sm', '--text-sm', '--text-lg', '--text-mono', '--text-mono-sm', '--h-chip', '--h-control', '--control-sm', '--h-row', '--radius-chip', '--radius-seg', '--radius-ui', '--radius-card', '--transition-color',
-  '--accent-soft', '--hl-bg', '--hl-bg-strong', '--border-hairline', '--border-strong', '--bg-panel', '--status-positive', '--status-negative', '--status-warning',
+  '--accent-soft', '--hl-bg', '--hl-bg-strong', '--find-bg', '--find-bg-strong', '--border-hairline', '--border-strong', '--bg-panel', '--overlay-bg', '--overlay-edge', '--shadow-popover', '--text-eyebrow', '--radius-hl', '--status-positive', '--status-negative', '--status-warning',
   '--viz-1', '--viz-2', '--viz-3', '--viz-4', '--viz-5', '--viz-6', '--viz-7', '--viz-ink-1', '--viz-ink-2', '--viz-ink-3', '--viz-ink-4',
+  '--viz-seq-1', '--viz-seq-2', '--viz-seq-3', '--viz-seq-4', '--viz-seq-5', '--viz-div-1', '--viz-div-2', '--viz-div-3', '--viz-div-4', '--viz-div-5',
+  '--viz-other', '--viz-highlight', '--viz-grid', '--viz-axis', '--viz-label', '--viz-annotation', '--viz-font', '--viz-font-label', '--viz-size', '--viz-size-title', '--viz-line', '--viz-bar-radius',
   '--label-1', '--label-2', '--label-3', '--label-4', '--label-5', '--label-6', '--label-7', '--label-8', '--label-9', '--label-10', '--label-11', '--label-12', '--label-13', '--label-14', '--label-15', '--label-16', '--label-17', '--label-18', '--label-none',
 ]
 // The app's faces (frontend/src/styles/fonts.css), latin subset, inlined as data URLs as ViewerFrame inlines them.

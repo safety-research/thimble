@@ -2,7 +2,9 @@
 // docs/terminal-views.md), drawn as text: Filter by's values are toggles in the top row, `●` while a value shows and
 // `○` while it is off, never in a hue, and a value turned off hides its rows; Rows groups by a field, a tree of them
 // with its guides left-aligned, or a label, each class a lane, a class added to the label a new lane; the lanes draw a
-// failure as `×` in red and their key's entries are toggles; a chart's cells are marked under the pointer rather than
+// failure as `×` in red and their key's entries are toggles, Density draws no band, drawLane draws the view's own
+// cells (a shaded span `░`, a cell) under the records' marks, and the timeline works alone, on its records' own span of
+// times or numbers with its axis under it; a chart's cells are marked under the pointer rather than
 // drawn inverse, with a tip per cell; the list's rows in view are on the selection background across the lanes; a row
 // opens in a side pane beside the list, or under it in a narrow panel, never under the row; `{` `}` resize the
 // overview; a transcript draws its turns as thimble-term's file view does; and the view says it loads while a reader
@@ -207,7 +209,7 @@ describe('Rows', () => {
 })
 
 describe('lanes', () => {
-  function scene(o: { rows?: number; span?: any; room?: number } = {}) {
+  function scene(o: { rows?: number; span?: any; room?: number; density?: boolean } = {}) {
     init({ rows: o.rows ?? 30 })
     const colour = kit.colorBy({ fields: [{ name: 'tool', title: 'Tool' }] })
     const rows = kit.rows({ fields: [{ name: 'session', title: 'Session', parentOf: (k: string) => (k === 'lead' ? 'run' : k === 'run' ? null : PARENT[k]), nameOf: (k: string) => (k === 'run' ? 'Run 1' : k) }] })
@@ -219,14 +221,14 @@ describe('lanes', () => {
     kit.draw((d: any) => {
       range.draw(d, { gutter: 16 })
       const scale = range.scale(d.cols - 16)
-      lanes.draw(d, { items: CALLS, scale, gutter: 16, room: o.room, span: o.span })
+      lanes.draw(d, { items: CALLS, scale, gutter: 16, room: o.room, span: o.span, density: o.density })
       kit.axis(d, scale, { gutter: 16, legend: lanes.legend() })
     })
     return { lanes, picked, marked }
   }
 
   test('a lane per group: the top group with its ▾, the others with their guides at A2, left-aligned; a failure × in red; the key\'s entries are toggles', async () => {
-    const { lanes, picked } = scene()
+    const { lanes, picked } = scene({ density: false })
     await tick()
     const rows = text()
     const names = rows.slice(2, 7).map((r: string) => r.slice(0, 16).trimEnd())
@@ -259,10 +261,10 @@ describe('lanes', () => {
     expect(hit).toBeTruthy()
     expect(hit.x0).toBe(2 + 16)
     expect(hit.tips).toHaveLength(100 - 16)
-    expect(hit.tips[0]).toMatch(/^lead · 16 May 09:00:\d\d · 1 record$/)
+    expect(hit.tips[0]).toMatch(/^lead · May 16 09:00:\d\d · 1 record$/)
     // the time range's strip is a chart too, with its own tips
     const strip = f.hits.find((h: any) => h.y === 1 && h.cursor)
-    expect(strip && strip.tips[0]).toMatch(/16 May 09:00.* · 1 record/)
+    expect(strip && strip.tips[0]).toMatch(/May 16 09:00.* · 1 record/)
     kit.handle({ t: 'click', i: f.hits.indexOf(hit), seq: f.seq, x: 0, n: ++n })
     await tick()
     expect(marked).toEqual(['r1/lead.jsonl#L3'])
@@ -277,6 +279,86 @@ describe('lanes', () => {
     const bgs = runsAt(f, explore).filter((r) => r.bg === kit.COLORS.selected).map((r) => r.s).join('')
     expect(bgs.length).toBeGreaterThan(5)
     expect(runsAt(f, explore).slice(0, 2).some((r) => r.bg)).toBe(false)
+  })
+
+  test('Density draws its bars alone: no band `─` where a lane ran, and no `running` in the key; Events draws the band', async () => {
+    scene()
+    await tick()
+    const lane = (rows: string[], name: string) => rows.find((r: string) => r.includes(name))!.slice(18)
+    // explore ran from its first call to its last: in Density only its bars, no ─ between them
+    expect(lane(text(), '├ explore')).toMatch(/[▁▂▃▄▅▆▇█×]/)
+    expect(lane(text(), '├ explore')).not.toContain('─')
+    expect(text().some((r: string) => r.includes('─ running'))).toBe(false)
+    expect(text().some((r: string) => r.includes('× failed'))).toBe(true)
+    init()
+    scene({ density: false })
+    await tick()
+    expect(lane(text(), '├ explore')).toContain('─')
+    expect(text().some((r: string) => r.includes('─ running'))).toBe(true)
+  })
+
+  test("drawLane draws the view's own cells under the records' marks: a shaded span ░ named in its cells' tips, its series a key entry that hides it; marks: false leaves the records' cells to the view, and a click still opens the nearest record", async () => {
+    init()
+    const colour = kit.colorBy({ fields: [{ name: 'tool', title: 'Tool' }] })
+    const rows = kit.rows({ fields: [{ name: 'session', title: 'Session' }] })
+    const range = kit.timeRange({})
+    range.data({ times: CALLS.map((c) => c.t) })
+    const marked: string[] = []
+    const seen: any[] = []
+    let marks: any = undefined
+    let ln: any
+    kit.draw((d: any) => {
+      const scale = range.scale(d.cols - 16)
+      ln = kit.timeline({
+        key: 'own', rows, colour, marks, onMark: (c: any) => marked.push(c.ref),
+        series: [{ id: 'freeze', name: 'freeze', mark: 'band' }],
+        drawLane: (lane: any, ctx: any) => {
+          seen.push({ key: lane.key, cols: ctx.cols, hue: lane.items.length ? ctx.colorOf(lane.items[0]) : null })
+          if (lane.key === 'explore') ctx.shade(T0 + 300, T0 + 1500, { name: 'deploy freeze', series: 'freeze' })
+          if (lane.key === 'lead') for (const it of lane.items) ctx.put(ctx.x(it.t), { s: '◆', fg: '#123456' })
+        },
+      })
+      ln.draw(d, { items: CALLS, scale, gutter: 16, density: false })
+      kit.axis(d, scale, { gutter: 16, legend: ln.legend() })
+    })
+    colour.counts({ Grep: 2, Task: 1, Read: 1, Bash: 1 })
+    await tick()
+    const y = (name: string) => text().findIndex((r: string) => r.trimStart().startsWith(name))
+    // the span's cells ░ in the rule gray, the records' marks ▌ over them; its name in the tips of its cells alone
+    const explore = text()[y('explore')]
+    expect(explore).toContain('░')
+    expect(explore.replace(/[^▌]/g, '')).toBe('▌▌')
+    const x = [...explore].indexOf('░')
+    expect(cell(last(), y('explore'), x)!.fg).toBe(kit.COLORS.rule)
+    const hit = last().hits.find((h: any) => h.y === y('explore') && h.cursor)
+    expect(hit.tips[x - hit.x0]).toMatch(/ · deploy freeze$/)
+    expect(hit.tips[0]).not.toContain('deploy freeze')
+    // drawLane hears each lane with the lane's cells, and the Color by hue of a record
+    expect(seen.slice(-4).map((s) => s.key)).toEqual(['lead', 'explore', 'grep', 'test'])
+    expect(seen[0].cols).toBe(100 - 16)
+    const hue = seen.filter((s) => s.key === 'grep').at(-1).hue
+    expect(hue).toBe(colour.colourOf('Grep'))
+    expect(hue).not.toBe(kit.COLORS.dim)
+    // the series' key entry hides it; Reset shows it again
+    expect(text().some((r: string) => r.includes('░ freeze'))).toBe(true)
+    await click('░ freeze')
+    expect(ln.isOn('freeze')).toBe(false)
+    expect(text()[y('explore')]).not.toContain('░')
+    expect(text().some((r: string) => r.includes('░ freeze'))).toBe(true)
+    // the lead's own ◆ stand under its ▌ marks; with marks: false the ◆ show, and a click still opens the nearest record
+    expect(text()[y('lead')]).not.toContain('◆')
+    marks = false
+    kit.redraw()
+    await tick()
+    const lead = text()[y('lead')]
+    expect(lead).not.toContain('▌')
+    expect(lead.replace(/[^◆]/g, '')).toBe('◆◆')
+    const lx = [...lead].indexOf('◆')
+    expect(cell(last(), y('lead'), lx)!.fg).toBe('#123456')
+    const leadHit = last().hits.find((h: any) => h.y === y('lead') && h.cursor)
+    kit.handle({ t: 'click', i: last().hits.indexOf(leadHit), seq: last().seq, x: lx - leadHit.x0, n: ++n })
+    await tick()
+    expect(marked).toEqual(['r1/lead.jsonl#L3'])
   })
 
   test('Events draws a mark ▌ in each cell that holds a record, in place of the bars of its records', async () => {
@@ -345,6 +427,132 @@ describe('lanes', () => {
     const rows = text()
     expect(rows[2].slice(0, 16).trim()).toBe('▸ Run 1')
     expect(rows.slice(2, 4).some((r: string) => r.includes('lead'))).toBe(false)
+  })
+})
+
+describe('the timeline on its own', () => {
+  test("with no scale it lays out its records' own span and draws its axis under the lanes; lanes from a field's name, one for the records with none; a record with no place left out; `lanes` is the same call", async () => {
+    init({ cols: 80 })
+    expect(kit.lanes).toBe(kit.timeline)
+    const commits = [
+      { t: '2026-05-16T09:00:00Z', author: 'ana', ok: true },
+      { t: T0 + 600, author: 'bo', ok: true },
+      { t: T0 + 900, author: 'ana', ok: false },
+      { t: new Date((T0 + 3000) * 1000), ok: true },
+      { t: 'soon', author: 'bo', ok: true },
+    ]
+    const tl = kit.timeline({ rows: 'author', problem: (c: any) => c.ok === false })
+    kit.draw((d: any) => tl.draw(d, { items: commits }))
+    await tick()
+    const rows = text()
+    expect(rows.slice(0, 3).map((r: string) => r.slice(0, 14).trim())).toEqual(['ana', 'bo', 'no author'])
+    expect(tl.lanes.map((l: any) => l.items.length)).toEqual([2, 1, 1])
+    // the first record in the first cell, the last in the last, failed × in red; the axis under them with its key
+    expect([...rows[0]][2 + 14]).toMatch(/[▁▂▃▄▅▆▇█]/)
+    expect(rows[2].length).toBe(2 + 80)
+    expect(rows[0]).toContain('×')
+    expect(rows[3]).toMatch(/^ {2}× failed +May 16 09:00 +09:15/)
+    const hit = last().hits.find((h: any) => h.cursor)
+    expect(hit.tips[0]).toMatch(/^ana · May 16 09:00:\d\d · 1 record$/)
+  })
+
+  test("on plain numbers (unit 'n'): the axis and the tips in numbers; with no rows, one lane with no name, its tips the place alone", async () => {
+    init({ cols: 60 })
+    const steps = [{ turn: 1 }, { turn: '12' }, { turn: 30 }, { turn: '2026-05-16' }]
+    const tl = kit.timeline({ unit: 'n', time: (s: any) => s.turn })
+    kit.draw((d: any) => tl.draw(d, { items: steps }))
+    await tick()
+    const rows = text()
+    // the one lane from the panel's edge, no name before it; the date is no turn
+    expect(tl.lanes[0].items).toHaveLength(3)
+    expect(rows[0].slice(2)).toMatch(/^[▁▂▃▄▅▆▇█]/)
+    expect(rows[1].trim().split(/\s+/).every((l: string) => /^\d+$/.test(l))).toBe(true)
+    const hit = last().hits.find((h: any) => h.cursor)
+    expect(hit.tips[0]).toBe('1 · 1 record')
+    expect(hit.tip).toBe('a click opens the record nearest there')
+  })
+
+  test("a date given as text with no zone is read in UTC on a machine in any zone, as the browser kit reads it; text with no date in it is no place", async () => {
+    const zone = process.env.TZ
+    // a machine seven hours behind UTC in May, where Date.parse reads a date with no zone in its own
+    process.env.TZ = 'America/Los_Angeles'
+    try {
+      init({ cols: 80 })
+      const commits = [
+        { t: '2026-05-16T09:00:00', author: 'ana' },
+        { t: '2026-05-16 09:05:00', author: 'ana' },
+        { t: 'Sat, 16 May 2026 09:10:00', author: 'bo' },
+        { t: '2026/05/16 09:15:00', author: 'bo' },
+        { t: 'Sat, 16 May 2026 02:20:00 -0700', author: 'cy' },
+        { t: 'step 4', author: 'cy' },
+      ]
+      const tl = kit.timeline({ rows: 'author' })
+      kit.draw((d: any) => tl.draw(d, { items: commits }))
+      await tick()
+      expect(tl.lanes.map((l: any) => [l.name, l.items.length])).toEqual([['ana', 2], ['bo', 2], ['cy', 1]])
+      // the axis from the first record, 09:00 in UTC, to the last, 09:20, the records five minutes apart in their cells
+      expect(text()[3]).toMatch(/^ +May 16 09:00 +09:05 +09:10 +09:15$/)
+      const marks = (row: string) => [...row].map((ch, i) => (ch === ' ' ? -1 : i)).filter((i) => i >= 16)
+      const at = [...marks(text()[0]), ...marks(text()[1]), ...marks(text()[2])]
+      expect(at[0]).toBe(16)
+      expect(at.at(-1)).toBe(2 + 80 - 1)
+      expect(at.slice(1).map((x, i) => x - at[i]).every((g) => Math.abs(g - 16) <= 1)).toBe(true)
+      expect(last().hits.find((h: any) => h.cursor).tips[0]).toMatch(/^ana · May 16 09:00:\d\d · 1 record$/)
+    } finally {
+      if (zone === undefined) delete process.env.TZ
+      else process.env.TZ = zone
+    }
+  })
+
+  test('on plain numbers such as years or identifiers: the axis, the tips and the time range write them as they are, without separators; a length keeps them', async () => {
+    init({ cols: 80 })
+    const releases = [2019, 2020, 2021, 2023, 2026].map((year) => ({ year }))
+    const tl = kit.timeline({ unit: 'n', time: (r: any) => r.year })
+    kit.draw((d: any) => tl.draw(d, { items: releases }))
+    await tick()
+    const ticks = text()[1].trim().split(/\s+/)
+    expect(ticks).toContain('2020')
+    expect(ticks.every((l: string) => /^\d{4}$/.test(l))).toBe(true)
+    expect(last().hits.find((h: any) => h.cursor).tips[0]).toBe('2019 · 1 record')
+    const range = kit.timeRange({ unit: 'n' })
+    range.data({ times: [67000, 69500] })
+    expect(range.readout()).toBe('67000 – 69500 · 2,500')
+    expect(range.format(68012)).toBe('68012')
+  })
+
+  test("under the time range's scale of numbers, its unit: a time is no place there", async () => {
+    init()
+    const range = kit.timeRange({ unit: 'n' })
+    range.data({ times: [0, 10, 40] })
+    const tl = kit.timeline({ rows: (s: any) => s.agent, time: (s: any) => s.turn })
+    kit.draw((d: any) => tl.draw(d, { items: [{ turn: 0, agent: 'lead' }, { turn: 10, agent: 'sub' }, { turn: 40, agent: 'lead' }, { turn: '2026-05-16T09:00:00Z', agent: 'sub' }], scale: range.scale(d.cols - 14), gutter: 14 }))
+    await tick()
+    expect(tl.lanes.map((l: any) => l.items.length)).toEqual([2, 1])
+    const hit = last().hits.find((h: any) => h.cursor)
+    expect(hit.tips[0]).toBe('lead · 0 · 1 record')
+  })
+
+  test('on plain numbers not all whole, such as scores: the ticks and the tips in decimals, each tick once; whole numbers never step under one; no records, no axis', async () => {
+    init({ cols: 80 })
+    const runs = [0.05, 0.31, 0.5, 0.72, 0.95].map((score) => ({ score }))
+    const tl = kit.timeline({ unit: 'n', time: (r: any) => r.score })
+    kit.draw((d: any) => tl.draw(d, { items: runs }))
+    await tick()
+    const ticks = text()[1].trim().split(/\s+/)
+    expect(ticks).toEqual(expect.arrayContaining(['0.2', '0.4']))
+    expect(new Set(ticks).size).toBe(ticks.length)
+    // the first cell's middle, to the hundredth a cell spans
+    expect(last().hits.find((h: any) => h.cursor).tips[0]).toMatch(/^0\.0\d · 1 record$/)
+    // turns 0 to 3: a tick at each whole turn, never 0.5
+    const turns = kit.timeline({ unit: 'n', time: (r: any) => r.turn })
+    kit.draw((d: any) => turns.draw(d, { items: [0, 1, 2, 3].map((turn) => ({ turn })) }))
+    await tick()
+    expect(text()[1].trim().split(/\s+/)).toEqual(['0', '1', '2', '3'])
+    // nothing to place: no axis of 1970 under no lanes
+    const none = kit.timeline({ rows: 'author' })
+    kit.draw((d: any) => none.draw(d, { items: [] }))
+    await tick()
+    expect(text().filter(Boolean)).toEqual([])
   })
 })
 
@@ -454,16 +662,16 @@ describe('the transcript', () => {
     const f = last()
     expect(text(f)).toEqual([
       '  lead · Run 1  3 turns',
-      '  16 May 2026',
+      '  May 16, 2026',
       '❯ 09:00:00  ● user',
       '              Find the failing test and say why it fails, then',
       '              propose the smallest fix you can find in the code base.',
       '  09:00:05  ⎿ × Bash pytest -q',
-      '  17 May 2026',
+      '  May 17, 2026',
       '  09:00:00  ● lead',
       '              One test fails.',
     ])
-    expect(runsAt(f, 1).find((r) => r.s.includes('16 May'))!.d).toBe(true)
+    expect(runsAt(f, 1).find((r) => r.s.includes('May 16'))!.d).toBe(true)
     expect(runsAt(f, 2).find((r) => r.s.includes('user'))!.b).toBe(true)
     expect(runsAt(f, 5).find((r) => r.s.includes('⎿'))!.d).toBe(true)
     // the failed call: × and its tool in the problem red, as the lanes draw it; its input dim
@@ -477,6 +685,38 @@ describe('the transcript', () => {
     expect(at).toBeGreaterThan(5)
     expect(runsAt(last(), at).find((r) => r.s.includes('FAILED'))!.fg).toBe(kit.COLORS.problem)
     expect(runsAt(last(), at - 1).find((r) => r.s.includes('pytest'))!.fg).toBe(kit.COLORS.code)
+  })
+
+  test("a turn's time given as text is read as the browser's transcript reads it: an ISO time, a mail's date, one with no zone in UTC on a machine in any zone, `time` when it has no `t`; text with no date in it has no clock", async () => {
+    const zone = process.env.TZ
+    // a machine seven hours behind UTC in May, where Date.parse reads a date with no zone in its own
+    process.env.TZ = 'America/Los_Angeles'
+    try {
+      init({ cols: 70 })
+      const at = (i: number, t: unknown, key = 't') => ({ ref: `s.jsonl#L${i}`, [key]: t, speaker: 'lead', kind: 'text', text: `turn ${i}` })
+      const turns = [
+        at(1, '2026-05-16T09:00:01Z'),
+        at(2, '2026-05-16T09:00:02'),
+        at(3, '2026-05-16 09:00:03'),
+        at(4, 'Sat, 16 May 2026 09:00:04'),
+        at(5, '2026-05-16T11:00:05+02:00'),
+        at(6, String(T0 + 6)),
+        at(7, '2026-05-17T09:00:07', 'time'),
+        at(8, 'step 4'),
+      ]
+      const tr = kit.transcript({})
+      kit.draw((d: any) => tr.draw(d, { turns }))
+      await tick()
+      const rows = text().filter((r: string) => r.includes('●'))
+      expect(rows.map((r: string) => r.slice(2, 10))).toEqual(['09:00:01', '09:00:02', '09:00:03', '09:00:04', '09:00:05', '09:00:06', '09:00:07', '        '])
+      expect(text().filter((r: string) => /^ {2}May 1[67], 2026$/.test(r))).toEqual(['  May 16, 2026', '  May 17, 2026'])
+      // the turns in view give the lanes above the list their times in seconds, read the same way (`span`), a Date too
+      expect(tr.list.span()).toEqual([T0 + 1, T0 + 86400 + 7])
+      expect(tr.list.span((it: any) => (it.ref === 's.jsonl#L3' ? new Date((T0 + 3) * 1000) : null))).toEqual([T0 + 3, T0 + 3])
+    } finally {
+      if (zone === undefined) delete process.env.TZ
+      else process.env.TZ = zone
+    }
   })
 
   test("with two choices of Color by a turn's `●` is two, the second in its value's hue of the second choice, a space where it has none", async () => {

@@ -3,7 +3,7 @@
 // scrollbar (files/Ruler PageRuler) with a lane per check that is on. The checks (Checks.tsx useChecks), the active
 // comment and the analyst's new comment live here; their tints go to the editor as flags.
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
-import { PageRuler, type RulerColumn, type RulerTick } from '../files/Ruler'
+import { PageRuler, type Passage, type RulerColumn, type RulerTick } from '../files/Ruler'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
@@ -12,7 +12,7 @@ import { ReadProbe, useDock } from '../shell/dock'
 import { usedCells } from './cards'
 import { SidebarShow, useChecks, useSidebar } from './Checks'
 import { checkColumns, openComments, passageFlags, shownComments, type DocComment } from './checkComments'
-import { commentsApi } from './commentsApi'
+import { commentsApi, type ResolveHow } from './commentsApi'
 import { ReportEditor, type DocFilter, type EditorHandle } from './Editor'
 import { forgetFigureCell } from './FigureBlock'
 import { Margin, RAIL_ROOM } from './Margin'
@@ -128,10 +128,10 @@ export function ReportPage({ ws, slug, doc, filter, client, onSaved }: ReportPag
     setActive(cids[(at + 1) % cids.length])
   }
 
-  const resolve = async (cm: DocComment) => {
+  const resolve = async (cm: DocComment, how: ResolveHow = 'done') => {
     try {
-      const saved = await commentsApi.resolve(ws, slug, cm.id)
-      track('ui-click', { target: `report:${slug}#${cm.sid}`, detail: { action: 'comment-resolve', check: cm.check } })
+      const saved = await commentsApi.resolve(ws, slug, cm.id, how)
+      track('ui-click', { target: `report:${slug}#${cm.sid}`, detail: { action: how === 'known' ? 'comment-know' : 'comment-resolve', check: cm.check } })
       onSaved(saved as Writeup)
     } catch (e) {
       bus.emit('toast', { text: `Could not resolve the comment. ${(e as Error).message}`, kind: 'error' })
@@ -145,9 +145,11 @@ export function ReportPage({ ws, slug, doc, filter, client, onSaved }: ReportPag
     setActive(comment.id)
   }
 
-  // the ruler: the marks follow the passages as the page lays out (a check turned on, a save, a narrower pane); the
-  // ruler follows the scroll itself
+  // the ruler: the marks and the loupe's passages (each block the decorations mark as a cell: a heading, a paragraph, a
+  // list item) follow the passages as the page lays out (a check turned on, a save, a narrower pane); the ruler follows
+  // the scroll itself
   const [columns, setColumns] = useState<RulerColumn[]>([])
+  const [passages, setPassages] = useState<Passage[]>([])
   const measure = useCallback(() => {
     const box = scroller.current
     const col = column.current
@@ -158,6 +160,14 @@ export function ReportPage({ ws, slug, doc, filter, client, onSaved }: ReportPag
       return r ? [r.top - base, r.bottom - base] : null
     }
     setColumns(checkColumns(shown, on, checks.list, spanOf, Math.max(1, box.scrollHeight)))
+    const blocks: Passage[] = []
+    for (const el of Array.from(col.querySelectorAll<HTMLElement>('[data-anchor-cell]'))) {
+      const text = el.getAttribute('data-anchor-text') ?? ''
+      const r = el.getBoundingClientRect()
+      if (text && r.height > 0) blocks.push({ top: r.top - base, bottom: r.bottom - base, text, heading: el.getAttribute('data-content-type') === 'heading' })
+    }
+    blocks.sort((a, b) => a.top - b.top)
+    setPassages(blocks)
   }, [shown, on, checks.list])
   useEffect(() => {
     // the editor applies the new tints in its own effect: the ticks are measured on the frame after
@@ -205,7 +215,7 @@ export function ReportPage({ ws, slug, doc, filter, client, onSaved }: ReportPag
           )}
         </div>
       </div>
-      <PageRuler scroller={scroller} columns={columns} onJump={jump} onMark={toMark} tipOf={(col) => col.name} />
+      <PageRuler scroller={scroller} columns={columns} onJump={jump} onMark={toMark} tipOf={(col) => col.name} passages={passages} />
     </div>
   )
 }

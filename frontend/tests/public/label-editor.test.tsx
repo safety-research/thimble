@@ -248,7 +248,7 @@ describe("a class's swatch", () => {
     const el = await mount(<SideCard editing="k1" />)
     await act(async () => swatch(el, 'writing').click())
     const picks = [...palette()!.querySelectorAll('.colorby-pick')]
-    expect(picks.map((b) => b.getAttribute('aria-label'))).toEqual([...LABEL_WHEEL.flat().map((n) => `Color ${n}`), 'Grey'])
+    expect(picks.map((b) => b.getAttribute('aria-label'))).toEqual([...LABEL_WHEEL.flat().map((n) => `Color ${n}`), 'Gray'])
     expect(picks.filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.getAttribute('aria-label'))).toEqual(['Color 2'])
     expect(palette()!.querySelector('.colorby-palette-head')?.textContent).toBe('writing')
     await act(async () => (picks.find((b) => b.getAttribute('aria-label') === 'Color 5') as HTMLButtonElement).click())

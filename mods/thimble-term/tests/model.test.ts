@@ -9,7 +9,7 @@ import { showsValue } from '../hooks/cite'
 import { signalEnd } from '../hooks/signal'
 import { threadState } from '../hooks/nav'
 import { labelCard } from '../hooks/cell'
-import { agentsOf, aroundLine, cardsOfCall, cellsOf, docsOf, forkDescription, homeOf, jsonLine, labelCountNow, labelIdOf, labelLinkStale, labelOf, labelsOf, namedForks, namedThreads, recordLine, resolutionOf, runShown, saysWriter, threadOf, threadRowsOf, verdictOf, withoutEnd, withoutNotes, withoutToldThreads, withoutWriterLines } from '../hooks/model'
+import { agentsOf, aroundLine, cardsOfCall, cellsOf, docsOf, forkDescription, homeOf, jsonLine, labelCountNow, labelIdOf, labelLinkStale, labelOf, labelsOf, namedForks, namedThreads, recordLine, reportOf, resolutionOf, runShown, saysWriter, threadOf, threadRowsOf, verdictOf, withoutEnd, withoutNotes, withoutToldThreads, withoutWriterLines } from '../hooks/model'
 import { turnTimes, wrapRows } from '../hooks/draw'
 import { AGENTS, CELLS, RESOLVE, STATES, THREAD_T1, THREADS } from './fixtures'
 
@@ -87,6 +87,16 @@ test("main's `↳ The writer …` line is found and left out; its other lines st
   expect(withoutWriterLines('↳ The writer finished the report; thimble shows it.\n\nThe thread is asked.')).toBe('The thread is asked.')
 })
 
+test("a prompt that reports on a subagent run names the agent: Claude Code's hand-back and its task notification; any other prompt none", () => {
+  // as Claude Code 2.1.295 writes them in main's transcript
+  expect(reportOf('Another Claude session sent a message:\n<agent-message from="a4bd4d0fe90cf1a5f">\n[Subagent hand-back] The text below is the final report of a subagent this session delegated to.')).toEqual({ agent: 'a4bd4d0fe90cf1a5f', kind: 'hand-back' })
+  expect(reportOf('<task-notification>\n<task-id>a4bd4d0fe90cf1a5f</task-id>\n<tool-use-id>toolu_01L</tool-use-id>\n<status>completed</status>\n</task-notification>')).toEqual({ agent: 'a4bd4d0fe90cf1a5f', kind: 'notice' })
+  // thimble's watcher wakes main with a notification of no task, and another session's message is no hand-back
+  expect(reportOf('<task-notification>\n<summary>thimble</summary>\n</task-notification>\nthimble browser event: <thimble-event kind="main">')).toBeNull()
+  expect(reportOf('Another Claude session sent a message:\n<agent-message from="s1">\nCan you look at this?')).toBeNull()
+  expect(reportOf('What else is in the export?')).toBeNull()
+})
+
 test("a day and a month in words cite a date written in digits: ISO or month and day, the year when both give one", () => {
   // live check term-fix6, new quirk 7: `23 June` and `19 June` citing the cells `06-23` and `06-19` were red
   for (const [d, cell] of [['23 June', '06-23'], ['19 June', '2026-06-19T18:21:02Z'], ['June 23, 2026', '2026-06-23'], ['23rd Jun', '06-23']] as const) expect(valueIn(d, cell)).toBe(true)
@@ -157,12 +167,12 @@ test("a turn's words in up to three rows, the last cut; a transcript's times as 
   expect(wrapRows('x'.repeat(30), 12, 3)).toEqual(['x'.repeat(12), 'x'.repeat(12), 'x'.repeat(6)])
   expect(wrapRows('x'.repeat(40), 12, 3)).toEqual(['x'.repeat(12), 'x'.repeat(12), `${'x'.repeat(11)}…`])
   expect(turnTimes(['2026-06-18T07:40:01Z', '2026-06-18T07:41:00Z', '2026-06-19T09:00:00Z'])).toEqual([
-    { clock: '07:40:01', day: '18 Jun 2026' },
+    { clock: '07:40:01', day: 'Jun 18, 2026' },
     { clock: '07:41:00', day: '' },
-    { clock: '09:00:00', day: '19 Jun 2026' },
+    { clock: '09:00:00', day: 'Jun 19, 2026' },
   ])
   expect(turnTimes(['10:00', '10:01'])).toEqual([{ clock: '10:00', day: '' }, { clock: '10:01', day: '' }])
-  expect(turnTimes(['2026-06-18T07:40:00Z', ''])).toEqual([{ clock: '07:40', day: '18 Jun 2026' }, { clock: '', day: '' }])
+  expect(turnTimes(['2026-06-18T07:40:00Z', ''])).toEqual([{ clock: '07:40', day: 'Jun 18, 2026' }, { clock: '', day: '' }])
 })
 
 test('the threads list keeps side threads, each with its answers and those not read', () => {
@@ -187,6 +197,11 @@ test('the cards a call of main names: add_card, edit_card, apply_label, and a ca
   const add = 'mcp__plugin_thimble_thimble__add_card'
   expect(cardsOfCall(add, { question: 'q' }, 'card:8c2264f4, your last card, still has no takeaway.\n\ncard:69d6b48a\n[out0: ...]')).toEqual(['69d6b48a'])
   expect(cardsOfCall('mcp__plugin_thimble_thimble__edit_card', { card: 'card:8c2264f4' }, 'takeaway noted')).toEqual(['8c2264f4'])
+  // the result's first line echoes the call cut short: a card id cut there is no card (live QA on 0.7.0: `× card 2
+  // cannot be drawn` under the reply, for `card:e157e5…`)
+  const echo = '$ edit_card card="e157e542" takeaway="One day stands out. On Jun 18 the dse wiki got [[5,884|card:e157e5\u2026"\ntakeaway noted on card:e157e542 (linked 5,884)'
+  expect(cardsOfCall('mcp__plugin_thimble_thimble__edit_card', { card: 'e157e542', takeaway: 'x' }, echo)).toEqual(['e157e542'])
+  expect(cardsOfCall('mcp__plugin_thimble_thimble__edit_card', {}, echo)).toEqual(['e157e542'])
   expect(cardsOfCall('mcp__plugin_thimble_thimble__apply_label', {}, "applied label x [[concept:e7]] over 3 record(s): yes 1. The label's card is [[card:01fee4d5]].")).toEqual(['01fee4d5'])
   expect(cardsOfCall('Bash', { command: '/tree/plugin/bin/thimble-run card 69d6b48a' }, 'card:69d6b48a\n...')).toEqual(['69d6b48a'])
   expect(cardsOfCall('Bash', { command: 'ls -la' }, '')).toEqual([])

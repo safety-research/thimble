@@ -571,6 +571,7 @@ def read_doc(c: str, inv_id: str, slug: str) -> dict[str, Any] | None:
     elif slug == LEGACY_VIDEO:
         doc.setdefault("renderer", "video")
     _legacy_comments(doc)
+    _split_comments(doc)
     return _with_defaults(doc)
 
 
@@ -586,6 +587,15 @@ def _legacy_comments(doc: dict[str, Any]) -> None:
         if isinstance(cm, dict) and cm.get("author") == LEGACY_AUTHOR:
             cm["author"] = CHECK_AUTHOR
             cm["check"] = LEGACY_CHECKS.get(str(cm.pop("kind", "") or ""), "judgment")
+
+
+def _split_comments(doc: dict[str, Any]) -> None:
+    """A stored document's comments from before `details`, each made its statement and its details, in place
+    (canvas_comments.split_stored); written so on its next save."""
+    from . import canvas_comments  # noqa: PLC0415
+
+    for cm in doc.get("comments") or []:
+        canvas_comments.split_stored(cm)
 
 
 def _inv(c: str, inv_id: str) -> Path:
@@ -2207,7 +2217,8 @@ def _comment_lines(c: str, doc: dict[str, Any]) -> list[str]:
     for cm in anchored_open_comments(doc):
         who = names.get(str(cm["check"]), str(cm["check"])) if cm.get("check") else \
             str(cm.get("author") or ANALYST) + (f", {cm['kind']}" if cm.get("kind") else "")
-        out.append(f"- #{cm.get('sentence_id')} · {who} · {_collapse(cm.get('text'))}")
+        details = _collapse(cm.get("details"))
+        out.append(f"- #{cm.get('sentence_id')} · {who} · {_collapse(cm.get('text'))}" + (f" — {details}" if details else ""))
     return out
 
 
@@ -4345,11 +4356,23 @@ async def post_comment(c: str, inv_id: str, slug: str, body: CommentBody) -> dic
     return comment
 
 
+class DismissBody(BaseModel):
+    how: str = "done"  # the margin's ✓ (done) or Know it (known), canvas_comments.HOWS
+
+
 @router.post("/ws/{c}/investigations/{inv_id}/types/{slug}/comments/{cid}/dismiss")
-async def dismiss(c: str, inv_id: str, slug: str, cid: str) -> dict[str, Any]:
+async def dismiss(c: str, inv_id: str, slug: str, cid: str, body: DismissBody | None = None) -> dict[str, Any]:
+    """The analyst resolved a comment: Done, or Know it (`how: known`), which a check's later runs never raise again
+    (checks.known_titles). Returns the document."""
+    from . import canvas_comments  # noqa: PLC0415
+
+    how = body.how if body is not None else "done"
+    if how not in canvas_comments.HOWS:
+        raise HTTPException(400, f"how is one of {', '.join(canvas_comments.HOWS)}")
     investigation.inv_dir(c, inv_id)
     slug, doc = _any_doc(c, inv_id, slug)
-    _find_comment(doc, cid)["status"] = "dismissed"
+    cm = _find_comment(doc, cid)
+    cm.update(status="dismissed", resolution=how, resolved_ts=_now())
     write_doc(c, inv_id, slug, doc)
     return doc
 

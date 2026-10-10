@@ -89,7 +89,7 @@ pre,
   color: var(--text-tertiary);
   font-variant-numeric: tabular-nums;
 }
-/* prose the chat, the reader's markdown and the report share: h1 one step over the heading, one inline code */
+/* prose the chat, the reader's markdown, the report and the comments share: h1 one step over the heading, one inline code */
 .chat-text h1,
 .reader-md h1 {
   margin: 16px 0 6px;
@@ -99,6 +99,8 @@ pre,
 }
 .chat-text code,
 .reader-md code,
+.wu-cm code,
+.ccm code,
 .wu-root .wu-editor .bn-inline-content code {
   padding: 0 4px;
   border-radius: calc(var(--radius-ui) / 2);

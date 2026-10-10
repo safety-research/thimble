@@ -39,11 +39,14 @@ Add a card, with its question and its content in one call. {{if:browser}}thimble
   "type": "object",
   "properties": {
     "question": {"type": "string", "description": "The one question the card answers."},
-    "kind": {"type": "string", "enum": ["example", "table", "code", "diagram", "plot", "timeline", "note", "custom"], "description": "table, code, diagram, plot and timeline run `code`, example shows `refs`, note `text`, custom `html`. Default code."},
-    "code": {"type": "string", "description": "Python run in the corpus root. A table ends in a DataFrame of a few short columns indexed by what names each row, a plot in an Altair or matplotlib chart, its colours left to thimble's theme, and after import thimble a diagram in thimble.diagram(nodes, edges), each edge a (source, target, label), and a timeline in thimble.timeline(events), each event a (time, label). Name nodes, edges and events in a few words, their numbers computed, as in f\"revisions.jsonl: {len(R):,} saves\"; an edge label over 36 characters becomes a numbered note under the diagram. In matplotlib, colour a label's values with thimble.colours(label, values), a {value: colour} dict. A plot can also be a card type's graphic, thimble.card(type, labels=[...], **args), from the card types under Cards."},
+    "kind": {"type": "string", "enum": ["example", "table", "code", "diagram", "plot", "timeline", "note", "custom", "plan"], "description": "table, code, diagram, plot and timeline run `code`, example shows `refs`, note `text`, custom `html`, plan `steps`. Default code."},
+    "code": {"type": "string", "description": "Python run in the corpus root. A table ends in a DataFrame of a few short columns indexed by what names each row, a plot in thimble.chart(kind, df) after import thimble when a kind fits, else in an Altair or matplotlib chart, its colors left to thimble's theme, and after import thimble a diagram in thimble.diagram(nodes, edges), each edge a (source, target, label), and a timeline in thimble.timeline(events), each event a (time, label). thimble.chart takes the DataFrame's columns in the kind's order, named as the axes: bar (category, value[, group]), line (x, y[, series]), area (x, y[, series]), scatter (x, y[, group]), dots (x, row[, group]), box (value, group), histogram (value[, group]), density (value[, group]), violin (value, group), ecdf (value[, group]), range (item, before, after[, group]) or heatmap (x, y, value), and label=<label> draws a label's values in its colors; interval=(lo, hi) on bar, dots or line names the columns of each value's low and high ends; panels=True draws each group in a panel of its own; fit=\"linear\" or \"smooth\" on scatter adds a trend line. thimble.chart(..., show=False) returns the chart as an Altair chart to layer your own marks on, such as a few events called out above a daily bar chart, colored with thimble.theme.accent, .ink, .muted, .pale or .series[i]. Name nodes, edges and events in a few words, their numbers computed, as in f\"revisions.jsonl: {len(R):,} saves\"; an edge label over 36 characters becomes a numbered note under the diagram. In matplotlib, color a label's values with thimble.colors(label, values), a {value: color} dict. A plot can also be a card type's graphic, thimble.card(type, labels=[...], **args), from the card types under Cards."},
     "refs": {"type": "array", "items": {"anyOf": [{"type": "string"}, {"type": "object", "properties": {"ref": {"type": "string"}, "quote": {"type": "string"} } } ] }, "description": "The records an example card shows, usually about three, adding one only when it shows something the others don't. Each is a ref, a moment of a video as <path>#t=<m:ss>, or {ref, quote} to highlight one passage of a long record, quoted exactly."},
     "text": {"type": "string", "description": "The markdown a note card shows."},
-    "html": {"type": "string", "description": "The page a custom card shows, for what no other kind can show. Scripts run, the network does not."},
+    "html": {"type": "string", "description": "The page a custom card shows, for what no other kind can show. Scripts run, the network does not. A chart in it takes thimble's chart style from CSS variables: `--viz-1` to `--viz-7` for series in order, `--viz-seq-1` to `--viz-seq-5` for an amount, `--viz-other` for the rest, `--viz-font`, `--viz-size` and `--viz-bar-radius` for the corners at a bar's end. Scripts also have thimble.colors.series, thimble.colors.seq and thimble.vegaConfig, the config of thimble's own Vega-Lite charts."},
+    "libs": {"type": "array", "items": {"type": "string"}, "description": "The libraries a custom card's scripts use, loaded before its html: vega, vega-lite and vega-embed, or an npm package as name@version. If a package is not installed, the result gives the command that installs it."},
+    "steps": {"type": "array", "items": {"type": "object", "properties": {"text": {"type": "string"}, "makes": {"type": "array", "items": {"type": "string"} }, "status": {"type": "string", "enum": ["not started", "running", "done", "needs you"]}, "note": {"type": "string", "description": "What happened in the step, in a line or two."}, "runs": {"type": "array", "items": {"type": "string"}, "description": "The description of each Agent call that runs the step, as you pass it to Agent. The card shows each one live."}, "details": {"type": "string", "description": "More about the step, such as how it works, which the analyst opens under it."} }, "required": ["text"] }, "description": "A plan card's steps in order, each one short line of what it does and the files or results it makes. A plan covers one phase, such as building and piloting, and its question names it, as in \"Plan: build the environment and pilot it\". A plan has no takeaway."},
+    "follows": {"type": "string", "description": "For a plan of the next phase, card:<id> of the plan it follows."},
     "group": {"type": "string", "description": "The group's title or id. A new title makes a group."},
     "takeaway": {"type": "string", "description": "The answer to the question in one or two sentences. In a takeaway, each number the card shows links to where the card shows it. Wrap the whole quantity and cite where you read the value, as in `[[31|card:<id>#outcome/merged]] of [[40|card:<id>#outcome/all]] runs`. On an example card, link the words of each claim to the record that shows them, as in `[[posted the answer|runs/r3.jsonl#L88]]`. A rewritten takeaway keeps every link that is right. The card's own id is written `card:<id>`, which thimble fills in."}
   },
@@ -61,11 +64,13 @@ Change a card in place and run it again, rather than adding a second card. It ta
   "properties": {
     "card": {"type": "string"},
     "question": {"type": "string"},
-    "kind": {"type": "string", "enum": ["example", "table", "code", "diagram", "plot", "timeline", "note", "custom"]},
+    "kind": {"type": "string", "enum": ["example", "table", "code", "diagram", "plot", "timeline", "note", "custom", "plan"]},
     "code": {"type": "string"},
     "refs": {"type": "array", "items": {"anyOf": [{"type": "string"}, {"type": "object", "properties": {"ref": {"type": "string"}, "quote": {"type": "string"} } } ] } },
     "text": {"type": "string"},
     "html": {"type": "string"},
+    "steps": {"type": "array", "items": {"type": "object", "properties": {"text": {"type": "string"}, "makes": {"type": "array", "items": {"type": "string"} }, "status": {"type": "string", "enum": ["not started", "running", "done", "needs you"]}, "note": {"type": "string", "description": "What happened in the step, in a line or two."}, "runs": {"type": "array", "items": {"type": "string"}, "description": "The description of each Agent call that runs the step, as you pass it to Agent. The card shows each one live."}, "details": {"type": "string", "description": "More about the step, such as how it works, which the analyst opens under it."} }, "required": ["text"] }, "description": "A plan's steps in order. They replace its steps, so you can change a step's status, note, runs or details at any time."},
+    "libs": {"type": "array", "items": {"type": "string"} },
     "group": {"type": "string", "description": "The group to move the card to, its title or id. A new title makes a group."},
     "after": {"type": "string", "description": "The card to place it right after, card:<id>, or first."},
     "takeaway": {"type": "string", "description": "The answer to the question in one or two sentences. In a takeaway, each number the card shows links to where the card shows it. Wrap the whole quantity and cite where you read the value, as in `[[31|card:<id>#outcome/merged]] of [[40|card:<id>#outcome/all]] runs`. On an example card, link the words of each claim to the record that shows them, as in `[[posted the answer|runs/r3.jsonl#L88]]`. A rewritten takeaway keeps every link that is right."}
@@ -131,7 +136,7 @@ Define a category, apply it to every unit of a scope, and get the counts per val
 
 ## show_label
 
-Turn a label over files on or off in Files and the views, where it marks the records that have the values it highlights, or give its values colours. It runs nothing, so a label is shown or hidden with it rather than with `apply_label`. The analyst turns labels on and off in Files too, so call it whenever they ask to show or hide one, or to colour a value.
+Turn a label over files on or off in Files and the views, where it marks the records that have the values it highlights, or give its values colors. It runs nothing, so a label is shown or hidden with it rather than with `apply_label`. The analyst turns labels on and off in Files too, so call it whenever they ask to show or hide one, or to color a value.
 
 ```json
 {
@@ -140,7 +145,7 @@ Turn a label over files on or off in Files and the views, where it marks the rec
     "name": {"type": "string", "description": "The label's name or id."},
     "on": {"type": "boolean", "description": "Left out, the label stays on or off as it is."},
     "values": {"type": "array", "items": {"type": "string"}, "description": "The values to highlight while it is on, when not the ones it highlights now."},
-    "colours": {"type": "object", "additionalProperties": {"type": "string", "enum": ["blue", "orange", "green", "sky blue", "olive", "teal", "brown", "navy", "grass green", "cerulean", "chestnut", "cyan", "red", "dark red", "purple", "dark purple", "pink", "dark pink"]}, "description": "A colour for each value named, which every card, view and Files show. A value that had the colour takes the one the other leaves."}
+    "colors": {"type": "object", "additionalProperties": {"type": "string", "enum": ["blue", "orange", "green", "sky blue", "olive", "teal", "brown", "navy", "grass green", "cerulean", "chestnut", "cyan", "red", "dark red", "purple", "dark purple", "pink", "dark pink"]}, "description": "A color for each value named, which every card, view and Files show. A value that had the color takes the one the other leaves."}
   },
   "required": ["name"]
 }
@@ -286,14 +291,15 @@ Replace one sentence, paragraph or heading of a written document, insert a passa
 
 ## add_comment
 
-Comment on one sentence, paragraph or heading of a written document, a note the analyst reads beside it. In a check's session, comment only on the document you are checking.
+Comment on one sentence, paragraph or heading of a written document, or on a card or a step of a plan, a note the analyst reads beside it. The analyst sees `text` first and opens `details` when they want more. In a check's session, comment only on what you are checking.
 
 ```json
 {
   "type": "object",
   "properties": {
-    "ref": {"type": "string", "description": "report:<doc>#<id> of a sentence or a heading, report:<doc>#p<id> of a paragraph."},
-    "text": {"type": "string"}
+    "ref": {"type": "string", "description": "report:<doc>#<id> of a sentence or a heading, report:<doc>#p<id> of a paragraph, card:<id> of a card, card:<id>#step-<n> of a plan's step."},
+    "text": {"type": "string", "description": "The statement: one short, clear sentence of about 20 words."},
+    "details": {"type": "string", "description": "The evidence for the statement, with its citations, in plain sentences or a few bullets of about 120 words at most."}
   },
   "required": ["ref", "text"]
 }
@@ -301,13 +307,14 @@ Comment on one sentence, paragraph or heading of a written document, a note the 
 
 ## resolve_comment
 
-Resolve a comment on a document, as the analyst's ✓ beside it does, or open a resolved one again.
+Resolve a comment on a document or a card, as the analyst's ✓ beside it does, or open a resolved one again.
 
 ```json
 {
   "type": "object",
   "properties": {
-    "comment": {"type": "string", "description": "The comment's id, as add_comment's result names it, or report:<doc>#<id> of a passage, which resolves every open comment on it."},
+    "comment": {"type": "string", "description": "The comment's id, as add_comment's result names it, or report:<doc>#<id> of a passage or card:<id> of a card, which resolves every open comment on it."},
+    "how": {"type": "string", "enum": ["done", "known"], "description": "known when the analyst says they know it, as Know it does, so the check does not raise it again. Default done."},
     "reopen": {"type": "boolean"}
   },
   "required": ["comment"]
@@ -468,7 +475,7 @@ Send the orientation a message, such as a question its analysis did not answer, 
 
 ## run_check
 
-Run a report check over the written documents, a question asked of every passage that leaves a comment beside each passage it applies to. A new name creates the check and a known one reruns it, and either way it is turned on. It runs again by itself after a writer saves a document, and after the analyst's own edits it shows the passages that changed until they run it. Its result is the exact Agent call that starts the check as a subagent of this session, which you then make. For one note on one passage, use `add_comment`.
+Run a report check over the written documents or the cards, a question asked of every passage that leaves a comment beside each passage it applies to. A new name creates the check and a known one reruns it, and either way it is turned on. It runs again by itself after a writer saves a document, and after the analyst's own edits it shows the passages that changed until they run it. Its result is the exact Agent call that starts the check as a subagent of this session, which you then make. For one note on one passage, use `add_comment`.
 
 ```json
 {
@@ -476,7 +483,8 @@ Run a report check over the written documents, a question asked of every passage
   "properties": {
     "name": {"type": "string", "description": "The check's name, such as Unverified, or a new one."},
     "instructions": {"type": "string", "description": "What to comment on, in the analyst's words. Needed for a new check, and it replaces the instructions of an existing one."},
-    "passages": {"type": "array", "items": {"type": "string"}, "description": "Passages to check again, report:<doc>#<id>. Default every passage but the locked ones already checked."}
+    "passages": {"type": "array", "items": {"type": "string"}, "description": "Passages to check again, report:<doc>#<id>. Default every passage but the locked ones already checked."},
+    "on": {"type": "string", "enum": ["documents", "cards"], "description": "Run it on the documents or on the cards alone. A new check then covers that alone. Default what the check covers."}
   },
   "required": ["name"]
 }
@@ -484,7 +492,7 @@ Run a report check over the written documents, a question asked of every passage
 
 ## stop_check
 
-Turn a report check off, {{if:browser}}as the switch in the Checks pane does, {{end}}which hides its {{if:browser}}tints and {{end}}comments and stops its runs. Its comments are kept, and `run_check` turns it on again.{{if:terminal}} The terminal has no switch for a check, so the analyst asks you to turn one on or off.{{end}}
+Turn a report check off, {{if:browser}}as the switch in the Comments pane does, {{end}}which hides its {{if:browser}}tints and {{end}}comments and stops its runs. Its comments are kept, and `run_check` turns it on again.{{if:terminal}} The terminal has no switch for a check, so the analyst asks you to turn one on or off.{{end}}
 
 ```json
 {
@@ -549,7 +557,7 @@ Take pictures of the view you review, whose paths Read opens. The first call of 
     "states": {
       "type": "array",
       "maxItems": 3,
-      "description": "States to see beside the overview: `control`, the view as it opens after clicking `controls` in turn, each named by its text as the list of controls gives it, or by an option of a select; `labels`, the view as it opens with a test label on that marks about one record in seven in the colour the analyst's first label takes; `filtered`, the same filtered to the test label, which should keep only what it marks; `detail`, the place the first citation opens; `open`, the place a citation of `ref` opens, a record `<path>#L<n>` or a unit from the records; `narrow`, the view as it opens 798 px wide; `wide`, the view as it opens 1528 px wide.",
+      "description": "States to see beside the overview: `control`, the view as it opens after clicking `controls` in turn, each named by its text as the list of controls gives it, or by an option of a select; `labels`, the view as it opens with a test label on that marks about one record in seven in the color the analyst's first label takes; `filtered`, the same filtered to the test label, which should keep only what it marks; `detail`, the place the first citation opens; `open`, the place a citation of `ref` opens, a record `<path>#L<n>` or a unit from the records; `narrow`, the view as it opens 798 px wide; `wide`, the view as it opens 1528 px wide.",
       "items": {
         "type": "object",
         "properties": {
@@ -691,6 +699,10 @@ The card check had rewritten card:{cid}'s {field}, so your change was made to th
 ## edit_card-takeaway-errored
 
 The card errored, so the takeaway was not saved. Fix the code, then give the takeaway again.
+
+## edit_card-same-outputs
+
+The new code ran and gave the same outputs as before the edit, so this edit changed nothing that card:{cid} shows.
 
 ## edit_card-after
 
@@ -922,11 +934,11 @@ The browser that takes the checks' and the review's pictures cannot play H.264 v
 
 ## view-purple
 
-The page writes purple colours: {colours}. Purple is thimble's colour for agents' work, so if any of them colours a category of the view, such as a speaker or a kind of record, give that category a viz colour (`--viz-*`) instead.
+The page writes purple colors: {colours}. Purple is thimble's color for agents' work, so if any of them colors a category of the view, such as a speaker or a kind of record, give that category a viz color (`--viz-*`) instead.
 
 ## view-own-parts
 
-The page's styles change how thimble's parts look, or draw chips of their own: {found}. A view looks like the rest of thimble only when it uses thimble's parts as the frame styles them: `chip` (with `chip-sans`, `chip-tone-neutral`, `chip-tone-evidence`, `chip-act`, and `chip-key` with a `chip-sw` swatch for a value with its colour), `btn`, `seg` with `seg-opt`, and `field`. Set their width, margins, padding and place, but not their edges, fills, corners, colours, type or height. Give no chip, tag or small button corners rounder than `var(--radius-chip)`.
+The page's styles change how thimble's parts look, or draw chips of their own: {found}. A view looks like the rest of thimble only when it uses thimble's parts as the frame styles them: `chip` (with `chip-sans`, `chip-tone-neutral`, `chip-tone-evidence`, `chip-act`, and `chip-key` with a `chip-sw` swatch for a value with its color), `btn`, `seg` with `seg-opt`, and `field`. Set their width, margins, padding and place, but not their edges, fills, corners, colors, type or height. Give no chip, tag or small button corners rounder than `var(--radius-chip)`.
 
 ## view-built
 
@@ -1034,11 +1046,11 @@ In the {state} state, {missing} of the {due} shown records or units the test lab
 
 ## view-marks-unseen
 
-In the {state} state, a picture of the page does not show the test label's colour on {unseen} of the {checked} marked records or units in view, such as {refs}. thimble draws a mark as a 3 px bar in the label's colour along the left edge of the outermost element whose `data-anchor` names the record, inside the element when its left padding is 6 px or more or when a box that hides overflow would cut a bar outside it, else just outside. The bar does not show when the page's CSS sets `box-shadow` on that element with `!important`, or when another element or a cell's background covers the element's left edge. An element with `data-anchor-unmarked` gets no bar, so the page must draw the label's colour on it itself, at full strength, such as a dot or a fill in the colour `thimble.markOf(ref).bar` gives, redrawn in `thimble.onMarks`.
+In the {state} state, a picture of the page does not show the test label's color on {unseen} of the {checked} marked records or units in view, such as {refs}. thimble draws a mark as a 3 px bar in the label's color along the left edge of the outermost element whose `data-anchor` names the record, inside the element when its left padding is 6 px or more or when a box that hides overflow would cut a bar outside it, else just outside. The bar does not show when the page's CSS sets `box-shadow` on that element with `!important`, or when another element or a cell's background covers the element's left edge. An element with `data-anchor-unmarked` gets no bar, so the page must draw the label's color on it itself, at full strength, such as a dot or a fill in the color `thimble.markOf(ref).bar` gives, redrawn in `thimble.onMarks`.
 
 ## view-no-label-controls
 
-The page draws no label controls: {why}. thimble draws none above a view, so the page lists the labels `thimble.onLabels` gives in `all`, each with its colours and a switch that calls `thimble.setLabel(id, on)` on the analyst's click, and shows each label that is on in view, such as in a legend, each such element carrying `data-label` with the label's id.
+The page draws no label controls: {why}. thimble draws none above a view, so the page lists the labels `thimble.onLabels` gives in `all`, each with its colors and a switch that calls `thimble.setLabel(id, on)` on the analyst's click, and shows each label that is on in view, such as in a legend, each such element carrying `data-label` with the label's id.
 
 ## view-labels-by-itself
 
@@ -1054,7 +1066,7 @@ The claims expect files the corpus lacks, which the analyst sees above the view 
 
 ## view-choice-error
 
-{count} choices of the view's controls gave a script error when chosen: {choices}. Every choice the analyst can make must draw the view, None and Off among them: guard what the page reads of a choice that can be null (`rows.by`, `colour.by`, `filter.by`), and draw the records in one group, or uncolored, for it.
+{count} choices of the view's controls gave a script error when chosen: {choices}. Every choice the analyst can make must draw the view, None and Off among them: guard what the page reads of a choice that can be null (`rows.by`, `color.by`, `filter.by`), and draw the records in one group, or uncolored, for it.
 
 ## view-term-error
 
@@ -1257,7 +1269,7 @@ The writer of {doc} is running already, and thimble shows it, so this turn needs
 
 ## agent-launched
 
-{who} runs in the background, and the analyst sees it. End the turn now, with no words and no other call, unless the analyst asked for more in this turn. Do not make this call again.
+{who} runs in the background, and the analyst sees it. End the turn now, with no words and no other call, unless the analyst asked for more in this turn. One short sentence is fine when it tells the analyst something thimble does not show. Do not make this call again.
 
 ## start_writing-subagent
 
@@ -1285,11 +1297,15 @@ There is no document {doc}. The documents are {docs}. To make a new one, pass it
 
 ## run_check-started
 
-check {check} started ({how}) on report:{doc}, {passages}
+check {check} started ({how}) on {doc}, {passages}
 
 ## run_check-no-doc
 
 No document is written yet, so the check {check} has nothing to read. It is on, and it runs once a document is written.
+
+## run_check-no-cards
+
+The check {check} is on, and has no card to read yet.
 
 ## run_check-no-instructions
 
@@ -1322,6 +1338,28 @@ Only the analyst's session and a check's own session comment with `add_comment`.
 ## add_comment-added
 
 commented on report:{doc}#{sid}, comment {comment}
+
+## add_comment-no-card
+
+{ref} is no card, or no step of a plan card. A card is card:<id>, and a plan's step card:<id>#step-<n>.
+
+## check-canvas
+
+The cards to comment on, each with its ref, kind and question, then its takeaway and a plan's steps. Comment on a card by its ref, or on one step of a plan by card:<id>#step-<n>. `read_ref` on a card gives its code and outputs. The analyst reads all of a card's comments beside it at once, so leave only the few that matter most on any one card.
+
+{cards}
+
+## check-known
+
+The analyst said they know these. Do not raise them again.
+
+{titles}
+
+## check-replaces
+
+When you finish, your comments replace the open comments this check left before on these passages, listed below. Leave again each one that still holds.
+
+{comments}
 
 ## resolve_comment-done
 

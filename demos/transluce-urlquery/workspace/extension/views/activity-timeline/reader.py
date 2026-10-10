@@ -105,7 +105,7 @@ def _iso_second(t):
 
 def _when(t, seconds=False):
     d = datetime.fromtimestamp(t, timezone.utc)
-    return f"{d.day} {MONTHS[d.month - 1]} {d.year} {d:%H:%M:%S}" if seconds else f"{d.day} {MONTHS[d.month - 1]} {d.year}"
+    return f"{MONTHS[d.month - 1]} {d.day}, {d.year} {d:%H:%M:%S}" if seconds else f"{MONTHS[d.month - 1]} {d.day}, {d.year}"
 
 
 def slug(name):
@@ -636,7 +636,7 @@ def _window(key):
     if a is None or b is None or b <= a:
         return None
     da, db = _when(a, True), _when(b, True)
-    words = f"{da[:-3]}–{db[-8:-3]}" if da[:-9] == db[:-9] else f"{da[:-14]} {da[-8:-3]}–{db[:-14]} {db[-8:-3]}"
+    words = f"{da[:-3]}–{db[-8:-3]}" if da[:-9] == db[:-9] else f"{da[:-15]} {da[-8:-3]}–{db[:-15]} {db[-8:-3]}"
     return a, b, words
 
 
@@ -702,7 +702,7 @@ def resolve(index, locator):
                     return None
                 ep = index["episodes"][e]
                 d = datetime.fromtimestamp(ep["start"], timezone.utc)
-                return _unit(index, ep["rows"], _chip(name, f"episode {d.day} {MONTHS[d.month - 1]} {d:%H:%M}",
+                return _unit(index, ep["rows"], _chip(name, f"episode {MONTHS[d.month - 1]} {d.day} {d:%H:%M}",
                                                       _plural(len(ep["rows"]), "report")), key,
                              {"lane": c, "episode": ep["start"], "from": ep["start"], "to": ep["end"] + 1})
             w = _window(when)

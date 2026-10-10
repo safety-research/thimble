@@ -29,11 +29,21 @@
   --shadow-float: 0 10px 28px -18px rgba(var(--ink-rgb), 0.28);
   /* the glass's inner top highlight, the same on every paper */
   --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.5);
-  /* data: the ink ramp for ordered series, darkest first */
+  /* data: the ink ramp, darkest first */
   --viz-ink-1: #1b1a18;
   --viz-ink-2: #6b675f;
   --viz-ink-3: #a19d94;
   --viz-ink-4: #cfcbc2;
+  /* the chart palette (lib/vizTheme): seven color families, each in five steps from faint (near the paper) to strong,
+     the third the family's series color, which reads at 3:1 or more on every ground. Neutral takes Warm's; Dark has its
+     own steps of the same hues. No red, which reads as an error */
+  --viz-violet-1: #eeeffe; --viz-violet-2: #9d9cff; --viz-violet-3: #5e4bd6; --viz-violet-4: #4228aa; --viz-violet-5: #280f72;
+  --viz-teal-1: #dbf7f3; --viz-teal-2: #73c4ba; --viz-teal-3: #018d82; --viz-teal-4: #065e56; --viz-teal-5: #01332f;
+  --viz-orange-1: #ffece3; --viz-orange-2: #ffa479; --viz-orange-3: #e26101; --viz-orange-4: #923d03; --viz-orange-5: #4a1b01;
+  --viz-green-1: #e7f5e1; --viz-green-2: #82af6b; --viz-green-3: #306602; --viz-green-4: #224c02; --viz-green-5: #163401;
+  --viz-blue-1: #e6f2ff; --viz-blue-2: #6eb2fc; --viz-blue-3: #0471c8; --viz-blue-4: #004d8c; --viz-blue-5: #002c54;
+  --viz-pink-1: #ffeaf0; --viz-pink-2: #fd86b5; --viz-pink-3: #c8367b; --viz-pink-4: #920153; --viz-pink-5: #53012d;
+  --viz-gold-1: #f7f0da; --viz-gold-2: #d0b870; --viz-gold-3: #a08319; --viz-gold-4: #695403; --viz-gold-5: #362a02;
 }
 
 :root[data-paper='neutral'] {
@@ -87,14 +97,14 @@
   --viz-ink-2: #b8b5ad;
   --viz-ink-3: #85827a;
   --viz-ink-4: #4d4b47;
-  /* the nominal hues (below) stepped for Dark */
-  --viz-1: #2275e8;
-  --viz-2: #da7306;
-  --viz-3: #17a973;
-  --viz-4: #0c9edc;
-  --viz-5: #9e8901;
-  --viz-6: #0b9a9e;
-  --viz-7: #ab691c;
+  /* the chart palette stepped for Dark: faint (near the paper) to strong as on the light papers, so here dark to light */
+  --viz-violet-1: #2d2d46; --viz-violet-2: #5955a5; --viz-violet-3: #8b86f9; --viz-violet-4: #b5b7fe; --viz-violet-5: #e4e6fe;
+  --viz-teal-1: #173635; --viz-teal-2: #027e7b; --viz-teal-3: #2ecac6; --viz-teal-4: #71e2de; --viz-teal-5: #bef4f1;
+  --viz-orange-1: #43291b; --viz-orange-2: #9f4c11; --viz-orange-3: #f57d2d; --viz-orange-4: #ffb084; --viz-orange-5: #ffe1d1;
+  --viz-green-1: #25361f; --viz-green-2: #4e8537; --viz-green-3: #8ad969; --viz-green-4: #a8eb8d; --viz-green-5: #d4f7c6;
+  --viz-blue-1: #203245; --viz-blue-2: #33679f; --viz-blue-3: #58a3f3; --viz-blue-4: #96c7ff; --viz-blue-5: #d9eafe;
+  --viz-pink-1: #422732; --viz-pink-2: #9e456e; --viz-pink-3: #f575af; --viz-pink-4: #feaacc; --viz-pink-5: #ffdeea;
+  --viz-gold-1: #3b2e14; --viz-gold-2: #95710c; --viz-gold-3: #f3be3c; --viz-gold-4: #ffd67e; --viz-gold-5: #fff0d0;
   /* the label colors (below) stepped for Dark, each place the same hue as on the light papers. A dark hue cannot keep
      3:1 here, so brown (7) and chestnut (11) are a muted khaki and a light tan, apart from orange, and navy (8) is a
      pale periwinkle, apart from sky (4); gold (5) and teal (6) are lighter than orange and green, so the first five
@@ -122,42 +132,193 @@
 
 /* -------- the accent: one of seven, iris by default. --accent is the fill, --accent-on the text on it (white or ink,
    whichever reads at 4.5:1), --accent-ink the accent as text on a light paper (darkened where the fill would read
-   under 4.5:1). -------- */
+   under 4.5:1). --find-mix and --find-mix-strong are the accent's share in the find's tints on a light paper
+   (--find-bg below), --find-mix-dark and --find-mix-dark-strong on Dark: a light accent such as yellow takes more on a
+   light paper and less on Dark, so that on every accent a match stands as far from the cell, and the current match as
+   far from a match, as on iris. -------- */
 :root,
 :root[data-accent='iris'] {
   --accent: #5135ff;
   --accent-on: #ffffff;
   --accent-ink: #5135ff;
+  --find-mix: 20%;
+  --find-mix-strong: 32%;
+  --find-mix-dark: 32%;
+  --find-mix-dark-strong: 50%;
 }
 :root[data-accent='pink'] {
   --accent: #d6336c;
   --accent-on: #ffffff;
   --accent-ink: #b4295a;
+  --find-mix: 26%;
+  --find-mix-strong: 40%;
+  --find-mix-dark: 32%;
+  --find-mix-dark-strong: 50%;
 }
 :root[data-accent='orange'] {
   --accent: #e0590c;
   --accent-on: #1b1a18;
   --accent-ink: #ac4207;
+  --find-mix: 28%;
+  --find-mix-strong: 44%;
+  --find-mix-dark: 30%;
+  --find-mix-dark-strong: 46%;
 }
 :root[data-accent='yellow'] {
   --accent: #f2b705;
   --accent-on: #1b1a18;
   --accent-ink: #886300;
+  --find-mix: 40%;
+  --find-mix-strong: 68%;
+  --find-mix-dark: 20%;
+  --find-mix-dark-strong: 32%;
 }
 :root[data-accent='lime'] {
   --accent: #74b816;
   --accent-on: #1b1a18;
   --accent-ink: #46730b;
+  --find-mix: 34%;
+  --find-mix-strong: 52%;
+  --find-mix-dark: 22%;
+  --find-mix-dark-strong: 36%;
 }
 :root[data-accent='blue'] {
   --accent: #1876d1;
   --accent-on: #ffffff;
   --accent-ink: #1365b4;
+  --find-mix: 26%;
+  --find-mix-strong: 40%;
+  --find-mix-dark: 36%;
+  --find-mix-dark-strong: 56%;
 }
 :root[data-accent='graphite'] {
   --accent: #3d3b37;
   --accent-on: #ffffff;
   --accent-ink: #3d3b37;
+  --find-mix: 20%;
+  --find-mix-strong: 32%;
+  --find-mix-dark: 26%;
+  --find-mix-dark-strong: 42%;
+}
+
+/* -------- the chart series and ramps for each accent (lib/vizTheme). The families keep one order, violet, teal, orange,
+   green, blue, pink, gold, and the accent rotates it: series one is the accent's family (blue for graphite, so a chart
+   is never black and white) and the rest follow in order. On every paper and accent, neighbors stay apart, and so do
+   the first three pairwise, under protan, deutan and tritan vision (tests/public/viz-palette.test.ts). The sequential
+   ramp is the accent's family; the diverging ramp runs from a family far from it, through a gray, to the accent's
+   family. -------- */
+:root,
+:root[data-accent='iris'] {
+  --viz-1: var(--viz-violet-3);
+  --viz-2: var(--viz-teal-3);
+  --viz-3: var(--viz-orange-3);
+  --viz-4: var(--viz-green-3);
+  --viz-5: var(--viz-blue-3);
+  --viz-6: var(--viz-pink-3);
+  --viz-7: var(--viz-gold-3);
+  --viz-seq-1: var(--viz-violet-1);
+  --viz-seq-2: var(--viz-violet-2);
+  --viz-seq-3: var(--viz-violet-3);
+  --viz-seq-4: var(--viz-violet-4);
+  --viz-seq-5: var(--viz-violet-5);
+  --viz-div-1: var(--viz-orange-4);
+  --viz-div-2: var(--viz-orange-2);
+}
+:root[data-accent='pink'] {
+  --viz-1: var(--viz-pink-3);
+  --viz-2: var(--viz-gold-3);
+  --viz-3: var(--viz-violet-3);
+  --viz-4: var(--viz-teal-3);
+  --viz-5: var(--viz-orange-3);
+  --viz-6: var(--viz-green-3);
+  --viz-7: var(--viz-blue-3);
+  --viz-seq-1: var(--viz-pink-1);
+  --viz-seq-2: var(--viz-pink-2);
+  --viz-seq-3: var(--viz-pink-3);
+  --viz-seq-4: var(--viz-pink-4);
+  --viz-seq-5: var(--viz-pink-5);
+  --viz-div-1: var(--viz-green-4);
+  --viz-div-2: var(--viz-green-2);
+}
+:root[data-accent='orange'] {
+  --viz-1: var(--viz-orange-3);
+  --viz-2: var(--viz-green-3);
+  --viz-3: var(--viz-blue-3);
+  --viz-4: var(--viz-pink-3);
+  --viz-5: var(--viz-gold-3);
+  --viz-6: var(--viz-violet-3);
+  --viz-7: var(--viz-teal-3);
+  --viz-seq-1: var(--viz-orange-1);
+  --viz-seq-2: var(--viz-orange-2);
+  --viz-seq-3: var(--viz-orange-3);
+  --viz-seq-4: var(--viz-orange-4);
+  --viz-seq-5: var(--viz-orange-5);
+  --viz-div-1: var(--viz-blue-4);
+  --viz-div-2: var(--viz-blue-2);
+}
+:root[data-accent='yellow'] {
+  --viz-1: var(--viz-gold-3);
+  --viz-2: var(--viz-violet-3);
+  --viz-3: var(--viz-teal-3);
+  --viz-4: var(--viz-orange-3);
+  --viz-5: var(--viz-green-3);
+  --viz-6: var(--viz-blue-3);
+  --viz-7: var(--viz-pink-3);
+  --viz-seq-1: var(--viz-gold-1);
+  --viz-seq-2: var(--viz-gold-2);
+  --viz-seq-3: var(--viz-gold-3);
+  --viz-seq-4: var(--viz-gold-4);
+  --viz-seq-5: var(--viz-gold-5);
+  --viz-div-1: var(--viz-blue-4);
+  --viz-div-2: var(--viz-blue-2);
+}
+:root[data-accent='lime'] {
+  --viz-1: var(--viz-green-3);
+  --viz-2: var(--viz-blue-3);
+  --viz-3: var(--viz-pink-3);
+  --viz-4: var(--viz-gold-3);
+  --viz-5: var(--viz-violet-3);
+  --viz-6: var(--viz-teal-3);
+  --viz-7: var(--viz-orange-3);
+  --viz-seq-1: var(--viz-green-1);
+  --viz-seq-2: var(--viz-green-2);
+  --viz-seq-3: var(--viz-green-3);
+  --viz-seq-4: var(--viz-green-4);
+  --viz-seq-5: var(--viz-green-5);
+  --viz-div-1: var(--viz-pink-4);
+  --viz-div-2: var(--viz-pink-2);
+}
+:root[data-accent='blue'] {
+  --viz-1: var(--viz-blue-3);
+  --viz-2: var(--viz-pink-3);
+  --viz-3: var(--viz-gold-3);
+  --viz-4: var(--viz-violet-3);
+  --viz-5: var(--viz-teal-3);
+  --viz-6: var(--viz-orange-3);
+  --viz-7: var(--viz-green-3);
+  --viz-seq-1: var(--viz-blue-1);
+  --viz-seq-2: var(--viz-blue-2);
+  --viz-seq-3: var(--viz-blue-3);
+  --viz-seq-4: var(--viz-blue-4);
+  --viz-seq-5: var(--viz-blue-5);
+  --viz-div-1: var(--viz-orange-4);
+  --viz-div-2: var(--viz-orange-2);
+}
+:root[data-accent='graphite'] {
+  --viz-1: var(--viz-blue-3);
+  --viz-2: var(--viz-pink-3);
+  --viz-3: var(--viz-gold-3);
+  --viz-4: var(--viz-violet-3);
+  --viz-5: var(--viz-teal-3);
+  --viz-6: var(--viz-orange-3);
+  --viz-7: var(--viz-green-3);
+  --viz-seq-1: var(--viz-blue-1);
+  --viz-seq-2: var(--viz-blue-2);
+  --viz-seq-3: var(--viz-blue-3);
+  --viz-seq-4: var(--viz-blue-4);
+  --viz-seq-5: var(--viz-blue-5);
+  --viz-div-1: var(--viz-orange-4);
+  --viz-div-2: var(--viz-orange-2);
 }
 
 /* -------- the semantic tokens every surface uses; they follow the paper and the accent above -------- */
@@ -261,36 +422,37 @@
   --status-info-soft: var(--paper-1);
   --status-neutral: var(--ink-500);
   --status-neutral-soft: var(--paper-1);
-  /* the highlight of the evidence, in ink on every accent: a span inside a longer text (.hl in base.css) and the
-     stronger wash of the find's current match (a cited table cell or output line is the accent's wash, refchip.css) */
+  /* the highlight of the evidence, in ink on every accent: a span inside a longer text (.hl in base.css) and a stronger
+     wash, such as a quote's words (a cited table cell or output line is the accent's wash, refchip.css) */
   --hl-bg: rgba(var(--ink-rgb), 0.08);
   --hl-bg-strong: rgba(var(--ink-rgb), 0.18);
   --hl-edge: rgba(var(--ink-rgb), 0.4);
   --hl-unverified: var(--status-warning-soft);
   --hl-unverified-ink: var(--status-warning);
+  /* the find's matches (Files' find, the view kit's search): every match on a tint of the accent and the current one on
+     a stronger tint (the accent's --find-mix above), on which the text and the secondary text read at 4.5:1 or more on
+     every paper and accent. Their ticks on a strip are the accent as text (--text-accent), in a lane of their own
+     beside Color by's */
+  --find-bg: color-mix(in oklab, var(--accent) var(--find-mix), transparent);
+  --find-bg-strong: color-mix(in oklab, var(--accent) var(--find-mix-strong), transparent);
 
-  /* data: the ink ramp for ordered series; for nominal groups seven hues with no red, which reads as an error, and no
-     purple, which is the agents' colour: blue, orange, green, sky, gold, teal, brown. Each reads at 3:1 or more on
-     every paper, neighbours stay apart under protan and deutan vision, and the first three stay apart pairwise. Dark
-     has its own steps of the same hues. The accent is never a series. */
-  --viz-1: #025ac3;
-  --viz-2: #d0750a;
-  --viz-3: #08632f;
-  --viz-4: #1392d4;
-  --viz-5: #897301;
-  --viz-6: #009c85;
-  --viz-7: #844500;
-  --viz-8: var(--viz-ink-1);
-  --viz-9: var(--viz-ink-3);
+  /* data: the chart's color roles (lib/vizTheme), past the series and ramps the accent sets above. Series one is a step
+     of the accent's family, not the accent's hex, and the interface's own uses of the accent (a selection, the find's
+     matches, focus, the agents' chips) are rings, washes behind text and text, never a filled mark in a plot, so data
+     and the interface stay apart. A label's colors (below) keep their meaning: no series takes one of their hexes */
+  --viz-div-3: var(--viz-ink-4);
+  --viz-div-4: var(--viz-seq-2);
+  --viz-div-5: var(--viz-seq-4);
+  --viz-other: var(--viz-ink-3);
+  --viz-highlight: var(--viz-1);
   /* a label's colors by place, and the color of "no match". A label's value stores its color as a place, so
      --label-N is always the same hue: 1 blue, 2 orange, 3 green, 4 sky, 5 gold, 6 teal, 7 brown, 8 navy, 9 grass,
-     10 cerulean, 11 chestnut, 12 cyan (show_label's color names, concepts.COLOUR_NAMES). Like the nominal hues, no red
-     and no purple, and twelve so that a label with more than eight values still gets a distinct color for each. New
-     values take the places in another order, blue, orange, green, gold, teal, brown, sky, then 8 to 12
-     (backend/app/label_order.json), so the first five are five hues with no second blue among them, each pair 15 or
-     more apart in OKLab (8 under protan and deutan vision): gold (5) is a darker olive and green (3) a deeper green than
-     the chart colours, so gold stands apart from both orange and green. Each reads at 3:1 or more on every paper, and
-     Dark has its own steps of the same hues. */
+     10 cerulean, 11 chestnut, 12 cyan (show_label's color names, concepts.COLOUR_NAMES). No red and no purple, and
+     twelve so that a label with more than eight values still gets a distinct color for each. New values take the
+     places in another order, blue, orange, green, gold, teal, brown, sky, then 8 to 12 (backend/app/label_order.json),
+     so the first five are five hues with no second blue among them, each pair 15 or more apart in OKLab (8 under protan
+     and deutan vision): gold (5) is a darker olive and green (3) a deeper green, so gold stands apart from both orange
+     and green. Each reads at 3:1 or more on every paper, and Dark has its own steps of the same hues. */
   --label-1: #025ac3;
   --label-2: #d0750a;
   --label-3: #06572a;
@@ -320,7 +482,16 @@
   --viz-grid: rgba(var(--ink-rgb), 0.08);
   --viz-axis: rgba(var(--ink-rgb), 0.28);
   --viz-label: var(--ink-500);
-  --viz-annotation: var(--accent);
+  --viz-annotation: var(--viz-ink-2);
+  /* the chart's faces and sizes: axis and legend labels in mono, titles and text marks in the body face, all at 11 px;
+     a chart's own title at 13 px; a line 1.5 px (backend/app/matplotlibrc holds the same in points); a bar's end, away
+     from its baseline, round at 2 px (a stacked bar's whole stack) */
+  --viz-font: var(--font-body);
+  --viz-font-label: var(--font-mono);
+  --viz-size: var(--text-2xs);
+  --viz-size-title: var(--text-sm);
+  --viz-line: 1.5px;
+  --viz-bar-radius: 2px;
 
   /* type: Hanken Grotesk for text, Geist Mono for anything the data named (a file, a thread, a label, a key, a time).
      400 and 500; 600 only for the report's H1 and H2. Numbers tabular everywhere. */
@@ -432,6 +603,10 @@
   --hl-bg: rgba(var(--ink-rgb), 0.14);
   --hl-bg-strong: rgba(var(--ink-rgb), 0.26);
   --hl-edge: rgba(var(--ink-rgb), 0.5);
+  /* the find's tints in the accent's shares for Dark: more for a dark accent such as iris, so it shows on a dark cell,
+     less for a light one such as yellow, which takes contrast from the light text */
+  --find-bg: color-mix(in oklab, var(--accent) var(--find-mix-dark), transparent);
+  --find-bg-strong: color-mix(in oklab, var(--accent) var(--find-mix-dark-strong), transparent);
   /* the code colours lightened toward Dark's text ink */
   --code-keyword: color-mix(in oklab, #cc79a7 70%, var(--ink-900));
   --code-string: color-mix(in oklab, #009e73 64%, var(--ink-900));
@@ -442,6 +617,9 @@
 }
 :root[data-paper='dark'][data-accent='graphite'] {
   --text-accent: color-mix(in oklab, var(--accent) 45%, white);
+  /* graphite's fill is too near Dark's cell to tint it, so the find's tints take its text color */
+  --find-bg: color-mix(in oklab, var(--text-accent) var(--find-mix-dark), transparent);
+  --find-bg-strong: color-mix(in oklab, var(--text-accent) var(--find-mix-dark-strong), transparent);
 }
 
 @media (prefers-reduced-motion: reduce) {

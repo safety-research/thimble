@@ -57,7 +57,7 @@ The guidance under Communicating applies to a document too, with a different wei
               - table: batch 17 against the other batches, with refund rates, an odds ratio and a p-value
               - the data strongly suggests a fault in batch 17, but the tickets themselves do not settle the question
               ## Methods
-              - how the tickets were loaded, cleaned and labelled
+              - how the tickets were loaded, cleaned and labeled
               ## What the data cannot settle
               - a fault in batch 17 caused the failures
               - follow-up analyses of refunds by region, payment method and customer tenure

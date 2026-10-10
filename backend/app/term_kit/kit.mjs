@@ -166,6 +166,13 @@ export function num(n) {
   return r > -1000 && r < 1000 ? String(r) : String(r).replace(/\B(?=(\d{3})+$)/g, ',')
 }
 
+// a place on an axis of plain numbers, such as a turn, a line or a year, written as it is, without separators (2019),
+// and as precise as `step` needs: 0.25 to a step of 0.05, 12 to a step of 1
+function numAt(n, step) {
+  const d = step > 0 && step < 1 ? Math.min(6, Math.ceil(-Math.log10(step) - 1e-9)) : 0
+  return d ? Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: d, useGrouping: false }) : String(Math.round(Number(n) || 0))
+}
+
 /** `n word` or `n words`. */
 export function plural(n, word, many = `${word}s`) {
   return `${num(n)} ${n === 1 ? word : many}`
@@ -175,14 +182,29 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const two = (n) => String(n).padStart(2, '0')
 
-/** A time in seconds since 1970, in UTC, as precise as `step` seconds need: `16 May 2026`, `16 May 04:31`,
- *  `16 May 04:31:07`. */
-export function when(t, step = 60) {
+/** A time in seconds since 1970, in UTC, as precise as `step` seconds need: `May 16, 2026`, `May 16 04:31`,
+ *  `May 16 04:31:07`; with `year`, the year at any step (`Dec 31, 2026 23:10`), as for a span that crosses one. */
+export function when(t, step = 60, year = step >= 86400) {
+  const day = year ? `${monthDay(t)}, ${yearOf(t)}` : monthDay(t)
+  return step >= 86400 ? day : `${day} ${clockOf(t, step)}`
+}
+
+// a day without its year, as an axis's tick names it: `May 16`, in UTC
+function monthDay(t) {
   const d = new Date(t * 1000)
-  const day = `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`
-  if (step >= 86400) return `${day} ${d.getUTCFullYear()}`
+  return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`
+}
+
+// the time of day as precise as `step` seconds need: `04:31`, `04:31:07`, in UTC
+function clockOf(t, step) {
+  const d = new Date(t * 1000)
   const hm = `${two(d.getUTCHours())}:${two(d.getUTCMinutes())}`
-  return step >= 60 ? `${day} ${hm}` : `${day} ${hm}:${two(d.getUTCSeconds())}`
+  return step >= 60 ? hm : `${hm}:${two(d.getUTCSeconds())}`
+}
+
+// the year a time falls in, in UTC
+function yearOf(t) {
+  return new Date(t * 1000).getUTCFullYear()
 }
 
 /** The time of day, `04:31:07`, in UTC. */
@@ -204,10 +226,44 @@ export function dayOf(t) {
 }
 const DAYS_SEEN = new Map()
 
-/** A day's heading, `Sat 16 May 2026`. */
+/** A day's heading, `Sat, May 16, 2026`. */
 export function dayName(t) {
   const d = new Date(t * 1000)
-  return `${DAYS[d.getUTCDay()]} ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`
+  return `${DAYS[d.getUTCDay()]}, ${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`
+}
+
+// A time in seconds since 1970 as a record gives it, read as the browser kit reads it (viewer_colour.js secs): a number
+// (in milliseconds past MS_FROM, which no time in seconds reaches before the year 5000), its digits as text, a Date, or
+// a date as text, such as an ISO time or a mail's date, one with no zone read in UTC as the kit writes times; null for
+// none, such as text with no date in it ("step 4"), which Date.parse would read a date into
+const MS_FROM = 1e11
+const ISO_TIME = /^(\d{4}-\d\d-\d\d)(?:[T ](\d\d:\d\d(?::\d\d(?:[.,]\d+)?)?)\s*(Z|UTC|GMT|[+-]\d\d(?::?\d\d)?)?)?$/i
+const A_DATE = /\d{4}[-/]\d\d?[-/]\d\d?|\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s.*\b\d{4}\b|\b\d{4}\b.*\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i
+const A_ZONE = /\d:\d\d(?::\d\d(?:\.\d+)?)?\s*(?:Z|[+-]\d\d:?\d\d|UTC|GMT|UT|[ECMP][SD]T)\b|\b(?:UTC|GMT)\b/i
+function secs(t) {
+  let s = null
+  if (t instanceof Date) s = t.getTime() / 1000
+  else {
+    if (typeof t === 'string' && /^\s*-?\d+(\.\d+)?\s*$/.test(t)) t = Number(t)
+    if (typeof t === 'number') s = Math.abs(t) >= MS_FROM ? t / 1000 : t
+    else if (typeof t === 'string') {
+      const d = t.trim()
+      const iso = ISO_TIME.exec(d)
+      let ms = NaN
+      // an ISO time as every engine reads it: a T, at most milliseconds, an offset with its minutes, Z for none
+      if (iso) {
+        const z = !iso[3] || /^(z|utc|gmt)$/i.test(iso[3]) ? 'Z' : `${iso[3].slice(0, 3)}:${iso[3].slice(3).replace(':', '') || '00'}`
+        ms = Date.parse(`${iso[1]}T${(iso[2] || '00:00').replace(',', '.').replace(/(\.\d{3})\d+/, '$1')}${z}`)
+      } else if (A_DATE.test(d)) {
+        ms = Date.parse(d)
+        // a date with no zone, which Date.parse reads in the machine's: in UTC
+        if (Number.isFinite(ms) && !A_ZONE.test(d)) ms -= new Date(ms).getTimezoneOffset() * 60000
+      }
+      s = ms / 1000
+    }
+  }
+  // a date can be no further than 100,000,000 days from 1970
+  return s !== null && Number.isFinite(s) && Math.abs(s) <= 864e10 ? s : null
 }
 
 /** A length of time in seconds, `45s`, `12m 5s`, `3h 20m`, `2d 4h`. */
@@ -1417,7 +1473,8 @@ export function colorBy(opts = {}) {
     const declared = (f.values || []).map((v) => (typeof v === 'object' ? v : { name: v }))
     for (const v of declared) {
       if (hues.has(v.name)) continue
-      const want = Number(v.colour) >= 1 && Number(v.colour) <= SERIES.length ? SERIES[Number(v.colour) - 1] : null
+      const named = Number(v.color !== undefined ? v.color : v.colour)
+      const want = named >= 1 && named <= SERIES.length ? SERIES[named - 1] : null
       hues.set(v.name, want && ![...hues.values()].includes(want) ? want : nextHue(hues))
     }
     const counts = (fieldOf(c.choice) === f && c.counts) || {}
@@ -1506,13 +1563,14 @@ export function colorBy(opts = {}) {
       return c.picks.map(resolve).filter(Boolean)
     },
     /** The tracks of the choices past the first, which the list draws beside its own and a mark each on its rows:
-     *  `[{title, valueOf(record), colourOf(value)}]`, a label's with its id (`label`). */
+     *  `[{title, valueOf(record), colorOf(value)}]`, a label's with its id (`label`); colourOf, the British spelling, is
+     *  the same. */
     get tracks() {
       return c.picks.slice(1).map((key) => {
         const f = fieldOf(key)
-        if (f) return { title: f.title, valueOf: (r) => { const v = r && (typeof f.value === 'function' ? f.value(r) : r[f.name]); return v === undefined || v === null || v === '' ? null : String(v) }, colourOf: (v) => (v === null ? null : hueFor(f, String(v))) }
+        if (f) return withColorOf({ title: f.title, valueOf: (r) => { const v = r && (typeof f.value === 'function' ? f.value(r) : r[f.name]); return v === undefined || v === null || v === '' ? null : String(v) }, colourOf: (v) => (v === null ? null : hueFor(f, String(v))) })
         const l = labelOf(key)
-        return l ? { title: l.name, label: l.id, valueOf: (r) => labelValue(l.id, r), colourOf: (v) => (v === null ? null : labelHue(l, String(v))) } : null
+        return l ? withColorOf({ title: l.name, label: l.id, valueOf: (r) => labelValue(l.id, r), colourOf: (v) => (v === null ? null : labelHue(l, String(v))) }) : null
       }).filter(Boolean)
     },
     /** A group's mix (a page, an agent, a session takes no color of its own): runs of `cells` cells, each value's share
@@ -1577,8 +1635,12 @@ export function colorBy(opts = {}) {
     },
     /** The hue a value's records are drawn in (a palette color), dim for a value past six and a label's value that
      *  does not color, null for Off, for no value and for a value turned off. */
-    colourOf(value) {
+    colorOf(value) {
       return api.isOn(value) ? hueOf(value) : null
+    },
+    /** colorOf, by its British spelling, which programs written before it use */
+    colourOf(value) {
+      return api.colorOf(value)
     },
     /** The mark of a value: `●` in its hue, dim for no value and for a value turned off. */
     dot(value, glyph = '●') {
@@ -1603,7 +1665,8 @@ export function colorBy(opts = {}) {
     drew(items) {
       if (Array.isArray(items)) tallied().lists.push(items)
     },
-    /** The chips: `[{value, name, colour, on, n}]`, `value` null for no value; none for Off. */
+    /** The chips: `[{value, name, color, on, n}]`, `value` null for no value; none for Off. `colour`, the British
+     *  spelling, is the same. */
     get values() {
       return chips()
     },
@@ -1691,15 +1754,15 @@ export function colorBy(opts = {}) {
     // a label's values that color, each with its count, then `not marked`, as the browser's chips
     if (l) {
       const vs = labelValues(l)
-      const out = vs.map((v) => ({ value: v, name: v, colour: labelHue(l, v), on: api.isOn(v), n: counts[v] || 0 }))
+      const out = vs.map((v) => ({ value: v, name: v, color: labelHue(l, v), colour: labelHue(l, v), on: api.isOn(v), n: counts[v] || 0 }))
       const rest = (l.values || []).map((x) => x.name).filter((v) => !vs.includes(v))
       const n = (counts[''] || 0) + rest.reduce((k, v) => k + (counts[v] || 0), 0)
-      out.push({ value: null, name: noValueName(), colour: null, on: api.isOn(null), n })
+      out.push({ value: null, name: noValueName(), color: null, colour: null, on: api.isOn(null), n })
       return out
     }
     const names = fieldValues(f)
     const out = []
-    const other = { value: '\u0000other', name: 'other', colour: null, on: true, n: 0, members: [] }
+    const other = { value: '\u0000other', name: 'other', color: null, colour: null, on: true, n: 0, members: [] }
     for (const v of names) {
       const n = counts[v] || 0
       if (!c.hues.get(f.name).get(v)) {
@@ -1708,14 +1771,14 @@ export function colorBy(opts = {}) {
         continue
       }
       if (c.counts && !n && !c.off.has(v) && !(f.values || []).some((x) => (typeof x === 'object' ? x.name : x) === v)) continue
-      out.push({ value: v, name: v, colour: hueOf(v), on: api.isOn(v), n })
+      out.push({ value: v, name: v, color: hueOf(v), colour: hueOf(v), on: api.isOn(v), n })
     }
     // like a value with no records, `other` with none is left out once the counts are in, unless one of its values is off
     if (other.members.length && (!c.counts || other.n || other.members.some((v) => c.off.has(v)))) {
       other.on = other.members.some((v) => api.isOn(v))
       out.push(other)
     }
-    if (counts[''] || c.off.has('')) out.push({ value: null, name: noValueName(), colour: null, on: api.isOn(null), n: counts[''] || 0 })
+    if (counts[''] || c.off.has('')) out.push({ value: null, name: noValueName(), color: null, colour: null, on: api.isOn(null), n: counts[''] || 0 })
     return out
   }
 
@@ -2012,9 +2075,46 @@ const MARKS_BATCH = 2000
 // ------------------------------------------------------------------------------------------------ the time range
 
 const BARS = ' ▁▂▃▄▅▆▇█'
-const TICKS = [1, 5, 15, 30, 60, 300, 900, 1800, 3600, 3 * 3600, 6 * 3600, 12 * 3600, 86400, 2 * 86400, 7 * 86400, 30 * 86400]
+const TICKS = [1, 5, 15, 30, 60, 300, 900, 1800, 3600, 3 * 3600, 6 * 3600, 12 * 3600, 86400, 2 * 86400, 7 * 86400]
+// past a week the ticks step by the calendar, in months (a year is 12), as the browser's axis does (viewer_range.js CAL)
+const MONTH_TICKS = [1, 3, 6, 12, 24, 60, 120]
 const BREAK = 4 // the cells of a break on a broken scale, drawn ` // ` on the strip and the axis
 const MIN_SEG = 3 // the cells a stretch too short to see takes on a broken scale
+
+// the step of time ticks at least `gap` cells apart, a cell being `step` seconds: seconds (TICKS), else {months}
+function tickStep(step, gap) {
+  return TICKS.find((s) => s / step >= gap) || { months: MONTH_TICKS.find((m) => (m * 30.44 * 86400) / step >= gap) || MONTH_TICKS.at(-1) }
+}
+
+// the times of a tick step in [a, b], in seconds: the multiples of a step in seconds; the first of each month whose
+// number the step's months divide (January 1 for a year)
+function tickTimes(a, b, tick) {
+  const out = []
+  if (typeof tick !== 'object') {
+    for (let t = Math.ceil(a / tick) * tick; t <= b; t += tick) out.push(t)
+    return out
+  }
+  const start = (i) => Date.UTC(Math.floor(i / 12), i % 12, 1) / 1000
+  const d = new Date(a * 1000)
+  let i = d.getUTCFullYear() * 12 + d.getUTCMonth()
+  if (start(i) < a) i++
+  for (i = Math.ceil(i / tick.months) * tick.months; start(i) <= b && out.length < 5000; i += tick.months) out.push(start(i))
+  return out
+}
+
+// a time tick's label at its step: a month step's the month, or the year in January and at a step of a year or more
+// (`Oct`, `2027`), as the browser's axis names them; a day step's the day (`May 16`); a shorter step's the time, with
+// its date where `dated` (`May 16 04:31`); `year` adds the year to a day or a date (`Jan 3, 2027`), and `date` gives
+// the date alone (`May 16`, for an axis with no room for the time)
+function tickLabel(t, tick, dated, year, date = false) {
+  if (typeof tick === 'object') {
+    const mo = new Date(t * 1000).getUTCMonth()
+    return mo === 0 || tick.months >= 12 ? String(yearOf(t)) : MONTHS[mo]
+  }
+  const day = year ? `${monthDay(t)}, ${yearOf(t)}` : monthDay(t)
+  if (tick >= 86400 || date) return day
+  return dated ? `${day} ${clockOf(t, tick)}` : clockOf(t, tick)
+}
 
 // the stretches of time that hold data: the sorted times, split where two lie more than `gap` apart
 function stretches(sorted, gap) {
@@ -2143,23 +2243,25 @@ export function timeRange(opts = {}) {
     fit() {
       api.set(null)
     },
-    /** The scale of the range across `cols` cells: `{from, to, cols, x(t), t(x), binOf(t), step, ticks(gap)}`; x(t) the
-     *  cell a time falls in, binOf(t) the same or -1 outside the range, step the time a cell spans. */
+    /** The scale of the range across `cols` cells: `{from, to, cols, unit, x(t), t(x), binOf(t), step, ticks(gap)}`;
+     *  x(t) the cell a time falls in, binOf(t) the same or -1 outside the range, step the time a cell spans. */
     scale(cols) {
       return scaleOf(api.from, api.to, Math.max(1, cols | 0), unit, r.segs)
     },
-    /** A time in the readout's words, as precise as `step` needs. */
+    /** A time in the readout's words, as precise as `step` needs, with its year when the data's span crosses one. */
     format(t, step = (api.to - api.from) / 60) {
-      return unit === 'n' ? num(t) : when(t, step)
+      return unit === 'n' ? numAt(t, 1) : when(t, step, step >= 86400 || yearOf(span()[0]) !== yearOf(span()[1]))
     },
-    /** The range's readout: start, end and length, `16 May 04:31 – 05:10 · 39m`. */
+    /** The range's readout: start, end and length, `May 16 04:31 – 05:10 · 39m`, each end with its year when the range
+     *  crosses one (`Dec 30, 2026 22:00 – Jan 2, 2027 06:00`). */
     readout() {
       const a = api.from
       const b = api.to
-      if (unit === 'n') return `${num(a)} – ${num(b)} · ${num(b - a)}`
+      if (unit === 'n') return `${numAt(a, 1)} – ${numAt(b, 1)} · ${num(b - a)}`
       const step = (b - a) / 60
-      const aa = when(a, step)
-      const bb = when(b, step)
+      const year = step >= 86400 || yearOf(a) !== yearOf(b)
+      const aa = when(a, step, year)
+      const bb = when(b, step, year)
       const sameDay = dayOf(a) === dayOf(b) && step < 86400
       return `${aa} – ${sameDay ? bb.split(' ').slice(2).join(' ') : bb} · ${dur(b - a)}`
     },
@@ -2234,7 +2336,7 @@ export function timeRange(opts = {}) {
       by[x].set(k, (by[x].get(k) || 0) + 1)
     })
     const max = Math.max(1, ...n)
-    const colourOf = hueFn(opts.colour)
+    const colourOf = hueFn(colorOption(opts))
     const brk = breakGlyphs(ov)
     return n.map((k, x) => {
       if (brk.has(x)) return { glyph: brk.get(x), brk: true }
@@ -2260,8 +2362,25 @@ export function timeRange(opts = {}) {
 // a value's hue from a Color by control, a function, or the view's Color by when none is given
 function hueFn(c) {
   if (typeof c === 'function') return c
-  const by = c && typeof c.colourOf === 'function' ? c : state.colour
+  const by = c && (typeof c.colourOf === 'function' || typeof c.colorOf === 'function') ? withColourOf(c) : state.colour
   return by ? (v) => by.colourOf(v) : () => null
+}
+
+// A part's Color by option: `color`, or `colour`, its British spelling, as the browser kit takes them; a Color by the
+// program made of its own, such as {valueOf, colorOf}, with colourOf, which the parts call (withColourOf)
+function colorOption(o) {
+  return withColourOf(o && o.colour !== undefined ? o.colour : o ? o.color : undefined)
+}
+function withColourOf(c) {
+  if (!c || typeof c !== 'object' || typeof c.colourOf === 'function' || typeof c.colorOf !== 'function') return c
+  const out = Object.create(c)
+  out.colourOf = (v) => c.colorOf(v)
+  return out
+}
+// a track as the control gives it, with colorOf beside colourOf
+function withColorOf(t) {
+  t.colorOf = t.colourOf
+  return t
 }
 
 // the cells of a broken scale's breaks, each with its glyph: ` // ` across the BREAK cells
@@ -2271,7 +2390,8 @@ function breakGlyphs(sc) {
   return out
 }
 
-function scaleOf(from, to, cols, unit, segs = null) {
+// `fine`: plain numbers that are not all whole, such as scores, whose ticks may step by less than one
+function scaleOf(from, to, cols, unit, segs = null, fine = false) {
   // the stretches that hold data within the range; a stretch that only touches an end of the range is none
   const parts = []
   for (const [a0, b0] of segs || []) {
@@ -2279,7 +2399,7 @@ function scaleOf(from, to, cols, unit, segs = null) {
     const b = Math.min(to, b0)
     if (b > a || (b === a && a !== from && b !== to)) parts.push([a, b])
   }
-  if (parts.length > 1 && cols >= parts.length * (MIN_SEG + BREAK)) return brokenScale(from, to, cols, unit, parts)
+  if (parts.length > 1 && cols >= parts.length * (MIN_SEG + BREAK)) return brokenScale(from, to, cols, unit, parts, fine)
   const len = Math.max(1e-9, to - from)
   const step = len / cols
   const x = (t) => Math.min(cols - 1, Math.max(0, Math.floor(((t - from) / len) * cols)))
@@ -2288,6 +2408,7 @@ function scaleOf(from, to, cols, unit, segs = null) {
     to,
     cols,
     step,
+    unit,
     x,
     t: (cx) => from + (cx + 0.5) * step,
     /** The position of a time in cells, fractional (0 to cols), and the time at a position. */
@@ -2297,24 +2418,27 @@ function scaleOf(from, to, cols, unit, segs = null) {
     gaps: () => [],
     binOf: (t) => (t < from || t > to ? -1 : x(t)),
     /** Ticks at least `gap` cells apart: `[{t, x, label}]`, the label as precise as the tick step needs, the date on
-     *  the first tick and where the day changes. */
+     *  the first tick and where the day changes, and where the range crosses a year, the year on the first tick and
+     *  where it changes; past a week, by the calendar (`Oct`, `2027`). */
     ticks(gap = 14) {
       if (unit === 'n') {
         const raw = (gap * len) / cols
         const p = 10 ** Math.floor(Math.log10(raw))
-        const tick = [1, 2, 5, 10].map((m) => m * p).find((v) => v >= raw) || 10 * p
+        const tick = Math.max(fine ? 0 : 1, [1, 2, 5, 10].map((m) => m * p).find((v) => v >= raw) || 10 * p)
         const out = []
-        for (let t = Math.ceil(from / tick) * tick; t <= to; t += tick) out.push({ t, x: x(t), label: num(t) })
+        for (let k = Math.ceil(from / tick); k * tick <= to; k++) out.push({ t: k * tick, x: x(k * tick), label: numAt(k * tick, tick) })
         return out
       }
-      const tick = TICKS.find((s) => s / step >= gap) || TICKS.at(-1)
+      const tick = tickStep(step, gap)
+      const years = yearOf(from) !== yearOf(to)
       const out = []
       let lastDay = ''
-      for (let t = Math.ceil(from / tick) * tick; t <= to; t += tick) {
+      let lastYear = null
+      for (const t of tickTimes(from, to, tick)) {
         const day = dayOf(t)
-        const label = tick >= 86400 ? when(t, 86400).split(' ').slice(0, 2).join(' ') : day !== lastDay ? when(t, tick) : when(t, tick).split(' ').slice(2).join(' ')
+        out.push({ t, x: x(t), label: tickLabel(t, tick, day !== lastDay, years && yearOf(t) !== lastYear) })
         lastDay = day
-        out.push({ t, x: x(t), label })
+        lastYear = yearOf(t)
       }
       return out
     },
@@ -2323,7 +2447,7 @@ function scaleOf(from, to, cols, unit, segs = null) {
 
 // a scale with breaks: each stretch its share of the cells by its length (at least MIN_SEG), the empty time between
 // two stretches BREAK cells, as the browser's broken scale lays them out
-function brokenScale(from, to, cols, unit, parts) {
+function brokenScale(from, to, cols, unit, parts, fine = false) {
   const room = cols - BREAK * (parts.length - 1)
   const total = parts.reduce((n, [a, b]) => n + (b - a), 0)
   let ws = parts.map(([a, b]) => (total > 0 ? ((b - a) / total) * room : room / parts.length))
@@ -2375,6 +2499,7 @@ function brokenScale(from, to, cols, unit, parts) {
     to,
     cols,
     step,
+    unit,
     x,
     t: (cx) => at(cx + 0.5),
     pos,
@@ -2383,30 +2508,34 @@ function brokenScale(from, to, cols, unit, parts) {
     /** The breaks, as [first cell, cell after the last]. */
     gaps: () => segs.slice(1).map((g, i) => [segs[i].c1, g.c0]),
     binOf: (t) => (t < from || t > to ? -1 : x(t)),
-    /** Ticks at least `gap` cells apart in each stretch: `[{t, x, label}]`, the date on the first tick, the first after
-     *  a break and where the day changes. */
+    /** Ticks at least `gap` cells apart in each stretch: `[{t, x, label, full, date}]`, the date on the first tick, the
+     *  first after a break and where the day changes, and where the range crosses a year, the year on the first tick
+     *  and where it changes; `full` the label with its date, `date` the date alone. */
     ticks(gap = 14) {
       if (unit === 'n') {
         const raw = gap * step
         const p = 10 ** Math.floor(Math.log10(raw))
-        const tick = [1, 2, 5, 10].map((m) => m * p).find((v) => v >= raw) || 10 * p
+        const tick = Math.max(fine ? 0 : 1, [1, 2, 5, 10].map((m) => m * p).find((v) => v >= raw) || 10 * p)
         return segs.flatMap((g) => {
           const out = []
-          for (let t = Math.ceil(g.a / tick) * tick; t <= g.b; t += tick) out.push({ t, x: x(t), label: num(t) })
+          for (let k = Math.ceil(g.a / tick); k * tick <= g.b; k++) out.push({ t: k * tick, x: x(k * tick), label: numAt(k * tick, tick) })
           return out
         })
       }
-      const tick = TICKS.find((s) => s / step >= gap) || TICKS.at(-1)
+      const tick = tickStep(step, gap)
+      const years = yearOf(from) !== yearOf(to)
       const out = []
       let lastDay = ''
+      let lastYear = null
       for (const g of segs) {
         let first = true
-        for (let t = Math.ceil(g.a / tick) * tick; t <= g.b; t += tick) {
-          const day = dayOf(t)
-          const label = tick >= 86400 ? when(t, 86400).split(' ').slice(0, 2).join(' ') : first || day !== lastDay ? when(t, tick) : when(t, tick).split(' ').slice(2).join(' ')
-          lastDay = day
+        for (const t of tickTimes(g.a, g.b, tick)) {
+          const year = years && yearOf(t) !== lastYear
+          const label = tickLabel(t, tick, first || dayOf(t) !== lastDay, year)
+          out.push({ t, x: x(t), label, full: tickLabel(t, tick, true, year), date: tickLabel(t, tick, true, year, true) })
+          lastDay = dayOf(t)
+          lastYear = yearOf(t)
           first = false
-          out.push({ t, x: x(t), label, full: tick >= 86400 ? label : when(t, tick) })
         }
       }
       return out
@@ -2417,7 +2546,7 @@ function brokenScale(from, to, cols, unit, parts) {
 /** The chart's axis under it: the ticks' labels dim at their cells, `gutter` cells in, none overlapping; `legend`, in
  *  the gutter before them, the key of the marks the chart draws other than Color by's (`─ running  × failed`): runs, or
  *  entries `{glyph, fg, name, on, toggle, tip}`, each a control that hides or shows its series (dim while off), as a
- *  lanes part gives them (`legend()`); then, with `marks` ([{t, label}]), their labels on a row of their own, each a
+ *  timeline gives them (`legend()`); then, with `marks` ([{t, label}]), their labels on a row of their own, each a
  *  control when `onMark(mark)` is given. */
 export function axis(d, scale, o = {}) {
   const gutter = o.gutter || 0
@@ -2454,7 +2583,7 @@ export function axis(d, scale, o = {}) {
   // a broken scale's breaks are `//` in the rule gray, and no label runs into one
   const gaps = scale.gaps ? scale.gaps() : []
   const items = [
-    ...scale.ticks(o.gap || 12).map((tk) => ({ x: tk.x, label: tk.label, full: tk.full, style: { d: true } })),
+    ...scale.ticks(o.gap || 12).map((tk) => ({ x: tk.x, label: tk.label, full: tk.full, date: tk.date, style: { d: true } })),
     ...gaps.map(([g0, g1]) => ({ x: g0 + 1, label: '//', style: { fg: COLORS.rule }, brk: g1 })),
   ].sort((a, b) => a.x - b.x || (a.brk ? -1 : 1))
   // the first label after a break gives the date, even when the stretch's first tick had no room
@@ -2468,7 +2597,7 @@ export function axis(d, scale, o = {}) {
     }
     // where the time with its date has no room, the date alone, as the browser's axis does
     const fits = (l) => tk.x >= end && tk.x + width(l) <= scale.cols && !gaps.some(([g0, g1]) => tk.x < g1 && tk.x + width(l) > g0)
-    const label = !dated && gaps.length && tk.full ? [tk.full, tk.full.split(' ').slice(0, 2).join(' ')].find(fits) : fits(tk.label) ? tk.label : null
+    const label = !dated && gaps.length && tk.full ? [tk.full, tk.date || tk.full.split(' ').slice(0, 2).join(' ')].find(fits) : fits(tk.label) ? tk.label : null
     if (!label) continue
     row.at(gutter + tk.x).add(label, tk.style)
     end = tk.x + width(label) + 2
@@ -2478,13 +2607,14 @@ export function axis(d, scale, o = {}) {
   const marks = (o.marks || []).filter((m) => m.t >= scale.from && m.t <= scale.to).sort((a, b) => a.t - b.t)
   if (!marks.length) return
   const mr = d.row().gap(gutter)
+  const years = yearOf(scale.from) !== yearOf(scale.to)
   end = 0
   for (const m of marks) {
     // a label that would run into the one before it stands just after it, near enough to its time, else is left out
     const x = Math.max(scale.x(m.t), end)
     const label = String(m.label)
     if (x - scale.x(m.t) > 12 || x + width(label) > scale.cols) continue
-    mr.at(gutter + x).add(label, o.onMark ? {} : { d: true }, o.onMark ? { on: () => o.onMark(m), tip: m.tip || `${label}: ${when(m.t, 60)}` } : { tip: m.tip || `${label}: ${when(m.t, 60)}` })
+    mr.at(gutter + x).add(label, o.onMark ? {} : { d: true }, o.onMark ? { on: () => o.onMark(m), tip: m.tip || `${label}: ${when(m.t, 60, years)}` } : { tip: m.tip || `${label}: ${when(m.t, 60, years)}` })
     end = x + width(label) + 2
   }
   mr.end()
@@ -2510,7 +2640,7 @@ export function strip(scale, items, o = {}) {
     let best = ''
     let bn = 0
     for (const [v, m] of by[x]) if (v !== '' && m > bn) [best, bn] = [v, m]
-    const colour = best ? hueFn(o.colour)(best) : null
+    const colour = best ? hueFn(colorOption(o))(best) : null
     // a value with no hue of its own (past six, a label's value that does not color) is dim, as no value is
     return colour && colour !== COLORS.dim ? { s: bar(k, max), fg: colour } : { s: bar(k, max), d: true }
   })
@@ -2542,7 +2672,7 @@ export function maxBin(scale, groups, time = (it) => it.t) {
  * and the colored track at its right edge when it is taller than its room (docs/terminal-views.md, "The list"). ↑↓
  * choose, Enter or a click opens and closes the chosen row's details, `a` asks a side thread about it, while the list
  * has the keys (SWITCH); the wheel over it moves its rows. `span(time)` gives the times of the rows in view, which a
- * lanes part marks on the overview.
+ * timeline marks on the overview.
  *
  * opts: key(item) its identity; enter (the hint's words, `to open`).
  */
@@ -2607,9 +2737,10 @@ export function list(opts = {}) {
     item() {
       return s.items.find((it) => !it.heading && keyOf(it) === s.chosen) || null
     },
-    /** The first and last times of the items in view, `[t0, t1]`, by `time(item)` (`item.t` or `item.time`); null
-     *  when none shows. A part drawn above the list (the lanes) reads them before the list draws: they are the rows
-     *  the list will show, foreseen from its last drawing and the row chosen since. */
+    /** The first and last times of the items in view, `[t0, t1]`, by `time(item)` (`item.t` or `item.time`), read as
+     *  the lanes place a record (a date as text in seconds, one with no zone in UTC); null when none shows. A part drawn
+     *  above the list (the lanes) reads them before the list draws: they are the rows the list will show, foreseen from
+     *  its last drawing and the row chosen since. */
     span(time = (it) => (it.t ?? it.time)) {
       let shown = s.shown
       if (state.drawing && s.drawnAt !== state.drawNo) {
@@ -2617,7 +2748,7 @@ export function list(opts = {}) {
         if (f) shown = f
         s.foreseen = { at: state.drawNo, key: f ? shownKeyOf(f) : null }
       }
-      const ts = shown.map((it) => Number(time(it))).filter((t) => Number.isFinite(t))
+      const ts = shown.map((it) => placeOf(time(it), 's')).filter((t) => t !== null)
       return ts.length ? [Math.min(...ts), Math.max(...ts)] : null
     },
     /** The items in view, as last drawn. */
@@ -2628,7 +2759,7 @@ export function list(opts = {}) {
      * Draw the list in the rows left (or `o.height`): `o.items` (an item with `heading` is a bold heading row no key
      * chooses), `o.row(item, r, {chosen, open})` adds the item's row to a Row started after its mark, `o.detail(item,
      * d)` draws its details into an inner drawing at A2, `o.value(item)` its Color by value (its mark and the track),
-     * `o.colour` (a Color by control, for the hues), `o.ask(item)` `{ref, text}` to ask about it, `o.onOpen(item)` when
+     * `o.color` (a Color by control, for the hues), `o.ask(item)` `{ref, text}` to ask about it, `o.onOpen(item)` when
      * its details open (fetch what they show), `o.header(r)` a row above the rows that does not scroll (a table's
      * columns' names), `o.empty` the words for no item.
      */
@@ -2659,14 +2790,14 @@ export function list(opts = {}) {
         }
       }
       const pane = o.side || o.sideOpen || null
-      const colour = o.colour
+      const colour = colorOption(o)
       // Color by's choices past the first, each a column of its own beside the track (at most TRACKS_MAX) and a mark of
       // its own after the row's first
       const tracks = colour && Array.isArray(colour.tracks) ? colour.tracks.slice(0, TRACKS_MAX) : []
       // a header row (the columns' names) stands above the rows and does not scroll with them, over their columns
       if (o.header) {
         const hr = d.row()
-        if (o.colour || o.value) hr.gap(2 + (o.mark !== false ? tracks.length : 0))
+        if (colour || o.value) hr.gap(2 + (o.mark !== false ? tracks.length : 0))
         o.header(hr)
         hr.end()
       }
@@ -2882,11 +3013,11 @@ function windowTop(off, items, n, height, c, top0, free, focus) {
   return Math.max(0, Math.min(top, last))
 }
 
-// the track beside a list taller than its room (docs/terminal-views.md, "The list"): a column of the whole list, each
-// cell its rows' commonest Color by hue (`▌`), the part in view on the selection background; a list many times its
-// room adds the zoomed track at the outer edge, the part around the view at a finer scale; each of Color by's choices
-// past the first (`tracks`) a column of its own before them, in its own hues. A click goes there. `off` holds each
-// item's first line, so the track reads each item's value once, never a line at a time.
+// the track beside a list taller than its room (docs/terminal-views.md, "The list"): one column of the whole list at
+// every length, as the browser's strip is, each cell its rows' commonest Color by hue (`▌`), the part in view on the
+// selection background; each of Color by's choices past the first (`tracks`) a column of its own before it, in its own
+// hues. A click goes there. `off` holds each item's first line, so the track reads each item's value once, never a line
+// at a time.
 const TRACKS_MAX = 3
 /** A record's mark for each of Color by's choices past the first (`tracks`), as the browser's bands on its edge: `●` in
  *  the hue of its value of that choice (dim for a field's value with no hue of its own), a space where it has none or a
@@ -2937,32 +3068,22 @@ function drawTrack(d, y0, total, top, height, off, items, valueOf, hueOf, tracks
     const h = best ? hue(best) : null
     return h && h !== COLORS.dim ? { s: '▌', fg: h } : { s: '▌', d: true }
   }
-  const cellOf = (from, to) => cellIn(values, hueOf, from, to)
-  const zoom = total > rows * 16
-  const zFrom = Math.max(0, Math.min(total - rows * 4, top + height / 2 - rows * 2))
-  const zLen = Math.min(total, rows * 4)
+  const n = lanes.length
+  const x = d.cols - 1
   for (let k = 0; k < rows; k++) {
     const line = d.lines[y0 + k]
     if (!line) break
     const a = (k / rows) * total
     const b = ((k + 1) / rows) * total
     const inView = b > top && a < top + height
-    const cell = { ...cellOf(a, b), ...(inView ? { bg: COLORS.selected } : {}) }
-    const n = lanes.length
+    const sel = inView ? { bg: COLORS.selected } : {}
     const runs = clipLine(line.runs, d.cols - 3 - n)
-    const pad = d.cols - (zoom ? 2 : 1) - n - lineWidth(runs)
-    const cells = [cell]
-    if (zoom) {
-      const za = zFrom + (k / rows) * zLen
-      const zb = zFrom + ((k + 1) / rows) * zLen
-      cells.unshift({ ...cellOf(za, zb), ...(zb > top && za < top + height ? { bg: COLORS.selected } : {}) })
-    }
-    cells.unshift(...lanes.map((l) => ({ ...cellIn(l.values, l.hue, a, b), ...(inView ? { bg: COLORS.selected } : {}) })))
+    const pad = x - n - lineWidth(runs)
+    const cells = [...lanes.map((l) => ({ ...cellIn(l.values, l.hue, a, b), ...sel })), { ...cellIn(values, hueOf, a, b), ...sel }]
     line.runs = merged([...runs, { s: ' '.repeat(Math.max(0, pad)) }, ...cells])
-    for (let j = 0; j < n; j++) d.hits.push({ y: y0 + k, x0: d.cols - (zoom ? 2 : 1) - n + j, x1: d.cols - (zoom ? 2 : 1) - n + j + 1, on: () => go(Math.floor(a)), tip: `${lanes[j].title}: rows ${num(Math.floor(a) + 1)}-${num(Math.min(total, Math.ceil(b)))} of ${num(total)}` })
-    const x = d.cols - (zoom ? 2 : 1)
-    d.hits.push({ y: y0 + k, x0: x + (zoom ? 1 : 0), x1: x + (zoom ? 2 : 1), on: () => go(Math.floor(a)), tip: `rows ${num(Math.floor(a) + 1)}-${num(Math.min(total, Math.ceil(b)))} of ${num(total)}` })
-    if (zoom) d.hits.push({ y: y0 + k, x0: x, x1: x + 1, on: () => go(Math.floor(zFrom + (k / rows) * zLen)), tip: 'the rows around the view' })
+    const where = `rows ${num(Math.floor(a) + 1)}-${num(Math.min(total, Math.ceil(b)))} of ${num(total)}`
+    for (let j = 0; j < n; j++) d.hits.push({ y: y0 + k, x0: x - n + j, x1: x - n + j + 1, on: () => go(Math.floor(a)), tip: `${lanes[j].title}: ${where}` })
+    d.hits.push({ y: y0 + k, x0: x, x1: x + 1, on: () => go(Math.floor(a)), tip: where })
   }
 }
 
@@ -3526,7 +3647,7 @@ function chooser(opts, name, initial) {
  * Filter by: which rows show, by a field of the view or a label (docs/terminal-views.md, "Filter by and Rows"). In the
  * top row, `Filter by  Outcome` and the chosen one's values as toggles, `●` while a value shows and `○` while it is off,
  * never in a hue (only Color by colors); `f`, or a click on the choice, opens its menu. The page hides a record whose
- * value is off (`keeps`), or sends `query()` to its reader, which takes it with thimble.colour_value and colour_on.
+ * value is off (`keeps`), or sends `query()` to its reader, which takes it with thimble.color_value and color_on.
  * Filter by alone hides records: Color by only colors.
  *
  * opts: fields [{name, title, description?, values?, meanings?, value?(record), nameOf?(value)}], initial (a field's
@@ -3758,7 +3879,7 @@ export function rows(opts = {}) {
       for (const k of roots.sort(order)) walk(k, 0, '', true, null)
       return out
     },
-    /** The choice for the reader: `{field}`, `{label, name}`, or null; thimble.colour_value(rows, ref, record) gives a
+    /** The choice for the reader: `{field}`, `{label, name}`, or null; thimble.color_value(rows, ref, record) gives a
      *  record's group there. */
     query() {
       const b = ch.by()
@@ -3801,24 +3922,60 @@ export function rows(opts = {}) {
   return api
 }
 
-// ------------------------------------------------------------------------------------------------ lanes
+// ------------------------------------------------------------------------------------------------ the timeline
 
 /**
- * The overview as lanes on the time range's scale (docs/terminal-views.md, "Lanes"): a lane per group of Rows, its name
- * in the gutter at the left with its tree guide (a top group's `▾` `▸` folds the lanes under it into its own), its
- * records' bars in the Color by hues on one height, `─` in the rule gray where it ran (`band`) and in a record's hue
- * while that record ran (`end`), and `×` in red where most of a cell's records failed (`problem`). Under the pointer a
- * lane marks only its cell, `┊` or the bar in the text color, with the cell's time and records in the tip; a click opens
- * the record nearest there (`onMark`), a click on a name chooses the lane (`onPick`). The list's rows in view are on the
- * selection background across the lanes (`span`, or a list's `span()`). `legend()` is the key for `axis`, each entry a
- * toggle that hides or shows its series.
+ * The timeline: the overview as lanes on one axis of times or numbers (docs/terminal-views.md, "The timeline"; `lanes`
+ * is its old name): a lane per group of `rows` (the Rows control, a field's name or a function of a record), its name in
+ * the gutter at the left with its tree guide (a top group's `▾` `▸` folds the lanes under it into its own), its
+ * records' bars in the Color by hues on one height, `─` in the rule gray where it ran (`band`, in Events only) and in a
+ * record's hue while that record ran (`end`), and `×` in red where most of a cell's records failed (`problem`). The axis is the
+ * scale `draw` gets (the time range's), else the records' own span in `unit`, with an axis of its own under the lanes;
+ * with no `rows`, one lane with no name. Under the pointer a lane marks only its cell, `┊` or the bar in the text color,
+ * with the cell's time and records in the tip; a click opens the record nearest there (`onMark`), a click on a name
+ * chooses the lane (`onPick`). The list's rows in view are on the selection background across the lanes (`span`, or a
+ * list's `span()`). `legend()` is the key for `axis`, each entry a toggle that hides or shows its series.
+ * `drawLane(lane, ctx)` draws the view's own cells in each lane under its records' marks, as the browser's does:
+ * `ctx.shade(t0, t1, {color, name, series})` a shaded span `░`, its name in the cells' tips, `ctx.put(x, run)` a cell,
+ * `ctx.x(t)` a time's cell, `ctx.colorOf(record)` its hue and `ctx.on(id)` whether a series of `series` shows.
  *
- * opts: rows (a Rows control) or groups(items), colour (Color by; the view's by default), time(item), end(item),
- * band(lane) [[start, end]], problem(item), onPick(lane), onMark(item), words {band, problem, record}, key.
+ * opts: rows (a Rows control, a field's name or a function of a record) or groups(items), color (Color by; the view's
+ * by default), time(item), end(item), unit ('s' or 'n', for an axis of its own), band(lane) [[start, end]],
+ * problem(item), onPick(lane), onMark(item), words {band, problem, record}, key, drawLane(lane, ctx), marks (false or
+ * a function of a record: whether Events draws its mark), series [{id, name, mark, color, glyph}].
  */
 const EVENT = '▌' // a lane's cell that holds a record, while the lanes draw Events rather than density
+// the key's glyph of a series of the view's own, by its mark as the browser's key draws it
+const SERIES_GLYPH = { band: '░', mark: '▌', line: '─', problem: '×' }
 
-export function lanes(opts = {}) {
+// a record's place on the axis, a number in `unit`: a number as it is, a string that holds one as that number, and on
+// an axis of time a Date or a date as text too, such as an ISO time, one with no zone in UTC as the axis writes times
+// (secs, as the browser's lanes read them), in seconds; else null, a record with no place
+function placeOf(v, unit) {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null
+  if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) return Number(v)
+  if (unit === 'n' || (typeof v !== 'string' && !(v instanceof Date))) return null
+  return secs(v)
+}
+
+// the lanes of a field or a function of a record (`rows` with no Rows control): its values as the records first take
+// them, then a lane for the records with none
+function groupsOf(items, rowOf, word) {
+  const by = new Map()
+  const none = []
+  for (const it of items) {
+    const v = rowOf(it)
+    if (v === null || v === undefined || v === '' || typeof v === 'object') none.push(it)
+    else if (by.has(String(v))) by.get(String(v)).push(it)
+    else by.set(String(v), [it])
+  }
+  const node = (key, name, its) => ({ key, value: key === '' ? null : key, name, depth: 0, guide: '', last: true, heading: false, parent: null, children: 0, items: its })
+  const out = [...by].map(([k, its]) => node(k, k, its))
+  if (none.length) out.push(node('', word ? `no ${word}` : 'no value', none))
+  return out
+}
+
+export function timeline(opts = {}) {
   const name = opts.key ? `lanes:${opts.key}` : 'lanes'
   const keptL = kept(name) || {}
   const st = {
@@ -3828,9 +3985,25 @@ export function lanes(opts = {}) {
     top: 0,
     shown: [],
     counts: { band: 0, problem: 0 },
+    drawn: new Set(), // the ids of the view's own series a lane drew (drawLane)
   }
+  // the view's own series in the key, and whether Events draws a record's mark (`marks`)
+  const series = (Array.isArray(opts.series) ? opts.series : []).filter((s) => s && s.id !== null && s.id !== undefined && s.id !== 'band' && s.id !== 'problem')
+  const marksFn = opts.marks === false ? () => false : typeof opts.marks === 'function' ? opts.marks : null
   const words = { band: 'running', problem: 'failed', record: 'record', ...(opts.words || {}) }
-  const time = typeof opts.time === 'function' ? opts.time : (it) => (it.t ?? it.time)
+  let unit = opts.unit === 'n' ? 'n' : 's'
+  const at = typeof opts.time === 'function' ? opts.time : (it) => (it.t ?? it.time)
+  const time = (it) => placeOf(at(it), unit)
+  // a record's end, no earlier than its place
+  const endOf = (it, t) => {
+    const e = typeof opts.end === 'function' ? placeOf(opts.end(it), unit) : null
+    return e === null || e < t ? t : e
+  }
+  const by = opts.rows
+  const rowsControl = by && typeof by === 'object' && typeof by.groups === 'function' ? by : null
+  const rowOf = typeof by === 'function' ? by : typeof by === 'string' && by ? (it) => (it && typeof it === 'object' ? it[by] : null) : null
+  // with nothing to tell lanes apart, one lane and no names
+  const bare = !rowsControl && !rowOf && typeof opts.groups !== 'function'
   const save = () => keep(name, { off: [...st.off], folded: [...st.folded] })
   const isOn = (series) => !st.off.has(series)
   const toggle = (series) => {
@@ -3842,7 +4015,7 @@ export function lanes(opts = {}) {
   // the lanes in `room` rows: a top group with children folds by itself, the largest first, until they fit, the
   // analyst's ▸ ▾ first; then the rows past the room wait behind `… N more`
   function layout(items, room) {
-    const nodes = typeof opts.groups === 'function' ? opts.groups(items) : opts.rows ? opts.rows.groups(items) : [{ key: '*', name: 'all', depth: 0, guide: '', items: items.slice(), children: 0 }]
+    const nodes = typeof opts.groups === 'function' ? opts.groups(items) : rowsControl ? rowsControl.groups(items) : rowOf ? groupsOf(items, rowOf, typeof by === 'string' ? by : '') : [{ key: '*', name: 'all', depth: 0, guide: '', items: items.slice(), children: 0 }]
     const tops = nodes.filter((n) => n.depth === 0 && n.children)
     const below = (n) => {
       const i = nodes.indexOf(n)
@@ -3878,20 +4051,63 @@ export function lanes(opts = {}) {
       if (b < scale.from || a > scale.to) return
       for (let x = scale.x(Math.max(a, scale.from)); x <= scale.x(Math.min(b, scale.to)); x++) if (!inGap(x)) out[x] = run
     }
-    if (typeof opts.band === 'function' && !(n.heading && !n.folded)) {
+    // a band where the lane ran, in Events only: Density draws its bars alone
+    if (typeof opts.band === 'function' && !dense && !(n.heading && !n.folded)) {
       const spans = opts.band(n) || []
       if (spans.length) st.counts.band++
       if (isOn('band')) for (const [a, b] of spans) fill(a, b, { s: '─', fg: COLORS.rule })
     }
     if (typeof opts.end === 'function')
       for (const it of its) {
-        const e = opts.end(it)
-        if (!(e > time(it)) || e - time(it) < scale.step) continue
+        const t = time(it)
+        const e = endOf(it, t)
+        if (!(e > t) || e - t < scale.step) continue
         const hue = colour ? colour.colourOf(colour.valueOf(it)) : null
-        fill(time(it), e, hue && hue !== COLORS.dim ? { s: '─', fg: hue } : { s: '─', d: true })
+        fill(t, e, hue && hue !== COLORS.dim ? { s: '─', fg: hue } : { s: '─', d: true })
       }
-    // each cell's records, those that failed and their Color by values, in one pass over the lane's records
+    // the view's own drawing (drawLane): its shaded spans and cells, under the records' marks
+    const named = new Array(scale.cols)
+    if (typeof opts.drawLane === 'function') {
+      const ctx = {
+        scale,
+        cols: scale.cols,
+        x: (t) => {
+          const p = placeOf(t, unit)
+          return p === null || p < scale.from || p > scale.to ? -1 : scale.x(p)
+        },
+        colorOf: (it) => {
+          const c = colour ? colour.colourOf(colour.valueOf(it)) : null
+          return c && c !== COLORS.dim ? c : null
+        },
+        on: (id) => {
+          st.drawn.add(String(id))
+          return isOn(String(id))
+        },
+        shade: (t0, t1, o = {}) => {
+          if (o.series !== undefined && o.series !== null && !ctx.on(o.series)) return
+          let a = placeOf(t0, unit)
+          let b = t1 === undefined || t1 === null ? a : placeOf(t1, unit)
+          if (a === null || b === null) return
+          if (b < a) [a, b] = [b, a]
+          if (b < scale.from || a > scale.to) return
+          const c = o.color || o.colour
+          for (let x = scale.x(Math.max(a, scale.from)); x <= scale.x(Math.min(b, scale.to)); x++) {
+            if (inGap(x) || x < 0 || x >= scale.cols) continue
+            out[x] = { s: '░', fg: c || COLORS.rule }
+            if (o.name !== undefined && o.name !== null && o.name !== '') (named[x] || (named[x] = [])).push(String(o.name))
+          }
+        },
+        put: (x, run) => {
+          if (Number.isInteger(x) && x >= 0 && x < scale.cols && !inGap(x) && run && typeof run.s === 'string') out[x] = { ...run, s: [...run.s][0] || ' ' }
+        },
+      }
+      ctx.colourOf = ctx.colorOf
+      opts.drawLane(n, ctx)
+    }
+    // each cell's records, those that failed and their Color by values, in one pass over the lane's records; in Events
+    // the hue of a cell's mark is that of the records whose marks the kit draws (`marks`)
     const counts = new Int32Array(scale.cols)
+    const marked = new Int32Array(scale.cols)
     const failed = new Int32Array(scale.cols)
     const values = new Array(scale.cols)
     const problem = typeof opts.problem === 'function' ? opts.problem : null
@@ -3900,6 +4116,8 @@ export function lanes(opts = {}) {
       if (x < 0) continue
       counts[x]++
       if (problem && problem(it)) failed[x]++
+      if (!dense && marksFn && !marksFn(it)) continue
+      marked[x]++
       const v = colour ? colour.valueOf(it) : null
       const k = v === null || v === undefined ? '' : String(v)
       const m = values[x] || (values[x] = new Map())
@@ -3909,7 +4127,7 @@ export function lanes(opts = {}) {
     // Events: a mark in every cell that holds a record
     const hue = hueFn(colour)
     for (let x = 0; x < scale.cols; x++) {
-      if (!counts[x]) continue
+      if (!marked[x]) continue
       let best = ''
       let bn = 0
       for (const [v, m] of values[x]) if (v !== '' && m > bn && hue(v)) [best, bn] = [v, m]
@@ -3930,7 +4148,8 @@ export function lanes(opts = {}) {
     const tips = Array.from({ length: scale.cols }, (_, x) => {
       const k = counts[x]
       const bad = failed[x]
-      return `${n.name} · ${whens[x]}${k ? ` · ${plural(k, words.record)}` : ''}${bad ? ` · ${num(bad)} ${words.problem}` : ''}`
+      const own = named[x] ? ` · ${[...new Set(named[x])].join(', ')}` : ''
+      return `${bare ? '' : `${n.name} · `}${whens[x]}${k ? ` · ${plural(k, words.record)}` : ''}${bad ? ` · ${num(bad)} ${words.problem}` : ''}${own}`
     })
     return { runs: out, tips, its }
   }
@@ -3953,24 +4172,41 @@ export function lanes(opts = {}) {
       const out = []
       if (typeof opts.band === 'function' && st.counts.band) out.push({ id: 'band', glyph: '─', fg: COLORS.rule, name: words.band, on: isOn('band'), toggle: () => toggle('band') })
       if (typeof opts.problem === 'function' && st.counts.problem) out.push({ id: 'problem', glyph: '×', fg: COLORS.problem, name: words.problem, on: isOn('problem'), toggle: () => toggle('problem') })
+      for (const s of series) {
+        const id = String(s.id)
+        if (st.drawn.has(id)) out.push({ id, glyph: s.glyph || SERIES_GLYPH[s.mark || 'band'] || '░', fg: s.color || s.colour || COLORS.rule, name: String(s.name || id), on: isOn(id), toggle: () => toggle(id) })
+      }
       return out
     },
-    /** Draw the lanes: `o.items` (those of the range), `o.scale` (range.scale), `o.gutter` (the names' cells), `o.room`
-     *  (rows, the rows left by default), `o.span` ([t0, t1] or a list whose rows in view it marks), `o.density` (false:
-     *  Events, a mark `▌` in each cell with a record, in place of the bars of its records). */
+    /** Draw the lanes: `o.items` (those of the range; a record with no place on the axis is left out), `o.scale`
+     *  (range.scale; without it the records' own span, with its axis under the lanes), `o.gutter` (the names' cells),
+     *  `o.room` (rows, the rows left by default), `o.span` ([t0, t1] or a list whose rows in view it marks), `o.density`
+     *  (false: Events, a mark `▌` in each cell with a record, in place of the bars of its records). */
     draw(d, o = {}) {
-      const items = o.items || []
-      const scale = o.scale
-      const gutter = o.gutter || 14
-      const room = Math.max(1, Math.min(o.room ?? d.left, d.left))
-      const colour = opts.colour || state.colour
+      if (o.scale && (o.scale.unit === 'n' || o.scale.unit === 's')) unit = o.scale.unit
+      else if (!o.scale) unit = opts.unit === 'n' ? 'n' : 's'
+      const placed = (it) => it !== null && it !== undefined && time(it) !== null
+      const items = (o.items || []).every(placed) ? o.items || [] : o.items.filter(placed)
+      // plain numbers not all whole, such as scores: their ticks and tips keep the decimals a cell needs
+      const fine = unit === 'n' && items.some((it) => time(it) % 1 || endOf(it, time(it)) % 1)
+      const gutter = o.gutter || (bare ? 0 : 14)
+      // an axis of its own takes a row under the lanes, and one more where its key has no room in the gutter; none
+      // with no records to place
+      const keyW = [typeof opts.band === 'function' && `─ ${words.band}`, typeof opts.problem === 'function' && `× ${words.problem}`, ...series.map((s) => `░ ${s.name || s.id}`)].filter(Boolean).reduce((w, s, i) => w + (i ? 2 : 0) + width(s), 0)
+      const ownAxis = !o.scale && items.length > 0
+      const axisRows = ownAxis ? (keyW && keyW > gutter - 2 ? 2 : 1) : 0
+      const room = Math.max(1, Math.min(o.room ?? d.left, d.left) - axisRows)
+      const scale = o.scale || ownScale(items, Math.max(10, d.cols - gutter), fine)
+      const colour = colorOption(opts) || state.colour
       const span = o.span && typeof o.span.span === 'function' ? o.span.span(time) : Array.isArray(o.span) ? o.span : null
       const dense = o.density !== false
       const all = layout(items, room)
       st.counts = { band: 0, problem: 0 }
+      st.drawn = new Set()
       const groups = all.map((n) => n.items)
       const max = maxBin(scale, groups, time)
-      const whens = Array.from({ length: scale.cols }, (_, x) => when(scale.t(x), Math.max(1, scale.step)))
+      const years = unit !== 'n' && yearOf(scale.from) !== yearOf(scale.to)
+      const whens = Array.from({ length: scale.cols }, (_, x) => (unit === 'n' ? numAt(scale.t(x), fine ? scale.step : 1) : when(scale.t(x), Math.max(1, scale.step), years || scale.step >= 86400)))
       // the rows past the room wait behind `… N more`, which shows the next of them
       const fits = all.length <= room ? all.length : Math.max(1, room - 1)
       if (st.top >= all.length || all.length <= room) st.top = 0
@@ -3980,19 +4216,21 @@ export function lanes(opts = {}) {
         const its = groups[all.indexOf(n)]
         const r = d.row()
         const own = n.depth === 0
-        if (own && n.children) r.add(n.folded ? '▸' : '▾', {}, { on: () => { st.folded.set(n.key, !n.folded); save(); redraw() }, tip: n.folded ? 'show the lanes under it' : 'fold the lanes under it into its own' }).gap(1)
-        else r.gap(2)
-        if (n.guide) r.add(n.guide, { fg: COLORS.rule })
-        const nameStyle = st.chosen === n.key ? { fg: COLORS.accent } : n.heading ? { b: true } : {}
-        r.add(n.name, nameStyle, {
-          on: () => {
-            st.chosen = n.key
-            if (typeof opts.onPick === 'function') opts.onPick(n)
-            redraw()
-          },
-          tip: `${n.name}: ${plural(n.items.length, words.record)}`,
-          max: Math.max(3, gutter - 2 - r.x),
-        })
+        if (!bare) {
+          if (own && n.children) r.add(n.folded ? '▸' : '▾', {}, { on: () => { st.folded.set(n.key, !n.folded); save(); redraw() }, tip: n.folded ? 'show the lanes under it' : 'fold the lanes under it into its own' }).gap(1)
+          else r.gap(2)
+          if (n.guide) r.add(n.guide, { fg: COLORS.rule })
+          const nameStyle = st.chosen === n.key ? { fg: COLORS.accent } : n.heading ? { b: true } : {}
+          r.add(n.name, nameStyle, {
+            on: () => {
+              st.chosen = n.key
+              if (typeof opts.onPick === 'function') opts.onPick(n)
+              redraw()
+            },
+            tip: `${n.name}: ${plural(n.items.length, words.record)}`,
+            max: Math.max(3, gutter - 2 - r.x),
+          })
+        }
         r.at(gutter)
         if (!(n.heading && !n.folded)) {
           const x0 = r.x
@@ -4003,7 +4241,7 @@ export function lanes(opts = {}) {
             x1: x0 + scale.cols,
             cursor: true,
             tips: lane.tips,
-            tip: `${n.name}: a click opens the ${words.record} nearest that time`,
+            tip: `${bare ? '' : `${n.name}: `}a click opens the ${words.record} nearest there`,
             on: (x) => {
               const t = scale.t(x)
               const near = lane.its.filter((it) => Math.abs(time(it) - t) <= scale.step * 3).sort((a, b) => Math.abs(time(a) - t) - Math.abs(time(b) - t))[0]
@@ -4018,11 +4256,32 @@ export function lanes(opts = {}) {
         const words2 = left > 0 ? `… ${num(left)} more` : '… back to the first'
         d.row().gap(2).add(words2, { d: true }, { on: () => { st.top = left > 0 ? st.top + fits : 0; redraw() }, tip: left > 0 ? 'show the next lanes' : 'show the first lanes' }).end()
       }
+      if (ownAxis) axis(d, scale, { gutter, legend: api.legend() })
     },
+  }
+  // without a scale from the page: the records' whole span across `cols` cells; one record's moment, or none, in the
+  // middle of a minute (of one unit for plain numbers)
+  function ownScale(items, cols, fine) {
+    let a = Infinity
+    let b = -Infinity
+    for (const it of items) {
+      const t = time(it)
+      const e = endOf(it, t)
+      if (t < a) a = t
+      if (e > b) b = e
+    }
+    if (!Number.isFinite(a)) a = b = 0
+    if (b <= a) {
+      const half = unit === 'n' ? 0.5 : 30
+      a -= half
+      b += half
+    }
+    return scaleOf(a, b, cols, unit, null, fine)
   }
   state.resets.push({ changed: () => st.off.size > 0, reset: () => { st.off.clear(); save() } })
   return api
 }
+export { timeline as lanes }
 
 // ------------------------------------------------------------------------------------------------ the transcript
 
@@ -4036,16 +4295,23 @@ const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Se
  * came back, an error in red), in place or in a side pane (`side`), `a` asks about it, and its track shows where the
  * Color by values are.
  *
- * opts: key (the list's), enter. draw(d, {turns, title, count, colour, side, onOpen, empty}): turns [{ref, t, speaker,
- * kind (text | prompt | tool | thinking | system), tool, text, input, output, error}].
+ * opts: key (the list's), enter. draw(d, {turns, title, count, color, side, onOpen, empty}): turns [{ref, t, speaker,
+ * kind (text | prompt | tool | thinking | system), tool, text, input, output, error}], `t` (or `time`) in seconds since
+ * 1970 or a date such as an ISO time, one with no zone in UTC, as the browser's transcript reads it.
  */
 export function transcript(opts = {}) {
   const items = list({ key: (t) => t.ref, enter: opts.enter || 'to open' })
-  const clockOf = (t) => (typeof t.t === 'number' && Number.isFinite(t.t) ? hms(t.t) : '')
+  // a turn's time in seconds from its `t` (or `time`), read as the browser's transcript reads it; null for none
+  const secsOf = (t) => secs(t.t !== null && t.t !== undefined && t.t !== '' ? t.t : t.time)
+  const clockOf = (t) => {
+    const s = secsOf(t)
+    return s === null ? '' : hms(s)
+  }
   const dayOf2 = (t) => {
-    if (typeof t.t !== 'number' || !Number.isFinite(t.t)) return ''
-    const d = new Date(t.t * 1000)
-    return `${d.getUTCDate()} ${MONTH_NAMES[d.getUTCMonth()]} ${d.getUTCFullYear()}`
+    const s = secsOf(t)
+    if (s === null) return ''
+    const d = new Date(s * 1000)
+    return `${MONTH_NAMES[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`
   }
   const firstLine = (s) => oneLine(String(s ?? '').split('\n').find((l) => l.trim()) || '')
   const api = {
@@ -4056,7 +4322,7 @@ export function transcript(opts = {}) {
     },
     draw(d, o = {}) {
       const turns = o.turns || []
-      const colour = o.colour || null
+      const colour = colorOption(o) || null
       // Color by's choices past the first: a mark each after the speaker's
       const tracks = colour && Array.isArray(colour.tracks) ? colour.tracks.slice(0, TRACKS_MAX) : []
       const withTime = turns.some((t) => clockOf(t))
@@ -4155,7 +4421,11 @@ export function frameText(f, o = {}) {
       if (rgb) codes.push(`38;2;${rgb.join(';')}`)
       else if (ANSI_FG[sg.fg]) codes.push(ANSI_FG[sg.fg])
     }
-    if (sg.bg && bgs[sg.bg]) codes.push(bgs[sg.bg])
+    if (sg.bg) {
+      const rgb = hexRgb(sg.bg)
+      if (rgb) codes.push(`48;2;${rgb.join(';')}`)
+      else if (bgs[sg.bg]) codes.push(bgs[sg.bg])
+    }
     return codes.length ? `\x1b[${codes.join(';')}m${sg.s}\x1b[0m` : sg.s
   }).join('').replace(/\s+$/, '')).join('\n')
 }

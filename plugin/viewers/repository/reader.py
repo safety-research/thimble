@@ -61,11 +61,11 @@
 # pull request's conversation, commits and changed files, an issue's timeline, a thread's posts and an agent's profile.
 #
 # What the page asks (records(index, query)):
-#   {"op": "view", "run": <a run>, "tab": "pulls" | "issues" | "discussions" | "agents", "colour": <colour.query()>,
+#   {"op": "view", "run": <a run>, "tab": "pulls" | "issues" | "discussions" | "agents", "color": <color.query()>,
 #    "filter": <filter.query()>}
 #       one run's repository, as a forge shows one repository at a time: the run's units of the tab that the label
-#       filter keeps (thimble.kept_unit) and Filter by keeps (thimble.colour_on), each with the facts its
-#       list row shows, its value under the Color by choice (thimble.colour_value) and, under a label, how many of its
+#       filter keeps (thimble.kept_unit) and Filter by keeps (thimble.color_on), each with the facts its
+#       list row shows, its value under the Color by choice (thimble.color_value) and, under a label, how many of its
 #       records take each value; the counts of every value for Filter by's and Color by's chips; how many units each
 #       tab of the run holds under the same filters; and each run's facts with its tabs' counts, which the run switcher
 #       lists. The run is the first when `run` names none
@@ -573,10 +573,10 @@ def _value(choice, u, ref=None):
     thimble marks the unit; None for none."""
     if isinstance(choice, dict) and choice.get("label") is not None:
         if ref:
-            return thimble.colour_value(choice, ref)
-        seen = Counter(v for r in (u["refs"] + u.get("more", []))[:200] if (v := thimble.colour_value(choice, r)) is not None)
+            return thimble.color_value(choice, ref)
+        seen = Counter(v for r in (u["refs"] + u.get("more", []))[:200] if (v := thimble.color_value(choice, r)) is not None)
         return max(seen, key=seen.get) if seen else None
-    return thimble.colour_value(choice, None, u)
+    return thimble.color_value(choice, None, u)
 
 
 def _by_records(index, choice, u):
@@ -586,9 +586,9 @@ def _by_records(index, choice, u):
     for a label, and for a field the agent carries: its author, itself."""
     if u["tab"] != "agents" or not isinstance(choice, dict) or choice.get("label") is not None or not choice.get("field"):
         return None
-    if thimble.colour_value(choice, None, u) is not None:
+    if thimble.color_value(choice, None, u) is not None:
         return None
-    return [thimble.colour_value(choice, None, index["units"].get(index["line"].get(e[0])))
+    return [thimble.color_value(choice, None, index["units"].get(index["line"].get(e[0])))
             for e in u["events"] if e[6] != "agent" and thimble.kept(e[0])]
 
 
@@ -646,8 +646,8 @@ def _view(index, query):
     tab = query.get("tab") if query.get("tab") in TABS else "pulls"
     names = sorted(index["runs"])
     run = query.get("run") if query.get("run") in index["runs"] else (names[0] if names else None)
-    colour, filt = query.get("colour"), query.get("filter")
-    by_label = isinstance(colour, dict) and colour.get("label") is not None
+    color, filt = query.get("color"), query.get("filter")
+    by_label = isinstance(color, dict) and color.get("label") is not None
     items, counts, filtered = [], Counter(), Counter()
     tabs = {r: Counter() for r in names}
     units = sorted(index["units"].values(), key=lambda u: (u["run"], u.get("number") or 0, u.get("name") or ""))
@@ -658,10 +658,10 @@ def _view(index, query):
         fvs = _values(filt, u, _by_records(index, filt, u))
         if here:
             filtered.update("" if v is None else v for v in fvs)
-        if not any(thimble.colour_on(filt, v) for v in fvs):
+        if not any(thimble.color_on(filt, v) for v in fvs):
             continue
-        got = _by_records(index, colour, u)
-        values = _values(colour, u, got)
+        got = _by_records(index, color, u)
+        values = _values(color, u, got)
         if here:
             counts.update("" if v is None else v for v in values)
         tabs[u["run"]][u["tab"]] += 1
@@ -669,12 +669,12 @@ def _view(index, query):
             continue
         # an agent standing for its records takes the value most of them take, as a unit under a label does
         seen = Counter(v for v in got or [] if v is not None)
-        value = _value(colour, u) if got is None else seen.most_common(1)[0][0] if seen else None
+        value = _value(color, u) if got is None else seen.most_common(1)[0][0] if seen else None
         item = {**_facts(index, u), "value": value, "search": u["search"]}
         mix = None
         if by_label:
             # the unit's records as thimble marks it (resolve's refs): how many take each value, in the order they come
-            mix = Counter(_value(colour, u, r) for r in (u["refs"] + u.get("more", []))[:200] if thimble.kept(r))
+            mix = Counter(_value(color, u, r) for r in (u["refs"] + u.get("more", []))[:200] if thimble.kept(r))
         elif got is not None:
             mix = Counter(got)
         if mix is not None:
@@ -773,7 +773,7 @@ def _detail(index, key):
 
 
 def records(index, query):
-    """{op: view, run?, tab, colour?, filter?}: one run's tab of units (_view). {op: unit, key}: one unit opened
+    """{op: view, run?, tab, color?, filter?}: one run's tab of units (_view). {op: unit, key}: one unit opened
     (_detail)."""
     query = query or {}
     if query.get("op") == "unit":

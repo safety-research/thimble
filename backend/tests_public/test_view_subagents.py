@@ -18,7 +18,7 @@ import pytest
 from conftest import Listener
 from fastapi.testclient import TestClient
 
-from app import agents, config, dev, events, orient_session, orientation, session, subagents, tools, view_review, view_tools, views
+from app import agents, config, dev, events, orient_session, orientation, prompts, session, subagents, tools, view_review, view_tools, views
 from app import subagent_files as sf
 from subagent_fakes import bridge, hints  # noqa: F401 — fixtures
 
@@ -166,6 +166,36 @@ async def test_main_s_propose_view_gives_the_exact_agent_call_its_hook_lets_thro
         assert sf.check_call(state, {"tool_name": "Agent", "tool_use_id": "toolu_x", "tool_input": inp}) is None
     slug = views.built_slug(CORPUS, "Posts") or next(p["slug"] for p in views.list_proposals(CORPUS))
     assert _prop(slug)["status"] == "building" and (CORPUS, slug) in dev._view_runs
+
+
+async def test_a_design_the_analyst_asked_main_for_reaches_the_builder_and_the_reviewer_word_for_word(board, bridge,
+                                                                                                     gates, hints):
+    # the reviewer keeps a visual design the proposal asks for (prompts/view-review.md), so main's propose_view fields,
+    # which carry the analyst's request, reach the builder's task and the reviewer's task whole
+    why = "Each post as the board drew it, in the old forum's look: serif titles, blue links, quoted replies indented."
+    overview = "The thread list in a dense grid in the style of a spreadsheet, one row per post, with no gaps."
+    res = await tools.call(CORPUS, "propose_view", {"name": "Posts", "why": why, "claims": ["board.jsonl"],
+                                                    "unit": "a post", "overview": overview, "zoom": "a post",
+                                                    "filter": "labels", "details": "the body"},
+                           tool_use_id="toolu_main2")
+    assert not res.is_error, res.text
+    builder = json.loads(res.text.split("AGENT CALL ", 1)[1].splitlines()[0])["prompt"]
+    slug = next(p["slug"] for p in views.list_proposals(CORPUS))
+    reviewer = view_review.task(CORPUS, _prop(slug))
+    for prompt in (builder, reviewer):
+        assert why in prompt and overview in prompt
+
+
+@pytest.mark.parametrize("mode", prompts.MODES)
+def test_the_builder_and_the_reviewer_are_registered_to_keep_a_design_the_proposal_asks_for(board, mode):
+    # prompts/dev-view.md's "A good view" and prompts/view-review.md's principles say so in both modes, and each reaches
+    # its agent's registered prompt as the module registers it (subagents.roles)
+    with prompts.rendering(mode):
+        roles = subagents.roles(CORPUS)
+    builder, reviewer = roles["view-builder"]["prompt"], roles["view-reviewer"]["prompt"]
+    ask = "When the proposal asks for a visual design"
+    assert ask in builder and "build that design" in builder
+    assert ask in reviewer and "keep that design" in reviewer
 
 
 async def test_main_s_message_to_a_view_s_build_thread_gives_the_exact_agent_call(board, bridge, gates, hints):

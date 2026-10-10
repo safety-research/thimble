@@ -99,7 +99,8 @@ def test_values_for_takes_the_run_s_arguments_over_settings(models):
 def test_the_work_folders_main_s_bash_may_write():
     ws = config.workspace_path(CORPUS)
     assert subagents.write_dirs(CORPUS) == [ws / "orient/work", ws / "writers", ws / "critique-work",
-                                             ws / "check-work", ws / "views-work", ws / "extension/views"]
+                                             ws / "check-work", ws / "views-work", ws / "extension/views",
+                                             ws / "card-libs"]
 
 
 # --------------------------------------------------------------------------- the files the hooks trust
@@ -552,9 +553,9 @@ async def test_the_critic_may_not_add_a_card_and_main_may_not_critique(bridge, m
 
 
 async def test_main_s_own_call_runs_at_once_and_a_subagent_s_is_found_by_its_transcript(bridge, tmp_path):
-    """The caller hook writes a line only for a subagent's call, and before Claude Code makes it, so main's own call has
-    none: it is told apart by main's transcript at once, not after CALLER_WAIT_S (live: each of main's thimble calls
-    took 2 s longer, start_orientation 4.2 s). A subagent's call with no line yet is found by its own transcript."""
+    """A call the caller hook wrote no line for (a hook of an older thimble) is told apart by the transcripts: main's
+    own at once when main's transcript holds it, not after CALLER_WAIT_S (live: each of main's thimble calls took 2 s
+    longer, start_orientation 4.2 s). A subagent's call with no line yet is found by its own transcript."""
     import time
 
     from app import session, tools
@@ -582,6 +583,34 @@ async def test_main_s_own_call_runs_at_once_and_a_subagent_s_is_found_by_its_tra
         assert time.monotonic() - t < 0.5, "main's own call runs at once"
         who = await subagents.caller(CORPUS, "toolu_sub1")
         assert who is not None and who.key == "orient", "a subagent's call is found by the transcript that holds it"
+    finally:
+        session._live.pop(CORPUS, None)
+
+
+async def test_main_s_own_call_runs_at_once_by_its_caller_line_while_main_s_transcript_lacks_it(bridge, tmp_path,
+                                                                                               monkeypatch):
+    """Claude Code writes a call to main's transcript only once the call has returned (2.1.295; live 2026-10-10: each of
+    main's add_card and edit_card calls took 2.03 to 2.09 s, the whole CALLER_WAIT_S). The caller hook writes main's own
+    call as a line with no agent, so the call runs as main's at once, and a start tool's typed_caller waits for nothing
+    either; a call with no line still waits for the transcripts."""
+    import time
+
+    from app import session, tools
+
+    assert subagents.CALLER_WAIT_S >= 1.0, "the wait this test shows main's calls no longer take"
+    main = tmp_path / "main.jsonl"
+    main.write_text("")  # main's transcript, which holds none of the calls below while they run
+    session._live[CORPUS] = session.Live(CORPUS, "sid-main", "/tmp", str(main), None)
+    sf.add_caller(config.workspace_dir(CORPUS), "toolu_main2", "", "")
+    try:
+        t = time.monotonic()
+        assert await tools._as_caller(CORPUS, "add_card", "toolu_main2") == ("", None)
+        assert await subagents.typed_caller(CORPUS, "toolu_main2") is None
+        assert time.monotonic() - t < 0.5, "main's own call runs at once"
+        monkeypatch.setattr(subagents, "CALLER_WAIT_S", 0.3)
+        t = time.monotonic()
+        assert await subagents.caller(CORPUS, "toolu_no_line") is None
+        assert time.monotonic() - t >= 0.3, "a call with no line waits for the transcripts"
     finally:
         session._live.pop(CORPUS, None)
 

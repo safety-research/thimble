@@ -4,7 +4,9 @@ import type {
   Extensions,
   LocalExtension,
   Cell,
+  CardVersion,
   CellName,
+  PlanRun,
   CellPatch,
   ChatDetail,
   ChatMeta,
@@ -321,6 +323,10 @@ export const api = {
   addCell: (c: string, nb: string, body: NewCellBody) => j<Cell>(`${ws(c)}/notebooks/${enc(nb)}/cells`, { method: 'POST', body: JSON.stringify(body) }),
   updateCell: (c: string, id: string, patch: CellPatch) => j<Cell>(`${ws(c)}/cells/${enc(id)}`, { method: 'PUT', body: JSON.stringify(patch) }),
   runCell: (c: string, id: string) => j<Cell>(`${ws(c)}/cells/${enc(id)}/run`, { method: 'POST' }),
+  /** the card as it stood before its edit `entry` (backend notebook.card_version_route) */
+  cardVersion: (c: string, id: string, entry: string) => j<CardVersion>(`${ws(c)}/cells/${enc(id)}/versions/${enc(entry)}`),
+  /** make the card as it stood before its edit `entry` again, as an edit of the analyst's (backend notebook.restore_version) */
+  restoreVersion: (c: string, id: string, entry: string) => j<Cell>(`${ws(c)}/cells/${enc(id)}/versions/${enc(entry)}/restore`, { method: 'POST' }),
   /** `POST …/cells/{id}/fixes/{fix}/undo`: restore the card from before a check's fix (backend checkstore.undo_fix); the
      * fix is marked undone and is not applied again. */
   undoCardFix: (c: string, id: string, fix: string) => j<Cell>(`${ws(c)}/cells/${enc(id)}/fixes/${enc(fix)}/undo`, { method: 'POST' }),
@@ -344,6 +350,10 @@ export const api = {
   },
   ipynbUrl: (c: string, nb: string) => `${ws(c)}/notebooks/${enc(nb)}/ipynb`,
   cellNames: (c: string) => j<CellName[]>(`${ws(c)}/cells/names`),
+  /** the live rows of a plan card's runs (backend plans.plan_runs_route) */
+  planRuns: (c: string, id: string) => j<{ runs: PlanRun[] }>(`${ws(c)}/cards/${enc(id)}/plan-runs`),
+  /** take off a plan's marks of what its last edit changed (backend plans.clear_edit_route) */
+  clearPlanEdit: (c: string, id: string) => j<{ cleared: boolean }>(`${ws(c)}/cards/${enc(id)}/plan-edit/clear`, { method: 'POST' }),
 
   // ---- labels and filters ----
   concepts: (c: string) => j<Concept[]>(`${ws(c)}/concepts`),
@@ -421,6 +431,9 @@ export const api = {
   viewProblems: (c: string, slug: string, version?: string, path?: string) => j<ViewProblems>(`${ws(c)}/views/${enc(slug)}/problems${q({ v: version, path })}`),
   viewShown: (c: string, slug: string, version?: string, path?: string) => j<ViewShown>(`${ws(c)}/views/${enc(slug)}/shown${q({ v: version, path })}`),
   viewOpen: (c: string, slug: string, ref: string, version?: string) => j<ViewOpen>(`${ws(c)}/views/${enc(slug)}/resolve${q({ ref, v: version })}`),
+  /** the libraries a custom card names (`libs`, comma-separated) as inline elements for its frame's head (backend
+   * card_libs.libs_route) */
+  cardLibs: (c: string, libs: string) => j<{ head: string; problems: string[] }>(`${ws(c)}/card-libs${q({ libs })}`),
   /** a card type's page as a card's frame loads it (backend cardtypes.frame_route) */
   cardTypeFrame: async (c: string, type: string): Promise<string> => {
     const res = await fetch(`${ws(c)}/cardtypes/${enc(type)}/frame`)
@@ -682,14 +695,14 @@ export const undoApi = {
 }
 
 // --- report checks: the Checks pane's rows (report/Checks.tsx, backend checks.py) ---
-import type { CardCheckStatus, Check, CheckPatch, CheckRun } from './types'
+import type { CardCheckStatus, Check, CheckCover, CheckPatch, CheckRun } from './types'
 
 export const checksApi = {
   /** `GET /checks`: every check of the workspace, the built-ins first, each with its latest run per document. */
   list: (c: string) => j<Check[]>(`${ws(c)}/checks`),
   /** `POST /checks`: a new check from a name and a prompt (201), which the server turns on and runs; a 409 when the
    * name is taken. */
-  create: (c: string, body: { name: string; prompt: string }) => j<Check>(`${ws(c)}/checks`, { method: 'POST', body: JSON.stringify(body) }),
+  create: (c: string, body: { name: string; prompt: string; covers?: CheckCover[] }) => j<Check>(`${ws(c)}/checks`, { method: 'POST', body: JSON.stringify(body) }),
   /** `PATCH /checks/{id}`: turned on or off, renamed, its prompt or colour changed; answers the check. The server runs
    * a check turned on, and one that is on given a new prompt, wherever it has passages it has not seen. */
   update: (c: string, id: string, patch: CheckPatch) => j<Check>(`${ws(c)}/checks/${enc(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),

@@ -2,7 +2,6 @@
 // ref targets and the scroll-and-highlight hook. Rows carry `data-anchor="<path>#L<n>"` and the class `reader-card`;
 // a marked text carries its own span anchor (`<path>#L<n>.b<k>:c<a>-<b>`), so ⌘ picks records and spans alike.
 import { useContext, useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type MouseEvent, type ReactNode, type RefObject } from 'react'
-import { Button } from '../../components/Button'
 import { Icon } from '../../components/Icon'
 import { Tipped } from '../../components/Tooltip'
 import { findQuote } from '../../lib/quoteFind'
@@ -294,7 +293,7 @@ export function RecordCard({ path, line, target, hit, className, header, text, c
     setFolded(f)
   }
   const banded = !!cb?.bands.some(Boolean)
-  const cls = ['reader-card', 'reader-record', className, isT && 'reader-target', isT && hit && 'reader-hit', marks.cells.length && 'has-gutter', marks.tint && 'has-tint', banded && 'has-cb', folded && 'is-folded'].filter(Boolean).join(' ')
+  const cls = ['reader-card', 'reader-record', className, isT && 'reader-target', isT && hit && 'reader-hit', marks.cells.length && 'has-gutter', marks.tint && 'has-tint', banded && 'has-cb', fold && 'has-fold', folded && 'is-folded'].filter(Boolean).join(' ')
   return (
     <div className={cls} data-line={line} data-anchor={`${path}#L${line}`} data-anchor-text={text || undefined} style={markStyle(marks)}>
       {banded && <EdgeBands bands={cb!.bands} />}
@@ -310,9 +309,11 @@ export function RecordCard({ path, line, target, hit, className, header, text, c
             <span className="reader-fold-text">{fold!.summary}</span>
           </button>
         ) : fold ? (
-          <button type="button" className="reader-record-head reader-fold-head mono" aria-expanded onClick={(e) => onFold(e, true)}>
-            <Icon name="chevron-down" size={12} className="reader-fold-caret" />
-            {header}
+          <button type="button" className="reader-fold-head" aria-expanded onClick={(e) => onFold(e, true)}>
+            <span className="reader-record-head mono">
+              <Icon name="chevron-down" size={12} className="reader-fold-caret" />
+              {header}
+            </span>
           </button>
         ) : (
           header != null && <div className="reader-record-head mono">{header}</div>
@@ -404,8 +405,8 @@ interface BlockElProps {
   from?: number
 }
 
-/** A piece of text a label marks: the focused label's colour at 24% behind it, another label's colour as a thin
- * underline; its own ⌘ anchor, the span. */
+/** A piece of text a label marks: the focused label's colour at 24% behind it, another label's colour faintly
+ * behind it; its own ⌘ anchor, the span. */
 export function SpanEl({ seg, anchor, children }: { seg: Seg; anchor?: string; children: ReactNode }) {
   const m = seg.mark!
   return (
@@ -443,8 +444,9 @@ export function BlockEl({ block, path, line, index, target, hit, className, from
 
 export const COLLAPSE_LINES = 6
 
-/** A block folded to COLLAPSE_LINES lines while it is longer, with Expand and Collapse. It opens on UNFOLD_EVENT, which
- * the reader's find sends when its current match is inside. */
+/** A block folded to COLLAPSE_LINES lines while it is longer, with Show more under its cut text and Show less in the
+ * same place once it is open. It opens on UNFOLD_EVENT, which the reader's find sends when its current match is
+ * inside. */
 export function Collapsible({ lines, forced, children }: { lines: number; forced?: boolean; children: ReactNode }) {
   const [open, setOpen] = useState(false)
   const box = useRef<HTMLDivElement>(null)
@@ -461,10 +463,9 @@ export function Collapsible({ lines, forced, children }: { lines: number; forced
     <div ref={box} className={'reader-collapse' + (expanded ? '' : ' reader-collapsed')}>
       {children}
       {long && (
-        <Button size="sm" className="reader-expand" onClick={() => setOpen((o) => !o)}>
-          {expanded ? 'Collapse' : 'Expand'}
-          {!expanded && <span className="dim">{lines} lines</span>}
-        </Button>
+        <button type="button" className="reader-more" aria-expanded={expanded} onClick={() => setOpen((o) => !o)}>
+          {expanded ? 'Show less' : 'Show more'}
+        </button>
       )}
     </div>
   )

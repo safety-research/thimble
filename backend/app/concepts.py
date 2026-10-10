@@ -1787,12 +1787,13 @@ def trial_groups(sources: list[dict], unit: str, limit: int) -> tuple[list[dict]
 
 
 def cell_text(cell: dict) -> str:
-    """What a card says, as text: its question, code, takeaway, note text and output text."""
+    """What a card says, as text: its question, code, takeaway, note text, a plan's steps and output text."""
     from . import notebook
 
     payload = cell.get("payload") if isinstance(cell.get("payload"), dict) else {}
     parts = [str(cell.get("title") or ""), str(cell.get("code") or ""), str(cell.get("takeaway") or ""),
-             str(payload.get("text") or cell.get("text") or ""), notebook.outputs_text(cell.get("outputs") or [])]
+             str(payload.get("text") or cell.get("text") or ""), "\n".join(notebook.plan_lines(cell)),
+             notebook.outputs_text(cell.get("outputs") or [])]
     return "\n\n".join(p for p in parts if p.strip())
 
 
@@ -2296,7 +2297,7 @@ def read_cut(refs: list[str], tokens: list[int], short: int, total: int | None, 
 
 
 def _cancelled_message(n: int, unit: str) -> str:
-    return f"cancelled by the analyst after {n:,} {unit}{'' if n == 1 else 's'}; the rows written so far are kept"
+    return f"canceled by the analyst after {n:,} {unit}{'' if n == 1 else 's'}; the rows written so far are kept"
 
 
 async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path, cancel: threading.Event,
@@ -4264,7 +4265,7 @@ def show_concept(c: str, id_or_name: str, on: bool | None, values: list[str] | N
                                  f"{', '.join(concept['labels'])}")
     nameless = [n for n in painted.values() if n not in COLOUR_NAMES]
     if nameless:
-        raise HTTPException(400, f"no label colour is named {', '.join(map(repr, nameless))}; the colours are {', '.join(COLOUR_NAMES)}")
+        raise HTTPException(400, f"no label color is named {', '.join(map(repr, nameless))}; the colors are {', '.join(COLOUR_NAMES)}")
     if on is not None:
         concept["shown"] = bool(on)
     if on and wanted:

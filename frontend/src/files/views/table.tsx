@@ -334,6 +334,13 @@ const lineText = (rec: SourceRecord | undefined): string | null => (rec && typeo
 /** A CSV or TSV file's records as objects keyed by its first line, which is read on its own when the page does not
  * hold it; the first line itself is no row. Any other file's records as they are. */
 export function useDelimited(workspace: string, path: string, records: SourceRecord[]): SourceRecord[] {
+  const delimit = useDelimiter(workspace, path, records)
+  return useMemo(() => (delimit ? delimit(records) : records), [delimit, records])
+}
+
+/** For a CSV or TSV file, what turns its records into objects keyed by its first line, as useDelimited shows them, once
+ * that line is known (read from `records` when they hold it, else on its own); null for any other file and until then. */
+export function useDelimiter(workspace: string, path: string, records: readonly SourceRecord[]): ((recs: readonly SourceRecord[]) => SourceRecord[]) | null {
   const delimited = DELIMITED.test(path)
   const sep = /\.tsv$/i.test(path) ? '\t' : ','
   const first = records[0]?.line === 1 ? lineText(records[0]) : null
@@ -355,12 +362,14 @@ export function useDelimited(workspace: string, path: string, records: SourceRec
     }
   }, [workspace, path, delimited, first, sep])
   return useMemo(() => {
-    if (!delimited || !header) return records
+    if (!delimited || !header) return null
     const name = (i: number) => header[i]?.trim() || `column ${i + 1}`
-    const byLine = new Map(records.map((r) => [r.line, r]))
-    const lines = records.filter((r) => r.line > 1).map((r) => ({ line: r.line, text: lineText(r) ?? '' }))
-    return splitDelimited(lines, sep).map(({ line, cells }) => ({ ...byLine.get(line)!, record: Object.fromEntries(cells.map((v, i) => [name(i), v])) }))
-  }, [records, header, delimited, sep])
+    return (recs: readonly SourceRecord[]) => {
+      const byLine = new Map(recs.map((r) => [r.line, r]))
+      const lines = recs.filter((r) => r.line > 1).map((r) => ({ line: r.line, text: lineText(r) ?? '' }))
+      return splitDelimited(lines, sep).map(({ line, cells }) => ({ ...byLine.get(line)!, record: Object.fromEntries(cells.map((v, i) => [name(i), v])) }))
+    }
+  }, [header, delimited, sep])
 }
 
 /** The number each row of a CSV or TSV file shown here is cited by (`<path>#row=<n>`), by the line it starts on, as the

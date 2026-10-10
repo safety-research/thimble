@@ -4,7 +4,10 @@
 // new lane; hovering a lane draws a thin cursor line, never a band over the marks; the detail list's rows in view are a
 // tint across the lanes that follows the list as it scrolls; a record opens in a side panel beside the list that starts
 // wide enough to read it, a drag of its edge resizes it, and the page built again opens it at that width; the divider's
-// drag gives the overview its height, kept too. What the controls decide without layout is
+// drag gives the overview its height, kept too; a failure in the lanes is a ✕ in the problem red that stands out from
+// the marks and the paper, light and dark; in Density the lanes draw their bars alone, their names and tree guides as
+// tall as the taller lanes, and the tint keeps to the lanes' height there and back in Events; the page's own drawing
+// in a lane (drawLane) is cut off at its track. What the controls decide without layout is
 // tests/public/controls-kit.test.ts.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -100,6 +103,196 @@ const labels = (page: Page, values: string[], marks: Record<string, string>) =>
     },
     [values, marks] as const,
   )
+
+// the lanes of three sessions in the theme's own tokens, light or dark, their marks in Color by's colours, every fifth
+// call failed
+const THEME = readFileSync(path.join(FRONTEND, 'src', 'styles', 'tokens.css'), 'utf8') + ':root{--font-body:sans-serif;--font-mono:monospace}'
+const failures = (dark: boolean) => `<!doctype html><html${dark ? ' data-paper="dark"' : ''}><head><style>${THEME} html,body{margin:0} body{background:var(--surface-card)}
+#lanes{width:860px;padding:8px}</style>${KIT}</head><body><span id="colour"></span><div id="lanes"></div>
+<script>
+const calls = []
+;['lead', 'explore', 'test'].forEach((s, si) => { for (let i = 0; i < 30; i++) calls.push({ ref: 'r1/' + s + '.jsonl#L' + (i + 1), t: ${T0} + si * 40 + i * 120, session: s, tool: ['Bash', 'Read', 'Grep', 'Edit'][i % 4], outcome: i % 5 === 2 ? 'error' : 'ok' }) })
+window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'tool', title: 'Tool' }] })
+window.lanes = thimble.timeline({ mount: '#lanes', rows: 'session', problem: (c) => c.outcome !== 'ok' })
+lanes.draw(calls)
+</script></body></html>`
+
+// a tree of sessions on the lanes in the theme's tokens, each session's band where it ran, Events or Density, and a
+// list under them whose rows carry data-t, so the tint of its rows in view shows across the lanes
+const dense = `<!doctype html><html><head><style>${THEME} html,body{margin:0} body{background:var(--surface-card)}
+#lanes{width:860px} #list{height:120px;overflow:auto} .row{height:24px}</style>${KIT}</head><body><span id="rows"></span><div id="lanes"></div><div id="list"></div>
+<script>
+const PARENT = { lead: null, explore: 'lead', grep: 'explore', test: 'lead' }
+const calls = []
+Object.keys(PARENT).forEach((s, si) => { for (let i = 0; i < 20; i++) calls.push({ ref: 'r1/' + s + '.jsonl#L' + (i + 1), t: ${T0} + si * 300 + i * 90, session: s }) })
+calls.sort((a, b) => a.t - b.t)
+window.dense = false
+window.rows = thimble.rows({ mount: '#rows', fields: [{ name: 'session', title: 'Session', parentOf: (k) => PARENT[k] }] })
+window.lanes = thimble.timeline({ mount: '#lanes', rows, names: 160, follow: '#list', density: () => window.dense,
+  band: (n) => (n.items.length ? [[n.items[0].t, n.items[n.items.length - 1].t]] : []) })
+lanes.draw(calls)
+document.getElementById('list').innerHTML = calls.map((c) => '<div class="row" data-t="' + c.t + '">' + c.ref + '</div>').join('')
+</script></body></html>`
+
+describe("the timeline's Density", () => {
+  test("its bars alone, with no band behind them; each tree guide as tall as its lane, so the guides meet as in Events; the tint of the list's rows in view as tall as the lanes, in Density and back in Events", async () => {
+    const page = await browser.newPage({ viewport: { width: 900, height: 500 } })
+    await page.setContent(dense)
+    await page.waitForSelector('.thimble-lane', { state: 'attached' })
+    const measure = () =>
+      page.evaluate(() => {
+        const lanes = [...document.querySelectorAll('.thimble-lane')]
+        const box = (e: Element) => e.getBoundingClientRect()
+        return {
+          bands: document.querySelectorAll('.thimble-lane-band').length,
+          bars: document.querySelectorAll('.thimble-lane-bar').length,
+          laneH: lanes.map((l) => Math.round(box(l).height)),
+          // each lane's name and guides against its lane's top and bottom
+          off: lanes.flatMap((l) => [l.querySelector('.thimble-lane-name')!, ...l.querySelectorAll('.thimble-lane-guide')].map((g) => Math.abs(box(g).top - box(l).top) + Math.abs(box(g).bottom - box(l).bottom))),
+          guides: lanes.map((l) => l.querySelectorAll('.thimble-lane-guide').length),
+          tint: Math.round(box(document.querySelector('.thimble-lanes-span')!).height),
+          lanes: Math.round(lanes.reduce((h, l) => h + box(l).height, 0)),
+        }
+      })
+    const events = await measure()
+    assert.ok(events.bands > 0 && events.bars === 0, JSON.stringify(events))
+    assert.deepEqual(events.guides, [0, 1, 2, 1])
+    assert.ok(Math.max(...events.off) <= 0.5, `names and guides as tall as their lanes: ${JSON.stringify(events)}`)
+    assert.equal(events.tint, events.lanes)
+    await page.evaluate(() => {
+      ;(window as any).dense = true
+      ;(window as any).lanes.draw()
+    })
+    await page.waitForTimeout(50)
+    const d = await measure()
+    assert.equal(d.bands, 0, 'no band behind the bars')
+    assert.ok(d.bars > 0)
+    assert.deepEqual(d.laneH, [36, 36, 36, 36])
+    assert.ok(Math.max(...d.off) <= 0.5, `names and guides as tall as Density's lanes: ${JSON.stringify(d)}`)
+    assert.equal(d.tint, d.lanes)
+    await page.evaluate(() => {
+      ;(window as any).dense = false
+      ;(window as any).lanes.draw()
+    })
+    await page.waitForTimeout(50)
+    const back = await measure()
+    assert.deepEqual(back.laneH, [18, 18, 18, 18])
+    assert.equal(back.tint, back.lanes, `the tint no taller than the lanes back in Events: ${JSON.stringify(back)}`)
+    await page.close()
+  })
+})
+
+// the range framing the middle of the calls while the page hands the lanes every call, and drawLane drawing a big red
+// dot at each of the first lane's calls and a red line wider than the track: what falls outside the track is cut off
+const own = `<!doctype html><html><head><style>${THEME} html,body{margin:0} body{background:var(--surface-card)}
+#range{margin-left:160px;width:700px} #lanes{width:860px;margin-top:20px}</style>${KIT}</head><body><div id="range"></div><div id="lanes"></div>
+<script>
+const calls = []
+for (let i = 0; i < 60; i++) calls.push({ t: ${T0} + i * 60, session: ['lead', 'explore', 'grep'][i % 3] })
+window.range = thimble.timeRange({ mount: '#range', times: calls.map((c) => c.t) })
+range.set(${T0} + 1200, ${T0} + 2400)
+window.lanes = thimble.timeline({ mount: '#lanes', rows: 'session', range, names: 160,
+  drawLane: (lane, ctx) => {
+    if (lane.key !== 'lead') return
+    for (const c of lane.items) ctx.over.insertAdjacentHTML('beforeend', '<circle cx="' + ctx.x(c.t) + '" cy="' + ctx.height / 2 + '" r="14" fill="#ff0000"/>')
+    ctx.g.insertAdjacentHTML('beforeend', '<path d="M-400 9H' + (ctx.width + 400) + '" stroke="#ff0000" stroke-width="2"/>')
+  } })
+lanes.draw(calls)
+</script></body></html>`
+
+describe("the page's own drawing in the lanes", () => {
+  test("is cut off at its lane's track: nothing over the names' column or the lanes beside it, though the records lie outside the range", async () => {
+    const page = await browser.newPage({ viewport: { width: 900, height: 300 } })
+    await page.setContent(own)
+    await page.waitForSelector('.thimble-lane-own', { state: 'attached' })
+    const boxes = await page.evaluate(() =>
+      [...document.querySelectorAll('.thimble-lane')].map((l) => {
+        const r = l.getBoundingClientRect()
+        return { x: r.x, y: r.y, w: r.width, h: r.height }
+      }),
+    )
+    // the red pixels of a part of the page
+    const red = async (b: { x: number; y: number; w: number; h: number }) => {
+      const png = await page.screenshot({ clip: { x: Math.round(b.x), y: Math.round(b.y), width: Math.round(b.w), height: Math.round(b.h) } })
+      return page.evaluate(async (b64) => {
+        const img = new Image()
+        img.src = 'data:image/png;base64,' + b64
+        await img.decode()
+        const c = document.createElement('canvas')
+        c.width = img.width
+        c.height = img.height
+        const g = c.getContext('2d')!
+        g.drawImage(img, 0, 0)
+        const d = g.getImageData(0, 0, img.width, img.height).data
+        let n = 0
+        for (let i = 0; i < d.length; i += 4) if (d[i] > 200 && d[i + 1] < 90 && d[i + 2] < 90) n++
+        return n
+      }, png.toString('base64'))
+    }
+    const [lead, explore] = boxes
+    assert.ok((await red({ ...lead, x: lead.x + 160, w: lead.w - 160 })) > 100, 'the first lane draws its red in its track')
+    assert.equal(await red({ ...lead, w: 160 }), 0, "nothing over the names' column")
+    assert.equal(await red({ x: 0, y: explore.y, w: 900, h: 300 - explore.y }), 0, 'nothing over the lanes under it')
+    assert.equal(await red({ x: 0, y: 0, w: 900, h: lead.y }), 0, 'nothing over the range above it')
+    await page.close()
+  })
+})
+
+describe('a failure in the lanes', () => {
+  for (const dark of [false, true]) {
+    test(`a ✕ in the problem red at its mark's foot, over a halo of the paper, easy to see beside the marks' colours (${dark ? 'dark' : 'light'})`, async () => {
+      const page = await browser.newPage({ viewport: { width: 900, height: 300 } })
+      await page.setContent(failures(dark))
+      await page.waitForSelector('.thimble-lane-bad', { state: 'attached' })
+      const got = await page.evaluate(() => {
+        const probe = document.createElement('div')
+        probe.style.cssText = 'color:var(--status-negative);background:var(--surface-card)'
+        document.body.appendChild(probe)
+        const want = getComputedStyle(probe)
+        const bads = [...document.querySelectorAll('.thimble-lane-bad')]
+        const x = getComputedStyle(bads[0].querySelector('.thimble-lane-bad-x')!)
+        const halo = getComputedStyle(bads[0].querySelector('.thimble-lane-bad-halo')!)
+        const r = bads[0].getBoundingClientRect()
+        return { n: bads.length, red: want.color, paper: want.backgroundColor, stroke: x.stroke, width: parseFloat(x.strokeWidth), halo: halo.stroke, box: { x: r.x, y: r.y, w: r.width, h: r.height } }
+      })
+      // one ✕ for each failed call, six of thirty in each of three lanes
+      assert.equal(got.n, 18)
+      assert.equal(got.stroke, got.red)
+      assert.equal(got.halo, got.paper)
+      assert.ok(got.width >= 1.5 && got.box.w >= 6 && got.box.h >= 6, `a ✕ big enough to see (${JSON.stringify(got)})`)
+      // in a picture of the page, the ✕'s red stands out: many of its pixels in the problem red, which keeps 3:1 or more
+      // against the paper
+      const png = await page.screenshot({ clip: { x: Math.floor(got.box.x) - 1, y: Math.floor(got.box.y) - 1, width: Math.ceil(got.box.w) + 2, height: Math.ceil(got.box.h) + 2 } })
+      const seen = await page.evaluate(
+        async ([b64, red, paper]) => {
+          const rgb = (c: string) => (c.match(/[\d.]+/g) || []).slice(0, 3).map(Number)
+          const lum = ([r, g, b]: number[]) => {
+            const f = (v: number) => ((v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)
+            return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
+          }
+          const [a, b] = [lum(rgb(red)), lum(rgb(paper))]
+          const img = new Image()
+          img.src = 'data:image/png;base64,' + b64
+          await img.decode()
+          const c = document.createElement('canvas')
+          c.width = img.width
+          c.height = img.height
+          const g = c.getContext('2d')!
+          g.drawImage(img, 0, 0)
+          const d = g.getImageData(0, 0, img.width, img.height).data
+          const want = rgb(red)
+          let near = 0
+          for (let i = 0; i < d.length; i += 4) if (Math.hypot(d[i] - want[0], d[i + 1] - want[1], d[i + 2] - want[2]) < 70) near++
+          return { near, contrast: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) }
+        },
+        [png.toString('base64'), got.red, got.paper] as const,
+      )
+      assert.ok(seen.near >= 12, `the ✕ draws its red (${JSON.stringify(seen)})`)
+      assert.ok(seen.contrast >= 3, `the problem red keeps 3:1 against the paper (${JSON.stringify(seen)})`)
+      await page.close()
+    })
+  }
+})
 
 describe('the row controls in a frame', () => {
   test("Filter by's menu picks a field and a toggle hides its value's rows from the list and the lanes", async () => {
@@ -229,5 +422,106 @@ describe('the side panel and the divider in a frame', () => {
     const h2 = await again.frame().evaluate(() => Math.round(document.getElementById('overview')!.getBoundingClientRect().height))
     assert.ok(Math.abs(h2 - h1) <= 3, `${h1} ${h2}`)
     await again.page.close()
+  })
+})
+
+// the timeline with no other part of the kit: one lane of commits with no name (#alone), a lane per author (#authors)
+// and a lane per agent on plain numbers, its turns (#turns), each on its records' own span with an axis of its own
+const alone = () => `<!doctype html><html><head><style>${TOKENS} html,body{margin:0} body{font:12px sans-serif;background:#fffdf8;padding:12px}
+section{margin-bottom:16px}</style>${KIT}</head><body>
+<section id="alone"></section><section id="authors"></section><section id="turns"></section>
+<script>
+const authors = ['ana', 'bo', 'cy']
+const commits = Array.from({ length: 31 }, (_, i) => ({ t: new Date((${T0} + i * 120) * 1000).toISOString(), author: authors[i % 3], text: 'commit ' + i }))
+window.a = thimble.timeline({ mount: '#alone' })
+a.draw(commits)
+window.b = thimble.timeline({ mount: '#authors', rows: 'author' })
+b.draw(commits)
+window.c = thimble.timeline({ mount: '#turns', rows: (s) => s.agent, unit: 'n', time: (s) => s.turn })
+c.draw(Array.from({ length: 40 }, (_, i) => ({ turn: i, agent: i % 4 ? 'lead' : 'sub' })))
+</script></body></html>`
+
+describe('the timeline alone in a frame', () => {
+  test("its own axis stands over its tracks, a label over the moment it names; with no lanes to tell apart the track takes the whole width; nothing runs past the frame", async () => {
+    const page = await browser.newPage({ viewport: { width: 1000, height: 700 } })
+    await page.setContent(`<!doctype html><html><body style="margin:0"><iframe id="f" sandbox="allow-scripts" style="border:0;width:900px;height:640px"></iframe></body></html>`)
+    await page.evaluate((doc) => ((document.getElementById('f') as HTMLIFrameElement).srcdoc = doc), alone())
+    const frame = () => page.frames().find((f) => f !== page.mainFrame())!
+    await page.waitForTimeout(300)
+    await frame().waitForSelector('#turns .thimble-axis-lab', { state: 'attached' })
+    const got = await frame().evaluate(() => {
+      const box = (e: Element) => e.getBoundingClientRect()
+      const mid = (e: Element) => (box(e).left + box(e).right) / 2
+      const lab = [...document.querySelectorAll('#alone .thimble-axis-lab')].find((l) => l.textContent === '09:30')!
+      // commit 15, at 09:30, is the 16th mark
+      const mark = document.querySelectorAll('#alone .thimble-lane-mark')[15]
+      const track = (id: string) => box(document.querySelector('#' + id + ' .thimble-lane-track')!)
+      return {
+        lab: mid(lab),
+        mark: mid(mark),
+        alone: [track('alone').left, track('alone').right, box(document.getElementById('alone')!).left, box(document.getElementById('alone')!).right],
+        authors: [track('authors').left, box(document.querySelector('#authors .thimble-lanes-axis')!).left, box(document.querySelector('#authors .thimble-lanes-axis')!).width, track('authors').width],
+        names: [...document.querySelectorAll('#authors .thimble-lane-nm')].map((n) => n.textContent),
+        turns: [...document.querySelectorAll('#turns .thimble-axis-lab')].map((l) => l.textContent),
+        wide: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      }
+    })
+    assert.ok(Math.abs(got.lab - got.mark) <= 2, `the label 09:30 over its commit: ${JSON.stringify(got)}`)
+    assert.ok(Math.abs(got.alone[0] - got.alone[2]) <= 1 && Math.abs(got.alone[1] - got.alone[3]) <= 1, `the track as wide as its mount: ${got.alone}`)
+    assert.ok(Math.abs(got.authors[0] - got.authors[1]) <= 1 && Math.abs(got.authors[2] - got.authors[3]) <= 1, `the axis over the tracks, past the names: ${got.authors}`)
+    assert.deepEqual(got.names, ['ana', 'bo', 'cy'])
+    assert.ok(got.turns.length > 2 && got.turns.every((l) => /^\d+$/.test(l!)), `turns on the axis: ${got.turns}`)
+    assert.equal(got.wide, 0)
+    await page.close()
+  })
+})
+
+// timelines with no range: runs by author, some failed, so the key shows (#runs); a lane per agent whose first name is
+// too long to show whole (#long)
+const fitted = () => `<!doctype html><html><head><style>${TOKENS} html,body{margin:0} body{font:12px sans-serif;background:#fffdf8;padding:12px}
+section{margin-bottom:16px}</style>${KIT}</head><body>
+<section id="runs"></section><section id="long"></section>
+<script>
+const authors = ['ana', 'bo', 'cy']
+window.runs = thimble.timeline({ mount: '#runs', rows: 'author', problem: (r) => r.failed })
+runs.draw(Array.from({ length: 30 }, (_, i) => ({ t: ${T0} + i * 120, author: authors[i % 3], failed: i % 7 === 3 })))
+window.long = thimble.timeline({ mount: '#long', rows: 'agent' })
+long.draw(Array.from({ length: 30 }, (_, i) => ({ t: ${T0} + i * 120, agent: i % 2 ? 'sub' : 'a-lead-agent-whose-name-runs-on-past-any-column-of-names' })))
+</script></body></html>`
+
+describe('a timeline with no range fits its names', () => {
+  test("the names' column as wide as the longest name, at most 200 px and a third of the width; a key with no room beside the axis stands under it, from the tracks' left edge", async () => {
+    const page = await browser.newPage({ viewport: { width: 1000, height: 700 } })
+    await page.setContent(`<!doctype html><html><body style="margin:0"><iframe id="f" sandbox="allow-scripts" style="border:0;width:900px;height:640px"></iframe></body></html>`)
+    const frame = () => page.frames().find((f) => f !== page.mainFrame())!
+    const measure = () =>
+      frame().evaluate(() => {
+        const box = (s: string) => document.querySelector(s)!.getBoundingClientRect()
+        const nm = [...document.querySelectorAll('#runs .thimble-lane-nm')].map((n) => n.getBoundingClientRect().right)
+        return {
+          runs: { track: box('#runs .thimble-lane-track').left, mount: box('#runs').left, widest: Math.max(...nm), axis: box('#runs .thimble-lanes-axis'), key: box('#runs .thimble-lanes-key') },
+          long: { track: box('#long .thimble-lane-track').left, mount: box('#long').left, width: box('#long').width, clipped: [...document.querySelectorAll('#long .thimble-lane-nm')].map((n) => n.scrollWidth > n.clientWidth) },
+          wide: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        }
+      })
+    await page.evaluate((doc) => ((document.getElementById('f') as HTMLIFrameElement).srcdoc = doc), fitted())
+    await page.waitForTimeout(300)
+    await frame().waitForSelector('#long .thimble-lane-track', { state: 'attached' })
+    let got = await measure()
+    // three short names: a column just past the widest of them, far under 200 px
+    assert.ok(got.runs.track - got.runs.mount < 70 && got.runs.track >= got.runs.widest, `the column fits ana, bo and cy: ${JSON.stringify(got.runs)}`)
+    // the key, too wide for that column, under the axis and lined up with the tracks
+    assert.ok(got.runs.key.top >= got.runs.axis.bottom - 1 && Math.abs(got.runs.key.left - got.runs.track) <= 1, `the key under the axis: ${JSON.stringify(got.runs)}`)
+    // a name too long for 200 px: the column stops there, the name cut short
+    assert.equal(Math.round(got.long.track - got.long.mount), 200)
+    assert.deepEqual(got.long.clipped, [true, false])
+    assert.equal(got.wide, 0)
+    // in a narrow frame the column takes a third of the width at most, so the tracks keep the rest
+    await page.evaluate(() => ((document.getElementById('f') as HTMLIFrameElement).style.width = '360px'))
+    await page.waitForTimeout(300)
+    got = await measure()
+    assert.ok(got.long.track - got.long.mount <= got.long.width / 3 + 1, `a third at most: ${JSON.stringify(got.long)}`)
+    assert.equal(got.wide, 0)
+    await page.close()
   })
 })

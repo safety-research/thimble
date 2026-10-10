@@ -1,16 +1,27 @@
-/* the view kit's row controls, side panel and transcript (viewer_controls.js, viewer_side.js, viewer_transcript.js),
-   which views.frame_document puts after viewer_kit.css and before view.html's own styles, in the theme's tokens
-   (frontend/src/lib/frame.ts VIEW_TOKENS). A page lays them out but does not restyle them (views.own_parts).
+/* the view kit's row controls, side panel, transcript, record viewer, charts and text (viewer_controls.js,
+   viewer_side.js, viewer_transcript.js, viewer_record.js, viewer_chart.js, viewer_text.js), which views.frame_document
+   puts after viewer_kit.css and before view.html's own styles, in the theme's tokens (frontend/src/lib/frame.ts
+   VIEW_TOKENS). A page lays them out but does not restyle them (views.own_parts).
      .thimble-filter-*      Filter by in the top row: its trigger (Color by's look) and its values as toggles, a box
                             ticked while the value shows, no colour
      .thimble-rows-*        Rows in the top row: its trigger
+     .thimble-tree-*        a list of groups to navigate (viewer_tree.js), as Files' tree draws its folders
      .thimble-key-*         a key whose entries are toggles, each swatch drawn as its series is drawn
-     .thimble-lanes-*,      the lanes: a name column with tree guides, a track per lane on the range's scale, the
-     .thimble-lane-*        problem red under a failure, the cursor line on hover, the tint of the list's rows in view
+     .thimble-lanes-*,      the timeline's lanes: a name column with tree guides, a track per lane on one axis (the
+     .thimble-lane-*        range's scale, or an axis of its own), a ✕ in the problem red on a failure, the cursor line on
+                            hover, the tint of the list's rows in view
      .thimble-divider       the bar between the overview and the detail list
      .thimble-side-*        the side panel at the list's right, its edge a drag resizes
      .thimble-transcript-*, a transcript's turns, as the File browser's Transcript mode draws them (files.css .reader-*)
-     .thimble-turn-* */
+     .thimble-turn-*
+     .thimble-msg-*         messages between people or agents, as a chat app draws them: an avatar in a rail, the
+                            author and the time in a head, a date line for each day, a reply one level in, an event
+                            on one line, a boxed message, quoted mail behind "…" and a long body behind Show more
+     .thimble-record-*      a record's fields as a tree under its citation: a key and a value per row, a nested value
+                            folded behind its key, a long string folded with Show more
+     .thimble-chart-*       a chart in the canvas's theme (the drawing's own look is the chart style's, not CSS), and
+                            the line in its place when it draws none
+     .thimble-text-*        a record's text as markdown or plain text (viewer_text.js), its links and its fold */
 
 /* -------- Filter by and Rows in the top row -------- */
 .thimble-filter-mount {
@@ -70,6 +81,184 @@
   height: 13px;
 }
 
+/* -------- the tree (viewer_tree.js, thimble.tree): a list of groups as Files' tree draws the corpus's folders
+   (files.css .files-row): 24px rows indented by depth on guide lines that show while the pointer is over the tree, a
+   folder's chevron turned down while it is open, the name cut with an ellipsis, then the mix and the number in mono at
+   the row's right, never under the name. Only the rows near its view are drawn, each placed at its line. -------- */
+.thimble-tree {
+  position: relative;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  outline: none;
+  color: var(--text-primary);
+  font: 400 var(--text-sm) / 1.45 var(--font-body);
+}
+/* the find over the rows, which stays at the top as they scroll, as the kit's search box looks; its padding keeps the
+   focus ring clear of the edges the tree scrolls in */
+.thimble-tree-find {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 2px 2px 6px;
+  background: var(--surface-card);
+}
+.thimble-tree-box {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: var(--h-control);
+  padding: 0 2px 0 7px;
+  border: 1px solid rgba(var(--ink-rgb), 0.14);
+  border-radius: var(--radius-ui);
+  background: var(--surface-card);
+  cursor: text;
+}
+.thimble-tree-box:hover {
+  border-color: rgba(var(--ink-rgb), 0.28);
+}
+.thimble-tree-box:focus-within {
+  border-color: transparent;
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+.thimble-tree-glyph {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  color: var(--text-tertiary);
+}
+.thimble-tree-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  margin: 0;
+  padding: 0 4px 0 5px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font: 400 var(--text-ui-sm) / 22px var(--font-body);
+}
+.thimble-tree-input::placeholder {
+  color: var(--text-placeholder);
+  opacity: 1;
+}
+.thimble-tree-body {
+  position: relative;
+  outline: none;
+}
+.thimble-tree-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 24px;
+  padding: 0 6px 0 8px;
+  border-radius: var(--radius-chip);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.thimble-tree.is-tree .thimble-tree-row {
+  padding-left: calc(20px + var(--depth, 0) * 14px);
+}
+.thimble-tree-row:hover {
+  background: rgba(var(--ink-rgb), 0.04);
+}
+.thimble-tree-row.active,
+.thimble-tree-row.active:hover {
+  background: var(--surface-selected);
+}
+/* the row the keys are on, while they move it (is-keys, from Tab or a key until the next click) */
+.thimble-tree-body.is-keys:focus .thimble-tree-row.is-cursor {
+  outline: 1.5px solid var(--accent);
+  outline-offset: -1.5px;
+}
+/* a label's bar on a row's left edge keeps it straight */
+.thimble-tree-row[data-thimble-edge] {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.thimble-tree-guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid rgba(var(--ink-rgb), 0.14);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.1s linear;
+}
+.thimble-tree:hover .thimble-tree-guide {
+  opacity: 1;
+}
+.thimble-tree-fold,
+.thimble-tree-gap {
+  display: inline-flex;
+  flex: none;
+  width: 13px;
+  height: 13px;
+  color: var(--text-tertiary);
+}
+.thimble-tree-chev {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.12s ease-out;
+}
+.thimble-tree-row[aria-expanded='true'] .thimble-tree-chev {
+  transform: rotate(90deg);
+}
+/* in a row too narrow for all of it, the name gives way down to its first letters (its far larger shrink), then the
+   mix down to nothing, so that the number keeps its room */
+.thimble-tree-name {
+  flex: 0 1000 auto;
+  min-width: 3em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* the find's words in a name, as Files' search marks them */
+.thimble-tree-hit {
+  border-radius: var(--radius-hl, 3px);
+  background: var(--find-bg, var(--hl-bg));
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.thimble-tree-end {
+  display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding-left: 4px;
+}
+.thimble-tree-end > .thimble-mix {
+  flex: 0 1 auto;
+  width: 32px;
+  min-width: 0;
+}
+.thimble-tree-n {
+  flex: none;
+  color: var(--text-tertiary);
+  font: 400 var(--text-mono-sm) / 1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.thimble-tree-none {
+  padding: 6px 8px;
+  color: var(--text-tertiary);
+  font: 400 var(--text-ui-sm) / 1.4 var(--font-body);
+}
+
 /* -------- a key whose entries are toggles -------- */
 .thimble-key {
   display: flex;
@@ -85,7 +274,7 @@
 .thimble-key-band {
   width: 12px;
   height: 8px;
-  background: rgba(var(--ink-rgb), 0.12);
+  background: color-mix(in oklab, var(--c, rgba(var(--ink-rgb), 0.43)) 28%, transparent);
 }
 .thimble-key-mark {
   width: 4px;
@@ -94,9 +283,17 @@
   background: var(--c, var(--viz-ink-3, rgba(var(--ink-rgb), 0.5)));
 }
 .thimble-key-problem {
-  width: 12px;
-  height: 2px;
-  background: var(--status-negative);
+  width: 10px;
+  height: 10px;
+}
+.thimble-key-problem svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: var(--status-negative);
+  stroke-width: 1.75;
+  stroke-linecap: round;
 }
 .thimble-key-line {
   width: 12px;
@@ -107,10 +304,50 @@
   opacity: 0.35;
 }
 
-/* -------- lanes: the names with their tree guides at the left, a track per lane on the range's scale -------- */
+/* -------- the timeline: the names with their tree guides at the left, a track per lane on one axis -------- */
 .thimble-lanes {
   position: relative;
+  display: block;
   min-width: 0;
+}
+/* with no range, its own axis under the tracks, the key beside it where the names stand; with nothing to tell lanes
+   apart, no column of names */
+.thimble-lanes-foot {
+  display: grid;
+  grid-template-columns: var(--thimble-names, 200px) minmax(0, 1fr);
+  align-items: start;
+}
+.thimble-lanes-foot > .thimble-lanes-key {
+  grid-column: 1;
+  grid-row: 1;
+  padding-top: 0;
+}
+.thimble-lanes-foot.is-key-under > .thimble-lanes-key {
+  grid-column: 2;
+  grid-row: 2;
+  padding: 4px 0 0;
+}
+.thimble-lanes-axis {
+  grid-column: 2;
+  grid-row: 1;
+}
+/* the names measured for a column fitted to them (thimble.timeline with no range) */
+.thimble-lanes-probe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: max-content;
+  visibility: hidden;
+  pointer-events: none;
+}
+.thimble-lanes-probe:not(.has-tree) .thimble-lane-fold-gap {
+  display: none;
+}
+.thimble-lanes-axis:empty {
+  display: none;
+}
+.thimble-lanes.is-nameless .thimble-lane {
+  grid-template-columns: minmax(0, 1fr);
 }
 .thimble-lanes-key {
   display: flex;
@@ -129,11 +366,12 @@
   align-items: center;
   height: 18px;
 }
+/* a name as tall as its lane, so that the tree guides meet the lanes above and below in Density's taller lanes too */
 .thimble-lane-name {
   display: flex;
+  align-self: stretch;
   align-items: center;
   min-width: 0;
-  height: 18px;
   padding: 0 10px 0 8px;
   overflow: hidden;
   color: var(--text-primary);
@@ -222,13 +460,35 @@
 .thimble-lane-band {
   fill: rgba(var(--ink-rgb), 0.07);
 }
+/* the page's own drawing in a lane (drawLane's ctx.g and ctx.over), cut off at the track's edges */
+.thimble-lane-own {
+  overflow: hidden;
+}
+/* a shaded span of the page's own (drawLane's ctx.shade), as light as a band, or its color at a low opacity */
+.thimble-lane-shade {
+  fill: rgba(var(--ink-rgb), 0.07);
+}
 .thimble-lane-mark {
   fill: var(--viz-ink-3, rgba(var(--ink-rgb), 0.5));
   cursor: pointer;
 }
-/* a failure: the problem red under its mark, beside the Color by colours */
+/* a failure: a ✕ in the problem red centered on the foot of its mark or bar, over a thin halo of the paper, so it reads
+   at a glance beside any Color by colour, light or dark, and a narrow mark keeps most of its colour; a click passes to
+   the mark under it */
 .thimble-lane-bad {
-  fill: var(--status-negative);
+  pointer-events: none;
+}
+.thimble-lane-bad path {
+  fill: none;
+  stroke-linecap: round;
+}
+.thimble-lane-bad-halo {
+  stroke: var(--surface-card);
+  stroke-width: 3;
+}
+.thimble-lane-bad-x {
+  stroke: var(--status-negative);
+  stroke-width: 1.75;
 }
 /* Density: taller lanes, so that the bars read; a bin's tip names its records per value */
 .thimble-lanes.is-density .thimble-lane {
@@ -390,8 +650,9 @@
 .thimble-transcript {
   min-width: 0;
 }
-/* what the list shows: the run, the session or the selection, and how many turns */
-.thimble-transcript-head {
+/* what the list shows: the run, the session or the selection, and how many turns (or messages) */
+.thimble-transcript-head,
+.thimble-msg-header {
   position: sticky;
   top: 0;
   z-index: 2;
@@ -405,7 +666,9 @@
   font: 500 var(--text-sm) / 1.4 var(--font-body);
 }
 .thimble-transcript-n,
-.thimble-transcript-sub {
+.thimble-transcript-sub,
+.thimble-msg-header-n,
+.thimble-msg-header-sub {
   color: var(--text-tertiary);
   font: 400 var(--text-mono-sm) / 1.4 var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -419,6 +682,10 @@
   border-bottom: 1px solid rgba(var(--ink-rgb), 0.07);
   content-visibility: auto;
   contain-intrinsic-size: auto 64px;
+}
+/* a turn drawn again, opened, folded or given its words: laid out at once, so its words are where the search finds them */
+.thimble-turn.is-drawn {
+  content-visibility: visible;
 }
 .thimble-turn-no {
   align-self: start;
@@ -450,6 +717,39 @@
   font: 400 var(--text-mono-sm) / 1.5 var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* the head of a turn that folds: a click on it, or Enter, opens or folds the turn, and the chevron at its start turns
+   down while it is open (files.css .reader-fold-head) */
+.thimble-turn-toggle {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.thimble-turn-toggle:hover {
+  color: var(--text-secondary);
+}
+.thimble-turn-caret {
+  width: 12px;
+  height: 12px;
+  margin-right: 4px;
+  vertical-align: -2px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  color: var(--text-placeholder);
+}
+.thimble-turn-toggle[aria-expanded='true'] .thimble-turn-caret {
+  transform: rotate(90deg);
+}
+.thimble-turn-toggle:hover .thimble-turn-caret {
+  color: var(--text-secondary);
 }
 .thimble-turn-tool {
   color: var(--text-secondary);
@@ -496,6 +796,8 @@
 .thimble-turn-thinking {
   color: var(--text-tertiary);
 }
+/* a long block folded: its height cut to six lines, the last fading; its lines past the sixth are hidden in the page
+   (viewer_transcript.js) */
 .thimble-turn-fold.is-folded > .thimble-turn-block {
   max-height: calc(6 * 1.5em + 8px);
   overflow: hidden;
@@ -505,28 +807,45 @@
   position: absolute;
   left: 2px;
   right: 0;
-  bottom: 26px;
+  bottom: 22px;
   height: 20px;
   background: linear-gradient(transparent, var(--bg-sunken));
   pointer-events: none;
 }
-.thimble-turn-expand.btn {
-  margin: 2px 0;
-  color: var(--text-tertiary);
+/* Show more under a long block's cut text, Show less in the same place once it is open: quiet text, as under a
+   comment's statement (report.css .wu-cm-more) */
+.thimble-turn-more,
+.thimble-msg-more {
+  display: block;
+  height: 18px;
+  margin: 2px 0 0 -2px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: var(--radius-chip);
+  background: none;
+  color: var(--text-secondary);
+  font: 500 var(--text-xs) / 18px var(--font-body);
+  cursor: pointer;
 }
-.thimble-turn-dim {
-  margin-left: 4px;
-  font-size: var(--text-mono-sm);
+.thimble-turn-more:hover,
+.thimble-msg-more:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 2px;
 }
-/* a folded turn's one line: the whole row, its overflow cut; a tool call reads in mono */
+.thimble-turn-toggle:focus-visible,
+.thimble-turn-more:focus-visible,
+.thimble-msg-more:focus-visible,
+.thimble-msg-dots:focus-visible {
+  outline: none;
+  border-radius: var(--radius-hl);
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+/* a folded turn's one line: the whole row, its overflow cut; a click on it opens the turn; a tool call reads in mono */
 .thimble-turn-line {
   display: block;
-  width: 100%;
-  margin: 0;
-  padding: 0;
   overflow: hidden;
-  border: 0;
-  background: none;
   color: var(--text-secondary);
   font: 400 var(--text-ui-sm) / 1.6 var(--font-body);
   text-align: left;
@@ -542,18 +861,15 @@
 .thimble-turn-line:hover {
   color: var(--text-primary);
 }
-.thimble-turn-line::before {
-  content: '▸ ';
-  color: var(--text-placeholder);
-}
 .thimble-turn-empty {
   color: var(--text-tertiary);
 }
 .thimble-transcript-none {
   padding: 28px 16px;
 }
-/* a new session: its name between two hairlines */
-.thimble-transcript-session {
+/* a new session, or a new day of messages: its name between two hairlines */
+.thimble-transcript-session,
+.thimble-msg-day {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -564,13 +880,16 @@
   text-transform: uppercase;
 }
 .thimble-transcript-session::before,
-.thimble-transcript-session::after {
+.thimble-transcript-session::after,
+.thimble-msg-day::before,
+.thimble-msg-day::after {
   content: '';
   flex: 1;
   border-top: 1px solid var(--border-hairline);
 }
-/* a cited turn: the evidence highlight, fading by 1.5 s, as Files' (files.css .reader-hit) */
-.thimble-turn-hit::after {
+/* a cited turn or message: the evidence highlight, fading by 1.5 s, as Files' (files.css .reader-hit) */
+.thimble-turn-hit::after,
+.thimble-msg-hit::after {
   content: '';
   position: absolute;
   inset: 0;
@@ -586,4 +905,633 @@
   100% {
     opacity: 0;
   }
+}
+
+/* -------- messages between people or agents, as a chat app draws them (thimble.messages): each author's avatar in a
+   rail at the left, the author and the time in a head over the words, the head shared by the messages that follow it
+   (each message still its own row, so Color by's bar and a label's are its own); the header, the date lines, Show more
+   and the highlight are the transcript's (above) -------- */
+.thimble-msg-list {
+  min-width: 0;
+}
+/* a long title, such as a pull request's beside the side panel, wraps, and the count goes under it whole */
+.thimble-msg-header {
+  flex-wrap: wrap;
+  row-gap: 0;
+}
+.thimble-msg-header-n,
+.thimble-msg-header-sub {
+  white-space: nowrap;
+}
+.thimble-msg {
+  position: relative;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 0 10px;
+  padding: 8px 16px 3px 12px;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 52px;
+}
+.thimble-msg.is-cont {
+  padding-top: 0;
+}
+/* a reply: one level in, under its parent's words, with a smaller avatar, as a board draws a thread */
+.thimble-msg.is-reply {
+  grid-template-columns: 24px minmax(0, 1fr);
+  margin-left: 42px;
+}
+.thimble-msg.is-act {
+  cursor: pointer;
+}
+.thimble-msg.is-act:hover {
+  background: var(--surface-hover);
+}
+/* the message picked last, such as the one the side panel shows, as the table marks its chosen row */
+.thimble-msg.active,
+.thimble-msg.active:hover {
+  background: var(--surface-selected);
+}
+/* under the list's sticky header, a message scrolled to stands clear of it; a cited one is drawn even out of view, so
+   reveal measures its own height */
+.thimble-msg-headed > .thimble-msg {
+  scroll-margin-top: 40px;
+}
+.thimble-msg.thimble-msg-hit {
+  content-visibility: visible;
+}
+/* a day whose messages the label filter hid all */
+.thimble-msg-day[hidden] {
+  display: none;
+}
+.thimble-msg:focus-visible {
+  outline: 1.5px solid var(--accent);
+  outline-offset: -1.5px;
+}
+.thimble-msg-rail {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  min-width: 0;
+  padding-top: 2px;
+}
+.thimble-msg-rail .avatar {
+  width: 32px;
+  height: 32px;
+  font-size: 12px;
+}
+.thimble-msg.is-reply .thimble-msg-rail .avatar {
+  width: 24px;
+  height: 24px;
+  font-size: 10px;
+}
+/* a message under a shared head: its time in the rail while the pointer is on it */
+.thimble-msg-railtime {
+  visibility: hidden;
+  padding-top: 1px;
+  color: var(--text-tertiary);
+  font: 400 10px / 1.6 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.thimble-msg:hover .thimble-msg-railtime,
+.thimble-msg:focus-within .thimble-msg-railtime {
+  visibility: visible;
+}
+.thimble-msg-main {
+  min-width: 0;
+}
+.thimble-msg-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.thimble-msg-author {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font: 600 var(--text-sm) / 1.45 var(--font-body);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.thimble-msg-time {
+  flex: none;
+  color: var(--text-tertiary);
+  font: 400 var(--text-mono-sm) / 1.45 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.thimble-msg-to {
+  color: var(--text-tertiary);
+  font: 400 var(--text-ui-sm) / 1.45 var(--font-body);
+  overflow-wrap: anywhere;
+}
+.thimble-msg-subject {
+  margin-top: 2px;
+  color: var(--text-primary);
+  font: 600 var(--text-sm) / 1.45 var(--font-body);
+  overflow-wrap: anywhere;
+}
+.thimble-msg-body {
+  margin-top: 1px;
+  color: var(--text-primary);
+  font: 400 var(--text-sm) / 1.5 var(--font-body);
+  overflow-wrap: anywhere;
+}
+.thimble-msg-body > * + *,
+.thimble-msg-rest > * + * {
+  margin-top: 6px;
+}
+/* words drawn without thimble.text: their lines as written */
+.thimble-msg-text.is-plain {
+  white-space: pre-wrap;
+}
+/* quoted mail: folded behind "…", as a mail app folds it; quiet once open */
+.thimble-msg-dots {
+  display: inline-flex;
+  align-items: center;
+  height: 14px;
+  margin: 0;
+  padding: 0 6px 5px;
+  border: 0;
+  border-radius: var(--radius-chip);
+  background: rgba(var(--ink-rgb), 0.08);
+  color: var(--text-secondary);
+  font: 600 13px / 1 var(--font-body);
+  cursor: pointer;
+}
+.thimble-msg-dots:hover,
+.thimble-msg-dots[aria-expanded='true'] {
+  background: rgba(var(--ink-rgb), 0.14);
+  color: var(--text-primary);
+}
+.thimble-msg-fold {
+  margin-top: 6px;
+  color: var(--text-secondary);
+}
+/* an event: one line, its icon in the rail in the ink, the time at the right */
+.thimble-msg-event {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.thimble-msg-event .thimble-msg-rail {
+  padding-top: 1px;
+}
+.thimble-msg-ico {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  color: var(--text-secondary);
+}
+/* an icon of the page's own ({html}): an svg in it takes the box, the ink and the stroke; a character is set small */
+.thimble-msg-ico.is-own {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font: 600 11px / 1 var(--font-body);
+}
+.thimble-msg-ico.is-own > svg {
+  width: 100%;
+  height: 100%;
+}
+.thimble-msg-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text-secondary);
+  font: 400 var(--text-ui-sm) / 1.5 var(--font-body);
+}
+.thimble-msg-said {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.thimble-msg-said .thimble-msg-author {
+  font: 600 var(--text-ui-sm) / 1.5 var(--font-body);
+  white-space: normal;
+}
+/* a command, a sha or a path in what an event says ({html}), in the mono face */
+.thimble-msg-said code {
+  font: 400 var(--text-mono-sm) / 1.5 var(--font-mono);
+}
+.thimble-msg-event .thimble-msg-body {
+  margin-top: 2px;
+}
+/* a boxed message (`box`), one that stands apart from the chat, such as a mail or a task's opening post: a box beside
+   the avatar, its head on a light tint as an event's line (the author, what they did and the time at the right), the
+   words under it; the box takes the row's own background, so a message chosen or under the pointer shows through it */
+.thimble-msg.is-boxed {
+  padding-bottom: 8px;
+}
+.thimble-msg-box {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+}
+.thimble-msg-boxhead {
+  padding: 5px 10px;
+  background: rgba(var(--ink-rgb), 0.035);
+}
+.thimble-msg-boxhead:not(:last-child) {
+  border-bottom: 1px solid var(--border-subtle);
+}
+.thimble-msg-boxbody {
+  padding: 8px 10px 10px;
+}
+.thimble-msg-boxbody > .thimble-msg-body:first-child {
+  margin-top: 0;
+}
+.thimble-msg-none {
+  padding: 28px 16px;
+  color: var(--text-tertiary);
+}
+
+/* -------- a record's fields as a tree (thimble.record): its citation, then a row per field, each level a grid of its
+   own so its values line up; a nested value under its key, inset past a hairline guide -------- */
+.thimble-record {
+  min-width: 0;
+  color: var(--text-primary);
+  font: 400 var(--text-ui-sm) / 1.55 var(--font-body);
+}
+.thimble-record-cite {
+  display: flex;
+  margin: 0 0 8px;
+}
+.thimble-record-tree,
+.thimble-record-kids {
+  display: grid;
+  grid-template-columns: fit-content(40%) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 3px 12px;
+}
+.thimble-record-tree.is-one {
+  display: block;
+}
+.thimble-record-kids {
+  grid-column: 1 / -1;
+  margin: 0 0 2px 5px;
+  padding-left: 9px;
+  border-left: 1px solid var(--border-hairline);
+}
+.thimble-record-row {
+  display: contents;
+}
+/* a key: mono, quiet, after its caret or the caret's room, so every key at a level starts at one edge */
+.thimble-record-key {
+  display: flex;
+  align-items: baseline;
+  justify-self: start;
+  gap: 3px;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-tertiary);
+  font: 400 var(--text-mono-sm) / 1.55 var(--font-mono);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+button.thimble-record-key {
+  cursor: pointer;
+}
+button.thimble-record-key:hover {
+  color: var(--text-primary);
+}
+button.thimble-record-key:focus-visible {
+  outline: 1.5px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--radius-chip);
+  color: var(--text-primary);
+}
+.thimble-record-caret,
+.thimble-record-gap {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  align-self: center;
+}
+.thimble-record-caret {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.12s ease;
+}
+.thimble-record-row.is-open .thimble-record-caret {
+  transform: rotate(90deg);
+}
+.thimble-record-val {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.thimble-record-val.is-num,
+.thimble-record-val.is-bool,
+.thimble-record-val.is-null,
+.thimble-record-val.is-empty {
+  font: 400 var(--text-mono-sm) / 1.55 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.thimble-record-val.is-bool {
+  color: var(--text-secondary);
+}
+/* a string under a field the page names in `mono`, such as a file's raw line or a command */
+.thimble-record-val.is-mono {
+  font: 400 var(--text-mono-sm) / 1.55 var(--font-mono);
+}
+.thimble-record-val.is-null,
+.thimble-record-val.is-empty {
+  color: var(--text-tertiary);
+}
+/* a folded value's one line: its size and its first fields or items */
+.thimble-record-sum {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font: 400 var(--text-mono-sm) / 1.55 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* a long string folded: its height cut to six lines, the last fading out above Show more; its text past its first six
+   lines is hidden in the page (viewer_record.js) */
+.thimble-record-text {
+  display: block;
+}
+.thimble-record-text.is-folded {
+  max-height: calc(6 * 1.55em);
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 1.55em), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 1.55em), transparent);
+}
+.thimble-record-more.btn {
+  margin: 2px 0 0 -6px;
+  color: var(--text-tertiary);
+}
+.thimble-record-dim {
+  margin-left: 4px;
+  font-size: var(--text-mono-sm);
+}
+/* the words found, as Files' find marks them: in the text's color, so a value's own color does not fade on the tint */
+.thimble-record-hit {
+  border-radius: var(--radius-hl, 3px);
+  background: var(--find-bg, var(--hl-bg-strong, var(--hl-bg)));
+  color: var(--text-primary);
+}
+
+/* -------- a chart (thimble.chart): Vega's drawing in the chart style, or the line in its place -------- */
+.thimble-chart {
+  min-width: 0;
+}
+/* as wide as its box; a chart whose columns cannot all be named at that width scrolls inside it, as on a card */
+.thimble-chart-plot {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  user-select: none;
+}
+.thimble-chart-plot [tabindex]:focus,
+.thimble-chart-plot svg:focus,
+.thimble-chart-plot canvas:focus,
+.thimble-chart-plot .vega-embed:focus {
+  outline: none;
+}
+.thimble-chart[data-pick] .role-mark > * {
+  cursor: pointer;
+}
+.thimble-chart-note {
+  box-sizing: border-box;
+  padding: 12px 0;
+  color: var(--text-tertiary);
+  font: 400 var(--text-ui-sm) / 1.5 var(--font-body);
+}
+.thimble-chart-note.is-error {
+  color: var(--status-negative);
+  font: 400 var(--text-mono-sm) / 1.5 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* Vega's hover tip as the canvas draws it (frontend/src/styles/outputs.css): vega-tooltip prepends its own sheet to the
+   head, so these rules win by order */
+#vg-tooltip-element,
+#vg-tooltip-element.dark-theme {
+  padding: 6px 8px;
+  border: var(--overlay-edge, 1px solid var(--border-subtle));
+  border-radius: var(--radius-card);
+  background: var(--overlay-bg, var(--surface-card));
+  box-shadow: var(--shadow-popover, 0 0 0 1px rgba(var(--ink-rgb), 0.09), 0 10px 28px -18px rgba(var(--ink-rgb), 0.28));
+  color: var(--text-primary);
+  font: 400 var(--text-mono-sm) / 1.5 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+#vg-tooltip-element h2 {
+  margin: 0 0 4px;
+  font: 500 var(--text-mono-sm) / 1.5 var(--font-mono);
+}
+#vg-tooltip-element table tr td.key,
+#vg-tooltip-element.dark-theme td.key {
+  color: var(--text-tertiary);
+}
+
+/* -------- formatted text (thimble.text): markdown or plain text as the File browser's reader draws a markdown file
+   (frontend/src/styles/files.css .reader-md), in the face, size and ink of the element around it; code on a light
+   tint of the ink, a table as the kit's .table, a quote indented in the secondary ink with no stripe -------- */
+.thimble-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.thimble-text > :first-child,
+.thimble-text :is(li, blockquote) > :first-child {
+  margin-top: 0;
+}
+.thimble-text > :last-child,
+.thimble-text :is(li, blockquote) > :last-child {
+  margin-bottom: 0;
+}
+.thimble-text p,
+.thimble-text ul,
+.thimble-text ol,
+.thimble-text pre,
+.thimble-text table,
+.thimble-text blockquote {
+  margin: 0 0 8px;
+}
+.thimble-text ul,
+.thimble-text ol {
+  padding-left: 22px;
+}
+.thimble-text :is(h1, h2, h3, h4, h5, h6) {
+  margin: 16px 0 6px;
+  font-family: var(--font-body);
+  font-weight: 500;
+  line-height: 1.3;
+}
+.thimble-text h1 {
+  font-size: 1.4em;
+}
+.thimble-text h2 {
+  font-size: 1.2em;
+}
+.thimble-text :is(h3, h4, h5, h6) {
+  font-size: 1.05em;
+}
+.thimble-text :is(strong, b) {
+  font-weight: 500;
+}
+.thimble-text code {
+  padding: 0 4px;
+  border-radius: var(--radius-hl);
+  background: rgba(var(--ink-rgb), 0.06);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+.thimble-text pre {
+  padding: 10px 12px;
+  border-radius: var(--radius-card);
+  background: rgba(var(--ink-rgb), 0.06);
+  font: 400 var(--text-mono) / 1.55 var(--font-mono);
+}
+.thimble-text pre code {
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  font: inherit;
+}
+/* a task's box in place of its item's bullet */
+.thimble-text li:has(> input[type='checkbox']:first-child) {
+  list-style: none;
+}
+.thimble-text li > input[type='checkbox']:first-child {
+  margin: 0 6px 0 -19px;
+  vertical-align: -2px;
+}
+.thimble-text table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+/* a cell breaks a word only where the word alone is wider than the column can be, so a narrow column keeps its words */
+.thimble-text th,
+.thimble-text td {
+  padding: 5px 12px 5px 8px;
+  border: 0;
+  border-bottom: 1px solid var(--border-hairline);
+  vertical-align: top;
+  overflow-wrap: break-word;
+}
+.thimble-text :is(th, td):first-child {
+  padding-left: 0;
+}
+.thimble-text :is(th, td) {
+  text-align: left;
+}
+.thimble-text :is(th, td)[align='right'] {
+  text-align: right;
+}
+.thimble-text :is(th, td)[align='center'] {
+  text-align: center;
+}
+.thimble-text thead th {
+  border-bottom-color: var(--border-subtle);
+  color: var(--text-tertiary);
+  font: 400 10.5px / 1.2 var(--font-body);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.thimble-text blockquote {
+  padding: 0 0 0 14px;
+  border: 0;
+  color: var(--text-secondary);
+}
+.thimble-text hr {
+  margin: 12px 0;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+}
+.thimble-text section.footnotes {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-hairline);
+  color: var(--text-secondary);
+  font-size: 0.92em;
+}
+.thimble-text sup {
+  line-height: 0;
+}
+/* plain text, and raw HTML a markdown text holds, as written */
+.thimble-text-plain {
+  white-space: pre-wrap;
+}
+/* a link that opens a corpus path or a view in thimble, as the app's links; a URL, which opens nothing in a view, a
+   dotted underline that shows its address on hover */
+.thimble-text-ref {
+  color: var(--text-link);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklab, var(--text-link) 35%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.thimble-text-ref:hover {
+  text-decoration-color: var(--text-link);
+}
+.thimble-text-ref:focus-visible {
+  outline: none;
+  border-radius: var(--radius-hl);
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+.thimble-text-url {
+  color: inherit;
+  text-decoration: underline dotted;
+  text-decoration-color: var(--border-strong);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+.thimble-text [data-thimble-fold][hidden] {
+  display: none;
+}
+.thimble-text-more.btn {
+  margin: 2px 0 0 -6px;
+  color: var(--text-tertiary);
+}
+/* in a card's body, a preview whose lines the card cuts, a heading is no larger than the text around it, and Show more,
+   which the cut would hide, is left out */
+.thimble-card-body .thimble-text :is(h1, h2, h3, h4, h5, h6) {
+  margin-top: 0;
+  font-size: 1em;
+}
+.thimble-card-body .thimble-text-more {
+  display: none;
+}
+/* in a table's one-line cell the text runs on as one line, its line breaks spaces, which the cell cuts */
+.thimble-table-td .thimble-text,
+.thimble-table-td .thimble-text :is(p, h1, h2, h3, h4, h5, h6, ul, ol, li, blockquote, pre, table, thead, tbody, tr, th, td, section) {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-size: inherit;
+  line-height: inherit;
+}
+.thimble-table-td .thimble-text,
+.thimble-table-td .thimble-text * {
+  white-space: nowrap;
+}
+.thimble-table-td .thimble-text li > input[type='checkbox']:first-child {
+  margin: 0 4px 0 0;
+}
+.thimble-table-td .thimble-text :is(hr, .thimble-text-more) {
+  display: none;
 }

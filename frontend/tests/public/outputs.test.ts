@@ -2,10 +2,12 @@
 // a chart before its text. A card type's graphic is the card's chart, drawn by the type's frame, and a citation of one
 // of its listing's lines opens the record that ends the line (src/canvas/TypeCard.tsx). What a card draws that a
 // document can show as a figure (figureKind).
+import { compile } from 'vega-lite'
 import { describe, expect, test } from 'vitest'
 import { citedRecord } from '../../src/canvas/TypeCard.tsx'
 import { CARD_MIME, ERROR_MIME, figureKind, pickMime, primaryArtifact, responsive } from '../../src/components/Outputs.tsx'
 import { FRAME_MIME } from '../../src/lib/dataFrame.ts'
+import { fitAfterCompile } from '../../src/lib/vegaDraw.ts'
 import type { Cell, MimeBundle } from '../../src/lib/types.ts'
 import { cardShape } from '../../src/report/cards.ts'
 import { figureCandidates } from '../../src/report/model.ts'
@@ -76,6 +78,45 @@ describe('a composite chart fitted to its room', () => {
     for (const v of fitted.vconcat) {
       expect(v.width).toBeLessThan(640)
       expect(v.layer[1].encoding.x.value).toBe(v.width)
+    }
+  })
+})
+
+describe("a chart fitted to its box", () => {
+  // as every chart that is no composite is fitted (responsive's container width and fit-x): a bar chart of named
+  // categories, whose rows Vega-Lite sizes by a step, a line chart, and a bar chart over a layer of notes
+  const VL = 'https://vega.github.io/schema/vega-lite/v6.json'
+  const names = responsive({ $schema: VL, data: { values: [{ agent: 'a1', n: 3 }, { agent: 'a2', n: 5 }] }, mark: 'bar', encoding: { y: { field: 'agent', type: 'nominal' }, x: { field: 'n', type: 'quantitative' } } })
+  const line = responsive({ $schema: VL, data: { values: [{ t: 1, n: 3 }, { t: 2, n: 5 }] }, mark: 'line', encoding: { x: { field: 't', type: 'quantitative' }, y: { field: 'n', type: 'quantitative' } } })
+  const noted = responsive({ $schema: VL, layer: [{ data: { values: [{ agent: 'a1', n: 3 }] }, mark: 'bar', encoding: { y: { field: 'agent', type: 'nominal' }, x: { field: 'n', type: 'quantitative' } } }, { data: { values: [{ agent: 'a1', note: 'top' }] }, mark: 'text', encoding: { y: { field: 'agent', type: 'nominal' }, text: { field: 'note' } } }] })
+  const logger = (into: unknown[]) => {
+    const log = { level: () => log, error: (...args: unknown[]) => (into.push(...args), log), info: () => log, debug: () => log, warn: (...args: unknown[]) => (into.push(...args), log) }
+    return log as never
+  }
+
+  test('is compiled with nothing for Vega-Lite to warn about, and draws as the spec as written compiles', () => {
+    for (const spec of [names, line, noted]) {
+      const before: unknown[] = []
+      const asWritten = compile(spec as never, { logger: logger(before) }).spec
+      const warned: unknown[] = []
+      const { spec: given, patch } = fitAfterCompile(spec)
+      const vg = patch(compile(given as never, { logger: logger(warned) }).spec as never) as { autosize?: unknown }
+      expect(warned).toEqual([])
+      expect(vg).toEqual(asWritten)
+      expect(vg.autosize).toEqual({ type: 'fit-x', contains: 'padding' })
+      // the spec as written warns, for rows sized by a step, though the fit it drops is not the chart's
+      expect(before).toEqual(spec === line ? [] : ['Dropping "fit-y" because spec has discrete height.'])
+    }
+  })
+
+  test('a chart that sets its own fit, or a composite, is given as it is', () => {
+    const own = { ...(names as object), autosize: 'fit' }
+    const composite = responsive({ $schema: VL, vconcat: [{ mark: 'bar' }, { mark: 'bar' }] }, 400)
+    for (const spec of [own, composite]) {
+      const { spec: given, patch } = fitAfterCompile(spec)
+      expect(given).toBe(spec)
+      const vg = { width: 400 }
+      expect(patch(vg)).toBe(vg)
     }
   })
 })

@@ -155,7 +155,7 @@ function LabelRow({ label: k, on, focused, marked, editing, status, labels, onEd
         )}
         {running && <Spinner size={10} label="Running" />}
         {files && (
-          <Button ref={paletteAt} variant="icon" size="sm" icon="palette" title="Change colour" aria-label={`Change the colours of ${k.name}`} className="files-label-colour" active={picking} onClick={() => setPicking(!picking)} />
+          <Button ref={paletteAt} variant="icon" size="sm" icon="palette" title="Change color" aria-label={`Change the colors of ${k.name}`} className="files-label-colour" active={picking} onClick={() => setPicking(!picking)} />
         )}
         {onFilter && (classes.length <= 2 || !on) && (
           <FilterButton pressed={filter != null} label={`Show only the records ${k.name} marks`} onClick={() => onFilter(k.id, filter != null ? null : ((classes.find((c) => c.highlight) ?? classes[0])?.name ?? 'yes'))} />
