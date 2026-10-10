@@ -736,6 +736,7 @@ button.thimble-record-key:hover {
   cursor: pointer;
 }
 .thimble-chart-note {
+  box-sizing: border-box;
   padding: 12px 0;
   color: var(--text-tertiary);
   font: 400 var(--text-ui-sm) / 1.5 var(--font-body);

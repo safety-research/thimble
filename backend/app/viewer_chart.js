@@ -18,8 +18,9 @@
 // Beside thimble.chart's options it takes three of its own: `colour`, Color by, whose colours the group or series
 // column's values take, in place of a legend, since Color by's chips are the key (gray with Off or for a value turned
 // off); `onPick(row)`, a mark clicked, with its row; and `height`, the plot's height in px. Called again on the same
-// mount it replaces the chart, so a page draws it in its draw(). A chart with no rows draws none, and a wrong call says
-// what is wrong in the chart's place, as a card's chart does.
+// mount it replaces the chart, so a page draws it in its draw(): the same chart again is kept as it is, and a mount asks
+// thimble one call at a time, the latest. A chart with no rows draws none, and a wrong call says what is wrong in the
+// chart's place, as a card's chart does, in a line as tall as the chart it replaces.
 ;(function () {
   'use strict'
   var kit = window.__thimbleKit
@@ -29,17 +30,21 @@
 
   var OWN = { colour: true, onPick: true, height: true } // the kit's own options; the others are thimble.chart's
   var KEPT = 32 // the specs kept, by what they were asked with, so drawing the same chart again asks thimble nothing
+  var KEPT_CHARS = 4e6 // and at most this many characters of what they were asked with, since a chart's rows can be many
 
   var specs = {}
   var order = []
+  var chars = 0
+  function forget(key) {
+    if (!specs[key]) return
+    delete specs[key]
+    order.splice(order.indexOf(key), 1)
+    chars -= key.length
+  }
   // a label's colours or values changed: a spec that names a label is asked for again
   kit.labels(function (state, labelsChanged) {
     if (!labelsChanged) return
-    order = order.filter(function (k) {
-      if (!specs[k].label) return true
-      delete specs[k]
-      return false
-    })
+    order.filter(function (k) { return specs[k].label }).forEach(forget)
   })
   function ask(kind, rows, options) {
     var own = {}
@@ -48,20 +53,34 @@
     var key = JSON.stringify(query)
     if (specs[key]) return specs[key].answer
     var answer = thimble.fetch(query).then(null, function (e) {
-      if (specs[key]) {
-        delete specs[key]
-        order.splice(order.indexOf(key), 1)
-      }
+      forget(key)
       throw e
     })
+    if (key.length > KEPT_CHARS) return answer
     specs[key] = { answer: answer, label: own.label != null }
     order.push(key)
-    while (order.length > KEPT) delete specs[order.shift()]
+    chars += key.length
+    while (order.length > KEPT || chars > KEPT_CHARS) forget(order[0])
     return answer
   }
+  // a mount's calls ask one at a time, so a page that draws its chart on every frame of a drag asks for the latest
+  // rows once the answer before comes, and the calls between ask nothing
+  function queued(st, seq, kind, rows, options) {
+    var go = function () {
+      return seq === st.seq ? ask(kind, rows, options) : null
+    }
+    var got = st.asking ? st.asking.then(go) : Promise.resolve(go())
+    st.asking = got.then(
+      function () {},
+      function () {}
+    )
+    return got
+  }
 
+  // what failed, named as thimble.chart's errors are, once
   function message(e) {
-    return e && e.message ? e.message : String(e)
+    var m = e && e.message ? e.message : String(e)
+    return /^thimble\.chart\b/.test(m) ? m : 'thimble.chart: ' + m
   }
   // a field's name as its rows hold it: Vega-Lite's field names a dot or a bracket with a backslash before it
   function bare(field) {
@@ -79,6 +98,12 @@
     }
     return out
   }
+  // whether a row holds `v` (null: no value) in `field`
+  function has(rows, field, v) {
+    var name = bare(field)
+    for (var i = 0; i < rows.length; i++) if (rows[i] && (rows[i][name] == null ? null : rows[i][name]) === v) return true
+    return false
+  }
   // the spec with every color channel over groups in Color by's colours, in the spec's order of them, and no legend
   function coloured(spec, colour) {
     var gray = kit.realColour('var(--label-none)')
@@ -90,9 +115,15 @@
       if (s.spec) out.spec = walk(s.spec, own)
       var c = s.encoding && s.encoding.color
       if (c && typeof c.field === 'string' && c.type !== 'quantitative' && c.type !== 'temporal') {
-        var domain = Array.isArray(c.sort) ? c.sort.slice() : distinct(own, c.field)
+        // the spec's order of the values, then any other its rows hold, and null, the rows with none, last
+        var domain = Array.isArray(c.sort) ? c.sort.slice() : []
+        distinct(own, c.field).forEach(function (v) {
+          if (domain.indexOf(v) < 0) domain.push(v)
+        })
+        if (!domain.length) return out // a field the rows do not hold, such as one a transform makes
+        if (has(own, c.field, null)) domain.push(null)
         var range = domain.map(function (v) {
-          return ctl.safe(function () { return colour.colourOf(v) }, null) || gray
+          return (v != null && ctl.safe(function () { return colour.colourOf(v) }, null)) || gray
         })
         out.encoding = Object.assign({}, s.encoding, { color: Object.assign({}, c, { scale: { domain: domain, range: range }, legend: null }) })
       }
@@ -142,12 +173,14 @@
     return row
   }
 
-  // what a mount keeps: the chart drawn, the last call's spec, and which call is the latest; its plot and its note are
-  // made again when the page emptied the mount
+  // what a mount keeps: which call is the latest (seq) and the one that asks now (asking); the chart it shows (last,
+  // the spec as drawn with its labels and the call's options, and sig, what it was drawn from), the drawing (drawn) and
+  // the draw under way (drawing, and tok, which a later draw replaces); its plot and its note are made again when the
+  // page emptied the mount
   function stateOf(el) {
     var st = el.__thimbleChart
     if (!st) {
-      st = el.__thimbleChart = { seq: 0, drawn: null, last: null, width: 0, waiting: null, plot: null, note: null }
+      st = el.__thimbleChart = { seq: 0, asking: null, last: null, sig: null, drawn: null, drawing: null, tok: null, width: 0, waiting: null, plot: null, note: null }
       if (typeof ResizeObserver === 'function') {
         new ResizeObserver(function () {
           resized(el, st)
@@ -155,8 +188,7 @@
       }
     }
     if (!st.plot || st.plot.parentNode !== el) {
-      if (st.drawn) st.drawn.finalize()
-      st.drawn = null
+      clear(st)
       el.classList.add('thimble-chart')
       el.innerHTML = '<div class="thimble-chart-plot"></div><div class="thimble-chart-note" data-thimble-chrome hidden></div>'
       st.plot = el.firstChild
@@ -164,20 +196,26 @@
     }
     return st
   }
-  // a call that waited for the mount's width and was replaced draws nothing
-  function unwait(st) {
+  // the chart taken away, and a draw under way or waiting for the mount's width stopped
+  function clear(st) {
+    st.sig = null
+    st.tok = null
+    st.drawing = null
     var w = st.waiting
     st.waiting = null
     if (w) w.resolve(null)
+    if (st.drawn) st.drawn.finalize()
+    st.drawn = null
   }
+  // a line in the chart's place, as tall as the chart it replaces, so the page below it keeps its place
   function note(el, st, text, error) {
-    if (st.drawn) {
-      st.drawn.finalize()
-      st.drawn = null
-    }
+    var h = st.drawn ? st.plot.offsetHeight : st.note.hidden ? 0 : parseFloat(st.note.style.minHeight) || 0
+    clear(st)
+    st.last = null
     st.plot.innerHTML = ''
     st.note.textContent = text
     st.note.classList.toggle('is-error', !!error)
+    st.note.style.minHeight = h ? h + 'px' : ''
     st.note.hidden = false
     el.removeAttribute('data-pick')
     return null
@@ -199,55 +237,64 @@
     }
     if (!st.drawn || !st.last || !window.__thimbleCharts) return
     if (st.drawn.container) window.__thimbleCharts.refit(st.drawn, st.plot)
-    else draw(el, st, ++st.seq)
+    else draw(el, st)
   }
-  function draw(el, st, seq) {
+  // the mark clicked, with its row, to the latest call's onPick
+  function picked(st, item) {
+    var pick = st.last && st.last.options.onPick
+    if (typeof pick !== 'function' || !item || !item.datum || typeof item.datum !== 'object') return
+    var row = rowOf(item.datum, columns(st.last.spec))
+    ctl.safe(function () { pick(row) })
+  }
+  // st.last drawn in the plot, in place of the chart before it; resolves with its Vega view, or null when another draw
+  // or a line took its place
+  function draw(el, st) {
     var charts = window.__thimbleCharts
     if (!charts) return failed(el, st, 'thimble.chart: the chart drawing, frontend/dist/kit/chart.js, is not built in this install')
+    var tok = (st.tok = {})
+    var w = st.waiting
+    st.waiting = null
+    if (w) w.resolve(null)
+    var alive = function () {
+      return st.tok === tok
+    }
+    st.note.hidden = true
     if (!el.clientWidth) {
       // drawn once the mount has a width, as a chart on a card waits for its box
-      return new Promise(function (resolve) {
+      return (st.drawing = new Promise(function (resolve) {
         st.waiting = {
           resolve: resolve,
           go: function () {
-            resolve(seq === st.seq ? draw(el, st, seq) : null)
+            resolve(alive() ? draw(el, st) : null)
           },
         }
-      })
+      }))
     }
-    var last = st.last
-    var pick = typeof last.options.onPick === 'function' ? last.options.onPick : null
-    var cols = pick ? columns(last.spec) : null
-    st.note.hidden = true
-    if (pick) el.setAttribute('data-pick', '')
-    else el.removeAttribute('data-pick')
     st.width = el.clientWidth
-    return charts
+    var last = st.last
+    return (st.drawing = charts
       .draw(st.plot, last.spec, {
         labels: last.labels,
-        alive: function () {
-          return seq === st.seq
-        },
+        alive: alive,
         replace: function () {
           if (st.drawn) st.drawn.finalize()
           st.drawn = null
         },
         drawn: function (d) {
           st.drawn = d
-          if (pick)
-            d.view.addEventListener('click', function (e, item) {
-              if (item && item.datum && typeof item.datum === 'object') ctl.safe(function () { pick(rowOf(item.datum, cols)) })
-            })
+          d.view.addEventListener('click', function (e, item) {
+            picked(st, item)
+          })
         },
       })
       .then(
         function (d) {
-          return seq === st.seq && d ? d.view : null
+          return alive() && d ? d.view : null
         },
         function (e) {
-          return seq === st.seq ? failed(el, st, 'thimble.chart: ' + message(e)) : null
+          return alive() ? failed(el, st, message(e)) : null
         }
-      )
+      ))
   }
 
   /** a chart of thimble.chart's kinds, or of any Vega-Lite spec, in the canvas's theme (see the top of this file);
@@ -264,21 +311,26 @@
     options = options && typeof options === 'object' ? options : {}
     var st = stateOf(el)
     var seq = ++st.seq
-    st.last = null
-    unwait(st)
     if (!spec && !Array.isArray(data)) return Promise.resolve(failed(el, st, 'thimble.chart(' + JSON.stringify(String(kind)) + ") takes its data as a list of rows, each an object whose keys come in the kind's order"))
     if (!spec && !data.length) return Promise.resolve(note(el, st, 'No data'))
-    var answer = spec ? Promise.resolve({ spec: spec }) : ask(kind, data, options)
+    var answer = spec ? Promise.resolve({ spec: spec }) : queued(st, seq, kind, data, options)
     return answer.then(
       function (got) {
         if (seq !== st.seq) return null
         if (!got || got.error || !got.spec) return failed(el, st, (got && got.error) || 'thimble.chart: thimble gave no chart')
-        st.last = { spec: finished(got.spec, options), labels: got.label ? [classes(got.label)] : [], options: options }
-        return draw(el, st, seq)
+        var last = { spec: finished(got.spec, options), labels: got.label ? [classes(got.label)] : [], options: options }
+        var sig = JSON.stringify([last.spec, last.labels])
+        st.last = last
+        if (typeof options.onPick === 'function') el.setAttribute('data-pick', '')
+        else el.removeAttribute('data-pick')
+        // the chart it shows already, or is drawing: kept as it is, with this call's onPick
+        if (sig === st.sig && st.drawing) return st.drawing
+        st.sig = sig
+        return draw(el, st)
       },
       function (e) {
         if (seq !== st.seq || (e && e.name === 'AbortError')) return null
-        return failed(el, st, 'thimble.chart: ' + message(e))
+        return failed(el, st, message(e))
       }
     )
   }

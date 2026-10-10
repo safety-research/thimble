@@ -179,11 +179,43 @@ describe('thimble.chart', () => {
     // a mark clicked: its row, by the columns the chart's rows hold
     win().__click({}, { datum: { agent: 'agent-2', posts: 9, tool: 'Bash', posts_end: 9, __thimble_stack: 1 } })
     expect(picked).toEqual([{ agent: 'agent-2', posts: 9, tool: 'Bash' }])
-    // the same chart again asks nothing and replaces the one drawn
-    await win().thimble.chart('#c', 'bar', ROWS, { stack: false, height: 120 })
+    // the same chart again asks nothing and keeps the one drawn, a click going to the new call's onPick
+    const again: object[] = []
+    expect(await win().thimble.chart('#c', 'bar', ROWS, { stack: false, height: 120, onPick: (row: object) => again.push(row) })).toBe(view)
+    expect(of('fetch').length).toBe(1)
+    expect(win().__drawn.length).toBe(1)
+    win().__click({}, { datum: { agent: 'agent-1', posts: 3, tool: 'Read' } })
+    expect(again).toEqual([{ agent: 'agent-1', posts: 3, tool: 'Read' }])
+    expect(picked.length).toBe(1)
+    // the same rows drawn otherwise ask nothing and replace it
+    await win().thimble.chart('#c', 'bar', ROWS, { stack: false, height: 90 })
     expect(of('fetch').length).toBe(1)
     expect(win().__drawn.length).toBe(2)
     expect(win().__drawn[0].d.gone).toBe(true)
+    expect(win().__drawn[1].spec.height).toBe(90)
+    expect(doc().querySelector('#c')!.hasAttribute('data-pick')).toBe(false)
+  })
+
+  test('asks one call at a time for a mount: the calls made while it waits ask nothing but the latest', async () => {
+    await load()
+    const rowsOf = (n: number) => [{ agent: 'agent-1', posts: n }]
+    const first = win().thimble.chart('#c', 'bar', rowsOf(1))
+    const second = win().thimble.chart('#c', 'bar', rowsOf(2))
+    const third = win().thimble.chart('#c', 'bar', rowsOf(3))
+    await wait()
+    expect(of('fetch').map((m) => (m.query as { rows: unknown }).rows)).toEqual([rowsOf(1)])
+    answer(BAR)
+    await wait()
+    expect(of('fetch').map((m) => (m.query as { rows: unknown }).rows)).toEqual([rowsOf(1), rowsOf(3)])
+    answer(BAR)
+    expect(await first).toBeNull()
+    expect(await second).toBeNull()
+    expect(await third).toBe(win().__drawn.at(-1).d.view)
+    expect(win().__drawn.length).toBe(1)
+    // another mount asks for itself
+    win().thimble.chart('#rec', 'bar', rowsOf(4))
+    await wait()
+    expect(of('fetch').length).toBe(3)
   })
 
   test("draws the groups in Color by's colours with no legend, gray for a value turned off, and a label in its colours", async () => {
@@ -198,12 +230,22 @@ describe('thimble.chart', () => {
     expect(color.scale.domain).toEqual(['Bash', 'Read'])
     expect(color.scale.range).toEqual([colour.colourOf('Bash'), colour.colourOf('Read')])
     expect(new Set(color.scale.range).size).toBe(2)
+    // a value the spec's order leaves out takes its own colour after it, and the rows with no value the gray, last
+    const more = [...ROWS, { agent: 'agent-3', posts: 1, tool: 'Grep' }, { agent: 'agent-3', posts: 2, tool: null }]
+    const both = win().thimble.chart('#c', 'bar', more, { colour })
+    await wait() // a mount's later calls ask once the call before has its answer
+    answer({ ...BAR, data: { values: more } })
+    await both
+    const scale = win().__drawn.at(-1).spec.encoding.color.scale
+    expect(scale.domain).toEqual(['Bash', 'Read', 'Grep', null])
+    expect(scale.range).toEqual([colour.colourOf('Bash'), colour.colourOf('Read'), colour.colourOf('Grep') || 'var(--label-none)', 'var(--label-none)'])
     // Read's colour turned off in the top row: its bars gray, as its records are
     const read = [...doc().querySelectorAll<HTMLElement>('.thimble-colour-chip')].find((c) => c.textContent!.startsWith('Read'))!
     read.click()
     await win().thimble.chart('#c', 'bar', ROWS, { colour })
     expect(win().__drawn.at(-1).spec.encoding.color.scale.range).toEqual([colour.colourOf('Bash'), 'var(--label-none)'])
     const labelled = win().thimble.chart('#c', 'bar', [{ activity: 'money', n: 2 }], { label: 'activity type' })
+    await wait()
     expect(of('fetch').at(-1)!.query).toMatchObject({ options: { label: 'activity type' } })
     answer({ ...BAR, encoding: { ...BAR.encoding, color: undefined } }, { label: [['captcha', 1], ['money', 3], ['other', 0]] })
     await labelled

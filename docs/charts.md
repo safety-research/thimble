@@ -103,10 +103,11 @@ Beside the options above it takes three of the kit's own:
 - `onPick(row)`: a mark clicked, with its row, such as to filter by its category or to open it in the side panel.
 - `height`: the plot's height in px.
 
-The chart takes its mount's width and follows it. Called again on the same mount, it replaces the chart, so a page draws
-it in its `draw()` with the rows Filter by keeps. A chart of no rows says so, and a wrong call says what is wrong in the
-chart's place, in the words a card's chart fails with. `thimble.chart(mount, spec, options)` draws any other Vega-Lite
-spec the same way. It returns a promise of the chart's Vega view, or null when it draws none.
+The chart takes its mount's width and follows it. Called again on the same mount, it replaces the chart and leaves the
+same chart as it is, so a page draws it in its `draw()` with the rows Filter by keeps. A chart of no rows says so, and a
+wrong call says what is wrong in the chart's place, in the words a card's chart fails with.
+`thimble.chart(mount, spec, options)` draws any other Vega-Lite spec the same way. It returns a promise of the chart's
+Vega view, or null when it draws none.
 
 Each half of the chart has one source. The kit builds no spec: it asks thimble for it with the kit's own fetch,
 `{"$thimble": "chart", kind, rows, options}`, which thimble answers with the code a card's `thimble.chart` runs

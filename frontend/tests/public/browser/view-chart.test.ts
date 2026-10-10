@@ -45,6 +45,12 @@ const ANSWERS: Record<string, object> = {
     n: 3,
     label: [['captcha', 1], ['signup', 2], ['money', 3], ['other', 0]],
   },
+  nulls: {
+    spec: { $schema: SCHEMA, data: { values: [{ agent: 'agent-1', posts: 3, tool: 'Read' }, { agent: 'agent-2', posts: 9, tool: null }] }, mark: 'bar',
+      encoding: { y: { field: 'agent', type: 'nominal', title: 'agent', sort: ['agent-2', 'agent-1'] }, x: { field: 'posts', type: 'quantitative', title: 'posts' },
+        color: { field: 'tool', type: 'nominal', title: 'tool', sort: ['Read'] }, tooltip: tip(['agent', 'posts', 'tool']) } },
+    n: 2,
+  },
   long: {
     spec: { $schema: SCHEMA, data: { values: [0, 1, 2].map((i) => ({ page: `Wikipedia:Requests for comment/the longest page name of them all, number ${i}`, posts: 3 + i })) }, mark: 'bar',
       encoding: { y: { field: 'page', type: 'nominal', title: 'page' }, x: { field: 'posts', type: 'quantitative', title: 'posts' } } },
@@ -165,6 +171,31 @@ test("its groups take Color by's colours, as its records' bars do, and a label's
     return [css('--label-1'), css('--label-3'), css('--label-none')]
   })
   assert.deepEqual(await fills(frame, '#c'), label, "captcha, money and other in the label's colours, other in its gray")
+  await page.close()
+})
+
+test("a group with no value takes Color by's gray, and a chart left with no rows keeps its height", async () => {
+  const frame = await framed()
+  await frame.evaluate(() => {
+    ;(window as any).colour = (window as any).thimble.colorBy({ mount: '#colour', fields: [{ name: 'tool', title: 'Tool', values: ['Read', 'Bash'] }] })
+  })
+  assert.equal(await chart(frame, '#b', 'nulls', { colour: true }), true)
+  const readColour = await frame.evaluate(() => (window as any).colour.colourOf('Read'))
+  const gray = await frame.evaluate(() => {
+    const i = document.createElement('i')
+    document.body.appendChild(i)
+    i.style.color = 'var(--label-none)'
+    return getComputedStyle(i).color
+  })
+  assert.deepEqual(await fills(frame, '#b'), [readColour, gray], "agent-1 in Read's colour; agent-2, whose tool is none, in the gray")
+  const before = await frame.evaluate(() => document.querySelector('#b .thimble-chart-plot')!.getBoundingClientRect().height)
+  const after = await frame.evaluate(async () => {
+    await (window as any).thimble.chart('#b', 'bar', [])
+    const note = document.querySelector('#b .thimble-chart-note') as HTMLElement
+    return { text: note.textContent, height: note.getBoundingClientRect().height }
+  })
+  assert.equal(after.text, 'No data')
+  assert.ok(before > 60 && Math.abs(after.height - before) <= 1, `No data as tall as the chart it replaced: ${after.height} for ${before}`)
   await page.close()
 })
 
