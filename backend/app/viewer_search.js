@@ -19,7 +19,9 @@
 // data-thimble-fold, hidden: the search counts what it holds, ticks it where the fold stands, and sends the element a
 // `thimble-unfold` event when it goes to a match inside it, so the part opens it. A fold may hold another: the event goes
 // to the innermost one folded around the match, and again while the match stays folded, so a part may open one level at
-// a time. Reset empties the box. The search hides nothing: search.has(text) tells a page that wants to filter by it.
+// a time. A match that a box cuts from view by its size (its overflow hidden, such as a long block whose height is cut to
+// six lines) sends that box the same event. Reset empties the box. The search hides nothing: search.has(text) tells a
+// page that wants to filter by it.
 ;(function () {
   'use strict'
   var kit = window.__thimbleKit
@@ -151,6 +153,22 @@
     if (!el || typeof el.checkVisibility !== 'function' || el.checkVisibility({ contentVisibilityAuto: true }) || !el.checkVisibility()) return el
     for (var e = el.parentElement; e; e = e.parentElement) if (e.checkVisibility({ contentVisibilityAuto: true })) return e
     return el
+  }
+  // The box that cuts a range from view by its size, such as a long block whose height is cut to six lines: the innermost
+  // element around it whose overflow is hidden or clipped and whose box the range runs past, inside the box it scrolls
+  // in; null where none does
+  function clipOf(r) {
+    var rect = r && typeof r.getBoundingClientRect === 'function' ? r.getBoundingClientRect() : null
+    if (!rect || (!rect.width && !rect.height)) return null
+    var n = r.startContainer
+    for (var e = n.nodeType === 1 ? n : n.parentElement; e && e !== document.body && e !== document.documentElement; e = e.parentElement) {
+      var cs = getComputedStyle(e)
+      if (/(auto|scroll|overlay)/.test(cs.overflowY)) return null
+      if (!/(hidden|clip)/.test(cs.overflowY + ' ' + cs.overflowX)) continue
+      var c = e.getBoundingClientRect()
+      if (rect.top < c.top - 1 || rect.bottom > c.bottom + 1 || rect.left < c.left - 1 || rect.right > c.right + 1) return e
+    }
+    return null
   }
   // a range over `run` from character `a` to `b`
   function rangeIn(run, a, b) {
@@ -442,28 +460,37 @@
     }
     return out
   }
-  // Where a match stands on the screen: its range's box; for one in a folded fold the place of the outermost fold folded
-  // around it; and for one in a row a list leaves unlaid out of view (content-visibility: auto), the row's box, since
-  // measuring the text would lay the row out, one row at a time. `places` keeps each element measured for the next match.
+  // Where a match stands on the screen: its range's box, within its block's, so that one its block cuts from view by its
+  // size (a long block's height cut to six lines) stands at the block's edge; for one in a folded fold the place of the
+  // outermost fold folded around it, the element before it or, in a line of text, its block; and for one in a row a list
+  // leaves unlaid out of view (content-visibility: auto), the row's box, since measuring the text would lay the row out,
+  // one row at a time. `places` keeps each element measured for the next match.
   Search.prototype.rectOf = function (m, places) {
+    var place = function (el) {
+      if (places && places.has(el)) return places.get(el)
+      var p = el.getBoundingClientRect()
+      if (places) places.set(el, p)
+      return p
+    }
     var at
     if (m.fold && m.fold.hidden) {
       var f = m.fold
       for (var up = f.parentElement; up; up = up.parentElement) if (up.hidden && up.hasAttribute(FOLD)) f = up
-      at = laidOut(f.previousElementSibling || f.parentElement)
+      // a fold in a line of text, such as a long block's lines past the sixth, stands in its block
+      at = laidOut(INLINE[f.tagName] ? f.parentElement : f.previousElementSibling || f.parentElement)
     } else {
       if (!m.run) return null
       at = laidOut(m.run.block)
       if (at === m.run.block) {
         if (m.range === undefined) m.range = rangeIn(m.run, m.a, m.b)
-        return m.range && typeof m.range.getBoundingClientRect === 'function' ? m.range.getBoundingClientRect() : null
+        var r = m.range && typeof m.range.getBoundingClientRect === 'function' ? m.range.getBoundingClientRect() : null
+        var b = r && at ? place(at) : null
+        if (!b || (!b.width && !b.height) || (r.top >= b.top && r.bottom <= b.bottom)) return r
+        var top = Math.min(Math.max(r.top, b.top), b.bottom)
+        return { top: top, bottom: Math.max(top, Math.min(r.bottom, b.bottom)) }
       }
     }
-    if (!at) return null
-    if (places && places.has(at)) return places.get(at)
-    var place = at.getBoundingClientRect()
-    if (places) places.set(at, place)
-    return place
+    return at ? place(at) : null
   }
   // the first match at or after the top of what the list shows, as Files' find; the first of all past the last
   Search.prototype.firstFrom = function (ticks) {
@@ -577,17 +604,37 @@
     this.at = k
     var m = this.matches[k]
     this.key = [m.rec, m.k]
-    // a match in a fold: the part that folded it opens it, and the matches are found again in what it drew; a part that
-    // opens one level at a time, such as a record's nested values, is sent the event again while the match stays folded
-    for (var tries = 0; m && m.fold && m.fold.hidden && tries < UNFOLD_MAX; tries++) {
-      var fold = m.fold
+    // a match in a fold, or cut from view by its box's size: the part that folded it opens it, and the matches are found
+    // again in what it drew; a part that opens one level at a time, such as a record's nested values, is sent the event
+    // again while the match stays folded
+    var fold = this.closed(m)
+    for (var tries = 0; fold && tries < UNFOLD_MAX; tries++) {
       fold.dispatchEvent(new CustomEvent('thimble-unfold', { bubbles: true }))
+      // the page drew nothing again: no part opens it
+      if (!this.changed()) break
       this.find(false)
       m = this.matches[this.at]
-      // the match not found again, or its fold left as it was: the part did not open it
-      if (!m || m.rec !== this.key[0] || m.k !== this.key[1] || m.fold === fold) break
+      // the match not found again, or the same fold around it: the part did not open it
+      if (!m || m.rec !== this.key[0] || m.k !== this.key[1]) break
+      var next = this.closed(m)
+      if (next === fold) break
+      fold = next
     }
     this.show(true)
+  }
+  // what keeps a match from view: the fold folded around it, else the box that cuts it from view by its size; null for
+  // neither
+  Search.prototype.closed = function (m) {
+    if (!m || !m.run) return null
+    if (m.fold && m.fold.hidden) return m.fold
+    if (m.range === undefined) m.range = rangeIn(m.run, m.a, m.b)
+    return clipOf(m.range)
+  }
+  // whether the page changed what the search finds since the observer last told, its changes taken from the observer
+  Search.prototype.changed = function () {
+    var rs = this.observer.takeRecords()
+    for (var i = 0; i < rs.length; i++) if (this.counts(rs[i])) return true
+    return false
   }
   // the current match brought into view and drawn as current
   Search.prototype.show = function (paint) {

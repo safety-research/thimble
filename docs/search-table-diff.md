@@ -77,9 +77,11 @@ the diff's unchanged lines, the transcript's folded turns and a long block's lin
 ([rows-and-filters.md](rows-and-filters.md)), and the record's folded values, a long string's lines past the sixth and a
 long list's items past the first 100. The search counts what it holds, ticks it where the fold stands, and sends the
 element a `thimble-unfold` event when it goes to a match inside it; the part opens the fold there, and the match shows.
-A fold may hold another, such as a folded tool call whose output is long: the event goes to the innermost fold around
-the match, and again while the match stays folded, so a part may open one level at a time. A citation's quote in folded
-text opens its fold the same way. A hidden element without `data-thimble-fold` is not searched.
+A fold may hold another: the event goes to the innermost fold around the match, and again while the match stays folded,
+so a part may open one level at a time, such as a folded tool call whose output is long. A match that a box cuts from
+view by its size, such as a long block whose height is cut to six lines (its overflow hidden), sends that box the same
+event. A citation's quote in folded or cut text opens its fold the same way. A hidden element without
+`data-thimble-fold` is not searched.
 
 ## The table
 

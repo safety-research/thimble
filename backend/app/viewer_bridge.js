@@ -1554,15 +1554,34 @@
     for (var e = n && (n.nodeType === 1 ? n : n.parentElement); e; e = e.parentElement) if (e.hidden && e.hasAttribute('data-thimble-fold')) return e
     return null
   }
-  // A passage found in folded text: the part that folded it is sent `thimble-unfold`, as the search sends it, until the
-  // passage shows or the part leaves the fold as it was; the passage found again
+  // the box that cuts a range from view by its size, as thimble.search finds it: the innermost element around it whose
+  // overflow is hidden or clipped and whose box the range runs past, inside the box it scrolls in, or null
+  function clipAround(r) {
+    var rect = typeof r.getBoundingClientRect === 'function' ? r.getBoundingClientRect() : null
+    if (!rect || (!rect.width && !rect.height)) return null
+    var n = r.startContainer
+    for (var e = n.nodeType === 1 ? n : n.parentElement; e && e !== document.body && e !== document.documentElement; e = e.parentElement) {
+      var cs = getComputedStyle(e)
+      if (/(auto|scroll|overlay)/.test(cs.overflowY)) return null
+      if (!/(hidden|clip)/.test(cs.overflowY + ' ' + cs.overflowX)) continue
+      var c = e.getBoundingClientRect()
+      if (rect.top < c.top - 1 || rect.bottom > c.bottom + 1 || rect.left < c.left - 1 || rect.right > c.right + 1) return e
+    }
+    return null
+  }
+  function closedAround(r) {
+    return foldAround(r.startContainer) || foldAround(r.endContainer) || clipAround(r)
+  }
+  // A passage found in folded text, or cut from view by its box's size: the part that folded it is sent
+  // `thimble-unfold`, as the search sends it, until the passage shows or the part leaves the fold as it was; the passage
+  // found again
   function unfoldQuote(q, r) {
     for (var i = 0; r && i < 32; i++) {
-      var f = foldAround(r.startContainer) || foldAround(r.endContainer)
+      var f = closedAround(r)
       if (!f) break
       f.dispatchEvent(new CustomEvent('thimble-unfold', { bubbles: true }))
       var again = quoteRange(q)
-      if (again && (foldAround(again.startContainer) || foldAround(again.endContainer)) === f) break
+      if (again && closedAround(again) === f) break
       r = again
     }
     return r
