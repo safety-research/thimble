@@ -537,6 +537,12 @@ function lineLayout(card: CardData, cols: number, hover: number, plotRows = 10):
   // categorical x: one position per distinct value, in first-seen order
   const cats = kind === 'cat' ? [...new Set(xs.map(String))] : []
   const xOf = (p: [string | number, number], i: number) => (kind === 'cat' ? cats.indexOf(String(p[0])) : xNumber(p[0], kind, i))
+  // an x as the axis and the readout name it: times as a bar's labels read (barNames), any other x as written; a
+  // citation keeps the x as the card's rows hold it
+  const stamps = kind === 'time' ? [...new Set(xs.map(String))] : []
+  const names = barNames(stamps)
+  const named = new Map(stamps.map((t, i) => [t, names[i]!]))
+  const xName = (x: string | number) => named.get(String(x)) ?? String(x)
   const xv = series.flatMap(s => s.points.map((p, i) => xOf(p, i)))
   const yv = all.map(p => p[1])
   const x0 = Math.min(...xv)
@@ -580,7 +586,7 @@ function lineLayout(card: CardData, cols: number, hover: number, plotRows = 10):
   series.forEach((s, si) =>
     s.points.forEach((p, i) => {
       const xLabel = String(p[0])
-      items.push({ label: xLabel, value: `${s.name} ${amount(p[1])}`, cite: cite(fmt(p[1]), `card:${card.id}#${s.name}/${xLabel}`), open: `card:${card.id}#${s.name}/${xLabel}`, kind: 'mark', text: amount(p[1]) })
+      items.push({ label: xName(p[0]), value: `${s.name} ${amount(p[1])}`, cite: cite(fmt(p[1]), `card:${card.id}#${s.name}/${xLabel}`), open: `card:${card.id}#${s.name}/${xLabel}`, kind: 'mark', text: amount(p[1]) })
       at.push({ s: si, i, cx: px(xOf(p, i)) >> 1, cy: py(p[1]) >> 2 })
     }),
   )
@@ -621,7 +627,7 @@ function lineLayout(card: CardData, cols: number, hover: number, plotRows = 10):
   }
   // the x labels, dim: the first and the last x, and the one nearest the middle where it fits between them with a
   // gutter at each side
-  const xsAt = series.flatMap(s => s.points.map((p, i) => ({ label: String(p[0]), x: px(xOf(p, i)) >> 1 })))
+  const xsAt = series.flatMap(s => s.points.map((p, i) => ({ label: xName(p[0]), x: px(xOf(p, i)) >> 1 })))
   const ends = xsAt.reduce((m, q) => ({ lo: q.x < m.lo.x ? q : m.lo, hi: q.x > m.hi.x ? q : m.hi }), { lo: xsAt[0] ?? { label: '', x: 0 }, hi: xsAt[0] ?? { label: '', x: 0 } })
   const first = kind === 'cat' ? cats[0] ?? '' : ends.lo.label
   const last = kind === 'cat' ? cats.at(-1) ?? '' : ends.hi.label
