@@ -614,6 +614,31 @@ def _known_part(c: str, check: dict[str, Any]) -> str:
     return tools.hint("check-known", titles="\n".join(f"- {t}" for t in titles)) if titles else ""
 
 
+def _replaced_part(c: str, check: dict[str, Any], doc: str, cover: list[dict[str, Any]],
+                   d: dict[str, Any] | None = None) -> str:
+    """The check's open comments on the passages a run covers, which the run's end supersedes (_finish): listed in its
+    task as the ones it replaces, so it leaves again each that still holds. Live check 0.7.0: the task's cards section
+    showed them as the cards' comments, so a run of You should know over unchanged cards took them as said, left one
+    new comment, and its end superseded the six still open."""
+    from . import cite  # noqa: PLC0415
+
+    cid = str(check["id"])
+    if doc == CANVAS:
+        keys = {canvas_comments.key_of(p) for p in cover}
+        found = [canvas_comments.line(c, cm) for cm in canvas_comments.open_comments(c)
+                 if cm.get("check") == cid and canvas_comments.key_of(cm) in keys]
+    else:
+        ps, covered, found = passages(doc, d), {p["ref"] for p in cover}, []
+        for cm in (d or {}).get("comments") or []:
+            if (isinstance(cm, dict) and cm.get("check") == cid and (cm.get("status") or "open") == "open"
+                    and _of_comment(doc, ps, str(cm.get("sentence_id"))) in covered):
+                note = canvas_comments.note_of(cm)
+                text, more = (_collapse(cite.canon_text(note[k])) for k in ("text", "details"))
+                found.append(f"comment {cm.get('id')} on report:{doc}#{cm.get('sentence_id')} · {text}"
+                             + (f" — {more}" if more else ""))
+    return tools.hint("check-replaces", comments="\n".join(f"- {x}" for x in found)) if found else ""
+
+
 def task_text(c: str, check: dict[str, Any], doc: str, cover: list[dict[str, Any]]) -> str:
     """The task of a run's task file."""
     from . import investigation as inv, report_types  # noqa: PLC0415
@@ -621,7 +646,7 @@ def task_text(c: str, check: dict[str, Any], doc: str, cover: list[dict[str, Any
     if doc == CANVAS:
         parts = [tools.hint("check-instructions", check=check["name"], prompt=str(check.get("prompt") or "").strip()),
                  tools.hint("check-canvas", cards=canvas_comments.card_lines(c, [p["ref"] for p in cover])),
-                 _known_part(c, check)]
+                 _replaced_part(c, check, doc, cover), _known_part(c, check)]
         return "\n\n".join(p.strip() for p in parts if p.strip())
     t = report_types.read_type(c, doc)
     d = report_types.read_doc(c, inv.MAIN, doc) or {}
@@ -636,7 +661,7 @@ def task_text(c: str, check: dict[str, Any], doc: str, cover: list[dict[str, Any
                 for x in report_types.all_sentences(d) if "unverified" in (x.get("tags") or []) and str(x.get("id")) in ids]
         if tags:
             parts.append(tools.hint("check-tags", tags="\n".join(tags)))
-    parts.append(_known_part(c, check))
+    parts += [_replaced_part(c, check, doc, cover, d), _known_part(c, check)]
     return "\n\n".join(p.strip() for p in parts if p.strip())
 
 

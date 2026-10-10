@@ -1,7 +1,8 @@
 // The view kit's search, table and diff (backend/app/viewer_search.js, viewer_table.js, viewer_diff.js) in a real
 // browser, each page holding the view in a sandboxed frame as ViewerFrame does, in the theme's own tokens: a table of
 // 20,000 rows draws only those near its view and keeps them as it scrolls, opens and sorts within a bound far above what
-// it takes, and its strip shows Color by's colours of every row; the search washes every match on screen and the current
+// it takes, and its strip shows Color by's colours of every row; a column of numbers is as wide as its head's title
+// with the sort's arrow; the search washes every match on screen and the current
 // one more strongly, puts a lane of ticks on the list's strip (with no Color by, on a strip of its own), and a click on a
 // tick goes to that match; it finds the words a transcript or a record folds away (viewer_transcript.js,
 // viewer_record.js), ticks them where they stand, and going to one opens its fold so the match shows; a table beside the
@@ -209,6 +210,33 @@ window.table = thimble.table({ mount: '#list', rows: Array.from({ length: 200 },
     const wide = await cells()
     assert.ok(fits(wide), JSON.stringify(wide))
     assert.equal(wide[0][1] - wide[0][0], 220)
+    await p.close()
+  })
+})
+
+describe("the table's heads", () => {
+  test("a column of short numbers is as wide as its head's title in capitals with the sort's arrow beside it", async () => {
+    // Live check 0.7.0: a forge's Comments column, its counts one digit, read COMME… once sorted by it
+    const doc = page(`<div id="list" style="height:300px"></div>
+<script>
+window.table = thimble.table({ mount: '#list', sort: { by: 'comments', desc: true },
+  rows: Array.from({ length: 50 }, (_, i) => ({ ref: 'forge.db#prs/' + (100 + i), title: 'A pull request ' + i, comments: i % 4, reviews: i % 9, merged: 1775000000 + i * 61 })),
+  columns: [{ name: 'title', title: 'Title' }, { name: 'comments', title: 'Comments', type: 'number' }, { name: 'reviews', title: 'Reviews', type: 'number' }, { name: 'merged', title: 'Merged', type: 'time' }] })
+</script>`)
+    const { page: p, frame } = await framed(doc)
+    const cut = () =>
+      frame().evaluate(() =>
+        [...document.querySelectorAll('.thimble-table-th.active .thimble-table-title')]
+          .filter((t) => t.scrollWidth > t.clientWidth + 0.5)
+          .map((t) => `${t.textContent} ${t.scrollWidth} > ${t.clientWidth}`),
+      )
+    assert.deepEqual(await cut(), [])
+    for (const col of ['reviews', 'merged']) {
+      await frame().locator(`[data-col="${col}"]`).click()
+      await p.waitForTimeout(100)
+      assert.equal(await frame().evaluate(() => document.querySelectorAll('.thimble-table-th.active').length), 1)
+      assert.deepEqual(await cut(), [], `sorted by ${col}`)
+    }
     await p.close()
   })
 })
