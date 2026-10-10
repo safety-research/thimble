@@ -26,13 +26,13 @@ rule that does).
   each list that gives them, such as a table. A table and the messages beside it, such as those of the record open in
   the side panel, are one search, their matches in the order they stand in the page. It goes to the first match at or
   after the top of what the list shows, and so does a paste; a match the page draws only in reply to the text, such as
-  rows it fetches for it, is gone to once it is drawn. Every match on the screen gets the find's wash and the current
-  one a stronger one. The box says "3 of 120", or "No results".
+  rows it fetches for it, is gone to once it is drawn. Every match on the screen gets a tint of the accent and the
+  current one a stronger one. The box says "3 of 120", or "No results".
 - Enter or ↓ goes to the next match, ⇧Enter or ↑ to the one before, and the box's arrows do the same; the steps wrap
   at the ends. The list scrolls the current match into view. ⌘F (Ctrl+F) puts the focus in the box, and Escape
   empties it.
 - Each list's strip (the kit's scrollbar, [color.md](color.md)) gets a lane of ticks at its left, one per match in it,
-  in the ink as Files' find draws them, and a click on a tick goes to that match. The loupe marks the records that hold
+  in the accent as Files' find draws them, and a click on a tick goes to that match. The loupe marks the records that hold
   one. Without Color by the list gets the kit's strip all the same: a plain scrollbar, with that lane alone while
   something is found.
 - It finds the text a record shows, through its inline elements (a phrase across a link or a bold word is one
@@ -85,7 +85,7 @@ A page that keeps only the matching records, by `has` or by its reader, may keep
 draw, such as a pull request kept for a comment; the box would count only the matches drawn, "No results" or "1 of 1"
 while more records show. `search.kept(refs)` says which records the page kept, once it has drawn them: the box counts
 those records and steps through them, each once, in place of the matches in them, and a record whose words do not show
-is highlighted for a moment when gone to, as a cited record is. The page calls it each time it keeps records for a new
+is highlighted for a moment when gone to, in the matches' tint. The page calls it each time it keeps records for a new
 text, in `onChange` or once its fetch returns; until it does, the box shows no count and its steps are off. A kept
 record counts once, as its row in a list, else as the first element with its `data-anchor`; shown again, such as in the
 side panel, it counts its matches.

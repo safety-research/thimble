@@ -2,7 +2,7 @@
 // (ReaderTracks).
 //
 // The strip is one track at every length, its lanes the scrollbar's (TRACK_LANES: 7 px lanes 2 px apart, 3 px in from
-// its edges): at its left a lane for the find's matches, ticks in the ink like cue points on a timeline, which go to the
+// its edges): at its left a lane for the find's matches, accent ticks like cue points on a timeline, which go to the
 // first match on a click (a marker lane of another kind is drawn in grey, never in a color); then a lane for Color by's
 // first choice, each pixel row in the color that most of its records take (a key's commonest value, a label's value most
 // of the records there have), never two colors side by side, and a lane in its own colors for each other choice. With
@@ -39,10 +39,10 @@ export const PLAIN_PX = 10
 /** px: the thumb's least height over lanes, and on a plain scrollbar */
 export const FRAME_MIN_PX = 14
 export const PLAIN_FRAME_MIN_PX = 32
-/** the grey of a marker's tick other than the find's: nothing but the Color by choice takes a color on the strip */
+/** the grey of a marker's tick other than the find's: only the Color by choice and the find take a color on the strip */
 const MARKER_INK = 'rgba(var(--ink-rgb), 0.45)'
-/** the find's ticks, in the ink as the find's highlight is */
-const FIND_INK = 'var(--text-primary)'
+/** the find's ticks, in the accent as the find's highlight is, as text so they read on the track on every paper */
+const FIND_INK = 'var(--text-accent)'
 /** a mark's least height, px */
 const MIN_MARK_PX = 2
 /** px either side of a marker within which the pointer is on it */
@@ -397,7 +397,7 @@ const StripCanvas = memo(function StripCanvas({ paints, markers }: { paints: rea
     const boxes = laneBoxes(markers.length + paints.length, TRACK_LANES, dpr)
     ctx.fillStyle = colourOf('rgba(var(--ink-rgb), 0.035)')
     for (const [x, cw] of boxes) ctx.fillRect(x, 0, cw, H)
-    // the markers: ticks in the ink for the find's matches, grey for another kind, no color of a label's
+    // the markers: ticks in the accent for the find's matches, grey for another kind, no color of a label's
     markers.forEach((col, i) => {
       const [x, cw] = boxes[i]
       const k = h / Math.max(1, col.total)
@@ -436,7 +436,7 @@ interface TracksProps {
   paintName?: string
   /** a lane beside it for each other choice of Color by, in its own colors */
   lanes?: readonly TrackLane[]
-  /** a lane each, in grey or for the find's matches the ink: the reader gives the find's matches alone */
+  /** a lane each, in grey or for the find's matches the accent: the reader gives the find's matches alone */
   markers: readonly RulerColumn[]
   onJump?: (fraction: number) => void
   /** a click on the strip snapped to a patch of color: go to the first record in `value` (a key's rank, a label's
@@ -676,7 +676,7 @@ export function ReaderTracks({ total, feed, paint, paintName, lanes = NO_LANES, 
       return got && typeof got !== 'string' ? (got.get(line) ?? null) : got === 'failed' ? null : undefined
     }
   }
-  /** Per marker lane, its ink where `line` holds a mark of it (the find's in the ink, another kind's in grey). */
+  /** Per marker lane, its ink where `line` holds a mark of it (the find's in the accent, another kind's in grey). */
   const markedOn = (line: number): (string | null)[] => markers.map((col, i) => (ticksIn(sorted[i], line, line).length ? (col.id === 'find' ? FIND_INK : MARKER_INK) : null))
   /** The rows of lines `a` to `b`, as the loupe and a record's tooltip show them. */
   const rowsOf = (a: number, b: number): LoupeRow[] => {

@@ -132,42 +132,73 @@
 
 /* -------- the accent: one of seven, iris by default. --accent is the fill, --accent-on the text on it (white or ink,
    whichever reads at 4.5:1), --accent-ink the accent as text on a light paper (darkened where the fill would read
-   under 4.5:1). -------- */
+   under 4.5:1). --find-mix and --find-mix-strong are the accent's share in the find's tints on a light paper
+   (--find-bg below), --find-mix-dark and --find-mix-dark-strong on Dark: a light accent such as yellow takes more on a
+   light paper and less on Dark, so that on every accent a match stands as far from the cell, and the current match as
+   far from a match, as on iris. -------- */
 :root,
 :root[data-accent='iris'] {
   --accent: #5135ff;
   --accent-on: #ffffff;
   --accent-ink: #5135ff;
+  --find-mix: 20%;
+  --find-mix-strong: 32%;
+  --find-mix-dark: 32%;
+  --find-mix-dark-strong: 50%;
 }
 :root[data-accent='pink'] {
   --accent: #d6336c;
   --accent-on: #ffffff;
   --accent-ink: #b4295a;
+  --find-mix: 26%;
+  --find-mix-strong: 40%;
+  --find-mix-dark: 32%;
+  --find-mix-dark-strong: 50%;
 }
 :root[data-accent='orange'] {
   --accent: #e0590c;
   --accent-on: #1b1a18;
   --accent-ink: #ac4207;
+  --find-mix: 28%;
+  --find-mix-strong: 44%;
+  --find-mix-dark: 30%;
+  --find-mix-dark-strong: 46%;
 }
 :root[data-accent='yellow'] {
   --accent: #f2b705;
   --accent-on: #1b1a18;
   --accent-ink: #886300;
+  --find-mix: 40%;
+  --find-mix-strong: 68%;
+  --find-mix-dark: 20%;
+  --find-mix-dark-strong: 32%;
 }
 :root[data-accent='lime'] {
   --accent: #74b816;
   --accent-on: #1b1a18;
   --accent-ink: #46730b;
+  --find-mix: 34%;
+  --find-mix-strong: 52%;
+  --find-mix-dark: 22%;
+  --find-mix-dark-strong: 36%;
 }
 :root[data-accent='blue'] {
   --accent: #1876d1;
   --accent-on: #ffffff;
   --accent-ink: #1365b4;
+  --find-mix: 26%;
+  --find-mix-strong: 40%;
+  --find-mix-dark: 36%;
+  --find-mix-dark-strong: 56%;
 }
 :root[data-accent='graphite'] {
   --accent: #3d3b37;
   --accent-on: #ffffff;
   --accent-ink: #3d3b37;
+  --find-mix: 20%;
+  --find-mix-strong: 32%;
+  --find-mix-dark: 26%;
+  --find-mix-dark-strong: 42%;
 }
 
 /* -------- the chart series and ramps for each accent (lib/vizTheme). The families keep one order, violet, teal, orange,
@@ -391,13 +422,19 @@
   --status-info-soft: var(--paper-1);
   --status-neutral: var(--ink-500);
   --status-neutral-soft: var(--paper-1);
-  /* the highlight of the evidence, in ink on every accent: a span inside a longer text (.hl in base.css) and the
-     stronger wash of the find's current match (a cited table cell or output line is the accent's wash, refchip.css) */
+  /* the highlight of the evidence, in ink on every accent: a span inside a longer text (.hl in base.css) and a stronger
+     wash, such as a quote's words (a cited table cell or output line is the accent's wash, refchip.css) */
   --hl-bg: rgba(var(--ink-rgb), 0.08);
   --hl-bg-strong: rgba(var(--ink-rgb), 0.18);
   --hl-edge: rgba(var(--ink-rgb), 0.4);
   --hl-unverified: var(--status-warning-soft);
   --hl-unverified-ink: var(--status-warning);
+  /* the find's matches (Files' find, the view kit's search): every match on a tint of the accent and the current one on
+     a stronger tint (the accent's --find-mix above), on which the text and the secondary text read at 4.5:1 or more on
+     every paper and accent. Their ticks on a strip are the accent as text (--text-accent), in a lane of their own
+     beside Color by's */
+  --find-bg: color-mix(in oklab, var(--accent) var(--find-mix), transparent);
+  --find-bg-strong: color-mix(in oklab, var(--accent) var(--find-mix-strong), transparent);
 
   /* data: the chart's color roles (lib/vizTheme), past the series and ramps the accent sets above. Series one is a step
      of the accent's family, not the accent's hex, and the interface's own uses of the accent (a selection, the find's
@@ -566,6 +603,10 @@
   --hl-bg: rgba(var(--ink-rgb), 0.14);
   --hl-bg-strong: rgba(var(--ink-rgb), 0.26);
   --hl-edge: rgba(var(--ink-rgb), 0.5);
+  /* the find's tints in the accent's shares for Dark: more for a dark accent such as iris, so it shows on a dark cell,
+     less for a light one such as yellow, which takes contrast from the light text */
+  --find-bg: color-mix(in oklab, var(--accent) var(--find-mix-dark), transparent);
+  --find-bg-strong: color-mix(in oklab, var(--accent) var(--find-mix-dark-strong), transparent);
   /* the code colours lightened toward Dark's text ink */
   --code-keyword: color-mix(in oklab, #cc79a7 70%, var(--ink-900));
   --code-string: color-mix(in oklab, #009e73 64%, var(--ink-900));
@@ -576,6 +617,9 @@
 }
 :root[data-paper='dark'][data-accent='graphite'] {
   --text-accent: color-mix(in oklab, var(--accent) 45%, white);
+  /* graphite's fill is too near Dark's cell to tint it, so the find's tints take its text color */
+  --find-bg: color-mix(in oklab, var(--text-accent) var(--find-mix-dark), transparent);
+  --find-bg-strong: color-mix(in oklab, var(--text-accent) var(--find-mix-dark-strong), transparent);
 }
 
 @media (prefers-reduced-motion: reduce) {

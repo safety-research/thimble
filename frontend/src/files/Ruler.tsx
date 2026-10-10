@@ -116,8 +116,8 @@ export function rulerColumns(on: readonly Concept[], ruler: LabelRuler | null, f
   return out
 }
 
-/** The colour of the find's marks, in ink as the find's highlight is. */
-export const FIND_MARK = 'var(--text-primary)'
+/** The colour of the find's marks, in the accent as the find's highlight is. */
+export const FIND_MARK = 'var(--text-accent)'
 
 /** The find's lane: a mark on each matching line of the `total`. */
 export function findColumn(lines: readonly number[], total: number, text: string): RulerColumn {

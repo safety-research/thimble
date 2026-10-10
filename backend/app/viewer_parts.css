@@ -229,7 +229,7 @@
 /* the find's words in a name, as Files' search marks them */
 .thimble-tree-hit {
   border-radius: var(--radius-hl, 3px);
-  background: var(--hl-bg);
+  background: var(--find-bg, var(--hl-bg));
   color: var(--text-primary);
   font-weight: 500;
 }
@@ -1282,11 +1282,11 @@ button.thimble-record-key:focus-visible {
   margin-left: 4px;
   font-size: var(--text-mono-sm);
 }
-/* the words found, as Files' find marks them */
+/* the words found, as Files' find marks them: in the text's color, so a value's own color does not fade on the tint */
 .thimble-record-hit {
   border-radius: var(--radius-hl, 3px);
-  background: var(--hl-bg-strong, var(--hl-bg));
-  color: inherit;
+  background: var(--find-bg, var(--hl-bg-strong, var(--hl-bg)));
+  color: var(--text-primary);
 }
 
 /* -------- a chart (thimble.chart): Vega's drawing in the chart style, or the line in its place -------- */

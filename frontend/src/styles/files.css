@@ -433,10 +433,10 @@
 .files-found-row {
   padding-left: 8px;
 }
-/* a match in the results: the evidence highlight, as the reader's find draws it */
+/* a match in the results: a tint of the accent, as the reader's find draws it */
 .files-found-row mark {
   border-radius: 2px;
-  background: var(--hl-bg);
+  background: var(--find-bg);
   color: var(--text-primary);
   font-weight: 500;
 }
@@ -1471,13 +1471,16 @@
   flex: none;
   color: var(--text-tertiary);
 }
-/* the find's matches in the records shown (find.ts markMatches): the span highlight's wash, and a stronger one in the
-   record the find moved to */
+/* the find's matches in the records shown (find.ts markMatches): a tint of the accent, and a stronger one in the record
+   the find moved to, as the view kit's search draws them (viewer_kit.css ::highlight(thimble-search)), the words in
+   the text's color so a link or a secondary text found reads on the tint as the text does */
 ::highlight(reader-find) {
-  background-color: var(--hl-bg);
+  background-color: var(--find-bg);
+  color: var(--text-primary);
 }
 ::highlight(reader-find-current) {
-  background-color: var(--hl-bg-strong);
+  background-color: var(--find-bg-strong);
+  color: var(--text-primary);
 }
 .reader-fragment {
   align-self: center;

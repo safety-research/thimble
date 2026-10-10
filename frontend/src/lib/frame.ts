@@ -106,6 +106,8 @@ export const VIEW_TOKENS = [
   '--accent-soft',
   '--hl-bg',
   '--hl-bg-strong',
+  '--find-bg',
+  '--find-bg-strong',
   '--border-hairline',
   '--border-strong',
   '--bg-panel',

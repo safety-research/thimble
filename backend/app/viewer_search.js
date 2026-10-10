@@ -6,12 +6,12 @@
 //
 // Typing finds the text, case ignored, in the records under `in` (the page by default) and in the rows of every list
 // that gives them (below), every part on screen at once, such as a table and the messages in the side panel beside it,
-// in the order they stand in the page: every match on screen gets the find's wash (::highlight(thimble-search)), the
+// in the order they stand in the page: every match on screen gets the accent's tint (::highlight(thimble-search)), the
 // current one a stronger one, and the box says "3 of 120". Enter or ↓ goes to the next match, ⇧Enter or ↑ to the one
 // before, wrapping at the ends; ⌘F or Ctrl+F puts the focus in the box; Escape empties it. Typing goes to the first match
 // at or after the top of what the list shows, as Files' find does, and so does a paste; a match the page draws only in
 // reply to the text, such as rows it fetches for it, is gone to once it is drawn, as long as no match was. Each list's
-// strip (viewer_colour.js) gets a lane of ticks in the ink at its left, one per match in it, like cue points, and a click
+// strip (viewer_colour.js) gets a lane of accent ticks at its left, one per match in it, like cue points, and a click
 // on a tick goes to that match; the loupe marks the records that hold one. Without Color by the list gets the kit's strip
 // with that lane alone.
 //
@@ -59,7 +59,7 @@
   var FOLD = 'data-thimble-fold'
   var DROP = 'data-thimble-drop'
   var UNFOLD_MAX = 32 // the times going to a match sends `thimble-unfold` at most, one fold level each
-  var SNAP_MS = 1600 // how long a record gone to whose words do not show keeps its highlight (viewer_kit.css [data-thimble-snap])
+  var SNAP_MS = 1600 // how long a record gone to whose words do not show keeps its tint (viewer_kit.css [data-thimble-snap='search'])
   var ICON = {
     search: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
     up: '<path d="M6 15l6-6 6 6"/>',
@@ -1136,7 +1136,7 @@
       })
     })
   }
-  // the find's wash on every match on the page, the stronger one on the current match (a kept record's first)
+  // the accent's tint on every match on the page, the stronger one on the current match (a kept record's first)
   Search.prototype.paint = function () {
     if (!HL) return
     var all = []
@@ -1299,8 +1299,8 @@
     this.drawn = el && el.isConnected ? { el: el, style: el.style.contentVisibility } : null
     if (this.drawn) el.style.contentVisibility = 'visible'
   }
-  // A record gone to whose words do not show, highlighted for a moment as a cited record is; one at a time, so a step
-  // on takes the highlight from the record before. null only takes it away
+  // A record gone to whose words do not show, in the matches' tint for a moment; one at a time, so a step on takes the
+  // tint from the record before. null only takes it away
   Search.prototype.snap = function (el) {
     var was = this.snapped
     if (was && was !== el) was.removeAttribute('data-thimble-snap')
@@ -1311,7 +1311,7 @@
     this.snapped = el
     el.removeAttribute('data-thimble-snap')
     void el.offsetWidth
-    el.setAttribute('data-thimble-snap', '')
+    el.setAttribute('data-thimble-snap', 'search')
     this.snapTimer = setTimeout(function () {
       el.removeAttribute('data-thimble-snap')
       if (self.snapped === el) self.snapped = null

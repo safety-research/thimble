@@ -1769,8 +1769,8 @@
   var TEXT_CHARS = 200 // the characters of a record's text the loupe writes; its row cuts the rest with an ellipsis
   var KEY_CHARS = 12 // the characters of a record's line or key its first column holds at most
   // The search's matches (viewer_search.js) are a lane of their own at the strip's left, as Files' find: a tick in the
-  // ink per match, like a cue point on a timeline, never a colour, and a click within TICK_HIT_PX of one goes to that
-  // match. With Color by Off the strip is that lane alone; with no search and Off, a plain scrollbar.
+  // accent as text per match, like a cue point on a timeline, never a label's colour, and a click within TICK_HIT_PX of
+  // one goes to that match. With Color by Off the strip is that lane alone; with no search and Off, a plain scrollbar.
   var TICK_HIT_PX = 4
   var FINDS = typeof WeakMap === 'function' ? new WeakMap() : null // a list's box -> its matches, {name, ticks, has, go}
 
@@ -2421,13 +2421,13 @@
     this.rowColours = this.fill(ctx, this.recs, boxes[nf][0], boxes[nf][1])
     for (var i = 0; i < this.lanes.length; i++) this.laneRows.push(this.fill(ctx, this.lanes[i].recs, boxes[nf + i + 1][0], boxes[nf + i + 1][1]))
   }
-  // the search's lane, `x` to `x + w` device px: a tick in the ink per match, at least MIN_MARK px tall
+  // the search's lane, `x` to `x + w` device px: a tick in the accent per match, at least MIN_MARK px tall
   Strip.prototype.ticks = function (ctx, x, w) {
     var h = this.h || 0
     var dpr = window.devicePixelRatio || 1
     var Hp = Math.ceil(h * dpr)
     var ts = this.find.ticks
-    ctx.fillStyle = kit.realColour('var(--text-primary)')
+    ctx.fillStyle = kit.realColour('var(--text-accent)')
     for (var k = 0; k < ts.length; k++) {
       var y0 = Math.max(0, Math.min(1, ts[k][0])) * h
       var y1 = Math.max(0, Math.min(1, ts[k][1])) * h
@@ -2852,7 +2852,7 @@
     var t = rec[3]
     var cells = []
     var f = this.find
-    if (f) cells.push(typeof f.has === 'function' && safe(function () { return f.has(t) }, false) ? kit.realColour('var(--text-primary)') : null)
+    if (f) cells.push(typeof f.has === 'function' && safe(function () { return f.has(t) }, false) ? kit.realColour('var(--text-accent)') : null)
     if (!this.plain) {
       cells.push(rec[2] && rec[2] !== this.grey ? rec[2] : null)
       for (var l = 0; l < this.lanes.length; l++) cells.push(this.lanes[l].by.get(t) || null)
