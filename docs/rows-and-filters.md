@@ -366,7 +366,7 @@ const side = thimble.side({ mount: '#body' })
 const conv = thimble.messages({ mount: '#thread', onPick: (m) => side.open({ title: m.author, ref: m.ref, render: (body) => thimble.record({ mount: body, value: m, ref: m.ref }) }) })
 conv.draw(posts.filter((p) => p.thread === chosen).map((p) => ({ ref: p.ref, t: p.time, author: p.author, text: p.text, parent: p.reply_to })), { title: '# ' + names[chosen] })
 // a user and an assistant, its tool calls as events
-conv.draw(turns.map((t) => (t.tool ? { ref: t.ref, t: t.time, author: t.role, kind: 'event', icon: 'run', said: 'ran ' + t.tool, text: t.output } : { ref: t.ref, t: t.time, author: t.role, text: t.text })))
+conv.draw(turns.map((t) => (t.tool ? { ref: t.ref, t: t.time, author: t.role, kind: 'event', icon: 'run', said: 'ran ' + t.tool, text: '```\n' + t.output + '\n```' } : { ref: t.ref, t: t.time, author: t.role, text: t.text })))
 ```
 
 A message is `{ref, t, author, text, title, to, parent, kind, icon, said, box, record}`, `t` in seconds since 1970 (or a
