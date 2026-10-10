@@ -1551,11 +1551,14 @@ button.thimble-card {
 .thimble-search .btn[hidden] {
   display: none;
 }
+/* the words found in the text's color, so a link or a secondary text found reads on the tint as the text does */
 ::highlight(thimble-search) {
   background-color: var(--find-bg, var(--hl-bg));
+  color: var(--text-primary);
 }
 ::highlight(thimble-search-current) {
   background-color: var(--find-bg-strong, var(--hl-bg-strong));
+  color: var(--text-primary);
 }
 /* a kept record gone to whose words do not show (viewer_search.js snap): the matches' tint for a moment, the lighter
    one, since it covers the whole record */
