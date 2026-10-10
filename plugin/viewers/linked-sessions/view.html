@@ -168,7 +168,7 @@ const bySession = () => rows.field === 'session'
 // underlined in the problem red; the transcript's turns in view tinted across them; the groups of Rows in the room the
 // overview has
 const failed = (it) => it.kind === 'call' && it.outcome !== 'ok'
-const lanes = thimble.lanes({
+const lanes = thimble.timeline({
   mount: '#lanes', keyMount: '#key', range, colour: laneColour, names: NAMES,
   groups: (its) => fitted(rows.groups(its)),
   time: (it) => it.time,
