@@ -129,6 +129,23 @@ def test_a_bar_chart_over_times_stands_up_each_bar_spanning_its_time_to_the_next
         kt.chart("bar", POSTS, marks={"x": 1})
 
 
+def test_times_a_week_apart_have_a_tick_at_each_and_times_a_day_apart_keep_vega_s_ticks():
+    # seen on collusion-wiki (2026-10-10): weekly bars from Mondays, "week starting" over ticks on May 19, May 27, Jun 3
+    weeks = pd.DataFrame({"week starting": pd.to_datetime(["2026-05-18", "2026-05-25", "2026-06-08"]), "saves": [35, 831, 187]})
+    ticks = {"values": [{"year": 2026, "month": 5, "date": 18}, {"year": 2026, "month": 5, "date": 25},
+                        {"year": 2026, "month": 6, "date": 8}]}
+    assert spec_of("bar", weeks)["encoding"]["x"]["axis"] == ticks
+    assert spec_of("line", weeks)["encoding"]["x"]["axis"] == ticks
+    assert spec_of("area", weeks)["encoding"]["x"]["axis"] == ticks
+    assert "axis" not in spec_of("scatter", weeks)["encoding"]["x"]  # points at any time: Vega's ticks
+    hours = pd.DataFrame({"t": pd.to_datetime(["2026-05-18 06:00", "2026-05-25 06:00"]), "n": [1, 2]})
+    assert spec_of("bar", hours)["encoding"]["x"]["axis"]["values"][0] == {"year": 2026, "month": 5, "date": 18, "hours": 6}
+    days = pd.DataFrame({"day": pd.date_range("2026-05-18", periods=10), "saves": range(10)})
+    assert "axis" not in spec_of("bar", days)["encoding"]["x"] and "axis" not in spec_of("line", days)["encoding"]["x"]
+    many = pd.DataFrame({"week": pd.date_range("2025-01-06", periods=kt.TIME_TICKS_MAX + 1, freq="7D"), "n": 1})
+    assert "axis" not in spec_of("bar", many)["encoding"]["x"]
+
+
 def test_a_label_s_values_take_its_order_and_the_card_reads_the_label_for_its_colors(label_ws):
     act = pd.DataFrame({"activity": ["other", "money", "captcha", "hmm"], "records": [50, 20, 80, 3]})
     enc = spec_of("bar", act, label="activity type")["encoding"]
@@ -209,6 +226,18 @@ def test_a_heatmap_orders_its_names_by_total_its_numbers_ascending_and_takes_a_l
     assert spec["encoding"]["x"]["sort"] == [1, 3] and spec["encoding"]["y"]["sort"] == ["Kansas", "Navy"]
     assert spec["encoding"]["color"] == {"field": "captures", "type": "quantitative", "title": "captures",
                                          "scale": {"type": "symlog"}}
+
+
+def test_a_heatmap_of_days_names_them_as_a_date_axis_does_and_its_rows_keep_the_dates():
+    # seen on collusion-wiki (2026-10-10): 11 days as `2026-06-18` on end under a card's heatmap
+    hm = pd.DataFrame({"day": ["2026-06-18", "2026-05-24", "2026-06-18"], "account": ["a", "b", "b"], "saves": [3, 1, 2]})
+    spec = spec_of("heatmap", hm)
+    x = spec["encoding"]["x"]
+    assert x["sort"] == ["2026-05-24", "2026-06-18"] and spec["data"]["values"][0]["day"] == "2026-06-18"
+    assert x["axis"] == {"labelExpr": "datum.value == null ? '' : utcFormat(utcParse(datum.value, '%Y-%m-%d'), '%b %-d')"}
+    assert "axis" not in spec["encoding"]["y"]
+    years = pd.DataFrame({"t": pd.to_datetime(["2025-12-31 23:00", "2026-01-01 01:30"]), "y": ["a", "a"], "n": [1, 2]})
+    assert "'%Y-%m-%d %H:%M'), '%b %-d, %Y %H:%M')" in spec_of("heatmap", years)["encoding"]["x"]["axis"]["labelExpr"]
 
 
 def test_a_column_name_with_a_dot_is_a_field_and_not_a_path():
