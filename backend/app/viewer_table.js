@@ -631,7 +631,8 @@
         var k = v == null ? '' : v
         counts[k] = (counts[k] || 0) + 1
       }
-      c.counts(counts)
+      // the counts of the rows in its mount, which the chips count while the table shows (not in a tab out of view)
+      c.counts(counts, this.mount)
     }
     this.colourStrip()
     this.drawn.forEach(function (el) {

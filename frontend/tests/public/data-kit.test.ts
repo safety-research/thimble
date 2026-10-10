@@ -487,6 +487,42 @@ describe('the table', () => {
     expect(w.thimble.__held()).toBe(5)
   })
 
+  test("tabs of different records: Color by's chips count the records of the tab in view, a table's and the page's own alike, and follow the tab shown", async () => {
+    await load(`<style>.tab:not(.on){display:none}</style><div class="top"><span id="colour"></span></div>
+<div id="prs" class="tab on" style="height:300px"></div><div id="issues" class="tab" style="height:300px"></div><div id="notes" class="tab"></div>`)
+    const w = win()
+    const records = (kind: string, states: string[]) => states.map((state, i) => ({ ref: `forge.db#${kind}/${i + 1}`, title: `${kind} ${i + 1}`, state }))
+    w.PRS = records('prs', ['open', 'open', 'open', 'merged'])
+    w.ISSUES = records('issues', ['open', 'closed', 'closed', 'closed', 'closed', 'closed'])
+    w.NOTES = records('notes', ['draft', 'draft'])
+    w.eval(`
+      window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'state', title: 'State' }] })
+      const columns = [{ name: 'title', title: 'Title' }, { name: 'state', title: 'State' }]
+      window.prs = thimble.table({ mount: '#prs', rows: PRS, columns, key: 'prs' })
+      window.issues = thimble.table({ mount: '#issues', rows: ISSUES, columns, key: 'issues' })
+      document.getElementById('notes').innerHTML = NOTES.map((n) => '<div data-anchor="' + n.ref + '"' + colour.attr(n) + '>' + n.title + '</div>').join('')
+    `)
+    const chips = async () => {
+      await wait(120)
+      return w.colour.values.filter((v: any) => v.n).map((v: any) => `${v.name} ${v.n}`).sort()
+    }
+    const show = (id: string) => doc().querySelectorAll('.tab').forEach((t) => t.classList.toggle('on', t.id === id))
+    // the pull requests' tab, though the issues' table was drawn last
+    expect(await chips()).toEqual(['merged 1', 'open 3'])
+    show('issues')
+    expect(await chips()).toEqual(['closed 5', 'open 1'])
+    show('notes')
+    expect(await chips()).toEqual(['draft 2'])
+    // a tab shown by its hidden attribute, and two lists in view at once: both counted
+    doc().querySelectorAll('.tab').forEach((t) => t.classList.add('on'))
+    ;(doc().getElementById('notes') as HTMLElement).hidden = true
+    expect(await chips()).toEqual(['closed 5', 'merged 1', 'open 4'])
+    // the pull requests drawn again, filtered: the counts of the rows they show
+    w.prs.draw(w.PRS.slice(0, 2))
+    show('prs')
+    expect(await chips()).toEqual(['open 2'])
+  })
+
   test("numbers: amounts with thousands separators, identifiers as they are (type 'id', or a name or title that names one); the search, the side panel, a card and the record viewer find and write an identifier as it is", async () => {
     await load(`<div class="top"><span id="search"></span></div><div id="body" style="height:300px"><div id="list"></div></div><div id="cards"></div><div id="rec"></div>`)
     const w = win()
