@@ -422,7 +422,8 @@
       step: step,
       bins: bins,
       of: function (t) {
-        var k = Math.floor((t - first) / step)
+        // a hair over, so that a value on a bin's edge (0.15 in bins of 0.05, which divides to 2.9999…) starts its bin
+        var k = Math.floor((t - first) / step + 1e-9)
         return k >= 0 && k < bins.length ? k : -1
       },
     }

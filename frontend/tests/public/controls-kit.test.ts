@@ -468,6 +468,17 @@ describe('the timeline on its own', () => {
     expect(texts('#tl2 .thimble-axis-lab')).toEqual(['0', '1', '2', '3'])
   })
 
+  test("Density on scores: a score that falls on a bin's edge starts that bin, so scores 0.02 apart stand evenly apart", async () => {
+    await load()
+    const w = win()
+    w.eval(`thimble.timeline({ mount: '#lanes', unit: 'n', density: true }).draw(Array.from({ length: 50 }, (_, i) => ({ t: i * 0.02 })))`)
+    await wait()
+    const xs = [...doc().querySelectorAll('#lanes .thimble-lane-bar')].map((b) => Number(b.getAttribute('x')))
+    expect(xs).toHaveLength(50)
+    const gaps = xs.slice(1).map((x, i) => x - xs[i])
+    expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThan(1)
+  })
+
   test("Density's tip gives a bin's day once: 16 May 09:00–09:01", async () => {
     await load()
     const w = win()
