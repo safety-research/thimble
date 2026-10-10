@@ -16,6 +16,7 @@ these parts, so a page lays them out and fills them rather than drawing its own:
 | the cards | `thimble.recordCard` | a record as a card or a tile, its colors Color by's bars on its edge, one per choice |
 | the side panel | `thimble.side` | a record, or a row's children, in a wide panel beside the list |
 | the transcript | `thimble.transcript` | a transcript's turns, as the File browser's Transcript mode draws them |
+| the messages | `thimble.messages` | messages between people or agents, as a chat app, a forge's conversation or a mail thread draws them |
 | the record | `thimble.record` | one record's fields as a tree under its citation, such as in the side panel |
 | a chart | `thimble.chart` | a chart of a card's `thimble.chart` kinds, in the canvas's style ([charts.md](charts.md#in-a-view)) |
 
@@ -282,6 +283,34 @@ A turn is `{ref, t, speaker, kind, tool, text, input, output, error, session, se
 names what the list shows (the run, the session or the selection) and how many turns; `reveal(ref)` opens a cited turn
 and scrolls it to the middle, its highlight fading as Files' does; `open(ref, on)` folds or opens one; `set(ref, patch)`
 gives a turn its words once the reader sent them whole.
+
+## The messages
+
+`thimble.messages({mount, colour, format, onPick})` draws messages between people or agents as a chat app, a forge's
+conversation or a mail thread draws them: each author's avatar in a rail at the left, a head with the author in bold and
+the time in mono (the full date and time on hover), a `title` such as a subject in bold over the words, `to` as a quiet
+line under the head, and the words drawn by `thimble.text` in `format` (`'markdown'`, the default, or `'plain'` for
+mail). One author's messages that follow each other within five minutes, with the same parent, share one head, each
+still its own record; a date line opens each day. A message with a `parent` is drawn under its parent's group, one level
+in, and a reply to a reply at that level too, as boards and forges draw threads. `kind: 'event'` is one line, an icon in
+the ink, the author, what they did (`said`) and the time at the right, as a forge's timeline draws it; `icon` is one of
+`comment`, `commit`, `merge`, `close`, `reopen`, `approve`, `changes`, `edit`, `delete` and `mail`.
+
+```js
+const side = thimble.side({ mount: '#body' })
+const conv = thimble.messages({ mount: '#thread', onPick: (m) => side.open({ title: m.author, ref: m.ref, render: (body) => thimble.record({ mount: body, value: m, ref: m.ref }) }) })
+conv.draw(posts.filter((p) => p.thread === chosen).map((p) => ({ ref: p.ref, t: p.time, author: p.author, text: p.text, parent: p.reply_to })), { title: '# ' + names[chosen] })
+```
+
+A message is `{ref, t, author, text, title, to, parent, kind, icon, said}`, `t` in seconds since 1970 (or a date the
+browser reads). Quoted mail, a run of lines that start with `>` with the "On … wrote:" line before it, folds behind a
+`…` button, and a body longer than twelve lines shows its first lines with Show more and Show less; both keep their text
+in the page, hidden, so `thimble.search` finds it and opens the fold. Each message is anchored with its ref and carries
+`data-t`, so a label marks it, a ⌘-click asks about it and the lanes follow it; Color by, the page's or `colour`, draws
+its bar and follows the choice as it changes. A click on a message, or Enter on it, calls `onPick(message)`.
+`draw(messages, {title, sub, empty})` draws them, with the transcript's header (the title and how many messages);
+`reveal(ref)` opens a cited message's folds and scrolls it to the middle, its highlight fading; `set(ref, patch)`
+changes one, such as its whole text once the reader sent it; `messages` gives them as last drawn.
 
 ## The record
 
