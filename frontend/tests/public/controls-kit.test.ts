@@ -602,6 +602,34 @@ describe('the side panel and the transcript', () => {
     expect(doc().querySelector('.thimble-turn-call')).not.toBe(null)
     expect(doc().querySelector('.thimble-turn-hit')!.getAttribute('data-anchor')).toBe('s.jsonl#L2')
   })
+
+  test("a transcript's head writes each turn's time as the kit writes times, in UTC, however the record gives it; a time it cannot read as written", async () => {
+    await load()
+    const w = win()
+    const at = (i: number, t: unknown, key = 't') => ({ ref: `s.jsonl#L${i}`, [key]: t, speaker: 'lead', kind: 'text', text: 'ok', line: i })
+    w.TURNS = [
+      at(1, T0),
+      at(2, (T0 + 1) * 1000),
+      at(3, '2026-05-16T09:00:02.250000+00:00'),
+      at(4, '2026-05-16T11:00:03+02:00'),
+      at(5, '2026-05-16T09:00:04'),
+      at(6, '2026-05-16 09:00:05'),
+      at(7, String(T0 + 6)),
+      at(8, '2026-05-16T09:00:07Z', 'time'),
+      at(9, 'step 4'),
+      at(10, null),
+    ]
+    w.eval(`thimble.transcript({ mount: '#turns' }).draw(window.TURNS)`)
+    expect(texts('.thimble-turn-head')).toEqual([
+      ...Array.from({ length: 8 }, (_, i) => `lead · 2026-05-16 09:00:0${i}`),
+      'lead · step 4',
+      'lead',
+    ])
+    // the lanes follow a time given as text too, in seconds; a number as given
+    expect([...doc().querySelectorAll('.thimble-turn')].map((e) => e.getAttribute('data-t'))).toEqual([
+      String(T0), String((T0 + 1) * 1000), String(T0 + 2.25), String(T0 + 3), String(T0 + 4), String(T0 + 5), String(T0 + 6), String(T0 + 7), null, null,
+    ])
+  })
 })
 
 describe("every choice of the kit's controls draws", () => {

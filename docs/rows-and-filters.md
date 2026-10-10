@@ -330,7 +330,8 @@ const tr = thimble.transcript({ mount: '#list', onOpen: async (turn) => tr.set(t
 tr.draw(turns.filter((t) => t.session === session), { title: `${names[session]} · ${runName}` })
 ```
 
-A turn is `{ref, t, speaker, kind, tool, text, input, output, error, session, sessionName, line, record}`, `kind` one of
+A turn is `{ref, t, speaker, kind, tool, text, input, output, error, session, sessionName, line, record}`, `t` in seconds
+since 1970 or a date such as an ISO time, which the head writes as `2026-04-01 09:30:12` in UTC, and `kind` one of
 `text`, `prompt`, `tool`, `thinking` and `system`. Color by reads `record`, the record the turn shows, when it is given,
 so a field named as a turn's own, such as `kind`, colors it; else the turn. `draw(turns, {title, sub, empty})` draws
 them, with a header that names what the list shows (the run, the session or the selection) and how many turns;
