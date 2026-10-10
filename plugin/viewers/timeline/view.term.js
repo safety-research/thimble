@@ -3,7 +3,7 @@
 // strip picks the time the lanes and the list show; an event opens in the side pane with the event it answers, those
 // that answer it, and its place. One fetch gives the events the search and Filter by keep, each with its Color by value
 // and its Rows group.
-import { COLORS, axis, colorBy, columns, dayOf, details, divider, draw, dur, fetch, filterBy, hms, lanes, list, onLabels, onOpen, onReset, plural, rows as rowsBy, search, side, timeRange, when } from 'thimble-term'
+import { COLORS, axis, colorBy, columns, dayOf, details, divider, draw, dur, fetch, filterBy, hms, list, onLabels, onOpen, onReset, plural, rows as rowsBy, search, side, timeline, timeRange, when } from 'thimble-term'
 
 const GUTTER = 12 // the lanes' names, which the strip, the axis and the lanes leave room for
 const BURST_GAP = 6 * 3600
@@ -74,7 +74,7 @@ const q = search({ words: 'search events', onChange: load })
 // the lanes draw each event in the value the reader gave it, which holds for a label too; a cell where most events
 // failed is `×` in red, always shown (there is no key that hides them)
 const painted = { keeps: () => true, valueOf: (e) => e.value, colourOf: (v) => colour.colourOf(v) }
-const ln = lanes({
+const ln = timeline({
   rows, colour: painted, problem: (e) => e.outcome === 'failed', words: { problem: 'failed', record: 'event' },
   onPick: (lane) => pick(picked && picked.key === lane.key ? null : lane),
   onMark: (e) => show(e.r),
