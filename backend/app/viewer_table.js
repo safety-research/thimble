@@ -27,8 +27,9 @@
 // as one beside the side panel, first writes its times shorter, then narrows its columns of text to their `min`, then
 // drops columns in `drop` order (with none, the rightmost first, the one the rows are sorted by last, and never the main
 // column, the first column of text that takes the width left), and draws them again when the room comes back. A head
-// never cuts its title: in a column narrower than the title it wraps to two lines, and a column keeps the width of its
-// title on two lines, with room for the sort's arrow, before it drops.
+// never cuts its title: a column of text with a `width` narrower than its title widens to the title while the table has
+// room; in a column narrower than the title it wraps to two lines, and a column keeps the width of its title on two
+// lines, with room for the sort's arrow, before it drops.
 ;(function () {
   'use strict'
   var kit = window.__thimbleKit
@@ -410,7 +411,9 @@
       self.forms[i] = null
       if (c.type === 'text') {
         var keeps = Math.max(c.min || (i === self.main ? MIN_MAIN : MIN_TEXT), headLeast[i])
-        if (typeof w === 'number') w = Math.max(w, headLeast[i])
+        // a width in px narrower than the title takes the title on one line while the table has room, and gives that up
+        // with the other columns of text in a narrow table, its title wrapping to two lines
+        if (typeof w === 'number') w = Math.max(w, Math.ceil(heads[i]) + PAD + (c.sorts ? SORT_ROOM : 0))
         self.want[i] = w
         self.least[i] = typeof w === 'number' ? Math.min(w, keeps) : keeps
         self.ease[i] = i === self.main ? Math.max(keeps, EASE_MAIN) : keeps

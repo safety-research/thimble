@@ -1559,8 +1559,9 @@ button.thimble-card {
 
 /* -------- the table (viewer_table.js): the kit's .table as a list that draws only the rows near its view, each row
    absolutely placed at its line, all one height, a cell cut with an ellipsis; a caps head that stays at the top, its
-   columns a click sorts by, a title that wraps to two lines in a narrow column rather than be cut, the titles on their
-   last line. A row's only colour is Color by's bar, which the bridge draws on its left edge. -------- */
+   columns a click sorts by, a title that wraps to two lines in a narrow column rather than be cut (never more: past two
+   lines, in a table too narrow even for the columns that never drop, it ends in an ellipsis), the titles on their last
+   line. A row's only colour is Color by's bar, which the bridge draws on its left edge. -------- */
 .thimble-table-host {
   position: relative;
   min-height: 0;
@@ -1613,6 +1614,9 @@ button.thimble-card {
   box-shadow: inset 0 0 0 1.5px var(--accent);
 }
 .thimble-table-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

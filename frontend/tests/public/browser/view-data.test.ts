@@ -431,7 +431,7 @@ window.table = thimble.table({ mount: '#list', sort: { by: 't', desc: true },
 })
 
 describe("a narrow table's heads", () => {
-  test("a narrow table never cuts a head: a title wraps to two lines in a column narrower than it, and a column keeps its title's width on two lines before it drops", async () => {
+  test("a narrow table never cuts a head: a column given less width than its title takes it on one line while the table has room, wraps it to two lines in a narrower table, and keeps its title's width on two lines before it drops", async () => {
     // Live check 0.7.0: beside the side panel a forge's Claimed by and Merged/closed by read CLAIMED… and MERGED/CL…
     const doc = page(`<div id="pane" style="width:900px;height:300px;display:flex"><div id="list" style="flex:1;min-height:0"></div></div>
 <script>
@@ -449,7 +449,8 @@ window.table = thimble.table({ mount: '#list', sort: { by: 'claimed', desc: fals
         return ths.map((th, i) => {
           const t = th.querySelector('.thimble-table-title') as HTMLElement
           const prev = ths[i - 1]?.getBoundingClientRect().right ?? -Infinity
-          return { title: t.textContent!, cut: t.scrollWidth > t.clientWidth + 0.5, lines: Math.round(t.getBoundingClientRect().height / line), over: th.getBoundingClientRect().left < prev - 0.5 }
+          const cut = t.scrollWidth > t.clientWidth + 0.5 || t.scrollHeight > t.clientHeight + 0.5
+          return { title: t.textContent!, cut, lines: Math.round(t.getBoundingClientRect().height / line), over: th.getBoundingClientRect().left < prev - 0.5 }
         })
       })
     const wrapped = new Set<string>()
@@ -461,10 +462,28 @@ window.table = thimble.table({ mount: '#list', sort: { by: 'claimed', desc: fals
         assert.ok(!h.cut && !h.over && h.lines <= 2, `${width}px: ${JSON.stringify(hs)}`)
         if (h.lines === 2) wrapped.add(h.title)
       }
-      if (width === 900) assert.deepEqual(hs.map((h) => [h.title, h.lines]), [['#', 1], ['Title', 1], ['Claimed by', 2], ['Merged/closed by', 2], ['State', 1]], 'a column given less width than its title takes it on two lines')
+      if (width === 900) assert.deepEqual(hs.map((h) => [h.title, h.lines]), [['#', 1], ['Title', 1], ['Claimed by', 1], ['Merged/closed by', 1], ['State', 1]], 'a column given less width than its title takes it on one line while the table has room')
       if (width === 320) assert.ok(hs.length < 5, `${width}px: columns drop rather than cut a head ${JSON.stringify(hs)}`)
     }
+    assert.ok(wrapped.has('Claimed by'), 'a narrower table wraps a title rather than cut it')
     assert.ok(wrapped.has('Merged/closed by'), 'the slash is a place to wrap')
+    await p.close()
+  })
+
+  test('a table too narrow for the columns that never drop keeps each head to two lines, cut with an ellipsis', async () => {
+    const doc = page(`<div id="pane" style="width:300px;height:300px;display:flex"><div id="list" style="flex:1;min-height:0"></div></div>
+<script>
+window.table = thimble.table({ mount: '#list',
+  rows: Array.from({ length: 20 }, (_, i) => ({ ref: 'runs.jsonl#L' + (i + 1), run: 'run ' + i, closer: 'agent-' + (i % 5), failed: 'none' })),
+  columns: [{ name: 'run', title: 'Run' }, { name: 'closer', title: 'Merged/closed by', drop: false }, { name: 'failed', title: 'Number of failed tool calls', drop: false }] })
+</script>`)
+    const { page: p, frame } = await framed(doc)
+    const lines = await frame().evaluate(() => {
+      const line = parseFloat(getComputedStyle(document.querySelector('.thimble-table-title')!).lineHeight)
+      return [...document.querySelectorAll('.thimble-table-title')].map((t) => [t.textContent, Math.round(t.getBoundingClientRect().height / line)])
+    })
+    assert.equal(lines.length, 3, JSON.stringify(lines))
+    for (const [title, n] of lines) assert.ok((n as number) <= 2, `${title} takes ${n} lines: ${JSON.stringify(lines)}`)
     await p.close()
   })
 })
