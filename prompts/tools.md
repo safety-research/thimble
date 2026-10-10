@@ -1064,7 +1064,7 @@ Screenshots are unavailable on this machine, so the checks did not load the page
 
 ## view-few-anchors
 
-The reader handed the page {fetched} records, but only {records} shown elements carry a record's citation form, such as `<path>#L<n>`, as their `data-anchor`, so the labels the analyst turns on show on almost nothing in it. Give each element that shows a record its file ref.
+The reader handed the page {fetched} records, but only {records} shown elements carry a record's citation form, such as `<path>#L<n>`, as their `data-anchor`, so the labels the analyst turns on show on almost nothing in it. Give each element that shows a record its file ref, and each element that shows a group of records, such as a bar or a cell, its unit's key (`view:{slug}/<key>`).
 
 ## view-marks-missing
 

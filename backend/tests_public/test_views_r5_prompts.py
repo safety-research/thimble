@@ -51,6 +51,17 @@ def test_the_builder_opens_on_the_chosen_form_with_the_raw_records_on_demand():
         assert "The reviewer judges the page by established principles" not in text
 
 
+def test_the_few_anchors_problem_offers_units_so_a_first_screen_of_groups_need_not_list_records():
+    """A first screen of groups, such as bars, anchors few of the records the reader handed it; the label check's
+    problem names the view's units beside the records' refs, so it does not ask for a list of records on the page."""
+    from app import views  # noqa: PLC0415
+
+    shot = {"ok": True, "state": "overview", "fetched_records": 400, "label_controls": 1,
+            "shown": {"records": 2, "units": 0, "due": 0, "drawn": 0}}
+    (problem,), _ = views.label_problems({"slug": "agents"}, [("board.jsonl", 100, 0)], [shot])
+    assert "only 2 shown elements" in problem and "`view:agents/<key>`" in problem
+
+
 def test_view_kit_names_every_part_of_the_view_kit_in_browser_mode_only():
     parts = kit_parts()
     assert {"colorBy", "table", "search", "diff", "text", "tree", "messages", "record", "chart", "timeline"} <= parts
