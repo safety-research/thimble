@@ -63,23 +63,9 @@
     var line = String(s == null ? '' : s).split('\n').filter(function (l) { return l.trim() })[0] || ''
     return line.length > LINE_MAX ? line.slice(0, LINE_MAX) + '…' : line
   }
-  var MS_FROM = 1e11 // a time past this is in milliseconds, which no time in seconds reaches before the year 5000
-  // A time in seconds since 1970: a number (in milliseconds past MS_FROM), its digits as text, or a date, such as an ISO
-  // time (one with no zone in UTC, as the kit writes times) or a mail's date: text with a year and a month, since the
-  // browser reads a date into any text with a number in it, such as "step 4"; null when none
-  var DATE = /\d{4}-\d\d-\d\d|\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s.*\b\d{4}\b|\b\d{4}\b.*\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i
-  function secs(t) {
-    var s = null
-    if (typeof t === 'string' && /^\s*-?\d+(\.\d+)?\s*$/.test(t)) t = Number(t)
-    if (typeof t === 'number' && isFinite(t)) s = Math.abs(t) >= MS_FROM ? t / 1000 : t
-    else if (typeof t === 'string' && DATE.test(t)) {
-      var iso = t.trim()
-      if (/^\d{4}-\d\d-\d\d[T ]\d\d:\d\d(:\d\d(\.\d+)?)?$/.test(iso)) iso = iso.replace(' ', 'T') + 'Z'
-      s = Date.parse(iso) / 1000
-    }
-    // a date can be no further than 100,000,000 days from 1970
-    return s != null && isFinite(s) && Math.abs(s) <= 864e10 ? s : null
-  }
+  // a time in seconds since 1970 from a number, its digits, a Date or a date as text, one with no zone in UTC; null for
+  // none, such as "step 4" (kit.shared.secs, which the messages and the lanes read times by too)
+  var secs = shared.secs
   // a turn's time as the reader's head writes it, YYYY-MM-DD HH:MM:SS in UTC, from its `t` (or `time`); text that holds
   // no date as written
   function stamp(turn) {

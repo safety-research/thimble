@@ -123,6 +123,40 @@
   function num(n) {
     return Number(n || 0).toLocaleString('en-US')
   }
+  // A time in seconds since 1970 as a record gives it, for the kit's parts that write or place times (the transcript,
+  // the messages, the lanes): a number (in milliseconds past MS_FROM, which no time in seconds reaches before the year
+  // 5000), its digits as text, a Date, or a date as text, such as an ISO time or a mail's date, one with no zone read in
+  // UTC as the kit writes times; null for none, such as text with no date in it ("step 4"), which the browser would
+  // read a date into
+  var MS_FROM = 1e11
+  var ISO = /^(\d{4}-\d\d-\d\d)(?:[T ](\d\d:\d\d(?::\d\d(?:[.,]\d+)?)?)\s*(Z|UTC|GMT|[+-]\d\d(?::?\d\d)?)?)?$/i
+  var DATE = /\d{4}[-/]\d\d?[-/]\d\d?|\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s.*\b\d{4}\b|\b\d{4}\b.*\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i
+  var ZONE = /\d:\d\d(?::\d\d(?:\.\d+)?)?\s*(?:Z|[+-]\d\d:?\d\d|UTC|GMT|UT|[ECMP][SD]T)\b|\b(?:UTC|GMT)\b/i
+  function secs(t) {
+    var s = null
+    if (Object.prototype.toString.call(t) === '[object Date]') s = t.getTime() / 1000
+    else {
+      if (typeof t === 'string' && /^\s*-?\d+(\.\d+)?\s*$/.test(t)) t = Number(t)
+      if (typeof t === 'number') s = Math.abs(t) >= MS_FROM ? t / 1000 : t
+      else if (typeof t === 'string') {
+        var d = t.trim()
+        var iso = ISO.exec(d)
+        var ms = NaN
+        // an ISO time as every browser reads it: a T, at most milliseconds, an offset with its minutes, Z for none
+        if (iso) {
+          var z = !iso[3] || /^(z|utc|gmt)$/i.test(iso[3]) ? 'Z' : iso[3].slice(0, 3) + ':' + (iso[3].slice(3).replace(':', '') || '00')
+          ms = Date.parse(iso[1] + 'T' + (iso[2] || '00:00').replace(',', '.').replace(/(\.\d{3})\d+/, '$1') + z)
+        } else if (DATE.test(d)) {
+          ms = Date.parse(d)
+          // a date with no zone, which the browser reads in its own: in UTC
+          if (isFinite(ms) && !ZONE.test(d)) ms -= new Date(ms).getTimezoneOffset() * 60000
+        }
+        s = ms / 1000
+      }
+    }
+    // a date can be no further than 100,000,000 days from 1970
+    return s != null && isFinite(s) && Math.abs(s) <= 864e10 ? s : null
+  }
   function keyOf(v) {
     return v == null || v === '' ? NONE : String(v)
   }
@@ -3665,6 +3699,7 @@
     untip: untip,
     esc: esc,
     num: num,
+    secs: secs,
     showsOrHides: showsOrHides,
     // the labels as Color by reads them, for the kit's other parts (viewer_controls.js): every label over files, one by
     // its id, whether it is on, its value on a record, and what its values mean

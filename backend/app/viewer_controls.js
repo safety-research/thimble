@@ -1169,13 +1169,14 @@
     return out
   }
   // a record's place on the axis, a number in `unit`: a number as it is, a string that holds one as that number, and on
-  // an axis of time a Date or an ISO time too, in seconds ('s') or ms ('ms'); else null, a record with no place
+  // an axis of time a Date or a date as text too, such as an ISO time, one with no zone in UTC as the axis writes times
+  // (kit.shared.secs), in seconds ('s') or ms ('ms'); else null, a record with no place
   function placeOf(v, unit) {
     if (typeof v === 'number') return isFinite(v) ? v : null
     if (typeof v === 'string' && v.trim() !== '' && isFinite(Number(v))) return Number(v)
-    if (unit === 'n') return null
-    var ms = Object.prototype.toString.call(v) === '[object Date]' ? v.getTime() : typeof v === 'string' ? Date.parse(v) : NaN
-    return isFinite(ms) ? (unit === 'ms' ? ms : ms / 1000) : null
+    if (unit === 'n' || (typeof v !== 'string' && Object.prototype.toString.call(v) !== '[object Date]')) return null
+    var s = shared.secs(v)
+    return s != null ? (unit === 'ms' ? s * 1000 : s) : null
   }
   // the lanes of a field or a function of a record (`rows` with no Rows control): its values as the records first take
   // them, then a lane for the records with none

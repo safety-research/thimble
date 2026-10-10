@@ -882,6 +882,34 @@ describe('the text', () => {
   })
 })
 
+describe('times', () => {
+  // 09:00 on 16 May 2026 in UTC
+  const T = Date.UTC(2026, 4, 16, 9) / 1000
+  test("the messages and the timeline read a record's time as the transcript does: a number, its digits, an ISO time or a mail's date, one with no zone in UTC on a machine in any zone, and text with no date in it as no time", async () => {
+    const zone = process.env.TZ
+    // a machine seven hours behind UTC in May, where the browser reads a date with no zone in its own
+    process.env.TZ = 'America/Los_Angeles'
+    try {
+      await load('<div id="c"></div><div id="lanes" style="width:600px"></div>')
+      const w = win()
+      const read = [T, (T + 60) * 1000, String(T + 120), '2026-05-16T09:03:00', '2026-05-16T11:04:00+02:00', 'Sat, 16 May 2026 09:05:00', 'Sat, 16 May 2026 02:06:00 -0700']
+      w.MSGS = [...read.map((t, i) => ({ ref: `m#${i + 1}`, t, author: i % 2 ? 'ana' : 'bo', text: 'ok' })), { ref: 'm#8', t: 'step 4', author: 'cy', text: 'no time' }]
+      w.eval(`thimble.messages({ mount: '#c' }).draw(window.MSGS)
+        window.line = thimble.timeline({ mount: '#lanes' })
+        window.line.draw(window.MSGS.slice(3))`)
+      expect([...doc().querySelectorAll('.thimble-msg')].map((e) => e.getAttribute('data-t'))).toEqual([...read.map((_, i) => String(T + 60 * i)), null])
+      expect([...doc().querySelectorAll('.thimble-msg-time')].map((e) => e.getAttribute('title'))).toEqual(read.map((_, i) => `2026-05-16 09:0${i}:00`))
+      // the timeline's scale holds the times of text from 09:03 to 09:06 within the hour around them, "step 4" placed
+      // nowhere
+      const sc = w.line.scale
+      expect([sc.from <= T + 180 && sc.from > T - 3600, sc.to >= T + 360 && sc.to < T + 3600]).toEqual([true, true])
+    } finally {
+      if (zone === undefined) delete process.env.TZ
+      else process.env.TZ = zone
+    }
+  })
+})
+
 describe('the messages', () => {
   // 23:30 on Thursday 27 August 2026, so that midnight comes half an hour in
   const T = Date.UTC(2026, 7, 27, 23, 30) / 1000
