@@ -1136,7 +1136,7 @@
       })
     })
   }
-  // the find's wash on every match on the page, the stronger one on the current match (a kept record's first)
+  // the accent's tint on every match on the page, the stronger one on the current match (a kept record's first)
   Search.prototype.paint = function () {
     if (!HL) return
     var all = []

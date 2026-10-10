@@ -26,8 +26,8 @@ rule that does).
   each list that gives them, such as a table. A table and the messages beside it, such as those of the record open in
   the side panel, are one search, their matches in the order they stand in the page. It goes to the first match at or
   after the top of what the list shows, and so does a paste; a match the page draws only in reply to the text, such as
-  rows it fetches for it, is gone to once it is drawn. Every match on the screen gets the find's wash and the current
-  one a stronger one. The box says "3 of 120", or "No results".
+  rows it fetches for it, is gone to once it is drawn. Every match on the screen gets a tint of the accent and the
+  current one a stronger one. The box says "3 of 120", or "No results".
 - Enter or ↓ goes to the next match, ⇧Enter or ↑ to the one before, and the box's arrows do the same; the steps wrap
   at the ends. The list scrolls the current match into view. ⌘F (Ctrl+F) puts the focus in the box, and Escape
   empties it.
