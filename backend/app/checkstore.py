@@ -7,7 +7,8 @@ stale record is refused, so a slow check never writes over a newer card.
 
 `cell.fixes` lists the changes checks made, oldest first. A fix is tried on a candidate first (candidate()), then
 apply_fix() stores it as one undo step with actor `check`, only on an unlocked card a model made. undo_fix() puts the
-card back; outputs a code fix replaced are kept in workspaces/<c>/card-checks/<card>/<fix>-before.json.
+card back; outputs a code fix replaced are kept in workspaces/<c>/card-checks/<card>/<fix>-before.json. A fix that left
+all the card shows as it was (shows_same) is one more version in the card's history and no entry of `fixes`.
 """
 from __future__ import annotations
 
@@ -40,6 +41,7 @@ ACTOR = "check"  # who a fix is by: the canvas history's author and the undo ste
 AI_AUTHORS = ("model", "thimble")  # heal.AI_AUTHORS: the takeaway authors whose words a fix may change
 ANALYST_MAKER = "user"  # created_by of a card the analyst made by hand, which a fix never changes
 SHOTS_DIR = "card-checks"  # card_check.SHOTS_DIR: under the workspace, a folder per card
+SAME = "same"  # apply_fix's `state` for a fix that left all the card shows as it was (shows_same), which `fixes` never lists
 
 
 def _now() -> str:
@@ -341,8 +343,10 @@ def _before_path(c: str, cid: str, fix_id: str) -> Path:
 @_changes
 def apply_fix(c: str, cid: str, check_id: str, patch: dict, cand: dict | None, reason: str) -> dict | None:
     """Apply a kept fix to card `cid` in place as one undo step by `check`, appending it to the card's `fixes`, and one
-    edit by `check` in the card's history (notebook.stamp_edit). None, changing nothing, when the check is stale, a
-    field may not be fixed, or the code candidate did not run clean."""
+    edit by `check` in the card's history (notebook.stamp_edit). A fix that left all the card shows as it was
+    (shows_same) is that edit alone, not added to `fixes`, so the card is not marked fixed, and comes back with `state`
+    SAME (Matt 2026-10-10: "I would just increment the cards history, not add fixed"). None, changing nothing, when the
+    check is stale, a field may not be fixed, or the code candidate did not run clean."""
     from . import canvas_history, notebook  # noqa: PLC0415
 
     fields = _patch_fields(patch)
@@ -359,10 +363,11 @@ def apply_fix(c: str, cid: str, check_id: str, patch: dict, cand: dict | None, r
     fix_id = _id("fix")
     before = {f: copy.deepcopy(cell.get(f)) for f in fields}
     content, shown = notebook.content_of(cell), notebook.shown_of(cell)  # for the card's history (notebook.stamp_edit)
+    ran, was = None, ""  # the run the new code replaces, and a digest of all that it shows (_shown_key)
     if "code" in fields:
-        _before_path(c, cid, fix_id).write_text(json.dumps({"outputs": cell.get("outputs") or [], "status": cell.get("status"),
-                                                            "labels": cell.get("labels") or [],
-                                                            "label_revs": cell.get("label_revs") or {}}, default=str), "utf-8")
+        ran = {"outputs": cell.get("outputs") or [], "status": cell.get("status"), "labels": cell.get("labels") or [],
+               "label_revs": cell.get("label_revs") or {}}
+        was = _shown_key(ws, cell)
         notebook.land_run(c, nb, cell, str(patch["code"]), copy.deepcopy(cand["outputs"]), "ok", by=ACTOR,
                           labels=cand.get("labels"), label_revs=cand.get("label_revs"))
     if "title" in fields:
@@ -380,7 +385,12 @@ def apply_fix(c: str, cid: str, check_id: str, patch: dict, cand: dict | None, r
     before, after = {f: before[f] for f in fields}, {f: after[f] for f in fields}
     fix = {"id": fix_id, "check": check_id, "ts": _now(), "by": ACTOR, "fields": fields, "before": before,
            "after": after, "reason": str(reason or "").strip(), "state": "applied"}
-    cell.setdefault("fixes", []).append(fix)
+    if shows_same(ws, cell, rec, fields, was):
+        fix["state"] = SAME
+    else:
+        if ran is not None:
+            _before_path(c, cid, fix_id).write_text(json.dumps(ran, default=str), "utf-8")
+        cell.setdefault("fixes", []).append(fix)
     notebook.stamp_edit(ws, cell, content, ACTOR, shown=shown)
     cell["ts"] = _now()
     rec["basis"] = basis(cell)
@@ -388,6 +398,28 @@ def apply_fix(c: str, cid: str, check_id: str, patch: dict, cand: dict | None, r
         notebook.write_notebook(ws, nb)
         notebook._emit(c, cell, what="edited")
     return copy.deepcopy(fix)
+
+
+def _shown_key(ws: Path, cell: dict) -> str:
+    """A digest of all that a card's run shows: its outputs (notebook.outputs_key) and the labels it read, at the
+    revisions it read them, which color its marks and say when a label changed since the run."""
+    from . import notebook  # noqa: PLC0415
+
+    read = json.dumps([list(cell.get("labels") or []), cell.get("label_revs") or {}], sort_keys=True, default=str)
+    return f"{notebook.outputs_key(ws, cell.get('outputs'))} {read}"
+
+
+def shows_same(ws: Path, cell: dict, rec: dict, fields: list[str], was: str) -> bool:
+    """Whether a fix left all that card `cell` shows as it was, as edit_card's `## edit_card-same-outputs` tells an
+    author: it changed the code alone, of a card that does not show its code (a code card does), the new code gave the
+    outputs the card showed before and read the same labels (`was`, _shown_key of the card before), and the check `rec`
+    found no numbers typed into the code, whose red ✕ a fix of the code takes away."""
+    from . import notebook  # noqa: PLC0415
+
+    render = (rec.get("stages") or {}).get("render")
+    typed = render.get("typed") if isinstance(render, dict) else None
+    return (fields == ["code"] and bool(was) and str(cell.get("kind") or notebook.DEFAULT_KIND) != "code" and not typed
+            and was == _shown_key(ws, cell))
 
 
 @_changes

@@ -306,6 +306,28 @@ async def test_the_card_check_keeps_or_rejects_its_revision_after_running_it_thr
     assert len(cell["fixes"]) == fixes and cell["code"] == "print(4 + 4)"
 
 
+async def test_a_check_revision_through_thimble_run_that_shows_the_same_outputs_is_a_version_in_the_history(term, monkeypatch):
+    """Terminal mode, as in the browser (test_card_history.py): a card check's revision whose new code, run through
+    `thimble-run trial`, shows what the card showed is one more version in the card's history and no fix, and the check
+    ends `ok` (Matt 2026-10-10: "I would just increment the cards history, not add fixed"). One that changes the outputs
+    is a fix, as before."""
+    from app import checkstore
+
+    table = "import pandas as pd\npd.DataFrame({{'posts': [{n}]}})"
+    revision = {"code": table.format(n="4 + 4")}
+    _fake_check(monkeypatch, revision)
+    cid = card_id(await call(term, "add_card", kind="table", question="Posts?", code=table.format(n="8"),
+                             takeaway="There are 8 posts."))
+    assert run(term, "card", cid).returncode == 0
+    cell = await _checked(cid)
+    assert cell["check"]["status"] == "ok" and cell["code"] == revision["code"] and not cell.get("fixes"), cell["check"]
+    assert [(e["by"], e["fields"]) for e in cell["edited"]] == [(checkstore.ACTOR, ["code"])]
+    revision["code"] = table.format(n="9")
+    cell = await _checked(cid, again=True)
+    assert cell["check"]["status"] == "fixed" and [f["state"] for f in cell["fixes"]] == ["applied"]
+    assert len(cell["edited"]) == 2
+
+
 async def test_a_trial_runs_in_the_sandbox_main_runs_thimble_run_in(term, monkeypatch):
     """Where main runs in thimble's fence, the trial runs in srt with the fence's filesystem rules and no network: it
     writes the card folders and nothing of the corpus or the rest of the workspace."""

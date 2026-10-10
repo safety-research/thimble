@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 from fastapi import HTTPException
 
-from app import checkstore, config, notebook, plans, tools
+from app import card_check, checkstore, config, filters, notebook, plans, render, tools
 
 CORPUS = "mini"
 STEPS = [
@@ -202,6 +202,88 @@ async def test_a_card_checks_fix_and_its_undo_are_entries(group, ran):
     assert (undone["by"], undone["fields"]) == ("user", ["title", "code"])
     assert (await _version(cid, undone["id"]))["version"]["title"] == "How many records?"
     assert _cell(cid)["title"] == "How many?"
+
+
+@pytest.fixture()
+def sums(monkeypatch) -> None:
+    """A stand-in kernel whose output is the value of the code's last line, so `8` and `4 + 4` show the same outputs."""
+    async def started(k, workspace, kernel=None) -> None:
+        return None
+
+    async def run(k, code, kind, timeout_s, extra_exprs=None):
+        k.last_labels, k.last_label_revs = [], {}
+        return [{"text/plain": str(eval(code.strip().splitlines()[-1], {"__builtins__": {}}))}], 1, "ok"
+
+    monkeypatch.setattr(notebook, "_ensure_started", started)
+    monkeypatch.setattr(notebook, "_run_card_code", run)
+
+
+def _check_gives(monkeypatch, revision: dict) -> None:
+    """The card check with its drawing and its model's reading stood in for: every card draws, and the reading finds
+    the question vague and gives the card back with `revision["code"]`."""
+    async def draw(c, cell):
+        return render.Rendered(png=b"\x89PNG card")
+
+    async def read(c, cell, png, run, picture=None):
+        assessment = [{"problem": "The question names no wiki."}] + [{"problem": ""}] * (card_check.CRITERIA - 1)
+        return assessment, {"question": cell["title"], "code": revision["code"], "takeaway": cell["takeaway"]}, "test-model"
+
+    monkeypatch.setattr(render, "down", lambda: False)
+    monkeypatch.setattr(card_check, "_draw", draw)
+    monkeypatch.setattr(card_check, "_read", read)
+
+
+async def _checked(cid: str, again: bool = False) -> dict:
+    run = card_check.start(CORPUS, cid, card_check.MAIN, again=again)
+    assert run is not None
+    await run.task
+    return _cell(cid)
+
+
+async def test_a_card_checks_fix_that_shows_the_same_outputs_is_a_version_in_the_history_and_no_fix(group, sums, monkeypatch):
+    """Matt 2026-10-10, of a card check's fix that changes nothing the card shows: "I would just increment the cards
+    history, not add fixed". Its new code is one more version in the card's history, by the check, which Restore takes
+    back; the card is not marked fixed and has no Undo: the check ends `ok`, as for a card it did not revise. A fix whose
+    code changes the outputs is marked fixed as before."""
+    cid = _cid(await call("add_card", group, kind="table", question="How many posts?", code="8", takeaway="There are 8 posts."))
+    revision = {"code": "4 + 4"}
+    _check_gives(monkeypatch, revision)
+    cell = await _checked(cid)
+    assert cell["code"] == "4 + 4" and cell["check"]["status"] == "ok", cell["check"]
+    assert "reason" not in cell["check"] and not cell.get("fixes"), "no fix to mark the card or to undo"
+    assert filters.check_state(cell) == "verified"
+    [e] = _edits(cid)
+    assert (e["by"], e["fields"]) == (checkstore.ACTOR, ["code"])
+    v = (await _version(cid, e["id"]))["version"]
+    assert v["code"] == "8" and json.dumps(v["outputs"]) == json.dumps(cell["outputs"])
+    notebook.restore_version(CORPUS, cid, e["id"])
+    assert _cell(cid)["code"] == "8" and _edits(cid)[-1]["by"] == "user"
+    # a fix whose code changes the outputs is marked fixed, with Undo, as before
+    revision["code"] = "9"
+    cell = await _checked(cid, again=True)
+    assert cell["check"]["status"] == "fixed" and [f["state"] for f in cell["fixes"]] == ["applied"]
+    assert (_edits(cid)[-1]["by"], cell["outputs"][0]["text/plain"]) == (checkstore.ACTOR, "9")
+
+
+async def test_a_fix_with_the_same_outputs_is_a_fix_on_a_card_that_shows_its_code_or_its_typed_numbers(group, ran):
+    """A fix whose new code shows the same outputs still changes what a code card shows, its code, takes the red ✕
+    for numbers typed into the code off a card, and changes the labels a card's marks are colored by when its code reads
+    other labels: all are fixes, marked fixed as before."""
+    same = {"status": "ok", "code": "print( 1)", "outputs": [{"text/plain": "out: print(1)"}], "labels": [], "label_revs": {}}
+    shown = _cid(await call("add_card", group, kind="code", question="How many?", code="print(1)", takeaway="One."))
+    typed = _cid(await call("add_card", group, kind="table", question="How many?", code="print(1)", takeaway="One."))
+    relabeled = _cid(await call("add_card", group, kind="table", question="How many?", code="print(1)", takeaway="One."))
+    plain = _cid(await call("add_card", group, kind="table", question="How many?", code="print(1)", takeaway="One."))
+    got = {}
+    for cid in (shown, typed, relabeled, plain):
+        chk = checkstore.begin(CORPUS, cid)
+        if cid == typed:
+            assert checkstore.stage(CORPUS, cid, chk, "render", {"status": "ok", "typed": ["4", "5", "6"]})
+        cand = {**same, "labels": ["outcome"], "label_revs": {"outcome": 2}} if cid == relabeled else same
+        got[cid] = checkstore.apply_fix(CORPUS, cid, chk, {"code": "print( 1)"}, cand, "the question was vague")["state"]
+    assert got == {shown: "applied", typed: "applied", relabeled: "applied", plain: checkstore.SAME}
+    assert [len(_cell(cid).get("fixes") or []) for cid in (shown, typed, relabeled, plain)] == [1, 1, 1, 0]
+    assert all(_edits(cid)[-1]["by"] == checkstore.ACTOR for cid in (shown, typed, relabeled, plain))
 
 
 async def test_a_takeaway_written_over_another_is_an_entry_and_a_late_first_one_too(group, monkeypatch):
