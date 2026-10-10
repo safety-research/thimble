@@ -1105,6 +1105,7 @@ FIT_HTML = """<!doctype html><html><head><style>body{font:13px sans-serif;margin
 <div style="position:relative;height:40px"><span style="position:absolute;left:0;top:0">Overlapping label one</span>
 <span style="position:absolute;left:12px;top:2px">Second label here</span></div>
 <div style="width:60px;overflow:hidden;white-space:nowrap">A text far too long for its box</div>
+<div>2026-04-01 <span style="display:inline-block;width:0;overflow:hidden;vertical-align:top">09:30:15</span></div>
 <div style="width:300px">Narrow column</div>
 <div style="width:120px;overflow-x:auto;white-space:nowrap">Lanes that run on past their box</div>
 <button id="more">Show more</button><div id="extra" hidden data-anchor="board.jsonl#L2">bo: Anyone have the build number?</div>
@@ -1116,8 +1117,9 @@ thimble.onOpen(() => {})
 
 
 async def test_the_headless_page_measures_how_its_text_fits_and_clicks_a_control_a_state_names(ws, inproc, bound):
-    """The checks' page reports text drawn over other text, text its box cuts off and how much of a wide pane the page
-    uses, lists its controls by their text, and a state's actions click a control by its text before it is measured."""
+    """The checks' page reports text drawn over other text, text its box cuts off (not a box drawn 0 wide on purpose, as
+    a table's narrow column of times hides its seconds) and how much of a wide pane the page uses, lists its controls by
+    their text, and a state's actions click a control by its text before it is measured."""
     if why := views.build_problem():
         if os.environ.get("CI") == "true":
             pytest.fail(why)

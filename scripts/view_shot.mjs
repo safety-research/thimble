@@ -385,7 +385,8 @@ function layoutCounts() {
     if (![...el.childNodes].some((n) => n.nodeType === 3 && n.nodeValue.trim())) continue
     const cs = getComputedStyle(el)
     if (!['hidden', 'clip'].includes(cs.overflowX) || cs.textOverflow === 'ellipsis') continue
-    if (el.scrollWidth <= el.clientWidth + 2 || !visible(el)) continue
+    // a box drawn 0 wide hides its text on purpose, as the kit's table hides the year a narrow column of times leaves out
+    if (el.clientWidth === 0 || el.scrollWidth <= el.clientWidth + 2 || !visible(el)) continue
     cut++
     if (cuts.length < EXAMPLES) cuts.push(el.textContent.replace(/\s+/g, ' ').trim().slice(0, 40))
   }
