@@ -169,4 +169,15 @@ test('layers that share an axis give it one format: a layer that names its own l
   const days = { data: { values: [{ day: '2026-08-01' }, { day: '2026-08-09' }] }, mark: 'tick', encoding: { x: { field: 'day', type: 'temporal' } } }
   const named = { ...days, encoding: { x: { field: 'day', type: 'temporal', axis: { format: '%d %b' } } } }
   expect((chartDefaults({ $schema: VL, layer: [days, named] }) as Spec).layer.map((l: Spec) => l.encoding.x.axis?.format)).toEqual([undefined, '%d %b'])
+  // a second y axis (Altair's resolve_scale(y="independent")) is its layer's own: its whole numbers keep their format
+  const weeks = [
+    { week: 1, share: 0.5, PRs: 3 },
+    { week: 2, share: 0.75, PRs: 8 },
+  ]
+  const shares = { mark: 'line', encoding: { x: { field: 'week', type: 'ordinal' }, y: { field: 'share', type: 'quantitative', axis: { format: '%' } } } }
+  const counts = { mark: 'bar', encoding: { x: { field: 'week', type: 'ordinal' }, y: { field: 'PRs', type: 'quantitative' } } }
+  const formats = (resolve: Spec | undefined) => (chartDefaults({ $schema: VL, data: { values: weeks }, layer: [shares, counts], ...(resolve ? { resolve } : {}) }) as Spec).layer.map((l: Spec) => l.encoding.y.axis?.format)
+  expect(formats({ scale: { y: 'independent' } })).toEqual(['%', ',d'])
+  expect(formats({ axis: { y: 'independent' } })).toEqual(['%', ',d'])
+  expect(formats(undefined)).toEqual(['%', undefined])
 })

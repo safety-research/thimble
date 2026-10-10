@@ -144,7 +144,8 @@ function timeFields(enc: Spec, ch: 'x' | 'y'): string[] {
  * (layers inside layers included), so a layer of a few marks (a shaded span) does not set the labels by its own one or
  * two times, null when no layer formats the axis from its values; `own`, a layer names the axis's format itself, which
  * then labels it for every layer; `bin`, a layer is binned, whose format then stands over a whole-number one (a rule at
- * a whole value over a histogram). */
+ * a whole value over a histogram). An axis the layers resolve apart (a second y axis) is each layer's own and shares
+ * nothing. */
 type Shared = Record<'x' | 'y', { time: string | null; own: boolean; bin: boolean }>
 
 function layerShared(s: Spec, root: Spec, inherited: unknown[] | null): Shared {
@@ -164,7 +165,11 @@ function layerShared(s: Spec, root: Spec, inherited: unknown[] | null): Shared {
     if (Array.isArray(u.layer)) for (const l of u.layer) if (obj(l)) visit(obj(l)!, own)
   }
   visit(s, inherited)
-  for (const ch of ['x', 'y'] as const) if (uses[ch].length) out[ch].time = spanFormat(uses[ch])
+  const resolve = obj(s.resolve)
+  for (const ch of ['x', 'y'] as const) {
+    if (obj(resolve?.scale)?.[ch] === 'independent' || obj(resolve?.axis)?.[ch] === 'independent') out[ch] = { time: null, own: false, bin: false }
+    else if (uses[ch].length) out[ch].time = spanFormat(uses[ch])
+  }
   return out
 }
 
