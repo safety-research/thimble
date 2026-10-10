@@ -52,6 +52,9 @@ describe('the Vega-Lite theme', () => {
     expect(s['thimble-end'].color).toBeUndefined()
     expect(s['thimble-end'].filled).toBeUndefined()
     expect(s['thimble-end'].size as number).toBeGreaterThan(30)
+    // an area's hover points unseen and wider than a dot, its fill and its color kept for the tooltip's swatch
+    expect(s['thimble-hover']).toMatchObject({ fillOpacity: 0 })
+    expect(s['thimble-hover'].size as number).toBeGreaterThan(4 * 30)
   })
 
   test("rounds a bar's end by --viz-bar-radius, and leaves a box plot's box square", () => {

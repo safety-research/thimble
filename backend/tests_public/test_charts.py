@@ -467,13 +467,13 @@ def test_an_area_stacks_its_series_in_the_legend_s_order_overlaps_them_lightly_o
     spec = spec_of("area", posts)
     enc = spec["encoding"]
     # no dot at each value (Matt, 2026-10-10: "I don't know if we need a dot on every point"), but a hover tip at each:
-    # Vega-Lite's transparent points
-    assert spec["mark"] == {"type": "area", "point": "transparent"} and enc["x"]["type"] == "temporal"
+    # points the theme draws unseen and wider than a dot (HOVER_STYLE)
+    assert spec["mark"] == {"type": "area", "point": {"style": kt.HOVER_STYLE}} and enc["x"]["type"] == "temporal"
     assert enc["color"] == {"field": "site", "type": "nominal", "title": "site", "sort": ["b", "a"]}
     assert enc["order"] == {"field": kt.STACK_FIELD, "type": "quantitative"}
     assert spec["transform"] == [{"calculate": 'indexof(["b", "a"], datum["site"])', "as": kt.STACK_FIELD}]
     over = spec_of("area", posts, stack=False)
-    assert over["mark"] == {"type": "area", "style": kt.OVERLAP_STYLE, "point": "transparent"}
+    assert over["mark"] == {"type": "area", "style": kt.OVERLAP_STYLE, "point": {"style": kt.HOVER_STYLE}}
     assert over["encoding"]["y"]["stack"] is None and "order" not in over["encoding"]
     share = spec_of("area", posts, stack="share")["encoding"]["y"]
     assert share["stack"] == "normalize" and share["axis"] == {"format": "%"}
@@ -487,10 +487,12 @@ def test_an_area_stacks_its_series_in_the_legend_s_order_overlaps_them_lightly_o
 
 
 def test_the_marks_a_chart_names_by_their_job_are_styled_by_the_theme():
-    """A faint band, a box, a median, an overlapping area, a fitted line, and a range's line and ends carry no style of
-    their own: the theme's `style` config gives each its look (frontend lib/vizTheme vegaConfig)."""
+    """A faint band, a box, a median, an overlapping area, a fitted line, a range's line and ends, and an area's hover
+    points carry no style of their own: the theme's `style` config gives each its look (frontend lib/vizTheme
+    vegaConfig)."""
     theme = (Path(__file__).resolve().parents[2] / "frontend" / "src" / "lib" / "vizTheme.ts").read_text()
-    for name in (kt.FAINT_STYLE, kt.BOX_STYLE, kt.MEDIAN_STYLE, kt.OVERLAP_STYLE, kt.FIT_STYLE, kt.SPAN_STYLE, kt.END_STYLE):
+    for name in (kt.FAINT_STYLE, kt.BOX_STYLE, kt.MEDIAN_STYLE, kt.OVERLAP_STYLE, kt.FIT_STYLE, kt.SPAN_STYLE, kt.END_STYLE,
+                 kt.HOVER_STYLE):
         assert f"'{name}':" in theme, name
 
 
@@ -865,6 +867,8 @@ def test_show_false_returns_an_altair_chart_to_layer_marks_on_and_shows_nothing(
                            ("violin", MERGE, {}), ("line", EVALS.assign(model=[1, 2, 3]), {"interval": ("lo", "hi")}),
                            ("dots", pd.DataFrame({"x": [1, 1, 5], "row": ["a", "a", "a"]}), {}),
                            ("box", pd.DataFrame({"turns": [*TURNS["turns"], 7], "agent": [*TURNS["agent"], "c"]}), {}),
+                           ("violin", pd.DataFrame({"minutes": [*MERGE["minutes"], 50, 51], "agent": [*MERGE["agent"], "c", "c"]}), {}),
+                           ("area", EVALS.assign(model=[1, 2, 3])[["model", "accuracy"]], {}),
                            ("histogram", MERGE, {"panels": True}), ("heatmap", LINKS[["site", "posted on", "link posts"]], {}),
                            ("scatter", EVAL2[["base", "tuned", "family"]], {"fit": "linear", "panels": True}),
                            ("line", EVAL2[["base", "tuned"]], {})]:

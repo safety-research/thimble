@@ -170,8 +170,9 @@ export function vegaConfig(): Record<string, unknown> {
     // the marks thimble.chart names by their job (backend kernel_thimble FAINT_STYLE and on): a band faint behind its
     // line (a line's interval); a box plot's boxes and a violin's body lighter than their color and square, its medians
     // in ink; areas side by side overlapping lightly; a scatter's fitted line in ink, or its group's color; the line
-    // between a range's two ends muted, the ends solid and larger than a dot. Each keeps its series or label color but
-    // the median, a fitted line of one group and a range's line
+    // between a range's two ends muted, the ends solid and larger than a dot; an area's points unseen and wider than a
+    // dot, so a hover finds its values. Each keeps its series or label color but the median, a fitted line of one group
+    // and a range's line
     style: {
       'thimble-faint': { opacity: 0.2 },
       'thimble-box': { opacity: 0.55, cornerRadiusEnd: 0 },
@@ -180,6 +181,7 @@ export function vegaConfig(): Record<string, unknown> {
       'thimble-fit': { color: ink, strokeWidth: px('--viz-line', 1.5) + 0.5 },
       'thimble-span': { color: token('--viz-other'), strokeWidth: px('--viz-line', 1.5) + 0.5 },
       'thimble-end': { size: 56, opacity: 1 },
+      'thimble-hover': { fillOpacity: 0, size: 300 },
     },
   }
 }

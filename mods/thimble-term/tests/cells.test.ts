@@ -226,7 +226,7 @@ test("thimble.chart's box, violin, a line's interval, an area and dots moved off
   const line = card({ data: { values: hours }, layer: [{ mark: 'rule', encoding: { x: along('hour'), y: along('lo'), y2: { field: 'hi' } } }, { mark: { type: 'line', point: true }, encoding: { x: along('hour'), y: along('share') } }] })
   expect([line.kind, line.columns]).toEqual(['table', ['hour', 'share', 'lo', 'hi']])
   // an area with a hover tip at each value and no dot is still a line card
-  const area = card({ data: { values: hours }, mark: { type: 'area', point: 'transparent' }, encoding: { x: along('hour'), y: along('share') } })
+  const area = card({ data: { values: hours }, mark: { type: 'area', point: { style: 'thimble-hover' } }, encoding: { x: along('hour'), y: along('share') } })
   expect([area.kind, area.series?.[0]?.points]).toEqual(['line', [[1, 0.5], [2, 0.6]]])
   // dots moved off their line keep their rows: a dots chart's table
   const runs = [{ time: '2026-08-30T15:00:00', agent: 'agent-1' }, { time: '2026-08-30T15:00:00', agent: 'agent-1' }]

@@ -87,12 +87,14 @@ test("a range's ends are solid dots in two series colors, or the before end the 
   expect(steps.map((k) => [k.fill, k.opacity])).toEqual([[token('--viz-label'), 0.4], [token('--viz-label'), 1]])
 })
 
-test("an area's hover points draw no dot", async () => {
+test("an area's hover points draw no dot, and are wider than a dot so a hover finds them", async () => {
   const rows = [1, 2, 3].map((x) => ({ x, y: x * 2 }))
-  const marks = await scene({ data: { values: rows }, mark: { type: 'area', point: 'transparent' }, encoding: { x: field('x', 'quantitative'), y: field('y', 'quantitative'), tooltip: [field('y', 'quantitative')] } })
-  const points = marks.find((m) => m.type === 'symbol')!.items
+  const marks = await scene({ data: { values: rows }, mark: { type: 'area', point: { style: 'thimble-hover' } }, encoding: { x: field('x', 'quantitative'), y: field('y', 'quantitative'), tooltip: [field('y', 'quantitative')] } })
+  const points = marks.find((m) => m.type === 'symbol')!.items as (Item & { fillOpacity?: number; tooltip?: unknown })[]
   expect(points).toHaveLength(3)
-  expect(points.every((p) => p.opacity === 0)).toBe(true)
+  expect(points.every((p) => p.fillOpacity === 0 && !(p as { stroke?: string }).stroke)).toBe(true)
+  expect(points.every((p) => (p.size as number) > 4 * 30)).toBe(true)
+  expect(points[0]!.tooltip).toBeTruthy()
 })
 
 test("a range's line runs from one end's edge to the other's, whichever way it runs", async () => {

@@ -1229,9 +1229,9 @@ DODGE_ROW, DODGE_FIELD = "__thimble_row", "__thimble_dodge"  # a row's number, a
 # the marks a chart names by their job, which the theme draws (frontend lib/vizTheme vegaConfig's `style`): a band
 # faint behind its line (a line's interval); a box plot's boxes and a violin's body lighter than their color, their
 # medians in ink; areas overlapping lightly; a scatter's fitted line in ink; the line between a range's two ends muted,
-# and the ends larger than a dot
+# and the ends larger than a dot; an area's points unseen, wider than a dot so a hover finds them
 FAINT_STYLE, BOX_STYLE, MEDIAN_STYLE, OVERLAP_STYLE = "thimble-faint", "thimble-box", "thimble-median", "thimble-overlap"
-FIT_STYLE, SPAN_STYLE, END_STYLE = "thimble-fit", "thimble-span", "thimble-end"
+FIT_STYLE, SPAN_STYLE, END_STYLE, HOVER_STYLE = "thimble-fit", "thimble-span", "thimble-end", "thimble-hover"
 # each kind's columns in order, how many of them it needs, and its options
 CHARTS = {
     "bar": (("category", "value", "group"), 2, ("sort", "stack", "label", "marks", "interval", "panels")),
@@ -2027,10 +2027,10 @@ def _area_spec(df, opts: dict) -> dict:
             more["transform"] = [{"calculate": f"indexof({json.dumps(series)}, datum[{json.dumps(ser)}])", "as": STACK_FIELD}]
             enc["order"] = {"field": STACK_FIELD, "type": "quantitative"}
     enc["tooltip"] = _tooltip(df, kinds)
-    # a hover tip at each value while the series are short, at a point drawn with no dot (Vega-Lite's transparent one)
+    # a hover tip at each value while the series are short, at a point the theme draws unseen and wider than a dot
     longest = int(df.groupby(ser, sort=False).size().max()) if ser and len(df) else len(df)
     if longest <= LINE_DOTS_MAX:
-        mark["point"] = "transparent"
+        mark["point"] = {"style": HOVER_STYLE}
     spec = _unit(rows, mark if len(mark) > 1 else "area", enc, **more)
     if opts.get("marks") is not None:
         spec = _with_marks(kind, spec, opts["marks"], x, kinds[x])
