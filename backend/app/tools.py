@@ -158,6 +158,7 @@ class Spec:
     sessions: "tuple[str | None, ...]" = ()
     aliases: tuple[str, ...] = ()
     drop_stops: bool = False
+    optional: bool = False  # listed only when prompts/tools.md has its section (views round 5: profile_data)
 
 
 _H = "app.tools:_h_"
@@ -185,6 +186,9 @@ REGISTRY: dict[str, Spec] = {
         # a card of a card type opened as its view in Files, as the card's Open as view does (cardtypes.py); main's
         Spec("open_view", (ANALYST,), "app.cardtypes:tool_open_view", sessions=MAIN_ONLY),
         Spec("propose_view", (ANALYST,), _H + "propose_view"),
+        # views round 5 (exploration), listed only where the prompts' tools.md gives it a section: main's description
+        # of the data checked against the records (profile_data.py)
+        Spec("profile_data", (ANALYST,), "app.profile_data:tool_profile_data", sessions=MAIN_ONLY, optional=True),
         Spec("write_document", (ANALYST,), "app.report_types:tool_write_document"),
         Spec("edit_document", (ANALYST,), "app.report_types:tool_edit_document"),
         # a comment beside a passage of a document: a check's, from the check's own session, or main's own note
@@ -324,6 +328,8 @@ def tool_sections(names: "builtins.list[str] | tuple[str, ...] | None" = None) -
     out: dict[str, tuple[str, dict[str, Any]]] = {}
     for name in REGISTRY if names is None else names:
         body = secs.get(name)
+        if body is None and names is None and REGISTRY[name].optional:
+            continue
         if body is None:
             raise ToolsFileError(f"prompts/{TOOLS_PROMPT}.md has no `## {name}` section for the tool {name}")
         try:
@@ -364,6 +370,8 @@ def list(role: str = ANALYST, session: str | None = None) -> "builtins.list[dict
     role_of(role)
     kind = session_kind(session)
     names = [s.name for s in REGISTRY.values() if role in s.roles and (kind is None or not s.sessions or kind in s.sessions)]
+    have = sections() if any(REGISTRY[n].optional for n in names) else {}
+    names = [n for n in names if not REGISTRY[n].optional or n in have]
     secs = tool_sections(names)
     return [{"name": n, "description": secs[n][0], "input_schema": secs[n][1]} for n in names]
 
