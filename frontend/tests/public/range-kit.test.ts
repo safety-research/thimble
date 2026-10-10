@@ -286,4 +286,16 @@ describe('the time range selector', () => {
     expect(doc().querySelector('.thimble-range-dates')!.textContent).toBe('100 – 250')
     expect(doc().querySelector('.thimble-range-len')!.textContent).toBe('150')
   })
+
+  test('plain numbers such as identifiers or years: their places written as they are, without separators; a length with them', async () => {
+    await load()
+    win().thimble.colorBy({ mount: '#colour', fields: [] })
+    const r = win().thimble.timeRange({ mount: '#range', unit: 'n', span: [60000, 70000] })
+    r.set(61000, 68500)
+    await wait()
+    expect(doc().querySelector('.thimble-range-dates')!.textContent).toBe('61000 – 68500')
+    expect(doc().querySelector('.thimble-range-len')!.textContent).toBe('7,500')
+    expect(r.format(2019)).toBe('2019')
+    expect(r.scale(600).ticks(64).map((k: any) => k.label).filter(Boolean)).toEqual(['62000', '63000', '64000', '65000', '66000', '67000', '68000'])
+  })
 })

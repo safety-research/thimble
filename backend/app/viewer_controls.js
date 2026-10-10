@@ -1742,7 +1742,7 @@
     if (step == null && sc) step = ((sc.to - sc.from) / Math.max(1, sc.width)) * 4
     if (sc && typeof sc.format === 'function') return sc.format(t, step)
     if (this.range && typeof this.range.format === 'function') return this.range.format(t, step)
-    return this.unit === 'n' ? num(t) : new Date(this.unit === 'ms' ? t : t * 1000).toISOString().slice(11, 19)
+    return this.unit === 'n' ? String(Math.round(t * 1000) / 1000) : new Date(this.unit === 'ms' ? t : t * 1000).toISOString().slice(11, 19)
   }
   // a bin's span in words, the day said once where both ends fall on it: 16 May 09:03–09:04
   Lanes.prototype.between = function (t0, t1) {

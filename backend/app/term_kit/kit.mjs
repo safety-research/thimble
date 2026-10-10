@@ -166,10 +166,11 @@ export function num(n) {
   return r > -1000 && r < 1000 ? String(r) : String(r).replace(/\B(?=(\d{3})+$)/g, ',')
 }
 
-// a plain number as precise as `step` needs: 0.25 to a step of 0.05, 12 to a step of 1
-function numTo(n, step) {
+// a place on an axis of plain numbers, such as a turn, a line or a year, written as it is, without separators (2019),
+// and as precise as `step` needs: 0.25 to a step of 0.05, 12 to a step of 1
+function numAt(n, step) {
   const d = step > 0 && step < 1 ? Math.min(6, Math.ceil(-Math.log10(step) - 1e-9)) : 0
-  return d ? Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: d }) : num(n)
+  return d ? Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: d, useGrouping: false }) : String(Math.round(Number(n) || 0))
 }
 
 /** `n word` or `n words`. */
@@ -214,6 +215,40 @@ const DAYS_SEEN = new Map()
 export function dayName(t) {
   const d = new Date(t * 1000)
   return `${DAYS[d.getUTCDay()]} ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`
+}
+
+// A time in seconds since 1970 as a record gives it, read as the browser kit reads it (viewer_colour.js secs): a number
+// (in milliseconds past MS_FROM, which no time in seconds reaches before the year 5000), its digits as text, a Date, or
+// a date as text, such as an ISO time or a mail's date, one with no zone read in UTC as the kit writes times; null for
+// none, such as text with no date in it ("step 4"), which Date.parse would read a date into
+const MS_FROM = 1e11
+const ISO_TIME = /^(\d{4}-\d\d-\d\d)(?:[T ](\d\d:\d\d(?::\d\d(?:[.,]\d+)?)?)\s*(Z|UTC|GMT|[+-]\d\d(?::?\d\d)?)?)?$/i
+const A_DATE = /\d{4}[-/]\d\d?[-/]\d\d?|\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s.*\b\d{4}\b|\b\d{4}\b.*\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i
+const A_ZONE = /\d:\d\d(?::\d\d(?:\.\d+)?)?\s*(?:Z|[+-]\d\d:?\d\d|UTC|GMT|UT|[ECMP][SD]T)\b|\b(?:UTC|GMT)\b/i
+function secs(t) {
+  let s = null
+  if (t instanceof Date) s = t.getTime() / 1000
+  else {
+    if (typeof t === 'string' && /^\s*-?\d+(\.\d+)?\s*$/.test(t)) t = Number(t)
+    if (typeof t === 'number') s = Math.abs(t) >= MS_FROM ? t / 1000 : t
+    else if (typeof t === 'string') {
+      const d = t.trim()
+      const iso = ISO_TIME.exec(d)
+      let ms = NaN
+      // an ISO time as every engine reads it: a T, at most milliseconds, an offset with its minutes, Z for none
+      if (iso) {
+        const z = !iso[3] || /^(z|utc|gmt)$/i.test(iso[3]) ? 'Z' : `${iso[3].slice(0, 3)}:${iso[3].slice(3).replace(':', '') || '00'}`
+        ms = Date.parse(`${iso[1]}T${(iso[2] || '00:00').replace(',', '.').replace(/(\.\d{3})\d+/, '$1')}${z}`)
+      } else if (A_DATE.test(d)) {
+        ms = Date.parse(d)
+        // a date with no zone, which Date.parse reads in the machine's: in UTC
+        if (Number.isFinite(ms) && !A_ZONE.test(d)) ms -= new Date(ms).getTimezoneOffset() * 60000
+      }
+      s = ms / 1000
+    }
+  }
+  // a date can be no further than 100,000,000 days from 1970
+  return s !== null && Number.isFinite(s) && Math.abs(s) <= 864e10 ? s : null
 }
 
 /** A length of time in seconds, `45s`, `12m 5s`, `3h 20m`, `2d 4h`. */
@@ -2156,13 +2191,13 @@ export function timeRange(opts = {}) {
     },
     /** A time in the readout's words, as precise as `step` needs. */
     format(t, step = (api.to - api.from) / 60) {
-      return unit === 'n' ? num(t) : when(t, step)
+      return unit === 'n' ? numAt(t, 1) : when(t, step)
     },
     /** The range's readout: start, end and length, `16 May 04:31 – 05:10 · 39m`. */
     readout() {
       const a = api.from
       const b = api.to
-      if (unit === 'n') return `${num(a)} – ${num(b)} · ${num(b - a)}`
+      if (unit === 'n') return `${numAt(a, 1)} – ${numAt(b, 1)} · ${num(b - a)}`
       const step = (b - a) / 60
       const aa = when(a, step)
       const bb = when(b, step)
@@ -2312,7 +2347,7 @@ function scaleOf(from, to, cols, unit, segs = null, fine = false) {
         const p = 10 ** Math.floor(Math.log10(raw))
         const tick = Math.max(fine ? 0 : 1, [1, 2, 5, 10].map((m) => m * p).find((v) => v >= raw) || 10 * p)
         const out = []
-        for (let k = Math.ceil(from / tick); k * tick <= to; k++) out.push({ t: k * tick, x: x(k * tick), label: numTo(k * tick, tick) })
+        for (let k = Math.ceil(from / tick); k * tick <= to; k++) out.push({ t: k * tick, x: x(k * tick), label: numAt(k * tick, tick) })
         return out
       }
       const tick = TICKS.find((s) => s / step >= gap) || TICKS.at(-1)
@@ -2401,7 +2436,7 @@ function brokenScale(from, to, cols, unit, parts, fine = false) {
         const tick = Math.max(fine ? 0 : 1, [1, 2, 5, 10].map((m) => m * p).find((v) => v >= raw) || 10 * p)
         return segs.flatMap((g) => {
           const out = []
-          for (let k = Math.ceil(g.a / tick); k * tick <= g.b; k++) out.push({ t: k * tick, x: x(k * tick), label: numTo(k * tick, tick) })
+          for (let k = Math.ceil(g.a / tick); k * tick <= g.b; k++) out.push({ t: k * tick, x: x(k * tick), label: numAt(k * tick, tick) })
           return out
         })
       }
@@ -3821,13 +3856,13 @@ export function rows(opts = {}) {
 const EVENT = '▌' // a lane's cell that holds a record, while the lanes draw Events rather than density
 
 // a record's place on the axis, a number in `unit`: a number as it is, a string that holds one as that number, and on
-// an axis of time a Date or an ISO time too, in seconds; else null, a record with no place
+// an axis of time a Date or a date as text too, such as an ISO time, one with no zone in UTC as the axis writes times
+// (secs, as the browser's lanes read them), in seconds; else null, a record with no place
 function placeOf(v, unit) {
   if (typeof v === 'number') return Number.isFinite(v) ? v : null
   if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) return Number(v)
-  if (unit === 'n') return null
-  const ms = v instanceof Date ? v.getTime() : typeof v === 'string' ? Date.parse(v) : NaN
-  return Number.isFinite(ms) ? ms / 1000 : null
+  if (unit === 'n' || (typeof v !== 'string' && !(v instanceof Date))) return null
+  return secs(v)
 }
 
 // the lanes of a field or a function of a record (`rows` with no Rows control): its values as the records first take
@@ -4023,7 +4058,7 @@ export function timeline(opts = {}) {
       st.counts = { band: 0, problem: 0 }
       const groups = all.map((n) => n.items)
       const max = maxBin(scale, groups, time)
-      const whens = Array.from({ length: scale.cols }, (_, x) => (unit === 'n' ? (fine ? numTo(scale.t(x), scale.step) : num(scale.t(x))) : when(scale.t(x), Math.max(1, scale.step))))
+      const whens = Array.from({ length: scale.cols }, (_, x) => (unit === 'n' ? numAt(scale.t(x), fine ? scale.step : 1) : when(scale.t(x), Math.max(1, scale.step))))
       // the rows past the room wait behind `… N more`, which shows the next of them
       const fits = all.length <= room ? all.length : Math.max(1, room - 1)
       if (st.top >= all.length || all.length <= room) st.top = 0
@@ -4113,14 +4148,21 @@ const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Se
  * Color by values are.
  *
  * opts: key (the list's), enter. draw(d, {turns, title, count, colour, side, onOpen, empty}): turns [{ref, t, speaker,
- * kind (text | prompt | tool | thinking | system), tool, text, input, output, error}].
+ * kind (text | prompt | tool | thinking | system), tool, text, input, output, error}], `t` (or `time`) in seconds since
+ * 1970 or a date such as an ISO time, one with no zone in UTC, as the browser's transcript reads it.
  */
 export function transcript(opts = {}) {
   const items = list({ key: (t) => t.ref, enter: opts.enter || 'to open' })
-  const clockOf = (t) => (typeof t.t === 'number' && Number.isFinite(t.t) ? hms(t.t) : '')
+  // a turn's time in seconds from its `t` (or `time`), read as the browser's transcript reads it; null for none
+  const secsOf = (t) => secs(t.t !== null && t.t !== undefined && t.t !== '' ? t.t : t.time)
+  const clockOf = (t) => {
+    const s = secsOf(t)
+    return s === null ? '' : hms(s)
+  }
   const dayOf2 = (t) => {
-    if (typeof t.t !== 'number' || !Number.isFinite(t.t)) return ''
-    const d = new Date(t.t * 1000)
+    const s = secsOf(t)
+    if (s === null) return ''
+    const d = new Date(s * 1000)
     return `${d.getUTCDate()} ${MONTH_NAMES[d.getUTCMonth()]} ${d.getUTCFullYear()}`
   }
   const firstLine = (s) => oneLine(String(s ?? '').split('\n').find((l) => l.trim()) || '')

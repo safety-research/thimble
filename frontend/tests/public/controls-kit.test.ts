@@ -450,6 +450,20 @@ describe('the timeline on its own', () => {
     expect(w.ranged.scale.unit).toBe('n')
   })
 
+  test('on plain numbers such as years: the axis and the tips write them as they are, without separators', async () => {
+    await load()
+    const w = win()
+    w.RELEASES = [2019, 2020, 2021, 2023, 2026].map((year) => ({ year, text: 'release ' + year }))
+    w.eval(`window.tl = thimble.timeline({ mount: '#lanes', unit: 'n', time: (r) => r.year }); window.tl.draw(window.RELEASES)`)
+    await wait()
+    const labels = texts('#lanes .thimble-lanes-axis .thimble-axis-lab')
+    expect(labels).toContain('2020')
+    expect(labels.every((l) => /^\d{4}$/.test(l))).toBe(true)
+    const lane = doc().querySelector('#lanes .thimble-lane')!
+    hover(lane, Number(lane.querySelector('.thimble-lane-mark')!.getAttribute('x')) + 1)
+    expect(tipOf()).toEqual(['2019', 'release 2019'])
+  })
+
   test("on plain numbers not all whole, such as scores: the axis in decimals and the tips as precise as four px; whole numbers never step under one", async () => {
     await load()
     const w = win()
