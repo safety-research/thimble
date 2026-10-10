@@ -250,7 +250,7 @@ describe('Rows', () => {
 })
 
 describe('the lanes and their key', () => {
-  test("a failure is underlined in the problem red; the key's entries are toggles that hide their series; one that never shows is left out; Reset shows them again", async () => {
+  test("a failure is a ✕ in the problem red at its mark's foot, over every mark; the key's entries are toggles that hide their series; one that never shows is left out; Reset shows them again", async () => {
     await load()
     const w = win()
     w.CALLS = CALLS
@@ -263,9 +263,20 @@ describe('the lanes and their key', () => {
     `)
     await wait()
     expect(doc().querySelectorAll('.thimble-lane-bad')).toHaveLength(2)
-    // no band ever shows, so the key has no `running`; `failed` with its count
+    // each ✕ a halo of the paper under its red strokes, after the lane's marks, centered on its failed call's mark
+    for (const bad of doc().querySelectorAll('.thimble-lane-bad')) {
+      expect([...bad.children].map((p) => p.getAttribute('class'))).toEqual(['thimble-lane-bad-halo', 'thimble-lane-bad-x'])
+      expect(bad.nextElementSibling).toBe(null)
+      const d = bad.children[1].getAttribute('d')!
+      const [x0, y0, dx, dy] = (/^M([\d.]+) ([\d.]+)l([\d.]+) ([\d.]+)M/.exec(d) || []).slice(1).map(Number)
+      expect([dx, dy]).toEqual([6.5, 6.5])
+      expect(y0 + dy).toBeCloseTo(18 - 0.5, 5)
+      const mark = [...bad.parentElement!.querySelectorAll('.thimble-lane-mark')].find((m) => Math.abs(Number(m.getAttribute('x')) + Number(m.getAttribute('width')) / 2 - (x0 + dx / 2)) < 0.15)
+      expect(mark, d).toBeTruthy()
+    }
+    // no band ever shows, so the key has no `running`; `failed` with its count, its swatch a ✕
     expect(texts('.thimble-key-chip')).toEqual(['failed2'])
-    expect(doc().querySelector('.thimble-key-chip .thimble-key-problem')).not.toBe(null)
+    expect(doc().querySelector('.thimble-key-chip .thimble-key-problem svg path')).not.toBe(null)
     ;(doc().querySelector('.thimble-key-chip') as HTMLElement).click()
     await wait()
     expect(doc().querySelector('.thimble-key-chip')!.getAttribute('aria-pressed')).toBe('false')

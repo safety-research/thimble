@@ -71,7 +71,7 @@ const lanes = thimble.timeline({
   mount: '#lanes', keyMount: '#key', rows, range, names: 200,
   end: (call) => call.t + call.duration,                 // a mark as wide as the call ran
   band: (lane) => [[lane.items[0].t, lane.items.at(-1).t]], // where the session ran
-  problem: (call) => call.outcome !== 'ok',              // a failure, underlined in the problem red
+  problem: (call) => call.outcome !== 'ok',              // a failure, a ✕ in the problem red
   follow: '#list',                                       // the list's rows in view, as a tint
   onPick: (lane) => { session = lane.key; draw() },      // a lane's name: its session's transcript
   onMark: (call) => show(call),                          // a mark: the call in the side panel
@@ -165,7 +165,7 @@ tl.draw(commits) // [{t: 1778922000, author: 'ana', text: 'Fix the parser'}]
 | `time(item)`, `end(item)` | a record's place on the axis (`item.t` by default), a number, or a Date or an ISO time on an axis of time, else the record is left out; and its end, for a mark as wide as the record ran |
 | `unit` | the axis's unit with no range, as the time range's: `'s'` seconds since 1970 (the default), `'ms'`, or `'n'` a plain number such as a turn, a line or a score |
 | `band(lane)` | the spans the lane ran, `[[start, end]]`, drawn as a light band (the key's "running") |
-| `problem(item)` | whether a record failed: its mark is underlined in the problem red (the key's "failed") |
+| `problem(item)` | whether a record failed: its mark takes a ✕ in the problem red at its foot (the key's "failed") |
 | `words` | the key's words: `{band, problem}` |
 | `keyMount` | where the key goes; at the lanes' top by default, or with no range beside the axis, under it where it has no room there |
 | `follow` | the detail list, whose rows carry `data-t`, as the table's, the transcript's and the messages' do: the rows in view, from the earliest of their times to the latest, are a light tint across the lanes |

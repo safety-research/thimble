@@ -27,7 +27,7 @@
   .lhead span { flex: none; color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); font-variant-numeric: tabular-nums; }
   .lhead .btn { flex: none; margin-left: auto; }
   #list { flex: 1; min-height: 0; }
-  /* a failed outcome: ✕ and its kind in the problem red, as the lanes underline its mark in it */
+  /* a failed outcome: ✕ and its kind in the problem red, as the lanes mark it */
   .failed { color: var(--status-negative); }
   /* an event in the side panel: its words, the event it answers and those that answer it, then its record */
   .words { margin: 0 0 12px; }
@@ -141,7 +141,7 @@ const rows = thimble.rows({ mount: '#rows', fields: FIELDS, initial: 'source', o
 const range = thimble.timeRange({ mount: '#range', readout: '#read', onChange: draw })
 // the lanes and the table's strip draw each event in the value the reader gave it, which holds for a label too, whose
 // marks reach only the rows the table draws; a row's bar is Color by's own (attr). In the lanes a failed event is
-// underlined in the problem red, and the table's rows in view are a tint across them
+// a ✕ in the problem red, and the table's rows in view are a tint across them
 const painted = { keeps: () => true, valueOf: (e) => e.value, colourOf: (v) => colour.colourOf(v), attr: (e) => colour.attr(e) }
 const lanes = thimble.timeline({
   mount: '#lanes', keyMount: '#key', rows, range, colour: painted, names: 112, follow: '#list',

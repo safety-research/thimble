@@ -164,9 +164,9 @@ const range = thimble.timeRange({ mount: '#range', readout: '#readout', gap: 120
 const valueOf = (it) => (colour.label ? (data && data.colours[it.ref]) ?? null : colour.valueOf(it))
 const laneColour = { keeps: () => true, valueOf, colourOf: (v) => colour.colourOf(v) }
 const bySession = () => rows.field === 'session'
-// the lanes: each turn a mark as wide as its call took (a Task call as long as its subagent ran), a failed call
-// underlined in the problem red; the transcript's turns in view tinted across them; the groups of Rows in the room the
-// overview has
+// the lanes: each turn a mark as wide as its call took (a Task call as long as its subagent ran), a failed call a ✕
+// in the problem red at its mark's foot; the transcript's turns in view tinted across them; the groups of Rows in the
+// room the overview has
 const failed = (it) => it.kind === 'call' && it.outcome !== 'ok'
 const lanes = thimble.timeline({
   mount: '#lanes', keyMount: '#key', range, colour: laneColour, names: NAMES,
