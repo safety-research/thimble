@@ -845,6 +845,35 @@ describe('the list', () => {
     expect(text()[1]).toMatch(/event 0/)
   })
 
+  test("a list many times taller than its rows keeps one track column at its right edge, as the browser's one strip, with no zoomed column beside it", async () => {
+    init({ rows: 10 })
+    const colour = kit.colorBy({ fields: [{ name: 'kind', title: 'Kind' }] })
+    const list = kit.list({ key: (e: any) => e.id })
+    const many = Array.from({ length: 400 }, (_, i) => ({ id: i, kind: i < 200 ? 'fired' : 'resolved', text: `event ${i}` }))
+    kit.draw((d: any) => list.draw(d, { items: many, colour, row: (e: any, r: any) => r.add(e.text) }))
+    colour.counts({ fired: 200, resolved: 200 })
+    await tick()
+    const f = last()
+    const rows = text(f)
+    expect(rows.length).toBe(10)
+    // the track's cell ends each row, the cell before it the row's own
+    for (const r of rows) expect([r.at(-1), r.at(-2)]).toEqual(['▌', ' '])
+    // its top half in the first value's hue, its bottom half in the second's; the part in view on the selection background
+    const track = f.lines.map((l: any) => l.at(-1))
+    expect(new Set(track.slice(0, 5).map((s: any) => s.fg))).toEqual(new Set([colour.colourOf('fired')]))
+    expect(new Set(track.slice(5).map((s: any) => s.fg))).toEqual(new Set([colour.colourOf('resolved')]))
+    expect(track.map((s: any) => s.bg === 'selectionBg')).toEqual(track.map((_: any, k: number) => k === 0))
+    // a hot region per row, over that one cell, that goes there
+    const hits = f.hits.filter((h: any) => /^rows \d/.test(h.tip ?? ''))
+    expect(hits.map((h: any) => h.y)).toEqual(rows.map((_: string, k: number) => k))
+    expect(new Set(hits.map((h: any) => h.x1 - h.x0))).toEqual(new Set([1]))
+    expect(f.hits.some((h: any) => h.tip === 'the rows around the view')).toBe(false)
+    const i = f.hits.indexOf(hits[7])
+    kit.handle({ t: 'click', i, seq: f.seq, x: 0, n: ++n })
+    await tick()
+    expect(text().find((r: string) => r.startsWith('❯'))).toMatch(/event 280/)
+  })
+
   test('a list that fits has no track; one with no item says so', async () => {
     const list = kit.list({ key: (e: any) => e.id })
     kit.draw((d: any) => list.draw(d, { items: items.slice(0, 3), row: (e: any, r: any) => r.add(e.text) }))

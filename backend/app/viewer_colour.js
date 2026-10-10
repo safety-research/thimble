@@ -11,9 +11,9 @@
 //                                              order and colors stay the records': { meanings: { payments: 'the
 //                                              payments API' } }; `description` says what the field is; a chip's hover
 //                                              gives them
-//     strip: '#list',                          the list that gets the colored tracks, or true for the page; another
-//                                              list gets them with colour.strip(el, {rows}) or {whole: true}, and is
-//                                              a plain track otherwise
+//     strip: '#list',                          the list that gets the colored strip, or true for the page; another
+//                                              list gets it with colour.strip(el, {rows}) or {whole: true}, and is
+//                                              a plain scrollbar otherwise
 //     onChange: (colour) => draw(),            the choice, a value turned on or off, or the label values changed
 //   })
 //
@@ -53,15 +53,12 @@
 // data-colour is the value of the chosen field, and on every anchored record when a label is chosen), never coloured
 // text or a fill; with several choices, a band per choice there, side by side in the order of the strip's lanes, each
 // in the record's value's colour of that choice and empty where it has none, as a slice of the strip.
-// The strip is a list's scrollbar as an editor's two tracks, as Files' Transcript mode draws them: the overview track
-// shows the whole list in one lane, each pixel row in the colour most of its records take, grey where they take no
-// value, a lane beside it for each of Color by's choices past the first, and a dark frame around the part in view; a
-// long list adds the zoomed track at the outer edge, which magnifies the frame: the part around the view at a finer
-// scale (once the list is ZOOM_AT times its box), its colours faded beyond the part in view, which lies under a lens
-// joined to the frame by two lines; a list whose colours the strip cannot know whole, or whose records take none, is a
-// plain track. The lens stands as far down the zoomed track
-// as the frame stands down the overview, so the two move together. Hovering the overview shows the records there, a
-// click goes there and a drag scrubs; a drag on the zoomed track scrolls the list at its scale. thimble keeps the choice, the values turned off and the colours per view (the bridge's `colour` message),
+// The strip is a list's scrollbar as one strip at every length, as Files' reader draws it: the whole list in a lane for
+// the first choice, each pixel row in the colour most of its records take, grey where they take no value, a lane beside
+// it for each of Color by's choices past the first, and a thumb framing the part in view; a list whose colours the
+// strip cannot know whole, or whose records take none, is a plain scrollbar. Resting on the strip opens the loupe
+// beside it, a line per record around the pointer; a click on the strip goes there and a drag scrubs (the strip's
+// section below). thimble keeps the choice, the values turned off and the colours per view (the bridge's `colour` message),
 // with the time ranges viewer_range.js keeps, and hands them back as window.__thimbleColour when the page loads.
 //
 // Reset, at the row's end, shows while the view is not as it opens: a value turned off, a time range zoomed in, a search
@@ -106,30 +103,6 @@
     for (out = [], i = 0; i < PALETTE; i++) out.push(i)
     return out
   })(window.__thimbleLabelOrder)
-  var TRACK_W = 12 // px: the overview track, its lane as wide as it, as the frame is
-  var ZOOM_W = 18 // px: the zoomed track, its lane as wide as it, so that the lens's margin is the same on every side
-  var LANE_X = 0
-  var LINK = 14 // px between the overview and the zoomed track, which the lines from the frame to the lens cross
-  var LENS_OUT = 3 // px the lens stands out past the part it shows at every side: its edge and a margin of the paper
-  var LENS_R = 4 // px, the lens's corners: the lines from the frame meet its left edge where their curves end
-  // the zoomed track shows only where the overview cannot tell a list's rows apart: once the list is this many times
-  // the part in view, and goes again below ZOOM_OFF, so that a list near the line does not flip
-  var ZOOM_AT = 12
-  var ZOOM_OFF = 10
-  var ZOOM_SPAN = 5 // the zoomed track holds this many heights of the part in view
-  var FADE = 0.3 // the zoomed track's colours beyond the part in view, as a share of their strength
-  var MIN_MARK = 2 // px, a mark's least height on a track
-  var LANE_GAP = 1 // px between the overview's lanes, one for the Color by choice and one for each choice past the first
-  var LANES_MAX = 24 // px the lanes take together at most, past one lane of TRACK_W
-  var LANE_MIN = 3 // px, the narrowest a lane gets
-  var SNAP_PX = 4 // px either side of a click on the overview within which it snaps to a thin patch of colour
-  var THIN_PX = 8 // px a patch of colour may be tall at most to be thin: a click in a taller one goes where it is clicked
-  var THUMB_MIN = 8 // px, the least height of the box around the part in view
-  var DRAG_PX = 3 // px the pointer moves before a press on a track becomes a drag
-  var GLIDE_MS = 160 // ms the tracks take to go from where a drag left them to the list's place
-  var SETTLE_MS = 60 // ms the tracks stay still before every edge on them goes onto the device's pixel grid
-  var JUMP_PX = 12 // px the frame moves at once, with nothing held, past which the tracks glide to the list's new place
-  var PEEK = 6 // records the hover preview lists
   var MAX_KEPT = 200 // values whose colour is kept per field
   var DEF_FOR = 60000 // ms what a label's values mean is kept before it is asked for again
   var ICON = {
@@ -532,7 +505,7 @@
       var any = false
       for (var i = 0; i < records.length; i++) {
         var t = records[i].target
-        if (t && t.nodeType === 1 && t.closest && t.closest('.thimble-colour-mount,.thimble-colour-menu,.thimble-colour-strip,.thimble-range,.thimble-tip,.thimble-colour-peek,.thimble-part')) continue
+        if (t && t.nodeType === 1 && t.closest && t.closest('.thimble-colour-mount,.thimble-colour-menu,.thimble-colour-strip,.thimble-range,.thimble-tip,.thimble-colour-loupe,.thimble-part')) continue
         any = true
         // a strip of a list of elements measures them again only when a change is inside its list
         for (var j = 0; j < self.strips.length; j++) {
@@ -1597,28 +1570,145 @@
       .catch(function () {})
   }
 
-  // ---------------------------------------------------------------- the tracks: a list's colored scrollbar
-  // A list's scrollbar as a music or video editor's navigator, in one or two tracks beside the list (the list's own
-  // scrollbar is hidden in their favour), drawn as Files' Transcript mode draws its tracks. The overview track is the
-  // whole list in one lane: each pixel row in the colour of a value that is on which most of the records there take,
-  // grey where they take no value (as the no-value chip is), never two colours side by side; each of Color by's
-  // choices past the first has a lane of its own beside it, in its own colours, named on hover, the lanes narrower as more come; a dark
-  // frame shows the part in view. The colours show only where the strip knows the whole list (Color by's own strip,
-  // `rows`, or `whole: true`) and some record takes one; otherwise the strip is a plain track, a scrollbar with no
-  // colours, no lanes and no zoomed track. A list ZOOM_AT times the height of its box adds the zoomed track at the
-  // outer edge, which magnifies the frame: the part around the view at a finer scale, its colours faded beyond the part
-  // in view, which lies under a lens (a raised box of the paper, framed), and two lines join the frame's top and bottom
-  // to the lens's. The zoomed track's span follows the view, the lens as far down it as the frame is down the overview,
-  // so that the two move together. Hovering the overview shows the records there in a preview, without scrolling; a
-  // click on it goes there, a click within SNAP_PX of a thin patch of a colour to the patch's first record, which it
-  // highlights for a moment, and a drag of the frame, or from where the press was, scrubs. A drag on the zoomed track
-  // scrolls the list at its scale, as a scrollbar's thumb: the lens follows the pointer over records that hold still, a
-  // press off the lens brings it there first, and let go it glides back to where the frame puts it. A wheel over them
-  // scrolls the list. The tracks move in the browser's animation frames with transforms alone, and go onto the device's
-  // pixel grid once still. `rows`, for a list that draws only the rows in view, gives every row's value in order, which
-  // the lanes draw in place of the rows on the page (`refs`, each row's record, which the labels' lanes read), and
-  // `preview(i)` what the preview says of row i; for a list of elements `preview(el)` may say it instead of each
-  // record's own time and first line.
+  // ---------------------------------------------------------------- the strip: a list's colored scrollbar
+  // A list's scrollbar as one strip beside the list at every length (the list's own scrollbar is hidden in its favour),
+  // as Files' reader and the Report draw theirs (frontend/src/files/Tracks.tsx and Loupe.tsx): the scrollbar's track
+  // drawn as the whole list, a lane for Color by's first choice, each pixel row in the colour of a value that is on which
+  // most of the records there take, grey where they take no value (as the no-value chip is), never two colours side by
+  // side; a lane beside it in its own colours for each choice past the first, named on hover; over the lanes a thumb that
+  // frames the part in view. The colours show only where the strip knows the whole list (Color by's own strip, `rows`,
+  // or `whole: true`) and some record takes one; otherwise the strip is a plain scrollbar with no lane. A drag of the
+  // thumb scrubs the list; a click elsewhere on the strip sends the thumb there, its middle under the pointer, and a
+  // click within SNAP_PX of a thin patch of a colour goes to the patch's first record and highlights it for a moment; the
+  // wheel over the strip scrolls the list. The strip moves in the browser's animation frames with transforms alone, and
+  // goes onto the device's pixel grid once still.
+  //
+  // Where the strip draws a record shorter than TELL_APART_PX, resting on it LOUPE_REST_MS opens the loupe beside it: a
+  // short list, a line per record around the pointer, each its line or key, a cell per lane of the strip in the
+  // record's colour, and the start of its text; the record under the pointer darker, those in view tinted, and a bracket
+  // beside the strip over the stretch it shows. It follows the pointer along the strip, and the records around the thumb
+  // only after a real scroll (the wheel over the strip or the loupe, a drag of the thumb): the list's place changing
+  // never moves it, so it never tells a scroll from scroll positions. Once the pointer is in it, it holds still: a click
+  // goes to the record there and leaves the rows where they are, and the wheel scrolls the list, its rows following. On
+  // a touch screen a press on the strip opens it, a drag scrubs and the release goes there. A strip that tells every
+  // record apart names the record under the pointer on rest instead, on one line.
+  //
+  // What the loupe says of a record comes from what the page gives the strip: for a list given its rows, `preview(i)`
+  // (a string, or `{when, text}`), else the row's element where the page draws it; for a list of elements,
+  // `preview(el)`, else the element's `<time>` (or data-time) and its text. Its first column is the line its ref names
+  // (`refs`, or its data-anchor: `#L12` is 12), else the key after the ref's `#` or its last `/`, else the row's place.
+  var PLAIN_W = 10 // px: the strip with no lane, a plain scrollbar
+  var LANE_W = 7 // px: a lane of the strip, 2 px from the next, 3 px in from the strip's edges (Files' TRACK_LANES)
+  var LANE_GAP = 2
+  var LANE_INSET = 3
+  var EDGE = 2 // px the strip stands in from the list's box
+  var MIN_MARK = 2 // px, a mark's least height on the strip
+  var SNAP_PX = 4 // px either side of a click on the strip within which it snaps to a thin patch of colour
+  var THIN_PX = 8 // px a patch of colour may be tall at most to be thin: a click in a taller one goes where it is clicked
+  var THUMB_MIN = 14 // px, the thumb's least height over lanes, and on a plain scrollbar
+  var PLAIN_THUMB_MIN = 32
+  var DRAG_PX = 3 // px the pointer moves before a press on the strip becomes a drag
+  var GLIDE_MS = 160 // ms the thumb takes to go from where a drag left it to the list's place
+  var SETTLE_MS = 60 // ms the thumb stays still before its edges go onto the device's pixel grid
+  var JUMP_PX = 12 // px the thumb moves at once, with nothing held, past which it glides to the list's new place
+  var LOUPE_REST_MS = 250 // ms the pointer is on the strip before the loupe opens
+  var NAME_MS = 120 // ms it is on a strip that tells every record apart before the record under it is named
+  var LOUPE_ROWS = 17 // the loupe's rows at most, LOUPE_ROW_PX each, LOUPE_PAD_PX of its paper above and below them
+  var LOUPE_ROW_PX = 16
+  var LOUPE_PAD_PX = 4
+  var LOUPE_OFF_PX = 8 // px between the loupe and the strip, which the pointer crosses into it
+  var TELL_APART_PX = 3 // px a record takes on the strip below which the strip cannot tell the records apart
+  var LOUPE_MIN_W = 200 // px, the loupe's width at the least and at the most
+  var LOUPE_MAX_W = 360
+  var LOUPE_INSET = 4 // px the loupe stays inside the strip's height
+  var BRACKET_PX = 4 // px, the bracket's width beside the strip
+  var TEXT_CHARS = 200 // the characters of a record's text the loupe writes; its row cuts the rest with an ellipsis
+  var KEY_CHARS = 12 // the characters of a record's line or key its first column holds at most
+
+  // the strip's width for `n` lanes, px: the lanes, or a plain scrollbar
+  function stripWidth(n) {
+    return n ? n * LANE_W + (n - 1) * LANE_GAP + 2 * LANE_INSET : PLAIN_W
+  }
+  // the `n` lanes' left edges and widths in device pixels at `dpr`, each a whole number of pixels from the last
+  function laneBoxes(n, dpr) {
+    var w = Math.max(1, Math.round(LANE_W * dpr))
+    var pitch = Math.max(w + 1, Math.round((LANE_W + LANE_GAP) * dpr))
+    var x0 = Math.round(LANE_INSET * dpr)
+    var out = []
+    for (var i = 0; i < n; i++) out.push([x0 + i * pitch, w])
+    return out
+  }
+  // the lane under a point `x` css px from the strip's left edge, of `n`
+  function laneAt(x, n) {
+    return Math.max(0, Math.min(n - 1, Math.floor((x - LANE_INSET + LANE_GAP / 2) / (LANE_W + LANE_GAP))))
+  }
+  function grey() {
+    return kit.realColour('rgba(var(--ink-rgb), 0.34)')
+  }
+  // a record's text on one line: its spaces as one, cut to TEXT_CHARS with an ellipsis
+  function oneLine(text) {
+    var t = String(text == null ? '' : text).replace(/\s+/g, ' ').trim()
+    return t.length > TEXT_CHARS ? t.slice(0, TEXT_CHARS - 1) + '\u2026' : t
+  }
+  // a record's first column in the loupe: the line its ref names, else the key after its `#` or its last `/`, else the
+  // row's place (`at`, from 0), else nothing
+  function refKey(ref, at) {
+    if (ref != null && ref !== '') {
+      var s = String(ref)
+      var m = /#L(\d+)/.exec(s)
+      if (m) return num(m[1])
+      var h = s.lastIndexOf('#')
+      if (h >= 0 && h < s.length - 1) return s.slice(h + 1)
+      var sl = s.replace(/\/+$/, '').lastIndexOf('/')
+      return sl >= 0 ? s.slice(sl + 1) : s
+    }
+    return typeof at === 'number' ? num(at + 1) : ''
+  }
+  // the first record a loupe of `n` rows shows around the unit `c`: its record in the middle row, kept within `total`
+  function loupeStart(c, total, n) {
+    return Math.max(0, Math.min(Math.max(0, total - n), Math.floor(c) - Math.floor(n / 2)))
+  }
+  function loupeHeight(n) {
+    return n * LOUPE_ROW_PX + 2 * LOUPE_PAD_PX + 2
+  }
+  // the bracket on a strip `h` px tall over `top` to `bottom` px: at least 4 px tall, centred on the stretch, on the strip
+  function bracketOf(top, bottom, h) {
+    var height = Math.max(4, bottom - top)
+    return { top: Math.max(0, Math.min(h - height, (top + bottom) / 2 - height / 2)), height: height }
+  }
+  function wheelPx(e, page) {
+    return e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * page : e.deltaY
+  }
+  // a row of the loupe: its line or key, its cells, its text
+  function loupeRowEl(k) {
+    var el = document.createElement('div')
+    el.className = 'thimble-colour-loupe-row'
+    el.setAttribute('data-k', String(k))
+    var parts = ['n', 'c', 't']
+    for (var i = 0; i < parts.length; i++) {
+      var s = document.createElement('span')
+      s.className = 'thimble-colour-loupe-' + parts[i]
+      el.appendChild(s)
+    }
+    return el
+  }
+  function writeLoupeRow(el, row) {
+    var n = el.children[0]
+    var c = el.children[1]
+    var t = el.children[2]
+    n.textContent = row.num
+    while (c.children.length < row.cells.length) c.appendChild(document.createElement('i'))
+    while (c.children.length > row.cells.length) c.lastChild.remove()
+    for (var j = 0; j < row.cells.length; j++) c.children[j].style.background = row.cells[j] || ''
+    t.textContent = ''
+    if (row.who) {
+      var b = document.createElement('b')
+      b.textContent = row.who
+      t.appendChild(b)
+    }
+    t.appendChild(document.createTextNode(row.text))
+  }
+
   function Strip(control, target, opts) {
     var self = this
     this.c = control
@@ -1626,17 +1716,16 @@
     this.box = this.page ? document.scrollingElement || document.documentElement : target
     this.set(opts)
     this.recs = [] // each record: [top, bottom] as fractions of the list's height, its colour or null, its element or row
-    this.lanes = [] // a lane for each of Color by's choices past the first: {key, id, field, name, label, recs}
+    this.lanes = [] // a lane for each of Color by's choices past the first: {key, id, field, name, label, recs, by}
     this.dataVer = 0 // bumps when the page gives other rows, refs or says otherwise of the list
-    this.measured = 0 // how many times the records were measured, which the overview's canvas is drawn for
+    this.measured = 0 // how many times the records were measured, which the canvas is drawn for
     this.sigDone = null // what the records were last measured for (sig)
     this.touched = true // a change of the page inside the list since its elements were measured
     this.stale = true
-    this.zoomed = false
-    // what a drag holds, in px of the tracks: the frame's top on the overview, the top of the part in view on the
-    // zoomed track; the px the pointer moved on the zoomed track since the list last scrolled for it; from where the
-    // tracks glide back to the list's place once a hold ends
-    this.hold = { frame: null, lens: null, pull: 0, seek: false, glide: null }
+    this.plain = !(this.rows || this.complete)
+    // what a drag holds: the thumb's top in px of the strip, whether the list is yet to go there, and from where the
+    // thumb glides back to the list's place once a hold ends
+    this.hold = { frame: null, seek: false, glide: null }
     this.drawn = null // the geometry last drawn, and whether on the pixel grid
     this.snapped = false
     this.movedAt = 0
@@ -1645,21 +1734,33 @@
     this.el.className = 'thimble-colour-strip'
     this.el.setAttribute('data-thimble-chrome', '')
     this.el.setAttribute('aria-hidden', 'true')
-    this.whole = this.track('whole', TRACK_W)
-    this.zoom = this.track('zoom', ZOOM_W)
-    // the lines from the overview's frame to the zoomed track's lens, and the wedge between them
-    this.link = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-    this.link.setAttribute('class', 'thimble-colour-link')
-    this.link.setAttribute('width', String(LINK))
-    this.link.innerHTML = '<polygon/><line data-edge="top"/><line data-edge="bottom"/>'
-    this.link.style.left = TRACK_W + 'px'
-    this.el.appendChild(this.link)
-    this.peekEl = document.createElement('div')
-    this.peekEl.className = 'thimble-colour-peek'
-    this.peekEl.setAttribute('data-thimble-chrome', '')
-    this.peekEl.setAttribute('aria-hidden', 'true')
+    this.track = document.createElement('div')
+    this.track.className = 'thimble-colour-track thimble-colour-whole'
+    this.canvas = document.createElement('canvas')
+    this.thumb = document.createElement('div')
+    this.thumb.className = 'thimble-colour-thumb'
+    this.track.appendChild(this.canvas)
+    this.track.appendChild(this.thumb)
+    this.el.appendChild(this.track)
+    // beside the strip, on the loupe's side, the bracket over the stretch the loupe shows
+    this.bracket = document.createElement('div')
+    this.bracket.className = 'thimble-colour-bracket'
+    this.bracket.style.left = -(BRACKET_PX + 1) + 'px'
+    this.bracket.style.width = BRACKET_PX + 'px'
+    this.el.appendChild(this.bracket)
+    this.loupeEl = document.createElement('div')
+    this.loupeEl.className = 'thimble-colour-loupe'
+    this.loupeEl.setAttribute('data-thimble-chrome', '')
+    this.loupeEl.setAttribute('aria-hidden', 'true')
+    this.loupeBox = document.createElement('div')
+    this.loupeBox.className = 'thimble-colour-loupe-box'
+    this.loupeEl.appendChild(this.loupeBox)
+    // the loupe: open, naming one record (`one`), the pointer in it (`frozen`), what it follows (`anchor`: 'pointer',
+    // 'view' or 'fixed'), the unit under the pointer and the first record shown, the row under the pointer in it, and
+    // what is written in each row, so that a draw writes only what changed
+    this.lp = { open: false, one: false, frozen: false, anchor: 'pointer', c: 0, start: 0, n: 0, timer: 0, lastY: null, hover: null, g: null, sigs: [], cls: [], kw: null, place: '', bracket: '' }
     document.body.appendChild(this.el)
-    document.body.appendChild(this.peekEl)
+    document.body.appendChild(this.loupeEl)
     var pad = this.page ? document.body : this.box
     this.padded = pad
     this.padWas = pad.style.paddingRight
@@ -1667,7 +1768,7 @@
     this.width = -1
     this.fitWidth()
     this.box.classList.add('thimble-colour-scrolled')
-    // the list's scroll moves the tracks in the next animation frame, with transforms
+    // the list's scroll moves the thumb in the next animation frame, with transforms
     this.onScroll = function () {
       self.kick()
     }
@@ -1695,14 +1796,39 @@
     this.el.addEventListener('pointercancel', function (e) {
       self.up(e)
     })
-    this.el.addEventListener('pointerleave', function () {
-      if (!self.drag) self.leave()
+    this.el.addEventListener('pointerenter', function (e) {
+      self.lpEnter(e)
     })
+    this.el.addEventListener('pointerleave', function (e) {
+      if (!self.drag) self.lpLeave(e)
+    })
+    // the wheel over the strip, a real scroll: an open loupe follows the scroll position
     this.el.addEventListener(
       'wheel',
       function (e) {
         e.preventDefault()
-        self.box.scrollTop += e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * self.box.clientHeight : e.deltaY
+        self.lpWheel()
+        self.box.scrollTop += wheelPx(e, self.box.clientHeight)
+      },
+      { passive: false },
+    )
+    this.loupeEl.addEventListener('pointermove', function (e) {
+      self.lpOver(e)
+    })
+    this.loupeEl.addEventListener('pointerleave', function (e) {
+      self.lpOut(e)
+    })
+    this.loupeEl.addEventListener('click', function (e) {
+      self.lpClick(e)
+    })
+    // the wheel over the loupe scrolls the list, and its rows follow the scroll position while it keeps its place
+    this.loupeEl.addEventListener(
+      'wheel',
+      function (e) {
+        e.preventDefault()
+        e.stopPropagation()
+        self.lpWheel()
+        self.box.scrollTop += wheelPx(e, self.box.clientHeight)
       },
       { passive: false },
     )
@@ -1715,28 +1841,8 @@
     this.rows = opts && Array.isArray(opts.rows) ? opts.rows : null
     this.refs = opts && Array.isArray(opts.refs) ? opts.refs : null
     this.preview = opts && typeof opts.preview === 'function' ? opts.preview : null
-    // each row's record, which the tracks of Color by's fields past the first read
+    // each row's record, which the lanes of Color by's fields past the first read
     this.records = opts && Array.isArray(opts.records) ? opts.records : null
-  }
-  // a track `w` px wide: its canvas over its box, and over them the frame around the part in view; the zoomed track's
-  // lens (its paper, under the canvas, and its edge, the frame over it)
-  Strip.prototype.track = function (name, w) {
-    var t = document.createElement('div')
-    t.className = 'thimble-colour-track thimble-colour-' + name
-    t.style.width = w + 'px'
-    var lens = null
-    if (name === 'zoom') {
-      lens = document.createElement('div')
-      lens.className = 'thimble-colour-lens'
-      t.appendChild(lens)
-    }
-    var cv = document.createElement('canvas')
-    var thumb = document.createElement('div')
-    thumb.className = 'thimble-colour-thumb'
-    t.appendChild(cv)
-    t.appendChild(thumb)
-    this.el.appendChild(t)
-    return { el: t, canvas: cv, thumb: thumb, lens: lens, name: name, w: w }
   }
   Strip.prototype.remove = function () {
     if (this.raf != null) {
@@ -1744,52 +1850,44 @@
       else clearTimeout(this.raf)
     }
     this.raf = null
+    this.lpClose()
+    clearTimeout(this.chosenTimer)
     ;(this.page ? window : this.box).removeEventListener('scroll', this.onScroll)
     window.removeEventListener('resize', this.onResize)
     if (this.ro) this.ro.disconnect()
     this.box.classList.remove('thimble-colour-scrolled')
     this.padded.style.paddingRight = this.padWas
     this.el.remove()
-    this.peekEl.remove()
+    this.loupeEl.remove()
   }
-  // the tracks' width, and the room the list leaves them
-  // the overview at the left, the zoomed track at the outer edge
+  // the strip's width, a lane per choice of Color by or a plain scrollbar, and the room the list leaves it; each lane
+  // named on hover, when there are several
   Strip.prototype.fitWidth = function () {
-    var n = (this.lanes ? this.lanes.length : 0) + 1
-    var ow = lanesWidth(n)
-    var w = this.zoomed ? ow + LINK + ZOOM_W : ow
-    // each lane named on hover, when there are several
+    var n = this.plain ? 0 : 1 + (this.lanes ? this.lanes.length : 0)
+    var w = stripWidth(n)
     var names = n > 1 ? [this.choiceName()].concat(this.lanes.map(function (l) { return l.name })) : []
     var key = names.join('\u0000')
     if (key !== this.laneKey) {
       this.laneKey = key
-      var old = this.whole.el.querySelectorAll('.thimble-colour-lane')
+      var old = this.track.querySelectorAll('.thimble-colour-lane')
       for (var i = 0; i < old.length; i++) old[i].remove()
-      var lw = laneWidth(n)
       for (var j = 0; j < names.length; j++) {
         var sp = document.createElement('span')
         sp.className = 'thimble-colour-lane'
-        sp.style.left = j * (lw + LANE_GAP) + 'px'
-        sp.style.width = lw + 'px'
+        sp.style.left = LANE_INSET + j * (LANE_W + LANE_GAP) + 'px'
+        sp.style.width = LANE_W + 'px'
         if (names[j]) sp.title = names[j]
-        this.whole.el.insertBefore(sp, this.whole.thumb)
+        this.track.insertBefore(sp, this.thumb)
       }
     }
-    if (w === this.width && ow === this.overW) return false
+    if (w === this.width) return false
     var padded = this.width !== -1
     this.width = w
-    this.overW = ow
     this.el.style.width = w + 'px'
-    this.whole.w = ow
-    this.whole.el.style.width = ow + 'px'
-    this.link.style.left = ow + 'px'
-    this.zoom.el.style.display = this.zoomed ? '' : 'none'
-    this.link.style.display = this.zoomed ? '' : 'none'
-    this.zoom.el.style.left = ow + LINK + 'px'
-    this.padded.style.paddingRight = this.padBase + w + 2 + LENS_OUT + 'px'
+    this.padded.style.paddingRight = this.padBase + w + 2 * EDGE + 'px'
     return padded
   }
-  // what the overview's first lane shows, which its hover names
+  // what the first lane shows, which its hover names
   Strip.prototype.choiceName = function () {
     var ch = this.c.choice()
     return ch && !ch.off ? ch.title || '' : ''
@@ -1805,7 +1903,7 @@
     return [c ? c.key : '', ex.map(function (x) { return x.key }).join('\u0001'), this.c.offSet(c).join('\u0001'), JSON.stringify(fs.map(function (n) { return [S.colours[n] || null, S.picked[n] || null] })), labelsVer, this.dataVer].join('\u0000')
   }
   // the control counted the page again: the records are measured again only when what they depend on changed, or, for
-  // a list of elements, when the page changed inside it; otherwise the tracks are only placed again
+  // a list of elements, when the page changed inside it; otherwise the strip is only placed again
   Strip.prototype.refreshed = function () {
     var dom = this.touched && !this.rows
     this.touched = false
@@ -1823,14 +1921,8 @@
     this.frame = typeof requestAnimationFrame === 'function' ? requestAnimationFrame(go) : setTimeout(go, 16)
   }
   Strip.prototype.dirty = function () {
-    var self = this
     this.stale = true
-    if (this.frame != null) return
-    var go = function () {
-      self.frame = null
-      self.draw()
-    }
-    this.frame = typeof requestAnimationFrame === 'function' ? requestAnimationFrame(go) : setTimeout(go, 16)
+    this.relayout()
   }
   // the box the list shows, in the frame's viewport
   Strip.prototype.rect = function () {
@@ -1838,22 +1930,11 @@
     var r = this.box.getBoundingClientRect()
     return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, height: r.height }
   }
-  function grey() {
-    return kit.realColour('rgba(var(--ink-rgb), 0.34)')
-  }
-  // the width of each of `n` lanes of the overview: one lane TRACK_W wide; more share LANES_MAX, each narrower as more
-  // come, down to LANE_MIN
-  function laneWidth(n) {
-    return n <= 1 ? TRACK_W : Math.max(LANE_MIN, Math.min(TRACK_W, Math.floor((LANES_MAX - (n - 1) * LANE_GAP) / n)))
-  }
-  function lanesWidth(n) {
-    return n * laneWidth(n) + (n - 1) * LANE_GAP
-  }
   // every record of the list: [top, bottom] as fractions of the list's height, its colour (the marks' grey for a record
   // that takes no value or a value turned off, as for every record with Color by Off), its element or its row
   Strip.prototype.measure = function (peeking) {
     this.measured++
-    // a list the strip cannot know whole is a plain track, whose records are read only when the preview asks for them
+    // a list the strip cannot know whole is a plain scrollbar, whose records are read only when the loupe asks for them
     if (!this.rows && !this.complete && !peeking) {
       this.recs = null
       this.grey = grey()
@@ -1907,20 +1988,21 @@
     this.recs = recs
     this.grey = g
     // the strip shows colours only where it reflects the whole list, the page giving every row's value (`rows`) or
-    // drawing every record (`whole`), and only where some record takes a colour: otherwise a plain track, a scrollbar
-    // with no colours, no lanes and no zoomed track, never grey tracks whose scale is wrong
+    // drawing every record (`whole`), and only where some record takes a colour: otherwise a plain scrollbar with no
+    // colours and no lanes, never grey lanes whose scale is wrong
     var complete = !!this.rows || !!this.complete
     var coloured = false
     for (var ci = 0; ci < recs.length && !coloured; ci++) coloured = !!recs[ci][2] && recs[ci][2] !== g
     // a lane for each of Color by's choices past the first: a label's records in its own colours, those it does not mark
-    // left out; a field's in its values' colours (the page's data-colour-tracks, or `records` for a list given rows)
+    // left out; a field's in its values' colours (the page's data-colour-tracks, or `records` for a list given rows).
+    // `by` gives each record's colour in the lane, which the loupe's cells read
     var lanes = []
     var extra = complete && !plain ? c.extra() : []
     for (var li = 0; li < extra.length; li++) {
       var x = extra[li]
       var xl = x.label ? labelById(x.label) : null
       if (x.label && !xl) continue
-      lanes.push({ key: x.key, id: x.label ? String(x.label) : null, field: x.field || null, at: li, name: x.title, label: xl, recs: [] })
+      lanes.push({ key: x.key, id: x.label ? String(x.label) : null, field: x.field || null, at: li, name: x.title, label: xl, recs: [], by: new Map() })
     }
     if (lanes.length) {
       var self = this
@@ -1961,7 +2043,9 @@
         var refs = this.refs || []
         for (var ri = 0; ri < nr; ri++) for (var la = 0; la < lanes.length; la++) {
           var cr = colourIn(lanes[la], refs[ri], ri)
-          if (cr) lanes[la].recs.push([ri / nr, (ri + 1) / nr, cr, ri])
+          if (!cr) continue
+          lanes[la].recs.push([ri / nr, (ri + 1) / nr, cr, ri])
+          lanes[la].by.set(ri, cr)
         }
       } else {
         var box2 = this.box
@@ -1983,6 +2067,7 @@
             if (!ar.height) break
             var ay = ar.top - top2
             lanes[lb].recs.push([ay / H2, (ay + ar.height) / H2, ca, ae])
+            lanes[lb].by.set(ae, ca)
           }
         }
         for (var lc = 0; lc < lanes.length; lc++)
@@ -1999,7 +2084,7 @@
       this.el.setAttribute('data-plain', '')
     } else this.el.removeAttribute('data-plain')
     this.lanes = lanes
-    // lanes that change the tracks' width change the room the list leaves them, and the records' places with it
+    // lanes that change the strip's width change the room the list leaves it, and the records' places with it
     if (this.fitWidth()) {
       this.stale = true
       this.dirty()
@@ -2011,137 +2096,79 @@
     var H = Math.max(1, box.scrollHeight)
     return [box.scrollTop / H, Math.min(1, (box.scrollTop + box.clientHeight) / H)]
   }
-  // the span the zoomed track shows: ZOOM_SPAN heights of the part in view, the part as far down the span as it is down
-  // the list (as a scrollbar's thumb stands), so that the lens moves down the zoomed track as the frame moves down the
-  // overview
-  Strip.prototype.zoomSpan = function () {
-    var v = this.view()
-    var vh = v[1] - v[0]
-    var s = Math.min(1, ZOOM_SPAN * vh)
-    var f = vh < 1 ? Math.max(0, Math.min(1, v[0] / (1 - vh))) : 0
-    var z0 = Math.max(0, Math.min(1 - s, v[0] - f * (s - vh)))
-    return [z0, z0 + s]
-  }
   Strip.prototype.draw = function () {
     var r = this.rect()
     var box = this.box
     var scrolls = box.scrollHeight > box.clientHeight + 1
     this.el.style.display = scrolls ? '' : 'none'
     if (!scrolls) {
-      this.leave()
+      this.lpClose()
       return
     }
-    // measured before the tracks are placed, since the lanes the labels need set their width
+    // measured before the strip is placed, since the lanes the choices need set its width
     if (this.stale) {
       this.stale = false
       this.measure()
     }
-    // a plain track has no zoomed track; a coloured one has it only where the list is long
-    var ratio = box.scrollHeight / Math.max(1, box.clientHeight)
-    var zoomed = !this.plain && (this.zoomed ? ratio >= ZOOM_OFF : ratio >= ZOOM_AT)
-    if (zoomed !== this.zoomed) {
-      this.zoomed = zoomed
-      this.fitWidth()
-    }
-    // the tracks on the device's pixel grid, so that every edge on them is drawn sharp
+    // the strip on the device's pixel grid, so that every edge on it is drawn sharp
     var dpr = window.devicePixelRatio || 1
     var snap = function (v) {
       return Math.round(v * dpr) / dpr
     }
-    var top = snap(Math.max(r.top, 0) + 2)
-    var h = Math.max(0, snap(Math.min(r.bottom, innerHeight) - 2) - top)
-    // the lens stands out past the zoomed track, which stands in from the list's edge by as much
-    this.el.style.left = snap(r.right - this.width - 2 - (this.zoomed ? LENS_OUT : 0)) + 'px'
+    var top = snap(Math.max(r.top, 0) + EDGE)
+    var h = Math.max(0, snap(Math.min(r.bottom, innerHeight) - EDGE) - top)
+    this.el.style.left = snap(r.right - this.width - EDGE) + 'px'
     this.el.style.top = top + 'px'
     this.el.style.height = h + 'px'
     this.h = h
-    // the overview drawn again only for records measured again or a track of another size
-    var painted = [h, dpr, this.overW, this.measured].join()
+    // the canvas drawn again only for records measured again or a strip of another size
+    var painted = [h, dpr, this.width, this.measured].join()
     if (painted !== this.painted) {
       this.painted = painted
-      this.paint(this.whole, [0, 1], null)
+      this.paint()
     }
     this.drawn = null
     this.place(typeof performance !== 'undefined' ? performance.now() : Date.now())
     this.kick()
+    if (this.lp.open) this.lpDraw(this.lpMeasure())
   }
-  // a track's canvas: the records within `span` (fractions of the list), each pixel row in the one colour most of it
-  // takes (the records' share of the row), grey where its records take no value, faded outside `bright`, where the
-  // lane's ground gives way to the lens's paper
-  Strip.prototype.paint = function (t, span, bright) {
+  // the strip's canvas: a lane for the Color by choice, then one for each choice past the first, each on its stripe, in
+  // whole device pixels; each keeps its rows' colours, for a click to snap to. A plain scrollbar draws none
+  Strip.prototype.paint = function () {
     var h = this.h || 0
     var dpr = window.devicePixelRatio || 1
-    var cv = t.canvas
-    var W = Math.ceil(t.w * dpr)
+    var cv = this.canvas
+    var W = Math.ceil(this.width * dpr)
     var Hp = Math.ceil(h * dpr)
     if (cv.width !== W) cv.width = W
     if (cv.height !== Hp) cv.height = Hp
-    cv.style.width = t.w + 'px'
+    cv.style.width = this.width + 'px'
     cv.style.height = h + 'px'
+    this.rowColours = null
+    this.laneRows = []
     var ctx = cv.getContext && cv.getContext('2d')
     if (!ctx) return
     ctx.clearRect(0, 0, cv.width, cv.height)
-    if (t !== this.whole) {
-      this.fill(ctx, this.recs || [], span, bright, Math.round(LANE_X * dpr), Math.max(1, Math.round((t.w - 2 * LANE_X) * dpr)))
-      return
-    }
-    // the overview: a lane for the Color by choice, then one for each choice past the first; each keeps its rows'
-    // colours, for a click to snap to
-    var lw = laneWidth(this.lanes.length + 1)
-    var x0 = function (i) {
-      return Math.round(i * (lw + LANE_GAP) * dpr)
-    }
-    var wOf = function (i) {
-      return Math.max(1, Math.round((i * (lw + LANE_GAP) + lw) * dpr) - x0(i))
-    }
-    this.rowColours = this.fill(ctx, this.plain || !this.recs ? [] : this.recs, span, null, x0(0), wOf(0))
-    this.laneRows = []
-    for (var i = 0; i < this.lanes.length; i++) this.laneRows.push(this.fill(ctx, this.lanes[i].recs, span, null, x0(i + 1), wOf(i + 1)))
+    if (this.plain || !this.recs) return
+    var boxes = laneBoxes(1 + this.lanes.length, dpr)
+    ctx.fillStyle = kit.realColour('rgba(var(--ink-rgb), 0.035)')
+    for (var b = 0; b < boxes.length; b++) ctx.fillRect(boxes[b][0], 0, boxes[b][1], Hp)
+    this.rowColours = this.fill(ctx, this.recs, boxes[0][0], boxes[0][1])
+    for (var i = 0; i < this.lanes.length; i++) this.laneRows.push(this.fill(ctx, this.lanes[i].recs, boxes[i + 1][0], boxes[i + 1][1]))
   }
-  // one lane of a track's canvas, `x` to `x + w` device px: the records `recs` within `span` (fractions of the list),
-  // each pixel row in the one colour most of it takes (the records' share of the row), grey where its records take no
-  // value, faded outside `bright`, where the lane's ground gives way to the lens's paper; each row's colour
-  Strip.prototype.fill = function (ctx, recs, span, bright, x, w) {
+  // one lane of the canvas, `x` to `x + w` device px: each pixel row in the one colour most of its records take (the
+  // records' share of the row), grey where its records take no value; each row's colour
+  Strip.prototype.fill = function (ctx, recs, x, w) {
     var h = this.h || 0
     var dpr = window.devicePixelRatio || 1
     var Hp = Math.ceil(h * dpr)
-    var s0 = span[0]
-    var sw = Math.max(1e-9, span[1] - span[0])
-    // the part in view, in device rows
-    var b0 = bright ? ((bright[0] - s0) / sw) * h * dpr : -Infinity
-    var b1 = bright ? ((bright[1] - s0) / sw) * h * dpr : Infinity
-    var lit = function (row) {
-      return row + 0.5 >= b0 && row + 0.5 <= b1
-    }
-    // the lens's margin of the paper around the part in view, where nothing is drawn
-    var m = LENS_OUT * dpr
-    var blank = function (row) {
-      return !!bright && row + 0.5 >= b0 - m && row + 0.5 <= b1 + m && !lit(row)
-    }
-    ctx.globalAlpha = 1
-    ctx.fillStyle = kit.realColour('rgba(var(--ink-rgb), 0.035)')
-    if (bright) {
-      var l0 = Math.max(0, Math.min(Hp, Math.round(b0 - m)))
-      var l1 = Math.max(l0, Math.min(Hp, Math.round(b1 + m)))
-      ctx.fillRect(x, 0, w, l0)
-      ctx.fillRect(x, l1, w, Hp - l1)
-    } else ctx.fillRect(x, 0, w, Hp)
-    // the first record that reaches into the span
-    var lo = 0
-    var hi = recs.length
-    while (lo < hi) {
-      var mid = (lo + hi) >> 1
-      if (recs[mid][1] < s0) lo = mid + 1
-      else hi = mid
-    }
     // per device row, each colour's share of it
     var rows = new Array(Hp)
-    for (var i = lo; i < recs.length; i++) {
+    for (var i = 0; i < recs.length; i++) {
       var rc = recs[i]
-      if (rc[0] > span[1]) break
       if (!rc[2]) continue
-      var y0 = ((rc[0] - s0) / sw) * h
-      var y1 = ((rc[1] - s0) / sw) * h
+      var y0 = rc[0] * h
+      var y1 = rc[1] * h
       if (y1 - y0 < MIN_MARK) {
         y0 = Math.max(0, Math.min(h - MIN_MARK, (y0 + y1 - MIN_MARK) / 2))
         y1 = y0 + MIN_MARK
@@ -2158,60 +2185,49 @@
     // the colour most of the row's records take; the grey of the records with no value only where none of them takes
     // one, so that records with no value never hide a value's
     var g = this.grey
-    var colourAt = function (r) {
-      var got = rows[r]
-      if (!got) return null
+    var kept = new Array(Hp)
+    for (var kr = 0; kr < Hp; kr++) {
+      var at = rows[kr]
       var best = null
       var most = 0
-      for (var c in got) {
-        if (c !== g && got[c] > most) {
-          most = got[c]
-          best = c
+      if (at) {
+        for (var c in at) {
+          if (c !== g && at[c] > most) {
+            most = at[c]
+            best = c
+          }
         }
+        if (!best && at[g]) best = g
       }
-      return best || (got[g] ? g : null)
+      kept[kr] = best
     }
-    var kept = new Array(Hp)
-    for (var kr = 0; kr < Hp; kr++) kept[kr] = colourAt(kr)
     var y = 0
+    ctx.globalAlpha = 1
     while (y < Hp) {
-      var c0 = blank(y) ? null : kept[y]
-      var on = lit(y)
+      var c0 = kept[y]
       var end = y + 1
-      while (end < Hp && (blank(end) ? null : kept[end]) === c0 && lit(end) === on) end++
+      while (end < Hp && kept[end] === c0) end++
       if (c0) {
-        ctx.globalAlpha = on ? 1 : FADE
         ctx.fillStyle = c0
         ctx.fillRect(x, y, w, end - y)
       }
       y = end
     }
-    ctx.globalAlpha = 1
     return kept
   }
-  // where the tracks stand, in px of them: the frame's top and height on the overview and how far through the list that
-  // is (as a scrollbar's thumb), and on the zoomed track its scale (`k`, px per share of the list), the share of the
-  // list at its top (`z0`) and the part in view (`vTop`, `vH`). A held frame puts the part in view as far down the
-  // zoomed track as the frame stands down the overview; a held lens keeps the part in view where it is held, and the
-  // list moves under it; otherwise the part in view stands as zoomSpan puts it
+  // where the thumb stands, in px of the strip: its top and height and how far through the list that is (as a
+  // scrollbar's thumb), where a drag holds it or the list's place puts it
   Strip.prototype.geom = function (v) {
     var h = this.h || 0
     v = v || this.view()
     var vh = Math.max(0, v[1] - v[0])
-    var frameH = Math.min(h, Math.max(THUMB_MIN, vh * h))
+    var frameH = Math.min(h, Math.max(this.plain ? PLAIN_THUMB_MIN : THUMB_MIN, vh * h))
     var room = Math.max(0, h - frameH)
     var hold = this.hold
     var f = hold.frame != null ? (room > 0 ? Math.max(0, Math.min(1, hold.frame / room)) : 0) : vh < 1 ? Math.max(0, Math.min(1, v[0] / (1 - vh))) : 0
-    var s = Math.max(1e-9, Math.min(1, ZOOM_SPAN * vh))
-    var k = h / s
-    var vH = vh * k
-    var vTop
-    if (hold.lens != null) vTop = Math.max(0, Math.min(Math.max(0, h - vH), hold.lens))
-    else if (hold.frame != null) vTop = f * Math.max(0, h - vH)
-    else vTop = (v[0] - Math.max(0, Math.min(1 - s, v[0] - f * (s - vh)))) * k
-    return { v: v, f: f, frameTop: f * room, frameH: frameH, k: k, s: s, z0: v[0] - vTop / k, vTop: vTop, vH: vH }
+    return { v: v, f: f, frameTop: f * room, frameH: frameH }
   }
-  // the next animation frame moves the tracks, and the next after it while they move
+  // the next animation frame moves the thumb, and the next after it while it moves
   Strip.prototype.kick = function () {
     var self = this
     if (this.raf != null) return
@@ -2221,16 +2237,15 @@
     }
     this.raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame(go) : setTimeout(function () { go(Date.now()) }, 16)
   }
-  // one frame of the tracks: the list scrolled for what a drag asks, then the frame around the part in view on the
-  // overview, the zoomed track drawn for where it now looks with its lens over the part in view, and the lines from the
-  // frame to the lens, with transforms alone. While they move they stand where they are computed; once still, every
-  // edge goes onto the device's pixel grid. Whether they still move.
+  // one frame of the strip: the list scrolled for what a drag asks, then the thumb over the part in view, with
+  // transforms alone, and an open loupe drawn again. While the thumb moves it stands where it is computed; once still,
+  // its edges go onto the device's pixel grid. Whether it still moves.
   Strip.prototype.place = function (now) {
     var h = this.h || 0
     if (!h || this.el.style.display === 'none') return false
     var box = this.box
     var hold = this.hold
-    // the list's height and its box's read once a frame, its scroll once a step
+    // the list's height and its box's read once a frame
     var H = Math.max(1, box.scrollHeight)
     var ch = box.clientHeight
     var free = Math.max(0, H - ch)
@@ -2238,127 +2253,73 @@
       var t = box.scrollTop
       return [t / H, Math.min(1, (t + ch) / H)]
     }
-    // a held frame: the list goes to the place it frames
+    // a held thumb: the list goes to the place it frames
     if (hold.seek && hold.frame != null) {
       hold.seek = false
       var g0 = this.geom(viewAt())
       box.scrollTop = Math.max(0, Math.min(free, g0.f * free))
     }
-    // a drag on the zoomed track: the list scrolls by what the pointer moved there, at its scale, and the part in view
-    // moves on the track by as much as the list went
-    if (hold.pull && hold.lens != null) {
-      var g1 = this.geom(viewAt())
-      var was = box.scrollTop
-      box.scrollTop = Math.max(0, Math.min(free, was + (hold.pull / g1.k) * H))
-      hold.lens += ((box.scrollTop - was) / H) * g1.k
-      hold.pull = 0
-    }
     var g = this.geom(viewAt())
-    if (hold.lens != null) hold.lens = g.vTop
     // a jump of the list (a click, a record gone to) with nothing held, past twice the part in view at once where a
-    // scroll goes by frames: the tracks glide there
+    // scroll goes by frames: the thumb glides there
     var d0 = this.drawn
     var jumped = this.lastV0 != null && Math.abs(g.v[0] - this.lastV0) > 2 * (g.v[1] - g.v[0])
     this.lastV0 = g.v[0]
-    if (jumped && !hold.glide && hold.frame == null && hold.lens == null && d0 && Math.abs(d0.frameTop - g.frameTop) > JUMP_PX) hold.glide = { at: now, frameTop: d0.frameTop, vTop: d0.vTop }
+    if (jumped && !hold.glide && hold.frame == null && d0 && Math.abs(d0.frameTop - g.frameTop) > JUMP_PX) hold.glide = { at: now, frameTop: d0.frameTop }
     var shown = g
     if (hold.glide) {
       var e = Math.min(1, (now - hold.glide.at) / GLIDE_MS)
       e = 1 - Math.pow(1 - e, 3)
       if (e >= 1) hold.glide = null
-      else {
-        var vTop = g.vTop + (hold.glide.vTop - g.vTop) * (1 - e)
-        shown = { v: g.v, f: g.f, frameTop: g.frameTop + (hold.glide.frameTop - g.frameTop) * (1 - e), frameH: g.frameH, k: g.k, s: g.s, z0: g.v[0] - vTop / g.k, vTop: vTop, vH: g.vH }
-      }
+      else shown = { v: g.v, f: g.f, frameTop: g.frameTop + (hold.glide.frameTop - g.frameTop) * (1 - e), frameH: g.frameH }
     }
     var d = this.drawn
-    var moved = !d || Math.abs(d.frameTop - shown.frameTop) > 1e-3 || Math.abs(d.frameH - shown.frameH) > 1e-3 || Math.abs(d.vTop - shown.vTop) > 1e-3 || Math.abs(d.vH - shown.vH) > 1e-3 || Math.abs((d.z0 - shown.z0) * shown.k) > 1e-3
+    var moved = !d || Math.abs(d.frameTop - shown.frameTop) > 1e-3 || Math.abs(d.frameH - shown.frameH) > 1e-3
     if (moved) this.movedAt = now
-    var still = !moved && !hold.glide && hold.frame == null && hold.lens == null && now - this.movedAt >= SETTLE_MS
+    var still = !moved && !hold.glide && hold.frame == null && now - this.movedAt >= SETTLE_MS
     if (moved || (still && !this.snapped)) this.write(shown, still)
     this.drawn = shown
     this.snapped = still
+    // an open loupe follows the list, and the thumb as it glides; its anchor stays as it is
+    if (this.lp.open) this.lpDraw()
     return !still
   }
-  // the tracks written for a geometry, on the device's pixel grid when `grid`
+  // the thumb written for a geometry, on the device's pixel grid when `grid`, only where it changed
   Strip.prototype.write = function (g, grid) {
-    var h = this.h || 0
     var dpr = window.devicePixelRatio || 1
     var q = function (v) {
       return grid ? Math.round(v * dpr) / dpr : v
     }
-    // each part written only where it changed, its height and its place
-    var put = function (el, at) {
-      var was = el.__thimbleAt
-      if (was && was[0] === at[0] && was[1] === at[1]) return
-      el.__thimbleAt = [at[0], at[1]]
-      el.style.display = at[1] > at[0] ? '' : 'none'
-      if (!was || was[1] - was[0] !== at[1] - at[0]) el.style.height = Math.max(0, at[1] - at[0]) + 'px'
-      el.style.transform = 'translateY(' + at[0] + 'px)'
-    }
-    var f0 = q(g.frameTop)
-    this.thumbAt = [f0, q(g.frameTop + g.frameH)]
-    put(this.whole.thumb, this.thumbAt)
-    if (!this.zoomed) return
-    var span = [g.z0, g.z0 + g.s]
-    this.zspan = span
-    var v0 = q(g.vTop)
-    var shown = [v0, Math.max(v0 + 4, q(g.vTop + g.vH))]
-    // the lens LENS_OUT outside the part in view, so that its edge and its margin of the paper cover none of it
-    var lens = [shown[0] - LENS_OUT, shown[1] + LENS_OUT]
-    put(this.zoom.lens, lens)
-    put(this.zoom.thumb, lens)
-    this.lensAt = lens
-    // the part in view as the zoomed track paints it: where the lens stands over it
-    this.paint(this.zoom, span, [span[0] + (shown[0] / h) * g.s, span[0] + (shown[1] / h) * g.s])
-    // each line from a corner of the frame to the lens's left edge where its corner's curve ends; at a pixel ratio where a
-    // 1px line is an odd number of device pixels wide, its ends move half a device pixel into the frame's and the lens's
-    // edges, so that it lies on whole device pixels there. The wedge reaches the edges themselves.
-    var x1 = LINK - LENS_OUT
-    var o = Math.round(dpr) % 2 === 1 ? 0.5 / dpr : 0
-    var r = Math.min(LENS_R, (lens[1] - lens[0]) / 2)
-    var f = this.thumbAt
-    var edges = this.link.querySelectorAll('line')
-    var set = function (el, a, b) {
-      el.setAttribute('x1', String(-o))
-      el.setAttribute('y1', String(a))
-      el.setAttribute('x2', String(x1 + o))
-      el.setAttribute('y2', String(b))
-    }
-    set(edges[0], f[0] + o, lens[0] + r)
-    set(edges[1], f[1] - o, lens[1] - r)
-    this.link.querySelector('polygon').setAttribute('points', '0,' + f[0] + ' ' + x1 + ',' + (lens[0] + r) + ' ' + x1 + ',' + (lens[1] - r) + ' 0,' + f[1])
-    this.link.style.height = h + 'px'
+    var at = [q(g.frameTop), q(g.frameTop + g.frameH)]
+    var el = this.thumb
+    var was = el.__thimbleAt
+    if (was && was[0] === at[0] && was[1] === at[1]) return
+    el.__thimbleAt = at
+    el.style.display = at[1] > at[0] ? '' : 'none'
+    if (!was || was[1] - was[0] !== at[1] - at[0]) el.style.height = Math.max(0, at[1] - at[0]) + 'px'
+    el.style.transform = 'translateY(' + at[0] + 'px)'
   }
-  // a hold ends: the tracks glide from where they stand to the list's place
+  // a hold ends: the thumb glides from where it stands to the list's place
   Strip.prototype.release = function () {
     var now = typeof performance !== 'undefined' ? performance.now() : Date.now()
-    if (this.drawn) this.hold.glide = { at: now, frameTop: this.drawn.frameTop, vTop: this.drawn.vTop }
+    if (this.drawn) this.hold.glide = { at: now, frameTop: this.drawn.frameTop }
     this.hold.frame = null
-    this.hold.lens = null
-    this.hold.pull = 0
     this.hold.seek = false
     this.kick()
   }
-  // the track under the pointer and the place there, as a fraction of the list
+  // the place under the pointer: px down the strip and across it, and the fraction of the list there
   Strip.prototype.at = function (e) {
-    var zr = this.zoomed ? this.zoom.el.getBoundingClientRect() : null
-    var onZoom = !!(zr && e.clientX >= zr.left - LINK / 2)
-    var t = onZoom ? this.zoom : this.whole
-    var r = t.el.getBoundingClientRect()
-    var y = Math.max(0, Math.min(this.h || 0, e.clientY - r.top))
-    var h = this.h || 1
-    var span = onZoom ? this.zspan || [0, 1] : [0, 1]
-    return { track: t, y: y, x: e.clientX - r.left, at: span[0] + (y / h) * (span[1] - span[0]), span: span }
+    var r = this.track.getBoundingClientRect()
+    var h = this.h || 0
+    var y = Math.max(0, Math.min(h, e.clientY - r.top))
+    return { y: y, x: e.clientX - r.left, at: y / Math.max(1, h) }
   }
-  // the record a click on the overview snaps to: of the runs of rows in one colour (not the grey of no value) at most
-  // THIN_PX tall that come within SNAP_PX of the click, the nearest, the upper on a tie; its first record of that
+  // the record a click snaps to: of the runs of rows in one colour (not the grey of no value) at most THIN_PX tall that
+  // come within SNAP_PX of the click, in the lane clicked, the nearest, the upper on a tie; its first record of that
   // colour from where the run starts. Null when none does: a click in a taller patch, or far from any, goes where it is
   Strip.prototype.snapAt = function (p) {
-    if (p.track !== this.whole) return null
-    // the lane clicked: the choice's, or another label's
-    var lw = laneWidth(this.lanes.length + 1)
-    var lane = Math.max(0, Math.min(this.lanes.length, Math.floor((p.x + LANE_GAP / 2) / (lw + LANE_GAP))))
+    if (this.plain) return null
+    var lane = laneAt(p.x, this.lanes.length + 1)
     var rows = lane ? this.laneRows && this.laneRows[lane - 1] : this.rowColours
     var recs = (lane ? this.lanes[lane - 1].recs : this.recs) || []
     if (!rows || !rows.length) return null
@@ -2394,20 +2355,27 @@
     }
     return null
   }
-  // a record a click snapped to: scrolled to, and an element of the page shown as chosen for a moment
+  // a record gone to (a click that snapped, a click in the loupe, a touch let go): scrolled to, and its element shown as
+  // chosen for a moment; a row of a list given its rows once the page has drawn it
   Strip.prototype.choose = function (t) {
     this.go(t)
-    var el = typeof t[3] === 'number' ? null : t[3]
-    if (!el || !el.setAttribute) return
-    el.setAttribute('data-thimble-snap', '')
-    clearTimeout(this.chosenTimer)
-    if (this.chosen && this.chosen !== el) this.chosen.removeAttribute('data-thimble-snap')
-    this.chosen = el
     var self = this
-    this.chosenTimer = setTimeout(function () {
-      el.removeAttribute('data-thimble-snap')
-      if (self.chosen === el) self.chosen = null
-    }, 1600)
+    var mark = function (el) {
+      if (!el || !el.setAttribute) return
+      el.setAttribute('data-thimble-snap', '')
+      clearTimeout(self.chosenTimer)
+      if (self.chosen && self.chosen !== el) self.chosen.removeAttribute('data-thimble-snap')
+      self.chosen = el
+      self.chosenTimer = setTimeout(function () {
+        el.removeAttribute('data-thimble-snap')
+        if (self.chosen === el) self.chosen = null
+      }, 1600)
+    }
+    if (typeof t[3] !== 'number') return mark(t[3])
+    var i = t[3]
+    setTimeout(function () {
+      mark(self.rowEl(i))
+    }, 60)
   }
   Strip.prototype.go = function (t) {
     var box = this.box
@@ -2418,31 +2386,28 @@
       box.scrollTop += r.top - top0 - box.clientHeight / 3
     }
   }
-  // a press on a track: on the overview, on the frame a drag of it moves the list, off it a click sends the frame there
-  // (or to a mark's record) and a drag from there scrubs, once the pointer has moved DRAG_PX; on the zoomed track a
-  // drag scrolls the list at its scale, as a scrollbar's thumb, and a press off the lens brings the lens's middle there
-  // first
+  // a press on the strip: on the thumb a drag of it moves the list and the loupe opens at it; off it a click sends the
+  // thumb there (or to a patch's record) and a drag from there scrubs, once the pointer has moved DRAG_PX. A touch off
+  // the thumb scrubs with the loupe, where the strip has one
   Strip.prototype.down = function (e) {
     if (e.button !== 0) return
     e.preventDefault()
     var p = this.at(e)
-    var whole = p.track === this.whole
     var g = this.drawn || this.geom()
-    var onThumb = whole && p.y >= g.frameTop - 1 && p.y <= g.frameTop + g.frameH + 1
-    this.drag = { track: p.track, dy: onThumb ? p.y - g.frameTop : g.frameH / 2, y0: e.clientY, last: p.y, moved: false, onThumb: onThumb }
-    if (!whole) {
-      this.hold.glide = null
-      this.hold.lens = g.vTop
-      if (p.y < g.vTop - LENS_OUT || p.y > g.vTop + g.vH + LENS_OUT) this.hold.pull += p.y - (g.vTop + g.vH / 2)
-      this.el.setAttribute('data-drag', 'zoom')
-      this.kick()
-    }
-    this.unpeek()
+    var onThumb = p.y >= g.frameTop - 1 && p.y <= g.frameTop + g.frameH + 1
     try {
       if (this.el.setPointerCapture) this.el.setPointerCapture(e.pointerId)
     } catch (err) {}
+    if (e.pointerType === 'touch' && !onThumb && this.lpKind() === 'list') {
+      this.drag = { touch: true }
+      this.lpOpenAt(e.clientY)
+      return
+    }
+    if (onThumb) this.lpThumb()
+    else if (this.lp.one) this.lpClose()
+    this.drag = { dy: onThumb ? p.y - g.frameTop : g.frameH / 2, y0: e.clientY, moved: false, onThumb: onThumb }
   }
-  // the frame held with its top at `top` px of the overview, and the list sent there in the next frame
+  // the thumb held with its top at `top` px of the strip, and the list sent there in the next frame
   Strip.prototype.holdFrame = function (top) {
     var g = this.drawn || this.geom()
     this.hold.glide = null
@@ -2452,28 +2417,30 @@
   }
   Strip.prototype.move = function (e) {
     var d = this.drag
-    if (!d) return this.hovered(e)
+    if (!d) return this.lpMove(e)
+    if (d.touch) return this.lpTouchMove(e)
     if (!d.moved && Math.abs(e.clientY - d.y0) < DRAG_PX) return
-    var r = d.track.el.getBoundingClientRect()
-    var y = e.clientY - r.top
     if (!d.moved) {
       d.moved = true
-      if (d.track === this.whole) this.el.setAttribute('data-drag', 'frame')
+      this.el.setAttribute('data-drag', 'frame')
+      // a drag of the thumb is a real scroll: the loupe follows the scroll position
+      if (!d.onThumb) this.lpThumb()
     }
-    if (d.track === this.whole) this.holdFrame(y - d.dy)
-    else {
-      this.hold.pull += y - d.last
-      d.last = y
-      this.kick()
-    }
+    this.holdFrame(e.clientY - this.track.getBoundingClientRect().top - d.dy)
   }
   Strip.prototype.up = function (e) {
     var d = this.drag
     this.drag = null
     this.el.removeAttribute('data-drag')
     if (!d) return
-    if (d.track === this.whole && !d.moved) {
-      // a click: near a patch of colour, the first record of the patch; elsewhere off the frame, the frame's middle
+    if (d.touch) {
+      // let go, the list goes to the record under the loupe's line
+      var u = this.lpTouchEnd()
+      if (u != null && this.recs && this.recs[u]) this.choose(this.recs[u])
+      return
+    }
+    if (!d.moved) {
+      // a click: near a patch of colour, the first record of the patch; elsewhere off the thumb, the thumb's middle
       // comes under the pointer
       var p = this.at(e)
       var t = this.snapAt(p)
@@ -2487,66 +2454,394 @@
     }
     if (this.hold.seek) this.place(typeof performance !== 'undefined' ? performance.now() : Date.now())
     this.release()
+    if (e.pointerType === 'touch') this.lpClose()
   }
-  // hovering a track: the preview lists the records there, without scrolling
-  Strip.prototype.hovered = function (e) {
-    this.peek(this.at(e), e)
-  }
-  Strip.prototype.leave = function () {
-    this.unpeek()
-  }
-  // what the preview says of a record: its time and its first line
-  Strip.prototype.peekOf = function (rec) {
-    var t = rec[3]
-    var got = null
-    if (this.preview) got = safe(function () { return this.preview(t) }.bind(this), null)
-    if (got != null && typeof got !== 'object') got = { text: String(got) }
-    if (got) return { when: got.when || got.time || '', text: got.text || '' }
-    if (typeof t === 'number') return { when: '', text: 'Row ' + num(t + 1) }
-    var time = t.querySelector && t.querySelector('time')
-    var when = (t.getAttribute('data-time') || (time ? time.textContent : '') || '').trim()
-    var text = t.getAttribute('data-preview') || t.getAttribute('data-anchor-text') || t.textContent || ''
-    text = text.replace(/\s+/g, ' ').trim()
-    if (when && text.indexOf(when) === 0) text = text.slice(when.length).trim()
-    return { when: when, text: text.slice(0, 160) }
-  }
-  Strip.prototype.peek = function (p, e) {
+
+  // ---- the loupe beside the strip (frontend/src/files/Loupe.tsx), its units records from 0: record i is the unit i
+  // to i + 1, fractions of them between
+  // how the loupe opens: 'list' where the strip draws a record shorter than TELL_APART_PX, 'one' (the record under the
+  // pointer named on one line) where it tells every record apart, '' with no record. A plain scrollbar's records are
+  // read now
+  Strip.prototype.lpKind = function () {
     if (!this.recs) this.measure(true)
-    var v = this.view()
-    var half = Math.max((v[1] - v[0]) / 2, 0.5 / Math.max(1, this.recs.length))
-    var at = p.at
-    var near = []
-    for (var i = 0; i < this.recs.length; i++) {
-      var r = this.recs[i]
-      if (r[1] < at - half) continue
-      if (r[0] > at + half) break
-      near.push(r)
-    }
-    near.sort(function (a, b) {
-      return Math.abs((a[0] + a[1]) / 2 - at) - Math.abs((b[0] + b[1]) / 2 - at)
-    })
-    near = near.slice(0, PEEK).sort(function (a, b) {
-      return a[0] - b[0]
-    })
-    var self = this
-    var html = near
-      .map(function (r) {
-        var w = self.peekOf(r)
-        return '<div class="thimble-peek-row"' + (r[2] ? ' style="--c:' + esc(r[2]) + '"' : '') + '>' + (w.when ? '<time>' + esc(w.when) + '</time>' : '') + '<span class="thimble-peek-t">' + esc(w.text) + '</span></div>'
-      })
-      .join('')
-    if (!html) return this.unpeek()
-    var pe = this.peekEl
-    pe.innerHTML = html
-    pe.style.display = 'block'
-    var sr = this.el.getBoundingClientRect()
-    var w = pe.offsetWidth
-    var ph = pe.offsetHeight
-    pe.style.left = Math.max(6, sr.left - w - 6) + 'px'
-    pe.style.top = Math.max(6, Math.min(innerHeight - ph - 6, e.clientY - ph / 2)) + 'px'
+    var n = this.recs ? this.recs.length : 0
+    var h = this.h || 0
+    if (!n || h <= 0) return ''
+    return h / n < TELL_APART_PX ? 'list' : 'one'
   }
-  Strip.prototype.unpeek = function () {
-    this.peekEl.style.display = 'none'
+  // the unit at `y` px down the strip, and a unit's place on the strip
+  Strip.prototype.unitAt = function (y) {
+    var recs = this.recs || []
+    var n = recs.length
+    if (!n) return 0
+    var f = y / Math.max(1, this.h || 0)
+    var lo = 0
+    var hi = n
+    while (lo < hi) {
+      var mid = (lo + hi) >> 1
+      if (recs[mid][1] <= f) lo = mid + 1
+      else hi = mid
+    }
+    if (lo >= n) return n - 1e-6
+    var r = recs[lo]
+    if (f <= r[0]) return lo
+    return lo + Math.min(0.999999, (f - r[0]) / Math.max(1e-12, r[1] - r[0]))
+  }
+  Strip.prototype.pxOf = function (u) {
+    var recs = this.recs || []
+    var n = recs.length
+    var h = this.h || 0
+    if (!n) return 0
+    if (u >= n) return recs[n - 1][1] * h
+    var i = Math.max(0, Math.floor(u))
+    var r = recs[i]
+    return (r[0] + (Math.max(0, u) - i) * (r[1] - r[0])) * h
+  }
+  // whether the records the strip read reach `y` px down it: always for a list it knows whole; for another, which may
+  // draw only some of its records (a list that draws the rows in view), only within a few px of those it draws, so that
+  // the loupe never names a record far from the pointer
+  Strip.prototype.lpNear = function (y) {
+    if (this.rows || this.complete) return true
+    var recs = this.recs || []
+    var h = Math.max(1, this.h || 0)
+    if (!recs.length) return false
+    return y / h >= recs[0][0] - 8 / h && y / h <= recs[recs.length - 1][1] + 8 / h
+  }
+  // the units in view
+  Strip.prototype.viewUnits = function () {
+    var v = this.view()
+    var h = this.h || 0
+    return [this.unitAt(v[0] * h), this.unitAt(v[1] * h)]
+  }
+  // the unit the thumb stands for as drawn, which the loupe shows around after a real scroll: where a drag holds it or a
+  // glide has got to, the list's place otherwise
+  Strip.prototype.thumbUnit = function () {
+    var h = this.h || 0
+    var v = this.view()
+    var vh = Math.max(0, v[1] - v[0])
+    var d = this.drawn
+    var f = vh < 1 ? Math.max(0, Math.min(1, v[0] / (1 - vh))) : 0
+    if (d) {
+      var room = h - d.frameH
+      f = room > 0 ? Math.max(0, Math.min(1, d.frameTop / room)) : 0
+    }
+    return this.unitAt((f * Math.max(0, 1 - vh) + vh / 2) * h)
+  }
+  Strip.prototype.thumbMid = function () {
+    var d = this.drawn || this.geom()
+    return d.frameTop + d.frameH / 2
+  }
+  // the row of the page a list given its rows draws for row `i`, where it draws it
+  Strip.prototype.rowEl = function (i) {
+    var ref = this.refs ? this.refs[i] : null
+    if (ref == null) return null
+    return (this.page ? document : this.box).querySelector('[data-anchor="' + String(ref).replace(/["\\]/g, '\\$&') + '"]')
+  }
+  // what the loupe says of a record (a row, or an element): the page's preview, else the element's time and text
+  Strip.prototype.textOf = function (t) {
+    var self = this
+    var got = this.preview ? safe(function () { return self.preview(t) }, null) : null
+    if (got != null && typeof got !== 'object') got = { text: String(got) }
+    if (got) return { when: String(got.when || got.time || ''), text: String(got.text || '') }
+    var e = typeof t === 'number' ? this.rowEl(t) : t
+    if (!e || !e.getAttribute) return { when: '', text: '' }
+    var time = e.querySelector && e.querySelector('time')
+    var when = (e.getAttribute('data-time') || (time ? time.textContent : '') || '').trim()
+    var text = (e.getAttribute('data-preview') || e.getAttribute('data-anchor-text') || e.textContent || '').replace(/\s+/g, ' ').trim()
+    if (when && text.indexOf(when) === 0) text = text.slice(when.length).trim()
+    return { when: when, text: text }
+  }
+  // a record's ref: the row's in `refs`, or the element's data-anchor
+  Strip.prototype.refOf = function (t) {
+    if (typeof t === 'number') return this.refs ? this.refs[t] : null
+    return t && t.getAttribute ? t.getAttribute('data-anchor') : null
+  }
+  // record `i` as a row of the loupe: its line or key, a cell per lane of the strip in the record's colour (none for no
+  // value), when it was and the start of its text
+  Strip.prototype.lpRow = function (i) {
+    var rec = this.recs[i]
+    var t = rec[3]
+    var cells = []
+    if (!this.plain) {
+      cells.push(rec[2] && rec[2] !== this.grey ? rec[2] : null)
+      for (var l = 0; l < this.lanes.length; l++) cells.push(this.lanes[l].by.get(t) || null)
+    }
+    var w = this.textOf(t)
+    return { num: refKey(this.refOf(t), t), cells: cells, who: oneLine(w.when), text: oneLine(w.text) }
+  }
+  // the characters of the widest line or key of the list, KEY_CHARS at most, read once per measure
+  Strip.prototype.keyChars = function () {
+    var ver = this.measured + ':' + this.dataVer
+    if (this.kwVer === ver) return this.kw
+    var most = 1
+    var recs = this.recs || []
+    for (var i = 0; i < recs.length && most < KEY_CHARS; i++) most = Math.max(most, refKey(this.refOf(recs[i][3]), recs[i][3]).length)
+    this.kwVer = ver
+    this.kw = Math.min(KEY_CHARS, most)
+    return this.kw
+  }
+  // where the strip stands, read before anything is written
+  Strip.prototype.lpMeasure = function () {
+    var r = this.track.getBoundingClientRect()
+    var g = { left: r.left, top: r.top, lo: r.top + LOUPE_INSET, hi: r.bottom - LOUPE_INSET, h: this.h || r.height, room: r.left - LOUPE_OFF_PX - LOUPE_INSET }
+    this.lp.g = g
+    return g
+  }
+  // the loupe's middle at `y`, px in the viewport, beside the strip: as wide as the room there leaves it, LOUPE_MIN_W
+  // to LOUPE_MAX_W; a name as wide as its text, as far
+  Strip.prototype.lpPlace = function (y, g) {
+    var L = this.lp
+    if (!g) return
+    var w = Math.max(120, Math.min(g.room, Math.max(LOUPE_MIN_W, Math.min(LOUPE_MAX_W, g.room - 24))))
+    var H = loupeHeight(L.one ? 1 : L.n)
+    var right = Math.max(0, document.documentElement.clientWidth - g.left)
+    var top = Math.max(g.lo, Math.min(g.hi - H, y - H / 2))
+    var at = [right, top, w, L.one].join()
+    if (at === L.place) return
+    L.place = at
+    this.loupeEl.style.right = right + 'px'
+    this.loupeEl.style.top = top + 'px'
+    this.loupeBox.style.width = L.one ? '' : w + 'px'
+    this.loupeBox.style.maxWidth = w + 'px'
+  }
+  Strip.prototype.lpAim = function (unit) {
+    var L = this.lp
+    var total = this.recs ? this.recs.length : 0
+    L.c = Math.max(0, Math.min(total - 1e-6, unit))
+    L.start = loupeStart(L.c, total, L.one ? 1 : Math.min(LOUPE_ROWS, total))
+  }
+  // the loupe drawn: what it shows after its anchor, a row per record written only where it changed, the record under
+  // the pointer darker and those in view tinted, and the bracket beside the strip over the stretch it shows
+  Strip.prototype.lpDraw = function (g) {
+    var L = this.lp
+    if (!L.open) return
+    // a list that changed how the loupe opens (shorter, longer, gone) closes it
+    var kind = this.lpKind()
+    if (kind !== (L.one ? 'one' : 'list')) return this.lpClose()
+    g = g || L.g || this.lpMeasure()
+    var total = this.recs.length
+    var n = L.one ? 1 : Math.min(LOUPE_ROWS, total)
+    L.n = n
+    if (L.anchor === 'view') {
+      this.lpAim(this.thumbUnit())
+      if (!L.frozen) this.lpPlace(g.top + this.thumbMid(), g)
+    } else if (L.c >= total || L.start > total - n) this.lpAim(L.c)
+    var box = this.loupeBox
+    // a plain scrollbar draws no lane, so its rows have no cells
+    if (this.loupeEl.hasAttribute('data-bare') !== !!this.plain) {
+      if (this.plain) this.loupeEl.setAttribute('data-bare', '')
+      else this.loupeEl.removeAttribute('data-bare')
+    }
+    var kw = this.keyChars()
+    if (L.kw !== kw) {
+      L.kw = kw
+      box.style.setProperty('--thimble-loupe-key', String(kw))
+    }
+    while (box.children.length < n) box.appendChild(loupeRowEl(box.children.length))
+    while (box.children.length > n) box.lastChild.remove()
+    L.sigs.length = Math.min(L.sigs.length, n)
+    L.cls.length = Math.min(L.cls.length, n)
+    var vu = this.viewUnits()
+    var at = L.one ? -1 : L.frozen ? (L.hover == null ? -1 : L.start + L.hover) : L.anchor === 'pointer' ? Math.floor(L.c) : -1
+    for (var k = 0; k < n; k++) {
+      var i = L.start + k
+      var el = box.children[k]
+      if (i >= total) continue
+      var row = this.lpRow(i)
+      var sig = [row.num, row.cells.join(','), row.who, row.text].join('\u0000')
+      if (sig !== L.sigs[k]) {
+        writeLoupeRow(el, row)
+        L.sigs[k] = sig
+      }
+      var seen = !L.one && i + 1 > vu[0] && i < vu[1]
+      var cls = (seen ? 's' : '') + (i === at ? 'a' : '')
+      if (cls !== L.cls[k]) {
+        el.classList.toggle('seen', seen)
+        el.classList.toggle('at', i === at)
+        L.cls[k] = cls
+      }
+    }
+    var br = this.bracket
+    if (L.one) {
+      br.removeAttribute('data-open')
+      return
+    }
+    var b = bracketOf(this.pxOf(L.start), this.pxOf(Math.min(total, L.start + n)), g.h)
+    var pos = b.top + '|' + b.height
+    if (pos !== L.bracket) {
+      L.bracket = pos
+      br.style.transform = 'translateY(' + b.top + 'px)'
+      br.style.height = b.height + 'px'
+    }
+    if (!br.hasAttribute('data-open')) br.setAttribute('data-open', '')
+  }
+  Strip.prototype.lpFreeze = function (frozen) {
+    var L = this.lp
+    L.frozen = frozen
+    if (!frozen) L.hover = null
+    if (frozen) this.loupeEl.setAttribute('data-frozen', '')
+    else this.loupeEl.removeAttribute('data-frozen')
+  }
+  Strip.prototype.lpShow = function (anchor, one) {
+    var L = this.lp
+    L.open = true
+    L.one = one
+    L.anchor = anchor
+    L.place = ''
+    this.lpFreeze(false)
+    this.loupeEl.setAttribute('data-open', '')
+    if (one) this.loupeEl.setAttribute('data-one', '')
+    else this.loupeEl.removeAttribute('data-one')
+  }
+  // opened with the record under the pointer at `y` in its middle row
+  Strip.prototype.lpOpenAt = function (y) {
+    var kind = this.lpKind()
+    if (!kind) return
+    var g = this.lpMeasure()
+    if (!this.lpNear(y - g.top)) return
+    this.lpShow('pointer', kind === 'one')
+    this.lp.n = kind === 'one' ? 1 : Math.min(LOUPE_ROWS, this.recs.length)
+    this.lpAim(this.unitAt(y - g.top))
+    this.lpPlace(y, g)
+    this.lpDraw(g)
+  }
+  // opened at the thumb, following the scroll position
+  Strip.prototype.lpOpenAtView = function () {
+    if (this.lpKind() !== 'list') return
+    this.lpShow('view', false)
+    this.lp.n = Math.min(LOUPE_ROWS, this.recs.length)
+    this.lpDraw(this.lpMeasure())
+  }
+  Strip.prototype.lpClose = function () {
+    var L = this.lp
+    clearTimeout(L.timer)
+    L.timer = 0
+    L.open = false
+    L.frozen = false
+    L.hover = null
+    this.loupeEl.removeAttribute('data-open')
+    this.loupeEl.removeAttribute('data-frozen')
+    this.bracket.removeAttribute('data-open')
+  }
+  // the pointer on the strip a while, which opens the loupe (or names the record) where it then is
+  Strip.prototype.lpRest = function () {
+    var L = this.lp
+    var kind = this.lpKind()
+    clearTimeout(L.timer)
+    L.timer = 0
+    if (!kind) return
+    var self = this
+    L.timer = setTimeout(function () {
+      L.timer = 0
+      if (!self.drag && L.lastY != null) self.lpOpenAt(L.lastY)
+    }, kind === 'one' ? NAME_MS : LOUPE_REST_MS)
+  }
+  // the pointer onto the strip: back from the loupe, it follows the pointer again; else it opens on rest
+  Strip.prototype.lpEnter = function (e) {
+    if (e.pointerType === 'touch') return
+    var L = this.lp
+    L.lastY = e.clientY
+    if (L.open) {
+      if (L.one) return
+      this.lpFreeze(false)
+      L.anchor = 'pointer'
+      this.lpFollow(e.clientY)
+      return
+    }
+    this.lpRest()
+  }
+  // an open loupe at the record under the pointer at `y`; closed where the strip read no record near it
+  Strip.prototype.lpFollow = function (y) {
+    var g = this.lpMeasure()
+    if (!this.lpNear(y - g.top)) return this.lpClose()
+    this.lpAim(this.unitAt(y - g.top))
+    this.lpPlace(y, g)
+    this.lpDraw(g)
+  }
+  // the pointer along the strip: an open loupe follows it; a move that did not move (one a browser sends as the page
+  // scrolls under a still pointer) leaves the anchor
+  Strip.prototype.lpMove = function (e) {
+    if (e.pointerType === 'touch') return
+    var L = this.lp
+    if (e.clientY === L.lastY) return
+    L.lastY = e.clientY
+    if (!L.open) {
+      if (!L.timer) this.lpRest()
+      return
+    }
+    if (L.frozen) return
+    L.anchor = 'pointer'
+    this.lpFollow(e.clientY)
+  }
+  // the pointer off the strip: into the loupe, which then holds still; elsewhere the loupe closes
+  Strip.prototype.lpLeave = function (e) {
+    var L = this.lp
+    clearTimeout(L.timer)
+    L.timer = 0
+    L.lastY = null
+    if (L.open && !L.one && e && e.relatedTarget && this.loupeEl.contains(e.relatedTarget)) {
+      this.lpFreeze(true)
+      L.anchor = 'fixed'
+      this.lpDraw()
+      return
+    }
+    this.lpClose()
+  }
+  // a real scroll (the wheel over the strip or the loupe): an open loupe follows the scroll position
+  Strip.prototype.lpWheel = function () {
+    var L = this.lp
+    if (L.open && !L.one) L.anchor = 'view'
+  }
+  // a press on the thumb or a drag of it: the loupe opens at it and follows the scroll position; a name closes
+  Strip.prototype.lpThumb = function () {
+    var L = this.lp
+    clearTimeout(L.timer)
+    L.timer = 0
+    if (L.open && L.one) return this.lpClose()
+    if (L.open) {
+      L.anchor = 'view'
+      this.lpDraw(this.lpMeasure())
+    } else this.lpOpenAtView()
+  }
+  Strip.prototype.lpTouchMove = function (e) {
+    var L = this.lp
+    if (!L.open) return
+    L.anchor = 'pointer'
+    this.lpFollow(e.clientY)
+  }
+  Strip.prototype.lpTouchEnd = function () {
+    var L = this.lp
+    var u = L.open ? Math.floor(L.c) : null
+    this.lpClose()
+    return u
+  }
+  // the row of the loupe under the pointer
+  Strip.prototype.lpRowAt = function (e) {
+    var row = e.target && e.target.closest ? e.target.closest('.thimble-colour-loupe-row') : null
+    return row ? Number(row.getAttribute('data-k')) : null
+  }
+  // the pointer in the loupe: the row under it darker
+  Strip.prototype.lpOver = function (e) {
+    var L = this.lp
+    if (!L.frozen) return
+    var k = this.lpRowAt(e)
+    if (k === L.hover) return
+    L.hover = k
+    this.lpDraw()
+  }
+  Strip.prototype.lpOut = function (e) {
+    if (e.relatedTarget && this.el.contains(e.relatedTarget)) return
+    this.lpClose()
+  }
+  // a click in the loupe goes to the record there, and its rows stay where they are
+  Strip.prototype.lpClick = function (e) {
+    var L = this.lp
+    if (!L.open || !L.frozen) return
+    var k = this.lpRowAt(e)
+    if (k == null) return
+    L.anchor = 'fixed'
+    var rec = this.recs && this.recs[L.start + k]
+    if (rec) this.choose(rec)
   }
 
   Control.prototype.strip = function (target, opts) {
