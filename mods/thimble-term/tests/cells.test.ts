@@ -198,6 +198,14 @@ test("thimble.chart's density, ecdf, ridgeline and range draw from their rows: o
   expect([range.kind, range.columns, range.rows]).toEqual(['table', ['model', 'base', 'tuned'], [['m1', 0.4, 0.5]]])
 })
 
+test("a chart the code layered its own marks on shows thimble.chart's rows as its table, wherever the chart stands", () => {
+  const card = (spec: unknown) => cardOfCell({ id: 'k1', kind: 'plot', title: 'q', outputs: [{ 'application/vnd.vegalite.v6.json': spec }] } as ThimbleCell).card
+  const span = { data: { name: 'data-1' }, mark: { type: 'rect' }, encoding: { x: { field: 'a', type: 'temporal' }, x2: { field: 'b' } } }
+  const bars = { data: { name: 'thimble-chart-0a1b2c3d', values: [{ day: '2026-08-01', merged: 3 }, { day: '2026-08-02', merged: 9 }] }, mark: 'bar', encoding: { x: { field: 'day', type: 'temporal' }, y: { field: 'merged', type: 'quantitative' } } }
+  const drawn = card({ layer: [span, bars], datasets: { 'data-1': [{ a: '2026-08-01', b: '2026-08-02' }] } })
+  expect([drawn.kind, drawn.columns, drawn.rows]).toEqual(['table', ['day', 'merged'], [['2026-08-01', 3], ['2026-08-02', 9]]])
+})
+
 test('text cut short has no space before `…`; a question in a row is cut at a word; shares side by side read in whole percent', () => {
   expect(cut('removed in under an hour', 12)).toBe('removed in…')
   expect(clip('Two of the three card checks', 8)).toBe('Two of…')

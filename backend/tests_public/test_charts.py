@@ -628,9 +628,15 @@ def test_show_false_returns_an_altair_chart_to_layer_marks_on_and_shows_nothing(
     layered = (bars + ev.mark_rule(color=kt.theme.pale).encode(x="day:T")
                + ev.mark_text(color=kt.theme.accent).encode(x="day:T", text="note:N")).to_dict()
     assert [l["mark"]["color"] for l in layered["layer"][1:]] == ["var(--viz-ink-4)", "var(--viz-highlight)"]
-    # the chart's rows stay its table, which a takeaway cites
+    # the chart's rows stay its table, which a takeaway cites, by the same row labels
     table = cite.chart_table({kt.VEGALITE_MIME: layered})
     assert table.columns == ["merged", "day end"] and table.cells[1] == ["9", "2026-08-03T00:00:00"]
+    # and so wherever the chart stands among the layers: a shaded span drawn first, behind the bars, takes nothing from it
+    span = alt.Chart(pd.DataFrame({"a": ["2026-08-02"], "b": ["2026-08-03"]})).mark_rect(color=kt.theme.pale)
+    behind = cite.chart_table({kt.VEGALITE_MIME: (span.encode(x="a:T", x2="b:T") + bars + ev.mark_text().encode(x="day:T", text="note:N")).to_dict()})
+    assert (behind.columns, behind.labels, behind.cells) == (table.columns, table.labels, table.cells)
+    alone = cite.chart_table({kt.VEGALITE_MIME: (span.encode(x="a:T", x2="b:T") + ev.mark_text().encode(x="day:T", text="note:N")).to_dict()})
+    assert (alone.label, alone.columns) == ("a", ["b"]), "a chart of the code's own layers alone reads its first part's rows, as before"
     # every kind comes back as an Altair chart that draws what thimble.chart shows, its rows and all
     def inline(node, sets):
         if isinstance(node, dict):
@@ -647,6 +653,8 @@ def test_show_false_returns_an_altair_chart_to_layer_marks_on_and_shows_nothing(
                            ("line", EVAL2[["base", "tuned"]], {})]:
         got = kt.chart(kind, df, show=False, **opts).to_dict()
         assert got["$schema"].startswith("https://vega.github.io/schema/vega-lite/v6"), kind
+        # the chart's own rows stay inline under a name of their own (cite reads them by it), the rest as shown
+        assert got["data"].pop("name").startswith(kt.CHART_ROWS_NAME), kind
         shown = spec_of(kind, df, **opts)
         del shown["$schema"]
         assert inline(got, got.get("datasets", {})) == shown, kind

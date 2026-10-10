@@ -1286,9 +1286,12 @@ def _altair(spec: dict):
     """The chart as an Altair chart (a Chart, a LayerChart or a FacetChart) that draws as the spec does. Its rows go round
     Altair's from_dict, which would make an object of every row (seconds for a few thousand): each inline `values` is
     held out under a name while the rest is read, then put back. No $schema, which Altair writes when it shows the chart
-    and refuses in a layer."""
+    and refuses in a layer. The chart's own rows keep a name of CHART_ROWS_NAME's (Altair leaves named rows inline), by
+    which they stay the table a takeaway cites wherever the chart stands among the code's layers (cite._inline_rows)."""
     import altair as alt
 
+    own = spec["data"]["values"]
+    named = f"{CHART_ROWS_NAME}{zlib.crc32(json.dumps(own).encode()):08x}"
     held: list = []
 
     def out(node):
@@ -1307,7 +1310,8 @@ def _altair(spec: dict):
             for k, v in list(obj._kwds.items()):
                 name = v.name if isinstance(v, alt.NamedData) else None
                 if isinstance(name, str) and name.startswith(_HELD):
-                    setattr(obj, k, alt.InlineData(values=held[int(name[len(_HELD):])]))
+                    rows = held[int(name[len(_HELD):])]
+                    setattr(obj, k, alt.InlineData(values=rows, name=named) if rows is own else alt.InlineData(values=rows))
                 else:
                     back(v)
 
@@ -1317,6 +1321,7 @@ def _altair(spec: dict):
 
 
 _HELD = "__thimble_rows_"  # the name a chart's rows go by while Altair reads the rest of it (_altair)
+CHART_ROWS_NAME = "thimble-chart-"  # the start of the name of a returned chart's own rows, then a checksum of them
 
 
 def _chart_frame(kind: str, data, extra=()):
