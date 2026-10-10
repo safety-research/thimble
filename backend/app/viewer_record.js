@@ -13,7 +13,11 @@
 //                                                              find: words whose matches are highlighted and opened;
 //                                                              colour: Color by, whose bar the record takes
 //
-// Called again on the same mount with the same ref, it keeps what the analyst opened and folded.
+// Called again on the same mount with the same ref, it keeps what the analyst opened and folded. What a fold hides stays
+// in the page, hidden, in an element with data-thimble-fold, so thimble.search finds it and opens its fold with the
+// `thimble-unfold` event: a folded value's values, each on its own line, a long string's text past its first six lines
+// and a long list's items past its first 100. A record's folded values and items are kept in the page up to FOLD_CHARS
+// characters; the search does not find those past them until their fold is opened by hand.
 ;(function () {
   'use strict'
   var kit = window.__thimbleKit
@@ -28,6 +32,7 @@
   var LONG_LINES = 6 // a string longer than this many lines, or LONG_CHARS characters, folds to six lines
   var LONG_CHARS = 480
   var MANY = 100 // the items or fields of a value shown before Show N more
+  var FOLD_CHARS = 200000 // characters of folded values and items a record keeps in the page for the search
   var PREVIEW = 6 // fields or items a folded value names
   var CARET = '<svg class="thimble-record-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>'
 
@@ -94,6 +99,29 @@
   function isLong(s) {
     return s.length > LONG_CHARS || s.split('\n').length > LONG_LINES
   }
+  // A long string's first LONG_LINES lines, LONG_CHARS characters of them at most (after a space where one is near), and
+  // the rest; the cut falls before a match of `q` it would split, so the match is found whole
+  function cutLong(s, q) {
+    var c = s.length
+    var at = -1
+    for (var i = 0; i < LONG_LINES; i++) if ((at = s.indexOf('\n', at + 1)) < 0) break
+    if (at >= 0) c = at
+    if (c > LONG_CHARS) {
+      var sp = s.lastIndexOf(' ', LONG_CHARS)
+      c = sp > LONG_CHARS * 0.8 ? sp + 1 : LONG_CHARS
+      var code = s.charCodeAt(c - 1)
+      if (code >= 0xd800 && code < 0xdc00) c--
+    }
+    if (q) {
+      var low = s.toLowerCase()
+      for (var m = low.indexOf(q); m >= 0 && m < c; m = low.indexOf(q, m + 1))
+        if (m + q.length > c) {
+          c = m
+          break
+        }
+    }
+    return [s.slice(0, c), s.slice(c)]
+  }
   // how long a folded string is, in what folded it: its lines, or its characters when it is long on few lines
   function folded(s) {
     var n = s.split('\n').length
@@ -124,6 +152,10 @@
     this.hits = 0
     mount.addEventListener('click', function (e) {
       self.click(e)
+    })
+    // the search goes to a match folded away (viewer_search.js): what folds it opens
+    mount.addEventListener('thimble-unfold', function (e) {
+      self.unfold(e.target)
     })
   }
   // the matches of `find` in a text, highlighted, and counted
@@ -184,10 +216,13 @@
       if (v === '') return '<span class="thimble-record-val is-empty">""</span>'
       if (!isLong(v)) return '<span class="thimble-record-val is-str">' + this.marked(v) + '</span>'
       var hits = this.hits
-      var text = this.marked(v)
+      var parts = cutLong(v, this.q)
+      var text = this.marked(parts[0])
+      var rest = this.marked(parts[1])
       var open = this.longs[path] !== undefined ? this.longs[path] : this.hits > hits
       return (
-        '<span class="thimble-record-val is-str is-long"><span class="thimble-record-text' + (open ? '' : ' is-folded') + '">' + text + '</span>' +
+        '<span class="thimble-record-val is-str is-long"><span class="thimble-record-text' + (open ? '' : ' is-folded') + '">' + text +
+        '<span data-thimble-fold data-fold-long="' + esc(path) + '"' + (open ? '' : ' hidden') + '>' + rest + '</span></span>' +
         '<button type="button" class="btn btn-ghost btn-sm thimble-record-more" data-long="' + esc(path) + '" aria-expanded="' + open + '" data-thimble-chrome>' +
         (open ? 'Show less' : 'Show more<span class="thimble-record-dim">' + folded(v) + '</span>') +
         '</button></span>'
@@ -213,6 +248,7 @@
           '<div class="thimble-record-row is-branch' + (open ? ' is-open' : '') + '">' +
             '<button type="button" class="thimble-record-key" data-fold="' + esc(at) + '" aria-expanded="' + open + '" data-thimble-chrome>' + CARET + '<span>' + name + '</span></button>' +
             '<span class="thimble-record-sum" data-thimble-chrome>' + esc(open ? summary(x).replace(/:.*$/, '') : summary(x)) + '</span>' +
+            (open ? '' : this.folded([x], 'data-fold-path', at)) +
           '</div>' +
           (open ? '<div class="thimble-record-kids">' + this.rows(x, at, depth + 1) + '</div>' : '')
         )
@@ -227,9 +263,39 @@
     if (!all)
       out.push(
         '<div class="thimble-record-row"><span></span><button type="button" class="btn btn-ghost btn-sm thimble-record-more" data-more="' + esc(path) + '" data-thimble-chrome>Show ' +
-          num(es.length - MANY) + ' more</button></div>'
+          num(es.length - MANY) + ' more</button>' +
+          this.folded(es.slice(MANY).map(function (e) { return e[1] }), 'data-fold-more', path) +
+          '</div>'
       )
     return out.join('')
+  }
+  // The plain values under folded values, each on its own line in the order the open tree draws them (keys are the
+  // tree's wording, which the search skips), hidden in the page for the search; `attr` names the fold's path for
+  // unfold. A record's folds hold FOLD_CHARS characters in all at most.
+  Record.prototype.folded = function (values, attr, path) {
+    var self = this
+    var out = []
+    var seen = []
+    var put = function (s) {
+      if (s.length > self.room) s = s.slice(0, self.room)
+      self.room -= s.length + 1
+      out.push(s)
+    }
+    var walk = function (x) {
+      if (self.room <= 0) return
+      if (!isBranch(x)) return put(x === '' ? '""' : plain(x))
+      if (seen.indexOf(x) >= 0) return
+      var list = Array.isArray(x)
+      var keys = list ? null : Object.keys(x)
+      if (!(list ? x.length : keys.length)) return put(list ? '[]' : '{}')
+      seen.push(x)
+      if (list) for (var i = 0; i < x.length && self.room > 0; i++) walk(x[i])
+      else for (var j = 0; j < keys.length && self.room > 0; j++) walk(x[keys[j]])
+      seen.pop()
+    }
+    for (var i = 0; i < values.length && this.room > 0; i++) walk(values[i])
+    if (!out.length) return ''
+    return '<div class="thimble-record-folded" data-thimble-fold hidden ' + attr + '="' + esc(path) + '">' + esc(out.join('\n')) + '</div>'
   }
   Record.prototype.draw = function (args) {
     this.args = args
@@ -247,6 +313,7 @@
     fresh = fresh || q !== this.q
     this.q = q
     this.hits = 0
+    this.room = FOLD_CHARS
     this.found = null
     if (this.q && isBranch(v)) {
       this.found = {}
@@ -277,6 +344,62 @@
       (ref ? '<div class="thimble-record-cite" data-thimble-chrome><button type="button" class="chip chip-tone-evidence chip-act" data-record-file title="' + esc(ref) + '"><span class="chip-text">' + esc(citeLabel(ref)) + '</span></button></div>' : '') +
       body +
       '</div>'
+    this.fit()
+  }
+  // A folded long string cut to six lines as drawn, as a clamp would show it: what wraps past them moves to the start of
+  // its fold (the hidden element at its end), where the search finds it. Each string is measured before any is cut, so
+  // the record is laid out once; one that is not laid out keeps its cut by lines.
+  Record.prototype.fit = function () {
+    var boxes = this.mount.querySelectorAll('.thimble-record-text.is-folded')
+    var cuts = []
+    var r = document.createRange()
+    for (var i = 0; i < boxes.length; i++) {
+      var box = boxes[i]
+      var rest = box.lastElementChild
+      var lh = parseFloat(getComputedStyle(box).lineHeight)
+      if (!rest || !rest.hidden || !(lh > 0) || !box.getClientRects().length) continue
+      var nodes = []
+      var len = 0
+      var walk = document.createTreeWalker(box, NodeFilter.SHOW_TEXT)
+      for (var t = walk.nextNode(); t && !rest.contains(t); t = walk.nextNode()) {
+        nodes.push([t, len])
+        len += t.nodeValue.length
+      }
+      if (!len) continue
+      var at = function (k) {
+        var j = nodes.length - 1
+        while (j > 0 && nodes[j][1] > k) j--
+        return j
+      }
+      var top = function (k) {
+        var n = nodes[at(k)]
+        r.setStart(n[0], k - n[1])
+        r.setEnd(n[0], k - n[1] + 1)
+        var rs = r.getClientRects()
+        return rs.length ? rs[0].top : r.getBoundingClientRect().top
+      }
+      var limit = top(0) + (LONG_LINES - 0.5) * lh
+      if (top(len - 1) < limit) continue
+      // the first character of the line after the sixth
+      var lo = 0
+      var hi = len - 1
+      while (lo < hi) {
+        var mid = (lo + hi) >> 1
+        if (top(mid) >= limit) hi = mid
+        else lo = mid + 1
+      }
+      var n = nodes[at(lo)]
+      cuts.push([box, rest, n[0], lo - n[1]])
+    }
+    for (var c = 0; c < cuts.length; c++) {
+      var cr = document.createRange()
+      // a found word's mark moves whole
+      var mark = cuts[c][2].parentElement && cuts[c][2].parentElement.closest('mark')
+      if (mark && cuts[c][0].contains(mark)) cr.setStartBefore(mark)
+      else cr.setStart(cuts[c][2], cuts[c][3])
+      cr.setEndBefore(cuts[c][1])
+      cuts[c][1].insertBefore(cr.extractContents(), cuts[c][1].firstChild)
+    }
   }
   // a click on a key, Show more or less, Show N more or the citation; the focus stays on what was clicked
   Record.prototype.click = function (e) {
@@ -311,6 +434,24 @@
     })
     var all = this.mount.querySelectorAll('[' + attr + ']')
     for (var i = 0; i < all.length; i++) if (all[i].getAttribute(attr) === path) return all[i].focus()
+  }
+
+  // the search goes to a match folded away: the folded value, long string or long list it is in opens, with every value
+  // around it, and the record is drawn again, as a click opens them
+  Record.prototype.unfold = function (el) {
+    var root = el && el.closest ? el.closest('.thimble-record') : null
+    if (!root || root !== this.mount.firstElementChild || !this.args) return
+    var p
+    if ((p = el.getAttribute('data-fold-path')) != null) this.folds[p] = true
+    else if ((p = el.getAttribute('data-fold-long')) != null) this.longs[p] = true
+    else if ((p = el.getAttribute('data-fold-more')) != null) this.more[p] = true
+    else return
+    for (var q = p.slice(0, Math.max(0, p.lastIndexOf('/'))); q; q = q.slice(0, q.lastIndexOf('/')))
+      if (!this.isOpen(q, q.split('/').length - 1)) this.folds[q] = true
+    var self = this
+    ctl.safe(function () {
+      self.draw(self.args)
+    })
   }
 
   /** a record's fields as a collapsible tree under its citation (see the top of this file); returns {hits}, how many

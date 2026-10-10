@@ -281,7 +281,8 @@ A turn is `{ref, t, speaker, kind, tool, text, input, output, error, session, se
 `text`, `prompt`, `tool`, `thinking` and `system`. `draw(turns, {title, sub, empty})` draws them, with a header that
 names what the list shows (the run, the session or the selection) and how many turns; `reveal(ref)` opens a cited turn
 and scrolls it to the middle, its highlight fading as Files' does; `open(ref, on)` folds or opens one; `set(ref, patch)`
-gives a turn its words once the reader sent them whole.
+gives a turn its words once the reader sent them whole. The search (`thimble.search`) finds the words a folded turn or a
+long block hides and opens them, as a click does, so `onOpen` hears of a turn it opens.
 
 ## The record
 
@@ -300,7 +301,9 @@ side.open({ title: 'Read · explorer', ref, render: (body) => thimble.record({ m
 The record is anchored with `ref`, so a label marks it and a ⌘-click asks about it, and its citation opens it in the
 File browser. `find`, such as the search field's words, highlights their matches and opens what holds them; `colour`,
 Color by, gives the record its bar. Called again on the same mount with the same ref, it keeps what the analyst opened
-and folded, and with another ref it starts as it opens. It returns `{hits}`, how many places match `find`.
+and folded, and with another ref it starts as it opens. It returns `{hits}`, how many places match `find`. The search
+(`thimble.search`) finds the words its folds hide and opens what holds them; a record keeps 200,000 characters of folded
+values and items in the page for it, and a word past them is found once its fold is opened by hand.
 
 ## What the list says it shows
 

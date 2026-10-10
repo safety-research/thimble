@@ -466,6 +466,10 @@
   content-visibility: auto;
   contain-intrinsic-size: auto 64px;
 }
+/* a turn drawn again, opened, folded or given its words: laid out at once, so its words are where the search finds them */
+.thimble-turn.is-drawn {
+  content-visibility: visible;
+}
 .thimble-turn-no {
   align-self: start;
   min-width: 3ch;
@@ -575,10 +579,7 @@
 .thimble-turn-thinking {
   color: var(--text-tertiary);
 }
-.thimble-turn-fold.is-folded > .thimble-turn-block {
-  max-height: calc(6 * 1.5em + 8px);
-  overflow: hidden;
-}
+/* a long block folded: its first six lines show (the rest hidden in the page, viewer_transcript.js), the last fading */
 .thimble-turn-fold.is-folded::after {
   content: '';
   position: absolute;
@@ -781,15 +782,14 @@ button.thimble-record-key:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* a long string folded to six lines, fading out above Show more */
+/* a long string folded to its first six lines (the rest hidden in the page, viewer_record.js), the last fading out
+   above Show more */
 .thimble-record-text {
   display: block;
 }
 .thimble-record-text.is-folded {
-  max-height: calc(6 * 1.55em);
-  overflow: hidden;
-  -webkit-mask-image: linear-gradient(to bottom, #000 65%, transparent);
-  mask-image: linear-gradient(to bottom, #000 65%, transparent);
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 1.55em), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 1.55em), transparent);
 }
 .thimble-record-more.btn {
   margin: 2px 0 0 -6px;

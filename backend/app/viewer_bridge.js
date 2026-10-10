@@ -1492,9 +1492,9 @@
   }
   // A quoted passage inside a record the view shows whole: `open` brings quote {record, text}, and the bridge finds the
   // text in the outermost element anchored at the record (else anywhere), whitespace collapsed and case ignored, then
-  // highlights it, scrolls to it and posts `quoted {found}`. The search reruns after each page change until the page is
-  // quiet for QUOTE_QUIET ms with no fetch pending, or QUOTE_MAX ms pass; a found passage is kept in view for
-  // QUOTE_SETTLE ms.
+  // highlights it, scrolls to it and posts `quoted {found}`; a passage in text a part keeps folded away opens its fold
+  // first. The search reruns after each page change until the page is quiet for QUOTE_QUIET ms with no fetch pending, or
+  // QUOTE_MAX ms pass; a found passage is kept in view for QUOTE_SETTLE ms.
   var QUOTE_QUIET = 800
   var QUOTE_MAX = 20000
   var QUOTE_SETTLE = 1000
@@ -1546,6 +1546,25 @@
     var r = document.createRange()
     r.setStart(a[0], a[1])
     r.setEnd(b[0], b[1])
+    return r
+  }
+  // the innermost element around a node that keeps text folded away (data-thimble-fold, hidden), as thimble.search
+  // finds it, or null
+  function foldAround(n) {
+    for (var e = n && (n.nodeType === 1 ? n : n.parentElement); e; e = e.parentElement) if (e.hidden && e.hasAttribute('data-thimble-fold')) return e
+    return null
+  }
+  // A passage found in folded text: the part that folded it is sent `thimble-unfold`, as the search sends it, until the
+  // passage shows or the part leaves the fold as it was; the passage found again
+  function unfoldQuote(q, r) {
+    for (var i = 0; r && i < 32; i++) {
+      var f = foldAround(r.startContainer) || foldAround(r.endContainer)
+      if (!f) break
+      f.dispatchEvent(new CustomEvent('thimble-unfold', { bubbles: true }))
+      var again = quoteRange(q)
+      if (again && (foldAround(again.startContainer) || foldAround(again.endContainer)) === f) break
+      r = again
+    }
     return r
   }
   function quoteRange(q) {
@@ -1604,7 +1623,7 @@
     if (!q) return
     var now = Date.now()
     // the page is searched again only when it changed since the last search, or to scroll a found passage back
-    var r = q.found || q.changed >= q.searched ? quoteRange(q) : null
+    var r = q.found || q.changed >= q.searched ? unfoldQuote(q, quoteRange(q)) : null
     q.searched = now
     if (r) {
       if (!q.found) {

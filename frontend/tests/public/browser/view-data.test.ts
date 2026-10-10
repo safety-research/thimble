@@ -3,9 +3,10 @@
 // 20,000 rows draws only those near its view and keeps them as it scrolls, opens and sorts within a bound far above what
 // it takes, and its strip shows Color by's colours of every row; the search washes every match on screen and the current
 // one more strongly, puts a lane of ticks on the list's strip (with no Color by, on a strip of its own), and a click on a
-// tick goes to that match; the diff sets the two versions side by side, a changed line level with the line it became,
-// inline in a narrow mount, and its tints follow the paper. What the parts decide without layout is
-// tests/public/data-kit.test.ts.
+// tick goes to that match; it finds the words a transcript or a record folds away (viewer_transcript.js,
+// viewer_record.js), ticks them where they stand, and going to one opens its fold so the match shows; the diff sets the
+// two versions side by side, a changed line level with the line it became, inline in a narrow mount, and its tints
+// follow the paper. What the parts decide without layout is tests/public/data-kit.test.ts.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -19,7 +20,7 @@ const inline = (js: string) => js.replace(/<\/script/g, '<\\/script')
 // the kit as views.frame_document loads it
 const KIT =
   `<script>${inline(read('viewer_bridge.js'))}</script><script>window.__thimbleLabelOrder = ${read('label_order.json')}</script>` +
-  ['viewer_colour.js', 'viewer_controls.js', 'viewer_side.js', 'viewer_transcript.js', 'viewer_search.js', 'viewer_table.js', 'viewer_diff.js', 'viewer_range.js']
+  ['viewer_colour.js', 'viewer_controls.js', 'viewer_side.js', 'viewer_transcript.js', 'viewer_search.js', 'viewer_table.js', 'viewer_diff.js', 'viewer_record.js', 'viewer_range.js']
     .map((n) => `<script>${inline(read(n))}</script>`)
     .join('') +
   `<style>${read('viewer_kit.css')}</style><style>${read('viewer_parts.css')}</style>`
@@ -229,6 +230,189 @@ describe('the search alone', () => {
       return { text: cur.toString(), inView: r.top >= c.top && r.bottom <= c.bottom, record: cur.startContainer.parentElement!.closest('[data-anchor]')!.getAttribute('data-anchor') }
     })
     assert.deepEqual(shown, { text: 'gale', inView: true, record: 'chat.jsonl#L360' })
+    await p.close()
+  })
+})
+
+// A transcript and a record that fold words away: a text turn of 20 lines whose lines wrap, a word at its line 15; a tool
+// call folded to one line, a word only on line 9 of what came back; a record with a word three levels deep, under a
+// folded value, and a word on line 12 of a long string
+const WIDE = 'of the notes, long enough that the line wraps in the column of the transcript as it is drawn here, and once more in a narrower pane than this one'
+const NOTES = Array.from({ length: 20 }, (_, i) => (i === 14 ? 'line 15: a kestrel hovers over the field' : `line ${i + 1} ${WIDE}`)).join('\n')
+const OUTPUT = Array.from({ length: 12 }, (_, i) => (i === 8 ? 'birds.txt:9: osprey, near the dam' : `birds.txt:${i + 1}: gull`)).join('\n')
+const calm = (from: number, n: number) => Array.from({ length: n }, (_, i) => ({ ref: `s.jsonl#L${from + i}`, speaker: 'lead', kind: 'text', text: `calm turn ${from + i}` }))
+const TURNS = [
+  ...calm(1, 8),
+  { ref: 's.jsonl#L9', speaker: 'lead', kind: 'text', text: NOTES },
+  ...calm(10, 8),
+  { ref: 's.jsonl#L18', speaker: 'lead', kind: 'tool', tool: 'Bash', input: 'grep -n . birds.txt', output: OUTPUT },
+  ...calm(19, 12),
+]
+const FOLDED_TRANSCRIPT = page(`<div class="top"><span id="search"></span><span id="colour"></span></div><div id="turns" style="height:420px;overflow-y:auto"></div>
+<script>
+window.colour = thimble.colorBy({ mount: '#colour', fields: [] })
+window.search = thimble.search({ mount: '#search', in: '#turns' })
+window.opened = []
+window.tr = thimble.transcript({ mount: '#turns', onOpen: (t) => window.opened.push(t.ref) })
+tr.draw(${JSON.stringify(TURNS)}, { title: 'lead · Run 1' })
+</script>`)
+const REC = {
+  seen: 'a heron flew over',
+  ...Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`field_${i + 1}`, `value ${i + 1}`])),
+  meta: { source: { tag: 'a heron by the weir' } },
+  notes: Array.from({ length: 20 }, (_, i) => (i === 11 ? 'line 12: a plover on the shingle' : `line ${i + 1} of the field notes`)).join('\n'),
+}
+const FOLDED_RECORD = page(`<div class="top"><span id="search"></span><span id="colour"></span></div><div id="rec" style="width:420px;height:300px;overflow-y:auto;padding:0 8px"></div>
+<script>
+window.colour = thimble.colorBy({ mount: '#colour', fields: [] })
+window.search = thimble.search({ mount: '#search', in: '#rec' })
+thimble.record({ mount: '#rec', value: ${JSON.stringify(REC)}, ref: 'notes.jsonl#L3' })
+</script>`)
+
+/** the search's current match: its text, whether its box is inside the element `within` and inside the box that
+ * scrolls, as drawn */
+const currentIn = (frame: () => Frame, within: string, box: string) =>
+  frame().evaluate(
+    ([within, box]) => {
+      const cur = [...((CSS as any).highlights.get('thimble-search-current') ?? [])][0] as Range | undefined
+      if (!cur) return null
+      const r = cur.getBoundingClientRect()
+      const inside = (sel: string) => {
+        const c = document.querySelector(sel)!.getBoundingClientRect()
+        return r.height > 0 && r.top >= c.top - 0.5 && r.bottom <= c.bottom + 0.5 && r.left >= c.left - 0.5 && r.right <= c.right + 0.5
+      }
+      return { text: cur.toString(), within: inside(within), shown: inside(box) }
+    },
+    [within, box],
+  )
+/** where an element, or the search's current match, stands in the box that scrolls, as fractions of its height */
+const placeIn = (frame: () => Frame, box: string, sel: string | null) =>
+  frame().evaluate(
+    ({ box, sel }) => {
+      const b = document.querySelector(box)!
+      const r = sel ? document.querySelector(sel)!.getBoundingClientRect() : ([...(CSS as any).highlights.get('thimble-search-current')][0] as Range).getBoundingClientRect()
+      const top0 = b.getBoundingClientRect().top + b.clientTop - b.scrollTop
+      return [(r.top - top0) / b.scrollHeight, (r.bottom - top0) / b.scrollHeight]
+    },
+    { box, sel },
+  )
+/** the ticks drawn in the search's lane of the strip, each [top, bottom] as fractions of its height */
+const ticksDrawn = (frame: () => Frame) =>
+  frame().evaluate(() => {
+    const cv = document.querySelector('.thimble-colour-strip canvas') as HTMLCanvasElement
+    const dpr = window.devicePixelRatio || 1
+    const data = cv.getContext('2d')!.getImageData(Math.round(6 * dpr), 0, 1, cv.height).data
+    const out: number[][] = []
+    let start = -1
+    for (let y = 0; y <= cv.height; y++) {
+      const on = y < cv.height && data[y * 4 + 3] > 200
+      if (on && start < 0) start = y
+      if (!on && start >= 0) {
+        out.push([start / cv.height, y / cv.height])
+        start = -1
+      }
+    }
+    return out
+  })
+/** `n` ticks drawn, one at the place given, within a few pixels of the strip */
+const tickAt = (ticks: number[][], place: number[], what: string, n = 1) => {
+  assert.equal(ticks.length, n, `${what}: ${n} ticks, ${JSON.stringify(ticks)}`)
+  const slack = 0.012
+  assert.ok(ticks.some((t) => t[1] >= place[0] - slack && t[0] <= place[1] + slack), `${what}: a tick at its place ${JSON.stringify(place)}, ${JSON.stringify(ticks)}`)
+}
+
+describe('the search in folded text', () => {
+  test("a transcript: a word on a long block's line 15 and one in a folded tool call's output, counted, ticked and shown; Show less folds it again; Reset leaves it open", async () => {
+    const { page: p, frame } = await framed(FOLDED_TRANSCRIPT)
+    const NOTES_TURN = '[data-anchor="s.jsonl#L9"]'
+    const TOOL_TURN = '[data-anchor="s.jsonl#L18"]'
+    // folded, the long block shows six lines as drawn, its lines wrapping
+    const lines = await frame().evaluate((sel) => {
+      const b = document.querySelector(sel + ' .thimble-turn-block') as HTMLElement
+      return b.getBoundingClientRect().height / parseFloat(getComputedStyle(b).lineHeight)
+    }, NOTES_TURN)
+    assert.ok(lines > 5.5 && lines < 6.5, `six lines show: ${lines}`)
+    // a word on line 15 of the long block: counted once, gone to, in view inside its turn, ticked where it stands
+    await typeIn(frame, 'kestrel')
+    assert.deepEqual(await frame().evaluate(() => [(window as any).search.count, document.querySelector('.thimble-search-count')!.textContent]), [1, '1 of 1'])
+    await frame().locator('.thimble-search-input').press('Enter')
+    await p.waitForTimeout(200)
+    assert.deepEqual(await currentIn(frame, NOTES_TURN, '#turns'), { text: 'kestrel', within: true, shown: true })
+    tickAt(await ticksDrawn(frame), await placeIn(frame, '#turns', null), 'kestrel')
+    // Show less folds the block again: still counted, ticked where the block stands, not drawn
+    await frame().locator(`${NOTES_TURN} .thimble-turn-more`).click()
+    await p.waitForTimeout(200)
+    const folded = await frame().evaluate((sel) => ({
+      hidden: (document.querySelector(sel + ' [data-thimble-fold]') as HTMLElement).hidden,
+      count: (window as any).search.count,
+      current: (CSS as any).highlights.has('thimble-search-current'),
+    }), NOTES_TURN)
+    assert.deepEqual(folded, { hidden: true, count: 1, current: false })
+    tickAt(await ticksDrawn(frame), await placeIn(frame, '#turns', `${NOTES_TURN} .thimble-turn-block`), 'kestrel folded')
+    // a word only on line 9 of a folded tool call's output: counted; going to it opens the turn, as a click does, and
+    // its output's lines past the sixth
+    await typeIn(frame, 'osprey')
+    assert.equal(await frame().evaluate(() => (window as any).search.count), 1)
+    await frame().locator('.thimble-search-input').press('Enter')
+    await p.waitForTimeout(200)
+    assert.deepEqual(await currentIn(frame, `${TOOL_TURN} .thimble-turn-result`, '#turns'), { text: 'osprey', within: true, shown: true })
+    assert.deepEqual(await frame().evaluate(() => (window as any).opened), ['s.jsonl#L18'])
+    tickAt(await ticksDrawn(frame), await placeIn(frame, '#turns', null), 'osprey')
+    // Reset empties the search and leaves the turn open as the search opened it
+    await frame().locator('.thimble-reset').click()
+    await p.waitForTimeout(200)
+    const after = await frame().evaluate((sel) => ({
+      text: (document.querySelector('.thimble-search-input') as HTMLInputElement).value,
+      count: (window as any).search.count,
+      open: !!document.querySelector(sel + ' .thimble-turn-result'),
+      whole: !(document.querySelector(sel + ' .thimble-turn-result [data-thimble-fold]') as HTMLElement).hidden,
+    }), TOOL_TURN)
+    assert.deepEqual(after, { text: '', count: 0, open: true, whole: true })
+    await p.close()
+  })
+
+  test("a record: a word under a folded value three levels deep and one on a long string's line 12, counted, ticked and shown; Show less folds it again; Reset leaves it open", async () => {
+    const { page: p, frame } = await framed(FOLDED_RECORD)
+    // the word three levels deep, under a folded value, and once at the top: typing goes to the one at the top, and the
+    // folded one is counted and ticked where its fold stands
+    const SOURCE = '[data-fold="/meta/source"]'
+    assert.equal(await frame().evaluate((s) => document.querySelector(s)!.getAttribute('aria-expanded'), SOURCE), 'false')
+    await typeIn(frame, 'heron')
+    assert.deepEqual(await frame().evaluate(() => [(window as any).search.count, (window as any).search.at]), [2, 0])
+    await p.waitForTimeout(150)
+    tickAt(await ticksDrawn(frame), await placeIn(frame, '#rec', `${SOURCE} + .thimble-record-sum`), 'heron folded', 2)
+    // Enter goes to it: its value opens, and the match shows in the record
+    await frame().locator('.thimble-search-input').press('Enter')
+    await p.waitForTimeout(200)
+    assert.deepEqual(await currentIn(frame, '#rec .thimble-record', '#rec'), { text: 'heron', within: true, shown: true })
+    assert.deepEqual(await frame().evaluate((s) => [(window as any).search.at, document.querySelector(s)!.getAttribute('aria-expanded')], SOURCE), [1, 'true'])
+    tickAt(await ticksDrawn(frame), await placeIn(frame, '#rec', null), 'heron', 2)
+    // a word on line 12 of a long string
+    await typeIn(frame, 'plover')
+    assert.deepEqual(await frame().evaluate(() => [(window as any).search.count, document.querySelector('.thimble-search-count')!.textContent]), [1, '1 of 1'])
+    await frame().locator('.thimble-search-input').press('Enter')
+    await p.waitForTimeout(200)
+    assert.deepEqual(await currentIn(frame, '#rec .thimble-record', '#rec'), { text: 'plover', within: true, shown: true })
+    tickAt(await ticksDrawn(frame), await placeIn(frame, '#rec', null), 'plover')
+    // Show less folds the string again: still counted, ticked where the string stands, not drawn
+    await frame().locator('[data-long="/notes"]').click()
+    await p.waitForTimeout(200)
+    const folded = await frame().evaluate(() => ({
+      hidden: (document.querySelector('[data-fold-long="/notes"]') as HTMLElement).hidden,
+      count: (window as any).search.count,
+      current: (CSS as any).highlights.has('thimble-search-current'),
+    }))
+    assert.deepEqual(folded, { hidden: true, count: 1, current: false })
+    tickAt(await ticksDrawn(frame), await placeIn(frame, '#rec', '.thimble-record-text'), 'plover folded')
+    // Reset empties the search and leaves open the value the search opened
+    await frame().locator('.thimble-reset').click()
+    await p.waitForTimeout(200)
+    const after = await frame().evaluate(() => ({
+      text: (document.querySelector('.thimble-search-input') as HTMLInputElement).value,
+      count: (window as any).search.count,
+      open: document.querySelector('[data-fold="/meta/source"]')!.getAttribute('aria-expanded'),
+    }))
+    assert.deepEqual(after, { text: '', count: 0, open: 'true' })
     await p.close()
   })
 })

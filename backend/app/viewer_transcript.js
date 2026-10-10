@@ -6,7 +6,9 @@
 // the start of its head that opens and folds it and turns as it does; a long block folded to six lines with Show more
 // under it, Show less in the same place once open; a thought quiet; an error in the problem red, a failed call's head
 // with ✕ before its tool; a line between sessions. Each turn is anchored with its ref, so a label marks it, a ⌘-click
-// asks about it and Color by draws its bar, and its number opens its lines in the File browser.
+// asks about it and Color by draws its bar, and its number opens its lines in the File browser. What a fold hides stays
+// in the page, hidden, in an element with data-thimble-fold, so thimble.search finds it and opens its fold with the
+// `thimble-unfold` event: a folded turn's words, and a long block's lines past the sixth.
 //
 //   const tr = thimble.transcript({ mount: '#turns', colour, onOpen: (turn) => fetchWhole(turn) })
 //   tr.draw(turns, { title: 'explorer · Run 2' })   turns: [{ref, t, speaker, kind, tool, text, input, output, error,
@@ -31,8 +33,68 @@
   // the chevron at the start of a folding turn's head, turned down while the turn is open (Icon chevron-right)
   var CARET = '<svg class="thimble-turn-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>'
 
-  function lines(s) {
-    return String(s == null ? '' : s).split('\n').length
+  // a block's first FOLD_LINES lines and the rest from the line break after them, '' when it is no longer
+  function cut(s) {
+    var at = -1
+    for (var i = 0; i < FOLD_LINES; i++) if ((at = s.indexOf('\n', at + 1)) < 0) return [s, '']
+    return [s.slice(0, at), s.slice(at)]
+  }
+  // the blocks an open turn draws, [k, kind, text, class]: a tool call and what came back, a system record's raw text,
+  // or its words
+  function blocks(turn) {
+    var kind = turn.kind || 'text'
+    if (kind === 'tool')
+      return [
+        [0, 'call', (turn.tool || 'tool') + (turn.input != null && turn.input !== '' ? '\n' + turn.input : '')],
+        [1, 'result', turn.output != null ? turn.output : turn.result, turn.error ? 'is-error' : ''],
+      ]
+    if (kind === 'thinking') return [[0, 'thinking', turn.text]]
+    if (kind === 'system') return [[0, 'raw', turn.text]]
+    return [[0, 'text', turn.text, turn.error ? 'is-error' : '']]
+  }
+  function filled(text) {
+    return text != null && String(text) !== ''
+  }
+  var FILL = 0.95 // the share of a block's width wrapped text fills, about, as it breaks between words
+  var measure = null // a canvas's 2d context, which measures text in a block's face
+  // a block's width for its text, and its face for the canvas; null where it is not laid out
+  function face(box) {
+    var cs = getComputedStyle(box)
+    var w = box.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0)
+    if (!(w > 0)) return null
+    if (!measure) measure = document.createElement('canvas').getContext('2d')
+    return measure ? { w: w, font: cs.fontStyle + ' ' + cs.fontWeight + ' ' + cs.fontSize + ' ' + cs.fontFamily } : null
+  }
+  // Where a block's text is cut to show FOLD_LINES lines `w` px wide in the canvas's face, a long line counting as the
+  // lines it wraps to; after a space where one is near; -1 where it shows whole
+  function wrapCut(s, w) {
+    var width = function (a, b) {
+      return b > a ? measure.measureText(s.slice(a, b)).width : 0
+    }
+    for (var at = 0, lines = 0; ; ) {
+      var nl = s.indexOf('\n', at)
+      var end = nl < 0 ? s.length : nl
+      var wide = width(at, end)
+      var wraps = wide <= w ? 1 : Math.ceil(wide / (w * FILL))
+      if (lines + wraps > FOLD_LINES) {
+        // as much of this line as the lines left hold
+        var room = (FOLD_LINES - lines) * w * FILL
+        var lo = at
+        var hi = end
+        while (lo < hi) {
+          var mid = (lo + hi + 1) >> 1
+          if (width(at, mid) <= room) lo = mid
+          else hi = mid - 1
+        }
+        var sp = s.lastIndexOf(' ', lo - 1)
+        if (sp > at && lo - sp < 40) lo = sp + 1
+        var code = s.charCodeAt(lo - 1)
+        return code >= 0xd800 && code < 0xdc00 ? lo - 1 : lo
+      }
+      lines += wraps
+      if (nl < 0) return -1
+      at = nl + 1
+    }
   }
   function firstLine(s) {
     var line = String(s == null ? '' : s).split('\n').filter(function (l) { return l.trim() })[0] || ''
@@ -66,21 +128,29 @@
     this.mount.addEventListener('click', function (e) {
       self.click(e)
     })
+    // the search goes to a match folded away (viewer_search.js): what folds it opens
+    this.mount.addEventListener('thimble-unfold', function (e) {
+      self.unfold(e.target)
+    })
   }
   Transcript.prototype.isOpen = function (turn) {
     var o = this.opened[turn.ref]
     return o === undefined ? !this.fold(turn) : o
   }
+  // A block: its first six lines, and the rest of a longer one in the page, hidden until Show more
+  // (data-thimble-fold, so the search finds it)
   Transcript.prototype.block = function (turn, k, kind, text, cls) {
-    if (text == null || String(text) === '') return ''
+    if (!filled(text)) return ''
     var key = turn.ref + ':' + k
-    var long = lines(text) > FOLD_LINES
+    var parts = cut(String(text))
+    var long = parts[1] !== ''
     var open = !long || !!this.expanded[key]
-    var body = String(text)
+    var body = parts[0]
     if (kind === 'call') {
       var nl = body.indexOf('\n')
       body = '<span class="thimble-turn-toolname">' + esc(nl < 0 ? body : body.slice(0, nl)) + '</span>' + esc(nl < 0 ? '' : body.slice(nl))
     } else body = esc(body)
+    if (long) body += '<span class="thimble-turn-rest" data-thimble-fold' + (open ? '' : ' hidden') + '>' + esc(parts[1]) + '</span>'
     return (
       '<div class="thimble-turn-fold' + (open ? '' : ' is-folded') + '">' +
       '<div class="thimble-turn-block thimble-turn-' + kind + (cls ? ' ' + cls : '') + '">' + body + '</div>' +
@@ -98,15 +168,18 @@
     var tool = failed ? '<span class="thimble-turn-failed" title="' + esc(typeof turn.error === 'string' ? turn.error : 'failed') + '">✕ ' + esc(turn.tool || 'tool') + '</span>' : esc(turn.tool)
     var head = esc(turn.speaker || '(unsigned)') + ((turn.tool || failed) && kind === 'tool' ? '<span class="thimble-turn-tool"> · ' + tool + '</span>' : '') + (stamp(turn) ? ' · ' + esc(stamp(turn)) : '')
     var body = ''
-    if (!open) body = '<div class="thimble-turn-line" data-open="' + esc(turn.ref) + '">' + esc(summary(turn)) + '</div>'
-    else {
-      if (kind === 'tool') {
-        body += this.block(turn, 0, 'call', (turn.tool || 'tool') + (turn.input != null && turn.input !== '' ? '\n' + turn.input : ''))
-        body += this.block(turn, 1, 'result', turn.output != null ? turn.output : turn.result, turn.error ? 'is-error' : '')
-      } else if (kind === 'thinking') body += this.block(turn, 0, 'thinking', turn.text)
-      else if (kind === 'system') body += this.block(turn, 0, 'raw', turn.text)
-      else body += this.block(turn, 0, 'text', turn.text, turn.error ? 'is-error' : '')
-      if (!body) body = '<div class="thimble-turn-empty">(empty)</div>'
+    var bs = blocks(turn)
+    if (!open) {
+      // the one line stands for the words, which stay in the page hidden, each block's text as the open turn shows it,
+      // so the search counts the same matches folded or open; the line is the page's wording (data-thimble-chrome)
+      var words = ''
+      for (var b = 0; b < bs.length; b++) if (filled(bs[b][2])) words += '<div>' + esc(String(bs[b][2])) + '</div>'
+      body =
+        '<div class="thimble-turn-line" data-open="' + esc(turn.ref) + '" data-thimble-chrome>' + esc(summary(turn)) + '</div>' +
+        (words ? '<div class="thimble-turn-folded" data-thimble-fold hidden>' + words + '</div>' : '')
+    } else {
+      for (var j = 0; j < bs.length; j++) body += this.block(turn, bs[j][0], bs[j][1], bs[j][2], bs[j][3])
+      if (!body) body = '<div class="thimble-turn-empty" data-thimble-chrome>(empty)</div>'
     }
     var colour = this.colour && typeof this.colour.attr === 'function' ? this.colour.attr(turn) : ''
     var no = turn.line != null ? turn.line : i + 1
@@ -137,6 +210,41 @@
     })
     if (!this.turns.length) out.push('<div class="thimble-turn-empty thimble-transcript-none">' + esc(o.empty || 'No turn') + '</div>')
     this.mount.innerHTML = out.join('')
+    this.fit(this.mount)
+  }
+  // The long blocks folded under `root` cut to about six lines as drawn, as a clamp would show them: what their first six
+  // lines wrap to past that moves to the start of the fold, where the search finds it. The lines are measured in the
+  // canvas rather than laid out, since content-visibility leaves the turns out of view unlaid and laying each out takes
+  // long in a long transcript; one block of each face is laid out for its width.
+  Transcript.prototype.fit = function (root) {
+    var boxes = root.querySelectorAll('.thimble-turn-fold.is-folded > .thimble-turn-block')
+    var faces = {}
+    var font = null
+    for (var i = 0; i < boxes.length; i++) {
+      var box = boxes[i]
+      var rest = box.lastElementChild
+      if (!rest || !rest.hidden) continue
+      var kind = box.classList.contains('thimble-turn-text') || box.classList.contains('thimble-turn-thinking') ? 'body' : 'mono'
+      if (!(kind in faces)) faces[kind] = face(box)
+      var f = faces[kind]
+      if (!f) continue
+      if (font !== f.font) measure.font = font = f.font
+      var nodes = []
+      var text = ''
+      var walk = document.createTreeWalker(box, NodeFilter.SHOW_TEXT)
+      for (var t = walk.nextNode(); t && !rest.contains(t); t = walk.nextNode()) {
+        nodes.push([t, text.length])
+        text += t.nodeValue
+      }
+      var k = wrapCut(text, f.w)
+      if (k < 0) continue
+      var j = nodes.length - 1
+      while (j > 0 && nodes[j][1] > k) j--
+      var r = document.createRange()
+      r.setStart(nodes[j][0], k - nodes[j][1])
+      r.setEndBefore(rest)
+      rest.insertBefore(r.extractContents(), rest.firstChild)
+    }
   }
   // one turn drawn again in its place; a control of it that had the focus keeps it, the chevron for the line that opened it
   Transcript.prototype.redrawTurn = function (ref) {
@@ -147,8 +255,12 @@
     var tmp = document.createElement('div')
     tmp.innerHTML = this.turnHtml(turn, i)
     var fresh = tmp.firstChild
+    // drawn at once, not when it next scrolls into view (content-visibility), so that its size and the place of its
+    // words are right at once for the search and a citation that scroll to them
+    fresh.classList.add('is-drawn')
     var had = document.activeElement && document.activeElement !== node && node.contains(document.activeElement) ? document.activeElement : null
     node.replaceWith(fresh)
+    this.fit(fresh)
     if (!had) return
     var key = had.getAttribute('data-expand')
     var again = had.hasAttribute('data-place') ? fresh.querySelector('[data-place]') : null
@@ -183,13 +295,37 @@
     var toggle = t.closest('[data-toggle]')
     if (toggle) return this.open(toggle.getAttribute('data-toggle'))
     var ex = t.closest('[data-expand]')
-    if (ex) {
-      var key = ex.getAttribute('data-expand')
-      this.expanded[key] = !this.expanded[key]
-      return this.redrawTurn(key.slice(0, key.lastIndexOf(':')))
-    }
+    if (ex) return this.expand(ex)
     var place = t.closest('[data-place]')
     if (place) thimble.navigate(place.getAttribute('data-place'), { browser: true })
+  }
+  // Show more shows a long block's lines past the sixth in place, and Show less folds them again
+  Transcript.prototype.expand = function (button) {
+    var key = button.getAttribute('data-expand')
+    var on = !this.expanded[key]
+    if (on) this.expanded[key] = true
+    else delete this.expanded[key]
+    var box = button.parentElement
+    var rest = box && box.querySelector('[data-thimble-fold]')
+    if (!rest) return this.redrawTurn(key.slice(0, key.lastIndexOf(':')))
+    rest.hidden = !on
+    box.classList.toggle('is-folded', !on)
+    button.setAttribute('aria-expanded', String(on))
+    button.textContent = on ? 'Show less' : 'Show more'
+    if (!on) this.fit(box)
+  }
+  // the search goes to a match folded away: the turn it is in opens, as a click on its line opens it (onOpen told), and
+  // the long block it is in shows whole
+  Transcript.prototype.unfold = function (el) {
+    var node = el && el.closest ? el.closest('.thimble-turn') : null
+    var ref = node && node.getAttribute('data-anchor')
+    var turn = ref != null && this.find(ref) === node ? this.byRef[ref] : null
+    if (!turn) return
+    var box = el.closest('.thimble-turn-fold')
+    var more = box && box.querySelector('[data-expand]')
+    if (more) this.expanded[more.getAttribute('data-expand')] = true
+    if (this.isOpen(turn)) this.redrawTurn(ref)
+    else this.open(ref, true)
   }
   // a cited turn: opened, in the middle of its box, its highlight fading as Files' does
   Transcript.prototype.reveal = function (ref) {
