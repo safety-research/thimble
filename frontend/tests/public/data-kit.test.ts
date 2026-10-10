@@ -680,6 +680,40 @@ describe('the table', () => {
     expect(rows[1].getAttribute('data-anchor')).toBe('mail.jsonl#L2')
   })
 
+  test("a column of times with `days`: a row's date only where it differs from the row above's, the time on every row; the date kept in its place unseen, found by the search, and written again as a sort brings other days together", async () => {
+    await load(`<div class="top"><span id="search"></span></div><div id="list" style="height:400px"></div>`)
+    const w = win()
+    const DAY = 86400
+    // two events on 1 April, one at 23:59:30 and one past midnight on 2 April, and one on 2 April at 10:00
+    w.EVENTS = [
+      { ref: 'e#L1', t: T0, what: 'opened' },
+      { ref: 'e#L2', t: T0 + 3600, what: 'merged' },
+      { ref: 'e#L3', t: T0 + 15 * 3600 - 30, what: 'paged' },
+      { ref: 'e#L4', t: T0 + 15 * 3600 + 30, what: 'closed' },
+      { ref: 'e#L5', t: T0 + DAY + 3600, what: 'reopened' },
+    ]
+    w.eval(`
+      window.search = thimble.search({ mount: '#search', in: '#list' })
+      window.table = thimble.table({ mount: '#list', rows: window.EVENTS, search: window.search,
+        columns: [{ name: 't', title: 'Time', type: 'time', days: true }, { name: 'what', title: 'What' }] })`)
+    const cells = () => [...doc().querySelectorAll('.thimble-table-row')].map((r) => r.children[0] as HTMLElement)
+    const shown = (c: HTMLElement) => [...c.childNodes].filter((n) => !(n as Element).classList?.contains('thimble-table-day')).map((n) => n.textContent).join('')
+    // every cell holds its whole time; the dates a day's later rows share are unseen
+    expect(cells().map((c) => c.textContent)).toEqual(['2026-04-01 09:00:00', '2026-04-01 10:00:00', '2026-04-01 23:59:30', '2026-04-02 00:00:30', '2026-04-02 10:00:00'])
+    expect(cells().map(shown)).toEqual(['2026-04-01 09:00:00', '10:00:00', '23:59:30', '2026-04-02 00:00:30', '10:00:00'])
+    expect(cells().map((c) => c.querySelector('.thimble-table-day')?.textContent ?? null)).toEqual([null, '2026-04-01 ', '2026-04-01 ', null, '2026-04-02 '])
+    // the search finds a date on every row that has it, seen or not
+    await type('2026-04-01')
+    expect(w.search.count).toBe(3)
+    // sorted by what happened, the rows' days alternate, and each row whose day differs from the row above writes it
+    ;(doc().querySelector('[data-col="what"]') as HTMLElement).click()
+    expect(w.table.rows.map((r: any) => r.what)).toEqual(['closed', 'merged', 'opened', 'paged', 'reopened'])
+    expect(cells().map(shown)).toEqual(['2026-04-02 00:00:30', '2026-04-01 10:00:00', '09:00:00', '23:59:30', '2026-04-02 10:00:00'])
+    // a column without `days` writes the date on every row
+    w.eval(`window.table = thimble.table({ mount: '#list', rows: window.EVENTS, columns: [{ name: 't', type: 'time' }, 'what'] })`)
+    expect(doc().querySelectorAll('.thimble-table-day')).toHaveLength(0)
+  })
+
   test("a column's second line (sub): under the value in each row, which is two lines tall, found by the search and shown by the default details", async () => {
     await load(`<div class="top"><span id="search"></span></div><div id="body"><div id="list" style="height:400px"></div></div>`)
     const w = win()

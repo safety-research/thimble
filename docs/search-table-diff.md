@@ -138,7 +138,7 @@ const table = thimble.table({
 | `attrs(row)` | more attributes of a row's element, `{name: value}`, as `thimble.recordCard` takes them, such as `data-anchor-unmarked` for a row that stands for records and draws their labels' colors itself (`thimble.mix` in a cell) |
 | `key` | the name thimble keeps the sort under, the mount's id by default; give each table of a page its own |
 
-A column is `{name, title, type, width, min, drop, value(row), html(row), sub(row), sort}`:
+A column is `{name, title, type, width, min, drop, value(row), html(row), sub(row), days, sort}`:
 
 | key | what it is |
 |---|---|
@@ -151,6 +151,7 @@ A column is `{name, title, type, width, min, drop, value(row), html(row), sub(ro
 | `value(row)` | the value it shows and sorts by when it is not `row[name]` |
 | `html(row)` | the cell's markup in place of its value as text |
 | `sub(row)` | a second line under the cell's value in the secondary ink, text or `{html}`, such as an email's first words under its subject or a pull request's number, author and time under its title; with one, every row is two lines tall. The search finds it and the default `details` show it |
+| `days` | `true` for a column of times that writes a row's date only where it differs from the row above's, and the time on every row, as a log does. The date a row shares with the row above stays in its place unseen, so the times stand in one column and the search still finds it |
 | `sort` | `false` for a column a click does not sort |
 
 | member | what it gives |

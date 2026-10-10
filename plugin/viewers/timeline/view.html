@@ -151,12 +151,13 @@ const lanes = thimble.timeline({
   onMark: (e) => show(e.r, true),
 })
 const side = thimble.side({ mount: '#body', onClose: () => { open = null } })
-// the events in the range as a table: the time, the source, the kind (✕ before a failure), the actor and the incident,
-// which a narrow table drops first, and the text; a row opens in the side panel, and ↑ ↓ move it to the next
+// the events in the range as a table: the time (the date on a day's first event), the source, the kind (✕ before a
+// failure), the actor and the incident, which a narrow table drops first, and the text; a row opens in the side panel,
+// and ↑ ↓ move it to the next
 const table = thimble.table({
   mount: '#list', side, search, colour: painted,
   columns: [
-    { name: 't', title: 'Time', type: 'time', drop: false },
+    { name: 't', title: 'Time', type: 'time', drop: false, days: true },
     { name: 'source', title: 'Source', width: 64 },
     { name: 'kind', title: 'Kind', width: 96, html: (e) => (FAILED(e) ? `<span class="failed" title="failed">✕ ${esc(e.kind)}</span>` : esc(e.kind)) },
     { name: 'actor', title: 'Actor', width: 110, drop: 2 },

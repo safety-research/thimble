@@ -1692,6 +1692,11 @@ button.thimble-card {
   overflow: hidden;
   vertical-align: top;
 }
+/* in a column of times with `days`, the date a row shares with the row above: in its place, unseen, so the times stand
+   in one column under the day's first */
+.thimble-table-day {
+  visibility: hidden;
+}
 .thimble-table-none {
   padding: 24px 16px;
   color: var(--text-tertiary);

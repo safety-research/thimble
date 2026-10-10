@@ -10,6 +10,7 @@
 //       { name: 'subject', title: 'Subject', min: 200 },     text takes the width left, at least `min`, cut with an ellipsis
 //       { name: 'subject', sub: (m) => m.snippet },        a second line under it, in the secondary ink: two-line rows
 //       { name: 't', title: 'Date', type: 'time' },          seconds since 1970, shown in UTC; or 'number', or 'id'
+//       { name: 't', type: 'time', days: true },              the date on a day's first row alone, the time on each
 //     ],
 //     rows: emails,                         plain records, each with its `ref`, which is its row's data-anchor
 //     sort: { by: 't', desc: true },        how it opens; a click on a column's head sorts by it, again the other way
@@ -159,6 +160,8 @@
           drop: c.drop === false ? false : typeof c.drop === 'number' && isFinite(c.drop) ? c.drop : null,
           min: typeof c.min === 'number' && c.min > 0 ? c.min : null,
           sub: typeof c.sub === 'function' ? c.sub : null,
+          // a column of times that writes a row's date only where it differs from the row above's, as a log does
+          days: type === 'time' && c.days === true,
         }
       })
     // the main column: the first column of text that takes the width left (no width in px), else the first column of
@@ -365,20 +368,27 @@
     if (v == null || v === '' || v === false) return ''
     return typeof v === 'object' && v.html != null ? String(v.html) : esc(v)
   }
-  // a cell's markup. A time in a column too narrow for its whole stamp keeps the year and the seconds it leaves out in
-  // the page, drawn 0 wide (.thimble-table-cut), so that the search finds the same text at every width.
-  Table.prototype.cell = function (col, r) {
+  // a cell's markup, `above` the row drawn over it. A time in a column too narrow for its whole stamp keeps the year and
+  // the seconds it leaves out in the page, drawn 0 wide (.thimble-table-cut), and in a column of `days` a date the row
+  // above has too is kept in its place unseen (.thimble-table-day), so its time stands under the time above it; the
+  // search finds the same text at every width and on every row.
+  Table.prototype.cell = function (col, r, above) {
     if (col.html) return String(ctl.safe(function () { return col.html(r) }, '') || '')
     var s = this.text(col, r)
-    var f = col.type === 'time' ? col.form : null
-    var v = f ? this.value(col, r) : null
-    if (!f || typeof v !== 'number' || !isFinite(v)) return esc(s)
+    var v = col.type === 'time' ? this.value(col, r) : null
+    if (typeof v !== 'number' || !isFinite(v)) return esc(s)
+    var f = col.form || { secs: true, year: true }
     var tail = col.secs ? 3 : 0 // :SS
     var head = s.length - 11 - tail // YYYY-, before MM-DD HH:MM
     var cut = function (t) {
       return t ? '<span class="thimble-table-cut">' + t + '</span>' : ''
     }
-    return cut(f.year ? '' : s.slice(0, head)) + s.slice(f.year ? 0 : head, s.length - (f.secs ? 0 : tail)) + cut(f.secs ? '' : s.slice(s.length - tail))
+    var date = (f.year ? s.slice(0, head) : cut(s.slice(0, head))) + s.slice(head, head + 6) // YYYY-MM-DD and its space
+    if (col.days && above != null) {
+      var u = this.value(col, above)
+      if (typeof u === 'number' && isFinite(u) && Math.floor(seconds(u) / 86400) === Math.floor(seconds(v) / 86400)) date = '<span class="thimble-table-day">' + date + '</span>'
+    }
+    return date + s.slice(head + 6, s.length - tail) + (f.secs ? s.slice(s.length - tail) : cut(s.slice(s.length - tail)))
   }
   // The columns' widths: a column's own, else for numbers and times as wide as their widest value or title, else an
   // equal share of what is left; and what each keeps in a table too narrow for them (fit): a column of text its `min`,
@@ -811,7 +821,8 @@
       this.drawnCols
         .map(function (col) {
           var sub = col.sub ? self.subHtml(col, r) : ''
-          var body = col.sub ? '<div class="thimble-table-line">' + self.cell(col, r) + '</div>' + (sub ? '<div class="thimble-table-sub">' + sub + '</div>' : '') : self.cell(col, r)
+          var cell = self.cell(col, r, i > 0 ? self.shown[i - 1] : null)
+          var body = col.sub ? '<div class="thimble-table-line">' + cell + '</div>' + (sub ? '<div class="thimble-table-sub">' + sub + '</div>' : '') : cell
           return '<div class="thimble-table-td thimble-table-' + col.type + '" role="gridcell">' + body + '</div>'
         })
         .join('') +
