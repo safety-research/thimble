@@ -232,7 +232,7 @@ whole on hover, and its number stands right-aligned in mono after it, never unde
 `count: false` none. A group takes no color of its own: `mix: (node) => counts` draws `thimble.mix` in its row, and with
 `rows`, `mix: true` counts each group's records by Color by. `anchor(node)` gives a row its `data-anchor`, such as a
 unit `view:<slug>/<key>`, so a label marks it and a ⌘-click asks about it. `find: true` puts a field over the tree that
-keeps the names that match, with the folders above them open.
+keeps the names that match, with the folders above them open; the page's `thimble.search` leaves the tree to it.
 
 A click or Enter picks a row: it is chosen (`.active`), a folder opens (a click on the chosen folder folds it), and
 `onPick(node)` hears it. ↑ and ↓ move, ← folds or goes to the parent, → opens. A node is `{key, name, parent, depth, children, n, item}`, and with `rows` also

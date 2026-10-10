@@ -287,6 +287,19 @@ window.tree = thimble.tree({ mount: '#tree', split: '/', items: [{ key: 'dse/Sta
     await page.close()
   })
 
+  test("the page's search leaves the tree out, which has its own find", async () => {
+    const { page, frame, errors } = await framed(`
+window.tree = thimble.tree({ mount: '#tree', items: [{ key: 'StartSeite' }, { key: 'Hilfe' }] })
+document.body.insertAdjacentHTML('beforeend', '<div id="list"><p data-anchor="r1">StartSeite, a record</p></div>')
+window.search = thimble.search({ mount: '#colour' })`)
+    // the tree's names are groups, not records: the page's search counts the records alone
+    await frame().evaluate(() => (window as any).search.set('startseite'))
+    await page.waitForTimeout(200)
+    assert.equal(await frame().evaluate(() => (window as any).search.count), 1)
+    assert.deepEqual(errors, [])
+    await page.close()
+  })
+
   test("with Rows, the nodes are rows.groups's with their records counted, by a tree of fields and by another field", async () => {
     const { page, frame } = await framed(`
 const PARENT = { lead: null, explore: 'lead', grep: 'explore', test: 'lead', solo: null }
