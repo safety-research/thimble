@@ -41,7 +41,7 @@
   var ROW = 28 // px, a row's height when the theme gives no --h-row
   var CHAR = 7 // px, a character of the mono face when it cannot be measured
   var PAD = 16 // px, a cell's padding, both sides
-  var SORT_ROOM = 14 // px, the sort's arrow beside a head's title
+  var SORT_ROOM = 15 // px, the sort's arrow beside a head's title and the gap before it
   var MIN_W = 56 // px, the narrowest column of numbers or times, and the widest
   var MAX_W = 260
   var MIN_TEXT = 64 // px, the narrowest a column of text gets in a table too narrow for its columns, unless it says (`min`)
@@ -329,6 +329,7 @@
   Table.prototype.layout = function () {
     var self = this
     var charW = measureChar(this.mount) || CHAR
+    var heads = measureHeads(this.mount, this.columns)
     var sample = this.all.length > SAMPLE ? this.all.slice(0, SAMPLE) : this.all
     var fitW = function (w) {
       return Math.round(Math.max(MIN_W, Math.min(MAX_W, w)))
@@ -379,7 +380,7 @@
         most = Math.max(most, t.length)
         if (c.type === 'time' && t && typeof self.value(c, sample[k]) !== 'number') asWritten = Math.max(asWritten, t.length)
       }
-      if (w == null) w = fitW(Math.max(most * charW + PAD, c.title.length * charW + PAD + SORT_ROOM))
+      if (w == null) w = fitW(Math.max(most * charW + PAD, (heads[i] || c.title.length * charW) + PAD + SORT_ROOM))
       self.want[i] = w
       self.least[i] = w
       if (c.type !== 'time') return
@@ -800,6 +801,24 @@
     var w = s.getBoundingClientRect().width / 40
     s.remove()
     return w
+  }
+
+  // each column's title as wide as its head draws it, in capitals and spaced out, which a count of the cells'
+  // characters underrates (Comments lost its last letters beside the sort's arrow); 0 where nothing lays out
+  function measureHeads(at, columns) {
+    var box = document.createElement('div')
+    box.className = 'thimble-table-probe-heads'
+    box.innerHTML = columns
+      .map(function (c) {
+        return '<div class="thimble-table-th"><span class="thimble-table-title">' + esc(c.title) + '</span></div>'
+      })
+      .join('')
+    at.appendChild(box)
+    var out = Array.prototype.map.call(box.querySelectorAll('.thimble-table-title'), function (t) {
+      return t.getBoundingClientRect().width
+    })
+    box.remove()
+    return out
   }
 
   /** a table of records with sortable columns, for thousands of rows (see the top of this file) */
