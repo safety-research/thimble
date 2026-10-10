@@ -164,7 +164,7 @@ BRIDGE_JS = Path(__file__).with_name("viewer_bridge.js")
 KIT_CSS = Path(__file__).with_name("viewer_kit.css")  # thimble's chips, buttons, segmented controls, tables and list rows
 COLOUR_JS = Path(__file__).with_name("viewer_colour.js")  # the view kit's Color by control, thimble.colorBy
 RANGE_JS = Path(__file__).with_name("viewer_range.js")  # the view kit's time range selector, thimble.timeRange
-# the view kit's row controls (thimble.filterBy, rows, lanes, key, divider), its side panel (thimble.side) and its
+# the view kit's row controls (thimble.filterBy, rows, timeline, key, divider), its side panel (thimble.side) and its
 # transcript (thimble.transcript), loaded between Color by and the range, which takes the bridge's part away; their styles
 CONTROLS_JS = Path(__file__).with_name("viewer_controls.js")
 SIDE_JS = Path(__file__).with_name("viewer_side.js")

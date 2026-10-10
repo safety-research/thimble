@@ -231,3 +231,54 @@ describe('the side panel and the divider in a frame', () => {
     await again.page.close()
   })
 })
+
+// the timeline with no other part of the kit: one lane of commits with no name (#alone), a lane per author (#authors)
+// and a lane per agent on plain numbers, its turns (#turns), each on its records' own span with an axis of its own
+const alone = () => `<!doctype html><html><head><style>${TOKENS} html,body{margin:0} body{font:12px sans-serif;background:#fffdf8;padding:12px}
+section{margin-bottom:16px}</style>${KIT}</head><body>
+<section id="alone"></section><section id="authors"></section><section id="turns"></section>
+<script>
+const authors = ['ana', 'bo', 'cy']
+const commits = Array.from({ length: 31 }, (_, i) => ({ t: new Date((${T0} + i * 120) * 1000).toISOString(), author: authors[i % 3], text: 'commit ' + i }))
+window.a = thimble.timeline({ mount: '#alone' })
+a.draw(commits)
+window.b = thimble.timeline({ mount: '#authors', rows: 'author' })
+b.draw(commits)
+window.c = thimble.timeline({ mount: '#turns', rows: (s) => s.agent, unit: 'n', time: (s) => s.turn })
+c.draw(Array.from({ length: 40 }, (_, i) => ({ turn: i, agent: i % 4 ? 'lead' : 'sub' })))
+</script></body></html>`
+
+describe('the timeline alone in a frame', () => {
+  test("its own axis stands over its tracks, a label over the moment it names; with no lanes to tell apart the track takes the whole width; nothing runs past the frame", async () => {
+    const page = await browser.newPage({ viewport: { width: 1000, height: 700 } })
+    await page.setContent(`<!doctype html><html><body style="margin:0"><iframe id="f" sandbox="allow-scripts" style="border:0;width:900px;height:640px"></iframe></body></html>`)
+    await page.evaluate((doc) => ((document.getElementById('f') as HTMLIFrameElement).srcdoc = doc), alone())
+    const frame = () => page.frames().find((f) => f !== page.mainFrame())!
+    await page.waitForTimeout(300)
+    await frame().waitForSelector('#turns .thimble-axis-lab', { state: 'attached' })
+    const got = await frame().evaluate(() => {
+      const box = (e: Element) => e.getBoundingClientRect()
+      const mid = (e: Element) => (box(e).left + box(e).right) / 2
+      const lab = [...document.querySelectorAll('#alone .thimble-axis-lab')].find((l) => l.textContent === '09:30')!
+      // commit 15, at 09:30, is the 16th mark
+      const mark = document.querySelectorAll('#alone .thimble-lane-mark')[15]
+      const track = (id: string) => box(document.querySelector('#' + id + ' .thimble-lane-track')!)
+      return {
+        lab: mid(lab),
+        mark: mid(mark),
+        alone: [track('alone').left, track('alone').right, box(document.getElementById('alone')!).left, box(document.getElementById('alone')!).right],
+        authors: [track('authors').left, box(document.querySelector('#authors .thimble-lanes-axis')!).left, box(document.querySelector('#authors .thimble-lanes-axis')!).width, track('authors').width],
+        names: [...document.querySelectorAll('#authors .thimble-lane-nm')].map((n) => n.textContent),
+        turns: [...document.querySelectorAll('#turns .thimble-axis-lab')].map((l) => l.textContent),
+        wide: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      }
+    })
+    assert.ok(Math.abs(got.lab - got.mark) <= 2, `the label 09:30 over its commit: ${JSON.stringify(got)}`)
+    assert.ok(Math.abs(got.alone[0] - got.alone[2]) <= 1 && Math.abs(got.alone[1] - got.alone[3]) <= 1, `the track as wide as its mount: ${got.alone}`)
+    assert.ok(Math.abs(got.authors[0] - got.authors[1]) <= 1 && Math.abs(got.authors[2] - got.authors[3]) <= 1, `the axis over the tracks, past the names: ${got.authors}`)
+    assert.deepEqual(got.names, ['ana', 'bo', 'cy'])
+    assert.ok(got.turns.length > 2 && got.turns.every((l) => /^\d+$/.test(l!)), `turns on the axis: ${got.turns}`)
+    assert.equal(got.wide, 0)
+    await page.close()
+  })
+})

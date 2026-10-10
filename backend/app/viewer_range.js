@@ -427,6 +427,8 @@
       to: s.to,
       width: s.width,
       broken: s.broken,
+      /** the units: 's', 'ms' or 'n' */
+      unit: s.u.unit,
       x: function (t) {
         return s.x(t)
       },
@@ -456,6 +458,18 @@
       _s: s,
     }
   }
+  // a scale of a span the page gives, for a part drawn without a range (viewer_controls.js thimble.timeline): `from`
+  // to `to` across `width` px in `unit` ('s', 'ms' or 'n'), with format(t, step) as a range words a time
+  if (shared)
+    shared.scale = function (unit, from, to, width) {
+      var u = new Units(unit)
+      var sc = scaleApi(new Scale(u, from, to, width))
+      var years = u.time && u.parts(from).y !== u.parts(to).y
+      sc.format = function (t, step) {
+        return u.at(t, step == null ? to - from : step, years)
+      }
+      return sc
+    }
 
   // the stretches of time that hold data: the sorted times, split where two lie more than `gap` apart
   function stretches(sorted, gap) {

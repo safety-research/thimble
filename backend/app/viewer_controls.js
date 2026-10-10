@@ -10,11 +10,14 @@
 //   thimble.rows({ mount, fields, initial, onChange })    Rows, in the top row: what the lanes or rows are grouped by, a field
 //                                                        or a label, with a lane for the records with no value. A field with
 //                                                        parentOf(key) is a tree, drawn left-aligned with tree guides
-//   thimble.lanes({ mount, rows, range, ... })           the overview as lanes on the time range's scale: a lane per group of
-//                                                        Rows, the marks in the Color by colours (or with `density` bars of
-//                                                        the records per bin), a failure underlined in the problem red, a
-//                                                        quiet cursor line on hover, the detail list's rows in view marked
-//                                                        as a tint, and the key's entries as toggles
+//   thimble.timeline({ mount, rows, range, ... })        the overview as lanes on one axis of times or numbers (the time
+//                                                        range's scale, else the records' own span with an axis of its
+//                                                        own): a lane per group of Rows, a field or a function, the marks
+//                                                        in the Color by colours (or with `density` bars of the records
+//                                                        per bin), a failure underlined in the problem red, a quiet
+//                                                        cursor line on hover, the detail list's rows in view marked as a
+//                                                        tint, and the key's entries as toggles; thimble.lanes, its old
+//                                                        name, is the same call
 //   thimble.key(mount, entries, { onChange })            a key whose entries turn their series off and on
 //   thimble.divider({ top, key })                        a bar between the overview and the detail list that a drag moves
 //
@@ -1137,11 +1140,15 @@
     return k.api
   }
 
-  // ---------------------------------------------------------------- lanes
-  // The overview as lanes on the time range's scale (thimble.timeRange): a lane per group of Rows (or of `groups`), its
-  // name in a column at the left with its tree guide, its records as marks in the Color by colours (grey with Off), as
-  // wide as each ran (`end`), a band where the group ran (`band`), and a record that failed (`problem`) underlined in the
-  // problem red. Hovering a lane draws a thin cursor line across the lanes and a tip of the time and the record there;
+  // ---------------------------------------------------------------- the timeline
+  // The overview as lanes on one axis of times or numbers (thimble.timeline; thimble.lanes is its old name): a lane per
+  // group of `rows` (the Rows control, a field's name or a function of a record) or of `groups(items)`, its name in a
+  // column at the left with its tree guide, its records as marks in the Color by colours (grey with Off or with no Color
+  // by), as wide as each ran (`end`), a band where the group ran (`band`), and a record that failed (`problem`)
+  // underlined in the problem red. The axis is the time range's scale (`range`), else the records' own span in `unit`,
+  // with an axis of its own under the lanes; with no `rows`, one lane with no name. It needs no other part of the kit,
+  // and with no `colour` of the page's own it follows the page's Color by as it changes.
+  // Hovering a lane draws a thin cursor line across the lanes and a tip of the time and the record there;
   // never an inverted band. A click on a mark is onMark(record), on a lane's name onPick(group), which marks the lane
   // chosen; ▾ folds a parent's lanes into its own. The detail list's rows in view (`follow`, rows with data-t) are a
   // light tint across the lanes, and the range's own overview marks them too where it can (range.visible). With
@@ -1160,18 +1167,78 @@
     }
     return out
   }
+  // a record's place on the axis, a number in `unit`: a number as it is, a string that holds one as that number, and on
+  // an axis of time a Date or an ISO time too, in seconds ('s') or ms ('ms'); else null, a record with no place
+  function placeOf(v, unit) {
+    if (typeof v === 'number') return isFinite(v) ? v : null
+    if (typeof v === 'string' && v.trim() !== '' && isFinite(Number(v))) return Number(v)
+    if (unit === 'n') return null
+    var ms = Object.prototype.toString.call(v) === '[object Date]' ? v.getTime() : typeof v === 'string' ? Date.parse(v) : NaN
+    return isFinite(ms) ? (unit === 'ms' ? ms : ms / 1000) : null
+  }
+  // the lanes of a field or a function of a record (`rows` with no Rows control): its values as the records first take
+  // them, then a lane for the records with none
+  function groupsOf(items, rowOf, word) {
+    var by = {}
+    var order = []
+    var none = []
+    var bad = false
+    for (var i = 0; i < items.length; i++) {
+      var v = null
+      try {
+        v = rowOf(items[i])
+      } catch (e) {
+        if (!bad) kit.report(e)
+        bad = true
+      }
+      if (v == null || v === '' || typeof v === 'object') {
+        none.push(items[i])
+        continue
+      }
+      var k = String(v)
+      if (!by[k]) {
+        by[k] = []
+        order.push(k)
+      }
+      by[k].push(items[i])
+    }
+    var node = function (k, name, its) {
+      return { key: k, value: k === NONE ? null : k, name: name, depth: 0, guide: '', last: true, heading: false, parent: null, children: 0, items: its }
+    }
+    var out = order.map(function (k) {
+      return node(k, k, by[k])
+    })
+    if (none.length) out.push(node(NONE, word ? 'No ' + word : 'No value', none))
+    return out
+  }
+  var PAD = 6 // px left either side of the records' span on an axis of the timeline's own, so no mark sits on its edge
   function Lanes(opts) {
     var self = this
     this.opts = opts
     this.mount = el(opts.mount)
-    this.rows = opts.rows || null
+    var by = opts.rows
+    this.rows = by && typeof by === 'object' && typeof by.groups === 'function' ? by : null
+    this.rowOf = typeof by === 'function' ? by : typeof by === 'string' && by ? function (it) { return it && typeof it === 'object' ? it[by] : null } : null
+    this.rowWord = typeof by === 'string' ? by : ''
     this.range = opts.range || null
     this.colour = opts.colour || null
-    this.time = typeof opts.time === 'function' ? opts.time : function (it) { return it.t != null ? it.t : it.time }
-    this.end = typeof opts.end === 'function' ? opts.end : null
+    this.unitOpt = opts.unit === 'ms' || opts.unit === 'n' ? opts.unit : 's'
+    this.unit = this.unitOpt
+    var at = typeof opts.time === 'function' ? opts.time : function (it) { return it.t != null ? it.t : it.time }
+    var end = typeof opts.end === 'function' ? opts.end : null
+    this.time = function (it) {
+      return placeOf(at(it), self.unit)
+    }
+    this.end = end
+      ? function (it) {
+          return placeOf(end(it), self.unit)
+        }
+      : null
     this.band = typeof opts.band === 'function' ? opts.band : null
     this.problem = typeof opts.problem === 'function' ? opts.problem : null
-    this.namesW = Number(opts.names) > 0 ? Number(opts.names) : 200
+    // with nothing to tell lanes apart, one lane and no column of names
+    this.bare = !this.rows && !this.rowOf && typeof opts.groups !== 'function'
+    this.namesW = opts.names != null && Number(opts.names) >= 0 ? Number(opts.names) : this.bare ? 0 : 200
     this.name = 'lanes:' + (opts.key || (this.mount && this.mount.id) || 'lanes')
     this.items = []
     this.nodes = []
@@ -1181,12 +1248,24 @@
     this.words = { band: words.band || 'running', problem: words.problem || 'failed' }
     if (!this.mount) return
     this.mount.classList.add('thimble-lanes')
+    this.mount.classList.toggle('is-nameless', !this.namesW)
     this.mount.style.setProperty('--thimble-names', this.namesW + 'px')
+    // with no range, the axis of the records' own span under the lanes, as wide as their tracks, and the key beside it
+    // where the names stand
+    var foot = null
+    if (!this.range) {
+      foot = document.createElement('div')
+      foot.className = 'thimble-lanes-foot'
+      this.axisEl = document.createElement('div')
+      this.axisEl.className = 'thimble-lanes-axis'
+      foot.appendChild(this.axisEl)
+    }
     this.keyEl = el(opts.keyMount)
     if (!this.keyEl) {
       this.keyEl = document.createElement('div')
       this.keyEl.className = 'thimble-lanes-key'
-      this.mount.appendChild(this.keyEl)
+      if (foot && this.namesW) foot.insertBefore(this.keyEl, this.axisEl)
+      else this.mount.appendChild(this.keyEl)
     }
     this.key = thimble.key(this.keyEl, [], {
       key: this.name,
@@ -1197,6 +1276,12 @@
     this.body = document.createElement('div')
     this.body.className = 'thimble-lanes-body'
     this.mount.appendChild(this.body)
+    if (foot) this.mount.appendChild(foot)
+    // with no Color by of the page's own given (`colour`), the marks follow the page's Color by as it changes
+    if (!this.colour && typeof shared.onColour === 'function')
+      shared.onColour(function () {
+        if (self.nodes.length && self.mount.isConnected) self.paint()
+      })
     this.spanEl = document.createElement('div')
     this.spanEl.className = 'thimble-lanes-span'
     this.spanEl.setAttribute('aria-hidden', 'true')
@@ -1229,25 +1314,43 @@
   Lanes.prototype.trackW = function () {
     return Math.max(10, this.body.clientWidth - this.namesW)
   }
+  // a record's end, no earlier than its place
+  Lanes.prototype.endOf = function (it, t) {
+    if (!this.end) return t
+    var self = this
+    var e = safe(function () { return self.end(it) }, null)
+    return e == null || e < t ? t : e
+  }
   Lanes.prototype.scale = function () {
     var w = this.trackW()
     if (this.range && typeof this.range.scale === 'function') return this.range.scale(w)
-    // without a range: the records' whole span, linear
+    // without a range: the records' whole span, PAD px in from each edge, on a scale of its own; one record's moment,
+    // or none, in the middle of a minute (of one unit for plain numbers)
     var a = Infinity
     var b = -Infinity
     for (var i = 0; i < this.items.length; i++) {
       var t = this.time(this.items[i])
+      var e = this.endOf(this.items[i], t)
       if (t < a) a = t
-      if (t > b) b = t
+      if (e > b) b = e
     }
     if (!isFinite(a)) a = b = 0
-    if (b <= a) b = a + 1
+    if (b <= a) {
+      var half = this.unit === 'n' ? 0.5 : this.unit === 'ms' ? 30000 : 30
+      a -= half
+      b += half
+    }
+    var pad = ((b - a) * PAD) / Math.max(1, w - 2 * PAD)
+    a -= pad
+    b += pad
+    if (typeof shared.scale === 'function') return shared.scale(this.unit, a, b, w)
     return { from: a, to: b, width: w, x: function (t) { return ((t - a) / (b - a)) * w }, t: function (x) { return a + (x / w) * (b - a) } }
   }
-  // the lanes: the groups of Rows (or `groups(items)`), a parent folded taking its descendants' records
+  // the lanes: the groups of Rows, a field or a function (or `groups(items)`), a parent folded taking its descendants'
+  // records
   Lanes.prototype.layout = function () {
     var items = this.items
-    var nodes = typeof this.opts.groups === 'function' ? safe(function () { return this.opts.groups(items) }.bind(this), []) : this.rows ? this.rows.groups(items) : [{ key: '*', name: 'All', depth: 0, guide: '', items: items.slice() }]
+    var nodes = typeof this.opts.groups === 'function' ? safe(function () { return this.opts.groups(items) }.bind(this), []) : this.rows ? this.rows.groups(items) : this.rowOf ? groupsOf(items, this.rowOf, this.rowWord) : [{ key: '*', name: 'All', depth: 0, guide: '', items: items.slice() }]
     var folded = this.folded()
     var out = []
     var hideBelow = null
@@ -1269,8 +1372,22 @@
     this.nodes = out
     return out
   }
+  // the units of the axis: the range's, else `unit`
+  Lanes.prototype.units = function () {
+    var r = this.range
+    var u = r && typeof r.scale === 'function' ? safe(function () { return r.scale(1).unit }, null) : null
+    return u === 's' || u === 'ms' || u === 'n' ? u : this.unitOpt
+  }
   Lanes.prototype.draw = function (items) {
-    if (Array.isArray(items)) this.items = items
+    if (Array.isArray(items)) {
+      // the records the axis can place: those whose place is a number, a Date or a time
+      this.unit = this.units()
+      var self = this
+      var placed = function (it) {
+        return it != null && self.time(it) != null
+      }
+      this.items = items.every(placed) ? items : items.filter(placed)
+    }
     if (!this.mount) return
     this.layout()
     this.paint()
@@ -1301,6 +1418,19 @@
     }
     var vals = colour && !colour.off ? colour.values || [] : []
     var order = vals.filter(function (v) { return v.value != null }).map(function (v) { return String(v.value) })
+    // no chips counted yet, as when no list hands Color by its records: the values as the lanes' records first take them
+    if (!order.length && colour && !colour.off) {
+      var seen = {}
+      this.nodes.forEach(function (node) {
+        ;(node.items || []).forEach(function (it) {
+          var v = colour.valueOf(it)
+          if (v != null && !seen[v]) {
+            seen[v] = true
+            order.push(String(v))
+          }
+        })
+      })
+    }
     var slot = {}
     order.forEach(function (v, i) { slot[v] = i })
     var K = order.length + 1
@@ -1387,29 +1517,43 @@
           })
           its = []
         }
+        var marks = []
         for (var i = 0; i < its.length; i++) {
           var it = its[i]
           var t = self.time(it)
-          var e = self.end ? safe(function () { return self.end(it) }, t) : t
+          var e = self.endOf(it, t)
           if (e < sc.from || t > sc.to) continue
           var x = sc.x(Math.max(t, sc.from))
-          var w = Math.max(MARK_MIN, sc.x(Math.min(e, sc.to)) - x)
-          var c = colour ? colour.colourOf(colour.valueOf(it)) : null
-          svg += '<rect class="thimble-lane-mark" data-i="' + i + '" x="' + x.toFixed(1) + '" y="3" width="' + w.toFixed(1) + '" height="' + (LANE_H - 6) + '"' + (c ? ' style="fill:' + esc(c) + '"' : '') + '/>'
-          if (self.problem && safe(function () { return self.problem(it) }, false)) {
+          marks.push({ i: i, it: it, x: x, w: Math.max(MARK_MIN, sc.x(Math.min(e, sc.to)) - x) })
+        }
+        // the longest first, so that a mark as wide as a long run never hides a short one under it
+        if (self.end)
+          marks.sort(function (p, q) {
+            return q.w - p.w || p.i - q.i
+          })
+        for (var j = 0; j < marks.length; j++) {
+          var mk = marks[j]
+          var c = colour ? colour.colourOf(colour.valueOf(mk.it)) : null
+          svg += '<rect class="thimble-lane-mark" data-i="' + mk.i + '" x="' + mk.x.toFixed(1) + '" y="3" width="' + mk.w.toFixed(1) + '" height="' + (LANE_H - 6) + '"' + (c ? ' style="fill:' + esc(c) + '"' : '') + '/>'
+          if (self.problem && safe(function () { return self.problem(mk.it) }, false)) {
             problems++
-            if (self.on('problem')) svg += '<rect class="thimble-lane-bad" x="' + x.toFixed(1) + '" y="' + (LANE_H - 2) + '" width="' + Math.max(4, w).toFixed(1) + '" height="2"/>'
+            if (self.on('problem')) svg += '<rect class="thimble-lane-bad" x="' + mk.x.toFixed(1) + '" y="' + (LANE_H - 2) + '" width="' + Math.max(4, mk.w).toFixed(1) + '" height="2"/>'
           }
         }
         var anchor = typeof self.opts.anchor === 'function' ? safe(function () { return self.opts.anchor(n) }, null) : null
         var fold = n.children ? '<button type="button" class="thimble-lane-fold" data-fold="' + esc(n.key) + '" aria-expanded="' + !n.folded + '" aria-label="' + esc((n.folded ? 'Show the lanes under ' : 'Fold the lanes under ') + n.name) + '">' + (n.folded ? '▸' : '▾') + '</button>' : '<span class="thimble-lane-fold-gap"></span>'
         return (
           '<div class="thimble-lane' + (n.heading ? ' is-heading' : '') + (self.chosen === String(n.key) ? ' is-chosen' : '') + '" data-key="' + esc(n.key) + '"' + (anchor ? ' data-anchor="' + esc(anchor) + '" data-anchor-unmarked' : '') + '>' +
-          '<div class="thimble-lane-name" data-pick="' + esc(n.key) + '" title="' + esc(n.name) + '">' + guideHtml(n.guide) + fold + '<span class="thimble-lane-nm">' + esc(n.name) + '</span></div>' +
+          (self.namesW ? '<div class="thimble-lane-name" data-pick="' + esc(n.key) + '" title="' + esc(n.name) + '">' + guideHtml(n.guide) + fold + '<span class="thimble-lane-nm">' + esc(n.name) + '</span></div>' : '') +
           '<svg class="thimble-lane-track" width="' + W + '" height="' + H + '">' + svg + '</svg></div>'
         )
       })
       .join('')
+    // an axis of its own (no range): its ticks under the lanes' tracks
+    if (this.axisEl) {
+      if (sc.unit && this.items.length && typeof thimble.timeAxis === 'function') thimble.timeAxis(this.axisEl, sc)
+      else this.axisEl.innerHTML = ''
+    }
     this.body.innerHTML = html
     this.body.classList.toggle('has-tree', this.nodes.some(function (n) { return n.children > 0 || n.depth > 0 }))
     this.body.appendChild(this.spanEl)
@@ -1517,14 +1661,13 @@
   // the record of a lane nearest the pointer's x, within HIT px of its mark
   Lanes.prototype.itemAt = function (node, x) {
     var sc = this.sc
-    var colour = this.colour || (shared.colour && shared.colour())
     var best = null
     var bd = Infinity
     var its = node.items || []
     for (var i = 0; i < its.length; i++) {
       var it = its[i]
       var t = this.time(it)
-      var e = this.end ? safe(function () { return this.end(it) }.bind(this), t) : t
+      var e = this.endOf(it, t)
       if (e < sc.from || t > sc.to) continue
       var x0 = sc.x(Math.max(t, sc.from))
       var x1 = Math.max(x0 + MARK_MIN, sc.x(Math.min(e, sc.to)))
@@ -1545,8 +1688,18 @@
     var bin = ni >= 0 && b >= 0 ? d.per[ni].get(b) : null
     return bin ? { bin: bin, t0: d.bins[b][0], t1: d.bins[b][1] } : null
   }
-  Lanes.prototype.when = function (t) {
-    return this.range && typeof this.range.format === 'function' ? this.range.format(t) : new Date(t * 1000).toISOString().slice(11, 19)
+  // a moment in words as precise as `step` needs (by default four px of the scale): the scale's own words (no range),
+  // the range's, else plainly
+  Lanes.prototype.when = function (t, step) {
+    var sc = this.sc
+    if (step == null && sc) step = ((sc.to - sc.from) / Math.max(1, sc.width)) * 4
+    if (sc && typeof sc.format === 'function') return sc.format(t, step)
+    if (this.range && typeof this.range.format === 'function') return this.range.format(t, step)
+    return this.unit === 'n' ? num(t) : new Date(this.unit === 'ms' ? t : t * 1000).toISOString().slice(11, 19)
+  }
+  // a tip's head: the lane's name, but for the one lane with no name, and the time
+  Lanes.prototype.head = function (node, when) {
+    return '<div class="thimble-tip-h">' + (this.bare ? '' : esc(node.name) + ' · ') + esc(when) + '</div>'
   }
   Lanes.prototype.hover = function (e) {
     var at = this.laneAt(e)
@@ -1563,7 +1716,7 @@
     if (this.dens) {
       // Density: the bin's time, its records, and how many take each value, in the chips' colours
       var hit = this.binAt(at.node, x)
-      html = '<div class="thimble-tip-h">' + esc(at.node.name) + ' · ' + esc(hit ? this.when(hit.t0) + '–' + this.when(hit.t1) : this.when(t)) + '</div>'
+      html = this.head(at.node, hit ? this.when(hit.t0, hit.t1 - hit.t0) + '–' + this.when(hit.t1, hit.t1 - hit.t0) : this.when(t))
       if (hit) {
         var d = this.dens
         var bin = hit.bin
@@ -1576,7 +1729,7 @@
       return tip(html, e.clientX, rr.bottom, 'under', rr.top)
     }
     var it = this.itemAt(at.node, x)
-    html = '<div class="thimble-tip-h">' + esc(at.node.name) + ' · ' + esc(this.when(t)) + '</div>'
+    html = this.head(at.node, this.when(t))
     if (it) {
       var words = typeof this.opts.tip === 'function' ? safe(function () { return this.opts.tip(it) }.bind(this), '') : it.text || it.name || ''
       if (words) html += '<div class="thimble-tip-m">' + esc(String(words).slice(0, 200)) + '</div>'
@@ -1629,7 +1782,8 @@
   }
   function lanesApi(l) {
     return {
-      /** draw the lanes with these records (those of the range the page shows) */
+      /** draw the lanes with these records (those of the range the page shows); a record with no place on the axis is
+       *  left out */
       draw: function (items) {
         l.draw(items)
       },
@@ -1658,12 +1812,13 @@
       },
     }
   }
-  /** lanes on the time range's scale (see above) */
-  thimble.lanes = function (opts) {
+  /** the timeline: lanes on one axis of times or numbers (see above); thimble.lanes is its old name */
+  thimble.timeline = function (opts) {
     var l = new Lanes(opts || {})
     l.api = lanesApi(l)
     return l.api
   }
+  thimble.lanes = thimble.timeline
 
   // ---------------------------------------------------------------- the divider
   // A bar between the overview (`top`) and the detail list under it: a drag moves it, ↑ ↓ move it when it has the focus,

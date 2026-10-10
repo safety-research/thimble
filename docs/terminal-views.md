@@ -231,7 +231,7 @@ A query names the label colored by, so the reader's `thimble.colour_value` reads
 - `axis(d, scale, {gutter, legend, marks, onMark})` draws the chart's axis under it, `//` at each break with the date on
   the first label after it, `legend` in the gutter before the ticks as the key of the marks the chart draws other than
   Color by's (`─ running  × failed`), and the marks' labels on a row of their own. `legend` is runs, or entries
-  `{glyph, fg, name, on, toggle}`, each a control that hides or shows its series, dim while it is off, as `lanes`
+  `{glyph, fg, name, on, toggle}`, each a control that hides or shows its series, dim while it is off, as `timeline`
   gives them (`legend()`); entries that do not all fit the gutter stand on a row of their own over the axis.
 - `strip(scale, items, {value, colour, max, guide})` is one row of a chart over time (a lane), `maxBin(scale,
   groups)` the height every lane shares, and `bar(n, max)` one cell's bar.
@@ -265,10 +265,10 @@ Both take `fields` as Color by does, `{name, title, description, values, meaning
 for a value's words, and a query names the labels they read, so the reader reads them though they are not on in Files.
 A label's value comes from `labelValue(id, record)`, which Color by reads too.
 
-## Lanes
+## The timeline
 
-`lanes(opts)` draws the overview as lanes on the time range's scale: `ln.draw(d, {items, scale, gutter, room, span})`
-draws a lane per group of `rows`, its name in the gutter at the left, left-aligned with its tree guide in the rule gray,
+`timeline(opts)` draws the overview as lanes on one axis of times or numbers: `tl.draw(d, {items, scale, gutter, room,
+span})` draws a lane per group of `rows`, its name in the gutter at the left, left-aligned with its tree guide in the rule gray,
 a top group's `▾` `▸` at A0 folding the lanes under it into its own, and in each lane's cells its records' bars in the
 Color by hues on one height, `─` in the rule gray where it ran (`band(lane)`), `─` in a record's hue while that record
 ran (`end(item)`), and `×` in red where most of a cell's records failed (`problem(item)`). Where the lanes pass their
@@ -279,7 +279,17 @@ ran (`end(item)`), and `×` in red where most of a cell's records failed (`probl
   in the accent (`onPick(lane)`), such as to show that session's transcript.
 - `span`, `[t0, t1]` or a list (its `span()`), is the list's rows in view, on the selection background across the lanes.
 - `density: false` draws Events: a mark `▌` in the hue of each cell that holds a record, in place of its bars.
-- `ln.legend()` is the key for `axis`: an entry for each series the lanes drew (`─ running`, `× failed`), each a toggle.
+- `tl.legend()` is the key for `axis`: an entry for each series the lanes drew (`─ running`, `× failed`), each a toggle.
+- It needs no other part. With no `scale` it lays out its records' whole span and draws its own axis, with its key,
+  under the lanes. `rows` is the Rows control, a field's name or a function of a record; with none it draws one lane and
+  no names. `time(item)` is a record's place (`item.t` by default), a number, or a Date or an ISO time on an axis of time
+  (`unit` `'s'`, the default, or `'n'` for plain numbers such as turns), and a record with none is left out. `lanes` is
+  its old name.
+
+```js
+const tl = timeline({ rows: 'author', onMark: (c) => show(c) })
+draw((d) => tl.draw(d, { items: commits }))
+```
 
 ## The list
 

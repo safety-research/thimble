@@ -5,8 +5,9 @@
                             ticked while the value shows, no colour
      .thimble-rows-*        Rows in the top row: its trigger
      .thimble-key-*         a key whose entries are toggles, each swatch drawn as its series is drawn
-     .thimble-lanes-*,      the lanes: a name column with tree guides, a track per lane on the range's scale, the
-     .thimble-lane-*        problem red under a failure, the cursor line on hover, the tint of the list's rows in view
+     .thimble-lanes-*,      the timeline's lanes: a name column with tree guides, a track per lane on one axis (the
+     .thimble-lane-*        range's scale, or an axis of its own), the problem red under a failure, the cursor line on
+                            hover, the tint of the list's rows in view
      .thimble-divider       the bar between the overview and the detail list
      .thimble-side-*        the side panel at the list's right, its edge a drag resizes
      .thimble-transcript-*, a transcript's turns, as the File browser's Transcript mode draws them (files.css .reader-*)
@@ -107,10 +108,31 @@
   opacity: 0.35;
 }
 
-/* -------- lanes: the names with their tree guides at the left, a track per lane on the range's scale -------- */
+/* -------- the timeline: the names with their tree guides at the left, a track per lane on one axis -------- */
 .thimble-lanes {
   position: relative;
+  display: block;
   min-width: 0;
+}
+/* with no range, its own axis under the tracks, the key beside it where the names stand; with nothing to tell lanes
+   apart, no column of names */
+.thimble-lanes-foot {
+  display: grid;
+  grid-template-columns: var(--thimble-names, 200px) minmax(0, 1fr);
+  align-items: start;
+}
+.thimble-lanes-foot > .thimble-lanes-key {
+  grid-column: 1;
+  padding-top: 0;
+}
+.thimble-lanes-axis {
+  grid-column: 2;
+}
+.thimble-lanes-axis:empty {
+  display: none;
+}
+.thimble-lanes.is-nameless .thimble-lane {
+  grid-template-columns: minmax(0, 1fr);
 }
 .thimble-lanes-key {
   display: flex;
