@@ -843,10 +843,12 @@ describe('where the strip shows colours, and one strip at every length', () => {
     const [list, side] = await strips(frame)
     assert.deepEqual([list.plain, list.zoom], [false, false], `Color by's own list: colours, one strip ${JSON.stringify(list)}`)
     assert.deepEqual([side.plain, side.zoom, side.colours, side.width], [true, false, 0, 10], `the second pane: a plain track ${JSON.stringify(side)}`)
-    // its loupe lists its records, with no cells, as it draws no lane; the pane runs past the frame's bottom (400 px),
-    // where its strip is cut as the pane is
+    // its loupe lists its records, with no cells, as it draws no lane; the pane, which runs past the frame's bottom
+    // (400 px), scrolled into view, so that its strip holds the loupe's 17 rows
+    await frame().evaluate(() => document.getElementById('side')!.scrollIntoView({ block: 'end' }))
+    await page.waitForTimeout(150)
     const sb = (await frame().locator('.thimble-colour-strip').nth(1).boundingBox())!
-    await page.mouse.move(sb.x + sb.width / 2, sb.y + (Math.min(sb.y + sb.height, 400) - sb.y) * 0.5)
+    await page.mouse.move(sb.x + sb.width / 2, sb.y + sb.height * 0.5)
     await page.waitForTimeout(400)
     const lp = await frame().evaluate(() => {
       const el = [...document.querySelectorAll('.thimble-colour-loupe')].find((e) => e.hasAttribute('data-open'))!

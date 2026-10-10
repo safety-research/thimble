@@ -2369,10 +2369,11 @@
     this.el.style.top = top + 'px'
     this.el.style.height = h + 'px'
     this.h = h
-    // the part cut off above and below; the bracket at the strip's left is kept across
+    // the part cut off above and below, and the left edge of the list in view, which the loupe stays inside; the
+    // bracket at the strip's left is kept across
     var above = Math.max(0, snap(vis.top) - top)
     var below = Math.max(0, top + h - snap(vis.bottom))
-    this.cut = { top: top + above, bottom: top + h - below }
+    this.cut = { top: top + above, bottom: top + h - below, left: vis.left }
     var side = '-' + (BRACKET_PX + 2) + 'px'
     var clip = above || below ? 'inset(' + above + 'px ' + side + ' ' + below + 'px ' + side + ')' : ''
     if (clip !== this.clipped) this.el.style.clipPath = this.clipped = clip
@@ -2874,9 +2875,11 @@
   // where the strip stands, read before anything is written
   Strip.prototype.lpMeasure = function () {
     var r = this.track.getBoundingClientRect()
-    // the loupe stays beside the part of the strip that is not cut off
+    // the loupe stays beside the part of the strip that is not cut off, and over the list in view left of the strip,
+    // as Files' loupe stays over its reader: a narrow list's loupe never stands past the list's left edge
     var c = this.cut || r
-    var g = { left: r.left, top: r.top, lo: Math.max(r.top, c.top) + LOUPE_INSET, hi: Math.min(r.bottom, c.bottom) - LOUPE_INSET, h: this.h || r.height, room: r.left - LOUPE_OFF_PX - LOUPE_INSET }
+    var edge = this.cut ? this.cut.left : 0
+    var g = { left: r.left, top: r.top, lo: Math.max(r.top, c.top) + LOUPE_INSET, hi: Math.min(r.bottom, c.bottom) - LOUPE_INSET, h: this.h || r.height, room: r.left - LOUPE_OFF_PX - LOUPE_INSET - edge }
     this.lp.g = g
     return g
   }
@@ -2886,7 +2889,7 @@
     var L = this.lp
     if (!g) return
     var w = Math.max(120, Math.min(g.room, Math.max(LOUPE_MIN_W, Math.min(LOUPE_MAX_W, g.room - 24))))
-    var H = loupeHeight(L.one ? 1 : L.n)
+    var H = loupeHeight(this.lpRows(g))
     var right = Math.max(0, document.documentElement.clientWidth - g.left)
     var top = Math.max(g.lo, Math.min(g.hi - H, y - H / 2))
     // a loupe taller than the part of the strip that shows stays in the frame
@@ -2900,11 +2903,18 @@
     this.loupeBox.style.width = L.one ? '' : w + 'px'
     this.loupeBox.style.maxWidth = w + 'px'
   }
+  // the rows the loupe shows: one naming a record, else LOUPE_ROWS (all the records for fewer), and no more than the
+  // part of the strip not cut off holds, so the loupe of a short list, or of a list the page cuts, stays beside it
+  Strip.prototype.lpRows = function (g) {
+    if (this.lp.one) return 1
+    var fit = g ? Math.floor((g.hi - g.lo - loupeHeight(0)) / LOUPE_ROW_PX) : LOUPE_ROWS
+    return Math.min(LOUPE_ROWS, this.recs ? this.recs.length : 0, Math.max(1, fit))
+  }
   Strip.prototype.lpAim = function (unit) {
     var L = this.lp
     var total = this.recs ? this.recs.length : 0
     L.c = Math.max(0, Math.min(total - 1e-6, unit))
-    L.start = loupeStart(L.c, total, L.one ? 1 : Math.min(LOUPE_ROWS, total))
+    L.start = loupeStart(L.c, total, this.lpRows(L.g))
   }
   // the loupe drawn: what it shows after its anchor, a row per record written only where it changed, the record under
   // the pointer darker and those in view tinted, and the bracket beside the strip over the stretch it shows
@@ -2916,12 +2926,13 @@
     if (kind !== (L.one ? 'one' : 'list')) return this.lpClose()
     g = g || L.g || this.lpMeasure()
     var total = this.recs.length
-    var n = L.one ? 1 : Math.min(LOUPE_ROWS, total)
+    var n = this.lpRows(g)
+    var nWas = L.n
     L.n = n
     if (L.anchor === 'view') {
       this.lpAim(this.thumbUnit())
       if (!L.frozen) this.lpPlace(g.top + this.thumbMid(), g)
-    } else if (L.c >= total || L.start > total - n) this.lpAim(L.c)
+    } else if (L.c >= total || L.start > total - n || n !== nWas) this.lpAim(L.c)
     var box = this.loupeBox
     // a plain scrollbar draws no lane, so its rows have no cells
     var bare = this.plain && !this.find
@@ -2997,7 +3008,7 @@
     var g = this.lpMeasure()
     if (!this.lpNear(y - g.top)) return
     this.lpShow('pointer', kind === 'one')
-    this.lp.n = kind === 'one' ? 1 : Math.min(LOUPE_ROWS, this.recs.length)
+    this.lp.n = this.lpRows(g)
     this.lpAim(this.unitAt(y - g.top))
     this.lpPlace(y, g)
     this.lpDraw(g)
@@ -3006,8 +3017,9 @@
   Strip.prototype.lpOpenAtView = function () {
     if (this.lpKind() !== 'list') return
     this.lpShow('view', false)
-    this.lp.n = Math.min(LOUPE_ROWS, this.recs.length)
-    this.lpDraw(this.lpMeasure())
+    var g = this.lpMeasure()
+    this.lp.n = this.lpRows(g)
+    this.lpDraw(g)
   }
   Strip.prototype.lpClose = function () {
     var L = this.lp

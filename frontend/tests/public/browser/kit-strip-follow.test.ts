@@ -24,19 +24,24 @@ const KIT =
   `<style>${read('viewer_kit.css')}</style><style>${read('viewer_parts.css')}</style>`
 const TOKENS = readFileSync(path.join(FRONTEND, 'src', 'styles', 'tokens.css'), 'utf8') + ':root{--font-body:sans-serif;--font-mono:monospace}'
 // a gallery's page: sections one under another, the page scrolling; a tree of 300 files in a card 240 px tall, a list
-// of 200 records Color by gives its strip in another card, and a pane that scrolls in the page holding a third list
+// of 200 records Color by gives its strip in another card, a pane that scrolls in the page holding a third list, and
+// far below them a table of 200 pull requests with no Color by and a side panel, in the right half of its card
 const FILES = Array.from({ length: 300 }, (_, i) => ({ key: `run-${Math.floor(i / 30)}/agent-${i % 30}.jsonl`, n: i + 1 }))
+const PULLS = Array.from({ length: 200 }, (_, i) => ({ ref: `forge.db#prs/${i + 1}`, title: `PR ${i + 1}`, author: `author-${i % 7}`, state: i % 4 ? 'open' : 'merged' }))
 const RECORDS = Array.from({ length: 200 }, (_, i) => `<div class="rec" data-anchor="r.jsonl#L${i + 1}" data-colour="${i % 3 ? 'ok' : 'failed'}">record ${i + 1}</div>`).join('')
 const PAGE = `<!doctype html><html><head><style>${TOKENS} body{margin:0;background:var(--surface-card);font:12px sans-serif}
 .sec{margin:40px 16px;border:1px solid var(--border-subtle);border-radius:var(--radius-card);overflow:hidden}
 #grow{height:0} #tree{height:240px} #list{height:200px;overflow:auto} .rec{box-sizing:border-box;height:24px;padding:4px 8px}
-#pane{height:260px;overflow:auto;border:1px solid var(--border-subtle)} #inner{height:150px;overflow:auto} .tall{height:900px}</style>${KIT}</head><body>
+#pane{height:260px;overflow:auto;border:1px solid var(--border-subtle)} #inner{height:150px;overflow:auto} .tall{height:900px}
+#tb-body{height:220px;margin-left:420px} #tb{height:100%}</style>${KIT}</head><body>
 <div class="top" style="padding:8px"><span id="colour"></span></div>
 <div class="sec" style="height:120px">above</div>
 <div class="sec" id="s-tree"><div id="grow"></div><div id="tree"></div></div>
 <div class="sec">a section under the tree<div style="height:300px"></div></div>
 <div class="sec"><div id="list">${RECORDS}</div></div>
 <div class="sec"><div id="pane"><div style="height:120px">above the inner list</div><div id="inner">${RECORDS.replace(/r\.jsonl/g, 'i.jsonl')}</div><div class="tall"></div></div></div>
+<div class="tall"></div>
+<div class="sec"><div id="tb-body"><div id="tb"></div></div></div>
 <div class="tall"></div>
 <script>
 // each strip named by its list as it is made, the newest strip in the page
@@ -48,6 +53,9 @@ named('#tree')
 tree.fold('run-0', false)
 colour.strip('#inner')
 named('#inner')
+window.table = thimble.table({ mount: '#tb', rows: ${JSON.stringify(PULLS)}, color: false, side: thimble.side({ mount: '#tb-body', width: 0.45, min: 150 }),
+  columns: [{ name: 'title', title: 'Pull request', sub: (p) => p.author }, { name: 'state', title: 'State', width: 80 }] })
+named('#tb')
 </script></body></html>`
 
 type Box = { left: number; top: number; right: number; bottom: number; height: number; shown: boolean }
@@ -193,8 +201,8 @@ describe('the strip on a page that scrolls', () => {
     await f.waitForSelector('.thimble-colour-loupe[data-open]', { state: 'visible' })
     const l2 = await box(f, '.thimble-colour-loupe')
     assert.ok(l2.top >= s2.seen!.top && l2.top < s2.seen!.bottom, `the loupe stands beside the part of the strip that shows: ${JSON.stringify([s2, l2])}`)
-    // the list's top 100 px above the frame's bottom, the rest under it: the loupe, taller than that part, stays in the
-    // frame beside it, never under the frame's bottom edge
+    // the list's top 100 px above the frame's bottom, the rest under it: the loupe takes no more rows than that part
+    // holds and stays beside it, in the frame, never under the frame's bottom edge
     await page.mouse.move(5, 5)
     await f.evaluate(() => window.scrollBy(0, (document.getElementById('list') as HTMLElement).getBoundingClientRect().top - 500))
     await settle(f)
@@ -205,8 +213,9 @@ describe('the strip on a page that scrolls', () => {
     await page.waitForTimeout(450)
     await f.waitForSelector('.thimble-colour-loupe[data-open]', { state: 'visible' })
     const l3 = await box(f, '.thimble-colour-loupe')
-    assert.ok(l3.height > s3.seen!.bottom - s3.seen!.top, `the loupe is taller than the part that shows: ${JSON.stringify([s3, l3])}`)
-    assert.ok(l3.bottom <= 600 && l3.top >= 0 && l3.top < s3.seen!.bottom && l3.bottom > s3.seen!.top, `the loupe stays in the frame, beside the part that shows: ${JSON.stringify([s3, l3])}`)
+    const rows3 = await f.evaluate(() => document.querySelectorAll('.thimble-colour-loupe[data-open] .thimble-colour-loupe-row').length)
+    assert.ok(rows3 >= 1 && rows3 < 17, `fewer rows than the loupe's 17, as many as the part that shows holds: ${rows3}`)
+    assert.ok(l3.bottom <= 600 && l3.top >= s3.seen!.top - 1 && l3.bottom <= s3.seen!.bottom + 1, `the loupe stays in the frame, inside the part that shows: ${JSON.stringify([s3, l3])}`)
     assert.deepEqual(errors, [])
     await page.close()
   })
@@ -242,6 +251,41 @@ describe('the strip on a page that scrolls', () => {
     assert.ok((await box(f, '#inner')).bottom < pane.top)
     const shown = await f.evaluate((top) => [...document.querySelectorAll<HTMLElement>('.thimble-colour-strip')].some((e) => getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().height > 0 && e.getBoundingClientRect().bottom > top - 1 && e.getBoundingClientRect().top < top + 1), pane.top)
     assert.equal(shown, false, 'no strip stands at the pane\'s top edge')
+    assert.deepEqual(errors, [])
+    await page.close()
+  })
+
+  test('a table with no Color by: its track goes with it as the page scrolls, and its loupe stays inside the table once the side panel narrows it', async () => {
+    const { page, frame, errors } = await framed()
+    const f = frame()
+    await f.evaluate(() => (document.getElementById('tb') as HTMLElement).scrollIntoView({ block: 'center' }))
+    await settle(f)
+    const tb0 = await box(f, '#tb')
+    const s0 = await stripOf(f, '#tb')
+    beside(s0, tb0, undefined, 'the table in view')
+    await f.evaluate(() => window.scrollBy(0, 150))
+    await settle(f)
+    const tb1 = await box(f, '#tb')
+    const s1 = await stripOf(f, '#tb')
+    beside(s1, tb1, undefined, 'scrolled 150 px')
+    moved(s1, tb1, s0, tb0, 'scrolled 150 px')
+    // a row opened: the side panel takes the right of the card, the table narrows at its left, the track beside it
+    await f.click('#tb .thimble-table-row')
+    await f.waitForSelector('.thimble-side:not([hidden])')
+    await settle(f)
+    const tb = await box(f, '#tb')
+    const s = await stripOf(f, '#tb')
+    beside(s, tb, undefined, 'the side panel open')
+    assert.ok(tb.right - tb.left < 220, `the table is narrow: ${JSON.stringify(tb)}`)
+    // rest on the track: the loupe opens at its left over the table alone, never past the table's left edge onto the
+    // page, and no taller than the track
+    const p = await page.evaluate(() => (document.getElementById('f') as HTMLElement).getBoundingClientRect().top)
+    await page.mouse.move(s.left + 5, p + s.seen!.top + (s.seen!.bottom - s.seen!.top) / 2)
+    await page.waitForTimeout(450)
+    await f.waitForSelector('.thimble-colour-loupe[data-open]', { state: 'visible' })
+    const l = await box(f, '.thimble-colour-loupe[data-open] .thimble-colour-loupe-box')
+    assert.ok(l.left >= tb.left - 0.5 && l.right <= s.left + 0.5, `the loupe stays inside the table, left of its track: ${JSON.stringify({ l, tb, s })}`)
+    assert.ok(l.top >= s.seen!.top - 1 && l.bottom <= s.seen!.bottom + 1, `the loupe stands beside the track, no taller: ${JSON.stringify({ l, s })}`)
     assert.deepEqual(errors, [])
     await page.close()
   })
