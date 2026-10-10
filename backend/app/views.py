@@ -170,6 +170,9 @@ RANGE_JS = Path(__file__).with_name("viewer_range.js")  # the view kit's time ra
 CONTROLS_JS = Path(__file__).with_name("viewer_controls.js")
 SIDE_JS = Path(__file__).with_name("viewer_side.js")
 TRANSCRIPT_JS = Path(__file__).with_name("viewer_transcript.js")
+# the view kit's messages (thimble.messages), a conversation between people or agents as a chat app draws it, loaded
+# after the transcript; viewer_parts.css styles it
+MESSAGES_JS = Path(__file__).with_name("viewer_messages.js")
 # the view kit's search, table and diff (thimble.search, thimble.table, thimble.diff), loaded after the transcript and
 # before the record viewer; viewer_kit.css styles them
 SEARCH_JS = Path(__file__).with_name("viewer_search.js")
@@ -3230,10 +3233,10 @@ def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool
                    derived: list[dict[str, str]] | None = None) -> str:
     """The view's page as a frame loads it: the policy that blocks every load but the view's media route, the bridge
     (viewer_bridge.js), the order new values take the label palette (label_order.json, for Color by), the kit's Color by
-    control (viewer_colour.js), its row controls, side panel and transcript (viewer_controls.js, viewer_side.js,
-    viewer_transcript.js), its search, table and diff (viewer_search.js, viewer_table.js, viewer_diff.js), its record
-    viewer and charts (viewer_record.js, viewer_chart.js, with the canvas's chart drawing, KIT_CHART_JS) and its time
-    range selector (viewer_range.js),
+    control (viewer_colour.js), its row controls, side panel, transcript and messages (viewer_controls.js,
+    viewer_side.js, viewer_transcript.js, viewer_messages.js), its search, table and diff (viewer_search.js,
+    viewer_table.js, viewer_diff.js), its record viewer and charts (viewer_record.js, viewer_chart.js, with the canvas's
+    chart drawing, KIT_CHART_JS) and its time range selector (viewer_range.js),
     thimble's parts (viewer_kit.css, viewer_parts.css), the vendored
     libraries the view names, then view.html, whose
     own styles come after the parts. The browser adds the theme's tokens (ViewerFrame.tsx). `media` is the media
@@ -3262,6 +3265,7 @@ def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool
             f"<script>{_script_text(CONTROLS_JS.read_text('utf-8'))}</script>",
             f"<script>{_script_text(SIDE_JS.read_text('utf-8'))}</script>",
             f"<script>{_script_text(TRANSCRIPT_JS.read_text('utf-8'))}</script>",
+            f"<script>{_script_text(MESSAGES_JS.read_text('utf-8'))}</script>",
             f"<script>{_script_text(SEARCH_JS.read_text('utf-8'))}</script>",
             f"<script>{_script_text(TABLE_JS.read_text('utf-8'))}</script>",
             f"<script>{_script_text(DIFF_JS.read_text('utf-8'))}</script>",
@@ -4574,12 +4578,12 @@ def purple_note(html: str) -> str:
 
 # thimble's parts as a view's styles may touch them: the frame styles .chip, .btn, .seg, .field, the record card, the
 # Color by control, the time range selector, the search, the table and the diff (viewer_kit.css), Filter by, Rows, the
-# lanes, the key, the divider, the side panel, the transcript, the record viewer and the charts (viewer_parts.css), and a
-# view lays them out but does not restyle them or draw chips of its own
+# lanes, the key, the divider, the side panel, the transcript, the messages, the record viewer and the charts
+# (viewer_parts.css), and a view lays them out but does not restyle them or draw chips of its own
 _STYLE_RE = re.compile(r"<style\b[^>]*>(.*?)</style\s*>", re.S | re.I)
 _CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.S)
 _KIT_PART_RE = re.compile(r"\.(?:chip|btn|seg|field|thimble-(?:colour|range|axis|def|peek|reset|tip|filter|rows|ctl|key|lanes?|"
-                          r"divider|side|transcript|turn|card|search|table|diff|record|chart))(?:-[\w-]+)?(?![\w-])")
+                          r"divider|side|transcript|turn|msg|card|search|table|diff|record|chart))(?:-[\w-]+)?(?![\w-])")
 _CLASS_RE = re.compile(r"\.(-?[_a-zA-Z][\w-]*)")
 # what a part looks like, which the kit sets: its edge, fill, corners, colours, type and height. Its width, margins,
 # padding, flex and place are the page's layout.

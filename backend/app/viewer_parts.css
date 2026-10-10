@@ -13,6 +13,9 @@
      .thimble-side-*        the side panel at the list's right, its edge a drag resizes
      .thimble-transcript-*, a transcript's turns, as the File browser's Transcript mode draws them (files.css .reader-*)
      .thimble-turn-*
+     .thimble-msg-*         messages between people or agents, as a chat app draws them: an avatar in a rail, the
+                            author and the time in a head, a date line for each day, a reply one level in, an event
+                            on one line, quoted mail behind "…" and a long body behind Show more
      .thimble-record-*      a record's fields as a tree under its citation: a key and a value per row, a nested value
                             folded behind its key, a long string folded with Show more
      .thimble-chart-*       a chart in the canvas's theme (the drawing's own look is the chart style's, not CSS), and
@@ -436,8 +439,9 @@
 .thimble-transcript {
   min-width: 0;
 }
-/* what the list shows: the run, the session or the selection, and how many turns */
-.thimble-transcript-head {
+/* what the list shows: the run, the session or the selection, and how many turns (or messages) */
+.thimble-transcript-head,
+.thimble-msg-header {
   position: sticky;
   top: 0;
   z-index: 2;
@@ -451,7 +455,9 @@
   font: 500 var(--text-sm) / 1.4 var(--font-body);
 }
 .thimble-transcript-n,
-.thimble-transcript-sub {
+.thimble-transcript-sub,
+.thimble-msg-header-n,
+.thimble-msg-header-sub {
   color: var(--text-tertiary);
   font: 400 var(--text-mono-sm) / 1.4 var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -591,7 +597,8 @@
 }
 /* Show more under a long block's cut text, Show less in the same place once it is open: quiet text, as under a
    comment's statement (report.css .wu-cm-more) */
-.thimble-turn-more {
+.thimble-turn-more,
+.thimble-msg-more {
   display: block;
   height: 18px;
   margin: 2px 0 0 -2px;
@@ -603,14 +610,17 @@
   font: 500 var(--text-xs) / 18px var(--font-body);
   cursor: pointer;
 }
-.thimble-turn-more:hover {
+.thimble-turn-more:hover,
+.thimble-msg-more:hover {
   color: var(--text-primary);
   text-decoration: underline;
   text-decoration-color: var(--border-strong);
   text-underline-offset: 2px;
 }
 .thimble-turn-toggle:focus-visible,
-.thimble-turn-more:focus-visible {
+.thimble-turn-more:focus-visible,
+.thimble-msg-more:focus-visible,
+.thimble-msg-dots:focus-visible {
   outline: none;
   border-radius: var(--radius-hl);
   box-shadow: 0 0 0 1.5px var(--accent);
@@ -640,8 +650,9 @@
 .thimble-transcript-none {
   padding: 28px 16px;
 }
-/* a new session: its name between two hairlines */
-.thimble-transcript-session {
+/* a new session, or a new day of messages: its name between two hairlines */
+.thimble-transcript-session,
+.thimble-msg-day {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -652,13 +663,16 @@
   text-transform: uppercase;
 }
 .thimble-transcript-session::before,
-.thimble-transcript-session::after {
+.thimble-transcript-session::after,
+.thimble-msg-day::before,
+.thimble-msg-day::after {
   content: '';
   flex: 1;
   border-top: 1px solid var(--border-hairline);
 }
-/* a cited turn: the evidence highlight, fading by 1.5 s, as Files' (files.css .reader-hit) */
-.thimble-turn-hit::after {
+/* a cited turn or message: the evidence highlight, fading by 1.5 s, as Files' (files.css .reader-hit) */
+.thimble-turn-hit::after,
+.thimble-msg-hit::after {
   content: '';
   position: absolute;
   inset: 0;
@@ -674,6 +688,185 @@
   100% {
     opacity: 0;
   }
+}
+
+/* -------- messages between people or agents, as a chat app draws them (thimble.messages): each author's avatar in a
+   rail at the left, the author and the time in a head over the words, the head shared by the messages that follow it
+   (each message still its own row, so Color by's bar and a label's are its own); the header, the date lines, Show more
+   and the highlight are the transcript's (above) -------- */
+.thimble-msg-list {
+  min-width: 0;
+}
+.thimble-msg {
+  position: relative;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 0 10px;
+  padding: 8px 16px 3px 12px;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 52px;
+}
+.thimble-msg.is-cont {
+  padding-top: 0;
+}
+/* a reply: one level in, under its parent's words, with a smaller avatar, as a board or a forge draws a thread */
+.thimble-msg.is-reply {
+  grid-template-columns: 24px minmax(0, 1fr);
+  margin-left: 42px;
+}
+.thimble-msg.is-act {
+  cursor: pointer;
+}
+.thimble-msg.is-act:hover {
+  background: var(--surface-hover);
+}
+.thimble-msg:focus-visible {
+  outline: 1.5px solid var(--accent);
+  outline-offset: -1.5px;
+}
+.thimble-msg-rail {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  min-width: 0;
+  padding-top: 2px;
+}
+.thimble-msg-rail .avatar {
+  width: 32px;
+  height: 32px;
+  font-size: 12px;
+}
+.thimble-msg.is-reply .thimble-msg-rail .avatar {
+  width: 24px;
+  height: 24px;
+  font-size: 10px;
+}
+/* a message under a shared head: its time in the rail while the pointer is on it */
+.thimble-msg-railtime {
+  visibility: hidden;
+  padding-top: 1px;
+  color: var(--text-tertiary);
+  font: 400 10px / 1.6 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.thimble-msg:hover .thimble-msg-railtime,
+.thimble-msg:focus-within .thimble-msg-railtime {
+  visibility: visible;
+}
+.thimble-msg-main {
+  min-width: 0;
+}
+.thimble-msg-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.thimble-msg-author {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font: 600 var(--text-sm) / 1.45 var(--font-body);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.thimble-msg-time {
+  flex: none;
+  color: var(--text-tertiary);
+  font: 400 var(--text-mono-sm) / 1.45 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.thimble-msg-to {
+  color: var(--text-tertiary);
+  font: 400 var(--text-ui-sm) / 1.45 var(--font-body);
+  overflow-wrap: anywhere;
+}
+.thimble-msg-subject {
+  margin-top: 2px;
+  color: var(--text-primary);
+  font: 600 var(--text-sm) / 1.45 var(--font-body);
+  overflow-wrap: anywhere;
+}
+.thimble-msg-body {
+  margin-top: 1px;
+  color: var(--text-primary);
+  font: 400 var(--text-sm) / 1.5 var(--font-body);
+  overflow-wrap: anywhere;
+}
+.thimble-msg-body > * + *,
+.thimble-msg-rest > * + * {
+  margin-top: 6px;
+}
+/* words drawn without thimble.text: their lines as written */
+.thimble-msg-text.is-plain {
+  white-space: pre-wrap;
+}
+/* quoted mail: folded behind "…", as a mail app folds it; quiet once open */
+.thimble-msg-dots {
+  display: inline-flex;
+  align-items: center;
+  height: 14px;
+  margin: 0;
+  padding: 0 6px 5px;
+  border: 0;
+  border-radius: var(--radius-chip);
+  background: rgba(var(--ink-rgb), 0.08);
+  color: var(--text-secondary);
+  font: 600 13px / 1 var(--font-body);
+  cursor: pointer;
+}
+.thimble-msg-dots:hover,
+.thimble-msg-dots[aria-expanded='true'] {
+  background: rgba(var(--ink-rgb), 0.14);
+  color: var(--text-primary);
+}
+.thimble-msg-fold {
+  margin-top: 6px;
+  color: var(--text-secondary);
+}
+/* an event: one line, its icon in the rail in the ink, the time at the right, as a forge's timeline draws it */
+.thimble-msg-event {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.thimble-msg-event .thimble-msg-rail {
+  padding-top: 1px;
+}
+.thimble-msg-ico {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  color: var(--text-secondary);
+}
+.thimble-msg-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text-secondary);
+  font: 400 var(--text-ui-sm) / 1.5 var(--font-body);
+}
+.thimble-msg-said {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.thimble-msg-said .thimble-msg-author {
+  font: 600 var(--text-ui-sm) / 1.5 var(--font-body);
+  white-space: normal;
+}
+.thimble-msg-event .thimble-msg-body {
+  margin-top: 2px;
+}
+.thimble-msg-none {
+  padding: 28px 16px;
+  color: var(--text-tertiary);
 }
 
 /* -------- a record's fields as a tree (thimble.record): its citation, then a row per field, each level a grid of its
