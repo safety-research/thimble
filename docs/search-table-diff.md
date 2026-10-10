@@ -1,6 +1,6 @@
-# Search, tables and diffs in a view
+# Search, tables, diffs and text in a view
 
-Three parts of the view kit draw the records themselves, so a view looks like a system the analyst knows (an inbox, a
+Four parts of the view kit draw the records themselves, so a view looks like a system the analyst knows (an inbox, a
 code forge's commit, a wiki page's history) in thimble's parts rather than parts of its own:
 
 | part | call | what it is |
@@ -8,13 +8,15 @@ code forge's commit, a wiki page's history) in thimble's parts rather than parts
 | the search | `thimble.search` | a box in the top row that finds text in the records, as Files' find does |
 | the table | `thimble.table` | records in columns a click sorts by, for thousands of rows |
 | the diff | `thimble.diff` | two versions of a text side by side or inline, the words that changed marked |
+| the text | `thimble.text` | a record's text, such as a pull request's body or an email, as markdown or plain text |
 
 Each works alone on any element with plain records: none needs Color by, a time range or the side panel. Each works
 with the other parts of the kit when the page has them, through the same hooks as the rest of the kit
 ([color.md](color.md), [rows-and-filters.md](rows-and-filters.md)): a record's element carries its `data-anchor`, so a
 label marks it, a ⌘-click asks about it and Color by draws its bar; Reset puts each back as the view opens; each draws
 in the theme's tokens, light and dark. Their styles are the kit's (`thimble-search-*`, `thimble-table-*`,
-`thimble-diff-*`): a page sets their width and place, never how they look (the view checks note a rule that does).
+`thimble-diff-*`, `thimble-text-*`): a page sets their width and place, never how they look (the view checks note a
+rule that does).
 
 ## The search
 
@@ -74,14 +76,14 @@ table does this itself when it is given the search.
 
 A part that folds text away keeps it in the page in an element with `data-thimble-fold` and the `hidden` attribute:
 the diff's unchanged lines, the transcript's folded turns and a long block's lines past the sixth
-([rows-and-filters.md](rows-and-filters.md)), and the record's folded values, a long string's lines past the sixth and a
-long list's items past the first 100. The search counts what it holds, ticks it where the fold stands, and sends the
-element a `thimble-unfold` event when it goes to a match inside it; the part opens the fold there, and the match shows.
-A fold may hold another: the event goes to the innermost fold around the match, and again while the match stays folded,
-so a part may open one level at a time, such as a folded tool call whose output is long. A match that a box cuts from
-view by its size, such as a long block whose height is cut to six lines (its overflow hidden), sends that box the same
-event. A citation's quote in folded or cut text opens its fold the same way. A hidden element without
-`data-thimble-fold` is not searched.
+([rows-and-filters.md](rows-and-filters.md)), the record's folded values, a long string's lines past the sixth and a
+long list's items past the first 100, and the rest of a long text. The search counts what it holds, ticks it where the
+fold stands, and sends the element a `thimble-unfold` event when it goes to a match inside it; the part opens the fold
+there, and the match shows. A fold may hold another: the event goes to the innermost fold around the match, and again
+while the match stays folded, so a part may open one level at a time, such as a folded tool call whose output is long.
+A match that a box cuts from view by its size, such as a long block whose height is cut to six lines (its overflow
+hidden), sends that box the same event. A citation's quote in folded or cut text opens its fold the same way. A hidden
+element without `data-thimble-fold` is not searched.
 
 ## The table
 
@@ -187,3 +189,48 @@ diff.set({ before: newer.text, after: next.text, ref: next.ref })   // the next 
 
 A history of revisions draws a diff per revision in its own element, each its revision's text against the one before;
 a long history draws the diffs of the revisions near its view, as a list draws its rows.
+
+## The text
+
+`thimble.text(mount, text, {format, ref, mentions, fold})` draws a record's text in `mount`, such as a pull request's
+body, a comment, a post, an email or a wiki page, and returns its element. `thimble.text.html(text, opts)` gives the
+same as html, for a part that takes markup: `recordCard`'s `{html}`, a table column's `html` or the side panel's
+details.
+
+- `'markdown'`, the default, is CommonMark with GitHub's tables, task lists (as disabled checkboxes), strikethrough,
+  autolinks and footnotes, drawn as the File browser draws a markdown file: headings in the body face at three sizes,
+  code in mono on a light tint of the ink, a table as the kit's `.table`, a quote indented in the secondary ink. The
+  text takes the face, size and ink of the element around it.
+- Raw HTML in the text shows as text, never parsed. An image is not loaded: its alt text shows in a neutral chip.
+- A link to a URL shows its address on hover and opens nothing, since a view has no network. A link to a corpus path,
+  such as `[the run](runs/r3.jsonl#L88)`, or to a view's unit, `view:<slug>/<key>`, opens with `thimble.navigate`; a
+  relative path is read from the folder of `ref`'s file, as a browser reads it.
+- `'plain'` is the text as written, its line breaks kept and its URLs links, for an email or a log.
+- `mentions` turns words that name a record into links that open it with `thimble.navigate`, such as a forge's `#123`
+  or a board's `@agent-08`. Each is `{match, ref}`: `match` a regular expression, `ref(m)` the ref for its match `m`,
+  or null to leave it as text. Code and links keep their text.
+- `fold` folds a text longer than that many lines after its first `fold` lines, with Show more and Show less: 12 in
+  `html()`, none in a mount, `0` for none. A long line counts once for every 100 characters, as it wraps, and a fold
+  hides 4 lines at least. The folded text stays in the page, so the search finds it and opens the fold, as a
+  citation's quote does. Opened, the text shows as it was drawn, a list's numbers and a table's columns kept.
+- `ref` is the text's record, its `data-anchor`: a label marks it, a ⌘-click asks about it, and a citation that quotes
+  the record's source word for word, its `**`, backticks and list markers included, is found in the rendered text.
+- A click on a link or on Show more, or Enter on it, does only that, so a card the text is in does not open as well.
+  In a table's cell the text runs on as one line, and in a card's body, which shows its first lines, it has no Show
+  more.
+
+```js
+const mentions = [{ match: /#(\d+)/g, ref: (m) => 'view:forge/pull/' + m[1] }]
+side.open({ title: pr.title, ref: pr.ref, render: (body) => thimble.text(body, pr.body, { ref: pr.ref, mentions }) })
+col.innerHTML = prs.map((pr) => thimble.recordCard({ ref: pr.ref, title: pr.title,
+  body: { html: thimble.text.html(pr.body, { mentions, fold: 0 }) } })).join('')
+```
+
+| option | what it is |
+|---|---|
+| `format` | `'markdown'` (the default) or `'plain'` |
+| `ref` | the text's record, its `data-anchor` |
+| `mentions` | `[{match, ref(m)}]`, the words that open a record |
+| `fold` | the lines shown before Show more: 12 in `html()`, none in a mount; `0` for none |
+
+Without the built interface, as in a checkout that was not built, markdown shows as plain text.

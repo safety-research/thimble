@@ -168,6 +168,9 @@ RANGE_JS = Path(__file__).with_name("viewer_range.js")  # the view kit's time ra
 # transcript (thimble.transcript), its record viewer (thimble.record) and its charts (thimble.chart), loaded between
 # Color by and the range, which takes the bridge's part away; their styles
 CONTROLS_JS = Path(__file__).with_name("viewer_controls.js")
+# the view kit's formatted text (thimble.text), loaded after the row controls, whose helpers it uses, with the kit's
+# markdown parser (KIT_MARKDOWN_JS) just before it; viewer_parts.css styles it
+TEXT_JS = Path(__file__).with_name("viewer_text.js")
 SIDE_JS = Path(__file__).with_name("viewer_side.js")
 TRANSCRIPT_JS = Path(__file__).with_name("viewer_transcript.js")
 # the view kit's search, table and diff (thimble.search, thimble.table, thimble.diff), loaded after the transcript and
@@ -179,9 +182,13 @@ RECORD_JS = Path(__file__).with_name("viewer_record.js")
 CHART_JS = Path(__file__).with_name("viewer_chart.js")
 PARTS_CSS = Path(__file__).with_name("viewer_parts.css")
 # the canvas's own chart drawing (frontend lib/vizTheme, lib/chartDefaults, lib/vegaDraw) as one script, which vite
-# build writes beside the app (frontend/vite.config.ts kitChart) and thimble.chart draws with, so a view's chart and a
+# build writes beside the app (frontend/vite.config.ts kitScript) and thimble.chart draws with, so a view's chart and a
 # card's take one theme from one code; a page without it (an unbuilt checkout) says so where it draws a chart
 KIT_CHART_JS = "kit/chart.js"
+# the markdown parser thimble.text draws with (frontend lib/kitMarkdown, micromark with GitHub's extensions, the parser
+# under the app's react-markdown), which vite build writes beside the app as one script; a page without it (an unbuilt
+# checkout) shows markdown as plain text
+KIT_MARKDOWN_JS = "kit/markdown.js"
 # the order new values take the label palette's places, which the kit's Color by reads as window.__thimbleLabelOrder
 # (the frontend imports the same file; kernel_thimble.LABEL_ORDER is the server's)
 LABEL_ORDER_JSON = Path(__file__).with_name("label_order.json")
@@ -3218,10 +3225,11 @@ def _style_text(css: str) -> str:
     return re.sub(r"</(style)", r"<\\/\1", css, flags=re.I)
 
 
-def _kit_chart() -> str:
-    """The canvas's chart drawing for thimble.chart (KIT_CHART_JS in the built UI), '' when the UI is not built."""
+def _kit_script(name: str) -> str:
+    """A script of the built UI the kit draws with (KIT_CHART_JS, the canvas's chart drawing for thimble.chart, or
+    KIT_MARKDOWN_JS, the markdown parser for thimble.text), '' when the UI is not built."""
     try:
-        return (Path(config.FRONTEND_DIST) / KIT_CHART_JS).read_text("utf-8")
+        return (Path(config.FRONTEND_DIST) / name).read_text("utf-8")
     except OSError:
         return ""
 
@@ -3230,10 +3238,10 @@ def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool
                    derived: list[dict[str, str]] | None = None) -> str:
     """The view's page as a frame loads it: the policy that blocks every load but the view's media route, the bridge
     (viewer_bridge.js), the order new values take the label palette (label_order.json, for Color by), the kit's Color by
-    control (viewer_colour.js), its row controls, side panel and transcript (viewer_controls.js, viewer_side.js,
-    viewer_transcript.js), its search, table and diff (viewer_search.js, viewer_table.js, viewer_diff.js), its record
-    viewer and charts (viewer_record.js, viewer_chart.js, with the canvas's chart drawing, KIT_CHART_JS) and its time
-    range selector (viewer_range.js),
+    control (viewer_colour.js), its row controls, formatted text, side panel and transcript (viewer_controls.js,
+    viewer_text.js with its markdown parser, KIT_MARKDOWN_JS, viewer_side.js, viewer_transcript.js), its search, table
+    and diff (viewer_search.js, viewer_table.js, viewer_diff.js), its record viewer and charts (viewer_record.js,
+    viewer_chart.js, with the canvas's chart drawing, KIT_CHART_JS) and its time range selector (viewer_range.js),
     thimble's parts (viewer_kit.css, viewer_parts.css), the vendored
     libraries the view names, then view.html, whose
     own styles come after the parts. The browser adds the theme's tokens (ViewerFrame.tsx). `media` is the media
@@ -3260,13 +3268,15 @@ def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool
             f"<script>{_script_text(BRIDGE_JS.read_text('utf-8'))}</script>",
             f"<script>{_script_text(COLOUR_JS.read_text('utf-8'))}</script>",
             f"<script>{_script_text(CONTROLS_JS.read_text('utf-8'))}</script>",
+            *([f"<script>{_script_text(parser)}</script>"] if (parser := _kit_script(KIT_MARKDOWN_JS)) else []),
+            f"<script>{_script_text(TEXT_JS.read_text('utf-8'))}</script>",
             f"<script>{_script_text(SIDE_JS.read_text('utf-8'))}</script>",
             f"<script>{_script_text(TRANSCRIPT_JS.read_text('utf-8'))}</script>",
             f"<script>{_script_text(SEARCH_JS.read_text('utf-8'))}</script>",
             f"<script>{_script_text(TABLE_JS.read_text('utf-8'))}</script>",
             f"<script>{_script_text(DIFF_JS.read_text('utf-8'))}</script>",
             f"<script>{_script_text(RECORD_JS.read_text('utf-8'))}</script>",
-            *([f"<script>{_script_text(drawing)}</script>"] if (drawing := _kit_chart()) else []),
+            *([f"<script>{_script_text(drawing)}</script>"] if (drawing := _kit_script(KIT_CHART_JS)) else []),
             f"<script>{_script_text(CHART_JS.read_text('utf-8'))}</script>",
             f"<script>{_script_text(RANGE_JS.read_text('utf-8'))}</script>",
             f"<style>{KIT_CSS.read_text('utf-8')}</style>",
@@ -4574,12 +4584,12 @@ def purple_note(html: str) -> str:
 
 # thimble's parts as a view's styles may touch them: the frame styles .chip, .btn, .seg, .field, the record card, the
 # Color by control, the time range selector, the search, the table and the diff (viewer_kit.css), Filter by, Rows, the
-# lanes, the key, the divider, the side panel, the transcript, the record viewer and the charts (viewer_parts.css), and a
-# view lays them out but does not restyle them or draw chips of its own
+# lanes, the key, the divider, the side panel, the transcript, the record viewer, the charts and the text
+# (viewer_parts.css), and a view lays them out but does not restyle them or draw chips of its own
 _STYLE_RE = re.compile(r"<style\b[^>]*>(.*?)</style\s*>", re.S | re.I)
 _CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.S)
 _KIT_PART_RE = re.compile(r"\.(?:chip|btn|seg|field|thimble-(?:colour|range|axis|def|peek|reset|tip|filter|rows|ctl|key|lanes?|"
-                          r"divider|side|transcript|turn|card|search|table|diff|record|chart))(?:-[\w-]+)?(?![\w-])")
+                          r"divider|side|transcript|turn|card|search|table|diff|record|chart|text))(?:-[\w-]+)?(?![\w-])")
 _CLASS_RE = re.compile(r"\.(-?[_a-zA-Z][\w-]*)")
 # what a part looks like, which the kit sets: its edge, fill, corners, colours, type and height. Its width, margins,
 # padding, flex and place are the page's layout.

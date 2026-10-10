@@ -1,5 +1,5 @@
 // The canvas's chart drawing for a view's page: vite build writes this module as one script, dist/kit/chart.js
-// (vite.config.ts kitChart), which backend views.frame_document puts in every view page for the view kit's
+// (vite.config.ts kitScript), which backend views.frame_document puts in every view page for the view kit's
 // thimble.chart (backend/app/viewer_chart.js). A view's chart is so drawn by the code that draws the canvas's charts
 // (lib/vegaDraw drawChart: lib/chartDefaults, the chart style of lib/vizTheme read from the page's own tokens, the
 // fitting to the box), never by a copy of it. It draws with the vega and vega-embed builds the page names in its libs.

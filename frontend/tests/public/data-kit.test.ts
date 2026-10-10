@@ -6,13 +6,16 @@
 // strip, and Reset empties it; the table draws only the rows near its view, sorts by a
 // click on a column's head with the rows with no value last, hides what Filter by does not keep, gives Color by its bars
 // and the counts of every row, opens a row in the side panel and keeps its sort; the diff aligns the lines, marks the
-// words that changed, folds the unchanged stretches with Show more and Show less, and draws side by side or inline.
-// Layout (the highlights, the strip's ticks drawn, the table's rows as it scrolls, the diff's columns) is
-// tests/public/browser/view-data.test.ts.
+// words that changed, folds the unchanged stretches with Show more and Show less, and draws side by side or inline; the
+// text (viewer_text.js, with the markdown parser of src/lib/kitMarkdown.ts) turns mentions into links that open their
+// record, shows raw HTML as text, takes every link's address off, and folds a long text with Show more.
+// Layout (the highlights, the strip's ticks drawn, the table's rows as it scrolls, the diff's columns, the text's look
+// and its quotes) is tests/public/browser/view-data.test.ts and view-text.test.ts.
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
+import { build } from 'esbuild'
 import { JSDOM } from 'jsdom'
-import { afterEach, describe, expect, test } from 'vitest'
+import { afterEach, beforeAll, describe, expect, test } from 'vitest'
 
 const APP = path.resolve(__dirname, '../../../backend/app')
 const read = (n: string) => readFileSync(path.join(APP, n), 'utf8')
@@ -579,5 +582,154 @@ describe('the diff', () => {
     w.diff.set({ before: c.join('\n'), after: d.join('\n') })
     expect(w.diff.added).toBeGreaterThan(0)
     expect(Date.now() - t0).toBeLessThan(8000)
+  })
+})
+
+describe('the text', () => {
+  // the kit as views.frame_document loads it, with the markdown parser bundled as vite build bundles it (kit/markdown.js)
+  let textKit = ''
+  beforeAll(async () => {
+    const out = await build({
+      entryPoints: [path.resolve(__dirname, '../../src/lib/kitMarkdown.ts')],
+      bundle: true,
+      format: 'iife',
+      platform: 'browser',
+      write: false,
+      logLevel: 'error',
+    })
+    textKit =
+      script(read('viewer_bridge.js')) +
+      script(`window.__thimbleLabelOrder = ${read('label_order.json')}`) +
+      script(read('viewer_colour.js')) +
+      script(read('viewer_controls.js')) +
+      script(out.outputFiles[0].text) +
+      ['viewer_text.js', 'viewer_side.js', 'viewer_transcript.js', 'viewer_search.js', 'viewer_range.js'].map((n) => script(read(n))).join('')
+  })
+  async function loadText(body = '<div id="t"></div>') {
+    dom = new JSDOM(`<!doctype html><html><head>${textKit}</head><body>${body}</body></html>`, { runScripts: 'dangerously', pretendToBeVisual: true, url: 'http://view.invalid/' })
+    sent = []
+    dom.window.postMessage = ((msg: Msg) => void sent.push(msg)) as typeof dom.window.postMessage
+    await wait()
+  }
+  /** the text's html drawn in #t, as a page puts it there */
+  const drawn = (html: string) => {
+    doc().getElementById('t')!.innerHTML = html
+    return doc().querySelector('#t > .thimble-text') as HTMLElement
+  }
+  const links = (root: Element) => [...root.querySelectorAll('a')].map((a) => [a.textContent, a.getAttribute('data-thimble-ref') ?? a.getAttribute('title'), a.className])
+  /** the text that shows: the element's text with its folded parts left out */
+  const shown = (root: Element) => {
+    const copy = root.cloneNode(true) as Element
+    copy.querySelectorAll('[hidden], .thimble-text-more').forEach((e) => e.remove())
+    return copy.textContent ?? ''
+  }
+
+  test('mentions: each match a link that opens its ref, in markdown and plain text; never in code or a link; a ref of null leaves the text', async () => {
+    await loadText()
+    const w = win()
+    w.eval(`window.mentions = [{ match: /#(\\d+)/, ref: (m) => (m[1] === '13' ? null : 'view:forge/pull/' + m[1]) }, { match: /@agent-\\d+/g, ref: (m) => 'view:board/' + m[0].slice(1) }]`)
+    const text = 'Fixes #12 and #13, not `#14` or [#15](view:forge/pull/99). Ping @agent-08 about #16.'
+    const md = drawn(w.thimble.text.html(text, { mentions: w.mentions }))
+    expect(links(md)).toEqual([
+      ['#12', 'view:forge/pull/12', 'thimble-text-ref'],
+      ['#15', 'view:forge/pull/99', 'thimble-text-ref'],
+      ['@agent-08', 'view:board/agent-08', 'thimble-text-ref'],
+      ['#16', 'view:forge/pull/16', 'thimble-text-ref'],
+    ])
+    expect(md.querySelector('code')!.textContent).toBe('#14')
+    expect(md.textContent).toBe('Fixes #12 and #13, not #14 or #15. Ping @agent-08 about #16.')
+    // a click opens the record, and goes no further: the card the text is in does not open
+    let cardClicks = 0
+    doc().getElementById('t')!.addEventListener('click', () => cardClicks++)
+    ;(md.querySelector('a') as HTMLElement).click()
+    expect(of('navigate').map((m) => m.ref)).toEqual(['view:forge/pull/12'])
+    expect(cardClicks).toBe(0)
+    // Enter on a link opens it too, a link to a keyboard and a screen reader, and the card does not take the key
+    let cardKeys = 0
+    doc().getElementById('t')!.addEventListener('keydown', () => cardKeys++)
+    expect([...md.querySelectorAll('a')].map((a) => [a.getAttribute('role'), a.getAttribute('tabindex')])).toEqual(Array(4).fill(['link', '0']))
+    md.querySelectorAll('a')[2].dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    expect(of('navigate').map((m) => m.ref)).toEqual(['view:forge/pull/12', 'view:board/agent-08'])
+    expect(cardKeys).toBe(0)
+    // plain text: the same links, the backticks as written
+    const plain = drawn(w.thimble.text.html(text, { format: 'plain', mentions: w.mentions }))
+    expect(links(plain).map((l) => l[0])).toEqual(['#12', '#14', '#15', '@agent-08', '#16'])
+    expect(plain.textContent).toBe(text)
+  })
+
+  test('escaping: raw HTML shows as text; a ref, an address and an alt are attributes as given; no link keeps its address', async () => {
+    await loadText()
+    const w = win()
+    const raw = '<b onclick="window.pwned = 1">hi</b> & <script>window.pwned = 2</script>\n\n<img src=x onerror="window.pwned = 3">'
+    for (const format of ['markdown', 'plain']) {
+      const root = drawn(w.thimble.text.html(raw, { format, ref: 'odd "name" <x>.jsonl#L1' }))
+      expect(root.querySelectorAll('b, script, img, [onclick], [onerror]').length).toBe(0)
+      expect(root.textContent).toContain('<b onclick="window.pwned = 1">hi</b> & <script>window.pwned = 2</script>')
+      expect(root.getAttribute('data-anchor')).toBe('odd "name" <x>.jsonl#L1')
+    }
+    expect(w.pwned).toBeUndefined()
+    // links: a URL shows its address and opens nothing, a view's ref and a corpus path open in thimble, read from the
+    // folder of the record's file, a place in the text goes there; an image is its alt text
+    const md = '[site](https://example.org/a?b=1) [bad](javascript:window.pwned=4) [pr](view:forge/pull/3) [up](../notes/a.md#L2) [top](/docs/b.md) [here](./c%20d.md) www.example.com ![a "harbor"](http://img.example/x.png)[^1]\n\n[^1]: a note'
+    const root = drawn(w.thimble.text.html(md, { ref: 'runs/r1/log.jsonl#L5' }))
+    expect(root.querySelectorAll('[href], [src], img').length).toBe(0)
+    expect(links(root).slice(0, 7)).toEqual([
+      ['site', 'https://example.org/a?b=1', 'thimble-text-url'],
+      ['bad', 'javascript:window.pwned=4', 'thimble-text-url'],
+      ['pr', 'view:forge/pull/3', 'thimble-text-ref'],
+      ['up', 'runs/notes/a.md#L2', 'thimble-text-ref'],
+      ['top', 'docs/b.md', 'thimble-text-ref'],
+      ['here', 'runs/r1/c d.md', 'thimble-text-ref'],
+      ['www.example.com', 'http://www.example.com', 'thimble-text-url'],
+    ])
+    const chip = root.querySelector('.thimble-text-img')!
+    expect([chip.className, chip.textContent, chip.getAttribute('title')]).toEqual(['chip chip-sans chip-tone-neutral thimble-text-img', 'a "harbor"', 'http://img.example/x.png'])
+    ;(root.querySelectorAll('a')[1] as HTMLElement).click()
+    expect(w.pwned).toBeUndefined()
+    expect(of('navigate')).toEqual([])
+    // the footnote's mark goes to its note, in the text
+    expect(root.querySelector('[data-thimble-jump]')!.textContent).toBe('1')
+    // a part of a path is decoded before its `..` is taken: an encoded `..` goes up, never past the corpus folder
+    const up = drawn(w.thimble.text.html('[esc](%2E%2E/%2E%2E/%2E%2E/x.md) [deep](a/%2e%2e/b%20c.md#L2)', { ref: 'runs/r1/log.jsonl#L5' }))
+    expect(links(up)).toEqual([
+      ['esc', 'x.md', 'thimble-text-ref'],
+      ['deep', 'runs/r1/b c.md#L2', 'thimble-text-ref'],
+    ])
+  })
+
+  test('the fold: html() folds a text past 12 lines, a mount draws it whole; Show more, the search and a quote open it', async () => {
+    await loadText('<div id="t"></div><div id="m"></div>')
+    const w = win()
+    const lines = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`)
+    const text = lines.join('\n')
+    const root = drawn(w.thimble.text.html(text, { format: 'plain', ref: 'mail.jsonl#L1' }))
+    expect(shown(root).trim()).toBe(lines.slice(0, 12).join('\n'))
+    expect(root.textContent).toContain('line 20')
+    const more = root.querySelector('.thimble-text-more') as HTMLElement
+    expect([more.textContent, more.getAttribute('aria-expanded'), more.hasAttribute('data-thimble-chrome')]).toEqual(['Show more', 'false', true])
+    const parts = [...root.querySelectorAll('.thimble-text-fold')]
+    expect(parts.length).toBeGreaterThan(0)
+    expect(parts.every((p) => (p as HTMLElement).hidden && p.hasAttribute('data-thimble-fold'))).toBe(true)
+    // a click opens it, and folds it again
+    more.click()
+    expect([more.textContent, shown(root).trim()]).toEqual(['Show less', text])
+    more.click()
+    expect(shown(root).trim()).toBe(lines.slice(0, 12).join('\n'))
+    // the search, or a quote, sends a part the event that opens the fold
+    parts[parts.length - 1].dispatchEvent(new dom.window.CustomEvent('thimble-unfold', { bubbles: true }))
+    expect(shown(root).trim()).toBe(text)
+    // markdown: a list folds after its 12th line, its items kept in place so its numbers run on
+    const md = drawn(w.thimble.text.html(lines.map((l, i) => `${i + 1}. ${l}`).join('\n'), { fold: 5 }))
+    expect(md.querySelectorAll('ol').length).toBe(1)
+    expect([...md.querySelectorAll('li')].map((li) => (li as HTMLElement).hidden)).toEqual(lines.map((_, i) => i >= 5))
+    // a mount draws it whole unless asked; fold 0 never folds; a rest under 4 lines shows; a long line counts as it wraps
+    w.thimble.text('#m', text)
+    expect(doc().querySelector('#m .thimble-text-more')).toBeNull()
+    expect(w.thimble.text('#m', text, { fold: 6 }).querySelector('.thimble-text-more')).not.toBeNull()
+    expect(drawn(w.thimble.text.html(text, { fold: 0 })).querySelector('.thimble-text-more')).toBeNull()
+    expect(drawn(w.thimble.text.html(lines.slice(0, 15).join('\n'), { format: 'plain' })).querySelector('.thimble-text-more')).toBeNull()
+    const long = drawn(w.thimble.text.html(Array.from({ length: 300 }, (_, i) => `word${i}`).join(' '), { format: 'plain', fold: 2 }))
+    expect(shown(long).length).toBeGreaterThan(150)
+    expect(shown(long).length).toBeLessThan(260)
   })
 })

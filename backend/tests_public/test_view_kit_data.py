@@ -1,11 +1,13 @@
-"""Views drawn with the view kit's table, search and diff alone pass the whole view check, the headless page included:
-an inbox whose table of 600 mails draws only the rows near its view (the check counts the rows it holds, each anchored
-as it is drawn), with Color by, Filter by, the side panel and the search; and a wiki page's history, each revision a
-diff against the one before, with the search. Each draws every choice of its controls, and the test label shows on
-the records it shows. What the parts do on their own is frontend/tests/public/data-kit.test.ts."""
+"""Views drawn with the view kit's table, search, diff and text alone pass the whole view check, the headless page
+included: an inbox whose table of 600 mails draws only the rows near its view (the check counts the rows it holds, each
+anchored as it is drawn), with Color by, Filter by, the side panel and the search; a wiki page's history, each revision
+a diff against the one before, with the search; and a forge's pull requests as cards, each body's markdown drawn by the
+text. Each draws every choice of its controls, and the test label shows on the records it shows. What the parts do on
+their own is frontend/tests/public/data-kit.test.ts."""
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -206,3 +208,77 @@ async def test_a_kit_view_passes_the_checks(name, corpora, inproc, bound, tmp_pa
         # the table drew a screen of its rows, too few for the check alone; the 600 it holds count
         fetched = max(int(s.get("fetched_records") or 0) for s in rep["shots"])
         assert shown["records"] < fetched // views.ANCHORED_SHARE and shown["held"] == 600, shown
+
+
+FORGE_HTML = """<!doctype html><html><head><style>
+html, body { margin: 0; height: 100%; } body { background: var(--surface-card); overflow: hidden; }
+#view { height: 100%; display: flex; flex-direction: column; }
+.top { flex: none; display: flex; align-items: center; gap: 10px; padding: 10px 16px 8px; min-width: 0; }
+#search { flex: 0 1 240px; min-width: 120px; }
+#body { flex: 1; min-height: 0; display: flex; border-top: 1px solid var(--border-subtle); }
+#list { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 16px 24px; }
+</style></head><body><div id="view">
+<div class="top"><span id="search"></span><span id="colour"></span></div>
+<div id="body"><div id="list"></div></div></div>
+<script>
+const mentions = [{ match: /#(\\d+)/g, ref: (m) => 'prs.jsonl#L' + m[1] }]
+const colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'state', title: 'State' }], strip: '#list', onChange: () => draw() })
+const side = thimble.side({ mount: '#body' })
+const search = thimble.search({ mount: '#search', in: '#list', placeholder: 'Search pull requests' })
+let prs = []
+function draw() {
+  document.getElementById('list').innerHTML = '<div class="thimble-cards">' + prs.map((pr) => thimble.recordCard({
+    ref: pr.ref, record: pr, key: '#' + pr.number, meta: pr.state, title: pr.title,
+    body: { html: thimble.text.html(pr.body, { mentions, fold: 0 }) } })).join('') + '</div>'
+}
+function open(ref) {
+  const pr = prs.find((p) => p.ref === ref)
+  if (pr) side.open({ title: pr.title, ref: pr.ref, render: (body) => thimble.text(body, pr.body, { ref: pr.ref, mentions }) })
+}
+document.getElementById('list').addEventListener('click', (e) => {
+  const card = e.target.closest('.thimble-card')
+  if (card) open(card.getAttribute('data-anchor'))
+})
+const loaded = thimble.fetch({}).then((rows) => { prs = rows; draw() })
+thimble.onOpen(async (place) => {
+  await loaded
+  const t = (place && place.target) || {}
+  if (t.ref) open(t.ref)
+})
+</script></body></html>"""
+
+
+def _prs(n: int) -> str:
+    out = []
+    for i in range(1, n + 1):
+        body = (f"## Summary\n\nFixes the **gale** warning for ferry {i}, after #{max(1, i - 1)}.\n\n"
+                f"- [x] [Tests added](https://example.org/pull/{i})\n- [ ] Docs\n\n"
+                f"```py\ndef gale(force):\n    return force >= {i % 12}\n```\n\n<script>window.pwned = {i}</script>\n")
+        out.append(json.dumps({"number": i, "title": f"Fix the gale warning, part {i}",
+                               "state": ["open", "merged", "closed"][i % 3], "body": body}))
+    return "\n".join(out) + "\n"
+
+
+async def test_a_forge_view_drawn_with_the_text_passes_the_checks(tmp_path, monkeypatch, workspaces_tmp, inproc, bound):
+    """Pull requests as the kit's cards, each body in GitHub's markdown drawn by thimble.text (with the parser the
+    interface builds, kit/markdown.js) in the card and whole in the side panel, its #123 mentions links to their pull
+    requests: the view passes the whole check, the headless page included."""
+    if why := views.build_problem():
+        pytest.skip(why)
+    d = tmp_path / "data" / "forge"
+    d.mkdir(parents=True)
+    (d / "manifest.json").write_text(json.dumps({"name": "forge", "description": "forge"}))
+    (d / "prs.jsonl").write_text(_prs(40))
+    monkeypatch.setattr(config, "DATA_DIR", d.parent.resolve())
+    dist = tmp_path / "dist"
+    frontend = config.REPO_ROOT / "frontend"
+    subprocess.run([str(frontend / "node_modules" / ".bin" / "esbuild"), "src/lib/kitMarkdown.ts", "--bundle",
+                    "--format=iife", "--platform=browser", "--log-level=error", f"--outfile={dist / views.KIT_MARKDOWN_JS}"],
+                   cwd=frontend, check=True, timeout=60)
+    monkeypatch.setattr(config, "FRONTEND_DIST", dist)
+    assert "window.__thimbleMarkdown" in (dist / views.KIT_MARKDOWN_JS).read_text("utf-8")
+    reader = INBOX_READER.replace('"excerpt": m["body"], "label": m["subject"]', '"excerpt": m["title"], "label": m["title"]')
+    views.write_view("forge", "pulls", name="Pull requests", description="Pull requests as cards.", claims=["prs.jsonl"],
+                     accepts=[{"form": "L<n>", "means": "one pull request"}], reader=reader, html=FORGE_HTML, libs=[])
+    rep = await views.check("forge", "pulls", ["prs.jsonl#L3", "prs.jsonl#L30"], shot_dir=tmp_path)
+    assert rep["ok"], views.gate_lines(rep)

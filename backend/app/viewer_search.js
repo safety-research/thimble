@@ -476,8 +476,12 @@
     if (m.fold && m.fold.hidden) {
       var f = m.fold
       for (var up = f.parentElement; up; up = up.parentElement) if (up.hidden && up.hasAttribute(FOLD)) f = up
-      // a fold in a line of text, such as a long block's lines past the sixth, stands in its block
-      at = laidOut(INLINE[f.tagName] ? f.parentElement : f.previousElementSibling || f.parentElement)
+      // a fold in a line of text, such as a long block's lines past the sixth, stands in its block; any other at the
+      // nearest element before it that shows, such as the row before a table's rows folded one by one, found by the
+      // hidden attribute alone so that no box is laid out
+      at = INLINE[f.tagName] ? f.parentElement : f.previousElementSibling || f.parentElement
+      while (at && at.hidden) at = at.previousElementSibling || at.parentElement
+      at = laidOut(at)
     } else {
       if (!m.run) return null
       at = laidOut(m.run.block)
