@@ -33,7 +33,8 @@
 // column, the first column of text that takes the width left), and draws them again when the room comes back. A head
 // never cuts its title: a column of text with a `width` narrower than its title widens to the title while the table has
 // room; in a column narrower than the title it wraps to two lines, and a column keeps the width of its title on two
-// lines, with room for the sort's arrow, before it drops.
+// lines, with room for the sort's arrow, before it drops; in a table too narrow even for the columns that never drop,
+// it takes more lines, breaking a word only in a column narrower than the word.
 // A column of numbers writes amounts with thousands separators (12,345) and identifiers as they are (67028): a column of
 // `type: 'id'`, and one of numbers whose name or title names an identifier (ID_WORDS), such as an id, a key, a PR, issue
 // or line number, or a year, so the search finds an identifier as it is written.
@@ -409,12 +410,20 @@
         titles.push(l[0], l[1])
       })
     })
+    // each title's words, as it wraps after a space, a slash or a hyphen inside a word
+    var words = this.columns.map(function (c) {
+      return c.title.replace(/([/-])(?=\S)/g, '$1 ').split(/\s+/).filter(Boolean)
+    })
+    words.forEach(function (ws) {
+      titles.push.apply(titles, ws)
+    })
     var widths = measureHeads(this.mount, titles)
     var wide = function (k) {
       return widths[k] || titles[k].length * charW
     }
     var heads = []
     var headLeast = [] // px a column keeps so that its head shows its whole title, with the cell's padding and the arrow
+    this.wordLeast = [] // px a column of text keeps, in a table too narrow even for the columns that never drop, before its head breaks a word
     var k = this.columns.length
     this.columns.forEach(function (c, i) {
       heads[i] = wide(i)
@@ -424,6 +433,13 @@
         k += 2
       })
       headLeast[i] = Math.ceil(two) + PAD + (c.sorts ? SORT_ROOM : 0)
+    })
+    this.columns.forEach(function (c, i) {
+      var word = 0
+      words[i].forEach(function () {
+        word = Math.max(word, wide(k++))
+      })
+      self.wordLeast[i] = Math.ceil(word) + PAD + (c.sorts ? SORT_ROOM : 0)
     })
     var sample = this.all.length > SAMPLE ? this.all.slice(0, SAMPLE) : this.all
     var fitW = function (w) {
@@ -519,8 +535,24 @@
     if (room > 0) {
       var order = this.dropOrder()
       for (var d = 0, left = cols.length; d < order.length && left > 1 && need() > room; d++, left--) on[order[d]] = false
-      // the columns that never drop, still too wide: their text shares what the others leave
+      // the columns that never drop, still too wide: their text shares what the others leave, each first down to its
+      // title's longest word, so that its head takes more lines rather than break a word, then below it
+      var words = this.wordLeast || []
+      var spare = function (i) {
+        return Math.max(0, least[i] - (words[i] || 0))
+      }
       var lack = need() - room
+      var give = 0
+      cols.forEach(function (c, i) {
+        if (on[i] && c.type === 'text') give += spare(i)
+      })
+      if (lack > 0 && give > 0) {
+        var part = Math.min(1, lack / give)
+        cols.forEach(function (c, i) {
+          if (on[i] && c.type === 'text') least[i] = Math.floor(least[i] - spare(i) * part)
+        })
+        lack = need() - room
+      }
       var textLeast = 0
       cols.forEach(function (c, i) {
         if (on[i] && c.type === 'text') textLeast += least[i]

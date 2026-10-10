@@ -574,7 +574,7 @@ window.table = thimble.table({ mount: '#list', sort: { by: 'claimed', desc: fals
     await p.close()
   })
 
-  test('a table too narrow for the columns that never drop keeps each head to two lines, cut with an ellipsis', async () => {
+  test('a table too narrow for the columns that never drop cuts no head: a title takes more lines, and breaks a word only in a column narrower than the word', async () => {
     const doc = page(`<div id="pane" style="width:300px;height:300px;display:flex"><div id="list" style="flex:1;min-height:0"></div></div>
 <script>
 window.table = thimble.table({ mount: '#list',
@@ -582,12 +582,45 @@ window.table = thimble.table({ mount: '#list',
   columns: [{ name: 'run', title: 'Run' }, { name: 'closer', title: 'Merged/closed by', drop: false }, { name: 'failed', title: 'Number of failed tool calls', drop: false }] })
 </script>`)
     const { page: p, frame } = await framed(doc)
-    const lines = await frame().evaluate(() => {
-      const line = parseFloat(getComputedStyle(document.querySelector('.thimble-table-title')!).lineHeight)
-      return [...document.querySelectorAll('.thimble-table-title')].map((t) => [t.textContent, Math.round(t.getBoundingClientRect().height / line)])
-    })
-    assert.equal(lines.length, 3, JSON.stringify(lines))
-    for (const [title, n] of lines) assert.ok((n as number) <= 2, `${title} takes ${n} lines: ${JSON.stringify(lines)}`)
+    /** each head: its title, how many lines it takes, whether its box cuts it, whether it passes the next head, and how
+     *  many of its words are broken across two lines */
+    const heads = () =>
+      frame().evaluate(() => {
+        const ths = [...document.querySelectorAll('.thimble-table-th')]
+        const line = parseFloat(getComputedStyle(document.querySelector('.thimble-table-title')!).lineHeight)
+        return ths.map((th, i) => {
+          const t = th.querySelector('.thimble-table-title') as HTMLElement
+          const text = t.firstChild as Text
+          let broken = 0
+          for (const m of text.data.matchAll(/[^\s/-]+[/-]?/g)) {
+            const r = document.createRange()
+            r.setStart(text, m.index!)
+            r.setEnd(text, m.index! + m[0].length)
+            if (new Set([...r.getClientRects()].map((b) => Math.round(b.top))).size > 1) broken++
+          }
+          const next = ths[i + 1]?.getBoundingClientRect().left ?? Infinity
+          return {
+            title: t.textContent!,
+            lines: Math.round(t.getBoundingClientRect().height / line),
+            cut: t.scrollWidth > t.clientWidth + 0.5 || t.scrollHeight > t.clientHeight + 0.5 || t.getBoundingClientRect().right > th.getBoundingClientRect().right + 0.5,
+            over: th.getBoundingClientRect().right > next + 0.5,
+            broken,
+          }
+        })
+      })
+    const at300 = await heads()
+    assert.deepEqual(at300.map((h) => h.title), ['Run', 'Merged/closed by', 'Number of failed tool calls'], 'the columns that never drop stay')
+    for (const h of at300) assert.ok(!h.cut && !h.over && h.broken === 0, `300px: ${JSON.stringify(at300)}`)
+    assert.ok(at300.some((h) => h.lines > 2), `a title takes a third line rather than end in an ellipsis: ${JSON.stringify(at300)}`)
+    // narrower than the titles' longest words: a word breaks where it must, and still no head is cut
+    await frame().evaluate(() => ((document.getElementById('pane') as HTMLElement).style.width = '200px'))
+    await p.waitForTimeout(150)
+    const at200 = await heads()
+    for (const h of at200) assert.ok(!h.cut && !h.over, `200px: ${JSON.stringify(at200)}`)
+    // and wide again, each title on one line
+    await frame().evaluate(() => ((document.getElementById('pane') as HTMLElement).style.width = '900px'))
+    await p.waitForTimeout(150)
+    assert.deepEqual((await heads()).map((h) => h.lines), [1, 1, 1])
     await p.close()
   })
 })

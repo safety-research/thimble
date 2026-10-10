@@ -143,7 +143,7 @@ A column is `{name, title, type, width, min, drop, value(row), html(row), sub(ro
 | key | what it is |
 |---|---|
 | `name` | the field as the records hold it |
-| `title` | its head, the name by default. A head is never cut: a column takes its title on one line while the table has room, wraps it to two lines in a narrower table, and keeps its title's width on two lines before it drops |
+| `title` | its head, the name by default. A head is never cut: a column takes its title on one line while the table has room, wraps it to two lines in a narrower table, and keeps its title's width on two lines before it drops; in a table too narrow even for the columns that never drop, it takes more lines |
 | `type` | `'text'` (the default), `'number'` (right-aligned, in the mono face, with thousands separators: `12,345`), `'id'` (a number that names a record, such as a pull request's, an issue's or a line's, written as it is: `67028`; laid out and sorted as a number) or `'time'` (seconds since 1970, shown as `2026-04-01 09:30` in UTC, with the seconds when the column's times have them; a string as written). A column of numbers whose name or title ends in a word that names an identifier, such as `id`, `key`, `number`, `PR`, `issue`, `line`, `#` or `year`, is written as `'id'` is. A column too narrow for its times leaves out the seconds, then the year when every row has the same one |
 | `width` | px or a CSS track such as `'2fr'` (text shares what is left; numbers and times fit their widest value) |
 | `min` | the px a column of text keeps before columns drop: 120 for the main column, the first column of text without a `width` in px (else the first column of text), and 64 for the others by default, and never more than its `width` |
