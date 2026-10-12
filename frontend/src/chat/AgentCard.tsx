@@ -177,7 +177,7 @@ export function madeSections(ws: string, made: Made, opts: { report?: string | n
       key: 'labels',
       label: 'Labels',
       onOpen: () => showTab('files'),
-      chips: made.labels.map((l) => <LabelChip key={l} ws={ws} name={l} onClick={() => openLabel(ws, l)} />),
+      chips: made.labels.map((l) => <LabelChip key={l} name={l} onClick={() => openLabel(ws, l)} />),
     })
   }
   const writer = opts.writer ?? null
