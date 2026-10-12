@@ -2361,11 +2361,15 @@ def _violin_spec(df, opts: dict) -> dict:
     qtip = [{"field": _field(c), "type": "nominal" if c == grp else "quantitative", "title": c}
             for c in (grp, q1, median, q3)]
     at = {**y, "field": RIDGE_BASE}
+    every = [v for _g, vs in by.values() for v in vs]
     layer: list = []
     if curved:
+        # the axis ends at the values, as it starts at 0 or the least: the curves' smoothing past them is cut there
+        ends = [_num(min(0, min(every))), _num(max(0, max(every)))]
         layer += [
-            {"transform": body, "mark": {"type": "area", "interpolate": "monotone", "style": BOX_STYLE},
-             "encoding": {"x": _enc(val, "quantitative"), "y": {**y, "field": RIDGE_TOP}, "y2": {"field": VIOLIN_LOW},
+            {"transform": body, "mark": {"type": "area", "interpolate": "monotone", "style": BOX_STYLE, "clip": True},
+             "encoding": {"x": _enc(val, "quantitative", scale={"domain": ends, "nice": False}),
+                          "y": {**y, "field": RIDGE_TOP}, "y2": {"field": VIOLIN_LOW},
                           "detail": {"field": _field(grp), "type": "nominal"}, **color, "tooltip": tip}},
             {"data": {"values": quartiles}, "transform": line, "mark": "rule",
              "encoding": {"x": _enc(q1, "quantitative", title=val), "x2": {"field": _field(q3)}, "y": at, "tooltip": qtip}},
@@ -2375,7 +2379,6 @@ def _violin_spec(df, opts: dict) -> dict:
         ]
     dots = [{val: _num(v), grp: g} for g in order if g not in curved for v in by[json.dumps(g)][1]]
     if dots:
-        every = [v for _g, vs in by.values() for v in vs]
         dodge = _dodged(_dodge([r[val] for r in dots], [json.dumps(r[grp]) for r in dots], max(every) - min(every)))
         layer.append({"data": {"values": dots}, "transform": [*line, *dodge],
                       "mark": {"type": "point", "yOffset": DODGE_OFFSET} if dodge else "point",

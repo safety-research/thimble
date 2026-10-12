@@ -90,7 +90,8 @@ is 1, so the curves compare shapes, not counts. The chart's rows are those point
 With 5 or more groups and no panels, the groups stand one over another, each curve on a baseline of its own named on the
 y axis, the curves scaled alike. The places of the ridges are laid out by the chart, not held in its rows.
 
-A violin's rows are the same points as a density's. Each group lies on its own line, as a box plot's does, its curve
+A violin's rows are the same points as a density's, but its axis ends at its largest value, the curves cut there.
+Each group lies on its own line, as a box plot's does, its curve
 mirrored either side of the line, each curve as wide at its widest as the others, with a line in ink from its first
 quartile to its third and its median as a mark in ink across it. A group of fewer than 5 values is a strip of its dots,
 as in a box plot, and has no curve in the rows. The quartiles and the dots are in their layers' own rows.

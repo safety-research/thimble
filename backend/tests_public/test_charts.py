@@ -579,7 +579,7 @@ def test_a_violin_mirrors_each_group_s_density_on_its_line_with_its_quartiles_in
     # the rows are the curves, the same as a density chart's, which a takeaway cites
     density = spec_of("density", MERGE)
     assert spec["data"]["values"] == density["data"]["values"] and set(spec["data"]["values"][0]) == {"minutes", "density", "agent"}
-    assert body["mark"] == {"type": "area", "interpolate": "monotone", "style": kt.BOX_STYLE}
+    assert body["mark"] == {"type": "area", "interpolate": "monotone", "style": kt.BOX_STYLE, "clip": True}
     order = density["encoding"]["color"]["sort"]
     assert order == ["b", "a"], "the largest median first"
     top = max(r["density"] for r in spec["data"]["values"])
@@ -725,6 +725,21 @@ def test_a_range_s_axis_of_numbers_is_not_rounded_out_past_its_ends():
     spans = pd.DataFrame({"agent": ["a", "b"], "first": pd.to_datetime(["2026-08-02", "2026-08-01"]),
                           "last": pd.to_datetime(["2026-08-09", "2026-08-03"])})
     assert spec_of("range", spans)["layer"][0]["encoding"]["x"]["scale"] == {"padding": kt.RANGE_PAD}
+
+
+def test_a_violin_s_axis_ends_at_its_values():
+    """QA (2026-10-12): a violin's axis ran past its values, to the curves' smoothing 3 widths past the largest value
+    and then out to a round number. The axis runs from 0 (or the least value, below 0) to the largest value (or 0),
+    the curves cut there; the rows stay the curves' points, as a density's."""
+    spec = spec_of("violin", MERGE)
+    body, quartiles, median = spec["layer"]
+    top = float(MERGE["minutes"].max())
+    assert body["encoding"]["x"]["scale"] == {"domain": [0, top], "nice": False} and body["mark"]["clip"] is True
+    assert max(r["minutes"] for r in spec["data"]["values"]) > top, "the curves' points past the values stay in the rows"
+    assert spec["data"]["values"] == spec_of("density", MERGE)["data"]["values"]
+    assert "scale" not in quartiles["encoding"]["x"] and "scale" not in median["encoding"]["x"]
+    below = spec_of("violin", MERGE.assign(minutes=-MERGE["minutes"]))["layer"][0]["encoding"]["x"]["scale"]
+    assert below["domain"] == [-top, 0]
 
 
 def test_a_scatter_fits_a_line_or_a_smooth_curve_per_group_its_fitted_values_a_column_of_its_rows():
