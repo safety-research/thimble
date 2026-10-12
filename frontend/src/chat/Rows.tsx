@@ -28,6 +28,7 @@ import { API_ERROR_KIND, callLineText, callPieces, capacityNote, corpusRelative,
 import { Note, ShotCard, ThreadChip, ThreadsContext } from './Notes'
 import { AgentCard, OrientLanding, openLabel } from './AgentCard'
 import { ApiErrorCard } from './ApiError'
+import { HandedBack } from './HandBack'
 import { DocChip, GroupChip, LabelChip } from './SurfaceChips'
 import { ViewChip } from './ViewChip'
 import { autoModeRefusal } from './permissions'
@@ -198,6 +199,8 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
             return <Note key={r.index} className="chat-stage" text={r.text} />
           case 'shot':
             return <ShotCard key={r.index} ticket={r.ticket} name={r.name} phase={r.phase} note={r.note} />
+          case 'handback':
+            return <HandedBack key={r.index} text={r.text} anchor={anchorOf(r.index)} />
           case 'error':
             return <ErrorRow key={r.index} item={r} retry={retry && retry.index === r.index ? retry : undefined} />
         }
