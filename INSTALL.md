@@ -238,8 +238,9 @@ cd ~/.thimble/demo/collusion-wiki && thimble -c  # later, to continue the last s
 
 A session attached to a pre-cached workspace starts fresh, with the orientation's cards and report as its context.
 
-A workspace that holds an analysis already is left as it is unless `--replace`, which archives it first. Run again,
-it downloads nothing it already has.
+A workspace that holds an analysis already is left as it is unless `--replace` or `--refresh`, which archives it and
+installs the pre-cache again. When it holds an older pre-cache than this thimble ships, `thimble demo` says so and
+names the command, `thimble demo --refresh <dataset>`. Run again, it downloads nothing it already has.
 
 `thimble demo --export <workspace> <out>` writes everything in a workspace as `<out>/<dataset>/`: the cards, labels,
 views and documents, every chat and call output, the work files, and the Claude Code transcripts of your sessions
