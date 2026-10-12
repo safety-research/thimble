@@ -2445,8 +2445,9 @@ def _range_spec(df, opts: dict) -> dict:
     order = _ordered(kind, df[item], ranked, opts.get("sort", _DEFAULT), None if grp else label, "items")
     rows = _chart_rows(df, kinds)
     xt, title = ("temporal" if xk == "time" else "quantitative"), f"{before} \u2192 {after}"
-    # the ends are places, not lengths from 0: the axis spans them, with room for the marks at its ends
-    scale = {"scale": {"zero": False, "padding": RANGE_PAD} if xk == "number" else {"padding": RANGE_PAD}}
+    # the ends are places, not lengths from 0: the axis spans them, with room for the marks at its ends, and numbers are
+    # not rounded out past that room (counts from 1 would start the axis at -20)
+    scale = {"scale": {"zero": False, "nice": False, "padding": RANGE_PAD} if xk == "number" else {"padding": RANGE_PAD}}
     y = {"y": _enc(item, "nominal", sort=order)}
     color: dict = {}
     if grp:

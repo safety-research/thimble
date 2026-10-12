@@ -689,7 +689,7 @@ def test_a_range_draws_a_dumbbell_per_item_a_muted_line_between_two_solid_ends_i
         assert layer["encoding"]["color"] == ends and "opacity" not in layer["encoding"]
     assert "color" not in rule["encoding"]
     assert all(l["encoding"]["x"]["title"] == "base \u2192 tuned" for l in spec["layer"])
-    assert all(l["encoding"]["x"]["scale"] == {"zero": False, "padding": kt.RANGE_PAD} for l in spec["layer"]), \
+    assert all(l["encoding"]["x"]["scale"] == {"zero": False, "nice": False, "padding": kt.RANGE_PAD} for l in spec["layer"]), \
         "the ends are places, not lengths, and the outermost clear the axis line"
     assert start["encoding"]["y"]["sort"] == ["m2", "m3", "m1"], "the largest after first"
     table = cite.chart_table(bundle)
@@ -713,6 +713,18 @@ def test_a_range_draws_a_dumbbell_per_item_a_muted_line_between_two_solid_ends_i
     assert "yOffset" not in grouped[1]["encoding"], "each item once: its line holds its one dumbbell"
     with pytest.raises(ValueError, match="the before and after both numbers or both times; `first` holds times and `n` numbers"):
         kt.chart("range", spans[["agent", "first"]].assign(n=[1, 2]))
+
+
+def test_a_range_s_axis_of_numbers_is_not_rounded_out_past_its_ends():
+    """QA (2026-10-12): a range of counts from 1 to 175 started its axis at -20, as Vega-Lite rounds a scale's ends out
+    to round numbers after the room its ends take (RANGE_PAD). The axis spans the ends and that room, and no more, so
+    counts from 0 or 1 start it at 0; times keep their axis as it was."""
+    counts = pd.DataFrame({"run": ["a", "b", "c"], "after 1 hour": [1, 50, 115], "at the end": [2, 175, 162]})
+    for layer in spec_of("range", counts)["layer"]:
+        assert layer["encoding"]["x"]["scale"] == {"zero": False, "nice": False, "padding": kt.RANGE_PAD}
+    spans = pd.DataFrame({"agent": ["a", "b"], "first": pd.to_datetime(["2026-08-02", "2026-08-01"]),
+                          "last": pd.to_datetime(["2026-08-09", "2026-08-03"])})
+    assert spec_of("range", spans)["layer"][0]["encoding"]["x"]["scale"] == {"padding": kt.RANGE_PAD}
 
 
 def test_a_scatter_fits_a_line_or_a_smooth_curve_per_group_its_fitted_values_a_column_of_its_rows():
