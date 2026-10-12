@@ -14,7 +14,7 @@ import { useColorBy, type ColorBy } from '../../src/files/useColorBy'
 import { useFilterBy, type FilterBy } from '../../src/files/useFilterBy'
 import type { FilesLabels } from '../../src/files/useLabels'
 import { writeColor } from '../../src/files/colorChoice'
-import transcript, { madeTurnBlocks, turnRecords } from '../../src/files/views/transcript.tsx'
+import transcript, { madeTurnBlocks, turnOver, turnRecords } from '../../src/files/views/transcript.tsx'
 import { api } from '../../src/lib/api.ts'
 import type { Concept, SourcePage, SourceRecord, SourceTurn } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -156,5 +156,14 @@ describe('a label of a JSON document’s records over its turns', () => {
     await settle()
     expect(STEPS.map((t) => color!.colors?.get(t.line)?.color ?? null)).toEqual([null, colourVar(15), null, colourVar(15)])
     expect(STEPS.map((t) => filter!.verdict?.hides(t.line) ?? false)).toEqual([true, false, true, false])
+  })
+  test('each line of a step takes its turn, from where its record starts to its last line, which the loupe colors', () => {
+    // the server gives each turn the last line it covers: the line before the next step's record, the last step's record's end
+    const records = turnRecords(STEPS.map((t, k) => ({ ...t, end: k < STEPS.length - 1 ? t.rec_line! + 5 : 31 })))
+    expect(records.map((r) => [r.meta.from, r.meta.end])).toEqual([[7, 12], [13, 18], [19, 24], [25, 31]])
+    const over = (line: number) => turnOver(records, line)?.meta.ref ?? null
+    expect([1, 6, 7, 8, 12, 13, 24, 25, 31, 32].map(over)).toEqual([null, null, `${P}#/steps/0`, `${P}#/steps/0`, `${P}#/steps/0`, `${P}#/steps/1`, `${P}#/steps/2`, `${P}#/steps/3`, `${P}#/steps/3`, null])
+    // a turn the server gives no extent covers its own line alone
+    expect(turnRecords([{ ...STEPS[0], rec_line: undefined }]).map((r) => [r.meta.from, r.meta.end])).toEqual([[8, 8]])
   })
 })

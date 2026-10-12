@@ -15,7 +15,7 @@ A file that reads as a transcript (transcripts.sniff) has the fields of its turn
 (transcripts.turn_fields: who speaks, the model, the tools a turn calls, its metadata): JSON lines of messages their
 records' fields beside their own keys (transcripts.record_fields, which the source page gives each record as
 `meta.fields`); a whole-file JSON transcript, whose lines are no records, its turns' fields alone, one record per turn
-standing on its line (GET /source/turns gives each turn's); a text chat log who starts each turn (`speaker`).
+over the lines it covers (GET /source/turns gives each turn's); a text chat log who starts each turn (`speaker`).
 
 A file bigger than SCAN_BYTES is read up to there: the answer says `partial`, and its bins cover the lines read. An
 answer is cached per file on its size and modification time. A file of another kind, or whose lines are not JSON
@@ -169,10 +169,14 @@ class _Tally:
         self.keys: dict[str, _Key] = {}
         self.rows = 0
         self.at = array("I")  # per row, its line's index (from 0)
+        self.till = array("I")  # per row, the index of the last line it covers (its own but for a turn of many lines)
 
-    def add(self, row: dict[str, Any] | None, line: int) -> None:
+    def add(self, row: dict[str, Any] | None, line: int, last: int | None = None) -> None:
+        """One record, on `line`, or over the lines `line` to `last` (a whole-file JSON transcript's turn), which the
+        bins count it in."""
         self.rows += 1
         self.at.append(max(0, line - 1))
+        self.till.append(max(0, line - 1, (last or line) - 1))
         seen = set()
         if row is not None:
             for k, v in row.items():
@@ -209,7 +213,9 @@ class _Tally:
             per = [Counter() for _ in range(bins)]
             for i, vi in enumerate(k.lines):
                 if vi != _NONE:
-                    per[min(bins - 1, self.at[i] * bins // lines)][rank[vi]] += 1
+                    # every bin of the lines the record covers
+                    for b in range(min(bins - 1, self.at[i] * bins // lines), min(bins - 1, self.till[i] * bins // lines) + 1):
+                        per[b][rank[vi]] += 1
             at = [c.most_common(1)[0][0] if c else -1 for c in per]
             rest = ranked[VALUES_LISTED:]
             out_keys.append({
@@ -240,15 +246,16 @@ def _line_sizes(path: Path, budget: int) -> tuple[array, bool]:
 
 
 def _turn_scan(path: Path, rel: str, bins: int) -> dict[str, Any]:
-    """A whole-file JSON transcript's keys: its turns' fields, each turn a record on its line (transcripts.parse_turns);
-    none when the parse finds no turns."""
+    """A whole-file JSON transcript's keys: its turns' fields, each turn a record over the lines it covers, from where
+    its record starts to the line before the next turn's (transcripts.parse_turns, turn_extents), so that the strip
+    draws a turn of many lines as a band as tall as it; none when the parse finds no turns."""
     try:
         turns = transcripts.parse_turns(path, rel)["turns"]
     except HTTPException:
         return _no_keys(bins)
     tally = _Tally()
     for t in turns:
-        tally.add(t.get("fields") or {}, t["line"])
+        tally.add(t.get("fields") or {}, t.get("rec_line") or t["line"], t.get("end"))
     sizes, _ = _line_sizes(path, 1 << 62)
     return tally.answer(bins, len(sizes), sizes, False)
 

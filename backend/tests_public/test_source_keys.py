@@ -139,11 +139,43 @@ def test_an_atif_trajectory_s_steps_give_their_fields_as_keys(keyed):
     assert [t["fields"]["source"] for t in turns] == ["system", "user", "agent", "agent", "user", "agent", "agent", "agent"]
     assert turns[3]["fields"] == {"source": "agent", "model_name": "model-a", "reasoning_effort": "medium",
                                   "llm_call_count": 1, "extra.phase": "edit", "tool": "write_file, bash"}
-    # the bins follow the lines the turns stand on: the agent's tool definitions at the top hold none
+    # the bins follow the lines the turns cover, from where each step starts to the line before the next: the agent's
+    # tool definitions at the top hold none
     total = got["total"]
-    lit = {(t["line"] - 1) * 8 // total for t in turns}
+    lit = {b for t in turns for b in range((t["rec_line"] - 1) * 8 // total, (t["end"] - 1) * 8 // total + 1)}
     assert [b for b, r in enumerate(keys["source"]["at"]) if r != -1] == sorted(lit)
     assert keys["source"]["at"][0] == -1
+
+
+def test_a_json_transcript_s_turn_colors_cover_its_whole_line_range(keyed):
+    """A pretty-printed trajectory's step spans many lines. The strip colors every line of it, from the line its
+    record starts on through the line before the next step's, the last step through its record's end, so that it shows
+    a band as tall as the step, not a tick on one line; the lines before the first step and after the last hold none.
+    The label ruler, asked for the Transcript mode (`turns`), counts a step's row over the same lines (turn_spans)."""
+    from app import concepts
+
+    (keyed / "run").mkdir()
+    traj = keyed / "run" / "trajectory.json"
+    traj.write_text(json.dumps(atif(), indent=2) + "\n")
+    total = traj.read_text().count("\n")
+    got = client.get(f"{CORPUS}/source/keys", params={"path": "run/trajectory.json", "bins": total}).json()
+    source = next(k for k in got["keys"] if k["key"] == "source")
+    rank = {v["value"]: r for r, v in enumerate(source["values"])}
+    turns = client.get(f"{CORPUS}/source/turns", params={"path": "run/trajectory.json"}).json()["turns"]
+    steps = json.loads(traj.read_text())["steps"]
+    assert len(turns) == len(steps)
+    want = [-1] * total
+    for k, t in enumerate(turns):
+        nxt = turns[k + 1]["rec_line"] if k + 1 < len(turns) else None
+        assert t["rec_line"] <= t["line"] <= t["end"] and (nxt is None or t["end"] == nxt - 1), t
+        assert t["end"] - t["rec_line"] >= 4, "each step spans several lines"
+        for line in range(t["rec_line"], t["end"] + 1):
+            want[line - 1] = rank[t["fields"]["source"]]
+    assert source["at"] == want
+    # the last step ends where its record does, before the trajectory's final metrics
+    assert traj.read_text().split("\n")[turns[-1]["end"] - 1].strip() == "}"
+    assert source["at"][turns[-1]["end"]:] == [-1] * (total - turns[-1]["end"])
+    assert concepts.turn_spans(traj, "run/trajectory.json") == {t["rec_line"]: t["end"] for t in turns}
 
 
 def test_a_stream_keeps_its_own_keys_and_gains_its_messages_model_and_tools(keyed):

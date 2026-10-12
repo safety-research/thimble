@@ -785,10 +785,28 @@ const TURNS_PAGE = 200
 const TURNS_CAP = 2000
 
 /** The turns of a whole-file JSON transcript as the records Color by and Filter by read (ViewProps.onRecords): each on
- * the line it stands on, with the fields the server read for it as `meta.fields` and the record of the JSON document it
- * is as `meta.ref` (an ATIF step's pointer), whose labels color and filter it. Pure. */
+ * the line it stands on, with the fields the server read for it as `meta.fields`, the record of the JSON document it
+ * is as `meta.ref` (an ATIF step's pointer), whose labels color and filter it, and the lines it covers, from where its
+ * record starts to its last (`meta.from`, `meta.end`), which the loupe colors for it. Pure. */
 export function turnRecords(turns: readonly SourceTurn[]): SourceRecord[] {
-  return turns.map((t) => ({ line: t.line, record: {}, blocks: [], meta: { ...(t.fields ? { fields: t.fields } : {}), ...(t.ref ? { ref: t.ref } : {}) } }))
+  return turns.map((t) => ({ line: t.line, record: {}, blocks: [], meta: { ...(t.fields ? { fields: t.fields } : {}), ...(t.ref ? { ref: t.ref } : {}), from: t.rec_line ?? t.line, end: Math.max(t.line, t.end ?? t.line) } }))
+}
+
+/** Of a whole-file JSON transcript's turn records (turnRecords, in the order of their lines), the one whose lines hold
+ * `line`; undefined for a line no turn covers (the document's head, or turns not loaded). Pure. */
+export function turnOver(turns: readonly SourceRecord[], line: number): SourceRecord | undefined {
+  let lo = 0
+  let hi = turns.length - 1
+  let at = -1
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1
+    if ((turns[mid].meta.from ?? turns[mid].line) <= line) {
+      at = mid
+      lo = mid + 1
+    } else hi = mid - 1
+  }
+  const t = at >= 0 ? turns[at] : undefined
+  return t && line <= (t.meta.end ?? t.line) ? t : undefined
 }
 
 /** A whole-file JSON transcript (a chat export, an eval log) as the turns the server parses from it (GET

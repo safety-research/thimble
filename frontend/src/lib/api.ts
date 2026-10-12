@@ -591,8 +591,9 @@ export const labelApi = {
   remove: (c: string, id: string) => j<{ ok: boolean }>(`${ws(c)}/concepts/${enc(id)}`, { method: 'DELETE' }),
   /** `GET /labels/presence`: per label over files, the values it left on each file (the tree's dots). */
   presence: (c: string) => j<LabelPresence[]>(`${ws(c)}/labels/presence`),
-  /** `GET /labels/ruler?path=&bins=`: where each label's values fall on one file (the reader's overview ruler). */
-  ruler: (c: string, path: string, bins: number) => j<LabelRuler>(`${ws(c)}/labels/ruler${q({ path, bins })}`),
+  /** `GET /labels/ruler?path=&bins=&turns=`: where each label's values fall on one file (the reader's overview ruler);
+   * with `turns` (the Transcript mode), a whole-file JSON transcript's turns over every line they cover. */
+  ruler: (c: string, path: string, bins: number, turns = false) => j<LabelRuler>(`${ws(c)}/labels/ruler${q({ path, bins, turns: turns ? 1 : undefined })}`),
   /** `POST /concepts/draft`: the labels model defines a label from the analyst's description, reading the first records
    * of the files it would apply to; nothing is stored. */
   draft: (c: string, text: string, paths: string[]) => j<LabelDraft>(`${ws(c)}/concepts/draft`, { method: 'POST', body: JSON.stringify({ text, paths }) }),

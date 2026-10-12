@@ -202,8 +202,9 @@ export function laneAt(x: number, g: LaneGeometry, n: number): number {
 export const rulerWidth = (n: number): number => (n ? n * TRACK_LANES.lane + (n - 1) * TRACK_LANES.gap + 2 * TRACK_LANES.inset : PLAIN_BAR_PX)
 
 /** Where the labels' values fall on the file, asked only while `on` (some label is on: with none the ruler draws no
- * lane, and the route would count the file's lines for nothing). */
-export function useRuler(ws: string, path: string, on = true): LabelRuler | null {
+ * lane, and the route would count the file's lines for nothing); with `turns` (the Transcript mode), a whole-file JSON
+ * transcript's turns over every line they cover. */
+export function useRuler(ws: string, path: string, on = true, turns = false): LabelRuler | null {
   const [ruler, setRuler] = useState<LabelRuler | null>(null)
   useEffect(() => {
     if (!on) return
@@ -211,7 +212,7 @@ export function useRuler(ws: string, path: string, on = true): LabelRuler | null
     let timer: number | null = null
     const read = () =>
       labelApi
-        .ruler(ws, path, RULER_BINS)
+        .ruler(ws, path, RULER_BINS, turns)
         .then((r) => alive && setRuler(r))
         .catch(() => alive && setRuler(null))
     void read()
@@ -224,7 +225,7 @@ export function useRuler(ws: string, path: string, on = true): LabelRuler | null
       off()
       if (timer != null) window.clearTimeout(timer)
     }
-  }, [ws, path, on])
+  }, [ws, path, on, turns])
   return ruler
 }
 

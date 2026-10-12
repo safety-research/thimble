@@ -1695,6 +1695,8 @@ def _parse_turns(path: Path, rel: str) -> dict[str, Any]:
             locator.place(conv)
             turns.extend(conv)
         _on_records(path, rel, turns)
+        for t, (_first, last) in zip(turns, turn_extents(turns)):
+            t["end"] = last
     else:
         for n, ln in enumerate(raw.split("\n"), 1):
             if not ln.strip():
@@ -1765,7 +1767,21 @@ def _on_records(path: Path, rel: str, turns: list[dict[str, Any]]) -> None:
     for i, ts in held.items():
         if len(ts) == 1:
             ts[0]["rec_line"] = idx.lines[i]
+            ts[0]["rec_end"] = idx.end_lines[i]
             ts[0]["ref"] = f"{rel}#{idx.pointers[i]}"
+
+
+def turn_extents(turns: list[dict[str, Any]]) -> list[tuple[int, int]]:
+    """Each turn of a whole-file JSON transcript as the lines it covers, (first, last): from the line its record starts
+    on (`rec_line`), else the line of its words, through the line before the next turn's first; the last turn through
+    the end of its record (`rec_end`), else its own line. The reader's strip colors these lines for the turn, so that a
+    turn of many lines is a band as tall as it, not a tick on its first line. Pure."""
+    firsts = [t.get("rec_line") or t["line"] for t in turns]
+    out = []
+    for k, (t, first) in enumerate(zip(turns, firsts)):
+        last = firsts[k + 1] - 1 if k + 1 < len(turns) else (t.get("rec_end") or t["line"])
+        out.append((first, max(first, last)))
+    return out
 
 
 def _quote_forms(quote: str) -> list[str]:
@@ -1820,9 +1836,9 @@ def turns_page(path: Path, rel: str, start: int = 0, count: int = 100, line: int
     turn found by its quote is `cited`: {i, quote}, the words as its text (or its blocks) hold them. Each turn's text is
     cut at TURN_TEXT_MAX (`cut` says so), the cited turn's not before the quote's end, and so is each of its blocks
     (turn_blocks); a turn with fields (turn_fields) carries them, for Color by and Filter by, and one that is its
-    record's names it (`ref`, `rec_line`). `groups` holds the conversations the page's turns belong to, by index, and
-    `n_groups` how many the file holds. Each turn's `n` is its own number: its step's, else its place in its
-    conversation (parse_turns)."""
+    record's names it (`ref`, `rec_line`). A whole-file JSON document's turn gives the last line it covers (`end`,
+    turn_extents). `groups` holds the conversations the page's turns belong to, by index, and `n_groups` how many the
+    file holds. Each turn's `n` is its own number: its step's, else its place in its conversation (parse_turns)."""
     parsed = parse_turns(path, rel)
     turns = parsed["turns"]
     count = max(1, min(count, TURNS_PAGE_MAX))
@@ -1845,7 +1861,7 @@ def turns_page(path: Path, rel: str, start: int = 0, count: int = 100, line: int
         item = {"i": i, "n": t["n"], "line": t["line"], "speaker": t.get("speaker") or "", "role": t["role"], "text": text[:keep]}
         if len(text) > keep:
             item["cut"] = len(text)
-        for k in ("time", "group", "ref", "rec_line"):
+        for k in ("time", "group", "ref", "rec_line", "end"):
             if k in t:
                 item[k] = t[k]
         if t.get("fields"):
