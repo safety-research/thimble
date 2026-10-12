@@ -108,7 +108,6 @@ const overview = timeline({
   onPick: (lane) => read(String(lane.key)),
   onMark: (it) => goTo(it.ref),
 })
-if (!overview.isOn('problem')) overview.toggle('problem')
 const pane = side({ key: 'turn' })
 const split = divider()
 // the transcript: each turn its clock, speaker and words, a tool call one line; Enter opens a turn in the side pane

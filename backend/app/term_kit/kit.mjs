@@ -2544,7 +2544,7 @@ function brokenScale(from, to, cols, unit, parts, fine = false) {
 }
 
 /** The chart's axis under it: the ticks' labels dim at their cells, `gutter` cells in, none overlapping; `legend`, in
- *  the gutter before them, the key of the marks the chart draws other than Color by's (`─ running  × failed`): runs, or
+ *  the gutter before them, the key of the marks the chart draws other than Color by's (`─ running`): runs, or
  *  entries `{glyph, fg, name, on, toggle, tip}`, each a control that hides or shows its series (dim while off), as a
  *  timeline gives them (`legend()`); then, with `marks` ([{t, label}]), their labels on a row of their own, each a
  *  control when `onMark(mark)` is given. */

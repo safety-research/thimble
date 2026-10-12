@@ -230,7 +230,7 @@ A query names the label colored by, so the reader's `thimble.color_value` reads 
   `broken` and `gaps()` (each break's first cell and the cell after it), with the breaks that fall inside the range.
 - `axis(d, scale, {gutter, legend, marks, onMark})` draws the chart's axis under it, `//` at each break with the date on
   the first label after it, `legend` in the gutter before the ticks as the key of the marks the chart draws other than
-  Color by's (`─ running  × failed`), and the marks' labels on a row of their own. `legend` is runs, or entries
+  Color by's (`─ running`), and the marks' labels on a row of their own. `legend` is runs, or entries
   `{glyph, fg, name, on, toggle}`, each a control that hides or shows its series, dim while it is off, as `timeline`
   gives them (`legend()`); entries that do not all fit the gutter stand on a row of their own over the axis.
 - `strip(scale, items, {value, color, max, guide})` is one row of a chart over time (a lane), `maxBin(scale,
