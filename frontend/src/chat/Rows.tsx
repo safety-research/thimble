@@ -373,7 +373,7 @@ export function ToolGroupCard({ group, ws, pending }: { group: ToolGroup; ws: st
       </span>
     )),
     ...made.views.map((v) => <ViewChip key={`view:${v}`} ws={ws} slug={made.viewSlugs?.[v]} name={v} />),
-    ...made.labels.map((l) => <LabelChip key={`label:${l}`} ws={ws} name={l} onClick={(e) => (e.stopPropagation(), openLabel(ws, l))} />),
+    ...made.labels.map((l) => <LabelChip key={`label:${l}`} name={l} onClick={(e) => (e.stopPropagation(), openLabel(ws, l))} />),
   ]
   return (
     <ToolCard
@@ -523,7 +523,7 @@ function madeChips(tool: ToolRowT, ws: string, refs: readonly string[] = []) {
       </span>
     )),
     ...made.views.map((v) => <ViewChip key={`view:${v}`} ws={ws} slug={made.viewSlugs?.[v]} name={v} />),
-    ...made.labels.map((l) => <LabelChip key={`label:${l}`} ws={ws} name={l} onClick={(e) => (e.stopPropagation(), openLabel(ws, l))} />),
+    ...made.labels.map((l) => <LabelChip key={`label:${l}`} name={l} onClick={(e) => (e.stopPropagation(), openLabel(ws, l))} />),
   ]
 }
 
@@ -828,7 +828,7 @@ function LabelRunsCard({ runs, ws }: { runs: AgentRowT[]; ws: string }) {
       chips={
         <ChipRun>
           {items.map((it) => (
-            <LabelChip key={`label:${it.name}`} ws={ws} name={it.name} onClick={(e) => (e.stopPropagation(), openLabel(ws, it.name))} />
+            <LabelChip key={`label:${it.name}`} name={it.name} onClick={(e) => (e.stopPropagation(), openLabel(ws, it.name))} />
           ))}
         </ChipRun>
       }
