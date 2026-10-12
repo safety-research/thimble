@@ -69,8 +69,8 @@ EXPECT: dict[str, tuple | None] = {
 }
 
 # JSON lines are kept as `<name>.jsonl.txt`, since no .jsonl file belongs in the tree (scripts/check_content.py), and
-# copied into the corpus under their own names
-KEPT = ".jsonl.txt"
+# logs as `<name>.log.txt`, since git ignores *.log; both are copied into the corpus under their own names
+KEPT = (".jsonl.txt", ".log.txt")
 FILES = sorted(str(p.relative_to(SAMPLES)).removesuffix(".txt") if p.name.endswith(KEPT) else str(p.relative_to(SAMPLES))
                for p in SAMPLES.rglob("*") if p.is_file())
 
@@ -83,7 +83,7 @@ def formats(tmp_path, monkeypatch, mini_dir):
     data = tmp_path / "data"
     shutil.copytree(mini_dir, data / "formats")
     shutil.copytree(SAMPLES, data / "formats", dirs_exist_ok=True)
-    for p in (data / "formats").rglob(f"*{KEPT}"):
+    for p in [p for p in (data / "formats").rglob("*.txt") if p.name.endswith(KEPT)]:
         p.rename(p.with_name(p.name.removesuffix(".txt")))
     monkeypatch.setattr(config, "DATA_DIR", data.resolve())
     monkeypatch.setattr(transcripts, "_SNIFFS", type(transcripts._SNIFFS)())
