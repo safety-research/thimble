@@ -1020,8 +1020,9 @@ function AskAgain({ ws, id, detached, onAsked }: { ws: string; id: string; detac
 }
 
 /** The rows of the orientation or a writer as its thread shows them: its whole session less its first message, which
- * is the card's. For an orientation that ran as main's subagent (an earlier build's; it now runs as its own background
- * session), its hand-back summary replaces the hand-back call and what followed. Pure. */
+ * is the card's. A session that handed its summary back to main at its end (a SubagentHandback call, which Claude Code
+ * has it make in auto mode) ends on one folded hand-back row that holds the summary, in place of the call and the text
+ * that followed it; with no summary, on neither. Pure. */
 export function orientMessages(rows: readonly Row[]): Row[] {
   const first = rows.findIndex((r) => r.kind === 'user')
   const own = rows.filter((_, i) => i !== first)
@@ -1031,8 +1032,8 @@ export function orientMessages(rows: readonly Row[]): Row[] {
   const summary = typeof inp.message === 'string' ? inp.message.trim() : ''
   const rest = own.filter((r) => r !== back)
   if (!summary) return rest
-  const summaryRow: Row = { kind: 'text', index: back.index, text: summary }
-  return [...rest.filter((r) => r.index < back.index || r.kind !== 'text'), summaryRow].sort((a, b) => a.index - b.index)
+  const handed: Row = { kind: 'handback', index: back.index, text: summary }
+  return [...rest.filter((r) => r.index < back.index || r.kind !== 'text'), handed].sort((a, b) => a.index - b.index)
 }
 
 /** An orientation's call numbers by tool_use id, read from its store's index while any call in `rows` has none in its

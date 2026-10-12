@@ -1,12 +1,15 @@
 // The action under a finished side thread that hands its answer back to main: `Hand back to main` sends main the
 // thread's question and answer as the analyst's message (backend threads.hand_back), which main's chat shows and main
-// answers. The line then says it was handed back, until a later question's answer is offered again.
+// answers. The line then says it was handed back, until a later question's answer is offered again. An orientation or a
+// writer that handed its summary back ends its thread on the same line, the summary folded under it.
 import { useEffect, useState } from 'react'
 import { Chip } from '../components/Chip'
+import { Icon } from '../components/Icon'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
 import type { ChatMeta } from '../lib/types'
+import { ChatMarkdown } from './markdown'
 import { Note } from './Notes'
 
 export const HAND_BACK = 'Hand back to main'
@@ -44,5 +47,46 @@ export function HandBack({ ws, id, state, detached = false, onDone }: { ws: stri
         </Chip>
       }
     />
+  )
+}
+
+/** The end of an orientation's or a writer's thread that handed its summary back to main (ChatPanel orientMessages): one
+ * quiet line, which a click opens on the summary as the thread's message, and folds again. `anchor` is the summary's
+ * data-anchor, so a ⌘-click on it starts a thread there. */
+export function HandedBack({ text, anchor }: { text: string; anchor?: string }) {
+  const [open, setOpen] = useState(false)
+  const toggle = () => setOpen((o) => !o)
+  return (
+    <>
+      <Note
+        className={`chat-hand-back${open ? ' open' : ''}`}
+        data-state="handed"
+        text={
+          <span
+            className="chat-note-head chat-note-act"
+            role="button"
+            tabIndex={0}
+            aria-expanded={open}
+            onClick={toggle}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                toggle()
+              }
+            }}
+          >
+            {HANDED_BACK}
+            <Icon name="chevron-right" size={10} className="chat-row-caret" />
+          </span>
+        }
+      />
+      {open && (
+        <div className="chat-msg chat-assistant chat-hand-back-summary">
+          <div className="chat-text" data-anchor={anchor} data-anchor-text={anchor ? text : undefined}>
+            <ChatMarkdown text={text} />
+          </div>
+        </div>
+      )}
+    </>
   )
 }

@@ -108,7 +108,14 @@ export interface ShotRow {
   name: string
   note?: string
 }
-export type Row = UserRow | TextRow | ToolRow | ChipRow | AgentRow | ErrorRow | NoteRow | ShotRow
+/** the summary an agent handed back to main at its end (its SubagentHandback call), which its thread shows folded under
+ * one line (ChatPanel orientMessages) */
+export interface HandBackRow {
+  kind: 'handback'
+  index: number
+  text: string
+}
+export type Row = UserRow | TextRow | ToolRow | ChipRow | AgentRow | ErrorRow | NoteRow | ShotRow | HandBackRow
 
 /** Find the tool row with `id` anywhere in `rows`, nested rows included. */
 function findTool(rows: Row[], id: string): ToolRow | undefined {
