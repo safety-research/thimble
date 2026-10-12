@@ -1,6 +1,6 @@
 <p align="center"><img src="docs/assets/thimble-banner.svg" alt="thimble" width="100%"></p>
 
-**thimble** is an open source Claude Code plugin for human oversight. It opens a workbench where you and Claude make sense of large volumes of agent output together.
+**thimble** is an open source Claude Code plugin for human oversight. It opens a workbench where you and Claude make sense of large volumes of agent output together. Where Claude Code answers in paragraphs that are hard to understand and verify, thimble answers visually, with charts and cards that cite every claim.
 
 > [!CAUTION]
 > - **thimble is in alpha.** It changes daily, so expect bugs and rough edges.
@@ -10,11 +10,11 @@ For feedback, bug reports, or anything else, please reach out to [@mjoerke](http
 
 ## Demo
 
-https://github.com/user-attachments/assets/3c21e405-6b8d-4ba6-85a8-24211800596c
+https://github.com/user-attachments/assets/e8b0c9d8-1bc0-4ccb-a5ac-4c311cea02d4
 
 ## Installation
 
-### Installing with Claude
+### Quickstart (with Claude)
 
 ```
 claude "install thimble from https://github.com/safety-research/thimble"
@@ -28,41 +28,22 @@ Instructions for agents installing thimble on the user's behalf are in [CLAUDE.m
 2. Unzip it.
 3. Run `bash scripts/install.sh` inside the unzipped folder.
 
-For a development build, clone the repo and run `bash scripts/install.sh`. 
-
-[INSTALL.md](INSTALL.md) covers requirements, updating and troubleshooting.
+For a development build, clone the repo and run `bash scripts/install.sh`. [INSTALL.md](INSTALL.md) covers requirements, updating and troubleshooting.
 
 ## Usage
 
-- Run `thimble` in a directory, just as you would run `claude` 
-- It starts a Claude Code session there with the thimble plugin loaded, inside thimble's sandbox, and prints the dashboard URL. 
+Run `thimble` in a directory with files you'd like to analyze, just like you would run `claude`.
+
+- It starts a Claude Code session there with the thimble plugin loaded, inside thimble's sandbox, and prints the dashboard URL.
 - Each run starts a new conversation on the same workspace (cards, report, labels). `thimble --continue` picks up your last conversation in this folder instead.
 
-### thimble's agents
+### Terminal mode
 
-- The orientation, its critic, the writers, view builds, view reviews and report checks run as subagents of your Claude Code session. Claude Code's agent tray shows them beside the browser's threads, and they run in your session's permission mode and sandbox.
-- A button in the browser, such as Start or Write, starts its agent at once, without a turn of Claude's. Asked in the terminal, Claude starts it with its own Agent call.
-- When an agent finishes, your terminal shows its report arriving and one short line from Claude.
-- Quitting Claude Code stops them, and nothing restarts them on its own: `thimble -c` and a message in the agent's thread continue one, and Retry starts a view build, review or check again.
-- Models and efforts in Settings apply to the next start, with no restart. Start, `/thimble:orient` and Claude's start tools take a model and an effort for one run.
-
-### From a running Claude Code session
-
-In a session started with `thimble`, type `/thimble` to start the thimble server and print the dashboard URL. If a session you started with plain `claude` doesn't recognise `/thimble`, quit it and run `thimble` in that folder. A plain `claude` session that has thimble's plugin runs without thimble's sandbox and can't start thimble's agents, and `/thimble` warns about it.
-
-> **Please note:** thimble connects the browser to your Claude Code session through the plugin's [hooks](https://code.claude.com/docs/en/hooks). If your settings or your organization turn the plugin's hooks off, thimble connects through a Monitor instead: permission prompts appear only in the terminal, you say `/thimble` again after `/clear` (in a session `thimble` started, you quit and run `thimble -c` instead, since thimble's sandbox lets out only the `/thimble` of the session it started), and `/thimble` prints a warning that says so. thimble's agents start through the plugin's hooks module, so where Claude Code's hooks modules are off (managed settings with `disableAllHooks` or `allowManagedHooksOnly`, or a folder Claude Code doesn't trust), they can't start. The launcher and the browser say so, and Claude, its threads, cards and labels still work.
-
-## Terminal mode
-
-In terminal mode, thimble draws its work in the Claude Code terminal, with no server or browser: cards and citations appear under Claude's replies, and home, threads, labels, documents and files open in a panel beside the chat. Views still open in the browser, and `thimble mode browser` switches a folder back ([INSTALL.md](INSTALL.md#terminal-mode)).
+In terminal mode, thimble operates as a Claude Code mod and shows its work directly in the terminal, with no server or browser.
 
 ![terminal mode: cards under a reply, and the citation panel beside the chat](docs/assets/thimble-term.png)
 
-```
-cd <directory you want to analyze>
-thimble mode terminal
-thimble
-```
+To switch a directory to terminal mode, run `thimble mode terminal` in it, then `thimble`. `thimble mode browser` switches it back.
 
 ## Commands
 
@@ -72,44 +53,30 @@ thimble
 |---|---|
 | `/thimble` | start the thimble server and print the dashboard URL |
 | `/thimble fresh` | archive this workspace and open an empty one |
-| `/thimble restore [<name>]` | bring an archived workspace back; with no name, list them |
-| `/thimble status` | one line: server, orientation, queue |
-| `/thimble fix` | in a development install, repair a server that will not start |
-| `/thimble feedback` | write a problem report (a zip), even with the server down |
-| `/thimble:ask <thread> [message]` | send a message to a thread, as its composer in the browser would |
-| `/thimble:orient [focus] [flags]` | start an orientation, with Start's switches, model and effort as flags |
-| `/thimble:label <name> [definition] [kind=regex\|code\|prompt] [paths=<glob>,…] [values=a,b] [limit=N]` | define a label and apply it to the corpus's records |
-| `/thimble:write [report\|slides\|story\|<type>] [request]` | start a writer on a document, the report when none is named |
+| `/thimble restore [<name>]` | bring an archived workspace back |
+| `/thimble:orient [focus]` | start an orientation |
+| `/thimble:label <name> [definition]` | define a label and apply it to the records |
+| `/thimble:write [report\|slides\|story] [request]` | start a writer on a document |
 
-**From a shell** (`thimble help` lists these)
+**From a shell** (`thimble help` lists every command)
 
 | Command | What it does |
 |---|---|
-| `thimble` | start thimble in this folder; `thimble -c` continues the last thimble session here |
-| `thimble demo [<name>...]` | download public datasets (collusion-wiki, mythos-5, transluce-urlquery) from their publishers, asking before each, and open the start page that lists them in the browser, each on an orientation run ahead of time where [demos/](demos/README.md) has one; it starts no Claude Code session (`--attach` starts one; `cd <folder> && thimble` attaches one later, `thimble -c` continues). `thimble demo --export <workspace> <out>` writes a workspace whole, with the transcripts of its sessions, and lists what it holds ([INSTALL.md](INSTALL.md#demo-datasets)) |
-| `thimble list` | list the workspaces by id (each folder's, and its archived runs), when each was last used and its open sessions |
-| `thimble purge <id>... [-y] [--dry-run]` | delete workspaces or archived runs by id and print what was deleted (`--dry-run` only shows what would go); never your data folder or Claude Code's transcripts |
-| `thimble extension add <folder\|git URL>` | add an extension and switch it on, after showing what it gives |
-| `thimble extension list\|on\|off\|remove [<name>]` | list the extensions, switch one on or off everywhere, or remove it |
-| `thimble mode [browser\|terminal] [--default]` | where `thimble` in this folder shows its work: in the browser, or in the terminal with no server (`--default`: every folder without a mode of its own) ([INSTALL.md](INSTALL.md#terminal-mode)) |
-| `thimble plugin on\|off\|status` | thimble in every Claude Code session, or only in the sessions `thimble` starts |
-| `thimble doctor` | what is installed and running, and what is wrong |
-| `thimble feedback ["<what went wrong>"]` | write a problem report (a zip) and say where to send it; the top bar's bug icon does the same |
-| `thimble update` | update to the latest release |
-| `thimble uninstall` | uninstall the package |
-
-A development install (a git clone) also has `thimble fix` and `thimble revert`, and the commands for running a checkout; [CONTRIBUTING.md](CONTRIBUTING.md) lists them.
+| `thimble` | start thimble in this folder; `thimble -c` continues the last session |
+| `thimble demo` | download the [demo datasets](demos/README.md) and open them in the browser |
+| `thimble mode browser\|terminal` | show thimble's work in the browser or in the terminal |
+| `thimble list`, `thimble purge <id>` | list the workspaces, or delete one |
+| `thimble doctor` | show what is installed and running, and what is wrong |
+| `thimble feedback` | write a problem report (a zip) |
+| `thimble update`, `thimble uninstall` | update to the latest release, or uninstall |
 
 ## Requirements
 
 Claude Code (tested with 2.1.295), with its hooks modules on, macOS or Linux, and Python 3.12+ ([uv](https://docs.astral.sh/uv/) recommended). Node 20+ is needed for custom views (the viewers the dev agent builds for your data), for the sandbox card code and code tickets run in, and for a development build. [INSTALL.md](INSTALL.md) has the details.
 
-## Security and privacy
+## Security & Privacy
 
-- **thimble is a research prototype.** Its server has no login, so any program on your machine can use it. Claude's notebook code runs in a sandbox that keeps the network, so it can reach local services, thimble's server among them: treat a corpus like code you are about to run.
-- **Your data stays with you.** The server runs on localhost. What leaves your machine is what Claude Code sends to the model and what Claude's notebook code or Claude Code's web tools reach on the network, as in any Claude Code session. A video's narration is read by a voice on your machine.
-- **Auth and billing work through Claude Code**; thimble doesn't touch them.
-- **Report security issues** privately to [@mjoerke](https://github.com/mjoerke).
+thimble is a research prototype. Please report any security issues privately to [@mjoerke](https://github.com/mjoerke). thimble is runs on top of Claude Code: it does not collect any data of its own and all authentication and billing is managed by `claude`.
 
 ## License
 
