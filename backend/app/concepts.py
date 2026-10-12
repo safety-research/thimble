@@ -5076,12 +5076,29 @@ def presence_route(c: str) -> list[dict]:
     return [{"concept_id": k["id"], "paths": _presence(ws, k["id"])} for k in list_concepts(ws) if k["unit"] in FILE_UNITS]
 
 
+def turn_spans(p: Path, rel: str) -> dict[int, int] | None:
+    """{first line: last line} of each turn of a whole-file JSON transcript (transcripts.turn_extents), by the line a
+    label's row of the turn stands on; None for a file of another kind."""
+    from . import transcripts  # noqa: PLC0415
+
+    hint = transcripts.sniff(p, rel)
+    if not hint or hint["format"] != "json":
+        return None
+    try:
+        turns = transcripts.parse_turns(p, rel)["turns"]
+    except HTTPException:
+        return None
+    return {first: last for first, last in transcripts.turn_extents(turns) if last > first}
+
+
 @router.get("/ws/{c}/labels/ruler")
-def ruler_route(c: str, path: str, bins: int = RULER_BINS) -> dict:
+def ruler_route(c: str, path: str, bins: int = RULER_BINS, turns: bool = False) -> dict:
     """{path, total, bins, labels: [{concept_id, bins: {value: [bin, ...]}, counts: {value: [n, ...]}}]}: where on one
     file each label's values fall, its `total` lines cut into `bins`, for the reader's overview ruler and tracks: the bins
     that hold a value and, in `counts` in the same order, how many records of that value each holds (the overview draws
-    each part of the file in the value most of its records have). Labels without rows on the file are left out."""
+    each part of the file in the value most of its records have). Labels without rows on the file are left out. With
+    `turns` (the Transcript mode), a whole-file JSON transcript's turn counts over every line it covers (turn_spans),
+    so that the strip draws it as a band as tall as the turn."""
     ws = _ws(c)
     bins = max(1, min(int(bins), 2_000))
     try:
@@ -5093,12 +5110,13 @@ def ruler_route(c: str, path: str, bins: int = RULER_BINS) -> dict:
         total = corpus.line_count(p)
     except (ValueError, OSError) as e:
         raise HTTPException(404, str(e)) from e
+    spans = turn_spans(p, path) if turns else None
     out = []
     for k in list_concepts(ws):
         if k["unit"] != "record":
             continue
         st, _building_now = _store(ws, k["id"])
-        got = st.line_counts(path, total, bins) if st is not None else {}
+        got = st.line_counts(path, total, bins, spans) if st is not None else {}
         if got:
             at = {v: sorted(per) for v, per in got.items()}
             out.append({"concept_id": k["id"], "bins": at, "counts": {v: [got[v][b] for b in bs] for v, bs in at.items()}})

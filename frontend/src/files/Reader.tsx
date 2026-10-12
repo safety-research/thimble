@@ -29,7 +29,7 @@ import { FilterBy } from './FilterBy'
 import { FilterContext, useFilterBy } from './useFilterBy'
 import { FoldContext, useFold } from './fold'
 import { labelPaint, PlaceFeed, ReaderTracks, type LoupeRecord, type OverviewPaint, type PreviewRecord, type TrackLane } from './Tracks'
-import { useColorBy } from './useColorBy'
+import { recordRows, useColorBy } from './useColorBy'
 import { fmtSize } from './Tree'
 import { useFilesFilter, type FilesLabels } from './useLabels'
 import { accepts, slugOf, viewValue } from './viewChoice'
@@ -39,7 +39,7 @@ import { usePinnedView, ViewUpdated } from './viewVersion'
 import { DeleteViewConfirm, ProposalOption } from './ViewsBar'
 import { useTypeViewers } from './typeViewers'
 import { compact, errMsg, LaneHead, recordExcerpt, targetOf, type ViewDef, type ViewProps } from './views/common'
-import { clockOf, keysFor, nameOf, pick, textOf } from './views/transcript'
+import { clockOf, keysFor, nameOf, pick, textOf, turnOver } from './views/transcript'
 import { withoutEscapes } from './views/raw'
 import { pickView, scoreViews, viewByType } from './views/registry'
 import { useDelimiter } from './views/table'
@@ -771,7 +771,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   const readerLabels = useReaderLabels(workspace, path, on, gutterLanes, labels.focus, fileOf)
   const tags = useMemo(() => laneTags(gutterLanes), [gutterLanes])
   const fileLanes = useMemo(() => new Set(lanes.filter((k) => marksOf(k) === 'file').map((k) => k.id)), [lanes])
-  const ruler = useRuler(workspace, path, lanes.length > 0)
+  const ruler = useRuler(workspace, path, lanes.length > 0, isTranscript)
   const columns = useMemo(() => rulerColumns(lanes, ruler, fileOf), [lanes, ruler, fileOf])
   const fileLabels = useFileLabels(labels, path)
 
@@ -1287,20 +1287,24 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   const paintName = nameOfChoice(colorChoice)
   const hint = builtins.transcript
   // the records the loupe shows and a record's tooltip names, read from the server: per choice of Color by its color (a
-  // label's read from its rows on those lines), its time and who said it as its metadata, and the start of its text
+  // label's read from its rows on those lines), its time and who said it as its metadata, and the start of its text. A
+  // line of a whole-file JSON transcript takes the colors of the turn loaded that covers it (turnOver), whose label rows
+  // stand on the line its record starts on, so they are read from there
   const laneOf = color.laneOf
   const pickLabels = useMemo(() => colored && color.picks.some((c) => c.by === 'label'), [colored, color.picks])
   const loupeRecords = useCallback(
     async (from: number, to: number): Promise<LoupeRecord[]> => {
-      const [page, rows] = await Promise.all([api.source(workspace, path, from, to - from + 1), pickLabels ? scaleApi.labelsForLines(workspace, path, from, to).then(rowsByRef) : Promise.resolve(null)])
+      const lo = viewRecords ? Math.min(from, turnOver(viewRecords, from)?.meta.from ?? from) : from
+      const [page, rows] = await Promise.all([api.source(workspace, path, from, to - from + 1), pickLabels ? scaleApi.labelsForLines(workspace, path, lo, to).then(rowsByRef) : Promise.resolve(null)])
       const recs = delimit ? delimit(page.records) : page.records
       return recs.map((rec) => {
-        const lanes = colored ? laneOf(rec, (id) => rows?.get(`${path}#L${rec.line}`)?.get(id)) : []
+        const turn = viewRecords ? turnOver(viewRecords, rec.line) : undefined
+        const lanes = !colored ? [] : turn ? laneOf(turn, (id) => (rows ? recordRows(rows, path, turn) : undefined)?.get(id)) : laneOf(rec, (id) => rows?.get(`${path}#L${rec.line}`)?.get(id))
         const p = previewOf(rec, hint, null)
         return { line: rec.line, lanes: lanes.map((l) => l.color), meta: [p.when, p.who].filter((m): m is string => !!m), text: p.text }
       })
     },
-    [workspace, path, pickLabels, delimit, colored, laneOf, hint],
+    [workspace, path, pickLabels, delimit, colored, laneOf, hint, viewRecords],
   )
   const toLine = useCallback((line: number) => goTo(line, 'ruler'), [goTo])
   // the record a mark of the ruler stands for: its line when it stands for one, else the first of its lines whose value

@@ -1457,6 +1457,9 @@ export interface SourceTurn {
    * labels mark it; absent for a turn that shares its record with others */
   ref?: string
   rec_line?: number
+  /** the last line it covers, for a turn of a whole JSON document: the line before the next turn's record (or words),
+   * the last turn's record's last line */
+  end?: number
   speaker: string
   role: 'user' | 'assistant' | 'system' | 'tool' | 'other'
   text: string
