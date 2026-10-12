@@ -366,8 +366,8 @@ export function refitChart(view: RefitView, el: { clientWidth: number }, contain
 
 /**
  * What of a drawn chart runs past its box at the right, in px: `svg`, the svg wider than the box; `drawn`, the drawing
- * past the svg's own edge (a label Vega measured narrower than it draws); `legend`, a horizontal legend row running past
- * the edge, with its entries per row, width and room.
+ * past the svg's own edge (a label Vega measured narrower than it draws); `legend`, a legend running past the edge, a row
+ * or a column, with its entries per row, width and room.
  */
 export interface Overrun {
   svg: number
@@ -394,7 +394,7 @@ export function measureOverrun(el: HTMLElement): Overrun | null {
     const labels = Array.from(g.querySelectorAll('.role-legend-label text'))
     const rows = new Set(labels.map((t) => Math.round(t.getBoundingClientRect().top / k))).size
     const perRow = rows ? Math.round(labels.length / rows) : 0
-    if (perRow > 1 && edge - left > 0) {
+    if (perRow > 0 && edge - left > 0) {
       legend = { perRow, width: r.width / k, room: edge - left }
       break
     }
@@ -525,10 +525,11 @@ export function hiddenXLabels(el: HTMLElement): HiddenX | null {
 }
 
 /** A legend that ran past the chart's edge, wrapped: the columns its entries' average width fits in its room (a row
- * still too wide is measured again and loses a column), and in one column the label width that fits. */
+ * still too wide is measured again and loses a column, and a column still too wide is measured again where it then
+ * stands); a legend already in one column, the label width that fits its room. */
 export function legendWrap(legend: NonNullable<Overrun['legend']>): Refit {
-  const columns = Math.max(1, Math.min(legend.perRow - 1, Math.floor((legend.perRow * legend.room) / legend.width)))
-  return columns > 1 ? { columns } : { columns, legendLabel: Math.max(MIN_LABEL, Math.floor(legend.room) - LEGEND_SYMBOL_ROOM) }
+  if (legend.perRow > 1) return { columns: Math.max(1, Math.min(legend.perRow - 1, Math.floor((legend.perRow * legend.room) / legend.width))) }
+  return { columns: 1, legendLabel: Math.max(MIN_LABEL, Math.floor(legend.room) - LEGEND_SYMBOL_ROOM) }
 }
 
 /** The spec with a refit applied: legends in `columns`, legend and y-axis labels cut at their limits (a lower limit in
@@ -693,7 +694,7 @@ export async function drawChart(el: HTMLElement, spec: Spec, load: () => Promise
     const cut = Math.max(MIN_LABEL, Math.round(box * AXIS_LABEL_SHARE))
     const cutLabels: Refit = { axisLabel: cut, legendLabel: Math.min(fit.legendLabel ?? cut, cut) }
     if (over && tries > 0) {
-      if (over.legend) return embed(w, { ...fit, ...legendWrap(over.legend) }, tries - 1)
+      if (over.legend && (over.legend.perRow > 1 || fit.legendLabel == null)) return embed(w, { ...fit, ...legendWrap(over.legend) }, tries - 1)
       // a composite whose drawing runs past its svg's right edge (the last tick label of its last view) is embedded
       // again that much narrower, so the label lands inside; never at 0 or less, which would draw the composite at the
       // widths its spec names

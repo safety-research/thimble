@@ -71,6 +71,26 @@ const heatmap = (n: number) => {
     encoding: { x: field('day', 'ordinal', { sort: days, axis: { tickBand: 'extent', labelExpr: label } }), y: field('account', 'nominal', { sort: ACCOUNTS }), color: field('saves', 'quantitative') },
   }
 }
+// a range with groups as thimble.chart writes one (backend kernel_thimble _range_spec): a dumbbell per model and
+// condition, the condition in color and the two ends by strength, so two legends stand under it on a phone's card
+const RANGE_ROWS = [['alpha', 50, 175, 47, 171], ['beta', 115, 162, 92, 147], ['gamma', 72, 143, 107, 137], ['gamma (sweep 1)', 5, 14, 1, 2]].flatMap(
+  ([model, e0, e1, m0, m1]) => [{ model, 'after 1 hour': e0, 'at the end': e1, condition: 'emergent' }, { model, 'after 1 hour': m0, 'at the end': m1, condition: 'managed' }],
+)
+const rangeEnc = (x: string) => ({
+  x: field(x, 'quantitative', { title: 'after 1 hour → at the end', scale: { zero: false, nice: false, padding: 8 } }),
+  y: field('model', 'nominal', { sort: ['alpha', 'beta', 'gamma', 'gamma (sweep 1)'] }),
+  yOffset: { field: 'condition', type: 'nominal', sort: ['emergent', 'managed'] },
+})
+const rangeEnd = (c: string) => ({
+  transform: [{ calculate: JSON.stringify(c), as: '__thimble_end' }],
+  mark: { type: 'point', style: 'thimble-end' },
+  encoding: { ...rangeEnc(c), color: field('condition', 'nominal', { sort: ['emergent', 'managed'] }), opacity: { field: '__thimble_end', type: 'ordinal', scale: { domain: ['after 1 hour', 'at the end'] }, title: 'end' } },
+})
+const range = {
+  $schema: VL,
+  data: { values: RANGE_ROWS },
+  layer: [{ mark: { type: 'rule', style: 'thimble-span' }, encoding: { ...rangeEnc('after 1 hour'), x2: { field: 'at the end' } } }, rangeEnd('after 1 hour'), rangeEnd('at the end')],
+}
 // a pull request's life with a loop, its long label a numbered note
 const LOOP = {
   nodes: ['open', 'reviewed', 'changes asked', 'merged'].map((id) => ({ id })),
@@ -158,6 +178,21 @@ for (const paper of ['warm', 'dark'])
       for (const a of got)
         for (const b of got)
           if (a.fill !== b.fill) assert.ok(Math.hypot(a.x - b.x, a.y - b.y) >= a.d, `dots of ${a.fill} and ${b.fill} overlap at ${a.x}, ${a.y}`)
+    })
+
+    test("two legends under a range on a phone's card each go into a column and keep their labels whole", async () => {
+      // QA 2026-10-12: two legends side by side ran past the edge, so each went into a column with its labels cut to
+      // the room the second had beside the first ("emerge…", "after …"), though as columns both fit whole
+      await draw('range-phone', range, 342)
+      const got = await page.evaluate(() =>
+        Array.from(document.querySelectorAll('#range-phone g.role-legend')).map((g) => {
+          const box = g.getBoundingClientRect()
+          return { labels: Array.from(g.querySelectorAll('g.role-legend-label text')).map((t) => t.textContent), right: box.right }
+        }),
+      )
+      assert.deepEqual(got.map((g) => g.labels), [['emergent', 'managed'], ['after 1 hour', 'at the end']])
+      const edge = await page.evaluate(() => document.querySelector('#range-phone')!.getBoundingClientRect().right)
+      for (const g of got) assert.ok(g.right <= edge + 1, `a legend runs past the card's edge: ${g.right} > ${edge}`)
     })
 
     test('a chart with names down its y axis, the dots chart and a histogram with a mark log nothing', async () => {
