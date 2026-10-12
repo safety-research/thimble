@@ -1,6 +1,6 @@
 <p align="center"><img src="docs/assets/thimble-banner.svg" alt="thimble" width="100%"></p>
 
-**thimble** is an open source Claude Code plugin for human oversight. It opens a workbench where you and Claude make sense of large volumes of agent output together.
+**thimble** is an open source Claude Code plugin for human oversight. It opens a workbench where you and Claude make sense of large volumes of agent output together. Where Claude Code answers in paragraphs that are hard to understand and verify, thimble answers visually, with charts and cards that cite every claim.
 
 > [!CAUTION]
 > - **thimble is in alpha.** It changes daily, so expect bugs and rough edges.
