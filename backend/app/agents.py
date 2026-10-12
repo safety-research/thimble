@@ -337,7 +337,7 @@ def new_thread(c: str, anchor: str | None, anchor_text: str | None, title: str |
                image: str | None = None, parent: str | None = None, comment: str | None = None) -> dict:
     """A thread born from a ⌘-click or ⌘-drag: `anchor` is what was pointed at (refs joined by ','), with its visible text,
     surface, element kind, CSS selector and a captured PNG. `parent` is the chat the analyst was reading (thread_parent).
-    `comment` is the id of the comment whose Ask opened it, kept as `anchor_comment` (comments.thread_comment), so its
+    `comment` is the id of the comment whose reply field opened it, kept as `anchor_comment` (comments.thread_comment), so its
     anchor line names the comment as well as its passage or step. Its first message is a browser event of kind `thread`,
     which main answers by forking."""
     from . import comments, threads  # noqa: PLC0415
@@ -801,7 +801,7 @@ class NewThread(BaseModel):
     image: str | None = None  # a data:image/png;base64 URL of the element, captured at the click
     parent: str | None = None  # the chat the analyst was reading when they asked (thread_parent)
     text: str | None = None  # the first question, posted as the thread's first event (create_route)
-    comment: str | None = None  # the id of the comment whose Ask opened it (new_thread)
+    comment: str | None = None  # the id of the comment whose reply field opened it (new_thread)
 
 
 class ChatUpdate(BaseModel):

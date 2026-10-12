@@ -4,10 +4,10 @@ import { checkRunLabel } from '../../src/report/Checks.tsx'
 
 describe("a running check's tip", () => {
   test('names what a run with no chat waits for: a free session, the writer, or plan mode to end', () => {
-    expect(checkRunLabel('Unverified', { chat: 'c1' })).toBe('Unverified is running: open its run')
-    expect(checkRunLabel('Unverified', { waiting: 'queued' })).toBe('Unverified waits for a free session')
-    expect(checkRunLabel('Unverified', { waiting: 'writer' })).toBe('Unverified runs once the writer has finished')
+    expect(checkRunLabel('Unverifiable', { chat: 'c1' })).toBe('Unverifiable is running: open its run')
+    expect(checkRunLabel('Unverifiable', { waiting: 'queued' })).toBe('Unverifiable waits for a free session')
+    expect(checkRunLabel('Unverifiable', { waiting: 'writer' })).toBe('Unverifiable runs once the writer has finished')
     // live check L21: a run a writer's end started while main was in plan mode said it waited for a free session
-    expect(checkRunLabel('Unverified', { waiting: 'plan' })).toBe('Unverified runs once your session leaves plan mode (shift+tab in your terminal)')
+    expect(checkRunLabel('Unverifiable', { waiting: 'plan' })).toBe('Unverifiable runs once your session leaves plan mode (shift+tab in your terminal)')
   })
 })

@@ -3,8 +3,13 @@ the context, can do work, and can be created and run from the chat. A check runs
 document, but is cached: a passage whose text did not change, or that is locked, is not checked again.
 
 A check is `workspaces/<c>/checks/<id>.json` = {id, name, prompt, colour, shown, builtin, created_by, ts, version,
-runs: {doc: Run}}. The built-ins (`unverified`, `verified`, `judgment`) are prompts/checks/<id>.md, read from the
-prompt file until first changed. An active extension's report checks, checks/<slug>/check.json (its name and colour)
+runs: {doc: Run}}. The built-ins (`judgment`, `unverified`, `you-should-know`: Judgment calls, Unverifiable and
+Important details) are prompts/checks/<id>.md, read from the prompt file until first changed: each covers the documents
+and the cards and is off until the analyst turns it on. A stored copy still holding a name, a prompt or covers its
+built-in had before reads as the built-in is now (FORMER_NAMES, FORMER_PROMPTS, FORMER_COVERS), since thimble stores a
+built-in whole when it is turned on or off or runs; its `shown` stays as stored. `verified`, a built-in before 0.7.0
+(RETIRED), is listed only where the workspace stored it, as any stored check is, so its comments stay readable there;
+no new check takes its id. An active extension's report checks, checks/<slug>/check.json (its name and colour)
 and check.md (its prompt) in its folder, follow the built-ins as `<extension>-<slug>`, off and read from the extension
 until first changed, as the built-ins are. A run is a `thimble:check`, a subagent of the analyst's Claude Code session
 (subagents.py), registered from prompts/check.md (definition) on Settings' checks row, with the corpus read-only and a
@@ -31,11 +36,10 @@ answers it in one line.
 The cards. A check `covers` the documents, the cards or both (COVERS; the built-ins say so in their frontmatter, a new
 check covers the documents unless made for the cards). The cards are one more run target beside the documents' slugs,
 CANVAS (`@canvas`), whose passages are canvas_comments.passages: each card of the analyst's and the threads' groups and
-each step of a plan card. Its comments are canvas_comments' store, and Done or Know it resolves them; the statements
-marked Know it are listed in each run's task (`## check-known`), on a document as on the cards, so a run never raises
-them again. Main's turn end starts each shown check that covers the cards, a follow-on start (main_turn_ended), on the cards
-that changed since its last run there and that it has not seen; Run on its row in the canvas's Comments pane and main's
-run_check with `on: cards` start one too.
+each step of a plan card. Its comments are canvas_comments' store, and Done resolves them. Main's turn end starts each
+shown check that covers the cards, a follow-on start (main_turn_ended), on the cards that changed since its last run
+there and that it has not seen; Run on its row in the canvas's Comments pane and main's run_check with `on: cards` start
+one too.
 """
 from __future__ import annotations
 
@@ -68,7 +72,18 @@ DIR = "checks"  # workspaces/<c>/checks/<id>.json
 WORK_DIR = "check-work"  # workspaces/<c>/check-work/<id>-<doc>/, a run's own folder, where its Bash may write
 TASK_FILE = "task.md"  # in a run's own folder: what its agent reads first
 OWN_TOOLS = ("read_ref", "list_cards", "add_comment")  # a check's thimble tools
-BUILTINS = ("unverified", "verified", "judgment", "you-should-know")  # prompts/checks/<id>.md, listed first in this order
+BUILTINS = ("judgment", "unverified", "you-should-know")  # prompts/checks/<id>.md, listed first in this order
+RETIRED = ("verified",)  # a former built-in: listed only where the workspace stored it, and no new check takes its id
+# what the built-ins were named before, the sha1 of the words (collapsed) of each prompt they shipped with before, and
+# what they covered before: a workspace's stored copy of a built-in that still holds one reads as the built-in is now
+# (_as_now)
+FORMER_NAMES = {"unverified": ("Unverified",), "you-should-know": ("You should know",)}
+FORMER_COVERS = {"judgment": (["documents"],), "unverified": (["documents"],)}
+FORMER_PROMPTS = {
+    "judgment": ("20b914af87f96860649651e3c44b4a1217752e90",),
+    "unverified": ("fd652c0e32dafbfda58932a0e2cc1e5acb7898e6",),
+    "you-should-know": ("af5c7de4b07f80efaa866258cc65be5a34a91981", "f3bce900c61feda9b38b72f34d5e8fdc34e5dec5"),
+}
 CANVAS = canvas_comments.CANVAS  # the run target of a check over the cards, among `runs` beside the documents' slugs
 CANVAS_NAME = "cards"  # how a line, a chat and main's `checked` event name that target
 COVERS = ("documents", "cards")  # what a check comments on
@@ -171,6 +186,26 @@ def from_extensions(c: str) -> dict[str, dict[str, Any]]:
     return out
 
 
+def _words_key(text: Any) -> str:
+    return hashlib.sha1(_collapse(text).encode("utf-8")).hexdigest()
+
+
+def _as_now(stored: dict[str, Any]) -> dict[str, Any]:
+    """A stored built-in with the name, the prompt and the covers its built-in has now in place of a former one it still
+    holds (FORMER_NAMES, FORMER_PROMPTS, FORMER_COVERS); one the analyst changed stays, and so does `shown`."""
+    cid = str(stored.get("id") or "")
+    now = builtin(cid) if cid in BUILTINS else None
+    if now is None:
+        return stored
+    if _collapse(stored.get("name")) in FORMER_NAMES.get(cid, ()):
+        stored["name"] = now["name"]
+    if _words_key(stored.get("prompt")) in FORMER_PROMPTS.get(cid, ()):
+        stored["prompt"] = now["prompt"]
+    if stored.get("covers") in FORMER_COVERS.get(cid, ()):
+        stored["covers"] = now["covers"]
+    return stored
+
+
 def read(c: str, cid: str) -> dict[str, Any] | None:
     """The check `cid`: its workspace file, else the built-in of that id, else an active extension's; None when none
     exists."""
@@ -180,7 +215,7 @@ def read(c: str, cid: str) -> dict[str, Any] | None:
         if "covers" not in stored:  # a check stored before checks covered the cards covers what its built-in says
             stored["covers"] = (builtin(cid) or {}).get("covers") or list(DEFAULT_COVERS)
         stored["covers"] = covers_of(stored["covers"])
-        return stored
+        return _as_now(stored)
     return builtin(cid) or from_extensions(c).get(cid)
 
 
@@ -237,7 +272,7 @@ def _new_id(c: str, name: str) -> str:
     base = base if ID_RE.match(base) else "check"
     taken = {x["id"] for x in list_checks(c)}
     cid, k = base, 2
-    while cid in taken or cid in BUILTINS:
+    while cid in taken or cid in BUILTINS or cid in RETIRED:
         cid, k = f"{base}-{k}", k + 1
     return cid
 
@@ -593,32 +628,11 @@ def _stream(c: str, cid: str, doc: str, status: str, run: str, chat: str, **extr
         log.debug("%s: check record not emitted for %s on %s", c, cid, doc, exc_info=True)
 
 
-def known_titles(c: str, cid: str) -> list[str]:
-    """What the analyst marked Know it among check `cid`'s comments, on the cards and in the documents, newest first,
-    each once: a comment's statement (canvas_comments.note_of)."""
-    from . import report_types  # noqa: PLC0415
-
-    found = [(str(x.get("resolved_ts") or x.get("ts") or ""), canvas_comments.note_of(x)["text"])
-             for x in canvas_comments._read(c) if x.get("check") == cid and x.get("resolution") == "known"]
-    for doc in _written(c):
-        d = report_types.read_doc(c, investigation.MAIN, doc) or {}
-        found += [(str(x.get("resolved_ts") or x.get("ts") or ""), canvas_comments.note_of(x)["text"])
-                  for x in d.get("comments") or [] if isinstance(x, dict) and x.get("check") == cid
-                  and x.get("resolution") == "known"]
-    found.sort(reverse=True)
-    return list(dict.fromkeys(_collapse(t) for _, t in found if _collapse(t)))[:canvas_comments.KNOWN_MAX]
-
-
-def _known_part(c: str, check: dict[str, Any]) -> str:
-    titles = known_titles(c, str(check["id"]))
-    return tools.hint("check-known", titles="\n".join(f"- {t}" for t in titles)) if titles else ""
-
-
 def _replaced_part(c: str, check: dict[str, Any], doc: str, cover: list[dict[str, Any]],
                    d: dict[str, Any] | None = None) -> str:
     """The check's open comments on the passages a run covers, which the run's end supersedes (_finish): listed in its
     task as the ones it replaces, so it leaves again each that still holds. Live check 0.7.0: the task's cards section
-    showed them as the cards' comments, so a run of You should know over unchanged cards took them as said, left one
+    showed them as the cards' comments, so a run of Important details over unchanged cards took them as said, left one
     new comment, and its end superseded the six still open."""
     from . import cite  # noqa: PLC0415
 
@@ -632,7 +646,7 @@ def _replaced_part(c: str, check: dict[str, Any], doc: str, cover: list[dict[str
         for cm in (d or {}).get("comments") or []:
             if (isinstance(cm, dict) and cm.get("check") == cid and (cm.get("status") or "open") == "open"
                     and _of_comment(doc, ps, str(cm.get("sentence_id"))) in covered):
-                note = canvas_comments.note_of(cm)
+                note = canvas_comments.note_of(cm, str(check.get("name") or ""))
                 text, more = (_collapse(cite.canon_text(note[k])) for k in ("text", "details"))
                 found.append(f"comment {cm.get('id')} on report:{doc}#{cm.get('sentence_id')} · {text}"
                              + (f" — {more}" if more else ""))
@@ -646,7 +660,7 @@ def task_text(c: str, check: dict[str, Any], doc: str, cover: list[dict[str, Any
     if doc == CANVAS:
         parts = [tools.hint("check-instructions", check=check["name"], prompt=str(check.get("prompt") or "").strip()),
                  tools.hint("check-canvas", cards=canvas_comments.card_lines(c, [p["ref"] for p in cover])),
-                 _replaced_part(c, check, doc, cover), _known_part(c, check)]
+                 _replaced_part(c, check, doc, cover)]
         return "\n\n".join(p.strip() for p in parts if p.strip())
     t = report_types.read_type(c, doc)
     d = report_types.read_doc(c, inv.MAIN, doc) or {}
@@ -661,7 +675,7 @@ def task_text(c: str, check: dict[str, Any], doc: str, cover: list[dict[str, Any
                 for x in report_types.all_sentences(d) if "unverified" in (x.get("tags") or []) and str(x.get("id")) in ids]
         if tags:
             parts.append(tools.hint("check-tags", tags="\n".join(tags)))
-    parts += [_replaced_part(c, check, doc, cover, d), _known_part(c, check)]
+    parts.append(_replaced_part(c, check, doc, cover, d))
     return "\n\n".join(p.strip() for p in parts if p.strip())
 
 

@@ -12,7 +12,7 @@ import { bundle, cleanup, launch, ORIGIN, src } from './page.ts'
 
 let browser: Browser
 let page: Page
-const resolved: { id: string; how: string }[] = []
+const resolved: { id: string; body: string | null }[] = []
 
 const ago = (m: number) => new Date(Date.now() - m * 60_000).toISOString()
 const step = (id: string, text: string, makes: string[], extra: Record<string, unknown> = {}) => ({ id, text, makes, status: 'not started', note: '', runs: [], time: '', started: null, ended: null, ...extra })
@@ -60,7 +60,7 @@ let COMMENTS = [
   },
 ]
 const RUNS = { runs: [{ step: 1, name: 'Run the emergent condition', chat: 'c0ffee01', state: 'running', latest: 'agent-07 waiting 12 min for a review of #131', elapsed: '40 m' }] }
-const YSK = { id: 'you-should-know', name: 'You should know', prompt: 'Leave a comment…', colour: 2, shown: true, builtin: true, created_by: 'thimble', ts: '', version: 1, runs: { '@canvas': { run: 'r1', status: 'done', chat: '', started: '', covered: [], seen: [], comments: 1, summary: '' } }, covers: ['documents', 'cards'] }
+const YSK = { id: 'you-should-know', name: 'Important details', prompt: 'Comment on a passage…', colour: 2, shown: true, builtin: true, created_by: 'thimble', ts: '', version: 1, runs: { '@canvas': { run: 'r1', status: 'done', chat: '', started: '', covered: [], seen: [], comments: 1, summary: '' } }, covers: ['documents', 'cards'] }
 
 beforeAll(async () => {
   const script = await bundle(
@@ -89,7 +89,7 @@ beforeAll(async () => {
     if (p === '/api/ws/w/canvas/comments') return json({ comments: COMMENTS })
     const res = /^\/api\/ws\/w\/canvas\/comments\/([^/]+)\/resolve$/.exec(p)
     if (res) {
-      resolved.push({ id: res[1], how: JSON.parse(req.postData() || '{}').how })
+      resolved.push({ id: res[1], body: req.postData() })
       COMMENTS = COMMENTS.filter((c) => c.id !== res[1])
       return json({ comments: COMMENTS })
     }
@@ -146,7 +146,7 @@ test('the comment on step 2 sits beside the frame, level with step 2, and stays 
   const before = await levelWithStep2('before the live rows')
   assert.ok(before.k1.left >= frame.right + 10 * s && before.k1.left <= frame.right + 26 * s, `beside the frame: ${before.k1.left} vs ${frame.right}`)
   const text = await page.evaluate(() => document.querySelector('[data-canvas-comment="k1"]')!.textContent)
-  assert.ok(text!.includes('You should know') && text!.includes("Only the versions on pandas' main branch are in the image."), text!)
+  assert.ok(text!.includes('Important details') && text!.includes("Only the versions on pandas' main branch are in the image."), text!)
   // step 1's live row arrives and pushes step 2 down; the comment moves with it
   await page.evaluate(() => (window as unknown as { releaseRuns: () => void }).releaseRuns())
   await page.waitForSelector('[data-cell="run1"] .plan-run-latest')
@@ -178,7 +178,7 @@ test('✓ resolves the comment on step 2, which no longer shows', async () => {
   await page.locator('[data-canvas-comment="k1"]').hover()
   await page.locator('[data-canvas-comment="k1"] .wu-cm-resolve').click()
   await page.waitForFunction(() => !document.querySelector('[data-canvas-comment="k1"]'))
-  assert.deepEqual(resolved, [{ id: 'k1', how: 'done' }])
+  assert.deepEqual(resolved, [{ id: 'k1', body: null }])
   // a later read of the comments (the stream's next record) does not bring it back
   await page.waitForTimeout(400)
   assert.equal(await page.locator('[data-canvas-comment]').count(), 0)

@@ -2,16 +2,15 @@
 // One comment card for every comment, in the Report's margin and on the canvas (src/report/CommentCard.tsx): its
 // header is its check's name in the check's color beside the color square, with no "Claude" before it; it shows its
 // statement, and its details only once Show more under the statement opens them (Show less folds them again), their
-// citations as chips; Know it (a check's comment)
-// and ✓ (Done) resolve it; Ask makes it active and puts the caret in its field, whose text opens a thread anchored to
-// the comment's place with the comment's id and words. Matt 2026-10-09: "it shows a short comment, then you expand for
+// citations as chips; ✓ (Done) resolves it, and its head holds nothing else (no Ask, no Know it); a click makes it
+// active, with a field whose text opens a thread anchored to the comment's place with the comment's id and words. Matt
+// 2026-10-09: "it shows a short comment, then you expand for
 // details (which can contain some citations), and can ask follow ups"; "instead of the >, use text like 'Show more' or
 // something that's placed below the short description".
 import { act, useState } from 'react'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { CommentCard, threadText, type CommentThread, type CommentView } from '../../src/report/CommentCard.tsx'
 import { extraEvidence, openComments } from '../../src/report/checkComments.ts'
-import type { ResolveHow } from '../../src/report/commentsApi.ts'
 import { api } from '../../src/lib/api.ts'
 import { bus } from '../../src/lib/bus.ts'
 import type { ChatMeta, WriteupComment } from '../../src/lib/types.ts'
@@ -22,7 +21,7 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-const look = { colour: (id: string | null) => (id == null ? 'var(--label-none)' : 'var(--label-2)'), name: (id: string | null) => (id === 'you-should-know' ? 'You should know' : (id ?? 'You')) }
+const look = { colour: (id: string | null) => (id == null ? 'var(--label-none)' : 'var(--label-2)'), name: (id: string | null) => (id === 'you-should-know' ? 'Important details' : (id ?? 'You')) }
 const YSK: CommentView = {
   id: 'k1',
   check: 'you-should-know',
@@ -34,7 +33,7 @@ const YSK: CommentView = {
 const ON_STEP: CommentThread = { anchor: 'card:abc123#step-2', passage: 'Plan: build the environment and pilot it', where: 'step 2', surface: 'canvas' }
 
 /** A card whose active state its parent holds, as the margin and the canvas hold it. */
-function Held({ comment, onResolve, thread = ON_STEP }: { comment: CommentView; onResolve?: (how: ResolveHow) => Promise<void>; thread?: CommentThread }) {
+function Held({ comment, onResolve, thread = ON_STEP }: { comment: CommentView; onResolve?: () => Promise<void>; thread?: CommentThread }) {
   const [active, setActive] = useState(false)
   return <CommentCard ws="w" comment={comment} look={look} active={active} onActivate={() => setActive(true)} onResolve={onResolve ?? (async () => {})} thread={thread} />
 }
@@ -45,7 +44,7 @@ describe('what a comment shows', () => {
   test("its check's name in the check's color and its statement; its details only once Show more under it opens them", async () => {
     const el = await mount(<Held comment={YSK} />)
     const name = el.querySelector<HTMLElement>('.wu-cm-name')!
-    expect(name.textContent).toBe('You should know')
+    expect(name.textContent).toBe('Important details')
     expect(name.style.color).toBe('var(--label-2)')
     expect(el.querySelector<HTMLElement>('.wu-cm-sq')!.style.background).toBe('var(--label-2)')
     expect(el.querySelector('.wu-cm-head')!.textContent).not.toContain('Claude')
@@ -56,7 +55,9 @@ describe('what a comment shows', () => {
 
     // no chevron in the header: the control is a button of words, after the statement
     expect(el.querySelector('.wu-cm .wu-chev')).toBeNull()
-    expect([...el.querySelectorAll('.wu-cm-head button')].map((b) => b.textContent?.trim() || b.getAttribute('aria-label'))).toEqual(['Ask', 'Know it', 'Done'])
+    expect([...el.querySelectorAll('.wu-cm-head button')].map((b) => b.textContent?.trim() || b.getAttribute('aria-label'))).toEqual(['Done'])
+    expect(el.textContent).not.toContain('Ask')
+    expect(el.textContent).not.toContain('Know it')
     const more = el.querySelector<HTMLButtonElement>('.wu-cm-more')!
     expect(more.tagName).toBe('BUTTON')
     expect(more.textContent).toBe('Show more')
@@ -86,7 +87,7 @@ describe('what a comment shows', () => {
     expect([...cited.querySelectorAll<HTMLElement>('.wu-cm-details .refchip')].map((c) => c.dataset.ref)).toEqual(['card:abc123'])
   })
 
-  test("Claude's note and the analyst's own name their author; neither has Know it, since no check raises them", async () => {
+  test("Claude's note and the analyst's own name their author, each with ✓ alone in its head", async () => {
     const el = await mount(
       <>
         <Held comment={{ ...YSK, id: 'n1', check: null, author: 'claude' }} />
@@ -94,31 +95,33 @@ describe('what a comment shows', () => {
       </>,
     )
     expect([...el.querySelectorAll('.wu-cm-name')].map((n) => n.textContent)).toEqual(['Claude', 'You'])
-    expect(el.querySelector('.wu-cm-know')).toBeNull()
-    expect(el.querySelectorAll('.wu-cm-ask').length).toBe(2)
+    expect([...el.querySelectorAll('.wu-cm-head')].map((h) => [...h.querySelectorAll('button')].map((b) => b.getAttribute('aria-label')))).toEqual([['Done'], ['Done']])
   })
 
-  test("a document's stored comments carry their details to the margin", () => {
-    const stored = [{ id: 'c1', sentence_id: 's1', text: 'The table counts 311, not 411.', details: 'See [[card:abc123]].', author: 'check', check: 'unverified', status: 'open', evidence: 'card:abc123' }] as unknown as WriteupComment[]
-    const [c] = openComments(stored, [])
+  test("a document's stored comments carry their details to the margin; one resolved as known before 0.7.0 stays resolved", () => {
+    const stored = [
+      { id: 'c1', sentence_id: 's1', text: 'The table counts 311, not 411.', details: 'See [[card:abc123]].', author: 'check', check: 'unverified', status: 'open', evidence: 'card:abc123' },
+      { id: 'c2', sentence_id: 's1', text: 'The account is a bot.', details: '', author: 'check', check: 'you-should-know', status: 'dismissed', resolution: 'known' },
+    ] as unknown as WriteupComment[]
+    const got = openComments(stored, [])
+    expect(got.map((c) => c.id)).toEqual(['c1'])
+    const [c] = got
     expect([c.text, c.details, c.evidence]).toEqual(['The table counts 311, not 411.', 'See [[card:abc123]].', ['card:abc123']])
   })
 })
 
-describe("a comment's menu", () => {
-  test('Know it and ✓ resolve a check\'s comment; the citation check\'s tag has neither', async () => {
-    const how: ResolveHow[] = []
-    const el = await mount(<Held comment={YSK} onResolve={async (h) => void how.push(h)} />)
-    expect([...el.querySelectorAll('.wu-cm-act')].map((b) => b.textContent)).toEqual(['Ask', 'Know it'])
-    await click(el.querySelector('.wu-cm-know'))
+describe("a comment's actions", () => {
+  test("✓ resolves a check's comment, once per press; the citation check's tag has no ✓", async () => {
+    let done = 0
+    const el = await mount(<Held comment={YSK} onResolve={async () => void (done += 1)} />)
     await click(el.querySelector('.wu-cm-resolve'))
-    expect(how).toEqual(['known', 'done'])
+    expect(done).toBe(1)
     const tag = await mount(<Held comment={{ ...YSK, id: 'tag:s1', check: 'unverified', details: '', evidence: [], fixed: true }} />)
-    expect(tag.querySelector('.wu-cm-know')).toBeNull()
     expect(tag.querySelector('.wu-cm-resolve')).toBeNull()
+    expect(tag.querySelectorAll('.wu-cm-head button').length).toBe(0)
   })
 
-  test("Ask makes the comment active with the caret in its field, and the question opens a thread anchored to the comment", async () => {
+  test('a click makes the comment active with its field, and the question opens a thread anchored to the comment', async () => {
     const made: Parameters<typeof api.createThread>[1][] = []
     vi.spyOn(api, 'createThread').mockImplementation(async (_ws, body) => {
       made.push(body)
@@ -127,11 +130,11 @@ describe("a comment's menu", () => {
     const opened: string[] = []
     const off = bus.on('openChat', ({ chatId }) => void opened.push(chatId))
     const el = await mount(<Held comment={YSK} />)
-    await click(el.querySelector('.wu-cm-ask'))
+    expect(el.querySelector('.wu-cm-reply')).toBeNull()
+    await click(el.querySelector('.wu-cm-statement'))
     expect(el.querySelector('.wu-cm')!.classList.contains('wu-cm-active')).toBe(true)
     expect(el.querySelector('.wu-cm-details')).not.toBeNull()
     const field = el.querySelector<HTMLTextAreaElement>('.wu-cm-reply textarea')!
-    expect(document.activeElement).toBe(field)
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, 'Which two libraries?')
       field.dispatchEvent(new Event('input', { bubbles: true }))
@@ -142,7 +145,7 @@ describe("a comment's menu", () => {
     expect(made).toEqual([
       {
         anchor: 'card:abc123#step-2',
-        anchor_text: `Plan: build the environment and pilot it\n\nThe comment k1 of the check “You should know” (on step 2): Blocking the web also blocks GitHub.\n\n${YSK.details}`,
+        anchor_text: `Plan: build the environment and pilot it\n\nThe comment k1 of the check “Important details” (on step 2): Blocking the web also blocks GitHub.\n\n${YSK.details}`,
         surface: 'canvas',
         element: 'comment',
         text: 'Which two libraries?',

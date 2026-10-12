@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // One switch for a check in both Comments panes (src/report/Checks.tsx useChecks): the Report and the canvas each hold
 // the checks, and a check turned on or off in one reaches the other through the stream's `checks` record (backend
-// checks._announce), which makes every pane read the checks again. Live check plan-cards: You should know turned off in
+// checks._announce), which makes every pane read the checks again. Live check plan-cards: Important details turned off in
 // the Report's pane stayed on in the canvas's, with its comments, until a reload.
 import { afterEach, expect, test, vi } from 'vitest'
 import { useChecks, type Checks } from '../../src/report/Checks.tsx'
@@ -16,7 +16,7 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-const ysk = (shown: boolean): Check => ({ id: 'you-should-know', name: 'You should know', prompt: 'p', colour: 2, shown, builtin: true, covers: ['documents', 'cards'], runs: {} }) as unknown as Check
+const ysk = (shown: boolean): Check => ({ id: 'you-should-know', name: 'Important details', prompt: 'p', colour: 2, shown, builtin: true, covers: ['documents', 'cards'], runs: {} }) as unknown as Check
 
 test("a check turned off in the Report's pane is off in the canvas's pane once the stream says it changed", async () => {
   let server = ysk(true)

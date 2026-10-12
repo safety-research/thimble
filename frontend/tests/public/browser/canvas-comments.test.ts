@@ -9,9 +9,9 @@
 // comment above it moving up. Matt 2026-10-09: "comment lines look off here"; "what about highlights, just like in the
 // report?"; "we don't need an underline in addition to darkened highlight … and we don't need the line connecting it to
 // the comment if it's foregrounded (e.g., slightly more shadow?) and moves up". ✓ (Done) resolves one through POST
-// /canvas/comments/{id}/resolve and it
-// goes; Know it does the same with `how: known`. Comments in the top bar lists the check that covers the cards, with its count
-// of open comments, and its square turns it off and on, which hides and shows its comments and their highlights.
+// /canvas/comments/{id}/resolve and it goes; a comment offers no Ask and no Know it. Comments in the top bar lists the
+// check that covers the cards, with its count of open comments, and its square turns it off and on, which hides and
+// shows its comments and their highlights.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { afterAll, beforeAll, test } from 'vitest'
@@ -20,7 +20,7 @@ import { bundle, cleanup, launch, ORIGIN, src } from './page.ts'
 
 let browser: Browser
 let page: Page
-const resolved: { id: string; how: string }[] = []
+const resolved: { id: string; body: string | null }[] = []
 const patched: { id: string; shown: boolean }[] = []
 
 const cell = (id: string, title: string, text: string) => ({ id, notebook: 'g', kind: 'note', title, takeaway: '', created_by: 'model', ts: '2026-10-08T12:00:00+00:00', payload: { text }, text })
@@ -38,8 +38,8 @@ let COMMENTS = [
   note('k3', 'box1', null, 'Each agent builds pandas from source on 1 CPU.', 'A build takes about a minute; 48 agents at once can slow the machine.'),
 ]
 const run = { run: 'r1', status: 'done', chat: '', started: '', covered: [], seen: [], comments: 3, summary: '' }
-let YSK = { id: 'you-should-know', name: 'You should know', prompt: 'Leave a comment…', colour: 2, shown: true, builtin: true, created_by: 'thimble', ts: '', version: 1, runs: { '@canvas': run }, covers: ['documents', 'cards'] }
-const UNVERIFIED = { ...YSK, id: 'unverified', name: 'Unverified', colour: 5, shown: false, runs: {}, covers: ['documents'] }
+let YSK = { id: 'you-should-know', name: 'Important details', prompt: 'Comment on a passage…', colour: 2, shown: true, builtin: true, created_by: 'thimble', ts: '', version: 1, runs: { '@canvas': run }, covers: ['documents', 'cards'] }
+const DOCS_ONLY = { ...YSK, id: 'quotes', name: 'Quotes', colour: 5, shown: false, builtin: false, created_by: 'analyst', runs: {}, covers: ['documents'] }
 
 beforeAll(async () => {
   const script = await bundle(
@@ -71,11 +71,11 @@ beforeAll(async () => {
     }
     const res = /^\/api\/ws\/w\/canvas\/comments\/([^/]+)\/resolve$/.exec(p)
     if (res) {
-      resolved.push({ id: res[1], how: JSON.parse(req.postData() || '{}').how })
+      resolved.push({ id: res[1], body: req.postData() })
       COMMENTS = COMMENTS.filter((c) => c.id !== res[1])
       return json({ comments: COMMENTS })
     }
-    if (p === '/api/ws/w/checks') return json([UNVERIFIED, YSK])
+    if (p === '/api/ws/w/checks') return json([DOCS_ONLY, YSK])
     if (p === '/api/ws/w/checks/you-should-know' && req.method() === 'PATCH') {
       const shown = JSON.parse(req.postData() || '{}').shown
       patched.push({ id: 'you-should-know', shown })
@@ -146,7 +146,7 @@ test('each comment sits right of the frame, level with its step row or its card,
   assert.equal(await page.evaluate(() => document.querySelectorAll('.ccm-lines, .board svg path[data-line]').length), 0)
   // a comment's header is its check's name alone, and it shows its statement; its details wait for its Show more
   const head = await page.textContent('[data-canvas-comment="k1"] .wu-cm-head')
-  assert.ok(head!.includes('You should know') && !head!.includes('Claude') && !head!.includes('Heads up'), head!)
+  assert.ok(head!.includes('Important details') && !head!.includes('Claude') && !head!.includes('Heads up'), head!)
   assert.equal(await page.textContent('[data-canvas-comment="k1"] .wu-cm-statement'), 'Blocking the web also blocks GitHub.')
   assert.ok(!(await page.textContent('[data-canvas-comment="k1"]'))!.includes('baked into the image'), 'the details stay folded')
 })
@@ -311,7 +311,7 @@ test('Comments in the top bar lists the check over the cards with its count, and
   await page.locator('.bctl-comments').click()
   await page.waitForSelector('.popover.bcomments')
   const rows = await page.evaluate(() => [...document.querySelectorAll('.popover.bcomments .wu-check')].map((r) => ({ id: (r as HTMLElement).dataset.check, name: r.querySelector('.wu-check-name')?.textContent, count: r.querySelector('.wu-count')?.textContent, on: r.querySelector('[role="switch"]')?.getAttribute('aria-checked') })))
-  assert.deepEqual(rows, [{ id: 'you-should-know', name: 'You should know', count: '3', on: 'true' }], 'Unverified covers the documents alone')
+  assert.deepEqual(rows, [{ id: 'you-should-know', name: 'Important details', count: '3', on: 'true' }], 'Quotes covers the documents alone')
   await page.locator('.popover.bcomments [data-check="you-should-know"] [role="switch"]').click()
   await page.waitForFunction(() => document.querySelectorAll('[data-canvas-comment]').length === 0)
   assert.deepEqual(patched, [{ id: 'you-should-know', shown: false }])
@@ -326,15 +326,17 @@ test('Comments in the top bar lists the check over the cards with its count, and
   assert.deepEqual(flagsOf(await drawn()), REST, 'and come back with them')
 })
 
-test('✓ resolves a comment, which goes, and Know it resolves one as known', async () => {
+test('✓ resolves a comment, which goes; a hovered comment offers ✓ alone, no Ask and no Know it', async () => {
   await page.locator('[data-canvas-comment="k2"]').hover()
+  const head = await page.evaluate(() => [...document.querySelectorAll('[data-canvas-comment="k2"] .wu-cm-head button')].map((b) => b.getAttribute('aria-label') || b.textContent?.trim()))
+  assert.deepEqual(head, ['Done'])
   await page.locator('[data-canvas-comment="k2"] .wu-cm-resolve').click()
   await page.waitForFunction(() => !document.querySelector('[data-canvas-comment="k2"]'))
-  assert.deepEqual(resolved, [{ id: 'k2', how: 'done' }])
+  assert.deepEqual(resolved, [{ id: 'k2', body: null }])
   await page.locator('[data-canvas-comment="k3"]').hover()
-  await page.locator('[data-canvas-comment="k3"] .wu-cm-know').click()
+  await page.locator('[data-canvas-comment="k3"] .wu-cm-resolve').click()
   await page.waitForFunction(() => !document.querySelector('[data-canvas-comment="k3"]'))
-  assert.deepEqual(resolved.at(-1), { id: 'k3', how: 'known' })
+  assert.deepEqual(resolved.at(-1), { id: 'k3', body: null })
   await page.waitForTimeout(400)
   assert.deepEqual(await shown(), ['k1'])
   const step4 = (await box('[data-anchor="card:plan1#step-4"]'))!

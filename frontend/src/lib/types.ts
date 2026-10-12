@@ -33,7 +33,7 @@ export interface ChatMeta {
      * the analyst asked for; may be absent (write_session.start) */
   orient?: string | null
   orient_run?: number | null
-  /** a thread that a comment's Ask opened: the comment, which its anchor line names beside its passage or step
+  /** a thread that a comment's reply field opened: the comment, which its anchor line names beside its passage or step
    * (backend comments.thread_comment) */
   anchor_comment?: ThreadComment | null
 }
@@ -102,7 +102,7 @@ export interface NewThreadBody {
   /** the first question: sent as the thread's first event in the same request, which makes nothing when no session
    * listens */
   text?: string | null
-  /** the id of the comment whose Ask opened the thread, which its anchor line then names */
+  /** the id of the comment whose reply field opened the thread, which its anchor line then names */
   comment?: string | null
 }
 
@@ -932,8 +932,9 @@ export interface WriteupComment {
   /** what supports the statement `text`, shown on request: markdown whose citations show as chips (backend
    * canvas_comments.note_of; a comment stored before it is read as its first sentence and the rest) */
   details?: string | null
-  /** why it is resolved: the analyst's Done or Know it, or superseded by a later run of its check */
-  resolution?: 'done' | 'known' | 'superseded' | string | null
+  /** why it is resolved: the analyst's Done, or superseded by a later run of its check (`known`, in a comment resolved
+   * before 0.7.0, is resolved as any other) */
+  resolution?: 'done' | 'superseded' | string | null
 }
 
 /** A comment beside a card or a step of a plan card (`GET /ws/{c}/canvas/comments`, backend canvas_comments.py): a

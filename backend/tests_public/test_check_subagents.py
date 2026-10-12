@@ -27,9 +27,8 @@ def doc(workspaces_tmp, monkeypatch):
     rows = {"checks": {"model": "claude-opus-5-5", "effort": "high", "fast": False}}
     real = config.models_for
     monkeypatch.setattr(config, "models_for", lambda c=None: {**real(c), **{k: dict(v) for k, v in rows.items()}})
-    for cid in ("unverified", "judgment"):
+    for cid in ("unverified", "judgment"):  # the built-ins are off until turned on: these two are the shown checks
         checks.edit(CORPUS, cid, shown=True)
-    checks.edit(CORPUS, "you-should-know", shown=False)  # the built-in thimble ships on: these two are the shown checks
 
 
 async def _write(text: str = TEXT) -> None:

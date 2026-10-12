@@ -1,9 +1,9 @@
 """Comments and checks from the chat: main's own note beside a passage of a written document or beside a card or a plan
 step (`add_comment` from main's shim), a comment resolved or opened again (`resolve_comment`), and a check turned off
-(`stop_check`), the chat counterparts of the margin's Comment, ✓ and Know it and the Comments pane's switch.
+(`stop_check`), the chat counterparts of the margin's Comment and ✓ and the Comments pane's switch.
 
 A note on a card goes to the cards' comments (canvas_comments.add) with author `claude`; `resolve_comment` takes such a
-comment's id, or `card:<id>` (`#step-<n>`) for every open comment there, and `how: known` for Know it.
+comment's id, or `card:<id>` (`#step-<n>`) for every open comment there.
 
 Main's note is stored as the analyst's comments are, `{id, sentence_id, text, details, author: "claude", ts, status:
 open}`, with no check and no run, so no run supersedes it. A note on a paragraph goes on its first sentence marked
@@ -159,7 +159,7 @@ async def tool_resolve_comment(ctx: Any, args: dict[str, Any]) -> Any:
         return _resolve_comment(ctx, args)
 
 
-def _resolve_card_comments(ctx: Any, value: str, reopen: bool, how: str) -> Any | None:
+def _resolve_card_comments(ctx: Any, value: str, reopen: bool) -> Any | None:
     """resolve_comment on the cards' comments: a comment's id, or a card's or a step's ref for every comment there in
     the state asked; None when `value` names none of them."""
     from . import canvas_comments  # noqa: PLC0415
@@ -176,7 +176,7 @@ def _resolve_card_comments(ctx: Any, value: str, reopen: bool, how: str) -> Any 
     if reopen:
         canvas_comments.reopen(ctx.c, ids)
     else:
-        canvas_comments.resolve(ctx.c, ids, how, by=AUTHOR)
+        canvas_comments.resolve(ctx.c, ids, by=AUTHOR)
     return tools.ok("\n".join(tools.hint("resolve_comment-done", action="reopened" if reopen else "resolved",
                                          comment=cm["id"], ref=cm["ref"], who=canvas_comments._who(ctx.c, cm),
                                          text=_collapse(cm.get("text"))) for cm in found))
@@ -187,16 +187,13 @@ def _resolve_comment(ctx: Any, args: dict[str, Any]) -> Any:
 
     value = _clean_ref(args.get("comment"))
     reopen = args.get("reopen") is True
-    how = _collapse(args.get("how")).lower() or "done"
-    if how not in canvas_comments.HOWS:
-        return tools.err(f"resolve_comment: `how` is one of {', '.join(canvas_comments.HOWS)}")
     is_card = canvas_comments.parse_ref(value) is not None
     if not value or not (value.startswith("report:") or is_card or _BARE_ID_RE.match(value)):
         return tools.err(tools.hint("resolve_comment-none", comment=value or "(no comment)",
                                     state="resolved" if reopen else "open"))
     slug, found, doc = _targets(ctx.c, value, want_open=not reopen) if not is_card else ("", [], None)
     if not found or doc is None:
-        on_cards = None if value.startswith("report:") else _resolve_card_comments(ctx, value, reopen, how)
+        on_cards = None if value.startswith("report:") else _resolve_card_comments(ctx, value, reopen)
         if on_cards is not None:
             return on_cards
         return tools.err(tools.hint("resolve_comment-none", comment=value, state="resolved" if reopen else "open"))
@@ -214,7 +211,7 @@ def _resolve_comment(ctx: Any, args: dict[str, Any]) -> Any:
         else:
             cm["status"] = report.SETTLED_STATUS
             cm[RESOLVED_BY] = AUTHOR
-            cm["resolution"] = how
+            cm["resolution"] = canvas_comments.RESOLUTION_DONE
             cm["resolved_ts"] = _now()
         lines.append(tools.hint("resolve_comment-done", action="reopened" if reopen else "resolved", comment=cm.get("id"),
                                 ref=where, who=_who(ctx.c, cm), text=_collapse(cm.get("text"))))
@@ -249,14 +246,14 @@ async def tool_stop_check(ctx: Any, args: dict[str, Any]) -> Any:
 # --------------------------------------------------------------------------- the comment a thread is about
 
 
-STATEMENT_CHARS = 300  # of a comment's statement, kept on the thread Ask opens on it
+STATEMENT_CHARS = 300  # of a comment's statement, kept on the thread its reply field opens
 
 
 def thread_comment(c: str, cid: str | None) -> dict[str, Any] | None:
     """{id, check, name, colour, text} of the comment `cid`, on the cards or in a written document, which the thread
-    that Ask opens on it keeps (agents.new_thread, `anchor_comment`) so its anchor line names the comment: its check's id,
-    name and color (the analyst's own comment is `You`, main's `Claude`, with no check) and its statement. None for no
-    such comment."""
+    that its reply field opens keeps (agents.new_thread, `anchor_comment`) so its anchor line names the comment: its
+    check's id, name and color (the analyst's own comment is `You`, main's `Claude`, with no check) and its statement.
+    None for no such comment."""
     from . import canvas_comments, checks, report_types  # noqa: PLC0415
 
     want = _clean_ref(cid)
@@ -278,7 +275,7 @@ def thread_comment(c: str, cid: str | None) -> dict[str, Any] | None:
         name = str((record or {}).get("name") or check)
     else:
         name = "Claude" if str(found.get("author") or "") == AUTHOR else "You"
-    text = _collapse(canvas_comments.note_of(found)["text"])
+    text = _collapse(canvas_comments.note_of(found, name if check else "")["text"])
     if len(text) > STATEMENT_CHARS:
         text = text[: STATEMENT_CHARS - 1].rstrip() + "…"
     colour = (record or {}).get("colour")

@@ -1,12 +1,11 @@
 // The report's margin: a card for every comment the page shows (a check's, Claude's note, or the analyst's), aligned
 // with its passage and stacked so no two meet (checkComments.ts stackCards). Each is the comment card the canvas draws
-// too (CommentCard.tsx): its check's name and its statement, its details on request, and Ask, Know it and ✓, with a
-// thread on the passage for Ask. A new comment from the toolbar is a card with a field until Enter stores it.
+// too (CommentCard.tsx): its check's name and its statement, its details on request and ✓, and, while it is active, a
+// field that opens a thread on the passage. A new comment from the toolbar is a card with a field until Enter stores it.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
 import { TextArea } from '../components/Field'
 import { bus } from '../lib/bus'
 import { CommentCard } from './CommentCard'
-import type { ResolveHow } from './commentsApi'
 import { NOTE_COLOR, stackCards, type CheckLook, type DocComment } from './checkComments'
 
 /** the room the margin takes beside the page's column: report.css `.wu-rail`, 228 wide with 12 before it and 16 after */
@@ -25,7 +24,7 @@ export interface MarginProps {
   look: CheckLook
   active: string | null
   onActivate: (id: string | null) => void
-  onResolve: (comment: DocComment, how: ResolveHow) => Promise<void>
+  onResolve: (comment: DocComment) => Promise<void>
   /** the passage a new comment of the analyst's is being written on */
   draft: string | null
   onDraft: (sid: string, text: string) => Promise<void>
@@ -110,7 +109,7 @@ export function Margin({ ws, slug, comments, look, active, onActivate, onResolve
             style={{ top: top ?? 0, visibility: top == null ? 'hidden' : undefined }}
             cardRef={setCard(c.id)}
             onActivate={() => onActivate(c.id)}
-            onResolve={(how) => onResolve(c, how)}
+            onResolve={() => onResolve(c)}
             thread={{ anchor: `report:${slug}#${c.sid}`, passage: textOf(c.sid), surface: 'report' }}
           />
         )

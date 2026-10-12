@@ -41,7 +41,7 @@ describe('the unfenced banner', () => {
 describe('the session-gone card', () => {
   test("names the agents main's quit stopped, and how to continue the orientation", () => {
     const m = (extra: Partial<ChatMeta>) => ({ id: 'x', route: 'subagent', status: 'stopped', stopped_by: 'quit', ...extra }) as ChatMeta
-    expect(stoppedAgentsLine([m({ role: 'orient' }), m({ role: 'writer', doc: 'report' }), m({ role: 'check', title: 'Unverified', stopped_by: 'analyst' })])).toBe(
+    expect(stoppedAgentsLine([m({ role: 'orient' }), m({ role: 'writer', doc: 'report' }), m({ role: 'check', title: 'Unverifiable', stopped_by: 'analyst' })])).toBe(
       "thimble's agents stopped with it: the orientation and the writer of the report. Once it is back, send the orientation a message to continue it.",
     )
     expect(stoppedAgentsLine([m({ role: 'orient', status: 'done' })])).toBe('')

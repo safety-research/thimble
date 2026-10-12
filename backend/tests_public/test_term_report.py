@@ -60,7 +60,7 @@ def _comments() -> dict[str, dict]:
 
 async def test_state_checks_gives_the_checks_route_s_list(doc):
     got = await local.state(CORPUS, "checks")
-    assert [c["id"] for c in got][:3] == ["unverified", "verified", "judgment"]
+    assert [c["id"] for c in got][:3] == ["judgment", "unverified", "you-should-know"]
     assert all({"name", "colour", "shown", "runs"} <= set(c) for c in got)
     assert "checks" in local.STATE_USAGE
 
@@ -131,4 +131,4 @@ def test_the_command_line_runs_the_report_s_acts(doc):
     assert json.loads(r.stdout) == {"ok": True, "doc": "report", "comment": "c2", "status": "dismissed"}
     r = subprocess.run([sys.executable, "-m", "app.local", "state", "checks", "--cwd", str(corpus)], cwd=backend,
                        env=dict(os.environ), capture_output=True, text=True, timeout=120)
-    assert r.returncode == 0 and json.loads(r.stdout)[0]["id"] == "unverified"
+    assert r.returncode == 0 and json.loads(r.stdout)[0]["id"] == "judgment"
