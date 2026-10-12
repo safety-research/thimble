@@ -1072,7 +1072,9 @@ def _page(corpus: Path, rel: str, start: int, end: int, clip: int = 0,
     page = {"path": rel, "kind": kind, "total_lines": total, "start": start, "records": records}
     if estimated:
         page["total_estimated"] = True
-    return transcripts.dress(page, p, rel)
+    from . import source_events  # noqa: PLC0415 — it reads this module's records
+
+    return source_events.dress(transcripts.dress(page, p, rel), p, rel)
 
 
 # --------------------------------------------------------------------------- routes

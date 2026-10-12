@@ -1495,9 +1495,30 @@ export interface SourcePage {
   records: SourceRecord[]
   /** the file reads as a transcript */
   transcript?: TranscriptHint
+  /** the first page of a file whose records carry a time: the key that holds it (backend source_events.time_hint) */
+  time?: TimeHint
   /** the file is binary, judged from its first bytes: no records, and its size */
   binary?: boolean
   size_bytes?: number
+}
+
+/** The key that holds the time of a file's records, which offers the Timeline mode (backend source_events.time_hint). */
+export interface TimeHint {
+  key: string
+}
+
+/** `GET /corpora/{c}/source/events?path=`: a file's records with a time, in time order, for the Timeline mode (backend
+ * source_events.py): each one's ref, the line it starts on, its time in seconds since 1970, the start of its words and
+ * its values of `keys` in their order; `untimed` records have no time, and `partial` says more records with a time
+ * follow the `total` placed. */
+export interface SourceEvents {
+  path: string
+  time: string | null
+  total: number
+  untimed: number
+  partial: boolean
+  keys: Omit<SourceKey, 'at'>[]
+  events: { ref: string; line: number; t: number; text: string; v: (string | null)[] }[]
 }
 
 /** `GET /corpora/{c}/source/lines`: a file's line count; while a big file's line index is being built, an estimate and
