@@ -237,14 +237,35 @@ test('the keyboard opens and folds the details: Tab to Show more, then Enter', a
 test("in the Report, a comment's Show more opening its details moves the comment below it down, and folding them moves it back", async () => {
   const c2 = '#report [data-comment="c2"]'
   const top = (s: string) => page.evaluate((q) => document.querySelector(q)!.getBoundingClientRect().top, s)
+  // the margin places its cards on the frame after a card's height changes, then slides them there (report.css .wu-cm
+  // transition), so before each measure the test waits, up to 3 s, until c1 and c2 stand still: no slide running and the
+  // same place over four frames in a row, longer than a new place waits for its frame
+  const settled = () =>
+    page.evaluate(
+      (qs) =>
+        new Promise<void>((done) => {
+          const end = performance.now() + 3000
+          let at = ''
+          let still = 0
+          const frame = () => {
+            const cards = qs.map((q) => document.querySelector(q)!)
+            const now = cards.map((c) => c.getBoundingClientRect().top).join()
+            still = now === at && cards.every((c) => !c.getAnimations().length) ? still + 1 : 0
+            at = now
+            if (still >= 4 || performance.now() > end) done()
+            else requestAnimationFrame(frame)
+          }
+          requestAnimationFrame(frame)
+        }),
+      [R, c2],
+    )
+  // the keyboard check before this one also opens and folds c1's details, and c2 can still be sliding back from it
+  await settled()
   const was = await top(c2)
   await page.locator(R).hover()
   // nothing but the details' own height may move the comment below
   await page.locator(`${R} .wu-cm-more`).click()
   await page.waitForSelector(`${R} .wu-cm-details`)
-  // the margin places its cards on the next frame and slides them there (report.css .wu-cm transition), so the test
-  // waits until they stand still, up to 3 s, before it measures
-  const settled = () => page.waitForFunction(([a, b]) => [a, b].every((q) => !document.querySelector(q)!.getAnimations().length), [R, c2], { timeout: 3000 }).catch(() => undefined)
   await page.waitForTimeout(300)
   await settled()
   const [r, b] = await page.evaluate((qs) => qs.map((q) => document.querySelector(q)!.getBoundingClientRect().toJSON()), [R, c2])
@@ -253,7 +274,8 @@ test("in the Report, a comment's Show more opening its details moves the comment
   await page.waitForFunction((s) => !document.querySelector(`${s} .wu-cm-details`), R)
   await page.waitForTimeout(300)
   await settled()
-  assert.ok(Math.abs((await top(c2)) - was) <= 1, 'c2 back in its place')
+  const now = await top(c2)
+  assert.ok(Math.abs(now - was) <= 1, `c2 back in its place: ${now} vs ${was}`)
   await page.mouse.move(5, 5)
 })
 
