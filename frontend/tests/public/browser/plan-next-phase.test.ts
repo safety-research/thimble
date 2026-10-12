@@ -31,8 +31,8 @@ const RUN = plan('run1', 'Plan: run the experiment', [step('s1', 'Run the emerge
 const canvas = { groups: [{ id: 'g', title: 'Your work', parent: null, kind: 'sequence', anchor: null, chat: null, role: 'analyst' }], cells: [BUILD] as unknown[] }
 const DETAILS =
   'Most pandas PRs live on contributors’ forks, so a clone of pandas-dev/pandas has none of their branches. The existing test only covers a PR an agent opened. Block approval from anyone who pushed commits to the PR, since the imported PRs were opened by upstream people and an agent who pushed a fix could approve its own work.'
-const COMMENTS = [{ id: 'k1', card: 'build1', step: 's1', n: 1, ref: 'card:build1#step-1', check: 'you-should-know', run: 'r1', author: 'check', text: "Cloning every branch won't get the open PRs' code: fetch them as `refs/pull/<n>/head`.", details: DETAILS, ts: '', status: 'open' }]
-const YSK = { id: 'you-should-know', name: 'Important details', prompt: 'Comment on a passage…', colour: 2, shown: true, builtin: true, created_by: 'thimble', ts: '', version: 1, runs: {}, covers: ['documents', 'cards'] }
+const COMMENTS = [{ id: 'k1', card: 'build1', step: 's1', n: 1, ref: 'card:build1#step-1', check: 'important-details', run: 'r1', author: 'check', text: "Cloning every branch won't get the open PRs' code: fetch them as `refs/pull/<n>/head`.", details: DETAILS, ts: '', status: 'open' }]
+const IMPORTANT = { id: 'important-details', name: 'Important details', prompt: 'Comment on a passage…', colour: 2, shown: true, builtin: true, created_by: 'thimble', ts: '', version: 1, runs: {}, covers: ['documents', 'cards'] }
 
 beforeAll(async () => {
   const script = await bundle(
@@ -56,7 +56,7 @@ beforeAll(async () => {
     if (p === '/bundle.css') return route.fulfill({ status: 200, contentType: 'text/css', body: css })
     if (p === '/api/ws/w/canvas') return json(canvas)
     if (p === '/api/ws/w/canvas/comments') return json({ comments: COMMENTS })
-    if (p === '/api/ws/w/checks') return json([YSK])
+    if (p === '/api/ws/w/checks') return json([IMPORTANT])
     if (p === '/api/ws/w/chats' || p === '/api/ws/w/concepts') return json([])
     if (p.startsWith('/api/')) return json({})
     return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/bundle.css"></head><body><div id="root" style="position:absolute;inset:0;display:flex"></div></body></html>' })

@@ -60,7 +60,7 @@ def _comments() -> dict[str, dict]:
 
 async def test_state_checks_gives_the_checks_route_s_list(doc):
     got = await local.state(CORPUS, "checks")
-    assert [c["id"] for c in got][:3] == ["judgment", "unverified", "you-should-know"]
+    assert [c["id"] for c in got][:3] == ["judgment", "unverified", "important-details"]
     assert all({"name", "colour", "shown", "runs"} <= set(c) for c in got)
     assert "checks" in local.STATE_USAGE
 

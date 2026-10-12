@@ -580,13 +580,17 @@ LEGACY_CHECKS = {"verified": "verified", "unverified": "unverified", "judgment":
 
 
 def _legacy_comments(doc: dict[str, Any]) -> None:
-    """A stored document's verifier comments as check comments, in place (LEGACY_CHECKS); written so on its next save."""
+    """A stored document's verifier comments as check comments (LEGACY_CHECKS), and each comment of a built-in's former
+    id as the built-in's (checks.current_id), in place; written so on its next save."""
+    from .checks import current_id  # noqa: PLC0415
     from .report import CHECK_AUTHOR, LEGACY_AUTHOR  # noqa: PLC0415
 
     for cm in doc.get("comments") or []:
         if isinstance(cm, dict) and cm.get("author") == LEGACY_AUTHOR:
             cm["author"] = CHECK_AUTHOR
             cm["check"] = LEGACY_CHECKS.get(str(cm.pop("kind", "") or ""), "judgment")
+        elif isinstance(cm, dict) and cm.get("check"):
+            cm["check"] = current_id(cm["check"])
 
 
 def _split_comments(c: str, doc: dict[str, Any]) -> None:

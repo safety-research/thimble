@@ -31,7 +31,7 @@ beforeAll(async () => {
       `import type { ChatMeta, ChatRecord } from '${src('lib/types.ts')}'`,
       `import type { ChatState } from '${src('chat/useChat.ts')}'`,
       `const records: ChatRecord[] = [{ type: 'user', text: 'why does that matter?' }]`,
-      `const comment = { id: 'k1', check: 'you-should-know', name: 'Important details', colour: 2, text: ${JSON.stringify(STATEMENT)} }`,
+      `const comment = { id: 'k1', check: 'important-details', name: 'Important details', colour: 2, text: ${JSON.stringify(STATEMENT)} }`,
       `const meta = (id: string, withComment: boolean): ChatMeta => ({ id, kind: 'thread', role: 'thread', title: 'plan-build-offline', created_at: '2026-10-09T17:48:00+00:00', parent: 'main', anchor: 'card:plan1#step-4', anchor_text: 'Plan', model: null, effort: null, group: null, anchor_comment: withComment ? comment : null })`,
       `const chat = (m: ChatMeta): ChatState => ({ meta: m, records, rows: foldRecords(records), loading: false, error: null, streaming: true, running: true, send: async () => true, interrupt: async () => {}, reload: async () => {} })`,
       `const main = { ...chat(meta('main', false)), records: [], rows: [] }`,

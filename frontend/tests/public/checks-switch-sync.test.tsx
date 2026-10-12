@@ -16,10 +16,10 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-const ysk = (shown: boolean): Check => ({ id: 'you-should-know', name: 'Important details', prompt: 'p', colour: 2, shown, builtin: true, covers: ['documents', 'cards'], runs: {} }) as unknown as Check
+const important = (shown: boolean): Check => ({ id: 'important-details', name: 'Important details', prompt: 'p', colour: 2, shown, builtin: true, covers: ['documents', 'cards'], runs: {} }) as unknown as Check
 
 test("a check turned off in the Report's pane is off in the canvas's pane once the stream says it changed", async () => {
-  let server = ysk(true)
+  let server = important(true)
   vi.spyOn(checksApi, 'list').mockImplementation(async () => [server])
   vi.spyOn(checksApi, 'update').mockImplementation(async (_ws, _id, patch) => {
     server = { ...server, shown: !!patch.shown }
@@ -37,15 +37,15 @@ test("a check turned off in the Report's pane is off in the canvas's pane once t
     </>,
   )
   await settle()
-  expect(got.report.on.has('you-should-know') && got.canvas.on.has('you-should-know')).toBe(true)
+  expect(got.report.on.has('important-details') && got.canvas.on.has('important-details')).toBe(true)
 
-  got.report.toggle('you-should-know', false)
+  got.report.toggle('important-details', false)
   await settle()
-  expect(got.report.on.has('you-should-know')).toBe(false)
-  expect(got.canvas.on.has('you-should-know')).toBe(true) // the canvas has heard nothing yet
+  expect(got.report.on.has('important-details')).toBe(false)
+  expect(got.canvas.on.has('important-details')).toBe(true) // the canvas has heard nothing yet
 
-  dispatch({ type: 'checks', id: 'you-should-know' })
+  dispatch({ type: 'checks', id: 'important-details' })
   await new Promise((r) => setTimeout(r, 200)) // the refetch's debounce
   await settle()
-  expect(got.canvas.on.has('you-should-know')).toBe(false)
+  expect(got.canvas.on.has('important-details')).toBe(false)
 })

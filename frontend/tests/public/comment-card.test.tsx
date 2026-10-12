@@ -21,10 +21,10 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-const look = { colour: (id: string | null) => (id == null ? 'var(--label-none)' : 'var(--label-2)'), name: (id: string | null) => (id === 'you-should-know' ? 'Important details' : (id ?? 'You')) }
-const YSK: CommentView = {
+const look = { colour: (id: string | null) => (id == null ? 'var(--label-none)' : 'var(--label-2)'), name: (id: string | null) => (id === 'important-details' ? 'Important details' : (id ?? 'You')) }
+const IMPORTANT: CommentView = {
   id: 'k1',
-  check: 'you-should-know',
+  check: 'important-details',
   author: 'check',
   text: 'Blocking the web also blocks GitHub.',
   details: '- The pandas build fetches two libraries from GitHub [[2|card:abc123#libs/TOTAL]].\n- Bake them into the image.',
@@ -42,7 +42,7 @@ const click = (el: Element | null) => act(async () => (el as HTMLElement).click(
 
 describe('what a comment shows', () => {
   test("its check's name in the check's color and its statement; its details only once Show more under it opens them", async () => {
-    const el = await mount(<Held comment={YSK} />)
+    const el = await mount(<Held comment={IMPORTANT} />)
     const name = el.querySelector<HTMLElement>('.wu-cm-name')!
     expect(name.textContent).toBe('Important details')
     expect(name.style.color).toBe('var(--label-2)')
@@ -78,11 +78,11 @@ describe('what a comment shows', () => {
   })
 
   test('a comment with no details has no Show more; the refs its statement cited show as chips in its details', async () => {
-    const plain = await mount(<Held comment={{ ...YSK, details: '', evidence: [] }} />)
+    const plain = await mount(<Held comment={{ ...IMPORTANT, details: '', evidence: [] }} />)
     expect(plain.querySelector('.wu-cm-more')).toBeNull()
     expect(plain.textContent).not.toContain('Show more')
     expect(extraEvidence(['card:a', 'card:b'], 'see [[card:a]]')).toEqual(['card:b'])
-    const cited = await mount(<Held comment={{ ...YSK, details: '', evidence: ['card:abc123'] }} />)
+    const cited = await mount(<Held comment={{ ...IMPORTANT, details: '', evidence: ['card:abc123'] }} />)
     await click(cited.querySelector('.wu-cm-more'))
     expect([...cited.querySelectorAll<HTMLElement>('.wu-cm-details .refchip')].map((c) => c.dataset.ref)).toEqual(['card:abc123'])
   })
@@ -90,8 +90,8 @@ describe('what a comment shows', () => {
   test("Claude's note and the analyst's own name their author, each with ✓ alone in its head", async () => {
     const el = await mount(
       <>
-        <Held comment={{ ...YSK, id: 'n1', check: null, author: 'claude' }} />
-        <Held comment={{ ...YSK, id: 'n2', check: null, author: 'analyst', details: '' }} />
+        <Held comment={{ ...IMPORTANT, id: 'n1', check: null, author: 'claude' }} />
+        <Held comment={{ ...IMPORTANT, id: 'n2', check: null, author: 'analyst', details: '' }} />
       </>,
     )
     expect([...el.querySelectorAll('.wu-cm-name')].map((n) => n.textContent)).toEqual(['Claude', 'You'])
@@ -101,7 +101,7 @@ describe('what a comment shows', () => {
   test("a document's stored comments carry their details to the margin; one resolved as known before 0.7.0 stays resolved", () => {
     const stored = [
       { id: 'c1', sentence_id: 's1', text: 'The table counts 311, not 411.', details: 'See [[card:abc123]].', author: 'check', check: 'unverified', status: 'open', evidence: 'card:abc123' },
-      { id: 'c2', sentence_id: 's1', text: 'The account is a bot.', details: '', author: 'check', check: 'you-should-know', status: 'dismissed', resolution: 'known' },
+      { id: 'c2', sentence_id: 's1', text: 'The account is a bot.', details: '', author: 'check', check: 'important-details', status: 'dismissed', resolution: 'known' },
     ] as unknown as WriteupComment[]
     const got = openComments(stored, [])
     expect(got.map((c) => c.id)).toEqual(['c1'])
@@ -113,10 +113,10 @@ describe('what a comment shows', () => {
 describe("a comment's actions", () => {
   test("✓ resolves a check's comment, once per press; the citation check's tag has no ✓", async () => {
     let done = 0
-    const el = await mount(<Held comment={YSK} onResolve={async () => void (done += 1)} />)
+    const el = await mount(<Held comment={IMPORTANT} onResolve={async () => void (done += 1)} />)
     await click(el.querySelector('.wu-cm-resolve'))
     expect(done).toBe(1)
-    const tag = await mount(<Held comment={{ ...YSK, id: 'tag:s1', check: 'unverified', details: '', evidence: [], fixed: true }} />)
+    const tag = await mount(<Held comment={{ ...IMPORTANT, id: 'tag:s1', check: 'unverified', details: '', evidence: [], fixed: true }} />)
     expect(tag.querySelector('.wu-cm-resolve')).toBeNull()
     expect(tag.querySelectorAll('.wu-cm-head button').length).toBe(0)
   })
@@ -129,7 +129,7 @@ describe("a comment's actions", () => {
     })
     const opened: string[] = []
     const off = bus.on('openChat', ({ chatId }) => void opened.push(chatId))
-    const el = await mount(<Held comment={YSK} />)
+    const el = await mount(<Held comment={IMPORTANT} />)
     expect(el.querySelector('.wu-cm-reply')).toBeNull()
     await click(el.querySelector('.wu-cm-statement'))
     expect(el.querySelector('.wu-cm')!.classList.contains('wu-cm-active')).toBe(true)
@@ -145,7 +145,7 @@ describe("a comment's actions", () => {
     expect(made).toEqual([
       {
         anchor: 'card:abc123#step-2',
-        anchor_text: `Plan: build the environment and pilot it\n\nThe comment k1 of the check “Important details” (on step 2): Blocking the web also blocks GitHub.\n\n${YSK.details}`,
+        anchor_text: `Plan: build the environment and pilot it\n\nThe comment k1 of the check “Important details” (on step 2): Blocking the web also blocks GitHub.\n\n${IMPORTANT.details}`,
         surface: 'canvas',
         element: 'comment',
         text: 'Which two libraries?',
@@ -157,6 +157,6 @@ describe("a comment's actions", () => {
 
   test("a thread from the Report's margin is anchored to the comment's passage", () => {
     const thread: CommentThread = { anchor: 'report:report#s4', passage: 'Most saves came in one week of June.', surface: 'report' }
-    expect(threadText({ ...YSK, check: null, author: 'claude', details: '' }, 'Claude', thread)).toBe('Most saves came in one week of June.\n\nClaude’s comment k1: Blocking the web also blocks GitHub.')
+    expect(threadText({ ...IMPORTANT, check: null, author: 'claude', details: '' }, 'Claude', thread)).toBe('Most saves came in one week of June.\n\nClaude’s comment k1: Blocking the web also blocks GitHub.')
   })
 })

@@ -17,7 +17,7 @@ afterEach(unmountAll)
 
 const group = (id: string, over: Partial<Group> = {}): Group => ({ id, title: id, parent: null, kind: 'sequence', anchor: null, chat: null, ...over }) as Group
 const cell = (id: string, notebook: string): Cell => ({ id, notebook, kind: 'note', title: id, takeaway: '' }) as unknown as Cell
-const comment = (id: string, card: string, over: Partial<CanvasComment> = {}): CanvasComment => ({ id, card, step: null, n: null, ref: `card:${card}`, check: 'ysk', run: 'r1', author: 'check', text: 'A statement.', details: 'A sentence.', ts: '', status: 'open', ...over })
+const comment = (id: string, card: string, over: Partial<CanvasComment> = {}): CanvasComment => ({ id, card, step: null, n: null, ref: `card:${card}`, check: 'important', run: 'r1', author: 'check', text: 'A statement.', details: 'A sentence.', ts: '', status: 'open', ...over })
 
 // a root frame `g` holding the plan card `p` and a nested frame `n` holding the card `t`, and a loose card `l`
 const data = { groups: [group('g'), group('n', { parent: 'g' }), group('loose', { kind: 'loose' })], cells: [cell('p', 'g'), cell('t', 'n'), { ...cell('l', 'loose'), pos: { x: 2000, y: 100 } }] } as unknown as CanvasResponse
@@ -124,29 +124,29 @@ describe('where the comments beside the cards sit', () => {
   test("a comment hides with its check, its card not drawn or its card filtered out; Claude's own always shows", () => {
     const list = [comment('a', 'p'), comment('b', 'p', { check: 'judgment' }), comment('c', 'gone'), comment('d', 't', { check: null, author: 'claude' }), comment('e', 't')]
     const drawn = (id: string) => id !== 'gone'
-    expect(shownCanvasComments(list, new Set(['ysk']), drawn, null).map((c) => c.id)).toEqual(['a', 'd', 'e'])
-    expect(shownCanvasComments(list, new Set(['ysk']), drawn, new Set(['p'])).map((c) => c.id)).toEqual(['a'])
+    expect(shownCanvasComments(list, new Set(['important']), drawn, null).map((c) => c.id)).toEqual(['a', 'd', 'e'])
+    expect(shownCanvasComments(list, new Set(['important']), drawn, new Set(['p'])).map((c) => c.id)).toEqual(['a'])
     expect(shownCanvasComments(list, new Set(), drawn, null).map((c) => c.id)).toEqual(['d'])
   })
 })
 
 const check = (id: string, covers: Check['covers'], over: Partial<Check> = {}): Check => ({ id, name: id, prompt: 'p', colour: 2, shown: true, builtin: true, created_by: 'thimble', ts: '', version: 1, runs: {}, covers, ...over })
-const LIST = [check('unverified', ['documents'], { shown: false }), check('ysk', ['documents', 'cards'], { name: 'Important details', runs: { '@canvas': { run: 'r', status: 'done', chat: '', started: '', covered: [], seen: [], comments: 2, summary: '' } } }), check('risks', ['cards'], { name: 'Risks', shown: false })]
+const LIST = [check('unverified', ['documents'], { shown: false }), check('important', ['documents', 'cards'], { name: 'Important details', runs: { '@canvas': { run: 'r', status: 'done', chat: '', started: '', covered: [], seen: [], comments: 2, summary: '' } } }), check('risks', ['cards'], { name: 'Risks', shown: false })]
 
 describe("the Comments pane's rows", () => {
   test('a check shows where it comments: the documents, the cards or both', () => {
-    expect(checksFor(LIST, CANVAS).map((c) => c.id)).toEqual(['ysk', 'risks'])
-    expect(checksFor(LIST, 'report').map((c) => c.id)).toEqual(['unverified', 'ysk'])
+    expect(checksFor(LIST, CANVAS).map((c) => c.id)).toEqual(['important', 'risks'])
+    expect(checksFor(LIST, 'report').map((c) => c.id)).toEqual(['unverified', 'important'])
     expect(coversSurface({ covers: undefined }, 'report')).toBe(true)
     expect(coversSurface({ covers: undefined }, CANVAS)).toBe(false)
   })
 
   test("on the canvas each row counts the check's open comments on the cards, and its square switches it", async () => {
     const toggled: string[] = []
-    const checks: Checks = { list: LIST, on: new Set(['ysk']), look: { colour: () => '', name: (id) => id ?? '', rank: () => 0 }, toggle: (id) => void toggled.push(id), create: async () => true, editPrompt: async () => true }
+    const checks: Checks = { list: LIST, on: new Set(['important']), look: { colour: () => '', name: (id) => id ?? '', rank: () => 0 }, toggle: (id) => void toggled.push(id), create: async () => true, editPrompt: async () => true }
     const el = await mount(<CheckRows ws="w" surface={CANVAS} checks={checks} comments={[comment('a', 'p'), comment('b', 'p'), comment('c', 't', { check: null })]} adding={null} onAdding={() => {}} />)
     const rows = [...el.querySelectorAll<HTMLElement>('.wu-check')]
-    expect(rows.map((r) => r.dataset.check)).toEqual(['ysk', 'risks'])
+    expect(rows.map((r) => r.dataset.check)).toEqual(['important', 'risks'])
     expect(rows[0].querySelector('.wu-check-name')!.textContent).toBe('Important details')
     expect(rows[0].querySelector('.wu-count')!.textContent).toBe('2')
     expect(rows[0].querySelector('[role="switch"]')!.getAttribute('aria-checked')).toBe('true')

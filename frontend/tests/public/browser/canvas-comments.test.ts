@@ -31,15 +31,15 @@ const CANVAS = {
     cell('box1', 'What can an agent do in its container?', 'Agents can install from PyPI and conda but cannot browse the web.'),
   ],
 }
-const note = (id: string, card: string, n: number | null, text: string, details: string) => ({ id, card, step: n == null ? null : `s${n}`, n, ref: n == null ? `card:${card}` : `card:${card}#step-${n}`, check: 'you-should-know', run: 'r1', author: 'check', text, details, ts: '', status: 'open' })
+const note = (id: string, card: string, n: number | null, text: string, details: string) => ({ id, card, step: n == null ? null : `s${n}`, n, ref: n == null ? `card:${card}` : `card:${card}#step-${n}`, check: 'important-details', run: 'r1', author: 'check', text, details, ts: '', status: 'open' })
 let COMMENTS = [
   note('k1', 'plan1', 4, 'Blocking the web also blocks GitHub.', 'The pandas build downloads two of its libraries from GitHub, not PyPI. Unless they are baked into the image, the pilot will fail.'),
   note('k2', 'plan1', null, 'The pilot only tests the emergent prompt.', ["The manager agent's prompt runs for the first time in the full run.", ...['assigns', 'reassigns', 'reviews', 'merges', 'reverts', 'waits', 'retries', 'stops'].map((w) => `- How the manager ${w} work is never tried in the pilot, so the full run is the first time anyone sees it.`)].join('\n')),
   note('k3', 'box1', null, 'Each agent builds pandas from source on 1 CPU.', 'A build takes about a minute; 48 agents at once can slow the machine.'),
 ]
 const run = { run: 'r1', status: 'done', chat: '', started: '', covered: [], seen: [], comments: 3, summary: '' }
-let YSK = { id: 'you-should-know', name: 'Important details', prompt: 'Comment on a passage…', colour: 2, shown: true, builtin: true, created_by: 'thimble', ts: '', version: 1, runs: { '@canvas': run }, covers: ['documents', 'cards'] }
-const DOCS_ONLY = { ...YSK, id: 'quotes', name: 'Quotes', colour: 5, shown: false, builtin: false, created_by: 'analyst', runs: {}, covers: ['documents'] }
+let IMPORTANT = { id: 'important-details', name: 'Important details', prompt: 'Comment on a passage…', colour: 2, shown: true, builtin: true, created_by: 'thimble', ts: '', version: 1, runs: { '@canvas': run }, covers: ['documents', 'cards'] }
+const DOCS_ONLY = { ...IMPORTANT, id: 'quotes', name: 'Quotes', colour: 5, shown: false, builtin: false, created_by: 'analyst', runs: {}, covers: ['documents'] }
 
 beforeAll(async () => {
   const script = await bundle(
@@ -75,12 +75,12 @@ beforeAll(async () => {
       COMMENTS = COMMENTS.filter((c) => c.id !== res[1])
       return json({ comments: COMMENTS })
     }
-    if (p === '/api/ws/w/checks') return json([DOCS_ONLY, YSK])
-    if (p === '/api/ws/w/checks/you-should-know' && req.method() === 'PATCH') {
+    if (p === '/api/ws/w/checks') return json([DOCS_ONLY, IMPORTANT])
+    if (p === '/api/ws/w/checks/important-details' && req.method() === 'PATCH') {
       const shown = JSON.parse(req.postData() || '{}').shown
-      patched.push({ id: 'you-should-know', shown })
-      YSK = { ...YSK, shown }
-      return json(YSK)
+      patched.push({ id: 'important-details', shown })
+      IMPORTANT = { ...IMPORTANT, shown }
+      return json(IMPORTANT)
     }
     if (p === '/api/ws/w/chats' || p === '/api/ws/w/concepts') return json([])
     if (p.startsWith('/api/')) return json({})
@@ -311,14 +311,14 @@ test('Comments in the top bar lists the check over the cards with its count, and
   await page.locator('.bctl-comments').click()
   await page.waitForSelector('.popover.bcomments')
   const rows = await page.evaluate(() => [...document.querySelectorAll('.popover.bcomments .wu-check')].map((r) => ({ id: (r as HTMLElement).dataset.check, name: r.querySelector('.wu-check-name')?.textContent, count: r.querySelector('.wu-count')?.textContent, on: r.querySelector('[role="switch"]')?.getAttribute('aria-checked') })))
-  assert.deepEqual(rows, [{ id: 'you-should-know', name: 'Important details', count: '3', on: 'true' }], 'Quotes covers the documents alone')
-  await page.locator('.popover.bcomments [data-check="you-should-know"] [role="switch"]').click()
+  assert.deepEqual(rows, [{ id: 'important-details', name: 'Important details', count: '3', on: 'true' }], 'Quotes covers the documents alone')
+  await page.locator('.popover.bcomments [data-check="important-details"] [role="switch"]').click()
   await page.waitForFunction(() => document.querySelectorAll('[data-canvas-comment]').length === 0)
-  assert.deepEqual(patched, [{ id: 'you-should-know', shown: false }])
+  assert.deepEqual(patched, [{ id: 'important-details', shown: false }])
   assert.equal(await page.locator('.wu-flag').count(), 0, 'its highlights go with its comments')
-  await page.locator('.popover.bcomments [data-check="you-should-know"] [role="switch"]').click()
+  await page.locator('.popover.bcomments [data-check="important-details"] [role="switch"]').click()
   await page.waitForSelector('[data-canvas-comment="k1"]')
-  assert.deepEqual(patched.at(-1), { id: 'you-should-know', shown: true })
+  assert.deepEqual(patched.at(-1), { id: 'important-details', shown: true })
   await page.keyboard.press('Escape')
   await page.waitForFunction(() => !document.querySelector('.popover.bcomments'))
   await page.waitForTimeout(400)
