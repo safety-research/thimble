@@ -50,7 +50,7 @@ let COMMENTS = [
     step: 's2',
     n: 2,
     ref: 'card:run1#step-2',
-    check: 'you-should-know',
+    check: 'important-details',
     run: 'r1',
     author: 'check',
     text: "Only the versions on pandas' main branch are in the image.",
@@ -60,7 +60,7 @@ let COMMENTS = [
   },
 ]
 const RUNS = { runs: [{ step: 1, name: 'Run the emergent condition', chat: 'c0ffee01', state: 'running', latest: 'agent-07 waiting 12 min for a review of #131', elapsed: '40 m' }] }
-const YSK = { id: 'you-should-know', name: 'Important details', prompt: 'Comment on a passage…', colour: 2, shown: true, builtin: true, created_by: 'thimble', ts: '', version: 1, runs: { '@canvas': { run: 'r1', status: 'done', chat: '', started: '', covered: [], seen: [], comments: 1, summary: '' } }, covers: ['documents', 'cards'] }
+const IMPORTANT = { id: 'important-details', name: 'Important details', prompt: 'Comment on a passage…', colour: 2, shown: true, builtin: true, created_by: 'thimble', ts: '', version: 1, runs: { '@canvas': { run: 'r1', status: 'done', chat: '', started: '', covered: [], seen: [], comments: 1, summary: '' } }, covers: ['documents', 'cards'] }
 
 beforeAll(async () => {
   const script = await bundle(
@@ -97,7 +97,7 @@ beforeAll(async () => {
       await ready
       return json(RUNS)
     }
-    if (p === '/api/ws/w/checks') return json([YSK])
+    if (p === '/api/ws/w/checks') return json([IMPORTANT])
     if (p === '/api/ws/w/chats' || p === '/api/ws/w/concepts') return json([])
     if (p.startsWith('/api/')) return json({})
     return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/bundle.css"></head><body><div id="root" style="position:absolute;inset:0;display:flex"></div></body></html>' })

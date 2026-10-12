@@ -131,6 +131,10 @@ def _defaults(meta: dict) -> dict:
         meta.setdefault("status", "running")
         meta.setdefault("result", None)
         meta.setdefault("ts_end", None)
+    if meta["role"] == "check" and meta.get("check"):  # a run of a check: by its id and name now (checks.chat_as_now)
+        from . import checks  # noqa: PLC0415 — checks imports the modules this one's callers import
+
+        checks.chat_as_now(meta)
     return meta
 
 

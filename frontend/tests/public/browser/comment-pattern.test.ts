@@ -25,11 +25,11 @@ const PLAN = { id: 'plan1', notebook: 'g', kind: 'plan', title: 'Plan: build the
 const BOX = { id: 'box1', notebook: 'g', kind: 'note', title: 'What can an agent do in its container?', takeaway: '', created_by: 'model', ts: '2026-10-08T12:00:00+00:00', payload: { text: 'Agents can install from PyPI and conda.' }, text: 'Agents can install from PyPI and conda.' }
 const CANVAS = { groups: [{ id: 'g', title: 'Your work', parent: null, kind: 'sequence', anchor: null, chat: null, role: 'analyst' }], cells: [PLAN, BOX] }
 const DETAILS = '- The pandas build fetches two of its libraries from GitHub [[2|card:box1]].\n- Bake them into the image, or allow github.com.'
-const COMMENTS = [{ id: 'k1', card: 'plan1', step: 's2', n: 2, ref: 'card:plan1#step-2', check: 'you-should-know', run: 'r1', author: 'check', text: 'Blocking the web also blocks GitHub.', details: DETAILS, evidence: 'card:box1', ts: '', status: 'open' }]
-const YSK = { id: 'you-should-know', name: 'Important details', prompt: 'Comment on a passage…', colour: 2, shown: true, builtin: true, created_by: 'thimble', ts: '', version: 1, runs: {}, covers: ['documents', 'cards'] }
+const COMMENTS = [{ id: 'k1', card: 'plan1', step: 's2', n: 2, ref: 'card:plan1#step-2', check: 'important-details', run: 'r1', author: 'check', text: 'Blocking the web also blocks GitHub.', details: DETAILS, evidence: 'card:box1', ts: '', status: 'open' }]
+const IMPORTANT = { id: 'important-details', name: 'Important details', prompt: 'Comment on a passage…', colour: 2, shown: true, builtin: true, created_by: 'thimble', ts: '', version: 1, runs: {}, covers: ['documents', 'cards'] }
 const PASSAGE = 'Most saves came in one week of June.'
 const PASSAGE2 = 'Half of them were from new accounts.'
-const STORED = [{ id: 'c1', sentence_id: 's1', text: 'Most saves came from one bot account.', details: '- The table counts [[612|card:box1]] of 900 saves.\n- Leave the bot out, or say so.', author: 'check', check: 'you-should-know', status: 'open', evidence: 'card:box1' }, { id: 'c2', sentence_id: 's2', text: 'New accounts here means made in June.', details: 'The table dates each account by its first save.', author: 'check', check: 'you-should-know', status: 'open', evidence: '' }]
+const STORED = [{ id: 'c1', sentence_id: 's1', text: 'Most saves came from one bot account.', details: '- The table counts [[612|card:box1]] of 900 saves.\n- Leave the bot out, or say so.', author: 'check', check: 'important-details', status: 'open', evidence: 'card:box1' }, { id: 'c2', sentence_id: 's2', text: 'New accounts here means made in June.', details: 'The table dates each account by its first save.', author: 'check', check: 'important-details', status: 'open', evidence: '' }]
 
 const R = '#report [data-comment="c1"]'
 const C = '[data-canvas-comment="k1"]'
@@ -44,7 +44,7 @@ beforeAll(async () => {
       `import { Canvas } from '${src('canvas/Canvas.tsx')}'`,
       `import { Margin } from '${src('report/Margin.tsx')}'`,
       `import { checkLook, openComments } from '${src('report/checkComments.ts')}'`,
-      `const look = checkLook([{ id: 'you-should-know', name: 'Important details', colour: 2 }])`,
+      `const look = checkLook([{ id: 'important-details', name: 'Important details', colour: 2 }])`,
       `const comments = openComments(${JSON.stringify(STORED)} as never, [])`,
       `function Report() {`,
       `  const column = useRef<HTMLDivElement>(null)`,
@@ -71,7 +71,7 @@ beforeAll(async () => {
     if (p === '/bundle.css') return route.fulfill({ status: 200, contentType: 'text/css', body: css })
     if (p === '/api/ws/w/canvas') return json(CANVAS)
     if (p === '/api/ws/w/canvas/comments') return json({ comments: COMMENTS })
-    if (p === '/api/ws/w/checks') return json([YSK])
+    if (p === '/api/ws/w/checks') return json([IMPORTANT])
     if (p === '/api/ws/w/chats' && req.method() === 'POST') {
       threads.push(JSON.parse(req.postData() || '{}'))
       return json({ id: `t${threads.length}`, kind: 'thread', title: 'thread' })

@@ -3,11 +3,13 @@ the context, can do work, and can be created and run from the chat. A check runs
 document, but is cached: a passage whose text did not change, or that is locked, is not checked again.
 
 A check is `workspaces/<c>/checks/<id>.json` = {id, name, prompt, colour, shown, builtin, created_by, ts, version,
-runs: {doc: Run}}. The built-ins (`judgment`, `unverified`, `you-should-know`: Judgment calls, Unverifiable and
+runs: {doc: Run}}. The built-ins (`judgment`, `unverified`, `important-details`: Judgment calls, Unverifiable and
 Important details) are prompts/checks/<id>.md, read from the prompt file until first changed: each covers the documents
 and the cards and is off until the analyst turns it on. A stored copy still holding a name, a prompt or covers its
 built-in had before reads as the built-in is now (FORMER_NAMES, FORMER_PROMPTS, FORMER_COVERS), since thimble stores a
-built-in whole when it is turned on or off or runs; its `shown` stays as stored. `verified`, a built-in before 0.7.0
+built-in whole when it is turned on or off or runs; its `shown` stays as stored. A stored copy under an id its built-in
+had before (FORMER_IDS) is renamed to the id now when the checks are read (_migrate), and a comment that names a former
+id reads as naming the id now, written so on the store's next write. `verified`, a built-in before 0.7.0
 (RETIRED), is listed only where the workspace stored it, as any stored check is, so its comments stay readable there;
 no new check takes its id. An active extension's report checks, checks/<slug>/check.json (its name and colour)
 and check.md (its prompt) in its folder, follow the built-ins as `<extension>-<slug>`, off and read from the extension
@@ -72,17 +74,20 @@ DIR = "checks"  # workspaces/<c>/checks/<id>.json
 WORK_DIR = "check-work"  # workspaces/<c>/check-work/<id>-<doc>/, a run's own folder, where its Bash may write
 TASK_FILE = "task.md"  # in a run's own folder: what its agent reads first
 OWN_TOOLS = ("read_ref", "list_cards", "add_comment")  # a check's thimble tools
-BUILTINS = ("judgment", "unverified", "you-should-know")  # prompts/checks/<id>.md, listed first in this order
+BUILTINS = ("judgment", "unverified", "important-details")  # prompts/checks/<id>.md, listed first in this order
 RETIRED = ("verified",)  # a former built-in: listed only where the workspace stored it, and no new check takes its id
+# the ids the built-ins had before, each with its id now: a workspace's stored copy, and a comment, under a former id
+# reads under the id now (_migrate, current_id). Internal only: no surface shows a former id.
+FORMER_IDS = {"you-should-know": "important-details"}
 # what the built-ins were named before, the sha1 of the words (collapsed) of each prompt they shipped with before, and
 # what they covered before: a workspace's stored copy of a built-in that still holds one reads as the built-in is now
 # (_as_now)
-FORMER_NAMES = {"unverified": ("Unverified",), "you-should-know": ("You should know",)}
+FORMER_NAMES = {"unverified": ("Unverified",), "important-details": ("You should know",)}
 FORMER_COVERS = {"judgment": (["documents"],), "unverified": (["documents"],)}
 FORMER_PROMPTS = {
     "judgment": ("20b914af87f96860649651e3c44b4a1217752e90",),
     "unverified": ("fd652c0e32dafbfda58932a0e2cc1e5acb7898e6",),
-    "you-should-know": ("af5c7de4b07f80efaa866258cc65be5a34a91981", "f3bce900c61feda9b38b72f34d5e8fdc34e5dec5"),
+    "important-details": ("af5c7de4b07f80efaa866258cc65be5a34a91981", "f3bce900c61feda9b38b72f34d5e8fdc34e5dec5"),
 }
 CANVAS = canvas_comments.CANVAS  # the run target of a check over the cards, among `runs` beside the documents' slugs
 CANVAS_NAME = "cards"  # how a line, a chat and main's `checked` event name that target
@@ -206,9 +211,53 @@ def _as_now(stored: dict[str, Any]) -> dict[str, Any]:
     return stored
 
 
+def current_id(cid: Any) -> str:
+    """The id a check has now: a built-in's former id (FORMER_IDS) as the built-in's id now, any other as it is."""
+    return FORMER_IDS.get(str(cid or ""), str(cid or ""))
+
+
+def chat_as_now(meta: dict[str, Any]) -> dict[str, Any]:
+    """A check run's chat meta, in place, with its check under its id now (current_id) and, when its title is a former
+    name of that check (FORMER_NAMES), the check's name now in its title and in its brief; the meta's file stays as it
+    is until thimble writes it again."""
+    cid = current_id(meta.get("check"))
+    if not cid:
+        return meta
+    meta["check"] = cid
+    old = _collapse(meta.get("title"))
+    if old not in FORMER_NAMES.get(cid, ()):
+        return meta
+    name = str((builtin(cid) or {}).get("name") or old)
+    meta["title"] = name
+    if isinstance(meta.get("brief"), str):  # check-instructions names the check before its prompt: the first match
+        meta["brief"] = meta["brief"].replace(old, name, 1)
+    return meta
+
+
+def _migrate(d: Path) -> None:
+    """In the checks folder `d`, a built-in stored under a former id (FORMER_IDS) renamed to its id now, so a workspace
+    from before reads and writes it under that id; a copy already stored under the id now wins, and the former file
+    then stays unread."""
+    for old, new in FORMER_IDS.items():
+        src, dst = d / f"{old}.json", d / f"{new}.json"
+        if not src.is_file() or dst.exists():
+            continue
+        x = read_json(src, None)
+        if not isinstance(x, dict):
+            continue
+        x["id"] = new
+        try:
+            write_json(dst, x)
+            src.unlink(missing_ok=True)
+        except OSError:  # a folder that cannot be written reads the built-in from its prompt file
+            log.warning("%s: stored check not renamed to %s", d, new, exc_info=True)
+
+
 def read(c: str, cid: str) -> dict[str, Any] | None:
-    """The check `cid`: its workspace file, else the built-in of that id, else an active extension's; None when none
-    exists."""
+    """The check `cid` (a former id as its id now): its workspace file, else the built-in of that id, else an active
+    extension's; None when none exists."""
+    cid = current_id(cid)
+    _migrate(_dir(c))
     stored = read_json(_path(c, cid), None)
     if isinstance(stored, dict):
         stored.setdefault("runs", {})
@@ -228,7 +277,7 @@ def list_checks(c: str) -> list[dict[str, Any]]:
     d = _dir(c)
     others = []
     for p in sorted(d.glob("*.json")) if d.is_dir() else []:
-        if p.stem in BUILTINS or p.stem in theirs:
+        if p.stem in BUILTINS or p.stem in theirs or p.stem in FORMER_IDS:
             continue
         x = read_json(p, None)
         if isinstance(x, dict) and x.get("id") == p.stem:
@@ -554,6 +603,8 @@ def recover(root: Path | None = None) -> list[str]:
 
     root = config.WORKSPACES_DIR if root is None else root
     ended: list[str] = []
+    for d in sorted(root.glob(f"*/{DIR}")) if root.is_dir() else []:
+        _migrate(d)
     for p in sorted(root.glob(f"*/{DIR}/*.json")) if root.is_dir() else []:
         check = read_json(p, None)
         if not isinstance(check, dict) or not isinstance(check.get("runs"), dict):

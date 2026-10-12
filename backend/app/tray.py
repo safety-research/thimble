@@ -59,6 +59,11 @@ def subagent_rows(c: str) -> list[dict[str, Any]]:
         role = str(a["role"])
         key = str(a.get("key") or "")
         what = key.split(":", 1)[1] if ":" in key and role != "critic" else ""
+        if role == "check":  # a run's check by its id now, though its key holds a former one (checks.current_id)
+            from . import checks  # noqa: PLC0415
+
+            cid, sep, doc = what.partition(":")
+            what = f"{checks.current_id(cid)}{sep}{doc}"
         if role == "dev-ticket":  # the ticket by its number and title, not its id
             from . import dev  # noqa: PLC0415 — dev imports the view modules, which import this one's callers
 
