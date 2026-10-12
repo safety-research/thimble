@@ -24,11 +24,16 @@ TEXT = ("# One account did it\n\n## One account\n\nAll the deletions came from o
 @pytest.fixture()
 def doc(workspaces_tmp, monkeypatch):
     """The checks `unverified` and `judgment` on, on Settings' checks row; each test writes the report (_write)."""
+    _checks_row(monkeypatch)
+    for cid in ("unverified", "judgment"):
+        checks.edit(CORPUS, cid, shown=True)
+    checks.edit(CORPUS, "important-details", shown=False)  # the built-ins start on: these two are the shown checks
+
+
+def _checks_row(monkeypatch) -> None:
     rows = {"checks": {"model": "claude-opus-5-5", "effort": "high", "fast": False}}
     real = config.models_for
     monkeypatch.setattr(config, "models_for", lambda c=None: {**real(c), **{k: dict(v) for k, v in rows.items()}})
-    for cid in ("unverified", "judgment"):  # the built-ins are off until turned on: these two are the shown checks
-        checks.edit(CORPUS, cid, shown=True)
 
 
 async def _write(text: str = TEXT) -> None:
@@ -86,6 +91,32 @@ async def test_a_writer_s_end_starts_each_shown_check_through_the_module_with_it
     await _until(lambda: len(bridge.ops("spawn")) == 2, "the queued check never started")
     assert _run(cid)["status"] == "done" and _run(cid)["summary"] == "Commented on 0 of 3 passages."
     assert _run(cid)["stale"] == 0
+
+
+async def test_in_a_new_workspace_a_writer_s_end_starts_each_built_in_and_a_check_turned_off_stays_off(
+        workspaces_tmp, bridge, monkeypatch):
+    """The built-ins are on in a workspace that stored none of them: a writer's end starts Judgment calls, Unverifiable
+    and Important details on its document. One the analyst turned off is stored so and starts no run."""
+    _checks_row(monkeypatch)
+    await _write()
+    assert not bridge.ops("spawn"), "a save starts nothing"
+    assert [(x["id"], x["shown"]) for x in checks.list_checks(CORPUS)] == [
+        ("judgment", True), ("unverified", True), ("important-details", True)]
+    _writer_done()
+    await _until(lambda: len(bridge.ops("spawn")) == 3, "the built-ins never started at the writer's end")
+    assert sorted(s["what"] for s in bridge.ops("spawn")) == [f"{cid} on report" for cid in
+                                                             ("important-details", "judgment", "unverified")]
+    for cid in ("judgment", "unverified", "important-details"):
+        subagents.run_ended(CORPUS, _run(cid)["agent_id"], "done", "Done.", source="handback")
+    await _until(lambda: all(_run(c)["status"] == "done" for c in ("judgment", "unverified", "important-details")),
+                 "the runs never ended")
+    checks.edit(CORPUS, "judgment", shown=False)
+    assert checks.read(CORPUS, "judgment")["shown"] is False, "the analyst's choice is stored and wins"
+    await _write(TEXT.replace("It ran at night.", "It ran in the morning."))
+    _writer_done()
+    await _until(lambda: len(bridge.ops("spawn")) == 5, "the checks on never started again")
+    await asyncio.sleep(0.05)
+    assert sorted(s["what"] for s in bridge.ops("spawn")[3:]) == ["important-details on report", "unverified on report"]
 
 
 async def test_in_plan_mode_a_writer_s_end_holds_its_checks_which_say_so_and_start_after(doc, bridge, monkeypatch):

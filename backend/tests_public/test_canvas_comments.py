@@ -5,8 +5,8 @@ statement (`text`) and its `details`, and a comment stored before `details` read
 Done hides a comment, and one resolved as known before 0.7.0 reads as resolved; a run's end supersedes its check's
 earlier comments on what it covered; a deleted card's comments are not served; main's run_check with `on: cards` gives
 the exact Agent call, and main's own add_comment on a card is Claude's note. The built-ins, Judgment calls,
-Unverifiable and Important details, each cover the documents and the cards and are off until the analyst turns one on;
-these tests turn Important details on. The module is the fake bridge (subagent_fakes); an agent's end is
+Unverifiable and Important details, each cover the documents and the cards and are on until the analyst turns one off;
+these tests turn the other two off. The module is the fake bridge (subagent_fakes); an agent's end is
 subagents.run_ended. A plan card is the plan kind, its steps in payload.steps."""
 from __future__ import annotations
 
@@ -27,12 +27,15 @@ IMPORTANT = "important-details"
 
 @pytest.fixture()
 def board(workspaces_tmp, monkeypatch):
-    """Settings' checks row, with Important details turned on (it covers the documents and the cards)."""
+    """Settings' checks row, with Important details on (it covers the documents and the cards) and the other built-ins
+    turned off."""
     rows = {"checks": {"model": "claude-opus-5-5", "effort": "high", "fast": False}}
     real = config.models_for
     monkeypatch.setattr(config, "models_for", lambda c=None: {**real(c), **{k: dict(v) for k, v in rows.items()}})
     config.workspace_dir(CORPUS).mkdir(parents=True, exist_ok=True)
     checks.edit(CORPUS, IMPORTANT, shown=True)
+    for cid in ("judgment", "unverified"):
+        checks.edit(CORPUS, cid, shown=False)
 
 
 def _card(title: str, *, group: str = notebook.MAIN, takeaway: str = "", steps: list[dict] | None = None) -> str:
@@ -87,15 +90,15 @@ async def _comment(act: checks._Active, ref: str, text: str, tid: str, details: 
     return await tools.call(CORPUS, "add_comment", args, session=checks.session_key(IMPORTANT, checks.CANVAS), tool_use_id=tid)
 
 
-def test_the_built_ins_are_three_checks_each_off_and_over_the_documents_and_the_cards(workspaces_tmp):
-    """0.7.0: Judgment calls, Unverifiable and Important details, in that order, each off until the analyst turns it on
+def test_the_built_ins_are_three_checks_each_on_and_over_the_documents_and_the_cards(workspaces_tmp):
+    """0.7.0: Judgment calls, Unverifiable and Important details, in that order, each on until the analyst turns it off
     and covering the documents and the cards; Verified is no built-in any more, so a new workspace does not list it."""
     config.workspace_dir(CORPUS).mkdir(parents=True, exist_ok=True)
     listed = checks.list_checks(CORPUS)
     assert [(c["id"], c["name"]) for c in listed] == [("judgment", "Judgment calls"), ("unverified", "Unverifiable"),
                                                       (IMPORTANT, "Important details")]
     for c in listed:
-        assert c["builtin"] is True and c["shown"] is False and c["covers"] == ["documents", "cards"], c
+        assert c["builtin"] is True and c["shown"] is True and c["covers"] == ["documents", "cards"], c
         want = open(config.REPO_ROOT / "prompts" / "checks" / f"{c['id']}.md", encoding="utf-8").read()
         assert c["prompt"] == want.split("\n---\n", 1)[1].strip() and c["prompt"].endswith("If you are unsure, leave no comment.")
     assert checks.read(CORPUS, IMPORTANT)["prompt"].startswith("Comment on a passage only when the reader would likely miss")
@@ -131,6 +134,7 @@ def test_a_workspace_s_stored_built_ins_read_with_today_s_names_prompts_and_cove
     assert by["unverified"]["covers"] == ["documents", "cards"] and by["unverified"]["shown"] is True
     assert (by[IMPORTANT]["name"], by[IMPORTANT]["prompt"], by[IMPORTANT]["shown"]) == ("Important details", now[IMPORTANT]["prompt"], True)
     assert (by["judgment"]["name"], by["judgment"]["prompt"]) == ("Calls", "Mark each guess."), "the analyst's own stay"
+    assert by["judgment"]["shown"] is False, "a built-in the workspace stored off stays off"
     assert by["judgment"]["covers"] == ["documents", "cards"]
     assert all(by[cid]["runs"]["report"] == run for cid in by), "the runs stay"
     assert (by["verified"]["name"], by["verified"]["shown"], by["verified"]["covers"]) == ("Verified", True, ["documents"])
@@ -151,6 +155,8 @@ async def test_a_workspace_s_check_and_comments_stored_under_important_details_f
     r = await tools.call(CORPUS, "write_document", {"doc": "report", "text": "# R\n\n## One\n\nAll the saves came "
                                                     "from one bot.\n"}, actor="analyst")
     assert not r.is_error, r.text
+    for p in (ws / checks.DIR).iterdir():  # the save stored the built-ins, on in a new workspace; that one stored none
+        p.unlink()
     path = report_types.doc_file(CORPUS, investigation.MAIN, "report")
     raw = json.loads(path.read_text())
     sid = report_types.all_sentences(raw)[0]["id"]
@@ -318,6 +324,21 @@ async def test_main_s_turn_end_runs_important_details_on_the_unseen_cards_with_a
     checks.main_turn_ended(CORPUS, "2000-01-01T00:00:00+00:00")
     await asyncio.sleep(0.05)
     assert len(bridge.ops("spawn")) == 1, "nothing unseen: no run"
+
+
+async def test_in_a_new_workspace_main_s_turn_end_runs_each_built_in_on_the_cards(workspaces_tmp, bridge, monkeypatch):
+    """The built-ins are on in a workspace that stored none of them, and each covers the cards: main's turn end starts
+    Judgment calls, Unverifiable and Important details on them."""
+    rows = {"checks": {"model": "claude-opus-5-5", "effort": "high", "fast": False}}
+    real = config.models_for
+    monkeypatch.setattr(config, "models_for", lambda c=None: {**real(c), **{k: dict(v) for k, v in rows.items()}})
+    config.workspace_dir(CORPUS).mkdir(parents=True, exist_ok=True)
+    card = _card("What did the pilot show?", takeaway="Both agents merged their PR.")
+    checks.main_turn_ended(CORPUS, "2000-01-01T00:00:00+00:00")
+    await _until(lambda: len(bridge.ops("spawn")) == 3, "the built-ins never started at main's turn end")
+    assert sorted(s["what"] for s in bridge.ops("spawn")) == [f"{cid} on {checks.CANVAS}" for cid in
+                                                             (IMPORTANT, "judgment", "unverified")]
+    assert all(_run(cid)["covered"] == [f"card:{card}"] for cid in checks.BUILTINS)
 
 
 async def test_a_turn_end_covers_only_the_cards_changed_since_the_turn_began(board, bridge):

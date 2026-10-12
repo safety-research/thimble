@@ -5,15 +5,15 @@ document, but is cached: a passage whose text did not change, or that is locked,
 A check is `workspaces/<c>/checks/<id>.json` = {id, name, prompt, colour, shown, builtin, created_by, ts, version,
 runs: {doc: Run}}. The built-ins (`judgment`, `unverified`, `important-details`: Judgment calls, Unverifiable and
 Important details) are prompts/checks/<id>.md, read from the prompt file until first changed: each covers the documents
-and the cards and is off until the analyst turns it on. A stored copy still holding a name, a prompt or covers its
+and the cards and is on until the analyst turns it off. A stored copy still holding a name, a prompt or covers its
 built-in had before reads as the built-in is now (FORMER_NAMES, FORMER_PROMPTS, FORMER_COVERS), since thimble stores a
 built-in whole when it is turned on or off or runs; its `shown` stays as stored. A stored copy under an id its built-in
 had before (FORMER_IDS) is renamed to the id now when the checks are read (_migrate), and a comment that names a former
 id reads as naming the id now, written so on the store's next write. `verified`, a built-in before 0.7.0
 (RETIRED), is listed only where the workspace stored it, as any stored check is, so its comments stay readable there;
 no new check takes its id. An active extension's report checks, checks/<slug>/check.json (its name and colour)
-and check.md (its prompt) in its folder, follow the built-ins as `<extension>-<slug>`, off and read from the extension
-until first changed, as the built-ins are. A run is a `thimble:check`, a subagent of the analyst's Claude Code session
+and check.md (its prompt) in its folder, follow the built-ins as `<extension>-<slug>`, read from the extension until
+first changed as the built-ins are, and off. A run is a `thimble:check`, a subagent of the analyst's Claude Code session
 (subagents.py), registered from prompts/check.md (definition) on Settings' checks row, with the corpus read-only and a
 work folder of its own, check-work/<id>-<doc>/. Its task file there, task.md, holds the context engine's part
 (context.render) and then the document, the check's prompt and the passages it covers; its prompt names that file
