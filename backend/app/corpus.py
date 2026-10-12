@@ -41,7 +41,7 @@ from typing import Any, AsyncIterator, Callable, Iterator
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from . import config, corpus_tree, hook_auth, refs, transcripts, view_calls, viewlog
@@ -58,6 +58,8 @@ ROWS_MAX = 500
 QUERY_LIMIT = 1000
 KIND_ORDER = {"text": 0, "board": 1, "events": 2, "forge": 3, "prompt": 4, "agent": 5}
 EDITABLE_SUFFIXES = (".txt", ".md", ".markdown")  # the files PUT /source may replace; by name, any case
+# the Download route's answer: revalidated each time, since the file on disk may change between downloads
+DOWNLOAD_HEADERS = {"Cache-Control": "no-cache"}
 
 
 # --------------------------------------------------------------------------- sources
@@ -1182,6 +1184,17 @@ def get_source(c: str, path: str, request: Request, start: int = 1, count: int =
     page = _page(_corpus(c), path, start, start + count - 1, clip)
     _viewed(c, path, request)
     return page
+
+
+@router.get("/corpora/{c}/download/{path:path}")
+def download_source(c: str, path: str) -> FileResponse:
+    """The file's bytes as they are on disk, for the File browser's Download: an attachment named as Files lists the file
+    (a link's own name, not its target's), sent in chunks, so a large or binary file is saved whole without being read
+    into memory. The checks are the reader's (_file): a file inside the corpus, 400 for a folder or a path outside it,
+    404 for none. Ranges are answered, so a browser can resume the download."""
+    p = _file(_corpus(c), path)
+    return FileResponse(p, media_type="application/octet-stream", filename=path.rstrip("/").rsplit("/", 1)[-1],
+                        headers=DOWNLOAD_HEADERS)
 
 
 @router.get("/corpora/{c}/source/around")

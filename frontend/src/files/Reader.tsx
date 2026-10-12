@@ -2,7 +2,7 @@
 // mode switch; the pick is remembered per file. Records load a page at a time around the ref's line and as the reader
 // scrolls, up to CAP in memory, with the strip and its loupe beside them (Tracks.tsx). ⌘F opens the find bar
 // (FindBar.tsx); media files show as themselves (MediaReader), a PDF in the browser's own viewer beside the viewers made
-// for PDFs (PdfReader), and other binary files show only their size.
+// for PDFs (PdfReader), and other binary files show only their size. Every file's bar has Download (DownloadButton).
 import { Component, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ErrorInfo, type ReactNode } from 'react'
 import { flushSync } from 'react-dom'
 import { Button, Segmented } from '../components/Button'
@@ -212,6 +212,21 @@ function ReaderViewer({ ws, view, path, targetRef, labels, onRaw }: { ws: string
       />
     </div>
   )
+}
+
+/** Download, in a file's bar: the file as it is on disk, saved under its own name. The browser fetches it from the
+ * download route itself (backend corpus.download_source, an attachment), so a large or binary file goes to disk as it
+ * arrives rather than through the page's memory. */
+export function DownloadButton({ workspace, path }: { workspace: string; path: string }) {
+  const save = () => {
+    const a = document.createElement('a')
+    a.href = api.downloadUrl(workspace, path)
+    a.download = path.slice(path.lastIndexOf('/') + 1)
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+  }
+  return <Button variant="icon" size="sm" icon="download" title="Download" className="reader-download" onClick={save} />
 }
 
 /** A memo, so that a render of the pane around it with the same props (a drag of the sidebar's width) leaves the
@@ -429,6 +444,7 @@ function PdfReader({ workspace, path, targetRef, lead, end, labels, only, onMode
         <div className="reader-bar">
           {lead}
           <span className="reader-spacer" />
+          <DownloadButton workspace={workspace} path={path} />
           {end}
           {(options.length > 1 || offered) && (
             <span className="reader-modes">
@@ -469,7 +485,13 @@ function MediaReader({ workspace, path, targetRef, lead, media }: ReaderProps & 
   const src = mediaUrl(workspace, at && at.path === path ? at : media)
   return (
     <div className="reader">
-      {lead !== undefined && <div className="reader-bar">{lead}</div>}
+      {lead !== undefined && (
+        <div className="reader-bar">
+          {lead}
+          <span className="reader-spacer" />
+          <DownloadButton workspace={workspace} path={path} />
+        </div>
+      )}
       <div className="reader-media" data-body="">
         {media.kind === 'image' ? (
           <img src={src} alt={path} />
@@ -1417,6 +1439,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
             <span className="reader-spacer" />
             {unread && <span className="reader-fragment mono">#{unread}</span>}
             {!isDatabase && !binary && loaded && !viewer && <Button variant="icon" size="sm" icon="search" title="Find in the file" className="reader-find-open" active={!!finder} onClick={() => (finder ? closeFinder() : openFinder('find'))} />}
+            <DownloadButton workspace={workspace} path={path} />
             {end}
             {!only && builtins.loaded && view && (options.length > 1 || offered) && (
               <span className="reader-modes">

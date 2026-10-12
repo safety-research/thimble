@@ -1419,10 +1419,19 @@
 .files-proposal-tip.tip {
   max-width: min(460px, calc(100vw - 16px));
 }
-.reader-find-open.btn {
+/* the bar's icon buttons: Find in the file, and Download (Reader DownloadButton) right after it; Download last in the
+   bar, with no mode switch after it, sits 8px from the bar's end, as the mode switch does */
+.reader-find-open.btn,
+.reader-download.btn {
   align-self: center;
   margin: 0 2px 0 6px;
   color: var(--text-tertiary);
+}
+.reader-find-open.btn + .reader-download.btn {
+  margin-left: 0;
+}
+.reader-download.btn:last-child {
+  margin-right: 8px;
 }
 /* the find bar: a strip under the tab bar with the field, the match count and the previous, next and × buttons */
 .reader-find {

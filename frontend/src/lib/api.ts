@@ -198,6 +198,9 @@ export const api = {
   sourceKeys: (c: string, path: string, bins?: number) => j<SourceKeys>(`${BASE}/corpora/${enc(c)}/source/keys${q({ path, bins })}`),
   /** The URL a PDF of the corpus opens from in the browser's viewer, at `page` when given. */
   pdfUrl: (c: string, path: string, page?: number | null) => `${BASE}/corpora/${enc(c)}/pdf/${path.split('/').map(enc).join('/')}${page ? `#page=${page}` : ''}`,
+  /** `GET /corpora/{c}/download/<path>`: the file as it is on disk, an attachment under its own name (the File browser's
+   * Download). */
+  downloadUrl: (c: string, path: string) => `${BASE}/corpora/${enc(c)}/download/${path.split('/').map(enc).join('/')}`,
   /** `GET /corpora/{c}/source/find`: the lines of one file past `after` that hold `text`, searched on the server. */
   findInSource: (c: string, path: string, text: string, after = 0, signal?: AbortSignal) =>
     j<SourceFind>(`${BASE}/corpora/${enc(c)}/source/find${q({ path, q: text, after: after || undefined })}`, { signal }),
