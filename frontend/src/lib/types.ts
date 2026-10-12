@@ -1450,7 +1450,13 @@ export interface ChatTurn {
 /** One turn of a whole-file JSON transcript (`GET /corpora/{c}/source/turns`), with the line it stands on. */
 export interface SourceTurn {
   i: number
+  /** its own number, which its row shows: its step's (an ATIF step's `step_id`), else its place in its conversation */
+  n?: number
   line: number
+  /** the record of its JSON document it is, by pointer (`<path>#/steps/3`), and the line that record starts on, where
+   * labels mark it; absent for a turn that shares its record with others */
+  ref?: string
+  rec_line?: number
   speaker: string
   role: 'user' | 'assistant' | 'system' | 'tool' | 'other'
   text: string
@@ -1461,6 +1467,9 @@ export interface SourceTurn {
   /** the fields its record keeps about it (backend transcripts.turn_fields: its role or source, the model, the tools it
    * calls, its metadata), which Color by and Filter by offer */
   fields?: Record<string, string | number | boolean>
+  /** what its record holds beyond its words, with its words, in order (backend transcripts.turn_blocks): its reasoning,
+   * its tool calls (`<name>\n<arguments>`) and their results; each block's whole length when it was cut */
+  blocks?: (Block & { cut?: number })[]
 }
 
 export interface SourceTurns {

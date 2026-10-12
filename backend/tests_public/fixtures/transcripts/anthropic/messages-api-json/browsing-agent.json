@@ -1,0 +1,306 @@
+{
+  "model": "claude-sonnet-5-5",
+  "max_tokens": 8000,
+  "system": [
+    {
+      "type": "text",
+      "text": "You are a research assistant. Use web search and web fetch to answer from primary sources, cite what you use, and record findings with the save_note tool when the user asks. Note titles must be at most 40 characters.",
+      "cache_control": {
+        "type": "ephemeral"
+      }
+    }
+  ],
+  "metadata": {
+    "user_id": "usr_2b9d05e7c4a1f836"
+  },
+  "thinking": {
+    "type": "adaptive",
+    "display": "summarized"
+  },
+  "tools": [
+    {
+      "type": "web_search_20250305",
+      "name": "web_search",
+      "max_uses": 3
+    },
+    {
+      "type": "web_fetch_20250910",
+      "name": "web_fetch",
+      "max_uses": 4,
+      "citations": {
+        "enabled": true
+      },
+      "max_content_tokens": 20000
+    },
+    {
+      "name": "save_note",
+      "description": "Save a short research note to the user's notebook. 'title' is at most 40 characters; 'body' is Markdown. Returns the new note id, or an error if validation fails.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "title",
+          "body"
+        ]
+      }
+    }
+  ],
+  "messages": [
+    {
+      "role": "user",
+      "content": "Which fastqueue release added priority queues, and when did it ship? Check the official changelog and save a note with the version, date and link."
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "Find the project's changelog first, then read the entry that mentions priority.",
+          "signature": "F02ZpR8c1gE4CwgrYNNIO0BvYfUoZTIMDX3Enm8e7JNaTNBnDpZ289EbFI7iKh0S1RgqdaPm553hwO+E9GPPw4KszcfptlabQrFC/fwGZ76NLNINb6jK5FDFlcDSsf702iHMI/G+ZXR1GDt03+hLX0XDStV6N8wKje8gtQ1QgcHE5WwQJ/yoLSTNsP0rx6molPjc179NkMztbjAXToJjIvJxyJMVAlmTXblNjZGghnrrb0oIrLvK+UeLeH8FNSXFSbHz3cEkD+wmHyYani/E5PysASmy78Y9Btm2eI97Oj935RZYkszrcaPMseAxCleA"
+        },
+        {
+          "type": "text",
+          "text": "I'll look for the fastqueue changelog."
+        },
+        {
+          "type": "server_tool_use",
+          "id": "srvtoolu_01bvLNhRv5k3C2WLMQwo5j5X",
+          "name": "web_search",
+          "input": {
+            "query": "fastqueue changelog priority queues"
+          }
+        },
+        {
+          "type": "web_search_tool_result",
+          "tool_use_id": "srvtoolu_01bvLNhRv5k3C2WLMQwo5j5X",
+          "content": [
+            {
+              "type": "web_search_result",
+              "url": "https://fastqueue.example.org/docs/changelog",
+              "title": "Changelog - fastqueue documentation",
+              "encrypted_content": "bFwoYwTq5gpSNN49AQSrO450c0QHV0mZFdd0+NaoY/+BPKkFGSu6XzK1vUBqNqxV3XbteL5t77n0cwdFbr8+3nUoflb/8Px+Uqsfx0n2w2XNzsRbiEmgYJVYBA1uajPbdYQ8H40YoCpMA6qf9aXU8sqedYpbvXRh9ladmokqaMIsR2ZhCPvAnj+oXH3LHjeMbpp8Zkvm",
+              "page_age": "August 20, 2026"
+            },
+            {
+              "type": "web_search_result",
+              "url": "https://git.example.com/fastqueue/fastqueue/blob/main/CHANGELOG.md",
+              "title": "fastqueue/CHANGELOG.md at main",
+              "encrypted_content": "OAFSJ59arhhVkMvgIrIkmR3LvJ1Bws3eBMFOsc5qEIQNwINIiq7UAEmVHEU1btWdo67SG364888WSJV8bRnV2+2t6gokegzpX4D2A4JiDUJCJlJ5ki0pp1Dv2as09jD6jTPfDYyZtJqN58t9pqpSaay7Rd+PzlhPHy/XBmyf0pjTrZSCgCa9JMSYt0EYyTMFeBQ4IfyZ",
+              "page_age": "August 19, 2026"
+            },
+            {
+              "type": "web_search_result",
+              "url": "https://forum.example.net/t/fastqueue-2-4-priority-queues/8812",
+              "title": "fastqueue 2.4 priority queues - first impressions",
+              "encrypted_content": "qlItpn4r0UqGYrsGBwom1lfy1sU9UuVLSW90MPVfj53W97hu4pQlk54Cp2zTvt9qECT3izP982H504RtTzckindBV+B2dqYE7g+7GgS/aDalmLSFv4k4ZOT1sIUnCCX9s277M8iOl1NazXCcy09bSD8H7oT/YzsUiG2K32Aa2J8BkF9c3/2RgXG2paTadHuPvD7DOXza",
+              "page_age": "May 9, 2026"
+            }
+          ]
+        },
+        {
+          "type": "server_tool_use",
+          "id": "srvtoolu_019TBygCL2YaMSvqK6DtYZJq",
+          "name": "web_fetch",
+          "input": {
+            "url": "https://fastqueue.example.org/docs/changelog"
+          }
+        },
+        {
+          "type": "web_fetch_tool_result",
+          "tool_use_id": "srvtoolu_019TBygCL2YaMSvqK6DtYZJq",
+          "content": {
+            "type": "web_fetch_tool_result_error",
+            "error_code": "url_not_accessible"
+          }
+        },
+        {
+          "type": "thinking",
+          "thinking": "The docs page failed to load. The repository copy of CHANGELOG.md is the same source; fetch the raw file.",
+          "signature": "WQ5NgNDMy7+Y3BahiiaNcmKrnjkzVzC2JpRnqYejb5VBvcrQnNgj44Es368UruteLmPCjR7m9+x8yuKcQP6BAxcKxZbPbb4WqCbi2XlF0mK/ySb7CqBa5GzPr9nla8xGI7q+2JjcCAnE/QlDT2KeD1aa16FTHkzG44TQnuxuV1GxNt2lS/xDuATNqHDblXJuqBOMFgJUGbycpmqNGSwB7bXHFGQXllgmuq1YHmQOtDL8XrMNw87AXFj0S3/Da8tWcrSo2eFdYjyjcq30CzmpzlGeq8ygQy4ah/dhwQgugX4E+oohoePHxP//e1xoRvHi"
+        },
+        {
+          "type": "text",
+          "text": "The documentation site didn't respond, so I'll read the changelog from the repository instead."
+        },
+        {
+          "type": "server_tool_use",
+          "id": "srvtoolu_01KSfyBFu8AZPWfUnyLEmrWJ",
+          "name": "web_fetch",
+          "input": {
+            "url": "https://git.example.com/fastqueue/fastqueue/raw/main/CHANGELOG.md"
+          }
+        },
+        {
+          "type": "web_fetch_tool_result",
+          "tool_use_id": "srvtoolu_01KSfyBFu8AZPWfUnyLEmrWJ",
+          "content": {
+            "type": "web_fetch_result",
+            "url": "https://git.example.com/fastqueue/fastqueue/raw/main/CHANGELOG.md",
+            "content": {
+              "type": "document",
+              "source": {
+                "type": "text",
+                "media_type": "text/plain",
+                "data": "# Changelog\n\nAll notable changes to fastqueue are documented in this file.\nThe format follows Keep a Changelog, and the project uses semantic versioning.\n\n## [2.5.0] - 2026-08-19\n### Added\n- `Queue.drain(timeout=...)` returns all pending jobs without blocking workers.\n- Redis backend: optional TLS client certificates (`ssl_certfile`, `ssl_keyfile`).\n### Fixed\n- Worker heartbeat no longer drifts under long garbage-collection pauses (#412).\n- `fastqueue inspect` no longer crashes on jobs with non-UTF-8 payloads (#418).\n\n## [2.4.1] - 2026-05-28\n### Fixed\n- Priority queues: jobs with equal priority are again served first-in, first-out (#391).\n- Typing: `enqueue()` accepts `priority=None` again.\n\n## [2.4.0] - 2026-05-06\n### Added\n- Priority queues: `Queue(priority=True)` and `enqueue(job, priority=0..9)` (#377).\n- `fastqueue inspect --by-priority` shows queue depth per priority level.\n### Changed\n- The default retry backoff is now exponential with jitter (base 2 s, cap 5 min).\n  Set `backoff=\"linear\"` to keep the previous behavior.\n### Deprecated\n- `Queue.put()` alias. Use `enqueue()`.\n\n## [2.3.2] - 2026-03-11\n### Fixed\n- SQLite backend: lock contention when more than 32 workers poll at once (#365).\n\n## [2.3.1] - 2026-02-02\n### Fixed\n- Graceful shutdown waits for in-flight jobs up to `shutdown_timeout` (#352).\n\n## [2.3.0] - 2026-01-14\n### Added\n- Scheduled jobs: `enqueue_at(when, job)` and `enqueue_in(delta, job)`.\n- Prometheus metrics endpoint (`fastqueue worker --metrics-port`).\n### Changed\n- Minimum supported Python is now 3.10.\n\n## [2.2.0] - 2025-10-30\n### Added\n- Dead-letter queue for jobs that exceed `max_retries`.\n### Removed\n- The deprecated `fastqueue.compat` module.\n\n## [2.1.0] - 2025-08-21\n### Added\n- SQLite backend for single-host deployments.\n\n## [2.0.0] - 2025-06-03\n### Changed\n- Jobs are serialized with msgpack instead of pickle. Pickled jobs from 1.x are\n  not readable; drain 1.x queues before upgrading.\n### Removed\n- Python 3.8 support.\n\n[2.5.0]: https://git.example.com/fastqueue/fastqueue/compare/v2.4.1...v2.5.0\n[2.4.1]: https://git.example.com/fastqueue/fastqueue/compare/v2.4.0...v2.4.1\n[2.4.0]: https://git.example.com/fastqueue/fastqueue/compare/v2.3.2...v2.4.0\n"
+              },
+              "title": "CHANGELOG.md",
+              "citations": {
+                "enabled": true
+              }
+            },
+            "retrieved_at": "2026-10-12T16:04:51Z"
+          }
+        },
+        {
+          "type": "text",
+          "text": "Priority queues arrived in fastqueue 2.4.0: "
+        },
+        {
+          "type": "text",
+          "text": "the 2.4.0 entry, dated 2026-05-06, lists `Queue(priority=True)` and `enqueue(job, priority=0..9)`",
+          "citations": [
+            {
+              "type": "char_location",
+              "document_index": 0,
+              "document_title": "CHANGELOG.md",
+              "start_char_index": 701,
+              "end_char_index": 724,
+              "cited_text": "## [2.4.0] - 2026-05-06"
+            },
+            {
+              "type": "char_location",
+              "document_index": 0,
+              "document_title": "CHANGELOG.md",
+              "start_char_index": 735,
+              "end_char_index": 818,
+              "cited_text": "- Priority queues: `Queue(priority=True)` and `enqueue(job, priority=0..9)` (#377)."
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": ". I'll save the note now."
+        },
+        {
+          "type": "tool_use",
+          "id": "toolu_01QbyJ439mUWFgNDx5xkVaZY",
+          "name": "save_note",
+          "input": {
+            "title": "fastqueue: release that added priority queues (2.4.0)",
+            "body": "- Version: **2.4.0**\n- Released: 2026-05-06\n- Feature: `Queue(priority=True)`, `enqueue(job, priority=0..9)` (#377)\n- Source: https://git.example.com/fastqueue/fastqueue/raw/main/CHANGELOG.md",
+            "tags": [
+              "fastqueue",
+              "changelog"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "toolu_01QbyJ439mUWFgNDx5xkVaZY",
+          "is_error": true,
+          "content": "ValidationError: title is 53 characters; the maximum is 40."
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "The title was too long. Retrying with a shorter one."
+        },
+        {
+          "type": "tool_use",
+          "id": "toolu_01E5NsFj33QUk5kQdhjUngrZ",
+          "name": "save_note",
+          "input": {
+            "title": "fastqueue priority queues: 2.4.0",
+            "body": "- Version: **2.4.0**\n- Released: 2026-05-06\n- Feature: `Queue(priority=True)`, `enqueue(job, priority=0..9)` (#377)\n- Source: https://git.example.com/fastqueue/fastqueue/raw/main/CHANGELOG.md",
+            "tags": [
+              "fastqueue",
+              "changelog"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "toolu_01E5NsFj33QUk5kQdhjUngrZ",
+          "content": [
+            {
+              "type": "text",
+              "text": "Saved note note_0193 \"fastqueue priority queues: 2.4.0\"."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Priority queues were added in **fastqueue 2.4.0**, released **2026-05-06** (https://git.example.com/fastqueue/fastqueue/raw/main/CHANGELOG.md). I saved this as note `note_0193`. A follow-up fix in 2.4.1 (2026-05-28) restored first-in, first-out order for jobs that share a priority."
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": "Did 2.4.0 change anything else I should know about before upgrading?"
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "The fetched changelog is already in context. 2.4.0 also changed the retry backoff default and deprecated Queue.put().",
+          "signature": "QxKhuzpSi1joGd1AbyaOQaa5bBWx19U2xkoAj3pDCBw6ANMJSzWUlfcejxiuvcSOwDkMp9I13Me/6w3rtxVBKDv/uCBGhvu9eiZSdhnodJXmB5K5Kl/mwffgdMZiDgA4v6tl3RxfGptcUJ0DBtfrrcGvr221LSMRwAC8XK+QUJ83bxbEItEiYyyZRUknBqqujGRKccwRkHeAgrwodkztKSdGoC/B1gErbdLRAp/1whhKTwMHD8am3ZxUAP3jHpWRfydWO0VWX1URse0wvNtYen9K0Ky4ofHGTz9gIT0aSWYr8134+lAgdc8HsGCSYw2+"
+        },
+        {
+          "type": "text",
+          "text": "Yes, two things. First, "
+        },
+        {
+          "type": "text",
+          "text": "the default retry backoff became exponential with jitter (base 2 s, cap 5 min)",
+          "citations": [
+            {
+              "type": "char_location",
+              "document_index": 0,
+              "document_title": "CHANGELOG.md",
+              "start_char_index": 905,
+              "end_char_index": 986,
+              "cited_text": "- The default retry backoff is now exponential with jitter (base 2 s, cap 5 min)."
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "; pass `backoff=\"linear\"` if your retry timing depends on the old behavior. Second, `Queue.put()` is deprecated in favor of `enqueue()`, so expect warnings but no breakage yet."
+        }
+      ]
+    }
+  ]
+}
