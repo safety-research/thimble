@@ -252,6 +252,24 @@ def test_the_turns_of_whole_file_json_transcripts(chats):
     assert client.get(f"{CHATS}/source/turns", params={"path": "../x.json"}).status_code == 400
 
 
+def test_every_step_of_an_atif_trajectory_is_a_turn_with_its_fields(chats):
+    """An ATIF trajectory's steps (Harbor's trajectory.json) say who speaks by their `source` (system, user, agent) and,
+    for the agent's, the model: a step with no model is a turn too, under its source. Each turn carries its fields."""
+    steps = [{"step_id": 1, "timestamp": "2026-09-10T21:58:01Z", "source": "system", "message": "You are an agent."},
+             {"step_id": 2, "timestamp": "2026-09-10T21:58:02Z", "source": "user", "message": "Write hello.py."},
+             {"step_id": 3, "timestamp": "2026-09-10T21:58:03Z", "source": "agent", "model_name": "model-a",
+              "message": "Writing it.", "tool_calls": [{"tool_call_id": "c1", "function_name": "write_file", "arguments": {}}],
+              "observation": {"results": [{"source_call_id": "c1", "content": "ok"}]}}]
+    doc = {"schema_version": "ATIF-v1.7", "agent": {"name": "toy", "version": "1"}, "steps": steps}
+    (chats / "logs" / "trajectory.json").write_text(json.dumps(doc, indent=2))
+    assert transcripts.sniff(chats / "logs" / "trajectory.json", "logs/trajectory.json")["format"] == "json"
+    turns = client.get(f"{CHATS}/source/turns", params={"path": "logs/trajectory.json"}).json()["turns"]
+    assert [(t["speaker"], t["role"], t["text"]) for t in turns] == [
+        ("system", "system", "You are an agent."), ("user", "user", "Write hello.py."), ("model-a", "other", "Writing it.")]
+    assert [t["fields"] for t in turns] == [{"source": "system"}, {"source": "user"},
+                                            {"source": "agent", "model_name": "model-a", "tool": "write_file"}]
+
+
 def test_a_chat_export_larger_than_the_sniff_s_head_is_offered_transcript_and_read_whole(chats):
     """An export is judged by its head, whatever its size, and its turns are read from the whole file."""
     convs = [{"uuid": f"c{i}", "name": f"Chat {i}", "chat_messages": [

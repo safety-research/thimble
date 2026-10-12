@@ -28,6 +28,9 @@ export interface ViewProps {
   /** the view found nothing in the file to show (the server's whole parse found no turns that its sniff of the head
    * promised): the reader drops the view and opens the one it would otherwise use */
   unavailable?: () => void
+  /** the records the view shows in place of the file's lines (a whole-file JSON transcript's turns, each on the line it
+   * stands on with its fields as `meta.fields`), which Color by and Filter by then read; null gives them the lines back */
+  onRecords?: (records: readonly SourceRecord[] | null) => void
 }
 
 export interface ViewDef {

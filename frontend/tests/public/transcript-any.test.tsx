@@ -2,10 +2,12 @@
 // Transcript for anything close to a transcript, and a PDF as itself: the server's sniff decides the mode, a text chat
 // log reads as turns whose lines keep their own records, and a PDF ref opens at its page; records that are objects
 // offer the Table, a citation of words deep in a record marks them, speakers named only by id show the corpus's names
-// for them, and a markdown file's front matter shows folded (src/files/views/transcript.tsx, table.tsx, text.tsx,
-// src/files/views/registry.ts, src/files/Reader.tsx).
+// for them, and a markdown file's front matter shows folded; a whole-file JSON transcript's turns (an ATIF trajectory's
+// steps) are what Color by colors and Filter by hides, by the fields the server gives each
+// (src/files/views/transcript.tsx, table.tsx, text.tsx, src/files/views/registry.ts, src/files/Reader.tsx).
 import { act } from 'react'
 import { afterEach, describe, expect, test, vi } from 'vitest'
+import { keyColor } from '../../src/files/colorChoice.ts'
 import { pdfPage, pickKey, previewOf, Reader } from '../../src/files/Reader.tsx'
 import { ReaderLabelsContext, type ReaderLabels } from '../../src/files/marks.tsx'
 import type { FilesLabels } from '../../src/files/useLabels.ts'
@@ -15,7 +17,7 @@ import { OBJECTS_SCORE, tableScore } from '../../src/files/views/table.tsx'
 import { frontMatterLines, metaFields } from '../../src/files/views/text.tsx'
 import transcript, { chatTurns, clockOf, conversationTurns, idKey, madeBlocks, nameOf, noTurns, parsedLines, pick, shortId, shownLines, speakerIds, textOf, timeOf, unwrapStream } from '../../src/files/views/transcript.tsx'
 import { api } from '../../src/lib/api.ts'
-import type { Concept, SourcePage, SourceRecord, TranscriptHint, View } from '../../src/lib/types.ts'
+import type { Concept, SourceKeys, SourcePage, SourceRecord, SourceTurn, TranscriptHint, View } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 const NO_LABELS = { all: [], on: [], focus: null, byId: new Map(), presence: new Map() } as unknown as FilesLabels
@@ -514,6 +516,69 @@ describe('a whole-file JSON transcript', () => {
     const el = await mount(<View workspace="w" path="sft.jsonl" kind="text" page={page} loadMore={() => undefined} transcript={hint} />)
     expect([...el.querySelectorAll('.reader-conv-speaker')].map((s) => s.textContent)).toEqual(['user'])
     expect(el.textContent).not.toContain('(empty)')
+  })
+})
+
+describe('Color by and Filter by over a whole-file JSON transcript', () => {
+  // an ATIF trajectory (Harbor's trajectory.json): its lines are no records, its steps are, each with its fields
+  const P = 'run/trajectory.json'
+  const TURNS: SourceTurn[] = [
+    { i: 0, line: 5, speaker: 'user', role: 'user', text: 'Write hello.py.', group: 0, fields: { source: 'user' } },
+    { i: 1, line: 9, speaker: 'model-a', role: 'other', text: 'Writing it.', group: 0, fields: { source: 'agent', model_name: 'model-a', tool: 'write_file' } },
+    { i: 2, line: 15, speaker: 'model-b', role: 'other', text: 'Running it.', group: 0, fields: { source: 'agent', model_name: 'model-b', tool: 'bash' } },
+    { i: 3, line: 21, speaker: 'user', role: 'user', text: 'Thanks.', group: 0, fields: { source: 'user' } },
+  ]
+  const key = (name: string, values: [string, number][], none: number) => ({ key: name, values: values.map(([value, n]) => ({ value, n })), more: { values: 0, n: 0 }, none, at: [] })
+  const KEYS: SourceKeys = {
+    path: P,
+    total: 30,
+    bins: 0,
+    partial: false,
+    bytes: [],
+    keys: [key('source', [['user', 2], ['agent', 2]], 0), key('model_name', [['model-a', 1], ['model-b', 1]], 2), key('tool', [['write_file', 1], ['bash', 1]], 2)],
+  }
+  async function open(kept: Record<string, unknown> = {}) {
+    vi.stubGlobal('fetch', async () => new Response('{"detail":"not found"}', { status: 404, headers: { 'content-type': 'application/json' } }))
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    )
+    const page: SourcePage = { path: P, kind: 'text', total_lines: 30, start: 1, records: [line(1, '{'), line(2, '  "schema_version": "ATIF-v1.7",')], transcript: { format: 'json', score: 0.5 } }
+    vi.spyOn(api, 'source').mockResolvedValue(page)
+    vi.spyOn(api, 'sourceTurns').mockResolvedValue({ path: P, total: 4, start: 0, n_groups: 1, groups: { '0': { title: 'toy-agent', first: 0 } }, turns: TURNS })
+    vi.spyOn(api, 'sourceKeys').mockResolvedValue(KEYS)
+    localStorage.setItem(pickKey('w', P), JSON.stringify('transcript'))
+    for (const [k, v] of Object.entries(kept)) localStorage.setItem(k, JSON.stringify(v))
+    const el = await mount(<Reader workspace="w" path={P} kind="text" labels={NO_LABELS} lead={<span />} />)
+    await settle()
+    await settle()
+    return el
+  }
+  const band = (el: HTMLElement, l: number) => el.querySelector<HTMLElement>(`.reader-card[data-line="${l}"] .reader-band`)?.style.background || null
+
+  test("Color by offers the turns' fields and colors each turn by its own value", async () => {
+    const el = await open()
+    expect([...el.querySelectorAll('.reader-turns .reader-card')].map((c) => c.getAttribute('data-line'))).toEqual(['5', '9', '15', '21'])
+    // the first field with few values colors the turns, as for any file
+    expect(el.querySelector('.colorby > .colorby-trigger')?.textContent).toBe('Color by: source')
+    expect([5, 9, 15, 21].map((l) => band(el, l))).toEqual([keyColor(0), keyColor(1), keyColor(1), keyColor(0)])
+    await act(async () => void el.querySelector('.colorby > .colorby-trigger')!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    const items = [...document.querySelectorAll('.colorby-menu .colorby-item')]
+    expect(items.map((b) => b.getAttribute('data-by'))).toEqual(['off', 'k:source', 'k:model_name', 'k:tool'])
+    // checked alone, a field colors each turn by its value, the turns without one left plain
+    await act(async () => void items[1].dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    await act(async () => void items[3].dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    expect(el.querySelector('.colorby > .colorby-trigger')?.textContent).toBe('Color by: tool')
+    expect([5, 9, 15, 21].map((l) => band(el, l))).toEqual([null, keyColor(0), keyColor(1), null])
+  })
+
+  test('Filter by hides the turns whose value of a field is off', async () => {
+    const el = await open({ 'thimble:w:filterBy:run/trajectory.json': { by: 'k:tool', off: { 'k:tool': ['bash'] } } })
+    expect([...el.querySelectorAll('.reader-turns .reader-card')].map((c) => c.getAttribute('data-line'))).toEqual(['5', '9', '21'])
   })
 })
 
