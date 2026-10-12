@@ -165,8 +165,8 @@ tl.draw(commits) // [{t: 1778922000, author: 'ana', text: 'Fix the parser'}]
 | `time(item)`, `end(item)` | a record's place on the axis (`item.t` by default), a number, or a Date or an ISO time on an axis of time, else the record is left out; and its end, for a mark as wide as the record ran |
 | `unit` | the axis's unit with no range, as the time range's: `'s'` seconds since 1970 (the default), `'ms'`, or `'n'` a plain number such as a turn, a line or a score |
 | `band(lane)` | the spans the lane ran, `[[start, end]]`, drawn as a light band in Events (the key's "running") |
-| `problem(item)` | whether a record failed: its mark takes a ✕ in the problem red at its foot (the key's "failed") |
-| `words` | the key's words: `{band, problem}` |
+| `problem(item)` | whether a record failed: its mark takes a ✕ in the problem red at its foot (always shown, with no entry in the key) |
+| `words` | the words for the band in the key and for a failure in the tip: `{band, problem}` |
 | `keyMount` | where the key goes; at the lanes' top by default, or with no range beside the axis, under it where it has no room there |
 | `follow` | the detail list, whose rows carry `data-t`, as the table's, the transcript's and the messages' do: the rows in view, from the earliest of their times to the latest, are a light tint across the lanes |
 | `density` | a flag, or a function the page answers at each draw: each lane as bars on the scale's bins in place of marks, with no band behind them (an Events \| Density choice) |
@@ -215,7 +215,7 @@ const tl = thimble.timeline({
 | `draw(items)` | the lanes drawn with these records, those of the range the page shows |
 | `lanes`, `chosen`, `choose(key)` | the lanes as drawn, and the chosen one |
 | `visible(t0, t1)`, `visible(null)` | the span the list shows, for a list `follow` cannot read |
-| `isOn(series)` | whether `band`, `problem` or one of `series` shows |
+| `isOn(series)` | whether `band` or one of `series` shows |
 | `scale` | the scale the lanes drew on |
 
 ## The key

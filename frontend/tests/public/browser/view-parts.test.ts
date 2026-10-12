@@ -476,14 +476,14 @@ describe('the timeline alone in a frame', () => {
   })
 })
 
-// timelines with no range: runs by author, some failed, so the key shows (#runs); a lane per agent whose first name is
-// too long to show whole (#long)
+// timelines with no range: runs by author, some failed, each lane's span a band, so the key shows `running` (#runs); a
+// lane per agent whose first name is too long to show whole (#long)
 const fitted = () => `<!doctype html><html><head><style>${TOKENS} html,body{margin:0} body{font:12px sans-serif;background:#fffdf8;padding:12px}
 section{margin-bottom:16px}</style>${KIT}</head><body>
 <section id="runs"></section><section id="long"></section>
 <script>
 const authors = ['ana', 'bo', 'cy']
-window.runs = thimble.timeline({ mount: '#runs', rows: 'author', problem: (r) => r.failed })
+window.runs = thimble.timeline({ mount: '#runs', rows: 'author', problem: (r) => r.failed, band: (lane) => [[lane.items[0].t, lane.items.at(-1).t]] })
 runs.draw(Array.from({ length: 30 }, (_, i) => ({ t: ${T0} + i * 120, author: authors[i % 3], failed: i % 7 === 3 })))
 window.long = thimble.timeline({ mount: '#long', rows: 'agent' })
 long.draw(Array.from({ length: 30 }, (_, i) => ({ t: ${T0} + i * 120, agent: i % 2 ? 'sub' : 'a-lead-agent-whose-name-runs-on-past-any-column-of-names' })))
