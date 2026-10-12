@@ -1,6 +1,7 @@
 """`thimble demo`: public datasets, each opened on an orientation run ahead of time where demos/ has one.
 
-    thimble demo [NAME...] [--yes] [--dir DIR] [--attach | --no-attach] [--replace] [--precaches DIR] [--list]
+    thimble demo [NAME...] [--yes] [--dir DIR] [--attach | --no-attach] [--replace | --refresh] [--precaches DIR]
+        [--list]
     thimble demo --export WORKSPACE OUT [--outputs-only] [--dataset NAME] [--corpus DIR] [--claude-config DIR]
         [--view SLUG] [--scrub-user] [--allow-private]
     thimble demo --examples [--refresh]
@@ -25,6 +26,10 @@ Claude Code session holds it open, or when the move fails, it keeps its name, an
 it; when Claude Code sessions ran in its folder (a full pre-cache's), which could not continue after a move, it stays
 where it is, unregistered, the folder registers as demo-<name>, and a line says how to remove the old one (`thimble
 purge`).
+
+Reinstalling. A workspace that holds an analysis already stays as it is, unless --replace, or --refresh (the same for
+the datasets), which archives it and installs the pre-cache again. When it holds an older install of the pre-cache
+than the one here (precache_outdated), a line says so and names the command, `thimble demo --refresh <name>`.
 
 Attaching. The demo is static: it opens the start page and starts no Claude Code session. --attach starts one (`thimble`
 in the dataset's folder), after `claude auth status` says a login is configured (when it says none, it says how to log
@@ -106,6 +111,7 @@ README = "README.md"
 WORKSPACE = "workspace"
 TRANSCRIPTS = "transcripts"  # in a full export: transcripts/<session>.jsonl and its folder transcripts/<session>/
 MARKER = "precached.json"  # in an installed workspace: what was installed, from where, and the sessions given it
+LOCAL_VIEWS = Path("extension") / "views"  # a workspace's views, each in its folder with its view.json
 PRECACHES = config.REPO_ROOT / "demos"  # demos/<name>/
 DEFAULT_DIR = Path("$THIMBLE_HOME/demo")  # for the help text; default_dir() is the folder
 DEMO_PREFIX = "demo-"  # of each dataset's workspace name (workspace_name)
@@ -1333,6 +1339,46 @@ def holds_work(ws: Path) -> bool:
     return any(p.name != "investigation.json" for p in (ws / "investigations" / "main").glob("*.json"))
 
 
+def precache_digest(manifest: dict[str, Any]) -> str:
+    """A pre-cache's digest: of its manifest, which lists each file it holds with its sha256. The mark keeps it."""
+    return hashlib.sha256(json.dumps(manifest, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def _when(stamp: str) -> datetime | str:
+    try:
+        return datetime.fromisoformat(stamp)
+    except ValueError:
+        return stamp
+
+
+def precache_outdated(ws: Path, src: Path) -> bool:
+    """Whether the workspace folder `ws` holds an older install of the pre-cache `src` than `src`: one exported earlier
+    (the manifest's `created`, which the mark keeps); else, of the same export, one whose manifest changed since (the
+    mark's `digest`); else, for a mark from before thimble kept the digest, a view still at the build the pre-cache
+    gave it whose stamp differs from the one `src` gives it (a stamp corrected after the export). A workspace that is
+    no install of the dataset's pre-cache is never outdated."""
+    mark = _read_json(ws / MARKER)
+    try:
+        m = read_manifest(src)
+    except DemoError:
+        return False
+    if not isinstance(mark, dict) or mark.get("dataset") != m.get("dataset"):
+        return False
+    had, has = str(mark.get("created") or ""), str(m.get("created") or "")
+    if had != has:
+        a, b = _when(had), _when(has)
+        return b > a if type(a) is type(b) else has > had
+    if mark.get("digest"):
+        return mark["digest"] != precache_digest(m)
+    root = src / WORKSPACE / LOCAL_VIEWS
+    for p in sorted(root.glob("*/view.json")) if root.is_dir() else []:
+        shipped, mine = _read_json(p), _read_json(ws / LOCAL_VIEWS / p.parent.name / "view.json")
+        if isinstance(shipped, dict) and isinstance(mine, dict) and mine.get("built") == shipped.get("built") \
+                and mine.get("version") != shipped.get("version"):
+            return True
+    return False
+
+
 CHAT_META_RE = re.compile(r"^chats/[^/]+\.meta\.json$")
 
 
@@ -1457,7 +1503,8 @@ def install(src: Path, ws: Path, corpus: Path, *, home: Path | None = None,
         mark = {"dataset": manifest.get("dataset"), "created": manifest.get("created"), "installed": now(),
                 "thimble": manifest.get("thimble"), "folder": str(corpus), "orientation": chat or None,
                 "ran": o.get("ended") or o.get("started"), "model": o.get("model"),
-                "format": "full" if full else "outputs-only", "kept": kept, "view": opens}
+                "format": "full" if full else "outputs-only", "kept": kept, "view": opens,
+                "digest": precache_digest(manifest)}
         (tmp / MARKER).write_text(json.dumps(mark, ensure_ascii=False, indent=1), "utf-8")
         if isinstance(run, dict):
             if not kept:
@@ -1763,8 +1810,18 @@ def place_precache(ds: Dataset, folder: Path, cat: dict[str, dict[str, Any]], ur
     ws = Path(env["workspaces_dir"]) / name
     if ws.exists():
         if holds_work(ws) and not replace:
-            say(f"  workspace {name} holds an analysis already; it stays (--replace archives it and installs the "
-                "pre-cache)")
+            src = Path(pc["path"])
+            if precache_outdated(ws, src):
+                shipped = src.parent.resolve() == PRECACHES.resolve()
+                cmd = f"thimble demo --refresh {ds.name}"
+                if not shipped:
+                    cmd += f" --precaches {shlex.quote(str(src.parent))}"
+                newer = "this thimble ships" if shipped else f"{src.parent} holds"
+                say(f"  workspace {name} holds an older pre-cache than {newer}; `{cmd}` archives it and installs the "
+                    "new one")
+            else:
+                say(f"  workspace {name} holds an analysis already; it stays (--replace archives it and installs the "
+                    "pre-cache)")
             return name
         archived = None
         if url:
@@ -1901,16 +1958,18 @@ def attach_lines(opened: list[tuple[Dataset, Path, str | None]], precached: bool
 
 
 def wrapped(say: Callable[[str], None], width: int = 110) -> Callable[[str], None]:
-    """`say`, with a long line wrapped under its own indent (a command, a URL or JSON to copy is left whole)."""
+    """`say`, with a long line wrapped under its own indent (a command, a URL or JSON to copy is left whole, and so is
+    a `command` in backticks within a line)."""
     def out(text: str) -> None:
         for line in text.split("\n"):
             if len(line) <= width or line.lstrip().startswith(("cd ", "{")) or "http" in line:
                 say(line)
                 continue
             indent = line[: len(line) - len(line.lstrip())]
-            for part in textwrap.wrap(line, width, subsequent_indent=indent + "  ", break_long_words=False,
+            whole = re.sub(r"`[^`\n]+`", lambda m: m.group(0).replace(" ", "\0"), line)
+            for part in textwrap.wrap(whole, width, subsequent_indent=indent + "  ", break_long_words=False,
                                       break_on_hyphens=False):
-                say(part)
+                say(part.replace("\0", " "))
 
     return out
 
@@ -1975,10 +2034,11 @@ def run(args: argparse.Namespace, *, get: Callable[[str], bytes] = demo_data.htt
     (root / "SOURCES.md").write_text(sources_md([d for d in DATASETS.values() if d.name in built
                                                  or (root / d.name).is_dir()]), "utf-8")
     url, env = server(say)
+    replace = bool(args.replace or getattr(args, "refresh", False))  # --refresh without --examples: as --replace
     opened: list[tuple[Dataset, Path, str | None]] = []
     for ds, folder in ready:
         try:
-            name: str | None = place_precache(ds, folder, cat, url, env, args.replace, say)
+            name: str | None = place_precache(ds, folder, cat, url, env, replace, say)
         except (DemoError, OSError) as e:
             say(f"  {ds.name}: " + ("the pre-cached orientation was not installed" if ds.name in cat else
                                      "not registered in thimble") + f": {e}")
@@ -2122,8 +2182,9 @@ def add_parser(sub: Any) -> None:
                         "workspace example-<name> on its sample, with its view built and its sample labels on, and open "
                         "the start page that lists them")
     p.add_argument("--refresh", action="store_true",
-                   help="with --examples: copy each example's sample and view again and redefine its labels, so edits "
-                        "in plugin/viewers show")
+                   help="reinstall each named dataset's pre-cache (default: all), archiving its workspace first, as "
+                        "--replace does; with --examples: copy each example's sample and view again and redefine its "
+                        "labels, so edits in plugin/viewers show")
     p.add_argument("--allow-private", action="store_true",
                    help="with --export --outputs-only: write the pre-cache even when it holds the user name or "
                         "absolute paths (never one that copies long stretches of the corpus)")

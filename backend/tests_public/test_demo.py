@@ -670,7 +670,7 @@ def fake_dataset(name: str, caution: str = "") -> Dataset:
 def args(**kw) -> argparse.Namespace:
     base = dict(names=[], yes=True, dir=None, list=False, attach=False, no_attach=False, replace=False, precaches=None,
                 export=None, outputs_only=False, dataset=None, corpus=None, allow_private=False, scrub_user=False,
-                app=None, claude_config=None, view=None)
+                app=None, claude_config=None, view=None, refresh=False)
     return argparse.Namespace(**{**base, **kw})
 
 
@@ -761,6 +761,107 @@ def test_demo_downloads_installs_opens_and_says_how_to_attach(tmp_path, fake_wor
     assert run(w, args(names=["one"], dir=str(w["root"]), precaches=str(pre), replace=True)) == 0
     assert list((Path(w["env"]["workspaces_dir"]) / ".archive").glob("demo-one-*"))
     assert (installed / "orient" / "run.json").is_file()
+
+
+def test_demo_refresh_reinstalls_each_named_dataset_or_all_as_replace_does(tmp_path, fake_world):
+    w = fake_world
+    pre = precache_for(tmp_path, "one")
+    ws = Path(w["env"]["workspaces_dir"]) / "demo-one"
+    archive = Path(w["env"]["workspaces_dir"]) / ".archive"
+    assert run(w, args(names=["one"], dir=str(w["root"]), precaches=str(pre))) == 0
+    (ws / "notebooks" / "mine.json").write_text("{}")  # the analyst's own card
+    assert run(w, args(names=["one"], dir=str(w["root"]), precaches=str(pre), refresh=True)) == 0
+    assert [p.name for p in archive.glob("demo-one-*/notebooks/mine.json")], "the earlier workspace is archived"
+    assert not (ws / "notebooks" / "mine.json").exists() and (ws / demo.MARKER).is_file()
+    assert "the earlier workspace demo-one is archived at" in said(w) and "it stays" not in said(w)
+    # no names: every dataset, the ones without a pre-cache registered as before
+    w["lines"].clear()
+    assert run(w, args(dir=str(w["root"]), precaches=str(pre), refresh=True)) == 0
+    assert len(list(archive.glob("demo-one-*"))) == 2 and (ws / demo.MARKER).is_file()
+    assert "two opens without a pre-cached orientation" in said(w)
+
+
+def test_refresh_s_help_says_it_reinstalls_and_what_it_does_with_examples():
+    parser = argparse.ArgumentParser()
+    demo.add_parser(parser.add_subparsers())
+    sub = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction)).choices["demo"]
+    text = next(a.help for a in sub._actions if "--refresh" in a.option_strings)
+    assert "reinstall" in text and "as --replace does" in text and "with --examples" in text
+
+
+def set_json(p: Path, **kw) -> None:
+    p.write_text(json.dumps({**json.loads(p.read_text()), **kw}))
+
+
+def test_an_install_of_an_older_precache_is_outdated_by_its_date_its_digest_or_a_corrected_view_stamp(tmp_path):
+    out, corpus, _ = made(tmp_path)
+    shipped_view = out / "workspace" / "extension" / "views" / "v1" / "view.json"
+    set_json(shipped_view, version="aaaaaaaaaaaa")
+    ws = tmp_path / "b" / "toy"
+    demo.install(out, ws, corpus)
+    manifest = out / demo.MANIFEST
+    mark = ws / demo.MARKER
+    assert json.loads(mark.read_text())["digest"] == demo.precache_digest(json.loads(manifest.read_text()))
+    assert not demo.precache_outdated(ws, out)
+    # the same export with a file changed since (its manifest lists the new sha256): the digest differs
+    m = json.loads(manifest.read_text())
+    m["files"][0]["sha256"] = "0" * 64
+    manifest.write_text(json.dumps(m))
+    assert demo.precache_outdated(ws, out)
+    # a mark from before thimble kept the digest: a view at the pre-cache's build whose stamp was corrected since
+    set_json(mark, digest=None)
+    assert not demo.precache_outdated(ws, out)
+    set_json(shipped_view, version="bbbbbbbbbbbb")
+    assert demo.precache_outdated(ws, out)
+    set_json(ws / "extension" / "views" / "v1" / "view.json", built="2026-10-12T00:00:00+00:00", version="cccccccccccc")
+    assert not demo.precache_outdated(ws, out), "a view built again here is the analyst's, not the pre-cache's"
+    # a pre-cache exported later is newer whatever else it holds; one exported earlier is not
+    had = json.loads(mark.read_text())["created"]
+    manifest.write_text(json.dumps({**m, "created": "2999-01-01T00:00:00+00:00"}))
+    assert demo.precache_outdated(ws, out)
+    manifest.write_text(json.dumps({**m, "created": "2000-01-01T00:00:00+00:00"}))
+    assert not demo.precache_outdated(ws, out) and had
+    # a workspace that is no install of this dataset's pre-cache
+    set_json(mark, dataset="other")
+    manifest.write_text(json.dumps({**m, "created": "2999-01-01T00:00:00+00:00"}))
+    assert not demo.precache_outdated(ws, out)
+    mark.unlink()
+    assert not demo.precache_outdated(ws, out)
+
+
+def test_demo_names_the_command_that_reinstalls_an_older_precache(tmp_path, fake_world, monkeypatch):
+    w = fake_world
+    pre = precache_for(tmp_path, "one")
+    monkeypatch.setattr(demo, "PRECACHES", pre)  # the pre-caches this thimble ships
+    assert run(w, args(names=["one"], dir=str(w["root"]))) == 0
+    assert run(w, args(names=["one"], dir=str(w["root"]))) == 0
+    assert "holds an analysis already; it stays" in said(w) and "older pre-cache" not in said(w)
+    manifest = pre / "one" / demo.MANIFEST
+    manifest.write_text(json.dumps({**json.loads(manifest.read_text()), "created": "2999-01-01T00:00:00+00:00"}))
+    w["lines"].clear()
+    assert run(w, args(names=["one"], dir=str(w["root"]))) == 0
+    line = "workspace demo-one holds an older pre-cache than this thimble ships; `thimble demo --refresh one` " \
+           "archives it and installs the new one"
+    assert line in said(w) and "it stays" not in said(w)
+    # from another folder of pre-caches, the command names it
+    other = tmp_path / "other"
+    shutil.copytree(pre, other)
+    w["lines"].clear()
+    assert run(w, args(names=["one"], dir=str(w["root"]), precaches=str(other))) == 0
+    assert f"older pre-cache than {other} holds; `thimble demo --refresh one --precaches {other}`" in said(w)
+    # --refresh installs it, and the workspace is no longer outdated
+    assert run(w, args(names=["one"], dir=str(w["root"]), refresh=True)) == 0
+    w["lines"].clear()
+    assert run(w, args(names=["one"], dir=str(w["root"]))) == 0
+    assert "holds an analysis already; it stays" in said(w) and "older pre-cache" not in said(w)
+
+
+def test_a_wrapped_line_keeps_a_command_in_backticks_whole():
+    lines: list[str] = []
+    demo.wrapped(lines.append)("  workspace demo-collusion-wiki holds an older pre-cache than this thimble ships; "
+                               "`thimble demo --refresh collusion-wiki` archives it and installs the new one")
+    assert len(lines) == 2 and all(len(x) <= 110 for x in lines)
+    assert lines[1] == "    `thimble demo --refresh collusion-wiki` archives it and installs the new one"
 
 
 def test_demo_with_no_precache_opens_each_dataset_with_a_note(fake_world):
