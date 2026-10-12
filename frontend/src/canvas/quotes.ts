@@ -3,21 +3,25 @@
 // fields on one line and long text fields under them, never a JSON dump. A span is the passage with the words around
 // it. Prose written in markdown is marked `md`; a text that is JSON reads as its fields, and a passage of JSON as the
 // decoded string values it covers (jsonSpanParts). Pure.
+import { findQuote } from '../lib/quoteFind'
 import type { ResolvedRef } from '../lib/types'
+
+/** where a passage an example card quotes sits in a part's text, as [start, end) offsets (markQuotes) */
+export type Mark = [number, number]
 
 export type QuotePart =
   /** prose: a message, a post, a line someone said; `md` when its source is markdown; `mark`, the claim's words in it
    * (canvas/facts markValue) */
-  | { kind: 'text'; text: string; md?: boolean; dim?: boolean; mark?: [number, number] }
+  | { kind: 'text'; text: string; md?: boolean; dim?: boolean; mark?: [number, number]; marks?: Mark[] }
   /** code or a log: mono, its lines kept */
-  | { kind: 'code'; text: string; mark?: [number, number] }
+  | { kind: 'code'; text: string; mark?: [number, number]; marks?: Mark[] }
   /** a tool call: the tool's name, then what it was asked to do (a command, else its input's fields) */
-  | { kind: 'tool'; name: string; text: string }
+  | { kind: 'tool'; name: string; text: string; marks?: Mark[] }
   /** a record's short fields, on one line */
   | { kind: 'fields'; pairs: [string, string][] }
   /** one long text field of a record, under its name; `mono` for output such as a tool's result, `md` when its text is
    * written in markdown */
-  | { kind: 'field'; key: string; text: string; mono?: boolean; md?: boolean; mark?: [number, number] }
+  | { kind: 'field'; key: string; text: string; mono?: boolean; md?: boolean; mark?: [number, number]; marks?: Mark[] }
   /** a passage inside a longer text, with the words before and after it; `key` names the record's field it sits in (a
    * passage of a JSON record), `md` when its source is markdown */
   | { kind: 'span'; before: string; text: string; after: string; mono?: boolean; md?: boolean; key?: string }
@@ -439,4 +443,79 @@ export function quoteLine(parts: readonly QuotePart[]): string {
     }
   }
   return pick.map(one).join(' · ').replace(/\s+/g, ' ').trim()
+}
+
+/** A record's parts with each quoted passage marked in the first part whose text holds it (findQuote: as written, as
+ * JSON writes it, or with its spaces and case folded); a passage no part holds is left out. Pure. */
+export function markQuotes(parts: readonly QuotePart[], quotes: readonly string[]): QuotePart[] {
+  const out = [...parts]
+  for (const q of quotes) {
+    const i = out.findIndex((p) => (p.kind === 'text' || p.kind === 'code' || p.kind === 'field' || p.kind === 'tool') && findQuote(p.text, q))
+    if (i < 0) continue
+    const p = out[i] as Extract<QuotePart, { marks?: Mark[] }>
+    out[i] = { ...p, marks: [...(p.marks ?? []), findQuote(p.text, q)!] }
+  }
+  return out
+}
+
+/** One entry of an example card: the record it shows once, the address that opens it, and the refs it stands for, each
+ * with the quote kept beside it ('' for none). */
+export interface ExampleEntry {
+  ref: string
+  refs: string[]
+  quotes: string[]
+}
+
+const SPAN_REF = /^(.+#L\d+)\.b\d+:c\d+-\d+$/
+
+/** The record an example's ref names: a span's line (`<path>#L<n>`), else the ref itself. Pure. */
+export function recordOf(ref: string): string {
+  return SPAN_REF.exec(ref)?.[1] ?? ref
+}
+
+/** An example card's refs as its entries, in order: the refs that name one record (the same file and pointer, row or
+ * line, such as three quotes of one JSON value or two spans of one line) are one entry, whose address is that record;
+ * a ref alone keeps its own address. `quotes` is the payload's, one per ref. Pure. */
+export function exampleEntries(refs: readonly string[], quotes: readonly unknown[] = []): ExampleEntry[] {
+  const by = new Map<string, ExampleEntry>()
+  refs.forEach((r, i) => {
+    const q = typeof quotes[i] === 'string' ? (quotes[i] as string).trim() : ''
+    const e = by.get(recordOf(r))
+    if (!e) by.set(recordOf(r), { ref: r, refs: [r], quotes: [q] })
+    else if (!e.refs.some((x, k) => x === r && e.quotes[k] === q)) {
+      e.refs.push(r)
+      e.quotes.push(q)
+    }
+  })
+  return [...by.values()].map((e) => (e.refs.length > 1 ? { ...e, ref: recordOf(e.refs[0]) } : e))
+}
+
+/** A span's whole record: the resolved span read as the record its line is (its blocks are the record's). */
+function wholeRecord(r: ResolvedRef): ResolvedRef {
+  if (r.kind !== 'span') return r
+  const { block: _b, start: _s, end: _e, ...rest } = r as ResolvedRef & { block?: number; start?: number; end?: number }
+  return { ...rest, ref: recordOf(r.ref), kind: 'record' }
+}
+
+/**
+ * What an example entry shows, as parts, from `got` (a ref's resolution; undefined while it loads, null when it failed):
+ * a lone ref as it reads (quoteParts), with the quote kept beside it marked; several refs of one record that record
+ * once, a span's record whole, with every quoted passage marked (a span's own words where no quote was kept). Null
+ * until the entry's refs have come back, or when none resolved. Pure.
+ */
+export function entryParts(e: ExampleEntry, got: (ref: string) => ResolvedRef | null | undefined): QuotePart[] | null {
+  const res = e.refs.map(got)
+  if (res.some((r) => r === undefined)) return null
+  const first = res.find((r): r is ResolvedRef => !!r)
+  if (!first) return null
+  if (e.refs.length === 1) {
+    const parts = quoteParts(first)
+    return first.kind === 'span' || !e.quotes[0] ? parts : markQuotes(parts, [e.quotes[0]])
+  }
+  const said = e.refs.flatMap((_r, i) => {
+    if (e.quotes[i]) return [e.quotes[i]]
+    const r = res[i]
+    return r && r.kind === 'span' ? quoteParts(r).flatMap((p) => (p.kind === 'span' ? [p.text] : [])) : []
+  })
+  return markQuotes(quoteParts(wholeRecord(first)), said)
 }

@@ -102,6 +102,27 @@ async def test_a_question_s_escaped_quotation_marks_are_stored_as_marks(group):
     assert notebook.get_cell(CORPUS, cid)["title"] == 'Which pages have "July" in their name?'
 
 
+async def test_an_example_keeps_each_quote_of_a_record_whose_ref_stays_as_given(group):
+    """Three quotes of one row of a database: span_of_quote keeps the row's ref, so the three refs were the same string
+    and the card showed three copies of the row from its start. Each quote is kept beside its ref, so the card can show
+    the row once with every passage highlighted. A quote of a JSONL line becomes a span, which says where it is, and
+    keeps no quote."""
+    r = await call("add_card", group, kind="example", question="Where does the row name the style?",
+                   refs=[{"ref": "forge.db#prs/7114", "quote": "Quote the style name"},
+                         {"ref": "forge.db#prs/7114", "quote": "configuration example"},
+                         {"ref": "forge.db#prs/7114", "quote": "merged"}])
+    payload = notebook.get_cell(CORPUS, _cid(r))["payload"]
+    assert payload["refs"] == ["forge.db#prs/7114"] * 3
+    assert payload["quotes"] == ["Quote the style name", "configuration example", "merged"]
+    assert "- forge.db#prs/7114 “configuration example”" in tools._payload_lines("example", payload), \
+        "the card read back names each quote with its ref"
+    r = await call("add_card", group, kind="example", question="Which post asks for thread 1?",
+                   refs=[{"ref": "board.jsonl#L3", "quote": "please use thread 1"}, "board.jsonl#L1"])
+    payload = notebook.get_cell(CORPUS, _cid(r))["payload"]
+    assert payload["refs"][0].startswith("board.jsonl#L3.b") and payload["refs"][1] == "board.jsonl#L1"
+    assert "quotes" not in payload
+
+
 async def test_an_edit_that_left_the_outputs_as_they_were_says_so_and_read_ref_says_the_code_ran(group):
     """Live QA 2: a fix turned a chart's weeks into text for its ticks, thimble.chart read the text as times again, and
     the card came out as before with nothing to say so; main then read the card and told the analyst that it had not
