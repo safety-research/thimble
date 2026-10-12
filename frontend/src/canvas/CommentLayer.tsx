@@ -9,23 +9,23 @@
 // from under the pointer. Matt 2026-10-09: "what about highlights, just like in the report?"; "we don't need an
 // underline in addition to darkened highlight … and we don't need the line connecting it to the comment if it's
 // foregrounded (e.g., slightly more shadow?) and moves up". Each is the comment card the Report's margin draws too
-// (report/CommentCard.tsx): its check's name and its statement, its details on request, Ask, Know it and ✓ (Done), and
-// a thread for Ask anchored to its card or step. A comment hides with its check, when its card is not drawn (a
-// collapsed frame) or when the filters leave its card out. The box the comments cover goes to the canvas, whose Fit
-// and minimap take it in.
+// (report/CommentCard.tsx): its check's name and its statement, its details on request and ✓ (Done), and, while it is
+// active, a field that opens a thread anchored to its card or step. A comment hides with its check, when its card is
+// not drawn (a collapsed frame) or when the filters leave its card out. The box the comments cover goes to the canvas,
+// whose Fit and minimap take it in.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
 import type { CanvasComment } from '../lib/types'
 import { evidenceRefs, type CheckLook } from '../report/checkComments'
 import { CommentCard } from '../report/CommentCard'
-import { canvasCommentsApi, type ResolveHow } from '../report/commentsApi'
+import { canvasCommentsApi } from '../report/commentsApi'
 import { COMMENT_LIFT, COMMENT_STEP_LIFT, COMMENT_W, commentPlaces, extentOf, type Board, type CommentPlace, type CommentSpot, type Layout, type Rect } from './layout'
 
 const REFETCH_DEBOUNCE_MS = 200
 
 /** The workspace's open comments on the cards, read again when the stream says they or the cards changed. */
-export function useCanvasComments(ws: string): { comments: CanvasComment[]; resolve: (c: CanvasComment, how: ResolveHow) => Promise<void> } {
+export function useCanvasComments(ws: string): { comments: CanvasComment[]; resolve: (c: CanvasComment) => Promise<void> } {
   const [comments, setComments] = useState<CanvasComment[]>([])
   useEffect(() => {
     let live = true
@@ -51,11 +51,11 @@ export function useCanvasComments(ws: string): { comments: CanvasComment[]; reso
     }
   }, [ws])
   const resolve = useCallback(
-    async (c: CanvasComment, how: ResolveHow) => {
+    async (c: CanvasComment) => {
       setComments((cur) => cur.filter((x) => x.id !== c.id))
       try {
-        setComments(await canvasCommentsApi.resolve(ws, c.id, how))
-        track('ui-click', { target: c.ref, detail: { action: how === 'known' ? 'comment-know' : 'comment-resolve', check: c.check } })
+        setComments(await canvasCommentsApi.resolve(ws, c.id))
+        track('ui-click', { target: c.ref, detail: { action: 'comment-resolve', check: c.check } })
       } catch (e) {
         bus.emit('toast', { text: `Could not resolve the comment. ${(e as Error).message}`, kind: 'error' })
         canvasCommentsApi.list(ws).then(setComments, () => undefined)
@@ -114,7 +114,7 @@ export interface CommentLayerProps {
   look: CheckLook
   /** a card's element on the board, to find its step rows */
   cardEl: (id: string) => HTMLElement | undefined
-  onResolve: (c: CanvasComment, how: ResolveHow) => Promise<void>
+  onResolve: (c: CanvasComment) => Promise<void>
   /** a card's question, for the thread a reply opens */
   titleOf: (card: string) => string
   /** the box the placed comments cover on the plane, or null for none, whenever it changes: Fit and the minimap take it
@@ -238,7 +238,7 @@ export function CommentLayer({ ws, board, lay, comments, look, cardEl, onResolve
             onActivate={() => setActive(c.id)}
             onHover={(on) => setHovered((cur) => (on ? c.id : cur === c.id ? null : cur))}
             onFocusIn={(on) => setFocused((cur) => (on ? c.id : cur === c.id ? null : cur))}
-            onResolve={(how) => onResolve(c, how)}
+            onResolve={() => onResolve(c)}
             thread={{ anchor: c.ref, passage: titleOf(c.card), where: c.n != null ? `step ${c.n}` : undefined, surface: 'canvas' }}
           />
         )

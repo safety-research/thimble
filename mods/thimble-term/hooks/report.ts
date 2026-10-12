@@ -99,7 +99,7 @@ export function commentsOf(doc: Obj, checks: readonly DocCheck[]): DocComment[] 
         for (const x of (p.sentences ?? []) as (DocSentence & { tags?: unknown; tag_notes?: Record<string, unknown> })[]) {
           if (!x.id || marked.has(x.id) || !Array.isArray(x.tags) || !x.tags.includes(UNVERIFIED)) continue
           const note = str(isObj(x.tag_notes) ? x.tag_notes[UNVERIFIED] : '').trim()
-          out.push({ id: `tag:${x.id}`, sid: x.id, check: UNVERIFIED, name: by.get(UNVERIFIED)?.name ?? 'Unverified', meta: 'citation check', text: note || 'Not checked', evidence: [], open: true, tag: true, colour: by.get(UNVERIFIED)?.colour ?? 0 })
+          out.push({ id: `tag:${x.id}`, sid: x.id, check: UNVERIFIED, name: by.get(UNVERIFIED)?.name ?? 'Unverifiable', meta: 'citation check', text: note || 'Not checked', evidence: [], open: true, tag: true, colour: by.get(UNVERIFIED)?.colour ?? 0 })
         }
   }
   return out.map((c, i) => ({ c, i })).sort((a, b) => rank.get(a.c.sid)! - rank.get(b.c.sid)! || a.i - b.i).map(x => x.c)

@@ -131,7 +131,7 @@ describe('where the comments beside the cards sit', () => {
 })
 
 const check = (id: string, covers: Check['covers'], over: Partial<Check> = {}): Check => ({ id, name: id, prompt: 'p', colour: 2, shown: true, builtin: true, created_by: 'thimble', ts: '', version: 1, runs: {}, covers, ...over })
-const LIST = [check('unverified', ['documents'], { shown: false }), check('ysk', ['documents', 'cards'], { name: 'You should know', runs: { '@canvas': { run: 'r', status: 'done', chat: '', started: '', covered: [], seen: [], comments: 2, summary: '' } } }), check('risks', ['cards'], { name: 'Risks', shown: false })]
+const LIST = [check('unverified', ['documents'], { shown: false }), check('ysk', ['documents', 'cards'], { name: 'Important details', runs: { '@canvas': { run: 'r', status: 'done', chat: '', started: '', covered: [], seen: [], comments: 2, summary: '' } } }), check('risks', ['cards'], { name: 'Risks', shown: false })]
 
 describe("the Comments pane's rows", () => {
   test('a check shows where it comments: the documents, the cards or both', () => {
@@ -147,7 +147,7 @@ describe("the Comments pane's rows", () => {
     const el = await mount(<CheckRows ws="w" surface={CANVAS} checks={checks} comments={[comment('a', 'p'), comment('b', 'p'), comment('c', 't', { check: null })]} adding={null} onAdding={() => {}} />)
     const rows = [...el.querySelectorAll<HTMLElement>('.wu-check')]
     expect(rows.map((r) => r.dataset.check)).toEqual(['ysk', 'risks'])
-    expect(rows[0].querySelector('.wu-check-name')!.textContent).toBe('You should know')
+    expect(rows[0].querySelector('.wu-check-name')!.textContent).toBe('Important details')
     expect(rows[0].querySelector('.wu-count')!.textContent).toBe('2')
     expect(rows[0].querySelector('[role="switch"]')!.getAttribute('aria-checked')).toBe('true')
     expect(rows[1].querySelector('[role="switch"]')!.getAttribute('aria-checked')).toBe('false')

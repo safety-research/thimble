@@ -32,7 +32,7 @@ const canvas = { groups: [{ id: 'g', title: 'Your work', parent: null, kind: 'se
 const DETAILS =
   'Most pandas PRs live on contributors’ forks, so a clone of pandas-dev/pandas has none of their branches. The existing test only covers a PR an agent opened. Block approval from anyone who pushed commits to the PR, since the imported PRs were opened by upstream people and an agent who pushed a fix could approve its own work.'
 const COMMENTS = [{ id: 'k1', card: 'build1', step: 's1', n: 1, ref: 'card:build1#step-1', check: 'you-should-know', run: 'r1', author: 'check', text: "Cloning every branch won't get the open PRs' code: fetch them as `refs/pull/<n>/head`.", details: DETAILS, ts: '', status: 'open' }]
-const YSK = { id: 'you-should-know', name: 'You should know', prompt: 'Leave a comment…', colour: 2, shown: true, builtin: true, created_by: 'thimble', ts: '', version: 1, runs: {}, covers: ['documents', 'cards'] }
+const YSK = { id: 'you-should-know', name: 'Important details', prompt: 'Comment on a passage…', colour: 2, shown: true, builtin: true, created_by: 'thimble', ts: '', version: 1, runs: {}, covers: ['documents', 'cards'] }
 
 beforeAll(async () => {
   const script = await bundle(

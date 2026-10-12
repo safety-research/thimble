@@ -1,10 +1,9 @@
 // One comment as the Report's margin (Margin.tsx) and the canvas (canvas/CommentLayer.tsx) draw it, the same on both:
-// its check's name in the check's color beside the color square, then its statement. Show more under the statement
-// opens its details, whose citations show as chips, and Show less folds them. A click makes it active, which opens its
-// details and a field whose text asks Thimble about it in a thread anchored to the comment's passage, card or step,
-// with the comment's id and words; Ask does the same and puts the caret in the field. On hover, Ask and Know it (a check's comment, which its check then never raises
-// again) stand before ✓ (Done); Know it and Done resolve the comment, which hides it. The canvas hears when the pointer
-// or the keyboard's focus comes onto a card, to show where its comment points (CommentLayer.tsx).
+// its check's name in the check's color beside the color square, then its statement, and ✓ (Done) at the head's end,
+// which resolves the comment and hides it. Show more under the statement opens its details, whose citations show as
+// chips, and Show less folds them. A click makes it active, which opens its details and a field whose text asks Thimble
+// about it in a thread anchored to the comment's passage, card or step, with the comment's id and words. The canvas
+// hears when the pointer or the keyboard's focus comes onto a card, to show where its comment points (CommentLayer.tsx).
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from 'react'
 import { ChatMarkdown, ChipContext } from '../chat/markdown'
 import { TextArea } from '../components/Field'
@@ -13,7 +12,6 @@ import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
 import { commentName, CLAUDE_AUTHOR, extraEvidence, type CheckLook } from './checkComments'
-import type { ResolveHow } from './commentsApi'
 import { noteText } from './NoteText'
 import { Glyph, IconButton } from './icons'
 
@@ -35,7 +33,7 @@ export interface CommentView {
   fixed?: boolean
 }
 
-/** Where the thread Ask opens is anchored, and what it shows of the place. */
+/** Where the thread the active card's field opens is anchored, and what it shows of the place. */
 export interface CommentThread {
   /** the comment's passage, card or step, as a ref */
   anchor: string
@@ -53,7 +51,8 @@ export interface CommentCardProps {
   look: Pick<CheckLook, 'colour' | 'name'>
   active: boolean
   onActivate: () => void
-  onResolve: (how: ResolveHow) => Promise<void>
+  /** ✓ (Done) */
+  onResolve: () => Promise<void>
   thread: CommentThread
   cardRef?: (el: HTMLDivElement | null) => void
   /** the surface's own class, which places the card */
@@ -88,7 +87,6 @@ export function threadText(c: CommentView, name: string, thread: CommentThread):
 export function CommentCard({ ws, comment, look, active, onActivate, onResolve, thread, cardRef, className, style, attrs, onMouseDown, onHover, onFocusIn }: CommentCardProps) {
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState(false)
-  const [asking, setAsking] = useState(0)
   const name = commentName(comment, look)
   const colour = look.colour(comment.check)
   const extra = extraEvidence(comment.evidence, comment.details)
@@ -99,20 +97,14 @@ export function CommentCard({ ws, comment, look, active, onActivate, onResolve, 
     if (wasActive.current && !active) setOpen(false)
     wasActive.current = active
   }, [active])
-  const act = (how: ResolveHow) => (e: MouseEvent) => {
+  const done = (e: MouseEvent) => {
     e.stopPropagation()
     setBusy(true)
-    void onResolve(how).finally(() => setBusy(false))
+    void onResolve().finally(() => setBusy(false))
   }
   const activate = () => {
     if (!active) setOpen(true)
     onActivate()
-  }
-  const ask = (e: MouseEvent) => {
-    e.stopPropagation()
-    if (!active) setOpen(true)
-    onActivate()
-    setAsking((n) => n + 1)
   }
   return (
     <div
@@ -133,23 +125,11 @@ export function CommentCard({ ws, comment, look, active, onActivate, onResolve, 
         <span className="wu-cm-name" style={{ color: colour }}>
           {name}
         </span>
-        <span className="wu-cm-tools">
-          <span className="wu-cm-menu">
-            <button type="button" className="wu-cm-act wu-cm-ask" onClick={ask}>
-              Ask
-            </button>
-            {comment.check != null && !comment.fixed && (
-              <button type="button" className="wu-cm-act wu-cm-know" disabled={busy} onClick={act('known')}>
-                Know it
-              </button>
-            )}
-          </span>
-          {!comment.fixed && (
-            <IconButton label="Done" className="wu-cm-resolve" disabled={busy} onClick={act('done')}>
-              <Glyph name="check" size={13} strokeWidth={2} />
-            </IconButton>
-          )}
-        </span>
+        {!comment.fixed && (
+          <IconButton label="Done" className="wu-cm-resolve" disabled={busy} onClick={done}>
+            <Glyph name="check" size={13} strokeWidth={2} />
+          </IconButton>
+        )}
       </div>
       <div className="wu-cm-text wu-cm-statement">{noteText(comment.text)}</div>
       {open && more && (
@@ -183,20 +163,15 @@ export function CommentCard({ ws, comment, look, active, onActivate, onResolve, 
           {open ? 'Show less' : 'Show more'}
         </button>
       )}
-      {active && <Reply ws={ws} comment={comment} name={name} thread={thread} focus={asking} />}
+      {active && <Reply ws={ws} comment={comment} name={name} thread={thread} />}
     </div>
   )
 }
 
-/** The active card's field: its text goes to Thimble as the first message of a thread anchored to the comment. `focus`
- * changes when Ask is pressed, which puts the caret in it. */
-function Reply({ ws, comment, name, thread, focus }: { ws: string; comment: CommentView; name: string; thread: CommentThread; focus: number }) {
+/** The active card's field: its text goes to Thimble as the first message of a thread anchored to the comment. */
+function Reply({ ws, comment, name, thread }: { ws: string; comment: CommentView; name: string; thread: CommentThread }) {
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
-  const field = useRef<HTMLTextAreaElement | null>(null)
-  useEffect(() => {
-    if (focus) field.current?.focus({ preventScroll: true })
-  }, [focus])
   const send = async () => {
     const msg = text.trim()
     if (!msg || busy) return
@@ -222,7 +197,7 @@ function Reply({ ws, comment, name, thread, focus }: { ws: string; comment: Comm
   }
   return (
     <div className="wu-cm-reply" onClick={(e) => e.stopPropagation()}>
-      <TextArea ref={field} bare block autoGrow rows={1} maxHeight={120} value={text} onChange={setText} onKeyDown={onKey} disabled={busy} placeholder="Reply, or ask thimble to fix…" aria-label="Reply" />
+      <TextArea bare block autoGrow rows={1} maxHeight={120} value={text} onChange={setText} onKeyDown={onKey} disabled={busy} placeholder="Reply, or ask thimble to fix…" aria-label="Reply" />
     </div>
   )
 }

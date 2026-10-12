@@ -3,9 +3,9 @@
 // in the analyst's frame with a comment on its step 2 (GET /canvas/comments). Each comment is one card
 // (src/report/CommentCard.tsx): its header is its check's name in the check's color, the color square matching, with no
 // "Claude"; it shows its statement, and its details only once Show more under the statement opens them (by pointer or
-// keyboard), their citation a chip, which moves the comment below it down in the margin; on hover its menu shows Ask and
-// Know it before ✓, alike on both surfaces; Ask puts the caret in its field, whose
-// question opens a thread (POST /chats) anchored to the comment's passage or step with the comment's id and words. With
+// keyboard), their citation a chip, which moves the comment below it down in the margin; its head holds ✓ alone (no Ask,
+// no Know it), alike on both surfaces; a click makes it active, with a field whose question opens a thread (POST
+// /chats) anchored to the comment's passage or step with the comment's id and words. With
 // no frame kept open in the browser, the analyst's frame, Your work, starts open. Matt 2026-10-09: "it shows a short
 // comment, then you expand for details ... and can ask follow ups"; "what does comment menu look like? should be
 // analogous to menu in reports"; "instead of the >, use text like 'Show more' or something that's placed below the
@@ -26,7 +26,7 @@ const BOX = { id: 'box1', notebook: 'g', kind: 'note', title: 'What can an agent
 const CANVAS = { groups: [{ id: 'g', title: 'Your work', parent: null, kind: 'sequence', anchor: null, chat: null, role: 'analyst' }], cells: [PLAN, BOX] }
 const DETAILS = '- The pandas build fetches two of its libraries from GitHub [[2|card:box1]].\n- Bake them into the image, or allow github.com.'
 const COMMENTS = [{ id: 'k1', card: 'plan1', step: 's2', n: 2, ref: 'card:plan1#step-2', check: 'you-should-know', run: 'r1', author: 'check', text: 'Blocking the web also blocks GitHub.', details: DETAILS, evidence: 'card:box1', ts: '', status: 'open' }]
-const YSK = { id: 'you-should-know', name: 'You should know', prompt: 'Leave a comment…', colour: 2, shown: true, builtin: true, created_by: 'thimble', ts: '', version: 1, runs: {}, covers: ['documents', 'cards'] }
+const YSK = { id: 'you-should-know', name: 'Important details', prompt: 'Comment on a passage…', colour: 2, shown: true, builtin: true, created_by: 'thimble', ts: '', version: 1, runs: {}, covers: ['documents', 'cards'] }
 const PASSAGE = 'Most saves came in one week of June.'
 const PASSAGE2 = 'Half of them were from new accounts.'
 const STORED = [{ id: 'c1', sentence_id: 's1', text: 'Most saves came from one bot account.', details: '- The table counts [[612|card:box1]] of 900 saves.\n- Leave the bot out, or say so.', author: 'check', check: 'you-should-know', status: 'open', evidence: 'card:box1' }, { id: 'c2', sentence_id: 's2', text: 'New accounts here means made in June.', details: 'The table dates each account by its first save.', author: 'check', check: 'you-should-know', status: 'open', evidence: '' }]
@@ -44,7 +44,7 @@ beforeAll(async () => {
       `import { Canvas } from '${src('canvas/Canvas.tsx')}'`,
       `import { Margin } from '${src('report/Margin.tsx')}'`,
       `import { checkLook, openComments } from '${src('report/checkComments.ts')}'`,
-      `const look = checkLook([{ id: 'you-should-know', name: 'You should know', colour: 2 }])`,
+      `const look = checkLook([{ id: 'you-should-know', name: 'Important details', colour: 2 }])`,
       `const comments = openComments(${JSON.stringify(STORED)} as never, [])`,
       `function Report() {`,
       `  const column = useRef<HTMLDivElement>(null)`,
@@ -127,7 +127,7 @@ test("each comment shows its check's name in the check's color and its statement
         text: card.innerText,
       }
     }, sel)
-    assert.equal(got.name, 'You should know', sel)
+    assert.equal(got.name, 'Important details', sel)
     assert.equal(got.color, got.square, `${sel}: the name takes the square's color`)
     assert.ok(!got.head!.includes('Claude') && !got.head!.includes('Heads up'), `${sel}: ${got.head}`)
     assert.equal(got.statement, statement)
@@ -135,13 +135,14 @@ test("each comment shows its check's name in the check's color and its statement
   }
 })
 
-test('the menu is the same on both surfaces: Ask and Know it on hover, before ✓, and Show more under the statement', async () => {
+test('the head is the same on both surfaces: ✓ alone after the name, at rest and hovered, and Show more under the statement', async () => {
   const menus = []
+  const buttons = (sel: string) => page.evaluate((s) => [...document.querySelectorAll(`${s} .wu-cm-head button`)].map((b) => b.textContent?.trim() || b.getAttribute('aria-label')), sel)
   for (const sel of [R, C]) {
-    assert.equal(await visible(`${sel} .wu-cm-menu`), false, `${sel}: the menu waits for the pointer`)
+    assert.deepEqual(await buttons(sel), ['Done'], `${sel}: at rest`)
     await page.locator(sel).hover()
     await page.waitForTimeout(100)
-    assert.equal(await visible(`${sel} .wu-cm-menu`), true, `${sel}: hovered, the menu shows`)
+    assert.equal(await visible(`${sel} .wu-cm-resolve`), true, `${sel}: hovered, ✓ shows`)
     menus.push(
       await page.evaluate((s) => {
         const card = document.querySelector<HTMLElement>(s)!
@@ -153,22 +154,20 @@ test('the menu is the same on both surfaces: Ask and Know it on hover, before �
         const cs = getComputedStyle(card)
         return {
           buttons: [...card.querySelectorAll('.wu-cm-head button')].map((b) => b.textContent?.trim() || b.getAttribute('aria-label')),
-          act: look('.wu-cm-ask'),
-          know: look('.wu-cm-know'),
           done: look('.wu-cm-resolve'),
           more: look('.wu-cm-more'),
           moreText: card.querySelector('.wu-cm-more')!.textContent,
           card: [cs.paddingTop, cs.paddingLeft, cs.borderRadius, cs.fontSize, cs.backgroundColor].join(' '),
-          order: box('.wu-cm-know').right <= box('.wu-cm-resolve').left + 1,
+          order: box('.wu-cm-name').right <= box('.wu-cm-resolve').left + 1,
           // Show more stands under the statement, at its left
           below: box('.wu-cm-more').top >= box('.wu-cm-statement').bottom - 1 && Math.abs(box('.wu-cm-more').left - box('.wu-cm-statement').left) <= 4,
-          inside: box('.wu-cm-menu').left >= box('.wu-cm-head').left && box('.wu-cm-resolve').right <= card.getBoundingClientRect().right,
+          inside: box('.wu-cm-resolve').left >= box('.wu-cm-head').left && box('.wu-cm-resolve').right <= card.getBoundingClientRect().right,
         }
       }, sel),
     )
     await page.mouse.move(5, 5)
   }
-  assert.deepEqual(menus[0].buttons, ['Ask', 'Know it', 'Done'])
+  assert.deepEqual(menus[0].buttons, ['Done'])
   assert.equal(menus[0].moreText, 'Show more')
   assert.deepEqual(menus[1], menus[0], 'the canvas menu looks as the Report menu does')
   assert.ok(menus[0].order && menus[0].below && menus[0].inside, JSON.stringify(menus[0]))
@@ -279,15 +278,15 @@ test("in the Report, a comment's Show more opening its details moves the comment
   await page.mouse.move(5, 5)
 })
 
-test("Ask puts the caret in the comment's field, and the question opens a thread anchored to the comment, on both surfaces", async () => {
+test("a click on a comment opens its field, and the question opens a thread anchored to the comment, on both surfaces", async () => {
   const cases = [
-    { sel: R, id: 'c1', anchor: 'report:report#s1', surface: 'report', who: `${PASSAGE}\n\nThe comment c1 of the check “You should know”: Most saves came from one bot account.` },
-    { sel: C, id: 'k1', anchor: 'card:plan1#step-2', surface: 'canvas', who: 'Plan: build the environment and pilot it\n\nThe comment k1 of the check “You should know” (on step 2): Blocking the web also blocks GitHub.' },
+    { sel: R, id: 'c1', anchor: 'report:report#s1', surface: 'report', who: `${PASSAGE}\n\nThe comment c1 of the check “Important details”: Most saves came from one bot account.` },
+    { sel: C, id: 'k1', anchor: 'card:plan1#step-2', surface: 'canvas', who: 'Plan: build the environment and pilot it\n\nThe comment k1 of the check “Important details” (on step 2): Blocking the web also blocks GitHub.' },
   ]
   for (const [i, { sel, id, anchor, surface, who }] of cases.entries()) {
-    await page.locator(sel).hover()
-    await page.locator(`${sel} .wu-cm-ask`).click()
+    await page.locator(`${sel} .wu-cm-statement`).click()
     await page.waitForSelector(`${sel}.wu-cm-active .wu-cm-reply textarea`)
+    await page.locator(`${sel} .wu-cm-reply textarea`).click()
     assert.ok(await page.evaluate((s) => document.activeElement === document.querySelector(`${s} .wu-cm-reply textarea`), sel), `${sel}: the caret is in the field`)
     await page.keyboard.type('Which one?')
     await page.keyboard.press('Enter')

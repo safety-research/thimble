@@ -979,7 +979,7 @@ export function ThreadView({ ws, meta, chat, main, skip, branches, detached }: {
   )
 }
 
-/** The comment a thread that its Ask opened is about, on the anchor line under its passage's or step's chip: its
+/** The comment a thread that its reply field opened is about, on the anchor line under its passage's or step's chip: its
  * check's square and name in the check's color, then its statement. */
 function AnchorComment({ comment }: { comment: ThreadComment }) {
   const colour = comment.check ? colourVar(comment.colour) : NOTE_COLOR

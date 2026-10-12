@@ -314,7 +314,6 @@ Resolve a comment on a document or a card, as the analyst's ✓ beside it does, 
   "type": "object",
   "properties": {
     "comment": {"type": "string", "description": "The comment's id, as add_comment's result names it, or report:<doc>#<id> of a passage or card:<id> of a card, which resolves every open comment on it."},
-    "how": {"type": "string", "enum": ["done", "known"], "description": "known when the analyst says they know it, as Know it does, so the check does not raise it again. Default done."},
     "reopen": {"type": "boolean"}
   },
   "required": ["comment"]
@@ -481,7 +480,7 @@ Run a report check over the written documents or the cards, a question asked of 
 {
   "type": "object",
   "properties": {
-    "name": {"type": "string", "description": "The check's name, such as Unverified, or a new one."},
+    "name": {"type": "string", "description": "The check's name, such as Unverifiable, or a new one."},
     "instructions": {"type": "string", "description": "What to comment on, in the analyst's words. Needed for a new check, and it replaces the instructions of an existing one."},
     "passages": {"type": "array", "items": {"type": "string"}, "description": "Passages to check again, report:<doc>#<id>. Default every passage but the locked ones already checked."},
     "on": {"type": "string", "enum": ["documents", "cards"], "description": "Run it on the documents or on the cards alone. A new check then covers that alone. Default what the check covers."}
@@ -498,7 +497,7 @@ Turn a report check off, {{if:browser}}as the switch in the Comments pane does, 
 {
   "type": "object",
   "properties": {
-    "name": {"type": "string", "description": "The check's name, such as Unverified."}
+    "name": {"type": "string", "description": "The check's name, such as Unverifiable."}
   },
   "required": ["name"]
 }
@@ -1348,12 +1347,6 @@ commented on report:{doc}#{sid}, comment {comment}
 The cards to comment on, each with its ref, kind and question, then its takeaway and a plan's steps. Comment on a card by its ref, or on one step of a plan by card:<id>#step-<n>. `read_ref` on a card gives its code and outputs. The analyst reads all of a card's comments beside it at once, so leave only the few that matter most on any one card.
 
 {cards}
-
-## check-known
-
-The analyst said they know these. Do not raise them again.
-
-{titles}
 
 ## check-replaces
 

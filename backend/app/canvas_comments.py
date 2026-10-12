@@ -1,6 +1,6 @@
 """Comments on the canvas: a note beside a card, or beside one step of a plan card, which a check's run over the cards
 leaves (checks.py, the run target CANVAS) or main leaves with add_comment. The analyst reads each beside what it is
-about while its check is on, and Done or Know it resolves it, which hides it.
+about while its check is on, and Done resolves it, which hides it.
 
 The store is `workspaces/<c>/canvas-comments.json` = {comments: [Comment]}, changed under its lock (ledger.update_json).
 A comment has the fields a document's comment has, with `card` and `step` in place of `sentence_id`:
@@ -11,10 +11,11 @@ A comment has the fields a document's comment has, with `card` and `step` in pla
 `card:<id>#step-<n>` by its place. `author` is `check` for a run's comment and `claude` for main's. Every comment is a
 short statement, `text`, which the analyst reads first, and optional `details`, which they open on request: `text` has
 its citations flattened for reading, `details` keeps them as chips, and both cite into `evidence`. A comment stored
-before `details` (no such key) is read as its first sentence and the rest (note_of), and a leading "Heads up:" or
-"You should know:" is dropped, since a comment shows its check's name. `status` is `open` or `dismissed`
-(report.SETTLED_STATUS) and `resolution` says why: `done` or `known` (the analyst's Done and Know it), `superseded` (a
-later run of its check covered its card or step). A comment on a card that is gone is not served.
+before `details` (no such key) is read as its first sentence and the rest (note_of), and a leading copy of its check's
+name with a colon is dropped, since a comment shows its check's name. `status` is `open` or `dismissed`
+(report.SETTLED_STATUS) and `resolution` says why: `done` (the analyst's Done), `superseded` (a later run of its check
+covered its card or step), or `known` in a comment resolved before 0.7.0, which reads as resolved as any other. A
+comment on a card that is gone is not served.
 
 The passages of the canvas (passages()) are the cards a check covers, in the tree's order, each followed by its steps:
 the cards of the analyst's groups and the threads' (not the orientation's deck, a document's figures or labels' cards).
@@ -33,7 +34,6 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
 
 from . import cite, config, investigation
 from .ledger import read_json, update_json
@@ -44,7 +44,7 @@ router = APIRouter()
 FILE = "canvas-comments.json"
 CANVAS = "@canvas"  # the run target of a check over the cards, among a check's runs beside the documents' slugs
 EVENT = "canvas-comments"  # the stream record a change emits
-HOWS = ("done", "known")  # how the analyst resolved a comment: Done, Know it
+RESOLUTION_DONE = "done"  # the analyst's Done, or main's resolve_comment
 RESOLUTION_SUPERSEDED = "superseded"
 SETTLED = "dismissed"  # report.SETTLED_STATUS
 CHECK_AUTHOR = "check"
@@ -53,11 +53,9 @@ COVERED_ROLES = ("analyst",)  # notebook.DEFAULT_ROLE: the analyst's groups and 
 SKIPPED_KINDS = ("label",)  # a label's card is the label's review, which its own pane shows
 DETAILS_CHARS = 2_000  # of a comment's details, kept
 WHOLE_AUTHORS = ("analyst", "terminal")  # the analyst's own comments, read whole: never split into statement and details
-KNOWN_MAX = 30  # the statements a run's task lists as known
 # a plan payload's keys of its steps (plans.REMOVED, plans.LAST_EDIT), left out of its card's fp
 PLAN_STEP_KEYS = ("steps", "removed_steps", "last_edit")
 _REF_RE = re.compile(r"^(?:card|cell):([A-Za-z0-9_-]+)(?:#step-(\d+))?$")
-_TAG_RE = re.compile(r"^\s*\**\s*(heads[ -]up|you should know)\s*\**\s*[:—–-]\s*\**\s*", re.I)
 # a sentence's end: its mark, then any closing quote, bracket or emphasis, then a space or the end; the next sentence can
 # start with anything, such as a file name or a code span
 _SENTENCE_END_RE = re.compile(r"[.!?][\"'”’)\]*_`]*(?=\s|$)")
@@ -80,19 +78,21 @@ def _path(c: str) -> Path:
 # --------------------------------------------------------------------------- what a comment says
 
 
-def parse_note(text: str) -> dict[str, str]:
-    """{statement, details} of a comment's words as one text: a leading "Heads up:" or "You should know:" dropped, the
-    first sentence the statement (its bold taken off, its first letter capitalized) and the rest the details."""
-    rest = _untagged(text)
+def parse_note(text: str, name: str = "") -> dict[str, str]:
+    """{statement, details} of a comment's words as one text: a leading copy of its check's name `name` with a colon
+    dropped, the first sentence the statement (its bold taken off, its first letter capitalized) and the rest the
+    details."""
+    rest = _untagged(text, name)
     end = _first_end(rest)
     first = rest[:end] if end else rest
     return {"statement": first.replace("**", "").strip(), "details": rest[len(first):].strip()}
 
 
-def _untagged(text: str) -> str:
-    """`text` on one line without a leading tag, its first letter capitalized when a tag stood before it."""
-    text = _collapse(text)
-    m = _TAG_RE.match(text)
+def _untagged(text: str, name: str = "") -> str:
+    """`text` on one line without a leading copy of its check's name `name` and a colon, such as "Unverifiable: …" (in
+    bold or not), its first letter capitalized when the name stood before it."""
+    text, name = _collapse(text), _collapse(name)
+    m = re.match(r"\**\s*" + re.escape(name) + r"\s*\**\s*:\s*\**\s*", text, re.I) if name else None
     if not m:
         return text
     rest = text[m.end():].strip()
@@ -108,24 +108,25 @@ def clean_details(details: Any) -> str:
     return out if len(out) <= DETAILS_CHARS else out[:DETAILS_CHARS].rstrip() + " …"
 
 
-def note_of(cm: dict[str, Any]) -> dict[str, str]:
+def note_of(cm: dict[str, Any], name: str = "") -> dict[str, str]:
     """{text, details} of a stored comment as the analyst reads it: its statement and its details. The analyst's own
-    comment is whole; one stored with `details` is its `text` without a tag; one stored before `details` is split into
-    its first sentence and the rest (parse_note)."""
+    comment is whole; one stored with `details` is its `text` without a leading copy of its check's name `name`; one
+    stored before `details` is split into its first sentence and the rest (parse_note)."""
     text = str(cm.get("text") or "")
     if str(cm.get("author") or "") in WHOLE_AUTHORS:
         return {"text": _collapse(text), "details": clean_details(cm.get("details"))}
     if "details" in cm:
-        return {"text": _untagged(text), "details": clean_details(cm.get("details"))}
-    got = parse_note(text)
+        return {"text": _untagged(text, name), "details": clean_details(cm.get("details"))}
+    got = parse_note(text, name)
     return {"text": got["statement"], "details": got["details"]}
 
 
-def split_stored(cm: dict[str, Any]) -> bool:
-    """A comment stored before `details`, made a statement and its details in place (note_of); whether it changed."""
+def split_stored(cm: dict[str, Any], name: str = "") -> bool:
+    """A comment stored before `details`, made a statement and its details in place (note_of, its check's name
+    `name`); whether it changed."""
     if not isinstance(cm, dict) or "details" in cm or not cm.get("text"):
         return False
-    cm.update(note_of(cm))
+    cm.update(note_of(cm, name))
     for k in ("tag", "title", "body"):
         cm.pop(k, None)
     return True
@@ -351,9 +352,9 @@ def _cards(c: str) -> dict[str, dict[str, Any]]:
     return out
 
 
-def _served(cm: dict[str, Any], cards: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
+def _served(cm: dict[str, Any], cards: dict[str, dict[str, Any]], names: dict[str, str]) -> dict[str, Any] | None:
     """A comment as the browser and the tools read it, with its `ref` and its statement (`text`) and `details` as the
-    analyst reads them (note_of); None when its card, or its step, is gone."""
+    analyst reads them (note_of, by its check's name in `names`); None when its card, or its step, is gone."""
     cell = cards.get(str(cm.get("card") or ""))
     if cell is None:
         return None
@@ -363,13 +364,19 @@ def _served(cm: dict[str, Any], cards: dict[str, dict[str, Any]]) -> dict[str, A
         if n is None:
             return None
     kept = {k: v for k, v in cm.items() if k not in ("tag", "title", "body")}
-    return {**kept, **note_of(cm), "ref": step_ref(str(cm["card"]), n), "n": n}
+    note = note_of(cm, names.get(str(cm.get("check") or ""), ""))
+    return {**kept, **note, "ref": step_ref(str(cm["card"]), n), "n": n}
 
 
 def all_comments(c: str) -> list[dict[str, Any]]:
     """Every stored comment whose card is there, open or resolved, each with its `ref`."""
-    cards = _cards(c)
-    return [s for cm in _read(c) if (s := _served(cm, cards)) is not None]
+    from . import checks  # noqa: PLC0415 — checks imports this module
+
+    stored = _read(c)
+    if not stored:
+        return []
+    cards, names = _cards(c), checks.names(c)
+    return [s for cm in stored if (s := _served(cm, cards, names)) is not None]
 
 
 def open_comments(c: str, card: str | None = None) -> list[dict[str, Any]]:
@@ -409,17 +416,15 @@ def add(c: str, *, card: str, step: str | None, text: str, author: str, details:
     return cm, new
 
 
-def resolve(c: str, ids: list[str], how: str, by: str = "analyst") -> list[dict[str, Any]]:
-    """Resolve the open comments `ids` as `how` (done or known), by `by`; returns the comments resolved."""
-    if how not in HOWS:
-        raise ValueError(f"how is one of {', '.join(HOWS)}")
+def resolve(c: str, ids: list[str], by: str = "analyst") -> list[dict[str, Any]]:
+    """Resolve the open comments `ids` as done, by `by`; returns the comments resolved."""
     want = set(ids)
 
     def fn(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         out = []
         for x in items:
             if str(x["id"]) in want and (x.get("status") or "open") == "open":
-                x.update(status=SETTLED, resolution=how, resolved_by=by, resolved_ts=_now())
+                x.update(status=SETTLED, resolution=RESOLUTION_DONE, resolved_by=by, resolved_ts=_now())
                 out.append(dict(x))
         return out
 
@@ -473,13 +478,6 @@ def count(c: str, check: str, run: str) -> int:
     return sum(1 for x in _read(c) if x.get("check") == check and x.get("run") == run)
 
 
-def known_titles(c: str, check: str) -> list[str]:
-    """What the analyst marked Know it among `check`'s comments on the cards, newest first: each comment's statement."""
-    out = [x for x in _read(c) if x.get("check") == check and x.get("resolution") == "known"]
-    out.sort(key=lambda x: str(x.get("resolved_ts") or x.get("ts") or ""), reverse=True)
-    return [note_of(x)["text"] for x in out]
-
-
 def _who(c: str, cm: dict[str, Any]) -> str:
     from . import checks  # noqa: PLC0415 — checks imports this module
 
@@ -491,10 +489,11 @@ def _who(c: str, cm: dict[str, Any]) -> str:
 def line(c: str, cm: dict[str, Any]) -> str:
     """One comment as the tools read it: `comment <id> on <ref> · <who> · <statement>`, then ` — <details>` on the same
     line when it has details."""
-    note = note_of(cm)
+    who = _who(c, cm)
+    note = note_of(cm, who if cm.get("check") else "")
     text = _collapse(cite.canon_text(note["text"]))
     details = _collapse(cite.canon_text(note["details"]))
-    return f"comment {cm['id']} on {cm['ref']} · {_who(c, cm)} · {text}" + (f" — {details}" if details else "")
+    return f"comment {cm['id']} on {cm['ref']} · {who} · {text}" + (f" — {details}" if details else "")
 
 
 def lines(c: str, card: str) -> list[str]:
@@ -506,10 +505,6 @@ def lines(c: str, card: str) -> list[str]:
 
 
 # --------------------------------------------------------------------------- routes
-
-
-class ResolveBody(BaseModel):
-    how: str = "done"
 
 
 def _ws(c: str) -> None:
@@ -527,13 +522,10 @@ async def list_route(c: str) -> dict[str, Any]:
 
 
 @router.post("/ws/{c}/canvas/comments/{cid}/resolve")
-async def resolve_route(c: str, cid: str, body: ResolveBody) -> dict[str, Any]:
-    """The analyst's Done (`how: done`) or Know it (`how: known`) on a comment, which hides it. Answers the open
-    comments; 404 for no open comment of that id, 400 for another `how`."""
+async def resolve_route(c: str, cid: str) -> dict[str, Any]:
+    """The analyst's Done on a comment, which hides it. Answers the open comments; 404 for no open comment of that id."""
     _ws(c)
-    if body.how not in HOWS:
-        raise HTTPException(400, f"how is one of {', '.join(HOWS)}")
-    if not resolve(c, [cid], body.how):
+    if not resolve(c, [cid]):
         raise HTTPException(404, f"no open comment {cid!r}")
     return {"comments": open_comments(c)}
 
