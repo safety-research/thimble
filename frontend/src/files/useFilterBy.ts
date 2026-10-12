@@ -9,6 +9,7 @@ import { bus } from '../lib/bus'
 import type { Concept, LabelRow, SourceKey, SourceKeys, SourceRecord } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { chipOfLabel, choiceId, keyValue, labelChips, NONE, OTHER, parseChoice, type ColorChoice, type ColorValue } from './colorChoice'
+import { recordRows } from './useColorBy'
 import type { FilesLabels } from './useLabels'
 
 /** What the reader keeps of Filter by per file: the choice (null for None), and per choice the values turned off. */
@@ -107,7 +108,7 @@ export function useFilterBy(ws: string, path: string, on: boolean, labels: Files
   const valueOf = useCallback(
     (rec: SourceRecord): string | undefined => {
       if (key) return filterValueOf(key, keyValue(rec, key.key))
-      if (label) return chipOfLabel(label, rows.get(`${path}#L${rec.line}`)?.get(label.id), true)
+      if (label) return chipOfLabel(label, recordRows(rows, path, rec)?.get(label.id), true)
       return undefined
     },
     [key, label, rows, path],

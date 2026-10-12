@@ -177,8 +177,14 @@ interface RecordProps {
   children?: ReactNode
   /** the last line of the records the card stands for (a chat turn's lines), whose labels its gutter shows too */
   end?: number
+  /** the first line whose labels its gutter shows, when before `line` (the start of a JSON document's record whose turn
+   * stands on the line of its words) */
+  from?: number
   /** the one line the record folds to, and whether it starts folded; no fold without it */
   fold?: RecordFold
+  /** the number the row shows in place of its line (a turn's own number in a whole-file JSON transcript), the line on
+   * hover */
+  no?: number
 }
 
 /** How a record folds (fold.ts): the one line it folds to, after its head (the start of its words or its tool call),
@@ -258,9 +264,9 @@ export const LANE_GLYPH_PX = 13
  * row while its value is turned off in Filter by, unless a ref points at it (ColorContext, FilterContext). With `fold`, a click on the head folds the record to one line, the head and the summary, and a click
  * on that line opens it again (FoldContext keeps it per file); a ref's record shows open until it is folded under the
  * ref. A folded record keeps its blocks in the page, hidden, so that the find finds them and opens it (UNFOLD_EVENT). */
-export function RecordCard({ path, line, target, hit, className, header, text, children, end, fold }: RecordProps) {
+export function RecordCard({ path, line, target, hit, className, header, text, children, end, fold, no, from }: RecordProps) {
   const isT = isTargetLine(target, line)
-  const marks = useMarksOver(path, line, end ?? line)
+  const marks = useMarksOver(path, Math.min(from ?? line, line), end ?? line)
   const cb = useContext(ColorContext)?.get(line)
   const filtered = useContext(FilterContext)?.hides(line) ?? false
   const folds = useContext(FoldContext)
@@ -301,7 +307,9 @@ export function RecordCard({ path, line, target, hit, className, header, text, c
     <div className={cls} data-line={line} data-anchor={`${path}#L${line}`} data-anchor-text={text || undefined} style={markStyle(marks)}>
       {banded && <EdgeBands bands={cb!.bands} />}
       <LaneGutter cells={marks.cells} />
-      <span className="reader-lineno mono">{line}</span>
+      <span className="reader-lineno mono" title={no != null ? `line ${line}` : undefined}>
+        {no ?? line}
+      </span>
       <div className={'reader-record-main' + (folded ? ' reader-collapsed' : '')} ref={main}>
         {folded ? (
           <button type="button" className="reader-fold-line" aria-expanded={false} onClick={(e) => onFold(e, false)}>

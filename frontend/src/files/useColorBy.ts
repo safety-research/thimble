@@ -16,6 +16,13 @@ import { bandsOf, type RecordColor } from './colorContext'
 import { classesOf, isFilesLabel, marksOf } from './labels'
 import type { FilesLabels } from './useLabels'
 
+/** A record's label rows: those of the record it names (`meta.ref`: a whole-file JSON transcript's turn names its JSON
+ * document's record, which labels mark by pointer), else those of its line. */
+export function recordRows<T>(rows: ReadonlyMap<string, T>, path: string, rec: SourceRecord): T | undefined {
+  const ref = typeof rec.meta?.ref === 'string' ? rec.meta.ref : null
+  return (ref ? rows.get(ref) : undefined) ?? rows.get(`${path}#L${rec.line}`)
+}
+
 export interface ColorBy {
   keys: SourceKeys | null
   /** the first choice, which colors the records; `off` for Off */
@@ -150,7 +157,7 @@ export function useColorBy(ws: string, path: string, on: boolean, labels: FilesL
   const chipOf = useCallback(
     (rec: SourceRecord): string | undefined => {
       if (key) return chipOfKeyValue(key, keyValue(rec, key.key))
-      if (label) return chipOfLabel(label, rows.get(`${path}#L${rec.line}`)?.get(label.id), true)
+      if (label) return chipOfLabel(label, recordRows(rows, path, rec)?.get(label.id), true)
       return undefined
     },
     [key, label, rows, path],
@@ -169,7 +176,7 @@ export function useColorBy(ws: string, path: string, on: boolean, labels: FilesL
         const l = c.by === 'label' ? labels.byId.get(c.id) : undefined
         if (!l) return () => null
         const colorOf = new Map(labelChips(l, undefined, null).map((v) => [v.id, v.color]))
-        return (rec) => colorOf.get(chipOfLabel(l, rows.get(`${path}#L${rec.line}`)?.get(l.id), true) ?? '') ?? null
+        return (rec) => colorOf.get(chipOfLabel(l, recordRows(rows, path, rec)?.get(l.id), true) ?? '') ?? null
       }),
     [picks, keys, kept.colors, labels.byId, rows, path],
   )

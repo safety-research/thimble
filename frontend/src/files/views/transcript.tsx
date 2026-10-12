@@ -28,7 +28,7 @@ import { useDelimited } from './table'
 export const CONVERSATIONAL = new Set(['assistant', 'user'])
 /** hidden system records in a row from which the run says how many it hides */
 export const HIDDEN_RUN_NOTE = 20
-const STREAM_TYPES = new Set(['assistant', 'user', 'system', 'tool_progress', 'result'])
+const STREAM_TYPES = new Set(['assistant', 'user', 'system', 'tool_progress', 'result', 'stream_event'])
 // The keys that name a record's author on their own (a post's author, a chat turn's role)
 const STRONG_AUTHOR_KEYS = ['author', 'role', 'sender', 'from', 'speaker', 'user']
 // and the ones that name it only in a record that also has a time: a revision's editor (`label` in a wiki's revision
@@ -50,7 +50,7 @@ export const hasAny = (r: any, keys: string[]) => keys.some((k) => r?.[k] != nul
 const isStreamRec = (r: any) => !!r && typeof r === 'object' && (STREAM_TYPES.has(r.type) || (r.message && typeof r.message === 'object') || typeof r.session_id === 'string')
 
 function sysSummary(rec: any): string {
-  const parts: string[] = [rec?.type, rec?.subtype, rec?.tool_name].filter(Boolean)
+  const parts: string[] = [rec?.type, rec?.subtype, rec?.tool_name, rec?.event?.type, rec?.event?.delta?.type].filter((x) => typeof x === 'string' && x)
   if (rec?.type === 'tool_progress' && rec.elapsed_time_seconds != null) parts.push(`${rec.elapsed_time_seconds}s`)
   if (rec?.type === 'result') {
     if (typeof rec.result === 'string') parts.push(rec.result.slice(0, 160))
@@ -529,8 +529,13 @@ function Posts({ workspace, path, records, targetRef, hint, derived, quote }: { 
         const run = runs.get(i)
         const note = run ? <HiddenRun key={`h${rec.line}`} run={run} onShowFiltered={show} /> : null
         const r = rec.record ?? {}
-        const author = nameOf(pick(r, keys.author)) ?? '(unsigned)'
+        const named = nameOf(pick(r, keys.author)) ?? rec.meta?.speaker ?? null
+        // a record that names no speaker (a Codex CLI line's event, beside its messages) is headed by what it is
+        const kind = named == null ? recordKind(r) : null
+        const author = named ?? kind ?? '(unsigned)'
         const ts = timeOf(pick(r, keys.time))
+        // what the record holds beyond its words, as the server reads it (backend transcripts.turn_blocks)
+        const made = rec.meta?.blocks?.length ? madeTurnBlocks(rec.meta.blocks) : null
         const ctx = keys.context ? r[keys.context] : undefined
         const value = pick(r, keys.body)
         const body = textOf(value)
@@ -544,14 +549,18 @@ function Posts({ workspace, path, records, targetRef, hint, derived, quote }: { 
         const cite = target && rec.line === target.line ? quote : null
         // an empty body leaves the server a raw block of the whole record: the post has no row, or, when a citation
         // points at it, says it is empty
-        const empty = typeof body === 'string' && !body.trim()
+        const empty = !made && typeof body === 'string' && !body.trim()
         if (empty && rec.line !== asked) return note
-        const fields = value == null && rec.blocks.every((b) => b.kind === 'raw') ? restFields(r, keys, cite) : null
+        const fields = !made && value == null && rec.blocks.every((b) => b.kind === 'raw') ? restFields(r, keys, cite) : null
         const own = !derived && rec.blocks.length > 0 && !rec.blocks.every((b) => b.kind === 'raw' && body != null)
-        const fold = empty ? undefined : fields?.length ? textFold(fields.map(([k, v]) => `${k} ${v}`).join('  '), true) : own ? blocksFold(rec.blocks) : textFold(body ?? JSON.stringify(value ?? r))
+        const fold = empty ? undefined : made ? blocksFold(made) : fields?.length ? textFold(fields.map(([k, v]) => `${k} ${v}`).join('  '), true) : own ? blocksFold(rec.blocks) : textFold(body ?? JSON.stringify(value ?? r))
+        // a record headed by what it is folds to one line (Codex CLI's events repeat its messages)
+        if (fold && kind) fold.folded = true
         const card = (
-          <RecordCard key={rec.line} path={path} line={rec.line} target={target} hit={hit} className="reader-msg" header={header} text={empty ? undefined : own ? recordExcerpt(rec) : body?.slice(0, 500)} fold={fold}>
-            {empty ? (
+          <RecordCard key={rec.line} path={path} line={rec.line} target={target} hit={hit} className="reader-msg" header={header} text={empty ? undefined : made ? (body ?? made.map((b) => b.text).join('\n')).slice(0, 500) : own ? recordExcerpt(rec) : body?.slice(0, 500)} fold={fold}>
+            {made ? (
+              <MadeBlocks blocks={made} line={rec.line} target={target} hit={hit} quote={cite} />
+            ) : empty ? (
               <div className="reader-msg-empty">(empty body)</div>
             ) : fields?.length ? (
               <div className="reader-msg-fields">
@@ -581,6 +590,13 @@ function Posts({ workspace, path, records, targetRef, hint, derived, quote }: { 
       })}
     </div>
   )
+}
+
+/** What a record that names no speaker is: its own `type` and that of the object it nests (a Codex CLI line's
+ * `event_msg · token_count`); null when it says none. Pure. */
+export function recordKind(r: any): string | null {
+  const parts = [r?.type, ...['payload', 'data', 'msg', 'event'].map((k) => r?.[k]?.type)].filter((x): x is string => typeof x === 'string' && !!x)
+  return parts.length ? [...new Set(parts)].join(' · ') : null
 }
 
 function PostText({ text, line, target, hit, quote }: { text: string; line: number; target: Target | null; hit: boolean; quote: string | null }) {
@@ -655,9 +671,18 @@ export function shownLines(recs: SourceRecord[], turn: ChatTurn | null): SourceR
   return [out[0], ...out.slice(k)]
 }
 
+/** One turn of a record that holds a whole conversation: who speaks, the words, the time, and, as the server reads
+ * them (meta.turns), what it holds beyond its words. */
+export interface ConvTurn {
+  speaker: string
+  text: string
+  time: string | null
+  blocks?: Block[]
+}
+
 /** The turns of a record that holds a whole conversation, where the sniff found them: its list of messages
  * (`keys.list`), or a prompt and its response (`pair`); null when the record keeps none there. Pure. */
-export function conversationTurns(r: unknown, hint: TranscriptHint | null | undefined): { speaker: string; text: string; time: string | null }[] | null {
+export function conversationTurns(r: unknown, hint: TranscriptHint | null | undefined): ConvTurn[] | null {
   if (hint?.pair) {
     const [a, b] = hint.pair
     const pa = pick(r, a)
@@ -694,8 +719,9 @@ function Conversations({ path, page, targetRef, transcript }: ViewProps) {
       {records.map((rec, i) => {
         const run = runs.get(i)
         const r = rec.record ?? {}
-        // a turn with no words gets no row
-        const turns = conversationTurns(r, transcript)?.filter((t) => t.text.trim())
+        // a turn with no words (nor blocks) gets no row; the server gives a line's turns with their blocks when one holds
+        // more than words (meta.turns)
+        const turns = ((rec.meta?.turns as ConvTurn[] | undefined)?.map((t) => ({ ...t, time: timeOf(t.time) })) ?? conversationTurns(r, transcript))?.filter((t) => t.text.trim() || t.blocks?.length)
         const ctx = CONTEXT_KEYS.map((key) => r[key]).find((v) => present(v) && typeof v !== 'object')
         const first = turns?.[0]?.text ?? ''
         const cite = target && rec.line === target.line ? quote : null
@@ -712,11 +738,11 @@ function Conversations({ path, page, targetRef, transcript }: ViewProps) {
                 <FoldSummary
                   parts={turns.slice(0, FOLD_PARTS).flatMap((t): FoldPart[] => [
                     { kind: 'other', text: t.speaker || '(unsigned)' },
-                    { kind: 'text', text: oneLine(t.text) },
+                    t.blocks?.length ? (foldParts(t.blocks)[0] ?? { kind: 'text', text: '' }) : { kind: 'text', text: oneLine(t.text) },
                   ])}
                 />
               ),
-              folded: turns.length > 1 || foldsByDefault(turns.map((t) => ({ kind: 'text', text: t.text }))),
+              folded: turns.length > 1 || foldsByDefault(turns.flatMap((t) => t.blocks ?? [{ kind: 'text', text: t.text }])),
             }
           : textFold(typeof r.text === 'string' ? r.text : JSON.stringify(r))
         return (
@@ -730,7 +756,12 @@ function Conversations({ path, page, targetRef, transcript }: ViewProps) {
                   const at = cited?.k === k ? cited.at : null
                   // a turn whose quoted words lie past the cut shows whole
                   const shown = at && at[1] > TURN_TEXT_MAX ? t.text : t.text.slice(0, TURN_TEXT_MAX)
-                  return (
+                  return t.blocks?.length ? (
+                    <div key={k} className="reader-conv-turn">
+                      <div className="reader-conv-speaker mono">{[t.speaker, t.time].filter(Boolean).join(' · ') || '(unsigned)'}</div>
+                      <MadeBlocks blocks={madeTurnBlocks(t.blocks)} line={rec.line} target={target} hit={hit} quote={cite} />
+                    </div>
+                  ) : (
                     <div key={k} className="reader-conv-turn">
                       <div className="reader-conv-speaker mono">{[t.speaker, t.time].filter(Boolean).join(' · ') || '(unsigned)'}</div>
                       <BlockEl block={{ kind: 'text', text: shown }} line={rec.line} index={k} target={at ? { line: rec.line, block: k, start: at[0], end: at[1] } : null} hit={hit} />
@@ -754,9 +785,10 @@ const TURNS_PAGE = 200
 const TURNS_CAP = 2000
 
 /** The turns of a whole-file JSON transcript as the records Color by and Filter by read (ViewProps.onRecords): each on
- * the line it stands on, with the fields the server read for it as `meta.fields`. Pure. */
-function turnRecords(turns: readonly SourceTurn[]): SourceRecord[] {
-  return turns.map((t) => ({ line: t.line, record: {}, blocks: [], meta: t.fields ? { fields: t.fields } : {} }))
+ * the line it stands on, with the fields the server read for it as `meta.fields` and the record of the JSON document it
+ * is as `meta.ref` (an ATIF step's pointer), whose labels color and filter it. Pure. */
+export function turnRecords(turns: readonly SourceTurn[]): SourceRecord[] {
+  return turns.map((t) => ({ line: t.line, record: {}, blocks: [], meta: { ...(t.fields ? { fields: t.fields } : {}), ...(t.ref ? { ref: t.ref } : {}) } }))
 }
 
 /** A whole-file JSON transcript (a chat export, an eval log) as the turns the server parses from it (GET
@@ -838,8 +870,9 @@ function TurnsTranscript({ workspace, path, targetRef, unavailable, onRecords }:
   // the citation itself when the turn stands on its line, so another span of that line scrolls again
   const cardRef = !holder ? undefined : holder.line === asked!.line ? targetRef : `${path}#L${holder.line}`
   const { target, hit } = useTarget(cardRef, path, rootRef, [data])
-  // a turn with no words gets no card, unless a citation points at it; the card before it shows its lines' labels
-  const shown = useMemo(() => (data?.turns ?? []).filter((t) => t.text.trim() || holder?.i === t.i), [data, holder])
+  // a turn with no words (nor blocks) gets no card, unless a citation points at it; the card before it shows its lines'
+  // labels
+  const shown = useMemo(() => (data?.turns ?? []).filter((t) => t.text.trim() || t.blocks?.length || holder?.i === t.i), [data, holder])
   const turnLines = useMemo(() => shown.map((t) => t.line), [shown])
   const { runs, show } = useFilterRuns(turnLines, target)
   if (error) return <div className="reader-error-text">{error}</div>
@@ -860,7 +893,9 @@ function TurnsTranscript({ workspace, path, targetRef, unavailable, onRecords }:
           <span>{g.title || `Conversation ${t.group! + 1}`}</span>
         </div>,
       )
-    const next = shown[k + 1]?.line ?? (last.i !== t.i ? last.line + 1 : t.line)
+    // a turn's gutter shows the labels of its lines, from where its record starts (rec_line), up to the next turn's
+    const after = shown[k + 1]
+    const next = after ? (after.rec_line ?? after.line) : last.i !== t.i ? last.line + 1 : t.line
     const run = runs.get(k)
     if (run) out.push(<HiddenRun key={`h${t.i}`} run={run} onShowFiltered={show} />)
     out.push(<TurnCard key={t.i} path={path} turn={t} end={Math.max(t.line, next - 1)} target={holder?.i === t.i ? target : null} hit={hit} quote={cited?.i === t.i ? cited.quote : null} />)
@@ -885,22 +920,31 @@ export function noTurns(e: unknown): boolean {
   return /^415\b/.test(errMsg(e))
 }
 
-/** The turn a citation of `line` opens at when no quoted words pick one: the first standing on it, else the last before
- * it. Pure. */
+/** The turn a citation of `line` opens at when no quoted words pick one: the first standing on it or whose record starts
+ * there (a citation of a JSON document's record opens at its first line), else the last before it. Pure. */
 function lineHolder(turns: readonly SourceTurn[], line: number): SourceTurn | null {
-  return turns.find((t) => t.line === line) ?? turns.reduce<SourceTurn | null>((best, t) => (t.line < line ? t : best), null)
+  return turns.find((t) => t.line === line || t.rec_line === line) ?? turns.reduce<SourceTurn | null>((best, t) => (t.line < line ? t : best), null)
 }
 
 /** One turn of a whole-file JSON transcript, whose gutter shows the labels of its line and of the lines up to the next
- * turn's (`end`), and the words a citation quotes (`quote`) highlighted. */
+ * turn's (`end`), and the words a citation quotes (`quote`) highlighted. Its row shows the turn's own number (its step's,
+ * else its place in its conversation), not the line of the file, which shows on hover and which refs keep. */
 function TurnCard({ path, turn, end, target, hit, quote }: { path: string; turn: SourceTurn; end: number; target: Target | null; hit: boolean; quote: string | null }) {
   const header = [turn.speaker || turn.role, turn.time ? timeOf(turn.time) : null].filter(Boolean).join(' · ')
   const block: Block = { kind: 'text', text: turn.text }
-  const fold = useMemo(() => textFold(turn.text), [turn.text])
+  const blocks = useMemo(() => (turn.blocks?.length ? madeTurnBlocks(turn.blocks) : null), [turn.blocks])
+  const fold = useMemo(() => (blocks ? blocksFold(blocks) : textFold(turn.text)), [blocks, turn.text])
+  const cut = turn.blocks?.find((b) => b.cut != null)
   return (
-    <RecordCard path={path} line={turn.line} end={end} target={target} hit={hit} className={`reader-msg reader-turn-${turn.role}`} header={header} text={turn.text.slice(0, 500)} fold={fold}>
-      {turn.text.trim() ? <BlockEl block={block} line={turn.line} index={0} target={quoteTarget(target, turn.line, 0, turn.text, quote)} hit={hit} /> : <div className="reader-msg-empty">(empty)</div>}
-      {turn.cut != null && <div className="reader-msg-empty">Cut at {turn.text.length.toLocaleString()} of {turn.cut.toLocaleString()} characters. Raw shows all of it.</div>}
+    <RecordCard path={path} line={turn.line} from={turn.rec_line} end={end} target={target} hit={hit} className={`reader-msg reader-turn-${turn.role}`} header={header} text={turn.text.slice(0, 500)} fold={fold} no={turn.n ?? turn.i + 1}>
+      {blocks ? (
+        <MadeBlocks blocks={blocks} line={turn.line} target={target} hit={hit} quote={quote} />
+      ) : turn.text.trim() ? (
+        <BlockEl block={block} line={turn.line} index={0} target={quoteTarget(target, turn.line, 0, turn.text, quote)} hit={hit} />
+      ) : (
+        <div className="reader-msg-empty">(empty)</div>
+      )}
+      {(blocks ? cut : turn.cut != null) && <div className="reader-msg-empty">Cut at {(cut ? cut.text : turn.text).length.toLocaleString()} of {(cut ? cut.cut! : turn.cut!).toLocaleString()} characters. Raw shows all of it.</div>}
     </RecordCard>
   )
 }
@@ -1065,6 +1109,34 @@ function AgentResult({ block, line, index, target, hit, quote }: { block: AgentB
   )
 }
 
+/** Blocks the view makes, not the file's own (a span's offsets do not apply to them): a tool result's cleaned output
+ * with Raw (AgentResult), reasoning, a tool call and a raw record folded past COLLAPSE_LINES, words as they are; the words
+ * a citation quotes (`quote`) highlighted in the block that holds them, which opens. */
+function MadeBlocks({ blocks, line, target, hit, quote }: { blocks: readonly AgentBlock[]; line: number; target: Target | null; hit: boolean; quote: string | null }) {
+  return (
+    <>
+      {blocks.map((b, k) =>
+        b.kind === 'tool_result' ? (
+          <AgentResult key={k} block={b} line={line} index={k} target={target} hit={hit} quote={quote} />
+        ) : b.kind === 'thinking' || b.kind === 'tool_use' || b.kind === 'raw' ? (
+          <Collapsible key={k} lines={lineCount(b.text)} forced={!!quote && !!quoteTarget(target, line, k, b.text, quote)?.start}>
+            <BlockEl block={b} line={line} index={k} target={quoteTarget(target, line, k, b.text, quote)} hit={hit} />
+          </Collapsible>
+        ) : (
+          <BlockEl key={k} block={b} line={line} index={k} target={quoteTarget(target, line, k, b.text, quote)} hit={hit} />
+        ),
+      )}
+    </>
+  )
+}
+
+/** A turn's blocks as the server reads them (backend transcripts.turn_blocks: its reasoning, its words, its tool calls
+ * and their results) as MadeBlocks draws them: a tool result's terminal output cleaned, the stored bytes kept for Raw.
+ * Pure (clean-up aside). */
+export function madeTurnBlocks(blocks: readonly Block[]): AgentBlock[] {
+  return blocks.map((b) => (b.kind === 'tool_result' && needsClean(b.text) ? { kind: b.kind, text: cleanTerminal(b.text), raw: b.text } : { kind: b.kind, text: b.text }))
+}
+
 /** An agent transcript whose records interleave spoken turns with tool records (the sniff's `tools`): one card per
  * message, its speaker, tool name and time in the head. A spoken reply shows (its `<thinking>` a quiet block) unless it
  * is long; a tool call and its cleaned result, and a system record, fold to one line until opened. A citation or a
@@ -1083,8 +1155,9 @@ function AgentTranscript({ workspace: _workspace, path, page, targetRef, transcr
       {records.map((rec, i) => {
         const run = runs.get(i)
         const r = rec.record ?? {}
-        const msg = agentDisplay(r, keys)
-        const speaker = nameOf(pick(r, keys.author)) ?? '(unsigned)'
+        const made: Block[] | undefined = toolParts(r) ? undefined : rec.meta?.blocks
+        const msg: AgentMsg = made?.length ? { kind: 'text', blocks: madeTurnBlocks(made), summary: firstLine(made.map((b) => b.text).join('\n')) } : agentDisplay(r, keys)
+        const speaker = nameOf(pick(r, keys.author)) ?? rec.meta?.speaker ?? '(unsigned)'
         const ts = timeOf(pick(r, keys.time))
         const header = (
           <>
@@ -1100,17 +1173,7 @@ function AgentTranscript({ workspace: _workspace, path, page, targetRef, transcr
           <Fragment key={rec.line}>
             {run && <HiddenRun run={run} onShowFiltered={show} />}
             <RecordCard path={path} line={rec.line} target={target} hit={hit} className={`reader-msg reader-agent-${msg.kind}`} header={header} text={msg.summary} fold={fold}>
-              {msg.blocks.map((b, k) =>
-                b.kind === 'tool_result' ? (
-                  <AgentResult key={k} block={b} line={rec.line} index={k} target={target} hit={hit} quote={cite} />
-                ) : b.kind === 'thinking' || b.kind === 'tool_use' || b.kind === 'raw' ? (
-                  <Collapsible key={k} lines={lineCount(b.text)} forced={!!cite && !!quoteTarget(target, rec.line, k, b.text, cite)?.start}>
-                    <BlockEl block={b} line={rec.line} index={k} target={quoteTarget(target, rec.line, k, b.text, cite)} hit={hit} />
-                  </Collapsible>
-                ) : (
-                  <BlockEl key={k} block={b} line={rec.line} index={k} target={quoteTarget(target, rec.line, k, b.text, cite)} hit={hit} />
-                ),
-              )}
+              <MadeBlocks blocks={msg.blocks} line={rec.line} target={target} hit={hit} quote={cite} />
             </RecordCard>
           </Fragment>
         )
