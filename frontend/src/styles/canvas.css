@@ -1240,6 +1240,15 @@ button.plan-run-name:hover {
   -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), transparent);
   mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), transparent);
 }
+/* opened at a quoted passage below its start: faded at the top too */
+.bcell-clamp.is-scrolled {
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 24px);
+  mask-image: linear-gradient(to bottom, transparent, #000 24px);
+}
+.bcell-clamp.is-scrolled.is-clipped {
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 24px, #000 calc(100% - 36px), transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 24px, #000 calc(100% - 36px), transparent);
+}
 .bcell-more {
   align-self: flex-start;
   min-height: 0;

@@ -1252,6 +1252,16 @@ def _example_ref(c: str | None, item: Any) -> tuple[str, str]:
         return ref, hint("example-quote-missing", ref=ref, quote=_cut(" ".join(quote.split()), 80))
 
 
+def _kept_quote(item: Any, ref: str) -> str:
+    """The quote of a {ref, quote} item whose ref stays as given (a JSON value, a row, a page or a view's unit, which
+    span_of_quote keeps), which the card highlights in that record; '' when the ref itself is the quoted passage (a span)
+    or the item quotes nothing."""
+    if not isinstance(item, dict):
+        return ""
+    quote = str(item.get("quote") or "").strip()
+    return quote if quote and str(item.get("ref") or "").strip().strip("[]") == ref else ""
+
+
 async def _warm_view_refs(c: str | None, args: dict[str, Any]) -> None:
     """Resolve an example's quoted view refs once in a worker thread before the handler reads them on the loop, since
     views.resolve_sync cannot run a view's reader on that loop. The answer is memoised for _example_ref."""
@@ -1283,13 +1293,18 @@ def _payload_args(kind: str, args: dict[str, Any], tool: str = "add_card", c: st
         raw = args.get("refs")
         items = [raw] if isinstance(raw, (str, dict)) else raw if isinstance(raw, builtins.list) else []
         refs: builtins.list[str] = []
+        quotes: builtins.list[str] = []
         for item in items:
             ref, problem = _example_ref(c, item)
             if problem:
                 return None, f"{tool}: {problem}"
             if ref:
                 refs.append(ref)
-        return ({"refs": refs}, "") if refs else (None, f"{tool}: an example card needs `refs`")
+                quotes.append(_kept_quote(item, ref))
+        if not refs:
+            return None, f"{tool}: an example card needs `refs`"
+        # a quote whose record keeps its ref (a JSON value, a row, a page) rides beside it, so the card can highlight it
+        return ({"refs": refs, **({"quotes": quotes} if any(quotes) else {})}, "")
     if kind == "note":
         text = str(args.get("text") or "")
         return ({"text": text}, "") if text.strip() else (None, f"{tool}: a note card needs `text`")
@@ -1982,7 +1997,9 @@ def _payload_lines(kind: str, payload: dict) -> "builtins.list[str]":
         return ["text:", str(payload.get("text") or "")]
     if kind == "example":
         refs = payload.get("refs") or []
-        return ["refs:", *(f"- {r}" for r in refs)] if refs else ["refs: (none)"]
+        quotes = payload.get("quotes") if isinstance(payload.get("quotes"), builtins.list) else []
+        said = [str(quotes[i]) if i < len(quotes) and quotes[i] else "" for i in range(len(refs))]
+        return ["refs:", *(f"- {r}" + (f" “{q}”" if q else "") for r, q in zip(refs, said))] if refs else ["refs: (none)"]
     if kind == "label":
         return [f"label: concept:{payload.get('concept') or '?'}"]
     if kind == "custom":

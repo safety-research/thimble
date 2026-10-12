@@ -6,23 +6,32 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { Icon, type IconName } from '../components/Icon'
 import { cutExcerpt } from './excerpts'
 import type { FactKind, RecordFact } from './facts'
-import type { QuotePart } from './quotes'
+import type { Mark, QuotePart } from './quotes'
 
 /** the characters of one part a quote draws (the clamp shows far less; Show all shows this much) */
 const PART_MAX = 20000
 const cap = (t: string) => cutExcerpt(t, PART_MAX)
 
-/** A part's text as drawn, with the claim's words in it highlighted when they fall inside what is drawn. */
-function markedText(text: string, mark?: [number, number]): ReactNode {
+/** A part's text as drawn, with the claim's words and each quoted passage in it highlighted when they fall inside what
+ * is drawn (passages that overlap are one highlight). */
+function markedText(text: string, mark?: Mark, marks?: readonly Mark[]): ReactNode {
   const shown = cap(text)
-  if (!mark || mark[1] > shown.length || mark[0] >= mark[1]) return shown
-  return (
-    <>
-      {shown.slice(0, mark[0])}
-      <span className="hl">{shown.slice(mark[0], mark[1])}</span>
-      {shown.slice(mark[1])}
-    </>
-  )
+  const all = [...(mark ? [mark] : []), ...(marks ?? [])].filter(([a, b]) => a < b && b <= shown.length).sort((x, y) => x[0] - y[0])
+  if (!all.length) return shown
+  const merged: Mark[] = []
+  for (const [a, b] of all) {
+    const last = merged[merged.length - 1]
+    if (last && a <= last[1]) last[1] = Math.max(last[1], b)
+    else merged.push([a, b])
+  }
+  const out: ReactNode[] = []
+  let at = 0
+  for (const [a, b] of merged) {
+    out.push(shown.slice(at, a), <span key={a} className="hl">{shown.slice(a, b)}</span>)
+    at = b
+  }
+  out.push(shown.slice(at))
+  return <>{out}</>
 }
 
 const FACT_ICON: Record<FactKind, IconName> = { time: 'clock', who: 'person', where: 'doc' }
@@ -48,14 +57,14 @@ export function RecordFacts({ facts, className }: { facts: readonly RecordFact[]
 export function QuotePartView({ part }: { part: QuotePart }) {
   switch (part.kind) {
     case 'text':
-      return <div className={`bcell-q-text${part.dim ? ' is-dim' : ''}`}>{markedText(part.text, part.mark)}</div>
+      return <div className={`bcell-q-text${part.dim ? ' is-dim' : ''}`}>{markedText(part.text, part.mark, part.marks)}</div>
     case 'code':
-      return <pre className="bcell-q-code">{markedText(part.text, part.mark)}</pre>
+      return <pre className="bcell-q-code">{markedText(part.text, part.mark, part.marks)}</pre>
     case 'tool':
       return (
         <div className="bcell-q-tool">
           <span className="bcell-q-key">{part.name}</span>
-          {part.text ? <pre className="bcell-q-code">{cap(part.text)}</pre> : null}
+          {part.text ? <pre className="bcell-q-code">{markedText(part.text, undefined, part.marks)}</pre> : null}
         </div>
       )
     case 'fields':
@@ -72,7 +81,7 @@ export function QuotePartView({ part }: { part: QuotePart }) {
       return (
         <div className="bcell-q-field">
           <span className="bcell-q-key">{part.key}</span>
-          {part.mono ? <pre className="bcell-q-code">{markedText(part.text, part.mark)}</pre> : <div className="bcell-q-text">{markedText(part.text, part.mark)}</div>}
+          {part.mono ? <pre className="bcell-q-code">{markedText(part.text, part.mark, part.marks)}</pre> : <div className="bcell-q-text">{markedText(part.text, part.mark, part.marks)}</div>}
         </div>
       )
     case 'span': {
