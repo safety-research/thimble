@@ -1288,6 +1288,10 @@
       if (foot) foot.insertBefore(this.keyEl, this.axisEl)
       else this.mount.appendChild(this.keyEl)
     }
+    // a failure's ✕ always shows and the key has no entry for it: a `problem` that an older key kept turned off is
+    // dropped, so Reset does not count it
+    var keptKey = kept('key:' + this.name)
+    if (Array.isArray(keptKey.off)) keptKey.off = keptKey.off.filter(function (id) { return id !== 'problem' })
     this.key = thimble.key(this.keyEl, [], {
       key: this.name,
       onChange: function () {
@@ -1517,7 +1521,6 @@
     this.sc = sc
     var W = sc.width
     var colour = this.bars.colour()
-    var problems = 0
     var bands = 0
     var dense = this.dense()
     var H = dense ? DENSE_H : LANE_H
@@ -1564,9 +1567,8 @@
               svg += '<rect class="thimble-lane-mark thimble-lane-bar" x="' + bx0.toFixed(2) + '" y="' + yy.toFixed(2) + '" width="' + bw.toFixed(2) + '" height="' + sh.toFixed(2) + '"' + (d.colours[k] ? ' style="fill:' + esc(d.colours[k]) + '"' : '') + '/>'
             }
             if (bin.bad) {
-              problems += bin.bad
               var cx = bx0 + bw / 2
-              if (self.on('problem') && cx - lastX > 2 * BAD_X) {
+              if (cx - lastX > 2 * BAD_X) {
                 bad += badX(cx, Math.min(H - 2, H - BAD_X))
                 lastX = cx
               }
@@ -1595,10 +1597,7 @@
             var c = colour ? colour.colourOf(colour.valueOf(mk.it)) : null
             svg += '<rect class="thimble-lane-mark" data-i="' + mk.i + '" x="' + mk.x.toFixed(1) + '" y="3" width="' + mk.w.toFixed(1) + '" height="' + (LANE_H - 6) + '"' + (c ? ' style="fill:' + esc(c) + '"' : '') + '/>'
           }
-          if (self.problem && safe(function () { return self.problem(mk.it) }, false)) {
-            problems++
-            if (self.on('problem')) bad += badX(mk.x + mk.w / 2, LANE_H - 3)
-          }
+          if (self.problem && safe(function () { return self.problem(mk.it) }, false)) bad += badX(mk.x + mk.w / 2, LANE_H - 3)
         }
         // the page's own drawing over the marks (ctx.over), then the failures' ✕ over every mark, so no mark drawn later
         // hides one
@@ -1634,10 +1633,10 @@
     this.body.appendChild(this.spanEl)
     this.body.appendChild(this.cursorEl)
     this.cursorEl.style.display = 'none'
-    // the key: each series the lanes draw beside Color by's, when it shows at all
+    // the key: each series the lanes draw beside Color by's, when it shows at all; a failure takes no entry, since its ✕
+    // always shows on its mark
     var entries = []
     if (this.band) entries.push({ id: 'band', name: this.words.band, mark: 'band', n: bands, count: false })
-    if (this.problem) entries.push({ id: 'problem', name: this.words.problem, mark: 'problem', n: problems })
     this.series.forEach(function (s) {
       var id = String(s.id)
       entries.push({ id: id, name: String(s.name || id), mark: s.mark || 'band', color: s.color || s.colour || null, about: s.about || null, n: drew[id] ? 1 : 0, count: false })
@@ -1999,7 +1998,7 @@
       visible: function (t0, t1) {
         l.visible(t0, t1)
       },
-      /** whether a series of the key shows: 'band', 'problem' or the id of one of `series` */
+      /** whether a series of the key shows: 'band' or the id of one of `series` */
       isOn: function (series) {
         return l.on(series)
       },

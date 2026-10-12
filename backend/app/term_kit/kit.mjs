@@ -2544,7 +2544,7 @@ function brokenScale(from, to, cols, unit, parts, fine = false) {
 }
 
 /** The chart's axis under it: the ticks' labels dim at their cells, `gutter` cells in, none overlapping; `legend`, in
- *  the gutter before them, the key of the marks the chart draws other than Color by's (`─ running  × failed`): runs, or
+ *  the gutter before them, the key of the marks the chart draws other than Color by's (`─ running`): runs, or
  *  entries `{glyph, fg, name, on, toggle, tip}`, each a control that hides or shows its series (dim while off), as a
  *  timeline gives them (`legend()`); then, with `marks` ([{t, label}]), their labels on a row of their own, each a
  *  control when `onMark(mark)` is given. */
@@ -3980,11 +3980,13 @@ export function timeline(opts = {}) {
   const keptL = kept(name) || {}
   const st = {
     chosen: null,
-    off: new Set(Array.isArray(keptL.off) ? keptL.off : []),
+    // a failure's × always shows and the key has no entry for it: a `problem` that an older key kept turned off is
+    // dropped, so Reset does not count it
+    off: new Set((Array.isArray(keptL.off) ? keptL.off : []).filter((id) => id !== 'problem')),
     folded: new Map(Array.isArray(keptL.folded) ? keptL.folded : []), // key -> true (folded by hand) or false (unfolded)
     top: 0,
     shown: [],
-    counts: { band: 0, problem: 0 },
+    counts: { band: 0 },
     drawn: new Set(), // the ids of the view's own series a lane drew (drawLane)
   }
   // the view's own series in the key, and whether Events draws a record's mark (`marks`)
@@ -4135,11 +4137,7 @@ export function timeline(opts = {}) {
       const glyph = dense ? bar(counts[x], max) : EVENT
       out[x] = c && c !== COLORS.dim ? { s: glyph, fg: c } : { s: glyph, d: true }
     }
-    for (let x = 0; x < scale.cols; x++) {
-      if (!failed[x]) continue
-      st.counts.problem += failed[x]
-      if (isOn('problem') && failed[x] * 2 >= counts[x]) out[x] = { s: '×', fg: COLORS.problem }
-    }
+    for (let x = 0; x < scale.cols; x++) if (failed[x] && failed[x] * 2 >= counts[x]) out[x] = { s: '×', fg: COLORS.problem }
     if (span) {
       const a = scale.binOf(Math.max(span[0], scale.from))
       const b = scale.binOf(Math.min(span[1], scale.to))
@@ -4167,11 +4165,11 @@ export function timeline(opts = {}) {
     get lanes() {
       return st.shown.slice()
     },
-    /** The key for `axis`: each series the lanes drew beside Color by's, a toggle. */
+    /** The key for `axis`: each series the lanes drew beside Color by's, a toggle; a failure takes no entry, since its
+     *  × always shows. */
     legend() {
       const out = []
       if (typeof opts.band === 'function' && st.counts.band) out.push({ id: 'band', glyph: '─', fg: COLORS.rule, name: words.band, on: isOn('band'), toggle: () => toggle('band') })
-      if (typeof opts.problem === 'function' && st.counts.problem) out.push({ id: 'problem', glyph: '×', fg: COLORS.problem, name: words.problem, on: isOn('problem'), toggle: () => toggle('problem') })
       for (const s of series) {
         const id = String(s.id)
         if (st.drawn.has(id)) out.push({ id, glyph: s.glyph || SERIES_GLYPH[s.mark || 'band'] || '░', fg: s.color || s.colour || COLORS.rule, name: String(s.name || id), on: isOn(id), toggle: () => toggle(id) })
@@ -4192,7 +4190,7 @@ export function timeline(opts = {}) {
       const gutter = o.gutter || (bare ? 0 : 14)
       // an axis of its own takes a row under the lanes, and one more where its key has no room in the gutter; none
       // with no records to place
-      const keyW = [typeof opts.band === 'function' && `─ ${words.band}`, typeof opts.problem === 'function' && `× ${words.problem}`, ...series.map((s) => `░ ${s.name || s.id}`)].filter(Boolean).reduce((w, s, i) => w + (i ? 2 : 0) + width(s), 0)
+      const keyW = [typeof opts.band === 'function' && `─ ${words.band}`, ...series.map((s) => `░ ${s.name || s.id}`)].filter(Boolean).reduce((w, s, i) => w + (i ? 2 : 0) + width(s), 0)
       const ownAxis = !o.scale && items.length > 0
       const axisRows = ownAxis ? (keyW && keyW > gutter - 2 ? 2 : 1) : 0
       const room = Math.max(1, Math.min(o.room ?? d.left, d.left) - axisRows)
@@ -4201,7 +4199,7 @@ export function timeline(opts = {}) {
       const span = o.span && typeof o.span.span === 'function' ? o.span.span(time) : Array.isArray(o.span) ? o.span : null
       const dense = o.density !== false
       const all = layout(items, room)
-      st.counts = { band: 0, problem: 0 }
+      st.counts = { band: 0 }
       st.drawn = new Set()
       const groups = all.map((n) => n.items)
       const max = maxBin(scale, groups, time)

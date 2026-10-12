@@ -252,8 +252,9 @@ describe('Rows', () => {
 })
 
 describe('the lanes and their key', () => {
-  test("a failure is a ✕ in the problem red at its mark's foot, over every mark; the key's entries are toggles that hide their series; one that never shows is left out; Reset shows them again", async () => {
-    await load()
+  test("a failure is a ✕ in the problem red at its mark's foot, over every mark, always shown: the key has no entry for it, and a `problem` an older key kept turned off is dropped; an entry whose series never shows is left out", async () => {
+    // the key of a version that had a `failed` entry, kept with it turned off
+    await load({ v: 1, parts: { 'key:lanes:lanes': { off: ['problem'] } } })
     const w = win()
     w.CALLS = CALLS
     w.eval(`
@@ -277,18 +278,13 @@ describe('the lanes and their key', () => {
       expect(mark, d).toBeTruthy()
       expect(y0 + dy / 2).toBeCloseTo(Number(mark!.getAttribute('y')) + Number(mark!.getAttribute('height')), 5)
     }
-    // no band ever shows, so the key has no `running`; `failed` with its count, its swatch a ✕
-    expect(texts('.thimble-key-chip')).toEqual(['failed2'])
-    expect(doc().querySelector('.thimble-key-chip .thimble-key-problem svg path')).not.toBe(null)
-    ;(doc().querySelector('.thimble-key-chip') as HTMLElement).click()
-    await wait()
-    expect(doc().querySelector('.thimble-key-chip')!.getAttribute('aria-pressed')).toBe('false')
-    expect(doc().querySelectorAll('.thimble-lane-bad')).toHaveLength(0)
-    expect(w.lanes.isOn('problem')).toBe(false)
-    await wait(60)
-    ;(doc().querySelector('.thimble-reset') as HTMLElement).click()
-    await wait()
+    // no band ever shows, so the key has no `running`; a failure takes no entry, since its ✕ always shows
+    expect(texts('.thimble-key-chip')).toEqual([])
+    expect(doc().querySelector('.thimble-key-problem')).toBe(null)
+    // the `problem` the older key kept turned off is dropped: it hides no ✕, and Reset does not show for it
     expect(w.lanes.isOn('problem')).toBe(true)
+    await wait(60)
+    expect((doc().querySelector('.thimble-reset') as HTMLButtonElement).hidden).toBe(true)
     expect(doc().querySelectorAll('.thimble-lane-bad')).toHaveLength(2)
   })
 
@@ -462,13 +458,13 @@ describe("the page's own marks in the lanes", () => {
     hover(lane('explore'), 200 + sc.x(T0 + 200))
     expect(tipOf()).not.toContain('deploy freeze')
     // the key: the series drawn, never one no lane drew; a click hides its spans, and Reset shows them again
-    expect(texts('.thimble-key-chip')).toEqual(['running', 'failed2', 'freeze'])
-    expect((doc().querySelectorAll('.thimble-key-chip')[2].querySelector('.thimble-key-sw') as HTMLElement).style.getPropertyValue('--c')).toBe('#aa0000')
-    ;(doc().querySelectorAll('.thimble-key-chip')[2] as HTMLElement).click()
+    expect(texts('.thimble-key-chip')).toEqual(['running', 'freeze'])
+    expect((doc().querySelectorAll('.thimble-key-chip')[1].querySelector('.thimble-key-sw') as HTMLElement).style.getPropertyValue('--c')).toBe('#aa0000')
+    ;(doc().querySelectorAll('.thimble-key-chip')[1] as HTMLElement).click()
     await wait()
     expect(w.lanes.isOn('freeze')).toBe(false)
     expect(lane('explore').querySelector('.thimble-lane-shade')).toBe(null)
-    expect(texts('.thimble-key-chip')).toEqual(['running', 'failed2', 'freeze'])
+    expect(texts('.thimble-key-chip')).toEqual(['running', 'freeze'])
     await wait(60)
     ;(doc().querySelector('.thimble-reset') as HTMLElement).click()
     await wait()
@@ -686,8 +682,8 @@ describe('the timeline on its own', () => {
     expect(centers.length).toBeGreaterThanOrEqual(Math.floor(bins / 2))
     expect(centers.length).toBeLessThan(bins)
     expect(centers.slice(1).every((x, i) => x - centers[i] > 6)).toBe(true)
-    // the key counts every failure all the same
-    expect(texts('.thimble-key-chip')).toEqual(['failed1,500'])
+    // and the key takes no entry for them
+    expect(texts('.thimble-key-chip')).toEqual([])
   })
 
   test("Density's tip gives a bin's day once: May 16 09:00–09:01", async () => {

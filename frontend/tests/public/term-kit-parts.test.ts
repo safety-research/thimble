@@ -209,8 +209,8 @@ describe('Rows', () => {
 })
 
 describe('lanes', () => {
-  function scene(o: { rows?: number; span?: any; room?: number; density?: boolean } = {}) {
-    init({ rows: o.rows ?? 30 })
+  function scene(o: { rows?: number; span?: any; room?: number; density?: boolean; state?: object } = {}) {
+    init({ rows: o.rows ?? 30, ...(o.state ? { state: o.state } : {}) })
     const colour = kit.colorBy({ fields: [{ name: 'tool', title: 'Tool' }] })
     const rows = kit.rows({ fields: [{ name: 'session', title: 'Session', parentOf: (k: string) => (k === 'lead' ? 'run' : k === 'run' ? null : PARENT[k]), nameOf: (k: string) => (k === 'run' ? 'Run 1' : k) }] })
     const range = kit.timeRange({})
@@ -227,8 +227,9 @@ describe('lanes', () => {
     return { lanes, picked, marked }
   }
 
-  test('a lane per group: the top group with its ▾, the others with their guides at A2, left-aligned; a failure × in red; the key\'s entries are toggles', async () => {
-    const { lanes, picked } = scene({ density: false })
+  test('a lane per group: the top group with its ▾, the others with their guides at A2, left-aligned; a failure × in red, always shown; the key\'s entries are toggles', async () => {
+    // the key of a version that had a `failed` entry, kept with it turned off
+    const { lanes, picked } = scene({ density: false, state: { lanes: { off: ['problem'] } } })
     await tick()
     const rows = text()
     const names = rows.slice(2, 7).map((r: string) => r.slice(0, 16).trimEnd())
@@ -239,11 +240,15 @@ describe('lanes', () => {
     const x = [...rows[explore]].indexOf('×')
     expect(x).toBeGreaterThan(16)
     expect(cell(f, explore, x)!.fg).toBe(kit.COLORS.problem)
-    // the key: running and failed, each a toggle; failed hidden takes the × away
-    expect(rows.some((r: string) => r.includes('─ running') && r.includes('× failed'))).toBe(true)
-    await click('× failed')
-    expect(lanes.isOn('problem')).toBe(false)
-    expect(text()[explore]).not.toContain('×')
+    // the key: running, a toggle, and no entry for the failures, whose × always shows; the `problem` the older key kept
+    // turned off is dropped, so nothing is to reset; running hidden leaves the ×
+    expect(rows.some((r: string) => r.includes('─ running'))).toBe(true)
+    expect(rows.some((r: string) => r.includes('× failed'))).toBe(false)
+    expect(lanes.isOn('problem')).toBe(true)
+    expect(kit.changed()).toBe(false)
+    await click('─ running')
+    expect(lanes.isOn('band')).toBe(false)
+    expect(text()[explore]).toContain('×')
     expect(kit.changed()).toBe(true)
     // a click on a lane's name chooses it, in the accent
     await click('grep')
@@ -289,7 +294,7 @@ describe('lanes', () => {
     expect(lane(text(), '├ explore')).toMatch(/[▁▂▃▄▅▆▇█×]/)
     expect(lane(text(), '├ explore')).not.toContain('─')
     expect(text().some((r: string) => r.includes('─ running'))).toBe(false)
-    expect(text().some((r: string) => r.includes('× failed'))).toBe(true)
+    expect(text().some((r: string) => r.includes('× failed'))).toBe(false)
     init()
     scene({ density: false })
     await tick()
@@ -447,11 +452,12 @@ describe('the timeline on its own', () => {
     const rows = text()
     expect(rows.slice(0, 3).map((r: string) => r.slice(0, 14).trim())).toEqual(['ana', 'bo', 'no author'])
     expect(tl.lanes.map((l: any) => l.items.length)).toEqual([2, 1, 1])
-    // the first record in the first cell, the last in the last, failed × in red; the axis under them with its key
+    // the first record in the first cell, the last in the last, failed × in red; the axis under them, with no key, since
+    // the failures take no entry
     expect([...rows[0]][2 + 14]).toMatch(/[▁▂▃▄▅▆▇█]/)
     expect(rows[2].length).toBe(2 + 80)
     expect(rows[0]).toContain('×')
-    expect(rows[3]).toMatch(/^ {2}× failed +May 16 09:00 +09:15/)
+    expect(rows[3]).toMatch(/^ +May 16 09:00 +09:15/)
     const hit = last().hits.find((h: any) => h.cursor)
     expect(hit.tips[0]).toMatch(/^ana · May 16 09:00:\d\d · 1 record$/)
   })

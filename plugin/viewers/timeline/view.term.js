@@ -79,7 +79,6 @@ const ln = timeline({
   onPick: (lane) => pick(picked && picked.key === lane.key ? null : lane),
   onMark: (e) => show(e.r),
 })
-if (!ln.isOn('problem')) ln.toggle('problem')
 const pane = side({ key: 'event' })
 const split = divider()
 const events = list({ key: (e) => e.r })
