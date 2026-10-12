@@ -1046,10 +1046,10 @@
   }
 
   // ---------------------------------------------------------------- a key whose entries are toggles
-  // Each entry is a chip with a swatch drawn as its series is drawn (a band, a mark, a ✕ in the problem red, a line),
-  // its name and its count; a click hides or shows the series, an entry whose series never appears is left out.
-  // entries: [{id, name, mark: 'band' | 'mark' | 'problem' | 'line', colour?, n?, count?}]: `n` the series' records (an
-  // entry with none is left out), shown after the name unless `count` is false
+  // Each entry is a chip with a swatch drawn as its series is drawn (a band, a mark, a ✕ in the problem red, a line, a
+  // diamond), its name and its count; a click hides or shows the series, an entry whose series never appears is left
+  // out. entries: [{id, name, mark: 'band' | 'mark' | 'problem' | 'line' | 'diamond', colour?, n?, count?}]: `n` the
+  // series' records (an entry with none is left out), shown after the name unless `count` is false
   function Key(mount, entries, opts) {
     var self = this
     this.mount = el(mount)

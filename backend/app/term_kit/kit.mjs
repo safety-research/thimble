@@ -3946,7 +3946,7 @@ export function rows(opts = {}) {
  */
 const EVENT = '▌' // a lane's cell that holds a record, while the lanes draw Events rather than density
 // the key's glyph of a series of the view's own, by its mark as the browser's key draws it
-const SERIES_GLYPH = { band: '░', mark: '▌', line: '─', problem: '×' }
+const SERIES_GLYPH = { band: '░', mark: '▌', line: '─', problem: '×', diamond: '◆' }
 
 // a record's place on the axis, a number in `unit`: a number as it is, a string that holds one as that number, and on
 // an axis of time a Date or a date as text too, such as an ISO time, one with no zone in UTC as the axis writes times

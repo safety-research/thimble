@@ -620,6 +620,23 @@ describe('the timeline on its own', () => {
     expect(w.ranged.scale.unit).toBe('n')
   })
 
+  test("a series the page draws as diamonds, as merges in place of the kit's marks, takes a diamond in the key", async () => {
+    // QA 2026-10-12: the gallery's timeline on line numbers drew each merge as a diamond, its key entry a gray bar
+    await load()
+    const w = win()
+    w.EVENTS = [1, 4, 9, 12].map((n, i) => ({ n, agent: i % 2 ? 'b' : 'a', action: i === 2 ? 'merge' : 'push' }))
+    w.eval(`window.tl = thimble.timeline({
+      mount: '#lanes', rows: 'agent', unit: 'n', time: (e) => e.n, marks: (e) => e.action !== 'merge',
+      series: [{ id: 'merge', name: 'merge', mark: 'diamond' }],
+      drawLane: (lane, ctx) => { if (ctx.on('merge')) for (const e of lane.items) if (e.action === 'merge') ctx.over.insertAdjacentHTML('beforeend', '<path class="own-merge" d="M' + ctx.x(e.n) + ' 3l5 6-5 6-5-6z"/>') },
+    }); window.tl.draw(window.EVENTS)`)
+    await wait()
+    expect(doc().querySelectorAll('#lanes .own-merge')).toHaveLength(1)
+    expect(texts('.thimble-key-chip')).toEqual(['merge'])
+    expect(doc().querySelector('.thimble-key-chip .thimble-key-sw')!.className).toBe('thimble-key-sw thimble-key-diamond')
+    // drawn as a diamond in the series' color, else the gray of a mark with no color
+    expect(read('viewer_parts.css')).toMatch(/\.thimble-key-diamond \{[^}]*clip-path: polygon\(50% 0, 100% 50%, 50% 100%, 0 50%\);[^}]*background: var\(--c, var\(--viz-ink-3/)
+  })
   test('on plain numbers such as years: the axis and the tips write them as they are, without separators', async () => {
     await load()
     const w = win()

@@ -300,6 +300,12 @@
   height: 0;
   border-top: 1.5px solid var(--c, var(--text-secondary));
 }
+.thimble-key-diamond {
+  width: 10px;
+  height: 10px;
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  background: var(--c, var(--viz-ink-3, rgba(var(--ink-rgb), 0.5)));
+}
 .chip.chip-key[aria-pressed='false'] .thimble-key-sw {
   opacity: 0.35;
 }

@@ -172,7 +172,7 @@ tl.draw(commits) // [{t: 1778922000, author: 'ana', text: 'Fix the parser'}]
 | `density` | a flag, or a function the page answers at each draw: each lane as bars on the scale's bins in place of marks, with no band behind them (an Events \| Density choice) |
 | `drawLane(lane, ctx)` | the view's own marks in each lane, on the lanes' scale (below) |
 | `marks` | `false`, or a function of a record: whether Events draws the kit's mark of a record, for a view that draws its own; the tip and a click still find the record |
-| `series` | the key's entries of the view's own series, `[{id, name, mark, color}]`, `mark` as the key draws it (`band`, `mark`, `line`); an entry shows while a lane draws its series |
+| `series` | the key's entries of the view's own series, `[{id, name, mark, color}]`, `mark` as the key draws it (`band`, `mark`, `line`, `diamond`); an entry shows while a lane draws its series |
 | `anchor(lane)` | a lane's `data-anchor`, such as a session's unit |
 | `onPick(lane)`, `onMark(item)` | a lane's name clicked, which marks it chosen; a mark clicked |
 | `tip(item)` | the words of a record in the hover tip |
@@ -221,9 +221,9 @@ const tl = thimble.timeline({
 ## The key
 
 `thimble.key(mount, entries, {key, onChange})` draws a key whose entries are toggles: `[{id, name, mark, color, n,
-count}]`, `mark` drawn as the series is drawn (`band`, `mark`, `problem`, `line`). A click hides or shows the series;
-an entry with `n` 0 is left out, so a key never names a series the view does not draw. `isOn(id)` says whether a series
-shows and `set(entries)` draws new ones. The lanes draw their own key with it.
+count}]`, `mark` drawn as the series is drawn (`band`, `mark`, `problem`, `line`, `diamond`). A click hides or shows
+the series; an entry with `n` 0 is left out, so a key never names a series the view does not draw. `isOn(id)` says
+whether a series shows and `set(entries)` draws new ones. The lanes draw their own key with it.
 
 ## The divider
 
