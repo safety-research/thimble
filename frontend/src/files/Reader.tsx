@@ -1217,9 +1217,14 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   const filterHolds = useRef<string | null>(null)
   // a CSV or TSV file's records as the Table mode reads them, by its first line's names
   const delimit = useDelimiter(workspace, colored && !isTranscript ? path : '', records)
-  const colorRecords = useMemo(() => (delimit ? delimit(records) : records), [delimit, records])
+  // the records the Transcript mode shows in place of the file's lines (a whole-file JSON transcript's turns), which
+  // Color by and Filter by read while it gives them (ViewProps.onRecords)
+  const [shown, setShown] = useState<{ path: string; records: readonly SourceRecord[] } | null>(null)
+  const onRecords = useCallback((recs: readonly SourceRecord[] | null) => setShown(recs ? { path, records: recs } : null), [path])
+  const viewRecords = isTranscript && shown?.path === path ? shown.records : null
+  const colorRecords = useMemo(() => viewRecords ?? (delimit ? delimit(records) : records), [viewRecords, delimit, records])
   const color = useColorBy(workspace, path, colored && !binary && !isDatabase, labels, colorRecords, readerLabels.rows, total, quiet, filterHolds)
-  const filter = useFilterBy(workspace, path, isTranscript && !binary && !isDatabase, labels, color.fileLabels, color.keys, records, readerLabels.rows, total, quiet)
+  const filter = useFilterBy(workspace, path, isTranscript && !binary && !isDatabase, labels, color.fileLabels, color.keys, viewRecords ?? records, readerLabels.rows, total, quiet)
   const filterLabel = isTranscript && filter.choice.by === 'label' ? filter.choice.id : null
   useEffect(() => {
     filterHolds.current = filterLabel
@@ -1392,9 +1397,9 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   const unavailable = isTranscript ? builtins.dropTranscript : undefined
   const viewEl = useMemo(() => {
     if (!ViewComponent) return null
-    const viewProps: ViewProps = { workspace, path, kind, page, loadMore: loadPage, targetRef: viewTarget, transcript, unavailable }
+    const viewProps: ViewProps = { workspace, path, kind, page, loadMore: loadPage, targetRef: viewTarget, transcript, unavailable, onRecords }
     return <ViewComponent {...viewProps} />
-  }, [ViewComponent, workspace, path, kind, page, loadPage, viewTarget, transcript, unavailable])
+  }, [ViewComponent, workspace, path, kind, page, loadPage, viewTarget, transcript, unavailable, onRecords])
   // the built-in modes, then the file-type viewers, then Raw
   const builtinOptions = builtins.listed.map((v) => ({ value: v.type, label: v.title }))
   const options = [

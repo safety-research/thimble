@@ -273,9 +273,11 @@ export function recordObject(rec: SourceRecord): Record<string, unknown> | null 
 }
 
 /** A key's value on a record as the server counts it (source_keys._scalar): a short string, a number or a boolean as
- * written; null for none. Pure. */
+ * written; null for none. A key the record does not keep as its own is read from the fields the server gives its turn
+ * (`meta.fields`, backend transcripts.turn_fields: the model a stream's message names, the tools a turn calls, a
+ * whole-file JSON transcript's turn's fields). Pure. */
 export function keyValue(rec: SourceRecord, key: string): string | null {
-  const v = recordObject(rec)?.[key]
+  const v = recordObject(rec)?.[key] ?? rec.meta?.fields?.[key]
   if (v == null || v === '') return null
   if (typeof v === 'boolean') return v ? 'true' : 'false'
   if (typeof v === 'number') return JSON.stringify(v)

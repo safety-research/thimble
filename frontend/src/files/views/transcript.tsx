@@ -753,16 +753,25 @@ const TURNS_PAGE = 200
 /** turns kept in memory; past it, the ones at the far end from the reader's move are let go */
 const TURNS_CAP = 2000
 
+/** The turns of a whole-file JSON transcript as the records Color by and Filter by read (ViewProps.onRecords): each on
+ * the line it stands on, with the fields the server read for it as `meta.fields`. Pure. */
+function turnRecords(turns: readonly SourceTurn[]): SourceRecord[] {
+  return turns.map((t) => ({ line: t.line, record: {}, blocks: [], meta: t.fields ? { fields: t.fields } : {} }))
+}
+
 /** A whole-file JSON transcript (a chat export, an eval log) as the turns the server parses from it (GET
  * /source/turns): a page at a time from the start, or
  * around a cited line, more as the reader nears either end, up to TURNS_CAP at a time. Each turn stands on the line of
  * the file that holds its words, so a label or a citation of that line finds it; the words are the parsed text, which
  * span labels do not mark. A citation of words opens at the turn the server finds holding them (`cited`), where they
  * are highlighted, among however many turns share its line. A file whose whole parse finds no turns (415: the sniff
- * read only its head) is left for the mode it would otherwise open in (`unavailable`), not shown as an error. */
-function TurnsTranscript({ workspace, path, targetRef, unavailable }: ViewProps) {
+ * read only its head) is left for the mode it would otherwise open in (`unavailable`), not shown as an error. The
+ * turns loaded are the records Color by and Filter by read (`onRecords`), by the fields the server gives each. */
+function TurnsTranscript({ workspace, path, targetRef, unavailable, onRecords }: ViewProps) {
   const asked = useMemo(() => targetOf(targetRef, path), [targetRef, path])
   const [data, setData] = useState<SourceTurns | null>(null)
+  useEffect(() => onRecords?.(data ? turnRecords(data.turns) : null), [data, onRecords])
+  useEffect(() => () => onRecords?.(null), [onRecords])
   const [error, setError] = useState<string | null>(null)
   const loading = useRef(false)
   const rootRef = useRef<HTMLDivElement | null>(null)

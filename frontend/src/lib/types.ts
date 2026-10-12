@@ -1407,6 +1407,8 @@ export interface SourceKeys {
   keys: SourceKey[]
 }
 
+/** One record of a file as the server pages it. `meta.fields`, in a file that reads as a transcript, holds the fields
+ * of the record's turn it does not keep as its own keys (backend transcripts.turn_fields), which Color by reads. */
 export interface SourceRecord {
   line: number
   record: any
@@ -1455,6 +1457,9 @@ export interface SourceTurn {
   group?: number
   /** the turn's whole length when its text was cut */
   cut?: number
+  /** the fields its record keeps about it (backend transcripts.turn_fields: its role or source, the model, the tools it
+   * calls, its metadata), which Color by and Filter by offer */
+  fields?: Record<string, string | number | boolean>
 }
 
 export interface SourceTurns {

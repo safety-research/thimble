@@ -11,6 +11,12 @@ records have none, and where the values fall: the file's lines cut into `bins`, 
 frequent value (-1 for a bin whose records have none), which the overview track draws. `bytes` is each bin's share of
 the file's bytes, which the track draws as density when nothing is coloured.
 
+A file that reads as a transcript (transcripts.sniff) has the fields of its turns as keys too, by the same rules
+(transcripts.turn_fields: who speaks, the model, the tools a turn calls, its metadata): JSON lines of messages their
+records' fields beside their own keys (transcripts.record_fields, which the source page gives each record as
+`meta.fields`); a whole-file JSON transcript, whose lines are no records, its turns' fields alone, one record per turn
+standing on its line (GET /source/turns gives each turn's); a text chat log who starts each turn (`speaker`).
+
 A file bigger than SCAN_BYTES is read up to there: the answer says `partial`, and its bins cover the lines read. An
 answer is cached per file on its size and modification time. A file of another kind, or whose lines are not JSON
 objects, has no keys.
@@ -26,11 +32,13 @@ from collections import Counter, OrderedDict
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
+
+from . import transcripts
 
 router = APIRouter()
 
-VALUE_CHARS = 80
+VALUE_CHARS = transcripts.FIELD_CHARS
 FEW = 30  # values a key may have whatever they are
 MANY = 20_000  # values tracked per key; past it the key names each record, not a kind
 VALUES_LISTED = 60
@@ -154,12 +162,128 @@ def _readable(path: Path) -> bool:
     return seen > 0 and objs / seen >= 0.8
 
 
-def scan(path: Path, bins: int = BINS_DEFAULT) -> dict[str, Any]:
-    """The answer for one file (the module note). Pure but for reading the file."""
+class _Tally:
+    """Keys' values over a file's records as they are read, one row per record, and the line each record stands on."""
+
+    def __init__(self) -> None:
+        self.keys: dict[str, _Key] = {}
+        self.rows = 0
+        self.at = array("I")  # per row, its line's index (from 0)
+
+    def add(self, row: dict[str, Any] | None, line: int) -> None:
+        self.rows += 1
+        self.at.append(max(0, line - 1))
+        seen = set()
+        if row is not None:
+            for k, v in row.items():
+                key = self.keys.get(k)
+                if key is None:
+                    key = self.keys[k] = _Key(k, len(self.keys), self.rows - 1)
+                key.add(v)
+                seen.add(k)
+        for k, key in self.keys.items():
+            if k not in seen:
+                key.none()
+
+    def answer(self, bins: int, lines: int, sizes: array, partial: bool, header: int = 0) -> dict[str, Any]:
+        """The keys that name a kind or a who (the module note), binned by the lines their records stand on over the
+        file's `lines`; `header` rows that are no records (a CSV file's first line)."""
+        def kind(k: _Key) -> bool:
+            n, carried = len(k.values), sum(k.values.values())
+            if k.dropped or n < 2:
+                return False
+            strings = all(not v.lstrip("-").replace(".", "", 1).isdigit() for v in list(k.values)[:50])
+            return n <= FEW or (strings and n * 3 <= carried)
+
+        kept = [k for k in self.keys.values() if kind(k)]
+        kept.sort(key=lambda k: (-sum(k.values.values()), k.order))
+        kept = kept[:KEYS_MAX]
+        total, lines = lines, max(1, lines)
+        out_bytes = [0] * bins
+        for i, s in enumerate(sizes):
+            out_bytes[min(bins - 1, i * bins // lines)] += s
+        out_keys = []
+        for k in kept:
+            ranked = [v for v, _ in k.values.most_common()]
+            rank = {k.index[v]: r for r, v in enumerate(ranked)}
+            per = [Counter() for _ in range(bins)]
+            for i, vi in enumerate(k.lines):
+                if vi != _NONE:
+                    per[min(bins - 1, self.at[i] * bins // lines)][rank[vi]] += 1
+            at = [c.most_common(1)[0][0] if c else -1 for c in per]
+            rest = ranked[VALUES_LISTED:]
+            out_keys.append({
+                "key": k.name,
+                "values": [{"value": v, "n": k.values[v]} for v in ranked[:VALUES_LISTED]],
+                "more": {"values": len(rest), "n": sum(k.values[v] for v in rest)},
+                "none": self.rows - sum(k.values.values()) - header,
+                "at": at,
+            })
+        return {"total": total, "bins": bins, "partial": partial, "bytes": out_bytes, "keys": out_keys}
+
+
+def _no_keys(bins: int) -> dict[str, Any]:
+    return {"total": 0, "bins": bins, "partial": False, "bytes": [], "keys": []}
+
+
+def _line_sizes(path: Path, budget: int) -> tuple[array, bool]:
+    """Each line's bytes, up to `budget` bytes, and whether the file goes on past them."""
+    sizes = array("I")
+    read = 0
+    with path.open("rb") as f:
+        for raw in f:
+            read += len(raw)
+            if read > budget:
+                return sizes, True
+            sizes.append(min(len(raw), 0xFFFFFFFF))
+    return sizes, False
+
+
+def _turn_scan(path: Path, rel: str, bins: int) -> dict[str, Any]:
+    """A whole-file JSON transcript's keys: its turns' fields, each turn a record on its line (transcripts.parse_turns);
+    none when the parse finds no turns."""
+    try:
+        turns = transcripts.parse_turns(path, rel)["turns"]
+    except HTTPException:
+        return _no_keys(bins)
+    tally = _Tally()
+    for t in turns:
+        tally.add(t.get("fields") or {}, t["line"])
+    sizes, _ = _line_sizes(path, 1 << 62)
+    return tally.answer(bins, len(sizes), sizes, False)
+
+
+def _text_scan(path: Path, hint: dict[str, Any], bins: int) -> dict[str, Any]:
+    """A text chat log's keys: who starts each turn (`speaker`), each turn a record on the line it starts on
+    (transcripts.text_turns, as the source page marks them)."""
+    sizes, partial = _line_sizes(path, SCAN_BYTES)
+
+    def texts():
+        with path.open("rb") as f:
+            for _, raw in zip(range(len(sizes)), f):
+                yield raw.decode("utf-8", "replace").rstrip("\r\n")
+
+    tally = _Tally()
+    for n, t in enumerate(transcripts.text_turns(texts(), hint), start=1):
+        if t is not None:
+            tally.add({"speaker": t["speaker"]}, n)
+    return tally.answer(bins, len(sizes), sizes, partial)
+
+
+def scan(path: Path, bins: int = BINS_DEFAULT, rel: str | None = None) -> dict[str, Any]:
+    """The answer for one file (the module note), `rel` its path in the corpus (its name when not given). Pure but for
+    reading the file."""
     bins = max(1, min(int(bins), BINS_MAX))
+    hint = transcripts.sniff(path, rel or path.name)
+    shape = hint["format"] if hint else None
+    if shape == "json":
+        return _turn_scan(path, rel or path.name, bins)
+    if shape == "text":
+        return _text_scan(path, hint, bins)
     if not _readable(path):
-        return {"total": 0, "bins": bins, "partial": False, "bytes": [], "keys": []}
-    keys: dict[str, _Key] = {}
+        return _no_keys(bins)
+    more = transcripts.record_fields if shape in ("stream", "messages") else None
+    tally = _Tally()
     sizes = array("I")
     total = 0
     partial = False
@@ -169,52 +293,14 @@ def scan(path: Path, bins: int = BINS_DEFAULT) -> dict[str, Any]:
             break
         total = n
         sizes.append(min(size, 0xFFFFFFFF))
-        seen = set()
-        if row is not None:
-            for k, v in row.items():
-                key = keys.get(k)
-                if key is None:
-                    key = keys[k] = _Key(k, len(keys), n - 1)
-                key.add(v)
-                seen.add(k)
-        for k, key in keys.items():
-            if k not in seen:
-                key.none()
-    def kind(k: _Key) -> bool:
-        n, carried = len(k.values), sum(k.values.values())
-        if k.dropped or n < 2:
-            return False
-        strings = all(not v.lstrip("-").replace(".", "", 1).isdigit() for v in list(k.values)[:50])
-        return n <= FEW or (strings and n * 3 <= carried)
-
-    kept = [k for k in keys.values() if kind(k)]
-    kept.sort(key=lambda k: (-sum(k.values.values()), k.order))
-    kept = kept[:KEYS_MAX]
-    lines = max(1, total)
-    out_bytes = [0] * bins
-    for i, s in enumerate(sizes):
-        out_bytes[min(bins - 1, i * bins // lines)] += s
-    out_keys = []
-    for k in kept:
-        ranked = [v for v, _ in k.values.most_common()]
-        rank = {k.index[v]: r for r, v in enumerate(ranked)}
-        per = [Counter() for _ in range(bins)]
-        for i, vi in enumerate(k.lines):
-            if vi != _NONE:
-                per[min(bins - 1, i * bins // lines)][rank[vi]] += 1
-        at = [c.most_common(1)[0][0] if c else -1 for c in per]
-        rest = ranked[VALUES_LISTED:]
-        out_keys.append({
-            "key": k.name,
-            "values": [{"value": v, "n": k.values[v]} for v in ranked[:VALUES_LISTED]],
-            "more": {"values": len(rest), "n": sum(k.values[v] for v in rest)},
-            "none": total - sum(k.values.values()) - (1 if path.name.lower().endswith((".csv", ".tsv")) else 0),
-            "at": at,
-        })
-    return {"total": total, "bins": bins, "partial": partial, "bytes": out_bytes, "keys": out_keys}
+        if row is not None and more is not None:
+            row = {**row, **more(row)}
+        tally.add(row, n)
+    header = 1 if path.name.lower().endswith((".csv", ".tsv")) else 0
+    return tally.answer(bins, total, sizes, partial, header)
 
 
-def keys_of(path: Path, bins: int = BINS_DEFAULT) -> dict[str, Any]:
+def keys_of(path: Path, bins: int = BINS_DEFAULT, rel: str | None = None) -> dict[str, Any]:
     """scan(), cached per file on its size and modification time."""
     st = path.stat()
     ck = (str(path), st.st_size, st.st_mtime_ns, int(bins))
@@ -223,7 +309,7 @@ def keys_of(path: Path, bins: int = BINS_DEFAULT) -> dict[str, Any]:
         if hit is not None:
             _cache.move_to_end(ck)
             return hit
-    got = scan(path, bins)
+    got = scan(path, bins, rel)
     with _lock:
         _cache[ck] = got
         while len(_cache) > CACHE_MAX:
@@ -241,4 +327,4 @@ def get_source_keys(c: str, path: str, bins: int = BINS_DEFAULT) -> dict[str, An
     p = corpus._file(root, path)
     if corpus.sniff_binary(p):
         return {"path": path, "total": 0, "bins": bins, "partial": False, "bytes": [], "keys": []}
-    return {"path": path, **keys_of(p, bins)}
+    return {"path": path, **keys_of(p, bins, path)}
