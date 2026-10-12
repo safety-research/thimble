@@ -284,7 +284,7 @@ ran (`end(item)`), and `×` in red where most of a cell's records failed (`probl
   `ctx.x(t)` a time's cell (-1 off the axis), `ctx.colorOf(record)` its hue and `ctx.on(id)` whether a series of
   `series` shows (`[{id, name, mark, color, glyph}]`, each a key entry while a lane draws it). `marks: false`, or a
   function of a record, leaves Events' marks to the view; the tips and a click still find the records.
-- `tl.legend()` is the key for `axis`: an entry for each series the lanes drew (`─ running`, `× failed`), each a toggle.
+- `tl.legend()` is the key for `axis`: an entry for each series the lanes drew (`─ running`), each a toggle.
 - It needs no other part. With no `scale` it lays out its records' whole span and draws its own axis, with its key,
   under the lanes. `rows` is the Rows control, a field's name or a function of a record; with none it draws one lane and
   no names. `time(item)` is a record's place (`item.t` by default), a number, or a Date or a date such as an ISO time
