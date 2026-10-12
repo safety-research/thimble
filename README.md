@@ -74,9 +74,9 @@ To switch a directory to terminal mode, run `thimble mode terminal` in it, then 
 
 Claude Code (tested with 2.1.295), with its hooks modules on, macOS or Linux, and Python 3.12+ ([uv](https://docs.astral.sh/uv/) recommended). Node 20+ is needed for custom views (the viewers the dev agent builds for your data), for the sandbox card code and code tickets run in, and for a development build. [INSTALL.md](INSTALL.md) has the details.
 
-## Security
+## Security & Privacy
 
-thimble is a research prototype. Its server has no login, so any program on your machine can use it, and Claude's notebook code can reach the network and local services: treat a corpus like code you are about to run. Report security issues privately to [@mjoerke](https://github.com/mjoerke).
+thimble is a research prototype. Please report any security issues privately to [@mjoerke](https://github.com/mjoerke). thimble is runs on top of Claude Code: it does not collect any data of its own and all authentication and billing is managed by `claude`.
 
 ## License
 
