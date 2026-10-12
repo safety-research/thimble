@@ -13,7 +13,7 @@ import { mediaOf, mediaUrl, type MediaRef } from '../lib/media'
 import { refreshProposals } from '../lib/proposals'
 import { fragmentIn, nearestLine, parseRef } from '../lib/refs'
 import { track } from '../lib/telemetry'
-import type { Concept, LabelsForPath, Proposal, SourceKind, SourcePage, SourceRecord, TranscriptHint, View } from '../lib/types'
+import type { Concept, LabelsForPath, Proposal, SourceKind, SourcePage, SourceRecord, TimeHint, TranscriptHint, View } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { failureText, ReportProblemButton } from '../shell/ProblemReport'
 import { clearMatches, firstMatchFrom, lineAsked, markMatches, markSpots, matchCount, matchNumber, stepInLine, stepMatch, unfoldAt, type MatchAt } from './find'
@@ -71,7 +71,7 @@ const DRAG_SHOW_MAX_MS = 60
 /** ms between asks for the line count while the server's is an estimate (a big file whose line index is being built) */
 const LINES_POLL_MS = 1000
 /** the order of the built-in views in the mode switch */
-const ORDER = ['transcript', 'text', 'raw', 'table', 'forge']
+const ORDER = ['transcript', 'text', 'raw', 'table', 'timeline', 'forge']
 const BINARY_REASON = 'A binary file, with no text to show here.'
 const NO_MATCH: MatchAt = { i: -1, k: 0 }
 const NO_SPOTS: ReadonlyMap<number, number[]> = new Map()
@@ -527,6 +527,8 @@ function useBuiltins(ws: string, path: string, kind: SourceKind): Builtins {
   const [sample, setSample] = useState<any[] | null>(isDatabase ? [] : null)
   const [binarySize, setBinarySize] = useState<number | null>(null)
   const [hint, setHint] = useState<TranscriptHint | null>(null)
+  // the key of the records' time the server read from the first page, which offers the Timeline mode
+  const [time, setTime] = useState<TimeHint | null>(null)
   // the file whose turns the server's whole parse did not find, though the sniff of its head promised them
   const [noTurns, setNoTurns] = useState<string | null>(null)
   const transcript = noTurns === path ? null : hint
@@ -540,6 +542,7 @@ function useBuiltins(ws: string, path: string, kind: SourceKind): Builtins {
         if (!alive) return
         if (page.binary) setBinarySize(page.size_bytes ?? 0)
         setHint(page.transcript ?? null)
+        setTime(page.time ?? null)
         setSample(page.records.map((r) => r.record))
       })
       .catch(() => alive && setSample([]))
@@ -548,7 +551,7 @@ function useBuiltins(ws: string, path: string, kind: SourceKind): Builtins {
     }
   }, [ws, path, isDatabase])
   return useMemo(() => {
-    const scored = scoreViews(path, kind, sample ?? [], transcript)
+    const scored = scoreViews(path, kind, sample ?? [], transcript, time)
     const scoreOf = (t: string) => scored.find((s) => s.def.type === t)?.score ?? 0
     const binary = !isDatabase && (binarySize != null || looksBinary(sample ?? []))
     const listed = (isDatabase ? scored.filter((s) => s.score >= 0.5).map((s) => s.def) : scored.map((s) => s.def).filter((v) => v.type !== 'forge' && (v.type === 'raw' || scoreOf(v.type) > 0)))
@@ -556,7 +559,7 @@ function useBuiltins(ws: string, path: string, kind: SourceKind): Builtins {
       .filter((v) => !binary || v.type === 'raw' || isDatabase)
       .sort((a, b) => ORDER.indexOf(a.type) - ORDER.indexOf(b.type))
     return { listed, auto: pickView(scored), loaded: sample != null, transcript, binary, binarySize, dropTranscript }
-  }, [path, kind, sample, isDatabase, binarySize, transcript, dropTranscript])
+  }, [path, kind, sample, isDatabase, binarySize, transcript, time, dropTranscript])
 }
 
 /** The line of the first record the reader shows at its top, or null when it shows none. */
@@ -705,6 +708,8 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   // of lanes
   const isTranscript = view?.type === 'transcript'
   const colored = isTranscript || view?.type === 'table'
+  // a view that draws the whole file in a frame of its own (Timeline), with its own controls
+  const whole = !!view?.whole
   const [records, setRecords] = useState<SourceRecord[]>([])
   const [total, setTotal] = useState<number | null>(null)
   // the server estimated `total` (a big file whose line index is being built): it is asked for again until it is exact,
@@ -1380,8 +1385,9 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   }
 
   // a viewer for the file's type shows in its place: the one picked for this file, else, while no built-in mode is
-  // picked and the best one is Raw, the first that reads the ref's fragment
-  const rawBest = builtins.loaded && (builtins.auto.type === 'raw' || binary)
+  // picked and the best one is Raw (or the Timeline, which a viewer written for the type goes before), the first that
+  // reads the ref's fragment
+  const rawBest = builtins.loaded && (builtins.auto.type === 'raw' || builtins.auto.type === 'timeline' || binary)
   const types = useTypeViewers(workspace, path, !only && !isDatabase, rawBest)
   const autoViewer = rawBest ? types.viewers.find((v) => fragment == null || accepts(v, fragment)) : undefined
   const pickedSlug = slugOf(pick)
@@ -1443,7 +1449,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
             {lead}
             <span className="reader-spacer" />
             {unread && <span className="reader-fragment mono">#{unread}</span>}
-            {!isDatabase && !binary && loaded && !viewer && <Button variant="icon" size="sm" icon="search" title="Find in the file" className="reader-find-open" active={!!finder} onClick={() => (finder ? closeFinder() : openFinder('find'))} />}
+            {!isDatabase && !binary && loaded && !viewer && !whole && <Button variant="icon" size="sm" icon="search" title="Find in the file" className="reader-find-open" active={!!finder} onClick={() => (finder ? closeFinder() : openFinder('find'))} />}
             <DownloadButton workspace={workspace} path={path} />
             {end}
             {!only && builtins.loaded && view && (options.length > 1 || offered) && (
@@ -1455,7 +1461,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
             )}
           </div>
         )}
-        {finder && !isDatabase && !binary && !viewer && (
+        {finder && !isDatabase && !binary && !viewer && !whole && (
           <FindBar
             text={finder.text}
             onText={(text) => setFinder((f) => (f ? { ...f, text } : f))}
@@ -1471,6 +1477,12 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
         <FileLabels items={fileLabels} />
         {viewer ? (
           <ReaderViewer key={viewer.slug} ws={workspace} view={viewer} path={path} targetRef={fragment != null && accepts(viewer, fragment) ? targetRef : undefined} labels={labels} onRaw={() => onPick('raw')} />
+        ) : whole && ViewComponent && loaded && !noViewReason ? (
+          <div className="reader-main reader-viewer">
+            <ViewBoundary key={`${view!.type}|${path}`} viewType={view!.type} onFallback={() => onPick('raw')}>
+              <ViewComponent workspace={workspace} path={path} kind={kind} page={page} loadMore={loadPage} targetRef={targetRef} transcript={transcript} labels={labels} />
+            </ViewBoundary>
+          </div>
         ) : (
           <>
             {colored && !binary && !isDatabase && loaded && !noViewReason && (

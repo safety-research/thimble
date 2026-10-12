@@ -33,6 +33,7 @@ import type {
   GrepDone,
   GrepFile,
   GrepProgress,
+  SourceEvents,
   SourceFind,
   SourceInfo,
   SourceLines,
@@ -196,6 +197,14 @@ export const api = {
   speakerNames: (c: string, path: string, key: string, ids: string) => j<{ names: Record<string, string> }>(`${BASE}/corpora/${enc(c)}/source/speakers${q({ path, key, ids })}`),
   /** the keys of the file's records that name a kind or a who, over the whole file (backend source_keys.py) */
   sourceKeys: (c: string, path: string, bins?: number) => j<SourceKeys>(`${BASE}/corpora/${enc(c)}/source/keys${q({ path, bins })}`),
+  /** the file's records with a time, in time order, for the Timeline mode (backend source_events.py) */
+  sourceEvents: (c: string, path: string) => j<SourceEvents>(`${BASE}/corpora/${enc(c)}/source/events${q({ path })}`),
+  /** the Timeline mode's page as its sandboxed frame loads it: the view kit over files_timeline.html */
+  timelinePage: async (c: string): Promise<string> => {
+    const res = await fetch(`${BASE}/corpora/${enc(c)}/source/timeline`)
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+    return res.text()
+  },
   /** The URL a PDF of the corpus opens from in the browser's viewer, at `page` when given. */
   pdfUrl: (c: string, path: string, page?: number | null) => `${BASE}/corpora/${enc(c)}/pdf/${path.split('/').map(enc).join('/')}${page ? `#page=${page}` : ''}`,
   /** `GET /corpora/{c}/download/<path>`: the file as it is on disk, an attachment under its own name (the File browser's

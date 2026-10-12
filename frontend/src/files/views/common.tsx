@@ -6,7 +6,7 @@ import { Icon } from '../../components/Icon'
 import { Tipped } from '../../components/Tooltip'
 import { findQuote } from '../../lib/quoteFind'
 import { parseRef } from '../../lib/refs'
-import type { Block, SourceKind, SourcePage, SourceRecord, TranscriptHint } from '../../lib/types'
+import type { Block, SourceKind, SourcePage, SourceRecord, TimeHint, TranscriptHint } from '../../lib/types'
 import { UNFOLD_EVENT } from '../find'
 import { cellFill, markSegments, type LaneCell, type LaneTag, type RecordMarks, type Segment, type SpanMark } from '../labels'
 import { useMarksAt, useMarksOver } from '../marks'
@@ -14,6 +14,7 @@ import { LabelMark } from '../LabelMark'
 import { ColorContext } from '../colorContext'
 import { FilterContext } from '../useFilterBy'
 import { FoldContext } from '../fold'
+import type { FilesLabels } from '../useLabels'
 
 export interface ViewProps {
   workspace: string
@@ -31,14 +32,20 @@ export interface ViewProps {
   /** the records the view shows in place of the file's lines (a whole-file JSON transcript's turns, each on the line it
    * stands on with its fields as `meta.fields`), which Color by and Filter by then read; null gives them the lines back */
   onRecords?: (records: readonly SourceRecord[] | null) => void
+  /** the labels of Files, for a view that draws the file whole in a frame of its own (`whole`), which draws them itself */
+  labels?: FilesLabels
 }
 
 export interface ViewDef {
   type: string
   title: string
-  /** 0..1 how well the view fits: the path, the kind, up to 20 sample records, the server's transcript sniff */
-  match: (path: string, kind: SourceKind, sample: any[], transcript?: TranscriptHint | null) => number
+  /** 0..1 how well the view fits: the path, the kind, up to 20 sample records, the server's transcript sniff and the
+   * key of the records' time it read from the first page */
+  match: (path: string, kind: SourceKind, sample: any[], transcript?: TranscriptHint | null, time?: TimeHint | null) => number
   component: ComponentType<ViewProps>
+  /** the view draws the whole file in a frame of its own, with its own controls (Timeline): the reader gives it its
+   * body, with no strip, no Color by row and no find of its own */
+  whole?: boolean
 }
 
 export interface Target {
