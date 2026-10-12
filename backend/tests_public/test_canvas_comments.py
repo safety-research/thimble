@@ -193,6 +193,41 @@ async def test_a_workspace_s_check_and_comments_stored_under_important_details_f
     assert [x["check"] for x in stored] == [IMPORTANT], "written so on the store's next write"
 
 
+def test_a_check_run_s_chat_stored_under_important_details_former_id_and_name_reads_as_important_details(
+        workspaces_tmp, monkeypatch):
+    """A run of Important details from before stored its chat under the check's former id and name: its title, its
+    brief and its check. The chat list, the chat itself and the tray's row of a run still going read them as
+    `important-details` and Important details, and the chat's file stays as it was."""
+    from app import agents, events, tray
+
+    former, old_name = "you-should-know", "You should know"
+    config.workspace_dir(CORPUS).mkdir(parents=True, exist_ok=True)
+    prompt = checks.builtin(IMPORTANT)["prompt"]
+    agents.ensure_main(CORPUS)
+    meta = {"id": "c1", "kind": "agent", "role": checks.ROLE, "title": old_name, "created_at": "2026-10-08T00:00:00Z",
+            "parent": agents.MAIN_ID, "status": "done", "check": former, "doc": "report", "run_id": "r1",
+            "brief": tools.hint("check-instructions", check=old_name, prompt=prompt)}
+    path, log_path = agents.paths(CORPUS, meta["id"])
+    stored = json.dumps(meta, indent=1)
+    path.write_text(stored)
+    log_path.touch()
+
+    for got in (agents.read_meta(CORPUS, meta["id"]), next(m for m in agents.list_chats(CORPUS) if m["id"] == meta["id"])):
+        assert (got["title"], got["check"]) == ("Important details", IMPORTANT)
+        assert got["brief"] == tools.hint("check-instructions", check="Important details", prompt=prompt)
+    assert path.read_text() == stored, "the chat's file is not rewritten"
+    other = agents.new_agent(CORPUS, checks.ROLE, "Unverifiable", announce=False, check="unverified", doc="report",
+                             brief="The check Unverifiable.")
+    assert agents.read_meta(CORPUS, other["id"])["title"] == "Unverifiable", "another check's chat stays"
+
+    monkeypatch.setattr(events, "asking", lambda c: set())
+    with subagents.update(CORPUS) as state:
+        sf.registry(state)["a1"] = {"role": "check", "key": checks.session_key(former, "report"), "status": "running",
+                                    "started": 1, "chat": meta["id"]}
+    [row] = tray.subagent_rows(CORPUS)
+    assert row["label"] == f"check: {IMPORTANT}:report" and former not in json.dumps(row)
+
+
 def test_a_comment_s_statement_and_details_are_read_from_words_written_as_one_text():
     """A comment stored before `details` is its first sentence, the statement, and the rest, its details; a leading copy
     of its own check's name and a colon goes, since a comment shows its check's name, and no other label does."""

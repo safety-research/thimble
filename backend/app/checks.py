@@ -216,6 +216,24 @@ def current_id(cid: Any) -> str:
     return FORMER_IDS.get(str(cid or ""), str(cid or ""))
 
 
+def chat_as_now(meta: dict[str, Any]) -> dict[str, Any]:
+    """A check run's chat meta, in place, with its check under its id now (current_id) and, when its title is a former
+    name of that check (FORMER_NAMES), the check's name now in its title and in its brief; the meta's file stays as it
+    is until thimble writes it again."""
+    cid = current_id(meta.get("check"))
+    if not cid:
+        return meta
+    meta["check"] = cid
+    old = _collapse(meta.get("title"))
+    if old not in FORMER_NAMES.get(cid, ()):
+        return meta
+    name = str((builtin(cid) or {}).get("name") or old)
+    meta["title"] = name
+    if isinstance(meta.get("brief"), str):  # check-instructions names the check before its prompt: the first match
+        meta["brief"] = meta["brief"].replace(old, name, 1)
+    return meta
+
+
 def _migrate(d: Path) -> None:
     """In the checks folder `d`, a built-in stored under a former id (FORMER_IDS) renamed to its id now, so a workspace
     from before reads and writes it under that id; a copy already stored under the id now wins, and the former file
