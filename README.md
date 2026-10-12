@@ -33,7 +33,8 @@ For a development build, clone the repo and run `bash scripts/install.sh`. [INST
 ## Usage
 
 Run `thimble` in a directory with files you'd like to analyze, just like you would run `claude`.
-- It starts a Claude Code session there with the thimble plugin loaded, inside thimble's sandbox, and prints the dashboard URL. 
+
+- It starts a Claude Code session there with the thimble plugin loaded, inside thimble's sandbox, and prints the dashboard URL.
 - Each run starts a new conversation on the same workspace (cards, report, labels). `thimble --continue` picks up your last conversation in this folder instead.
 
 ### Terminal mode
@@ -42,7 +43,7 @@ In terminal mode, thimble operates as a Claude Code mod and shows its work direc
 
 ![terminal mode: cards under a reply, and the citation panel beside the chat](docs/assets/thimble-term.png)
 
-To switch to terminal mode, run `thimble mode terminal` before running `thimble` in a directory. You can switch back to browser mode by running `thimble mode browser`.
+To switch a directory to terminal mode, run `thimble mode terminal` in it, then `thimble`. `thimble mode browser` switches it back.
 
 ## Commands
 
@@ -52,37 +53,30 @@ To switch to terminal mode, run `thimble mode terminal` before running `thimble`
 |---|---|
 | `/thimble` | start the thimble server and print the dashboard URL |
 | `/thimble fresh` | archive this workspace and open an empty one |
-| `/thimble restore [<name>]` | bring an archived workspace back; with no name, list them |
-| `/thimble status` | one line: server, orientation, queue |
-| `/thimble fix` | in a development install, repair a server that will not start |
-| `/thimble feedback` | write a problem report (a zip) |
-| `/thimble:ask <thread> [message]` | send a message to a thread |
-| `/thimble:orient [focus] [flags]` | start an orientation, with Start's switches, model and effort as flags |
-| `/thimble:label <name> [definition] [kind=regex\|code\|prompt] [paths=<glob>,…] [values=a,b] [limit=N]` | define a label and apply it to the corpus's records |
-| `/thimble:write [report\|slides\|story\|<type>] [request]` | start a writer on a document, the report when none is named |
+| `/thimble restore [<name>]` | bring an archived workspace back |
+| `/thimble:orient [focus]` | start an orientation |
+| `/thimble:label <name> [definition]` | define a label and apply it to the records |
+| `/thimble:write [report\|slides\|story] [request]` | start a writer on a document |
 
-**From a shell** (`thimble help` lists these)
+**From a shell** (`thimble help` lists every command)
 
 | Command | What it does |
 |---|---|
-| `thimble` | start thimble in this folder; `thimble -c` continues the last thimble session here |
-| `thimble demo [<name>...]` | download public datasets (collusion-wiki, mythos-5, transluce-urlquery) from their publishers, asking before each, and open the start page that lists them in the browser, each on an orientation run ahead of time where [demos/](demos/README.md) has one; it starts no Claude Code session (`--attach` starts one; `cd <folder> && thimble` attaches one later, `thimble -c` continues). `thimble demo --export <workspace> <out>` writes a workspace whole, with the transcripts of its sessions, and lists what it holds ([INSTALL.md](INSTALL.md#demo-datasets)) |
-| `thimble list` | list the workspaces by id (each folder's, and its archived runs), when each was last used and its open sessions |
-| `thimble purge <id>... [-y] [--dry-run]` | delete workspaces or archived runs by id and print what was deleted (`--dry-run` only shows what would go); never your data folder or Claude Code's transcripts |
-| `thimble extension add <folder\|git URL>` | add an extension and switch it on, after showing what it gives |
-| `thimble extension list\|on\|off\|remove [<name>]` | list the extensions, switch one on or off everywhere, or remove it |
-| `thimble mode [browser\|terminal] [--default]` | where `thimble` in this folder shows its work: in the browser, or in the terminal with no server (`--default`: every folder without a mode of its own) ([INSTALL.md](INSTALL.md#terminal-mode)) |
-| `thimble plugin on\|off\|status` | thimble in every Claude Code session, or only in the sessions `thimble` starts |
-| `thimble doctor` | what is installed and running, and what is wrong |
-| `thimble feedback ["<what went wrong>"]` | write a problem report (a zip) and say where to send it; the top bar's bug icon does the same |
-| `thimble update` | update to the latest release |
-| `thimble uninstall` | uninstall the package |
-
-A development install (a git clone) also has `thimble fix` and `thimble revert`, and the commands for running a checkout; [CONTRIBUTING.md](CONTRIBUTING.md) lists them.
+| `thimble` | start thimble in this folder; `thimble -c` continues the last session |
+| `thimble demo` | download the [demo datasets](demos/README.md) and open them in the browser |
+| `thimble mode browser\|terminal` | show thimble's work in the browser or in the terminal |
+| `thimble list`, `thimble purge <id>` | list the workspaces, or delete one |
+| `thimble doctor` | show what is installed and running, and what is wrong |
+| `thimble feedback` | write a problem report (a zip) |
+| `thimble update`, `thimble uninstall` | update to the latest release, or uninstall |
 
 ## Requirements
 
 Claude Code (tested with 2.1.295), with its hooks modules on, macOS or Linux, and Python 3.12+ ([uv](https://docs.astral.sh/uv/) recommended). Node 20+ is needed for custom views (the viewers the dev agent builds for your data), for the sandbox card code and code tickets run in, and for a development build. [INSTALL.md](INSTALL.md) has the details.
+
+## Security
+
+thimble is a research prototype. Its server has no login, so any program on your machine can use it, and Claude's notebook code can reach the network and local services: treat a corpus like code you are about to run. Report security issues privately to [@mjoerke](https://github.com/mjoerke).
 
 ## License
 
