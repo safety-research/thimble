@@ -32,6 +32,8 @@ const TOKENS =
   '--text-sm:13px;--text-ui-sm:12px;--text-mono-sm:11px;--border-subtle:rgba(27,26,24,0.12);--border-hairline:rgba(27,26,24,0.08);' +
   '--font-body:sans-serif;--font-mono:monospace}'
 const DOC = VIEW_HTML.replace('<head>', `<head><style>${TOKENS}</style>${KIT}`)
+// the view as it opens again after the analyst colored it by Wiki: it opens Off, and thimble keeps the choice
+const BY_WIKI = VIEW_HTML.replace('<head>', `<head><style>${TOKENS}</style><script>window.__thimbleColour = ${JSON.stringify({ v: 1, by: 'f:wiki', picks: ['f:wiki'], field: 'wiki', off: {}, seen: [], colours: {} })}</script>${KIT}`)
 
 // A bound many times what a step takes in headless Chromium (opening about 0.2 s, a page switch about 0.03 s here), so
 // a slower machine passes and a page that draws every row, every line of every diff, or the whole history again fails.
@@ -116,7 +118,7 @@ function answers() {
   })
 }
 
-async function open(): Promise<{ page: Page; frame: Frame; ms: number; errors: string[] }> {
+async function open(doc = DOC): Promise<{ page: Page; frame: Frame; ms: number; errors: string[] }> {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
   const errors: string[] = []
   page.on('pageerror', (e) => errors.push(String(e)))
@@ -126,7 +128,7 @@ async function open(): Promise<{ page: Page; frame: Frame; ms: number; errors: s
     const t = Date.now()
     ;(document.getElementById('f') as HTMLIFrameElement).srcdoc = doc
     return t
-  }, DOC)
+  }, doc)
   // the frame's first document is about:blank, which the view's replaces
   for (let tries = 0; ; tries++) {
     const frame = page.frames().find((f) => f !== page.mainFrame())
@@ -198,7 +200,7 @@ describe('the Wiki Page History demo view', () => {
   })
 
   test('the history: diffs drawn in part, only the items around the view drawn, Color by\'s tracks, and Color by reads nothing again', async () => {
-    const { page, frame } = await open()
+    const { page, frame } = await open(BY_WIKI)
     const h = await frame.evaluate(() => {
       const d = document.querySelector('#blocks .blk .diff')!
       return {
@@ -269,7 +271,7 @@ describe('the Wiki Page History demo view', () => {
   })
 
   test('Color by only colors: a wiki turned off keeps its pages and revisions, drawn without its colour', async () => {
-    const { page, frame, errors } = await open()
+    const { page, frame, errors } = await open(BY_WIKI)
     const look = () => frame.evaluate(() => {
       const sw = [...document.querySelectorAll('.thimble-colour-chip')].find((c) => c.querySelector('.chip-text')!.textContent === 'dse')!
       const dse = getComputedStyle(sw.querySelector('.chip-sw')!).backgroundColor
