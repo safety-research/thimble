@@ -514,6 +514,10 @@ BROWSER_ONLY_PROMPTS = {"dev-view.md": "the view's parts", "view-review.md": "th
                         "report-video.md": "video"}
 BROWSER_ONLY_HINTS = {"view-media-unplayable": "the view page", "view-marks-missing": "the view page",
                       "view-own-parts": "the view page"}
+# Prompt files that prompts.py does not load, each with why, scanned as their text stands: the per-turn view proposal
+# prompt, which the views experiment's harness reads itself, and whose JSON example ends in `}}`, which prompts.py
+# refuses outside a directive
+RAW_PROMPTS = {"view-propose.md": "read by the views experiment's harness; its JSON example ends in }}"}
 
 
 def _browser_words(text: str) -> list[str]:
@@ -546,7 +550,8 @@ def test_no_terminal_mode_prompt_names_the_browser(tmp_path, monkeypatch):
             if rel in BROWSER_ONLY_PROMPTS or rel == "tools.md":
                 continue
             name = rel.removesuffix(".md")
-            text = prompts.render(name, {s: "X" for s in prompts.slots(name)})
+            text = (path.read_text("utf-8") if rel in RAW_PROMPTS
+                    else prompts.render(name, {s: "X" for s in prompts.slots(name)}))
             found += [f"{rel}: {w}" for w in _browser_words(text)]
         for name, (desc, schema) in tools.tool_sections().items():
             found += [f"tools.md ## {name}: {w}" for d in (desc, *_descriptions(schema)) for w in _browser_words(d)]
