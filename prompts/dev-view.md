@@ -71,7 +71,7 @@ Code checks every view and says what to fix when a check fails. The analyst sees
 {{end}}
 - **The filter.** The reader keeps only the records for which `thimble.kept(ref)` holds, in every list and count, and the units for which `thimble.kept_unit(refs)` holds. The {{if:browser}}page fetches again in `thimble.onLabels(fn)`{{end}}{{if:terminal}}program fetches again in `onLabels(fn)`{{end}}, which runs when the labels or the filter change.{{if:browser}} Without `onLabels`, thimble hides the anchored elements the filter drops.{{end}}
 - **Charts.** thimble cannot see inside a chart, so the reader counts each label's marks with `thimble.marked(ref)`, each `{"label", "value", "color"}`, and the chart draws the marked part in the label's color.
-- **Color.** A label the analyst turns on takes Color by's color.{{if:browser}} The kit's parts keep their own bars, so `onChange` draws again only your own markup.{{end}} A group of records, such as a run or a session, takes no color of its own: {{if:browser}}`thimble.mix(el, counts)`{{end}}{{if:terminal}}`color.mix(counts, cells)`{{end}} shows its records' mix.
+- **Color.** A label the analyst turns on takes Color by's color.{{if:browser}} The kit's parts keep their own bars, so Color by's `onChange` draws again only your own markup.{{end}} A group of records, such as a run or a session, takes no color of its own: {{if:browser}}`thimble.mix(el, counts)`{{end}}{{if:terminal}}`color.mix(counts, cells)`{{end}} shows its records' mix.
 - **Labels stay labels.** A judgment that a label holds belongs to the label, not to a field the view derives from keywords.
 {{if:browser}}
 - **Label calls.** `thimble.mark(ref, id, value)` gives a record a value and `thimble.editLabel(id)` opens a label's editor (a new label's with no id). Each works only during the analyst's own click or key press, never on load or on a timer, and returns a promise that rejects with thimble's reason. Never hardcode a label's name or color.
@@ -85,7 +85,7 @@ Three example views in {{examples}} show this contract on invented data with the
 
 A form in `accepts` is cited `<file>#<form>`. Accept `L<n>` for a line, so older citations open in the view. A form in `units` is cited `view:<slug>/<form>`, with a unit's key in its place, which `resolve` gets as `{"key"}`. Give a unit only to what spans records, such as a conversation or a day.
 
-    Ticket  Unit: one ticket; tickets with the same customer_id are one conversation, in time order.
+    Ticket  Data: one ticket per line; tickets with the same customer_id are one conversation, in time order.
     Good    "accepts": [{"form": "L<n>", "means": "the ticket on line <n>, shown in its conversation"}],
             "units": [{"form": "<customer_id>", "means": "one customer's whole conversation"}]
 
