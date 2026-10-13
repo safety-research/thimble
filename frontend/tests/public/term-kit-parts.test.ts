@@ -202,6 +202,31 @@ describe('Rows', () => {
     expect(rows.by).toEqual({ field: 'session', title: 'Session' })
   })
 
+  test('opened again on what thimble kept, with no Color by chosen, Color by still does not take the label Rows groups by', async () => {
+    const open = async (state: object) => {
+      init({ labels: [TACTIC(['explore', 'verify'])], state })
+      const colour = kit.colorBy({ fields: [{ name: 'tool', title: 'Tool' }], initial: 'tool' })
+      const rows = kit.rows({ fields: [{ name: 'session', title: 'Session' }, { name: 'tool', title: 'Tool' }], initial: [{ label: 'tactic' }, 'tool'] })
+      kit.draw((d: any) => {
+        const r = d.row()
+        rows.add(r)
+        r.end()
+        colour.draw(d)
+      })
+      await tick()
+      return { colour, rows }
+    }
+    await open({})
+    // the labels heard again: Color by keeps its state, no choice among it
+    kit.handle({ t: 'labels', labels: [TACTIC(['explore', 'verify'])], filter: null })
+    await tick()
+    const keptNow = JSON.parse(JSON.stringify(kit.__driver.state.kept))
+    expect(keptNow.colour.chosen).toBe(undefined)
+    const { colour, rows } = await open(keptNow)
+    expect(rows.by).toEqual({ label: 'k1', title: 'Tactic' })
+    expect(colour.by).toEqual({ field: 'tool', title: 'Tool' })
+  })
+
   test('a record the reader gave its group keeps it', () => {
     const rows = kit.rows({ fields: [{ name: 'tool', title: 'Tool' }] })
     expect(rows.groups([{ ref: 'a#L1', tool: 'Bash', group: 'Edit' }]).map((g: any) => g.name)).toEqual(['Edit'])

@@ -434,6 +434,10 @@ describe('Color by', () => {
     await tick()
     expect(colour.by).toEqual({ label: 'k2', title: 'Charged twice' })
     expect(heard).toBe(1)
+    // opened again on what thimble kept, the view keeps the label turned on last, as the browser's does
+    const keptNow = JSON.parse(JSON.stringify(kit.__driver.state.kept))
+    init({ labels: ON.map((l) => ({ ...l, on: true })), state: keptNow })
+    expect(kit.colorBy({ fields: FIELDS }).by).toEqual({ label: 'k2', title: 'Charged twice' })
     // another view opening keeps what it saw: nothing new is on, so its choice stays
     init({ labels: ON.map((l) => ({ ...l, on: true })), state: { colour: { by: 'field:kind', off: [], seen: ['k1', 'k2'], chosen: true } } })
     expect(kit.colorBy({ fields: FIELDS }).by).toEqual({ field: 'kind', title: 'Kind' })

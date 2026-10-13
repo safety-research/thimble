@@ -1391,8 +1391,9 @@ export function colorBy(opts = {}) {
     const on = onIds().filter((id) => !h.has(id))
     return on.length ? `label:${on[0]}` : startKey
   }
-  // what thimble kept of the choices and the values turned off holds once the analyst (or the page) changed them; until
-  // then, and after Reset, the view opens as it says (home), so a newer version of the view opens as that one says
+  // what thimble kept of the choices and the values turned off holds once the analyst, the page or a label turned on in
+  // thimble changed them; until then, and after Reset, the view opens as it says (home), so a newer version of the view
+  // opens as that one says
   const chosen = Boolean(keptBy && keptBy.chosen)
   const c = {
     // the choices in order, as the browser's Color by keeps them: the first is the color, each other a track beside
@@ -1454,6 +1455,8 @@ export function colorBy(opts = {}) {
     // the label takes the first place, the color; a field it takes it from gives way, a label there keeps its track
     const rest = c.picks.filter((k) => k !== key)
     c.picks = [key, ...(rest[0] && rest[0].startsWith('field:') ? rest.slice(1) : rest)]
+    // a label turned on in thimble is a choice, kept as the analyst's are, as the browser keeps it
+    c.chosen = true
     freshOff()
     c.counts = null
     return true
@@ -1480,8 +1483,9 @@ export function colorBy(opts = {}) {
   // a part that holds a label now: a view that opened colored by it, and was never given a color, opens again
   state.rehome.push(() => {
     const l = labelOf(c.choice)
-    if (kept('colour') || !l || !held().has(String(l.id))) return
+    if ((kept('colour') && kept('colour').chosen) || !l || !held().has(String(l.id))) return
     c.choice = home()
+    c.chosen = false
     freshOff()
     c.counts = null
   })
