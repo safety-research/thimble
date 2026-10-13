@@ -189,7 +189,7 @@ describe('thimble.record', () => {
 
   test('draws in the side panel as its body, and takes Color by\'s bar', async () => {
     await load('<span id="colour"></span><div id="body"><div id="list"></div></div>')
-    const colour = win().thimble.colorBy({ mount: '#colour', fields: [{ name: 'tool', title: 'Tool' }] })
+    const colour = win().thimble.colorBy({ mount: '#colour', fields: [{ name: 'tool', title: 'Tool' }], initial: 'tool' })
     const side = win().thimble.side({ mount: '#body' })
     side.open({ title: 'Read', ref: 'a.jsonl#L1', render: (body: HTMLElement) => win().thimble.record({ mount: body, value: REC, ref: 'a.jsonl#L1', colour }) })
     const rec = side.body.querySelector('.thimble-record')!
@@ -273,7 +273,7 @@ describe('thimble.chart', () => {
 
   test("draws the groups in Color by's colours with no legend, gray for a value turned off, and a label in its colours", async () => {
     await load()
-    const colour = win().thimble.colorBy({ mount: '#colour', fields: [{ name: 'tool', title: 'Tool', values: ['Read', 'Bash'] }] })
+    const colour = win().thimble.colorBy({ mount: '#colour', fields: [{ name: 'tool', title: 'Tool', values: ['Read', 'Bash'] }], initial: 'tool' })
     const done = win().thimble.chart('#c', 'bar', ROWS, { colour })
     expect(of('fetch').at(-1)!.query).toEqual({ $thimble: 'chart', kind: 'bar', rows: ROWS, options: {} })
     answer(BAR)

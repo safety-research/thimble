@@ -63,7 +63,7 @@ const view = (mount: Mount) => `<!doctype html><html><head><style>${TOKENS} html
 <script>
 const RECS = ${JSON.stringify(RECS)}
 window.__changes = 0
-const mountColour = () => (window.colour = thimble.colorBy({ mount: '#colour', fields: ${JSON.stringify(FIELDS)}, onChange: () => window.__changes++ }))
+const mountColour = () => (window.colour = thimble.colorBy({ mount: '#colour', fields: ${JSON.stringify(FIELDS)}, initial: 'author', onChange: () => window.__changes++ }))
 ${mount === 'first' ? 'mountColour()' : ''}
 const rows = (p) => RECS.map((r) => ({ ...r, ref: p + '.jsonl#L' + r.n }))
 const turns = (p) => rows(p).map((r) => (r.n === 3 ? { ...r, speaker: r.author, kind: 'tool', tool: 'Bash', input: 'ls', output: 'a\\nb' } : { ...r, speaker: r.author, kind: 'text' }))
@@ -316,7 +316,7 @@ const POSTS = Array.from({ length: 40 }, (_, i) => ({ n: i + 1, kind: ['review',
 window.__reads = 0
 // a read of a turn's record, which the transcripts alone hand Color by (the tables' rows are copies)
 const count = (name) => (r) => (POSTS.includes(r) && window.__reads++, r[name])
-thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', value: count('kind') }, { name: 'author', title: 'Author', value: count('author') }], onChange: () => {} })
+thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', value: count('kind') }, { name: 'author', title: 'Author', value: count('author') }], initial: 'kind', onChange: () => {} })
 const turns = (p) => POSTS.slice(0, 4).map((r) => ({ ref: p + '#L' + r.n, speaker: r.author, kind: 'text', text: r.text, record: r }))
 for (let k = 0; k < 20; k++) thimble.transcript({ mount: '#again' }).draw(turns('again'))
 thimble.transcript({ mount: '#quiet' }).draw(turns('quiet'))
@@ -387,7 +387,7 @@ test("a part whose records the page's Color by cannot read draws them with no ba
 <span id="colour"></span><ul id="list"></ul><div id="tr"></div><div id="rec"></div><div id="cards"></div><div id="given"></div>
 <script>
 const ROWS = [{ kind: 'a', text: 'one' }, { kind: 'b', text: 'two' }]
-const colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', value: (i) => ROWS[i].kind }], onChange: () => {} })
+const colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', value: (i) => ROWS[i].kind }], initial: 'kind', onChange: () => {} })
 document.getElementById('list').innerHTML = ROWS.map((r, i) => '<li data-anchor="l#L' + (i + 1) + '"' + colour.attr(i) + '>' + r.text + '</li>').join('')
 const turns = (p) => ROWS.map((r, i) => ({ ref: p + '#L' + (i + 1), speaker: 'x', kind: 'text', text: r.text }))
 thimble.transcript({ mount: '#tr' }).draw(turns('t'))

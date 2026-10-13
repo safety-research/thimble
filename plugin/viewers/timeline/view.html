@@ -135,7 +135,7 @@ const FIELDS = [
 // the search marks the words in the table's rows and in the event open beside them, and the reader keeps only the
 // events that hold them, so the lanes show those alone; the table counts the events it keeps (drawList)
 const search = thimble.search({ mount: '#search', in: '#body', placeholder: 'Search events', onChange: () => load() })
-const color = thimble.colorBy({ mount: '#color', fields: FIELDS, initial: 'service', onChange: load })
+const color = thimble.colorBy({ mount: '#color', fields: FIELDS, onChange: load })
 const filter = thimble.filterBy({ mount: '#filter', fields: FIELDS, initial: 'incident', onChange: load })
 const rows = thimble.rows({ mount: '#rows', fields: FIELDS, initial: 'source', onChange: () => { pick(null); load() } })
 const range = thimble.timeRange({ mount: '#range', readout: '#read', onChange: draw })

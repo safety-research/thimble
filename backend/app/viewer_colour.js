@@ -11,6 +11,8 @@
 //                                              order and colors stay the records': { meanings: { payments: 'the
 //                                              payments API' } }; `description` says what the field is; a chip's hover
 //                                              gives them
+//     initial: 'kind',                         how the view opens: a field's name, or { field: 'kind', on: ['With
+//                                              links'] }, that field with only those values colored; Off without it
 //     strip: '#list',                          the list that gets the colored strip, or true for the page; another
 //                                              list gets it with color.strip(el, {rows}) or {whole: true}, and is
 //                                              a plain scrollbar otherwise
@@ -25,9 +27,10 @@
 // One menu takes several choices: Off, then the view's own fields under "Fields" and every label over files under
 // "Labels", those that mark the view's files first, a label a choice as a field is (no switch of its own). The first
 // checked is the colour; each checked after it is a lane of its own in the list's tracks; with none checked the view is
-// Off. Each field and label says how many values it colors by and shows them as chips on a line under its name, cut off
-// with … where they do not fit; a field that declares no values shows those its records take on the page (the records
-// the page hands valueOf, attr and keeps), the commonest first. Checking a label turns it on in Files and every view and
+// Off. The view opens Off, or as its `initial` says, unless a label is on (below). Each field and label says how many
+// values it colors by and shows them as chips on a line under its name, cut off with … where they do not fit; a field
+// that declares no values shows those its records take on the page (the records the page hands valueOf, attr and
+// keeps), the commonest first. Checking a label turns it on in Files and every view and
 // opens thimble's label editor beside the menu (thimble.editLabel), which stays open; unchecking it turns it off unless
 // Rows or Filter by holds it. Escape in the editor closes it and puts the focus back on the label's row, and a click in
 // the view closes it too. A field colors by the values its records take, each in a palette colour of its own (the label
@@ -62,9 +65,10 @@
 // section below). thimble keeps the choice, the values turned off and the colours per view (the bridge's `colour` message),
 // with the time ranges viewer_range.js keeps, and hands them back as window.__thimbleColour when the page loads.
 //
-// Reset, at the row's end, shows while the view is not as it opens: a value turned off, a time range zoomed in, a search
-// field or select in the row changed, or what the page says of its own state (thimble.onReset). It puts all of them
-// back and keeps the choice of Color by. Hidden, it keeps its place unseen, so the chips fit one width either way.
+// Reset, at the row's end, shows while the view is not as it opens: Color by's choice or its values turned off, a time
+// range zoomed in, a search field or select in the row changed, or what the page says of its own state
+// (thimble.onReset). It puts all of them back: Color by as `initial` says, else Off, or on a label that is on.
+// Hidden, it keeps its place unseen, so the chips fit one width either way.
 ;(function () {
   'use strict'
   // the bridge's part for the kit (window.__thimbleKit), which viewer_range.js, loaded after this file, takes away
@@ -268,14 +272,18 @@
   // A label turned on since the view last saw the labels takes the colour, the one turned on last; the labels on now
   // are seen. A label another part holds (viewer_controls.js: the one Rows groups the lanes by) takes no colour.
   var holds = []
+  function heldLabels() {
+    var held = []
+    for (var h = 0; h < holds.length; h++) held = held.concat(safe(holds[h], []) || [])
+    return held.map(String)
+  }
   function notice() {
     var ids = onLabels().map(function (l) {
       return String(l.id)
     })
     var before = S.seen || []
     S.seen = ids
-    var held = []
-    for (var h = 0; h < holds.length; h++) held = held.concat(safe(holds[h], []) || [])
+    var held = heldLabels()
     var fresh = ids.filter(function (id) {
       return before.indexOf(id) < 0 && held.indexOf(id) < 0
     })
@@ -500,7 +508,12 @@
     this.tallies = {}
     this.seenRecs = typeof WeakSet === 'function' ? new WeakSet() : null
     this.seenRows = {}
-    this.initial = typeof opts.initial === 'string' ? opts.initial : this.fields.length ? this.fields[0].name : null
+    // how the view opens (`initial`): Off, a field's name, or {field, on: [values]}, that field with only those values
+    // colored; a name that is none of its fields opens Off, as Filter by and Rows open on their default
+    var init = opts.initial
+    var initField = typeof init === 'string' ? init : init && typeof init === 'object' && typeof init.field === 'string' ? init.field : ''
+    this.initial = initField && this.field(initField) ? initField : null
+    this.initialOn = this.initial && init && typeof init === 'object' && Array.isArray(init.on) ? init.on.map(keyOf) : null
     this.onChange = typeof opts.onChange === 'function' ? opts.onChange : null
     this.mount = el(opts.mount)
     this.given = null // counts the page gave for the current choice: {key: n}
@@ -535,7 +548,10 @@
         var key = self.keyAt(chip)
         var c = self.choice()
         // the first click of the double click turned the value off or on: that is undone before the value is kept alone
-        if (c && self.pre && self.pre.key === key && self.pre.by === c.key) S.off[c.key] = self.pre.off
+        if (c && self.pre && self.pre.key === key && self.pre.by === c.key) {
+          if (self.pre.off) S.off[c.key] = self.pre.off
+          else delete S.off[c.key]
+        }
         self.pre = null
         self.only(key)
       })
@@ -606,7 +622,8 @@
     return f ? { field: f.name, title: f.title, key: by } : null
   }
   // Color by's choices now, in order: the first is the colour, each other a track beside the list's (Strip). None for
-  // Off; with none that holds (a label turned off, a field the view dropped), the field chosen last or the first
+  // Off; with none that holds (a label turned off, a field the view dropped), the field chosen last, else how the view
+  // opens: its `initial` field, or none (Off)
   Control.prototype.picks = function () {
     if (S.picks && !S.picks.length) return []
     var out = []
@@ -628,22 +645,83 @@
       return c.key
     })
   }
-  // what the colour is now: Off, a field, a label that is on, or nothing
+  // what the colour is now: a field, a label that is on, or Off
   Control.prototype.choice = function () {
     if (S.picks && !S.picks.length) return { off: true, title: 'Off', key: OFF }
-    return this.picks()[0] || null
+    return this.picks()[0] || { off: true, title: 'Off', key: OFF }
+  }
+  // Color by's choices as the view opens: a label that is on and no part holds (the last of them), as the view opens
+  // colored by it, else its `initial` field, else none (Off)
+  Control.prototype.homePicks = function () {
+    var held = heldLabels()
+    var on = onLabels().filter(function (l) {
+      return held.indexOf(String(l.id)) < 0
+    })
+    if (on.length) return ['l:' + on[on.length - 1].id]
+    return this.initial ? ['f:' + this.initial] : []
+  }
+  // the values a choice colors as the view opens: those of `initial`'s `on` for its field, else every one (null)
+  Control.prototype.homeOn = function (c) {
+    return this.initialOn && c && !c.off && c.key === 'f:' + this.initial ? this.initialOn : null
+  }
+  // the keys of the chips' values, each value under "Other" in its place
+  Control.prototype.allKeys = function () {
+    return this.flat().map(function (v) {
+      return v.key
+    })
+  }
+  // the values of a choice turned off as the view opens: with `initial`'s `on`, every value but those
+  Control.prototype.homeOff = function (c) {
+    var on = this.homeOn(c)
+    return on
+      ? this.allKeys().filter(function (k) {
+          return on.indexOf(k) < 0
+        })
+      : []
+  }
+  // whether Color by differs from how the view opens: another choice, or other values turned off
+  Control.prototype.moved = function () {
+    if (this.pickKeys().join('\u0001') !== this.homePicks().join('\u0001')) return true
+    var c = this.choice()
+    var off = this.offSet(c)
+    var home = this.homeOff(c)
+    return off.length !== home.length || off.some(function (k) { return home.indexOf(k) < 0 })
+  }
+  // Color by as the view opens (Reset): its choices and no value turned off but those `initial` turns off; a label
+  // that is on is a choice the analyst made elsewhere in thimble, so it is kept as a choice, a field is left to the view
+  Control.prototype.home = function () {
+    var home = this.homePicks()
+    S.off = {}
+    if (home.length && home[0].indexOf('l:') === 0) S.picks = home
+    else {
+      S.picks = null
+      S.by = null
+      S.field = null
+    }
   }
   // the choices past the first, each a track of its own
   Control.prototype.extra = function () {
     var c = this.choice()
     return c && !c.off ? this.picks().slice(1) : []
   }
+  // a choice's values turned off: those the analyst turned off, else those `initial` turns off as the view opens
   Control.prototype.offSet = function (c) {
     c = c || this.choice()
-    return c && !c.off ? S.off[c.key] || [] : []
+    if (!c || c.off) return []
+    return S.off[c.key] || this.homeOff(c)
+  }
+  // whether a value of a choice is turned off, read without the chips' values, so a value not yet counted is off when
+  // `initial` colors only others
+  Control.prototype.isOff = function (key, c) {
+    c = c || this.choice()
+    if (!c || c.off) return false
+    var off = S.off[c.key]
+    if (off) return off.indexOf(key) >= 0
+    var on = this.homeOn(c)
+    return !!on && on.indexOf(key) < 0
   }
   Control.prototype.isOn = function (value) {
-    return this.offSet().indexOf(keyOf(value)) < 0
+    return !this.isOff(keyOf(value))
   }
   // the colour of a field's value, from the palette: the place the analyst picked for it, else a declared value's own
   // place, and the others the first time they are seen, the most frequent first, kept per view so a value keeps its
@@ -966,7 +1044,6 @@
   Control.prototype.hook = function () {
     var c = this.choice()
     var self = this
-    var off = this.offSet(c)
     kit.colour(
       c && c.off
         ? { mode: 'off' }
@@ -979,7 +1056,7 @@
                 return self.drawnColour(v)
               },
               off: function (v) {
-                return off.indexOf(keyOf(v)) >= 0
+                return self.isOff(keyOf(v), c)
               },
               // the choices past the first, a band each beside the first's on every record: a label's value from its
               // mark, a field's from the record's data-color-tracks (attr), at its place there
@@ -1241,14 +1318,14 @@
     if (e.altKey) return this.only(key)
     if (e.detail > 1) return // the second click of a double click, which keeps the value alone
     var c = this.choice()
-    this.pre = c ? { key: key, by: c.key, off: (S.off[c.key] || []).slice() } : null
+    this.pre = c ? { key: key, by: c.key, off: S.off[c.key] ? S.off[c.key].slice() : null } : null
     this.toggle(key)
   }
   // the chip of `key` turned off or on: "Other" turns every value under it
   Control.prototype.toggle = function (key) {
     var c = this.choice()
     if (!c || c.off) return
-    var off = (S.off[c.key] || []).slice()
+    var off = this.offSet(c).slice()
     var v = this.chipOf(key)
     var keys = v ? keysOf(v) : [key]
     var on = v ? this.chipOn(v, off) : off.indexOf(key) < 0
@@ -1272,7 +1349,7 @@
     var mine = v ? keysOf(v) : [key]
     var others = []
     for (var i = 0; i < this.values.length; i++) if (this.values[i].key !== key) others.push.apply(others, keysOf(this.values[i]))
-    var off = S.off[c.key] || []
+    var off = this.offSet(c)
     var alone = mine.every(function (k) { return off.indexOf(k) < 0 }) && others.every(function (k) { return off.indexOf(k) >= 0 })
     S.off[c.key] = alone ? [] : others
     this.changed()
@@ -3273,10 +3350,12 @@
   thimble.expand = expand
 
   // ---------------------------------------------------------------- Reset
-  // The view as it opens: no value turned off, every time range showing its whole span (viewer_range.js), each search
+  // The view as it opens: Color by's choice as `initial` says (else Off, or a label that is on) with no value turned
+  // off but those `initial` leaves uncolored, every time range showing its whole span (viewer_range.js), each search
   // field and select in Color by's row as the page wrote it, and the page's own state as thimble.onReset says. Reset
-  // puts them back without telling the page part by part, then calls the page's reset(), which draws once; a page that
-  // gave none hears Color by's and each range's onChange, and its fields' input and change events, as usual.
+  // puts them back without telling the page part by part, then calls the page's reset(), which draws once, and Color
+  // by's onChange too when its choice changed; a page that gave none hears Color by's and each range's onChange, and
+  // its fields' input and change events, as usual.
   var parts = [] // the kit's other parts that Reset puts back: {changed(), reset(), fire()}
   var pageReset = null
   var resetting = false
@@ -3302,7 +3381,7 @@
     return f.tagName === 'SELECT' ? f.selectedIndex !== firstIndex(f) : f.value !== f.defaultValue
   }
   function isChanged() {
-    if (control && control.offSet().length) return true
+    if (control && control.moved()) return true
     for (var i = 0; i < parts.length; i++) if (safe(parts[i].changed, false)) return true
     if (rowFields().some(fieldChanged)) return true
     return !!(pageReset && pageReset.changed && safe(pageReset.changed, false))
@@ -3318,11 +3397,17 @@
     untip()
     resetting = true
     var fired = []
+    var before = control ? control.choiceKey + '\u0000' + control.tracksKey : ''
+    var rechose = false
     try {
-      S.off = {}
+      if (control) control.home()
+      else S.off = {}
       for (var i = 0; i < parts.length; i++) if (safe(parts[i].changed, false)) fired.push(parts[i])
       for (var j = 0; j < fired.length; j++) safe(fired[j].reset)
       if (control) {
+        control.forget()
+        control.labelKey = control.drawnKey()
+        rechose = control.choiceKey + '\u0000' + control.tracksKey !== before
         save()
         control.hook()
         control.refresh()
@@ -3338,8 +3423,11 @@
     } finally {
       resetting = false
     }
-    if (pageReset && pageReset.reset) safe(pageReset.reset)
-    else {
+    if (pageReset && pageReset.reset) {
+      safe(pageReset.reset)
+      // Color by's choice put back: the page fetches and draws by it again, as at any change of the choice
+      if (rechose) control.changedQuiet()
+    } else {
       if (control) control.changedQuiet()
       for (var m = 0; m < fired.length; m++) if (fired[m].fire) safe(fired[m].fire)
     }

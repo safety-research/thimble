@@ -391,7 +391,7 @@ describe('lanes', () => {
 
   test('a value turned off in Color by keeps its records in the lanes and the time range\'s strip, dim, with no hue', async () => {
     init()
-    const colour = kit.colorBy({ fields: [{ name: 'tool', title: 'Tool' }] })
+    const colour = kit.colorBy({ fields: [{ name: 'tool', title: 'Tool' }], initial: 'tool' })
     const rows = kit.rows({ fields: [{ name: 'session', title: 'Session' }] })
     const range = kit.timeRange({})
     range.data({ times: CALLS.map((c) => c.t), values: (i: number) => colour.valueOf(CALLS[i]) })
@@ -576,9 +576,9 @@ describe('a page\'s own chart', () => {
 })
 
 describe('the side pane', () => {
-  function scene(cols: number, rows = 24) {
+  function scene(cols: number, rows = 24, opts: object = {}) {
     init({ cols, rows })
-    const side = kit.side({})
+    const side = kit.side(opts)
     const list = kit.list({ key: (c: any) => c.ref })
     const opened: string[] = []
     kit.draw((d: any) => {
@@ -618,6 +618,37 @@ describe('the side pane', () => {
     await key('backspace')
     expect(side.isOpen).toBe(false)
     expect(text()[1]).toBe('❯ Grep  r1/explore.jsonl#L2')
+  })
+
+  test("with `empty`, the pane shows its one line, dim, until a row opens; the program's hide() brings the line back, Backspace closes it, and Reset puts the line back", async () => {
+    const { side } = scene(120, 24, { empty: 'Open a call' })
+    await tick()
+    let rows = text()
+    expect([side.isOpen, side.isEmpty]).toEqual([false, true])
+    expect(rows[0]).toMatch(/Task {2}r1\/lead\.jsonl#L3 +│ Open a call +close$/)
+    expect(last().lines[0].find((s: any) => s.s === 'Open a call')).toMatchObject({ d: true })
+    // nothing under the line, and the view as it opens
+    expect(rows[1]).toMatch(/r1\/explore\.jsonl#L2 +│$/)
+    expect(kit.changed()).toBe(false)
+    await key('return')
+    expect([side.isOpen, side.isEmpty]).toEqual([true, false])
+    expect(text()[0]).toMatch(/│ r1\/lead\.jsonl line 3 +close$/)
+    expect(kit.changed()).toBe(true)
+    side.hide()
+    await tick()
+    expect([side.isOpen, side.isEmpty]).toEqual([false, true])
+    expect(text()[0]).toMatch(/│ Open a call +close$/)
+    expect(kit.changed()).toBe(false)
+    // Backspace closes the pane, its line too: the list alone, a change Reset puts back
+    await key('backspace')
+    expect([side.isOpen, side.isEmpty]).toEqual([false, false])
+    expect(text()[0]).toBe('❯ Task  r1/lead.jsonl#L3')
+    expect(kit.changed()).toBe(true)
+    kit.reset()
+    await tick()
+    rows = text()
+    expect(side.isEmpty).toBe(true)
+    expect(rows[0]).toMatch(/│ Open a call +close$/)
   })
 
   test('in a narrow panel the pane stands under the list, a rule between them', async () => {
@@ -726,7 +757,7 @@ describe('the transcript', () => {
   })
 
   test("with two choices of Color by a turn's `●` is two, the second in its value's hue of the second choice, a space where it has none", async () => {
-    init({ cols: 70, state: { colour: { by: 'field:speaker', picks: ['field:speaker', 'field:mood'], off: [], seen: [] } } })
+    init({ cols: 70, state: { colour: { by: 'field:speaker', picks: ['field:speaker', 'field:mood'], off: [], seen: [], chosen: true } } })
     const colour = kit.colorBy({ fields: [{ name: 'speaker', title: 'Speaker' }, { name: 'mood', title: 'Mood' }] })
     const tr = kit.transcript({})
     const turns = [{ ...TURNS[0], mood: 'calm' }, TURNS[1], TURNS[2]]
