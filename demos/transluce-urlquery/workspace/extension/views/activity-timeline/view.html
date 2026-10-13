@@ -438,6 +438,8 @@ const noneColour = () => token('--label-none') || '#a09c93'
 const colour = thimble.colorBy({
   mount: '#colour',
   fields: FIELDS_BY.map((f) => ({ ...f, value: (i) => fieldValue(f.name, i) })),
+  // the lanes' bars stack by Color by's values: the view opens on the catalog's confidence
+  initial: 'confidence',
   onChange: () => { if (D) { assignValues(); rescope() } },
 })
 function assignValues() {
