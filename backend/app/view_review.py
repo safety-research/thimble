@@ -55,7 +55,8 @@ log = logging.getLogger("thimble.view_review")
 PROMPT = "view-review"  # prompts/view-review.md: its `review` section is the reviewer's registered prompt
 TASK = "view-review"  # tasks.TASKS: a program that replaces it reads the pictures (program_reading)
 TASK_PROMPT = "dev-view-review"  # prompts/dev-view-review.md: a review run's prompt
-CONTEXT_CHARS = 400_000  # of the analyst's work (the context engine's parts) in a review run's prompt, as a critique's
+CONTEXT_CHARS = 2_000_000  # of the analyst's work (the context engine's parts): about half the reviewer's 1M-token window,
+# the rest left for the principles, the pictures and the review's own calls (subagents.values_for gives it the window)
 CONTEXT_PARTS = ("conversation", "threads", "orientation", "canvas")
 REVIEWER = "view-reviewer"  # subagents.TYPES
 ROUNDS = 2  # revisions a review may make

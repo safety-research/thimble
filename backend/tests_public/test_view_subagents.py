@@ -1310,9 +1310,9 @@ def test_every_job_click_route_refuses_the_server_s_token_without_the_analyst_s_
 
 
 def test_the_module_registers_the_three_job_roles_on_their_settings_rows(board):
-    """subagents.roles holds `thimble:view-builder` and `thimble:view-reviewer` on Settings' dev row and `thimble:check`
-    on its checks row, each with an explicit effort, a fixed description, and the thimble tools that are not its own
-    taken away."""
+    """subagents.roles holds `thimble:view-builder` and `thimble:view-reviewer` (with the 1M window) on Settings' dev
+    row and `thimble:check` on its checks row, each with an explicit effort, a fixed description, and the thimble tools
+    that are not its own taken away."""
     roles = subagents.roles(CORPUS)
     assert {"orientation", "critic", "writer", "view-builder", "view-reviewer", "check", "orient-helper"} <= set(roles)
     own = {"view-builder": view_tools.BUILDER_TOOLS, "view-reviewer": view_tools.REVIEWER_TOOLS,
@@ -1320,7 +1320,9 @@ def test_the_module_registers_the_three_job_roles_on_their_settings_rows(board):
     for role, mine in own.items():
         r = roles[role]
         assert r["type"] == f"thimble:{role}" and r["background"] and r["description"].strip()
-        assert (r["model"], r["effort"]) == ("claude-opus-5-5", "high")
+        # the reviewer reads the analyst's whole work (view_review.task), so it runs with the 1M-token window
+        assert (r["model"], r["effort"]) == ("claude-opus-5-5[1m]" if role == "view-reviewer" else "claude-opus-5-5",
+                                             "high")
         assert not [n for n in mine if tools.thimble_tool(n) in r["disallowedTools"]]
         assert tools.thimble_tool("add_card") in r["disallowedTools"]
         assert "{{" not in r["prompt"] and len(r["prompt"]) > 500
