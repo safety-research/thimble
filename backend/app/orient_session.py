@@ -1146,12 +1146,12 @@ def _switch(args: dict[str, Any], keys: "tuple[str, ...]", default: bool) -> boo
 
 def choices_of(args: dict[str, Any]) -> tuple[str, list[str], bool, dict[str, Any]]:
     """(the request, the outputs, the critique, the run's model and effort) of start_orientation's arguments or Start's
-    body: `focus` (or `brief`, `text`); the deck (`deck`, `final_notebook`, `analyze_data`) and the views on unless
-    turned off; the report (`report`, `generate_report`) and the critique off unless turned on; `model` and `effort`
+    body: `focus` (or `brief`, `text`); the deck (`deck`, `final_notebook`, `analyze_data`) on unless turned off; the
+    views (`views`, `propose_views`), the report (`report`, `generate_report`) and the critique off unless turned on; `model` and `effort`
     left to Settings when not given (subagents.values_for)."""
     brief = str(args.get("focus") or args.get("brief") or args.get("text") or "")
     deck = _switch(args, ("deck", "final_notebook", "analyze_data"), True)
-    views = _switch(args, ("views", "propose_views"), True)
+    views = _switch(args, ("views", "propose_views"), False)
     report = _switch(args, ("report", "generate_report"), False)
     critique = _switch(args, ("critique",), orientation.DEFAULT_CRITIQUE)
     passes = [p for p, on in (("final", deck), ("views", views), ("report", report)) if on]

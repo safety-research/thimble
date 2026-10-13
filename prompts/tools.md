@@ -241,7 +241,7 @@ Propose a view, a page that shows records in a form their files hide, or a viewe
   "properties": {
     "name": {"type": "string", "description": "A short name in Title Case, as its tab shows it, such as Message Board."},
     "description": {"type": "string", "description": "What the analyst sees, in one sentence, such as a wiki page with its edit history or a graph of who replies to whom."},
-    "task": {"type": "string", "description": "What the analyst does with the view, in their words."},
+    "task": {"type": "string", "description": "What the analyst wants to find out or do, in their words: the goal, not the steps they take in the view."},
     "claims": {"type": "array", "items": {"type": "string"}, "description": "Globs of every file that holds its records, by pattern rather than one file, such as runs/*/events.jsonl. For a viewer of one file type, the extension's glob, such as **/*.vtt."},
     "model": {"type": "string", "description": "The model to build it on, such as opus, sonnet or a full model id, only when the analyst names one. Default: the dev agent's model in Settings."},
     "effort": {"type": "string", "enum": ["low", "medium", "high", "xhigh", "max"], "description": "The effort to build it at, only when the analyst names one. Default: the dev agent's effort in Settings."}
@@ -404,7 +404,7 @@ Delete a thread and its chat from the workspace, stopping its session if it runs
 
 ## start_orientation
 
-Start an orientation, a broad analysis of the corpus that helps the analyst understand it, as a subagent of this session, which shows the analyst when it finishes the outputs its switches turn on. thimble shows it as a thread, Claude Code's agent tray shows it as a row, and an `orient` event tells you when it ends. Call it when the analyst asks for a new orientation, which adds to the cards the earlier ones left, and `message_orientation` to explore further within one that has finished. A question about the corpus, even a broad one, is no request for an orientation: answer it yourself, and after your answer you can ask whether they want one. Its result is the exact Agent call that starts the orientation, which you then make. Pass only the model, effort and switches the analyst named, so that the others take the values thimble's Settings give them. One orientation runs at a time, so while one runs the call starts nothing.
+Start an orientation, a broad analysis of the corpus that helps the analyst understand it, as a subagent of this session, which shows the analyst when it finishes the outputs its switches turn on. thimble shows it as a thread, Claude Code's agent tray shows it as a row, and an `orient` event tells you when it ends. Call it when the analyst asks for an orientation, or when their question needs a broad analysis of the corpus, such as "what's going on in this dataset?". A new orientation adds to the cards the earlier ones left. Call `message_orientation` to explore further within one that has finished. Its result is the exact Agent call that starts the orientation, which you then make. Pass only the model, effort and switches the analyst named, so that the others take the values thimble's Settings give them. One orientation runs at a time, so while one runs the call starts nothing.
 
 ```json
 {
@@ -412,7 +412,7 @@ Start an orientation, a broad analysis of the corpus that helps the analyst unde
   "properties": {
     "brief": {"type": "string", "description": "The analyst's request in their words, such as a focus, or empty for the whole corpus."},
     "final_notebook": {"type": "boolean", "description": "Leave a deck of cards for the analyst, the group `Orientation`, which appears when the orientation ends. Left out, Settings decide. Default true."},
-    "propose_views": {"type": "boolean", "description": "Propose views of the files. Left out, Settings decide. Default true."},
+    "propose_views": {"type": "boolean", "description": "Propose views of the files. Left out, Settings decide. Default false."},
     "generate_report": {"type": "boolean", "description": "Write the report when the orientation ends. Left out, Settings decide. Default false."},
     "critique": {"type": "boolean", "description": "Have a critic review the analysis before the outputs are written. Left out, Settings decide. Default false."},
     "model": {"type": "string", "description": "The model to run it on, such as opus, sonnet or a full model id, only when the analyst names one. Default: the orientation's model in Settings."},
@@ -1680,7 +1680,7 @@ none
 
 ## message_orientation-none
 
-No orientation has run in this workspace. Answer the analyst yourself, and call `start_orientation` only when they ask for an orientation.
+No orientation has run in this workspace. Answer the analyst yourself, or call `start_orientation` for a new orientation.
 
 ## message_orientation-gone
 

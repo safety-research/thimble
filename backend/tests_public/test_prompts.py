@@ -249,8 +249,9 @@ def test_main_and_the_orientation_say_how_subagents_end_and_start(monkeypatch):
 
 
 def test_main_answers_a_question_itself_and_in_terminal_mode_answers_from_an_agents_outputs(tmp_path, monkeypatch):
-    """Main answers a question itself, even a broad one, and starts an orientation only when the analyst asks for one,
-    then still answers a question asked with it, as start_orientation's description and hints say in both modes. In
+    """Main decides when to start an orientation: when the analyst asks for one or their question needs a broad
+    analysis, then answers what it can itself while it runs, as start_orientation's description and hints say in both
+    modes. In
     terminal mode, once the orientation or a writer finished, main answers from its outputs with a link to each card
     and says where the rest is; browser mode keeps "never summarize", since the browser shows the agent's thread."""
     from app import events, subagent_files, tools
@@ -265,13 +266,13 @@ def test_main_answers_a_question_itself_and_in_terminal_mode_answers_from_an_age
             hints[mode] = {n: tools.hint(n, input="<input>", **note) for n in names}
             desc[mode] = tools.tool_sections(["start_orientation"])["start_orientation"][0]
     for mode in prompts.MODES:
-        assert "Start an orientation only when the analyst asks for one." in main[mode], mode
-        assert ('even a broad one such as "what\'s going on in this dataset?", is no such request: answer it yourself '
-                "in that turn, with a quick look and a few cards") in main[mode], mode
-        assert "start the orientation, then answer the question yourself while it runs" in main[mode], mode
-        assert "is no request for an orientation: answer it yourself" in desc[mode], mode
+        assert "You decide when to start an orientation, as Claude Code decides when to start a subagent." in main[mode]
+        assert ('or when their question needs a broad analysis of the corpus, such as "what\'s going on in this '
+                'dataset?"') in main[mode], mode
+        assert "Then answer what you can yourself while it runs, with a quick look and a few cards." in main[mode]
+        assert "or when their question needs a broad analysis of the corpus" in desc[mode], mode
         assert "then answer that question yourself after the call" in hints[mode]["start_orientation-subagent"], mode
-        assert "only when they ask for an orientation" in hints[mode]["message_orientation-none"], mode
+        assert "or call `start_orientation` for a new orientation" in hints[mode]["message_orientation-none"], mode
     [answer] = [line for line in main["terminal"].splitlines() if line.startswith("- When the orientation or a writer")]
     assert all(part in answer for part in ("under the `↳` line", "`list_cards` on the group `Orientation`",
                                            "`read_ref`", "in a few sentences", "[↗](card:<id>)",

@@ -62,7 +62,8 @@ async def test_start_orientation_gives_the_exact_agent_call_with_settings_values
     assert inp["description"] == "orientation: the moderators"
     rid = inp["prompt"].split("\n")[0]
     assert sf.REQUEST_RE.fullmatch(rid), "the request id on the prompt's first line"
-    assert "REQUEST the moderators" in inp["prompt"] and "OUTPUTS the deck, view proposals, the report" in inp["prompt"]
+    assert "REQUEST the moderators" in inp["prompt"] and "OUTPUTS the deck, the report" in inp["prompt"]
+    assert "OFF view proposals" in inp["prompt"]
     assert "CRITIQUE off" in inp["prompt"]
     rec = orientation.read_run(CORPUS)
     assert (rec["status"], rec["route"], rec["started_by"], rec["request"]) == ("starting", "subagent", "typed", rid)

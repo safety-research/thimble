@@ -284,7 +284,7 @@ def start_passes(payload: dict[str, Any]) -> list[str]:
     `generate_report`); with all three off the orientation leaves its thread. `analyze_data` and `report` are accepted
     as alternate names."""
     final = flag(payload.get("final_notebook", payload.get("analyze_data")), True)
-    views = flag(payload.get("propose_views"), True)
+    views = flag(payload.get("propose_views"), False)
     report = flag(payload.get("generate_report", payload.get("report")), False)
     return [p for p, on in (("final", final), ("views", views), ("report", report)) if on]
 
