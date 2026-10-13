@@ -198,6 +198,23 @@ def test_the_builder_and_the_reviewer_are_registered_to_keep_a_design_the_propos
     assert ask in reviewer and "keep that design" in reviewer
 
 
+@pytest.mark.parametrize("mode", prompts.MODES)
+def test_the_builder_and_the_reviewer_hold_back_color_and_the_detail_panel_and_mirror_the_data(board, mode):
+    # prompts/dev-view.md's "A good view" and prompts/view-review.md's principles, in both modes: at most one color, with
+    # Color by Off unless the view gives it an `initial` choice; the detail panel closed, or one short line until a
+    # click (the side panel's `empty`); a first screen in the chosen form, not a table of raw records; the data's
+    # structure mirrored, a network among the forms; and the units the data repeats compared before their details
+    with prompts.rendering(mode):
+        roles = subagents.roles(CORPUS)
+    builder, reviewer = roles["view-builder"]["prompt"], roles["view-reviewer"]["prompt"]
+    for prompt in (builder, reviewer):
+        assert "at most one color" in prompt and "Color by opens Off" in prompt and "`initial`" in prompt
+        assert "detail panel stays closed" in prompt and "Click a session" in prompt
+        assert "not a table of raw records" in prompt
+        assert "who works with whom as a network" in prompt and "before the details within one" in prompt
+    assert "`{field, on: [values]}`" in builder and "`empty` option" in builder
+
+
 async def test_main_s_message_to_a_view_s_build_thread_gives_the_exact_agent_call(board, bridge, gates, hints):
     """/thimble:ask typed into a view's build thread (message_thread, main's tool) is a typed change, as main's
     file_dev_ticket on a view is: main's exact Agent call starts its builder, so auto mode judges the start, and the
