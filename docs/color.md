@@ -301,7 +301,7 @@ for a record the label does not mark.
 |---|---|
 | `by` | the first choice: `{field, title}` or `{label, title}` (the label's id and name), or `null` (Off, or nothing to color by) |
 | `picks` | every choice in order, the first the color and each other a lane of the tracks: `[{field, title}]` or `[{label, title}]`; none for Off |
-| `off` | whether the analyst chose Off |
+| `off` | whether the color is Off: as the view opens without `initial`, or when the analyst chose Off |
 | `field`, `label` | the field colored by, or the label's id; `null` for the other and for Off |
 | `values` | the chips' values: `[{value, name, color, on, n}]`, `value` `null` for no value, each value under "Other" in its place; none for Off |
 | `valueOf(record)` | a record's value: its field's, or for a label the label's value on `record.ref` (or on a ref given as a string); `null` for Off |

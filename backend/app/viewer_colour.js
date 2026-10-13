@@ -3558,7 +3558,7 @@
           return x.label ? { label: x.label, title: x.title } : { field: x.field, title: x.title }
         })
       },
-      /** whether the analyst chose Off, which colors nothing */
+      /** whether the color is Off, which colors nothing: as the view opens without `initial`, or the analyst's choice */
       get off() {
         var ch = c.choice()
         return !!(ch && ch.off)
