@@ -2466,7 +2466,7 @@ def proposal_lines(prop: dict[str, Any]) -> str:
     sees, what they do with it, the files it reads, and any layout it gave (layout_lines)."""
     task = _one(prop.get("task"))
     return "\n".join(x for x in (f"- What the analyst sees: {_one(prop.get('description') or prop.get('why'))}",
-                                 f"- What the analyst wants to find out or do: {task}" if task else "",
+                                 f"- What the analyst wants to accomplish: {task}" if task else "",
                                  f"- The files it reads: {', '.join(prop.get('claims') or [])}",
                                  layout_lines(prop)) if x)
 

@@ -17,10 +17,10 @@ Offer nothing when:
 
 Start from the analyst's task: what they asked, what the session found, and what they will check next. Mirror the structure of the data, such as threads as threads and who works with whom as a network. Name the actual things the analyst knows, in their words.
 
-The task is what the analyst wants to find out or get done. It names the goal, not the steps: how they reach it is the view's job.
+A good task says what the analyst wants to accomplish, not how. A bad task presupposes an interface and a sequence of steps, which constrains the design too early: how the analyst reaches the goal is the view's job.
 
 - Good: "Find the pub my friend told me about while I visit London." Bad: "Tap the pub icon and choose Directions as I walk down the street."
-- Good: "Find out why some support chats end without an answer." Bad: "Open each unanswered chat and scroll to its last message."
+- Good: "Understand why some support chats end without an answer." Bad: "Open each unanswered chat and scroll to its last message."
 - Good: "Compare how the two models handle a refusal." Bad: "Filter by model, then open each refusal in the side panel."
 
 ## Your answer
@@ -34,7 +34,7 @@ Answer with one JSON object and nothing else:
   "proposal": {
     "name": "Reply Network",
     "description": "One sentence the analyst reads in the banner: what they will see.",
-    "task": "What the analyst wants to find out or do, in their words.",
+    "task": "What the analyst wants to accomplish, in their words.",
     "claims": ["threads/*.jsonl"]
   }
 }
@@ -42,7 +42,7 @@ Answer with one JSON object and nothing else:
 
 - `name`: a short name in Title Case, as its tab shows it.
 - `description`: what the analyst sees, in one sentence.
-- `task`: the analyst's goal, not the steps they take in the view.
+- `task`: what the analyst wants to accomplish, not how.
 - `claims`: globs of every file that holds its records, by pattern rather than one file.
 
 When `show` is false, `proposal` is null.

@@ -241,7 +241,7 @@ Propose a view, a page that shows records in a form their files hide, or a viewe
   "properties": {
     "name": {"type": "string", "description": "A short name in Title Case, as its tab shows it, such as Message Board."},
     "description": {"type": "string", "description": "What the analyst sees, in one sentence, such as a wiki page with its edit history or a graph of who replies to whom."},
-    "task": {"type": "string", "description": "What the analyst wants to find out or do, in their words: the goal, not the steps they take in the view."},
+    "task": {"type": "string", "description": "What the analyst wants to accomplish, in their words, not how."},
     "claims": {"type": "array", "items": {"type": "string"}, "description": "Globs of every file that holds its records, by pattern rather than one file, such as runs/*/events.jsonl. For a viewer of one file type, the extension's glob, such as **/*.vtt."},
     "model": {"type": "string", "description": "The model to build it on, such as opus, sonnet or a full model id, only when the analyst names one. Default: the dev agent's model in Settings."},
     "effort": {"type": "string", "enum": ["low", "medium", "high", "xhigh", "max"], "description": "The effort to build it at, only when the analyst names one. Default: the dev agent's effort in Settings."}

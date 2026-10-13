@@ -67,7 +67,7 @@ async def test_start_orientation_gives_the_exact_agent_call_with_settings_values
     assert "CRITIQUE off" in inp["prompt"]
     rec = orientation.read_run(CORPUS)
     assert (rec["status"], rec["route"], rec["started_by"], rec["request"]) == ("starting", "subagent", "typed", rid)
-    assert (rec["model"], rec["effort"]) == ("claude-opus-5-5[1m]", "max") and rec["passes"] == ["final", "views", "report"]
+    assert (rec["model"], rec["effort"]) == ("claude-opus-5-5[1m]", "max") and rec["passes"] == ["final", "report"]
     r = subagents.request(CORPUS, rid)
     assert r["values"] == {"model": "claude-opus-5-5[1m]", "effort": "max"} and r["route"] == "typed"
     assert not bridge.calls, "a typed start is main's call"

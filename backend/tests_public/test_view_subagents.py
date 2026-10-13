@@ -208,7 +208,7 @@ async def test_propose_view_takes_a_description_a_task_and_claims_and_the_builde
     assert "why" not in row and "spec" not in row
     builder = json.loads(res.text.split("AGENT CALL ", 1)[1].splitlines()[0])["prompt"]
     assert "- What the analyst sees: The posts by thread." in builder
-    assert "- What the analyst wants to find out or do: Find the threads where an agent asks for help." in builder
+    assert "- What the analyst wants to accomplish: Find the threads where an agent asks for help." in builder
     assert "- The files it reads: board.jsonl" in builder
     assert "Find the fields, keys and counts in the files themselves." in builder
     assert "Unit:" not in builder and "The unit and the layout" not in builder
