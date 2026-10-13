@@ -3023,9 +3023,7 @@ def change_text(c: str, prop: dict[str, Any]) -> str:
     request = str(prop.get("change") or "").strip()
     return prompts.render("dev-view-change", {
         "name": str(prop.get("name") or prop["slug"]),
-        "description": str(prop.get("why") or ""),
-        "claims": ", ".join(prop.get("claims") or []),
-        "spec": views.spec_lines(prop),
+        "proposal": views.proposal_lines(prop),
         "request": fenced("the analyst's request", request) if request else "",
         "folder": str(views.views_dir(c) / prop["slug"]),
     })
@@ -3591,8 +3589,9 @@ async def program_view_turn(c: str, slug: str, message: str, folders: list[Path]
     prop = views.read_proposal(c, slug) or {"slug": slug}
     folder = folders[0] if folders else views.views_dir(c) / slug
     job = harness.Job(c, "dev", view_key(slug), f"view: {prop.get('name') or slug}", {
-        "task": "view", "slug": slug, "name": str(prop.get("name") or slug), "description": str(prop.get("why") or ""),
-        "scope": list(prop.get("claims") or []), "spec": views.spec_lines(prop), "change": str(prop.get("change") or ""),
+        "task": "view", "slug": slug, "name": str(prop.get("name") or slug),
+        "description": str(prop.get("description") or ""), "analyst_task": str(prop.get("task") or ""),
+        "scope": list(prop.get("claims") or []), "spec": views.layout_lines(prop), "change": str(prop.get("change") or ""),
         "folder": str(folder), "corpus": str(config.corpus_dir(c)), "examples": str(views.EXAMPLES_DIR),
         "message": message,
     }, VIEW_PROGRAM_TOOLS, view_work_dir(c, slug), writes=(folder,))

@@ -445,13 +445,17 @@ export interface Filters {
  * browser until the analyst accepts it (backend views.accept). */
 export type ProposalStatus = 'queued' | 'building' | 'built' | 'failed' | 'dropped' | 'suggested'
 
-/** A view ticket (the propose_view tool): what the analyst sees in the view and why, the files it reads, the unit and
- * the layout, and the state of the dev agent's build, whose agent chat is `chat`. */
+/** A view ticket (the propose_view tool): what the analyst sees in the view, what they do with it, the files it reads,
+ * and the state of the dev agent's build, whose agent chat is `chat`. The backend reads a 0.7.0 ticket's `why` as its
+ * `description` (views._normalize_proposal). */
 export interface Proposal {
   slug: string
   name: string
-  why: string
+  description: string
+  /** what the analyst does with the view; empty for a viewer for a file type and a 0.7.0 ticket */
+  task: string
   claims: string[]
+  /** the layout a viewer for a file type or a 0.7.0 ticket gave; empty for propose_view's tickets */
   arrangement: string
   proposed_by: string
   /** the analyst asked for it (backend views.propose): it opens by itself once built (files/viewReady.ts) */

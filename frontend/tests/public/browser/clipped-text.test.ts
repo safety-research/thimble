@@ -102,7 +102,7 @@ const view = (slug: string, name: string) => ({
   slug, origin: 'workspace', name, description: `${name}: every save of a page, typography and all.`, claims: ['revisions.jsonl', 'pages.jsonl'], accepts: [], units: [], libs: [], built: T, version: 'v1', ok: true, forms: [], first_file: 'revisions.jsonl', files: ['revisions.jsonl', 'pages.jsonl'], n_files: 2, label_controls: false,
 })
 const VIEWS = [view('wiki-page-history', 'Wiki Page History'), view('query-replay', 'Query Replay Gallery')]
-const PROPOSALS = [{ slug: 'agent-gossip', name: 'Agent Gossip Map', why: 'Who copies whom, by page.', claims: ['revisions.jsonl'], arrangement: 'a graph', proposed_by: 'terminal', status: 'building', ts: T, chat: null }]
+const PROPOSALS = [{ slug: 'agent-gossip', name: 'Agent Gossip Map', description: 'Who copies whom, by page.', task: 'Find who copies whom.', claims: ['revisions.jsonl'], arrangement: '', proposed_by: 'terminal', status: 'building', ts: T, chat: null }]
 const concept = (id: string, name: string, values: string[], counts: number[]) => ({
   id, name, description: `${name}, judged per save.`, unit: 'record', kind: 'prompt', spec: '', labels: values, created_by: 'terminal', ts: T, version: 1, marks: 'record', glob: 'revisions.jsonl', model: '',
   classes: values.map((v, k) => ({ name: v, color: k + 1, highlight: k < values.length - 1 })), shown: true, trial: false,

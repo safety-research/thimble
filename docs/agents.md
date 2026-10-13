@@ -25,7 +25,7 @@ stdin, `{"input": {...}}`, and in the file `$THIMBLE_INPUT`:
 | orientation | `request`, `outputs`, `follow_up`, `choices`, `cards`, `corpus`, `tools` | `read_ref`, `list_cards`, `add_card`, `edit_card`, `delete_card`, `apply_label`, `propose_view`, `screenshot` (as `outputs` allows) | the line main hears |
 | critic | `digest` (what thimble's critic reads), `transcript`, `context` | `read_ref`, `list_cards` | the report the orientation's `critique` call returns |
 | writer | `doc`, `type`, `request`, `after`, `context` | `read_ref`, `list_cards`, `add_card`, `edit_card`, `delete_card`, `screenshot`, `write_document`, `edit_document` | the line main hears |
-| dev | one turn of a view build: `slug`, `name`, `description`, `scope`, `spec`, `change`, `folder`, `corpus`, `examples`, `message` | `read_ref` | the turn's reply; thimble then checks the view's files in `folder` and runs the program again with what failed in `message` |
+| dev | one turn of a view build: `slug`, `name`, `description` (what the analyst sees), `analyst_task` (what they do with the view), `scope`, `spec` (the layout an older proposal or a file type's viewer gave, else empty), `change`, `folder`, `corpus`, `examples`, `message` | `read_ref` | the turn's reply; thimble then checks the view's files in `folder` and runs the program again with what failed in `message` |
 
 An orientation program runs again for a follow-up: a message to the orientation arrives as `request`, with
 `follow_up` true and the cards as they stand in `cards`, so it adds to them. Switching the extension on where an
@@ -44,7 +44,7 @@ answers or check one.
 | labels | `label` (`name`, `unit`, `definition`, `values`, `marks`, `examples`, `comment`, `model`?), `items` (`i`, `ref`, `text`) | `read_ref` | `{labels: [{i, label, confidence, rationale?, quote?}]}`, one entry per item |
 | label-draft | `description`, `paths`, `records` (`paths`, `path`, `cut`, `lines`) | `read_ref` | a label: `{name, scope, kind, text, values, marks?}` |
 | card-check | `card` (`id`, `kind`, `question`, `takeaway`, `citations`, `code`, `context`, `typed`, `kept`), `picture` (a PNG's path, or null), `effort` | `read_ref` | `{assessment: [{problem}] × 5, question, code, takeaway}`, the replacement card |
-| view-review | `view` (`slug`, `name`, `description`, `claims`, `spec`, `checks`), `pictures` (`path`, `about`), `controls`, `records`, `ask` (false) | `read_ref` | `{problems: [...]}`, which thimble's reviewer then fixes; it asks for more pictures itself, and `thimble.default` has no reading to lend |
+| view-review | `view` (`slug`, `name`, `description`, `task`, `claims`, `spec`, `checks`), `pictures` (`path`, `about`), `controls`, `records`, `ask` (false) | `read_ref` | `{problems: [...]}`, which thimble's reviewer then fixes; it asks for more pictures itself, and `thimble.default` has no reading to lend |
 | view-fit | `view` (`name`, `description`), `files`, `samples` | `read_ref` | `{fits, reason}` |
 | file-viewer | `path`, `size`, `count`, `suffix`, `what`, `head` | `read_ref` | `{help, name, why, arrangement}`, the words empty when a viewer would not help |
 | checks | `check` (`id`, `name`, `prompt`), `doc`, `passages` (`ref`, `kind`, `anchor`), `context` | `read_ref`, `list_cards`, `add_comment` | the run's summary line; its comments go through `add_comment` |

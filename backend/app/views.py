@@ -2358,7 +2358,7 @@ def resolve_view_ref(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str,
         prop = read_proposal(c, slug)
         if prop is not None:
             return {"ref": ref, "kind": "view", "slug": slug, "key": None, "record": None, "label": prop["name"],
-                    "excerpt": prop.get("why") or prop["name"], "refs": [],
+                    "excerpt": prop.get("description") or prop["name"], "refs": [],
                     "meta": {"slug": slug, "name": prop["name"], "proposal": True, "status": prop.get("status")}}
         raise refs.RefError(f"no view {slug!r}", 404)
     if view is not None and view["ok"]:
@@ -2435,30 +2435,40 @@ def proposals_path(c: str) -> Path:
     return state_dir(c) / PROPOSALS_FILE
 
 
-# a proposal's `spec`, the fields propose_view requires beside its free-text `why`, in the order a ticket lists them,
-# each with the words it is named by
-SPEC_FIELDS = (("unit", "Unit"), ("overview", "Overview"), ("zoom", "Zoom"), ("filter", "Filter"), ("details", "Details"))
+# A proposal (propose_view) says what the analyst sees in the view (`description`) and what they do with it (`task`),
+# and claims the files it reads; the dev agent reads those files itself for the fields, keys and counts. A viewer for a
+# file type (suggest) also gives a free-text `arrangement`. A 0.7.0 row has `why` in place of `description`, and the
+# layout fields below as its `spec`, also written out as its `arrangement`: it reads as it was proposed (layout_lines).
+# The layout fields of a 0.7.0 proposal, in the order its ticket listed them, each with the words it is named by
+LEGACY_SPEC_FIELDS = (("unit", "Unit"), ("overview", "Overview"), ("zoom", "Zoom"), ("filter", "Filter"),
+                      ("details", "Details"))
 
 
-def clean_spec(raw: Any) -> dict[str, str]:
-    """The spec fields `raw` holds, each with its whitespace collapsed; empty ones are left out."""
-    if not isinstance(raw, dict):
-        return {}
-    return {k: v for k, _ in SPEC_FIELDS if (v := " ".join(str(raw.get(k) or "").split()))}
+def _one(text: Any) -> str:
+    """`text` on one line, its whitespace collapsed."""
+    return " ".join(str(text or "").split())
 
 
-def spec_arrangement(spec: dict[str, str]) -> str:
-    """A spec as the proposal's `arrangement`: one `<Field>: <text>` line per field."""
-    return "\n".join(f"{label}: {spec[k]}" for k, label in SPEC_FIELDS if spec.get(k))
+def layout_lines(prop: dict[str, Any]) -> str:
+    """The layout a proposal gave beside its description and task, as a ticket's bullets: a 0.7.0 proposal's spec, one
+    bullet per field, else its free-text arrangement (a viewer for a file type, a 0.7.0 row without a spec); '' for a
+    proposal that gives none, as propose_view's do."""
+    spec = prop.get("spec") if isinstance(prop.get("spec"), dict) else {}
+    lines = [f"- {label}: {v}" for k, label in LEGACY_SPEC_FIELDS if (v := _one(spec.get(k)))]
+    if lines:
+        return "\n".join(lines)
+    arrangement = _one(prop.get("arrangement"))
+    return f"- The unit and the layout: {arrangement}" if arrangement else ""
 
 
-def spec_lines(prop: dict[str, Any]) -> str:
-    """A proposal's layout as a ticket's bullets: one per spec field, or one holding the free-text arrangement of a
-    proposal without a spec."""
-    spec = clean_spec(prop.get("spec"))
-    if spec:
-        return "\n".join(f"- {label}: {spec[k]}" for k, label in SPEC_FIELDS if spec.get(k))
-    return f"- The unit and the layout: {' '.join(str(prop.get('arrangement') or '').split()) or '-'}"
+def proposal_lines(prop: dict[str, Any]) -> str:
+    """A proposal as the dev agent's tickets give it (view_tools.fenced_proposal, dev.change_text): what the analyst
+    sees, what they do with it, the files it reads, and any layout it gave (layout_lines)."""
+    task = _one(prop.get("task"))
+    return "\n".join(x for x in (f"- What the analyst sees: {_one(prop.get('description') or prop.get('why'))}",
+                                 f"- What the analyst does with it: {task}" if task else "",
+                                 f"- The files it reads: {', '.join(prop.get('claims') or [])}",
+                                 layout_lines(prop)) if x)
 
 
 def _lines(text: Any) -> str:
@@ -2467,11 +2477,12 @@ def _lines(text: Any) -> str:
 
 
 def _normalize_proposal(p: dict[str, Any]) -> dict[str, Any]:
-    """A stored row as the routes give it, with legacy fields normalised: a glob reads as its claim, and a `proposed`
-    status
-    reads as queued."""
-    out = {k: v for k, v in p.items() if k not in ("renderer", "data_md", "glob", "view", "path")}
+    """A stored row as the routes give it, with legacy fields normalized: a glob reads as its claim, a 0.7.0 row's
+    `why` as its description, and a `proposed` status reads as queued."""
+    out = {k: v for k, v in p.items() if k not in ("renderer", "data_md", "glob", "view", "path", "why")}
     out["claims"] = _str_list(p.get("claims")) or _str_list(p.get("glob"))
+    out["description"] = str(p.get("description") or p.get("why") or "")
+    out["task"] = str(p.get("task") or "")
     out.setdefault("arrangement", "")
     if out.get("status") == "held":  # a row stored when a held proposal waited unbuilt
         out.update(status="queued", held=True)
@@ -2561,7 +2572,7 @@ def _counted(p: dict[str, Any]) -> bool:
             and not offered_type_viewer(p.get("claims")))
 
 
-def install_viewer(c: str, slug: str, d: Path, claims: Any, *, why: str, proposed_by: str, orientation: bool,
+def install_viewer(c: str, slug: str, d: Path, claims: Any, *, description: str, proposed_by: str, orientation: bool,
                    extension: str | None = None, libs: Any = None) -> None:
     """The viewer in folder `d` as the workspace's view `slug` claiming `claims`, under a built proposal (an
     `orientation` one counts toward VIEW_PROPOSALS_MAX) that keeps the digest of the files as installed (`installed`)
@@ -2570,7 +2581,7 @@ def install_viewer(c: str, slug: str, d: Path, claims: Any, *, why: str, propose
     v = _normalize_view(slug, raw)
     with _proposals_lock:
         items = [p for p in list_proposals(c) if p.get("slug") != slug]
-        prop = {"slug": slug, "name": title_case(raw.get("name") or slug), "why": " ".join(why.split()),
+        prop = {"slug": slug, "name": title_case(raw.get("name") or slug), "description": _one(description),
                 "claims": _str_list(claims), "arrangement": v["description"],
                 "proposed_by": proposed_by, "status": "queued", "orientation": orientation, "ts": _now()}
         if extension:
@@ -2657,10 +2668,9 @@ def _keep_deleted(c: str, prop: dict[str, Any]) -> None:
 CLICK, FOLLOW_ON, TYPED = "click", "follow-on", "typed"  # how a build starts (subagents.ROUTES)
 
 
-def propose(c: str, name: str, why: str, claims: Any, arrangement: str, proposed_by: str = "analyst",
-            orientation: bool = False, asked: bool = False, suggested: bool = False,
-            spec: dict[str, Any] | None = None, route: str | None = None,
-            values: dict[str, Any] | None = None) -> dict[str, Any]:
+def propose(c: str, name: str, description: str, claims: Any, arrangement: str = "", proposed_by: str = "analyst",
+            orientation: bool = False, asked: bool = False, suggested: bool = False, task: str = "",
+            route: str | None = None, values: dict[str, Any] | None = None) -> dict[str, Any]:
     """Store a proposal, announce it and queue its build at once (dev.queue_view), as part of the start that asked for it
     (`route`: an orientation's proposal a follow-on start, else a click), with the run's `values` (model and effort,
     else Settings' dev row). A typed proposal, main's propose_view, is not queued: its caller starts it with main's
@@ -2672,15 +2682,18 @@ def propose(c: str, name: str, why: str, claims: Any, arrangement: str, proposed
     one more under a new name is refused (409), and one under a name it proposed before improves that view in place.
     One the analyst deleted is refused (409).
     `asked` says the analyst asked for it. With `suggested` (a viewer for a file type the File browser proposes) it is
-    stored `suggested` and not queued until the analyst accepts it (accept). A `spec` (propose_view's fields) is stored
-    with the proposal and written out as its `arrangement`."""
+    stored `suggested` and not queued until the analyst accepts it (accept). A proposal says what the analyst sees in
+    the view (`description`, 400 without it) and, from propose_view, what they do with it (`task`); a viewer for a file
+    type also gives its free-text `arrangement`."""
     name = title_case(name)
     if not name:
         raise HTTPException(400, "a proposal needs a name")
     claims_l = _str_list(claims)
     if not claims_l:
         raise HTTPException(400, "a proposal claims at least one file: give `claims` as corpus-relative globs")
-    spec = clean_spec(spec)
+    description, task, arrangement = _one(description), _one(task), _lines(arrangement)
+    if not description:
+        raise HTTPException(400, "a proposal says what the analyst sees in the view (`description`)")
     hold = orientation and not suggested
     if orientation:
         gone = deleted_proposals(c)
@@ -2690,35 +2703,31 @@ def propose(c: str, name: str, why: str, claims: Any, arrangement: str, proposed
         spent = [*(str(p["name"]) for p in mine), *(str(d["name"]) for d in gone if d.get("counted"))]
         if hold and len(spent) >= VIEW_PROPOSALS_MAX and not any(n.casefold() == name.casefold() for n in spent):
             raise HTTPException(409, _hint("propose_view-cap", view=name, n=VIEW_PROPOSALS_MAX, views=", ".join(spent)))
-    arrangement = spec_arrangement(spec) if spec else _lines(arrangement)
-    if not arrangement:
-        raise HTTPException(400, "a proposal says which records a unit gathers and how the page lays it out (`arrangement`)")
     # a view already built under this name is changed in place, as the analyst still uses it, rather than built again
     # beside it under a new slug
     route = route or (FOLLOW_ON if orientation else CLICK)
     if (built := built_slug(c, name)) is not None:
-        return revise(c, built, "", why=why, claims=claims_l, arrangement=arrangement, proposed_by=proposed_by,
-                      asked=asked, spec=spec or None, route=route, values=values)
+        return revise(c, built, "", description=description, task=task, claims=claims_l, arrangement=arrangement,
+                      proposed_by=proposed_by, asked=asked, route=route, values=values)
     with _proposals_lock:
         items = list_proposals(c)
         old = next((p for p in items if str(p.get("name", "")).casefold() == name.casefold()
                     and (p.get("status") != "built" or p.get("held"))), None)
-        why = " ".join(str(why or "").split())
         if old is not None and old.get("held") and hold and old.get("status") not in ("dropped", "suggested"):
-            if (old.get("why"), old.get("claims"), old.get("arrangement")) == (why, claims_l, arrangement):
+            fields = ("description", "task", "claims", "arrangement")
+            if tuple(old.get(k) for k in fields) == (description, task, claims_l, arrangement) and not old.get("spec"):
                 return old  # the same proposal again: its build goes on, or its view stays built
             # changed, such as after the critique: its build goes on from its draft, or its view is changed
-            return revise(c, old["slug"], "", why=why, claims=claims_l, arrangement=arrangement,
-                          proposed_by=proposed_by, spec=spec or None, route=route, values=values)
+            return revise(c, old["slug"], "", description=description, task=task, claims=claims_l,
+                          arrangement=arrangement, proposed_by=proposed_by, route=route, values=values)
         if old is not None:
             _stop_review(c, old["slug"], forget=True)
             _stop_build(c, old["slug"], "replaced", force=bool(old.get("held")))
             items = [p for p in list_proposals(c) if p.get("slug") != old["slug"]]
         slug = old["slug"] if old is not None else _unique_slug(c, name)
-        prop = {"slug": slug, "name": name, "why": why, "claims": claims_l, "arrangement": arrangement,
-                "proposed_by": str(proposed_by or "analyst"), "status": "suggested" if suggested else "queued", "ts": _now()}
-        if spec:
-            prop["spec"] = spec
+        prop = {"slug": slug, "name": name, "description": description, "task": task, "claims": claims_l,
+                "arrangement": arrangement, "proposed_by": str(proposed_by or "analyst"),
+                "status": "suggested" if suggested else "queued", "ts": _now()}
         if orientation:
             prop["orientation"] = True
         if hold:
@@ -2872,11 +2881,12 @@ def end_revision(c: str, slug: str, error: str | None = None, *, failed_change: 
     _emit(c, slug, "built")
 
 
-def revise(c: str, slug: str, request: str, *, why: str | None = None, claims: Any = None,
-           arrangement: str | None = None, proposed_by: str = "analyst", asked: bool = False,
-           spec: dict[str, Any] | None = None, route: str = CLICK, values: dict[str, Any] | None = None) -> dict[str, Any]:
+def revise(c: str, slug: str, request: str, *, description: str | None = None, task: str | None = None,
+           claims: Any = None, arrangement: str | None = None, proposed_by: str = "analyst", asked: bool = False,
+           route: str = CLICK, values: dict[str, Any] | None = None) -> dict[str, Any]:
     """A change to the view `slug`, as a build on its proposal (made from the view when it has none): `request` is the
-    analyst's words, and given fields replace the proposal's. A built view's files are copied aside first
+    analyst's words, and given fields replace the proposal's. A `description` is the proposal made again (propose), so
+    its task and arrangement replace the old ones with it, a 0.7.0 spec too. A built view's files are copied aside first
     (restore_built), and the proposal is marked `revision` and `changed`. Queued at once (dev.queue_view), as part of
     the start that asked for it (`route`), where a running builder of the view gets the change as a message, and a
     finished one that main's session can still reach runs again with it; a typed change (main's propose_view) is
@@ -2890,8 +2900,9 @@ def revise(c: str, slug: str, request: str, *, why: str | None = None, claims: A
             raise HTTPException(404, f"no such view: {slug}")
         if prop is None:
             items = list_proposals(c)
-            prop = {"slug": slug, "name": view["name"], "why": view["description"], "claims": view["claims"], "arrangement": "",
-                    "proposed_by": str(proposed_by or "analyst"), "status": "built", "ts": _now()}
+            prop = {"slug": slug, "name": view["name"], "description": view["description"], "task": "",
+                    "claims": view["claims"], "arrangement": "", "proposed_by": str(proposed_by or "analyst"),
+                    "status": "built", "ts": _now()}
             _save_proposals(c, [*items, prop])
         revision = view is not None or bool(prop.get("revision"))
         pending = prop.get("status") in PENDING
@@ -2902,11 +2913,10 @@ def revise(c: str, slug: str, request: str, *, why: str | None = None, claims: A
                                   "route": route, "refused": None, "stopped_by": None}
         if values:
             fields["values"] = {k: str(v) for k, v in values.items() if v}
-        spec = clean_spec(spec)
-        for k, v in (("why", " ".join(str(why or "").split())), ("claims", _str_list(claims)),
-                     ("arrangement", spec_arrangement(spec) if spec else _lines(arrangement)), ("spec", spec)):
-            if v:
-                fields[k] = v
+        if description := _one(description):
+            fields.update(description=description, task=_one(task), arrangement=_lines(arrangement), spec=None)
+        if claims_l := _str_list(claims):
+            fields["claims"] = claims_l
         if revision:
             _keep_built(c, slug)
         prop = update_proposal(c, slug, **fields) or prop
@@ -4770,19 +4780,19 @@ async def tool_read_ref(ctx: Any, args: dict[str, Any]) -> Any:
     if not p.get("key"):
         if view is not None:
             lines = [f"{ref} ({view['name']})", view["description"], f"claims: {', '.join(view['claims'])}"]
-            # the arrangement lives on the proposal it was built from, and a change to the view restates it
-            arrangement = str((read_proposal(ctx.c, p["slug"]) or {}).get("arrangement") or "")
-            if arrangement:
-                lines.append(f"arrangement: {arrangement}")
+            # the task and any arrangement live on the proposal it was built from, and a change to the view restates them
+            built_from = read_proposal(ctx.c, p["slug"]) or {}
+            lines += [f"{k}: {built_from[k]}" for k in ("task", "arrangement") if str(built_from.get(k) or "").strip()]
             forms = view_forms(view)
             lines += [f"form: {f}  {m}" for f, m in forms] or ["forms: none"]
             lines.append(await asyncio.to_thread(records_text, ctx.c, p["slug"]))
             return tools.ok("\n".join(ln for ln in lines if ln))
         prop = read_proposal(ctx.c, p["slug"])
         if prop is not None:
-            return tools.ok("\n".join([f"{ref} (a proposal, {prop.get('status')})", f"name: {prop['name']}",
-                                       f"why: {prop.get('why', '')}", f"claims: {', '.join(prop.get('claims') or [])}",
-                                       f"arrangement: {prop.get('arrangement', '')}"]))
+            fields = [("name", prop["name"]), ("description", prop.get("description")), ("task", prop.get("task")),
+                      ("claims", ", ".join(prop.get("claims") or [])), ("arrangement", prop.get("arrangement"))]
+            return tools.ok("\n".join([f"{ref} (a proposal, {prop.get('status')})",
+                                       *(f"{k}: {v}" for k, v in fields if str(v or "").strip())]))
         return tools.err(f"read_ref: no view {p['slug']!r}")
     try:
         res = await asyncio.to_thread(resolve_view_ref, config.corpus_dir(ctx.c), p, ref)
@@ -5038,7 +5048,7 @@ async def suggest(c: str, rel: str) -> str | None:
         log.info("no viewer suggestion for %s/%s: the call ended %s", c, rel, getattr(res, "status", "?"))
         return None
     name = " ".join(str(out.get("name") or "").split())
-    if not out.get("help") or not name or not str(out.get("arrangement") or "").strip():
+    if not out.get("help") or not name or not all(str(out.get(k) or "").strip() for k in ("why", "arrangement")):
         await asyncio.to_thread(_answer_suffix, c, suffix, "none")
         return None
     # the checks ran off the loop: a proposal made meanwhile for the suffix stands

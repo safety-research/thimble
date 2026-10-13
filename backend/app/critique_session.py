@@ -423,8 +423,7 @@ def drafts(c: str) -> list[str]:
         out.append(tools.hint("critique-deck", deck=orientation.GROUP_PATHS["deck"]))
     mine = [p for p in views.list_proposals(c) if (p.get("orientation") or p.get("held")) and p.get("status") != "dropped"]
     if mine:
-        rows = "\n".join(f"- {p.get('name')}: {p.get('why')} Claims {', '.join(p.get('claims') or [])}.\n"
-                         + textwrap.indent(views.spec_lines(p), "  ") for p in mine)
+        rows = "\n".join(f"- {p.get('name')}\n" + textwrap.indent(views.proposal_lines(p), "  ") for p in mine)
         out.append(tools.hint("critique-proposals", proposals=rows))
     return out
 

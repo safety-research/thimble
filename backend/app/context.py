@@ -568,8 +568,8 @@ def views(c: str) -> str:
             lines.append(f"  {v['description']}")
     for p in proposed:
         lines.append(f"- proposed, {p.get('status')}: {p.get('name') or p.get('slug')} · claims {', '.join(p.get('claims') or [])}")
-        if p.get("why"):
-            lines.append(f"  {' '.join(str(p['why']).split())}")
+        if p.get("description"):
+            lines.append(f"  {' '.join(str(p['description']).split())}")
     return "\n".join(lines)
 
 

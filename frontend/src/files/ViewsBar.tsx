@@ -139,15 +139,15 @@ export function buildLabel(status: Proposal['status'], asking: boolean): string 
  * build's thread; for a failed build (a view the analyst asked for, or an orientation's proposal after its repairs) a
  * warning icon with why on hover (failedWhy: a stop at main's quit says so, as the chat's chip does), and Retry beside
  * it; × on hover to delete it (`onDismiss` gets the proposal's box, which a confirm sits by). A viewer
- * suggested for a file type (in the File browser's mode row) wears the sparkle, shows its `why` on hover, and a click
- * builds it (`onAccept` runs then). */
+ * suggested for a file type (in the File browser's mode row) wears the sparkle, shows its description on hover, and a
+ * click builds it (`onAccept` runs then). */
 export function ProposalOption({ ws, p, onDismiss, onAccept, size, asking = false }: { ws: string; p: Proposal; onDismiss: (at: HTMLElement) => void; onAccept?: () => void; size: 'md' | 'lg'; asking?: boolean }) {
   const [retrying, setRetrying] = useState(false)
   const [accepting, setAccepting] = useState(false)
   const suggested = p.status === 'suggested' && !accepting
   const pending = p.status === 'queued' || p.status === 'building' || accepting
   const failed = p.status === 'failed'
-  const { props: tipProps, tip } = useTooltip(suggested ? p.why : null, 'files-proposal-tip')
+  const { props: tipProps, tip } = useTooltip(suggested ? p.description : null, 'files-proposal-tip')
   const retry = () => {
     track('view-build', { target: `view:${p.slug}`, detail: { again: true } })
     setRetrying(true)

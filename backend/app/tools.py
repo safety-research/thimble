@@ -2781,12 +2781,13 @@ async def _h_delete_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
 
 
 async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
-    """A proposal for a view written for how the corpus arranges its records, which a `thimble:view-builder` builds at
-    once (views.propose, dev.start_build) from its fields (views.SPEC_FIELDS), on the model and effort the call names,
-    else Settings' dev row. The orientation's proposals are built as follow-on starts of its own start, and held until
-    their views pass their checks, so each reaches the analyst as soon as it works. A viewer of unusual file types the
-    orientation proposes (views.offered_type_viewer) is stored `suggested`, offered in the File browser and built once
-    the analyst accepts it. A claim that matches no corpus file is refused, naming real paths near it; where views
+    """A proposal for a view: what the analyst sees in it (`description`), what they do with it (`task`) and the files
+    it reads (`claims`), which a `thimble:view-builder` builds at once (views.propose, dev.start_build), reading those
+    files itself for the fields, keys and counts, on the model and effort the call names, else Settings' dev row. The
+    orientation's proposals are built as follow-on starts of its own start, and held until their views pass their
+    checks, so each reaches the analyst as soon as it works. A viewer of unusual file types the orientation proposes
+    (views.offered_type_viewer) is stored `suggested`, offered in the File browser and built once the analyst accepts
+    it. A claim that matches no corpus file is refused, naming real paths near it; where views
     cannot be built the proposal fails at once. A proposal from main's shim is one the analyst asked for: its result is
     the exact Agent call that starts its builder, which main makes (`## start_job-subagent`), and the browser opens the
     view once built. A thread's fork's proposal is built the same way, by main's Agent call on a `start_agent` event
@@ -2796,9 +2797,9 @@ async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     claims = args.get("claims")
     if isinstance(claims, str):
         claims = views._fold(claims)
-    spec = views.clean_spec(args)
-    given = {"name": args.get("name"), "why": args.get("why"), "claims": claims, **spec}
-    for k in ("name", "why", "claims", *(k for k, _ in views.SPEC_FIELDS)):
+    given = {"name": args.get("name"), "description": args.get("description"), "task": args.get("task"),
+             "claims": claims}
+    for k in ("name", "description", "task", "claims"):
         v = given.get(k)
         if not v or (isinstance(v, str) and not v.strip()):
             return err(f"propose_view: `{k}` is required")
@@ -2815,10 +2816,11 @@ async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
 
         if (before := subagents.refusal_before(ctx.c)) is not None:
             return err(before.reason or f"propose_view: {before.kind}")
-    prop = await _maybe_await(views.propose(ctx.c, name=str(args["name"]).strip(), why=str(args["why"]).strip(),
-                                            claims=claims, arrangement="", proposed_by=ctx.created_by,
+    prop = await _maybe_await(views.propose(ctx.c, name=str(args["name"]).strip(),
+                                            description=str(args["description"]).strip(), claims=claims,
+                                            task=str(args["task"]).strip(), proposed_by=ctx.created_by,
                                             orientation=orient, asked=typed,
-                                            suggested=orient and views.offered_type_viewer(claims), spec=spec,
+                                            suggested=orient and views.offered_type_viewer(claims),
                                             route=views.TYPED if typed else None, values=values or None))
     status = str(prop.get("status") or "queued")
     if not prop.get("held"):

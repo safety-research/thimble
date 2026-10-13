@@ -1139,7 +1139,7 @@ function ViewBuildView({ ws, id, chat, slug }: { ws: string; id: string; chat: C
   const parts = useMemo(() => viewBuildParts(chat.rows), [chat.rows])
   return (
     <>
-      {p && <SpecCard className="chat-proposal" title="Proposal" lead={firstSentence(`${p.why} ${p.arrangement}`)} full={[p.why, p.arrangement].filter(Boolean).join('\n\n')} end={<ViewChip ws={ws} slug={p.slug} name={p.name} />} data-anchor={`view:${p.slug}`} />}
+      {p && <SpecCard className="chat-proposal" title="Proposal" lead={firstSentence(p.description || p.task || p.arrangement)} full={[p.description, p.task, p.arrangement].filter(Boolean).join('\n\n')} end={<ViewChip ws={ws} slug={p.slug} name={p.name} />} data-anchor={`view:${p.slug}`} />}
       {parts.map((part, i) => {
         const status = buildStatus(part.stages, chat.running && i === parts.length - 1)
         return (

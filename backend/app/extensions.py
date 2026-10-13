@@ -1079,8 +1079,9 @@ def install_views(c: str) -> list[str]:
             if not (prop and prop.get("extension") == v["extension"] and views.stale_install(c, slug, d)):
                 continue
         try:
-            views.install_viewer(c, slug, d, v["claims"], why=v["note"] or v["description"], proposed_by="extension",
-                                 orientation=False, extension=v["extension"], libs=libs.get(v["extension"]) or None)
+            views.install_viewer(c, slug, d, v["claims"], description=v["note"] or v["description"],
+                                 proposed_by="extension", orientation=False, extension=v["extension"],
+                                 libs=libs.get(v["extension"]) or None)
         except HTTPException as e:
             log.warning("%s: the view %s of the extension %s was not installed: %s", c, slug, v["extension"], e.detail)
             continue

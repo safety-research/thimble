@@ -619,12 +619,14 @@ def _drawn_about(s: dict[str, Any]) -> str:
 
 
 def review_input(c: str, prop: dict[str, Any], view: dict[str, Any], shots: list[dict[str, Any]]) -> dict[str, Any]:
-    """The view-review task's input (tasks.py, docs/agents.md): the view (its name, description, the files it claims,
-    its spec and what its checks found), each picture's path and what it shows (_about), the controls the first picture
-    shows, the first records the pages fetched, and `ask` false, since the reviewer asks for more pictures itself."""
+    """The view-review task's input (tasks.py, docs/agents.md): the view (its name, description, what the analyst does
+    with it, the files it claims, any layout its proposal gave and what its checks found), each picture's path and what
+    it shows (_about), the controls the first picture shows, the first records the pages fetched, and `ask` false, since
+    the reviewer asks for more pictures itself."""
     return {"view": {"slug": str(view["slug"]), "name": str(prop.get("name") or view["name"]),
-                     "description": str(prop.get("why") or view["description"]),
-                     "claims": [str(x) for x in prop.get("claims") or view["claims"]], "spec": views.spec_lines(prop),
+                     "description": str(prop.get("description") or view["description"]),
+                     "task": str(prop.get("task") or ""),
+                     "claims": [str(x) for x in prop.get("claims") or view["claims"]], "spec": views.layout_lines(prop),
                      "checks": list(views.gate_notes(c, view["slug"]))},
             "pictures": [{"path": str(s["png"]), "about": _about(s)} for s in shots if s.get("png")],
             "controls": [str(x) for x in (shots[0].get("controls") or [])] if shots else [],

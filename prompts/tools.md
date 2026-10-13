@@ -233,24 +233,20 @@ Open a card of a card type as its view in Files, as the card's Open as view does
 
 ## propose_view
 
-Propose a view, a page that shows records in a form their files hide, or a viewer for one unusual file type. thimble's dev agent builds it from these fields alone, so name the fields, keys and counts it needs. When main proposes one, the result is the exact Agent call that starts its build as a subagent of main, which main then makes; an orientation's proposals are built without a call of its own. Pass a model or an effort only when the analyst names one, so that the build otherwise runs on the dev agent's values in thimble's Settings.
+Propose a view, a page that shows records in a form their files hide, or a viewer for one unusual file type. thimble's dev agent builds it from these fields and reads the files itself. When main proposes one, the result is the exact Agent call that starts its build as a subagent of main, which main then makes; an orientation's proposals are built without a call of its own. Pass a model or an effort only when the analyst names one, so that the build otherwise runs on the dev agent's values in thimble's Settings.
 
 ```json
 {
   "type": "object",
   "properties": {
     "name": {"type": "string", "description": "A short name in Title Case, as its tab shows it, such as Message Board."},
-    "why": {"type": "string", "description": "What the analyst sees and why that helps, in whatever form fits the records, such as a wiki page with its edit history or a graph of who replies to whom."},
+    "description": {"type": "string", "description": "What the analyst sees, in one sentence, such as a wiki page with its edit history or a graph of who replies to whom."},
+    "task": {"type": "string", "description": "What the analyst does with the view, in their words."},
     "claims": {"type": "array", "items": {"type": "string"}, "description": "Globs of every file that holds its records, by pattern rather than one file, such as runs/*/events.jsonl. For a viewer of one file type, the extension's glob, such as **/*.vtt."},
-    "unit": {"type": "string", "description": "What one row, mark or card stands for, the field that keys it, and how many there are."},
-    "overview": {"type": "string", "description": "What does the overview look like?"},
-    "zoom": {"type": "string", "description": "How do you zoom?"},
-    "filter": {"type": "string", "description": "How do you filter? Labels are the main filter, every field the records carry can be selected, and several runs or sources can be compared side by side."},
-    "details": {"type": "string", "description": "What details might you want on demand?"},
     "model": {"type": "string", "description": "The model to build it on, such as opus, sonnet or a full model id, only when the analyst names one. Default: the dev agent's model in Settings."},
     "effort": {"type": "string", "enum": ["low", "medium", "high", "xhigh", "max"], "description": "The effort to build it at, only when the analyst names one. Default: the dev agent's effort in Settings."}
   },
-  "required": ["name", "why", "claims", "unit", "overview", "zoom", "filter", "details"]
+  "required": ["name", "description", "task", "claims"]
 }
 ```
 
@@ -1412,7 +1408,7 @@ Its drafted deck is the group `{deck}`, which `list_cards` lists.
 
 ## critique-proposals
 
-The views it proposed, each with what it is for, the files it reads and its layout.
+The views it proposed, each with what the analyst sees in it, what they do with it and the files it reads.
 
 {proposals}
 

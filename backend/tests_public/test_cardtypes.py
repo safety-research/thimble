@@ -263,9 +263,9 @@ async def test_swarm_orient_ships_no_view_and_takes_back_the_one_it_installed(cr
         (old / name).write_text((SWIMLANE / name).read_text("utf-8"))
     (old / "view.html").write_text("<!doctype html><title>Swarm</title>")
     (old / "view.json").write_text(json.dumps({"name": "Swarm", "claims": ["saves.jsonl"]}))
-    views.install_viewer(CORPUS, "swarm", old, ["saves.jsonl"], why="", proposed_by="extension", orientation=False,
-                         extension="swarm")
-    views.install_viewer(CORPUS, "relay", old, ["saves.jsonl"], why="", proposed_by="thimble", orientation=True)
+    views.install_viewer(CORPUS, "swarm", old, ["saves.jsonl"], description="", proposed_by="extension",
+                         orientation=False, extension="swarm")
+    views.install_viewer(CORPUS, "relay", old, ["saves.jsonl"], description="", proposed_by="thimble", orientation=True)
     state = await extensions.refresh(CORPUS, wait=10)
     assert state["extensions"]["swarm-orient"]["active"] and state["extensions"]["swarm-orient"]["views"] == []
     assert views.list_proposals(CORPUS) == [] and views.read_view(CORPUS, "swarm") is None

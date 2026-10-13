@@ -499,9 +499,8 @@ async def test_two_view_builds_of_one_turn_each_build_their_own_view(board, brid
     main = tmp_path / "proj" / f"{SID}.jsonl"
     builds = []
     for i, name in enumerate(("Posts", "Authors")):
-        res = await tools.call(c, "propose_view", {"name": name, "why": "to read the board", "claims": ["board.jsonl"],
-                                                   "unit": "a post", "overview": "a list", "zoom": "a post",
-                                                   "filter": "labels", "details": "the body"},
+        res = await tools.call(c, "propose_view", {"name": name, "description": "The board's posts as a list.",
+                                                   "task": "Read the board.", "claims": ["board.jsonl"]},
                                tool_use_id=f"toolu_main{i}")
         assert not res.is_error, res.text
         inp = json.loads(res.text.split("AGENT CALL ", 1)[1].splitlines()[0])

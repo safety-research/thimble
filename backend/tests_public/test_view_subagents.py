@@ -151,9 +151,8 @@ def test_main_s_note_of_a_view_build_names_its_view_and_a_ticket_s_names_none(bo
 
 
 async def test_main_s_propose_view_gives_the_exact_agent_call_its_hook_lets_through(board, bridge, gates, hints):
-    res = await tools.call(CORPUS, "propose_view", {"name": "Posts", "why": "to read the board",
-                                                    "claims": ["board.jsonl"], "unit": "a post", "overview": "a list",
-                                                    "zoom": "a post", "filter": "labels", "details": "the body",
+    res = await tools.call(CORPUS, "propose_view", {"name": "Posts", "description": "The board's posts as a list.",
+                                                    "task": "Read the board.", "claims": ["board.jsonl"],
                                                     "effort": "low"}, tool_use_id="toolu_main1")
     assert not res.is_error, res.text
     inp = json.loads(res.text.split("AGENT CALL ", 1)[1].splitlines()[0])
@@ -172,18 +171,105 @@ async def test_a_design_the_analyst_asked_main_for_reaches_the_builder_and_the_r
                                                                                                      gates, hints):
     # the reviewer keeps a visual design the proposal asks for (prompts/view-review.md), so main's propose_view fields,
     # which carry the analyst's request, reach the builder's task and the reviewer's task whole
-    why = "Each post as the board drew it, in the old forum's look: serif titles, blue links, quoted replies indented."
-    overview = "The thread list in a dense grid in the style of a spreadsheet, one row per post, with no gaps."
-    res = await tools.call(CORPUS, "propose_view", {"name": "Posts", "why": why, "claims": ["board.jsonl"],
-                                                    "unit": "a post", "overview": overview, "zoom": "a post",
-                                                    "filter": "labels", "details": "the body"},
+    description = ("Each post as the board drew it, in the old forum's look: serif titles, blue links, quoted replies "
+                   "indented.")
+    task = "Scan the thread list in a dense grid in the style of a spreadsheet, one row per post, with no gaps."
+    res = await tools.call(CORPUS, "propose_view", {"name": "Posts", "description": description, "task": task,
+                                                    "claims": ["board.jsonl"]},
                            tool_use_id="toolu_main2")
     assert not res.is_error, res.text
     builder = json.loads(res.text.split("AGENT CALL ", 1)[1].splitlines()[0])["prompt"]
     slug = next(p["slug"] for p in views.list_proposals(CORPUS))
     reviewer = view_review.task(CORPUS, _prop(slug))
     for prompt in (builder, reviewer):
-        assert why in prompt and overview in prompt
+        assert description in prompt and task in prompt
+
+
+async def test_propose_view_takes_a_description_a_task_and_claims_and_the_builder_reads_the_layout_from_the_files(
+        board, bridge, gates, hints):
+    """0.8.0 (Matt): propose_view takes name, description, task and claims; the overview, zoom, filter and details
+    emerge from the build, not up front. A call with the 0.7.0 fields alone is refused, and the proposal it stores
+    gives the builder what the analyst sees and does, the files, and no layout."""
+    old = {"name": "Posts", "why": "to read the board", "claims": ["board.jsonl"], "unit": "a post",
+           "overview": "a list", "zoom": "a post", "filter": "labels", "details": "the body"}
+    res = await tools.call(CORPUS, "propose_view", old, tool_use_id="toolu_old")
+    assert res.is_error and "`description` is required" in res.text
+    res = await tools.call(CORPUS, "propose_view", {"name": "Posts", "description": "The posts by thread.",
+                                                    "claims": ["board.jsonl"]}, tool_use_id="toolu_notask")
+    assert res.is_error and "`task` is required" in res.text
+    assert not views.list_proposals(CORPUS), "nothing is stored for a refused call"
+    res = await tools.call(CORPUS, "propose_view", {"name": "Posts", "description": "The posts by thread.",
+                                                    "task": "Find the threads where an agent asks for help.",
+                                                    "claims": ["board.jsonl"]}, tool_use_id="toolu_new")
+    assert not res.is_error, res.text
+    [row] = views.read_json(views.proposals_path(CORPUS), [])
+    assert (row["description"], row["task"], row["arrangement"]) == (
+        "The posts by thread.", "Find the threads where an agent asks for help.", "")
+    assert "why" not in row and "spec" not in row
+    builder = json.loads(res.text.split("AGENT CALL ", 1)[1].splitlines()[0])["prompt"]
+    assert "- What the analyst sees: The posts by thread." in builder
+    assert "- What the analyst does with it: Find the threads where an agent asks for help." in builder
+    assert "- The files it reads: board.jsonl" in builder
+    assert "Find the fields, keys and counts in the files themselves." in builder
+    assert "Unit:" not in builder and "The unit and the layout" not in builder
+
+
+async def test_a_0_7_0_proposal_loads_with_its_why_as_its_description_and_its_layout_for_the_dev_agent(board, bridge,
+                                                                                                    gates, hints):
+    """A proposal stored by 0.7.0 (`why`, the layout fields as `spec` and as `arrangement`, as the demos' pre-caches
+    keep them) still loads: its `why` reads as its description, and the builder, a change, the reviewer, read_ref,
+    main's context and the critique show its layout fields as they were proposed. Proposed again under its name, the
+    new fields replace the old layout."""
+    from app import context, critique_session
+
+    spec = {"unit": "One post, keyed by `id`.", "overview": "A list of threads.", "zoom": "Click a thread.",
+            "filter": "By label.", "details": "The post's body."}
+    arrangement = "\n".join(f"{label}: {spec[k]}" for k, label in views.LEGACY_SPEC_FIELDS)
+    row = {"slug": "posts", "name": "Posts", "why": "Each post in its thread, as the board drew it.",
+           "claims": ["board.jsonl"], "arrangement": arrangement, "spec": spec, "proposed_by": "orient",
+           "orientation": True, "status": "failed", "ts": "2026-10-01T00:00:00+00:00", "route": subagents.CLICK}
+    views._save_proposals(CORPUS, [row])
+    prop = _prop("posts")
+    assert (prop["description"], prop["task"]) == ("Each post in its thread, as the board drew it.", "")
+    assert "why" not in prop
+    layout = ["- Unit: One post, keyed by `id`.", "- Overview: A list of threads.", "- Zoom: Click a thread.",
+              "- Filter: By label.", "- Details: The post's body."]
+    builder = dev.build_task(CORPUS, prop)
+    change = dev.change_text(CORPUS, {**prop, "change": "Make the rows blue."})
+    reviewer = view_review.task(CORPUS, prop)
+    for text in (builder, change, reviewer):
+        assert "- What the analyst sees: Each post in its thread, as the board drew it." in text
+        assert "- The files it reads: board.jsonl" in text and "\n".join(layout) in text
+        assert "What the analyst does with it" not in text
+    assert "Make the rows blue." in change
+    [drafts] = critique_session.drafts(CORPUS)
+    assert "- Posts\n  - What the analyst sees: Each post in its thread" in drafts
+    assert "\n  - Zoom: Click a thread." in drafts
+    assert "  Each post in its thread, as the board drew it." in context.views(CORPUS)
+    res = await tools.call(CORPUS, "read_ref", {"ref": "view:posts"})
+    assert "description: Each post in its thread, as the board drew it." in res.text and "Overview: A list" in res.text
+    views.revise(CORPUS, "posts", "", description="The posts by thread.", task="Find the threads that ask for help.",
+                 claims=["board.jsonl"], route=views.TYPED)
+    prop = _prop("posts")
+    assert (prop["description"], prop["task"], prop["arrangement"]) == (
+        "The posts by thread.", "Find the threads that ask for help.", "")
+    assert "spec" not in prop and "Unit:" not in dev.build_task(CORPUS, prop)
+
+
+def test_a_viewer_for_a_file_type_keeps_its_arrangement_for_the_builder(board, monkeypatch):
+    """A viewer suggested for a file type (views.suggest, prompts/file-viewer.md) gives a description and a free-text
+    arrangement, which the builder gets as the unit and the layout; a proposal without a description is refused."""
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(views, "_queue", lambda c, slug: None)
+    slug = views.propose(CORPUS, "Board Lines", "Each line of the board as a post.", ["board.jsonl"],
+                         "One post per line, its body in full.", "files", False, False, True)["slug"]
+    prop = _prop(slug)
+    assert (prop["status"], prop["description"], prop["task"]) == ("suggested", "Each line of the board as a post.", "")
+    assert views.proposal_lines(prop).endswith("- The unit and the layout: One post per line, its body in full.")
+    with pytest.raises(HTTPException) as e:
+        views.propose(CORPUS, "Blank", " ", ["board.jsonl"])
+    assert e.value.status_code == 400 and "`description`" in str(e.value.detail)
 
 
 @pytest.mark.parametrize("mode", prompts.MODES)
@@ -238,8 +324,7 @@ async def test_main_s_message_to_a_view_s_build_thread_gives_the_exact_agent_cal
 # --------------------------------------------------------------------------- a thread's fork's start, which main makes
 
 
-SPEC = {"why": "to read the tasks", "claims": ["board.jsonl"], "unit": "a task", "overview": "a table",
-        "zoom": "a task", "filter": "labels", "details": "the body"}
+SPEC = {"description": "The tasks as a table.", "task": "Read the tasks.", "claims": ["board.jsonl"]}
 
 
 @pytest.fixture()

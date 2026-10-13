@@ -7,7 +7,7 @@ const view = (slug: string, extra: Partial<View> = {}): View => ({
   built: 't', ok: true, forms: [], first_file: 'board.jsonl', ...extra,
 })
 const built = (slug: string): Proposal => ({
-  slug, name: slug, why: '', claims: ['board.jsonl'], arrangement: '', proposed_by: 'analyst', status: 'built', ts: 't',
+  slug, name: slug, description: '', task: '', claims: ['board.jsonl'], arrangement: '', proposed_by: 'analyst', status: 'built', ts: 't',
 })
 
 describe('barList', () => {
