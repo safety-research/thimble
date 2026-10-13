@@ -695,7 +695,7 @@ async def as_view(c: str, cell_id: str) -> dict[str, Any]:
         slug = t["view"]
         v = await asyncio.to_thread(views.read_built, c, slug)
         if v is None or not v["ok"]:
-            await asyncio.to_thread(views.install_viewer, c, slug, Path(t["view_dir"]), t["claims"], why="",
+            await asyncio.to_thread(views.install_viewer, c, slug, Path(t["view_dir"]), t["claims"], description="",
                                     proposed_by="analyst", orientation=False, extension=t["extension"])
         return {"slug": slug, "query": await _turn_on(c, cell_id, cell, made)}
     v = await asyncio.to_thread(views.read_built, c, t["slug"])

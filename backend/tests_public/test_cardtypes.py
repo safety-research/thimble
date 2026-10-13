@@ -277,6 +277,27 @@ async def test_swarm_orient_ships_no_view_and_takes_back_the_one_it_installed(cr
         await cardtypes.as_view(CORPUS, "c1")
 
 
+async def test_open_as_view_installs_the_view_of_an_extension_s_type_the_workspace_lacks(crew, monkeypatch, tmp_path):
+    """Open as view on a card of an extension's type that draws with a view of the extension installs that view in the
+    workspace when it has none (views.install_viewer), under a proposal of the extension with no description, and
+    opens it."""
+    src = tmp_path / "relay-view"
+    src.mkdir()
+    (src / "reader.py").write_text((SWIMLANE / "reader.py").read_text("utf-8"))
+    (src / "view.html").write_text("<!doctype html><title>Relay</title>")
+    (src / "view.json").write_text(json.dumps({"name": "Relay", "claims": ["saves.jsonl"]}))
+    t = {"origin": "extension", "slug": "relay", "view": "relay", "view_dir": str(src), "claims": ["saves.jsonl"],
+         "extension": "relay-ext"}
+    cell = {"id": "c1", "outputs": [{cardtypes.CARD_MIME: {"type": "relay", "args": {}}}]}
+    monkeypatch.setattr(notebook, "get_cell", lambda c, cid: cell)
+    monkeypatch.setattr(cardtypes, "type_of", lambda c, cell: t)
+    assert views.read_view(CORPUS, "relay") is None
+    got = await cardtypes.as_view(CORPUS, "c1")
+    assert got["slug"] == "relay" and views.read_view(CORPUS, "relay") is not None
+    prop = views.read_proposal(CORPUS, "relay")
+    assert (prop["extension"], prop["description"], prop["task"]) == ("relay-ext", "", "")
+
+
 def test_the_swarm_reader_s_shares_print_every_record_once(monkeypatch, capsys, tmp_path):
     """The Swarm reader's shares are cut by size at records, so a place may run over two, and between them they print
     every record once, each line whole; --shares writes them to a folder, and --from and --count print part of one
