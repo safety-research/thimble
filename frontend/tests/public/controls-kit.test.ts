@@ -789,9 +789,11 @@ describe('the side panel and the transcript', () => {
     await wait(60)
     expect([w.side.isEmpty, title(), w.closed]).toEqual([true, 'Click a session', ['r2/lead.jsonl#L1']])
     expect(reset().hidden).toBe(true)
-    // × closes the panel, its line too: a change from how the view opens, which Reset puts back
+    // × closes the panel, its line too: a change from how the view opens, which Reset puts back; no record closed, so
+    // the page hears nothing
     ;(panel.querySelector('.thimble-side-close') as HTMLElement).click()
     expect([panel.hidden, w.side.isOpen, w.side.isEmpty]).toEqual([true, false, false])
+    expect(w.closed).toEqual(['r2/lead.jsonl#L1'])
     await wait(60)
     expect(reset().hidden).toBe(false)
     reset().click()

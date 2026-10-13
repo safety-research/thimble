@@ -193,7 +193,8 @@
     if (!blank && kit.shows) kit.shows(null)
     if (this.check) this.check()
     var self = this
-    if (byHand && this.onClose) ctl.safe(function () { self.onClose(ref) })
+    // the page hears of a record closed, not of the `empty` line closed
+    if (byHand && !blank && this.onClose) ctl.safe(function () { self.onClose(ref) })
   }
   /** a wide side panel beside the list, for a record or a row's children (see the top of this file) */
   thimble.side = function (opts) {
