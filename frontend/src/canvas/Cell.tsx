@@ -24,7 +24,7 @@ const fail = (e: unknown) => bus.emit('toast', { text: (e as Error)?.message || 
 export const CARD_PAD_X = 28
 
 export type { CardField } from './CardFace'
-export type CardAction = 'detail' | 'ask' | 'delete' | 'star' | 'lock'
+export type CardAction = 'detail' | 'history' | 'ask' | 'delete' | 'star' | 'lock'
 /** The edge or corner of a card a resize holds, by compass point: the opposite edge stays where it is. */
 export type Edge = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw'
 const EDGES: Edge[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
@@ -202,6 +202,7 @@ export const CellCard = memo(function CellCard(p: CellCardProps) {
             )}
             <span className="bcell-acts" onMouseDown={(e) => e.stopPropagation()}>
               <Button variant="icon" size="sm" icon="code" title="Details" aria-label="Details" active={p.detailOpen} onClick={act('detail')} />
+              <Button variant="icon" size="sm" icon="history" title="History" aria-label="History" className="bcell-history" onClick={act('history')} />
               <Button variant="icon" size="sm" icon="chat" title="Chat about this card" aria-label="Chat about this card" onClick={act('ask')} />
               <Button variant="icon" size="sm" icon="trash" title="Delete" aria-label="Delete" className="bcell-delete" onClick={act('delete')} />
               <Button variant="icon" size="sm" icon="star" title={cell.starred ? 'Starred' : 'Star'} aria-label={cell.starred ? 'Starred' : 'Star'} active={!!cell.starred} className="bcell-star" onClick={act('star')} />

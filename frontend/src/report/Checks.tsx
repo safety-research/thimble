@@ -1,9 +1,10 @@
-// The Checks pane, shared by every document type: one row per report check (GET /ws/{c}/checks, built-ins first), each
-// with its colour square to show or hide its tints and comments, its count of open comments (or a spinner while it
-// runs, ✕ when it failed), and ⋯ to open its card (CheckCard). + opens the new-check card. Whether a check is on is
-// kept on the server (`shown`), and the server runs what the pane asks for (backend checks.py); `check` stream records
-// say when a run starts and ends. `useChecks` holds the list; `useSidebar` is the sidebar's state (shown or hidden,
-// beside the document or over it).
+// The Comments pane, shared by every document type and the canvas: one row per check that covers the surface (GET
+// /ws/{c}/checks, built-ins first; CheckRows), each with its colour square to show or hide its tints and comments, its
+// count of open comments (or a spinner while it runs, ✕ when it failed), and ⋯ to open its card (CheckCard). + opens the
+// new-check card. Whether a check is on is kept on the server (`shown`), so one switch covers a check's comments in the
+// documents and on the cards, and the server runs what the pane asks for (backend checks.py); `check` stream records
+// say when a run starts and ends, and `checks` records when a check changes, so both panes follow one switch.
+// `useChecks` holds the list; `useSidebar` is the sidebar's state (shown or hidden, beside the document or over it).
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import { Button } from '../components/Button'
 import { TextArea, TextInput } from '../components/Field'
@@ -16,12 +17,12 @@ import { colourVar } from '../files/labels'
 import { checksApi } from '../lib/api'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
-import type { Check, CheckRun } from '../lib/types'
+import type { Check, CheckCover, CheckRun } from '../lib/types'
 import { refusalLine } from '../chat/Refused'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { useDock, useFoldingSide, type FoldingSide } from '../shell/dock'
 import { sideKey } from './cards'
-import { checkColour, checkLook, countsByCheck, freeColour, nameTaken, rowCount, runLine, runOf, shownIds, withCheck, withRun, withShown, type CheckLook, type DocComment } from './checkComments'
+import { CANVAS, checkColour, checkLook, checksFor, countsByCheck, freeColour, nameTaken, rowCount, runLine, runOf, shownIds, withCheck, withRun, withShown, type CheckLook } from './checkComments'
 import { Chevron, Glyph, IconButton } from './icons'
 
 const REFETCH_DEBOUNCE_MS = 150
@@ -35,15 +36,16 @@ export interface Checks {
   look: CheckLook
   /** a check turned on or off (`next` given), or flipped */
   toggle: (id: string, next?: boolean) => void
-  /** a new check from the pane, which the server turns on; false when the server refused it */
-  create: (name: string, prompt: string) => Promise<boolean>
+  /** a new check from the pane, which the server turns on, commenting on what `covers` names (the documents by
+   * default); false when the server refused it */
+  create: (name: string, prompt: string, covers?: CheckCover[]) => Promise<boolean>
   /** a check's new prompt; false when the server refused it */
   editPrompt: (id: string, prompt: string) => Promise<boolean>
 }
 
 const toast = (what: string, e: unknown) => bus.emit('toast', { text: `${what} ${(e as Error).message}`, kind: 'error' })
 
-/** The workspace's checks, read again when the stream says a run started or ended. */
+/** The workspace's checks, read again when the stream says a run started or ended or a check changed. */
 export function useChecks(ws: string): Checks {
   const [list, setList] = useState<Check[]>([])
   const current = useRef<Check[]>(list)
@@ -74,6 +76,8 @@ export function useChecks(ws: string): Checks {
         put(withRun(current.current, e.id, e.doc, { status: e.status, run: e.run, chat: e.chat }))
         later()
       }),
+      // a check made or changed anywhere, such as turned on or off in the other Comments pane or by main
+      bus.on('checks', later),
       bus.on('wsStream', (e) => e.connected && later()),
     ]
     return () => {
@@ -103,9 +107,9 @@ export function useChecks(ws: string): Checks {
   )
 
   const create = useCallback(
-    async (name: string, prompt: string) => {
+    async (name: string, prompt: string, covers?: CheckCover[]) => {
       try {
-        const made = await checksApi.create(ws, { name: name.trim(), prompt: prompt.trim() })
+        const made = await checksApi.create(ws, { name: name.trim(), prompt: prompt.trim(), ...(covers ? { covers } : {}) })
         put(withCheck(current.current, made))
         track('ui-click', { target: 'ui:report-check-new', detail: { check: made.id } })
         return true
@@ -220,42 +224,42 @@ export function useSidebar(ws: string): DocSidebar {
   return { ...fold, show, hide, row, probe }
 }
 
-export interface ChecksPaneProps {
+export interface CommentsPaneProps {
   ws: string
   /** the document shown, whose runs the rows show */
   doc: string
   checks: Checks
   /** the document's open comments, whether their check is on or off */
-  comments: readonly DocComment[]
+  comments: readonly { check: string | null }[]
   /** the sidebar's hide toggle, in the pane's head when the pane is the whole sidebar */
   onHide?: () => void
 }
 
-export function ChecksPane({ ws, doc, checks, comments, onHide }: ChecksPaneProps) {
+/** The Comments pane beside a document: its head (the count of comments shown, + for a new check, the sidebar's hide
+ * toggle) and the rows of the checks that cover the documents. */
+export function CommentsPane({ ws, doc, checks, comments, onHide }: CommentsPaneProps) {
   const key = storageKey(ws, 'report-checks-pane')
   const [open, setOpen] = useState<boolean>(() => readStorage<boolean>(key, true) !== false)
-  // the check whose card is open, or 'new' for the new-check card, with the element the card stands beside
-  const [editing, setEditing] = useState<{ id: string; at: HTMLElement } | null>(null)
+  const [adding, setAdding] = useState<HTMLElement | null>(null)
   const head = useRef<HTMLDivElement | null>(null)
+  const list = useMemo(() => checksFor(checks.list, doc), [checks.list, doc])
   const counts = useMemo(() => countsByCheck(comments), [comments])
-  const shownCount = comments.filter((c) => c.check != null && checks.on.has(c.check)).length
-  const anyResult = checks.list.some((c) => rowCount(runOf(c, doc), counts.get(c.id) ?? 0) != null)
+  const mine = new Set(list.map((c) => c.id))
+  const shownCount = comments.filter((c) => c.check != null && checks.on.has(c.check) && mine.has(c.check)).length
+  const anyResult = list.some((c) => rowCount(runOf(c, doc), counts.get(c.id) ?? 0) != null)
   const setPane = (next: boolean) => {
     setOpen(next)
     writeStorage(key, next)
   }
-  const edit = (id: string, at: HTMLElement | null) => setEditing((e) => (e?.id === id || !at ? null : { id, at }))
-  const close = useCallback(() => setEditing(null), [])
-  const editCheck = editing && editing.id !== 'new' ? (checks.list.find((c) => c.id === editing.id) ?? null) : null
   return (
-    <div className="wu-checks" aria-label="Checks">
+    <div className="wu-checks" aria-label="Comments">
       <div className="wu-checks-head" ref={head}>
         <button type="button" className="wu-sec-head" aria-expanded={open} onClick={() => setPane(!open)}>
           <Chevron open={open} />
-          <span className="wu-sec-name">Checks</span>
+          <span className="wu-sec-name">Comments</span>
           {anyResult && <span className="wu-count wu-count-inline">{shownCount}</span>}
         </button>
-        <IconButton label="New check" className="wu-checks-add" aria-expanded={editing?.id === 'new'} onClick={() => edit('new', head.current)}>
+        <IconButton label="New check" className="wu-checks-add" aria-expanded={!!adding} onClick={() => setAdding((a) => (a ? null : head.current))}>
           <Icon name="plus" size={14} />
         </IconButton>
         {onHide && (
@@ -264,13 +268,54 @@ export function ChecksPane({ ws, doc, checks, comments, onHide }: ChecksPaneProp
           </IconButton>
         )}
       </div>
-      {open && (
+      <CheckRows ws={ws} surface={doc} checks={checks} comments={comments} adding={adding} onAdding={setAdding} listed={open} />
+    </div>
+  )
+}
+
+export interface CheckRowsProps {
+  ws: string
+  /** where the rows' runs and counts are: a document's slug, or CANVAS for the cards */
+  surface: string
+  checks: Checks
+  /** the surface's open comments, whether their check is on or off */
+  comments: readonly { check: string | null }[]
+  /** what the new-check card stands beside while the head's + holds it open, else null */
+  adding: HTMLElement | null
+  onAdding: (at: HTMLElement | null) => void
+  /** whether the rows show; the cards a row or + opens show either way */
+  listed?: boolean
+}
+
+/** The rows of the checks that cover a surface, and the card beside a row (its ⋯) or beside the head (+). A check made
+ * here covers the surface: the documents beside a document, the cards on the canvas. */
+export function CheckRows({ ws, surface, checks, comments, adding, onAdding, listed = true }: CheckRowsProps) {
+  // the check whose card is open, with the element the card stands beside
+  const [editing, setEditing] = useState<{ id: string; at: HTMLElement } | null>(null)
+  const counts = useMemo(() => countsByCheck(comments), [comments])
+  const list = useMemo(() => checksFor(checks.list, surface), [checks.list, surface])
+  const cover: CheckCover = surface === CANVAS ? 'cards' : 'documents'
+  const edit = (id: string, at: HTMLElement | null) => {
+    onAdding(null)
+    setEditing((e) => (e?.id === id || !at ? null : { id, at }))
+  }
+  useEffect(() => {
+    if (adding) setEditing(null)
+  }, [adding])
+  const close = useCallback(() => {
+    setEditing(null)
+    onAdding(null)
+  }, [onAdding])
+  const editCheck = editing ? (list.find((c) => c.id === editing.id) ?? null) : null
+  return (
+    <>
+      {listed && (
         <div className="wu-checks-list">
-          {checks.list.map((c) => {
+          {list.map((c) => {
             const isOn = checks.on.has(c.id)
             const isOpen = editing?.id === c.id
             const colour = checkColour(c)
-            const run = runOf(c, doc)
+            const run = runOf(c, surface)
             const count = rowCount(run, counts.get(c.id) ?? 0)
             const notRun = count == null && run?.status !== 'running' && run?.status !== 'failed'
             const rowOf = (el: HTMLElement) => el.closest<HTMLElement>('.wu-check-row')
@@ -310,28 +355,28 @@ export function ChecksPane({ ws, doc, checks, comments, onHide }: ChecksPaneProp
                     <Icon name="more-horizontal" size={14} />
                   </IconButton>
                 </div>
-                {staleOf(run) > 0 && <StaleRow ws={ws} check={c} doc={doc} n={staleOf(run)} />}
+                {staleOf(run) > 0 && <StaleRow ws={ws} check={c} doc={surface} n={staleOf(run)} />}
                 {run?.refused && run.status !== 'running' && <p className="wu-check-refused" role="status">{`Didn't start: ${refusalLine(run.refused)}`}</p>}
               </div>
             )
           })}
         </div>
       )}
-      <Popover anchor={editing?.at ?? null} open={editing?.id === 'new' || !!editCheck} onClose={close} side="aside" width={340} label={editCheck ? `Edit ${editCheck.name}` : 'New check'} className="check-card">
-        {editing?.id === 'new' ? (
+      <Popover anchor={adding ?? editing?.at ?? null} open={!!adding || !!editCheck} onClose={close} side="aside" width={340} label={editCheck && !adding ? `Edit ${editCheck.name}` : 'New check'} className="check-card">
+        {adding ? (
           <NewCheckCard
             colour={colourVar(freeColour(checks.list))}
             taken={(name) => nameTaken(checks.list, name)}
             onClose={close}
             onAdd={async (name, prompt) => {
-              if (await checks.create(name, prompt)) close()
+              if (await checks.create(name, prompt, [cover])) close()
             }}
           />
         ) : editCheck ? (
           <CheckCard
             key={editCheck.id}
             ws={ws}
-            doc={doc}
+            doc={surface}
             check={editCheck}
             on={checks.on.has(editCheck.id)}
             comments={counts.get(editCheck.id) ?? 0}
@@ -340,7 +385,7 @@ export function ChecksPane({ ws, doc, checks, comments, onHide }: ChecksPaneProp
           />
         ) : null}
       </Popover>
-    </div>
+    </>
   )
 }
 
@@ -551,12 +596,12 @@ function NewCheckCard({ colour, taken, onAdd, onClose }: { colour: string; taken
   )
 }
 
-/** The sidebar of the slides, the story and a page: the Checks pane alone, with the hide toggle in its head; `over`
+/** The sidebar of the slides, the story and a page: the Comments pane alone, with the hide toggle in its head; `over`
  * when it shows over the view's left edge. */
-export function ChecksSidebar({ onHide, over, ...pane }: ChecksPaneProps & { onHide: () => void; over: boolean }) {
+export function CommentsSidebar({ onHide, over, ...pane }: CommentsPaneProps & { onHide: () => void; over: boolean }) {
   return (
-    <aside className={'wu-side wu-side-checks' + (over ? ' is-over' : '')} aria-label="Checks">
-      <ChecksPane {...pane} onHide={onHide} />
+    <aside className={'wu-side wu-side-checks' + (over ? ' is-over' : '')} aria-label="Comments">
+      <CommentsPane {...pane} onHide={onHide} />
     </aside>
   )
 }

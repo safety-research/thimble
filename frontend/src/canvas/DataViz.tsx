@@ -3,8 +3,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useTheme } from '../lib/theme'
 import type { GraphDataset, TimelineDataset } from '../lib/types'
-import { frameStyle, frameTokens, useFrameFonts, withFrameStyle } from '../lib/frame'
+import { chartScript, frameStyle, frameTokens, useCardLibs, useFrameFonts, withFrameStyle } from '../lib/frame'
 import { useVisibleSize } from '../lib/visibleSize'
+import { VIZ_SERIES } from '../lib/vizTheme'
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 
@@ -187,13 +188,22 @@ export function timelineRows(events: TimelineDataset['events'], even = false): T
   }))
 }
 
+/** Each lane's dot color: the chart series (--viz-1 to --viz-7, lib/vizTheme) in the order the lanes first appear, the
+ * muted "other" past them, so a timeline of one lane, or of none, is in the first series color. Pure. */
+export function laneColors(lanes: readonly string[]): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const lane of lanes) if (!out.has(lane)) out.set(lane, out.size < VIZ_SERIES.length ? `var(${VIZ_SERIES[out.size]})` : 'var(--viz-other)')
+  return out
+}
+
 /**
- * A timeline: the events down a time axis, one to a row, the time at the left, a dot on the axis, the label at the
- * right. A break is a short dashed stretch of the axis with the wait's length beside it.
+ * A timeline: the events down a time axis, one to a row, the time at the left, a dot on the axis in its lane's color
+ * (laneColors), the label at the right. A break is a short dashed stretch of the axis with the wait's length beside it.
  */
 export function Timeline({ dataset }: { dataset: TimelineDataset & { spacing?: 'even' }; fitWidth?: number }) {
   const even = dataset.spacing === 'even'
   const rows = useMemo(() => timelineRows(dataset.events, even), [dataset.events, even])
+  const dots = useMemo(() => laneColors(rows.map((r) => r.lane)), [rows])
   if (!rows.length) return null
   const timeW = Math.max(...rows.map((r) => Math.max(r.time.length + (r.end ? r.end.length + 1 : 0), r.brk.length)))
   return (
@@ -214,7 +224,7 @@ export function Timeline({ dataset }: { dataset: TimelineDataset & { spacing?: '
             style={rows[i + 1]?.gap && !rows[i + 1].brk ? { paddingBottom: rows[i + 1].gap } : undefined}
           >
             <span className="canvas-tl-time">{r.end ? `${r.time}–${r.end}` : r.time}</span>
-            <span className="canvas-tl-dot" aria-hidden="true" />
+            <span className="canvas-tl-dot" aria-hidden="true" style={{ background: dots.get(r.lane) }} />
             <span className="canvas-tl-label">
               {r.lane ? <span className="canvas-tl-lane">{r.lane}</span> : null}
               {r.label}
@@ -751,34 +761,72 @@ export function diagramLayout(g: GraphDataset, opts: DiagramLayoutOptions = {}):
     return { e, rev, path, line, spots }
   })
   // a label's box is clear where no box, no other label and no other edge's line runs under it, so it is read as its
-  // own edge's; where no spot is that clear, one clear of the boxes and the labels does
+  // own edge's; where no spot is that clear, one clear of the boxes and the labels does. A line is tested only where its
+  // bounds (a pixel wider) meet the box, since a number may try every point of its edge
+  const bounds = drawn.map(({ line }) => ({ x0: Math.min(...line.map((p) => p.x)) - 1, y0: Math.min(...line.map((p) => p.y)) - 1, x1: Math.max(...line.map((p) => p.x)) + 1, y1: Math.max(...line.map((p) => p.y)) + 1 }))
   const clearOf = (bx: Box, own: Pt[], strict: boolean) =>
-    !taken.some((t) => hits(t, bx)) && (!strict || !drawn.some((d) => d.line !== own && lineHits(d.line, bx)))
+    !taken.some((t) => hits(t, bx)) && (!strict || !drawn.some((d, i) => d.line !== own && hits(bounds[i], bx) && lineHits(d.line, bx)))
+  const ring = (s: Pt): Box => ({ x0: s.x - MARK_R, y0: s.y - MARK_R, x1: s.x + MARK_R, y1: s.y + MARK_R })
+  const overlap = (a: Box, b: Box) => Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)) * Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0))
+  const covered = (bx: Box) => taken.reduce((a, t) => a + overlap(t, bx), 0)
+  // where an edge's number sits: on the edge, at a label's spot or else at any point of its line nearest the first spot,
+  // clear as a label is; where no point is clear, the one that covers the least of what is placed
+  const markAt = (spots: Pt[], line: Pt[]): { spot: Pt; clear: boolean } => {
+    const dist = (p: Pt) => Math.hypot(p.x - spots[0].x, p.y - spots[0].y)
+    const along = [...spots, ...[...line].sort((p, q) => dist(p) - dist(q))]
+    const clear = along.find((s) => clearOf(ring(s), line, true)) ?? along.find((s) => clearOf(ring(s), line, false))
+    const spot = clear ?? along.reduce((m, s) => (covered(ring(s)) < covered(ring(m)) ? s : m))
+    taken.push(ring(spot))
+    return { spot, clear: !!clear }
+  }
+  // each edge in turn: a short label written on its edge, else beside it, where a spot is clear; a long one, or one that
+  // finds no spot, a note under the drawing, numbered on its edge. A number must sit on its own edge, where a label may
+  // sit beside it, so a number that finds no clear spot (a loop's two edges run close, and a label written across both
+  // leaves the other no room) is placed before every label, and all are placed again
+  const marks = new Map<number, Pt>()
+  const written = new Map<number, Pt>()
+  const first = new Set<number>()
+  for (;;) {
+    taken.splice(nodes.length)
+    marks.clear()
+    written.clear()
+    for (const i of first) marks.set(i, markAt(drawn[i].spots, drawn[i].line).spot)
+    const crowded: number[] = []
+    drawn.forEach(({ e, line, spots }, i) => {
+      const label = e.label.trim()
+      if (!label || first.has(i)) return
+      if (label.length <= INLINE_CHARS) {
+        const half = (label.length * LABEL_CW) / 2 + 4
+        // on the edge, else beside it at the right or the left, the line running past the label's end
+        const beside = [0, half + 3, -half - 3]
+        for (const strict of [true, false])
+          for (const dx of beside)
+            for (const s of spots) {
+              const x = s.x + dx
+              const bx = { x0: x - half, y0: s.y - LABEL_H / 2, x1: x + half, y1: s.y + LABEL_H / 2 }
+              if (bx.x0 < 0 || bx.x1 > W || !clearOf(bx, line, strict)) continue
+              taken.push(bx)
+              written.set(i, { x, y: s.y })
+              return
+            }
+      }
+      const { spot, clear } = markAt(spots, line)
+      marks.set(i, spot)
+      if (!clear) crowded.push(i)
+    })
+    if (!crowded.length) break
+    for (const i of crowded) first.add(i)
+  }
+  // the notes numbered in the edges' order
   const notes: DiagramNote[] = []
-  const edges: DiagramEdge[] = drawn.map(({ e, rev, path, line, spots }) => {
+  const edges: DiagramEdge[] = drawn.map(({ e, rev, path, line, spots }, i) => {
     const label = e.label.trim()
+    const text = written.get(i)
     if (!label) return { source: e.source, target: e.target, label: '', path, line, lx: spots[0].x, ly: spots[0].y, inline: true, rev }
-    // written on the edge when it is short and a spot along the edge is clear
-    if (label.length <= INLINE_CHARS) {
-      const half = (label.length * LABEL_CW) / 2 + 4
-      // on the edge, else beside it at the right or the left, the line running past the label's end
-      const beside = [0, half + 3, -half - 3]
-      for (const strict of [true, false])
-        for (const dx of beside)
-          for (const s of spots) {
-            const x = s.x + dx
-            const bx = { x0: x - half, y0: s.y - LABEL_H / 2, x1: x + half, y1: s.y + LABEL_H / 2 }
-            if (bx.x0 < 0 || bx.x1 > W || !clearOf(bx, line, strict)) continue
-            taken.push(bx)
-            return { source: e.source, target: e.target, label, path, line, lx: r1(x), ly: r1(s.y), inline: true, rev }
-          }
-    }
-    // else a number on the edge and the label in a note under the drawing
+    if (text) return { source: e.source, target: e.target, label, path, line, lx: r1(text.x), ly: r1(text.y), inline: true, rev }
     const n = notes.length + 1
     notes.push({ n, source: shortName(info.get(e.source)!.label), target: shortName(info.get(e.target)!.label), label })
-    const ring = (s: Pt): Box => ({ x0: s.x - MARK_R, y0: s.y - MARK_R, x1: s.x + MARK_R, y1: s.y + MARK_R })
-    const spot = spots.find((s) => clearOf(ring(s), line, true)) ?? spots.find((s) => clearOf(ring(s), line, false)) ?? spots[0]
-    taken.push(ring(spot))
+    const spot = marks.get(i)!
     return { source: e.source, target: e.target, label, path, line, lx: r1(spot.x), ly: r1(spot.y), inline: false, n, rev }
   })
   const height = rowY[depth] + rowH[depth]
@@ -926,8 +974,9 @@ export const clampCustomHeight = (h: number): number => Math.min(CUSTOM_MAX_H, M
 export const CUSTOM_OPEN_MAX_H = 8000
 
 /** A custom card's page in a sandboxed frame, as tall as its content up to CUSTOM_MAX_H; taller pages fade out with a
- * Show all under them. */
-export function CustomFrame({ html, title, height }: { html: string; title: string; height?: number }) {
+ * Show all under them. Its head carries the theme, the chart style (chartScript) and the libraries the card names in
+ * workspace `ws` (useCardLibs), before the page's own scripts. */
+export function CustomFrame({ html, title, height, ws = '', libs }: { html: string; title: string; height?: number; ws?: string; libs?: readonly string[] }) {
   const ref = useRef<HTMLIFrameElement>(null)
   const [full, setFull] = useState(() => Math.max(CUSTOM_MIN_H, Math.ceil(typeof height === 'number' ? height : 160)))
   const [open, setOpen] = useState(false)
@@ -935,8 +984,9 @@ export function CustomFrame({ html, title, height }: { html: string; title: stri
   const [sized, setSized] = useState(false)
   const { resolved, key } = useTheme()
   const fonts = useFrameFonts()
-  // the tokens are read at embed time, once per theme. It waits for the page's fonts, so the page is drawn once
-  const doc = useMemo(() => (fonts == null ? null : withFrameStyle(withSizer(html), frameStyle(resolved, frameTokens(), fonts))), [html, resolved, key, fonts]) // key: the tokens are read again when the paper or the accent changes
+  const head = useCardLibs(ws, libs)
+  // the tokens are read at embed time, once per theme. It waits for the page's fonts and libraries, so the page is drawn once
+  const doc = useMemo(() => (fonts == null || head == null ? null : withFrameStyle(withSizer(html), frameStyle(resolved, frameTokens(), fonts) + chartScript() + head)), [html, resolved, key, fonts, head]) // key: the tokens are read again when the paper or the accent changes
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
       if (!ref.current || e.source !== ref.current.contentWindow) return

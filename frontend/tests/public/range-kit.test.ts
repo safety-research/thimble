@@ -26,7 +26,7 @@ const of = (type: string) => sent.filter((m) => m.type === `thimble:${type}`)
 
 const H = 3600
 const T0 = Date.UTC(2026, 5, 16) / 1000
-// two bursts of records two days apart: 16 Jun 00:00 to 06:00, and 18 Jun 06:00 to 08:00
+// two bursts of records two days apart: Jun 16 00:00 to 06:00, and Jun 18 06:00 to 08:00
 const TIMES = [...Array.from({ length: 61 }, (_, i) => T0 + i * 360), ...Array.from({ length: 21 }, (_, i) => T0 + 54 * H + i * 360)]
 
 async function load(kept?: object) {
@@ -54,9 +54,9 @@ describe('the time range selector', () => {
     expect(r.from).toBeLessThanOrEqual(TIMES[0])
     expect(r.to).toBeGreaterThanOrEqual(TIMES.at(-1)!)
     expect(r.has(TIMES[0]) && r.has(TIMES.at(-1)!)).toBe(true)
-    expect(doc().querySelector('.thimble-range-dates')!.textContent).toBe('16 Jun 00:00 – 18 Jun 08:00')
+    expect(doc().querySelector('.thimble-range-dates')!.textContent).toBe('Jun 16 00:00 – Jun 18 08:00')
     expect(doc().querySelector('.thimble-range-len')!.textContent).toBe('2d 8h')
-    expect(doc().querySelector('.thimble-range-win')!.getAttribute('aria-valuetext')).toBe('16 Jun 00:00 – 18 Jun 08:00')
+    expect(doc().querySelector('.thimble-range-win')!.getAttribute('aria-valuetext')).toBe('Jun 16 00:00 – Jun 18 08:00')
   })
 
   test('a range set is drawn, told once to the page and kept per view; the page built again starts on it', async () => {
@@ -67,7 +67,7 @@ describe('the time range selector', () => {
     await wait()
     expect([r.full, r.from, r.to, told]).toEqual([false, T0 + H, T0 + 3 * H, 1])
     expect(r.has(T0 + 2 * H) && !r.has(T0 + 4 * H)).toBe(true)
-    expect(doc().querySelector('.thimble-range-dates')!.textContent).toBe('16 Jun 01:00 – 03:00')
+    expect(doc().querySelector('.thimble-range-dates')!.textContent).toBe('Jun 16 01:00 – 03:00')
     const kept = of('colour').at(-1)!.state as { range: Record<string, number[]> }
     expect(kept.range).toEqual({ time: [T0 + H, T0 + 3 * H] })
     await load(kept)
@@ -118,9 +118,9 @@ describe('the time range selector', () => {
     expect(ticks.length).toBeGreaterThan(3)
     expect(ticks.every((k: { x: number }) => k.x <= gaps[0][0] || k.x >= gaps[0][1])).toBe(true)
     const labels = ticks.filter((k: { label: string }) => k.label)
-    expect(labels.every((k: { label: string }) => /^\d\d:\d\d$|^\d+ Jun( \d\d:\d\d)?$/.test(k.label))).toBe(true)
-    expect(labels[0].label).toMatch(/^16 Jun/)
-    expect(labels.find((k: { x: number }) => k.x >= gaps[0][1]).label).toMatch(/^18 Jun/)
+    expect(labels.every((k: { label: string }) => /^\d\d:\d\d$|^Jun \d+( \d\d:\d\d)?$/.test(k.label))).toBe(true)
+    expect(labels[0].label).toMatch(/^Jun 16/)
+    expect(labels.find((k: { x: number }) => k.x >= gaps[0][1]).label).toMatch(/^Jun 18/)
     // bins of a chart at least 3 px wide, aligned to the clock
     const bins = s.bins(3)
     expect(bins[0][0] % s.step(3)).toBe(0)
@@ -182,17 +182,17 @@ describe('the time range selector', () => {
     await wait()
     const ticks = r.scale(600).ticks(60) as { t: number; x: number; lx: number; label: string }[]
     const gap = r.scale(600).gaps()[0]
-    // 18 Jun 06:00, where the second burst starts, stands right at the break: its label moves off the // beside it
+    // Jun 18 06:00, where the second burst starts, stands right at the break: its label moves off the // beside it
     const at = ticks.find((k) => k.t === T0 + 54 * H)!
-    expect(at.label).toBe('18 Jun 06:00')
+    expect(at.label).toBe('Jun 18 06:00')
     expect(at.lx).toBeGreaterThan(at.x)
     expect(at.lx - (at.label.length * 6.2) / 2).toBeGreaterThanOrEqual(gap[1])
     // no time without a date before it on its day
     let day = ''
     for (const k of ticks.filter((k) => k.label)) {
-      const d = /^(\d+ Jun)/.exec(k.label)?.[1]
+      const d = /^(Jun \d+)/.exec(k.label)?.[1]
       if (d) day = d
-      expect(day, k.label).toBe(new Date(k.t * 1000).getUTCDate() + ' Jun')
+      expect(day, k.label).toBe('Jun ' + new Date(k.t * 1000).getUTCDate())
     }
     // no unlabelled tick stands on the break's //
     const mid = (gap[0] + gap[1]) / 2
@@ -226,13 +226,13 @@ describe('the time range selector', () => {
     await wait()
     expect(width()).toBe('27ch')
     // each end whole, the dash with the start
-    expect([...read().querySelectorAll('.thimble-range-d')].map((e) => e.textContent)).toEqual(['16 Jun 01:00 –', '03:00'])
+    expect([...read().querySelectorAll('.thimble-range-d')].map((e) => e.textContent)).toEqual(['Jun 16 01:00 –', '03:00'])
     // a span of years: its ends on two lines, as wide as one end
     await load()
     win().thimble.colorBy({ mount: '#colour', fields: [] })
     win().thimble.timeRange({ mount: '#range', span: [Date.UTC(2023, 8, 22) / 1000, Date.UTC(2026, 8, 20) / 1000] })
     await wait()
-    expect(width()).toBe('19ch')
+    expect(width()).toBe('20ch')
     expect(doc().querySelector('.thimble-range')!.classList.contains('thimble-range-stack')).toBe(true)
   })
 
@@ -255,6 +255,9 @@ describe('the time range selector', () => {
     win().thimble.timeAxis('#ax', r.scale(600), { marks: [{ t: T0 + 3 * H, label: 'r3' }, { t: T0 + 3 * H + 60, label: 'r4' }] })
     const flags = [...ax.querySelectorAll('.thimble-axis-flag')]
     expect(flags.map((f) => [f.textContent, f.getAttribute('title')])).toEqual([['r3', 'r3'], ['', 'r4']])
+    // a flag's color, by its American name or its British alias
+    win().thimble.timeAxis('#ax', r.scale(600), { marks: [{ t: T0 + 3 * H, label: 'a', color: '#123456' }, { t: T0 + 5 * H, label: 'b', colour: '#654321' }] })
+    expect([...ax.querySelectorAll<HTMLElement>('.thimble-axis-flag')].map((f) => f.style.getPropertyValue('--c'))).toEqual(['#123456', '#654321'])
   })
 
   test('a long range reads in months and years', async () => {
@@ -273,7 +276,7 @@ describe('the time range selector', () => {
     const r = mount()
     r.data({ times: TIMES, span: [T0, T0 + 4 * 24 * H] })
     await wait()
-    expect(doc().querySelector('.thimble-range-dates')!.textContent).toBe('16 Jun – 19 Jun')
+    expect(doc().querySelector('.thimble-range-dates')!.textContent).toBe('Jun 16 – Jun 19')
     expect(r.span).toEqual([T0, T0 + 4 * 24 * H])
   })
 
@@ -285,5 +288,17 @@ describe('the time range selector', () => {
     await wait()
     expect(doc().querySelector('.thimble-range-dates')!.textContent).toBe('100 – 250')
     expect(doc().querySelector('.thimble-range-len')!.textContent).toBe('150')
+  })
+
+  test('plain numbers such as identifiers or years: their places written as they are, without separators; a length with them', async () => {
+    await load()
+    win().thimble.colorBy({ mount: '#colour', fields: [] })
+    const r = win().thimble.timeRange({ mount: '#range', unit: 'n', span: [60000, 70000] })
+    r.set(61000, 68500)
+    await wait()
+    expect(doc().querySelector('.thimble-range-dates')!.textContent).toBe('61000 – 68500')
+    expect(doc().querySelector('.thimble-range-len')!.textContent).toBe('7,500')
+    expect(r.format(2019)).toBe('2019')
+    expect(r.scale(600).ticks(64).map((k: any) => k.label).filter(Boolean)).toEqual(['62000', '63000', '64000', '65000', '66000', '67000', '68000'])
   })
 })

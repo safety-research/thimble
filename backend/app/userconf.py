@@ -24,7 +24,10 @@ mode and share its sandbox, network and rules. So the orientation's `web`, `netw
 which every agent shares; the other agents keep only `web: off`, which keeps that one agent off the web tools. Code
 tickets' agents are subagents of main too. The dev agent alone keeps its own permission mode, fast mode and fence keys,
 for `thimble fix` and an extension's program that runs the dev agent, which stay jobs of the server.
-Installs follow Claude Code's permission mode: thimble adds no rule for them. The keys earlier builds read for this,
+Installs follow Claude Code's permission mode: thimble adds no rule for them. The web tools do too at `web` "ask":
+Manual asks for them as Claude Code does, and auto mode's classifier judges them. An `ask` rule in main's fence would
+also ask in auto mode, since Claude Code obeys an explicit ask rule there, and the fence stays the same while main's
+mode changes (live check: the checks asked three times for the web in auto mode). The keys earlier builds read for this,
 `installs`, and each agent's own `fast` and `permissionMode` and `web` other than "off" but the dev agent's
 (IGNORED_KEYS), are read and ignored, so an earlier config stays valid; `ignored` lists those a file holds, and a save
 from the Settings pane drops them. `suggest` (the viewer suggestion's call) and `refusal` (the model and effort a refused classifier call runs
@@ -998,11 +1001,11 @@ def checkout_git() -> list[Path]:
 def main_rules(c: str) -> list[Rule]:
     """The permission rules of main's fence for workspace `c` (cli.main_fence; module note, one fence), each with its
     cause: an edit of the corpus asks, or is denied or left to the mode, by the orientation's `data`; an edit of
-    thimble's config files or the workspace's settings.json asks; the web tools ask, are denied or are allowed by its
-    `web`; main's kept mode, the workspace's records (STATE_PATHS), the code tickets' (dev_files) and the live checkout's
-    git folder (checkout_git) are not edited; the
-    token files and the links folder are neither read nor edited; the critique folder is read unasked, since the critic
-    reads its digest and brief there. No rule for installs, which follow Claude Code's permission mode. A config with an
+    thimble's config files or the workspace's settings.json asks; the web tools are denied or allowed by its `web`, and
+    at "ask" get no rule, so the permission mode decides (module note, one fence); main's kept mode, the workspace's
+    records (STATE_PATHS), the code tickets' (dev_files) and the live checkout's git folder (checkout_git) are not
+    edited; the token files and the links folder are neither read nor edited; the critique folder is read unasked,
+    since the critic reads its digest and brief there. No rule for installs, which follow Claude Code's permission mode. A config with an
     error gives the defaults' rules."""
     conf = agent_conf(load_or_defaults(c)[0], "orientation")
     ws = config.WORKSPACES_DIR.resolve() / c
@@ -1013,8 +1016,9 @@ def main_rules(c: str) -> list[Rule]:
     elif conf["data"] == "off":
         out.append(Rule("deny", corpus, "data"))
     out += [Rule("ask", f"Edit(/{f})", "config") for f in [*config_files(c), ws / "settings.json"]]
-    web = {"ask": "ask", "off": "deny", "allow": "allow"}[conf["web"] if conf["web"] in WEB else "ask"]
-    out += [Rule(web, t, "web") for t in WEB_TOOLS]
+    web = {"off": "deny", "allow": "allow"}.get(conf["web"])
+    if web:
+        out += [Rule(web, t, "web") for t in WEB_TOOLS]
     out.append(Rule("deny", f"Edit(/{main_modes_file()})", "state"))
     out += [Rule("deny", f"Edit(/{ws / p})", "state") for p in STATE_PATHS]
     out += [Rule("deny", f"Edit(/{f})", "state") for f in dev_files()]

@@ -82,7 +82,7 @@
 # Units: an incident (INC-312), a day (2026-05-16) and a window of time (2026-05-16T08:00..2026-05-16T09:00).
 #
 # Labels: they apply when records are served, never in the index. Every answer keeps only the records thimble.kept(ref)
-# holds for. While a label is the page's Color by, Filter by or Rows, thimble.colour_value gives each record the
+# holds for. While a label is the page's Color by, Filter by or Rows, thimble.color_value gives each record the
 # label's value on it, which the page draws in its lanes and its time range and filters and groups by, since a label's
 # marks reach the page only on the rows it draws.
 import bisect
@@ -138,7 +138,7 @@ def _iso(epoch):
 
 def _when(epoch):
     d = datetime.fromtimestamp(epoch, timezone.utc)
-    return f"{d.day} {MONTHS[d.month - 1]} {d:%H:%M}"
+    return f"{MONTHS[d.month - 1]} {d.day} {d:%H:%M}"
 
 
 def _str(v):
@@ -534,12 +534,12 @@ def _overview(index, query, keep):
     its filter.query()) the analyst left on; and those in `keep`, which a citation asked for, whatever the filters.
     Color by only colors, so a value turned off there keeps its rows. They come as columns: `r` the row, `t` its time in
     seconds since 1970, `ref`, a column per field, `text` cut to TEXT_MAX characters, `value` its value under Color by
-    (`colour`, its colour.query()) and `group` its group under the page's Rows (`rows`, its rows.query()). `counts`
+    (`color`, its color.query()) and `group` its group under the page's Rows (`rows`, its rows.query()). `counts`
     counts Color by's values for its chips over the rows Filter by keeps, and `fcounts` Filter by's for its toggles over
     every row, so a value turned off keeps its count. `next` is the row the next page starts at, None after the last.
     The first page also holds `span`, the first and the last time of all the rows."""
     rows = index["rows"]
-    choice, only, group_by = query.get("colour"), query.get("filter"), query.get("rows")
+    choice, only, group_by = query.get("color"), query.get("filter"), query.get("rows")
     q = _str(query.get("q")).lower()
     start = query.get("from")
     i = start if isinstance(start, int) and not isinstance(start, bool) and start > 0 else 0
@@ -556,15 +556,15 @@ def _overview(index, query, keep):
                 continue
             if not _kept(index, j, keep):
                 continue
-            value, shown = thimble.colour_value(choice, ref, r), thimble.colour_value(only, ref, r)
-            shows = thimble.colour_on(only, shown)
+            value, shown = thimble.color_value(choice, ref, r), thimble.color_value(only, ref, r)
+            shows = thimble.color_on(only, shown)
             fcounts[shown or ""] = fcounts.get(shown or "", 0) + 1
             if shows:
                 counts[value or ""] = counts.get(value or "", 0) + 1
             if not shows and not asked:
                 continue
             for k, v in zip(cols, (j, rows[j][T], ref, *(_text(r, f) for f in FIELDS), _text(r, "text")[:TEXT_MAX],
-                                   value, thimble.colour_value(group_by, ref, r)), strict=True):
+                                   value, thimble.color_value(group_by, ref, r)), strict=True):
                 cols[k].append(v)
     page = {"cols": cols, "counts": counts, "fcounts": fcounts, "next": i if i < len(rows) else None}
     if not start:
@@ -598,7 +598,7 @@ def _record(index, i, keep):
 
 
 def records(index, query):
-    """{op: overview, from?, colour?, filter?, rows?, q?, keep?}: a page of the events the page shows (_overview).
+    """{op: overview, from?, color?, filter?, rows?, q?, keep?}: a page of the events the page shows (_overview).
     {op: record, r, keep?}: one row in full (_record). `keep` rows are kept whatever the label filter."""
     query = query or {}
     keep = {x for x in query.get("keep") or () if isinstance(x, int) and not isinstance(x, bool)}

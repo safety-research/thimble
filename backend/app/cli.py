@@ -1739,9 +1739,10 @@ def main_name(cwd: Path) -> str:
 # launch-args writes the hooks module's roles file (write_roles), since no server hands it the roles.
 
 # the folders main's Bash may write, under the workspace (subagents.write_dirs, which this list stands in for until the
-# subagent paths are in): the orientation's work folder, the writers', the critics', the checks', the view builders' and
-# the workspace's own views. The code tickets' worktrees are outside the workspace (ticket_trees).
-WRITE_DIRS = ("orient/work", "writers", "critique-work", "check-work", "views-work", "extension/views")
+# subagent paths are in): the orientation's work folder, the writers', the critics', the checks', the view builders',
+# the workspace's own views and the custom cards' npm packages (card_libs.FOLDER). The code tickets' worktrees are
+# outside the workspace (ticket_trees).
+WRITE_DIRS = ("orient/work", "writers", "critique-work", "check-work", "views-work", "extension/views", "card-libs")
 LAUNCH_FILE = "trusted/launch.json"  # in the workspace (subagent_files): {session, at, fenced, switches, unset, pid, modules_off, mode}
 TERMINAL_RENDERER = "mods/thimble-term"  # under the tree: the plugin `thimble-term` that draws thimble's work in the terminal
 RENDERER_NAME = "thimble-term"

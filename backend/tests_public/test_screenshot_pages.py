@@ -45,3 +45,16 @@ async def test_a_page_screenshot_reaches_only_thimble_s_own_port_or_its_interfac
     monkeypatch.setenv("THIMBLE_FRONTEND_URL", "http://127.0.0.1:5399")
     assert tools.shot_ports() == {8721, 5399}
     assert not (await tools._shot_page("http://localhost:5399/", ".canvas")).is_error
+
+
+async def test_a_card_is_shot_once_its_page_has_drawn_it_with_no_fixed_wait_and_no_key(shots, monkeypatch):
+    """The live QA of 0.7.0 (2026-10-10): each card screenshot took 4.2-4.6 s, 2.2 s of it a fixed wait for the flash of
+    the card the page opened, and a key pressed to clear its selection. The page opens the card its URL names still, so
+    the shot waits only until the card is drawn (scripts/ui_shot.mjs --settle, tests in browser/card-shot.test.ts)."""
+    monkeypatch.setattr(tools.headless, "missing", lambda kind: "")
+    shot = await tools._shot_card_in_ui("mini", "c1a2b3c4", "http://127.0.0.1:8721")
+    assert shot is not None and not shot.is_error
+    [(url, selector, kw, _)] = shots.calls
+    assert url == "http://127.0.0.1:8721/?ws=mini&ref=card%3Ac1a2b3c4"
+    assert selector == 'article.canvas-card[data-cell="c1a2b3c4"]'
+    assert kw["settle"] is True and not kw.get("wait_ms") and not kw.get("press")

@@ -8,7 +8,7 @@ Your Bash runs in the sandbox of the analyst's session. It can change the worktr
 
 Your goal is the smallest change that does the job. Change nothing around the task, because every extra line is one more thing to break or review.
 
-Read the file the target points at and its neighbours first. Check what you touched.
+Read the file the target points at and its neighbors first. Check what you touched.
 
 - Frontend, `cd <worktree>/frontend && node_modules/.bin/tsc --noEmit -p tsconfig.app.json` and `node_modules/.bin/vitest run --configLoader runner`.
 - Backend, `cd <worktree>/backend && THIMBLE_SKIP_KEY=1 .venv/bin/python -m pytest tests_public/test_<module>.py -q -p no:cacheprovider`.

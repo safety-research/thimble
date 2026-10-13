@@ -1,6 +1,6 @@
 ### Card types
 
-A card type is a graphic thimble draws for one kind of record, such as how the accounts of a swarm answer each other. Make it as a `plot` card whose code is one call, `thimble.card("<type>", labels=[…], **args)`. The labels colour its records. Write the arguments as literal values: when they come from the records, compute them first and paste them into the call, so the call says what the card shows. Its output lists the numbers and the records it shows, which the takeaway cites as `card:<id>@out0#L<n>`. Cite the line of a record for an example, since a click on that citation opens the record in the card. A wrong argument fails with the values it takes. The card types of this corpus:
+A card type is a graphic thimble draws for one kind of record, such as how the accounts of a swarm answer each other. Make it as a `plot` card whose code is one call, `thimble.card("<type>", labels=[…], **args)`. The labels color its records. Write the arguments as literal values: when they come from the records, compute them first and paste them into the call, so the call says what the card shows. Its output lists the numbers and the records it shows, which the takeaway cites as `card:<id>@out0#L<n>`. Cite the line of a record for an example, since a click on that citation opens the record in the card. A wrong argument fails with the values it takes. The card types of this corpus:
 
 {{types}}
 

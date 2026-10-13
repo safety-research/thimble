@@ -64,7 +64,7 @@
 //                          bridge sees (it stops the message before the view's own listeners)
 //   labelCall {id, key, op, args}
 //                          frame to page, answered by labelDone {id, error?}: the page's label controls (window.thimble
-//                          setLabel, setLabelColour, editLabel, mark and setFilter), each sent only while the frame has
+//                          setLabel, setLabelColor, editLabel, mark and setFilter), each sent only while the frame has
 //                          the analyst's transient user activation, which thimble checks again on its side; ops on,
 //                          colour, edit, mark and filter. edit's args are {id, anchor?, side?}: thimble opens the label
 //                          editor in a popover over the page, beside `anchor` {left, top, width, height} (the control
@@ -106,13 +106,16 @@
   var openers = []
   var last = null
   var pointed = null
-  var picked = null // the data-anchor of the element the analyst last clicked since the last `open`
+  // the data-anchor of the element the analyst last clicked, or the ref the kit's side panel opened, since the last
+  // `open`; and whether the side panel closed since then with nothing picked after, so a newer version opens on none
+  var picked = null
+  var sideClosed = false
   var cardMode = !!(window.__thimbleView && window.__thimbleView.card)
   var init = null
   var initFns = []
   var markFns = []
   // the view kit's own controls (viewer_colour.js): what they hear of the labels, which is not the page's onLabels and
-  // so leaves the label filter to thimble, and the Colour by choice that the marks are drawn by (colourHook)
+  // so leaves the label filter to thimble, and the Color by choice that the marks are drawn by (colourHook)
   var kitFns = []
   var colourHook = null
   var ownSize = false // the page said the height it needs, so the document's own height is no longer sent
@@ -193,7 +196,7 @@
     post({ type: P + 'error', message: String((err && (err.message || err.reason)) || err) })
   }
   function aborted() {
-    var err = new Error('the fetch was cancelled')
+    var err = new Error('the fetch was canceled')
     err.name = 'AbortError'
     return err
   }
@@ -300,13 +303,13 @@
     if (Array.isArray(c.spans))
       c.spans = c.spans.map(function (s) {
         if (!s || typeof s !== 'object') return s
-        var sp = { text: s.text, colour: realColour(s.colour) }
+        var sp = { text: s.text, color: realColour(s.colour), colour: realColour(s.colour) }
         if (s.id != null) sp.id = String(s.id)
         return sp
       })
     if (Array.isArray(c.values))
       c.values = c.values.map(function (v) {
-        return v && typeof v === 'object' ? { id: v.id, label: v.label, value: v.value, colour: realColour(v.colour) } : v
+        return v && typeof v === 'object' ? { id: v.id, label: v.label, value: v.value, color: realColour(v.colour), colour: realColour(v.colour) } : v
       })
     return c
   }
@@ -358,12 +361,15 @@
       var c = {}
       for (var k in l) c[k] = l[k]
       if (typeof c.colour === 'string') c.colour = realColour(c.colour)
+      // `color`, the documented name, beside `colour`, its British spelling, which pages written before it read
+      if ('colour' in c) c.color = c.colour
       if (Array.isArray(c.values))
         c.values = c.values.map(function (v) {
           if (!v || typeof v !== 'object') return v
           var w = {}
           for (var j in v) w[j] = v[j]
           if (typeof w.colour === 'string') w.colour = realColour(w.colour)
+          if ('colour' in w) w.color = w.colour
           return w
         })
       return c
@@ -411,9 +417,13 @@
     setLabel: function (id, on) {
       return labelCall('on', { id: String(id), on: !!on })
     },
-    /** give a label's value one of the colours onLabels' palette holds; every view hears it through onLabels */
+    /** give a label's value one of the colors onLabels' palette holds; every view hears it through onLabels */
+    setLabelColor: function (id, value, color) {
+      return labelCall('colour', { id: String(id), value: String(value), colour: String(color) })
+    },
+    /** setLabelColor, by its British spelling, which pages written before it call */
     setLabelColour: function (id, value, colour) {
-      return labelCall('colour', { id: String(id), value: String(value), colour: String(colour) })
+      return window.thimble.setLabelColor(id, value, colour)
     },
     /** open thimble's label editor on the label with this id, or on a new label without one, in a popover over the page.
      *  opts.anchor, the element or rect {left, top, width, height} it stands beside (default: inside the page's top-left
@@ -496,8 +506,8 @@
       }
     },
     /** the mark of the labels the page is given on one record or unit ref, {bar, names, values, spans, keep?}, or null:
-     *  `bar` the colour of the first label that highlights it, `values` [{id, label, value, colour}] each label that
-     *  does with its value; every colour one a canvas can draw (rgb(), or a hex) */
+     *  `bar` the color of the first label that highlights it, `values` [{id, label, value, color}] each label that
+     *  does with its value; every color one a canvas can draw (rgb(), or a hex) */
     markOf: function (ref) {
       return marks[String(ref)] || null
     },
@@ -580,6 +590,7 @@
     } else if (d.type === P + 'open') {
       last = d.open || {}
       picked = null
+      sideClosed = false
       for (var i = 0; i < openers.length; i++) {
         try {
           openers[i](last)
@@ -623,7 +634,7 @@
     } else if (d.type === P + 'labels') {
       var marksChanged = takeMarks(d.marks)
       filter = d.filter && typeof d.filter === 'object' ? d.filter : null
-      if (filter && typeof filter.colour === 'string') filter = realLabelList([filter])[0]
+      if (filter && 'colour' in filter) filter = realLabelList([filter])[0]
       answered = typeof d.answered === 'number' ? d.answered : -1
       var state = { labels: Array.isArray(d.on) ? realLabelList(d.on) : [], filter: filter }
       if (Array.isArray(d.all)) state.all = realLabelList(d.all)
@@ -765,7 +776,10 @@
         return
       }
       var own = e.target && e.target.closest ? e.target.closest('[data-anchor]') : null
-      if (own) picked = own.getAttribute('data-anchor')
+      if (own) {
+        picked = own.getAttribute('data-anchor')
+        sideClosed = false
+      }
       // a link never takes the frame anywhere: the frame has no network, and a view moves with thimble.navigate
       var a = e.target && e.target.closest ? e.target.closest('a[href]') : null
       if (a) e.preventDefault()
@@ -777,7 +791,7 @@
   // and a bar in the first label's colour along its left edge, drawn as a box-shadow added to the view's own
   // (data-thimble-own): inset when the left padding has room or when a box that hides overflow, or the frame's edge,
   // would cut a bar outside it; else just outside. Only the outermost element carrying a record's ref takes the bar. Span labels are highlighted with the CSS Custom Highlight API, leaving the DOM as it is.
-  // With several choices of the kit's Colour by, the bar is a band per choice (bandsAt), side by side from the left in
+  // With several choices of the kit's Color by, the bar is a band per choice (bandsAt), side by side from the left in
   // the order of the strip's lanes, each in the colour of the record's value of that choice and empty where it has none,
   // as a slice of the strip: in the left padding a gradient behind the text (data-thimble-edge="bands"), so an empty
   // band shows the element's own background; with no room there, shadows just outside ("bands-out"), and on an element
@@ -852,6 +866,22 @@
       if (j) outer.push(-(far + BAND_GAP + BAR) + 'px 0 0 -' + BAR + 'px ' + GAP)
     }
     return '--thimble-bands:linear-gradient(to right,' + grad.join(',') + ');--thimble-bands-in:' + inner.join(',') + ';--thimble-bands-out:' + outer.join(',')
+  }
+  // The width the bar or the bands take now, as --thimble-bands-w on the root (BAR for one choice, bandsW(n) for n), so
+  // that a part that keeps them in its left padding (viewer_kit.css .thimble-card) widens that padding when more come
+  // than BANDS_ROOM holds, and its text never sits under a band. In a sheet of its own, written before the elements are
+  // measured, so that they are read with the padding they will have; written once Color by first takes two choices.
+  var roomSheet = null
+  var roomW = null
+  function setRoom(w) {
+    if (w === roomW) return
+    roomW = w
+    if (!roomSheet) {
+      roomSheet = document.createElement('style')
+      roomSheet.setAttribute('data-thimble', 'bands-room')
+      ;(document.head || document.documentElement).appendChild(roomSheet)
+    }
+    roomSheet.textContent = ':root{--thimble-bands-w:' + w + 'px}'
   }
   var DROP = '[data-thimble-drop="hide"]{display:none!important}[data-thimble-drop="dim"]{opacity:.25!important}'
   var COLOUR = /^[\w\s(),.#%-]+$/
@@ -1043,7 +1073,7 @@
     cut.set(a, left)
     return left
   }
-  // With `n` choices of Colour by past one, the bands take the bar's place (bandsW wide), and the element also gets how
+  // With `n` choices of Color by past one, the bands take the bar's place (bandsW wide), and the element also gets how
   // they are drawn (`bands`, the edge they take) and, for shadows, the colour behind the element (`gap`).
   function measure(el, cut, n) {
     var style = getComputedStyle(el)
@@ -1103,9 +1133,9 @@
     for (var a = el.parentElement; a; a = a.parentElement) if (a.getAttribute('data-anchor') === ref) return false
     return true
   }
-  // A record's bands for Colour by's choices (colourHook.tracks, the choices past the first): `first`, the first's
+  // A record's bands for Color by's choices (colourHook.tracks, the choices past the first): `first`, the first's
   // colour, then each other's: a label's value on the record (its mark), a field's value as the element says it in
-  // data-colour-tracks (the kit's attr) in that field's colour; null where the record has none. Null when none has a
+  // data-color-tracks (the kit's attr) in that field's colour; null where the record has none. Null when none has a
   // colour.
   function bandsAt(el, m, first, tracks) {
     var out = [typeof first === 'string' && COLOUR.test(first) ? first : null]
@@ -1143,7 +1173,7 @@
     return out.join(', ')
   }
   function tracksOf(el) {
-    var raw = el.getAttribute('data-colour-tracks')
+    var raw = el.getAttribute('data-color-tracks') || el.getAttribute('data-colour-tracks')
     if (!raw) return null
     try {
       var got = JSON.parse(raw)
@@ -1152,15 +1182,15 @@
       return null
     }
   }
-  // With the view kit's Colour by in the page (colourHook, viewer_colour.js), the bar shows the one thing the analyst
+  // With the view kit's Color by in the page (colourHook, viewer_colour.js), the bar shows the one thing the analyst
   // colours by, on the records alone (the anchored elements). For a label, the outermost element of each anchored record
   // that label highlights takes the bar in its value's colour, with data-thimble-label as before. For a field of the
-  // view, every anchored element that says its value in data-colour takes the bar in that value's colour, with
+  // view, every anchored element that says its value in data-color takes the bar in that value's colour, with
   // data-thimble-colour (an SVG shape the page colours itself), and a group's row, which has no anchor, takes none; the
   // labels that are on then draw no bar, and their texts stay highlighted. An element whose value
   // the analyst turned off takes no bar, nor a band of the first choice, and stays: Color by only colors, and a label's
   // texts of that value take the plain ink (the hook's `off`). With Color by Off (mode 'off') no element takes a bar.
-  // One colour encoding: with Colour by in the page, only the chosen label's texts are highlighted in its colours; the
+  // One colour encoding: with Color by in the page, only the chosen label's texts are highlighted in its colours; the
   // texts of the other labels that are on, and every label's with a field or Off chosen, are highlighted in the plain
   // ink of a highlight (--hl-bg). A span names its label (`id`); one from before spans did is
   // the chosen label's when it has the colour of that label's value on the record.
@@ -1274,7 +1304,7 @@
     paintFrame = null
     var hook = colourHook && (colourHook.mode === 'label' || colourHook.mode === 'field') ? colourHook : null
     var plain = !!(colourHook && colourHook.mode === 'off') // Color by: Off, which draws no bar
-    // Colour by's choices past the first, each a band beside the first's; the elements are measured again when their
+    // Color by's choices past the first, each a band beside the first's; the elements are measured again when their
     // number changes, since the bands take more room than the bar
     var tracks = hook && Array.isArray(hook.tracks) ? hook.tracks : []
     var n = tracks.length + 1
@@ -1282,10 +1312,11 @@
       bandsN = n
       measureTurn++
     }
+    if (n > 1 || roomSheet) setRoom(n > 1 ? bandsW(n) : BAR)
     var todo = [] // [element, bar colour (null for bands), what it shows, 'label' or 'colour', mark, bands or null]
     var spanned = []
     if (hasMarks() || hook) {
-      var els = document.querySelectorAll(hook && hook.mode === 'field' ? '[data-anchor],[data-colour]' : '[data-anchor]')
+      var els = document.querySelectorAll(hook && hook.mode === 'field' ? '[data-anchor],[data-color],[data-colour]' : '[data-anchor]')
       for (var j = 0; j < els.length; j++) {
         var el = els[j]
         if (el.tagName === 'CANVAS') continue
@@ -1315,8 +1346,9 @@
           if (!hit && !bands) continue
           shows = bands ? namesOf(bands, hook, tracks) : hook.name
         } else {
-          var own = el.hasAttribute('data-colour')
-          var v = own ? el.getAttribute('data-colour') : null
+          // data-color, which the kit's attr writes, or data-colour, its British spelling, which a page may write
+          var own = el.hasAttribute('data-color') || el.hasAttribute('data-colour')
+          var v = own ? (el.hasAttribute('data-color') ? el.getAttribute('data-color') : el.getAttribute('data-colour')) : null
           if (v === '') v = null
           if (m && !unmarked && outermost(el, ref)) spanned.push([el, m])
           // the bar marks a record, the element the view anchors: a group's row (no anchor) takes none; a value turned
@@ -1349,7 +1381,7 @@
       var cut = new Map()
       for (var c = 0; c < reads.length; c++) measured.set(reads[c], measure(reads[c], cut, n))
     }
-    // the texts of the span labels, each in its colour, or in the plain ink when it is not the Colour by choice
+    // the texts of the span labels, each in its colour, or in the plain ink when it is not the Color by choice
     var used = new Set()
     var usedOwn = new Set()
     var usedBands = new Set()
@@ -1475,9 +1507,12 @@
   }
   // A quoted passage inside a record the view shows whole: `open` brings quote {record, text}, and the bridge finds the
   // text in the outermost element anchored at the record (else anywhere), whitespace collapsed and case ignored, then
-  // highlights it, scrolls to it and posts `quoted {found}`. The search reruns after each page change until the page is
-  // quiet for QUOTE_QUIET ms with no fetch pending, or QUOTE_MAX ms pass; a found passage is kept in view for
-  // QUOTE_SETTLE ms.
+  // highlights it, scrolls to it and posts `quoted {found}`. In an element that holds the kit's formatted text
+  // (viewer_text.js), which shows a record's markdown rendered, the quote of its source is also tried with the markdown
+  // taken out. A passage in text a part keeps folded away (data-thimble-fold, hidden), or cuts from view by its box's
+  // size, has the part open it first, and each fold the passage runs into opens as it shows. The search reruns after
+  // each page change until the page is quiet for QUOTE_QUIET ms with no fetch pending, or QUOTE_MAX ms pass; a found
+  // passage is kept in view for QUOTE_SETTLE ms.
   var QUOTE_QUIET = 800
   var QUOTE_MAX = 20000
   var QUOTE_SETTLE = 1000
@@ -1487,7 +1522,28 @@
   function squeeze(s) {
     return String(s).replace(/\s+/g, ' ').trim().toLowerCase()
   }
-  function quoteNeedles(text) {
+  // A quote of a markdown source as its rendered text reads: without the markers of emphasis, strikethrough and code,
+  // a heading's #, a list's, a task's and a block quote's markers, and with a link's or an image's text alone
+  function unmarked(text) {
+    return String(text)
+      .split('\n')
+      .map(function (l) {
+        return l
+          .replace(/^\s*(?:>\s?)+/, '')
+          .replace(/^\s{0,3}#{1,6}(?:\s+|$)/, '')
+          .replace(/\s+#+\s*$/, '')
+          .replace(/^\s*(?:[-*+]|\d{1,9}[.)])\s+(?:\[[ xX]\]\s+)?/, '')
+      })
+      .join('\n')
+      .replace(/!?\[([^\]]*)\]\((?:[^()\s]|\([^()\s]*\))*(?:\s+(?:"[^"]*"|'[^']*'))?\)/g, '$1')
+      .replace(/!?\[([^\]]*)\]\[[^\]]*\]/g, '$1')
+      .replace(/<((?:https?|mailto):[^>\s]+)>/gi, '$1')
+      .replace(/`+/g, '')
+      .replace(/\*\*|__|~~/g, '')
+      .replace(/(^|[\s([{"'])[*_]+(?=\S)/g, '$1')
+      .replace(/(\S)[*_]+(?=$|[\s)\]}.,;:!?"'])/gm, '$1')
+  }
+  function quoteNeedles(text, md) {
     var out = []
     function add(n) {
       if (n && out.indexOf(n) < 0) out.push(n)
@@ -1502,6 +1558,7 @@
         break
       }
     }
+    if (md) quoteNeedles(unmarked(text)).forEach(add)
     return out
   }
   // the first place a squeezed needle shows in the element's squeezed text, as a range over the element's own text
@@ -1531,6 +1588,44 @@
     r.setEnd(b[0], b[1])
     return r
   }
+  // the innermost element around a node that keeps text folded away (data-thimble-fold, hidden), as thimble.search
+  // finds it, or null
+  function foldAround(n) {
+    for (var e = n && (n.nodeType === 1 ? n : n.parentElement); e; e = e.parentElement) if (e.hidden && e.hasAttribute('data-thimble-fold')) return e
+    return null
+  }
+  // the box that cuts a range from view by its size, as thimble.search finds it: the innermost element around it whose
+  // overflow is hidden or clipped and whose box the range runs past, inside the box it scrolls in, or null
+  function clipAround(r) {
+    var rect = typeof r.getBoundingClientRect === 'function' ? r.getBoundingClientRect() : null
+    if (!rect || (!rect.width && !rect.height)) return null
+    var n = r.startContainer
+    for (var e = n.nodeType === 1 ? n : n.parentElement; e && e !== document.body && e !== document.documentElement; e = e.parentElement) {
+      var cs = getComputedStyle(e)
+      if (/(auto|scroll|overlay)/.test(cs.overflowY)) return null
+      if (!/(hidden|clip)/.test(cs.overflowY + ' ' + cs.overflowX)) continue
+      var c = e.getBoundingClientRect()
+      if (rect.top < c.top - 1 || rect.bottom > c.bottom + 1 || rect.left < c.left - 1 || rect.right > c.right + 1) return e
+    }
+    return null
+  }
+  function closedAround(r) {
+    return foldAround(r.startContainer) || foldAround(r.endContainer) || clipAround(r)
+  }
+  // A passage found in folded text, or cut from view by its box's size: the part that folded it is sent
+  // `thimble-unfold`, as the search sends it, until the passage shows or the part leaves the fold as it was; the passage
+  // found again
+  function unfoldQuote(q, r) {
+    for (var i = 0; r && i < 32; i++) {
+      var f = closedAround(r)
+      if (!f) break
+      f.dispatchEvent(new CustomEvent('thimble-unfold', { bubbles: true }))
+      var again = quoteRange(q)
+      if (again && closedAround(again) === f) break
+      r = again
+    }
+    return r
+  }
   function quoteRange(q) {
     var scopes = []
     var els = document.querySelectorAll('[data-anchor]')
@@ -1546,6 +1641,15 @@
       for (var s = 0; s < scopes.length; s++) {
         var r = squeezedRange(scopes[s], ns[n])
         if (r) return r
+      }
+    }
+    // a quote of a record's markdown, in its rendered text
+    var ms = quoteNeedles(q.text, true).slice(ns.length)
+    for (var m = 0; m < ms.length; m++) {
+      for (var t = 0; t < scopes.length; t++) {
+        if (!scopes[t].matches('.thimble-text') && !scopes[t].querySelector('.thimble-text')) continue
+        var rm = squeezedRange(scopes[t], ms[m])
+        if (rm) return rm
       }
     }
     return null
@@ -1566,6 +1670,15 @@
   // the evidence highlight in ink, at the find's stronger step so it reads over the ring views draw around the record a
   // citation opened
   function showQuote(r) {
+    // each fold the passage is in, or runs into, is opened by the part that folded it
+    var top = r.commonAncestorContainer.nodeType === 1 ? r.commonAncestorContainer : r.commonAncestorContainer.parentElement
+    var folds = top ? [].slice.call(top.querySelectorAll('[data-thimble-fold][hidden]')) : []
+    var around = top && top.closest('[data-thimble-fold]')
+    if (around) folds.unshift(around)
+    for (var f = 0; f < folds.length; f++) {
+      if (folds[f].hidden && (folds[f] === around || r.intersectsNode(folds[f])))
+        folds[f].dispatchEvent(new CustomEvent('thimble-unfold', { bubbles: true }))
+    }
     if (HL) {
       if (!quoteSheet) {
         quoteSheet = document.createElement('style')
@@ -1587,7 +1700,7 @@
     if (!q) return
     var now = Date.now()
     // the page is searched again only when it changed since the last search, or to scroll a found passage back
-    var r = q.found || q.changed >= q.searched ? quoteRange(q) : null
+    var r = q.found || q.changed >= q.searched ? unfoldQuote(q, quoteRange(q)) : null
     q.searched = now
     if (r) {
       if (!q.found) {
@@ -1643,7 +1756,7 @@
       for (var j = 0; j < r.addedNodes.length; j++) {
         var added = r.addedNodes[j]
         if (collect(added)) changed = true
-        else if (colourHook && added.nodeType === 1 && (added.hasAttribute('data-colour') || added.querySelector('[data-colour]'))) changed = true
+        else if (colourHook && added.nodeType === 1 && (added.hasAttribute('data-color') || added.hasAttribute('data-colour') || added.querySelector('[data-color],[data-colour]'))) changed = true
       }
       // the elements with highlighted texts around the change find their ranges again
       if (walked && !walked.has(r.target)) {
@@ -1658,12 +1771,14 @@
     if (unsent.length && sendTimer == null) sendTimer = setTimeout(sendAnchors, 30)
     else if (changed) seenSoon()
     if (changed && (hasMarks() || dropping() || colourHook)) paintSoon()
-  }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-anchor', 'data-colour', 'data-colour-tracks', 'class'] })
+  }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-anchor', 'data-color', 'data-color-tracks', 'data-colour', 'data-colour-tracks', 'class'] })
 
   // What the analyst is looking at, for a newer version of the view loaded in this page's place: `ref` the element they
-  // last clicked since the last `open`, `scroll` the scroll positions of the page and of each box scrolled, `fields`
-  // the values typed or picked in its inputs, and `segs` the chosen option of each segmented control, by its text. An
-  // element is named by its id, else by its path of child positions from the body.
+  // last clicked or the record the side panel opened since the last `open`, else the ref that `open` named, and none
+  // once they closed the side panel with nothing picked after, so that the newer version opens on no record; `scroll`
+  // the scroll positions of the page and of each box scrolled, `fields` the values typed or picked in its inputs, and
+  // `segs` the chosen option of each segmented control, by its text. An element is named by its id, else by its path
+  // of child positions from the body.
   var SCAN_MAX = 5000
   function pathOf(el) {
     if (el === document.scrollingElement || el === document.documentElement || el === document.body) return ''
@@ -1705,7 +1820,7 @@
     var segs = []
     var chosen = document.querySelectorAll('.seg .seg-opt.active')
     for (var k = 0; k < chosen.length; k++) segs.push({ path: pathOf(chosen[k].closest('.seg')), text: chosen[k].textContent.trim() })
-    return { ref: picked || (last && last.ref) || null, scroll: scroll, fields: fields, segs: segs }
+    return { ref: picked || (sideClosed ? null : last && last.ref) || null, scroll: scroll, fields: fields, segs: segs }
   }
   // The state put back, again after each change of the page, until it has been quiet for QUOTE_QUIET ms with no fetch
   // pending or RESTORE_MAX ms pass, or the analyst scrolls, clicks or types: each field and segmented control once it is
@@ -1774,8 +1889,8 @@
 
   // What the view kit's own controls (viewer_colour.js and viewer_range.js, loaded right after this bridge) need of it,
   // handed over once (the last of them takes it away): they hear the labels and marks without registering the page's
-  // onLabels, set the Color by choice the marks are drawn by, have the page drawn again, and keep the choice and the
-  // time ranges with thimble.
+  // onLabels, set the Color by choice the marks are drawn by, have the page drawn again, keep the choice and the time
+  // ranges with thimble, and say what the side panel shows (viewer_side.js), which a newer version opens on.
   window.__thimbleKit = {
     labels: function (fn) {
       kitFns.push(fn)
@@ -1788,6 +1903,11 @@
     paint: paintSoon,
     save: function (state) {
       post({ type: P + 'colour', state: state })
+    },
+    // the side panel opened the record `ref`, or closed (null)
+    shows: function (ref) {
+      picked = ref == null ? null : String(ref)
+      sideClosed = ref == null
     },
     gesture: gesture,
     report: report,

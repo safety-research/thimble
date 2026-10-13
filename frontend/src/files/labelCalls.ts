@@ -118,10 +118,10 @@ export async function runLabelCall(op: string, args: unknown, ctx: LabelCallCont
       return
     }
     case 'colour': {
-      if (!actions) throw new Error('label colours cannot be changed here')
+      if (!actions) throw new Error('label colors cannot be changed here')
       const k = filesLabel(byId, str(a.id))
       const at = palette.findIndex((c) => c.toLowerCase() === str(a.colour).toLowerCase())
-      if (at < 0) throw new Error(`${JSON.stringify(str(a.colour))} is not one of the palette's colours`)
+      if (at < 0) throw new Error(`${JSON.stringify(str(a.colour))} is not one of the palette's colors`)
       actions.setColour(k.id, valueOf(k, str(a.value)), PALETTE[at])
       return
     }

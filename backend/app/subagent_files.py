@@ -2,11 +2,12 @@
 both (subagents.py has the design):
 
   subagents.json  the pending requests (a start, a message or a stop, by request id), the nested starts a subagent's
-                  Agent call left (`nested`), the agent registry (`agents`, by agent id), the per-run efforts the
-                  module's step hook applies (`efforts`), the module's last hello (`module`), main's session and its
-                  moves (`main`) and main's end (`main_end`)
-  callers.jsonl   one line per thimble tool call of a subagent: {tool_use_id, agent_id, agent_type, ts}, trimmed to the
-                  last CALLERS_KEEP_S
+                  Agent call left (`nested`), the agent registry (`agents`, by agent id), the agents of a role whose
+                  own start is not known yet (`unsettled`, by agent id: register), the per-run efforts the module's
+                  step hook applies (`efforts`), the module's last hello (`module`), main's session and its moves
+                  (`main`) and main's end (`main_end`)
+  callers.jsonl   one line per thimble tool call: {tool_use_id, agent_id, agent_type, ts}, agent_id and agent_type
+                  empty for main's own call, trimmed to the last CALLERS_KEEP_S
   launch.json     what the launcher started main with (lane A writes it), with the session's mode (`mode`: browser or
                   terminal), which every process of the session reads here (session_mode)
 
@@ -68,6 +69,7 @@ LOCK_POLL_S = 0.01
 CALLERS_KEEP_S = 3600.0
 CALLERS_TRIM_BYTES = 256 * 1024  # callers.jsonl is trimmed to CALLERS_KEEP_S once it grows past this
 NESTED_KEEP_S = 600.0  # a nested start no SubagentStart took up within this long is dropped
+UNSETTLED = "unsettled"  # subagents.json: the agents of a role whose own start is not known yet, by agent id (register)
 DONE_KEEP_S = 24 * 3600.0  # a request that ended is dropped after this long
 REKEYS_KEPT = 16  # the session moves kept under `module.rekeyed`
 PLUGIN = "thimble"
@@ -247,7 +249,8 @@ def update(ws: Path, wait_s: float = LOCK_WAIT_S) -> Iterator[dict[str, Any]]:
 
 
 def _prune(state: dict[str, Any]) -> None:
-    """Requests that ended more than DONE_KEEP_S ago, and nested starts older than NESTED_KEEP_S, go."""
+    """Requests that ended more than DONE_KEEP_S ago, and nested starts and unsettled agents older than NESTED_KEEP_S,
+    go."""
     t = now()
     reqs = state.get("requests")
     if isinstance(reqs, dict):
@@ -257,6 +260,10 @@ def _prune(state: dict[str, Any]) -> None:
     nested = state.get("nested")
     if isinstance(nested, list):
         state["nested"] = [n for n in nested if isinstance(n, dict) and t - float(n.get("at") or 0) <= NESTED_KEEP_S]
+    table = state.get(UNSETTLED)
+    if isinstance(table, dict):
+        state[UNSETTLED] = {k: u for k, u in table.items()
+                            if isinstance(u, dict) and t - float(u.get("at") or 0) <= NESTED_KEEP_S}
 
 
 def requests(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -278,6 +285,13 @@ def efforts(state: dict[str, Any]) -> dict[str, str]:
     if not isinstance(out, dict):
         out = state["efforts"] = {}
     return out
+
+
+def unsettled(state: dict[str, Any], agent_id: str) -> dict[str, Any] | None:
+    """The record of `agent_id` when it is an agent of a role whose own start is not known yet (register), else None."""
+    got = state.get(UNSETTLED)
+    u = got.get(agent_id) if isinstance(got, dict) and agent_id else None
+    return u if isinstance(u, dict) else None
 
 
 # --------------------------------------------------------------------------- deny reasons
@@ -473,14 +487,19 @@ def _doc_of(prompt: str, state: dict[str, Any]) -> str:
     return key.split(":", 1)[1] if key.startswith("writer:") else ""
 
 
-def register(state: dict[str, Any], hook: dict[str, Any]) -> dict[str, Any] | None:
+def register(state: dict[str, Any], hook: dict[str, Any], settled: list[str] | None = None) -> dict[str, Any] | None:
     """The SubagentStart hook's record (`hook` its input): the agent's entry in the registry, which it returns; None for
-    an agent that is no business of thimble's (the analyst's own subagent, a thread's fork).
+    an agent that is no business of thimble's (the analyst's own subagent, a thread's fork) and for one whose own start
+    is not known yet.
 
     An agent the registry holds starts again (a follow-up, a hand-back of its child): its latest start is recorded. A new
-    agent of one of thimble's roles takes up the claimed start of its type that no agent took up yet. Any other new agent
-    is a descendant of one of thimble's agents when a nested start of its type names that agent as its caller; when two
-    callers' nested starts share its type, its parent waits for its first call (resolve_parent)."""
+    agent of one of thimble's roles takes up its own claimed start (_own_claim). When that start is not known yet (main
+    started two or more agents of one type in one turn), the agent waits under `unsettled`, and its start is given to it
+    by the first sign that names its call (settle), or when every other start it could have is taken (eliminate). An
+    agent that takes its start can leave an unsettled agent one start: that agent takes it too, and its id goes to
+    `settled`. Any other new agent is a descendant of one of thimble's agents when a nested start of its type names that
+    agent as its caller (a caller still unsettled takes up its own start first, _settle_callers, and goes to `settled`);
+    when two callers' nested starts share its type, its parent waits for its first call (resolve_parent)."""
     agent_id = str(hook.get("agent_id") or "")
     agent_type = str(hook.get("agent_type") or "")
     session = str(hook.get("session_id") or "")
@@ -497,23 +516,30 @@ def register(state: dict[str, Any], hook: dict[str, Any]) -> dict[str, Any] | No
         return known
     role = role_of(agent_type)
     if role is not None:
-        claimed = [(rid, r) for rid, r in requests(state).items()
-                   if isinstance(r, dict) and r.get("kind") == "start" and r.get("state") == "claimed" and not r.get("agent")
-                   and (r.get("input") or {}).get("subagent_type") == agent_type]
+        claimed = open_claims(state, agent_type)
         if claimed:
-            rid, req = max(claimed, key=lambda x: float(x[1].get("claimed_at") or 0))
-            entry = {"key": req.get("key"), "type": agent_type, "role": role, "request": rid,
-                     "parent": req.get("caller"), "chat": req.get("chat"), "run": 0,
-                     "values": req.get("values") or {}, "route": req.get("route"),
-                     "plugin_started": str(req.get("claimed_by") or "").startswith(PLUGIN_CALL),
-                     "sessions": [session] if session else [], "started": t, "last_start": t, "starts": 1,
-                     "status": "running", "work": req.get("work"), "handed_back": False}
-            agents[agent_id] = entry
-            req.update(state="started", agent=agent_id, at=t)
-            effort = str((req.get("values") or {}).get("effort") or "")
-            if req.get("route") == "typed" and effort:
-                efforts(state)[agent_id] = effort  # the module's step hook gives a typed run its effort
+            own = _own_claim(state, hook, agent_id, claimed)
+            if own is None:
+                before = unsettled(state, agent_id)
+                # the calls that claimed the starts it could have, not the requests: a start refused and started again
+                # (Start it) is claimed by a new call, and is never an agent's that waited for the old one
+                claims = (before or {}).get("claims") or [str(r["claimed_by"]) for _, r in claimed
+                                                          if r.get("claimed_by") and not r.get("spawned")]
+                table = state.get(UNSETTLED)
+                if not isinstance(table, dict):
+                    table = state[UNSETTLED] = {}
+                table[agent_id] = {
+                    "type": agent_type, "session": session, "transcript_path": str(hook.get("transcript_path") or ""),
+                    "claims": claims, "at": t}
+                return None
+            entry = _take(state, agent_id, own[0], own[1], session)
+            left = eliminate(state)
+            if settled is not None:
+                settled.extend(left)
             return entry
+    left = _settle_callers(state, agent_type)
+    if settled is not None:
+        settled.extend(left)
     nested = [n for n in state.get("nested") or [] if isinstance(n, dict) and n.get("subagent_type") == agent_type
               and isinstance(agents.get(str(n.get("caller") or "")), dict)]
     if not nested:
@@ -528,6 +554,166 @@ def register(state: dict[str, Any], hook: dict[str, Any]) -> dict[str, Any] | No
         state["nested"] = [n for n in state.get("nested") or [] if n is not nested[-1]]
     agents[agent_id] = entry
     return entry
+
+
+def _settle_callers(state: dict[str, Any], agent_type: str) -> list[str]:
+    """The callers of the nested starts of `agent_type` that are unsettled (UNSETTLED) take up their own start, from the
+    meta.json Claude Code wrote once their SubagentStart hooks ended (spawn_call), so that the new agent of that type is
+    their descendant: an agent of thimble's can start a subagent before any sign of its own start comes. The agents that
+    took their start (settle)."""
+    table = state.get(UNSETTLED)
+    if not isinstance(table, dict) or not table:
+        return []
+    callers = dict.fromkeys(str(n.get("caller") or "") for n in state.get("nested") or []
+                            if isinstance(n, dict) and n.get("subagent_type") == agent_type)
+    out: list[str] = []
+    for caller in callers:
+        u = unsettled(state, caller)
+        call = spawn_call(u, caller) if u is not None else None
+        if call:
+            out.extend(settle(state, caller, call))
+    return out
+
+
+def open_claims(state: dict[str, Any], agent_type: Any) -> list[tuple[str, dict[str, Any]]]:
+    """The starts of `agent_type` that an Agent call claimed and that no agent took up yet."""
+    return [(rid, r) for rid, r in requests(state).items()
+            if isinstance(r, dict) and r.get("kind") == "start" and r.get("state") == "claimed" and not r.get("agent")
+            and (r.get("input") or {}).get("subagent_type") == agent_type]
+
+
+def spawn_call(hook: dict[str, Any], agent_id: str) -> str | None:
+    """The tool_use id of the Agent call that spawned `agent_id`: the `toolUseId` of the meta.json Claude Code writes
+    beside its transcript (<session>/subagents/agent-<id>.meta.json, the session's transcript being the hook's
+    `transcript_path`); None when it cannot be read. Claude Code writes the file after the agent's SubagentStart hooks
+    end (2.1.295), so the file is there for the agent's later hooks, not for its SubagentStart."""
+    path = str(hook.get("transcript_path") or "")
+    if not path.endswith(".jsonl") or not re.fullmatch(r"[A-Za-z0-9_-]+", agent_id):
+        return None
+    meta = Path(path[:-len(".jsonl")]) / "subagents" / f"agent-{agent_id}.meta.json"
+    try:
+        got = json.loads(meta.read_text("utf-8"))
+    except (OSError, ValueError):
+        return None
+    call = got.get("toolUseId") if isinstance(got, dict) else None
+    return str(call) if call else None
+
+
+def _own_claim(state: dict[str, Any], hook: dict[str, Any], agent_id: str,
+               claimed: list[tuple[str, dict[str, Any]]]) -> tuple[str, dict[str, Any]] | None:
+    """The claimed start that is the new agent's own, among those of its type no agent took up (`claimed`), or None
+    when it is not known yet. The SubagentStart hook's input does not name the Agent call that spawned the agent. So
+    the start is known only from what names that call: its `spawned`, recorded when the call's result named the agent
+    before this hook ran (settle); the agent's meta.json, which Claude Code can have written by a later start; or the
+    agent's call being the only one that waits. Main can start two or more agents of one type in one turn, such as two
+    views' builders, and Claude Code spawns them together, in either order. A guess then gave each the other's start
+    (views round 5: each builder built the other's view), so with two or more calls waiting, none is guessed."""
+    mine = [x for x in claimed if x[1].get("spawned") == agent_id]
+    if mine:
+        return mine[0]
+    call = spawn_call(hook, agent_id)
+    mine = [x for x in claimed if call and x[1].get("claimed_by") == call]
+    if mine:
+        return mine[0]
+    free = [x for x in claimed if not x[1].get("spawned")]  # a start whose call named another agent is that agent's
+    if len(free) != 1:
+        return None
+    # an unsettled agent's own start is among its claims: one that names this start may have it
+    table = state.get(UNSETTLED)
+    call = free[0][1].get("claimed_by")
+    if isinstance(table, dict) and any(call in (u.get("claims") or []) for a, u in table.items()
+                                       if a != agent_id and isinstance(u, dict)):
+        return None
+    return free[0]
+
+
+def _take(state: dict[str, Any], agent_id: str, rid: str, req: dict[str, Any], session: str) -> dict[str, Any]:
+    """The agent `agent_id` of one of thimble's roles takes up the claimed start `rid` (`req`): its entry in the
+    registry, which it returns, and the start is `started` by it. It waits no more (UNSETTLED)."""
+    t = now()
+    agent_type = str((req.get("input") or {}).get("subagent_type") or "")
+    entry = {"key": req.get("key"), "type": agent_type, "role": role_of(agent_type), "request": rid,
+             "parent": req.get("caller"), "chat": req.get("chat"), "run": 0,
+             "values": req.get("values") or {}, "route": req.get("route"),
+             "plugin_started": str(req.get("claimed_by") or "").startswith(PLUGIN_CALL),
+             "sessions": [session] if session else [], "started": t, "last_start": t, "starts": 1,
+             "status": "running", "work": req.get("work"), "handed_back": False}
+    registry(state)[agent_id] = entry
+    req.update(state="started", agent=agent_id, at=t)
+    effort = str((req.get("values") or {}).get("effort") or "")
+    if req.get("route") == "typed" and effort:
+        efforts(state)[agent_id] = effort  # the module's step hook gives a typed run its effort
+    if unsettled(state, agent_id) is not None:
+        state[UNSETTLED].pop(agent_id, None)
+    return entry
+
+
+def eliminate(state: dict[str, Any]) -> list[str]:
+    """The unsettled agents (UNSETTLED) that have one start left of the claims they could have: each takes it, as its own
+    is among them and each other start was taken by its own agent or refused. Two unsettled agents that have the same one
+    start left take nothing. The agents that took their start, in order."""
+    out: list[str] = []
+    while True:
+        table = state.get(UNSETTLED)
+        if not isinstance(table, dict) or not table:
+            return out
+        left: dict[str, list[str]] = {}
+        for aid, u in table.items():
+            if not isinstance(u, dict):
+                continue
+            open_ = {str(r["claimed_by"]): (rid, r) for rid, r in open_claims(state, u.get("type"))
+                     if r.get("claimed_by")}
+            left[aid] = [open_[call][0] for call in u.get("claims") or []
+                         if call in open_ and not open_[call][1].get("spawned")]
+        singles = [(aid, rids[0]) for aid, rids in left.items() if len(rids) == 1]
+        pick = next(((aid, rid) for aid, rid in singles if sum(1 for _, r in singles if r == rid) == 1), None)
+        if pick is None:
+            return out
+        aid, rid = pick
+        _take(state, aid, rid, requests(state)[rid], str(table[aid].get("session") or ""))
+        out.append(aid)
+
+
+def settle(state: dict[str, Any], agent_id: str, call: str) -> list[str]:
+    """The Agent call `call` started the agent `agent_id`, as its result, its PostToolUse hook or the agent's meta.json
+    says: the start the call claimed is recorded as that agent's (`spawned`), and an unsettled agent (UNSETTLED) takes it
+    up (_take), with any other unsettled agent that then has one start left (eliminate). An agent whose SubagentStart has
+    not run yet takes it up there (register). The agents that took their start, in order; none for a start that has its
+    agent already or that is no longer claimed."""
+    if not agent_id or not call:
+        return []
+    hit = next(((rid, r) for rid, r in requests(state).items()
+                if isinstance(r, dict) and r.get("kind") == "start" and r.get("claimed_by") == call), None)
+    if hit is None:
+        return []
+    rid, req = hit
+    if req.get("agent") or req.get("state") != "claimed":
+        return []
+    req["spawned"] = agent_id
+    u = unsettled(state, agent_id)
+    if u is None or isinstance(registry(state).get(agent_id), dict):
+        return eliminate(state)  # the start is this agent's, so an unsettled agent that could have it has one left
+    _take(state, agent_id, rid, req, str(u.get("session") or ""))
+    return [agent_id, *eliminate(state)]
+
+
+def launched_agent(hook: dict[str, Any]) -> str | None:
+    """The agent a PostToolUse hook's Agent call (`hook`) launched for one of thimble's roles: the `agentId` of Claude
+    Code's `async_launched` answer, or of the text that opens "Async agent launched"; None for any other call."""
+    if str(hook.get("tool_name") or "") not in AGENT_TOOLS or str(hook.get("hook_event_name") or "PostToolUse") \
+            != "PostToolUse":
+        return None
+    inp = hook.get("tool_input") if isinstance(hook.get("tool_input"), dict) else {}
+    if role_of(inp.get("subagent_type")) is None:
+        return None
+    answer = hook.get("tool_response")
+    if isinstance(answer, dict):
+        got = str(answer.get("agentId") or "") if "launched" in str(answer.get("status") or "") else ""
+    else:
+        text = str(answer or "").lstrip()
+        m = re.search(r"agentId:\s*([A-Za-z0-9_-]+)", text) if text.startswith("Async agent launched") else None
+        got = m.group(1) if m else ""
+    return got if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", got) else None
 
 
 def _inherit(state: dict[str, Any], agent_id: str, entry: dict[str, Any], parent: str) -> None:
@@ -707,9 +893,9 @@ def started_notes(state: dict[str, Any], session_mode: str | None = None) -> lis
 
 
 def add_caller(ws: Path, tool_use_id: str, agent_id: str, agent_type: str) -> None:
-    """One line of callers.jsonl (module note): the thimble call `tool_use_id` is the subagent `agent_id`'s. The file is
-    trimmed to CALLERS_KEEP_S once it grows past CALLERS_TRIM_BYTES."""
-    if not tool_use_id or not agent_id:
+    """One line of callers.jsonl (module note): the thimble call `tool_use_id` is the subagent `agent_id`'s, or main's own
+    with `agent_id` empty. The file is trimmed to CALLERS_KEEP_S once it grows past CALLERS_TRIM_BYTES."""
+    if not tool_use_id:
         return
     path = callers_path(ws)
     line = json.dumps({"tool_use_id": tool_use_id, "agent_id": agent_id, "agent_type": agent_type, "ts": now()}) + "\n"

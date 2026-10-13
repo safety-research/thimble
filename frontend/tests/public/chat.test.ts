@@ -4,7 +4,8 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, test } from 'vitest'
-import { callLineText, callTarget, foldRecords, leadText, madeBy, mainSkips, MCP_PREFIXES, type UserRow } from '../../src/chat/model.ts'
+import { callLineText, callTarget, foldRecords, leadText, madeBy, mainSkips, MCP_PREFIXES, type CallsRow, type ToolGroup, type UserRow } from '../../src/chat/model.ts'
+import { shownRows } from '../../src/chat/Rows.tsx'
 import type { ChatRecord } from '../../src/lib/types.ts'
 
 const ROOT = path.resolve(__dirname, '../../..')
@@ -83,6 +84,26 @@ describe('a cited call', () => {
     ]
     expect(named).toEqual(['agents/agent-01.jsonl', 'search for “escalat” in tickets', 'Count refund tickets', 'wc -l notes.jsonl', 'Reviews per agent', 'the critic’s report', 'an agent’s report', 'step 10'])
     for (const n of named) expect(n).not.toMatch(/[{}]|StructuredOutput|critique|Bash|Grep|Read/)
+  })
+})
+
+describe('a call of a tool thimble does not know', () => {
+  test("is one compact line, named by its words and never by its input as JSON; thimble's own calls stay cards", () => {
+    // live QA 2: main's SendFeedback call was a card of its own that read `SendFeedback {"type":"bug",…`
+    const rows = foldRecords(records([
+      { type: 'tool_use', ts: '2026-10-10T11:09:33Z', id: 'b1', name: 'Bash', input: { command: 'wc -l revisions.jsonl' } },
+      { type: 'tool_use', ts: '2026-10-10T11:09:34Z', id: 'u1', name: 'TodoWrite', input: { todos: [{ content: 'Look', status: 'done' }] } },
+      { type: 'tool_use', ts: '2026-10-10T11:09:35Z', id: 'u2', name: 'mcp__claude-in-chrome__navigate', input: { tabId: 3, url: 'https://example.org/' } },
+      { type: 'tool_use', ts: '2026-10-10T11:09:36Z', id: 't1', name: `${P}open_view`, input: { view: 'wiki-pages' } },
+    ]))
+    const shown = shownRows(rows)
+    expect(shown.map((r) => r.kind)).toEqual(['calls', 'tools'])
+    const [calls, card] = [shown[0] as CallsRow, shown[1] as ToolGroup]
+    expect(calls.tools.map((t) => callLineText(t.name, t.input, ''))).toEqual(['Bash wc -l revisions.jsonl', 'TodoWrite', 'navigate https://example.org/'])
+    expect(callLineText(card.tools[0].name, card.tools[0].input, '')).toBe('open_view wiki-pages')
+    const feedback = { type: 'bug', title: 'The hook says to end the turn silently', details: '- **What happened:** …' }
+    expect(callLineText('SendFeedback', feedback, '')).toBe('SendFeedback The hook says to end the turn silently')
+    expect(callLineText('CronCreate', { cron: '*/5 * * * *', recurring: true }, '')).toBe('CronCreate */5 * * * *')
   })
 })
 

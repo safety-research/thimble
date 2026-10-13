@@ -1,5 +1,6 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+import { build, context, type BuildOptions } from 'esbuild'
 
 // the config runs under node; this is the one node global it reads
 declare const process: { env: Record<string, string | undefined> }
@@ -29,8 +30,47 @@ export function ownOriginToTarget(req: ProxyReq, incoming: Incoming, target: str
 
 const target = `http://127.0.0.1:${backend}`
 
+/** A module of src/lib as one script a view's page inlines for the view kit, written beside the app on every build:
+ * kitChart, the canvas's chart drawing for thimble.chart, as kit/chart.js (backend views.KIT_CHART_JS), so a view's
+ * charts and the canvas's are drawn by the same code, and kitMarkdown, the markdown parser for thimble.text, as
+ * kit/markdown.js (views.KIT_MARKDOWN_JS). Under the dev server it is written into the build's folder as it starts and
+ * again on every change to what it bundles, so a view's charts follow the chart style there too. */
+export function kitScript(name: string, fileName: string, what: string): Plugin {
+  let root = '.'
+  let outDir = 'dist'
+  const options = (): BuildOptions => ({
+    entryPoints: [`${root}/src/lib/${name}.ts`],
+    bundle: true,
+    format: 'iife',
+    platform: 'browser',
+    target: 'es2020',
+    minify: true,
+    legalComments: 'none',
+    logLevel: 'error',
+  })
+  return {
+    name: `thimble-${fileName.replace(/\W+/g, '-')}`,
+    configResolved(config) {
+      root = config.root
+      outDir = config.build.outDir.startsWith('/') ? config.build.outDir : `${root}/${config.build.outDir}`
+    },
+    async generateBundle() {
+      const out = await build({ ...options(), write: false })
+      this.emitFile({ type: 'asset', fileName, source: out.outputFiles[0].text })
+    },
+    configureServer(server) {
+      context({ ...options(), outfile: `${outDir}/${fileName}`, write: true })
+        .then(async (ctx) => {
+          await ctx.watch()
+          server.httpServer?.once('close', () => void ctx.dispose())
+        })
+        .catch((e: Error) => server.config.logger.warn(`${fileName}, the view kit's ${what}, was not written: ${e.message}`))
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), kitScript('kitChart', 'kit/chart.js', 'chart drawing'), kitScript('kitMarkdown', 'kit/markdown.js', 'markdown parser')],
   cacheDir,
   server: {
     port: 5300,

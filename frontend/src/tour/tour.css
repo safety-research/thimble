@@ -156,7 +156,7 @@
   top: 8px;
   right: 10px;
   padding: 0 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-chip);
   font: var(--type-caption);
   line-height: 17px;
   color: var(--text-secondary);
@@ -178,7 +178,7 @@
   align-items: center;
   gap: 8px;
   padding: 6px 10px 6px 6px;
-  border-radius: 10px;
+  border-radius: var(--radius-card);
   font: var(--type-body-sm);
   color: var(--text-secondary);
   background: var(--overlay-bg);
@@ -193,7 +193,7 @@
   height: 34px;
   padding: 0 8px;
   box-sizing: border-box;
-  border-radius: 7px;
+  border-radius: var(--radius-ui);
   font: 500 20px/1 var(--font-body);
   color: var(--text-primary);
   background: var(--surface-card);

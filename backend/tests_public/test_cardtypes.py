@@ -246,9 +246,9 @@ async def test_main_hears_when_a_label_it_ran_finishes_and_can_colour_its_values
     concepts.show_concept(CORPUS, "even", None, colours={"odd": "red", "even": "purple"})
     asked = {cl["name"]: cl["color"] for cl in concepts.read_concept(config.workspace_dir(CORPUS), cid)["classes"]}
     assert asked == {"even": 15, "odd": 13}
-    with pytest.raises(HTTPException, match="no label colour is named 'magenta'"):
+    with pytest.raises(HTTPException, match="no label color is named 'magenta'"):
         concepts.show_concept(CORPUS, "even", None, colours={"odd": "magenta"})
-    named = tools.schema_of("show_label")["properties"]["colours"]["additionalProperties"]["enum"]
+    named = tools.schema_of("show_label")["properties"]["colors"]["additionalProperties"]["enum"]
     assert named == list(concepts.COLOUR_NAMES) and sorted(concepts.COLOUR_NAMES.values()) == list(range(1, concepts.PICKS + 1))
 
 

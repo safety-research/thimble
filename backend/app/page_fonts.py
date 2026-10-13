@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-FONTS_DIR = Path(__file__).with_name("fonts")
+FONTS_DIR = Path(__file__).resolve().with_name("fonts")  # by its real path (notebook._kernel_reads)
 
 
 def files() -> list[str]:

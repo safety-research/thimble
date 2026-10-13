@@ -28,7 +28,9 @@ import { callRef, parseRef } from '../lib/refs'
 import { track } from '../lib/telemetry'
 import { hhmm } from '../lib/time'
 import { useTouring } from '../lib/touring'
-import type { ChatMeta, ChatRecord, MainEffort, ModelConf, Proposal, SessionAlert, StartAnswer, Ticket } from '../lib/types'
+import type { ChatMeta, ChatRecord, MainEffort, ModelConf, Proposal, SessionAlert, StartAnswer, ThreadComment, Ticket } from '../lib/types'
+import { colourVar } from '../files/labels'
+import { NOTE_COLOR } from '../report/checkComments'
 import { loadSettings, onSettingsChange } from '../lib/models'
 import { findProposal, refreshProposals, useProposals } from '../lib/proposals'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
@@ -965,6 +967,7 @@ export function ThreadView({ ws, meta, chat, main, skip, branches, detached }: {
                 <RefChip key={`${a}:${i}`} ref={a} compact workspace={ws} />
               ))}
               {anchors.length > ANCHORS_SHOWN && <Chip kind="value">+{anchors.length - ANCHORS_SHOWN}</Chip>}
+              {meta.anchor_comment && <AnchorComment comment={meta.anchor_comment} />}
             </>
           }
         />
@@ -973,6 +976,21 @@ export function ThreadView({ ws, meta, chat, main, skip, branches, detached }: {
       {canAskAgain(chat.records, chat.running) && <AskAgain ws={ws} id={meta.id} detached={detached} onAsked={chat.reload} />}
       {!chat.running && <HandBack ws={ws} id={meta.id} state={meta.hand_back} detached={detached} onDone={chat.reload} />}
     </>
+  )
+}
+
+/** The comment a thread that its reply field opened is about, on the anchor line under its passage's or step's chip: its
+ * check's square and name in the check's color, then its statement. */
+function AnchorComment({ comment }: { comment: ThreadComment }) {
+  const colour = comment.check ? colourVar(comment.colour) : NOTE_COLOR
+  return (
+    <span className="chat-anchor-comment" data-comment={comment.id}>
+      <span className="wu-cm-sq" style={{ background: colour }} />
+      <span className="chat-anchor-comment-name" style={{ color: colour }}>
+        {comment.name}
+      </span>
+      <span className="chat-anchor-comment-text">{comment.text}</span>
+    </span>
   )
 }
 
@@ -1002,8 +1020,9 @@ function AskAgain({ ws, id, detached, onAsked }: { ws: string; id: string; detac
 }
 
 /** The rows of the orientation or a writer as its thread shows them: its whole session less its first message, which
- * is the card's. For an orientation that ran as main's subagent (an earlier build's; it now runs as its own background
- * session), its hand-back summary replaces the hand-back call and what followed. Pure. */
+ * is the card's. A session that handed its summary back to main at its end (a SubagentHandback call, which Claude Code
+ * has it make in auto mode) ends on one folded hand-back row that holds the summary, in place of the call and the text
+ * that followed it; with no summary, on neither. Pure. */
 export function orientMessages(rows: readonly Row[]): Row[] {
   const first = rows.findIndex((r) => r.kind === 'user')
   const own = rows.filter((_, i) => i !== first)
@@ -1013,8 +1032,8 @@ export function orientMessages(rows: readonly Row[]): Row[] {
   const summary = typeof inp.message === 'string' ? inp.message.trim() : ''
   const rest = own.filter((r) => r !== back)
   if (!summary) return rest
-  const summaryRow: Row = { kind: 'text', index: back.index, text: summary }
-  return [...rest.filter((r) => r.index < back.index || r.kind !== 'text'), summaryRow].sort((a, b) => a.index - b.index)
+  const handed: Row = { kind: 'handback', index: back.index, text: summary }
+  return [...rest.filter((r) => r.index < back.index || r.kind !== 'text'), handed].sort((a, b) => a.index - b.index)
 }
 
 /** An orientation's call numbers by tool_use id, read from its store's index while any call in `rows` has none in its

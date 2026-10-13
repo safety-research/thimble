@@ -1,5 +1,6 @@
 // The board's controls. At the top right, the bar that adds to the board (Card · Group, and Group ⌘G for a multiple
-// selection). At the bottom right: the search menu (the card filter, cardFilter.ts), the zoom and Fit, and the minimap,
+// selection) and Comments, which lists the checks that comment on the cards with their switches and counts, as the
+// Report's Comments pane does (report/Checks.tsx CheckRows), and + for a new one. At the bottom right: the search menu (the card filter, cardFilter.ts), the zoom and Fit, and the minimap,
 // where a press or drag moves the view. While a filter is set the minimap draws the kept cards in ink, the rest faint.
 import { useEffect, useRef, useState, type MouseEvent, type WheelEvent } from 'react'
 import { Button } from '../components/Button'
@@ -12,6 +13,10 @@ import { CardCheckPart } from './CheckStatus'
 import { CHECK_STATES, CHECK_WORDS } from '../lib/cardCheck'
 import { MINIMAP, zoomLabel, type Board, type Layout, type Minimap, type View } from './layout'
 import { shortcutLabel } from '../lib/platform'
+import type { CanvasComment } from '../lib/types'
+import { CheckRows, type Checks } from '../report/Checks'
+import { CANVAS, checksFor } from '../report/checkComments'
+import { IconButton } from '../report/icons'
 
 /** A label the canvas can be filtered by (its unit is the card), with its values and how many cards each marks. */
 export interface CanvasLabel {
@@ -49,6 +54,10 @@ export interface ControlsProps {
   /** the server's filter has been read: until then the menu stays shut, so a choice made on an empty filter never
    * overwrites the one kept */
   filterReady: boolean
+  ws: string
+  /** the workspace's checks, and the open comments on the cards, whether their check is on or off */
+  checks: Checks
+  comments: readonly CanvasComment[]
 }
 
 export function Controls(p: ControlsProps) {
@@ -70,6 +79,7 @@ export function Controls(p: ControlsProps) {
             </svg>
             Group
           </button>
+          <CommentsButton ws={p.ws} checks={p.checks} comments={p.comments} />
           {p.several > 1 && (
             <>
               <span className="bctl-sep" />
@@ -112,6 +122,41 @@ export function Controls(p: ControlsProps) {
           </div>
         </div>
       </div>
+    </>
+  )
+}
+
+/** Comments in the top bar: the count of the comments shown on the cards, and a menu of the checks that comment on
+ * them, each with its switch, its count and its card (CheckRows), with + for a new check over the cards. */
+function CommentsButton({ ws, checks, comments }: { ws: string; checks: Checks; comments: readonly CanvasComment[] }) {
+  const [open, setOpen] = useState(false)
+  const [adding, setAdding] = useState<HTMLElement | null>(null)
+  const btn = useRef<HTMLButtonElement>(null)
+  const head = useRef<HTMLDivElement>(null)
+  const mine = new Set(checksFor(checks.list, CANVAS).map((c) => c.id))
+  const shown = comments.filter((c) => c.check == null || (checks.on.has(c.check) && mine.has(c.check))).length
+  const close = () => {
+    setOpen(false)
+    setAdding(null)
+  }
+  return (
+    <>
+      <button ref={btn} type="button" className={`bctl-btn bctl-comments${open ? ' is-open' : ''}`} aria-haspopup="dialog" aria-expanded={open} onClick={() => (open ? close() : setOpen(true))}>
+        <Icon name="comment" size={14} />
+        Comments
+        {shown > 0 && <span className="bctl-comments-count">{shown}</span>}
+      </button>
+      <Popover anchor={btn} open={open} onClose={close} align="end" width={280} label="Comments" className="bcomments">
+        <div className="wu-checks bcomments-pane">
+          <div className="wu-checks-head bcomments-head" ref={head}>
+            <span className="wu-sec-name">Comments</span>
+            <IconButton label="New check" className="wu-checks-add" aria-expanded={!!adding} onClick={() => setAdding((a) => (a ? null : head.current))}>
+              <Icon name="plus" size={14} />
+            </IconButton>
+          </div>
+          <CheckRows ws={ws} surface={CANVAS} checks={checks} comments={comments} adding={adding} onAdding={setAdding} />
+        </div>
+      </Popover>
     </>
   )
 }

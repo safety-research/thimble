@@ -91,9 +91,13 @@ const RUN_RE = /(?:^|[\s/'"])thimble-run['"]?\s+(card|label|stale)\b\s*['"]?([A-
 export function cardsOfCall(tool: string, input: unknown, text: string): string[] {
   const inp = isObj(input) ? input : {}
   if (CARD_TOOLS.test(tool)) {
-    const own = /^card:([A-Za-z0-9_-]+)\s*$/m.exec(text)?.[1] ?? /\bcard:([A-Za-z0-9_-]+)/.exec(text)?.[1]
+    // the card on a line of its own, else the card the call names, else the first the result names whole: never one in
+    // the result's `$ edit_card …` line, which echoes the call cut short (`[[5,884|card:e157e5…`, live QA on 0.7.0)
+    const own = /^card:([A-Za-z0-9_-]+)\s*$/m.exec(text)?.[1]
     const named = str(inp.card).replace(/^(?:card|cell):/, '')
-    return [...new Set([own, named].filter((x): x is string => Boolean(x)))].slice(0, 1)
+    const said = /\bcard:([A-Za-z0-9_-]+)(?![A-Za-z0-9_…-])/.exec(text.split('\n').filter(l => !l.startsWith('$ ')).join('\n'))?.[1]
+    const id = own || named || said
+    return id ? [id] : []
   }
   if (LABEL_TOOL.test(tool)) {
     const card = /The label's card is \[\[card:([A-Za-z0-9_-]+)\]\]/.exec(text)?.[1]
@@ -188,6 +192,29 @@ export function saysWriter(text: string): boolean {
 export function withoutWriterLines(text: string): string {
   if (!saysWriter(text)) return text
   return text.split('\n').filter(l => !WRITER_LINE.test(l)).join('\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+/** The subagent run a prompt of main's reports on: Claude Code's hand-back of the agent's last report (`<agent-message
+ *  from="<id>">` around its `[Subagent hand-back]` frame) or its task notification (`<task-id><id></task-id>`). One run
+ *  of one of thimble's agents brings both, one after the other, and main answers each with a `↳` line
+ *  (prompts/main.md). null for any other prompt. */
+export function reportOf(text: string): { agent: string; kind: 'hand-back' | 'notice' } | null {
+  const notice = /<task-notification>[\s\S]*?<task-id>\s*([^<\s]+)\s*<\/task-id>/.exec(text)
+  if (notice) return { agent: notice[1]!, kind: 'notice' }
+  const back = /<agent-message from="([^"]+)">\s*\[Subagent hand-back\]/.exec(text)
+  return back ? { agent: back[1]!, kind: 'hand-back' } : null
+}
+
+/** A reply's `↳` lines, each trimmed. */
+export function noteLines(text: string): string[] {
+  return text.split('\n').map(l => l.trim()).filter(l => l.startsWith('↳'))
+}
+
+/** A reply without the lines given (trimmed, as noteLines gives them). */
+export function withoutLines(text: string, lines: readonly string[]): string {
+  const drop = new Set(lines)
+  const kept = text.split('\n').filter(l => !drop.has(l.trim()))
+  return kept.length === text.split('\n').length ? text : kept.join('\n').replace(/\n{3,}/g, '\n\n').trim()
 }
 
 /** An Agent call's description or a task notification's words with each thread's fork (`thread:<slug>`, in quotation

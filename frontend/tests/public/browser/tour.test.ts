@@ -136,7 +136,7 @@ interface Server {
 }
 
 /** A page on the made-up origin, answered by this file: the app, the tour's example view, the workspace's API. */
-async function open(opts: { W: number; H: number; dpr?: number; chat?: number; seen?: boolean; folded?: boolean; paper?: string; views?: unknown[]; surface?: string }): Promise<{ page: Page; server: Server; close: () => Promise<void> }> {
+async function open(opts: { W: number; H: number; dpr?: number; chat?: number; seen?: boolean; folded?: boolean; paper?: string; views?: unknown[]; surface?: string; ref?: string }): Promise<{ page: Page; server: Server; close: () => Promise<void> }> {
   const server: Server = { seen: !!opts.seen, writes: [], telemetry: [], settings: { ...SETTINGS }, views: opts.views ?? [] }
   const ctx = await browser.newContext({ viewport: { width: opts.W, height: opts.H }, deviceScaleFactor: opts.dpr ?? 1 })
   await ctx.addInitScript(
@@ -160,7 +160,7 @@ async function open(opts: { W: number; H: number; dpr?: number; chat?: number; s
   const page = await ctx.newPage()
   page.on('pageerror', (e) => console.warn('page error:', e.message))
   await page.route('**/*', (route) => answer(route, server))
-  await page.goto(`${ORIGIN}/?ws=${WS}`)
+  await page.goto(`${ORIGIN}/?ws=${WS}${opts.ref ? `&ref=${encodeURIComponent(opts.ref)}` : ''}`)
   return { page, server, close: () => ctx.close() }
 }
 
@@ -1158,6 +1158,20 @@ test('Esc on the welcome closes it, and the offer stays recorded', async () => {
     assert.equal(await page.$('.tour-root'), null, 'Esc closes the welcome')
     assert.deepEqual(await probe(page), [], 'the Esc reached nothing of the page')
     assert.ok(server.seen, 'the offer is recorded')
+  } finally {
+    await close()
+  }
+}, 60_000)
+
+test('the page the screenshot tool opens at a card offers no welcome over it, nor records the offer', async () => {
+  // a first launch whose dashboard has not been opened yet: the card screenshot (backend tools._shot_card_in_ui) loads
+  // the page at `?ref=`, and the welcome would stand over the card in its picture
+  const { page, server, close } = await open({ W: 1440, H: 900, folded: true, surface: 'canvas', ref: 'card:c0ffee00' })
+  try {
+    await page.waitForSelector('.shell .board-viewport')
+    await sleep(3000)
+    assert.equal(await page.evaluate(() => !!document.querySelector('.tour-root')), false, 'no welcome')
+    assert.equal(server.seen, false, 'the offer is not recorded, so the analyst gets it')
   } finally {
     await close()
   }

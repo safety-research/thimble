@@ -1,13 +1,17 @@
 // A card's details in a panel at the right of the board: the question, its provenance (thread, run, files read), the
 // code for a card that runs code (editable; Run or ⌘↵ saves and runs it again), the output and what it printed, the
 // takeaway (editable with RefEditor), the card check (CheckDetails, with the Undo of its fix), and the card's history.
-// What the analyst types is saved when the field is left.
+// What the analyst types is saved when the field is left. The card's History (its button on the card, or a row of the
+// history here) lists its edits, newest first; each opens the card as it was before that edit, to read (VersionView:
+// its question, steps or text, code, output and takeaway as stored then), with Restore, which makes the card that
+// version again as an edit of the analyst's (backend notebook.restore_version). Matt 2026-10-09: "we should not keep
+// 'Before' with a strikethrough. maybe cards have a history button?"
 // LabelPanel is the same panel for a label with no card of its own.
 import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type MouseEvent, type RefObject } from 'react'
 import { ChatMarkdown } from '../chat/markdown'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
-import { CodeArea } from '../components/Code'
+import { CodeArea, CodeText } from '../components/Code'
 import { TextArea } from '../components/Field'
 import { Kbd } from '../components/Marks'
 import { Icon } from '../components/Icon'
@@ -20,14 +24,16 @@ import { cellLabel, displayName, onCellNames } from '../lib/cellName'
 import { revealLines, scrollWithin } from '../lib/tableCell'
 import { teleport } from '../lib/teleport'
 import { track } from '../lib/telemetry'
-import type { Cell } from '../lib/types'
+import type { CardVersion, Cell } from '../lib/types'
 import { shortcutLabel } from '../lib/platform'
 import { CheckDetails } from './CheckDetails'
 import { useConceptDetail } from './concepts'
 import { CanvasContext } from './context'
-import { detailBlocks, formatDuration, groupInputs, truncatedSize, type DetailBlock } from './details'
+import { detailBlocks, fieldWords, formatDuration, groupInputs, historyRows, truncatedSize, type DetailBlock, type HistoryRow } from './details'
 import { LabelDetails } from './LabelDetails'
 import { hhmm, isRunnable, kindOf } from './layout'
+import { planSteps } from './plan'
+import { PlanSteps } from './PlanBody'
 import { RefEditor } from './RefEditor'
 
 const fail = (e: unknown) => bus.emit('toast', { text: (e as Error)?.message || String(e), kind: 'error' })
@@ -46,7 +52,11 @@ export interface OutputCite {
   seq: number
 }
 
-export function DetailPanel({ cell, cite = null, onClose }: { cell: Cell; cite?: OutputCite | null; onClose: () => void }) {
+/** What the panel shows: the card's details, its history, or the card as it was before one of its edits (and where Back
+ * goes from there). */
+type PanelView = { kind: 'card' } | { kind: 'history' } | { kind: 'version'; entry: string; back: 'card' | 'history' }
+
+export function DetailPanel({ cell, cite = null, history = 0, onClose }: { cell: Cell; cite?: OutputCite | null; history?: number; onClose: () => void }) {
   const ctx = useContext(CanvasContext)
   const { ws } = ctx
   const kind = kindOf(cell)
@@ -74,6 +84,11 @@ export function DetailPanel({ cell, cite = null, onClose }: { cell: Cell; cite?:
   const busy = running || cell.status === 'running'
   const blocks = useMemo(() => detailBlocks(cell.outputs), [cell.outputs])
   const name = useSyncExternalStore(onCellNames, () => cellLabel(cell.id) ?? displayName(cell))
+  // the card's History button opens the history (`history` counts its presses); a row of the history opens a version
+  const [view, setView] = useState<PanelView>(history ? { kind: 'history' } : { kind: 'card' })
+  useEffect(() => {
+    if (history) setView({ kind: 'history' })
+  }, [history])
 
   const saveField = async (field: 'title' | 'takeaway', value: string) => {
     const next = value.trim()
@@ -129,8 +144,12 @@ export function DetailPanel({ cell, cite = null, onClose }: { cell: Cell; cite?:
   }
   const ran = runnable && cell.exec_count != null ? [hhmm(cell.ts), formatDuration(cell.duration_s), `run ${cell.exec_count}`].filter(Boolean).join(' · ') : ''
   // you for the analyst's own hand; else the thread or agent, as the card's foot names it (the terminal session is main)
-  const byName = (by: string | null | undefined) => (!by || by === 'user' || by === 'analyst' ? 'you' : ctx.threadOf({ ...cell, created_by: by }).name || by)
-  const history = [{ ts: cell.created_ts ?? cell.ts, what: `created by ${byName(cell.created_by)}` }, ...(cell.edited ?? []).map((e) => ({ ts: e.ts, what: `edited by ${byName(e.by)}` }))].filter((h) => h.ts)
+  const byName = (by: string | null | undefined) => (!by || by === 'user' || by === 'analyst' ? 'you' : by === 'check' ? 'the card check' : ctx.threadOf({ ...cell, created_by: by }).name || by)
+  const rows = historyRows(cell, byName)
+  const open = (back: 'card' | 'history') => (entry: string) => {
+    track('ui-click', { target: `cell:${cell.id}`, detail: { action: 'version', entry } })
+    setView({ kind: 'version', entry, back })
+  }
   const editTake = (e: MouseEvent<HTMLElement>) => {
     if ((e.target as HTMLElement).closest('a, button, .chip, .refchip')) return
     setTakeAt({ x: e.clientX, y: e.clientY })
@@ -138,11 +157,24 @@ export function DetailPanel({ cell, cite = null, onClose }: { cell: Cell; cite?:
   return (
     <aside className="bdetail" role="complementary" aria-label="Detail" data-cite-home={cell.id} onMouseDown={(e) => e.stopPropagation()} onWheel={(e) => e.stopPropagation()}>
       <header className="bdetail-head">
-        <span className="bdetail-title">Detail</span>
+        <span className="bdetail-title">{view.kind === 'card' ? 'Detail' : 'History'}</span>
         <span className="bdetail-id">{name}</span>
         <Button variant="icon" size="md" icon="x" title="Close" aria-label="Close" className="bdetail-close" onClick={onClose} />
       </header>
-      <div className="bdetail-body">
+      {view.kind === 'history' && (
+        <div className="bdetail-body" data-view="history">
+          <div className="bdetail-q-read">{cell.title}</div>
+          <section className="bdetail-sec">
+            <HistoryList rows={rows} onOpen={open('history')} />
+          </section>
+        </div>
+      )}
+      {view.kind === 'version' && (
+        <div className="bdetail-body" data-view="version">
+          <VersionView key={view.entry} ws={ws} cell={cell} entry={view.entry} byName={byName} onBack={() => setView({ kind: view.back })} onRestored={() => setView({ kind: 'history' })} />
+        </div>
+      )}
+      <div className="bdetail-body" hidden={view.kind !== 'card'}>
         <TextArea bare block autoGrow rows={1} maxHeight={200} className="bdetail-q" value={question} onChange={setQuestion} onKeyDown={(e) => e.stopPropagation()} onBlur={() => void saveField('title', question)} aria-label="Question" />
         <dl className="bdetail-facts">
           <dt>Thread</dt>
@@ -239,21 +271,200 @@ export function DetailPanel({ cell, cite = null, onClose }: { cell: Cell; cite?:
           </section>
         )}
         <CheckDetails cell={cell} />
-        {history.length > 0 && (
+        {rows.length > 0 && (
           <section className="bdetail-sec">
             <span className="bdetail-label">History</span>
-            {history.map((h, i) => (
-              <div key={i} className="bdetail-hist">
-                <time className="bdetail-hist-t" dateTime={h.ts}>
-                  {hhmm(h.ts)}
-                </time>
-                <span>{h.what}</span>
-              </div>
-            ))}
+            <HistoryList rows={rows} onOpen={open('card')} />
           </section>
         )}
       </div>
     </aside>
+  )
+}
+
+/** A card's history, newest first (details.historyRows): each edit whose version was kept is a button that opens the
+ * card as it was before it. */
+function HistoryList({ rows, onOpen }: { rows: HistoryRow[]; onOpen: (entry: string) => void }) {
+  return (
+    <div className="bdetail-hists">
+      {rows.map((h, i) => {
+        const body = (
+          <>
+            <time className="bdetail-hist-t" dateTime={h.ts}>
+              {hhmm(h.ts)}
+            </time>
+            <span className="bdetail-hist-what">{h.what}</span>
+            {h.fields && <span className="bdetail-hist-fields">{h.fields}</span>}
+          </>
+        )
+        return h.entry ? (
+          <button key={i} type="button" className="bdetail-hist is-version" data-entry={h.entry} title="Open the card as it was before this edit" onClick={() => onOpen(h.entry!)}>
+            {body}
+            <Icon name="chevron-right" size={11} className="bdetail-hist-go" />
+          </button>
+        ) : (
+          <div key={i} className="bdetail-hist">
+            {body}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+/** The card as it was before one of its edits (backend notebook.card_version_route), to read: its question, its steps
+ * or text, its code, output and takeaway as stored then, a quiet Changed beside each part the edit replaced. Back
+ * returns to where it was opened; Restore makes the card this version again, as an edit of the analyst's. */
+function VersionView({ ws, cell, entry, byName, onBack, onRestored }: { ws: string; cell: Cell; entry: string; byName: (by: string | null | undefined) => string; onBack: () => void; onRestored: () => void }) {
+  const ctx = useContext(CanvasContext)
+  const [got, setGot] = useState<CardVersion | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    let live = true
+    api.cardVersion(ws, cell.id, entry).then(
+      (v) => live && setGot(v),
+      (e: Error) => live && setError(e.message),
+    )
+    return () => void (live = false)
+  }, [ws, cell.id, entry])
+  const restore = async () => {
+    if (busy) return
+    setBusy(true)
+    track('ui-click', { target: `cell:${cell.id}`, detail: { action: 'restore', entry } })
+    try {
+      await api.restoreVersion(ws, cell.id, entry)
+      ctx.refresh()
+      onRestored()
+    } catch (e) {
+      fail(e)
+    } finally {
+      setBusy(false)
+    }
+  }
+  const v = got?.version
+  const changed = new Set(got?.fields ?? [])
+  const who = got ? byName(got.by) : ''
+  const kind = v ? kindOf(v as Cell) : ''
+  const blocks = v ? detailBlocks(v.outputs) : []
+  const tag = (field: string) =>
+    changed.has(field) ? (
+      <span className="plan-mark is-changed" title="This edit changed it">
+        Changed
+      </span>
+    ) : null
+  return (
+    <>
+      <div className="bdetail-version">
+        <Button variant="ghost" size="sm" icon="arrow-left" className="bdetail-back" onClick={onBack}>
+          Back
+        </Button>
+        <span className="bdetail-version-what">{got ? `Before ${who === 'you' ? 'your' : `${who}’s`} edit at ${hhmm(got.ts)}` : ''}</span>
+        <Button variant="primary" size="sm" className="bdetail-restore" busy={busy} disabled={!got} onClick={() => void restore()}>
+          Restore
+        </Button>
+      </div>
+      {error ? (
+        <div className="bdetail-wait">{error}</div>
+      ) : !v ? (
+        <div className="bdetail-wait">
+          <Spinner size={10} label="loading" />
+        </div>
+      ) : (
+        <>
+          <section className="bdetail-sec">
+            <span className="bdetail-label">Question{tag('title')}</span>
+            <div className="bdetail-q-read">{v.title}</div>
+          </section>
+          {kind === 'plan' && (
+            <section className="bdetail-sec">
+              <span className="bdetail-label">Steps{tag('payload')}</span>
+              <PlanSteps ws={ws} cellId={cell.id} steps={planSteps(v as Cell)} now={Date.now()} anchors={false} />
+            </section>
+          )}
+          {kind === 'note' && (
+            <section className="bdetail-sec">
+              <span className="bdetail-label">Text{tag('payload')}</span>
+              <div className="bdetail-take-text chat-text">
+                <ChatMarkdown text={v.text ?? String((v.payload as { text?: unknown } | undefined)?.text ?? '')} />
+              </div>
+            </section>
+          )}
+          {kind !== 'plan' && kind !== 'note' && v.payload != null && (
+            <section className="bdetail-sec">
+              <span className="bdetail-label">{fieldWords(kind, ['payload']).replace(/^./, (c) => c.toUpperCase())}{tag('payload')}</span>
+              <pre className="bdetail-shell">{JSON.stringify(v.payload, null, 2)}</pre>
+            </section>
+          )}
+          {v.code != null && v.payload == null && (
+            <section className="bdetail-sec">
+              <span className="bdetail-label">Code{tag('code')}</span>
+              <pre className="bdetail-code-read">
+                <CodeText text={v.code} lang="python" />
+              </pre>
+            </section>
+          )}
+          {blocks.length > 0 && (
+            <section className="bdetail-sec">
+              <span className="bdetail-label">Output</span>
+              {blocks.map((b) => (
+                <ReadBlock key={b.index} block={b} cell={cell} />
+              ))}
+            </section>
+          )}
+          {kind !== 'plan' && kind !== 'note' && (
+            <section className="bdetail-sec">
+              <span className="bdetail-label">Takeaway{tag('takeaway')}</span>
+              <div className="bdetail-take">
+                <div className="bdetail-take-text chat-text">
+                  {v.takeaway?.trim() ? (
+                    <GlyphCites.Provider value={true}>
+                      <ChatMarkdown text={v.takeaway} />
+                    </GlyphCites.Provider>
+                  ) : (
+                    <span className="bdetail-take-empty">No takeaway</span>
+                  )}
+                </div>
+              </div>
+            </section>
+          )}
+        </>
+      )}
+    </>
+  )
+}
+
+/** One output of an earlier version, to read: as the panel draws the card's own, a stream's stored text with no
+ * complete text to load (its side file went with the run that replaced it). */
+function ReadBlock({ block, cell }: { block: DetailBlock; cell: Cell }) {
+  const { concepts } = useContext(CanvasContext)
+  if (block.kind === 'shell') {
+    return (
+      <div className="bdetail-block">
+        <pre className={block.stream === 'stderr' ? 'bdetail-shell bdetail-stderr' : 'bdetail-shell'}>
+          <OutputText text={block.text} truncated={block.truncated} />
+        </pre>
+      </div>
+    )
+  }
+  return (
+    <div className="bdetail-out">
+      {block.kind === 'error' ? (
+        <pre className="bdetail-shell bdetail-error">
+          <span className="bdetail-error-head">
+            {block.ename}
+            {block.evalue ? `: ${block.evalue}` : ''}
+          </span>
+          {block.traceback ? '\n' + block.traceback : ''}
+        </pre>
+      ) : block.kind === 'text' ? (
+        <pre className="bdetail-shell">{block.plain ? <OutputText text={block.text} /> : block.text}</pre>
+      ) : (
+        <div className={`bdetail-artifact bdetail-artifact-${block.label}`}>
+          <Output bundle={block.bundle} maxRows={PANEL_ROWS} fitWidth={PANEL_ROOM} labels={chartLabels(cell.labels, concepts)} />
+        </div>
+      )}
+    </div>
   )
 }
 

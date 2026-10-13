@@ -680,6 +680,7 @@ async def run_card(c: str, cid: str) -> tuple[str, int]:
     ctx = _ctx(c)
     kind = str(full.get("kind") or notebook.DEFAULT_KIND)
     text = tools._format_cell_result(full, lines=tools.result_lines(c)) + tools._run_hint(full, kind)
+    text += tools._same_outputs(ws, cid, str(run.get("was") or ""), full.get("outputs"))  # an edit that changed nothing
     line, noted = tools._takeaway_after(ctx, cid, run.get("takeaway"), full)
     if line:
         text += f"\n\n{line}"
@@ -691,8 +692,8 @@ async def run_card(c: str, cid: str) -> tuple[str, int]:
 
 
 def _finish(c: str, cid: str, status: str, *, check: bool) -> None:
-    """The card's `run` record ended (the takeaway and kept text it carried are spent), and `check: "pending"` when its
-    card check is to start (card_check.wants_check), for the shim's CardWatch."""
+    """The card's `run` record ended (the takeaway, kept text and outputs before an edit it carried are spent), and
+    `check: "pending"` when its card check is to start (card_check.wants_check), for the shim's CardWatch."""
     from . import card_check, notebook  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
@@ -701,7 +702,8 @@ def _finish(c: str, cid: str, status: str, *, check: bool) -> None:
         if hit is None:
             return
         nb, cell = hit
-        run = {k: v for k, v in (cell.get(notebook.RUN_KEY) or {}).items() if k not in ("takeaway", "kept", "pid")}
+        run = {k: v for k, v in (cell.get(notebook.RUN_KEY) or {}).items()
+               if k not in ("takeaway", "kept", "was", "pid")}
         run.update(state=DONE, ended=_now(), status=status)
         cell[notebook.RUN_KEY] = run
         if check and card_check.wants_check(cell):

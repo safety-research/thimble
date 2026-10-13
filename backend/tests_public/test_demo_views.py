@@ -3,6 +3,7 @@ the orientation's own, each as the server serves it, renamed, and stamped with t
 install keeps that version and the view shows at once."""
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -170,3 +171,22 @@ def test_the_sync_script_maps_each_dataset_s_reviewed_views():
     for ds in ("collusion-wiki", "mythos-5", "transluce-urlquery"):
         assert f"    {ds}) echo " in text
     assert "demo_views.py" in text and "check_content.py" in text
+
+
+def test_every_demo_view_is_stamped_with_the_digest_of_its_files_and_listed_as_it_is():
+    """A demo view edited after its stamp shows in `thimble demo` as changed and is built again, which fails there; so
+    each pre-cache's views keep their `version` equal to their files' digest, and its manifest lists every file as it
+    is (scripts/sync_demo_views.sh stamps both)."""
+    root = ROOT / "demos"
+    manifests = sorted(root.glob("*/thimble-demo-precache.json"))
+    assert manifests
+    for man in manifests:
+        ws = man.parent / "workspace"
+        for vd in sorted((ws / "extension" / "views").iterdir()):
+            stamp = json.loads((vd / "view.json").read_text())["version"]
+            assert stamp == views.view_digest(vd)[:12], f"{man.parent.name}/{vd.name}: stamp {stamp} is not its digest"
+        for f in json.loads(man.read_text()).get("files", []):
+            p = ws / f["path"]
+            if p.is_file():
+                body = p.read_bytes()
+                assert (f["bytes"], f["sha256"]) == (len(body), hashlib.sha256(body).hexdigest()), f"{man.parent.name}: {f['path']}"

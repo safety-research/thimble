@@ -160,6 +160,18 @@ def test_main_s_start_of_a_fork_or_one_of_thimble_s_agents_ends_its_turn():
         assert sf.launched_note(quiet) == "", quiet
 
 
+def test_the_launch_note_lets_main_say_what_thimble_does_not_show():
+    """Live QA 2, ask 5: the analyst asked for the wiki's pages drawn the way the wiki drew them, the corpus holds only
+    their markup, and main had to say so after it started the view's builder. The note said to end the turn with no
+    words, so main wrote the warning anyway and drafted a Claude Code feedback report about the hook. The note now
+    allows the one short sentence main's prompt allows on its other turns."""
+    allowed = "something thimble does not show"
+    main = (Path(__file__).resolve().parents[2] / "prompts" / "main.md").read_text("utf-8")
+    note = sf.launched_note(launched("thimble:view-builder"))
+    assert note.startswith("thimble's view-builder runs in the background") and "End the turn now" in note
+    assert allowed in main and allowed in note
+
+
 def test_the_agents_hook_gives_main_the_launch_note_as_context_alone(tmp_path, ws):
     """The note goes to main as added context, with no systemMessage, so the terminal draws no row for it."""
     out = run_hook(tmp_path, "--agents", launched("thimble:writer"))
@@ -504,6 +516,16 @@ def test_without_a_server_each_new_hook_writes_its_record(tmp_path, ws):
     assert sf.read(ws)["main_end"]["reason"] == "clear"
     run_hook(tmp_path, "--rekey", {"hook_event_name": "SessionStart", "session_id": "new-sid", "source": "clear"})
     assert sf.read(ws)["agents"][AGENT]["sessions"] == [MAIN_SID, "new-sid"]
+
+
+def test_the_caller_hook_writes_main_s_own_call_as_a_line_with_no_agent(tmp_path, ws):
+    """Main's own thimble call gets a line too, naming no agent, so the server knows it is main's before Claude Code
+    writes the call to main's transcript, which it does only once the call has returned (subagents.caller)."""
+    out = run_hook(tmp_path, "--caller", {"hook_event_name": "PreToolUse", "session_id": MAIN_SID,
+                                          "tool_name": "mcp__plugin_thimble_thimble__add_card", "tool_use_id": "toolu_main1"})
+    assert out.returncode == 0 and out.stdout == ""
+    line = sf.find_caller(ws, "toolu_main1")
+    assert line is not None and line["agent_id"] == "" and line["agent_type"] == ""
 
 
 def test_without_a_server_a_fork_s_turn_end_refuses_its_unclaimed_typed_start_in_the_file(tmp_path, ws):

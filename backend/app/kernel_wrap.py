@@ -6,7 +6,8 @@ runs inside one of two wrappers, and `config.resolve_kernel_wrap` says which:
   bwrap  bubblewrap run directly (`kernel_wrap_argv`): the fallback on Linux where srt is missing or does not work.
 
 Both draw the same boundary:
-  read     the system, the backend venv and its interpreter, the corpus and the page's fonts and matplotlibrc
+  read     the system, the backend venv and its interpreter, the corpus, the page's fonts, matplotlibrc and the
+           `thimble` module's source (kernel_thimble.py)
   write    the workspace directory, except settings.json and config.json (thimble's config for the workspace), which
            the kernel can neither read nor write, and telemetry.jsonl, viewed.jsonl (the view log, which the telemetry
            export merges), the registry folder (REGISTRY_DIR), the views' state (VIEWS_DIR), the workspace's local
@@ -154,8 +155,8 @@ def srt_rules(*, corpus_dir: str | Path, workspace_dir: str | Path, venv: str | 
               srt_dir: str | Path, read: Sequence[str | Path] = (), hide: Sequence[str | Path] = (), home: str | Path,
               platform: str) -> dict:
     """srt's filesystem rules for the kernel (module docstring). `python` is the interpreter the kernel runs (a venv's
-    bin/python); `read` more paths it reads (the fonts and matplotlibrc); `hide` thimble's folders and Claude Code's
-    config, hidden besides `home` and SRT_HIDDEN[platform] (sys.platform: linux or darwin)."""
+    bin/python); `read` more paths it reads (the fonts, matplotlibrc, kernel_thimble.py); `hide` thimble's folders and
+    Claude Code's config, hidden besides `home` and SRT_HIDDEN[platform] (sys.platform: linux or darwin)."""
     ws = Path(workspace_dir)
     system = "darwin" if platform == "darwin" else "linux"
     hidden = [str(ws / name) for name in (*HIDDEN_FILES, *LOCK_FILES)]

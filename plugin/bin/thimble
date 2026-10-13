@@ -474,7 +474,7 @@ for m in rows if isinstance(rows, list) else []:
     # the command line once more before each signal: a pid that is no longer a thimble server on the port is not signalled
     if alive "$pid"; then if is_ours "$pid" "$port"; then run kill -TERM "$pid" || true; wait_dead "$pid" 50; else changed=1; fi; fi
     if [ "$changed" = 0 ] && alive "$pid"; then if is_ours "$pid" "$port"; then run kill -KILL "$pid" || true; wait_dead "$pid" 20; else changed=1; fi; fi
-    if [ "$changed" = 1 ]; then add_left "pid $pid was not signalled: its command line stopped being a thimble server on port $port before the signal" "ps -p $pid -o command=   # kill $pid only if it is a thimble server"
+    if [ "$changed" = 1 ]; then add_left "pid $pid was not signaled: its command line stopped being a thimble server on port $port before the signal" "ps -p $pid -o command=   # kill $pid only if it is a thimble server"
     elif alive "$pid"; then add_left "the thimble server (pid $pid) is still running" "kill -KILL $pid"
     else ndone=$((ndone + 1)); fi
   fi

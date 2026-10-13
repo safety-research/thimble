@@ -191,7 +191,7 @@ test('the comments a document shows: in reading order, a check that is off left 
     ['c4', 'Judgment calls', 'check', false],
     ['c1', 'Judgment calls', 'check', true],
     ['c2', 'Claude', 'comment', true],
-    ['tag:x3', 'Unverified', 'citation check', true],
+    ['tag:x3', 'Unverifiable', 'citation check', true],
   ])
   // a section's parts end at each passage with comments, which stand under it; a section with none is one part
   expect(unitParts(COMMENTED.sections[1] as never).length).toBe(1)
@@ -200,6 +200,12 @@ test('the comments a document shows: in reading order, a check that is off left 
   expect(p2[0]!.md).toBe('## The data\n\nThe corpus is an export of four wikis [[README.md#L3]]. It holds [[4579|card:ff73e071#pages/TOTAL]] pages.')
   expect(p2[0]!.after.map(c => c.id)).toEqual(['c4', 'c1'])
   expect(p2[1]!.md).toBe('[[card:ff73e071]]\n*The export per wiki.*')
+})
+
+test('a comment shows its statement and then its details, the citations in both as chips', () => {
+  const doc = { ...COMMENTED, comments: [{ id: 'c6', sentence_id: 'x2', text: 'The count covers all four wikis.', details: '- The card counts [[4579|card:ff73e071#pages/TOTAL]] pages.\n- Say so.', check: 'judgment', status: 'open' }] }
+  const [c] = commentsOf(doc as never, checksOf(STATES.checks))
+  expect(c!.text).toBe('The count covers all four wikis. - The card counts 4579 pages. - Say so.')
 })
 
 test('a report as Markdown and back: headings, lists, figures as their card\'s line, citations as written; the title apart', () => {
@@ -282,7 +288,7 @@ test('comments stand under the passages they are on: the check\'s name and hue, 
   expect(rows[head + 2]).toBe('       Say which week of June.')
   expect(rows[head + 3]).toBe('')
   // the citation check's tag under its sentence
-  expect(rows[rowOf(rows, 'No card counts saves by week.') - 1]).toMatch(/^ {5}● Unverified +citation check$/)
+  expect(rows[rowOf(rows, 'No card counts saves by week.') - 1]).toMatch(/^ {5}● Unverifiable +citation check$/)
   // the hues: the check's on its ●, a note's dim, every name in the text color
   const block = (await pane.drawn({ in: 'm:doc-cm-0-0' })) as Node
   const marks = JSON.stringify(block)

@@ -562,16 +562,16 @@ async def test_timeline_draws_what_its_browser_page_shows(timeline, cols):
     assert all(len(x) <= cols + 2 for x in body)
     assert body[0].startswith("  / search events  Filter by  Incident  ● INC-312 100  ● INC-313 23  ● INC-311 11  ● no incident 64")
     assert body[1].startswith("  Rows  Source  Color by  Service  ● payments 79  ● web 45")
-    assert body[2] == "  16 May 01:14 – 19 May 14:25 · 3d 13h"
+    assert body[2] == "  May 16 01:14 – May 19 14:25 · 3d 13h"
     assert [x[2:12].strip() for x in body[4:9]] == ["alert", "deploy", "agent", "chat", "ticket"]
-    assert body[9].startswith(" " * 12) and "17 May 00:00" in body[9] and "18 May 00:00" in body[9]
+    assert body[9].startswith(" " * 12) and "May 17 00:00" in body[9] and "May 18 00:00" in body[9]
     assert "failed" not in "\n".join(body[:11]) and "INC-311" not in "\n".join(body[2:11])
     assert body[10] == ""
     assert body[11] == "  In the range  198 events"
     assert body[12].split() == ["time", "source", "kind", "actor", "incident", "text"]
-    assert body[13].startswith("❯ ● 16 May 01:40:12  chat    message      Oona")
+    assert body[13].startswith("❯ ● May 16 01:40:12  chat    message      Oona")
     assert body[14].startswith("  ●        02:00:05  deploy  started      deploybot")
-    assert not any(re.match(r"\s*(Sat|Sun|Mon|Tue) \d+ May", x) for x in body[13:]), "no day's heading breaks the list"
+    assert not any(re.match(r"\s*(Sat|Sun|Mon|Tue), May \d+", x) for x in body[13:]), "no day's heading breaks the list"
     assert "02:57:20  alert   fired        monitor     INC-311   payments: database connections at 181 of 200 for 5 min" in body[20]
     if cols == 200:
         assert "Tonight's release train: web 2.31.0 and payments 4.12.0. deploybot starts at 02:00." in body[13]
@@ -619,7 +619,7 @@ async def test_timeline_opens_an_event_in_the_side_pane_filters_and_picks_a_lane
                                      panel=False)
     rows = out.splitlines()
     assert "○ INC-312 100  ● INC-313 23  ○ INC-311 11  ○ no incident 64" in rows[0]
-    assert rows[2].startswith("  18 May 06:39 – 09:49")
+    assert rows[2].startswith("  May 18 06:39 – 09:49")
     assert all("INC-313" in x for x in _list_rows(rows))
 
 
@@ -647,13 +647,13 @@ PORT1 = "runs/r1/36fe6b9d-6e6d-4582-aef9-c97a0fe8f576/subagents/agent-a07a4da7.j
 
 def _axis(body: list[str]) -> int:
     """The axis under the lanes: the first row after the time range's strip with a blank gutter, where no key stands."""
-    top = next(i for i, x in enumerate(body) if re.match(r"\s+\d+ \w{3} \d\d:\d\d", x)) + 2
+    top = next(i for i, x in enumerate(body) if re.match(r"\s+\w{3} \d+ \d\d:\d\d", x)) + 2
     return next(i for i in range(top, len(body)) if body[i].strip() and not body[i][:12].strip())
 
 
 def _tree(body: list[str]) -> list[str]:
     """The lanes' names, from the row under the time range's strip to the axis."""
-    top = next(i for i, x in enumerate(body) if re.match(r"\s+\d+ \w{3} \d\d:\d\d", x)) + 2
+    top = next(i for i, x in enumerate(body) if re.match(r"\s+\w{3} \d+ \d\d:\d\d", x)) + 2
     return [re.match(r"\s*\S+(?: \S+)*", x[2:])[0] for x in body[top:_axis(body)]]
 
 
@@ -678,7 +678,7 @@ async def test_linked_sessions_draws_what_its_browser_page_shows(linked, cols):
     body, hints = _split(lines, 3, 40)
     assert all(len(x) <= cols + 2 for x in body)
     assert body[0].startswith("  / search  Filter by  none  Rows  Session  Color by  Speaker  ● client-port 100  ● lead 63")
-    assert body[1] == "  12 Sep 14:02 – 13 Sep 09:53 · 19h 51m"
+    assert body[1] == "  Sep 12 14:02 – Sep 13 09:53 · 19h 51m"
     assert body[2].count(" // ") == 2
     assert _tree(body) == [
         "▾ Run 1 · lead", "  ├ survey", "  ├ client-port", "  │ ├ pagination", "  │ └ auth-headers", "  ├ webhooks",
@@ -688,14 +688,14 @@ async def test_linked_sessions_draws_what_its_browser_page_shows(linked, cols):
     breaks = [i for i in range(len(body[2])) if body[2][i:i + 4] == " // "]
     assert body[3][22:breaks[0]].strip() and not body[10][22:breaks[0]].strip() and body[10][breaks[0]:breaks[1]].strip()
     axis = _axis(body)
-    assert body[axis].count("//") == 2 and "12 Sep 14:15" in body[axis] and "13 Sep 09:15" in body[axis]
+    assert body[axis].count("//") == 2 and "Sep 12 14:15" in body[axis] and "Sep 13 09:15" in body[axis]
     assert "failed" not in "\n".join(body[:axis + 1]), "no key of the failed calls"
     assert any("×" in x[22:] for x in body[3:axis]), "a failed call is × on its lane"
     assert body[axis + 1] == ""
     assert body[axis + 2].startswith("  lead of Run 1 · nested team · subagents survey 14:03:10, client-port 14:09:05, webhooks 14:09:06")
     assert body[axis + 3].startswith("  lead · Run 1 · nested team  20 turns · 14:02:00 – 14:46:10")
     rows = [re.sub(r"\s*▌*$", "", x) for x in body[axis + 4:]]
-    assert rows[:2] == ["  12 Sep 2026", "❯ 14:02:00  ● user"]
+    assert rows[:2] == ["  Sep 12, 2026", "❯ 14:02:00  ● user"]
     assert rows[2].strip().startswith("Upgrade invoicer from Brambleway API v2 to v3.")
     assert "  14:03:10  ⎿ Task → survey Find every v2 call site" in rows
     assert "  14:30:20  ⎿ × Bash pytest -q" in rows, "a failed call's row gives × before its tool"
@@ -827,7 +827,7 @@ async def test_repository_draws_what_its_browser_page_shows(repository, cols):
     assert lines[0] == "  Repository"
     body, hints = _split(lines, 2, 16)
     assert all(len(x) <= cols + 2 for x in body)
-    assert body[0] == "  run  r1  3 agents · 1 approval to merge · Mon 11 May 2026"
+    assert body[0] == "  run  r1  3 agents · 1 approval to merge · Mon, May 11, 2026"
     assert body[1].split() == ["pull", "requests", "8", "issues", "9", "discussions", "3", "agents", "3"]
     assert body[2].startswith("  / search  Filter by  none  Color by  State  ● merged 7  ● closed 1")
     assert body[3] == ""
@@ -906,7 +906,7 @@ async def test_repository_switches_runs_and_follows_its_citations_its_filter_and
     out = await term_views.draw_text(repository, "repository", cols=120, rows=24, wrap=DRAW_WRAP, keys=["p", "down", "return"],
                                      panel=False)
     rows = out.splitlines()
-    assert rows[0] == "  run  r2  3 agents · 2 approvals to merge · Tue 12 May 2026"
+    assert rows[0] == "  run  r2  3 agents · 2 approvals to merge · Tue, May 12, 2026"
     assert rows[1].split()[:3] == ["pull", "requests", "7"] and rows[2].rstrip().endswith("reset")
     assert next(x for x in rows if x.startswith("❯")).startswith("❯ ● #9   Make 'next <weekday>' skip today")
     out = await term_views.draw_text(repository, "repository", cols=120, rows=24, wrap=DRAW_WRAP,
@@ -925,7 +925,7 @@ async def test_repository_switches_runs_and_follows_its_citations_its_filter_and
     out = await term_views.draw_text(repository, "repository", cols=120, rows=24, wrap=DRAW_WRAP, ref="view:repository/r3",
                                      panel=False)
     rows = out.splitlines()
-    assert rows[0] == "  run  r3  5 agents · 1 approval to merge · Wed 13 May 2026" and rows[2].rstrip().endswith("reset")
+    assert rows[0] == "  run  r3  5 agents · 1 approval to merge · Wed, May 13, 2026" and rows[2].rstrip().endswith("reset")
     assert rows[1].split()[:3] == ["pull", "requests", "11"]
     out = await term_views.draw_text(repository, "repository", cols=120, rows=40, wrap=DRAW_WRAP,
                                      keys=["f", "click:Area", "click:parser 3"], panel=False)

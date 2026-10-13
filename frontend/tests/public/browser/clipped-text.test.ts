@@ -152,7 +152,7 @@ const TYPES = {
   slides: { exists: false, renderer: 'slides', frame: false, name: 'Slides' },
 }
 const CHECKS = [
-  { id: 'unverified', name: 'Unverified', prompt: 'Comment on each claim that cannot be verified by the evidence.', colour: 5, shown: false, builtin: true, created_by: 'thimble', ts: '', version: 1, runs: {} },
+  { id: 'unverified', name: 'Unverifiable', prompt: 'Comment on a claim only when its evidence, or anything in the corpus, cannot support it, and the claim matters to the conclusions. If you are unsure, leave no comment.', colour: 5, shown: false, builtin: true, created_by: 'thimble', ts: '', version: 1, runs: {} },
   { id: 'judgment', name: 'Judgment calls', prompt: 'Comment on each judgment.', colour: 1, shown: false, builtin: true, created_by: 'thimble', ts: '', version: 1, runs: {} },
 ]
 const ROWS = [

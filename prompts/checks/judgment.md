@@ -1,6 +1,8 @@
 ---
 name: Judgment calls
-colour: 1
+color: 1
+covers: [documents, cards]
+shown: true
 ---
 
-Comment on each sentence that relies on the model's judgment or interpretation rather than reporting facts derived directly from the data.
+Comment on a sentence only when it presents the writer's judgment or interpretation as if the data showed it, and a reader who took it as fact could reach a wrong conclusion. If you are unsure, leave no comment.

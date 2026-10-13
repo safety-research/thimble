@@ -134,6 +134,53 @@ def test_a_file_read_counts_as_the_analysts_view_only_with_the_analysts_cookie(m
     assert [(r["actor"], r["path"]) for r in viewlog.rows("mini")] == [("analyst", "agents/agent-01.jsonl")]
 
 
+# --------------------------------------------------------------------------- Download
+
+
+def test_download_sends_any_file_as_it_is_on_disk_as_an_attachment_under_its_own_name(data_tmp):
+    """The File browser's Download (corpus.download_source): a text, PDF or binary file's bytes unchanged, larger than
+    one chunk of the stream, as an attachment named as Files lists the file (a link inside the corpus by its own name),
+    with ranges answered so a download can resume."""
+    mini = data_tmp / "mini"
+    agent = (mini / AGENT).read_bytes()
+    blob = bytes(range(256)) * 1024  # 256 KiB, four chunks of FileResponse's stream
+    (mini / "docs").mkdir()
+    (mini / "docs" / "scan 1.pdf").write_bytes(b"%PDF-1.4\n" + blob)
+    (mini / "data.bin").write_bytes(blob)
+    (mini / "latest.jsonl").symlink_to(mini / AGENT)
+
+    def get(path, **kw):
+        return client.get(f"{MINI}/download/{path}", **kw)
+
+    r = get(AGENT)
+    assert r.status_code == 200 and r.content == agent
+    assert r.headers["content-disposition"] == 'attachment; filename="agent-01.jsonl"'
+    assert r.headers["content-type"] == "application/octet-stream" and r.headers["x-content-type-options"] == "nosniff"
+    r = get("docs/scan%201.pdf")
+    assert r.status_code == 200 and r.content == b"%PDF-1.4\n" + blob
+    assert r.headers["content-length"] == str(len(blob) + 9)
+    assert r.headers["content-disposition"] == "attachment; filename*=utf-8''scan%201.pdf"
+    r = get("data.bin")
+    assert r.status_code == 200 and r.content == blob and r.headers["content-disposition"] == 'attachment; filename="data.bin"'
+    r = get("latest.jsonl")
+    assert r.content == agent and r.headers["content-disposition"] == 'attachment; filename="latest.jsonl"'
+    part = get("data.bin", headers={"Range": "bytes=256-511"})
+    assert part.status_code == 206 and part.content == bytes(range(256))
+
+
+def test_download_has_the_readers_checks(data_tmp, tmp_path):
+    """Download refuses what the reader refuses: a folder, a path or a link that leads out of the corpus, a file that is
+    not there, a corpus that is not there."""
+    outside = tmp_path / "secret.txt"
+    outside.write_text("not the corpus's\n")
+    (data_tmp / "mini" / "escape.txt").symlink_to(outside)
+    assert client.get(f"{MINI}/download/agents").status_code == 400
+    assert client.get(f"{MINI}/download/..%2F..%2Fsecret.txt").status_code == 400
+    assert client.get(f"{MINI}/download/escape.txt").status_code == 400
+    assert client.get(f"{MINI}/download/agents/agent-99.jsonl").status_code == 404
+    assert client.get(f"/api/corpora/nope/download/{AGENT}").status_code == 404
+
+
 # --------------------------------------------------------------------------- the Files search
 
 

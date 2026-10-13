@@ -82,6 +82,8 @@ function Face(p: CardFaceProps) {
   const failed = cell.status === 'error' && !running
   const check = checkOf(cell)
   const problem = p.onCheckAgain ? checkProblem(check) : ''
+  // a plan has no takeaway (bodies.tsx PlanBody): its steps say where the work stands
+  const takeaway = kind === 'plan' ? '' : cell.takeaway
   const swapped = useSwap(check?.fix?.id ?? null)
   const cls = ['canvas-card']
   if (check?.state === 'running') cls.push('is-checking')
@@ -110,7 +112,8 @@ function Face(p: CardFaceProps) {
           <InlineField className="bcell-q" value={cell.title} onDone={(v) => p.onEdited?.('title', v)} onAsk={p.onAsk ? (v) => p.onAsk?.('title', v) : undefined} />
         ) : (
           <span className="bcell-q" data-anchor={`card:${cell.id}`} data-anchor-text={cell.title} onMouseDown={p.onTextDown?.('title')} onClick={p.onTextClick?.('title')}>
-            {cell.title}
+            {/* its words alone, which a comment on the card highlights (CommentLayer.tsx) */}
+            <span className="bcell-q-text">{cell.title}</span>
           </span>
         )}
       </div>
@@ -141,10 +144,10 @@ function Face(p: CardFaceProps) {
         <div className="bcell-take">
           <RefEditor className="bcell-take-text chat-text bcell-edit-take" label="Takeaway" value={cell.takeaway ?? ''} at={p.editAt ?? null} onDone={(v) => p.onEdited?.('takeaway', v)} />
         </div>
-      ) : cell.takeaway ? (
-        <div className="bcell-take" data-anchor={`card:${cell.id}`} data-anchor-text={cell.takeaway} onMouseDown={p.onTextDown?.('takeaway')} onClick={p.onTextClick?.('takeaway')}>
+      ) : takeaway ? (
+        <div className="bcell-take" data-anchor={`card:${cell.id}`} data-anchor-text={takeaway} onMouseDown={p.onTextDown?.('takeaway')} onClick={p.onTextClick?.('takeaway')}>
           <div className={'chat-text bcell-take-text' + (cell.takeaway_stale ? ' is-stale' : '')} title={cell.takeaway_stale ? 'Written before the card ran again' : undefined}>
-            <ChatMarkdown text={cell.takeaway} />
+            <ChatMarkdown text={takeaway} />
           </div>
           {problem && <ProblemMark text={problem} onAgain={p.onCheckAgain} />}
         </div>

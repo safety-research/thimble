@@ -1,14 +1,18 @@
-// Files' reader (src/files/Reader.tsx) and its tracks (src/files/Tracks.tsx) while it scrolls a transcript, in
+// Files' reader (src/files/Reader.tsx) and its strip (src/files/Tracks.tsx) while it scrolls a transcript, in
 // Chromium and, where Playwright's WebKit starts, in WebKit: a file of 300 messages with Color by on, whose posts are of
 // many heights and with runs of records the Transcript mode hides, so that what the reader shows of the file at once
-// changes many times over as it scrolls. The zoomed track neither comes nor goes while the reader scrolls (each change
-// of it was a change of the reader's width, which reflowed the records and moved the reader back), the reader's width
-// stays the same, and a steady wheel scroll down never moves the reader up, nor one up moves it down.
+// changes many times over as it scrolls. The strip keeps its width while the reader scrolls (a change of it is a change
+// of the reader's width, which reflows the records and moves the reader back), the reader's width stays the same, and
+// a steady wheel scroll down never moves the reader up, nor one up moves it down. Resting on the strip opens the loupe:
+// a line per message, its number, its time of day and who said it in the quiet gray, and the start of what they said in
+// the ink; moved along the strip while the reader
+// moves by itself under it (as records load and a browser rounds its scroll), it stays at the pointer and never jumps
+// to the thumb.
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterAll, beforeAll, test } from 'vitest'
-import { chromium, webkit, type BrowserType } from 'playwright'
+import { chromium, webkit, type Browser, type BrowserType } from 'playwright'
 import { bundle, cleanup, ORIGIN, src } from './page.ts'
 
 const MIME: Record<string, string> = { '.js': 'text/javascript', '.css': 'text/css', '.woff2': 'font/woff2', '.woff': 'font/woff' }
@@ -67,38 +71,44 @@ const ENGINES: [string, BrowserType][] = [
   ['webkit', webkit],
 ]
 
-type Sample = { st: number; zoom: boolean; width: number; line: number }
+type Sample = { st: number; strip: number; width: number; line: number }
+
+/** The transcript's page in a browser, its records drawn and Color by on. */
+async function openPage(browser: Browser) {
+  const page = await browser.newPage({ viewport: { width: 1000, height: 760 }, deviceScaleFactor: 2 })
+  await page.route('**/*', (route) => {
+    const p = new URL(route.request().url()).pathname
+    if (p === '/') return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html lang="en"><head><meta charset="utf-8"><link rel="stylesheet" href="/bundle.css"></head><body style="margin:0"><div id="root"></div><script src="/bundle.js"></script></body></html>' })
+    const file = path.join(dir, p)
+    if (existsSync(file)) return route.fulfill({ status: 200, contentType: MIME[path.extname(file)] ?? 'application/octet-stream', body: readFileSync(file) })
+    return route.fulfill({ status: 404, body: '' })
+  })
+  await page.goto(`${ORIGIN}/`)
+  await page.waitForSelector('.reader-card', { timeout: 20000 })
+  await page.waitForSelector('.reader-colorbar')
+  await page.waitForTimeout(600)
+  return page
+}
 
 for (const [name, engine] of ENGINES)
-  test(`${name}: the zoomed track stays as it is while the reader scrolls a transcript, which never moves back`, async (ctx) => {
+  test(`${name}: the strip keeps its width while the reader scrolls a transcript, which never moves back`, async (ctx) => {
     const browser = await engine.launch({ headless: true }).catch(() => null)
     if (!browser) return ctx.skip()
     try {
-      const page = await browser.newPage({ viewport: { width: 1000, height: 760 }, deviceScaleFactor: 2 })
-      await page.route('**/*', (route) => {
-        const p = new URL(route.request().url()).pathname
-        if (p === '/') return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html lang="en"><head><meta charset="utf-8"><link rel="stylesheet" href="/bundle.css"></head><body style="margin:0"><div id="root"></div><script src="/bundle.js"></script></body></html>' })
-        const file = path.join(dir, p)
-        if (existsSync(file)) return route.fulfill({ status: 200, contentType: MIME[path.extname(file)] ?? 'application/octet-stream', body: readFileSync(file) })
-        return route.fulfill({ status: 404, body: '' })
-      })
-      await page.goto(`${ORIGIN}/`)
-      await page.waitForSelector('.reader-card', { timeout: 20000 })
-      await page.waitForSelector('.reader-colorbar')
-      await page.waitForTimeout(600)
+      const page = await openPage(browser)
       const box = (await page.locator('.reader-body').boundingBox())!
       await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
-      // after every painted frame: the body's scroll, whether the zoomed track shows, the body's width and its top post
+      // after every painted frame: the body's scroll, the strip's width, the body's width and its top post
       await page.evaluate(() => {
         const w = window as any
         w.__samples = []
         w.__on = true
         const body = document.querySelector('.reader-body') as HTMLElement
         const tick = () => {
-          const z = document.querySelector('.track-zoom')
+          const z = document.querySelector('.tracks') as HTMLElement | null
           const top = body.getBoundingClientRect().top
           const card = Array.from(body.querySelectorAll<HTMLElement>('.reader-card[data-line]')).find((el) => el.getBoundingClientRect().bottom > top + 1)
-          w.__samples.push({ st: body.scrollTop, zoom: !!z && getComputedStyle(z).display !== 'none', width: body.clientWidth, line: Number(card?.dataset.line ?? 0) })
+          w.__samples.push({ st: body.scrollTop, strip: z?.offsetWidth ?? 0, width: body.clientWidth, line: Number(card?.dataset.line ?? 0) })
           if (w.__on) requestAnimationFrame(tick)
         }
         requestAnimationFrame(tick)
@@ -128,8 +138,8 @@ for (const [name, engine] of ENGINES)
       // the scroll went through the runs of hidden records, where one post stands for 50 lines, and back
       assert.ok(Math.max(...lines) > 230 && Math.min(...up.map((s) => s.line)) < 40, `the scroll went from ${Math.min(...lines)} to ${Math.max(...lines)} and back to ${Math.min(...up.map((s) => s.line))}`)
       for (const [dir, run] of [['down', down], ['up', up]] as const) {
-        const zooms = new Set(run.map((s) => s.zoom))
-        assert.equal(zooms.size, 1, `scrolling ${dir}, the zoomed track came and went: ${run.filter((s, i) => i && s.zoom !== run[i - 1].zoom).map((s) => `${s.zoom ? 'on' : 'off'} at ${s.line}`).join(', ')}`)
+        const strips = new Set(run.map((s) => s.strip))
+        assert.equal(strips.size, 1, `scrolling ${dir}, the strip's width changed: ${run.filter((s, i) => i && s.strip !== run[i - 1].strip).map((s) => `${s.strip} at ${s.line}`).join(', ')}`)
         const widths = new Set(run.map((s) => s.width))
         assert.equal(widths.size, 1, `scrolling ${dir}, the reader's width changed: ${[...widths].join(', ')}`)
         const back = run.filter((s, i) => i && (dir === 'down' ? s.st < run[i - 1].st - 0.5 : s.st > run[i - 1].st + 0.5)).map((s) => `at ${s.line}`)
@@ -139,3 +149,87 @@ for (const [name, engine] of ENGINES)
       await browser.close()
     }
   }, 180_000)
+
+for (const [name, engine] of ENGINES)
+  test(`${name}: the loupe over a transcript names each message's time and who said it in the gray, its words in the ink, and moving along the strip as the reader moves under it never jumps it to the thumb`, async (ctx) => {
+    const browser = await engine.launch({ headless: true }).catch(() => null)
+    if (!browser) return ctx.skip()
+    try {
+      const page = await openPage(browser)
+      // the reader a third of the way down
+      const body = (await page.locator('.reader-body').boundingBox())!
+      await page.mouse.move(body.x + body.width / 2, body.y + body.height / 2)
+      for (let i = 0; i < 60; i++) {
+        await page.mouse.wheel(0, 60)
+        await page.waitForTimeout(10)
+      }
+      await page.waitForTimeout(500)
+      const over = (await page.locator('.track-over').boundingBox())!
+      const x = over.x + over.width / 2
+      const probe = () =>
+        page.evaluate(() => {
+          const r = (sel: string) => document.querySelector(sel)?.getBoundingClientRect() ?? null
+          const loupe = r('.loupe[data-open] .loupe-box')
+          const frame = r('.track-frame-over')!
+          return {
+            mid: loupe ? (loupe.top + loupe.bottom) / 2 : null,
+            thumb: (frame.top + frame.bottom) / 2,
+            rows: [...document.querySelectorAll('.loupe[data-open] .loupe-row')].map((row) => {
+              const t = row.querySelector('.loupe-t')!
+              const meta = [...t.querySelectorAll('.loupe-m')]
+              return {
+                n: row.querySelector('.loupe-n')!.textContent ?? '',
+                meta: meta.map((m) => m.textContent ?? ''),
+                metaInk: meta.map((m) => getComputedStyle(m).color),
+                text: [...t.childNodes].filter((c) => c.nodeType === 3).map((c) => c.textContent).join(''),
+                textInk: getComputedStyle(t).color,
+                at: row.classList.contains('at'),
+              }
+            }),
+            ink: (() => {
+              const probe = document.createElement('span')
+              document.body.appendChild(probe)
+              probe.style.color = 'var(--text-tertiary)'
+              const gray = getComputedStyle(probe).color
+              probe.style.color = 'var(--text-primary)'
+              const main = getComputedStyle(probe).color
+              probe.remove()
+              return { gray, main }
+            })(),
+          }
+        })
+      // rest on the strip well below the thumb, where the loupe has room to stand at the pointer
+      let y = over.y + over.height * 0.75
+      await page.mouse.move(x, y)
+      await page.waitForTimeout(700)
+      const a = await probe()
+      assert.ok(a.mid != null && Math.abs(a.mid - y) <= 2, `the loupe opens at the pointer: ${JSON.stringify(a)}`)
+      assert.equal(a.rows.length, 17)
+      for (const r of a.rows) {
+        const n = Number(r.n.replace(/,/g, ''))
+        // its time of day and who said it, as the Transcript mode reads them, in the quiet gray
+        assert.deepEqual(r.meta, [`20:${String(n % 60).padStart(2, '0')}:00`, ['user', 'assistant', 'tool'][n % 3]], `line ${n}: ${JSON.stringify(r)}`)
+        assert.deepEqual(r.metaInk, [a.ink.gray, a.ink.gray], `line ${n}: the metadata in the quiet gray`)
+        // a message with words: its start, in the ink
+        if (!(n % 120 > 61 && n % 120 < 110)) assert.ok(r.text.startsWith(`message ${n} lorem ipsum`), `line ${n}: ${r.text}`)
+        assert.equal(r.textInk, a.ink.main, `line ${n}: the text in the ink`)
+      }
+      assert.notEqual(a.ink.gray, a.ink.main)
+      assert.ok(a.rows[8].at, "the pointer's message darker")
+      // up the strip a little at a time while the reader moves by itself by a pixel or two: the loupe stays at the
+      // pointer
+      for (let i = 0; i < 20; i++) {
+        await page.evaluate((k) => {
+          const el = document.querySelector('.reader-body') as HTMLElement
+          el.scrollTop += k % 2 ? 1.5 : 1
+        }, i)
+        y -= 2
+        await page.mouse.move(x, y)
+        await page.waitForTimeout(30)
+        const g = await probe()
+        assert.ok(g.mid != null && Math.abs(g.mid - y) <= 2, `step ${i}: the loupe's middle ${g.mid}, the pointer ${y}, the thumb ${g.thumb}`)
+      }
+    } finally {
+      await browser.close()
+    }
+  }, 120_000)

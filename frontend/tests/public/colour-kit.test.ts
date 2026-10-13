@@ -34,8 +34,9 @@ const ROWS = [
   ['a.jsonl#L3', 'Text only', 'ops'],
   ['a.jsonl#L4', '', 'ops'],
 ]
-/** A page with four anchored messages, each saying its kind (or its channel) as data-colour, and a mount in its top
- * row; `kept` is what thimble kept for the view (window.__thimbleColour); `pre`, a script run before the bridge. */
+/** A page with four anchored messages, each saying its kind (or its channel) as data-colour, the British spelling of
+ * the data-color the kit's attr writes, which the kit still reads, and a mount in its top row; `kept` is what thimble
+ * kept for the view (window.__thimbleColour); `pre`, a script run before the bridge. */
 async function load(kept?: object, field: 'kind' | 'channel' = 'kind', pre = '') {
   const rows = ROWS.map(([ref, kind, channel]) => `<div class="msg" data-anchor="${ref}" data-colour="${field === 'kind' ? kind : channel}">${ref}</div>`).join('')
   const page = `<!doctype html><html><head>${kept ? `<script>window.__thimbleColour = ${JSON.stringify(kept)}</script>` : ''}${pre}${script(BRIDGE)}${script(COLOUR)}</head><body><div class="top"><span id="colour"></span></div><div id="list">${rows}</div></body></html>`
@@ -65,7 +66,7 @@ describe('Colour by', () => {
       ['No kind', '1', 'true'],
     ])
     expect(c.by).toEqual({ field: 'kind', title: 'Kind' })
-    expect(c.attr({ kind: 'With links' })).toBe(' data-colour="With links"')
+    expect(c.attr({ kind: 'With links' })).toBe(' data-color="With links"')
     // the bridge draws the bar on each record with a value, not on the one with none
     expect([...doc().querySelectorAll('[data-thimble-colour]')].map((e) => e.getAttribute('data-anchor'))).toEqual(['a.jsonl#L1', 'a.jsonl#L2', 'a.jsonl#L3'])
     expect(doc().querySelector('[data-anchor="a.jsonl#L1"]')!.getAttribute('data-thimble-bar')).toBe(doc().querySelector('[data-anchor="a.jsonl#L3"]')!.getAttribute('data-thimble-bar'))
@@ -141,14 +142,14 @@ describe('Colour by', () => {
     expect(c.picks).toEqual([{ field: 'kind', title: 'Kind' }, { field: 'channel', title: 'Channel' }])
     expect(doc().querySelector('.thimble-colour-by')!.textContent).toBe('Color by:Kind+1')
     expect(menu().querySelector('[data-by="f:channel"] .thimble-colour-track-n')!.textContent).toBe('track')
-    expect(c.attr({ kind: 'Text only', channel: 'ops' })).toBe(' data-colour="Text only" data-colour-tracks="[&quot;ops&quot;]"')
+    expect(c.attr({ kind: 'Text only', channel: 'ops' })).toBe(' data-color="Text only" data-color-tracks="[&quot;ops&quot;]"')
     expect(changed).toBe(1)
     // the first unchecked: the next one colours
     ;(menu().querySelector('[data-by="f:kind"]') as HTMLElement).click()
     await wait()
     expect(c.by).toEqual({ field: 'channel', title: 'Channel' })
     expect(c.picks).toEqual([{ field: 'channel', title: 'Channel' }])
-    expect(c.attr({ channel: 'ops' })).toBe(' data-colour="ops"')
+    expect(c.attr({ channel: 'ops' })).toBe(' data-color="ops"')
     expect(changed).toBe(2)
     expect(of('colour').at(-1)!.state).toMatchObject({ by: 'f:channel', picks: ['f:channel'], field: 'channel' })
     // the last unchecked: Color by is Off
@@ -599,7 +600,7 @@ describe('a field that says its own value', () => {
     const kinds = ['Text only', 'With links', '']
     const c = win().thimble.colourBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', value: (i: number) => kinds[i] }] })
     expect([0, 1, 2].map((i) => c.valueOf(i))).toEqual(['Text only', 'With links', null])
-    expect(c.attr(1)).toBe(' data-colour="With links"')
+    expect(c.attr(1)).toBe(' data-color="With links"')
     expect(c.keeps(0)).toBe(true)
   })
 })
@@ -700,5 +701,52 @@ describe("every choice of the kit's controls", () => {
     list[4].go()
     await wait()
     expect(c.picks.map((p: { title: string }) => p.title)).toEqual(['Kind', 'Channel'])
+  })
+})
+
+describe('the American names, the British ones kept as aliases', () => {
+  test('colorOf, a value\'s color and a declared value\'s color, as colourOf and colour are', async () => {
+    await load()
+    const c = win().thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', values: [{ name: 'Text only', color: 4 }, { name: 'With links', colour: 7 }] }] })
+    await wait()
+    expect(win().thimble.colourBy).toBe(win().thimble.colorBy)
+    expect([c.colorOf('Text only'), c.colorOf('With links')]).toEqual(['var(--label-4)', 'var(--label-7)'])
+    expect(c.colourOf('With links')).toBe(c.colorOf('With links'))
+    expect(c.values.every((v: { color: unknown; colour: unknown }) => v.color === v.colour)).toBe(true)
+  })
+
+  test('a record the page marks with data-color by hand, or data-colour, takes its bar', async () => {
+    await load()
+    for (const e of doc().querySelectorAll('.msg[data-anchor="a.jsonl#L1"],.msg[data-anchor="a.jsonl#L2"]')) {
+      e.setAttribute('data-color', e.getAttribute('data-colour')!)
+      e.removeAttribute('data-colour')
+    }
+    mount()
+    await wait()
+    expect([...doc().querySelectorAll('[data-thimble-bar]')].map((e) => e.getAttribute('data-anchor'))).toEqual(['a.jsonl#L1', 'a.jsonl#L2', 'a.jsonl#L3'])
+    expect(chips()).toEqual([
+      ['Text only', '2', 'true'],
+      ['With links', '1', 'true'],
+      ['No kind', '1', 'true'],
+    ])
+  })
+
+  test("markOf and onLabels give each color as color and colour; setLabelColour is setLabelColor", async () => {
+    await load()
+    const heard: any[] = []
+    win().thimble.onLabels((s: unknown) => heard.push(s))
+    labels(true, { 'a.jsonl#L2': { bar: '#025ac3', names: ['Deadline'], values: [{ id: 'k1', label: 'Deadline', value: 'deadline', colour: '#025ac3' }], spans: [{ text: 'due', colour: '#025ac3', id: 'k1' }] } })
+    await wait()
+    const m = win().thimble.markOf('a.jsonl#L2')
+    expect([m.values[0].color, m.values[0].colour, m.spans[0].color, m.spans[0].colour]).toEqual(['#025ac3', '#025ac3', '#025ac3', '#025ac3'])
+    const state = heard.at(-1)
+    for (const l of [...state.labels, ...state.all]) {
+      expect(l.color).toBe(l.colour)
+      for (const v of l.values) expect(v.color).toBe(v.colour)
+    }
+    const calls: unknown[][] = []
+    win().thimble.setLabelColor = (...a: unknown[]) => (calls.push(a), Promise.resolve())
+    win().thimble.setLabelColour('k1', 'deadline', '#025ac3')
+    expect(calls).toEqual([['k1', 'deadline', '#025ac3']])
   })
 })

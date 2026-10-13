@@ -6,10 +6,10 @@
 // way and comes back when the labels go off. Off is no choice at all, kept for the file; unchecking the last is Off.
 import { act, useRef, useState } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
-import { readColor, writeColor, type ColorChoice } from '../../src/files/colorChoice'
+import { keyColor, readColor, writeColor, type ColorChoice } from '../../src/files/colorChoice'
 import { useColorBy, type ColorBy } from '../../src/files/useColorBy'
 import type { FilesLabels } from '../../src/files/useLabels'
-import type { Concept, SourceKeys } from '../../src/lib/types'
+import type { Concept, LabelRow, SourceKeys, SourceRecord } from '../../src/lib/types'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 const PATH = 'run.jsonl'
@@ -155,4 +155,28 @@ test('a label turned on elsewhere takes the first place; the key that was the co
   // both turned off: the key chosen last
   await draw([])
   expect(ids(got!.picks)).toEqual(['k:wiki'])
+})
+
+test("a record's lanes for the loupe, read from the rows given: each choice's color and value, the first's turned off without color", async () => {
+  writeColor('w', PATH, { by: 'l:a', picks: ['l:a', 'k:wiki', 'l:b'], off: {} })
+  await start(['a', 'b'])
+  expect(ids(got!.picks)).toEqual(['l:a', 'k:wiki', 'l:b'])
+  // a record the reader has not loaded, marked "yes" by "passed on" and not by "links"
+  const rec = { line: 7, record: { wiki: 'dse' }, blocks: [], meta: {} } as unknown as SourceRecord
+  const rows = new Map<string, LabelRow>([['a', { ref: `${PATH}#L7`, label: 'yes', confidence: 1, source: 'analyst' }]])
+  expect(got!.laneOf(rec, (id) => rows.get(id))).toEqual([
+    { color: 'var(--label-1)', name: 'passed on' },
+    { color: keyColor(0), name: 'wiki: dse' },
+    { color: null, name: null },
+  ])
+  // a record with no value of the key and no rows: no color, no value
+  const bare = { line: 8, record: {}, blocks: [], meta: {} } as unknown as SourceRecord
+  expect(got!.laneOf(bare, () => undefined)).toEqual([
+    { color: null, name: null },
+    { color: null, name: null },
+    { color: null, name: null },
+  ])
+  // "yes" of the first choice turned off: its lane keeps the value, without its color
+  await act(async () => got!.toggle('yes', false))
+  expect(got!.laneOf(rec, (id) => rows.get(id))[0]).toEqual({ color: null, name: 'passed on' })
 })

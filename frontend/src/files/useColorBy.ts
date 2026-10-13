@@ -11,10 +11,17 @@ import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } fro
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import type { Concept, LabelRow, SourceKeys, SourceRecord } from '../lib/types'
-import { chipOfKeyValue, chipOfLabel, choiceId, colorKeys, keptPicks, keyChips, keyValue, labelChips, pickedChips, picksOf, readColor, togglePick, withPicks, writeColor, type ColorChoice, type ColorKept, type ColorValue } from './colorChoice'
+import { chipOfKeyValue, chipOfLabel, choiceId, colorKeys, keptPicks, keyChips, keyValue, labelChips, NONE, pickedChips, picksOf, readColor, togglePick, withPicks, writeColor, type ColorChoice, type ColorKept, type ColorValue } from './colorChoice'
 import { bandsOf, type RecordColor } from './colorContext'
-import { isFilesLabel, marksOf } from './labels'
+import { classesOf, isFilesLabel, marksOf } from './labels'
 import type { FilesLabels } from './useLabels'
+
+/** A record's label rows: those of the record it names (`meta.ref`: a whole-file JSON transcript's turn names its JSON
+ * document's record, which labels mark by pointer), else those of its line. */
+export function recordRows<T>(rows: ReadonlyMap<string, T>, path: string, rec: SourceRecord): T | undefined {
+  const ref = typeof rec.meta?.ref === 'string' ? rec.meta.ref : null
+  return (ref ? rows.get(ref) : undefined) ?? rows.get(`${path}#L${rec.line}`)
+}
 
 export interface ColorBy {
   keys: SourceKeys | null
@@ -31,6 +38,10 @@ export interface ColorBy {
   colors: ReadonlyMap<number, RecordColor> | null
   /** the chip a record falls under */
   chipOf: (rec: SourceRecord) => string | undefined
+  /** per choice in order, a record's color in its lane of the tracks (none of the first choice for a value turned off)
+   * and what its value is called ("label", "label: value" for a label of more than two values, "key: value"), null
+   * where it has none; the record's label rows are `rowOf`'s, so that a record not loaded (the loupe's) reads them too */
+  laneOf: (rec: SourceRecord, rowOf: (id: string) => LabelRow | undefined) => LaneValue[]
   /** the palette color (1 to 12) picked for a key's value, by value */
   picked: Readonly<Record<string, number>>
   /** Off, or a key or a label checked after the other choices, or unchecked */
@@ -76,6 +87,13 @@ export function useSourceKeys(ws: string, path: string, on: boolean): SourceKeys
 }
 
 const OFF: ColorChoice = { by: 'off' }
+
+/** A record's value of one choice, as its lane of the tracks shows it. */
+export interface LaneValue {
+  color: string | null
+  name: string | null
+}
+const NO_LANE: LaneValue = { color: null, name: null }
 
 export function useColorBy(ws: string, path: string, on: boolean, labels: FilesLabels, records: readonly SourceRecord[], rows: ReadonlyMap<string, ReadonlyMap<string, LabelRow>>, total: number | null, quiet?: RefObject<Set<string>>, holds?: RefObject<string | null>): ColorBy {
   const keys = useSourceKeys(ws, path, on)
@@ -139,7 +157,7 @@ export function useColorBy(ws: string, path: string, on: boolean, labels: FilesL
   const chipOf = useCallback(
     (rec: SourceRecord): string | undefined => {
       if (key) return chipOfKeyValue(key, keyValue(rec, key.key))
-      if (label) return chipOfLabel(label, rows.get(`${path}#L${rec.line}`)?.get(label.id), true)
+      if (label) return chipOfLabel(label, recordRows(rows, path, rec)?.get(label.id), true)
       return undefined
     },
     [key, label, rows, path],
@@ -158,10 +176,34 @@ export function useColorBy(ws: string, path: string, on: boolean, labels: FilesL
         const l = c.by === 'label' ? labels.byId.get(c.id) : undefined
         if (!l) return () => null
         const colorOf = new Map(labelChips(l, undefined, null).map((v) => [v.id, v.color]))
-        return (rec) => colorOf.get(chipOfLabel(l, rows.get(`${path}#L${rec.line}`)?.get(l.id), true) ?? '') ?? null
+        return (rec) => colorOf.get(chipOfLabel(l, recordRows(rows, path, rec)?.get(l.id), true) ?? '') ?? null
       }),
     [picks, keys, kept.colors, labels.byId, rows, path],
   )
+  const lanes = useMemo(
+    () =>
+      picks.map((c, i): ((rec: SourceRecord, rowOf: (id: string) => LabelRow | undefined) => LaneValue) => {
+        // a value turned off takes its color off the first choice's lane, as off its records
+        const offSet = i === 0 ? new Set(off) : null
+        const lane = (chips: Map<string, ColorValue>, chip: string, name: (v: ColorValue) => string): LaneValue => {
+          const v = chips.get(chip)
+          return { color: v && !offSet?.has(chip) ? v.color : null, name: v && chip !== NONE ? name(v) : null }
+        }
+        if (c.by === 'key') {
+          const k = keys?.keys.find((x) => x.key === c.key)
+          if (!k) return () => NO_LANE
+          const chips = new Map(pickedChips(keyChips(k), kept.colors?.[choiceId(c)]).map((v) => [v.id, v]))
+          return (rec) => lane(chips, chipOfKeyValue(k, keyValue(rec, k.key)), (v) => `${k.key}: ${v.name}`)
+        }
+        const l = c.by === 'label' ? labels.byId.get(c.id) : undefined
+        if (!l) return () => NO_LANE
+        const chips = new Map(labelChips(l, undefined, null).map((v) => [v.id, v]))
+        const valued = classesOf(l).length > 2
+        return (_rec, rowOf) => lane(chips, chipOfLabel(l, rowOf(l.id), true) ?? NONE, (v) => (valued ? `${l.name}: ${v.name}` : l.name))
+      }),
+    [picks, keys, kept.colors, off, labels.byId],
+  )
+  const laneOf = useCallback((rec: SourceRecord, rowOf: (id: string) => LabelRow | undefined) => lanes.map((f) => f(rec, rowOf)), [lanes])
   const colors = useMemo(() => {
     if (!on || choice.by === 'off' || (!key && !label)) return null
     const colorOf = new Map(values.map((v) => [v.id, v.color]))
@@ -235,6 +277,7 @@ export function useColorBy(ws: string, path: string, on: boolean, labels: FilesL
     off,
     colors,
     chipOf,
+    laneOf,
     picked,
     choose,
     toggle,

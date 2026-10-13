@@ -1,8 +1,10 @@
 // Files' Transcript mode in a real browser (src/files/Reader.tsx, views/transcript.tsx, fold.ts, useFilterBy.ts,
 // FilterBy.tsx): the reader over a Claude Code stream answered in the page, as an agent's transcript reads. A tool call,
 // a tool result, a system record and a message of more than a few lines open folded to one row as tall as the Table
-// mode's, the head and the start of the words or the call on it; a short reply shows whole. A Bash command that holds a
-// whole file as one JSON string opens clipped to a few lines with Expand, not as a wall of text. Collapse all and Expand
+// mode's, the head and the start of the words or the call on it; a short reply shows whole. The chevron at the start of
+// a record's head opens and folds it, turned, in one place. A Bash command that holds a whole file as one JSON string
+// opens clipped to a few lines with Show more under it, not as a wall of text, and Show less in the same place clips it
+// again, by a click or the keyboard. Collapse all and Expand
 // all in the mode's top row fold and open every record, and the choice and a record opened by itself are kept for the
 // file. Filter by, before Color by, filters by a key of the records: a value turned off hides its records, a long run of
 // them says how many it hides, and Show brings them back; the choice is kept for the file.
@@ -94,6 +96,7 @@ afterAll(async () => {
 const card = (line: number) => `.reader-card[data-line="${line}"]`
 const folded = (line: number) => page.evaluate((s) => document.querySelector(s)?.classList.contains('is-folded') ?? null, card(line))
 const height = (sel: string) => page.evaluate((s) => document.querySelector(s)!.getBoundingClientRect().height, sel)
+const box = (sel: string) => page.evaluate((s) => document.querySelector(s)!.getBoundingClientRect().toJSON() as DOMRect, sel)
 /** Draw the reader again from scratch, as on opening the file again, and wait for its record on `line`. */
 const remount = async (n: number, line: number) => {
   await page.evaluate((k) => (window as any).__mount(k), n)
@@ -120,21 +123,74 @@ test('tool calls, results and long messages open folded to one row; a short repl
   assert.equal(lines, 1)
 })
 
-test('a Bash command holding a whole file in one string opens clipped to a few lines, with Expand', async () => {
-  await page.click(`${card(4)} .reader-fold-line`)
+test('a Bash command holding a whole file in one string opens clipped to a few lines, with Show more under it and Show less in its place', async () => {
+  // the chevron at the start of the head opens the record and folds it again, turned: a click on the same spot does both
+  // in place: the chevron, the head's words and the line number do not move, while the folded row keeps its height and
+  // the open record the height it had
+  const caret = `${card(4)} .reader-fold-caret`
+  const lineno = `${card(4)} .reader-lineno`
+  // where the head's words are drawn: the box of their text, whatever element holds it
+  const words = () =>
+    page.evaluate((s) => {
+      const head = document.querySelector(`${s} .reader-record-head`)!
+      const text = [...head.childNodes].find((n) => n.nodeType === Node.TEXT_NODE && n.textContent!.trim())!
+      const r = document.createRange()
+      r.selectNodeContents(text)
+      return r.getBoundingClientRect().toJSON() as DOMRect
+    }, card(4))
+  const [shut, shutHead, shutNo, shutRow] = [await box(caret), await words(), await box(lineno), await box(card(4))]
+  const at = { x: shut.x + shut.width / 2, y: shut.y + shut.height / 2 }
+  await page.mouse.click(at.x, at.y)
+  assert.equal(await folded(4), false)
+  const [open, openHead, openNo, openRow] = [await box(caret), await words(), await box(lineno), await box(card(4))]
+  assert.ok(Math.abs(open.x - shut.x) < 1 && Math.abs(open.y - shut.y) < 1, `the chevron stays put (${shut.x},${shut.y} folded, ${open.x},${open.y} open)`)
+  assert.ok(Math.abs(openHead.x - shutHead.x) < 1 && Math.abs(openHead.y - shutHead.y) < 1, `the head's words stay put (${shutHead.x},${shutHead.y} folded, ${openHead.x},${openHead.y} open)`)
+  assert.ok(Math.abs(openNo.y - shutNo.y) < 1, `the line number stays put (${shutNo.y}, ${openNo.y})`)
+  assert.ok(shutRow.height <= 34, `the folded row is ${shutRow.height}px tall`)
+  // as tall as with its head under a record's 10px top padding: 10, the head's 24, a gap of 3, the body, 10 and the
+  // border; the 6px the head gave up above it are under the body
+  const body = await box(`${card(4)} .reader-record-body`)
+  assert.ok(Math.abs(openRow.height - body.height - 48) < 1, `the open record is its body and ${openRow.height - body.height}px`)
+  await page.mouse.click(at.x, at.y)
+  assert.equal(await folded(4), true, 'a second click on the same spot folds it')
+  await page.mouse.click(at.x, at.y)
   assert.equal(await folded(4), false)
   const block = `${card(4)} .reader-tool_use`
   const clipped = await height(block)
   assert.ok(clipped < 160, `the call shows ${clipped}px of its input`)
-  const expand = page.locator(`${card(4)} .reader-expand`)
-  assert.match((await expand.textContent())!, /Expand/)
-  await expand.click()
+  const more = page.locator(`${card(4)} .reader-more`)
+  // right under the block, cut or whole
+  const under = async () => {
+    const [b, m] = [await box(block), await box(`${card(4)} .reader-more`)]
+    return m.y - (b.y + b.height)
+  }
+  assert.deepEqual([await more.textContent(), await more.getAttribute('aria-expanded')], ['Show more', 'false'])
+  const gap = await under()
+  assert.ok(gap >= 0 && gap <= 4, `Show more sits under the cut text (${gap}px below it)`)
+  await more.click()
   const whole = await height(block)
   assert.ok(whole > clipped * 3, `expanded, it shows its input whole (${whole}px)`)
-  // the head folds it again
+  assert.deepEqual([await more.textContent(), await more.getAttribute('aria-expanded')], ['Show less', 'true'])
+  const gapOpen = await under()
+  assert.ok(Math.abs(gapOpen - gap) < 0.5, `Show less sits where Show more did, under the text (${gapOpen}px, ${gap}px)`)
+  assert.equal(await page.locator(`${card(4)} :text-is("Collapse")`).count(), 0)
+  // the keyboard: Tab reaches Show less, ringed; Enter clips the block again and the focus stays on it
+  await page.keyboard.press('Shift+Tab')
+  await page.keyboard.press('Tab')
+  assert.deepEqual([await more.evaluate((e) => e === document.activeElement), await more.evaluate((e) => getComputedStyle(e).boxShadow !== 'none')], [true, true])
+  await page.keyboard.press('Enter')
+  assert.ok((await height(block)) < 160, 'Enter clips it again')
+  assert.deepEqual([await more.textContent(), await more.evaluate((e) => e === document.activeElement)], ['Show more', true])
+  await page.keyboard.press('Enter')
+  assert.ok((await height(block)) > clipped * 3, 'Enter opens it whole')
+  // the head folds it again, its chevron turned back where it was; Enter on the folded row opens the record
   await page.click(`${card(4)} .reader-fold-head`)
   assert.equal(await folded(4), true)
-  await page.click(`${card(4)} .reader-fold-line`)
+  const back = await box(caret)
+  assert.ok(Math.abs(back.x - shut.x) < 1 && Math.abs(back.y - shut.y) < 1, 'the chevron is back where it was')
+  await page.locator(`${card(4)} .reader-fold-line`).focus()
+  await page.keyboard.press('Enter')
+  assert.equal(await folded(4), false)
 })
 
 test('Collapse all folds every record and Expand all opens them; the choice is kept for the file', async () => {

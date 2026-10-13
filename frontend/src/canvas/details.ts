@@ -1,10 +1,10 @@
 // The card details drawer's pure parts: the outputs of a run as ordered blocks, a bundle's kind, the files a run read
-// summarised by folder and pattern, duration and count formats, and the label card drawer's helpers (value order,
-// coverage groups, unit words, example counts).
+// summarised by folder and pattern, duration and count formats, the card's history as rows, and the label card
+// drawer's helpers (value order, coverage groups, unit words, example counts).
 import { ERROR_MIME, asText, isStream, isVegaLite, pickMime, stripAnsi } from '../components/Outputs'
 import { FRAME_MIME } from '../lib/dataFrame'
 import { matchedCount, unmatchedValues } from '../files/labels'
-import type { ConceptCoverage, CoverageFile, LabelRow, MimeBundle, OutputTruncation } from '../lib/types'
+import type { Cell, ConceptCoverage, CoverageFile, LabelRow, MimeBundle, OutputTruncation } from '../lib/types'
 
 /** What a bundle is, by the representation the card would pick from it. */
 export type BundleKind = 'stdout' | 'stderr' | 'error' | 'chart' | 'image' | 'table' | 'html' | 'markdown' | 'json' | 'text' | 'unknown'
@@ -385,4 +385,34 @@ export function pickExamples(values: readonly string[], candidates: Readonly<Rec
     seen.push(words(ex.text))
   }
   return out
+}
+
+// ---- the card's history (backend notebook.stamp_edit) ----
+
+/** One row of a card's history: when, who did what, the fields an edit changed in words, and the edit by which the card
+ * as it was before it opens; null for the card's making and for an edit whose record, or a later one's, was not kept. */
+export interface HistoryRow {
+  ts: string
+  what: string
+  fields: string
+  entry: string | null
+}
+
+/** The fields an edit changed, in the words the panel uses for them: a plan's payload is its steps, a note's its text. */
+export function fieldWords(kind: string, fields: readonly string[] | undefined): string {
+  const payload = kind === 'plan' ? 'steps' : kind === 'note' ? 'text' : kind === 'example' ? 'records' : kind === 'label' ? 'label' : 'content'
+  const words: Record<string, string> = { title: 'question', code: 'code', payload, takeaway: 'takeaway', kind: 'kind' }
+  return (fields ?? []).map((f) => words[f] ?? f).join(', ')
+}
+
+/** A card's history, newest first: each edit, then its making. `byName` names who did it, as the card's foot does. An
+ * edit opens the card as it was before it only while its record and every later edit's were kept. */
+export function historyRows(cell: Pick<Cell, 'kind' | 'created_by' | 'created_ts' | 'ts' | 'edited'>, byName: (by: string | null | undefined) => string): HistoryRow[] {
+  const edits = cell.edited ?? []
+  let kept = edits.length
+  while (kept > 0 && edits[kept - 1].id) kept--
+  const rows: HistoryRow[] = edits.map((e, i) => ({ ts: e.ts, what: `edited by ${byName(e.by)}`, fields: fieldWords(String(cell.kind), e.fields), entry: i >= kept ? e.id ?? null : null }))
+  rows.reverse()
+  rows.push({ ts: cell.created_ts ?? cell.ts, what: `created by ${byName(cell.created_by)}`, fields: '', entry: null })
+  return rows.filter((r) => r.ts)
 }

@@ -14,7 +14,12 @@ start_writing or run_check, whose Agent call Claude Code does not let a fork mak
 that carries the exact call (ask_main, tools._ask_main), with no step of the analyst's; a turn that missed the event
 gets it once more (ask_again). Every click route takes the analyst's browser cookie (hook_auth.analyst), never the
 server's token alone, since a start through the module is not judged by auto mode. There is no second route: without
-the module thimble's agents cannot start (start-refused-no-module).
+the module thimble's agents cannot start (start-refused-no-module). Each agent takes up the start its own Agent call
+claimed. The SubagentStart hook does not name that call, so when two or more starts of the agent's type wait (main
+started several in one turn), the agent is unsettled until a sign names its call: the call's result in main's
+transcript (session._settle), its PostToolUse hook, the agent's meta.json at its first thimble call (caller), or the
+module's answer to a click (bind); or until every other start it could have is taken or refused
+(subagent_files.settle and eliminate).
 
 Run values. Every run gets exactly the model and effort its arguments or Settings name (values_for). A click registers
 the role with them first (the module); a typed start gets them from the module's spawn and step hooks, which read the
@@ -83,7 +88,7 @@ AUTO_MODE, NO_CALL, LIMIT, NOT_LAUNCHED, HOOK, EARLIER, NO_MODULE, ERROR = (
 HANDBACK_WAIT_S = 5.0  # a turn's end with no running child ends the run once no hand-back follows within this
 # in auto mode Claude Code makes an agent that ended with text call SubagentHandback, a model step later
 AUTO_HANDBACK_WAIT_S = 30.0
-CALLER_WAIT_S = 2.0  # how long caller() waits for the caller hook's line before the mirror's transcript search
+CALLER_WAIT_S = 2.0  # how long caller() waits for a transcript to hold a call the caller hook wrote no line for
 STOPPED_QUIT = "quit"  # `stopped_by` of a chat that main's quit stopped
 STOPPED_ANALYST = "analyst"
 STOPPED_REFUSED = "refused"
@@ -105,7 +110,7 @@ PLAN_FAILED = {"orientation": ("the orientation", "it could not finish its work"
                "dev-ticket": ("the ticket's agent", "it could not finish the change", "choose Retry on the ticket")}
 USER_STOP_RE = re.compile(r"stopped by (the )?user", re.I)  # Esc's task notification and a SendMessage's error say so
 QUIT_LINE = "Stopped when Claude Code quit."  # a chat's end line, its card's text is the browser's (AgentCard)
-WORK_DIRS = ("orient/work", "writers", "critique-work", "check-work", "views-work", "extension/views")
+WORK_DIRS = ("orient/work", "writers", "critique-work", "check-work", "views-work", "extension/views", "card-libs")
 LIMIT_RE_WORDS = ("concurrent", "subagents")  # Claude Code's concurrency-limit text holds both (R2, the module's answer)
 # the label Claude Code puts before a PreToolUse hook's deny in what $.agent.spawn and $.tool.call answer
 HOOK_ERROR_RE = re.compile(r"^\s*PreToolUse:[A-Za-z]+ hook error:\s*")
@@ -306,7 +311,8 @@ def extension_types(c: str) -> dict[str, dict[str, Any]]:
 
 def write_dirs(c: str) -> list[Path]:
     """The folders main's Bash may write in workspace `c`, its agents' work folders: orient/work, writers,
-    critique-work, check-work, views-work and the local extension's views. They need not exist yet."""
+    critique-work, check-work, views-work, the local extension's views and card-libs, where main installs the npm
+    packages its custom cards load (card_libs). They need not exist yet."""
     ws = config.workspace_path(c)
     return [ws / d for d in WORK_DIRS]
 
@@ -530,6 +536,7 @@ def refuse(c: str, rid: str, reason: str, kind: str) -> dict[str, Any] | None:
         rec = {**r, "id": rid}
     log.info("%s: %s request %s (%s) refused, %s: %s", c, rec.get("kind"), rid, rec.get("role"), kind, reason[:200])
     _refused(c, rec)
+    _settle_left(c)
     return rec
 
 
@@ -553,6 +560,7 @@ def expire(c: str, rid: str) -> dict[str, Any] | None:
     if rec is not None:
         _refused(c, {**rec, "id": rid, "reason": str(module_bridge.why_not(c) or ""), "refused_kind": NO_MODULE,
                      "expired": True})
+        _settle_left(c)
     return rec
 
 
@@ -631,7 +639,7 @@ async def typed_caller(c: str, call: str | None) -> str | None:
         return None
     line = files.find_caller(ws(c), call)
     agent_id = str((line or {}).get("agent_id") or "")
-    if not agent_id:
+    if line is None:  # a line with no agent is main's own call (caller)
         held = await session.call_holder(c, call, CALLER_WAIT_S)
         agent_id = str(held.agent_id or "") if isinstance(held, session.Sub) else ""
     if not agent_id or agent(c, agent_id) is not None:
@@ -776,6 +784,7 @@ def bind(c: str, agent_id: str, rid: str) -> dict[str, Any] | None:
     from . import session  # noqa: PLC0415
 
     lv = session.current(c)
+    left: list[str] = []
     with update(c) as state:
         r = files.requests(state).get(rid)
         if not isinstance(r, dict):
@@ -783,14 +792,54 @@ def bind(c: str, agent_id: str, rid: str) -> dict[str, Any] | None:
         reg = files.registry(state)
         if agent_id not in reg:
             plugin = r.get("route") in (CLICK, FOLLOW_ON) or str(r.get("claimed_by") or "").startswith(files.PLUGIN_CALL)
+            u = files.unsettled(state, agent_id)  # its SubagentStart ran while its own start was not known
+            sid = str(u.get("session") or "") if u is not None else (lv.sid if lv is not None else "")
             reg[agent_id] = {"key": r.get("key"), "type": (r.get("input") or {}).get("subagent_type"),
                              "role": r.get("role"), "request": rid, "parent": r.get("caller"), "run": 0,
                              "values": r.get("values") or {}, "route": r.get("route"), "plugin_started": plugin,
-                             "sessions": [lv.sid] if lv is not None else [], "started": files.now(),
+                             "sessions": [sid] if sid else [], "started": files.now(),
                              "last_start": files.now(), "starts": 1,
                              "status": "running", "work": r.get("work"), "handed_back": False}
+            if u is not None:
+                state[files.UNSETTLED].pop(agent_id, None)
         r.update(state="started", agent=agent_id, at=files.now())
-    return ensure_chat(c, agent_id)
+        left = files.eliminate(state)
+    meta = ensure_chat(c, agent_id)
+    for other in left:
+        hook_started(c, {"agent_id": other})
+    return meta
+
+
+def settle(c: str, agent_id: str, call: str) -> list[str]:
+    """The Agent call `call` started the agent `agent_id` (its result names the agent, or the agent's meta.json names
+    the call): an unsettled agent takes up the start that call claimed, and any other unsettled agent left with one start
+    takes that (subagent_files.settle); each gets its chat and its role's start handler runs, as at a SubagentStart
+    (hook_started). Before the agent's SubagentStart the start is only recorded as its own, which that hook reads. The
+    agents that took their start."""
+    with update(c) as state:
+        done = files.settle(state, agent_id, call)
+    for who in done:
+        hook_started(c, {"agent_id": who})
+    return done
+
+
+def settle_unsettled(c: str, agent_id: str) -> list[str]:
+    """An unsettled agent (subagent_files.UNSETTLED) settled by its meta.json, which Claude Code writes once its
+    SubagentStart hooks end and which names the Agent call that spawned it (subagent_files.spawn_call), so that its
+    first thimble call (caller) runs as its own start. The agents that took their start; none for an agent that does
+    not wait."""
+    u = files.unsettled(read(c), agent_id)
+    call = files.spawn_call(u, agent_id) if u is not None else None
+    return settle(c, agent_id, call) if call else []
+
+
+def _settle_left(c: str) -> None:
+    """A start that ended without its agent (refused, expired) can leave an unsettled agent one start: it takes that start
+    (subagent_files.eliminate), with its chat and its role's start handler (hook_started)."""
+    with update(c) as state:
+        left = files.eliminate(state)
+    for who in left:
+        hook_started(c, {"agent_id": who})
 
 
 # --------------------------------------------------------------------------- follow-ups and stops
@@ -1432,21 +1481,29 @@ async def caller(c: str, tool_use_id: str | None) -> Caller | None:
     mirror's search of the transcripts (session.call_holder), which waits up to CALLER_WAIT_S for one to hold the call.
     None for main's own call and for a call of an agent that is not thimble's.
 
-    The caller hook runs, and writes its line, before Claude Code makes a subagent's call, and main's own calls get no
-    line. So a missing line is not waited for: main's transcript holds main's call as soon as the call comes, and each
-    of main's calls (add_card among them) runs at once."""
+    The caller hook runs, and writes its line, before Claude Code makes the call: a subagent's line names the agent, and
+    main's own names none. Main's line is what lets each of main's calls (add_card among them) run at once, since Claude
+    Code writes a call to main's transcript only once the call has returned (2.1.295): the transcripts are searched only
+    for a call with no line, such as one a hook of an older thimble made."""
     from . import session  # noqa: PLC0415
 
     if not tool_use_id:
         return None
     line = files.find_caller(ws(c), tool_use_id)
+    if line is not None and not line.get("agent_id"):  # main's own call
+        return None
     if line is None:
         held = await session.call_holder(c, tool_use_id, CALLER_WAIT_S)
         line = files.find_caller(ws(c), tool_use_id)  # a line written meanwhile names the agent best
         if line is None:
             agent_id = held.agent_id if isinstance(held, session.Sub) else None
-            return caller_of(c, str(agent_id)) if agent_id else None
-    return caller_of(c, str(line.get("agent_id") or ""), str(line.get("agent_type") or ""))
+            if not agent_id:
+                return None
+            settle_unsettled(c, str(agent_id))
+            return caller_of(c, str(agent_id))
+    agent_id = str(line.get("agent_id") or "")
+    settle_unsettled(c, agent_id)  # an agent whose own start is not known yet makes no call as another's
+    return caller_of(c, agent_id, str(line.get("agent_type") or ""))
 
 
 def allowed(who: Caller, name: str) -> bool:
@@ -1514,6 +1571,7 @@ def hook_denied(c: str, hook: dict[str, Any]) -> dict[str, Any]:
     r = request(c, rid) if rid else None
     if r is not None and r.get("state") == "refused":
         _refused(c, {**r, "id": rid})
+        _settle_left(c)
     return {"request": rid or None}
 
 

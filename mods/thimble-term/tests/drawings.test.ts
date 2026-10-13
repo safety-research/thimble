@@ -260,7 +260,7 @@ test('a bar chart of two series by date: one row per date in words, its series s
   const rows = lay.lines.map(l => l.map(s => s.s).join(''))
   print('a bar card of page saved and page deleted by day, 70 columns', rows)
   // dates as the browser's axis writes them, every time midnight: the day alone, in words
-  expect(rows.slice(0, 3).map(r => r.split('  ')[0])).toEqual(['24 May', '25 May', '26 May'])
+  expect(rows.slice(0, 3).map(r => r.split('  ')[0])).toEqual(['May 24', 'May 25', 'May 26'])
   expect(rows.join('\n')).not.toContain('2026-05')
   expect(rows.join('\n')).not.toContain('T00:00')
   // one row per date, its total at the right, the key on the row under the bars
@@ -276,15 +276,44 @@ test('a bar chart of two series by date: one row per date in words, its series s
   const bar = (r: string) => [...r].filter(ch => /[█▏▎▍▌▋▊▉]/.test(ch)).length
   expect(bar(rows[1]!)).toBeGreaterThan(bar(rows[0]!))
   expect(bar(rows[0]!)).toBeGreaterThan(bar(rows[2]!))
-  // the pointer on each part reads its series: `24 May · page deleted  14 events`
+  // the pointer on each part reads its series: `May 24 · page deleted  14 events`
   const x0 = rows[0]!.indexOf('█')
   const saved = lay.hit(x0, 0)
   const deleted = lay.hit(x0 + parts[0]!.s.length, 0)
-  expect(lay.items[saved]).toMatchObject({ label: '24 May · page saved', value: '120 events' })
-  expect(lay.items[deleted]).toMatchObject({ label: '24 May · page deleted', value: '14 events' })
+  expect(lay.items[saved]).toMatchObject({ label: 'May 24 · page saved', value: '120 events' })
+  expect(lay.items[deleted]).toMatchObject({ label: 'May 24 · page deleted', value: '14 events' })
   // a time that is not midnight keeps its clock
   const noon = cardOfCell({ ...BY_DATE, outputs: [{ 'application/vnd.vegalite.v6.json': { mark: 'bar', encoding: { x: { field: 't', type: 'temporal' }, y: { field: 'n', type: 'quantitative' } }, data: { values: [{ t: '2026-05-24T00:00:00Z', n: 3 }, { t: '2026-05-24T12:30:00Z', n: 5 }] } } }] }).card
-  expect(cardLayout(noon, 60, -1).lines.map(l => l.map(s => s.s).join('').split('  ')[0])).toEqual(['24 May 00:00', '24 May 12:30'])
+  expect(cardLayout(noon, 60, -1).lines.map(l => l.map(s => s.s).join('').split('  ')[0])).toEqual(['May 24 00:00', 'May 24 12:30'])
+})
+
+test("a line chart over dates names its x in words, as a bar chart's labels read; its citations keep the rows' stamps", async () => {
+  // seen on collusion-wiki (2026-10-10): thimble.chart('line') of weekly saves, its axis `2026-05-18T00:00:00 …`
+  const weeks = ['2026-05-18T00:00:00', '2026-05-25T00:00:00', '2026-06-01T00:00:00', '2026-06-08T00:00:00', '2026-06-15T00:00:00']
+  const cell: ThimbleCell = {
+    id: 'l1week00',
+    kind: 'plot',
+    title: 'How many saves did the busiest accounts make each week?',
+    status: 'ok',
+    outputs: [
+      {
+        'application/vnd.vegalite.v6.json': {
+          mark: 'line',
+          encoding: { x: { field: 'week', type: 'temporal' }, y: { field: 'saves', type: 'quantitative' }, color: { field: 'account', type: 'nominal' } },
+          data: { values: weeks.flatMap((week, i) => [{ week, account: 'AgentRelent', saves: i * 70 }, { week, account: 'MapHelper', saves: i * 40 }]) },
+        },
+      },
+    ],
+  }
+  const { card } = cardOfCell(cell)
+  const lay = cardLayout(card, 70, -1)
+  const rows = lay.lines.map(l => l.map(s => s.s).join(''))
+  print('a line card of two accounts by week, 70 columns', rows)
+  // the axis ticks at a round step of the calendar, a week from each Sunday, as the browser's axis does (axes.test.ts)
+  const axis = rows.find(r => r.includes('May'))!
+  expect(axis.trim().split(/\s{2,}/)).toEqual(['May 24', 'May 31', 'Jun 7', 'Jun 14'])
+  expect(rows.join('\n')).not.toContain('2026-')
+  expect(lay.items[0]).toMatchObject({ label: 'May 18', value: 'AgentRelent 0', open: 'card:l1week00#AgentRelent/2026-05-18T00:00:00' })
 })
 
 // ------------------------------------------------------------------------------------------------ the title row

@@ -306,7 +306,7 @@ async def test_a_number_or_a_span_of_time_in_the_title_or_a_heading_that_no_link
 
 
 async def test_the_report_checks_read_the_title_as_a_passage_and_its_comment_stays_while_its_words_do(cells):
-    """The report checks (Verified, Unverified, Judgment calls) read the title as a passage at report:<slug>#title,
+    """The report checks (Judgment calls, Unverifiable, Important details) read the title as a passage at report:<slug>#title,
     first, and a comment on it carries to the next generation while the title's words stay; a new title settles a
     check's comment on the old one."""
     from app import checks

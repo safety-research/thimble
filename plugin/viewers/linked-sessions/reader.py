@@ -43,11 +43,11 @@
 # whole text, are read back from those offsets when the page opens its row.
 #
 # What the page asks (records(index, query)):
-#   {"op": "overview", "colour": <colour.query()>, "filter": <filter.query()>, "rows": <rows.query()>, "search": <words>}
+#   {"op": "overview", "color": <color.query()>, "filter": <filter.query()>, "rows": <rows.query()>, "search": <words>}
 #       every run and session the label filter keeps, as trees; the Task calls that started them (`spawns`), which the
 #       filters never drop, so the links between sessions always show; and the calls and messages (`items`) that hold
 #       the words and whose Filter by value is on (Color by only colors), with the counts of each control's values.
-#       With a label chosen, `colours` and `groups` give its value on each item by ref, since the page holds a label's
+#       With a label chosen, `colors` and `groups` give its value on each item by ref, since the page holds a label's
 #       marks only for the records it shows.
 #   {"op": "turns", "session": <id>} or {"op": "turns", "refs": [<ref>, ...]}
 #       a session's turns in order, or those of the refs, each item as the overview gives it with a message's whole text.
@@ -477,26 +477,26 @@ def _bare(item):
 
 def _overview(index, query):
     ix = index
-    colour, filt, rows = query.get("colour"), query.get("filter"), query.get("rows")
+    color, filt, rows = query.get("color"), query.get("filter"), query.get("rows")
     words = str(query.get("search") or "").strip().lower()
     keep = _kept(ix)
-    items, counts, fcounts, colours, groups = [], Counter(), Counter(), {}, {}
+    items, counts, fcounts, colors, groups = [], Counter(), Counter(), {}, {}
     for sid in keep:
         for it in _items(ix, ix["sessions"][sid]):
             if words not in it["_words"] or not thimble.kept_unit(it["_refs"]):
                 continue
             # Filter by first: a value turned off leaves the lanes, the transcript and Color by's counts
-            fv = thimble.colour_value(filt, it["ref"], it)
+            fv = thimble.color_value(filt, it["ref"], it)
             fcounts["" if fv is None else fv] += 1
-            if not thimble.colour_on(filt, fv):
+            if not thimble.color_on(filt, fv):
                 continue
             # Color by only colors: a value turned off there keeps its records
-            cv = thimble.colour_value(colour, it["ref"], it)
+            cv = thimble.color_value(color, it["ref"], it)
             counts["" if cv is None else cv] += 1
-            if isinstance(colour, dict) and colour.get("label") is not None and cv is not None:
-                colours[it["ref"]] = cv
+            if isinstance(color, dict) and color.get("label") is not None and cv is not None:
+                colors[it["ref"]] = cv
             if isinstance(rows, dict) and rows.get("label") is not None:
-                gv = thimble.colour_value(rows, it["ref"], it)
+                gv = thimble.color_value(rows, it["ref"], it)
                 if gv is not None:
                     groups[it["ref"]] = gv
             items.append(_bare(it))
@@ -508,7 +508,7 @@ def _overview(index, query):
                           "parent": ss[i]["parent"], "depth": ss[i]["depth"], "start": ss[i]["t0"], "end": ss[i]["t1"],
                           "turns": len(ss[i]["calls"]) + len(ss[i]["msgs"])} for i in keep],
             "spawns": spawns, "items": sorted(items, key=lambda it: it["time"]), "counts": dict(counts), "fcounts": dict(fcounts),
-            "colours": colours, "groups": groups}
+            "colors": colors, "groups": groups}
 
 
 def _turns(index, query):

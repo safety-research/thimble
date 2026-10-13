@@ -67,6 +67,25 @@ test('an example card lists its records; a note is prose; a custom card its word
   expect(text('k0code00')).toEqual(['revisions.jsonl 14591', 'events.jsonl 19913'])
 })
 
+test("a plan card is a note of its numbered steps: each step's status and time, what it makes, and its note under it", () => {
+  const plan = {
+    id: 'p0plan00', kind: 'plan', title: 'Plan: build the environment', outputs: [],
+    payload: { steps: [
+      { id: 's1', text: 'Mirror pandas', makes: ['mirror/'], status: 'done', note: 'six repos', started: '2026-10-08T10:00:00+00:00', ended: '2026-10-08T10:06:00+00:00' },
+      { id: 's2', text: 'Run the pilot', makes: [], status: 'running', time: '40 m' },
+      { id: 's3', text: 'Compare the conditions', makes: ['results/'], status: 'not started' },
+    ] },
+  } as unknown as ThimbleCell
+  const { card } = cardOfCell(plan)
+  expect(card.kind).toBe('note')
+  expect(card.note.split('\n')).toEqual([
+    '1. [done · 6 m] Mirror pandas → mirror/',
+    '   six repos',
+    '2. [running · 40 m] Run the pilot',
+    '3. [not started] Compare the conditions → results/',
+  ])
+})
+
 test("a card whose run failed says why; one waiting for its run says so", () => {
   const { error } = cardOfCell(of('x0err000'))
   expect(error).toBe("KeyError: 'wiki'")
@@ -155,6 +174,111 @@ test("a bar card keeps the order its chart's label axis sorts: by the value with
   // bars of one label stay together, summed for the sort
   const stacked = [{ wiki: 'a', n: 1, kind: 'x' }, { wiki: 'b', n: 5, kind: 'x' }, { wiki: 'a', n: 9, kind: 'y' }]
   expect(sortedBars(stacked, { x: { field: 'wiki', sort: '-y' }, y: { field: 'n' } }, 'x', 'wiki').map(r => `${r.wiki}${r.kind}`)).toEqual(['ax', 'ay', 'bx'])
+})
+
+test("thimble.chart's density, ecdf, ridgeline and range draw from their rows: one-layer curves as lines, the others as the rows' table", () => {
+  const card = (spec: unknown) => cardOfCell({ id: 'k1', kind: 'plot', title: 'q', outputs: [{ 'application/vnd.vegalite.v6.json': spec }] } as ThimbleCell).card
+  const curves = [{ minutes: 0, density: 0.01, agent: 'a' }, { minutes: 10, density: 0.04, agent: 'a' }, { minutes: 0, density: 0.02, agent: 'b' }, { minutes: 10, density: 0.03, agent: 'b' }]
+  const x = { field: 'minutes', type: 'quantitative' }
+  // a few groups' density curves, overlapping (backend kernel_thimble _density_spec)
+  const density = card({ data: { values: curves }, mark: { type: 'area', line: true, style: 'thimble-overlap' }, encoding: { x, y: { field: 'density', type: 'quantitative', stack: null }, color: { field: 'agent', type: 'nominal' } } })
+  expect(density.kind).toBe('line')
+  expect(density.series?.map(s => [s.name, s.points])).toEqual([['a', [[0, 0.01], [10, 0.04]]], ['b', [[0, 0.02], [10, 0.03]]]])
+  // the cumulative share, as steps
+  const shares = [{ minutes: 5, share: 0.5 }, { minutes: 9, share: 1 }]
+  const ecdf = card({ data: { values: shares }, mark: { type: 'line', interpolate: 'step-after', point: true }, encoding: { x, y: { field: 'share', type: 'quantitative', axis: { format: '%' } } } })
+  expect([ecdf.kind, ecdf.y, ecdf.series?.[0]?.points]).toEqual(['line', 'share', [[5, 0.5], [9, 1]]])
+  // a ridgeline's y is a place the chart computes, in no row: the rows' table rather than flat lines at 0
+  const ridge = card({ data: { values: curves }, transform: [{ calculate: '1 - indexof(["a", "b"], datum["agent"])', as: '__thimble_base' }, { calculate: 'datum["__thimble_base"] + datum["density"] / 0.04 * 1.5', as: '__thimble_top' }], mark: { type: 'area', line: true }, encoding: { x, y: { field: '__thimble_top', type: 'quantitative' }, y2: { field: '__thimble_base' }, detail: { field: 'agent', type: 'nominal' } } })
+  expect([ridge.kind, ridge.columns]).toEqual(['table', ['minutes', 'density', 'agent']])
+  // a range's dumbbells are layers, a muted line and its two ends each named by its column: the rows' table
+  const ends = [{ model: 'm1', base: 0.4, tuned: 0.5 }]
+  const y = { field: 'model', type: 'nominal' }
+  const end = (c: string) => ({ transform: [{ calculate: JSON.stringify(c), as: '__thimble_end' }], mark: { type: 'point', style: 'thimble-end' }, encoding: { x: { field: c, type: 'quantitative' }, y, color: { field: '__thimble_end', type: 'nominal', scale: { domain: ['base', 'tuned'] }, title: null } } })
+  const range = card({ data: { values: ends }, layer: [{ mark: { type: 'rule', style: 'thimble-span' }, encoding: { x: { field: 'base', type: 'quantitative' }, x2: { field: 'tuned' }, y } }, end('base'), end('tuned')] })
+  expect([range.kind, range.columns, range.rows]).toEqual(['table', ['model', 'base', 'tuned'], [['m1', 0.4, 0.5]]])
+})
+
+test("thimble.chart's box, violin, a line's interval, an area and dots moved off their line draw from their rows as before", () => {
+  const card = (spec: unknown) => cardOfCell({ id: 'k1', kind: 'plot', title: 'q', outputs: [{ 'application/vnd.vegalite.v6.json': spec }] } as ThimbleCell).card
+  // a Tukey box per group (backend kernel_thimble _box_spec): its summary is the table, not the dots past its whiskers,
+  // which are a layer of their own rows, however many
+  const summary = [{ agent: 'b', n: 5, low: 10, q1: 20, median: 30, q3: 40, high: 50 }]
+  const y = { field: 'agent', type: 'nominal' }
+  const along = (f: string) => ({ field: f, type: 'quantitative' })
+  const past = [{ turns: 100, agent: 'b' }, { turns: 101, agent: 'b' }, { turns: 102, agent: 'b' }]
+  const box = card({ data: { values: summary }, layer: [
+    { mark: 'rule', encoding: { x: along('low'), x2: { field: 'q1' }, y } },
+    { mark: { type: 'bar', style: 'thimble-box' }, encoding: { x: along('q1'), x2: { field: 'q3' }, y } },
+    { mark: { type: 'tick', style: 'thimble-median' }, encoding: { x: along('median'), y } },
+    { data: { values: past }, transform: [{ window: [{ op: 'row_number', as: '__thimble_row' }] }, { lookup: '__thimble_row', from: { data: { values: [{ r: 2, d: -1 }] }, key: 'r', fields: ['d'] }, as: ['__thimble_dodge'], default: 0 }], mark: { type: 'point', yOffset: { expr: 'datum["__thimble_dodge"] * 3.5' } }, encoding: { x: along('turns'), y } },
+  ] })
+  expect([box.kind, box.columns, (box.rows as Cell[][]).length]).toEqual(['table', ['agent', 'n', 'low', 'q1', 'median', 'q3', 'high'], 1])
+  // a violin's places are computed, as a ridgeline's: its curves' table
+  const curves = [{ minutes: 0, density: 0.01, agent: 'a' }, { minutes: 10, density: 0.04, agent: 'a' }]
+  const violin = card({ data: { values: curves }, layer: [
+    { transform: [{ calculate: '0 - indexof(["a"], datum["agent"])', as: '__thimble_base' }], mark: { type: 'area', style: 'thimble-box' }, encoding: { x: along('minutes'), y: { field: '__thimble_top', type: 'quantitative' }, y2: { field: '__thimble_low' } } },
+    { data: { values: [{ agent: 'a', q1: 2, median: 5, q3: 8 }] }, mark: 'rule', encoding: { x: along('q1'), x2: { field: 'q3' }, y: { field: '__thimble_base', type: 'quantitative' } } },
+  ] })
+  expect([violin.kind, violin.columns]).toEqual(['table', ['minutes', 'density', 'agent']])
+  // a line with its interval under it, as a bar's interval: the rows' table, the ends among its columns
+  const hours = [{ hour: 1, share: 0.5, lo: 0.4, hi: 0.6 }, { hour: 2, share: 0.6, lo: 0.5, hi: 0.7 }]
+  const line = card({ data: { values: hours }, layer: [{ mark: 'rule', encoding: { x: along('hour'), y: along('lo'), y2: { field: 'hi' } } }, { mark: { type: 'line', point: true }, encoding: { x: along('hour'), y: along('share') } }] })
+  expect([line.kind, line.columns]).toEqual(['table', ['hour', 'share', 'lo', 'hi']])
+  // an area with a hover tip at each value and no dot is still a line card
+  const area = card({ data: { values: hours }, mark: { type: 'area', point: { style: 'thimble-hover' } }, encoding: { x: along('hour'), y: along('share') } })
+  expect([area.kind, area.series?.[0]?.points]).toEqual(['line', [[1, 0.5], [2, 0.6]]])
+  // dots moved off their line keep their rows: a dots chart's table
+  const runs = [{ time: '2026-08-30T15:00:00', agent: 'agent-1' }, { time: '2026-08-30T15:00:00', agent: 'agent-1' }]
+  const dots = card({ data: { values: runs }, transform: [{ window: [{ op: 'row_number', as: '__thimble_row' }] }, { lookup: '__thimble_row', from: { data: { values: [{ r: 2, d: -1 }] }, key: 'r', fields: ['d'] }, as: ['__thimble_dodge'], default: 0 }], mark: { type: 'point', yOffset: { expr: 'datum["__thimble_dodge"] * 3.5' } }, encoding: { x: { field: 'time', type: 'temporal' }, y: { field: 'agent', type: 'nominal' } } })
+  expect([dots.kind, dots.columns, dots.rows]).toEqual(['table', ['time', 'agent'], [['2026-08-30T15:00:00', 'agent-1'], ['2026-08-30T15:00:00', 'agent-1']]])
+})
+
+test("a dots chart's rows are names down its y axis, which no line card draws: its rows' table", () => {
+  const card = (spec: unknown) => cardOfCell({ id: 'k1', kind: 'plot', title: 'q', outputs: [{ 'application/vnd.vegalite.v6.json': spec }] } as ThimbleCell).card
+  // thimble.chart("dots", frame) with a group column (backend kernel_thimble _xy_spec): a point per row on its agent's line
+  const runs = [
+    { time: '2026-08-30T15:00:00', agent: 'agent-1', action: 'claim' },
+    { time: '2026-08-30T15:00:00', agent: 'agent-1', action: 'review' },
+    { time: '2026-08-30T15:05:00', agent: 'agent-2', action: 'merge' },
+  ]
+  const group = { field: 'action', type: 'nominal' }
+  const dots = card({ data: { values: runs }, mark: 'point', encoding: { x: { field: 'time', type: 'temporal' }, y: { field: 'agent', type: 'nominal' }, color: group, yOffset: group } })
+  expect([dots.kind, dots.columns, (dots.rows as Cell[][]).length]).toEqual(['table', ['time', 'agent', 'action'], 3])
+  // a scatter's points are still a line card's
+  const scatter = card({ data: { values: [{ x: 1, y: 2 }, { x: 2, y: 3 }] }, mark: 'point', encoding: { x: { field: 'x', type: 'quantitative' }, y: { field: 'y', type: 'quantitative' } } })
+  expect(scatter.kind).toBe('line')
+})
+
+test("a chart the code layered its own marks on shows thimble.chart's rows as its table, wherever the chart stands", () => {
+  const card = (spec: unknown) => cardOfCell({ id: 'k1', kind: 'plot', title: 'q', outputs: [{ 'application/vnd.vegalite.v6.json': spec }] } as ThimbleCell).card
+  const span = { data: { name: 'data-1' }, mark: { type: 'rect' }, encoding: { x: { field: 'a', type: 'temporal' }, x2: { field: 'b' } } }
+  const bars = { data: { name: 'thimble-chart-0a1b2c3d', values: [{ day: '2026-08-01', merged: 3 }, { day: '2026-08-02', merged: 9 }] }, mark: 'bar', encoding: { x: { field: 'day', type: 'temporal' }, y: { field: 'merged', type: 'quantitative' } } }
+  const drawn = card({ layer: [span, bars], datasets: { 'data-1': [{ a: '2026-08-01', b: '2026-08-02' }] } })
+  expect([drawn.kind, drawn.columns, drawn.rows]).toEqual(['table', ['day', 'merged'], [['2026-08-01', 3], ['2026-08-02', 9]]])
+})
+
+test('a chart layered in plain Altair shows the rows of its layer with the most rows, not the marks on it', () => {
+  // the live QA of 0.7.0: a pale span behind daily bars and a note on them, each layer with rows of its own
+  const card = (spec: unknown) => cardOfCell({ id: 'k2', kind: 'plot', title: 'q', outputs: [{ 'application/vnd.vegalite.v6.json': spec }] } as ThimbleCell).card
+  const span = { data: { name: 'data-1' }, mark: { type: 'rect' }, encoding: { x: { field: 'a', type: 'temporal' }, x2: { field: 'b' } } }
+  const bars = { data: { name: 'data-2' }, mark: 'bar', encoding: { x: { field: 'day', type: 'temporal' }, y: { field: 'saves', type: 'quantitative' } } }
+  const note = { data: { name: 'data-3' }, mark: 'text', encoding: { x: { field: 'day', type: 'temporal' }, text: { field: 't', type: 'nominal' } } }
+  const datasets = { 'data-1': [{ a: '2026-06-16', b: '2026-06-20' }], 'data-2': [{ day: '2026-06-15', saves: 2610 }, { day: '2026-06-16', saves: 6543 }], 'data-3': [{ day: '2026-06-16', t: 'peak' }] }
+  const drawn = card({ layer: [span, bars, note], datasets })
+  expect([drawn.kind, drawn.columns, drawn.rows]).toEqual(['table', ['day', 'saves'], [['2026-06-15', 2610], ['2026-06-16', 6543]]])
+  // a panel of a concatenated chart the same way
+  const side = card({ hconcat: [{ layer: [span, bars, note] }, { data: { name: 'data-1' }, mark: 'rect' }], datasets })
+  expect(side.columns).toEqual(['day', 'saves'])
+})
+
+test('a concatenated chart shows the rows of its panel with the most rows, not a header set first', () => {
+  // the live QA of 0.7.0: a panel of text set over the chart as its header, with one row of its own
+  const card = (spec: unknown) => cardOfCell({ id: 'k3', kind: 'plot', title: 'q', outputs: [{ 'application/vnd.vegalite.v6.json': spec }] } as ThimbleCell).card
+  const head = { data: { name: 'data-1' }, mark: { type: 'text', size: 14 }, encoding: { text: { field: 't', type: 'nominal' } } }
+  const bars = { data: { name: 'data-2' }, mark: 'bar', encoding: { x: { field: 'day', type: 'temporal' }, y: { field: 'saves', type: 'quantitative' } } }
+  const datasets = { 'data-1': [{ t: 'Saves per day' }], 'data-2': [{ day: '2026-06-15', saves: 2610 }, { day: '2026-06-16', saves: 6543 }] }
+  for (const key of ['vconcat', 'hconcat', 'concat']) expect(card({ [key]: [head, bars], datasets }).columns, key).toEqual(['day', 'saves'])
 })
 
 test('text cut short has no space before `…`; a question in a row is cut at a word; shares side by side read in whole percent', () => {

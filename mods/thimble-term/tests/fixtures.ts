@@ -150,7 +150,7 @@ export const STATES = {
   ui: [] as { n: number; kind: string; args: Record<string, unknown> }[],
   // the report checks (`thimble state checks`, GET /checks), which name a comment's check
   checks: [
-    { id: 'unverified', name: 'Unverified', colour: 2, shown: true, builtin: true, runs: {} },
+    { id: 'unverified', name: 'Unverifiable', colour: 2, shown: true, builtin: true, runs: {} },
     { id: 'verified', name: 'Verified', colour: 3, shown: false, builtin: true, runs: {} },
     { id: 'judgment', name: 'Judgment calls', colour: 4, shown: true, builtin: true, runs: {} },
   ] as Record<string, unknown>[],
