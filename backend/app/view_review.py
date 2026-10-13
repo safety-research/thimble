@@ -55,6 +55,8 @@ log = logging.getLogger("thimble.view_review")
 PROMPT = "view-review"  # prompts/view-review.md: its `review` section is the reviewer's registered prompt
 TASK = "view-review"  # tasks.TASKS: a program that replaces it reads the pictures (program_reading)
 TASK_PROMPT = "dev-view-review"  # prompts/dev-view-review.md: a review run's prompt
+CONTEXT_CHARS = 400_000  # of the analyst's work (the context engine's parts) in a review run's prompt, as a critique's
+CONTEXT_PARTS = ("conversation", "threads", "orientation", "canvas")
 REVIEWER = "view-reviewer"  # subagents.TYPES
 ROUNDS = 2  # revisions a review may make
 RECORDS_CHARS = 6000  # of the reader's answers view_pictures gives
@@ -197,13 +199,19 @@ def work_dir(c: str, slug: str) -> Path:
 
 def task(c: str, prop: dict[str, Any]) -> str:
     """A review run's prompt (prompts/dev-view-review.md): the view's name and slug, its folder and the reviewer's own,
-    and the proposal fenced as data."""
-    from . import prompts, view_tools  # noqa: PLC0415
+    the proposal fenced as data, and the analyst's work the proposal came from: the context engine's conversation,
+    threads, orientation and canvas (context.render, CONTEXT_CHARS)."""
+    from . import context, prompts, view_tools  # noqa: PLC0415
 
     slug = str(prop["slug"])
+    # the view builder experiment builds each proposal in a scratch workspace of its own: there a file of the context
+    # the proposal's workspace rendered stands in for it (THIMBLE_REVIEW_CONTEXT_FILE, set only by its harness)
+    seam = Path(os.environ.get("THIMBLE_REVIEW_CONTEXT_FILE") or "")
+    analyst = seam.read_text("utf-8") if seam.name and seam.is_file() else context.render(c, budget=CONTEXT_CHARS,
+                                                                                            parts=CONTEXT_PARTS)
     return prompts.render(TASK_PROMPT, {"name": str(prop.get("name") or slug), "slug": slug,
                                         "folder": str(views.views_dir(c) / slug), "work": str(work_dir(c, slug)),
-                                        "proposal": view_tools.fenced_proposal(prop)})
+                                        "proposal": view_tools.fenced_proposal(prop), "context": analyst})
 
 
 # --------------------------------------------------------------------------- starting and stopping

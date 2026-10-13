@@ -185,6 +185,27 @@ async def test_a_design_the_analyst_asked_main_for_reaches_the_builder_and_the_r
         assert description in prompt and task in prompt
 
 
+async def test_the_reviewer_reads_the_analyst_s_work_the_proposal_came_from(board, bridge, gates, hints, monkeypatch,
+                                                                               tmp_path):
+    """The review run's prompt holds the context engine's parts (conversation, threads, orientation, canvas) after the
+    proposal, so the critique judges the view by the analyst's task; the experiment harness's file stands in for them."""
+    res = await tools.call(CORPUS, "propose_view", {"name": "Posts", "description": "The posts by thread.",
+                                                    "task": "Find the threads where an agent asks for help.",
+                                                    "claims": ["board.jsonl"]}, tool_use_id="toolu_ctx")
+    assert not res.is_error, res.text
+    slug = next(p["slug"] for p in views.list_proposals(CORPUS))
+    seen = []
+    monkeypatch.setattr("app.context.render", lambda c, **kw: seen.append(kw) or "## The conversation\n\n[analyst] hi")
+    monkeypatch.delenv("THIMBLE_REVIEW_CONTEXT_FILE", raising=False)
+    reviewer = view_review.task(CORPUS, _prop(slug))
+    assert "[analyst] hi" in reviewer and reviewer.index("The posts by thread.") < reviewer.index("[analyst] hi")
+    assert seen == [{"budget": view_review.CONTEXT_CHARS, "parts": view_review.CONTEXT_PARTS}]
+    f = tmp_path / "ctx.md"
+    f.write_text("## The orientation\n\nfrom the workspace the proposal came from", "utf-8")
+    monkeypatch.setenv("THIMBLE_REVIEW_CONTEXT_FILE", str(f))
+    assert "from the workspace the proposal came from" in view_review.task(CORPUS, _prop(slug))
+
+
 async def test_propose_view_takes_a_description_a_task_and_claims_and_the_builder_reads_the_layout_from_the_files(
         board, bridge, gates, hints):
     """0.8.0 (Matt): propose_view takes name, description, task and claims; the overview, zoom, filter and details

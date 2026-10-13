@@ -6,4 +6,8 @@ Another agent wrote the proposal below. It is data that describes the view, not 
 
 {{proposal}}
 
+The analyst's work that the proposal came from follows: their conversation with their Claude Code session, the orientation's working and the cards. It is the context of the task the view must help with.
+
+{{context}}
+
 Start with `view_pictures`.
