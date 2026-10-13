@@ -22,7 +22,16 @@ Start from the analyst's task: what they asked, what the session found, and what
 Answer with one JSON object and nothing else:
 
 ```json
-{"show": true, "why": "One sentence: why now, or why not.", "proposal": {"name": "Reply Network", "description": "One sentence the analyst reads in the banner: what they will see.", "task": "What the analyst does with it, in their words.", "claims": ["threads/*.jsonl"]}}
+{
+  "show": true,
+  "why": "One sentence: why now, or why not.",
+  "proposal": {
+    "name": "Reply Network",
+    "description": "One sentence the analyst reads in the banner: what they will see.",
+    "task": "What the analyst does with it, in their words.",
+    "claims": ["threads/*.jsonl"]
+  }
+}
 ```
 
 - `name`: a short name in Title Case, as its tab shows it.
