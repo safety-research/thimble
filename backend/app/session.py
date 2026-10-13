@@ -121,6 +121,8 @@ COMMAND_ARGS_RE = re.compile(r"<command-args>(.*?)</command-args>", re.S)
 LOCAL_CAVEAT = "<local-command-caveat>"  # the meta record before a local command's line (module note, the table)
 CONNECT_COMMANDS = ("/thimble", "/thimble:thimble")  # /thimble's command line, whose turn is not mirrored (module note)
 TASK_FIELD_RE = re.compile(r"<(task-id|tool-use-id|status|result|summary)>(.*?)</\1>", re.S)
+# one task's notification: Claude Code puts the notifications of tasks that end together in one message
+TASK_NOTICE_RE = re.compile(r"<task-notification>(.*?)</task-notification>", re.S)
 DIDNT_FINISH = "didn't finish"  # a task notification's summary after `thimble --continue`: the agent was cut off by the quit
 # the attachments Claude Code adds to a running subagent's transcript when main goes into plan mode (again), which the
 # agent then follows: it may only read and write a plan (live check L21); and the one it adds when main leaves plan mode
@@ -1325,8 +1327,19 @@ def browser_events(text: str) -> list[str]:
     return EVENT_TAG_RE.findall(text or "")
 
 
+def task_notices(text: str) -> list[dict]:
+    """The fields of each task notification a message holds, one dict per task: Claude Code puts the notifications of
+    tasks that end together in one message (live check on the view builder experiment, where the second of two helpers
+    kept its step running). A text without the wrapper is one notification."""
+    return [dict(TASK_FIELD_RE.findall(b)) for b in (TASK_NOTICE_RE.findall(text or "") or [text or ""])]
+
+
 def _task_notification(lv: Live, text: str, at: float = 0.0) -> None:
-    fields = dict(TASK_FIELD_RE.findall(text or ""))
+    for fields in task_notices(text):
+        _task_notice(lv, fields, at)
+
+
+def _task_notice(lv: Live, fields: dict, at: float = 0.0) -> None:
     if fields.get("task-id") in lv.watch_tasks:
         _open_turn(lv)  # thimble's Monitor expired or ended: main arms it again, a call that is no row in main
         return
@@ -1383,15 +1396,15 @@ def _child_finished(lv: Live, text: str) -> None:
     """A task notification in a subagent's own transcript: a subagent it started (the writer's verifier, the
     orientation's critic) has stopped. Main never sees that notification, so the child's chat is finished here, and
     main's turn is left alone."""
-    fields = dict(TASK_FIELD_RE.findall(text or ""))
-    sub = _sub_by(lv, agent_id=fields.get("task-id")) or _sub_by(lv, tool_use_id=fields.get("tool-use-id"))
-    if sub is None or sub.done:
-        return
-    _tail_sub(lv, sub)
-    if sub.thimble:
-        _thimble_notice(lv, fields, 0.0, sub)
-        return
-    _finish_sub(lv, sub, _task_status(fields.get("status")), str(fields.get("result") or "").strip() or None)
+    for fields in task_notices(text):
+        sub = _sub_by(lv, agent_id=fields.get("task-id")) or _sub_by(lv, tool_use_id=fields.get("tool-use-id"))
+        if sub is None or sub.done:
+            continue
+        _tail_sub(lv, sub)
+        if sub.thimble:
+            _thimble_notice(lv, fields, 0.0, sub)
+            continue
+        _finish_sub(lv, sub, _task_status(fields.get("status")), str(fields.get("result") or "").strip() or None)
 
 
 def _peer(lv: Live, *, mid_turn: bool, origin: Any = None) -> None:
@@ -2832,16 +2845,17 @@ def translate(lv: Live, line: bytes | str) -> None:
                     _browser_event(lv, tag, mid_turn=True)
             elif aorigin == "task-notification" or att.get("commandMode") == "task-notification":
                 # a subagent that ended while main's turn went on
-                fields = dict(TASK_FIELD_RE.findall(prompt))
-                sub = _sub_by(lv, agent_id=fields.get("task-id")) or _sub_by(lv, tool_use_id=fields.get("tool-use-id"))
-                if sub is not None and sub.thimble:
-                    _tail_sub(lv, sub)
-                    _thimble_notice(lv, fields, _stamp(rec), sub)
-                elif sub is not None:
-                    _tail_sub(lv, sub)
-                    _finish_sub(lv, sub, _task_status(fields.get("status")), str(fields.get("result") or "").strip() or None)
-                else:
-                    _thimble_notice(lv, fields, _stamp(rec))
+                for fields in task_notices(prompt):
+                    sub = _sub_by(lv, agent_id=fields.get("task-id")) or _sub_by(lv, tool_use_id=fields.get("tool-use-id"))
+                    if sub is not None and sub.thimble:
+                        _tail_sub(lv, sub)
+                        _thimble_notice(lv, fields, _stamp(rec), sub)
+                    elif sub is not None:
+                        _tail_sub(lv, sub)
+                        _finish_sub(lv, sub, _task_status(fields.get("status")),
+                                    str(fields.get("result") or "").strip() or None)
+                    else:
+                        _thimble_notice(lv, fields, _stamp(rec))
             elif aorigin == "peer":
                 _peer(lv, mid_turn=True, origin=att.get("origin"))
             elif prompt.strip() and not prompt.lstrip().startswith("<"):

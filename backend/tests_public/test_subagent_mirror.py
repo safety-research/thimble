@@ -589,6 +589,43 @@ async def test_a_descendant_s_step_ends_at_its_task_notification_in_either_shape
         "the notice is no line of the orientation's thread"
 
 
+@pytest.mark.parametrize("shape", ["user", "attachment"])
+async def test_two_children_that_end_together_in_one_notification_message_both_end(bridge, project, ended, shape):
+    """Claude Code puts the notifications of two tasks that end together in one message, one block each (the view
+    builder experiment's ml-tasks orientation, where the first of two helpers kept its step running). Each ends."""
+    lv, chat, path = await _click_orientation(bridge, project)
+    with subagents.update(CORPUS) as state:
+        for h in ("h1", "h2"):
+            sf.registry(state)[h] = {"type": "thimble:orient-helper", "role": "orient-helper", "parent": AGENT,
+                                     "root": AGENT, "status": "running", "descendant": True}
+    for h in ("h1", "h2"):
+        child = _agent_file(project, h, agentType="thimble:orient-helper", description=f"survey {h}",
+                            parentAgentId=AGENT, toolUseId=f"toolu_{h}")
+        _write(child, _assistant(_use(f"toolu_{h}r", "Read", {"file_path": "/c/board.jsonl"})),
+               _result(f"toolu_{h}r", "1\tx"))
+    session.tail_once(lv)
+    steps = {m["agent_id"]: m["id"] for m in agents.list_chats(CORPUS) if m.get("role") == agents.STEP_ROLE}
+    note = "\n".join(f"<task-notification>\n<task-id>{h}</task-id>\n<tool-use-id>toolu_{h}</tool-use-id>\n"
+                     f"<status>completed</status>\n<summary>Agent \"survey {h}\" finished</summary>\n"
+                     f"</task-notification>" for h in ("h1", "h2"))
+    if shape == "user":
+        rec = {"type": "user", "isMeta": True, "origin": {"kind": "task-notification"},
+               "message": {"role": "user", "content": "[SYSTEM NOTIFICATION - NOT USER INPUT]\n\n" + note}}
+    else:
+        rec = {"type": "attachment", "attachment": {"type": "queued_command", "prompt": note,
+                                                    "commandMode": "task-notification"}}
+    _write(path, rec)
+    session.tail_once(lv)
+    assert [agents.read_meta(CORPUS, steps[h])["status"] for h in ("h1", "h2")] == ["done", "done"]
+
+
+def test_task_notices_reads_each_block_and_a_bare_notification_as_one():
+    two = "pre <task-notification><task-id>a</task-id><status>completed</status></task-notification>\n" \
+          "<task-notification><task-id>b</task-id><status>killed</status></task-notification>"
+    assert session.task_notices(two) == [{"task-id": "a", "status": "completed"}, {"task-id": "b", "status": "killed"}]
+    assert session.task_notices("<task-id>c</task-id>") == [{"task-id": "c"}]
+
+
 async def test_clear_carries_thimble_s_agents_into_the_new_session_read_from_the_start_of_its_file(bridge, project,
                                                                                                 ended):
     lv, chat, path = await _click_orientation(bridge, project)

@@ -186,19 +186,19 @@ def _entries(path: Path, forks: bool = True) -> list[_Entry]:
         if found:
             entries.extend(e for e in (_event(x, forks) for x in found) if e is not None)
             return
-        fields = dict(session.TASK_FIELD_RE.findall(text or ""))
-        agent_id = str(fields.get("task-id") or "").strip()
-        thread = fork_calls.get(str(fields.get("tool-use-id") or "").strip()) or fork_agents.get(agent_id)
-        if thread and agent_id:
-            fork_agents[agent_id] = thread
-            if forks:
-                got, read = _fork_entries(subagents / f"agent-{agent_id}.jsonl", thread, fork_read.get(agent_id, 0))
-                fork_read[agent_id] = read
-                entries.extend(got)
-            return
-        result, status = str(fields.get("result") or "").strip(), str(fields.get("status") or "").strip()
-        if result:
-            entries.append(_Entry(f"[notification {status}]" if status else "[notification]", result))
+        for fields in session.task_notices(text):
+            agent_id = str(fields.get("task-id") or "").strip()
+            thread = fork_calls.get(str(fields.get("tool-use-id") or "").strip()) or fork_agents.get(agent_id)
+            if thread and agent_id:
+                fork_agents[agent_id] = thread
+                if forks:
+                    got, read = _fork_entries(subagents / f"agent-{agent_id}.jsonl", thread, fork_read.get(agent_id, 0))
+                    fork_read[agent_id] = read
+                    entries.extend(got)
+                continue
+            result, status = str(fields.get("result") or "").strip(), str(fields.get("status") or "").strip()
+            if result:
+                entries.append(_Entry(f"[notification {status}]" if status else "[notification]", result))
 
     def prompt(text: str, origin: str | None) -> None:
         if origin == session.OLD_ORIGIN:  # an event in a transcript thimble 0.5.0 wrote
