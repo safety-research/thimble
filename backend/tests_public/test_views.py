@@ -640,6 +640,10 @@ def test_the_checks_fail_a_page_whose_records_do_not_show_the_test_label():
     assert "no element" in run(_shot("overview", records=0, units=0, fetched=40))[0][0]
     assert "only 2 shown elements" in run(_shot("overview", records=2, units=0, due=0, fetched=400))[0][0]
     assert run(_shot("overview", records=2, units=3, fetched=400)) == ([], []), "a view may anchor units instead"
+    # a list that draws only the rows near its view, such as the kit's table, anchors each row it draws: the rows it
+    # holds count, the few it drew do not fail it
+    assert run(_shot("overview", records=34, units=0, held=400, fetched=400)) == ([], [])
+    assert "only 34 shown elements" in run(_shot("overview", records=34, units=0, held=34, fetched=400))[0][0]
     assert "3 of the 6" in run(_shot("overview", records=40, due=6, drawn=3, fetched=40))[0][0]
     problems, notes = run(good[0], _shot("filtered", records=10, unkept=8), good[2])
     assert not problems and "anchors 8 of them" in notes[0] and "shows 10 records" in notes[0]
@@ -791,7 +795,11 @@ def test_a_viewer_thimble_ships_runs_from_a_copy_in_the_workspace(ws, tmp_path, 
     assert Path(req["reader"]).read_text("utf-8") == THREADS_READER
 
 
-def test_the_frame_document_blocks_every_host_before_any_script(ws):
+def test_the_frame_document_blocks_every_host_before_any_script(ws, tmp_path, monkeypatch):
+    # the built interface's chart drawing (views.KIT_CHART_JS), a stand-in, so the count does not hang on a build
+    (tmp_path / "dist" / "kit").mkdir(parents=True)
+    (tmp_path / "dist" / views.KIT_CHART_JS).write_text("window.__thimbleCharts = {}")
+    monkeypatch.setattr(config, "FRONTEND_DIST", tmp_path / "dist")
     doc = views.frame_document(views.read_view(CORPUS, "threads"))
     assert doc.lower().startswith("<!doctype html>")
     csp = doc.index("Content-Security-Policy")
@@ -800,9 +808,10 @@ def test_the_frame_document_blocks_every_host_before_any_script(ws):
     v = dict(views.read_view(CORPUS, "threads"), libs=views._libs(["vega-embed"]))
     with_libs = views.frame_document(v)
     if views.LIBS["vega"].is_file():
-        assert with_libs.count("<script>") == 11, \
-            "the view's name, the bridge, the kit's Color by, row controls, side panel, transcript and time range, vega, " \
-            "vega-lite, vega-embed and the view's own"
+        assert with_libs.count("<script>") == 20, \
+            "the view's name, the bridge, the kit's Color by, row controls, text, side panel, transcript, messages, " \
+            "search, table, tree, diff, record viewer, chart drawing, charts and time range, vega, vega-lite, vega-embed " \
+            "and the view's own"
     assert views._script_text("a</script>b") == "a<\\/script>b"
     assert views._libs(["vega-embed"]) == ["vega", "vega-lite", "vega-embed"]
 
@@ -1038,7 +1047,7 @@ async def test_the_repository_colors_an_agent_by_its_own_name_and_by_its_records
 
     async def view(field, tab="agents", off=(), hide=None):
         return await views.reader_call("repository", slug, "records", {
-            "op": "view", "run": "r1", "tab": tab, "colour": {"field": field, "off": list(off)},
+            "op": "view", "run": "r1", "tab": tab, "color": {"field": field, "off": list(off)},
             **({"filter": {"field": field, "off": list(hide)}} if hide is not None else {})})
 
     got = await view("author")
@@ -1096,6 +1105,8 @@ FIT_HTML = """<!doctype html><html><head><style>body{font:13px sans-serif;margin
 <div style="position:relative;height:40px"><span style="position:absolute;left:0;top:0">Overlapping label one</span>
 <span style="position:absolute;left:12px;top:2px">Second label here</span></div>
 <div style="width:60px;overflow:hidden;white-space:nowrap">A text far too long for its box</div>
+<div>2026-04-01 <span class="thimble-table-cut" style="display:inline-block;width:0;overflow:hidden;vertical-align:top">09:30:15</span></div>
+<div style="display:flex;width:100px"><span style="flex:none;width:100px">Label</span><span style="min-width:0;overflow:hidden;white-space:nowrap">Squeezed away</span></div>
 <div style="width:300px">Narrow column</div>
 <div style="width:120px;overflow-x:auto;white-space:nowrap">Lanes that run on past their box</div>
 <button id="more">Show more</button><div id="extra" hidden data-anchor="board.jsonl#L2">bo: Anyone have the build number?</div>
@@ -1107,8 +1118,10 @@ thimble.onOpen(() => {})
 
 
 async def test_the_headless_page_measures_how_its_text_fits_and_clicks_a_control_a_state_names(ws, inproc, bound):
-    """The checks' page reports text drawn over other text, text its box cuts off and how much of a wide pane the page
-    uses, lists its controls by their text, and a state's actions click a control by its text before it is measured."""
+    """The checks' page reports text drawn over other text, text its box cuts off (a box squeezed to nothing among them,
+    but not the kit's table's 0-wide year or seconds, which a narrow column of times leaves out on purpose) and how much
+    of a wide pane the page uses, lists its controls by their text, and a state's actions click a control by its text
+    before it is measured."""
     if why := views.build_problem():
         if os.environ.get("CI") == "true":
             pytest.fail(why)
@@ -1119,7 +1132,7 @@ async def test_the_headless_page_measures_how_its_text_fits_and_clicks_a_control
     assert plain["ok"] and clicked["ok"], (plain["errors"], clicked["errors"])
     lay = plain["layout"]
     assert lay["overlaps"] == 1 and lay["pairs"][0] == ["Overlapping label one", "Second label here"], lay
-    assert lay["cut"] == 1 and lay["cuts"] == ["A text far too long for its box"], lay
+    assert lay["cut"] == 2 and lay["cuts"] == ["A text far too long for its box", "Squeezed away"], lay
     assert lay["width"] == views.PANE_WIDE[0] and lay["used"] < views.WIDE_USED * lay["width"] and not lay["overflow"]
     assert lay["sideways"] == 1 and lay["wide"] == ["Lanes that run on past their box"], lay
     assert (lay["anchored"], lay["outside"]) == (1, 1), "the record far below the pane is out of view"
@@ -1268,7 +1281,7 @@ async def test_the_checks_look_for_the_label_s_colour_in_a_picture_of_the_page(n
     else:
         n = p["checked"]
         assert p["seen"] == 0 and len(problems) == 1, (p, problems)
-        assert f"does not show the test label's colour on {n} of the {n}" in problems[0], problems
+        assert f"does not show the test label's color on {n} of the {n}" in problems[0], problems
 
 async def test_the_end_to_end_test_s_fixture_view_passes_the_checks(workspaces_tmp, tmp_path, monkeypatch, inproc, bound):
     """scripts/e2e/fixture-view, the view the release test opens with a label on, passes the whole check as the tab in

@@ -1226,16 +1226,16 @@ def shot_script() -> Path:
 
 async def run_shot(url: str, out: Path, selector: str | None = None, *, info_out: Path | None = None,
                    viewport: str | None = None, scale: float | None = None, storage: dict[str, str] | None = None,
-                   press: list[str] | None = None, wait_ms: int | None = None, offline: bool = False,
-                   own_origin: bool = False) -> int:
+                   press: list[str] | None = None, wait_ms: int | None = None, settle: bool = False,
+                   offline: bool = False, own_origin: bool = False) -> int:
     """`node scripts/ui_shot.mjs`: 0 ok, 2 selector not found (the viewport is written instead), 1 error, -1 timeout.
     Options map to the script's options of the same names. headless.Missing when the browser is missing, which stays so
     for the rest of the server run."""
     path = headless.launch(headless.PAGES)
     if path is None or headless.missing(headless.PAGES):
         raise headless.Missing(headless.missing(headless.PAGES))
-    cmd = ["node", str(shot_script()), "--url", url, "--out", str(out), *(["--offline"] if offline else []),
-           *(["--own-origin"] if own_origin else [])]
+    cmd = ["node", str(shot_script()), "--url", url, "--out", str(out), *(["--settle"] if settle else []),
+           *(["--offline"] if offline else []), *(["--own-origin"] if own_origin else [])]
     if selector:
         cmd += ["--selector", selector]
     if info_out is not None:
@@ -1943,9 +1943,9 @@ APPLY_UNANSWERED = "not applied because nobody answered within {wait}. The chang
 CODE_QUESTION = ("This edits thimble's own code, which then runs outside the sandbox (its test server, its checks and "
                  "git). Allow?")
 CODE_WHY = ("The ticket's checks can't run in a sandbox here ({why}), so thimble asks this before every code ticket, in "
-            "every permission mode. Unanswered, the ticket is cancelled after {wait}.")
+            "every permission mode. Unanswered, the ticket is canceled after {wait}.")
 CODE_NOT_ALLOWED = "the analyst did not allow it to edit thimble's own code, so it did not start"
-CODE_UNANSWERED = "cancelled because nobody answered within {wait} whether it may edit thimble's own code"
+CODE_UNANSWERED = "canceled because nobody answered within {wait} whether it may edit thimble's own code"
 CODE_NOBODY = ("it has no workspace, so no permission card could ask the analyst about thimble's own code, and it did "
                "not start")
 FILES_SHOWN = 8

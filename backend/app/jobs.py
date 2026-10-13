@@ -232,7 +232,7 @@ def cancel_workspace(c: str) -> list[str]:
     out: list[str] = []
     for job in [j for j in _active.values() if j.workspace == c or j.target == c]:
         job.status = "cancelled"
-        job.note = "cancelled: the workspace was reset"
+        job.note = "canceled: the workspace was reset"
         _active.pop(job.key, None)
         if job.task is not None and not job.task.done():
             job.task.cancel()

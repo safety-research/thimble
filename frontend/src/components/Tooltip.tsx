@@ -28,8 +28,9 @@ export function placeTip(rect: Rect, w: number, h: number, vw: number, vh: numbe
   return { left, top }
 }
 
-/** The label itself, placed by `place` once its size is known. */
-export function Tip({ id, text, place, className }: { id?: string; text: string; place: (w: number, h: number) => { left: number; top: number }; className?: string }) {
+/** The label itself, placed by `place` once its size is known: `text`, or `children` drawn in its place (`text` then
+ * says what they say, which places the label again when it changes). */
+export function Tip({ id, text, place, className, children }: { id?: string; text: string; place: (w: number, h: number) => { left: number; top: number }; className?: string; children?: ReactNode }) {
   const el = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
   useLayoutEffect(() => {
@@ -39,7 +40,7 @@ export function Tip({ id, text, place, className }: { id?: string; text: string;
   const style: CSSProperties = { position: 'fixed', left: pos?.left ?? MARGIN, top: pos?.top ?? MARGIN, visibility: pos ? 'visible' : 'hidden' }
   return createPortal(
     <div ref={el} id={id} className={`tip overlay${className ? ` ${className}` : ''}`} role="tooltip" style={style}>
-      {text}
+      {children ?? text}
     </div>,
     document.body,
   )

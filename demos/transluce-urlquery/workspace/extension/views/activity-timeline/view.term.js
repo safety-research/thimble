@@ -28,9 +28,9 @@ const pad2 = (n) => String(n).padStart(2, '0')
 const hms = (t) => dt(t).toISOString().slice(11, 19)
 const hm = (t) => dt(t).toISOString().slice(11, 16)
 const isoDay = (t) => dt(t).toISOString().slice(0, 10)
-const dm = (t) => `${dt(t).getUTCDate()} ${MONTH[dt(t).getUTCMonth()]}`
-const dmy = (t) => `${dm(t)} ${dt(t).getUTCFullYear()}`
-const epWords = (a, b) => `${WEEKDAY[dt(a).getUTCDay()]} ${dmy(a)} ${hm(a)}${b > a ? ` – ${isoDay(a) === isoDay(b) ? hm(b) : `${dm(b)} ${hm(b)}`}` : ''}`
+const dm = (t) => `${MONTH[dt(t).getUTCMonth()]} ${dt(t).getUTCDate()}`
+const dmy = (t) => `${dm(t)}, ${dt(t).getUTCFullYear()}`
+const epWords = (a, b) => `${WEEKDAY[dt(a).getUTCDay()]}, ${dmy(a)} ${hm(a)}${b > a ? ` – ${isoDay(a) === isoDay(b) ? hm(b) : `${dm(b)} ${hm(b)}`}` : ''}`
 function dur(s) {
   s = Math.max(0, Math.round(s))
   if (s < 60) return `${s}s`

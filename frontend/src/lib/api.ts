@@ -4,7 +4,9 @@ import type {
   Extensions,
   LocalExtension,
   Cell,
+  CardVersion,
   CellName,
+  PlanRun,
   CellPatch,
   ChatDetail,
   ChatMeta,
@@ -31,6 +33,7 @@ import type {
   GrepDone,
   GrepFile,
   GrepProgress,
+  SourceEvents,
   SourceFind,
   SourceInfo,
   SourceLines,
@@ -194,8 +197,19 @@ export const api = {
   speakerNames: (c: string, path: string, key: string, ids: string) => j<{ names: Record<string, string> }>(`${BASE}/corpora/${enc(c)}/source/speakers${q({ path, key, ids })}`),
   /** the keys of the file's records that name a kind or a who, over the whole file (backend source_keys.py) */
   sourceKeys: (c: string, path: string, bins?: number) => j<SourceKeys>(`${BASE}/corpora/${enc(c)}/source/keys${q({ path, bins })}`),
+  /** the file's records with a time, in time order, for the Timeline mode (backend source_events.py) */
+  sourceEvents: (c: string, path: string) => j<SourceEvents>(`${BASE}/corpora/${enc(c)}/source/events${q({ path })}`),
+  /** the Timeline mode's page as its sandboxed frame loads it: the view kit over files_timeline.html */
+  timelinePage: async (c: string): Promise<string> => {
+    const res = await fetch(`${BASE}/corpora/${enc(c)}/source/timeline`)
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+    return res.text()
+  },
   /** The URL a PDF of the corpus opens from in the browser's viewer, at `page` when given. */
   pdfUrl: (c: string, path: string, page?: number | null) => `${BASE}/corpora/${enc(c)}/pdf/${path.split('/').map(enc).join('/')}${page ? `#page=${page}` : ''}`,
+  /** `GET /corpora/{c}/download/<path>`: the file as it is on disk, an attachment under its own name (the File browser's
+   * Download). */
+  downloadUrl: (c: string, path: string) => `${BASE}/corpora/${enc(c)}/download/${path.split('/').map(enc).join('/')}`,
   /** `GET /corpora/{c}/source/find`: the lines of one file past `after` that hold `text`, searched on the server. */
   findInSource: (c: string, path: string, text: string, after = 0, signal?: AbortSignal) =>
     j<SourceFind>(`${BASE}/corpora/${enc(c)}/source/find${q({ path, q: text, after: after || undefined })}`, { signal }),
@@ -321,6 +335,10 @@ export const api = {
   addCell: (c: string, nb: string, body: NewCellBody) => j<Cell>(`${ws(c)}/notebooks/${enc(nb)}/cells`, { method: 'POST', body: JSON.stringify(body) }),
   updateCell: (c: string, id: string, patch: CellPatch) => j<Cell>(`${ws(c)}/cells/${enc(id)}`, { method: 'PUT', body: JSON.stringify(patch) }),
   runCell: (c: string, id: string) => j<Cell>(`${ws(c)}/cells/${enc(id)}/run`, { method: 'POST' }),
+  /** the card as it stood before its edit `entry` (backend notebook.card_version_route) */
+  cardVersion: (c: string, id: string, entry: string) => j<CardVersion>(`${ws(c)}/cells/${enc(id)}/versions/${enc(entry)}`),
+  /** make the card as it stood before its edit `entry` again, as an edit of the analyst's (backend notebook.restore_version) */
+  restoreVersion: (c: string, id: string, entry: string) => j<Cell>(`${ws(c)}/cells/${enc(id)}/versions/${enc(entry)}/restore`, { method: 'POST' }),
   /** `POST …/cells/{id}/fixes/{fix}/undo`: restore the card from before a check's fix (backend checkstore.undo_fix); the
      * fix is marked undone and is not applied again. */
   undoCardFix: (c: string, id: string, fix: string) => j<Cell>(`${ws(c)}/cells/${enc(id)}/fixes/${enc(fix)}/undo`, { method: 'POST' }),
@@ -344,6 +362,10 @@ export const api = {
   },
   ipynbUrl: (c: string, nb: string) => `${ws(c)}/notebooks/${enc(nb)}/ipynb`,
   cellNames: (c: string) => j<CellName[]>(`${ws(c)}/cells/names`),
+  /** the live rows of a plan card's runs (backend plans.plan_runs_route) */
+  planRuns: (c: string, id: string) => j<{ runs: PlanRun[] }>(`${ws(c)}/cards/${enc(id)}/plan-runs`),
+  /** take off a plan's marks of what its last edit changed (backend plans.clear_edit_route) */
+  clearPlanEdit: (c: string, id: string) => j<{ cleared: boolean }>(`${ws(c)}/cards/${enc(id)}/plan-edit/clear`, { method: 'POST' }),
 
   // ---- labels and filters ----
   concepts: (c: string) => j<Concept[]>(`${ws(c)}/concepts`),
@@ -421,6 +443,9 @@ export const api = {
   viewProblems: (c: string, slug: string, version?: string, path?: string) => j<ViewProblems>(`${ws(c)}/views/${enc(slug)}/problems${q({ v: version, path })}`),
   viewShown: (c: string, slug: string, version?: string, path?: string) => j<ViewShown>(`${ws(c)}/views/${enc(slug)}/shown${q({ v: version, path })}`),
   viewOpen: (c: string, slug: string, ref: string, version?: string) => j<ViewOpen>(`${ws(c)}/views/${enc(slug)}/resolve${q({ ref, v: version })}`),
+  /** the libraries a custom card names (`libs`, comma-separated) as inline elements for its frame's head (backend
+   * card_libs.libs_route) */
+  cardLibs: (c: string, libs: string) => j<{ head: string; problems: string[] }>(`${ws(c)}/card-libs${q({ libs })}`),
   /** a card type's page as a card's frame loads it (backend cardtypes.frame_route) */
   cardTypeFrame: async (c: string, type: string): Promise<string> => {
     const res = await fetch(`${ws(c)}/cardtypes/${enc(type)}/frame`)
@@ -566,8 +591,9 @@ export const labelApi = {
   remove: (c: string, id: string) => j<{ ok: boolean }>(`${ws(c)}/concepts/${enc(id)}`, { method: 'DELETE' }),
   /** `GET /labels/presence`: per label over files, the values it left on each file (the tree's dots). */
   presence: (c: string) => j<LabelPresence[]>(`${ws(c)}/labels/presence`),
-  /** `GET /labels/ruler?path=&bins=`: where each label's values fall on one file (the reader's overview ruler). */
-  ruler: (c: string, path: string, bins: number) => j<LabelRuler>(`${ws(c)}/labels/ruler${q({ path, bins })}`),
+  /** `GET /labels/ruler?path=&bins=&turns=`: where each label's values fall on one file (the reader's overview ruler);
+   * with `turns` (the Transcript mode), a whole-file JSON transcript's turns over every line they cover. */
+  ruler: (c: string, path: string, bins: number, turns = false) => j<LabelRuler>(`${ws(c)}/labels/ruler${q({ path, bins, turns: turns ? 1 : undefined })}`),
   /** `POST /concepts/draft`: the labels model defines a label from the analyst's description, reading the first records
    * of the files it would apply to; nothing is stored. */
   draft: (c: string, text: string, paths: string[]) => j<LabelDraft>(`${ws(c)}/concepts/draft`, { method: 'POST', body: JSON.stringify({ text, paths }) }),
@@ -682,14 +708,14 @@ export const undoApi = {
 }
 
 // --- report checks: the Checks pane's rows (report/Checks.tsx, backend checks.py) ---
-import type { CardCheckStatus, Check, CheckPatch, CheckRun } from './types'
+import type { CardCheckStatus, Check, CheckCover, CheckPatch, CheckRun } from './types'
 
 export const checksApi = {
   /** `GET /checks`: every check of the workspace, the built-ins first, each with its latest run per document. */
   list: (c: string) => j<Check[]>(`${ws(c)}/checks`),
   /** `POST /checks`: a new check from a name and a prompt (201), which the server turns on and runs; a 409 when the
    * name is taken. */
-  create: (c: string, body: { name: string; prompt: string }) => j<Check>(`${ws(c)}/checks`, { method: 'POST', body: JSON.stringify(body) }),
+  create: (c: string, body: { name: string; prompt: string; covers?: CheckCover[] }) => j<Check>(`${ws(c)}/checks`, { method: 'POST', body: JSON.stringify(body) }),
   /** `PATCH /checks/{id}`: turned on or off, renamed, its prompt or colour changed; answers the check. The server runs
    * a check turned on, and one that is on given a new prompt, wherever it has passages it has not seen. */
   update: (c: string, id: string, patch: CheckPatch) => j<Check>(`${ws(c)}/checks/${enc(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),

@@ -191,7 +191,7 @@ test("a value's `color` shows the eighteen label colors by name under it around 
   // thimble answers with proxy-link teal (show_label's names)
   label(w).classes = [{ name: 'proxy-link', color: 6, highlight: true }, { name: 'none', color: 0, highlight: false }]
   pane = await press($, w, pane, 'lb-pick-proxy-link-6')
-  expect(w.acts).toContainEqual({ kind: 'label-show', payload: { label: LABEL.id, colours: { 'proxy-link': 'teal' } } })
+  expect(w.acts).toContainEqual({ kind: 'label-show', payload: { label: LABEL.id, colors: { 'proxy-link': 'teal' } } })
   const after = JSON.stringify(await pane.drawn())
   // the colors gone from under it, its ● and bar teal; none, with no color, dim
   expect(shown(await pane.drawn())).not.toContain('grass green')
@@ -202,7 +202,7 @@ test("a value's `color` shows the eighteen label colors by name under it around 
   pane = await press($, w, pane, 'lb-color-proxy-link')
   label(w).classes = [{ name: 'proxy-link', color: 16, highlight: true }, { name: 'none', color: 0, highlight: false }]
   pane = await press($, w, pane, 'lb-pick-proxy-link-16')
-  expect(w.acts).toContainEqual({ kind: 'label-show', payload: { label: LABEL.id, colours: { 'proxy-link': 'dark purple' } } })
+  expect(w.acts).toContainEqual({ kind: 'label-show', payload: { label: LABEL.id, colors: { 'proxy-link': 'dark purple' } } })
   expect(JSON.stringify(await pane.drawn())).toMatch(new RegExp(`"color":"${PICKED_HUES[3]}"\\},"children":\\["█+"\\]`))
   await pane.unmount()
 })

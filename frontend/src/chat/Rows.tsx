@@ -28,6 +28,7 @@ import { API_ERROR_KIND, callLineText, callPieces, capacityNote, corpusRelative,
 import { Note, ShotCard, ThreadChip, ThreadsContext } from './Notes'
 import { AgentCard, OrientLanding, openLabel } from './AgentCard'
 import { ApiErrorCard } from './ApiError'
+import { HandedBack } from './HandBack'
 import { DocChip, GroupChip, LabelChip } from './SurfaceChips'
 import { ViewChip } from './ViewChip'
 import { autoModeRefusal } from './permissions'
@@ -198,6 +199,8 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
             return <Note key={r.index} className="chat-stage" text={r.text} />
           case 'shot':
             return <ShotCard key={r.index} ticket={r.ticket} name={r.name} phase={r.phase} note={r.note} />
+          case 'handback':
+            return <HandedBack key={r.index} text={r.text} anchor={anchorOf(r.index)} />
           case 'error':
             return <ErrorRow key={r.index} item={r} retry={retry && retry.index === r.index ? retry : undefined} />
         }
@@ -373,7 +376,7 @@ export function ToolGroupCard({ group, ws, pending }: { group: ToolGroup; ws: st
       </span>
     )),
     ...made.views.map((v) => <ViewChip key={`view:${v}`} ws={ws} slug={made.viewSlugs?.[v]} name={v} />),
-    ...made.labels.map((l) => <LabelChip key={`label:${l}`} ws={ws} name={l} onClick={(e) => (e.stopPropagation(), openLabel(ws, l))} />),
+    ...made.labels.map((l) => <LabelChip key={`label:${l}`} name={l} onClick={(e) => (e.stopPropagation(), openLabel(ws, l))} />),
   ]
   return (
     <ToolCard
@@ -523,7 +526,7 @@ function madeChips(tool: ToolRowT, ws: string, refs: readonly string[] = []) {
       </span>
     )),
     ...made.views.map((v) => <ViewChip key={`view:${v}`} ws={ws} slug={made.viewSlugs?.[v]} name={v} />),
-    ...made.labels.map((l) => <LabelChip key={`label:${l}`} ws={ws} name={l} onClick={(e) => (e.stopPropagation(), openLabel(ws, l))} />),
+    ...made.labels.map((l) => <LabelChip key={`label:${l}`} name={l} onClick={(e) => (e.stopPropagation(), openLabel(ws, l))} />),
   ]
 }
 
@@ -828,7 +831,7 @@ function LabelRunsCard({ runs, ws }: { runs: AgentRowT[]; ws: string }) {
       chips={
         <ChipRun>
           {items.map((it) => (
-            <LabelChip key={`label:${it.name}`} ws={ws} name={it.name} onClick={(e) => (e.stopPropagation(), openLabel(ws, it.name))} />
+            <LabelChip key={`label:${it.name}`} name={it.name} onClick={(e) => (e.stopPropagation(), openLabel(ws, it.name))} />
           ))}
         </ChipRun>
       }

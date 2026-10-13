@@ -60,6 +60,41 @@ def test_the_row_controls_side_panel_and_transcript_are_thimble_s_parts_too():
     ]
 
 
+def test_the_record_card_is_one_of_thimble_s_parts():
+    """A page lays out the kit's record card (viewer_kit.css .thimble-card) and its column or grid, but does not give it
+    corners, an edge or a color of its own, such as a colored side stripe in place of Color by's bar."""
+    css = ("<style>.col .thimble-card { margin: 0 0 6px } .thimble-cards { gap: 8px; background: #f4f4f4 }"
+           " .thimble-cards-grid { --thimble-tile-w: 180px } .thimble-card-title { -webkit-line-clamp: 3 }"
+           " .thimble-card { border-radius: 12px } .thimble-card.hot { border-left: 3px solid #d0750a }"
+           " .thimble-card-key { color: #d0750a }</style>")
+    assert views.own_parts(css) == [
+        "`.thimble-card` sets border-radius",
+        "`.thimble-card.hot` sets border-left",
+        "`.thimble-card-key` sets color",
+    ]
+
+
+def test_the_search_table_and_diff_are_thimble_s_parts_too():
+    """A page sets the search's width and the table's and the diff's place, but does not change how they look."""
+    css = ("<style>#search .thimble-search { width: 320px } .thimble-table-host { flex: 1 } .thimble-diff-host { margin: 8px }"
+           " .thimble-table-row { background: #fafafa } .thimble-diff-ins { color: green } .thimble-search { border-radius: 999px }</style>")
+    assert views.own_parts(css) == [
+        "`.thimble-table-row` sets background",
+        "`.thimble-diff-ins` sets color",
+        "`.thimble-search` sets border-radius",
+    ]
+
+
+def test_the_text_is_thimble_s_part_too():
+    """A page sets the text's width and place, but does not change how it or its links look."""
+    css = ("<style>#body .thimble-text { max-width: 720px; margin: 0 auto } .thimble-text-ref { color: crimson }"
+           " .post .thimble-text { font-family: serif }</style>")
+    assert views.own_parts(css) == [
+        "`.thimble-text-ref` sets color",
+        "`.post .thimble-text` sets font-family",
+    ]
+
+
 def test_the_note_names_them_and_the_worked_examples_get_none():
     note = views.own_parts_note(PAGE)
     assert "`.chip` sets border-radius" in note and "and 2 more" in note and "chip-key" in note

@@ -85,8 +85,10 @@ END_TOKEN = "(shown in the dashboard)"
 TERMINAL_ONLY = "↳"  # opens a line of main's or a fork's that only the terminal shows (prompts/main.md)
 # the token at the end of a text, with the variants the model writes: any case, a trailing period, `*` or `_` emphasis
 END_RE = re.compile(r"[ \t]*[*_]*" + re.escape(END_TOKEN) + r"\.?[*_]*\.?\s*\Z", re.I)
-# Claude Code loading a deferred tool's schema before its first call: nothing the analyst reads, so no row in any chat
-PLUMBING_TOOLS = frozenset({"ToolSearch"})
+# Claude Code's calls that are nothing the analyst reads, so no row in any chat: loading a deferred tool's schema before
+# its first call, and a feedback report the model drafts for Claude Code, which Claude Code's own terminal draws no row
+# for either (live QA 2: main's draft about a hook showed in thimble's chat as `SendFeedback {"type":"bug",…`)
+PLUMBING_TOOLS = frozenset({"ToolSearch", "SendFeedback"})
 HANDBACK_TOOL = "SubagentHandback"  # a foreground subagent's report to its caller: its message is the agent's result
 SUBAGENT_ROLE = "subagent"
 SUBAGENT_TITLE = "subagent"  # when neither the Agent call nor the meta json names one
@@ -246,6 +248,7 @@ class Live:
         self.sends: dict[str, str] = {}  # tool_use id of main's SendMessage to a thread's fork -> the thread
         self.wrote = False  # the turn wrote something to main
         self.turn_calls: set[str] = set()  # the ids of main's tool calls in the turn (R3, _end_turn)
+        self.turn_since: str | None = None  # when the turn opened, which the checks over the cards look from (_end_turn)
         self.turn_text = ""  # main's last text in the turn, the reason R3 quotes
         self.thimble_calls: dict[str, dict] = {}  # tool_use id of main's call for one of thimble's agents -> {name, input}
         # tool_use id of main's SendMessage to a subagent -> (its Sub, the call's input): shown in its chat once the call
@@ -1157,7 +1160,7 @@ def _open_turn(lv: Live) -> None:
     if not lv.turn_open or not lv.fresh:
         lv.turn_open, lv.fresh, lv.wrote, lv.turn_threads, lv.forked = True, True, False, list(lv.handed), set()
         lv.flagged, lv.answered, lv.held_by_check, lv.stop_noted = False, True, False, False
-        lv.turn_calls, lv.turn_text = set(), ""
+        lv.turn_calls, lv.turn_text, lv.turn_since = set(), "", _now()
     agents.set_running(lv.c, agents.MAIN_ID, True)
 
 
@@ -1179,9 +1182,22 @@ def _end_turn(lv: Live) -> None:
         _stopped(lv, SAFETY_STOP_TEXT)
     if lv.wrote:
         agents.mirror(lv.c, "done", by=TERMINAL, session_id=lv.sid)
+    was_open = lv.turn_open
     lv.turn_open = lv.fresh = lv.wrote = False
     agents.set_running(lv.c, agents.MAIN_ID, False)
     _ask_again(lv, again)
+    if was_open:
+        _cards_checked(lv)
+
+
+def _cards_checked(lv: Live) -> None:
+    """The shown checks that cover the cards run on the ones that changed (checks.main_turn_ended)."""
+    from . import checks  # noqa: PLC0415 — checks reads the session's mode lazily
+
+    try:
+        checks.main_turn_ended(lv.c, lv.turn_since or lv.since)
+    except Exception:  # noqa: BLE001 — a check that does not run is no reason to fail the mirror
+        log.exception("%s: the checks over the cards did not start at main's turn end", lv.c)
 
 
 def _no_call(lv: Live) -> list[tuple[str, str, str]]:
@@ -1578,7 +1594,7 @@ def _thimble_result(lv: Live, tool_use_id: str, call: dict, content: Any, is_err
     """R2 (module note): the result of main's call for one of thimble's agents. An error is a start or message that did
     not happen, its kind read from Claude Code's text (_refused_kind); so is a SendMessage that answers `success: false`
     because the agent belongs to another session (earlier-session). A TaskStop that finds the agent ended counts as
-    done."""
+    done. A start that launched names its agent, which takes up the start the call claimed (_settle)."""
     from . import subagents  # noqa: PLC0415
 
     text = response_text(content)
@@ -1604,15 +1620,34 @@ def _thimble_result(lv: Live, tool_use_id: str, call: dict, content: Any, is_err
         kind = _refused_kind(text)
         m = AUTO_MODE_RE.search(text) if kind == subagents.AUTO_MODE else None
         subagents.refuse(lv.c, rid, m.group(1).strip() if m else text.strip(), kind)
+        return
+    m = AGENT_ID_RE.search(text) if name in AGENT_TOOLS else None
+    if m:
+        _settle(lv, m.group(1), tool_use_id)
+
+
+def _settle(lv: Live, agent_id: str, tool_use_id: str) -> None:
+    """The agent an Agent call launched takes up the start the call claimed (subagents.settle): main can start two or
+    more agents of one type in one turn, and their SubagentStart hooks cannot tell them apart."""
+    from . import subagents  # noqa: PLC0415
+
+    try:
+        subagents.settle(lv.c, agent_id, tool_use_id)
+    except Exception:  # noqa: BLE001 — the mirror reads on
+        log.exception("%s: the start of the agent %s that the call %s launched", lv.c, agent_id, tool_use_id)
 
 
 def _sub_start_result(lv: Live, tool_use_id: str, inp: dict, content: Any, is_error: bool) -> None:
     """R2 for a subagent that is no agent of thimble's (a thread's fork, U5): the result of its Agent call for one of
     thimble's roles. An error is a start that did not happen, its kind read from Claude Code's text (_refused_kind),
-    such as thimble's own deny of a call that differs from the one the start tool gave, or the concurrency limit."""
+    such as thimble's own deny of a call that differs from the one the start tool gave, or the concurrency limit. A
+    start that launched names its agent, which takes up the start the call claimed (_settle)."""
     from . import subagents  # noqa: PLC0415
 
     if not is_error:
+        m = AGENT_ID_RE.search(response_text(content))
+        if m:
+            _settle(lv, m.group(1), tool_use_id)
         return
     rid = _request_of(lv, tool_use_id, AGENT_TOOLS[0], inp)
     if rid is None:
@@ -2116,7 +2151,9 @@ def _scan_subs(lv: Live, replay: bool = True, places: dict[str, dict] | None = N
         meta = _read_meta_json(path)
         if not meta:
             lv.pending_paths[key] = lv.pending_paths.get(key, 0) + 1
-            if lv.pending_paths[key] <= META_WAIT_SCANS and _sub_by(lv, agent_id=agent_id) is None:
+            # an agent of thimble's whose own start is not known yet has no chat to go to until a sign names its call
+            if _sub_by(lv, agent_id=agent_id) is None and (lv.pending_paths[key] <= META_WAIT_SCANS
+                                                          or _unsettled(lv, agent_id)):
                 continue
         lv.pending_paths.pop(key, None)
         lv.sub_paths.add(key)
@@ -2140,6 +2177,17 @@ def _scan_subs(lv: Live, replay: bool = True, places: dict[str, dict] | None = N
             _take_place(sub, path, (places or {}).get(key), at_end=read_before)
     for owner in [s for s in lv.subs if s.workflow and s.workflow_dir is not None]:
         _scan_workflow(lv, owner, replay, places)
+
+
+def _unsettled(lv: Live, agent_id: str) -> bool:
+    """Whether `agent_id` is an agent of one of thimble's roles whose own start is not known yet
+    (subagent_files.UNSETTLED)."""
+    from . import subagents  # noqa: PLC0415
+
+    try:
+        return sfiles.unsettled(subagents.read(lv.c), agent_id) is not None
+    except Exception:  # noqa: BLE001 — an unreadable record holds no agent
+        return False
 
 
 def _scan_workflow(lv: Live, owner: Sub, replay: bool, places: dict[str, dict] | None = None) -> None:
@@ -2383,8 +2431,9 @@ async def caller_sub(c: str, tool_use_id: str | None) -> "Sub | None":
 
 async def call_holder(c: str, tool_use_id: str | None, wait_s: float = CALL_WAIT_S) -> "Sub | Live | None":
     """The subagent, or main (its Live), whose transcript holds the call `tool_use_id`, waiting `wait_s` at most for its
-    line; None when no session is attached or no transcript holds it by then. Main's own call is found as soon as
-    Claude Code has written it to main's transcript, which it does before it makes the call."""
+    line; None when no session is attached or no transcript holds it by then. Claude Code writes a call to main's
+    transcript only once the call has returned (2.1.295), so main's own call is told by the caller hook's line instead
+    (subagents.caller)."""
     lv = _live.get(c)
     if lv is None or not tool_use_id:
         return None

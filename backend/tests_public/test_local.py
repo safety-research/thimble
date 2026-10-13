@@ -641,17 +641,17 @@ async def test_act_label_show_turns_a_label_on_or_off_and_colors_its_values_by_n
     on = await local.act(CORPUS, "label-show", {"label": "bash", "on": True})
     assert on["shown"] is True and concepts.find_concept(ws, "bash")["shown"] is True
     yes = next(cl for cl in on["classes"] if cl["name"] == "yes")["color"]
-    got = await local.act(CORPUS, "label-show", {"label": "bash", "colours": {"no": "teal"}})
+    got = await local.act(CORPUS, "label-show", {"label": "bash", "colors": {"no": "teal"}})
     by = {cl["name"]: cl["color"] for cl in got["classes"]}
     assert by["no"] == concepts.COLOUR_NAMES["teal"] and got["shown"] is True
-    # the color another value has: the two swap
+    # the color another value has: the two swap (`colours`, the British spelling, is the same)
     got = await local.act(CORPUS, "label-show", {"label": "bash", "colours": {"no": next(n for n, i in concepts.COLOUR_NAMES.items() if i == yes)}})
     by = {cl["name"]: cl["color"] for cl in got["classes"]}
     assert (by["no"], by["yes"]) == (yes, concepts.COLOUR_NAMES["teal"])
     off = await local.act(CORPUS, "label-show", {"label": "bash", "on": False})
     assert off["shown"] is False
     assert len(concepts.find_concept(ws, "bash")["applications"]) == runs, "it runs nothing"
-    with pytest.raises(local.StateError, match="no label colour is named"):
+    with pytest.raises(local.StateError, match="no label color is named"):
         await local.act(CORPUS, "label-show", {"label": "bash", "colours": {"no": "magenta"}})
     with pytest.raises(local.StateError, match="has no value"):
         await local.act(CORPUS, "label-show", {"label": "bash", "colours": {"maybe": "teal"}})
@@ -659,6 +659,18 @@ async def test_act_label_show_turns_a_label_on_or_off_and_colors_its_values_by_n
         await local.act(CORPUS, "label-show", {"label": "bash"})
     with pytest.raises(local.StateError, match="true or false"):
         await local.act(CORPUS, "label-show", {"label": "bash", "on": "yes"})
+
+
+async def test_show_label_colors_a_value_by_its_american_name_or_its_british_alias(term):
+    from app import concepts
+
+    await call(term, "apply_label", scope="files", name="bash", predicate={"kind": "regex", "text": "Bash"},
+               paths=["agents/*.jsonl"])
+    ws = config.workspace_dir(CORPUS)
+    for arg, name in (("colors", "teal"), ("colours", "cyan")):
+        said = text(await call(term, "show_label", name="bash", **{arg: {"no": name}}))
+        by = {cl["name"]: cl["color"] for cl in concepts.find_concept(ws, "bash")["classes"]}
+        assert by["no"] == concepts.COLOUR_NAMES[name] and f"colors no {name}" in said, said
 
 
 async def test_act_label_filter_keeps_one_value_and_state_label_says_which(term):

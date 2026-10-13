@@ -164,12 +164,36 @@ BRIDGE_JS = Path(__file__).with_name("viewer_bridge.js")
 KIT_CSS = Path(__file__).with_name("viewer_kit.css")  # thimble's chips, buttons, segmented controls, tables and list rows
 COLOUR_JS = Path(__file__).with_name("viewer_colour.js")  # the view kit's Color by control, thimble.colorBy
 RANGE_JS = Path(__file__).with_name("viewer_range.js")  # the view kit's time range selector, thimble.timeRange
-# the view kit's row controls (thimble.filterBy, rows, lanes, key, divider), its side panel (thimble.side) and its
-# transcript (thimble.transcript), loaded between Color by and the range, which takes the bridge's part away; their styles
+# the view kit's row controls (thimble.filterBy, rows, timeline, key, divider), its side panel (thimble.side), its
+# transcript (thimble.transcript), its record viewer (thimble.record) and its charts (thimble.chart), loaded between
+# Color by and the range, which takes the bridge's part away; their styles
 CONTROLS_JS = Path(__file__).with_name("viewer_controls.js")
+# the view kit's formatted text (thimble.text), loaded after the row controls, whose helpers it uses, with the kit's
+# markdown parser (KIT_MARKDOWN_JS) just before it; viewer_parts.css styles it
+TEXT_JS = Path(__file__).with_name("viewer_text.js")
 SIDE_JS = Path(__file__).with_name("viewer_side.js")
 TRANSCRIPT_JS = Path(__file__).with_name("viewer_transcript.js")
+# the view kit's messages (thimble.messages), a conversation between people or agents as a chat app draws it, loaded
+# after the transcript; viewer_parts.css styles it
+MESSAGES_JS = Path(__file__).with_name("viewer_messages.js")
+# the view kit's search, table and diff (thimble.search, thimble.table, thimble.diff), loaded after the transcript and
+# before the record viewer; viewer_kit.css styles them
+SEARCH_JS = Path(__file__).with_name("viewer_search.js")
+TABLE_JS = Path(__file__).with_name("viewer_table.js")
+# the view kit's tree (thimble.tree), a list of groups to navigate, loaded after the table; viewer_parts.css styles it
+TREE_JS = Path(__file__).with_name("viewer_tree.js")
+DIFF_JS = Path(__file__).with_name("viewer_diff.js")
+RECORD_JS = Path(__file__).with_name("viewer_record.js")
+CHART_JS = Path(__file__).with_name("viewer_chart.js")
 PARTS_CSS = Path(__file__).with_name("viewer_parts.css")
+# the canvas's own chart drawing (frontend lib/vizTheme, lib/chartDefaults, lib/vegaDraw) as one script, which vite
+# build writes beside the app (frontend/vite.config.ts kitScript) and thimble.chart draws with, so a view's chart and a
+# card's take one theme from one code; a page without it (an unbuilt checkout) says so where it draws a chart
+KIT_CHART_JS = "kit/chart.js"
+# the markdown parser thimble.text draws with (frontend lib/kitMarkdown, micromark with GitHub's extensions, the parser
+# under the app's react-markdown), which vite build writes beside the app as one script; a page without it (an unbuilt
+# checkout) shows markdown as plain text
+KIT_MARKDOWN_JS = "kit/markdown.js"
 # the order new values take the label palette's places, which the kit's Color by reads as window.__thimbleLabelOrder
 # (the frontend imports the same file; kernel_thimble.LABEL_ORDER is the server's)
 LABEL_ORDER_JSON = Path(__file__).with_name("label_order.json")
@@ -3147,7 +3171,7 @@ def gate_lines(report: dict[str, Any]) -> list[str]:
                          "units shown"
                          + (f", {int(x.get('drawn') or 0)} of the {int(x.get('due') or 0)} the test label marks drawn marked"
                             if s.get("state", "overview") in LABELLED_STATES else "")
-                         + (f", its colour seen on {int(p.get('seen') or 0)} of the {int(p.get('checked') or 0)} in view"
+                         + (f", its color seen on {int(p.get('seen') or 0)} of the {int(p.get('checked') or 0)} in view"
                             if s.get("state", "overview") in LABELLED_STATES and p.get("checked") else "")
                          + (f", {int(x.get('unkept') or 0)} records shown that the filter drops"
                             if s.get("state") == "filtered" else ""))
@@ -3206,12 +3230,24 @@ def _style_text(css: str) -> str:
     return re.sub(r"</(style)", r"<\\/\1", css, flags=re.I)
 
 
+def _kit_script(name: str) -> str:
+    """A script of the built UI the kit draws with (KIT_CHART_JS, the canvas's chart drawing for thimble.chart, or
+    KIT_MARKDOWN_JS, the markdown parser for thimble.text), '' when the UI is not built."""
+    try:
+        return (Path(config.FRONTEND_DIST) / name).read_text("utf-8")
+    except OSError:
+        return ""
+
+
 def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool = False,
                    derived: list[dict[str, str]] | None = None) -> str:
     """The view's page as a frame loads it: the policy that blocks every load but the view's media route, the bridge
     (viewer_bridge.js), the order new values take the label palette (label_order.json, for Color by), the kit's Color by
-    control (viewer_colour.js), its row controls, side panel and transcript (viewer_controls.js, viewer_side.js,
-    viewer_transcript.js) and its time range selector (viewer_range.js),
+    control (viewer_colour.js), its row controls, formatted text, side panel, transcript and messages
+    (viewer_controls.js, viewer_text.js with its markdown parser, KIT_MARKDOWN_JS, viewer_side.js, viewer_transcript.js,
+    viewer_messages.js), its search, table, tree and diff (viewer_search.js, viewer_table.js, viewer_tree.js,
+    viewer_diff.js), its record viewer and charts (viewer_record.js, viewer_chart.js, with the canvas's chart drawing,
+    KIT_CHART_JS) and its time range selector (viewer_range.js),
     thimble's parts (viewer_kit.css, viewer_parts.css), the vendored
     libraries the view names, then view.html, whose
     own styles come after the parts. The browser adds the theme's tokens (ViewerFrame.tsx). `media` is the media
@@ -3238,8 +3274,18 @@ def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool
             f"<script>{_script_text(BRIDGE_JS.read_text('utf-8'))}</script>",
             f"<script>{_script_text(COLOUR_JS.read_text('utf-8'))}</script>",
             f"<script>{_script_text(CONTROLS_JS.read_text('utf-8'))}</script>",
+            *([f"<script>{_script_text(parser)}</script>"] if (parser := _kit_script(KIT_MARKDOWN_JS)) else []),
+            f"<script>{_script_text(TEXT_JS.read_text('utf-8'))}</script>",
             f"<script>{_script_text(SIDE_JS.read_text('utf-8'))}</script>",
             f"<script>{_script_text(TRANSCRIPT_JS.read_text('utf-8'))}</script>",
+            f"<script>{_script_text(MESSAGES_JS.read_text('utf-8'))}</script>",
+            f"<script>{_script_text(SEARCH_JS.read_text('utf-8'))}</script>",
+            f"<script>{_script_text(TABLE_JS.read_text('utf-8'))}</script>",
+            f"<script>{_script_text(TREE_JS.read_text('utf-8'))}</script>",
+            f"<script>{_script_text(DIFF_JS.read_text('utf-8'))}</script>",
+            f"<script>{_script_text(RECORD_JS.read_text('utf-8'))}</script>",
+            *([f"<script>{_script_text(drawing)}</script>"] if (drawing := _kit_script(KIT_CHART_JS)) else []),
+            f"<script>{_script_text(CHART_JS.read_text('utf-8'))}</script>",
             f"<script>{_script_text(RANGE_JS.read_text('utf-8'))}</script>",
             f"<style>{KIT_CSS.read_text('utf-8')}</style>",
             f"<style>{_style_text(PARTS_CSS.read_text('utf-8'))}</style>"]
@@ -3371,9 +3417,8 @@ async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width
 
     async def answer(kind: str, i: int, msg: dict[str, Any]) -> dict[str, Any]:
         if kind == "fetch":
-            kit, data = kit_answer(c, msg.get("query"))
-            if kit:
-                return {"data": data}
+            if isinstance(msg.get("query"), dict) and KIT_QUERY in msg["query"]:  # the kit's own fetch, off the loop
+                return {"data": (await asyncio.to_thread(kit_answer, c, msg["query"]))[1]}
             try:
                 if prepared is not None:
                     data = await _call(c, {**prepared, "labels": _wire(ctxs[i])}, "records", msg.get("query"))
@@ -4004,7 +4049,7 @@ def choice_problems(shots: list[dict[str, Any]]) -> list[str]:
     return [_hint("view-choice-error", count=len(bad), choices=named + more)
             or f"{_plural(len(bad), 'choice')} of the view's controls gave a script error when chosen: {named}{more}. "
                "Every choice the analyst can make must draw the view, None and Off among them: guard what the page "
-               "reads of a choice that can be null (rows.by, colour.by, filter.by) and draw the records in one group, "
+               "reads of a choice that can be null (rows.by, color.by, filter.by) and draw the records in one group, "
                "or uncolored, for it."]
 
 
@@ -4051,7 +4096,8 @@ def label_problems(view: dict[str, Any], files: list[tuple[str, int, int]],
                    shots: list[dict[str, Any]], switch: bool = True) -> tuple[list[str], list[str]]:
     """(problems, notes) of labels in the page, from what each loaded state shows at its end (view_shot.mjs `shown`),
     for a view of files that split into records (lined). It fails when no record or unit is shown anchored; when fewer
-    than one in ANCHORED_SHARE of the records the reader answered are shown anchored and no unit is; when a record or
+    than one in ANCHORED_SHARE of the records the reader answered are shown anchored, or held by the view kit's lists
+    that draw only the rows near their view (view_shot.mjs `held`), and no unit is; when a record or
     unit the test label marks is shown without its mark; and when a picture of the page shows the label's colour on
     fewer of the marked records in view than it checked (view_shot.mjs `painted`), as when a box that hides overflow
     cuts the bar, or for an element with data-anchor-unmarked that draws no colour of its own. A corpus view, not a file
@@ -4075,7 +4121,10 @@ def label_problems(view: dict[str, Any], files: list[tuple[str, int, int]],
         return [_hint("view-no-anchors", slug=view["slug"])], []
     fetched = max([int(s.get("fetched_records") or 0) for s in shots if s.get("state", "overview") in ("overview", "detail")]
                   or [0])
-    if not units and records < max(1, fetched // ANCHORED_SHARE):
+    # a list that draws only the rows near its view, such as the kit's table, anchors each row it draws: the rows it
+    # holds count as shown
+    held = max(int(x.get("held") or 0) for _, x in seen)
+    if not units and max(records, held) < max(1, fetched // ANCHORED_SHARE):
         problems.append(_hint("view-few-anchors", fetched=fetched, records=records))
     for name, x in seen:
         due, drawn = int(x.get("due") or 0), int(x.get("drawn") or 0)
@@ -4104,7 +4153,7 @@ def label_problems(view: dict[str, Any], files: list[tuple[str, int, int]],
 
 
 # the bridge's label calls by the op view_shot.mjs reports
-LABEL_CALLS = {"on": "thimble.setLabel", "colour": "thimble.setLabelColour", "edit": "thimble.editLabel",
+LABEL_CALLS = {"on": "thimble.setLabel", "colour": "thimble.setLabelColor", "edit": "thimble.editLabel",
                "mark": "thimble.mark", "filter": "thimble.setFilter"}
 
 
@@ -4541,13 +4590,14 @@ def purple_note(html: str) -> str:
     return _hint("view-purple", colours=shown)
 
 
-# thimble's parts as a view's styles may touch them: the frame styles .chip, .btn, .seg, .field, the Color by control
-# and the time range selector (viewer_kit.css), Filter by, Rows, the lanes, the key, the divider, the side panel and the
-# transcript (viewer_parts.css), and a view lays them out but does not restyle them or draw chips of its own
+# thimble's parts as a view's styles may touch them: the frame styles .chip, .btn, .seg, .field, the record card, the
+# Color by control, the time range selector, the search, the table and the diff (viewer_kit.css), Filter by, Rows, the
+# lanes, the key, the divider, the side panel, the transcript, the messages, the tree, the record viewer, the charts and
+# the text (viewer_parts.css), and a view lays them out but does not restyle them or draw chips of its own
 _STYLE_RE = re.compile(r"<style\b[^>]*>(.*?)</style\s*>", re.S | re.I)
 _CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.S)
 _KIT_PART_RE = re.compile(r"\.(?:chip|btn|seg|field|thimble-(?:colour|range|axis|def|peek|reset|tip|filter|rows|ctl|key|lanes?|"
-                          r"divider|side|transcript|turn))(?:-[\w-]+)?(?![\w-])")
+                          r"divider|side|transcript|turn|msg|card|search|table|tree|diff|record|chart|text))(?:-[\w-]+)?(?![\w-])")
 _CLASS_RE = re.compile(r"\.(-?[_a-zA-Z][\w-]*)")
 # what a part looks like, which the kit sets: its edge, fill, corners, colours, type and height. Its width, margins,
 # padding, flex and place are the page's layout.
@@ -4651,10 +4701,10 @@ def _chip_like(decls: dict[str, str], radius: float) -> bool:
 
 def own_parts(html: str) -> list[str]:
     """What a view's page (`html`) does in its styles that makes its parts look unlike thimble's: a rule that restyles
-    one of thimble's parts (.chip, .btn, .seg, .field or the Colour by control, or a class the page puts on one of
-    them in the same selector, such as `.fbtn.field`), setting its edge, fill, corners, colours, type or height; and a
-    rule that draws a chip-like element (_chip_like) with corners rounder than var(--radius-chip). Each once, in the
-    page's order, as `selector` and what it sets."""
+    one of thimble's parts (.chip, .btn, .seg, .field, the record card or the Colour by control, or a class the page
+    puts on one of them in the same selector, such as `.fbtn.field`), setting its edge, fill, corners, colours, type or
+    height; and a rule that draws a chip-like element (_chip_like) with corners rounder than var(--radius-chip). Each
+    once, in the page's order, as `selector` and what it sets."""
     css = _CSS_COMMENT_RE.sub("", "\n".join(_STYLE_RE.findall(html or "")))
     rules = [(sel.strip(), _declarations(body)) for group, body in _css_rules(css) for sel in group.split(",")]
     aliases: set[str] = set()
@@ -5306,8 +5356,8 @@ async def card_media_route(c: str, path: str) -> FileResponse:
     return FileResponse(f, media_type=media_type, headers=MEDIA_HEADERS)
 
 
-# A fetch the view kit sends (viewer_colour.js), {"$thimble": <what>, ...}, which thimble answers itself rather than the
-# view's reader: "label", a label's definition for Color by's menu.
+# A fetch the view kit sends, {"$thimble": <what>, ...}, which thimble answers itself rather than the view's reader:
+# "label", a label's definition for Color by's menu (viewer_colour.js); "chart", a chart's spec (viewer_chart.js).
 KIT_QUERY = "$thimble"
 _MEANING_SPLIT = re.compile(r"(?<=[.;?!])\s+|\n+")
 
@@ -5356,6 +5406,37 @@ def label_definition(c: str, concept_id: str) -> dict[str, Any] | None:
                         "meaning": meant.get(cl["name"], "")} for cl in (k.get("classes") or [])]}
 
 
+def chart_answer(c: str, query: dict[str, Any]) -> dict[str, Any]:
+    """The view kit's chart (viewer_chart.js thimble.chart) as a card's would draw it: the Vega-Lite spec of `rows`, a
+    list of objects whose keys come in the kind's order as a DataFrame's columns do, built by the code a card's
+    thimble.chart runs (kernel_thimble.chart_spec), so the two take the same kinds, data and options and draw the same
+    spec. {spec, n} and, when `options` names a label of workspace `c`, `label`, its classes as [[value, colour
+    index]]; {error} with the line a card's chart fails with."""
+    import pandas as pd  # noqa: PLC0415
+
+    from . import kernel_thimble  # noqa: PLC0415
+
+    rows, options = query.get("rows"), query.get("options")
+    options = {} if options is None else options
+    if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
+        return {"error": "thimble.chart takes its data as a list of rows, each an object whose keys come in the kind's "
+                         "order"}
+    if not isinstance(options, dict):
+        return {"error": "thimble.chart takes its options as an object"}
+    labelled = options.get("label") is not None
+    try:
+        ws = config.workspace_dir(c) if labelled else None
+        spec, n = kernel_thimble.chart_spec(query.get("kind"), pd.DataFrame.from_records(rows), options, ws=ws)
+        label = kernel_thimble._find(options["label"], ws)["classes"] if labelled else None
+    except (ValueError, TypeError) as e:
+        return {"error": str(e)}
+    except KeyError as e:
+        return {"error": str(e.args[0]) if e.args else "thimble.chart: no such label"}
+    except HTTPException as e:
+        return {"error": f"thimble.chart: {e.detail}"}
+    return {"spec": spec, "n": n, **({"label": label} if label is not None else {})}
+
+
 def kit_answer(c: str, query: Any) -> tuple[bool, Any]:
     """(True, the answer) for a fetch the view kit sent ({KIT_QUERY: ...}), which never reaches the reader; (False, None)
     for any other query."""
@@ -5363,6 +5444,8 @@ def kit_answer(c: str, query: Any) -> tuple[bool, Any]:
         return False, None
     if query.get(KIT_QUERY) == "label" and isinstance(query.get("id"), str):
         return True, label_definition(c, query["id"])
+    if query.get(KIT_QUERY) == "chart":
+        return True, chart_answer(c, query)
     return True, None
 
 
@@ -5389,7 +5472,7 @@ async def records_route(c: str, slug: str, body: RecordsBody, request: Request,
         return {"data": (await asyncio.to_thread(kit_answer, c, body.query))[1]}
     cid = view_calls.call_id(body.call)
     if view_calls.cancelled_before(c, cid):
-        raise HTTPException(409, {"message": "the call was cancelled", "cancelled": True})
+        raise HTTPException(409, {"message": "the call was canceled", "cancelled": True})
     sink: dict[str, Any] = {}
     work = asyncio.ensure_future(reader_call(c, slug, "records", body.query, version=v, call=cid, sink=sink, raw=True))
     call = view_calls.begin(c, slug, cid, indexes_dir(c))
@@ -5410,7 +5493,7 @@ async def records_route(c: str, slug: str, body: RecordsBody, request: Request,
     except asyncio.CancelledError:
         task = asyncio.current_task()
         if work.cancelled() and not (task is not None and task.cancelling()):
-            raise HTTPException(409, {"message": "the call was cancelled", "cancelled": True}) from None
+            raise HTTPException(409, {"message": "the call was canceled", "cancelled": True}) from None
         work.cancel()
         raise
     finally:

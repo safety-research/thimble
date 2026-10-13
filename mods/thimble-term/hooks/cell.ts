@@ -83,7 +83,7 @@ export const CARD_TYPE = 'application/vnd.thimble.card+json'
 const READS = 'application/vnd.thimble.reads+json'
 
 type Frame = { columns?: string[]; index?: string | null; label?: string; rows?: Cell[][]; total?: number; view?: { columns?: string[]; formats?: Record<string, string> } }
-type Enc = { field?: string; type?: string; aggregate?: string; sort?: unknown }
+type Enc = { field?: string; type?: string; aggregate?: string; sort?: unknown; axis?: { values?: unknown } | null }
 type VegaLite = {
   mark?: string | { type?: string }
   encoding?: Record<string, Enc | undefined>
@@ -186,15 +186,33 @@ function vegaRows(spec: VegaLite, root: VegaLite): Record<string, unknown>[] {
   return []
 }
 
-/** Every dataset a chart holds, the first that has rows. */
+/** The start of the name thimble.chart(..., show=False) gives its own rows (backend kernel_thimble CHART_ROWS_NAME). */
+const CHART_ROWS_NAME = 'thimble-chart-'
+
+/** The rows of thimble.chart's own part of a chart the code layered its marks on, wherever that part stands. */
+function chartRows(spec: VegaLite): Record<string, unknown>[] | null {
+  if (spec.data?.name?.startsWith(CHART_ROWS_NAME) && Array.isArray(spec.data.values)) return spec.data.values
+  for (const sub of [...(spec.layer ?? []), ...(spec.hconcat ?? []), ...(spec.vconcat ?? []), ...(spec.concat ?? [])]) {
+    const got = chartRows(sub)
+    if (got) return got
+  }
+  return null
+}
+
+/** The rows of a chart's table, as the backend reads them (cite._main_part): thimble.chart's own rows (chartRows), else
+ *  a part's own rows, else of its layers' or concatenated charts' rows the most, the first on a tie (the marks a
+ *  chart's code layers on and a panel of text set beside it take a row or a few, the data many), else its inner
+ *  spec's. */
 function anyRows(spec: VegaLite, root: VegaLite = spec): Record<string, unknown>[] {
+  if (spec === root && !spec.data) {
+    const marked = chartRows(spec)
+    if (marked?.length) return marked
+  }
   const own = vegaRows(spec, root)
   if (own.length) return own
-  for (const sub of [spec.spec, ...(spec.layer ?? []), ...(spec.hconcat ?? []), ...(spec.vconcat ?? []), ...(spec.concat ?? [])]) {
-    if (!sub) continue
-    const got = anyRows(sub, root)
-    if (got.length) return got
-  }
+  const parts = [...(spec.layer ?? []), ...(spec.hconcat ?? []), ...(spec.vconcat ?? []), ...(spec.concat ?? []), ...(spec.spec ? [spec.spec] : [])]
+  const most = parts.map(sub => anyRows(sub, root)).reduce((a, b) => (b.length > a.length ? b : a), [])
+  if (most.length) return most
   const sets = Object.values(root.datasets ?? {})
   return sets.find(s => s.length) ?? []
 }
@@ -281,7 +299,10 @@ export function chartCard(cell: ThimbleCell, spec: VegaLite): CardData | null {
   const color = spec.encoding?.color
   if (!x?.field || !y?.field || x.aggregate || y.aggregate) return null
   const rows = vegaRows(spec, spec)
-  if (!rows.length) return null
+  // an axis whose field the chart computes (a ridgeline's places) is in no row: the rows' table draws instead
+  const xf = x.field
+  const yf = y.field
+  if (!rows.some(r => xf in r && yf in r)) return null
   if (mark === 'bar') {
     // the quantitative axis is the value, the other the label
     const horizontal = x.type === 'quantitative' && y.type !== 'quantitative'
@@ -291,16 +312,33 @@ export function chartCard(cell: ThimbleCell, spec: VegaLite): CardData | null {
     if (bars.some(b => !Number.isFinite(b.value))) return null
     return { ...blank(cell, 'bar'), x: lab, y: val, rows: bars }
   }
-  if (mark === 'line' || mark === 'point' || mark === 'area' || mark === 'circle') {
+  // a dots chart's rows are names down its y axis, which no line card draws: its rows' table instead
+  if ((mark === 'line' || mark === 'point' || mark === 'area' || mark === 'circle') && y.type !== 'nominal' && y.type !== 'ordinal') {
     const by = new Map<string, [string | number, number][]>()
     for (const r of rows) {
       const s = color?.field ? String(r[color.field] ?? '') : y.field
       const xv = r[x.field]
       by.set(s, [...(by.get(s) ?? []), [typeof xv === 'number' ? xv : String(xv ?? ''), Number(r[y.field] ?? 0)]])
     }
-    return { ...blank(cell, 'line'), x: x.field, y: y.field, series: [...by].map(([name, points]) => ({ name, points })) }
+    const xTicks = axisValues(x)
+    return { ...blank(cell, 'line'), x: x.field, y: y.field, series: [...by].map(([name, points]) => ({ name, points })), ...(xTicks.length ? { xTicks } : {}) }
   }
   return null
+}
+
+/** The values an axis names itself (Vega-Lite's `axis.values`, which thimble.chart sets at each time of weekly or
+ *  monthly data): numbers and text as written, a DateTime as its wall clock written out (`2026-05-18T00:00:00`), as a
+ *  row's time is. */
+function axisValues(enc: Enc): (string | number)[] {
+  const values = enc.axis?.values
+  if (!Array.isArray(values)) return []
+  const two = (n: unknown) => String(typeof n === 'number' ? n : 0).padStart(2, '0')
+  return values.flatMap(v => {
+    if (typeof v === 'number' || typeof v === 'string') return [v]
+    const d = v as { year?: unknown; month?: unknown; date?: unknown; hours?: unknown; minutes?: unknown; seconds?: unknown } | null
+    if (!d || typeof d.year !== 'number' || [d.month, d.date].some(n => n !== undefined && typeof n !== 'number')) return []
+    return [`${d.year}-${two(d.month ?? 1)}-${two(d.date ?? 1)}T${two(d.hours)}:${two(d.minutes)}:${two(d.seconds)}`]
+  })
 }
 
 function rowsTable(cell: ThimbleCell, rows: Record<string, unknown>[]): CardData | null {
@@ -353,6 +391,31 @@ export function htmlText(html: string): string {
     .join('\n')
 }
 
+/** A plan card's steps as the lines of a note (backend notebook.step_line): `2. [running · 40 m] Run it → runs/`, with
+ * a step's note under it. The time is the one the agent gave or, for a step that ended, the time it took. */
+export function planText(steps: unknown): string {
+  const list = Array.isArray(steps) ? steps.filter((s): s is Record<string, unknown> => Boolean(s) && typeof s === 'object') : []
+  const took = (s: Record<string, unknown>): string => {
+    if (typeof s.time === 'string' && s.time.trim()) return s.time.trim()
+    const a = Date.parse(String(s.started ?? '')), b = Date.parse(String(s.ended ?? ''))
+    if (Number.isNaN(a) || Number.isNaN(b)) return ''
+    const sec = Math.max(0, Math.round((b - a) / 1000))
+    if (sec < 60) return `${sec} s`
+    if (sec < 3600) return `${Math.floor(sec / 60)} m`
+    const h = Math.floor(sec / 3600), m = Math.floor(sec / 60) % 60
+    return m ? `${h} h ${m} m` : `${h} h`
+  }
+  return list
+    .flatMap((s, i) => {
+      const t = took(s)
+      const makes = Array.isArray(s.makes) && s.makes.length ? ` → ${s.makes.map(String).join(', ')}` : ''
+      const head = `${i + 1}. [${String(s.status ?? 'not started')}${t ? ` · ${t}` : ''}] ${String(s.text ?? '')}${makes}`
+      const note = typeof s.note === 'string' ? s.note.split('\n').map(l => l.trim()).filter(Boolean).map(l => `   ${l}`) : []
+      return [head, ...note]
+    })
+    .join('\n')
+}
+
 /** The card a cell draws as, and the error its last run ended in ('' for none). */
 export function cardOfCell(cell: ThimbleCell, label?: ThimbleLabel | null): Drawn {
   const err = first(cell, k => k === ERROR) as { ename?: string; evalue?: string } | undefined
@@ -361,6 +424,7 @@ export function cardOfCell(cell: ThimbleCell, label?: ThimbleLabel | null): Draw
   const payload = cell.payload && typeof cell.payload === 'object' ? cell.payload : null
   if (kind === 'note') return { card: { ...blank(cell, 'note'), note: String(payload?.text ?? cell.text ?? '') }, error }
   if (kind === 'custom') return { card: { ...blank(cell, 'note'), note: htmlText(String(payload?.html ?? '')) || 'a custom card: the browser draws it' }, error }
+  if (kind === 'plan') return { card: { ...blank(cell, 'note'), note: planText(payload?.steps) }, error }
   if (kind === 'example') {
     const refs = Array.isArray(payload?.refs) ? (payload!.refs as unknown[]) : []
     const examples: CardExample[] = refs.map(r =>

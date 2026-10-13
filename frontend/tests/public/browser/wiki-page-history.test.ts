@@ -207,7 +207,7 @@ describe('the Wiki Page History demo view', () => {
         tracked: document.getElementById('blocks')!.classList.contains('thimble-colour-scrolled'),
         // a page's row: the kit's mix of its revisions' colors, no color of its own
         rowMix: !!document.querySelector('#vl .row .thimble-mix:not([hidden])'),
-        rowColoured: !!document.querySelector('#vl .row[data-colour], #vl .row [data-colour]'),
+        rowColoured: !!document.querySelector('#vl .row[data-color], #vl .row [data-color], #vl .row[data-colour], #vl .row [data-colour]'),
         // each strip by the list it stands beside, and whether it is the kit's plain track
         strips: [...document.querySelectorAll<HTMLElement>('.thimble-colour-strip')].map((el) => {
           const r = el.getBoundingClientRect()
@@ -264,7 +264,7 @@ describe('the Wiki Page History demo view', () => {
     await frame.waitForFunction(() => document.querySelector('.thimble-colour-by:not(.thimble-filter-by) b')?.textContent === 'Kind of save')
     await page.waitForTimeout(200)
     assert.equal(await page.evaluate(() => (window as any).__fetches.filter((x: string) => x === 'page').length), pages, 'a Color by change read the page again')
-    assert.ok(await frame.evaluate(() => document.querySelector('#blocks .blk.rev')!.getAttribute('data-colour') === 'New page'))
+    assert.ok(await frame.evaluate(() => document.querySelector('#blocks .blk.rev')!.getAttribute('data-color') === 'New page'))
     await page.close()
   })
 
@@ -280,7 +280,7 @@ describe('the Wiki Page History demo view', () => {
         dseRows: [...document.querySelectorAll('#vl .row .meta')].filter((m) => m.textContent!.startsWith('dse ·')).length,
         chart: fills.filter((f) => f === dse).length,
         gray: fills.filter((f) => f === 'rgb(161, 157, 148)').length,
-        revColour: rev.getAttribute('data-colour'),
+        revColour: rev.getAttribute('data-color'),
         revBar: rev.hasAttribute('data-thimble-bar'),
         revShown: getComputedStyle(rev).display !== 'none' && getComputedStyle(rev).opacity === '1',
         pressed: sw.getAttribute('aria-pressed'),

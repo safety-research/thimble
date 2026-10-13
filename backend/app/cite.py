@@ -20,10 +20,11 @@ import json
 import re
 from dataclasses import dataclass, field
 from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Decimal, InvalidOperation
-from typing import Any, Iterator
+from typing import Any, Iterable, Iterator
 from urllib.parse import unquote
 
 from . import frames
+from .kernel_thimble import CHART_ROWS_NAME
 
 # A number token: optional sign, digits with optional thousands commas, optional decimals, optional trailing %. Not
 # preceded by a word char or ref punctuation (digits inside cell:ab12, L44, out3), and not followed by a word char, "%"
@@ -532,31 +533,78 @@ def chart_spec(bundle: Any) -> dict | None:
     return None
 
 
-def _inline_rows(spec: dict, datasets: dict | None = None) -> list | None:
-    """The rows a spec draws when they are inline: its `data.values`, or the `datasets` entry its `data.name` names
-    (Altair's form). A layered, concatenated or faceted spec with no data of its own reads its first part's; a Vega
-    spec's `data` list gives its first entry with values; a spec whose only inline data is one dataset reads that.
-    None when the rows are not in the spec (a URL, a generator, no data at all)."""
+def _own_rows(part: dict, datasets: dict) -> list | None:
+    """The rows a part of a chart carries itself when they are inline: its `data.values`, or the `datasets` entry its
+    `data.name` names (Altair's form); None when it has no data of its own or its data is not inline (a URL, a
+    generator)."""
+    data = part.get("data")
+    if not isinstance(data, dict):
+        return None
+    if isinstance(data.get("values"), list):
+        return data["values"]
+    rows = datasets.get(data.get("name")) if isinstance(data.get("name"), str) else None
+    return rows if isinstance(rows, list) else None
+
+
+def _subparts(spec: dict) -> list[dict]:
+    """A chart's parts one level down: its layers, its concatenated charts and a facet's or repeat's inner spec."""
+    parts = [p for key in ("layer", "hconcat", "vconcat", "concat")
+             for p in (spec.get(key) if isinstance(spec.get(key), list) else [])]
+    return [p for p in [*parts, spec.get("spec")] if isinstance(p, dict)]
+
+
+def _datasets(spec: dict, datasets: dict | None) -> dict:
+    """The datasets a part of a chart names its rows from: those of the parts around it and its own."""
     own = spec.get("datasets")
-    datasets = {**(datasets or {}), **(own if isinstance(own, dict) else {})}
+    return {**(datasets or {}), **(own if isinstance(own, dict) else {})}
+
+
+def _main_part(spec: dict, datasets: dict | None = None) -> tuple[dict, list] | None:
+    """(part, rows) of the part of a chart whose rows are its table (chart_table): a Vega spec's first `data` entry with
+    values; a part's own rows; in a spec with no data of its own, thimble.chart's own part wherever it stands
+    (_chart_part), so the code's own marks may come before it; else of its layers' or concatenated charts' main rows the
+    most, the first of them on a tie, since the marks a chart's code layers on (a shaded span, a rule, a note) and a
+    panel of text set beside the chart (a header) take a row or a few and the data many; else its inner spec's. A spec
+    with no such part whose only inline data is one dataset gives that. None when no rows are in the spec (a URL, a
+    generator, no data at all)."""
+    datasets = _datasets(spec, datasets)
     data = spec.get("data")
     if isinstance(data, list):
-        return next((d["values"] for d in data if isinstance(d, dict) and isinstance(d.get("values"), list)), None)
-    if isinstance(data, dict):
-        if isinstance(data.get("values"), list):
-            return data["values"]
-        rows = datasets.get(data.get("name")) if isinstance(data.get("name"), str) else None
-        return rows if isinstance(rows, list) else None
+        rows = next((d["values"] for d in data if isinstance(d, dict) and isinstance(d.get("values"), list)), None)
+        return None if rows is None else (spec, rows)
+    if data is not None:
+        rows = _own_rows(spec, datasets)
+        return None if rows is None else (spec, rows)
+    if (part := _chart_part(spec)) is not None:
+        return part, part["data"]["values"]
+    found = [m for p in _subparts(spec) if (m := _main_part(p, datasets)) is not None]
+    if found:
+        return max(found, key=lambda m: len(m[1]))
+    if len(datasets) == 1 and isinstance(rows := next(iter(datasets.values())), list):
+        return spec, rows
+    return None
+
+
+def _row_parts(spec: dict, datasets: dict | None = None) -> list[tuple[dict, list]]:
+    """(part, rows) for every part of a chart that carries inline rows of its own (_own_rows), in the order the spec
+    writes them, at any depth."""
+    datasets = _datasets(spec, datasets)
+    rows = _own_rows(spec, datasets)
+    return ([(spec, rows)] if rows is not None else []) + [r for p in _subparts(spec) for r in _row_parts(p, datasets)]
+
+
+def _chart_part(spec: dict) -> dict | None:
+    """The part of a spec that holds thimble.chart's own rows inline, named CHART_ROWS_NAME… (kernel_thimble _altair):
+    the spec itself or a layer or concatenated part at any depth; None when no part does."""
+    data = spec.get("data")
+    if isinstance(data, dict) and str(data.get("name") or "").startswith(CHART_ROWS_NAME) \
+            and isinstance(data.get("values"), list):
+        return spec
     for key in ("layer", "hconcat", "vconcat", "concat"):
         for part in spec.get(key) if isinstance(spec.get(key), list) else []:
-            rows = _inline_rows(part, datasets) if isinstance(part, dict) else None
-            if rows is not None:
-                return rows
-    if isinstance(spec.get("spec"), dict):
-        return _inline_rows(spec["spec"], datasets)
-    if len(datasets) == 1:
-        rows = next(iter(datasets.values()))
-        return rows if isinstance(rows, list) else None
+            found = _chart_part(part) if isinstance(part, dict) else None
+            if found is not None:
+                return found
     return None
 
 
@@ -578,23 +626,12 @@ def _value_text(v: Any) -> str:
 
 
 def _encoding_def(spec: dict, channel: str) -> dict | None:
-    """The field definition of a chart's `channel` (x or y), in its own encoding or in its first layer's or inner
-    spec's."""
+    """The field definition of a chart's `channel` (x or y), in its own encoding or in that of its first layer or inner
+    spec that draws its rows (one with data of its own draws other rows)."""
     enc = spec.get("encoding")
     if isinstance(enc, dict) and isinstance(enc.get(channel), dict) and isinstance(enc[channel].get("field"), str):
         return enc[channel]
-    for key in ("layer", "hconcat", "vconcat", "concat"):
-        for part in spec.get(key) if isinstance(spec.get(key), list) else []:
-            d = _encoding_def(part, channel) if isinstance(part, dict) else None
-            if d:
-                return d
-    return _encoding_def(spec["spec"], channel) if isinstance(spec.get("spec"), dict) else None
-
-
-def _encoding_field(spec: dict, channel: str) -> str | None:
-    """The field a chart's `channel` (x or y) encodes (_encoding_def)."""
-    d = _encoding_def(spec, channel)
-    return d["field"] if d else None
+    return next((d for p in _subparts(spec) if "data" not in p and (d := _encoding_def(p, channel))), None)
 
 
 def _label_text(v: Any) -> str:
@@ -606,12 +643,31 @@ def _label_text(v: Any) -> str:
 
 def chart_table(bundle: Any) -> ChartTable | None:
     """The table of a chart bundle's inline rows (ChartTable), the first CHART_ROWS_MAX of them; None when the bundle is no
-    chart or draws no inline rows. The row label is the first column whose values are all distinct, non-empty text, else
-    the x (then y) axis field when its values are distinct and not a numeric y measure, else the row's position from 0."""
+    chart or draws no inline rows. The rows and axes are those of its main part (_main_part): thimble.chart's own
+    wherever it stands among a chart's layers or panels, else the layer or panel with the most rows. The row label is
+    the first column whose values are all distinct, non-empty text, else the x (then y) axis field when its values are
+    distinct and not a numeric y measure, else the row's position from 0."""
     spec = chart_spec(bundle)
-    raw = _inline_rows(spec) if spec is not None else None
-    if not isinstance(raw, list):
-        return None
+    main = _main_part(spec) if spec is not None else None
+    return _rows_table(*main) if main is not None else None
+
+
+def chart_tables(bundle: Any) -> Iterator[ChartTable]:
+    """The tables of a chart bundle, each read only when the one before it is done with: its own (chart_table) first,
+    then that of each other part with inline rows of its own, in the order the spec writes them, so a ref into a layer's
+    rows (a shaded span's dates, a note's words) still finds its value though the chart's table is another part's.
+    Nothing for a bundle that is no chart or draws no inline rows."""
+    spec = chart_spec(bundle)
+    main = _main_part(spec) if spec is not None else None
+    if main is None:
+        return
+    for part, rows in [main, *((p, r) for p, r in _row_parts(spec) if p is not main[0])]:
+        if (table := _rows_table(part, rows)) is not None:
+            yield table
+
+
+def _rows_table(part: dict, raw: list) -> ChartTable | None:
+    """The ChartTable of a part of a chart and its rows (chart_table); None when no row is an object."""
     rows = [r for r in raw[:CHART_ROWS_MAX] if isinstance(r, dict)]
     if not rows:
         return None
@@ -623,7 +679,7 @@ def chart_table(bundle: Any) -> ChartTable | None:
     by_axis = False
     if label is None:
         for channel in ("x", "y"):
-            d = _encoding_def(spec, channel) if spec is not None else None
+            d = _encoding_def(part, channel)
             if d is None or (channel == "y" and d.get("type") == "quantitative"):
                 continue
             f = d["field"]
@@ -708,8 +764,8 @@ def data_totals(outputs: list[dict] | None) -> list[str]:
             for j, c in enumerate(frame["columns"]):
                 cols[c] = [r[j] if j < len(r) else None for r in frame["rows"]]
         elif (spec := chart_spec(b)) is not None:
-            raw = _inline_rows(spec)
-            rows = [r for r in raw if isinstance(r, dict)] if isinstance(raw, list) else []
+            main = _main_part(spec)
+            rows = [r for r in main[1] if isinstance(r, dict)] if main is not None else []
             if not rows:
                 continue
             out.append(str(len(rows)))
@@ -917,7 +973,8 @@ def normalise_markup(text: str) -> str:
 
 def find_td(outputs: list[dict] | None, col: str, row: str) -> tuple[str, str] | None:
     """(value, table_html) of the <td> at column `col` / row label `row`, searching the cell's tables in order, a chart's
-    inline rows among them; None when no table has it. The labels may be given raw or encoded (encode_label)."""
+    inline rows among them (its table, then each other part's rows); None when no table has it. The labels may be given
+    raw or encoded (encode_label)."""
     want = {(col, row), (decode_label(col), decode_label(row))}
     for b in outputs or []:
         if isinstance(b, dict) and frames.FRAME_MIME in b:
@@ -934,27 +991,29 @@ def find_td(outputs: list[dict] | None, col: str, row: str) -> tuple[str, str] |
                 name = next(r for r in frames.row_labels(f) if (head, r) in want)
                 return name, frames.frame_html(b, around=name)
             continue
-        html = table_html(b)
-        if not html:
-            continue
-        cells = table_cells(html)
-        for c, r, v in cells:
-            if (c, r) in want:
-                return v, html
-        name = _row_name(html, want)
-        if name is not None:
-            return name, html
-        # a chart whose rows are labelled by its axis still answers a ref that names a row by its position
-        table = chart_table(b) if chart_spec(b) is not None else None
-        pos = decode_label(row)
-        if table is not None and table.by_axis and pos.isdigit() and int(pos) < len(table.labels):
-            want_pos = {(col, table.labels[int(pos)]), (decode_label(col), table.labels[int(pos)])}
+        # a chart's table, then the rows of each of its other parts (chart_tables), else the bundle's table
+        tables: Iterable[ChartTable | None] = chart_tables(b) if chart_spec(b) is not None else [None]
+        for table in tables:
+            html = table.html() if table is not None else table_html(b)
+            if not html:
+                continue
+            cells = table_cells(html)
             for c, r, v in cells:
-                if (c, r) in want_pos:
+                if (c, r) in want:
                     return v, html
-        hit = _by_key_column(cells, col, row)
-        if hit is not None:
-            return hit, html
+            name = _row_name(html, want)
+            if name is not None:
+                return name, html
+            # a chart whose rows are labelled by its axis still answers a ref that names a row by its position
+            pos = decode_label(row)
+            if table is not None and table.by_axis and pos.isdigit() and int(pos) < len(table.labels):
+                want_pos = {(col, table.labels[int(pos)]), (decode_label(col), table.labels[int(pos)])}
+                for c, r, v in cells:
+                    if (c, r) in want_pos:
+                        return v, html
+            hit = _by_key_column(cells, col, row)
+            if hit is not None:
+                return hit, html
     return None
 
 

@@ -36,7 +36,7 @@ export function ValuePalette({ value, onPick, onReset, grey }: Props) {
       <div ref={grid} className="colorby-palette-grid">
         {colors.map((n) => {
           const now = value.color === colourVar(n)
-          return <button key={n} type="button" className={'colorby-pick' + (now ? ' on' : '')} style={{ '--c': colourVar(n) } as CSSProperties} aria-label={n ? `Color ${n}` : 'Grey'} aria-pressed={now} onClick={() => onPick(n)} />
+          return <button key={n} type="button" className={'colorby-pick' + (now ? ' on' : '')} style={{ '--c': colourVar(n) } as CSSProperties} aria-label={n ? `Color ${n}` : 'Gray'} aria-pressed={now} onClick={() => onPick(n)} />
         })}
       </div>
       {onReset && (

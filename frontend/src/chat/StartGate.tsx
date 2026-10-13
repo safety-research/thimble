@@ -32,7 +32,7 @@ export const PASSES: { id: OrientPass; label: string }[] = [
 ]
 
 /** The note main keeps once the gate is skipped. */
-export const SKIPPED_NOTE = 'Orientation skipped. You can ask Thimble to orient itself later.'
+export const SKIPPED_NOTE = 'Orientation skipped. You can ask thimble to orient itself later.'
 
 export type Passes = Record<OrientPass, boolean>
 /** The switches as the gate opens: every output on, the critique off (backend orientation.DEFAULT_CRITIQUE). */

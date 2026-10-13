@@ -1787,12 +1787,13 @@ def trial_groups(sources: list[dict], unit: str, limit: int) -> tuple[list[dict]
 
 
 def cell_text(cell: dict) -> str:
-    """What a card says, as text: its question, code, takeaway, note text and output text."""
+    """What a card says, as text: its question, code, takeaway, note text, a plan's steps and output text."""
     from . import notebook
 
     payload = cell.get("payload") if isinstance(cell.get("payload"), dict) else {}
     parts = [str(cell.get("title") or ""), str(cell.get("code") or ""), str(cell.get("takeaway") or ""),
-             str(payload.get("text") or cell.get("text") or ""), notebook.outputs_text(cell.get("outputs") or [])]
+             str(payload.get("text") or cell.get("text") or ""), "\n".join(notebook.plan_lines(cell)),
+             notebook.outputs_text(cell.get("outputs") or [])]
     return "\n\n".join(p for p in parts if p.strip())
 
 
@@ -2296,7 +2297,7 @@ def read_cut(refs: list[str], tokens: list[int], short: int, total: int | None, 
 
 
 def _cancelled_message(n: int, unit: str) -> str:
-    return f"cancelled by the analyst after {n:,} {unit}{'' if n == 1 else 's'}; the rows written so far are kept"
+    return f"canceled by the analyst after {n:,} {unit}{'' if n == 1 else 's'}; the rows written so far are kept"
 
 
 async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path, cancel: threading.Event,
@@ -4264,7 +4265,7 @@ def show_concept(c: str, id_or_name: str, on: bool | None, values: list[str] | N
                                  f"{', '.join(concept['labels'])}")
     nameless = [n for n in painted.values() if n not in COLOUR_NAMES]
     if nameless:
-        raise HTTPException(400, f"no label colour is named {', '.join(map(repr, nameless))}; the colours are {', '.join(COLOUR_NAMES)}")
+        raise HTTPException(400, f"no label color is named {', '.join(map(repr, nameless))}; the colors are {', '.join(COLOUR_NAMES)}")
     if on is not None:
         concept["shown"] = bool(on)
     if on and wanted:
@@ -5075,12 +5076,29 @@ def presence_route(c: str) -> list[dict]:
     return [{"concept_id": k["id"], "paths": _presence(ws, k["id"])} for k in list_concepts(ws) if k["unit"] in FILE_UNITS]
 
 
+def turn_spans(p: Path, rel: str) -> dict[int, int] | None:
+    """{first line: last line} of each turn of a whole-file JSON transcript (transcripts.turn_extents), by the line a
+    label's row of the turn stands on; None for a file of another kind."""
+    from . import transcripts  # noqa: PLC0415
+
+    hint = transcripts.sniff(p, rel)
+    if not hint or hint["format"] != "json":
+        return None
+    try:
+        turns = transcripts.parse_turns(p, rel)["turns"]
+    except HTTPException:
+        return None
+    return {first: last for first, last in transcripts.turn_extents(turns) if last > first}
+
+
 @router.get("/ws/{c}/labels/ruler")
-def ruler_route(c: str, path: str, bins: int = RULER_BINS) -> dict:
+def ruler_route(c: str, path: str, bins: int = RULER_BINS, turns: bool = False) -> dict:
     """{path, total, bins, labels: [{concept_id, bins: {value: [bin, ...]}, counts: {value: [n, ...]}}]}: where on one
     file each label's values fall, its `total` lines cut into `bins`, for the reader's overview ruler and tracks: the bins
     that hold a value and, in `counts` in the same order, how many records of that value each holds (the overview draws
-    each part of the file in the value most of its records have). Labels without rows on the file are left out."""
+    each part of the file in the value most of its records have). Labels without rows on the file are left out. With
+    `turns` (the Transcript mode), a whole-file JSON transcript's turn counts over every line it covers (turn_spans),
+    so that the strip draws it as a band as tall as the turn."""
     ws = _ws(c)
     bins = max(1, min(int(bins), 2_000))
     try:
@@ -5092,12 +5110,13 @@ def ruler_route(c: str, path: str, bins: int = RULER_BINS) -> dict:
         total = corpus.line_count(p)
     except (ValueError, OSError) as e:
         raise HTTPException(404, str(e)) from e
+    spans = turn_spans(p, path) if turns else None
     out = []
     for k in list_concepts(ws):
         if k["unit"] != "record":
             continue
         st, _building_now = _store(ws, k["id"])
-        got = st.line_counts(path, total, bins) if st is not None else {}
+        got = st.line_counts(path, total, bins, spans) if st is not None else {}
         if got:
             at = {v: sorted(per) for v, per in got.items()}
             out.append({"concept_id": k["id"], "bins": at, "counts": {v: [got[v][b] for b in bs] for v, bs in at.items()}})

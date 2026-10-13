@@ -75,3 +75,17 @@ def test_a_files_records_per_bin_count_each_value_with_the_covers_records_that_h
     assert st.line_counts("turns.jsonl", 20, 2) == {"shell": {0: 8, 1: 7}, "gui": {0: 2, 1: 3}}
     assert st.line_counts("other.jsonl", 40, 4) == {"quiet": {0: 9, 1: 10, 2: 10, 3: 10}, "loud": {0: 1}}
     assert st.line_bins("other.jsonl", 40, 4) == {"quiet": [0, 1, 2, 3], "loud": [0]}
+
+
+def test_a_json_document_s_record_counts_over_the_lines_its_turn_covers_when_asked(tmp_path):
+    """line_counts with `spans` (the ruler for the Transcript mode of a whole-file JSON transcript): a row on a turn's
+    first line counts in every bin up to the turn's last line, so the strip draws the turn as a band; without them it
+    counts on its line alone, as the Raw mode's ruler draws it."""
+    rows = [{"ref": "run/doc.json#/steps/0", "line": 3, "label": "yes", "source": "code"},
+            {"ref": "run/doc.json#/steps/1", "line": 8, "label": "no", "source": "code"}]
+    jsonl = tmp_path / "k.jsonl"
+    jsonl.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    st = labels_store.Store(jsonl)
+    st.rebuild()
+    assert st.line_counts("run/doc.json", 20, 20) == {"yes": {2: 1}, "no": {7: 1}}
+    assert st.line_counts("run/doc.json", 20, 20, {3: 7, 8: 12}) == {"yes": {b: 1 for b in range(2, 7)}, "no": {b: 1 for b in range(7, 12)}}

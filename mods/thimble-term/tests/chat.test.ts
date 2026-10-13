@@ -563,6 +563,75 @@ test("main's `↳ The writer …` line is said once: a later row about the same 
   expect(await draw('r3', '↳ The writer finished the slides; thimble shows them.')).toContain('The writer finished the slides')
 })
 
+test("main's `↳` line for one of thimble's agents is said once a run: not again for the run's task notification after its hand-back, after a resume too", async ($, on) => {
+  // live QA on 0.7.0 (10-10): `↳ The view builder finished` once for the builder's hand-back and again for Claude
+  // Code's task notification of the same run, which the browser's chat hides
+  const w = world(on)
+  await start($, w)
+  const prompt = (uuid: string, kind: string, text: string, meta = false) =>
+    $.session.append({ door: 'prompt', origin: { kind }, uuid, message: { type: 'user', role: 'user', content: text, ...(meta ? { isMeta: true } : {}) } } as never).catch(() => undefined)
+  // as Claude Code 2.1.295 writes them: the hand-back a meta row, the notification not
+  const handBack = (agent: string) => prompt(`hb-${agent}-${Math.random()}`, 'peer', `Another Claude session sent a message:\n<agent-message from="${agent}">\n[Subagent hand-back] The text below is the final report of a subagent this session delegated to. The report follows:\n  Done.\n</agent-message>`, true)
+  const notice = (agent: string) => prompt(`tn-${agent}-${Math.random()}`, 'task-notification', `<task-notification>\n<task-id>${agent}</task-id>\n<status>completed</status>\n<summary>Agent "view: Swarm Board" finished</summary>\n</task-notification>`)
+  const draw = async (row: string, text: string) => {
+    const ui = (await $.ui.mount(MESSAGE(row, text))) as unknown as M
+    const got = shown(await ui.drawn())
+    await ui.unmount()
+    return got
+  }
+  const built = '↳ The view builder finished; thimble shows Swarm Board.'
+  await handBack('a7c0ffee')
+  // thimble's own note in between, a meta row, answers nothing and keeps the report
+  await prompt('note1', 'plugin', "thimble: the analyst started thimble's view-reviewer for swarm-board as your subagent b0bacafe.", true)
+  await append($, 'h1', [{ type: 'text', text: built }])
+  await notice('a7c0ffee')
+  await append($, 'h2', [{ type: 'text', text: built }])
+  expect(await draw('h1', built)).toContain('The view builder finished')
+  expect(await draw('h2', built)).not.toContain('The view builder finished')
+  // kept with the row, so a resumed session leaves it out too
+  expect(parseKept(w.files.get(`${WS}/${KEPT_FILE}`) ?? '').rows.h2?.repeat).toEqual([built])
+  // the live check's next turn: the builder's notification and the reviewer's hand-back answered in one row, a line
+  // each in their order; only the builder's is left out
+  await handBack('c0ffee11')
+  await append($, 'h3', [{ type: 'text', text: '↳ The Page History view is built; thimble shows it.' }])
+  await notice('c0ffee11')
+  await handBack('b0bacafe')
+  const both = "↳ The Page History build has finished; I covered its result above.\n↳ The view reviewer finished and made one fix; thimble shows the revised view."
+  await append($, 'h4', [{ type: 'text', text: both }])
+  const drawn = await draw('h4', both)
+  expect(drawn).not.toContain('I covered its result above')
+  expect(drawn).toContain('The view reviewer finished and made one fix')
+  // the agent's next run is said again, and so is a second report whose first main answered without a line
+  await handBack('a7c0ffee')
+  await append($, 'h5', [{ type: 'text', text: '(shown in the dashboard)' }])
+  await notice('a7c0ffee')
+  await append($, 'h6', [{ type: 'text', text: built }])
+  expect(await draw('h6', built)).toContain('The view builder finished')
+  // where a row's lines do not match the reports one to one, none is hidden
+  await handBack('d00dfeed')
+  await append($, 'h7', [{ type: 'text', text: '↳ The writer finished; thimble shows the report.' }])
+  await notice('d00dfeed')
+  await handBack('e1e1e1e1')
+  await append($, 'h8', [{ type: 'text', text: '↳ The writer and the check both finished; thimble shows them.' }])
+  expect(await draw('h8', '↳ The writer and the check both finished; thimble shows them.')).toContain('both finished')
+  // the live check on 0.7.0: a notification that came right after main answered the run's hand-back started no turn,
+  // and main said its line again atop its reply to the analyst's next prompt; only that line is left out
+  await handBack('f00df00d')
+  const checked = '↳ The Numbers check finished and left six comments on the report.'
+  await append($, 'h9', [{ type: 'text', text: checked }])
+  await notice('f00df00d')
+  await prompt('p10', 'human', 'How many PRs did the managed runs merge in total?')
+  const reply = '↳ The Numbers check has finished. Thimble shows its six comments on the report.\n\nThe two managed runs merged 6 PRs in total.'
+  await append($, 'h10', [{ type: 'text', text: reply }])
+  expect(await draw('h9', checked)).toContain('The Numbers check finished')
+  const answered = await draw('h10', reply)
+  expect(answered).not.toContain('has finished')
+  expect(answered).toContain('merged 6 PRs in total')
+  // the turn's later rows answer something else, such as a fork that returned
+  await append($, 'h11', [{ type: 'text', text: '↳ thread label-fields: answered what each field means' }])
+  expect(await draw('h11', '↳ thread label-fields: answered what each field means')).toContain('answered what each field means')
+})
+
 test("a passage whose citation a side thread was asked about keeps a blue ↳ beside it, which opens that thread", async ($, on) => {
   const w = world(on)
   // the live check's thread (New 5): asked about the citation, its anchor the cited place, its anchor text the passage

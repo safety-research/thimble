@@ -177,7 +177,7 @@ export function madeSections(ws: string, made: Made, opts: { report?: string | n
       key: 'labels',
       label: 'Labels',
       onOpen: () => showTab('files'),
-      chips: made.labels.map((l) => <LabelChip key={l} ws={ws} name={l} onClick={() => openLabel(ws, l)} />),
+      chips: made.labels.map((l) => <LabelChip key={l} name={l} onClick={() => openLabel(ws, l)} />),
     })
   }
   const writer = opts.writer ?? null
@@ -610,7 +610,7 @@ export function OrientLanding({ ws, chat }: { ws: string; chat: string }) {
         {status === 'failed' && <ReportProblemButton description={failureText('The orientation failed.', log.meta?.result)} focus={[chat]} className="chat-landing-report" />}
         {list && (
           <>
-            {' Thimble has '}
+            {' thimble has '}
             <ReviewCounts views={made.views.length} cells={cards} labels={made.labels.length} report={!!report} />
             {' for you to review.'}
           </>

@@ -2,10 +2,11 @@
 // Color by in Files' Transcript mode (src/files/colorChoice.ts): a key's values take the palette by frequency, the rest
 // one Other, the records with none their own chip; a label's chips are its highlighted values with their counts and the
 // meanings its definition gives, then Not marked; the default choice is the file's first key with few values, else Off;
-// a record's value is read from a JSON line the server pages as text; the choices and the values off are kept per file,
-// a file kept with one choice before Color by took several opening on it; the choices that no longer hold fall back to
-// the key chosen last, else the default; a key's lane paints its commonest value per bin. A key whose values are nearly
-// unique per record (an id, a page) is not offered.
+// a record's value is read from a JSON line the server pages as text, or from the fields the server gives its turn
+// (meta.fields); the choices and the values off are kept per file, a file kept with one choice before Color by took
+// several opening on it; the choices that no longer hold fall back to the key chosen last, else the default; a key's
+// lane paints its commonest value per bin. A key whose values are nearly unique per record (an id, a page) is not
+// offered.
 // The tracks' geometry is tracks.test.ts.
 import { afterEach, describe, expect, test } from 'vitest'
 import { chipOfKeyValue, choiceId, colorKeys, defaultChoice, definitionLead, keptPicks, keyChips, keyPaint, keyValue, labelChips, nearlyUnique, NONE, OTHER, parseChoice, pickedChips, picksOf, readColor, togglePick, valueMeaning, withPicks, writeColor, type ColorChoice } from '../../src/files/colorChoice'
@@ -124,7 +125,7 @@ describe('the choice', () => {
   })
 })
 
-test("a record's value is read from its object or from a JSON line's text, and falls under its chip", () => {
+test("a record's value is read from its object, from a JSON line's text or from its turn's fields, and falls under its chip", () => {
   const rec = (record: unknown, line = 1): SourceRecord => ({
     line,
     record,
@@ -136,6 +137,12 @@ test("a record's value is read from its object or from a JSON line's text, and f
   expect(keyValue(rec({ text: '{"type": "v13", "n": 2}' }), 'type')).toBe('v13')
   expect(keyValue(rec({ text: '{"n": 2}' }), 'n')).toBe('2')
   expect(keyValue(rec({ text: 'plain words' }), 'type')).toBeNull()
+  // a key the record does not keep as its own is read from the fields the server gives its turn; its own key comes first
+  const turn = (record: unknown, fields: Record<string, unknown>): SourceRecord => ({ line: 1, record, blocks: [], meta: { fields } })
+  expect(keyValue(turn({ type: 'assistant' }, { 'message.model': 'model-a', tool: 'Bash' }), 'message.model')).toBe('model-a')
+  expect(keyValue(turn({}, { source: 'agent', llm_call_count: 1 }), 'llm_call_count')).toBe('1')
+  expect(keyValue(turn({ type: 'user' }, { type: 'other' }), 'type')).toBe('user')
+  expect(keyValue(turn({ type: 'user' }, {}), 'tool')).toBeNull()
   expect(chipOfKeyValue(k, 'v3')).toBe('v3')
   expect(chipOfKeyValue(k, 'v13')).toBe(OTHER)
   expect(chipOfKeyValue(k, null)).toBe(NONE)

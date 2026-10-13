@@ -7,7 +7,7 @@ import { figureKind } from '../components/Outputs'
 import type { Cell, Group } from '../lib/types'
 import { readStorage, writeStorage } from '../lib/workspace'
 import { CARD_MIME, cardSections, sectionsKey, type CardSectionKey } from './cards'
-import { ChecksPane, type Checks } from './Checks'
+import { CommentsPane, type Checks } from './Checks'
 import type { DocComment } from './checkComments'
 import { Chevron, Glyph, IconButton } from './icons'
 
@@ -90,7 +90,7 @@ export function Sidebar({ ws, cells, groups, used, onInsert, onHide, over, doc, 
           })}
         </div>
       </div>
-      <ChecksPane ws={ws} doc={doc} checks={checks} comments={comments} />
+      <CommentsPane ws={ws} doc={doc} checks={checks} comments={comments} />
     </aside>
   )
 }

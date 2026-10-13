@@ -252,6 +252,87 @@ def test_the_turns_of_whole_file_json_transcripts(chats):
     assert client.get(f"{CHATS}/source/turns", params={"path": "../x.json"}).status_code == 400
 
 
+def test_every_step_of_an_atif_trajectory_is_a_turn_with_its_fields(chats):
+    """An ATIF trajectory's steps (Harbor's trajectory.json) say who speaks by their `source` (system, user, agent) and,
+    for the agent's, the model: a step with no model is a turn too, under its source. Each turn carries its fields."""
+    steps = [{"step_id": 1, "timestamp": "2026-09-10T21:58:01Z", "source": "system", "message": "You are an agent."},
+             {"step_id": 2, "timestamp": "2026-09-10T21:58:02Z", "source": "user", "message": "Write hello.py."},
+             {"step_id": 3, "timestamp": "2026-09-10T21:58:03Z", "source": "agent", "model_name": "model-a",
+              "message": "Writing it.", "tool_calls": [{"tool_call_id": "c1", "function_name": "write_file", "arguments": {}}],
+              "observation": {"results": [{"source_call_id": "c1", "content": "ok"}]}}]
+    doc = {"schema_version": "ATIF-v1.7", "agent": {"name": "toy", "version": "1"}, "steps": steps}
+    (chats / "logs" / "trajectory.json").write_text(json.dumps(doc, indent=2))
+    assert transcripts.sniff(chats / "logs" / "trajectory.json", "logs/trajectory.json")["format"] == "json"
+    turns = client.get(f"{CHATS}/source/turns", params={"path": "logs/trajectory.json"}).json()["turns"]
+    assert [(t["speaker"], t["role"], t["text"]) for t in turns] == [
+        ("system", "system", "You are an agent."), ("user", "user", "Write hello.py."), ("model-a", "other", "Writing it.")]
+    assert [t["fields"] for t in turns] == [{"source": "system"}, {"source": "user"},
+                                            {"source": "agent", "model_name": "model-a", "tool": "write_file"}]
+
+
+def test_an_atif_step_shows_its_reasoning_its_tool_calls_and_each_result_under_its_call(chats):
+    """An ATIF step's reasoning, words, tool calls (name and arguments) and the results its `observation` holds are the
+    turn's blocks, each result right after the call whose id it names; a step of words alone carries no blocks."""
+    steps = [{"step_id": 1, "source": "user", "message": "Write hello.py and test it."},
+             {"step_id": 2, "source": "agent", "message": "Writing it, then the test.",
+              "reasoning_content": "Write first, then run.",
+              "tool_calls": [{"tool_call_id": "c1", "function_name": "write_file", "arguments": {"path": "hello.py"}},
+                             {"tool_call_id": "c2", "function_name": "bash", "arguments": {"command": "pytest -q"}}],
+              "observation": {"results": [{"source_call_id": "c2", "content": "1 passed"},
+                                          {"source_call_id": "c1", "content": "Wrote 2 lines"}]}},
+             {"step_id": 3, "source": "agent", "message": "",
+              "tool_calls": [{"tool_call_id": "c3", "function_name": "bash", "arguments": {"command": "ls"}}],
+              "observation": {"results": [{"source_call_id": "c3", "content": "hello.py"}]}}]
+    (chats / "logs" / "steps.json").write_text(json.dumps({"schema_version": "ATIF-v1.7", "steps": steps}, indent=2))
+    turns = client.get(f"{CHATS}/source/turns", params={"path": "logs/steps.json"}).json()["turns"]
+    assert "blocks" not in turns[0] and turns[0]["text"] == "Write hello.py and test it."
+    assert turns[1]["blocks"] == [
+        {"kind": "thinking", "text": "Write first, then run."},
+        {"kind": "text", "text": "Writing it, then the test."},
+        {"kind": "tool_use", "text": 'write_file\n{\n  "path": "hello.py"\n}'},
+        {"kind": "tool_result", "text": "Wrote 2 lines"},
+        {"kind": "tool_use", "text": 'bash\n{\n  "command": "pytest -q"\n}'},
+        {"kind": "tool_result", "text": "1 passed"}]
+    assert [b["kind"] for b in turns[2]["blocks"]] == ["tool_use", "tool_result"], "a step that only calls a tool is a turn"
+    assert [t["n"] for t in turns] == [1, 2, 3], "each step's own number"
+    assert turns[2]["line"] > turns[1]["line"]
+    # each step's turn names its record, by the pointer labels mark it by and the line that record starts on, a line
+    # before its words; a citation of that line (the record's) opens at the turn
+    from app import records
+
+    idx = records.json_index(chats / "logs" / "steps.json")
+    assert [(t["ref"], t["rec_line"]) for t in turns] == [(f"logs/steps.json#{p}", idx.lines[i]) for i, p in enumerate(idx.pointers)]
+    assert all(t["rec_line"] < t["line"] for t in turns)
+    page = client.get(f"{CHATS}/source/turns", params={"path": "logs/steps.json", "line": turns[2]["rec_line"], "count": 1}).json()
+    assert page["start"] == 2
+
+
+def test_a_turn_s_own_number_is_its_step_s_else_its_place_in_its_conversation(chats):
+    """The number a whole-file JSON transcript's turn shows in place of its line: an ATIF step's `step_id`, else its
+    place in its conversation, counted from 1 in each."""
+    steps = [{"step_id": 4, "source": "user", "message": "Go on."}, {"step_id": 5, "source": "agent", "message": "Done."}]
+    (chats / "logs" / "later.json").write_text(json.dumps({"steps": steps}, indent=2))
+    assert [t["n"] for t in _turns("later.json")["turns"]] == [4, 5]
+    gpt = _turns("chatgpt.json")["turns"]
+    assert [t["n"] for t in gpt] == [1, 2, 3, 4]
+    share = _turns("sharegpt.jsonl")["turns"]
+    assert [t["n"] for t in share] == [1, 2, 1, 2, 1, 2], "counted in each conversation"
+
+
+def test_a_claude_code_stream_s_records_carry_no_blocks_of_the_server_s(chats):
+    """A Claude Code stream keeps its own view, which makes its records' blocks: the source page adds none of the
+    server's (meta.blocks, meta.turns) to them."""
+    recs = [{"type": "user", "uuid": "u1", "session_id": "s", "message": {"role": "user", "content": "List the files."}},
+            {"type": "assistant", "uuid": "u2", "session_id": "s", "message": {"role": "assistant", "content": [
+                {"type": "text", "text": "Listing."}, {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "ls"}}]}},
+            {"type": "user", "uuid": "u3", "session_id": "s", "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "t1", "content": "notes.txt"}]}}]
+    (chats / "logs" / "session.jsonl").write_text(jsonl(recs))
+    page = client.get(f"{CHATS}/source", params={"path": "logs/session.jsonl"}).json()
+    assert page["transcript"]["format"] == "stream"
+    assert len(page["records"]) == 3 and all("blocks" not in r["meta"] and "turns" not in r["meta"] for r in page["records"])
+
+
 def test_a_chat_export_larger_than_the_sniff_s_head_is_offered_transcript_and_read_whole(chats):
     """An export is judged by its head, whatever its size, and its turns are read from the whole file."""
     convs = [{"uuid": f"c{i}", "name": f"Chat {i}", "chat_messages": [

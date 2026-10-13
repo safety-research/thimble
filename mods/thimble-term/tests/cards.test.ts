@@ -121,13 +121,13 @@ test("a card whose script read a label shows the label's row, its values in thei
 test("a timeline's axis names both its ends or neither: neither when the list under it starts and ends with them", () => {
   const { card } = cardOfCell(CELLS.e0time00 as unknown as ThimbleCell)
   const lines = cardLayout(card, 60, -1).lines.map(l => l.map(s => s.s).join(''))
-  expect(lines.filter(l => l.includes('24 May')).length).toBe(1)
-  expect(lines.filter(l => l.includes('18 Jun')).length).toBe(1)
-  expect(lines[1]).toMatch(/^24 May {2}● first saves/)
+  expect(lines.filter(l => l.includes('May 24')).length).toBe(1)
+  expect(lines.filter(l => l.includes('Jun 18')).length).toBe(1)
+  expect(lines[1]).toMatch(/^May 24 {2}● first saves/)
   // listed in another order (by size), the list does not name the ends where an axis's reader looks: both under it
   const sorted = cardOfCell({ ...(CELLS.e0time00 as object), outputs: [{ 'application/vnd.thimble.timeline+json': { events: [{ time: '2026-06-02', label: 'most' }, { time: '2026-05-24', label: 'first saves' }, { time: '2026-06-18', label: 'peak afternoon' }] } }] } as unknown as ThimbleCell).card
   const axis = cardLayout(sorted, 60, -1).lines.map(l => l.map(s => s.s).join(''))
-  expect(axis[1]).toMatch(/^24 May +18 Jun$/)
+  expect(axis[1]).toMatch(/^May 24 +Jun 18$/)
   expect(axis[1]!.length).toBe(60)
 })
 

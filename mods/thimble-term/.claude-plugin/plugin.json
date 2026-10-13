@@ -1,6 +1,6 @@
 {
   "name": "thimble-term",
-  "version": "0.6.2",
+  "version": "0.7.0",
   "description": "thimble's terminal-mode renderer: it draws thimble's cards, citations, labels, agents, side threads, documents and files in Claude Code. It only draws; the `thimble` command loads it in terminal mode.",
   "author": {
     "name": "thimble"

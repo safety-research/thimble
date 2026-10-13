@@ -571,6 +571,7 @@ def read_doc(c: str, inv_id: str, slug: str) -> dict[str, Any] | None:
     elif slug == LEGACY_VIDEO:
         doc.setdefault("renderer", "video")
     _legacy_comments(doc)
+    _split_comments(c, doc)
     return _with_defaults(doc)
 
 
@@ -579,13 +580,28 @@ LEGACY_CHECKS = {"verified": "verified", "unverified": "unverified", "judgment":
 
 
 def _legacy_comments(doc: dict[str, Any]) -> None:
-    """A stored document's verifier comments as check comments, in place (LEGACY_CHECKS); written so on its next save."""
+    """A stored document's verifier comments as check comments (LEGACY_CHECKS), and each comment of a built-in's former
+    id as the built-in's (checks.current_id), in place; written so on its next save."""
+    from .checks import current_id  # noqa: PLC0415
     from .report import CHECK_AUTHOR, LEGACY_AUTHOR  # noqa: PLC0415
 
     for cm in doc.get("comments") or []:
         if isinstance(cm, dict) and cm.get("author") == LEGACY_AUTHOR:
             cm["author"] = CHECK_AUTHOR
             cm["check"] = LEGACY_CHECKS.get(str(cm.pop("kind", "") or ""), "judgment")
+        elif isinstance(cm, dict) and cm.get("check"):
+            cm["check"] = current_id(cm["check"])
+
+
+def _split_comments(c: str, doc: dict[str, Any]) -> None:
+    """A stored document's comments from before `details`, each made its statement and its details, in place
+    (canvas_comments.split_stored, by its check's name); written so on its next save."""
+    from . import canvas_comments, checks  # noqa: PLC0415
+
+    old = [cm for cm in doc.get("comments") or [] if isinstance(cm, dict) and "details" not in cm and cm.get("text")]
+    names = checks.names(c) if any(cm.get("check") for cm in old) else {}
+    for cm in old:
+        canvas_comments.split_stored(cm, names.get(str(cm.get("check") or ""), ""))
 
 
 def _inv(c: str, inv_id: str) -> Path:
@@ -2207,7 +2223,8 @@ def _comment_lines(c: str, doc: dict[str, Any]) -> list[str]:
     for cm in anchored_open_comments(doc):
         who = names.get(str(cm["check"]), str(cm["check"])) if cm.get("check") else \
             str(cm.get("author") or ANALYST) + (f", {cm['kind']}" if cm.get("kind") else "")
-        out.append(f"- #{cm.get('sentence_id')} · {who} · {_collapse(cm.get('text'))}")
+        details = _collapse(cm.get("details"))
+        out.append(f"- #{cm.get('sentence_id')} · {who} · {_collapse(cm.get('text'))}" + (f" — {details}" if details else ""))
     return out
 
 
@@ -4347,9 +4364,13 @@ async def post_comment(c: str, inv_id: str, slug: str, body: CommentBody) -> dic
 
 @router.post("/ws/{c}/investigations/{inv_id}/types/{slug}/comments/{cid}/dismiss")
 async def dismiss(c: str, inv_id: str, slug: str, cid: str) -> dict[str, Any]:
+    """The analyst resolved a comment: the margin's ✓ (Done). Returns the document."""
+    from . import canvas_comments  # noqa: PLC0415
+
     investigation.inv_dir(c, inv_id)
     slug, doc = _any_doc(c, inv_id, slug)
-    _find_comment(doc, cid)["status"] = "dismissed"
+    cm = _find_comment(doc, cid)
+    cm.update(status="dismissed", resolution=canvas_comments.RESOLUTION_DONE, resolved_ts=_now())
     write_doc(c, inv_id, slug, doc)
     return doc
 

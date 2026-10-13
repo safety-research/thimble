@@ -9,7 +9,8 @@
 //
 // The panel opens wide enough to read a record, `width` of the mount (0.4 by default), never narrower than `min` px. A
 // drag of its left edge resizes it, a double click on the edge puts it back, and thimble keeps its width per view (as a
-// share of the mount, viewer_colour.js `parts`). Escape in the panel or its × closes it.
+// share of the mount, viewer_colour.js `parts`). Escape in the panel or its × closes it. A newer version of the view,
+// which Reload loads, opens on the record the panel shows, and with the panel closed on none (the bridge's pageState).
 ;(function () {
   'use strict'
   var kit = window.__thimbleKit
@@ -136,6 +137,7 @@
       ctl.safe(function () { o.render(body) })
     } else this.body.innerHTML = o.html == null ? '' : String(o.html)
     this.body.scrollTop = 0
+    if (this.ref != null && kit.shows) kit.shows(this.ref)
     this.el.hidden = false
     this.mount.classList.add('thimble-side-open')
     if (was) this.fit()
@@ -147,6 +149,7 @@
     var ref = this.ref
     this.ref = null
     this.body.innerHTML = ''
+    if (kit.shows) kit.shows(null)
     var self = this
     if (byHand && this.onClose) ctl.safe(function () { self.onClose(ref) })
   }

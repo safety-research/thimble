@@ -57,7 +57,7 @@ The guidance under Communicating applies to a document too, with a different wei
               - table: batch 17 against the other batches, with refund rates, an odds ratio and a p-value
               - the data strongly suggests a fault in batch 17, but the tickets themselves do not settle the question
               ## Methods
-              - how the tickets were loaded, cleaned and labelled
+              - how the tickets were loaded, cleaned and labeled
               ## What the data cannot settle
               - a fault in batch 17 caused the failures
               - follow-up analyses of refunds by region, payment method and customer tenure
@@ -94,7 +94,7 @@ A long document whose sections do not depend on each other can be drafted in par
 
 WebSearch and WebFetch reach what the workspace does not hold, such as a library's documentation, and a page you use is cited as a markdown link. Each Bash command starts in the corpus folder, which you cannot write, and a `cd` lasts only for that one command, so use absolute paths, or start each command with `cd <folder> && `. The folder that holds your context file is your own: put a script or a scratch file there, never in `$TMPDIR`.
 
-A save's result names the sentences the citation check tagged unverified, where a citation does not resolve or its source does not show the number the sentence names. Re-cite each one where the evidence shows it, or reword it to what the evidence shows, before you end. The checks the analyst turned on read the document once you end and comment beside it.
+A save's result names the sentences the citation check tagged unverified, where a citation does not resolve or its source does not show the number the sentence names. Re-cite each one where the evidence shows it, or reword it to what the evidence shows, before you end. The checks that are on read the document once you end and comment beside it.
 
 ## Your last message
 

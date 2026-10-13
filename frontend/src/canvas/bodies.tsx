@@ -1,7 +1,7 @@
 // What a card shows between its question and its takeaway, by kind: a plot or table (components/Outputs), shell output,
 // a note's text, an example's quoted records, a label's values and examples, a timeline or diagram (DataViz), a custom
-// card's frame. `width` is the room the body has.
-import { useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+// card's frame, a plan's steps (PlanBody). `width` is the room the body has.
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { ChatMarkdown } from '../chat/markdown'
 import { Chip } from '../components/Chip'
 import { CodeText } from '../components/Code'
@@ -23,13 +23,14 @@ import type { Cell, ConceptDetail, LabelRowText, ResolvedRef } from '../lib/type
 import { CanvasContext } from './context'
 import { CustomFrame, DatasetView } from './DataViz'
 import { conceptName, type ConceptDetailState } from './concepts'
+import { PlanBody } from './PlanBody'
 import { exampleCandidates, exampleParts, labelShares, labelValues, noMatchValues, pickExamples, shortGlob, shownValues, unitTotal, unitWord, unmatchedExample, wholeUnit, type ValueExample } from './details'
 import { resolvedOf } from './excerpts'
 import { FACT_KINDS, recordFacts } from './facts'
 import { filterIs, kindOf, scopeForUnit } from './layout'
 import { QuoteParts, RecordFacts } from './Quote'
 import { TypeCard } from './TypeCard'
-import { jsonRecordParts, plainMarkdown, quoteLine, quoteParts } from './quotes'
+import { entryParts, exampleEntries, jsonRecordParts, plainMarkdown, quoteLine, quoteParts, type ExampleEntry } from './quotes'
 
 const fail = (e: unknown) => bus.emit('toast', { text: (e as Error)?.message || String(e), kind: 'error' })
 
@@ -47,8 +48,10 @@ export function CardBody({ cell, width, label, big = false }: { cell: Cell; widt
       ) : null
     }
     case 'example': {
-      const refs = Array.isArray(payload.refs) ? (payload.refs as unknown[]).filter((r): r is string => typeof r === 'string') : []
-      return <ExampleBody refs={refs} ws={ws} big={big} />
+      const raw = Array.isArray(payload.refs) ? (payload.refs as unknown[]) : []
+      const quotes = Array.isArray(payload.quotes) ? (payload.quotes as unknown[]) : []
+      const refs = raw.filter((r): r is string => typeof r === 'string')
+      return <ExampleBody refs={refs} quotes={raw.flatMap((r, i) => (typeof r === 'string' ? [quotes[i]] : []))} ws={ws} big={big} />
     }
     case 'label': {
       const concept = typeof payload.concept === 'string' ? payload.concept : ''
@@ -56,8 +59,11 @@ export function CardBody({ cell, width, label, big = false }: { cell: Cell; widt
     }
     case 'custom': {
       const html = typeof payload.html === 'string' ? payload.html : ''
-      return html ? <CustomFrame html={html} title={cell.title} height={typeof payload.height === 'number' ? payload.height : undefined} /> : null
+      const libs = Array.isArray(payload.libs) ? (payload.libs as unknown[]).filter((x): x is string => typeof x === 'string') : undefined
+      return html ? <CustomFrame html={html} title={cell.title} height={typeof payload.height === 'number' ? payload.height : undefined} ws={ws} libs={libs} /> : null
     }
+    case 'plan':
+      return <PlanBody cell={cell} />
     default: {
       if ((kind === 'timeline' || kind === 'diagram') && !cell.code && payload.dataset != null) return <DatasetView kind={kind} dataset={payload.dataset} fitWidth={width} />
       const art = primaryArtifact(cell.outputs)
@@ -94,24 +100,36 @@ export function CardBody({ cell, width, label, big = false }: { cell: Cell; widt
 /**
  * A box that shows its content up to `max` px, faded at the bottom when there is more, with Show all under it that
  * opens it whole (and Show less that closes it). Used where a card quotes something long: a record, a label's code.
+ * While closed, a box whose first highlight (.hl, a quoted passage) falls below what it shows opens at that highlight
+ * with a few lines before it, faded at the top as well.
  */
 function Clamp({ max, className, children }: { max: number; className?: string; children: ReactNode }) {
   const box = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
-  const [clipped, setClipped] = useState(false)
+  const [clip, setClip] = useState({ below: false, above: false })
   useLayoutEffect(() => {
     const el = box.current
     if (!el || open) return
-    const check = () => setClipped(el.scrollHeight > el.clientHeight + 1)
+    const check = () => {
+      el.scrollTop = highlightTop(el)
+      const below = el.scrollTop + el.clientHeight < el.scrollHeight - 1
+      const above = el.scrollTop > 0
+      setClip((c) => (c.below === below && c.above === above ? c : { below, above }))
+    }
     check()
     const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(check) : null
     ro?.observe(el)
     for (const child of Array.from(el.children)) ro?.observe(child)
     return () => ro?.disconnect()
   })
+  const clipped = clip.below || clip.above
   return (
     <>
-      <div ref={box} className={`bcell-clamp${clipped && !open ? ' is-clipped' : ''}${className ? ` ${className}` : ''}`} style={open ? undefined : { maxHeight: max }}>
+      <div
+        ref={box}
+        className={`bcell-clamp${clip.below && !open ? ' is-clipped' : ''}${clip.above && !open ? ' is-scrolled' : ''}${className ? ` ${className}` : ''}`}
+        style={open ? undefined : { maxHeight: max }}
+      >
         {children}
       </div>
       {(clipped || open) && (
@@ -121,6 +139,23 @@ function Clamp({ max, className, children }: { max: number; className?: string; 
       )}
     </>
   )
+}
+
+/** the room a clamped box keeps over its first highlight when it opens there: about two lines of what comes before */
+const HIGHLIGHT_LEAD = 44
+
+/** Where a clamped box scrolls to show its first highlight: 0 while the highlight's first line shows from the top (the
+ * box as it always opened), else the highlight's top less HIGHLIGHT_LEAD, in the box's own px (the canvas may scale it). */
+function highlightTop(el: HTMLElement): number {
+  const hl = el.querySelector<HTMLElement>('.hl')
+  if (!hl) return 0
+  const box = el.getBoundingClientRect()
+  const scale = el.offsetHeight ? box.height / el.offsetHeight || 1 : 1
+  const line = hl.getClientRects()[0] ?? hl.getBoundingClientRect()
+  const top = (line.top - box.top) / scale + el.scrollTop
+  const bottom = (line.bottom - box.top) / scale + el.scrollTop
+  // the bottom 36px of a clipped box fade out (canvas.css .bcell-clamp.is-clipped)
+  return bottom <= el.clientHeight - 36 ? 0 : Math.max(0, Math.round(top - HIGHLIGHT_LEAD))
 }
 
 /** the height of a code card's code before Show all: about twelve lines, and more in focus mode */
@@ -145,69 +180,71 @@ function MediaExample({ ws, media }: { ws: string; media: MediaRef }) {
 
 /**
  * An example card's body: one record quoted under its address, or several as a numbered list. The address opens the
- * record. A ref to an image, recording or video shows the file itself (MediaExample).
+ * record. Refs that name one record (three quotes of one JSON value) show it once with every quoted passage highlighted
+ * (canvas/quotes exampleEntries, entryParts). A ref to an image, recording or video shows the file itself
+ * (MediaExample).
  */
-function ExampleBody({ refs, ws, big }: { refs: string[]; ws: string; big: boolean }) {
+function ExampleBody({ refs, quotes, ws, big }: { refs: string[]; quotes: unknown[]; ws: string; big: boolean }) {
   const [got, setGot] = useState<Record<string, ResolvedRef | null>>({})
   useEffect(() => {
     let alive = true
-    for (const ref of refs.filter((r) => !mediaOf(r))) void resolvedOf(ws, ref).then((r) => alive && setGot((cur) => (cur[ref] === r ? cur : { ...cur, [ref]: r })))
+    for (const ref of new Set(refs.filter((r) => !mediaOf(r)))) void resolvedOf(ws, ref).then((r) => alive && setGot((cur) => (cur[ref] === r ? cur : { ...cur, [ref]: r })))
     return () => {
       alive = false
     }
   }, [ws, refs])
-  if (!refs.length) return null
+  const entries = useMemo(() => exampleEntries(refs, quotes), [refs, quotes])
+  if (!entries.length) return null
   const open = (r: string) => {
     track('chip-teleport', { target: r, detail: { kind: 'example' } })
     teleport(r, { browser: true })
   }
   const address = (r: string) => <Address r={r} onOpen={open} />
+  const lookup = (r: string) => (r in got ? got[r] : undefined)
   // under the address, one record's facts (time, author, page; canvas/facts); a range spans several records and shows none
-  const facts = (r: string) => {
-    const res = got[r]
+  const facts = (e: ExampleEntry) => {
+    const res = got[e.refs[0]]
     if (!res || !FACT_KINDS.has(res.kind)) return null
     const f = recordFacts(res)
     return f.length ? <RecordFacts facts={f} /> : null
   }
   // the record behind a faint rule: the cited words highlighted, the words around them in the tertiary (Quote.tsx)
-  const body = (r: string, max: number) => {
-    const media = mediaOf(r)
+  const body = (e: ExampleEntry, max: number) => {
+    const media = mediaOf(e.ref)
     if (media) return <MediaExample ws={ws} media={media} />
-    const res = got[r]
-    if (!res) return null
-    const parts = quoteParts(res)
-    if (!parts.length) return null
+    const parts = entryParts(e, lookup)
+    if (!parts?.length) return null
     return (
       <Clamp max={max} className="bcell-q-body">
         <QuoteParts parts={parts} />
       </Clamp>
     )
   }
-  const quote = (r: string, max: number) => (
+  const quote = (e: ExampleEntry, max: number) => (
     <>
       <div className="bcell-address-row">
-        {address(r)}
-        {facts(r)}
+        {address(e.ref)}
+        {facts(e)}
       </div>
-      <div className="bcell-quote-rec">{body(r, max)}</div>
+      <div className="bcell-quote-rec">{body(e, max)}</div>
     </>
   )
   // drawn once every record it quotes has come back (a media file draws itself)
   const settled = refs.every((r) => mediaOf(r) || r in got) ? 'true' : 'false'
-  if (refs.length === 1) {
+  if (entries.length === 1) {
     return (
-      <div className="bcell-quote" data-body="" data-settled={settled} data-part={refs[0]}>
-        {quote(refs[0], big ? QUOTE_MAX_BIG : QUOTE_MAX)}
+      <div className="bcell-quote" data-body="" data-settled={settled} data-part={entries[0].ref}>
+        {quote(entries[0], big ? QUOTE_MAX_BIG : QUOTE_MAX)}
       </div>
     )
   }
   return (
     <ol className="bcell-quotes" data-body="" data-settled={settled}>
-      {refs.map((r, i) => (
-        <li key={r}>
+      {entries.map((e, i) => (
+        <li key={e.ref}>
           <span className="bcell-quotes-n">{i + 1}</span>
-          <div className="bcell-quote" data-part={r}>
-            {quote(r, big ? QUOTES_MAX_BIG : QUOTES_MAX)}
+          <div className="bcell-quote" data-part={e.ref}>
+            {quote(e, big ? QUOTES_MAX_BIG : QUOTES_MAX)}
           </div>
         </li>
       ))}

@@ -820,7 +820,7 @@ def records(index, query):
 
 def _when(t):
     d = datetime.fromtimestamp(t, timezone.utc)
-    return f"{d.day} {d:%b %H:%M}"
+    return f"{d:%b} {d.day} {d:%H:%M}"
 
 
 def _excerpt_body(body, limit=EXCERPT_LINES):

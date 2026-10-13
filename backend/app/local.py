@@ -900,7 +900,7 @@ _SURFACES = {"home": _home, "cards": _cards, "card": _card, "labels": _labels, "
 
 ACT_USAGE = ("thimble act <kind> --cwd <dir> '<json>'; kinds: thread {anchor | anchor_text, message}, thread-message {thread, message}, "
              "verdict {label, ref, value}, label {label, name?, kind?, body?, glob?, values?}, label-run {label, limit?}, label-stop {label}, "
-             "label-delete {label}, label-undelete {label}, label-show {label, on?, values?, colours?}, label-filter {label, value?}, seen {thread}, "
+             "label-delete {label}, label-undelete {label}, label-show {label, on?, values?, colors?}, label-filter {label, value?}, seen {thread}, "
              "hand-back {thread}, stop {agent}")
 
 
@@ -1107,8 +1107,8 @@ async def _act_label_undelete(c: str, payload: dict[str, Any]) -> dict[str, Any]
 
 async def _act_label_show(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     """A label over files turned on or off in Files and the views (`on`), its values highlighted while it is on
-    (`values`), or its values given colors by name (`colours`, concepts.COLOUR_NAMES), as the Labels pane's toggle and
-    palette do and show_label does (concepts.show_concept). It runs nothing."""
+    (`values`), or its values given colors by name (`colors`, or `colours`, its British alias; concepts.COLOUR_NAMES),
+    as the Labels pane's toggle and palette do and show_label does (concepts.show_concept). It runs nothing."""
     from . import concepts  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
@@ -1121,11 +1121,11 @@ async def _act_label_show(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     values = payload.get("values")
     if values is not None and not (isinstance(values, list) and all(isinstance(v, str) for v in values)):
         raise StateError("`values` must be a list of the label's values")
-    colours = payload.get("colours")
+    colours = payload.get("colors", payload.get("colours"))
     if colours is not None and not (isinstance(colours, dict) and all(isinstance(v, str) for v in colours.values())):
-        raise StateError("`colours` must map values to color names")
+        raise StateError("`colors` must map values to color names")
     if on is None and not colours:
-        raise StateError("nothing to change: give on or colours")
+        raise StateError("nothing to change: give on or colors")
     k = await asyncio.to_thread(concepts.show_concept, c, str(found["id"]), on, values, colours)
     return {"label": k["id"], "shown": bool(k["shown"]), "classes": k["classes"]}
 

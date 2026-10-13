@@ -83,7 +83,8 @@ export function commentsOf(doc: Obj, checks: readonly DocCheck[]): DocComment[] 
   for (const cm of Array.isArray(doc.comments) ? doc.comments : []) {
     if (!isObj(cm)) continue
     const sid = str(cm.sentence_id)
-    const text = plainCites(str(cm.text)).trim()
+    // the statement, then its details on the same lines: the panel has no fold to open them in
+    const text = plainCites([str(cm.text), str(cm.details)].filter(s => s.trim()).join(' ')).replace(/\s+/g, ' ').trim()
     if (!sid || !text || !rank.has(sid)) continue
     const check = cm.check ? str(cm.check) : null
     const open = (str(cm.status) || 'open') === 'open'
@@ -98,7 +99,7 @@ export function commentsOf(doc: Obj, checks: readonly DocCheck[]): DocComment[] 
         for (const x of (p.sentences ?? []) as (DocSentence & { tags?: unknown; tag_notes?: Record<string, unknown> })[]) {
           if (!x.id || marked.has(x.id) || !Array.isArray(x.tags) || !x.tags.includes(UNVERIFIED)) continue
           const note = str(isObj(x.tag_notes) ? x.tag_notes[UNVERIFIED] : '').trim()
-          out.push({ id: `tag:${x.id}`, sid: x.id, check: UNVERIFIED, name: by.get(UNVERIFIED)?.name ?? 'Unverified', meta: 'citation check', text: note || 'Not checked', evidence: [], open: true, tag: true, colour: by.get(UNVERIFIED)?.colour ?? 0 })
+          out.push({ id: `tag:${x.id}`, sid: x.id, check: UNVERIFIED, name: by.get(UNVERIFIED)?.name ?? 'Unverifiable', meta: 'citation check', text: note || 'Not checked', evidence: [], open: true, tag: true, colour: by.get(UNVERIFIED)?.colour ?? 0 })
         }
   }
   return out.map((c, i) => ({ c, i })).sort((a, b) => rank.get(a.c.sid)! - rank.get(b.c.sid)! || a.i - b.i).map(x => x.c)

@@ -4,7 +4,7 @@
 // filter with how many records it hides (ViewFilter). A file viewer's line says only what it leaves out of the file it
 // shows.
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { LabelChip } from '../chat/SurfaceChips'
+import { LabelRowChip } from '../chat/SurfaceChips'
 import { FilterChip } from '../components/FilterChip'
 import { Popover } from '../components/Menu'
 import { api } from '../lib/api'
@@ -354,7 +354,7 @@ function DerivedData({ ws, shown, labels, name }: { ws: string; shown: ViewShown
         {fields.length > 0 && labels.length > 0 && <hr className="view-pane-list-rule" />}
         {labels.map((k) => (
           <div key={k.id} className="view-pane-list-row">
-            <LabelChip ws={ws} name={k.name} />
+            <LabelRowChip ws={ws} name={k.name} />
             {k.description && <span className="view-pane-list-why">{k.description}</span>}
           </div>
         ))}

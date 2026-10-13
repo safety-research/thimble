@@ -230,6 +230,27 @@
   gap: 5px;
   min-width: 0;
 }
+/* the comment a thread is about, on its own line under the anchor's chip: its square and check's name start the text,
+   which wraps under them, three lines at most */
+.chat-anchor-comment {
+  flex-basis: 100%;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+  color: var(--text-secondary);
+}
+.chat-anchor-comment .wu-cm-sq {
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: 1px;
+}
+.chat-anchor-comment-name {
+  margin-right: 6px;
+  font-weight: 500;
+}
 .chat-row-word {
   color: inherit;
 }
@@ -452,16 +473,19 @@ button.chat-call-chip:hover,
   flex: none;
   max-width: 100%;
 }
+/* one line of words that ends in … where the chat is too narrow for every tool's name, the chevron kept */
 .chat-callrun-tools {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  flex: 0 1 auto;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.chat-callrun-tool {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+.chat-callrun-tool + .chat-callrun-tool,
+.chat-callrun-more {
+  margin-left: 6px;
+}
+.chat-callrun-tool > * + * {
+  margin-left: 4px;
 }
 .chat-callrun-name {
   color: var(--text-primary);
@@ -769,8 +793,9 @@ button.view-tab:focus-visible {
   text-overflow: ellipsis;
   line-height: normal;
 }
-/* a chip that names a label (chat/SurfaceChips.tsx) is its row in the Labels pane, a size smaller: 22px, radius 6,
-   the name in the body face at 12.5 */
+/* a label's row chip (chat/SurfaceChips.tsx LabelRowChip, in a view's list of its fields and labels) is its row in the
+   Labels pane, a size smaller: 22px, radius 6, the name in the body face at 12.5. A label's chip in the chat is a
+   view's chip (.view-tab) */
 .surface-chip {
   display: inline-flex;
   align-items: center;
@@ -805,18 +830,18 @@ button.surface-chip:focus-visible {
 }
 /* a label: its row in the Labels pane, no box until hovered: the colour's square (filled while on) or its glyph, and
    the name, in ink while on */
-.label-chip {
+.label-row-chip {
   gap: 7px;
   padding: 0 8px 0 6px;
   color: var(--text-secondary);
 }
-.label-chip.on {
+.label-row-chip.on {
   color: var(--text-primary);
 }
-button.label-chip:hover {
+button.label-row-chip:hover {
   background: var(--surface-hover);
 }
-.label-chip-box {
+.label-row-chip-box {
   flex: none;
   box-sizing: border-box;
   width: 10px;
@@ -824,19 +849,19 @@ button.label-chip:hover {
   border: 1.5px solid var(--c);
   border-radius: 2.5px;
 }
-.label-chip.on .label-chip-box {
+.label-row-chip.on .label-row-chip-box {
   background: var(--c);
 }
 /* a multi-class label: the label glyph in the icon ink (files.css .files-label-tag), filled with a tint of the ink while on */
-.label-chip-tag {
+.label-row-chip-tag {
   flex: none;
   color: var(--text-tertiary);
 }
-.label-chip.on .label-chip-tag {
+.label-row-chip.on .label-row-chip-tag {
   color: var(--text-secondary);
   fill: rgba(var(--ink-rgb), 0.12);
 }
-.label-chip-over {
+.label-row-chip-over {
   flex: none;
   color: var(--c);
 }
