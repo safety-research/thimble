@@ -39,7 +39,8 @@ inside the height it has.
 
 thimble keeps each part's state per view, with Color by's choice: Filter by's and Rows' choices, the values turned off,
 the series of the key turned off, the lanes folded, the divider's place and the side panel's width. Reset, at the end of
-Color by's row, turns every value and series back on and closes the side panel.
+Color by's row, puts the view back as it opens: Color by's choice and values as its `initial` says, every series back
+on, and the side panel closed (or with its `empty` line).
 
 ## Mount them
 
@@ -322,9 +323,11 @@ out as tiles at least `--thimble-tile-w` (220 px) wide. A list of records with n
 
 ## The side panel
 
-`thimble.side({mount, width, min, key, onClose})` gives the list a side panel: `mount` holds the list, and the panel
-opens at its right, the list narrowing beside it. A record and a row's children open there, never under the row, so the
-list keeps its place.
+`thimble.side({mount, width, min, key, empty, onClose})` gives the list a side panel: `mount` holds the list, and the
+panel opens at its right, the list narrowing beside it. A record and a row's children open there, never under the row,
+so the list keeps its place. The panel is closed until the page opens a record in it. A view whose panel is part of
+its layout gives `empty`, one short line such as `'Click a session'`: the panel then shows as the view opens, with
+that line in place of a title and nothing under it, until the analyst clicks a record.
 
 ```js
 const side = thimble.side({ mount: '#body', onClose: () => { open = null; list() } })
@@ -338,8 +341,10 @@ listEl.addEventListener('click', (e) => {
 ```
 
 The panel opens `width` of the mount (0.4), never narrower than `min` px (280). A drag of its left edge resizes it, a
-double click on the edge puts it back, and thimble keeps its width per view. Escape in the panel or its × closes it.
-`isOpen`, `ref`, `body` and `width` read it; `open({title, sub, ref, html | render(body)})` and `close()` change it.
+double click on the edge puts it back, and thimble keeps its width per view. Escape in the panel or its × closes it,
+its `empty` line too; the page's `close()` and Reset bring the `empty` line back. `isOpen` (a record shows), `isEmpty`
+(the `empty` line shows), `ref`, `body` and `width` read it; `open({title, sub, ref, html | render(body)})` and
+`close()` change it.
 
 ## The transcript
 

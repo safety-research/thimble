@@ -26,6 +26,10 @@ the view as text, a glyph or a gray pattern, never in a second palette. Filter b
   or Filter by holds it. Checking a field or Off opens nothing.
 - Color by is thimble's small secondary button, with the first choice in it and how many more there are: "Color by:
   Kind", "Color by: Kind +1".
+- The view opens Off, so no color shows until the analyst picks a field or a label. Where color is the point of the
+  view, `initial` opens it on a field, or on a few values of a field: `initial: {field: 'outcome', on: ['error']}`
+  colors only the errors, and the records of the other values stay in gray, as values turned off. A label that is on
+  in thimble takes the color as the view opens (below).
 - Off colors nothing anywhere: no chips, no bars, no lanes, the tracks a plain scrollbar, the lanes and the time range's
   overview every record in gray, and the labels' texts highlighted in gray, a label on or not.
 - The values of the chosen field show as key chips in the top row (`chip chip-key` in the view kit): a square of the
@@ -110,7 +114,7 @@ load()
 |---|---|
 | `mount` | an element or a selector in the view's top row. The control fills it and takes the row's free width. |
 | `fields` | the view's own fields it can color by, in menu order: `{name, title, description?, values?, meanings?, value?}`. `name` is the field as the records hold it. `description` says what the field is, on its chips' hover and its menu row. `values` fixes the order of the values and their colors. A value given as `{name, color}` takes the label palette's color `color` (1 to 12: 1 blue, 2 orange, 3 green, 4 sky, 5 gold, 6 teal, 7 brown, 8 navy, 9 grass, 10 cerulean, 11 chestnut, 12 cyan), for example so that two values that often sit side by side do not take two blues; `{name, meaning}` says what the value means, on its chip's hover. `meanings`, `{value: meaning}`, says what values mean without declaring them, so they keep the order and colors the records give them. `value(record)` gives a record's value when it is not `record[name]`. |
-| `initial` | the field chosen before the analyst picks one; the first field by default |
+| `initial` | how the view opens until the analyst picks: a field's name, or `{field, on: [values]}`, that field with only those values colored and the others' records in gray. Without it, or with a name that is none of the fields, the view opens Off. Reset puts it back |
 | `chips` | does nothing: a value turned off keeps its records, in gray, whatever it says (`'filter'` hid them once). Filter by hides records ([rows-and-filters.md](rows-and-filters.md)) |
 | `strip` | the list that gets the tracks: an element, a selector, or `true` for the page |
 | `onChange(color)` | runs when the choice changes (Off among them), when a value is turned off or on, and when the values or colors of the label colored by change. Fetch and draw again here. |
@@ -215,10 +219,11 @@ elements with the class `thimble-details`) grow into place. A new view uses the 
 
 ## Reset
 
-Reset shows at the end of the row while the view is not as it opens: a value turned off (Color by's or Filter by's), a
-series of a key turned off, a time range zoomed in, the side panel open, or a search field or select in Color by's row
-changed. It puts them back and keeps the choices of Color by, Filter by and Rows. Tell it the
-page's own state, such as a menu's choice or the row opened, with `thimble.onReset`:
+Reset shows at the end of the row while the view is not as it opens: another Color by choice, a value turned off
+(Color by's or Filter by's) or a value that `initial` leaves uncolored turned on, a series of a key turned off, a time
+range zoomed in, the side panel not as it opens, or a search field or select in Color by's row changed. It puts them
+back: Color by as `initial` says (Off without it, or the label that is on). It keeps the choices of Filter by and Rows.
+Tell it the page's own state, such as a menu's choice or the row opened, with `thimble.onReset`:
 
 ```js
 thimble.onReset({
@@ -227,9 +232,10 @@ thimble.onReset({
 })
 ```
 
-`reset()` runs after the kit has put back its chips, its time ranges and the row's fields (each field hears its own
-`input` and `change` events), and Color by's and the ranges' `onChange` are not called then: draw the page once there.
-A page that gives no `reset` hears those `onChange` calls instead. `onReset` returns `{check}`: call `check()` after
+`reset()` runs after the kit has put back Color by, its time ranges and the row's fields (each field hears its own
+`input` and `change` events), and the ranges' `onChange` are not called then: draw the page once there. Color by's
+`onChange` is called after it only when Reset changed Color by's choice, so the page fetches by the new choice. A page
+that gives no `reset` hears those `onChange` calls instead. `onReset` returns `{check}`: call `check()` after
 the page changes its state without a click or a key, so Reset shows or hides.
 
 ## In the reader
@@ -267,7 +273,7 @@ for a record the label does not mark.
 - A label the analyst turns on, in the menu or anywhere in thimble, takes the first place, the color, unless Rows groups
   the lanes by it ([rows-and-filters.md](rows-and-filters.md)): a field that was the color gives way, and a label that
   was keeps its lane. When it is turned off again it leaves the choices, and the next is the color; with none left, the
-  field chosen last.
+  field chosen last, else the view as it opens.
 - Every choice of Color by, Rows and Filter by the page mounts must draw the view, Off and None among them: the view
   checks try each in turn, and each control's first choice again after the others, and fail the view on the choice
   whose drawing gives a script error, naming it. Guard what the page reads of a choice that can be null (`rows.by`,
