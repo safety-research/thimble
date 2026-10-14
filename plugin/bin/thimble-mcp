@@ -225,7 +225,9 @@ async def call_server(name: str, args: dict[str, Any], tool_use_id: str | None =
             "tool_use_id": tool_use_id}
     retry = _env_s(RETRY_ENV, CALL_RETRY_S)
     until = anyio.current_time() + retry
-    async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=3.0)) as client:
+    # trust_env=False: the server is on 127.0.0.1, so a proxy the analyst's environment names (HTTP_PROXY without
+    # NO_PROXY) must not carry the call
+    async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=3.0), trust_env=False) as client:
         boot = await _boot(client)
         while True:
             found = server()
@@ -399,7 +401,7 @@ async def subscription(route: str) -> None:
             if found is None:
                 raise ConnectionError(f"no token in {server_json()}")
             headers, proof = signed(found[1])
-            async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=3.0)) as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=3.0), trust_env=False) as client:
                 async with client.stream("GET", f"{found[0]}/api/events?{query}", headers=headers) as resp:
                     if resp.status_code != 200 or not proven(resp, proof):
                         await resp.aread()
