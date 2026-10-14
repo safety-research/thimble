@@ -69,8 +69,8 @@ Every `.jsonl` file has one JSON object per line.
   `telemetry/files-opened.jsonl` and the sends from the chats.
 - **Chat cadence** (sent, answered, latency, main against threads): `chats/index.jsonl` for each chat's kind, then in
   each log each `user` record from the browser or the terminal and the next `done` record.
-- **Phases**: the Start card's `start-run` row (and the orientation chat's `created_at`), the orientation's end (its
-  chat's `ts_end`), documents written (`documents/documents.jsonl`, `generated_at`).
+- **Phases**: the orientation chat's `created_at` (and, in an export from before 0.8.0, the browser Start's `start-run`
+  row), the orientation's end (its chat's `ts_end`), documents written (`documents/documents.jsonl`, `generated_at`).
 - **Sensemaking steps and facts**: coded by a reader from the whole record in time order: the transcripts (every
   prompt, tool call and output), the chats, `canvas/history.jsonl` and the telemetry.
 

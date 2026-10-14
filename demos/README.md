@@ -12,8 +12,8 @@ the download the first time they open. The export refuses a file that copies a l
 threshold](#the-threshold)). `thimble demo --export` without `--outputs-only` writes a full export, which does not
 belong here ([The full export](#the-full-export)).
 
-A dataset with no folder here opens with no analysis yet: `thimble demo` says so in one line, and Start in the page
-runs the orientation. A folder is committed only after a maintainer has exported a run and reviewed it ([Making
+A dataset with no folder here opens with no analysis yet: `thimble demo` says so in one line, and asking Claude for
+an orientation runs one. A folder is committed only after a maintainer has exported a run and reviewed it ([Making
 one](#making-one)).
 
 ## What a folder holds
@@ -121,13 +121,15 @@ each one written (backend/app/precached.py).
 1. Download the dataset as a user would, so the orientation runs on the same bytes. Point `--precaches` at an empty
    folder so that no pre-cache is installed: `thimble demo collusion-wiki --dir ~/demo-src --precaches /tmp/none`.
 2. Run the orientation in `~/demo-src/collusion-wiki` by one of two routes:
-   - **By hand.** Run `thimble` there. In Start, set the orientation's model to Opus 5.5 at xhigh effort, and start
-     it with no prompt. Keep the session running, since the orientation and the writer of its report run as its
-     subagents, and answer in the terminal any permission request your permission mode leaves to you.
+   - **By hand.** Run `thimble` there, then `/thimble:orient --model claude-opus-5-5 --effort xhigh` in the
+     terminal, and once the orientation has finished, `/thimble:write report`. Keep the session running, since the
+     orientation and the writer of its report run as its subagents, and answer in the terminal any permission request
+     your permission mode leaves to you.
    - **Scripted.** Run `scripts/dev/precache_orientation.py`, which runs `thimble` on a tmux socket of its own and
-     presses Start as the browser does.
+     posts the start the browser's Start card sent (POST /api/ws/<c>/start). Since 0.8.0 the orientation writes no
+     report of its own, so this route leaves none; take the route by hand for a pre-cache with a report.
 
-   Wait until it is done: its views built and its report written. Claude's cyber safeguards flag mythos-5 under Opus
+   Wait until it is done: the orientation finished, each view proposal you accepted built, and its report written. Claude's cyber safeguards flag mythos-5 under Opus
    5.5. On 2026-10-05, an earlier demo dataset ran to the end on claude-opus-4-8, but the same safeguard stopped its
    critic, two verification agents and one view build (the orientation's thread says so).
 3. Export it from the checkout: `thimble demo --export demo-collusion-wiki demos/ --outputs-only` (the workspace's name,
@@ -181,8 +183,8 @@ gitleaks' findings) and what it left out, each with its size. The manifest holds
 
 `thimble demo <dataset> --precaches <out>` installs it. Each transcript goes where Claude Code keeps it, under a new
 session id that the workspace's files name in place of the old one, so every thread shows its steps. Its agents ran as
-subagents of the exporter's session, so none of them can be continued: the orientation's thread says so, and Start
-runs a new orientation.
+subagents of the exporter's session, so none of them can be continued: the orientation's thread says so, and asking
+Claude for an orientation runs a new one.
 
 A full export holds the dataset's text, so `scripts/check_content.py` refuses it under `demos/`.
 
