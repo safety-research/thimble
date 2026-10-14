@@ -13,7 +13,7 @@ import { mediaOf, mediaUrl, type MediaRef } from '../lib/media'
 import { refreshProposals } from '../lib/proposals'
 import { fragmentIn, nearestLine, parseRef } from '../lib/refs'
 import { track } from '../lib/telemetry'
-import type { Concept, LabelsForPath, Proposal, SourceKind, SourcePage, SourceRecord, TimeHint, TranscriptHint, View } from '../lib/types'
+import type { Concept, LabelsForPath, SourceKind, SourcePage, SourceRecord, TimeHint, TranscriptHint, View } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { failureText, ReportProblemButton } from '../shell/ProblemReport'
 import { clearMatches, firstMatchFrom, lineAsked, markMatches, markSpots, matchCount, matchNumber, stepInLine, stepMatch, unfoldAt, type MatchAt } from './find'
@@ -36,8 +36,9 @@ import { accepts, slugOf, viewValue } from './viewChoice'
 import { fileLineShows, ResidueList, useLabelsOfFile, useResidueOpen, useViewNotes, ViewFilter, ViewHeadLine } from './ViewChrome'
 import { ViewerFrame } from './ViewerFrame'
 import { usePinnedView, ViewUpdated } from './viewVersion'
-import { DeleteViewConfirm, ProposalOption } from './ViewsBar'
+import { DeleteViewConfirm } from './ViewsBar'
 import { useTypeViewers } from './typeViewers'
+import { markOpened, useReadyViews, useUpdatedViews } from './viewReady'
 import { compact, errMsg, LaneHead, recordExcerpt, targetOf, type ViewDef, type ViewProps } from './views/common'
 import { clockOf, keysFor, nameOf, pick, textOf, turnOver } from './views/transcript'
 import { withoutEscapes } from './views/raw'
@@ -361,22 +362,15 @@ function PdfPageLabels({ items, page, onPage, path }: { items: PageMarks[]; page
 /** Where the File browser keeps the mode picked for a file: a built-in view's type, or `v:<slug>` for a file viewer. */
 export const pickKey = (workspace: string, path: string): string => storageKey(workspace, `viewOf:${path}`)
 
-/** A proposed view for the file's type, offered beside the modes until the analyst dismisses it. */
-function useOffered(ws: string, proposal: Proposal | null, on: boolean): { offered: Proposal | null; dismiss: (p: Proposal) => void } {
-  const [dismissed, setDismissed] = useState<string | null>(null)
-  const offered = on && proposal && proposal.slug !== dismissed ? proposal : null
-  const dismiss = (p: Proposal) => {
-    track('view-dismiss', { target: `view:${p.slug}` })
-    setDismissed(p.slug)
-    api
-      .deleteProposal(ws, p.slug)
-      .then(() => refreshProposals(ws))
-      .catch((e: Error) => {
-        setDismissed(null)
-        bus.emit('toast', { text: `Could not remove ${p.name}. ${e.message}`, kind: 'error' })
-      })
-  }
-  return { offered, dismiss }
+/** A file viewer's place in a file's modes: a viewer built or updated and not opened since wears the view chip's
+ * accent outline (`is-fresh`), and showing it counts as opening it (files/viewReady.ts). */
+function useFreshViewers(ws: string, shown: string | undefined): (slug: string) => string | undefined {
+  const ready = useReadyViews(ws)
+  const updated = useUpdatedViews(ws)
+  useEffect(() => {
+    if (shown) markOpened(ws, shown)
+  }, [ws, shown])
+  return (slug) => (ready.includes(slug) || updated.includes(slug) ? 'is-fresh' : undefined)
 }
 
 /** The × a file viewer built for the workspace shows on hover in a file's modes, which deletes it once confirmed, as
@@ -416,7 +410,7 @@ function PdfReader({ workspace, path, targetRef, lead, end, labels, only, onMode
   const [pick, setPick] = useState<string | null>(() => readStorage<string | null>(memoryKey, null))
   useEffect(() => bus.on('fileMode', (e) => e.path === path && setPick(e.mode)), [path])
   const fragment = fragmentIn(targetRef, path)
-  const types = useTypeViewers(workspace, path, !only, true)
+  const types = useTypeViewers(workspace, path, !only, false)
   const autoViewer = fragment != null && page == null ? types.viewers.find((v) => accepts(v, fragment)) : undefined
   const pickedSlug = slugOf(pick)
   const viewer = only ? undefined : pickedSlug ? (types.viewers.find((v) => v.slug === pickedSlug) ?? autoViewer) : pick ? undefined : autoViewer
@@ -436,8 +430,8 @@ function PdfReader({ workspace, path, targetRef, lead, end, labels, only, onMode
   const fileLabels = useFileLabels(labels, path)
   const pageLabels = usePdfPageLabels(workspace, labels, path)
   const { removable, confirmDelete } = useViewerDelete(workspace, pickedSlug, forgetPick)
-  const { offered, dismiss } = useOffered(workspace, types.proposal, !only && !viewer)
-  const options = [{ value: PDF_MODE, label: 'PDF' }, ...(only ? [] : types.viewers.map((v) => ({ value: viewValue(v.slug), label: v.name, ...removable(v) })))]
+  const fresh = useFreshViewers(workspace, viewer?.slug)
+  const options = [{ value: PDF_MODE, label: 'PDF' }, ...(only ? [] : types.viewers.map((v) => ({ value: viewValue(v.slug), label: v.name, className: fresh(v.slug), ...removable(v) })))]
   return (
     <div className="reader">
       {lead !== undefined && (
@@ -446,10 +440,9 @@ function PdfReader({ workspace, path, targetRef, lead, end, labels, only, onMode
           <span className="reader-spacer" />
           <DownloadButton workspace={workspace} path={path} />
           {end}
-          {(options.length > 1 || offered) && (
+          {options.length > 1 && (
             <span className="reader-modes">
               <Segmented label="Mode" size="md" value={viewer ? viewValue(viewer.slug) : PDF_MODE} onChange={onPick} options={options} />
-              {offered && <ProposalOption ws={workspace} p={offered} size="md" onDismiss={() => dismiss(offered)} onAccept={forgetPick} />}
               {confirmDelete}
             </span>
           )}
@@ -1388,12 +1381,12 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     })
   }
 
-  // a viewer for the file's type shows in its place: the one picked for this file, else, while no built-in mode is
-  // picked and the best one is Raw (or the Timeline, which a viewer written for the type goes before), the first that
-  // reads the ref's fragment
+  // a viewer for the file's type shows in its place only when it was picked last for this file, or, while no built-in
+  // mode is picked and the best one is Raw (or the Timeline), when a ref's fragment needs it: the first that reads it.
+  // Where the best mode is Raw and no viewer claims the file, thimble may propose one for its type (typeViewers.ts)
   const rawBest = builtins.loaded && (builtins.auto.type === 'raw' || builtins.auto.type === 'timeline' || binary)
   const types = useTypeViewers(workspace, path, !only && !isDatabase, rawBest)
-  const autoViewer = rawBest ? types.viewers.find((v) => fragment == null || accepts(v, fragment)) : undefined
+  const autoViewer = rawBest && fragment != null ? types.viewers.find((v) => accepts(v, fragment)) : undefined
   const pickedSlug = slugOf(pick)
   const viewer = only ? undefined : pickedSlug ? types.viewers.find((v) => v.slug === pickedSlug) ?? autoViewer : pick ? undefined : autoViewer
   const modeTitle = viewer?.name ?? view?.title
@@ -1405,13 +1398,13 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     setPick(v)
     writeStorage(memoryKey, v)
   }
-  // a viewer built from the chip opens as the file's mode, even after a pick of Raw
+  // a deleted viewer's pick is forgotten, so the file opens in its best built-in mode again
   const forgetPick = () => {
     setPick(null)
     writeStorage(memoryKey, null)
   }
   const { removable, confirmDelete } = useViewerDelete(workspace, pickedSlug, forgetPick)
-  const { offered, dismiss } = useOffered(workspace, types.proposal, !only && !viewer)
+  const fresh = useFreshViewers(workspace, viewer?.slug)
   // a file that could not be read says so, and so does a binary one (an archive, a file of a type no view reads), whose
   // bytes read as text would be noise
   const noViewReason: string | null = isDatabase || !loaded || loading ? null : error && records.length === 0 ? `Could not read it. ${error}` : binary ? binaryReason(binarySize ?? builtins.binarySize) : null
@@ -1441,6 +1434,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
       : types.viewers.map((v) => ({
           value: viewValue(v.slug),
           label: v.name,
+          className: fresh(v.slug),
           ...removable(v),
         }))),
     ...builtinOptions.filter((o) => o.value === 'raw'),
@@ -1456,10 +1450,9 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
             {!isDatabase && !binary && loaded && !viewer && !whole && <Button variant="icon" size="sm" icon="search" title="Find in the file" className="reader-find-open" active={!!finder} onClick={() => (finder ? closeFinder() : openFinder('find'))} />}
             <DownloadButton workspace={workspace} path={path} />
             {end}
-            {!only && builtins.loaded && view && (options.length > 1 || offered) && (
+            {!only && builtins.loaded && view && options.length > 1 && (
               <span className="reader-modes">
                 <Segmented label="Mode" size="md" value={viewer ? viewValue(viewer.slug) : view.type} onChange={onPick} options={options} />
-                {offered && <ProposalOption ws={workspace} p={offered} size="md" onDismiss={() => dismiss(offered)} onAccept={forgetPick} />}
                 {confirmDelete}
               </span>
             )}

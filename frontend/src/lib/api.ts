@@ -384,7 +384,8 @@ export const api = {
   /** what thimble proposes for a file opened in the File browser: whether a viewer may be proposed for its type, and
    * the proposal for the type when there is one (backend views.suggestion_for) */
   viewSuggestions: (c: string, path: string) => j<ViewSuggestion>(`${ws(c)}/views/suggestions${q({ path })}`),
-  /** ask for a viewer for the type of a file the analyst opened: the suggested proposal's slug, or null */
+  /** ask for a viewer for the type of a file the analyst opened: the slug of the view proposal it wrote (which the
+   * stream's `view {status: suggested}` brings to the view proposal card), or null */
   suggestView: (c: string, path: string) => j<{ slug: string | null }>(`${ws(c)}/views/suggest`, { method: 'POST', body: JSON.stringify({ path }) }),
   /** Accept on a view proposal: its build queued as one the analyst asked for; a start that cannot happen comes back
    * as the row's `refused`. 403 without the analyst's cookie. */
