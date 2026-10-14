@@ -1890,6 +1890,10 @@ def main_fence(cwd: Path, c: str | None = None, root: Path | None = None, sessio
     trees = [str(d) for d in ticket_trees()]
     # the agents' work folders, which their Read and Edit reach unasked (userconf.main_rules) as working directories
     work = [str(d) for d in userconf.agent_work_dirs(c)]
+    try:  # the workspace first, private and with its trusted files (config.workspace_dir), before the work folders in it
+        config.workspace_dir(c)
+    except (OSError, ValueError):
+        pass
     for tree in [*work, *trees]:
         # Claude Code drops an additionalDirectories folder that does not exist as main starts, and the first ticket
         # makes this one later, so outside auto mode a ticket's agent was asked about each Read of its worktree (live

@@ -69,6 +69,8 @@ def test_the_fence_keeps_the_corpus_read_only_and_lets_main_write_only_the_agent
     assert perms["additionalDirectories"] == [str(ws / d) for d in ("orient/work", "writers", "critique-work",
                                                                      "check-work", "views-work")]
     assert all(Path(d).is_dir() for d in perms["additionalDirectories"]), "Claude Code drops a folder that is missing"
+    assert not ws.stat().st_mode & 0o077 and (ws / "trusted").is_dir(), \
+        "the workspace those folders are made in is made first as config.workspace_dir makes it: private, trusted files"
     for p in ("checks/**", "chats/**", "extensions/**", "extension/extension.json", "orient/run.json", "trusted/**",
               "views/**"):
         assert f"Edit(/{ws / p})" in perms["deny"], p
