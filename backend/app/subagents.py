@@ -34,6 +34,11 @@ Runs and ends. A run is one turn sequence of an agent, from its start or a follo
 a turn's end, which ends the run only when no child of the agent runs and no hand-back follows within HANDBACK_WAIT_S.
 Each role's handlers (Type.started, Type.ended, Type.refused) do what its run's start, end and refusal mean for it.
 
+Notices. A start or a message that did not happen, and a run that ended failed, are told in the foreground with their
+fix (notices.agent_refused, agent_failed), under the agent's key; its next start and a run that ended done clear it. A
+role whose module settles what its end means (Type.own_notices: a view's build, a report check, a code ticket) tells
+its own failures there, since a run's status is not its outcome (a build that ends failed may be repaired).
+
 Attribution. A PreToolUse hook on thimble's tools records which agent makes each call (callers.jsonl); caller() names
 the agent, and its key is the session the call runs as (tools.call_route), a descendant's that of its thimble ancestor.
 
@@ -149,7 +154,8 @@ class Type:
     Main's plan mode (_plan_end): `left_work` names `module:attr`, a function (c, run) of whether a run that plan mode
     held at its end left its work all the same (a writer's saved document); one that did not ends failed, not done. A
     role with none left nothing to count on then. With `gated` the role's end handler judges what the run left by its
-    gate, as after any run, and fails it with plan_failed_line when nothing passes (a view's build, a code ticket)."""
+    gate, as after any run, and fails it with plan_failed_line when nothing passes (a view's build, a code ticket).
+    With `own_notices` the role's module tells its failures itself (module note, notices)."""
 
     role: str
     kind: str | None
@@ -165,6 +171,7 @@ class Type:
     keeps_chat: bool = False
     left_work: str = ""
     gated: bool = False
+    own_notices: bool = False
 
 
 TYPES: dict[str, Type] = {
@@ -182,17 +189,18 @@ TYPES: dict[str, Type] = {
                    "app.write_session:subagent_refused", left_work="app.write_session:left_work"),
     "view-builder": Type("view-builder", tools.VIEW_SESSION, "dev", "dev", "dev", "app.view_tools:builder_definition",
                          "app.view_tools:BUILDER_TOOLS", "app.dev:build_started", "app.dev:build_ended",
-                         "app.dev:build_refused", gated=True),
+                         "app.dev:build_refused", gated=True, own_notices=True),
     "view-reviewer": Type("view-reviewer", tools.REVIEW_SESSION, "dev", "dev", "dev",
                           "app.view_tools:reviewer_definition", "app.view_tools:REVIEWER_TOOLS",
                           "app.view_review:subagent_started", "app.view_review:subagent_ended",
                           "app.view_review:subagent_refused", left_work="app.view_review:left_work"),
     "check": Type("check", tools.CHECK_SESSION, "check", "checks", "checks", "app.checks:definition",
                   "app.checks:OWN_TOOLS", "app.checks:subagent_started", "app.checks:subagent_ended",
-                  "app.checks:subagent_refused"),
+                  "app.checks:subagent_refused", own_notices=True),
     "dev-ticket": Type("dev-ticket", tools.TICKET_SESSION, "dev", "dev", "dev", "app.ticket_tools:definition",
                        "app.ticket_tools:TICKET_TOOLS", "app.dev:ticket_started", "app.dev:ticket_ended",
-                       "app.dev:ticket_refused", when="app.dev:tickets_run_here", keeps_chat=True, gated=True),
+                       "app.dev:ticket_refused", when="app.dev:tickets_run_here", keeps_chat=True, gated=True,
+                       own_notices=True),
     HELPER: Type(HELPER, None, None, "subagents", "orientation", "app.subagents:helper_definition"),
 }
 
@@ -548,6 +556,31 @@ def _refused(c: str, rec: dict[str, Any]) -> None:
         _resolve(t.refused)(c, rec)
     except Exception:  # noqa: BLE001 — the request is refused either way
         log.exception("%s: the %s's refusal handler failed", c, rec.get("role"))
+    _tell_refused(c, t, rec)
+
+
+# why a typed start did not happen when main's turn ended without its call (NO_CALL), in the notice's words: the
+# refusal's own reason is main's last words then
+NO_CALL_WHY = "Claude ended its turn without the call that starts it; ask Claude again"
+
+
+def _tell_refused(c: str, t: Type, rec: dict[str, Any]) -> None:
+    """A start or a message that did not happen, told in the foreground (module note, notices), unless the role tells
+    its own."""
+    from . import notices  # noqa: PLC0415
+
+    kind = rec.get("kind")
+    if t.own_notices or kind not in ("start", "message"):
+        return
+    why = NO_CALL_WHY if rec.get("refused_kind") == NO_CALL else rec.get("reason") or rec.get("refused_kind")
+    try:
+        a = (agent(c, str(rec.get("agent") or "")) or {}) if kind == "message" else {}
+    except Exception:  # noqa: BLE001 — told without its chat
+        a = {}
+    chat = str(a.get("chat") or "") or None
+    title = str((rec.get("chat") or {}).get("title") or "") if isinstance(rec.get("chat"), dict) else ""
+    notices.agent_refused(c, role=t.role, key=rec.get("key") or rec.get("id"), why=why, chat=chat, title=title,
+                          message=kind == "message")
 
 
 def expire(c: str, rid: str) -> dict[str, Any] | None:
@@ -1116,6 +1149,7 @@ def ensure_chat(c: str, agent_id: str) -> dict[str, Any] | None:
     run = _run(c, agent_id, {**a, "chat": meta["id"]})
     with contextlib.suppress(Exception):
         session.expect_agent(c, agent_id, str(meta["id"]), t.chat_role)
+    _started_notice(c, t, a.get("key"))
     if run is not None and t.started:
         try:
             _resolve(t.started)(c, run, r)
@@ -1148,6 +1182,7 @@ def _continue_chat(c: str, agent_id: str, a: dict[str, Any], r: dict[str, Any], 
     run = _run(c, agent_id, {**snap, "chat": chat, "run": k})
     with contextlib.suppress(Exception):
         session.expect_agent(c, agent_id, chat, t.chat_role)
+    _started_notice(c, t, snap.get("key"))
     if run is not None and t.started:
         try:
             _resolve(t.started)(c, run, r)
@@ -1176,12 +1211,36 @@ def run_again(c: str, agent_id: str, by: str = "") -> Run | None:
                                 **({"continue": None} if was_cancelled else {}))
     run = _run(c, agent_id, snap)
     t = TYPES[str(snap["role"])]
+    _started_notice(c, t, snap.get("key"))
     if run is not None and t.started:
         try:
             _resolve(t.started)(c, run, request(c, str(snap.get("request") or "")) or {})
         except Exception:  # noqa: BLE001
             log.exception("%s: the %s's start handler failed for run %s", c, t.role, run.k)
     return run
+
+
+def _started_notice(c: str, t: Type, key: Any) -> None:
+    """An agent started (a run, a follow-up, a continuation): a notice of its earlier failure or refusal goes (module
+    note, notices), unless its role tells its own."""
+    from . import notices  # noqa: PLC0415
+
+    if key and not t.own_notices:
+        notices.cleared(c, key)
+
+
+def _ended_notice(c: str, t: Type | None, snap: dict[str, Any], status: str, report: str | None) -> None:
+    """A run ended: a failed one is told in the foreground with its fix, with Open on its chat, and one that ended done
+    clears the agent's notice (module note, notices), unless its role tells its own."""
+    from . import notices  # noqa: PLC0415
+
+    key = snap.get("key")
+    if t is None or t.own_notices or not key:
+        return
+    if status == "failed":
+        notices.agent_failed(c, role=t.role, key=key, error=report, chat=str(snap.get("chat") or "") or None)
+    elif status == "done":
+        notices.cleared(c, key)
 
 
 def _bare(model: str) -> str:
@@ -1274,6 +1333,7 @@ def run_ended(c: str, agent_id: str, status: str, report: str | None, *, source:
             _resolve(t.ended)(c, run, status, report or "")
         except Exception:  # noqa: BLE001 — the run has ended either way
             log.exception("%s: the %s's end handler failed", c, t.role)
+    _ended_notice(c, t, snap, status, report)
     return True
 
 

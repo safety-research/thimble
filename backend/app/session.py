@@ -16,7 +16,8 @@ or local commands such as /model), browser events, task notifications, peer mess
 and `done` at turn_duration; any record shape it does not cover disables it with one `error` record. Safety stops,
 interrupts and long waits (read from `<claude config>/sessions/<pid>.json`) become one note each; a reply Claude's
 safeguards switched to another model becomes a notice (notices.py, FALLBACK_TEXT), shown in the foreground and kept in
-its chat, main's or an agent's.
+its chat, main's or an agent's, and so does an API error that stops a side thread's fork or a helper of one of
+thimble's agents (_sub_error; thimble's agents' own failures are told where their runs end, subagents.run_ended).
 At the end of each turn of main the view proposer hears whether the turn answered the analyst (proposer.turn_ended),
 and when a side thread answers (proposer.trigger).
 
@@ -173,11 +174,13 @@ SAFETY_ALERT = ("Claude Code is waiting in your terminal: Claude's safety check 
 # `session`, or `local` for one reply), and in a subagent's as that record or as a reply with stop_reason refusal and
 # the next replies on another model (2.1.295, workflow agents); each becomes a notice (notices.post) that names the
 # chat it happened in. A block: the request ends with Claude Code's API error line (isApiErrorMessage, stop_reason
-# refusal), which the chat shows as its API error card; its text record carries `refusal: true`.
+# refusal), which the chat shows as its API error card; its text record carries `refusal: true`, and the failure of an
+# agent it stopped is told as any API error's (_sub_error, subagents.run_ended).
 FALLBACK_SUBTYPE = "model_refusal_fallback"
 FALLBACK_TEXT = "Claude's safeguards switched this reply from {model} to {fallback}."
 AGENT_FALLBACK_TEXT = "Claude's safeguards switched a reply of {subject} from {model} to {fallback}."
 FALLBACK_KEY = "safeguards:{chat}"  # the notices' key: a later switch in the same chat updates the notice
+SUB_ERROR_TEXT = "{subject} stopped with an error: {why}."  # a side thread's fork or a helper an API error stopped
 REFUSAL = "refusal"  # the stop_reason of a reply the model's safeguards stopped
 
 
@@ -1909,6 +1912,24 @@ def _switched(c: str, chat: str, model: Any, fallback: Any, *, sub: Sub | None =
         log.exception("%s: the safeguards' switch in %s was not told", c, chat)
 
 
+def _sub_error(lv: Live, sub: Sub) -> None:
+    """An API error stopped a side thread's fork or a helper of one of thimble's agents (sub.api_error): a notice with
+    its fix (notices.reason), under the thread's or the helper's key. Thimble's own agents' failures are told where
+    their runs end (subagents.run_ended); main's own subagents report to main."""
+    from . import notices  # noqa: PLC0415
+
+    if not sub.api_error or sub.thimble or not (sub.thread or sub.root):
+        return
+    try:
+        name, subject = _sub_who(lv.c, sub)
+        why, fix = notices.reason(sub.api_error)
+        key = f"thread:{sub.chat}" if sub.thread else f"helper:{sub.agent_id or sub.chat}"
+        notices.post(lv.c, chat=sub.chat, kind="agent", text=SUB_ERROR_TEXT.format(subject=subject, why=why),
+                     agent=name, action=fix, key=key)
+    except Exception:  # noqa: BLE001
+        log.exception("%s: the API error in %s was not told", lv.c, sub.chat)
+
+
 def agent_error(c: str, agent_id: str) -> str | None:
     """Claude Code's error line when the latest reply of the current run of one of thimble's agents is an API error
     (api_error_of): why the run failed. None when the mirror does not follow the agent, or its latest reply is not one."""
@@ -2238,8 +2259,17 @@ def _finish_sub(lv: Live, sub: Sub, status: str, result: str | None, *, kind: st
             agents.finish_agent(lv.c, sub.chat, status, (sub.report or result or "")[:RESULT_LIMIT] or None)
     except Exception:  # noqa: BLE001 — a chat deleted under the mirror
         log.debug("%s: subagent chat %s could not be finished", lv.c, sub.chat, exc_info=True)
-    if sub.thread and kind is None and status in ("done", "completed"):
+    if sub.thread and kind is None and status in ("done", "completed") and not sub.api_error:
+        _thread_answered(lv, sub.chat)
         _proposer_after_thread(lv, sub.chat)
+
+
+def _thread_answered(lv: Live, chat: str) -> None:
+    """A side thread's fork answered: a notice of an earlier API error of the thread's is over (_sub_error)."""
+    from . import notices  # noqa: PLC0415
+
+    with contextlib.suppress(Exception):
+        notices.clear(lv.c, f"thread:{chat}")
 
 
 def _proposer_after_thread(lv: Live, chat: str) -> None:
@@ -2807,6 +2837,7 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
     if rec.get("type") != "assistant":
         return 0
     sub.api_error = api_error_of(rec)
+    _sub_error(lv, sub)
     _sub_safeguards(lv, sub, rec)
     blocked = _blocked(rec)
     if sub.thimble and not sub.ran:

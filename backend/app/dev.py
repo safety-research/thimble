@@ -52,6 +52,12 @@ build failed with Retry (views.stop_build, _view_stopped). Main's quit ends ever
 fail with MAIN_ENDED and Retry; nothing starts again by itself. Where an active extension runs the dev agent with a
 program (roles.py), that program builds the view instead, turn by turn (program_build), checked the same way.
 
+Notices. A view whose build failed after the repairs it gets, a change to a view that failed, a build that did not
+start, and a code ticket that failed are told in the foreground with their fix (notices.post, under the agent's key
+notices.agent_key: Retry on a view), since the analyst may be in another chat; a build that starts or passes, and a
+ticket that starts or is applied, clear it (_view_notice, _ticket_notice). Main's quit and the analyst's Stop tell
+nothing.
+
 Permissions. A ticket's agent and a view builder are subagents of main: they run in main's permission mode and fence,
 and ask as main does, in the analyst's terminal. thimble's own questions about its code stay on the ticket's card, in
 every mode, Bypass included (CODE_TOOL): its chat hosts the ticket's key (agent_session.host) for them alone, and a
@@ -537,6 +543,7 @@ def _fail_now(t: dict[str, Any], why: str) -> dict[str, Any]:
     _close_chat(rec, "failed", why)
     _chip(rec, f"{_label(rec)} failed: {why}", "failed")
     _ticket_event(rec, "failed")
+    _ticket_notice(rec)
     return rec
 
 
@@ -2324,6 +2331,9 @@ def ticket_started(c: str, run: Any, req: dict[str, Any]) -> None:
     rec = _update(tid, agent_id=run.agent_id, chat=run.chat or t.get("chat"), request=None,
                   values=run.values or t.get("values")) or t
     _ticket_event(rec, "running")
+    from . import notices  # noqa: PLC0415
+
+    notices.cleared(c, run.key)
 
 
 def ticket_refused(c: str, req: dict[str, Any]) -> None:
@@ -2653,6 +2663,34 @@ def _finish(rec: dict[str, Any], summary: str | None) -> None:
         why = str(rec.get("error") or "no reason given")
         _chip(rec, f"{_label(rec)}: {why}" if why.startswith(status) else f"{_label(rec)} {status}: {why}", status)
     _ticket_event(rec, status)
+    _ticket_notice(rec)
+
+
+# a code ticket's end the notices tell (module note, notices), by its status: {subject} the ticket, {why} the reason
+TICKET_TEXTS = {"failed": "{subject} failed: {why}.", "needs manual merge": "{subject} needs a manual merge: {why}.",
+                "rolled back": "{subject} was rolled back: {why}."}
+
+
+def _ticket_notice(rec: dict[str, Any]) -> None:
+    """A code ticket ended: a failure is told in the foreground, with Open on its thread, and an apply clears the
+    ticket's notice. A ticket with no workspace (`thimble fix`) tells the terminal itself. Never raises."""
+    from . import notices  # noqa: PLC0415
+
+    c, status = rec.get("workspace"), str(rec.get("status") or "")
+    if not c:
+        return
+    key = ticket_key(str(rec["id"]))
+    try:
+        if status == "applied":
+            notices.cleared(str(c), key)
+        elif status in TICKET_TEXTS:
+            title = str(rec.get("title") or "untitled")
+            name, subject = notices.who("dev-ticket", f"#{rec['n']} ({title})" if rec.get("n") else title)
+            words, fix = notices.reason(rec.get("error") or "no reason was given")
+            notices.post(str(c), kind="agent", text=TICKET_TEXTS[status].format(subject=subject, why=words), agent=name,
+                         chat=str(rec.get("chat") or "") or None, action=fix, key=notices.agent_key(key))
+    except Exception:  # noqa: BLE001 — the ticket has ended either way
+        log.exception("the end of ticket %s was not told", rec.get("id"))
 
 
 async def _roll_back(tid: str, why: str, run_log: Log) -> str | None:
@@ -3167,6 +3205,7 @@ def build_started(c: str, run: Any, req: dict[str, Any]) -> None:
                                  session=None, session_id=None, values=run.values or None)
     if prop is not None:
         views._emit(c, slug, "building", chat=run.chat)
+    _view_cleared(c, slug)
 
 
 def build_refused(c: str, req: dict[str, Any]) -> None:
@@ -3201,6 +3240,7 @@ def build_refused(c: str, req: dict[str, Any]) -> None:
     else:
         views.update_proposal(c, slug, status="failed", error=reason[:ERROR_CHARS], refused=refused)
         views._emit(c, slug, "failed", chat=prop.get("chat"), refused=refused)
+        _view_notice(c, prop or {"slug": slug}, BUILD_REFUSED_TEXT, reason, chat=prop.get("chat"))
     _start_views()
 
 
@@ -3227,6 +3267,7 @@ def register_pass(c: str, slug: str, agent_id: str | None) -> dict[str, Any]:
     views.update_proposal(c, slug, changed=None, change=None, revision=None, failed_change=None, last_report=None,
                           finish={"agent": agent_id, "result": "pass", "version": view.get("version")})
     views.drop_built_copy(c, slug)
+    _view_cleared(c, slug)
     try:
         session.push_event(c, "view", views.built_line(view), view=slug)
     except Exception:  # noqa: BLE001 — the view is built; main learns its forms at its next prompt render
@@ -3484,6 +3525,8 @@ def _change_failed_chip(c: str, prop: dict[str, Any], why: str) -> None:
                     status="stopped" if quit_ else "failed")
     except Exception:  # noqa: BLE001
         log.exception("could not chip the failed change to %s/%s", c, prop.get("slug"))
+    if not quit_:
+        _view_notice(c, prop, CHANGE_FAILED_TEXT, why, chat=prop.get("chat"))
 
 
 def _view_failed(c: str, slug: str, error: str, chat: str | None = None) -> None:
@@ -3508,6 +3551,38 @@ def _view_failed(c: str, slug: str, error: str, chat: str | None = None) -> None
     views._emit(c, slug, "failed", chat=chat)
     if chat:
         _close_chat({"workspace": c, "chat": chat}, "failed", error)
+    if error != MAIN_ENDED:
+        _view_notice(c, current, BUILD_FAILED_TEXT, error, chat=chat)
+
+
+# the notices of a view's build (module note, notices): {name} the view's, {why} the failure in plain words
+BUILD_FAILED_TEXT = "The view {name} failed to build: {why}."
+BUILD_REFUSED_TEXT = "The build of the view {name} didn't start: {why}."
+CHANGE_FAILED_TEXT = "The change to the view {name} failed, so the view is as it was: {why}."
+
+
+def _view_notice(c: str, prop: dict[str, Any], text: str, why: Any, chat: Any = None) -> None:
+    """A view's build or change failed, or its build did not start: the notice in the foreground with Retry, under the
+    build's key, with Open on its thread. Never raises."""
+    from . import notices  # noqa: PLC0415
+
+    try:
+        slug = str(prop.get("slug") or "")
+        name = str(prop.get("name") or slug)
+        words, fix = notices.reason(why)
+        retry_ = {"label": "Retry", "do": "view-retry", "slug": slug}
+        notices.post(c, kind="view", text=text.format(name=name, why=words), agent=notices.who("view-builder", name)[0],
+                     chat=str(chat) if chat else None, action=[retry_, fix] if fix else retry_,
+                     key=notices.agent_key(view_key(slug)))
+    except Exception:  # noqa: BLE001 — the view has failed either way
+        log.exception("%s: the failure of the view %s was not told", c, prop.get("slug"))
+
+
+def _view_cleared(c: str, slug: str) -> None:
+    """A view's build started or passed: a notice of its earlier failure goes."""
+    from . import notices  # noqa: PLC0415
+
+    notices.cleared(c, view_key(slug))
 
 
 def _view_stopped(c: str, slug: str, chat: str | None = None) -> None:

@@ -29,6 +29,9 @@ the analyst's last correction of it (rerun_after_verdicts), thimble runs every c
 and main hears which of them it should write a takeaway for again
 (`rerun`, or inside `label_done`). bring_current reruns labels whose rows were made under another definition before a
 card runs on POST .../regenerate.
+Notices: a run that fails, or that leaves units it could not label, is told in the foreground (notices.post, under
+`label:<id>`), and so are classifier calls Claude's safeguards switched to the fallback model; a run with no failure
+clears the first (_label_notice).
 """
 from __future__ import annotations
 
@@ -2252,6 +2255,54 @@ async def _backoff(delay: float, cancel: threading.Event) -> None:
 
 MESSAGES_KEPT = 3  # distinct problem messages carried on a run's summary
 FALLBACK_MESSAGE = "Downgrading {model} to {fallback}"
+# the notices of a label's runs (module note): {name} the label's, {why} the failure in plain words
+LABEL_FAILED_TEXT = "The label {name} failed: {why}."
+LABEL_UNITS_FAILED_TEXT = "The label {name} couldn't label {failed} of {total}: {why}."
+LABEL_FALLBACK_TEXT = "Claude's safeguards switched {n} of the label {name}'s calls from {model} to {fallback}."
+
+
+def _label_notice(c: str, concept: dict, *, error: Any = None, failed: int = 0, total: Any = None,
+                  message: str | None = None) -> None:
+    """A run of the label ended: an `error`, or `failed` units it could not label, is told in the foreground under
+    `label:<id>`, and a run with neither clears it. Never raises."""
+    from . import notices  # noqa: PLC0415
+
+    key, name = f"label:{concept['id']}", str(concept.get("name") or concept["id"])
+    try:
+        if error is None and not failed:
+            notices.clear(c, key)
+            return
+        if error is not None:
+            why, fix = notices.reason(error, server=True)
+            text = LABEL_FAILED_TEXT.format(name=name, why=why)
+        else:
+            problems = [m for m in str(message or "").split("; ") if m and not m.startswith("Downgrading ")]
+            why, fix = notices.reason("; ".join(problems) or "the classifier gave no label for them", server=True)
+            noun = {"agent": "file", "run": "run", "cell": "card", "span": "sentence"}.get(str(concept.get("unit")),
+                                                                                         "record")
+            of = f"{int(total):,} {noun}s" if isinstance(total, int) and total else f"its {noun}s"
+            text = LABEL_UNITS_FAILED_TEXT.format(name=name, failed=f"{failed:,}", total=of, why=why)
+        notices.post(c, kind="label", text=text, agent=f"Label: {name}", action=fix, key=key)
+    except Exception:  # noqa: BLE001 — the run has ended either way
+        log.exception("the end of a run of the label %s was not told", key)
+
+
+def _fallback_notice(c: str, concept: dict, fell_back: dict[tuple[str, str], int]) -> None:
+    """Classifier calls of the run that Claude's safeguards switched to the fallback model, told in the foreground under
+    `safeguards:label:<id>`. Never raises."""
+    from . import notices  # noqa: PLC0415
+    from .session import model_label  # noqa: PLC0415
+
+    if not fell_back:
+        return
+    try:
+        (refused, fallback), n = max(fell_back.items(), key=lambda kv: kv[1])
+        name = str(concept.get("name") or concept["id"])
+        notices.post(c, kind="safeguards", key=f"safeguards:label:{concept['id']}", agent=f"Label: {name}",
+                     text=LABEL_FALLBACK_TEXT.format(n=f"{sum(fell_back.values()):,}", name=name,
+                                                     model=model_label(refused), fallback=model_label(fallback)))
+    except Exception:  # noqa: BLE001
+        log.exception("the safeguards' switch of the label %s was not told", concept.get("id"))
 
 
 def _fallback_message(n: int, refused: str, fallback: str) -> str:
@@ -2512,6 +2563,7 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
         for task, _b in pending:
             task.cancel()
         await asyncio.to_thread(writer.close)
+    _fallback_notice(c, concept, fell_back)
     return labeled, failed, message()
 
 
@@ -3339,6 +3391,7 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
             _record_application(ws, concept_id, {"ts": started, "paths": patterns, "total": total, "matched_total": matched,
                                                  "labeled": 0, "failed": total or 0, "status": "error", "message": str(e.detail),
                                                  "created_by": created_by, "version": version})
+            _label_notice(c, concept, error=str(e.detail))
             raise
         except asyncio.CancelledError:
             _progress(c, concept_id, status="error", message="cancelled", eta_s=None, phase=None)
@@ -3353,6 +3406,7 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
             _record_application(ws, concept_id, {"ts": started, "paths": patterns, "total": total, "matched_total": matched,
                                                  "labeled": 0, "failed": total or 0, "status": "error", "message": msg,
                                                  "created_by": created_by, "version": version})
+            _label_notice(c, concept, error=msg)
             raise HTTPException(502, f"apply failed: {msg}") from e
         try:
             _progress(c, concept_id, phase="summary", eta_s=None)
@@ -3378,6 +3432,7 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
             whole = not cancel.is_set() and not limit and not failed and state.get("files_total") is not None
             _progress(c, concept_id, status="done", done=labeled + failed, labeled=labeled, failed=failed, message=message,
                       eta_s=None, phase=None, files_done=state["files_total"] if whole else state.get("files_done", 0), summary=summary)
+            _label_notice(c, concept, failed=failed if not cancel.is_set() else 0, total=total, message=message)
         except asyncio.CancelledError:
             _progress(c, concept_id, status="error", message="cancelled", eta_s=None, phase=None)
             raise
@@ -3385,6 +3440,7 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
             log.exception("apply: the end-of-run summary failed")
             msg = f"the labels were written but the run's summary failed: {type(e).__name__}: {e}"[:500]
             _progress(c, concept_id, status="error", message=msg, eta_s=None, phase=None)
+            _label_notice(c, concept, error=msg)
             raise HTTPException(502, f"apply failed: {msg}") from e
     _notify(c, concept_id, "applied")
     if not summary["stopped"]:
