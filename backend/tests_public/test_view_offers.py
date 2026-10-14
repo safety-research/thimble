@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from app import config, context, ledger, userconf, views
 
 CORPUS = "offers"
+CLICK_REFUSED = views.click_refused  # the real one, which the corpus fixture replaces
 READER = '''
 def build_index(paths):
     return {}
@@ -119,6 +120,24 @@ def test_accept_stamps_the_answer_and_queues_the_build_as_one_the_analyst_asked_
         views.accept(CORPUS, row["slug"])
     assert e.value.status_code == 409
     assert e.value.detail == "the view proposal 'Posts' is no longer waiting for an answer", "the card's toast"
+
+
+def test_an_accept_that_cannot_start_a_builder_comes_back_refused_and_the_view_proposal_still_waits(corpus,
+                                                                                                    monkeypatch):
+    """Accept refused at once (no hooks module, main not started by `thimble`): the card shows the reason and its fix
+    under its buttons (`refused.reason`), and the view proposal waits for the analyst's next answer."""
+    from app import subagents
+
+    reason = "Claude Code's hooks modules are off in this session: turn them on, then Accept."
+    monkeypatch.setattr(views, "click_refused", CLICK_REFUSED)
+    monkeypatch.setattr(subagents, "refusal_before", lambda c, click=False: subagents.refusal("no-module", reason))
+    row, _ = _offer()
+    got = views.accept(CORPUS, row["slug"])
+    assert got["status"] == "suggested" and got["refused"]["reason"] == reason and "answer" not in got
+    assert corpus.queued == [] and views.open_offer(CORPUS)["slug"] == row["slug"]
+    monkeypatch.setattr(subagents, "refusal_before", lambda c, click=False: None)
+    got = views.accept(CORPUS, row["slug"])
+    assert (got["status"], got["answer"], got.get("refused")) == ("queued", "accepted", None)
 
 
 async def test_reject_is_the_analyst_s_click_and_drops_the_view_proposal_with_its_answer(corpus, analyst):
