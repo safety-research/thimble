@@ -557,7 +557,7 @@ Take pictures of the view you review, whose paths Read opens. The first call of 
         "type": "object",
         "properties": {
           "state": {"type": "string", "enum": ["control", "labels", "filtered", "detail", "open", "narrow", "wide"]},
-          "controls": {"type": "array", "maxItems": 3, "items": {"type": "string"}, "description": "For `control`: the controls to click in turn, by their text."},
+          "controls": {"type": "array", "maxItems": 3, "items": {"type": "string"}, "description": "For `control`: the controls to click in turn, by their text, such as `Color by: State`, `State` and `Approval`, which color by Approval in place of State."},
           "ref": {"type": "string", "description": "For `open`: the ref whose place to see."},
           "why": {"type": "string", "description": "What you want to check in it, in a few words."}
         },
