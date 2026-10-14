@@ -548,7 +548,7 @@ async def test_an_orientation_program_s_start_marks_only_its_own_extension_as_or
         assert extensions.add(str(folder), yes=True, say=lambda _: None) == [folder.name]
     await extensions.refresh(CORPUS)
     assert extensions.offered(CORPUS) == ["looker"], "thimble's own session that ran is gone, so no follow-up reaches it"
-    await orient_session.start(CORPUS, "count the runs", ("final",))
+    await orient_session.start(CORPUS, "count the runs")
     await _until(lambda: (r := orientation.read_run(CORPUS)) and r.get("program") == "looker"
                  and r.get("status") in ("done", "failed"), what="the program to end")
     assert extensions.offered(CORPUS) == ["notes"]

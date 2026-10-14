@@ -2,29 +2,33 @@
 analyst's Claude Code session with a fresh context (subagents.py). The machinery it shares with thimble's other agents
 is subagents.py; this module holds what is the orientation's own.
 
-Start. Start in the browser is a click (start_route): the module spawns the orientation with no turn of main. Typed in
-the terminal, main calls `start_orientation`, whose result is the exact Agent call main makes (tool_start_orientation);
-a thread's fork's call gives that call to main in a `start_agent` event (tools._ask_main). Both take the request (the
-focus), the four switches (the deck, the views, the critique and the report) and the run's model and effort, each
-defaulting to Settings. Once an orientation has ended, the tool starts another only when someone asked for it since
+Start. Main starts the orientation: it calls `start_orientation` (or `/thimble:orient` does), whose result is the exact
+Agent call main makes (tool_start_orientation); a thread's fork's call gives that call to main in a `start_agent` event
+(tools._ask_main). POST /ws/{c}/start is a click (start_route): the module spawns the orientation with no turn of main.
+The browser no longer sends it, since its chat opens without a Start; scripts/dev/precache_orientation.py does. Both
+take the request (the focus) and the run's model and effort, which default to Settings (choices_of); no switch decides
+what the orientation does. Once an orientation has ended, the tool starts another only when someone asked for it since
 (asked_for). Without thimble's plugin module, in plan mode, or in a session the launcher did not start, no orientation
 starts (subagents.refusal_before).
 
-The prompt. The registration (subagent_definition) holds prompts/orient.md's body rendered for the workspace with every
-part, its instructions (prompts/orient-instructions.md, or the workspace's `orient_instructions` setting) and the active
+The prompt. The registration (subagent_definition) holds prompts/orient.md's body rendered for the workspace, its
+instructions (prompts/orient-instructions.md, or the workspace's `orient_instructions` setting) and the active
 extensions' blocks; the module registers it again when they change. A run's own prompt (run_prompt, hint
-orient-subagent-prompt) carries the request id on its first line, the request, and which outputs are on, so the parts
-that are off stay unused: their tools refuse a call (orientation.part_on). The run's model and effort are Settings' or
-its arguments' (subagents.values_for).
+orient-subagent-prompt) carries the request id on its first line and the request. The orientation explores as far as
+the request and its effort call for, leaves its findings as cards in its deck, and may start its own subagents, such
+as the critic its `critique` tool starts (critique_session.py). The run's model and effort are Settings' or its
+arguments' (subagents.values_for).
 
 Calls. Each call the orientation and its own subagents make is numbered in its chat's sequence and citable as
 `call:<chat>/<n>` (calls.py); the plugin's --agents hook tells the model each ref.
 
 End of a run. The orientation's run ends at its hand-back (subagents.run_ended), and subagent_ended does what it means:
 the first run's record closes and reveals the deck, its coverage line is measured (below), main hears an `orient` event
-with one line counting what was made, the work folder lets go of what no card uses (work_files), and the report pass
-starts the report's writer through the module, as part of the orientation's own start (write_session.follow_on). A run
-the analyst stopped stops the builds of the views it proposed.
+with one line counting what was made, and the work folder lets go of what no card uses (work_files). When the first run
+ended done, thimble's view proposer is told (_tell_proposer, proposer.trigger). thimble writes a report only when the
+analyst asks for one (start_writing). A run the analyst stopped stops the builds of the views it proposed, which only an
+orientation from before 0.8.0 did. A run that failed gets its notice where every agent's end does (subagents.run_ended);
+a failed run of an extension's program that runs the orientation gets one here (_notice).
 
 Coverage. When the first run finishes (done; not stopped or failed), its coverage line (orient_checks.coverage) is
 measured in the checks' child process before the end goes on; meanwhile a follow-up waits (at most COVERAGE_TIMEOUT_S),
@@ -35,14 +39,13 @@ a SendMessage that --agent-check denied, and the call main makes again after it,
 
 Follow-ups. The thread's composer sends a follow-up through the module (message_route, subagents.send); main's
 `message_orientation` returns the exact SendMessage. A follow-up continues the same agent, by its id, as its next run;
-its cards land in place as one undo batch, and when it changes a card the report cites, the report pass runs again as a
-revision. One stopped with Esc in its agent view, which Claude Code resumes no more, is continued by a message all the
-same (continue_stopped): a new `thimble:orientation` run in its thread, as its next run, with what the stopped run left
-and on its model and effort. An orientation of an earlier Claude Code session, or of an earlier version of thimble (a
-chat with no agent id), cannot be continued (409, 410). An orientation `thimble demo` installed from a pre-cache cannot either
-(precached.py). An orientation an extension's program runs takes a follow-up by running again with it
-(_program_follow_up); Settings' Run now for an extension whose program runs the orientation runs it again
-(run_program_now).
+its cards land in place as one undo batch. One stopped with Esc in its agent view, which Claude Code resumes no more, is
+continued by a message all the same (continue_stopped): a new `thimble:orientation` run in its thread, as its next run,
+with what the stopped run left and on its model and effort. An orientation of an earlier Claude Code session, or of an
+earlier version of thimble (a chat with no agent id), cannot be continued (409, 410). An orientation `thimble demo`
+installed from a pre-cache cannot either (precached.py). An orientation an extension's program runs takes a follow-up by
+running again with it (_program_follow_up); Settings' Run now for an extension whose program runs the orientation runs it
+again (run_program_now).
 """
 from __future__ import annotations
 
@@ -68,28 +71,13 @@ KEY = tools.ORIENT_SESSION  # its key: the session its calls run as (subagents.c
 ROLE = "orientation"  # its role among subagents.TYPES
 
 
-PASSES = ("final", "views", "report")  # orientation.passes: the outputs start_orientation's switches turn on
+# The thimble tools the orientation gets; every other registry tool is taken away. Since 0.8.0 it proposes no views
+# (thimble's view proposer does, proposer.py), so propose_view is not among them.
+ORIENT_TOOLS = ("read_ref", "list_cards", "add_card", "edit_card", "delete_card", "apply_label", "screenshot", "critique")
 
-# The `#### ` parts of orient.md's `### Outputs` a switch includes or leaves out, by the output it turns on.
-PARTS = {"final": "The deck", "views": "Views", "report": "The report"}
-
-# The parts that are lines of orient.md, by what turns them on, and the text that finds each line.
-LINES = {"critique": "`critique`"}
-
-# The lines of orient.md about the outputs as a whole, kept only while at least one output is on.
-OUTPUT_LINES = ("Draft the outputs described below", "Then revise the outputs described above")
-
-# The lines of orient.md's order of work that propose views, early and while it analyzes, kept only while the views are
-# on.
-VIEWS_LINES = ("propose the views whose form the survey", "propose a view when the categories or leads")
-
-# The thimble tools the orientation gets; every other registry tool is taken away.
-ORIENT_TOOLS = ("read_ref", "list_cards", "add_card", "edit_card", "delete_card", "apply_label", "propose_view",
-                "screenshot", "critique")
-
-# The thimble tools that belong to a part, by the part: each refuses a call while its part is off (orientation.part_on).
-PART_TOOLS = {"final": ("add_card", "edit_card", "delete_card", "apply_label"), "views": ("propose_view",),
-              "critique": ("critique",)}
+# The thimble tools that belong to a part of a run, which tools._as_caller refuses while the part is off
+# (orientation.part_on). Since 0.8.0 a start has no switches, so no tool belongs to one.
+PART_TOOLS: dict[str, tuple[str, ...]] = {}
 
 WORK_DIR = "work"  # orient/work: the one folder outside the corpus the session writes into
 
@@ -101,7 +89,8 @@ SETTING = "orient_instructions"  # settings.json: the analyst's own instructions
 # name: each one's default prompt file.
 BLOCKS = {"instructions": INSTRUCTIONS}
 
-# What stands in each slot the analyst's text fills until the parts are left out (system_prompt).
+# What stands in each slot the analyst's text fills while orient.md renders, so that text goes in whole after it
+# (system_prompt).
 _MARKS = {"request": "\x00request\x00", "instructions": "\x00instructions\x00"}
 
 BROWSER = "browser"  # `by` of a message typed in the orientation's thread
@@ -119,6 +108,10 @@ ERROR_KIND = "orient_error"  # the chip kind of the line that ends a failed run 
 # that line: the run stopped, and why, in the error's own words (failure_line), such as Claude Code's API error line
 FAILED_LINES = ("The orientation stopped because of an error: {error}",
                 "The orientation's follow-up stopped because of an error: {error}")
+# a notice of a failed run of an extension's program that runs the orientation (_notice): the agent it names, its key's
+# prefix (the chat follows), how much of the error it keeps, and the fix it gives after the failed line
+NOTICE_AGENT, NOTICE_KEY, NOTICE_CHARS = "Orientation", "orientation", 200
+NOTICE_FIX = "A message in its thread runs it again."
 
 ASKED_WAIT_S = 2.0  # how long start_orientation waits for main's chat to show the analyst's latest message (asked_for)
 # what a thread's fork's start_orientation filed, and the agent main starts for it, as its start_agent event and the
@@ -184,15 +177,6 @@ def effort_of(choices: dict[str, Any]) -> str:
     return effort
 
 
-def parts_of(choices: dict[str, Any], passes: "list[str] | tuple[str, ...]") -> list[str]:
-    """The parts of the prompt a run uses (the keys of PARTS and LINES): the outputs its switches turned on, and the
-    critique when on."""
-    on = [p for p in PASSES if p in passes]
-    if choices.get("critique", orientation.DEFAULT_CRITIQUE):
-        on.append("critique")
-    return [p for p in (*PARTS, *LINES) if p in on]
-
-
 def instructions_of(c: str, own: "str | None" = None) -> str:
     """The instructions part of workspace `c`'s prompt: `own` when given, else the workspace's SETTING; either one, when
     it holds text, replaces thimble's defaults (INSTRUCTIONS) rather than adding to them. Without it, an active
@@ -209,58 +193,42 @@ def instructions_of(c: str, own: "str | None" = None) -> str:
         text += f"\n\n#### {title}\n\n{added}"
     return text
 
-def system_prompt(c: str, brief: str, parts: "list[str] | tuple[str, ...]", instructions: "str | None" = None) -> str:
+def system_prompt(c: str, brief: str, instructions: "str | None" = None) -> str:
     """orient.md's body rendered for workspace `c`: the prefix with shared.md (with the workspace's view citation forms)
-    and the request, the instructions, and the suffix with each part not in `parts` left out (and OUTPUT_LINES when no
-    output is on, VIEWS_LINES when the views are off)."""
+    and the request, the instructions, and the suffix."""
     from . import cardtypes, views  # noqa: PLC0415 — views imports refs, which the rest of this module does not need
 
     values = {"workdir": str(config.corpus_dir(c)), "workfolder": str(work_dir(c)), "forms": views.forms_text(c),
               "card_types": cardtypes.prompt_text(c), **_MARKS}
-    lines = [s for p, s in LINES.items() if p not in parts] + ([] if any(p in parts for p in PARTS) else list(OUTPUT_LINES))
-    lines += [] if "views" in parts else list(VIEWS_LINES)
-    replaced = bool(userconf.prompt_files(c, "orientation"))  # a prompt that replaces thimble's may lack its parts
-    text = prompts.without(prompts.agent_prompt(PROMPT, values), [h for p, h in PARTS.items() if p not in parts], lines,
-                           strict=not replaced)
-    # The request and the instructions go in after the parts are left out, so a heading in either cannot cut the
-    # analyst's own text or a part of the suffix.
+    text = prompts.agent_prompt(PROMPT, values)
+    # The request and the instructions go in after the prompt renders, so a `{{` in either is never read as a slot.
     fills = {"request": brief.strip() or tools.hint("orient-no-request"), "instructions": instructions_of(c, instructions)}
     for slot, mark in _MARKS.items():
         text = text.replace(mark, fills[slot], 1)
     return re.sub(r"\n{3,}", "\n\n", text)  # an empty {{forms}} leaves a blank line of its own
 
 def disallowed() -> list[str]:
-    """The registration's disallowedTools: the thimble tools that are not the orientation's (main's own among them).
-    A part's tools stay, since one registration serves every run; a call of one whose part is off is refused
-    (orientation.part_on)."""
+    """The registration's disallowedTools: the thimble tools that are not the orientation's (main's own among them)."""
     return tools.not_own(list(ORIENT_TOOLS))
 
 
 def subagent_definition(c: str) -> dict[str, Any]:
     """The registration of `thimble:orientation` for workspace `c` (subagents.roles adds its model, effort and
-    `background`): orient.md's body rendered with every part, shared.md embedded, the workspace's instructions and the
-    extensions' blocks, with the request left to each run's prompt (`## orient-subagent-prompt`), its frontmatter's
-    description, and the thimble tools that are not the orientation's taken away. orient.md has no `{{request}}` slot;
-    an analyst's own copy that still has one loses the no-request line there, since each run's prompt says it."""
+    `background`): orient.md's body rendered, shared.md embedded, the workspace's instructions and the extensions'
+    blocks, with the request left to each run's prompt (`## orient-subagent-prompt`), its frontmatter's description, and
+    the thimble tools that are not the orientation's taken away. orient.md has no `{{request}}` slot; an analyst's own
+    copy that still has one loses the no-request line there, since each run's prompt says it."""
     front = prompts.agent_file(PROMPT)[0]
     with prompts.custom(userconf.prompt_files(c, "orientation")):
-        body = system_prompt(c, "", [*PARTS, *LINES])
+        body = system_prompt(c, "")
     body = body.replace(tools.hint("orient-no-request"), "", 1)
     return {"description": str(front.get("description") or ""), "prompt": body, "disallowedTools": disallowed()}
 
 
-# a run prompt's {outputs} and {off}, each the outputs named so, or `none` and `nothing`; its {critique} is on or off
-OUTPUT_WORDS = {"final": "the deck", "views": "view proposals", "report": "the report"}
-
-
-def run_prompt(c: str, rid: str, brief: str, passes: "list[str]", critique: bool) -> str:
-    """A run's own prompt (`## orient-subagent-prompt`): the request id `rid` on its first line, the analyst's request,
-    the outputs this run makes and those it leaves out, and whether it runs the critique."""
-    on = [OUTPUT_WORDS[p] for p in PASSES if p in passes]
-    off = [OUTPUT_WORDS[p] for p in PASSES if p not in passes]
-    return tools.hint("orient-subagent-prompt", request_id=rid, request=brief.strip() or tools.hint("orient-no-request"),
-                      outputs=", ".join(on) or "none", off=", ".join(off) or "none",
-                      critique="on" if critique else "off")
+def run_prompt(c: str, rid: str, brief: str) -> str:
+    """A run's own prompt (`## orient-subagent-prompt`): the request id `rid` on its first line, then the analyst's
+    request."""
+    return tools.hint("orient-subagent-prompt", request_id=rid, request=brief.strip() or tools.hint("orient-no-request"))
 
 
 def description(brief: str) -> str:
@@ -276,15 +244,14 @@ def starting(c: str) -> bool:
     return c in _starting
 
 
-async def start(c: str, brief: str, passes: "list[str] | tuple[str, ...]" = ("final", "views"), *,
-                critique: bool = orientation.DEFAULT_CRITIQUE, values: "dict[str, Any] | None" = None,
-                route: str = subagents.CLICK, call: str | None = None) -> subagents.Answer:
-    """Start the orientation for workspace `c` with the outputs `passes`, the critique and the run's values (each
-    defaulting to Settings): a click through the module, or for a typed start (`call`, main's start_orientation call)
-    the pending request and the exact Agent call (subagents.start_job). The record says `starting`, then `running` once
-    the agent starts (subagent_started), or `refused` with the reason and its kind. An extension whose program runs the
-    orientation runs it instead (start_program). The workspace's extensions are found first when it never found them
-    (extensions.settle)."""
+async def start(c: str, brief: str, *, values: "dict[str, Any] | None" = None, route: str = subagents.CLICK,
+                call: str | None = None) -> subagents.Answer:
+    """Start the orientation for workspace `c` with the request `brief` and the run's values (the model and effort
+    default to Settings): a click through the module (start_route), or for a typed start (`call`, main's
+    start_orientation call) the pending request and the exact Agent call (subagents.start_job). The record says
+    `starting`, then `running` once the agent starts (subagent_started), or `refused` with the reason and its kind. An
+    extension whose program runs the orientation runs it instead (start_program). The workspace's extensions are found
+    first when it never found them (extensions.settle)."""
     from . import extensions, roles  # noqa: PLC0415
 
     if running(c) or starting(c):
@@ -292,12 +259,11 @@ async def start(c: str, brief: str, passes: "list[str] | tuple[str, ...]" = ("fi
     _starting.add(c)
     try:
         await extensions.settle(c)
-        passes = [p for p in PASSES if p in passes]
         vals = subagents.values_for(c, ROLE, values)
         agent = roles.agent_for(c, "orientation")
         if agent.code and agent.replacing is not None:
-            orientation.request(c, brief, passes, critique=critique, **vals)
-            await start_program(c, agent.replacing, brief, passes, {"critique": critique, **vals}, call=call)
+            orientation.request(c, brief, **vals)
+            await start_program(c, agent.replacing, brief, vals, call=call)
             await extensions.mark_oriented(c, [agent.replacing.extension])
             return subagents.Answer({"program": agent.replacing.extension})
         rid = subagents.request_id()
@@ -305,12 +271,11 @@ async def start(c: str, brief: str, passes: "list[str] | tuple[str, ...]" = ("fi
         before = subagents.refusal_before(c, click=route == subagents.CLICK)
         if before is not None and route == subagents.TYPED:
             return before  # main reads why; the analyst typed it in the terminal and reads main's answer there
-        orientation.start_requested(c, {"text": brief, "passes": passes, "critique": critique, **vals,
-                                        "request": rid, "started_by": started_by})
+        orientation.start_requested(c, {"text": brief, **vals, "request": rid, "started_by": started_by})
         if before is not None:
             orientation.refuse(c, before.reason, before.kind or subagents.ERROR)
             return before
-        task = run_prompt(c, rid, brief, passes, critique)
+        task = run_prompt(c, rid, brief)
         ans = await subagents.start_job(c, ROLE, KEY, task, vals, route, description=description(brief), request_id=rid,
                                         chat={"title": orientation.TITLE, "brief": brief.strip()}, work=work_dir(c),
                                         call=call, check=False)
@@ -321,39 +286,37 @@ async def start(c: str, brief: str, passes: "list[str] | tuple[str, ...]" = ("fi
         _starting.discard(c)
 
 
-async def start_program(c: str, part: Any, brief: str, passes: "list[str]", choices: dict[str, Any],
-                        call: str | None = None, follow_up: bool = False) -> Any:
-    """Start the orientation as an extension's program (harness.py) with the request `brief`, the outputs `passes` and
-    Start's `choices`; `follow_up` for a message to a finished one, which runs the program again with it. Its cards,
-    labels and proposals come through its tools; what it returns is the line main hears."""
+async def start_program(c: str, part: Any, brief: str, choices: dict[str, Any], call: str | None = None,
+                        follow_up: bool = False) -> Any:
+    """Start the orientation as an extension's program (harness.py) with the request `brief` and the run's `choices`
+    (its model and effort); `follow_up` for a message to a finished one, which runs the program again with it. Its
+    input keeps `outputs`, now always the deck, for programs written before 0.8.0. Its cards and labels come through its
+    tools; what it returns is the line main hears."""
     from . import harness  # noqa: PLC0415
 
     listed = await tools.call(c, "list_cards", {"group": "all"}, session=KEY)
-    parts = parts_of(choices, passes)
     # critique reads the transcript of thimble's own orientation session, which a program has none of
-    own = tuple(n for n in ORIENT_TOOLS if n != "critique" and n not in {
-        t for p, names in PART_TOOLS.items() if p not in parts for t in names})
+    own = tuple(n for n in ORIENT_TOOLS if n != "critique")
     job = harness.Job(c, "orientation", KEY, orientation.TITLE,
-                      {"request": brief.strip(), "outputs": list(passes), "follow_up": follow_up,
-                       "choices": {"effort": effort_of(choices),
-                                   "critique": bool(choices.get("critique", orientation.DEFAULT_CRITIQUE))},
+                      {"request": brief.strip(), "outputs": [orientation.DECK], "follow_up": follow_up,
+                       "choices": {"effort": effort_of(choices)},
                        "cards": listed.text, "corpus": str(config.corpus_dir(c)), "tools": list(own)},
                       own, work_dir(c), chat_role=orientation.ROLE,
                       fields={"brief": brief.strip(), **({"tool_use_id": call} if call else {})})
 
     def started(run: Any) -> None:
-        orientation.started(c, run.chat, passes=passes, route="program")
-        orientation.record(c, model=choices.get("model"), effort=choices.get("effort"),
-                           critique=bool(choices.get("critique", orientation.DEFAULT_CRITIQUE)), program=part.extension)
+        orientation.started(c, run.chat, route="program")
+        orientation.record(c, model=choices.get("model"), effort=choices.get("effort"), program=part.extension)
 
     def ended(run: Any, status: str, summary: str) -> None:
         try:
-            orientation.finished(c, run.chat, status, summary, report=False)
+            orientation.finished(c, run.chat, status, summary)
         except Exception:  # noqa: BLE001
             log.exception("%s: the orientation's record was not closed", c)
         _tell_main(c, status, 0, {}, error=summary if status == "failed" else "")
-        if status == "done":
-            _report(c)
+        _notice(c, run.chat, status, summary, follow_up)
+        if status == "done" and not follow_up:
+            _tell_proposer(c)
 
     return harness.start(job, part, on_start=started, on_end=ended)
 
@@ -596,22 +559,18 @@ def _stopped_cards(c: str, rec: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def continuation_prompt(c: str, rid: str, agent_id: str, message: str, passes: "list[str]", critique: bool) -> str:
+def continuation_prompt(c: str, rid: str, agent_id: str, message: str) -> str:
     """The prompt of a continuation (`## orient-continuation-prompt`): the request id on its first line, what the
-    stopped run left (its last text, its deck's cards, the paths of its transcript), the outputs and the critique of the
-    orientation, and the analyst's message."""
+    stopped run left (its last text, its deck's cards, the paths of its transcript), and the analyst's message."""
     rec = orientation.read_run(c) or {}
     paths = _stopped_transcripts(c, agent_id)
     summary = " ".join((_last_text(paths) or str(orientation.summary(c) or "")).split())
     if len(summary) > SUMMARY_CHARS:
         summary = summary[: SUMMARY_CHARS - 1].rstrip() + "…"
-    on = [OUTPUT_WORDS[p] for p in PASSES if p in passes]
-    off = [OUTPUT_WORDS[p] for p in PASSES if p not in passes]
     none = tools.hint("orient-continuation-none") or "none"
     return tools.hint("orient-continuation-prompt", request_id=rid, summary=summary or none,
                       cards=_stopped_cards(c, rec) or none,
-                      transcripts="\n".join(str(p) for p in paths) or none, outputs=", ".join(on) or "none",
-                      off=", ".join(off) or "none", critique="on" if critique else "off", message=message.strip())
+                      transcripts="\n".join(str(p) for p in paths) or none, message=message.strip())
 
 
 async def continue_stopped(c: str, chat: str, agent_id: str, text: str, by: str = BROWSER, *,
@@ -625,8 +584,6 @@ async def continue_stopped(c: str, chat: str, agent_id: str, text: str, by: str 
         return subagents.refusal(subagents.HOOK, tools.hint("start_orientation-running"))
     rec = orientation.read_run(c) or {}
     a = subagents.agent(c, agent_id) or {}
-    passes = [p for p in PASSES if p in (rec.get("passes") or [])]
-    critique = bool(rec.get("critique", orientation.DEFAULT_CRITIQUE))
     vals = dict(a.get("values") or {}) or subagents.values_for(c, ROLE, {k: rec[k] for k in ("model", "effort")
                                                                         if rec.get(k)})
     body, told = with_lead(c, text)
@@ -634,7 +591,7 @@ async def continue_stopped(c: str, chat: str, agent_id: str, text: str, by: str 
     meta = agents.meta_or_none(c, chat) or {}
     _starting.add(c)
     try:
-        task = await asyncio.to_thread(continuation_prompt, c, rid, agent_id, body, passes, critique)
+        task = await asyncio.to_thread(continuation_prompt, c, rid, agent_id, body)
         ans = await subagents.start_job(
             c, ROLE, KEY, task, vals, route, description=description(str(meta.get("brief") or rec.get("query") or "")),
             request_id=rid, chat={"title": orientation.TITLE}, work=work_dir(c), call=call,
@@ -673,16 +630,14 @@ async def _program_follow_up(c: str, text: str, call: str | None) -> dict[str, A
         return None
     if harness.running(c, KEY) or orientation.running(c):
         raise RuntimeError("the orientation is running")
-    passes = [p for p in PASSES if p in (rec.get("passes") or [])]
-    choices = {"model": rec.get("model"), "effort": rec.get("effort"),
-               "critique": rec.get("critique", orientation.DEFAULT_CRITIQUE)}
-    run = await start_program(c, agent.replacing, text, passes, choices, call=call, follow_up=True)
+    choices = {"model": rec.get("model"), "effort": rec.get("effort")}
+    run = await start_program(c, agent.replacing, text, choices, call=call, follow_up=True)
     return {"status": "sent", "chat": run.chat, "run": 0}
 
 async def run_program_now(c: str, name: str) -> dict[str, Any]:
     """Settings' Run now for extension `name`, whose program runs the orientation here: the program runs again as a
-    follow-up of the latest orientation, thimble's own or a program's, with that orientation's request, outputs and
-    choices and the cards as they stand, so it adds to them rather than starting over. {status: resumed, chat, run: 0};
+    follow-up of the latest orientation, thimble's own or a program's, with that orientation's request, model and
+    effort and the cards as they stand, so it adds to them rather than starting over. {status: resumed, chat, run: 0};
     NoOrientation when no orientation ran here, RuntimeError while one runs or when another agent runs the
     orientation."""
     from . import roles  # noqa: PLC0415
@@ -697,10 +652,8 @@ async def run_program_now(c: str, name: str) -> dict[str, Any]:
     meta = agents.meta_or_none(c, chat) if chat else None
     if meta is None:
         raise NoOrientation("no orientation has run in this workspace")
-    passes = [p for p in PASSES if p in (rec.get("passes") or [])]
-    choices = {"model": rec.get("model"), "effort": rec.get("effort"),
-               "critique": rec.get("critique", orientation.DEFAULT_CRITIQUE)}
-    run = await start_program(c, agent.replacing, str(meta.get("brief") or ""), passes, choices, follow_up=True)
+    choices = {"model": rec.get("model"), "effort": rec.get("effort")}
+    run = await start_program(c, agent.replacing, str(meta.get("brief") or ""), choices, follow_up=True)
     return {"status": "resumed", "chat": run.chat, "run": 0}
 
 
@@ -716,8 +669,7 @@ def _at(ts: Any) -> datetime | None:
 
 def changed_cards(c: str, chat: str, k: int) -> dict[str, Any]:
     """What run `k` of the orientation `chat` changed, read from its undo batch (undo.batch_steps): {added, revised,
-    deleted, views, view_states, cards}, the counts of cards it added, changed and deleted, of the views it proposed and
-    of those by where their builds stand (view_counts), and the ids of every card it touched."""
+    deleted, cards}, the counts of cards it added, changed and deleted, and the ids of every card it touched."""
     from . import undo  # noqa: PLC0415
 
     added, revised, deleted = set(), set(), set()
@@ -733,50 +685,15 @@ def changed_cards(c: str, chat: str, k: int) -> dict[str, Any]:
         else:
             revised.add(cid)
     revised -= added | deleted
-    started = None
-    for u in (orientation.read_run(c) or {}).get("followups") or []:
-        if isinstance(u, dict) and u.get("run") == k:
-            started = _at(u.get("started"))
-    states = view_counts(c, started) if started is not None else dict.fromkeys(VIEW_LINES, 0)
-    return {"added": len(added), "revised": len(revised), "deleted": len(deleted), "views": sum(states.values()),
-            "view_states": states, "cards": sorted(added | revised | deleted)}
-
-def report_cards(c: str) -> set[str]:
-    """The ids of the cards the report cites or shows, read from its stored document; empty when none is written."""
-    from . import investigation, report_types  # noqa: PLC0415
-
-    try:
-        doc = report_types.read_doc(c, investigation.MAIN, orientation.REPORT_DOC)
-    except Exception:  # noqa: BLE001 — a report that cannot be read cites nothing we can revise
-        return set()
-    if not isinstance(doc, dict):
-        return set()
-    text = json.dumps(doc, ensure_ascii=False)
-    out = set(re.findall(r"(?:card|cell):([A-Za-z0-9_-]+)", text))
-
-    def walk(x: Any) -> None:
-        if isinstance(x, dict):
-            for key in ("cell", "card", "cell_id"):
-                if isinstance(x.get(key), str):
-                    out.add(x[key])
-            for v in x.values():
-                walk(v)
-        elif isinstance(x, list):
-            for v in x:
-                walk(v)
-
-    walk(doc)
-    return out
-
+    return {"added": len(added), "revised": len(revised), "deleted": len(deleted),
+            "cards": sorted(added | revised | deleted)}
 
 def subagent_started(c: str, run: subagents.Run, req: dict[str, Any]) -> None:
     """The orientation's agent started a run (subagents.ensure_chat for the first, run_again for a follow-up): the
-    first takes up the record (`running`, its chat, agent id, route and session; the deck made when on), a follow-up
-    runs it again as run k with the message it carries."""
-    rec = orientation.read_run(c) or {}
+    first takes up the record (`running`, its chat, agent id, route and session; its deck made), a follow-up runs it
+    again as run k with the message it carries."""
     if run.k == 0:
-        orientation.started(c, run.chat, session=run.sid, passes=list(rec.get("passes") or ["final", "views"]),
-                            agent_id=run.agent_id, route="subagent")
+        orientation.started(c, run.chat, session=run.sid, agent_id=run.agent_id, route="subagent")
         return
     cont = req.get("continues") if isinstance(req.get("continues"), dict) else {}
     if cont and int(cont.get("run") or 0) == run.k:  # a continuation's first run: its message is the analyst's (U2)
@@ -836,12 +753,12 @@ def subagent_refused(c: str, req: dict[str, Any]) -> None:
 
 
 def subagent_ended(c: str, run: subagents.Run, status: str, summary: str) -> None:
-    """A run of the orientation ended (subagents.run_ended): its record closes (the first run's reveals its outputs),
-    and what follows goes on (_go_on): main hears it, the work folder lets go of what it no longer needs, and the
-    report pass is asked for. A critic start it never made ends (critique_session.expire_pending). A run the analyst
-    stopped stops the builds of the views it proposed (dev.stop_orientation_views) first. The first run's end goes on, when it finished, once its coverage line is
-    measured (_measured). A critique an extension's program runs for it stops with it (critique_session.program_critique).
-    """
+    """A run of the orientation ended (subagents.run_ended): its record closes (the first run's reveals its deck), and
+    what follows goes on (_go_on): main hears it, thimble's view proposer is told of a first run that ended done, and the
+    work folder lets go of what it no longer needs. A critic start it never made ends (critique_session.expire_pending).
+    A run the analyst stopped stops the builds of the views it proposed (dev.stop_orientation_views, for an orientation
+    from before 0.8.0) first. The first run's end goes on, when it finished, once its coverage line is measured
+    (_measured). A critique an extension's program runs for it stops with it (critique_session.program_critique)."""
     _stop_program_critique(c, run)
     try:
         from . import critique_session  # noqa: PLC0415 — critique_session imports this module's callers
@@ -860,14 +777,11 @@ def subagent_ended(c: str, run: subagents.Run, status: str, summary: str) -> Non
             log.exception("%s: the builds of the orientation's views were not stopped", c)
     try:
         if run.k == 0:
-            orientation.finished(c, run.chat, status, summary, report=False)
+            orientation.finished(c, run.chat, status, summary)
             made: dict[str, Any] = {}
         else:
             made = changed_cards(c, run.chat, run.k)
             orientation.run_finished(c, run.chat, run.k, status, {k: v for k, v in made.items() if k != "cards"})
-            if made.get("cards"):
-                rec = orientation.read_run(c) or {}
-                orientation.record(c, revised_cards=sorted({*(rec.get("revised_cards") or []), *made["cards"]}))
     except Exception:  # noqa: BLE001
         log.exception("%s: the orientation's record was not closed", c)
         made = {}
@@ -948,12 +862,45 @@ def _closed(c: str) -> None:
 
 def _go_on(c: str, run: subagents.Run, status: str, summary: str, stopped: "bool | list[str]", made: dict[str, Any],
            coverage: str = "") -> None:
-    """What follows a run's end once its record is closed: main hears it, with the first run's coverage line, the work
-    folder is cleared, and the report pass is asked for. A stop asks for no report."""
+    """What follows a run's end once its record is closed: main hears it, with the first run's coverage line, thimble's
+    view proposer is told when the first run ended done (_tell_proposer), and the work folder is cleared."""
     _tell_main(c, status, run.k, made, error=summary if status == "failed" else "", coverage=coverage)
+    if run.k == 0 and status == "done" and not run.interrupted:
+        _tell_proposer(c)
     work_files.after_run(c, work_dir(c), "stopped" if status != "failed" and stopped else status)
-    if status == "done" and not run.interrupted:
-        _report(c)
+
+
+def _tell_proposer(c: str) -> None:
+    """Tell thimble's view proposer that the orientation's first run ended done, so it may check for a view proposal
+    (proposer.trigger, which waits for main's hand-back turn). Imported here: proposer imports context, which imports
+    session. A failure costs only that check."""
+    try:
+        from . import proposer  # noqa: PLC0415
+
+        proposer.trigger(c, "orientation")
+    except Exception:  # noqa: BLE001 — the run's end goes on without it
+        log.exception("%s: the view proposer did not hear of the orientation's end", c)
+
+
+def _notice(c: str, chat: str, status: str, error: str, follow_up: bool = False) -> None:
+    """The end of a run of an extension's program that runs the orientation (start_program), told where the analyst is
+    looking: a failed run posts a notice (notices.post) that names the orientation, says why in one line and how to run
+    it again, with its thread `chat`; a run that ended done clears it. thimble's own orientation, a subagent, gets its
+    notice where every agent's end does (subagents.run_ended). Imported here; a notice that cannot be told is logged,
+    and the run's end goes on."""
+    try:
+        from . import notices  # noqa: PLC0415
+
+        key = f"{NOTICE_KEY}:{chat}"
+        if status == "failed":
+            line = FAILED_LINES[bool(follow_up)].format(
+                error=failure_line(error, NOTICE_CHARS) or "no error text came with it")
+            line += "" if line.endswith((".", "…", "!", "?")) else "."
+            notices.post(c, kind="agent", agent=NOTICE_AGENT, chat=chat, key=key, text=f"{line} {NOTICE_FIX}")
+        elif status == "done":
+            notices.clear(c, key)
+    except Exception:  # noqa: BLE001 — the run's end goes on without it
+        log.exception("%s: the notice of the orientation's end (%s) was not told", c, status)
 
 
 def _analyst_stopped(c: str, run: subagents.Run, status: str) -> bool:
@@ -961,52 +908,12 @@ def _analyst_stopped(c: str, run: subagents.Run, status: str) -> bool:
     return status == "stopped" and not run.interrupted
 
 
-def _report(c: str) -> None:
-    """The report pass once no run goes: the first report when the switch was on and it was never asked for, else a
-    revision when a follow-up changed a card the report cites. The report's writer starts through the module as part of
-    the orientation's own start (orientation.request_report). A writer still writing the report gets the revision when
-    it ends (_writer_finished)."""
-    from . import write_session  # noqa: PLC0415
-
-    rec = orientation.read_run(c) or {}
-    if "report" not in (rec.get("passes") or []) or running(c):
-        return
-    if not rec.get("report_asked"):
-        if orientation.request_report(c):
-            orientation.record(c, revised_cards=[])
-        return
-    changed = set(rec.get("revised_cards") or []) & report_cards(c)
-    if not changed:
-        return
-    if write_session.running(c, orientation.REPORT_DOC):
-        return  # _writer_finished asks when the writer ends
-    request = tools.hint("orient-report-revision", cards=", ".join(f"card:{x}" for x in sorted(changed)))
-    if orientation.request_report(c, request):
-        orientation.record(c, revised_cards=[])
-
-
-def _writer_finished(c: str, meta: dict[str, Any]) -> None:
-    """An agent chat ended: when it was the report's writer and a follow-up revised cards the report cites meanwhile,
-    the revision is asked for now."""
-    from . import report_types  # noqa: PLC0415
-
-    if str(meta.get("agent_type") or "").rsplit(":", 1)[-1] != report_types.WRITER_AGENT:
-        return
-    if meta.get("doc") not in (None, orientation.REPORT_DOC):
-        return
-    try:
-        if (orientation.read_run(c) or {}).get("revised_cards"):
-            _report(c)
-    except Exception:  # noqa: BLE001 — the writer has ended either way
-        log.exception("%s: the report's revision was not asked for", c)
-
-agents.on_agent_finished(_writer_finished)
-
 VIEW_LINES = {"built": "orient-views-built", "failed": "orient-views-failed", "building": "orient-views-building",
               "stopped": "orient-views-stopped", "suggested": "orient-views-suggested"}
 
 def view_counts(c: str, since: datetime | None) -> dict[str, int]:
-    """The views the orientation proposed since `since`, by where their builds stand (built, failed, building; queued or
+    """The views an orientation from before 0.8.0 proposed since `since`, which only the end line of a record whose
+    passes name `views` counts (made_text), by where their builds stand (built, failed, building; queued or
     held count as building; stopped, those the analyst's Stop dropped), and the viewers for file types it suggested.
     Proposals main made at the analyst's request are not counted; one that failed through its repairs counts as
     failed."""
@@ -1030,10 +937,10 @@ def views_text(counts: dict[str, int], none: str = "orient-made-views") -> str:
     return ", ".join(tools.hint(VIEW_LINES[k], views=tools._count("view", n)) for k, n in counts.items() if n)
 
 def made_text(c: str, run: dict[str, Any]) -> str:
-    """What the orientation of `run` made, for the `orient-made-*` lines of prompts/tools.md: the views it proposed by
-    build state, the labels it defined (not trials), and the cards it made in its deck; an earlier orientation's cards
-    in the same deck are not counted. A record may name the deck's pass `analyze` or keep the deck as its `final` group.
-    """
+    """What the orientation of `run` made, for the `orient-made-*` lines of prompts/tools.md: the labels it defined (not
+    trials) and the cards it made in its deck, and for a record from before 0.8.0 whose passes name `views`, the views
+    it proposed by build state; an earlier orientation's cards in the same deck are not counted. A record may name the
+    deck's pass `analyze` or keep the deck as its `final` group."""
     from . import concepts, notebook  # noqa: PLC0415 — the workspace's stores, only read at the end
 
     since = _at(run.get("started"))
@@ -1073,10 +980,6 @@ def status_text(c: str, status: str, k: int = 0, made: "dict[str, Any] | None" =
         m = made or {}
         what = [tools.hint(CHANGED_LINES[key], cards=tools._count("card", int(m[key])))
                 for key in CHANGED_LINES if m.get(key)]
-        if m.get("views"):
-            states = m.get("view_states") if isinstance(m.get("view_states"), dict) else {}
-            what.append(views_text({k: int(states.get(k) or 0) for k in VIEW_LINES}) if any(states.values())
-                        else tools.hint("orient-changed-views", views=tools._count("view", int(m["views"]))))
         follow = {"stopped": "orient-follow-up-stopped", "failed": "orient-follow-up-failed"}.get(status, "orient-followed-up")
         return tools.hint(follow, changed=", ".join(what) or tools.hint("orient-changed-nothing"), error=why)
     first = {"stopped": "orient-stopped", "failed": "orient-failed"}.get(status, "orient-finished")
@@ -1087,10 +990,10 @@ def status_text(c: str, status: str, k: int = 0, made: "dict[str, Any] | None" =
 FAILURE_CHARS = 400  # of a failure's text in the one line that says why (failure_line)
 
 
-def failure_line(summary: str | None) -> str:
-    """A failure's text on one line, cut at FAILURE_CHARS."""
+def failure_line(summary: str | None, chars: int = FAILURE_CHARS) -> str:
+    """A failure's text on one line, cut at `chars` (FAILURE_CHARS)."""
     line = " ".join(str(summary or "").split())
-    return line if len(line) <= FAILURE_CHARS else line[: FAILURE_CHARS - 1].rstrip() + "…"
+    return line if len(line) <= chars else line[: chars - 1].rstrip() + "…"
 
 
 def _tell_main(c: str, status: str, k: int = 0, made: "dict[str, Any] | None" = None, error: str = "",
@@ -1121,7 +1024,7 @@ def _wrote_since(c: str, since: str, chat: str = agents.MAIN_ID) -> bool:
     return False
 
 async def asked_for(c: str, chat: str = agents.MAIN_ID) -> bool:
-    """Whether anyone asked for a new orientation: a Start waits for start_orientation, none has run here yet, or the
+    """Whether anyone asked for a new orientation: a start waits for its agent, none has run here yet, or the
     analyst wrote to main (or to the thread `chat` whose fork calls start_orientation, U5) since the latest one ended.
     Main's chat records a typed message within its follower's tail, so a message not there yet is waited for up to
     ASKED_WAIT_S."""
@@ -1137,37 +1040,24 @@ async def asked_for(c: str, chat: str = agents.MAIN_ID) -> bool:
         await asyncio.sleep(0.25)
 
 
-def _switch(args: dict[str, Any], keys: "tuple[str, ...]", default: bool) -> bool:
-    for key in keys:
-        if args.get(key) is not None:
-            return orientation.flag(args[key], default)
-    return default
-
-
-def choices_of(args: dict[str, Any]) -> tuple[str, list[str], bool, dict[str, Any]]:
-    """(the request, the outputs, the critique, the run's model and effort) of start_orientation's arguments or Start's
-    body: `focus` (or `brief`, `text`); the deck (`deck`, `final_notebook`, `analyze_data`) on unless turned off; the
-    views (`views`, `propose_views`), the report (`report`, `generate_report`) and the critique off unless turned on; `model` and `effort`
-    left to Settings when not given (subagents.values_for)."""
+def choices_of(args: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """(the request, the run's model and effort) of start_orientation's arguments or the body of POST /ws/{c}/start:
+    `focus` (or `brief`, `text`), and `model` and `effort`, left to Settings when not given (subagents.values_for). The
+    switches a start had before 0.8.0 (the deck, the views, the report, the critique) are ignored."""
     brief = str(args.get("focus") or args.get("brief") or args.get("text") or "")
-    deck = _switch(args, ("deck", "final_notebook", "analyze_data"), True)
-    views = _switch(args, ("views", "propose_views"), False)
-    report = _switch(args, ("report", "generate_report"), False)
-    critique = _switch(args, ("critique",), orientation.DEFAULT_CRITIQUE)
-    passes = [p for p, on in (("final", deck), ("views", views), ("report", report)) if on]
     values = {k: str(args[k]) for k in ("model", "effort") if args.get(k)}
-    return brief, passes, critique, values
+    return brief, values
 
 
 async def tool_start_orientation(ctx: Any, args: dict[str, Any]) -> Any:
-    """The `start_orientation` tool: the pending start of the orientation with the request, the four switches and the
-    run's model and effort (choices_of), and the exact Agent call main makes (`## start_orientation-subagent`).
+    """The `start_orientation` tool: the pending start of the orientation with the request and the run's model and
+    effort (choices_of), and the exact Agent call main makes (`## start_orientation-subagent`).
     Refused while one runs, when nobody asked for a new one since the latest ended (asked_for), without the module, in
     plan mode, and in a session the launcher did not start. A thread's fork's call starts the orientation the same way,
     by main's Agent call on a `start_agent` event (tools._ask_main), since the fork may not make it."""
     from . import session  # noqa: PLC0415
 
-    brief, passes, critique, values = choices_of(args)
+    brief, values = choices_of(args)
     if running(ctx.c) or starting(ctx.c):
         return tools.err(tools.hint("start_orientation-running"))
     fork = await tools._fork_of(ctx) if ctx.session is None else None
@@ -1183,7 +1073,7 @@ async def tool_start_orientation(ctx: Any, args: dict[str, Any]) -> Any:
         return tools.err(tools.hint("start_orientation-unasked"))
     try:
         # a fork's start keeps no call of the fork's: main's Agent call claims it (tools._ask_main)
-        ans = await start(ctx.c, brief, passes, critique=critique, values=values, route=subagents.TYPED,
+        ans = await start(ctx.c, brief, values=values, route=subagents.TYPED,
                           call=None if fork is not None else ctx.tool_use_id)
     except (RuntimeError, ValueError) as e:
         return tools.err(f"start_orientation: {e}")
@@ -1235,41 +1125,36 @@ async def tool_message_orientation(ctx: Any, args: dict[str, Any]) -> Any:
 
 
 class StartBody(BaseModel):
-    """Start's body (POST /ws/{c}/start): the focus, the four switches, and the run's model and effort; `ultracode`,
-    `fast` and `mode` from an older page are ignored."""
+    """The body of POST /ws/{c}/start, which the browser's Start sent before 0.8.0 and a pre-cache sends
+    (scripts/dev/precache_orientation.py): the focus and the run's model and effort. Any other field, such as a switch
+    an older page or a pre-cache sends (`deck`, `views`, `report`, `critique`), is ignored."""
 
     text: str = ""
-    deck: bool | None = None
-    views: bool | None = None
-    critique: bool | None = None
-    report: bool | None = None
     model: str | None = None
     effort: str | None = None
-    final_notebook: bool | None = None
-    propose_views: bool | None = None
-    generate_report: bool | None = None
 
 
 @router.post("/ws/{c}/start")
 async def start_route(c: str, body: StartBody, request: Request) -> dict[str, Any]:
-    """Start in the browser: a click, so the analyst's cookie (403 without it), and the orientation starts through the
-    module (start). The answer: {agentId} or the refusal's {kind, reason}, which the record also holds."""
+    """A start by click, which a pre-cache sends (the browser's Start sent it before 0.8.0): the analyst's cookie (403
+    without it), and the orientation starts through the module (start). The answer: {agentId} or the refusal's {kind,
+    reason}, which the record also holds."""
     subagents.analyst_only(request)
     config.workspace_dir(c)
-    brief, passes, critique, values = choices_of(body.model_dump())
-    ans = await start(c, brief, passes, critique=critique, values=values, route=subagents.CLICK)
+    brief, values = choices_of(body.model_dump())
+    ans = await start(c, brief, values=values, route=subagents.CLICK)
     return {**dict(ans), **({"kind": ans.kind, "reason": ans.reason} if ans.refused else {})}
 
 
-RUN_FIELDS = ("status", "query", "passes", "critique", "model", "effort", "route", "started_by", "agent_id", "request",
-              "refused", "requested", "started", "ended", "chats")  # what run_route shows of orient/run.json
+RUN_FIELDS = ("status", "query", "model", "effort", "route", "started_by", "agent_id", "request", "refused", "requested",
+              "started", "ended", "chats")  # what run_route shows of orient/run.json
 
 
 @router.get("/ws/{c}/orientation")
 async def run_route(c: str) -> dict[str, Any]:
-    """The latest orientation's record as the browser's Start gate and its card read it: its status, the request and
-    switches, the run's exact model and effort, who started it, the pending request, and for a start that did not
-    happen {reason, kind, at, expired?}; {} before any was asked for."""
+    """The latest orientation's record as the browser's orientation card reads it: its status, the request, the run's
+    exact model and effort, who started it, the pending request, and for a start that did not happen {reason, kind, at,
+    expired?}; {} before any was asked for."""
     config.workspace_dir(c)
     rec = orientation.read_run(c) or {}
     return {k: rec[k] for k in RUN_FIELDS if k in rec}

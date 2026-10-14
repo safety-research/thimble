@@ -822,8 +822,8 @@ async def list_route(c: str) -> list[dict]:
 
 def _orientation_status(c: str) -> str | None:
     """The status of the workspace's orientation from orient/run.json (requested, running, done, failed or stopped),
-    None when none was ever asked for, for main's meta: the browser's Start gate stays open until then, whatever main
-    holds."""
+    None when none was ever asked for, for main's meta: when it changes, the browser reads the orientation's record
+    again (useOrientRun), such as for a refused start."""
     from . import orientation  # noqa: PLC0415 — orientation imports this module
 
     status = (orientation.read_run(c) or {}).get("status")
@@ -839,7 +839,7 @@ async def instance_route(c: str) -> dict:
 
 def _main_state(c: str) -> dict:
     """What main's meta adds for the browser (module_bridge.main_meta): `fenced`, `launched`, `module` and `module_why`,
-    which the unfenced banner and Start's no-module line read."""
+    which the unfenced banner and a refused start read."""
     from . import module_bridge  # noqa: PLC0415 — module_bridge imports the session modules
 
     return module_bridge.main_meta(c)

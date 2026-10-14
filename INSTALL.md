@@ -7,7 +7,8 @@
 
 thimble uses whichever auth path you have configured for `claude`: every model call runs through your own `claude`, in
 your config dir with your user settings. thimble's agents run as subagents of the session you start with `thimble`;
-its single model calls (labels, card checks) and `thimble fix` run as `claude -p` jobs in folders of their own, so auth
+its single model calls (labels, card checks, view proposals) and `thimble fix` run as `claude -p` jobs in folders of
+their own, so auth
 set only in a project's `.claude/` settings does not reach them. thimble tells you when `claude` is missing or not
 logged in.
 
@@ -167,14 +168,27 @@ link and run install.sh again.
 The orientation, its critic, the writers, view builds, view reviews and report checks are subagents of the Claude Code
 session you start with `thimble`. Claude Code's agent tray (↓) lists them, and each has its thread in the browser.
 
-- **Starting one.** Start, Write, Build, Run and the other buttons in the browser start their agent at once through
-  thimble's plugin, without a turn of Claude's; Claude's context gets a one-line note that names it. Asked in the
-  terminal, Claude calls a thimble tool (`start_orientation`, `start_writing`, `propose_view`, `run_check`) and then
-  makes the Agent call it gives, which Claude Code's auto mode judges as it judges any call. A start that doesn't happen
-  shows in the browser with its reason.
+- **Starting one.** Write, a view proposal's Accept, Build, Run and the other buttons in the browser start their agent
+  at once through thimble's plugin, without a turn of Claude's; Claude's context gets a one-line note that names it.
+  Asked in the terminal, Claude calls a thimble tool (`start_orientation`, `start_writing`, `propose_view`, `run_check`)
+  and then makes the Agent call it gives, which Claude Code's auto mode judges as it judges any call. A start that
+  doesn't happen shows in the browser with its reason.
+- **The orientation.** Claude starts one when you ask for it, or when your question needs a broad look at the corpus;
+  `/thimble:orient [focus]` asks for one directly. It explores as far as your request and its effort call for, leaves
+  its findings as cards in the group Orientation, and may have a critic review its analysis before it finishes. It
+  writes no report and proposes no views: ask Claude for a report (`/thimble:write report`) when you want one.
+- **View proposals.** After each of your messages, when a side thread answers, and once when an orientation ends,
+  thimble may propose a view, a page that shows your records in a form their files hide. The proposal waits on a card
+  above the reply box, with the view's name, what it shows and the task it serves, until you answer it: Accept builds
+  the view, Reject drops the proposal, and Don't ask again turns view proposals off. Nothing builds before you accept.
+  When you open a file that only Raw can show, the same card can propose a viewer for its type. Deciding whether to
+  propose takes one model call on a copy of your session's context, made with the sign-in thimble's card checks and
+  labels use. Settings' View proposals switch turns them on and off. In terminal mode the proposal is a row above the
+  prompt with accept, reject and don't ask again; to turn proposals on again there, remove `views.propose` from
+  `~/.thimble/config.json` or set it to true ([docs/config.md](docs/config.md)).
 - **Models and efforts.** Each agent runs on exactly the model and effort that Settings name for it, and a change
-  applies to the next start, with no restart. Start, `/thimble:orient --model <model> --effort <level>` and the start
-  tools take a model and an effort for one run. The orientation's own subagents run on the "orientation subagents" row
+  applies to the next start, with no restart. `/thimble:orient --model <model> --effort <level>` and the start tools
+  take a model and an effort for one run. The orientation's own subagents run on the "orientation subagents" row
   when it starts them as `thimble:orient-helper`; one it starts as another type runs on the orientation's own model and
   effort. A follow-up runs on its run's model and effort, except one typed in the terminal to an agent started from
   the browser after that role's settings changed, which runs on the new ones; its thread says so. The launcher unsets
@@ -188,6 +202,16 @@ session you start with `thimble`. Claude Code's agent tray (↓) lists them, and
   its thread shows. A finished agent leaves the ↓ tray; `/tasks` opens it. "Move to background" and the ← agent view
   are turned off. `/clear` keeps the agents running, but it stops the orientation's current command, which it may run
   again or skip.
+- **Failures.** When one of thimble's agents fails, a notice tells you where you are looking: in the browser above the
+  reply box of the chat you have open, main's or a thread's, and in terminal mode in the rows above the prompt. It
+  names the agent, such as Orientation, View build: Agent Network or Card check, says in one line what failed and how
+  to fix it, and has a button for the fix where there is one (Retry, Try again, Open Settings) and Open for the agent's
+  thread. It stays until you dismiss it (×) or the fix works, and the agent's thread keeps it as a row. This covers
+  the orientation and its subagents, the critic, the writers, view builds and reviews, report checks, code tickets,
+  card checks, label runs and view proposals: a request Claude's safeguards blocked or switched to another model, an
+  API error that stopped the agent (sign-in, access, a model not found, overload or rate limits after Claude Code's
+  own retries, the connection), an agent that ended failed or could not start, and a build, check or label run that
+  failed.
 - **Report checks** run after a writer saves a document. After your own edits a check shows how many passages changed,
   and Run starts it.
 - **Code tickets**, in a development install only, are changes to thimble's own code: file one with Report a problem →
@@ -207,7 +231,7 @@ session you start with `thimble`. Claude Code's agent tray (↓) lists them, and
   threads count, and thimble queues view builds and checks at the limit. Raise it with
   `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`; it doesn't apply while your session runs Ultracode. The agents have no
   Workflow tool, which Claude Code gives only to your session and its forks, and no Ultracode mode; its effort, xhigh,
-  is one of the efforts Settings offer them. Start is refused while your session is in plan mode, where an agent would
+  is one of the efforts Settings offer them. A start is refused while your session is in plan mode, where an agent would
   have to ask before every card; shift+tab leaves it. Agents that already run go on in plan mode, as Claude Code's own
   subagents do, and can only read and plan there; one that ends there without its work shows failed, with what to do.
   Safe mode (`--safe-mode`) turns thimble's plugin off entirely.
@@ -277,10 +301,10 @@ dataset, where it was downloaded from and what each build changes. The Transluce
 The command then registers each folder. Where [demos/](demos/README.md) in the repository has a pre-cached
 orientation for the dataset, it installs it as the folder's workspace: the cards, labels, views and report. A
 pre-cache holds the orientation's outputs alone, so its Claude Code session is not included. A dataset without one
-opens with no analysis yet, and Start in the page runs the orientation. It prints one URL and opens it in your browser
-without a Claude Code session: thimble's start page, which lists the datasets you downloaded (and any other folder
-open in thimble), each row opening its workspace on the dataset's main view rather than on Files; in a workspace, the
-folder name in the top bar opens the same list.
+opens with no analysis yet; ask Claude in the page or the terminal for an orientation. It prints one URL and opens it
+in your browser without a Claude Code session: thimble's start page, which lists the datasets you downloaded (and any
+other folder open in thimble), each row opening its workspace on the dataset's main view rather than on Files; in a
+workspace, the folder name in the top bar opens the same list.
 The orientation's thread opens with a card that says it is a frozen demo session, with the command that starts a live
 session from scratch with the dataset.
 
@@ -335,11 +359,18 @@ that one and prints each path it deleted. The folder it read and your Claude Cod
 - `thimble doctor` shows the server, the versions, the auth path and the log's recent errors.
 - thimble's agents don't start because Claude Code's sandbox can't run: `thimble doctor` says what is missing, and on
   Linux `install.sh --sandbox-deps` installs it.
-- thimble's agents don't start, and the browser says Claude Code's hooks modules are off: managed settings
-  (`disableAllHooks`, `allowManagedHooksOnly`) turn them off, or Claude Code doesn't trust the folder. `thimble doctor`
-  names the reason. Fix it, then run `thimble -c`. Claude, its threads, cards and labels work meanwhile.
-- Start is grayed out with a line about plan mode: your session is in plan mode, where an agent would ask before every
-  card. Leave it with shift+tab in the terminal.
+- thimble's agents don't start, and a refused start in the browser says Claude Code's hooks modules are off: managed
+  settings (`disableAllHooks`, `allowManagedHooksOnly`) turn them off, or Claude Code doesn't trust the folder.
+  `thimble doctor` names the reason. Fix it, then run `thimble -c`. Claude, its threads, cards and labels work meanwhile.
+- A start or a view proposal's Accept is refused with a line about plan mode: your session is in plan mode, where an
+  agent would ask before every card. Leave it with shift+tab in the terminal, then try again.
+- A notice says thimble couldn't check for a view proposal: it gives the reason, with Try again and Turn off view
+  proposals. When it says Claude Code isn't signed in for thimble's server, run `/login`; if you changed your sign-in
+  after the server started, such as by exporting `ANTHROPIC_API_KEY`, run `thimble server restart` from that shell. An
+  accepted view that fails to build has a notice with Retry.
+- A chat says Claude's safeguards stopped a request: rephrase or narrow the request and send it again. A notice that
+  Claude's safeguards switched a reply to another model names both models; the reply, or the view proposal, came from
+  the second.
 - An empty `.claude/.cc-writes/` folder appears in the folder you start `thimble` in: Claude Code's sandbox makes it
   for Bash, and thimble runs your session in that sandbox. Your Claude Code settings files stay as they are.
 - Cards are not checked, views are checked without loading their page, or screenshots are unavailable: there is no

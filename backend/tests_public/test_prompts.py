@@ -61,7 +61,7 @@ SUBAGENT_HINTS = {
     "start_writing-subagent": {"input"},
     "start_job-subagent": {"input"},
     "critique-subagent": {"input"},
-    "orient-subagent-prompt": {"request_id", "request", "outputs", "off", "critique"},
+    "orient-subagent-prompt": {"request_id", "request"},
     "orient-subagent-message": {"agent", "text"},
     "subagent-request": {"request_id"},
     "agent-check-exact": set(),
@@ -451,17 +451,20 @@ def test_the_event_kinds_are_the_same_in_both_modes(monkeypatch):
     assert found["browser"] == found["terminal"] and "thread" in found["terminal"]
 
 
-def test_the_orientation_parts_leave_out_cleanly_in_both_modes(monkeypatch):
-    """orient_session leaves out parts of orient.md by heading and by line, strictly; each of those headings and
-    lines is still there in terminal mode."""
-    from app import orient_session
+def test_the_orientation_s_prompt_has_no_switches_views_or_report_pass_in_either_mode(monkeypatch):
+    """Since 0.8.0 the orientation is a plain subagent: orient.md, whole in both modes, asks for its deck, offers the
+    critic as its own choice, and names no switch of its run, no view it proposes and no report thimble writes after
+    it; start_orientation takes only the request, the model and the effort."""
+    from app import tools
 
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
     for mode in prompts.MODES:
         text = prompts.agent_prompt("orient", {s: "<x>" for s in prompts.slots("orient", mode)}, mode)
-        lines = [*orient_session.LINES.values(), *orient_session.OUTPUT_LINES, *orient_session.VIEWS_LINES]
-        out = prompts.without(text, orient_session.PARTS.values(), lines)
-        assert all(line not in out for line in lines), mode
+        assert "#### The deck" in text and "when a review would help, call `critique`" in text, mode
+        for gone in ("propose_view", "#### Views", "#### The report", "Your first message names the outputs",
+                     "turns the critique on"):
+            assert gone not in text, (mode, gone)
+    assert set(tools.schema_of("start_orientation")["properties"]) == {"brief", "model", "effort"}
 
 
 # The hint sections the terminal-mode lanes name (modes PLAN.md, Prompt modes), with exactly their placeholders.

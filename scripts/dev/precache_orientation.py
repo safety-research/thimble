@@ -10,10 +10,11 @@ plugin module starts in an interactive main, and the module does nothing in `cla
   - it registers the folder and starts the launcher (<tree>/plugin/bin/thimble, with `--permission-mode <mode>`) in the
     corpus folder, in a tmux server of its own (`tmux -L <socket>`), with CLAUDE_CODE_DISABLE_AGENT_VIEW=1 and
     DISABLE_AUTOUPDATER=1; it answers the folder-trust question if Claude Code asks it;
-  - it waits for the module's hello (subagents.json's `module`), then presses Start as the browser does, with the
-    page's key (the ui_key cookie of server.json): POST /api/ws/<c>/start with the deck, views and report on and the
-    critique off (--no-report turns the report off, --critique the critique on; --model and --effort name the run's,
-    else Settings decide);
+  - it waits for the module's hello (subagents.json's `module`), then posts the start the browser's Start sent before
+    0.8.0, with the page's key (the ui_key cookie of server.json): POST /api/ws/<c>/start, whose --model and --effort
+    name the run's, else Settings decide. Since 0.8.0 the server ignores the body's switches (deck, views, report,
+    critique; --no-report and --critique), so the orientation proposes no views, writes no report and decides on its
+    own critique;
   - every STATUS_S it writes <log folder>/status.json, what the workspace holds and whether it is done (the orientation
     ended, no view build or writer runs, and a report asked for is written), and the terminal's screen to
     <log folder>/screen.txt;
@@ -112,8 +113,9 @@ def launch_command(tree: Path, mode: str, environ: "dict[str, str]") -> str:
 
 
 def start_body(opts: argparse.Namespace) -> dict[str, Any]:
-    """Start as the browser's gate sends it: the deck, views and report on, the critique off, no focus; the run's model
-    and effort only when named."""
+    """The start as the browser's gate sent it before 0.8.0: the deck, views and report on, the critique off, no
+    focus; the run's model and effort only when named. Since 0.8.0 the server reads only the focus, the model and the
+    effort."""
     return {"text": "", "deck": True, "views": True, "report": not opts.no_report, "critique": opts.critique,
             **({"model": opts.model} if opts.model else {}), **({"effort": opts.effort} if opts.effort else {})}
 

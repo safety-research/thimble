@@ -58,17 +58,21 @@ def test_each_role_is_registered_with_a_full_model_id_an_explicit_effort_and_a_f
     assert roles["writer"]["skills"][0] == roles["critic"]["skills"][0] == "thimble:shared"
 
 
-def test_the_orientation_s_registration_holds_every_part_and_takes_main_s_tools_away(models, hints):
+def test_the_orientation_s_registration_holds_its_prompt_and_takes_main_s_tools_and_propose_view_away(models, hints):
+    """The orientation's registration holds orient.md's deck and its critique, and no views or report part, since 0.8.0
+    leaves view proposals to thimble's proposer and a report to the analyst's request; propose_view is taken away."""
     d = subagents.roles(CORPUS)["orientation"]
     denied = set(d["disallowedTools"])
     assert "mcp__plugin_thimble_thimble__start_orientation" in denied
     assert "mcp__plugin_thimble_thimble__message_orientation" in denied
+    assert "mcp__plugin_thimble_thimble__propose_view" in denied
     assert "mcp__plugin_thimble_thimble__add_card" not in denied and "mcp__plugin_thimble_thimble__critique" not in denied
     from app import tools  # noqa: PLC0415
 
     assert tools.hint("orient-no-request") not in d["prompt"], "a run's request is in its own prompt"
-    for heading in ("The deck", "Views", "The report"):
-        assert heading in d["prompt"], heading
+    assert "#### The deck" in d["prompt"] and "`critique`" in d["prompt"]
+    for heading in ("#### Views", "#### The report"):
+        assert heading not in d["prompt"], heading
     critic = set(subagents.roles(CORPUS)["critic"]["disallowedTools"])
     assert "mcp__plugin_thimble_thimble__add_card" in critic and "mcp__plugin_thimble_thimble__read_ref" not in critic
 

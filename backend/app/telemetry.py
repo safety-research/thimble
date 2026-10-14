@@ -53,7 +53,7 @@ KINDS = frozenset({
     "page-load", "page-unload", "visibility", "corpus-switch",
     # the surfaces: the chat and the three center tabs
     "panel-open", "panel-close", "tab-activate",
-    # the chat: the Start card, agent rows, chips, the ⌘ pointer, threads
+    # the chat: an orientation's start in a page before 0.8.0, agent rows, chips, the ⌘ pointer, threads
     "start-toggle", "start-run", "agent-row-expand", "chip-teleport", "pointer-open", "pointer-send",
     "chat-open", "chat-interrupt", "chat-settings", "thread-open", "thread-switch", "thread-fold", "thread-rename", "thread-delete",
     "thread-ask-again", "thread-hand-back", "chat-retry",
