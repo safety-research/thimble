@@ -398,17 +398,17 @@ async def _home(c: str, args: list[str], pos: list[str]) -> Any:
         out["views"] = _home_views(c)
     except Exception:  # noqa: BLE001 — the row above the prompt still shows the rest
         out["views"] = []
-    # the view proposal waiting for the analyst's answer and the latest notice of the view proposals, rows above the prompt
+    # the view proposal waiting for the analyst's answer and every agent's open notices, rows above the prompt
     try:
         out["offer"] = _offer(c)
     except Exception:  # noqa: BLE001 — as for the views
         log.debug("%s: the view proposal was not read", c, exc_info=True)
         out["offer"] = None
     try:
-        out["notice"] = _notice(c)
+        out["notices"] = _notices(c)
     except Exception:  # noqa: BLE001
-        log.debug("%s: the view proposals' notice was not read", c, exc_info=True)
-        out["notice"] = None
+        log.warning("%s: the open notices were not read", c, exc_info=True)
+        out["notices"] = []
     run = orientation.read_run(c) or {}
     out["orientation"] = run.get("status")
     out["coverage"] = run.get("coverage")  # run 0's coverage line (orient_session.measure), which home shows under Files
@@ -463,50 +463,51 @@ def _offer(c: str) -> dict[str, Any] | None:
             **({"refused": str(refused["reason"])} if refused.get("reason") else {})}
 
 
-# The notices of main's chat that the rows above the prompt show (notices.post; main's own safeguard messages show in
-# Claude Code's terminal already): those of the view proposals (proposer.py: a check that failed, or one a fallback
-# model answered) and of an accepted view whose build failed, known by their key or their action. Each action the
-# terminal can take maps to the act that takes it; a notice whose action it cannot take (`settings`) shows its text
-# alone, which names the fix.
-NOTICE_KEYS = ("proposer", "proposal", "view")
+# Every agent's open notices (notices.py: a failure with its fix, from the orientation and its helpers, the critic,
+# writers, view builds and reviews, report checks, code tickets and the dev agent, card checks, labels and the view
+# proposer), which the rows above the prompt show, since Claude Code's own terminal shows only main's requests; a notice
+# of Claude's safeguards on main's own reply (kind "safeguards" in main's chat) is left out, as Claude Code shows it
+# there. Each action the terminal can take maps to the act that takes it; one it cannot take (`settings`: the terminal
+# has no Settings) is left out, and the notice's text names the fix.
 NOTICE_ACTS = {"proposals-retry": "view-propose-now", "proposals-off": "view-proposals-off", "view-retry": "view-retry"}
-PROPOSER_ACTS = ("proposals-retry", "proposals-off")
-NOTICE_TAIL = 262_144  # bytes at the end of main's chat log read for its latest notice
 
 
-def _notice(c: str) -> dict[str, Any] | None:
-    """The latest notice of the view proposals in main's chat (NOTICE_KEYS): {id, key, kind, text, at, action?}, its
-    action {label, act, slug?} as `thimble act` takes it. A later notice of the same key replaces it, and one marked
-    `dismissed` takes it away. While view proposals are off, the proposer's notices are left out. None for none."""
-    from . import agents, plans, views  # noqa: PLC0415
+def _notice_acts(action: Any) -> list[dict[str, str]]:
+    """A notice's `action` (one {label, do, slug?} or a list of them) as the acts `thimble act` takes: {label, act,
+    slug?} each, in its order; a Retry with no view is left out."""
+    out: list[dict[str, str]] = []
+    for a in action if isinstance(action, list) else [action]:
+        if not isinstance(a, dict) or (act := NOTICE_ACTS.get(str(a.get("do") or ""))) is None:
+            continue
+        slug = str(a.get("slug") or "")
+        if act == "view-retry" and not slug:
+            continue
+        out.append({"label": str(a.get("label") or "") or act, "act": act, **({"slug": slug} if slug else {})})
+    return out
 
-    on = views.propose_enabled(c)
-    by_key: dict[str, dict[str, Any]] = {}
-    for r in plans.tail_records(agents.paths(c, agents.MAIN_ID)[1], NOTICE_TAIL):
-        if r.get("type") != "notice":
-            continue
-        key = str(r.get("key") or "")
-        action = r.get("action") if isinstance(r.get("action"), dict) else {}
-        if not (key.startswith(NOTICE_KEYS) or action.get("do") in NOTICE_ACTS):
-            continue
-        k = key or str(r.get("id") or "")
-        by_key.pop(k, None)
-        if r.get("dismissed"):
-            continue
-        if not on and (key.startswith(("proposer", "proposal")) or action.get("do") in PROPOSER_ACTS):
-            continue
-        by_key[k] = r
-    if not by_key:
-        return None
-    r = list(by_key.values())[-1]
-    action = r.get("action") if isinstance(r.get("action"), dict) else {}
-    act = NOTICE_ACTS.get(str(action.get("do") or ""))
-    slug = str(action.get("slug") or "")
-    usable = act is not None and (bool(slug) or act != "view-retry")
-    return {"id": str(r.get("id") or ""), "key": str(r.get("key") or ""), "kind": str(r.get("kind") or ""),
-            "text": str(r.get("text") or ""), "at": str(r.get("ts") or ""),
-            **({"action": {"label": str(action.get("label") or "") or act, "act": act, **({"slug": slug} if slug else {})}}
-               if usable else {})}
+
+def _notices(c: str) -> list[dict[str, Any]]:
+    """Every agent's open notices (notices.open_notices), newest first: {id, key, kind, text, agent, chat, at, acts,
+    open}. `text` reads alone (it names the agent and the failure), `agent` names the agent ("Orientation", "View build:
+    Agent Network"), `acts` are its actions as `thimble act` takes them (_notice_acts), and `open` says how its own
+    thread opens: "thread" for a side thread, "agent" for an agent's chat, "" for main's, for none, or for a chat that
+    is gone."""
+    from . import agents, notices  # noqa: PLC0415
+
+    rows = [n for n in notices.open_notices(c) if isinstance(n, dict) and str(n.get("text") or "").strip()
+            and not (n.get("chat") == agents.MAIN_ID and n.get("kind") == "safeguards")]
+    rows = sorted(reversed(rows), key=lambda n: str(n.get("ts") or ""), reverse=True)  # newest first, ties as given
+    out: list[dict[str, Any]] = []
+    for n in rows:
+        chat, kind = str(n.get("chat") or ""), None
+        if chat and chat != agents.MAIN_ID:
+            with contextlib.suppress(OSError, ValueError):
+                kind = (agents.meta_or_none(c, chat) or {}).get("kind")
+        out.append({"id": str(n.get("id") or ""), "key": str(n.get("key") or ""), "kind": str(n.get("kind") or ""),
+                    "text": " ".join(str(n["text"]).split()), "agent": str(n.get("agent") or ""), "chat": chat,
+                    "at": str(n.get("ts") or ""), "acts": _notice_acts(n.get("action")),
+                    "open": kind if kind in (agents.KIND_THREAD, agents.KIND_AGENT) else ""})
+    return out
 
 
 async def _cards(c: str, args: list[str], pos: list[str]) -> Any:
@@ -979,7 +980,7 @@ ACT_USAGE = ("thimble act <kind> --cwd <dir> '<json>'; kinds: thread {anchor | a
              "verdict {label, ref, value}, label {label, name?, kind?, body?, glob?, values?}, label-run {label, limit?}, label-stop {label}, "
              "label-delete {label}, label-undelete {label}, label-show {label, on?, values?, colors?}, label-filter {label, value?}, seen {thread}, "
              "hand-back {thread}, stop {agent}, view-accept {slug}, view-reject {slug}, view-proposals-off {}, "
-             "view-propose-now {}, view-retry {slug}")
+             "view-propose-now {notice?}, view-retry {slug, notice?}, notice-dismiss {id}")
 
 
 async def act(c: str, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1341,8 +1342,16 @@ async def _act_view_proposals_off(c: str, payload: dict[str, Any]) -> dict[str, 
 
 async def _act_view_propose_now(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Check for a view proposal now, as a notice's Try again does in the browser (POST …/views/propose-now): handed to
-    the holder (local_hooks `view-propose-now`: proposer.run_now), which runs it and writes what comes of it."""
-    return _queued("view-propose-now", c)
+    the holder (local_hooks `view-propose-now`: proposer.run_now), which runs it and writes what comes of it.
+    {queued: false, reason} at once while view proposals are off or one waits for an answer, which the holder would
+    refuse with no word to the terminal."""
+    from . import views  # noqa: PLC0415
+
+    if not views.propose_enabled(c):
+        return {"queued": False, "reason": 'view proposals are off; set "views": {"propose": true} in thimble\'s config'}
+    if views.open_offer(c) is not None:
+        return {"queued": False, "reason": "a view proposal waits for your answer above the prompt"}
+    return _queued("view-propose-now", c, _notice_ref(payload))
 
 
 async def _act_view_retry(c: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1357,7 +1366,20 @@ async def _act_view_retry(c: str, payload: dict[str, Any]) -> dict[str, Any]:
         return {"queued": False, "reason": f"there is no view {slug!r}"}
     if row.get("status") != "failed" and not (row.get("status") == "built" and row.get("failed_change") is not None):
         return {"queued": False, "reason": f"the view {str(row.get('name') or slug)!r} is {row.get('status')}, not failed"}
-    return _queued("view-retry", c, {"slug": slug})
+    return _queued("view-retry", c, {"slug": slug, **_notice_ref(payload)})
+
+
+def _notice_ref(payload: dict[str, Any]) -> dict[str, Any]:
+    """The id of the notice whose act the press was (`notice`), which the holder dismisses before it runs the act, so
+    that a failure that comes again shows as a notice of its own: {notice: id}, or {} for none."""
+    notice_id = " ".join(str(payload.get("notice") or "").split())
+    return {"notice": notice_id} if notice_id else {}
+
+
+async def _act_notice_dismiss(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """A notice dismissed, as its × does in the browser: handed to the holder (local_hooks `notice-dismiss`:
+    notices.dismiss), which writes it, so the notice is gone in every view and after a relaunch. {queued: true}."""
+    return _queued("notice-dismiss", c, {"id": _text(payload, "id")})
 
 
 _ACTS = {"thread": _act_thread, "thread-message": _act_thread_message, "verdict": _act_verdict, "label": _act_label,
@@ -1365,7 +1387,8 @@ _ACTS = {"thread": _act_thread, "thread-message": _act_thread_message, "verdict"
          "label-undelete": _act_label_undelete, "label-show": _act_label_show, "label-filter": _act_label_filter,
          "seen": _act_seen, "hand-back": _act_hand_back, "stop": _act_stop, "view-accept": _act_view_accept,
          "view-reject": _act_view_reject, "view-proposals-off": _act_view_proposals_off,
-         "view-propose-now": _act_view_propose_now, "view-retry": _act_view_retry}
+         "view-propose-now": _act_view_propose_now, "view-retry": _act_view_retry,
+         "notice-dismiss": _act_notice_dismiss}
 
 
 # --------------------------------------------------------------------------- the command line

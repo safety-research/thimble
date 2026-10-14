@@ -436,3 +436,40 @@ async def test_a_notice_s_try_again_checks_for_a_view_proposal_and_the_holder_wa
     assert await _call("view-propose-now", {"cwd": str(config.corpus_dir(CORPUS))}) >= 1
     assert done == [CORPUS], "the holder ran the check to its end"
     assert "view-propose-now" in local_hooks.KINDS and "view-retry" in local_hooks.KINDS
+
+    # proposer.run_now as Lane A writes it: it starts its run as a task of the running loop and answers at once
+    def run_now(c):
+        asyncio.get_running_loop().create_task(check(c))
+        return {"started": True}
+
+    fake.run_now = run_now
+    assert await _call("view-propose-now", {"cwd": str(config.corpus_dir(CORPUS))}) >= 1
+    assert done == [CORPUS, CORPUS], "the holder waited for the run's task"
+
+
+async def test_a_notice_dismissed_in_the_terminal_is_dismissed_by_the_holder(ws, project, monkeypatch):
+    """`thimble act notice-dismiss {id}` hands the dismissal to the holder, which calls notices.dismiss; a notice that is
+    gone is one line in the log."""
+    import sys
+    import types
+
+    import app
+
+    calls: list[tuple] = []
+    fake = types.ModuleType("app.notices")
+    fake.dismiss = lambda c, notice_id: calls.append((c, notice_id)) or notice_id != "gone"
+    monkeypatch.setitem(sys.modules, "app.notices", fake)
+    monkeypatch.setattr(app, "notices", fake, raising=False)
+    _main(project)
+    cwd = str(config.corpus_dir(CORPUS))
+    for notice_id in ("n3", "gone"):
+        assert await _call("notice-dismiss", {"cwd": cwd, "id": notice_id}) >= 1
+    assert calls == [(CORPUS, "n3"), (CORPUS, "gone")]
+    assert "notice-dismiss" in local_hooks.KINDS
+    # a notice's Retry: the notice it was pressed on is dismissed before the view is built again
+    from app import views
+
+    monkeypatch.setattr(views, "retry", lambda c, slug: calls.append(("retry", c, slug)))
+    del calls[:]
+    assert await _call("view-retry", {"cwd": cwd, "slug": "edit-bursts", "notice": "n4"}) >= 1
+    assert calls == [(CORPUS, "n4"), ("retry", CORPUS, "edit-bursts")]

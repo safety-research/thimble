@@ -817,48 +817,105 @@ async def test_state_home_gives_the_waiting_view_proposal_and_none_while_view_pr
     assert (await local.state(CORPUS, "home"))["offer"] is None
 
 
+@pytest.fixture()
+def open_notices(term, monkeypatch):
+    """Lane A's notices, stubbed: notices.open_notices gives the list this returns (the open ones, oldest first, as
+    GET /api/ws/{c}/notices gives them), and notices.dismiss records its calls."""
+    import types
+
+    import app
+
+    held: list[dict] = []
+    fake = types.ModuleType("app.notices")
+    fake.open_notices = lambda c: list(held)
+    fake.dismissed = []
+    fake.dismiss = lambda c, notice_id: fake.dismissed.append((c, notice_id)) or True
+    monkeypatch.setitem(sys.modules, "app.notices", fake)
+    monkeypatch.setattr(app, "notices", fake, raising=False)
+    return held
+
+
 def _notice(**fields: Any) -> dict:
-    return {"type": "notice", "ts": "2026-10-14T10:00:00Z", "kind": "warning", **fields}
+    return {"ts": "2026-10-14T10:00:00Z", "kind": "warning", **fields}
 
 
-async def test_state_home_gives_the_latest_notice_of_the_view_proposals_with_the_act_that_fixes_it(proposals):
+async def test_state_home_gives_every_agent_s_open_notices_newest_first_with_the_acts_that_fix_them(open_notices):
+    """Every agent's open notices reach the rows above the prompt, since Claude Code's own terminal shows only main's
+    requests: the orientation's, a view build's, a writer's, the view proposer's. Each says how its own thread opens. A
+    notice of Claude's safeguards on main's own reply is left out: Claude Code shows that one."""
     from app import agents
 
-    assert (await local.state(CORPUS, "home"))["notice"] is None
-    agents.ensure_main(CORPUS)
-    log_path = agents.paths(CORPUS, agents.MAIN_ID)[1]
+    assert (await local.state(CORPUS, "home"))["notices"] == []
+    orient = agents.new_agent(CORPUS, "orientation", title="orientation")["id"]
+    thread = agents.new_thread(CORPUS, "board.jsonl#L2", "the second post", title="second-post")["id"]
+    switched = "Claude's safeguards switched the orientation's reply from Opus 5.5 to Opus 4.8."
     blocked = "Couldn't check for a view proposal: Claude's safeguards blocked the request."
-    agents.append(log_path, _notice(id="n1", key="proposer", text=blocked,
-                                    action={"label": "Try again", "do": "proposals-retry"}))
-    # main's own safeguard notice is not one of the view proposals': Claude Code's terminal shows it
-    agents.append(log_path, _notice(id="n2", key="main-fallback", text="Claude's safeguards switched this reply."))
-    assert (await local.state(CORPUS, "home"))["notice"] == {
-        "id": "n1", "key": "proposer", "kind": "warning", "text": blocked, "at": "2026-10-14T10:00:00Z",
-        "action": {"label": "Try again", "act": "view-propose-now"}}
-    # a later notice of the same key replaces it; a failed build's Retry names its view
-    agents.append(log_path, _notice(id="n3", key="proposer", text="Couldn't check for a view proposal: timeout.",
-                                    action={"label": "Turn off view proposals", "do": "proposals-off"}))
-    assert (await local.state(CORPUS, "home"))["notice"]["action"] == {"label": "Turn off view proposals",
-                                                                       "act": "view-proposals-off"}
-    failed = "The view Edit Bursts failed to build: no rows."
-    agents.append(log_path, _notice(id="n4", key="view:edit-bursts", text=failed,
-                                    action={"label": "Retry", "do": "view-retry", "slug": "edit-bursts"}))
-    got = (await local.state(CORPUS, "home"))["notice"]
-    assert got["text"] == failed and got["action"] == {"label": "Retry", "act": "view-retry", "slug": "edit-bursts"}
-    # dismissed, the one before it shows; with view proposals off, the proposer's notices are left out
-    agents.append(log_path, {"type": "notice", "key": "view:edit-bursts", "dismissed": True})
-    assert (await local.state(CORPUS, "home"))["notice"]["id"] == "n3"
-    proposals(False)
-    assert (await local.state(CORPUS, "home"))["notice"] is None
-    agents.append(log_path, _notice(id="n5", key="view:board", text="The view Board failed to build: timeout.",
-                                    action={"label": "Retry", "do": "view-retry", "slug": "board"}))
-    assert (await local.state(CORPUS, "home"))["notice"]["id"] == "n5", "a failed build's notice stays"
-    # an action the terminal cannot take (Settings) leaves the text alone, which names the fix
-    proposals(True)
-    agents.append(log_path, _notice(id="n6", key="proposer", text="Couldn't check for a view proposal: sign in.",
-                                    action={"label": "Settings", "do": "settings"}))
-    got = (await local.state(CORPUS, "home"))["notice"]
-    assert got["id"] == "n6" and "action" not in got
+    failed = "The view Agent Network failed to build: its check found no rows."
+    open_notices.extend([
+        _notice(id="n1", key="safeguards-fallback", kind="safeguards", text=switched, agent="Orientation", chat=orient,
+                ts="2026-10-14T10:00:00Z"),
+        _notice(id="n2", key="proposer", kind="proposals", text=blocked, agent="View proposals", chat=None,
+                action=[{"label": "Try again", "do": "proposals-retry"},
+                        {"label": "Turn off view proposals", "do": "proposals-off"}], ts="2026-10-14T10:05:00Z"),
+        _notice(id="n3", key="view:agent-network", kind="view", text=failed, agent="View build: Agent Network",
+                chat=thread, action={"label": "Retry", "do": "view-retry", "slug": "agent-network"},
+                ts="2026-10-14T10:10:00Z"),
+        # an action the terminal cannot take (Settings) is left out: the text names the fix
+        _notice(id="n4", key="writer", kind="agent", text="The writer of report failed: Claude Code isn't signed in.",
+                agent="Writer: report", chat="gone1", action={"label": "Open Settings", "do": "settings"},
+                ts="2026-10-14T10:10:00Z"),
+        _notice(id="n5", key="empty", text="  ", ts="2026-10-14T11:00:00Z"),
+        _notice(id="n6", key="safeguards:main", kind="safeguards", text="Claude's safeguards switched this reply.",
+                agent=None, chat="main", ts="2026-10-14T11:00:00Z"),
+    ])
+    got = (await local.state(CORPUS, "home"))["notices"]
+    assert [n["id"] for n in got] == ["n4", "n3", "n2", "n1"], "newest first; a tie keeps the later one first"
+    assert got[3] == {"id": "n1", "key": "safeguards-fallback", "kind": "safeguards", "text": switched,
+                      "agent": "Orientation", "chat": orient, "at": "2026-10-14T10:00:00Z", "acts": [],
+                      "open": "agent"}
+    assert got[2]["acts"] == [{"label": "Try again", "act": "view-propose-now"},
+                              {"label": "Turn off view proposals", "act": "view-proposals-off"}]
+    assert (got[2]["chat"], got[2]["open"]) == ("", ""), "the proposer has no thread of its own"
+    assert got[1]["acts"] == [{"label": "Retry", "act": "view-retry", "slug": "agent-network"}]
+    assert got[1]["open"] == "thread"
+    assert (got[0]["acts"], got[0]["open"]) == ([], ""), "Settings is left out; a chat that is gone opens nothing"
+    # a notices module that fails leaves the rest of home's state as it was
+    import app
+    app.notices.open_notices = lambda c: 1 / 0
+    home = await local.state(CORPUS, "home")
+    assert home["notices"] == [] and "views" in home
+
+
+async def test_notice_dismiss_hands_the_dismissal_to_the_holder(open_notices, popen):
+    assert await local.act(CORPUS, "notice-dismiss", {"id": "n3"}) == {"ok": True, "queued": True}
+    assert [(r["argv"][-1], r["stdin"]) for r in popen] == [
+        ("notice-dismiss", {"cwd": str(config.corpus_dir(CORPUS)), "id": "n3"})]
+    with pytest.raises(local.StateError, match="id"):
+        await local.act(CORPUS, "notice-dismiss", {})
+
+
+async def test_state_home_lists_a_notice_notices_post_wrote_for_an_agent(term):
+    """With the real notices module (Lane A): a notice posted for an agent's chat is open in home's state, and gone
+    once cleared or dismissed."""
+    notices = pytest.importorskip("app.notices")
+    if not hasattr(notices, "open_notices"):
+        pytest.fail("notices.open_notices(c), the open notices GET /api/ws/{c}/notices gives, is what home reads")
+    from app import agents
+
+    orient = agents.new_agent(CORPUS, "orientation", title="orientation")["id"]
+    notices.post(CORPUS, kind="safeguards", text="Claude's safeguards switched the orientation's reply.",
+                 agent="Orientation", chat=orient, key="t-fallback")
+    got = (await local.state(CORPUS, "home"))["notices"]
+    assert [(n["agent"], n["chat"], n["open"]) for n in got] == [("Orientation", orient, "agent")]
+    notices.clear(CORPUS, "t-fallback")
+    assert (await local.state(CORPUS, "home"))["notices"] == []
+    posted = notices.post(CORPUS, kind="proposals", text="Couldn't check for a view proposal: it timed out.",
+                          agent="View proposals", action={"label": "Try again", "do": "proposals-retry"})
+    got = (await local.state(CORPUS, "home"))["notices"]
+    assert [(n["id"], n["acts"], n["open"]) for n in got] == [(posted["id"], [{"label": "Try again",
+                                                                                "act": "view-propose-now"}], "")]
+    notices.dismiss(CORPUS, posted["id"])
+    assert (await local.state(CORPUS, "home"))["notices"] == []
 
 
 async def test_view_accept_and_reject_hand_the_answer_to_the_holder_and_write_nothing_themselves(proposals, popen):
@@ -913,8 +970,20 @@ async def test_a_notice_s_try_again_and_retry_hand_their_call_to_the_holder(prop
     assert await local.act(CORPUS, "view-retry", {"slug": "broken"}) == {"ok": True, "queued": True}
     assert [(r["argv"][-1], r["stdin"].get("slug")) for r in popen] == [("view-propose-now", None),
                                                                        ("view-retry", "broken")]
+    # pressed on a notice, the act names it, so the holder dismisses it before it runs the act
+    assert (await local.act(CORPUS, "view-retry", {"slug": "broken", "notice": "n3"}))["queued"] is True
+    assert (await local.act(CORPUS, "view-propose-now", {"notice": "n2"}))["queued"] is True
+    assert [r["stdin"].get("notice") for r in popen[2:]] == ["n3", "n2"]
+    del popen[2:]
     got = await local.act(CORPUS, "view-retry", {"slug": "fine"})
     assert got == {"ok": True, "queued": False, "reason": "the view 'Fine' is building, not failed"}
+    assert len(popen) == 2
+    # Try again while a view proposal waits, or with view proposals off, says why at once and starts nothing
+    views._save_proposals(CORPUS, [OFFER])
+    got = await local.act(CORPUS, "view-propose-now", {})
+    assert got == {"ok": True, "queued": False, "reason": "a view proposal waits for your answer above the prompt"}
+    proposals(False)
+    assert "view proposals are off" in (await local.act(CORPUS, "view-propose-now", {}))["reason"]
     assert len(popen) == 2
 
 
