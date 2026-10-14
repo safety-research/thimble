@@ -152,6 +152,8 @@ ROUTER_MODULES = [
     "tour",
     # the workspaces the start page and the top bar's switcher list
     "start_page",
+    # the failures of thimble's agents, told in the foreground with their fix
+    "notices",
 ]
 
 # The backend binds to 127.0.0.1, but a DNS-rebinding page can still reach it as same-origin unless the Host

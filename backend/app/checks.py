@@ -42,6 +42,10 @@ each step of a plan card. Its comments are canvas_comments' store, and Done reso
 shown check that covers the cards, a follow-on start (main_turn_ended), on the cards that changed since its last run
 there and that it has not seen; Run on its row in the canvas's Comments pane and main's run_check with `on: cards` start
 one too.
+
+Notices. A run that ends failed (its agent's API error, a start that did not happen, a program's error) is told in the
+foreground with Open on its chat, since the analyst may be in another chat (notices.post, under the run's key); its
+next start and a run that ends done clear it (_notice).
 """
 from __future__ import annotations
 
@@ -936,6 +940,7 @@ def subagent_started(c: str, run: Any, req: dict[str, Any]) -> None:
         rec.pop("waiting", None)
         save(c, check)
     _stream(c, act.check, act.doc, "running", act.run, run.chat)
+    _notice(act, None, "running", "", run.chat)
 
 
 def subagent_ended(c: str, run: Any, status: str, report: str) -> None:
@@ -1112,6 +1117,7 @@ def _finish(act: _Active, status: str, summary: str) -> None:
         rec["stale"] = len(to_cover(check, act.doc, doc)) if doc is not None and check.get("shown") else 0
         save(c, check)
         _stream(c, act.check, act.doc, status, act.run, str(rec.get("chat") or ""), stale=rec["stale"])
+        _notice(act, check, status, str(summary or ""), str(rec.get("chat") or ""))
         if act.notify and not act.agent:  # main's subagent hands back itself: one line in main's chat, not two
             try:
                 events.post(c, CHECKED_KIND, {"text": rec["summary"] or status, "check": act.check,
@@ -1122,6 +1128,30 @@ def _finish(act: _Active, status: str, summary: str) -> None:
                          e.status_code, e.detail)
     finally:
         _pump()
+
+
+# the notice of a run that failed (module note, notices): {subject} the check, {target} what it ran on, {why} why
+FAILED_TEXT = "{subject} on {target} failed: {why}."
+
+
+def _notice(act: _Active, check: dict[str, Any] | None, status: str, summary: str, chat: str) -> None:
+    """A run started or ended: a failed one is told in the foreground with Open on its chat, under the run's key, and
+    a start or a run that ended done clears it. Never raises."""
+    from . import notices  # noqa: PLC0415
+
+    key = session_key(act.check, act.doc)
+    try:
+        if status != "failed":
+            if status in ("running", "done"):
+                notices.cleared(act.c, key)
+            return
+        name, subject = notices.who(ROLE, str((check or {}).get("name") or act.check))
+        target = f"the {CANVAS_NAME}" if act.doc == CANVAS else f"the document {act.doc}"
+        why, fix = notices.reason(summary or "it ended with no summary")
+        notices.post(act.c, kind="agent", text=FAILED_TEXT.format(subject=subject, target=target, why=why), agent=name,
+                     chat=chat or None, action=fix, key=notices.agent_key(key))
+    except Exception:  # noqa: BLE001 — the run has ended either way
+        log.exception("%s: the end of check %s on %s was not told", act.c, act.check, act.doc)
 
 
 async def stop(act: _Active) -> None:
