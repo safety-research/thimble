@@ -393,6 +393,8 @@ export const api = {
   /** Reject on a view proposal: the proposal dropped as rejected (backend views.answer_offer). 403 without the
    * analyst's cookie, 409 for a row that is no open proposal. */
   rejectProposal: (c: string, slug: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/reject`, { method: 'POST' }),
+  /** Try again on a notice that a check for a view proposal failed: the check runs now (backend proposer.run_now). */
+  proposeNow: (c: string) => j<unknown>(`${ws(c)}/views/propose-now`, { method: 'POST' }),
   retryProposal: (c: string, slug: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/retry`, { method: 'POST' }),
   /** Build or Retry on a proposal's chip (`POST /ws/{c}/views/{slug}/build`): a click that starts a view builder through
    * thimble's plugin, with the run's model and effort (Settings' dev row when left out). */

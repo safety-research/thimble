@@ -1723,6 +1723,41 @@ button.model-line-part[aria-expanded='true'] {
   color: var(--text-secondary);
   font: var(--type-body-sm);
 }
+/* a notice (chat/Notice.tsx): a failure with its fix, one line on the warning's soft wash with its edge, the glyph, the
+   text, the fix's button and × */
+.chat-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  padding: 5px 4px 5px 10px;
+  border: 1px solid color-mix(in oklab, var(--status-warning) 45%, transparent);
+  border-radius: var(--radius-card);
+  background: var(--status-warning-soft);
+  color: var(--text-primary);
+  font: var(--type-body-sm);
+}
+.chat-notice-ico {
+  flex: none;
+  align-self: flex-start;
+  margin-top: 3px;
+  color: var(--status-warning);
+}
+.chat-notice-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.chat-notice-text code {
+  font: var(--type-mono-sm);
+}
+.chat-notice-act.btn,
+.chat-notice-x.btn {
+  flex: none;
+}
 /* a start that did not happen (chat/Refused): one card on the warning's soft wash, the agent named, why on one line,
    the request in full behind a disclosure, and the kind's buttons */
 .chat-refused {

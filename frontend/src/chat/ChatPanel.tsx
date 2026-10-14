@@ -8,7 +8,8 @@
 // whose run ended without a reply offers Ask again, and one whose run ended with an answer offers Hand back to main
 // (HandBack). Main opens empty with its composer, as Claude Code does; a start that did not happen shows its card in main
 // (OrientStart). A view proposal waits above the composer until the analyst answers it (ProposalCard), except while the
-// product tour runs (lib/touring). While main runs outside thimble's fence, a banner says so (UnfencedBanner).
+// product tour runs (lib/touring). A failure with its fix shows as a notice in the chat it belongs to (Notice.tsx). While
+// main runs outside thimble's fence, a banner says so (UnfencedBanner).
 import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -546,6 +547,9 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   // main's meta again when the record changes (its `orientation`, whose status the record is read again on)
   const reloadMain = main.reload
   useEffect(() => bus.on('orient', () => void reloadMain()), [reloadMain])
+  // a notice written into main's log or the chat shown (backend notices.post): its log is read again at once
+  const reloadOther = other.reload
+  useEffect(() => bus.on('notice', (e) => void (e.chat === 'main' ? reloadMain() : e.chat === current ? reloadOther() : undefined)), [reloadMain, reloadOther, current])
   const onStartAnswer = (a: StartAnswer | null) => {
     setStartAnswer(a)
     orientRun.reload()
@@ -850,7 +854,8 @@ export function canAskAgain(records: readonly ChatRecord[], running: boolean): b
  * the thread is not working, which asks the thread's unanswered questions again (threads.ask_again); else undefined.
  * Pure but for `ask`. */
 export function threadRetry(rows: readonly Row[], running: boolean, ask: () => Promise<unknown>): ErrorRetry | undefined {
-  const last = rows[rows.length - 1]
+  // a notice after the error (a safeguard's model switch, say) does not hide its Retry
+  const last = rows.filter((r) => r.kind !== 'notice').at(-1)
   if (running || !last || last.kind !== 'error' || last.errorKind !== API_ERROR_KIND) return undefined
   return { index: last.index, onRetry: ask, note: THREAD_RETRY_NOTE }
 }

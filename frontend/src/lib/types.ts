@@ -62,6 +62,26 @@ export type ChatRecord =
   | { type: 'chip'; ts?: string; kind: ChipKind | string; text: string; ref?: string; [k: string]: unknown }
   | { type: 'agent'; ts?: string; chat: string; role: string; title: string; run?: number; tool_use_id?: string; view?: string }
   | { type: 'shot'; ts?: string; phase: string; ticket: string; name: string; note?: string }
+  | ({ type: 'notice'; ts?: string } & Notice)
+
+/** What a notice's button does (backend notices.post): look for a view proposal again (`proposals-retry`), turn view
+ * proposals off (`proposals-off`), open Settings (`settings`), or build the failed view `slug` again (`view-retry`). */
+export interface NoticeAction {
+  label: string
+  do: 'proposals-retry' | 'proposals-off' | 'settings' | 'view-retry' | (string & {})
+  slug?: string
+}
+
+/** A failure the analyst should know of, with an easy fix (backend notices.post): one line in a chat (main's, or the
+ * thread it belongs to), an optional button, and a dismissal. A later notice with the same `key` replaces it. The
+ * stream's `notice` event carries the same fields with its chat. */
+export interface Notice {
+  id?: string
+  key?: string | null
+  kind?: string
+  text: string
+  action?: NoticeAction | null
+}
 
 export interface ChatDetail {
   meta: ChatMeta

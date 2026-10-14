@@ -99,6 +99,17 @@ describe('the API client', () => {
     expect('start' in client.api).toBe(false)
   })
 
+  test("a view proposal's Accept and Reject, and a notice's Try again, are clicks of their own routes", async () => {
+    await client.api.acceptProposal('w', 'agent timeline')
+    await client.api.rejectProposal('w', 'agent timeline')
+    await client.api.proposeNow('w')
+    expect(calls.map((c) => [c.method, c.url])).toEqual([
+      ['POST', '/api/ws/w/views/proposals/agent%20timeline/accept'],
+      ['POST', '/api/ws/w/views/proposals/agent%20timeline/reject'],
+      ['POST', '/api/ws/w/views/propose-now'],
+    ])
+  })
+
   test('the routes thimble removed with its headless agents are gone from the client', () => {
     const names = Object.keys(client.api)
     for (const gone of ['resumeSession', 'retrySession', 'setSessionMode']) expect(names, gone).not.toContain(gone)

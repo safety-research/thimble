@@ -1,7 +1,7 @@
 // The fold of a chat log into rows the panel renders. `index` is the record's position in the log.
 import type { StepState, ToolState, ToolStep } from '../components/ToolCard'
 import { parseRef, refLabel } from '../lib/refs'
-import type { ChatRecord } from '../lib/types'
+import type { ChatRecord, NoticeAction } from '../lib/types'
 import { shortStepNames, stepParts } from './threads'
 
 export interface UserRow {
@@ -115,7 +115,20 @@ export interface HandBackRow {
   index: number
   text: string
 }
-export type Row = UserRow | TextRow | ToolRow | ChipRow | AgentRow | ErrorRow | NoteRow | ShotRow | HandBackRow
+/** a failure the analyst should know of, with an easy fix (backend notices.post): one line, an optional button, and ×
+ * (chat/Notice.tsx). `id` is the notice's own, else its record's index */
+export interface NoticeRow {
+  kind: 'notice'
+  index: number
+  id: string
+  key?: string
+  /** the notice's kind (backend notices.post `kind`) */
+  noticeKind?: string
+  text: string
+  action?: NoticeAction
+  ts?: string
+}
+export type Row = UserRow | TextRow | ToolRow | ChipRow | AgentRow | ErrorRow | NoteRow | ShotRow | HandBackRow | NoticeRow
 
 /** Find the tool row with `id` anywhere in `rows`, nested rows included. */
 function findTool(rows: Row[], id: string): ToolRow | undefined {
@@ -157,13 +170,17 @@ export function stageLine(delta: string): string | null {
  * Fold the records of a log into rows: a whole message is a text row of its own, a text delta extends the last text row
  * of its level, a stage line is a note. A record `skip` names is left out; every row keeps its record's index. An
  * `agent` record that names the tool call which started its chat (`tool_use_id`) follows that call's row, since the
- * mirror copies the call only once Claude Code flushes its transcript, so the record can come first in the log. Pure.
+ * mirror copies the call only once Claude Code flushes its transcript, so the record can come first in the log. A
+ * notice that a later one with the same `key` replaces is left out, so a failure that happens again shows as one row,
+ * the latest, where it was written. Pure.
  */
 export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<number>): Row[] {
   const rows: Row[] = []
   const calls = new Map<string, number>() // a top-level tool call's id -> its record's index, for the calls folded
+  const latest = new Map<string, number>() // a notice's key -> the index of its latest record
   records.forEach((e, index) => {
     if (e.type === 'tool_use' && !skip?.has(index) && typeof e.parent_tool_use_id !== 'string') calls.set(e.id, index)
+    if (e.type === 'notice' && e.key && !skip?.has(index)) latest.set(e.key, index)
   })
   const held = new Map<string, AgentRow[]>() // the agent rows that wait for their call's row
   records.forEach((e, index) => {
@@ -216,6 +233,12 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
       case 'shot':
         rows.push({ kind: 'shot', index, phase: e.phase, ticket: e.ticket, name: e.name, note: e.note })
         return
+      case 'notice': {
+        if (!e.text || (e.key && latest.get(e.key) !== index)) return
+        const action = e.action && typeof e.action.label === 'string' && e.action.label && typeof e.action.do === 'string' && e.action.do ? e.action : undefined
+        rows.push({ kind: 'notice', index, id: e.id ? String(e.id) : `#${index}`, ...(e.key ? { key: e.key } : {}), ...(e.kind ? { noticeKind: e.kind } : {}), text: e.text, ...(action ? { action } : {}), ts: e.ts })
+        return
+      }
       default:
         return
     }

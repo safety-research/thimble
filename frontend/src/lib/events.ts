@@ -7,7 +7,7 @@ import { useEffect } from 'react'
 import { api } from './api'
 import { bus } from './bus'
 import { openStream } from './sse'
-import type { ViewQuery, WsEvent } from './types'
+import type { NoticeAction, ViewQuery, WsEvent } from './types'
 
 let replaying = false
 
@@ -89,12 +89,32 @@ function fanOut(ev: WsEvent): void {
       // opened again
       if (!replaying && typeof rest.slug === 'string') bus.emit('openView', { slug: rest.slug, query: viewQuery(rest.query) })
       return
+    case 'notice':
+      // a failure written into a chat's log with its fix (backend notices.post): the chat reads its log again
+      if (typeof rest.text === 'string' && rest.text)
+        bus.emit('notice', {
+          chat: typeof rest.chat === 'string' && rest.chat ? rest.chat : 'main',
+          id: typeof rest.id === 'string' ? rest.id : undefined,
+          key: typeof rest.key === 'string' ? rest.key : undefined,
+          kind: typeof rest.kind === 'string' ? rest.kind : undefined,
+          text: rest.text,
+          action: noticeAction(rest.action),
+        })
+      return
     case 'filter':
       bus.emit('filter',{ scope: rest.scope as 'files' | 'canvas' | 'report', concept: typeof rest.concept === 'string' ? rest.concept : undefined, value: typeof rest.value === 'string' ? rest.value : undefined })
       return
     default:
       return
   }
+}
+
+/** A notice's action as the stream sends it: {label, do, slug?}, else undefined. Pure. */
+export function noticeAction(a: unknown): NoticeAction | undefined {
+  if (!a || typeof a !== 'object') return undefined
+  const o = a as Record<string, unknown>
+  if (typeof o.label !== 'string' || !o.label || typeof o.do !== 'string' || !o.do) return undefined
+  return { label: o.label, do: o.do, ...(typeof o.slug === 'string' && o.slug ? { slug: o.slug } : {}) }
 }
 
 /** A stream record's `query` as a view takes it: {card, title, args}, else null. */

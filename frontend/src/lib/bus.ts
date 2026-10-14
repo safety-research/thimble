@@ -1,5 +1,5 @@
 // The page's typed event bus: the workspace stream fans out here, and the surfaces talk to each other through it.
-import type { FilterScope, ViewQuery, WsEvent } from './types'
+import type { FilterScope, Notice, ViewQuery, WsEvent } from './types'
 
 export type Tab = 'files' | 'canvas' | 'report'
 
@@ -85,6 +85,10 @@ export type Events = {
   cmdHeld: { on: boolean; cursor: string }
   /** run the product tour again (Settings' Take the tour) */
   tour: Record<string, never>
+  /** a notice was written into `chat`'s log (the stream's `notice` record, backend notices.post; chat/Notice.tsx) */
+  notice: Notice & { chat: string }
+  /** open Settings under the top bar's gear (a notice's Open Settings) */
+  openSettings: Record<string, never>
 }
 
 type Handler<T> = (payload: T) => void
