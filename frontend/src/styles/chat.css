@@ -1720,15 +1720,15 @@ button.model-line-part[aria-expanded='true'] {
 }
 /* -------- notices (chat/Notice.tsx): a failure of main or of one of thimble's agents with its fix. Above the composer,
    the open ones stack under the view proposal's place, each one line on the warning's wash mixed into the card's own
-   surface (the foot floats over the rows), with the warning's edge: the glyph, the agent in bold and the failure, its
-   fix and Open (beside the words while they fit, under them when not), and ×. In a chat's rows the same line without
-   buttons, quiet once the notice is closed -------- */
+   surface (the foot floats over the rows), with the warning's edge: the glyph, the agent in bold, the failure and Open,
+   ×, and under the words its fix. In a chat's rows the same line without buttons, quiet once the notice is closed
+   -------- */
 .chat-notices {
   display: flex;
   flex: none;
   flex-direction: column;
   gap: 6px;
-  max-height: 30vh;
+  max-height: 40vh;
   margin-bottom: 12px;
   overflow-y: auto;
   border-radius: var(--radius-card);
@@ -1759,14 +1759,13 @@ button.model-line-part[aria-expanded='true'] {
 .chat-notice-body {
   display: flex;
   flex: 1 1 auto;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 8px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
   min-width: 0;
   padding-top: 1px;
 }
 .chat-notice-text {
-  flex: 1 1 14em;
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -1778,14 +1777,31 @@ button.model-line-part[aria-expanded='true'] {
 }
 .chat-notice-acts {
   display: flex;
-  flex: none;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  margin-left: auto;
 }
 .chat-notice-x.btn {
   flex: none;
+}
+/* Open: a link after the words, to the chat the notice happened in */
+.chat-notice-open {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-accent);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+.chat-notice-open:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.chat-notice-open:focus-visible {
+  outline: 1.5px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-chip);
 }
 /* in a chat's rows: no buttons, so the line keeps its own padding on the right */
 .chat-notice-row {

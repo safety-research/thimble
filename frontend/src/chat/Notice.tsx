@@ -3,11 +3,11 @@
 // is open (NoticeStrip), under the view proposal card's place, and stays there across thread switches until the
 // analyst dismisses it (×) or a fix that worked clears it. Each is one line in the warning's colors: the agent it
 // happened to in bold ("Orientation", "View build: Agent Network"), the failure and, when the fix is a command
-// (`/login`, `thimble server restart`), the command in code; then its fix as buttons, Open for the chat it happened in
-// when another one is shown, and ×. A fix that went through dismisses the notice (a new failure brings a new one); one
+// (`/login`, `thimble server restart`), the command in code, and Open for the chat it happened in when another one is
+// shown; then its fix as buttons under the words, and ×. A fix that went through dismisses the notice (a new failure brings a new one); one
 // that failed says why in a toast and leaves it. In the agent's own chat the notice is also a row (NoticeRow), the same
 // line without buttons, which stays as a quiet line of the chat's history once the notice is closed.
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
 import { api } from '../lib/api'
@@ -58,13 +58,15 @@ export function noticeAgent(n: Pick<Notice, 'agent' | 'chat'>, labels?: Readonly
   return n.chat && n.chat !== 'main' ? (labels?.get(n.chat) ?? '') : ''
 }
 
-/** The words of a notice: the agent in bold, then the failure. */
-function NoticeWords({ agent, text }: { agent: string; text: string }) {
+/** The words of a notice: the agent in bold, then the failure, then what `after` adds (Open). */
+function NoticeWords({ agent, text, after }: { agent: string; text: string; after?: ReactNode }) {
   return (
     <span className="chat-notice-text">
       {agent && <b className="chat-notice-agent">{agent}</b>}
       {agent && ' '}
       {noticeText(text)}
+      {after && ' '}
+      {after}
     </span>
   )
 }
@@ -84,31 +86,30 @@ function ForegroundNotice({ ws, notice, current, agent, onOpen }: { ws: string; 
       .finally(() => setBusy(null))
   }
   const open = notice.chat && notice.chat !== current ? notice.chat : null
+  const openLink = open ? (
+    <button
+      type="button"
+      className="chat-notice-open"
+      onClick={() => {
+        track('thread-switch', { target: `chat:${open}`, detail: { from: 'notice' } })
+        onOpen(open)
+      }}
+    >
+      Open
+    </button>
+  ) : undefined
   return (
     <div className="chat-notice" role="status" data-notice={notice.id} data-key={notice.key ?? undefined} data-kind={notice.kind} data-chat={notice.chat ?? undefined}>
       <Icon name="warning" size={13} className="chat-notice-ico" />
       <div className="chat-notice-body">
-        <NoticeWords agent={agent} text={notice.text} />
-        {(actions.length > 0 || open) && (
+        <NoticeWords agent={agent} text={notice.text} after={openLink} />
+        {actions.length > 0 && (
           <span className="chat-notice-acts">
             {actions.map((a) => (
               <Button key={`${a.do}:${a.slug ?? ''}`} variant="secondary" size="sm" className="chat-notice-act" busy={busy === a.do} disabled={!!busy && busy !== a.do} onClick={() => run(a)}>
                 {a.label}
               </Button>
             ))}
-            {open && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="chat-notice-open"
-                onClick={() => {
-                  track('thread-switch', { target: `chat:${open}`, detail: { from: 'notice' } })
-                  onOpen(open)
-                }}
-              >
-                Open
-              </Button>
-            )}
           </span>
         )}
       </div>

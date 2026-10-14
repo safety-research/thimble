@@ -130,7 +130,8 @@ describe('the strip above the composer, and the rows', () => {
   }
   const live = (ev: Record<string, unknown>) => act(async () => dispatch({ type: 'notice', ...ev } as never))
   const click = (el: Element | null | undefined) => act(async () => (el as HTMLButtonElement).click())
-  const lines = (el: HTMLElement) => [...el.querySelectorAll('.chat-notice')].map((n) => n.querySelector('.chat-notice-text')?.textContent)
+  /** Each notice's words, without its Open link. */
+  const lines = (el: HTMLElement) => [...el.querySelectorAll('.chat-notice')].map((n) => n.querySelector('.chat-notice-text')?.textContent?.replace(/ Open$/, ''))
 
   test('the open notices are read when the page opens: the agent in bold, the failure, the fixes, Open and ×', async () => {
     open = [{ id: 'n1', key: 'proposals', kind: 'proposals', agent: 'View proposals', text: BLOCKED, action: [TRY, OFF], foreground: true }, { id: 'n2', key: 'build:agent-network', kind: 'view', agent: 'View build: Agent Network', chat: 'dev-1', text: BUILD, action: { label: 'Retry', do: 'view-retry', slug: 'agent-network' } }]
@@ -141,7 +142,9 @@ describe('the strip above the composer, and the rows', () => {
     expect(proposals.querySelector('.chat-notice-text')?.textContent).toBe(`View proposals ${BLOCKED}`)
     expect([...proposals.querySelectorAll('button')].map((b) => b.textContent || b.getAttribute('aria-label'))).toEqual(['Try again', 'Turn off view proposals', 'Dismiss'])
     expect(build.querySelector('.chat-notice-agent')?.textContent).toBe('View build: Agent Network')
-    expect([...build.querySelectorAll('button')].map((b) => b.textContent || b.getAttribute('aria-label'))).toEqual(['Retry', 'Open', 'Dismiss'])
+    // Open is a link after the words, the fix a button under them
+    expect([...build.querySelectorAll('button')].map((b) => b.textContent || b.getAttribute('aria-label'))).toEqual(['Open', 'Retry', 'Dismiss'])
+    expect(build.querySelector('.chat-notice-text .chat-notice-open')).not.toBeNull()
   })
 
   test('a command in the text is code; with no agent named, the thread it happened in names it', async () => {
