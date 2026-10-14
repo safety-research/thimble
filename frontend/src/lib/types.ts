@@ -491,6 +491,22 @@ export interface Proposal {
   values?: { model?: string; effort?: string } | null
   model?: string | null
   effort?: string | null
+  /** a view proposal thimble made to the analyst (backend views.offer): when, at which analyst turn, after what
+   * (`main`, `thread:<id>`, `orientation`, or `file` for a viewer proposed when a file was opened) and why. An open
+   * proposal is `suggested` with this; a `suggested` row without it is from an older version and never shows */
+  offered?: ProposalOffer | null
+  /** how the analyst answered the view proposal: Accept or Reject */
+  answer?: 'accepted' | 'rejected' | null
+  answered_at?: string | null
+  answered_turn?: number | null
+}
+
+/** When and why thimble proposed the view (Proposal.offered). */
+export interface ProposalOffer {
+  at: string
+  turn: number
+  after: string
+  why?: string
 }
 
 /** The review of a built view's pictures: running, done (with what it revised and what problems are left), failed
@@ -1186,6 +1202,9 @@ export interface Settings {
   tasks?: TaskRow[]
   /** the minutes a code ticket's permission request waits before it is declined (thimble's config `cardWait`) */
   card_wait?: number
+  /** View proposals: whether thimble proposes views after a turn and viewers for file types (thimble's config
+   * `views.propose`) */
+  propose_views?: boolean
   [k: string]: unknown
 }
 
@@ -1245,6 +1264,8 @@ export interface SettingsPatch {
   models?: Record<string, Partial<ModelConf>>
   permission_modes?: Partial<Record<ModeAgent, OrientPermissions | null>>
   web?: Partial<Record<'orient' | 'writer' | 'critic' | 'checks', 'off' | null>>
+  /** View proposals: false turns them off, null puts back the default (on) */
+  propose_views?: boolean | null
   [k: string]: unknown
 }
 

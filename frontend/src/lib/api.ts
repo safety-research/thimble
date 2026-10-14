@@ -386,8 +386,12 @@ export const api = {
   viewSuggestions: (c: string, path: string) => j<ViewSuggestion>(`${ws(c)}/views/suggestions${q({ path })}`),
   /** ask for a viewer for the type of a file the analyst opened: the suggested proposal's slug, or null */
   suggestView: (c: string, path: string) => j<{ slug: string | null }>(`${ws(c)}/views/suggest`, { method: 'POST', body: JSON.stringify({ path }) }),
-  /** build a suggested viewer */
+  /** Accept on a view proposal: its build queued as one the analyst asked for; a start that cannot happen comes back
+   * as the row's `refused`. 403 without the analyst's cookie. */
   acceptProposal: (c: string, slug: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/accept`, { method: 'POST' }),
+  /** Reject on a view proposal: the proposal dropped as rejected (backend views.answer_offer). 403 without the
+   * analyst's cookie, 409 for a row that is no open proposal. */
+  rejectProposal: (c: string, slug: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/reject`, { method: 'POST' }),
   retryProposal: (c: string, slug: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/retry`, { method: 'POST' }),
   /** Build or Retry on a proposal's chip (`POST /ws/{c}/views/{slug}/build`): a click that starts a view builder through
    * thimble's plugin, with the run's model and effort (Settings' dev row when left out). */

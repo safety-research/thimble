@@ -7,7 +7,8 @@
 // step's parent) runs and the browser can stop it, the composer's send square is its Stop (composerStopOf). A thread
 // whose run ended without a reply offers Ask again, and one whose run ended with an answer offers Hand back to main
 // (HandBack). Main opens empty with its composer, as Claude Code does; a start that did not happen shows its card in main
-// (OrientStart). While main runs outside thimble's fence, a banner says so (UnfencedBanner).
+// (OrientStart). A view proposal waits above the composer until the analyst answers it (ProposalCard), except while the
+// product tour runs (lib/touring). While main runs outside thimble's fence, a banner says so (UnfencedBanner).
 import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -25,6 +26,7 @@ import { newest, STALE } from '../lib/newest'
 import { callRef, parseRef } from '../lib/refs'
 import { track } from '../lib/telemetry'
 import { hhmm } from '../lib/time'
+import { useTouring } from '../lib/touring'
 import type { ChatMeta, ChatRecord, MainEffort, Proposal, SessionAlert, StartAnswer, ThreadComment, Ticket } from '../lib/types'
 import { colourVar } from '../files/labels'
 import { NOTE_COLOR } from '../report/checkComments'
@@ -53,6 +55,7 @@ import { RoleChip } from './RoleChip'
 import { useChat, type ChatState } from './useChat'
 import { pendingAsks, waitingAt, waitingChats } from './waiting'
 import { PermissionCard } from './PermissionCard'
+import { ProposalCard } from './ProposalCard'
 import { AttachBar, PrecachedCard, attachInstead, precachedMark, takesFollowUps } from './Precached'
 import { pendingRequests } from './permissions'
 
@@ -536,6 +539,8 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   const runningAgents = useMemo(() => chats.filter((m) => (threadKind(m) === 'orient' || threadKind(m) === 'writer' || threadKind(m) === 'dev') && m.status === 'running').sort((a, b) => (a.created_at < b.created_at ? 1 : -1)), [chats])
   // the orientations' logs are read as well: main leaves out its relay of the summary one handed back
   const orientIds = useMemo(() => chats.filter((m) => threadKind(m) === 'orient').map((m) => m.id), [chats])
+  // while the product tour runs, no view proposal shows over its examples
+  const touring = useTouring()
   // the orientation's record: Starting… and a start that did not happen
   const orientRun = useOrientRun(ws, main.meta?.orientation)
   // main's meta again when the record changes (its `orientation`, whose status the record is read again on)
@@ -794,6 +799,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
         <div ref={footRef} className="chat-foot">
           <Holds className="chat-main-holds" alert={main.meta?.alert} />
           {asks.length > 0 && <PermissionCard ws={ws} asks={asks} metas={metaMap} labels={labels} />}
+          {!touring && <ProposalCard ws={ws} />}
           {strip && <TaskStrip title={strip.title} steps={strip.steps} count={strip.count} open={stripOpen} onToggle={() => setStripOpen((o) => !o)} waiting={waiting} />}
           {precached && attachInstead(precached, neverAttached, target.to) ? (
             <AttachBar mark={precached} card={kind === 'orient' && current === precached.orientation} />

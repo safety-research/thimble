@@ -8,7 +8,8 @@
 //   - every step: each cutout lies inside the window, everything an example shows in a cutout lies inside that cutout,
 //     the popover lies inside the window, covers no cutout wherever the window has room for it beside the first, and its
 //     caret points at the first cutout;
-//   - main draws no Start card, on every step and once the tour ends (main opens on an empty chat); step 1's example
+//   - main draws no Start card, on every step and once the tour ends (main opens on an empty chat), and the waiting view
+//     proposal shows above the composer only once the tour ends; step 1's example
 //     sits 8 px or more inside its cutout, which lies inside the chat panel; step 3, Files, says what the files browser
 //     shows;
 //   - step 4: the wheel scrolls the labels' transcript in steps with every record moving by exactly the scroll, its
@@ -107,7 +108,8 @@ const GET: Record<string, unknown> = {
   [`/api/ws/${WS}/chats/main`]: { meta: { ...MAIN, orientation: null }, events: [] },
   [`/api/ws/${WS}/concepts`]: [],
   [`/api/ws/${WS}/views`]: [],
-  [`/api/ws/${WS}/views/proposals`]: [],
+  // a view proposal waiting for the analyst, which the chat shows only once the tour ends
+  [`/api/ws/${WS}/views/proposals`]: [{ slug: 'deploy-timeline', name: 'Deploy Timeline', description: 'Every deploy on one time axis.', task: 'see which deploys broke the database', claims: ['deploys.csv'], status: 'suggested', proposed_by: 'proposer', offered: { at: T, turn: 1, after: 'main' } }],
   [`/api/corpora/${WS}/sources`]: FILES,
   [`/api/ws/${WS}/labels`]: [],
   [`/api/ws/${WS}/labels/presence`]: [],
@@ -218,9 +220,12 @@ async function onStep(page: Page, n: number, title?: string) {
   )
   await sleep(500)
   assert.equal(await realGates(page), 0, `step ${n}: main draws no Start card while the tour runs`)
+  assert.equal(await realOffers(page), 0, `step ${n}: no view proposal shows while the tour runs`)
 }
 /** How many Start cards main's own chat draws: none since main opens on an empty chat. */
 const realGates = (page: Page) => page.evaluate(() => [...document.querySelectorAll('.chat-gate')].filter((g) => !g.closest('.tour-root')).length)
+/** How many view proposal cards the chat draws. */
+const realOffers = (page: Page) => page.evaluate(() => [...document.querySelectorAll('.chat-offer')].filter((g) => !g.closest('.tour-root')).length)
 const next = (page: Page) => page.click('.tour-pop [data-tour="next"]')
 
 // in the page: what a cutout shows lies inside it. Every element drawn in an example container (a size, visible, and
@@ -1057,8 +1062,9 @@ async function walk(page: Page, tag: string, folds?: boolean, send = false) {
   await page.click('.tour-pop [data-tour="done"]')
   await sleep(500)
   assert.equal(await page.evaluate(() => !!document.querySelector('.tour-root, .tour-host')), false, `${tag}: Done removes the tour and its examples`)
-  // main opens on an empty chat: no Start card after the tour either
+  // main opens on an empty chat: no Start card after the tour either; the waiting view proposal shows again
   assert.equal(await realGates(page), 0, `${tag}: no Start card after the tour`)
+  await page.waitForFunction(() => document.querySelectorAll('.chat-offer').length === 1, null, { timeout: 3000 })
 }
 
 const fontOk = (page: Page) =>

@@ -1,8 +1,10 @@
 // A view the analyst asked for opens by itself once it is built: a new `view {status: built, asked}` stream record
 // teleports to it, unless the analyst is typing in a field. Then the view waits as ready (a toast, Open on its chip and
-// the accent dot in the views bar) until opened. A view nobody asked for never opens by itself: a new version of it
-// that no pane shows, a first build included, waits as updated, with the same dot and no toast, until opened, while a
-// pane that shows it keeps its version and offers Reload (ViewPane). Both sets are kept per workspace in localStorage.
+// the accent dot in the views bar) until opened. A view the analyst accepted from a view proposal (ProposalCard) never
+// opens by itself: its first build (`accepted`) waits as ready, with the toast. A view nobody asked for never opens by
+// itself: a new version of it that no pane shows, a first build included, waits as updated, with the same dot and no
+// toast, until opened, while a pane that shows it keeps its version and offers Reload (ViewPane). Both sets are kept per
+// workspace in localStorage.
 import { useEffect, useRef, useSyncExternalStore } from 'react'
 import { bus } from '../lib/bus'
 import { isReplay } from '../lib/events'
@@ -88,9 +90,10 @@ export function typingIn(el: Element | null): boolean {
 }
 
 /** What a `view` record asks of the page: open the view, mark it ready, mark a new version of it updated, or nothing.
- * Pure, so the rule is tested without a page. */
-export function onBuilt(e: { status: string; asked?: boolean; version?: string }, replay: boolean, typing: boolean, shownNow = false): 'open' | 'ready' | 'updated' | null {
+ * The first build of an accepted view proposal is ready, never opened. Pure, so the rule is tested without a page. */
+export function onBuilt(e: { status: string; asked?: boolean; accepted?: boolean; version?: string }, replay: boolean, typing: boolean, shownNow = false): 'open' | 'ready' | 'updated' | null {
   if (e.status !== 'built' || replay) return null
+  if (e.accepted) return 'ready'
   if (e.asked) return typing ? 'ready' : 'open'
   return e.version && !shownNow ? 'updated' : null
 }

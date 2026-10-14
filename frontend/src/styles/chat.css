@@ -1388,6 +1388,94 @@ button.model-line-part[aria-expanded='true'] {
   margin-left: auto;
 }
 
+/* -------- a view proposal (ProposalCard): one card above the composer in the accent, on the view chip's tint mixed
+   into the card's own surface (the foot floats over the rows) with the accent's stronger edge: the head with its
+   sparkle, the view's name in bold and what it shows, the task, then Accept, Reject and a quiet Don't ask again; an
+   Accept that could not start the build says why under them -------- */
+.chat-offer {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 6px;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--chip-edge-hover);
+  border-radius: var(--radius-card);
+  background: color-mix(in oklab, var(--accent) 8%, var(--surface-card));
+  box-shadow: var(--shadow-composer);
+  color: var(--text-primary);
+  font: var(--type-body-sm);
+}
+.chat-offer-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-accent);
+  font: var(--type-ui-sm);
+  font-weight: 600;
+}
+.chat-offer-ico {
+  flex: none;
+  color: var(--text-accent);
+}
+.chat-offer-text,
+.chat-offer-task {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow-wrap: anywhere;
+}
+.chat-offer-name {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.chat-offer-desc {
+  color: var(--text-secondary);
+}
+.chat-offer-task {
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  color: var(--text-tertiary);
+}
+.chat-offer-acts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-top: 2px;
+}
+/* Don't ask again: a quiet text button after Reject, at the row's end */
+.chat-offer-off {
+  margin-left: auto;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+  cursor: pointer;
+}
+.chat-offer-off:hover {
+  color: var(--text-secondary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.chat-offer-off:focus-visible {
+  outline: 1.5px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-chip);
+}
+.chat-offer-refused {
+  margin: 0;
+  color: var(--status-negative);
+  overflow-wrap: anywhere;
+}
+
 /* -------- the composer: glass floating over the transcript -------- */
 .chat-foot {
   position: absolute;
