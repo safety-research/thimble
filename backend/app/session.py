@@ -14,7 +14,8 @@ once no workspace has a main session the server stops itself (cli.stop_self).
 The tail translates transcript records into main's log (`by: terminal`): the analyst's lines (not /thimble's own turn
 or local commands such as /model), browser events, task notifications, peer messages, tool calls and results, text,
 and `done` at turn_duration; any record shape it does not cover disables it with one `error` record. Safety stops,
-fallbacks, interrupts and long waits (read from `<claude config>/sessions/<pid>.json`) become one note each.
+interrupts and long waits (read from `<claude config>/sessions/<pid>.json`) become one note each; a reply Claude's
+safeguards switched to another model becomes a notice in its chat (notices.py, FALLBACK_TEXT), main's or an agent's.
 
 Each subagent transcript becomes an agent chat, except `thread:<id>` subagents, which are that thread's fork
 (threads.py), and thimble's own agents (subagents.py): an agent of one of thimble's roles goes to its role's chat (made
@@ -164,8 +165,16 @@ WAIT_NOTE_S = 2.0  # a wait shorter than this (a prompt the analyst answered at 
 ASK_RELEASE_S = 10.0
 SAFETY_ALERT = ("Claude Code is waiting in your terminal: Claude's safety check stopped this answer. Choose there whether "
                 "to switch to another model and go on, or to stay on this one and stop the answer.")
+# Claude's safeguards and a reply (module note, stops and waits). A downgrade: Claude Code answers on another model
+# after the requested one refused, which it records in main's transcript as a FALLBACK_SUBTYPE system record (scope
+# `session`, or `local` for one reply), and in a subagent's as that record or as a reply with stop_reason refusal and
+# the next replies on another model (2.1.295, workflow agents); each becomes a notice (notices.post) in the chat it
+# happened in. A block: the request ends with Claude Code's API error line (isApiErrorMessage, stop_reason refusal),
+# which the chat shows as its API error card; its text record carries `refusal: true`.
 FALLBACK_SUBTYPE = "model_refusal_fallback"
-FALLBACK_TEXT = "Claude's safety check stopped this answer, so {model} answers instead"
+FALLBACK_TEXT = "Claude's safeguards switched this reply from {model} to {fallback}."
+FALLBACK_KEY = "safeguards-fallback"  # the notices' key: a later switch in the same chat updates the row
+REFUSAL = "refusal"  # the stop_reason of a reply the model's safeguards stopped
 
 
 def _now() -> str:
@@ -210,6 +219,9 @@ class Sub:
         # Claude Code's error line when the latest reply of its current run is an API error (isApiErrorMessage: a
         # refusal by the model's safeguards, retries run out), else None (agent_error)
         self.api_error: str | None = None
+        # the model of its last reply that the safeguards stopped (stop_reason refusal), until a reply on that model or
+        # on another (a downgrade, _sub_safeguards) comes
+        self.refused_on: str | None = None
         self.ran = False  # the model of its current run is recorded (subagents.ran_on)
         self.quiet_since = time.monotonic()
         self.done = False
@@ -394,7 +406,8 @@ def _sub_places(lv: Live) -> dict[str, dict]:
         names = dict(list(sub.names.items())[-CURSOR_CALLS:])
         seen = sorted(k for k in sub.seen if k.startswith("skip:") or k.split(":", 1)[-1] in names)[-2 * CURSOR_CALLS:]
         out[str(sub.path)] = {"offset": at, "done": sub.done, "names": names, "seen": seen,
-                              **({"report": sub.report} if sub.report else {})}
+                              **({"report": sub.report} if sub.report else {}),
+                              **({"refused_on": sub.refused_on} if sub.refused_on else {})}
     return out
 
 
@@ -769,6 +782,8 @@ def _take_place(sub: Sub, path: Path, place: Any, at_end: bool) -> None:
         sub.seen.update(str(k) for k in place.get("seen") or [])
         if place.get("report") and not sub.report:
             sub.report = str(place["report"])
+        if place.get("refused_on") and not sub.refused_on:
+            sub.refused_on = str(place["refused_on"])
     elif at_end:
         sub.offset = _size(path)
 
@@ -1449,12 +1464,12 @@ def visible(text: str) -> str:
     return "\n".join(ln for ln in text.split("\n") if not ln.lstrip().startswith(TERMINAL_ONLY)).strip()
 
 
-def _text(lv: Live, text: str) -> None:
+def _text(lv: Live, text: str, **extra: Any) -> None:
     text = visible(text)
     if not text.strip():
         return
     lv.turn_text = text
-    _rec(lv, "text", delta=text)
+    _rec(lv, "text", delta=text, **extra)
 
 
 def _tool_use(lv: Live, tool_use_id: str, name: str, tool_input: Any) -> None:
@@ -1796,6 +1811,43 @@ def api_error_of(rec: dict) -> str | None:
     blocks = [{"type": "text", "text": content}] if isinstance(content, str) else content if isinstance(content, list) else []
     text = "\n".join(str(b.get("text") or "") for b in blocks if isinstance(b, dict) and b.get("type") == "text").strip()
     return text or str(rec.get("error") or "") or "API Error"
+
+
+def _blocked(rec: dict) -> bool:
+    """Whether an assistant record is Claude Code's API error line for a request the model's safeguards blocked."""
+    msg = rec.get("message") if isinstance(rec.get("message"), dict) else {}
+    return rec.get("isApiErrorMessage") is True and msg.get("stop_reason") == REFUSAL
+
+
+def _reply_model(rec: dict) -> str | None:
+    """The model of a reply the model wrote (no API error line, no record of Claude Code's own), else None."""
+    msg = rec.get("message") if isinstance(rec.get("message"), dict) else {}
+    model = msg.get("model")
+    if rec.get("isApiErrorMessage") or not isinstance(model, str) or not model or model.startswith("<"):
+        return None
+    return model
+
+
+def _sub_safeguards(lv: Live, sub: Sub, rec: dict) -> None:
+    """A subagent's reply after one the safeguards stopped: on another model, Claude Code switched models for it, which
+    its chat's notice says (module note, FALLBACK_TEXT); on the same model, it went on there."""
+    model = _reply_model(rec)
+    if model is None:
+        return
+    msg = rec.get("message") if isinstance(rec.get("message"), dict) else {}
+    if sub.refused_on and config.base_model(model) != config.base_model(sub.refused_on):
+        _switched(lv.c, sub.chat, sub.refused_on, model)
+    sub.refused_on = model if msg.get("stop_reason") == REFUSAL else None
+
+
+def _switched(c: str, chat: str, model: Any, fallback: Any) -> None:
+    """Claude's safeguards switched a reply in chat `chat` from `model` to `fallback`: a notice there (FALLBACK_TEXT),
+    one row per chat however often it happens (FALLBACK_KEY)."""
+    from . import notices  # noqa: PLC0415
+
+    text = FALLBACK_TEXT.format(model=model_label(str(model or "")) if model else "the model it was asked for",
+                                fallback=model_label(str(fallback or "")))
+    notices.post(c, chat=chat, kind="safeguards", text=text, key=FALLBACK_KEY)
 
 
 def agent_error(c: str, agent_id: str) -> str | None:
@@ -2677,9 +2729,15 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
                 agents.claim_cell(lv.c, data["cell_id"], sub.chat, edit=_short(sub.names.get(tid, "")) in ("edit_card", "edit_cell"))
             n += 1
         return n
+    if rec.get("type") == "system" and rec.get("subtype") == FALLBACK_SUBTYPE:
+        sub.refused_on = None
+        _switched(lv.c, sub.chat, rec.get("originalModel"), rec.get("fallbackModel"))
+        return 0
     if rec.get("type") != "assistant":
         return 0
     sub.api_error = api_error_of(rec)
+    _sub_safeguards(lv, sub, rec)
+    blocked = _blocked(rec)
     if sub.thimble and not sub.ran:
         msg = rec.get("message") if isinstance(rec.get("message"), dict) else {}
         if isinstance(msg.get("model"), str):
@@ -2697,7 +2755,8 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
             if text.strip():
                 sub.last_text = text.strip()
                 sub.note = None
-                sub.rec.text(text, by=TERMINAL, **({"reply": True} if sub.thread else {}))
+                sub.rec.text(text, by=TERMINAL, **({"reply": True} if sub.thread else {}),
+                             **({"refusal": True} if blocked else {}))
                 n += 1
             elif sub.thread:
                 sub.note = _note_words(b["text"]) or sub.note
@@ -2866,8 +2925,9 @@ def translate(lv: Live, line: bytes | str) -> None:
             _end_turn(lv)
         elif rec.get("subtype") == "informational" and SAFETY_RE.search(str(rec.get("content") or "")):
             _safety_stop(lv)
-        elif rec.get("subtype") == FALLBACK_SUBTYPE and rec.get("scope", "session") == "session" and rec.get("direction", "retry") == "retry":
-            _note(lv, FALLBACK_TEXT.format(model=model_label(str(rec.get("fallbackModel") or ""))))
+        elif rec.get("subtype") == FALLBACK_SUBTYPE and rec.get("direction", "retry") == "retry":
+            lv.wrote = True
+            _switched(lv.c, agents.MAIN_ID, rec.get("originalModel"), rec.get("fallbackModel"))
         return
     if t != "assistant":
         return
@@ -2877,11 +2937,12 @@ def translate(lv: Live, line: bytes | str) -> None:
     lv.fresh = False
     # the retry after a stop, if there was one, is writing; after the dialog, the analyst chose to go on
     lv.answered, lv.held_by_check = True, False
+    blocked = _blocked(rec)
     for b in _blocks(rec):
         if b["type"] == "text":
             if not isinstance(b.get("text"), str):
                 raise Unreadable("a text block without text")
-            _text(lv, b["text"])
+            _text(lv, b["text"], **({"refusal": True} if blocked else {}))
         elif b["type"] == "tool_use":
             if not isinstance(b.get("id"), str) or not isinstance(b.get("name"), str):
                 raise Unreadable("a tool_use block without id or name")
