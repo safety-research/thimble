@@ -36,7 +36,7 @@ thimble has no login of its own: every model call runs your own `claude`. Any wa
   whether to use the key.
 - **apiKeyHelper (most robust).** Put `"apiKeyHelper": "<a command that prints the key>"` in `~/.claude/settings.json`
   (your Claude Code config dir). It reaches your session and thimble's server calls, whatever your shell exports. Auth
-  set only in a project's `.claude/` settings does not reach thimble's single model calls.
+  set only in a project's `.claude/` settings does not reach thimble's server calls.
 - **Bedrock, Vertex or Foundry.** Set `CLAUDE_CODE_USE_BEDROCK=1`, `CLAUDE_CODE_USE_VERTEX=1` or
   `CLAUDE_CODE_USE_FOUNDRY=1` and the provider's credentials, as Claude Code's docs say, before the server starts.
   thimble names Anthropic's model ids, such as `claude-opus-5-5`. If your provider needs other ids, set each agent's
@@ -78,7 +78,8 @@ What thimble needs from a managed Claude Code setup:
   plugin, so `thimble` can't start. `thimble plugin on` adds the plugin to Claude Code instead, and the launcher then
   loads it without the flag (terminal mode's renderer still needs it).
 - **`allowManagedPermissionRulesOnly`** makes Claude Code ignore thimble's permission rules, so each thimble tool call
-  asks. Add `mcp__plugin_thimble_thimble` to managed `permissions.allow`.
+  asks. Add `mcp__plugin_thimble_thimble` to managed `permissions.allow`. thimble's ask and deny rules stop too: for
+  edits of the corpus and of thimble's config, and for reads of its token files.
 - **`forceLoginMethod`** blocks API keys and `apiKeyHelper` ([Authentication](#authentication)).
 - **`disableAutoMode`** turns auto mode off, so users answer many more prompts ([Permissions](#permissions)).
 
