@@ -1319,6 +1319,7 @@ def run_ended(c: str, agent_id: str, status: str, report: str | None, *, source:
     log.info("%s: %s %s run %s ended %s (%s)", c, snap.get("role") or "agent", agent_id, snap.get("run"), status,
              source or "?")
     t = TYPES.get(str(snap.get("role") or ""))
+    _ended_notice(c, t, snap, status, report)  # before the chat's end, so the chat's own last lines stay its last
     if snap.get("chat") and not (t is not None and t.keeps_chat):
         try:
             fields = {"stopped_by": snap.get("stopped_by")} if status == "stopped" and snap.get("stopped_by") else {}
@@ -1333,7 +1334,6 @@ def run_ended(c: str, agent_id: str, status: str, report: str | None, *, source:
             _resolve(t.ended)(c, run, status, report or "")
         except Exception:  # noqa: BLE001 — the run has ended either way
             log.exception("%s: the %s's end handler failed", c, t.role)
-    _ended_notice(c, t, snap, status, report)
     return True
 
 
