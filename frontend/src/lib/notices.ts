@@ -164,11 +164,11 @@ export function useNoticesRead(ws: string): boolean {
 }
 
 /** The analyst's × on a notice, or a fix of theirs that went through: it goes from the foreground at once, and the
- * server forgets it (`POST /ws/{c}/chats/{chat}/notices/{id}/dismiss`), so a reload does not show it again. */
-export function dismissNotice(ws: string, n: Pick<Notice, 'id' | 'key' | 'chat'>): Promise<void> {
+ * server forgets it (`POST /ws/{c}/notices/{id}/dismiss`), so a reload does not show it again. */
+export function dismissNotice(ws: string, n: Pick<Notice, 'id'>): Promise<void> {
   const s = storeOf(ws)
   publish(s, withoutNotice(s.list, { id: n.id }))
-  return api.dismissNotice(ws, n.chat || 'main', n.id).then(
+  return api.dismissNotice(ws, n.id).then(
     () => undefined,
     () => undefined,
   )

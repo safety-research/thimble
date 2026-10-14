@@ -190,14 +190,14 @@ describe('the strip above the composer, and the rows', () => {
     expect(el.querySelector('.chat-notice-open')).not.toBeNull()
   })
 
-  test('× hides the notice at once and dismisses it on the server, in the chat that holds its row', async () => {
+  test('× hides the notice at once and dismisses it on the server', async () => {
     open = [{ id: 'b1', key: 'build:agent-network', chat: 'dev-1', text: BUILD }, { id: 'p1', text: BLOCKED }]
     const el = await strip('nt-x')
     await click(el.querySelectorAll('.chat-notice-x')[0])
     await click(el.querySelectorAll('.chat-notice-x')[0])
     await settle()
     expect(el.querySelector('.chat-notice')).toBeNull()
-    expect(sent).toEqual(['POST /api/ws/nt-x/chats/dev-1/notices/b1/dismiss', 'POST /api/ws/nt-x/chats/main/notices/p1/dismiss'])
+    expect(sent).toEqual(['POST /api/ws/nt-x/notices/b1/dismiss', 'POST /api/ws/nt-x/notices/p1/dismiss'])
   })
 
   test('each fix runs: Try again checks for a view proposal now, Turn off view proposals turns them off, Retry builds the view again; the notice goes', async () => {
@@ -215,11 +215,11 @@ describe('the strip above the composer, and the rows', () => {
     }
     expect(sent).toEqual([
       'POST /api/ws/nt-act/views/propose-now',
-      'POST /api/ws/nt-act/chats/main/notices/a/dismiss',
+      'POST /api/ws/nt-act/notices/a/dismiss',
       'PUT /api/ws/nt-act/settings {"propose_views":false}',
-      'POST /api/ws/nt-act/chats/main/notices/b/dismiss',
+      'POST /api/ws/nt-act/notices/b/dismiss',
       'POST /api/ws/nt-act/views/proposals/agent-network/retry',
-      'POST /api/ws/nt-act/chats/dev-1/notices/c/dismiss',
+      'POST /api/ws/nt-act/notices/c/dismiss',
     ])
     expect(el.querySelector('.chat-notice')).toBeNull()
     expect(toasts).toEqual([PROPOSALS_OFF_LINE])

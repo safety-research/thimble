@@ -1769,7 +1769,10 @@ button.model-line-part[aria-expanded='true'] {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+/* the agent, a tag in the warning's ink before the sentence (which names it again, so it reads alone) */
 .chat-notice-agent {
+  margin-right: 2px;
+  color: var(--status-warning);
   font-weight: 600;
 }
 .chat-notice-text code {

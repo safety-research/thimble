@@ -6,7 +6,7 @@
 // (`/login`, `thimble server restart`), the command in code, and Open for the chat it happened in when another one is
 // shown; then its fix as buttons under the words, and ×. A fix that went through dismisses the notice (a new failure brings a new one); one
 // that failed says why in a toast and leaves it. In the agent's own chat the notice is also a row (NoticeRow), the same
-// line without buttons, which stays as a quiet line of the chat's history once the notice is closed.
+// words without buttons, which stay as a quiet line of the chat's history once the notice is closed.
 import { useState, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
@@ -142,8 +142,9 @@ export function NoticeStrip({ ws, current, labels, onOpen }: { ws: string; curre
   )
 }
 
-/** A notice as a row of the chat it happened in: the warning line while the notice is open (its fix is above the
- * composer), a quiet line once a fix cleared it or the analyst dismissed it. */
+/** A notice as a row of the chat it happened in: the warning line, without the agent's name (the chat is its own),
+ * while the notice is open (its fix is above the composer), a quiet line once a fix cleared it or the analyst
+ * dismissed it. */
 export function NoticeRow({ item, ws }: { item: NoticeRowT; ws: string }) {
   const open = useNotices(ws)
   const read = useNoticesRead(ws)
@@ -153,7 +154,7 @@ export function NoticeRow({ item, ws }: { item: NoticeRowT; ws: string }) {
     <div className="chat-notice chat-notice-row" role="note" data-notice={item.id} data-key={item.key} data-kind={item.noticeKind} data-closed={closed || undefined}>
       <Icon name="warning" size={13} className="chat-notice-ico" />
       <div className="chat-notice-body">
-        <NoticeWords agent={item.agent ?? ''} text={item.text} />
+        <NoticeWords agent="" text={item.text} />
       </div>
     </div>
   )
