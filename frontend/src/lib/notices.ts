@@ -94,7 +94,7 @@ function apply(list: readonly Notice[], e: Events['notice']): Notice[] {
   return [...list]
 }
 
-/** Read the workspace's open notices now (`GET /ws/{c}/notices`); a server without the route leaves the list as it is. */
+/** Read the workspace's open notices now (`GET /ws/{c}/notices`); a read that fails leaves the list as it is. */
 export function refreshNotices(ws: string): Promise<void> {
   const s = storeOf(ws)
   s.pending ??= []
