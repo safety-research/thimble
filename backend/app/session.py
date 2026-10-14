@@ -171,9 +171,12 @@ SAFETY_ALERT = ("Claude Code is waiting in your terminal: Claude's safety check 
                 "to switch to another model and go on, or to stay on this one and stop the answer.")
 # Claude's safeguards and a reply (module note, stops and waits). A downgrade: Claude Code answers on another model
 # after the requested one refused, which it records in main's transcript as a FALLBACK_SUBTYPE system record (scope
-# `session`, or `local` for one reply), and in a subagent's as that record or as a reply with stop_reason refusal and
-# the next replies on another model (2.1.295, workflow agents); each becomes a notice (notices.post) that names the
-# chat it happened in. A block: the request ends with Claude Code's API error line (isApiErrorMessage, stop_reason
+# `session`, or `local` for one reply). A subagent's transcript may carry that record, but mostly it only shows the
+# replies going on on another model: after a reply with stop_reason refusal (at once, or after more replies on the
+# same model), after Claude Code's meta line that a safety classifier stopped the reply (no refusal record), or as a
+# reply whose first block is a `fallback` block (workflow agents; 2.1.295-2.1.300, the view builder experiment's runs).
+# So a subagent's reply on a model other than the one its run replies on is a downgrade (_sub_safeguards). Each
+# downgrade becomes a notice (notices.post) that names the chat it happened in. A block: the request ends with Claude Code's API error line (isApiErrorMessage, stop_reason
 # refusal), which the chat shows as its API error card; its text record carries `refusal: true`, and the failure of an
 # agent it stopped is told as any API error's (_sub_error, subagents.run_ended).
 FALLBACK_SUBTYPE = "model_refusal_fallback"
@@ -226,9 +229,10 @@ class Sub:
         # Claude Code's error line when the latest reply of its current run is an API error (isApiErrorMessage: a
         # refusal by the model's safeguards, retries run out), else None (agent_error)
         self.api_error: str | None = None
-        # the model of its last reply that the safeguards stopped (stop_reason refusal), until a reply on that model or
-        # on another (a downgrade, _sub_safeguards) comes
-        self.refused_on: str | None = None
+        # the model its current run replies on (its first reply's, without a `[1m]` tag), and the other model Claude
+        # Code switched its replies to since, while they stay there (a downgrade, _sub_safeguards)
+        self.run_model: str | None = None
+        self.switched_to: str | None = None
         self.ran = False  # the model of its current run is recorded (subagents.ran_on)
         self.quiet_since = time.monotonic()
         self.done = False
@@ -419,7 +423,8 @@ def _sub_places(lv: Live) -> dict[str, dict]:
         seen = sorted(k for k in sub.seen if k.startswith("skip:") or k.split(":", 1)[-1] in names)[-2 * CURSOR_CALLS:]
         out[str(sub.path)] = {"offset": at, "done": sub.done, "names": names, "seen": seen,
                               **({"report": sub.report} if sub.report else {}),
-                              **({"refused_on": sub.refused_on} if sub.refused_on else {})}
+                              **({"run_model": sub.run_model} if sub.run_model else {}),
+                              **({"switched_to": sub.switched_to} if sub.switched_to else {})}
     return out
 
 
@@ -800,8 +805,10 @@ def _take_place(sub: Sub, path: Path, place: Any, at_end: bool) -> None:
         sub.seen.update(str(k) for k in place.get("seen") or [])
         if place.get("report") and not sub.report:
             sub.report = str(place["report"])
-        if place.get("refused_on") and not sub.refused_on:
-            sub.refused_on = str(place["refused_on"])
+        if place.get("run_model") and not sub.run_model:
+            sub.run_model = str(place["run_model"])
+        if place.get("switched_to") and not sub.switched_to:
+            sub.switched_to = str(place["switched_to"])
     elif at_end:
         sub.offset = _size(path)
 
@@ -1864,15 +1871,20 @@ def _reply_model(rec: dict) -> str | None:
 
 
 def _sub_safeguards(lv: Live, sub: Sub, rec: dict) -> None:
-    """A subagent's reply after one the safeguards stopped: on another model, Claude Code switched models for it, which
-    its chat's notice says (module note, FALLBACK_TEXT); on the same model, it went on there."""
+    """A subagent's reply on a model other than the one its run replies on: Claude's safeguards switched its replies to
+    that model (module note, FALLBACK_TEXT), which its chat's notice says once per switch; a reply back on the run's
+    own model ends the switch, so a later one is told again."""
     model = _reply_model(rec)
     if model is None:
         return
-    msg = rec.get("message") if isinstance(rec.get("message"), dict) else {}
-    if sub.refused_on and config.base_model(model) != config.base_model(sub.refused_on):
-        _switched(lv.c, sub.chat, sub.refused_on, model, sub=sub)
-    sub.refused_on = model if msg.get("stop_reason") == REFUSAL else None
+    model = config.base_model(model)
+    if sub.run_model is None:
+        sub.run_model = model
+    elif model == sub.run_model:
+        sub.switched_to = None
+    elif model != sub.switched_to:
+        sub.switched_to = model
+        _switched(lv.c, sub.chat, sub.run_model, model, sub=sub)
 
 
 def _sub_who(c: str, sub: Sub) -> tuple[str, str]:
@@ -2799,7 +2811,8 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
         if prompt and prompt.strip() and not prompt.lstrip().startswith("<"):
             if INTERRUPT_RE.match(prompt.strip()):
                 return 0  # the stop's own line: the chat's end says it was stopped
-            sub.api_error = None  # a new run's prompt
+            sub.api_error = None  # a new run's prompt, which may run on another model (subagents.ran_on)
+            sub.run_model = sub.switched_to = None
             if sub.skip_prompt:
                 sub.skip_prompt = False
                 return 0
@@ -2831,7 +2844,9 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
             n += 1
         return n
     if rec.get("type") == "system" and rec.get("subtype") == FALLBACK_SUBTYPE:
-        sub.refused_on = None
+        # told here, so the replies on the fallback model that follow are no second notice (_sub_safeguards)
+        sub.run_model = sub.run_model or config.base_model(str(rec.get("originalModel") or "")) or None
+        sub.switched_to = config.base_model(str(rec.get("fallbackModel") or "")) or None
         _switched(lv.c, sub.chat, rec.get("originalModel"), rec.get("fallbackModel"), sub=sub)
         return 0
     if rec.get("type") != "assistant":

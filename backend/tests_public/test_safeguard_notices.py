@@ -156,6 +156,83 @@ def test_an_agent_s_reply_on_another_model_after_a_refusal_leaves_a_notice_in_it
     assert len(_notices(chat)) == 2 and len(_open(f"safeguards:{chat}")) == 1
 
 
+def _sub_project(cwd: str, tmp_path: Path) -> tuple[session.Live, Path, str]:
+    project = tmp_path / "claude-config" / "projects" / "-corpus"
+    project.mkdir(parents=True)
+    p = project / f"{SID}.jsonl"
+    p.write_text("")
+    lv = session.attach(CORPUS, SID, cwd, str(p))
+    session.tail_once(lv)
+    path, chat = _agent(project, lv, p)
+    return lv, path, chat
+
+
+def _feed(lv: session.Live, path: Path, recs: list[dict]) -> None:
+    with path.open("a") as f:
+        f.write("".join(json.dumps(_side(r)) + "\n" for r in recs))
+    session.tail_once(lv)
+    for sub in lv.subs:
+        session._tail_sub(lv, sub)
+
+
+def _refusal() -> dict:
+    rec = _assistant({"type": "thinking", "thinking": ""})
+    rec["message"]["stop_reason"] = "refusal"
+    return rec
+
+
+# Claude Code's meta line after a reply a safety classifier stopped (2.1.295), which comes with or without a record of
+# the refused reply
+CLASSIFIER = {"type": "user", "isMeta": True, "turnCompanion": True, "refusedMessageId": "msg_01",
+              "message": {"role": "user", "content": "Your response above was stopped by a safety classifier — this is "
+                                                     "not a tool or API error. The rest of it was withheld."}}
+SWITCHED = 'Claude\'s safeguards switched a reply of the agent "posts" from Opus 5.5 to Opus 4.8.'
+
+
+def test_a_switch_that_comes_replies_after_the_refusal_is_told(cwd, tmp_path):
+    """A refusal, then the run goes on on its own model for a reply, then answers on another one (a real transcript's
+    order): the switch is told when it comes, once."""
+    lv, path, chat = _sub_project(cwd, tmp_path)
+    _feed(lv, path, [_assistant(_say("Counting.")), _refusal(), _assistant(_say("Going on.")),
+                     _assistant(_say("Counted 8."), model="claude-opus-4-8"),
+                     _assistant(_say("And 9."), model="claude-opus-4-8")])
+    assert [r["text"] for r in _notices(chat)] == [SWITCHED]
+
+
+def test_a_switch_with_no_refusal_record_is_told(cwd, tmp_path):
+    """Only the classifier's meta line comes before the replies on another model."""
+    lv, path, chat = _sub_project(cwd, tmp_path)
+    _feed(lv, path, [_assistant(_say("Counting.")), CLASSIFIER, _assistant(_say("Counted 8."), model="claude-opus-4-8")])
+    assert [r["text"] for r in _notices(chat)] == [SWITCHED]
+    assert not [r for r in _log(chat) if r["type"] == "user" and "classifier" in str(r.get("text"))], \
+        "Claude Code's meta line is no message in the chat"
+
+
+def test_a_workflow_agent_s_fallback_block_is_told(cwd, tmp_path):
+    lv, path, chat = _sub_project(cwd, tmp_path)
+    _feed(lv, path, [_assistant(_say("Counting."), model="claude-fable-5"),
+                     _assistant({"type": "fallback"}, model="claude-opus-4-8"),
+                     _assistant(_say("Counted 8."), model="claude-opus-4-8")])
+    assert [r["text"] for r in _notices(chat)] == [
+        'Claude\'s safeguards switched a reply of the agent "posts" from Fable 5 to Opus 4.8.']
+
+
+def test_a_reply_back_on_the_run_s_model_ends_the_switch_and_a_new_switch_updates_the_notice(cwd, tmp_path):
+    lv, path, chat = _sub_project(cwd, tmp_path)
+    _feed(lv, path, [_assistant(_say("Counting.")), _assistant(_say("a"), model="claude-opus-4-8"),
+                     _assistant(_say("b")), _assistant(_say("c"), model="claude-opus-4-8[1m]")])
+    assert [r["text"] for r in _notices(chat)] == [SWITCHED, SWITCHED], "a model's [1m] tag is the same model"
+    assert len(_open(f"safeguards:{chat}")) == 1, "one notice in the foreground"
+
+
+def test_a_new_run_on_another_model_is_no_switch(cwd, tmp_path):
+    lv, path, chat = _sub_project(cwd, tmp_path)
+    follow_up = {"type": "user", "message": {"role": "user", "content": "Now count the replies."}}
+    _feed(lv, path, [_assistant(_say("Counted 8.")), follow_up,
+                     _assistant(_say("Counted 3."), model="claude-sonnet-5-5")])
+    assert _notices(chat) == []
+
+
 def _api_error(text: str) -> dict:
     return {"type": "assistant", "isApiErrorMessage": True, "error": "invalid_request",
             "message": {"role": "assistant", "model": "<synthetic>", "stop_reason": "refusal",
