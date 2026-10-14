@@ -1806,7 +1806,7 @@ def place_precache(ds: Dataset, folder: Path, cat: dict[str, dict[str, Any]], ur
     name = register(folder, url, workspace_name(ds.name))
     pc = cat.get(ds.name)
     if pc is None:
-        say(f"  {ds.name} opens without a pre-cached orientation; Start in the page runs one")
+        say(f"  {ds.name} opens without a pre-cached orientation; ask Claude in the page or the terminal to run one")
         return name
     ws = Path(env["workspaces_dir"]) / name
     if ws.exists():

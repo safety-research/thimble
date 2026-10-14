@@ -743,7 +743,7 @@ def test_demo_downloads_installs_opens_and_says_how_to_attach(tmp_path, fake_wor
     text = said(w)
     assert "installed as workspace demo-one: 3 cards, 1 label, 1 view, 1 document" in text
     assert "downloads these datasets from their sources" in text
-    assert "two opens without a pre-cached orientation; Start in the page runs one" in text
+    assert "two opens without a pre-cached orientation; ask Claude in the page or the terminal to run one" in text
     assert f"cd {w['root'] / 'one'} && thimble # one" in text and f"cd {w['root'] / 'two'} && thimble # two" in text
     # no session attached: for each dataset the frozen demo's one sentence and command, as the browser's card gives them
     assert text.count(f"{demo.FROZEN_LINE} cd ") == 2
