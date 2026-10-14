@@ -586,6 +586,68 @@ async def test_an_extension_s_program_orientation_tells_the_view_proposer_only_o
     assert proposer == [(CORPUS, "orientation")]
 
 
+@pytest.fixture()
+def notices(monkeypatch):
+    """thimble's notices (app.notices, lane A's) as a stand-in that records each call: [("post", kwargs) |
+    ("clear", key)]."""
+    import sys
+    import types
+
+    import app
+
+    calls: list[tuple[str, object]] = []
+    fake = types.ModuleType("app.notices")
+    fake.post = lambda c, **kw: calls.append(("post", {"c": c, **kw}))
+    fake.clear = lambda c, key, **kw: calls.append(("clear", key))
+    monkeypatch.setitem(sys.modules, "app.notices", fake)
+    monkeypatch.setattr(app, "notices", fake, raising=False)
+    return calls
+
+
+async def test_a_failed_program_orientation_posts_a_notice_that_a_run_that_ended_done_clears(
+        workspaces_tmp, monkeypatch, proposer, notices, caplog):
+    """A run of an extension's program that runs the orientation and failed is told where the analyst is looking: one
+    notice that names the orientation, says why in one line and how to run it again, with its thread, under a key
+    that a later run that ended done clears. A stopped run tells nothing, and a notices module that fails is logged
+    while the run's end goes on."""
+    from types import SimpleNamespace
+
+    from app import harness
+
+    ends: list = []
+    monkeypatch.setattr(harness, "start", lambda job, part, on_start, on_end: ends.append(on_end)
+                        or SimpleNamespace(chat="c1"))
+
+    async def listed(*a, **kw):
+        return SimpleNamespace(text="")
+
+    told: list[str] = []
+    monkeypatch.setattr(tools, "call", listed)
+    monkeypatch.setattr(subagents, "tell_main", lambda c, kind, payload: told.append(payload["status"]))
+    part = SimpleNamespace(extension="looker")
+    await orient_session.start_program(CORPUS, part, "count the runs", {})
+    ends[-1](SimpleNamespace(chat="c1"), "failed", "Traceback (most recent call last):\n  ...\nKeyError: 'runs'" + "x" * 400)
+    [(op, kw)] = notices
+    assert op == "post" and (kw["c"], kw["kind"], kw["agent"], kw["chat"], kw["key"]) == (
+        CORPUS, "agent", "Orientation", "c1", "orientation:c1")
+    assert kw["text"].startswith("The orientation stopped because of an error: Traceback (most recent call last): ...")
+    assert kw["text"].endswith("… A message in its thread runs it again.") and "\n" not in kw["text"]
+    assert len(kw["text"]) < 300, "one short line"
+    await orient_session.start_program(CORPUS, part, "again", {}, follow_up=True)
+    ends[-1](SimpleNamespace(chat="c1"), "stopped", "")
+    assert len(notices) == 1, "a stop tells nothing"
+    ends[-1](SimpleNamespace(chat="c1"), "done", "Looked.")
+    assert notices[-1] == ("clear", "orientation:c1") and told == ["failed", "stopped", "done"]
+
+    def broken(c, **kw):
+        raise TypeError("post() got an unexpected keyword argument")
+
+    import sys
+    sys.modules["app.notices"].post = broken
+    ends[-1](SimpleNamespace(chat="c1"), "failed", "boom")
+    assert told[-1] == "failed" and "the notice of the orientation's end (failed) was not told" in caplog.text
+
+
 async def test_a_run_the_analyst_stopped_stops_its_views_and_asks_for_no_report(bridge, models, workspaces_tmp,
                                                                               monkeypatch, proposer):
     from app import dev

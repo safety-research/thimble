@@ -27,7 +27,8 @@ the first run's record closes and reveals the deck, its coverage line is measure
 with one line counting what was made, and the work folder lets go of what no card uses (work_files). When the first run
 ended done, thimble's view proposer is told (_tell_proposer, proposer.trigger). thimble writes a report only when the
 analyst asks for one (start_writing). A run the analyst stopped stops the builds of the views it proposed, which only an
-orientation from before 0.8.0 did.
+orientation from before 0.8.0 did. A run that failed gets its notice where every agent's end does (subagents.run_ended);
+a failed run of an extension's program that runs the orientation gets one here (_notice).
 
 Coverage. When the first run finishes (done; not stopped or failed), its coverage line (orient_checks.coverage) is
 measured in the checks' child process before the end goes on; meanwhile a follow-up waits (at most COVERAGE_TIMEOUT_S),
@@ -107,6 +108,10 @@ ERROR_KIND = "orient_error"  # the chip kind of the line that ends a failed run 
 # that line: the run stopped, and why, in the error's own words (failure_line), such as Claude Code's API error line
 FAILED_LINES = ("The orientation stopped because of an error: {error}",
                 "The orientation's follow-up stopped because of an error: {error}")
+# a notice of a failed run of an extension's program that runs the orientation (_notice): the agent it names, its key's
+# prefix (the chat follows), how much of the error it keeps, and the fix it gives after the failed line
+NOTICE_AGENT, NOTICE_KEY, NOTICE_CHARS = "Orientation", "orientation", 200
+NOTICE_FIX = "A message in its thread runs it again."
 
 ASKED_WAIT_S = 2.0  # how long start_orientation waits for main's chat to show the analyst's latest message (asked_for)
 # what a thread's fork's start_orientation filed, and the agent main starts for it, as its start_agent event and the
@@ -309,6 +314,7 @@ async def start_program(c: str, part: Any, brief: str, choices: dict[str, Any], 
         except Exception:  # noqa: BLE001
             log.exception("%s: the orientation's record was not closed", c)
         _tell_main(c, status, 0, {}, error=summary if status == "failed" else "")
+        _notice(c, run.chat, status, summary, follow_up)
         if status == "done" and not follow_up:
             _tell_proposer(c)
 
@@ -876,6 +882,27 @@ def _tell_proposer(c: str) -> None:
         log.exception("%s: the view proposer did not hear of the orientation's end", c)
 
 
+def _notice(c: str, chat: str, status: str, error: str, follow_up: bool = False) -> None:
+    """The end of a run of an extension's program that runs the orientation (start_program), told where the analyst is
+    looking: a failed run posts a notice (notices.post) that names the orientation, says why in one line and how to run
+    it again, with its thread `chat`; a run that ended done clears it. thimble's own orientation, a subagent, gets its
+    notice where every agent's end does (subagents.run_ended). Imported here; a notice that cannot be told is logged,
+    and the run's end goes on."""
+    try:
+        from . import notices  # noqa: PLC0415
+
+        key = f"{NOTICE_KEY}:{chat}"
+        if status == "failed":
+            line = FAILED_LINES[bool(follow_up)].format(
+                error=failure_line(error, NOTICE_CHARS) or "no error text came with it")
+            line += "" if line.endswith((".", "…", "!", "?")) else "."
+            notices.post(c, kind="agent", agent=NOTICE_AGENT, chat=chat, key=key, text=f"{line} {NOTICE_FIX}")
+        elif status == "done":
+            notices.clear(c, key)
+    except Exception:  # noqa: BLE001 — the run's end goes on without it
+        log.exception("%s: the notice of the orientation's end (%s) was not told", c, status)
+
+
 def _analyst_stopped(c: str, run: subagents.Run, status: str) -> bool:
     """Whether the analyst stopped the run (Stop, Esc), not main's quit or a failure."""
     return status == "stopped" and not run.interrupted
@@ -963,10 +990,10 @@ def status_text(c: str, status: str, k: int = 0, made: "dict[str, Any] | None" =
 FAILURE_CHARS = 400  # of a failure's text in the one line that says why (failure_line)
 
 
-def failure_line(summary: str | None) -> str:
-    """A failure's text on one line, cut at FAILURE_CHARS."""
+def failure_line(summary: str | None, chars: int = FAILURE_CHARS) -> str:
+    """A failure's text on one line, cut at `chars` (FAILURE_CHARS)."""
     line = " ".join(str(summary or "").split())
-    return line if len(line) <= FAILURE_CHARS else line[: FAILURE_CHARS - 1].rstrip() + "…"
+    return line if len(line) <= chars else line[: chars - 1].rstrip() + "…"
 
 
 def _tell_main(c: str, status: str, k: int = 0, made: "dict[str, Any] | None" = None, error: str = "",
