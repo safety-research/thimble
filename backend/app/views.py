@@ -5029,8 +5029,25 @@ ORDINARY_SUFFIXES = frozenset(
 _TYPE_GLOB = re.compile(r"^(?:\*\*/)?\*(\.[A-Za-z0-9_+-]{1,16})$")
 SUGGEST_HEAD_LINES, SUGGEST_LINE_CHARS = 40, 300  # of a text file's start the proposal is written from
 SUGGEST_HEX_BYTES, SUGGEST_SCAN_BYTES, SUGGEST_RUN_MIN = 512, 65536, 6  # of a binary file's start
-SUGGEST_TIMEOUT_S = 30.0
+# the file-viewer call's wait, a refused call's rerun on the refusal row's model included (model.structured)
+SUGGEST_TIMEOUT_S = 90.0
 SUGGEST_PROMPT = "file-viewer"
+# A file type's check for a view proposal that failed (suggest) is a notice in main's chat under SUGGEST_NOTICE_KEY
+# (notices.post), whose Try again (POST /views/propose-now) checks that file type again (_suggest_failed); a check that
+# answers clears it.
+SUGGEST_NOTICE_KEY = "view-proposal-file"
+SUGGEST_FAILED = "Couldn't check for a view proposal for {files}: {reason}."
+SUGGEST_REFUSED = "Claude's safeguards blocked the request"
+SUGGEST_AUTH = ("Claude Code isn't signed in for thimble's server. Run /login, or if you changed your sign-in (for "
+                "example exported ANTHROPIC_API_KEY), run `thimble server restart`")
+SUGGEST_FALLBACK = "This view proposal came from {model}: Claude's safeguards switched models."
+SUGGEST_REASON_CHARS = 160  # of the call's own detail in the notice
+SUGGEST_TRY_AGAIN = {"label": "Try again", "do": "proposals-retry"}
+SUGGEST_TURN_OFF = {"label": "Turn off view proposals", "do": "proposals-off"}
+_REFUSED_RE = re.compile(r"safeguards|usage polic|can't help with this", re.I)
+_AUTH_RE = re.compile(r"not logged in|invalid api key|please run /login|authentication_failed|oauth token|\b401\b", re.I)
+_suggest_failed: dict[str, str] = {}  # workspace -> the file whose type's check failed last, for Try again
+_suggest_tasks: set[asyncio.Task] = set()  # the checks Try again started, kept until they end
 
 
 def type_suffix(glob: str) -> str | None:
@@ -5191,7 +5208,8 @@ async def suggest(c: str, rel: str) -> str | None:
     proposer's, and the suffix's answer `suggested`; a no is the suffix's answer `none`, so it is never asked again. The
     view proposal's slug, or None. No call is made while view proposals are off (propose_enabled), one waits, or views
     cannot be built here. A call that fails, or a view proposal that offer refuses, caches nothing, so the next file of
-    the type asks again."""
+    the type asks again. A call that fails is also main's notice, with Try again (_check_failed); a call that answers
+    clears it, or, when its view proposal came from the refusal row's model, says so (SUGGEST_FALLBACK)."""
     from . import tasks  # noqa: PLC0415
 
     if not await asyncio.to_thread(propose_enabled, c) or await asyncio.to_thread(open_offer, c) is not None:
@@ -5208,29 +5226,96 @@ async def suggest(c: str, rel: str) -> str | None:
     _, tool = await asyncio.to_thread(_suggest_sections, c)
     try:
         res = await asyncio.wait_for(tasks.call(c, "file-viewer", inp, schema=tool.input_schema), SUGGEST_TIMEOUT_S)
-    except (asyncio.TimeoutError, Exception) as e:  # noqa: BLE001 — a failed call asks again next time
-        log.info("no viewer suggestion for %s/%s: %s", c, rel, e)
-        return None
+    except asyncio.TimeoutError:  # a failed call asks again next time
+        return _check_failed(c, rel, suffix, f"Claude didn't answer within {SUGGEST_TIMEOUT_S:.0f} seconds")
+    except Exception as e:  # noqa: BLE001
+        return _check_failed(c, rel, suffix, _one(str(e)) or type(e).__name__)
     out = res.output if getattr(res, "status", "") == "ok" and isinstance(res.output, dict) else None
     if out is None:
-        log.info("no viewer suggestion for %s/%s: the call ended %s", c, rel, getattr(res, "status", "?"))
-        return None
+        return _check_failed(c, rel, suffix, _failure_of(res))
+    _suggest_failed.pop(c, None)
     name = " ".join(str(out.get("name") or "").split())
     if not out.get("help") or not name or not all(str(out.get(k) or "").strip() for k in ("why", "arrangement")):
+        _suggest_notice(c)
         await asyncio.to_thread(_answer_suffix, c, suffix, "none")
         return None
     # the checks ran off the loop: a proposal made meanwhile for the suffix stands
     if (await asyncio.to_thread(suggestion_for, c, rel))["proposal"] is not None:
+        _suggest_notice(c)
         return None
     why = str(out.get("why") or "")
     prop, refused = await asyncio.to_thread(
         lambda: offer(c, name=name, description=why, task="", claims=[f"**/*{suffix}"], after="file", why=why,
                       proposed_by="files", arrangement=str(out.get("arrangement") or "")))
     if prop is None:
+        _suggest_notice(c)
         log.info("no view proposal for the type of %s/%s: %s", c, rel, refused)
         return None
+    if getattr(res, "refused_by", ""):
+        from . import session  # noqa: PLC0415 — session imports this module
+        used = str(getattr(res, "model_used", "") or getattr(res, "model_requested", "") or "")
+        _suggest_notice(c, SUGGEST_FALLBACK.format(model=session.model_label(used)))
+    else:
+        _suggest_notice(c)
     await asyncio.to_thread(_answer_suffix, c, suffix, "suggested", prop["slug"])
     return str(prop["slug"])
+
+
+def _failure_of(res: Any) -> str:
+    """Why a file type's check for a view proposal gave no answer, in a few words for its notice: Claude's safeguards
+    (SUGGEST_REFUSED), no sign-in (SUGGEST_AUTH), an answer that could not be read, or the call's own detail."""
+    status, detail = str(getattr(res, "status", "") or ""), _one(getattr(res, "detail", "") or "")
+    if status == "refused" or _REFUSED_RE.search(detail):
+        return SUGGEST_REFUSED
+    if _AUTH_RE.search(detail):
+        return SUGGEST_AUTH
+    if status in ("ok", "truncated", "no_tool_call"):
+        return "Claude's answer couldn't be read"
+    return detail or f"the call ended {status or 'without an answer'}"
+
+
+def _check_failed(c: str, rel: str, suffix: str, reason: str) -> None:
+    """A file type's check for a view proposal failed: logged, kept for Try again (_suggest_failed), and told in main's
+    notice (SUGGEST_FAILED) with Try again, and Turn off view proposals when Claude's safeguards blocked it. None,
+    suggest's answer."""
+    log.info("no viewer suggestion for %s/%s: %s", c, rel, reason)
+    _suggest_failed[c] = rel
+    action = [SUGGEST_TRY_AGAIN, SUGGEST_TURN_OFF] if reason == SUGGEST_REFUSED else SUGGEST_TRY_AGAIN
+    if reason not in (SUGGEST_REFUSED, SUGGEST_AUTH):
+        reason = reason.rstrip(".")
+        reason = reason if len(reason) <= SUGGEST_REASON_CHARS else reason[:SUGGEST_REASON_CHARS - 1].rstrip() + "…"
+    files = f"{suffix} files" if suffix else "files without a suffix"
+    _suggest_notice(c, SUGGEST_FAILED.format(files=files, reason=reason), action)
+    return None
+
+
+def _suggest_notice(c: str, text: str = "", action: Any = None) -> None:
+    """main's notice of a file type's check for a view proposal (notices.post under SUGGEST_NOTICE_KEY), or with no
+    text its clearing, as a check that answers clears it (notices.clear). Never raises: a notice that cannot be written
+    is logged. On the server's loop, so its event goes out."""
+    try:
+        from . import notices  # noqa: PLC0415 — notices imports agents, which imports this module
+
+        if text:
+            notices.post(c, kind="proposals", text=text, action=action, key=SUGGEST_NOTICE_KEY)
+        else:
+            notices.clear(c, SUGGEST_NOTICE_KEY)
+    except Exception:  # noqa: BLE001 — a notice never stops the check
+        log.warning("%s: the notice of a file type's check for a view proposal was not written: %s", c,
+                    text or "(cleared)", exc_info=True)
+
+
+async def _suggest_again(c: str, rel: str) -> None:
+    """Try again on the notice of a file type's failed check (propose-now): the check of the type of `rel` again
+    (suggest). A check that cannot run now (view proposals off, a card waiting, the type no longer asked about) leaves
+    no notice."""
+    try:
+        await suggest(c, rel)
+    except Exception as e:  # noqa: BLE001
+        log.exception("the viewer suggestion for %s/%s failed", c, rel)
+        _check_failed(c, rel, suffix_of(rel), _one(str(e)) or type(e).__name__)
+    if c not in _suggest_failed:
+        _suggest_notice(c)
 
 
 def accept(c: str, slug: str) -> dict[str, Any]:
@@ -5406,11 +5491,17 @@ async def reject_route(c: str, slug: str, request: Request) -> dict[str, Any]:
 
 @router.post("/ws/{c}/views/propose-now")
 async def propose_now_route(c: str, request: Request) -> dict[str, Any]:
-    """Try again on a notice that thimble could not check for a view proposal, a click: the proposer checks now
-    (proposer.run_now), which starts the check and answers at once. Its answer."""
+    """Try again on a notice that thimble could not check for a view proposal, a click. When a file type's check failed
+    last (suggest), that file type is checked again ({started: true}); otherwise the proposer checks now
+    (proposer.run_now). Either starts the check and answers at once."""
     _click(request)
     config.workspace_dir(c)
     _bind_loop()
+    if (rel := _suggest_failed.pop(c, None)) is not None:
+        task = asyncio.get_running_loop().create_task(_suggest_again(c, rel), name=f"view-proposal-file-{c}")
+        _suggest_tasks.add(task)
+        task.add_done_callback(_suggest_tasks.discard)
+        return {"started": True}
     from . import proposer  # noqa: PLC0415 — proposer imports this module
 
     got = proposer.run_now(c)

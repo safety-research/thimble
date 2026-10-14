@@ -1,11 +1,13 @@
 """View proposals (app/views.py, `offer` in the code): a view thimble proposes to the analyst after a turn (proposer.py)
 or for a file type opened in the File browser (views.suggest), stored as a `suggested` proposal row with `offered`,
 which builds only when the analyst accepts it. One waits at a time, until the analyst answers it: Accept builds it,
-Reject drops it, each with its answer stamped. Try again on a notice asks the proposer to check now (propose-now).
-proposer.json keeps the proposer's pending job. Main sees the waiting view proposal as thimble's.
+Reject drops it, each with its answer stamped. A file type's check that fails is main's notice with a fix. Try again on
+a notice checks that file type again, else asks the proposer to check now (propose-now). proposer.json keeps the
+proposer's pending job. Main sees the waiting view proposal as thimble's.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from types import SimpleNamespace
 
@@ -353,3 +355,122 @@ def test_the_propose_now_route_refuses_the_server_s_token_without_the_analyst_s_
     r = client.post(f"/api/ws/{CORPUS}/views/propose-now", headers=plugin_headers())
     assert r.status_code == 403, r.text
     assert asked == []
+
+
+def _fake_notices(monkeypatch) -> list[tuple]:
+    """A stand-in for app.notices (Lane A's): each post as ("post", c, its keywords), each clear as ("clear", c, key)."""
+    import sys
+
+    import app
+
+    told: list[tuple] = []
+    fake = SimpleNamespace(post=lambda c, **kw: told.append(("post", c, kw)),
+                           clear=lambda c, key, **kw: told.append(("clear", c, key)))
+    monkeypatch.setitem(sys.modules, "app.notices", fake)
+    monkeypatch.setattr(app, "notices", fake, raising=False)
+    return told
+
+
+def _calls_answering(monkeypatch, results: list) -> list[str]:
+    """tasks.call answering the file-viewer call with each of `results` in turn: a CallResult, or an exception raised."""
+    from app import tasks
+
+    calls: list[str] = []
+
+    async def call(c, task, inp, schema=None):
+        calls.append(inp["suffix"])
+        got = results.pop(0)
+        if isinstance(got, BaseException):
+            raise got
+        return got
+
+    monkeypatch.setattr(tasks, "call", call)
+    return calls
+
+
+async def test_a_file_type_check_that_fails_is_main_s_notice_and_try_again_checks_that_type_again(corpus, analyst,
+                                                                                                   monkeypatch):
+    from app import model
+
+    told = _fake_notices(monkeypatch)
+    monkeypatch.setattr(views, "_suggest_failed", {})
+    asked: list[str] = []
+    _fake_proposer(monkeypatch, lambda c: asked.append(c) or {"started": True})
+    answer = {"help": True, "name": "trace steps", "why": "Traces read as steps.", "arrangement": "One row per step."}
+    calls = _calls_answering(monkeypatch, [
+        model.CallResult(status="error", detail="the session reported an error (HTTP 529): Overloaded."),
+        model.CallResult(status="ok", output=answer)])
+    assert await views.suggest(CORPUS, "run.trace") is None and calls == [".trace"]
+    assert told == [("post", CORPUS, {"kind": "proposals", "key": views.SUGGEST_NOTICE_KEY,
+                                      "action": {"label": "Try again", "do": "proposals-retry"},
+                                      "text": "Couldn't check for a view proposal for .trace files: the session "
+                                              "reported an error (HTTP 529): Overloaded."})]
+    assert views.suggestions(CORPUS) == {} and views.open_offer(CORPUS) is None, "nothing cached: it asks again"
+    told.clear()
+    assert await views.propose_now_route(CORPUS, analyst) == {"started": True}
+    await asyncio.gather(*views._suggest_tasks)
+    assert asked == [], "Try again checked the file type, not main's turn"
+    assert calls == [".trace", ".trace"] and views.open_offer(CORPUS)["name"] == "Trace Steps"
+    assert ("clear", CORPUS, views.SUGGEST_NOTICE_KEY) in told and not [t for t in told if t[0] == "post"]
+    assert await views.propose_now_route(CORPUS, analyst) == {"started": True} and asked == [CORPUS], \
+        "with no file type's check failed, Try again is the proposer's"
+
+
+@pytest.mark.parametrize(("result", "reason", "turn_off"), [
+    ({"status": "refused", "detail": "the model refused the request (stop_reason refusal)"},
+     "Claude's safeguards blocked the request.", True),
+    ({"status": "error", "detail": "the session reported an error: API Error: Claude's safeguards flagged this message"},
+     "Claude's safeguards blocked the request.", True),
+    ({"status": "error", "detail": "the model call failed (authentication_failed)"},
+     "Claude Code isn't signed in for thimble's server. Run /login, or if you changed your sign-in (for example "
+     "exported ANTHROPIC_API_KEY), run `thimble server restart`.", False),
+    ({"status": "no_tool_call", "detail": "the file_viewer tool was never called"},
+     "Claude's answer couldn't be read.", False),
+    ({"status": "rate_limited", "detail": "the subscription's rate limit is exhausted"},
+     "the subscription's rate limit is exhausted.", False),
+])
+async def test_a_file_type_check_s_notice_says_why_it_failed_and_how_to_fix_it(corpus, monkeypatch, result, reason,
+                                                                               turn_off):
+    from app import model
+
+    told = _fake_notices(monkeypatch)
+    monkeypatch.setattr(views, "_suggest_failed", {})
+    _calls_answering(monkeypatch, [model.CallResult(**result)])
+    assert await views.suggest(CORPUS, "run.trace") is None
+    [(_, _, kw)] = told
+    assert kw["text"] == f"Couldn't check for a view proposal for .trace files: {reason}"
+    buttons = kw["action"] if isinstance(kw["action"], list) else [kw["action"]]
+    assert [b["do"] for b in buttons] == ["proposals-retry", *(["proposals-off"] if turn_off else [])]
+    assert views._suggest_failed == {CORPUS: "run.trace"}
+
+
+async def test_a_file_type_check_that_times_out_or_raises_is_told_too(corpus, monkeypatch):
+    told = _fake_notices(monkeypatch)
+    monkeypatch.setattr(views, "_suggest_failed", {})
+    monkeypatch.setattr(views, "SUGGEST_TIMEOUT_S", 0.05)
+    from app import tasks
+
+    async def slow(c, task, inp, schema=None):
+        await asyncio.sleep(5)
+
+    monkeypatch.setattr(tasks, "call", slow)
+    assert await views.suggest(CORPUS, "run.trace") is None
+    assert told[-1][2]["text"].startswith("Couldn't check for a view proposal for .trace files: Claude didn't answer")
+    _calls_answering(monkeypatch, [RuntimeError("the claude CLI was not found " + "x" * 300)])
+    assert await views.suggest(CORPUS, "run.trace") is None
+    text = told[-1][2]["text"]
+    assert "the claude CLI was not found" in text and text.endswith("….") and len(text) < 240, "a long reason is cut"
+
+
+async def test_a_view_proposal_from_the_refusal_row_s_model_says_so(corpus, monkeypatch):
+    from app import model
+
+    told = _fake_notices(monkeypatch)
+    answer = {"help": True, "name": "trace steps", "why": "Traces read as steps.", "arrangement": "One row per step."}
+    _calls_answering(monkeypatch, [model.CallResult(status="ok", output=answer, refused_by="claude-opus-5-5",
+                                                    model_used="claude-opus-4-8", model_requested="claude-opus-4-8")])
+    slug = await views.suggest(CORPUS, "run.trace")
+    assert slug is not None and views.open_offer(CORPUS)["slug"] == slug, "the card shows"
+    assert told == [("post", CORPUS, {"kind": "proposals", "key": views.SUGGEST_NOTICE_KEY, "action": None,
+                                      "text": "This view proposal came from Opus 4.8: Claude's safeguards switched "
+                                              "models."})]
