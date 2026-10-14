@@ -22,7 +22,7 @@ stdin, `{"input": {...}}`, and in the file `$THIMBLE_INPUT`:
 
 | role | input | its thimble tools | what it returns |
 |---|---|---|---|
-| orientation | `request`, `outputs`, `follow_up`, `choices`, `cards`, `corpus`, `tools` | `read_ref`, `list_cards`, `add_card`, `edit_card`, `delete_card`, `apply_label`, `propose_view`, `screenshot` (as `outputs` allows) | the line main hears |
+| orientation | `request`, `outputs` (always `["final"]`, the deck), `follow_up`, `choices` (`effort`), `cards`, `corpus`, `tools` | `read_ref`, `list_cards`, `add_card`, `edit_card`, `delete_card`, `apply_label`, `screenshot` | the line main hears |
 | critic | `digest` (what thimble's critic reads), `transcript`, `context` | `read_ref`, `list_cards` | the report the orientation's `critique` call returns |
 | writer | `doc`, `type`, `request`, `after`, `context` | `read_ref`, `list_cards`, `add_card`, `edit_card`, `delete_card`, `screenshot`, `write_document`, `edit_document` | the line main hears |
 | dev | one turn of a view build: `slug`, `name`, `description` (what the analyst sees), `analyst_task` (what they do with the view), `scope`, `spec` (the layout an older proposal or a file type's viewer gave, else empty), `change`, `folder`, `corpus`, `examples`, `message` | `read_ref` | the turn's reply; thimble then checks the view's files in `folder` and runs the program again with what failed in `message` |
@@ -30,6 +30,8 @@ stdin, `{"input": {...}}`, and in the file `$THIMBLE_INPUT`:
 An orientation program runs again for a follow-up: a message to the orientation arrives as `request`, with
 `follow_up` true and the cards as they stand in `cards`, so it adds to them. Switching the extension on where an
 orientation already ran makes Settings offer Run now, which runs the program the same way with the earlier `request`.
+When an orientation program fails, a notice that names the orientation and gives the end of its stderr shows above the
+reply box of the chat the analyst has open, or above the prompt in terminal mode.
 
 ## Tasks
 
