@@ -62,9 +62,9 @@ export type ChatRecord =
   | { type: 'chip'; ts?: string; kind: ChipKind | string; text: string; ref?: string; [k: string]: unknown }
   | { type: 'agent'; ts?: string; chat: string; role: string; title: string; run?: number; tool_use_id?: string; view?: string }
   | { type: 'shot'; ts?: string; phase: string; ticket: string; name: string; note?: string }
-  | ({ type: 'notice'; ts?: string } & Notice)
+  | { type: 'notice'; ts?: string; id?: string; key?: string | null; kind?: string; text?: string; agent?: string | null; action?: NoticeAction | NoticeAction[] | null; dismissed?: boolean; cleared?: boolean }
 
-/** What a notice's button does (backend notices.post): look for a view proposal again (`proposals-retry`), turn view
+/** What a notice's button does (backend notices.py): look for a view proposal again (`proposals-retry`), turn view
  * proposals off (`proposals-off`), open Settings (`settings`), or build the failed view `slug` again (`view-retry`). */
 export interface NoticeAction {
   label: string
@@ -72,15 +72,20 @@ export interface NoticeAction {
   slug?: string
 }
 
-/** A failure the analyst should know of, with an easy fix (backend notices.post): one line in a chat (main's, or the
- * thread it belongs to), an optional button, and a dismissal. A later notice with the same `key` replaces it. The
- * stream's `notice` event carries the same fields with its chat. */
+/** A failure the analyst should know of, with an easy fix (backend notices.post), as `GET /ws/{c}/notices` lists the
+ * open ones and the stream's `notice` event sends a new one: one line naming the agent it happened to (`agent`, such as
+ * "Orientation" or "View build: Agent Network"), its fix as buttons (`action`, one or several), and the chat the agent
+ * writes in (`chat`, its thread, or main), where the notice is also a row. A later notice with the same `key` replaces
+ * it, and a fix that worked clears it (the event's `cleared`). */
 export interface Notice {
-  id?: string
+  id: string
   key?: string | null
   kind?: string
   text: string
-  action?: NoticeAction | null
+  agent?: string | null
+  chat?: string | null
+  action?: NoticeAction | NoticeAction[] | null
+  ts?: string
 }
 
 export interface ChatDetail {

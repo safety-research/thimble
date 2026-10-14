@@ -1,7 +1,7 @@
 // The fold of a chat log into rows the panel renders. `index` is the record's position in the log.
 import type { StepState, ToolState, ToolStep } from '../components/ToolCard'
 import { parseRef, refLabel } from '../lib/refs'
-import type { ChatRecord, NoticeAction } from '../lib/types'
+import type { ChatRecord } from '../lib/types'
 import { shortStepNames, stepParts } from './threads'
 
 export interface UserRow {
@@ -115,8 +115,10 @@ export interface HandBackRow {
   index: number
   text: string
 }
-/** a failure the analyst should know of, with an easy fix (backend notices.post): one line, an optional button, and ×
- * (chat/Notice.tsx). `id` is the notice's own, else its record's index */
+/** a failure the analyst should know of, with an easy fix (backend notices.post), as a row of the chat it happened in:
+ * one warning line that names the agent and the failure (chat/Notice.tsx). Its fix and × are on the notice above the
+ * composer while it is open; once a fix that worked cleared it, or the analyst dismissed it (`closed`), the row stays as
+ * a quiet line of the chat's history. `id` is the notice's own (the latest under its key), else its record's index */
 export interface NoticeRow {
   kind: 'notice'
   index: number
@@ -125,7 +127,8 @@ export interface NoticeRow {
   /** the notice's kind (backend notices.post `kind`) */
   noticeKind?: string
   text: string
-  action?: NoticeAction
+  agent?: string
+  closed: boolean
   ts?: string
 }
 export type Row = UserRow | TextRow | ToolRow | ChipRow | AgentRow | ErrorRow | NoteRow | ShotRow | HandBackRow | NoticeRow
@@ -171,16 +174,15 @@ export function stageLine(delta: string): string | null {
  * of its level, a stage line is a note. A record `skip` names is left out; every row keeps its record's index. An
  * `agent` record that names the tool call which started its chat (`tool_use_id`) follows that call's row, since the
  * mirror copies the call only once Claude Code flushes its transcript, so the record can come first in the log. A
- * notice that a later one with the same `key` replaces is left out, so a failure that happens again shows as one row,
- * the latest, where it was written. Pure.
+ * notice under the key of one still open replaces it in place, so a failure that happens again shows as one row; a
+ * notice's end closes its row. Pure.
  */
 export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<number>): Row[] {
   const rows: Row[] = []
   const calls = new Map<string, number>() // a top-level tool call's id -> its record's index, for the calls folded
-  const latest = new Map<string, number>() // a notice's key -> the index of its latest record
+  const notices = new Map<string, NoticeRow>() // a notice's key -> its row while it is open
   records.forEach((e, index) => {
     if (e.type === 'tool_use' && !skip?.has(index) && typeof e.parent_tool_use_id !== 'string') calls.set(e.id, index)
-    if (e.type === 'notice' && e.key && !skip?.has(index)) latest.set(e.key, index)
   })
   const held = new Map<string, AgentRow[]>() // the agent rows that wait for their call's row
   records.forEach((e, index) => {
@@ -234,9 +236,29 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
         rows.push({ kind: 'shot', index, phase: e.phase, ticket: e.ticket, name: e.name, note: e.note })
         return
       case 'notice': {
-        if (!e.text || (e.key && latest.get(e.key) !== index)) return
-        const action = e.action && typeof e.action.label === 'string' && e.action.label && typeof e.action.do === 'string' && e.action.do ? e.action : undefined
-        rows.push({ kind: 'notice', index, id: e.id ? String(e.id) : `#${index}`, ...(e.key ? { key: e.key } : {}), ...(e.kind ? { noticeKind: e.kind } : {}), text: e.text, ...(action ? { action } : {}), ts: e.ts })
+        // the end of a notice (a fix that worked, or the analyst's ×): its row stays, closed; a later notice under its
+        // key is a row of its own
+        if (e.dismissed || e.cleared) {
+          const id = e.id
+          const row = (id ? rows.find((r): r is NoticeRow => r.kind === 'notice' && r.id === id) : undefined) ?? (e.key ? notices.get(e.key) : undefined)
+          if (!row) return
+          row.closed = true
+          if (row.key) notices.delete(row.key)
+          return
+        }
+        const text = typeof e.text === 'string' ? e.text.trim() : ''
+        if (!text) return
+        const fields = { id: e.id ? String(e.id) : `#${index}`, text, ...(e.kind ? { noticeKind: e.kind } : {}), ...(typeof e.agent === 'string' && e.agent.trim() ? { agent: e.agent.trim() } : {}), ...(e.ts ? { ts: e.ts } : {}) }
+        // a notice under the key of one still open replaces it in place
+        const open = e.key ? notices.get(e.key) : undefined
+        if (open) {
+          delete open.agent
+          Object.assign(open, fields)
+          return
+        }
+        const row: NoticeRow = { kind: 'notice', index, ...(e.key ? { key: e.key } : {}), closed: false, ...fields }
+        if (e.key) notices.set(e.key, row)
+        rows.push(row)
         return
       }
       default:

@@ -85,8 +85,10 @@ export type Events = {
   cmdHeld: { on: boolean; cursor: string }
   /** run the product tour again (Settings' Take the tour) */
   tour: Record<string, never>
-  /** a notice was written into `chat`'s log (the stream's `notice` record, backend notices.post; chat/Notice.tsx) */
-  notice: Notice & { chat: string }
+  /** the stream's `notice` record (backend notices.py, lib/notices.ts): a new notice (`notice`; `foreground` unless the
+   * server says otherwise), or the end of one by its id or key (`gone`: a fix that worked cleared it, or the analyst
+   * dismissed it). `chat` is the chat whose log holds its row, if any; `replay` marks a record of the replayed history */
+  notice: { chat: string | null; notice: Notice | null; gone: { id?: string; key?: string } | null; foreground: boolean; replay: boolean }
   /** open Settings under the top bar's gear (a notice's Open Settings) */
   openSettings: Record<string, never>
 }

@@ -8,8 +8,9 @@
 // whose run ended without a reply offers Ask again, and one whose run ended with an answer offers Hand back to main
 // (HandBack). Main opens empty with its composer, as Claude Code does; a start that did not happen shows its card in main
 // (OrientStart). A view proposal waits above the composer until the analyst answers it (ProposalCard), except while the
-// product tour runs (lib/touring). A failure with its fix shows as a notice in the chat it belongs to (Notice.tsx). While
-// main runs outside thimble's fence, a banner says so (UnfencedBanner).
+// product tour runs (lib/touring). A failure of main or of any of thimble's agents shows as a notice with its fix under
+// the proposal's place, above the composer of whichever chat is open, and as a row in the chat it happened in
+// (Notice.tsx). While main runs outside thimble's fence, a banner says so (UnfencedBanner).
 import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -57,6 +58,7 @@ import { useChat, type ChatState } from './useChat'
 import { pendingAsks, waitingAt, waitingChats } from './waiting'
 import { PermissionCard } from './PermissionCard'
 import { ProposalCard } from './ProposalCard'
+import { NoticeStrip } from './Notice'
 import { AttachBar, PrecachedCard, attachInstead, precachedMark, takesFollowUps } from './Precached'
 import { pendingRequests } from './permissions'
 
@@ -547,9 +549,10 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   // main's meta again when the record changes (its `orientation`, whose status the record is read again on)
   const reloadMain = main.reload
   useEffect(() => bus.on('orient', () => void reloadMain()), [reloadMain])
-  // a notice written into main's log or the chat shown (backend notices.post): its log is read again at once
+  // a notice written into main's log or the log of the chat shown, or closed there (backend notices.py): that log is
+  // read again at once
   const reloadOther = other.reload
-  useEffect(() => bus.on('notice', (e) => void (e.chat === 'main' ? reloadMain() : e.chat === current ? reloadOther() : undefined)), [reloadMain, reloadOther, current])
+  useEffect(() => bus.on('notice', (e) => void (e.replay ? undefined : e.chat === 'main' ? reloadMain() : e.chat && e.chat === current ? reloadOther() : undefined)), [reloadMain, reloadOther, current])
   const onStartAnswer = (a: StartAnswer | null) => {
     setStartAnswer(a)
     orientRun.reload()
@@ -804,6 +807,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
           <Holds className="chat-main-holds" alert={main.meta?.alert} />
           {asks.length > 0 && <PermissionCard ws={ws} asks={asks} metas={metaMap} labels={labels} />}
           {!touring && <ProposalCard ws={ws} />}
+          <NoticeStrip ws={ws} current={current} labels={labels} onOpen={setCurrent} />
           {strip && <TaskStrip title={strip.title} steps={strip.steps} count={strip.count} open={stripOpen} onToggle={() => setStripOpen((o) => !o)} waiting={waiting} />}
           {precached && attachInstead(precached, neverAttached, target.to) ? (
             <AttachBar mark={precached} card={kind === 'orient' && current === precached.orientation} />

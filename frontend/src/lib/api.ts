@@ -395,6 +395,11 @@ export const api = {
   rejectProposal: (c: string, slug: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/reject`, { method: 'POST' }),
   /** Try again on a notice that a check for a view proposal failed: the check runs now (backend proposer.run_now). */
   proposeNow: (c: string) => j<unknown>(`${ws(c)}/views/propose-now`, { method: 'POST' }),
+  /** The open notices (backend notices.py): failures of main and of thimble's agents, each with its fix, oldest first;
+   * a list, or {notices: [...]}. */
+  notices: (c: string) => j<unknown>(`${ws(c)}/notices`).then((r) => (Array.isArray(r) ? r : r && typeof r === 'object' && Array.isArray((r as { notices?: unknown }).notices) ? (r as { notices: unknown[] }).notices : [])),
+  /** × on a notice, or a fix of the analyst's that went through: the server forgets it (backend notices.dismiss_route). */
+  dismissNotice: (c: string, chat: string, id: string) => j<{ dismissed: boolean }>(`${ws(c)}/chats/${enc(chat)}/notices/${enc(id)}/dismiss`, { method: 'POST' }),
   retryProposal: (c: string, slug: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/retry`, { method: 'POST' }),
   /** Build or Retry on a proposal's chip (`POST /ws/{c}/views/{slug}/build`): a click that starts a view builder through
    * thimble's plugin, with the run's model and effort (Settings' dev row when left out). */

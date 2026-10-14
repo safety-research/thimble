@@ -1,63 +1,31 @@
-// A notice in a chat (backend notices.post): a failure the analyst should know of, with an easy fix, as one line in the
-// warning's colours, an optional button that runs the fix, and × that dismisses it. A notice whose fix is a command
-// (`/login`, `thimble server restart`) says it in its text, the command in code. A later notice with the same key
-// replaces it (model.foldRecords), so a failure that happens again shows as one row. Dismissed notices are kept per
-// workspace in this browser; a new notice of the same failure has an id of its own and shows again. A button that
-// worked dismisses its notice; one that failed says why in a toast and leaves the notice.
-import { useState, useSyncExternalStore } from 'react'
+// Notices (backend notices.py, lib/notices.ts): a failure of main or of one of thimble's agents that the analyst should
+// know of, with an easy fix. Every open notice shows in the foreground, in a strip above the composer of whichever chat
+// is open (NoticeStrip), under the view proposal card's place, and stays there across thread switches until the
+// analyst dismisses it (×) or a fix that worked clears it. Each is one line in the warning's colors: the agent it
+// happened to in bold ("Orientation", "View build: Agent Network"), the failure and, when the fix is a command
+// (`/login`, `thimble server restart`), the command in code; then its fix as buttons, Open for the chat it happened in
+// when another one is shown, and ×. A fix that went through dismisses the notice (a new failure brings a new one); one
+// that failed says why in a toast and leaves it. In the agent's own chat the notice is also a row (NoticeRow), the same
+// line without buttons, which stays as a quiet line of the chat's history once the notice is closed.
+import { useState } from 'react'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
+import { dismissNotice, noticeActions, useNotices, useNoticesRead } from '../lib/notices'
 import { refreshProposals } from '../lib/proposals'
 import { track } from '../lib/telemetry'
-import type { NoticeAction } from '../lib/types'
-import { readStorage, storageKey, writeStorage } from '../lib/workspace'
+import type { Notice, NoticeAction } from '../lib/types'
 import type { NoticeRow as NoticeRowT } from './model'
 import { proposalsOff } from './ProposalCard'
 
-/** The actions a notice's button can run; a notice with another one shows no button. */
+/** The actions a notice's button can run; one with another `do` shows no button. */
 export const NOTICE_DOS: readonly string[] = ['proposals-retry', 'proposals-off', 'settings', 'view-retry']
-/** How many dismissed notices a workspace keeps (the newest). */
-const DISMISSED_MAX = 200
-
-const dismissedKey = (ws: string) => storageKey(ws, 'notices-dismissed')
-const listeners = new Set<() => void>()
-const cache = new Map<string, readonly string[]>()
-
-/** The notices dismissed in workspace `ws`, by `<chat>:<id>`. */
-export function dismissedNotices(ws: string): readonly string[] {
-  let list = cache.get(ws)
-  if (!list) {
-    const raw = readStorage<unknown>(dismissedKey(ws), [])
-    list = Array.isArray(raw) ? raw.filter((x): x is string => typeof x === 'string') : []
-    cache.set(ws, list)
-  }
-  return list
-}
-
-/** Dismiss notice `id` of `chat` in workspace `ws`, for every component that shows it. */
-export function dismissNotice(ws: string, chat: string, id: string): void {
-  const key = `${chat}:${id}`
-  const list = dismissedNotices(ws)
-  if (list.includes(key)) return
-  const next = [...list, key].slice(-DISMISSED_MAX)
-  cache.set(ws, next)
-  writeStorage(dismissedKey(ws), next)
-  listeners.forEach((fn) => fn())
-}
-
-function subscribe(fn: () => void): () => void {
-  listeners.add(fn)
-  return () => {
-    listeners.delete(fn)
-  }
-}
 
 /** Whether `action` is one this page can run. Pure. */
-export const runnable = (action: NoticeAction | undefined): action is NoticeAction => !!action && NOTICE_DOS.includes(action.do) && (action.do !== 'view-retry' || !!action.slug)
+export const runnable = (action: NoticeAction): boolean => NOTICE_DOS.includes(action.do) && (action.do !== 'view-retry' || !!action.slug)
 
-/** Run a notice's action: true when the notice is answered and can go (Open Settings leaves it). */
+/** Run a notice's action: true when the failure is answered and the notice can go (Open Settings leaves it). */
 export async function runNotice(ws: string, action: NoticeAction): Promise<boolean> {
   switch (action.do) {
     case 'proposals-retry':
@@ -84,30 +52,108 @@ export function noticeText(text: string) {
   return text.split(/(`[^`\n]+`)/).map((part, i) => (part.length > 2 && part.startsWith('`') && part.endsWith('`') ? <code key={i}>{part.slice(1, -1)}</code> : part))
 }
 
-export function NoticeRow({ item, ws, chat }: { item: NoticeRowT; ws: string; chat: string }) {
-  const dismissed = useSyncExternalStore(subscribe, () => dismissedNotices(ws))
-  const [busy, setBusy] = useState(false)
-  if (dismissed.includes(`${chat}:${item.id}`)) return null
-  const action = runnable(item.action) ? item.action : undefined
-  const run = () => {
-    if (!action || busy) return
-    track('ui-click', { target: `notice:${item.key ?? item.id}`, detail: { action: action.do } })
-    setBusy(true)
-    runNotice(ws, action)
-      .then((done) => done && dismissNotice(ws, chat, item.id))
-      .catch((e: Error) => bus.emit('toast', { text: `${action.label} didn't work: ${e.message.replace(/^\d{3}\s+/, '')}`, kind: 'error' }))
-      .finally(() => setBusy(false))
-  }
+/** The name a notice gives its agent: its own `agent`, else the label of the thread it happened in; none for main's. */
+export function noticeAgent(n: Pick<Notice, 'agent' | 'chat'>, labels?: ReadonlyMap<string, string>): string {
+  if (n.agent) return n.agent
+  return n.chat && n.chat !== 'main' ? (labels?.get(n.chat) ?? '') : ''
+}
+
+/** The words of a notice: the agent in bold, then the failure. */
+function NoticeWords({ agent, text }: { agent: string; text: string }) {
   return (
-    <div className="chat-notice" role="status" data-key={item.key} data-kind={item.noticeKind}>
+    <span className="chat-notice-text">
+      {agent && <b className="chat-notice-agent">{agent}</b>}
+      {agent && ' '}
+      {noticeText(text)}
+    </span>
+  )
+}
+
+/** One open notice in the foreground: its words, its fix, Open for its chat when another is shown, and ×. */
+function ForegroundNotice({ ws, notice, current, agent, onOpen }: { ws: string; notice: Notice; current: string; agent: string; onOpen: (chat: string) => void }) {
+  const [busy, setBusy] = useState<string | null>(null)
+  const actions = noticeActions(notice.action).filter(runnable)
+  const target = `notice:${notice.key || notice.id}`
+  const run = (a: NoticeAction) => {
+    if (busy) return
+    track('ui-click', { target, detail: { action: a.do } })
+    setBusy(a.do)
+    runNotice(ws, a)
+      .then((done) => (done ? dismissNotice(ws, notice) : undefined))
+      .catch((e: Error) => bus.emit('toast', { text: `${a.label} didn't work: ${e.message.replace(/^\d{3}\s+/, '')}`, kind: 'error' }))
+      .finally(() => setBusy(null))
+  }
+  const open = notice.chat && notice.chat !== current ? notice.chat : null
+  return (
+    <div className="chat-notice" role="status" data-notice={notice.id} data-key={notice.key ?? undefined} data-kind={notice.kind} data-chat={notice.chat ?? undefined}>
       <Icon name="warning" size={13} className="chat-notice-ico" />
-      <span className="chat-notice-text">{noticeText(item.text)}</span>
-      {action && (
-        <Button variant="secondary" size="sm" className="chat-notice-act" busy={busy} onClick={run}>
-          {action.label}
-        </Button>
-      )}
-      <Button variant="icon" size="sm" icon="x" title="Dismiss" aria-label="Dismiss" className="chat-notice-x" onClick={() => dismissNotice(ws, chat, item.id)} />
+      <div className="chat-notice-body">
+        <NoticeWords agent={agent} text={notice.text} />
+        {(actions.length > 0 || open) && (
+          <span className="chat-notice-acts">
+            {actions.map((a) => (
+              <Button key={`${a.do}:${a.slug ?? ''}`} variant="secondary" size="sm" className="chat-notice-act" busy={busy === a.do} disabled={!!busy && busy !== a.do} onClick={() => run(a)}>
+                {a.label}
+              </Button>
+            ))}
+            {open && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="chat-notice-open"
+                onClick={() => {
+                  track('thread-switch', { target: `chat:${open}`, detail: { from: 'notice' } })
+                  onOpen(open)
+                }}
+              >
+                Open
+              </Button>
+            )}
+          </span>
+        )}
+      </div>
+      <Button
+        variant="icon"
+        size="sm"
+        icon="x"
+        title="Dismiss"
+        aria-label="Dismiss"
+        className="chat-notice-x"
+        onClick={() => {
+          track('ui-click', { target, detail: { action: 'dismiss' } })
+          void dismissNotice(ws, notice)
+        }}
+      />
+    </div>
+  )
+}
+
+/** Every open notice of the workspace, above the composer of the chat shown (`current`), oldest first. */
+export function NoticeStrip({ ws, current, labels, onOpen }: { ws: string; current: string; labels?: ReadonlyMap<string, string>; onOpen: (chat: string) => void }) {
+  const notices = useNotices(ws)
+  if (!notices.length) return null
+  return (
+    <div className="chat-notices" role="region" aria-label="Notices">
+      {notices.map((n) => (
+        <ForegroundNotice key={n.key || n.id} ws={ws} notice={n} current={current} agent={noticeAgent(n, labels)} onOpen={onOpen} />
+      ))}
+    </div>
+  )
+}
+
+/** A notice as a row of the chat it happened in: the warning line while the notice is open (its fix is above the
+ * composer), a quiet line once a fix cleared it or the analyst dismissed it. */
+export function NoticeRow({ item, ws }: { item: NoticeRowT; ws: string }) {
+  const open = useNotices(ws)
+  const read = useNoticesRead(ws)
+  // open while the log has not closed it and, once the open notices are read, they hold it
+  const closed = item.closed || (read && !open.some((n) => n.id === item.id || (!!item.key && n.key === item.key)))
+  return (
+    <div className="chat-notice chat-notice-row" role="note" data-notice={item.id} data-key={item.key} data-kind={item.noticeKind} data-closed={closed || undefined}>
+      <Icon name="warning" size={13} className="chat-notice-ico" />
+      <div className="chat-notice-body">
+        <NoticeWords agent={item.agent ?? ''} text={item.text} />
+      </div>
     </div>
   )
 }

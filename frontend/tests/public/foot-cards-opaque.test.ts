@@ -19,4 +19,6 @@ test("the foot floats over the rows, and a hold's card in it mixes its wash into
   expect(rule('.chat-perm')).toMatch(/background:\s*color-mix\([^;]*var\(--surface-card\)\)/)
   // the view proposal card: the accent mixed into the card's own surface
   expect(rule('.chat-offer')).toMatch(/background:\s*color-mix\([^;]*var\(--accent\)[^;]*var\(--surface-card\)\)/)
+  // a notice above the composer: the warning's wash mixed into the card's own surface
+  expect(rule('.chat-foot .chat-notice')).toMatch(/background:\s*color-mix\([^;]*var\(--status-warning\)[^;]*var\(--surface-card\)\)/)
 })

@@ -1,8 +1,7 @@
 // The top bar: at the left the thimble mark and the corpus's folder in mono, which opens the switcher, the server's
 // workspaces as the start page lists them (WorkspaceList), this one marked; the surfaces' tabs over the main area
 // (a click shows the surface, a drag takes it to a pane); at the right Undo and Redo (shell/undo.ts), Report a problem,
-// the links toggle, the theme popover and the settings gear, which a notice's Open Settings also opens (the bus's
-// `openSettings`).
+// the links toggle, the theme popover and the settings gear.
 import { useEffect, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { Button, type TabOption } from '../components/Button'
 import { Icon } from '../components/Icon'
@@ -51,7 +50,7 @@ export function TopBar({ ws, tabs, onTab, onTabDrag }: TopBarProps) {
       }),
     [],
   )
-  // a notice's Open Settings (chat/Notice.tsx)
+  // a notice's Open Settings (chat/Notice.tsx, the bus's `openSettings`) opens the settings under the gear
   useEffect(
     () =>
       bus.on('openSettings', () => {

@@ -1718,40 +1718,87 @@ button.model-line-part[aria-expanded='true'] {
   color: var(--text-secondary);
   font: var(--type-body-sm);
 }
-/* a notice (chat/Notice.tsx): a failure with its fix, one line on the warning's soft wash with its edge, the glyph, the
-   text, the fix's button and × */
+/* -------- notices (chat/Notice.tsx): a failure of main or of one of thimble's agents with its fix. Above the composer,
+   the open ones stack under the view proposal's place, each one line on the warning's wash mixed into the card's own
+   surface (the foot floats over the rows), with the warning's edge: the glyph, the agent in bold and the failure, its
+   fix and Open (beside the words while they fit, under them when not), and ×. In a chat's rows the same line without
+   buttons, quiet once the notice is closed -------- */
+.chat-notices {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 30vh;
+  margin-bottom: 12px;
+  overflow-y: auto;
+  border-radius: var(--radius-card);
+}
 .chat-notice {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   box-sizing: border-box;
   min-width: 0;
   max-width: 100%;
   margin: 0;
-  padding: 5px 4px 5px 10px;
-  border: 1px solid color-mix(in oklab, var(--status-warning) 45%, transparent);
+  padding: 6px 4px 6px 10px;
+  border: 1px solid var(--status-warning);
   border-radius: var(--radius-card);
   background: var(--status-warning-soft);
   color: var(--text-primary);
   font: var(--type-body-sm);
 }
+.chat-foot .chat-notice {
+  background: color-mix(in oklab, var(--status-warning) 12%, var(--surface-card));
+}
 .chat-notice-ico {
   flex: none;
-  align-self: flex-start;
   margin-top: 3px;
   color: var(--status-warning);
 }
-.chat-notice-text {
+.chat-notice-body {
+  display: flex;
   flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+  padding-top: 1px;
+}
+.chat-notice-text {
+  flex: 1 1 14em;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+.chat-notice-agent {
+  font-weight: 600;
 }
 .chat-notice-text code {
   font: var(--type-mono-sm);
 }
-.chat-notice-act.btn,
+.chat-notice-acts {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
 .chat-notice-x.btn {
   flex: none;
+}
+/* in a chat's rows: no buttons, so the line keeps its own padding on the right */
+.chat-notice-row {
+  padding-right: 10px;
+}
+/* closed (a fix cleared it, or the analyst dismissed it): a quiet line of the chat's history */
+.chat-notice-row[data-closed] {
+  border-color: var(--border-subtle);
+  background: transparent;
+  color: var(--text-tertiary);
+}
+.chat-notice-row[data-closed] .chat-notice-ico {
+  color: var(--text-tertiary);
 }
 /* a start that did not happen (chat/Refused): one card on the warning's soft wash, the agent named, why on one line,
    the request in full behind a disclosure, and the kind's buttons */

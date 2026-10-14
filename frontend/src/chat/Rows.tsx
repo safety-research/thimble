@@ -4,7 +4,7 @@
 // is such a line carrying its `call:` ref, so it can be cited and, open, shows its whole stored output with numbered
 // lines. Other runs of one kind of call are one card (Cards · 2 steps · 31s). Everything else is a quiet note with the
 // chips of what it points at. Label runs in a row are one Label card, a step per label. A notice (a failure with its
-// fix) is one warning line with its button and × (Notice.tsx).
+// fix, which the strip above the composer offers) is one warning line, quiet once it is closed (Notice.tsx).
 import { createContext, useContext, useEffect, useRef, useState, type DragEvent } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -206,7 +206,7 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
           case 'error':
             return <ErrorRow key={r.index} item={r} retry={retry && retry.index === r.index ? retry : undefined} />
           case 'notice':
-            return <NoticeRow key={r.index} item={r} ws={ws} chat={chat ?? 'main'} />
+            return <NoticeRow key={r.index} item={r} ws={ws} />
         }
       })}
       {streaming && !toolPending && <Working />}
