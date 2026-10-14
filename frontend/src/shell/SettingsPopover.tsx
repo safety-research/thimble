@@ -3,13 +3,14 @@
 // launch (PUT session/effort and session/fast); thimble's agents (the orientation, the orientation's subagents run as
 // thimble:orient-helper, the critic, the writers, the dev agent of view builds, reviews and code tickets, the report checks),
 // with a "web" switch that keeps an agent off WebFetch and WebSearch, and on the dev row a fast switch for `thimble fix`
-// alone (backend config.FAST_OF_TICKETS); the classifiers (labels, the card check, the viewer suggestion), the only
+// alone (backend config.FAST_OF_TICKETS); the classifiers (labels, the card check, the view proposals), the only
 // other rows with fast mode; and the row a classifier's call runs again on when its model
 // refuses, or off. Then one row per agent of the extensions running here (`<extension>:<agent>`). The effort menu lists
 // Claude Code's levels, and a model that runs with no effort shows none. An agent's row applies to its next start. A
 // save sends only the changed fields so defaults stay defaults (thimble's config, backend userconf.py). Choices that
 // cannot take effect are dimmed with the reason in a tooltip. Every row names its model exactly, never `default`.
-// Under the table, main's fence, which thimble's agents share as subagents of the analyst's Claude Code session (its
+// Under the table, the View proposals switch (PROPOSE_NOTE), which a view proposal's Don't ask again turns off;
+// then main's fence, which thimble's agents share as subagents of the analyst's Claude Code session (its
 // sandbox, network, web and edits of the data), with the CLAUDE.md files each agent reads; then the one agent with a
 // permission mode of its own, an extension's program that runs the dev agent, shown only where one does, and its own
 // fence; then labels and the card check, which have no mode; then how long a code ticket's question about thimble's code
@@ -208,7 +209,7 @@ export const ROLE_LABEL: Record<string, string> = {
   writer: 'writers',
   checks: 'report checks',
   verify: 'card check',
-  suggest: 'viewer suggestion',
+  suggest: 'view proposals',
   refusal: 'if refused',
 }
 /** A row's note under its name: what it covers, where its id does not say. */
@@ -236,6 +237,15 @@ export const cardWaitLine = (minutes: number): string =>
   `A code ticket asks you before its change reaches thimble's own code; its card waits ${minutes} min (cardWait).`
 /** The line under the table. */
 export const NEXT_START_LINE = "An agent's row applies to its next start; a run that goes on keeps its own model and effort."
+/** The View proposals switch's name and note. */
+export const PROPOSE_LABEL = 'View proposals'
+export const PROPOSE_NOTE = 'thimble may propose a view for your task above the reply box. Nothing builds until you accept it.'
+
+/** What a save sends for View proposals: false to turn them off, null to put back the default (on), nothing when the
+ * switch did not change. Pure. */
+export function changedPropose(loaded: Settings | null, on: boolean): { propose_views?: false | null } {
+  return (loaded?.propose_views !== false) === on ? {} : { propose_views: on ? null : false }
+}
 
 /** An extension's agent, whose row is keyed `<extension>:<agent>` as thimble's config keys it. */
 const isExtensionAgent = (role: string): boolean => role.includes(':')
@@ -351,6 +361,8 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
   const [localOn, setLocalOn] = useState<Record<string, boolean>>({})
   // each answer to an extension's question whether to run its orientation now, sent on Save
   const [runAnswers, setRunAnswers] = useState<Record<string, boolean>>({})
+  // View proposals (thimble's config `views.propose`)
+  const [propose, setPropose] = useState(true)
 
   useEffect(() => {
     if (!open) return
@@ -369,6 +381,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
         setSettings(s)
         setModeRows(s.permission_modes ?? {})
         setWeb(webRows(s))
+        setPropose(s.propose_views !== false)
         setAttached(a)
         const fast = mainFast(a)
         setModels({ ...(s.models ?? {}), main: { model: a?.model ?? '', effort: mainEffort(a), fast: !!fast } })
@@ -388,11 +401,13 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
       const changed = changedRoles(settings?.models ?? {}, models)
       const modes = changedModes(settings?.permission_modes, modeRows)
       const webs = changedWeb(webRows(settings), web)
-      if (Object.keys(changed).length || Object.keys(modes).length || Object.keys(webs).length)
+      const proposeNow = changedPropose(settings, propose)
+      if (Object.keys(changed).length || Object.keys(modes).length || Object.keys(webs).length || 'propose_views' in proposeNow)
         await api.putSettings(ws, {
           ...(Object.keys(changed).length ? { models: changed } : {}),
           ...(Object.keys(modes).length ? { permission_modes: modes } : {}),
           ...(Object.keys(webs).length ? { web: webs } : {}),
+          ...proposeNow,
         })
       for (const [name, how] of extensionCalls(exts?.extensions ?? [], extOn)) {
         if (how === 'add') await api.addExtension(ws, name)
@@ -554,6 +569,20 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
             <p className="settings-agent-main settings-next-start" role="note">
               {NEXT_START_LINE}
             </p>
+          </div>
+        )}
+        {settings && (
+          <div className="settings-grid settings-modes settings-auto" role="table" aria-label={PROPOSE_LABEL}>
+            <div className="settings-row settings-headrow" role="row">
+              <span className="label">views</span>
+            </div>
+            <div className="settings-row" role="row" data-auto="propose-views">
+              <span className="settings-role">{PROPOSE_LABEL}</span>
+              <span className="settings-web" data-on={propose}>
+                <Switch checked={propose} onChange={() => setPropose(!propose)} aria-label={PROPOSE_LABEL} />
+              </span>
+              <span className="settings-agent-line">{PROPOSE_NOTE}</span>
+            </div>
           </div>
         )}
         {settings && fence && (

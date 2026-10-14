@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 // The settings popover (src/shell/SettingsPopover.tsx): one model table with a row per role and exactly the model and
 // effort that runs, Claude Code's levels in every agent's effort menu and none for a model that runs with none, fast
-// mode only for the classifiers, main and `thimble fix` (on the dev row), the viewer suggestion's and the refusal's
-// rows, the orientation subagents' row with its effort, a web switch per agent; main's fence, which thimble's agents,
-// code tickets' among them, share; one permission row, the dev agent's program's, only where an extension runs one;
-// cardWait; no installs row.
+// mode only for the classifiers, main and `thimble fix` (on the dev row), the view proposals' and the refusal's
+// rows, the orientation subagents' row with its effort, a web switch per agent; the View proposals switch, sent only
+// when it changed; main's fence, which thimble's agents, code tickets' among them, share; one permission row, the dev
+// agent's program's, only where an extension runs one; cardWait; no installs row.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { MAIN_MODE_LINE, SettingsPopover, TICKET_FAST, cardWaitLine, changedRoles, changedWeb, fenceLine, lockedWhy, memoryWords, modeRowShown, rolesOf, roleEfforts, webRows } from '../../src/shell/SettingsPopover.tsx'
+import { MAIN_MODE_LINE, PROPOSE_LABEL, SettingsPopover, TICKET_FAST, cardWaitLine, changedPropose, changedRoles, changedWeb, fenceLine, lockedWhy, memoryWords, modeRowShown, rolesOf, roleEfforts, webRows } from '../../src/shell/SettingsPopover.tsx'
 import { invalidateSettings } from '../../src/lib/models.ts'
 import type { Settings } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -84,6 +84,13 @@ describe('the rules', () => {
     expect(changedWeb(loaded, { ...loaded, critic: true, writer: false })).toEqual({ critic: null, writer: 'off' })
   })
 
+  test('View proposals: false to turn them off, null to put the default (on) back, nothing when unchanged', () => {
+    expect(changedPropose(SETTINGS, true)).toEqual({})
+    expect(changedPropose(SETTINGS, false)).toEqual({ propose_views: false })
+    expect(changedPropose({ ...SETTINGS, propose_views: false }, false)).toEqual({})
+    expect(changedPropose({ ...SETTINGS, propose_views: false }, true)).toEqual({ propose_views: null })
+  })
+
   test("main's fence in words, and the CLAUDE.md files each agent reads", () => {
     expect(fenceLine(SETTINGS.agents!.main)).toBe('sandbox on · network on · asks before the web · asks to edit data')
     expect(memoryWords('off')).toBe('CLAUDE.md files: off')
@@ -119,6 +126,24 @@ describe('the popover', () => {
     await act(async () => [...doc.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Save')!.click())
     await settle()
     expect(puts).toEqual([['/api/ws/mini/settings', { web: { writer: 'off' } }]])
+  })
+
+  test('the View proposals switch, on by default, and a save sends it only once it changed', async () => {
+    const anchor = document.createElement('button')
+    document.body.appendChild(anchor)
+    await mount(<SettingsPopover ws="mini" anchor={anchor} open onClose={() => {}} />)
+    await settle()
+    await settle()
+    const doc = document.body
+    const row = doc.querySelector('.settings-row[data-auto="propose-views"]')!
+    expect(row.querySelector('.settings-role')?.textContent).toBe(PROPOSE_LABEL)
+    expect(row.textContent).not.toMatch(/offer/i)
+    const sw = row.querySelector<HTMLButtonElement>('[role="switch"]')!
+    expect(sw.getAttribute('aria-checked')).toBe('true')
+    await act(async () => sw.click())
+    await act(async () => [...doc.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Save')!.click())
+    await settle()
+    expect(puts).toEqual([['/api/ws/mini/settings', { propose_views: false }]])
   })
 
   test("the dev row's fast switch is thimble fix's, and a save sends it", async () => {
