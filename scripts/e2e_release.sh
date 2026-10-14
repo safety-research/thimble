@@ -140,7 +140,7 @@ if [ "$own_caches" = 1 ]; then
   caches=("UV_CACHE_DIR=$out/caches/uv" "npm_config_cache=$out/caches/npm" "PLAYWRIGHT_BROWSERS_PATH=$out/caches/ms-playwright")
 fi
 envs=(env ${unset_vars[@]+"${unset_vars[@]}"} "PATH=$bin:$PATH" "THIMBLE_HOME=$thome" "THIMBLE_BIN_DIR=$bin"
-      "THIMBLE_PORT=$port" "THIMBLE_UI_PORT=$((port + 1))" ${caches[@]+"${caches[@]}"})
+      "THIMBLE_PORT=$port" "THIMBLE_UI_PORT=$((port + 1))" "THIMBLE_PROPOSE_VIEWS=off" ${caches[@]+"${caches[@]}"})
 in_env() { "${envs[@]}" "$@"; }
 
 ours() {  # the processes this run started that may still run: the server's session (it starts as its own session

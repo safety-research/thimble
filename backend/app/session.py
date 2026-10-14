@@ -16,6 +16,8 @@ or local commands such as /model), browser events, task notifications, peer mess
 and `done` at turn_duration; any record shape it does not cover disables it with one `error` record. Safety stops,
 interrupts and long waits (read from `<claude config>/sessions/<pid>.json`) become one note each; a reply Claude's
 safeguards switched to another model becomes a notice in its chat (notices.py, FALLBACK_TEXT), main's or an agent's.
+At the end of each turn of main the view proposer hears whether the turn answered the analyst (proposer.turn_ended),
+and when a side thread answers (proposer.trigger).
 
 Each subagent transcript becomes an agent chat, except `thread:<id>` subagents, which are that thread's fork
 (threads.py), and thimble's own agents (subagents.py): an agent of one of thimble's roles goes to its role's chat (made
@@ -256,6 +258,11 @@ class Live:
         self.hidden: set[str] = set()  # tool_use ids that are not rows in main (threads' Agent and SendMessage calls)
         self.turn_open = False
         self.fresh = False  # the turn has had no assistant record yet: another opening record still counts
+        # the open turn answers the analyst: opened by a line they typed, or by their message or thread question from
+        # the browser, not by a task notification, a Monitor's re-arm or a start_agent event (proposer.turn_ended)
+        self.turn_analyst = False
+        self.last_cut: str | None = None  # the uuid of main's last turn_duration record, where a fork of it resumes
+        self.context_tokens = 0  # the tokens main's last reply read: input, cache read and cache written (_note_model)
         self.turn_threads: list[str] = []  # the threads whose events reached the turn (_release_threads)
         self.handed: list[str] = []  # the threads whose events main got in a tool's result (handed)
         self.forked: set[str] = set()  # the threads the turn forked or sent a follow-up to
@@ -435,7 +442,9 @@ def _turn_state(lv: Live) -> dict:
             "thimble_calls": lv.thimble_calls, "turn_calls": sorted(lv.turn_calls)[-CURSOR_CALLS:],
             "turn_text": lv.turn_text[-TURN_TEXT_KEPT:], "after_start": lv.after_start, "last_tool": lv.last_tool,
             "last_failed": lv.last_failed,
-            "relays": {k: [sub.agent_id, inp] for k, (sub, inp) in lv.relays.items() if sub.agent_id}}
+            "relays": {k: [sub.agent_id, inp] for k, (sub, inp) in lv.relays.items() if sub.agent_id},
+            # the proposer's (proposer.turn_ended): a turn's first line and its end are often read by different passes
+            "turn_analyst": lv.turn_analyst, "last_cut": lv.last_cut, "context_tokens": lv.context_tokens}
 
 
 def _take_turn(lv: Live, cur: dict) -> None:
@@ -455,6 +464,10 @@ def _take_turn(lv: Live, cur: dict) -> None:
     lv.after_start = bool(cur.get("after_start"))
     lv.last_tool = str(cur.get("last_tool") or "") or None
     lv.last_failed = bool(cur.get("last_failed"))
+    lv.turn_analyst = bool(cur.get("turn_analyst"))
+    lv.last_cut = str(cur.get("last_cut") or "") or None
+    tokens = cur.get("context_tokens")
+    lv.context_tokens = tokens if isinstance(tokens, int) and not isinstance(tokens, bool) and tokens > 0 else 0
     relays = cur.get("relays") if isinstance(cur.get("relays"), dict) else {}
     lv.pending_relays = {str(k): v for k, v in relays.items() if isinstance(v, list) and len(v) == 2}
     if lv.turn_open:
@@ -1178,6 +1191,7 @@ def _open_turn(lv: Live) -> None:
         lv.turn_open, lv.fresh, lv.wrote, lv.turn_threads, lv.forked = True, True, False, list(lv.handed), set()
         lv.flagged, lv.answered, lv.held_by_check, lv.stop_noted = False, True, False, False
         lv.turn_calls, lv.turn_text, lv.turn_since = set(), "", _now()
+        lv.turn_analyst = False
     agents.set_running(lv.c, agents.MAIN_ID, True)
 
 
@@ -1191,7 +1205,9 @@ def _release_threads(lv: Live) -> None:
     lv.turn_threads, lv.forked, lv.handed = [], set(), []
 
 
-def _end_turn(lv: Live) -> None:
+def _end_turn(lv: Live, cut: str | None = None) -> None:
+    """Main's turn ended: at its turn_duration record, whose uuid is `cut`, or (no cut) when a later record shows that a
+    turn never got one."""
     _release_threads(lv)
     again = _no_call(lv)
     _asked(lv, False)  # a relayed prompt the terminal answered before the tail saw the wait
@@ -1205,6 +1221,7 @@ def _end_turn(lv: Live) -> None:
     _ask_again(lv, again)
     if was_open:
         _cards_checked(lv)
+        _proposer_turn(lv, cut)
 
 
 def _cards_checked(lv: Live) -> None:
@@ -1215,6 +1232,17 @@ def _cards_checked(lv: Live) -> None:
         checks.main_turn_ended(lv.c, lv.turn_since or lv.since)
     except Exception:  # noqa: BLE001 — a check that does not run is no reason to fail the mirror
         log.exception("%s: the checks over the cards did not start at main's turn end", lv.c)
+
+
+def _proposer_turn(lv: Live, cut: str | None) -> None:
+    """The view proposer hears of the turn's end (proposer.turn_ended): after a turn that answered the analyst it looks
+    for a view proposal at `cut`."""
+    from . import proposer  # noqa: PLC0415 — proposer imports context, which imports this module
+
+    try:
+        proposer.turn_ended(lv.c, sid=lv.sid, analyst=lv.turn_analyst, cut=cut)
+    except Exception:  # noqa: BLE001 — a proposal not looked for is no reason to fail the mirror
+        log.exception("%s: the view proposer did not hear of main's turn end", lv.c)
 
 
 def _no_call(lv: Live) -> list[tuple[str, str, str]]:
@@ -1284,7 +1312,7 @@ def _interrupted(lv: Live) -> None:
 
 def _user_line(lv: Live, text: str, by: str = TERMINAL, **extra: Any) -> None:
     _open_turn(lv)
-    lv.fresh = True
+    lv.fresh = lv.turn_analyst = True
     _rec(lv, "user", text=text, by=by, **extra)
 
 
@@ -1296,6 +1324,8 @@ def _browser_event(lv: Live, raw: str, *, mid_turn: bool) -> None:
     kind, event_id, thread = attrs.get("kind", ""), attrs.get("event", ""), attrs.get("thread")
     if not mid_turn:
         _open_turn(lv)
+    if kind in ("main", "thread") or not kind:  # the analyst's message or thread question (proposer.turn_ended)
+        lv.turn_analyst = True
     if kind == "thread" and thread:
         lv.turn_threads.append(thread)
     if event_id:  # a start_agent event's start is refused when this turn ends without its Agent call (R3, _no_call)
@@ -2179,6 +2209,18 @@ def _finish_sub(lv: Live, sub: Sub, status: str, result: str | None, *, kind: st
             agents.finish_agent(lv.c, sub.chat, status, (sub.report or result or "")[:RESULT_LIMIT] or None)
     except Exception:  # noqa: BLE001 — a chat deleted under the mirror
         log.debug("%s: subagent chat %s could not be finished", lv.c, sub.chat, exc_info=True)
+    if sub.thread and kind is None and status in ("done", "completed"):
+        _proposer_after_thread(lv, sub.chat)
+
+
+def _proposer_after_thread(lv: Live, chat: str) -> None:
+    """A side thread answered the analyst: the view proposer looks for a view proposal (proposer.trigger)."""
+    from . import proposer  # noqa: PLC0415 — proposer imports context, which imports this module
+
+    try:
+        proposer.trigger(lv.c, f"thread:{chat}")
+    except Exception:  # noqa: BLE001 — a proposal not looked for is no reason to fail the mirror
+        log.exception("%s: the view proposer did not hear of thread %s's answer", lv.c, chat)
 
 
 def _agent_dir(lv: Live) -> Path | None:
@@ -2922,7 +2964,9 @@ def translate(lv: Live, line: bytes | str) -> None:
         return
     if t == "system":
         if rec.get("subtype") == "turn_duration":
-            _end_turn(lv)
+            cut = str(rec.get("uuid") or "") or None
+            lv.last_cut = cut or lv.last_cut
+            _end_turn(lv, cut=cut)
         elif rec.get("subtype") == "informational" and SAFETY_RE.search(str(rec.get("content") or "")):
             _safety_stop(lv)
         elif rec.get("subtype") == FALLBACK_SUBTYPE and rec.get("direction", "retry") == "retry":
@@ -2969,6 +3013,10 @@ def _note_model(lv: Live, rec: dict) -> None:
     usage = msg.get("usage") if isinstance(msg, dict) and isinstance(msg.get("usage"), dict) else {}
     speed = usage.get("speed")
     fast = speed == "fast" if speed in ("fast", "standard") else None
+    read = sum(n for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+               if isinstance(n := usage.get(k), int) and not isinstance(n, bool))
+    if read > 0:  # an API error line Claude Code wrote itself reads nothing
+        lv.context_tokens = read
     if not isinstance(model, str) or not model or model.startswith("<"):
         model = None
     if (model is None or model == lv.model) and (effort is None or effort == lv.effort) and (fast is None or fast == lv.fast):
@@ -3352,3 +3400,6 @@ async def shutdown() -> None:
         with contextlib.suppress(asyncio.CancelledError):
             await _sweep_task
         _sweep_task = None
+    from . import proposer  # noqa: PLC0415 — proposer imports context, which imports this module
+
+    await proposer.shutdown()
