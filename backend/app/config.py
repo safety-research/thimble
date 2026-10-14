@@ -940,7 +940,7 @@ def safe_corpus_path(corpus: Path, rel: str) -> Path:
 #              (thimble:dev-ticket) and `thimble fix`'s session (dev.py)
 #   verify     the card check's reading of a card's picture (card_check), a classifier
 #   labels     the labels classifier (concepts), the label draft and the view fit
-#   suggest    the viewer suggestion (views._suggest_call), a classifier
+#   suggest    the view proposals after a turn (proposer.py) and for a file type (views.suggest), a classifier
 #   refusal    the model and effort a classifier's call runs on again once its model refused it (model.structured);
 #              `off` turns the rerun off
 # Layered: the role's default (ROLE_MODELS_DEFAULT; an agent file's frontmatter where it names one, ROLE_AGENTS; for the
@@ -961,7 +961,7 @@ ROLE_MODELS_DEFAULT: dict[str, dict[str, Any]] = {
     "labels": {"model": "claude-opus-5-5", "effort": "low", "fast": False},
     "dev": {"model": "claude-opus-5-5", "effort": "high", "fast": True},  # fast mode for `thimble fix` alone
     "verify": {"model": "claude-opus-5-5", "effort": "high", "fast": True},
-    "suggest": {"model": "claude-opus-5-5", "effort": "low", "fast": False},
+    "suggest": {"model": "claude-opus-5-5", "effort": "medium", "fast": False},
     "refusal": {"model": FALLBACK_MODEL, "effort": FALLBACK_EFFORT, "fast": False, "off": not FALLBACK_MODEL},
 }
 ORIENT_DEFAULT_MODEL = "claude-opus-5-5"  # the orientation's model when the analyst's own settings name none

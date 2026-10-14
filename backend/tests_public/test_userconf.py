@@ -322,3 +322,41 @@ def test_whether_new_cards_are_checked_by_themselves_is_the_card_check_s_config(
     with TestClient(app, base_url="http://127.0.0.1") as client:
         assert client.put(f"/api/ws/{CORPUS}/card-checks/auto", json={"on": False}).status_code in (404, 405)
         assert client.get(f"/api/ws/{CORPUS}/card-checks").json()["auto"] is True
+
+
+def test_the_propose_views_switch_is_on_by_default_and_only_the_analyst_s_browser_changes_it(workspaces_tmp, analyst):
+    """Settings' View proposals switch is thimble's config's `views.propose`: null or missing is on, false is off. A
+    PUT of `propose_views` needs the analyst's cookie and a true, false or null value; null takes the key out. It goes
+    to the config, never to the workspace's settings.json, and a value the config does not take is an error naming the
+    key."""
+    from starlette.requests import Request  # noqa: PLC0415
+
+    assert ledger.get_settings(CORPUS)["propose_views"] is True and userconf.propose_views(CORPUS)
+    out = ledger.put_settings_route(CORPUS, analyst, {"propose_views": False})
+    assert out["propose_views"] is False and not userconf.propose_views(CORPUS)
+    assert json.loads(userconf.global_file().read_text())["views"] == {"propose": False}
+    assert "propose_views" not in ledger.stored_settings(CORPUS)
+    ledger.put_settings_route(CORPUS, analyst, {"propose_views": None})
+    assert "views" not in json.loads(userconf.global_file().read_text()) and userconf.propose_views(CORPUS)
+    with pytest.raises(Exception) as e:
+        ledger.put_settings_route(CORPUS, Request({"type": "http", "headers": []}), {"propose_views": False})
+    assert getattr(e.value, "status_code", None) == 403
+    for bad in ("yes", 1, 0, [], {}):
+        with pytest.raises(Exception) as e:
+            ledger.put_settings_route(CORPUS, analyst, {"propose_views": bad})
+        assert getattr(e.value, "status_code", None) == 400, bad
+    assert userconf.propose_views(CORPUS), "a refused PUT changes nothing"
+    _write(userconf.workspace_file(CORPUS), {"views": {"propose": False}})
+    assert not userconf.propose_views(CORPUS) and userconf.propose_views(None), "the workspace's file over the home's"
+    ledger.put_settings_route(CORPUS, analyst, {"propose_views": True})
+    assert json.loads(userconf.workspace_file(CORPUS).read_text())["views"] == {"propose": True}, \
+        "written where the value Settings shows came from"
+    _write(userconf.workspace_file(CORPUS), {})
+    for bad in ("yes", 1):
+        _write(userconf.global_file(), {"views": {"propose": bad}})
+        assert f"views.propose is {json.dumps(bad)}; it takes true, false or null" in userconf.problem(CORPUS)
+    _write(userconf.global_file(), {"views": {"propose": None, "auto": True}})
+    assert "views.auto is not a setting" in userconf.problem(CORPUS)
+    _write(userconf.global_file(), {"views": False})
+    assert "views must be an object" in userconf.problem(CORPUS)
+    assert userconf.propose_views(CORPUS), "a config with an error leaves view proposals on, as its defaults"

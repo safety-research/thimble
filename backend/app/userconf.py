@@ -135,6 +135,9 @@ DEFAULTS: dict[str, Any] = {
         "suggest": {"model": None, "effort": None, "fast": None},
         "refusal": {"model": None, "effort": None, "off": None},
     },
+    # `views.propose`: whether thimble shows the analyst view proposals, after a turn and for a file type
+    # (propose_views); null is on, and the view proposal card's Don't ask again sets it false
+    "views": {"propose": None},
 }
 # `agents.cardCheck.auto`: whether the card check reads each new card by itself (card_check.auto); null is on
 DEFAULTS["agents"]["cardCheck"]["auto"] = None
@@ -285,6 +288,13 @@ def card_wait_s() -> float:
     return (got if got is not None else CARD_WAIT_MINUTES) * 60.0
 
 
+def propose_views(c: str | None) -> bool:
+    """Whether thimble shows the analyst view proposals in workspace `c` (views.propose_enabled): on unless
+    `views.propose` is false, and on while the config has an error, as the other keys then take their defaults
+    (load_or_defaults)."""
+    return load_or_defaults(c)[0]["views"].get("propose") is not False
+
+
 def _words(values: tuple[str, ...]) -> str:
     quoted = [f'"{v}"' for v in values]
     return ", ".join(quoted[:-1]) + f" or {quoted[-1]}" if len(quoted) > 1 else quoted[0]
@@ -310,7 +320,7 @@ def _problems(data: dict[str, Any], scope: str, base: Path) -> list[str]:
                            f"{', '.join(known)}{more}")
         return True
 
-    keys("", data, (*IGNORED_TOP, "sandbox", "browser", "cardWait", "extensions", "agents"))
+    keys("", data, (*IGNORED_TOP, "sandbox", "browser", "cardWait", "extensions", "agents", "views"))
     if "browser" in data:
         if scope != "global":
             out.append("browser is set for the whole machine, in the config in thimble's home, not per workspace")
@@ -330,6 +340,9 @@ def _problems(data: dict[str, Any], scope: str, base: Path) -> list[str]:
             out.append(f"sandbox.enforce is {json.dumps(box['enforce'])}; it takes true or false")
         if box.get("use") == "never" and box.get("enforce") is True:
             out.append('sandbox.enforce is true while sandbox.use is "never", so no agent could run')
+    if "views" in data and keys("views", data["views"], tuple(DEFAULTS["views"])):
+        if "propose" in data["views"] and not isinstance(data["views"]["propose"], (bool, type(None))):
+            out.append(f"views.propose is {json.dumps(data['views']['propose'])}; it takes true, false or null")
     exts = data.get("extensions")
     if "extensions" in data:
         if scope != "global":
@@ -562,10 +575,11 @@ def set_extension_enabled(name: str, on: bool) -> None:
 
 
 def leaves(patch: dict[str, Any], at: tuple[str, ...] = ()) -> list[tuple[tuple[str, ...], Any]]:
-    """Each (path, value) of a nested patch; an object under `agents.<name>` is walked, any other value is a leaf."""
+    """Each (path, value) of a nested patch; an object under `agents.<name>`, `sandbox` or `views` is walked, any other
+    value is a leaf."""
     out: list[tuple[tuple[str, ...], Any]] = []
     for k, v in patch.items():
-        if isinstance(v, dict) and (len(at) < 2 and k in ("agents", "sandbox") or at == ("agents",)):
+        if isinstance(v, dict) and (len(at) < 2 and k in ("agents", "sandbox", "views") or at == ("agents",)):
             out.extend(leaves(v, (*at, k)))
         else:
             out.append(((*at, k), v))
