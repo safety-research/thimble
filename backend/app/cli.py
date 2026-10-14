@@ -1719,8 +1719,7 @@ def main_name(cwd: Path) -> str:
 # on with no command outside it, writes only in the agents' work folders (write_dirs) and Claude Code's own temp folder,
 # the corpus and the workspace's config not writable, thimble's token files and the links folder unreadable, the
 # network as the orientation's `network` says, and the permission rules of userconf.main_rules: an edit of the corpus or
-# of thimble's config asks, the web tools as `web` says, thimble's records not edited, the agents' work folders read and
-# edited unasked (also additionalDirectories, so acceptEdits covers them). Installs follow Claude Code's
+# of thimble's config asks, the web tools as `web` says, thimble's records not edited. Installs follow Claude Code's
 # permission mode. The fence's `env` carries cc_plugin.FENCE_MARK, which the server reads from main's command line
 # (cc_plugin.main_fenced). Every sandbox path is a folder or a file, at most with a trailing `/**`: on Linux Claude Code
 # drops any other glob without a warning (spike U19). Without the sandbox (thimble's config's `sandbox.use` "never", or
@@ -1853,9 +1852,8 @@ def main_fence(cwd: Path, c: str | None = None, root: Path | None = None, sessio
                given: str = "", mode: str = launch_mode.BROWSER) -> dict[str, Any]:
     """The --settings keys that put main, and every subagent it starts, inside thimble's fence for the corpus `cwd`,
     workspace `c` (by default the one `cwd` is registered as), the plugin copy at `root`, main's session `session`
-    (module note, main's fence): `sandbox`, `permissions` (userconf.main_rules, and as additionalDirectories the agents'
-    work folders, userconf.agent_work_dirs, and in a development install the code tickets' worktrees, ticket_trees) and
-    `env` (cc_plugin.FENCE_MARK). With the plugin's hooks off, /thimble's own command for SANDBOX_ACTIONS in that session and
+    (module note, main's fence): `sandbox`, `permissions` (userconf.main_rules, and in a development install the code
+    tickets' worktrees as additionalDirectories, ticket_trees) and `env` (cc_plugin.FENCE_MARK). With the plugin's hooks off, /thimble's own command for SANDBOX_ACTIONS in that session and
     the Monitor route's watcher command for it are let out of the sandbox, and no other (sandbox_rules, watch_rules);
     `given` is the analyst's own --settings to the launcher, which may turn the hooks off (launch_hooks_blocked). In
     terminal `mode` main's Bash may also write the card folders (card_dirs), where the card runner writes a card's
@@ -1877,13 +1875,11 @@ def main_fence(cwd: Path, c: str | None = None, root: Path | None = None, sessio
         # starts the server
         excluded += [*watch_rules(root, cwd, session), *sandbox_rules(root, cwd, session)]
     trees = [str(d) for d in ticket_trees()]
-    # the agents' work folders, which their Read and Edit reach unasked (userconf.main_rules) as working directories
-    work = [str(d) for d in userconf.agent_work_dirs(c)]
-    try:  # the workspace first, private and with its trusted files (config.workspace_dir), before the work folders in it
+    try:  # the workspace first, private and with its trusted files (config.workspace_dir), before any folder in it
         config.workspace_dir(c)
     except (OSError, ValueError):
         pass
-    for tree in [*work, *trees]:
+    for tree in trees:
         # Claude Code drops an additionalDirectories folder that does not exist as main starts, and the first ticket
         # makes this one later, so outside auto mode a ticket's agent was asked about each Read of its worktree (live
         # check L27 on 060-s4): the folder is made first
@@ -1903,7 +1899,8 @@ def main_fence(cwd: Path, c: str | None = None, root: Path | None = None, sessio
     perms: dict[str, list[str]] = {}
     for rule in userconf.main_rules(c):
         perms.setdefault(rule.behavior, []).append(rule.rule)
-    perms["additionalDirectories"] = [*work, *trees]
+    if trees:
+        perms["additionalDirectories"] = trees
     return {"sandbox": box, "permissions": perms, "env": {cc_plugin.FENCE_MARK: "1"}}
 
 

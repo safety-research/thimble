@@ -50,8 +50,8 @@ def test_the_fence_keeps_the_corpus_read_only_and_lets_main_write_only_the_agent
                                                                                              monkeypatch):
     """Claude Code's sandbox on with no command outside it and no Bash allowed unasked; writes only in the six work
     folders; the corpus and the workspace's config and settings not writable; the token files and the links folder
-    unreadable; thimble's records not editable; the agents' work folders as additionalDirectories, made first, and in an
-    installed copy no ticket's worktree; the fence's mark."""
+    unreadable; thimble's records not editable; in an installed copy no additionalDirectories and no ticket's worktree;
+    the workspace made first, private; the fence's mark."""
     monkeypatch.setattr(config, "REPO_ROOT", tmp_path / "installed")  # no git checkout
     fence = cli.main_fence(corpus)
     box, perms = fence["sandbox"], _rules(fence)
@@ -66,11 +66,9 @@ def test_the_fence_keeps_the_corpus_read_only_and_lets_main_write_only_the_agent
     assert fs["denyRead"] == [*userconf.private_paths(), str(cli.home() / "links")]
     assert "network" not in box, "the orientation's network is on by default"
     assert box["excludedCommands"] == [], "with the hooks on, no command runs outside the sandbox"
-    assert perms["additionalDirectories"] == [str(ws / d) for d in ("orient/work", "writers", "critique-work",
-                                                                     "check-work", "views-work")]
-    assert all(Path(d).is_dir() for d in perms["additionalDirectories"]), "Claude Code drops a folder that is missing"
+    assert "additionalDirectories" not in perms
     assert not ws.stat().st_mode & 0o077 and (ws / "trusted").is_dir(), \
-        "the workspace those folders are made in is made first as config.workspace_dir makes it: private, trusted files"
+        "the workspace is made first as config.workspace_dir makes it: private, with its trusted files"
     for p in ("checks/**", "chats/**", "extensions/**", "extension/extension.json", "orient/run.json", "trusted/**",
               "views/**"):
         assert f"Edit(/{ws / p})" in perms["deny"], p
@@ -143,8 +141,7 @@ def test_a_development_install_denies_edits_of_the_code_tickets_records(corpus, 
             f"Edit(/{tmp_path / '.git'}/**)"} <= set(perms["deny"])
     trees = str(dev.worktrees_dir())
     assert trees == str(cli.home() / "dev" / "trees") and cli.ticket_trees() == [dev.worktrees_dir()]
-    work = [str(d) for d in userconf.agent_work_dirs("logs")]
-    assert perms["additionalDirectories"] == [*work, trees] and fence["sandbox"]["filesystem"]["allowWrite"][-1] == trees
+    assert perms["additionalDirectories"] == [trees] and fence["sandbox"]["filesystem"]["allowWrite"][-1] == trees
     # Claude Code drops an additionalDirectories folder that does not exist as main starts (live check L27 on 060-s4)
     assert dev.worktrees_dir().is_dir(), "the fence makes the worktrees' folder before main starts"
     written = fence["sandbox"]["filesystem"]["allowWrite"]
@@ -154,55 +151,7 @@ def test_a_development_install_denies_edits_of_the_code_tickets_records(corpus, 
     (tmp_path / ".git").rmdir()
     fence = cli.main_fence(corpus)
     assert not any("tickets.jsonl" in r or ".git" in r for r in _rules(fence)["deny"]), "an installed copy has none"
-    assert _rules(fence)["additionalDirectories"] == work and trees not in fence["sandbox"]["filesystem"]["allowWrite"]
-
-
-def _decide(perms: dict[str, list[str]], tool: str, path: Path) -> str | None:
-    """What Claude Code does with `tool` on `path` under the fence's rules: the first behavior with a matching rule, deny
-    before ask before allow, as Claude Code ranks them whatever the order of the lists; None when no rule matches."""
-    for behavior in ("deny", "ask", "allow"):
-        for rule in perms.get(behavior) or []:
-            name, _, pattern = rule.partition("(")
-            if name != tool or not pattern.startswith("//"):
-                continue
-            target = pattern[1:-1]
-            folder = target.removesuffix("/**")
-            if str(path) == target or (target.endswith("/**") and (str(path) == folder or str(path).startswith(folder + "/"))):
-                return behavior
-    return None
-
-
-def test_the_agents_read_and_edit_only_their_own_work_folders_unasked_and_every_deny_and_ask_still_wins(corpus):
-    """Outside auto mode an agent's Read or Edit in its work folder asked, in acceptEdits too, since the folders were
-    neither working directories nor allowed. The fence allows Read and Edit of exactly the five agents' work folders, as
-    a server job's fence allows its own folder, and nothing around them: not the workspace, its views or card-libs,
-    which hold code that views and cards load. Every deny and ask rule still decides what it decided."""
-    ws = config.WORKSPACES_DIR.resolve() / "logs"
-    perms = _rules(cli.main_fence(corpus))
-    folders = [ws / d for d in ("orient/work", "writers", "critique-work", "check-work", "views-work")]
-    assert userconf.agent_work_dirs("logs") == folders
-    granted = sorted(r for r in perms["allow"] if r.split("(")[0] in ("Read", "Edit"))
-    assert granted == sorted([f"Read(/{ws / 'critique'}/**)", *(f"{t}(/{d}/**)" for d in folders for t in ("Read", "Edit"))])
-    assert {r.cause for r in userconf.main_rules("logs") if r.rule in granted} == {"state", "work"}
-    for d in folders:
-        assert _decide(perms, "Edit", d / "a" / "notes.md") == _decide(perms, "Read", d / "notes.md") == "allow", d
-    for d in ("card-libs/node_modules/x.js", "extension/views/board/view.js", "notes.md", "orient/notes.md"):
-        assert _decide(perms, "Edit", ws / d) is None, d
-    for d in ("trusted/launch.json", "orient/run.json", "views/board/view.json", "checks/c1.json", "chats/main.json",
-              "extension/extension.json"):
-        assert _decide(perms, "Edit", ws / d) == "deny", d
-    assert _decide(perms, "Edit", corpus.resolve() / "a.jsonl") == "ask", "data is ask by default"
-    assert _decide(perms, "Edit", ws / "config.json") == _decide(perms, "Edit", ws / "settings.json") == "ask"
-    assert _decide(perms, "Edit", userconf.main_modes_file()) == "deny"
-    for p in userconf.private_paths():
-        assert _decide(perms, "Read", Path(p)) == _decide(perms, "Edit", Path(p)) == "deny", p
-    # a work folder inside the corpus (a workspaces folder kept in the folder thimble opened) still asks for its edits
-    inside = {**perms, "ask": [*perms["ask"], f"Edit(/{ws}/**)"]}
-    assert _decide(inside, "Edit", folders[0] / "x") == "ask"
-    _conf({"agents": {"orientation": {"data": "off"}}})
-    off = _rules(cli.main_fence(corpus))
-    assert _decide(off, "Edit", corpus.resolve() / "a.jsonl") == "deny"
-    assert _decide({**off, "deny": [*off["deny"], f"Edit(/{folders[1]}/**)"]}, "Edit", folders[1] / "x") == "deny"
+    assert "additionalDirectories" not in _rules(fence) and trees not in fence["sandbox"]["filesystem"]["allowWrite"]
 
 
 def test_no_fence_without_the_sandbox_and_the_launch_says_so(corpus, monkeypatch):
