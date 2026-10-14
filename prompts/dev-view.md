@@ -80,8 +80,8 @@ Code checks every view and says what to fix when a check fails. The analyst sees
 ## Worked examples
 
 Three example views in {{examples}} show this contract on invented data with the mess of a real corpus, and each `reader.py` describes its files at the top: `timeline`, events on a time axis in lanes and a table; `repository`, a code forge's pull requests and issues drawn as the forge draws them; and `linked-sessions`, related transcripts as a tree of sessions. Read the closest one, then lay out your view for your own data.{{if:terminal}} Its `view.term.js` draws the same view in the terminal: start your program from it.{{end}}
-
 {{if:browser}}
+
 The form follows from the records' structure and the analyst's task. These examples show that step, not forms to copy:
 
     Records    emails: 12,000 emails among 300 staff of a company, each with its sender, its recipients and the email it answers
