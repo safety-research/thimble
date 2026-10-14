@@ -194,11 +194,17 @@ async def test_main_s_terminal_says_once_per_session_that_main_runs_in_manual_mo
     assert await report("default", sid="sid-other") is None, "another session's report says nothing"
     assert await report("auto") is None and "manual" not in attached(), "the chip goes with auto mode"
     assert await report("default") is None and attached()["manual"] == "switch"
+    session._before_plan.clear()
     session.note_plan(CORPUS, "sid-main", True)
     assert "manual" not in attached(), "plan mode is not Manual mode"
+    session.note_plan(CORPUS, "sid-main", False)
+    assert attached()["permission_mode"] == "default" and "manual" not in attached(), \
+        "the mode before plan mode is only a guess of the mode main left it for (shift+tab may pick auto): no chip"
+    session.note_plan(CORPUS, "sid-main", True)
     session._before_plan.clear()
     session.note_plan(CORPUS, "sid-main", False)
     assert attached()["permission_mode"] == "default" and "manual" not in attached(), "a guess shows no chip"
+    assert await report("default") is None and attached()["manual"] == "switch", "main's next report brings it back"
     events._hold(CORPUS, "r1", "Bash", "x", "{}", tool_input={"command": "ls"})
     [p] = agents.read_meta(CORPUS, agents.MAIN_ID)["permissions"]
     assert "manual" not in p
@@ -223,16 +229,26 @@ async def test_main_s_terminal_says_once_per_session_that_main_runs_in_manual_mo
 
 def test_a_server_restarted_under_main_keeps_the_chip_and_says_nothing_again(fake):
     """The chip's hint and the session's told mark live on main's meta, so a server restarted under the same session
-    neither loses the chip nor shows the line again."""
+    neither loses the chip nor shows the line again; a mode note_plan only guessed, which is kept for the restart too,
+    shows no chip there either."""
     cwd = str(config.corpus_dir(CORPUS))
+
+    def restart() -> dict:
+        session._live.clear()
+        session._modes.clear()
+        session.attach(CORPUS, "sid-main", cwd)
+        return agents.read_meta(CORPUS, agents.MAIN_ID)["attached"]
+
+    session._before_plan.clear()
     session.attach(CORPUS, "sid-main", cwd)
     assert session.note_mode(CORPUS, "sid-main", "default", tell=True) == modes.MANUAL_LINES["switch"]
-    session._live.clear()
-    session._modes.clear()
-    session.attach(CORPUS, "sid-main", cwd)
-    held = agents.read_meta(CORPUS, agents.MAIN_ID)["attached"]
+    held = restart()
     assert held["manual"] == "switch" and held["permission_mode"] == "default"
     assert session.note_mode(CORPUS, "sid-main", "default", tell=True) == ""
+    session.note_plan(CORPUS, "sid-main", True)
+    session.note_plan(CORPUS, "sid-main", False)
+    held = restart()
+    assert held["permission_mode"] == "default" and "manual" not in held, "the kept mode is a guess"
 
 
 # ----------------------------------------------------------------------------- Auto

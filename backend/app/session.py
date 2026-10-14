@@ -593,7 +593,8 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
         kept = _kept_mode(c, sid)
         if kept:
             _modes[c] = (sid, kept)
-        now = (_with_mode(held, kept) if kept else
+        # the chip stays as main's meta has it, since the kept mode may be one note_plan only guessed
+        now = ({**held, "permission_mode": kept} if kept else
                {k: v for k, v in held.items() if k not in ("permission_mode", MANUAL_KEY)})
         if now != held:
             meta["attached"] = now
@@ -690,17 +691,17 @@ _before_plan: dict[str, str] = {}  # workspace -> main's mode before thimble's m
 def note_plan(c: str, sid: str | None, plan: bool) -> None:
     """thimble's module saw main's session go into plan mode, or out of it, while main was idle (it asks Claude Code's
     permission decision every few seconds, module_bridge.mode_route): the mode becomes plan, or goes back to the one
-    before (default when none was known, a guess that shows no Manual-mode chip), until main's hooks report the mode at
-    its next turn (live check L21: a shift+tab while main was idle reached thimble only at main's next turn, so held
-    checks waited and the Start line was stale)."""
+    before (default when none was known), until main's hooks report the mode at its next turn (live check L21: a
+    shift+tab while main was idle reached thimble only at main's next turn, so held checks waited and the Start line
+    was stale). The mode it goes back to is a guess, since a shift+tab out of plan mode, or the plan's approval, may
+    pick another, so it shows no Manual-mode chip."""
     cur = main_mode(c)
     if plan and cur != "plan":
         if cur:
             _before_plan[c] = cur
         note_mode(c, sid, "plan")
     elif not plan and cur == "plan":
-        before = _before_plan.pop(c, "")
-        note_mode(c, sid, before or "default", guessed=not before)
+        note_mode(c, sid, _before_plan.pop(c, "") or "default", guessed=True)
 
 
 def main_mode(c: str) -> str | None:

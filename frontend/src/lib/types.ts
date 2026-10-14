@@ -2004,9 +2004,10 @@ export interface LabelRowText extends LabelRow {
 
 // ---- the chat: the mirror of the analyst's session ----
 
-/** The Claude Code session mirrored as main while `/thimble` has it attached. */
 /** What the Manual-mode chip says (Attached.manual). */
 export type ManualHint = 'switch' | 'org' | 'settings'
+
+/** The Claude Code session mirrored as main while `/thimble` has it attached. */
 export interface Attached {
   session: string
   cwd: string
