@@ -1389,7 +1389,7 @@ button.model-line-part[aria-expanded='true'] {
 }
 
 /* -------- a view proposal (ProposalCard): one card above the composer in the accent, on the view chip's tint mixed
-   into the card's own surface (the foot floats over the rows) with the accent's stronger edge: the head with its
+   into the card's own surface (the foot floats over the rows) with the accent's edge: the head with its
    sparkle, the view's name in bold and what it shows, the task, then Accept, Reject and a quiet Don't ask again; an
    Accept that could not start the build says why under them -------- */
 .chat-offer {
@@ -1400,11 +1400,13 @@ button.model-line-part[aria-expanded='true'] {
   box-sizing: border-box;
   min-width: 0;
   max-width: 100%;
+  max-height: 45vh;
   margin-bottom: 12px;
   padding: 10px 12px;
-  border: 1px solid var(--chip-edge-hover);
+  overflow-y: auto;
+  border: 1.5px solid var(--accent);
   border-radius: var(--radius-card);
-  background: color-mix(in oklab, var(--accent) 8%, var(--surface-card));
+  background: color-mix(in oklab, var(--accent) 9%, var(--surface-card));
   box-shadow: var(--shadow-composer);
   color: var(--text-primary);
   font: var(--type-body-sm);
@@ -1423,12 +1425,7 @@ button.model-line-part[aria-expanded='true'] {
 }
 .chat-offer-text,
 .chat-offer-task {
-  display: -webkit-box;
   margin: 0;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  line-clamp: 3;
   overflow-wrap: anywhere;
 }
 .chat-offer-name {
@@ -1439,9 +1436,7 @@ button.model-line-part[aria-expanded='true'] {
   color: var(--text-secondary);
 }
 .chat-offer-task {
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
 }
 .chat-offer-acts {
   display: flex;

@@ -503,7 +503,7 @@ export function tourSteps(key: string, chat = true): Step[] {
       tab: 'files', example: viewsExample, leave: releaseBrowser, anchor: filesPanel, place: 'left', align: 'start', pad: 0, radius: 12,
       interact: (api) => api.els.frame ?? null,
       title: 'Views',
-      body: 'thimble also proposes views, custom-generated just for your corpus, like this Timeline of every event. A proposal waits above the reply box until you accept or reject it.',
+      body: 'thimble also proposes views, custom-generated just for your corpus, like this Timeline of every event. A view proposal waits above the reply box until you accept or reject it.',
     },
     {
       tab: 'canvas', example: cardExample, clip: canvasPanel, place: 'right', align: 'center', pad: 6,

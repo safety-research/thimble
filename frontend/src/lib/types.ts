@@ -524,7 +524,7 @@ export interface Proposal {
 /** When and why thimble proposed the view (Proposal.offered). */
 export interface ProposalOffer {
   at: string
-  turn: number
+  turn?: number
   after: string
   why?: string
 }
