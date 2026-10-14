@@ -56,9 +56,11 @@ main replies in one line (prompts/main.md).
 
 The mode hook tells the server (POST /api/events/mode) the permission mode Claude Code reports for the session as each
 of its turns begins and ends, which is the mode the agents thimble starts follow by default. It sends nothing in a
-subagent. As a turn ends it also shows, once, as its systemMessage, the dashboard link /thimble left for the session
-(app/cli.py leave_link): the link carries the key that lets the browser answer permission requests and change
-permission modes, and a systemMessage reaches the analyst's terminal but not the model's context.
+subagent. The first time main reports Manual mode in a session, the server answers with a line that says so and how to
+switch to auto mode (app/modes.py manual_line), which the hook shows as its systemMessage. As a turn ends it also shows,
+once, the dashboard link /thimble left for the session (app/cli.py leave_link): the link carries the key that lets the
+browser answer permission requests and change permission modes, and a systemMessage reaches the analyst's terminal but
+not the model's context. Both go in one systemMessage, the link first.
 
 The agents hook tells one of thimble's agents, or a descendant of one, the ref of each call it made (POST
 /api/ws/<c>/calls/ref, for the orientation and its descendants, whose calls its thread numbers) and, after a Bash call,
@@ -85,10 +87,11 @@ thread's fork too. --agent-check also refuses a second fork of a thread from sub
 fork_check), and records each fork it lets through by its tool_use id, by which the mirror knows the fork's thread.
 The waker polls the workspace's events/queue.jsonl (app/event_files.py) for an event main's watcher has not taken,
 takes it, writes it to stderr and exits 2. --held prints the held events from held-events.json and the lines of
-the events the waker wrote out. --mode records main's permission mode in subagents.json, and on main's Stop starts the
-backend's `main-stop` call. Plan mode stops none of thimble's running agents, as in browser mode (Claude Code's own
-subagents go on in plan mode). --permission exits at once with no decision, so Claude Code asks in its own dialog.
---agents numbers an orientation's calls in its sequence (app/calls_file.py) and gives the ref as the server would.
+the events the waker wrote out. --mode records main's permission mode in subagents.json, shows the Manual-mode line
+once per session as the server would (app/subagent_files.py manual_once, app/modes.py manual_line), and on main's Stop
+starts the backend's `main-stop` call. Plan mode stops none of thimble's running agents, as in browser mode (Claude
+Code's own subagents go on in plan mode). --permission exits at once with no decision, so Claude Code asks in its own
+dialog. --agents numbers an orientation's calls in its sequence (app/calls_file.py) and gives the ref as the server would.
 
 The stream writes each event as one block of lines. Claude Code truncates Monitor output at 500 characters per line and
 about 3,000 per event, so lines are wrapped under LINE_CHARS and a longer event is cut and saved whole under
@@ -391,33 +394,42 @@ def mode(inp: dict) -> int:
     ws = term_ws()
     if ws is not None:
         return mode_files(inp, ws)
-    if inp.get("hook_event_name") == "Stop" and not inp.get("agent_id"):
-        show_link(str(inp.get("session_id") or ""))
-    if inp.get("agent_id") or not inp.get("permission_mode"):
+    if inp.get("agent_id"):
         return 0
-    body = {"cwd": folder(inp), "session": str(inp.get("session_id") or "") or None,
-            "permission_mode": str(inp["permission_mode"])}
-    try:
-        request("POST", "/api/events/mode", body, timeout=AGENTS_WAIT_S)
-    except (OSError, http.client.HTTPException):
-        pass
+    said = [link_lines(str(inp.get("session_id") or ""))] if inp.get("hook_event_name") == "Stop" else []
+    if inp.get("permission_mode"):
+        body = {"cwd": folder(inp), "session": str(inp.get("session_id") or "") or None,
+                "permission_mode": str(inp["permission_mode"])}
+        try:
+            status, answer = request("POST", "/api/events/mode", body, timeout=AGENTS_WAIT_S)
+        except (OSError, http.client.HTTPException):
+            status, answer = 0, {}
+        if status == 200:
+            said.append(str(answer.get("terminal") or ""))
+    show(said)
     return 0
 
 
-def show_link(session: str) -> None:
-    """The link /thimble left for `session`, and the lines left after it, printed as the hook's systemMessage and then
-    deleted (module note)."""
+def show(lines: list) -> None:
+    """`lines`, those not empty, printed as the hook's systemMessage, one per line."""
+    text = "\n".join(x for x in lines if x)
+    if text:
+        print(json.dumps({"systemMessage": text}))
+
+
+def link_lines(session: str) -> str:
+    """The link /thimble left for `session`, and the lines left after it, which the file then no longer holds (module
+    note); '' when it left none."""
     name = "".join(ch for ch in session if ch.isalnum() or ch in "-_")
     if not name:
-        return
+        return ""
     path = home() / "links" / name
     try:
         url, _, notes = path.read_text("utf-8").strip().partition("\n")
         path.unlink()
     except OSError:
-        return
-    if url:
-        print(json.dumps({"systemMessage": f"thimble: {url}" + (f"\n{notes}" if notes else "")}))
+        return ""
+    return f"thimble: {url}" + (f"\n{notes}" if notes else "") if url else ""
 
 
 # --------------------------------------------------------------------------- terminal mode
@@ -523,15 +535,22 @@ def held_files(inp: dict, ws: Path) -> int:
 
 def mode_files(inp: dict, ws: Path) -> int:
     """The mode hook in terminal mode: main's permission mode recorded in subagents.json (app/subagent_files.py
-    record_mode), and on main's Stop the backend's `main-stop` call."""
+    record_mode), the first time in the session that it is Manual mode the line that says so as the hook's
+    systemMessage (manual_once, app/modes.py manual_line), and on main's Stop the backend's `main-stop` call."""
     session = str(inp.get("session_id") or "")
     if inp.get("agent_id") or not session or not is_main(ws, session):
         return 0
     sf = files()
     mode = str(inp.get("permission_mode") or "")
+    line = ""
     if mode:
         with sf.update(ws) as state:
             sf.record_mode(state, session, mode)
+            if sf.manual_once(state, session, mode):
+                from app import modes  # noqa: PLC0415 — standard library only, as subagent_files; once per session
+
+                line = modes.manual_line(mode)
+    show([line])
     if inp.get("hook_event_name") == "Stop":
         spawn_local("main-stop", inp)
     return 0

@@ -698,9 +698,6 @@ export interface PermissionRequest {
   /** the rule of main's fence that sends the call to the analyst (userconf.main_rules): an edit of thimble's config, an
    * edit of the corpus, or a web call; `installs` and `commands` only on a code ticket's */
   asked_by?: 'config' | 'data' | 'web' | 'installs' | 'commands'
-  /** on main's meta, while main runs in Manual (backend modes.manual_hint): `switch` when auto mode would ask less,
-   * `org` or `settings` when the organization's or the analyst's Claude Code settings turn auto mode off */
-  manual?: 'switch' | 'org' | 'settings'
 }
 
 /** A session held where the browser cannot answer: the model-switch dialog after a safety stop (session.py). */
@@ -2008,6 +2005,8 @@ export interface LabelRowText extends LabelRow {
 // ---- the chat: the mirror of the analyst's session ----
 
 /** The Claude Code session mirrored as main while `/thimble` has it attached. */
+/** What the Manual-mode chip says (Attached.manual). */
+export type ManualHint = 'switch' | 'org' | 'settings'
 export interface Attached {
   session: string
   cwd: string
@@ -2025,6 +2024,12 @@ export interface Attached {
   /** the permission mode Claude Code last reported to the session's hooks (default, acceptEdits, auto, plan,
    * bypassPermissions, dontAsk), which each agent's permission mode follows until the analyst sets it (backend modes.py) */
   permission_mode?: string
+  /** while that mode is Claude Code's Manual mode (backend modes.manual_hint), what the top bar's Manual-mode chip says:
+   * `switch` how to switch to auto mode, `org` or `settings` that the organization's or the analyst's Claude Code
+   * settings turn auto mode off */
+  manual?: ManualHint
+  /** main's terminal said once that the session runs in Manual mode (backend session.note_mode) */
+  manual_told?: boolean
   /** what the composer's fast-mode switch chose for main's next launch, while this session runs */
   fast_choice?: boolean
   /** the session that was main until this one took its place while it runs on in another terminal */

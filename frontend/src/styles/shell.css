@@ -89,6 +89,57 @@
   align-items: center;
   gap: 2px;
 }
+/* the Manual-mode chip (ManualChip): the warning chip, whose words open the sheet and whose × hides it */
+.manual-chip {
+  gap: 0;
+  margin-right: 6px;
+  padding: 0;
+  overflow: hidden;
+}
+.manual-chip-open,
+.manual-chip-hide {
+  display: inline-flex;
+  align-items: center;
+  align-self: stretch;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.manual-chip-open {
+  gap: 5px;
+  min-width: 0;
+  padding: 0 4px 0 8px;
+}
+.manual-chip-hide {
+  justify-content: center;
+  width: 20px;
+  padding: 0;
+  opacity: 0.75;
+}
+.manual-chip-open:hover,
+.manual-chip-hide:hover {
+  background: var(--status-warning-soft);
+  opacity: 1;
+}
+.manual-chip-open:focus-visible,
+.manual-chip-hide:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+.manual-sheet {
+  padding: 10px 12px;
+}
+.manual-sheet-text {
+  margin: 0;
+  font: var(--type-ui-sm);
+}
+.manual-sheet-text code {
+  font: var(--type-mono-sm);
+  overflow-wrap: anywhere;
+}
 /* the links toggle: the accent while citations show */
 .shell-links.on,
 .shell-links.on:hover {

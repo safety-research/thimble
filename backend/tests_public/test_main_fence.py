@@ -554,51 +554,16 @@ def test_the_launch_says_plainly_when_hooks_modules_are_off_and_still_launches(c
     assert cli.SAFE_MODE_LINE in note()
 
 
-def test_the_launch_says_how_to_switch_to_auto_mode_when_main_will_ask_in_manual(corpus, tmp_path, monkeypatch):
-    """thimble's agents run in main's mode, and in Manual every command of theirs asks, in the terminal alone. So when
-    main will start in Manual as far as the launch can tell (the analyst's own --permission-mode, else the defaultMode
-    of their settings.json, their --settings or the org's managed tier, else auto when main last reported it here), a
-    note names shift+tab and `thimble --permission-mode auto`; when the org's managed settings, or the analyst's own,
-    turn auto mode off, the note says who did instead."""
-    import sys  # noqa: PLC0415
-
-    def notes(**kw) -> list[str]:
-        return [n for n in cli.launch_args(corpus, **kw).split("\n")[9].split("\t") if n in cli.MANUAL_LINES.values()]
-
-    switch, org, own = (cli.MANUAL_LINES[k] for k in ("switch", "org", "settings"))
-    assert "shift+tab" in switch and "thimble --permission-mode auto" in switch
-    assert notes() == [switch], "nothing names a mode: Manual, as modes.session_mode counts it"
-    assert notes(own_mode="default") == notes(own_mode="acceptEdits") == notes(own_mode="plan") == [switch]
-    for mode in ("auto", "bypassPermissions", "dontAsk"):
-        assert notes(own_mode=mode) == [], mode
+def test_the_launch_says_nothing_about_the_permission_mode(corpus, tmp_path):
+    """Before Claude Code starts, the launch cannot know main's mode (Claude Code starts in auto mode by its own default
+    since 2.1.283), so it prints no note about it: main's terminal says so once main reports Manual mode
+    (modes.manual_line, test_permission_modes)."""
     user = tmp_path / "cc" / "settings.json"
     user.parent.mkdir(exist_ok=True)
-    user.write_text(json.dumps({"permissions": {"defaultMode": "auto"}}))
-    assert notes() == []
-    assert notes(settings=json.dumps({"permissions": {"defaultMode": "default"}})) == [switch], "their --settings win"
-    assert notes(own_mode="default") == [switch], "their flag wins"
-    (corpus / ".claude").mkdir()
-    (corpus / ".claude" / "settings.json").write_text(json.dumps({"permissions": {"defaultMode": "default"}}))
-    assert notes() == [], "the corpus folder's settings choose nothing"
-    user.write_text(json.dumps({"permissions": {"defaultMode": "auto", "disableAutoMode": "disable"}}))
-    assert notes() == notes(own_mode="auto") == [own], "auto mode turned off: Claude Code starts main in Manual"
-    assert notes(own_mode="bypassPermissions") == [], "bypass is still on"
-    user.write_text("{}")
-    managed = tmp_path / "managed"
-    managed.mkdir()
-    monkeypatch.setattr(cc_plugin, "MANAGED_DIRS", {sys.platform: managed})
-    (managed / "managed-settings.json").write_text(json.dumps({"disableAutoMode": "disable"}))
-    assert notes() == notes(own_mode="auto") == [org]
-    (managed / "managed-settings.json").write_text(json.dumps({"permissions": {"defaultMode": "auto"}}))
-    assert notes(settings=json.dumps({"permissions": {"defaultMode": "default"}})) == [], "the org's tier wins"
-    (managed / "managed-settings.json").unlink()
-    kept = userconf.main_modes_file()
-    kept.parent.mkdir(parents=True, exist_ok=True)
-    kept.write_text(json.dumps({"logs": {"session": "s1", "mode": "auto"}}))
-    assert notes() == [], "main ran in auto mode here last, as Claude Code may start it by its own default"
-    assert notes(own_mode="default") == [switch]
-    kept.write_text(json.dumps({"logs": {"session": "s1", "mode": "default"}, "other": {"mode": "auto"}}))
-    assert notes() == [switch]
+    for own in ({}, {"permissions": {"defaultMode": "default"}}, {"permissions": {"disableAutoMode": "disable"}}):
+        user.write_text(json.dumps(own))
+        notes = cli.launch_args(corpus).split("\n")[9]
+        assert "Manual" not in notes and "shift+tab" not in notes and "auto mode" not in notes, own
 
 
 def test_slash_thimble_warns_in_a_session_the_launcher_did_not_start(corpus, monkeypatch, capsys):

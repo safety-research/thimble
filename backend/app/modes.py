@@ -13,12 +13,18 @@ Main's own mode is Claude Code's alone.
 
 Manual and Bypass both run Claude Code's manual mode (FLAGS): in Bypass thimble grants every request itself
 (agent_session.ask), so a card switches between them without restarting the session. Auto runs Claude Code's auto mode.
+
+While main reports Claude Code's Manual mode (subagent_files.MANUAL_MODES), Claude Code asks before most commands of
+main's and of thimble's agents. The first time main reports it in a session, main's terminal says so once, with how to
+switch to auto mode, or who turned auto mode off (manual_line: session.note_mode in browser mode, the watcher's mode
+hook in terminal mode), and the browser shows a chip while it lasts (`attached.manual`, manual_hint).
 """
 from __future__ import annotations
 
 from typing import Any
 
 from . import cc_settings
+from .subagent_files import MANUAL_MODES
 
 MODES = ("manual", "auto", "bypass")
 AGENTS = ("dev",)
@@ -64,16 +70,29 @@ def auto_off() -> str:
 
 
 def manual_hint(claude_mode: str | None) -> str:
-    """What to tell the analyst about main's prompts when main runs in Claude Code's mode `claude_mode` (None when not
-    known, which counts as Manual, as session_mode counts it): auto_off's "org" or "settings" when auto mode is turned
-    off, "switch" when main asks in Manual and auto mode would ask less, '' in auto or bypass mode (unless turned off,
-    where Claude Code starts main in Manual) and in dontAsk, which asks nothing."""
-    if claude_mode == "dontAsk":
-        return ""
-    ours = OF_CLAUDE.get(claude_mode or "", "manual")
-    if ours != "manual" and ours not in disabled():
+    """What to tell the analyst about prompts when main reports Claude Code's mode `claude_mode`: '' unless it is Manual
+    mode (MANUAL_MODES); then auto_off's "org" or "settings" when auto mode is turned off, else "switch"."""
+    if claude_mode not in MANUAL_MODES:
         return ""
     return auto_off() or "switch"
+
+
+# what main's terminal shows once per session when main reports Manual mode, by manual_hint
+MANUAL_LINE = ("thimble: Claude Code is in Manual mode, so it asks you before most commands that main or thimble's "
+               "agents run.")
+MANUAL_LINES = {
+    "switch": f"{MANUAL_LINE} For fewer prompts, press shift+tab to switch to auto mode, or start with "
+              "`thimble --permission-mode auto`.",
+    "org": f"{MANUAL_LINE} Your organization turned auto mode off.",
+    "settings": f"{MANUAL_LINE} Your Claude Code settings turn auto mode off (disableAutoMode).",
+}
+
+
+def manual_line(claude_mode: str | None) -> str:
+    """The line main's terminal shows about Manual mode when main reports `claude_mode` (MANUAL_LINES), '' when it is
+    not Manual mode."""
+    hint = manual_hint(claude_mode)
+    return MANUAL_LINES[hint] if hint else ""
 
 
 def refused(mode: Any) -> str | None:

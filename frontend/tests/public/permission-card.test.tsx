@@ -8,7 +8,7 @@ import { act, useState } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ThreadsContext } from '../../src/chat/Notes.tsx'
 import { ARM_MS, EXPIRED_TITLE, PermissionCard } from '../../src/chat/PermissionCard.tsx'
-import { askWhy, autoModeRefusal, MANUAL_LINES, pendingRequests, pluginSteered, subagentName, type PendingAsk } from '../../src/chat/permissions.ts'
+import { askWhy, autoModeRefusal, pendingRequests, pluginSteered, subagentName, type PendingAsk } from '../../src/chat/permissions.ts'
 import { bus } from '../../src/lib/bus.ts'
 import { newest, STALE } from '../../src/lib/newest.ts'
 import type { ChatMeta, PermissionRequest } from '../../src/lib/types.ts'
@@ -177,17 +177,6 @@ describe("main's requests and those of thimble's agents, its subagents", () => {
     expect(askWhy({ chat: 'main', request: req('t2', { terminal: true, chat: 'o9', asked_by: 'data' }) }, metas)).toBe(
       'thimble asks before an agent changes your files, in every permission mode. The orientation asks in your terminal. Answer it there (↓ to the orientation in the agent tray if it is not shown). Claude Code shows it as from the thimble plugin.',
     )
-  })
-
-  test('while main runs in Manual, its card and its agents\' cards say how to switch to auto mode, or who turned it off', () => {
-    const own = askWhy({ chat: 'main', request: req('m3', { manual: 'switch' }) }, metas)
-    expect(own).toBe(`Answer here or in your terminal. ${MANUAL_LINES.switch}`)
-    expect(MANUAL_LINES.switch).toMatch(/shift\+tab/)
-    expect(MANUAL_LINES.switch).toMatch(/thimble --permission-mode auto/)
-    const agent = askWhy({ chat: 'main', request: req('t6', { terminal: true, chat: 'o8', manual: 'org' }) }, metas)
-    expect(agent.endsWith(` ${MANUAL_LINES.org}`)).toBe(true)
-    expect(agent.startsWith('The orientation asks in your terminal.')).toBe(true)
-    expect(askWhy({ chat: 'main', request: req('m4', { manual: 'settings' }) }, metas)).toBe(`Answer here or in your terminal. ${MANUAL_LINES.settings}`)
   })
 
   test('a view\'s builder and reviewer are named as such, not by their chat\'s title (live check L31)', () => {

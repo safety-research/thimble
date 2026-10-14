@@ -593,11 +593,10 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
         kept = _kept_mode(c, sid)
         if kept:
             _modes[c] = (sid, kept)
-        if held.get("permission_mode") != kept:
-            if kept:
-                held["permission_mode"] = kept
-            else:
-                held.pop("permission_mode", None)
+        now = (_with_mode(held, kept) if kept else
+               {k: v for k, v in held.items() if k not in ("permission_mode", MANUAL_KEY)})
+        if now != held:
+            meta["attached"] = now
             agents.write_meta(c, meta)
     _persist(lv, keep_subs=restored or bool(lv.subs))
     _cancel_grace(c)
@@ -640,22 +639,49 @@ def _keep_mode(c: str, sid: str, mode: str) -> None:
         log.warning("%s: main's permission mode was not kept in %s: %s", c, userconf.main_modes_file(), e)
 
 
-def note_mode(c: str, sid: str | None, mode: str) -> None:
+MANUAL_KEY = "manual"  # in main's meta's `attached`: what the browser's chip says while main runs in Manual mode
+TOLD_KEY = "manual_told"  # in main's meta's `attached`: main's terminal said once that the session runs in Manual mode
+
+
+def _with_mode(held: dict[str, Any], mode: str, guessed: bool = False) -> dict[str, Any]:
+    """Main's meta's `attached` with `mode` as main's permission mode and MANUAL_KEY as modes.manual_hint gives it for
+    that mode (none outside Manual mode); a `guessed` mode leaves MANUAL_KEY as it was."""
+    out = {**held, "permission_mode": mode}
+    if guessed:
+        return out
+    out.pop(MANUAL_KEY, None)
+    hint = modes.manual_hint(mode)
+    return {**out, MANUAL_KEY: hint} if hint else out
+
+
+def note_mode(c: str, sid: str | None, mode: str, *, tell: bool = False, guessed: bool = False) -> str:
     """Main's hooks report the permission mode Claude Code runs the session `sid` in: when `sid` is main, this server
     keeps it (main_mode), in thimble's home too (userconf.main_modes_file) so that a restarted server under the same
     session follows it until main reports again, the mode each agent's row follows until the analyst sets it
-    (modes.py), and main's meta shows it (`attached.permission_mode`)."""
+    (modes.py), and main's meta shows it (`attached.permission_mode`), with what the browser's chip says while it is
+    Manual mode (`attached.manual`, modes.manual_hint), unless the mode is only `guessed` (note_plan).
+
+    With `tell` (a report of main's hooks, events.mode_route), the first report of Manual mode in the session returns
+    the line main's terminal then shows (modes.manual_line), and `attached.manual_told` records that it showed, so it
+    shows once per session; '' otherwise."""
     lv = _live.get(c)
     if lv is None or not sid or lv.sid != sid or mode not in modes.CLAUDE_MODES:
-        return
+        return ""
     _modes[c] = (sid, mode)
     _keep_mode(c, sid, mode)
     meta = agents.meta_or_none(c, agents.MAIN_ID) or {}
     held = meta.get("attached") or {}
-    if held.get("session") == sid and held.get("permission_mode") != mode:
-        meta["attached"] = {**held, "permission_mode": mode}
+    if held.get("session") != sid:
+        return ""
+    now = _with_mode(held, mode, guessed)
+    line = modes.manual_line(mode) if tell and not guessed and not held.get(TOLD_KEY) else ""
+    if line:
+        now[TOLD_KEY] = True
+    if now != held:
+        meta["attached"] = now
         agents.write_meta(c, meta)
         agents.notify(c, agents.MAIN_ID)
+    return line
 
 
 _before_plan: dict[str, str] = {}  # workspace -> main's mode before thimble's module saw it go into plan mode
@@ -664,16 +690,17 @@ _before_plan: dict[str, str] = {}  # workspace -> main's mode before thimble's m
 def note_plan(c: str, sid: str | None, plan: bool) -> None:
     """thimble's module saw main's session go into plan mode, or out of it, while main was idle (it asks Claude Code's
     permission decision every few seconds, module_bridge.mode_route): the mode becomes plan, or goes back to the one
-    before (default when none was known), until main's hooks report the mode at its next turn (live check L21: a
-    shift+tab while main was idle reached thimble only at main's next turn, so held checks waited and the Start line
-    was stale)."""
+    before (default when none was known, a guess that shows no Manual-mode chip), until main's hooks report the mode at
+    its next turn (live check L21: a shift+tab while main was idle reached thimble only at main's next turn, so held
+    checks waited and the Start line was stale)."""
     cur = main_mode(c)
     if plan and cur != "plan":
         if cur:
             _before_plan[c] = cur
         note_mode(c, sid, "plan")
     elif not plan and cur == "plan":
-        note_mode(c, sid, _before_plan.pop(c, "") or "default")
+        before = _before_plan.pop(c, "")
+        note_mode(c, sid, before or "default", guessed=not before)
 
 
 def main_mode(c: str) -> str | None:

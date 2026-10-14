@@ -165,39 +165,74 @@ def test_a_server_restarted_under_main_follows_its_last_reported_mode_until_main
     assert "permission_mode" not in agents.read_meta(CORPUS, agents.MAIN_ID)["attached"]
 
 
-def test_main_s_card_says_how_to_switch_to_auto_mode_while_main_runs_in_manual(fake, monkeypatch):
-    """A request relayed to main's card carries what the card says about auto mode (modes.manual_hint): while main runs
-    in Manual, Manual before main reports, how to switch; nothing in auto mode; who turned auto mode off when the
-    analyst's or the org's settings did; nothing when a rule of the fence that asks in every mode sends it."""
+async def test_main_s_terminal_says_once_per_session_that_main_runs_in_manual_mode_and_the_chip_follows_the_mode(
+        fake, monkeypatch):
+    """Only a mode main's hooks report counts: nothing is said before the first report. The first report of Manual mode
+    in a session answers the mode hook with the line main's terminal shows (modes.manual_line: shift+tab, or `thimble
+    --permission-mode auto`), and never again in that session; a new session hears it again. Main's meta carries the
+    chip's hint (`attached.manual`) while main is in Manual mode only, not in auto, plan or Accept edits mode, nor for a
+    mode note_plan only guesses. When the analyst's or the org's settings turn auto mode off, the line and the chip say
+    who did, with no way to switch. A relayed permission request carries no such hint any more."""
     cwd = str(config.corpus_dir(CORPUS))
     session.attach(CORPUS, "sid-main", cwd)
 
-    def manual(tool: str = "Bash", inp: dict | None = None) -> str | None:
-        events._hold(CORPUS, "r1", tool, "x", "{}", tool_input=inp or {"command": "ls"})
-        [p] = agents.read_meta(CORPUS, agents.MAIN_ID)["permissions"]
-        events._drop(CORPUS, {"r1"})
-        return p.get("manual")
+    def attached() -> dict:
+        return agents.read_meta(CORPUS, agents.MAIN_ID)["attached"]
 
-    assert manual() == "switch", "Manual before main reports its mode"
-    session.note_mode(CORPUS, "sid-main", "acceptEdits")
-    assert manual() == "switch"
-    session.note_mode(CORPUS, "sid-main", "auto")
-    assert manual() is None
-    session.note_mode(CORPUS, "sid-main", "default")
-    edit = {"file_path": str(Path(cwd).resolve() / "notes.txt")}
-    assert events._asked_by(CORPUS, "Edit", edit) == "data" and manual("Edit", edit) is None, "it asks in every mode"
+    async def report(mode: str, sid: str = "sid-main") -> str | None:
+        got = await events.mode_route(events.ModeBody(cwd=cwd, session=sid, permission_mode=mode))
+        return got.get("terminal")
+
+    switch = modes.MANUAL_LINES["switch"]
+    assert "shift+tab" in switch and "`thimble --permission-mode auto`" in switch
+    assert "manual" not in attached(), "nothing before main reports its mode"
+    assert await report("auto") is None and "manual" not in attached()
+    assert await report("acceptEdits") is None and "manual" not in attached(), "Accept edits is not Manual mode"
+    assert await report("default") == switch and attached()["manual"] == "switch"
+    assert await report("default") is None and await report("manual") is None, "once per session"
+    assert attached()["manual"] == "switch"
+    assert await report("default", sid="sid-other") is None, "another session's report says nothing"
+    assert await report("auto") is None and "manual" not in attached(), "the chip goes with auto mode"
+    assert await report("default") is None and attached()["manual"] == "switch"
+    session.note_plan(CORPUS, "sid-main", True)
+    assert "manual" not in attached(), "plan mode is not Manual mode"
+    session._before_plan.clear()
+    session.note_plan(CORPUS, "sid-main", False)
+    assert attached()["permission_mode"] == "default" and "manual" not in attached(), "a guess shows no chip"
+    events._hold(CORPUS, "r1", "Bash", "x", "{}", tool_input={"command": "ls"})
+    [p] = agents.read_meta(CORPUS, agents.MAIN_ID)["permissions"]
+    assert "manual" not in p
+    events._drop(CORPUS, {"r1"})
+
+    session.detach(CORPUS, "sid-main", "ended")
+    session.attach(CORPUS, "sid-next", cwd)
     user = fake.parent / "claude-config" / "settings.json"
     user.parent.mkdir(parents=True, exist_ok=True)
     user.write_text(json.dumps({"permissions": {"disableAutoMode": "disable"}}))
-    assert modes.auto_off() == "settings" and manual() == "settings"
+    assert modes.auto_off() == "settings"
+    assert await report("default", sid="sid-next") == modes.MANUAL_LINES["settings"], "a new session hears it again"
+    assert attached()["manual"] == "settings" and "shift+tab" not in modes.MANUAL_LINES["settings"]
     managed = fake.parent / "managed"
     managed.mkdir(parents=True)
     monkeypatch.setitem(cc_plugin.MANAGED_DIRS, sys.platform, managed)
     (managed / "managed-settings.json").write_text(json.dumps({"disableAutoMode": "disable"}))
-    assert modes.auto_off() == "org" and manual() == "org"
-    session.note_mode(CORPUS, "sid-main", "auto")
-    assert manual() == "org", "Claude Code starts main in Manual when auto mode is off"
-    assert modes.manual_hint("dontAsk") == "", "dontAsk asks nothing"
+    assert modes.auto_off() == "org" and modes.manual_line("default") == modes.MANUAL_LINES["org"]
+    assert await report("default", sid="sid-next") is None and attached()["manual"] == "org"
+    assert modes.manual_line("dontAsk") == modes.manual_line("bypassPermissions") == modes.manual_line(None) == ""
+
+
+def test_a_server_restarted_under_main_keeps_the_chip_and_says_nothing_again(fake):
+    """The chip's hint and the session's told mark live on main's meta, so a server restarted under the same session
+    neither loses the chip nor shows the line again."""
+    cwd = str(config.corpus_dir(CORPUS))
+    session.attach(CORPUS, "sid-main", cwd)
+    assert session.note_mode(CORPUS, "sid-main", "default", tell=True) == modes.MANUAL_LINES["switch"]
+    session._live.clear()
+    session._modes.clear()
+    session.attach(CORPUS, "sid-main", cwd)
+    held = agents.read_meta(CORPUS, agents.MAIN_ID)["attached"]
+    assert held["manual"] == "switch" and held["permission_mode"] == "default"
+    assert session.note_mode(CORPUS, "sid-main", "default", tell=True) == ""
 
 
 # ----------------------------------------------------------------------------- Auto
