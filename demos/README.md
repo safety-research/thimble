@@ -126,12 +126,13 @@ each one written (backend/app/precached.py).
      orientation and the writer of its report run as its subagents, and answer in the terminal any permission request
      your permission mode leaves to you.
    - **Scripted.** Run `scripts/dev/precache_orientation.py`, which runs `thimble` on a tmux socket of its own and
-     posts the start the browser's Start card sent (POST /api/ws/<c>/start). Since 0.8.0 the orientation writes no
+     posts the start the browser sent before 0.8.0 (POST /api/ws/<c>/start). Since 0.8.0 the orientation writes no
      report of its own, so this route leaves none; take the route by hand for a pre-cache with a report.
 
-   Wait until it is done: the orientation finished, each view proposal you accepted built, and its report written. Claude's cyber safeguards flag mythos-5 under Opus
-   5.5. On 2026-10-05, an earlier demo dataset ran to the end on claude-opus-4-8, but the same safeguard stopped its
-   critic, two verification agents and one view build (the orientation's thread says so).
+   Wait until it is done: the orientation finished, each view proposal you accepted built, and its report written.
+   Claude's cyber safeguards flag mythos-5 under Opus 5.5. On 2026-10-05, an earlier demo dataset ran to the end on
+   claude-opus-4-8, but the same safeguard stopped its critic, two verification agents and one view build (the
+   orientation's thread says so).
 3. Export it from the checkout: `thimble demo --export demo-collusion-wiki demos/ --outputs-only` (the workspace's name,
    which `thimble demo` makes demo-<dataset>, or its folder). This writes `demos/collusion-wiki/`, replacing an earlier
    pre-cache there. The export refuses, listing
