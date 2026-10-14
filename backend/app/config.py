@@ -200,11 +200,14 @@ def _skip() -> bool:
 
 
 # The CLAUDE_* variables a `claude` thimble starts takes from this process: those naming the config dir, a provider, a
-# login or a network setting. Every other one (CLAUDECODE, CLAUDE_CODE_SESSION_ID, CLAUDE_CODE_ENTRYPOINT and the rest of
-# the calling session's identity) stays out. A variable naming a file descriptor stays out too, since the server
-# starts with its descriptors closed.
+# login or a network setting: a proxy, a certificate (the client certificate's CLIENT_* among them) or an LLM gateway.
+# Every other one (CLAUDECODE, CLAUDE_CODE_SESSION_ID, CLAUDE_CODE_ENTRYPOINT and the rest of the calling session's
+# identity) stays out. A variable naming a file descriptor stays out too, since the server starts with its descriptors
+# closed. Variables that do not start with CLAUDE (HTTPS_PROXY, NO_PROXY, NODE_EXTRA_CA_CERTS, SSL_CERT_FILE, …) pass.
 _CLAUDE_PASS = re.compile(r"CLAUDE_CONFIG_DIR|CLAUDE_CODE_(USE_\w+|SKIP_\w+_AUTH|OAUTH_(TOKEN|REFRESH_TOKEN|SCOPES)|"
-                          r"CLIENT_\w+|API_KEY_HELPER_TTL_MS|DISABLE_NONESSENTIAL_TRAFFIC)")
+                          r"CLIENT_\w+|API_KEY_HELPER_TTL_MS|DISABLE_NONESSENTIAL_TRAFFIC|"
+                          r"HTTPS?_PROXY|PROXY_(URL|AUTHENTICATE|AUTH_HELPER_TTL_MS|RESOLVES_HOSTS)|ENABLE_PROXY_AUTH_HELPER|"
+                          r"CERT_STORE|GATEWAY_TOKEN|API_BASE_URL|ASSUME_FIRST_PARTY_BASE_URL|DISABLE_EXPERIMENTAL_BETAS)")
 
 
 def passes(name: str) -> bool:
