@@ -33,6 +33,15 @@ describe("a request Claude's safeguards stopped", () => {
     expect(apiFailureText(blocked)).toBe(REFUSED)
     expect(apiFailureText('API Error: Claude Code is unable to respond to this request, which appears to violate our Usage Policy')).toBe(REFUSED)
     expect(apiFailureText("Claude's safeguards refused the request (stop_reason refusal)")).toBe(REFUSED)
+    // Claude Code 2.1.300's own wordings of a block
+    expect(apiFailureText("API Error: Opus 5.5's safeguards flagged this message (cyber). Claude Code can't respond to this message with Opus 5.5.")).toBe(REFUSED)
+  })
+
+  test("Claude Code's refusal that ends the session says to start a new one", () => {
+    const text = "API Error: Claude can't help with this. Start a new session to continue."
+    expect(apiFailure(text).failure).toBe('refused')
+    expect(apiFailureText(text)).toBe("Claude's safeguards stopped this request: start a new session (/clear in your terminal), then send a rephrased or narrower request")
+    expect(apiErrorAt(`Reading the logs. ${text}`)).toBeGreaterThan(0)
   })
 
   test('after words a reply streamed, and in a thread\'s reply row, it folds into a refused error row', () => {

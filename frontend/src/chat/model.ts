@@ -1252,7 +1252,7 @@ export const isApiError = (text: string): boolean => text.trim().startsWith(API_
 /** Claude Code's error line after the words a reply streamed before the request failed (`Now the page: API Error:
  * Server error mid-response. The response above may be incomplete.`): one of its own wordings, running to the end, a
  * refusal by Claude's safeguards among them. */
-const TRAILING_API_ERROR = /(?:^|\s)(API Error: (?:Repeated \d{3}|\d{3} \{|Server error|Connection error|Rate limit|Request timed out|Request was aborted|[^\n]{0,40}overloaded|[^\n]{0,60}safeguards|[^\n]{0,100}Usage Policy)[\s\S]*)$/
+const TRAILING_API_ERROR = /(?:^|\s)(API Error: (?:Repeated \d{3}|\d{3} \{|Server error|Connection error|Rate limit|Request timed out|Request was aborted|[^\n]{0,40}overloaded|[^\n]{0,60}safeguards|[^\n]{0,100}Usage Policy|Claude can.t help with this)[\s\S]*)$/
 
 /** Where Claude Code's API error line begins in a text: 0 when the text is the line, the offset of a line that ends a
  * reply cut short, -1 for none. Pure. */
@@ -1275,8 +1275,12 @@ const STATUS_TEXT = /\b(?:HTTP|API Error:?|Error code:?|status(?: code)?:?)\s*(\
 const BARE_STATUS = /\b(429|5\d\d)\b/
 const BODY_TEXT = /\b(overloaded_error|api_error|server_error|rate_limit_error|authentication_error|permission_error|not_found_error)\b/i
 const CONNECTION_TEXT = /connection error|connection reset|connection refused|econnreset|econnrefused|etimedout|socket hang up|fetch failed|network error/i
-/** A request Claude's safeguards stopped, in Claude Code's words or the API's (backend model.py's refusal detail). */
-const REFUSED_TEXT = /safeguards|usage polic/i
+/** A request Claude's safeguards stopped, in Claude Code's words or the API's (backend model.py's refusal detail):
+ * "Opus 5.5's safeguards flagged this message", "… Usage Policy …", or "Claude can't help with this. Start a new session
+ * to continue." */
+const REFUSED_TEXT = /safeguards|usage polic|can['’]t help with this/i
+/** Claude Code's refusal that takes the session with it: only a new session goes on. */
+const NEW_SESSION_TEXT = /start a new session/i
 
 /** What an API error says failed, and the HTTP status it names (`Repeated 529 Overloaded errors`: 529), from Claude
  * Code's error line or the server's words for it; the same patterns the backend's retry.transient_class reads. Pure. */
@@ -1327,7 +1331,7 @@ const FAILURE_FIX: Readonly<Partial<Record<ApiFailure, string>>> = {
 export function apiFailureText(text: string): string {
   const { failure, status } = apiFailure(text)
   const head = status != null && failure !== 'refused' ? `${FAILURE_WORDS[failure]} (${status})` : FAILURE_WORDS[failure]
-  const fix = FAILURE_FIX[failure]
+  const fix = failure === 'refused' && NEW_SESSION_TEXT.test(text) ? 'start a new session (/clear in your terminal), then send a rephrased or narrower request' : FAILURE_FIX[failure]
   return fix ? `${head}: ${fix}` : head
 }
 
