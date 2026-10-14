@@ -72,6 +72,7 @@ SUBAGENT_HINTS = {
     "critique-work-folder": {"path"},
     "check-task-file": {"path"},
     "start-refused-not-launched": set(),
+    "start-refused-unfenced": {"reason"},
     "start-refused-no-module": {"reason"},
     "orient-continue-earlier-session": {"resume"},
     "orient-continue-earlier-version": set(),

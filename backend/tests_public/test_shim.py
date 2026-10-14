@@ -230,6 +230,25 @@ def test_a_tool_call_carries_the_id_claude_code_gave_it(tmp_path, server):
     assert got == {"more": ("message_orientation", "toolu_01abc"), "again": ("message_orientation", None)}
 
 
+def test_a_proxy_in_the_environment_never_carries_the_shim_s_calls_to_the_local_server(tmp_path, server):
+    """The shim talks only to thimble's server on 127.0.0.1, so a proxy the analyst's shell sets without NO_PROXY must
+    not carry its subscription or its tool calls (httpx would send even 127.0.0.1 through it): here the proxy is a port
+    nothing listens on, and both still reach the server."""
+    with __import__("socket").socket() as s:
+        s.bind(("127.0.0.1", 0))
+        dead = f"http://127.0.0.1:{s.getsockname()[1]}"  # closed again before the shim runs
+    proxies = {k: dead for k in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")}
+    call = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "message_orientation", "arguments": {"message": "through"}}}
+    saved = {k: os.environ.pop(k) for k in ("NO_PROXY", "no_proxy") if k in os.environ}
+    try:
+        _run(tmp_path, server.port, wait_s=20, send=[call], until=lambda: bool(server.calls and server.queries),
+             extra=proxies)
+    finally:
+        os.environ.update(saved)
+    assert server.queries and [body["args"]["message"] for _, body in server.calls] == ["through"]
+
+
 def test_a_session_name_counts_only_with_its_token(tmp_path, server):
     """THIMBLE_SESSION without THIMBLE_SESSION_TOKEN is what Claude Code's background service can hand on from one of
     thimble's sessions to the user's own: the shim then calls as the analyst's session. With the token both go to the

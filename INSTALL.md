@@ -18,12 +18,70 @@ it runs in bubblewrap on Linux and with your user's access on macOS.
 
 ## Requirements
 
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (tested with 2.1.295), logged in (`claude auth status`), with
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (tested with 2.1.295), logged in (`claude auth status`)
+  or set up with an API key or a cloud provider ([Authentication](#authentication)), with
   its hooks modules on, which thimble's agents need: managed settings with `disableAllHooks` or
   `allowManagedHooksOnly`, or a folder Claude Code doesn't trust, turn them off.
 - macOS or Linux, and Python 3.12+. [uv](https://docs.astral.sh/uv/getting-started/installation/) is recommended: it
   installs the pinned versions and fetches Python when the machine has none.
 - Node 20+ for custom views and for the sandbox card code and code tickets run in; a Dev install needs 20.19+, 22.13+ or 24+, which the frontend's tests need.
+
+## Authentication
+
+thimble has no login of its own: every model call runs your own `claude`. Any way you sign in to Claude Code works.
+
+- **Claude login.** Run `claude auth login`, or `/login` in a `claude` session.
+- **API key.** Export `ANTHROPIC_API_KEY` in your shell before thimble's server starts. The server keeps the environment
+  it started with, so if a server already runs, run `thimble server restart` from that shell. Claude Code asks once
+  whether to use the key.
+- **apiKeyHelper (most robust).** Put `"apiKeyHelper": "<a command that prints the key>"` in `~/.claude/settings.json`
+  (your Claude Code config dir). It reaches your session and thimble's server calls, whatever your shell exports. Auth
+  set only in a project's `.claude/` settings does not reach thimble's server calls.
+- **Bedrock, Vertex or Foundry.** Set `CLAUDE_CODE_USE_BEDROCK=1`, `CLAUDE_CODE_USE_VERTEX=1` or
+  `CLAUDE_CODE_USE_FOUNDRY=1` and the provider's credentials, as Claude Code's docs say, before the server starts.
+  thimble names Anthropic's model ids, such as `claude-opus-5-5`. If your provider needs other ids, set each agent's
+  model in Settings or as `agents.<agent>.model` in `~/.thimble/config.json` ([docs/config.md](docs/config.md)), or set
+  `THIMBLE_<ROLE>_MODEL` (such as `THIMBLE_ORIENT_MODEL`) in the server's environment.
+
+After you change credentials, run `thimble server restart`. `thimble doctor` shows the auth path. When your
+organization's managed settings set `forceLoginMethod`, Claude Code blocks API keys and `apiKeyHelper`: sign in with the
+method it names.
+
+## Permissions
+
+thimble's agents run in your session's permission mode. Auto mode is recommended: Claude Code's classifier approves
+routine calls, so thimble's agents keep working while you watch the browser. Start with
+`thimble --permission-mode auto`, press shift+tab in the terminal, or set `"permissions": {"defaultMode": "auto"}` in
+`~/.claude/settings.json` (a project's settings can't choose auto). In Manual mode Claude Code asks about most commands
+of your session and of each agent, and an agent's requests show only in the terminal. The launch prints a line when
+your session will ask in Manual mode, or when your organization turned auto mode off.
+
+Some requests ask in every mode, auto and bypass included, because thimble's fence adds an ask rule for them: edits of
+the folder you opened while the orientation's `data` is `"ask"` (the default, [docs/config.md](docs/config.md)), and
+edits of thimble's config files (`~/.thimble/config.json`, and a workspace's `config.json` and `settings.json`).
+
+A session started with `thimble` may call thimble's tools without asking. A session started any other way asks before
+each thimble tool call, unless you add `"mcp__plugin_thimble_thimble"` to `permissions.allow` in
+`~/.claude/settings.json`.
+
+## For administrators
+
+What thimble needs from a managed Claude Code setup:
+
+- **Hooks modules on.** Managed `disableAllHooks` turns them off, and so does `allowManagedHooksOnly`, unless managed
+  `enabledPlugins` force-enables thimble's plugin. Without them thimble's agents can't start.
+- **Claude Code's sandbox.** On Linux it needs bubblewrap and socat (`install.sh --sandbox-deps`). Without it thimble's
+  agents can't start.
+- **Folder trust.** Claude Code loads a plugin's hooks module only in a folder it trusts. Each user accepts the trust
+  dialog once in the folder they open.
+- **`disableSideloadFlags`** makes Claude Code reject `--plugin-dir`, which the `thimble` command uses to load thimble's
+  plugin, so `thimble` can't start. `thimble plugin on` adds the plugin to Claude Code instead, and the launcher then
+  loads it without the flag (terminal mode's renderer still needs it).
+- **`allowManagedPermissionRulesOnly`** makes Claude Code ignore thimble's permission rules, so each thimble tool call
+  asks. Add `mcp__plugin_thimble_thimble` to managed `permissions.allow`. thimble's ask and deny rules stop too: for
+  edits of the corpus and of thimble's config, and for reads of its token files.
+- **`forceLoginMethod`** blocks API keys and `apiKeyHelper` ([Authentication](#authentication)).
+- **`disableAutoMode`** turns auto mode off, so users answer many more prompts ([Permissions](#permissions)).
 
 ## Global install (recommended)
 
@@ -140,11 +198,11 @@ session you start with `thimble`. Claude Code's agent tray (↓) lists them, and
   folder you opened is read-only, an edit of it or of thimble's config asks you, and so do web fetches and searches as
   Settings say. View builders use your session's network. Installs follow your Claude Code permission mode; thimble
   adds no rule for them. A view reaches you only as its checks last passed it, whatever was written in its folder since.
-- **Permissions.** Every agent runs in your session's permission mode, which you change in the terminal. Your
-  session's own requests show on the browser's card and in the terminal, and either place answers them. An agent's
-  request shows only in the terminal; for one the browser started, Claude Code names the request as from the thimble
-  plugin and offers Yes and No without an always-allow. When auto mode refuses an agent's call, `/permissions` →
-  Recently denied approves it.
+- **Permissions.** Every agent runs in your session's permission mode, which you change in the terminal; auto mode
+  asks least ([Permissions](#permissions)). Your session's own requests show on the browser's card and in the
+  terminal, and either place answers them. An agent's request shows only in the terminal; for one the browser started,
+  Claude Code names the request as from the thimble plugin and offers Yes and No without an always-allow. When auto
+  mode refuses an agent's call, `/permissions` → Recently denied approves it.
 - **Limits.** Claude Code runs at most 20 subagents at once in a session. thimble's agents, their own subagents and side
   threads count, and thimble queues view builds and checks at the limit. Raise it with
   `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`; it doesn't apply while your session runs Ultracode. The agents have no
@@ -290,5 +348,8 @@ that one and prints each path it deleted. The folder it read and your Claude Cod
   up, and `thimble doctor` names the command for missing libraries. Then run `thimble restart`.
 - `/thimble` is not recognized in a `claude` session: a session started with plain `claude` doesn't load thimble. Quit
   it and run `thimble` in that folder; sessions you start with `thimble` have `/thimble`.
+- A session started with `claude --plugin-dir ~/.thimble/app/plugin`, then `/thimble`, has no fence. Chat, cards and
+  labels work, but thimble's agents can't start, and each thimble tool call asks unless you add the allow rule in
+  [Permissions](#permissions). Run `thimble` in the folder instead.
 - To report a problem, run `thimble feedback "<what went wrong>"`. It writes a zip of the logs, chats and Claude
   Code transcripts, with keys removed, and says where to send it. The chats and transcripts quote your corpus.

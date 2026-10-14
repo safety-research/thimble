@@ -122,7 +122,8 @@ def default_dir() -> Path:
     return (Path(os.environ.get("THIMBLE_HOME") or "~/.thimble").expanduser() / "demo").resolve()
 SCRUBBED_USER = "user"  # what --scrub-user writes in place of the exporter's user name
 COVERAGE_CHIP = "coverage"  # the chip kind of the coverage line at the end of the orientation's thread (orient_session)
-LOGIN_HINT = "`claude auth login`, or run `claude` and type /login"
+LOGIN_HINT = ("`claude auth login`, or run `claude` and type /login; or export ANTHROPIC_API_KEY and run `thimble server "
+              "restart` (INSTALL.md, Authentication)")
 
 # What the export keeps of the orientation's record and of its thread's meta; the rest belonged to its session.
 RUN_KEYS = ("status", "passes", "query", "effort", "critique", "ultracode", "requested", "started", "ended", "groups",

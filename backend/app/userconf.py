@@ -965,7 +965,8 @@ def config_files(c: str | None) -> list[Path]:
 class Rule(NamedTuple):
     """One permission rule of main's fence (main_rules): Claude Code's `behavior` list it goes in (ask, deny or allow),
     the rule, and its `cause`: `data` (an edit of the corpus), `config` (an edit of thimble's config), `web` (the web
-    tools), `private` (thimble's token files and the links folder) or `state` (the files thimble keeps its records in)."""
+    tools), `private` (thimble's token files and the links folder), `state` (the files thimble keeps its records in) or
+    `work` (the agents' work folders, AGENT_WORK_DIRS)."""
 
     behavior: str
     rule: str
@@ -979,6 +980,16 @@ LINKS_DIR = "links"  # under thimble's home: the dashboard link with its key, br
 STATE_PATHS = ("checks/**", "chats/**", "extensions/**", "extension/extension.json", "orient/run.json", "trusted/**",
                "views/**")
 TICKET_FILES = ("tickets.jsonl", "applies.jsonl")  # in a development install's dev folder: the code tickets' records
+# the agents' own work folders in the workspace (subagents.WORK_DIRS but the workspace's views and card-libs, which hold
+# code that views and cards load): main's fence lets main and its agents read and edit them unasked, as a server job's
+# fence lets it edit its own folder (agent_session.fence), and names them as additionalDirectories (cli.main_fence)
+AGENT_WORK_DIRS = ("orient/work", "writers", "critique-work", "check-work", "views-work")
+
+
+def agent_work_dirs(c: str) -> list[Path]:
+    """The agents' work folders of workspace `c` (AGENT_WORK_DIRS). They need not exist yet."""
+    ws = config.WORKSPACES_DIR.resolve() / c
+    return [ws / d for d in AGENT_WORK_DIRS]
 
 
 def dev_files() -> list[Path]:
@@ -1005,8 +1016,9 @@ def main_rules(c: str) -> list[Rule]:
     at "ask" get no rule, so the permission mode decides (module note, one fence); main's kept mode, the workspace's
     records (STATE_PATHS), the code tickets' (dev_files) and the live checkout's git folder (checkout_git) are not
     edited; the token files and the links folder are neither read nor edited; the critique folder is read unasked,
-    since the critic reads its digest and brief there. No rule for installs, which follow Claude Code's permission mode. A config with an
-    error gives the defaults' rules."""
+    since the critic reads its digest and brief there; the agents' work folders (agent_work_dirs) are read and edited
+    unasked, which every deny and ask rule above still overrides, as Claude Code ranks deny and ask over allow. No rule
+    for installs, which follow Claude Code's permission mode. A config with an error gives the defaults' rules."""
     conf = agent_conf(load_or_defaults(c)[0], "orientation")
     ws = config.WORKSPACES_DIR.resolve() / c
     out: list[Rule] = []
@@ -1027,6 +1039,7 @@ def main_rules(c: str) -> list[Rule]:
     links = global_file().parent / LINKS_DIR
     out += [Rule("deny", f"Read(/{links}/**)", "private"), Rule("deny", f"Edit(/{links}/**)", "private")]
     out.append(Rule("allow", f"Read(/{ws / 'critique'}/**)", "state"))
+    out += [Rule("allow", f"{tool}(/{d}/**)", "work") for d in agent_work_dirs(c) for tool in ("Read", "Edit")]
     return out
 
 

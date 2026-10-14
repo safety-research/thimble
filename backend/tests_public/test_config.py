@@ -17,6 +17,50 @@ def test_a_claude_thimble_starts_keeps_the_users_auth_and_drops_the_callers_iden
                                                "CLAUDE_CODE_SKIP_VERTEX_AUTH", "ANTHROPIC_API_KEY", "PATH"}
 
 
+def test_calls_to_thimbles_own_server_stay_off_the_shells_proxy():
+    """thimble's server is on 127.0.0.1. With a proxy exported and NO_PROXY naming other hosts, keep_local_off_proxy
+    adds 127.0.0.1 and localhost, so urllib and httpx send thimble's local calls direct; run again, it changes
+    nothing."""
+    import urllib.request
+    env = {"HTTP_PROXY": "http://proxy.invalid:3128", "NO_PROXY": "corp.example"}
+    config.keep_local_off_proxy(env)
+    assert env["NO_PROXY"] == "corp.example,127.0.0.1,localhost"
+    assert env["no_proxy"] == "127.0.0.1,localhost"
+    assert urllib.request.proxy_bypass_environment("127.0.0.1", {"no": env["NO_PROXY"]})
+    again = dict(env)
+    config.keep_local_off_proxy(again)
+    assert again == env
+
+
+def test_a_claude_thimble_starts_keeps_the_users_proxy_certificate_and_gateway_settings():
+    """Exported in the shell that starts thimble's server, the proxy, CA-certificate, client-certificate and gateway
+    variables reach every `claude` the server runs (labels, card checks), as they reach main; a file descriptor's
+    variable and the calling session's identity still stay out."""
+    network = ["HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy", "SSL_CERT_FILE",
+               "NODE_EXTRA_CA_CERTS", "REQUESTS_CA_BUNDLE", "CLAUDE_CODE_HTTP_PROXY", "CLAUDE_CODE_HTTPS_PROXY",
+               "CLAUDE_CODE_PROXY_URL", "CLAUDE_CODE_PROXY_AUTHENTICATE", "CLAUDE_CODE_ENABLE_PROXY_AUTH_HELPER",
+               "CLAUDE_CODE_PROXY_AUTH_HELPER_TTL_MS", "CLAUDE_CODE_PROXY_RESOLVES_HOSTS", "CLAUDE_CODE_CERT_STORE",
+               "CLAUDE_CODE_CLIENT_CERT", "CLAUDE_CODE_CLIENT_KEY", "CLAUDE_CODE_CLIENT_KEY_PASSPHRASE",
+               "CLAUDE_CODE_GATEWAY_TOKEN", "CLAUDE_CODE_API_BASE_URL", "CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL",
+               "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS", "CLAUDE_CODE_USE_GATEWAY"]
+    left_out = ["CLAUDE_CODE_GATEWAY_TOKEN_FILE_DESCRIPTOR", "CLAUDECODE", "CLAUDE_CODE_SESSION_ID",
+                "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_PROXY_URL_EXTRA"]
+    env = {name: "x" for name in [*network, *left_out]}
+    assert set(config.passed_environ(env)) == set(network)
+    assert set(network) <= set(config.launch_environ(env)), "what every `claude` thimble runs gets"
+
+
+def test_not_logged_in_names_the_login_and_the_api_key_route(monkeypatch):
+    """thimble has no login of its own, and an API key works through `claude` once thimble's server starts with it: the
+    alert names both routes, and where the others are."""
+    monkeypatch.delenv("THIMBLE_SKIP_KEY", raising=False)
+    monkeypatch.setattr(config, "CLI_PATH", "/bin/claude")
+    said = config.auth_problem({"loggedIn": False})
+    assert "claude auth login" in said and "ANTHROPIC_API_KEY" in said and "thimble server restart" in said
+    assert "Authentication" in said
+    assert config.auth_problem({"loggedIn": True}) == ""
+
+
 # --------------------------------------------------------------------------- corpus registration
 
 

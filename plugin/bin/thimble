@@ -63,6 +63,15 @@
 # a supervisor subcommand runs backend/app/cli.py with THIMBLE_CALLER_CWD set; any other word prints the usage and
 # exits 2. This file is reached through the ~/.local/bin/thimble symlink, so its directory comes from the resolved $0.
 set -euo pipefail
+# thimble talks to its own server on 127.0.0.1. Keep that traffic off any HTTP proxy the shell sets: every process this
+# launcher starts (Claude Code, its hooks module, the MCP shim, the server) reads NO_PROXY / no_proxy.
+for _np in NO_PROXY no_proxy; do
+  case ",${!_np:-}," in
+    *,127.0.0.1,*) ;;
+    *) export "$_np=${!_np:+${!_np},}127.0.0.1,localhost" ;;
+  esac
+done
+unset _np
 resolve_link() {  # resolve_link PATH: the file a chain of symlinks ends at, as an absolute path (readlink -f is not on every macOS);
   # exit 1 when the chain ends at nothing or runs past 40 hops (a cycle)
   local p="$1" t n=0
@@ -633,11 +642,15 @@ command -v claude >/dev/null 2>&1 || {
 # Each launch starts a new session; the workspace stays. -c/--continue resumes the folder's last main session by
 # thimble's own record (cli.last_main), since Claude Code's --continue could pick a writer's session in the same
 # folder; with none, --continue goes to `claude` as it is. The analyst's --settings goes to launch-args, which merges it
-# into thimble's. Other flags go to `claude` as they are; --new is dropped.
-cont=0 args=() own="" sid="" sid_named=0 safe=0
+# into thimble's. Other flags go to `claude` as they are; --new is dropped. The permission mode they name goes to
+# launch-args as well, which then says how to switch to auto mode only when main will ask in Manual.
+cont=0 args=() own="" sid="" sid_named=0 safe=0 pmode=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --new) ;;
+    --permission-mode) args+=("$1"); [ "$#" -lt 2 ] || { pmode="$2"; args+=("$2"); shift; };;
+    --permission-mode=*) pmode="${1#--permission-mode=}"; args+=("$1");;
+    --dangerously-skip-permissions) pmode=bypassPermissions; args+=("$1");;
     -c | --continue) cont=1;;
     --settings) [ "$#" -lt 2 ] || { own="$2"; shift; };;
     --settings=*) own="${1#--settings=}";;
@@ -660,6 +673,7 @@ ask=()
 [ -z "$own" ] || ask+=(--settings="$own")
 [ "$sid_named" = 0 ] || ask+=(--own-session="$sid")
 [ "$safe" = 0 ] || ask+=(--safe-mode)
+[ -z "$pmode" ] || ask+=(--own-mode="$pmode")
 repo="$("$here/thimble-app-dir")"
 cwd="$PWD"
 unset THIMBLE_MODE THIMBLE_WS

@@ -200,11 +200,28 @@ def _skip() -> bool:
 
 
 # The CLAUDE_* variables a `claude` thimble starts takes from this process: those naming the config dir, a provider, a
-# login or a network setting. Every other one (CLAUDECODE, CLAUDE_CODE_SESSION_ID, CLAUDE_CODE_ENTRYPOINT and the rest of
-# the calling session's identity) stays out. A variable naming a file descriptor stays out too, since the server
-# starts with its descriptors closed.
+# login or a network setting: a proxy, a certificate (the client certificate's CLIENT_* among them) or an LLM gateway.
+# Every other one (CLAUDECODE, CLAUDE_CODE_SESSION_ID, CLAUDE_CODE_ENTRYPOINT and the rest of the calling session's
+# identity) stays out. A variable naming a file descriptor stays out too, since the server starts with its descriptors
+# closed. Variables that do not start with CLAUDE (HTTPS_PROXY, NO_PROXY, NODE_EXTRA_CA_CERTS, SSL_CERT_FILE, …) pass.
+def keep_local_off_proxy(env: dict[str, str] | None = None) -> None:
+    """Add 127.0.0.1 and localhost to NO_PROXY / no_proxy in `env` (default os.environ), so that thimble's calls to its
+    own server on 127.0.0.1 never go through an HTTP proxy the shell sets. urllib and httpx read these variables, and
+    every process thimble starts inherits them. The launcher does the same for the processes it starts."""
+    env = os.environ if env is None else env
+    for name in ("NO_PROXY", "no_proxy"):
+        cur = env.get(name, "")
+        if "127.0.0.1" not in [x.strip() for x in cur.split(",")]:
+            env[name] = f"{cur},127.0.0.1,localhost" if cur else "127.0.0.1,localhost"
+
+
+keep_local_off_proxy()
+
+
 _CLAUDE_PASS = re.compile(r"CLAUDE_CONFIG_DIR|CLAUDE_CODE_(USE_\w+|SKIP_\w+_AUTH|OAUTH_(TOKEN|REFRESH_TOKEN|SCOPES)|"
-                          r"CLIENT_\w+|API_KEY_HELPER_TTL_MS|DISABLE_NONESSENTIAL_TRAFFIC)")
+                          r"CLIENT_\w+|API_KEY_HELPER_TTL_MS|DISABLE_NONESSENTIAL_TRAFFIC|"
+                          r"HTTPS?_PROXY|PROXY_(URL|AUTHENTICATE|AUTH_HELPER_TTL_MS|RESOLVES_HOSTS)|ENABLE_PROXY_AUTH_HELPER|"
+                          r"CERT_STORE|GATEWAY_TOKEN|API_BASE_URL|ASSUME_FIRST_PARTY_BASE_URL|DISABLE_EXPERIMENTAL_BETAS)")
 
 
 def passes(name: str) -> bool:
@@ -240,6 +257,12 @@ def auth_status(env: Mapping[str, str] | None = None, cwd: str | Path | None = N
     return d if isinstance(d, dict) else None
 
 
+# how to give Claude Code a login, for every "not logged in" message: the login, or the API-key route, which reaches
+# thimble's server only once it starts again with the key (INSTALL.md's Authentication section has the other routes)
+AUTH_HELP = ("log in with `claude auth login`, or export ANTHROPIC_API_KEY and run `thimble server restart` (INSTALL.md, "
+             "Authentication, has more ways)")
+
+
 def auth_problem(status: dict[str, Any] | None = None) -> str:
     """The alert when a model call cannot run: no `claude`, or `claude auth status` reporting no login; '' otherwise,
     when the status cannot be read (the call itself then says what failed), and under THIMBLE_SKIP_KEY."""
@@ -249,7 +272,7 @@ def auth_problem(status: dict[str, Any] | None = None) -> str:
         return NO_CLAUDE
     st = auth_status() if status is None else status
     if st is not None and st.get("loggedIn") is False:
-        return "Claude Code is not logged in (`claude auth status`): log in with `claude`, then try again"
+        return f"Claude Code is not logged in (`claude auth status`): {AUTH_HELP}, then try again"
     return ""
 
 

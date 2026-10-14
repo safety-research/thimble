@@ -596,14 +596,19 @@ async def again(c: str, rid: str) -> Answer:
 
 
 def refusal_before(c: str, click: bool = False) -> Answer | None:
-    """Why no agent of thimble's can start now in workspace `c`, before any request is made: main was not started by
-    `thimble` (not-launched), main is in plan mode (hook, start-plan-mode), or the module does not hold the long-poll
-    (no-module). None when nothing stands in the way. A `click` leaves plan mode to --agent-check, which reads main's mode
-    as the module's call runs: thimble hears main's mode only at main's turns, so after a shift+tab while main is idle
-    the mode it keeps is stale (live check L21), and the click would stay refused after the analyst left plan mode."""
-    from . import cc_plugin, module_bridge, session  # noqa: PLC0415
+    """Why no agent of thimble's can start now in workspace `c`, before any request is made: main runs outside thimble's
+    fence (not-launched: main was not started by `thimble`, start-refused-not-launched, or it was and runs without the
+    sandbox, start-refused-unfenced with cli.unfenced_reason), main is in plan mode (hook, start-plan-mode), or the module
+    does not hold the long-poll (no-module). None when nothing stands in the way. A `click` leaves plan mode to
+    --agent-check, which reads main's mode as the module's call runs: thimble hears main's mode only at main's turns, so
+    after a shift+tab while main is idle the mode it keeps is stale (live check L21), and the click would stay refused
+    after the analyst left plan mode."""
+    from . import cc_plugin, cli, module_bridge, session  # noqa: PLC0415
 
     if not cc_plugin.main_fenced(c):
+        if cc_plugin.main_launched(c):
+            why = cli.unfenced_reason(c) or "thimble could not add its fence to the session's settings"
+            return refusal(NOT_LAUNCHED, tools.hint("start-refused-unfenced", reason=why))
         return refusal(NOT_LAUNCHED, tools.hint("start-refused-not-launched"))
     if not click and session.main_mode(c) == files.PLAN_MODE:
         return refusal(HOOK, tools.hint("start-plan-mode"))

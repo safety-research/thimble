@@ -1719,7 +1719,8 @@ def main_name(cwd: Path) -> str:
 # on with no command outside it, writes only in the agents' work folders (write_dirs) and Claude Code's own temp folder,
 # the corpus and the workspace's config not writable, thimble's token files and the links folder unreadable, the
 # network as the orientation's `network` says, and the permission rules of userconf.main_rules: an edit of the corpus or
-# of thimble's config asks, the web tools as `web` says, thimble's records not edited. Installs follow Claude Code's
+# of thimble's config asks, the web tools as `web` says, thimble's records not edited, the agents' work folders read and
+# edited unasked (also additionalDirectories, so acceptEdits covers them). Installs follow Claude Code's
 # permission mode. The fence's `env` carries cc_plugin.FENCE_MARK, which the server reads from main's command line
 # (cc_plugin.main_fenced). Every sandbox path is a folder or a file, at most with a trailing `/**`: on Linux Claude Code
 # drops any other glob without a warning (spike U19). Without the sandbox (thimble's config's `sandbox.use` "never", or
@@ -1777,11 +1778,24 @@ SAFE_MODE_LINE = ("thimble: WARNING - Claude Code's safe mode is on (CLAUDE_CODE
                   "can't start. Run `thimble` without it.")
 MODULES_OFF_LINE = ("thimble's agents can't start in this session: Claude Code's hooks modules are off ({reason}). Main, "
                     "its threads, cards and labels still work.")
+# what the launch says about prompts when main will run in Manual (modes.manual_hint, main_start_mode): how to switch to
+# auto mode, or who turned it off. thimble's agents run in main's mode, and their prompts show in the terminal alone.
+MANUAL_LINES = {
+    "switch": "thimble: In Manual mode, Claude Code asks you before most commands that main or thimble's agents run "
+              "(agents ask only in this terminal). For fewer prompts, press shift+tab to switch to auto mode, or start "
+              "with `thimble --permission-mode auto`.",
+    "org": "thimble: Your organization turned auto mode off, so Claude Code asks you before most commands that main or "
+           "thimble's agents run (agents ask only in this terminal).",
+    "settings": "thimble: Your Claude Code settings turn auto mode off (disableAutoMode), so Claude Code asks you before "
+                "most commands that main or thimble's agents run (agents ask only in this terminal).",
+}
 NO_FENCE_LINES = {
-    "never": "thimble: WARNING - thimble's config turns the sandbox off (sandbox.use \"never\"), so main and thimble's "
-             "agents run without thimble's fence and can change your files.",
-    "missing": "thimble: WARNING - Claude Code's Bash sandbox can't run on this machine, so main and thimble's agents run "
-               "without thimble's fence and can change your files; `thimble doctor` says what is missing.",
+    "never": "thimble: WARNING - thimble's config turns the sandbox off (sandbox.use \"never\"), so main runs without "
+             "thimble's fence and can change your files, and thimble's agents can't start. Main, cards and labels still "
+             "work.",
+    "missing": "thimble: WARNING - Claude Code's Bash sandbox can't run on this machine, so main runs without thimble's "
+               "fence and can change your files, and thimble's agents can't start. `thimble doctor` says what is "
+               "missing; on Linux, `install.sh --sandbox-deps` installs it.",
     "refused": "thimble: WARNING - thimble does not open this folder as a workspace (your home folder, /, or a folder it "
                "could not register), so main runs without thimble's fence and thimble's agents cannot start here.",
 }
@@ -1823,6 +1837,22 @@ def fence_off(c: str | None) -> str:
     return "" if cc_settings.sandbox_ok() else "missing"
 
 
+def unfenced_reason(c: str | None) -> str:
+    """Why main, which the launcher started in workspace `c`, runs without thimble's fence, in words for the start
+    refusal (subagents.refusal_before): thimble's config turns the sandbox off, or Claude Code's sandbox can't run here,
+    with what it lacks (cc_settings.sandbox_missing); '' when fence_off finds no reason, as for an analyst's --settings
+    that could not be read."""
+    from . import cc_settings  # noqa: PLC0415
+
+    why = fence_off(c)
+    if why == "never":
+        return 'thimble\'s config turns the sandbox off (sandbox.use "never")'
+    if why != "missing":
+        return ""
+    missing = cc_settings.sandbox_missing()
+    return "Claude Code's sandbox can't run on this machine" + (f" (missing: {', '.join(missing)})" if missing else "")
+
+
 def ticket_trees() -> list[Path]:
     """The folder of the code tickets' worktrees in a development install (dev.worktrees_dir's rule, which this module
     does not import), which main's fence lets main's Bash and its subagents write, a ticket's agent among them, and
@@ -1834,8 +1864,9 @@ def main_fence(cwd: Path, c: str | None = None, root: Path | None = None, sessio
                given: str = "", mode: str = launch_mode.BROWSER) -> dict[str, Any]:
     """The --settings keys that put main, and every subagent it starts, inside thimble's fence for the corpus `cwd`,
     workspace `c` (by default the one `cwd` is registered as), the plugin copy at `root`, main's session `session`
-    (module note, main's fence): `sandbox`, `permissions` (userconf.main_rules, and in a development install the code
-    tickets' worktrees as additionalDirectories, ticket_trees) and `env` (cc_plugin.FENCE_MARK). With the plugin's hooks off, /thimble's own command for SANDBOX_ACTIONS in that session and
+    (module note, main's fence): `sandbox`, `permissions` (userconf.main_rules, and as additionalDirectories the agents'
+    work folders, userconf.agent_work_dirs, and in a development install the code tickets' worktrees, ticket_trees) and
+    `env` (cc_plugin.FENCE_MARK). With the plugin's hooks off, /thimble's own command for SANDBOX_ACTIONS in that session and
     the Monitor route's watcher command for it are let out of the sandbox, and no other (sandbox_rules, watch_rules);
     `given` is the analyst's own --settings to the launcher, which may turn the hooks off (launch_hooks_blocked). In
     terminal `mode` main's Bash may also write the card folders (card_dirs), where the card runner writes a card's
@@ -1857,7 +1888,13 @@ def main_fence(cwd: Path, c: str | None = None, root: Path | None = None, sessio
         # starts the server
         excluded += [*watch_rules(root, cwd, session), *sandbox_rules(root, cwd, session)]
     trees = [str(d) for d in ticket_trees()]
-    for tree in trees:
+    # the agents' work folders, which their Read and Edit reach unasked (userconf.main_rules) as working directories
+    work = [str(d) for d in userconf.agent_work_dirs(c)]
+    try:  # the workspace first, private and with its trusted files (config.workspace_dir), before the work folders in it
+        config.workspace_dir(c)
+    except (OSError, ValueError):
+        pass
+    for tree in [*work, *trees]:
         # Claude Code drops an additionalDirectories folder that does not exist as main starts, and the first ticket
         # makes this one later, so outside auto mode a ticket's agent was asked about each Read of its worktree (live
         # check L27 on 060-s4): the folder is made first
@@ -1877,8 +1914,7 @@ def main_fence(cwd: Path, c: str | None = None, root: Path | None = None, sessio
     perms: dict[str, list[str]] = {}
     for rule in userconf.main_rules(c):
         perms.setdefault(rule.behavior, []).append(rule.rule)
-    if trees:
-        perms["additionalDirectories"] = trees
+    perms["additionalDirectories"] = [*work, *trees]
     return {"sandbox": box, "permissions": perms, "env": {cc_plugin.FENCE_MARK: "1"}}
 
 
@@ -1962,6 +1998,33 @@ def modules_off(cwd: Path, given: str = "") -> str:
         if isinstance(v, bool):
             value = v
     return "your Claude Code settings set disableAllHooks" if value else ""
+
+
+def main_start_mode(cwd: Path, c: str | None, given: str = "", own_mode: str | None = None) -> str | None:
+    """The permission mode Claude Code starts main in, by Claude Code's name, as far as the launch can tell: the
+    analyst's own `--permission-mode` (`own_mode`; bypassPermissions for --dangerously-skip-permissions), else the
+    highest `permissions.defaultMode` of the analyst's settings.json, the launcher's own --settings `given` and the org's
+    managed tier (the tiers modes.disabled reads, cc_settings.analyst_tiers, with `given` between them), else "auto"
+    when main last reported auto mode in workspace `c` (userconf.main_modes_file), since Claude Code may start in auto
+    mode by its own default; None when nothing says, which modes.manual_hint counts as Manual."""
+    from . import cc_settings, modes, userconf  # noqa: PLC0415
+
+    if own_mode:
+        return own_mode
+    user, org = cc_settings.analyst_tiers()
+    own = given_settings(cwd, given)
+    found = None
+    for d in (user, own if isinstance(own, dict) else {}, org):  # lowest first: a later tier overwrites an earlier one
+        perms = d.get("permissions") if isinstance(d.get("permissions"), dict) else {}
+        if perms.get("defaultMode") in modes.CLAUDE_MODES:
+            found = perms["defaultMode"]
+    if found or not c:
+        return found
+    try:
+        kept = json.loads(userconf.main_modes_file().read_text("utf-8")).get(c) or {}
+    except (OSError, ValueError, AttributeError):
+        kept = {}
+    return "auto" if isinstance(kept, dict) and kept.get("mode") == "auto" else None
 
 
 def register_here(cwd: Path) -> str | None:
@@ -2188,7 +2251,7 @@ def server_dirs() -> Iterator[None]:
 
 
 def launch_args(cwd: Path, resume: bool = False, settings: str = "", own_session: str | None = None,
-                safe_mode: bool = False, launcher_pid: int | None = None) -> str:
+                safe_mode: bool = False, launcher_pid: int | None = None, own_mode: str | None = None) -> str:
     """The launcher's values, one per line: the plugin folder to load with `--plugin-dir` ('' when the plugin copy is
     one Claude Code has installed, installed_copy), the `--allowedTools` line, the `--effort` value ('' for none), the
     `--settings` value (launch_settings, over the analyst's own `settings`, with thimble's fence), the value to export as
@@ -2208,17 +2271,19 @@ def launch_args(cwd: Path, resume: bool = False, settings: str = "", own_session
     launch.json (launch_record), with `launcher_pid`, the launcher's own pid, until the launcher writes main's `claude`
     process there, and in terminal mode the hooks module's roles file (write_roles). Main's effort is explicit:
     models.main's, else the CLAUDE_CODE_EFFORT_LEVEL it unsets, else cc_settings.main_effort_flag; a stored ultracode
-    runs at its level."""
+    runs at its level. `own_mode` is the permission mode the analyst's own flags give main; a note says how to switch to
+    auto mode when main will ask in Manual (MANUAL_LINES)."""
     installed = installed_copy(cwd)
     root = installed.root if installed else plugin_root()
     with server_dirs():
-        return _launch_args(cwd, resume, settings, own_session, safe_mode, installed, root, launcher_pid)
+        return _launch_args(cwd, resume, settings, own_session, safe_mode, installed, root, launcher_pid, own_mode)
 
 
 def _launch_args(cwd: Path, resume: bool, settings: str, own_session: str | None, safe_mode: bool,
-                 installed: Installed | None, root: Path, launcher_pid: int | None = None) -> str:
+                 installed: Installed | None, root: Path, launcher_pid: int | None = None,
+                 own_mode: str | None = None) -> str:
     """launch_args inside server_dirs."""
-    from . import cc_settings, events, terminal_tools  # noqa: PLC0415 — needed by this subcommand alone
+    from . import cc_settings, events, modes, terminal_tools  # noqa: PLC0415 — needed by this subcommand alone
 
     c = register_here(cwd)
     mode = launch_mode.resolve(cwd)[0]
@@ -2280,6 +2345,9 @@ def _launch_args(cwd: Path, resume: bool, settings: str, own_session: str | None
         notes.append(MODULES_OFF_LINE.format(reason=why_idle))
     if safe_mode or os.environ.get(SAFE_MODE_ENV, "").strip() not in ("", "0", "false"):
         notes.append(SAFE_MODE_LINE)
+    hint = modes.manual_hint(main_start_mode(cwd, c, settings, own_mode))
+    if hint:
+        notes.append(MANUAL_LINES[hint])
     exports = terminal_env(c) if terminal else {}
     renderer = ""
     if terminal:
@@ -2331,7 +2399,7 @@ def cmd_launch_args(args: argparse.Namespace) -> int:
     try:
         out = launch_args(Path(args.cwd or os.environ.get("THIMBLE_CALLER_CWD") or os.getcwd()), bool(args.resume),
                           args.settings or "", own_session=args.own_session, safe_mode=bool(args.safe_mode),
-                          launcher_pid=args.launcher_pid)
+                          launcher_pid=args.launcher_pid, own_mode=args.own_mode or None)
     except LaunchRefused as e:  # on stderr, which the launcher leaves on the terminal; it starts nothing
         print(str(e), file=sys.stderr)
         return LAUNCH_REFUSED_EXIT
@@ -2506,7 +2574,7 @@ def auth_line(status: dict[str, Any] | None) -> str:
     if status is None:
         return "not known: `claude auth status --json` did not answer"
     if status.get("loggedIn") is False:
-        return "not logged in: log in with `claude`; nothing that calls a model runs until then"
+        return f"not logged in: {config.AUTH_HELP}; nothing that calls a model runs until then"
     return f"logged in ({status.get('authMethod') or '?'}, {status.get('apiProvider') or '?'}), as `claude auth status` reports"
 
 
@@ -2706,9 +2774,10 @@ def sandbox_lines(commands: bool = True) -> list[str]:
     except Exception:  # noqa: BLE001
         box = userconf.DEFAULTS["sandbox"]
     if box.get("use") == "never":
-        return ["  bash sandbox: off in thimble's config (sandbox.use \"never\"), so "
-                + ("thimble's config (sandbox.enforce) refuses to start the agents" if box.get("enforce") else
-                   "the agents' Bash runs with your user's access, limited only by each agent's permission mode")]
+        return ["  bash sandbox: off in thimble's config (sandbox.use \"never\"), so main runs without thimble's fence and "
+                "thimble's agents can't start; "
+                + ("thimble's config (sandbox.enforce) also refuses to start `thimble fix`" if box.get("enforce") else
+                   "`thimble fix` runs its Bash with your user's access, limited only by its permission mode")]
     if not missing:
         from . import ticket_box  # noqa: PLC0415
 
@@ -2719,8 +2788,9 @@ def sandbox_lines(commands: bool = True) -> list[str]:
         return ["  bash sandbox: runs (every agent's Bash runs in it: no writes outside the agent's folder and no "
                 f"network unless the agent's network is \"on\"; {tickets}; Claude Code's sandbox adds an empty "
                 ".claude/.cc-writes/ folder to the agent's own folder, where its commands start)"]
-    after = ("thimble's config (sandbox.enforce) refuses to start the agents" if box.get("enforce") else
-             "the agents' Bash runs outside it, under each agent's permission mode")
+    after = ("main runs without thimble's fence and thimble's agents can't start; "
+             + ("thimble's config (sandbox.enforce) also refuses to start `thimble fix`" if box.get("enforce") else
+                "`thimble fix` runs its Bash outside it, under its permission mode"))
     head = "  bash sandbox: off, missing " + ", ".join(missing) + "; " + after
     if not cmds or not commands:
         return [head + (f"; {what}" if what else "")]
@@ -4162,6 +4232,8 @@ def build_parser() -> argparse.ArgumentParser:
     la.add_argument("--own-session", help="the analyst's own flags name main's session (-r, --session-id or "
                                           "--fork-session): its id, or '' when it is not known")
     la.add_argument("--safe-mode", action="store_true", help="the analyst passed Claude Code's --safe-mode")
+    la.add_argument("--own-mode", help="the permission mode the analyst's own flags give main (--permission-mode, or "
+                                       "bypassPermissions for --dangerously-skip-permissions)")
     la.add_argument("--launcher-pid", type=int, help="the launcher's own pid ($$), which launch.json records until the "
                                                      "launcher writes main's `claude` process there")
     la.set_defaults(fn=cmd_launch_args)
