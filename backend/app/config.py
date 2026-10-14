@@ -204,6 +204,20 @@ def _skip() -> bool:
 # Every other one (CLAUDECODE, CLAUDE_CODE_SESSION_ID, CLAUDE_CODE_ENTRYPOINT and the rest of the calling session's
 # identity) stays out. A variable naming a file descriptor stays out too, since the server starts with its descriptors
 # closed. Variables that do not start with CLAUDE (HTTPS_PROXY, NO_PROXY, NODE_EXTRA_CA_CERTS, SSL_CERT_FILE, …) pass.
+def keep_local_off_proxy(env: dict[str, str] | None = None) -> None:
+    """Add 127.0.0.1 and localhost to NO_PROXY / no_proxy in `env` (default os.environ), so that thimble's calls to its
+    own server on 127.0.0.1 never go through an HTTP proxy the shell sets. urllib and httpx read these variables, and
+    every process thimble starts inherits them. The launcher does the same for the processes it starts."""
+    env = os.environ if env is None else env
+    for name in ("NO_PROXY", "no_proxy"):
+        cur = env.get(name, "")
+        if "127.0.0.1" not in [x.strip() for x in cur.split(",")]:
+            env[name] = f"{cur},127.0.0.1,localhost" if cur else "127.0.0.1,localhost"
+
+
+keep_local_off_proxy()
+
+
 _CLAUDE_PASS = re.compile(r"CLAUDE_CONFIG_DIR|CLAUDE_CODE_(USE_\w+|SKIP_\w+_AUTH|OAUTH_(TOKEN|REFRESH_TOKEN|SCOPES)|"
                           r"CLIENT_\w+|API_KEY_HELPER_TTL_MS|DISABLE_NONESSENTIAL_TRAFFIC|"
                           r"HTTPS?_PROXY|PROXY_(URL|AUTHENTICATE|AUTH_HELPER_TTL_MS|RESOLVES_HOSTS)|ENABLE_PROXY_AUTH_HELPER|"

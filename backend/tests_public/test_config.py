@@ -17,6 +17,21 @@ def test_a_claude_thimble_starts_keeps_the_users_auth_and_drops_the_callers_iden
                                                "CLAUDE_CODE_SKIP_VERTEX_AUTH", "ANTHROPIC_API_KEY", "PATH"}
 
 
+def test_calls_to_thimbles_own_server_stay_off_the_shells_proxy():
+    """thimble's server is on 127.0.0.1. With a proxy exported and NO_PROXY naming other hosts, keep_local_off_proxy
+    adds 127.0.0.1 and localhost, so urllib and httpx send thimble's local calls direct; run again, it changes
+    nothing."""
+    import urllib.request
+    env = {"HTTP_PROXY": "http://proxy.invalid:3128", "NO_PROXY": "corp.example"}
+    config.keep_local_off_proxy(env)
+    assert env["NO_PROXY"] == "corp.example,127.0.0.1,localhost"
+    assert env["no_proxy"] == "127.0.0.1,localhost"
+    assert urllib.request.proxy_bypass_environment("127.0.0.1", {"no": env["NO_PROXY"]})
+    again = dict(env)
+    config.keep_local_off_proxy(again)
+    assert again == env
+
+
 def test_a_claude_thimble_starts_keeps_the_users_proxy_certificate_and_gateway_settings():
     """Exported in the shell that starts thimble's server, the proxy, CA-certificate, client-certificate and gateway
     variables reach every `claude` the server runs (labels, card checks), as they reach main; a file descriptor's

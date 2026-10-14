@@ -63,6 +63,15 @@
 # a supervisor subcommand runs backend/app/cli.py with THIMBLE_CALLER_CWD set; any other word prints the usage and
 # exits 2. This file is reached through the ~/.local/bin/thimble symlink, so its directory comes from the resolved $0.
 set -euo pipefail
+# thimble talks to its own server on 127.0.0.1. Keep that traffic off any HTTP proxy the shell sets: every process this
+# launcher starts (Claude Code, its hooks module, the MCP shim, the server) reads NO_PROXY / no_proxy.
+for _np in NO_PROXY no_proxy; do
+  case ",${!_np:-}," in
+    *,127.0.0.1,*) ;;
+    *) export "$_np=${!_np:+${!_np},}127.0.0.1,localhost" ;;
+  esac
+done
+unset _np
 resolve_link() {  # resolve_link PATH: the file a chain of symlinks ends at, as an absolute path (readlink -f is not on every macOS);
   # exit 1 when the chain ends at nothing or runs past 40 hops (a cycle)
   local p="$1" t n=0
