@@ -28,7 +28,7 @@ afterEach(() => {
 })
 
 const REFUSAL = 'Your Claude Code session is in plan mode, where thimble\'s agents would have to ask you before every card and every edit, so none of them starts or takes a message there. Switch out of plan mode first (shift+tab in your terminal).'
-const OFFER = { slug: 'agent-timeline', name: 'Agent Timeline', description: 'Every agent on one time axis.', task: 'compare the agents', claims: ['agents/*.jsonl'], status: 'suggested', offered: { at: '2026-10-14T10:00:00Z', turn: 3, after: 'main' } }
+const OFFER = { slug: 'agent-timeline', name: 'Agent Timeline', description: 'Every agent on one time axis.', task: 'compare the agents', claims: ['agents/*.jsonl'], status: 'suggested', offered: { at: '2026-10-14T10:00:00Z', after: 'main' } }
 
 test('an Accept that cannot start says why under the view proposal, once, and makes no toast', async () => {
   vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {

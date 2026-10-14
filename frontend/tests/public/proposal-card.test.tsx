@@ -17,7 +17,7 @@ import { mount, settle, unmountAll } from './mount.tsx'
 vi.mock('../../src/lib/telemetry.ts', async (orig) => ({ ...(await orig<typeof import('../../src/lib/telemetry.ts')>()), track: vi.fn() }))
 
 const row = (slug: string, at: string | null, extra: Partial<Proposal> = {}): Proposal =>
-  ({ slug, name: slug.replace(/-/g, ' '), description: `What ${slug} shows.`, task: 'compare how the agents coordinated', claims: ['agents/*.jsonl'], status: 'suggested', ...(at ? { offered: { at, turn: 2, after: 'main' } } : {}), ...extra }) as Proposal
+  ({ slug, name: slug.replace(/-/g, ' '), description: `What ${slug} shows.`, task: 'compare how the agents coordinated', claims: ['agents/*.jsonl'], status: 'suggested', ...(at ? { offered: { at, after: 'main' } } : {}), ...extra }) as Proposal
 
 describe('which proposal shows, and its line', () => {
   test('the oldest suggested row with `offered`; a row without it (an older version), one switched off or one answered never shows', () => {
@@ -146,7 +146,7 @@ describe('the card', () => {
   })
 
   test('a viewer proposed for a file type shows the files it reads in place of a task', async () => {
-    proposals = [row('vtt-viewer', '2026-10-14T10:00:00Z', { task: '', claims: ['**/*.vtt'], proposed_by: 'files', offered: { at: '2026-10-14T10:00:00Z', turn: 2, after: 'file' } } as Partial<Proposal>)]
+    proposals = [row('vtt-viewer', '2026-10-14T10:00:00Z', { task: '', claims: ['**/*.vtt'], proposed_by: 'files', offered: { at: '2026-10-14T10:00:00Z', after: 'file' } } as Partial<Proposal>)]
     const el = await card('pc-file', false)
     expect(el.querySelector('.chat-offer-task')?.textContent).toBe('For **/*.vtt')
     expect(el.querySelector('.chat-offer')?.getAttribute('data-after')).toBe('file')

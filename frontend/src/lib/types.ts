@@ -516,20 +516,18 @@ export interface Proposal {
   values?: { model?: string; effort?: string } | null
   model?: string | null
   effort?: string | null
-  /** a view proposal thimble made to the analyst (backend views.offer): when, at which analyst turn, after what
-   * (`main`, `thread:<id>`, `orientation`, or `file` for a viewer proposed when a file was opened) and why. An open
+  /** a view proposal thimble made to the analyst (backend views.offer): when, after what (`main`, `thread:<id>`,
+   * `orientation`, or `file` for a viewer proposed when a file was opened) and why. An open
    * proposal is `suggested` with this; a `suggested` row without it is from an older version and never shows */
   offered?: ProposalOffer | null
   /** how the analyst answered the view proposal: Accept or Reject */
   answer?: 'accepted' | 'rejected' | null
   answered_at?: string | null
-  answered_turn?: number | null
 }
 
 /** When and why thimble proposed the view (Proposal.offered). */
 export interface ProposalOffer {
   at: string
-  turn?: number
   after: string
   why?: string
 }
@@ -764,7 +762,7 @@ export interface Refusal {
   expired?: boolean
 }
 
-/** What a click start answers (Start, Write, Start it, Try again; subagents.Answer): the agent id when it started,
+/** What a click start answers (Write, Accept, Start it, Try again; subagents.Answer): the agent id when it started,
  * else the refusal's kind and reason; `request` is the pending request either way, `program` an extension's program
  * that runs it instead. */
 export interface StartAnswer {

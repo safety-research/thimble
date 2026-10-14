@@ -109,7 +109,7 @@ const GET: Record<string, unknown> = {
   [`/api/ws/${WS}/concepts`]: [],
   [`/api/ws/${WS}/views`]: [],
   // a view proposal waiting for the analyst, which the chat shows only once the tour ends
-  [`/api/ws/${WS}/views/proposals`]: [{ slug: 'deploy-timeline', name: 'Deploy Timeline', description: 'Every deploy on one time axis.', task: 'see which deploys broke the database', claims: ['deploys.csv'], status: 'suggested', proposed_by: 'proposer', offered: { at: T, turn: 1, after: 'main' } }],
+  [`/api/ws/${WS}/views/proposals`]: [{ slug: 'deploy-timeline', name: 'Deploy Timeline', description: 'Every deploy on one time axis.', task: 'see which deploys broke the database', claims: ['deploys.csv'], status: 'suggested', proposed_by: 'proposer', offered: { at: T, after: 'main' } }],
   [`/api/corpora/${WS}/sources`]: FILES,
   [`/api/ws/${WS}/labels`]: [],
   [`/api/ws/${WS}/labels/presence`]: [],
