@@ -3,10 +3,10 @@ the view builders and reviewers (dev.py, view_review.py), the runs of report che
 tickets (dev.py, ticket_tools.py). Each is a named subagent with a fresh context, of a type thimble's plugin module
 registers (`thimble:<role>`, roles); the orientation's own subagents run as `thimble:orient-helper`.
 
-Starts. A click in the browser (Start, Write, Start it, …) starts its agent through the plugin's module, with no turn of
+Starts. A click in the browser (Write, a view proposal's Accept, Start it, …) starts its agent through the plugin's module, with no turn of
 main: start_job writes the pending request, then asks the module (module_bridge.request) to spawn it, and the module's
 answer ends the request ({agentId}, a deny of thimble's own --agent-check, Claude Code's concurrency limit, or no
-module). A follow-on start (a run's own next step, such as the orientation's report pass) goes the same way. A typed
+module). A follow-on start (a run's own next step, such as a view build's review) goes the same way. A typed
 request goes through main: the start tool records the pending request and returns the exact Agent call, which main
 makes; the plugin's --agent-check hook lets only that call through, and the mirror watches for a start that does not
 happen (R1–R3, session.py). The typed start of a thread's fork's start_orientation, propose_view, file_dev_ticket,
@@ -799,7 +799,7 @@ async def _spawn(c: str, rid: str, r: dict[str, Any]) -> Answer:
     ans = await _bridge(c, "spawn", role=r.get("role"), values=r.get("values") or {}, prompt=inp.get("prompt"),
                         description=inp.get("description"), request=rid, what=_what(r), route=r.get("route") or CLICK)
     if ans.started:
-        meta = bind(c, str(ans.agent_id), rid)  # its chat, which the browser opens after a click (Start's thread)
+        meta = bind(c, str(ans.agent_id), rid)  # its chat, which the browser opens after a click (the started agent's thread)
         return Answer({**ans, "request": rid, **({"chat": meta["id"]} if meta and meta.get("id") else {})})
     if ans.get("expired"):
         expire(c, rid)

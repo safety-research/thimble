@@ -382,13 +382,20 @@ async def test_the_critic_s_first_message_has_the_line_in_place_of_the_unread_ch
     assert "were opened by no card" not in text
 
 
-def test_the_critique_is_the_orientation_s_choice_with_no_switch(workspaces_tmp):
+async def test_the_critique_is_the_orientation_s_choice_with_no_switch(workspaces_tmp):
     """The orientation's prompt offers the critique whatever its start said; a start records no critique switch and
-    keeps its deck; and no tool of the orientation's belongs to a part (PART_TOOLS), so tools._as_caller refuses
-    neither `critique` nor a card tool, also on the record of an earlier version whose critique or deck was off."""
+    keeps its deck; and tools._as_caller refuses the orientation neither `critique` nor a card tool, also on the record
+    of an earlier version whose critique or deck was off."""
     assert "when a review would help, call `critique`" in orient_session.system_prompt(CORPUS, "")
     orientation.start_requested(CORPUS, {"text": "", "passes": ["views"], "critique": False})
     rec = orientation.read_run(CORPUS)
     assert rec["passes"] == ["final"] and "critique" not in rec and orientation.deck_of(rec)
-    assert orient_session.PART_TOOLS == {}
     assert "critique" in orient_session.ORIENT_TOOLS and "propose_view" not in orient_session.ORIENT_TOOLS
+    orientation._write_run(CORPUS, {**rec, "passes": ["views"], "critique": False})  # an earlier version's record
+    ws = config.workspace_dir(CORPUS)
+    with subagents.update(CORPUS) as state:
+        sf.registry(state)["orient1"] = {"key": orient_session.KEY, "role": "orientation", "status": "running"}
+    sf.add_caller(ws, "toolu_o1", "orient1", "thimble:orientation")
+    sf.add_caller(ws, "toolu_o2", "orient1", "thimble:orientation")
+    assert await tools._as_caller(CORPUS, "critique", "toolu_o1") == ("", orient_session.KEY)
+    assert await tools._as_caller(CORPUS, "add_card", "toolu_o2") == ("", orient_session.KEY)

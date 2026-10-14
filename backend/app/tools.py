@@ -3116,9 +3116,8 @@ async def _as_caller(c: str, name: str, tool_use_id: str | None) -> tuple[str, s
     """(why the call is refused, '' when it runs; the session it runs as) for a call through main's shim: the key of the
     agent of thimble's that made it (subagents.caller, from the caller hook's line, else the transcript that holds the
     call), or None for main's own. A call its caller may not make is refused (subagents.allowed): main's `critique`, the
-    critic's `add_card`, a tool of a part the orientation's run has off (orientation.part_on). A thread's fork's call
-    runs as main's own (_fork_of)."""
-    from . import orientation, orient_session, subagents  # noqa: PLC0415 — each imports this module
+    critic's `add_card`. A thread's fork's call runs as main's own (_fork_of)."""
+    from . import subagents  # noqa: PLC0415 — it imports this module
 
     canon = canonical(name)
     who = await subagents.caller(c, tool_use_id) if tool_use_id else None
@@ -3129,10 +3128,6 @@ async def _as_caller(c: str, name: str, tool_use_id: str | None) -> tuple[str, s
         return "", None
     if not subagents.allowed(who, canon):
         return f"{canon} is not available to {who.agent_type or 'this agent'}", None
-    if session_kind(who.key) == ORIENT_SESSION:
-        part = next((p for p, names in orient_session.PART_TOOLS.items() if canon in names), None)
-        if part is not None and not orientation.part_on(c, part):
-            return f"{canon} is not available in this run of the orientation, whose {part} output is off", None
     return "", who.key
 
 

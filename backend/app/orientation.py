@@ -128,16 +128,6 @@ def _emit(c: str, status: str, **fields: Any) -> None:
         log.warning("orientation %s: could not emit %s", c, status, exc_info=True)
 
 
-def part_on(c: str, part: str) -> bool:
-    """Whether the latest orientation's record names `part` among its passes, or for `critique` keeps the critique on,
-    as a record from before 0.8.0 may. Since 0.8.0 no tool of the orientation's belongs to a part
-    (orient_session.PART_TOOLS is empty), so tools._as_caller, which asks this for such a tool, refuses no call."""
-    run = read_run(c) or {}
-    if part == "critique":
-        return bool(run.get("critique"))
-    return part in (run.get("passes") or [])
-
-
 def ensure_groups(c: str, deck: bool = False) -> dict[str, str]:
     """{orientation}: the id of the deck, the root group `Orientation`, found or made by the path add_card resolves, so
     a later orientation appends to it. A deck made here is a column. With `deck`, an Orientation stored as a row holding

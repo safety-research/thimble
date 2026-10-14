@@ -3,12 +3,11 @@
 Its registration (definition) is prompts/writer.md with shared.md loaded as the skill `thimble:shared`, the `writer`
 role's model and effort from Settings, and of thimble's tools OWN_TOOLS. Its run's prompt names its task and a context
 file, writers/<doc>/context.md, that holds the whole context (context.render, CONTEXT_CHARS) followed by the task, which
-it reads first. One writer runs per document. Write in the browser is a click (write_route), the orientation's report
-pass a follow-on start of the same click or typed start (follow_on), both through thimble's plugin module; main's
-`start_writing` gives the exact Agent call main makes (tool_start_writing), and a thread's fork's gives it to main in a
-`start_agent` event (tools._ask_main). Main hears a `written` browser event when a writer ends. A writer answering the
-orientation's report pass carries `orient` and `orient_run` on its chat. A writer stopped when Claude Code quit is
-started again with Write again (subagents.again)."""
+it reads first. One writer runs per document. Write in the browser is a click (write_route), through thimble's plugin
+module; main's `start_writing` gives the exact Agent call main makes (tool_start_writing), and a thread's fork's gives it
+to main in a `start_agent` event (tools._ask_main). Main hears a `written` browser event when a writer ends. A writer
+that answered the report pass of an orientation from before 0.8.0 carries `orient` and `orient_run` on its chat. A
+writer stopped when Claude Code quit is started again with Write again (subagents.again)."""
 from __future__ import annotations
 
 import asyncio
@@ -128,25 +127,6 @@ async def start(c: str, doc: str, request: str = "", after: str = "", *, route: 
                                           **fields},
                                     work=work_dir(c, doc), call=call, check=False)
     return ans
-
-
-def follow_on(c: str, doc: str, request: str = "", **fields: Any) -> None:
-    """The writer of `doc` as a follow-on start of a run whose own start was the analyst's click or a typed start main
-    made (the orientation's report pass, Q5), through the module, in a task; in plan mode it waits (out_of_plan)."""
-    async def go() -> None:
-        try:
-            await subagents.out_of_plan(c)
-            ans = await start(c, doc, request, route=subagents.FOLLOW_ON, **fields)
-        except Exception:  # noqa: BLE001
-            log.exception("%s: the writer of %s did not start", c, doc)
-            return
-        if ans.refused:
-            log.info("%s: the writer of %s did not start: %s (%s)", c, doc, ans.reason, ans.kind)
-
-    try:
-        asyncio.get_running_loop().create_task(go(), name=f"writer-follow-on:{c}:{doc}")
-    except RuntimeError:
-        log.warning("%s: no loop to start the writer of %s in", c, doc)
 
 
 def start_program(c: str, doc: str, t: dict[str, Any], request: str, after: str, context_text: str, part: Any,

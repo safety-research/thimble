@@ -75,10 +75,6 @@ ROLE = "orientation"  # its role among subagents.TYPES
 # (thimble's view proposer does, proposer.py), so propose_view is not among them.
 ORIENT_TOOLS = ("read_ref", "list_cards", "add_card", "edit_card", "delete_card", "apply_label", "screenshot", "critique")
 
-# The thimble tools that belong to a part of a run, which tools._as_caller refuses while the part is off
-# (orientation.part_on). Since 0.8.0 a start has no switches, so no tool belongs to one.
-PART_TOOLS: dict[str, tuple[str, ...]] = {}
-
 WORK_DIR = "work"  # orient/work: the one folder outside the corpus the session writes into
 
 INSTRUCTIONS = "orient-instructions"  # prompts/orient-instructions.md, thimble's default instructions

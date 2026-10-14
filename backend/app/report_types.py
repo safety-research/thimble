@@ -2301,14 +2301,6 @@ def write_saved(c: str, slug: str) -> bool:
     return bool(w and w.get("saved"))
 
 
-def write_for_orientation(c: str, slug: str, chat: str, run: int = 0) -> None:
-    """The pending write of `slug` is the orientation's report pass (orientation.request_report): its writer carries the
-    orientation's chat and run, and the browser shows it on the orientation's card."""
-    w = write_pending(c, slug)
-    if w is not None:
-        w.update(orient=chat, orient_run=int(run or 0))
-
-
 def _writer_chat(ctx: Any) -> str | None:
     """The chat of the writer a call comes from (its key `writer:<doc>`, subagents.caller), named as `writer` on a
     save's chip; None for any other caller."""
