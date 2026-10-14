@@ -3,7 +3,7 @@
 // shows the whole span, a drag across the whole span frames a new range, the keys zoom and pan, and Ctrl with the wheel
 // zooms around the pointer, telling onInput at each step and onChange once it stops; the hover tip stands under the overview, and the readout keeps the overview in place as it
 // zooms; the overview draws its records in the Color by
-// colours, grey with Off, one colour per pixel row; a long list gets one strip, no zoomed track, its thumb on the pixel
+// colours, the one series color with Off, one colour per pixel row; a long list gets one strip, no zoomed track, its thumb on the pixel
 // grid once still; resting on it opens the loupe beside it, a line per record around the pointer with its line, its
 // colour's cell and its text, which follows the pointer, stays where it is as the list moves by itself, goes to the
 // thumb on the wheel over the strip or a drag of the thumb, and moved into holds still: a click goes to a record and
@@ -22,7 +22,7 @@ const read = (name: string) => readFileSync(path.join(APP, name), 'utf8')
 const inline = (js: string) => js.replace(/<\/script/g, '<\\/script')
 const KIT = `<script>${inline(read('viewer_bridge.js'))}</script><script>window.__thimbleLabelOrder = ${read('label_order.json')}</script><script>${inline(read('viewer_colour.js'))}</script><script>${inline(read('viewer_range.js'))}</script><style>${read('viewer_kit.css')}</style>`
 const TOKENS =
-  ':root{--label-1:#025ac3;--label-2:#d0750a;--label-3:#08632f;--label-none:#a09c93;--ink-rgb:27,26,24;--surface-card:#fffdf8;' +
+  ':root{--label-1:#025ac3;--label-2:#d0750a;--label-3:#08632f;--label-none:#a09c93;--viz-1:#5e4bd6;--ink-rgb:27,26,24;--surface-card:#fffdf8;' +
   '--text-primary:#000;--text-secondary:#4a4844;--text-tertiary:#726f69;--accent:#5135ff;--radius-chip:4px;--radius-ui:6px;' +
   '--h-row:28px;--control-sm:28px;--h-control:24px;--h-chip:20px;--text-xs:12px;--text-ui-sm:12px;--text-mono-sm:11px;--border-subtle:rgba(27,26,24,0.12);' +
   '--border-hairline:rgba(27,26,24,0.08);--font-body:sans-serif;--font-mono:monospace;--radius-hl:3px}'
@@ -278,7 +278,7 @@ describe('the time range selector in a frame', () => {
     await page.close()
   })
 
-  test('the overview draws its records in the Color by colours, and grey with Off', async () => {
+  test('the overview draws its records in the Color by colours, and in the one series color with Off', async () => {
     const { page, frame } = await framed()
     const px = () =>
       frame().evaluate(() => {
@@ -292,8 +292,8 @@ describe('the time range selector in a frame', () => {
     await frame().locator('.thimble-colour-menu [data-by="off"]').click()
     await page.waitForTimeout(200)
     const [a, b] = await px()
-    assert.deepEqual(a, b, 'one grey for every record')
-    assert.ok(Math.max(...a) - Math.min(...a) < 12, `a grey: ${a}`)
+    assert.deepEqual(a, b, 'one color for every record')
+    assert.deepEqual(a, [94, 75, 214], 'the one series color, as a chart of one series')
     assert.equal(await frame().locator('.thimble-colour-chip').count(), 0)
     await page.close()
   })

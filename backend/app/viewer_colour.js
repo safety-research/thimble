@@ -448,7 +448,8 @@
     return p
   }
   // A field's declared values and the palette place of each: a value given as {name, colour} takes the colour it names
-  // (1 to 12, as a label's value names its colour); the others take the free places in ORDER, in their order
+  // (1 to PICKS, as the picker names them: the twelve, then red, purple and pink, which a page may give a value whose
+  // meaning they carry, such as red for a failure); the others take the free places in ORDER, in their order
   function declare(list) {
     if (!Array.isArray(list)) return null
     var values = []
@@ -462,7 +463,7 @@
       if (values.indexOf(name) >= 0) continue
       if (obj && typeof v.meaning === 'string' && v.meaning) meanings[name] = v.meaning
       var c = obj ? Number(v.color !== undefined ? v.color : v.colour) : NaN
-      var at = c >= 1 && c <= PALETTE && Math.floor(c) === c && !taken[c - 1] ? c - 1 : -1
+      var at = c >= 1 && c <= PICKS && Math.floor(c) === c && !taken[c - 1] ? c - 1 : -1
       if (at >= 0) taken[at] = true
       values.push(name)
       named.push(at)

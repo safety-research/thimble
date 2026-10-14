@@ -534,7 +534,8 @@ describe('the timeline on its own', () => {
     expect(doc().querySelectorAll('#lanes .thimble-lane')).toHaveLength(1)
     expect(doc().querySelector('#lanes .thimble-lane-name')).toBe(null)
     expect(doc().querySelector('#lanes')!.classList.contains('is-nameless')).toBe(true)
-    // an ISO time, seconds since 1970 and a Date each placed, in order, a few px in from the axis's edges, in gray
+    // an ISO time, seconds since 1970 and a Date each placed, in order, a few px in from the axis's edges, in the one
+    // series color (jsdom resolves no CSS variable), as a chart of one series
     const marks = [...doc().querySelectorAll('#lanes .thimble-lane-mark[data-i]')] as HTMLElement[]
     const xs = marks.map((m) => Number(m.getAttribute('x')))
     expect(w.tl.lanes[0].items.map((e: any) => e.ref)).toEqual(['a#L1', 'a#L2', 'a#L3'])
@@ -542,7 +543,7 @@ describe('the timeline on its own', () => {
     expect(xs[0]).toBeGreaterThan(2)
     expect(xs[1] - xs[0]).toBeCloseTo(xs[2] - xs[1], 0)
     expect(xs[2]).toBeLessThan(798)
-    expect(marks.every((m) => !m.style.fill)).toBe(true)
+    expect(marks.map((m) => m.style.fill)).toEqual(['var(--viz-1)', 'var(--viz-1)', 'var(--viz-1)'])
     // its axis over the lane, in hours
     const labels = texts('#lanes .thimble-lanes-axis .thimble-axis-lab')
     expect(labels.length).toBeGreaterThan(2)

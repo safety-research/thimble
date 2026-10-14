@@ -9,7 +9,8 @@ colors below. Show any other category of
 the view as text or a glyph, never in a second palette or in shades of gray, which read as an order. Values with a
 meaning people know may draw their glyph or word in thimble's status colors, as the diff's + and − and the timeline's
 problem ✕ do: an addition or a success in `var(--status-positive)`, a deletion or a failure in
-`var(--status-negative)` (Color by never gives a value red). Filter by and Rows
+`var(--status-negative)`. Color by gives such a value its color when the page declares it (`values`, below: 3 green,
+13 red). Filter by and Rows
 stand beside it in the top row ([rows-and-filters.md](rows-and-filters.md)): they read a field or a label the way
 Color by does, and draw no color.
 
@@ -36,8 +37,9 @@ Color by does, and draw no color.
   field, or on a few values of a field: `initial: {field: 'outcome', on: ['error']}`
   colors only the errors, and the records of the other values stay in gray, as values turned off. A label that is on
   in thimble takes the color as the view opens (below).
-- Off colors nothing anywhere: no chips, no bars, no lanes, the tracks a plain scrollbar, the lanes and the time range's
-  overview every record in gray, and the labels' texts highlighted in gray, a label on or not.
+- Off colors by nothing: no chips, no bars, no lanes, the tracks a plain scrollbar, and the labels' texts highlighted
+  in gray, a label on or not. The marks then show one variable, so the timeline's marks, the time range's overview and
+  a chart's groups take the one series color, `var(--viz-1)`, as a chart of one series does.
 - The values of the chosen field show as key chips in the top row (`chip chip-key` in the view kit): a square of the
   value's color, its name and its count. The chip of the records with no value ("Not marked", "No kind") has the gray
   square the marks draw those records in. A click turns a value's color off or on. An Alt-click, or a double click,
@@ -57,7 +59,8 @@ Color by does, and draw no color.
   records' bars, the tracks, and what the page draws through `colorOf`. A label's value keeps it as the label's color,
   in Files and every view; a field's value keeps it for this view, and Reset colors in the picker gives the field's
   values their own colors back. Red, purple and pink (places 13 to 18) are the analyst's to pick: no value takes them by
-  itself, so the problem red and the agents' purple keep their meaning, and a failed mark keeps a shape (✕) beside
+  itself, unless the page declares one for a value whose meaning it carries, such as red for a failure, so the problem
+  red and the agents' purple keep their meaning, and a failed mark keeps a shape (✕) beside
   its red so that it stays apart from a value picked red.
 - Color marks the unit its value belongs to: the records, the elements the page anchors (`data-anchor`). On a record,
   color is a 3 px bar on the left edge of its row or card; with several choices, a band per choice there, side by side
@@ -119,7 +122,7 @@ load()
 | option | what it is |
 |---|---|
 | `mount` | an element or a selector in the view's top row. The control fills it and takes the row's free width. |
-| `fields` | the view's own fields it can color by, in menu order: `{name, title, description?, values?, meanings?, value?}`. `name` is the field as the records hold it. `description` says what the field is, on its chips' hover and its menu row. `values` fixes the order of the values and their colors. A value given as `{name, color}` takes the label palette's color `color` (1 to 12: 1 blue, 2 orange, 3 green, 4 sky, 5 gold, 6 teal, 7 brown, 8 navy, 9 grass, 10 cerulean, 11 chestnut, 12 cyan), for example so that two values that often sit side by side do not take two blues; `{name, meaning}` says what the value means, on its chip's hover. `meanings`, `{value: meaning}`, says what values mean without declaring them, so they keep the order and colors the records give them. `value(record)` gives a record's value when it is not `record[name]`. |
+| `fields` | the view's own fields it can color by, in menu order: `{name, title, description?, values?, meanings?, value?}`. `name` is the field as the records hold it. `description` says what the field is, on its chips' hover and its menu row. `values` fixes the order of the values and their colors. A value given as `{name, color}` takes the picker's color `color` (1 to 18: 1 blue, 2 orange, 3 green, 4 sky, 5 gold, 6 teal, 7 brown, 8 navy, 9 grass, 10 cerulean, 11 chestnut, 12 cyan, then 13 red and 14 light red, 15 and 16 purple, 17 and 18 pink, which no value takes by itself), for example so that two values that often sit side by side do not take two blues, or so that a failure is red and a success green; purple stays thimble's color for agents' work; `{name, meaning}` says what the value means, on its chip's hover. `meanings`, `{value: meaning}`, says what values mean without declaring them, so they keep the order and colors the records give them. `value(record)` gives a record's value when it is not `record[name]`. |
 | `initial` | how the view opens until the analyst picks: a field's name, or `{field, on: [values]}`, that field with only those values colored and the others' records in gray. Without it, or with a name that is none of the fields, the view opens Off. Reset puts it back |
 | `chips` | does nothing: a value turned off keeps its records, in gray, whatever it says (`'filter'` hid them once). Filter by hides records ([rows-and-filters.md](rows-and-filters.md)) |
 | `strip` | the list that gets the tracks: an element, a selector, or `true` for the page |

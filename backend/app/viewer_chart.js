@@ -110,6 +110,10 @@
   // the spec with every color channel over groups in Color by's colours, in the spec's order of them, and no legend
   function coloured(spec, colour) {
     var gray = kit.realColour('var(--label-none)')
+    // with Color by Off the groups are one variable: the one series color, as a chart of one series; the rows with no
+    // value keep the gray
+    var off = !!colour.off || (colour.field === null && colour.label === null)
+    var one = kit.realColour('var(--viz-1)')
     var walk = function (s, rows) {
       if (!s || typeof s !== 'object' || Array.isArray(s)) return s
       var own = s.data && Array.isArray(s.data.values) ? s.data.values : rows
@@ -126,6 +130,7 @@
         if (!domain.length) return out // a field the rows do not hold, such as one a transform makes
         if (has(own, c.field, null)) domain.push(null)
         var range = domain.map(function (v) {
+          if (v != null && off) return one
           return (v != null && ctl.safe(function () { return colour.colourOf(v) }, null)) || gray
         })
         out.encoding = Object.assign({}, s.encoding, { color: Object.assign({}, c, { scale: { domain: domain, range: range }, legend: null }) })

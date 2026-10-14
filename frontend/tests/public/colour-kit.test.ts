@@ -628,6 +628,17 @@ describe('a declared value that names its colour', () => {
     expect(['Text only', 'With links', 'Quote', 'Other'].map((v) => c.colourOf(v))).toEqual(['var(--label-1)', 'var(--label-6)', 'var(--label-2)', 'var(--label-3)'])
     expect(chips().map((x) => x[0])).toEqual(['Text only', 'With links', 'Quote', 'Other'])
   })
+
+  test("may name one of the picker's colours no value takes by itself, such as red for a failure", async () => {
+    await load()
+    const c = win().thimble.colourBy({ mount: '#colour', fields: [{ name: 'outcome', title: 'Outcome', values: [{ name: 'merged', colour: 3 }, { name: 'failed', colour: 13 }] }], initial: 'outcome' })
+    c.counts({ merged: 3, failed: 2, open: 1 })
+    await wait()
+    // the declared ones their own; the undeclared one one of the twelve, since red is never a place a value takes by itself
+    expect(['merged', 'failed'].map((v) => c.colourOf(v))).toEqual(['var(--label-3)', 'var(--label-13)'])
+    expect(c.colourOf('open')).toMatch(/^var\(--label-([1-9]|1[0-2])\)$/)
+    expect(chips().map((x) => x[0])).toEqual(['merged', 'failed', 'open'])
+  })
 })
 
 describe("a field's values without a colour of their own", () => {
