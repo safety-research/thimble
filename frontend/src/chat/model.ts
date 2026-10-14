@@ -1227,8 +1227,9 @@ export const API_ERROR_KIND = 'api-error'
 export const isApiError = (text: string): boolean => text.trim().startsWith(API_ERROR)
 
 /** Claude Code's error line after the words a reply streamed before the request failed (`Now the page: API Error:
- * Server error mid-response. The response above may be incomplete.`): one of its own wordings, running to the end. */
-const TRAILING_API_ERROR = /(?:^|\s)(API Error: (?:Repeated \d{3}|\d{3} \{|Server error|Connection error|Rate limit|Request timed out|Request was aborted|[^\n]{0,40}overloaded)[\s\S]*)$/
+ * Server error mid-response. The response above may be incomplete.`): one of its own wordings, running to the end, a
+ * refusal by Claude's safeguards among them. */
+const TRAILING_API_ERROR = /(?:^|\s)(API Error: (?:Repeated \d{3}|\d{3} \{|Server error|Connection error|Rate limit|Request timed out|Request was aborted|[^\n]{0,40}overloaded|[^\n]{0,60}safeguards|[^\n]{0,100}Usage Policy)[\s\S]*)$/
 
 /** Where Claude Code's API error line begins in a text: 0 when the text is the line, the offset of a line that ends a
  * reply cut short, -1 for none. Pure. */
@@ -1240,9 +1241,10 @@ export function apiErrorAt(text: string): number {
 }
 
 /** The kinds of failure an API error card names, sorted as the backend's retry.transient_class sorts them; `auth`
- * (401), `forbidden` (403) and `not_found` (404, a model id the account or provider does not have), which no retry
- * fixes; and `other` for an error that is none of them (a request the API refused). */
-export type ApiFailure = 'overloaded' | 'rate_limited' | 'server_error' | 'connection' | 'auth' | 'forbidden' | 'not_found' | 'other'
+ * (401), `forbidden` (403), `not_found` (404, a model id the account or provider does not have) and `refused` (a
+ * request Claude's safeguards or the usage policy stopped), which no retry fixes; and `other` for an error that is none
+ * of them. */
+export type ApiFailure = 'overloaded' | 'rate_limited' | 'server_error' | 'connection' | 'auth' | 'forbidden' | 'not_found' | 'refused' | 'other'
 
 const FAILURE_OF_STATUS: Readonly<Record<number, ApiFailure>> = { 401: 'auth', 403: 'forbidden', 404: 'not_found', 429: 'rate_limited', 500: 'server_error', 502: 'server_error', 503: 'server_error', 504: 'server_error', 529: 'overloaded' }
 const FAILURE_OF_BODY: Readonly<Record<string, ApiFailure>> = { overloaded_error: 'overloaded', api_error: 'server_error', server_error: 'server_error', rate_limit_error: 'rate_limited', authentication_error: 'auth', permission_error: 'forbidden', not_found_error: 'not_found' }
@@ -1250,6 +1252,8 @@ const STATUS_TEXT = /\b(?:HTTP|API Error:?|Error code:?|status(?: code)?:?)\s*(\
 const BARE_STATUS = /\b(429|5\d\d)\b/
 const BODY_TEXT = /\b(overloaded_error|api_error|server_error|rate_limit_error|authentication_error|permission_error|not_found_error)\b/i
 const CONNECTION_TEXT = /connection error|connection reset|connection refused|econnreset|econnrefused|etimedout|socket hang up|fetch failed|network error/i
+/** A request Claude's safeguards stopped, in Claude Code's words or the API's (backend model.py's refusal detail). */
+const REFUSED_TEXT = /safeguards|usage polic/i
 
 /** What an API error says failed, and the HTTP status it names (`Repeated 529 Overloaded errors`: 529), from Claude
  * Code's error line or the server's words for it; the same patterns the backend's retry.transient_class reads. Pure. */
@@ -1257,19 +1261,21 @@ export function apiFailure(text: string): { failure: ApiFailure; status: number 
   const named = STATUS_TEXT.exec(text)?.[1] ?? BARE_STATUS.exec(text)?.[1]
   const status = named ? Number(named) : null
   const body = BODY_TEXT.exec(text)?.[1]?.toLowerCase()
-  const failure: ApiFailure = /overloaded/i.test(text)
-    ? 'overloaded'
-    : status != null && FAILURE_OF_STATUS[status]
-      ? FAILURE_OF_STATUS[status]
-      : body
-        ? FAILURE_OF_BODY[body]
-        : /rate[ _-]?limit/i.test(text)
-          ? 'rate_limited'
-          : /server error/i.test(text)
-            ? 'server_error'
-            : CONNECTION_TEXT.test(text)
-              ? 'connection'
-              : 'other'
+  const failure: ApiFailure = REFUSED_TEXT.test(text)
+    ? 'refused'
+    : /overloaded/i.test(text)
+      ? 'overloaded'
+      : status != null && FAILURE_OF_STATUS[status]
+        ? FAILURE_OF_STATUS[status]
+        : body
+          ? FAILURE_OF_BODY[body]
+          : /rate[ _-]?limit/i.test(text)
+            ? 'rate_limited'
+            : /server error/i.test(text)
+              ? 'server_error'
+              : CONNECTION_TEXT.test(text)
+                ? 'connection'
+                : 'other'
   return { failure, status }
 }
 
@@ -1281,6 +1287,7 @@ const FAILURE_WORDS: Readonly<Record<ApiFailure, string>> = {
   auth: "Claude Code's login or API key was refused",
   forbidden: 'Your account may not make this request',
   not_found: "This model isn't available to your account",
+  refused: "Claude's safeguards stopped this request",
   other: "Anthropic's API returned an error",
 }
 
@@ -1289,13 +1296,14 @@ const FAILURE_FIX: Readonly<Partial<Record<ApiFailure, string>>> = {
   auth: 'run /login in your terminal, or check ANTHROPIC_API_KEY and run thimble server restart',
   forbidden: "check your login and your organization's settings, or pick another model in Settings",
   not_found: 'pick another model in Settings',
+  refused: 'rephrase or narrow the request and send it again',
 }
 
 /** What happened, in the card's head: the failure in plain words and its status (Anthropic's API is overloaded (529)),
- * then what to do when no retry fixes it. Pure. */
+ * then what to do when no retry fixes it. A refusal names no status, which says nothing of why. Pure. */
 export function apiFailureText(text: string): string {
   const { failure, status } = apiFailure(text)
-  const head = status != null ? `${FAILURE_WORDS[failure]} (${status})` : FAILURE_WORDS[failure]
+  const head = status != null && failure !== 'refused' ? `${FAILURE_WORDS[failure]} (${status})` : FAILURE_WORDS[failure]
   const fix = FAILURE_FIX[failure]
   return fix ? `${head}: ${fix}` : head
 }
