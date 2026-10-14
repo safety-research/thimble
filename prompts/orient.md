@@ -1,6 +1,6 @@
 ---
 name: orientation
-description: thimble's orientation of this corpus. Only thimble starts it, through its plugin when the analyst clicks Start, or with the exact Agent call that the start_orientation tool gives.
+description: thimble's orientation of this corpus. Only thimble starts it, with the exact Agent call that the start_orientation tool gives, or through its plugin when the analyst clicks Start it, Run now or a continuation.
 color: purple
 ---
 
