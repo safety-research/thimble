@@ -1789,10 +1789,12 @@ MANUAL_LINES = {
                 "most commands that main or thimble's agents run (agents ask only in this terminal).",
 }
 NO_FENCE_LINES = {
-    "never": "thimble: WARNING - thimble's config turns the sandbox off (sandbox.use \"never\"), so main and thimble's "
-             "agents run without thimble's fence and can change your files.",
-    "missing": "thimble: WARNING - Claude Code's Bash sandbox can't run on this machine, so main and thimble's agents run "
-               "without thimble's fence and can change your files; `thimble doctor` says what is missing.",
+    "never": "thimble: WARNING - thimble's config turns the sandbox off (sandbox.use \"never\"), so main runs without "
+             "thimble's fence and can change your files, and thimble's agents can't start. Main, cards and labels still "
+             "work.",
+    "missing": "thimble: WARNING - Claude Code's Bash sandbox can't run on this machine, so main runs without thimble's "
+               "fence and can change your files, and thimble's agents can't start. `thimble doctor` says what is "
+               "missing; on Linux, `install.sh --sandbox-deps` installs it.",
     "refused": "thimble: WARNING - thimble does not open this folder as a workspace (your home folder, /, or a folder it "
                "could not register), so main runs without thimble's fence and thimble's agents cannot start here.",
 }
@@ -1832,6 +1834,22 @@ def fence_off(c: str | None) -> str:
     if box["use"] == "never":
         return "never"
     return "" if cc_settings.sandbox_ok() else "missing"
+
+
+def unfenced_reason(c: str | None) -> str:
+    """Why main, which the launcher started in workspace `c`, runs without thimble's fence, in words for the start
+    refusal (subagents.refusal_before): thimble's config turns the sandbox off, or Claude Code's sandbox can't run here,
+    with what it lacks (cc_settings.sandbox_missing); '' when fence_off finds no reason, as for an analyst's --settings
+    that could not be read."""
+    from . import cc_settings  # noqa: PLC0415
+
+    why = fence_off(c)
+    if why == "never":
+        return 'thimble\'s config turns the sandbox off (sandbox.use "never")'
+    if why != "missing":
+        return ""
+    missing = cc_settings.sandbox_missing()
+    return "Claude Code's sandbox can't run on this machine" + (f" (missing: {', '.join(missing)})" if missing else "")
 
 
 def ticket_trees() -> list[Path]:
@@ -2749,9 +2767,10 @@ def sandbox_lines(commands: bool = True) -> list[str]:
     except Exception:  # noqa: BLE001
         box = userconf.DEFAULTS["sandbox"]
     if box.get("use") == "never":
-        return ["  bash sandbox: off in thimble's config (sandbox.use \"never\"), so "
-                + ("thimble's config (sandbox.enforce) refuses to start the agents" if box.get("enforce") else
-                   "the agents' Bash runs with your user's access, limited only by each agent's permission mode")]
+        return ["  bash sandbox: off in thimble's config (sandbox.use \"never\"), so main runs without thimble's fence and "
+                "thimble's agents can't start; "
+                + ("thimble's config (sandbox.enforce) also refuses to start `thimble fix`" if box.get("enforce") else
+                   "`thimble fix` runs its Bash with your user's access, limited only by its permission mode")]
     if not missing:
         from . import ticket_box  # noqa: PLC0415
 
@@ -2762,8 +2781,9 @@ def sandbox_lines(commands: bool = True) -> list[str]:
         return ["  bash sandbox: runs (every agent's Bash runs in it: no writes outside the agent's folder and no "
                 f"network unless the agent's network is \"on\"; {tickets}; Claude Code's sandbox adds an empty "
                 ".claude/.cc-writes/ folder to the agent's own folder, where its commands start)"]
-    after = ("thimble's config (sandbox.enforce) refuses to start the agents" if box.get("enforce") else
-             "the agents' Bash runs outside it, under each agent's permission mode")
+    after = ("main runs without thimble's fence and thimble's agents can't start; "
+             + ("thimble's config (sandbox.enforce) also refuses to start `thimble fix`" if box.get("enforce") else
+                "`thimble fix` runs its Bash outside it, under its permission mode"))
     head = "  bash sandbox: off, missing " + ", ".join(missing) + "; " + after
     if not cmds or not commands:
         return [head + (f"; {what}" if what else "")]

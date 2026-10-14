@@ -23,6 +23,7 @@ HINTS = {
     "writer-context-file": "READ {path} FIRST",
     "critic-brief-file": "READ {path} FIRST",
     "start-refused-not-launched": "NOT LAUNCHED",
+    "start-refused-unfenced": "UNFENCED: {reason}",
     "start-refused-no-module": "NO MODULE: {reason}",
     "orient-continue-earlier-session": "EARLIER SESSION: {resume}",
     "orient-continue-earlier-version": "EARLIER VERSION",

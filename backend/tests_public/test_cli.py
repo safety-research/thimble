@@ -774,8 +774,8 @@ def test_the_doctor_says_when_the_analyst_s_own_sandbox_makes_a_folder_in_the_co
 
 
 def test_the_doctor_s_sandbox_line_follows_the_config(monkeypatch):
-    """Every agent's Bash uses the sandbox where it runs; sandbox.use "never" turns it off, and sandbox.enforce
-    refuses to start the agents where it cannot run."""
+    """Every agent's Bash uses the sandbox where it runs; sandbox.use "never" turns it off. Without it main runs
+    unfenced and thimble's agents can't start, and sandbox.enforce refuses to start `thimble fix` too."""
     from app import cc_settings, userconf
 
     conf = {"sandbox": {"use": "when-available", "enforce": False}}
@@ -784,8 +784,10 @@ def test_the_doctor_s_sandbox_line_follows_the_config(monkeypatch):
     assert "every agent's Bash runs in it" in cli.sandbox_lines()[0]
     conf["sandbox"]["use"] = "never"
     assert "off in thimble's config" in cli.sandbox_lines()[0]
+    assert "thimble's agents can't start" in cli.sandbox_lines()[0]
     conf["sandbox"] = {"use": "when-available", "enforce": True}
     monkeypatch.setattr(cc_settings, "sandbox_missing", lambda: ["bubblewrap"])
     monkeypatch.setattr(cc_settings, "sandbox_setup", lambda: ([], ""))
-    assert cli.sandbox_lines() == ["  bash sandbox: off, missing bubblewrap; thimble's config (sandbox.enforce) refuses "
-                                   "to start the agents"]
+    assert cli.sandbox_lines() == ["  bash sandbox: off, missing bubblewrap; main runs without thimble's fence and "
+                                   "thimble's agents can't start; thimble's config (sandbox.enforce) also refuses to "
+                                   "start `thimble fix`"]

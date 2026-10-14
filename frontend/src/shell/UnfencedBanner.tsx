@@ -9,9 +9,10 @@ import type { ChatMeta } from '../lib/types'
 export const UNFENCED_LINE =
   "thimble: WARNING - this session was not started with `thimble`, so it and its subagents run without thimble's sandbox and can change your files, and thimble's agents cannot start in it. Quit and run `thimble` in this folder."
 
-/** The warning for a session `thimble` started that runs without thimble's sandbox all the same. */
+/** The warning for a session `thimble` started that runs without thimble's sandbox all the same: Claude Code's sandbox
+ * can't run on the machine, or thimble's config turns it off. Starting again does not help, so it names where to look. */
 export const NO_SANDBOX_LINE =
-  "thimble: WARNING - this session runs without thimble's sandbox, so it and its subagents can change your files, and thimble's agents cannot start in it. Quit and run `thimble` in this folder."
+  "thimble: WARNING - this session runs without thimble's sandbox, because Claude Code's sandbox can't run on this machine or thimble's config turns it off. So it and its subagents can change your files, and thimble's agents cannot start in it. `thimble doctor` says why; on Linux, `install.sh --sandbox-deps` installs what the sandbox needs."
 
 /** The banner's line for main's meta, or null while main runs inside thimble's fence (or the meta does not say). Only
  * an attached session is judged. Pure. */

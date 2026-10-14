@@ -206,13 +206,39 @@ async def test_in_a_plain_claude_or_in_plan_mode_nothing_starts(bridge, models, 
     from app import cc_plugin, session
 
     monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: False, raising=False)
-    assert (await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)).kind == \
-        "not-launched"
+    monkeypatch.setattr(cc_plugin, "main_launched", lambda c: False, raising=False)
+    ans = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)
+    assert ans.kind == "not-launched" and ans.reason == HINTS["start-refused-not-launched"]
     monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: True, raising=False)
     monkeypatch.setattr(session, "main_mode", lambda c: "plan")
     ans = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.TYPED)
     assert ans.kind == "hook" and ans.reason == HINTS["start-plan-mode"]
     assert not bridge.calls
+
+
+async def test_a_session_thimble_started_without_the_sandbox_is_told_why_not_that_it_was_not_launched(bridge, models,
+                                                                                                      monkeypatch):
+    """Main started by `thimble` that runs unfenced, because Claude Code's sandbox can't run here or thimble's config
+    turns it off: the refusal says so, with the packages the sandbox lacks, rather than that `thimble` did not start it,
+    which starting again would not fix."""
+    from app import cc_plugin, cc_settings, cli
+
+    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: False, raising=False)
+    monkeypatch.setattr(cc_plugin, "main_launched", lambda c: True, raising=False)
+    monkeypatch.setattr(cli, "fence_off", lambda c: "missing")
+    monkeypatch.setattr(cc_settings, "sandbox_missing", lambda: ["bwrap", "socat"])
+    ans = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)
+    assert ans.kind == "not-launched"
+    assert ans.reason == HINTS["start-refused-unfenced"].format(
+        reason="Claude Code's sandbox can't run on this machine (missing: bwrap, socat)")
+    monkeypatch.setattr(cli, "fence_off", lambda c: "never")
+    ans = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.TYPED)
+    assert ans.reason == HINTS["start-refused-unfenced"].format(
+        reason='thimble\'s config turns the sandbox off (sandbox.use "never")')
+    monkeypatch.setattr(cli, "fence_off", lambda c: "")
+    ans = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)
+    assert ans.reason.startswith("UNFENCED: ") and "not started" not in ans.reason
+    assert not bridge.calls and not sf.requests(subagents.read(CORPUS))
 
 
 async def test_a_typed_start_answers_the_exact_agent_call_with_the_request_id_on_its_first_line(bridge, models):
