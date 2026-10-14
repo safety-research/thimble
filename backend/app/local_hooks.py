@@ -276,21 +276,12 @@ def _propose_now(c: str, body: dict[str, Any]) -> None:
     """A notice's Try again: the notice dismissed first, then a check for a view proposal now (proposer.run_now), which
     starts its run as a task of this loop that keeps the holder busy (_busy) until it ends; a check it refuses is one
     line in the log."""
-    import inspect  # noqa: PLC0415
-
     from . import proposer  # noqa: PLC0415
 
     _fixing(c, body)
     got = proposer.run_now(c)
-    if inspect.isawaitable(got):
-        fut = asyncio.ensure_future(got)
-        _running.add(fut)
-        fut.add_done_callback(_running.discard)
-    elif isinstance(got, dict) and got.get("started") is False:
+    if got.get("started") is False:
         log.warning("%s: no check for a view proposal: %s", c, got.get("reason"))
-
-
-_running: set[asyncio.Future[Any]] = set()  # the checks for a view proposal _propose_now awaits, held until they end
 
 
 def _dismiss(c: str, body: dict[str, Any]) -> None:

@@ -764,15 +764,12 @@ OFFER = {"slug": "edit-bursts", "name": "Edit Bursts", "description": "Each page
 
 @pytest.fixture()
 def proposals(term, monkeypatch):
-    """Lane B's view proposals, stubbed: view proposals on (views.propose_enabled) and the waiting one the first
-    `suggested` row that has `offered` (views.open_offer). Returns a switch: proposals(False) turns them off."""
+    """View proposals on (views.propose_enabled, by its PROPOSE_ENV, which the suite sets off). Returns a switch:
+    proposals(False) turns them off."""
     from app import views
 
-    on = {"v": True}
-    monkeypatch.setattr(views, "propose_enabled", lambda c: on["v"], raising=False)
-    monkeypatch.setattr(views, "open_offer", lambda c: next(
-        (p for p in views.list_proposals(c) if p.get("status") == "suggested" and p.get("offered")), None), raising=False)
-    return lambda v: on.__setitem__("v", v)
+    monkeypatch.setenv(views.PROPOSE_ENV, "on")
+    return lambda v: monkeypatch.setenv(views.PROPOSE_ENV, "on" if v else "off")
 
 
 @pytest.fixture()
@@ -819,19 +816,12 @@ async def test_state_home_gives_the_waiting_view_proposal_and_none_while_view_pr
 
 @pytest.fixture()
 def open_notices(term, monkeypatch):
-    """Lane A's notices, stubbed: notices.open_notices gives the list this returns (the open ones, oldest first, as
-    GET /api/ws/{c}/notices gives them), and notices.dismiss records its calls."""
-    import types
-
-    import app
+    """notices.open_notices giving the list this returns (the open ones, oldest first, as GET /api/ws/{c}/notices gives
+    them)."""
+    from app import notices
 
     held: list[dict] = []
-    fake = types.ModuleType("app.notices")
-    fake.open_notices = lambda c: list(held)
-    fake.dismissed = []
-    fake.dismiss = lambda c, notice_id: fake.dismissed.append((c, notice_id)) or True
-    monkeypatch.setitem(sys.modules, "app.notices", fake)
-    monkeypatch.setattr(app, "notices", fake, raising=False)
+    monkeypatch.setattr(notices, "open_notices", lambda c: list(held))
     return held
 
 
@@ -839,7 +829,8 @@ def _notice(**fields: Any) -> dict:
     return {"ts": "2026-10-14T10:00:00Z", "kind": "warning", **fields}
 
 
-async def test_state_home_gives_every_agent_s_open_notices_newest_first_with_the_acts_that_fix_them(open_notices):
+async def test_state_home_gives_every_agent_s_open_notices_newest_first_with_the_acts_that_fix_them(open_notices,
+                                                                                                     monkeypatch):
     """Every agent's open notices reach the rows above the prompt, since Claude Code's own terminal shows only main's
     requests: the orientation's, a view build's, a writer's, the view proposer's. Each says how its own thread opens. A
     notice of Claude's safeguards on main's own reply is left out: Claude Code shows that one."""
@@ -884,8 +875,9 @@ async def test_state_home_gives_every_agent_s_open_notices_newest_first_with_the
         "the terminal has no Settings pane: the press says where thimble's config is"
     assert got[0]["open"] == "", "a chat that is gone opens nothing"
     # a notices module that fails leaves the rest of home's state as it was
-    import app
-    app.notices.open_notices = lambda c: 1 / 0
+    from app import notices
+
+    monkeypatch.setattr(notices, "open_notices", lambda c: 1 / 0)
     home = await local.state(CORPUS, "home")
     assert home["notices"] == [] and "views" in home
 
@@ -899,12 +891,9 @@ async def test_notice_dismiss_hands_the_dismissal_to_the_holder(open_notices, po
 
 
 async def test_state_home_lists_a_notice_notices_post_wrote_for_an_agent(term):
-    """With the real notices module (Lane A): a notice posted for an agent's chat is open in home's state, and gone
-    once cleared or dismissed."""
-    notices = pytest.importorskip("app.notices")
-    if not hasattr(notices, "open_notices"):
-        pytest.fail("notices.open_notices(c), the open notices GET /api/ws/{c}/notices gives, is what home reads")
-    from app import agents
+    """With the real notices module: a notice posted for an agent's chat is open in home's state, and gone once
+    cleared or dismissed."""
+    from app import agents, notices
 
     orient = agents.new_agent(CORPUS, "orientation", title="orientation")["id"]
     notices.post(CORPUS, kind="safeguards", text="Claude's safeguards switched the orientation's reply.",

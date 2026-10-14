@@ -395,8 +395,7 @@ async def test_the_analyst_s_answers_to_a_view_proposal_reach_the_views_through_
                                     "offered": {"at": "2026-10-14T10:00:00Z", "after": "main"}}])
     monkeypatch.setattr(views, "click_refused", lambda c, slug: None)
     monkeypatch.setattr(dev, "queue_view", lambda c, slug: made.append(("accept", c, slug)))
-    monkeypatch.setattr(views, "answer_offer", lambda c, slug, answer, **kw: made.append((answer, c, slug)) or {},
-                        raising=False)
+    monkeypatch.setattr(views, "answer_offer", lambda c, slug, answer, **kw: made.append((answer, c, slug)) or {})
 
     def retry(c, slug):
         made.append(("retry", c, slug))
@@ -416,10 +415,7 @@ async def test_a_notice_s_try_again_checks_for_a_view_proposal_and_the_holder_wa
                                                                                                     monkeypatch):
     """`view-propose-now` (a notice's Try again) runs proposer.run_now in the holder; a check that runs on its loop keeps
     it busy until it ends, so what the check writes is written before the process exits."""
-    import sys
-    import types
-
-    import app
+    from app import proposer
 
     done: list[str] = []
 
@@ -427,38 +423,25 @@ async def test_a_notice_s_try_again_checks_for_a_view_proposal_and_the_holder_wa
         await asyncio.sleep(0.4)
         done.append(c)
 
-    fake = types.ModuleType("app.proposer")
-    fake.run_now = lambda c: check(c)
-    monkeypatch.setitem(sys.modules, "app.proposer", fake)
-    monkeypatch.setattr(app, "proposer", fake, raising=False)
-    _main(project)
-    assert await _call("view-propose-now", {"cwd": str(config.corpus_dir(CORPUS))}) >= 1
-    assert done == [CORPUS], "the holder ran the check to its end"
-    assert "view-propose-now" in local_hooks.KINDS and "view-retry" in local_hooks.KINDS
-
-    # proposer.run_now as Lane A writes it: it starts its run as a task of the running loop and answers at once
+    # proposer.run_now starts its run as a task of the running loop and answers at once
     def run_now(c):
         asyncio.get_running_loop().create_task(check(c))
         return {"started": True}
 
-    fake.run_now = run_now
+    monkeypatch.setattr(proposer, "run_now", run_now)
+    _main(project)
     assert await _call("view-propose-now", {"cwd": str(config.corpus_dir(CORPUS))}) >= 1
-    assert done == [CORPUS, CORPUS], "the holder waited for the run's task"
+    assert done == [CORPUS], "the holder waited for the run's task"
+    assert "view-propose-now" in local_hooks.KINDS and "view-retry" in local_hooks.KINDS
 
 
 async def test_a_notice_dismissed_in_the_terminal_is_dismissed_by_the_holder(ws, project, monkeypatch):
     """`thimble act notice-dismiss {id}` hands the dismissal to the holder, which calls notices.dismiss; a notice that is
     gone is one line in the log."""
-    import sys
-    import types
-
-    import app
+    from app import notices
 
     calls: list[tuple] = []
-    fake = types.ModuleType("app.notices")
-    fake.dismiss = lambda c, notice_id: calls.append((c, notice_id)) or notice_id != "gone"
-    monkeypatch.setitem(sys.modules, "app.notices", fake)
-    monkeypatch.setattr(app, "notices", fake, raising=False)
+    monkeypatch.setattr(notices, "dismiss", lambda c, notice_id: calls.append((c, notice_id)) or notice_id != "gone")
     _main(project)
     cwd = str(config.corpus_dir(CORPUS))
     for notice_id in ("n3", "gone"):
