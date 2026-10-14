@@ -116,6 +116,7 @@ def test_accept_stamps_the_answer_and_queues_the_build_as_one_the_analyst_asked_
     with pytest.raises(HTTPException) as e:
         views.accept(CORPUS, row["slug"])
     assert e.value.status_code == 409
+    assert e.value.detail == "the view proposal 'Posts' is no longer waiting for an answer", "the card's toast"
 
 
 async def test_reject_is_the_analyst_s_click_and_drops_the_view_proposal_with_its_answer(corpus, analyst):

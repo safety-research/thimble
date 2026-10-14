@@ -2641,6 +2641,11 @@ def _is_offer(p: dict[str, Any]) -> bool:
     return isinstance(p.get("offered"), dict)
 
 
+def _answered(p: dict[str, Any]) -> str:
+    """The 409 of an Accept or Reject of a view proposal answered already, as the card's toast shows it."""
+    return f"the view proposal {p.get('name')!r} is no longer waiting for an answer"
+
+
 def offers(c: str) -> list[dict[str, Any]]:
     """Every view proposal thimble showed, waiting or answered, oldest first."""
     return sorted((p for p in list_proposals(c) if _is_offer(p)), key=lambda p: str(p["offered"].get("at") or ""))
@@ -2719,7 +2724,7 @@ def answer_offer(c: str, slug: str, answer: str = "rejected") -> dict[str, Any]:
         if prop is None:
             raise HTTPException(404, f"no such proposal: {slug}")
         if prop.get("status") != "suggested" or not _is_offer(prop):
-            raise HTTPException(409, f"the view proposal {prop.get('name')!r} is no longer waiting for an answer")
+            raise HTTPException(409, _answered(prop))
         prop = update_proposal(c, slug, status="dropped", answer=answer, answered_at=_now()) or prop
         if prop.get("proposed_by") == "files" or prop["offered"].get("after") == "file":
             for suffix in sorted({s for g in prop.get("claims") or [] if (s := type_suffix(g))}):
@@ -5237,7 +5242,8 @@ def accept(c: str, slug: str) -> dict[str, Any]:
     if prop is None:
         raise HTTPException(404, f"no such proposal: {slug}")
     if prop.get("status") != "suggested":
-        raise HTTPException(409, f"the view {prop['name']!r} is {prop.get('status')}, not suggested")
+        raise HTTPException(409, _answered(prop) if _is_offer(prop)
+                            else f"the view {prop['name']!r} is {prop.get('status')}, not suggested")
     if (refused := click_refused(c, slug)) is not None:
         return refused
     now = _now()
