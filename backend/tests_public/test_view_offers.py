@@ -1,0 +1,283 @@
+"""View proposals (app/views.py, `offer` in the code): a view thimble proposes to the analyst after a turn (proposer.py)
+or for a file type opened in the File browser (views.suggest), stored as a `suggested` proposal row with `offered`,
+which builds only when the analyst accepts it. One waits at a time, until the analyst answers it: Accept builds it,
+Reject drops it, each with its answer stamped. proposer.json keeps the proposer's pending job.
+"""
+from __future__ import annotations
+
+import json
+from types import SimpleNamespace
+
+import pytest
+from fastapi import HTTPException
+from fastapi.testclient import TestClient
+
+from app import config, ledger, userconf, views
+
+CORPUS = "offers"
+READER = '''
+def build_index(paths):
+    return {}
+
+
+def records(index, query):
+    return []
+
+
+def resolve(index, locator):
+    return None
+'''
+
+
+@pytest.fixture()
+def corpus(tmp_path, monkeypatch, workspaces_tmp) -> SimpleNamespace:
+    """A corpus of a board and a trace file, where views can be built (build_problem) and no build or click starts
+    anything (_queue, click_refused). The `view` events go to the list the fixture returns, as (slug, status, extra)."""
+    d = tmp_path / "data" / CORPUS
+    d.mkdir(parents=True)
+    (d / "manifest.json").write_text(json.dumps({"name": CORPUS}))
+    (d / "board.jsonl").write_text(json.dumps({"body": "first post"}) + "\n")
+    (d / "run.trace").write_text("t=0 start\nt=1 step\n")
+    monkeypatch.setattr(config, "DATA_DIR", d.parent.resolve())
+    monkeypatch.setattr(views, "build_problem", lambda: "")
+    monkeypatch.setattr(views, "_queue", lambda c, slug: queued.append(slug))
+    monkeypatch.setattr(views, "click_refused", lambda c, slug: None)
+    monkeypatch.delenv(views.PROPOSE_ENV, raising=False)
+    queued: list[str] = []
+    sent: list[tuple[str, str, dict]] = []
+    monkeypatch.setattr(views, "_emit", lambda c, slug, status, **extra: sent.append((slug, status, extra)))
+    return SimpleNamespace(dir=d, sent=sent, queued=queued)
+
+
+def _offer(name: str = "Posts", **kw) -> tuple[dict | None, str]:
+    args = {"name": name, "description": "Each post of the board.", "task": "Compare who posts what.",
+            "claims": ["board.jsonl"], "after": "main", "why": "The analyst compares the agents.", **kw}
+    return views.offer(CORPUS, **args)
+
+
+def _file_offer(name: str = "Trace Steps") -> tuple[dict | None, str]:
+    return views.offer(CORPUS, name=name, description="Each step of a trace.", task="", claims=["**/*.trace"],
+                       after="file", why="Traces read as steps.", proposed_by="files", arrangement="One row per step.")
+
+
+def _row(slug: str) -> dict:
+    return views.read_proposal(CORPUS, slug) or {}
+
+
+def _build(slug: str, name: str = "Posts") -> dict:
+    return views.write_view(CORPUS, slug, name=name, description="The posts.", claims=["board.jsonl"], reader=READER,
+                            html="<p>posts</p>")
+
+
+def test_a_view_proposal_is_stored_announced_and_never_queued(corpus):
+    row, why = _offer()
+    assert why == "" and row is not None
+    stored = _row(row["slug"])
+    assert stored["status"] == "suggested" and stored["proposed_by"] == "proposer" and stored["route"] == views.CLICK
+    assert stored["offered"] == {"at": stored["ts"], "after": "main", "why": "The analyst compares the agents."}
+    assert (stored["name"], stored["task"], stored["claims"]) == ("Posts", "Compare who posts what.", ["board.jsonl"])
+    assert corpus.sent == [(row["slug"], "suggested", {})] and corpus.queued == []
+    assert views.open_offer(CORPUS)["slug"] == row["slug"]
+    assert [p["slug"] for p in views.offers(CORPUS)] == [row["slug"]]
+
+
+def test_a_view_proposal_is_refused_while_another_waits_or_when_its_name_files_or_build_cannot_be(corpus, monkeypatch):
+    first, _ = _offer()
+    assert _offer("Threads") == (None, views.OFFER_OPEN), "one view proposal waits at a time"
+    views.answer_offer(CORPUS, first["slug"], "rejected")
+    corpus.sent.clear()
+    for name in ("posts", "POSTS"):
+        row, why = _offer(name)
+        assert row is None and "taken" in why, "a row's name, answered offers included"
+    _build("threads", "Threads")
+    assert "taken" in _offer("threads")[1], "a built view's name"
+    views._keep_deleted(CORPUS, {"slug": "replies", "name": "Replies"})
+    assert "taken" in _offer("Replies")[1], "a deleted proposal's name"
+    row, why = _offer("Notes", claims=["notes/*.md"])
+    assert row is None and "notes/*.md" in why, "a claim that matches no file"
+    assert _offer("Notes", task="")[1] == "the view proposal has no task"
+    assert _offer("Notes", after="somewhere")[0] is None
+    assert views.offer(CORPUS, name="Trace", description="Steps.", task="", claims=["**/*.trace"], after="file",
+                       why="", proposed_by="files")[1] == "the view proposal has no arrangement"
+    monkeypatch.setattr(views, "build_problem", lambda: "Custom views need Node 20+, and this machine has no Node.")
+    assert _offer("Notes") == (None, "Custom views need Node 20+, and this machine has no Node.")
+    assert not [e for e in corpus.sent if e[1] == "suggested"] and views.open_offer(CORPUS) is None
+    assert {p["name"] for p in views.list_proposals(CORPUS)} == {"Posts"}, "a refused offer writes nothing"
+
+
+def test_accept_stamps_the_answer_and_queues_the_build_as_one_the_analyst_asked_for(corpus):
+    row, _ = _offer()
+    got = views.accept(CORPUS, row["slug"])
+    assert (got["status"], got["asked"], got["accepted"], got["answer"]) == ("queued", True, True, "accepted")
+    assert got["answered_at"] and got["offered"] == row["offered"]
+    assert corpus.sent[-1] == (row["slug"], "queued", {"asked": True}) and corpus.queued == [row["slug"]]
+    assert views.open_offer(CORPUS) is None
+    with pytest.raises(HTTPException) as e:
+        views.accept(CORPUS, row["slug"])
+    assert e.value.status_code == 409
+
+
+async def test_reject_is_the_analyst_s_click_and_drops_the_view_proposal_with_its_answer(corpus, analyst):
+    from starlette.requests import Request
+
+    row, _ = _offer()
+    with pytest.raises(HTTPException) as e:
+        await views.reject_route(CORPUS, row["slug"], Request({"type": "http", "headers": []}))
+    assert e.value.status_code == 403 and _row(row["slug"])["status"] == "suggested"
+    with pytest.raises(ValueError):
+        views.answer_offer(CORPUS, row["slug"], "ignored")
+    assert _row(row["slug"])["status"] == "suggested", "it waits until the analyst answers it"
+    got = await views.reject_route(CORPUS, row["slug"], analyst)
+    assert (got["status"], got["answer"]) == ("dropped", "rejected") and got["answered_at"]
+    assert corpus.sent[-1] == (row["slug"], "dropped", {})
+    assert views.suggestions(CORPUS) == {}, "a rejected proposer offer leaves the file types alone"
+    with pytest.raises(HTTPException) as e:
+        await views.reject_route(CORPUS, row["slug"], analyst)
+    assert e.value.status_code == 409, "no longer waiting for an answer"
+    assert "view proposal" in e.value.detail and "offer" not in e.value.detail.replace("view proposal", "")
+    with pytest.raises(HTTPException) as e:
+        await views.reject_route(CORPUS, "nothing", analyst)
+    assert e.value.status_code == 404
+    built = views.propose(CORPUS, "Threads", "The threads.", ["board.jsonl"])
+    with pytest.raises(HTTPException) as e:
+        await views.reject_route(CORPUS, built["slug"], analyst)
+    assert e.value.status_code == 409, "main's proposal, which no card shows"
+    legacy = views.propose(CORPUS, "Old Trace", "A trace viewer.", ["**/*.trace"], "One row per step.", "files",
+                           False, False, True)
+    with pytest.raises(HTTPException) as e:
+        await views.reject_route(CORPUS, legacy["slug"], analyst)
+    assert e.value.status_code == 409, "a 0.7.x suggested row without `offered`"
+
+
+async def test_a_rejected_file_type_proposal_dismisses_its_file_type(corpus, analyst):
+    row, why = _file_offer()
+    assert why == "" and row["proposed_by"] == "files" and row["offered"]["after"] == "file"
+    await views.reject_route(CORPUS, row["slug"], analyst)
+    assert views.suggestions(CORPUS)[".trace"]["answer"] == "dismissed"
+    assert views.suggestion_for(CORPUS, "run.trace")["eligible"] is False
+
+
+@pytest.mark.real_write_guard
+def test_the_reject_route_refuses_the_server_s_token_without_the_analyst_s_cookie(corpus, plugin_headers):
+    from app import main
+
+    row, _ = _offer()
+    client = TestClient(main.create_app())
+    r = client.post(f"/api/ws/{CORPUS}/views/proposals/{row['slug']}/reject", headers=plugin_headers())
+    assert r.status_code == 403, r.text
+    assert _row(row["slug"])["status"] == "suggested"
+
+
+def test_a_0_7_suggested_row_is_never_the_waiting_view_proposal_and_blocks_none(corpus):
+    legacy = views.propose(CORPUS, "Old Trace", "A trace viewer.", ["**/*.trace"], "One row per step.", "files",
+                           False, False, True)
+    assert legacy["status"] == "suggested" and "offered" not in legacy
+    assert views.open_offer(CORPUS) is None and views.offers(CORPUS) == []
+    row, why = _offer()
+    assert why == "" and views.open_offer(CORPUS)["slug"] == row["slug"]
+    views.answer_offer(CORPUS, row["slug"])
+    assert _row(legacy["slug"])["status"] == "suggested" and "answer" not in _row(legacy["slug"])
+    assert [(p["slug"], p["answer"]) for p in views.offers(CORPUS)] == [(row["slug"], "rejected")], \
+        "answered view proposals stay listed, so the proposer sees the rejected ones"
+
+
+def test_the_first_build_of_an_accepted_view_proposal_says_accepted_and_no_later_one_does(corpus):
+    row, _ = _offer()
+    views.accept(CORPUS, row["slug"])
+    corpus.sent.clear()
+    _build(row["slug"])
+    assert corpus.sent[-1][:2] == (row["slug"], "built")
+    assert corpus.sent[-1][2].get("accepted") is True and "asked" not in corpus.sent[-1][2], "marked new, not opened"
+    _build(row["slug"])
+    assert "accepted" not in corpus.sent[-1][2], "a build after the first"
+    views.revise(CORPUS, row["slug"], "a legend", route=views.TYPED)
+    _build(row["slug"])
+    assert "accepted" not in corpus.sent[-1][2], "a change to the view"
+    asked = views.propose(CORPUS, "Threads", "The threads.", ["board.jsonl"], asked=True)
+    _build(asked["slug"], "Threads")
+    assert corpus.sent[-1][2] == {"asked": True, "version": corpus.sent[-1][2]["version"]}, "a view main proposed"
+
+
+def test_proposer_json_keeps_the_proposer_s_pending_job(corpus):
+    assert views.proposer_state(CORPUS) == {"job": None}
+    job = {"after": ["main"], "sid": "s1", "cut": "u1"}
+    assert views.update_proposer_state(CORPUS, job=job) == {"job": job}
+    path = views.state_dir(CORPUS) / views.PROPOSER_FILE
+    assert json.loads(path.read_text()) == {"job": job}, "written whole, so the next process reads it"
+    assert views.update_proposer_state(CORPUS, job=None) == {"job": None}
+    path.write_text("{broken")
+    assert views.proposer_state(CORPUS) == {"job": None}
+    path.write_text(json.dumps({"job": "x"}))
+    assert views.proposer_state(CORPUS) == {"job": None}
+
+
+def test_main_s_proposal_under_a_waiting_view_proposal_s_name_replaces_it_and_builds(corpus):
+    row, _ = _offer()
+    got = views.propose(CORPUS, "posts", "The board's posts by agent.", ["board.jsonl"], task="Compare the agents.",
+                        asked=True, route=views.TYPED)
+    assert got["slug"] == row["slug"] and got["status"] == "queued" and got["asked"] is True
+    assert "offered" not in got and views.open_offer(CORPUS) is None
+    assert [p["slug"] for p in views.list_proposals(CORPUS)] == [row["slug"]]
+    row2, _ = _offer("Threads")
+    views.propose(CORPUS, "Threads", "The threads.", ["board.jsonl"])
+    assert corpus.queued == [row2["slug"]], "a click's proposal queues its build at once"
+
+
+def _viewer_call(answer: dict, calls: list):
+    async def call(c, task, inp, schema=None):
+        calls.append(inp["suffix"])
+        return SimpleNamespace(status="ok", output=answer)
+
+    return call
+
+
+async def test_the_file_type_proposal_makes_no_call_while_view_proposals_are_off_or_one_waits(corpus, monkeypatch):
+    from app import tasks
+
+    calls: list[str] = []
+    answer = {"help": True, "name": "trace steps", "why": "Traces read as steps.", "arrangement": "One row per step."}
+    monkeypatch.setattr(tasks, "call", _viewer_call(answer, calls))
+    monkeypatch.setenv(views.PROPOSE_ENV, "off")
+    assert await views.suggest(CORPUS, "run.trace") is None and calls == []
+    monkeypatch.delenv(views.PROPOSE_ENV)
+    userconf.save(None, {"views": {"propose": False}})
+    assert not views.propose_enabled(CORPUS)
+    assert await views.suggest(CORPUS, "run.trace") is None and calls == []
+    userconf.save(None, {"views": {"propose": None}})
+    row, _ = _offer()
+    assert await views.suggest(CORPUS, "run.trace") is None and calls == []
+    assert views.suggestions(CORPUS) == {}, "no answer is kept for the file type, so it is asked again"
+    views.answer_offer(CORPUS, row["slug"], "rejected")
+    slug = await views.suggest(CORPUS, "run.trace")
+    assert calls == [".trace"] and slug is not None
+    got = _row(slug)
+    assert (got["name"], got["status"], got["proposed_by"], got["claims"]) == ("Trace Steps", "suggested", "files",
+                                                                              ["**/*.trace"])
+    assert got["offered"]["after"] == "file" and got["arrangement"] == "One row per step." and got["task"] == ""
+    assert views.suggestions(CORPUS)[".trace"] == {"answer": "suggested", "slug": slug,
+                                                   "ts": views.suggestions(CORPUS)[".trace"]["ts"]}
+    assert views.open_offer(CORPUS)["slug"] == slug and corpus.queued == []
+
+
+async def test_a_file_type_proposal_that_cannot_be_written_keeps_no_answer(corpus, monkeypatch):
+    from app import tasks
+
+    calls: list[str] = []
+    answer = {"help": True, "name": "Posts", "why": "Traces read as steps.", "arrangement": "One row per step."}
+    monkeypatch.setattr(tasks, "call", _viewer_call(answer, calls))
+    views.answer_offer(CORPUS, _offer()[0]["slug"], "rejected")
+    assert await views.suggest(CORPUS, "run.trace") is None and calls == [".trace"]
+    assert views.suggestions(CORPUS) == {} and views.open_offer(CORPUS) is None, "the name was taken"
+
+
+def test_view_proposals_are_on_unless_the_environment_or_the_config_turns_them_off(corpus, monkeypatch):
+    assert views.propose_enabled(CORPUS) and userconf.propose_views(CORPUS)
+    for off in ("off", "OFF", "0", "false"):
+        monkeypatch.setenv(views.PROPOSE_ENV, off)
+        assert not views.propose_enabled(CORPUS), off
+    monkeypatch.setenv(views.PROPOSE_ENV, "on")
+    assert views.propose_enabled(CORPUS)
+    path = userconf.workspace_file(CORPUS)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"views": {"propose": False}}))
+    assert not views.propose_enabled(CORPUS) and not ledger.get_settings(CORPUS)["propose_views"]
