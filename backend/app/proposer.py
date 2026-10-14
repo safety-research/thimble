@@ -2,10 +2,10 @@
 one model call on a fork of main's own session decides whether thimble shows the analyst a view proposal card, and
 writes it (views.offer).
 
-When it runs (trigger): at the end of a turn of main that answered the analyst (session.turn_analyst: a line they
-typed, their message or thread question from the browser), at the cut of that turn's turn_duration record
-(turn_ended); when a side thread's fork answered (session._finish_sub); and once when the first run of an orientation
-ends done (orient_session). Each trigger merges into the workspace's pending job (JOB_FILE: the reasons, main's session
+When it runs (trigger): at the end of a turn of main that answered the analyst (session.turn_analyst: a line they typed,
+their message or thread question from the browser), at the cut of that turn's turn_duration record (turn_ended); when a
+side thread's fork answered (session._finish_sub); and once when the first run of an orientation ends done
+(orient_session). Each trigger merges into the workspace's pending job (JOB_FILE's `job`: the reasons, main's session
 and its cut), so a later pass of the mirror in terminal mode, or a restarted server, runs it. One loop per workspace
 (_loop) waits DEBOUNCE_MAIN_S after a main turn, else DEBOUNCE_OTHER_S (longer than auto mode's hand-back wait, so an
 orientation's end merges with main's `↳` turn), and runs the job once main is idle; a main turn still open leaves it
@@ -53,7 +53,9 @@ FORK_TIMEOUT_S = 300.0
 CONTEXT_CHARS = 120_000  # of the threads part
 RESERVE_TOKENS = 20_000  # main's context plus the prompt above CONTEXT_TOKENS less this runs on the 1M-token window
 LOG_FILE = "proposer.jsonl"  # in the views state folder: one line per run
-JOB_FILE = "proposer-job.json"  # in the views state folder: the pending job {after, sid, cut, since}, or nothing
+# in the views state folder: {job: the pending job {after, sid, cut, since} or null} (views.PROPOSER_FILE, whose
+# proposer_state reads it), changed under the file's lock (ledger.update_json) by whichever process triggers
+JOB_FILE = "proposer.json"
 NOTICE_KEY = "proposals"  # the key of the proposer's notices in main's chat
 BUILTIN = "Files shows every file in its built-in views: Raw, Table, Text, Transcript and Timeline, as fit its type."
 TERMINAL_BUILTIN = ("thimble's panel shows every file in its built-in views: Raw, Table, Text, Transcript and Timeline, "
@@ -100,39 +102,45 @@ def _job_path(c: str) -> Path:
     return views.state_dir(c) / JOB_FILE
 
 
+def _job_of(state: Any) -> dict[str, Any] | None:
+    job = state.get("job") if isinstance(state, dict) else None
+    return job if isinstance(job, dict) and job.get("after") else None
+
+
 def pending(c: str) -> dict[str, Any] | None:
     """The workspace's pending job {after: [...], sid, cut, since}, or None."""
     try:
-        raw = ledger.read_json(_job_path(c), None)
+        return _job_of(ledger.read_json(_job_path(c), None))
     except (OSError, ValueError):
         return None
-    return raw if isinstance(raw, dict) and raw.get("after") else None
 
 
 def _merge(c: str, after: str, *, sid: str | None = None, cut: str | None = None) -> dict[str, Any]:
     """Add a reason to the pending job: the reasons are unioned, and a cut replaces the job's when its session is the
-    same or the job has none."""
-    def change(job: Any) -> dict[str, Any]:
-        job = job if isinstance(job, dict) and job.get("after") else {"after": [], "sid": None, "cut": None}
+    same or the job has none. The job."""
+    def change(state: Any) -> dict[str, Any]:
+        job = _job_of(state) or {"after": [], "sid": None, "cut": None}
         job["after"] = list(dict.fromkeys([*job["after"], after]))
         if cut and (not job.get("sid") or job.get("sid") == sid or not job.get("cut")):
             job["sid"], job["cut"] = sid, cut
         job["since"] = _now()
-        return job
+        return {**(state if isinstance(state, dict) else {}), "job": job}
 
     p = _job_path(c)
     p.parent.mkdir(parents=True, exist_ok=True)
-    return ledger.update_json(p, change, None)
+    return ledger.update_json(p, change, None)["job"]
 
 
 def _pop(c: str) -> dict[str, Any] | None:
     """Take the pending job, leaving none."""
     out: dict[str, Any] = {}
 
-    def change(job: Any) -> dict[str, Any]:
-        if isinstance(job, dict) and job.get("after"):
-            out.update(job)
-        return {}
+    def change(state: Any) -> dict[str, Any] | None:
+        job = _job_of(state)
+        if job is None:
+            return None
+        out.update(job)
+        return {**state, "job": None}
 
     p = _job_path(c)
     if p.is_file():

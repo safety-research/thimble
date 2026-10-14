@@ -249,6 +249,8 @@ def test_without_a_running_loop_a_trigger_keeps_the_job_and_starts_nothing(cards
     proposer.trigger(CORPUS, "main", cut="c1", sid=SID)
     proposer.trigger(CORPUS, "thread:t1")
     assert proposer.pending(CORPUS)["after"] == ["main", "thread:t1"] and proposer._tasks == {}
+    state = json.loads((views.state_dir(CORPUS) / "proposer.json").read_text())
+    assert state["job"]["cut"] == "c1", "the job is views' proposer.json `job` (proposer_state)"
 
 
 # ----------------------------------------------------------------------------- the gate
