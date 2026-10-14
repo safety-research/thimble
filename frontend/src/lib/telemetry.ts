@@ -11,8 +11,6 @@ export const CLIENT_KINDS = [
   'panel-open',
   'panel-close',
   'tab-activate',
-  'start-toggle',
-  'start-run',
   'agent-row-expand',
   'chip-teleport',
   'pointer-open',
@@ -255,14 +253,6 @@ export function classifyRequest(method: string, url: string, body?: string | nul
   if (a === 'canvas' && b === 'active-group' && method === 'PUT') {
     const group = str(B()?.group)
     return group ? { kind: 'notebook-switch', target: `group:${group}` } : null
-  }
-  if (a === 'events' && !b && method === 'POST' && str(B()?.kind) === 'start') {
-    const payload = B()?.payload as Record<string, unknown> | undefined
-    // the switches by the start event's names (StartBody), `final` being the deck's; legacy start events name the deck's
-        // switch `analyze_data`, or carry `report` alone
-    const on = { final: payload?.final_notebook ?? payload?.analyze_data ?? true, views: payload?.propose_views ?? false, report: payload?.generate_report ?? payload?.report, critique: payload?.critique, ultracode: payload?.ultracode }
-    const passes = (['final', 'views', 'critique', 'report', 'ultracode'] as const).filter((p) => on[p] === true)
-    return { kind: 'start-run', target: null, detail: { passes, ...(str(payload?.effort) ? { effort: str(payload?.effort) } : {}), ...(str(payload?.permissions) ? { permissions: str(payload?.permissions) } : {}) } }
   }
   if (a === 'filters') {
     if (method === 'PUT') {

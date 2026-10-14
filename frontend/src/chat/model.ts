@@ -115,7 +115,23 @@ export interface HandBackRow {
   index: number
   text: string
 }
-export type Row = UserRow | TextRow | ToolRow | ChipRow | AgentRow | ErrorRow | NoteRow | ShotRow | HandBackRow
+/** a failure the analyst should know of, with an easy fix (backend notices.post), as a row of the chat it happened in:
+ * one warning line that names the agent and the failure (chat/Notice.tsx). Its fix and × are on the notice above the
+ * composer while it is open; once a fix that worked cleared it, or the analyst dismissed it (`closed`), the row stays as
+ * a quiet line of the chat's history. `id` is the notice's own (the latest under its key), else its record's index */
+export interface NoticeRow {
+  kind: 'notice'
+  index: number
+  id: string
+  key?: string
+  /** the notice's kind (backend notices.post `kind`) */
+  noticeKind?: string
+  text: string
+  agent?: string
+  closed: boolean
+  ts?: string
+}
+export type Row = UserRow | TextRow | ToolRow | ChipRow | AgentRow | ErrorRow | NoteRow | ShotRow | HandBackRow | NoticeRow
 
 /** Find the tool row with `id` anywhere in `rows`, nested rows included. */
 function findTool(rows: Row[], id: string): ToolRow | undefined {
@@ -157,11 +173,14 @@ export function stageLine(delta: string): string | null {
  * Fold the records of a log into rows: a whole message is a text row of its own, a text delta extends the last text row
  * of its level, a stage line is a note. A record `skip` names is left out; every row keeps its record's index. An
  * `agent` record that names the tool call which started its chat (`tool_use_id`) follows that call's row, since the
- * mirror copies the call only once Claude Code flushes its transcript, so the record can come first in the log. Pure.
+ * mirror copies the call only once Claude Code flushes its transcript, so the record can come first in the log. A
+ * notice under the key of one still open replaces it in place, so a failure that happens again shows as one row; a
+ * notice's end closes its row. Pure.
  */
 export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<number>): Row[] {
   const rows: Row[] = []
   const calls = new Map<string, number>() // a top-level tool call's id -> its record's index, for the calls folded
+  const notices = new Map<string, NoticeRow>() // a notice's key -> its row while it is open
   records.forEach((e, index) => {
     if (e.type === 'tool_use' && !skip?.has(index) && typeof e.parent_tool_use_id !== 'string') calls.set(e.id, index)
   })
@@ -216,6 +235,32 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
       case 'shot':
         rows.push({ kind: 'shot', index, phase: e.phase, ticket: e.ticket, name: e.name, note: e.note })
         return
+      case 'notice': {
+        // the end of a notice (a fix that worked, or the analyst's ×): its row stays, closed; a later notice under its
+        // key is a row of its own
+        if (e.dismissed || e.cleared) {
+          const id = e.id
+          const row = (id ? rows.find((r): r is NoticeRow => r.kind === 'notice' && r.id === id) : undefined) ?? (e.key ? notices.get(e.key) : undefined)
+          if (!row) return
+          row.closed = true
+          if (row.key) notices.delete(row.key)
+          return
+        }
+        const text = typeof e.text === 'string' ? e.text.trim() : ''
+        if (!text) return
+        const fields = { id: e.id ? String(e.id) : `#${index}`, text, ...(e.kind ? { noticeKind: e.kind } : {}), ...(typeof e.agent === 'string' && e.agent.trim() ? { agent: e.agent.trim() } : {}), ...(e.ts ? { ts: e.ts } : {}) }
+        // a notice under the key of one still open replaces it in place
+        const open = e.key ? notices.get(e.key) : undefined
+        if (open) {
+          delete open.agent
+          Object.assign(open, fields)
+          return
+        }
+        const row: NoticeRow = { kind: 'notice', index, ...(e.key ? { key: e.key } : {}), closed: false, ...fields }
+        if (e.key) notices.set(e.key, row)
+        rows.push(row)
+        return
+      }
       default:
         return
     }
@@ -1227,8 +1272,9 @@ export const API_ERROR_KIND = 'api-error'
 export const isApiError = (text: string): boolean => text.trim().startsWith(API_ERROR)
 
 /** Claude Code's error line after the words a reply streamed before the request failed (`Now the page: API Error:
- * Server error mid-response. The response above may be incomplete.`): one of its own wordings, running to the end. */
-const TRAILING_API_ERROR = /(?:^|\s)(API Error: (?:Repeated \d{3}|\d{3} \{|Server error|Connection error|Rate limit|Request timed out|Request was aborted|[^\n]{0,40}overloaded)[\s\S]*)$/
+ * Server error mid-response. The response above may be incomplete.`): one of its own wordings, running to the end, a
+ * refusal by Claude's safeguards among them. */
+const TRAILING_API_ERROR = /(?:^|\s)(API Error: (?:Repeated \d{3}|\d{3} \{|Server error|Connection error|Rate limit|Request timed out|Request was aborted|[^\n]{0,40}overloaded|[^\n]{0,60}safeguards|[^\n]{0,100}Usage Policy|Claude can.t help with this)[\s\S]*)$/
 
 /** Where Claude Code's API error line begins in a text: 0 when the text is the line, the offset of a line that ends a
  * reply cut short, -1 for none. Pure. */
@@ -1240,9 +1286,10 @@ export function apiErrorAt(text: string): number {
 }
 
 /** The kinds of failure an API error card names, sorted as the backend's retry.transient_class sorts them; `auth`
- * (401), `forbidden` (403) and `not_found` (404, a model id the account or provider does not have), which no retry
- * fixes; and `other` for an error that is none of them (a request the API refused). */
-export type ApiFailure = 'overloaded' | 'rate_limited' | 'server_error' | 'connection' | 'auth' | 'forbidden' | 'not_found' | 'other'
+ * (401), `forbidden` (403), `not_found` (404, a model id the account or provider does not have) and `refused` (a
+ * request Claude's safeguards or the usage policy stopped), which no retry fixes; and `other` for an error that is none
+ * of them. */
+export type ApiFailure = 'overloaded' | 'rate_limited' | 'server_error' | 'connection' | 'auth' | 'forbidden' | 'not_found' | 'refused' | 'other'
 
 const FAILURE_OF_STATUS: Readonly<Record<number, ApiFailure>> = { 401: 'auth', 403: 'forbidden', 404: 'not_found', 429: 'rate_limited', 500: 'server_error', 502: 'server_error', 503: 'server_error', 504: 'server_error', 529: 'overloaded' }
 const FAILURE_OF_BODY: Readonly<Record<string, ApiFailure>> = { overloaded_error: 'overloaded', api_error: 'server_error', server_error: 'server_error', rate_limit_error: 'rate_limited', authentication_error: 'auth', permission_error: 'forbidden', not_found_error: 'not_found' }
@@ -1250,6 +1297,12 @@ const STATUS_TEXT = /\b(?:HTTP|API Error:?|Error code:?|status(?: code)?:?)\s*(\
 const BARE_STATUS = /\b(429|5\d\d)\b/
 const BODY_TEXT = /\b(overloaded_error|api_error|server_error|rate_limit_error|authentication_error|permission_error|not_found_error)\b/i
 const CONNECTION_TEXT = /connection error|connection reset|connection refused|econnreset|econnrefused|etimedout|socket hang up|fetch failed|network error/i
+/** A request Claude's safeguards stopped, in Claude Code's words or the API's (backend model.py's refusal detail):
+ * "Opus 5.5's safeguards flagged this message", "… Usage Policy …", or "Claude can't help with this. Start a new session
+ * to continue." */
+const REFUSED_TEXT = /safeguards|usage polic|can['’]t help with this/i
+/** Claude Code's refusal that takes the session with it: only a new session goes on. */
+const NEW_SESSION_TEXT = /start a new session/i
 
 /** What an API error says failed, and the HTTP status it names (`Repeated 529 Overloaded errors`: 529), from Claude
  * Code's error line or the server's words for it; the same patterns the backend's retry.transient_class reads. Pure. */
@@ -1257,19 +1310,21 @@ export function apiFailure(text: string): { failure: ApiFailure; status: number 
   const named = STATUS_TEXT.exec(text)?.[1] ?? BARE_STATUS.exec(text)?.[1]
   const status = named ? Number(named) : null
   const body = BODY_TEXT.exec(text)?.[1]?.toLowerCase()
-  const failure: ApiFailure = /overloaded/i.test(text)
-    ? 'overloaded'
-    : status != null && FAILURE_OF_STATUS[status]
-      ? FAILURE_OF_STATUS[status]
-      : body
-        ? FAILURE_OF_BODY[body]
-        : /rate[ _-]?limit/i.test(text)
-          ? 'rate_limited'
-          : /server error/i.test(text)
-            ? 'server_error'
-            : CONNECTION_TEXT.test(text)
-              ? 'connection'
-              : 'other'
+  const failure: ApiFailure = REFUSED_TEXT.test(text)
+    ? 'refused'
+    : /overloaded/i.test(text)
+      ? 'overloaded'
+      : status != null && FAILURE_OF_STATUS[status]
+        ? FAILURE_OF_STATUS[status]
+        : body
+          ? FAILURE_OF_BODY[body]
+          : /rate[ _-]?limit/i.test(text)
+            ? 'rate_limited'
+            : /server error/i.test(text)
+              ? 'server_error'
+              : CONNECTION_TEXT.test(text)
+                ? 'connection'
+                : 'other'
   return { failure, status }
 }
 
@@ -1281,6 +1336,7 @@ const FAILURE_WORDS: Readonly<Record<ApiFailure, string>> = {
   auth: "Claude Code's login or API key was refused",
   forbidden: 'Your account may not make this request',
   not_found: "This model isn't available to your account",
+  refused: "Claude's safeguards stopped this request",
   other: "Anthropic's API returned an error",
 }
 
@@ -1289,14 +1345,15 @@ const FAILURE_FIX: Readonly<Partial<Record<ApiFailure, string>>> = {
   auth: 'run /login in your terminal, or check ANTHROPIC_API_KEY and run thimble server restart',
   forbidden: "check your login and your organization's settings, or pick another model in Settings",
   not_found: 'pick another model in Settings',
+  refused: 'rephrase or narrow the request and send it again',
 }
 
 /** What happened, in the card's head: the failure in plain words and its status (Anthropic's API is overloaded (529)),
- * then what to do when no retry fixes it. Pure. */
+ * then what to do when no retry fixes it. A refusal names no status, which says nothing of why. Pure. */
 export function apiFailureText(text: string): string {
   const { failure, status } = apiFailure(text)
-  const head = status != null ? `${FAILURE_WORDS[failure]} (${status})` : FAILURE_WORDS[failure]
-  const fix = FAILURE_FIX[failure]
+  const head = status != null && failure !== 'refused' ? `${FAILURE_WORDS[failure]} (${status})` : FAILURE_WORDS[failure]
+  const fix = failure === 'refused' && NEW_SESSION_TEXT.test(text) ? 'start a new session (/clear in your terminal), then send a rephrased or narrower request' : FAILURE_FIX[failure]
   return fix ? `${head}: ${fix}` : head
 }
 

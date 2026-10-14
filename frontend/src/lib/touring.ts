@@ -1,6 +1,5 @@
-// Whether the product tour runs now (shell/TourHost sets it from the welcome to the tour's end). While it runs, main's
-// chat draws no Start gate (chat/StartGate startGateShown): the tour's orientation step shows its own example in the
-// gate's place, and its other steps show no Start card at all.
+// Whether the product tour runs now (shell/TourHost sets it from the welcome to the tour's end). While it runs, the
+// chat shows no view proposal above its composer (chat/ProposalCard), so only the tour's examples show.
 import { useSyncExternalStore } from 'react'
 
 let touring = false

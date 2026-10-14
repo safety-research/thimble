@@ -62,6 +62,31 @@ export type ChatRecord =
   | { type: 'chip'; ts?: string; kind: ChipKind | string; text: string; ref?: string; [k: string]: unknown }
   | { type: 'agent'; ts?: string; chat: string; role: string; title: string; run?: number; tool_use_id?: string; view?: string }
   | { type: 'shot'; ts?: string; phase: string; ticket: string; name: string; note?: string }
+  | { type: 'notice'; ts?: string; id?: string; key?: string | null; kind?: string; text?: string; agent?: string | null; action?: NoticeAction | NoticeAction[] | null; dismissed?: boolean; cleared?: boolean }
+
+/** What a notice's button does (backend notices.py): look for a view proposal again (`proposals-retry`), turn view
+ * proposals off (`proposals-off`), open Settings (`settings`), or build the failed view `slug` again (`view-retry`). */
+export interface NoticeAction {
+  label: string
+  do: 'proposals-retry' | 'proposals-off' | 'settings' | 'view-retry' | (string & {})
+  slug?: string
+}
+
+/** A failure the analyst should know of, with an easy fix (backend notices.post), as `GET /ws/{c}/notices` lists the
+ * open ones and the stream's `notice` event sends a new one: one line naming the agent it happened to (`agent`, such as
+ * "Orientation" or "View build: Agent Network"), its fix as buttons (`action`, one or several), and the chat the agent
+ * writes in (`chat`, its thread, or main), where the notice is also a row. A later notice with the same `key` replaces
+ * it, and a fix that worked clears it (the event's `cleared`). */
+export interface Notice {
+  id: string
+  key?: string | null
+  kind?: string
+  text: string
+  agent?: string | null
+  chat?: string | null
+  action?: NoticeAction | NoticeAction[] | null
+  ts?: string
+}
 
 export interface ChatDetail {
   meta: ChatMeta
@@ -491,6 +516,22 @@ export interface Proposal {
   values?: { model?: string; effort?: string } | null
   model?: string | null
   effort?: string | null
+  /** a view proposal thimble made to the analyst (backend views.offer): when, at which analyst turn, after what
+   * (`main`, `thread:<id>`, `orientation`, or `file` for a viewer proposed when a file was opened) and why. An open
+   * proposal is `suggested` with this; a `suggested` row without it is from an older version and never shows */
+  offered?: ProposalOffer | null
+  /** how the analyst answered the view proposal: Accept or Reject */
+  answer?: 'accepted' | 'rejected' | null
+  answered_at?: string | null
+  answered_turn?: number | null
+}
+
+/** When and why thimble proposed the view (Proposal.offered). */
+export interface ProposalOffer {
+  at: string
+  turn?: number
+  after: string
+  why?: string
 }
 
 /** The review of a built view's pictures: running, done (with what it revised and what problems are left), failed
@@ -634,10 +675,6 @@ export interface ViewOpen {
 
 // ---- orientation ----
 
-/** The Start card's switches, start_orientation's: the orientation's deck (`final`), its view proposals, the report,
- * and its critic's review. */
-export type OrientPass = 'final' | 'views' | 'critique' | 'report'
-
 /** The efforts Claude Code takes, lowest first (cc_settings.EFFORTS): every effort menu of thimble's agents offers
  * these. Main's composer adds Ultracode (MainEffort). */
 export type OrientEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
@@ -713,18 +750,6 @@ export interface SessionAlert {
   attempt?: number
 }
 
-/** The body of Start (`POST /ws/{c}/start`, orient_session.StartBody): the request (focus), start_orientation's four
- * switches, and the run's exact model and effort, each defaulting to Settings' orientation row. */
-export interface StartBody {
-  text?: string
-  deck: boolean
-  views: boolean
-  critique: boolean
-  report: boolean
-  model?: string
-  effort?: string
-}
-
 /** The kinds of a start or a follow-up that did not happen (backend subagents: run.json `refused.kind`). */
 export type RefusalKind = 'auto-mode' | 'no-call' | 'limit' | 'not-launched' | 'hook' | 'earlier-session' | 'no-module' | 'error' | (string & {})
 
@@ -774,14 +799,12 @@ export interface RunValues {
   effort?: string
 }
 
-/** The orientation's record (`GET /ws/{c}/orientation`, orient/run.json): its status, the request and switches, the
- * run's exact model and effort, who started it, the pending request, and for a start that did not happen its refusal.
- * {} before any orientation was asked for. */
+/** The orientation's record (`GET /ws/{c}/orientation`, orient/run.json): its status, the request, the run's exact
+ * model and effort, who started it, the pending request, and for a start that did not happen its refusal. {} before
+ * any orientation was asked for. */
 export interface OrientRun {
   status?: 'requested' | 'starting' | 'running' | 'done' | 'failed' | 'stopped' | 'refused' | (string & {})
   query?: string | null
-  passes?: string[]
-  critique?: boolean
   model?: string | null
   effort?: string | null
   route?: 'subagent' | 'program' | (string & {}) | null
@@ -1204,6 +1227,9 @@ export interface Settings {
   tasks?: TaskRow[]
   /** the minutes a code ticket's permission request waits before it is declined (thimble's config `cardWait`) */
   card_wait?: number
+  /** View proposals: whether thimble proposes views after a turn and viewers for file types (thimble's config
+   * `views.propose`) */
+  propose_views?: boolean
   [k: string]: unknown
 }
 
@@ -1263,6 +1289,8 @@ export interface SettingsPatch {
   models?: Record<string, Partial<ModelConf>>
   permission_modes?: Partial<Record<ModeAgent, OrientPermissions | null>>
   web?: Partial<Record<'orient' | 'writer' | 'critic' | 'checks', 'off' | null>>
+  /** View proposals: false turns them off, null puts back the default (on) */
+  propose_views?: boolean | null
   [k: string]: unknown
 }
 
@@ -2069,8 +2097,6 @@ export interface ChatMeta {
   /** the agent a session or a program runs as: thimble's own as `thimble:<role>`, an extension's program's as
    * `<extension>:<role or task>` (backend harness.start) */
   agent_type?: string | null
-  /** the orientation: its critique */
-  critique?: boolean
   /** a writer: the document it writes (write_session.py) */
   doc?: string | null
   /** one of thimble's agents: what it was asked, for its card, when its first message is longer (a writer's task) */

@@ -3,7 +3,8 @@
 // in a row fold into one chip that names each tool and count (Bash 2 · Grep 1). In the orientation's thread every call
 // is such a line carrying its `call:` ref, so it can be cited and, open, shows its whole stored output with numbered
 // lines. Other runs of one kind of call are one card (Cards · 2 steps · 31s). Everything else is a quiet note with the
-// chips of what it points at. Label runs in a row are one Label card, a step per label.
+// chips of what it points at. Label runs in a row are one Label card, a step per label. A notice (a failure with its
+// fix, which the strip above the composer offers) is one warning line, quiet once it is closed (Notice.tsx).
 import { createContext, useContext, useEffect, useRef, useState, type DragEvent } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -29,6 +30,7 @@ import { Note, ShotCard, ThreadChip, ThreadsContext } from './Notes'
 import { AgentCard, OrientLanding, openLabel } from './AgentCard'
 import { ApiErrorCard } from './ApiError'
 import { HandedBack } from './HandBack'
+import { NoticeRow } from './Notice'
 import { DocChip, GroupChip, LabelChip } from './SurfaceChips'
 import { ViewChip } from './ViewChip'
 import { autoModeRefusal } from './permissions'
@@ -203,6 +205,8 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
             return <HandedBack key={r.index} text={r.text} anchor={anchorOf(r.index)} />
           case 'error':
             return <ErrorRow key={r.index} item={r} retry={retry && retry.index === r.index ? retry : undefined} />
+          case 'notice':
+            return <NoticeRow key={r.index} item={r} ws={ws} />
         }
       })}
       {streaming && !toolPending && <Working />}

@@ -1,7 +1,7 @@
 // A session's model line at a composer's foot: the model, the effort as a menu and fast mode as a lightning bolt
-// (Opus 5.5 · medium ▾ ⚡). The model is a menu where the UI can change it (a run's, the orientation's on the Start
-// card), else text whose tooltip says where it changes (main's through /model in its terminal). The effort menu lists
-// low to max, then ultracode for main, which alone takes it. The bolt switches fast mode where the UI can; otherwise it
+// (Opus 5.5 · medium ▾ ⚡). The model is a menu where the UI can change it (a run's), else text whose tooltip says
+// where it changes (main's through /model in its terminal). The effort menu lists low to max, then ultracode for main,
+// which alone takes it. The bolt switches fast mode where the UI can; otherwise it
 // shows the state and its tooltip says why; thimble's agents have no fast mode, so their line has no bolt (`noFast`).
 // Its tooltip always opens with "Fast mode" (fastTip). A menu names each model once, without an id's `[1m]` tag
 // (lib/models).

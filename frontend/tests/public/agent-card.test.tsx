@@ -49,15 +49,15 @@ describe('the words', () => {
     expect(continueOf(meta({}), 's1')).toBe('here')
     expect(continueOf(meta({}), 's2')).toBe('earlier-session')
     expect(continueOf(meta({ route: null, agent_id: null }), 's1')).toBe('earlier-version')
-    expect(continueText('earlier-session', 'abc-123')).toBe('This orientation ran in an earlier Claude Code session. To continue it, quit and run `thimble -r abc-123` in this folder, or start a new orientation.')
-    expect(continueText('earlier-version', '')).toBe('This orientation ran in an earlier version of thimble and cannot be continued. Start a new orientation to explore further.')
+    expect(continueText('earlier-session', 'abc-123')).toBe('This orientation ran in an earlier Claude Code session. To continue it, quit and run `thimble -r abc-123` in this folder, or ask Claude in main for a new orientation.')
+    expect(continueText('earlier-version', '')).toBe('This orientation ran in an earlier version of thimble and cannot be continued. Ask Claude in main for a new orientation to explore further.')
   })
 
   test('an orientation stopped with Esc in its agent view, which Claude Code resumes no more, takes a message that continues it (U2)', () => {
     const stopped = meta({ status: 'stopped', stopped_by: 'user', continue: 'stopped-by-user' })
     expect(stoppedLine(stopped)).toBe('Stopped with Esc in your terminal.')
     expect(continueOf(stopped, 's1')).toBe('stopped-by-user')
-    // no closed text: the composer stays, and its message starts a new run in the thread (no New orientation offer)
+    // no closed text: the composer stays, and its message starts a new run in the thread
     expect(continueText('stopped-by-user', '')).toBe('')
     expect(STOPPED_CONTINUE_LINE).toMatch(/Send a message to continue it/)
   })

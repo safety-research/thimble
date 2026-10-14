@@ -384,10 +384,22 @@ export const api = {
   /** what thimble proposes for a file opened in the File browser: whether a viewer may be proposed for its type, and
    * the proposal for the type when there is one (backend views.suggestion_for) */
   viewSuggestions: (c: string, path: string) => j<ViewSuggestion>(`${ws(c)}/views/suggestions${q({ path })}`),
-  /** ask for a viewer for the type of a file the analyst opened: the suggested proposal's slug, or null */
+  /** ask for a viewer for the type of a file the analyst opened: the slug of the view proposal it wrote (which the
+   * stream's `view {status: suggested}` brings to the view proposal card), or null */
   suggestView: (c: string, path: string) => j<{ slug: string | null }>(`${ws(c)}/views/suggest`, { method: 'POST', body: JSON.stringify({ path }) }),
-  /** build a suggested viewer */
+  /** Accept on a view proposal: its build queued as one the analyst asked for; a start that cannot happen comes back
+   * as the row's `refused`. 403 without the analyst's cookie. */
   acceptProposal: (c: string, slug: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/accept`, { method: 'POST' }),
+  /** Reject on a view proposal: the proposal dropped as rejected (backend views.answer_offer). 403 without the
+   * analyst's cookie, 409 for a row that is no open proposal. */
+  rejectProposal: (c: string, slug: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/reject`, { method: 'POST' }),
+  /** Try again on a notice that a check for a view proposal failed: the check runs now (backend proposer.run_now). */
+  proposeNow: (c: string) => j<unknown>(`${ws(c)}/views/propose-now`, { method: 'POST' }),
+  /** The open notices (backend notices.py): failures of main and of thimble's agents, each with its fix, oldest first;
+   * a list, or {notices: [...]}. */
+  notices: (c: string) => j<unknown>(`${ws(c)}/notices`).then((r) => (Array.isArray(r) ? r : r && typeof r === 'object' && Array.isArray((r as { notices?: unknown }).notices) ? (r as { notices: unknown[] }).notices : [])),
+  /** × on a notice, or a fix of the analyst's that went through: the server forgets it (backend notices.dismiss_route). */
+  dismissNotice: (c: string, id: string) => j<{ dismissed: boolean }>(`${ws(c)}/notices/${enc(id)}/dismiss`, { method: 'POST' }),
   retryProposal: (c: string, slug: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/retry`, { method: 'POST' }),
   /** Build or Retry on a proposal's chip (`POST /ws/{c}/views/{slug}/build`): a click that starts a view builder through
    * thimble's plugin, with the run's model and effort (Settings' dev row when left out). */
@@ -467,10 +479,6 @@ export const api = {
    * with */
   cardAsView: (c: string, card: string) => j<{ slug: string; query: ViewQuery }>(`${ws(c)}/cells/${enc(card)}/as-view`, { method: 'POST' }),
   // ---- orientation ----
-  /** Start (`POST /ws/{c}/start`): a click, which starts the orientation through thimble's plugin with no turn of main;
-     * the answer is the agent id, or the refusal's kind and reason, which orient/run.json also holds (`orientation`).
-     * 403 without the analyst's cookie. */
-  start: (c: string, body: Partial<StartBody> = {}) => j<StartAnswer>(`${ws(c)}/start`, { method: 'POST', body: JSON.stringify(body) }).then(startAnswer),
   /** The orientation's record (`GET /ws/{c}/orientation`, orient/run.json): {} before any was asked for. */
   orientation: (c: string) => j<OrientRun>(`${ws(c)}/orientation`),
 
@@ -537,7 +545,7 @@ export const api = {
 export const isNotFound = (e: unknown): boolean => /^404\b/.test((e as Error)?.message ?? '')
 
 // --- the canvas's layout ---
-import type { CellMoveBody, GroupPatch, MainEffort, Pos, StartBody } from './types'
+import type { CellMoveBody, GroupPatch, MainEffort, Pos } from './types'
 
 /** The canvas' layout routes: where a group's column sits and how wide a card is. */
 export const canvasApi = {

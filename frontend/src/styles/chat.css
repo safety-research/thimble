@@ -1010,131 +1010,6 @@ button.label-row-chip:hover {
   margin: 0 auto;
 }
 
-/* -------- the start gate: the orientation's offer wrapped around the composer, radius 12; the title and passes, the
-   field, then Skip and Start -------- */
-/* in a short pane the gate's top scrolls, and the field and Start stay in view */
-.chat-gate {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-height: 0;
-  padding: 14px 8px 8px;
-  border-radius: var(--radius-pane);
-  background: var(--glass-bg);
-  -webkit-backdrop-filter: var(--glass-blur-strong);
-  backdrop-filter: var(--glass-blur-strong);
-  border: var(--glass-edge-strong);
-  box-shadow: var(--glass-highlight), var(--shadow-composer);
-}
-.chat-gate-top {
-  display: flex;
-  flex-direction: column;
-  flex: 0 1 auto;
-  gap: 12px;
-  min-height: 0;
-  padding: 0 6px;
-  overflow-y: auto;
-}
-.chat-gate-title {
-  font: 500 13.5px / 1.3 var(--font-body);
-  color: var(--text-primary);
-}
-/* Show options, collapsed by default: the words in the accent and the chevron after them, pointing down; open, the
-   chevron turns up and the switches and the permission mode follow */
-.chat-gate-options-toggle {
-  display: flex;
-  align-items: center;
-  align-self: flex-start;
-  gap: 4px;
-  min-width: 0;
-  min-height: 0;
-  margin: -4px 0 0;
-  padding: 2px 0;
-  border: 0;
-  background: none;
-  color: var(--text-accent);
-  font: var(--type-body);
-  text-align: left;
-  cursor: pointer;
-}
-.chat-gate-caret {
-  flex: none;
-  transition: transform var(--dur-fast) var(--ease-out);
-}
-.chat-gate-options-toggle.open .chat-gate-caret {
-  transform: rotate(180deg);
-}
-.chat-gate-options-toggle:focus-visible {
-  outline: 1.5px solid var(--accent);
-  outline-offset: 2px;
-  border-radius: var(--radius-ui);
-}
-.chat-gate-options {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.chat-gate-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.chat-gate-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font: var(--type-body);
-  color: var(--text-primary);
-}
-.chat-gate-label {
-  flex: 1 1 auto;
-  min-width: 0;
-  cursor: pointer;
-  user-select: none;
-  transition: color var(--dur-base) var(--ease-out);
-}
-.chat-gate-warn-ico {
-  flex: none;
-  margin-top: 2px;
-}
-/* the line under the gate's field while Start is off: why (main not started by `thimble`, no session, no hooks module,
-   plan mode), a fault in the warning's color */
-.chat-gate-mode {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  margin: 0;
-  padding: 0 4px;
-  color: var(--text-tertiary);
-  font: var(--type-body-sm);
-}
-.chat-gate-mode.chat-gate-blocked {
-  color: var(--status-negative);
-}
-.chat-gate-field {
-  display: flex;
-  flex: none;
-  flex-direction: column;
-  gap: 14px;
-  padding: 10px 12px;
-  border-radius: var(--radius-card);
-  background: var(--surface-card);
-  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.1);
-  cursor: text;
-}
-.chat-gate-text.field-area {
-  min-height: 34px;
-  font: var(--type-body);
-}
-.chat-gate-text::placeholder {
-  color: var(--text-tertiary);
-}
-.chat-gate-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  align-self: flex-start;
-}
 /* a session's model line at a composer's foot (ModelLine): the model, the effort menu and fast mode's bolt, in the
    composer's quiet ink */
 .model-line {
@@ -1175,24 +1050,6 @@ button.model-line-part[aria-expanded='true'] {
   width: 20px;
   height: 20px;
   color: inherit;
-}
-.chat-gate-foot {
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 0 0 0 4px;
-}
-.chat-gate-skip.btn {
-  color: var(--text-tertiary);
-}
-.chat-gate-error {
-  flex: 1 1 auto;
-  min-width: 0;
-  color: var(--status-negative);
-  font: var(--type-body-sm);
-  overflow-wrap: anywhere;
 }
 /* -------- the task strip: glass on the pane's paper, riding 4px behind the composer's top edge while the thread works;
    the spinner, what it does, how many of its steps are done, and a chevron that opens the steps -------- */
@@ -1531,6 +1388,89 @@ button.model-line-part[aria-expanded='true'] {
   margin-left: auto;
 }
 
+/* -------- a view proposal (ProposalCard): one card above the composer in the accent, on the view chip's tint mixed
+   into the card's own surface (the foot floats over the rows) with the accent's edge: the head with its
+   sparkle, the view's name in bold and what it shows, the task, then Accept, Reject and a quiet Don't ask again; an
+   Accept that could not start the build says why under them -------- */
+.chat-offer {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 6px;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  max-height: 45vh;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  overflow-y: auto;
+  border: 1.5px solid var(--accent);
+  border-radius: var(--radius-card);
+  background: color-mix(in oklab, var(--accent) 9%, var(--surface-card));
+  box-shadow: var(--shadow-composer);
+  color: var(--text-primary);
+  font: var(--type-body-sm);
+}
+.chat-offer-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-accent);
+  font: var(--type-ui-sm);
+  font-weight: 600;
+}
+.chat-offer-ico {
+  flex: none;
+  color: var(--text-accent);
+}
+.chat-offer-text,
+.chat-offer-task {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.chat-offer-name {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.chat-offer-desc {
+  color: var(--text-secondary);
+}
+.chat-offer-task {
+  color: var(--text-secondary);
+}
+.chat-offer-acts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-top: 2px;
+}
+/* Don't ask again: a quiet text button after Reject, at the row's end */
+.chat-offer-off {
+  margin-left: auto;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+  cursor: pointer;
+}
+.chat-offer-off:hover {
+  color: var(--text-secondary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.chat-offer-off:focus-visible {
+  outline: 1.5px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-chip);
+}
+.chat-offer-refused {
+  margin: 0;
+  color: var(--status-negative);
+  overflow-wrap: anywhere;
+}
+
 /* -------- the composer: glass floating over the transcript -------- */
 .chat-foot {
   position: absolute;
@@ -1778,6 +1718,107 @@ button.model-line-part[aria-expanded='true'] {
   color: var(--text-secondary);
   font: var(--type-body-sm);
 }
+/* -------- notices (chat/Notice.tsx): a failure of main or of one of thimble's agents with its fix. Above the composer,
+   the open ones stack under the view proposal's place, each one line on the warning's wash mixed into the card's own
+   surface (the foot floats over the rows), with the warning's edge: the glyph, the agent in bold, the failure and Open,
+   ×, and under the words its fix. In a chat's rows the same line without buttons, quiet once the notice is closed
+   -------- */
+.chat-notices {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 40vh;
+  margin-bottom: 12px;
+  overflow-y: auto;
+  border-radius: var(--radius-card);
+}
+.chat-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  padding: 6px 4px 6px 10px;
+  border: 1px solid var(--status-warning);
+  border-radius: var(--radius-card);
+  background: var(--status-warning-soft);
+  color: var(--text-primary);
+  font: var(--type-body-sm);
+}
+.chat-foot .chat-notice {
+  background: color-mix(in oklab, var(--status-warning) 12%, var(--surface-card));
+}
+.chat-notice-ico {
+  flex: none;
+  margin-top: 3px;
+  color: var(--status-warning);
+}
+.chat-notice-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  padding-top: 1px;
+}
+.chat-notice-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* the agent, a tag in the warning's ink before the sentence (which names it again, so it reads alone) */
+.chat-notice-agent {
+  margin-right: 2px;
+  color: var(--status-warning);
+  font-weight: 600;
+}
+.chat-notice-text code {
+  font: var(--type-mono-sm);
+}
+.chat-notice-acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.chat-notice-x.btn {
+  flex: none;
+}
+/* Open: a link after the words, to the chat the notice happened in */
+.chat-notice-open {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-accent);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+.chat-notice-open:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.chat-notice-open:focus-visible {
+  outline: 1.5px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-chip);
+}
+/* in a chat's rows: no buttons, so the line keeps its own padding on the right */
+.chat-notice-row {
+  padding-right: 10px;
+}
+/* closed (a fix cleared it, or the analyst dismissed it): a quiet line of the chat's history */
+.chat-notice-row[data-closed] {
+  border-color: var(--border-subtle);
+  background: transparent;
+  color: var(--text-tertiary);
+}
+.chat-notice-row[data-closed] .chat-notice-ico {
+  color: var(--text-tertiary);
+}
 /* a start that did not happen (chat/Refused): one card on the warning's soft wash, the agent named, why on one line,
    the request in full behind a disclosure, and the kind's buttons */
 .chat-refused {
@@ -1899,10 +1940,6 @@ button.model-line-part[aria-expanded='true'] {
 .chat-continue-ico {
   flex: none;
   margin-top: 2px;
-}
-.chat-continue-new {
-  flex: none;
-  margin-left: auto;
 }
 /* a request of one of thimble's agents, which the terminal answers: no buttons, the line says where */
 .chat-perm-terminal .chat-perm-why {

@@ -1,5 +1,5 @@
 // The page's typed event bus: the workspace stream fans out here, and the surfaces talk to each other through it.
-import type { FilterScope, ViewQuery, WsEvent } from './types'
+import type { FilterScope, Notice, ViewQuery, WsEvent } from './types'
 
 export type Tab = 'files' | 'canvas' | 'report'
 
@@ -18,7 +18,8 @@ export type Events = {
   report: { slug: string; status: string; span?: string }
   /** `asked`: a view the analyst asked for is built (files/viewReady.ts); `version`: a new version of it passed its checks */
   /** `held`: one of the orientation's proposals before its view first passes, which only its chip follows */
-  view: { slug: string; status: string; path?: string; chat?: string; asked?: boolean; version?: string; held?: boolean }
+  /** `accepted`: the first build of a view the analyst accepted from a view proposal (files/viewReady.ts) */
+  view: { slug: string; status: string; path?: string; chat?: string; asked?: boolean; accepted?: boolean; version?: string; held?: boolean }
   ticket: { id: string; n: number; status: string }
   /** `rows` false: the label's rows stayed as they were (turned on or off, recoloured, a filter set) */
   concepts: { concept: string; what: string; rows?: boolean }
@@ -84,6 +85,12 @@ export type Events = {
   cmdHeld: { on: boolean; cursor: string }
   /** run the product tour again (Settings' Take the tour) */
   tour: Record<string, never>
+  /** the stream's `notice` record (backend notices.py, lib/notices.ts): a new notice (`notice`; `foreground` unless the
+   * server says otherwise), or the end of one by its id or key (`gone`: a fix that worked cleared it, or the analyst
+   * dismissed it). `chat` is the chat whose log holds its row, if any; `replay` marks a record of the replayed history */
+  notice: { chat: string | null; notice: Notice | null; gone: { id?: string; key?: string } | null; foreground: boolean; replay: boolean }
+  /** open Settings under the top bar's gear (a notice's Open Settings) */
+  openSettings: Record<string, never>
 }
 
 type Handler<T> = (payload: T) => void

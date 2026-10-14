@@ -38,9 +38,9 @@ describe('the reason and the buttons, by kind', () => {
     expect(refusalLine({ kind: 'not-launched', reason: 'This session was not started with `thimble`' })).toBe('This session was not started with `thimble`.')
   })
 
-  test('Start it and Edit request for auto mode and a call main did not make, Try again at the limit and for an unanswered click, Dismiss always', () => {
-    expect(refusalActions('auto-mode')).toEqual(['start-it', 'edit', 'dismiss'])
-    expect(refusalActions('no-call')).toEqual(['start-it', 'edit', 'dismiss'])
+  test('Start it for auto mode and a call main did not make, Try again at the limit and for an unanswered click, Dismiss always', () => {
+    expect(refusalActions('auto-mode')).toEqual(['start-it', 'dismiss'])
+    expect(refusalActions('no-call')).toEqual(['start-it', 'dismiss'])
     expect(refusalActions('limit')).toEqual(['try-again', 'dismiss'])
     expect(refusalActions('no-module', true)).toEqual(['try-again', 'dismiss'])
     for (const k of ['no-module', 'not-launched', 'hook', 'earlier-session', 'error']) expect(refusalActions(k)).toEqual(['dismiss'])
@@ -54,13 +54,13 @@ describe('the reason and the buttons, by kind', () => {
 describe('the card', () => {
   test('an auto-mode refusal shows the request in full, the /permissions line, and Start it posts start-it', async () => {
     const started: unknown[] = []
-    const el = await mount(<RefusedCard ws="mini" what="the orientation" refusal={{ kind: 'auto-mode', reason: '[Credential Exploration]', request: 'r1' }} text="moderators" onDismiss={() => {}} onEdit={() => {}} onStarted={(a) => started.push(a)} />)
+    const el = await mount(<RefusedCard ws="mini" what="the orientation" refusal={{ kind: 'auto-mode', reason: '[Credential Exploration]', request: 'r1' }} text="moderators" onDismiss={() => {}} onStarted={(a) => started.push(a)} />)
     await settle()
     expect(el.querySelector('.chat-refused-title')?.textContent).toBe("The orientation didn't start")
     expect(el.textContent).toContain(PERMISSIONS_LINE)
     expect(el.querySelector('.chat-refused-line')?.textContent).toBe('thimble:orientation · Opus 5.5 · max')
     expect(el.querySelector('.chat-refused-prompt')?.textContent).toContain('Orient on the moderators.')
-    expect(buttons(el)).toEqual(['Start it', 'Edit request', 'Dismiss'])
+    expect(buttons(el)).toEqual(['Start it', 'Dismiss'])
     expect(el.textContent).not.toMatch(/Allow it/)
     await act(async () => el.querySelector<HTMLButtonElement>('.chat-refused-start')!.click())
     await settle()
@@ -75,7 +75,7 @@ describe('the card', () => {
     await act(async () => el.querySelector<HTMLButtonElement>('.chat-refused-again')!.click())
     await settle()
     expect(posted).toEqual([['/api/ws/mini/subagents/again', { request: 'r1' }]])
-    const hook = await mount(<RefusedCard ws="mini" what="the orientation" refusal={{ kind: 'hook', reason: 'Your Claude Code session is in plan mode.', request: null }} onDismiss={() => {}} onEdit={() => {}} />)
+    const hook = await mount(<RefusedCard ws="mini" what="the orientation" refusal={{ kind: 'hook', reason: 'Your Claude Code session is in plan mode.', request: null }} onDismiss={() => {}} />)
     expect(buttons(hook)).toEqual(['Dismiss'])
   })
 })

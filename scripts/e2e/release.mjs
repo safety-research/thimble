@@ -374,17 +374,8 @@ async function tourState(page) {
   })
 }
 
-/** Unlock a gated step: press a Start inside the tour's example, else ⌘-click (Ctrl-click off macOS) the step's cutout. */
+/** Unlock a gated step: ⌘-click (Ctrl-click off macOS) the step's cutout. */
 async function unlockStep(page, st) {
-  const start = await page.evaluate(() => {
-    const b = [...document.querySelectorAll('.tour-ex button, .tour-root button')].find((x) => x.textContent?.trim() === 'Start')
-    const r = b?.getBoundingClientRect()
-    return r && r.width ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null
-  })
-  if (start) {
-    await page.mouse.click(start.x, start.y)
-    return 'Start'
-  }
   const at = st.hole || { x: SIZES[0].width / 2, y: SIZES[0].height / 2 }
   await page.mouse.move(at.x - 10, at.y)
   await page.keyboard.down('ControlOrMeta')

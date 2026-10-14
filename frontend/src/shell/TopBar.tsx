@@ -50,6 +50,16 @@ export function TopBar({ ws, tabs, onTab, onTabDrag }: TopBarProps) {
       }),
     [],
   )
+  // a notice's Open Settings (chat/Notice.tsx, the bus's `openSettings`) opens the settings under the gear
+  useEffect(
+    () =>
+      bus.on('openSettings', () => {
+        setThemeOpen(false)
+        setProblemOpen(false)
+        setSettingsOpen(true)
+      }),
+    [],
+  )
   useEffect(() => {
     let alive = true
     api

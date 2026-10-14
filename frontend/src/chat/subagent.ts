@@ -61,9 +61,9 @@ export const lastSession = (m: Pick<ChatMeta, 'session' | 'sessions'> | null | u
  * for one that can, an orientation stopped with Esc among them, whose message starts a continuation
  * (STOPPED_CONTINUE_LINE). */
 export function continueText(kind: Continue, sid: string): string {
-  if (kind === 'earlier-version') return 'This orientation ran in an earlier version of thimble and cannot be continued. Start a new orientation to explore further.'
+  if (kind === 'earlier-version') return 'This orientation ran in an earlier version of thimble and cannot be continued. Ask Claude in main for a new orientation to explore further.'
   if (kind === 'earlier-session')
-    return `This orientation ran in an earlier Claude Code session. To continue it, quit and run \`thimble -r ${sid || '<session id>'}\` in this folder, or start a new orientation.`
+    return `This orientation ran in an earlier Claude Code session. To continue it, quit and run \`thimble -r ${sid || '<session id>'}\` in this folder, or ask Claude in main for a new orientation.`
   return ''
 }
 

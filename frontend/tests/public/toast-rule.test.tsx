@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 // One rule for toasts: a toast confirms or fails the analyst's own click, or reports news with a link. A state that
-// lasts shows once beside what it concerns and is never also a toast: a refused Start stays beside Start alone, and a
-// write that failed stays on its document (src/report/writeFailures.ts), with no toast for either.
+// lasts shows once beside what it concerns and is never also a toast: an Accept that cannot start stays under the view
+// proposal's buttons alone, and a write that failed stays on its document (src/report/writeFailures.ts), with no toast
+// for either.
 import { act } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
-import { StartGate } from '../../src/chat/StartGate.tsx'
+import { ARM_MS } from '../../src/chat/PermissionCard.tsx'
+import { ProposalCard } from '../../src/chat/ProposalCard.tsx'
 import { bus } from '../../src/lib/bus.ts'
 import { invalidateSettings } from '../../src/lib/models.ts'
 import { useWriteFailures } from '../../src/report/writeFailures.ts'
@@ -25,19 +27,23 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-const REFUSAL = "Claude Code's sandbox cannot run here, so the orientation would run unsandboxed."
+const REFUSAL = 'Your Claude Code session is in plan mode, where thimble\'s agents would have to ask you before every card and every edit, so none of them starts or takes a message there. Switch out of plan mode first (shift+tab in your terminal).'
+const OFFER = { slug: 'agent-timeline', name: 'Agent Timeline', description: 'Every agent on one time axis.', task: 'compare the agents', claims: ['agents/*.jsonl'], status: 'suggested', offered: { at: '2026-10-14T10:00:00Z', turn: 3, after: 'main' } }
 
-test('a refused Start says why beside Start, once, and makes no toast', async () => {
+test('an Accept that cannot start says why under the view proposal, once, and makes no toast', async () => {
   vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
-    if (String(url).endsWith('/start') && init?.method === 'POST') return new Response(JSON.stringify({ detail: REFUSAL }), { status: 409, headers: { 'content-type': 'application/json' } })
-    return new Response(JSON.stringify({ models: {} }), { status: 200, headers: { 'content-type': 'application/json' } })
+    const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } })
+    if (String(url).endsWith('/accept') && init?.method === 'POST') return json({ ...OFFER, refused: { kind: 'hook', reason: REFUSAL } })
+    if (String(url).endsWith('/views/proposals')) return json([OFFER])
+    return json({ models: {}, propose_views: true })
   })
-  const el = await mount(<StartGate ws="mini" model="claude-opus-5-5" />)
+  const el = await mount(<ProposalCard ws="toast-rule" />)
   await settle()
-  const start = [...el.querySelectorAll('button')].find((b) => b.textContent === 'Start')!
-  await act(async () => start.click())
+  await act(async () => new Promise((r) => setTimeout(r, ARM_MS + 30)))
+  await act(async () => el.querySelector<HTMLButtonElement>('.chat-offer-accept')!.click())
   await settle()
-  expect(el.querySelector('.chat-gate-error')?.textContent).toBe(REFUSAL)
+  expect(el.querySelectorAll('.chat-offer-refused')).toHaveLength(1)
+  expect(el.querySelector('.chat-offer-refused')?.textContent).toBe(REFUSAL)
   expect(toasts).toEqual([])
 })
 
