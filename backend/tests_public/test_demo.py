@@ -918,6 +918,7 @@ def test_demo_says_how_to_log_in_when_claude_is_not_logged_in(fake_world, monkey
     assert asked == [] and w["started"] == []
     text = said(w)
     assert "Claude Code is not logged in" in text and "`claude auth login`" in text
+    assert "ANTHROPIC_API_KEY" in text, "the API-key route too"
     assert f"cd {w['root'] / 'one'} && thimble" in text
     # no claude on PATH at all
     monkeypatch.setattr(config, "CLI_PATH", None)

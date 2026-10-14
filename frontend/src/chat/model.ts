@@ -1239,15 +1239,16 @@ export function apiErrorAt(text: string): number {
   return m ? t.length - m[1].length : -1
 }
 
-/** The kinds of failure an API error card names, sorted as the backend's retry.transient_class sorts them, and `other`
- * for an error that is none of them (a request the API refused). */
-export type ApiFailure = 'overloaded' | 'rate_limited' | 'server_error' | 'connection' | 'other'
+/** The kinds of failure an API error card names, sorted as the backend's retry.transient_class sorts them; `auth`
+ * (401), `forbidden` (403) and `not_found` (404, a model id the account or provider does not have), which no retry
+ * fixes; and `other` for an error that is none of them (a request the API refused). */
+export type ApiFailure = 'overloaded' | 'rate_limited' | 'server_error' | 'connection' | 'auth' | 'forbidden' | 'not_found' | 'other'
 
-const FAILURE_OF_STATUS: Readonly<Record<number, ApiFailure>> = { 429: 'rate_limited', 500: 'server_error', 502: 'server_error', 503: 'server_error', 504: 'server_error', 529: 'overloaded' }
-const FAILURE_OF_BODY: Readonly<Record<string, ApiFailure>> = { overloaded_error: 'overloaded', api_error: 'server_error', server_error: 'server_error', rate_limit_error: 'rate_limited' }
+const FAILURE_OF_STATUS: Readonly<Record<number, ApiFailure>> = { 401: 'auth', 403: 'forbidden', 404: 'not_found', 429: 'rate_limited', 500: 'server_error', 502: 'server_error', 503: 'server_error', 504: 'server_error', 529: 'overloaded' }
+const FAILURE_OF_BODY: Readonly<Record<string, ApiFailure>> = { overloaded_error: 'overloaded', api_error: 'server_error', server_error: 'server_error', rate_limit_error: 'rate_limited', authentication_error: 'auth', permission_error: 'forbidden', not_found_error: 'not_found' }
 const STATUS_TEXT = /\b(?:HTTP|API Error:?|Error code:?|status(?: code)?:?)\s*(\d{3})\b/i
 const BARE_STATUS = /\b(429|5\d\d)\b/
-const BODY_TEXT = /\b(overloaded_error|api_error|server_error|rate_limit_error)\b/i
+const BODY_TEXT = /\b(overloaded_error|api_error|server_error|rate_limit_error|authentication_error|permission_error|not_found_error)\b/i
 const CONNECTION_TEXT = /connection error|connection reset|connection refused|econnreset|econnrefused|etimedout|socket hang up|fetch failed|network error/i
 
 /** What an API error says failed, and the HTTP status it names (`Repeated 529 Overloaded errors`: 529), from Claude
@@ -1277,13 +1278,26 @@ const FAILURE_WORDS: Readonly<Record<ApiFailure, string>> = {
   rate_limited: "Anthropic's API rate limit was reached",
   server_error: "Anthropic's API had a server error",
   connection: "The connection to Anthropic's API failed",
+  auth: "Claude Code's login or API key was refused",
+  forbidden: 'Your account may not make this request',
+  not_found: "This model isn't available to your account",
   other: "Anthropic's API returned an error",
 }
 
-/** What happened, in the card's head: the failure in plain words and its status (Anthropic's API is overloaded (529)). Pure. */
+/** What the analyst does about a failure no retry fixes, after its words in the card's head. */
+const FAILURE_FIX: Readonly<Partial<Record<ApiFailure, string>>> = {
+  auth: 'run /login in your terminal, or check ANTHROPIC_API_KEY and run thimble server restart',
+  forbidden: "check your login and your organization's settings, or pick another model in Settings",
+  not_found: 'pick another model in Settings',
+}
+
+/** What happened, in the card's head: the failure in plain words and its status (Anthropic's API is overloaded (529)),
+ * then what to do when no retry fixes it. Pure. */
 export function apiFailureText(text: string): string {
   const { failure, status } = apiFailure(text)
-  return status != null ? `${FAILURE_WORDS[failure]} (${status})` : FAILURE_WORDS[failure]
+  const head = status != null ? `${FAILURE_WORDS[failure]} (${status})` : FAILURE_WORDS[failure]
+  const fix = FAILURE_FIX[failure]
+  return fix ? `${head}: ${fix}` : head
 }
 
 /** The line a view build's run writes when the API ended a turn and the build waits it out (backend dev.run_view):

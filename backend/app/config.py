@@ -240,6 +240,12 @@ def auth_status(env: Mapping[str, str] | None = None, cwd: str | Path | None = N
     return d if isinstance(d, dict) else None
 
 
+# how to give Claude Code a login, for every "not logged in" message: the login, or the API-key route, which reaches
+# thimble's server only once it starts again with the key (INSTALL.md's Authentication section has the other routes)
+AUTH_HELP = ("log in with `claude auth login`, or export ANTHROPIC_API_KEY and run `thimble server restart` (INSTALL.md, "
+             "Authentication, has more ways)")
+
+
 def auth_problem(status: dict[str, Any] | None = None) -> str:
     """The alert when a model call cannot run: no `claude`, or `claude auth status` reporting no login; '' otherwise,
     when the status cannot be read (the call itself then says what failed), and under THIMBLE_SKIP_KEY."""
@@ -249,7 +255,7 @@ def auth_problem(status: dict[str, Any] | None = None) -> str:
         return NO_CLAUDE
     st = auth_status() if status is None else status
     if st is not None and st.get("loggedIn") is False:
-        return "Claude Code is not logged in (`claude auth status`): log in with `claude`, then try again"
+        return f"Claude Code is not logged in (`claude auth status`): {AUTH_HELP}, then try again"
     return ""
 
 

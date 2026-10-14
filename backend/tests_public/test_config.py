@@ -17,6 +17,17 @@ def test_a_claude_thimble_starts_keeps_the_users_auth_and_drops_the_callers_iden
                                                "CLAUDE_CODE_SKIP_VERTEX_AUTH", "ANTHROPIC_API_KEY", "PATH"}
 
 
+def test_not_logged_in_names_the_login_and_the_api_key_route(monkeypatch):
+    """thimble has no login of its own, and an API key works through `claude` once thimble's server starts with it: the
+    alert names both routes, and where the others are."""
+    monkeypatch.delenv("THIMBLE_SKIP_KEY", raising=False)
+    monkeypatch.setattr(config, "CLI_PATH", "/bin/claude")
+    said = config.auth_problem({"loggedIn": False})
+    assert "claude auth login" in said and "ANTHROPIC_API_KEY" in said and "thimble server restart" in said
+    assert "Authentication" in said
+    assert config.auth_problem({"loggedIn": True}) == ""
+
+
 # --------------------------------------------------------------------------- corpus registration
 
 

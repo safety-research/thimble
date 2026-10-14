@@ -2567,7 +2567,7 @@ def auth_line(status: dict[str, Any] | None) -> str:
     if status is None:
         return "not known: `claude auth status --json` did not answer"
     if status.get("loggedIn") is False:
-        return "not logged in: log in with `claude`; nothing that calls a model runs until then"
+        return f"not logged in: {config.AUTH_HELP}; nothing that calls a model runs until then"
     return f"logged in ({status.get('authMethod') or '?'}, {status.get('apiProvider') or '?'}), as `claude auth status` reports"
 
 
