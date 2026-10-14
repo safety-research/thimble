@@ -114,13 +114,10 @@ export function ViewPane({ ws, view, path, picked, targetRef, quote, onQuoteMiss
   )
 }
 
-/** The rounds a view's reviewer looks at its pictures, at most (backend view_review.ROUNDS, counted by finish_review). */
-export const REVIEW_ROUNDS = 3
-
 /** What the review's mark says of its state, in one line. */
 export function reviewLine(r: ViewReview): string {
   const at = hhmm(r.ts)
-  if (r.state === 'running') return r.round ? `Reviewing the view's pictures, round ${r.round} of ${REVIEW_ROUNDS}` : "Reviewing the view's pictures"
+  if (r.state === 'running') return "Reviewing the view's pictures"
   if (r.state === 'queued') return r.note || 'Waits for a free subagent'
   if (r.state === 'failed') return r.note || 'The review did not finish'
   if (r.state === 'stopped') return (at ? `Stopped at ${at}` : 'Stopped') + (r.note ? `: ${r.note.replace(/\.$/, '')}` : '')

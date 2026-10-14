@@ -1,7 +1,7 @@
 """The view review: once a view passes its checks, which code runs without pictures (views.check), a
 `thimble:view-reviewer`, a subagent of the analyst's Claude Code session (subagents.py), looks at pictures of its page
-and fixes what it finds, with a fresh context. The view reaches the analyst at once and the review runs beside it; each
-revision that passes the view's checks replaces it, with Undo back to the view as it was built.
+and fixes clear problems in how it draws, with a fresh context. The view reaches the analyst at once and the review runs
+beside it; each revision that passes the view's checks replaces it, with Undo back to the view as it was built.
 
 dev._settle calls after_built() when a build or a change to a view passes, and the review starts through thimble's
 plugin module as part of the start that asked for the build (a follow-on start); Review again is the analyst's click.
@@ -55,11 +55,8 @@ log = logging.getLogger("thimble.view_review")
 PROMPT = "view-review"  # prompts/view-review.md: its `review` section is the reviewer's registered prompt
 TASK = "view-review"  # tasks.TASKS: a program that replaces it reads the pictures (program_reading)
 TASK_PROMPT = "dev-view-review"  # prompts/dev-view-review.md: a review run's prompt
-CONTEXT_CHARS = 2_000_000  # of the analyst's work (the context engine's parts): about half the reviewer's 1M-token window,
-# the rest left for the principles, the pictures and the review's own calls (subagents.values_for gives it the window)
-CONTEXT_PARTS = ("conversation", "threads", "orientation", "canvas")
 REVIEWER = "view-reviewer"  # subagents.TYPES
-ROUNDS = 3  # revisions a review may make
+ROUNDS = 1  # revisions a review may make: one light pass after the build, for clear problems in how the view draws
 RECORDS_CHARS = 6000  # of the reader's answers view_pictures gives
 ANSWERS_PER_STATE = 2
 PHRASE_CHARS = 120  # of a problem, as the check mark's hover lists what was revised or is left
@@ -88,7 +85,7 @@ NO_MORE = ("No picture is left in this round: the overview and {n} more states a
 EXTRA_STATES = {"labels": views.PANE_NARROW, "filtered": views.PANE_NARROW, "detail": views.PANE_NARROW,
                 "open": views.PANE_NARROW, "wide": views.PANE_WIDE, "narrow": views.PANE_NARROW,
                 "control": views.PANE_SIZE}
-EXTRA_SHOTS = 6
+EXTRA_SHOTS = 4
 CONTROLS_CLICKED = 3  # controls one `control` state clicks in turn
 # in terminal mode, the columns of the overview's drawing and the states the reviewer may ask to see beside it, each
 # with its columns: the view 200 columns wide, the first place a citation opens, the place a ref names, and the view
@@ -200,19 +197,14 @@ def work_dir(c: str, slug: str) -> Path:
 
 def task(c: str, prop: dict[str, Any]) -> str:
     """A review run's prompt (prompts/dev-view-review.md): the view's name and slug, its folder and the reviewer's own,
-    the proposal fenced as data, and the analyst's work the proposal came from: the context engine's conversation,
-    threads, orientation and canvas (context.render, CONTEXT_CHARS)."""
-    from . import context, prompts, view_tools  # noqa: PLC0415
+    and the proposal fenced as data. The review looks only at how the view draws, so it gets no analyst context: the
+    proposal carries a visual design the analyst asked for."""
+    from . import prompts, view_tools  # noqa: PLC0415
 
     slug = str(prop["slug"])
-    # the view builder experiment builds each proposal in a scratch workspace of its own: there a file of the context
-    # the proposal's workspace rendered stands in for it (THIMBLE_REVIEW_CONTEXT_FILE, set only by its harness)
-    seam = Path(os.environ.get("THIMBLE_REVIEW_CONTEXT_FILE") or "")
-    analyst = seam.read_text("utf-8") if seam.name and seam.is_file() else context.render(c, budget=CONTEXT_CHARS,
-                                                                                            parts=CONTEXT_PARTS)
     return prompts.render(TASK_PROMPT, {"name": str(prop.get("name") or slug), "slug": slug,
                                         "folder": str(views.views_dir(c) / slug), "work": str(work_dir(c, slug)),
-                                        "proposal": view_tools.fenced_proposal(prop), "context": analyst})
+                                        "proposal": view_tools.fenced_proposal(prop)})
 
 
 # --------------------------------------------------------------------------- starting and stopping

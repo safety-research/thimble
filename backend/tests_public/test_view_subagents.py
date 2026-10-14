@@ -185,10 +185,9 @@ async def test_a_design_the_analyst_asked_main_for_reaches_the_builder_and_the_r
         assert description in prompt and task in prompt
 
 
-async def test_the_reviewer_reads_the_analyst_s_work_the_proposal_came_from(board, bridge, gates, hints, monkeypatch,
-                                                                               tmp_path):
-    """The review run's prompt holds the context engine's parts (conversation, threads, orientation, canvas) after the
-    proposal, so the critique judges the view by the analyst's task; the experiment harness's file stands in for them."""
+async def test_the_reviewer_s_task_holds_the_proposal_and_no_analyst_context(board, bridge, gates, hints, monkeypatch):
+    """The review is a light pass over how the view draws, so its run's prompt holds the view and the proposal, and none
+    of the analyst's work: the context engine is not asked for it."""
     res = await tools.call(CORPUS, "propose_view", {"name": "Posts", "description": "The posts by thread.",
                                                     "task": "Find the threads where an agent asks for help.",
                                                     "claims": ["board.jsonl"]}, tool_use_id="toolu_ctx")
@@ -196,14 +195,10 @@ async def test_the_reviewer_reads_the_analyst_s_work_the_proposal_came_from(boar
     slug = next(p["slug"] for p in views.list_proposals(CORPUS))
     seen = []
     monkeypatch.setattr("app.context.render", lambda c, **kw: seen.append(kw) or "## The conversation\n\n[analyst] hi")
-    monkeypatch.delenv("THIMBLE_REVIEW_CONTEXT_FILE", raising=False)
     reviewer = view_review.task(CORPUS, _prop(slug))
-    assert "[analyst] hi" in reviewer and reviewer.index("The posts by thread.") < reviewer.index("[analyst] hi")
-    assert seen == [{"budget": view_review.CONTEXT_CHARS, "parts": view_review.CONTEXT_PARTS}]
-    f = tmp_path / "ctx.md"
-    f.write_text("## The orientation\n\nfrom the workspace the proposal came from", "utf-8")
-    monkeypatch.setenv("THIMBLE_REVIEW_CONTEXT_FILE", str(f))
-    assert "from the workspace the proposal came from" in view_review.task(CORPUS, _prop(slug))
+    assert "The posts by thread." in reviewer and "Find the threads where an agent asks for help." in reviewer
+    assert "- The files it reads: board.jsonl" in reviewer and f"`{slug}`" in reviewer
+    assert "[analyst] hi" not in reviewer and "The analyst's work" not in reviewer and not seen
 
 
 async def test_propose_view_takes_a_description_a_task_and_claims_and_the_builder_reads_the_layout_from_the_files(
@@ -307,20 +302,21 @@ def test_the_builder_and_the_reviewer_are_registered_to_keep_a_design_the_propos
 
 @pytest.mark.parametrize("mode", prompts.MODES)
 def test_the_builder_and_the_reviewer_use_color_for_the_task_hold_back_the_detail_panel_and_mirror_the_data(board, mode):
-    # prompts/dev-view.md's "A good view" and prompts/view-review.md's principles, in both modes: color one encoding at a
-    # time, Color by on the task's field (or a few of its values), never categories in shades of gray; the detail panel
-    # closed, or one short line until a click (the side panel's `empty`); a first screen in the chosen form, not a table
-    # of raw records; the data's structure mirrored, a network among the forms; and the units the data repeats compared
-    # before their details
+    # prompts/dev-view.md's "A good view", in both modes: color one encoding at a time, Color by on the task's field (or
+    # a few of its values), never categories in shades of gray; the detail panel closed, or one short line until a click
+    # (the side panel's `empty`); a first screen in the chosen form, not a table of raw records; the data's structure
+    # mirrored, a network among the forms; and the units the data repeats compared before their details.
+    # prompts/view-review.md's clear problems keep the detail panel's rule
     with prompts.rendering(mode):
         roles = subagents.roles(CORPUS)
     builder, reviewer = roles["view-builder"]["prompt"], roles["view-reviewer"]["prompt"]
-    for prompt in (builder, reviewer):
-        assert "one encoding at a time" in prompt and "shades of gray" in prompt and "take a hue" in prompt
-        assert "detail panel stays closed" in prompt and "Click a session" in prompt
-        assert "not a table of raw records" in prompt
-        assert "who works with whom as a network" in prompt and "before the details within one" in prompt
+    assert "one encoding at a time" in builder and "shades of gray" in builder and "take a hue" in builder
+    assert "detail panel stays closed" in builder and "Click a session" in builder
+    assert "not a table of raw records" in builder
+    assert "who works with whom as a network" in builder and "before the details within one" in builder
     assert "`initial`" in builder and "`{field, on: [values]}`" in builder and "`empty` option" in builder
+    # the reviewer is a light pass for clear problems in how the view draws: of these it keeps the detail panel
+    assert "detail panel stays closed" in reviewer and "Click a session" in reviewer
 
 
 async def test_main_s_message_to_a_view_s_build_thread_gives_the_exact_agent_call(board, bridge, gates, hints):
@@ -1158,28 +1154,38 @@ async def test_view_pictures_writes_the_overview_and_the_states_asked_for_into_t
     assert res.is_error and "No picture is left" in res.text
 
 
-async def test_finish_review_keeps_a_passing_revision_counts_the_round_and_restores_a_failing_one(
-        board, bridge, gates, pictures, hints):
+async def test_finish_review_keeps_a_passing_revision_and_ends_the_review(board, bridge, gates, pictures, hints):
+    """One light pass: a revision that passes the view's checks is kept, and the review is done with it."""
     slug = _propose(asked=True)
     reviewer, key = await _reviewed(slug)
     folder = views.views_dir(CORPUS) / slug
     (folder / views.VIEW_HTML).write_text("<p>v2</p>")
     res = await _call("finish_review", {"revised": ["the axis names days"]}, reviewer, key)
-    assert res.text.endswith(tools.hint("finish-review-again"))
+    assert res.text.endswith(tools.hint("finish-review-done"))
     review = _prop(slug)["review"]
-    assert (review["round"], review["revised"], review["state"]) == (1, ["the axis names days"], "running")
-    assert views.passed_as_is(CORPUS, slug) and (folder / views.VIEW_HTML).read_text() == "<p>v2</p>"
-    (folder / views.VIEW_HTML).write_text("<p>FAIL</p>")
-    res = await _call("finish_review", {"revised": ["a legend"]}, reviewer, key)
-    assert res.text.endswith(tools.hint("finish-review-restored"))
-    assert (folder / views.VIEW_HTML).read_text() == "<p>v2</p>" and views.passed_as_is(CORPUS, slug)
-    review = _prop(slug)["review"]
-    assert review["note"] == view_review.REVISION_FAILED_NOTE and review["finished"]
+    assert (review["round"], review["revised"], review["state"]) == (1, ["the axis names days"], "done")
+    assert review["finished"] and views.passed_as_is(CORPUS, slug)
+    assert (folder / views.VIEW_HTML).read_text() == "<p>v2</p>"
     res = await _call("finish_review", {}, reviewer, key)
     assert res.text.endswith(tools.hint("finish-review-done")), "a call after the review ended runs nothing"
     subagents.run_ended(CORPUS, reviewer, "done", "Revised the axis.", source="handback")
     await _until(lambda: not view_review.running(CORPUS, slug), "the reviewer never ended")
     assert view_review.undo(CORPUS, slug)["undo"] and (folder / views.VIEW_HTML).read_text() == "<p>v1</p>"
+
+
+async def test_finish_review_restores_a_failing_revision_and_ends_the_review(board, bridge, gates, pictures, hints):
+    """A revision that fails the view's checks is undone, back to the view as it last passed, and ends the review."""
+    slug = _propose(asked=True)
+    reviewer, key = await _reviewed(slug)
+    folder = views.views_dir(CORPUS) / slug
+    (folder / views.VIEW_HTML).write_text("<p>FAIL</p>")
+    res = await _call("finish_review", {"revised": ["a legend"]}, reviewer, key)
+    assert res.text.endswith(tools.hint("finish-review-restored"))
+    assert (folder / views.VIEW_HTML).read_text() == "<p>v1</p>" and views.passed_as_is(CORPUS, slug)
+    review = _prop(slug)["review"]
+    assert review["note"] == view_review.REVISION_FAILED_NOTE and review["finished"] and review["state"] == "done"
+    res = await _call("finish_review", {}, reviewer, key)
+    assert res.text.endswith(tools.hint("finish-review-done")), "a call after the review ended runs nothing"
 
 
 async def test_a_review_with_no_problems_is_done_after_its_last_round_at_the_latest(board, bridge, gates, pictures,
@@ -1314,9 +1320,9 @@ def test_every_job_click_route_refuses_the_server_s_token_without_the_analyst_s_
 
 
 def test_the_module_registers_the_three_job_roles_on_their_settings_rows(board):
-    """subagents.roles holds `thimble:view-builder` and `thimble:view-reviewer` (with the 1M window) on Settings' dev
-    row and `thimble:check` on its checks row, each with an explicit effort, a fixed description, and the thimble tools
-    that are not its own taken away."""
+    """subagents.roles holds `thimble:view-builder` and `thimble:view-reviewer` on Settings' dev row and
+    `thimble:check` on its checks row, each with an explicit effort, a fixed description, and the thimble tools that
+    are not its own taken away."""
     roles = subagents.roles(CORPUS)
     assert {"orientation", "critic", "writer", "view-builder", "view-reviewer", "check", "orient-helper"} <= set(roles)
     own = {"view-builder": view_tools.BUILDER_TOOLS, "view-reviewer": view_tools.REVIEWER_TOOLS,
@@ -1324,9 +1330,8 @@ def test_the_module_registers_the_three_job_roles_on_their_settings_rows(board):
     for role, mine in own.items():
         r = roles[role]
         assert r["type"] == f"thimble:{role}" and r["background"] and r["description"].strip()
-        # the reviewer reads the analyst's whole work (view_review.task), so it runs with the 1M-token window
-        assert (r["model"], r["effort"]) == ("claude-opus-5-5[1m]" if role == "view-reviewer" else "claude-opus-5-5",
-                                             "high")
+        # the reviewer reads no analyst context (view_review.task), so it runs without the 1M-token window
+        assert (r["model"], r["effort"]) == ("claude-opus-5-5", "high")
         assert not [n for n in mine if tools.thimble_tool(n) in r["disallowedTools"]]
         assert tools.thimble_tool("add_card") in r["disallowedTools"]
         assert "{{" not in r["prompt"] and len(r["prompt"]) > 500

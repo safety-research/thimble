@@ -543,7 +543,7 @@ Finish the view you build: thimble runs the checks as the record of your build. 
 
 ## view_pictures
 
-Take pictures of the view you review, whose paths Read opens. The first call of a round gives the view as it opens; ask for other states in `states`, up to six more in each round.
+Take pictures of the view you review, whose paths Read opens. The first call gives the view as it opens; ask for other states in `states`, up to four more.
 
 ```json
 {
@@ -551,7 +551,7 @@ Take pictures of the view you review, whose paths Read opens. The first call of 
   "properties": {
     "states": {
       "type": "array",
-      "maxItems": 6,
+      "maxItems": 4,
       "description": "States to see beside the overview: `control`, the view as it opens after clicking `controls` in turn, each named by its text as the list of controls gives it, or by an option of a select; `labels`, the view as it opens with a test label on that marks about one record in seven in the color the analyst's first label takes; `filtered`, the same filtered to the test label, which should keep only what it marks; `detail`, the place the first citation opens; `open`, the place a citation of `ref` opens, a record `<path>#L<n>` or a unit from the records; `narrow`, the view as it opens 798 px wide; `wide`, the view as it opens 1528 px wide.",
       "items": {
         "type": "object",
@@ -570,7 +570,7 @@ Take pictures of the view you review, whose paths Read opens. The first call of 
 
 ## view_pictures@terminal
 
-Draw the view you review as text, as thimble's panel shows it. The first call of a round gives the view as it opens, 120 columns wide; ask for other states in `states`, up to six more in each round.
+Draw the view you review as text, as thimble's panel shows it. The first call gives the view as it opens, 120 columns wide; ask for other states in `states`, up to four more.
 
 ```json
 {
@@ -578,7 +578,7 @@ Draw the view you review as text, as thimble's panel shows it. The first call of
   "properties": {
     "states": {
       "type": "array",
-      "maxItems": 6,
+      "maxItems": 4,
       "description": "States to see beside the overview: `control`, the view after the keys in `controls`, pressed in turn; `detail`, the place the first citation opens; `open`, the place a citation of `ref` opens, a record `<path>#L<n>` or a unit from the records; `wide`, the view as it opens 200 columns wide.",
       "items": {
         "type": "object",
@@ -597,13 +597,13 @@ Draw the view you review as text, as thimble's panel shows it. The first call of
 
 ## finish_review
 
-End a round of your review: thimble runs the view's checks on what you changed. Pass what you revised and what you leave, each as a short phrase; with nothing changed, the review is done.
+End your review: thimble runs the view's checks on what you changed. Pass what you revised and what you leave, each as a short phrase; with nothing changed, the review is done.
 
 ```json
 {
   "type": "object",
   "properties": {
-    "revised": {"type": "array", "items": {"type": "string"}, "description": "What you revised in this round, one short phrase each."},
+    "revised": {"type": "array", "items": {"type": "string"}, "description": "What you revised, one short phrase each."},
     "left": {"type": "array", "items": {"type": "string"}, "description": "The problems you leave as they are, one short phrase each, with why when the data shows the view is right."}
   }
 }

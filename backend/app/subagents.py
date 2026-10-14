@@ -238,7 +238,7 @@ def values_for(c: str, role: str, args: dict[str, Any] | None = None) -> dict[st
     args = args or {}
     conf = config.models_for(c)[TYPES[role].row]
     model = config.exact_model(str(args.get("model") or "").strip()) or str(conf.get("model") or "")
-    if role in ("orientation", "view-reviewer"):  # the reviewer reads the analyst's whole work (view_review.task)
+    if role == "orientation":
         model = config.long_context(model)
     asked = str(args.get("effort") or "").strip()
     effort = config.effort_level(asked) or str(conf.get("effort") or "")

@@ -38,8 +38,8 @@ FINISH_GRACE_S = 120.0  # after a pass or the last attempt, how long the agent m
 # the fixed descriptions main's agent list shows (V5: main keeps the first description it sees)
 BUILDER_DESCRIPTION = ("thimble's builder of one view of the analyst's corpus. thimble starts it, or gives the exact "
                        "Agent call that starts it.")
-REVIEWER_DESCRIPTION = ("thimble's reviewer of one view it built: it looks at pictures of the view and fixes what it "
-                        "finds. thimble starts it.")
+REVIEWER_DESCRIPTION = ("thimble's reviewer of one view it built: it looks at pictures of the view and fixes clear "
+                        "problems in how it draws. thimble starts it.")
 UNCHANGED_REPORT = "the view's files are as they were before the change, so the change is not made yet"
 NOT_YOURS = "{tool} is the tool of the agent thimble started for this view, and this call is not that agent's"
 
