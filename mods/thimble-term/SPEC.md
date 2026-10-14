@@ -60,7 +60,7 @@ Each channel has one meaning. A run the table does not cover is regular, in the 
 | blue, underlined | a link: a citation's value, the place after `↗`, a label's name on a card | controls, rows a click selects |
 | blue, in brackets `[ … ]` | a chip: a citation that names only its place (`[ card ]`) | controls, a citation with words |
 | blue | the `?` and `↳` in the margin | |
-| accent | a panel's title, the selected row | anything else |
+| accent | a panel's title, the selected row, `view proposal` above the prompt | anything else |
 | italic | a record's own words (in quotation marks); the key-hint row | emphasis, captions |
 | inverse | the selected tab; the control, citation, mark or bar label under the pointer; a card's title under the pointer | anything at rest |
 | selection background | a choice in use: a card's parameter, a label's type, the cited value in its lines, the chosen record of a file, the words a find matched, text being dragged | rows, hover |
@@ -160,7 +160,7 @@ the type area runs from A0 to R.
 | dim | `inactive` (`dimColor`) | letters (rule 15); the catch-all value's marks | secondary |
 | rule gray | `subtle` | lines only: rules, card borders, a field's border, tracks, axes, tree guides, a diagram's boxes and edges | structure |
 | link | `remember` | links (rule 16); the `?` and `↳` in the margin | opens what it names |
-| accent | `suggestion` | a panel's title; the selected row's `❯` and its text | where you are |
+| accent | `suggestion` | a panel's title; the selected row's `❯` and its text; `view proposal` above the prompt | where you are; a view proposal waiting for an answer |
 | new | `success` | the word `new` and `N new` | new |
 | tip | `userMessageBackground`, a background | the tip of the citation under the pointer | |
 | inline code | `permission` | inline code in thimble-term's own paragraphs | code |
@@ -413,6 +413,28 @@ The same reply's first row under the pointer, and a passage a thread was asked a
 - One row above the prompt, the toast, at column 2: `thimble` dim, what is new in the workspace since home was last opened
   (`3 new cards`), `open ›`, which opens home; the row is gone once home is opened. Side threads have their `↳` rows and
   thimble's agents Claude Code's agent tray, so no row repeats them.
+- The view proposal's rows above the prompt, while one waits for the analyst's answer, whatever the panel shows:
+  `view proposal` in the accent on the label column, the view's name in bold, then `accept`, `reject` and `don't ask
+  again`; under the name what the view would show, then the task it serves after `task` dim (for a viewer of a file
+  type, the files it claims after `files` dim), each wrapped whole and never cut, since nothing else shows them; why
+  accept could not start its build, and the fix, in red under them. A press shows `◌ accepting` or `◌ rejecting` until
+  thimble has written the answer. The rows go once the proposal is answered, and while view proposals are off; `don't
+  ask again` turns them off (`views.propose: false` in thimble's config) and a toast says how to turn them back on. They
+  bind no key: a letter typed goes to the prompt.
+- The notice rows, under them, newest first: every open notice of every agent thimble runs (the orientation and its
+  helpers, the critic, writers, view builds and reviews, report checks, code tickets and the dev agent, card checks,
+  labels, the view proposer), since Claude Code's own output shows only main's requests (a notice of Claude's
+  safeguards on main's own reply is left out, as Claude Code shows that one). One row each: `notice` dim on the label
+  column, then the notice's words in red, which name the agent and the failure, wrapped whole (a safeguard's block, or
+  its switch to another model; an API error that stopped the agent; an agent that ended failed or was refused; a view
+  build, a check or a label run that failed; a check for a view proposal that failed or that a fallback model
+  answered); then the acts that fix it (`try again`, `retry`, `turn off view proposals`, `open settings`), `open ›` to
+  the agent's thread (a side thread in the threads panel, an agent's chat in its own panel) and `dismiss`. A fix that
+  is a command (`/login`, `thimble server restart`) is in the notice's words; `open settings` says in a toast where
+  thimble's config is, which the terminal has in place of the browser's Settings, and leaves the row. An act or
+  `dismiss` takes the row away at once and thimble writes the dismissal, so it stays gone after a relaunch; a failure
+  that comes again is a new row. An act thimble refuses leaves the row, with why in a toast. A notice that thimble
+  clears (a later success) goes when home's state is read again.
 - The panel's row above the prompt, only while Claude Code leaves the panel undrawn (an open it was not asked for, from
   main's tool or a click in a card, on a terminal narrower than 144 columns, or 110 for a panel opened before): `panel`
   dim, `Home is ready`, then `open panel` and `dismiss`. `open panel` opens the panel from its press, as `/thimble`

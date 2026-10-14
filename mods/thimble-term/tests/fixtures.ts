@@ -135,7 +135,9 @@ export const DOC = {
 }
 
 export const STATES = {
-  home: { cards: 12, labels: 1, docs: { report: { exists: true, title: 'Agents used the dse wiki as a relay' } }, threads: 2, views: 0, files: 4 },
+  // `offer`: the view proposal waiting for an answer; `notices`: every agent's open notices, newest first (local.py
+  // _offer, _notices); none in the fixtures until a test sets them
+  home: { cards: 12, labels: 1, docs: { report: { exists: true, title: 'Agents used the dse wiki as a relay' } }, threads: 2, views: 0, files: 4, offer: null as Record<string, unknown> | null, notices: [] as Record<string, unknown>[] },
   cards: { groups: [{ id: 'g1', title: 'Your work', role: 'analyst', ts: '2026-10-06T09:00:00+00:00' }], cells: Object.values(CELLS) },
   labels: [LABEL],
   docs: { report: { exists: true, title: DOC.title, renderer: 'document', name: 'Report' }, slides: { exists: false, renderer: 'slides', name: 'Slides' } },

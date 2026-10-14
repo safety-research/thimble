@@ -398,6 +398,17 @@ async def _home(c: str, args: list[str], pos: list[str]) -> Any:
         out["views"] = _home_views(c)
     except Exception:  # noqa: BLE001 — the row above the prompt still shows the rest
         out["views"] = []
+    # the view proposal waiting for the analyst's answer and every agent's open notices, rows above the prompt
+    try:
+        out["offer"] = _offer(c)
+    except Exception:  # noqa: BLE001 — as for the views
+        log.debug("%s: the view proposal was not read", c, exc_info=True)
+        out["offer"] = None
+    try:
+        out["notices"] = _notices(c)
+    except Exception:  # noqa: BLE001
+        log.warning("%s: the open notices were not read", c, exc_info=True)
+        out["notices"] = []
     run = orientation.read_run(c) or {}
     out["orientation"] = run.get("status")
     out["coverage"] = run.get("coverage")  # run 0's coverage line (orient_session.measure), which home shows under Files
@@ -430,6 +441,78 @@ def _home_views(c: str) -> list[dict[str, Any]]:
                      # whether the terminal draws it: a view.term.js among the files its last pass covered
                      "term": status == "built" and term_views.has_term(v)})
     return rows
+
+
+def _offer(c: str) -> dict[str, Any] | None:
+    """The view proposal waiting for the analyst's answer (views.open_offer), as the rows above the prompt show it: its
+    slug, name, description, the analyst's task (empty for a viewer of a file type) and the files it claims, and
+    `refused`, why accept could not start its build and how to fix that (views.click_refused), while that stands. None
+    while none waits, and while view proposals are off (views.propose_enabled). It is not among the `views` until it is
+    accepted."""
+    from . import views  # noqa: PLC0415
+
+    if not views.propose_enabled(c):
+        return None
+    row = views.open_offer(c)
+    if not row:
+        return None
+    refused = row.get("refused") if isinstance(row.get("refused"), dict) else {}
+    return {"slug": str(row["slug"]), "name": str(row.get("name") or row["slug"]),
+            "description": str(row.get("description") or ""), "task": str(row.get("task") or ""),
+            "claims": [str(x) for x in (row.get("claims") or [])],
+            **({"refused": str(refused["reason"])} if refused.get("reason") else {})}
+
+
+# Every agent's open notices (notices.py: a failure with its fix, from the orientation and its helpers, the critic,
+# writers, view builds and reviews, report checks, code tickets and the dev agent, card checks, labels and the view
+# proposer), which the rows above the prompt show, since Claude Code's own terminal shows only main's requests; a notice
+# of Claude's safeguards on main's own reply (kind "safeguards" in main's chat) is left out, as Claude Code shows it
+# there. Each action maps to the act that takes it in the terminal: a `thimble act` kind, or for `settings` (Open
+# Settings: the terminal has no Settings pane) "settings", which says where thimble's config is, since Settings writes it.
+NOTICE_ACTS = {"proposals-retry": "view-propose-now", "proposals-off": "view-proposals-off", "view-retry": "view-retry",
+               "settings": "settings"}
+
+
+def _notice_acts(action: Any) -> list[dict[str, str]]:
+    """A notice's `action` (one {label, do, slug?} or a list of them) as the terminal takes it: {label, act, slug?,
+    config?} each, in its order, `config` the file of thimble's config for "settings"; a Retry with no view is left
+    out."""
+    from . import userconf  # noqa: PLC0415
+
+    out: list[dict[str, str]] = []
+    for a in action if isinstance(action, list) else [action]:
+        if not isinstance(a, dict) or (act := NOTICE_ACTS.get(str(a.get("do") or ""))) is None:
+            continue
+        slug = str(a.get("slug") or "")
+        if act == "view-retry" and not slug:
+            continue
+        out.append({"label": str(a.get("label") or "") or act, "act": act, **({"slug": slug} if slug else {}),
+                    **({"config": str(userconf.global_file())} if act == "settings" else {})})
+    return out
+
+
+def _notices(c: str) -> list[dict[str, Any]]:
+    """Every agent's open notices (notices.open_notices), newest first: {id, key, kind, text, agent, chat, at, acts,
+    open}. `text` reads alone (it names the agent and the failure), `agent` names the agent ("Orientation", "View build:
+    Agent Network"), `acts` are its actions as `thimble act` takes them (_notice_acts), and `open` says how its own
+    thread opens: "thread" for a side thread, "agent" for an agent's chat, "" for main's, for none, or for a chat that
+    is gone."""
+    from . import agents, notices  # noqa: PLC0415
+
+    rows = [n for n in notices.open_notices(c) if isinstance(n, dict) and str(n.get("text") or "").strip()
+            and not (n.get("chat") == agents.MAIN_ID and n.get("kind") == "safeguards")]
+    rows = sorted(reversed(rows), key=lambda n: str(n.get("ts") or ""), reverse=True)  # newest first, ties as given
+    out: list[dict[str, Any]] = []
+    for n in rows:
+        chat, kind = str(n.get("chat") or ""), None
+        if chat and chat != agents.MAIN_ID:
+            with contextlib.suppress(OSError, ValueError):
+                kind = (agents.meta_or_none(c, chat) or {}).get("kind")
+        out.append({"id": str(n.get("id") or ""), "key": str(n.get("key") or ""), "kind": str(n.get("kind") or ""),
+                    "text": " ".join(str(n["text"]).split()), "agent": str(n.get("agent") or ""), "chat": chat,
+                    "at": str(n.get("ts") or ""), "acts": _notice_acts(n.get("action")),
+                    "open": kind if kind in (agents.KIND_THREAD, agents.KIND_AGENT) else ""})
+    return out
 
 
 async def _cards(c: str, args: list[str], pos: list[str]) -> Any:
@@ -901,7 +984,8 @@ _SURFACES = {"home": _home, "cards": _cards, "card": _card, "labels": _labels, "
 ACT_USAGE = ("thimble act <kind> --cwd <dir> '<json>'; kinds: thread {anchor | anchor_text, message}, thread-message {thread, message}, "
              "verdict {label, ref, value}, label {label, name?, kind?, body?, glob?, values?}, label-run {label, limit?}, label-stop {label}, "
              "label-delete {label}, label-undelete {label}, label-show {label, on?, values?, colors?}, label-filter {label, value?}, seen {thread}, "
-             "hand-back {thread}, stop {agent}")
+             "hand-back {thread}, stop {agent}, view-accept {slug}, view-reject {slug}, view-proposals-off {}, "
+             "view-propose-now {notice?}, view-retry {slug, notice?}, notice-dismiss {id}")
 
 
 async def act(c: str, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1187,10 +1271,129 @@ async def _act_stop(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     return {"stopped": True, **({"done": True} if ans.get("done") else {})}
 
 
+BACKEND_DIR = Path(__file__).resolve().parents[1]  # where `python -m app.local_hooks` runs
+
+
+def _hand_over(kind: str, c: str, body: dict[str, Any] | None = None) -> None:
+    """`python -m app.local_hooks <kind>` started detached with the corpus folder and `body` on its stdin, as a hook
+    starts it (.thimble-watch spawn_local), and not waited for: the holder of the workspace's passes runs it, the one
+    process that writes proposals.json and follows to its end a build it queues. OSError when it cannot start."""
+    import subprocess  # noqa: PLC0415
+
+    proc = subprocess.Popen([sys.executable, "-m", "app.local_hooks", kind], cwd=str(BACKEND_DIR),
+                            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            start_new_session=True, close_fds=True)
+    if proc.stdin is None:
+        return
+    try:
+        proc.stdin.write(json.dumps({"cwd": str(config.corpus_dir(c)), **(body or {})}).encode("utf-8"))
+        proc.stdin.close()
+    except OSError:
+        pass
+
+
+def _queued(kind: str, c: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+    """`kind` handed to the holder (_hand_over): {queued: true}, or {queued: false, reason} when it cannot start."""
+    try:
+        _hand_over(kind, c, body)
+    except OSError as e:
+        return {"queued": False, "reason": f"thimble could not start its {kind} call: {e}"}
+    return {"queued": True}
+
+
+def _offer_answer(c: str, payload: dict[str, Any], kind: str) -> dict[str, Any]:
+    """The analyst's accept or reject of the view proposal that waits (views.open_offer), handed to the holder
+    (local_hooks `view-accept`: views.accept, its build queued; `view-reject`): this process reads and writes nothing
+    more. {queued: true} at once, or {queued: false, reason} when the proposal is gone or no longer waits."""
+    from . import views  # noqa: PLC0415
+
+    slug = _text(payload, "slug")
+    row = views.read_proposal(c, slug)
+    if row is None:
+        return {"queued": False, "reason": f"there is no view proposal {slug!r}"}
+    waiting = views.open_offer(c) if views.propose_enabled(c) else None
+    if not waiting or waiting.get("slug") != slug:
+        return {"queued": False, "reason": f"the view proposal {str(row.get('name') or slug)!r} no longer waits"}
+    return _queued(kind, c, {"slug": slug})
+
+
+async def _act_view_accept(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Accept the view proposal, as the browser's Accept does (POST …/proposals/{slug}/accept)."""
+    return _offer_answer(c, payload, "view-accept")
+
+
+async def _act_view_reject(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Reject the view proposal, as the browser's Reject does (POST …/proposals/{slug}/reject)."""
+    return _offer_answer(c, payload, "view-reject")
+
+
+async def _act_view_proposals_off(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Turn view proposals off, as the browser's Don't ask again does (PUT settings `propose_views: false`):
+    `views.propose: false` in thimble's config (userconf.save writes it where the key was set, else in the file in
+    thimble's home). {off: true, config: the file that holds it now}; StateError naming the config's error when it
+    cannot be written."""
+    from . import userconf  # noqa: PLC0415
+
+    try:
+        userconf.save(c, {"views": {"propose": False}})
+    except userconf.ConfigError as e:
+        raise StateError(str(e)) from None
+    written = userconf.global_file()
+    with contextlib.suppress(OSError, ValueError, AttributeError):
+        if "propose" in (json.loads(userconf.workspace_file(c).read_text("utf-8")).get("views") or {}):
+            written = userconf.workspace_file(c)
+    return {"off": True, "config": str(written)}
+
+
+async def _act_view_propose_now(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Check for a view proposal now, as a notice's Try again does in the browser (POST …/views/propose-now): handed to
+    the holder (local_hooks `view-propose-now`: proposer.run_now), which runs it and writes what comes of it.
+    {queued: false, reason} at once while view proposals are off or one waits for an answer, which the holder would
+    refuse with no word to the terminal."""
+    from . import views  # noqa: PLC0415
+
+    if not views.propose_enabled(c):
+        return {"queued": False, "reason": 'view proposals are off; set "views": {"propose": true} in thimble\'s config'}
+    if views.open_offer(c) is not None:
+        return {"queued": False, "reason": "a view proposal waits for your answer above the prompt"}
+    return _queued("view-propose-now", c, _notice_ref(payload))
+
+
+async def _act_view_retry(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Build again a view whose build failed, as a notice's Retry does in the browser (POST …/proposals/{slug}/retry):
+    handed to the holder (local_hooks `view-retry`: views.retry), which follows the build. {queued: false, reason} for a
+    view with nothing failed."""
+    from . import views  # noqa: PLC0415
+
+    slug = _text(payload, "slug")
+    row = views.read_proposal(c, slug)
+    if row is None:
+        return {"queued": False, "reason": f"there is no view {slug!r}"}
+    if row.get("status") != "failed" and not (row.get("status") == "built" and row.get("failed_change") is not None):
+        return {"queued": False, "reason": f"the view {str(row.get('name') or slug)!r} is {row.get('status')}, not failed"}
+    return _queued("view-retry", c, {"slug": slug, **_notice_ref(payload)})
+
+
+def _notice_ref(payload: dict[str, Any]) -> dict[str, Any]:
+    """The id of the notice whose act the press was (`notice`), which the holder dismisses before it runs the act, so
+    that a failure that comes again shows as a notice of its own: {notice: id}, or {} for none."""
+    notice_id = " ".join(str(payload.get("notice") or "").split())
+    return {"notice": notice_id} if notice_id else {}
+
+
+async def _act_notice_dismiss(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """A notice dismissed, as its × does in the browser: handed to the holder (local_hooks `notice-dismiss`:
+    notices.dismiss), which writes it, so the notice is gone in every view and after a relaunch. {queued: true}."""
+    return _queued("notice-dismiss", c, {"id": _text(payload, "id")})
+
+
 _ACTS = {"thread": _act_thread, "thread-message": _act_thread_message, "verdict": _act_verdict, "label": _act_label,
          "label-run": _act_label_run, "label-stop": _act_label_stop, "label-delete": _act_label_delete,
          "label-undelete": _act_label_undelete, "label-show": _act_label_show, "label-filter": _act_label_filter,
-         "seen": _act_seen, "hand-back": _act_hand_back, "stop": _act_stop}
+         "seen": _act_seen, "hand-back": _act_hand_back, "stop": _act_stop, "view-accept": _act_view_accept,
+         "view-reject": _act_view_reject, "view-proposals-off": _act_view_proposals_off,
+         "view-propose-now": _act_view_propose_now, "view-retry": _act_view_retry,
+         "notice-dismiss": _act_notice_dismiss}
 
 
 # --------------------------------------------------------------------------- the command line

@@ -117,6 +117,138 @@ export async function homeViews(cx: Ctx): Promise<HomeView[]> {
   })
 }
 
+// ------------------------------------------------------------------------------------------------ the view proposal
+
+/** The view proposal waiting for the analyst's answer, as home's state gives it (`offer`: null while none waits and
+ *  while view proposals are off): its slug, name and description, the analyst's task it serves (none for a viewer of a
+ *  file type), the files it claims, `refused`, why accept could not start its build and how to fix that, and
+ *  `pressed`, the answer pressed here that thimble has not written yet (answerOffer). */
+export type HomeOffer = { slug: string; name: string; description: string; task: string; claims: string[]; refused: string; pressed: '' | 'accept' | 'reject' }
+
+export async function homeOffer(cx: Ctx): Promise<HomeOffer | null> {
+  const home = await surfaceValue<Obj>(cx, 'home-full')
+  const o = home?.ok && isObj(home.value.offer) ? home.value.offer : null
+  if (!o || !str(o.slug)) return null
+  const pressed = o.pressed === 'accept' || o.pressed === 'reject' ? o.pressed : ''
+  return { slug: str(o.slug), name: str(o.name) || str(o.slug), description: str(o.description), task: str(o.task), claims: Array.isArray(o.claims) ? (o.claims as unknown[]).map(String) : [], refused: str(o.refused), pressed }
+}
+
+/** Every agent's open notices, as home's state gives them (`notices`, newest first): a failure with its fix, from the
+ *  orientation and its helpers, the critic, writers, view builds, report checks, code tickets, card checks, labels or
+ *  the view proposer. Each with its text, which names the agent and the failure, the agent's name, the acts that fix it
+ *  where the terminal can take one (`try again`, `retry`, `turn off view proposals`), and how its own thread opens
+ *  (`open`: a side thread, an agent's chat, or none). One dismissed here is left out at once, before thimble has
+ *  written it. */
+export type NoticeAct = { label: string; act: string; slug: string; config: string }
+export type HomeNotice = { id: string; text: string; agent: string; chat: string; open: '' | 'thread' | 'agent'; acts: NoticeAct[] }
+
+// the notices dismissed or fixed from here in this session, by id: a later notice of the same failure has an id of its own
+const dismissed = new Set<string>()
+
+export async function homeNotices(cx: Ctx): Promise<HomeNotice[]> {
+  const home = await surfaceValue<Obj>(cx, 'home-full')
+  const rows = home?.ok && Array.isArray(home.value.notices) ? (home.value.notices as unknown[]).filter(isObj) : []
+  return rows
+    .filter(n => str(n.id) && str(n.text) && !dismissed.has(str(n.id)))
+    .map(n => {
+      const acts = Array.isArray(n.acts) ? (n.acts as unknown[]).filter(isObj).filter(a => str(a.act)) : []
+      const open = n.open === 'thread' || n.open === 'agent' ? n.open : ''
+      return { id: str(n.id), text: str(n.text), agent: str(n.agent), chat: str(n.chat), open: str(n.chat) ? open : '', acts: acts.map(a => ({ label: str(a.label).toLowerCase() || str(a.act), act: str(a.act), slug: str(a.slug), config: str(a.config) })) }
+    })
+}
+
+/** How long an answer pressed on the view proposal shows as pressed, at most: the holder of the workspace's passes
+ *  writes it a second or a few after the press, and home's state read then shows the proposal gone, or why its build
+ *  could not start. */
+export const OFFER_PRESS_MS = 20_000
+
+/** Home's state with its view proposal marked `pressed` (or not, for ''), so the row above the prompt shows the answer
+ *  as pressed until home's state is read again; with `only`, only while the mark is the one made at `only`. */
+async function markOffer(cx: Ctx, slug: string, pressed: '' | 'accept' | 'reject', at: number, only?: number): Promise<void> {
+  const home = await surfaceValue<Obj>(cx, 'home-full')
+  const o = home?.ok && isObj(home.value.offer) ? home.value.offer : null
+  if (!home?.ok || !o || str(o.slug) !== slug) return
+  if (only !== undefined && o.pressedAt !== only) return
+  await cx.setSurface('home-full', { ok: true, value: { ...home.value, offer: { ...o, pressed, pressedAt: pressed ? at : 0 } } })
+}
+
+/** The analyst's accept or reject of the view proposal, from the row above the prompt: `thimble act view-accept` or
+ *  `view-reject` {slug}, which hands the answer to thimble and answers at once. The row shows the answer as pressed
+ *  (`◌ accepting`) until home's state is read again or OFFER_PRESS_MS pass; an act refused, or a proposal that no
+ *  longer waits, is a toast. */
+export async function answerOffer(cx: Ctx, slug: string, verb: 'accept' | 'reject'): Promise<void> {
+  if (!rt.sc) return
+  const at = await cx.now()
+  await markOffer(cx, slug, verb, at)
+  const got = await act<{ queued?: boolean; reason?: string }>(cx, rt.sc, `view-${verb}`, { slug })
+  if (!got.ok || got.value.queued === false) {
+    await markOffer(cx, slug, '', at, at)
+    cx.toast(`thimble: ${got.ok ? got.value.reason || 'the view proposal no longer waits' : got.error}`)
+    return
+  }
+  cx.later(OFFER_PRESS_MS, () => void markOffer(cx, slug, '', at, at))
+}
+
+/** The view proposal's `don't ask again`: view proposals off (`thimble act view-proposals-off`, `views.propose: false`
+ *  in thimble's config), the row gone at once, and a toast that says how to turn them back on. */
+export async function proposalsOff(cx: Ctx): Promise<void> {
+  if (!rt.sc) return
+  const got = await act<{ config?: string }>(cx, rt.sc, 'view-proposals-off', {})
+  if (!got.ok) {
+    cx.toast(`thimble: view proposals are still on: ${got.error}`)
+    return
+  }
+  const home = await surfaceValue<Obj>(cx, 'home-full')
+  if (home?.ok) await cx.setSurface('home-full', { ok: true, value: { ...home.value, offer: null } })
+  cx.toast(`thimble: view proposals are off. To turn them back on, set "views": {"propose": true} in ${got.value.config || "thimble's config"}`)
+}
+
+/** A notice's act: `view-propose-now` (try again) or `view-retry` {slug} (retry), which name the notice, so that thimble
+ *  dismisses it before the act runs and a failure that comes again shows as a new notice; or `view-proposals-off`, as
+ *  don't ask again, which dismisses it. The notice goes at once; one that thimble refuses stays, with why in a toast.
+ *  `settings` (open settings) says in a toast where thimble's config is, which the terminal has in place of the
+ *  browser's Settings, and leaves the notice. */
+export async function noticeAct(cx: Ctx, n: HomeNotice, a: NoticeAct): Promise<void> {
+  if (!rt.sc) return
+  if (a.act === 'settings') {
+    cx.toast(`thimble: in terminal mode, Settings is thimble's config: ${a.config || 'config.json in thimble\'s home'} (its keys: docs/config.md)`)
+    return
+  }
+  if (a.act === 'view-proposals-off') {
+    await dismissNotice(cx, n)
+    return proposalsOff(cx)
+  }
+  const got = await act<{ queued?: boolean; reason?: string }>(cx, rt.sc, a.act, { ...(a.slug ? { slug: a.slug } : {}), notice: n.id })
+  if (!got.ok || got.value.queued === false) {
+    cx.toast(`thimble: ${got.ok ? got.value.reason || 'it could not start' : got.error}`)
+    return
+  }
+  await hideNotice(cx, n.id)
+  cx.toast(a.act === 'view-propose-now' ? 'thimble: checking for a view proposal' : 'thimble: building the view again')
+}
+
+/** The notice's row gone at once (home's state read again no longer has it once thimble has written why). */
+async function hideNotice(cx: Ctx, id: string): Promise<void> {
+  dismissed.add(id)
+  const home = await surfaceValue<Obj>(cx, 'home-full')
+  if (home?.ok && Array.isArray(home.value.notices)) await cx.setSurface('home-full', { ok: true, value: { ...home.value, notices: (home.value.notices as unknown[]).filter(x => !isObj(x) || str(x.id) !== id) } })
+}
+
+/** A notice dismissed, as its × does in the browser: gone at once, and `thimble act notice-dismiss` {id} has thimble
+ *  write it, so it stays gone after a relaunch. */
+export async function dismissNotice(cx: Ctx, n: HomeNotice): Promise<void> {
+  await hideNotice(cx, n.id)
+  if (!rt.sc) return
+  const got = await act(cx, rt.sc, 'notice-dismiss', { id: n.id })
+  if (!got.ok) cx.toast(`thimble: the notice was not dismissed: ${got.error}`)
+}
+
+/** The thread of the agent a notice names: a side thread in the threads panel, an agent's chat in its own panel. */
+export async function openNoticeChat(cx: Ctx, n: HomeNotice): Promise<void> {
+  if (n.open === 'thread') return openThread(cx, n.chat)
+  if (n.open === 'agent') await openPanel(cx, { view: 'agent', title: n.agent || 'agent', thread: n.chat })
+}
+
 /** A document in the panel, under its title. Opened, it is no longer new. */
 export async function openDoc(cx: Ctx, slug: string, title: string): Promise<void> {
   const docs = await surfaceValue(cx, 'docs')
