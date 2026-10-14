@@ -1327,3 +1327,95 @@ test('keys · back after a line chosen in a file, and after a thread asked: wher
   expect(s.text).not.toContain('New thread')
   expect(s.text).toContain('c for its code')
 })
+
+// ------------------------------------------------------------------------------------------------ the view proposal
+
+const OFFER = { slug: 'edit-bursts', name: 'Edit Bursts', description: 'Each wiki page as a strip of its saves.', task: 'Find out when the agents edited together.', claims: ['revisions.jsonl'] }
+
+async function above($: E): Promise<M> {
+  return (await $.ui.mount(ABOVE)) as unknown as M
+}
+
+test('the view proposal row · accept and reject hand the answer to thimble (`thimble act view-accept|view-reject {slug}`); the row says so until home is read again; one thimble refuses is a toast and the controls come back', async ($, on) => {
+  const w = world(on)
+  w.states.home = { ...w.states.home, offer: OFFER }
+  await start($, w)
+  let row = await above($)
+  await row.press({ key: 'above-offer-accept' })
+  await w.clock.settle()
+  expect(w.acts.at(-1)).toEqual({ kind: 'view-accept', payload: { slug: 'edit-bursts' } })
+  await row.unmount()
+  row = await above($)
+  expect(shown(await row.find({ type: 'Box', key: 'above-offer' }))).toContain('◌ accepting')
+  expect(await row.find({ type: 'Button', key: 'above-offer-accept' })).toBeUndefined()
+  await row.unmount()
+  // thimble wrote the answer: the proposal no longer waits, and home's state read again has none
+  w.states.home = { ...w.states.home, offer: null }
+  w.stamps.set(`${WS}/views/proposals.json`, 2)
+  await w.clock.advance(1100)
+  row = await above($)
+  expect(await row.find({ type: 'Box', key: 'above-offer' })).toBeUndefined()
+  await row.unmount()
+  // a new proposal, rejected; one thimble refuses (it no longer waits) is a toast, and the controls come back
+  w.states.home = { ...w.states.home, offer: { ...OFFER, slug: 'board-threads', name: 'Board Threads' } }
+  w.stamps.set(`${WS}/views/proposals.json`, 3)
+  await w.clock.advance(1100)
+  w.refuse = { 'view-reject': "the view proposal 'Board Threads' no longer waits" }
+  row = await above($)
+  await row.press({ key: 'above-offer-reject' })
+  await w.clock.settle()
+  expect(w.acts.at(-1)).toEqual({ kind: 'view-reject', payload: { slug: 'board-threads' } })
+  expect(w.toasts.at(-1)).toBe("thimble: the view proposal 'Board Threads' no longer waits")
+  await row.unmount()
+  row = await above($)
+  expect(await row.find({ type: 'Button', key: 'above-offer-reject' })).toBeDefined()
+  await row.unmount()
+})
+
+test('the view proposal row · don\'t ask again turns view proposals off (`thimble act view-proposals-off`): the row goes at once, and a toast says how to turn them back on', async ($, on) => {
+  const w = world(on)
+  w.states.home = { ...w.states.home, offer: OFFER }
+  await start($, w)
+  let row = await above($)
+  await row.press({ key: 'above-offer-off' })
+  await w.clock.settle()
+  expect(w.acts.at(-1)).toEqual({ kind: 'view-proposals-off', payload: {} })
+  expect(w.toasts.at(-1)).toContain('view proposals are off. To turn them back on, set "views": {"propose": true} in')
+  await row.unmount()
+  row = await above($)
+  expect(await row.find({ type: 'Box', key: 'above-offer' })).toBeUndefined()
+  await row.unmount()
+})
+
+test('the view proposal row · a notice\'s act: try again checks for a view proposal now (`view-propose-now`), retry builds a failed view again (`view-retry {slug}`), turn off view proposals as don\'t ask again; the notice goes once its act started', async ($, on) => {
+  const w = world(on)
+  w.states.home = { ...w.states.home, notice: { id: 'k1', key: 'proposer', text: "Couldn't check for a view proposal: the request timed out.", at: '2026-10-14T11:00:00Z', action: { label: 'Try again', act: 'view-propose-now' } } }
+  await start($, w)
+  let row = await above($)
+  await row.press({ key: 'above-notice-act' })
+  await w.clock.settle()
+  expect(w.acts.at(-1)).toEqual({ kind: 'view-propose-now', payload: {} })
+  expect(w.toasts.at(-1)).toBe('thimble: checking for a view proposal')
+  await row.unmount()
+  row = await above($)
+  expect(await row.find({ type: 'Box', key: 'above-notice' })).toBeUndefined()
+  await row.unmount()
+  w.states.home = { ...w.states.home, notice: { id: 'k2', key: 'view:edit-bursts', text: 'The view Edit Bursts failed to build: its check found no rows.', at: '2026-10-14T11:05:00Z', action: { label: 'Retry', act: 'view-retry', slug: 'edit-bursts' } } }
+  w.stamps.set(`${WS}/chats/main.jsonl`, 4)
+  await w.clock.advance(1100)
+  row = await above($)
+  expect(shown(await row.find({ type: 'Box', key: 'above-notice' }))).toContain('retrydismiss')
+  await row.press({ key: 'above-notice-act' })
+  await w.clock.settle()
+  expect(w.acts.at(-1)).toEqual({ kind: 'view-retry', payload: { slug: 'edit-bursts' } })
+  await row.unmount()
+  w.states.home = { ...w.states.home, notice: { id: 'k3', key: 'proposer', text: "Couldn't check for a view proposal: Claude's safeguards blocked the request.", at: '2026-10-14T11:10:00Z', action: { label: 'Turn off view proposals', act: 'view-proposals-off' } } }
+  w.stamps.set(`${WS}/chats/main.jsonl`, 5)
+  await w.clock.advance(1100)
+  row = await above($)
+  expect(shown(await row.find({ type: 'Box', key: 'above-notice' }))).toContain('turn off view proposals')
+  await row.press({ key: 'above-notice-act' })
+  await w.clock.settle()
+  expect(w.acts.at(-1)).toEqual({ kind: 'view-proposals-off', payload: {} })
+  await row.unmount()
+})

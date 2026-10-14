@@ -117,6 +117,110 @@ export async function homeViews(cx: Ctx): Promise<HomeView[]> {
   })
 }
 
+// ------------------------------------------------------------------------------------------------ the view proposal
+
+/** The view proposal waiting for the analyst's answer, as home's state gives it (`offer`: null while none waits and
+ *  while view proposals are off): its slug, name and description, the analyst's task it serves (none for a viewer of a
+ *  file type), the files it claims, `refused`, why accept could not start its build and how to fix that, and
+ *  `pressed`, the answer pressed here that thimble has not written yet (answerOffer). */
+export type HomeOffer = { slug: string; name: string; description: string; task: string; claims: string[]; refused: string; pressed: '' | 'accept' | 'reject' }
+
+export async function homeOffer(cx: Ctx): Promise<HomeOffer | null> {
+  const home = await surfaceValue<Obj>(cx, 'home-full')
+  const o = home?.ok && isObj(home.value.offer) ? home.value.offer : null
+  if (!o || !str(o.slug)) return null
+  const pressed = o.pressed === 'accept' || o.pressed === 'reject' ? o.pressed : ''
+  return { slug: str(o.slug), name: str(o.name) || str(o.slug), description: str(o.description), task: str(o.task), claims: Array.isArray(o.claims) ? (o.claims as unknown[]).map(String) : [], refused: str(o.refused), pressed }
+}
+
+/** The latest notice of the view proposals in main's chat, as home's state gives it (`notice`): a check for a view
+ *  proposal that failed, or that a fallback model answered, or an accepted view whose build failed; its text, and the
+ *  act that fixes it where the terminal can take one (`try again`, `retry`, `turn off view proposals`). None once
+ *  dismissed here. */
+export type HomeNotice = { id: string; text: string; action: { label: string; act: string; slug: string } | null }
+
+// the notices dismissed in this session, by their id and time: a later notice of the same key shows again
+const dismissed = new Set<string>()
+const noticeId = (o: Obj) => `${str(o.id)}|${str(o.at)}|${str(o.key)}`
+
+export async function homeNotice(cx: Ctx): Promise<HomeNotice | null> {
+  const home = await surfaceValue<Obj>(cx, 'home-full')
+  const n = home?.ok && isObj(home.value.notice) ? home.value.notice : null
+  if (!n || !str(n.text) || dismissed.has(noticeId(n))) return null
+  const a = isObj(n.action) && str(n.action.act) ? n.action : null
+  return { id: noticeId(n), text: str(n.text), action: a ? { label: str(a.label).toLowerCase() || str(a.act), act: str(a.act), slug: str(a.slug) } : null }
+}
+
+/** How long an answer pressed on the view proposal shows as pressed, at most: the holder of the workspace's passes
+ *  writes it a second or a few after the press, and home's state read then shows the proposal gone, or why its build
+ *  could not start. */
+export const OFFER_PRESS_MS = 20_000
+
+/** Home's state with its view proposal marked `pressed` (or not, for ''), so the row above the prompt shows the answer
+ *  as pressed until home's state is read again; with `only`, only while the mark is the one made at `only`. */
+async function markOffer(cx: Ctx, slug: string, pressed: '' | 'accept' | 'reject', at: number, only?: number): Promise<void> {
+  const home = await surfaceValue<Obj>(cx, 'home-full')
+  const o = home?.ok && isObj(home.value.offer) ? home.value.offer : null
+  if (!home?.ok || !o || str(o.slug) !== slug) return
+  if (only !== undefined && o.pressedAt !== only) return
+  await cx.setSurface('home-full', { ok: true, value: { ...home.value, offer: { ...o, pressed, pressedAt: pressed ? at : 0 } } })
+}
+
+/** The analyst's accept or reject of the view proposal, from the row above the prompt: `thimble act view-accept` or
+ *  `view-reject` {slug}, which hands the answer to thimble and answers at once. The row shows the answer as pressed
+ *  (`◌ accepting`) until home's state is read again or OFFER_PRESS_MS pass; an act refused, or a proposal that no
+ *  longer waits, is a toast. */
+export async function answerOffer(cx: Ctx, slug: string, verb: 'accept' | 'reject'): Promise<void> {
+  if (!rt.sc) return
+  const at = await cx.now()
+  await markOffer(cx, slug, verb, at)
+  const got = await act<{ queued?: boolean; reason?: string }>(cx, rt.sc, `view-${verb}`, { slug })
+  if (!got.ok || got.value.queued === false) {
+    await markOffer(cx, slug, '', at, at)
+    cx.toast(`thimble: ${got.ok ? got.value.reason || 'the view proposal no longer waits' : got.error}`)
+    return
+  }
+  cx.later(OFFER_PRESS_MS, () => void markOffer(cx, slug, '', at, at))
+}
+
+/** The view proposal's `don't ask again`: view proposals off (`thimble act view-proposals-off`, `views.propose: false`
+ *  in thimble's config), the row gone at once, and a toast that says how to turn them back on. */
+export async function proposalsOff(cx: Ctx): Promise<void> {
+  if (!rt.sc) return
+  const got = await act<{ config?: string }>(cx, rt.sc, 'view-proposals-off', {})
+  if (!got.ok) {
+    cx.toast(`thimble: view proposals are still on: ${got.error}`)
+    return
+  }
+  const home = await surfaceValue<Obj>(cx, 'home-full')
+  if (home?.ok) await cx.setSurface('home-full', { ok: true, value: { ...home.value, offer: null } })
+  cx.toast(`thimble: view proposals are off. To turn them back on, set "views": {"propose": true} in ${got.value.config || "thimble's config"}`)
+}
+
+/** A notice's action: its act (`view-propose-now`, `view-retry` {slug}, `view-proposals-off`); the notice goes, and
+ *  what the act starts shows in its own time (a view proposal, the view's build, another notice). */
+export async function noticeAct(cx: Ctx, n: HomeNotice): Promise<void> {
+  if (!rt.sc || !n.action) return
+  if (n.action.act === 'view-proposals-off') {
+    await dismissNotice(cx, n)
+    return proposalsOff(cx)
+  }
+  const got = await act<{ queued?: boolean; reason?: string }>(cx, rt.sc, n.action.act, n.action.slug ? { slug: n.action.slug } : {})
+  if (!got.ok || got.value.queued === false) {
+    cx.toast(`thimble: ${got.ok ? got.value.reason || 'it could not start' : got.error}`)
+    return
+  }
+  await dismissNotice(cx, n)
+  cx.toast(n.action.act === 'view-propose-now' ? 'thimble: checking for a view proposal' : 'thimble: building the view again')
+}
+
+/** A notice dismissed for this session: the row goes until a new notice comes. */
+export async function dismissNotice(cx: Ctx, n: HomeNotice): Promise<void> {
+  dismissed.add(n.id)
+  const home = await surfaceValue<Obj>(cx, 'home-full')
+  if (home?.ok) await cx.setSurface('home-full', { ok: true, value: { ...home.value, notice: null } })
+}
+
 /** A document in the panel, under its title. Opened, it is no longer new. */
 export async function openDoc(cx: Ctx, slug: string, title: string): Promise<void> {
   const docs = await surfaceValue(cx, 'docs')

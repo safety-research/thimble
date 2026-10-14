@@ -34,7 +34,7 @@ import { cardsOfCall, docsOf, forkDescription, labelsOf, namedForks, namedThread
 import { HOME_UI_EMPTY } from './home'
 import { keepLast, keepRow, loadKept, resetKept } from './kept'
 import { linesMessage, onListClick } from './lines'
-import { ANSWER_ELEMENT, RELAY, docEditMessage, drawPanel, fieldMessage, focusedField, hasList, homeViews, onGesture, openAsk, openCard, openCite, openFile, openHomeNew, openLabel, openThread, openView, relayKey, relayMove, scrollPending, viewWheelAt, wheelWindow } from './panel'
+import { ANSWER_ELEMENT, RELAY, answerOffer, dismissNotice, docEditMessage, drawPanel, fieldMessage, focusedField, hasList, homeNotice, homeOffer, homeViews, noticeAct, onGesture, openAsk, openCard, openCite, openFile, openHomeNew, openLabel, openThread, openView, proposalsOff, relayKey, relayMove, scrollPending, viewWheelAt, wheelWindow } from './panel'
 import type { PaneEvent } from './panel'
 // the file browser and a file, drawn by a module of their own (panel.tsx drawsView, term.ts loadsView)
 import './filesview'
@@ -69,7 +69,7 @@ function resultText(output: unknown): string {
   const blocks = Array.isArray(output) ? output : (output as { content?: unknown } | undefined)?.content
   return Array.isArray(blocks) ? blocks.map(b => (b && typeof b === 'object' && 'text' in b ? String((b as { text: unknown }).text) : '')).join('\n') : ''
 }
-const ABOVE_LABEL = 12
+const ABOVE_LABEL = 16
 const paneTurns = turns()
 
 // the state the drawings read (types/index.d.ts)
@@ -932,9 +932,16 @@ export const register: Register = on => {
     if (e.surface === 'terminal' && e.viewport?.columns && !panes.some(p => p.isPlaced)) rt.termColumns = e.viewport.columns
     const { Box, Text, Button } = $.ui.resolve(e)
     const rows: RenderElement[] = []
-    const label = (s: string) => (
+    const label = (s: string, color?: string) => (
       <Box width={ABOVE_LABEL} flexShrink={0}>
-        <Text dimColor>{`  ${s}`}</Text>
+        {color ? <Text color={color}>{`  ${s}`}</Text> : <Text dimColor>{`  ${s}`}</Text>}
+      </Box>
+    )
+    // a row under a row's label: the label's width left empty
+    const under = (key: string, child: RenderElement) => (
+      <Box key={key} flexDirection="row">
+        {label('')}
+        <Box flexShrink={1}>{child}</Box>
       </Box>
     )
     // a panel Claude Code left undrawn (an open it was not asked for, on a terminal narrower than it places those at),
@@ -957,6 +964,57 @@ export const register: Register = on => {
             <Box flexDirection="row" columnGap={2} flexShrink={0}>
               <Button key="above-panel-open" label="open panel" plain onPress={() => openPending(cx)} />
               <Button key="above-panel-dismiss" label="dismiss" plain onPress={() => closePanel(cx)} />
+            </Box>
+          </Box>
+        </Box>,
+      )
+    }
+    // the view proposal waiting for the analyst's answer (proposer.py, or a viewer for a file type), until it is answered
+    // and whatever the panel shows: `view proposal` in the accent, its name in bold, what it would show and the task it
+    // serves wrapped whole, never behind a press; `accept`, `reject` and `don't ask again`, which turns view proposals
+    // off; why accept could not start its build, in red, under them (SPEC.md, "Main's chat")
+    const offer = await homeOffer(cx)
+    if (offer) {
+      const accept = () => answerOffer(cx, offer.slug, 'accept')
+      const reject = () => answerOffer(cx, offer.slug, 'reject')
+      rows.push(
+        <Box key="above-offer" flexDirection="row">
+          {label('view proposal', COLORS.accent)}
+          <Box flexDirection="row" columnGap={2} flexShrink={1}>
+            <Box flexShrink={1}>
+              <Text bold wrap="wrap">{offer.name}</Text>
+            </Box>
+            <Box flexDirection="row" columnGap={2} flexShrink={0}>
+              {offer.pressed
+                ? [<Text key="above-offer-pressed" dimColor>{offer.pressed === 'accept' ? '◌ accepting' : '◌ rejecting'}</Text>]
+                : [
+                    <Button key="above-offer-accept" label="accept" plain onPress={accept} />,
+                    <Button key="above-offer-reject" label="reject" plain onPress={reject} />,
+                    <Button key="above-offer-off" label="don't ask again" plain onPress={() => proposalsOff(cx)} />,
+                  ]}
+            </Box>
+          </Box>
+        </Box>,
+      )
+      if (offer.description) rows.push(under('above-offer-description', <Text wrap="wrap">{offer.description}</Text>))
+      if (offer.task) rows.push(under('above-offer-task', <Text wrap="wrap"><Text dimColor>{'task  '}</Text>{offer.task}</Text>))
+      else if (offer.claims.length) rows.push(under('above-offer-files', <Text wrap="wrap"><Text dimColor>{'files  '}</Text>{offer.claims.join(', ')}</Text>))
+      if (offer.refused && !offer.pressed) rows.push(under('above-offer-refused', <Text color={COLORS.problem} wrap="wrap">{offer.refused}</Text>))
+    }
+    // the latest notice of the view proposals (a check that failed or that a fallback model answered, an accepted view
+    // whose build failed), in red, with the act that fixes it where there is one, until dismissed or replaced
+    const notice = await homeNotice(cx)
+    if (notice) {
+      rows.push(
+        <Box key="above-notice" flexDirection="row">
+          {label('thimble')}
+          <Box flexDirection="row" columnGap={2} flexShrink={1}>
+            <Box flexShrink={1}>
+              <Text color={COLORS.problem} wrap="wrap">{notice.text}</Text>
+            </Box>
+            <Box flexDirection="row" columnGap={2} flexShrink={0}>
+              {notice.action ? <Button key="above-notice-act" label={notice.action.label} plain onPress={() => noticeAct(cx, notice)} /> : null}
+              <Button key="above-notice-dismiss" label="dismiss" plain onPress={() => dismissNotice(cx, notice)} />
             </Box>
           </Box>
         </Box>,
