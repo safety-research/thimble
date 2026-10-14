@@ -1,6 +1,6 @@
 {
   "name": "Timeline",
-  "description": "Events on a time axis, from five sources of a ferry operator (alerts, deploys, chat, support tickets and automated agents' actions): the base layout of a view, with Filter by, Rows and Color by in the top row, the lanes Rows groups under the time range's viewfinder, the events in the range in a table with its columns' headings, and an event in the side panel with the event it answers and those that answer it.",
+  "description": "Events on a time axis, from five sources of a ferry operator (alerts, deploys, chat, support tickets and automated agents' actions), with Filter by, Rows and Color by in the top row, the lanes Rows groups under the time range's viewfinder, the events in the range in a table with its columns' headings, and an event in the side panel with the event it answers and those that answer it.",
   "scope": ["agents.log", "alerts/*.jsonl", "chat/*.json", "deploys.csv", "tickets/*.txt", "tickets/index.csv"],
   "records": [
     {"name": "event", "one": "one alert, deploy step, chat message, ticket message or agent action", "fields": [

@@ -1,8 +1,8 @@
 # Rows, filters, lanes, cards, the side panel and the transcript
 
-Most views share one layout: the top row with the controls that act on the whole view, an overview of the records on a
-time axis, the records themselves in a list under it, and the details of the record chosen. The view kit draws each of
-these parts, so a page lays them out and fills them rather than drawing its own:
+A view of events in time often has this layout: the top row with the controls that act on the whole view, an
+overview of the records on a time axis, the records themselves in a list under it, and the details of the record
+chosen. The view kit draws each of these parts, so a page lays them out and fills them rather than drawing its own:
 
 | part | call | what it is |
 |---|---|---|

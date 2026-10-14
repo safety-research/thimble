@@ -15,7 +15,7 @@ Offer nothing when:
 
 ## The view
 
-Start from the analyst's task: what they asked, what the session found, and what they will check next. Mirror the structure of the data, such as threads as threads and who works with whom as a network. Name the actual things the analyst knows, in their words.
+Start from the analyst's task: what they asked, what the session found, and what they will check next. Mirror the structure of the data, such as threads as threads, who replies to whom as a network, agents and the subagents they start as a tree, or work that moves from state to state as a flow. Name the actual things the analyst knows, in their words.
 
 A good task says what the analyst wants to accomplish, not how. A bad task presupposes an interface and a sequence of steps, which constrains the design too early: how the analyst reaches the goal is the view's job.
 

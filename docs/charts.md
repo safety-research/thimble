@@ -205,3 +205,23 @@ Each half of the chart has one source. The kit builds no spec: it asks thimble f
 fails as a card's does. And it draws the spec with the code the canvas draws every chart with (frontend
 `lib/vegaDraw.ts`, with `lib/chartDefaults.ts` and the chart style of `lib/vizTheme.ts`), which `vite build` writes
 beside the app as `kit/chart.js` and every view page inlines, so a view's charts follow the theme as a card's do.
+
+## Networks, trees and flows in a view
+
+The kit has no part that draws a network, a tree of nodes and links, or a flow. A page draws them in SVG with d3's
+layouts, installed as npm packages and listed in `libs`: `d3-force` for a network, `d3-hierarchy` for a tidy tree, a
+treemap, an icicle or circle packing, `d3-chord` for a chord diagram, `d3-sankey` for a flow and `d3-shape` for curved
+links. The kit's parts stay around the drawing: Color by, Filter by and Rows in the top row, and the record in
+`thimble.side`.
+
+- Run the layout to its end before the first draw, such as `sim.stop()` and then 300 calls of `sim.tick()`, so the
+  view opens the same way each time.
+- A node or a link that stands for records is a unit, `view:<slug>/<key>`, in its `data-anchor`. It draws its label
+  colors itself: give it `data-anchor-unmarked`, and draw `thimble.markOf(ref).bar` again in `thimble.onMarks(fn)`.
+- Nodes take Color by's colors, `color.colorOf(color.valueOf(record))`. That is `null` with Off, where nodes take the
+  one series color, `var(--viz-1)`, and for a value turned off or none, where they take the marks' gray,
+  `var(--viz-ink-3)`. Links are context, in `var(--text-tertiary)`, each as wide as the records it stands for.
+- A click on a node opens its records in the side panel and keeps its neighbors in full color. Drag and the wheel pan
+  and zoom, with no zoom buttons.
+- When the pane cannot name every node, show the largest groups, or one node with its neighbors, first, and let Filter
+  by or a click widen it.
