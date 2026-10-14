@@ -13,6 +13,14 @@ The file-first hooks of plugin/bin/.thimble-watch write their record to the work
     rekey       SessionStart of main for clear and resume (subagents.hook_rekey: the chats and the mirror follow)
     main-stop   Stop of main's turn (only the pass below: the mirror, R3, the hand-backs, the task notifications)
 
+and `thimble act` (local.py) starts it with the analyst's answer to a view proposal or to one of its notices, since
+only this process writes proposals.json and follows to its end a build it queues (dev's queue lives in its memory):
+
+    view-accept       the view proposal accepted (views.accept: its build queued as one the analyst asked for)
+    view-reject       the view proposal rejected (views.answer_offer)
+    view-retry        a failed build of a view run again (views.retry)
+    view-propose-now  a check for a view proposal now, a notice's Try again (proposer.run_now)
+
 One process holds the workspace's MIRROR_LOCK at a time. A call that finds it held adds its kind and input to TODO and
 exits, and the holder takes it. The holder runs passes until nothing is left to do: each pass applies what module.json
 says (the ends of the runs the module started, module_bridge.new_ended; a late spawn's stop, module_bridge.reconcile),
@@ -46,7 +54,8 @@ from . import subagent_files as sf
 
 log = logging.getLogger("thimble.local_hooks")
 
-KINDS = ("started", "stopped", "denied", "end", "rekey", "main-stop")
+KINDS = ("started", "stopped", "denied", "end", "rekey", "main-stop", "view-accept", "view-reject", "view-retry",
+         "view-propose-now")
 MIRROR_LOCK = "mirror.lock"  # in the workspace folder: held by the one process that runs passes
 TODO = "mirror.todo.jsonl"  # in the workspace folder: the calls that found the lock held, for the holder
 TICK_S = 1.0
@@ -224,6 +233,58 @@ async def _pass(c: str, items: list[tuple[str, dict[str, Any]]]) -> None:
         elif kind == "rekey":
             _step(kind, subagents.hook_rekey, c, hook)
             _step("the mirror", session.catch_up, c)
+        elif kind in VIEW_KINDS:
+            _step(kind, VIEW_KINDS[kind], c, str(hook.get("slug") or ""))
+
+
+def _answered(what: str, c: str, slug: str, fn: Any, *args: Any) -> None:
+    """A view's call (views.accept, answer_offer, retry) for the analyst's press; a press the view no longer takes (a
+    second press, an answer written meanwhile: 404 or 409) is one line in the log."""
+    from fastapi import HTTPException  # noqa: PLC0415
+
+    try:
+        fn(c, slug, *args)
+    except HTTPException as e:
+        log.warning("%s: the view %s was not %s: %s", c, slug, what, e.detail)
+
+
+def _accept(c: str, slug: str) -> None:
+    """The view proposal accepted: its build queued (views.accept), which this process follows (_busy); a refusal
+    (no session, no hooks module) is written on the proposal, which the row above the prompt shows."""
+    from . import views  # noqa: PLC0415
+
+    _answered("accepted", c, slug, views.accept)
+
+
+def _reject(c: str, slug: str) -> None:
+    from . import views  # noqa: PLC0415
+
+    _answered("rejected", c, slug, views.answer_offer, "rejected")
+
+
+def _retry(c: str, slug: str) -> None:
+    from . import views  # noqa: PLC0415
+
+    _answered("built again", c, slug, views.retry)
+
+
+_running: set[asyncio.Future[Any]] = set()  # the checks for a view proposal _propose_now started, held until they end
+
+
+def _propose_now(c: str, slug: str = "") -> None:
+    """A check for a view proposal now (proposer.run_now); one that runs on this loop keeps the holder busy (_busy)."""
+    import inspect  # noqa: PLC0415
+
+    from . import proposer  # noqa: PLC0415
+
+    got = proposer.run_now(c)
+    if inspect.isawaitable(got):
+        fut = asyncio.ensure_future(got)
+        _running.add(fut)
+        fut.add_done_callback(_running.discard)
+
+
+VIEW_KINDS = {"view-accept": _accept, "view-reject": _reject, "view-retry": _retry, "view-propose-now": _propose_now}
 
 
 def _step(what: str, fn: Any, *args: Any) -> Any:

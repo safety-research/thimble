@@ -775,6 +775,31 @@ def proposals(term, monkeypatch):
     return lambda v: on.__setitem__("v", v)
 
 
+@pytest.fixture()
+def popen(monkeypatch):
+    """subprocess.Popen recorded: each start's argv, cwd and what it was given on stdin; nothing runs."""
+    started: list[dict[str, Any]] = []
+
+    class Pipe:
+        def __init__(self, rec):
+            self.rec = rec
+
+        def write(self, data):
+            self.rec["stdin"] = json.loads(data.decode("utf-8"))
+
+        def close(self):
+            pass
+
+    class Fake:
+        def __init__(self, argv, **kw):
+            self.rec = {"argv": list(argv), "cwd": kw.get("cwd"), "new_session": kw.get("start_new_session")}
+            started.append(self.rec)
+            self.stdin = Pipe(self.rec)
+
+    monkeypatch.setattr(subprocess, "Popen", Fake)
+    return started
+
+
 async def test_state_home_gives_the_waiting_view_proposal_and_none_while_view_proposals_are_off(proposals):
     from app import views
 
@@ -834,6 +859,63 @@ async def test_state_home_gives_the_latest_notice_of_the_view_proposals_with_the
                                     action={"label": "Settings", "do": "settings"}))
     got = (await local.state(CORPUS, "home"))["notice"]
     assert got["id"] == "n6" and "action" not in got
+
+
+async def test_view_accept_and_reject_hand_the_answer_to_the_holder_and_write_nothing_themselves(proposals, popen):
+    from app import views
+
+    views._save_proposals(CORPUS, [OFFER, {**OFFER, "slug": "board", "name": "Board", "status": "queued"}])
+    before = views.proposals_path(CORPUS).read_bytes()
+    assert await local.act(CORPUS, "view-accept", {"slug": "edit-bursts"}) == {"ok": True, "queued": True}
+    assert await local.act(CORPUS, "view-reject", {"slug": "edit-bursts"}) == {"ok": True, "queued": True}
+    assert [r["argv"][1:] for r in popen] == [["-m", "app.local_hooks", "view-accept"],
+                                              ["-m", "app.local_hooks", "view-reject"]]
+    assert all(r["cwd"] == str(local.BACKEND_DIR) and r["new_session"] for r in popen)
+    assert popen[0]["stdin"] == {"cwd": str(config.corpus_dir(CORPUS)), "slug": "edit-bursts"}
+    assert views.proposals_path(CORPUS).read_bytes() == before, "the act wrote nothing: the holder does"
+    # a proposal that no longer waits, or none of that name, starts nothing
+    got = await local.act(CORPUS, "view-accept", {"slug": "board"})
+    assert got == {"ok": True, "queued": False, "reason": "the view proposal 'Board' no longer waits"}
+    assert (await local.act(CORPUS, "view-reject", {"slug": "nope"}))["queued"] is False
+    proposals(False)
+    assert (await local.act(CORPUS, "view-accept", {"slug": "edit-bursts"}))["queued"] is False
+    assert len(popen) == 2
+    with pytest.raises(local.StateError, match="slug"):
+        await local.act(CORPUS, "view-accept", {})
+
+
+async def test_view_proposals_off_writes_views_propose_false_in_thimble_s_config(proposals, monkeypatch):
+    from app import userconf
+
+    saved: list = []
+    monkeypatch.setattr(userconf, "save", lambda c, patch: saved.append((c, patch)))
+    got = await local.act(CORPUS, "view-proposals-off", {})
+    assert saved == [(CORPUS, {"views": {"propose": False}})]
+    assert got == {"ok": True, "off": True, "config": str(userconf.global_file())}
+    # set in the workspace's config, it is written there, and the answer names that file
+    userconf.workspace_file(CORPUS).write_text(json.dumps({"views": {"propose": None}}))
+    assert (await local.act(CORPUS, "view-proposals-off", {}))["config"] == str(userconf.workspace_file(CORPUS))
+
+    def broken(c, patch):
+        raise userconf.ConfigError("thimble's config: agents.nope is unknown")
+
+    monkeypatch.setattr(userconf, "save", broken)
+    with pytest.raises(local.StateError, match="agents.nope"):
+        await local.act(CORPUS, "view-proposals-off", {})
+
+
+async def test_a_notice_s_try_again_and_retry_hand_their_call_to_the_holder(proposals, popen):
+    from app import views
+
+    views._save_proposals(CORPUS, [{**OFFER, "slug": "broken", "name": "Broken", "status": "failed"},
+                                   {**OFFER, "slug": "fine", "name": "Fine", "status": "building"}])
+    assert await local.act(CORPUS, "view-propose-now", {}) == {"ok": True, "queued": True}
+    assert await local.act(CORPUS, "view-retry", {"slug": "broken"}) == {"ok": True, "queued": True}
+    assert [(r["argv"][-1], r["stdin"].get("slug")) for r in popen] == [("view-propose-now", None),
+                                                                       ("view-retry", "broken")]
+    got = await local.act(CORPUS, "view-retry", {"slug": "fine"})
+    assert got == {"ok": True, "queued": False, "reason": "the view 'Fine' is building, not failed"}
+    assert len(popen) == 2
 
 
 def _cli(*argv: str, env: dict | None = None, cwd: Path | None = None) -> subprocess.CompletedProcess:

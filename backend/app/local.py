@@ -978,7 +978,8 @@ _SURFACES = {"home": _home, "cards": _cards, "card": _card, "labels": _labels, "
 ACT_USAGE = ("thimble act <kind> --cwd <dir> '<json>'; kinds: thread {anchor | anchor_text, message}, thread-message {thread, message}, "
              "verdict {label, ref, value}, label {label, name?, kind?, body?, glob?, values?}, label-run {label, limit?}, label-stop {label}, "
              "label-delete {label}, label-undelete {label}, label-show {label, on?, values?, colors?}, label-filter {label, value?}, seen {thread}, "
-             "hand-back {thread}, stop {agent}")
+             "hand-back {thread}, stop {agent}, view-accept {slug}, view-reject {slug}, view-proposals-off {}, "
+             "view-propose-now {}, view-retry {slug}")
 
 
 async def act(c: str, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1264,10 +1265,107 @@ async def _act_stop(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     return {"stopped": True, **({"done": True} if ans.get("done") else {})}
 
 
+BACKEND_DIR = Path(__file__).resolve().parents[1]  # where `python -m app.local_hooks` runs
+
+
+def _hand_over(kind: str, c: str, body: dict[str, Any] | None = None) -> None:
+    """`python -m app.local_hooks <kind>` started detached with the corpus folder and `body` on its stdin, as a hook
+    starts it (.thimble-watch spawn_local), and not waited for: the holder of the workspace's passes runs it, the one
+    process that writes proposals.json and follows to its end a build it queues. OSError when it cannot start."""
+    import subprocess  # noqa: PLC0415
+
+    proc = subprocess.Popen([sys.executable, "-m", "app.local_hooks", kind], cwd=str(BACKEND_DIR),
+                            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            start_new_session=True, close_fds=True)
+    if proc.stdin is None:
+        return
+    try:
+        proc.stdin.write(json.dumps({"cwd": str(config.corpus_dir(c)), **(body or {})}).encode("utf-8"))
+        proc.stdin.close()
+    except OSError:
+        pass
+
+
+def _queued(kind: str, c: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+    """`kind` handed to the holder (_hand_over): {queued: true}, or {queued: false, reason} when it cannot start."""
+    try:
+        _hand_over(kind, c, body)
+    except OSError as e:
+        return {"queued": False, "reason": f"thimble could not start its {kind} call: {e}"}
+    return {"queued": True}
+
+
+def _offer_answer(c: str, payload: dict[str, Any], kind: str) -> dict[str, Any]:
+    """The analyst's accept or reject of the view proposal that waits (views.open_offer), handed to the holder
+    (local_hooks `view-accept`: views.accept, its build queued; `view-reject`): this process reads and writes nothing
+    more. {queued: true} at once, or {queued: false, reason} when the proposal is gone or no longer waits."""
+    from . import views  # noqa: PLC0415
+
+    slug = _text(payload, "slug")
+    row = views.read_proposal(c, slug)
+    if row is None:
+        return {"queued": False, "reason": f"there is no view proposal {slug!r}"}
+    waiting = views.open_offer(c) if views.propose_enabled(c) else None
+    if not waiting or waiting.get("slug") != slug:
+        return {"queued": False, "reason": f"the view proposal {str(row.get('name') or slug)!r} no longer waits"}
+    return _queued(kind, c, {"slug": slug})
+
+
+async def _act_view_accept(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Accept the view proposal, as the browser's Accept does (POST …/proposals/{slug}/accept)."""
+    return _offer_answer(c, payload, "view-accept")
+
+
+async def _act_view_reject(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Reject the view proposal, as the browser's Reject does (POST …/proposals/{slug}/reject)."""
+    return _offer_answer(c, payload, "view-reject")
+
+
+async def _act_view_proposals_off(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Turn view proposals off, as the browser's Don't ask again does (PUT settings `propose_views: false`):
+    `views.propose: false` in thimble's config (userconf.save writes it where the key was set, else in the file in
+    thimble's home). {off: true, config: the file that holds it now}; StateError naming the config's error when it
+    cannot be written."""
+    from . import userconf  # noqa: PLC0415
+
+    try:
+        userconf.save(c, {"views": {"propose": False}})
+    except userconf.ConfigError as e:
+        raise StateError(str(e)) from None
+    written = userconf.global_file()
+    with contextlib.suppress(OSError, ValueError, AttributeError):
+        if "propose" in (json.loads(userconf.workspace_file(c).read_text("utf-8")).get("views") or {}):
+            written = userconf.workspace_file(c)
+    return {"off": True, "config": str(written)}
+
+
+async def _act_view_propose_now(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Check for a view proposal now, as a notice's Try again does in the browser (POST …/views/propose-now): handed to
+    the holder (local_hooks `view-propose-now`: proposer.run_now), which runs it and writes what comes of it."""
+    return _queued("view-propose-now", c)
+
+
+async def _act_view_retry(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Build again a view whose build failed, as a notice's Retry does in the browser (POST …/proposals/{slug}/retry):
+    handed to the holder (local_hooks `view-retry`: views.retry), which follows the build. {queued: false, reason} for a
+    view with nothing failed."""
+    from . import views  # noqa: PLC0415
+
+    slug = _text(payload, "slug")
+    row = views.read_proposal(c, slug)
+    if row is None:
+        return {"queued": False, "reason": f"there is no view {slug!r}"}
+    if row.get("status") != "failed" and not (row.get("status") == "built" and row.get("failed_change") is not None):
+        return {"queued": False, "reason": f"the view {str(row.get('name') or slug)!r} is {row.get('status')}, not failed"}
+    return _queued("view-retry", c, {"slug": slug})
+
+
 _ACTS = {"thread": _act_thread, "thread-message": _act_thread_message, "verdict": _act_verdict, "label": _act_label,
          "label-run": _act_label_run, "label-stop": _act_label_stop, "label-delete": _act_label_delete,
          "label-undelete": _act_label_undelete, "label-show": _act_label_show, "label-filter": _act_label_filter,
-         "seen": _act_seen, "hand-back": _act_hand_back, "stop": _act_stop}
+         "seen": _act_seen, "hand-back": _act_hand_back, "stop": _act_stop, "view-accept": _act_view_accept,
+         "view-reject": _act_view_reject, "view-proposals-off": _act_view_proposals_off,
+         "view-propose-now": _act_view_propose_now, "view-retry": _act_view_retry}
 
 
 # --------------------------------------------------------------------------- the command line

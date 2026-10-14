@@ -380,3 +380,59 @@ async def test_while_an_agent_runs_its_thread_shows_each_step_with_no_other_hook
         sf.registry(state)[AGENT]["status"] = "done"
     assert await asyncio.to_thread(done.wait, 30), "the follower went on after the orientation ended"
     assert out and out[0] >= 1
+
+
+async def test_the_analyst_s_answers_to_a_view_proposal_reach_the_views_through_the_holder(ws, project, monkeypatch):
+    """`thimble act view-accept|view-reject|view-retry` hand their call to the holder (local.py), which makes it: the
+    accept (views.accept, whose build it then follows), the reject (views.answer_offer) and the retry (views.retry). A
+    press the view no longer takes (a second press: 409) is one line in the log, and the passes go on."""
+    from fastapi import HTTPException
+
+    from app import dev, views
+
+    made: list[tuple] = []
+    views._save_proposals(CORPUS, [{"slug": "edit-bursts", "name": "Edit Bursts", "description": "d", "task": "t",
+                                    "claims": ["board.jsonl"], "status": "suggested", "proposed_by": "proposer",
+                                    "offered": {"at": "2026-10-14T10:00:00Z", "after": "main"}}])
+    monkeypatch.setattr(views, "click_refused", lambda c, slug: None)
+    monkeypatch.setattr(dev, "queue_view", lambda c, slug: made.append(("accept", c, slug)))
+    monkeypatch.setattr(views, "answer_offer", lambda c, slug, answer, **kw: made.append((answer, c, slug)) or {},
+                        raising=False)
+
+    def retry(c, slug):
+        made.append(("retry", c, slug))
+        raise HTTPException(409, "the view 'Edit Bursts' is building, not failed")
+
+    monkeypatch.setattr(views, "retry", retry)
+    _main(project)
+    for kind in ("view-accept", "view-reject", "view-retry"):
+        assert await _call(kind, {"cwd": str(config.corpus_dir(CORPUS)), "slug": "edit-bursts"}) >= 1
+    assert made == [("accept", CORPUS, "edit-bursts"), ("rejected", CORPUS, "edit-bursts"),
+                    ("retry", CORPUS, "edit-bursts")]
+    row = views.read_proposal(CORPUS, "edit-bursts")
+    assert (row["status"], row["asked"], row["accepted"]) == ("queued", True, True), "accepted: queued as asked for"
+
+
+async def test_a_notice_s_try_again_checks_for_a_view_proposal_and_the_holder_waits_for_the_check(ws, project,
+                                                                                                    monkeypatch):
+    """`view-propose-now` (a notice's Try again) runs proposer.run_now in the holder; a check that runs on its loop keeps
+    it busy until it ends, so what the check writes is written before the process exits."""
+    import sys
+    import types
+
+    import app
+
+    done: list[str] = []
+
+    async def check(c):
+        await asyncio.sleep(0.4)
+        done.append(c)
+
+    fake = types.ModuleType("app.proposer")
+    fake.run_now = lambda c: check(c)
+    monkeypatch.setitem(sys.modules, "app.proposer", fake)
+    monkeypatch.setattr(app, "proposer", fake, raising=False)
+    _main(project)
+    assert await _call("view-propose-now", {"cwd": str(config.corpus_dir(CORPUS))}) >= 1
+    assert done == [CORPUS], "the holder ran the check to its end"
+    assert "view-propose-now" in local_hooks.KINDS and "view-retry" in local_hooks.KINDS
