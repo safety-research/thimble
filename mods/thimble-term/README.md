@@ -69,12 +69,14 @@ Claude Code's panel chrome, no right-click menu.
   Code's agent tray, so no row repeats them.
 - **A view proposal above the prompt**, while one waits for an answer: `view proposal` in the accent, the view's name in
   bold, what it would show and the task it serves, whole, then `accept` (thimble builds it), `reject` and `don't ask
-  again`, which turns view proposals off; why accept could not start the build, and the fix, in red under them. Under
-  it, the latest notice of the view proposals in red (a check for a view proposal that failed, or that a fallback model
-  answered; an accepted view whose build failed) with the act that fixes it (`try again`, `retry`, `turn off view
-  proposals`) and `dismiss`. To turn view proposals back on after `don't ask again`, set `"views": {"propose": true}` in
-  thimble's config (`~/.thimble/config.json`, or the workspace's `config.json` when it sets the key), or take the key
-  out.
+  again`, which turns view proposals off; why accept could not start the build, and the fix, in red under them. To turn
+  view proposals back on after `don't ask again`, set `"views": {"propose": true}` in thimble's config
+  (`~/.thimble/config.json`, or the workspace's `config.json` when it sets the key), or take the key out.
+- **Every agent's failures above the prompt**, newest first, under the view proposal: a notice for each failure of any
+  agent thimble runs (the orientation and its helpers, the critic, writers, view builds, report checks, code tickets,
+  card checks, labels, the view proposer), since Claude Code's own output shows only main's: the agent in bold and the
+  failure in red, then the acts that fix it (`try again`, `retry`, `turn off view proposals`), `open ›` to the agent's
+  thread, and `dismiss`.
 - **One panel**, on Claude Code's panel chrome: one title row, the path from home, its earlier steps dim and a click
   away and the current step last in the accent color and bold (`home › Threads`; on home, `show all threads` and
   `N new` at the right; no `‹ back`, b goes back), a dim subtitle, a rule, the actions at the bottom after a second rule, and a dim italic row of key hints (`b to go back` only where there is a way back),
@@ -130,7 +132,7 @@ route for it:
 
 | Call | Read as |
 | --- | --- |
-| `thimble state home --cwd <dir>` | the workspace's counts: `cards`, `labels`, `docs`, `threads`, `views`, `files` (a number or a list each); `views`, each with its `status` (built, building, proposed, failed), `ts` and claimed `files`; the orientation's `coverage` line; `offer`, the view proposal waiting for an answer (`slug`, `name`, `description`, `task`, `claims`, `refused`), null while none waits and while view proposals are off; and `notice`, the latest notice of the view proposals in main's chat (`text`, and `action` with the act that fixes it) |
+| `thimble state home --cwd <dir>` | the workspace's counts: `cards`, `labels`, `docs`, `threads`, `views`, `files` (a number or a list each); `views`, each with its `status` (built, building, proposed, failed), `ts` and claimed `files`; the orientation's `coverage` line; `offer`, the view proposal waiting for an answer (`slug`, `name`, `description`, `task`, `claims`, `refused`), null while none waits and while view proposals are off; and `notices`, every agent's open notices, newest first (`id`, `agent`, `text`, `chat`, `open`: `thread`, `agent` or none, and `acts`, the acts that fix it) |
 | `thimble state cards --cwd <dir> --since <iso>` | the canvas route's `{groups, cells}`, the cells changed since |
 | `thimble state card --cwd <dir> <id>` | the cell route's cell |
 | `thimble state labels --cwd <dir>` / `label --cwd <dir> <id> [--rows <json>]` | the concepts route's list / one concept, with a page of its rows per value (`rows`, as `/rows?text=1` answers; `--rows {"<value>": n}` n of that value) after the records the analyst gave that value, how many records have each value (`totals`) and the value its scope's filter keeps (`filter`) |
@@ -156,7 +158,8 @@ route for it:
 | `thimble act stop --cwd <dir> {agent}` | stop one of thimble's agents, or a side thread's fork |
 | `thimble act view-accept --cwd <dir> {slug}` / `view-reject` | the view proposal accepted (its build queued) or rejected, as the browser's Accept and Reject do; it answers `{queued: true}` at once and thimble's hook process writes the answer, or `{queued: false, reason}` when the proposal no longer waits |
 | `thimble act view-proposals-off --cwd <dir> {}` | view proposals off (`views.propose: false` in thimble's config), as Don't ask again does; `{off, config}` names the file written |
-| `thimble act view-propose-now --cwd <dir> {}` / `view-retry --cwd <dir> {slug}` | a notice's act: check for a view proposal now, or build again a view whose build failed, run by thimble's hook process |
+| `thimble act view-propose-now --cwd <dir> {notice?}` / `view-retry --cwd <dir> {slug, notice?}` | a notice's act: check for a view proposal now, or build again a view whose build failed, run by thimble's hook process, which first dismisses the notice it was pressed on (`notice`, its id) |
+| `thimble act notice-dismiss --cwd <dir> {id}` | a notice dismissed, as its × in the browser does, written by thimble's hook process |
 | `thimble state checks --cwd <dir>` | the report checks route's list: each check's name, color, `shown` and runs, which name a document's comments |
 | `thimble act comment-resolve --cwd <dir> {doc, comment}` / `comment-reopen` | a document's comment resolved, as the browser's margin's ✓ does, or opened again |
 | `thimble act doc-save --cwd <dir> {doc, title?, blocks}` | a report edited as Markdown, saved as the browser's editor saves it (PUT …/blocks): each block with the id of the unit it was built from, so a kept passage keeps its id and its comments |

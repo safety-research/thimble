@@ -421,11 +421,19 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   thimble has written the answer. The rows go once the proposal is answered, and while view proposals are off; `don't
   ask again` turns them off (`views.propose: false` in thimble's config) and a toast says how to turn them back on. They
   bind no key: a letter typed goes to the prompt.
-- The notice row, under them: `thimble` dim, the latest notice of the view proposals in red, wrapped (a check for a view
-  proposal that failed or that a fallback model answered, an accepted view whose build failed), then the act that fixes
-  it where the terminal can take one (`try again`, `retry`, `turn off view proposals`) and `dismiss`. A fix that is a
-  command (`/login`, `thimble server restart`) is in the notice's words. Dismissed, it stays gone for the session until
-  a new notice comes.
+- The notice rows, under them, newest first: every open notice of every agent thimble runs (the orientation and its
+  helpers, the critic, writers, view builds and reviews, report checks, code tickets and the dev agent, card checks,
+  labels, the view proposer), since Claude Code's own output shows only main's requests (a notice of Claude's
+  safeguards on main's own reply is left out, as Claude Code shows that one). One row each: `notice` dim on the label
+  column, then the notice's words in red, which name the agent and the failure, wrapped whole (a safeguard's block, or
+  its switch to another model; an API error that stopped the agent; an agent that ended failed or was refused; a view
+  build, a check or a label run that failed; a check for a view proposal that failed or that a fallback model
+  answered); then the acts that fix it where the terminal can take one (`try again`, `retry`, `turn off view
+  proposals`), `open ›` to the agent's thread (a side thread in the threads panel, an agent's chat in its own panel)
+  and `dismiss`. A fix that is a command (`/login`, `thimble server restart`) is in the notice's words; one that only
+  the browser's Settings takes has no act here. An act or `dismiss` takes the row away at once and thimble writes the
+  dismissal, so it stays gone after a relaunch; a failure that comes again is a new row. An act thimble refuses leaves
+  the row, with why in a toast. A notice that thimble clears (a later success) goes when home's state is read again.
 - The panel's row above the prompt, only while Claude Code leaves the panel undrawn (an open it was not asked for, from
   main's tool or a click in a card, on a terminal narrower than 144 columns, or 110 for a panel opened before): `panel`
   dim, `Home is ready`, then `open panel` and `dismiss`. `open panel` opens the panel from its press, as `/thimble`
