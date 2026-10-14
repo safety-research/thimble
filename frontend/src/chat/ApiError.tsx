@@ -1,6 +1,7 @@
 // A request that Anthropic's API failed, as one card wherever it surfaces (model.withApiErrors, model.capacityNote,
 // sessions waiting to retry). It says what happened with the status, whether and when thimble retries, and offers Retry
-// where something can run again. The error's own words are one click away. A wait thimble ends by itself is a status;
+// where something can run again, except for a request Claude's safeguards stopped, which the same words would meet
+// again: its fix is to rephrase it. The error's own words are one click away. A wait thimble ends by itself is a status;
 // a request that stays failed is an alert.
 import { useState, type ReactNode } from 'react'
 import { Button } from '../components/Button'
@@ -33,18 +34,21 @@ export function ApiErrorCard({ line, retrying, waits = false, onRetry, retryLabe
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const words = line.trim()
+  const failure = apiFailure(words).failure
   const what = head ?? apiFailureText(words)
+  // a request the safeguards stopped is sent again only rephrased, which the composer does
+  const again = failure === 'refused' ? undefined : onRetry
   // Claude Code's own words for the error, one click away; the server's words say no more than the head
   const detail = given ?? (isApiError(words) ? words : '')
   const retry = () => {
-    if (!onRetry) return
+    if (!again) return
     setBusy(true)
-    onRetry()
+    again()
       .catch((e: Error) => bus.emit('toast', { text: `Could not retry: ${e.message}`, kind: 'error' }))
       .finally(() => setBusy(false))
   }
   return (
-    <div className={`chat-apierr ${className}`.trim()} role={waits ? 'status' : 'alert'} data-failure={apiFailure(words).failure} data-waits={waits || undefined}>
+    <div className={`chat-apierr ${className}`.trim()} role={waits ? 'status' : 'alert'} data-failure={failure} data-waits={waits || undefined}>
       <div className="chat-apierr-head">
         <Icon name="warning" size={13} className="chat-apierr-ico" />
         <span className="chat-apierr-what">{what}</span>
@@ -55,11 +59,11 @@ export function ApiErrorCard({ line, retrying, waits = false, onRetry, retryLabe
         )}
       </div>
       {open && detail && <p className="chat-apierr-detail">{detail}</p>}
-      {(retrying || onRetry || actions) && (
+      {(retrying || again || actions) && (
         <div className="chat-apierr-foot">
           {retrying && <span className="chat-apierr-retrying">{retrying}</span>}
           {actions}
-          {onRetry && (
+          {again && (
             <Button variant="secondary" size="sm" className="chat-apierr-retry" busy={busy} onClick={retry}>
               {retryLabel}
             </Button>
