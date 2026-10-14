@@ -11,7 +11,7 @@ and its cut), so a later pass of the mirror in terminal mode, or a restarted ser
 orientation's end merges with main's `↳` turn), and runs the job once main is idle; a main turn still open leaves it
 pending until that turn ends. A running fork is never cancelled; a trigger that comes meanwhile is the next job.
 
-The gate (due): view proposals are on (PROPOSE_ENV, then views.propose_enabled: Settings' View proposals switch),
+The gate (due): view proposals are on (views.propose_enabled: PROPOSE_ENV, then Settings' View proposals switch),
 main is attached and idle with a cut to fork at, no view proposal card waits (views.open_offer), and views can be built
 here (views.build_problem_for). There is no other limit.
 
@@ -46,16 +46,16 @@ from . import agents, capture, config, ledger, model, notices, prompts, sdk, vie
 log = logging.getLogger("thimble.proposer")
 
 PROMPT = "view-propose"  # prompts/view-propose.md
-PROPOSE_ENV = "THIMBLE_PROPOSE_VIEWS"  # "off" turns view proposals off whatever Settings say (the test suite)
+PROPOSE_ENV = views.PROPOSE_ENV  # "off" turns view proposals off whatever Settings say (the test suite)
 DEBOUNCE_MAIN_S = 2.0
 DEBOUNCE_OTHER_S = 45.0  # above subagents' 30 s hand-back wait in auto mode
 FORK_TIMEOUT_S = 300.0
 CONTEXT_CHARS = 120_000  # of the threads part
 RESERVE_TOKENS = 20_000  # main's context plus the prompt above CONTEXT_TOKENS less this runs on the 1M-token window
 LOG_FILE = "proposer.jsonl"  # in the views state folder: one line per run
-# in the views state folder: {job: the pending job {after, sid, cut, since} or null} (views.PROPOSER_FILE, whose
-# proposer_state reads it), changed under the file's lock (ledger.update_json) by whichever process triggers
-JOB_FILE = "proposer.json"
+# in the views state folder: {job: the pending job {after, sid, cut, since} or null}, read through
+# views.proposer_state and changed under the file's lock (ledger.update_json) by whichever process triggers
+JOB_FILE = views.PROPOSER_FILE
 NOTICE_KEY = "proposals"  # the key of the proposer's notices (notices.post)
 AGENT = "View proposals"  # the proposer's name on its notices
 BUILTIN = "Files shows every file in its built-in views: Raw, Table, Text, Transcript and Timeline, as fit its type."
@@ -88,11 +88,9 @@ def _now() -> str:
 
 
 def enabled(c: str) -> bool:
-    """Whether view proposals are on in workspace `c`: PROPOSE_ENV is not off and Settings' switch is on
-    (views.propose_enabled)."""
-    if os.environ.get(PROPOSE_ENV, "on").strip().lower() in ("0", "off", "false", "no"):
-        return False
-    return bool(views.propose_enabled(c))
+    """Whether view proposals are on in workspace `c` (views.propose_enabled: PROPOSE_ENV is not off and Settings'
+    switch is on)."""
+    return views.propose_enabled(c)
 
 
 # --------------------------------------------------------------------------- the pending job
@@ -108,11 +106,8 @@ def _job_of(state: Any) -> dict[str, Any] | None:
 
 
 def pending(c: str) -> dict[str, Any] | None:
-    """The workspace's pending job {after: [...], sid, cut, since}, or None."""
-    try:
-        return _job_of(ledger.read_json(_job_path(c), None))
-    except (OSError, ValueError):
-        return None
+    """The workspace's pending job {after: [...], sid, cut, since}, or None (views.proposer_state)."""
+    return _job_of(views.proposer_state(c))
 
 
 def _merge(c: str, after: str, *, sid: str | None = None, cut: str | None = None) -> dict[str, Any]:

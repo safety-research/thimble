@@ -1,7 +1,7 @@
 """proposer.py: the view proposer. A turn of main that answered the analyst, a side thread's answer and an orientation's
 end each run one fork of main's session, which may show a view proposal card (views.offer); every failure leaves a
 notice with its fix in the foreground (notices.py). The fork is faked (proposer._fork) with the stream-json Claude Code
-prints; the view proposal storage (Lane B's views.offer, open_offer, propose_enabled) is faked where a test needs it.
+prints; the view proposal storage (views.offer, open_offer, propose_enabled) is faked where a test needs it.
 
 session.py's part is here too: which turns answered the analyst, the cut a turn ended at, main's context size, and the
 notices for a reply Claude's safeguards switched to another model."""
@@ -19,6 +19,7 @@ from app import agents, config, notices, orientation, proposer, session, views
 CORPUS = "mini"
 SID = "a0b0c0d0-0000-4000-8000-0000000000a1"
 END = {"type": "system", "subtype": "turn_duration"}
+PROPOSE_ENABLED = views.propose_enabled  # the real switch (PROPOSE_ENV, then thimble's config), which `cards` fakes
 ANSWER = {"show": True, "why": "The analyst keeps comparing who replies to whom.",
           "proposal": {"name": "Reply Network", "description": "Who replies to whom, as a network.",
                        "task": "Compare how the agents coordinate.", "claims": ["board.jsonl"]}}
@@ -46,10 +47,9 @@ def cards(monkeypatch) -> list[dict]:
     waits."""
     rows: list[dict] = []
     monkeypatch.setenv(proposer.PROPOSE_ENV, "on")
-    monkeypatch.setattr(views, "propose_enabled", lambda c: True, raising=False)
+    monkeypatch.setattr(views, "propose_enabled", lambda c: True)
     monkeypatch.setattr(views, "build_problem_for", lambda c: "")
-    monkeypatch.setattr(views, "open_offer", lambda c: next((r for r in rows if r["status"] == "suggested"), None),
-                        raising=False)
+    monkeypatch.setattr(views, "open_offer", lambda c: next((r for r in rows if r["status"] == "suggested"), None))
 
     def offer(c, *, name, description, task, claims, after, why, proposed_by="proposer", arrangement=""):
         row = {"slug": name.lower().replace(" ", "-"), "name": name, "description": description, "task": task,
@@ -57,7 +57,7 @@ def cards(monkeypatch) -> list[dict]:
         rows.append(row)
         return row, ""
 
-    monkeypatch.setattr(views, "offer", offer, raising=False)
+    monkeypatch.setattr(views, "offer", offer)
     monkeypatch.setattr(proposer, "DEBOUNCE_MAIN_S", 0.0)
     monkeypatch.setattr(proposer, "DEBOUNCE_OTHER_S", 0.0)
     return rows
@@ -266,10 +266,10 @@ async def test_no_fork_while_a_card_waits_or_views_cannot_be_built(cwd, tmp_path
 
 async def test_view_proposals_off_keep_no_job(cwd, tmp_path, cards, forks, monkeypatch):
     lv, p = _attach(cwd, tmp_path)
-    monkeypatch.setattr(views, "propose_enabled", lambda c: False, raising=False)
+    monkeypatch.setattr(views, "propose_enabled", lambda c: False)
     _append(p, lv, _turn("Who replies?", "cut-1"))
     monkeypatch.setenv(proposer.PROPOSE_ENV, "off")
-    monkeypatch.setattr(views, "propose_enabled", lambda c: True, raising=False)
+    monkeypatch.setattr(views, "propose_enabled", PROPOSE_ENABLED)
     _append(p, lv, _turn("And now?", "cut-2"))
     await _settle()
     assert forks == [] and proposer.pending(CORPUS) is None
@@ -375,7 +375,7 @@ async def test_try_again_runs_now_or_says_why_not(cwd, tmp_path, cards, forks, m
     assert [f["cut"] for f in forks] == ["cut-1"] and len(cards) == 1
     assert proposer.run_now(CORPUS) == {"started": False, "reason": "A view proposal waits for the analyst."}
     assert proposer.pending(CORPUS) is None, "a refused Try again leaves no job"
-    monkeypatch.setattr(views, "propose_enabled", lambda c: False, raising=False)
+    monkeypatch.setattr(views, "propose_enabled", lambda c: False)
     assert proposer.run_now(CORPUS) == {"started": False, "reason": "View proposals are off."}
 
 
@@ -507,7 +507,6 @@ def test_the_turn_s_cut_and_who_opened_it_are_kept_and_survive_a_pass(cwd, tmp_p
     assert heard[-1] == {"sid": SID, "analyst": False, "cut": "cut-10"}
 
 
-@pytest.mark.skipif(not hasattr(views, "offer"), reason="views.offer comes with the view proposal storage (lane B)")
 async def test_the_proposer_writes_its_card_through_views_offer(cwd, tmp_path, forks, monkeypatch):
     """With the real storage: the card is a `suggested` row with `offered`, which open_offer gives."""
     monkeypatch.setenv(proposer.PROPOSE_ENV, "on")

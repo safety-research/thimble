@@ -1,7 +1,7 @@
 """View proposals (app/views.py, `offer` in the code): a view thimble proposes to the analyst after a turn (proposer.py)
 or for a file type opened in the File browser (views.suggest), stored as a `suggested` proposal row with `offered`,
 which builds only when the analyst accepts it. One waits at a time, until the analyst answers it: Accept builds it,
-Reject drops it, each with its answer stamped. A file type's check that fails is main's notice with a fix. Try again on
+Reject drops it, each with its answer stamped. A file type's check that fails is a notice with a fix. Try again on
 a notice checks that file type again, else asks the proposer to check now (propose-now). proposer.json keeps the
 proposer's pending job. Main sees the waiting view proposal as thimble's.
 """
@@ -224,10 +224,12 @@ def test_the_first_build_of_an_accepted_view_proposal_says_accepted_and_no_later
 def test_proposer_json_keeps_the_proposer_s_pending_job(corpus):
     assert views.proposer_state(CORPUS) == {"job": None}
     job = {"after": ["main"], "sid": "s1", "cut": "u1"}
-    assert views.update_proposer_state(CORPUS, job=job) == {"job": job}
     path = views.state_dir(CORPUS) / views.PROPOSER_FILE
-    assert json.loads(path.read_text()) == {"job": job}, "written whole, so the next process reads it"
-    assert views.update_proposer_state(CORPUS, job=None) == {"job": None}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"job": job}))
+    assert views.proposer_state(CORPUS) == {"job": job}, "a job one process wrote (proposer.py) is the next one's"
+    path.write_text(json.dumps({"job": None}))
+    assert views.proposer_state(CORPUS) == {"job": None}
     path.write_text("{broken")
     assert views.proposer_state(CORPUS) == {"job": None}
     path.write_text(json.dumps({"job": "x"}))
@@ -335,14 +337,10 @@ def test_view_proposals_are_on_unless_the_environment_or_the_config_turns_them_o
 
 
 def _fake_proposer(monkeypatch, run_now):
-    """A stand-in for app.proposer (Lane A's), whose run_now the propose-now route calls."""
-    import sys
+    """proposer.run_now, which the propose-now route calls, replaced by `run_now`."""
+    from app import proposer
 
-    import app
-
-    fake = SimpleNamespace(run_now=run_now)
-    monkeypatch.setitem(sys.modules, "app.proposer", fake)
-    monkeypatch.setattr(app, "proposer", fake, raising=False)
+    monkeypatch.setattr(proposer, "run_now", run_now)
 
 
 async def test_try_again_asks_the_proposer_to_check_now_and_only_the_analyst_s_click_does(corpus, analyst, monkeypatch):
@@ -354,12 +352,8 @@ async def test_try_again_asks_the_proposer_to_check_now_and_only_the_analyst_s_c
         await views.propose_now_route(CORPUS, Request({"type": "http", "headers": []}))
     assert e.value.status_code == 403 and asked == []
     assert await views.propose_now_route(CORPUS, analyst) == {"started": True} and asked == [CORPUS]
-
-    async def later(c):
-        asked.append(c)
-
-    _fake_proposer(monkeypatch, later)
-    assert await views.propose_now_route(CORPUS, analyst) == {"ok": True} and asked == [CORPUS, CORPUS]
+    _fake_proposer(monkeypatch, lambda c: asked.append(c) or {"queued": True})
+    assert await views.propose_now_route(CORPUS, analyst) == {"queued": True} and asked == [CORPUS, CORPUS]
     assert "propose-now" in views.RESERVED_SLUGS, "no view takes the route's name"
 
 
@@ -377,16 +371,13 @@ def test_the_propose_now_route_refuses_the_server_s_token_without_the_analyst_s_
 
 
 def _fake_notices(monkeypatch) -> list[tuple]:
-    """A stand-in for app.notices (Lane A's): each post as ("post", c, its keywords), each clear as ("clear", c, key)."""
-    import sys
-
-    import app
+    """notices.post and notices.clear recorded: each post as ("post", c, its keywords), each clear as ("clear", c,
+    key)."""
+    from app import notices
 
     told: list[tuple] = []
-    fake = SimpleNamespace(post=lambda c, **kw: told.append(("post", c, kw)),
-                           clear=lambda c, key, **kw: told.append(("clear", c, key)))
-    monkeypatch.setitem(sys.modules, "app.notices", fake)
-    monkeypatch.setattr(app, "notices", fake, raising=False)
+    monkeypatch.setattr(notices, "post", lambda c, **kw: told.append(("post", c, kw)))
+    monkeypatch.setattr(notices, "clear", lambda c, key, **kw: told.append(("clear", c, key)))
     return told
 
 
@@ -407,8 +398,8 @@ def _calls_answering(monkeypatch, results: list) -> list[str]:
     return calls
 
 
-async def test_a_file_type_check_that_fails_is_main_s_notice_and_try_again_checks_that_type_again(corpus, analyst,
-                                                                                                   monkeypatch):
+async def test_a_file_type_check_that_fails_is_a_notice_and_try_again_checks_that_type_again(corpus, analyst,
+                                                                                              monkeypatch):
     from app import model
 
     told = _fake_notices(monkeypatch)
@@ -420,7 +411,7 @@ async def test_a_file_type_check_that_fails_is_main_s_notice_and_try_again_check
         model.CallResult(status="error", detail="the session reported an error (HTTP 529): Overloaded."),
         model.CallResult(status="ok", output=answer)])
     assert await views.suggest(CORPUS, "run.trace") is None and calls == [".trace"]
-    assert told == [("post", CORPUS, {"kind": "proposals", "key": views.SUGGEST_NOTICE_KEY,
+    assert told == [("post", CORPUS, {"kind": "proposals", "key": views.SUGGEST_NOTICE_KEY, "agent": "View proposals",
                                       "action": {"label": "Try again", "do": "proposals-retry"},
                                       "text": "Couldn't check for a view proposal for .trace files: the session "
                                               "reported an error (HTTP 529): Overloaded."})]
@@ -491,5 +482,6 @@ async def test_a_view_proposal_from_the_refusal_row_s_model_says_so(corpus, monk
     slug = await views.suggest(CORPUS, "run.trace")
     assert slug is not None and views.open_offer(CORPUS)["slug"] == slug, "the card shows"
     assert told == [("post", CORPUS, {"kind": "proposals", "key": views.SUGGEST_NOTICE_KEY, "action": None,
+                                      "agent": "View proposals",
                                       "text": "This view proposal came from Opus 4.8: Claude's safeguards switched "
                                               "models."})]

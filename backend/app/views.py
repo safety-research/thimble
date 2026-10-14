@@ -49,7 +49,6 @@ import contextvars
 import fnmatch
 import functools
 import hashlib
-import inspect
 import itertools
 import json
 import logging
@@ -2592,7 +2591,7 @@ def _counted(p: dict[str, Any]) -> bool:
 # ("main", "thread:<id>", "orientation" or "file") and why. At most one waits at a time (open_offer), and it waits until
 # the analyst answers it: Accept queues it as a view the analyst asked for, Reject drops it. The answer is stamped on
 # the row (`answer`, `answered_at`), so the proposer sees which views the analyst rejected. proposer.json holds the
-# proposer's pending job (proposer_state).
+# proposer's pending job (proposer_state), which proposer.py writes under the file's lock.
 
 PROPOSE_ENV = "THIMBLE_PROPOSE_VIEWS"  # "off" turns view proposals off, whatever thimble's config says (the test suite)
 PROPOSER_FILE = "proposer.json"  # in the views state folder: {job} (proposer_state)
@@ -2625,16 +2624,6 @@ def proposer_state(c: str) -> dict[str, Any]:
     if not isinstance(out["job"], dict):
         out["job"] = None
     return out
-
-
-def update_proposer_state(c: str, **fields: Any) -> dict[str, Any]:
-    """Set fields of proposer.json (None stores null) under _proposals_lock, written whole at once; the new state."""
-    with _proposals_lock:
-        state = {**proposer_state(c), **fields}
-        p = _proposer_path(c)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        write_json(p, state)
-        return proposer_state(c)
 
 
 def _is_offer(p: dict[str, Any]) -> bool:
@@ -5032,10 +5021,11 @@ SUGGEST_HEX_BYTES, SUGGEST_SCAN_BYTES, SUGGEST_RUN_MIN = 512, 65536, 6  # of a b
 # the file-viewer call's wait, a refused call's rerun on the refusal row's model included (model.structured)
 SUGGEST_TIMEOUT_S = 90.0
 SUGGEST_PROMPT = "file-viewer"
-# A file type's check for a view proposal that failed (suggest) is a notice in main's chat under SUGGEST_NOTICE_KEY
+# A file type's check for a view proposal that failed (suggest) is a notice in the foreground under SUGGEST_NOTICE_KEY
 # (notices.post), whose Try again (POST /views/propose-now) checks that file type again (_suggest_failed); a check that
 # answers clears it.
 SUGGEST_NOTICE_KEY = "view-proposal-file"
+SUGGEST_AGENT = "View proposals"  # the name its notices give, as the proposer's do
 SUGGEST_FAILED = "Couldn't check for a view proposal for {files}: {reason}."
 SUGGEST_REFUSED = "Claude's safeguards blocked the request"
 SUGGEST_AUTH = ("Claude Code isn't signed in for thimble's server. Run /login, or if you changed your sign-in (for "
@@ -5044,8 +5034,6 @@ SUGGEST_FALLBACK = "This view proposal came from {model}: Claude's safeguards sw
 SUGGEST_REASON_CHARS = 160  # of the call's own detail in the notice
 SUGGEST_TRY_AGAIN = {"label": "Try again", "do": "proposals-retry"}
 SUGGEST_TURN_OFF = {"label": "Turn off view proposals", "do": "proposals-off"}
-_REFUSED_RE = re.compile(r"safeguards|usage polic|can't help with this", re.I)
-_AUTH_RE = re.compile(r"not logged in|invalid api key|please run /login|authentication_failed|oauth token|\b401\b", re.I)
 _suggest_failed: dict[str, str] = {}  # workspace -> the file whose type's check failed last, for Try again
 _suggest_tasks: set[asyncio.Task] = set()  # the checks Try again started, kept until they end
 
@@ -5208,7 +5196,7 @@ async def suggest(c: str, rel: str) -> str | None:
     proposer's, and the suffix's answer `suggested`; a no is the suffix's answer `none`, so it is never asked again. The
     view proposal's slug, or None. No call is made while view proposals are off (propose_enabled), one waits, or views
     cannot be built here. A call that fails, or a view proposal that offer refuses, caches nothing, so the next file of
-    the type asks again. A call that fails is also main's notice, with Try again (_check_failed); a call that answers
+    the type asks again. A call that fails is also a notice, with Try again (_check_failed); a call that answers
     clears it, or, when its view proposal came from the refusal row's model, says so (SUGGEST_FALLBACK)."""
     from . import tasks  # noqa: PLC0415
 
@@ -5264,10 +5252,12 @@ async def suggest(c: str, rel: str) -> str | None:
 def _failure_of(res: Any) -> str:
     """Why a file type's check for a view proposal gave no answer, in a few words for its notice: Claude's safeguards
     (SUGGEST_REFUSED), no sign-in (SUGGEST_AUTH), an answer that could not be read, or the call's own detail."""
+    from . import notices  # noqa: PLC0415 — notices imports agents, which imports this module
+
     status, detail = str(getattr(res, "status", "") or ""), _one(getattr(res, "detail", "") or "")
-    if status == "refused" or _REFUSED_RE.search(detail):
+    if status == "refused" or notices.REFUSED_RE.search(detail):
         return SUGGEST_REFUSED
-    if _AUTH_RE.search(detail):
+    if notices.AUTH_RE.search(detail):
         return SUGGEST_AUTH
     if status in ("ok", "truncated", "no_tool_call"):
         return "Claude's answer couldn't be read"
@@ -5275,7 +5265,7 @@ def _failure_of(res: Any) -> str:
 
 
 def _check_failed(c: str, rel: str, suffix: str, reason: str) -> None:
-    """A file type's check for a view proposal failed: logged, kept for Try again (_suggest_failed), and told in main's
+    """A file type's check for a view proposal failed: logged, kept for Try again (_suggest_failed), and told in a
     notice (SUGGEST_FAILED) with Try again, and Turn off view proposals when Claude's safeguards blocked it. None,
     suggest's answer."""
     log.info("no viewer suggestion for %s/%s: %s", c, rel, reason)
@@ -5290,14 +5280,14 @@ def _check_failed(c: str, rel: str, suffix: str, reason: str) -> None:
 
 
 def _suggest_notice(c: str, text: str = "", action: Any = None) -> None:
-    """main's notice of a file type's check for a view proposal (notices.post under SUGGEST_NOTICE_KEY), or with no
+    """The notice of a file type's check for a view proposal (notices.post under SUGGEST_NOTICE_KEY), or with no
     text its clearing, as a check that answers clears it (notices.clear). Never raises: a notice that cannot be written
     is logged. On the server's loop, so its event goes out."""
     try:
         from . import notices  # noqa: PLC0415 — notices imports agents, which imports this module
 
         if text:
-            notices.post(c, kind="proposals", text=text, action=action, key=SUGGEST_NOTICE_KEY)
+            notices.post(c, kind="proposals", text=text, agent=SUGGEST_AGENT, action=action, key=SUGGEST_NOTICE_KEY)
         else:
             notices.clear(c, SUGGEST_NOTICE_KEY)
     except Exception:  # noqa: BLE001 — a notice never stops the check
@@ -5504,10 +5494,7 @@ async def propose_now_route(c: str, request: Request) -> dict[str, Any]:
         return {"started": True}
     from . import proposer  # noqa: PLC0415 — proposer imports this module
 
-    got = proposer.run_now(c)
-    if inspect.isawaitable(got):
-        got = await got
-    return got if isinstance(got, dict) else {"ok": True}
+    return proposer.run_now(c)
 
 
 class BuildBody(BaseModel):
