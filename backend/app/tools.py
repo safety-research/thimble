@@ -2783,12 +2783,10 @@ async def _h_delete_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
 async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     """A proposal for a view: what the analyst sees in it (`description`), what they do with it (`task`) and the files
     it reads (`claims`), which a `thimble:view-builder` builds at once (views.propose, dev.start_build), reading those
-    files itself for the fields, keys and counts, on the model and effort the call names, else Settings' dev row. The
-    orientation's proposals are built as follow-on starts of its own start, and held until their views pass their
-    checks, so each reaches the analyst as soon as it works. A viewer of unusual file types the orientation proposes
-    (views.offered_type_viewer) is stored `suggested`, offered in the File browser and built once the analyst accepts
-    it. A claim that matches no corpus file is refused, naming real paths near it; where views
-    cannot be built the proposal fails at once. A proposal from main's shim is one the analyst asked for: its result is
+    files itself for the fields, keys and counts, on the model and effort the call names, else Settings' dev row. Since
+    0.8.0 the orientation proposes no views (it does not have this tool); thimble's own view proposals wait for the
+    analyst's Accept (views.offer). A claim that matches no corpus file is refused, naming real paths near it; where
+    views cannot be built the proposal fails at once. A proposal from main's shim is one the analyst asked for: its result is
     the exact Agent call that starts its builder, which main makes (`## start_job-subagent`), and the browser opens the
     view once built. A thread's fork's proposal is built the same way, by main's Agent call on a `start_agent` event
     (_ask_main), since the fork may not make it."""
@@ -2820,14 +2818,11 @@ async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
                                             description=str(args["description"]).strip(), claims=claims,
                                             task=str(args["task"]).strip(), proposed_by=ctx.created_by,
                                             orientation=orient, asked=typed,
-                                            suggested=orient and views.offered_type_viewer(claims),
                                             route=views.TYPED if typed else None, values=values or None))
     status = str(prop.get("status") or "queued")
     if not prop.get("held"):
         _chip(ctx.c, "view", str(prop.get("name") or prop.get("slug")), ref=f"view:{prop.get('slug')}", status=status)
     claimed = ", ".join(prop.get("claims") or [])
-    if status == "suggested":
-        return ok(hint("propose_view-suggested", view=prop.get("name"), slug=prop.get("slug"), claims=claimed))
     # without Node 20+ or the frontend's packages the build fails at once (dev.start_build), and main is told why
     if why := await asyncio.to_thread(views.build_problem_for, ctx.c):
         if typed:

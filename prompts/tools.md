@@ -867,10 +867,6 @@ screenshot cannot take this picture in terminal mode. There it draws only a card
 
 Proposed the view {view} (view:{slug}) over {claims}. The dev agent is building it now, and it opens in {{if:browser}}Files{{end}}{{if:terminal}}thimble's panel in the terminal{{end}} when its checks pass.
 
-## propose_view-suggested
-
-Proposed the viewer {view} (view:{slug}) for {claims}. Files offers it beside Raw on those files, and it is built when the analyst picks it.
-
 ## propose_view-unmatched
 
 No file of the corpus matches {claims}, so the view was not proposed and the dev agent has nothing to build. {near} Propose it again with claims that match files the corpus holds.

@@ -318,7 +318,7 @@ async def test_a_command_harness_runs_the_orientation_through_thimble_s_tools(tm
     active.append(_extension(tmp_path, "harn", {"orientation": {"description": "A harness.",
                                                                 "command": ["python", "orient.py"]}},
                              {"agents/orientation/orient.py": HARNESS}))
-    res = await tools.call(CORPUS, "start_orientation", {"brief": "count the runs", "propose_views": False})
+    res = await tools.call(CORPUS, "start_orientation", {"brief": "count the runs"})
     assert not res.is_error, res.text
     rec = await _until(lambda: (r := orientation.read_run(CORPUS)) and r.get("status") in ("done", "failed") and r,
                        what="the orientation to end")
@@ -429,7 +429,7 @@ def test_the_example_sdk_orientation_runs_end_to_end_on_a_copy_of_a_corpus(tmp_p
     shutil.copytree(EXAMPLE, home / "extensions" / "orient-sdk")
     active.append(home / "extensions" / "orient-sdk")
     r = httpx.post(f"{base}/api/tools/start_orientation", headers=plugin_headers(), timeout=60,
-                   json={"args": {"brief": "", "propose_views": False}, "workspace": CORPUS, "actor": "analyst"})
+                   json={"args": {"brief": ""}, "workspace": CORPUS, "actor": "analyst"})
     assert r.status_code == 200 and not r.json()["is_error"], r.text
     end = time.monotonic() + 90
     rec: dict = {}
@@ -605,7 +605,7 @@ async def test_a_javascript_command_harness_runs_the_orientation_with_thimble_s_
     active.append(_extension(tmp_path, "jsharn", {"orientation": {"description": "A JavaScript harness.",
                                                                   "command": ["node", "orient.mjs"]}},
                              {"agents/orientation/orient.mjs": JS_HARNESS}))
-    res = await tools.call(CORPUS, "start_orientation", {"brief": "count the runs", "propose_views": False})
+    res = await tools.call(CORPUS, "start_orientation", {"brief": "count the runs"})
     assert not res.is_error, res.text
     rec = await _until(lambda: (r := orientation.read_run(CORPUS)) and r.get("status") in ("done", "failed") and r,
                        what="the orientation to end")
@@ -731,7 +731,7 @@ async def run(input):
     active.append(_extension(tmp_path, "pushy", {"orientation": {"description": "Pushes.", "sdk": "o.py"}},
                              {"agents/orientation/o.py": program}))
     r = httpx.post(f"{base}/api/tools/start_orientation", headers=plugin_headers(), timeout=60,
-                   json={"args": {"brief": "", "propose_views": False}, "workspace": CORPUS, "actor": "analyst"})
+                   json={"args": {"brief": ""}, "workspace": CORPUS, "actor": "analyst"})
     assert r.status_code == 200 and not r.json()["is_error"], r.text
     end = time.monotonic() + 90
     rec: dict = {}
