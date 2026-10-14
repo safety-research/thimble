@@ -1,7 +1,8 @@
 """View proposals (app/views.py, `offer` in the code): a view thimble proposes to the analyst after a turn (proposer.py)
 or for a file type opened in the File browser (views.suggest), stored as a `suggested` proposal row with `offered`,
 which builds only when the analyst accepts it. One waits at a time, until the analyst answers it: Accept builds it,
-Reject drops it, each with its answer stamped. proposer.json keeps the proposer's pending job.
+Reject drops it, each with its answer stamped. proposer.json keeps the proposer's pending job. Main sees the waiting
+view proposal as thimble's.
 """
 from __future__ import annotations
 
@@ -12,7 +13,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from app import config, ledger, userconf, views
+from app import config, context, ledger, userconf, views
 
 CORPUS = "offers"
 READER = '''
@@ -268,6 +269,34 @@ async def test_a_file_type_proposal_that_cannot_be_written_keeps_no_answer(corpu
     views.answer_offer(CORPUS, _offer()[0]["slug"], "rejected")
     assert await views.suggest(CORPUS, "run.trace") is None and calls == [".trace"]
     assert views.suggestions(CORPUS) == {} and views.open_offer(CORPUS) is None, "the name was taken"
+
+
+def test_main_sees_the_waiting_view_proposal_as_thimble_s_and_no_legacy_row(corpus, monkeypatch):
+    views.propose(CORPUS, "Old Trace", "A trace viewer.", ["**/*.trace"], "One row per step.", "files", False, False,
+                  True)
+    views.propose(CORPUS, "Threads", "The threads.", ["board.jsonl"])
+    _offer()
+    text = context.views(CORPUS)
+    assert "- thimble's view proposal, waiting for the analyst's Accept or Reject: Posts · claims board.jsonl" in text
+    assert "  Each post of the board." in text and "- proposed, queued: Threads · claims board.jsonl" in text
+    assert "Old Trace" not in text
+    monkeypatch.setenv(views.PROPOSE_ENV, "off")
+    assert "Posts" not in context.views(CORPUS), "with view proposals off the analyst sees none, and neither does main"
+    monkeypatch.delenv(views.PROPOSE_ENV)
+    views.answer_offer(CORPUS, views.open_offer(CORPUS)["slug"], "rejected")
+    assert "Posts" not in context.views(CORPUS)
+
+
+def test_don_t_ask_again_turns_view_proposals_off_through_the_settings_put_and_settings_back_on(corpus, analyst):
+    """The card's Don't ask again is the settings PUT of `propose_views: false`; Settings' switch turns them back on.
+    The waiting view proposal only hides meanwhile."""
+    row, _ = _offer()
+    assert ledger.put_settings_route(CORPUS, analyst, {"propose_views": False})["propose_views"] is False
+    assert not views.propose_enabled(CORPUS) and "Posts" not in context.views(CORPUS)
+    assert _row(row["slug"])["status"] == "suggested"
+    assert ledger.put_settings_route(CORPUS, analyst, {"propose_views": True})["propose_views"] is True
+    assert views.propose_enabled(CORPUS) and views.open_offer(CORPUS)["slug"] == row["slug"]
+    assert "thimble's view proposal" in context.views(CORPUS)
 
 
 def test_view_proposals_are_on_unless_the_environment_or_the_config_turns_them_off(corpus, monkeypatch):
