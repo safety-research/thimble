@@ -257,10 +257,9 @@ def auth_status(env: Mapping[str, str] | None = None, cwd: str | Path | None = N
     return d if isinstance(d, dict) else None
 
 
-# how to give Claude Code a login, for every "not logged in" message: the login, or the API-key route, which reaches
-# thimble's server only once it starts again with the key (INSTALL.md's Authentication section has the other routes)
-AUTH_HELP = ("log in with `claude auth login`, or export ANTHROPIC_API_KEY and run `thimble server restart` (INSTALL.md, "
-             "Authentication, has more ways)")
+# how to give Claude Code a login, for every "not logged in" message: the login, and where the other ways are
+# (INSTALL.md's Authentication section: an API key, a cloud provider)
+AUTH_HELP = "log in with `claude auth login` (INSTALL.md, Authentication, has more ways)"
 
 
 def auth_problem(status: dict[str, Any] | None = None) -> str:
