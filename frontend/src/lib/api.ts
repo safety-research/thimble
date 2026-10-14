@@ -467,10 +467,6 @@ export const api = {
    * with */
   cardAsView: (c: string, card: string) => j<{ slug: string; query: ViewQuery }>(`${ws(c)}/cells/${enc(card)}/as-view`, { method: 'POST' }),
   // ---- orientation ----
-  /** Start (`POST /ws/{c}/start`): a click, which starts the orientation through thimble's plugin with no turn of main;
-     * the answer is the agent id, or the refusal's kind and reason, which orient/run.json also holds (`orientation`).
-     * 403 without the analyst's cookie. */
-  start: (c: string, body: Partial<StartBody> = {}) => j<StartAnswer>(`${ws(c)}/start`, { method: 'POST', body: JSON.stringify(body) }).then(startAnswer),
   /** The orientation's record (`GET /ws/{c}/orientation`, orient/run.json): {} before any was asked for. */
   orientation: (c: string) => j<OrientRun>(`${ws(c)}/orientation`),
 
@@ -537,7 +533,7 @@ export const api = {
 export const isNotFound = (e: unknown): boolean => /^404\b/.test((e as Error)?.message ?? '')
 
 // --- the canvas's layout ---
-import type { CellMoveBody, GroupPatch, MainEffort, Pos, StartBody } from './types'
+import type { CellMoveBody, GroupPatch, MainEffort, Pos } from './types'
 
 /** The canvas' layout routes: where a group's column sits and how wide a card is. */
 export const canvasApi = {

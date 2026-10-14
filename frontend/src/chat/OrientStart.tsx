@@ -1,9 +1,9 @@
 // The orientation's start as main's chat shows it before its thread exists: "Starting…" while the start is on its way
 // (a click's answer normally comes within a second, so the card shows only after STARTING_AFTER_MS; a typed start shows
-// it until main makes the call), and the card of a start that did not happen (chat/Refused), whose Edit request goes to
-// the Start gate, which comes back filled in from orient/run.json. Once the agent starts, main's log holds its
-// "Orientation started in" row and its thread opens. The record is read from `GET /ws/{c}/orientation`, again on the
-// stream's `orient` events and while it says `starting`.
+// it until main makes the call), and the card of a start that did not happen (chat/Refused), with Start it and Dismiss
+// as its kind offers them. Once the agent starts, main's log holds its "Orientation started in" row and its thread
+// opens. The record is read from `GET /ws/{c}/orientation`, again on the stream's `orient` events and while it says
+// `starting`.
 import { useEffect, useState } from 'react'
 import { Spinner } from '../components/Spinner'
 import { api } from '../lib/api'
@@ -51,6 +51,11 @@ export function shownRefusal(run: OrientRun | null, answer: StartAnswer | null, 
   return dismissed.includes(refusalKey(r)) ? null : r
 }
 
+/** The chat a click start opens: the started agent's (its thread opens on its first steps), else none. Pure. */
+export function startedChat(a: StartAnswer | null | undefined): string | null {
+  return a?.agentId && a.chat ? a.chat : null
+}
+
 /** What a dismissal of a refusal keeps: its request, else when it happened. Pure. */
 export const refusalKey = (r: Pick<Refusal, 'request' | 'at'>): string => r.request || r.at || 'refused'
 
@@ -63,14 +68,13 @@ export function startingShown(run: OrientRun | null, pendingSince: number | null
 
 const dismissedKey = (ws: string) => storageKey(ws, 'orient-refused-dismissed')
 
-export function OrientStart({ ws, run, answer, pendingSince, onEdit, onStarted }: {
+export function OrientStart({ ws, run, answer, pendingSince, onStarted }: {
   ws: string
   run: OrientRun | null
-  /** what this tab's Start click answered, while the record is read again */
+  /** what this tab's click start answered, while the record is read again */
   answer: StartAnswer | null
-  /** when this tab's Start click went out, while it waits for its answer */
+  /** when this tab's click start went out, while it waits for its answer */
   pendingSince: number | null
-  onEdit: () => void
   onStarted: (a: StartAnswer) => void
 }) {
   const [dismissed, setDismissed] = useState<string[]>(() => readStorage<string[]>(dismissedKey(ws), []))
@@ -96,7 +100,6 @@ export function OrientStart({ ws, run, answer, pendingSince, onEdit, onStarted }
       what="the orientation"
       refusal={refusal}
       text={run?.query ?? null}
-      onEdit={onEdit}
       onStarted={onStarted}
       onDismiss={() => {
         const key = refusalKey(refusal)

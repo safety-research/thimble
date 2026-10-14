@@ -256,8 +256,8 @@ const PATHS: Record<IconName, string> = {
   sliders: 'M4 7h9M17 7h3M4 17h3M11 17h9M15 5v4M9 15v4',
   image: 'M5 4h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zM4 16.5l4.5-4.5 4 4 2.5-2.5 5 5M15.5 8.5h.01',
   markdown: 'M3.5 6h17a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-17a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1zM6 15V9l2.75 3L11.5 9v6M17 9v6M14.75 12.75L17 15l2.25-2.25',
-  // the permission modes on Start's switcher (StartGate): Manual a pause, Auto the play triangle `run`, Bypass an
-  // exclamation mark
+  // a pause (the video's Pause) and an exclamation mark, drawn for the permission modes Manual and Bypass, beside Auto's
+  // play triangle `run`
   pause: 'M9 5.5v13M15 5.5v13',
   exclaim: 'M12 4.5v10M12 19.5h.01',
   // where a story section's card stands (the story editor's section bar), drawn as alignment glyphs are, the text as

@@ -634,10 +634,6 @@ export interface ViewOpen {
 
 // ---- orientation ----
 
-/** The Start card's switches, start_orientation's: the orientation's deck (`final`), its view proposals, the report,
- * and its critic's review. */
-export type OrientPass = 'final' | 'views' | 'critique' | 'report'
-
 /** The efforts Claude Code takes, lowest first (cc_settings.EFFORTS): every effort menu of thimble's agents offers
  * these. Main's composer adds Ultracode (MainEffort). */
 export type OrientEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
@@ -713,18 +709,6 @@ export interface SessionAlert {
   attempt?: number
 }
 
-/** The body of Start (`POST /ws/{c}/start`, orient_session.StartBody): the request (focus), start_orientation's four
- * switches, and the run's exact model and effort, each defaulting to Settings' orientation row. */
-export interface StartBody {
-  text?: string
-  deck: boolean
-  views: boolean
-  critique: boolean
-  report: boolean
-  model?: string
-  effort?: string
-}
-
 /** The kinds of a start or a follow-up that did not happen (backend subagents: run.json `refused.kind`). */
 export type RefusalKind = 'auto-mode' | 'no-call' | 'limit' | 'not-launched' | 'hook' | 'earlier-session' | 'no-module' | 'error' | (string & {})
 
@@ -774,14 +758,12 @@ export interface RunValues {
   effort?: string
 }
 
-/** The orientation's record (`GET /ws/{c}/orientation`, orient/run.json): its status, the request and switches, the
- * run's exact model and effort, who started it, the pending request, and for a start that did not happen its refusal.
- * {} before any orientation was asked for. */
+/** The orientation's record (`GET /ws/{c}/orientation`, orient/run.json): its status, the request, the run's exact
+ * model and effort, who started it, the pending request, and for a start that did not happen its refusal. {} before
+ * any orientation was asked for. */
 export interface OrientRun {
   status?: 'requested' | 'starting' | 'running' | 'done' | 'failed' | 'stopped' | 'refused' | (string & {})
   query?: string | null
-  passes?: string[]
-  critique?: boolean
   model?: string | null
   effort?: string | null
   route?: 'subagent' | 'program' | (string & {}) | null
@@ -2069,8 +2051,6 @@ export interface ChatMeta {
   /** the agent a session or a program runs as: thimble's own as `thimble:<role>`, an extension's program's as
    * `<extension>:<role or task>` (backend harness.start) */
   agent_type?: string | null
-  /** the orientation: its critique */
-  critique?: boolean
   /** a writer: the document it writes (write_session.py) */
   doc?: string | null
   /** one of thimble's agents: what it was asked, for its card, when its first message is longer (a writer's task) */
