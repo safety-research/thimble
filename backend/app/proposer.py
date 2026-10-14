@@ -217,6 +217,7 @@ def run_now(c: str) -> dict[str, Any]:
         return {"queued": True}
     why = due(c, lv, job)[1]
     if why:
+        _pop(c)  # as a run the gate holds leaves no job (run_once)
         return {"started": False, "reason": why}
     loop = _loop_running()
     if loop is None:
@@ -317,9 +318,9 @@ def _orientation_section(c: str) -> str:
                    "its cards appear.")
         out += (["", "Its cards so far:", "", *cards] if cards else ["It has made no card yet."])
     else:
-        how = "ran" if run.get("status") == "done" else str(run.get("status"))
-        out.append(f"An orientation {how} beside the session from {_hm(run.get('started'))} to "
-                   f"{_hm(run.get('ended'))}, and the analyst sees its cards.")
+        ended = {"done": "", "stopped": " and was stopped before it finished", "failed": " and failed"}
+        out.append(f"An orientation ran beside the session from {_hm(run.get('started'))} to "
+                   f"{_hm(run.get('ended'))}{ended.get(str(run.get('status')), '')}, and the analyst sees its cards.")
         summary = (orientation.summary(c) or "").strip() if run.get("status") == "done" else ""
         if summary:
             out += ["Its summary:", "", nest_headings(summary)]

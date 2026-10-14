@@ -376,6 +376,7 @@ async def test_try_again_runs_now_or_says_why_not(cwd, tmp_path, cards, forks, m
     await _settle()
     assert [f["cut"] for f in forks] == ["cut-1"] and len(cards) == 1
     assert proposer.run_now(CORPUS) == {"started": False, "reason": "A view proposal waits for the analyst."}
+    assert proposer.pending(CORPUS) is None, "a refused Try again leaves no job"
     monkeypatch.setattr(views, "propose_enabled", lambda c: False, raising=False)
     assert proposer.run_now(CORPUS) == {"started": False, "reason": "View proposals are off."}
 
