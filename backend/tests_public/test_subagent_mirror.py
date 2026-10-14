@@ -132,7 +132,7 @@ async def _click_orientation(bridge, project: Path) -> tuple[session.Live, str, 
     transcript; its file appears under main's session folder."""
     lv = _attach(project)
     bridge.answers.append({"agentId": AGENT})
-    ans = await orient_session.start(CORPUS, "", ["final"], route=subagents.CLICK)
+    ans = await orient_session.start(CORPUS, "", route=subagents.CLICK)
     assert ans.agent_id == AGENT
     path = _agent_file(project, AGENT, agentType="thimble:orientation", toolUseId="toolu_plugin_105f7e7c43f6",
                        description="orientation: the whole corpus")

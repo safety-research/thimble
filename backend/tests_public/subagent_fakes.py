@@ -15,7 +15,7 @@ HINTS = {
     "start_writing-subagent": "AGENT CALL {input}",
     "start_job-subagent": "AGENT CALL {input}",
     "critique-subagent": "AGENT CALL {input}",
-    "orient-subagent-prompt": "{request_id}\nREQUEST {request}\nOUTPUTS {outputs}\nOFF {off}\nCRITIQUE {critique}",
+    "orient-subagent-prompt": "{request_id}\nREQUEST {request}",
     "orient-subagent-message": "SEND TO {agent}\n{text}",
     "agent-check-exact": "MAKE THE CALL EXACTLY",
     "agent-check-message": "ONLY WHEN THE ANALYST ASKS",
@@ -30,7 +30,7 @@ HINTS = {
     "module-started-note": "STARTED {role} {agent} {what}",
     "follow-up-ran-on": "RAN ON {model} {effort}",
     "orient-continuation-prompt": "{request_id}\nSUMMARY {summary}\nCARDS {cards}\nTRANSCRIPTS {transcripts}\n"
-                                  "OUTPUTS {outputs}\nOFF {off}\nCRITIQUE {critique}\nMESSAGE {message}",
+                                  "MESSAGE {message}",
     "message_orientation-continues": "CONTINUE WITH AGENT CALL {input}",
 }
 

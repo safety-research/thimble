@@ -1,9 +1,10 @@
-"""The orientation as a subagent of main (orient_session.py): Start in the browser starts it through thimble's module
-(a fake of lane M's bridge); main's start_orientation records the pending start and gives the exact Agent call, with the
-run's model and effort from its arguments or Settings; neither starts without the module, in plan mode, or in a session
-the launcher did not start. A follow-up goes through the module from the browser and as main's exact SendMessage from
-the terminal; one to an orientation of an earlier session or version is refused. The end of a run closes the record,
-tells main, and starts the report's writer through the module."""
+"""The orientation as a subagent of main (orient_session.py): a start by click (POST /ws/{c}/start) starts it through
+thimble's module (a fake of lane M's bridge); main's start_orientation records the pending start and gives the exact
+Agent call, with the request and the run's model and effort from its arguments or Settings, and no switch; neither
+starts without the module, in plan mode, or in a session the launcher did not start. A follow-up goes through the module
+from the browser and as main's exact SendMessage from the terminal; one to an orientation of an earlier session or
+version is refused. The end of a run closes the record, tells main and tells thimble's view proposer; no report pass
+starts, since a report is written only when the analyst asks."""
 from __future__ import annotations
 
 import json
@@ -56,31 +57,32 @@ def _input(res) -> dict:
 
 
 async def test_start_orientation_gives_the_exact_agent_call_with_settings_values(bridge, models, workspaces_tmp):
-    res = await tools.call(CORPUS, "start_orientation", {"focus": "the moderators", "report": True})
+    res = await tools.call(CORPUS, "start_orientation", {"focus": "the moderators"})
     inp = _input(res)
     assert set(inp) == {"subagent_type", "description", "prompt"} and inp["subagent_type"] == "thimble:orientation"
     assert inp["description"] == "orientation: the moderators"
     rid = inp["prompt"].split("\n")[0]
     assert sf.REQUEST_RE.fullmatch(rid), "the request id on the prompt's first line"
-    assert "REQUEST the moderators" in inp["prompt"] and "OUTPUTS the deck, the report" in inp["prompt"]
-    assert "OFF view proposals" in inp["prompt"]
-    assert "CRITIQUE off" in inp["prompt"]
+    assert inp["prompt"] == f"{rid}\nREQUEST the moderators", "the run's prompt holds its request and nothing else"
     rec = orientation.read_run(CORPUS)
     assert (rec["status"], rec["route"], rec["started_by"], rec["request"]) == ("starting", "subagent", "typed", rid)
-    assert (rec["model"], rec["effort"]) == ("claude-opus-5-5[1m]", "max") and rec["passes"] == ["final", "report"]
+    assert (rec["model"], rec["effort"]) == ("claude-opus-5-5[1m]", "max") and rec["passes"] == ["final"]
     r = subagents.request(CORPUS, rid)
     assert r["values"] == {"model": "claude-opus-5-5[1m]", "effort": "max"} and r["route"] == "typed"
     assert not bridge.calls, "a typed start is main's call"
 
 
-async def test_the_run_s_own_model_and_effort_and_switches(bridge, models, workspaces_tmp):
+async def test_the_run_s_own_model_and_effort_and_no_switch_of_an_earlier_version(bridge, models, workspaces_tmp):
+    """The run takes the model and effort its call names. A switch a call from before 0.8.0 still names (the deck, the
+    views, the report, the critique) is ignored: the run keeps its deck, and its prompt and record name no switch."""
     res = await tools.call(CORPUS, "start_orientation", {"brief": "x", "model": "sonnet", "effort": "high",
-                                                         "views": False, "critique": True})
+                                                         "views": True, "propose_views": True, "report": True,
+                                                         "generate_report": True, "critique": True, "deck": False})
     inp = _input(res)
-    assert "OFF view proposals, the report" in inp["prompt"] and "CRITIQUE on" in inp["prompt"]
+    assert inp["prompt"].endswith("\nREQUEST x")
     rec = orientation.read_run(CORPUS)
-    assert (rec["model"], rec["effort"], rec["critique"]) == ("claude-sonnet-5[1m]", "high", True)
-    assert orientation.part_on(CORPUS, "critique") and not orientation.part_on(CORPUS, "views")
+    assert (rec["model"], rec["effort"], rec["passes"]) == ("claude-sonnet-5[1m]", "high", ["final"])
+    assert "critique" not in rec and orientation.deck_of(rec)
 
 
 async def test_a_second_start_while_one_starts_or_runs_starts_nothing(bridge, models, workspaces_tmp):
@@ -159,9 +161,9 @@ async def test_a_subagent_of_main_s_own_is_held_to_the_analyst_s_messages_to_mai
     assert not (await tools.call(CORPUS, "start_orientation", {}, tool_use_id="toolu_gp_start")).is_error
 
 
-async def test_start_in_the_browser_spawns_through_the_module_with_the_gate_s_values(bridge, models, workspaces_tmp):
-    ans = await orient_session.start(CORPUS, "the moderators", ["final", "views"], critique=False,
-                                     values={"model": "opus", "effort": "xhigh"}, route=subagents.CLICK)
+async def test_a_start_by_click_spawns_through_the_module_with_its_values(bridge, models, workspaces_tmp):
+    ans = await orient_session.start(CORPUS, "the moderators", values={"model": "opus", "effort": "xhigh"},
+                                     route=subagents.CLICK)
     assert ans.started
     [spawn] = bridge.ops("spawn")
     assert spawn["role"] == "orientation" and spawn["values"] == {"model": "claude-opus-5-5[1m]", "effort": "xhigh"}
@@ -176,13 +178,13 @@ async def test_start_in_the_browser_spawns_through_the_module_with_the_gate_s_va
 
 async def test_a_start_refused_by_the_module_ends_the_record_refused_with_its_kind(bridge, models, workspaces_tmp):
     bridge.answers.append({"deny": "PreToolUse:Agent hook error: An orientation is already running."})
-    ans = await orient_session.start(CORPUS, "", ["final"], route=subagents.CLICK)
+    ans = await orient_session.start(CORPUS, "", route=subagents.CLICK)
     assert ans.kind == "hook"
     rec = orientation.read_run(CORPUS)
     assert rec["status"] == "refused" and rec["refused"]["kind"] == "hook" and "already running" in rec["refused"]["reason"]
     bridge.is_live = False
     orientation.run_file(CORPUS).unlink()
-    refused = await orient_session.start(CORPUS, "", ["final"], route=subagents.CLICK)
+    refused = await orient_session.start(CORPUS, "", route=subagents.CLICK)
     assert refused.kind == "no-module" and orientation.read_run(CORPUS)["refused"]["kind"] == "no-module"
 
 
@@ -201,7 +203,7 @@ async def test_start_it_starts_a_refused_typed_start_through_the_module(bridge, 
 
 
 async def _orientation() -> str:
-    ans = await orient_session.start(CORPUS, "", ["final"], route=subagents.CLICK)
+    ans = await orient_session.start(CORPUS, "", route=subagents.CLICK)
     return str(ans.agent_id)
 
 
@@ -328,7 +330,7 @@ async def test_an_orientation_stopped_with_esc_is_continued_by_a_message_in_its_
     assert subagents.cancelled(CORPUS, agent)
     spawn = bridge.ops("spawn")[-1]
     assert spawn["role"] == "orientation" and spawn["values"] == {"model": "claude-opus-5-5[1m]", "effort": "max"}
-    assert "MESSAGE And May?" in spawn["prompt"] and "OUTPUTS the deck" in spawn["prompt"]
+    assert "MESSAGE And May?" in spawn["prompt"]
     new = out["agentId"]
     assert new != agent
     meta = agents.read_meta(CORPUS, chat)
@@ -405,11 +407,11 @@ def test_a_continuation_s_prompt_holds_the_stopped_run_s_last_text_cards_and_tra
     monkeypatch.setattr(orient_session, "_stopped_transcripts", lambda c, a: [tr])
     cells = [{"id": "c1", "title": "How many merges?"}, {"id": "c2", "title": "Who reviewed?"}]
     monkeypatch.setattr(notebook, "read_notebook", lambda ws, nb_id: {"cells": cells} if nb_id == "deck1" else None)
-    orientation._write_run(CORPUS, {"passes": ["final"], "groups": {"final": "deck1"}, "critique": False})
-    text = orient_session.continuation_prompt(CORPUS, "req_0123456789", "old", "And May?", ["final"], False)
+    orientation._write_run(CORPUS, {"passes": ["final"], "groups": {"final": "deck1"}})
+    text = orient_session.continuation_prompt(CORPUS, "req_0123456789", "old", "And May?")
     assert text.startswith("req_0123456789\n")
     assert "SUMMARY Counted the merges." in text and f"TRANSCRIPTS {tr}" in text
-    assert "card:c1 How many merges?\ncard:c2 Who reviewed?" in text and "OFF view proposals, the report" in text
+    assert "card:c1 How many merges?\ncard:c2 Who reviewed?" in text and text.endswith("MESSAGE And May?")
 
 
 MAIN_SID, EARLIER_SID = "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"
@@ -485,11 +487,27 @@ async def test_a_follow_up_in_plan_mode_is_refused(bridge, models, workspaces_tm
 # --------------------------------------------------------------------------- ends
 
 
-async def test_the_end_of_the_first_run_tells_main_and_starts_the_report_s_writer(bridge, models, workspaces_tmp,
-                                                                                monkeypatch):
-    import asyncio
+@pytest.fixture()
+def proposer(monkeypatch):
+    """thimble's view proposer (app.proposer, lane A's) as a stand-in that records each trigger: [(c, after)]."""
+    import sys
+    import types
 
-    from app import report_types
+    import app
+
+    calls: list[tuple[str, str]] = []
+    fake = types.ModuleType("app.proposer")
+    fake.trigger = lambda c, after, **kw: calls.append((c, after))
+    monkeypatch.setitem(sys.modules, "app.proposer", fake)
+    monkeypatch.setattr(app, "proposer", fake, raising=False)
+    return calls
+
+
+async def test_the_end_of_the_first_run_tells_main_and_the_view_proposer_and_starts_no_report(
+        bridge, models, workspaces_tmp, monkeypatch, proposer):
+    """The first run ended done: main hears it, thimble's view proposer is told once (proposer.trigger, "orientation"),
+    and no writer starts, since a report is written only when the analyst asks for one."""
+    import asyncio
 
     told: list[tuple] = []
     monkeypatch.setattr(subagents, "tell_main", lambda c, kind, payload: told.append((kind, payload)))
@@ -498,35 +516,89 @@ async def test_the_end_of_the_first_run_tells_main_and_starts_the_report_s_write
         return ""
 
     monkeypatch.setattr(orient_session, "measure", measured)
-    assert report_types.read_type(CORPUS, "report") is not None
-    ans = await orient_session.start(CORPUS, "", ["final", "report"], route=subagents.CLICK)
+    ans = await orient_session.start(CORPUS, "", route=subagents.CLICK)
     subagents.run_ended(CORPUS, ans.agent_id, "done", "Done.", source="handback")
     for _ in range(100):
-        if len(bridge.ops("spawn")) > 1:
+        if CORPUS not in orient_session._closing and told:
             break
         await asyncio.sleep(0.02)
     assert told and told[0][0] == orientation.ORIENT_KIND and told[0][1]["status"] == "done"
     rec = orientation.read_run(CORPUS)
-    assert rec["status"] == "done" and rec["report_asked"] is True
-    writer = bridge.ops("spawn")[-1]
-    assert writer["role"] == "writer" and writer["what"] == "report"
-    w = list(subagents.agents_of(CORPUS, "writer").values())[-1]
-    assert subagents.request(CORPUS, w["request"])["route"] == "follow-on"
-    assert agents.read_meta(CORPUS, w["chat"])["orient"] == rec["chats"]["orient"]
+    assert rec["status"] == "done" and "report_asked" not in rec
+    assert proposer == [(CORPUS, "orientation")]
+    assert len(bridge.ops("spawn")) == 1, "no report pass"
+
+
+@pytest.mark.parametrize(("k", "status", "interrupted"), [(1, "done", False), (0, "stopped", False),
+                                                          (0, "failed", False), (0, "done", True)])
+def test_the_view_proposer_hears_of_no_follow_up_stop_failure_or_quit(workspaces_tmp, monkeypatch, proposer, k, status,
+                                                                     interrupted):
+    """Only a first run that ended done tells the proposer: a follow-up's end, a stop, a failure and a run main's quit
+    cut off do not."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(subagents, "tell_main", lambda c, kind, payload: None)
+    run = SimpleNamespace(k=k, interrupted=interrupted)
+    orient_session._go_on(CORPUS, run, status, "", False, {})
+    assert proposer == []
+
+
+def test_a_proposer_that_fails_costs_the_run_s_end_nothing(workspaces_tmp, monkeypatch, proposer, caplog):
+    """A proposer that raises, or is missing, is logged; the run's end goes on (main hears it)."""
+    import sys
+    from types import SimpleNamespace
+
+    told: list[str] = []
+    monkeypatch.setattr(subagents, "tell_main", lambda c, kind, payload: told.append(kind))
+
+    def boom(c, after, **kw):
+        raise RuntimeError("the proposer broke")
+
+    sys.modules["app.proposer"].trigger = boom
+    orient_session._go_on(CORPUS, SimpleNamespace(k=0, interrupted=False), "done", "Done.", False, {})
+    assert told == [orientation.ORIENT_KIND] and "did not hear of the orientation's end" in caplog.text
+
+
+async def test_an_extension_s_program_orientation_tells_the_view_proposer_only_of_its_first_run(
+        workspaces_tmp, monkeypatch, proposer):
+    """An orientation an extension's program runs gets the request, its deck as `outputs` and the effort, and no
+    switch; its first run that ended done tells the proposer, as thimble's own does, and a follow-up's end does not."""
+    from types import SimpleNamespace
+
+    from app import harness
+
+    jobs: list[tuple] = []
+    monkeypatch.setattr(harness, "start", lambda job, part, on_start, on_end: jobs.append((job, on_end))
+                        or SimpleNamespace(chat="c1"))
+
+    async def listed(*a, **kw):
+        return SimpleNamespace(text="")
+
+    monkeypatch.setattr(tools, "call", listed)
+    monkeypatch.setattr(subagents, "tell_main", lambda c, kind, payload: None)
+    part = SimpleNamespace(extension="looker")
+    for follow_up in (False, True):
+        await orient_session.start_program(CORPUS, part, "count the runs", {"effort": "high"}, follow_up=follow_up)
+        job, on_end = jobs[-1]
+        assert (job.input["outputs"], job.input["choices"]) == (["final"], {"effort": "high"})
+        assert "critique" not in job.tools and "propose_view" not in job.tools
+        on_end(SimpleNamespace(chat="c1"), "done", "Looked.")
+    assert proposer == [(CORPUS, "orientation")]
 
 
 async def test_a_run_the_analyst_stopped_stops_its_views_and_asks_for_no_report(bridge, models, workspaces_tmp,
-                                                                              monkeypatch):
+                                                                              monkeypatch, proposer):
     from app import dev
 
     stopped: list[str] = []
     monkeypatch.setattr(dev, "stop_orientation_views", lambda c: stopped.append(c) or [])
     monkeypatch.setattr(subagents, "tell_main", lambda c, kind, payload: None)
-    ans = await orient_session.start(CORPUS, "", ["final", "report"], route=subagents.CLICK)
+    ans = await orient_session.start(CORPUS, "", route=subagents.CLICK)
     subagents.mark_stopped_by(CORPUS, ans.agent_id, subagents.STOPPED_ANALYST)
     subagents.run_ended(CORPUS, ans.agent_id, "stopped", "", source="notification")
     assert stopped == [CORPUS] and orientation.read_run(CORPUS)["status"] == "stopped"
     assert len(bridge.ops("spawn")) == 1, "no report pass"
+    assert proposer == [], "a stopped run asks the view proposer for nothing"
 
 
 SAFEGUARD = ("API Error: Opus 4.8's safeguards flagged this message. Our intentionally broad safeguards allow us to "
@@ -542,7 +614,7 @@ async def test_an_orientation_an_api_error_stopped_says_so_and_why_in_its_thread
     API error's card) although there are no cards. No report pass starts."""
     told: list[tuple] = []
     monkeypatch.setattr(subagents, "tell_main", lambda c, kind, payload: told.append((kind, payload)))
-    ans = await orient_session.start(CORPUS, "", ["final", "report"], route=subagents.CLICK)
+    ans = await orient_session.start(CORPUS, "", route=subagents.CLICK)
     chat = orientation.read_run(CORPUS)["chats"]["orient"]
     assert subagents.ended(CORPUS, ans.agent_id, SAFEGUARD, "refusal")
 
@@ -581,7 +653,7 @@ async def test_an_orientation_main_s_plan_mode_held_at_its_end_fails_saying_why_
     `orient` event main gets says it failed with that line, and no report pass starts."""
     told: list[tuple] = []
     monkeypatch.setattr(subagents, "tell_main", lambda c, kind, payload: told.append((kind, payload)))
-    ans = await orient_session.start(CORPUS, "", ["final", "report"], route=subagents.CLICK)
+    ans = await orient_session.start(CORPUS, "", route=subagents.CLICK)
     chat = orientation.read_run(CORPUS)["chats"]["orient"]
     subagents.saw_plan_mode(CORPUS, ans.agent_id)
     subagents.run_ended(CORPUS, ans.agent_id, "done", "My plan is in the plan file.", source="handback")
@@ -639,8 +711,9 @@ async def test_a_workspace_0_5_0_left_loads_lists_and_renders_and_its_orientatio
 
 
 async def test_the_browser_reads_the_orientation_s_record_a_refused_start_with_its_kind(bridge, models, workspaces_tmp):
-    """GET /ws/{c}/orientation: {} before any orientation, then the record the Start gate and its card read: a refused
-    start with its request, switches, model, effort and {reason, kind}."""
+    """GET /ws/{c}/orientation: {} before any orientation, then the record the browser's orientation card reads: a
+    refused start with its request, model, effort and {reason, kind}, and no switch, even when a start of an earlier
+    version sent one."""
     from fastapi.testclient import TestClient
 
     from app.main import app
@@ -652,7 +725,7 @@ async def test_the_browser_reads_the_orientation_s_record_a_refused_start_with_i
                                              "started_by": "typed"})
         orientation.refuse(CORPUS, "[Auto-Mode Bypass]", subagents.AUTO_MODE, request="r1")
         got = client.get(f"/api/ws/{CORPUS}/orientation").json()
-    assert (got["status"], got["query"], got["passes"], got["critique"]) == ("refused", "the moderators", ["final", "report"], True)
+    assert (got["status"], got["query"]) == ("refused", "the moderators") and not {"passes", "critique"} & set(got)
     assert (got["model"], got["effort"], got["started_by"], got["request"]) == ("claude-sonnet-5", "high", "typed", "r1")
     assert {k: got["refused"][k] for k in ("reason", "kind", "request")} == {"reason": "[Auto-Mode Bypass]", "kind": "auto-mode", "request": "r1"}
     assert set(got) <= set(orient_session.RUN_FIELDS)

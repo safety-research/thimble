@@ -142,7 +142,7 @@ async def test_critique_writes_the_brief_and_gives_the_orientation_its_agent_cal
         return None
 
     monkeypatch.setattr(critique_session, "checks_text", no_checks)
-    ans = await orient_session.start(CORPUS, "", ["final"], critique=True, route=subagents.CLICK)
+    ans = await orient_session.start(CORPUS, "", route=subagents.CLICK)
     ctx = type("Ctx", (), {"c": CORPUS, "session": "orient", "tool_use_id": "toolu_cq"})()
     res = await critique_session.tool_critique(ctx, {"context": "My account."})
     assert not res.is_error, res.text
@@ -177,7 +177,7 @@ async def test_a_critic_start_the_orientation_never_makes_ends_with_its_run(brid
         return None
 
     monkeypatch.setattr(critique_session, "checks_text", no_checks)
-    ans = await orient_session.start(CORPUS, "", ["final"], critique=True, route=subagents.CLICK)
+    ans = await orient_session.start(CORPUS, "", route=subagents.CLICK)
     ctx = type("Ctx", (), {"c": CORPUS, "session": "orient", "tool_use_id": "toolu_cq"})()
     res = await critique_session.tool_critique(ctx, {"context": "My account."})
     inp = json.loads(res.text.split("AGENT CALL ", 1)[1].splitlines()[0])
