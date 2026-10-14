@@ -139,7 +139,7 @@ export async function homeOffer(cx: Ctx): Promise<HomeOffer | null> {
  *  where the terminal can take one (`try again`, `retry`, `turn off view proposals`), and how its own thread opens
  *  (`open`: a side thread, an agent's chat, or none). One dismissed here is left out at once, before thimble has
  *  written it. */
-export type NoticeAct = { label: string; act: string; slug: string }
+export type NoticeAct = { label: string; act: string; slug: string; config: string }
 export type HomeNotice = { id: string; text: string; agent: string; chat: string; open: '' | 'thread' | 'agent'; acts: NoticeAct[] }
 
 // the notices dismissed or fixed from here in this session, by id: a later notice of the same failure has an id of its own
@@ -153,7 +153,7 @@ export async function homeNotices(cx: Ctx): Promise<HomeNotice[]> {
     .map(n => {
       const acts = Array.isArray(n.acts) ? (n.acts as unknown[]).filter(isObj).filter(a => str(a.act)) : []
       const open = n.open === 'thread' || n.open === 'agent' ? n.open : ''
-      return { id: str(n.id), text: str(n.text), agent: str(n.agent), chat: str(n.chat), open: str(n.chat) ? open : '', acts: acts.map(a => ({ label: str(a.label).toLowerCase() || str(a.act), act: str(a.act), slug: str(a.slug) })) }
+      return { id: str(n.id), text: str(n.text), agent: str(n.agent), chat: str(n.chat), open: str(n.chat) ? open : '', acts: acts.map(a => ({ label: str(a.label).toLowerCase() || str(a.act), act: str(a.act), slug: str(a.slug), config: str(a.config) })) }
     })
 }
 
@@ -205,9 +205,15 @@ export async function proposalsOff(cx: Ctx): Promise<void> {
 
 /** A notice's act: `view-propose-now` (try again) or `view-retry` {slug} (retry), which name the notice, so that thimble
  *  dismisses it before the act runs and a failure that comes again shows as a new notice; or `view-proposals-off`, as
- *  don't ask again, which dismisses it. The notice goes at once; one that thimble refuses stays, with why in a toast. */
+ *  don't ask again, which dismisses it. The notice goes at once; one that thimble refuses stays, with why in a toast.
+ *  `settings` (open settings) says in a toast where thimble's config is, which the terminal has in place of the
+ *  browser's Settings, and leaves the notice. */
 export async function noticeAct(cx: Ctx, n: HomeNotice, a: NoticeAct): Promise<void> {
   if (!rt.sc) return
+  if (a.act === 'settings') {
+    cx.toast(`thimble: in terminal mode, Settings is thimble's config: ${a.config || 'config.json in thimble\'s home'} (its keys: docs/config.md)`)
+    return
+  }
   if (a.act === 'view-proposals-off') {
     await dismissNotice(cx, n)
     return proposalsOff(cx)

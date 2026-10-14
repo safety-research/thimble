@@ -1423,6 +1423,23 @@ test('a notice\'s acts · try again (`view-propose-now`) and retry (`view-retry 
   await row.unmount()
 })
 
+test('a notice\'s open settings says where thimble\'s config is, since the terminal has no Settings pane, and leaves the notice', async ($, on) => {
+  const w = world(on)
+  const config = '/home/a/.thimble/config.json'
+  w.states.home = { ...w.states.home, notices: [{ id: 'n6', key: 'agent:check:c1:report', kind: 'agent', text: "The report check Unverified failed: its model isn't available to your account; pick another model in Settings.", agent: 'Report check: Unverified', chat: '', at: '2026-10-14T10:00:00Z', acts: [{ label: 'Open Settings', act: 'settings', config }], open: '' }] }
+  await start($, w)
+  let row = await above($)
+  const acts = w.acts.length
+  await row.press({ key: 'above-notice-n6-act-0' })
+  await w.clock.settle()
+  expect(w.acts.length).toBe(acts)
+  expect(w.toasts.at(-1)).toBe(`thimble: in terminal mode, Settings is thimble's config: ${config} (its keys: docs/config.md)`)
+  await row.unmount()
+  row = await above($)
+  expect(shown(await row.find({ type: 'Box', key: 'above-notice-n6' }))).toContain('open settingsdismiss')
+  await row.unmount()
+})
+
 test('a notice\'s open › goes to the thread of the agent it names: an agent\'s chat in its own panel, a side thread in the threads panel', async ($, on) => {
   const w = world(on)
   w.states.home = { ...w.states.home, notices: [

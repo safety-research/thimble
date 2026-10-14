@@ -467,14 +467,18 @@ def _offer(c: str) -> dict[str, Any] | None:
 # writers, view builds and reviews, report checks, code tickets and the dev agent, card checks, labels and the view
 # proposer), which the rows above the prompt show, since Claude Code's own terminal shows only main's requests; a notice
 # of Claude's safeguards on main's own reply (kind "safeguards" in main's chat) is left out, as Claude Code shows it
-# there. Each action the terminal can take maps to the act that takes it; one it cannot take (`settings`: the terminal
-# has no Settings) is left out, and the notice's text names the fix.
-NOTICE_ACTS = {"proposals-retry": "view-propose-now", "proposals-off": "view-proposals-off", "view-retry": "view-retry"}
+# there. Each action maps to the act that takes it in the terminal: a `thimble act` kind, or for `settings` (Open
+# Settings: the terminal has no Settings pane) "settings", which says where thimble's config is, since Settings writes it.
+NOTICE_ACTS = {"proposals-retry": "view-propose-now", "proposals-off": "view-proposals-off", "view-retry": "view-retry",
+               "settings": "settings"}
 
 
 def _notice_acts(action: Any) -> list[dict[str, str]]:
-    """A notice's `action` (one {label, do, slug?} or a list of them) as the acts `thimble act` takes: {label, act,
-    slug?} each, in its order; a Retry with no view is left out."""
+    """A notice's `action` (one {label, do, slug?} or a list of them) as the terminal takes it: {label, act, slug?,
+    config?} each, in its order, `config` the file of thimble's config for "settings"; a Retry with no view is left
+    out."""
+    from . import userconf  # noqa: PLC0415
+
     out: list[dict[str, str]] = []
     for a in action if isinstance(action, list) else [action]:
         if not isinstance(a, dict) or (act := NOTICE_ACTS.get(str(a.get("do") or ""))) is None:
@@ -482,7 +486,8 @@ def _notice_acts(action: Any) -> list[dict[str, str]]:
         slug = str(a.get("slug") or "")
         if act == "view-retry" and not slug:
             continue
-        out.append({"label": str(a.get("label") or "") or act, "act": act, **({"slug": slug} if slug else {})})
+        out.append({"label": str(a.get("label") or "") or act, "act": act, **({"slug": slug} if slug else {}),
+                    **({"config": str(userconf.global_file())} if act == "settings" else {})})
     return out
 
 

@@ -860,7 +860,7 @@ async def test_state_home_gives_every_agent_s_open_notices_newest_first_with_the
         _notice(id="n3", key="view:agent-network", kind="view", text=failed, agent="View build: Agent Network",
                 chat=thread, action={"label": "Retry", "do": "view-retry", "slug": "agent-network"},
                 ts="2026-10-14T10:10:00Z"),
-        # an action the terminal cannot take (Settings) is left out: the text names the fix
+        # Open Settings, which the terminal answers with where thimble's config is
         _notice(id="n4", key="writer", kind="agent", text="The writer of report failed: Claude Code isn't signed in.",
                 agent="Writer: report", chat="gone1", action={"label": "Open Settings", "do": "settings"},
                 ts="2026-10-14T10:10:00Z"),
@@ -878,7 +878,11 @@ async def test_state_home_gives_every_agent_s_open_notices_newest_first_with_the
     assert (got[2]["chat"], got[2]["open"]) == ("", ""), "the proposer has no thread of its own"
     assert got[1]["acts"] == [{"label": "Retry", "act": "view-retry", "slug": "agent-network"}]
     assert got[1]["open"] == "thread"
-    assert (got[0]["acts"], got[0]["open"]) == ([], ""), "Settings is left out; a chat that is gone opens nothing"
+    from app import userconf
+
+    assert got[0]["acts"] == [{"label": "Open Settings", "act": "settings", "config": str(userconf.global_file())}], \
+        "the terminal has no Settings pane: the press says where thimble's config is"
+    assert got[0]["open"] == "", "a chat that is gone opens nothing"
     # a notices module that fails leaves the rest of home's state as it was
     import app
     app.notices.open_notices = lambda c: 1 / 0

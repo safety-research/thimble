@@ -74,9 +74,9 @@ Claude Code's panel chrome, no right-click menu.
   (`~/.thimble/config.json`, or the workspace's `config.json` when it sets the key), or take the key out.
 - **Every agent's failures above the prompt**, newest first, under the view proposal: a notice for each failure of any
   agent thimble runs (the orientation and its helpers, the critic, writers, view builds, report checks, code tickets,
-  card checks, labels, the view proposer), since Claude Code's own output shows only main's: the agent in bold and the
-  failure in red, then the acts that fix it (`try again`, `retry`, `turn off view proposals`), `open ›` to the agent's
-  thread, and `dismiss`.
+  card checks, labels, the view proposer), since Claude Code's own output shows only main's: its words in red, which
+  name the agent and the failure, then the acts that fix it (`try again`, `retry`, `turn off view proposals`; `open
+  settings` says where thimble's config is, the terminal's Settings), `open ›` to the agent's thread, and `dismiss`.
 - **One panel**, on Claude Code's panel chrome: one title row, the path from home, its earlier steps dim and a click
   away and the current step last in the accent color and bold (`home › Threads`; on home, `show all threads` and
   `N new` at the right; no `‹ back`, b goes back), a dim subtitle, a rule, the actions at the bottom after a second rule, and a dim italic row of key hints (`b to go back` only where there is a way back),

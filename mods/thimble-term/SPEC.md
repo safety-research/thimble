@@ -428,12 +428,13 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   column, then the notice's words in red, which name the agent and the failure, wrapped whole (a safeguard's block, or
   its switch to another model; an API error that stopped the agent; an agent that ended failed or was refused; a view
   build, a check or a label run that failed; a check for a view proposal that failed or that a fallback model
-  answered); then the acts that fix it where the terminal can take one (`try again`, `retry`, `turn off view
-  proposals`), `open ›` to the agent's thread (a side thread in the threads panel, an agent's chat in its own panel)
-  and `dismiss`. A fix that is a command (`/login`, `thimble server restart`) is in the notice's words; one that only
-  the browser's Settings takes has no act here. An act or `dismiss` takes the row away at once and thimble writes the
-  dismissal, so it stays gone after a relaunch; a failure that comes again is a new row. An act thimble refuses leaves
-  the row, with why in a toast. A notice that thimble clears (a later success) goes when home's state is read again.
+  answered); then the acts that fix it (`try again`, `retry`, `turn off view proposals`, `open settings`), `open ›` to
+  the agent's thread (a side thread in the threads panel, an agent's chat in its own panel) and `dismiss`. A fix that
+  is a command (`/login`, `thimble server restart`) is in the notice's words; `open settings` says in a toast where
+  thimble's config is, which the terminal has in place of the browser's Settings, and leaves the row. An act or
+  `dismiss` takes the row away at once and thimble writes the dismissal, so it stays gone after a relaunch; a failure
+  that comes again is a new row. An act thimble refuses leaves the row, with why in a toast. A notice that thimble
+  clears (a later success) goes when home's state is read again.
 - The panel's row above the prompt, only while Claude Code leaves the panel undrawn (an open it was not asked for, from
   main's tool or a click in a card, on a terminal narrower than 144 columns, or 110 for a panel opened before): `panel`
   dim, `Home is ready`, then `open panel` and `dismiss`. `open panel` opens the panel from its press, as `/thimble`
