@@ -36,6 +36,12 @@ def flag(mode: str) -> str:
     return FLAGS.get(mode, "default")
 
 
+def _auto_disabled(d: dict[str, Any]) -> bool:
+    """Whether the settings `d` turn auto mode off: `disableAutoMode` or `permissions.disableAutoMode` set to "disable"."""
+    perms = d.get("permissions") if isinstance(d.get("permissions"), dict) else {}
+    return "disable" in (d.get("disableAutoMode"), perms.get("disableAutoMode"))
+
+
 def disabled() -> set[str]:
     """The modes the analyst's or the org's Claude Code settings turn off (cc_settings.analyst_tiers): Bypass by
     `permissions.disableBypassPermissionsMode`, Auto by `disableAutoMode` or `permissions.disableAutoMode`, each set to
@@ -45,9 +51,29 @@ def disabled() -> set[str]:
         perms = d.get("permissions") if isinstance(d.get("permissions"), dict) else {}
         if perms.get("disableBypassPermissionsMode") == "disable":
             off.add("bypass")
-        if "disable" in (d.get("disableAutoMode"), perms.get("disableAutoMode")):
+        if _auto_disabled(d):
             off.add("auto")
     return off
+
+
+def auto_off() -> str:
+    """Who turns auto mode off: "org" when the org's managed tier does, "settings" when the analyst's own settings.json
+    does (cc_settings.analyst_tiers), '' when neither does."""
+    user, org = cc_settings.analyst_tiers()
+    return "org" if _auto_disabled(org) else "settings" if _auto_disabled(user) else ""
+
+
+def manual_hint(claude_mode: str | None) -> str:
+    """What to tell the analyst about main's prompts when main runs in Claude Code's mode `claude_mode` (None when not
+    known, which counts as Manual, as session_mode counts it): auto_off's "org" or "settings" when auto mode is turned
+    off, "switch" when main asks in Manual and auto mode would ask less, '' in auto or bypass mode (unless turned off,
+    where Claude Code starts main in Manual) and in dontAsk, which asks nothing."""
+    if claude_mode == "dontAsk":
+        return ""
+    ours = OF_CLAUDE.get(claude_mode or "", "manual")
+    if ours != "manual" and ours not in disabled():
+        return ""
+    return auto_off() or "switch"
 
 
 def refused(mode: Any) -> str | None:

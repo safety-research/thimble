@@ -230,8 +230,12 @@ def test_the_launcher_passes_the_session_id_exports_the_switches_unsets_the_vari
     told_pid = asked.read_text().splitlines()
     assert told_pid[told_pid.index("--launcher-pid") + 1] == Path(f"{argv_out}.pid").read_text().strip(), \
         "launch-args gets the launcher's own pid, `claude`'s parent"
+    assert not any(a.startswith("--own-mode") for a in asked.read_text().splitlines())
     for flags, told in ((["-r", "sid-mine"], "--own-session=sid-mine"), (["--session-id", sid], f"--own-session={sid}"),
-                        (["-r", "x", "--fork-session"], "--own-session="), (["--safe-mode"], "--safe-mode")):
+                        (["-r", "x", "--fork-session"], "--own-session="), (["--safe-mode"], "--safe-mode"),
+                        (["--permission-mode", "auto"], "--own-mode=auto"),
+                        (["--permission-mode=acceptEdits"], "--own-mode=acceptEdits"),
+                        (["--dangerously-skip-permissions"], "--own-mode=bypassPermissions")):
         subprocess.run(["bash", str(launcher), *flags], check=True, capture_output=True, cwd=tmp_path, env=env)
         assert told in asked.read_text().splitlines(), flags
         assert flags[-1] in argv_out.read_text().splitlines(), "the analyst's flags reach claude as they are"

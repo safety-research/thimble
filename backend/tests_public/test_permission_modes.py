@@ -165,6 +165,41 @@ def test_a_server_restarted_under_main_follows_its_last_reported_mode_until_main
     assert "permission_mode" not in agents.read_meta(CORPUS, agents.MAIN_ID)["attached"]
 
 
+def test_main_s_card_says_how_to_switch_to_auto_mode_while_main_runs_in_manual(fake, monkeypatch):
+    """A request relayed to main's card carries what the card says about auto mode (modes.manual_hint): while main runs
+    in Manual, Manual before main reports, how to switch; nothing in auto mode; who turned auto mode off when the
+    analyst's or the org's settings did; nothing when a rule of the fence that asks in every mode sends it."""
+    cwd = str(config.corpus_dir(CORPUS))
+    session.attach(CORPUS, "sid-main", cwd)
+
+    def manual(tool: str = "Bash", inp: dict | None = None) -> str | None:
+        events._hold(CORPUS, "r1", tool, "x", "{}", tool_input=inp or {"command": "ls"})
+        [p] = agents.read_meta(CORPUS, agents.MAIN_ID)["permissions"]
+        events._drop(CORPUS, {"r1"})
+        return p.get("manual")
+
+    assert manual() == "switch", "Manual before main reports its mode"
+    session.note_mode(CORPUS, "sid-main", "acceptEdits")
+    assert manual() == "switch"
+    session.note_mode(CORPUS, "sid-main", "auto")
+    assert manual() is None
+    session.note_mode(CORPUS, "sid-main", "default")
+    edit = {"file_path": str(Path(cwd).resolve() / "notes.txt")}
+    assert events._asked_by(CORPUS, "Edit", edit) == "data" and manual("Edit", edit) is None, "it asks in every mode"
+    user = fake.parent / "claude-config" / "settings.json"
+    user.parent.mkdir(parents=True, exist_ok=True)
+    user.write_text(json.dumps({"permissions": {"disableAutoMode": "disable"}}))
+    assert modes.auto_off() == "settings" and manual() == "settings"
+    managed = fake.parent / "managed"
+    managed.mkdir(parents=True)
+    monkeypatch.setitem(cc_plugin.MANAGED_DIRS, sys.platform, managed)
+    (managed / "managed-settings.json").write_text(json.dumps({"disableAutoMode": "disable"}))
+    assert modes.auto_off() == "org" and manual() == "org"
+    session.note_mode(CORPUS, "sid-main", "auto")
+    assert manual() == "org", "Claude Code starts main in Manual when auto mode is off"
+    assert modes.manual_hint("dontAsk") == "", "dontAsk asks nothing"
+
+
 # ----------------------------------------------------------------------------- Auto
 
 

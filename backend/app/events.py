@@ -997,17 +997,20 @@ def _hold(c: str, request_id: str, tool: str, what: str, preview: str, agent: st
           tool_input: Any = None, terminal: bool = False) -> None:
     """Put a relayed permission request on main's meta, where the browser shows it; `chat` names the thread or subagent
     chat whose agent asked, when the hook said which (_asking_chat), `asked_by` the fence's rule that asks
-    (_asked_by), and `terminal` says the terminal answers it, so the card shows it without buttons."""
-    from . import agents  # noqa: PLC0415
+    (_asked_by), `terminal` says the terminal answers it, so the card shows it without buttons, and `manual` what the
+    card says about auto mode while main runs in Manual (modes.manual_hint), unless a rule that asks in every mode
+    sends it."""
+    from . import agents, modes, session  # noqa: PLC0415
 
     meta = agents.ensure_main(c)
     pending = [p for p in meta.get("permissions") or [] if isinstance(p, dict) and p.get("id") != request_id]
     chat = _asking_chat(c, agent)
     cause = _asked_by(c, tool, tool_input)
+    manual = modes.manual_hint(session.main_mode(c)) if cause in (None, "web") else ""
     entry = {"id": request_id, "tool": tool, "what": what or tool, "input": preview[:PERMISSION_INPUT_CHARS],
              "since": _now(), **({"cut": len(preview)} if len(preview) > PERMISSION_INPUT_CHARS else {}),
              **({"chat": chat} if chat else {}), **({"asked_by": cause} if cause else {}),
-             **({"terminal": True} if terminal else {})}
+             **({"terminal": True} if terminal else {}), **({"manual": manual} if manual else {})}
     pending.append(entry)
     meta["permissions"] = pending
     agents.write_meta(c, meta)
