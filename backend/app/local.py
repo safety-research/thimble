@@ -398,6 +398,17 @@ async def _home(c: str, args: list[str], pos: list[str]) -> Any:
         out["views"] = _home_views(c)
     except Exception:  # noqa: BLE001 — the row above the prompt still shows the rest
         out["views"] = []
+    # the view proposal waiting for the analyst's answer and the latest notice of the view proposals, rows above the prompt
+    try:
+        out["offer"] = _offer(c)
+    except Exception:  # noqa: BLE001 — as for the views
+        log.debug("%s: the view proposal was not read", c, exc_info=True)
+        out["offer"] = None
+    try:
+        out["notice"] = _notice(c)
+    except Exception:  # noqa: BLE001
+        log.debug("%s: the view proposals' notice was not read", c, exc_info=True)
+        out["notice"] = None
     run = orientation.read_run(c) or {}
     out["orientation"] = run.get("status")
     out["coverage"] = run.get("coverage")  # run 0's coverage line (orient_session.measure), which home shows under Files
@@ -430,6 +441,72 @@ def _home_views(c: str) -> list[dict[str, Any]]:
                      # whether the terminal draws it: a view.term.js among the files its last pass covered
                      "term": status == "built" and term_views.has_term(v)})
     return rows
+
+
+def _offer(c: str) -> dict[str, Any] | None:
+    """The view proposal waiting for the analyst's answer (views.open_offer), as the rows above the prompt show it: its
+    slug, name, description, the analyst's task (empty for a viewer of a file type) and the files it claims, and
+    `refused`, why accept could not start its build and how to fix that (views.click_refused), while that stands. None
+    while none waits, and while view proposals are off (views.propose_enabled). It is not among the `views` until it is
+    accepted."""
+    from . import views  # noqa: PLC0415
+
+    if not views.propose_enabled(c):
+        return None
+    row = views.open_offer(c)
+    if not row:
+        return None
+    refused = row.get("refused") if isinstance(row.get("refused"), dict) else {}
+    return {"slug": str(row["slug"]), "name": str(row.get("name") or row["slug"]),
+            "description": str(row.get("description") or ""), "task": str(row.get("task") or ""),
+            "claims": [str(x) for x in (row.get("claims") or [])],
+            **({"refused": str(refused["reason"])} if refused.get("reason") else {})}
+
+
+# The notices of main's chat that the rows above the prompt show (notices.post; main's own safeguard messages show in
+# Claude Code's terminal already): those of the view proposals (proposer.py: a check that failed, or one a fallback
+# model answered) and of an accepted view whose build failed, known by their key or their action. Each action the
+# terminal can take maps to the act that takes it; a notice whose action it cannot take (`settings`) shows its text
+# alone, which names the fix.
+NOTICE_KEYS = ("proposer", "proposal", "view")
+NOTICE_ACTS = {"proposals-retry": "view-propose-now", "proposals-off": "view-proposals-off", "view-retry": "view-retry"}
+PROPOSER_ACTS = ("proposals-retry", "proposals-off")
+NOTICE_TAIL = 262_144  # bytes at the end of main's chat log read for its latest notice
+
+
+def _notice(c: str) -> dict[str, Any] | None:
+    """The latest notice of the view proposals in main's chat (NOTICE_KEYS): {id, key, kind, text, at, action?}, its
+    action {label, act, slug?} as `thimble act` takes it. A later notice of the same key replaces it, and one marked
+    `dismissed` takes it away. While view proposals are off, the proposer's notices are left out. None for none."""
+    from . import agents, plans, views  # noqa: PLC0415
+
+    on = views.propose_enabled(c)
+    by_key: dict[str, dict[str, Any]] = {}
+    for r in plans.tail_records(agents.paths(c, agents.MAIN_ID)[1], NOTICE_TAIL):
+        if r.get("type") != "notice":
+            continue
+        key = str(r.get("key") or "")
+        action = r.get("action") if isinstance(r.get("action"), dict) else {}
+        if not (key.startswith(NOTICE_KEYS) or action.get("do") in NOTICE_ACTS):
+            continue
+        k = key or str(r.get("id") or "")
+        by_key.pop(k, None)
+        if r.get("dismissed"):
+            continue
+        if not on and (key.startswith(("proposer", "proposal")) or action.get("do") in PROPOSER_ACTS):
+            continue
+        by_key[k] = r
+    if not by_key:
+        return None
+    r = list(by_key.values())[-1]
+    action = r.get("action") if isinstance(r.get("action"), dict) else {}
+    act = NOTICE_ACTS.get(str(action.get("do") or ""))
+    slug = str(action.get("slug") or "")
+    usable = act is not None and (bool(slug) or act != "view-retry")
+    return {"id": str(r.get("id") or ""), "key": str(r.get("key") or ""), "kind": str(r.get("kind") or ""),
+            "text": str(r.get("text") or ""), "at": str(r.get("ts") or ""),
+            **({"action": {"label": str(action.get("label") or "") or act, "act": act, **({"slug": slug} if slug else {})}}
+               if usable else {})}
 
 
 async def _cards(c: str, args: list[str], pos: list[str]) -> Any:

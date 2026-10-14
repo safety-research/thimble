@@ -754,6 +754,88 @@ async def test_a_label_run_stops_when_another_process_deletes_its_label(term, mo
     assert seen == [True]
 
 
+# ------------------------------------------------------------------------------------------------ view proposals
+
+OFFER = {"slug": "edit-bursts", "name": "Edit Bursts", "description": "Each page as a strip of its saves.",
+         "task": "Find out when the agents edited together.", "claims": ["agents/*.jsonl"], "proposed_by": "proposer",
+         "status": "suggested", "route": "click", "ts": "2026-10-14T10:00:00Z",
+         "offered": {"at": "2026-10-14T10:00:00Z", "after": "main", "why": "a recurring comparison"}}
+
+
+@pytest.fixture()
+def proposals(term, monkeypatch):
+    """Lane B's view proposals, stubbed: view proposals on (views.propose_enabled) and the waiting one the first
+    `suggested` row that has `offered` (views.open_offer). Returns a switch: proposals(False) turns them off."""
+    from app import views
+
+    on = {"v": True}
+    monkeypatch.setattr(views, "propose_enabled", lambda c: on["v"], raising=False)
+    monkeypatch.setattr(views, "open_offer", lambda c: next(
+        (p for p in views.list_proposals(c) if p.get("status") == "suggested" and p.get("offered")), None), raising=False)
+    return lambda v: on.__setitem__("v", v)
+
+
+async def test_state_home_gives_the_waiting_view_proposal_and_none_while_view_proposals_are_off(proposals):
+    from app import views
+
+    assert (await local.state(CORPUS, "home"))["offer"] is None, "none waits"
+    views._save_proposals(CORPUS, [OFFER, {**OFFER, "slug": "old", "name": "Old", "offered": None},
+                                   {**OFFER, "slug": "built", "name": "Built", "status": "built"}])
+    home = await local.state(CORPUS, "home")
+    assert home["offer"] == {"slug": "edit-bursts", "name": "Edit Bursts", "description": OFFER["description"],
+                             "task": OFFER["task"], "claims": ["agents/*.jsonl"]}
+    assert [v["slug"] for v in home["views"]] == ["built"], "a view proposal is not among the views until accepted"
+    # an accept that could not start the build: its reason, with the fix, until the next press
+    views.update_proposal(CORPUS, "edit-bursts", refused={"kind": "no-session", "reason": "Start thimble again, then accept."})
+    assert (await local.state(CORPUS, "home"))["offer"]["refused"] == "Start thimble again, then accept."
+    proposals(False)
+    assert (await local.state(CORPUS, "home"))["offer"] is None
+
+
+def _notice(**fields: Any) -> dict:
+    return {"type": "notice", "ts": "2026-10-14T10:00:00Z", "kind": "warning", **fields}
+
+
+async def test_state_home_gives_the_latest_notice_of_the_view_proposals_with_the_act_that_fixes_it(proposals):
+    from app import agents
+
+    assert (await local.state(CORPUS, "home"))["notice"] is None
+    agents.ensure_main(CORPUS)
+    log_path = agents.paths(CORPUS, agents.MAIN_ID)[1]
+    blocked = "Couldn't check for a view proposal: Claude's safeguards blocked the request."
+    agents.append(log_path, _notice(id="n1", key="proposer", text=blocked,
+                                    action={"label": "Try again", "do": "proposals-retry"}))
+    # main's own safeguard notice is not one of the view proposals': Claude Code's terminal shows it
+    agents.append(log_path, _notice(id="n2", key="main-fallback", text="Claude's safeguards switched this reply."))
+    assert (await local.state(CORPUS, "home"))["notice"] == {
+        "id": "n1", "key": "proposer", "kind": "warning", "text": blocked, "at": "2026-10-14T10:00:00Z",
+        "action": {"label": "Try again", "act": "view-propose-now"}}
+    # a later notice of the same key replaces it; a failed build's Retry names its view
+    agents.append(log_path, _notice(id="n3", key="proposer", text="Couldn't check for a view proposal: timeout.",
+                                    action={"label": "Turn off view proposals", "do": "proposals-off"}))
+    assert (await local.state(CORPUS, "home"))["notice"]["action"] == {"label": "Turn off view proposals",
+                                                                       "act": "view-proposals-off"}
+    failed = "The view Edit Bursts failed to build: no rows."
+    agents.append(log_path, _notice(id="n4", key="view:edit-bursts", text=failed,
+                                    action={"label": "Retry", "do": "view-retry", "slug": "edit-bursts"}))
+    got = (await local.state(CORPUS, "home"))["notice"]
+    assert got["text"] == failed and got["action"] == {"label": "Retry", "act": "view-retry", "slug": "edit-bursts"}
+    # dismissed, the one before it shows; with view proposals off, the proposer's notices are left out
+    agents.append(log_path, {"type": "notice", "key": "view:edit-bursts", "dismissed": True})
+    assert (await local.state(CORPUS, "home"))["notice"]["id"] == "n3"
+    proposals(False)
+    assert (await local.state(CORPUS, "home"))["notice"] is None
+    agents.append(log_path, _notice(id="n5", key="view:board", text="The view Board failed to build: timeout.",
+                                    action={"label": "Retry", "do": "view-retry", "slug": "board"}))
+    assert (await local.state(CORPUS, "home"))["notice"]["id"] == "n5", "a failed build's notice stays"
+    # an action the terminal cannot take (Settings) leaves the text alone, which names the fix
+    proposals(True)
+    agents.append(log_path, _notice(id="n6", key="proposer", text="Couldn't check for a view proposal: sign in.",
+                                    action={"label": "Settings", "do": "settings"}))
+    got = (await local.state(CORPUS, "home"))["notice"]
+    assert got["id"] == "n6" and "action" not in got
+
+
 def _cli(*argv: str, env: dict | None = None, cwd: Path | None = None) -> subprocess.CompletedProcess:
     return subprocess.run([sys.executable, "-m", "app.local", *argv], cwd=cwd or BACKEND, env=env or dict(os.environ),
                           capture_output=True, text=True, timeout=120)
