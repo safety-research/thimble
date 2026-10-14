@@ -192,30 +192,79 @@ test('why accept could not start the build, and how to fix it, shows in red unde
   await above.unmount()
 })
 
-test('the latest notice of the view proposals shows in red with the act that fixes it and dismiss, until dismissed; one with no act the terminal can take shows its text alone', async ($, on) => {
+// every agent's open notices, as home's state gives them (local.py _notices: newest first); each one's words name the
+// agent and the failure
+const SWITCHED = "Claude's safeguards switched the orientation's reply from Opus 5.5 to Opus 4.8."
+const BLOCKED = "Couldn't check for a view proposal: Claude's safeguards blocked the request."
+const FAILED = 'The build of the view Agent Network failed: its check found no rows.'
+const NOTICES = [
+  { id: 'n3', key: 'agent:view:agent-network', kind: 'view', text: FAILED, agent: 'View build: Agent Network', chat: 'b1', at: '2026-10-14T10:10:00Z', acts: [{ label: 'Retry', act: 'view-retry', slug: 'agent-network' }], open: 'agent' },
+  { id: 'n2', key: 'proposals', kind: 'proposals', text: BLOCKED, agent: 'View proposals', chat: '', at: '2026-10-14T10:05:00Z', acts: [{ label: 'Try again', act: 'view-propose-now' }, { label: 'Turn off view proposals', act: 'view-proposals-off' }], open: '' },
+  { id: 'n1', key: 'safeguards:o1', kind: 'safeguards', text: SWITCHED, agent: 'Orientation', chat: 'o1', at: '2026-10-14T10:00:00Z', acts: [], open: 'agent' },
+]
+
+test("every agent's open notices show above the prompt, newest first and under the view proposal: `notice` dim, then the words in red, wrapped whole, then the acts that fix it, open › to the agent's thread and dismiss", async ($, on) => {
   const w = world(on)
-  const text = "Couldn't check for a view proposal: Claude's safeguards blocked the request."
-  w.states.home = { ...w.states.home, notice: { id: 'n1', key: 'proposer', kind: 'warning', text, at: '2026-10-14T10:00:00Z', action: { label: 'Try again', act: 'view-propose-now' } } }
+  w.states.home = { ...w.states.home, offer: OFFER, notices: NOTICES }
+  await start($, w)
+  const above = (await $.ui.mount(aboveAt(160))) as unknown as M
+  const json = JSON.stringify(await above.drawn())
+  // the view proposal's rows first, then the notices in the order home's state gives them
+  const order = ['above-offer', 'above-notice-n3', 'above-notice-n2', 'above-notice-n1'].map(k => json.indexOf(`"key":"${k}"`))
+  expect(order.every((at, i) => at >= 0 && (i === 0 || at > order[i - 1]!))).toBe(true)
+  expect(shown(await above.find({ type: 'Box', key: 'above-notice-n3' }))).toBe(`  notice${FAILED}retryopen ›dismiss`)
+  expect(shown(await above.find({ type: 'Box', key: 'above-notice-n2' }))).toBe(`  notice${BLOCKED}try againturn off view proposalsdismiss`)
+  expect(shown(await above.find({ type: 'Box', key: 'above-notice-n1' }))).toBe(`  notice${SWITCHED}open ›dismiss`)
+  for (const text of [FAILED, BLOCKED, SWITCHED]) expect(json).toContain(`{"type":"Text","props":{"color":"error","wrap":"wrap"},"children":["${text}"]}`)
+  await above.unmount()
+  // a survey, or an agent's own view, takes the place above the prompt
+  const other = (await $.ui.mount(aboveWith({ hasSurvey: true }))) as unknown as M
+  expect(shown(await other.drawn())).toBe('(the engine row)')
+  await other.unmount()
+})
+
+test('a notice of an agent with no chat of its own shows when only the open notices change (notices.json), and goes when thimble clears it', async ($, on) => {
+  const w = world(on)
   await start($, w)
   let above = (await $.ui.mount(aboveAt(140))) as unknown as M
-  expect(shown(await above.find({ type: 'Box', key: 'above-notice' }))).toBe(`  thimble${text}try againdismiss`)
-  expect(JSON.stringify(await above.drawn())).toContain(`{"type":"Text","props":{"color":"error","wrap":"wrap"},"children":["${text}"]}`)
-  await above.press({ key: 'above-notice-dismiss' })
+  expect(await above.find({ type: 'Box', key: 'above-notice-n2' })).toBeUndefined()
   await above.unmount()
-  above = (await $.ui.mount(aboveAt(140))) as unknown as M
-  expect(await above.find({ type: 'Box', key: 'above-notice' })).toBeUndefined()
-  await above.unmount()
-  // read again, the dismissed notice stays gone; a new one (another time) shows, here with no act
-  w.stamps.set(`${WS}/chats/main.jsonl`, 5)
+  w.states.home = { ...w.states.home, notices: [NOTICES[1]!] }
+  w.stamps.set(`${WS}/notices.json`, 2)
   await w.clock.advance(1100)
   above = (await $.ui.mount(aboveAt(140))) as unknown as M
-  expect(await above.find({ type: 'Box', key: 'above-notice' })).toBeUndefined()
+  expect(shown(await above.find({ type: 'Box', key: 'above-notice-n2' }))).toBe(`  notice${BLOCKED}try againturn off view proposalsdismiss`)
   await above.unmount()
-  const fell = 'This view proposal came from claude-opus-4-8: Claude\'s safeguards switched models.'
-  w.states.home = { ...w.states.home, notice: { id: 'n2', key: 'proposer', kind: 'warning', text: fell, at: '2026-10-14T10:05:00Z' } }
-  w.stamps.set(`${WS}/chats/main.jsonl`, 6)
+  w.states.home = { ...w.states.home, notices: [] }
+  w.stamps.set(`${WS}/notices.json`, 3)
   await w.clock.advance(1100)
   above = (await $.ui.mount(aboveAt(140))) as unknown as M
-  expect(shown(await above.find({ type: 'Box', key: 'above-notice' }))).toBe(`  thimble${fell}dismiss`)
+  expect(await above.find({ type: 'Box', key: 'above-notice-n2' })).toBeUndefined()
+  await above.unmount()
+})
+
+test('a dismissed notice goes at once and stays gone when home is read again; a new notice of the same failure (an id of its own) shows', async ($, on) => {
+  const w = world(on)
+  w.states.home = { ...w.states.home, notices: [NOTICES[2]!] }
+  await start($, w)
+  let above = (await $.ui.mount(aboveAt(140))) as unknown as M
+  await above.press({ key: 'above-notice-n1-dismiss' })
+  await w.clock.settle()
+  expect(w.acts.at(-1)).toEqual({ kind: 'notice-dismiss', payload: { id: 'n1' } })
+  await above.unmount()
+  above = (await $.ui.mount(aboveAt(140))) as unknown as M
+  expect(await above.find({ type: 'Box', key: 'above-notice-n1' })).toBeUndefined()
+  await above.unmount()
+  // read again before thimble wrote the dismissal: still gone
+  w.stamps.set(`${WS}/notices.json`, 5)
+  await w.clock.advance(1100)
+  above = (await $.ui.mount(aboveAt(140))) as unknown as M
+  expect(await above.find({ type: 'Box', key: 'above-notice-n1' })).toBeUndefined()
+  await above.unmount()
+  w.states.home = { ...w.states.home, notices: [{ ...NOTICES[2]!, id: 'n8', at: '2026-10-14T10:20:00Z' }] }
+  w.stamps.set(`${WS}/notices.json`, 6)
+  await w.clock.advance(1100)
+  above = (await $.ui.mount(aboveAt(140))) as unknown as M
+  expect(shown(await above.find({ type: 'Box', key: 'above-notice-n8' }))).toBe(`  notice${SWITCHED}open ›dismiss`)
   await above.unmount()
 })

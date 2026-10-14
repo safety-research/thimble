@@ -1387,35 +1387,60 @@ test('the view proposal row · don\'t ask again turns view proposals off (`thimb
   await row.unmount()
 })
 
-test('the view proposal row · a notice\'s act: try again checks for a view proposal now (`view-propose-now`), retry builds a failed view again (`view-retry {slug}`), turn off view proposals as don\'t ask again; the notice goes once its act started', async ($, on) => {
+test('a notice\'s acts · try again (`view-propose-now`) and retry (`view-retry {slug}`) name the notice, which thimble dismisses before the act runs, and it goes at once; turn off view proposals turns them off and dismisses it; one thimble refuses stays, with why in a toast', async ($, on) => {
   const w = world(on)
-  w.states.home = { ...w.states.home, notice: { id: 'k1', key: 'proposer', text: "Couldn't check for a view proposal: the request timed out.", at: '2026-10-14T11:00:00Z', action: { label: 'Try again', act: 'view-propose-now' } } }
+  const tryAgain = { id: 'n2', key: 'proposals', kind: 'proposals', text: "Couldn't check for a view proposal: the request timed out.", agent: 'View proposals', chat: '', at: '2026-10-14T11:00:00Z', acts: [{ label: 'Try again', act: 'view-propose-now' }, { label: 'Turn off view proposals', act: 'view-proposals-off' }], open: '' }
+  const retry = { id: 'n3', key: 'agent:view:edit-bursts', kind: 'view', text: 'The build of the view Edit Bursts failed: its check found no rows.', agent: 'View build: Edit Bursts', chat: 'b1', at: '2026-10-14T11:05:00Z', acts: [{ label: 'Retry', act: 'view-retry', slug: 'edit-bursts' }], open: 'agent' }
+  w.states.home = { ...w.states.home, notices: [retry, tryAgain] }
   await start($, w)
   let row = await above($)
-  await row.press({ key: 'above-notice-act' })
+  await row.press({ key: 'above-notice-n2-act-0' })
   await w.clock.settle()
-  expect(w.acts.at(-1)).toEqual({ kind: 'view-propose-now', payload: {} })
+  expect(w.acts.at(-1)).toEqual({ kind: 'view-propose-now', payload: { notice: 'n2' } })
   expect(w.toasts.at(-1)).toBe('thimble: checking for a view proposal')
   await row.unmount()
   row = await above($)
-  expect(await row.find({ type: 'Box', key: 'above-notice' })).toBeUndefined()
+  expect(await row.find({ type: 'Box', key: 'above-notice-n2' })).toBeUndefined()
+  // a retry thimble refuses (the view builds already): the notice stays, and the toast says why
+  w.refuse = { 'view-retry': "the view 'Edit Bursts' is building, not failed" }
+  await row.press({ key: 'above-notice-n3-act-0' })
+  await w.clock.settle()
+  expect(w.acts.at(-1)).toEqual({ kind: 'view-retry', payload: { slug: 'edit-bursts', notice: 'n3' } })
+  expect(w.toasts.at(-1)).toBe("thimble: the view 'Edit Bursts' is building, not failed")
   await row.unmount()
-  w.states.home = { ...w.states.home, notice: { id: 'k2', key: 'view:edit-bursts', text: 'The view Edit Bursts failed to build: its check found no rows.', at: '2026-10-14T11:05:00Z', action: { label: 'Retry', act: 'view-retry', slug: 'edit-bursts' } } }
-  w.stamps.set(`${WS}/chats/main.jsonl`, 4)
+  row = await above($)
+  expect(await row.find({ type: 'Box', key: 'above-notice-n3' })).toBeDefined()
+  await row.unmount()
+  // a new notice of the proposer's failure: turn off view proposals, as don't ask again, dismisses it
+  w.states.home = { ...w.states.home, notices: [{ ...tryAgain, id: 'n4', at: '2026-10-14T11:10:00Z' }] }
+  w.stamps.set(`${WS}/notices.json`, 5)
   await w.clock.advance(1100)
   row = await above($)
-  expect(shown(await row.find({ type: 'Box', key: 'above-notice' }))).toContain('retrydismiss')
-  await row.press({ key: 'above-notice-act' })
+  await row.press({ key: 'above-notice-n4-act-1' })
   await w.clock.settle()
-  expect(w.acts.at(-1)).toEqual({ kind: 'view-retry', payload: { slug: 'edit-bursts' } })
+  expect(w.acts.slice(-2)).toEqual([{ kind: 'notice-dismiss', payload: { id: 'n4' } }, { kind: 'view-proposals-off', payload: {} }])
+  expect(w.toasts.at(-1)).toContain('view proposals are off. To turn them back on')
   await row.unmount()
-  w.states.home = { ...w.states.home, notice: { id: 'k3', key: 'proposer', text: "Couldn't check for a view proposal: Claude's safeguards blocked the request.", at: '2026-10-14T11:10:00Z', action: { label: 'Turn off view proposals', act: 'view-proposals-off' } } }
-  w.stamps.set(`${WS}/chats/main.jsonl`, 5)
-  await w.clock.advance(1100)
+})
+
+test('a notice\'s open › goes to the thread of the agent it names: an agent\'s chat in its own panel, a side thread in the threads panel', async ($, on) => {
+  const w = world(on)
+  w.states.home = { ...w.states.home, notices: [
+    { id: 'n1', key: 'safeguards:o1', kind: 'safeguards', text: "Claude's safeguards switched the orientation's reply from Opus 5.5 to Opus 4.8.", agent: 'Orientation', chat: 'o1', at: '2026-10-14T10:00:00Z', acts: [], open: 'agent' },
+    { id: 'n5', key: 'thread:t1', kind: 'agent', text: 'The side thread why is events.jsonl bigger? stopped: the connection to Anthropic\'s API failed; check the network and try again.', agent: 'Side thread: why is events.jsonl bigger?', chat: 't1', at: '2026-10-14T09:00:00Z', acts: [], open: 'thread' },
+  ] }
+  await start($, w)
+  let row = await above($)
+  await row.press({ key: 'above-notice-n1-open' })
+  await w.clock.settle()
+  await row.unmount()
+  let s = await seen($, SHORT)
+  expect(s.text).toContain('orientation: the whole corpus')
+  expect(s.text).toContain('s to stop')
   row = await above($)
-  expect(shown(await row.find({ type: 'Box', key: 'above-notice' }))).toContain('turn off view proposals')
-  await row.press({ key: 'above-notice-act' })
+  await row.press({ key: 'above-notice-n5-open' })
   await w.clock.settle()
-  expect(w.acts.at(-1)).toEqual({ kind: 'view-proposals-off', payload: {} })
   await row.unmount()
+  s = await seen($, SHORT)
+  expect(s.text).toContain('why is events.jsonl so much bigger?')
 })

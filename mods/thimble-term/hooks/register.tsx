@@ -34,7 +34,7 @@ import { cardsOfCall, docsOf, forkDescription, labelsOf, namedForks, namedThread
 import { HOME_UI_EMPTY } from './home'
 import { keepLast, keepRow, loadKept, resetKept } from './kept'
 import { linesMessage, onListClick } from './lines'
-import { ANSWER_ELEMENT, RELAY, answerOffer, dismissNotice, docEditMessage, drawPanel, fieldMessage, focusedField, hasList, homeNotice, homeOffer, homeViews, noticeAct, onGesture, openAsk, openCard, openCite, openFile, openHomeNew, openLabel, openThread, openView, proposalsOff, relayKey, relayMove, scrollPending, viewWheelAt, wheelWindow } from './panel'
+import { ANSWER_ELEMENT, RELAY, answerOffer, dismissNotice, docEditMessage, drawPanel, fieldMessage, focusedField, hasList, homeNotices, homeOffer, homeViews, noticeAct, onGesture, openAsk, openCard, openCite, openFile, openHomeNew, openLabel, openNoticeChat, openThread, openView, proposalsOff, relayKey, relayMove, scrollPending, viewWheelAt, wheelWindow } from './panel'
 import type { PaneEvent } from './panel'
 // the file browser and a file, drawn by a module of their own (panel.tsx drawsView, term.ts loadsView)
 import './filesview'
@@ -1001,20 +1001,25 @@ export const register: Register = on => {
       else if (offer.claims.length) rows.push(under('above-offer-files', <Text wrap="wrap"><Text dimColor>{'files  '}</Text>{offer.claims.join(', ')}</Text>))
       if (offer.refused && !offer.pressed) rows.push(under('above-offer-refused', <Text color={COLORS.problem} wrap="wrap">{offer.refused}</Text>))
     }
-    // the latest notice of the view proposals (a check that failed or that a fallback model answered, an accepted view
-    // whose build failed), in red, with the act that fixes it where there is one, until dismissed or replaced
-    const notice = await homeNotice(cx)
-    if (notice) {
+    // every agent's open notices, newest first, under the view proposal's place: a failure with its fix (a safeguard's
+    // block or switch of model, an API error, an agent that ended failed or was refused, a view build, a check or label
+    // run, the view proposer), since Claude Code's own output shows only main's requests. `notice` dim, then its words
+    // in red, which name the agent and the failure, wrapped whole; then the acts that fix it, `open ›` to the agent's
+    // thread, `dismiss` (SPEC.md, "Main's chat")
+    for (const n of await homeNotices(cx)) {
       rows.push(
-        <Box key="above-notice" flexDirection="row">
-          {label('thimble')}
+        <Box key={`above-notice-${n.id}`} flexDirection="row">
+          {label('notice')}
           <Box flexDirection="row" columnGap={2} flexShrink={1}>
             <Box flexShrink={1}>
-              <Text color={COLORS.problem} wrap="wrap">{notice.text}</Text>
+              <Text color={COLORS.problem} wrap="wrap">{n.text}</Text>
             </Box>
             <Box flexDirection="row" columnGap={2} flexShrink={0}>
-              {notice.action ? <Button key="above-notice-act" label={notice.action.label} plain onPress={() => noticeAct(cx, notice)} /> : null}
-              <Button key="above-notice-dismiss" label="dismiss" plain onPress={() => dismissNotice(cx, notice)} />
+              {n.acts.map((a, i) => (
+                <Button key={`above-notice-${n.id}-act-${i}`} label={a.label} plain onPress={() => noticeAct(cx, n, a)} />
+              ))}
+              {n.open ? <Button key={`above-notice-${n.id}-open`} label="open ›" plain onPress={() => openNoticeChat(cx, n)} /> : null}
+              <Button key={`above-notice-${n.id}-dismiss`} label="dismiss" plain onPress={() => dismissNotice(cx, n)} />
             </Box>
           </Box>
         </Box>,
