@@ -120,7 +120,7 @@ def test_every_role_resolves_to_a_full_model_id_and_an_explicit_effort(tmp_path,
     assert models["orient"]["effort"] == config.ORIENT_DEFAULT_EFFORT == "xhigh"
     assert models["subagents"]["model"] == config.base_model(models["orient"]["model"])
     assert models["subagents"]["effort"] == "xhigh" and models["subagents"]["follows"] == "orient"
-    assert (models["suggest"]["model"], models["suggest"]["effort"]) == ("claude-opus-5-5", "low")
+    assert (models["suggest"]["model"], models["suggest"]["effort"]) == ("claude-opus-5-5", "medium")
     assert (models["refusal"]["model"], models["refusal"]["effort"], models["refusal"]["off"]) == \
         (config.FALLBACK_MODEL, "high", False)
     _conf({"agents": {"orientation": {"effort": "ultracode", "subagentModel": "sonnet", "subagentEffort": "medium"},
