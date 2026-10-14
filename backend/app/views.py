@@ -49,6 +49,7 @@ import contextvars
 import fnmatch
 import functools
 import hashlib
+import inspect
 import itertools
 import json
 import logging
@@ -116,7 +117,7 @@ VERSION_RE = re.compile(r"^[0-9a-f]{12}$")
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 # the route names under /views/ and the Reader's built-in file views, which its switcher keys by
 RESERVED_SLUGS = {"proposals", "forge", "raw", "records", "table", "text", "transcript", "lib", "frame", "resolve",
-                  "suggestions", "suggest"}
+                  "suggestions", "suggest", "propose-now"}
 RESOLVE_WAIT_S = 180.0  # how long a synchronous caller (resolve_sync) waits for a reader's answer, which runs on after it
 # a reader call names the claimed files only when they are this many or fewer, or when its kernel must build the index
 # (view_host `need_paths`), so a view of a million files sends their paths only to build
@@ -5395,6 +5396,21 @@ async def reject_route(c: str, slug: str, request: Request) -> dict[str, Any]:
     config.workspace_dir(c)
     _bind_loop()
     return answer_offer(c, slug, "rejected")
+
+
+@router.post("/ws/{c}/views/propose-now")
+async def propose_now_route(c: str, request: Request) -> dict[str, Any]:
+    """Try again on a notice that thimble could not check for a view proposal, a click: the proposer checks now
+    (proposer.run_now), which starts the check and answers at once. Its answer."""
+    _click(request)
+    config.workspace_dir(c)
+    _bind_loop()
+    from . import proposer  # noqa: PLC0415 — proposer imports this module
+
+    got = proposer.run_now(c)
+    if inspect.isawaitable(got):
+        got = await got
+    return got if isinstance(got, dict) else {"ok": True}
 
 
 class BuildBody(BaseModel):

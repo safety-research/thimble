@@ -1,8 +1,8 @@
 """View proposals (app/views.py, `offer` in the code): a view thimble proposes to the analyst after a turn (proposer.py)
 or for a file type opened in the File browser (views.suggest), stored as a `suggested` proposal row with `offered`,
 which builds only when the analyst accepts it. One waits at a time, until the analyst answers it: Accept builds it,
-Reject drops it, each with its answer stamped. proposer.json keeps the proposer's pending job. Main sees the waiting
-view proposal as thimble's.
+Reject drops it, each with its answer stamped. Try again on a notice asks the proposer to check now (propose-now).
+proposer.json keeps the proposer's pending job. Main sees the waiting view proposal as thimble's.
 """
 from __future__ import annotations
 
@@ -310,3 +310,45 @@ def test_view_proposals_are_on_unless_the_environment_or_the_config_turns_them_o
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"views": {"propose": False}}))
     assert not views.propose_enabled(CORPUS) and not ledger.get_settings(CORPUS)["propose_views"]
+
+
+def _fake_proposer(monkeypatch, run_now):
+    """A stand-in for app.proposer (Lane A's), whose run_now the propose-now route calls."""
+    import sys
+
+    import app
+
+    fake = SimpleNamespace(run_now=run_now)
+    monkeypatch.setitem(sys.modules, "app.proposer", fake)
+    monkeypatch.setattr(app, "proposer", fake, raising=False)
+
+
+async def test_try_again_asks_the_proposer_to_check_now_and_only_the_analyst_s_click_does(corpus, analyst, monkeypatch):
+    from starlette.requests import Request
+
+    asked: list[str] = []
+    _fake_proposer(monkeypatch, lambda c: asked.append(c) or {"started": True})
+    with pytest.raises(HTTPException) as e:
+        await views.propose_now_route(CORPUS, Request({"type": "http", "headers": []}))
+    assert e.value.status_code == 403 and asked == []
+    assert await views.propose_now_route(CORPUS, analyst) == {"started": True} and asked == [CORPUS]
+
+    async def later(c):
+        asked.append(c)
+
+    _fake_proposer(monkeypatch, later)
+    assert await views.propose_now_route(CORPUS, analyst) == {"ok": True} and asked == [CORPUS, CORPUS]
+    assert "propose-now" in views.RESERVED_SLUGS, "no view takes the route's name"
+
+
+@pytest.mark.real_write_guard
+def test_the_propose_now_route_refuses_the_server_s_token_without_the_analyst_s_cookie(corpus, plugin_headers,
+                                                                                         monkeypatch):
+    from app import main
+
+    asked: list[str] = []
+    _fake_proposer(monkeypatch, lambda c: asked.append(c) or {"started": True})
+    client = TestClient(main.create_app())
+    r = client.post(f"/api/ws/{CORPUS}/views/propose-now", headers=plugin_headers())
+    assert r.status_code == 403, r.text
+    assert asked == []
