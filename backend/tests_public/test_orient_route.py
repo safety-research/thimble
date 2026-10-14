@@ -489,17 +489,11 @@ async def test_a_follow_up_in_plan_mode_is_refused(bridge, models, workspaces_tm
 
 @pytest.fixture()
 def proposer(monkeypatch):
-    """thimble's view proposer (app.proposer, lane A's) as a stand-in that records each trigger: [(c, after)]."""
-    import sys
-    import types
-
-    import app
+    """thimble's view proposer with each trigger recorded (proposer.trigger): [(c, after)]."""
+    from app import proposer as proposer_mod
 
     calls: list[tuple[str, str]] = []
-    fake = types.ModuleType("app.proposer")
-    fake.trigger = lambda c, after, **kw: calls.append((c, after))
-    monkeypatch.setitem(sys.modules, "app.proposer", fake)
-    monkeypatch.setattr(app, "proposer", fake, raising=False)
+    monkeypatch.setattr(proposer_mod, "trigger", lambda c, after, **kw: calls.append((c, after)))
     return calls
 
 
@@ -544,9 +538,10 @@ def test_the_view_proposer_hears_of_no_follow_up_stop_failure_or_quit(workspaces
 
 
 def test_a_proposer_that_fails_costs_the_run_s_end_nothing(workspaces_tmp, monkeypatch, proposer, caplog):
-    """A proposer that raises, or is missing, is logged; the run's end goes on (main hears it)."""
-    import sys
+    """A proposer that raises is logged; the run's end goes on (main hears it)."""
     from types import SimpleNamespace
+
+    from app import proposer as proposer_mod
 
     told: list[str] = []
     monkeypatch.setattr(subagents, "tell_main", lambda c, kind, payload: told.append(kind))
@@ -554,7 +549,7 @@ def test_a_proposer_that_fails_costs_the_run_s_end_nothing(workspaces_tmp, monke
     def boom(c, after, **kw):
         raise RuntimeError("the proposer broke")
 
-    sys.modules["app.proposer"].trigger = boom
+    monkeypatch.setattr(proposer_mod, "trigger", boom)
     orient_session._go_on(CORPUS, SimpleNamespace(k=0, interrupted=False), "done", "Done.", False, {})
     assert told == [orientation.ORIENT_KIND] and "did not hear of the orientation's end" in caplog.text
 
@@ -588,19 +583,12 @@ async def test_an_extension_s_program_orientation_tells_the_view_proposer_only_o
 
 @pytest.fixture()
 def notices(monkeypatch):
-    """thimble's notices (app.notices, lane A's) as a stand-in that records each call: [("post", kwargs) |
-    ("clear", key)]."""
-    import sys
-    import types
-
-    import app
+    """thimble's notices with each call recorded (notices.post, notices.clear): [("post", kwargs) | ("clear", key)]."""
+    from app import notices as notices_mod
 
     calls: list[tuple[str, object]] = []
-    fake = types.ModuleType("app.notices")
-    fake.post = lambda c, **kw: calls.append(("post", {"c": c, **kw}))
-    fake.clear = lambda c, key, **kw: calls.append(("clear", key))
-    monkeypatch.setitem(sys.modules, "app.notices", fake)
-    monkeypatch.setattr(app, "notices", fake, raising=False)
+    monkeypatch.setattr(notices_mod, "post", lambda c, **kw: calls.append(("post", {"c": c, **kw})))
+    monkeypatch.setattr(notices_mod, "clear", lambda c, key, **kw: calls.append(("clear", key)))
     return calls
 
 
@@ -642,8 +630,9 @@ async def test_a_failed_program_orientation_posts_a_notice_that_a_run_that_ended
     def broken(c, **kw):
         raise TypeError("post() got an unexpected keyword argument")
 
-    import sys
-    sys.modules["app.notices"].post = broken
+    from app import notices as notices_mod
+
+    monkeypatch.setattr(notices_mod, "post", broken)
     ends[-1](SimpleNamespace(chat="c1"), "failed", "boom")
     assert told[-1] == "failed" and "the notice of the orientation's end (failed) was not told" in caplog.text
 
