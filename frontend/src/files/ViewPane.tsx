@@ -115,7 +115,7 @@ export function ViewPane({ ws, view, path, picked, targetRef, quote, onQuoteMiss
 }
 
 /** The rounds a view's reviewer looks at its pictures, at most (backend view_review.ROUNDS, counted by finish_review). */
-export const REVIEW_ROUNDS = 2
+export const REVIEW_ROUNDS = 3
 
 /** What the review's mark says of its state, in one line. */
 export function reviewLine(r: ViewReview): string {

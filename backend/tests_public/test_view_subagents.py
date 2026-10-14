@@ -306,20 +306,21 @@ def test_the_builder_and_the_reviewer_are_registered_to_keep_a_design_the_propos
 
 
 @pytest.mark.parametrize("mode", prompts.MODES)
-def test_the_builder_and_the_reviewer_hold_back_color_and_the_detail_panel_and_mirror_the_data(board, mode):
-    # prompts/dev-view.md's "A good view" and prompts/view-review.md's principles, in both modes: at most one color, with
-    # Color by Off unless the view gives it an `initial` choice; the detail panel closed, or one short line until a
-    # click (the side panel's `empty`); a first screen in the chosen form, not a table of raw records; the data's
-    # structure mirrored, a network among the forms; and the units the data repeats compared before their details
+def test_the_builder_and_the_reviewer_use_color_for_the_task_hold_back_the_detail_panel_and_mirror_the_data(board, mode):
+    # prompts/dev-view.md's "A good view" and prompts/view-review.md's principles, in both modes: color one encoding at a
+    # time, Color by on the task's field (or a few of its values), never categories in shades of gray; the detail panel
+    # closed, or one short line until a click (the side panel's `empty`); a first screen in the chosen form, not a table
+    # of raw records; the data's structure mirrored, a network among the forms; and the units the data repeats compared
+    # before their details
     with prompts.rendering(mode):
         roles = subagents.roles(CORPUS)
     builder, reviewer = roles["view-builder"]["prompt"], roles["view-reviewer"]["prompt"]
     for prompt in (builder, reviewer):
-        assert "at most one color" in prompt and "Color by opens Off" in prompt and "`initial`" in prompt
+        assert "one encoding at a time" in prompt and "shades of gray" in prompt and "take a hue" in prompt
         assert "detail panel stays closed" in prompt and "Click a session" in prompt
         assert "not a table of raw records" in prompt
         assert "who works with whom as a network" in prompt and "before the details within one" in prompt
-    assert "`{field, on: [values]}`" in builder and "`empty` option" in builder
+    assert "`initial`" in builder and "`{field, on: [values]}`" in builder and "`empty` option" in builder
 
 
 async def test_main_s_message_to_a_view_s_build_thread_gives_the_exact_agent_call(board, bridge, gates, hints):
@@ -1148,8 +1149,11 @@ async def test_view_pictures_writes_the_overview_and_the_states_asked_for_into_t
     assert [Path(s["out"]).parent for s in states] == [dev.view_work_dir(CORPUS, slug) / "review" / "1"] * 2
     assert all(str(s["out"]) in res.text for s in states) and "1528" in res.text
     more = [{"state": "narrow", "why": "x"}, {"state": "labels", "why": "y"}, {"state": "filtered", "why": "z"}]
-    res = await _call("view_pictures", {"states": more}, reviewer, key)
-    assert len(pictures[-1]) == 2, "the round's overview is taken, and two more states are left"
+    left = view_review.EXTRA_SHOTS - 1
+    while left > 0:
+        res = await _call("view_pictures", {"states": more}, reviewer, key)
+        assert len(pictures[-1]) == min(len(more), left), "the round's overview is taken; the states left are shot"
+        left -= len(pictures[-1])
     res = await _call("view_pictures", {"states": more}, reviewer, key)
     assert res.is_error and "No picture is left" in res.text
 
@@ -1178,8 +1182,8 @@ async def test_finish_review_keeps_a_passing_revision_counts_the_round_and_resto
     assert view_review.undo(CORPUS, slug)["undo"] and (folder / views.VIEW_HTML).read_text() == "<p>v1</p>"
 
 
-async def test_a_review_with_no_problems_is_done_after_its_second_round_at_the_latest(board, bridge, gates, pictures,
-                                                                                    hints):
+async def test_a_review_with_no_problems_is_done_after_its_last_round_at_the_latest(board, bridge, gates, pictures,
+                                                                                  hints):
     slug = _propose(asked=True)
     reviewer, key = await _reviewed(slug)
     res = await _call("finish_review", {"left": ["a taste in colours"]}, reviewer, key)
@@ -1187,8 +1191,8 @@ async def test_a_review_with_no_problems_is_done_after_its_second_round_at_the_l
     other = _propose("Threads", asked=True)
     second, key2 = await _reviewed(other)
     folder = views.views_dir(CORPUS) / other
-    for n, html in enumerate(("<p>v2</p>", "<p>v3</p>"), 1):
-        (folder / views.VIEW_HTML).write_text(html)
+    for n in range(1, view_review.ROUNDS + 1):
+        (folder / views.VIEW_HTML).write_text(f"<p>v{n + 1}</p>")
         res = await _call("finish_review", {"revised": [f"fix {n}"]}, second, key2)
     assert res.text.endswith(tools.hint("finish-review-done")) and _prop(other)["review"]["round"] == view_review.ROUNDS
 

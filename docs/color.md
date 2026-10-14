@@ -4,9 +4,14 @@ Every view page has thimble's Color by control, `thimble.colorBy`, in its view k
 function, as is each British spelling of a name below, such as `colourOf`, a part's `colour` or `data-colour`). The
 page mounts it in its top row and draws its records with the color it chooses. Use it in place of a
 color control of your own, so that every view colors the same way. Color is one encoding at a time: only the Color by
-choice is drawn in colors, on the chips, the records' bars, the tracks and the chart marks. Show any other category of
-the view as text, a glyph or a gray pattern, never in a second palette. Filter by and Rows stand beside it in the top row
-([rows-and-filters.md](rows-and-filters.md)): they read a field or a label the way Color by does, and draw no color.
+choice is drawn in colors, on the chips, the records' bars, the tracks and the chart marks, apart from the status
+colors below. Show any other category of
+the view as text or a glyph, never in a second palette or in shades of gray, which read as an order. Values with a
+meaning people know may draw their glyph or word in thimble's status colors, as the diff's + and − and the timeline's
+problem ✕ do: an addition or a success in `var(--status-positive)`, a deletion or a failure in
+`var(--status-negative)` (Color by never gives a value red). Filter by and Rows
+stand beside it in the top row ([rows-and-filters.md](rows-and-filters.md)): they read a field or a label the way
+Color by does, and draw no color.
 
 - One menu, which takes several choices: Off, then the fields the view can color by under "Fields" and every label
   over files under "Labels", each with how many values it colors by and those values as chips on a line under its
@@ -26,8 +31,9 @@ the view as text, a glyph or a gray pattern, never in a second palette. Filter b
   or Filter by holds it. Checking a field or Off opens nothing.
 - Color by is thimble's small secondary button, with the first choice in it and how many more there are: "Color by:
   Kind", "Color by: Kind +1".
-- The view opens Off, so no color shows until the analyst picks a field or a label. Where color is the point of the
-  view, `initial` opens it on a field, or on a few values of a field: `initial: {field: 'outcome', on: ['error']}`
+- The view opens Off unless the page gives `initial`. Give it for the field the task depends on: the field when it has a
+  handful of values, such as an outcome or a source, and a few of its values when it has many. `initial` opens the view on a
+  field, or on a few values of a field: `initial: {field: 'outcome', on: ['error']}`
   colors only the errors, and the records of the other values stay in gray, as values turned off. A label that is on
   in thimble takes the color as the view opens (below).
 - Off colors nothing anywhere: no chips, no bars, no lanes, the tracks a plain scrollbar, the lanes and the time range's

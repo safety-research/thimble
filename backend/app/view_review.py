@@ -59,7 +59,7 @@ CONTEXT_CHARS = 2_000_000  # of the analyst's work (the context engine's parts):
 # the rest left for the principles, the pictures and the review's own calls (subagents.values_for gives it the window)
 CONTEXT_PARTS = ("conversation", "threads", "orientation", "canvas")
 REVIEWER = "view-reviewer"  # subagents.TYPES
-ROUNDS = 2  # revisions a review may make
+ROUNDS = 3  # revisions a review may make
 RECORDS_CHARS = 6000  # of the reader's answers view_pictures gives
 ANSWERS_PER_STATE = 2
 PHRASE_CHARS = 120  # of a problem, as the check mark's hover lists what was revised or is left
@@ -88,7 +88,7 @@ NO_MORE = ("No picture is left in this round: the overview and {n} more states a
 EXTRA_STATES = {"labels": views.PANE_NARROW, "filtered": views.PANE_NARROW, "detail": views.PANE_NARROW,
                 "open": views.PANE_NARROW, "wide": views.PANE_WIDE, "narrow": views.PANE_NARROW,
                 "control": views.PANE_SIZE}
-EXTRA_SHOTS = 3
+EXTRA_SHOTS = 6
 CONTROLS_CLICKED = 3  # controls one `control` state clicks in turn
 # in terminal mode, the columns of the overview's drawing and the states the reviewer may ask to see beside it, each
 # with its columns: the view 200 columns wide, the first place a citation opens, the place a ref names, and the view

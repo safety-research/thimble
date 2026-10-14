@@ -83,7 +83,8 @@ def reviewer_definition(c: str) -> dict[str, Any]:
 
     with prompts.custom(tasks.files(c, view_review.PROMPT)):
         prompt = view_review.reviewer_prompt(c)
-    return {"description": REVIEWER_DESCRIPTION, "prompt": prompt, "disallowedTools": tools.not_own(REVIEWER_TOOLS)}
+    return {"description": REVIEWER_DESCRIPTION, "prompt": prompt,
+            "disallowedTools": [*tools.not_own(REVIEWER_TOOLS), "Monitor"]}  # a review ends with its turn
 
 
 # --------------------------------------------------------------------------- the caller

@@ -8,6 +8,6 @@ test('a queued review says it waits for a free subagent; the other states keep t
     'Waits for a free subagent: Claude Code runs only so many at once.',
   )
   expect(reviewLine({ state: 'queued' })).toBe('Waits for a free subagent')
-  expect(reviewLine({ state: 'running', round: 1 })).toBe("Reviewing the view's pictures, round 1 of 2")
+  expect(reviewLine({ state: 'running', round: 1 })).toBe("Reviewing the view's pictures, round 1 of 3")
   expect(reviewLine({ state: 'failed' })).toBe('The review did not finish')
 })
