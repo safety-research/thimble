@@ -591,8 +591,8 @@ async def test_a_descendant_s_step_ends_at_its_task_notification_in_either_shape
 
 @pytest.mark.parametrize("shape", ["user", "attachment"])
 async def test_two_children_that_end_together_in_one_notification_message_both_end(bridge, project, ended, shape):
-    """Claude Code puts the notifications of two tasks that end together in one message, one block each (the view
-    builder experiment's ml-tasks orientation, where the first of two helpers kept its step running). Each ends."""
+    """Claude Code puts the notifications of two tasks that end together in one message, one block each, such as two
+    helpers of an orientation; read as one notification, the first helper kept its step running. Each ends."""
     lv, chat, path = await _click_orientation(bridge, project)
     with subagents.update(CORPUS) as state:
         for h in ("h1", "h2"):

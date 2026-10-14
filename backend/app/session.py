@@ -1329,8 +1329,8 @@ def browser_events(text: str) -> list[str]:
 
 def task_notices(text: str) -> list[dict]:
     """The fields of each task notification a message holds, one dict per task: Claude Code puts the notifications of
-    tasks that end together in one message (live check on the view builder experiment, where the second of two helpers
-    kept its step running). A text without the wrapper is one notification."""
+    tasks that end together in one message, and read as one notification it ends only the last of them, so the others
+    keep their steps running. A text without the wrapper is one notification."""
     return [dict(TASK_FIELD_RE.findall(b)) for b in (TASK_NOTICE_RE.findall(text or "") or [text or ""])]
 
 
