@@ -115,7 +115,7 @@ def launch_command(tree: Path, mode: str, environ: "dict[str, str]") -> str:
 def start_body(opts: argparse.Namespace) -> dict[str, Any]:
     """The start as the browser's gate sent it before 0.8.0: the deck, views and report on, the critique off, no
     focus; the run's model and effort only when named. Since 0.8.0 the server reads only the focus, the model and the
-    effort (orient_session.StartBody)."""
+    effort."""
     return {"text": "", "deck": True, "views": True, "report": not opts.no_report, "critique": opts.critique,
             **({"model": opts.model} if opts.model else {}), **({"effort": opts.effort} if opts.effort else {})}
 
