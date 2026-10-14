@@ -1,8 +1,8 @@
 """session.py and Claude's safeguards: a reply Claude Code switched to another model after the requested one refused
-leaves a notice in its chat (main's, or an agent's), and a request the safeguards blocked marks its error line, which
-the chat shows as its API error card. Transcripts are written in the record shapes of Claude Code 2.1.295-2.1.300 (the
-view builder experiment's runs: main's model_refusal_fallback record, a workflow agent's refusal and replies on Opus
-4.8)."""
+leaves a notice (shown in the foreground, a row in its chat, main's or an agent's), and a request the safeguards
+blocked marks its error line, which the chat shows as its API error card. Transcripts are written in the record shapes
+of Claude Code 2.1.295-2.1.300 (the view builder experiment's runs: main's model_refusal_fallback record, a workflow
+agent's refusal and replies on Opus 4.8)."""
 from __future__ import annotations
 
 import json
@@ -36,7 +36,13 @@ def _log(chat: str = agents.MAIN_ID) -> list[dict]:
 
 
 def _notices(chat: str = agents.MAIN_ID) -> list[dict]:
+    """The notice rows of a chat (its history)."""
     return [r for r in _log(chat) if r["type"] == notices.TYPE]
+
+
+def _open(key: str) -> list[dict]:
+    """The open notices under `key`, as the foreground shows them."""
+    return [n for n in notices.open_notices(CORPUS) if n.get("key") == key]
 
 
 def _human(text: str) -> dict:
@@ -80,9 +86,11 @@ def test_a_reply_main_s_safeguards_switched_leaves_one_notice_row(cwd, tmp_path)
     _append(p, lv, [_human("Look at the logs."), FALLBACK, _assistant(_say("Here."), model="claude-opus-4-8"),
                     _end("c1"), _human("Again."), {**FALLBACK, "scope": "local"},
                     _assistant(_say("Here."), model="claude-opus-4-8"), _end("c2")])
-    rows = [r for r in _notices() if r.get("key") == session.FALLBACK_KEY]
+    rows = _notices()
     assert [r["text"] for r in rows] == ["Claude's safeguards switched this reply from Opus 5.5 to Opus 4.8."] * 2
     assert rows[0]["kind"] == "safeguards"
+    (shown,) = _open("safeguards:main")
+    assert shown["id"] == rows[-1]["id"] and shown["chat"] == agents.MAIN_ID, "one notice in the foreground"
 
 
 def test_a_request_the_safeguards_blocked_marks_its_error_line(cwd, tmp_path):
@@ -136,10 +144,12 @@ def test_an_agent_s_reply_on_another_model_after_a_refusal_leaves_a_notice_in_it
     for sub in lv.subs:
         session._tail_sub(lv, sub)
     rows = _notices(chat)
-    assert [r["text"] for r in rows] == ["Claude's safeguards switched this reply from Opus 5.5 to Opus 4.8."]
+    assert [r["text"] for r in rows] == [
+        'Claude\'s safeguards switched a reply of the agent "posts" from Opus 5.5 to Opus 4.8.']
     assert _notices() == [], "the agent's chat, not main's"
+    assert _open(f"safeguards:{chat}")[0]["chat"] == chat, "shown in the foreground, with Open on the agent's chat"
     with path.open("a") as f:
         f.write(json.dumps(_side({**FALLBACK, "scope": "local"})) + "\n")
     for sub in lv.subs:
         session._tail_sub(lv, sub)
-    assert len(_notices(chat)) == 2 and _notices(chat)[-1]["key"] == session.FALLBACK_KEY
+    assert len(_notices(chat)) == 2 and len(_open(f"safeguards:{chat}")) == 1

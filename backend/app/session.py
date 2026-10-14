@@ -15,7 +15,8 @@ The tail translates transcript records into main's log (`by: terminal`): the ana
 or local commands such as /model), browser events, task notifications, peer messages, tool calls and results, text,
 and `done` at turn_duration; any record shape it does not cover disables it with one `error` record. Safety stops,
 interrupts and long waits (read from `<claude config>/sessions/<pid>.json`) become one note each; a reply Claude's
-safeguards switched to another model becomes a notice in its chat (notices.py, FALLBACK_TEXT), main's or an agent's.
+safeguards switched to another model becomes a notice (notices.py, FALLBACK_TEXT), shown in the foreground and kept in
+its chat, main's or an agent's.
 At the end of each turn of main the view proposer hears whether the turn answered the analyst (proposer.turn_ended),
 and when a side thread answers (proposer.trigger).
 
@@ -170,12 +171,13 @@ SAFETY_ALERT = ("Claude Code is waiting in your terminal: Claude's safety check 
 # Claude's safeguards and a reply (module note, stops and waits). A downgrade: Claude Code answers on another model
 # after the requested one refused, which it records in main's transcript as a FALLBACK_SUBTYPE system record (scope
 # `session`, or `local` for one reply), and in a subagent's as that record or as a reply with stop_reason refusal and
-# the next replies on another model (2.1.295, workflow agents); each becomes a notice (notices.post) in the chat it
-# happened in. A block: the request ends with Claude Code's API error line (isApiErrorMessage, stop_reason refusal),
-# which the chat shows as its API error card; its text record carries `refusal: true`.
+# the next replies on another model (2.1.295, workflow agents); each becomes a notice (notices.post) that names the
+# chat it happened in. A block: the request ends with Claude Code's API error line (isApiErrorMessage, stop_reason
+# refusal), which the chat shows as its API error card; its text record carries `refusal: true`.
 FALLBACK_SUBTYPE = "model_refusal_fallback"
 FALLBACK_TEXT = "Claude's safeguards switched this reply from {model} to {fallback}."
-FALLBACK_KEY = "safeguards-fallback"  # the notices' key: a later switch in the same chat updates the row
+AGENT_FALLBACK_TEXT = "Claude's safeguards switched a reply of {subject} from {model} to {fallback}."
+FALLBACK_KEY = "safeguards:{chat}"  # the notices' key: a later switch in the same chat updates the notice
 REFUSAL = "refusal"  # the stop_reason of a reply the model's safeguards stopped
 
 
@@ -1866,18 +1868,45 @@ def _sub_safeguards(lv: Live, sub: Sub, rec: dict) -> None:
         return
     msg = rec.get("message") if isinstance(rec.get("message"), dict) else {}
     if sub.refused_on and config.base_model(model) != config.base_model(sub.refused_on):
-        _switched(lv.c, sub.chat, sub.refused_on, model)
+        _switched(lv.c, sub.chat, sub.refused_on, model, sub=sub)
     sub.refused_on = model if msg.get("stop_reason") == REFUSAL else None
 
 
-def _switched(c: str, chat: str, model: Any, fallback: Any) -> None:
-    """Claude's safeguards switched a reply in chat `chat` from `model` to `fallback`: a notice there (FALLBACK_TEXT),
-    one row per chat however often it happens (FALLBACK_KEY)."""
+def _sub_who(c: str, sub: Sub) -> tuple[str, str]:
+    """(the name on a notice, the subject of a sentence) of a subagent: one of thimble's agents by its role, a side
+    thread's fork, a helper of one of thimble's agents, or one of main's own subagents, by its chat's title."""
+    from . import notices, subagents  # noqa: PLC0415
+
+    title = notices.chat_title(c, sub.chat)
+    if sub.thimble:
+        return notices.who(sub.thimble, title)
+    if sub.thread:
+        return notices.who("thread", title)
+    if sub.root:
+        root = subagents.agent(c, sub.root) or {}
+        if root.get("role") == "orientation":
+            return notices.who(subagents.HELPER)
+        name, subject = notices.who(root.get("role"), notices.chat_title(c, root.get("chat")))
+        return name, f"A subagent of {subject[0].lower()}{subject[1:]}"
+    return notices.who("", title)
+
+
+def _switched(c: str, chat: str, model: Any, fallback: Any, *, sub: Sub | None = None) -> None:
+    """Claude's safeguards switched a reply in chat `chat` (main's, or subagent `sub`'s) from `model` to `fallback`: a
+    notice that says so (FALLBACK_TEXT), one per chat however often it happens (FALLBACK_KEY). Never raises."""
     from . import notices  # noqa: PLC0415
 
-    text = FALLBACK_TEXT.format(model=model_label(str(model or "")) if model else "the model it was asked for",
-                                fallback=model_label(str(fallback or "")))
-    notices.post(c, chat=chat, kind="safeguards", text=text, key=FALLBACK_KEY)
+    was = model_label(str(model or "")) if model else "the model it was asked for"
+    now = model_label(str(fallback or ""))
+    try:
+        if sub is None:
+            name, text = None, FALLBACK_TEXT.format(model=was, fallback=now)
+        else:
+            name, subject = _sub_who(c, sub)
+            text = AGENT_FALLBACK_TEXT.format(subject=subject[0].lower() + subject[1:], model=was, fallback=now)
+        notices.post(c, chat=chat, kind="safeguards", text=text, agent=name, key=FALLBACK_KEY.format(chat=chat))
+    except Exception:  # noqa: BLE001 — a notice not told is no reason to fail the mirror
+        log.exception("%s: the safeguards' switch in %s was not told", c, chat)
 
 
 def agent_error(c: str, agent_id: str) -> str | None:
@@ -2773,7 +2802,7 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
         return n
     if rec.get("type") == "system" and rec.get("subtype") == FALLBACK_SUBTYPE:
         sub.refused_on = None
-        _switched(lv.c, sub.chat, rec.get("originalModel"), rec.get("fallbackModel"))
+        _switched(lv.c, sub.chat, rec.get("originalModel"), rec.get("fallbackModel"), sub=sub)
         return 0
     if rec.get("type") != "assistant":
         return 0

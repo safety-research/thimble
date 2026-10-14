@@ -1,7 +1,7 @@
 """proposer.py: the view proposer. A turn of main that answered the analyst, a side thread's answer and an orientation's
 end each run one fork of main's session, which may show a view proposal card (views.offer); every failure leaves a
-notice with its fix in main's chat. The fork is faked (proposer._fork) with the stream-json Claude Code prints; the
-view proposal storage (Lane B's views.offer, open_offer, propose_enabled) is faked where a test needs it.
+notice with its fix in the foreground (notices.py). The fork is faked (proposer._fork) with the stream-json Claude Code
+prints; the view proposal storage (Lane B's views.offer, open_offer, propose_enabled) is faked where a test needs it.
 
 session.py's part is here too: which turns answered the analyst, the cut a turn ended at, main's context size, and the
 notices for a reply Claude's safeguards switched to another model."""
@@ -109,14 +109,9 @@ def _log(chat: str = agents.MAIN_ID) -> list[dict]:
     return agents.read_events(agents.paths(CORPUS, chat)[1])
 
 
-def _notices(chat: str = agents.MAIN_ID) -> list[dict]:
-    return [r for r in _log(chat) if r["type"] == notices.TYPE]
-
-
-def _shown_notice(chat: str = agents.MAIN_ID, key: str = proposer.NOTICE_KEY) -> dict | None:
-    """The notice row the chat shows under `key`: its latest record, unless that one dismissed it."""
-    last = next((r for r in reversed(_notices(chat)) if r.get("key") == key), None)
-    return None if last is None or last.get("dismissed") else last
+def _shown_notice(key: str = proposer.NOTICE_KEY) -> dict | None:
+    """The open notice under `key` (notices.open_notices), the one the foreground shows."""
+    return next((n for n in notices.open_notices(CORPUS) if n.get("key") == key), None)
 
 
 def _runs() -> list[dict]:
@@ -299,7 +294,8 @@ async def test_a_request_the_safeguards_blocked_says_so_with_try_again_and_turn_
     assert n["text"] == "Couldn't check for a view proposal: Claude's safeguards blocked the request."
     assert n["action"] == [{"label": "Try again", "do": "proposals-retry"},
                            {"label": "Turn off view proposals", "do": "proposals-off"}]
-    assert n["kind"] == "proposals"
+    assert n["kind"] == "proposals" and n["agent"] == "View proposals" and n["chat"] is None
+    assert [r for r in _log() if r["type"] == notices.TYPE] == [], "the proposer has no chat: no row in main's"
 
 
 async def test_no_sign_in_says_how_to_sign_in(cwd, tmp_path, cards, forks):

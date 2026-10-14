@@ -22,7 +22,7 @@ main's context needs it. The fork writes nothing into the analyst's projects (sp
 is prompts/view-propose.md, the threads, the orientation, the views the analyst has (built, building, failed, accepted
 and rejected proposals, deleted views) and what just happened; the answer is one JSON object (parse).
 
-Each run appends a line to the run log (LOG_FILE). Every failure tells the analyst in main's chat with an easy fix
+Each run appends a line to the run log (LOG_FILE). Every failure tells the analyst in the foreground with an easy fix
 (notices.post, NOTICE_KEY): a request Claude's safeguards blocked (Try again, Turn off view proposals), Claude Code not
 signed in for thimble's server (/login or `thimble server restart`, Try again), and any other failure (Try again). A
 proposal that came from a fallback model is shown with a notice saying so. A run that works clears the notice.
@@ -56,7 +56,8 @@ LOG_FILE = "proposer.jsonl"  # in the views state folder: one line per run
 # in the views state folder: {job: the pending job {after, sid, cut, since} or null} (views.PROPOSER_FILE, whose
 # proposer_state reads it), changed under the file's lock (ledger.update_json) by whichever process triggers
 JOB_FILE = "proposer.json"
-NOTICE_KEY = "proposals"  # the key of the proposer's notices in main's chat
+NOTICE_KEY = "proposals"  # the key of the proposer's notices (notices.post)
+AGENT = "View proposals"  # the proposer's name on its notices
 BUILTIN = "Files shows every file in its built-in views: Raw, Table, Text, Transcript and Timeline, as fit its type."
 TERMINAL_BUILTIN = ("thimble's panel shows every file in its built-in views: Raw, Table, Text, Transcript and Timeline, "
                     "as fit its type.")
@@ -64,8 +65,7 @@ MAIN, ORIENTATION, THREAD = "main", "orientation", "thread:"
 REPLY_CHARS = 1_500  # of a thread's question quoted in the Now section
 # the words of an error that says the model's safeguards refused the request, and of one that says Claude Code has no
 # working sign-in (spike G: "Not logged in · Please run /login", error authentication_failed)
-REFUSED_RE = re.compile(r"safeguards|usage polic|can't help with this", re.I)
-AUTH_RE = re.compile(r"not logged in|invalid api key|please run /login|authentication_failed|oauth token|\b401\b", re.I)
+REFUSED_RE, AUTH_RE = notices.REFUSED_RE, notices.AUTH_RE
 REFUSAL = "refusal"  # the stop_reason of a reply the model's safeguards stopped
 
 NOTICE_REFUSED = "Couldn't check for a view proposal: Claude's safeguards blocked the request."
@@ -687,20 +687,21 @@ def _stale(c: str, sid: str) -> bool:
 
 
 def _tell(c: str, status: str, *, reason: str = "", fallback: str | None = None, offered: bool = False) -> None:
-    """main's notice for the run's outcome (module note): the failure and its fix, the fallback model a card came from,
-    or, for a run that worked, no notice."""
+    """The notice of the run's outcome (module note): the failure and its fix, the fallback model a card came from, or,
+    for a run that worked, none. The proposer has no chat, so its notices show in the foreground alone."""
     from . import session  # noqa: PLC0415 — model_label
 
+    def tell(text: str, action: Any = None) -> None:
+        notices.post(c, kind="proposals", text=text, agent=AGENT, action=action, key=NOTICE_KEY)
+
     if status == "refused":
-        notices.post(c, kind="proposals", text=NOTICE_REFUSED, action=[TRY_AGAIN, TURN_OFF], key=NOTICE_KEY)
+        tell(NOTICE_REFUSED, [TRY_AGAIN, TURN_OFF])
     elif status == "auth":
-        notices.post(c, kind="proposals", text=NOTICE_AUTH, action=TRY_AGAIN, key=NOTICE_KEY)
+        tell(NOTICE_AUTH, TRY_AGAIN)
     elif status in ("timeout", "unparsed", "error"):
-        notices.post(c, kind="proposals", text=NOTICE_FAILED.format(reason=reason or REASONS[status]),
-                     action=TRY_AGAIN, key=NOTICE_KEY)
+        tell(NOTICE_FAILED.format(reason=reason or REASONS[status]), TRY_AGAIN)
     elif offered and fallback:
-        notices.post(c, kind="proposals", text=NOTICE_FALLBACK.format(fallback=session.model_label(fallback)),
-                     key=NOTICE_KEY)
+        tell(NOTICE_FALLBACK.format(fallback=session.model_label(fallback)))
     else:
         notices.clear(c, NOTICE_KEY)
 
