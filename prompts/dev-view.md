@@ -122,4 +122,4 @@ A form in `accepts` is cited `<file>#<form>`. Accept `L<n>` for a line, so older
 
 Check the view with `view_check` as often as you want. It samples lines through `L<n>`, so pass as `locators` the refs it may miss, such as a key of each unit. When the view is done, call `finish_view`, which runs the same checks as the record of your build. You have {{attempts}} attempts, and its result says what to do next.
 
-A reviewer then looks at pictures of the view and fixes what it finds, so start no review subagent of your own.
+A reviewer then looks at pictures of the view and fixes clear problems in how it draws, so start no review subagent of your own.

@@ -151,9 +151,10 @@ load()
   shows, so a tab out of view counts nothing: `color.counts(map, el)` gives the counts of the records in `el`, such as
   a tab's list, as the kit's table gives those of its rows.
 - Draw charts in `color.colorOf(value)`, a color a canvas can draw. `colorOf` gives `null` for no value, for a value
-  turned off and for Off: draw those marks in one gray, and keep them.
+  turned off and for Off: with Off draw every mark in the series color, `var(--viz-1)`, and otherwise draw those marks
+  in one gray, `var(--viz-ink-3)`, and keep them.
 - A chart's key gives every series a mark drawn as the series is: a series in the Color by colors shows the chips'
-  colors (or the field's name), one in a single color its swatch, and with Off a gray swatch.
+  colors (or the field's name), one in a single color its swatch, and with Off a swatch in the series color.
 - Draw no color control, legend or label list of your own. The control is the page's label control: a view that
   mounts it passes the check that a view draws its labels' controls.
 - Where the page shows a value with its color outside the control, such as in a row's details, use the same key chip:
