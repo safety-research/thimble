@@ -36,6 +36,7 @@ Run `thimble` in a directory with files you'd like to analyze, just like you wou
 
 - It starts a Claude Code session there with the thimble plugin loaded, inside thimble's sandbox, and prints the dashboard URL.
 - Each run starts a new conversation on the same workspace (cards, report, labels). `thimble --continue` picks up your last conversation in this folder instead.
+- For fewer prompts, run `thimble --permission-mode auto`. For API keys and cloud providers, see [Authentication](INSTALL.md#authentication).
 
 ### Terminal mode
 
