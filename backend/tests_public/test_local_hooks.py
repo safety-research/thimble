@@ -121,10 +121,10 @@ def _process_restart() -> None:
     session._shadows.clear()
 
 
-async def _typed_orientation(project: Path, passes=("final", "report")) -> str:
+async def _typed_orientation(project: Path) -> str:
     """A typed orientation as main starts it in terminal mode: the start tool's request, main's exact Agent call
     claimed by --agent-check, and the agent registered by SubagentStart, whose backend call makes its chat."""
-    ans = await orient_session.start(CORPUS, "", list(passes), route=subagents.TYPED, call="toolu_start1")
+    ans = await orient_session.start(CORPUS, "", route=subagents.TYPED, call="toolu_start1")
     assert ans.typed, ans
     inp = ans["input"]
     main = _main(project)
@@ -192,7 +192,7 @@ def test_in_terminal_mode_every_process_knows_main_from_the_files(ws, project):
 async def test_r3_holds_across_passes_of_separate_processes(ws, project, module):
     """The turn in which main called a start tool ends without main's Agent call: the request is refused no-call,
     though one pass read the call and another, in a new process, the turn's end."""
-    ans = await orient_session.start(CORPUS, "", ["final"], route=subagents.TYPED, call="toolu_s1")
+    ans = await orient_session.start(CORPUS, "", route=subagents.TYPED, call="toolu_s1")
     rid = ans["request"]
     main = _main(project)
     _write(main, _human("/thimble:orient"), _assistant(_use("toolu_s1", "mcp__plugin_thimble_thimble__start_orientation", {})),
@@ -206,11 +206,11 @@ async def test_r3_holds_across_passes_of_separate_processes(ws, project, module)
     assert (r["state"], r["refused_kind"], r["reason"]) == ("refused", "no-call", "I won't start it now.\nAsk again later.")
 
 
-async def test_a_finished_orientation_s_hand_back_ends_it_with_its_coverage_line_and_the_report_s_writer(
+async def test_a_finished_orientation_s_hand_back_ends_it_with_its_coverage_line_and_no_report_s_writer(
         ws, project, module):
     """The plan's case: the orientation hands back; main's Stop hook's backend call ends its run, so its chat ends, the
-    coverage line is measured and kept, main's `orient` event waits in held-events.json for main's next prompt, and the
-    report pass asks the module for the writer, with no turn of main."""
+    coverage line is measured and kept, and main's `orient` event waits in held-events.json for main's next prompt. No
+    report's writer starts: since 0.8.0 a report is written only when the analyst asks for one."""
     chat = await _typed_orientation(project)
     assert orientation.read_run(CORPUS)["status"] == "running"
     _write(_main(project), _peer(AGENT, "Seven cards on the moderators."))
@@ -223,8 +223,7 @@ async def test_a_finished_orientation_s_hand_back_ends_it_with_its_coverage_line
     assert orientation.read_run(CORPUS)["coverage"] == COVERAGE
     [held] = event_files.held(ws)
     assert held["meta"]["kind"] == orientation.ORIENT_KIND and COVERAGE in held["content"]
-    [spawn] = module.ops("spawn")
-    assert spawn["role"] == "writer" and spawn["request"]
+    assert module.ops("spawn") == [], "no report pass"
 
 
 def test_two_calls_at_once_run_the_passes_one_at_a_time_and_lose_neither(ws, project, monkeypatch):
@@ -257,7 +256,7 @@ def test_two_calls_at_once_run_the_passes_one_at_a_time_and_lose_neither(ws, pro
 
 
 async def test_main_s_quit_ends_its_running_agents_chats_and_the_orientation_s_record(ws, project, module):
-    chat = await _typed_orientation(project, passes=("final",))
+    chat = await _typed_orientation(project)
     await _call("end", {"session_id": SID, "reason": "prompt_input_exit"})
     meta = agents.meta_or_none(CORPUS, chat)
     assert (meta["status"], meta["stopped_by"], meta["continue"]) == ("stopped", subagents.STOPPED_QUIT, "here")
@@ -267,13 +266,13 @@ async def test_main_s_quit_ends_its_running_agents_chats_and_the_orientation_s_r
 
 
 async def test_another_session_s_quit_ends_nothing(ws, project, module):
-    chat = await _typed_orientation(project, passes=("final",))
+    chat = await _typed_orientation(project)
     await _call("end", {"session_id": "some-other-session", "reason": "prompt_input_exit"})
     assert agents.meta_or_none(CORPUS, chat)["status"] == "running"
 
 
 async def test_the_end_the_module_writes_for_an_agent_it_started_ends_its_run(ws, project, module, monkeypatch):
-    chat = await _typed_orientation(project, passes=("final",))
+    chat = await _typed_orientation(project)
     with sf.update(ws) as state:
         sf.registry(state)[AGENT]["plugin_started"] = True
     module.ended(AGENT, "", reason="refusal", refusal={"category": "cyber", "explanation": "flagged"})
@@ -289,7 +288,7 @@ async def test_the_end_the_module_writes_for_an_agent_it_started_ends_its_run(ws
 async def test_plan_mode_stops_none_of_thimble_s_running_agents(ws, project, module):
     """Plan mode stops no running agent in terminal mode, as in browser mode: Claude Code's own subagents go on in plan
     mode, and so do thimble's. Main's Stop in plan mode runs the pass and asks the module to stop nothing."""
-    chat = await _typed_orientation(project, passes=("final",))
+    chat = await _typed_orientation(project)
     module.plan(True)
     with sf.update(ws) as state:
         sf.record_mode(state, SID, "plan")
@@ -314,7 +313,7 @@ def test_a_call_for_a_workspace_in_browser_mode_does_nothing(workspaces_tmp, mon
 async def test_a_subagent_stop_of_a_finished_orientation_ends_its_run_after_the_hand_back_s_wait(ws, project, module):
     """The plan's case by the SubagentStop hook: no hand-back comes within the wait, so the run ends with the turn's
     answer, in the same process, which waits for it; the coverage line and the `orient` event follow."""
-    chat = await _typed_orientation(project, passes=("final",))
+    chat = await _typed_orientation(project)
     with sf.update(ws) as state:
         sf.record_stop(state, {"agent_id": AGENT, "agent_type": "thimble:orientation"})
     await _call("stopped", {"agent_id": AGENT, "agent_type": "thimble:orientation", "session_id": SID, "refused": []})
@@ -361,7 +360,7 @@ async def test_while_an_agent_runs_its_thread_shows_each_step_with_no_other_hook
     reaches its thread with no further hook, and the follower stops once no agent of thimble's runs (live check T5: an
     orientation's pane showed one step after a minute's work)."""
     monkeypatch.setattr(local_hooks, "FOLLOW_S", 0.05)
-    chat = await _typed_orientation(project, passes=("final",))
+    chat = await _typed_orientation(project)
     done = threading.Event()
     out: list[int] = []
     t = threading.Thread(target=lambda: (out.append(local_hooks.follow(CORPUS)), done.set()), daemon=True)
