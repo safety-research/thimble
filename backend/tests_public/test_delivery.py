@@ -239,17 +239,19 @@ def test_the_permission_hook_waits_on_main_s_meta_until_the_browser_answers(monk
 class _Stand:
     """The server's delivery routes as the watcher sees them: `pull` answers in order from `answers` (a (status, body)
     pair each; 204 once they run out; status 0 closes the connection without an answer, as a server that crashed while
-    holding the poll), after calling `on_pull`, if given; `ack`, the permission hook and the held hook are recorded.
+    holding the poll), after calling `on_pull`, if given; `ack`, the permission hook, the held hook and the mode hook
+    are recorded, the mode hook answered with `mode`.
     Each answer proves `token` as thimble's server does (app/hook_auth.py), none with `token` None, as a process that
     took the port; `unproven` counts the requests that did not prove the token."""
 
     def __init__(self, answers: list[tuple[int, dict]], permission: tuple[int, dict] = (200, {"behavior": None}),
                  on_pull=None, held: tuple[int, dict] = (200, {"text": ""}), token: str | None = TOKEN,
-                 agents: tuple[int, dict] = (200, {})) -> None:
+                 agents: tuple[int, dict] = (200, {}), mode: tuple[int, dict] = (200, {})) -> None:
         self.answers = list(answers)
         self.permission = permission
         self.held = held
         self.agents = agents
+        self.mode = mode
         self.sent: list[str] = []  # every request's header values
         self.on_pull = on_pull
         self.token = token
@@ -302,6 +304,8 @@ class _Stand:
                     return self._reply(*outer.held)
                 if path == "/api/agents":
                     return self._reply(*outer.agents)
+                if path == "/api/events/mode":
+                    return self._reply(*outer.mode)
                 self._reply(*(outer.permission if path == "/api/events/permission" else (200, {})))
 
             def log_message(self, *a):
@@ -379,6 +383,32 @@ def test_main_s_stop_hook_shows_the_link_thimble_up_left_once_and_only_as_it_end
         (tmp_path / "thome" / "links" / SID).write_text(f"{link}\nthimble: WARNING - a note for the terminal")
         assert json.loads(_watch(tmp_path, stand.port, stop, "--mode").stdout) == {
             "systemMessage": f"thimble: {link}\nthimble: WARNING - a note for the terminal"}, "the notes under the link"
+    finally:
+        stand.close()
+
+
+def test_the_mode_hook_shows_the_line_the_server_answers_after_the_link_in_one_system_message(tmp_path):
+    """The server answers the mode hook with the line main's terminal shows once per session in Manual mode
+    (events.mode_route `terminal`): the hook shows it as its systemMessage, on a turn's start and on its end, after the
+    link on a Stop that has one, in the one systemMessage a hook gives; a subagent's report is never sent."""
+    line = "thimble: Claude Code is in Manual mode."
+    link = "http://127.0.0.1:8300/?ws=mini#k=the-ui-key"
+    turn = {"session_id": SID, "cwd": "/data/mini", "hook_event_name": "UserPromptSubmit", "permission_mode": "default"}
+    stand = _Stand([], mode=(200, {"terminal": line}))
+    try:
+        assert json.loads(_watch(tmp_path, stand.port, turn, "--mode").stdout) == {"systemMessage": line}
+        sent = {"cwd": "/data/mini", "session": SID, "permission_mode": "default"}
+        assert ("POST", "/api/events/mode", sent) in stand.seen
+        (tmp_path / "thome" / "links").mkdir(parents=True)
+        (tmp_path / "thome" / "links" / SID).write_text(link)
+        stop = {**turn, "hook_event_name": "Stop"}
+        got = json.loads(_watch(tmp_path, stand.port, stop, "--mode").stdout)
+        assert got == {"systemMessage": f"thimble: {link}\n{line}"}
+        stand.mode = (200, {})
+        assert _watch(tmp_path, stand.port, stop, "--mode").stdout == ""
+        before = len(stand.seen)
+        assert _watch(tmp_path, stand.port, {**turn, "agent_id": "a1"}, "--mode").stdout == ""
+        assert len(stand.seen) == before, "a subagent's mode is not reported"
     finally:
         stand.close()
 

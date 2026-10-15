@@ -163,13 +163,6 @@ const ASKED_BY: Readonly<Record<string, string>> = {
   commands: 'thimble asks about each command this agent runs outside its sandbox.',
 }
 
-/** What main's card says about auto mode while main runs in Manual (PermissionRequest.manual). */
-export const MANUAL_LINES: Readonly<Record<string, string>> = {
-  switch: 'For fewer prompts, press shift+tab in your terminal to switch to auto mode, or start with thimble --permission-mode auto.',
-  org: 'Your organization turned auto mode off, so Claude Code asks before most commands.',
-  settings: 'Your Claude Code settings turn auto mode off, so Claude Code asks before most commands.',
-}
-
 /** The modes a code ticket's session runs in, as the settings name them. */
 const MODE_NAMES: Readonly<Record<string, string>> = { manual: 'Manual', auto: 'Auto', bypass: 'Bypass' }
 
@@ -202,19 +195,17 @@ export function pluginSteered(id: string | null | undefined, metas: ReadonlyMap<
 }
 
 /** Why the session asks, in one line: main's fence's rule when one sends it, then where it is answered (main's in the
- * browser or the terminal, a subagent's in the terminal), then while main runs in Manual how to switch to auto mode.
- * A code ticket's request keeps its own reasons: thimble's own (`why`), auto mode could not judge the call or left it
- * to the analyst, the session runs in Manual, then when an unanswered request is declined; for one declined
- * unanswered, that it was. Pure. */
+ * browser or the terminal, a subagent's in the terminal). A code ticket's request keeps its own reasons: thimble's own
+ * (`why`), auto mode could not judge the call or left it to the analyst, the session runs in Manual, then when an
+ * unanswered request is declined; for one declined unanswered, that it was. Pure. */
 export function askWhy(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>, labels: ReadonlyMap<string, string> = new Map()): string {
   const p = ask.request
   const rule = p.asked_by && (ask.chat === 'main' || p.asked_by !== 'web') ? ASKED_BY[p.asked_by] : ''
   if (ask.chat === 'main') {
-    const manual = p.manual ? MANUAL_LINES[p.manual] : ''
     if (p.terminal) {
-      return [rule, terminalAsksLine(askedBy(ask, metas, labels), pluginSteered(p.chat, metas)), manual].filter(Boolean).join(' ')
+      return [rule, terminalAsksLine(askedBy(ask, metas, labels), pluginSteered(p.chat, metas))].filter(Boolean).join(' ')
     }
-    return [rule, MAIN_ASKS_LINE, manual].filter(Boolean).join(' ')
+    return [rule, MAIN_ASKS_LINE].filter(Boolean).join(' ')
   }
   if (p.expired) return `Nobody answered ${p.wait_s ? `within ${waitWords(p.wait_s)}` : 'in time'}, so thimble declined it${p.why ? '' : ' and the agent went on without it'}.`
   if (p.why) return p.why

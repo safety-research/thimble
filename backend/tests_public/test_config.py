@@ -50,14 +50,14 @@ def test_a_claude_thimble_starts_keeps_the_users_proxy_certificate_and_gateway_s
     assert set(network) <= set(config.launch_environ(env)), "what every `claude` thimble runs gets"
 
 
-def test_not_logged_in_names_the_login_and_the_api_key_route(monkeypatch):
-    """thimble has no login of its own, and an API key works through `claude` once thimble's server starts with it: the
-    alert names both routes, and where the others are."""
+def test_not_logged_in_names_the_login_and_where_the_other_ways_are(monkeypatch):
+    """thimble has no login of its own: the alert names `claude auth login` and points to INSTALL.md's Authentication
+    section for the other ways, and nothing longer."""
     monkeypatch.delenv("THIMBLE_SKIP_KEY", raising=False)
     monkeypatch.setattr(config, "CLI_PATH", "/bin/claude")
     said = config.auth_problem({"loggedIn": False})
-    assert "claude auth login" in said and "ANTHROPIC_API_KEY" in said and "thimble server restart" in said
-    assert "Authentication" in said
+    assert said == ("Claude Code is not logged in (`claude auth status`): log in with `claude auth login` (INSTALL.md, "
+                    "Authentication, has more ways), then try again")
     assert config.auth_problem({"loggedIn": True}) == ""
 
 

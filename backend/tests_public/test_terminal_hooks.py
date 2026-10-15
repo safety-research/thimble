@@ -165,6 +165,32 @@ def test_the_mode_hook_records_main_s_mode_and_starts_the_backend_s_call_on_main
     assert len(spawned) == 1 and sf.read(ws)["main"]["permission_mode"] == "plan"
 
 
+def test_the_mode_hook_says_once_per_session_that_main_runs_in_manual_mode(tmp_path, ws, monkeypatch, capsys):
+    """In terminal mode the mode hook shows the line the server would (app/modes.py manual_line) as its systemMessage,
+    the first time main's session reports Manual mode, and records it (subagent_files.manual_once), so it shows once in
+    that session; auto, plan and Accept edits mode say nothing; with auto mode turned off by the analyst's settings it
+    says so instead."""
+    watcher, _ = loaded(monkeypatch, tmp_path, ws)
+
+    def said(mode: str, event: str = "UserPromptSubmit", session: str = MAIN) -> str | None:
+        watcher.mode_files({"session_id": session, "hook_event_name": event, "permission_mode": mode}, ws)
+        out = capsys.readouterr().out.strip()
+        return json.loads(out)["systemMessage"] if out else None
+
+    from app import modes
+
+    assert said("auto") is None and said("plan") is None and said("acceptEdits") is None
+    assert said("default", session="not-main") is None
+    assert said("default") == modes.MANUAL_LINES["switch"] and sf.read(ws)["main"]["manual_told"] == MAIN
+    assert said("default", "Stop") is None and said("manual") is None, "once per session"
+    with sf.update(ws) as state:
+        state["main"].pop("manual_told")
+    user = tmp_path / "claude-config" / "settings.json"
+    user.parent.mkdir(parents=True, exist_ok=True)
+    user.write_text(json.dumps({"disableAutoMode": "disable"}))
+    assert said("default", "Stop") == modes.MANUAL_LINES["settings"]
+
+
 def test_no_hook_opens_a_socket_in_terminal_mode_and_each_file_first_hook_starts_the_backend_s_call(
         tmp_path, ws, monkeypatch, capsys):
     watcher, spawned = loaded(monkeypatch, tmp_path, ws)

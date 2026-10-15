@@ -54,8 +54,9 @@ thimble's agents run in your session's permission mode. Auto mode is recommended
 routine calls, so thimble's agents keep working while you watch the browser. Start with
 `thimble --permission-mode auto`, press shift+tab in the terminal, or set `"permissions": {"defaultMode": "auto"}` in
 `~/.claude/settings.json` (a project's settings can't choose auto). In Manual mode Claude Code asks about most commands
-of your session and of each agent, and an agent's requests show only in the terminal. The launch prints a line when
-your session will ask in Manual mode, or when your organization turned auto mode off.
+of your session and of each agent, and an agent's requests show only in the terminal. The first time your session
+reports Manual mode, the terminal prints one line that says how to switch, or who turned auto mode off, and the
+browser's top bar shows a Manual mode chip until you switch or close it.
 
 Some requests ask in every mode, auto and bypass included, because thimble's fence adds an ask rule for them: edits of
 the folder you opened while the orientation's `data` is `"ask"` (the default, [docs/config.md](docs/config.md)), and

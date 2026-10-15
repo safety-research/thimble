@@ -193,9 +193,9 @@ def test_without_the_plugin_registered_the_launcher_loads_its_own_plugin_folder(
 def test_the_launcher_passes_the_session_id_exports_the_switches_unsets_the_variables_and_prints_the_notes(tmp_path):
     """The launcher passes launch-args' session id with --session-id, exports the env line's switches into `claude`'s
     environment, unsets the variables the unset line names, prints each note line before Claude Code starts, and tells
-    launch-args when the analyst's own flags name the session (-r, --session-id, --fork-session) or ask for safe mode.
-    It passes launch-args its own pid for launch.json, which `claude`'s replaces once it starts (the launcher outlives
-    `claude`, so `claude` is its child)."""
+    launch-args when the analyst's own flags name the session (-r, --session-id, --fork-session) or ask for safe mode; a
+    permission mode they name goes to `claude` alone. It passes launch-args its own pid for launch.json, which
+    `claude`'s replaces once it starts (the launcher outlives `claude`, so `claude` is its child)."""
     import subprocess  # noqa: PLC0415
 
     head = [str(tmp_path / "plugin"), "mcp__x", "high", "{}", ""]
@@ -230,15 +230,16 @@ def test_the_launcher_passes_the_session_id_exports_the_switches_unsets_the_vari
     told_pid = asked.read_text().splitlines()
     assert told_pid[told_pid.index("--launcher-pid") + 1] == Path(f"{argv_out}.pid").read_text().strip(), \
         "launch-args gets the launcher's own pid, `claude`'s parent"
-    assert not any(a.startswith("--own-mode") for a in asked.read_text().splitlines())
     for flags, told in ((["-r", "sid-mine"], "--own-session=sid-mine"), (["--session-id", sid], f"--own-session={sid}"),
-                        (["-r", "x", "--fork-session"], "--own-session="), (["--safe-mode"], "--safe-mode"),
-                        (["--permission-mode", "auto"], "--own-mode=auto"),
-                        (["--permission-mode=acceptEdits"], "--own-mode=acceptEdits"),
-                        (["--dangerously-skip-permissions"], "--own-mode=bypassPermissions")):
+                        (["-r", "x", "--fork-session"], "--own-session="), (["--safe-mode"], "--safe-mode")):
         subprocess.run(["bash", str(launcher), *flags], check=True, capture_output=True, cwd=tmp_path, env=env)
         assert told in asked.read_text().splitlines(), flags
         assert flags[-1] in argv_out.read_text().splitlines(), "the analyst's flags reach claude as they are"
+    for flags in (["--permission-mode", "auto"], ["--permission-mode=acceptEdits"], ["--dangerously-skip-permissions"]):
+        subprocess.run(["bash", str(launcher), *flags], check=True, capture_output=True, cwd=tmp_path, env=env)
+        argv = argv_out.read_text().splitlines()
+        assert argv[argv.index(flags[0]):][:len(flags)] == flags, "a permission mode reaches claude as it is"
+        assert not set(flags) & set(asked.read_text().splitlines()), "and launch-args is told none"
 
 
 @pytest.fixture()

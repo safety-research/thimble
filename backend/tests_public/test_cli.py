@@ -342,7 +342,8 @@ def test_doctor_says_what_claude_reports_about_its_login_and_never_a_value(home,
     assert all(word in line(text, "auth:") for word in ("api_key", "firstParty"))
     fake_claude.write_text(json.dumps({"loggedIn": False, "authMethod": "none"}))
     assert "not logged in" in line(cli.doctor_text(), "auth:")
-    assert "ANTHROPIC_API_KEY" in line(cli.doctor_text(), "auth:"), "the API-key route too"
+    said = line(cli.doctor_text(), "auth:")
+    assert config.AUTH_HELP in said and "ANTHROPIC_API_KEY" not in said, "the login and the pointer, nothing longer"
 
 
 def test_the_doctor_a_model_reads_names_no_install_command_even_when_the_log_does(home, monkeypatch, fake_claude):
