@@ -205,8 +205,10 @@ session you start with `thimble`. Claude Code's agent tray (↓) lists them, and
 - **Failures.** When one of thimble's agents fails, a notice tells you where you are looking: in the browser above the
   reply box of the chat you have open, main's or a thread's, and in terminal mode in the rows above the prompt. It
   names the agent, such as Orientation, View build: Agent Network or Card check, says in one line what failed and how
-  to fix it, and has a button for the fix where there is one (Retry, Try again, Open Settings) and Open for the agent's
-  thread. It stays until you dismiss it (×) or the fix works, and the agent's thread keeps it as a row. This covers
+  to fix it, and has a button for the fix where the browser can run it (Retry, Try again, Open Settings) and Open for
+  the agent's thread. A fix only your terminal can run, such as `/login` or `/model`, says "In your terminal:". It stays
+  until you dismiss it (×) or the fix works, and the agent's thread keeps it as a line. A request of Claude's own that
+  fails shows as an error card in main, with its fix, and as a notice while you are in another chat. This covers
   the orientation and its subagents, the critic, the writers, view builds and reviews, report checks, code tickets,
   card checks, label runs and view proposals: a request Claude's safeguards blocked or switched to another model, an
   API error that stopped the agent (sign-in, access, a model not found, overload or rate limits after Claude Code's
@@ -365,9 +367,10 @@ that one and prints each path it deleted. The folder it read and your Claude Cod
 - A start or a view proposal's Accept is refused with a line about plan mode: your session is in plan mode, where an
   agent would ask before every card. Leave it with shift+tab in the terminal, then try again.
 - A notice says thimble couldn't check for a view proposal: it gives the reason, with Try again and Turn off view
-  proposals. When it says Claude Code isn't signed in for thimble's server, run `/login`; if you changed your sign-in
-  after the server started, such as by exporting `ANTHROPIC_API_KEY`, run `thimble server restart` from that shell. An
-  accepted view that fails to build has a notice with Retry.
+  proposals. When it says Claude Code isn't signed in for thimble's server, run `/login` in your terminal (or
+  `claude auth login` in a shell); if you changed your sign-in after the server started, such as by exporting
+  `ANTHROPIC_API_KEY`, run `thimble server restart` from that shell. Then press Try again. An accepted view that fails
+  to build has a notice with Retry.
 - A chat says Claude's safeguards stopped a request: rephrase or narrow the request and send it again. A notice that
   Claude's safeguards switched a reply to another model names both models; the reply, or the view proposal, came from
   the second.
