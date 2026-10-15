@@ -2,12 +2,14 @@
 // what is a toast: it confirms or fails the analyst's own click, or reports news with a link to where it landed (a
 // view that is ready, a thread that got its answer). A state that lasts (a refused start, a write that failed, the
 // server down) shows once, next to what it concerns, and is never also a toast. An error has a negative edge and ✕;
-// news has the accent dot and a chip to where it landed, and news of a thread stays longer (its chip opens it).
+// news has the accent dot and a chip to where it landed, and news of a thread stays longer (its chip opens it). A span
+// in backticks (a command such as `thimble up`) is drawn as code, as a notice draws it.
 import { useEffect, useState } from 'react'
 import { Mark } from '../components/Marks'
 import { RefChip } from '../components/RefChip'
 import { bus } from '../lib/bus'
 import { ThreadChip } from '../chat/Notes'
+import { noticeText } from '../chat/Notice'
 
 interface Toast {
   id: number
@@ -44,7 +46,7 @@ export function Toasts() {
       {toasts.map((t) => (
         <div key={t.id} className={`shell-toast overlay${t.kind === 'error' ? ' shell-toast-error' : ''}`} onClick={() => setToasts((ts) => ts.filter((x) => x.id !== t.id))}>
           <Mark kind={t.kind === 'error' ? 'failed' : 'unread'} label={t.kind === 'error' ? 'error' : 'news'} />
-          <span className="shell-toast-text">{t.text}</span>
+          <span className="shell-toast-text">{noticeText(t.text)}</span>
           {t.ref && <RefChip ref={t.ref} compact />}
           {t.thread && <ThreadChip id={t.thread.id} label={t.thread.label} />}
         </div>
