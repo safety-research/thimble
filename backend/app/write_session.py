@@ -1,10 +1,12 @@
 """A writer: `thimble:writer`, a subagent of the analyst's Claude Code session for one document (subagents.py).
 
 Its registration (definition) is prompts/writer.md with shared.md loaded as the skill `thimble:shared`, the `writer`
-role's model and effort from Settings, and of thimble's tools OWN_TOOLS. Its run's prompt names its task and a context
-file, writers/<doc>/context.md, that holds the whole context (context.render, CONTEXT_CHARS) followed by the task, which
-it reads first. One writer runs per document. Write in the browser is a click (write_route), the orientation's report
-pass a follow-on start of the same click or typed start (follow_on), both through thimble's plugin module; main's
+role's model and effort from Settings, and of thimble's tools OWN_TOOLS. Its run's prompt names its task and its
+context, writers/<doc>/context.md, that holds the whole context (context.render, CONTEXT_CHARS) followed by the task,
+which it reads first; a context too large for one Read call is written as several files (context_parts,
+CONTEXT_PART_CHARS), each small enough that Read returns it whole. One writer runs per document. Write in the browser is
+a click (write_route), the orientation's report pass a follow-on start of the same click or typed start (follow_on),
+both through thimble's plugin module; main's
 `start_writing` gives the exact Agent call main makes (tool_start_writing), and a thread's fork's gives it to main in a
 `start_agent` event (tools._ask_main). Main hears a `written` browser event when a writer ends. A writer answering the
 orientation's report pass carries `orient` and `orient_run` on its chat. A writer stopped when Claude Code quit is
@@ -30,7 +32,10 @@ AGENT = "writer"  # prompts/writer.md, the writer's registered prompt
 ROLE = "writer"  # the agent chat's role, and its role among subagents.TYPES
 WRITTEN_KIND = "written"  # the event kind that tells main a writer ended (prompts/main.md)
 CONTEXT_CHARS = 600_000  # of the context file, about 150k tokens
-CONTEXT_FILE = "context.md"  # in its work folder: what it reads first
+CONTEXT_FILE = "context.md"  # in its work folder: what it reads first, with context-2.md… when one file is too large
+CONTEXT_PART_CHARS = 60_000  # of one context file: small enough that one Read call returns it whole, under both the
+# tool's file-size cap (256KB) and its cap on the tokens a call returns (25k), which a larger file trips with no
+# recourse: dense lines put even a small offset/limit window past the token cap
 WORK_DIR = "writers"  # workspaces/<c>/writers/<doc>, a writer's own folder, where it may write
 SKILLS = ("thimble:shared",)  # shared.md, loaded before its first turn (U3)
 OWN_TOOLS = ("read_ref", "list_cards", "add_card", "edit_card", "delete_card", "screenshot", "write_document",
@@ -71,17 +76,51 @@ def definition(c: str) -> dict[str, Any]:
     return out
 
 
-def write_context(c: str, t: dict[str, Any], request: str, after: str) -> Path:
-    """The writer's context file, writers/<doc>/context.md (first_message), which its prompt names."""
-    path = work_dir(c, str(t["slug"])) / CONTEXT_FILE
-    write_under(config.workspace_dir(c), path, first_message(c, t, request, after) + "\n")  # a folder agents write
-    return path
+def context_parts(text: str, limit: int | None = None) -> list[str]:
+    """`text` cut at line ends into parts of at most `limit` (CONTEXT_PART_CHARS) characters, a line longer than that
+    alone cut mid-line, so that the session's Read tool returns each part whole. The parts joined are `text`."""
+    limit = CONTEXT_PART_CHARS if limit is None else max(1, limit)
+    parts: list[str] = []
+    piece: list[str] = []
+    size = 0
+    for line in text.splitlines(keepends=True):
+        if size and size + len(line) > limit:
+            parts.append("".join(piece))
+            piece, size = [], 0
+        while len(line) > limit:
+            parts.append(line[:limit])
+            line = line[limit:]
+        if line:
+            piece.append(line)
+            size += len(line)
+    if piece:
+        parts.append("".join(piece))
+    return parts or [""]
 
 
-def task(t: dict[str, Any], request: str, after: str, path: Path) -> str:
-    """A writer's run prompt: its task, the analyst's request and passage, and its context file
-    (`## writer-context-file`)."""
-    return "\n\n".join(x for x in (task_text(t, request, after), tools.hint("writer-context-file", path=str(path))) if x)
+def write_context(c: str, t: dict[str, Any], request: str, after: str) -> list[Path]:
+    """The writer's context files, writers/<doc>/context.md and context-2.md… when the context outgrows what one Read
+    call returns (first_message, context_parts), which its prompt names. Parts of an earlier, larger context that this
+    one no longer needs are removed."""
+    folder = work_dir(c, str(t["slug"]))
+    parts = context_parts(first_message(c, t, request, after) + "\n")
+    paths = [folder / (CONTEXT_FILE if i == 0 else f"context-{i + 1}.md") for i in range(len(parts))]
+    for path, part in zip(paths, parts):
+        write_under(config.workspace_dir(c), path, part)  # a folder agents write
+    for old in folder.glob("context-*.md"):
+        if old not in paths:
+            old.unlink(missing_ok=True)
+    return paths
+
+
+def task(t: dict[str, Any], request: str, after: str, paths: list[Path]) -> str:
+    """A writer's run prompt: its task, the analyst's request and passage, and its context file or files
+    (`## writer-context-file`, `## writer-context-files`)."""
+    if len(paths) == 1:
+        where = tools.hint("writer-context-file", path=str(paths[0]))
+    else:
+        where = tools.hint("writer-context-files", n=len(paths), paths=", ".join(str(p) for p in paths))
+    return "\n\n".join(x for x in (task_text(t, request, after), where) if x)
 
 
 def running(c: str, doc: str) -> bool:
@@ -118,11 +157,11 @@ async def start(c: str, doc: str, request: str = "", after: str = "", *, route: 
         before = subagents.refusal_before(c, click=route == subagents.CLICK)
         if before is not None:
             return before
-    path = await asyncio.to_thread(write_context, c, t, request, after)
+    paths = await asyncio.to_thread(write_context, c, t, request, after)
     if running(c, doc):  # a second call that started while this one rendered
         return subagents.refusal(subagents.HOOK, tools.hint("start_writing-running", doc=doc))
     report_types.begin_write(c, doc, request, after)
-    ans = await subagents.start_job(c, ROLE, key, task(t, request, after, path), subagents.values_for(c, ROLE, values),
+    ans = await subagents.start_job(c, ROLE, key, task(t, request, after, paths), subagents.values_for(c, ROLE, values),
                                     route, description=f"writer: {doc}",
                                     chat={"title": f"Write {doc}", "doc": doc, "brief": task_text(t, request, after),
                                           **fields},

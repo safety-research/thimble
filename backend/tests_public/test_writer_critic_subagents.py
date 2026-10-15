@@ -43,6 +43,47 @@ async def test_write_starts_the_writer_through_the_module_with_its_context_file(
     assert again.kind == "hook", "a second writer of the document"
 
 
+def test_context_parts_cut_at_line_ends_and_rejoin_exactly():
+    text = "short\n" + "a" * 250 + "\n" + "tail\n"
+    parts = write_session.context_parts(text, limit=100)
+    assert "".join(parts) == text
+    assert all(len(p) <= 100 for p in parts)
+    assert parts[0] == "short\n", "a line that does not fit the open part starts the next one"
+    assert parts[1] == "a" * 100 and parts[2] == "a" * 100, "a line past the cap alone is cut mid-line"
+    assert write_session.context_parts("", limit=100) == [""]
+
+
+async def test_a_large_context_is_written_in_files_a_read_call_returns_whole(bridge, models, workspaces_tmp, monkeypatch):
+    """A context past the Read tool's caps as one file (#17) is written as files of at most CONTEXT_PART_CHARS, every
+    one named in the writer's prompt, so the writer reads each whole without tripping a cap."""
+    monkeypatch.setattr(write_session, "CONTEXT_PART_CHARS", 1_000)
+    big = "\n".join(f"line {i} " + "x" * 90 for i in range(60))  # ~6k characters: past the (patched) cap
+    monkeypatch.setattr(write_session.context, "render", lambda *a, **k: big)
+    ans = await write_session.start(CORPUS, "report", route=subagents.CLICK)
+    assert ans.started
+    folder = write_session.work_dir(CORPUS, "report")
+    first = folder / write_session.CONTEXT_FILE
+    others = sorted(folder.glob("context-*.md"), key=lambda p: int(p.stem.split("-")[1]))
+    assert first.is_file() and len(others) >= 1
+    paths = [first, *others]
+    assert all(len(p.read_text()) <= 1_000 for p in paths)
+    assert "".join(p.read_text() for p in paths) == big + "\n", "the parts are the whole context"
+    [spawn] = bridge.ops("spawn")
+    assert f"READ {len(paths)} FILES" in spawn["prompt"] and all(str(p) in spawn["prompt"] for p in paths)
+
+
+def test_a_shrunken_context_removes_the_extra_files_of_an_earlier_one(workspaces_tmp, monkeypatch):
+    monkeypatch.setattr(write_session, "CONTEXT_PART_CHARS", 100)
+    t = {"slug": "report", "name": "Report"}
+    monkeypatch.setattr(write_session.context, "render", lambda *a, **k: "x" * 350)
+    assert len(write_session.write_context(CORPUS, t, "", "")) == 4
+    monkeypatch.setattr(write_session.context, "render", lambda *a, **k: "y" * 50)
+    paths = write_session.write_context(CORPUS, t, "", "")
+    assert [p.name for p in paths] == ["context.md"]
+    folder = write_session.work_dir(CORPUS, "report")
+    assert sorted(p.name for p in folder.glob("context*.md")) == ["context.md"]
+
+
 async def test_two_typed_writers_of_two_documents_are_claimed_by_their_request_ids(bridge, models, workspaces_tmp):
     report_types.create_document_type(CORPUS, "casefile", name="Cases", slug="cases")
     got = {}

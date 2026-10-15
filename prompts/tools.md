@@ -1286,6 +1286,10 @@ An extension's program writes {doc}. The program has started, and thimble shows 
 
 The workspace as it stands, each part under a heading that says what it holds, is in {path}. Read it whole before you write.
 
+## writer-context-files
+
+The workspace as it stands, each part under a heading that says what it holds, is in {n} files, in this order: {paths}. Read each one whole, in that order, before you write.
+
 ## start_writing-made
 
 Made the new document {title}, report:{doc}.
