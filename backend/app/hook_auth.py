@@ -129,8 +129,8 @@ CODE_GONE = ("This sign-in link was already used or has expired. Run `thimble up
 # these: the supervisor's, the plugin's and the page's health check, and the page's question whether it is signed in
 OPEN_READS = frozenset({"/api/health", "/api/ui/paired"})
 READ_METHODS = frozenset({"GET", "HEAD"})
-SIGN_IN_NEEDED = ("open thimble from the link shown under /thimble's reply, or printed by `thimble up` in a shell, to"
-                  " see it")
+SIGN_IN_NEEDED = ("thimble refused this read: thimble's data needs your browser's sign-in or thimble's own token, and"
+                  " this request had neither. Use thimble's tools instead.")
 SHOT_HEADER = "x-thimble-shot"  # a page screenshot's read-only token (mint_shot)
 SHOT_TTL_S = 120  # a shot token's life: dev.SHOT_TIMEOUT_S (90 s) ends the headless run before it
 # the view media route with its key (media_key), as the frame's browser asks for it

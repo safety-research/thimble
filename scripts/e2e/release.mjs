@@ -873,7 +873,7 @@ async function main() {
       const concepts = `${origin}/api/ws/${WS.name}/concepts`
       const read = await fetch(concepts)
       const readBody = await read.json().catch(() => null)
-      check(read.status === 401 && readBody?.signin === true && /^open thimble from the link /.test(String(readBody?.detail ?? '')),
+      check(read.status === 401 && readBody?.signin === true && /^thimble refused this read: /.test(String(readBody?.detail ?? '')),
         `an unsigned GET /api/ws/${WS.name}/concepts answered ${read.status} ${JSON.stringify(readBody)?.slice(0, 160)}, not 401 {detail, signin: true}`)
       const head = await fetch(concepts, { method: 'HEAD' })
       const headBody = await head.text()
