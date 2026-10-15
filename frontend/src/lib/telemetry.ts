@@ -1,6 +1,7 @@
 // The browser's record of what the analyst did, posted in batches to POST /ws/{c}/telemetry. Nothing here blocks the
 // UI: a batch that fails is requeued, a handler that throws is swallowed. Three sources: the API requests the page
 // makes (one wrapped fetch), clicks on interactive elements, and the window's uncaught errors.
+import { apiBase, apiPath } from './browserKey'
 import { workspaceFromUrl } from './workspace'
 
 export const CLIENT_KINDS = [
@@ -216,7 +217,7 @@ export function classifyRequest(method: string, url: string, body?: string | nul
   } catch {
     return null
   }
-  const m = /^\/api\/ws\/([^/]+)\/(.*)$/.exec(u.pathname)
+  const m = /^\/api\/ws\/([^/]+)\/(.*)$/.exec(apiPath(u.pathname))
   if (!m) return null
   const parts = m[2].split('/').filter(Boolean)
   const [a, b, c] = parts
@@ -424,7 +425,7 @@ let selectTimer: number | null = null
 let lastSelection = ''
 
 function send(ws: string, records: TelemetryRecord[], beacon: boolean): boolean | Promise<boolean> {
-  const url = `/api/ws/${encodeURIComponent(ws)}/telemetry`
+  const url = `${apiBase()}/ws/${encodeURIComponent(ws)}/telemetry`
   const body = JSON.stringify(records)
   try {
     if (beacon && typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {

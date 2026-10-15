@@ -59,17 +59,24 @@ def test_the_shim_believes_no_answer_without_the_server_s_proof(tmp_path):
     assert answer["isError"] and "ok" not in [c.get("text") for c in answer["content"]]
 
 
-def test_the_analyst_s_cookie_goes_only_to_thimble_s_api_routes():
-    """The link's code is traded for a cookie scoped to /api/, the path of every route the page calls, HttpOnly and
-    SameSite=Strict, and the only cookie the answer sets, since a browser sends a cookie to every port of its host; a
-    code that is not alive gets none."""
+def test_the_analyst_s_cookie_goes_only_to_thimble_s_api_routes_under_the_browser_s_own_path():
+    """The link's code is traded for a cookie scoped to the browser's own path, /b/<key>/api/, whose key the answer
+    gives that page alone, HttpOnly and SameSite=Strict: a browser sends a cookie to every port of its host, so a cookie
+    scoped to /api/ would reach another server's page that asks for its own /api/ paths. The answer also deletes a
+    cookie an earlier build scoped to /api/, and sets no other; a code that is not alive gets none."""
+    import json
+
     from starlette.requests import Request
 
     fresh = Request({"type": "http", "headers": []})
     r, browser = hook_auth.claim({"code": hook_auth.mint()}, fresh)
+    key = json.loads(r.body)["key"]
     cookies = [v.decode() for k, v in r.raw_headers if k == b"set-cookie"]
-    assert r.status_code == 204 and len(cookies) == 1 and browser, cookies
-    assert cookies[0].startswith(f"{hook_auth.ui_cookie()}=") and "Path=/api/;" in cookies[0], cookies
-    assert "HttpOnly" in cookies[0] and "SameSite=strict" in cookies[0], cookies
+    assert r.status_code == 200 and len(cookies) == 2 and browser, cookies
+    [mine] = [c for c in cookies if "Max-Age=0" not in c]
+    [old] = [c for c in cookies if "Max-Age=0" in c]
+    assert mine.startswith(f"{hook_auth.ui_cookie()}=") and f"Path=/b/{key}/api/;" in mine, mine
+    assert "HttpOnly" in mine and "SameSite=strict" in mine, mine
+    assert old.startswith(f'{hook_auth.ui_cookie()}=""') and "Path=/api/;" in old, old
     gone, none = hook_auth.claim({"code": "another-code"}, fresh)
     assert gone.status_code == 410 and none == "" and not [k for k, _ in gone.raw_headers if k == b"set-cookie"]

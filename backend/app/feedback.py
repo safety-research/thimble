@@ -115,6 +115,8 @@ SECRET_PATTERNS: list[tuple[str, re.Pattern[str], bool]] = [
     ("url-password", re.compile(r"://[^/\s:@\"']+:(?P<v>[^/\s@\"']+)@"), False),
     # the key in the URL of a view's media route (app/hook_auth.py media_key), which a log line may name
     ("view-media-key", re.compile(r"/views/[^/?#\s\"']+/media/(?P<v>[0-9a-f]{32})(?![0-9a-f])"), False),
+    # a browser's key in the path its page asks the API under (app/hook_auth.py browser_path)
+    ("browser-key", re.compile(r"/b/(?P<v>[A-Za-z0-9_\-]{16,128})/api\b"), False),
     # a value assigned to a name that says it is secret, in code, an env line or JSON (its quotes escaped once or more)
     ("secret", re.compile(
         r"(?i)(?:api[_\-]?key|apikey|secret|password|passwd|access[_\-]?key|private[_\-]?key|credential|"

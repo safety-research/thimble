@@ -43,14 +43,14 @@ def test_the_token_alone_is_refused_on_every_analyst_route_and_the_cookie_alone_
     """Walking the server's routes: every write that is no token route and not the claim of a code refuses the token
     alone with 403 and today's words (WRITE_REFUSED), and every token route refuses a signed-in browser's cookie alone
     with 401. The two sets and the claim cover every write."""
-    from conftest import UI_COOKIE_VALUE, _record_paired
+    from conftest import UI_COOKIE_VALUE, _record_paired, browser_base
 
     _, rows = table
     monkeypatch.setenv("THIMBLE_PORT", "8300")
     monkeypatch.delenv("THIMBLE_DEV", raising=False)
     app = main.create_app()
     by_token = TestClient(app, base_url="http://testserver")
-    by_cookie = TestClient(app, base_url="http://testserver")
+    by_cookie = TestClient(app, base_url=browser_base())  # the page asks under its key's path (hook_auth)
     _record_paired(UI_COOKIE_VALUE)
     by_cookie.cookies.set(hook_auth.ui_cookie(), UI_COOKIE_VALUE)
     writes = [(m, p) for m, p, _, _ in rows if m not in ("GET", "WS")]
@@ -73,14 +73,14 @@ def test_every_read_needs_the_cookie_or_the_token_and_only_the_open_reads_answer
     credential with 401 and {detail: SIGN_IN_NEEDED, signin: true} (a HEAD with no body), and an agent's token, whose
     grant allows no read, as well; a signed-in browser's cookie and the token's proof each get past the guard (the
     event streams, which never end, are left out of that half). The open reads answer anyone."""
-    from conftest import UI_COOKIE_VALUE, _record_paired
+    from conftest import UI_COOKIE_VALUE, _record_paired, browser_base
 
     _, rows = table
     monkeypatch.setenv("THIMBLE_PORT", "8300")
     monkeypatch.delenv("THIMBLE_DEV", raising=False)
     app = main.create_app()
     anyone = TestClient(app, base_url="http://testserver")
-    by_cookie = TestClient(app, base_url="http://testserver")
+    by_cookie = TestClient(app, base_url=browser_base())  # the page asks under its key's path (hook_auth)
     _record_paired(UI_COOKIE_VALUE)
     by_cookie.cookies.set(hook_auth.ui_cookie(), UI_COOKIE_VALUE)
     # an extension program's token, whose grant allows the POST of its tools alone (harness.Run.allows)

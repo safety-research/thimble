@@ -1,9 +1,10 @@
 // Comment routes with no client in lib/api.ts: the analyst's comment on a passage, resolving a comment (Done), the
 // comments on the cards, and export.
 import { claimKey, describeDetail, signInNeeded } from '../lib/api'
+import { apiBase } from '../lib/browserKey'
 import type { AnyDoc, CanvasComment, WriteupComment } from '../lib/types'
 
-const inv = (ws: string, slug: string) => `/api/ws/${encodeURIComponent(ws)}/investigations/main/types/${encodeURIComponent(slug)}`
+const inv = (ws: string, slug: string) => `${apiBase()}/ws/${encodeURIComponent(ws)}/investigations/main/types/${encodeURIComponent(slug)}`
 
 async function call<T>(url: string, init?: RequestInit): Promise<T> {
   await claimKey()
@@ -31,7 +32,7 @@ export const commentsApi = {
   exportDoc: (ws: string, slug: string) => call<{ markdown: string; html?: string; title?: string }>(`${inv(ws, slug)}/export`),
 }
 
-const canvas = (ws: string) => `/api/ws/${encodeURIComponent(ws)}/canvas/comments`
+const canvas = (ws: string) => `${apiBase()}/ws/${encodeURIComponent(ws)}/canvas/comments`
 
 export const canvasCommentsApi = {
   /** `GET /canvas/comments`: the open comments on the cards that are there. */

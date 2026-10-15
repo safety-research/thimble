@@ -2,6 +2,7 @@
 // feedback.py writes them to browser-log.jsonl). An in-memory ring buffer of the last MAX_ENTRIES, fed by console.error,
 // uncaught errors, unhandled rejections and failed fetches (status 400+). Nothing leaves the tab until the analyst
 // prepares a report, and the backend removes anything that looks like a key or token.
+import { apiPath } from './browserKey'
 import { benignError, errorText } from './telemetry'
 
 export type ProblemKind = 'console' | 'error' | 'rejection' | 'request'
@@ -58,7 +59,8 @@ export function consoleText(args: readonly unknown[]): string {
     .join(' ')
 }
 
-/** A request's address as the log keeps it: the path and query of one to this page's server, else the URL without its
+/** A request's address as the log keeps it: the path and query of one to this page's server, with the API's own path
+ * for one under this browser's key (lib/browserKey apiPath, so a report never holds the key), else the URL without its
  * user and password. Pure given `origin`. */
 export function requestUrl(input: RequestInfo | URL, origin: string): string {
   let raw = ''
@@ -67,7 +69,7 @@ export function requestUrl(input: RequestInfo | URL, origin: string): string {
   else raw = (input as Request).url ?? ''
   try {
     const u = new URL(raw, origin)
-    const shown = u.origin === origin ? u.pathname + u.search : `${u.protocol}//${u.host}${u.pathname}${u.search}`
+    const shown = u.origin === origin ? apiPath(u.pathname) + u.search : `${u.protocol}//${u.host}${u.pathname}${u.search}`
     return cut(shown, URL_MAX)
   } catch {
     return cut(raw, URL_MAX)

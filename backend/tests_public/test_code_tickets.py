@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from conftest import UI_COOKIE_VALUE, Listener, _record_paired, card_wait
+from conftest import UI_COOKIE_VALUE, UI_KEY_VALUE, Listener, _record_paired, card_wait
 from fastapi import HTTPException
 from starlette.requests import Request
 
@@ -128,7 +128,8 @@ def _click(path: str = "/") -> Request:
     server (_record_paired)."""
     _record_paired(UI_COOKIE_VALUE)
     return Request({"type": "http", "path": path, "client": ("127.0.0.1", 1),
-                    "headers": [(b"cookie", f"{hook_auth.ui_cookie()}={UI_COOKIE_VALUE}".encode())]})
+                    "headers": [(b"cookie", f"{hook_auth.ui_cookie()}={UI_COOKIE_VALUE}".encode())],
+                    "state": {hook_auth.BROWSER_KEY_SCOPE: UI_KEY_VALUE}})
 
 
 async def test_a_click_prepares_the_ticket_and_starts_its_agent_through_the_module_in_its_thread(ticketing):

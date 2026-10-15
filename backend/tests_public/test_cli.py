@@ -347,29 +347,42 @@ def test_unpair_signs_every_browser_out_and_says_how_to_sign_in_again(home, monk
 
 def test_browser_cookie_mints_a_code_and_trades_it_without_the_token(home, monkeypatch):
     """A script's browser sign-in: a code from POST /api/ui/pair (with the token), traded at POST /api/ui/key with no
-    token, as a browser trades it; the cookie it sets comes back as `name=value`. A refusal raises."""
+    token, as a browser trades it; the cookie it sets comes back as `name=value; Path=/b/<key>/api/`, the path it is
+    scoped to (beside the deletion of an earlier build's cookie), and _request sends it there as a browser does, to the
+    API path under the browser's key. A refusal raises."""
     import http.server
 
+    key = "k3y-of-the-script-s-browser"
     seen: list[tuple[str, dict, bool]] = []
+    gets: list[tuple[str, str]] = []
 
     class Server(http.server.BaseHTTPRequestHandler):
         def do_POST(self):  # noqa: N802 — http.server's name
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])) or b"{}")
             seen.append((self.path, body, any(k.lower().startswith("x-thimble") for k in self.headers.keys())))
             if self.path == "/api/ui/pair":
-                out, cookie = json.dumps({"code": "c0de", "expires_s": 300}).encode(), None
+                out, cookies = json.dumps({"code": "c0de", "expires_s": 300}).encode(), []
             elif body.get("code") == "c0de":
-                out, cookie = b"", "thimble-ui-8300=s3cret; Path=/api/; HttpOnly; SameSite=Strict"
+                out = json.dumps({"key": key}).encode()
+                cookies = [f"thimble-ui-8300=s3cret; Max-Age=34560000; Path=/b/{key}/api/; HttpOnly; SameSite=strict",
+                           'thimble-ui-8300=""; expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0; Path=/api/']
             else:
                 self.send_response(410)
                 self.end_headers()
                 return
-            self.send_response(200 if out else 204)
-            if cookie:
+            self.send_response(200)
+            for cookie in cookies:
                 self.send_header("Set-Cookie", cookie)
             self.send_header("Content-Length", str(len(out)))
             self.end_headers()
             self.wfile.write(out)
+
+        def do_GET(self):  # noqa: N802
+            gets.append((self.path, self.headers.get("Cookie", "")))
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"[]")
 
         def log_message(self, *a):
             pass
@@ -379,9 +392,14 @@ def test_browser_cookie_mints_a_code_and_trades_it_without_the_token(home, monke
     try:
         url = f"http://127.0.0.1:{server.server_address[1]}"
         cli.write_state({"port": server.server_address[1]})
-        assert cli.browser_cookie(url) == "thimble-ui-8300=s3cret"
+        cookie = cli.browser_cookie(url)
+        assert cookie == f"thimble-ui-8300=s3cret; Path=/b/{key}/api/"
         assert [(path, body) for path, body, _ in seen] == [("/api/ui/pair", {}), ("/api/ui/key", {"code": "c0de"})]
         assert seen[0][2] is True and seen[1][2] is False, "the mint proves the token, the claim does not"
+        assert cli._request("GET", f"{url}/api/ws/mini/concepts?x=1", cookie=cookie) == (200, [])
+        assert gets == [(f"/b/{key}/api/ws/mini/concepts?x=1", "thimble-ui-8300=s3cret")]
+        bare = "thimble-ui-8300=s3cret"
+        assert cli.browser_request(f"{url}/api/x", bare) == (f"{url}/api/x", bare), "a cookie that names no path"
         monkeypatch.setattr(cli, "pair_code", lambda api, name: "spent")
         with pytest.raises(RuntimeError, match="refused the sign-in code"):
             cli.browser_cookie(url)

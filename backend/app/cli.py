@@ -598,12 +598,25 @@ def sandbox_line(cwd: Path) -> str:
     return SANDBOX_LINE.format(rule=sandbox_rule(), settings=settings, log=log_path())
 
 
+def browser_request(url: str, cookie: str) -> tuple[str, str]:
+    """(the URL, the Cookie header) of a request a signed-in browser makes, for a script holding browser_cookie's
+    `cookie` (`name=value; Path=/b/<key>/api/`): `url`, a URL of the server's API (/api/...), moved under the cookie's
+    path, where the server counts it (hook_auth.browser_path), and the cookie's `name=value`. A cookie that names no
+    such path leaves `url` as it is."""
+    pair, _, attrs = cookie.partition(";")
+    path = next((a.strip()[5:] for a in attrs.split(";") if a.strip().lower().startswith("path=")), "")
+    u = urllib.parse.urlsplit(url)
+    if path.startswith("/b/") and path.endswith("/api/") and (u.path == "/api" or u.path.startswith("/api/")):
+        url = urllib.parse.urlunsplit(u._replace(path=path[:-len("/api/")] + u.path))
+    return url, pair.strip()
+
+
 def _request(method: str, url: str, body: dict | None = None, timeout: float = 5.0,
              cookie: str | None = None) -> tuple[int, Any]:
     """(status, parsed json | text). Transport failures are (0, message); an HTTP error is (status, its body). The
     request proves the server's token (hook_auth), which the routes of hooks, the plugin and this CLI need; a write the
-    analyst's browser makes needs a signed-in browser's `cookie` (`name=value`, browser_cookie), sent as the Cookie
-    header. A notebook kernel holds neither."""
+    analyst's browser makes needs a signed-in browser's `cookie` (browser_cookie), sent as the Cookie header on the path
+    the cookie is scoped to (browser_request). A notebook kernel holds neither."""
     from . import hook_auth  # noqa: PLC0415
 
     data = json.dumps(body).encode() if body is not None else None
@@ -612,7 +625,7 @@ def _request(method: str, url: str, body: dict | None = None, timeout: float = 5
     if tok:  # good only on the port `url` names, for a few minutes, once: a process that holds that port gains nothing
         headers.update(hook_auth.headers(tok, hook_auth.port_of(url)))
     if cookie:
-        headers["Cookie"] = cookie
+        url, headers["Cookie"] = browser_request(url, cookie)
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
         with config.LOOPBACK.open(req, timeout=timeout) as r:  # never through the shell's proxy
@@ -1446,8 +1459,9 @@ def ui_url(name: str | None, pair: bool = False) -> str:
 
 def browser_cookie(url: str | None = None) -> str:
     """A browser's sign-in, for scripts (scripts/dev/precache_orientation.py, scripts/e2e): a code from the server at
-    `url` (pair_code), traded at `POST /api/ui/key` with no token, as a browser trades it; the cookie it sets, as
-    `name=value` for _request's `cookie`. Each call is a new sign-in, with its terminal line and notice. RuntimeError
+    `url` (pair_code), traded at `POST /api/ui/key` with no token, as a browser trades it; the cookie it sets with the
+    path of the browser's key it is scoped to (hook_auth.browser_path), as `name=value; Path=/b/<key>/api/` for
+    _request's `cookie` (browser_request). Each call is a new sign-in, with its terminal line and notice. RuntimeError
     when the server gives no code or no cookie."""
     base = url or api_url()
     code = pair_code(base, None)
@@ -1462,10 +1476,12 @@ def browser_cookie(url: str | None = None) -> str:
         raise RuntimeError(f"the server at {base} refused the sign-in code ({e.code})") from None
     except OSError as e:
         raise RuntimeError(f"the server at {base} did not answer the sign-in: {e}") from None
-    for raw in set_cookies:
-        name, _, value = raw.split(";", 1)[0].strip().partition("=")
-        if name and value:
-            return f"{name}={value}"
+    for raw in set_cookies:  # the cookie, beside the deletion of one an earlier build scoped to /api/
+        pair, _, attrs = raw.partition(";")
+        name, _, value = pair.strip().partition("=")
+        path = next((a.strip()[5:] for a in attrs.split(";") if a.strip().lower().startswith("path=")), "")
+        if name and value and path.startswith("/b/"):
+            return f"{name}={value}; Path={path}"
     raise RuntimeError(f"the server at {base} set no cookie for the sign-in")
 
 

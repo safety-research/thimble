@@ -212,8 +212,10 @@ def test_the_permission_hook_waits_on_main_s_meta_until_the_browser_answers(monk
         assert r.status_code == 403
         t.join(0.2)
         assert t.is_alive(), "the hook still waits"
-        assert client.post("/api/ui/key", json={"code": hook_auth.mint(CORPUS)}).status_code == 204
-        r = client.post(f"/api/ws/{CORPUS}/permission", json={"id": held[0]["id"], "allow": True})
+        claimed = client.post("/api/ui/key", json={"code": hook_auth.mint(CORPUS)})
+        assert claimed.status_code == 200
+        page = f"/b/{claimed.json()['key']}"  # the page asks under its key's path, where its cookie goes (hook_auth)
+        r = client.post(f"{page}/api/ws/{CORPUS}/permission", json={"id": held[0]["id"], "allow": True})
         assert r.status_code == 200
         t.join(10)
         assert answers[0].status_code == 200 and answers[0].json() == {"id": held[0]["id"], "behavior": "allow"}

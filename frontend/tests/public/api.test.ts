@@ -1,7 +1,8 @@
 // The browser's client for the backend's routes (src/lib/api.ts, src/report/commentsApi.ts). The backend answers only
 // its own origin and refuses a state-changing request whose body is not JSON (backend/app/http_guard.py), so every
-// call goes to a relative /api path, every call that changes state sends JSON as JSON, and a workspace name or an id
-// is percent-encoded into its path segment. Every method of every client is called here with fetch stubbed, so a new
+// call goes to a relative /api path (under the browser's own /b/<key> once it holds its key, src/lib/browserKey.ts),
+// every call that changes state sends JSON as JSON, and a workspace name or an id is percent-encoded into its path
+// segment. Every method of every client is called here with fetch stubbed, so a new
 // route is held to the same rules without a line of its own.
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import * as client from '../../src/lib/api.ts'
@@ -67,6 +68,25 @@ describe('the API client', () => {
         expect(url, name).not.toContain(WS)
         expect(url, name).not.toMatch(/\/\.\.\//)
       }
+    }
+  })
+
+  test("once this browser holds its key, every request goes under the browser's own path, which its cookie is scoped to", async () => {
+    // lib/browserKey: the server scopes the cookie to /b/<key>/api/, so a request to /api/ itself would go unsigned
+    const key = 'Ab3_-'.repeat(6)
+    const held = new Map([['thimble-browser-key', key]])
+    vi.stubGlobal('window', {
+      localStorage: { getItem: (k: string) => held.get(k) ?? null, setItem: (k: string, v: string) => void held.set(k, v) },
+      location: { hash: '', search: '', pathname: '/', origin: 'http://127.0.0.1:8300' },
+      history: { state: null, replaceState: () => undefined },
+      addEventListener: () => undefined,
+    })
+    const all = await callEverything()
+    expect(all.length).toBeGreaterThan(80)
+    for (const [name, made] of all) {
+      const urls = typeof made === 'string' ? [made] : made.map((c) => c.url)
+      expect(urls.length, `${name} asks something`).toBeGreaterThan(0)
+      for (const url of urls) expect(url, name).toMatch(new RegExp(`^/b/${key}/api/`))
     }
   })
 

@@ -168,12 +168,13 @@ def test_a_shot_token_reads_for_its_time_and_never_writes(client, monkeypatch):
 def test_the_shot_route_gives_a_token_only_to_the_token_s_holder(client, plugin_headers):
     """POST /api/ui/shot is a token route (hook_auth.CLI_PATHS): a dev ticket's runner proves the stack's or the box's
     token, and the answer proves this server back. A page with the cookie, or anyone else, gets none."""
-    from conftest import UI_COOKIE_VALUE, _record_paired
+    from conftest import UI_COOKIE_VALUE, UI_KEY_VALUE, _record_paired
 
     assert client.post("/api/ui/shot").status_code == 401
     _record_paired(UI_COOKIE_VALUE)
     client.cookies.set(hook_auth.ui_cookie(), UI_COOKIE_VALUE)
     assert client.post("/api/ui/shot").status_code == 401, "the cookie alone gets no token"
+    assert client.post(f"/b/{UI_KEY_VALUE}/api/ui/shot").status_code == 401, "not under its key's path either"
     client.cookies.clear()
     r = client.post("/api/ui/shot", headers=plugin_headers())
     assert r.status_code == 200 and r.json()["expires_s"] == hook_auth.SHOT_TTL_S
@@ -324,7 +325,7 @@ def test_an_event_stream_a_browser_opened_ends_once_that_browser_is_signed_out(s
     import time  # noqa: PLC0415
 
     import httpx  # noqa: PLC0415
-    from conftest import UI_COOKIE_VALUE, _record_paired  # noqa: PLC0415
+    from conftest import UI_COOKIE_VALUE, UI_KEY_VALUE, _record_paired  # noqa: PLC0415
 
     from app import agents, investigation  # noqa: PLC0415
 
@@ -349,11 +350,12 @@ def test_an_event_stream_a_browser_opened_ends_once_that_browser_is_signed_out(s
                            (other, hook_auth.unpair)):
         _record_paired(cookie)
         jar = {hook_auth.ui_cookie(): cookie}
+        page = f"{served}/b/{UI_KEY_VALUE}"  # where the browser's page asks (hook_auth.browser_path)
         got: list[str] = []
         ended = threading.Event()
 
         def read() -> None:
-            with httpx.Client(cookies=jar, timeout=30) as c, c.stream("GET", f"{served}/api/ws/mini/events") as r:
+            with httpx.Client(cookies=jar, timeout=30) as c, c.stream("GET", f"{page}/api/ws/mini/events") as r:
                 got.append(str(r.status_code))
                 for line in r.iter_lines():
                     got.append(line)
@@ -368,4 +370,4 @@ def test_an_event_stream_a_browser_opened_ends_once_that_browser_is_signed_out(s
         write(f"after {cookie}")
         assert ended.wait(10), "the stream ended"
         assert not any(f"after {cookie}" in x for x in got), "the event written after the sign-out never arrived"
-        assert httpx.get(f"{served}/api/ws/mini/canvas", cookies=jar).status_code == 401
+        assert httpx.get(f"{page}/api/ws/mini/canvas", cookies=jar).status_code == 401

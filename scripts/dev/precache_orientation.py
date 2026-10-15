@@ -149,9 +149,13 @@ def status(ws: Path, c: str) -> dict:
 
 
 def press_start(url: str, cookie: str, body: dict[str, Any]) -> tuple[int, Any]:
-    """POST the Start with the page's cookie, as the browser sends it (the click routes take only the analyst's)."""
+    """POST the Start with the page's cookie, as the browser sends it, under the cookie's path (cli.browser_request; the
+    click routes take only the analyst's)."""
+    from app import cli  # noqa: PLC0415
+
+    url, pair = cli.browser_request(url, cookie)
     req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST",
-                                 headers={"Content-Type": "application/json", "Cookie": cookie})
+                                 headers={"Content-Type": "application/json", "Cookie": pair})
     try:
         with urllib.request.urlopen(req, timeout=60) as r:
             return r.status, json.loads(r.read() or b"{}")
