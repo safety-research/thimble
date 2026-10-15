@@ -941,6 +941,38 @@ def test_up_in_the_bash_sandbox_prints_what_the_hook_did_outside_it(home, data, 
     assert capsys.readouterr().out.startswith("thimble: WARNING") and started == []
 
 
+def test_slash_thimble_s_hook_leaves_the_session_s_marker_for_the_hooks_module(home, monkeypatch, tmp_path):
+    """/thimble's hook leaves <home>/up/<session>.active before its `up` runs, written anew at each /thimble: where an
+    organization manages Claude Code, the module's skill.prompt hook does not run, and the module turns on when it finds
+    a new marker at the end of main's turn (plugin/hooks/thimble.ts). The result for the skill's `up` is kept as before;
+    a hook input with no usable session id leaves nothing."""
+    seen = []
+
+    def up(args):
+        marker = cli.hook_marker_path(args.session)
+        seen.append(marker is not None and marker.is_file())
+        print(f"thimble: up {args.action}")
+
+    monkeypatch.setattr(cli, "cmd_server_up", up)
+    folder = tmp_path / "calls"
+    folder.mkdir()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(folder))
+    hook = {"session_id": "s7", "cwd": str(folder), "command_name": "thimble:thimble", "command_args": ""}
+    assert cli.hook_up(json.dumps(hook)) == 0
+    marker = home / "up" / "s7.active"
+    assert cli.hook_marker_path("s7") == marker and seen == [True], "the marker is there before `up` runs"
+    first = json.loads(marker.read_text("utf-8"))
+    assert first["cwd"] == str(folder) and first["action"] == ""
+    assert marker.parent.stat().st_mode & 0o077 == 0, "only its owner reads <home>/up"
+    assert cli.hook_up(json.dumps({**hook, "command_args": "status"})) == 0
+    second = json.loads(marker.read_text("utf-8"))
+    assert second["action"] == "status" and second["at"] > first["at"], "a new marker for each /thimble"
+    assert cli.take_hook_result("s7", folder, "status", "") == "thimble: up status\n"
+    assert marker.is_file(), "the skill's `up` takes the result and leaves the marker"
+    assert cli.hook_up(json.dumps({**hook, "session_id": "../"})) == 0 and len(seen) == 2
+    assert sorted(p.name for p in marker.parent.iterdir()) == ["s7.active"]
+
+
 def test_the_doctor_says_when_the_analyst_s_own_sandbox_makes_a_folder_in_the_corpus(tmp_path, monkeypatch):
     """main's Bash runs in the analyst's own session, so with their Claude Code sandbox on it adds .claude/.cc-writes/
     to the folder `thimble` starts in; thimble leaves that session's settings alone and the doctor says so."""

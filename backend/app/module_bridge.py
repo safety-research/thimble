@@ -480,6 +480,8 @@ def why_not(c: str) -> str:
     for key in ("disableAllHooks", "allowManagedHooksOnly"):
         if tier.get(key) is True:
             return f"your organization's managed settings set {key}"
+    if cc_plugin.managed_mods_only():
+        return f"your organization's managed settings set {cc_plugin.MODS_ONLY}"
     if file and out:
         if out.get("session") != main_session(c):
             return NOT_MAIN

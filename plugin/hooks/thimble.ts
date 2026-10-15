@@ -5,13 +5,18 @@
 // Scope. It acts only in thimble's main and checks that before its first fetch or registration: `isInteractive` first
 // (an open long poll would hold every `claude -p` run open), THIMBLE_NO_MODULE unset, then either THIMBLE_LAUNCHED at
 // session.start (the `thimble` command starts the server first, so the types are in main's first agent listing) or
-// /thimble expanding in this session (skill.prompt for thimble:thimble); then a server named by server.json that
-// accepts its hello for this folder and session (only main's). In a session the launcher did not start, it waits for
+// /thimble expanding in this session; then a server named by server.json that accepts its hello for this folder and
+// session (only main's). The module hears of /thimble from skill.prompt for thimble:thimble, or at the end of main's
+// turn from the marker /thimble's own hook leaves, <home>/up/<session>.active (app/cli.py hook_up), written anew at
+// each /thimble: where an organization manages Claude Code (managed settings on the machine, or a Team or Enterprise
+// account), Claude Code seats its built-in security plugin, and skill.prompt passes over the plugins a person installs,
+// while turn.complete still reaches them. Whichever of the two comes first stands for that /thimble; a marker the
+// module has seen (its mtime and size) never turns it on again. In a session the launcher did not start, it waits for
 // that server at most ACTIVATE_WAIT_MS after /thimble, then says hello once at the end of each of main's turns; a
 // refused hello, or a folder the server does not know, leaves it idle until the next /thimble. Anywhere else it
-// registers nothing and fetches nothing. It starts no process: $.http.fetch only, every request proving the token of
-// server.json and every answer proving it back (app/hook_auth.py), so a process on the port can neither hand it
-// requests nor read them.
+// registers nothing and fetches nothing, and looks at nothing but that marker's file system entry once per turn of
+// main's. It starts no process: $.http.fetch only, every request proving the token of server.json and every answer
+// proving it back (app/hook_auth.py), so a process on the port can neither hand it requests nor read them.
 //
 // The file guard (tool.call), from the moment the scope check passes: it refuses a call of a file tool (Read, Edit,
 // Write, MultiEdit, NotebookEdit, Grep, Glob) on thimble's token files, a call of an edit tool on thimble's records or,
@@ -186,6 +191,8 @@ type State = {
   interactive: boolean // session.start said the session is interactive
   launched: boolean // the launcher started this session (THIMBLE_LAUNCHED at session.start)
   armed: boolean // /thimble expanded in this session the launcher did not start, and no hello was refused since
+  expanded: boolean // skill.prompt reported /thimble in main's turn now running, so its marker is not a new /thimble
+  marker: string // the stamp of the last marker /thimble's hook left that the module saw ('' for none)
   user: string // $HOME, for a path that starts with ~
   home: string // thimble's home, as spelled
   homeReal: string // and resolved, '' when it does not resolve
@@ -214,7 +221,8 @@ type State = {
 
 function fresh(): State {
   return {
-    active: false, interactive: false, launched: false, armed: false, user: '', home: '', homeReal: '', rules: null,
+    active: false, interactive: false, launched: false, armed: false, expanded: false, marker: '', user: '', home: '',
+    homeReal: '', rules: null,
     cwd: '', session: '', version: '', gen: 0, server: null, roles: {}, registered: {}, efforts: {},
     requests: {}, started: new Set(), queue: Promise.resolve(), helloing: null, leaving: '', plan: null,
     file: false, ws: '', writing: Promise.resolve(), stamps: {}, n: 0,
@@ -931,6 +939,20 @@ function namesPrivate(m: State, e: Json): boolean {
 
 const moduleOn = async ($: Engine): Promise<boolean> => OFF.has(((await $.env.get('THIMBLE_NO_MODULE')) ?? '').trim().toLowerCase())
 
+/** At the end of main's turn: whether /thimble's hook left a marker for this session that the module has not seen
+ *  (module note), <home>/up/<session>.active as app/cli.py hook_marker_path names it, and no skill.prompt reported the
+ *  same /thimble in this turn. With THIMBLE_NO_MODULE it looks at nothing. */
+async function expanded($: Engine, m: State): Promise<boolean> {
+  const reported = m.expanded
+  m.expanded = false
+  if (!(await moduleOn($))) return false
+  const name = (await $.session.id()).replace(/[^A-Za-z0-9_-]/g, '')
+  const seen = name ? await stamp($, `${await thimbleHome($)}/up/${name}.active`) : ''
+  if (!seen || seen === m.marker) return false
+  m.marker = seen
+  return !reported
+}
+
 export const register: Register = on => {
   const m = fresh()
 
@@ -957,7 +979,9 @@ export const register: Register = on => {
   // /thimble in a session the launcher did not start turns the module on, in that session only (module note)
   on('skill.prompt', async ($, e, next) => {
     const r = await next(e)
-    if (e.skill === `${PLUGIN}:thimble` && m.interactive && !m.launched && !m.active && (await moduleOn($))) {
+    if (e.skill !== `${PLUGIN}:thimble`) return r
+    m.expanded = true // its marker, at the end of this turn, is this /thimble
+    if (m.interactive && !m.launched && !m.active && (await moduleOn($))) {
       m.active = true
       m.armed = true
       void begin($, m, m.cwd, ACTIVATE_WAIT_MS)
@@ -998,10 +1022,17 @@ export const register: Register = on => {
       } else {
         void call($, m, 'POST', '/api/module/ended', { cwd: m.cwd, session: m.session, agentId: e.agentId, answer: e.answer, reason: e.reason, ...refusal })
       }
-    } else if (m.armed && !m.active && e.agentId === undefined) {
-      // after /thimble, once the wait for the server ended: one hello at the end of each of main's turns (module note)
-      m.active = true
-      void begin($, m, m.cwd, 0)
+    } else if (e.agentId === undefined && m.interactive && !m.launched) {
+      if ((await expanded($, m)) && !m.active) {
+        // /thimble's marker, where skill.prompt passed over this plugin: what skill.prompt does (module note)
+        m.active = true
+        m.armed = true
+        void begin($, m, m.cwd, ACTIVATE_WAIT_MS)
+      } else if (m.armed && !m.active) {
+        // after /thimble, once the wait for the server ended: one hello at the end of each of main's turns (module note)
+        m.active = true
+        void begin($, m, m.cwd, 0)
+      }
     }
     return r
   })

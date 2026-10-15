@@ -118,3 +118,24 @@ def test_slash_thimble_prints_nothing_about_routes_on_the_hook_route_and_the_mon
     note, mark = cli.monitor_lines(tmp_path, "sid")
     assert note == cli.MONITOR_NOTE
     assert mark.startswith(cli.MONITOR_MARK) and mark.endswith("--stream --cwd " + str(tmp_path) + " --session sid")
+
+
+MODS_ONLY = {"pluginConfigs": {"cc-plugin-sec-default@builtin": {"options": {"allowManagedModsOnly": True}}}}
+
+
+@pytest.mark.parametrize("tier, off", [
+    (None, False),
+    ({}, False),
+    (MODS_ONLY, True),
+    ({"pluginConfigs": {"cc-plugin-sec-default@builtin": {"options": {"allowManagedModsOnly": False}}}}, False),
+    ({**MODS_ONLY, "prependPlugins": ["corp-policy@corp"]}, False),
+    ({**MODS_ONLY, "prependPlugins": ["corp-policy@corp", "cc-plugin-sec-default@builtin"]}, True),
+    ({**MODS_ONLY, "appendPlugins": ["thimble@thimble-local"]}, False),
+    ({"pluginConfigs": "garbled"}, False),
+])
+def test_the_security_plugin_s_allow_managed_mods_only_keeps_thimble_s_module_out(monkeypatch, tier, off):
+    """Claude Code's built-in security plugin, seated where an organization manages Claude Code (unless managed
+    prependPlugins leaves it out), refuses the hooks module of every plugin a person installs when its managed option
+    allowManagedModsOnly is set to anything but false; a plugin in one of the organization's own seats loads."""
+    monkeypatch.setattr(cc_plugin, "managed", lambda environ=None: tier)
+    assert cc_plugin.managed_mods_only() is off
