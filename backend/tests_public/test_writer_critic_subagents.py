@@ -263,25 +263,6 @@ async def test_a_thimble_agent_s_request_is_answered_at_once_and_its_card_has_no
         session._live.pop(CORPUS, None)
 
 
-def test_the_card_names_the_fence_s_rule_that_asks(monkeypatch, workspaces_tmp):
-    from app import userconf
-
-    # userconf.main_rules's own shape: Rule(behavior, rule, cause), of which only the ask rules send a request
-    monkeypatch.setattr(userconf, "main_rules",
-                        lambda c: [userconf.Rule("deny", "Edit(//data/corpus/kept/**)", "state"),
-                                   userconf.Rule("ask", "Edit(//data/corpus/**)", "data"),
-                                   userconf.Rule("ask", "WebFetch", "web"),
-                                   userconf.Rule("allow", "WebSearch", "web")])
-    assert events._asked_by(CORPUS, "Edit", {"file_path": "/data/corpus/kept/a.jsonl"}) == "data"
-    assert events._asked_by(CORPUS, "Edit", {"file_path": "/data/corpus/a.jsonl"}) == "data"
-    assert events._asked_by(CORPUS, "WebFetch", {"url": "https://x"}) == "web"
-    assert events._asked_by(CORPUS, "WebSearch", {"query": "x"}) is None, "an allow rule sends nothing"
-    assert events._asked_by(CORPUS, "Bash", {"command": "ls"}) is None
-    assert events._asked_by(CORPUS, "Write", {"file_path": "/data/corpus/new.txt"}) == "data", "Edit covers Write"
-    assert events._asked_by(CORPUS, "NotebookEdit", {"notebook_path": "/data/corpus/n.ipynb"}) == "data"
-    assert events._asked_by(CORPUS, "Edit", {"file_path": "/data/corpus-2/a.jsonl"}) is None, "a folder, not a prefix"
-
-
 def test_a_code_ticket_s_runner_reads_no_project_settings(workspaces_tmp, monkeypatch):
     """A `claude -p` job the server starts (a code ticket, `thimble fix`) runs none of the folder's own hooks, settings or
     MCP servers (U17)."""

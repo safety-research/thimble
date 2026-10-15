@@ -1089,14 +1089,14 @@ def test_an_earlier_demo_workspace_under_a_suffixed_name_becomes_demo_name_with_
 
 
 def test_the_server_renames_an_earlier_demo_workspace_and_refuses_while_a_session_holds_it(tmp_path, named_world,
-                                                                                          monkeypatch):
+                                                                                          monkeypatch, plugin_headers):
     from fastapi.testclient import TestClient
 
     from app import cli, events, main
 
     w = named_world
     pre, old = old_demo(w, tmp_path)
-    client = TestClient(main.create_app())
+    client = TestClient(main.create_app(), headers=plugin_headers())  # the rename is the CLI's route: it proves the token
     calls: list[tuple[str, str]] = []
 
     def request(method, url, body=None, timeout=5.0):

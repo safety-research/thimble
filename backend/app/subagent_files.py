@@ -21,9 +21,8 @@ In terminal mode (no server) two more files are in the folder, and subagents.jso
                   write a file whole in place
   subagents.json  the module's requests, entries of `requests` of kind `module` ({op, args, module: pending | answered
                   | expired, session, asked_at, expires_at}, add_module_request), main's permission mode (`main`:
-                  record_mode) and the session main's terminal said it runs in Manual mode in (manual_once), the notes
-                  for a new main after /clear (`module.notes`: rekey) and the forks of threads that are starting
-                  (`forking`)
+                  record_mode), the notes for a new main after /clear (`module.notes`: rekey) and the forks of threads
+                  that are starting (`forking`)
 
 The files are in the workspace's `trusted` folder (DIR). The server makes the folder and the files when it
 registers the workspace, and both kernel wrappers bind the folder read-only (kernel_wrap.TRUSTED_DIR), since a notebook
@@ -94,7 +93,7 @@ TOOLS_MD = ("prompts", "tools.md")  # under the tree: the hint sections the hook
 # Claude Code's permission mode in which thimble starts nothing: a subagent inherits it and then asks before each call
 PLAN_MODE = "plan"
 # Claude Code's Manual mode, by both its names ("manual" is its alias of "default"), in which it asks before most
-# commands; main's terminal says so once per session (modes.MANUAL_LINES, manual_once)
+# commands; thimble then shows the `manual-mode` notice (modes.manual_notice)
 MANUAL_MODES = ("default", "manual")
 
 
@@ -1079,17 +1078,6 @@ def record_mode(state: dict[str, Any], session: str, mode: str) -> bool:
     if mode == PLAN_MODE and was and was != PLAN_MODE:
         out["before_plan"] = was
     state["main"] = out
-    return True
-
-
-def manual_once(state: dict[str, Any], session: str, mode: str) -> bool:
-    """Whether main's terminal shows the Manual-mode line now, in terminal mode: main's session `session` reports Manual
-    mode (MANUAL_MODES) and the line has not shown in that session yet (`main.manual_told`, the session it showed in),
-    which this then records."""
-    main = state.get("main") if isinstance(state.get("main"), dict) else {}
-    if mode not in MANUAL_MODES or not session or main.get("manual_told") == session:
-        return False
-    state["main"] = {**main, "manual_told": session}
     return True
 
 

@@ -1,4 +1,5 @@
-"""Notices: something an agent of thimble's did failed, told where the analyst is looking, with an easy fix.
+"""Notices: something an agent of thimble's did failed, or the analyst's setup needs a look, told where the analyst is
+looking, with an easy fix.
 
 A notice is one short line in a warning style, an optional action button, and x to dismiss it. It shows in the
 foreground: in the browser in a strip above the composer of whichever chat the analyst has open, until they dismiss it
@@ -15,9 +16,11 @@ a list of them, `do` one of ACTIONS:
   proposals-off    PUT /api/ws/{c}/settings {propose_views: false}
   settings         open Settings
   view-retry       the failed view's Retry (its slug in `slug`)
+  sign-out         POST /api/ui/signout (the browser's id in slug)
 
 A notice with the same `key` replaces the earlier one in place, so a failure that repeats updates one notice. clear
-(a later success under the key) and dismiss (the analyst's x) take a notice away. Each change is a `notice` event on
+(a later success under the key) and dismiss (the analyst's x) take a notice away. A dismissal of a REMEMBERED key holds
+for the workspace: dismiss records the key in DISMISSED_FILE, and post then writes no notice under it. Each change is a `notice` event on
 the workspace stream: {id, key, kind, text, agent, chat, action, foreground: true} for a notice, {id, key, cleared:
 true} for one taken away. GET /api/ws/{c}/notices gives the open ones, so a page loaded again shows them.
 
@@ -26,6 +29,16 @@ view builds and code tickets, checks.py for report checks), `proposals` for the 
 `safeguards:<chat>` for a reply Claude's safeguards switched to another model (session.py), `thread:<chat>` and
 `helper:<agent id>` for a side thread's or a helper's API error, `main:api` for main's own (session.py), `card-check`
 (card_check.py) and `label:<id>` (concepts.py). post and clear never raise: a failure to tell is logged.
+
+Kinds that tell of the setup rather than a failure:
+
+  manual-mode  key `manual-mode`: main runs in Claude Code's Manual mode (modes.manual_notice; session.note_mode in
+               browser mode, local_hooks' mode-notice in terminal mode), shown in red; it goes when main reports
+               another mode
+  sandbox      key `no-box:<extension>`: an extension's program runs without a sandbox (harness.py)
+  setup        keys `env:<NAME>` and `proxy`: what /thimble found in the shell (events.session_route), in words this
+               module writes from the key (setup_text), never words from the request
+  sign-in      key `sign-in:<id>`: a browser signed in to thimble (main.signed_in), with Sign it out
 
 A failure of Anthropic's API is told in plain words with its fix, and each fix says where it runs (reason, API_WORDS):
 in the browser with its button, or "In your terminal: …" for one only Claude Code's terminal can run, such as /login or
@@ -64,8 +77,11 @@ _loop: asyncio.AbstractEventLoop | None = None
 TYPE = "notice"  # the event's type on the workspace stream, and the row's type in a chat's log
 API = "api"  # the kind of a notice of main's own request that Anthropic's API failed (session.py), which main's chat
 # shows as its API error card: no row, and the foreground strip leaves it out while main is open
-ACTIONS = ("proposals-retry", "proposals-off", "settings", "view-retry")
+ACTIONS = ("proposals-retry", "proposals-off", "settings", "view-retry", "sign-out")
 NOTICES_FILE = "notices.json"  # in the workspace folder: the open notices, oldest first
+DISMISSED_FILE = "notices-dismissed.json"  # in the workspace folder: the REMEMBERED keys the analyst dismissed
+# keys whose dismissal holds for the workspace: a key equal to one, or starting with one that ends in ":"
+REMEMBERED = ("manual-mode", "no-box:")
 OPEN_MAX = 50  # open notices kept; the oldest go first
 TEXT_CHARS = 480  # a notice's text at most, cut at a word (long enough for a fix in the terminal and its words)
 REASON_CHARS = 280  # a failure's own words inside a notice at most
@@ -149,6 +165,47 @@ def open_notices(c: str) -> list[dict[str, Any]]:
         return []
 
 
+def remembered(key: Any) -> bool:
+    """Whether a dismissal of `key` holds for the workspace (REMEMBERED)."""
+    k = str(key or "")
+    return bool(k) and any(k == r or (r.endswith(":") and k.startswith(r)) for r in REMEMBERED)
+
+
+def _dismissed_file(c: str) -> Path:
+    return config.workspace_path(c) / DISMISSED_FILE
+
+
+def _dismissed_keys(c: str) -> list[str]:
+    try:
+        p = _dismissed_file(c)
+        raw = ledger.read_json(p, []) if p.is_file() and not p.is_symlink() else []
+    except (OSError, ValueError, HTTPException):
+        return []
+    return [str(k) for k in raw if isinstance(k, str)] if isinstance(raw, list) else []
+
+
+def dismissed(c: str, key: str) -> bool:
+    """Whether the analyst dismissed the REMEMBERED key `key` in workspace `c`, so no notice shows under it."""
+    return remembered(key) and key in _dismissed_keys(c)
+
+
+def _remember(c: str, keys: list[str]) -> None:
+    """Record the REMEMBERED keys among `keys` as dismissed for the workspace."""
+    keep = [k for k in keys if remembered(k)]
+    if not keep:
+        return
+
+    def change(raw: Any) -> list[str] | None:
+        held = [str(k) for k in raw if isinstance(k, str)] if isinstance(raw, list) else []
+        new = [k for k in dict.fromkeys(keep) if k not in held]
+        return [*held, *new] if new else None
+
+    try:
+        ledger.update_json(_dismissed_file(c), change, [])
+    except (OSError, ValueError, HTTPException):
+        log.warning("%s: the dismissal of %s was not kept", c, ", ".join(keep), exc_info=True)
+
+
 def _row(c: str, chat: str, rec: dict[str, Any]) -> None:
     """The notice as a row in its agent's chat, for its history; nothing when the chat is gone."""
     if chat == agents.MAIN_ID:
@@ -166,11 +223,13 @@ def post(c: str, *, kind: str, text: str, agent: str | None = None, chat: str | 
     """Tell the analyst in the foreground that something failed (module note): an open notice, replacing the one under
     the same `key`, a row in the agent's chat `chat` when it has one (not with `row` false: the chat shows the failure
     itself, as main's API error card does), and the `notice` event. `kind` names what failed ("agent", "safeguards",
-    "view", "proposals", "card-check", "label", API for main's own request). The notice, or None when it was not
-    written."""
+    "view", "proposals", "card-check", "label", API for main's own request, or a setup kind of the module note). The
+    notice, or None when it was not written, as for a REMEMBERED key the analyst dismissed (dismissed)."""
     text = _short(text, TEXT_CHARS)
     if not text:
         raise ValueError("a notice says something")
+    if key and dismissed(c, str(key)):
+        return None
     rec: dict[str, Any] = {"id": secrets.token_hex(6), "key": str(key) if key else None, "kind": str(kind or "agent"),
                            "text": text, "agent": str(agent) if agent else None, "chat": str(chat) if chat else None,
                            "action": _actions(action), "ts": _now()}
@@ -225,8 +284,36 @@ def clear(c: str, key: str) -> bool:
 
 
 def dismiss(c: str, notice_id: str) -> bool:
-    """The analyst's x on the notice `notice_id`: it goes. False when no such notice is open."""
-    return bool(notice_id) and bool(_take(c, lambda n: n.get("id") == notice_id))
+    """The analyst's x on the notice `notice_id`: it goes, and a REMEMBERED key of it stays dismissed for the workspace.
+    False when no such notice is open."""
+    if not notice_id:
+        return False
+    gone = _take(c, lambda n: n.get("id") == notice_id)
+    _remember(c, [str(n.get("key") or "") for n in gone])
+    return bool(gone)
+
+
+# --------------------------------------------------------------------------- the setup /thimble found
+
+# the `setup` notices' words by key (events.session_route): `env:<NAME>` for each NAME the launcher unsets (cli.UNSET_VARS),
+# and `proxy`; the request names only the key
+SETUP_TEXTS = {
+    "env": ("Your shell sets {name}, so thimble's agents may not use the models and efforts in Settings. In your "
+            "terminal: quit, unset {name} and start claude again, or start with `thimble`."),
+    "proxy": ("Your shell sets a proxy, so thimble's plugin may not reach thimble's server. In your terminal: quit, add "
+              "127.0.0.1 and localhost to NO_PROXY, and start claude again."),
+}
+
+
+def setup_text(key: Any) -> str:
+    """The words of the `setup` notice under `key` (SETUP_TEXTS), '' for a key that is none of them."""
+    from . import cli  # noqa: PLC0415 — cli imports config, procs and cc_plugin only
+
+    k = str(key or "")
+    if k == "proxy":
+        return SETUP_TEXTS["proxy"]
+    kind, _, name = k.partition(":")
+    return SETUP_TEXTS["env"].format(name=name) if kind == "env" and name in cli.UNSET_VARS else ""
 
 
 # --------------------------------------------------------------------------- what failed, in plain words

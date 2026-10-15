@@ -37,6 +37,8 @@ REQUEST, DENIED, PRE = "PermissionRequest", "PermissionDenied", "PreToolUse"
 EVENTS = (REQUEST, DENIED, PRE)
 TIMEOUT = 86_400  # the hook's own timeout in the session's settings for a request or a refusal, in seconds
 PRE_TIMEOUT = 10  # its timeout before each call, which the server answers at once (agent_session.permission_hooks)
+# the request goes to thimble's own server on 127.0.0.1, never through a proxy the session's environment names
+LOOPBACK = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 def sign(token: str, role: str, nonce: str) -> str:
@@ -67,7 +69,7 @@ def post(path: str, body: dict, timeout: float, home: str = "") -> object:
     nonce = secrets.token_hex(16)
     headers = {"Content-Type": "application/json", "X-Thimble-Nonce": nonce, "X-Thimble-Auth": sign(token, "hook", nonce)}
     req = urllib.request.Request(url + path, data=json.dumps(body).encode("utf-8"), method="POST", headers=headers)
-    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 — loopback, thimble's own server
+    with LOOPBACK.open(req, timeout=timeout) as resp:  # noqa: S310 — loopback, thimble's own server
         raw, proof = resp.read(), resp.headers.get("X-Thimble-Proof") or ""
     if not hmac.compare_digest(proof, sign(token, "server", nonce)):
         raise OSError("the answer does not carry thimble's proof")
