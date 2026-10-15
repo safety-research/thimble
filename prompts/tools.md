@@ -1191,7 +1191,7 @@ Start it now as a subagent of this session, with one Agent call whose input is e
 
 {input}
 
-Change nothing in it, since thimble lets only this call through, and end the turn on it, with no words before or after it: the analyst sees the call.
+Change nothing in it, since thimble lets only this call through, and write no words before it. The call returns at once while the agent runs in the background; after its result, end the turn with no words and no other call, since the analyst sees the agent start.
 
 ## subagent-request
 
@@ -1280,7 +1280,7 @@ Start the writer now as a subagent of this session, with one Agent call whose in
 
 {input}
 
-Change nothing in it, since thimble lets only this call through, and end the turn on it, with no words before or after it: the analyst sees the call.
+Change nothing in it, since thimble lets only this call through, and write no words before it. The call returns at once while the agent runs in the background; after its result, end the turn with no words and no other call, since the analyst sees the agent start.
 
 ## start_writing-program
 
@@ -1640,7 +1640,7 @@ The analyst stopped this orientation with Esc in their terminal, and Claude Code
 
 {input}
 
-Change nothing in it, since thimble lets only this call through, and end the turn on it, with no words before or after it: the analyst sees the call.
+Change nothing in it, since thimble lets only this call through, and write no words before it. The call returns at once while the agent runs in the background; after its result, end the turn with no words and no other call, since the analyst sees the agent start.
 
 ## orient-continuation-prompt
 
