@@ -1373,7 +1373,8 @@ button.model-line-part[aria-expanded='true'] {
   gap: 6px;
   min-width: 0;
 }
-/* a long Always allow ends in an ellipsis rather than wrap; its tooltip says the whole of it */
+/* a long Always allow wraps onto more lines rather than end in an ellipsis: Claude Code's words begin "Allow, and don't
+   ask again for", so a cut label never said what it allows (live check 7.f); its tooltip says where it is kept */
 .tipped.chat-perm-always-tip {
   flex: 0 1 auto;
   min-width: 0;
@@ -1382,6 +1383,15 @@ button.model-line-part[aria-expanded='true'] {
   flex: 0 1 auto;
   min-width: 0;
   max-width: 100%;
+  height: auto;
+  min-height: var(--h-control);
+  padding-block: 3px;
+  white-space: normal;
+  text-align: left;
+}
+.chat-perm-always .btn-label {
+  overflow: visible;
+  overflow-wrap: break-word;
 }
 .chat-perm-deny.btn {
   margin-left: auto;

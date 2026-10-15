@@ -100,15 +100,29 @@ def tool_words(tool: str) -> str:
     """A tool as Claude Code's permission dialog names it: an MCP tool `mcp__<server>__<tool>` as `<server> — <Tool>`,
     with each `_` of its tool name a space and each word capitalized, and a plugin's server `plugin_<plugin>_<server>`
     as Claude Code names it, `plugin:<plugin>:<server>` (a plugin's name holds no `_`); any other tool by its name."""
+    parts = _mcp_parts(tool)
+    return tool if parts is None else f"{parts[0]} \u2014 {parts[1]}"
+
+
+def tool_title(tool: str) -> str:
+    """A tool as the button of main's card names it: an MCP tool by its title alone (`Add Card`), since the server's
+    name before it would push what the button allows past its end; any other tool by its name."""
+    parts = _mcp_parts(tool)
+    return tool if parts is None else parts[1]
+
+
+def _mcp_parts(tool: str) -> tuple[str, str] | None:
+    """(the server, the tool's title) of an MCP tool as Claude Code's permission dialog names them (tool_words); None
+    for any other tool."""
     parts = tool.split("__")
     if len(parts) < 3 or parts[0] != "mcp" or not parts[1]:
-        return tool
+        return None
     server, name = parts[1], "__".join(parts[2:])
     plugin, _, rest = server.removeprefix("plugin_").partition("_")
     if server.startswith("plugin_") and plugin and rest:
         server = f"plugin:{plugin}:{rest}"
     title = re.sub(r"\b\w", lambda m: m.group().upper(), re.sub(r"_+", " ", name).strip(), flags=re.ASCII)
-    return f"{server} \u2014 {title or name}"
+    return server, title or name
 
 
 def read_folder(content: str) -> str:
@@ -147,7 +161,10 @@ def _clauses(u: dict[str, Any], cwd: str) -> list[tuple[str, str, bool]]:
     if whole:
         words = f"don't ask again for {listed([tool_words(t) for t in whole])} commands"
         here = f" in {cwd}" if cwd and u["destination"] in ("localSettings", "projectSettings") else ""
-        out.append((words, f"{words}{here}{tail}", True))
+        # the button: MCP tools by their titles, with neither the server nor `commands` (tool_title)
+        short = (f"don't ask again for {listed([tool_title(t) for t in whole])}"
+                 if all(_mcp_parts(t) for t in whole) else words)
+        out.append((short, f"{words}{here}{tail}", True))
     if bash:
         words = ("don\u2019t ask again for any Bash command" if bash == ["*"]
                  else f"don\u2019t ask again for: {listed(bash)}")
@@ -166,7 +183,8 @@ def main_words(updates: list[dict[str, Any]], cwd: str = "") -> dict[str, str]:
     """The button of main's card's "don't ask again" (main_offer) and its tooltip, in the words of the row of Claude
     Code 2.1.300's own permission dialog for the same updates (_clauses), with the card's "Allow" for its "Yes", the
     rows of several updates in its order (the switch of mode, folders, rules) and joined by `; ` as Claude Code joins
-    them: `always_label`, short (a folder by its last part, acceptEdits by its name, without the session's folder), and
+    them: `always_label`, short (a folder by its last part, acceptEdits by its name, an MCP tool by its title, without
+    the session's folder), and
     `always_tip`, whole, which then says where Claude Code saves the updates it keeps in a settings file (SAVED_IN).
     `cwd` is the session's folder, which Claude Code names in the row of a whole tool's rule."""
     order = ("setMode", "addDirectories", "addRules")

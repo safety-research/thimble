@@ -245,12 +245,14 @@ def test_main_s_offer_is_claude_code_s_suggestions_with_each_destination_and_onl
 
 def test_main_s_card_words_its_offer_as_claude_code_s_own_dialog_does():
     """The rows Claude Code 2.1.300's terminal dialog showed for these permission_suggestions, with the card's "Allow"
-    for its "Yes": the button short, the tooltip whole and with where Claude Code keeps the update."""
+    for its "Yes": the button short, the tooltip whole and with where Claude Code keeps the update. The button names an
+    MCP tool by its title alone: with the server's name and `commands` it showed only "Allow, and don't ask again for…"
+    in the chat's width (live check 7.f)."""
     words = permission_updates.main_words
     saved = "Claude Code saves this in this folder's local settings (.claude/settings.local.json)."
     # "Yes, and don't ask again for plugin:thimble:thimble — Add Card commands in <folder>"
     assert words(ADD_CARD, "/w/corpus") == {
-        "always_label": "Allow, and don't ask again for plugin:thimble:thimble \u2014 Add Card commands",
+        "always_label": "Allow, and don't ask again for Add Card",
         "always_tip": ("Allow, and don't ask again for plugin:thimble:thimble \u2014 Add Card commands in /w/corpus. "
                        f"{saved}")}
     # "Yes, and don’t ask again for: npm run *"
@@ -273,10 +275,15 @@ def test_main_s_card_words_its_offer_as_claude_code_s_own_dialog_does():
     other = [{"type": "addRules", "rules": [{"toolName": "mcp__demo__list_open_items"}], "behavior": "allow",
               "destination": "userSettings"}]
     assert words(other, "/w/corpus") == {
-        "always_label": "Allow, and don't ask again for demo \u2014 List Open Items commands",
+        "always_label": "Allow, and don't ask again for List Open Items",
         "always_tip": ("Allow, and don't ask again for demo \u2014 List Open Items commands. Claude Code saves this in "
                        "your user settings, for any project.")}
     assert permission_updates.tool_words("Bash") == "Bash"
+    # a tool that is no MCP tool keeps Claude Code's words on the button too
+    search = [{"type": "addRules", "rules": [{"toolName": "WebSearch"}], "behavior": "allow", "destination": "session"}]
+    assert words(search, "/w/corpus") == {"always_label": "Allow, and don't ask again for WebSearch commands",
+                                          "always_tip": "Allow, and don't ask again for WebSearch commands for this "
+                                                        "session"}
 
 
 async def test_always_allow_on_main_s_card_answers_with_exactly_what_the_card_named(monkeypatch):
@@ -284,7 +291,7 @@ async def test_always_allow_on_main_s_card_answers_with_exactly_what_the_card_na
     monkeypatch.setattr(hook_auth, "analyst", lambda request: True)
     call, entry = await _ask(ADD_CARD)
     assert entry["always"] == "mcp__plugin_thimble_thimble__add_card"
-    assert entry["always_label"] == "Allow, and don't ask again for plugin:thimble:thimble \u2014 Add Card commands"
+    assert entry["always_label"] == "Allow, and don't ask again for Add Card"
     assert entry["always_tip"] == ("Allow, and don't ask again for plugin:thimble:thimble \u2014 Add Card commands in "
                                    f"{config.corpus_dir(CORPUS)}. Claude Code saves this in this folder's local "
                                    "settings (.claude/settings.local.json).")

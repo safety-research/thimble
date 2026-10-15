@@ -210,7 +210,7 @@ describe("main's requests and those of thimble's agents, its subagents", () => {
 
   test("main's own request offers Always allow as Claude Code suggests and words it, and the click posts always", async () => {
     // as the backend words it after Claude Code's own dialog (permission_updates.main_words)
-    const label = "Allow, and don't ask again for plugin:thimble:thimble \u2014 Add Card commands"
+    const label = "Allow, and don't ask again for Add Card"
     const tip = "Allow, and don't ask again for plugin:thimble:thimble \u2014 Add Card commands in /w/mini. Claude Code saves this in this folder's local settings (.claude/settings.local.json)."
     const m = req('m4', { tool: 'mcp__plugin_thimble_thimble__add_card', what: 'mcp__plugin_thimble_thimble__add_card', always: 'mcp__plugin_thimble_thimble__add_card', always_label: label, always_tip: tip })
     expect(alwaysChoice(m)).toEqual({ label, tip })
