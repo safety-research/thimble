@@ -12,11 +12,12 @@ none:
 - **agent token**: the token of one run of an extension's program.
 - **cookie**: a signed-in browser's cookie. Everything the analyst does in thimble.
 - **cookie or token**: a read, which needs a signed-in browser's cookie or the token, proven as above (the CLI
-  proves it with every request).
+  proves it with every request). A screenshot of the page carries a shot token instead, good for reads alone
+  and for two minutes.
 - **none**: the health check, which names no path or pid without the token, and whether the browser is signed
   in.
 
-262 routes, 152 of them writes: 36 token, 1 code, 1 agent token, 120 cookie, 102 cookie or token, 2 none.
+263 routes, 153 of them writes: 37 token, 1 code, 1 agent token, 120 cookie, 102 cookie or token, 2 none.
 
 | Method | Path | Module | Credential |
 |---|---|---|---|
@@ -94,6 +95,7 @@ none:
 | POST | `/api/ui/key` | main | code |
 | POST | `/api/ui/pair` | main | token |
 | GET | `/api/ui/paired` | main | none |
+| POST | `/api/ui/shot` | main | token |
 | POST | `/api/ui/signout` | main | cookie |
 | POST | `/api/ui/unpair` | main | token |
 | GET | `/api/workspaces` | start_page | cookie or token |

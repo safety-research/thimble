@@ -12,7 +12,7 @@ backend/tests_public/test_route_auth.py fails until the table is written again. 
     agent token      the token of one run of an extension's program (the WebSocket)
     cookie           a signed-in browser's cookie (hook_auth.analyst): every other write
     cookie or token  a read (GET) of every other route (hook_auth.LocalReadGuard): a signed-in browser's cookie, or the
-                     token proven as above (the CLI)
+                     token proven as above (the CLI); a page screenshot carries a shot token instead
     none             the reads hook_auth.OPEN_READS names: the health check and whether the browser is signed in
 """
 from __future__ import annotations
@@ -102,7 +102,8 @@ def render(table: list[tuple[str, str, str, str]]) -> str:
         "- **agent token**: the token of one run of an extension's program.",
         "- **cookie**: a signed-in browser's cookie. Everything the analyst does in thimble.",
         "- **cookie or token**: a read, which needs a signed-in browser's cookie or the token, proven as above (the CLI",
-        "  proves it with every request).",
+        "  proves it with every request). A screenshot of the page carries a shot token instead, good for reads alone",
+        "  and for two minutes.",
         "- **none**: the health check, which names no path or pid without the token, and whether the browser is signed",
         "  in.",
         "",

@@ -121,7 +121,7 @@ def test_the_routes_of_the_cli_and_of_pairing_are_token_routes_and_the_proposals
                   ("POST", "/api/subagents/caller"), ("POST", "/api/ui/pair"), ("POST", "/api/ui/unpair")]:
         assert cred[route] == "token", route
     assert cred[("POST", "/api/ui/key")] == "code" and cred[("GET", "/api/ui/paired")] == "none"
-    assert cred[("GET", "/api/health")] == "none"
+    assert cred[("GET", "/api/health")] == "none" and cred[("POST", "/api/ui/shot")] == "token"
     for route in [("GET", "/api/corpora"), ("GET", "/api/ws/{c}/canvas"), ("GET", "/api/ws/{c}/views/{slug}/media"),
                   ("GET", "/api/corpora/{c}/download/{path:path}"), ("GET", "/api/jobs")]:
         assert cred[route] == "cookie or token", route

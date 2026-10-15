@@ -275,9 +275,11 @@ def _pairing_fresh():
     from app import hook_auth
 
     hook_auth._codes.clear()
+    hook_auth._shots.clear()
     hook_auth._paired = None
     yield
     hook_auth._codes.clear()
+    hook_auth._shots.clear()
     hook_auth._paired = None
 
 

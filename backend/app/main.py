@@ -449,7 +449,7 @@ def create_app() -> FastAPI:
         app.add_middleware(CORSMiddleware, allow_origins=vite, allow_methods=["*"], allow_headers=["*"])
     app.add_middleware(HookAuth)  # inside the write guard: a hook proves the token here too
     app.add_middleware(LocalWriteGuard)  # inside OriginCheck, outside HookAuth: a forged-Origin write still needs the cookie or the token
-    app.add_middleware(LocalReadGuard)  # beside the write guard: a read needs the cookie or the CLI's proof
+    app.add_middleware(LocalReadGuard)  # beside the write guard: a read needs the cookie, the CLI's proof or a shot's token
     app.add_middleware(OriginCheck, extra_origins=vite)  # after TrustedHost: the Host it compares with is an allowed one
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
     app.add_middleware(SecurityHeaders)  # outside the two checks, so their refusals carry the headers too
@@ -502,6 +502,10 @@ def create_app() -> FastAPI:
     @app.post("/api/ui/unpair", status_code=204)  # token only: `thimble unpair`
     def ui_unpair() -> None:
         hook_auth.unpair()
+
+    @app.post("/api/ui/shot")  # token only: a dev ticket's shot of this server's page (dev._take_shot)
+    def ui_shot() -> dict:
+        return {"token": hook_auth.mint_shot(), "expires_s": hook_auth.SHOT_TTL_S}
 
     @app.post("/api/ui/signout")  # cookie: a sign-in notice's "Sign it out"
     def ui_signout(body: dict = Body(...)) -> dict:

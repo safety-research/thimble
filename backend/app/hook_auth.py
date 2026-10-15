@@ -35,7 +35,9 @@ a notice.
 
 Reads are gated too (LocalReadGuard), since another account on a shared computer reaches the loopback port as well:
 every GET or HEAD under /api needs the signed-in browser's cookie or a hook proof (the CLI sends one with every
-request), except OPEN_READS.
+request), except OPEN_READS. A screenshot of the page (tools.py, dev.py) runs a headless browser with no cookie, so it
+carries a shot token (mint_shot) in SHOT_HEADER instead: random, good for SHOT_TTL_S on GET and HEAD alone, kept in
+memory as its sha256.
 """
 from __future__ import annotations
 
@@ -72,7 +74,7 @@ SESSION_HOOK_PATHS = re.compile(r"/api/ws/[^/]+/(sessions/permission|calls/ref)"
 # `thimble up` / `thimble unpair` call
 CLI_PATHS = frozenset({
     "/api/corpora/register", "/api/dev/announce", "/api/dev/revert", "/api/extensions/refresh", "/api/subagents/caller",
-    "/api/ui/pair", "/api/ui/unpair",
+    "/api/ui/pair", "/api/ui/unpair", "/api/ui/shot",
 })
 CLI_WS_PATHS = re.compile(r"/api/ws/[^/]+/(session|precached/context|archive|restore|rename)")  # POST
 CLI_WS_DELETE = re.compile(r"/api/ws/[^/]+")  # DELETE: a workspace removed (`thimble rm`)
@@ -112,6 +114,8 @@ OPEN_READS = frozenset({"/api/health", "/api/ui/paired"})
 READ_METHODS = frozenset({"GET", "HEAD"})
 SIGN_IN_NEEDED = ("open thimble from the link shown under /thimble's reply, or printed by `thimble up` in a shell, to"
                   " see it")
+SHOT_HEADER = "x-thimble-shot"  # a page screenshot's read-only token (mint_shot)
+SHOT_TTL_S = 120  # a shot token's life: dev.SHOT_TIMEOUT_S (90 s) ends the headless run before it
 
 _cache: tuple[tuple[str, int, int], dict] | None = None
 # the tokens of the programs thimble runs, by id: (the whole token, whether its grant allows a method and path)
@@ -306,6 +310,37 @@ def _spend(code: object) -> bool:
     return got is not None and got[0] > _now()
 
 
+# a live shot token's sha256 -> when it expires on _now's clock; in memory only, so a restart voids every one
+_shots: dict[str, float] = {}
+
+
+def mint_shot() -> str:
+    """A new shot token (module note): good on GET and HEAD for SHOT_TTL_S, or until drop_shot. Expired ones go."""
+    tok = secrets.token_urlsafe(24)
+    now = _now()
+    with _pair_lock:
+        for h in [h for h, until in _shots.items() if until <= now]:
+            del _shots[h]
+        _shots[_sha(tok)] = now + SHOT_TTL_S
+    return tok
+
+
+def drop_shot(tok: str) -> None:
+    """The shot token `tok` stops working (its shot ended)."""
+    with _pair_lock:
+        _shots.pop(_sha(tok or ""), None)
+
+
+def shot_proven(headers: Headers, method: str) -> bool:
+    """Whether a read carries a live shot token in SHOT_HEADER; never a write."""
+    tok = headers.get(SHOT_HEADER, "")
+    if method not in READ_METHODS or not tok:
+        return False
+    with _pair_lock:
+        until = _shots.get(_sha(tok))
+    return until is not None and until > _now()
+
+
 def _paired_file() -> Path:
     return home() / PAIRED_FILE
 
@@ -494,10 +529,11 @@ class LocalWriteGuard:
 
 
 def read_allowed(scope: dict) -> bool:
-    """Whether a gated read may go on: it comes from a signed-in browser (analyst) or carries a hook proof (the plugin,
-    the CLI; an agent's token proves no read, as its grant allows none)."""
+    """Whether a gated read may go on: it comes from a signed-in browser (analyst), carries a hook proof (the plugin, the
+    CLI; an agent's token proves no read, as its grant allows none) or a live shot token (shot_proven)."""
     path, method = scope.get("path", ""), scope.get("method", "")
-    return analyst(Request(scope)) or hook_proof(Headers(scope=scope), method, path)
+    h = Headers(scope=scope)
+    return analyst(Request(scope)) or hook_proof(h, method, path) or shot_proven(h, method)
 
 
 class LocalReadGuard:
