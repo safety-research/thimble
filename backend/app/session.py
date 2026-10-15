@@ -3382,9 +3382,13 @@ def session_state(lv: Live) -> dict:
 def _watch_wait(lv: Live) -> None:
     """While a turn is open or a subagent runs, a dialog or prompt that holds the session for WAIT_NOTE_S gets one note.
     The
-    model-switch dialog after a safety stop sets the alert on main's meta instead, cleared when the session moves on."""
+    model-switch dialog after a safety stop sets the alert on main's meta instead, cleared when the session moves on.
+    Whether any dialog is open also tells which prompts of thimble's agents the analyst has answered in the terminal
+    (events.terminal_dialogs)."""
     state = session_state(lv) if lv.busy else {}
     what = str(state.get("waitingFor") or DIALOG_WAIT) if state.get("status") == "waiting" else None
+    if state:
+        _events().terminal_dialogs(lv.c, what is not None)
     if what != PERMISSION_WAIT and lv.wait is not None and lv.wait[0] == PERMISSION_WAIT:
         _asked(lv, False)
     if state and what != PERMISSION_WAIT:

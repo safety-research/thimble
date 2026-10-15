@@ -1376,6 +1376,9 @@ def run_ended(c: str, agent_id: str, status: str, report: str | None, *, source:
         snap = dict(a)
     log.info("%s: %s %s run %s ended %s (%s)", c, snap.get("role") or "agent", agent_id, snap.get("run"), status,
              source or "?")
+    from . import events  # noqa: PLC0415
+
+    events.agent_moved(c, agent_id, float("inf"))  # a prompt it left open in the terminal went with its run (a Stop)
     t = TYPES.get(str(snap.get("role") or ""))
     _ended_notice(c, t, {**snap, "id": agent_id}, status, report, cls)  # before the chat's end: its lines stay last
     if snap.get("chat") and not (t is not None and t.keeps_chat):
