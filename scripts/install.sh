@@ -2,66 +2,59 @@
 # scripts/install.sh — install thimble: a git checkout in place (a Dev install), or an unzipped release, copied into
 # ~/.thimble/app (a Global install).
 #
-#   scripts/install.sh [--dry-run] [--verbose] [--browser bundled|system|off] [--sandbox-deps | --no-sandbox-deps]
-#                      [--plugin | --no-plugin] [--no-modify-path | --modify-path] [--dir DIR] [--dev] [--python PATH]
-#                      [--deps-only] [--require-pinned] [--marketplace-name NAME]
+#   scripts/install.sh [--dry-run] [--verbose] [--browser bundled|system|off] [--no-plugin] [--dir DIR] [--dev]
+#                      [--python PATH] [--deps-only] [--require-pinned] [--marketplace-name NAME]
 #
-# It opens with one screen: what it found (Claude Code, Python or uv, Node, a browser, Claude Code's sandbox), what it
-# installs where and about how big, the line it adds to your shell's startup file, what it changes in your Claude Code
-# setup, and the questions that remain, often none. It asks those, then prints a line per step, and ends with the command
-# to run. Every command it runs, with its output, goes to $THIMBLE_HOME/install.log (~/.thimble/install.log).
+# It opens with one screen: what it found (Claude Code, Python or uv, Node, a browser, and on Linux whether card code and
+# terminal-mode views can run in bubblewrap), what it installs where and about how big, what it changes in your Claude
+# Code setup, and whether a question remains. It asks it, then prints a line per step, and ends with what to run next.
+# Every command it runs, with its output, goes to $THIMBLE_HOME/install.log (~/.thimble/install.log).
 #
-# So that a new terminal finds `thimble`, it adds a line that puts ~/.local/bin on PATH to your shell's startup file
-# (~/.zshrc, ~/.bashrc and the file a login shell reads, fish's conf.d/thimble.fish, or ~/.profile) while PATH lacks that
-# folder, and with a THIMBLE_HOME other than ~/.thimble a line that sets it. Each ends with "# added by thimble's
-# installer", goes in once, and `thimble uninstall` removes exactly those lines.
+# It adds thimble's plugin to Claude Code with Claude Code's own commands: claude plugin marketplace add <the install
+# folder>, then claude plugin install --scope user thimble@<marketplace>, so /thimble works in any claude session. A
+# re-run updates the plugin when its version changed. It writes no shell startup file: when ~/.local/bin is not on PATH,
+# or THIMBLE_HOME is not ~/.thimble, it prints the line a new terminal needs. It installs no system package and never
+# runs sudo.
 #
-# The questions, each asked only when it remains, and the flags that answer them without asking:
+# The question, asked only when it remains, and the flag that answers it without asking:
 #   --browser bundled|system|off   a browser for screenshots, asked only when no Chrome or Edge that starts under
 #                          automation is found where Playwright looks (one that does is used, and nothing is downloaded).
 #                          bundled downloads Playwright's headless Chromium (about 210 MB to download, 650 MB on disk);
 #                          system uses the Chrome or Edge found anyway; off takes no screenshots
-#   --sandbox-deps         on Linux, asked only while Claude Code's sandbox can't run: install what it lacks with sudo
-#                          (bubblewrap and socat, and on Ubuntu 23.10+ an AppArmor profile for bwrap). --no-sandbox-deps
-#                          answers no
-# An answer is kept in $THIMBLE_HOME, so a re-run or `thimble update` doesn't ask it again; its flag changes it. Without a
-# terminal install.sh stops while a question remains without its flag, and lists those.
+# The answer is kept in $THIMBLE_HOME, so a re-run or `thimble update` doesn't ask it again; its flag changes it. Without a
+# terminal install.sh stops while the question remains without its flag, and says so.
 #
-#   --dry-run              print the opening screen and the questions that remain, each with its flags; change nothing.
-#                          An agent installing thimble for someone asks exactly those questions (CLAUDE.md, Installing)
+#   --dry-run              print the opening screen and the question if it remains, with its flags; change nothing.
+#                          An agent installing thimble for someone asks exactly that question (CLAUDE.md, Installing)
 #   --verbose              also print each command it runs and its output; with --dry-run, every step's commands
-#   --plugin               add thimble to every Claude Code session; --no-plugin takes back what an earlier --plugin
-#                          added. Without either nothing changes: the `thimble` command loads its plugin into the
-#                          sessions it starts
-#   --no-modify-path       add no line to your shell's startup files, now or in a later `thimble update` (lines an earlier
-#                          run added stay until `thimble uninstall`); --modify-path takes that back
+#   --no-plugin            add nothing to Claude Code: no marketplace and no plugin (INSTALL.md, Manual install, step 6
+#                          says how to add it)
 #   --dir DIR              where the tree goes (default: this checkout, in place; $THIMBLE_HOME/app for a release)
 #   --dev                  also install the backend's test extras (a checkout always gets them)
 #   --python PATH          use the virtual environment of the python at PATH as backend/.venv: install.sh checks that it
 #                          holds what backend/pyproject.toml asks for and installs nothing into it
-#   --deps-only            stop after the browser: no `thimble` command, shell startup lines, plugin or doctor
+#   --deps-only            stop after the browser: no `thimble` command, plugin or doctor
 #   --require-pinned       install only pinned versions: stop where the package index lacks one, and where nothing pins
 #                          them (a Dev install without uv or without backend/uv.lock)
 #   --marketplace-name N   the name Claude Code registers the tree under (default: .claude-plugin/marketplace.json's)
-#   --trust-workspaces, --no-trust-workspaces   accepted and ignored: thimble 0.6.0's agents need no folder Claude Code
-#                          trusts, so install.sh no longer asks about it
+#   --sandbox-deps, --no-sandbox-deps, --plugin, --modify-path and --no-modify-path are accepted and ignored (0.7's)
 # THIMBLE_BIN_DIR, when set, is the folder the `thimble` link goes into in place of ~/.local/bin.
 set -euo pipefail
 # How it works (not printed by --help).
-# Steps: what it finds (check_prerequisites) and plans (plan: each question's plan, the plugin, the link) · the opening
-# screen · the questions · the sandbox's packages, right after the questions, so that only sudo asks for more (its
-# password) · copy the release into --dir · backend/.venv · the frontend's packages and frontend/dist · the browser ·
-# the app-dir pointer and `thimble` on PATH (~/.local/bin/thimble → the tree's plugin/bin/thimble) · the lines in the
-# shell's startup files (shell_step) · the plugin, only on --plugin or --no-plugin or an earlier yes (scripts/plugin.sh) ·
-# doctor · the command to run. Nothing is left in a list for the user: a step that needs them says so with a ! line and
-# what fixes it under it.
+# Steps: what it finds (check_prerequisites) and plans (plan: the question's plan, the plugin, the link, the lines a new
+# terminal needs) · the opening screen · the question · copy the release into --dir · backend/.venv · the frontend's
+# packages and frontend/dist · the browser · the app-dir pointer and `thimble` on PATH (~/.local/bin/thimble → the
+# tree's plugin/bin/thimble) · the plugin, unless --no-plugin (scripts/plugin.sh) · doctor · what to run next, with the
+# line for a shell startup file when a new terminal needs one. Nothing is left in a list for the user: a step that needs
+# them says so with a ! line and what fixes it under it.
 # Each question is one block of functions named after it, which adds its name to QUESTIONS; the rest of the script
 # reaches a question only through those functions, so deleting its block removes it.
-# The browser and plugin answers are kept in $THIMBLE_HOME (config.json's "browser", plugin.json). A
-# Chrome or Edge used because it was found and started is not recorded: the server picks it too when config.json names
-# no browser (backend/app/userconf.py browser), and a later run asks only if it stops working.
-# Another install's plugin registration (a marketplace added from another folder) and a ~/.local/bin/thimble linked into
-# another install are never changed unasked: install.sh names that install, and only on a terminal asks to switch them.
+# The browser answer is kept in $THIMBLE_HOME (config.json's "browser"). A Chrome or Edge used because it was found and
+# started is not recorded: the server picks it too when config.json names no browser (backend/app/userconf.py browser),
+# and a later run asks only if it stops working.
+# Another install's plugin registration (a marketplace added from another folder, or from GitHub) is never changed:
+# install.sh names it and prints the commands that switch it. A ~/.local/bin/thimble linked into another install is
+# changed only on a yes, asked on a terminal.
 # Re-running it (after `git pull`, over a newer release, or to answer a question again with its flag) skips the steps that
 # are done: the same release is not copied again, pinned packages already installed are kept, and the browser is fetched
 # only on a yes and only when the build thimble's Playwright needs is missing.
@@ -176,7 +169,7 @@ parse_args() {
   src="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
   home="${THIMBLE_HOME:-$HOME/.thimble}"
   bin_dir="${THIMBLE_BIN_DIR:-$HOME/.local/bin}"
-  dir="" mp_name="" dev=0 deps_only=0 plugin="" byo="" require_pinned=0 trust_ignored=""
+  dir="" mp_name="" dev=0 deps_only=0 plugin="" byo="" require_pinned=0 ignored=()
   local q
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -186,11 +179,10 @@ parse_args() {
       --python) byo="$2"; shift 2;;
       --deps-only) deps_only=1; shift;;
       --require-pinned) require_pinned=1; shift;;
-      --plugin) plugin=yes; shift;;
       --no-plugin) plugin=no; shift;;
-      --modify-path) modify_path=yes; shift;;
-      --no-modify-path) modify_path=no; shift;;
-      --trust-workspaces | --no-trust-workspaces) trust_ignored="$1"; shift;;  # 0.5.0's question, gone (opening)
+      # 0.7's sandbox question, plugin question and startup-file lines, gone; opening() names them in one line
+      --plugin | --sandbox-deps | --no-sandbox-deps | --modify-path | --no-modify-path)
+        case " ${ignored[*]+"${ignored[*]}"} " in *" $1 "*) ;; *) ignored+=("$1");; esac; shift;;
       --dry-run) dry=1; shift;;
       -v | --verbose) verbose=1; shift;;
       -h | --help) usage; exit 0;;
@@ -919,7 +911,7 @@ browser_step() {  # after the packages, since it launches the browser with thimb
         note "For screenshots, run this again when the download works: $fix"
       elif [ "$lc" = nolibs ]; then
         warn "Playwright's headless Chromium is downloaded, but this machine lacks the system libraries it needs, so there are no screenshots"
-        note "For screenshots, install those libraries: sudo $dir/backend/.venv/bin/python -m playwright install-deps chromium-headless-shell"
+        note "For screenshots, install those libraries. In a shell, as root: $dir/backend/.venv/bin/python -m playwright install-deps chromium-headless-shell"
       elif [ "$lc" = failed ]; then
         warn "Playwright's headless Chromium did not start ($lc_why), so there are no screenshots"
       elif [ "$fetched" -gt 0 ]; then ok "Screenshots use Playwright's headless Chromium, downloaded to $(tilde "$(pw_cache)")"
@@ -932,125 +924,21 @@ browser_step() {  # after the packages, since it launches the browser with thimb
   if [ -n "$browser" ] && [ "$browser" != "$browser_was" ]; then record_browser "$browser"; fi
 }
 
-# ----------------------------------------------------------------------- the sandbox question (Linux)
-QUESTIONS+=(sandbox)
-sandbox_deps=""  # --sandbox-deps (yes) or --no-sandbox-deps (no)
-sandbox_flag() { case "$1" in --sandbox-deps) sandbox_deps=yes;; --no-sandbox-deps) sandbox_deps=no;; *) return 1;; esac; took=1; }
-
-APPARMOR_USERNS=/proc/sys/kernel/apparmor_restrict_unprivileged_userns  # 1 (Ubuntu 23.10+): a user namespace needs an AppArmor profile
-
-sandbox_runs() {  # Claude Code's Bash sandbox can run here: on Linux socat is on PATH and bwrap creates a sandbox
-  local bw
-  bw="$(command -v bwrap)" && command -v socat >/dev/null 2>&1 \
-    && "$bw" --ro-bind / / --dev /dev --unshare-all --die-with-parent true >/dev/null 2>&1
-}
-
-sandbox_plan() {  # what Claude Code's Bash sandbox needs here: sb_ok=1 when it runs (macOS has it built in); else sb_need
-  # names what it lacks, and sb_cmds holds the root commands that set it up (the sandbox question offers them), or
-  # sb_why says why there are none
-  sb_ok=0 sb_need="" sb_why="" sb_pm="" sb_cmds=()
-  if [ "$(uname -s)" != Linux ] || sandbox_runs; then sb_ok=1; return 0; fi
-  local pkgs=() bw sudo="" f profile=0
-  command -v bwrap >/dev/null 2>&1 || pkgs+=(bubblewrap)
-  command -v socat >/dev/null 2>&1 || pkgs+=(socat)
-  bw="$(command -v bwrap || echo /usr/bin/bwrap)"
-  if [ "$(cat "$APPARMOR_USERNS" 2>/dev/null)" = 1 ]; then
-    profile=1
-    for f in /etc/apparmor.d/*; do
-      if [ -f "$f" ] && grep -qF "$bw" "$f" && grep -q userns "$f"; then profile=0; break; fi
-    done
-  fi
-  [ "${#pkgs[@]}" = 0 ] || sb_need="${pkgs[*]}"
-  sb_need="${sb_need/ / and }"
-  [ "$profile" = 0 ] || sb_need="${sb_need:+$sb_need, and }an AppArmor profile that lets bwrap create user namespaces (/etc/apparmor.d/bwrap)"
-  if [ -z "$sb_need" ]; then
-    sb_need="user namespaces for bwrap"
-    sb_why="bwrap is installed but can't create a sandbox here (user namespaces may be turned off, as in some containers)"
+# ------------------------------------------------------------------------- card code's sandbox (Linux)
+# Card code runs in the notebook kernel, in Anthropic's sandbox runtime or in bubblewrap, and terminal mode draws views
+# only in one of them; on Linux both need bubblewrap to create a sandbox. install.sh installs neither: the opening screen
+# says whether it runs, and `thimble doctor --verbose` names the commands that add it.
+card_found() {  # its line in the opening screen's Found, on Linux
+  local bw why
+  [ "$(uname -s)" = Linux ] || return 0
+  if ! bw="$(command -v bwrap)"; then why="bubblewrap missing"
+  elif ! "$bw" --ro-bind / / --dev /dev --unshare-all --die-with-parent true >/dev/null 2>&1; then
+    why="bubblewrap can't create a sandbox here"
+  else
+    found ok "card code and terminal views sandbox: bubblewrap runs here"
     return 0
   fi
-  if [ "$(id -u)" != 0 ]; then
-    command -v sudo >/dev/null 2>&1 || { sb_why="setting up $sb_need needs root: ask an administrator"; return 0; }
-    sudo="sudo "
-  fi
-  if [ "${#pkgs[@]}" -gt 0 ]; then
-    for sb_pm in apt-get dnf pacman zypper apk ""; do [ -z "$sb_pm" ] || ! command -v "$sb_pm" >/dev/null 2>&1 || break; done
-    case "$sb_pm" in
-      apt-get | dnf) sb_cmds+=("${sudo}$sb_pm install -y ${pkgs[*]}");;
-      pacman) sb_cmds+=("${sudo}pacman -S --needed --noconfirm ${pkgs[*]}");;
-      zypper) sb_cmds+=("${sudo}zypper --non-interactive install ${pkgs[*]}");;
-      apk) sb_cmds+=("${sudo}apk add ${pkgs[*]}");;
-      *) sb_why="install ${pkgs[*]} with this system's package manager"; return 0;;
-    esac
-  fi
-  if [ "$profile" = 1 ]; then
-    sb_cmds+=("printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile bwrap $bw flags=(unconfined) {\n  userns,\n  include if exists <local/bwrap>\n}\n' | ${sudo}tee /etc/apparmor.d/bwrap >/dev/null"
-              "${sudo}apparmor_parser -r /etc/apparmor.d/bwrap")
-  fi
-}
-SANDBOX_WHY="thimble's agents run their shell commands in Claude Code's sandbox, so they can read only the folder you open with thimble and write only their workspace."
-sandbox_later() {  # how to set up a sandbox that can't run later, on the line under its warning
-  if [ "${#sb_cmds[@]}" -gt 0 ]; then
-    note "To set up Claude Code's sandbox, without which thimble's agents won't start: bash $(tilde "$dir")/scripts/install.sh --sandbox-deps"
-  else
-    note "thimble's agents won't start until Claude Code's sandbox runs ($sb_why); \`thimble doctor\` shows when it does."
-  fi
-}
-sandbox_pending() { [ "${#sb_cmds[@]}" -gt 0 ] && [ -z "$sandbox_deps" ]; }
-sandbox_found() {
-  if [ "$sb_ok" = 1 ]; then
-    if [ "$(uname -s)" = Linux ]; then found ok "Claude Code's sandbox runs here"; else found ok "Claude Code's sandbox, built into macOS"; fi
-  elif [ "${#sb_cmds[@]}" = 0 ]; then found warn "Claude Code's sandbox can't run here: $sb_why. thimble's agents won't start until it does"
-  elif [ "$sandbox_deps" = yes ]; then found warn "Claude Code's sandbox needs $sb_need, which install.sh installs with sudo (--sandbox-deps)"
-  elif [ "$sandbox_deps" = no ]; then found warn "Claude Code's sandbox needs $sb_need, left out (--no-sandbox-deps): thimble's agents won't start until it runs"
-  else found warn "Claude Code's sandbox needs $sb_need: a question below"; fi
-}
-sandbox_title()   { echo "Install what Claude Code's sandbox needs?"; }
-sandbox_text() {
-  echo "$SANDBOX_WHY Here it needs $sb_need, which these commands install:"
-  printf '  %s\n' "${sb_cmds[@]}"
-  echo "With a no, thimble's agents won't start until the sandbox works."
-}
-sandbox_prompt()  { echo "Install them now?"; }
-sandbox_default() { echo y; }
-sandbox_choices() { echo "yes: --sandbox-deps"; echo "no: --no-sandbox-deps"; }
-sandbox_need()    { echo "what Claude Code's sandbox needs: --sandbox-deps or --no-sandbox-deps"; }
-sandbox_answer()  { if [ "$1" = y ]; then sandbox_deps=yes; else sandbox_deps=no; fi; }
-sandbox_phase()   { echo first; }
-sandbox_step() {  # right after the questions, so that sudo asks for its password while the user is at the terminal:
-  # sandbox_plan's root commands on a yes, then whether the sandbox runs
-  local c upd
-  if [ "$sb_ok" = 1 ]; then say "Claude Code's Bash sandbox runs here: nothing to install"; return 0; fi
-  if [ "${#sb_cmds[@]}" = 0 ]; then
-    warn "Claude Code's sandbox can't run here: $sb_why"
-    sandbox_later; return 0
-  fi
-  if [ "$sandbox_deps" != yes ]; then
-    if [ "$dry" = 1 ] && [ -z "$sandbox_deps" ]; then say "(the answer to the sandbox question, above)"; return 0; fi
-    warn "Claude Code's sandbox lacks $sb_need, left out as you chose: thimble's agents won't start until the sandbox works"
-    sandbox_later; return 0
-  fi
-  if [ "$dry" = 0 ] && [ "$tty" = 0 ] && [ "$(id -u)" != 0 ] && ! sudo -n true 2>/dev/null; then
-    warn "Claude Code's sandbox lacks $sb_need, and sudo needs your password, which install.sh can't ask for without a terminal. Run these in a terminal, then \`thimble doctor\`:"
-    printf '    %s\n' "${sb_cmds[@]}" | while IFS= read -r l; do show "$l"; done
-    sandbox_later; return 0
-  fi
-  [ "$dry" = 1 ] || show "… installing $sb_need with sudo, which may ask for your password"
-  for c in "${sb_cmds[@]}"; do
-    say "+ $c"
-    [ "$dry" = 0 ] || continue
-    _run "(running it)" bash -c "$c" && continue
-    if [ "$sb_pm" = apt-get ] && [ "$c" = "${sb_cmds[0]}" ]; then  # the package lists may predate the packages
-      upd="${c%%apt-get install*}apt-get update"
-      say "+ $upd"
-      if _run "(running it)" bash -c "$upd" && say "+ $c" && _run "(running it)" bash -c "$c"; then continue; fi
-    fi
-    tail_out
-    say "(that failed, above)"
-    break
-  done
-  [ "$dry" = 0 ] || return 0
-  if sandbox_runs; then ok "Claude Code's sandbox runs now"
-  else warn "Claude Code's sandbox still doesn't run (above)"; sandbox_later; fi
+  found ok "card code: runs without a sandbox, and terminal mode shows no views ($why); thimble doctor --verbose names the commands that add it"
 }
 
 # -------------------------------------------------------------- the `thimble` command and the plugin
@@ -1116,23 +1004,30 @@ cli_switch_line() {  # the line saying ~/.local/bin/thimble runs another install
   printf '%s\n' "$(tilde "$cli_link") runs the thimble install in $cli_other, so it is left as it is. To make \`thimble\` run this install: ln -sfn $(printf '%q' "$dir/plugin/bin/thimble") $(printf '%q' "$cli_link")"
 }
 
+plugin_step() {  # thimble's plugin in Claude Code (scripts/plugin.sh): added from this install's folder at user scope, or
+  # updated when its version changed; another install's is left as it is. --no-plugin leaves Claude Code's plugins alone
+  local mp_file="$dir/.claude-plugin/marketplace.json"
+  if [ "$plugin" = no ]; then ok "Claude Code's plugins left as they are (--no-plugin)"; return 0; fi
+  if [ "$mp_name" != "$mp_file_name" ]; then
+    say "+ set .name = \"$mp_name\" in $mp_file"
+    [ "$dry" = 1 ] || python3 -I -c 'import json,sys; p,n=sys.argv[1:]; d=json.load(open(p)); d["name"]=n; json.dump(d, open(p,"w"), indent=2); open(p,"a").write("\n")' "$mp_file" "$mp_name"
+  fi
+  plugin_apply || true
+}
+
 # ------------------------------------------------------------------------------------- the shell startup files
 # A new terminal finds `thimble` once the folder of its link is on PATH, and a THIMBLE_HOME other than ~/.thimble must
-# stay set wherever thimble or Claude Code runs. install.sh writes the line for each into the startup file of the
-# user's shell ($SHELL, else the login shell the user database names), as uv and rustup do: zsh ${ZDOTDIR:-~}/.zshrc;
-# bash ~/.bashrc, and the file a login shell reads (the first of ~/.bash_profile, ~/.bash_login and ~/.profile; ~/.profile
-# when there is none) unless it sources ~/.bashrc; fish ~/.config/fish/conf.d/thimble.fish; sh, dash or ksh ~/.profile.
-# Another shell (csh, tcsh, nu…) gets no line, and a warning says what to set. A line goes in only while it is needed
-# (PATH lacks the folder; the home is not the default), only where that exact line is missing, and only while the
-# `thimble` link runs this install. Each line ends with SHELL_MARK, and each one added, with each file created, is
-# recorded in $home/shell-startup, from which `thimble uninstall` removes exactly those lines (plugin/bin/thimble).
-# --no-modify-path adds none, and is kept in the record ("skip") so that `thimble update` adds none either;
-# --modify-path takes that back. Lines an earlier run added stay until uninstall. A file is appended to, never
-# replaced, so a link (into a dotfiles repo) stays a link.
+# stay set wherever thimble or Claude Code runs. install.sh writes no startup file: at its end it prints the line for
+# each, in the syntax of the user's shell ($SHELL, else the login shell the user database names), and the file it goes
+# in: zsh ${ZDOTDIR:-~}/.zshrc; bash ~/.bashrc, and the file a login shell reads (the first of ~/.bash_profile,
+# ~/.bash_login and ~/.profile; ~/.profile when there is none) unless it sources ~/.bashrc; fish
+# ~/.config/fish/conf.d/thimble.fish; sh, dash or ksh ~/.profile. Another shell (csh, tcsh, nu…) gets what to set in
+# words. A line is printed only while it is needed (PATH lacks the folder; the home is not the default), only where the
+# file lacks it, and only while the `thimble` link runs this install. `claude` and /thimble need neither line.
+# Installs before 0.8.0 wrote these lines themselves, each ending with SHELL_MARK and recorded in $home/shell-startup,
+# from which `thimble uninstall` still removes exactly those lines (plugin/bin/thimble); such a line counts as present.
 SHELL_MARK="# added by thimble's installer"
-SHELL_RECORD=shell-startup
-modify_path=""  # --modify-path (yes) or --no-modify-path (no)
-sh_want="" sh_why="" sh_name="" sh_prev="" sh_answer=yes sh_added=0 sh_had_home=0 sh_files=() sh_lines=() sh_add=()
+sh_want="" sh_why="" sh_name="" sh_had_home=0 sh_files=() sh_lines=() sh_add=()
 
 login_shell() {  # the user's login shell: $SHELL, else the user database's entry
   local sh="${SHELL:-}"
@@ -1154,12 +1049,11 @@ wants() { case " $sh_want " in *" $1 "*) return 0;; esac; return 1; }  # wants p
 
 shell_plan() {  # the lines a new terminal needs (sh_want: path while PATH lacks the link's folder, home for a home other
   # than ~/.thimble), the startup files of the user's shell (sh_files), those lines in its syntax (sh_lines), and each
-  # "FILE<TAB>LINE" where a line is missing (sh_add); sh_answer: yes, or no for --no-modify-path or a kept no. Nothing
-  # is wanted while the `thimble` link would run another program or install (cli_plan, link_cli)
+  # "FILE<TAB>LINE" where a line is missing (sh_add); sh_why: other (a shell install.sh knows no syntax for) or name (a
+  # folder's name a startup file would expand). Nothing is wanted while the `thimble` link would run another program or
+  # install (cli_plan, link_cli)
   local sh f login w bin_w home_w
   sh_want="" sh_why="" sh_name="" sh_had_home=0 sh_files=() sh_lines=() sh_add=()
-  sh_prev=""; [ ! -f "$home/$SHELL_RECORD" ] || ! grep -qx skip "$home/$SHELL_RECORD" || sh_prev=no
-  sh_answer="${modify_path:-${sh_prev:-yes}}"
   case "${cli_state:-}" in new | ours | gone) ;; other) [ "$cli_switch" = yes ] || return 0;; *) return 0;; esac
   path_has_local_bin || sh_want="path"
   [ "$custom_home" = 0 ] || sh_want="${sh_want:+$sh_want }home"
@@ -1178,36 +1072,18 @@ shell_plan() {  # the lines a new terminal needs (sh_want: path while PATH lacks
   if ! bin_w="$(shell_word "$bin_dir")" || ! home_w="$(shell_word "$home")"; then sh_why=name; return 0; fi
   for w in $sh_want; do
     case "$sh_name:$w" in
-      fish:path) sh_lines+=("contains -- \"$bin_w\" \$PATH; or set -gx PATH \"$bin_w\" \$PATH  $SHELL_MARK");;
-      fish:home) sh_lines+=("set -gx THIMBLE_HOME \"$home_w\"  $SHELL_MARK");;
-      *:path) sh_lines+=("export PATH=\"$bin_w:\$PATH\"  $SHELL_MARK");;
-      *:home) sh_lines+=("export THIMBLE_HOME=\"$home_w\"  $SHELL_MARK");;
+      fish:path) sh_lines+=("contains -- \"$bin_w\" \$PATH; or set -gx PATH \"$bin_w\" \$PATH");;
+      fish:home) sh_lines+=("set -gx THIMBLE_HOME \"$home_w\"");;
+      *:path) sh_lines+=("export PATH=\"$bin_w:\$PATH\"");;
+      *:home) sh_lines+=("export THIMBLE_HOME=\"$home_w\"");;
     esac
   done
   for f in "${sh_files[@]}"; do
     for w in "${sh_lines[@]}"; do
-      if ! { [ -f "$f" ] && grep -qxF -- "$w" "$f"; }; then sh_add+=("$f"$'\t'"$w"); fi
+      if ! { [ -f "$f" ] && grep -qxF -e "$w" -e "$w  $SHELL_MARK" "$f"; }; then sh_add+=("$f"$'\t'"$w"); fi
     done
   done
   ! wants home || case " ${sh_add[*]+"${sh_add[*]}"} " in *THIMBLE_HOME*) ;; *) sh_had_home=1;; esac
-}
-
-shell_what() {  # what the lines do, for one line (`a line that puts ~/.local/bin on PATH`) or two (`lines that put … and set …`)
-  local s=""; [ "${#sh_lines[@]}" -gt 1 ] || s=s
-  printf '%s' "$( [ -n "$s" ] && echo 'a line that' || echo 'lines that' )"
-  ! wants path || printf ' put%s %s on PATH' "$s" "$(tilde "$bin_dir")"
-  ! wants home || printf '%s set%s THIMBLE_HOME' "$(wants path && echo ' and')" "$s"
-  printf '\n'
-}
-
-shell_targets() {  # the files of sh_add, each once: "~/.zshrc", or "~/.bashrc and ~/.profile"
-  local p f seen="|" out=""
-  for p in ${sh_add[@]+"${sh_add[@]}"}; do
-    f="${p%%$'\t'*}"
-    case "$seen" in *"|$f|"*) continue;; esac
-    seen="$seen$f|"; out="${out:+$out and }$(tilde "$f")"
-  done
-  printf '%s\n' "$out"
 }
 
 shell_files_text() {  # the startup files, "~/.zshrc" or "~/.bashrc and ~/.profile"
@@ -1216,140 +1092,43 @@ shell_files_text() {  # the startup files, "~/.zshrc" or "~/.bashrc and ~/.profi
   printf '%s\n' "$out"
 }
 
-shell_row() {  # its row in the opening screen's Installs, while a new terminal needs a line
-  [ -n "$sh_want" ] || return 0
-  if [ "$sh_why" = other ]; then row "shell startup" "not written: install.sh writes no startup file for $sh_name (a line below says what to set)"
-  elif [ "$sh_why" = name ]; then row "shell startup" "not written: a folder's name holds a character that a startup file would expand"
-  elif [ "${#sh_add[@]}" = 0 ]; then return 0
-  elif [ "$sh_answer" = no ]; then row "shell startup" "left as it is ($( [ -n "$modify_path" ] && echo '--no-modify-path' || echo 'your earlier --no-modify-path; --modify-path changes it'))"
-  else row "shell startup" "$(shell_targets): $(shell_what) (--no-modify-path leaves $( [ "${#sh_lines[@]}" -gt 1 ] && echo them || echo it ) out)"; fi
+shell_needs() {  # what a new terminal needs set, in words, where install.sh knows no line for the shell
+  ! wants path || show "  $(tilde "$bin_dir") on PATH"
+  ! wants home || show "  THIMBLE_HOME=$(arg_path "$home")"
 }
 
-record_shell() {  # record_shell KIND [FILE [LINE]]: a line of $home/shell-startup, written once
-  local entry="$1"; shift
-  [ $# = 0 ] || entry="$entry"$'\t'"$(IFS=$'\t'; printf '%s' "$*")"
-  [ "$dry" = 0 ] || return 0
-  [ -f "$home/$SHELL_RECORD" ] || printf '%s\n' \
-    "# thimble's installer: \"added<TAB>FILE<TAB>LINE\" is a line it added to that shell startup file, \"created<TAB>FILE\" a file" \
-    "# it created, which \`thimble uninstall\` removes; \"skip\" is --no-modify-path, which a later run keeps." > "$home/$SHELL_RECORD"
-  grep -qxF -- "$entry" "$home/$SHELL_RECORD" || printf '%s\n' "$entry" >> "$home/$SHELL_RECORD"
-}
-
-shell_step() {  # after the link: the lines of shell_plan appended where they are missing, each recorded
-  local p f line failed=0
-  if [ "$cli_linked" != 1 ]; then say "the thimble link is not this install's, so no shell startup file is changed"; sh_want=""; return 0; fi
-  [ "$cli_state" != other ] || shell_plan  # a yes switched the link, so its lines are wanted now
-  if [ "$sh_answer" = no ]; then
-    say "--no-modify-path: no shell startup file is changed"
-    [ "$modify_path" != no ] || record_shell skip
-    return 0
-  fi
-  if [ "$modify_path" = yes ] && [ "$dry" = 0 ] && [ -f "$home/$SHELL_RECORD" ] && grep -qx skip "$home/$SHELL_RECORD"; then
-    { grep -vx skip "$home/$SHELL_RECORD" || true; } > "$tmp/shell-record"; cat "$tmp/shell-record" > "$home/$SHELL_RECORD"
-  fi
-  [ -n "$sh_want" ] || { say "a new terminal needs no line: $(tilde "$bin_dir") is on PATH and thimble's home is ~/.thimble"; return 0; }
+shell_advice() {  # after Next: the lines the startup files lack that a new terminal needs for `thimble`, and the command
+  # that runs thimble in this terminal (HERE) until then
+  local here="$1" line p f lacking groups=() each="" same=1
+  [ "$cli_linked" = 1 ] && [ -n "$sh_want" ] || return 0
   if [ "$sh_why" = other ]; then
-    warn "install.sh writes no startup file for your shell, $sh_name, so set these in it for a new terminal:"; shell_needs; return 0
+    showf "To run thimble in a new terminal, set this in the startup file of your shell, $sh_name:"; shell_needs
   elif [ "$sh_why" = name ]; then
-    warn "a folder's name holds a character that a startup file would expand, so install.sh writes no line; set these in your shell's startup file for a new terminal:"; shell_needs; return 0
-  fi
-  [ "${#sh_add[@]}" -gt 0 ] || { say "the shell startup files have the lines already"; return 0; }
-  for p in "${sh_add[@]}"; do
-    f="${p%%$'\t'*}" line="${p#*$'\t'}"
-    say "+ append to $f: $line"
-    [ "$dry" = 0 ] || continue
-    if [ ! -e "$f" ]; then
-      if mkdir -p "$(dirname "$f")" 2>/dev/null && : >> "$f" 2>/dev/null; then record_shell created "$f"; else failed=1; continue; fi
+    showf "To run thimble in a new terminal, set this in your shell's startup file (a folder's name holds a character a startup file would expand):"; shell_needs
+  elif [ "${#sh_add[@]}" = 0 ]; then
+    [ "$here" = thimble ] || showf "This terminal started before $(shell_files_text) had $( [ "${#sh_lines[@]}" -gt 1 ] && echo 'those lines' || echo 'that line'), so in it run: $here"
+    return 0
+  else
+    for line in "${sh_lines[@]}"; do  # the files that lack each line
+      lacking=""
+      for p in "${sh_add[@]}"; do
+        [ "${p#*$'\t'}" = "$line" ] || continue
+        f="$(tilde "${p%%$'\t'*}")"; lacking="${lacking:+$lacking and }$f"
+      done
+      [ -n "$lacking" ] || continue
+      groups+=("$lacking"$'\t'"$line")
+      if [ -z "$each" ]; then each="$lacking"; elif [ "$each" != "$lacking" ]; then same=0; fi
+    done
+    if [ "${#groups[@]}" = 1 ]; then
+      showf "To run thimble in a new terminal, add this to ${groups[0]%%$'\t'*}: ${groups[0]#*$'\t'}"
+    elif [ "$same" = 1 ]; then
+      showf "To run thimble in a new terminal, add these to $each:"
+      for p in "${groups[@]}"; do show "  ${p#*$'\t'}"; done
+    else
+      for p in "${groups[@]}"; do showf "To run thimble in a new terminal, add this to ${p%%$'\t'*}: ${p#*$'\t'}"; done
     fi
-    # a file whose last line has no newline gets one first, so that the line is a line of its own
-    if [ -s "$f" ] && [ -n "$(tail -c 1 "$f" 2>/dev/null)" ]; then printf '\n' >> "$f" 2>/dev/null || { failed=1; continue; }; fi
-    if printf '%s\n' "$line" >> "$f" 2>/dev/null; then record_shell added "$f" "$line"; else failed=1; fi
-  done
-  if [ "$failed" = 1 ]; then
-    warn "a shell startup file could not be written (it may be read-only), so set these in it for a new terminal:"; shell_needs; return 0
   fi
-  sh_added=1
-  ok "Added to $(shell_targets), so that a new terminal $(wants path && echo 'finds thimble' || echo "keeps THIMBLE_HOME=$(tilde "$home")"):"
-  for line in "${sh_lines[@]}"; do note "  $line"; done
-  sh_add=()
-}
-
-shell_needs() {  # what a new terminal needs set, as notes, where install.sh writes no line
-  ! wants path || note "  $(tilde "$bin_dir") on PATH"
-  ! wants home || note "  THIMBLE_HOME=$(arg_path "$home")"
-}
-
-register_plugin() {  # thimble in every Claude Code session (scripts/plugin.sh): only --plugin, --no-plugin or an earlier
-  # yes changes anything; without them Claude Code's plugins are left as they are
-  local answer="${plugin:-$plugin_prev}" mp_file="$dir/.claude-plugin/marketplace.json"
-  if [ "$mp_name" != "$mp_file_name" ]; then
-    say "+ set .name = \"$mp_name\" in $mp_file"
-    [ "$dry" = 1 ] || python3 -I -c 'import json,sys; p,n=sys.argv[1:]; d=json.load(open(p)); d["name"]=n; json.dump(d, open(p,"w"), indent=2); open(p,"a").write("\n")' "$mp_file" "$mp_name"
-  fi
-  [ -z "$plugin" ] || [ "$plugin" = "$plugin_prev" ] || say "--$( [ "$plugin" = yes ] || echo 'no-' )plugin: changing thimble's place in every Claude Code session"
-  plugin_apply "$answer" || note "thimble is not in every Claude Code session as asked: once the above is fixed, run install.sh again with --plugin."
-}
-
-# ------------------------------------------------------------- thimble-cc-mod, which this version no longer has
-# 0.5.0's `thimble cc-mod on` installed thimble-cc-mod from thimble's marketplace at project scope in a folder, and this
-# version's marketplace no longer lists it. An update does what Claude Code does with a plugin that left its
-# marketplace (code.claude.com/docs/en/plugins/host-marketplace, "Rename or remove a plugin"): it takes the plugin out
-# of the user, project and local scopes it is installed at, with `claude plugin uninstall` at each scope, in every
-# folder Claude Code lists it in, then says in one line where it turned it off. The marketplace's renames map
-# (`"thimble-cc-mod": null`) has Claude Code do the same in a folder this misses, when a session starts there.
-MOD_GONE=thimble-cc-mod
-
-mod_plan() {  # mod_at: where thimble-cc-mod from this install's marketplace is installed, a line each of its
-  # marketplace, scope and folder (none at user scope), read from the lists plugin_regs (scripts/plugin.sh) left in $tmp
-  mod_at=""
-  [ -s "$tmp/plugins.json" ] && [ -s "$tmp/markets.json" ] || return 0
-  mod_at="$(python3 -I - "$tmp/plugins.json" "$tmp/markets.json" "$dir" "$MOD_GONE" <<'PY'
-import json, os, sys
-
-plugins, markets, mine, gone = sys.argv[1:]
-try:
-    rows, listed = json.load(open(plugins, encoding="utf-8")), json.load(open(markets, encoding="utf-8"))
-except (OSError, ValueError):
-    raise SystemExit(0)
-ours = set()
-for m in listed if isinstance(listed, list) else []:
-    if not isinstance(m, dict):
-        continue
-    src = m.get("source")
-    kind, path = (src.get("source"), src.get("path")) if isinstance(src, dict) else (src, m.get("path"))
-    if kind == "directory" and isinstance(path, str) and path and os.path.realpath(path) == os.path.realpath(mine):
-        ours.add(m.get("name"))
-for p in rows if isinstance(rows, list) else []:
-    if not isinstance(p, dict):
-        continue
-    name, _, market = str(p.get("id", "")).partition("@")
-    if name == gone and market in ours and p.get("scope") in ("user", "project", "local"):
-        print(market, p["scope"], p.get("projectPath") or "", sep="\t")
-PY
-)" || mod_at=""
-}
-
-mod_step() {  # thimble-cc-mod taken out of each scope mod_at names (a folder that is gone has no settings left to change),
-  # then one line naming where; a scope it could not be taken out of gets a ! line with the command that does it
-  [ -n "$mod_at" ] || return 0
-  local market scope folder where off=() n i list=""
-  while IFS=$'\t' read -r market scope folder; do
-    if [ "$scope" = user ]; then
-      where="your user settings"
-      if run claude plugin uninstall "$MOD_GONE@$market" --scope user; then off+=("$where")
-      else warn "thimble-cc-mod is still on in $where: claude plugin uninstall $MOD_GONE@$market --scope user turns it off"; fi
-    elif [ -d "$folder" ]; then
-      where="$(tilde "$folder")"
-      if run_in "$folder" claude plugin uninstall "$MOD_GONE@$market" --scope "$scope"; then off+=("$where")
-      else warn "thimble-cc-mod is still on in $where: claude plugin uninstall $MOD_GONE@$market --scope $scope, run there, turns it off"; fi
-    fi
-  done <<< "$mod_at"
-  n="${#off[@]}"
-  [ "$n" -gt 0 ] || return 0
-  for ((i = 0; i < n; i++)); do
-    if [ "$i" = 0 ]; then list="${off[i]}"; elif [ "$i" = $((n - 1)) ]; then list="$list and ${off[i]}"; else list="$list, ${off[i]}"; fi
-  done
-  ok "Turned thimble-cc-mod off in $list: thimble $version no longer has it (\`thimble mode terminal\` shows thimble in the terminal)"
+  [ "$here" = thimble ] || showf "Until then: $here"
 }
 
 # ---------------------------------------------------------------------------- the opening screen
@@ -1372,12 +1151,15 @@ PY_SIZE="about 650 MB"           # backend/.venv from uv.lock, measured
 NODE_SIZE="about 300 MB"         # a checkout's frontend/node_modules (npm ci), measured
 NODE_RUNTIME_SIZE="about 70 MB"  # a release's frontend/runtime packages, measured
 
-plan() {  # what each question, the plugin and the link find, before the opening screen
+plan() {  # what the question, the plugin, the link and the startup files find, before the opening screen
   local q
   for q in ${QUESTIONS[@]+"${QUESTIONS[@]}"}; do "${q}_plan"; done
-  plugin_prev="" plugin_reg="" plugin_kept="" plugin_switch="" other_reg="" other_from="" plugin_known=1 mod_at=""
+  plugin_reg="" plugin_on="" plugin_version="" other_reg="" other_from="" plugin_known=1 plugin_ok=0
   cli_state="" cli_other="" cli_switch=""
-  [ "$deps_only" = 1 ] || { plugin_record; mod_plan; cli_plan; shell_plan; }
+  if [ "$deps_only" = 0 ]; then
+    [ "$plugin" = no ] || plugin_record
+    cli_plan; shell_plan
+  fi
 }
 
 opening() {  # the one screen before the questions: what install.sh found, what it installs where, what it changes in
@@ -1392,6 +1174,7 @@ opening() {  # the one screen before the questions: what install.sh found, what 
   found "$found_py" "$found_py_text"
   found "$found_node" "$found_node_text"
   for q in ${QUESTIONS[@]+"${QUESTIONS[@]}"}; do if declare -F "${q}_found" >/dev/null; then "${q}_found"; fi; done
+  card_found
   show ""
   heading_q "Installs"
   if [ "$in_place" = 1 ]; then row "thimble $version" "$(tilde "$dir")" "in place"
@@ -1411,18 +1194,18 @@ opening() {  # the one screen before the questions: what install.sh found, what 
     case "$cli_state" in
       other) row "thimble command" "$(tilde "$cli_link")" "runs another install now, $cli_other; $(asks && echo 'asks before switching it' || echo 'left as it is')";;
       foreign) row "thimble command" "$(tilde "$dir/plugin/bin/thimble")" "$(tilde "$cli_link") is another program, left alone";;
-      *) row "thimble command" "$(tilde "$cli_link")";;
+      *) row "thimble command" "$(tilde "$cli_link")" \
+           "$(! wants path || echo "$(tilde "$bin_dir") is not on PATH: the last lines say what to add to your shell's startup file")";;
     esac
   fi
   row "settings and logs" "$(tilde "$home")"
-  [ "$deps_only" = 1 ] || shell_row
   if [ "$deps_only" = 0 ]; then
     show ""
     heading_q "Your Claude Code setup"
     plugin_setup
     for q in ${QUESTIONS[@]+"${QUESTIONS[@]}"}; do if declare -F "${q}_setup" >/dev/null; then "${q}_setup"; fi; done
-    [ -z "$trust_ignored" ] || found ok "$trust_ignored is ignored: thimble's agents no longer need a folder Claude Code trusts"
   fi
+  if [ "${#ignored[@]}" -gt 0 ]; then show ""; ignored_line; fi
   show ""
   if [ "$n" = 0 ]; then show "Questions: none."
   elif [ "$dry" = 1 ]; then show "Questions: $n, listed below."
@@ -1430,13 +1213,26 @@ opening() {  # the one screen before the questions: what install.sh found, what 
 }
 
 plugin_setup() {  # the plugin's line in "Your Claude Code setup"
-  local answer="${plugin:-$plugin_prev}"
-  if [ -n "$other_reg" ] && [ -z "$plugin_reg" ]; then
-    found ok "thimble from another install is in every Claude Code session (thimble@$other_reg, from $(tilde "$other_from")); left as it is$( [ "$answer" = yes ] && asks && echo ', unless you agree below to switch it')"
-  elif [ "$plugin" = yes ]; then found ok "thimble is added to every Claude Code session (--plugin)"
-  elif [ "$plugin" = no ] && [ -n "$plugin_reg$plugin_kept" ]; then found ok "thimble is taken out of your other Claude Code sessions (--no-plugin)"
-  elif [ "$answer" = yes ]; then found ok "thimble stays in every Claude Code session (your earlier choice; thimble plugin off takes it out)"
-  else found ok "thimble is not added to your other Claude Code sessions: the thimble command loads it into the sessions it starts"; fi
+  local cc
+  cc="$(tilde "${CLAUDE_CONFIG_DIR:-$HOME/.claude}")"
+  if [ "$plugin" = no ]; then found ok "thimble's plugin: left as it is (--no-plugin)"
+  elif [ "$have_claude" != 1 ]; then
+    found warn "thimble's plugin: not added, since Claude Code is not installed; run install.sh again once it is"
+  elif [ -n "$other_reg" ] && [ -z "$plugin_reg" ]; then
+    found ok "another install's thimble@$other_reg (from $(tilde "$other_from")) stays; to switch: $(plugin_switch_cmds)"
+  elif [ "$plugin_reg" = "$mp_name" ]; then
+    found ok "updates thimble's plugin (thimble@$mp_name) when its version changed; on or off as you set it"
+  else
+    found ok "adds thimble's plugin with Claude Code's own commands: claude plugin marketplace add $(arg_path "$dir"), then claude plugin install --scope user thimble@$mp_name (Claude Code writes it to $cc/settings.json and $cc/plugins)"
+  fi
+}
+
+ignored_line() {  # one line naming the flags of 0.7 that were given, which this version ignores
+  local n="${#ignored[@]}" i list=""
+  for ((i = 0; i < n; i++)); do
+    if [ "$i" = 0 ]; then list="${ignored[i]}"; elif [ "$i" = $((n - 1)) ]; then list="$list and ${ignored[i]}"; else list="$list, ${ignored[i]}"; fi
+  done
+  found ok "$list $( [ "$n" = 1 ] && echo is || echo are ) ignored: thimble 0.8 always adds its plugin, installs no system package and writes no shell startup file"
 }
 
 # --------------------------------------------------------------------------------------- questions
@@ -1457,7 +1253,7 @@ prompt() {  # prompt TEXT DEFAULT: TEXT with [Y/n] or [y/N], on the terminal, th
 
 ask() {  # the questions that remain, before anything is installed (QUESTIONS, each NAME_pending). --dry-run lists them
   # with their flags; on a terminal each is asked; without one install.sh stops while one has no flag. Then, on a
-  # terminal only, whether to switch another install's plugin or command to this one
+  # terminal only, whether to switch another install's `thimble` command to this one
   local q pending=() need=() i=0 n again
   tty=0
   for q in ${QUESTIONS[@]+"${QUESTIONS[@]}"}; do if "${q}_pending"; then pending+=("$q"); fi; done
@@ -1500,10 +1296,6 @@ $again"
     if prompt "$("${q}_prompt")" "$("${q}_default")"; then "${q}_answer" y; else "${q}_answer" n; fi
   done
   [ "$deps_only" = 0 ] || return 0
-  if [ "${plugin:-$plugin_prev}" = yes ] && [ -n "$other_reg" ] && [ -z "$plugin_reg" ]; then
-    show ""
-    if prompt "$(other_plugin) Switch it to this install?" n; then plugin_switch=yes; fi
-  fi
   if [ "$cli_state" = other ]; then
     show ""
     if prompt "$(tilde "$cli_link") runs the thimble install in $cli_other. Make \`thimble\` run this install instead?" n; then cli_switch=yes; fi
@@ -1520,25 +1312,27 @@ path_has_local_bin() {  # $HOME/.local/bin (or ~/.local/bin) as a PATH entry, a 
   case ":$(printf '%s' "$PATH" | sed 's#/*:#:#g; s#/*$##'):" in *":$bin_dir:"* | *":~/.local/bin:"*) return 0;; esac; return 1
 }
 
-doctor_check() {  # thimble doctor, its report in the log; the line names what it found wrong with Claude Code's login
+doctor_check() {  # thimble doctor --verbose, its report in the log; the line names what it found wrong with Claude Code's
+  # login
   local auth net rc=0
   busy "Checking the install with thimble doctor"
-  run "$dir/plugin/bin/thimble" doctor || rc=$?
+  run "$dir/plugin/bin/thimble" doctor --verbose || rc=$?
   [ "$dry" = 0 ] || return 0
   auth="$(sed -n 's/^  auth: //p' "$tmp/out" | head -n 1)"
   net="$(sed -n 's/^  network: //p' "$tmp/out" | head -n 1)"
   if [ "$rc" != 0 ]; then warn "thimble doctor failed (exit $rc); its output is in $(tilde "$log_file")"
   elif [ "${auth#not logged in}" != "$auth" ]; then
     warn "Checked with thimble doctor: Claude Code is not logged in, and nothing that calls a model runs until it is"
-    note "To log in, run claude."
+    note "To log in, in a shell: claude auth login (or /login in a claude session)"
   elif [ -n "$net" ] && [ "${net%answers}" = "$net" ] && [ "${net#not checked}" = "$net" ]; then
     warn "Checked with thimble doctor: the Claude API does not answer from here ($net)"
-  else ok "Checked with thimble doctor$( [ "${auth#logged in}" != "$auth" ] && echo ': Claude Code is logged in') (thimble doctor shows its full report)"; fi
+  else ok "Checked with thimble doctor$( [ "${auth#logged in}" != "$auth" ] && echo ': Claude Code is logged in') (thimble doctor shows a checklist; --verbose the details)"; fi
 }
 
-finish() {  # doctor, a server that runs another tree, then the one next step: `thimble` when a new terminal runs it, with
-  # the command for this terminal when it started before the startup files had their lines; else that command alone
-  local cmd here pid repo ready=0 here_ok=0
+finish() {  # doctor, a server that runs another tree, then what to run next: /thimble in claude when Claude Code has this
+  # install's plugin, else the `thimble` command; then the line a new terminal needs for `thimble`, if any, and the
+  # command that works in this terminal until then (shell_advice)
+  local name here pid repo
   doctor_check
   # a server started from another tree keeps running that tree's code until it is restarted
   if [ "$dry" = 0 ] && [ -f "$home/server.json" ]; then
@@ -1546,27 +1340,30 @@ finish() {  # doctor, a server that runs another tree, then the one next step: `
     repo="$(json_get "$home/server.json" repo)"
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && [ -n "$repo" ] && [ "$repo" != "$dir" ]; then
       warn "The thimble server (pid $pid) still runs the install in $repo until it restarts"
-      note "To run this install, restart it while no agent is at work: thimble server restart"
+      note "To run this install, restart it while no agent is at work. In a shell: thimble server restart"
     fi
   fi
   [ "$dry" = 0 ] || return 0
-  # a new terminal runs `thimble`: the link is this install's and the startup files have every line it needs
-  if [ "$cli_linked" = 1 ] && { [ -z "$sh_want" ] || { [ -z "$sh_why" ] && [ "${#sh_add[@]}" = 0 ]; }; }; then ready=1; fi
-  # this one does too: its PATH has the link's folder, and its THIMBLE_HOME is the default or came from a startup file
-  if [ "$cli_linked" = 1 ] && path_has_local_bin && { [ "$custom_home" = 0 ] || [ "$sh_had_home" = 1 ]; }; then here_ok=1; fi
-  if [ "$cli_linked" = 1 ] && path_has_local_bin; then cmd=thimble
-  elif [ "$cli_linked" = 1 ]; then cmd="$(arg_path "$cli_link")"
-  else cmd="$(arg_path "$dir/plugin/bin/thimble")"; fi
-  here="$cmd"; if [ "$custom_home" = 1 ] && [ "$sh_had_home" = 0 ]; then here="THIMBLE_HOME=$(arg_path "$home") $cmd"; fi
-  heading "Done: thimble $version is installed in $(tilde "$dir")"
-  if [ "$ready" = 1 ] && [ "$here_ok" = 1 ]; then
-    showf "Next: run thimble in a folder of transcripts. It starts Claude Code with thimble and prints the dashboard's address."
-  elif [ "$ready" = 1 ]; then
-    showf "Next: open a new terminal and run thimble in a folder of transcripts. It starts Claude Code with thimble and prints the dashboard's address."
-    showf "This terminal started before $(shell_files_text) had $( [ "${#sh_lines[@]}" -gt 1 ] && echo 'those lines' || echo 'that line'), so in it run: $here"
+  shell_plan  # again: a yes may have switched the link to this install since the opening screen
+  # `thimble` in a new terminal, once the startup files have the lines shell_advice prints; in this one, the command that
+  # works now: the link by its path while PATH lacks its folder, with THIMBLE_HOME while no startup file sets it
+  if [ "$cli_linked" = 1 ]; then
+    name=thimble
+    if path_has_local_bin; then here=thimble; else here="$(arg_path "$cli_link")"; fi
   else
-    showf "Next: run $here in a folder of transcripts. It starts Claude Code with thimble and prints the dashboard's address."
+    name="$(arg_path "$dir/plugin/bin/thimble")" here="$name"
   fi
+  if [ "$custom_home" = 1 ] && [ "$sh_had_home" = 0 ]; then
+    here="THIMBLE_HOME=$(arg_path "$home") $here"
+    [ "$cli_linked" = 1 ] || name="$here"
+  fi
+  heading "Done: thimble $version is installed in $(tilde "$dir")"
+  if [ "$plugin_ok" = 1 ]; then
+    showf "Next: in a folder of transcripts, start claude and type /thimble (in a session that was open before, /reload-plugins first), or run $name there."
+  else
+    showf "Next: run $name in a folder of transcripts. It starts Claude Code with thimble and prints the dashboard's link."
+  fi
+  shell_advice "$here"
   showf "Optional: \`thimble mode terminal\` in a folder shows thimble's work in the terminal, with no server or browser."
 }
 
@@ -1597,9 +1394,7 @@ main() {
   if [ "$deps_only" = 1 ]; then heading "--deps-only: done"; exit 0; fi
   write_pointer
   link_cli
-  shell_step
-  mod_step
-  register_plugin
+  plugin_step
   run_steps last
   finish
 }
