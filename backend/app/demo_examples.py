@@ -175,7 +175,7 @@ def run(args: argparse.Namespace, say: Callable[[str], None],
             failed += 1
     say("")
     if opened:
-        coded = demo.start_url(pair=True)
+        coded = demo.start_url()  # a sign-in code only for a terminal: output a program reads can reach a model
         if (show or demo.open_page)(coded):  # the browser spent the code, so the line names the page without it
             say(f"  Open at {demo.start_url(pair=False)}")
             say("  (opened in your browser)")

@@ -78,10 +78,11 @@ def installed(name: str, slug: str) -> dict:
     return json.loads((views.views_dir(name) / slug / views.VIEW_JSON).read_text("utf-8"))
 
 
-def test_every_worked_example_opens_as_a_workspace_with_its_view_built_and_its_labels_on(world):
+def test_every_worked_example_opens_as_a_workspace_with_its_view_built_and_its_labels_on(world, monkeypatch):
     """Each example of plugin/viewers: its sample copied into THIMBLE_HOME (not the repository) as the corpus of the
     workspace example-<name>, its view built so read_built serves it, each sample label defined, turned on and applied,
-    and one URL printed and opened, the start page with a sign-in code."""
+    and one URL printed and opened, the start page with a sign-in code on a terminal."""
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
     w = world
     found = demo_examples.examples()
     assert [p.name for p in found] == sorted(p.name for p in views.EXAMPLES_DIR.iterdir() if (p / "view.json").is_file())
@@ -106,6 +107,19 @@ def test_every_worked_example_opens_as_a_workspace_with_its_view_built_and_its_l
     # (start_page.py); the browser spent the code, so the printed line names the page without it
     assert re.findall(r"http://\S+", out) == ["http://127.0.0.1:1/"]
     assert w["shown"] == [f"http://127.0.0.1:1/#p={CODE}"]
+
+
+def test_without_a_terminal_the_start_page_s_link_carries_no_sign_in_code(world, monkeypatch):
+    """Output that a program reads, such as an agent's Bash, can reach a model's context, so without a terminal the
+    printed link carries no sign-in code (cli.ui_url, as `thimble demo` and /thimble print it)."""
+    monkeypatch.setattr("sys.stdout.isatty", lambda: False)
+    w = world
+    a = argparse.Namespace(examples=True, refresh=False)
+    assert demo_examples.run(a, w["lines"].append, lambda say: ("http://127.0.0.1:1", w["env"]), request=w["server"],
+                             show=lambda url: w["shown"].append(url) and False) == 0
+    out = said(w)
+    assert re.findall(r"http://\S+", out) == ["http://127.0.0.1:1/"] and "#p=" not in out
+    assert w["shown"] == ["http://127.0.0.1:1/"]
 
 
 def test_a_second_run_adds_only_what_is_missing(world):
