@@ -407,7 +407,7 @@ def stopped_unnamed(c: str, agent_id: str) -> bool:
 
 def earlier_text(sid: str) -> str:
     """The text for an orientation of an earlier Claude Code session, naming the full session id to resume."""
-    return tools.hint("orient-continue-earlier-session", resume=f"thimble -r {sid}")
+    return tools.hint("orient-continue-earlier-session", session=sid)
 
 
 def _refuse_message(c: str, text: str) -> None:

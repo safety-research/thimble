@@ -2,9 +2,10 @@
 // app/hook_auth.py does. The server's side is backend/tests_public/test_module_bridge.py. Run with the frontend's
 // vitest (frontend/vitest.config.ts includes this file): cd frontend && npx vitest run ../plugin/hooks
 import { createHmac } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 
-import { hmac, register } from './thimble'
+import { ACTIVATE_WAIT_MS, PRIVATE_FALLBACK, RETRY_MS, hmac, register } from './thimble'
 
 type Json = Record<string, any>
 
@@ -43,6 +44,8 @@ class Server {
   results: Json[] = []
   ended: Json[] = []
   modes: Json[] = [] // what the module posted of main's plan mode
+  rules: Json | undefined = undefined // the rules GET /api/module/roles carries beside the roles (userconf.module_rules)
+  rolesStatus = 200
   nextStatus: number | null = null // one forced answer to the next poll
   waiters: (() => void)[] = []
 
@@ -75,7 +78,7 @@ class Server {
         return reply(status, status === 200 ? { ok: true } : { detail: 'no' })
       }
       case 'GET /api/module/roles':
-        return reply(200, { roles: this.roles })
+        return this.rolesStatus === 200 ? reply(200, { roles: this.roles, ...(this.rules ? { rules: this.rules } : {}) }) : reply(this.rolesStatus)
       case 'GET /api/module/state':
         return reply(200, this.state)
       case 'GET /api/module/next': {
@@ -103,7 +106,7 @@ class Server {
   }
 }
 
-type Options = { env?: Json; interactive?: boolean; server?: Server; serverUp?: boolean }
+type Options = { env?: Json; interactive?: boolean; server?: Server; serverUp?: boolean; fakeClock?: boolean }
 
 /** A fake engine: the module's hooks, `$`, and a record of what the module asked Claude Code for. */
 function engine(opts: Options = {}) {
@@ -114,6 +117,8 @@ function engine(opts: Options = {}) {
     ...(opts.serverUp === false ? {} : { [`${HOME}/.thimble/server.json`]: JSON.stringify({ port: 21125, token: TOKEN }) }),
   }
   const mtimes: Json = {} // each file's mtime, which a write moves on
+  const links: Json = {} // symbolic links: path -> where it points
+  let clock = Date.now() // the fake clock's time (fakeClock), which each sleep moves on
   let tick = 1
   const writeFile = (path: string, data: unknown) => { files[path] = typeof data === 'string' ? data : JSON.stringify(data); mtimes[path] = ++tick }
   const hooks: Json = {}
@@ -124,14 +129,27 @@ function engine(opts: Options = {}) {
   let spawnAnswer = (args: Json): Json => ({ agentId: `agent-${log.length}`, model: now[args.subagentType]?.model })
   let toolAnswer = (input: Json): Json => ({ result: { success: true }, text: `Resuming agent ${input.to}` })
   let checkReason = 'Claude requested permissions to write, but you haven\'t granted it yet.' // Claude Code's decision for a write
+  /** where a path lands, every link followed; undefined when it leads nowhere (no file, and no folder of one) */
+  const land = (path: string): string | undefined => {
+    let p = path
+    for (let hops = 0; hops < 16; hops++) {
+      const link = Object.keys(links).find(l => p === l || p.startsWith(`${l}/`))
+      if (!link) break
+      p = `${links[link]}${p.slice(link.length)}`
+    }
+    return p in files || Object.keys(files).some(f => f.startsWith(`${p}/`)) ? p : undefined
+  }
   const $ = {
     env: { get: vi.fn(async (name: string) => env[name]), set: async () => undefined },
     fs: {
       read: vi.fn(async (path: string) => { if (path in files) return files[path]; throw new Error(`ENOENT ${path}`) }),
       write: vi.fn(async (path: string, data: string) => { writeFile(path, data) }),
-      stat: vi.fn(async (path: string) => {
-        if (!(path in files)) throw new Error(`ENOENT ${path}`)
-        return { kind: 'file', size: String(files[path]).length, mtimeMs: mtimes[path] ?? 1, isLink: false }
+      stat: vi.fn(async (path: string, options?: { resolve: boolean }) => {
+        const real = land(path)
+        if (real === undefined) throw new Error(`ENOENT ${path}`)
+        const isLink = path in links
+        if (!(real in files)) return { kind: 'dir', size: 0, mtimeMs: 1, isLink, ...(options?.resolve ? { realPath: real } : {}) }
+        return { kind: 'file', size: String(files[real]).length, mtimeMs: mtimes[real] ?? 1, isLink, ...(options?.resolve ? { realPath: real } : {}) }
       }),
     },
     http: { fetch: vi.fn((url: string, init?: Json) => server.fetch(url, init)) },
@@ -153,18 +171,32 @@ function engine(opts: Options = {}) {
       id: vi.fn(async () => sid),
       append: vi.fn(async (args: Json) => ({ uuid: 'u1', message: args.message })),
     },
-    clock: { sleep: (ms: number) => new Promise(r => setTimeout(r, Math.min(ms, 5))), now: async () => Date.now() },
+    clock: opts.fakeClock
+      ? { sleep: (ms: number) => { clock += ms; return new Promise(r => setTimeout(r, 0)) }, now: async () => clock }
+      : { sleep: (ms: number) => new Promise(r => setTimeout(r, Math.min(ms, 5))), now: async () => Date.now() },
     plugin: { name: 'thimble', root: '/plugin' },
   }
   const notes = () => $.session.append.mock.calls.map(([a]) => a.message.content[0].text as string)
   return {
-    $, server, env, files, now, log, notes, writeFile,
+    $, server, env, files, links, now, log, notes, writeFile,
     setSession: (s: string) => { sid = s },
     onSpawn: (f: (args: Json) => Json) => { spawnAnswer = f },
     onTool: (f: (input: Json) => Json) => { toolAnswer = f },
     /** the reason Claude Code's permission decision gives for a write now: in plan mode it says so */
     onCheck: (reason: string) => { checkReason = reason },
     start: () => hooks['session.start']($, { cwd: CWD, surface: opts.interactive === false ? null : 'terminal', isInteractive: opts.interactive ?? true }, async () => ({ cwd: CWD })),
+    /** a skill's prompt expanding: /thimble is `thimble:thimble` */
+    skill: (name: string) => hooks['skill.prompt']($, { skill: name, text: 'the skill', frontmatter: {}, source: 'plugin', pluginName: 'thimble' }, async () => ({ text: 'the skill' })),
+    /** one tool call through the tool.call hook: `ran` when it went on to Claude Code, else what the hook answered */
+    tool: async (input: Json): Promise<Json> => {
+      const next = vi.fn(async () => ({ ran: true }))
+      return hooks['tool.call']($, { tool_use_id: 'toolu_9', ...input }, next)
+    },
+    /** the guard's catch, as Claude Code runs it when the hook failed: before its `next` or after it */
+    toolCaught: (input: Json, called: boolean): Promise<Json> => {
+      const next = Object.assign(vi.fn(async () => ({ ran: true })), { called })
+      return hooks['tool.call.catch']($, { tool_use_id: 'toolu_9', ...input }, next)
+    },
     end: (reason: string, sessionId = MAIN) => hooks['session.end']($, { reason, sessionId, resume: {} }, async () => ({ sessionId })),
     /** main's (or an agent's) Agent call through the agent.spawn hook: the input Claude Code went on with, and its answer */
     agentCall: async (e: Json, agentId: string) => {
@@ -217,7 +249,7 @@ describe('the scope check', () => {
     expect(e.$.env.get).not.toHaveBeenCalled()
   })
 
-  it('stays idle when the server refuses its hello (not main, or main unfenced)', async () => {
+  it('stays idle when the server refuses its hello (not main)', async () => {
     const server = new Server()
     server.helloStatus = () => 403
     const e = engine({ server })
@@ -225,6 +257,120 @@ describe('the scope check', () => {
     await new Promise(r => setTimeout(r, 30))
     expect(server.calls).toEqual(['POST /api/module/hello'])
     expect(e.$.agent.register).not.toHaveBeenCalled()
+  })
+})
+
+describe('turning on with /thimble, in a session the launcher did not start', () => {
+  const plain = (opts: Options = {}) => engine({ ...opts, env: { THIMBLE_LAUNCHED: undefined, ...(opts.env ?? {}) } })
+  /** the number of hellos once one came and no other came for 20 ms (the fake clock moves only as the module sleeps) */
+  const settled = async (server: Server): Promise<number> => {
+    await until(() => server.hellos.length > 0)
+    let n = -1
+    for (let i = 0; i < 400 && server.hellos.length !== n; i++) {
+      n = server.hellos.length
+      await new Promise(r => setTimeout(r, 20))
+    }
+    return n
+  }
+
+  it('says hello and registers the roles once /thimble expands, and only then', async () => {
+    const e = plain()
+    await e.start()
+    await e.complete(undefined)
+    expect(e.$.http.fetch).not.toHaveBeenCalled()
+    expect(e.$.fs.read).not.toHaveBeenCalled()
+    await e.skill('thimble:thimble')
+    await until(() => e.server.polls.length > 0)
+    expect(e.server.hellos[0]).toEqual({ cwd: CWD, session: MAIN, version: '0.6.0', problem: '' })
+    expect(e.$.agent.register).toHaveBeenCalledTimes(7)
+    expect(e.server.calls.slice(0, 3)).toEqual(['POST /api/module/hello', 'GET /api/module/state', 'GET /api/module/roles'])
+  })
+
+  for (const [why, opts, name] of [
+    ['for another skill', {}, 'thimble:orient'],
+    ['with THIMBLE_NO_MODULE', { env: { THIMBLE_NO_MODULE: '1' } }, 'thimble:thimble'],
+    ['in claude -p (isInteractive false)', { interactive: false }, 'thimble:thimble'],
+  ] as [string, Options, string][]) {
+    it(`does nothing ${why}`, async () => {
+      const e = plain(opts)
+      await e.start()
+      await e.skill(name)
+      await new Promise(r => setTimeout(r, 30))
+      await e.complete(undefined)
+      await new Promise(r => setTimeout(r, 30))
+      expect(e.$.http.fetch).not.toHaveBeenCalled()
+      expect(e.$.agent.register).not.toHaveBeenCalled()
+    })
+  }
+
+  it('waits ACTIVATE_WAIT_MS for a server that accepts it, then says hello once at the end of each of main’s turns', async () => {
+    const server = new Server()
+    server.helloStatus = () => 409 // no main known yet
+    const e = plain({ server, fakeClock: true })
+    await e.start()
+    await e.skill('thimble:thimble')
+    const n = await settled(server)
+    expect(n).toBe(ACTIVATE_WAIT_MS / RETRY_MS + 1) // one at once, then one every RETRY_MS until the wait is over
+    await e.complete('agent-1') // an agent's turn: nothing
+    await e.complete(undefined) // main's turn
+    await until(() => server.hellos.length === n + 1)
+    await new Promise(r => setTimeout(r, 30))
+    expect(server.hellos.length).toBe(n + 1)
+    server.helloStatus = () => 200
+    await e.complete(undefined)
+    await until(() => server.polls.length > 0)
+    expect(e.$.agent.register).toHaveBeenCalledTimes(7)
+  })
+
+  it('stays idle after a refused hello until the next /thimble', async () => {
+    const server = new Server()
+    server.helloStatus = () => 409
+    const e = plain({ server, fakeClock: true })
+    await e.start()
+    await e.skill('thimble:thimble')
+    const n = await settled(server)
+    server.helloStatus = () => 403 // another session is main
+    await e.complete(undefined)
+    await until(() => server.hellos.length === n + 1)
+    await e.complete(undefined)
+    await new Promise(r => setTimeout(r, 30))
+    expect(server.hellos.length).toBe(n + 1)
+    server.helloStatus = () => 200
+    await e.skill('thimble:thimble')
+    await until(() => server.polls.length > 0)
+  })
+
+  it('takes a 404 after /thimble (a folder /thimble did not open) as refused: one hello, none at later turn ends', async () => {
+    const server = new Server()
+    server.helloStatus = () => 404
+    const e = plain({ server })
+    await e.start()
+    await e.skill('thimble:thimble')
+    await until(() => server.hellos.length === 1)
+    await new Promise(r => setTimeout(r, 30))
+    await e.complete(undefined)
+    await e.complete(undefined)
+    await new Promise(r => setTimeout(r, 30))
+    expect(server.calls).toEqual(['POST /api/module/hello'])
+  })
+
+  it('keeps asking on a 404 in the launcher’s session, whose server may be starting', async () => {
+    const server = new Server()
+    server.helloStatus = () => 404
+    const e = engine({ server })
+    await e.start()
+    await until(() => server.hellos.length >= 3)
+  })
+
+  it('does not turn on again in the launcher’s session, whose own hello is refused', async () => {
+    const server = new Server()
+    server.helloStatus = () => 403
+    const e = engine({ server })
+    await e.start()
+    await e.skill('thimble:thimble')
+    await e.complete(undefined)
+    await new Promise(r => setTimeout(r, 30))
+    expect(server.calls).toEqual(['POST /api/module/hello'])
   })
 })
 
@@ -373,7 +519,7 @@ describe('requests', () => {
     e.onCheck("Claude requested permissions to write, but you haven't granted it yet.")
     await until(3)
     expect(e.server.modes.map((b) => b.plan)).toEqual([false, true, false])
-    // a path no rule of thimble's fence names, so that plan mode is what decides it (main's corpus is an ask rule)
+    // a path no rule of thimble's names, so that plan mode is what decides it
     expect(e.$.tool.check).toHaveBeenLastCalledWith({ tool: 'Write', input: { file_path: '/tmp/.thimble-plan-probe', content: '' } })
     expect(e.$.tool.call).not.toHaveBeenCalledWith(expect.objectContaining({ tool: 'Write' })) // never written
     await e.end('other')
@@ -528,6 +674,109 @@ describe('ends and sessions', () => {
   })
 })
 
+describe('the file guard', () => {
+  const T = `${HOME}/.thimble`
+  const WS = `${T}/workspaces/wiki`
+  const RULES = {
+    private: [`${T}/server.json`, `${T}/session.key`, `${T}/paired.json`, `${T}/links`],
+    records: [`${WS}/trusted`, `${WS}/chats`, `${WS}/notices.json`, `${WS}/notices-dismissed.json`, `${T}/main-modes.json`, `${T}/bypass.json`],
+    corpus: null, web_off: false,
+    reasons: { private: 'NO TOKEN FILES', records: 'NO RECORDS', data: 'NO CORPUS EDITS', web: 'NO WEB' },
+  }
+  const ran = { ran: true }
+
+  async function guarded(rules: Json | undefined = RULES, opts: Options = {}) {
+    const server = opts.server ?? new Server()
+    server.rules = rules
+    const e = await started({ ...opts, server })
+    e.writeFile(`${T}/paired.json`, '{}')
+    return e
+  }
+
+  it('refuses a file tool its read of the token files while active, and lets it through while idle', async () => {
+    const e = await guarded()
+    expect(await e.tool({ tool: 'Read', file_path: `${T}/server.json` })).toEqual({ deny: 'NO TOKEN FILES' })
+    expect(await e.tool({ tool: 'Read', file_path: `${T}/paired.json` })).toEqual({ deny: 'NO TOKEN FILES' })
+    expect(await e.tool({ tool: 'Read', file_path: `${T}/links/s-1` })).toEqual({ deny: 'NO TOKEN FILES' })
+    expect(await e.tool({ tool: 'Read', file_path: '~/.thimble/./workspaces/../server.json' })).toEqual({ deny: 'NO TOKEN FILES' })
+    expect(await e.tool({ tool: 'Read', file_path: `${CWD}/board.jsonl` })).toEqual(ran)
+    const idle = engine({ env: { THIMBLE_LAUNCHED: undefined } })
+    await idle.start()
+    expect(await idle.tool({ tool: 'Read', file_path: `${T}/server.json` })).toEqual(ran)
+    expect(idle.$.fs.stat).not.toHaveBeenCalled()
+  })
+
+  it('refuses a link to a token file, comparing where the path lands', async () => {
+    const e = await guarded()
+    e.links['/tmp/innocent.json'] = `${T}/server.json`
+    e.links['/tmp/home-link'] = T
+    expect(await e.tool({ tool: 'Read', file_path: '/tmp/innocent.json' })).toEqual({ deny: 'NO TOKEN FILES' })
+    expect(await e.tool({ tool: 'Edit', file_path: '/tmp/home-link/session.key', old_string: 'a', new_string: 'b' })).toEqual({ deny: 'NO TOKEN FILES' })
+  })
+
+  it('refuses an edit of thimble’s records, a file not there yet included, and lets a read of one through', async () => {
+    const e = await guarded()
+    e.writeFile(`${WS}/trusted/launch.json`, '{}')
+    expect(await e.tool({ tool: 'Edit', file_path: `${WS}/trusted/launch.json`, old_string: 'a', new_string: 'b' })).toEqual({ deny: 'NO RECORDS' })
+    expect(await e.tool({ tool: 'Write', file_path: `${WS}/notices.json`, content: '[]' })).toEqual({ deny: 'NO RECORDS' })
+    expect(await e.tool({ tool: 'Write', file_path: `${T}/bypass.json`, content: '{"rows": ["dev"]}' })).toEqual({ deny: 'NO RECORDS' })
+    expect(await e.tool({ tool: 'NotebookEdit', notebook_path: `${WS}/chats/main.ipynb`, new_source: 'x' })).toEqual({ deny: 'NO RECORDS' })
+    e.links['/tmp/ws-link'] = WS
+    expect(await e.tool({ tool: 'Write', file_path: '/tmp/ws-link/notices-dismissed.json', content: '[]' })).toEqual({ deny: 'NO RECORDS' })
+    expect(await e.tool({ tool: 'Read', file_path: `${WS}/trusted/launch.json` })).toEqual(ran)
+    expect(await e.tool({ tool: 'Write', file_path: `${WS}/notes.md`, content: 'x' })).toEqual(ran)
+  })
+
+  it('refuses an edit of the corpus only when the rules name it, and the web tools only when they are off', async () => {
+    const open = await guarded()
+    expect(await open.tool({ tool: 'Edit', file_path: `${CWD}/board.jsonl`, old_string: 'a', new_string: 'b' })).toEqual(ran)
+    expect(await open.tool({ tool: 'WebFetch', url: 'https://example.com', prompt: 'p' })).toEqual(ran)
+    const off = await guarded({ ...RULES, corpus: CWD, web_off: true })
+    expect(await off.tool({ tool: 'Edit', file_path: `${CWD}/board.jsonl`, old_string: 'a', new_string: 'b' })).toEqual({ deny: 'NO CORPUS EDITS' })
+    expect(await off.tool({ tool: 'Read', file_path: `${CWD}/board.jsonl` })).toEqual(ran)
+    expect(await off.tool({ tool: 'WebSearch', query: 'q' })).toEqual({ deny: 'NO WEB' })
+    expect(await off.tool({ tool: 'WebFetch', url: 'https://example.com', prompt: 'p' })).toEqual({ deny: 'NO WEB' })
+  })
+
+  it('leaves Bash to the permission mode', async () => {
+    const e = await guarded()
+    expect(await e.tool({ tool: 'Bash', command: `cat ${T}/server.json` })).toEqual(ran)
+  })
+
+  it('refuses Grep and Glob at thimble’s home or a token file, and lets them through at $HOME', async () => {
+    const e = await guarded()
+    expect(await e.tool({ tool: 'Grep', pattern: 'token', path: T })).toEqual({ deny: 'NO TOKEN FILES' })
+    expect(await e.tool({ tool: 'Glob', pattern: '*.json', path: `${T}/` })).toEqual({ deny: 'NO TOKEN FILES' })
+    expect(await e.tool({ tool: 'Grep', pattern: 'token', path: `${T}/server.json` })).toEqual({ deny: 'NO TOKEN FILES' })
+    expect(await e.tool({ tool: 'Grep', pattern: 'token', path: HOME })).toEqual(ran)
+    expect(await e.tool({ tool: 'Grep', pattern: 'token' })).toEqual(ran) // the working directory
+  })
+
+  it('refuses only the token files, in its own words, when the rules could not be fetched', async () => {
+    const server = new Server()
+    server.rolesStatus = 500
+    const e = await guarded(RULES, { server })
+    expect(await e.tool({ tool: 'Read', file_path: `${T}/server.json` })).toEqual({ deny: PRIVATE_FALLBACK })
+    expect(await e.tool({ tool: 'Write', file_path: `${T}/bypass.json`, content: '{}' })).toEqual(ran)
+    expect(await e.tool({ tool: 'Write', file_path: `${WS}/notices.json`, content: '[]' })).toEqual(ran)
+  })
+
+  it('refuses a token file in its catch only when the hook failed before its next, with no file system call', async () => {
+    const e = await guarded()
+    const stats = e.$.fs.stat.mock.calls.length
+    expect(await e.toolCaught({ tool: 'Read', file_path: `${T}/server.json` }, false)).toEqual({ deny: 'NO TOKEN FILES' })
+    expect(await e.toolCaught({ tool: 'Read', file_path: `${T}/server.json` }, true)).toEqual(ran)
+    expect(await e.toolCaught({ tool: 'Read', file_path: `${CWD}/board.jsonl` }, false)).toEqual(ran)
+    expect(e.$.fs.stat.mock.calls.length).toBe(stats)
+  })
+
+  it('says what prompts/tools.md’s module-deny-private says before the rules come', () => {
+    const tools = readFileSync(new URL('../../prompts/tools.md', import.meta.url), 'utf-8')
+    const section = tools.split('\n## module-deny-private\n')[1].split('\n## ')[0].trim()
+    expect(PRIVATE_FALLBACK).toBe(section)
+  })
+})
+
 describe('the proof', () => {
   it("is app/hook_auth.py's HMAC-SHA256, short and long keys alike", async () => {
     for (const key of [TOKEN, 'k'.repeat(64), 'long-'.repeat(40)]) {
@@ -540,7 +789,7 @@ describe('terminal mode', () => {
   const WS = '/workspaces/wiki'
   const T = `${WS}/trusted`
   const out = (e: { files: Json }): Json => JSON.parse(e.files[`${T}/module.json`])
-  const launch = (more: Json = {}) => ({ session: MAIN, mode: 'terminal', fenced: true, at: '2026-10-06T10:00:00+00:00', pid: 4242, ...more })
+  const launch = (more: Json = {}) => ({ session: MAIN, mode: 'terminal', at: '2026-10-06T10:00:00+00:00', pid: 4242, ...more })
 
   /** an engine in terminal mode: THIMBLE_WS, launch.json, roles.json and subagents.json as the launcher and the backend
    *  write them, and server.json naming a live server, which the module must never ask */
@@ -586,7 +835,6 @@ describe('terminal mode', () => {
 
   for (const [why, more] of [
     ['a session launch.json does not name', { session: NEW }],
-    ['main outside thimble’s fence', { fenced: false }],
   ] as [string, Json][]) {
     it(`stays idle for ${why}: no registration, no module.json, no fetch`, async () => {
       const e = terminal({ launch: launch(more) })

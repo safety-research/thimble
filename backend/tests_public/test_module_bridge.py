@@ -1,12 +1,13 @@
 """module_bridge.py: the server's side of thimble's hooks module (plugin/hooks/thimble.ts). The module says hello only
-from main's fenced session as launch.json names it, or as `--rekey` moved it after /clear, in either order; it takes the
-requests made for its session alone from a long poll; a request it does not answer in time expires, and an agent its
-late spawn started is stopped; every route takes the hooks' proof both ways. The module's own side is
-plugin/hooks/thimble.test.ts."""
+from main's session as launch.json names it (the launcher's, or /thimble's), or as `--rekey` moved it after /clear, in
+either order; it takes the requests made for its session alone from a long poll; a request it does not answer in time
+expires, and an agent its late spawn started is stopped; the roles it fetches carry the rules it enforces on file tools;
+every route takes the hooks' proof both ways. The module's own side is plugin/hooks/thimble.test.ts."""
 from __future__ import annotations
 
 import asyncio
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -18,7 +19,7 @@ import httpx
 import pytest
 
 import app
-from app import cc_plugin, config, hook_auth, module_bridge, procs, session, tools
+from app import cc_plugin, config, hook_auth, module_bridge, procs, session, tools, userconf
 
 _real_opened = module_bridge._opened  # the autouse fixture stands in for it
 
@@ -37,7 +38,6 @@ def _fresh(monkeypatch, workspaces_tmp):
     module_bridge._ended.clear()
     monkeypatch.setattr(module_bridge, "_loop", None)
     monkeypatch.setattr(session, "_live", {})  # no main another test left behind
-    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: True, raising=False)
     monkeypatch.setattr(module_bridge, "_opened", lambda c, sid: True)  # main's session attached (/thimble ran)
     monkeypatch.setattr(cc_plugin, "managed", lambda environ=None: None)
     monkeypatch.setattr(module_bridge, "HELLO_HOLD_S", 0.6)
@@ -53,8 +53,7 @@ def _cwd() -> str:
 
 
 def _launch(session: str = MAIN, **more) -> None:
-    (config.workspace_dir(CORPUS) / module_bridge.LAUNCH).write_text(json.dumps({"session": session, "fenced": True,
-                                                                                  **more}))
+    (config.workspace_dir(CORPUS) / module_bridge.LAUNCH).write_text(json.dumps({"session": session, **more}))
 
 
 def _registry() -> dict:
@@ -136,20 +135,20 @@ async def test_every_module_route_answers_only_a_request_that_proves_the_token(c
         assert r.status_code != 401, path
         assert r.headers[hook_auth.PROOF_HEADER] == hook_auth.sign(hook_auth.token(), "server", h[hook_auth.NONCE_HEADER])
     assert hook_auth.guarded("GET", "/api/module/anything") and hook_auth.guarded("POST", "/api/module/hello")
+    assert hook_auth.guarded("GET", "/api/module/roles"), "the roles and the rules need the hooks' proof"
 
 
 # ----------------------------------------------------------------------------------------------- main's meta
 
 
-async def test_main_s_meta_says_whether_main_is_fenced_launched_and_the_module_live(client, plugin_headers, monkeypatch):
-    """The browser's unfenced banner and Start's no-module line read main's meta: `fenced`, `launched`, `module` and,
-    while the module is not live, `module_why`. Each time the module goes live or stops being live, main's chat is
+async def test_main_s_meta_says_whether_the_module_is_live(client, plugin_headers, monkeypatch):
+    """The browser's no-module line reads main's meta: `module` and, while the module is not live, `module_why`, and
+    nothing of a fence or of how main started. Each time the module goes live or stops being live, main's chat is
     notified, so an open page reads the meta again."""
     from app import agents
 
     notified: list = []
     monkeypatch.setattr(agents, "notify", lambda c, chat: notified.append((c, chat)))
-    monkeypatch.setattr(cc_plugin, "main_launched", lambda c: True, raising=False)
     monkeypatch.setattr(module_bridge, "LIVE_GAP_S", 0.2)
     _launch()
 
@@ -158,12 +157,14 @@ async def test_main_s_meta_says_whether_main_is_fenced_launched_and_the_module_l
         assert r.status_code == 200
         got = r.json()["meta"]
         assert got == {**got, **(await client.get(f"/api/ws/{CORPUS}/chats/main")).json()["meta"]}
-        return {k: got[k] for k in ("fenced", "launched", "module", "module_why")}
+        assert "fenced" not in got and "launched" not in got
+        return {k: got[k] for k in ("module", "module_why")}
 
-    assert await meta() == {"fenced": True, "launched": True, "module": False, "module_why": module_bridge.NOT_LOADED}
+    assert module_bridge.main_meta(CORPUS) == {"module": False, "module_why": module_bridge.NOT_LOADED}
+    assert await meta() == {"module": False, "module_why": module_bridge.NOT_LOADED}
     mod = Module(client, plugin_headers)
     poll = await _live(mod)
-    assert await meta() == {"fenced": True, "launched": True, "module": True, "module_why": ""}
+    assert await meta() == {"module": True, "module_why": ""}
     assert notified == [(CORPUS, agents.MAIN_ID)], "once, as it went live"
     module_bridge._enqueue(CORPUS, "note", {"text": "x"}, MAIN, None)  # ends the poll, which the test does not renew
     assert (await poll).status_code == 200
@@ -174,16 +175,12 @@ async def test_main_s_meta_says_whether_main_is_fenced_launched_and_the_module_l
     assert notified == [(CORPUS, agents.MAIN_ID)] * 2, "and once as it stopped polling"
     got = await meta()
     assert not got["module"] and got["module_why"].startswith(module_bridge.NOT_ANSWERING)
-    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: False, raising=False)
-    monkeypatch.setattr(cc_plugin, "main_launched", lambda c: False, raising=False)
-    assert {k: v for k, v in (await meta()).items() if k != "module_why"} == \
-        {"fenced": False, "launched": False, "module": False}
 
 
 # ----------------------------------------------------------------------------------------------- the hello
 
 
-async def test_a_hello_is_accepted_from_main_s_fenced_session_and_recorded_for_doctor(client, plugin_headers):
+async def test_a_hello_is_accepted_from_main_s_session_and_recorded_for_doctor(client, plugin_headers):
     _launch()
     reg = config.workspace_dir(CORPUS) / module_bridge.REGISTRY
     reg.write_text(json.dumps({"agents": {"a1": {"type": "thimble:writer"}}}))
@@ -197,8 +194,7 @@ async def test_a_hello_is_accepted_from_main_s_fenced_session_and_recorded_for_d
     assert _registry()["module"]["problem"] == "writer: refused"
 
 
-async def test_a_hello_from_a_session_that_is_not_the_workspace_s_fenced_main_is_refused(client, plugin_headers,
-                                                                                         monkeypatch):
+async def test_a_hello_from_a_session_that_is_not_the_workspace_s_main_is_refused(client, plugin_headers):
     # no main known yet (no launch.json names a session, /thimble made none main): asked again later
     r = await Module(client, plugin_headers).hello()
     assert r.status_code == 409 and r.json()["detail"] == module_bridge.NO_MAIN
@@ -210,12 +206,7 @@ async def test_a_hello_from_a_session_that_is_not_the_workspace_s_fenced_main_is
     assert r.status_code == 403 and r.json()["detail"] == module_bridge.NOT_MAIN
     assert time.monotonic() - t0 >= module_bridge.HELLO_HOLD_S * 0.9
     assert _registry()["module"]["idle"] == module_bridge.NOT_MAIN
-    # main itself, unfenced
-    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: False, raising=False)
-    r = await Module(client, plugin_headers).hello()
-    assert r.status_code == 403 and r.json()["detail"] == module_bridge.NOT_FENCED
-    assert module_bridge.why_not(CORPUS) == module_bridge.NOT_FENCED
-    # a folder that is no workspace: 404, and the module asks again later
+    # a folder that is no workspace: 404 (a module /thimble turned on stays idle then; a launched one asks again later)
     r = await client.post("/api/module/hello", json={"cwd": "/nowhere", "session": MAIN}, headers=plugin_headers())
     assert r.status_code == 404
 
@@ -223,11 +214,10 @@ async def test_a_hello_from_a_session_that_is_not_the_workspace_s_fenced_main_is
 async def test_a_hello_before_main_s_session_opened_thimble_is_asked_again_not_refused(client, plugin_headers,
                                                                                          monkeypatch):
     """At session start the module says hello before the launcher's first prompt, /thimble, attaches main, so main's
-    `claude` process is not known yet (or only the last main's is): the hello waits (409) rather than being refused as
-    unfenced, which would leave the module idle for the whole session."""
+    `claude` process is not known yet (or only the last main's is): the hello waits (409) rather than being refused,
+    which would leave the module idle for the whole session."""
     _launch()
     monkeypatch.setattr(module_bridge, "_opened", _real_opened)
-    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: session.main_pid(c) == 4242, raising=False)
     monkeypatch.setattr(session, "main_pid", lambda c: None)
     r = await Module(client, plugin_headers).hello()
     assert r.status_code == 409 and r.json()["detail"] == module_bridge.NOT_OPEN
@@ -247,6 +237,19 @@ async def test_a_hello_before_main_s_session_opened_thimble_is_asked_again_not_r
     assert (await Module(client, plugin_headers, CHILD).hello()).status_code == 200
 
 
+async def test_a_hello_from_the_session_thimble_made_main_is_accepted_with_no_fence(client, plugin_headers,
+                                                                                     monkeypatch):
+    """A plain `claude` session that typed /thimble: launch.json is /thimble's (`via: skill`, no fence, no session
+    named on main's command line), and /thimble attached main, so its module's hello is accepted."""
+    _launch(via="skill", mode="browser", pid=4242)
+    monkeypatch.setattr(module_bridge, "_opened", _real_opened)
+    monkeypatch.setattr(session, "current", lambda c: types.SimpleNamespace(sid=MAIN))
+    monkeypatch.setattr(session, "main_pid", lambda c: 4242)
+    r = await Module(client, plugin_headers).hello()
+    assert r.status_code == 200 and r.json() == {"ok": True}
+    assert module_bridge._accepted(CORPUS, MAIN) and "idle" not in _registry()["module"]
+
+
 def _process(tmp_path, name: str, *args: str) -> subprocess.Popen:
     """A process whose command line is `<tmp_path>/<name> <args>`, as `ps` and /proc show it: the Python running the
     tests, by a link of that name, sleeping."""
@@ -256,19 +259,15 @@ def _process(tmp_path, name: str, *args: str) -> subprocess.Popen:
     return subprocess.Popen([str(link), "-c", "import time; time.sleep(60)", *args])
 
 
-FENCE = json.dumps({"sandbox": {"enabled": True}, "env": {cc_plugin.FENCE_MARK: "1"}})
-
-
-async def test_a_hello_at_session_start_is_accepted_when_launch_json_s_process_is_main_s_fenced_claude(
+async def test_a_hello_at_session_start_is_accepted_when_launch_json_s_process_is_main_s_claude(
         client, plugin_headers, monkeypatch, tmp_path):
     """At session start /thimble has not attached main, so the server knows no `claude` process of main's; the launcher
     wrote main's `claude` process into launch.json as it started it. A hello from launch.json's session is accepted at once
-    when that process is a `claude` whose command line names the session and carries thimble's fence, read from /proc as
-    main_fenced reads it, so the module registers thimble's types inside session.start. Every case where that check
-    cannot be made waits (409) for /thimble as before: no pid, a process that is gone, not `claude`, not fenced or for
-    another session, and a session /clear moved main to."""
+    when that process is a `claude` whose command line names the session, read from /proc, with or without a
+    `--settings`, so the module registers thimble's types inside session.start. Every case where that check cannot be
+    made waits (409) for /thimble as before: no pid, a process that is gone, not `claude` or for another session, and a
+    session /clear moved main to."""
     monkeypatch.setattr(module_bridge, "_opened", _real_opened)
-    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: False, raising=False)  # no main attached: nothing read
     monkeypatch.setattr(session, "main_pid", lambda c: None)
     running: list[subprocess.Popen] = []
 
@@ -285,29 +284,31 @@ async def test_a_hello_at_session_start_is_accepted_when_launch_json_s_process_i
         return await Module(client, plugin_headers, sid).hello()
 
     try:
-        main = started("claude", "--settings", FENCE, "--session-id", MAIN, "--", "/thimble")
+        main = started("claude", "--session-id", MAIN, "--", "/thimble")
         t0 = time.monotonic()
         r = await hello(main)
         assert r.status_code == 200 and r.json() == {"ok": True}
         assert time.monotonic() - t0 < module_bridge.HELLO_HOLD_S, "accepted at once, inside session.start"
         assert module_bridge._accepted(CORPUS, MAIN) and "idle" not in _registry()["module"]
         module_bridge._bridges.clear()
-        resumed = started("claude", "--settings", FENCE, "--resume", MAIN)
+        resumed = started("claude", "--resume", MAIN)
         assert (await hello(resumed)).status_code == 200, "thimble -c passes --resume with the session"
+        module_bridge._bridges.clear()
+        settings = started("claude", "--settings", "{}", "--session-id", MAIN)
+        assert (await hello(settings)).status_code == 200, "a --settings changes nothing"
         module_bridge._bridges.clear()
 
         waits = {
             "no pid in launch.json": None,
-            "not claude": started("python3", "--settings", FENCE, "--session-id", MAIN),
-            "not fenced": started("claude", "--settings", "{}", "--session-id", MAIN),
-            "another session's claude": started("claude", "--settings", FENCE, "--session-id", CHILD),
+            "not claude": started("python3", "--session-id", MAIN),
+            "another session's claude": started("claude", "--session-id", CHILD),
             "the pid is no process": 2 ** 22 + 7,
         }
         for why, pid in waits.items():
             r = await hello(pid)
             assert r.status_code == 409 and r.json()["detail"] == module_bridge.NOT_OPEN, why
             assert not module_bridge._accepted(CORPUS, MAIN), why
-        gone = started("claude", "--settings", FENCE, "--session-id", MAIN)
+        gone = started("claude", "--session-id", MAIN)
         running[-1].kill()
         running[-1].wait()
         r = await hello(gone)
@@ -563,13 +564,19 @@ async def test_the_roles_come_from_subagents_roles_as_agent_register_takes_them(
     mod = Module(client, plugin_headers)
     assert (await mod.get("roles")).status_code == 409, "only after the hello"
     await mod.hello()
-    roles = (await mod.get("roles")).json()["roles"]
+    got = (await mod.get("roles")).json()
+    assert set(got) == {"roles", "rules"}
+    roles = got["roles"]
     assert roles == {
         "orientation": {"name": "orientation", "prompt": "Orient.", "model": "claude-opus-5-5[1m]", "effort": "xhigh",
                         "description": "thimble's orientation of this corpus", "background": True,
                         "disallowedTools": ["mcp__plugin_thimble_thimble__start_orientation"]},
         "orient-helper": {"name": "orient-helper", "prompt": "Help.", "model": "claude-sonnet-5", "effort": "high",
                           "description": "thimble's role", "background": True, "skills": ["thimble:shared"]}}
+    rules = got["rules"]
+    assert rules == userconf.module_rules(CORPUS), "the rules the hooks module enforces on file tools"
+    assert str(userconf.global_file().parent / "server.json") in rules["private"]
+    assert set(rules["reasons"]) == {"private", "records", "data", "web"} and all(rules["reasons"].values())
 
 
 def _fake_roles(monkeypatch, prompt: dict) -> None:
@@ -900,11 +907,17 @@ def test_push_roles_writes_roles_json_in_terminal_mode_and_sync_writes_it_only_w
     path = module_bridge.sf.roles_path(terminal)
     first = json.loads(path.read_text())
     assert first["roles"]["orientation"]["prompt"] == "Orient." and first["digest"]
+    assert first["rules"] == userconf.module_rules(CORPUS) and first["rules"]["corpus"] is None
     assert path.stat().st_mode & 0o777 == 0o600
     assert asyncio.run(module_bridge.sync_roles(CORPUS, force=True)) is False
     prompt["text"] = "Orient, edited by hand."
     assert asyncio.run(module_bridge.sync_roles(CORPUS, force=True)) is True
     assert json.loads(path.read_text())["roles"]["orientation"]["prompt"] == "Orient, edited by hand."
+    # the rules count as well: corpus edits turned off by hand in thimble's config
+    userconf.global_file().parent.mkdir(parents=True, exist_ok=True)
+    userconf.global_file().write_text(json.dumps({"agents": {"orientation": {"data": "off"}}}))
+    assert asyncio.run(module_bridge.sync_roles(CORPUS, force=True)) is True
+    assert json.loads(path.read_text())["rules"]["corpus"] == os.path.realpath(config.corpus_dir(CORPUS))
 
 
 def test_roles_json_is_rendered_in_the_sessions_mode_from_any_folder(monkeypatch, tmp_path):

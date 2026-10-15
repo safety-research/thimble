@@ -18,16 +18,16 @@ edit of the corpus does with `data` at "ask" (Session.verdict, ask_cause `config
 an agent would change in its own permissions and decides; a session nobody answers is refused it. main's kept mode
 (main_modes_file), which only thimble writes, stays denied.
 
-One fence for main and its agents. thimble's agents are subagents of main, the analyst's Claude Code session, which the
-launcher starts inside thimble's fence (cli.main_fence, its permission rules main_rules): they run in main's permission
-mode and share its sandbox, network and rules. So the orientation's `web`, `network` and `data` are main's fence's keys,
-which every agent shares; the other agents keep only `web: off`, which keeps that one agent off the web tools. Code
-tickets' agents are subagents of main too. The dev agent alone keeps its own permission mode, fast mode and fence keys,
-for `thimble fix` and an extension's program that runs the dev agent, which stay jobs of the server.
+One fence for main and its agents. thimble's agents are subagents of main and run in main's permission mode; thimble
+adds no rule, working directory or sandbox to main's session, only the hooks module's denies (module_rules). So the
+orientation's `web`, `network` and `data` are main's keys, which every agent shares; the other agents keep only `web:
+off`, which keeps that one agent off the web tools. Code tickets' agents are subagents of main too. The dev agent alone
+keeps its own permission mode, fast mode and fence keys, for `thimble fix` and an extension's program that runs the dev
+agent, which stay jobs of the server.
 Installs follow Claude Code's permission mode: thimble adds no rule for them. The web tools do too at `web` "ask":
-Manual asks for them as Claude Code does, and auto mode's classifier judges them. An `ask` rule in main's fence would
-also ask in auto mode, since Claude Code obeys an explicit ask rule there, and the fence stays the same while main's
-mode changes (live check: the checks asked three times for the web in auto mode). The keys earlier builds read for this,
+Manual asks for them as Claude Code does, and auto mode's classifier judges them. An `ask` rule would also ask in auto
+mode, since Claude Code obeys an explicit ask rule there (live check: the checks asked three times for the web in auto
+mode). The keys earlier builds read for this,
 `installs`, and each agent's own `fast` and `permissionMode` and `web` other than "off" but the dev agent's
 (IGNORED_KEYS), are read and ignored, so an earlier config stays valid; `ignored` lists those a file holds, and a save
 from the Settings pane drops them. `suggest` (the viewer suggestion's call) and `refusal` (the model and effort a refused classifier call runs
@@ -93,6 +93,8 @@ CARD_WAIT_MAX = permission_hook.TIMEOUT // 120
 SERVER_JSON = "server.json"  # in thimble's home: the server's address and the token of its local API (hook_auth)
 MAIN_MODES = "main-modes.json"  # in thimble's home: the permission mode main last reported, per workspace (session.note_mode)
 SESSION_KEY = "session.key"  # in thimble's home: the secret of the sessions' tokens (hook_auth.SESSION_KEY)
+PAIRED_JSON = "paired.json"  # in thimble's home: the hashes of the browsers signed in (hook_auth.PAIRED_FILE)
+BYPASS_JSON = "bypass.json"  # in thimble's home: the rows the analyst chose Bypass for in Settings (bypass_file)
 EDIT_TOOLS = ("Edit", "MultiEdit", "Write", "NotebookEdit")
 MEMORY = ("inherit", "on", "off")
 PERMISSION_MODES = ("manual", "auto", "bypass")  # modes.MODES
@@ -116,7 +118,7 @@ def _subagent(web: str | None) -> dict[str, Any]:
 
 
 DEFAULTS: dict[str, Any] = {
-    "sandbox": {"use": "when-available", "enforce": True},
+    "sandbox": {"use": "when-available", "enforce": False},
     "browser": None,
     "cardWait": CARD_WAIT_MINUTES,
     "extensions": {},
@@ -153,9 +155,10 @@ EXTENSION_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 RENAMED_EXTENSIONS = {"swarm": "swarm-orient"}
 
 def private_paths() -> list[str]:
-    """The files no agent thimble starts may read: server.json in thimble's home, which holds the local API's token, and
-    the key the sessions' tokens are signed with."""
-    return [str(global_file().parent / name) for name in (SERVER_JSON, SESSION_KEY)]
+    """The files the hooks module keeps from file tools, and an extension program's box from the program: the local
+    API's token, the key the sessions' tokens are signed with, and the hashes of the browsers signed in
+    (hook_auth.PAIRED_FILE)."""
+    return [str(global_file().parent / name) for name in (SERVER_JSON, SESSION_KEY, PAIRED_JSON)]
 
 
 def private_rules() -> list[str]:
@@ -178,6 +181,13 @@ def global_file() -> Path:
 def main_modes_file() -> Path:
     """$THIMBLE_HOME/main-modes.json, which every row that follows main reads its mode from after a restart (modes.py)."""
     return global_file().parent / MAIN_MODES
+
+
+def bypass_file() -> Path:
+    """$THIMBLE_HOME/bypass.json, {"rows": [row], "at": iso}: the rows the analyst chose Bypass for in Settings, which
+    only modes.choose writes (from the settings PUT, which only the analyst's browser may make). The hooks module keeps
+    file tools from editing it (module_rules), and server jobs' settings deny it (Session.settings)."""
+    return global_file().parent / BYPASS_JSON
 
 
 def workspace_file(c: str) -> Path:
@@ -854,7 +864,8 @@ class Session:
         of edits to main's kept mode (main_modes_file). No rule for installs, which follow the session's permission mode
         (module note, one fence)."""
         config_rules = [f"Edit(/{f})" for f in self.config_files()]
-        perms: dict[str, list[str]] = {"deny": [f"Edit(/{main_modes_file()})", *private_rules()]}
+        perms: dict[str, list[str]] = {"deny": [f"Edit(/{main_modes_file()})", f"Edit(/{bypass_file()})",
+                                                *private_rules()]}
         if self.hosted:
             perms["ask"] = config_rules
         else:
@@ -915,16 +926,16 @@ def allow_own(command: str, own: list[str]) -> bool:
 
 
 # why an agent did not start while thimble's config requires the sandbox (session), read by the analyst and by models,
-# so the fix names no command
-NO_SANDBOX = "thimble's agents run only in Claude Code's Bash sandbox (sandbox.enforce), and {why}, so the {agent} agent did not start. {fix}"
+# so the fix names no install command
+NO_SANDBOX = "This agent's session runs only in Claude Code's Bash sandbox (sandbox.enforce), and {why}, so the {agent} agent did not start. {fix}"
 NO_SANDBOX_WHY = {
     "outside": ("this agent's sessions run outside it", ""),
     "never": ('thimble\'s config turns it off (sandbox.use "never")',
               "To run the agents without it, set sandbox.enforce to false in thimble's config as well."),
     "env": ("THIMBLE_SANDBOX=0 turns it off", "Unset THIMBLE_SANDBOX and restart thimble to use it."),
     "missing": ("it can't run on this machine",
-                "The analyst installs what it needs by running thimble's installer again in their own terminal with "
-                "--sandbox-deps; `thimble doctor` says what is missing."),
+                "`thimble doctor --verbose` names the commands that install what it needs, which the analyst runs in "
+                "their own terminal."),
 }
 
 
@@ -989,9 +1000,10 @@ class Rule(NamedTuple):
 LINKS_DIR = "links"  # under thimble's home: the dashboard link with its key, briefly (cli.LINKS_DIR)
 # the workspace's files and folders main and its agents may not edit, since thimble keeps its records there: the checks,
 # the chats, the extensions' state, the run record, the folder of the files the hooks trust (trusted/: subagents.json,
-# callers.jsonl, launch.json) and the views' state (proposals with their attempt counts, the versions readers are served)
+# callers.jsonl, launch.json), the views' state (proposals with their attempt counts, the versions readers are served),
+# and the open notices and those the analyst dismissed (notices.py)
 STATE_PATHS = ("checks/**", "chats/**", "extensions/**", "extension/extension.json", "orient/run.json", "trusted/**",
-               "views/**")
+               "views/**", "notices.json", "notices-dismissed.json")
 TICKET_FILES = ("tickets.jsonl", "applies.jsonl")  # in a development install's dev folder: the code tickets' records
 
 
@@ -1042,6 +1054,51 @@ def main_rules(c: str) -> list[Rule]:
     out += [Rule("deny", f"Read(/{links}/**)", "private"), Rule("deny", f"Edit(/{links}/**)", "private")]
     out.append(Rule("allow", f"Read(/{ws / 'critique'}/**)", "state"))
     return out
+
+
+def _spellings(*paths: Path | str) -> list[str]:
+    """Each path as spelled and as its realpath, in order and without repeats."""
+    out: list[str] = []
+    for p in paths:
+        for s in (str(p), os.path.realpath(p)):
+            if s not in out:
+                out.append(s)
+    return out
+
+
+def module_rules(c: str) -> dict[str, Any]:
+    """What the hooks module refuses the file tools and the web tools of main and its agents in workspace `c`
+    (plugin/hooks/thimble.ts, `refusal`), which GET /api/module/roles and roles.json carry:
+        private   the token files (private_paths) and the links folder, which no file tool reads or edits
+        records   the workspace's records (STATE_PATHS), main's kept mode, the Bypass choice (bypass_file), the code
+                  tickets' records (dev_files) and the live checkout's git folder (checkout_git), which no edit tool
+                  changes
+        corpus    the corpus folder's realpath when the orientation's `data` is "off", which no edit tool changes; else
+                  None
+        web_off   whether the orientation's `web` is "off", which refuses WebFetch and WebSearch
+        reasons   what a refusal of each kind says (private, records, data, web: prompts/tools.md's module-deny-* hints)
+    Each path is listed as spelled and as its realpath, since the module compares the call's path both ways. A config
+    with an error gives the defaults' rules."""
+    from . import tools  # noqa: PLC0415 — tools imports much of the server
+
+    conf = agent_conf(load_or_defaults(c)[0], "orientation")
+    ws = config.WORKSPACES_DIR / c
+    records = [ws / p.removesuffix("/**") for p in STATE_PATHS]
+    records += [main_modes_file(), bypass_file(), *dev_files(), *checkout_git()]
+    corpus = None
+    if conf["data"] == "off":
+        try:
+            corpus = os.path.realpath(config.corpus_dir(c))
+        except (OSError, ValueError, KeyError):
+            corpus = None
+    return {
+        "private": _spellings(*private_paths(), global_file().parent / LINKS_DIR),
+        "records": _spellings(*records),
+        "corpus": corpus,
+        "web_off": conf["web"] == "off",
+        "reasons": {"private": tools.hint("module-deny-private"), "records": tools.hint("module-deny-records"),
+                    "data": tools.hint("module-deny-data"), "web": tools.hint("module-deny-web")},
+    }
 
 
 # --------------------------------------------------------------------------- prompts

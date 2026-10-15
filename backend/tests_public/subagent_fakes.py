@@ -25,7 +25,7 @@ HINTS = {
     "start-refused-not-launched": "NOT LAUNCHED",
     "start-refused-unfenced": "UNFENCED: {reason}",
     "start-refused-no-module": "NO MODULE: {reason}",
-    "orient-continue-earlier-session": "EARLIER SESSION: {resume}",
+    "orient-continue-earlier-session": "EARLIER SESSION: {session}",
     "orient-continue-earlier-version": "EARLIER VERSION",
     "module-started-note": "STARTED {role} {agent} {what}",
     "follow-up-ran-on": "RAN ON {model} {effort}",

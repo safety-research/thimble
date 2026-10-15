@@ -91,22 +91,18 @@ async def test_a_second_start_while_one_starts_or_runs_starts_nothing(bridge, mo
     assert second.is_error and second.text.endswith(tools.hint("start_orientation-running"))
 
 
-@pytest.mark.parametrize("why", ["no-module", "not-launched", "plan"])
-async def test_start_orientation_is_refused_without_the_module_in_plan_mode_or_unlaunched(bridge, models,
-                                                                                        workspaces_tmp, monkeypatch,
-                                                                                        why):
-    from app import cc_plugin, session
+@pytest.mark.parametrize("why", ["no-module", "plan"])
+async def test_start_orientation_is_refused_without_the_module_or_in_plan_mode(bridge, models, workspaces_tmp,
+                                                                              monkeypatch, why):
+    from app import session
 
     if why == "no-module":
         bridge.is_live, bridge.reason = False, "Claude Code did not load thimble's hooks module"
-    elif why == "not-launched":
-        monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: False, raising=False)
     else:
         monkeypatch.setattr(session, "main_mode", lambda c: "plan")
     res = await tools.call(CORPUS, "start_orientation", {"brief": ""})
     assert res.is_error
-    want = {"no-module": "NO MODULE: Claude Code did not load thimble's hooks module", "not-launched": "NOT LAUNCHED",
-            "plan": "PLAN MODE"}[why]
+    want = {"no-module": "NO MODULE: Claude Code did not load thimble's hooks module", "plan": "PLAN MODE"}[why]
     assert res.text.endswith(want), res.text
     assert orientation.read_run(CORPUS) is None, "the analyst typed it and reads main's answer"
 
@@ -308,7 +304,7 @@ async def test_a_follow_up_to_an_earlier_version_s_or_session_s_orientation_is_r
         with pytest.raises(HTTPException) as e:
             await orient_session.message_route(CORPUS, orient_session.MessageBody(text="hi"), analyst)
         assert e.value.status_code == 409
-        assert e.value.detail == "EARLIER SESSION: thimble -r 11111111-1111-4111-8111-111111111111", "the full id"
+        assert e.value.detail == "EARLIER SESSION: 11111111-1111-4111-8111-111111111111", "the full id"
     finally:
         session._live.pop(CORPUS, None)
 
