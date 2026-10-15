@@ -2,8 +2,8 @@
 // card's width (or its body, for cards with no run), and a caption edited in place. Before a card is picked the block is
 // the picker. Locked (a scene, a slide), the caption is text; `FigureView` is the same figure outside the editor. A
 // figure follows its card: when the card changes (the stream's `cell` record) it is read again and drawn in place, and a
-// caption that still says the card's takeaway word for word takes the new takeaway. In the editor the question line is
-// a handle that moves the figure, as the block's actions in the gutter do.
+// caption that still says the card's takeaway word for word takes the new takeaway, unless the analyst locked the figure.
+// In the editor the question line is a handle that moves the figure, as the block's actions in the gutter do.
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { SideMenuExtension, type BlockNoteEditor } from '@blocknote/core'
 import { CardBody } from '../canvas/bodies'
@@ -153,7 +153,12 @@ export function FigureBlock({ block, editor }: FigureBlockProps) {
     )
   }
   const drag = readOnly ? undefined : figureDrag(editor, block.id, slug)
-  return <Figure ws={ws} id={block.id} cellRef={block.props.cell} caption={block.props.caption} stored={stored} readOnly={!!readOnly} onCaption={(v) => setProps({ caption: v })} onRemove={remove} drag={drag} />
+  // a change of the card carries an unedited caption to the new takeaway, except on a locked figure, which no model's
+  // change reaches; the lock is read when the change comes, from the document as last saved
+  const follow = (v: string) => {
+    if (!storedFigure(docRef.current?.sections, block.id)?.locked) setProps({ caption: v })
+  }
+  return <Figure ws={ws} id={block.id} cellRef={block.props.cell} caption={block.props.caption} stored={stored} readOnly={!!readOnly} onCaption={(v) => setProps({ caption: v })} onFollow={follow} onRemove={remove} drag={drag} />
 }
 
 /** A figure standing on its own, outside the editor, from its stored record: a scene's or a slide's figure. `bare`
@@ -173,6 +178,8 @@ interface FigureProps {
   readOnly: boolean
   bare?: boolean
   onCaption?: (caption: string) => void
+  /** the caption a change of the card carries over (followedCaption), in the editor */
+  onFollow?: (caption: string) => void
   onRemove?: () => void
   /** the question line's drag, in the editor */
   drag?: FigureDrag
@@ -184,7 +191,7 @@ function contentWidth(el: HTMLElement): number {
   return Math.floor(el.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0))
 }
 
-function Figure({ ws, id, cellRef, caption, stored, readOnly, bare = false, onCaption, onRemove, drag }: FigureProps) {
+function Figure({ ws, id, cellRef, caption, stored, readOnly, bare = false, onCaption, onFollow, onRemove, drag }: FigureProps) {
   const pending = !cellRef && !!stored?.make && (stored.status ?? 'pending') === 'pending'
   // Measure the figure's own element, not its body: the body draws nothing until it has a width, so a body measured at 0
     // in a hidden tab would stay at 0. A width of 0 keeps the last one, so the chart is not redrawn on every tab switch.
@@ -195,8 +202,8 @@ function Figure({ ws, id, cellRef, caption, stored, readOnly, bare = false, onCa
   const concepts = useConcepts(ws)
   // the card as the caption last followed it, the latest caption and its setter, read by the card's updates
   const followed = useRef<Cell | null>(null)
-  const captionNow = useRef({ caption, onCaption })
-  captionNow.current = { caption, onCaption }
+  const captionNow = useRef({ caption, onFollow })
+  captionNow.current = { caption, onFollow }
 
   // the card, read again whenever it changes, so the figure redraws in place; while the card runs again the figure keeps
   // what it showed, and only the newest read is shown
@@ -231,7 +238,7 @@ function Figure({ ws, id, cellRef, caption, stored, readOnly, bare = false, onCa
   useEffect(() => {
     if (!cell) return
     const was = followed.current
-    const { caption: now, onCaption: set } = captionNow.current
+    const { caption: now, onFollow: set } = captionNow.current
     const next = was && set ? followedCaption(now, was, cell) : null
     // a card with no takeaway yet is not followed, so the caption is matched against the takeaway it had
     if (!was || cell.takeaway || !was.takeaway) followed.current = cell

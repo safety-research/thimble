@@ -8,6 +8,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vi
 import { api } from '../../src/lib/api'
 import { dispatch } from '../../src/lib/events'
 import type { Cell } from '../../src/lib/types'
+import { ReportContext, type ReportCtx } from '../../src/report/context'
 import { FigureBlock, followedCaption } from '../../src/report/FigureBlock.tsx'
 import { mount, settle, unmountAll } from './mount.tsx'
 
@@ -44,13 +45,17 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-/** A figure block of card c1 with `caption`, in an editor whose updateBlock is recorded. */
-async function figure(caption: string, ws = 'w-follow') {
+/** A figure block of card c1 with `caption`, in an editor whose updateBlock is recorded; `locked`, the figure as the
+ * document last saved it is locked. */
+async function figure(caption: string, ws = 'w-follow', { locked }: { locked?: boolean } = {}) {
   const editor = { updateBlock: vi.fn(), removeBlocks: vi.fn() }
   const block = { id: 'f1', props: { cell: 'card:c1', caption } }
   // the report's context is read from the URL when no editor provides it
   window.history.replaceState(null, '', `/?ws=${ws}`)
-  const el = await mount(<FigureBlock block={block} editor={editor as never} />)
+  const fig = <FigureBlock block={block} editor={editor as never} />
+  const docRef = { current: { sections: [{ id: 's1', heading: 'Notes', paragraphs: [], figures: [{ id: 'f1', cell: 'card:c1', caption, locked }] }] } }
+  const ctx = { ws, slug: 'report', docRef, submitPrompt: vi.fn(), submitCard: vi.fn() } as unknown as ReportCtx
+  const el = await mount(locked === undefined ? fig : <ReportContext.Provider value={ctx}>{fig}</ReportContext.Provider>)
   await settle()
   return { el, editor }
 }
@@ -84,6 +89,19 @@ describe('a report figure follows its card', () => {
     await changed({ outputs: [{ 'text/plain': 'second chart' }], takeaway: 'Two runs in three end early.' })
     expect(el.textContent).toContain('second chart')
     expect(editor.updateBlock).not.toHaveBeenCalled()
+  })
+
+  test('a locked figure redraws, and its caption stays as it is', async () => {
+    const { el, editor } = await figure('Most runs end early.', 'w-follow-5', { locked: true })
+    await changed({ outputs: [{ 'text/plain': 'second chart' }], takeaway: 'Two runs in three end early.' })
+    expect(el.textContent).toContain('second chart')
+    expect(editor.updateBlock).not.toHaveBeenCalled()
+  })
+
+  test('an unlocked figure in the same document follows', async () => {
+    const { editor } = await figure('Most runs end early.', 'w-follow-6', { locked: false })
+    await changed({ takeaway: 'Two runs in three end early.' })
+    expect(editor.updateBlock).toHaveBeenCalledWith('f1', { props: { cell: 'card:c1', caption: 'Two runs in three end early.' } })
   })
 
   test('while the card runs again the figure keeps its chart, and the takeaway the run clears changes no caption', async () => {
