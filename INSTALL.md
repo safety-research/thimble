@@ -70,8 +70,9 @@ workspace. In browser mode the terminal also prints that line once per session.
 Code tickets and view builds are subagents of your session, so they run in its mode, Bypass included. thimble's own
 jobs (an extension's program that runs the dev agent, and the sessions thimble's server runs) follow your session's
 mode, except Bypass: they run in Bypass only when you choose Bypass for them in thimble's Settings. `"bypass"` written
-into thimble's config by hand counts as Manual until you choose it in Settings. `thimble fix` asks you first and then
-runs in Manual mode.
+into thimble's config by hand counts as Manual until you choose it in Settings. `thimble fix` asks you in the terminal
+before its change reaches thimble's code, and before it starts where its sandbox can't run. Nobody can answer it while
+it works, so it runs its commands without asking, in its sandbox where that can run.
 
 To be asked less, add this to `~/.claude/settings.json`, with the path from the `workspaces_dir` line of
 `thimble doctor --verbose` (in a development install, also `~/.thimble/dev/trees`, made first with `mkdir -p`):
