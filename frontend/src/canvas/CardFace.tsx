@@ -1,9 +1,9 @@
 // A card as the analyst sees it at rest: its question, the Labels row (a label card's label row), its body by kind
-// (bodies.tsx) and its takeaway, in the card's own box. The board's CellCard (Cell.tsx) adds hover chrome around it, and the card harness
-// (render.tsx) mounts it alone, so the image a check reads is the card the canvas draws. The face also shows the card
-// check, only as far as the analyst needs it at rest: a shimmer while it runs, its replacement faded in once confirmed,
-// and a red ✕ at the takeaway's corner only for a real problem it found (lib/cardCheck checkProblem). The rest of the
-// check, the fix's Undo among it, is in the card's details (CheckDetails).
+// (bodies.tsx) and its takeaway, in the card's own box. The board's CellCard (Cell.tsx) adds hover chrome around it,
+// and the card harness (render.tsx) mounts it alone, so the image a check reads is the card the canvas draws. The face
+// also shows the card check, only as far as the analyst needs it at rest: a shimmer while it runs, its replacement
+// faded in once confirmed, and a red ✕ at the takeaway's corner only for a real problem it found (lib/cardCheck
+// checkProblem). The rest of the check, the fix's Undo among it, is in the card's details (CheckDetails).
 // The body shimmers the same way while the card's code runs, as when an edit_card call is changing it, and the card
 // shimmers as in a check while thimble runs it again because a label it read changed.
 import { useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
@@ -213,8 +213,10 @@ export function CardLabels({ cell, detail }: { cell: Cell; detail?: Concept | nu
     <>
       {named && (
         <div className="bcell-labels bcell-label-row">
-          <LabelKindTag />
-          {tag(own)}
+          <span className="bcell-label-who">
+            <LabelKindTag />
+            {tag(own)}
+          </span>
           {self && <LabelMeta label={self} />}
         </div>
       )}

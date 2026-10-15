@@ -93,6 +93,34 @@ test("the card shows no record; Definition and records opens the card's details 
   await page.waitForFunction(() => !document.querySelector('.bdetail'))
 })
 
+test("on a narrow card the label row's words go under its tags, whole, and the two tags stay on one line", async () => {
+  const wide = await page.evaluate(() => {
+    const row = document.querySelector<HTMLElement>('[data-cell="c1"] .bcell-label-row')!
+    const top = (s: string) => row.querySelector(s)!.getBoundingClientRect().top
+    return { meta: top('.bcell-label-meta'), tag: top('.bcell-kind-tag') }
+  })
+  assert.ok(Math.abs(wide.meta - wide.tag) < 8, 'on a wide card the row is one line')
+  await page.evaluate(() => {
+    const card = document.querySelector<HTMLElement>('[data-cell="c1"]')!
+    ;(card.closest<HTMLElement>('.bcell') ?? card).style.width = '360px'
+  })
+  await page.waitForTimeout(200)
+  const narrow = await page.evaluate(() => {
+    const row = document.querySelector<HTMLElement>('[data-cell="c1"] .bcell-label-row')!
+    const meta = row.querySelector<HTMLElement>('.bcell-label-meta')!
+    const box = (s: string) => row.querySelector(s)!.getBoundingClientRect()
+    return { cut: meta.scrollWidth > meta.clientWidth, metaTop: box('.bcell-label-meta').top, kindTop: box('.bcell-kind-tag').top, kindBottom: box('.bcell-kind-tag').bottom, tagTop: box('.bcell-tag').top, rowRight: row.getBoundingClientRect().right, metaRight: box('.bcell-label-meta').right }
+  })
+  assert.equal(narrow.cut, false, 'how the label is defined and what it ran on show whole')
+  assert.ok(narrow.metaTop >= narrow.kindBottom - 1, 'they stand under the tags')
+  assert.ok(Math.abs(narrow.kindTop - narrow.tagTop) < 4, 'the Label tag and the label tag share a line')
+  assert.ok(narrow.metaRight <= narrow.rowRight + 1)
+  await page.evaluate(() => {
+    const card = document.querySelector<HTMLElement>('[data-cell="c1"]')!
+    ;(card.closest<HTMLElement>('.bcell') ?? card).style.width = ''
+  })
+})
+
 test('from focus mode it leaves focus mode and opens the same details', async () => {
   // the card is selected (Definition and records selected it), and Enter opens focus mode on it
   await page.keyboard.press('Enter')

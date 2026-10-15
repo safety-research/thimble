@@ -1406,13 +1406,23 @@ audio.bcell-media {
 .bcell-label-head .bcell-kind-tag {
   align-self: center;
 }
-/* a label card's label row under its question: the Label tag, the label's tag, then what it says of the label */
+/* a label card's label row under its question: the Label tag and the label's tag together, then what it says of the
+   label, which goes to a line of its own where the row is too narrow for it */
 .bcell-label-row {
-  flex-wrap: nowrap;
-  gap: 8px;
+  gap: 2px 8px;
 }
-.bcell-label-row .bcell-tag {
-  flex: none;
+.bcell-label-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+.bcell-label-who .bcell-tag {
+  min-width: 0;
+}
+.bcell-label-row .bcell-label-meta {
+  max-width: 100%;
 }
 /* how the label is defined, what it ran on and how many units: one quiet line, cut at its end where it does not fit */
 .bcell-label-meta {
