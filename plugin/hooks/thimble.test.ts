@@ -232,6 +232,7 @@ function engine(opts: Options = {}) {
   let spawnAnswer = (args: Json): Json => ({ agentId: `agent-${log.length}`, model: now[args.subagentType]?.model })
   let toolAnswer = (input: Json): Json => ({ result: { success: true }, text: `Resuming agent ${input.to}` })
   let abortAnswer = async (_input: Json): Promise<void> => undefined
+  let messages: Json[] = [] // main's transcript as $.session.messages() returns it
   let checkReason = 'Claude requested permissions to write, but you haven\'t granted it yet.' // Claude Code's decision for a write
   /** where a path lands, every link followed; undefined when it leads nowhere (no file, and no folder of one) */
   const land = (path: string): string | undefined => {
@@ -275,6 +276,7 @@ function engine(opts: Options = {}) {
     session: {
       id: vi.fn(async () => sid),
       append: vi.fn(async (args: Json) => ({ uuid: 'u1', message: args.message })),
+      messages: vi.fn(async () => messages),
     },
     clock: opts.fakeClock
       ? { sleep: (ms: number) => { clock += ms; return new Promise(r => setTimeout(r, 0)) }, now: async () => clock }
@@ -289,6 +291,8 @@ function engine(opts: Options = {}) {
     onTool: (f: (input: Json) => Json) => { toolAnswer = f },
     /** what $.turn.abort does: resolves, or rejects with Claude Code's reason */
     onAbort: (f: (input: Json) => Promise<void>) => { abortAnswer = f },
+    /** main's transcript from now on, as $.session.messages() returns it */
+    setMessages: (rows: Json[]) => { messages = rows },
     /** a model turn's start through the turn.start hook: main's (no agentId) or an agent's */
     turnStart: (agentId: string | undefined, turnId: string) => hooks['turn.start']($, { text: '', turnId, ...(agentId === undefined ? {} : { agentId }) }, async () => ({ turnId })),
     /** the reason Claude Code's permission decision gives for a write now: in plan mode it says so */
@@ -774,6 +778,45 @@ describe('requests', () => {
     // once it completed, no turn of main's runs: a second Stop has nothing to end
     expect(await e.server.answer(e.server.push('abort'))).toMatchObject({ error: expect.any(String), gone: true })
     expect(e.$.turn.abort).toHaveBeenCalledTimes(1)
+  })
+
+  it("stops the command that the Stop of main's turn moved to the background, once the turn ended, and no other", async () => {
+    // Claude Code's $.turn.abort moves a foreground command that runs to the background (backgroundedByTurnAbort on the
+    // call's stored result) where Esc would end it; left running, its end starts a new turn of main's (live check L4-12l)
+    const e = await started()
+    const moved = (id: string) => ({ stdout: '', stderr: '', interrupted: false, backgroundTaskId: id, backgroundedByTurnAbort: true })
+    const said = (id: string) => `Command running in background with ID: ${id}. Output is being written to: /tmp/${id}.output.`
+    const call = (id: string, command: string, result: Json) => [
+      { role: 'assistant', text: '', toolUses: [{ tool_use_id: id, tool: 'Bash', input: { command }, result, text: said(String(result.backgroundTaskId)) }] },
+      { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: id, text: said(String(result.backgroundTaskId)), result }] },
+    ]
+    const transcript = [
+      { role: 'user', text: 'An earlier prompt.', toolUses: [] },
+      ...call('toolu_0', 'sleep 60', moved('bearlier1')), // an earlier turn's, which no Stop of this turn moved
+      { role: 'assistant', text: 'Done.', toolUses: [] },
+      { role: 'user', text: 'Run it.', toolUses: [] }, // the stopped turn's prompt
+      ...call('toolu_1', 'serve', { stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'bkeep1' }), // in the background on purpose
+      ...call('toolu_2', 'sleep 45; echo one', moved('b8g9p4611')),
+    ]
+    const stops = () => e.$.tool.call.mock.calls.map(([a]) => a).filter((a: Json) => a.tool === 'TaskStop')
+    // the wait for the turn's end is long enough here that only the turn's end ends it
+    const sleep = e.$.clock.sleep
+    e.$.clock.sleep = (ms: number) => (ms === ABORT_WAIT_MS ? new Promise(r => setTimeout(r, 5000)) : sleep(ms))
+    await e.turnStart(undefined, 'turn-7')
+    e.setMessages(transcript.slice(0, 7)) // while the command runs, its call has no result yet
+    e.onAbort(async () => {
+      setTimeout(() => {
+        e.setMessages(transcript) // the abort moved the command to the background, and the turn ends
+        void e.complete(undefined, '', { turnId: 'turn-7', reason: 'aborted', isAborted: true })
+      }, 20)
+    })
+    expect(await e.server.answer(e.server.push('abort'))).toEqual({ ok: true })
+    expect(stops()).toEqual([{ tool: 'TaskStop', task_id: 'b8g9p4611' }])
+    // a Stop Claude Code refused moved nothing, so nothing is stopped
+    await e.turnStart(undefined, 'turn-8')
+    e.onAbort(async () => { throw new Error('something else') })
+    expect(await e.server.answer(e.server.push('abort'))).toEqual({ error: 'Error: something else' })
+    expect(stops()).toEqual([{ tool: 'TaskStop', task_id: 'b8g9p4611' }])
   })
 
   it("says main's turn had ended when none runs, or when Claude Code says so; any other refusal is an error", async () => {

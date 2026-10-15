@@ -39,7 +39,8 @@
 //   the run's values if they differ, $.agent.spawn with no `model`, then the one-line note the server rendered), send
 //   (register if needed, then SendMessage), stop (TaskStop of the agent and of the shells the server names), abort
 //   (the analyst's Stop of main: $.turn.abort of main's running turn, by the id its turn.start carried, answered once
-//   that turn completed or ABORT_WAIT_MS passed), note ($.session.append). It never starts, sends or stops anything the
+//   that turn completed or ABORT_WAIT_MS passed, after a TaskStop of each command of that turn the abort moved to the
+//   background, where Esc would have ended it), note ($.session.append). It never starts, sends or stops anything the
 //   server did not ask for;
 // - agent.spawn: an Agent call for one of thimble's roles whose prompt's first line names a typed request, main's or a
 //   subagent's (a subagent of main's own may start thimble's agents, as Claude Code lets a subagent start subagents;
@@ -576,7 +577,8 @@ async function stopAgent($: Engine, agent: string, shells: string[] = []): Promi
 }
 
 /** The analyst's Stop of main: main's running turn ended as Esc in the terminal ends it, with $.turn.abort and the id its
- *  turn.start carried, answered once the turn completed or ABORT_WAIT_MS passed; `gone` when no turn of main's runs. */
+ *  turn.start carried, answered once the turn completed or ABORT_WAIT_MS passed, and the commands the abort moved to the
+ *  background stopped (stopMoved); `gone` when no turn of main's runs. */
 async function abortTurn($: Engine, m: State): Promise<Answer> {
   const turn = m.turn
   if (!turn) return { error: 'main is not running a turn', gone: true }
@@ -587,7 +589,29 @@ async function abortTurn($: Engine, m: State): Promise<Answer> {
     return NO_TURN.test(why) ? { error: why, gone: true } : { error: why }
   }
   if (m.turn === turn) await Promise.race([new Promise<void>(resolve => m.turnEnded.push(resolve)), $.clock.sleep(ABORT_WAIT_MS)])
+  await stopMoved($)
   return { ok: true }
+}
+
+/** Where Esc ends a command that runs, $.turn.abort moves it to the background (Claude Code's backgroundedByTurnAbort on
+ *  the call's stored result), where it runs on and its end starts a new turn of main's (live check L4-12l). Once the
+ *  stopped turn ended, each such command of it, read from main's messages back to the turn's prompt (a user message with
+ *  no tool results), is stopped with TaskStop; one that has ended already answers an error, which changes nothing. */
+async function stopMoved($: Engine): Promise<void> {
+  const rows: unknown = await $.session.messages().catch(() => [])
+  if (!Array.isArray(rows)) return
+  const shells = new Set<string>()
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const row = rows[i]
+    if (!isObj(row)) continue
+    const results = Array.isArray(row.toolResults) ? row.toolResults : []
+    if (row.role === 'user' && !results.length) break
+    for (const one of [...(Array.isArray(row.toolUses) ? row.toolUses : []), ...results]) {
+      const result = isObj(one) ? one.result : undefined
+      if (isObj(result) && result.backgroundedByTurnAbort === true && text(result.backgroundTaskId)) shells.add(text(result.backgroundTaskId))
+    }
+  }
+  for (const shell of shells) await $.tool.call({ tool: 'TaskStop', task_id: shell } as Parameters<Engine['tool']['call']>[0]).catch(() => undefined)
 }
 
 async function note($: Engine, line: string): Promise<Answer> {

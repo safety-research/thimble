@@ -45,7 +45,8 @@ Ops and their arguments:
     send   agent, text, role, values      register the run's values if needed, then SendMessage
     stop   agent                          TaskStop
     abort                                 `$.turn.abort` of main's running turn (the analyst's Stop of main), answered
-                                          once that turn completed
+                                          once that turn completed; a command of it that the abort moved to the
+                                          background is stopped too (TaskStop)
     note   text                           `$.session.append` to main
 `request` is a coroutine for the server's loop; request_blocking is the same call from a worker thread.
 
