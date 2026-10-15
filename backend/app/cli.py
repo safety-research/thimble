@@ -2249,9 +2249,8 @@ def launch_args(cwd: Path, resume: bool = False, settings: str = "", own_session
     """The launcher's values, one per line: the plugin folder to load with `--plugin-dir` ('' when the plugin copy is
     one Claude Code has installed, installed_copy), the `--effort` value ('' for none), the `--settings` value
     (launch_settings, over the analyst's own `settings`), the value to export as terminal_tools.ENV ('' when the
-    `claude` it starts does not read it), main's `--name` (main_name), the session id to
-    pass with `--session-id` ('' when the analyst's own flags name the session, `own_session`, or `resume` continues
-    one), the env line (NAME=VALUE words to export: SWITCHES), the unset line (the names of UNSET_VARS the analyst's
+    `claude` it starts does not read it), main's `--name` (main_name), the session id to pass with `--session-id` (''
+    when the analyst's own flags name the session, `own_session`, or `resume` continues one), the env line (NAME=VALUE words to export: SWITCHES), the unset line (the names of UNSET_VARS the analyst's
     environment sets), the note line (tab-separated lines to print before Claude Code starts), the mode line (the mode
     the folder starts in, launch_mode.resolve, then a tab and in terminal mode the renderer plugin's folder to load with
     `--plugin-dir`, when it can load, then a tab and the workspace's launch.json, whose `pid` the launcher sets to main's
@@ -2262,8 +2261,7 @@ def launch_args(cwd: Path, resume: bool = False, settings: str = "", own_session
     permission mode the analyst starts Claude Code in.
 
     Before it prints, it registers the folder (register_here) and marks it active for the plugin's hooks (mark_active),
-    refuses with LaunchRefused when the workspace is open in
-    the other mode (open_elsewhere), starts thimble's server and waits for it (server_for_launch; not in terminal mode),
+    refuses with LaunchRefused when the workspace is open in the other mode (open_elsewhere), starts thimble's server and waits for it (server_for_launch; not in terminal mode),
     finds the workspace's extensions again (refresh_extensions; in terminal mode local_extensions) and writes
     launch.json (launch_record), with `launcher_pid`, the launcher's own pid, until the launcher writes main's `claude`
     process there, and in terminal mode the hooks module's roles file (write_roles). Main's effort is explicit:
