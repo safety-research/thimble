@@ -1,7 +1,7 @@
 """Run an orientation on a corpus through an interactive main, to pre-cache a workspace (the demo's).
 
     <tree>/backend/.venv/bin/python scripts/dev/precache_orientation.py <tree> <corpus folder> <log folder>
-        [--mode auto|default|bypassPermissions] [--no-report] [--critique] [--model M] [--effort E]
+        [--mode auto|default|bypassPermissions] [--model M] [--effort E]
         [--socket NAME] [--attach]
 
 Run it in the environment the server runs in, with a home and ports of its own (THIMBLE_HOME, THIMBLE_PORT,
@@ -10,14 +10,11 @@ plugin module starts in an interactive main, and the module does nothing in `cla
   - it registers the folder and starts the launcher (<tree>/plugin/bin/thimble, with `--permission-mode <mode>`) in the
     corpus folder, in a tmux server of its own (`tmux -L <socket>`), with CLAUDE_CODE_DISABLE_AGENT_VIEW=1 and
     DISABLE_AUTOUPDATER=1; it answers the folder-trust question if Claude Code asks it;
-  - it waits for the module's hello (subagents.json's `module`), then posts the start the browser's Start sent before
-    0.8.0, with a browser sign-in (cli.browser_cookie): POST /api/ws/<c>/start, whose --model and --effort
-    name the run's, else Settings decide. Since 0.8.0 the server ignores the body's switches (deck, views, report,
-    critique; --no-report and --critique), so the orientation proposes no views, writes no report and decides on its
-    own critique;
+  - it waits for the module's hello (subagents.json's `module`), then posts the start with a browser sign-in
+    (cli.browser_cookie): POST /api/ws/<c>/start with no focus, whose --model and --effort name the run's, else
+    Settings decide; the orientation decides on its own critique, proposes no views and writes no report;
   - every STATUS_S it writes <log folder>/status.json, what the workspace holds and whether it is done (the orientation
-    ended, no view build or writer runs, and a report asked for is written), and the terminal's screen to
-    <log folder>/screen.txt;
+    ended and no view build or writer runs), and the terminal's screen to <log folder>/screen.txt;
   - once done, it quits main with /exit, choosing "Exit and stop tasks" if Claude Code asks, and stops its tmux server.
 --attach skips the Start (a run already going). Every step goes to <log folder>/events.jsonl.
 """
@@ -54,8 +51,6 @@ def options(argv: "list[str] | None" = None) -> argparse.Namespace:
     ap.add_argument("corpus")
     ap.add_argument("logs")
     ap.add_argument("--mode", default="auto", choices=("auto", "default", "bypassPermissions"))
-    ap.add_argument("--no-report", action="store_true")
-    ap.add_argument("--critique", action="store_true")
     ap.add_argument("--model")
     ap.add_argument("--effort")
     ap.add_argument("--socket", default="precache", help="the tmux server's name (tmux -L)")
@@ -113,11 +108,9 @@ def launch_command(tree: Path, mode: str, environ: "dict[str, str]") -> str:
 
 
 def start_body(opts: argparse.Namespace) -> dict[str, Any]:
-    """The start as the browser's gate sent it before 0.8.0: the deck, views and report on, the critique off, no
-    focus; the run's model and effort only when named. Since 0.8.0 the server reads only the focus, the model and the
-    effort."""
-    return {"text": "", "deck": True, "views": True, "report": not opts.no_report, "critique": opts.critique,
-            **({"model": opts.model} if opts.model else {}), **({"effort": opts.effort} if opts.effort else {})}
+    """The start: no focus, and the run's model and effort only when named."""
+    return {"text": "", **({"model": opts.model} if opts.model else {}),
+            **({"effort": opts.effort} if opts.effort else {})}
 
 
 def read(p: Path):
@@ -135,7 +128,7 @@ def hello(ws: Path) -> "dict | None":
     return None
 
 
-def status(ws: Path, c: str, report: bool) -> dict:
+def status(ws: Path, c: str) -> dict:
     run = read(ws / "orient" / "run.json") or {}
     chats = [m for m in (read(p) for p in (ws / "chats").glob("*.meta.json")) if isinstance(m, dict)]
     running = sorted(f"{m.get('role') or m.get('kind')}:{m.get('title') or m.get('id')}" for m in chats
@@ -148,7 +141,7 @@ def status(ws: Path, c: str, report: bool) -> dict:
                    if (read(p) or {}).get("built"))
     docs = sorted({p.stem for p in (ws / "investigations").glob("*/*.json")} - {"investigation"})
     ended = run.get("status") in ("done", "failed", "stopped", "refused")
-    done = ended and not running and (not report or "report" not in (run.get("passes") or []) or "report" in docs)
+    done = ended and not running
     return {"at": now(), "workspace": c, "orientation": run.get("status"), "refused": run.get("refused"),
             "passes": run.get("passes"), "model": run.get("model"), "effort": run.get("effort"),
             "started": run.get("started"), "ended": run.get("ended"), "running": running, "proposals": proposals,
@@ -242,7 +235,7 @@ def main() -> int:
                 return 1
         st: dict = {}
         while True:
-            st = status(ws, c, not opts.no_report)
+            st = status(ws, c)
             (logs / "status.json").write_text(json.dumps(st, indent=1), "utf-8")
             (logs / "screen.txt").write_text(term.screen(), "utf-8")
             if st["done"] or not term.alive():
