@@ -1753,6 +1753,18 @@ button.model-line-part[aria-expanded='true'] {
 .chat-notice[data-kind='manual-mode']:not([data-closed]) .chat-notice-ico {
   color: var(--status-negative);
 }
+/* the new comments' notice (chat/Notice NewCommentsNotice, kind `comments`): news rather than a failure, so the
+   accent's edge, wash and glyph in place of the warning's */
+.chat-notice[data-kind='comments'] {
+  border-color: color-mix(in oklab, var(--accent) 60%, transparent);
+  background: var(--accent-soft);
+}
+.chat-foot .chat-notice[data-kind='comments'] {
+  background: color-mix(in oklab, var(--accent) 8%, var(--surface-card));
+}
+.chat-notice[data-kind='comments'] .chat-notice-ico {
+  color: var(--text-accent);
+}
 .chat-notice-body {
   display: flex;
   flex: 1 1 auto;

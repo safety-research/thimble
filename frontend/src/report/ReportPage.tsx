@@ -13,6 +13,7 @@ import { usedCells } from './cards'
 import { SidebarShow, useChecks, useSidebar } from './Checks'
 import { checkColumns, openComments, passageFlags, shownComments, type DocComment } from './checkComments'
 import { commentsApi } from './commentsApi'
+import { useLookedAt, useTakeReveal } from './newComments'
 import { ReportEditor, type DocFilter, type EditorHandle } from './Editor'
 import { Margin, RAIL_ROOM } from './Margin'
 import { allSentences, paragraphOf, passageOrder, readableText, TITLE_ID } from './model'
@@ -108,6 +109,15 @@ export function ReportPage({ ws, slug, doc, filter, client, onSaved }: ReportPag
   useEffect(() => {
     if (active && !shown.some((c) => c.id === active)) setActive(null)
   }, [active, shown])
+  // the comment open is looked at, so the new comments notice leaves its run out; the notice's Show opens the sidebar
+  // with its Comments pane, and the first new comment at its passage
+  useLookedAt(ws, shown.find((c) => c.id === active)?.run)
+  useTakeReveal(ws, slug, shown, checks.ready, (first) => {
+    if (!side.shown) side.show()
+    if (!first) return
+    setActive(first.id)
+    window.requestAnimationFrame(() => column.current?.querySelector(`[data-sid="${CSS.escape(first.sid)}"]`)?.scrollIntoView({ block: 'center' }))
+  })
 
   // a click on a tinted passage opens its card (the next one of the passage's when one of them is open); a click
   // elsewhere on the page closes the open one
