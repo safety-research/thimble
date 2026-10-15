@@ -1,13 +1,108 @@
 // thimble.ts, the plugin's hooks module, against a fake engine `$` and a fake thimble server that proves the token as
-// app/hook_auth.py does. The server's side is backend/tests_public/test_module_bridge.py. Run with the frontend's
-// vitest (frontend/vitest.config.ts includes this file): cd frontend && npx vitest run ../plugin/hooks
-import { createHmac } from 'node:crypto'
-import { readFileSync } from 'node:fs'
-import { describe, expect, it, vi } from 'vitest'
+// app/hook_auth.py does. The server's side is backend/tests_public/test_module_bridge.py, which also checks that the
+// module's PRIVATE_FALLBACK says what prompts/tools.md says, a file this test cannot read.
+//
+// Run with Claude Code's test kit, in plugin/: claude plugin test . It runs this file as the module's hooks run: it
+// imports only its own files and 'claude-code/testing', and has no file system and no Node. The frontend's vitest runs
+// it too, with that kit's describe, test and expect mapped to its own (frontend/vitest.config.ts,
+// frontend/tests/public/claude-code-testing.ts): cd frontend && npx vitest run ../plugin/hooks
+// The kit has no mock functions and no Node crypto, so the file has its own: `vi.fn`, the checks of their calls
+// (`expect`), and the HMAC-SHA256 the fake server signs with (hmacSha256).
+import { describe, expect as check, test as it } from 'claude-code/testing'
 
 import { ACTIVATE_WAIT_MS, PRIVATE_FALLBACK, RETRY_MS, hmac, register } from './thimble'
 
 type Json = Record<string, any>
+
+type MockFn<F extends (...args: any[]) => any> = F & { mock: { calls: Parameters<F>[] }; mockImplementation: (impl: F) => MockFn<F> }
+
+/** A mock function, as vitest's vi.fn: it runs `impl`, or the one mockImplementation gave it later, on each call and
+ *  keeps the call's arguments in `mock.calls`. */
+function fn<F extends (...args: any[]) => any>(impl: F): MockFn<F> {
+  const calls: Parameters<F>[] = []
+  let run = impl
+  const spy = Object.assign((...args: Parameters<F>) => { calls.push(args); return run(...args) }, {
+    mock: { calls },
+    mockImplementation: (next: F) => { run = next; return spy },
+  }) as unknown as MockFn<F>
+  return spy
+}
+const vi = { fn }
+
+type Spy = ((...args: any[]) => unknown) & { mock: { calls: unknown[][] } }
+const isSpy = (v: unknown): v is Spy => typeof v === 'function' && Array.isArray((v as Partial<Spy>).mock?.calls)
+
+/** vitest's checks of a mock function's calls, made with the kit's checks of its `mock.calls`; `not` negates each. */
+function callChecks(spy: Spy, not: boolean) {
+  const calls = spy.mock.calls
+  const of = (v: unknown) => (not ? check(v).not : check(v))
+  return {
+    toHaveBeenCalled: () => (not ? check(calls).toEqual([]) : check(calls.length).toBeGreaterThan(0)),
+    toHaveBeenCalledTimes: (n: number) => of(calls).toHaveLength(n),
+    toHaveBeenCalledWith: (...args: unknown[]) => of(calls).toContainEqual(args),
+    toHaveBeenLastCalledWith: (...args: unknown[]) => of(calls.at(-1)).toEqual(args),
+  }
+}
+
+/** The kit's expect, which also checks the calls of a mock function (vi.fn) as vitest's does (callChecks). */
+const expect = Object.assign(
+  (received: unknown, message?: string): any =>
+    isSpy(received) ? { ...callChecks(received, false), not: callChecks(received, true) } : check(received, message),
+  { any: check.any, anything: check.anything, objectContaining: check.objectContaining, arrayContaining: check.arrayContaining,
+    stringContaining: check.stringContaining, stringMatching: check.stringMatching },
+)
+
+const K256 = [
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01,
+  0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+  0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
+  0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08,
+  0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+  0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+]
+const rotr = (x: number, n: number) => (x >>> n) | (x << (32 - n))
+
+/** SHA-256 (FIPS 180-4) in plain code, apart from the crypto.subtle digest the module's hmac uses. */
+function sha256(data: Uint8Array): Uint8Array {
+  const padded = new Uint8Array((((data.length + 8) >> 6) + 1) << 6)
+  padded.set(data)
+  padded[data.length] = 0x80
+  const view = new DataView(padded.buffer)
+  view.setUint32(padded.length - 8, Math.floor(data.length / 0x20000000))
+  view.setUint32(padded.length - 4, (data.length * 8) >>> 0)
+  const h = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]
+  const w = new Array<number>(64)
+  for (let at = 0; at < padded.length; at += 64) {
+    for (let i = 0; i < 16; i++) w[i] = view.getUint32(at + 4 * i)
+    for (let i = 16; i < 64; i++) {
+      const s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >>> 3)
+      const s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >>> 10)
+      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0
+    }
+    let [a, b, c, d, e, f, g, k] = h
+    for (let i = 0; i < 64; i++) {
+      const t1 = (k + (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)) + ((e & f) ^ (~e & g)) + K256[i] + w[i]) >>> 0
+      const t2 = ((rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))) >>> 0
+      k = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0
+    }
+    ;[a, b, c, d, e, f, g, k].forEach((v, i) => { h[i] = (h[i] + v) >>> 0 })
+  }
+  const out = new DataView(new ArrayBuffer(32))
+  h.forEach((v, i) => out.setUint32(4 * i, v))
+  return new Uint8Array(out.buffer)
+}
+
+/** HMAC-SHA256 (RFC 2104) as hex, on sha256: what Node's createHmac('sha256', key).update(message).digest('hex') gives. */
+function hmacSha256(key: string, message: string): string {
+  const utf8 = new TextEncoder()
+  let k = utf8.encode(key)
+  if (k.length > 64) k = sha256(k)
+  const block = (pad: number) => Uint8Array.from({ length: 64 }, (_, i) => (k[i] ?? 0) ^ pad)
+  const cat = (x: Uint8Array, y: Uint8Array) => { const z = new Uint8Array(x.length + y.length); z.set(x); z.set(y, x.length); return z }
+  const mac = sha256(cat(block(0x5c), sha256(cat(block(0x36), utf8.encode(message)))))
+  return Array.from(mac, v => v.toString(16).padStart(2, '0')).join('')
+}
 
 const TOKEN = 'token-of-the-test-server'
 const HOME = '/home/analyst'
@@ -22,7 +117,7 @@ const ROLES: Json = Object.fromEntries(ROLE_NAMES.map((name, i) => [name, {
 }]))
 const NOTE = 'The analyst started the writer {agent} (report) in thimble; leave it unless they ask.'
 
-const sign = (role: string, nonce: string, token = TOKEN) => createHmac('sha256', token).update(`${role}:${nonce}`).digest('hex')
+const sign = (role: string, nonce: string, token = TOKEN) => hmacSha256(token, `${role}:${nonce}`)
 const until = async (ok: () => boolean, ms = 2000) => {
   const end = Date.now() + ms
   while (!ok()) {
@@ -769,19 +864,22 @@ describe('the file guard', () => {
     expect(await e.toolCaught({ tool: 'Read', file_path: `${CWD}/board.jsonl` }, false)).toEqual(ran)
     expect(e.$.fs.stat.mock.calls.length).toBe(stats)
   })
-
-  it('says what prompts/tools.md’s module-deny-private says before the rules come', () => {
-    const tools = readFileSync(new URL('../../prompts/tools.md', import.meta.url), 'utf-8')
-    const section = tools.split('\n## module-deny-private\n')[1].split('\n## ')[0].trim()
-    expect(PRIVATE_FALLBACK).toBe(section)
-  })
 })
 
 describe('the proof', () => {
   it("is app/hook_auth.py's HMAC-SHA256, short and long keys alike", async () => {
-    for (const key of [TOKEN, 'k'.repeat(64), 'long-'.repeat(40)]) {
-      expect(await hmac(key, 'hook:abc123')).toBe(createHmac('sha256', key).update('hook:abc123').digest('hex'))
+    // hmac.new(key.encode(), b'hook:abc123', hashlib.sha256).hexdigest(), as app/hook_auth.py signs
+    const proofs: [string, string][] = [
+      [TOKEN, 'b3034a19a9d45af99002a6aa0066868888c4b8858bfadf9e8957b8f7507bb7de'],
+      ['k'.repeat(64), 'c725b8497add2bc1fe195f4357a2698c72d2a7525d995c65c760785fbd7ade3c'],
+      ['long-'.repeat(40), 'a3d9cf09189641b0ec9c3016ba36330c1ba61ed0e5b1ae0a25b4f73ebfd7b5e6'],
+    ]
+    for (const [key, proof] of proofs) {
+      expect(await hmac(key, 'hook:abc123')).toBe(hmacSha256(key, 'hook:abc123'))
+      expect(hmacSha256(key, 'hook:abc123')).toBe(proof)
     }
+    // RFC 4231, test case 2
+    expect(hmacSha256('Jefe', 'what do ya want for nothing?')).toBe('5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843')
   })
 })
 
