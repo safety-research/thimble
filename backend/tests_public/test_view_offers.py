@@ -70,6 +70,16 @@ def _row(slug: str) -> dict:
     return views.read_proposal(CORPUS, slug) or {}
 
 
+def _legacy_trace() -> dict:
+    """A 0.7.x orientation's viewer for a file type as it stored it: a `suggested` row without `offered`, never queued."""
+    with views._proposals_lock:
+        row = {"slug": views._unique_slug(CORPUS, "Old Trace"), "name": "Old Trace", "description": "A trace viewer.",
+               "task": "", "claims": ["**/*.trace"], "arrangement": "One row per step.", "proposed_by": "files",
+               "status": "suggested", "ts": views._now(), "route": views.CLICK}
+        views._save_proposals(CORPUS, [*views.list_proposals(CORPUS), row])
+    return row
+
+
 def _build(slug: str, name: str = "Posts") -> dict:
     return views.write_view(CORPUS, slug, name=name, description="The posts.", claims=["board.jsonl"], reader=READER,
                             html="<p>posts</p>")
@@ -167,8 +177,7 @@ async def test_reject_is_the_analyst_s_click_and_drops_the_view_proposal_with_it
     with pytest.raises(HTTPException) as e:
         await views.reject_route(CORPUS, built["slug"], analyst)
     assert e.value.status_code == 409, "main's proposal, which no card shows"
-    legacy = views.propose(CORPUS, "Old Trace", "A trace viewer.", ["**/*.trace"], "One row per step.", "files",
-                           False, False, True)
+    legacy = _legacy_trace()
     with pytest.raises(HTTPException) as e:
         await views.reject_route(CORPUS, legacy["slug"], analyst)
     assert e.value.status_code == 409, "a 0.7.x suggested row without `offered`"
@@ -194,8 +203,7 @@ def test_the_reject_route_refuses_the_server_s_token_without_the_analyst_s_cooki
 
 
 def test_a_0_7_suggested_row_is_never_the_waiting_view_proposal_and_blocks_none(corpus):
-    legacy = views.propose(CORPUS, "Old Trace", "A trace viewer.", ["**/*.trace"], "One row per step.", "files",
-                           False, False, True)
+    legacy = _legacy_trace()
     assert legacy["status"] == "suggested" and "offered" not in legacy
     assert views.open_offer(CORPUS) is None and views.offers(CORPUS) == []
     row, why = _offer()
@@ -313,8 +321,7 @@ async def test_a_file_type_proposal_that_cannot_be_written_keeps_no_answer(corpu
 
 
 def test_main_sees_the_waiting_view_proposal_as_thimble_s_and_no_legacy_row(corpus, monkeypatch):
-    views.propose(CORPUS, "Old Trace", "A trace viewer.", ["**/*.trace"], "One row per step.", "files", False, False,
-                  True)
+    _legacy_trace()
     views.propose(CORPUS, "Threads", "The threads.", ["board.jsonl"])
     _offer()
     text = context.views(CORPUS)

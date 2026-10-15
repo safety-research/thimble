@@ -85,7 +85,7 @@ LOCAL_MANIFEST = "extension.json"
 LOCAL_VERSION = "local"
 CACHE_SUBDIR = "cache"  # in a view's folder: its check pictures, which an extension's copy leaves out
 PROPOSALS_FILE = "proposals.json"
-DELETED_FILE = "deleted.json"  # the proposals the analyst deleted, [{slug, name, counted, ts}] (delete_proposal)
+DELETED_FILE = "deleted.json"  # the proposals the analyst deleted, [{slug, name, ts}] (delete_proposal)
 OFF_FILE = "off.json"  # the workspace's own views switched off in Settings, [slug] (set_view_on)
 KEY_REFS_FILE = "key-refs.json"  # view:<slug>/<key> -> {refs, excerpt, label, name}, kept past the view's deletion
 # under the workspace, beside the views folder, which a kernel may only read (kernel_wrap.READ_ONLY_DIRS): each view's
@@ -104,8 +104,8 @@ TOOLS_PROMPT = "tools"  # prompts/tools.md, whose lowercase sections are the lin
 # only then.
 # `suggested` with an `offered` object is a view proposal thimble shows the analyst (offer), after a turn (proposer.py)
 # or for a file type opened in the File browser (suggest), which builds only once the analyst accepts it (accept). A
-# `suggested` row without `offered` is an orientation's viewer for a file type (propose with `suggested`), as 0.7.x
-# stored them, which is never shown (open_offer).
+# `suggested` row without `offered` is an orientation's viewer for a file type, as 0.7.x stored them, which is never
+# shown (open_offer).
 STATUSES = ("queued", "building", "built", "failed", "dropped", "suggested")
 PENDING = ("queued", "building")  # the statuses a restart queues again (dev.recover_views)
 SHOTS_KEPT = 5  # the check pictures kept per view, newest first (the session Reads the latest)
@@ -2571,18 +2571,6 @@ def title_case(name: Any) -> str:
     return " ".join("-".join(p[:1].upper() + p[1:] for p in w.split("-")) for w in words)
 
 
-# the views an orientation from before 0.8.0 might propose in a workspace, those the analyst deleted included; a viewer
-# it suggested for a file type is not counted, nor a view dropped. Since 0.8.0 the orientation has no propose_view, so
-# no call passes `orientation` to propose.
-VIEW_PROPOSALS_MAX = 4
-
-
-def _counted(p: dict[str, Any]) -> bool:
-    """Whether a proposal counts toward VIEW_PROPOSALS_MAX: the orientation's, neither dropped nor a file-type viewer."""
-    return (bool(p.get("orientation") or p.get("held")) and p.get("status") not in ("dropped", "suggested")
-            and not offered_type_viewer(p.get("claims")))
-
-
 # ----------------------------------------------------------------------------------------------------------
 # view proposals: a view thimble proposes to the analyst, after a turn (proposer.py) or for a file type opened in the
 # File browser (suggest), which builds only when the analyst accepts it (accept)
@@ -2726,9 +2714,9 @@ def answer_offer(c: str, slug: str, answer: str = "rejected") -> dict[str, Any]:
 
 def install_viewer(c: str, slug: str, d: Path, claims: Any, *, description: str, proposed_by: str, orientation: bool,
                    extension: str | None = None, libs: Any = None) -> None:
-    """The viewer in folder `d` as the workspace's view `slug` claiming `claims`, under a built proposal (an
-    `orientation` one counts toward VIEW_PROPOSALS_MAX) that keeps the digest of the files as installed (`installed`)
-    and the `extension` they came from. `libs`, when given, are the libraries its page gets in place of view.json's."""
+    """The viewer in folder `d` as the workspace's view `slug` claiming `claims`, under a built proposal (stored with
+    `orientation` as given) that keeps the digest of the files as installed (`installed`) and the `extension` they came
+    from. `libs`, when given, are the libraries its page gets in place of view.json's."""
     raw = read_json(d / VIEW_JSON, {})
     v = _normalize_view(slug, raw)
     with _proposals_lock:
@@ -2793,13 +2781,9 @@ def withdraw(c: str, slug: str, extension: str | None) -> bool:
     return True
 
 
-def orientation_views(c: str) -> list[dict[str, Any]]:
-    """The views the orientation proposed that count toward VIEW_PROPOSALS_MAX."""
-    return [p for p in list_proposals(c) if _counted(p)]
-
-
 def deleted_proposals(c: str) -> list[dict[str, Any]]:
-    """The proposals the analyst deleted (delete_proposal), which the orientation cannot propose again."""
+    """The proposals the analyst deleted (delete_proposal), whose names no view proposal takes again (_names_taken). A
+    record from before 0.8.0 may also carry `counted`, which nothing reads."""
     p = state_dir(c) / DELETED_FILE
     raw = read_json(p, []) if p.is_file() else []
     return [x for x in raw if isinstance(x, dict) and x.get("name")] if isinstance(raw, list) else []
@@ -2809,10 +2793,8 @@ def _keep_deleted(c: str, prop: dict[str, Any]) -> None:
     with _proposals_lock:
         name = str(prop["name"])
         items = deleted_proposals(c)
-        same = [x for x in items if str(x["name"]).casefold() == name.casefold()]
-        counted = _counted(prop) or any(x.get("counted") for x in same)
-        items = [x for x in items if x not in same]
-        items.append({"slug": prop.get("slug"), "name": name, "counted": counted, "ts": _now()})
+        items = [x for x in items if str(x["name"]).casefold() != name.casefold()]
+        items.append({"slug": prop.get("slug"), "name": name, "ts": _now()})
         state_dir(c).mkdir(parents=True, exist_ok=True)
         write_json(state_dir(c) / DELETED_FILE, items)
 
@@ -2820,25 +2802,17 @@ def _keep_deleted(c: str, prop: dict[str, Any]) -> None:
 CLICK, FOLLOW_ON, TYPED = "click", "follow-on", "typed"  # how a build starts (subagents.ROUTES)
 
 
-def propose(c: str, name: str, description: str, claims: Any, arrangement: str = "", proposed_by: str = "analyst",
-            orientation: bool = False, asked: bool = False, suggested: bool = False, task: str = "",
-            route: str | None = None, values: dict[str, Any] | None = None) -> dict[str, Any]:
+def propose(c: str, name: str, description: str, claims: Any, arrangement: str = "", proposed_by: str = "analyst", *,
+            asked: bool = False, task: str = "", route: str | None = None,
+            values: dict[str, Any] | None = None) -> dict[str, Any]:
     """Store a proposal, announce it and queue its build at once (dev.queue_view), as part of the start that asked for it
-    (`route`: an orientation's proposal a follow-on start, else a click), with the run's `values` (model and effort,
-    else Settings' dev row). A typed proposal, main's propose_view, is not queued: its caller starts it with main's
-    Agent call (dev.start_build). A proposal of the same
-    name not yet built is replaced under its slug, its build stopped. An `orientation` proposal is stored
-    `orientation: true` and, unless `suggested`, `held: true`, queued unannounced until its view passes its checks
-    (mark_built); a held proposal proposed again unchanged is left as it is, and changed it is revised (revise), still
-    held. A workspace gets at most VIEW_PROPOSALS_MAX views from the orientation, those the analyst deleted included:
-    one more under a new name is refused (409), and one under a name it proposed before improves that view in place.
-    One the analyst deleted is refused (409).
-    `asked` says the analyst asked for it. With `suggested` (an orientation's viewer for unusual file types) it is
-    stored `suggested`, without the `offered` of a view proposal thimble shows (offer), so no card shows it
-    (open_offer), and not queued until the analyst accepts it (accept). A proposal of the name of a waiting view
-    proposal replaces it and is built at once, since the analyst asked for it. A proposal says what the analyst sees in
-    the view (`description`, 400 without it) and, from propose_view, what they do with it (`task`); a viewer for a file
-    type also gives its free-text `arrangement`."""
+    (`route`, a click unless given), with the run's `values` (model and effort, else Settings' dev row). A typed
+    proposal, main's propose_view, is not queued: its caller starts it with main's Agent call (dev.start_build). A view
+    already built under the name is changed in place (revise). A proposal of the same name not yet built is replaced
+    under its slug, its build stopped: a waiting view proposal of the name too, since the analyst asked for this one,
+    and a held proposal of an orientation from before 0.8.0 with any view built under it (_stop_build's `force`).
+    `asked` says the analyst asked for it. A proposal says what the analyst sees in the view (`description`, 400
+    without it) and, from propose_view, what they do with it (`task`), and may give a free-text `arrangement`."""
     name = title_case(name)
     if not name:
         raise HTTPException(400, "a proposal needs a name")
@@ -2848,18 +2822,9 @@ def propose(c: str, name: str, description: str, claims: Any, arrangement: str =
     description, task, arrangement = _one(description), _one(task), _lines(arrangement)
     if not description:
         raise HTTPException(400, "a proposal says what the analyst sees in the view (`description`)")
-    hold = orientation and not suggested
-    if orientation:
-        gone = deleted_proposals(c)
-        if any(str(d["name"]).casefold() == name.casefold() for d in gone):
-            raise HTTPException(409, _hint("propose_view-deleted", view=name))
-        mine = orientation_views(c)
-        spent = [*(str(p["name"]) for p in mine), *(str(d["name"]) for d in gone if d.get("counted"))]
-        if hold and len(spent) >= VIEW_PROPOSALS_MAX and not any(n.casefold() == name.casefold() for n in spent):
-            raise HTTPException(409, _hint("propose_view-cap", view=name, n=VIEW_PROPOSALS_MAX, views=", ".join(spent)))
+    route = route or CLICK
     # a view already built under this name is changed in place, as the analyst still uses it, rather than built again
     # beside it under a new slug
-    route = route or (FOLLOW_ON if orientation else CLICK)
     if (built := built_slug(c, name)) is not None:
         return revise(c, built, "", description=description, task=task, claims=claims_l, arrangement=arrangement,
                       proposed_by=proposed_by, asked=asked, route=route, values=values)
@@ -2867,25 +2832,14 @@ def propose(c: str, name: str, description: str, claims: Any, arrangement: str =
         items = list_proposals(c)
         old = next((p for p in items if str(p.get("name", "")).casefold() == name.casefold()
                     and (p.get("status") != "built" or p.get("held"))), None)
-        if old is not None and old.get("held") and hold and old.get("status") not in ("dropped", "suggested"):
-            fields = ("description", "task", "claims", "arrangement")
-            if tuple(old.get(k) for k in fields) == (description, task, claims_l, arrangement) and not old.get("spec"):
-                return old  # the same proposal again: its build goes on, or its view stays built
-            # changed, such as after the critique: its build goes on from its draft, or its view is changed
-            return revise(c, old["slug"], "", description=description, task=task, claims=claims_l,
-                          arrangement=arrangement, proposed_by=proposed_by, route=route, values=values)
         if old is not None:
             _stop_review(c, old["slug"], forget=True)
             _stop_build(c, old["slug"], "replaced", force=bool(old.get("held")))
             items = [p for p in list_proposals(c) if p.get("slug") != old["slug"]]
         slug = old["slug"] if old is not None else _unique_slug(c, name)
         prop = {"slug": slug, "name": name, "description": description, "task": task, "claims": claims_l,
-                "arrangement": arrangement, "proposed_by": str(proposed_by or "analyst"),
-                "status": "suggested" if suggested else "queued", "ts": _now()}
-        if orientation:
-            prop["orientation"] = True
-        if hold:
-            prop["held"] = True
+                "arrangement": arrangement, "proposed_by": str(proposed_by or "analyst"), "status": "queued",
+                "ts": _now()}
         if asked:
             prop["asked"] = True
         prop["route"] = route
@@ -2894,7 +2848,7 @@ def propose(c: str, name: str, description: str, claims: Any, arrangement: str =
         items.append(prop)
         _save_proposals(c, items)
     _emit(c, slug, prop["status"])
-    if not suggested and route != TYPED:
+    if route != TYPED:
         _queue(c, slug)
     return prop
 
@@ -5056,14 +5010,6 @@ def file_type_viewer(view: dict[str, Any]) -> bool:
         return view["unit"] == "file"
     claims = view.get("claims") or []
     return bool(claims) and all(type_suffix(g) for g in claims)
-
-
-def offered_type_viewer(claims: Any) -> bool:
-    """Whether a proposal claiming `claims` is a viewer of unusual file types, which waits for the analyst's accept
-    before it is built: every claim one extension's glob, of a suffix that neither the files view nor a media player
-    reads."""
-    suffixes = [type_suffix(g) for g in _str_list(claims)]
-    return bool(suffixes) and all(s and s not in ORDINARY_SUFFIXES and s not in MEDIA_TYPES for s in suffixes)
 
 
 def _suggestions_path(c: str) -> Path:

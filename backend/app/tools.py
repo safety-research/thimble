@@ -2805,7 +2805,6 @@ async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     if unmatched:
         near = " ".join(hint("propose_view-near", claim=g, paths=", ".join(p)) for g, p in unmatched.items() if p)
         return err(" ".join(hint("propose_view-unmatched", claims=", ".join(unmatched), near=near).split()))
-    orient = session_kind(ctx.session) == ORIENT_SESSION
     typed = ctx.session is None  # main's own call: the build is main's Agent call
     fork = await _fork_of(ctx) if typed else None  # a thread's fork's call: main makes that Agent call (_ask_main)
     values = {k: str(args[k]) for k in ("model", "effort") if args.get(k)}
@@ -2817,11 +2816,9 @@ async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     prop = await _maybe_await(views.propose(ctx.c, name=str(args["name"]).strip(),
                                             description=str(args["description"]).strip(), claims=claims,
                                             task=str(args["task"]).strip(), proposed_by=ctx.created_by,
-                                            orientation=orient, asked=typed,
-                                            route=views.TYPED if typed else None, values=values or None))
+                                            asked=typed, route=views.TYPED if typed else None, values=values or None))
     status = str(prop.get("status") or "queued")
-    if not prop.get("held"):
-        _chip(ctx.c, "view", str(prop.get("name") or prop.get("slug")), ref=f"view:{prop.get('slug')}", status=status)
+    _chip(ctx.c, "view", str(prop.get("name") or prop.get("slug")), ref=f"view:{prop.get('slug')}", status=status)
     claimed = ", ".join(prop.get("claims") or [])
     # without Node 20+ or the frontend's packages the build fails at once (dev.start_build), and main is told why
     if why := await asyncio.to_thread(views.build_problem_for, ctx.c):
@@ -2833,7 +2830,7 @@ async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         return await _fork_build(ctx, str(prop["slug"]), what, fork, values)
     if typed:
         return await _typed_build(ctx, str(prop["slug"]), values)
-    if prop.get("revised") and not prop.get("held"):  # a view built under this name is changed in place (views.revise)
+    if prop.get("revised"):  # a view built under this name is changed in place (views.revise)
         return ok(hint("view-changing", view=prop.get("name"), slug=prop.get("slug")))
     return ok(hint("propose_view-proposed", view=prop.get("name"), slug=prop.get("slug"), claims=claimed))
 

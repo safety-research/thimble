@@ -755,30 +755,23 @@ async def test_a_program_that_replaces_the_view_review_task_reads_the_reviewer_s
     assert review["state"] == "failed" and review["finished"] and "it crashed" in review["note"] and stopped == ["a1"]
 
 
-async def test_a_workspace_gets_four_views_from_the_orientation_and_a_deleted_one_stays_deleted(ws, monkeypatch):
+async def test_a_deleted_proposal_or_view_takes_its_build_folder_and_the_analyst_may_ask_for_it_again(ws, monkeypatch):
     monkeypatch.setattr(views, "_queue", lambda c, slug: None)
 
     def propose(name, **k):
         return views.propose(CORPUS, name, "The posts.", ["board.jsonl"], "Unit: a post", **k)
 
-    first = [propose(n, orientation=True) for n in ("One", "Two", "Three", "Four")]
-    with pytest.raises(views.HTTPException) as e:
-        propose("Five", orientation=True)
-    assert e.value.status_code == 409
-    assert propose("Two", orientation=True)["slug"] == first[1]["slug"], "one of the four is improved under its name"
-    # the analyst deletes a proposal and a view: neither frees a place or comes back, and their own asks still build
+    first = [propose(n, asked=True) for n in ("One", "Two")]
     for slug in (first[0]["slug"], "threads"):
         dev.view_work_dir(CORPUS, slug).mkdir(parents=True, exist_ok=True)
         (dev.view_work_dir(CORPUS, slug) / "sample.jsonl").write_text("{}\n")
     views.delete_proposal(CORPUS, first[0]["slug"])
     views.delete_view(CORPUS, "threads")
     assert not any(dev.view_work_dir(CORPUS, s).exists() for s in (first[0]["slug"], "threads")), "the builds' folders go"
-    for name in ("One", "Threads", "Five"):
-        with pytest.raises(views.HTTPException) as e:
-            propose(name, orientation=True)
-        assert e.value.status_code == 409, name
+    assert [(d["name"], sorted(d)) for d in views.deleted_proposals(CORPUS)] == [
+        ("One", ["name", "slug", "ts"]), ("Threads", ["name", "slug", "ts"])]
     assert propose("One", asked=True)["status"] == "queued"
-    assert [p["name"] for p in views.list_proposals(CORPUS)] == ["Two", "Three", "Four", "One"]
+    assert [p["name"] for p in views.list_proposals(CORPUS)] == ["Two", "One"]
 
 
 def test_a_viewer_thimble_ships_runs_from_a_copy_in_the_workspace(ws, tmp_path, monkeypatch):
