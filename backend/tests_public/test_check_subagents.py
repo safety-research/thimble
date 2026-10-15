@@ -27,7 +27,7 @@ def doc(workspaces_tmp, monkeypatch):
     _checks_row(monkeypatch)
     for cid in ("unverified", "judgment"):
         checks.edit(CORPUS, cid, shown=True)
-    checks.edit(CORPUS, "important-details", shown=False)  # the built-ins start on: these two are the shown checks
+    checks.edit(CORPUS, "important-details", shown=False)  # Important details starts on: these two are the shown checks
 
 
 def _checks_row(monkeypatch) -> None:
@@ -93,30 +93,33 @@ async def test_a_writer_s_end_starts_each_shown_check_through_the_module_with_it
     assert _run(cid)["stale"] == 0
 
 
-async def test_in_a_new_workspace_a_writer_s_end_starts_each_built_in_and_a_check_turned_off_stays_off(
+async def test_in_a_new_workspace_a_writer_s_end_starts_important_details_alone_and_each_switch_the_analyst_sets_stays(
         workspaces_tmp, bridge, monkeypatch):
-    """The built-ins are on in a workspace that stored none of them: a writer's end starts Judgment calls, Unverifiable
-    and Important details on its document. One the analyst turned off is stored so and starts no run."""
+    """Of the built-ins only Important details is on in a workspace that stored none of them: a writer's end starts it
+    alone on its document, and Judgment calls and Unverifiable stay off. One the analyst turns on runs at the next
+    writer's end, and one they turn off is stored so and starts no run."""
     _checks_row(monkeypatch)
     await _write()
     assert not bridge.ops("spawn"), "a save starts nothing"
     assert [(x["id"], x["shown"]) for x in checks.list_checks(CORPUS)] == [
-        ("judgment", True), ("unverified", True), ("important-details", True)]
+        ("judgment", False), ("unverified", False), ("important-details", True)]
     _writer_done()
-    await _until(lambda: len(bridge.ops("spawn")) == 3, "the built-ins never started at the writer's end")
-    assert sorted(s["what"] for s in bridge.ops("spawn")) == [f"{cid} on report" for cid in
-                                                             ("important-details", "judgment", "unverified")]
-    for cid in ("judgment", "unverified", "important-details"):
-        subagents.run_ended(CORPUS, _run(cid)["agent_id"], "done", "Done.", source="handback")
-    await _until(lambda: all(_run(c)["status"] == "done" for c in ("judgment", "unverified", "important-details")),
-                 "the runs never ended")
-    checks.edit(CORPUS, "judgment", shown=False)
-    assert checks.read(CORPUS, "judgment")["shown"] is False, "the analyst's choice is stored and wins"
+    await _until(lambda: len(bridge.ops("spawn")) == 1, "Important details never started at the writer's end")
+    await asyncio.sleep(0.05)
+    assert [s["what"] for s in bridge.ops("spawn")] == ["important-details on report"]
+    subagents.run_ended(CORPUS, _run("important-details")["agent_id"], "done", "Done.", source="handback")
+    await _until(lambda: _run("important-details")["status"] == "done", "the run never ended")
+    assert [(x["id"], x["shown"]) for x in checks.list_checks(CORPUS)] == [
+        ("judgment", False), ("unverified", False), ("important-details", True)], "a run's save keeps the defaults"
+    checks.edit(CORPUS, "judgment", shown=True)
+    checks.edit(CORPUS, "important-details", shown=False)
+    assert checks.read(CORPUS, "judgment")["shown"] is True, "the analyst's choice is stored and wins"
+    assert checks.read(CORPUS, "important-details")["shown"] is False, "the analyst's choice is stored and wins"
     await _write(TEXT.replace("It ran at night.", "It ran in the morning."))
     _writer_done()
-    await _until(lambda: len(bridge.ops("spawn")) == 5, "the checks on never started again")
+    await _until(lambda: len(bridge.ops("spawn")) == 2, "the check turned on never started")
     await asyncio.sleep(0.05)
-    assert sorted(s["what"] for s in bridge.ops("spawn")[3:]) == ["important-details on report", "unverified on report"]
+    assert [s["what"] for s in bridge.ops("spawn")[1:]] == ["judgment on report"]
 
 
 async def test_in_plan_mode_a_writer_s_end_holds_its_checks_which_say_so_and_start_after(doc, bridge, monkeypatch):

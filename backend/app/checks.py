@@ -2,16 +2,20 @@
 the context, can do work, and can be created and run from the chat. A check runs again after a writer saves the
 document, but is cached: a passage whose text did not change, or that is locked, is not checked again.
 
-A check is `workspaces/<c>/checks/<id>.json` = {id, name, prompt, colour, shown, builtin, created_by, ts, version,
-runs: {doc: Run}}. The built-ins (`judgment`, `unverified`, `important-details`: Judgment calls, Unverifiable and
-Important details) are prompts/checks/<id>.md, read from the prompt file until first changed: each covers the documents
-and the cards and is on until the analyst turns it off. A stored copy still holding a name, a prompt or covers its
-built-in had before reads as the built-in is now (FORMER_NAMES, FORMER_PROMPTS, FORMER_COVERS), since thimble stores a
-built-in whole when it is turned on or off or runs; its `shown` stays as stored. A stored copy under an id its built-in
-had before (FORMER_IDS) is renamed to the id now when the checks are read (_migrate), and a comment that names a former
-id reads as naming the id now, written so on the store's next write. `verified`, a built-in before 0.7.0
-(RETIRED), is listed only where the workspace stored it, as any stored check is, so its comments stay readable there;
-no new check takes its id. An active extension's report checks, checks/<slug>/check.json (its name and colour)
+A check is `workspaces/<c>/checks/<id>.json` = {id, name, prompt, colour, shown, shown_set, builtin, created_by, ts,
+version, runs: {doc: Run}}. The built-ins (`judgment`, `unverified`, `important-details`: Judgment calls, Unverifiable
+and Important details) are prompts/checks/<id>.md, read from the prompt file until first changed: each covers the
+documents and the cards, and its front matter's `shown` says whether it is on until the analyst turns it on or off
+(Important details on, the other two off). A stored copy still holding a name, a prompt or covers its built-in had
+before reads as the built-in is now (FORMER_NAMES, FORMER_PROMPTS, FORMER_COVERS), since thimble stores a built-in
+whole when it is turned on or off or runs. Its `shown` stays as stored once the analyst set it (`shown_set`, which edit
+records for the analyst's switch and for main's run_check and stop_check) or when it is off; one stored on without
+`shown_set` reads as its built-in is now (_shown_now), since 0.7.0 and 0.8.0 turned every built-in on and stored it on
+when it ran or a save marked it stale. A stored copy under an id its built-in had before (FORMER_IDS) is renamed to
+the id now when the checks are read (_migrate), and a comment that names a former id reads as naming the id now,
+written so on the store's next write. `verified`, a built-in before 0.7.0 (RETIRED), is listed only where the
+workspace stored it, as any stored check is, so its comments stay readable there; no new check takes its id. An active
+extension's report checks, checks/<slug>/check.json (its name and colour)
 and check.md (its prompt) in its folder, follow the built-ins as `<extension>-<slug>`, read from the extension until
 first changed as the built-ins are, and off. A run is a `thimble:check`, a subagent of the analyst's Claude Code session
 (subagents.py), registered from prompts/check.md (definition) on Settings' checks row, with the corpus read-only and a
@@ -199,13 +203,24 @@ def _words_key(text: Any) -> str:
     return hashlib.sha1(_collapse(text).encode("utf-8")).hexdigest()
 
 
-def _as_now(stored: dict[str, Any]) -> dict[str, Any]:
+def _shown_now(stored: dict[str, Any], now: dict[str, Any], *, before_cards: bool) -> bool:
+    """Whether a stored built-in is on: as stored when the analyst set it (`shown_set`) or it is off, and when it was
+    stored before checks covered the cards (`before_cards`: before 0.7.0, when the built-ins started off, so on was the
+    analyst's choice); else, stored on by 0.7.0 or 0.8.0, which turned every built-in on, as its built-in is now."""
+    if stored.get("shown_set") or stored.get("shown") is not True or before_cards:
+        return bool(stored.get("shown"))
+    return bool(now.get("shown"))
+
+
+def _as_now(stored: dict[str, Any], *, before_cards: bool = False) -> dict[str, Any]:
     """A stored built-in with the name, the prompt and the covers its built-in has now in place of a former one it still
-    holds (FORMER_NAMES, FORMER_PROMPTS, FORMER_COVERS); one the analyst changed stays, and so does `shown`."""
+    holds (FORMER_NAMES, FORMER_PROMPTS, FORMER_COVERS), and `shown` as _shown_now reads it; one the analyst changed
+    stays."""
     cid = str(stored.get("id") or "")
     now = builtin(cid) if cid in BUILTINS else None
     if now is None:
         return stored
+    stored["shown"] = _shown_now(stored, now, before_cards=before_cards)
     if _collapse(stored.get("name")) in FORMER_NAMES.get(cid, ()):
         stored["name"] = now["name"]
     if _words_key(stored.get("prompt")) in FORMER_PROMPTS.get(cid, ()):
@@ -265,10 +280,11 @@ def read(c: str, cid: str) -> dict[str, Any] | None:
     stored = read_json(_path(c, cid), None)
     if isinstance(stored, dict):
         stored.setdefault("runs", {})
+        before_cards = "covers" not in stored or covers_of(stored["covers"]) in FORMER_COVERS.get(cid, ())
         if "covers" not in stored:  # a check stored before checks covered the cards covers what its built-in says
             stored["covers"] = (builtin(cid) or {}).get("covers") or list(DEFAULT_COVERS)
         stored["covers"] = covers_of(stored["covers"])
-        return _as_now(stored)
+        return _as_now(stored, before_cards=before_cards)
     return builtin(cid) or from_extensions(c).get(cid)
 
 
@@ -382,8 +398,8 @@ def edit(c: str, cid: str, *, name: str | None = None, prompt: str | None = None
         if colour not in COLOURS:
             raise HTTPException(400, f"a color is one of {COLOURS[0]} to {COLOURS[-1]}")
         check["colour"] = colour
-    if shown is not None:
-        check["shown"] = bool(shown)
+    if shown is not None:  # the analyst's switch, or main's run_check or stop_check: a choice that stays (_shown_now)
+        check["shown"], check["shown_set"] = bool(shown), True
     if covers is not None:
         check["covers"] = covers_of(covers)
     saved = save(c, check)
