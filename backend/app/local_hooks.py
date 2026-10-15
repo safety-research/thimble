@@ -12,6 +12,9 @@ The file-first hooks of plugin/bin/.thimble-watch write their record to the work
     end         SessionEnd of main (subagents.hook_end: the running agents' chats end, "Stopped when Claude Code quit.")
     rekey       SessionStart of main for clear and resume (subagents.hook_rekey: the chats and the mirror follow)
     main-stop   Stop of main's turn (only the pass below: the mirror, R3, the hand-backs, the task notifications)
+    mode-notice main's permission mode turned into or out of Manual mode (the mode hook): the `manual-mode` notice
+                shown with modes.manual_notice's words, or cleared (notices.py), as session.note_mode does in browser
+                mode
 
 and `thimble act` (local.py) starts it with the analyst's answer to a view proposal or to a notice, since only this
 process writes proposals.json and the chats' logs, and follows to its end a build it queues (dev's queue lives in its
@@ -56,8 +59,8 @@ from . import subagent_files as sf
 
 log = logging.getLogger("thimble.local_hooks")
 
-KINDS = ("started", "stopped", "denied", "end", "rekey", "main-stop", "view-accept", "view-reject", "view-retry",
-         "view-propose-now", "notice-dismiss")
+KINDS = ("started", "stopped", "denied", "end", "rekey", "main-stop", "mode-notice", "view-accept", "view-reject",
+         "view-retry", "view-propose-now", "notice-dismiss")
 MIRROR_LOCK = "mirror.lock"  # in the workspace folder: held by the one process that runs passes
 TODO = "mirror.todo.jsonl"  # in the workspace folder: the calls that found the lock held, for the holder
 TICK_S = 1.0
@@ -235,8 +238,23 @@ async def _pass(c: str, items: list[tuple[str, dict[str, Any]]]) -> None:
         elif kind == "rekey":
             _step(kind, subagents.hook_rekey, c, hook)
             _step("the mirror", session.catch_up, c)
+        elif kind == "mode-notice":
+            _step(kind, _mode_notice, c, hook)
         elif kind in ANSWERS:
             _step(kind, ANSWERS[kind], c, hook)
+
+
+def _mode_notice(c: str, hook: dict[str, Any]) -> None:
+    """The `manual-mode` notice for the permission mode the mode hook reported: shown while it is Manual mode
+    (modes.manual_hint), in the words of modes.manual_notice, and cleared otherwise. A dismissal holds for the workspace
+    (notices.dismiss)."""
+    from . import modes, notices  # noqa: PLC0415
+
+    mode = str(hook.get("permission_mode") or "")
+    if modes.manual_hint(mode):
+        notices.post(c, kind="manual-mode", key="manual-mode", text=modes.manual_notice(mode))
+    else:
+        notices.clear(c, "manual-mode")
 
 
 def _answered(what: str, c: str, slug: str, fn: Any, *args: Any) -> None:

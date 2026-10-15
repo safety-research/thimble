@@ -538,6 +538,38 @@ def _terminal_ws(c: str) -> Path | None:
     return ws if sfiles.terminal(ws) else None
 
 
+def attached_workspaces() -> list[str]:
+    """The workspaces whose main this server follows now."""
+    return list(_live)
+
+
+def tell_terminal(c: str, line: str) -> bool:
+    """`line` for main's terminal in workspace `c`: appended to <home>/links/<main's session>, which main's Stop hook shows
+    under main's next reply (plugin/bin/.thimble-watch link_lines), as a note after the link /thimble left there, or after
+    an empty first line in a file this makes (readable by its owner alone). False when no main is attached or the line
+    was not written."""
+    lv = _live.get(c)
+    name = "".join(ch for ch in (lv.sid if lv is not None else "") if ch.isalnum() or ch in "-_")
+    if not name or not line.strip():
+        return False
+    d = userconf.global_file().parent / userconf.LINKS_DIR
+    try:
+        config.private_dir(d)
+        path = d / name
+        try:
+            held = path.read_bytes()
+        except FileNotFoundError:
+            held = None
+        lead = "\n" if held is None or (held and not held.endswith(b"\n")) else ""
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with os.fdopen(fd, "a", encoding="utf-8") as f:
+            f.write(lead + " ".join(line.split()))
+    except OSError as e:
+        log.warning("%s: a line for main's terminal was not left: %s", c, e)
+        return False
+    return True
+
+
 def current(c: str) -> Live | None:
     """The session that is main in workspace `c`: the one this server follows, or in terminal mode the one launch.json
     names, followed through the moves --rekey recorded (_terminal_main), when no pass of the mirror in this process
@@ -629,16 +661,20 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
         meta["ended"] = None
         agents.write_meta(c, meta)
         agents.notify(c, agents.MAIN_ID)
+        if held.get(MANUAL_KEY):  # the new session reports its own mode
+            _clear_manual(c)
     elif _modes.get(c, ("",))[0] != sid:  # this server restarted under the session: main's last report, as kept
         kept = _kept_mode(c, sid)
         if kept:
             _modes[c] = (sid, kept)
-        # the chip stays as main's meta has it, since the kept mode may be one note_plan only guessed
+        # the notice stays as main's meta has it, since the kept mode may be one note_plan only guessed
         now = ({**held, "permission_mode": kept} if kept else
                {k: v for k, v in held.items() if k not in ("permission_mode", MANUAL_KEY)})
         if now != held:
             meta["attached"] = now
             agents.write_meta(c, meta)
+        if held.get(MANUAL_KEY) and not now.get(MANUAL_KEY):
+            _clear_manual(c)
     _persist(lv, keep_subs=restored or bool(lv.subs))
     _cancel_grace(c)
     _ensure_tail(lv)
@@ -680,8 +716,21 @@ def _keep_mode(c: str, sid: str, mode: str) -> None:
         log.warning("%s: main's permission mode was not kept in %s: %s", c, userconf.main_modes_file(), e)
 
 
-MANUAL_KEY = "manual"  # in main's meta's `attached`: what the browser's chip says while main runs in Manual mode
+MANUAL_KEY = "manual"  # in main's meta's `attached`: what kind of Manual-mode notice shows (modes.manual_hint)
 TOLD_KEY = "manual_told"  # in main's meta's `attached`: main's terminal said once that the session runs in Manual mode
+MANUAL_NOTICE_KEY = "manual-mode"  # the notices' key and kind of the Manual-mode notice (notices.py)
+
+
+def _post_manual(c: str, mode: str) -> None:
+    from . import notices  # noqa: PLC0415
+
+    notices.post(c, kind=MANUAL_NOTICE_KEY, key=MANUAL_NOTICE_KEY, text=modes.manual_notice(mode))
+
+
+def _clear_manual(c: str) -> None:
+    from . import notices  # noqa: PLC0415
+
+    notices.clear(c, MANUAL_NOTICE_KEY)
 
 
 def _with_mode(held: dict[str, Any], mode: str, guessed: bool = False) -> dict[str, Any]:
@@ -699,8 +748,9 @@ def note_mode(c: str, sid: str | None, mode: str, *, tell: bool = False, guessed
     """Main's hooks report the permission mode Claude Code runs the session `sid` in: when `sid` is main, this server
     keeps it (main_mode), in thimble's home too (userconf.main_modes_file) so that a restarted server under the same
     session follows it until main reports again, the mode each agent's row follows until the analyst sets it
-    (modes.py), and main's meta shows it (`attached.permission_mode`), with what the browser's chip says while it is
-    Manual mode (`attached.manual`, modes.manual_hint), unless the mode is only `guessed` (note_plan).
+    (modes.py), and main's meta shows it (`attached.permission_mode`), with what the Manual-mode notice says while it is
+    Manual mode (`attached.manual`, modes.manual_hint), unless the mode is only `guessed` (note_plan). The notice
+    `manual-mode` (notices.py, modes.manual_notice) shows when that hint comes or changes, and goes when it goes.
 
     With `tell` (a report of main's hooks, events.mode_route), the first report of Manual mode in the session returns
     the line main's terminal then shows (modes.manual_line), and `attached.manual_told` records that it showed, so it
@@ -722,6 +772,11 @@ def note_mode(c: str, sid: str | None, mode: str, *, tell: bool = False, guessed
         meta["attached"] = now
         agents.write_meta(c, meta)
         agents.notify(c, agents.MAIN_ID)
+    before, after = held.get(MANUAL_KEY), now.get(MANUAL_KEY)
+    if after and after != before:
+        _post_manual(c, mode)
+    elif before and not after and not guessed:
+        _clear_manual(c)
     return line
 
 
@@ -734,7 +789,7 @@ def note_plan(c: str, sid: str | None, plan: bool) -> None:
     before (default when none was known), until main's hooks report the mode at its next turn (live check L21: a
     shift+tab while main was idle reached thimble only at main's next turn, so held checks waited and the Start line
     was stale). The mode it goes back to is a guess, since a shift+tab out of plan mode, or the plan's approval, may
-    pick another, so it shows no Manual-mode chip."""
+    pick another, so it shows no Manual-mode notice."""
     cur = main_mode(c)
     if plan and cur != "plan":
         if cur:
@@ -846,9 +901,9 @@ def _take_place(sub: Sub, path: Path, place: Any, at_end: bool) -> None:
 
 
 def detach(c: str, sid: str, reason: str | None = None) -> bool:
-    """The session is no longer main: the tail stops, a running subagent is stopped, and main's meta drops `attached`
-    and
-    names the session in `ended` ({session, cwd, at}). True when this session was main."""
+    """The session is no longer main: the tail stops, a running subagent is stopped, main's meta drops `attached` and
+    names the session in `ended` ({session, cwd, at}), and the Manual-mode notice of the session goes. True when this
+    session was main."""
     lv = _live.get(c)
     if lv is not None and lv.sid == sid:
         _live.pop(c, None)
@@ -873,6 +928,8 @@ def detach(c: str, sid: str, reason: str | None = None) -> bool:
     meta["ended"] = {"session": sid, "cwd": str(held.get("cwd") or ""), "at": _now()}
     agents.write_meta(c, meta)
     agents.notify(c, agents.MAIN_ID)
+    if held.get(MANUAL_KEY):  # the Manual-mode notice was this session's; the next main reports its own mode
+        _clear_manual(c)
     log.info("%s: session %s detached (%s)", c, sid, reason or "ended")
     return True
 

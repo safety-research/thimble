@@ -455,3 +455,32 @@ async def test_a_notice_dismissed_in_the_terminal_is_dismissed_by_the_holder(ws,
     del calls[:]
     assert await _call("view-retry", {"cwd": cwd, "slug": "edit-bursts", "notice": "n4"}) >= 1
     assert calls == [(CORPUS, "n4"), ("retry", CORPUS, "edit-bursts")]
+
+
+async def test_mode_notice_shows_the_manual_mode_notice_and_clears_it_and_a_dismissal_holds(ws, project, tmp_path):
+    """`mode-notice` (the mode hook, as main turns into or out of Manual mode) posts the `manual-mode` notice in the words
+    of modes.manual_notice, which thimble-term's band shows above the prompt, and clears it for another mode; once the
+    analyst dismissed it in the band (`notice-dismiss`), a later Manual report posts none in this workspace."""
+    from app import modes, notices
+
+    _main(project)
+    cwd = str(config.corpus_dir(CORPUS))
+
+    def manual() -> list[dict]:
+        return [n for n in notices.open_notices(CORPUS) if n.get("key") == "manual-mode"]
+
+    assert "mode-notice" in local_hooks.KINDS
+    assert await _call("mode-notice", {"cwd": cwd, "permission_mode": "default"}) >= 1
+    assert [(n["kind"], n["text"]) for n in manual()] == [("manual-mode", modes.manual_notice("default"))]
+    assert modes.manual_notice("default") == modes.MANUAL_NOTICES["switch"]
+    assert await _call("mode-notice", {"cwd": cwd, "permission_mode": "auto"}) >= 1
+    assert manual() == []
+    user = tmp_path / "claude-config" / "settings.json"
+    user.parent.mkdir(parents=True, exist_ok=True)
+    user.write_text(json.dumps({"disableAutoMode": "disable"}))
+    assert await _call("mode-notice", {"cwd": cwd, "permission_mode": "manual"}) >= 1
+    assert [n["text"] for n in manual()] == [modes.MANUAL_NOTICES["settings"]]
+    assert await _call("notice-dismiss", {"cwd": cwd, "id": manual()[0]["id"]}) >= 1
+    assert manual() == [] and notices.dismissed(CORPUS, "manual-mode")
+    assert await _call("mode-notice", {"cwd": cwd, "permission_mode": "default"}) >= 1
+    assert manual() == [], "the dismissal holds for the workspace"
