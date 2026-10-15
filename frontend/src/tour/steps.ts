@@ -471,20 +471,38 @@ const scrollTo = (api: Api, el: Element | null | undefined, above = 120, smooth 
 }
 const inReport = (api: Api, sel: string) => (api.els.root as HTMLElement | undefined)?.querySelector<HTMLElement>(sel) ?? null
 
+/** What the steps about the chat and the ⌘-click box say: on a demo page (`demo`, lib/demo), that Claude isn't
+ * connected there, and what the chat is once thimble runs in the analyst's own folder. */
+export function sessionTexts(demo: boolean): { chat: [string, string]; terminal: [string, string]; ask: string } {
+  if (!demo) {
+    return {
+      chat: ['Your Claude Code session', 'This chat is your Claude Code session: ask it anything about the files.'],
+      terminal: ['Your terminal', 'The session also runs in the terminal where you started thimble. It shows the same conversation, and you can type in either.'],
+      ask: 'Type a question and press Enter. On a real card, the answer comes in a new thread in the chat.',
+    }
+  }
+  return {
+    chat: ['The chat', "This is a demo, so Claude isn't connected here. When you run thimble in a folder of your own, this chat is your Claude Code session: ask it anything about the files."],
+    terminal: ['Your terminal', 'When you run thimble yourself, the session also runs in the terminal where you started it. It shows the same conversation, and you can type in either.'],
+    ask: 'Type a question and press Enter. With Claude connected, the answer comes in a new thread in the chat.',
+  }
+}
+
 /** The tour, for a pointer key written `key` (⌘ on a Mac, Ctrl elsewhere). With the chat column folded (`chat` false)
- * the steps about the chat are left out. */
-export function tourSteps(key: string, chat = true): Step[] {
+ * the steps about the chat are left out; on a demo page (`demo`) they say it is a demo (sessionTexts). */
+export function tourSteps(key: string, chat = true, demo = false): Step[] {
+  const said = sessionTexts(demo)
   const steps: Step[] = [
     {
       tab: 'files', needsChat: true, example: sessionExample, anchor: chatContent, place: 'right', align: 'start', pad: 0, radius: 12,
-      title: 'Your Claude Code session',
-      body: 'This chat is your Claude Code session: ask it anything about the files.',
+      title: said.chat[0],
+      body: said.chat[1],
     },
     {
       tab: 'files', needsChat: true, terminal: true, example: sessionExample, place: ['left', 'bottom'], align: 'start', pad: 0, radius: 10,
       anchor: (api) => [api.els.term, chatContent(api)],
-      title: 'Your terminal',
-      body: 'The session also runs in the terminal where you started thimble. It shows the same conversation, and you can type in either.',
+      title: said.terminal[0],
+      body: said.terminal[1],
     },
     {
       tab: 'files', example: filesExample, leave: releaseBrowser, anchor: filesPanel, place: 'left', align: 'start', pad: 0, radius: 12,
@@ -640,7 +658,7 @@ export function tourSteps(key: string, chat = true): Step[] {
         api.closeMock()
       },
       title: `${key}-click to ask`,
-      body: 'Type a question and press Enter. On a real card, the answer comes in a new thread in the chat.',
+      body: said.ask,
     },
     {
       // the whole Report surface: its bar (with Export), the cards and checks, and the page

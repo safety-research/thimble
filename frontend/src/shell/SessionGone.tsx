@@ -7,8 +7,8 @@
 // down, unless main's session had ended before it went down (the server stops itself after a quit). A session that
 // takes main over from another terminal is followed at once, with a toast. A workspace `thimble demo` installed from a
 // pre-cache, and a worked example's that `thimble demo --examples` opened (the start page's `example` row), are static:
-// each is read without a session until the first attaches, so the card waits for that session's end there
-// (chat/Precached offers the attach command in a pre-cache's orientation thread).
+// each is read without a session until the first attaches, so the card waits for that session's end there. Until then
+// the page is a demo page (lib/demo), which says so and keeps what needs Claude from failing.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ThreadsContext } from '../chat/Notes'
@@ -20,6 +20,7 @@ import { useChatMetas } from '../chat/waiting'
 import { Button } from '../components/Button'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
+import { isDemoPage, setDemo } from '../lib/demo'
 import type { ChatMeta, CorpusInfo, SessionEnded, WorkspaceRow } from '../lib/types'
 import { shortPath, shownPath } from '../lib/workspace'
 import { copyText } from './ProblemReport'
@@ -161,6 +162,12 @@ export function useSessionGone(ws: string): Gone | null {
     }
   }, [ws])
   const gone = isGone(main, up, precached || example !== false)
+  // a demo page (lib/demo): read without a session, and no session attached to it yet
+  const demo = isDemoPage(main, precached || example === true)
+  useEffect(() => {
+    setDemo(demo)
+    return () => setDemo(false)
+  }, [demo])
   useEffect(() => {
     setDue(false)
     if (!gone) return

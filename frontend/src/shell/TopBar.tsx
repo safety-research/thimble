@@ -1,5 +1,6 @@
 // The top bar: at the left the thimble mark and the corpus's folder in mono, which opens the switcher, the server's
-// workspaces as the start page lists them (WorkspaceList), this one marked; the surfaces' tabs over the main area
+// workspaces as the start page lists them (WorkspaceList), this one marked, and on a demo page the Demo tag (DemoTag);
+// the surfaces' tabs over the main area
 // (a click shows the surface, a drag takes it to a pane); at the right the Manual-mode chip while main's session runs
 // in Claude Code's Manual mode (ManualChip), Undo and Redo (shell/undo.ts), Report a problem, the links toggle, the
 // theme popover and the settings gear.
@@ -13,6 +14,7 @@ import { bus, type ProblemPrefill, type Tab } from '../lib/bus'
 import { toggleLinks, useLinksVisible } from '../lib/links'
 import type { Attached, WorkspaceRow } from '../lib/types'
 import { shortPath, shownPath } from '../lib/workspace'
+import { DemoTag } from './DemoTag'
 import { ManualChip } from './ManualChip'
 import { ProblemReportPopover } from './ProblemReport'
 import { SettingsPopover } from './SettingsPopover'
@@ -80,6 +82,7 @@ export function TopBar({ ws, tabs, onTab, onTabDrag, attached }: TopBarProps) {
         <Icon name="thimble" size={18} className="shell-mark" />
         <span className="shell-word">thimble</span>
         <WorkspaceSwitcher ws={ws} label={path ? shortPath(path) : ws} />
+        <DemoTag />
       </span>
       <nav className="tabs shell-tabs" role="tablist" aria-label="Surfaces">
         {tabs.map((t) => (

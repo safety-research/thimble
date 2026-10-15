@@ -59,7 +59,9 @@ import { pendingAsks, waitingAt, waitingChats } from './waiting'
 import { PermissionCard } from './PermissionCard'
 import { ProposalCard } from './ProposalCard'
 import { NoticeStrip } from './Notice'
-import { AttachBar, PrecachedCard, attachInstead, precachedMark, takesFollowUps } from './Precached'
+import { PrecachedCard, precachedMark, takesFollowUps } from './Precached'
+import { DemoNote } from './DemoNote'
+import { demoStop, useDemo } from '../lib/demo'
 import { pendingRequests } from './permissions'
 
 const LIST_DEBOUNCE_MS = 300
@@ -599,8 +601,8 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   // which is known once main's meta has loaded
   const attached = main.meta?.attached ?? null
   const detached = !!main.meta && !attached
-  // whether no session was ever attached to a pre-cached workspace, while the composer would reach nothing
-  const neverAttached = detached && !main.meta?.ended
+  // a demo page (lib/demo): no view proposal, and a send shows the demo note and keeps the text
+  const demo = useDemo()
   // the orientation the composer would reach, when it cannot take a message here: an earlier Claude Code session's or an
   // earlier version's, whose text takes the composer's place (backend orient_session.latest's 409 and 410)
   const orientMeta = target.to === 'orient' ? metaMap.get(target.chat) ?? (curMeta?.id === target.chat ? curMeta : null) : null
@@ -673,6 +675,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
 
   // a send that fails hands its text back to the composer (Composer), so nothing typed is lost
   const send = (text: string): Promise<boolean> => {
+    if (demoStop()) return Promise.resolve(false)
     if (target.to === 'orient') {
       // the latest orientation takes the analyst's message itself: it resumes the finished session, or waits for the run
       // going on to end; from one of its steps, its thread opens, where the message and the reply show
@@ -806,12 +809,11 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
         <div ref={footRef} className="chat-foot">
           <Holds className="chat-main-holds" alert={main.meta?.alert} />
           {asks.length > 0 && <PermissionCard ws={ws} asks={asks} metas={metaMap} labels={labels} />}
-          {!touring && <ProposalCard ws={ws} />}
+          {!touring && !demo && <ProposalCard ws={ws} />}
           <NoticeStrip ws={ws} current={current} labels={labels} onOpen={setCurrent} />
           {strip && <TaskStrip title={strip.title} steps={strip.steps} count={strip.count} open={stripOpen} onToggle={() => setStripOpen((o) => !o)} waiting={waiting} />}
-          {precached && attachInstead(precached, neverAttached, target.to) ? (
-            <AttachBar mark={precached} card={kind === 'orient' && current === precached.orientation} />
-          ) : orientClosedText ? (
+          <DemoNote />
+          {orientClosedText ? (
             <div className="chat-continue" role="note" data-continue={orientContinue ?? undefined}>
               <Icon name="terminal" size={13} className="chat-continue-ico" />
               <span>{orientClosedText}</span>

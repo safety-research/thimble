@@ -16,6 +16,7 @@ import { pendingAsks, useChatMetas } from '../chat/waiting'
 import { failedWhy } from '../chat/ViewChip'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
+import { demoStop } from '../lib/demo'
 import { refreshProposals, useProposals } from '../lib/proposals'
 import { useViewList } from '../lib/views'
 import { startSurfaceDrag } from '../lib/surfaces'
@@ -269,7 +270,7 @@ export function ViewsBar({ ws, value, onChange, views, proposals, compact = fals
   const dismiss = (p: Proposal, at: HTMLElement) => setRemoving({ slug: p.slug, name: p.name, view: false, at })
   const sendAsk = () => {
     const text = ask.trim()
-    if (!text) return
+    if (!text || demoStop()) return
     track('view-build', { target: 'panel:files', detail: { asked: true } })
     setAsking(false)
     setAsk('')

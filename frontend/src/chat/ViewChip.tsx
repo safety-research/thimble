@@ -21,6 +21,7 @@ import { Spinner } from '../components/Spinner'
 import { Tipped } from '../components/Tooltip'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
+import { demoStop } from '../lib/demo'
 import { hasEffort, loadSettings, modelChoices, modelLabel, sameModel } from '../lib/models'
 import { findProposal, refreshProposals, useProposals } from '../lib/proposals'
 import { track } from '../lib/telemetry'
@@ -160,7 +161,7 @@ export function ViewChip({ ws, slug, name, className }: Props) {
   }
   // Retry and Try again: a new builder through thimble's plugin, with the Build menu's values
   const retry = () => {
-    if (!p) return
+    if (!p || demoStop()) return
     track('view-build', { target: `view:${p.slug}`, detail: { again: true, ...values } })
     setRetrying(true)
     api

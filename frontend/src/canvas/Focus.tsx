@@ -9,6 +9,7 @@ import { ComposerFrame } from '../components/Composer'
 import { CARD_MIME, primaryArtifact } from '../components/Outputs'
 import { GlyphCites } from '../components/RefChip'
 import { bus } from '../lib/bus'
+import { demoStop } from '../lib/demo'
 import { track } from '../lib/telemetry'
 import type { Cell } from '../lib/types'
 import { CardBody, LabelHead, asksQuestion } from './bodies'
@@ -71,7 +72,7 @@ export function Focus({ cell, list, frame, onPick, onClose, onAskNew }: FocusPro
   }, [])
   const send = () => {
     const text = draft.trim()
-    if (!text) return
+    if (!text || demoStop()) return
     track('chat-open', { target: `cell:${cell.id}`, detail: { via: 'focus-composer', chat: thread.chatId } })
     setDraft('')
     setAsked({ id: cell.id, text })

@@ -7,8 +7,8 @@
 // At the head's right end, the mark of the review of the view's pictures (ReviewMark). The head offers no other view and
 // no Raw: a file's own modes (Transcript, Table, Raw, its viewers) are the File browser's. The view's label controls
 // open the label editor in a popover over the view, beside the control that asked (LabelEditor), so nothing moves.
-// The pane keeps the version of the view it opened (usePinnedView): a newer one, from a change, the review or the
-// orientation, never reloads under the analyst. The head says Updated with Reload, which loads it where they were: the
+// The pane keeps the version of the view it opened (usePinnedView): a newer one, from a change or the review, never
+// reloads under the analyst. The head says Updated with Reload, which loads it where they were: the
 // element they picked or the record the side panel shows (none once they closed it), the scroll positions, the fields
 // and the label filter. Undo in the review's mark loads at once.
 import { useEffect, useMemo, useState } from 'react'
@@ -16,6 +16,7 @@ import { Button } from '../components/Button'
 import { CheckMark } from '../components/CheckMark'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
+import { demoStop } from '../lib/demo'
 import { refreshProposals } from '../lib/proposals'
 import { refPath } from '../lib/refs'
 import { track } from '../lib/telemetry'
@@ -174,7 +175,8 @@ export function ReviewMark({ ws, slug, review: r, onUndo }: { ws: string; slug: 
     void call()
       .then(() => refreshProposals(ws))
       .catch((e: Error) => bus.emit('toast', { text: `Could not ${what}. ${e.message}`, kind: 'error' }))
-  const again = act(() => api.viewReviewAgain(ws, slug), 'review the view again')
+  const reviewAgain = act(() => api.viewReviewAgain(ws, slug), 'review the view again')
+  const again = () => demoStop() || reviewAgain()
   const stop = act(() => api.viewReviewStop(ws, slug), 'stop the review')
   const undo = act(() => (onUndo?.(), api.viewReviewUndo(ws, slug)), 'undo the revision')
   const line = reviewLine(r)
