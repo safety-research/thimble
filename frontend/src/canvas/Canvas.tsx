@@ -41,7 +41,6 @@ import { addSeen, canvasLanding } from './landing'
 import {
   DEFAULT_VIEW,
   DOUBLE_MS,
-  GAP,
   HEAD,
   PAD,
   activeFrame,
@@ -77,6 +76,8 @@ import {
   patchCellLocal,
   patchGroupLocal,
   pillAt,
+  placeBeside,
+  placeFree,
   readable,
   removeLocal,
   scopeForUnit,
@@ -478,8 +479,8 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   }, [ws, workFrame])
 
   // the latest of everything, for the window listeners a press installs
-  const live = useRef({ board, lay, view, sel, open })
-  live.current = { board, lay, view, sel, open }
+  const live = useRef({ data, board, lay, view, sel, open, heights })
+  live.current = { data, board, lay, view, sel, open, heights }
 
   // frames opened by a click on their collapsed deck or by a teleport (not by their title): each collapses again at a
   // click outside it. Kept for the page's life only.
@@ -681,8 +682,10 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
       const { board: b2, lay: l2 } = live.current
       if (!b2 || !l2) return
       const target = frameAt(b2, l2, p)
-      const ins = target && !ev.altKey ? insertionAt(b2, l2, target, p, id) : null
-      last = { t: 'c', id, x: r.x + p.x - p0.x, y: r.y + p.y - p0.y, target, ins, free: ev.altKey || !ins, move: !!target && target !== bc.parent }
+      // a collapsed frame takes a card at the end of its deck, never free or between the cards it does not show
+      const shut = !!target && !live.current.open.has(target)
+      const ins = target && !ev.altKey && !shut ? insertionAt(b2, l2, target, p, id) : null
+      last = { t: 'c', id, x: r.x + p.x - p0.x, y: r.y + p.y - p0.y, target, ins, free: !shut && (ev.altKey || !ins), move: !!target && target !== bc.parent }
       setDrag(last)
     }
     const up = () => {
@@ -702,40 +705,48 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     window.addEventListener('mouseup', up)
   }
 
+  // a card dropped free, or beside a sibling, stands where it covers no other card (layout.ts placeFree, placeBeside)
   const dropCard = (d: Drag) => {
-    const { board: b, lay: l } = live.current
-    if (!b || !l) return
+    const { data: d0, board: b, lay: l, open: o, heights: hs } = live.current
+    if (!d0 || !b || !l) return
     const me = b.cellById.get(d.id)
     if (!me) return
-    const frame = d.target ? l.rects.get(d.target) : null
-    track('ui-click', { target: `cell:${d.id}`, detail: { action: 'move', to: d.target, free: d.free, side: d.ins?.side } })
-    if (d.target && frame && d.ins?.side && d.ins.ref) {
-      // beside a sibling: the card is placed free at the sibling's side; on the left it takes the sibling's place and
-      // the sibling moves right
-      const ref = l.rects.get(d.ins.ref)!
-      const y = ref.y - frame.y
-      if (d.ins.side === 'R') {
-        const pos = { x: ref.x + ref.w + GAP - frame.x, y }
-        void change((x) => moveLocal(x, [d.id], d.target, undefined, pos), () => canvasApi.move(ws, { cells: [d.id], group: d.target, pos }))
+    const target = d.target
+    const frame = target ? l.rects.get(target) : null
+    track('ui-click', { target: `cell:${d.id}`, detail: { action: 'move', to: target, free: d.free, side: d.ins?.side } })
+    if (target && !o.has(target)) {
+      // on a collapsed frame: at the end of its deck; on its own deck the card stays where it is
+      if (target === me.parent) return
+      void change((x) => moveLocal(x, [d.id], target, undefined, null), () => canvasApi.move(ws, { cells: [d.id], group: target }))
+      return
+    }
+    if (target && frame && d.ins?.side && d.ins.ref) {
+      // beside a sibling: on the right the card is placed free at the sibling's side; on the left it takes the
+      // sibling's place and the sibling moves right
+      const at = placeBeside(d0, d.id, target, d.ins.ref, d.ins.side, o, hs)
+      if (d.ins.side === 'R' || !at.ref) {
+        const pos = at.pos
+        void change((x) => moveLocal(x, [d.id], target, undefined, pos), () => canvasApi.move(ws, { cells: [d.id], group: target, pos }))
       } else {
-        const pos = { x: ref.x - frame.x, y }
-        const refPos = { x: ref.x - frame.x + me.w + GAP, y }
+        const after = at.after ?? null
+        const refPos = at.ref
         const refId = d.ins.ref
         void change(
-          (x) => patchCellLocal(moveLocal(x, [d.id], d.target, undefined, pos), refId, { pos: refPos }),
-          () => Promise.all([canvasApi.move(ws, { cells: [d.id], group: d.target, pos }), canvasApi.patchCell(ws, refId, { pos: refPos })]),
+          (x) => patchCellLocal(moveLocal(x, [d.id], target, after, null), refId, { pos: refPos }),
+          () => Promise.all([canvasApi.move(ws, { cells: [d.id], group: target, after }), canvasApi.patchCell(ws, refId, { pos: refPos })]),
         )
       }
       return
     }
-    if (d.target && d.ins) {
-      const sibs = kidsOf(b, d.target).filter((k) => k.t === 'c' && !k.it.pos && k.it.id !== d.id && l.rects.has(k.it.id))
+    if (target && d.ins) {
+      const sibs = kidsOf(b, target).filter((k) => k.t === 'c' && !k.it.pos && k.it.id !== d.id && l.rects.has(k.it.id))
       const after = d.ins.index > 0 ? sibs[d.ins.index - 1].it.id : null
-      void change((x) => moveLocal(x, [d.id], d.target, after, null), () => canvasApi.move(ws, { cells: [d.id], group: d.target, after }))
+      void change((x) => moveLocal(x, [d.id], target, after, null), () => canvasApi.move(ws, { cells: [d.id], group: target, after }))
       return
     }
-    const pos = frame ? { x: Math.round(d.x - frame.x), y: Math.round(d.y - frame.y) } : { x: Math.round(d.x), y: Math.round(d.y) }
-    void change((x) => moveLocal(x, [d.id], d.target, undefined, pos), () => canvasApi.move(ws, { cells: [d.id], group: d.target, pos }))
+    const at = frame ? { x: Math.round(d.x - frame.x), y: Math.round(d.y - frame.y) } : { x: Math.round(d.x), y: Math.round(d.y) }
+    const pos = placeFree(d0, d.id, target, at, o, hs)
+    void change((x) => moveLocal(x, [d.id], target, undefined, pos), () => canvasApi.move(ws, { cells: [d.id], group: target, pos }))
   }
 
   const clickTimer = useRef<number | null>(null)

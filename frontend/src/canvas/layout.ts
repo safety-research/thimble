@@ -411,6 +411,98 @@ export function removeLocal(data: CanvasResponse, cells: readonly string[], grou
   return { groups: data.groups.filter((g) => !gone.has(g.id)), cells: data.cells.filter((c) => !cells.includes(c.id) && !gone.has(c.notebook)) }
 }
 
+// ---- where a dropped card stands: cards never cover each other ----
+
+/** The first top at or below `r.y` where a box of `r`'s size overlaps none of `others`: `r.y` when it overlaps none
+ * there, else the bottom of one of them plus GAP, at least about GAP clear of all of them. Pure. */
+export function clearBelow(r: Rect, others: readonly Rect[]): number {
+  const hits = (y: number, m: number) => others.some((o) => overlaps({ ...r, y }, { x: o.x - m, y: o.y - m, w: o.w + 2 * m, h: o.h + 2 * m }))
+  if (!hits(r.y, 0)) return r.y
+  const tops = others.map((o) => o.y + o.h + GAP).filter((y) => y > r.y).sort((a, b) => a - b)
+  // the last of them is GAP below every box, so one of them is clear
+  return tops.find((y) => !hits(y, GAP - 1)) ?? r.y
+}
+
+/** What the card `id` must not cover of what `keep` keeps: every other drawn card, and every drawn frame it is not in,
+ * with the room of the frame's title above it. */
+function coverable(board: Board, lay: Layout, id: string, keep: (k: string, r: Rect) => boolean): Rect[] {
+  const holds = new Set(framesAbove(board, id))
+  const out: Rect[] = []
+  for (const [k, r] of lay.rects) {
+    if (k === id || holds.has(k) || !keep(k, r)) continue
+    out.push(board.group.has(k) ? { x: r.x, y: r.y - TITLE, w: r.w, h: r.h + TITLE } : r)
+  }
+  return out
+}
+
+/** how far down clearPos moves a card to see what moves with its frames */
+const FAR = 100_000
+const sameRect = (a: Rect | undefined, b: Rect | undefined): boolean => !!a && !!b && a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h
+
+/**
+ * Where the card `id`, placed free in `data`, stands so that it covers nothing: at its own `pos`, or straight below it
+ * at the first place where it overlaps no other drawn card and no frame it is not in. Null when it has no `pos`. Pure.
+ */
+export function clearPos(data: CanvasResponse, id: string, open: ReadonlySet<string>, heights: Readonly<Record<string, number>>): Pos | null {
+  const start = boardOf(data).cellById.get(id)?.pos ?? null
+  if (!start) return start
+  const placed = (y: number) => patchCellLocal(data, id, { pos: { x: start.x, y } })
+  // what stands after the card's frames moves down as they grow, so the card never covers it: only what stays where it
+  // is with the card far down counts
+  const far = layoutBoard(boardOf(placed(start.y + FAR)), open, heights).rects
+  let y = start.y
+  for (let i = 0; i < 4; i++) {
+    const board = boardOf(placed(y))
+    const lay = layoutBoard(board, open, heights)
+    const r = lay.rects.get(id)
+    if (!r) break
+    const to = clearBelow(r, coverable(board, lay, id, (k, o) => sameRect(o, far.get(k))))
+    if (to <= r.y) break
+    y = Math.round(y + to - r.y)
+  }
+  return { x: start.x, y }
+}
+
+/** Where a card dropped free at `pos` in `group` (null: loose, on the board) stands: there, or moved down clear of what
+ * it would cover (clearPos). Pure. */
+export function placeFree(data: CanvasResponse, id: string, group: string | null, pos: Pos, open: ReadonlySet<string>, heights: Readonly<Record<string, number>>): Pos {
+  return clearPos(moveLocal(data, [id], group, undefined, pos), id, open, heights) ?? pos
+}
+
+/** A card dropped beside a sibling: free at `pos`; or, on the sibling's left, in the flow `after` that card (null:
+ * first) with the sibling free at `ref`. */
+export interface Beside {
+  pos: Pos | null
+  after?: string | null
+  ref?: Pos
+}
+
+/**
+ * Where a card dropped beside the sibling `ref` in `group`'s column stands, as the frame is laid out once the card has
+ * left its place. On the right it is placed free level with the sibling. On the left it takes the sibling's place in
+ * the flow and the sibling is placed free to its right, level with it, so the cards after them in the flow stay below
+ * them. A card placed free moves down clear of what it would cover (clearPos). Pure.
+ */
+export function placeBeside(data: CanvasResponse, id: string, group: string, ref: string, side: 'L' | 'R', open: ReadonlySet<string>, heights: Readonly<Record<string, number>>): Beside {
+  const relTo = (d: CanvasResponse, of: string, dx: number): Pos | null => {
+    const lay = layoutBoard(boardOf(d), open, heights)
+    const r = lay.rects.get(of)
+    const f = lay.rects.get(group)
+    return r && f ? { x: Math.round(r.x + r.w + dx - f.x), y: Math.round(r.y - f.y) } : null
+  }
+  if (side === 'R') {
+    const moved = moveLocal(data, [id], group, undefined, { x: 0, y: 0 })
+    const pos = relTo(moved, ref, GAP) ?? { x: 0, y: 0 }
+    return { pos: clearPos(patchCellLocal(moved, id, { pos }), id, open, heights) ?? pos }
+  }
+  const rest = data.cells.filter((c) => c.notebook === group && c.id !== id)
+  const at = rest.findIndex((c) => c.id === ref)
+  const after = at > 0 ? rest[at - 1].id : null
+  const moved = patchCellLocal(moveLocal(data, [id], group, after, null), ref, { pos: { x: 0, y: 0 } })
+  const pos = relTo(moved, id, GAP) ?? { x: 0, y: 0 }
+  return { pos: null, after, ref: clearPos(patchCellLocal(moved, ref, { pos }), ref, open, heights) ?? pos }
+}
+
 /** The analyst's own group, where a new card goes: role analyst, a root, no thread; with several, the one with the most cards. */
 export function analystGroup(groups: readonly Group[]): Group | null {
   const own = groups.filter((g) => (g.role || 'analyst') === 'analyst' && !isThreadGroup(g) && !g.parent && g.kind !== 'loose')
