@@ -14,7 +14,7 @@ import { PROPOSALS_OFF_LINE } from '../../src/chat/ProposalCard.tsx'
 import { ThreadRows } from '../../src/chat/ThreadRows.tsx'
 import { bus } from '../../src/lib/bus.ts'
 import { dispatch } from '../../src/lib/events.ts'
-import { noticeActions, parseNotice, withNotice, withoutNotice } from '../../src/lib/notices.ts'
+import { CODE_GONE_TEXT, noticeActions, parseNotice, setBrowserId, showCodeGone, withNotice, withoutNotice } from '../../src/lib/notices.ts'
 import type { ChatRecord, Notice } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
@@ -316,5 +316,36 @@ describe('the strip above the composer, and the rows', () => {
     await settle()
     expect(el.querySelector('.chat-notice')).toBeNull()
     expect(sent).toEqual(['POST /api/ws/nt-manual/notices/mm1/dismiss'])
+  })
+
+  test("a browser's sign-in notice is left out in that browser; another browser's shows with Sign it out, which signs it out and goes", async () => {
+    const signIn = (id: string) => ({ id: `s-${id}`, key: `sign-in:${id}`, kind: 'sign-in', text: `A browser signed in to thimble at 10:0${id.length}. If it was not you, click Sign it out, or run \`thimble unpair\` in a shell to sign out every browser.`, action: { label: 'Sign it out', do: 'sign-out', slug: id } })
+    open = [signIn('aaaaaaaaaaaa'), signIn('bbbbbbbbbbbb')]
+    try {
+      const el = await strip('nt-sign-in')
+      expect(el.querySelectorAll('.chat-notice')).toHaveLength(2)
+      await act(async () => setBrowserId('aaaaaaaaaaaa'))
+      const shown = [...el.querySelectorAll('.chat-notice')]
+      expect(shown.map((n) => n.getAttribute('data-key'))).toEqual(['sign-in:bbbbbbbbbbbb'])
+      expect(shown[0].querySelector('.chat-notice-text code')?.textContent).toBe('thimble unpair')
+      await click([...el.querySelectorAll('.chat-notice-act')].find((b) => b.textContent === 'Sign it out'))
+      await settle()
+      expect(sent).toEqual(['POST /api/ui/signout {"id":"bbbbbbbbbbbb","ws":"nt-sign-in"}', 'POST /api/ws/nt-sign-in/notices/s-bbbbbbbbbbbb/dismiss'])
+      expect(el.querySelector('.chat-notice')).toBeNull()
+    } finally {
+      await act(async () => setBrowserId(''))
+    }
+  })
+
+  test("a link's sign-in code that is gone shows in the strip, first; its × takes it from the page and sends nothing", async () => {
+    open = [{ id: 'p1', text: BLOCKED }]
+    const el = await strip('nt-code-gone')
+    await act(async () => showCodeGone())
+    expect(lines(el)).toEqual([CODE_GONE_TEXT.replace(/`/g, ''), BLOCKED])
+    expect([...el.querySelectorAll('.chat-notice-text code')].map((c) => c.textContent)).toEqual(['thimble up'])
+    await click(el.querySelector('.chat-notice-x'))
+    await settle()
+    expect(lines(el)).toEqual([BLOCKED])
+    expect(sent).toEqual([])
   })
 })

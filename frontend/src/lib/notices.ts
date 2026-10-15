@@ -5,6 +5,11 @@
 // and again when the stream comes back after a failure, and kept up to date by the stream's `notice` records: a notice
 // with the key of one shown replaces it in place, any other is added at the end. The history the stream replays is
 // left to the read, which already holds what is open.
+//
+// Signing in (lib/api.ts claimKey): a link's sign-in code that was used, replaced by a newer one or expired shows as a
+// notice this page makes itself (showCodeGone, an id under PAGE_NOTICE), in every workspace's strip and on the start
+// page, whose × sends nothing. A browser's sign-in posts a `sign-in` notice with Sign it out (backend main.signed_in);
+// the browser that signed in leaves out its own (setBrowserId, from GET /ui/paired).
 import { useSyncExternalStore } from 'react'
 import { api } from './api'
 import { bus, type Events } from './bus'
@@ -64,8 +69,68 @@ export function withoutNotice(list: readonly Notice[], gone: { id?: string; key?
   return [...list]
 }
 
+/** The words of backend hook_auth.CODE_GONE: the sign-in code of the link this page opened was used, replaced by a
+ * newer one, or expired. */
+export const CODE_GONE_TEXT = 'This sign-in link was already used or has expired. Run `thimble up` in a shell for a new one, or type /thimble in your terminal.'
+/** The start of the id of a notice this page made, which the server does not hold. */
+export const PAGE_NOTICE = 'page:'
+
+// the notices this page made (shown in every workspace's strip and on the start page), and this browser's id (the
+// first 12 hex digits of its cookie's hash, '' while not known or not signed in)
+let page: Notice[] = []
+let browserId = ''
+const pageSubs = new Set<() => void>()
+
+/** Whether `n` is the sign-in notice of this browser itself (backend main.signed_in: key `sign-in:<id>`, and its Sign it
+ * out names the id). Pure but for the id. */
+function ownSignIn(n: Notice): boolean {
+  if (!browserId || n.kind !== 'sign-in') return false
+  return n.key === `sign-in:${browserId}` || noticeActions(n.action).some((a) => a.do === 'sign-out' && a.slug === browserId)
+}
+
+/** Every reader learns that the page's notices or this browser's id changed. */
+function touchAll(): void {
+  pageSubs.forEach((fn) => fn())
+  stores.forEach((s) => s.subs.forEach((fn) => fn()))
+}
+
+/** This browser's id, as GET /ui/paired answers it after the claim: its own sign-in notice is left out. */
+export function setBrowserId(id: string): void {
+  if (id === browserId) return
+  browserId = id
+  touchAll()
+}
+
+/** A notice of this page's own, in every strip, in place of one with its id. */
+export function showPageNotice(n: Notice): void {
+  page = withNotice(page, n)
+  touchAll()
+}
+
+/** The link's sign-in code was used, replaced or expired (POST /ui/key answered 410). */
+export function showCodeGone(): void {
+  showPageNotice({ id: `${PAGE_NOTICE}code-gone`, key: `${PAGE_NOTICE}code-gone`, kind: 'sign-in', text: CODE_GONE_TEXT })
+}
+
+/** The notices this page made, for the start page, which has no workspace. */
+export function usePageNotices(): readonly Notice[] {
+  return useSyncExternalStore(
+    subscribePage,
+    () => page,
+    () => page,
+  )
+}
+
+function subscribePage(fn: () => void): () => void {
+  pageSubs.add(fn)
+  return () => void pageSubs.delete(fn)
+}
+
 interface Store {
   list: Notice[]
+  /** what useNotices shows: the page's notices, then the list less this browser's own sign-in, kept while its parts
+   * stay the same */
+  view: { list: Notice[]; page: Notice[]; id: string; out: Notice[] } | null
   subs: Set<() => void>
   off: (() => void) | null
   /** the stream's records that came while a read was under way, applied over its answer */
@@ -79,8 +144,15 @@ const stores = new Map<string, Store>()
 
 function storeOf(ws: string): Store {
   let s = stores.get(ws)
-  if (!s) stores.set(ws, (s = { list: [], subs: new Set(), off: null, pending: null, read: false, sub: (fn) => subscribe(ws, fn) }))
+  if (!s) stores.set(ws, (s = { list: [], view: null, subs: new Set(), off: null, pending: null, read: false, sub: (fn) => subscribe(ws, fn) }))
   return s
+}
+
+function viewOf(s: Store): readonly Notice[] {
+  const v = s.view
+  if (v && v.list === s.list && v.page === page && v.id === browserId) return v.out
+  s.view = { list: s.list, page, id: browserId, out: [...page, ...s.list.filter((n) => !ownSignIn(n))] }
+  return s.view.out
 }
 
 function publish(s: Store, next: Notice[]) {
@@ -144,12 +216,12 @@ function subscribe(ws: string, fn: () => void): () => void {
   }
 }
 
-/** The workspace's open notices, oldest first. */
+/** The workspace's open notices, oldest first, after the notices this page made; this browser's own sign-in left out. */
 export function useNotices(ws: string): readonly Notice[] {
   return useSyncExternalStore(
     storeOf(ws).sub,
-    () => storeOf(ws).list,
-    () => storeOf(ws).list,
+    () => viewOf(storeOf(ws)),
+    () => viewOf(storeOf(ws)),
   )
 }
 
@@ -164,8 +236,14 @@ export function useNoticesRead(ws: string): boolean {
 }
 
 /** The analyst's × on a notice, or a fix of theirs that went through: it goes from the foreground at once, and the
- * server forgets it (`POST /ws/{c}/notices/{id}/dismiss`), so a reload does not show it again. */
+ * server forgets it (`POST /ws/{c}/notices/{id}/dismiss`), so a reload does not show it again. A notice this page made
+ * (PAGE_NOTICE) only goes from the page. */
 export function dismissNotice(ws: string, n: Pick<Notice, 'id'>): Promise<void> {
+  if (n.id.startsWith(PAGE_NOTICE)) {
+    page = withoutNotice(page, { id: n.id })
+    touchAll()
+    return Promise.resolve()
+  }
   const s = storeOf(ws)
   publish(s, withoutNotice(s.list, { id: n.id }))
   return api.dismissNotice(ws, n.id).then(

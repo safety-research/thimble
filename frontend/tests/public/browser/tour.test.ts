@@ -181,6 +181,7 @@ function answer(route: Route, server: Server) {
       return json({ seen: true })
     }
     if (p === '/api/ui/key') return route.fulfill({ status: 204, body: '' })
+    if (p === '/api/ui/paired') return json({ paired: true, id: 'x' })
     if (p === `/api/ws/${WS}/events`) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: ': open\n\n' })
     if (p === `/api/corpora/${WS}/sources` && url.searchParams.get('depth') === '1') return json(folder(url.searchParams.get('path') ?? ''))
     if (p === `/api/corpora/${WS}/source`) return json(sourcePage(url.searchParams.get('path') ?? 'README.md'))
@@ -1074,7 +1075,7 @@ const fontOk = (page: Page) =>
     return family === 'Hanken Grotesk' && document.fonts.check('16px "Hanken Grotesk"') && [...document.fonts].some((f) => f.family.replace(/"/g, '') === 'Hanken Grotesk' && f.status === 'loaded')
   })
 
-/** What a run of the tour may write: the browser's key, the theme, telemetry and the offer, and nothing else. */
+/** What a run of the tour may write: the browser's sign-in, the theme, telemetry and the offer, and nothing else. */
 const ALLOWED = new Set(['POST /api/ui/key', `PUT /api/ws/${WS}/render/theme`, 'POST /api/tour/seen', `POST /api/ws/${WS}/telemetry`])
 /** The telemetry of a click in the tour, which is not the analyst's work and is never sent. */
 const tourClicks = (s: Server) => s.telemetry.filter((t) => t.kind === 'ui-click')

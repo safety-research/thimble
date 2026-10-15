@@ -979,6 +979,10 @@ button.settings-ext-name:hover .settings-ext-caret {
   letter-spacing: var(--tracking-title);
   color: var(--text-primary);
 }
+/* a link's sign-in code that was used or expired (chat/Notice PageNoticeStrip), under the title */
+.start-notices {
+  margin: -12px 0 24px;
+}
 .start-missing,
 .start-empty {
   margin: -12px 0 24px;
