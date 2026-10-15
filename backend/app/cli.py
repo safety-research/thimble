@@ -181,9 +181,8 @@ REFUSED_LINE = "thimble: {path} is not a folder to open as a workspace; say /thi
 TAKEOVER_LINE = ("thimble: this session is main now. The session {other} in another terminal no longer hears the "
                  "browser, and is main again once this one exits.")
 FOREIGN_UNNAMED = "<its THIMBLE_HOME>"  # foreign_home's answer for a server that names no home to this install
-FOREIGN_LINE = ("thimble: port {port} is held by the thimble server of another install (THIMBLE_HOME {other}), so this "
-                "install does not use it. Set THIMBLE_PORT to a free port, or stop that server with "
-                "`THIMBLE_HOME={other} thimble server stop`.")
+FOREIGN_LINE = ("thimble: port {port} (set by THIMBLE_PORT) is in use by another program. Set THIMBLE_PORT to a free "
+                "port, or unset it and thimble picks one.")
 SANDBOX_ENV = "SANDBOX_RUNTIME"  # "1" in a command Claude Code's Bash sandbox runs (module note, the Bash sandbox)
 # /thimble in the sandbox when the plugin's UserPromptExpansion hook left nothing (module note, the Bash sandbox)
 SANDBOX_LINE = ("thimble: WARNING - Claude Code's Bash sandbox is on in this session and keeps /thimble from reaching "
@@ -538,7 +537,7 @@ def refuse_foreign(url: str | None = None) -> bool:
     other = foreign_home(url)
     if other:
         _log(f"port {port()} is held by the thimble server of {other}; not used")
-        print(FOREIGN_LINE.format(port=port(), other=other))
+        print(FOREIGN_LINE.format(port=port()))
     return bool(other)
 
 
@@ -2144,7 +2143,7 @@ def server_for_launch(c: str) -> list[str]:
         url = api_url()
         other = foreign_home(url) if explicit_port() is not None else None
         if other:
-            return [FOREIGN_LINE.format(port=port(), other=other)]
+            return [FOREIGN_LINE.format(port=port())]
         NOTICES.clear()
         try:
             up: bool | None = ensure_running(WAIT_S)

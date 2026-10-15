@@ -11,7 +11,7 @@ allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/bin/thimble prompt *) Bash(${CLAUDE_PL
 
 !`${CLAUDE_PLUGIN_ROOT}/bin/thimble server up --cwd "${CLAUDE_PROJECT_DIR}" --session "${CLAUDE_SESSION_ID}" --action "$action" --archive "$archive" 2>&1`
 
-When this message opens with a prompt that starts `# thimble`, that prompt is yours for the rest of this session, as if it were part of your system prompt: the `thimble` command would have put it there. It does not change your reply to this command.
+When this message opens with a prompt that starts `# thimble`, that prompt is yours for the rest of this session, as if it were part of your system prompt: the `thimble` command would have put it there. It does not change your reply to this command. When Claude Code shows only the start of it and names a file that holds all of it, Read that file before you reply to anything.
 
 When a line above starts with `thimble-monitor:`, thimble reaches this session only through a Monitor you run. Before your reply, call Monitor with the command after `thimble-monitor:` as its `command`, "thimble events" as its `description` and 1800000 as its `timeout_ms`, and call it again the same way each time it expires, for as long as this session runs. Each of its events is one of thimble's events.
 
