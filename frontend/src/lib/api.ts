@@ -334,8 +334,10 @@ export const api = {
   setEffort: (c: string, effort: MainEffort) => j<{ effort: string; choice: MainEffort }>(`${ws(c)}/session/effort`, { method: 'PUT', body: JSON.stringify({ effort }) }),
   /** Turn fast mode off or back on for main and its threads from main's next request (events.fast_route). */
   setFast: (c: string, fast: boolean) => j<{ fast: boolean }>(`${ws(c)}/session/fast`, { method: 'PUT', body: JSON.stringify({ fast }) }),
-  /** Allow or deny a permission prompt of main's session that its hook relayed (events.permission_route). */
-  answerPermission: (c: string, id: string, allow: boolean) => j<{ answered: string }>(`${ws(c)}/permission`, { method: 'POST', body: JSON.stringify({ id, allow }) }),
+  /** Allow or deny a permission prompt of main's session that its hook relayed (events.permission_route); `always` also
+     * adds what the card's "Always allow" named, where Claude Code's own "don't ask again" would keep it. */
+  answerPermission: (c: string, id: string, allow: boolean, always = false) =>
+    j<{ answered: string }>(`${ws(c)}/permission`, { method: 'POST', body: JSON.stringify({ id, allow, ...(always ? { always } : {}) }) }),
   /** Allow or deny a permission request of a code ticket's session (agent_session.permission_route), the one kind of
      * session thimble still runs beside main; `always` also applies Claude Code's suggested "don't ask again" rules for
      * the rest of the session, and `shown` is how many of the later calls that joined it the card listed. */

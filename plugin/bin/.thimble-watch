@@ -53,7 +53,9 @@ subagent, when another watcher holds the session's lock, when no server listens 
 `claude` process has moved to another session (/clear), and when that process has exited. A server that has answered
 once is waited for across restarts.
 
-The permission hook relays the prompt to the server, which shows it in main's chat and answers when the analyst does.
+The permission hook relays the prompt to the server, with Claude Code's permission_suggestions, which shows it in main's
+chat and answers when the analyst does. An answer from the card's "Always allow" names the suggestions it adds, which
+the hook passes on as the decision's updatedPermissions, as Claude Code's own "Yes, and don't ask again" applies them.
 
 The held hook runs as each of main's turns begins, on a prompt the analyst typed and on an event the watcher woke it
 with: it takes the events the server holds for main (app/events.py QUIET_KINDS) and prints them as the prompt's added
@@ -371,7 +373,7 @@ def permission(inp: dict) -> int:
     """The PermissionRequest hook (module note)."""
     body = {"cwd": folder(inp), "session": str(inp.get("session_id") or "") or None,
             "tool_name": str(inp.get("tool_name") or ""), "tool_input": inp.get("tool_input"),
-            "agent_id": inp.get("agent_id") or None}
+            "agent_id": inp.get("agent_id") or None, "suggestions": inp.get("permission_suggestions")}
     try:
         status, answer = request("POST", "/api/events/permission", body, timeout=None)
     except (OSError, http.client.HTTPException):
@@ -382,6 +384,8 @@ def permission(inp: dict) -> int:
     decision: dict = {"behavior": behavior}
     if behavior == "deny":
         decision["message"] = DENIED
+    elif isinstance(answer.get("updatedPermissions"), list) and answer["updatedPermissions"]:
+        decision["updatedPermissions"] = answer["updatedPermissions"]
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}}))
     return 0
 

@@ -701,9 +701,12 @@ export interface PermissionRequest {
   agent_chat?: string
   /** a Bash request's command, whole, which the card shows as code rather than the input's JSON */
   command?: string
-  /** what Claude Code's own "don't ask again" would add for the session (`Bash(npm test *)`, `all edits`), when the
-   * request suggests it: the card's third choice (backend agent_session, don't ask again) */
+  /** what Claude Code's own "don't ask again" would add (`Bash(npm test *)`, `all edits`), when the request suggests
+   * it: the card's third choice (backend agent_session, don't ask again). A code ticket's adds it for the session; main's
+   * keeps it where Claude Code would, which `always_tip` says (backend events._main_offer). */
   always?: string
+  /** on main's meta: the tooltip of `always`, what it adds and where Claude Code keeps it (backend permission_updates.main_tip) */
+  always_tip?: string
   /** on main's meta: the thread or subagent chat whose agent asked, when the hook said which (backend events._hold) */
   chat?: string | null
   /** on main's meta: a request of one of thimble's subagents, which Claude Code asks in the terminal at once (it shows

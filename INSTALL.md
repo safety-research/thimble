@@ -637,8 +637,8 @@ that one and prints each path it deleted. The folder it read and your Claude Cod
 - `/thimble` is not recognized in a `claude` session: Claude Code doesn't have thimble's plugin, or it is off. `thimble
   doctor` says which. `bash <install folder>/scripts/install.sh` adds it, `/plugin` turns it on, and a session open
   since before then needs `/reload-plugins`.
-- Each thimble tool call asks you: answer "Yes, and don't ask again" once for each tool, in the terminal, add the allow
-  line in [Permissions](#permissions), or use auto mode.
+- Each thimble tool call asks you: answer "Yes, and don't ask again" once for each tool, in the terminal or on the
+  browser's card, add the allow line in [Permissions](#permissions), or use auto mode.
 - thimble's agents never start in a session you started with `claude`, and your shell sets a proxy: start claude with
   127.0.0.1 and localhost in `NO_PROXY` ([Start thimble](#start-thimble)).
 - A change in the browser says to open the link: this browser is not signed in. Open the link /thimble shows in your

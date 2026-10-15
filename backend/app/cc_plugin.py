@@ -166,6 +166,12 @@ def managed_blocks(root: Path, environ: Mapping[str, str] | None = None) -> bool
     return False
 
 
+def managed_rules_only(environ: Mapping[str, str] | None = None) -> bool:
+    """Whether the org's managed tier sets `allowManagedPermissionRulesOnly`, under which Claude Code ignores every
+    permission rule a session saves, so its dialog offers no "don't ask again"."""
+    return (managed(environ) or {}).get("allowManagedPermissionRulesOnly") is True
+
+
 def hooks_blocked(cwd: Path, root: Path, environ: Mapping[str, str] | None = None) -> bool:
     """Whether the plugin's hooks are off for a session in `cwd` (module note): by the managed tier, or by
     `disableAllHooks` as the analyst's, the project's and the folder's local settings and the session's `--settings`

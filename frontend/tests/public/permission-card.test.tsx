@@ -2,12 +2,13 @@
 // The permission card above the chat's composer (src/chat/PermissionCard.tsx, src/chat/permissions.ts): every request
 // that waits for the analyst, from main's session and from every session thimble started, on one card, the one asked
 // first first, each answer sent to the session that asked. Several requests at once: the card keeps the request it
-// shows while others come and go, an answer frees the card at once, and a request that ended leaves it. Every request
-// is recorded and answered by a stand-in fetch, which a test may hold or fail.
+// shows while others come and go, an answer frees the card at once, and a request that ended leaves it. Main's own
+// request offers Always allow where Claude Code suggests it. Every request is recorded and answered by a stand-in fetch,
+// which a test may hold or fail.
 import { act, useState } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ThreadsContext } from '../../src/chat/Notes.tsx'
-import { ARM_MS, EXPIRED_TITLE, PermissionCard } from '../../src/chat/PermissionCard.tsx'
+import { alwaysChoice, ARM_MS, EXPIRED_TITLE, PermissionCard } from '../../src/chat/PermissionCard.tsx'
 import { askWhy, autoModeRefusal, pendingRequests, pluginSteered, subagentName, type PendingAsk } from '../../src/chat/permissions.ts'
 import { bus } from '../../src/lib/bus.ts'
 import { newest, STALE } from '../../src/lib/newest.ts'
@@ -205,6 +206,20 @@ describe("main's requests and those of thimble's agents, its subagents", () => {
     expect(el.querySelector('.chat-perm-who')?.textContent).toMatch(/^The orientationasks to run a command/)
     const main = await mount(<PermissionCard ws="mini" asks={[{ chat: 'main', request: req('m3') }]} metas={metas} labels={new Map()} />)
     expect([...main.querySelectorAll('.chat-perm-acts button')].map((b) => b.textContent)).toEqual(['Allow', 'Deny'])
+  })
+
+  test("main's own request offers Always allow as Claude Code suggests it, and the click posts always", async () => {
+    const tip = "Allow, and don't ask again for mcp__plugin_thimble_thimble__add_card in this folder (your project local settings)"
+    const m = req('m4', { tool: 'mcp__plugin_thimble_thimble__add_card', what: 'mcp__plugin_thimble_thimble__add_card', always: 'mcp__plugin_thimble_thimble__add_card', always_tip: tip })
+    expect(alwaysChoice(m)).toEqual({ label: 'Always allow mcp__plugin_thimble_thimble__add_card', tip })
+    expect(alwaysChoice({ ...m, always_tip: undefined })?.tip).toBe("Allow, and don't ask again for mcp__plugin_thimble_thimble__add_card for the rest of this session")
+    const el = await mount(<PermissionCard ws="mini" asks={[{ chat: 'main', request: m }]} metas={metas} labels={new Map()} />)
+    expect([...el.querySelectorAll('.chat-perm-acts button')].map((b) => b.textContent)).toEqual(['Allow', 'Always allow mcp__plugin_thimble_thimble__add_card', 'Deny'])
+    await armed()
+    await act(async () => (el.querySelector('.chat-perm-always') as HTMLButtonElement).click())
+    await settle()
+    expect(posted).toEqual([['/api/ws/mini/permission', { id: 'm4', allow: true, always: true }]])
+    expect(el.querySelector('.chat-perm')).toBeNull()
   })
 })
 

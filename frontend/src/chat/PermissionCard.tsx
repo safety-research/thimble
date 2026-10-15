@@ -3,8 +3,9 @@
 // at a time with paging, whose `1 of 3` counts the requests that still wait, or on one declined unanswered those
 // declined unanswered. The card keeps showing the request it shows while others arrive, are answered or time out. Its
 // head names the requesting thread (askThread); the body says who asks, what the call does, every later call that waits
-// on the same answer (scrolled), and why it asks, then Allow, Always allow (where Claude Code offers a rule for the
-// session, or for a web call its site or web search in the workspace; the scope in its tooltip) and Deny, in one row. A
+// on the same answer (scrolled), and why it asks, then Allow, Always allow (where Claude Code offers a rule: for main's
+// request what its own "don't ask again" adds, kept where Claude Code keeps it; for a session thimble started a rule for
+// the session, or for a web call its site or web search in the workspace; the scope in its tooltip) and Deny, in one row. A
 // request declined unanswered says so, with Dismiss, and Dismiss all when several were. When auto mode's classifier
 // could not judge a call, the request of a session thimble started offers the switch to Manual, and to Bypass unless
 // the analyst's Claude Code settings turn it off. An answer takes its request off the card at once and the next request
@@ -26,10 +27,11 @@ import { askFields, askWhat, CODE_LANGS } from './Holds'
 import { ThreadChip } from './Notes'
 import { askedBy, askingAgent, asksTo, askThread, askWhy, type PendingAsk } from './permissions'
 
-/** A request's "don't ask again" choice: the button's label, and its tooltip saying what it keeps and where. */
-function alwaysChoice(p: PermissionRequest): { label: string; tip: string } | null {
+/** A request's "don't ask again" choice: the button's label, and its tooltip saying what it keeps and where (for main's
+ * request, as the backend words it). Pure. */
+export function alwaysChoice(p: PermissionRequest): { label: string; tip: string } | null {
   if (p.keep) return { label: `Always allow ${p.keep}`, tip: `Allow, and don't ask again for ${p.keep === 'web search' ? 'web searches' : p.keep} in this workspace` }
-  if (p.always) return { label: `Always allow ${p.always}`, tip: `Allow, and don't ask again for ${p.always} for the rest of this session` }
+  if (p.always) return { label: `Always allow ${p.always}`, tip: p.always_tip || `Allow, and don't ask again for ${p.always} for the rest of this session` }
   return null
 }
 
@@ -43,11 +45,12 @@ export function cutLine(p: Pick<PermissionRequest, 'cut' | 'command' | 'input'>)
   return `Only the first ${shown.toLocaleString('en-US')} of ${p.cut.toLocaleString('en-US')} characters are shown. Allow approves all of it.`
 }
 
-/** Send the analyst's answer to the session that asked: main's prompt through the shim, any other session's through
- * its chat with how many of the later calls the card listed (backend agent_session.permission_route). */
+/** Send the analyst's answer to the session that asked: main's prompt to the hook that relayed it (backend
+ * events.permission_route), any other session's through its chat with how many of the later calls the card listed
+ * (backend agent_session.permission_route). */
 function answer(ws: string, ask: PendingAsk, allow: boolean, always: boolean): Promise<unknown> {
   const shown = ask.request.also?.length ?? 0
-  return ask.chat === 'main' ? api.answerPermission(ws, ask.request.id, allow) : api.answerSessionPermission(ws, ask.chat, ask.request.id, allow, always, shown)
+  return ask.chat === 'main' ? api.answerPermission(ws, ask.request.id, allow, always) : api.answerSessionPermission(ws, ask.chat, ask.request.id, allow, always, shown)
 }
 
 /** How long a request that just took the card's place ignores clicks and keys. */

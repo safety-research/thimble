@@ -22,7 +22,8 @@ wait on the same card (`groups`), each listed on it whole, up to WEB_ALSO_MAX. T
 (`shown`); a later one it did not list is asked on its own once the answer comes.
 
 Don't ask again. The request's `permission_suggestions` become the card's third choice (offer); chosen, they are sent
-as `updatedPermissions` with destination session and kept on the chat's meta (RULES_KEY).
+as `updatedPermissions` with destination session and kept on the chat's meta (RULES_KEY). Main's own requests, which
+events.py relays, offer them with the destination Claude Code gave each (permission_updates.main_offer).
 
 Auto mode. A call auto mode's classifier refuses never reaches the PermissionRequest hook, so the hook also runs on
 PermissionDenied: the card asks the analyst, and an allow answers `retry` and is remembered (`grants`, `passes`, for
@@ -66,6 +67,7 @@ from pydantic import BaseModel
 from . import agents, cc_settings, config, hook_auth, modes, permission_hook, sandbox_allow, session, tools, \
     userconf
 from .ledger import atomic_write_text
+from .permission_updates import EDIT_MODE, WORKSPACE, allowing, offer_text, rule_text
 
 log = logging.getLogger("thimble.agent_session")
 router = APIRouter()
@@ -109,7 +111,6 @@ BYPASS = "bypass"
 # the answers that allow a request with the "don't ask again" updates Claude Code suggested for it, and a waiting one
 # those updates cover (module note, don't ask again)
 ALWAYS, COVERED = "always", "covered"
-EDIT_MODE = "acceptEdits"  # the one mode a suggestion may switch a session to (offer)
 RULES_KEY = "session_rules"  # on the session's chat meta: [{text, update}], the updates the analyst chose
 CACHE_DIR = ".cache"  # in the work folder: XDG_CACHE_HOME and MPLCONFIGDIR of a fenced session (module note, the fence)
 # The prompts the shared skill's command prints (plugin/skills/shared), rendered for a fenced session into this folder
@@ -141,7 +142,6 @@ LATER_TOOLS = ("ScheduleWakeup", "CronCreate", "CronDelete", "CronList")
 WEB_TOOLS = tools.WEB_TOOLS
 WEB_ASK_MODES = ("default", "acceptEdits")
 WEB_RULES_FILE = "web_rules.json"
-WORKSPACE = "workspace"  # the `destination` of a "don't ask again" update kept for the workspace, never sent to Claude Code
 WEB_ALSO_MAX = 20  # the later requests that join a waiting web request, each listed on its card (`also`)
 ALSO_CHARS = 300  # of a joining request's address or search; a longer one is a request of its own
 TIMED_OUT = "timed out"  # the answer of a request nobody answered in time
@@ -792,40 +792,7 @@ def _asker(run: Run, agent_id: str, agent_type: str | None) -> dict[str, Any]:
 def offer(suggestions: Any) -> list[dict[str, Any]]:
     """The updates of a request's permission_suggestions the card offers as "don't ask again": its allow rules, working
     directories and a switch to acceptEdits, each for the session alone (`destination` session); [] when it suggests none."""
-    out: list[dict[str, Any]] = []
-    for s in suggestions if isinstance(suggestions, list) else []:
-        kind = s.get("type") if isinstance(s, dict) else None
-        if kind == "addRules" and s.get("behavior") == "allow":
-            rules = [{"toolName": r["toolName"], **({"ruleContent": r["ruleContent"]} if r.get("ruleContent") else {})}
-                     for r in s.get("rules") or [] if isinstance(r, dict) and isinstance(r.get("toolName"), str)
-                     and r["toolName"] and isinstance(r.get("ruleContent", ""), str)]
-            if rules:
-                out.append({"type": "addRules", "rules": rules, "behavior": "allow", "destination": "session"})
-        elif kind == "addDirectories":
-            dirs = [d for d in s.get("directories") or [] if isinstance(d, str) and d]
-            if dirs:
-                out.append({"type": "addDirectories", "directories": dirs, "destination": "session"})
-        elif kind == "setMode" and s.get("mode") == EDIT_MODE:
-            out.append({"type": "setMode", "mode": EDIT_MODE, "destination": "session"})
-    return out
-
-
-def rule_text(rule: dict[str, Any]) -> str:
-    """A permission rule as Claude Code writes it in its settings and in /permissions: `Bash(npm test *)`, or the tool
-    alone."""
-    return f"{rule['toolName']}({rule['ruleContent']})" if rule.get("ruleContent") else str(rule["toolName"])
-
-
-def offer_text(updates: list[dict[str, Any]]) -> str:
-    """What a "don't ask again" adds, in Claude Code's terms: its rules, `all edits` for acceptEdits (Claude Code's
-    "allow all edits during this session") and `files in <folder>/` for a working directory, named by its last part as
-    Claude Code's dialog names it; a web rule kept for the workspace by its site, or as web search."""
-    parts = [web_text(r) if u.get("destination") == WORKSPACE else rule_text(r)
-             for u in updates if u["type"] == "addRules" for r in u["rules"]]
-    parts += [f"files in {Path(d).name or d}/"
-              for u in updates if u["type"] == "addDirectories" for d in u["directories"]]
-    parts += ["all edits" for u in updates if u["type"] == "setMode"]
-    return ", ".join(parts)
+    return allowing(suggestions, keep=False)
 
 
 def _offered(updates: list[dict[str, Any]]) -> dict[str, str]:
@@ -837,13 +804,6 @@ def _offered(updates: list[dict[str, Any]]) -> dict[str, str]:
         rule = updates[0]["rules"][0]
         return {"keep": str(rule.get("ruleContent") or "").removeprefix("domain:") or "web search"}
     return {"always": offer_text(updates)}
-
-
-def web_text(rule: dict[str, Any]) -> str:
-    """A web rule kept for the workspace, in the card's words: `<site> in this workspace`, `web search in this
-    workspace`."""
-    site = str(rule.get("ruleContent") or "").removeprefix("domain:")
-    return f"{site or 'web search'} in this workspace"
 
 
 def with_rules(argv: list[str], rules: list[dict[str, Any]]) -> list[str]:

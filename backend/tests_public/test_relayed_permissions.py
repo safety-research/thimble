@@ -1,16 +1,19 @@
 """Permission prompts the PermissionRequest hook relays for main's background subagents (events.py, session.py): each
 asks while main's own turn is over, and stays on the card until the analyst answers it here, its call's result shows
-in the agent's transcript (answered in the terminal), or the agent stops, whatever main's turn does meanwhile. Every
-transcript and Claude Code's session record are written by the test."""
+in the agent's transcript (answered in the terminal), or the agent stops, whatever main's turn does meanwhile. The
+card's "Always allow" offers exactly the permission_suggestions Claude Code gave, each kept where Claude Code gave it,
+and nothing without them or under the managed tier's allowManagedPermissionRulesOnly. Every transcript, Claude Code's
+session record and its managed settings are written by the test."""
 from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from pathlib import Path
 
 import pytest
 
-from app import agents, config, events, hook_auth, session
+from app import agent_session, agents, cc_plugin, config, events, hook_auth, permission_updates, session
 
 CORPUS = "mini"
 SID = "e7b0a1f2-0000-4000-8000-0000000000aa"
@@ -23,12 +26,14 @@ COMMANDS = {"a1": "wc -l agents.jsonl", "a2": "wc -l villages.jsonl", "a3": "wc 
 @pytest.fixture(autouse=True)
 def _fresh(workspaces_tmp, tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-config"))
+    monkeypatch.setitem(cc_plugin.MANAGED_DIRS, sys.platform, tmp_path / "managed")  # the machine's own is not read
     for table in (session._live, session._expected, session._event_threads, session._came_back, session._shim_pids,
-                  session._shim_configs, events._subs, events._asks, events._answered):
+                  session._shim_configs, events._subs, events._asks, events._answered, events._offers,
+                  events._terminal):
         table.clear()
     agents._busy.clear()
     yield
-    for table in (session._live, events._subs, events._asks, events._answered):
+    for table in (session._live, events._subs, events._asks, events._answered, events._offers, events._terminal):
         table.clear()
 
 
@@ -163,3 +168,127 @@ async def test_four_relayed_requests_stay_while_main_idles_on_its_background_age
     answers = {r["id"]: r["answer"] for r in log if r["event"] == "answered"}
     assert answers == {ids["a1"]: events.GONE_ANSWER, ids["a2"]: "allow", ids["a3"]: events.GONE_ANSWER,
                        ids["a4"]: events.GONE_ANSWER}
+
+
+# what Claude Code 2.1.300 suggests for a call of one of thimble's tools and for a Bash command (its dialog's "Yes, and
+# don't ask again for ... in <folder>"), and for an edit outside the folder ("allow all edits during this session")
+ADD_CARD = [{"type": "addRules", "rules": [{"toolName": "mcp__plugin_thimble_thimble__add_card"}], "behavior": "allow",
+             "destination": "localSettings"}]
+WC = [{"type": "addRules", "rules": [{"toolName": "Bash", "ruleContent": "wc -l *"}], "behavior": "allow",
+       "destination": "localSettings"}]
+OUTSIDE = [{"type": "addDirectories", "directories": ["/data/notes"], "destination": "session"},
+           {"type": "setMode", "mode": "acceptEdits", "destination": "session"}]
+CARD_INPUT = {"question": "How many files are there?", "code": "len(files)"}
+
+
+def _main_attached() -> None:
+    assert session.attach(CORPUS, SID, str(config.corpus_dir(CORPUS)), None) is not None
+
+
+def _entry(request_id: str) -> dict:
+    return next(p for p in (agents.meta_or_none(CORPUS, agents.MAIN_ID) or {}).get("permissions") or []
+                if p["id"] == request_id)
+
+
+async def _ask(suggestions, tool_name: str = "mcp__plugin_thimble_thimble__add_card", tool_input=None,
+               agent_id: str | None = None) -> tuple[asyncio.Future, dict]:
+    """The hook relays one of main's prompts with Claude Code's suggestions; returns its call and its card entry."""
+    before = set(_held())
+    call = asyncio.ensure_future(events.hook_permission_route(Req(), events.HookPermission(
+        cwd=str(config.corpus_dir(CORPUS)), session=SID, tool_name=tool_name,
+        tool_input=CARD_INPUT if tool_input is None else tool_input, agent_id=agent_id, suggestions=suggestions)))
+    for _ in range(200):
+        await asyncio.sleep(0.01)
+        if set(_held()) - before:
+            break
+    [request_id] = set(_held()) - before
+    return call, _entry(request_id)
+
+
+def _answers() -> dict[str, str]:
+    log = [json.loads(ln) for ln in (config.workspace_dir(CORPUS) / agents.PERMISSIONS_LOG).read_text().splitlines()]
+    return {r["id"]: r["answer"] for r in log if r["event"] == "answered"}
+
+
+def test_main_s_offer_is_claude_code_s_suggestions_with_each_destination_and_only_what_allows():
+    for given in (ADD_CARD, WC, OUTSIDE, WC + OUTSIDE):
+        assert permission_updates.main_offer(given) == given, "exactly as Claude Code gave them"
+    left_out = [
+        {"type": "addRules", "rules": [{"toolName": "Bash"}], "behavior": "deny", "destination": "localSettings"},
+        {"type": "removeRules", "rules": [{"toolName": "Bash"}], "behavior": "deny", "destination": "localSettings"},
+        {"type": "setMode", "mode": "bypassPermissions", "destination": "session"},
+        {"type": "addRules", "rules": [{"toolName": "Read"}], "behavior": "allow", "destination": "elsewhere"},
+        {"type": "addDirectories", "directories": ["/data/x"]},
+    ]
+    assert permission_updates.main_offer(left_out + WC) == WC
+    assert permission_updates.main_offer(None) == permission_updates.main_offer("x") == []
+    # a session thimble started still keeps every update for the session alone
+    assert {u["destination"] for u in agent_session.offer(WC + OUTSIDE)} == {"session"}
+    assert permission_updates.main_tip(WC) == ("Allow, and don't ask again for Bash(wc -l *) in this folder (your "
+                                               "project local settings)")
+    assert permission_updates.main_tip(WC + OUTSIDE) == ("Allow, and don't ask again for Bash(wc -l *) in this "
+                                                         "folder (your project local settings); files in notes/, all "
+                                                         "edits for the rest of this session")
+
+
+async def test_always_allow_on_main_s_card_answers_with_exactly_what_the_card_named(monkeypatch):
+    _main_attached()
+    monkeypatch.setattr(hook_auth, "analyst", lambda request: True)
+    call, entry = await _ask(ADD_CARD)
+    assert entry["always"] == "mcp__plugin_thimble_thimble__add_card"
+    assert entry["always_tip"] == ("Allow, and don't ask again for mcp__plugin_thimble_thimble__add_card in this "
+                                   "folder (your project local settings)")
+    assert events._offers == {entry["id"]: ADD_CARD}, "the suggestions are stored with the request"
+    await events.permission_route(CORPUS, events.PermissionAnswer(id=entry["id"], allow=True, always=True), Browser())
+    got = await asyncio.wait_for(call, 5)
+    assert got == {"id": entry["id"], "behavior": "allow", "updatedPermissions": ADD_CARD}
+    assert events._offers == {} and _held() == []
+    assert _answers()[entry["id"]] == "allow, don't ask again: mcp__plugin_thimble_thimble__add_card"
+
+    # Allow alone, or Deny, adds nothing
+    for allow in (True, False):
+        call, entry = await _ask(WC, "Bash", {"command": "wc -l agents.jsonl"})
+        assert entry["always"] == "Bash(wc -l *)"
+        await events.permission_route(CORPUS, events.PermissionAnswer(id=entry["id"], allow=allow, always=not allow),
+                                      Browser())
+        assert await asyncio.wait_for(call, 5) == {"id": entry["id"], "behavior": "allow" if allow else "deny"}
+        assert _answers()[entry["id"]] == ("allow" if allow else "deny")
+    assert events._offers == {}
+
+
+@pytest.mark.parametrize("managed", ["remote-settings.json in Claude Code's config dir", "managed-settings.json"])
+async def test_no_always_allow_without_suggestions_or_under_the_managed_rules_only_key(managed, tmp_path, monkeypatch):
+    _main_attached()
+    monkeypatch.setattr(hook_auth, "analyst", lambda request: True)
+
+    async def once(suggestions, *args, **kw) -> dict:
+        """The card entry of a prompt the analyst answers with `always`, which then allows it once."""
+        call, entry = await _ask(suggestions, *args, **kw)
+        await events.permission_route(CORPUS, events.PermissionAnswer(id=entry["id"], allow=True, always=True),
+                                      Browser())
+        assert await asyncio.wait_for(call, 5) == {"id": entry["id"], "behavior": "allow"}
+        return entry
+
+    deny = [{"type": "addRules", "rules": [{"toolName": "Bash"}], "behavior": "deny", "destination": "localSettings"}]
+    for none in (None, [], deny):
+        assert "always" not in await once(none)
+    # a request the card shows only the start of offers none, as on every card
+    assert "always" not in await once(WC, "Bash", {"command": "wc -l " + "x" * events.PERMISSION_INPUT_CHARS})
+    # one of thimble's agents asks in the terminal, and its card has no buttons
+    monkeypatch.setattr(events, "_thimble_agent", lambda c, agent: agent == "t1")
+    call, entry = await _ask(ADD_CARD, agent_id="t1")
+    assert entry["terminal"] and "always" not in entry and (await asyncio.wait_for(call, 5))["behavior"] is None
+    assert events._offers == {}
+
+    if managed.startswith("remote"):
+        tier = tmp_path / "claude-config" / cc_plugin.REMOTE_SETTINGS
+    else:
+        tier = tmp_path / "managed" / cc_plugin.MANAGED_FILE
+    tier.parent.mkdir(parents=True, exist_ok=True)
+    tier.write_text(json.dumps({"allowManagedPermissionRulesOnly": True}))
+    assert "always" not in await once(ADD_CARD)
+    tier.write_text(json.dumps({"allowManagedPermissionRulesOnly": False}))
+    call, entry = await _ask(ADD_CARD)
+    assert entry["always"] == "mcp__plugin_thimble_thimble__add_card"
+    events.clear_permissions(CORPUS)
+    assert (await asyncio.wait_for(call, 5))["behavior"] is None and events._offers == {}

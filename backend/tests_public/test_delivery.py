@@ -584,6 +584,31 @@ def test_the_hooks_do_nothing_without_server_json_or_with_a_server_that_cannot_p
     assert json.loads(r.stdout)["hookSpecificOutput"]["decision"] == {"behavior": "allow"} and stand.unproven == 0
 
 
+def test_the_permission_hook_sends_claude_code_s_suggestions_and_passes_on_what_always_allow_names(tmp_path):
+    """The permission hook relays the request's permission_suggestions, and an answer from the card's "Always allow"
+    names them as updatedPermissions, which the hook passes on in its decision, as Claude Code's own "Yes, and don't ask
+    again" applies them; a plain allow and a deny carry none."""
+    rules = [{"type": "addRules", "rules": [{"toolName": "mcp__plugin_thimble_thimble__add_card"}], "behavior": "allow",
+              "destination": "localSettings"}]
+    inp = {"session_id": SID, "cwd": "/data/mini", "tool_name": "mcp__plugin_thimble_thimble__add_card",
+           "tool_input": {"question": "How many files?"}, "hook_event_name": "PermissionRequest",
+           "permission_suggestions": rules}
+
+    def decision() -> dict:
+        return json.loads(_watch(tmp_path, stand.port, inp, "--permission").stdout)["hookSpecificOutput"]["decision"]
+
+    stand = _Stand([], permission=(200, {"id": "h1", "behavior": "allow", "updatedPermissions": rules}))
+    try:
+        assert decision() == {"behavior": "allow", "updatedPermissions": rules}
+        assert [b["suggestions"] for _, p, b in stand.seen if p == "/api/events/permission"] == [rules]
+        stand.permission = (200, {"id": "h2", "behavior": "allow"})
+        assert decision() == {"behavior": "allow"}
+        stand.permission = (200, {"id": "h3", "behavior": "deny", "updatedPermissions": rules})
+        assert "updatedPermissions" not in decision()
+    finally:
+        stand.close()
+
+
 def test_the_held_hook_lets_each_hand_back_through_and_still_delivers_the_held_events(tmp_path):
     """Q2: the held hook never blocks a prompt. A subagent's hand-back in auto mode (the `isMeta` row with
     `origin.kind: "peer"`, a plugin-started agent's included) and a later run's `<task-notification>` in default mode reach

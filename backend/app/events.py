@@ -15,7 +15,9 @@ Each event is queued per workspace and session (_pending), and the plugin's watc
 runs as the plugin's asyncRewake hooks, which wake the session with the event (the HOOK route), or, where the plugin's
 hooks are off, as main's Monitor (the MONITOR route, cc_plugin.route). Permission prompts come from the
 PermissionRequest hook; since Claude Code does not signal that hook when the analyst answers in the terminal, the server
-ends the wait itself (clear_permissions, release_asks, agent_moved).
+ends the wait itself (clear_permissions, release_asks, agent_moved). A prompt's card offers "Always allow" where Claude
+Code's own dialog offers "don't ask again": the request's permission_suggestions, each kept where Claude Code gave it
+(permission_updates.main_offer), none when the org's managed tier sets allowManagedPermissionRulesOnly (_main_offer).
 
 Main's terminal shows each event as one line (terminal_line): the analyst's words after SAID, with the thread or button
 they belong to, else a short line saying what happened. Claude Code shows a woken turn only as the hook's fixed summary,
@@ -53,7 +55,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 from sse_starlette import EventSourceResponse
 
-from . import cc_plugin, config, event_files, ledger, procs, prompts
+from . import cc_plugin, config, event_files, ledger, permission_updates, procs, prompts
 from . import subagent_files as files
 
 log = logging.getLogger("thimble.events")
@@ -123,6 +125,7 @@ _taken: dict[str, tuple[str, str, dict[str, Any], float]] = {}  # event id -> (w
 _waiters: dict[str, set[tuple[asyncio.AbstractEventLoop, asyncio.Future]]] = {}  # workspace -> its waiting pulls
 _asks: dict[str, "Ask"] = {}  # hook permission id -> the request waiting for the analyst
 _terminal: dict[str, "Ask"] = {}  # hook permission id -> a request of thimble's agents the terminal answers (its card)
+_offers: dict[str, list[dict[str, Any]]] = {}  # hook permission id -> what its card's "Always allow" adds (_main_offer)
 # (workspace, session) -> (event id, line) of events its watcher wrote out, and lines that send no event, to print
 _lines: dict[tuple[str, str], list[tuple[str, str]]] = {}
 # (workspace, session) -> (event id, words) of the analyst's messages queued for it, not yet printed (queued_line)
@@ -971,11 +974,24 @@ def _thimble_agent(c: str, agent: str | None) -> bool:
         return False
 
 
+def _main_offer(suggestions: Any, preview: str) -> list[dict[str, Any]]:
+    """What the card's "Always allow" adds to a relayed request of main's session (module note): its
+    permission_suggestions as Claude Code gave them (permission_updates.main_offer); [] when it suggests none, when the
+    card shows only the start of the request (as for every card's "don't ask again"), or when the org's managed tier
+    sets allowManagedPermissionRulesOnly, under which Claude Code ignores the rules a session saves."""
+    updates = permission_updates.main_offer(suggestions)
+    if not updates or len(preview) > PERMISSION_INPUT_CHARS:
+        return []
+    return [] if cc_plugin.managed_rules_only({config.CONFIG_DIR_ENV: str(config.claude_config_dir())}) else updates
+
+
 def _hold(c: str, request_id: str, tool: str, what: str, preview: str, agent: str | None = None,
-          tool_input: Any = None, terminal: bool = False) -> None:
+          tool_input: Any = None, terminal: bool = False, offer: list[dict[str, Any]] | None = None) -> None:
     """Put a relayed permission request on main's meta, where the browser shows it; `chat` names the thread or subagent
     chat whose agent asked, when the hook said which (_asking_chat), and `terminal` says the terminal answers it, so the
-    card shows it without buttons. `tool_input` is the call's input, which the card shows as `preview`."""
+    card shows it without buttons. `tool_input` is the call's input, which the card shows as `preview`. An `offer`
+    (_main_offer) is the card's "Always allow": `always` names what it adds and `always_tip` where Claude Code keeps it
+    (permission_updates.offer_text, main_tip)."""
     from . import agents  # noqa: PLC0415
 
     meta = agents.ensure_main(c)
@@ -983,7 +999,9 @@ def _hold(c: str, request_id: str, tool: str, what: str, preview: str, agent: st
     chat = _asking_chat(c, agent)
     entry = {"id": request_id, "tool": tool, "what": what or tool, "input": preview[:PERMISSION_INPUT_CHARS],
              "since": _now(), **({"cut": len(preview)} if len(preview) > PERMISSION_INPUT_CHARS else {}),
-             **({"chat": chat} if chat else {}), **({"terminal": True} if terminal else {})}
+             **({"chat": chat} if chat else {}), **({"terminal": True} if terminal else {}),
+             **({"always": permission_updates.offer_text(offer), "always_tip": permission_updates.main_tip(offer)}
+                if offer else {})}
     pending.append(entry)
     meta["permissions"] = pending
     agents.write_meta(c, meta)
@@ -1018,6 +1036,7 @@ class HookPermission(BaseModel):
     tool_name: str = ""
     tool_input: Any = None
     agent_id: str | None = None
+    suggestions: Any = None  # the request's permission_suggestions, the card's "Always allow" (_main_offer)
 
 
 class Ask(NamedTuple):
@@ -1035,7 +1054,8 @@ class Ask(NamedTuple):
 @router.post("/events/permission")
 async def hook_permission_route(request: Request, body: HookPermission) -> dict[str, Any]:
     """The PermissionRequest hook relays a prompt of main's session: it waits on main's meta until the analyst answers,
-    `{id, behavior: allow | deny}`, or the prompt or hook goes away, `{id, behavior: null}`. A prompt of one of
+    `{id, behavior: allow | deny}`, with `updatedPermissions`, what the card's "Always allow" named, when the analyst
+    chose it (_main_offer), or the prompt or hook goes away, `{id, behavior: null}`. A prompt of one of
     thimble's agents (or a descendant) is answered `null` at once, since Claude Code shows no dialog while a hook holds
     a background subagent's request (U6b): it shows on the card without buttons (`terminal`), and the terminal answers
     it; the card goes with the call's result or the agent's end. 404 when the folder is no workspace, 409 when the
@@ -1060,7 +1080,10 @@ async def hook_permission_route(request: Request, body: HookPermission) -> dict[
     fut: asyncio.Future = loop.create_future()
     _asks[request_id] = Ask(c, loop, fut, time.monotonic(), time.time(), body.agent_id or None,
                             call_key(body.tool_name, body.tool_input))
-    _hold(c, request_id, body.tool_name, what, preview, body.agent_id or None, body.tool_input)
+    offer = _main_offer(body.suggestions, preview)
+    if offer:
+        _offers[request_id] = offer
+    _hold(c, request_id, body.tool_name, what, preview, body.agent_id or None, body.tool_input, offer=offer)
     try:
         while not fut.done():
             try:
@@ -1070,34 +1093,39 @@ async def hook_permission_route(request: Request, body: HookPermission) -> dict[
                     break
     finally:
         _asks.pop(request_id, None)
+        _offers.pop(request_id, None)
         if not fut.done():
             _drop(c, {request_id})  # the hook went away: Claude Code decided without it
-    return {"id": request_id, "behavior": fut.result() if fut.done() else None}
+    return {"id": request_id, **(fut.result() if fut.done() else {"behavior": None})}
 
 
-def _answer_ask(request_id: str, behavior: str | None) -> bool:
-    """End a hook's wait with the analyst's answer, or with none; False when no hook waits on that request. An agent's
-    prompt the analyst answered here is remembered (_answered), so its call's result ends no other prompt."""
+def _answer_ask(request_id: str, behavior: str | None, updates: list[dict[str, Any]] | None = None) -> bool:
+    """End a hook's wait with the analyst's answer, or with none, and with the "Always allow" `updates` the analyst
+    chose; False when no hook waits on that request. An agent's prompt the analyst answered here is remembered
+    (_answered), so its call's result ends no other prompt."""
     held = _asks.pop(request_id, None)
     if held is None:
         return False
     if behavior is not None:
         _answered.setdefault((held.c, held.agent or ""), []).append(held.call)
     fut = held.fut
-    held.loop.call_soon_threadsafe(lambda: fut.done() or fut.set_result(behavior))
+    answer = {"behavior": behavior, **({"updatedPermissions": updates} if updates else {})}
+    held.loop.call_soon_threadsafe(lambda: fut.done() or fut.set_result(answer))
     return True
 
 
 class PermissionAnswer(BaseModel):
     id: str
     allow: bool
+    always: bool = False  # the card's "Always allow": also what it named (_offers)
 
 
 @router.post("/ws/{c}/permission")
 async def permission_route(c: str, body: PermissionAnswer, request: Request) -> dict[str, Any]:
     """The analyst's answer to a relayed permission prompt of main's: it goes to the waiting hook, and the request leaves
-    the card. 403 for a request that is not the analyst's browser's (hook_auth.analyst), 404 when no such request
-    waits."""
+    the card. With `always`, an allow also adds what the card's "Always allow" named, exactly (_offers); a request
+    that offers none is allowed once. 403 for a request that is not the analyst's browser's (hook_auth.analyst), 404
+    when no such request waits."""
     from . import agents, hook_auth  # noqa: PLC0415
 
     if not hook_auth.analyst(request):
@@ -1108,8 +1136,10 @@ async def permission_route(c: str, body: PermissionAnswer, request: Request) -> 
     if not any(p.get("id") == body.id for p in pending):
         raise HTTPException(404, "no such permission request is waiting")
     behavior = "allow" if body.allow else "deny"
-    _drop(c, {body.id}, answer=behavior)
-    _answer_ask(body.id, behavior)
+    chosen = _offers.get(body.id) if body.allow and body.always else None
+    said = f"allow, don't ask again: {permission_updates.offer_text(chosen)}" if chosen else behavior
+    _drop(c, {body.id}, answer=said)
+    _answer_ask(body.id, behavior, chosen)
     return {"answered": body.id, "allow": body.allow}
 
 
