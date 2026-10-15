@@ -201,6 +201,23 @@ async def test_the_analyst_s_browser_message_is_their_turn(cwd, tmp_path, cards,
     assert [f["cut"] for f in forks] == ["cut-b"]
 
 
+async def test_a_side_thread_question_runs_one_fork_after_the_thread_answers(cwd, tmp_path, cards, forks):
+    """main's turn that hands a side thread's question to the thread's fork is no analyst's turn of main: the
+    proposer runs once, after the thread answers (session._finish_sub), at main's cut."""
+    lv, p = _attach(cwd, tmp_path)
+    tid = agents.new_thread(CORPUS, None, None, "Replies")["id"]
+    agents.Recorder(CORPUS, tid).record("user", text="Which agent replies most?")
+    event = f'<thimble-event kind="thread" thread="{tid}" event="ev4">Which agent replies most?</thimble-event>'
+    _append(p, lv, [{"type": "user", "origin": {"kind": "task-notification"}, "message": {"content": event}},
+                    _assistant(_say("I asked the thread's fork.")), _end("cut-r")])
+    await _settle()
+    assert forks == [] and proposer.pending(CORPUS) is None, "main's relay turn runs nothing"
+    session._proposer_after_thread(lv, tid)  # the thread's fork answered
+    await _settle()
+    (f,) = forks
+    assert f["cut"] == "cut-r" and cards[0]["offered"]["after"] == f"thread:{tid}"
+
+
 async def test_a_thread_and_an_orientation_wait_for_main_and_run_once_with_both_sentences(cwd, tmp_path, cards,
                                                                                        forks):
     """A side thread's answer and an orientation's end that come while main works on something else (here a

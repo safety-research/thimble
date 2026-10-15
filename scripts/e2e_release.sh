@@ -53,7 +53,8 @@
 # --no-plugin so that Claude Code's plugins stay as they are (install.sh writes no shell startup file), and installs
 # only when install.sh --dry-run plans no `claude plugin` command and no write to ~/.local/bin/thimble. The last step
 # checks that Claude Code's plugins and marketplaces, its trusted folders, ~/.local/bin/thimble and the lines an earlier
-# thimble installer added to the startup files are as they were before the run.
+# thimble installer added to the startup files are as they were before the run (scripts/e2e/claude_files.py), less
+# the official marketplace Claude Code adds on its own at its first interactive start in a config folder.
 #
 # A step marked pending waits for work that is not merged yet: its failure is reported as expected and does not fail the
 # run (unless --strict), and once it passes the report says so. Exit 0 when no step failed, 1 otherwise.

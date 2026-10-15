@@ -84,7 +84,7 @@ To switch a directory to terminal mode, run `thimble mode terminal` in it, then 
 
 ## Requirements
 
-Claude Code (tested with 2.1.295), with its hooks modules on, macOS or Linux, and Python 3.12+ ([uv](https://docs.astral.sh/uv/) recommended). Node 20+ is needed for custom views (the viewers the dev agent builds for your data), for the sandbox card code and code tickets run in, and for a development build. [INSTALL.md](INSTALL.md) has the details. On Linux, card code runs in a sandbox where bubblewrap can create one (`thimble doctor` says whether it does).
+Claude Code (tested with 2.1.300), with its hooks modules on, macOS or Linux, and Python 3.12+ ([uv](https://docs.astral.sh/uv/) recommended). Node 20+ is needed for custom views (the viewers the dev agent builds for your data), for the sandbox card code and code tickets run in, and for a development build. [INSTALL.md](INSTALL.md) has the details. On Linux, card code runs in a sandbox where bubblewrap can create one (`thimble doctor` says whether it does).
 
 ## Security & Privacy
 

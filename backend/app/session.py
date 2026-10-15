@@ -268,8 +268,9 @@ class Live:
         self.hidden: set[str] = set()  # tool_use ids that are not rows in main (threads' Agent and SendMessage calls)
         self.turn_open = False
         self.fresh = False  # the turn has had no assistant record yet: another opening record still counts
-        # the open turn answers the analyst: opened by a line they typed, or by their message or thread question from
-        # the browser, not by a task notification, a Monitor's re-arm or a start_agent event (proposer.turn_ended)
+        # the open turn answers the analyst: opened by a line they typed or their message from the browser, not by a
+        # thread question (the thread's fork answers it), a task notification, a Monitor's re-arm or a start_agent
+        # event (proposer.turn_ended)
         self.turn_analyst = False
         self.last_cut: str | None = None  # the uuid of main's last turn_duration record, where a fork of it resumes
         self.context_tokens = 0  # the tokens main's last reply read: input, cache read and cache written (_note_model)
@@ -1427,7 +1428,9 @@ def _browser_event(lv: Live, raw: str, *, mid_turn: bool) -> None:
     kind, event_id, thread = attrs.get("kind", ""), attrs.get("event", ""), attrs.get("thread")
     if not mid_turn:
         _open_turn(lv)
-    if kind in ("main", "thread") or not kind:  # the analyst's message or thread question (proposer.turn_ended)
+    # the analyst's message to main (proposer.turn_ended); a thread question main only hands to the thread's fork, whose
+    # answer runs the proposer (_proposer_after_thread)
+    if kind == "main" or not kind:
         lv.turn_analyst = True
     if kind == "thread" and thread:
         lv.turn_threads.append(thread)

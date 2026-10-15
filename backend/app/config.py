@@ -203,11 +203,6 @@ def _skip() -> bool:
     return os.environ.get("THIMBLE_SKIP_KEY") == "1"
 
 
-# The CLAUDE_* variables a `claude` thimble starts takes from this process: those naming the config dir, a provider, a
-# login or a network setting: a proxy, a certificate (the client certificate's CLIENT_* among them) or an LLM gateway.
-# Every other one (CLAUDECODE, CLAUDE_CODE_SESSION_ID, CLAUDE_CODE_ENTRYPOINT and the rest of the calling session's
-# identity) stays out. A variable naming a file descriptor stays out too, since the server starts with its descriptors
-# closed. Variables that do not start with CLAUDE (HTTPS_PROXY, NO_PROXY, NODE_EXTRA_CA_CERTS, SSL_CERT_FILE, …) pass.
 def keep_local_off_proxy(env: dict[str, str] | None = None) -> None:
     """Add 127.0.0.1 and localhost to NO_PROXY / no_proxy in `env` (default os.environ), so that thimble's calls to its
     own server on 127.0.0.1 never go through an HTTP proxy the shell sets. urllib and httpx read these variables, and
@@ -222,7 +217,27 @@ def keep_local_off_proxy(env: dict[str, str] | None = None) -> None:
 keep_local_off_proxy()
 
 
-_CLAUDE_PASS = re.compile(r"CLAUDE_CONFIG_DIR|CLAUDE_CODE_(USE_\w+|SKIP_\w+_AUTH|OAUTH_(TOKEN|REFRESH_TOKEN|SCOPES)|"
+# The CLAUDE_* variables a `claude` thimble starts takes from this process: those naming the config dir, a provider, a
+# network setting (a proxy, a certificate, the client certificate's CLIENT_* among them, or an LLM gateway) and every
+# one Claude Code reads to sign in, so the child signs in as the analyst's session does and keeps its tokens where
+# that session keeps them: the federation token cache, the credential store (its folder, the Windows credential
+# manager, the refresh lock), OAuth (its endpoints, client ids and timing), the account, organization and plan of a
+# token given in the environment, the cloud providers' credential settings, a host's credentials file and provider,
+# and the managed settings files, which can choose the login. Every other one (CLAUDECODE, CLAUDE_CODE_SESSION_ID,
+# CLAUDE_CODE_ENTRYPOINT and the rest of the calling session's identity) stays out, as do the calling cloud session's
+# own tokens (CLAUDE_CODE_SESSION_ACCESS_TOKEN, CLAUDE_SESSION_INGRESS_TOKEN_FILE) and the variables that say an SDK
+# host refreshes the login (CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH, CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH and its timeout):
+# that host answers main alone, and Claude Code also drops the first from the sessions it starts in the background. A
+# variable naming a file descriptor stays out too, since the server starts with its descriptors closed. Variables
+# that do not start with CLAUDE (ANTHROPIC_*, AWS_*, HTTPS_PROXY, NODE_EXTRA_CA_CERTS, …) pass.
+_CLAUDE_PASS = re.compile(r"CLAUDE_CONFIG_DIR|CLAUDE_SECURESTORAGE_CONFIG_DIR|CLAUDE_TRUSTED_DEVICE_TOKEN|"
+                          r"CLAUDE_LOCAL_OAUTH_(API|APPS|CONSOLE)_BASE|"
+                          r"CLAUDE_CODE_(USE_\w+|SKIP_\w+_AUTH|SKIP_AWS_CRED_CACHE|AWS_CHAIN_RESOLVE_TIMEOUT_MS|"
+                          r"OAUTH_(TOKEN|REFRESH_TOKEN|SCOPES|CLIENT_ID|401_WAIT_MS)|CUSTOM_OAUTH_URL|"
+                          r"DESIGN_OAUTH_CLIENT_ID|AUTH_FAIL_EXIT_MS|FEDERATION_CACHE_DIR|FORCE_WINDOWS_CREDMAN|"
+                          r"DISABLE_AUTH_REFRESH_LOCK|ACCOUNT_UUID|ACCOUNT_TAGGED_ID|ORGANIZATION_UUID|USER_EMAIL|"
+                          r"SUBSCRIPTION_TYPE|RATE_LIMIT_TIER|HFI_BEARER_TOKEN|PROVIDER_MANAGED_BY_HOST|HOST_CREDS_FILE|"
+                          r"HOST_AUTH_ENV_VAR|HOST_GATEWAY_LINEAGE|MANAGED_SETTINGS_PATH|REMOTE_SETTINGS_PATH|"
                           r"CLIENT_\w+|API_KEY_HELPER_TTL_MS|DISABLE_NONESSENTIAL_TRAFFIC|"
                           r"HTTPS?_PROXY|PROXY_(URL|AUTHENTICATE|AUTH_HELPER_TTL_MS|RESOLVES_HOSTS)|ENABLE_PROXY_AUTH_HELPER|"
                           r"CERT_STORE|GATEWAY_TOKEN|API_BASE_URL|ASSUME_FIRST_PARTY_BASE_URL|DISABLE_EXPERIMENTAL_BETAS)")

@@ -3,8 +3,8 @@ one model call on a fork of main's own session decides whether thimble shows the
 writes it (views.offer).
 
 When it runs (trigger): at the end of a turn of main that answered the analyst (session.turn_analyst: a line they typed,
-their message or thread question from the browser), at the cut of that turn's turn_duration record (turn_ended); when a
-side thread's fork answered (session._finish_sub); and once when the first run of an orientation ends done
+their message from the browser), at the cut of that turn's turn_duration record (turn_ended); when a side thread's fork
+answered (session._finish_sub), not at the end of main's turn that handed the thread's question to that fork; and once when the first run of an orientation ends done
 (orient_session). Each trigger merges into the workspace's pending job (JOB_FILE's `job`: the reasons, main's session
 and its cut), so a later pass of the mirror in terminal mode, or a restarted server, runs it. One loop per workspace
 (_loop) waits DEBOUNCE_MAIN_S after a main turn, else DEBOUNCE_OTHER_S (longer than auto mode's hand-back wait, so an
