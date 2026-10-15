@@ -37,6 +37,7 @@ ORIENT_LINE_CHARS = 300  # of one line of the orientation's digest, in its secon
 CARD_CALLS = ("add_card", "edit_card", "add_cell", "edit_cell")  # the calls whose result names the card they made
 COMMENT_CHARS = 300  # of an open comment's text in the documents part
 INDENT = "    "
+PASTED = "(pasted)"  # the line over what the analyst pasted into a message, which is indented under it (_said)
 # the cut steps, (part, level) in order, then the parts whose oldest entries go, in order
 STEPS = (("orientation", 1), ("orientation", 2), ("threads", 1), ("threads", 2), ("conversation", 1),
          ("conversation", 2), ("conversation", 3), ("session", 1), ("session", 2), ("session", 3))
@@ -133,6 +134,19 @@ def _event(raw: str, forks: bool = True) -> _Entry | None:
     return _Entry(f"[event {kind}{' ' + tags if tags else ''}]", body)
 
 
+def _said(text: str) -> str | None:
+    """The analyst's prompt as the agent reads it: what they typed, and each paste (session.pastes) as a PASTED line
+    with the pasted text indented under it. None for an interrupt's line and for a text that starts with a tag other
+    than a paste's, which is Claude Code's own record and no message of the analyst's (`<local-command-stdout>`,
+    `<bash-input>`, `<system-reminder>`, …)."""
+    text = text.strip()
+    if not text or session.INTERRUPT_RE.match(text) or (text.startswith("<") and not session.PASTE_RE.match(text)):
+        return None
+    pieces = [f"{PASTED}\n{_indent(piece)}".rstrip() if pasted else piece.strip()
+              for pasted, piece in session.pastes(text)]
+    return "\n".join(p for p in pieces if p) or None
+
+
 def _fork_entries(path: Path, thread: str, start: int) -> tuple[list[_Entry], int]:
     """A thread's fork's calls from its transcript, from record `start` on (a follow-up resumes the same file), and
     the number of records read. Its text is left out: the analyst reads a fork's reply_in_thread, never its text."""
@@ -209,10 +223,9 @@ def _entries(path: Path, forks: bool = True) -> list[_Entry]:
             notification(text)
         elif origin in (None, "human"):
             command = session._command_line(text)
-            if command is not None:
-                entries.append(_Entry("[analyst]", command))
-            elif text.strip() and not text.lstrip().startswith("<") and not session.INTERRUPT_RE.match(text.strip()):
-                entries.append(_Entry("[analyst]", text.strip()))
+            said = _said(text) if command is None else command
+            if said:
+                entries.append(_Entry("[analyst]", said))
 
     for rec in _records(path):
         if rec.get("isSidechain"):

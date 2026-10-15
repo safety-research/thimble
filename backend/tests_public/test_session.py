@@ -570,6 +570,49 @@ def test_a_transcript_thimble_0_5_0_wrote_keeps_its_browser_events_in_the_contex
     assert session.browser_events('<channel source="plugin:other:x" kind="main">not ours</channel>') == []
 
 
+def test_a_message_the_analyst_pasted_is_theirs_in_the_context_and_claude_code_s_own_records_are_not(tmp_path):
+    """Claude Code 2.1.300 writes a message the analyst pasted as a prompt whose text starts with its
+    `<pasted_content id="…">` tag, which the context took for one of Claude Code's own records and left out, so a
+    writer, a check, the critic and the card check never read it. The context's conversation now shows a paste as the
+    analyst's message, the pasted text indented under a `(pasted)` line among what they typed around it, typed or
+    queued, and still leaves out every record that starts with another tag."""
+    from app import context
+
+    def human(content: str | list) -> dict:
+        return {"type": "user", "origin": {"kind": "human"}, "message": {"role": "user", "content": content}}
+
+    def paste(text: str, pid: str = "3f9a") -> str:
+        return f'<pasted_content id="{pid}">\n{text}\n</pasted_content id="{pid}">\n'
+
+    path = tmp_path / f"{SID}.jsonl"
+    path.write_text("\n".join(json.dumps(r) for r in [
+        human(paste("ERROR 1\n  at step 2\n\nERROR 3")),
+        human("why does it fail here?\n\n" + paste("Traceback (most recent call last)", "07c1") + "\nand here?\n\n"
+              + paste("KeyError: 'posts'", "07c1")),
+        {"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": paste("in a text block")}]}},
+        {"type": "attachment", "attachment": {"type": "queued_command", "prompt": paste("sent while it worked", "5d6e")}},
+        human("<command-name>/model</command-name>\n<command-args>opus</command-args>"),
+        human("<local-command-stdout>Set model to opus</local-command-stdout>"),
+        human("<bash-input>ls runs</bash-input>"),
+        human("<bash-stdout>a.jsonl</bash-stdout><bash-stderr></bash-stderr>"),
+        human("<user-memory-input>keep runs short</user-memory-input>"),
+        human("<system-reminder>\nnot the analyst's\n</system-reminder>"),
+        human('<pasted_content id="nothex">\nno paste of Claude Code\'s\n</pasted_content id="nothex">'),
+        human("[Request interrupted by user]"),
+        human("  typed, as before  "),
+    ]) + "\n")
+    said = [(e.head, e.body) for e in context._entries(path)]
+    assert said == [
+        ("[analyst]", "(pasted)\n    ERROR 1\n      at step 2\n\n    ERROR 3"),
+        ("[analyst]", "why does it fail here?\n(pasted)\n    Traceback (most recent call last)\nand here?\n"
+                      "(pasted)\n    KeyError: 'posts'"),
+        ("[analyst]", "(pasted)\n    in a text block"),
+        ("[analyst]", "(pasted)\n    sent while it worked"),
+        ("[analyst]", "/model opus"),
+        ("[analyst]", "typed, as before"),
+    ]
+
+
 def test_the_module_s_plan_mode_report_moves_main_s_mode_and_back(workspaces_tmp, monkeypatch):
     """Live check L21: a shift+tab while main is idle reaches thimble through the module (session.note_plan): plan mode,
     then on leaving it the mode main's hooks last reported, or default."""
