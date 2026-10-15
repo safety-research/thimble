@@ -1203,3 +1203,19 @@ def test_thimble_fix_asks_before_a_session_with_no_sandbox_edits_thimble_s_code(
     assert cli.fix_refusal() == cli.FIX_DECLINED
     monkeypatch.setattr(dev, "fix_contained", lambda: True)
     assert cli.fix_refusal() == "", "contained: nothing to ask"
+
+
+def test_restart_names_the_running_orientations_and_ticket_and_asks_no_route_the_server_lacks(monkeypatch):
+    """running_work asked GET /api/sessions/running, a route thimble 0.6.0 removed, so it always fell back; it now reads
+    the orientations' run.json and the dev runner's status alone."""
+    asked = []
+
+    def request(method, url, body=None, timeout=5.0):
+        asked.append(url.split("8300", 1)[1])
+        return 200, {"running": True, "current": {"title": "Darker accent", "workspace": "trials"}}
+
+    monkeypatch.setattr(cli, "_request", request)
+    monkeypatch.setattr(cli, "_workspace_names", lambda d: ["board-sim", "trials"])
+    monkeypatch.setattr(cli, "orient_status", lambda c: "running" if c == "trials" else "done")
+    assert cli.running_work("http://127.0.0.1:8300") == ["trials: the orientation", 'trials: the dev ticket "Darker accent"']
+    assert asked == ["/api/dev/status"]
