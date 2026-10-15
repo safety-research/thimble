@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // The view proposal above the chat's composer (src/chat/ProposalCard.tsx): the oldest open proposal (a `suggested` row
-// with `offered`), with its name, what it shows and the analyst's task in view, never behind a click; Accept and Reject
-// are clicks of their own routes, each tracked; Don't ask again turns view proposals off and says where to turn them on
+// with `offered`), with its name and what it shows in view, never behind a click, and not the task it names; Accept and
+// Reject are clicks of their own routes, each tracked; Don't ask again turns view proposals off and says where to turn them on
 // again; nothing shows while view proposals are off; a click in the first ARM_MS does nothing; an Accept that cannot
 // start says why under the buttons.
 import { act } from 'react'
@@ -27,8 +27,8 @@ describe('which proposal shows, and its line', () => {
     expect(openOffer(null)).toBeNull()
   })
 
-  test("the analyst's task, or for a viewer of a file type the files it reads", () => {
-    expect(offerFor({ task: ' compare the agents ', claims: ['a.jsonl'] })).toBe('Task: compare the agents')
+  test('none for a proposal with a task, which the card does not show; for a viewer of a file type the files it reads', () => {
+    expect(offerFor({ task: ' compare the agents ', claims: ['a.jsonl'] })).toBe('')
     expect(offerFor({ task: '', claims: ['**/*.vtt'] })).toBe('For **/*.vtt')
     expect(offerFor({ task: '', claims: [] })).toBe('')
   })
@@ -84,14 +84,15 @@ describe('the card', () => {
   }
   const click = (el: HTMLElement, sel: string) => act(async () => el.querySelector<HTMLButtonElement>(sel)!.click())
 
-  test('the head, the name in bold, what it shows and the task are in view, with Accept, Reject and Don’t ask again', async () => {
+  test('the head, the name in bold and what it shows are in view, with Accept, Reject and Don’t ask again, and no task', async () => {
     const el = await card('pc-look', false)
     const c = el.querySelector('.chat-offer')!
     expect(c.getAttribute('aria-label')).toBe(PROPOSAL_HEAD)
     expect(c.querySelector('.chat-offer-head')?.textContent).toBe('View proposal')
     expect(c.querySelector('b.chat-offer-name')?.textContent).toBe('agent timeline')
     expect(c.querySelector('.chat-offer-desc')?.textContent?.trim()).toBe('What agent-timeline shows.')
-    expect(c.querySelector('.chat-offer-task')?.textContent).toBe('Task: compare how the agents coordinated')
+    expect(c.querySelector('.chat-offer-files')).toBeNull()
+    expect(c.textContent).not.toMatch(/task|compare how the agents coordinated/i)
     expect([...c.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Accept', 'Reject', 'Don’t ask again'])
     expect(c.textContent).not.toMatch(/offer/i)
     expect(document.activeElement).toBe(document.body)
@@ -145,10 +146,10 @@ describe('the card', () => {
     expect(el.querySelector('.chat-offer')).toBeNull()
   })
 
-  test('a viewer proposed for a file type shows the files it reads in place of a task', async () => {
+  test('a viewer proposed for a file type shows the files it reads under what it shows', async () => {
     proposals = [row('vtt-viewer', '2026-10-14T10:00:00Z', { task: '', claims: ['**/*.vtt'], proposed_by: 'files', offered: { at: '2026-10-14T10:00:00Z', after: 'file' } } as Partial<Proposal>)]
     const el = await card('pc-file', false)
-    expect(el.querySelector('.chat-offer-task')?.textContent).toBe('For **/*.vtt')
+    expect(el.querySelector('.chat-offer-files')?.textContent).toBe('For **/*.vtt')
     expect(el.querySelector('.chat-offer')?.getAttribute('data-after')).toBe('file')
   })
 
