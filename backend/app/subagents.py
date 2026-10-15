@@ -902,7 +902,7 @@ async def send(c: str, agent_id: str, text: str, *, values: dict[str, Any] | Non
     kept, when the module is not live."""
     a = agent(c, agent_id)
     if a is None:
-        return refusal(EARLIER, tools.hint("orient-continue-earlier-session", resume=""))
+        return refusal(EARLIER, tools.hint("orient-continue-earlier-session", session=""))
     before = refusal_before(c, click=route == CLICK)
     if before is not None:
         return before

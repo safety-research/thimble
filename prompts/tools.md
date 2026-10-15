@@ -607,7 +607,7 @@ End your review: thimble runs the view's checks on what you changed. Pass what y
 
 ## ticket_checks
 
-Check the change in your ticket's worktree, as often as you want: thimble's checks run over what the worktree changed, in a sandbox of the server's, and say what failed. Nothing is committed.
+Check the change in your ticket's worktree, as often as you want: thimble's checks run over what the worktree changed, in a sandbox of the server's where one can run (where none can, thimble asked the analyst before the ticket started), and say what failed. Nothing is committed.
 
 ```json
 {
@@ -629,7 +629,7 @@ Finish your ticket: thimble commits every change in the worktree to the ticket's
 
 ## instructions
 
-These tools act on thimble, the analyst's workspace for this corpus beside this session: a chat, the corpus's files, cards and a report, which thimble shows {{if:browser}}in the browser{{end}}{{if:terminal}}in the terminal{{end}}. A session started with the `thimble` command, and each thimble subagent, also has thimble's full instructions in its system prompt. If yours has none, this session was started some other way and thimble cannot reach it, so tell the analyst to quit and start it again by running `thimble` in this folder.
+These tools act on thimble, the analyst's workspace for this corpus beside this session: a chat, the corpus's files, cards and a report, which thimble shows {{if:browser}}in the browser{{end}}{{if:terminal}}in the terminal{{end}}. A session that opened thimble, with /thimble or the `thimble` command, and each thimble subagent, also has thimble's full instructions. If yours has none, thimble cannot reach this session yet, so tell the analyst to type /thimble.
 
 ## card-errored
 
@@ -1236,7 +1236,27 @@ The analyst asked for this in the side thread {thread}, which they opened on thi
 
 ## start-refused-no-module
 
-thimble's agents can't start in this session: Claude Code's hooks modules are off ({reason}). Main, its threads, cards and labels still work. Once modules are on, quit and run `thimble -c` in this folder.
+thimble's agents can't start in this session: {reason}. Main, its threads, cards and labels still work. Once that is fixed, restart Claude Code in this folder (`claude -c`) and type /thimble, or run `thimble -c`.
+
+## start-refused-connecting
+
+thimble's plugin is still connecting to this session, so thimble's agents can't start yet. Try again in a few seconds.
+
+## module-deny-private
+
+thimble refused this call, since it keeps its token files (server.json, session.key, paired.json and the links folder in thimble's home) out of reach of the file tools of its sessions. Do the task without them.
+
+## module-deny-records
+
+thimble refused this edit, since only thimble writes its records (its chats, checks, views, notices, the trusted folder, the orientation's run file and the permission modes it keeps in its home). Make the change with thimble's tools, or ask the analyst to make it in thimble's Settings.
+
+## module-deny-data
+
+thimble refused this edit, since thimble's config turns edits of the corpus off (agents.orientation.data is "off"). Leave the corpus as it is, and tell the analyst when the task needs an edit.
+
+## module-deny-web
+
+thimble refused this call, since thimble's config turns the web tools off (agents.orientation.web is "off").
 
 ## module-started-note
 
@@ -1618,7 +1638,7 @@ Pass the message on now with one SendMessage call, with `to` "{agent}" and exact
 
 ## orient-continue-earlier-session
 
-This orientation ran in an earlier Claude Code session. To continue it, quit and run `{resume}` in this folder, or start a new orientation.
+This orientation ran in an earlier Claude Code session. To continue it, quit and run `thimble -r {session}` in this folder, or `claude -r {session}` and then /thimble, or start a new orientation.
 
 ## orient-continue-earlier-version
 
