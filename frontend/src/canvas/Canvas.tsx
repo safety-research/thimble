@@ -48,6 +48,7 @@ import {
   boardOf,
   cardCount,
   cardsIn,
+  contains,
   cellThread,
   centerOn,
   clampHeight,
@@ -744,6 +745,10 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
       void change((x) => moveLocal(x, [d.id], target, after, null), () => canvasApi.move(ws, { cells: [d.id], group: target, after }))
       return
     }
+    // a card of a frame's column dropped back over its own place (a click that moved a little) stays in the column:
+    // placed free there it would cover the card that takes its place, and so move down past the whole column
+    const own = l.rects.get(d.id)
+    if (target && target === me.parent && !me.pos && own && contains(own, { x: d.x + own.w / 2, y: d.y + own.h / 2 })) return
     const at = frame ? { x: Math.round(d.x - frame.x), y: Math.round(d.y - frame.y) } : { x: Math.round(d.x), y: Math.round(d.y) }
     const pos = placeFree(d0, d.id, target, at, o, hs)
     void change((x) => moveLocal(x, [d.id], target, undefined, pos), () => canvasApi.move(ws, { cells: [d.id], group: target, pos }))
