@@ -16,10 +16,12 @@ Manual and Bypass both run Claude Code's manual mode (FLAGS): in Bypass thimble 
 (agent_session.ask), so a card switches between them without restarting the session. Auto runs Claude Code's auto mode.
 
 While main reports Claude Code's Manual mode (subagent_files.MANUAL_MODES), Claude Code asks before most commands of
-main's and of thimble's agents. thimble then shows the notice `manual-mode` (manual_notice) in red: in the browser above
-the chat's composer, in terminal mode above Claude Code's prompt, until main reports another mode or the analyst
-dismisses it, which holds for the workspace (notices.py). In browser mode, main's terminal also says so once per session
-(manual_line, session.note_mode).
+main's and of thimble's agents, and asks thimble's agents' prompts in the terminal alone, where each agent waits until
+the analyst answers. thimble then shows the notice `manual-mode` (manual_notice) in red, which says both: in the browser
+above the chat's composer, in terminal mode above Claude Code's prompt, until main reports another mode or the analyst
+dismisses it, which holds for the workspace (notices.py). While one of those prompts is open the browser shows the agent
+as waiting for the analyst's answer in the terminal (events.py, the terminal's prompts). In browser mode, main's
+terminal also says once per session that Claude Code is in Manual mode (manual_line, session.note_mode).
 """
 from __future__ import annotations
 
@@ -104,7 +106,8 @@ def manual_line(claude_mode: str | None) -> str:
 
 # the words of the `manual-mode` notice (notices.py), by manual_hint, in the browser above the composer and in terminal
 # mode's band above Claude Code's prompt
-MANUAL_NOTICE = "Manual mode: Claude Code asks before most commands."
+MANUAL_NOTICE = ("Manual mode: Claude Code asks before most commands, and thimble's agents wait in your terminal until you "
+                 "answer there.")
 MANUAL_NOTICES = {
     "switch": f"{MANUAL_NOTICE} In your terminal, press shift+tab for auto mode, or start with "
               "`thimble --permission-mode auto`.",
