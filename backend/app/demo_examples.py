@@ -8,6 +8,8 @@ view is left out. For each, the command copies the sample to $THIMBLE_HOME/examp
 repository), registers that folder as the workspace example-<name>, installs the example's view in it as a built view
 (views.install_view, as a pre-cache's views are installed), so it shows at once without its checks running, and
 defines the sample labels its labels.json lists, turned on in Files and applied (regex labels: no model is called).
+Defining a label is the analyst's write (hook_auth.LocalWriteGuard), so the command signs in as a browser does for those
+writes (cli.browser_cookie, once per run and only when a label is to be defined) and signs that browser out at the end.
 It ends with one URL, which it opens in the browser: thimble's start page with the page key, where each example's row
 opens its workspace at its view (start_page.py).
 
@@ -33,6 +35,7 @@ PREFIX = "example-"  # of each copy's folder name, so of its workspace's name
 LABELS_JSON = "labels.json"
 APPLY_TIMEOUT_S = 180.0  # one sample label's apply, which the server answers once it ends
 Request = Callable[..., "tuple[int, Any]"]
+SignIn = Callable[[str], str]  # cli.browser_cookie: a browser's sign-in at the server's URL, as `name=value`
 
 
 def examples(root: Path | None = None) -> list[Path]:
@@ -88,10 +91,12 @@ def label_specs(src: Path) -> list[dict[str, Any]]:
     return [s for s in specs if isinstance(s, dict) and s.get("name")] if isinstance(specs, list) else []
 
 
-def define_labels(url: str, name: str, src: Path, refresh: bool, request: Request) -> list[str]:
+def define_labels(url: str, name: str, src: Path, refresh: bool, request: Request,
+                  cookie: Callable[[], str] | None = None) -> list[str]:
     """The example's sample labels defined in the workspace through the server (as the analyst defines one in Files),
     turned on and applied; one defined already is left as it is unless `refresh`, which redefines and applies it again.
-    A line for each label defined, or why it was not."""
+    The writes carry the browser cookie `cookie` gives (module note). A line for each label defined, or why it was
+    not."""
     base = f"{url}/api/ws/{urllib.parse.quote(name)}/concepts"
     status, have = request("GET", base)
     if status != 200 or not isinstance(have, list):
@@ -104,15 +109,20 @@ def define_labels(url: str, name: str, src: Path, refresh: bool, request: Reques
         k = by_name.get(str(spec["name"]))
         if k is not None and not refresh:
             continue
+        try:
+            signed = {"cookie": cookie()} if cookie is not None else {}
+        except RuntimeError as e:
+            return [*out, f"the labels could not be defined: {e}"]
         if k is None:
-            status, k = request("POST", base, {"name": spec["name"], **fields})
+            status, k = request("POST", base, {"name": spec["name"], **fields}, **signed)
         else:
-            status, k = request("PUT", f"{base}/{urllib.parse.quote(str(k['id']))}", fields)
+            status, k = request("PUT", f"{base}/{urllib.parse.quote(str(k['id']))}", fields, **signed)
         if status not in (200, 201) or not isinstance(k, dict) or not k.get("id"):
             out.append(f"label {spec['name']!r} not defined: {status} {str(k)[:200]}")
             continue
         status, done = request("POST", f"{base}/{urllib.parse.quote(str(k['id']))}/apply",
-                               {"paths": list(spec.get("paths") or ["*"]), "wait": True}, timeout=APPLY_TIMEOUT_S)
+                               {"paths": list(spec.get("paths") or ["*"]), "wait": True}, timeout=APPLY_TIMEOUT_S,
+                               **signed)
         counts = (done.get("counts") or (done.get("label_stats") or {}).get("counts")) if isinstance(done, dict) else None
         out.append(f"label {spec['name']!r} " + (f"applied: {counts}" if status in (200, 202) and counts is not None
                                                   else f"defined, not applied: {status} {str(done)[:200]}"))
@@ -120,7 +130,7 @@ def define_labels(url: str, name: str, src: Path, refresh: bool, request: Reques
 
 
 def open_example(src: Path, url: str, env: dict[str, Any], refresh: bool, say: Callable[[str], None],
-                 request: Request) -> tuple[str, str]:
+                 request: Request, cookie: Callable[[], str] | None = None) -> tuple[str, str]:
     """The example in the folder `src` opened as a workspace (module note): (the workspace's name, its view's slug)."""
     from . import demo, views  # noqa: PLC0415
 
@@ -144,17 +154,29 @@ def open_example(src: Path, url: str, env: dict[str, Any], refresh: bool, say: C
         what = f"view {slug} kept at {installed.get('version')}"
     say(f"  {name}: " + ("sample copied, " if copied else "") + what
         + (f" (the folder {folder.name} was registered as {name}, a name already taken)" if name != folder.name else ""))
-    for line in define_labels(url, name, src, refresh, request):
+    for line in define_labels(url, name, src, refresh, request, cookie):
         say(f"    {line}")
     return name, slug
 
 
+def sign_out(url: str, cookie: str, request: Request) -> None:
+    """Sign out the browser whose cookie `cookie` (`name=value`) is, as its notice's Sign it out does: its id is the
+    first 12 hex digits of the value's sha256 (hook_auth.browser_id)."""
+    import hashlib  # noqa: PLC0415
+
+    value = cookie.split("=", 1)[1] if "=" in cookie else cookie
+    request("POST", f"{url}/api/ui/signout", {"id": hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]},
+            cookie=cookie)
+
+
 def run(args: argparse.Namespace, say: Callable[[str], None],
         server: Callable[[Callable[[str], None]], tuple[str | None, dict[str, Any]]],
-        request: Request | None = None, root: Path | None = None, show: Callable[[str], bool] | None = None) -> int:
+        request: Request | None = None, root: Path | None = None, show: Callable[[str], bool] | None = None,
+        signin: SignIn | None = None) -> int:
     from . import cli, demo  # noqa: PLC0415
 
     request = request or cli._request
+    signin = signin or cli.browser_cookie
     found = examples(root)
     if not found:
         say("thimble demo --examples: no worked examples found")
@@ -167,12 +189,23 @@ def run(args: argparse.Namespace, say: Callable[[str], None],
         return 1
     opened: list[tuple[str, str]] = []
     failed = 0
-    for src in found:
-        try:
-            opened.append(open_example(src, url, env, args.refresh, say, request))
-        except (demo.DemoError, OSError, ValueError) as e:
-            say(f"  {PREFIX}{src.name}: not opened: {e}")
-            failed += 1
+    held: list[str] = []  # the browser cookie of this run's sign-in, made at the first label to define
+
+    def cookie() -> str:
+        if not held:
+            held.append(signin(url))
+        return held[0]
+
+    try:
+        for src in found:
+            try:
+                opened.append(open_example(src, url, env, args.refresh, say, request, cookie))
+            except (demo.DemoError, OSError, ValueError) as e:
+                say(f"  {PREFIX}{src.name}: not opened: {e}")
+                failed += 1
+    finally:
+        if held:
+            sign_out(url, held[0], request)
     say("")
     if opened:
         coded = demo.start_url()  # a sign-in code only for a terminal: output a program reads can reach a model

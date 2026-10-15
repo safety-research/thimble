@@ -9,6 +9,7 @@ import asyncio
 import io
 import json
 import sys
+import time
 
 import pytest
 from conftest import card_wait
@@ -147,7 +148,8 @@ def test_the_permission_hook_hands_the_request_to_the_server_and_prints_its_deci
 
     def urlopen(req, timeout=None):
         nonce = req.get_header("X-thimble-nonce")
-        assert req.get_header("X-thimble-auth") == hook_auth.sign("tok", "hook", nonce)
+        assert req.get_header("X-thimble-auth") == hook_auth.request_proof("tok", 8311, nonce), "for its port alone"
+        assert abs(int(nonce.split(".")[0]) - time.time()) < 60, "and the time it was made"
         sent.append((req.full_url, json.loads(req.data)))
         assert timeout == permission_hook.TIMEOUT
         return Resp(json.dumps(answer).encode(), nonce)

@@ -29,6 +29,7 @@ import json
 import os
 import secrets
 import sys
+import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -42,8 +43,14 @@ LOOPBACK = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 def sign(token: str, role: str, nonce: str) -> str:
-    """app/hook_auth.py's sign: the proof `role` gives for `nonce`."""
+    """app/hook_auth.py's sign: the proof `role` gives for `nonce` (the server's, on an answer)."""
     return hmac.new(token.encode("utf-8"), f"{role}:{nonce}".encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def request_proof(token: str, url: str, nonce: str) -> str:
+    """app/hook_auth.py's request_proof for the port `url` names: good on that port alone, for a few minutes, once."""
+    port = urllib.parse.urlsplit(url).port or 80
+    return hmac.new(token.encode("utf-8"), f"hook@{port}:{nonce}".encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 def server(home: str = "") -> tuple[str, str] | None:
@@ -66,8 +73,9 @@ def post(path: str, body: dict, timeout: float, home: str = "") -> object:
     if found is None:
         raise OSError("no server.json with an address and a token")
     url, token = found
-    nonce = secrets.token_hex(16)
-    headers = {"Content-Type": "application/json", "X-Thimble-Nonce": nonce, "X-Thimble-Auth": sign(token, "hook", nonce)}
+    nonce = f"{int(time.time())}.{secrets.token_hex(16)}"  # app/hook_auth.py's new_nonce
+    headers = {"Content-Type": "application/json", "X-Thimble-Nonce": nonce,
+               "X-Thimble-Auth": request_proof(token, url, nonce)}
     req = urllib.request.Request(url + path, data=json.dumps(body).encode("utf-8"), method="POST", headers=headers)
     with LOOPBACK.open(req, timeout=timeout) as resp:  # noqa: S310 — loopback, thimble's own server
         raw, proof = resp.read(), resp.headers.get("X-Thimble-Proof") or ""

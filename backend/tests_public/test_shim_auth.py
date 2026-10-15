@@ -20,7 +20,7 @@ def test_the_server_answers_the_shim_s_routes_only_to_a_request_that_proves_the_
     asks = [("POST", "/api/tools/read_ref", {"json": tool}), ("GET", "/api/events", {"params": {"cwd": "/nowhere"}}),
             ("POST", f"/api/ws/{CORPUS}/sessions/permission", {"json": {"session": "orient", "tool_name": "Bash"}})]
     with TestClient(create_app(), base_url="http://127.0.0.1") as client:
-        wrong = hook_auth.headers("another-token", "n0nce")
+        wrong = hook_auth.headers("another-token", 80)
         for method, path, kw in asks:
             assert client.request(method, path, **kw).status_code == 401, path
             assert client.request(method, path, headers=wrong, **kw).status_code == 401, path

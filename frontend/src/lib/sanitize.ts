@@ -1,5 +1,5 @@
-// HTML and SVG that a model or a corpus wrote, made safe to put in the page itself (DOMPurify). The API is
-// unauthenticated and answers the page's own origin, so injected script could call any route, and remote resources
+// HTML and SVG that a model or a corpus wrote, made safe to put in the page itself (DOMPurify). The page's requests carry
+// its sign-in, so injected script could call any route as the analyst, and remote resources
 // could leak what the page shows. Kept: markup, classes, inline style, links, and data:, blob: or media-route images.
 // Removed: script and event attributes, <style>, forms, every URL to another host, every URL to the app's own routes but
 // the two that serve media (even a GET to some routes changes state), the attributes that open a popover or a dialog in

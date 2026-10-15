@@ -129,7 +129,7 @@ async def test_every_module_route_answers_only_a_request_that_proves_the_token(c
              ("POST", "/api/module/ended", {"json": {"cwd": _cwd(), "agentId": "a1"}}),
              ("GET", "/api/module/roles", {"params": {"cwd": _cwd(), "session": MAIN}}),
              ("GET", "/api/module/state", {"params": {"cwd": _cwd(), "session": MAIN}})]
-    wrong = hook_auth.headers("another-token", "n0nce")
+    wrong = hook_auth.headers("another-token", 80)
     for method, path, kw in calls:
         assert (await client.request(method, path, **kw)).status_code == 401, path
         assert (await client.request(method, path, headers=wrong, **kw)).status_code == 401, path

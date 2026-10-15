@@ -3329,13 +3329,14 @@ def built_line(view: dict[str, Any]) -> str:
 # ----------------------------------------------------------------------------------------------------------
 
 
-def media_url(origin: str, c: str, slug: str) -> str:
+def media_url(origin: str, c: str, slug: str, key: str | None = None) -> str:
     """The view's media route as the frame's browser reaches it: the origin, then the route's path under /api, where
-    main.create_app mounts every router. Workspace names (config.NAME_RE) and slugs (SLUG_RE) need no escaping in a URL
-    or a policy. ValueError for an origin that is not scheme, host and port."""
+    main.create_app mounts every router, and with `key` (hook_auth.media_key) the route that takes that key in its path
+    (media_key_route), since the sandboxed frame sends no cookie. Workspace names (config.NAME_RE), slugs (SLUG_RE) and
+    keys (hex) need no escaping in a URL or a policy. ValueError for an origin that is not scheme, host and port."""
     if not ORIGIN_RE.fullmatch(origin or ""):
         raise ValueError(f"not an origin: {origin!r}")
-    return f"{origin}/api/ws/{c}/views/{slug}/media"
+    return f"{origin}/api/ws/{c}/views/{slug}/media" + (f"/{key}" if key else "")
 
 
 def _script_text(js: str) -> str:
@@ -5580,8 +5581,11 @@ async def frame_route(c: str, slug: str, request: Request, origin: str | None = 
     view = _view_or_404(c, slug, v)
     if not view["ok"]:
         raise HTTPException(409, f"the view {slug!r} has no reader.py, view.html or claims")
+    from . import hook_auth  # noqa: PLC0415
+
     try:
-        media = media_url(origin or f"{request.url.scheme}://{request.url.netloc}", c, slug)
+        media = media_url(origin or f"{request.url.scheme}://{request.url.netloc}", c, slug,
+                          await asyncio.to_thread(hook_auth.media_key, c, slug, hook_auth.read_holder(request.scope)))
     except ValueError as e:
         raise HTTPException(400, str(e)) from None
     derived = await derived_fields(c, slug, view, v)
@@ -5602,6 +5606,19 @@ async def media_route(c: str, slug: str, path: str) -> FileResponse:
     _view_or_404(c, slug)  # a draft's page loads its media only in the checks' headless page (shoot)
     f, media_type = await asyncio.to_thread(media_file, c, slug, path)
     return FileResponse(f, media_type=media_type, headers=MEDIA_HEADERS)
+
+
+@router.get("/ws/{c}/views/{slug}/media/{key}")
+async def media_key_route(c: str, slug: str, key: str, path: str) -> FileResponse:
+    """media_route for the view's frame, which is sandboxed and sends no cookie: the URL carries the view's key
+    (hook_auth.media_key, which frame_route writes into the frame's media URL for the browser that loads it), which
+    hook_auth.LocalReadGuard lets through while that browser stays signed in, and which is checked again here. 404 for
+    any other key, as for a view that is not there."""
+    from . import hook_auth  # noqa: PLC0415
+
+    if not await asyncio.to_thread(hook_auth.media_key_ok, c, slug, key):
+        raise HTTPException(404, "no such media route")
+    return await media_route(c, slug, path)
 
 
 @router.get("/ws/{c}/media")

@@ -257,11 +257,12 @@ def earlier_orientation_proposal(c: str, name: str, description: str, claims: li
 @pytest.fixture()
 def plugin_headers():
     """A function giving the headers thimble's plugin sends to the routes only it may call (app/hook_auth.py), for a
-    fresh nonce each time, proving the token this fixture records in the test's server.json."""
+    fresh nonce each time, proving the token this fixture records in the test's server.json to the server at `url`: by
+    default TestClient's and httpx.ASGITransport's, on port 80; a live server's base URL for one."""
     from app import hook_auth
 
     _record(token=PLUGIN_TOKEN)
-    return lambda: hook_auth.headers(PLUGIN_TOKEN, os.urandom(8).hex())
+    return lambda url="http://testserver": hook_auth.headers(PLUGIN_TOKEN, hook_auth.port_of(url))
 
 
 def _record_paired(cookie: str = UI_COOKIE_VALUE) -> None:
@@ -293,15 +294,19 @@ def _pairing_fresh():
     from app import hook_auth
 
     hook_auth._codes.clear()
+    hook_auth._shots.clear()
     hook_auth._paired = None
     yield
     hook_auth._codes.clear()
+    hook_auth._shots.clear()
     hook_auth._paired = None
 
 
 def pytest_configure(config):
     config.addinivalue_line(
         "markers", "real_write_guard: keep hook_auth.LocalWriteGuard on for a test (the suite bypasses it by default)")
+    config.addinivalue_line(
+        "markers", "real_read_guard: keep hook_auth.LocalReadGuard on for a test (the suite bypasses it by default)")
 
 
 @pytest.fixture(autouse=True)
@@ -315,6 +320,18 @@ def _write_guard_off(request, monkeypatch):
     from app import hook_auth
 
     monkeypatch.setattr(hook_auth, "write_guarded", lambda method, path: False)
+
+
+@pytest.fixture(autouse=True)
+def _read_guard_off(request, monkeypatch):
+    """As _write_guard_off, for reads: a test's TestClient stands in for the signed-in browser, which proves itself to
+    hook_auth.LocalReadGuard with its cookie, so a route test reads with no credential; a test marked
+    `real_read_guard` keeps the real guard."""
+    if "real_read_guard" in request.keywords:
+        return
+    from app import hook_auth
+
+    monkeypatch.setattr(hook_auth, "read_guarded", lambda method, path: False)
 
 
 @pytest.fixture(autouse=True)

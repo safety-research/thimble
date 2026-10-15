@@ -24,7 +24,7 @@ from starlette.staticfiles import StaticFiles
 from . import config
 from .errors import ErrorLog
 from . import hook_auth
-from .hook_auth import HookAuth, LocalWriteGuard
+from .hook_auth import HookAuth, LocalReadGuard, LocalWriteGuard
 from .http_guard import OriginCheck, SecurityHeaders, dev_origins
 
 # every line of thimble's own loggers carries a wall-clock stamp, so the server log can be read against the other logs
@@ -119,6 +119,21 @@ class QuietPolling(logging.Filter):
 
 if os.environ.get("THIMBLE_ACCESS_LOG", "").strip().lower() != "all":
     logging.getLogger("uvicorn.access").addFilter(QuietPolling())
+
+
+class HideMediaKeys(logging.Filter):
+    """A view's media key (hook_auth.media_key) in a line's text arguments shown as `<key>` (hook_auth.hide_media_keys):
+    uvicorn's access line names the URL of every failed request and the timing line that of a slow one, and the server
+    log goes into a problem report."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple) and any(isinstance(a, str) and "/media/" in a for a in record.args):
+            record.args = tuple(hook_auth.hide_media_keys(a) if isinstance(a, str) else a for a in record.args)
+        return True
+
+
+for _name in ("uvicorn.access", "thimble.timing"):
+    logging.getLogger(_name).addFilter(HideMediaKeys())
 
 ROUTER_MODULES = [
     # storage and the corpus
@@ -438,7 +453,8 @@ def signed_in(ws: object, browser: str) -> None:
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="thimble", version="0.0.1", lifespan=_lifespan)
+    # no /docs, /redoc or /openapi.json: the API is thimble's own, and its table is docs/routes.md
+    app = FastAPI(title="thimble", version="0.0.1", lifespan=_lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     # Every page reaches /api same-origin, from the built UI or through Vite's proxy; only a dev stack trusts the Vite
     # origin, since any project's dev server can sit on a loopback port (http_guard). ErrorLog is innermost, so an
     # error's answer passes through the checks' headers and the timing.
@@ -448,6 +464,7 @@ def create_app() -> FastAPI:
         app.add_middleware(CORSMiddleware, allow_origins=vite, allow_methods=["*"], allow_headers=["*"])
     app.add_middleware(HookAuth)  # inside the write guard: a hook proves the token here too
     app.add_middleware(LocalWriteGuard)  # inside OriginCheck, outside HookAuth: a forged-Origin write still needs the cookie or the token
+    app.add_middleware(LocalReadGuard)  # beside the write guard: a read needs the cookie, the CLI's proof or a shot's token
     app.add_middleware(OriginCheck, extra_origins=vite)  # after TrustedHost: the Host it compares with is an allowed one
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
     app.add_middleware(SecurityHeaders)  # outside the two checks, so their refusals carry the headers too
@@ -474,12 +491,17 @@ def create_app() -> FastAPI:
     install = {"home": str(cli.home().expanduser().resolve()), "app": str(Path(config.REPO_ROOT).resolve())}
 
     @app.get("/api/health")
-    async def health() -> dict:
-        # `leader` lets `server up`/`stop` find a server whose record was lost, `ui` lets an open tab tell it is stale,
-        # and `home`/`app` let another install's `server up` on the same port refuse it. Answered on the event loop, not
-        # in a worker thread, which can wait behind threads that compute: the supervisor and the plugin give a health
-        # call 1 to 2 s (cli.HEALTH_TIMEOUT_S) before they take the server for one that is starting or gone.
-        return {"ok": True, "leader": os.getsid(0), "boot": config.BOOT_ID, "ui": ui_build(), **install}
+    async def health(request: Request) -> dict:
+        # `ui` lets an open tab tell it is stale and `boot` lets the plugin's shim tell a restart; to a caller that proves
+        # the token (the CLI), also `leader`, which lets `server up`/`stop` find a server whose record was lost, and
+        # `home`/`app`, which let the same install's commands tell its server from another install's. Without the proof
+        # no path or pid: another account on the computer reaches this route too. Answered on the event loop, not in a
+        # worker thread, which can wait behind threads that compute: the supervisor and the plugin give a health call 1
+        # to 2 s (cli.HEALTH_TIMEOUT_S) before they take the server for one that is starting or gone.
+        out = {"ok": True, "boot": config.BOOT_ID, "ui": ui_build()}
+        if hook_auth.proven(request.scope):
+            out.update({"leader": os.getsid(0), **install})
+        return out
 
     @app.post("/api/ui/key")
     def ui_claim(request: Request, body: dict = Body(...)):  # a link's one-time code, traded for the browser's cookie
@@ -495,6 +517,10 @@ def create_app() -> FastAPI:
     @app.post("/api/ui/unpair", status_code=204)  # token only: `thimble unpair`
     def ui_unpair() -> None:
         hook_auth.unpair()
+
+    @app.post("/api/ui/shot")  # token only: a dev ticket's shot of this server's page (dev._take_shot)
+    def ui_shot() -> dict:
+        return {"token": hook_auth.mint_shot(), "expires_s": hook_auth.SHOT_TTL_S}
 
     @app.post("/api/ui/signout")  # cookie: a sign-in notice's "Sign it out"
     def ui_signout(body: dict = Body(...)) -> dict:

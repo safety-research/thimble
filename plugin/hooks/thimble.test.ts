@@ -167,7 +167,10 @@ class Server {
     const reply = (status: number, body: unknown = {}) => ({
       status, ok: status < 300, headers: { 'x-thimble-proof': sign('server', nonce, this.proofToken) }, text: JSON.stringify(body),
     })
-    if (!nonce || init.headers?.['x-thimble-auth'] !== sign('hook', nonce)) return { status: 401, ok: false, headers: {}, text: '{}' }
+    // app/hook_auth.py's check: a nonce `<unix time>.<hex>` near the server's clock, proven for the port it was sent to
+    const sent = Number(/^(\d+)\.[0-9a-f]+$/.exec(nonce)?.[1] ?? NaN)
+    const fresh = Math.abs(Date.now() / 1000 - sent) <= 300
+    if (!nonce || !fresh || init.headers?.['x-thimble-auth'] !== sign(`hook@${u.port}`, nonce)) return { status: 401, ok: false, headers: {}, text: '{}' }
     const body = init.body ? JSON.parse(init.body) : {}
     const route = `${init.method ?? 'GET'} ${u.pathname}`
     this.calls.push(route)

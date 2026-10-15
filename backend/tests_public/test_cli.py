@@ -873,10 +873,17 @@ def test_real_up_starts_a_detached_server_idempotently_and_stop_ends_it(home, da
         assert cli.pid_alive(pid) and st["port"] == port and st["env"]["data_dir"] == str(data)
         assert os.getsid(pid) == pid, "uvicorn is its own session leader"
         assert int(Path(f"/proc/{pid}/stat").read_text().split()[3]) != os.getpid()
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=5) as r:
+        from app import hook_auth  # noqa: PLC0415
+
+        proven = urllib.request.Request(f"http://127.0.0.1:{port}/api/health",
+                                        headers=hook_auth.headers(st["token"], port))
+        with urllib.request.urlopen(proven, timeout=5) as r:
             health = json.loads(r.read())
             assert {k: health[k] for k in ("ok", "leader")} == {"ok": True, "leader": pid}, "the server names the pid server.json records"
             assert len(str(health.get("boot") or "")) == 8, "and a boot token new for each start"
+            assert health["home"] == str(home.resolve()), "and its home, to the token's holder"
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=5) as r:
+            assert set(json.loads(r.read())) == {"ok", "boot", "ui"}, "no pid or path to a caller without the token"
         t1 = time.monotonic()
         out2 = subprocess.run(cmd, cwd=BACKEND, env=env, capture_output=True, text=True, timeout=30)
         assert out2.stdout.splitlines() == lines and json.loads((home / "server.json").read_text())["pid"] == pid
@@ -1258,3 +1265,19 @@ def test_thimble_fix_asks_before_a_session_with_no_sandbox_edits_thimble_s_code(
     assert cli.fix_refusal() == cli.FIX_DECLINED
     monkeypatch.setattr(dev, "fix_contained", lambda: True)
     assert cli.fix_refusal() == "", "contained: nothing to ask"
+
+
+def test_restart_names_the_running_orientations_and_ticket_and_asks_no_route_the_server_lacks(monkeypatch):
+    """running_work asked GET /api/sessions/running, a route thimble 0.6.0 removed, so it always fell back; it now reads
+    the orientations' run.json and the dev runner's status alone."""
+    asked = []
+
+    def request(method, url, body=None, timeout=5.0):
+        asked.append(url.split("8300", 1)[1])
+        return 200, {"running": True, "current": {"title": "Darker accent", "workspace": "trials"}}
+
+    monkeypatch.setattr(cli, "_request", request)
+    monkeypatch.setattr(cli, "_workspace_names", lambda d: ["board-sim", "trials"])
+    monkeypatch.setattr(cli, "orient_status", lambda c: "running" if c == "trials" else "done")
+    assert cli.running_work("http://127.0.0.1:8300") == ["trials: the orientation", 'trials: the dev ticket "Darker accent"']
+    assert asked == ["/api/dev/status"]

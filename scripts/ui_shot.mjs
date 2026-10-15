@@ -20,7 +20,10 @@
 // the page's origin, and sends the browser's other traffic to a proxy that isn't there, for an app whose code a dev
 // ticket wrote.
 // Read-only: PUT/POST/DELETE/PATCH to /api/** are answered 204 and never reach the backend, and every request carries
-// `X-Thimble-Peek: 1`, so the files a shot loads are not logged as opened by the analyst.
+// `X-Thimble-Peek: 1`, so the files a shot loads are not logged as opened by the analyst. The page holds no sign-in
+// cookie, so its reads of the API carry the shot token THIMBLE_SHOT_TOKEN names in the environment (never on the
+// command line, which other accounts can see) in `X-Thimble-Shot`: only reads of /api/ on the page's own origin, and
+// never with --offline (backend/app/hook_auth.py mint_shot).
 // Exit 0 on success, 2 if --selector or an action target was not found (the shot is still written), 1 on error.
 // One JSON line on stdout describes the result: {ok, out, selector, found, box, actions: [{kind, target, found}],
 // element_out, ms}.
@@ -42,6 +45,10 @@ const SETTLE_QUIET_MS = 100
 const SETTLE_MAX_MS = 5_000
 const STREAM_RE = /\/(events|stream)$/
 const MUTATING = new Set(['PUT', 'POST', 'DELETE', 'PATCH'])
+const SHOT_HEADER = 'x-thimble-shot'
+// the shot token, out of the environment the browser inherits
+const SHOT_TOKEN = process.env.THIMBLE_SHOT_TOKEN || ''
+delete process.env.THIMBLE_SHOT_TOKEN
 
 const USAGE =
   'usage: node scripts/ui_shot.mjs --url <url> --out <png> [--selector <css>] [--wait <ms>] ' +
@@ -104,6 +111,17 @@ function clip(box, viewport = VIEWPORT) {
   const y1 = Math.min(viewport.height, Math.ceil(box.y + box.height + PAD))
   if (x1 - x0 < 1 || y1 - y0 < 1) return null
   return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }
+}
+
+/** Whether `url` is a path under /api/ on the origin of the page `pageUrl` (an http one), where the shot token goes. */
+function ownApi(url, pageUrl) {
+  try {
+    const u = new URL(url)
+    const page = new URL(pageUrl)
+    return /^https?:$/.test(page.protocol) && u.origin === page.origin && u.pathname.startsWith('/api/')
+  } catch {
+    return false
+  }
 }
 
 function isStream(url) {
@@ -236,9 +254,15 @@ try {
     await page.route('**/*', (route) => (new URL(route.request().url()).origin === origin ? route.continue() : route.abort()))
     await page.routeWebSocket(/.*/, (ws) => (new URL(ws.url()).origin === wsOrigin ? ws.connectToServer() : ws.close()))
   }
-  await page.route('**/api/**', (route) =>
-    MUTATING.has(route.request().method()) ? route.fulfill({ status: 204, body: '' }) : route.continue(),
-  )
+  // Registered last, so it runs first: a write is answered here, and a read falls back to the --offline and
+  // --own-origin handlers above, which still refuse what they refuse.
+  await page.route('**/api/**', (route) => {
+    const req = route.request()
+    if (MUTATING.has(req.method())) return route.fulfill({ status: 204, body: '' })
+    if (SHOT_TOKEN && !args.offline && ownApi(req.url(), args.url))
+      return route.fallback({ headers: { ...req.headers(), 'x-thimble-peek': '1', [SHOT_HEADER]: SHOT_TOKEN } })
+    return route.fallback()
+  })
   const inflight = trackRequests(page)
   await page.goto(args.url, { waitUntil: 'load', timeout: NAV_TIMEOUT_MS })
   await waitQuiet(page, inflight)

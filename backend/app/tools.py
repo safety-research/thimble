@@ -2337,12 +2337,17 @@ async def _shot_page(url: str, selector: str | None) -> ToolResult:
     run_shot = _optional("dev", "run_shot")
     if run_shot is None:
         return _not_available("screenshot", "dev", "run_shot")
+    from . import hook_auth  # noqa: PLC0415
+
     with tempfile.TemporaryDirectory(prefix="thimble-shot-") as d:
         out = Path(d) / "shot.png"
+        tok = hook_auth.mint_shot()  # the headless page holds no cookie: its reads of this server carry this token
         try:
-            code = await _maybe_await(run_shot(url, out, selector))
+            code = await _maybe_await(run_shot(url, out, selector, read_token=tok))
         except headless.Missing:
             return err(headless.NO_SCREENSHOTS)
+        finally:
+            hook_auth.drop_shot(tok)
         if not out.is_file():
             return err(f"screenshot failed (exit {code}): no image was written for {url}")
         data = base64.b64encode(out.read_bytes()).decode("ascii")
@@ -2465,16 +2470,22 @@ async def _shot_card_in_ui(c: str, cid: str, ui: str) -> ToolResult | None:
     url = f"{ui}/?{urlencode({'ws': c, 'ref': f'card:{cid}'})}"
     storage = {f"thimble:{c}:layout": json.dumps({"tab": "canvas", "chatOpen": False}),
                f"thimble:{c}:canvas-view": json.dumps({"x": 0, "y": 0, "scale": 1})}
+    from . import hook_auth  # noqa: PLC0415
+
     with tempfile.TemporaryDirectory(prefix="thimble-shot-") as d:
         png = Path(d) / "card.png"
+        tok = hook_auth.mint_shot()  # the headless page holds no cookie: its reads of this server carry this token
         try:
             code = await _maybe_await(run_shot(url, png, f'article.canvas-card[data-cell="{cid}"]', viewport=CARD_SHOT_VIEWPORT,
-                                               scale=CARD_SHOT_SCALE, storage=storage, settle=True, wait_ms=0))
+                                               scale=CARD_SHOT_SCALE, storage=storage, settle=True, wait_ms=0,
+                                               read_token=tok))
         except headless.Missing:
             return None
         except Exception:  # noqa: BLE001 — a missing node is the fallback's case, not an error to the model
             log.warning("card shot in the interface failed for card:%s", cid, exc_info=True)
             return None
+        finally:
+            hook_auth.drop_shot(tok)
         if code != 0 or not png.is_file():
             return None
         data = base64.b64encode(png.read_bytes()).decode("ascii")

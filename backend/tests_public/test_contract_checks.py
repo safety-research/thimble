@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import secrets
 import sys
 import urllib.request
 from pathlib import Path
@@ -182,9 +181,9 @@ def test_the_stand_in_server_proves_the_token_as_thimble_s_hooks_expect(tmp_path
     stub = cp.Stub(tmp_path / "home", _free_port(), tmp_path / "requests.jsonl")
     try:
         st = json.loads((tmp_path / "home" / "server.json").read_text())
-        nonce = secrets.token_hex(8)
+        nonce = hook_auth.new_nonce()
         req = urllib.request.Request(f"{st['api']}/api/module/hello", data=b"{}", method="POST",
-                                     headers=hook_auth.headers(st["token"], nonce))
+                                     headers=hook_auth.headers(st["token"], hook_auth.port_of(st["api"]), nonce))
         with urllib.request.urlopen(req, timeout=5) as r:
             assert r.headers["x-thimble-proof"] == hook_auth.sign(st["token"], "server", nonce)
             assert json.loads(r.read())["ok"] is True

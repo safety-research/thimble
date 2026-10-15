@@ -117,14 +117,15 @@ def test_the_app_shell_and_the_api_carry_the_security_headers(dist):
 
 
 @pytest.mark.real_write_guard
+@pytest.mark.real_read_guard
 def test_a_write_needs_a_signed_in_browser_so_neither_a_kernel_nor_the_token_reaches_an_analyst_route(
         app_prod, plugin_headers, monkeypatch):
     """hook_auth.LocalWriteGuard: a write to an analyst route of the local API must come from a signed-in browser (its
     cookie). A notebook kernel runs model-authored code with the host's network and can open this server on 127.0.0.1,
     but holds no cookie, and forging a same-origin Origin, which slips past the Origin check, does not help. The token
     in server.json, which the plugin and the CLI prove, reaches only the token routes (hook_auth.guarded), so a process
-    that reads server.json is refused here too, in the words the page shows today. Reads and the browser's claim of a
-    link's code stay open."""
+    that reads server.json is refused here too, in the words the page shows today. A read needs the cookie too
+    (hook_auth.LocalReadGuard), or the CLI's proof; the browser's claim of a link's code stays open."""
     from conftest import UI_COOKIE_VALUE, _record_paired
 
     from app import hook_auth
@@ -147,7 +148,7 @@ def test_a_write_needs_a_signed_in_browser_so_neither_a_kernel_nor_the_token_rea
     # the token alone is refused on an analyst route, word for word as a page without the cookie is
     r = c.put(THEME_PATH, json=THEME, headers=plugin_headers())
     assert r.status_code == 403 and r.json()["detail"] == hook_auth.WRITE_REFUSED
-    assert c.put(THEME_PATH, json=THEME, headers=hook_auth.headers("wrong-token", "n0nce")).status_code == 403
+    assert c.put(THEME_PATH, json=THEME, headers=hook_auth.headers("wrong-token", 80)).status_code == 403
     not_ascii = {hook_auth.NONCE_HEADER: "n", hook_auth.AUTH_HEADER: "\u00e9".encode("latin-1")}
     assert c.put(THEME_PATH, json=THEME, headers=not_ascii).status_code == 403
 
@@ -158,8 +159,15 @@ def test_a_write_needs_a_signed_in_browser_so_neither_a_kernel_nor_the_token_rea
     assert c.put(THEME_PATH, json=THEME).status_code == 403
     c.cookies.clear()
 
-    # reads are untouched, and the claim of a link's code needs no credential
+    # a read needs the cookie too (it was open before 0.8.0), however the kernel forges its Origin, or the CLI's proof
+    for headers in ({}, {"Origin": "http://testserver"}, {"Sec-Fetch-Site": "same-origin"}):
+        r = c.get("/api/corpora", headers=headers)
+        assert (r.status_code, r.json()) == (401, {"detail": hook_auth.SIGN_IN_NEEDED, "signin": True}), headers
+    assert c.get("/api/corpora", headers=plugin_headers()).status_code == 200
+    c.cookies.set(hook_auth.ui_cookie(), UI_COOKIE_VALUE)
     assert c.get("/api/corpora").status_code == 200
+    c.cookies.clear()
+    # the claim of a link's code needs no credential
     assert c.post("/api/ui/key", json={"code": hook_auth.mint("mini")}).status_code == 204
 
 
@@ -244,7 +252,7 @@ def test_thimble_extension_tells_the_server_with_the_token(app_prod, plugin_head
         status = 200
 
     def urlopen(req, timeout=None):
-        r = c.request(req.get_method(), req.full_url.removeprefix("http://127.0.0.1:8300"), content=req.data,
+        r = c.request(req.get_method(), req.full_url, content=req.data,  # the whole URL: its port is in the proof
                       headers=dict(req.header_items()))
         seen.append(r.status_code)
         if r.status_code >= 400:

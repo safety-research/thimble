@@ -259,8 +259,9 @@ def test_a_program_s_token_works_for_its_role_s_own_tools_only_and_only_while_it
     hook_auth.grant(run.token_id, run.token, run.allows)
 
     def headers() -> dict[str, str]:
-        nonce = os.urandom(8).hex()
-        return {**hook_auth.headers(run.token, nonce), hook_auth.AGENT_HEADER: run.token_id}
+        nonce = os.urandom(8).hex()  # as docs/agents.md says: a fresh random string, bound to no port or time
+        return {hook_auth.NONCE_HEADER: nonce, hook_auth.AUTH_HEADER: hook_auth.sign(run.token, "hook", nonce),
+                hook_auth.AGENT_HEADER: run.token_id}
 
     body = {"args": {"group": "all"}, "cwd": "/nowhere", "session": "main-would-be-refused"}
     with TestClient(app) as client:
@@ -441,7 +442,7 @@ def test_the_example_sdk_orientation_runs_end_to_end_on_a_copy_of_a_corpus(tmp_p
     home = Path(os.environ["THIMBLE_HOME"])
     shutil.copytree(EXAMPLE, home / "extensions" / "orient-sdk")
     active.append(home / "extensions" / "orient-sdk")
-    r = httpx.post(f"{base}/api/tools/start_orientation", headers=plugin_headers(), timeout=60,
+    r = httpx.post(f"{base}/api/tools/start_orientation", headers=plugin_headers(base), timeout=60,
                    json={"args": {"brief": ""}, "workspace": CORPUS, "actor": "analyst"})
     assert r.status_code == 200 and not r.json()["is_error"], r.text
     end = time.monotonic() + 90
@@ -762,7 +763,7 @@ async def run(input):
 '''
     active.append(_extension(tmp_path, "pushy", {"orientation": {"description": "Pushes.", "sdk": "o.py"}},
                              {"agents/orientation/o.py": program}))
-    r = httpx.post(f"{base}/api/tools/start_orientation", headers=plugin_headers(), timeout=60,
+    r = httpx.post(f"{base}/api/tools/start_orientation", headers=plugin_headers(base), timeout=60,
                    json={"args": {"brief": ""}, "workspace": CORPUS, "actor": "analyst"})
     assert r.status_code == 200 and not r.json()["is_error"], r.text
     end = time.monotonic() + 90

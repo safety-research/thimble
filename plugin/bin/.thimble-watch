@@ -176,8 +176,17 @@ class NoServer(urllib.error.URLError):
 
 
 def sign(token: str, role: str, nonce: str) -> str:
-    """app/hook_auth.py's sign: the proof `role` gives for `nonce`."""
+    """app/hook_auth.py's sign: the proof `role` gives for `nonce` (the server's, on an answer)."""
     return hmac.new(token.encode("utf-8"), f"{role}:{nonce}".encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def proof_headers(token: str, base: str) -> dict[str, str]:
+    """app/hook_auth.py's headers: a fresh nonce (its new_nonce) and the request's proof for the port `base` names (its
+    request_proof), good on that port alone, for a few minutes, once."""
+    nonce = f"{int(time.time())}.{secrets.token_hex(16)}"
+    port = urllib.parse.urlsplit(base).port or 80
+    auth = hmac.new(token.encode("utf-8"), f"hook@{port}:{nonce}".encode("utf-8"), hashlib.sha256).hexdigest()
+    return {"X-Thimble-Nonce": nonce, "X-Thimble-Auth": auth}
 
 
 def request(method: str, path: str, body: dict | None = None, timeout: float | None = 10.0,
@@ -190,10 +199,10 @@ def request(method: str, path: str, body: dict | None = None, timeout: float | N
     if found is None:
         raise NoServer("no server.json with a token")
     base, token = found
-    nonce = secrets.token_hex(16)
+    proof_of = proof_headers(token, base)
+    nonce = proof_of["X-Thimble-Nonce"]
     data = json.dumps(body).encode("utf-8") if body is not None else None
-    headers = {"X-Thimble-Nonce": nonce, "X-Thimble-Auth": sign(token, "hook", nonce),
-               **({"Content-Type": "application/json"} if data else {})}
+    headers = {**proof_of, **({"Content-Type": "application/json"} if data else {})}
     req = urllib.request.Request(base + path, data=data, method=method, headers=headers)
     try:
         with LOOPBACK.open(req, timeout=timeout) as resp:  # noqa: S310 — loopback, thimble's own server
