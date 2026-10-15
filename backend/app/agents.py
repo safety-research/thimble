@@ -989,6 +989,12 @@ async def _stop_for_delete(c: str, meta: dict) -> None:
         await asyncio.wait({task}, timeout=DELETE_WAIT_S)
 
 
+def thread_name(meta: dict) -> str:
+    """A side thread's name as the browser's thread list shows it (frontend chat/threads.ts): `main/` and the analyst's
+    name for it, else its title."""
+    return f"main/{meta.get('name') or meta.get('title') or meta.get('id') or ''}"
+
+
 def _runs_as_subagent(meta: dict) -> bool:
     """Whether an agent chat is one of thimble's agents that runs, which a delete stops through the module."""
     return (meta.get("kind") == KIND_AGENT and meta.get("route") == "subagent" and bool(meta.get("agent_id"))
@@ -1055,9 +1061,10 @@ async def interrupt_route(c: str, chat_id: str, request: Request) -> dict:
     which is a click, so the analyst's cookie (403 without it); a stop of an agent that had ended counts as done
     ({stopped, done}); without the module {stopped: false, kind: no-module}, and the card says to press Esc in the
     agent's view. Main's running turn ends through the module as Esc ends it (subagents.stop_main, `$.turn.abort`), and
-    the mirror ends the turn (session.turn_stopped); a side thread's fork stops as an agent does (TaskStop of the fork
-    that answers it), {stopped: false, kind: no-fork} while it has none. Both are clicks too. A server task stops as
-    before; the analyst's own subagent of main is main's to stop, so main is asked to."""
+    the mirror ends the turn (session.turn_stopped); a side thread's fork stops as an agent does (subagents.stop_fork,
+    TaskStop of the fork that answers it), {stopped: false, kind: no-fork} while it has none. Both are clicks too, and
+    each that stopped something tells main so, in a line no chat shows. A server task stops as before; the analyst's
+    own subagent of main is main's to stop, so main is asked to."""
     if chat_id == MAIN_ID:
         from . import session, subagents  # noqa: PLC0415 — each imports this module
 
@@ -1075,7 +1082,7 @@ async def interrupt_route(c: str, chat_id: str, request: Request) -> dict:
         fork = meta.get("fork") if isinstance(meta.get("fork"), dict) else {}
         if not fork.get("agent_id") or fork.get("ended"):
             return {"stopped": False, "kind": NO_FORK, "reason": "its fork has not started yet"}
-        ans = await subagents.stop(c, str(fork["agent_id"]))
+        ans = await subagents.stop_fork(c, str(fork["agent_id"]), thread_name(meta))
         if ans.refused:
             return {"stopped": False, "kind": ans.kind, "reason": ans.reason}
         return {"stopped": True, **({"done": True} if ans.get("done") else {})}

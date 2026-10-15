@@ -26,6 +26,8 @@ HINTS = {
     "orient-continue-earlier-session": "EARLIER SESSION: {session}",
     "orient-continue-earlier-version": "EARLIER VERSION",
     "module-started-note": "STARTED {role} {agent} {what}",
+    "main-stopped-note": "MAIN STOPPED",
+    "thread-stopped-note": "THREAD STOPPED {thread} {agent_id}",
     "follow-up-ran-on": "RAN ON {model} {effort}",
     "orient-continuation-prompt": "{request_id}\nSUMMARY {summary}\nCARDS {cards}\nTRANSCRIPTS {transcripts}\n"
                                   "MESSAGE {message}",
