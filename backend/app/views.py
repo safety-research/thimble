@@ -5639,7 +5639,7 @@ async def frame_route(c: str, slug: str, request: Request, origin: str | None = 
 
     try:
         media = media_url(origin or f"{request.url.scheme}://{request.url.netloc}", c, slug,
-                          await asyncio.to_thread(hook_auth.media_key, c, slug))
+                          await asyncio.to_thread(hook_auth.media_key, c, slug, hook_auth.read_holder(request.scope)))
     except ValueError as e:
         raise HTTPException(400, str(e)) from None
     derived = await derived_fields(c, slug, view, v)
@@ -5665,8 +5665,9 @@ async def media_route(c: str, slug: str, path: str) -> FileResponse:
 @router.get("/ws/{c}/views/{slug}/media/{key}")
 async def media_key_route(c: str, slug: str, key: str, path: str) -> FileResponse:
     """media_route for the view's frame, which is sandboxed and sends no cookie: the URL carries the view's key
-    (hook_auth.media_key, which frame_route writes into the frame's media URL), which hook_auth.LocalReadGuard lets
-    through and which is checked again here. 404 for any other key, as for a view that is not there."""
+    (hook_auth.media_key, which frame_route writes into the frame's media URL for the browser that loads it), which
+    hook_auth.LocalReadGuard lets through while that browser stays signed in, and which is checked again here. 404 for
+    any other key, as for a view that is not there."""
     from . import hook_auth  # noqa: PLC0415
 
     if not await asyncio.to_thread(hook_auth.media_key_ok, c, slug, key):

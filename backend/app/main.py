@@ -120,6 +120,21 @@ class QuietPolling(logging.Filter):
 if os.environ.get("THIMBLE_ACCESS_LOG", "").strip().lower() != "all":
     logging.getLogger("uvicorn.access").addFilter(QuietPolling())
 
+
+class HideMediaKeys(logging.Filter):
+    """A view's media key (hook_auth.media_key) in a line's text arguments shown as `<key>` (hook_auth.hide_media_keys):
+    uvicorn's access line names the URL of every failed request and the timing line that of a slow one, and the server
+    log goes into a problem report."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple) and any(isinstance(a, str) and "/media/" in a for a in record.args):
+            record.args = tuple(hook_auth.hide_media_keys(a) if isinstance(a, str) else a for a in record.args)
+        return True
+
+
+for _name in ("uvicorn.access", "thimble.timing"):
+    logging.getLogger(_name).addFilter(HideMediaKeys())
+
 ROUTER_MODULES = [
     # storage and the corpus
     "corpus", "transcripts", "source_keys", "source_events", "pdfs", "ledger", "investigation", "notebook", "concepts", "views", "cardtypes",

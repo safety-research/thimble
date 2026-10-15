@@ -858,7 +858,8 @@ async def test_a_view_s_frame_loads_its_media_by_a_key_in_the_url_and_that_key_r
     views.write_view(CORPUS, "shots", reader=THREADS_READER, html=THREADS_HTML,
                      **{**VIEW, "name": "Shots", "claims": ["board.jsonl", "shot.png"]})
     _record_paired(UI_COOKIE_VALUE)
-    key = hook_auth.media_key(CORPUS, "shots")
+    browser = f"browser:{hook_auth._sha(UI_COOKIE_VALUE)}"  # the key is bound to the browser that loads the frame
+    key = hook_auth.media_key(CORPUS, "shots", browser)
     media = f"http://127.0.0.1:8300/api/ws/{CORPUS}/views/shots/media/{key}"
     base = f"/api/ws/{CORPUS}/views/shots/media"
     shot = {"path": "shot.png"}
@@ -875,11 +876,78 @@ async def test_a_view_s_frame_loads_its_media_by_a_key_in_the_url_and_that_key_r
         part = await frame.get(f"{base}/{key}", params=shot, headers={"Range": "bytes=0-3"})
         assert (part.status_code, part.content) == (206, PNG[:4])
         assert (await frame.get(f"{base}/{key}", params={"path": "notes.md"})).status_code == 403, "claimed files only"
-        for url in (f"{base}/{hook_auth.media_key(CORPUS, 'threads')}", f"{base}/{'0' * 32}", f"{base}/x", base):
+        for url in (f"{base}/{hook_auth.media_key(CORPUS, 'threads', browser)}", f"{base}/{'0' * 32}", f"{base}/x",
+                    base):
             assert (await frame.get(url, params=shot)).status_code == 401, url
         assert (await frame.get(f"/api/ws/{CORPUS}/views/shots/frame")).status_code == 401
         assert (await page.get(base, params=shot)).content == PNG, "the page's own route, with the cookie"
         assert (await page.get(f"{base}/{'0' * 32}", params=shot)).status_code == 404, "the route checks the key too"
+
+
+@pytest.mark.real_read_guard
+async def test_a_view_s_media_key_works_only_while_the_browser_or_shot_that_loaded_the_frame_holds(ws, inproc, bound,
+                                                                                                plugin_headers):
+    """hook_auth.media_key is bound to who loaded the frame: a browser's key stops working when that browser is signed
+    out (a sign-in notice's "Sign it out") and every browser's at `thimble unpair`; a shot's when its token ends; the
+    CLI's when the server's token changes. Another browser's key is its own. The server log and a problem report show
+    such a URL without its key."""
+    import logging  # noqa: PLC0415
+
+    import httpx  # noqa: PLC0415
+    from conftest import UI_COOKIE_VALUE, _record_paired  # noqa: PLC0415
+
+    from app import feedback, hook_auth, main  # noqa: PLC0415
+
+    (config.DATA_DIR / CORPUS / "shot.png").write_bytes(PNG)
+    views.write_view(CORPUS, "shots", reader=THREADS_READER, html=THREADS_HTML,
+                     **{**VIEW, "name": "Shots", "claims": ["board.jsonl", "shot.png"]})
+    other = "the-cookie-of-another-browser-in-this-test"
+    _record_paired(UI_COOKIE_VALUE)
+    _record_paired(other)
+    frame_url = f"/api/ws/{CORPUS}/views/shots/frame"
+    base = f"/api/ws/{CORPUS}/views/shots/media"
+    shot = {"path": "shot.png"}
+    transport = httpx.ASGITransport(app=main.create_app())
+
+    def key_in(doc: str) -> str:
+        return doc.split("/views/shots/media/", 1)[1][:32]
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as c:
+        async def frame_key(**kw) -> str:
+            r = await c.get(frame_url, params={"origin": "http://127.0.0.1:8300"}, **kw)
+            assert r.status_code == 200, r.text[:200]
+            return key_in(r.text)
+
+        async def works(key: str) -> bool:
+            return (await c.get(f"{base}/{key}", params=shot)).status_code == 200
+
+        mine = await frame_key(headers={"cookie": f"{hook_auth.ui_cookie()}={UI_COOKIE_VALUE}"})
+        theirs = await frame_key(headers={"cookie": f"{hook_auth.ui_cookie()}={other}"})
+        assert mine != theirs and await works(mine) and await works(theirs)
+        assert hook_auth.sign_out(hook_auth._sha(UI_COOKIE_VALUE)[:12])
+        assert not await works(mine), "signed out: its key is void"
+        assert await works(theirs), "another browser's key is its own"
+        hook_auth.unpair()
+        assert not await works(theirs), "unpaired: every browser's key is void"
+        tok = hook_auth.mint_shot()
+        by_shot = await frame_key(headers={hook_auth.SHOT_HEADER: tok})
+        assert await works(by_shot)
+        hook_auth.drop_shot(tok)
+        assert not await works(by_shot), "the shot's token ended"
+        by_cli = await frame_key(headers=plugin_headers())
+        assert await works(by_cli)
+        from conftest import _record  # noqa: PLC0415
+
+        _record(token="a-new-start-s-token")
+        assert not await works(by_cli), "a new start's token"
+
+    url = f"{base}/{mine}?path=shot.png"
+    access = logging.LogRecord("uvicorn.access", logging.INFO, "", 0, '%s - "%s %s HTTP/%s" %d',
+                               ("127.0.0.1:5", "GET", url, "1.1", 401), None)
+    assert main.HideMediaKeys().filter(access) and access.getMessage().endswith(
+        f'"GET {base}/<key>?path=shot.png HTTP/1.1" 401') and mine not in access.getMessage()
+    text, n = feedback.redact(f"INFO: 127.0.0.1:5 - \"GET {url} HTTP/1.1\" 401")
+    assert n == 1 and mine not in text and "/media/[redacted:view-media-key]?path=shot.png" in text
 
 
 async def test_no_thread_is_read_as_a_question_from_a_view_s_own_box(ws, inproc, bound):

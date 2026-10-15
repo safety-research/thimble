@@ -46,8 +46,9 @@ request), except OPEN_READS. Two narrow credentials stand in where neither can b
 (tools.py, dev.py) runs a headless browser with no cookie, so it carries a shot token (mint_shot) in SHOT_HEADER: random,
 good for SHOT_TTL_S on GET and HEAD alone, kept in memory as its sha256. A view's frame is sandboxed with an opaque
 origin, which the browser sends no SameSite=Strict cookie from, so the one URL it loads, the view's media route, carries
-a key in its path (media_key: an HMAC under SESSION_KEY of the workspace and the view), good for that view's media
-alone. What let a read through is asked again before each later part of its answer goes out, so a browser signed out,
+a key in its path (media_key: an HMAC under SESSION_KEY of the workspace, the view and who loaded the frame), good for
+that view's media alone, and only while the browser that loaded the frame stays signed in (or the shot's token, or
+server.json's token, lives). The server log shows such a URL with `<key>` in its place (hide_media_keys). What let a read through is asked again before each later part of its answer goes out, so a browser signed out,
 or a shot whose token ended, gets nothing more on an event stream it opened before (read_still_allowed).
 """
 from __future__ import annotations
@@ -378,19 +379,59 @@ def shot_proven(headers: Headers, method: str) -> bool:
     return until is not None and until > _now()
 
 
-def media_key(c: str, slug: str) -> str:
-    """The key in the URL of view `slug`'s media route in workspace `c` (module note): the same for every load of the
-    view, so the frame's document, and its ETag, stay the same."""
-    return hmac.new(_session_secret(True), f"view-media\n{c}\n{slug}".encode("utf-8"), hashlib.sha256).hexdigest()[:32]
+def read_holder(scope: dict) -> str:
+    """Who the read `scope` comes from, which a view's media key is bound to (media_key): `browser:<the sha256 of its
+    cookie>` for a signed-in browser, `shot:<the sha256 of the token>` for a live shot token, `token:<the sha256 of
+    server.json's token>` for a hook proof; '' for none of them."""
+    digest = _cookie_hash(Request(scope))
+    if digest:
+        return f"browser:{digest}"
+    got = proven_by(scope)
+    if got is not None and not got[1]:
+        return f"token:{_sha(got[0])}"
+    h = Headers(scope=scope)
+    if shot_proven(h, scope.get("method", "")):
+        return f"shot:{_sha(h.get(SHOT_HEADER, ''))}"
+    return ""
+
+
+def _holders() -> list[str]:
+    """The holders (read_holder) whose media keys work now: each signed-in browser, each live shot token, and
+    server.json's token."""
+    now = _now()
+    with _pair_lock:
+        held = [f"browser:{e['hash']}" for e in _entries()] + [f"shot:{h}" for h, until in _shots.items() if until > now]
+    tok = token()
+    return [*held, f"token:{_sha(tok)}"] if tok else held
+
+
+def _media_mac(secret: bytes, holder: str, c: str, slug: str) -> str:
+    return hmac.new(secret, f"view-media\n{holder}\n{c}\n{slug}".encode("utf-8"), hashlib.sha256).hexdigest()[:32]
+
+
+def media_key(c: str, slug: str, holder: str) -> str:
+    """The key in the URL of view `slug`'s media route in workspace `c` for the frame a read of `holder` (read_holder)
+    loads (module note): the same for every load by that browser, so the frame's document, and its ETag, stay the
+    same, and void once the browser is signed out, the shot's token ends or the server starts with a new token. A
+    holder of '' gets a key that never works."""
+    return _media_mac(_session_secret(True), holder, c, slug)
 
 
 def media_key_ok(c: str, slug: str, key: str) -> bool:
-    """Whether `key` is media_key's for view `slug` of workspace `c`."""
+    """Whether `key` is media_key's for view `slug` of workspace `c` and a holder whose keys work now (_holders)."""
     secret = _session_secret(False)
     if not secret or not key:
         return False
-    want = hmac.new(secret, f"view-media\n{c}\n{slug}".encode("utf-8"), hashlib.sha256).hexdigest()[:32]
-    return _same(key, want)
+    return any(_same(key, _media_mac(secret, h, c, slug)) for h in _holders())
+
+
+# a view's media key where a URL shows it in text, such as a line of the server log (hide_media_keys)
+MEDIA_KEY_TEXT = re.compile(r"(/views/[^/?#\s]+/media/)[0-9a-f]{32}")
+
+
+def hide_media_keys(text: str) -> str:
+    """`text` with each view media key in a URL (MEDIA_KEY_TEXT) shown as `<key>`."""
+    return MEDIA_KEY_TEXT.sub(r"\1<key>", text)
 
 
 def media_proven(path: str) -> bool:

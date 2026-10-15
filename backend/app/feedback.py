@@ -113,6 +113,8 @@ SECRET_PATTERNS: list[tuple[str, re.Pattern[str], bool]] = [
     ("jwt", re.compile(r"eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}"), True),
     ("bearer-token", re.compile(r"(?i)bearer\s+(?P<v>[A-Za-z0-9._~+/\-]{20,}=*)"), True),
     ("url-password", re.compile(r"://[^/\s:@\"']+:(?P<v>[^/\s@\"']+)@"), False),
+    # the key in the URL of a view's media route (app/hook_auth.py media_key), which a log line may name
+    ("view-media-key", re.compile(r"/views/[^/?#\s\"']+/media/(?P<v>[0-9a-f]{32})(?![0-9a-f])"), False),
     # a value assigned to a name that says it is secret, in code, an env line or JSON (its quotes escaped once or more)
     ("secret", re.compile(
         r"(?i)(?:api[_\-]?key|apikey|secret|password|passwd|access[_\-]?key|private[_\-]?key|credential|"
