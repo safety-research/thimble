@@ -9,10 +9,11 @@ import { subagentNotes, SubagentNotes } from '../../src/chat/AgentCard.tsx'
 import { pickItems, threadNodes } from '../../src/chat/threads.ts'
 import { TERMINAL_WAIT, terminalWaits, useTerminalWaits } from '../../src/chat/waiting.ts'
 import { ThreadTree } from '../../src/components/ThreadTree.tsx'
-import { buildLabel } from '../../src/files/ViewsBar.tsx'
+import { ViewChip } from '../../src/chat/ViewChip.tsx'
 import { api } from '../../src/lib/api'
 import { bus } from '../../src/lib/bus'
-import type { ChatMeta, PermissionRequest } from '../../src/lib/types.ts'
+import { refreshProposals } from '../../src/lib/proposals.ts'
+import type { ChatMeta, PermissionRequest, Proposal } from '../../src/lib/types.ts'
 import { checkRunLabel } from '../../src/report/Checks.tsx'
 import { WriteAction } from '../../src/report/WriteAction.tsx'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -128,12 +129,16 @@ describe('where an agent waiting in the terminal says so', () => {
     expect(labels).toContain('Waiting for you')
   })
 
-  test("a report check's run and a view build name the terminal in their words", () => {
+  test("a report check's run and a view build's chip name the terminal in their words", async () => {
     expect(checkRunLabel('Unverifiable', { chat: 'c1' }, true)).toBe('Unverifiable is waiting for your answer in the terminal: open its run')
     expect(checkRunLabel('Unverifiable', { chat: 'c1' }, false)).toBe('Unverifiable is running: open its run')
-    expect(buildLabel('building', 'terminal')).toBe(TERMINAL_WAIT)
-    expect(buildLabel('building', true)).toBe('Waiting for permission')
-    expect(buildLabel('building', false)).toBe('Building')
-    expect(buildLabel('queued', 'terminal')).toBe('Queued')
+    const building = { slug: 'posts', name: 'Posts', description: '', task: '', claims: [], arrangement: '', proposed_by: 'proposer', status: 'building', ts: '', chat: 'build-1' } as unknown as Proposal
+    vi.spyOn(api, 'proposals').mockResolvedValue([building])
+    vi.spyOn(api, 'chats').mockResolvedValue([meta({ id: 'main', kind: 'main', role: 'main', title: 'main', parent: null, permissions: [ask('h1', 'build-1')] }), meta({ id: 'build-1', role: 'dev', status: 'running' })])
+    await act(async () => void (await refreshProposals('ws-tw-chip')))
+    const el = await mount(<ViewChip ws="ws-tw-chip" slug="posts" name="Posts" />)
+    await settle()
+    expect(el.querySelector('.view-chip-word')?.textContent).toBe(TERMINAL_WAIT.toLowerCase())
+    expect(el.querySelector('.view-chip-wait')?.getAttribute('aria-label')).toBe(TERMINAL_WAIT)
   })
 })

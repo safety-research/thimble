@@ -9,7 +9,6 @@ import { buildStage } from '../../src/chat/ChatPanel.tsx'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ChipRow } from '../../src/chat/Rows.tsx'
 import { ViewChip, buildingText, failedWhy, queuedText } from '../../src/chat/ViewChip.tsx'
-import { ProposalOption } from '../../src/files/ViewsBar.tsx'
 import { bus } from '../../src/lib/bus.ts'
 import { invalidateSettings } from '../../src/lib/models.ts'
 import { refreshProposals } from '../../src/lib/proposals.ts'
@@ -80,11 +79,12 @@ describe('a view build\'s chip', () => {
     expect(posted).toEqual([['/api/ws/jobs/views/posts/build', { model: 'claude-opus-5-5', effort: 'max' }]])
   })
 
-  test("the views bar's warning on a build main's quit stopped says so, as the chip does (live check L14)", async () => {
+  test("the chip's ✕ on a build main's quit stopped says so on hover (live check L14; the views bar shows no build)", async () => {
+    proposals = [P('posts', { status: 'failed', stopped_by: 'quit', error: 'thimble stopped when its Claude Code session ended' })]
+    const el = await chip('posts')
     vi.useFakeTimers()
     try {
-      const el = await mount(<ProposalOption ws="jobs" p={P('posts', { status: 'failed', stopped_by: 'quit', error: 'thimble stopped when its Claude Code session ended' })} onDismiss={() => undefined} size="md" />)
-      const tipped = el.querySelector<HTMLElement>('.files-proposal-opt .tipped')!
+      const tipped = el.querySelector<HTMLElement>('.view-chip-why')!
       await act(async () => {
         tipped.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' }))
         tipped.dispatchEvent(new PointerEvent('pointerenter', { bubbles: false, pointerType: 'mouse' }))
