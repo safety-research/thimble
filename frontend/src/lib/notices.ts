@@ -107,7 +107,7 @@ export function showPageNotice(n: Notice): void {
   touchAll()
 }
 
-/** The link's sign-in code was used, replaced or expired (POST /ui/key answered 410). */
+/** The link's sign-in code was used, replaced or expired (POST /ui/key answered 410, or refused it otherwise). */
 export function showCodeGone(): void {
   showPageNotice({ id: `${PAGE_NOTICE}code-gone`, key: `${PAGE_NOTICE}code-gone`, kind: 'sign-in', text: CODE_GONE_TEXT })
 }
