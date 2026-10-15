@@ -967,3 +967,25 @@ def test_why_not_names_the_security_plugin_s_allow_managed_mods_only(monkeypatch
     assert module_bridge.why_not(CORPUS) == "your organization's managed settings set allowManagedModsOnly"
     monkeypatch.setattr(cc_plugin, "managed", lambda environ=None: None)
     assert module_bridge.why_not(CORPUS) == module_bridge.NOT_LOADED
+
+
+def test_why_not_names_the_shell_s_proxy_when_no_hello_came():
+    """When main's /thimble found a shell proxy that NO_PROXY does not keep off 127.0.0.1 and localhost (its `setup`
+    notice `proxy`, events.session_route) and no hello of the hooks module came, a start refused for want of the module
+    names the proxy, not that Claude Code did not load the module. Once a hello came, or once /thimble no longer finds
+    the proxy, it does not."""
+    from app import events
+
+    proxy = ("your shell sets a proxy without 127.0.0.1 and localhost in NO_PROXY, so thimble's hooks module cannot "
+             "reach thimble's server")
+    _launch()
+    assert module_bridge.why_not(CORPUS) == module_bridge.NOT_LOADED
+    events._setup(CORPUS, events.SessionBody(session=MAIN, warnings=["proxy"]))
+    assert module_bridge.why_not(CORPUS) == proxy
+    assert tools.hint("start-refused-no-module", reason=module_bridge.why_not(CORPUS)).startswith(
+        f"thimble's agents can't start in this session: {proxy}. ")
+    module_bridge._bridges[CORPUS] = module_bridge._Bridge(session=MAIN, hello_at=time.time())
+    assert module_bridge.why_not(CORPUS).startswith(module_bridge.NOT_ANSWERING), "a hello came: the proxy let it by"
+    module_bridge._bridges.clear()
+    events._setup(CORPUS, events.SessionBody(session=MAIN, warnings=[]))
+    assert module_bridge.why_not(CORPUS) == module_bridge.NOT_LOADED

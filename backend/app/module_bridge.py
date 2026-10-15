@@ -142,6 +142,10 @@ NOT_LOADED = "Claude Code did not load thimble's hooks module"
 NOT_ANSWERING = "Your Claude Code session's thimble module did not answer"
 NOT_MAIN = "this Claude Code session is not thimble's main session in this folder"
 NO_MAIN = "thimble knows no main session in this folder yet"
+# no hello came and main's /thimble found a shell proxy that NO_PROXY does not keep off thimble's server (its `setup`
+# notice cli.PROXY_KEY, events.session_route), which the module's requests to 127.0.0.1 then go to
+PROXY_IN_WAY = ("your shell sets a proxy without 127.0.0.1 and localhost in NO_PROXY, so thimble's hooks module "
+                "cannot reach thimble's server")
 # main's session as launch.json names it has not opened thimble yet: the launcher's first prompt, /thimble, attaches it
 # (session.current) only after the module's first hello at session start, and its `claude` process is known only then
 # (session.main_pid), unless launch.json's pid names it (_launched)
@@ -458,8 +462,9 @@ def live(c: str) -> bool:
 
 def why_not(c: str) -> str:
     """'' when the module is live, else why thimble's agents cannot start: the reason its hello was refused, what it
-    reported, THIMBLE_NO_MODULE or the managed settings that turn hooks modules off, or that Claude Code did not load
-    the module (or that it stopped polling)."""
+    reported, THIMBLE_NO_MODULE or the managed settings that turn hooks modules off, that it stopped polling, or, when
+    no hello came, the shell's proxy main's /thimble found (PROXY_IN_WAY) or that Claude Code did not load the
+    module."""
     if live(c):
         return ""
     file = transport(c) == FILE
@@ -491,7 +496,17 @@ def why_not(c: str) -> str:
         return f"{NOT_ANSWERING}; " + ("its session ended" if out.get("gone") else "it stopped writing its heartbeat")
     if b.session and b.hello_at:
         return f"{NOT_ANSWERING}; it stopped polling"
+    if not file and _proxy_found(c):
+        return PROXY_IN_WAY
     return NOT_LOADED
+
+
+def _proxy_found(c: str) -> bool:
+    """Whether main's /thimble found a shell proxy that NO_PROXY does not keep off thimble's server: the open `setup`
+    notice cli.PROXY_KEY of workspace `c` (events.session_route), which a later /thimble that finds none clears."""
+    from . import cli, notices  # noqa: PLC0415
+
+    return any(n.get("kind") == "setup" and n.get("key") == cli.PROXY_KEY for n in notices.open_notices(c))
 
 
 def main_meta(c: str) -> dict[str, Any]:
