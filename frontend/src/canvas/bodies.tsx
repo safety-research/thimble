@@ -1,8 +1,9 @@
 // What a card shows between its question and its takeaway, by kind: a plot or table (components/Outputs), shell output,
-// a note's text, an example's quoted records, a label's values and examples, a timeline or diagram (DataViz), a custom
+// a note's text, an example's quoted records, a label's values, a timeline or diagram (DataViz), a custom
 // card's frame, a plan's steps (PlanBody). `width` is the room the body has.
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { ChatMarkdown } from '../chat/markdown'
+import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
 import { CodeText } from '../components/Code'
 import { CARD_MIME, chartLabels, Output, outIndex, primaryArtifact } from '../components/Outputs'
@@ -10,27 +11,27 @@ import { refIcon, refTone } from '../components/RefChip'
 import { Icon } from '../components/Icon'
 import { Spinner } from '../components/Spinner'
 import { useTooltip } from '../components/Tooltip'
-import { classesOf, colourVar, globPatterns, isFilesLabel, isMultiClass, mainColour, marksOf } from '../files/labels'
+import { classesOf, colourVar, isFilesLabel, isMultiClass, mainColour } from '../files/labels'
 import { ReadCutLine } from '../files/ReadCutLine'
-import { api, labelApi } from '../lib/api'
+import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { mediaOf, mediaUrl, type MediaRef } from '../lib/media'
 import { loadSettings, modelLabel } from '../lib/models'
 import { addressLabel, hiddenPath } from '../lib/refs'
 import { teleport } from '../lib/teleport'
 import { track } from '../lib/telemetry'
-import type { Cell, ConceptDetail, LabelRowText, ResolvedRef } from '../lib/types'
+import type { Cell, Concept, ConceptDetail, ResolvedRef } from '../lib/types'
 import { CanvasContext } from './context'
 import { CustomFrame, DatasetView } from './DataViz'
 import { conceptName, type ConceptDetailState } from './concepts'
 import { PlanBody } from './PlanBody'
-import { exampleCandidates, exampleParts, labelShares, labelValues, noMatchValues, pickExamples, shortGlob, shownValues, unitTotal, unitWord, unmatchedExample, wholeUnit, type ValueExample } from './details'
+import { labeledTotal, labelIdentity, labelShares, labelValues, shownValues, unitWord } from './details'
 import { resolvedOf } from './excerpts'
 import { FACT_KINDS, recordFacts } from './facts'
 import { filterIs, kindOf, scopeForUnit } from './layout'
 import { QuoteParts, RecordFacts } from './Quote'
 import { TypeCard } from './TypeCard'
-import { entryParts, exampleEntries, jsonRecordParts, plainMarkdown, quoteLine, quoteParts, type ExampleEntry } from './quotes'
+import { entryParts, exampleEntries, type ExampleEntry } from './quotes'
 
 const fail = (e: unknown) => bus.emit('toast', { text: (e as Error)?.message || String(e), kind: 'error' })
 
@@ -55,7 +56,7 @@ export function CardBody({ cell, width, label, big = false }: { cell: Cell; widt
     }
     case 'label': {
       const concept = typeof payload.concept === 'string' ? payload.concept : ''
-      return concept ? <LabelBody conceptId={concept} concept={label.concept} error={label.error} title={cell.title} /> : null
+      return concept ? <LabelBody cellId={cell.id} conceptId={concept} concept={label.concept} error={label.error} /> : null
     }
     case 'custom': {
       const html = typeof payload.html === 'string' ? payload.html : ''
@@ -264,60 +265,6 @@ function Address({ r, onOpen }: { r: string; onOpen: (r: string) => void }) {
   )
 }
 
-/** A JSON record's text as one line of its own words (canvas/quotes), whole or cut short as a label's row keeps it; the
- * text itself when it is not JSON. */
-function recordLine(text: string): string {
-  const parts = jsonRecordParts(text)
-  return (parts && quoteLine(parts)) || text
-}
-
-/** the characters of a value's one example the label card keeps (backend concepts.MATCH_WINDOW) */
-const LABEL_EXAMPLE_MAX = 240
-/** the rows of each value the card picks its example from, so a value whose first row repeats another value's example
- * can show its next (backend render.LABEL_ROWS) */
-const EXAMPLE_ROWS = 3
-
-/** A row's example: the words around its match when the server found them, else its own text, else the record's own
- * words (quoteLine). Without a match, units whose text only shows how they begin give none (unmatchedExample). */
-async function exampleOf(ws: string, row: LabelRowText, unit: string | undefined): Promise<ValueExample | null> {
-  const own = typeof row.text === 'string' ? row.text.trim() : ''
-  if (own && row.match) return { text: plainMarkdown(own), match: plainMarkdown(row.match) }
-  if (own) return unmatchedExample(unit, own, row.ref) && { text: own.startsWith('{') ? recordLine(own) : plainMarkdown(own) }
-  if (unit === 'cell' || unit === 'span' || wholeUnit(unit, row.ref)) return null
-  const res = await resolvedOf(ws, row.ref)
-  return res ? unmatchedExample(unit, quoteLine(quoteParts(res)), row.ref) : null
-}
-
-/**
- * One example per value for a label card, from the first EXAMPLE_ROWS rows of each value, none repeating another
- * value's (pickExamples).
- */
-function useValueExamples(ws: string, conceptId: string, values: readonly string[], labels: readonly string[], unit: string | undefined, stamp: string): Record<string, ValueExample> {
-  const [examples, setExamples] = useState<Record<string, ValueExample>>({})
-  const key = values.join('\u0000')
-  const labelKey = labels.join('\u0000')
-  useEffect(() => {
-    let alive = true
-    setExamples({})
-    if (!conceptId || !key) return
-    const vals = key.split('\u0000')
-    const noMatch = noMatchValues(labelKey ? labelKey.split('\u0000') : [])
-    void Promise.all(
-      vals.map((v) =>
-        labelApi
-          .rows(ws, conceptId, { value: v, limit: EXAMPLE_ROWS, offset: 0 })
-          .then((r) => Promise.all(r.rows.map((row) => exampleOf(ws, row, unit).catch(() => null))))
-          .then((xs) => exampleCandidates(v, noMatch, xs.filter((x): x is ValueExample => !!x)))
-          .catch(() => [] as ValueExample[]),
-      ),
-    ).then((lists) => alive && setExamples(pickExamples(vals, Object.fromEntries(vals.map((v, i) => [v, lists[i]])))))
-    return () => {
-      alive = false
-    }
-  }, [ws, conceptId, key, labelKey, unit, stamp])
-  return examples
-}
-
 /** The model a prompt label judges with: the labels role's, else main's, from the workspace settings. */
 function useLabelModel(ws: string, on: boolean): string {
   const [model, setModel] = useState('')
@@ -343,13 +290,32 @@ export const asksQuestion = (title: string | undefined, name: string): boolean =
   return !!t && t !== name.trim().toLowerCase()
 }
 
+/** The small tag that says a card is a label's card, first on its label row (LabelHead, CardFace CardLabels). */
+export function LabelKindTag() {
+  return <span className="bcell-kind-tag">Label</span>
+}
+
+/** What a label card's label row says after the label's name (details labelIdentity): how the label is defined, what it
+ * ran on, and how many units its shares are of, in one quiet line; the hover names every file pattern whole. */
+export function LabelMeta({ label: k }: { label: Pick<Concept, 'kind' | 'unit' | 'glob' | 'n_labeled' | 'counts' | 'trial' | 'model'> }) {
+  const { ws } = useContext(CanvasContext)
+  const model = useLabelModel(ws, k.kind === 'prompt' && !k.model)
+  const id = labelIdentity(k, k.kind === 'prompt' && (k.model || model) ? modelLabel(k.model || model) : '')
+  const parts = [id.how && <span key="how">{id.how}</span>, <span key="where" title={id.full !== id.where ? id.full : undefined}>{id.where}</span>, id.units && <span key="units">{id.units}</span>].filter(Boolean)
+  return <span className="bcell-label-meta">{parts.flatMap((part, i) => (i ? [' · ', part] : [part]))}</span>
+}
+
 /**
- * A label card's body, drawn by a fixed template (a label card is deterministic, so no model checks it): the file glob
- * when the card has a question of its own, the value table (value · units · share, each value a button that sets the
- * scope's filter), one example per value with the words that earned it highlighted, and a `kind · show rule` line that
- * opens the classifier's prompt, pattern or code. While a run goes on, the line says how far it has come.
+ * A label card's body, drawn by a fixed template (a label card is deterministic, so no model checks it); the label row
+ * above it names the label (LabelHead, CardFace CardLabels). The value table: value · units · share, each value a
+ * button that sets the scope's filter, every value's share of the same total (details labelShares); the units that
+ * total is of the label row states. Under it the Rule disclosure, closed, which opens the classifier's prompt, pattern
+ * or code, and Definition and records, which opens the label's definition and its records under each value in the
+ * card's details (DetailPanel LabelDetails). The card shows no record of the corpus itself (Matt 2026-10-15: "examples
+ * in label card should always be collapsed by default, and we have to be very careful here"). While a run goes on, a
+ * line says how far it has come.
  */
-function LabelBody({ conceptId, concept, error, title }: { conceptId: string; concept: ConceptDetail | null; error: string | null; title?: string }) {
+function LabelBody({ cellId, conceptId, concept, error }: { cellId: string; conceptId: string; concept: ConceptDetail | null; error: string | null }) {
   const ctx = useContext(CanvasContext)
   const { ws } = ctx
   const [pending, setPending] = useState<string | null>(null)
@@ -359,13 +325,10 @@ function LabelBody({ conceptId, concept, error, title }: { conceptId: string; co
   const run = (known as ConceptDetail | null)?.run
   const running = run?.status === 'running'
   const values = known ? shownValues(labelValues(known.labels, counts), counts, running) : []
-  const examples = useValueExamples(ws, conceptId, values, known?.labels ?? [], known?.unit, `${known?.n_labeled ?? 0}:${running ? 'run' : ''}`)
-  const model = useLabelModel(ws, known?.kind === 'prompt' && !known?.model)
   if (error && !known) return <div className="bcell-plainerror">{error}</div>
   if (!known) return <div className="bcell-label" data-body="" data-settled="false" />
   const scope = scopeForUnit(known.unit)
-  const total = known.n_labeled ?? Object.values(counts).reduce((a, b) => a + b, 0)
-  const shares = labelShares(known.labels, counts, total)
+  const shares = labelShares(values, counts, labeledTotal(known))
   const noCounts = running && values.every((v) => !counts[v])
   const toggle = async (value: string) => {
     if (!scope || pending) return
@@ -385,22 +348,18 @@ function LabelBody({ conceptId, concept, error, title }: { conceptId: string; co
     }
   }
   const spec = (known.spec || known.description || '').trim()
-  const shown = values.filter((v) => examples[v])
   const files = isFilesLabel(known)
   const classes = files ? new Map(classesOf(known).map((c) => [c.name, c])) : null
-  const glob = files && ctx.concepts.has(conceptId) && asksQuestion(title, conceptName(ctx.concepts, conceptId)) ? shortGlob(known.glob) : null
-  const how = [known.kind, known.kind === 'prompt' && (known.model || model) ? modelLabel(known.model || model) : ''].filter(Boolean).join(' · ')
   // the whole files or runs its last run read only in part: the concepts list's `last_run`, a card's detail's last kept run
   const cut = (known.last_run ?? (known as ConceptDetail).applications?.at(-1))?.cut
   const done = run?.done ?? run?.labeled
   const progress = running && typeof done === 'number' ? (typeof run?.total === 'number' && run.total > 0 ? `${done.toLocaleString()} of ${run.total.toLocaleString()} ${unitWord(known.unit, run.total)}` : `${done.toLocaleString()} ${unitWord(known.unit, done)}`) : ''
+  const records = () => {
+    track('ui-click', { target: `cell:${cellId}`, detail: { action: 'label-records' } })
+    ctx.openDetail?.(cellId)
+  }
   return (
     <div className="bcell-label" data-body="" data-settled="true">
-      {glob?.short && (
-        <span className="bcell-label-glob" title={glob.full}>
-          {glob.short}
-        </span>
-      )}
       {values.length > 0 && (
         <table className="bcell-values">
           <thead>
@@ -424,79 +383,57 @@ function LabelBody({ conceptId, concept, error, title }: { conceptId: string; co
                     </button>
                   </td>
                   <td className="num">{noCounts ? '—' : (counts[v] ?? 0).toLocaleString()}</td>
-                  <td className="num">{noCounts ? '—' : shares.share[v]}</td>
+                  <td className="num">{noCounts ? '—' : shares[v]}</td>
                 </tr>
               )
             })}
           </tbody>
         </table>
       )}
-      {values.length > 0 && !noCounts && shares.negatives.size > 0 && (
-        <div className="bcell-values-total">
-          {shares.matched.toLocaleString()} of {unitTotal(total, known.unit)} matched
-        </div>
-      )}
       {!running && cut && <ReadCutLine cut={cut} className="bcell-label-cut" />}
-      {shown.length > 0 && (
-        <ul className="bcell-label-examples">
-          {shown.map((v) => {
-            const part = exampleParts(examples[v], LABEL_EXAMPLE_MAX)
-            return (
-              <li key={v} className="bcell-label-example">
-                <span className="bcell-label-example-value">{v}</span>
-                {part.match ? (
-                  <span className="bcell-label-example-text">
-                    <span className="bcell-q-ctx">{part.before}</span>
-                    <span className="bcell-q-passage hl">{part.match}</span>
-                    <span className="bcell-q-ctx">{part.after}</span>
-                  </span>
-                ) : (
-                  <span className="bcell-label-example-text">{part.before}</span>
-                )}
-              </li>
-            )
-          })}
-        </ul>
-      )}
-      {spec && (
-        <div className="bcell-label-how">
-          <button type="button" className="bcell-label-rule-toggle" aria-expanded={ruleOpen} onMouseDown={(e) => e.stopPropagation()} onClick={() => setRuleOpen((o) => !o)}>
-            {how} · {ruleOpen ? 'hide rule' : 'show rule'}
-          </button>
-          {ruleOpen && (
-            <div className="bcell-label-def">
-              {known.kind === 'prompt' ? (
-                <q className="bcell-label-prompt">{spec}</q>
-              ) : (
-                <Clamp max={LABEL_SPEC_MAX}>
-                  <pre className="bcell-label-spec">{spec}</pre>
-                </Clamp>
-              )}
-            </div>
-          )}
-        </div>
-      )}
       {running && (
         <div className="bcell-label-run">
           <Spinner size={10} label="applying" />
           {progress ? `applying · ${progress}` : 'applying'}
         </div>
       )}
+      <div className="bcell-label-foot">
+        {spec && (
+          <button type="button" className="bcell-label-rule-toggle" aria-expanded={ruleOpen} onMouseDown={(e) => e.stopPropagation()} onClick={() => setRuleOpen((o) => !o)}>
+            <Icon name={ruleOpen ? 'chevron-down' : 'chevron-right'} size={12} />
+            Rule ({known.kind})
+          </button>
+        )}
+        <Button variant="ghost" size="sm" icon="panel-right" className="bcell-label-records" onMouseDown={(e) => e.stopPropagation()} onClick={records}>
+          Definition and records
+        </Button>
+      </div>
+      {spec && ruleOpen && (
+        <div className="bcell-label-def">
+          {known.kind === 'prompt' ? (
+            <q className="bcell-label-prompt">{spec}</q>
+          ) : (
+            <Clamp max={LABEL_SPEC_MAX}>
+              <pre className="bcell-label-spec">{spec}</pre>
+            </Clamp>
+          )}
+        </div>
+      )}
     </div>
   )
 }
 
-/** A label card's head: the square (the label's colour for a label over files, else ink) and the label's name in mono,
- * and where it applies (for a label over files, what it marks and its glob). */
-export function LabelHead({ conceptId }: { conceptId: string }) {
+/** A label card's head when the card has no question of its own: the Label tag, the square (the label's colour for a
+ * label over files, else ink) and the label's name in mono, then what the label row says of it (LabelMeta). `detail`
+ * is the card's own copy of the label, else the board's list's. */
+export function LabelHead({ conceptId, detail }: { conceptId: string; detail?: Concept | null }) {
   const ctx = useContext(CanvasContext)
-  const k = ctx.concepts.get(conceptId)
-  const scope = scopeForUnit(k?.unit)
+  const k = detail ?? ctx.concepts.get(conceptId)
   const files = !!k && isFilesLabel(k)
-  const where = k && files ? ['label', scope, `${marksOf(k)}s`, globPatterns(k.glob).join(', ')] : ['label', scope, k ? unitWord(k.unit, 2) : '']
   return (
     <span className="bcell-label-head">
       <span className="bcell-label-name">
+        <LabelKindTag />
         {files && isMultiClass(classesOf(k)) ? (
           <Icon name="label" size={11} className="bcell-label-tag" style={{ color: mainColour(k) }} />
         ) : (
@@ -504,7 +441,7 @@ export function LabelHead({ conceptId }: { conceptId: string }) {
         )}
         {conceptName(ctx.concepts, conceptId)}
       </span>
-      <span className="bcell-label-where">{where.filter(Boolean).join(' · ')}</span>
+      {k && <LabelMeta label={k} />}
     </span>
   )
 }

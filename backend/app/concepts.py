@@ -161,7 +161,7 @@ ROWS_MAX = 2_000
 EXAMPLES_MAX = 8          # the analyst's latest values every prompt run carries as few-shot examples
 EXAMPLE_TEXT_MAX = 600    # chars of an example's text shown to the model
 MATCH_TEXT_MAX = 2000     # chars of a unit's text searched for the words that earned its value (refs.EXCERPT_MAX)
-MATCH_WINDOW = 240        # chars of a unit's text shown around those words (canvas/bodies.tsx LABEL_EXAMPLE_MAX)
+MATCH_WINDOW = 240        # chars of a unit's text shown around those words
 MATCH_BEFORE = 60         # of them, at most, before the words
 CHANGE_KINDS = ("redefined", "corrected", "ran")  # what a change to a label's rows is (note_change)
 CHANGES_KEPT = 20         # changes kept on a label, which a stale card's tag reads what changed from
@@ -4033,8 +4033,10 @@ def resolve_concept_ref(corpus: Path | str, ref: str) -> dict:
 
 
 def label_share(count: int, total: int) -> str:
-    """A value's share of the labeled units as the label card's table writes it (frontend canvas/details.labelShare):
-    whole percents, one decimal at the ends (0.3%, 99.7%); '' with no total."""
+    """A value's share of the labeled units as a `concept:<id>/<value>` excerpt writes it: whole percents, one decimal
+    at the ends (0.3%, 99.7%); '' with no total. The label card's table writes each share in whole percents rounded so
+    the shares add up to 100% (frontend canvas/details.labelShares), so a share under 10% or over 90% can read
+    otherwise there."""
     if total <= 0 or count < 0:
         return ""
     p = count / total * 100
