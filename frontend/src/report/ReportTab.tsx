@@ -2,7 +2,8 @@
 // drawn as the Files views bar draws its views (Segmented), + New
 // (DocMenus.tsx), Export (ExportMenu.tsx), the story's Read, the lock note (LockNote.tsx), History (History.tsx) and the primary action,
 // Write or Revise (WriteAction.tsx, where Revise asks first), which asks the analyst's session for the document (a
-// `write` browser event; `report` stream events follow it). A failed write stays on its document (writeFailures.ts) with Retry until dismissed or written. A document
+// `write` browser event; `report` stream events follow it). While a writer of the document runs, Stop stands beside
+// Writing (WriteAction.tsx StopWriter). A failed write stays on its document (writeFailures.ts) with Retry until dismissed or written. A document
 // not written yet is its frame (GET …/frame). The views' module (Documents.tsx) is imported once in an effect rather than
 // with React.lazy, whose Suspense retry can stall; documents are kept by slug so a switch never shows an empty body.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -30,7 +31,7 @@ import type { HistoryRow, HistoryView } from './historyModel'
 import { LockNote } from './LockNote'
 import { ExportMenu } from './ExportMenu'
 import { docKey, docLabel, labelReadDocument, ownType, rendererOf, reportFilterSets, SLUG, switcherItems } from './model'
-import { WriteAction } from './WriteAction'
+import { StopWriter, WriteAction } from './WriteAction'
 import { failedDetail, failedReport, failedText, noteRefusal, useWriteFailures, useWriteRefusals, WRITE_RETRY_NOTE, writingAfter } from './writeFailures'
 import { RefusedCard } from '../chat/Refused'
 import { ApiErrorCard } from '../chat/ApiError'
@@ -392,6 +393,7 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
         {written && <ExportMenu ws={ws} slug={slug} page={isPage} />}
         {isPage && load.state !== 'loading' && <Button variant="icon" icon="code" title="Code" aria-label="Code" active={drawer || load.state === 'none'} disabled={load.state === 'none'} onClick={() => setDrawer((d) => !d)} />}
         {written && <LockNote doc={bodyDoc} root={root} />}
+        {writer && <StopWriter key={writer.id} ws={ws} chat={writer.id} />}
         <WriteAction
           name={ownType(slug) ? docLabel(slug, types) : docLabel(slug, types).toLowerCase()}
           written={written}

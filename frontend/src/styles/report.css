@@ -505,6 +505,10 @@
 .wu-bar .btn-primary {
   margin-left: 6px;
 }
+/* Stop beside Writing while a writer runs */
+.wu-bar .wu-stop {
+  flex: none;
+}
 .wu-bar > .chip {
   margin-right: 4px;
 }
