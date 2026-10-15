@@ -25,6 +25,9 @@ export interface TextRow {
   kind: 'text'
   index: number
   text: string
+  /** Claude Code's API error line, as the server read it from its record (backend session.api_error_class): the
+   * failure's class, so the row is an error card whatever its words (withApiErrors) */
+  apiError?: string
 }
 export interface ToolResult {
   summary: string
@@ -89,6 +92,8 @@ export interface ErrorRow {
   index: number
   message: string
   errorKind?: string
+  /** an API error's class, as the server read it from Claude Code's record (failureOf), which the card names */
+  failure?: ApiFailure
   detail?: string
   /** an API error a view build waits out: the seconds it waits before it goes on (capacityNote) */
   wait?: number
@@ -203,8 +208,13 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
           rows.push({ kind: 'note', index, text: stage })
           return
         }
+        // Claude Code's API error line, which the server marked by its record: a row of its own
+        if (typeof e.api_error === 'string' && e.api_error) {
+          into.push({ kind: 'text', index, text: e.delta, apiError: e.api_error })
+          return
+        }
         const last = into[into.length - 1]
-        if (last && last.kind === 'text' && !wholeMessage(e)) last.text += e.delta
+        if (last && last.kind === 'text' && !last.apiError && !wholeMessage(e)) last.text += e.delta
         else into.push({ kind: 'text', index, text: e.delta })
         return
       }
@@ -1276,11 +1286,16 @@ export const isApiError = (text: string): boolean => text.trim().startsWith(API_
  * refusal by Claude's safeguards among them. */
 const TRAILING_API_ERROR = /(?:^|\s)(API Error: (?:Repeated \d{3}|\d{3} \{|Server error|Connection error|Rate limit|Request timed out|Request was aborted|[^\n]{0,40}overloaded|[^\n]{0,60}safeguards|[^\n]{0,100}Usage Policy|Claude can.t help with this)[\s\S]*)$/
 
+/** Claude Code 2.1.300's error lines that do not start with "API Error" (a sign-in, a model the account cannot use),
+ * as the whole of a text: what a record from before the server marked them (`api_error`) shows, and a failed run's
+ * result. */
+const WHOLE_API_ERROR = /^(?:Not logged in · Please run \/login|Please run \/login · API Error: \d{3}\b[^\n]*|Failed to authenticate\. API Error: \d{3}\b[^\n]*|Invalid API key · [^\n]*|There's an issue with the selected model \([^\n]*)$/
+
 /** Where Claude Code's API error line begins in a text: 0 when the text is the line, the offset of a line that ends a
  * reply cut short, -1 for none. Pure. */
 export function apiErrorAt(text: string): number {
   const t = text.trimEnd()
-  if (isApiError(t)) return t.length - t.trimStart().length
+  if (isApiError(t) || WHOLE_API_ERROR.test(t.trim())) return t.length - t.trimStart().length
   const m = TRAILING_API_ERROR.exec(t)
   return m ? t.length - m[1].length : -1
 }
@@ -1303,6 +1318,10 @@ const CONNECTION_TEXT = /connection error|connection reset|connection refused|ec
 const REFUSED_TEXT = /safeguards|usage polic|can['’]t help with this/i
 /** Claude Code's refusal that takes the session with it: only a new session goes on. */
 const NEW_SESSION_TEXT = /start a new session/i
+/** Claude Code 2.1.300's lines of a sign-in that failed and of a model the account cannot use, which name no status
+ * ("Not logged in · Please run /login", "There's an issue with the selected model (…)") */
+const AUTH_TEXT = /not logged in|please run \/login|invalid api key|failed to authenticate|authentication_failed|oauth token/i
+const NOT_FOUND_TEXT = /issue with the selected model|model_not_found/i
 
 /** What an API error says failed, and the HTTP status it names (`Repeated 529 Overloaded errors`: 529), from Claude
  * Code's error line or the server's words for it; the same patterns the backend's retry.transient_class reads. Pure. */
@@ -1318,14 +1337,24 @@ export function apiFailure(text: string): { failure: ApiFailure; status: number 
         ? FAILURE_OF_STATUS[status]
         : body
           ? FAILURE_OF_BODY[body]
-          : /rate[ _-]?limit/i.test(text)
-            ? 'rate_limited'
-            : /server error/i.test(text)
-              ? 'server_error'
-              : CONNECTION_TEXT.test(text)
-                ? 'connection'
-                : 'other'
+          : AUTH_TEXT.test(text)
+            ? 'auth'
+            : NOT_FOUND_TEXT.test(text)
+              ? 'not_found'
+              : /rate[ _-]?limit/i.test(text)
+                ? 'rate_limited'
+                : /server error/i.test(text)
+                  ? 'server_error'
+                  : CONNECTION_TEXT.test(text)
+                    ? 'connection'
+                    : 'other'
   return { failure, status }
+}
+
+/** The failure a class the server read from Claude Code's record names (backend session.api_error_class: its
+ * apiErrorStatus and `error`, before its words), else null for one this page does not know. Pure. */
+export function failureOf(kind: string | null | undefined): ApiFailure | null {
+  return kind && kind in FAILURE_WORDS ? (kind as ApiFailure) : null
 }
 
 const FAILURE_WORDS: Readonly<Record<ApiFailure, string>> = {
@@ -1340,21 +1369,43 @@ const FAILURE_WORDS: Readonly<Record<ApiFailure, string>> = {
   other: "Anthropic's API returned an error",
 }
 
-/** What the analyst does about a failure no retry fixes, after its words in the card's head. */
-const FAILURE_FIX: Readonly<Partial<Record<ApiFailure, string>>> = {
-  auth: 'run /login in your terminal, or check ANTHROPIC_API_KEY and run thimble server restart',
-  forbidden: "check your login and your organization's settings, or pick another model in Settings",
-  not_found: 'pick another model in Settings',
-  refused: 'rephrase or narrow the request and send it again',
+/** Where a failure's fix runs (Matt, 10-14: the browser can't run /login or /model): `browser`, a button or a reply
+ * here (Retry, a rephrased request from the composer), or `terminal`, the Claude Code terminal where thimble runs,
+ * whose fix the card says after "In your terminal:" and which no button here can take. */
+export const FIX_WHERE: Readonly<Record<ApiFailure, 'browser' | 'terminal'>> = {
+  overloaded: 'browser',
+  rate_limited: 'browser',
+  server_error: 'browser',
+  connection: 'browser',
+  auth: 'terminal',
+  forbidden: 'terminal',
+  not_found: 'terminal',
+  refused: 'browser',
+  other: 'browser',
 }
 
+/** What the analyst does about a failure no retry fixes, after its words in the card's head: a fix in the terminal
+ * (FIX_WHERE) after "In your terminal:", to which `{then}` adds ", then Retry" where the card has Retry. */
+const FAILURE_FIX: Readonly<Partial<Record<ApiFailure, string>>> = {
+  auth: 'In your terminal: run /login (or claude auth login in a shell){then}.',
+  forbidden: "In your terminal: check your sign-in (/login) and your account's or organization's settings{then}.",
+  not_found: "In your terminal: run /model to pick another model (thimble's own agents take theirs from Settings){then}.",
+  refused: 'rephrase or narrow the request and send it again',
+}
+const NEW_SESSION_FIX = 'In your terminal: run /clear to start a new session, then send a rephrased or narrower request here.'
+
 /** What happened, in the card's head: the failure in plain words and its status (Anthropic's API is overloaded (529)),
- * then what to do when no retry fixes it. A refusal names no status, which says nothing of why. Pure. */
-export function apiFailureText(text: string): string {
-  const { failure, status } = apiFailure(text)
+ * then what to do when no retry fixes it, and where (FIX_WHERE). A refusal names no status, which says nothing of why.
+ * `failure` is the class the server read from Claude Code's record (failureOf), which decides before the words do;
+ * `retry`, whether the card offers Retry, which a fix in the terminal comes before. Pure. */
+export function apiFailureText(text: string, opts: { failure?: ApiFailure | null; retry?: boolean } = {}): string {
+  const read = apiFailure(text)
+  const failure = opts.failure ?? read.failure
+  const status = read.status != null && FAILURE_OF_STATUS[read.status] === failure ? read.status : failure === read.failure ? read.status : null
   const head = status != null && failure !== 'refused' ? `${FAILURE_WORDS[failure]} (${status})` : FAILURE_WORDS[failure]
-  const fix = failure === 'refused' && NEW_SESSION_TEXT.test(text) ? 'start a new session (/clear in your terminal), then send a rephrased or narrower request' : FAILURE_FIX[failure]
-  return fix ? `${head}: ${fix}` : head
+  const fix = (failure === 'refused' && NEW_SESSION_TEXT.test(text) ? NEW_SESSION_FIX : FAILURE_FIX[failure])?.replace('{then}', opts.retry ? ', then Retry' : '')
+  if (!fix) return head
+  return FIX_WHERE[failure] === 'terminal' || fix === NEW_SESSION_FIX ? `${head}. ${fix}` : `${head}: ${fix}`
 }
 
 /** The line a view build's run writes when the API ended a turn and the build waits it out (backend dev.run_view):
@@ -1369,12 +1420,17 @@ export function waitText(seconds: number): string {
   return seconds >= 60 ? `${Math.round(seconds / 60)} min` : `${Math.round(seconds)} s`
 }
 
-/** Rows with each of Claude Code's API error lines as an error row (API_ERROR_KIND) in place of its text row; a line
- * that ends a reply cut short is split off, the error row's index half a step on so each row keeps its own key. Pure. */
+/** Rows with each of Claude Code's API error lines as an error row (API_ERROR_KIND) in place of its text row: a row
+ * the server marked by its record (`apiError`, with its class) whole, else a line its words show, where one that ends
+ * a reply cut short is split off, the error row's index half a step on so each row keeps its own key. Pure. */
 export function withApiErrors<T extends { kind: string }>(rows: readonly T[]): (T | ErrorRow)[] {
   return rows.flatMap((r): (T | ErrorRow)[] => {
     const t = r as unknown as TextRow
     if (r.kind !== 'text') return [r]
+    if (t.apiError) {
+      const failure = failureOf(t.apiError)
+      return [{ kind: 'error', index: t.index, message: t.text.trim(), errorKind: API_ERROR_KIND, ...(failure ? { failure } : {}) }]
+    }
     const at = apiErrorAt(t.text)
     if (at < 0) return [r]
     const error: ErrorRow = { kind: 'error', index: at === 0 ? t.index : t.index + 0.5, message: t.text.slice(at).trim(), errorKind: API_ERROR_KIND }
@@ -1391,7 +1447,7 @@ export function apiRetry(records: readonly ChatRecord[], skip?: ReadonlySet<numb
     if (skip?.has(i)) continue
     if (e.type === 'user' || e.type === 'tool_use' || e.type === 'agent') return null
     if (e.type !== 'text' || e.parent_tool_use_id) continue
-    const at = apiErrorAt(e.delta)
+    const at = e.api_error ? 0 : apiErrorAt(e.delta)
     if (at < 0) return null
     for (let j = i - 1; j >= 0; j--) {
       const u = records[j]

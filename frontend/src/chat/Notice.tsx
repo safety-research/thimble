@@ -5,8 +5,10 @@
 // happened to in bold ("Orientation", "View build: Agent Network"), the failure and, when the fix is a command
 // (`/login`, `thimble server restart`), the command in code, and Open for the chat it happened in when another one is
 // shown; then its fix as buttons under the words, and ×. A fix that went through dismisses the notice (a new failure brings a new one); one
-// that failed says why in a toast and leaves it. In the agent's own chat the notice is also a row (NoticeRow), the same
-// words without buttons, which stay as a quiet line of the chat's history once the notice is closed.
+// that failed, or that the server could not start, says why in a toast and leaves it. A failure of main's own request
+// shows in the strip only while another chat is open, since main's chat shows its API error card. In the agent's own
+// chat the notice is also a row (NoticeRow), the same words without buttons, kept as a quiet line of the chat's history
+// once the notice is closed; while it is open the strip shows it there.
 import { useState, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
@@ -25,23 +27,29 @@ export const NOTICE_DOS: readonly string[] = ['proposals-retry', 'proposals-off'
 /** Whether `action` is one this page can run. Pure. */
 export const runnable = (action: NoticeAction): boolean => NOTICE_DOS.includes(action.do) && (action.do !== 'view-retry' || !!action.slug)
 
-/** Run a notice's action: true when the failure is answered and the notice can go (Open Settings leaves it). */
-export async function runNotice(ws: string, action: NoticeAction): Promise<boolean> {
+/** Run a notice's action: true when the failure is answered and the notice can go (Open Settings leaves it). A fix the
+ * server could not start (a check that cannot run now, a build refused at once) throws with its reason, which the
+ * toast says, and the notice stays. Try again names the notice's key, so the check that failed is the one run again. */
+export async function runNotice(ws: string, action: NoticeAction, notice?: Pick<Notice, 'key'>): Promise<boolean> {
   switch (action.do) {
-    case 'proposals-retry':
-      await api.proposeNow(ws)
+    case 'proposals-retry': {
+      const got = await api.proposeNow(ws, notice?.key ?? undefined)
+      if (got && got.started === false) throw new Error(got.reason || 'the check could not start')
       return true
+    }
     case 'proposals-off':
       await proposalsOff(ws)
       return true
     case 'settings':
       bus.emit('openSettings', {})
       return false
-    case 'view-retry':
+    case 'view-retry': {
       if (!action.slug) return false
-      await api.retryProposal(ws, action.slug)
+      const row = await api.retryProposal(ws, action.slug)
       void refreshProposals(ws)
+      if (row?.refused) throw new Error(row.refused.reason || 'the build could not start')
       return true
+    }
     default:
       return false
   }
@@ -80,7 +88,7 @@ function ForegroundNotice({ ws, notice, current, agent, onOpen }: { ws: string; 
     if (busy) return
     track('ui-click', { target, detail: { action: a.do } })
     setBusy(a.do)
-    runNotice(ws, a)
+    runNotice(ws, a, notice)
       .then((done) => (done ? dismissNotice(ws, notice) : undefined))
       .catch((e: Error) => bus.emit('toast', { text: `${a.label} didn't work: ${e.message.replace(/^\d{3}\s+/, '')}`, kind: 'error' }))
       .finally(() => setBusy(null))
@@ -129,9 +137,13 @@ function ForegroundNotice({ ws, notice, current, agent, onOpen }: { ws: string; 
   )
 }
 
+/** Whether the strip shows a notice in the chat `current`: every one, but a failure of main's own request while main
+ * is shown, whose API error card main's chat shows with its fix (backend notices.API). Pure. */
+export const stripShows = (n: Pick<Notice, 'kind' | 'chat'>, current: string): boolean => !(n.kind === 'api' && n.chat === current)
+
 /** Every open notice of the workspace, above the composer of the chat shown (`current`), oldest first. */
 export function NoticeStrip({ ws, current, labels, onOpen }: { ws: string; current: string; labels?: ReadonlyMap<string, string>; onOpen: (chat: string) => void }) {
-  const notices = useNotices(ws)
+  const notices = useNotices(ws).filter((n) => stripShows(n, current))
   if (!notices.length) return null
   return (
     <div className="chat-notices" role="region" aria-label="Notices">
@@ -142,14 +154,15 @@ export function NoticeStrip({ ws, current, labels, onOpen }: { ws: string; curre
   )
 }
 
-/** A notice as a row of the chat it happened in: the warning line, without the agent's name (the chat is its own),
- * while the notice is open (its fix is above the composer), a quiet line once a fix cleared it or the analyst
- * dismissed it. */
+/** A notice as a row of the chat it happened in, for its history: a quiet line, without the agent's name (the chat is
+ * its own), once a fix cleared it or the analyst dismissed it. While it is open the strip above the composer shows it
+ * with its fix, in this chat too, so the row waits (it shows only while the open notices are not read). */
 export function NoticeRow({ item, ws }: { item: NoticeRowT; ws: string }) {
   const open = useNotices(ws)
   const read = useNoticesRead(ws)
   // open while the log has not closed it and, once the open notices are read, they hold it
   const closed = item.closed || (read && !open.some((n) => n.id === item.id || (!!item.key && n.key === item.key)))
+  if (!closed && read) return null
   return (
     <div className="chat-notice chat-notice-row" role="note" data-notice={item.id} data-key={item.key} data-kind={item.noticeKind} data-closed={closed || undefined}>
       <Icon name="warning" size={13} className="chat-notice-ico" />

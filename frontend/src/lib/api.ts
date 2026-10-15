@@ -393,8 +393,11 @@ export const api = {
   /** Reject on a view proposal: the proposal dropped as rejected (backend views.answer_offer). 403 without the
    * analyst's cookie, 409 for a row that is no open proposal. */
   rejectProposal: (c: string, slug: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/reject`, { method: 'POST' }),
-  /** Try again on a notice that a check for a view proposal failed: the check runs now (backend proposer.run_now). */
-  proposeNow: (c: string) => j<unknown>(`${ws(c)}/views/propose-now`, { method: 'POST' }),
+  /** Try again on a notice that a check for a view proposal failed: the check that failed runs now, the file type's
+   * or the proposer's (backend views.propose_now_route, by the notice's `key`). `started: false` with the reason when it
+   * cannot run now. */
+  proposeNow: (c: string, key?: string) =>
+    j<{ started?: boolean; queued?: boolean; reason?: string }>(`${ws(c)}/views/propose-now`, { method: 'POST', ...(key ? { body: JSON.stringify({ key }) } : {}) }),
   /** The open notices (backend notices.list_route): failures of main and of thimble's agents, each with its fix,
    * oldest first. */
   notices: (c: string) => j<unknown[]>(`${ws(c)}/notices`),

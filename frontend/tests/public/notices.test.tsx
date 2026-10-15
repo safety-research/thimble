@@ -18,7 +18,7 @@ import { noticeActions, parseNotice, withNotice, withoutNotice } from '../../src
 import type { ChatRecord, Notice } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
-const SIGN_IN = "Couldn't check for a view proposal: Claude Code isn't signed in for thimble's server. Run /login, or if you changed your sign-in (for example exported ANTHROPIC_API_KEY), run `thimble server restart`."
+const SIGN_IN = "Couldn't check for a view proposal: Claude Code isn't signed in for thimble's server. In your terminal: run /login (or `claude auth login` in a shell), or if you changed your sign-in (for example exported ANTHROPIC_API_KEY), run `thimble server restart`. Then Try again."
 const BLOCKED = "Couldn't check for a view proposal: Claude's safeguards blocked the request."
 const DOWNGRADE = "Claude's safeguards switched this reply from Opus 5.5 to Opus 4.8."
 const BUILD = 'The view Agent Network failed to build: the page did not load.'
@@ -150,7 +150,7 @@ describe('the strip above the composer, and the rows', () => {
   test('a command in the text is code; with no agent named, the thread it happened in names it', async () => {
     open = [{ id: 'n1', text: SIGN_IN, action: TRY }, { id: 'n2', chat: 'orient-1', text: DOWNGRADE }]
     const el = await strip('nt-code')
-    expect(el.querySelector('.chat-notice-text code')?.textContent).toBe('thimble server restart')
+    expect([...el.querySelectorAll('.chat-notice-text code')].map((c) => c.textContent)).toEqual(['claude auth login', 'thimble server restart'])
     expect(el.querySelectorAll('.chat-notice-agent')[0]?.textContent).toBe('orient')
   })
 
@@ -214,7 +214,7 @@ describe('the strip above the composer, and the rows', () => {
       await settle()
     }
     expect(sent).toEqual([
-      'POST /api/ws/nt-act/views/propose-now',
+      'POST /api/ws/nt-act/views/propose-now {"key":"p1"}',
       'POST /api/ws/nt-act/notices/a/dismiss',
       'PUT /api/ws/nt-act/settings {"propose_views":false}',
       'POST /api/ws/nt-act/notices/b/dismiss',
@@ -247,17 +247,56 @@ describe('the strip above the composer, and the rows', () => {
     expect(el.querySelector('.chat-notice')).not.toBeNull()
   })
 
-  test("in the agent's own chat the notice is a row without buttons, open while the notice is, then a quiet line", async () => {
+  test("in the agent's own chat the notice is a row without buttons, kept as a quiet line once it is closed; while it is open the strip shows it there, not a second line", async () => {
     open = [{ id: 'd1', key: 'safeguards-fallback', chat: 't1', text: DOWNGRADE }]
     const records = [record('d1', DOWNGRADE, { key: 'safeguards-fallback' }), record('b0', BUILD, { key: 'build' })]
-    const el = await mount(<ThreadRows rows={foldRecords(records)} edits={new Map()} ws="nt-rows" chat="t1" />)
+    const el = await mount(
+      <>
+        <ThreadRows rows={foldRecords(records)} edits={new Map()} ws="nt-rows" chat="t1" />
+        <NoticeStrip ws="nt-rows" current="t1" onOpen={() => undefined} />
+      </>,
+    )
     await settle()
-    const [down, build] = el.querySelectorAll('.chat-notice-row')
-    expect(down.querySelectorAll('button')).toHaveLength(0)
-    expect(down.hasAttribute('data-closed')).toBe(false)
+    expect([...el.querySelectorAll('.chat-notice')].filter((n) => n.textContent?.includes(DOWNGRADE))).toHaveLength(1)
     // the build's notice is not open: a fix cleared it before the page read the open ones
+    const [build] = el.querySelectorAll('.chat-notice-row')
     expect(build.hasAttribute('data-closed')).toBe(true)
+    expect(build.querySelectorAll('button')).toHaveLength(0)
     await live({ id: 'd1', key: 'safeguards-fallback', cleared: true })
-    expect(el.querySelector('.chat-notice-row')?.hasAttribute('data-closed')).toBe(true)
+    expect([...el.querySelectorAll('.chat-notice-row')].map((r) => r.hasAttribute('data-closed'))).toEqual([true, true])
+    expect(el.querySelector('.chat-notices')).toBeNull()
+  })
+
+  test("a fix the server could not start says why and the notice stays", async () => {
+    open = [{ id: 'a', key: 'proposals', text: BLOCKED, action: TRY }, { id: 'c', key: 'v', chat: 'dev-1', text: BUILD, action: { label: 'Retry', do: 'view-retry', slug: 'agent-network' } }]
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
+      const u = String(url)
+      const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } })
+      if ((init.method ?? 'GET') !== 'GET') sent.push(`${init.method} ${u}`)
+      if (u.endsWith('/notices')) return json(open)
+      if (u.endsWith('/propose-now')) return json({ started: false, reason: 'A view proposal waits for the analyst.' })
+      if (u.endsWith('/retry')) return json({ slug: 'agent-network', status: 'failed', refused: { kind: 'no-module', reason: 'Leave plan mode (shift+tab), then Retry.' } })
+      return json([])
+    })
+    const el = await strip('nt-unstarted')
+    for (const b of [...el.querySelectorAll('.chat-notice-act')]) {
+      await click(b)
+      await settle()
+    }
+    expect(toasts).toEqual(["Try again didn't work: A view proposal waits for the analyst.", "Retry didn't work: Leave plan mode (shift+tab), then Retry."])
+    expect(el.querySelectorAll('.chat-notice')).toHaveLength(2)
+    expect(sent.filter((x) => x.endsWith('/dismiss'))).toEqual([])
+  })
+
+  test("a failure of main's own request shows in the strip of every other chat, with Open on main, but not in main, whose chat shows its card", async () => {
+    open = [{ id: 'm1', key: 'main:api', kind: 'api', chat: 'main', agent: 'Main', text: "Claude's reply in main failed: Claude Code isn't signed in. In your terminal: run /login (or `claude auth login` in a shell)." }]
+    const opened: string[] = []
+    let el = await strip('nt-main-api', 'main')
+    expect(el.querySelector('.chat-notice')).toBeNull()
+    unmountAll()
+    el = await strip('nt-main-api', 'thread-3', (c) => opened.push(c))
+    expect(lines(el)).toEqual(["Main Claude's reply in main failed: Claude Code isn't signed in. In your terminal: run /login (or claude auth login in a shell)."])
+    await click(el.querySelector('.chat-notice-open'))
+    expect(opened).toEqual(['main'])
   })
 })

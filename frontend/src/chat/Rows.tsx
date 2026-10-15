@@ -960,7 +960,7 @@ export function ErrorRow({ item, retry }: { item: ErrorRowT; retry?: ErrorRetry 
       : undefined
     return (
       <div className="chat-msg chat-api-error" data-error-kind={item.errorKind}>
-        <ApiErrorCard line={item.message} retrying={item.wait != null ? buildWaitNote(item.wait) : retry?.note} waits={item.wait != null} onRetry={onRetry} />
+        <ApiErrorCard line={item.message} failure={item.failure} retrying={item.wait != null ? buildWaitNote(item.wait) : retry?.note} waits={item.wait != null} onRetry={onRetry} />
       </div>
     )
   }
