@@ -229,14 +229,18 @@ def test_slash_thimble_in_a_plain_claude_says_what_its_environment_lacks_and_lea
     monkeypatch.setattr(cli, "launched", lambda: False)
     monkeypatch.setattr(cli.cc_plugin, "claude_pid", lambda environ=None: None)
     monkeypatch.setattr(cli, "name_session", NAME_SESSION)
-    for name in (*cli.UNSET_VARS, *cli.PROXY_VARS, *cli.NO_PROXY_VARS):
+    for name in (*cli.UNSET_VARS, *cli.PROXY_VARS):
         monkeypatch.delenv(name, raising=False)
+    for name in cli.NO_PROXY_VARS:  # as the session gave them to this process (config.GIVEN_NO_PROXY)
+        monkeypatch.setitem(cli.config.GIVEN_NO_PROXY, name, "")
     assert cli.main(["up", "--cwd", str(data / "mini" / "agents"), "--session", "s7"]) == 0
     assert capsys.readouterr().out.splitlines() == [cli.LINK_LINE]
     assert "\n" not in (home / "links" / "s7").read_text() and told[-1]["warnings"] == []
     monkeypatch.setenv("CLAUDE_CODE_SUBAGENT_MODEL", "haiku")
     monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:3128")
-    monkeypatch.setenv("NO_PROXY", "corp.example")
+    monkeypatch.setitem(cli.config.GIVEN_NO_PROXY, "NO_PROXY", "corp.example")
+    # what config made of it as it loaded, which keeps thimble's own requests off the proxy but not the plugin's
+    monkeypatch.setenv("NO_PROXY", "corp.example,127.0.0.1,localhost")
     (tmp_path / "claude-home" / "settings.json").write_text(json.dumps({"env": {cli.EFFORT_ENV: "high"}}))
     assert cli.main(["up", "--cwd", str(data / "mini" / "agents"), "--session", "s7"]) == 0
     lines = [cli.SETUP_ENV_LINE.format(name=cli.EFFORT_ENV),
@@ -245,7 +249,7 @@ def test_slash_thimble_in_a_plain_claude_says_what_its_environment_lacks_and_lea
     assert (home / "links" / "s7").read_text().split("\n") == ["http://127.0.0.1:5300/?ws=mini", *lines]
     assert told[-1]["warnings"] == [f"env:{cli.EFFORT_ENV}", "env:CLAUDE_CODE_SUBAGENT_MODEL", "proxy"]
     assert not [w for w in told[-1]["warnings"] if " " in w], "keys only: the server writes the words"
-    monkeypatch.setenv("NO_PROXY", "corp.example, localhost")
+    monkeypatch.setitem(cli.config.GIVEN_NO_PROXY, "NO_PROXY", "corp.example, localhost")
     assert cli.proxy_unsafe() is False and cli.setup_warnings(data) == [f"env:{cli.EFFORT_ENV}",
                                                                          "env:CLAUDE_CODE_SUBAGENT_MODEL"]
     monkeypatch.setattr(cli, "launched", lambda: True)
@@ -1049,6 +1053,25 @@ def test_requests_to_thimble_s_own_server_skip_the_shell_s_proxy(home, monkeypat
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_slash_thimble_reads_the_sessions_no_proxy_though_config_adds_127_0_0_1_to_its_own(tmp_path):
+    """app/config.py adds 127.0.0.1 and localhost to NO_PROXY as it loads, so thimble's own requests skip a proxy, but
+    the hooks module's requests go through the proxy the session sets: /thimble's proxy line and `setup` notice read
+    NO_PROXY as the session gave it (config.GIVEN_NO_PROXY). Live check 11: with HTTP_PROXY set and no NO_PROXY, a
+    process that imported config found no proxy problem, so neither showed. A new process, as /thimble's hook runs it."""
+    code = "import os; from app import cli; print(cli.proxy_unsafe(), os.environ['NO_PROXY'])"
+    base = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "THIMBLE_HOME": str(tmp_path / "home"),
+            "THIMBLE_SKIP_KEY": "1", "HTTP_PROXY": "http://127.0.0.1:9"}
+
+    def run(**extra: str) -> list[str]:
+        return subprocess.run([sys.executable, "-c", code], env={**base, **extra}, cwd=BACKEND, capture_output=True,
+                              text=True, check=True).stdout.split()
+
+    assert run() == ["True", "127.0.0.1,localhost"], "config keeps its own requests off the proxy all the same"
+    assert run(NO_PROXY="corp.example") == ["True", "corp.example,127.0.0.1,localhost"]
+    assert run(NO_PROXY="corp.example,localhost")[0] == "False"
+    assert run(no_proxy="127.0.0.1")[0] == "False"
 
 
 INTERNAL_WORDS = re.compile(r"fence|module|delivery|turn ending|ui_key|server\.json", re.I)

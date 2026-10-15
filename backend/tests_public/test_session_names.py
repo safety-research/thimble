@@ -147,6 +147,36 @@ def test_the_launcher_passes_mains_name_and_lets_the_analysts_win(tmp_path):
         assert "thimble:main · logs" not in argv and own[-1] in argv
 
 
+def test_the_launcher_keeps_the_session_off_the_proxy_and_hands_a_subcommand_the_shells_no_proxy(tmp_path):
+    """The session the launcher starts gets 127.0.0.1 and localhost in NO_PROXY and no_proxy, so its hooks module and
+    MCP shim reach thimble's server past a proxy the shell sets. A subcommand gets the shell's own values: /thimble's
+    hook runs `thimble server up` in a plain `claude`'s environment, and its proxy line reads what that session sets
+    (cli.proxy_unsafe), while app/config.py keeps the Python process's own requests off the proxy."""
+    import subprocess  # noqa: PLC0415
+
+    lines = [str(tmp_path / "plugin"), "", "{}", "", "thimble:main · w", "", "", "", "", "browser", "", "the prompt"]
+    launcher, path = _launcher(tmp_path, lines)
+    seen = tmp_path / "seen.txt"
+    py = tmp_path / "plugin" / "bin" / "thimble-python"
+    py.write_text(f'#!/bin/sh\ncase " $* " in *" launch-args "*) cat "{tmp_path}/launch-args.txt";; '
+                  f'*) printf "%s|%s\\n" "${{NO_PROXY-unset}}" "${{no_proxy-unset}}" > "{seen}";; esac\n')
+    (path / "claude").write_text(f'#!/bin/sh\nprintf "%s|%s\\n" "$NO_PROXY" "$no_proxy" > "{seen}"\n')
+    env = {"PATH": f"{path}:/usr/bin:/bin", "HOME": str(tmp_path), "HTTP_PROXY": "http://127.0.0.1:9"}
+
+    def run(*args: str, **extra: str) -> str:
+        seen.unlink(missing_ok=True)
+        subprocess.run(["bash", str(launcher), *args], check=True, capture_output=True, cwd=tmp_path,
+                       env={**env, **extra})
+        return seen.read_text().strip()
+
+    assert run() == "127.0.0.1,localhost|127.0.0.1,localhost"
+    assert run(NO_PROXY="corp.example") == "corp.example,127.0.0.1,localhost|127.0.0.1,localhost"
+    up = ["server", "up", "--cwd", str(tmp_path), "--session", "s1"]
+    assert run(*up) == "unset|unset", "the shell's values, which cli.proxy_unsafe reads"
+    assert run(*up, NO_PROXY="corp.example") == "corp.example|unset"
+    assert run("doctor") == "unset|unset"
+
+
 def test_without_the_plugin_registered_the_launcher_loads_its_own_plugin_folder(tmp_path, monkeypatch):
     """thimble is not added to every Claude Code session unless asked (install.sh --plugin, `thimble plugin on`), so the
     launcher must load the plugin itself: when Claude Code lists no thimble copy of this install (installed_copy is

@@ -206,7 +206,7 @@ def _skip() -> bool:
 def keep_local_off_proxy(env: dict[str, str] | None = None) -> None:
     """Add 127.0.0.1 and localhost to NO_PROXY / no_proxy in `env` (default os.environ), so that thimble's calls to its
     own server on 127.0.0.1 never go through an HTTP proxy the shell sets. urllib and httpx read these variables, and
-    every process thimble starts inherits them. The launcher does the same for the processes it starts."""
+    every process thimble starts inherits them. The launcher does the same for the Claude Code session it starts."""
     env = os.environ if env is None else env
     for name in ("NO_PROXY", "no_proxy"):
         cur = env.get(name, "")
@@ -214,6 +214,9 @@ def keep_local_off_proxy(env: dict[str, str] | None = None) -> None:
             env[name] = f"{cur},127.0.0.1,localhost" if cur else "127.0.0.1,localhost"
 
 
+# NO_PROXY and no_proxy as this process got them, before keep_local_off_proxy adds 127.0.0.1 and localhost: what the
+# session that ran this command sets, which /thimble's proxy line and `setup` notice read (cli.proxy_unsafe)
+GIVEN_NO_PROXY = {name: os.environ.get(name, "") for name in ("NO_PROXY", "no_proxy")}
 keep_local_off_proxy()
 
 

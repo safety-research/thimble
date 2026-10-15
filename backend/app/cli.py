@@ -1723,10 +1723,11 @@ def env_set_here(cwd: Path) -> list[str]:
 
 def proxy_unsafe() -> bool:
     """Whether this session's environment sets an HTTP proxy and no NO_PROXY or no_proxy names 127.0.0.1 or localhost,
-    so a request of the plugin's to thimble's server could go to the proxy."""
+    so a request of the plugin's to thimble's server could go to the proxy. NO_PROXY and no_proxy are read as the
+    session gave them to this process (config.GIVEN_NO_PROXY), since config adds 127.0.0.1 to both as it loads."""
     if not any(os.environ.get(name, "").strip() for name in PROXY_VARS):
         return False
-    named = {part.strip().lower() for name in NO_PROXY_VARS for part in os.environ.get(name, "").split(",")}
+    named = {part.strip().lower() for name in NO_PROXY_VARS for part in config.GIVEN_NO_PROXY.get(name, "").split(",")}
     return not named & set(LOOPBACK_NAMES)
 
 
