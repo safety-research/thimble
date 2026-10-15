@@ -89,8 +89,6 @@ UI_COOKIE_AGE_S = 400 * 24 * 3600  # the longest a browser keeps a cookie
 UI_COOKIE_PATH = "/api/"
 PAIRED_FILE = "paired.json"  # in thimble's home: [{hash, at}], the sha256 of each signed-in browser's cookie (claim)
 PAIR_TTL_S = 300  # a link's sign-in code works this long after it was made (mint), and once
-PAIR_MAX = 16  # sign-in codes alive at once, the newest kept
-PAIRED_MAX = 8  # browsers signed in at once, the newest kept
 # a click route's 403 without the analyst's cookie: every such click, not only the permission answers (live check L32)
 ANALYST_ONLY = ("only the analyst's own thimble page can do this (start, message or stop thimble's agents, build a view,"
                 " answer a permission request, change a permission mode): open it from the link shown under /thimble's"
@@ -278,13 +276,13 @@ _pair_lock = threading.Lock()
 
 def mint(ws: str = "") -> str:
     """A new sign-in code for the link of workspace `ws` ("" for the start page): it works once, for PAIR_TTL_S, and a
-    newer code for the same workspace voids it. Expired codes go, and at most PAIR_MAX stay alive."""
+    newer code for the same workspace voids it. Expired codes go."""
     code = secrets.token_urlsafe(16)
     now = _now()
     with _pair_lock:
-        live = sorted(((h, v) for h, v in _codes.items() if v[0] > now and v[1] != ws), key=lambda kv: kv[1][0])
+        live = {h: v for h, v in _codes.items() if v[0] > now and v[1] != ws}
         _codes.clear()
-        _codes.update(live[-(PAIR_MAX - 1):])
+        _codes.update(live)
         _codes[_sha(code)] = (now + PAIR_TTL_S, ws)
     return code
 
@@ -314,7 +312,7 @@ def _entries() -> list[dict[str, str]]:
         raw = []
     got = [{"hash": str(e["hash"]), "at": str(e.get("at") or "")} for e in (raw if isinstance(raw, list) else [])
            if isinstance(e, dict) and isinstance(e.get("hash"), str) and re.fullmatch(r"[0-9a-f]{64}", e["hash"])]
-    _paired, _paired_home = got[-PAIRED_MAX:], where
+    _paired, _paired_home = got, where
     return _paired
 
 
@@ -322,7 +320,7 @@ def _save(entries: list[dict[str, str]]) -> None:
     """`entries` as the signed-in browsers, in memory and written through to PAIRED_FILE (whole, readable by its owner
     alone); an empty list deletes the file."""
     global _paired, _paired_home
-    _paired, _paired_home = entries[-PAIRED_MAX:], str(home())
+    _paired, _paired_home = list(entries), str(home())
     path = _paired_file()
     if not _paired:
         with contextlib.suppress(FileNotFoundError):

@@ -88,14 +88,14 @@ def test_a_restart_voids_every_code_but_keeps_the_signed_in_browsers():
         hook_auth._paired = None
 
 
-def test_at_most_pair_max_codes_live_and_at_most_paired_max_browsers_stay_signed_in():
-    codes = [hook_auth.mint(f"ws{i}") for i in range(hook_auth.PAIR_MAX + 3)]
-    assert len(hook_auth._codes) == hook_auth.PAIR_MAX == 16
-    assert all(_gone(_claim(c)[0]) for c in codes[:3]), "the oldest went"
-    cookies = [_cookie_of(_claim(c)[0]) for c in codes[3:3 + hook_auth.PAIRED_MAX + 2]]
-    assert hook_auth.PAIRED_MAX == 8 and len(hook_auth._entries()) == hook_auth.PAIRED_MAX
-    assert _claim("x", cookies[0])[0].status_code == 410, "the first browser of ten is signed out"
-    assert _claim("x", cookies[-1])[0].status_code == 204
+def test_every_workspace_s_code_stays_alive_and_no_sign_in_signs_another_browser_out():
+    """No count limits the live codes or the signed-in browsers: a code goes only when it is spent, expires or a newer
+    one for its workspace is made, and a browser is signed out only by Sign it out or `thimble unpair`."""
+    codes = [hook_auth.mint(f"ws{i}") for i in range(40)]
+    assert len(hook_auth._codes) == 40
+    cookies = [_cookie_of(_claim(c)[0]) for c in codes]
+    assert len(hook_auth._entries()) == 40
+    assert all(_claim("x", cookie)[0].status_code == 204 for cookie in cookies), "the first browser is still signed in"
 
 
 def test_a_signed_in_browser_spends_a_code_with_no_cookie_no_entry_and_no_notice(client):
