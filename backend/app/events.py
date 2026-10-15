@@ -663,9 +663,15 @@ class EventBody(BaseModel):
     payload: dict[str, Any] = {}
 
 
+BROWSER_KINDS = ("main", "thread", "card")  # the kinds the browser posts (events_route); the server posts the others
+
+
 @router.post("/ws/{c}/events")
 async def events_route(c: str, body: EventBody) -> dict[str, Any]:
-    """The browser's one way to reach the session."""
+    """The browser's one way to reach the session: a message to main or a thread, or a card's event (BROWSER_KINDS);
+    400 for any other kind, which only the server's own code posts (post)."""
+    if body.kind not in BROWSER_KINDS:
+        raise HTTPException(400, "the browser sends only main, thread and card events")
     try:
         config.workspace_dir(c)
     except ValueError as e:
@@ -676,6 +682,8 @@ async def events_route(c: str, body: EventBody) -> dict[str, Any]:
 class SessionBody(BaseModel):
     session: str
     cwd: str | None = None
+    sandbox: bool | None = None  # whether Claude Code's sandbox is on in the session (cli.own_sandbox_here)
+    warnings: list[str] = []  # the keys of what /thimble found in the shell (notices.setup_text), never words
 
 
 @router.post("/ws/{c}/session")
@@ -695,7 +703,30 @@ async def session_route(c: str, body: SessionBody) -> dict[str, Any]:
     lv = session.attach(c, body.session, body.cwd or str(corpus))
     if replaced and session._parked(c, replaced):  # it waits parked and is never main again (session.may_return)
         replaced = None
+    if lv is not None:
+        _setup(c, body)
     return {"attached": bool(lv), "session": body.session, "listening": listening(c), "replaced": replaced}
+
+
+def _setup(c: str, body: SessionBody) -> None:
+    """What /thimble found about main's session: whether Claude Code's sandbox is on in it (main's `attached.sandbox`,
+    which Settings shows), and a `setup` notice for each key of `warnings` the server has words for (notices.setup_text),
+    with the open ones whose key /thimble no longer names cleared. The words never come from the request."""
+    from . import agents, notices  # noqa: PLC0415
+
+    if body.sandbox is not None:
+        meta = agents.ensure_main(c)
+        held = meta.get("attached") or {}
+        if held.get("session") == body.session and held.get("sandbox") is not body.sandbox:
+            meta["attached"] = {**held, "sandbox": body.sandbox}
+            agents.write_meta(c, meta)
+            agents.notify(c, agents.MAIN_ID)
+    named = [k for k in dict.fromkeys(str(w) for w in body.warnings) if notices.setup_text(k)]
+    for key in named:
+        notices.post(c, kind="setup", key=key, text=notices.setup_text(key))
+    for n in notices.open_notices(c):
+        if n.get("kind") == "setup" and n.get("key") not in named:
+            notices.clear(c, str(n.get("key") or ""))
 
 
 class MainChoice(BaseModel):
@@ -928,61 +959,6 @@ def _asking_chat(c: str, agent: str | None) -> str | None:
     return None
 
 
-def _asked_by(c: str, tool: str, tool_input: Any) -> str | None:
-    """Which of the fence's ask rules sends a request of main's or its subagents' to the analyst (userconf.main_rules,
-    each rule with its cause: data or config), so the card can say why; None when none is known to."""
-    import fnmatch  # noqa: PLC0415
-
-    from . import userconf  # noqa: PLC0415
-
-    try:
-        rules = userconf.main_rules(c)
-    except Exception:  # noqa: BLE001 — a fence that cannot be read says nothing on the card
-        return None
-    pairs: list[tuple[str, str]] = []
-    if isinstance(rules, dict):
-        for k, v in rules.items():
-            if isinstance(v, (list, tuple)):  # {cause: [rule, …]} or {"ask": [{rule, cause}, …]}
-                for r in v:
-                    if isinstance(r, dict):
-                        pairs.append((str(r.get("rule") or ""), str(r.get("cause") or "")))
-                    else:
-                        pairs.append((str(r), str(k)))
-            elif isinstance(v, str):  # {rule: cause}
-                pairs.append((str(k), v))
-    elif isinstance(rules, (list, tuple)):
-        for r in rules:
-            if hasattr(r, "rule") and hasattr(r, "cause"):  # userconf.Rule(behavior, rule, cause): its ask rules
-                if getattr(r, "behavior", "ask") == "ask":
-                    pairs.append((str(r.rule), str(r.cause)))
-            elif isinstance(r, dict):
-                pairs.append((str(r.get("rule") or ""), str(r.get("cause") or "")))
-            elif isinstance(r, (list, tuple)) and len(r) >= 2:
-                pairs.append((str(r[0]), str(r[1])))
-    inp = tool_input if isinstance(tool_input, dict) else {}
-    field = CALL_FIELDS.get(tool) or ("file_path" if tool in EDIT_TOOLS else "")
-    target = str(inp.get(field) or "") if field else ""
-    names = {tool, "Edit"} if tool in EDIT_TOOLS else {tool}  # an Edit rule covers every tool that writes a file
-    for rule, cause in pairs:
-        name, _, pattern = rule.partition("(")
-        if name.strip() not in names or not cause:
-            continue
-        pattern = pattern.rstrip(")")
-        if not pattern:
-            return cause
-        path = pattern[1:] if pattern.startswith("//") else pattern
-        if path.endswith("/**"):  # the folder and everything under it, not every path that starts with its name
-            hit = target == path[:-3] or target.startswith(path[:-2])
-        else:
-            hit = fnmatch.fnmatch(target, path)
-        if target and hit:
-            return cause
-    return None
-
-
-EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")  # the tools Claude Code's Edit(...) rules cover
-
-
 def _thimble_agent(c: str, agent: str | None) -> bool:
     """Whether `agent` is one of thimble's agents or a descendant of one (subagents.json)."""
     if not agent:
@@ -998,18 +974,16 @@ def _thimble_agent(c: str, agent: str | None) -> bool:
 def _hold(c: str, request_id: str, tool: str, what: str, preview: str, agent: str | None = None,
           tool_input: Any = None, terminal: bool = False) -> None:
     """Put a relayed permission request on main's meta, where the browser shows it; `chat` names the thread or subagent
-    chat whose agent asked, when the hook said which (_asking_chat), `asked_by` the fence's rule that asks
-    (_asked_by), and `terminal` says the terminal answers it, so the card shows it without buttons."""
+    chat whose agent asked, when the hook said which (_asking_chat), and `terminal` says the terminal answers it, so the
+    card shows it without buttons. `tool_input` is the call's input, which the card shows as `preview`."""
     from . import agents  # noqa: PLC0415
 
     meta = agents.ensure_main(c)
     pending = [p for p in meta.get("permissions") or [] if isinstance(p, dict) and p.get("id") != request_id]
     chat = _asking_chat(c, agent)
-    cause = _asked_by(c, tool, tool_input)
     entry = {"id": request_id, "tool": tool, "what": what or tool, "input": preview[:PERMISSION_INPUT_CHARS],
              "since": _now(), **({"cut": len(preview)} if len(preview) > PERMISSION_INPUT_CHARS else {}),
-             **({"chat": chat} if chat else {}), **({"asked_by": cause} if cause else {}),
-             **({"terminal": True} if terminal else {})}
+             **({"chat": chat} if chat else {}), **({"terminal": True} if terminal else {})}
     pending.append(entry)
     meta["permissions"] = pending
     agents.write_meta(c, meta)
