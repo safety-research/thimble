@@ -206,42 +206,50 @@ async def test_without_a_live_module_a_start_is_refused_before_any_request(bridg
     assert not bridge.calls and not sf.requests(subagents.read(CORPUS))
 
 
-async def test_in_a_plain_claude_or_in_plan_mode_nothing_starts(bridge, models, monkeypatch):
+async def test_in_plan_mode_nothing_starts_and_a_plain_claude_is_no_refusal(bridge, models, monkeypatch):
+    """With the module live, a session thimble's launcher did not start starts agents as the launcher's does: no
+    refusal before the request. Plan mode still refuses a typed start."""
     from app import cc_plugin, session
 
     monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: False, raising=False)
     monkeypatch.setattr(cc_plugin, "main_launched", lambda c: False, raising=False)
-    ans = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)
-    assert ans.kind == "not-launched" and ans.reason == HINTS["start-refused-not-launched"]
-    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: True, raising=False)
+    assert subagents.refusal_before(CORPUS) is None and subagents.refusal_before(CORPUS, click=True) is None
     monkeypatch.setattr(session, "main_mode", lambda c: "plan")
     ans = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.TYPED)
     assert ans.kind == "hook" and ans.reason == HINTS["start-plan-mode"]
     assert not bridge.calls
 
 
-async def test_a_session_thimble_started_without_the_sandbox_is_told_why_not_that_it_was_not_launched(bridge, models,
-                                                                                                      monkeypatch):
-    """Main started by `thimble` that runs unfenced, because Claude Code's sandbox can't run here or thimble's config
-    turns it off: the refusal says so, with the packages the sandbox lacks, rather than that `thimble` did not start it,
-    which starting again would not fix."""
-    from app import cc_plugin, cc_settings, cli
+async def test_a_start_in_the_first_seconds_after_slash_thimble_says_the_plugin_is_still_connecting(bridge, models,
+                                                                                                     monkeypatch):
+    """Right after /thimble opened a plain `claude`, Claude Code has not loaded the module's hello yet: within
+    CONNECT_GRACE_S of main attaching (session.current's `since`), a start with the module not loaded is refused as
+    start-refused-connecting, not as no module. Later, or for any other reason, or with a `since` that does not parse,
+    it gets the no-module refusal."""
+    import sys
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
 
-    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: False, raising=False)
-    monkeypatch.setattr(cc_plugin, "main_launched", lambda c: True, raising=False)
-    monkeypatch.setattr(cli, "fence_off", lambda c: "missing")
-    monkeypatch.setattr(cc_settings, "sandbox_missing", lambda: ["bwrap", "socat"])
+    from app import session
+
+    monkeypatch.setitem(HINTS, "start-refused-connecting", "CONNECTING")
+    not_loaded = "Claude Code did not load thimble's hooks module"
+    monkeypatch.setattr(sys.modules["app.module_bridge"], "NOT_LOADED", not_loaded, raising=False)
+    bridge.is_live, bridge.reason = False, not_loaded
+    attached = {"since": datetime.now(timezone.utc).isoformat(timespec="milliseconds")}
+    monkeypatch.setattr(session, "current", lambda c: SimpleNamespace(since=attached["since"]))
     ans = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)
-    assert ans.kind == "not-launched"
-    assert ans.reason == HINTS["start-refused-unfenced"].format(
-        reason="Claude Code's sandbox can't run on this machine (missing: bwrap, socat)")
-    monkeypatch.setattr(cli, "fence_off", lambda c: "never")
-    ans = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.TYPED)
-    assert ans.reason == HINTS["start-refused-unfenced"].format(
-        reason='thimble\'s config turns the sandbox off (sandbox.use "never")')
-    monkeypatch.setattr(cli, "fence_off", lambda c: "")
+    assert ans.kind == "no-module" and ans.reason == "CONNECTING"
+    attached["since"] = (datetime.now(timezone.utc) - timedelta(seconds=subagents.CONNECT_GRACE_S + 5)).isoformat()
     ans = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)
-    assert ans.reason.startswith("UNFENCED: ") and "not started" not in ans.reason
+    assert ans.kind == "no-module" and ans.reason == f"NO MODULE: {not_loaded}"
+    attached["since"] = "not a time"
+    assert subagents.refusal_before(CORPUS).reason == f"NO MODULE: {not_loaded}", "a since that does not parse is old"
+    attached["since"] = datetime.now(timezone.utc).isoformat()
+    bridge.reason = "THIMBLE_NO_MODULE is set"
+    assert subagents.refusal_before(CORPUS).reason == "NO MODULE: THIMBLE_NO_MODULE is set", "another reason"
+    bridge.is_live = True
+    assert subagents.refusal_before(CORPUS) is None
     assert not bridge.calls and not sf.requests(subagents.read(CORPUS))
 
 
