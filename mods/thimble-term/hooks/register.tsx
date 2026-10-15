@@ -10,7 +10,8 @@
 //   - each card a turn of main added or changed, once, under the turn's last reply, in its last state, its takeaway
 //     under it; no hex id, and Claude Code's tool groups left folded
 //   - one row above the prompt, a toast: what is new in the workspace since home was last opened (`open ›` opens home
-//     and the row goes); Claude Code's agent tray shows thimble's agents, and side threads have `↳` rows
+//     and the row goes, `dismiss` marks it seen); Claude Code's agent tray shows thimble's agents, and side threads
+//     have `↳` rows
 //   - one panel (panel.tsx): home, a card, a citation's place, the threads, a label, a document, the files, an agent
 //   - side threads: the blue "?" beside a passage or a card, or a selection's "ask"; a `↳ thread` row under main's
 //     latest row when an answer comes in while the panel shows something else, and a blue ↳ beside the passage asked
@@ -43,7 +44,7 @@ import { COLORS } from './paint'
 import { isAnchor, signalEnd, signalQuestion } from './signal'
 import type { AppendedRow } from './signal'
 import { NAV_EMPTY } from './nav'
-import { FILES_UI_EMPTY, LABEL_UI_EMPTY, PANEL, checkQueued, closePanel, loadCards, loadCardsBatch, navOrigin, openHome, openPanel, openPending, paneTitle, panelColumns, placedLater, readSurface, readThread, retryPending, rt, surfaceValue, takeKeys, threadsNow, tick } from './term'
+import { FILES_UI_EMPTY, LABEL_UI_EMPTY, PANEL, checkQueued, closePanel, loadCards, loadCardsBatch, navOrigin, openHome, openPanel, openPending, paneTitle, panelColumns, placedLater, readSurface, readThread, retryPending, rt, seeHome, surfaceValue, takeKeys, threadsNow, tick } from './term'
 import type { UiApply } from './term'
 import { turns } from './turns'
 import { PUMP_MS, closeView, openViewState, sendEvent, viewFault, viewMessage, viewPump } from './viewhost'
@@ -1026,7 +1027,8 @@ export const register: Register = on => {
       )
     }
     // what is new in the workspace since home was last opened, like a toast: open › opens home on the first new item
-    // and the row goes; none while home shows (live check term-fix8, quirk 6: it stayed beside home, which showed them)
+    // and the row goes; dismiss marks what is there seen, as opening home does, and opens nothing; none while home
+    // shows (live check term-fix8, quirk 6: it stayed beside home, which showed them)
     const home = await cx.home()
     const homeShown = (await cx.panel())?.view === 'home' && panes.some(p => p.id === PANEL && p.isPlaced)
     if (home && !homeShown) {
@@ -1043,6 +1045,7 @@ export const register: Register = on => {
               {/* the word `new` in green, as wherever it shows (SPEC.md, rule 8) */}
               <Text wrap="truncate-end">{words.split(/( new )/).map((w, i) => (w === ' new ' ? <Text key={`new-${i}`}>{' '}<Text color={COLORS.fresh}>new</Text>{' '}</Text> : w))}</Text>
               <Button key="above-home-open" label="open ›" plain onPress={() => openHomeNew(cx)} />
+              <Button key="above-home-dismiss" label="dismiss" plain onPress={() => seeHome(cx, home)} />
             </Box>
           </Box>,
         )

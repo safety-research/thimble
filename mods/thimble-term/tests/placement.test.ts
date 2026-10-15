@@ -268,3 +268,15 @@ test('a dismissed notice goes at once and stays gone when home is read again; a 
   expect(shown(await above.find({ type: 'Box', key: 'above-notice-n8' }))).toBe(`  notice${SWITCHED}open ›dismiss`)
   await above.unmount()
 })
+
+test('the toast row above the prompt: `thimble` dim, what is new, then `open ›` and `dismiss`', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  w.states.home = { ...w.states.home, cards: 14 }
+  w.stamps.set(`${WS}/notebooks`, 2)
+  await w.clock.advance(1100)
+  const above = (await $.ui.mount(aboveAt(140))) as unknown as M
+  expect(shown(await above.find({ type: 'Box', key: 'above-home' }))).toBe('  thimble2 new cardsopen ›dismiss')
+  expect(await above.find({ type: 'Button', key: 'above-home-dismiss' })).toBeTruthy()
+  await above.unmount()
+})
