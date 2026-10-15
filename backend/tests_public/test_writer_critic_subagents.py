@@ -13,7 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from app import agents, config, critique_session, events, orientation, report_types, subagents, tools, write_session
+from app import (agents, config, critique_session, events, orientation, read_parts, report_types, subagents, tools,
+                 write_session)
 from app import subagent_files as sf
 from subagent_fakes import bridge  # noqa: F401 — a fixture
 
@@ -44,20 +45,10 @@ async def test_write_starts_the_writer_through_the_module_with_its_context_file(
     assert again.kind == "hook", "a second writer of the document"
 
 
-def test_context_parts_cut_at_line_ends_and_rejoin_exactly():
-    text = "short\n" + "a" * 250 + "\n" + "tail\n"
-    parts = write_session.context_parts(text, limit=100)
-    assert "".join(parts) == text
-    assert all(len(p) <= 100 for p in parts)
-    assert parts[0] == "short\n", "a line that does not fit the open part starts the next one"
-    assert parts[1] == "a" * 100 and parts[2] == "a" * 100, "a line past the cap alone is cut mid-line"
-    assert write_session.context_parts("", limit=100) == [""]
-
-
 async def test_a_large_context_is_written_in_files_a_read_call_returns_whole(bridge, models, workspaces_tmp, monkeypatch):
-    """A context past the Read tool's caps as one file (#17) is written as files of at most CONTEXT_PART_CHARS, every
-    one named in the writer's prompt, so the writer reads each whole without tripping a cap."""
-    monkeypatch.setattr(write_session, "CONTEXT_PART_CHARS", 1_000)
+    """A context past the Read tool's caps as one file (#17) is written as files of at most read_parts.PART_CHARS,
+    every one named in the writer's prompt, so the writer reads each whole without tripping a cap."""
+    monkeypatch.setattr(read_parts, "PART_CHARS", 1_000)
     big = "\n".join(f"line {i} " + "x" * 90 for i in range(60))  # ~6k characters: past the (patched) cap
     monkeypatch.setattr(write_session.context, "render", lambda *a, **k: big)
     ans = await write_session.start(CORPUS, "report", route=subagents.CLICK)
@@ -74,7 +65,7 @@ async def test_a_large_context_is_written_in_files_a_read_call_returns_whole(bri
 
 
 def test_a_shrunken_context_removes_the_extra_files_of_an_earlier_one(workspaces_tmp, monkeypatch):
-    monkeypatch.setattr(write_session, "CONTEXT_PART_CHARS", 100)
+    monkeypatch.setattr(read_parts, "PART_CHARS", 100)
     t = {"slug": "report", "name": "Report"}
     monkeypatch.setattr(write_session.context, "render", lambda *a, **k: "x" * 350)
     assert len(write_session.write_context(CORPUS, t, "", "")) == 4
@@ -86,20 +77,20 @@ def test_a_shrunken_context_removes_the_extra_files_of_an_earlier_one(workspaces
 
 
 def test_a_full_context_file_of_dense_table_lines_is_under_the_read_file_size_cap(workspaces_tmp, monkeypatch):
-    """A context file as full as CONTEXT_PART_CHARS lets it be, of dense table rows with characters UTF-8 writes in two
-    to four bytes, is under the Read tool's file-size cap (256KB) on disk, and so is any part, at four bytes a character
-    at most. The tool's other cap, 25k tokens a call, cannot be measured offline, since no tokenizer runs here, so
-    CONTEXT_PART_CHARS keeps its margin for that cap by estimate (its comment)."""
+    """A context file as full as read_parts.PART_CHARS lets it be, of dense table rows with characters UTF-8 writes in
+    two to four bytes, is under the Read tool's file-size cap (256KB) on disk, and so is any part, at four bytes a
+    character at most. The tool's other cap, 25k tokens a call, cannot be measured offline, since no tokenizer runs
+    here, so PART_CHARS keeps its margin for that cap by estimate (its comment)."""
     cap = 256 * 1024
     row = "|{i:06d}|r{i}.jsonl#L{i}|0.{i:04d}|✓|€{i}|東京|🙂|—|\n"
-    text = "".join(row.format(i=i) for i in range(4 * write_session.CONTEXT_PART_CHARS // len(row)))
+    text = "".join(row.format(i=i) for i in range(4 * read_parts.PART_CHARS // len(row)))
     monkeypatch.setattr(write_session.context, "render", lambda *a, **k: text)
     paths = write_session.write_context(CORPUS, {"slug": "report", "name": "Report"}, "", "")
     assert len(paths) >= 3
     full = max(paths, key=lambda p: len(p.read_text("utf-8")))
-    assert len(full.read_text("utf-8")) > write_session.CONTEXT_PART_CHARS - 2 * len(row), "as full as a part gets"
+    assert len(full.read_text("utf-8")) > read_parts.PART_CHARS - 2 * len(row), "as full as a part gets"
     assert all(p.stat().st_size < cap for p in paths)
-    assert 4 * write_session.CONTEXT_PART_CHARS < cap
+    assert 4 * read_parts.PART_CHARS < cap
 
 
 async def test_two_typed_writers_of_two_documents_are_claimed_by_their_request_ids(bridge, models, workspaces_tmp):
@@ -224,6 +215,37 @@ async def test_critique_writes_the_brief_and_gives_the_orientation_its_agent_cal
     assert meta["role"] == agents.STEP_ROLE and meta["parent"] == chat and meta["title"] == "critique"
     subagents.run_ended(CORPUS, "crit1", "done", "The critic's report.", source="handback")
     assert agents.read_meta(CORPUS, chat).get("paused") is None, "the report continues the orientation's run"
+
+
+async def test_a_large_brief_is_written_in_files_a_read_call_returns_whole(bridge, models, workspaces_tmp,
+                                                                          monkeypatch):
+    """The orientation's account of its analysis, which has no limit, and the coverage checks' findings can take the
+    brief past what one Read call returns: it is written as brief.md, brief-2.md… of at most read_parts.PART_CHARS
+    characters each, under the Read tool's file-size cap, and the critic's prompt names every one in order."""
+    from app import orient_session
+
+    found = "\n".join(f"- logs/day-{i:04d}.jsonl: no call opened it, and no card names its field `actor_id`"
+                      for i in range(900))
+
+    async def many_checks(c, chat=None):
+        return found
+
+    monkeypatch.setattr(critique_session, "checks_text", many_checks)
+    ans = await orient_session.start(CORPUS, "", route=subagents.CLICK)
+    ctx = type("Ctx", (), {"c": CORPUS, "session": "orient", "tool_use_id": "toolu_cq"})()
+    account = "\n\n".join(f"Finding {i}: account a{i:04d} deleted {i % 97} files on night {i % 7}, as "
+                           f"[[card:c{i:04d}]] counts." for i in range(700))
+    res = await critique_session.tool_critique(ctx, {"context": account})
+    assert not res.is_error, res.text
+    inp = json.loads(res.text.split("AGENT CALL ", 1)[1].splitlines()[0])
+    folder = config.workspace_dir(CORPUS) / "critique" / subagents.agent(CORPUS, ans.agent_id)["chat"]
+    paths = read_parts.paths(folder / critique_session.BRIEF_FILE, len(list(folder.glob("brief*.md"))))
+    text = "".join(p.read_text() for p in paths)
+    assert len(text) > 100_000, "one file would fail a Read call whole"
+    assert len(paths) >= 3 and all(p.is_file() for p in paths)
+    assert all(len(p.read_text()) <= read_parts.PART_CHARS and p.stat().st_size < 256 * 1024 for p in paths)
+    assert "Finding 0:" in text and "Finding 699:" in text and "day-0899" in text, "the brief whole"
+    assert f"READ {len(paths)} FILES {', '.join(str(p) for p in paths)} FIRST" in inp["prompt"]
 
 
 async def test_a_critic_start_the_orientation_never_makes_ends_with_its_run(bridge, models, workspaces_tmp,

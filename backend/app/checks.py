@@ -16,11 +16,13 @@ and check.md (its prompt) in its folder, follow the built-ins as `<extension>-<s
 first changed as the built-ins are, and off. A run is a `thimble:check`, a subagent of the analyst's Claude Code session
 (subagents.py), registered from prompts/check.md (definition) on Settings' checks row, with the corpus read-only and a
 work folder of its own, check-work/<id>-<doc>/. Its task file there, task.md, holds the context engine's part
-(context.render) and then the document, the check's prompt and the passages it covers; its prompt names that file
-(`## check-task-file`). It comments with add_comment and hands back one line, its run's summary. At most MAX_SESSIONS
-run at once; the others wait queued. A run has no time limit, and the analyst's Stop ends it (through thimble's plugin
-module, subagents.stop). A check made or changed (its name, prompt, colour, shown or covers) emits `checks` on the
-stream, so every Comments pane, the Report's and the canvas's in any tab, reads the checks again.
+(context.render) and then the document, the check's prompt and the passages it covers; a task too large for one Read
+call is written as task.md, task-2.md… (read_parts), each small enough that Read returns it whole. Its prompt names that
+file or those files in order (`## check-task-file`, `## check-task-files`). It comments with add_comment and hands back
+one line, its run's summary. At most MAX_SESSIONS run at once; the others wait queued. A run has no time limit, and the
+analyst's Stop ends it (through thimble's plugin module, subagents.stop). A check made or changed (its name, prompt,
+colour, shown or covers) emits `checks` on the stream, so every Comments pane, the Report's and the canvas's in any tab,
+reads the checks again.
 
 How a run starts: a writer's end starts each shown check on its document, a follow-on start of the writer's own start
 (_writer_ended); Run on a check's row, or turning a check on, is the analyst's click; main's run_check gives main the
@@ -63,9 +65,9 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from . import canvas_comments, config, investigation, prompts, tools, userconf, work_files
+from . import canvas_comments, config, investigation, prompts, read_parts, tools, userconf, work_files
 from .kernel_thimble import LABEL_ORDER
-from .ledger import read_json, write_json, write_under
+from .ledger import read_json, write_json
 
 log = logging.getLogger("thimble.checks")
 router = APIRouter()
@@ -76,7 +78,7 @@ WRITER_ROLE = "writer"  # the chat role of a writer, whose end starts the shown 
 AUTHOR = "check"  # a check's comment's author (report.CHECK_AUTHOR)
 DIR = "checks"  # workspaces/<c>/checks/<id>.json
 WORK_DIR = "check-work"  # workspaces/<c>/check-work/<id>-<doc>/, a run's own folder, where its Bash may write
-TASK_FILE = "task.md"  # in a run's own folder: what its agent reads first
+TASK_FILE = "task.md"  # in a run's own folder: what its agent reads first, with task-2.md… when one file is too large
 OWN_TOOLS = ("read_ref", "list_cards", "add_comment")  # a check's thimble tools
 BUILTINS = ("judgment", "unverified", "important-details")  # prompts/checks/<id>.md, listed first in this order
 RETIRED = ("verified",)  # a former built-in: listed only where the workspace stored it, and no new check takes its id
@@ -898,14 +900,13 @@ async def _launch(act: _Active) -> None:
         await _program(act, check, cover, text, part)
         return
     work = work_dir(c, act.check, act.doc)
-    path = work / TASK_FILE
-    await asyncio.to_thread(_write_task, c, path, text)
+    paths = await asyncio.to_thread(_write_task, c, work / TASK_FILE, text)
     if act.route == subagents.FOLLOW_ON:
         await _wait_out_of_plan(act)
     if act.ended:
         return
     ans = await subagents.start_job(
-        c, ROLE, session_key(act.check, act.doc), tools.hint("check-task-file", path=str(path)),
+        c, ROLE, session_key(act.check, act.doc), read_parts.named(paths, "check-task-file", "check-task-files"),
         subagents.values_for(c, ROLE), act.route,
         description=f"check: {check['name']} · {CANVAS_NAME if act.doc == CANVAS else act.doc}",
         chat={"title": str(check["name"]), "check": act.check, "doc": act.doc, "run_id": act.run, "announce": False,
@@ -921,9 +922,11 @@ async def _launch(act: _Active) -> None:
         act.request = str(ans.get("request") or "") or None
 
 
-def _write_task(c: str, path: Path, text: str) -> None:
-    """The run's task file, in a folder its agent and main's Bash can write, so never through a link (write_under)."""
-    write_under(config.workspace_dir(c), path, text + "\n")
+def _write_task(c: str, path: Path, text: str) -> list[Path]:
+    """The run's task file, `path`, and the files after it when the task outgrows what one Read call returns
+    (read_parts.write), in a folder its agent and main's Bash can write, so never through a link. The paths, in
+    order."""
+    return read_parts.write(config.workspace_dir(c), path, text + "\n")
 
 
 def subagent_started(c: str, run: Any, req: dict[str, Any]) -> None:

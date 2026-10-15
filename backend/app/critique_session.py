@@ -15,10 +15,11 @@ digest, a page at a time.
 
 The brief. `critique` writes the critic's first message to `critique/<chat>/brief.md`: what to review, the drafts, the
 digest, the orientation's context, the coverage checks' findings led by the coverage line, and the analyst's
-conversation with main. It records a pending start of the critic for the orientation's run and returns the exact Agent
-call (`## critique-subagent`); the orientation makes it, ends its turn, and revises when the critic's report arrives as a
-message (F1). Meanwhile its chat is `paused: critique`. The critic's chat is a step of the orientation's chat titled
-`critique`.
+conversation with main; a brief too large for one Read call is written as brief.md, brief-2.md… (read_parts), each small
+enough that Read returns it whole, and the critic's prompt names them in order. It records a pending start of the critic
+for the orientation's run and returns the exact Agent call (`## critique-subagent`); the orientation makes it, ends its
+turn, and revises when the critic's report arrives as a message (F1). Meanwhile its chat is `paused: critique`. The
+critic's chat is a step of the orientation's chat titled `critique`.
 
 An extension's program can run the critique instead (program_critique): it gets the same digest, through one Caller
 for both, and its report is the tool's result; the orientation's end stops it.
@@ -32,7 +33,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import agents, config, orient_checks, orientation, session, subagents, tools, work_files
+from . import agents, config, orient_checks, orientation, read_parts, session, subagents, tools, work_files
 from .ledger import write_under
 
 log = logging.getLogger("thimble.critique_session")
@@ -42,7 +43,7 @@ ROLE = "critic"  # its role among subagents.TYPES
 TITLE = "critique"  # its step's title, so the browser names it `<caller>/critique`
 DIGEST_DIR = "critique"  # the one folder outside the corpus and the work folders the critic reads
 WORK_DIR = "critique-work"  # critique-work/<chat>, the critic's own folder, where it may write
-BRIEF_FILE = "brief.md"  # in critique/<chat>: the critic's first message
+BRIEF_FILE = "brief.md"  # in critique/<chat>: the critic's first message, with brief-2.md… when one file is too large
 SKILLS = ("thimble:shared",)
 OWN_TOOLS = ("read_ref", "list_cards")  # the critic's thimble tools
 
@@ -454,7 +455,7 @@ async def brief(c: str, caller: Caller, context: str = "") -> tuple[Path | None,
 
 
 async def tool_critique(ctx: Any, args: dict[str, Any]) -> Any:
-    """The `critique` tool, the orientation's: the digest and the brief written (critique/<chat>/brief.md), a pending
+    """The `critique` tool, the orientation's: the digest and the brief written (critique/<chat>/brief.md…), a pending
     start of the critic for the orientation's run, and the exact Agent call the orientation makes, then ends its turn
     and revises when the report arrives (`## critique-subagent`). Its chat is `paused: critique` meanwhile. An
     extension's program runs the critique instead (program_critique)."""
@@ -470,12 +471,12 @@ async def tool_critique(ctx: Any, args: dict[str, Any]) -> Any:
     if subagents.running(ctx.c, key):
         return tools.err(tools.hint("critique-running"))
     _, text = await brief(ctx.c, caller, str(args.get("context") or ""))
-    path = digest_dir(ctx.c, caller.chat) / BRIEF_FILE
-    try:
-        write_under(config.workspace_dir(ctx.c), path, text + "\n")  # a kernel can write the workspace
+    try:  # a kernel can write the workspace
+        paths = read_parts.write(config.workspace_dir(ctx.c), digest_dir(ctx.c, caller.chat) / BRIEF_FILE, text + "\n")
     except OSError as e:
         return tools.err(f"critique: the brief was not written ({e})")
-    task = "\n\n".join(x for x in (tools.hint("critique-task"), tools.hint("critic-brief-file", path=str(path))) if x)
+    where = read_parts.named(paths, "critic-brief-file", "critic-brief-files")
+    task = "\n\n".join(x for x in (tools.hint("critique-task"), where) if x)
     ans = await subagents.start_job(ctx.c, ROLE, key, task, subagents.values_for(ctx.c, ROLE), subagents.TYPED,
                                     description=TITLE, chat={"title": TITLE, "parent": caller.chat,
                                                              "brief": tools.hint("critique-task")},

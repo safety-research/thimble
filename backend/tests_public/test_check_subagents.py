@@ -12,7 +12,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from app import agents, checks, config, investigation, report_types, subagents, tools
+from app import agents, checks, config, investigation, read_parts, report_types, subagents, tools
 from app import subagent_files as sf
 from subagent_fakes import bridge  # noqa: F401 — a fixture
 
@@ -91,6 +91,25 @@ async def test_a_writer_s_end_starts_each_shown_check_through_the_module_with_it
     await _until(lambda: len(bridge.ops("spawn")) == 2, "the queued check never started")
     assert _run(cid)["status"] == "done" and _run(cid)["summary"] == "Commented on 0 of 3 passages."
     assert _run(cid)["stale"] == 0
+
+
+async def test_a_large_workspace_s_task_is_written_in_files_a_read_call_returns_whole(doc, bridge):
+    """A task past what one Read call returns, here one with a long report, which the task never cuts, is written as
+    task.md, task-2.md… of at most read_parts.PART_CHARS characters each, under the Read tool's file-size cap, and the
+    run's prompt names every one in order."""
+    paras = "\n\n".join(f"Account a{i:04d} deleted {i % 97} files on night {i % 7} from host h{i % 13}, as line {i} of "
+                         f"the log shows." for i in range(900))
+    await _write("# A long report\n\n## Findings\n\n" + paras + "\n")
+    await _started("unverified")
+    [spawn] = bridge.ops("spawn")
+    work = checks.work_dir(CORPUS, "unverified", "report")
+    paths = read_parts.paths(work / checks.TASK_FILE, len(list(work.glob("task*.md"))))
+    text = "".join(p.read_text() for p in paths)
+    assert len(text) > 100_000, "one file would fail a Read call whole"
+    assert len(paths) >= 3 and all(p.is_file() for p in paths)
+    assert all(len(p.read_text()) <= read_parts.PART_CHARS and p.stat().st_size < 256 * 1024 for p in paths)
+    assert "Account a0000 deleted" in text and "Account a0899 deleted" in text, "the document whole"
+    assert f"READ {len(paths)} FILES {', '.join(str(p) for p in paths)} FIRST" in spawn["prompt"]
 
 
 async def test_in_a_new_workspace_a_writer_s_end_starts_each_built_in_and_a_check_turned_off_stays_off(
