@@ -54,7 +54,9 @@ import type {
   WorkspaceRow,
   Writeup,
 } from './types'
+import { bus } from './bus'
 import { heavy } from './limit'
+import { clearCodeGone, setBrowserId, showCodeGone } from './notices'
 
 const BASE = '/api'
 
@@ -74,45 +76,139 @@ export function describeDetail(d: unknown): string {
 
 let keyReady: Promise<void> | null = null
 const CLAIM_WAITS_MS = [0, 500, 2000] // before each try of the claim while the server does not answer
+// whether the server refused the last code this page posted with 410: used, replaced by a newer one, or expired
+let codeGone = false
 
-/** Trade the key in the link thimble showed (`#k=`) for the cookie that proves this browser to the server (permission
- * answers and mode changes, and every write behind hook_auth.LocalWriteGuard), and take it out of the address once the
- * server has answered. Memoised: with no key in the link the cookie the browser already holds stands; a claim the server
- * never answered leaves the key in the address and is tried again by the next call. `j` awaits it, so a write never
- * races the claim. */
+/** Whether the server refused the link's sign-in code with 410 at the last claim (used, replaced by a newer one, or
+ * expired); shell/SignIn starts its line with it. */
+export const claimRefused = (): boolean => codeGone
+
+/** The address's hash as parameters: `p` is a link's sign-in code. */
+const hashParams = (): URLSearchParams => new URLSearchParams(window.location.hash.slice(1))
+
+/** The address with `params` as its hash (none when empty), in place: no reload, no history entry. */
+function setHash(params: URLSearchParams): void {
+  const rest = params.toString()
+  window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + (rest ? `#${rest}` : ''))
+}
+
+/** Sign this browser in with the one-time code in the link thimble showed (`#p=`, made as the link is shown: backend
+ * hook_auth.mint), which the server trades for the cookie that every read of the server's data and every analyst
+ * action needs (backend hook_auth), and take the code out of the address once the server has answered. 204: signed
+ * in, or signed in already. 410 (or any other refusal): the code was used, replaced by a newer one, or expired, which
+ * shell/SignIn's line and a notice this page makes say (claimRefused, lib/notices showCodeGone; a later sign-in takes
+ * the notice away). The key an earlier version's link carried (`k` in the hash)
+ * is taken out of the address and never sent. After the claim the page asks which browser it is (GET /ui/paired), so
+ * it leaves out the notice of its own sign-in (lib/notices setBrowserId). Memoised: with no code in the link the
+ * cookie the browser already holds stands; a claim the server never answered leaves the code in the address and is
+ * tried again by the next call. `j` awaits it, so a write never races the claim. */
 export function claimKey(): Promise<void> {
   if (keyReady) return keyReady
   if (typeof window === 'undefined') return (keyReady = Promise.resolve())
-  const key = new URLSearchParams(window.location.hash.slice(1)).get('k')
-  keyReady = key ? claim(key) : Promise.resolve()
+  const hash = hashParams()
+  if (hash.has('k')) {
+    hash.delete('k')
+    setHash(hash)
+  }
+  const code = hash.get('p')
+  keyReady = (code ? claim(code) : Promise.resolve(true)).then((answered) => {
+    if (answered) afterClaim = learnBrowser()
+  })
   return keyReady
 }
 
-async function claim(key: string): Promise<void> {
+async function claim(code: string): Promise<boolean> {
+  const ws = new URLSearchParams(window.location.search).get('ws')
   for (const wait of CLAIM_WAITS_MS) {
     if (wait) await new Promise((r) => setTimeout(r, wait))
     try {
-      const res = await fetch(`${BASE}/ui/key`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key }) })
-      // 204 claimed it, 403 names a key that is not this server's: neither changes on another try
-      if (res.status === 204 || res.status === 403) {
-        if (new URLSearchParams(window.location.hash.slice(1)).get('k') === key) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search)
-        return
+      const res = await fetch(`${BASE}/ui/key`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(ws ? { code, ws } : { code }) })
+      // 204 signed in, 410 (or any refusal) a code that is gone: neither changes on another try
+      if (res.status === 204 || (res.status >= 400 && res.status < 500)) {
+        const now = hashParams()
+        if (now.get('p') === code) {
+          now.delete('p')
+          setHash(now)
+        }
+        codeGone = res.status === 410
+        if (res.status !== 204) showCodeGone()
+        else clearCodeGone()
+        return true
       }
     } catch {
       /* no answer: try again */
     }
   }
   keyReady = null
+  return false
 }
 
-/** A link with a key opened in a tab already on its page changes only the address's hash, and loads nothing. */
+type Paired = { paired: boolean; id: string }
+// what GET /ui/paired answered after the last claim the server answered; null before one, or when the read failed
+let afterClaim: Promise<Paired | null> = Promise.resolve(null)
+
+/** This browser's id (GET /ui/paired), for lib/notices; a read that fails leaves it unknown. The answer, or null when
+ * the read failed. */
+async function learnBrowser(): Promise<Paired | null> {
+  try {
+    const got = await api.paired()
+    setBrowserId(typeof got?.id === 'string' ? got.id : '')
+    return got ?? null
+  } catch {
+    return null // unknown: every sign-in notice shows
+  }
+}
+
+/** Whether the server answers this page's reads: this browser is signed in, as GET /ui/paired answered after the claim
+ * of the link's code (the read that learns its id, not one more), or else a read the server guards answers all the
+ * same (GET /tour), as it does for a page thimble's screenshot tool loads with a read credential of its own, which
+ * /ui/paired does not count. null when the server did not answer. `again` asks /ui/paired anew. For shell/SignIn. */
+export async function signedIn(again = false): Promise<boolean | null> {
+  await claimKey()
+  const got = again ? await learnBrowser() : await afterClaim
+  if (!got) return null
+  if (got.paired === true) return true
+  try {
+    return (await fetch(`${BASE}/tour`)).status !== 401
+  } catch {
+    return null
+  }
+}
+
+/** A link with a code opened in a tab already on its page changes only the address's hash, and loads nothing: the code
+ * is claimed, and shell/SignIn checks again whether this browser is signed in (bus `newLink`). */
 export function claimOnHashChange(): void {
   if (typeof window === 'undefined') return
   window.addEventListener('hashchange', () => {
-    if (!new URLSearchParams(window.location.hash.slice(1)).get('k')) return
+    const hash = hashParams()
+    if (!hash.get('p') && !hash.has('k')) return
     keyReady = null
     void claimKey()
+    bus.emit('newLink', {})
   })
+}
+
+/** Whether `res` is a read the server refused because this browser is not signed in (backend hook_auth: 401 with
+ * `signin: true`); when it is, the page learns it (bus `signedOut`) and shell/SignIn shows its line in place of the app.
+ * Every request of the page's own that reads the server's data hands its failed answer here. Reads a copy of the body,
+ * so `res` can still be read. */
+export async function signInNeeded(res: Response): Promise<boolean> {
+  if (res.status !== 401) return false
+  try {
+    const body = (await res.clone().json()) as { signin?: unknown } | null
+    if (body?.signin !== true) return false
+  } catch {
+    return false
+  }
+  bus.emit('signedOut', {})
+  return true
+}
+
+/** After a stream the server closed (lib/sse): when the server no longer answers this page's reads (signedIn), the
+ * page learns it (bus `signedOut`), so it shows shell/SignIn's line rather than that the server is down. A server that
+ * does not answer says nothing: lib/sse's own failure stands. */
+export async function checkSignedIn(): Promise<void> {
+  if ((await signedIn(true)) === false) bus.emit('signedOut', {})
 }
 
 /** A click start's answer as the server's subagents.Answer gives it, with its refusal's `kind` and `reason` filled in
@@ -132,6 +228,7 @@ async function j<T>(url: string, init?: RequestInit): Promise<T> {
   await claimKey()
   const res = await fetch(url, { ...init, headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) } })
   if (!res.ok) {
+    await signInNeeded(res)
     let detail = res.statusText
     try {
       const body = await res.json()
@@ -143,6 +240,12 @@ async function j<T>(url: string, init?: RequestInit): Promise<T> {
   }
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
+}
+
+/** The error of a request that answered text rather than JSON, by its status (signInNeeded heard it first). */
+async function failed(res: Response): Promise<Error> {
+  await signInNeeded(res)
+  return new Error(`${res.status} ${res.statusText}`)
 }
 
 const q = (params: Record<string, string | number | undefined | null>) =>
@@ -202,7 +305,7 @@ export const api = {
   /** the Timeline mode's page as its sandboxed frame loads it: the view kit over files_timeline.html */
   timelinePage: async (c: string): Promise<string> => {
     const res = await fetch(`${BASE}/corpora/${enc(c)}/source/timeline`)
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+    if (!res.ok) throw await failed(res)
     return res.text()
   },
   /** The URL a PDF of the corpus opens from in the browser's viewer, at `page` when given. */
@@ -229,6 +332,7 @@ export const api = {
   ): Promise<void> => {
     const res = await fetch(`${BASE}/corpora/${enc(c)}/sources/grep${q({ q: text })}`, { signal })
     if (!res.ok || !res.body) {
+      await signInNeeded(res)
       let detail = res.statusText
       try {
         detail = describeDetail((await res.json()).detail)
@@ -283,7 +387,6 @@ export const api = {
    * module); a subagent of main the analyst started is asked of main. */
   interrupt: (c: string, id: string) => j<{ stopped: boolean; done?: boolean; asked?: 'main'; kind?: string; reason?: string }>(`${ws(c)}/chats/${enc(id)}/interrupt`, { method: 'POST' }),
   askAgain: (c: string, id: string) => j<{ asked: string; event: string; questions: number }>(`${ws(c)}/chats/${enc(id)}/ask-again`, { method: 'POST' }),
-  handBack: (c: string, id: string) => j<{ thread: string; event: string; text: string; hand_back: 'handed' }>(`${ws(c)}/chats/${enc(id)}/hand-back`, { method: 'POST' }),
   /**
      * Send the analyst's Claude Code session an event (`POST /ws/{c}/events {kind, payload}`), e.g. a message typed in main
      * (`main`, {text}) or in a thread (`thread`, {thread, text}). The reply arrives through the chat's log. A 409 says no
@@ -295,8 +398,10 @@ export const api = {
   setEffort: (c: string, effort: MainEffort) => j<{ effort: string; choice: MainEffort }>(`${ws(c)}/session/effort`, { method: 'PUT', body: JSON.stringify({ effort }) }),
   /** Turn fast mode off or back on for main and its threads from main's next request (events.fast_route). */
   setFast: (c: string, fast: boolean) => j<{ fast: boolean }>(`${ws(c)}/session/fast`, { method: 'PUT', body: JSON.stringify({ fast }) }),
-  /** Allow or deny a permission prompt of main's session that its hook relayed (events.permission_route). */
-  answerPermission: (c: string, id: string, allow: boolean) => j<{ answered: string }>(`${ws(c)}/permission`, { method: 'POST', body: JSON.stringify({ id, allow }) }),
+  /** Allow or deny a permission prompt of main's session that its hook relayed (events.permission_route); `always` also
+     * adds what the card's "Always allow" named, where Claude Code's own "don't ask again" would keep it. */
+  answerPermission: (c: string, id: string, allow: boolean, always = false) =>
+    j<{ answered: string }>(`${ws(c)}/permission`, { method: 'POST', body: JSON.stringify({ id, allow, ...(always ? { always } : {}) }) }),
   /** Allow or deny a permission request of a code ticket's session (agent_session.permission_route), the one kind of
      * session thimble still runs beside main; `always` also applies Claude Code's suggested "don't ask again" rules for
      * the rest of the session, and `shown` is how many of the later calls that joined it the card listed. */
@@ -357,7 +462,7 @@ export const api = {
   /** `GET …/outputs/{i}/full`: the complete text of a truncated stream output, as text. */
   outputFull: async (c: string, nb: string, id: string, i: number): Promise<string> => {
     const res = await fetch(`${ws(c)}/notebooks/${enc(nb)}/cells/${enc(id)}/outputs/${i}/full`)
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+    if (!res.ok) throw await failed(res)
     return res.text()
   },
   ipynbUrl: (c: string, nb: string) => `${ws(c)}/notebooks/${enc(nb)}/ipynb`,
@@ -384,10 +489,31 @@ export const api = {
   /** what thimble proposes for a file opened in the File browser: whether a viewer may be proposed for its type, and
    * the proposal for the type when there is one (backend views.suggestion_for) */
   viewSuggestions: (c: string, path: string) => j<ViewSuggestion>(`${ws(c)}/views/suggestions${q({ path })}`),
-  /** ask for a viewer for the type of a file the analyst opened: the suggested proposal's slug, or null */
+  /** ask for a viewer for the type of a file the analyst opened: the slug of the view proposal it wrote (which the
+   * stream's `view {status: suggested}` brings to the view proposal card), or null */
   suggestView: (c: string, path: string) => j<{ slug: string | null }>(`${ws(c)}/views/suggest`, { method: 'POST', body: JSON.stringify({ path }) }),
-  /** build a suggested viewer */
+  /** Accept on a view proposal: its build queued as one the analyst asked for; a start that cannot happen comes back
+   * as the row's `refused`. 403 without the analyst's cookie. */
   acceptProposal: (c: string, slug: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/accept`, { method: 'POST' }),
+  /** Reject on a view proposal: the proposal dropped as rejected (backend views.answer_offer). 403 without the
+   * analyst's cookie, 409 for a row that is no open proposal. */
+  rejectProposal: (c: string, slug: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/reject`, { method: 'POST' }),
+  /** Try again on a notice that a check for a view proposal failed: the check that failed runs now, the file type's
+   * or the proposer's (backend views.propose_now_route, by the notice's `key`). `started: false` with the reason when it
+   * cannot run now. */
+  proposeNow: (c: string, key?: string) =>
+    j<{ started?: boolean; queued?: boolean; reason?: string }>(`${ws(c)}/views/propose-now`, { method: 'POST', ...(key ? { body: JSON.stringify({ key }) } : {}) }),
+  /** The open notices (backend notices.list_route): failures of main and of thimble's agents, each with its fix,
+   * oldest first. */
+  notices: (c: string) => j<unknown[]>(`${ws(c)}/notices`),
+  /** × on a notice, or a fix of the analyst's that went through: the server forgets it (backend notices.dismiss_route). */
+  dismissNotice: (c: string, id: string) => j<{ dismissed: boolean }>(`${ws(c)}/notices/${enc(id)}/dismiss`, { method: 'POST' }),
+  /** Whether this browser is signed in, and its id: the first 12 hex digits of its cookie's hash, '' when not signed in
+   * (backend main.ui_paired). */
+  paired: () => j<{ paired: boolean; id: string }>(`${BASE}/ui/paired`),
+  /** A sign-in notice's Sign it out: the server signs the browser `id` out and clears its notice in workspace `c`
+   * (backend main.ui_signout). */
+  signOut: (id: string, c?: string) => j<{ signed_out: boolean }>(`${BASE}/ui/signout`, { method: 'POST', body: JSON.stringify(c ? { id, ws: c } : { id }) }),
   retryProposal: (c: string, slug: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/retry`, { method: 'POST' }),
   /** Build or Retry on a proposal's chip (`POST /ws/{c}/views/{slug}/build`): a click that starts a view builder through
    * thimble's plugin, with the run's model and effort (Settings' dev row when left out). */
@@ -409,7 +535,7 @@ export const api = {
      * name the host this browser reaches. */
   viewFrame: async (c: string, slug: string, version?: string): Promise<string> => {
     const res = await fetch(`${ws(c)}/views/${enc(slug)}/frame${q({ origin: location.origin, v: version })}`)
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+    if (!res.ok) throw await failed(res)
     return res.text()
   },
   /** reader.records(index, query), for the page's thimble.fetch, with no time limit, through the gate of slow calls
@@ -449,7 +575,7 @@ export const api = {
   /** a card type's page as a card's frame loads it (backend cardtypes.frame_route) */
   cardTypeFrame: async (c: string, type: string): Promise<string> => {
     const res = await fetch(`${ws(c)}/cardtypes/${enc(type)}/frame`)
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+    if (!res.ok) throw await failed(res)
     return res.text()
   },
   /** reader.records(index, query) for a card's page, under the labels the card names */
@@ -467,10 +593,6 @@ export const api = {
    * with */
   cardAsView: (c: string, card: string) => j<{ slug: string; query: ViewQuery }>(`${ws(c)}/cells/${enc(card)}/as-view`, { method: 'POST' }),
   // ---- orientation ----
-  /** Start (`POST /ws/{c}/start`): a click, which starts the orientation through thimble's plugin with no turn of main;
-     * the answer is the agent id, or the refusal's kind and reason, which orient/run.json also holds (`orientation`).
-     * 403 without the analyst's cookie. */
-  start: (c: string, body: Partial<StartBody> = {}) => j<StartAnswer>(`${ws(c)}/start`, { method: 'POST', body: JSON.stringify(body) }).then(startAnswer),
   /** The orientation's record (`GET /ws/{c}/orientation`, orient/run.json): {} before any was asked for. */
   orientation: (c: string) => j<OrientRun>(`${ws(c)}/orientation`),
 
@@ -537,7 +659,7 @@ export const api = {
 export const isNotFound = (e: unknown): boolean => /^404\b/.test((e as Error)?.message ?? '')
 
 // --- the canvas's layout ---
-import type { CellMoveBody, GroupPatch, MainEffort, Pos, StartBody } from './types'
+import type { CellMoveBody, GroupPatch, MainEffort, Pos } from './types'
 
 /** The canvas' layout routes: where a group's column sits and how wide a card is. */
 export const canvasApi = {
@@ -626,6 +748,10 @@ export const docsApi = {
   version: (c: string, slug: string, n: number) => j<AnyDoc>(`${inv(c, slug)}/versions/${n}`),
   /** `GET …/types/{slug}/versions/{n}/revisions/{i}`: an earlier save of the writer run that wrote generation `n`. */
   revision: (c: string, slug: string, n: number, i: number) => j<AnyDoc>(`${inv(c, slug)}/versions/${n}/revisions/${i}`),
+  /** `POST …/types/{slug}/versions/{n}[/revisions/{i}]/restore`: that draft, or that save of it, made the newest draft
+   * again, as the analyst's; answers the document. The top bar's Undo reverts it. */
+  restore: (c: string, slug: string, n: number, i: number | null) =>
+    j<AnyDoc>(`${inv(c, slug)}/versions/${n}${i != null ? `/revisions/${i}` : ''}/restore`, { method: 'POST' }),
   /** `GET /report-types/presets`: the presets + New offers. */
   presets: (c: string) => j<DocPreset[]>(`${ws(c)}/report-types/presets`),
   /** `POST /report-types/new`: a preset's document, a page, or one of the analyst's own from a name and a brief. */

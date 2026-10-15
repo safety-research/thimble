@@ -20,7 +20,7 @@ Judge each passage by its evidence, not by how it reads. Read the cards and reco
 
 ## Comments
 
-Comment with `add_comment` only where the check's instructions apply. Each comment takes the analyst's attention, so leave few, and none when you are unsure.
+Comment with `add_comment` only where the check's instructions apply. Each comment takes the analyst's attention, so leave few, and none when you are unsure. A comment holds one finding about the passage or card it sits on, the way a takeaway claims only what its card shows: the analyst reads it beside that passage or card alone, so a finding that rests on something it does not show, such as another card, a file or a term from the corpus, says in plain words what that is.
 
 A comment has two parts. Its `text` is the statement the analyst reads first: one plain sentence of at most about 20 words that says what you found, not a question or a hint. Its `details` open on Show more: in two to four sentences, what the thing is in plain words, why it matters for the analyst's work, what they can do about it, and the evidence, with a citation of where, so the analyst can confirm it in one click. Use the analyst's words rather than jargon, and say "may" where a finding is not certain. A citation is `[[<ref>]]`, such as `[[card:<id>]]` or `[[<path>#L<n>]]`. Comment on a sentence when the finding is about that sentence, and on a paragraph when it is about the paragraph as a whole.
 

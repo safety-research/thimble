@@ -493,6 +493,8 @@ def test_install_fills_the_placeholders_and_marks_the_workspace_precached(tmp_pa
     mark = json.loads((new_ws / demo.MARKER).read_text())
     assert mark["dataset"] == "toy" and mark["folder"] == str(new_corpus) and mark["orientation"] == "o1"
     assert mark["model"] == "claude-opus-5-5" and mark["created"]
+    # what it holds, which the orientation's card in the browser names
+    assert mark["counts"] == {"cards": 3, "labels": 1, "views": 1, "documents": 1}
     run = json.loads((new_ws / "orient" / "run.json").read_text())
     assert run["status"] == "done" and run["precached"] == mark and "session" not in run
     meta = json.loads((new_ws / "chats" / "o1.meta.json").read_text())
@@ -599,6 +601,91 @@ def test_the_coverage_line_goes_with_the_precache_to_the_end_of_the_orientation_
                      "text": line}]
     # a record without a line (an export made before it was kept) installs with the empty log
     assert demo.coverage_line({"coverage": 1}) is None and demo.coverage_line({"coverage": "  "}) is None
+
+
+PENDING = {
+    "views/proposals.json": json.dumps([
+        {"slug": "v1", "name": "Page threads", "status": "built", "claims": ["a.jsonl"]},
+        {"slug": "trace-steps", "name": "Trace Steps", "status": "suggested", "claims": ["**/*.trace"],
+         "offered": {"at": "2026-10-14T10:00:00Z", "after": "file", "why": "Traces read as steps."}},
+        {"slug": "old-viewer", "name": "Old Viewer", "status": "suggested", "claims": ["**/*.vtt"]}]),
+    "views/suggestions.json": json.dumps({".trace": {"answer": "suggested", "slug": "trace-steps", "ts": "t"},
+                                          ".vtt": {"answer": "none", "ts": "t"}}),
+    "notices.json": json.dumps([{"id": "n1", "key": "proposals", "text": "Couldn't check for a view proposal."}]),
+    "notices-dismissed.json": json.dumps({"manual-mode": "t"}),
+    "views/proposer.json": json.dumps({"job": {"after": ["main"], "sid": "s-exporter", "cut": "u9"}}),
+    "views/proposer.jsonl": json.dumps({"status": "ok", "sid": "s-exporter"}) + "\n",
+}
+
+
+def pending_workspace(tmp_path: Path) -> tuple[Path, Path]:
+    """A workspace that holds what was pending for its exporter (PENDING): (the workspace, the corpus)."""
+    root = tmp_path / "a"
+    corpus = root / "corpus"
+    corpus.mkdir(parents=True)
+    (corpus / "a.jsonl").write_text(json.dumps({"body": CORPUS_TEXT}) + "\n")
+    ws = make_workspace(root, corpus, root)
+    for rel, text in PENDING.items():
+        (ws / rel).parent.mkdir(parents=True, exist_ok=True)
+        (ws / rel).write_text(text)
+    return ws, corpus
+
+
+def slugs(path: Path) -> list[str]:
+    return [r["slug"] for r in json.loads(path.read_text())]
+
+
+def test_exports_leave_out_what_was_pending_for_the_exporter_and_install_takes_it_from_an_older_one(tmp_path):
+    """A view proposal that waits for the exporter's answer, their notices and the view proposer's job and run log would
+    show a card or a notice on every machine that installs the export: neither format carries them, and install takes
+    them out of an export made before."""
+    ws, corpus = pending_workspace(tmp_path)
+    out = tmp_path / "out" / "toy"
+    m = demo.export_outputs(ws, corpus, out, name="toy", home=tmp_path / "a", user="", scan=no_scan)
+    assert slugs(out / "workspace" / demo.PROPOSALS) == ["v1", "old-viewer"], "a 0.7 viewer row is no card; it stays"
+    left = {f["path"]: f["why"] for f in m["left_out"]}
+    for rel in demo.PENDING_LEFT_OUT:
+        assert left[rel] == demo.PENDING_LEFT_OUT[rel] and not (out / "workspace" / rel).exists()
+    full = tmp_path / "full" / "toy"
+    m = demo.export_full(ws, corpus, full, name="toy", home=tmp_path / "a", user="", scan=no_scan,
+                         claude_dir=tmp_path / "no-claude")
+    names = {f["path"] for f in m["files"]}
+    assert not set(demo.PENDING_LEFT_OUT) & names
+    assert {f["path"]: f["why"] for f in m["left_out"]}["views/proposer.json"] == demo.PENDING_LEFT_OUT["views/proposer.json"]
+    assert slugs(full / "workspace" / demo.PROPOSALS) == ["v1", "old-viewer"]
+    # the file type whose answer was the proposal left out is asked again; another type's answer stays
+    assert set(json.loads((full / "workspace" / demo.SUGGESTIONS).read_text())) == {".vtt"}
+    # an export made before it left them out: install takes them out
+    older = json.loads((full / demo.MANIFEST).read_text())
+    for rel, text in PENDING.items():
+        (full / "workspace" / rel).write_text(text)
+        if rel not in names:
+            older["files"].append({"path": rel, "bytes": len(text)})
+    (full / demo.MANIFEST).write_text(json.dumps(older))
+    new_ws = tmp_path / "b" / "toy"
+    demo.install(full, new_ws, corpus, home=tmp_path / "b", claude_dir=tmp_path / "b-claude")
+    assert not [rel for rel in demo.PENDING_LEFT_OUT if (new_ws / rel).exists()]
+    assert slugs(new_ws / demo.PROPOSALS) == ["v1", "old-viewer"]
+    assert set(json.loads((new_ws / demo.SUGGESTIONS).read_text())) == {".vtt"}
+
+
+def test_a_readme_names_the_switches_of_a_run_from_before_0_8_0_only(tmp_path):
+    # since 0.8.0 an orientation's record holds the deck alone; its views and documents came from the analyst after it
+    assert demo.outputs_of({"passes": ["final"]}) == ""
+    assert demo.outputs_of({"passes": ["final", "views", "report"], "critique": True}) == \
+        "; outputs final, views, report, critique on"
+    assert demo.outputs_of({"passes": []}) == "; outputs none"
+    out, _, m = made(tmp_path)  # a record with passes final and views, as 0.6.0 wrote
+    readme = (out / "README.md").read_text()
+    assert "; outputs final, views." in readme and "opens on its cards, labels, views and documents" in readme
+    m = {**m, "orientation": {**m["orientation"], "passes": ["final"]},
+         "views": [{"slug": "v1", "name": "Page threads", "from": "review"}]}
+    readme = demo.readme(m)
+    assert "; outputs" not in readme and "It holds 3 cards, 1 label, 1 view and 1 document" in readme
+    assert "in place of the pre-cache's own views" in readme and "orientation's own" not in readme
+    full = demo.readme_full({**m, "version": demo.FULL_VERSION, "files": [], "transcripts": [], "inventory": {}})
+    assert "continues the orientation's session" not in full and "; outputs" not in full
+    assert "no prompt.\n" in full
 
 
 def test_install_refuses_paths_outside_the_workspace_and_files_of_other_kinds(tmp_path):
@@ -743,9 +830,12 @@ def test_demo_downloads_installs_opens_and_says_how_to_attach(tmp_path, fake_wor
     text = said(w)
     assert "installed as workspace demo-one: 3 cards, 1 label, 1 view, 1 document" in text
     assert "downloads these datasets from their sources" in text
-    assert "two opens without a pre-cached orientation; Start in the page runs one" in text
+    # a static page has no Claude to ask: the line says where a session starts
+    assert (f"two opens without a pre-cached orientation; to run one, start a session there (`cd {w['root'] / 'two'} "
+            "&& thimble`) and ask Claude for an orientation") in text
+    assert "ask Claude in the page" not in text
     assert f"cd {w['root'] / 'one'} && thimble # one" in text and f"cd {w['root'] / 'two'} && thimble # two" in text
-    # no session attached: for each dataset the frozen demo's one sentence and command, as the browser's card gives them
+    # no session attached: for each dataset one sentence and the command that starts a session there
     assert text.count(f"{demo.FROZEN_LINE} cd ") == 2
     assert "No Claude Code session is attached" not in text and "thimble -c" not in text and "starts fresh" not in text
     assert w["started"] == []  # no terminal here, so nothing is asked and no session starts
@@ -918,6 +1008,7 @@ def test_demo_says_how_to_log_in_when_claude_is_not_logged_in(fake_world, monkey
     assert asked == [] and w["started"] == []
     text = said(w)
     assert "Claude Code is not logged in" in text and "`claude auth login`" in text
+    assert "INSTALL.md, Authentication" in text and "ANTHROPIC_API_KEY" not in text
     assert f"cd {w['root'] / 'one'} && thimble" in text
     # no claude on PATH at all
     monkeypatch.setattr(config, "CLI_PATH", None)
@@ -941,15 +1032,17 @@ def test_demo_attach_and_no_attach_answer_without_asking(fake_world, monkeypatch
 
 
 def test_demo_prints_and_opens_one_url_the_start_page(tmp_path, fake_world, monkeypatch):
-    """Two datasets or one, the command prints one URL and opens it: the start page (no workspace in the URL), with the
-    page key when it prints to a terminal; the attach lines follow as before."""
+    """Two datasets or one, the command prints one URL and opens it: the start page (no workspace in the URL), with a
+    one-time sign-in code when it prints to a terminal. A browser it opened spent that code, so the line it prints then
+    names the page without it; with no browser opened the printed link carries the code. The attach lines follow as
+    before."""
     w = fake_world
     pre = precache_for(tmp_path, "one")
     from app import cli
 
     monkeypatch.setattr(demo, "register", lambda folder, url, name=None: name or folder.name)
-    monkeypatch.setattr(cli, "ui_url", lambda name, key=True: f"http://127.0.0.1:1/{f'?ws={name}' if name else ''}"
-                                                              + ("#k=pagekey" if key else ""))
+    monkeypatch.setattr(cli, "ui_url", lambda name, pair=False: f"http://127.0.0.1:1/{f'?ws={name}' if name else ''}"
+                                                                + ("#p=c0de" if pair else ""))
     w["server"] = lambda say: ("http://127.0.0.1:1", w["env"])
     assert run(w, args(names=["one", "two"], dir=str(w["root"]), precaches=str(pre))) == 0
     text = said(w)
@@ -958,13 +1051,19 @@ def test_demo_prints_and_opens_one_url_the_start_page(tmp_path, fake_world, monk
     assert "?ws=" not in text and "is open at" not in text
     assert f"cd {w['root'] / 'one'} && thimble # one" in text and demo.FROZEN_LINE in text
     assert w["started"] == []
-    # one dataset: still the start page; on a terminal, with the key
+    # one dataset: still the start page; on a terminal, the browser opens it with a code and the line names it plain
     terminal(monkeypatch, [])
     w["shown"].clear()
     w["lines"].clear()
     assert run(w, args(names=["two"], dir=str(w["root"]))) == 0
-    assert w["shown"] == ["http://127.0.0.1:1/#k=pagekey"]
-    assert re.findall(r"http://\S+", said(w)) == ["http://127.0.0.1:1/#k=pagekey"]
+    assert w["shown"] == ["http://127.0.0.1:1/#p=c0de"]
+    assert re.findall(r"http://\S+", said(w)) == ["http://127.0.0.1:1/"] and "(opened in your browser)" in said(w)
+    # no browser opened (no desktop): the printed link carries the code
+    w["lines"].clear()
+    assert demo.run(args(names=["two"], dir=str(w["root"])), get=w["get"], say=w["lines"].append, server=w["server"],
+                    start=w["started"].append, show=lambda url: False, auth=lambda: w["auth"]) == 0
+    text = said(w)
+    assert re.findall(r"http://\S+", text) == ["http://127.0.0.1:1/#p=c0de"] and "opened in your browser" not in text
 
 
 def test_demo_asks_before_downloading_and_needs_a_terminal_to_ask(fake_world, monkeypatch):
@@ -1080,7 +1179,7 @@ def test_an_earlier_demo_workspace_under_a_suffixed_name_becomes_demo_name_with_
 
 
 def test_the_server_renames_an_earlier_demo_workspace_and_refuses_while_a_session_holds_it(tmp_path, named_world,
-                                                                                          monkeypatch):
+                                                                                          monkeypatch, plugin_headers):
     from fastapi.testclient import TestClient
 
     from app import cli, events, main
@@ -1093,7 +1192,8 @@ def test_the_server_renames_an_earlier_demo_workspace_and_refuses_while_a_sessio
     def request(method, url, body=None, timeout=5.0):
         path = url.removeprefix("http://127.0.0.1:1")
         calls.append((method, path))
-        r = client.request(method, path, json=body)
+        # the rename is the CLI's route: it proves the token, with a nonce of its own each time
+        r = client.request(method, path, json=body, headers=plugin_headers())
         return r.status_code, r.json()
 
     monkeypatch.setattr(cli, "_request", request)
@@ -1106,11 +1206,12 @@ def test_the_server_renames_an_earlier_demo_workspace_and_refuses_while_a_sessio
     assert "the demo workspace one-2 keeps its name, since a Claude Code session has it open" in text
     assert "run `thimble demo` again to rename it demo-one (`thimble purge one-2` removes it)" in text
     # the route refuses on its own too, the moment it is asked
-    assert client.post("/api/ws/one-2/rename", json={"to": "demo-one"}).status_code == 409
+    assert client.post("/api/ws/one-2/rename", json={"to": "demo-one"}, headers=plugin_headers()).status_code == 409
     monkeypatch.delitem(events._subs, "one-2")
-    assert client.post("/api/ws/one-2/rename", json={"to": "one"}).status_code == 409  # the analyst's name
-    assert client.post("/api/ws/one-2/rename", json={"to": "../x"}).status_code == 400
-    assert client.post("/api/ws/nothing/rename", json={"to": "demo-x"}).status_code == 404
+    assert client.post("/api/ws/one-2/rename", json={"to": "one"},
+                       headers=plugin_headers()).status_code == 409  # the analyst's name
+    assert client.post("/api/ws/one-2/rename", json={"to": "../x"}, headers=plugin_headers()).status_code == 400
+    assert client.post("/api/ws/nothing/rename", json={"to": "demo-x"}, headers=plugin_headers()).status_code == 404
     # once it is closed, the next run renames it through the server
     w["lines"].clear()
     assert run(w, args(names=["one"], dir=str(w["root"]), precaches=str(pre))) == 0

@@ -62,9 +62,8 @@ def stubs(tmp_path: Path, node: str) -> dict[str, str]:
 
 
 def install(tree: Path, env: dict[str, str], *flags: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["bash", str(tree / "scripts" / "install.sh"), "--deps-only", "--browser", "off",
-                           "--no-sandbox-deps", *flags], capture_output=True, text=True, env=env,
-                          stdin=subprocess.DEVNULL, timeout=60)
+    return subprocess.run(["bash", str(tree / "scripts" / "install.sh"), "--deps-only", "--browser", "off", *flags],
+                          capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=60)
 
 
 STOPS = "is older than a checkout needs: the frontend's tests, which a code ticket's checks run, need Node 20.19+, 22.13+ or 24+"

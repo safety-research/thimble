@@ -12,6 +12,19 @@ The file-first hooks of plugin/bin/.thimble-watch write their record to the work
     end         SessionEnd of main (subagents.hook_end: the running agents' chats end, "Stopped when Claude Code quit.")
     rekey       SessionStart of main for clear and resume (subagents.hook_rekey: the chats and the mirror follow)
     main-stop   Stop of main's turn (only the pass below: the mirror, R3, the hand-backs, the task notifications)
+    mode-notice main's permission mode turned into or out of Manual mode (the mode hook): the `manual-mode` notice
+                shown with modes.manual_notice's words, or cleared (notices.py), as session.note_mode does in browser
+                mode
+
+and `thimble act` (local.py) starts it with the analyst's answer to a view proposal or to a notice, since only this
+process writes proposals.json and the chats' logs, and follows to its end a build it queues (dev's queue lives in its
+memory):
+
+    view-accept       the view proposal accepted (views.accept: its build queued as one the analyst asked for)
+    view-reject       the view proposal rejected (views.answer_offer)
+    view-retry        a failed build of a view run again, a notice's Retry (views.retry)
+    view-propose-now  a check for a view proposal now, a notice's Try again (proposer.run_now)
+    notice-dismiss    a notice dismissed, its × (notices.dismiss)
 
 One process holds the workspace's MIRROR_LOCK at a time. A call that finds it held adds its kind and input to TODO and
 exits, and the holder takes it. The holder runs passes until nothing is left to do: each pass applies what module.json
@@ -46,7 +59,8 @@ from . import subagent_files as sf
 
 log = logging.getLogger("thimble.local_hooks")
 
-KINDS = ("started", "stopped", "denied", "end", "rekey", "main-stop")
+KINDS = ("started", "stopped", "denied", "end", "rekey", "main-stop", "mode-notice", "view-accept", "view-reject",
+         "view-retry", "view-propose-now", "notice-dismiss")
 MIRROR_LOCK = "mirror.lock"  # in the workspace folder: held by the one process that runs passes
 TODO = "mirror.todo.jsonl"  # in the workspace folder: the calls that found the lock held, for the holder
 TICK_S = 1.0
@@ -107,9 +121,9 @@ def _try_lock(ws: Path, name: str = MIRROR_LOCK) -> int | None:
 
 
 # the modules that hear an agent's end only once imported (agents.on_agent_finished at their import), as the server
-# imports every module at its start: a writer's end starts the shown checks (checks), the orientation's report pass
-# follows its writer (orient_session), and the document follows its writer (report_types)
-END_LISTENERS = ("checks", "orient_session", "report_types")
+# imports every module at its start: a writer's end starts the shown checks (checks), and the document follows its
+# writer (report_types)
+END_LISTENERS = ("checks", "report_types")
 
 
 def listen() -> None:
@@ -224,6 +238,89 @@ async def _pass(c: str, items: list[tuple[str, dict[str, Any]]]) -> None:
         elif kind == "rekey":
             _step(kind, subagents.hook_rekey, c, hook)
             _step("the mirror", session.catch_up, c)
+        elif kind == "mode-notice":
+            _step(kind, _mode_notice, c, hook)
+        elif kind in ANSWERS:
+            _step(kind, ANSWERS[kind], c, hook)
+
+
+def _mode_notice(c: str, hook: dict[str, Any]) -> None:
+    """The `manual-mode` notice for the permission mode the mode hook reported: shown while it is Manual mode
+    (modes.manual_hint), in the words of modes.manual_notice, and cleared otherwise. A dismissal holds for the workspace
+    (notices.dismiss)."""
+    from . import modes, notices  # noqa: PLC0415
+
+    mode = str(hook.get("permission_mode") or "")
+    if modes.manual_hint(mode):
+        notices.post(c, kind="manual-mode", key="manual-mode", text=modes.manual_notice(mode))
+    else:
+        notices.clear(c, "manual-mode")
+
+
+def _answered(what: str, c: str, slug: str, fn: Any, *args: Any) -> None:
+    """A view's call (views.accept, answer_offer, retry) for the analyst's press; a press the view no longer takes (a
+    second press, an answer written meanwhile: 404 or 409) is one line in the log."""
+    from fastapi import HTTPException  # noqa: PLC0415
+
+    try:
+        fn(c, slug, *args)
+    except HTTPException as e:
+        log.warning("%s: the view %s was not %s: %s", c, slug, what, e.detail)
+
+
+def _accept(c: str, body: dict[str, Any]) -> None:
+    """The view proposal accepted: its build queued (views.accept), which this process follows (_busy); a refusal
+    (no session, no hooks module) is written on the proposal, which the row above the prompt shows."""
+    from . import views  # noqa: PLC0415
+
+    _answered("accepted", c, str(body.get("slug") or ""), views.accept)
+
+
+def _reject(c: str, body: dict[str, Any]) -> None:
+    from . import views  # noqa: PLC0415
+
+    _answered("rejected", c, str(body.get("slug") or ""), views.answer_offer, "rejected")
+
+
+def _retry(c: str, body: dict[str, Any]) -> None:
+    """A notice's Retry: the notice dismissed first, then the view built again (views.retry)."""
+    from . import views  # noqa: PLC0415
+
+    _fixing(c, body)
+    _answered("built again", c, str(body.get("slug") or ""), views.retry)
+
+
+def _propose_now(c: str, body: dict[str, Any]) -> None:
+    """A notice's Try again: the notice dismissed first, then a check for a view proposal now (proposer.run_now), which
+    starts its run as a task of this loop that keeps the holder busy (_busy) until it ends; a check it refuses is one
+    line in the log."""
+    from . import proposer  # noqa: PLC0415
+
+    _fixing(c, body)
+    got = proposer.run_now(c)
+    if got.get("started") is False:
+        log.warning("%s: no check for a view proposal: %s", c, got.get("reason"))
+
+
+def _dismiss(c: str, body: dict[str, Any]) -> None:
+    """A notice dismissed (notices.dismiss)."""
+    from . import notices  # noqa: PLC0415
+
+    notice_id = str(body.get("id") or "")
+    if notice_id and not notices.dismiss(c, notice_id):
+        log.warning("%s: the notice %s was not dismissed: it is gone", c, notice_id)
+
+
+def _fixing(c: str, body: dict[str, Any]) -> None:
+    """The notice a press of its act named (`notice`, its id) dismissed before the act runs: a failure the act meets
+    again is a new notice, which this does not hide."""
+    if body.get("notice"):
+        _step("the notice's dismissal", _dismiss, c, {"id": body["notice"]})
+
+
+# the analyst's answers that `thimble act` hands to the holder (module note), each called with the act's body
+ANSWERS = {"view-accept": _accept, "view-reject": _reject, "view-retry": _retry, "view-propose-now": _propose_now,
+           "notice-dismiss": _dismiss}
 
 
 def _step(what: str, fn: Any, *args: Any) -> Any:

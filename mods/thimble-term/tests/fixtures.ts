@@ -135,7 +135,9 @@ export const DOC = {
 }
 
 export const STATES = {
-  home: { cards: 12, labels: 1, docs: { report: { exists: true, title: 'Agents used the dse wiki as a relay' } }, threads: 2, views: 0, files: 4 },
+  // `offer`: the view proposal waiting for an answer; `notices`: every agent's open notices, newest first (local.py
+  // _offer, _notices); none in the fixtures until a test sets them
+  home: { cards: 12, labels: 1, docs: { report: { exists: true, title: 'Agents used the dse wiki as a relay' } }, threads: 2, views: 0, files: 4, offer: null as Record<string, unknown> | null, notices: [] as Record<string, unknown>[] },
   cards: { groups: [{ id: 'g1', title: 'Your work', role: 'analyst', ts: '2026-10-06T09:00:00+00:00' }], cells: Object.values(CELLS) },
   labels: [LABEL],
   docs: { report: { exists: true, title: DOC.title, renderer: 'document', name: 'Report' }, slides: { exists: false, renderer: 'slides', name: 'Slides' } },
@@ -350,12 +352,6 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
       w.acts.push({ kind: what!, payload })
       if (w.refuse?.[what!]) return out({ error: w.refuse[what!] }, 1)
       if (what === 'thread') return out({ ok: true, thread: 't9' })
-      // a thread's answer handed back to main: its meta says so from then on, as thimble's does (threads.hand_back_state)
-      if (what === 'hand-back') {
-        const chat = w.chats[String(payload.thread)] as { meta: Record<string, unknown> } | undefined
-        if (chat) chat.meta = { ...chat.meta, hand_back: 'handed' }
-        return out({ ok: true, thread: payload.thread, hand_back: 'handed' })
-      }
       // a label deleted leaves the labels and home; one that is not there is refused, as thimble refuses it
       if (what === 'label-delete') {
         const ls = w.states.labels as { id: string; name?: string }[]

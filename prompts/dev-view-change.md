@@ -2,9 +2,7 @@
 
 The analyst asked for a change to the view {{name}}. The proposal now reads:
 
-- What the analyst sees in it and why that helps: {{description}}
-- The files it reads: {{claims}}
-{{spec}}
+{{proposal}}
 
 {{request}}
 

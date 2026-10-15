@@ -10,7 +10,8 @@
 //   - each card a turn of main added or changed, once, under the turn's last reply, in its last state, its takeaway
 //     under it; no hex id, and Claude Code's tool groups left folded
 //   - one row above the prompt, a toast: what is new in the workspace since home was last opened (`open ›` opens home
-//     and the row goes); Claude Code's agent tray shows thimble's agents, and side threads have `↳` rows
+//     and the row goes, `dismiss` marks it seen); Claude Code's agent tray shows thimble's agents, and side threads
+//     have `↳` rows
 //   - one panel (panel.tsx): home, a card, a citation's place, the threads, a label, a document, the files, an agent
 //   - side threads: the blue "?" beside a passage or a card, or a selection's "ask"; a `↳ thread` row under main's
 //     latest row when an answer comes in while the panel shows something else, and a blue ↳ beside the passage asked
@@ -34,7 +35,7 @@ import { cardsOfCall, docsOf, forkDescription, labelsOf, namedForks, namedThread
 import { HOME_UI_EMPTY } from './home'
 import { keepLast, keepRow, loadKept, resetKept } from './kept'
 import { linesMessage, onListClick } from './lines'
-import { ANSWER_ELEMENT, RELAY, docEditMessage, drawPanel, fieldMessage, focusedField, hasList, homeViews, onGesture, openAsk, openCard, openCite, openFile, openHomeNew, openLabel, openThread, openView, relayKey, relayMove, scrollPending, viewWheelAt, wheelWindow } from './panel'
+import { ANSWER_ELEMENT, RELAY, answerOffer, dismissNotice, docEditMessage, drawPanel, fieldMessage, focusedField, hasList, homeNotices, homeOffer, homeViews, noticeAct, onGesture, openAsk, openCard, openCite, openFile, openHomeNew, openLabel, openNoticeChat, openThread, openView, proposalsOff, relayKey, relayMove, scrollPending, viewWheelAt, wheelWindow } from './panel'
 import type { PaneEvent } from './panel'
 // the file browser and a file, drawn by a module of their own (panel.tsx drawsView, term.ts loadsView)
 import './filesview'
@@ -43,7 +44,7 @@ import { COLORS } from './paint'
 import { isAnchor, signalEnd, signalQuestion } from './signal'
 import type { AppendedRow } from './signal'
 import { NAV_EMPTY } from './nav'
-import { FILES_UI_EMPTY, LABEL_UI_EMPTY, PANEL, checkQueued, closePanel, loadCards, loadCardsBatch, navOrigin, openHome, openPanel, openPending, paneTitle, panelColumns, placedLater, readSurface, readThread, retryPending, rt, surfaceValue, takeKeys, threadsNow, tick } from './term'
+import { FILES_UI_EMPTY, LABEL_UI_EMPTY, PANEL, checkQueued, closePanel, loadCards, loadCardsBatch, navOrigin, openHome, openPanel, openPending, paneTitle, panelColumns, placedLater, readSurface, readThread, retryPending, rt, seeHome, surfaceValue, takeKeys, threadsNow, tick } from './term'
 import type { UiApply } from './term'
 import { turns } from './turns'
 import { PUMP_MS, closeView, openViewState, sendEvent, viewFault, viewMessage, viewPump } from './viewhost'
@@ -69,7 +70,7 @@ function resultText(output: unknown): string {
   const blocks = Array.isArray(output) ? output : (output as { content?: unknown } | undefined)?.content
   return Array.isArray(blocks) ? blocks.map(b => (b && typeof b === 'object' && 'text' in b ? String((b as { text: unknown }).text) : '')).join('\n') : ''
 }
-const ABOVE_LABEL = 12
+const ABOVE_LABEL = 16
 const paneTurns = turns()
 
 // the state the drawings read (types/index.d.ts)
@@ -932,9 +933,16 @@ export const register: Register = on => {
     if (e.surface === 'terminal' && e.viewport?.columns && !panes.some(p => p.isPlaced)) rt.termColumns = e.viewport.columns
     const { Box, Text, Button } = $.ui.resolve(e)
     const rows: RenderElement[] = []
-    const label = (s: string) => (
+    const label = (s: string, color?: string) => (
       <Box width={ABOVE_LABEL} flexShrink={0}>
-        <Text dimColor>{`  ${s}`}</Text>
+        {color ? <Text color={color}>{`  ${s}`}</Text> : <Text dimColor>{`  ${s}`}</Text>}
+      </Box>
+    )
+    // a row under a row's label: the label's width left empty
+    const under = (key: string, child: RenderElement) => (
+      <Box key={key} flexDirection="row">
+        {label('')}
+        <Box flexShrink={1}>{child}</Box>
       </Box>
     )
     // a panel Claude Code left undrawn (an open it was not asked for, on a terminal narrower than it places those at),
@@ -962,8 +970,65 @@ export const register: Register = on => {
         </Box>,
       )
     }
+    // the view proposal waiting for the analyst's answer (proposer.py, or a viewer for a file type), until it is answered
+    // and whatever the panel shows: `view proposal` in the accent, its name in bold, what it would show and the task it
+    // serves wrapped whole, never behind a press; `accept`, `reject` and `don't ask again`, which turns view proposals
+    // off; why accept could not start its build, in red, under them (SPEC.md, "Main's chat")
+    const offer = await homeOffer(cx)
+    if (offer) {
+      const accept = () => answerOffer(cx, offer.slug, 'accept')
+      const reject = () => answerOffer(cx, offer.slug, 'reject')
+      rows.push(
+        <Box key="above-offer" flexDirection="row">
+          {label('view proposal', COLORS.accent)}
+          <Box flexDirection="row" columnGap={2} flexShrink={1}>
+            <Box flexShrink={1}>
+              <Text bold wrap="wrap">{offer.name}</Text>
+            </Box>
+            <Box flexDirection="row" columnGap={2} flexShrink={0}>
+              {offer.pressed
+                ? [<Text key="above-offer-pressed" dimColor>{offer.pressed === 'accept' ? '◌ accepting' : '◌ rejecting'}</Text>]
+                : [
+                    <Button key="above-offer-accept" label="accept" plain onPress={accept} />,
+                    <Button key="above-offer-reject" label="reject" plain onPress={reject} />,
+                    <Button key="above-offer-off" label="don't ask again" plain onPress={() => proposalsOff(cx)} />,
+                  ]}
+            </Box>
+          </Box>
+        </Box>,
+      )
+      if (offer.description) rows.push(under('above-offer-description', <Text wrap="wrap">{offer.description}</Text>))
+      if (offer.task) rows.push(under('above-offer-task', <Text wrap="wrap"><Text dimColor>{'task  '}</Text>{offer.task}</Text>))
+      else if (offer.claims.length) rows.push(under('above-offer-files', <Text wrap="wrap"><Text dimColor>{'files  '}</Text>{offer.claims.join(', ')}</Text>))
+      if (offer.refused && !offer.pressed) rows.push(under('above-offer-refused', <Text color={COLORS.problem} wrap="wrap">{offer.refused}</Text>))
+    }
+    // every agent's open notices, newest first, under the view proposal's place: a failure with its fix (a safeguard's
+    // block or switch of model, an API error, an agent that ended failed or was refused, a view build, a check or label
+    // run, the view proposer), since Claude Code's own output shows only main's requests. `notice` dim, then its words
+    // in red, which name the agent and the failure, wrapped whole; then the acts that fix it, `open ›` to the agent's
+    // thread, `dismiss` (SPEC.md, "Main's chat")
+    for (const n of await homeNotices(cx)) {
+      rows.push(
+        <Box key={`above-notice-${n.id}`} flexDirection="row">
+          {label('notice')}
+          <Box flexDirection="row" columnGap={2} flexShrink={1}>
+            <Box flexShrink={1}>
+              <Text color={COLORS.problem} wrap="wrap">{n.text}</Text>
+            </Box>
+            <Box flexDirection="row" columnGap={2} flexShrink={0}>
+              {n.acts.map((a, i) => (
+                <Button key={`above-notice-${n.id}-act-${i}`} label={a.label} plain onPress={() => noticeAct(cx, n, a)} />
+              ))}
+              {n.open ? <Button key={`above-notice-${n.id}-open`} label="open ›" plain onPress={() => openNoticeChat(cx, n)} /> : null}
+              <Button key={`above-notice-${n.id}-dismiss`} label="dismiss" plain onPress={() => dismissNotice(cx, n)} />
+            </Box>
+          </Box>
+        </Box>,
+      )
+    }
     // what is new in the workspace since home was last opened, like a toast: open › opens home on the first new item
-    // and the row goes; none while home shows (live check term-fix8, quirk 6: it stayed beside home, which showed them)
+    // and the row goes; dismiss marks what is there seen, as opening home does, and opens nothing; none while home
+    // shows (live check term-fix8, quirk 6: it stayed beside home, which showed them)
     const home = await cx.home()
     const homeShown = (await cx.panel())?.view === 'home' && panes.some(p => p.id === PANEL && p.isPlaced)
     if (home && !homeShown) {
@@ -980,6 +1045,7 @@ export const register: Register = on => {
               {/* the word `new` in green, as wherever it shows (SPEC.md, rule 8) */}
               <Text wrap="truncate-end">{words.split(/( new )/).map((w, i) => (w === ' new ' ? <Text key={`new-${i}`}>{' '}<Text color={COLORS.fresh}>new</Text>{' '}</Text> : w))}</Text>
               <Button key="above-home-open" label="open ›" plain onPress={() => openHomeNew(cx)} />
+              <Button key="above-home-dismiss" label="dismiss" plain onPress={() => seeHome(cx, home)} />
             </Box>
           </Box>,
         )

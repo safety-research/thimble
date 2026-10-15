@@ -99,8 +99,9 @@ export function findProposal(proposals: readonly Proposal[] | null, slug: string
   return named.length ? named.reduce((a, b) => (a.ts >= b.ts ? a : b)) : null
 }
 
-/** Whether the proposal a chip names was dropped (an orientation view that could not be built, backend views.drop),
- * so no chip, count or section shows it. Pure. */
+/** Whether the proposal a chip names was dropped (a view proposal the analyst rejected, or the proposal of an
+ * orientation from before 0.8.0 that the analyst stopped, backend views.drop), so no chip, count or section shows it.
+ * Pure. */
 export function isDropped(proposals: readonly Proposal[] | null, slug: string | null | undefined, name?: string | null): boolean {
   return findProposal(proposals, slug, name)?.status === 'dropped'
 }

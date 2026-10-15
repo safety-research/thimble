@@ -95,56 +95,6 @@ const chatContent = (api: Api) => {
   return { x: C.x, y: C.y, width: C.width, height: Math.min(C.y + C.height, F.y + F.height + 14) - C.y }
 }
 
-// ---------- the orientation: the example Start gate in the place main's own gate takes, at the chat's foot. While the
-// tour runs main draws no gate (lib/touring, chat/StartGate startGateShown), so only the example's shows, and no other
-// step shows a Start card. Its Start starts nothing: the step shows at once what a started orientation looks like
-// (captured from a real run), the note in the chat and the strip over the reply box, with nothing of the gate left
-const startOf = (g: Element | null | undefined) => [...(g?.querySelectorAll('button') ?? [])].find((b) => b.textContent?.trim() === 'Start') || null
-const orientExample = (api: Api): Example => {
-  const chat = api.q(chatSel),
-    ground = api.groundOf(chat)
-  const g = api.snap('gate', 'tour-ex-gate')
-  ;(g.firstElementChild as HTMLElement).style.margin = '0'
-  g.style.background = ground
-  Object.assign(api.tag(g).style, { top: '8px', right: '10px' })
-  const foot = api.snap('orientFoot', 'tour-ex-orient-foot')
-  const note = api.snap('orientNote', 'tour-ex-orient-note')
-  for (const e of [foot, note]) {
-    e.style.background = ground
-    e.style.display = 'none'
-  }
-  foot.dataset.ground = '1'
-  ;(note.firstElementChild as HTMLElement).style.padding = '8px 2px'
-  // laid out in its own box: the real foot is placed at the chat's bottom by the chat's own layout
-  const footEl = foot.querySelector<HTMLElement>('.chat-foot')
-  if (footEl) Object.assign(footEl.style, { position: 'static', inset: 'auto' })
-  api.ex.append(g, foot, note)
-  const els = { gate: g, foot, note, started: false }
-  startOf(g)?.addEventListener('click', () => {
-    els.started = true
-    g.remove()
-    foot.style.display = ''
-    note.style.display = ''
-  })
-  const layout = () => {
-    const C = api.rectOf(api.q(chatSel)),
-      L = api.rectOf(api.q(`${chatSel} .chat-list`))
-    if (!C) return
-    // the gate's place: as wide as what the chat's foot holds now (main's reply box, which the gate takes the place of),
-    // its bottom on the foot's
-    const F = api.rectOf(api.q(`${chatSel} .chat-foot`)),
-      slot = api.rectOf(api.q(`${chatSel} .chat-foot > :last-child`)) ?? C
-    const bottom = F ? F.y + F.height : C.y + C.height
-    if (g.isConnected) Object.assign(g.style, { left: `${slot.x}px`, width: `${slot.width}px`, top: `${bottom - g.offsetHeight}px` })
-    // the started foot is as tall as what it holds, the strip and the reply box, so no empty box stands above it
-    Object.assign(foot.style, { left: `${slot.x}px`, width: `${slot.width}px`, height: '', flexDirection: 'column' })
-    if (foot.style.display !== 'none') foot.style.display = 'flex'
-    foot.style.top = `${bottom - foot.offsetHeight}px`
-    if (L) Object.assign(note.style, { left: `${C.x}px`, width: `${C.width}px`, top: `${L.y}px` })
-  }
-  return { els, layout }
-}
-
 // ---------- Files: the file browser. The File browser stays on through the Files steps (Files, Labels, Views): a view
 // the analyst left open is closed for them, and opened again once the tour moves to another step or ends.
 const viewTabs = (bar: Element | null) => [...(bar?.querySelectorAll<HTMLElement>('.seg-opt') ?? [])]
@@ -521,40 +471,45 @@ const scrollTo = (api: Api, el: Element | null | undefined, above = 120, smooth 
 }
 const inReport = (api: Api, sel: string) => (api.els.root as HTMLElement | undefined)?.querySelector<HTMLElement>(sel) ?? null
 
-/** The tour, for a pointer key written `key` (⌘ on a Mac, Ctrl elsewhere). With the chat column folded (`chat` false)
- * the steps about the chat are left out. */
-export function tourSteps(key: string, chat = true): Step[] {
+/** What the steps about the chat and the ⌘-click box say: on a demo page (`demo`, lib/demo), that thimble isn't
+ * connected to a live Claude Code session there, so the chat takes no typing, and what the chat is in a live
+ * session. */
+export function sessionTexts(demo: boolean): { chat: [string, string]; terminal: [string, string]; ask: string } {
+  if (!demo) {
+    return {
+      chat: ['Your Claude Code session', 'This chat is your Claude Code session: ask it anything about the files.'],
+      terminal: ['Your terminal', 'The session also runs in the terminal where you started thimble. It shows the same conversation, and you can type in either.'],
+      ask: 'Type a question and press Enter. On a real card, the answer comes in a new thread in the chat.',
+    }
+  }
+  return {
+    chat: ['The chat', "This is a demo and thimble isn't connected to a live Claude Code session, so you can't type here. In a live session, this chat is your Claude Code session: ask it anything about the files."],
+    terminal: ['Your terminal', 'When you run thimble yourself, the session also runs in the terminal where you started it. It shows the same conversation, and you can type in either.'],
+    ask: 'Type a question and press Enter. With Claude connected, the answer comes in a new thread in the chat.',
+  }
+}
+
+/** The tour, for the ask key written `key` (⌘ or ⌥ on a Mac, Ctrl or Alt elsewhere, as Settings picks). With the chat
+ * column folded (`chat` false) the steps about the chat are left out; on a demo page (`demo`) they say it is a demo
+ * (sessionTexts). */
+export function tourSteps(key: string, chat = true, demo = false): Step[] {
+  const said = sessionTexts(demo)
   const steps: Step[] = [
     {
       tab: 'files', needsChat: true, example: sessionExample, anchor: chatContent, place: 'right', align: 'start', pad: 0, radius: 12,
-      title: 'Your Claude Code session',
-      body: 'This chat is your Claude Code session: ask it anything about the files.',
+      title: said.chat[0],
+      body: said.chat[1],
     },
     {
       tab: 'files', needsChat: true, terminal: true, example: sessionExample, place: ['left', 'bottom'], align: 'start', pad: 0, radius: 10,
       anchor: (api) => [api.els.term, chatContent(api)],
-      title: 'Your terminal',
-      body: 'The session also runs in the terminal where you started thimble. It shows the same conversation, and you can type in either.',
-    },
-    {
-      tab: 'files', needsChat: true, example: orientExample, place: 'right', align: 'end', pad: 0, radius: 12, gateNext: true,
-      allow: (api) => (api.els.gate?.isConnected ? startOf(api.els.gate) : null),
-      anchor: (api) => {
-        if (!api.els.started) return api.els.gate
-        if (api.run) api.run.tried = true
-        const foot = api.els.foot.querySelector('.chat-foot') || api.els.foot
-        return [foot, api.els.note]
-      },
-      title: 'The orientation',
-      body: (api) =>
-        api.els.started
-          ? 'The orientation has started. It can take a while, depending on your dataset, prompt and model.'
-          : 'A background agent explores your files and drafts an analysis for you to review. Press Start to begin it now.',
+      title: said.terminal[0],
+      body: said.terminal[1],
     },
     {
       tab: 'files', example: filesExample, leave: releaseBrowser, anchor: filesPanel, place: 'left', align: 'start', pad: 0, radius: 12,
       title: 'Files',
-      body: `${chat ? 'In the meantime, you can explore the files and views. ' : ''}The files browser exposes global views on the corpus.`,
+      body: 'The files browser exposes global views on the corpus.',
     },
     {
       tab: 'files', example: labelsExample, leave: releaseBrowser, place: 'left', align: 'end', pad: 0, radius: 0,
@@ -568,7 +523,7 @@ export function tourSteps(key: string, chat = true): Step[] {
       tab: 'files', example: viewsExample, leave: releaseBrowser, anchor: filesPanel, place: 'left', align: 'start', pad: 0, radius: 12,
       interact: (api) => api.els.frame ?? null,
       title: 'Views',
-      body: 'The orientation also proposes views, custom-generated just for your corpus, like this Timeline of every event.',
+      body: 'thimble also proposes views, custom-generated just for your corpus, like this Timeline of every event. A view proposal waits above the reply box until you accept or reject it.',
     },
     {
       tab: 'canvas', example: cardExample, clip: canvasPanel, place: 'right', align: 'center', pad: 6,
@@ -705,7 +660,7 @@ export function tourSteps(key: string, chat = true): Step[] {
         api.closeMock()
       },
       title: `${key}-click to ask`,
-      body: 'Type a question and press Enter. On a real card, the answer comes in a new thread in the chat.',
+      body: said.ask,
     },
     {
       // the whole Report surface: its bar (with Export), the cards and checks, and the page

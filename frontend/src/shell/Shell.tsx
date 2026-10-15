@@ -4,7 +4,7 @@
 // and fold state are kept per workspace in browser storage (App clears it first when the workspace was replaced by a new
 // one of the same name, lib/workspace.ts syncInstance); a new workspace opens on Files. A folded chat column opens when
 // something asks for a thread. When the workspace is replaced (the stream's `reset`), the page reloads. With no Claude
-// Code session attached the shell is inert under SessionGone.
+// Code session attached the shell is inert under SessionGone, except on a demo page (lib/demo, `data-session` static).
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Canvas } from '../canvas/Canvas'
 import { ChatPanel } from '../chat/ChatPanel'
@@ -19,6 +19,9 @@ import { useViews } from '../files/ViewsBar'
 import { ViewSurface } from '../files/ViewSurface'
 import { api } from '../lib/api'
 import { bus, type Tab } from '../lib/bus'
+import { onDemoNote, useDemo } from '../lib/demo'
+import { loadSettings, onSettingsChange } from '../lib/models'
+import { setAskKey } from '../lib/platform'
 import { isReplay, useWorkspaceEvents } from '../lib/events'
 import { track } from '../lib/telemetry'
 import { notePress, pressedPane, renewPress, setShownSurfaces, setSurfaceDrag } from '../lib/surfaces'
@@ -103,6 +106,23 @@ function useSize(el: HTMLElement | null, guess: () => { w: number; h: number }) 
 export function Shell({ ws }: { ws: string }) {
   useWorkspaceEvents(ws)
   useEffect(() => bus.on('wsReset', (e) => e.workspace === ws && window.location.reload()), [ws])
+  // the ask key Settings picks (thimble's config `askKey`, lib/platform), read with the settings and again whenever
+  // they change, for the pointer, the canvas, the tour and the views' frames
+  useEffect(() => {
+    let alive = true
+    const read = (w: string) => {
+      if (w !== ws) return
+      loadSettings(ws)
+        .then((s) => alive && setAskKey(s.ask_key))
+        .catch(() => undefined)
+    }
+    read(ws)
+    const off = onSettingsChange(read)
+    return () => {
+      alive = false
+      off()
+    }
+  }, [ws])
   const key = storageKey(ws, 'layout')
   const [layout, setLayout] = useState<Layout>(() => readLayout(key))
   const [liveWidth, setLiveWidth] = useState(layout.chatWidth)
@@ -182,6 +202,8 @@ export function Shell({ ws }: { ws: string }) {
       patch({ chatOpen: true })
     }
     const offs = [
+      // an action that stopped on a demo page: its note is in the chat (lib/demo)
+      onDemoNote(() => chatOpen.current || open()),
       bus.on('openChat', (e) => {
         if (chatOpen.current) return
         holdForChat({ event: 'openChat', payload: e })
@@ -218,6 +240,7 @@ export function Shell({ ws }: { ws: string }) {
     }
   }, [ws, firstOpen])
   const gone = useSessionGone(ws)
+  const demo = useDemo()
 
   // the main area's left edge: the window's 12px margin, the chat column and the 12px seam, or the collapsed strip
   const paneX = 12 + (layout.chatOpen ? liveWidth + 12 : 40)
@@ -278,7 +301,7 @@ export function Shell({ ws }: { ws: string }) {
   const signals = tabSignals(dots, writing(metas))
 
   return (
-    <div className="shell" data-chat={layout.chatOpen ? 'open' : 'closed'} data-session={gone ? 'gone' : undefined} inert={!!gone} style={{ '--pane-x': `${paneX}px` } as React.CSSProperties}>
+    <div className="shell" data-chat={layout.chatOpen ? 'open' : 'closed'} data-session={gone ? 'gone' : demo ? 'static' : undefined} inert={!!gone} style={{ '--pane-x': `${paneX}px` } as React.CSSProperties}>
       <TopBar
         ws={ws}
         tabs={BASE.map((t) => ({

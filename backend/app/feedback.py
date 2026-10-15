@@ -76,6 +76,8 @@ CONTENTS_ROOM = 4000  # kept back for contents.txt
 BLOB_CHARS = 2000
 DOCTOR_TIMEOUT_S = 30.0
 HEALTH_TIMEOUT_S = 2.0
+# config.LOOPBACK's opener, kept in the standard library: the health check skips any proxy the shell sets
+LOOPBACK = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 CLAUDE_TIMEOUT_S = 10.0
 ISSUE_TEXT_MAX = 1500  # of the description in the new-issue link, so the URL stays well under what GitHub accepts
 ISSUE_VERSIONS = ("thimble", "Claude Code", "OS")  # the versions.txt lines a new issue carries, each without its path
@@ -111,6 +113,8 @@ SECRET_PATTERNS: list[tuple[str, re.Pattern[str], bool]] = [
     ("jwt", re.compile(r"eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}"), True),
     ("bearer-token", re.compile(r"(?i)bearer\s+(?P<v>[A-Za-z0-9._~+/\-]{20,}=*)"), True),
     ("url-password", re.compile(r"://[^/\s:@\"']+:(?P<v>[^/\s@\"']+)@"), False),
+    # the key in the URL of a view's media route (app/hook_auth.py media_key), which a log line may name
+    ("view-media-key", re.compile(r"/views/[^/?#\s\"']+/media/(?P<v>[0-9a-f]{32})(?![0-9a-f])"), False),
     # a value assigned to a name that says it is secret, in code, an env line or JSON (its quotes escaped once or more)
     ("secret", re.compile(
         r"(?i)(?:api[_\-]?key|apikey|secret|password|passwd|access[_\-]?key|private[_\-]?key|credential|"
@@ -228,7 +232,7 @@ def api_url() -> str:
 
 def server_answers(url: str) -> bool:
     try:
-        with urllib.request.urlopen(f"{url}/api/health", timeout=HEALTH_TIMEOUT_S) as r:
+        with LOOPBACK.open(f"{url}/api/health", timeout=HEALTH_TIMEOUT_S) as r:
             return r.status == 200 and bool(json.loads(r.read() or b"{}").get("ok"))
     except Exception:  # noqa: BLE001
         return False
@@ -437,7 +441,8 @@ def versions(user_agent: str = "", workspace: str | None = None) -> dict[str, st
 
 
 def doctor() -> str:
-    """`thimble doctor`, within DOCTOR_TIMEOUT_S; a line that says why when cli.py cannot be imported or it fails."""
+    """`thimble doctor --verbose` (cli.doctor_text), within DOCTOR_TIMEOUT_S; a line that says why when cli.py cannot be
+    imported or it fails."""
     cli = _lazy("cli")
     if cli is None:
         return "thimble doctor could not run: cli.py failed to import (import-error.txt)"
@@ -973,7 +978,7 @@ def build(description: str = "", *, workspace: tuple[str, Path] | None = None, s
            "thimble and its install, whether the server answers, the OS, Python, Claude Code and the browser")
     doc = doctor()
     b.text("doctor.txt", (doc if logs else without_log(doc)) + "\n",
-           "`thimble doctor` (it names the auth path in use, never a secret)")
+           "`thimble doctor --verbose` (it names the auth path in use, never a secret)")
     if _import_errors:
         b.text("import-error.txt", "\n".join(f"app.{k}:\n{v}" for k, v in _import_errors.items()),
                "why a module of the supervisor could not be imported")

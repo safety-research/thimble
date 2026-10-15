@@ -4,13 +4,13 @@
 // Building: a spinner, a click opens the build's thread (each gate shows there as a step), its tooltip says where the
 // terminal shows it, and a repair (a fresh builder after a build that failed for good) says which of VIEW_REPAIRS it is.
 // Built: a click opens the view (with Open after it while the analyst has not opened it yet, files/viewReady.ts).
-// Failed (a view the analyst asked for, or an orientation's proposal after its repairs), or stopped when the analyst's
+// Failed (a view the analyst asked for, or one nobody asked for after its repairs), or stopped when the analyst's
 // Claude Code session ended: ✕ with why in its tooltip, Retry, and Report a problem (shell/ProblemReport); Retry is a
 // click that starts a builder through thimble's plugin, and its menu picks the run's model and effort (Settings' dev
 // row by default). A start that did not happen says why, with Start it where the kind takes it (chat/Refused). A
-// proposal dropped when the analyst stopped the orientation is not drawn (lib/proposals isDropped). A built view whose
-// last change failed (`failed_change`) shows the same as a failed one. A suggested viewer for a file type, which the
-// File browser offers beside Raw, is a plain name until it is accepted.
+// dropped proposal (a view proposal the analyst rejected, or an orientation's from before 0.8.0 that the analyst stopped)
+// is not drawn (lib/proposals isDropped). A built view whose last change failed (`failed_change`) shows the same as a
+// failed one. A view proposal (`suggested`), which waits on the chat's card, is a plain name until it is accepted.
 import { useEffect, useState } from 'react'
 import type { MouseEvent } from 'react'
 import { Button } from '../components/Button'
@@ -21,6 +21,7 @@ import { Spinner } from '../components/Spinner'
 import { Tipped } from '../components/Tooltip'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
+import { demoStop } from '../lib/demo'
 import { hasEffort, loadSettings, modelChoices, modelLabel, sameModel } from '../lib/models'
 import { findProposal, refreshProposals, useProposals } from '../lib/proposals'
 import { track } from '../lib/telemetry'
@@ -34,7 +35,7 @@ import { refusalActions, refusalLine } from './Refused'
 
 /** How many view builds run at once (backend dev.VIEW_POOL); the rest wait in the queue. */
 export const VIEW_POOL = 3
-/** How many fresh builders repair an orientation's proposal whose build failed for good (backend dev.VIEW_REPAIRS). */
+/** How many fresh builders repair a proposal nobody asked for whose build failed for good (backend dev.VIEW_REPAIRS). */
 export const VIEW_REPAIRS = 2
 
 /** A chip that names a view, drawn as that view's unpicked option in the views bar, a size smaller, so it does not
@@ -160,7 +161,7 @@ export function ViewChip({ ws, slug, name, className }: Props) {
   }
   // Retry and Try again: a new builder through thimble's plugin, with the Build menu's values
   const retry = () => {
-    if (!p) return
+    if (!p || demoStop()) return
     track('view-build', { target: `view:${p.slug}`, detail: { again: true, ...values } })
     setRetrying(true)
     api

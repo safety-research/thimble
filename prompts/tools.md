@@ -233,24 +233,20 @@ Open a card of a card type as its view in Files, as the card's Open as view does
 
 ## propose_view
 
-Propose a view, a page that shows records in a form their files hide, or a viewer for one unusual file type. thimble's dev agent builds it from these fields alone, so name the fields, keys and counts it needs. When main proposes one, the result is the exact Agent call that starts its build as a subagent of main, which main then makes; an orientation's proposals are built without a call of its own. Pass a model or an effort only when the analyst names one, so that the build otherwise runs on the dev agent's values in thimble's Settings.
+Propose a view, a page that shows records in a form their files hide, or a viewer for one unusual file type. thimble's dev agent builds it from these fields and reads the files itself. When main proposes one, the result is the exact Agent call that starts its build as a subagent of main, which main then makes. Call it only when the analyst asks for a view; thimble shows the analyst view proposals of its own. Pass a model or an effort only when the analyst names one, so that the build otherwise runs on the dev agent's values in thimble's Settings.
 
 ```json
 {
   "type": "object",
   "properties": {
     "name": {"type": "string", "description": "A short name in Title Case, as its tab shows it, such as Message Board."},
-    "why": {"type": "string", "description": "What the analyst sees and why that helps, in whatever form fits the records, such as a wiki page with its edit history or a graph of who replies to whom."},
+    "description": {"type": "string", "description": "What the analyst sees, in one sentence, such as a wiki page with its edit history or a graph of who replies to whom."},
+    "task": {"type": "string", "description": "What the analyst wants to accomplish, in their words, not how."},
     "claims": {"type": "array", "items": {"type": "string"}, "description": "Globs of every file that holds its records, by pattern rather than one file, such as runs/*/events.jsonl. For a viewer of one file type, the extension's glob, such as **/*.vtt."},
-    "unit": {"type": "string", "description": "What one row, mark or card stands for, the field that keys it, and how many there are."},
-    "overview": {"type": "string", "description": "What does the overview look like?"},
-    "zoom": {"type": "string", "description": "How do you zoom?"},
-    "filter": {"type": "string", "description": "How do you filter? Labels are the main filter, every field the records carry can be selected, and several runs or sources can be compared side by side."},
-    "details": {"type": "string", "description": "What details might you want on demand?"},
     "model": {"type": "string", "description": "The model to build it on, such as opus, sonnet or a full model id, only when the analyst names one. Default: the dev agent's model in Settings."},
     "effort": {"type": "string", "enum": ["low", "medium", "high", "xhigh", "max"], "description": "The effort to build it at, only when the analyst names one. Default: the dev agent's effort in Settings."}
   },
-  "required": ["name", "why", "claims", "unit", "overview", "zoom", "filter", "details"]
+  "required": ["name", "description", "task", "claims"]
 }
 ```
 
@@ -408,17 +404,13 @@ Delete a thread and its chat from the workspace, stopping its session if it runs
 
 ## start_orientation
 
-Start an orientation, a broad analysis of the corpus that helps the analyst understand it, as a subagent of this session, which shows the analyst when it finishes the outputs its switches turn on. thimble shows it as a thread, Claude Code's agent tray shows it as a row, and an `orient` event tells you when it ends. Call it when the analyst asks for a new orientation, which adds to the cards the earlier ones left, and `message_orientation` to explore further within one that has finished. A question about the corpus, even a broad one, is no request for an orientation: answer it yourself, and after your answer you can ask whether they want one. Its result is the exact Agent call that starts the orientation, which you then make. Pass only the model, effort and switches the analyst named, so that the others take the values thimble's Settings give them. One orientation runs at a time, so while one runs the call starts nothing.
+Start an orientation, a broad analysis of the corpus that helps the analyst understand it, as a subagent of this session, which leaves its findings as cards in the group `Orientation`. thimble shows it as a thread, Claude Code's agent tray shows it as a row, and an `orient` event tells you when it ends. Call it when the analyst asks for an orientation, or when their question needs a broad analysis of the corpus, such as "what's going on in this dataset?". A new orientation adds to the cards the earlier ones left. Call `message_orientation` to explore further within one that has finished. Its result is the exact Agent call that starts the orientation, which you then make. Pass a model or an effort only when the analyst names one, so that the orientation otherwise runs on the values thimble's Settings give it. One orientation runs at a time, so while one runs the call starts nothing.
 
 ```json
 {
   "type": "object",
   "properties": {
     "brief": {"type": "string", "description": "The analyst's request in their words, such as a focus, or empty for the whole corpus."},
-    "final_notebook": {"type": "boolean", "description": "Leave a deck of cards for the analyst, the group `Orientation`, which appears when the orientation ends. Left out, Settings decide. Default true."},
-    "propose_views": {"type": "boolean", "description": "Propose views of the files. Left out, Settings decide. Default true."},
-    "generate_report": {"type": "boolean", "description": "Write the report when the orientation ends. Left out, Settings decide. Default false."},
-    "critique": {"type": "boolean", "description": "Have a critic review the analysis before the outputs are written. Left out, Settings decide. Default false."},
     "model": {"type": "string", "description": "The model to run it on, such as opus, sonnet or a full model id, only when the analyst names one. Default: the orientation's model in Settings."},
     "effort": {"type": "string", "enum": ["low", "medium", "high", "xhigh", "max"], "description": "The effort to run it at, only when the analyst names one. Default: the orientation's effort in Settings."}
   }
@@ -447,7 +439,7 @@ Start a writer, as a subagent of this session, which writes or revises one docum
 
 ## critique
 
-Have a critic review your whole analysis, from your transcript, and the cards and view proposals you drafted, for files and fields you never opened, rival accounts you did not test and claims no call supports. The call returns the Agent call that starts the critic as your subagent, which you then make. The critic changes nothing, and its report reaches you as a message when it ends.
+Have a critic review your whole analysis, from your transcript, and the cards you drafted, for files and fields you never opened, rival accounts you did not test and claims no call supports. The call returns the Agent call that starts the critic as your subagent, which you then make. The critic changes nothing, and its report reaches you as a message when it ends.
 
 ```json
 {
@@ -547,7 +539,7 @@ Finish the view you build: thimble runs the checks as the record of your build. 
 
 ## view_pictures
 
-Take pictures of the view you review, whose paths Read opens. The first call of a round gives the view as it opens; ask for other states in `states`, up to three more in each round.
+Take pictures of the view you review, whose paths Read opens. The first call gives the view as it opens; ask for other states in `states`, up to four more.
 
 ```json
 {
@@ -555,13 +547,13 @@ Take pictures of the view you review, whose paths Read opens. The first call of 
   "properties": {
     "states": {
       "type": "array",
-      "maxItems": 3,
+      "maxItems": 4,
       "description": "States to see beside the overview: `control`, the view as it opens after clicking `controls` in turn, each named by its text as the list of controls gives it, or by an option of a select; `labels`, the view as it opens with a test label on that marks about one record in seven in the color the analyst's first label takes; `filtered`, the same filtered to the test label, which should keep only what it marks; `detail`, the place the first citation opens; `open`, the place a citation of `ref` opens, a record `<path>#L<n>` or a unit from the records; `narrow`, the view as it opens 798 px wide; `wide`, the view as it opens 1528 px wide.",
       "items": {
         "type": "object",
         "properties": {
           "state": {"type": "string", "enum": ["control", "labels", "filtered", "detail", "open", "narrow", "wide"]},
-          "controls": {"type": "array", "maxItems": 3, "items": {"type": "string"}, "description": "For `control`: the controls to click in turn, by their text."},
+          "controls": {"type": "array", "maxItems": 3, "items": {"type": "string"}, "description": "For `control`: the controls to click in turn, by their text, such as `Color by: State`, `State` and `Approval`, which color by Approval in place of State."},
           "ref": {"type": "string", "description": "For `open`: the ref whose place to see."},
           "why": {"type": "string", "description": "What you want to check in it, in a few words."}
         },
@@ -574,7 +566,7 @@ Take pictures of the view you review, whose paths Read opens. The first call of 
 
 ## view_pictures@terminal
 
-Draw the view you review as text, as thimble's panel shows it. The first call of a round gives the view as it opens, 120 columns wide; ask for other states in `states`, up to three more in each round.
+Draw the view you review as text, as thimble's panel shows it. The first call gives the view as it opens, 120 columns wide; ask for other states in `states`, up to four more.
 
 ```json
 {
@@ -582,7 +574,7 @@ Draw the view you review as text, as thimble's panel shows it. The first call of
   "properties": {
     "states": {
       "type": "array",
-      "maxItems": 3,
+      "maxItems": 4,
       "description": "States to see beside the overview: `control`, the view after the keys in `controls`, pressed in turn; `detail`, the place the first citation opens; `open`, the place a citation of `ref` opens, a record `<path>#L<n>` or a unit from the records; `wide`, the view as it opens 200 columns wide.",
       "items": {
         "type": "object",
@@ -601,13 +593,13 @@ Draw the view you review as text, as thimble's panel shows it. The first call of
 
 ## finish_review
 
-End a round of your review: thimble runs the view's checks on what you changed. Pass what you revised and what you leave, each as a short phrase; with nothing changed, the review is done.
+End your review: thimble runs the view's checks on what you changed. Pass what you revised and what you leave, each as a short phrase; with nothing changed, the review is done.
 
 ```json
 {
   "type": "object",
   "properties": {
-    "revised": {"type": "array", "items": {"type": "string"}, "description": "What you revised in this round, one short phrase each."},
+    "revised": {"type": "array", "items": {"type": "string"}, "description": "What you revised, one short phrase each."},
     "left": {"type": "array", "items": {"type": "string"}, "description": "The problems you leave as they are, one short phrase each, with why when the data shows the view is right."}
   }
 }
@@ -615,7 +607,7 @@ End a round of your review: thimble runs the view's checks on what you changed. 
 
 ## ticket_checks
 
-Check the change in your ticket's worktree, as often as you want: thimble's checks run over what the worktree changed, in a sandbox of the server's, and say what failed. Nothing is committed.
+Check the change in your ticket's worktree, as often as you want: thimble's checks run over what the worktree changed, in a sandbox of the server's where one can run (where none can, thimble asked the analyst before the ticket started), and say what failed. Nothing is committed.
 
 ```json
 {
@@ -637,7 +629,7 @@ Finish your ticket: thimble commits every change in the worktree to the ticket's
 
 ## instructions
 
-These tools act on thimble, the analyst's workspace for this corpus beside this session: a chat, the corpus's files, cards and a report, which thimble shows {{if:browser}}in the browser{{end}}{{if:terminal}}in the terminal{{end}}. A session started with the `thimble` command, and each thimble subagent, also has thimble's full instructions in its system prompt. If yours has none, this session was started some other way and thimble cannot reach it, so tell the analyst to quit and start it again by running `thimble` in this folder.
+These tools act on thimble, the analyst's workspace for this corpus beside this session: a chat, the corpus's files, cards and a report, which thimble shows {{if:browser}}in the browser{{end}}{{if:terminal}}in the terminal{{end}}. A session that opened thimble, with /thimble or the `thimble` command, and each thimble subagent, also has thimble's full instructions. If yours has none, thimble cannot reach this session yet, so tell the analyst to type /thimble.
 
 ## card-errored
 
@@ -875,10 +867,6 @@ screenshot cannot take this picture in terminal mode. There it draws only a card
 
 Proposed the view {view} (view:{slug}) over {claims}. The dev agent is building it now, and it opens in {{if:browser}}Files{{end}}{{if:terminal}}thimble's panel in the terminal{{end}} when its checks pass.
 
-## propose_view-suggested
-
-Proposed the viewer {view} (view:{slug}) for {claims}. Files offers it beside Raw on those files, and it is built when the analyst picks it.
-
 ## propose_view-unmatched
 
 No file of the corpus matches {claims}, so the view was not proposed and the dev agent has nothing to build. {near} Propose it again with claims that match files the corpus holds.
@@ -933,7 +921,7 @@ The browser that takes the checks' and the review's pictures cannot play H.264 v
 
 ## view-purple
 
-The page writes purple colors: {colours}. Purple is thimble's color for agents' work, so if any of them colors a category of the view, such as a speaker or a kind of record, give that category a viz color (`--viz-*`) instead.
+The page writes purple colors: {colours}. Purple is thimble's color for agents' work, so if any of them colors a category of the view, such as a speaker or a kind of record, show that category as text or a glyph, or through Color by, instead.
 
 ## view-own-parts
 
@@ -1179,7 +1167,7 @@ When your first run ended, thimble measured how much of the corpus it saw, from 
 
 ## start_orientation-unasked
 
-No Start and no message from the analyst has asked for an orientation since the last one ended, so this call started none. Start one only when the analyst asks for it, and write nothing about this call.
+No message from the analyst has come since the last orientation ended, so this call started none. Start a new one only after the analyst writes again, and write nothing about this call.
 
 ## start_orientation-running
 
@@ -1203,7 +1191,7 @@ Start it now as a subagent of this session, with one Agent call whose input is e
 
 {input}
 
-Change nothing in it, since thimble lets only this call through, and end the turn on it, with no words before or after it: the analyst sees the call.
+Change nothing in it, since thimble lets only this call through, and write no words before it. The call returns at once while the agent runs in the background; after its result, end the turn with no words and no other call, since the analyst sees the agent start.
 
 ## subagent-request
 
@@ -1220,10 +1208,6 @@ thimble's agents continue only when the analyst asks. If they asked, call messag
 ## start-plan-mode
 
 Your Claude Code session is in plan mode, where thimble's agents would have to ask you before every card and every edit, so none of them starts or takes a message there. Switch out of plan mode first (shift+tab in your terminal).
-
-## start-refused-not-launched
-
-This session was not started with `thimble`, so it and its subagents run without thimble's sandbox and can change your files, and thimble's agents cannot start in it. Quit and run `thimble` in this folder.
 
 ## start_agent-fork
 
@@ -1244,7 +1228,27 @@ The analyst asked for this in the side thread {thread}, which they opened on thi
 
 ## start-refused-no-module
 
-thimble's agents can't start in this session: Claude Code's hooks modules are off ({reason}). Main, its threads, cards and labels still work. Once modules are on, quit and run `thimble -c` in this folder.
+thimble's agents can't start in this session: {reason}. Main, its threads, cards and labels still work. Once that is fixed, restart Claude Code in this folder (`claude -c`) and type /thimble, or run `thimble -c`.
+
+## start-refused-connecting
+
+thimble's plugin is still connecting to this session, so thimble's agents can't start yet. Try again in a few seconds.
+
+## module-deny-private
+
+thimble refused this call, since it keeps its token files (server.json, session.key, paired.json and the links folder in thimble's home) out of reach of the file tools of its sessions. Do the task without them.
+
+## module-deny-records
+
+thimble refused this edit, since only thimble writes its records (its chats, checks, views, notices, the trusted folder, the orientation's run file and the permission modes it keeps in its home). Make the change with thimble's tools, or ask the analyst to make it in thimble's Settings.
+
+## module-deny-data
+
+thimble refused this edit, since thimble's config turns edits of the corpus off (agents.orientation.data is "off"). Leave the corpus as it is, and tell the analyst when the task needs an edit.
+
+## module-deny-web
+
+thimble refused this call, since thimble's config turns the web tools off (agents.orientation.web is "off").
 
 ## module-started-note
 
@@ -1276,7 +1280,7 @@ Start the writer now as a subagent of this session, with one Agent call whose in
 
 {input}
 
-Change nothing in it, since thimble lets only this call through, and end the turn on it, with no words before or after it: the analyst sees the call.
+Change nothing in it, since thimble lets only this call through, and write no words before it. The call returns at once while the agent runs in the background; after its result, end the turn with no words and no other call, since the analyst sees the agent start.
 
 ## start_writing-program
 
@@ -1414,12 +1418,6 @@ Review the orientation's analysis and its drafts.
 
 Its drafted deck is the group `{deck}`, which `list_cards` lists.
 
-## critique-proposals
-
-The views it proposed, each with what it is for, the files it reads and its layout.
-
-{proposals}
-
 ## critique-transcript
 
 Its transcript, rendered as its steps, is `{path}`, which Read opens.
@@ -1530,10 +1528,6 @@ The analyst asked for nothing in particular, so cover the whole corpus.
 
 The analyst's request: {request}
 
-You should generate the following outputs (described in `### Outputs`): {outputs}
-You should *not* generate the following outputs: {off}
-Critique: {critique}
-
 Start the orientation.
 
 ## orient-finished
@@ -1618,17 +1612,9 @@ The orientation's follow-up failed: {changed}. Its error: {error}
 
 {cards} deleted
 
-## orient-changed-views
-
-{views} proposed
-
 ## orient-changed-nothing
 
 nothing changed
-
-## orient-report-revision
-
-A follow-up of the orientation changed these cards, which the report cites: {cards}. Revise the passages that rest on them.
 
 ## message_orientation-started
 
@@ -1642,7 +1628,7 @@ Pass the message on now with one SendMessage call, with `to` "{agent}" and exact
 
 ## orient-continue-earlier-session
 
-This orientation ran in an earlier Claude Code session. To continue it, quit and run `{resume}` in this folder, or start a new orientation.
+This orientation ran in an earlier Claude Code session. To continue it, quit and run `thimble -r {session}` in this folder, or `claude -r {session}` and then /thimble, or start a new orientation.
 
 ## orient-continue-earlier-version
 
@@ -1658,7 +1644,7 @@ The analyst stopped this orientation with Esc in their terminal, and Claude Code
 
 {input}
 
-Change nothing in it, since thimble lets only this call through, and end the turn on it, with no words before or after it: the analyst sees the call.
+Change nothing in it, since thimble lets only this call through, and write no words before it. The call returns at once while the agent runs in the background; after its result, end the turn with no words and no other call, since the analyst sees the agent start.
 
 ## orient-continuation-prompt
 
@@ -1674,10 +1660,6 @@ Its cards:
 Its transcript, which you can read for what it did and found:
 {transcripts}
 
-You should generate the following outputs (described in `### Outputs`): {outputs}
-You should *not* generate the following outputs: {off}
-Critique: {critique}
-
 The analyst's message:
 
 {message}
@@ -1688,7 +1670,7 @@ none
 
 ## message_orientation-none
 
-No orientation has run in this workspace. Answer the analyst yourself, and call `start_orientation` only when they ask for an orientation.
+No orientation has run in this workspace. Answer the analyst yourself, or call `start_orientation` for a new orientation.
 
 ## message_orientation-gone
 

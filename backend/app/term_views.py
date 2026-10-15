@@ -320,7 +320,7 @@ def sandbox_argv(wrap: str | None = None) -> tuple[str, list[str], dict[str, str
     if choice == "node":
         return "node", program, {**base_env, "HOME": str(_real(KIT_DIR))}, None
     raise SandboxError("neither thimble's sandbox runtime nor bubblewrap runs on this machine, so no view program runs "
-                       "here (`thimble doctor` says why)")
+                       "here (`thimble doctor --verbose` says why)")
 
 
 # ------------------------------------------------------------------------------------------------------ the program

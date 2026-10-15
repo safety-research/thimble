@@ -5,12 +5,11 @@ role's model and effort from Settings, and of thimble's tools OWN_TOOLS. Its run
 context, writers/<doc>/context.md, that holds the whole context (context.render, CONTEXT_CHARS) followed by the task,
 which it reads first; a context too large for one Read call is written as several files (context_parts,
 CONTEXT_PART_CHARS), each small enough that Read returns it whole. One writer runs per document. Write in the browser is
-a click (write_route), the orientation's report pass a follow-on start of the same click or typed start (follow_on),
-both through thimble's plugin module; main's
-`start_writing` gives the exact Agent call main makes (tool_start_writing), and a thread's fork's gives it to main in a
-`start_agent` event (tools._ask_main). Main hears a `written` browser event when a writer ends. A writer answering the
-orientation's report pass carries `orient` and `orient_run` on its chat. A writer stopped when Claude Code quit is
-started again with Write again (subagents.again)."""
+a click (write_route), through thimble's plugin module; main's `start_writing` gives the exact Agent call main makes
+(tool_start_writing), and a thread's fork's gives it to main in a `start_agent` event (tools._ask_main). Main hears a
+`written` browser event when a writer ends. A writer that answered the report pass of an orientation from before 0.8.0
+carries `orient` and `orient_run` on its chat. A writer stopped when Claude Code quit is started again with Write again
+(subagents.again)."""
 from __future__ import annotations
 
 import asyncio
@@ -33,9 +32,15 @@ ROLE = "writer"  # the agent chat's role, and its role among subagents.TYPES
 WRITTEN_KIND = "written"  # the event kind that tells main a writer ended (prompts/main.md)
 CONTEXT_CHARS = 600_000  # of the context file, about 150k tokens
 CONTEXT_FILE = "context.md"  # in its work folder: what it reads first, with context-2.md… when one file is too large
-CONTEXT_PART_CHARS = 60_000  # of one context file: small enough that one Read call returns it whole, under both the
-# tool's file-size cap (256KB) and its cap on the tokens a call returns (25k), which a larger file trips with no
-# recourse: dense lines put even a small offset/limit window past the token cap
+# of one context file: small enough that one Read call returns it whole, under both the tool's file-size cap (256KB) and
+# its cap on the tokens a call returns (25k), which a larger file trips with no recourse, since dense lines put even a
+# small offset/limit window past the token cap. 40k, not 60k: dense lines such as a table's run about 3 characters to a
+# token, so 60k characters come to about 20k tokens before Read adds a line-number prefix to every line, close to the
+# cap, while 40k come to about 13k. At 4 bytes a character at most, 40k characters are at most 160KB.
+CONTEXT_PART_CHARS = 40_000
+# a new writer's chat fields of the orientation's report pass, which 0.8.0 took out: `orient` null says the writer is no
+# report pass, so the browser does not guess one from when it ran (frontend chat/model.ts orientWriters)
+NO_REPORT_PASS: dict[str, Any] = {"orient": None, "orient_run": 0}
 WORK_DIR = "writers"  # workspaces/<c>/writers/<doc>, a writer's own folder, where it may write
 SKILLS = ("thimble:shared",)  # shared.md, loaded before its first turn (U3)
 OWN_TOOLS = ("read_ref", "list_cards", "add_card", "edit_card", "delete_card", "screenshot", "write_document",
@@ -130,8 +135,7 @@ def running(c: str, doc: str) -> bool:
 
 
 async def start(c: str, doc: str, request: str = "", after: str = "", *, route: str = subagents.CLICK,
-                values: "dict[str, Any] | None" = None, call: str | None = None, orient: str | None = None,
-                orient_run: int = 0) -> subagents.Answer:
+                values: "dict[str, Any] | None" = None, call: str | None = None) -> subagents.Answer:
     """Start the writer of `doc` for workspace `c` with the analyst's request and passage and the run's values (each
     defaulting to Settings' writer row): a click or a follow-on start through the module, or a typed one's pending
     request and exact Agent call (subagents.start_job). The context file is written off the event loop first.
@@ -143,15 +147,12 @@ async def start(c: str, doc: str, request: str = "", after: str = "", *, route: 
     key = session_key(doc)
     if running(c, doc):
         return subagents.refusal(subagents.HOOK, tools.hint("start_writing-running", doc=doc))
-    # the orientation's report pass: the writer carries its chat and run, and its card shows the writer (module note)
-    pending = report_types.write_pending(c, doc) or {}
-    fields = {"orient": orient or pending.get("orient") or None, "orient_run": orient_run or pending.get("orient_run") or 0}
     from . import roles  # noqa: PLC0415
 
     agent = roles.agent_for(c, "writer")
     if agent.code and agent.replacing is not None:
         prompt = await asyncio.to_thread(first_message, c, t, request, after)
-        start_program(c, doc, t, request, after, prompt, agent.replacing, fields)
+        start_program(c, doc, t, request, after, prompt, agent.replacing)
         return subagents.Answer({"program": agent.replacing.extension})
     if route == subagents.TYPED or route == subagents.CLICK:
         before = subagents.refusal_before(c, click=route == subagents.CLICK)
@@ -164,32 +165,12 @@ async def start(c: str, doc: str, request: str = "", after: str = "", *, route: 
     ans = await subagents.start_job(c, ROLE, key, task(t, request, after, paths), subagents.values_for(c, ROLE, values),
                                     route, description=f"writer: {doc}",
                                     chat={"title": f"Write {doc}", "doc": doc, "brief": task_text(t, request, after),
-                                          **fields},
+                                          **NO_REPORT_PASS},
                                     work=work_dir(c, doc), call=call, check=False)
     return ans
 
 
-def follow_on(c: str, doc: str, request: str = "", **fields: Any) -> None:
-    """The writer of `doc` as a follow-on start of a run whose own start was the analyst's click or a typed start main
-    made (the orientation's report pass, Q5), through the module, in a task; in plan mode it waits (out_of_plan)."""
-    async def go() -> None:
-        try:
-            await subagents.out_of_plan(c)
-            ans = await start(c, doc, request, route=subagents.FOLLOW_ON, **fields)
-        except Exception:  # noqa: BLE001
-            log.exception("%s: the writer of %s did not start", c, doc)
-            return
-        if ans.refused:
-            log.info("%s: the writer of %s did not start: %s (%s)", c, doc, ans.reason, ans.kind)
-
-    try:
-        asyncio.get_running_loop().create_task(go(), name=f"writer-follow-on:{c}:{doc}")
-    except RuntimeError:
-        log.warning("%s: no loop to start the writer of %s in", c, doc)
-
-
-def start_program(c: str, doc: str, t: dict[str, Any], request: str, after: str, context_text: str, part: Any,
-                  orient: dict[str, Any]) -> Any:
+def start_program(c: str, doc: str, t: dict[str, Any], request: str, after: str, context_text: str, part: Any) -> Any:
     """The writer of `doc` run by an extension's program (harness.py): its input is the document, its type, the
     request and what thimble's writer reads first; it writes through write_document and edit_document, and main hears
     what it returns."""
@@ -199,7 +180,7 @@ def start_program(c: str, doc: str, t: dict[str, Any], request: str, after: str,
                       {"doc": doc, "type": {k: t.get(k) for k in ("slug", "name", "kind", "description") if k in t},
                        "request": request, "after": after, "context": context_text},
                       OWN_TOOLS, work_dir(c, doc), chat_role=ROLE,
-                      fields={"doc": doc, "brief": task_text(t, request, after), **orient})
+                      fields={"doc": doc, "brief": task_text(t, request, after), **NO_REPORT_PASS})
 
     def ended(_run: Any, status: str, summary: str) -> None:
         subagents.tell_main(c, WRITTEN_KIND, {"text": summary or "", "status": status, "doc": doc})

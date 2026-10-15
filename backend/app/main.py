@@ -11,9 +11,10 @@ import shutil
 import sys
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 
-from fastapi import Body, FastAPI
+from fastapi import Body, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.datastructures import MutableHeaders
 from starlette.exceptions import HTTPException
@@ -23,7 +24,7 @@ from starlette.staticfiles import StaticFiles
 from . import config
 from .errors import ErrorLog
 from . import hook_auth
-from .hook_auth import HookAuth, LocalWriteGuard
+from .hook_auth import HookAuth, LocalReadGuard, LocalWriteGuard
 from .http_guard import OriginCheck, SecurityHeaders, dev_origins
 
 # every line of thimble's own loggers carries a wall-clock stamp, so the server log can be read against the other logs
@@ -119,6 +120,21 @@ class QuietPolling(logging.Filter):
 if os.environ.get("THIMBLE_ACCESS_LOG", "").strip().lower() != "all":
     logging.getLogger("uvicorn.access").addFilter(QuietPolling())
 
+
+class HideMediaKeys(logging.Filter):
+    """A view's media key (hook_auth.media_key) in a line's text arguments shown as `<key>` (hook_auth.hide_media_keys):
+    uvicorn's access line names the URL of every failed request and the timing line that of a slow one, and the server
+    log goes into a problem report."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple) and any(isinstance(a, str) and "/media/" in a for a in record.args):
+            record.args = tuple(hook_auth.hide_media_keys(a) if isinstance(a, str) else a for a in record.args)
+        return True
+
+
+for _name in ("uvicorn.access", "thimble.timing"):
+    logging.getLogger(_name).addFilter(HideMediaKeys())
+
 ROUTER_MODULES = [
     # storage and the corpus
     "corpus", "transcripts", "source_keys", "source_events", "pdfs", "ledger", "investigation", "notebook", "concepts", "views", "cardtypes",
@@ -152,6 +168,8 @@ ROUTER_MODULES = [
     "tour",
     # the workspaces the start page and the top bar's switcher list
     "start_page",
+    # the failures of thimble's agents, told in the foreground with their fix
+    "notices",
 ]
 
 # The backend binds to 127.0.0.1, but a DNS-rebinding page can still reach it as same-origin unless the Host
@@ -403,8 +421,40 @@ async def _startup() -> None:
         log.exception("recording the source fingerprint failed")
 
 
+# what a new sign-in of a browser shows (signed_in), in each workspace whose main may act for it, at {at} (HH:MM)
+SIGNED_IN_NOTICE = ("A browser signed in to thimble at {at}. If it was not you, click Sign it out, or run `thimble unpair`"
+                    " in a shell to sign out every browser.")
+SIGNED_IN_LINE = "thimble: a browser signed in to thimble at {at}. If it was not you, run `thimble unpair` in a shell."
+
+
+def signed_in(ws: object, browser: str) -> None:
+    """A browser signed in with a link's code (hook_auth.claim): each workspace it may act in hears of it twice, as a
+    notice with Sign it out (sign-in:<browser>) and as a line under main's next reply in its terminal
+    (session.tell_terminal), which the browser cannot hide. The workspaces are the one the link named, when it is
+    registered, and each whose main this server follows. The browser that signed in shows no notice of its own sign-in
+    (its id, GET /api/ui/paired)."""
+    from . import notices, session  # noqa: PLC0415
+
+    name = ws if isinstance(ws, str) else ""
+    places: list[str] = []
+    if name:
+        try:
+            config.corpus_dir(name)
+            places.append(name)
+        except ValueError:
+            pass
+    places += [c for c in session.attached_workspaces() if c not in places]
+    at = datetime.now().strftime("%H:%M")
+    for c in places:
+        notices.post(c, kind="sign-in", key=f"sign-in:{browser}", text=SIGNED_IN_NOTICE.format(at=at),
+                     action={"label": "Sign it out", "do": "sign-out", "slug": browser})
+        session.tell_terminal(c, SIGNED_IN_LINE.format(at=at))
+    log.warning("a browser signed in to thimble (%s)", name or "the start page")
+
+
 def create_app() -> FastAPI:
-    app = FastAPI(title="thimble", version="0.0.1", lifespan=_lifespan)
+    # no /docs, /redoc or /openapi.json: the API is thimble's own, and its table is docs/routes.md
+    app = FastAPI(title="thimble", version="0.0.1", lifespan=_lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     # Every page reaches /api same-origin, from the built UI or through Vite's proxy; only a dev stack trusts the Vite
     # origin, since any project's dev server can sit on a loopback port (http_guard). ErrorLog is innermost, so an
     # error's answer passes through the checks' headers and the timing.
@@ -414,6 +464,7 @@ def create_app() -> FastAPI:
         app.add_middleware(CORSMiddleware, allow_origins=vite, allow_methods=["*"], allow_headers=["*"])
     app.add_middleware(HookAuth)  # inside the write guard: a hook proves the token here too
     app.add_middleware(LocalWriteGuard)  # inside OriginCheck, outside HookAuth: a forged-Origin write still needs the cookie or the token
+    app.add_middleware(LocalReadGuard)  # beside the write guard: a read needs the cookie, the CLI's proof or a shot's token
     app.add_middleware(OriginCheck, extra_origins=vite)  # after TrustedHost: the Host it compares with is an allowed one
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
     app.add_middleware(SecurityHeaders)  # outside the two checks, so their refusals carry the headers too
@@ -440,17 +491,54 @@ def create_app() -> FastAPI:
     install = {"home": str(cli.home().expanduser().resolve()), "app": str(Path(config.REPO_ROOT).resolve())}
 
     @app.get("/api/health")
-    async def health() -> dict:
-        # `leader` lets `server up`/`stop` find a server whose record was lost, `ui` lets an open tab tell it is stale,
-        # and `home`/`app` let another install's `server up` on the same port refuse it. Answered on the event loop, not
-        # in a worker thread, which can wait behind threads that compute: the supervisor and the plugin give a health
-        # call 1 to 2 s (cli.HEALTH_TIMEOUT_S) before they take the server for one that is starting or gone.
-        return {"ok": True, "leader": os.getsid(0), "boot": config.BOOT_ID, "ui": ui_build(), **install}
+    async def health(request: Request) -> dict:
+        # `ui` lets an open tab tell it is stale and `boot` lets the plugin's shim tell a restart; to a caller that proves
+        # the token (the CLI), also `leader`, which lets `server up`/`stop` find a server whose record was lost, and
+        # `home`/`app`, which let the same install's commands tell its server from another install's. Without the proof
+        # no path or pid: another account on the computer reaches this route too. Answered on the event loop, not in a
+        # worker thread, which can wait behind threads that compute: the supervisor and the plugin give a health call 1
+        # to 2 s (cli.HEALTH_TIMEOUT_S) before they take the server for one that is starting or gone.
+        out = {"ok": True, "boot": config.BOOT_ID, "ui": ui_build()}
+        if hook_auth.proven(request.scope):
+            out.update({"leader": os.getsid(0), **install})
+        return out
 
     @app.post("/api/ui/key")
-    def ui_key(body: dict = Body(...)):
-        # the key of the page's link, traded for the cookie a change of permission modes needs (hook_auth.claim)
-        return hook_auth.claim(body.get("key"))
+    def ui_claim(request: Request, body: dict = Body(...)):  # a link's one-time code, traded for the browser's cookie
+        r, new = hook_auth.claim(body, request)
+        if new:
+            signed_in(body.get("ws"), new)
+        return r
+
+    @app.post("/api/ui/pair")  # token only (hook_auth.guarded): Stop hook, `thimble up`
+    def ui_pair(body: dict = Body(default={})) -> dict:
+        return {"code": hook_auth.mint(str(body.get("ws") or "")), "expires_s": hook_auth.PAIR_TTL_S}
+
+    @app.post("/api/ui/unpair", status_code=204)  # token only: `thimble unpair`
+    def ui_unpair() -> None:
+        hook_auth.unpair()
+
+    @app.post("/api/ui/shot")  # token only: a dev ticket's shot of this server's page (dev._take_shot)
+    def ui_shot() -> dict:
+        return {"token": hook_auth.mint_shot(), "expires_s": hook_auth.SHOT_TTL_S}
+
+    @app.post("/api/ui/signout")  # cookie: a sign-in notice's "Sign it out"
+    def ui_signout(body: dict = Body(...)) -> dict:
+        from . import notices, session  # noqa: PLC0415
+
+        browser = str(body.get("id") or "")
+        done = hook_auth.sign_out(browser)
+        if browser:  # its notice goes wherever it was posted, also when the browser was signed out already
+            ws = body.get("ws")
+            for c in dict.fromkeys([*([str(ws)] if ws else []), *session.attached_workspaces()]):
+                with contextlib.suppress(ValueError):
+                    config.corpus_dir(c)
+                    notices.clear(c, f"sign-in:{browser}")
+        return {"signed_out": done}
+
+    @app.get("/api/ui/paired")
+    def ui_paired(request: Request) -> dict:
+        return {"paired": hook_auth.analyst(request), "id": hook_auth.browser_id(request)}
 
     # the built UI, last: a mount at / matches everything the routes above did not
     dist = frontend_dist()

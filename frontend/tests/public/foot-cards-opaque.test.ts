@@ -17,4 +17,10 @@ test("the foot floats over the rows, and a hold's card in it mixes its wash into
   expect(rule('.chat-foot')).toMatch(/position:\s*absolute/)
   expect(rule('.chat-foot .chat-hold')).toMatch(/background:\s*color-mix\([^;]*var\(--surface-card\)\)/)
   expect(rule('.chat-perm')).toMatch(/background:\s*color-mix\([^;]*var\(--surface-card\)\)/)
+  // the view proposal card: the accent mixed into the card's own surface
+  expect(rule('.chat-offer')).toMatch(/background:\s*color-mix\([^;]*var\(--accent\)[^;]*var\(--surface-card\)\)/)
+  // a notice above the composer: the warning's wash mixed into the card's own surface
+  expect(rule('.chat-foot .chat-notice')).toMatch(/background:\s*color-mix\([^;]*var\(--status-warning\)[^;]*var\(--surface-card\)\)/)
+  // the Manual-mode notice: the problem red mixed into the card's own surface
+  expect(rule(".chat-foot .chat-notice[data-kind='manual-mode']:not([data-closed])")).toMatch(/background:\s*color-mix\([^;]*var\(--status-negative\)[^;]*var\(--surface-card\)\)/)
 })

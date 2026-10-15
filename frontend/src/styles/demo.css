@@ -1,0 +1,14 @@
+/* A demo page (lib/demo): the Demo tag beside the workspace's folder in the top bar (shell/DemoTag), and the chat's
+   note when an action needs Claude there (chat/DemoNote), a .chat-continue line with its × at the right. */
+.shell-demo {
+  flex: none;
+  cursor: default;
+}
+.chat-demo-note-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.chat-demo-note-x {
+  flex: none;
+  margin: -4px -6px -4px 0;
+}

@@ -4,22 +4,23 @@
 In browser mode a card's code runs in a kernel the server owns. Terminal mode has no server, and code a model wrote never
 runs in the MCP shim: add_card and edit_card store the card with a `run` record ({state: waiting, by: bash, script}) and
 answer with one Bash command (`## card-run`); a code label answers with `## label-run`, and cards that read a changed
-label with `## cards-stale`. The caller runs the command in its Bash, inside main's sandbox, where `thimble-run` runs
-the code as a kernel cell would: one IPython shell (LocalKernel) set up with the kernel's own startup lines
+label with `## cards-stale`. The caller runs the command in its Bash, as its permission mode decides and in Claude
+Code's own sandbox when the analyst turned that on, where `thimble-run` runs the code as a kernel cell would: one IPython shell (LocalKernel) set up with the kernel's own startup lines
 (notebook.startup_lines: Altair's mimetype renderer, pandas' column width, the figure formatter, the page's faces, the
 cell-reads hook and the `thimble` module with WS set), thimble's matplotlibrc and the inline backend's SVG figures,
 then the same storage path as a kernel run (notebook._execute_cell: output bounding, memos, reads, labels read). The
 cell runs in the process's main thread, as in a kernel, with a SIGALRM time limit standing in for a kernel's SIGINT,
 while the event loop runs in a thread of its own (serve). It writes the card's outputs into the group under the store's
 lock and prints what add_card prints in browser mode, and exits 0, or 1 when the code errored. No kernel lasts between
-runs, so each run loads its data again. A run writes only the folders write_dirs names, which main's fence gives its
-Bash; it writes no canvas history or undo step and starts no chat.
+runs, so each run loads its data again. A run writes only the folders write_dirs names; it writes no canvas history or
+undo step and starts no chat.
 
 The shim's CardWatch sees a group file change and records each run that ended (canvas_history, undo), starts the card
 check of a card marked `check: "pending"` (a run that ended with add_card's `takeaway`; card_check.start skips it as
 browser mode does without Chromium or the built frontend), and marks interrupted a run whose `thimble-run` is gone (its
 run lock is free: hold_run), such as one Bash's timeout killed. The check tries the code of its revision of a card
-through `thimble-run trial`, which the shim starts in main's sandbox (trial).
+through `thimble-run trial`, which the shim starts in Anthropic's sandbox runtime where it runs (trial_sandbox), and
+otherwise with the user's access (trial).
 """
 from __future__ import annotations
 
@@ -90,7 +91,7 @@ def command(kind: str, ident: str = "") -> str:
 
 
 def write_dirs(c: str) -> list[Path]:
-    """The folders of workspace `c` a card run writes, which main's fence gives its Bash (allowWrite): the groups, their
+    """The folders of workspace `c` a card run writes, which a trial's sandbox lets it write (trial_sandbox): the groups, their
     outputs' side files, the labels' rows and definitions (a code label's run records its application there), this
     module's folder and the scratch mirror the code runs in (the kernels' cwd)."""
     from . import notebook  # noqa: PLC0415
@@ -766,8 +767,8 @@ async def run_stale(c: str) -> tuple[str, int]:
 #
 # The card check runs in the shim, and it tries the code of its revision of a card before it keeps it
 # (notebook.trial_run). In browser mode the revision runs on the card's kernel; in terminal mode the shim starts
-# `thimble-run trial <card>` itself (trial), with the revision's code on its stdin, in the sandbox main's Bash runs
-# `thimble-run card` in (trial_sandbox) and with the shim's environment less its keys. The runner runs the code as a
+# `thimble-run trial <card>` itself (trial), with the revision's code on its stdin, in Anthropic's sandbox runtime where
+# it runs (trial_sandbox), and otherwise with the user's access, and with the shim's environment less its keys. The runner runs the code as a
 # card run would, stores nothing, and prints the run as one JSON line (TRIAL_FIELDS), which the shim reads back. No
 # shell lasts after the runner ends, so a trial leaves nothing to put back (notebook.trial_settle).
 
@@ -795,29 +796,25 @@ async def run_trial(c: str, cid: str, code: str) -> tuple[str, int]:
 
 
 def trial_sandbox(c: str) -> dict[str, Any] | None:
-    """srt's settings for a trial in workspace `c`: the filesystem rules of the sandbox main's Bash runs `thimble-run`
-    in (thimble's fence in terminal mode, cli.main_fence), and no network, since a host main's Bash would ask about has
-    nobody to ask here and the fence names none it allows. None when main runs without thimble's fence (launch.json's
-    `fenced`; a record without it is read as cli.fence_off reads thimble's config and the machine), as main's Bash then
-    runs `thimble-run` unsandboxed too. TrialUnavailable when main is fenced but the fence cannot be built here."""
-    from . import cli, launch_mode, notebook  # noqa: PLC0415 — cli builds main's fence
+    """srt's settings for a trial in workspace `c` where srt runs (kernel_wrap.srt_works): no network; thimble's token
+    files and links folder unreadable; writes only to the agents' work folders and the card folders; the corpus and the
+    workspace's config.json and settings.json not writable. None where srt can't run, where main's Bash runs
+    `thimble-run` without a sandbox too."""
+    from . import kernel_wrap, srt, subagents, userconf  # noqa: PLC0415
 
-    fenced = cli.read_launch(c).get("fenced")
-    if fenced is not True and (fenced is False or cli.fence_off(c)):
+    if not kernel_wrap.srt_works(srt.node(), srt.package(config.REPO_ROOT)):
         return None
-    fence = cli.main_fence(Path(config.corpus_dir(c)), c, mode=launch_mode.TERMINAL)
-    fs = (fence.get("sandbox") or {}).get("filesystem") if fence else None
-    if not isinstance(fs, dict):
-        raise notebook.TrialUnavailable(f"main's sandbox cannot be set up here ({cli.fence_off(c) or 'no fence'})")
+    home = userconf.global_file().parent
     return {"network": {"allowedDomains": [], "deniedDomains": []},
-            "filesystem": {"denyRead": list(fs.get("denyRead") or []), "allowRead": [],
-                           "allowWrite": list(fs.get("allowWrite") or []),
-                           "denyWrite": list(fs.get("denyWrite") or [])}}
+            "filesystem": {"denyRead": [*userconf.private_paths(), str(home / userconf.LINKS_DIR)], "allowRead": [],
+                           "allowWrite": [*map(str, subagents.write_dirs(c)), *map(str, write_dirs(c))],
+                           "denyWrite": [os.path.realpath(config.corpus_dir(c)), str(userconf.workspace_file(c)),
+                                         str(config.workspace_path(c) / "settings.json")]}}
 
 
 def trial_argv(c: str, cid: str, settings_dir: Path) -> list[str]:
     """The command of a trial of card `cid`: `thimble-run trial <cid>`, inside srt with trial_sandbox's settings
-    (written to `settings_dir`, outside the sandbox) when main's Bash is sandboxed. TrialUnavailable when srt is
+    (written to `settings_dir`, outside the sandbox) where srt runs, else as it is. TrialUnavailable when srt is
     missing."""
     import json  # noqa: PLC0415
 

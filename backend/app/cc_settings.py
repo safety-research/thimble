@@ -64,6 +64,17 @@ def sources(cwd: Path) -> list[Path]:
     return [config_dir() / "settings.json", cwd / PROJECT_SETTINGS, cwd / LOCAL_SETTINGS, *([managed] if managed else [])]
 
 
+def enabled_thimbles(cwd: Path) -> list[str]:
+    """The `thimble@*` keys `enabledPlugins` sets to true in the user's, the project's and the folder's local settings
+    for a session in `cwd` (sources without the managed tier, whose plugins a session's --settings cannot turn off)."""
+    on: dict[str, bool] = {}
+    for path in sources(cwd)[:3]:
+        plugins = _read(path).get("enabledPlugins")
+        if isinstance(plugins, dict):
+            on.update({str(k): v is True for k, v in plugins.items() if str(k).startswith("thimble@")})
+    return [k for k, v in on.items() if v]
+
+
 def analyst_tiers() -> list[dict[str, Any]]:
     """The settings that are the analyst's own wherever a session runs, lowest precedence first: the user's settings.json
     and the org's managed tier (cc_plugin.managed: server-managed settings, else the managed file with its drop-ins). A
@@ -319,6 +330,50 @@ def _apparmor_needed(bwrap: str) -> bool:
                        (p.read_text("utf-8", errors="replace") for p in APPARMOR_DIR.iterdir() if p.is_file()))
     except OSError:
         return True
+
+
+# kernel_setup's packages: bubblewrap alone, which the card kernel's and terminal views' sandbox needs (no socat)
+KERNEL_PACKAGE_INSTALL = (("apt-get", "apt-get install -y bubblewrap"), ("dnf", "dnf install -y bubblewrap"),
+                          ("zypper", "zypper install -y bubblewrap"), ("pacman", "pacman -S --needed bubblewrap"),
+                          ("apk", "apk add bubblewrap"))
+
+
+def kernel_setup() -> tuple[list[str], str]:
+    """(the root commands that would let bubblewrap make a sandbox on this machine, what they do or why there are none),
+    for the doctor's card code and terminal views lines: sandbox_setup for bubblewrap alone, with the AppArmor profile
+    when bwrap needs one, and no socat. [] off Linux, where bubblewrap runs (kernel_wrap.works), or when no root command
+    is at hand. The commands are printed, never run."""
+    if sys.platform != "linux":
+        return [], ""
+    import shutil  # noqa: PLC0415
+
+    from . import kernel_wrap  # noqa: PLC0415
+
+    if kernel_wrap.works():
+        return [], ""
+    found = shutil.which("bwrap")
+    bwrap = found or "/usr/bin/bwrap"
+    profile = _apparmor_needed(bwrap)
+    what = " and ".join(filter(None, ["bubblewrap" if not found else "",
+                                      "an AppArmor profile that lets bwrap create user namespaces" if profile else ""]))
+    if not what:
+        return [], "bwrap is installed but cannot create a sandbox here (user namespaces may be off, as in some containers)"
+    root = os.geteuid() == 0
+    if not root and not shutil.which("sudo"):
+        return [], f"setting up {what} needs root: ask an administrator"
+    sudo = "" if root else "sudo "
+    cmds: list[str] = []
+    if not found:
+        install = next((cmd for tool, cmd in KERNEL_PACKAGE_INSTALL if shutil.which(tool)), None)
+        if install is None:
+            return [], "install bubblewrap with this system's package manager"
+        cmds.append(sudo + install)
+    if profile:
+        path = APPARMOR_DIR / "bwrap"
+        text = APPARMOR_PROFILE.format(bwrap=bwrap).replace("\n", "\\n")
+        cmds.append(f"printf '{text}' | {sudo}tee {path} >/dev/null")
+        cmds.append(f"{sudo}apparmor_parser -r {path}")
+    return cmds, f"set up {what}"
 
 
 def sandbox_setup() -> tuple[list[str], str]:

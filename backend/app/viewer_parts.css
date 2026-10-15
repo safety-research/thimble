@@ -632,6 +632,11 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* the panel's `empty` line, in place of a title until a record opens in it */
+.thimble-side[data-empty] .thimble-side-title {
+  color: var(--text-tertiary);
+  font-weight: 400;
+}
 .thimble-side-sub {
   overflow: hidden;
   color: var(--text-tertiary);

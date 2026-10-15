@@ -5,16 +5,23 @@ sessions thimble starts (app/permission_hook.py).
 
 Any process on the machine can reach a loopback port, and the plugin runs in every Claude Code session that has it,
 so each side proves it holds the token the supervisor writes into <home>/server.json (readable by its owner alone,
-cli.write_state) without sending it: a request carries a fresh nonce and HMAC-SHA256(token, "hook:" + nonce), and the
-answer carries HMAC-SHA256(token, "server:" + nonce). HookAuth answers a request on a guarded route without a valid
-proof with 401. A hook or shim that finds no server.json, no token in it, or no valid proof on the answer sends
-nothing or believes nothing, so a process that holds the recorded port learns nothing from the plugin and cannot answer
-it.
+cli.write_state) without sending it: a request carries a fresh nonce, `<unix time>.<random hex>` (new_nonce), and
+HMAC-SHA256(token, "hook@<port>:" + nonce) for the port it was sent to (request_proof), and the answer carries
+HMAC-SHA256(token, "server:" + nonce). The server checks the proof against the port it listens on, refuses one whose
+time is more than PROOF_TTL_S away from its own clock, and takes each nonce once (proven). So a proof a client sent to
+another process, such as another account's program that holds the recorded port while thimble's server runs on
+another, proves nothing anywhere: not on this server's port, not later, not twice. HookAuth answers a request on a
+guarded route without a valid proof with 401. A hook or shim that finds no server.json, no token in it, or no valid
+proof on the answer sends nothing more or believes nothing, so a process that holds the recorded port learns nothing
+from the plugin and cannot answer it.
 
 A program thimble runs for one of its agents (harness.py) cannot read server.json. It gets a token of its own instead,
 `<id>.<secret>`, valid while it runs and only on the routes its grant allows (grant): its requests carry AGENT_HEADER
-with the id and prove the whole token the same way, and the answer proves it back. The request's scope then holds the
-id under AGENT_SCOPE, so a route acts for that agent alone.
+with the id and HMAC-SHA256(token, "hook:" + nonce) for any fresh nonce (docs/agents.md documents it for extension
+programs, and its WebSocket to the session route proves the token the same way, harness._proven), and the answer proves
+it back. That proof is bound to no port or time: the program is handed the address of the server that runs it, so it
+sends the token nowhere else, and the token stops working when the run ends. The request's scope then holds the id
+under AGENT_SCOPE, so a route acts for that agent alone.
 
 A session thimble starts tells its tool calls apart from main's by THIMBLE_SESSION, which its shim sends with each
 call. Any process can set that variable, the user's own sessions included, so the name alone
@@ -23,11 +30,26 @@ HMAC-SHA256 under SESSION_KEY with the workspace and the session's key (session_
 name only with a token it signed for that workspace (session_proven). The key is a file in thimble's home that no agent
 may read (userconf.private_paths), and it outlives a restart, as the sessions a restart resumes do.
 
-A change of permission modes, and an answer to a permission request, must come from the analyst's browser (analyst).
-The dashboard link carries the `ui_key` of server.json after `#k=`; the page trades it for an HttpOnly, SameSite=Strict
-cookie named for this server's port (claim, ui_cookie), which such a request must carry. Only the analyst's terminal
-shows that link (cli.py leave_link), never the model's context, so a process that cannot read server.json, such as a
-notebook kernel in bubblewrap that the model writes cells for, can do neither.
+Everything the analyst does in thimble (a message, a click, a permission answer, a change of Settings or of a permission
+mode) must come from a signed-in browser (analyst). The dashboard link carries a one-time code after `#p=`, which the
+server makes when the link is shown (mint: main's Stop hook, `thimble up`); the page trades it for an HttpOnly,
+SameSite=Strict cookie (claim), and the code then stops working, as it does PAIR_TTL_S after it was made or when a newer
+code for the same workspace is made. A browser that is signed in already spends a code with no change. The server keeps
+only the sha256 of each code and of each browser's cookie (PAIRED_FILE, read at start and then kept in memory), so no
+file, transcript or link holds a credential that lasts. The token proves only the routes hooks, the shim, the module and
+the CLI use (guarded); with it a process can mint a code, and each new sign-in prints a line in main's terminal and posts
+a notice.
+
+Reads are gated too (LocalReadGuard), since another account on a shared computer reaches the loopback port as well:
+every GET or HEAD under /api needs the signed-in browser's cookie or a hook proof (the CLI sends one with every
+request), except OPEN_READS. Two narrow credentials stand in where neither can be sent. A screenshot of the page
+(tools.py, dev.py) runs a headless browser with no cookie, so it carries a shot token (mint_shot) in SHOT_HEADER: random,
+good for SHOT_TTL_S on GET and HEAD alone, kept in memory as its sha256. A view's frame is sandboxed with an opaque
+origin, which the browser sends no SameSite=Strict cookie from, so the one URL it loads, the view's media route, carries
+a key in its path (media_key: an HMAC under SESSION_KEY of the workspace, the view and who loaded the frame), good for
+that view's media alone, and only while the browser that loaded the frame stays signed in (or the shot's token, or
+server.json's token, lives). The server log shows such a URL with `<key>` in its place (hide_media_keys). What let a read through is asked again before each later part of its answer goes out, so a browser signed out,
+or a shot whose token ended, gets nothing more on an event stream it opened before (read_still_allowed).
 """
 from __future__ import annotations
 
@@ -40,12 +62,16 @@ import re
 import secrets
 import tempfile
 import threading
+import time
+from collections import OrderedDict
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
+from urllib.parse import urlsplit
 
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 
 HOOK_PATHS = frozenset({
     "/api/events/pull", "/api/events/ack", "/api/events/held", "/api/events/mode", "/api/events/permission",
@@ -58,35 +84,57 @@ SHIM_PATHS = frozenset({"/api/events"})
 MODULE_PREFIX = "/api/module/"  # the hooks module's routes (app/module_bridge.py): every one, whatever the method
 TOOL_PREFIX = "/api/tools/"  # POST /api/tools/<name>; GET /api/tools/holdings is the CLI's and stays open
 SESSION_HOOK_PATHS = re.compile(r"/api/ws/[^/]+/(sessions/permission|calls/ref)")
+# the routes only thimble's CLI posts to (cli._request, which proves the token), and the pairing routes the Stop hook and
+# `thimble up` / `thimble unpair` call
+CLI_PATHS = frozenset({
+    "/api/corpora/register", "/api/dev/announce", "/api/dev/revert", "/api/extensions/refresh", "/api/subagents/caller",
+    "/api/ui/pair", "/api/ui/unpair", "/api/ui/shot",
+})
+CLI_WS_PATHS = re.compile(r"/api/ws/[^/]+/(session|precached/context|archive|restore|rename)")  # POST
+CLI_WS_DELETE = re.compile(r"/api/ws/[^/]+")  # DELETE: a workspace removed (`thimble rm`)
 NONCE_HEADER = "x-thimble-nonce"
 AGENT_HEADER = "x-thimble-agent"  # the id of an agent's token (module note)
 AGENT_SCOPE = "thimble_agent"  # where a request proven with an agent's token keeps its id, in the ASGI scope's state
 AUTH_HEADER = "x-thimble-auth"
 PROOF_HEADER = "x-thimble-proof"
 NONCE_MAX = 128  # characters
+# a request's proof is good while the time in its nonce is this close to the server's clock, and once (module note)
+PROOF_TTL_S = 300
+PROOF_SCOPE = "thimble_proof"  # where a request's checked proof is kept in the ASGI scope's state (proven_by)
 SESSION_KEY = "session.key"  # in thimble's home: the secret session tokens are signed with (module note)
 SESSION_TOKEN_ENV = "THIMBLE_SESSION_TOKEN"
 _secret_lock = threading.Lock()
-UI_COOKIE = "thimble-ui"  # the cookie's name before the port was added to it (ui_cookie), which browsers still hold
+UI_COOKIE = "thimble-ui"  # the cookie's name, with this server's port after it (ui_cookie)
 UI_COOKIE_AGE_S = 400 * 24 * 3600  # the longest a browser keeps a cookie
 # The cookie the browser holds (claim) and analyst() and LocalWriteGuard check. A cookie is not bound to a port, so the
 # path is what keeps it from the browser's requests to other services on 127.0.0.1, except requests to their own /api/
 # paths. It covers the whole API, not just /api/ws/, so a browser proves itself to LocalWriteGuard on every write route.
 UI_COOKIE_PATH = "/api/"
-LEGACY_COOKIE_PATHS = ("/api/ws/", "/api/")  # where UI_COOKIE was set; claim and a moved cookie delete it there
+PAIRED_FILE = "paired.json"  # in thimble's home: [{hash, at}], the sha256 of each signed-in browser's cookie (claim)
+PAIR_TTL_S = 300  # a link's sign-in code works this long after it was made (mint), and once
 # a click route's 403 without the analyst's cookie: every such click, not only the permission answers (live check L32)
 ANALYST_ONLY = ("only the analyst's own thimble page can do this (start, message or stop thimble's agents, build a view,"
                 " answer a permission request, change a permission mode): open it from the link shown under /thimble's"
                 " reply, or printed by `thimble up` in a shell, and click there")
 
-# A write to the local API (any method but GET/HEAD/OPTIONS) must prove it comes from thimble's own browser (the ui_key
-# cookie) or a local tool that can read server.json (the hook proof). A notebook kernel runs model-authored code with
-# the host's network and can reach this server on 127.0.0.1, but the sandbox hides server.json from it (its token and
-# ui_key), so it can produce neither and is refused. Request headers, including Origin, are forgeable by such a caller,
-# so the Origin check alone is no boundary against it (http_guard).
+# A write to the local API (any method but GET/HEAD/OPTIONS) is either a token route (guarded: the plugin, the CLI, a
+# program's grant), which needs the hook proof, or an analyst route, which needs a signed-in browser's cookie (analyst).
+# A notebook kernel can reach this server on 127.0.0.1 but holds neither.
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 WRITE_REFUSED = ("open thimble from the link shown under /thimble's reply, or printed by `thimble up` in a shell, to"
                  " make changes")
+CODE_GONE = ("This sign-in link was already used or has expired. Run `thimble up` in a shell for a new one, or type"
+             " /thimble in your terminal.")
+# A read of the local API (GET or HEAD) needs a signed-in browser's cookie or a hook proof too (LocalReadGuard), except
+# these: the supervisor's, the plugin's and the page's health check, and the page's question whether it is signed in
+OPEN_READS = frozenset({"/api/health", "/api/ui/paired"})
+READ_METHODS = frozenset({"GET", "HEAD"})
+SIGN_IN_NEEDED = ("open thimble from the link shown under /thimble's reply, or printed by `thimble up` in a shell, to"
+                  " see it")
+SHOT_HEADER = "x-thimble-shot"  # a page screenshot's read-only token (mint_shot)
+SHOT_TTL_S = 120  # a shot token's life: dev.SHOT_TIMEOUT_S (90 s) ends the headless run before it
+# the view media route with its key (media_key), as the frame's browser asks for it
+MEDIA_PATH = re.compile(r"/api/ws/([^/]+)/views/([^/]+)/media/([0-9a-f]{32})")
 
 _cache: tuple[tuple[str, int, int], dict] | None = None
 # the tokens of the programs thimble runs, by id: (the whole token, whether its grant allows a method and path)
@@ -118,19 +166,41 @@ def agent_of(scope: dict) -> str:
 
 
 def sign(token: str, role: str, nonce: str) -> str:
-    """The proof `role` ("hook" or "server") gives for `nonce`."""
+    """The proof `role` gives for `nonce`: "server" on an answer, "hook" on an agent program's request (module note).
+    The request of a tool that read server.json proves request_proof."""
     return hmac.new(token.encode("utf-8"), f"{role}:{nonce}".encode("utf-8"), hashlib.sha256).hexdigest()
 
 
-def headers(token: str, nonce: str) -> dict[str, str]:
-    """A hook's request headers for `nonce`."""
-    return {NONCE_HEADER: nonce, AUTH_HEADER: sign(token, "hook", nonce)}
+def new_nonce() -> str:
+    """A fresh nonce for a request's proof: the Unix time it was made, a dot, and random hex (module note)."""
+    return f"{int(time.time())}.{secrets.token_hex(16)}"
+
+
+def port_of(url: str) -> int:
+    """The port a request to `url` goes to: the one it names, else 80 (443 for https)."""
+    u = urlsplit(url)
+    return u.port or (443 if u.scheme == "https" else 80)
+
+
+def request_proof(token: str, port: int, nonce: str) -> str:
+    """The proof a request to the server listening on `port` gives for `nonce` (module note)."""
+    return hmac.new(token.encode("utf-8"), f"hook@{int(port)}:{nonce}".encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def headers(token: str, port: int, nonce: str | None = None) -> dict[str, str]:
+    """A request's proof headers for the server on `port` (port_of a URL), with a fresh nonce unless `nonce` is given;
+    the answer's proof is sign(token, "server", <the nonce>)."""
+    nonce = nonce or new_nonce()
+    return {NONCE_HEADER: nonce, AUTH_HEADER: request_proof(token, port, nonce)}
 
 
 def guarded(method: str, path: str) -> bool:
-    """Whether a request needs the proof: a hook's, the shim's or the hooks module's route, or a tool call."""
+    """Whether a request needs the proof: a hook's, the shim's or the hooks module's route, a tool call, or a route only
+    the CLI calls (CLI_PATHS, CLI_WS_PATHS, CLI_WS_DELETE)."""
     return (path in HOOK_PATHS or path in SHIM_PATHS or path.startswith(MODULE_PREFIX)
-            or (method == "POST" and path.startswith(TOOL_PREFIX)) or SESSION_HOOK_PATHS.fullmatch(path) is not None)
+            or (method == "POST" and path.startswith(TOOL_PREFIX)) or SESSION_HOOK_PATHS.fullmatch(path) is not None
+            or (method == "POST" and (path in CLI_PATHS or CLI_WS_PATHS.fullmatch(path) is not None))
+            or (method == "DELETE" and CLI_WS_DELETE.fullmatch(path) is not None))
 
 
 def _state() -> dict:
@@ -237,46 +307,329 @@ def ui_cookie() -> str:
     return f"{UI_COOKIE}-{port}" if port.isdigit() else UI_COOKIE
 
 
-def key_cookie(cookies: dict[str, str]) -> tuple[bool, bool]:
-    """(proves, legacy): whether `cookies` hold server.json's ui_key, and whether only under UI_COOKIE, the name a
-    browser that claimed the key before the port was added to it still holds, at /api/ws/ (moved by LocalWriteGuard)."""
-    key = _field("ui_key")
-    if not key:
-        return False, False
-    name = ui_cookie()
-    if _same(cookies.get(name, ""), key):
-        return True, False
-    if name != UI_COOKIE and _same(cookies.get(UI_COOKIE, ""), key):
-        return True, True
-    return False, False
+def _sha(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8", "surrogateescape")).hexdigest()
+
+
+def _now() -> float:
+    """The clock codes expire by."""
+    return time.monotonic()
+
+
+# a live sign-in code's sha256 -> (when it expires on _now's clock, the workspace it was made for or ""); in memory
+# only, so a restart voids every code
+_codes: dict[str, tuple[float, str]] = {}
+# the signed-in browsers, [{hash, at}], as read from PAIRED_FILE in thimble's home at the first use (the home named
+# beside them) and then kept: another process's later edit of the file is not read until the next start
+_paired: list[dict[str, str]] | None = None
+_paired_home = ""
+_pair_lock = threading.Lock()
+
+
+def mint(ws: str = "") -> str:
+    """A new sign-in code for the link of workspace `ws` ("" for the start page): it works once, for PAIR_TTL_S, and a
+    newer code for the same workspace voids it. Expired codes go."""
+    code = secrets.token_urlsafe(16)
+    now = _now()
+    with _pair_lock:
+        live = {h: v for h, v in _codes.items() if v[0] > now and v[1] != ws}
+        _codes.clear()
+        _codes.update(live)
+        _codes[_sha(code)] = (now + PAIR_TTL_S, ws)
+    return code
+
+
+def _spend(code: object) -> bool:
+    """Spend the code `code`: whether it was alive."""
+    if not isinstance(code, str) or not code:
+        return False
+    with _pair_lock:
+        got = _codes.pop(_sha(code), None)
+    return got is not None and got[0] > _now()
+
+
+# a live shot token's sha256 -> when it expires on _now's clock; in memory only, so a restart voids every one
+_shots: dict[str, float] = {}
+
+
+def mint_shot() -> str:
+    """A new shot token (module note): good on GET and HEAD for SHOT_TTL_S, or until drop_shot. Expired ones go."""
+    tok = secrets.token_urlsafe(24)
+    now = _now()
+    with _pair_lock:
+        for h in [h for h, until in _shots.items() if until <= now]:
+            del _shots[h]
+        _shots[_sha(tok)] = now + SHOT_TTL_S
+    return tok
+
+
+def drop_shot(tok: str) -> None:
+    """The shot token `tok` stops working (its shot ended)."""
+    with _pair_lock:
+        _shots.pop(_sha(tok or ""), None)
+
+
+def shot_proven(headers: Headers, method: str) -> bool:
+    """Whether a read carries a live shot token in SHOT_HEADER; never a write."""
+    tok = headers.get(SHOT_HEADER, "")
+    if method not in READ_METHODS or not tok:
+        return False
+    with _pair_lock:
+        until = _shots.get(_sha(tok))
+    return until is not None and until > _now()
+
+
+def read_holder(scope: dict) -> str:
+    """Who the read `scope` comes from, which a view's media key is bound to (media_key): `browser:<the sha256 of its
+    cookie>` for a signed-in browser, `shot:<the sha256 of the token>` for a live shot token, `token:<the sha256 of
+    server.json's token>` for a hook proof; '' for none of them."""
+    digest = _cookie_hash(Request(scope))
+    if digest:
+        return f"browser:{digest}"
+    got = proven_by(scope)
+    if got is not None and not got[1]:
+        return f"token:{_sha(got[0])}"
+    h = Headers(scope=scope)
+    if shot_proven(h, scope.get("method", "")):
+        return f"shot:{_sha(h.get(SHOT_HEADER, ''))}"
+    return ""
+
+
+def _holders() -> list[str]:
+    """The holders (read_holder) whose media keys work now: each signed-in browser, each live shot token, and
+    server.json's token."""
+    now = _now()
+    with _pair_lock:
+        held = [f"browser:{e['hash']}" for e in _entries()] + [f"shot:{h}" for h, until in _shots.items() if until > now]
+    tok = token()
+    return [*held, f"token:{_sha(tok)}"] if tok else held
+
+
+def _media_mac(secret: bytes, holder: str, c: str, slug: str) -> str:
+    return hmac.new(secret, f"view-media\n{holder}\n{c}\n{slug}".encode("utf-8"), hashlib.sha256).hexdigest()[:32]
+
+
+def media_key(c: str, slug: str, holder: str) -> str:
+    """The key in the URL of view `slug`'s media route in workspace `c` for the frame a read of `holder` (read_holder)
+    loads (module note): the same for every load by that browser, so the frame's document, and its ETag, stay the
+    same, and void once the browser is signed out, the shot's token ends or the server starts with a new token. A
+    holder of '' gets a key that never works."""
+    return _media_mac(_session_secret(True), holder, c, slug)
+
+
+def media_key_ok(c: str, slug: str, key: str) -> bool:
+    """Whether `key` is media_key's for view `slug` of workspace `c` and a holder whose keys work now (_holders)."""
+    secret = _session_secret(False)
+    if not secret or not key:
+        return False
+    return any(_same(key, _media_mac(secret, h, c, slug)) for h in _holders())
+
+
+# a view's media key where a URL shows it in text, such as a line of the server log (hide_media_keys)
+MEDIA_KEY_TEXT = re.compile(r"(/views/[^/?#\s]+/media/)[0-9a-f]{32}")
+
+
+def hide_media_keys(text: str) -> str:
+    """`text` with each view media key in a URL (MEDIA_KEY_TEXT) shown as `<key>`."""
+    return MEDIA_KEY_TEXT.sub(r"\1<key>", text)
+
+
+def media_proven(path: str) -> bool:
+    """Whether `path` is a view's media route with that view's key (MEDIA_PATH, media_key)."""
+    m = MEDIA_PATH.fullmatch(path)
+    return m is not None and media_key_ok(m.group(1), m.group(2), m.group(3))
+
+
+def _paired_file() -> Path:
+    return home() / PAIRED_FILE
+
+
+def _entries() -> list[dict[str, str]]:
+    """The signed-in browsers (module note), read from PAIRED_FILE at the first use for this home."""
+    global _paired, _paired_home
+    where = str(home())
+    if _paired is not None and _paired_home == where:
+        return _paired
+    try:
+        raw = json.loads(_paired_file().read_text("utf-8"))
+    except (OSError, ValueError):
+        raw = []
+    got = [{"hash": str(e["hash"]), "at": str(e.get("at") or "")} for e in (raw if isinstance(raw, list) else [])
+           if isinstance(e, dict) and isinstance(e.get("hash"), str) and re.fullmatch(r"[0-9a-f]{64}", e["hash"])]
+    _paired, _paired_home = got, where
+    return _paired
+
+
+def _save(entries: list[dict[str, str]]) -> None:
+    """`entries` as the signed-in browsers, in memory and written through to PAIRED_FILE (whole, readable by its owner
+    alone); an empty list deletes the file."""
+    global _paired, _paired_home
+    _paired, _paired_home = list(entries), str(home())
+    path = _paired_file()
+    if not _paired:
+        with contextlib.suppress(FileNotFoundError):
+            path.unlink()
+        return
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{PAIRED_FILE}.")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(_paired, indent=1))
+        os.replace(tmp, path)
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+
+
+def _cookie_hash(request: Request) -> str:
+    """The sha256 of the browser's cookie, when it is one of a signed-in browser; '' otherwise."""
+    value = request.cookies.get(ui_cookie(), "")
+    if not value:
+        return ""
+    want = _sha(value)
+    with _pair_lock:
+        known = [e["hash"] for e in _entries()]
+    return want if any(_same(want, h) for h in known) else ""
 
 
 def analyst(request: Request) -> bool:
-    """Whether `request` carries the cookie claim gave for server.json's ui_key."""
-    return key_cookie(request.cookies)[0]
+    """Whether `request` comes from a signed-in browser: it carries a cookie claim gave, which no sign_out or unpair
+    took back."""
+    return bool(_cookie_hash(request))
 
 
-def set_cookie(r: Response, key: str) -> Response:
-    """`r` with this server's cookie for `key` (ui_cookie, at UI_COOKIE_PATH), and UI_COOKIE deleted where it was
-    set."""
-    r.delete_cookie(UI_COOKIE, path="/")  # and none for every path, which other services' pages would get too
-    if ui_cookie() != UI_COOKIE:
-        for path in LEGACY_COOKIE_PATHS:
-            r.delete_cookie(UI_COOKIE, path=path)
-    r.set_cookie(ui_cookie(), key, max_age=UI_COOKIE_AGE_S, path=UI_COOKIE_PATH, httponly=True, samesite="strict")
+def browser_id(request: Request) -> str:
+    """The id of the signed-in browser `request` comes from, the first 12 hex digits of its cookie's sha256; '' for a
+    request from no signed-in browser."""
+    return _cookie_hash(request)[:12]
+
+
+def set_cookie(r: Response, value: str) -> Response:
+    """`r` with this server's cookie `value` (ui_cookie, at UI_COOKIE_PATH)."""
+    r.set_cookie(ui_cookie(), value, max_age=UI_COOKIE_AGE_S, path=UI_COOKIE_PATH, httponly=True, samesite="strict")
     return r
 
 
-def claim(key: object) -> Response:
-    """The cookie for the ui_key `key` from the page's link; 403 for any other key."""
-    want = _field("ui_key")
-    if not (want and isinstance(key, str) and _same(key, want)):
-        return Response(status_code=403)
-    return set_cookie(Response(status_code=204), want)
+def _gone() -> Response:
+    return JSONResponse({"detail": CODE_GONE}, status_code=410)
+
+
+def claim(body: Any, request: Request) -> tuple[Response, str]:
+    """(the answer to a page's POST /api/ui/key with its link's code, the id of the browser it signed in or ''): a
+    signed-in browser spends the code and gets 204 and nothing more; any other browser with a live code gets 204 with a
+    new cookie, whose sha256 joins the signed-in browsers; anything else, an old {key} body included, 410 CODE_GONE."""
+    code = body.get("code") if isinstance(body, dict) else None
+    if analyst(request):
+        _spend(code)
+        return Response(status_code=204), ""
+    if not _spend(code):
+        return _gone(), ""
+    cookie = secrets.token_urlsafe(32)
+    digest = _sha(cookie)
+    at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with _pair_lock:
+        _save([*[e for e in _entries() if e["hash"] != digest], {"hash": digest, "at": at}])
+    return set_cookie(Response(status_code=204), cookie), digest[:12]
+
+
+def unpair() -> None:
+    """Sign every browser out: no cookie proves anything until a browser signs in again."""
+    with _pair_lock:
+        _save([])
+
+
+def sign_out(browser: str) -> bool:
+    """Sign out the browser whose id (browser_id) is `browser`; whether one was signed in."""
+    if not re.fullmatch(r"[0-9a-f]{12}", browser or ""):
+        return False
+    with _pair_lock:
+        held = _entries()
+        kept = [e for e in held if not e["hash"].startswith(browser)]
+        if len(kept) == len(held):
+            return False
+        _save(kept)
+    return True
+
+
+# the nonces of the proofs taken in the last PROOF_TTL_S, each -> the time (on _wall's clock) after which its proof is
+# refused for its age anyway, oldest first; in memory only (module note)
+_seen: OrderedDict[str, float] = OrderedDict()
+_seen_lock = threading.Lock()
+
+
+def _wall() -> float:
+    """The clock a nonce's time is read against: the wall clock, which the clients on this computer share."""
+    return time.time()
+
+
+def _nonce_time(nonce: str) -> int | None:
+    """The Unix time at the head of a nonce new_nonce made; None for any other nonce."""
+    head, dot, rest = nonce.partition(".")
+    return int(head) if dot and rest and head.isascii() and head.isdigit() and len(head) <= 12 else None
+
+
+def _own_port(scope: dict) -> int | None:
+    """The port this server took the request on (the ASGI scope's `server`), 80 or 443 when a test transport names
+    none; when the scope names no server (a socket whose address could not be read), the port the supervisor or a
+    ticket's box started it on (THIMBLE_PORT), else None."""
+    server = scope.get("server")
+    if not server or len(server) < 2:
+        port = os.environ.get("THIMBLE_PORT", "").strip()
+        return int(port) if port.isascii() and port.isdigit() else None
+    if server[1] is None:
+        return 443 if scope.get("scheme") == "https" else 80
+    try:
+        return int(server[1])
+    except (TypeError, ValueError):
+        return None
+
+
+def _check(scope: dict) -> tuple[str, str] | None:
+    """(the token, the agent's id or '') a request proves (module note): its nonce's time within PROOF_TTL_S of _wall,
+    its proof request_proof's for this server's port, and its nonce not taken before, which it then is; for an agent's
+    token, sign's "hook" proof of its nonce. None otherwise."""
+    h = Headers(scope=scope)
+    nonce = h.get(NONCE_HEADER, "")
+    tok, aid = _token_for(h, scope.get("method", ""), scope.get("path", ""))
+    if not tok or not nonce or len(nonce) > NONCE_MAX:
+        return None
+    if aid:  # an agent program's token proves its request as docs/agents.md says (module note): the program is handed
+        # the address of the server that runs it, and the token stops working when its run ends
+        return (tok, aid) if _same(h.get(AUTH_HEADER, ""), sign(tok, "hook", nonce)) else None
+    when = _nonce_time(nonce)
+    port = _own_port(scope)
+    if when is None or port is None:
+        return None
+    now = _wall()
+    if abs(now - when) > PROOF_TTL_S or not _same(h.get(AUTH_HEADER, ""), request_proof(tok, port, nonce)):
+        return None
+    with _seen_lock:
+        while _seen and next(iter(_seen.values())) < now:
+            _seen.popitem(last=False)
+        if nonce in _seen:
+            return None
+        _seen[nonce] = when + PROOF_TTL_S
+    return tok, aid
+
+
+def proven_by(scope: dict) -> tuple[str, str] | None:
+    """_check's answer for the request `scope`, worked out once per request and kept in its state (PROOF_SCOPE), since
+    a nonce is taken once and both a guard and a route may ask."""
+    state = scope.setdefault("state", {})
+    if PROOF_SCOPE not in state:
+        state[PROOF_SCOPE] = _check(scope) if Headers(scope=scope).get(NONCE_HEADER) else None
+    return state[PROOF_SCOPE]
+
+
+def proven(scope: dict) -> bool:
+    """Whether the request `scope` carries a valid hook proof (proven_by): a local tool that read the token (the plugin,
+    the CLI), or an agent's token on a request its grant allows."""
+    return proven_by(scope) is not None
 
 
 class HookAuth:
-    """401 for a request on a guarded route without a valid proof; the proof of this server on every answer to one."""
+    """401 for a request on a guarded route without a valid proof (proven_by); the proof of this server on every answer
+    to one."""
 
     def __init__(self, app) -> None:
         self.app = app
@@ -285,17 +638,15 @@ class HookAuth:
         if scope["type"] != "http" or not guarded(scope.get("method", ""), scope.get("path", "")):
             await self.app(scope, receive, send)
             return
-        h = Headers(scope=scope)
-        nonce = h.get(NONCE_HEADER, "")
-        tok, aid = _token_for(h, scope.get("method", ""), scope.get("path", ""))
-        if not tok or not nonce or len(nonce) > NONCE_MAX or not hmac.compare_digest(
-                h.get(AUTH_HEADER, ""), sign(tok, "hook", nonce)):
+        got = proven_by(scope)
+        if got is None:
             body = json.dumps({"detail": "only thimble's plugin may call this route"}).encode()
             await send({"type": "http.response.start", "status": 401,
                         "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())]})
             await send({"type": "http.response.body", "body": body})
             return
-        proof = sign(tok, "server", nonce)
+        tok, aid = got
+        proof = sign(tok, "server", Headers(scope=scope).get(NONCE_HEADER, ""))
         if aid:
             scope.setdefault("state", {})[AGENT_SCOPE] = aid
 
@@ -309,57 +660,117 @@ class HookAuth:
 
 def write_guarded(method: str, path: str) -> bool:
     """Whether LocalWriteGuard gates this request: a write (not GET/HEAD/OPTIONS) to the local API, but not /api/ui/key,
-    where the browser trades the ui_key for the cookie before it holds one."""
+    where the browser trades its link's code for the cookie before it holds one."""
     return method not in SAFE_METHODS and _api(path) and path != "/api/ui/key"
+
+
+def read_guarded(method: str, path: str) -> bool:
+    """Whether LocalReadGuard gates this request: a read (GET or HEAD) of the local API, but not OPEN_READS."""
+    return method in READ_METHODS and _api(path) and path not in OPEN_READS
 
 
 def _api(path: str) -> bool:
     return path == "/api" or path.startswith("/api/")
 
 
-def hook_proof(headers: Headers, method: str = "", path: str = "") -> bool:
-    """Whether `headers` carry a valid hook proof: a local tool that read the token (the plugin, the CLI), or an agent's
-    token on a request its grant allows."""
-    tok = _token_for(headers, method, path)[0]
-    nonce = headers.get(NONCE_HEADER, "")
-    return bool(tok and nonce and len(nonce) <= NONCE_MAX
-                and _same(headers.get(AUTH_HEADER, ""), sign(tok, "hook", nonce)))
-
-
 class LocalWriteGuard:
-    """403 for a write to the local API that proves neither the ui_key cookie (the browser) nor the token (the plugin,
-    the CLI or a view build's check). The notebook kernel runs model-authored code with the host's network and can reach
-    this server on 127.0.0.1, but the sandbox hides server.json from it, so it can prove neither and changes nothing
-    here.
-
-    A request that proves the key only with UI_COOKIE, the name before the port was added to it, also gets this server's
-    cookie at UI_COOKIE_PATH on its answer, so a browser that claimed the key before holds it on every /api/ path from
-    its next /api/ws/ request on, without the link. Pure ASGI."""
+    """403 for a write to the local API that is no token route and comes from no signed-in browser (analyst): the token
+    proves only the routes guarded() names, which HookAuth checks, so neither a process that reads server.json nor a
+    notebook kernel that reaches 127.0.0.1 changes anything else here. Pure ASGI."""
 
     def __init__(self, app) -> None:
         self.app = app
 
     async def __call__(self, scope, receive, send) -> None:
-        if scope["type"] != "http" or not _api(scope.get("path", "")):
+        path, method = scope.get("path", ""), scope.get("method", "")
+        if (scope["type"] != "http" or not _api(path) or guarded(method, path) or not write_guarded(method, path)
+                or analyst(Request(scope))):
             await self.app(scope, receive, send)
             return
-        proves, legacy = key_cookie(Request(scope).cookies)
-        guarded = write_guarded(scope.get("method", ""), scope["path"])
-        if guarded and not proves and not hook_proof(Headers(scope=scope), scope.get("method", ""), scope["path"]):
-            body = json.dumps({"detail": WRITE_REFUSED}).encode()
-            await send({"type": "http.response.start", "status": 403,
-                        "headers": [(b"content-type", b"application/json"),
-                                    (b"content-length", str(len(body)).encode())]})
-            await send({"type": "http.response.body", "body": body})
+        body = json.dumps({"detail": WRITE_REFUSED}).encode()
+        await send({"type": "http.response.start", "status": 403,
+                    "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())]})
+        await send({"type": "http.response.body", "body": body})
+
+
+def read_still_allowed(scope: dict) -> Callable[[], bool] | None:
+    """Whether a gated read may go on, as a check that asks again: None when nothing lets it through; otherwise a
+    function that answers whether what let it through still does. That is a signed-in browser (analyst) until it is
+    signed out (sign_out, unpair), a live shot token (shot_proven) until it expires or its shot ends, a view's media
+    route with that view's key (media_proven) while the key holds, and a hook proof (the plugin, the CLI; an agent's
+    token proves no read, as its grant allows none) always, since the server's next start ends the request anyway."""
+    path, method = scope.get("path", ""), scope.get("method", "")
+    h = Headers(scope=scope)
+    digest = _cookie_hash(Request(scope))
+    if digest:
+        return lambda: _signed_in(digest)
+    if proven(scope):
+        return lambda: True
+    if shot_proven(h, method):
+        return lambda: shot_proven(h, method)
+    if method in READ_METHODS and media_proven(path):
+        return lambda: media_proven(path)
+    return None
+
+
+def read_allowed(scope: dict) -> bool:
+    """Whether a gated read may go on (read_still_allowed)."""
+    return read_still_allowed(scope) is not None
+
+
+def _signed_in(digest: str) -> bool:
+    """Whether the browser whose cookie's sha256 is `digest` is still signed in."""
+    with _pair_lock:
+        return any(_same(digest, e["hash"]) for e in _entries())
+
+
+def _while(still: Callable[[], bool], receive, send):
+    """(receive, send) for a read that may go on while `still()` holds: each part of the answer's body goes out only
+    while it does, and once it does not the answer ends there, empty, and the app hears that the client left. So an event
+    stream a browser opened sends nothing once that browser is signed out, nor a shot's once its token ends."""
+    ended = False
+
+    async def receive_until() -> dict:
+        if ended:
+            return {"type": "http.disconnect"}
+        return await receive()
+
+    async def send_while(message) -> None:
+        nonlocal ended
+        if ended:
             return
-        if not legacy:
+        if message["type"] == "http.response.body" and not still():
+            ended = True
+            await send({"type": "http.response.body", "body": b"", "more_body": False})
+            return
+        await send(message)
+
+    return receive_until, send_while
+
+
+class LocalReadGuard:
+    """401 for a read of the local API (read_guarded) that read_allowed refuses, so another account on the computer, or
+    a notebook kernel, that reaches 127.0.0.1 reads none of the analyst's chats, cards, reports or files through
+    thimble. The body is {detail: SIGN_IN_NEEDED, signin: true}, which tells the page to show its sign-in line; a HEAD
+    gets no body. A token route is HookAuth's to answer. A read it lets through stops at the first part of its answer
+    sent after what let it through no longer does (read_still_allowed, _while): an event stream, which never ends by
+    itself, ends at its next event or ping once its browser is signed out. Pure ASGI."""
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        path, method = scope.get("path", ""), scope.get("method", "")
+        if scope["type"] != "http" or not read_guarded(method, path) or guarded(method, path):
             await self.app(scope, receive, send)
             return
-        moved = [(k, v) for k, v in set_cookie(Response(), _field("ui_key")).raw_headers if k == b"set-cookie"]
-
-        async def moving(message) -> None:
-            if message["type"] == "http.response.start":
-                message["headers"] = [*message.get("headers", []), *moved]
-            await send(message)
-
-        await self.app(scope, receive, moving)
+        still = read_still_allowed(scope)
+        if still is not None:
+            await self.app(scope, *_while(still, receive, send))
+            return
+        body = b"" if method == "HEAD" else json.dumps({"detail": SIGN_IN_NEEDED, "signin": True}).encode()
+        headers = [(b"content-length", str(len(body)).encode())]
+        if body:
+            headers.insert(0, (b"content-type", b"application/json"))
+        await send({"type": "http.response.start", "status": 401, "headers": headers})
+        await send({"type": "http.response.body", "body": body})

@@ -135,3 +135,148 @@ test("why a pane waits, from Claude Code's answer: the width it places panes it 
   expect(pendingOf('Files', 'no attached surface places panes (desktop-1): placed when a surface that does attaches, or once they detach')).toEqual({ title: 'Files', noScreen: true })
   expect(pendingOf('Citation', 'refused')).toEqual({ title: 'Citation' })
 })
+
+// ------------------------------------------------------------------------------------------------ the view proposal
+
+const OFFER = { slug: 'edit-bursts', name: 'Edit Bursts', description: 'Each wiki page as a strip of its saves over the days, bursts marked.', task: 'Find out when the agents edited the wiki together.', claims: ['revisions.jsonl'] }
+const aboveWith = (props: Record<string, unknown>) => ({ ...(aboveAt(140) as unknown as Record<string, unknown>), props: { hasSurvey: false, isWorking: false, view: {}, ...props } }) as never
+
+test('a view proposal waits above the prompt until it is answered: `view proposal` in the accent, its name in bold, what it would show and the task it serves whole, then accept, reject and don\'t ask again', async ($, on) => {
+  const w = world(on)
+  w.states.home = { ...w.states.home, offer: OFFER }
+  await start($, w)
+  const above = (await $.ui.mount(aboveAt(140))) as unknown as M
+  const drawn = await above.drawn()
+  expect(shown(await above.find({ type: 'Box', key: 'above-offer' }))).toBe("  view proposalEdit Burstsacceptrejectdon't ask again")
+  expect(shown(await above.find({ type: 'Box', key: 'above-offer-description' }))).toContain(OFFER.description)
+  expect(shown(await above.find({ type: 'Box', key: 'above-offer-task' }))).toBe(`  task  ${OFFER.task}`)
+  const json = JSON.stringify(drawn)
+  expect(json).toContain('{"type":"Text","props":{"color":"suggestion"},"children":["  view proposal"]}')
+  expect(json).toContain('{"type":"Text","props":{"bold":true,"wrap":"wrap"},"children":["Edit Bursts"]}')
+  // never cut: the description and the task wrap
+  expect(json).not.toContain(`"truncate-end"},"children":["${OFFER.description}`)
+  await above.unmount()
+  // a survey, or an agent's own view, takes the place above the prompt
+  for (const props of [{ hasSurvey: true }, { view: { agentId: 'a1' } }]) {
+    const other = (await $.ui.mount(aboveWith(props))) as unknown as M
+    expect(shown(await other.drawn())).toBe('(the engine row)')
+    await other.unmount()
+  }
+})
+
+test('the row goes once the view proposal is answered or view proposals are off, as home\'s state says (`offer` null); a viewer for a file type names its files', async ($, on) => {
+  const w = world(on)
+  w.states.home = { ...w.states.home, offer: { slug: 'vtt-captions', name: 'Captions', description: 'Each caption on a time axis.', task: '', claims: ['**/*.vtt'] } }
+  await start($, w)
+  let above = (await $.ui.mount(aboveAt(140))) as unknown as M
+  expect(await above.find({ type: 'Box', key: 'above-offer-task' })).toBeUndefined()
+  expect(shown(await above.find({ type: 'Box', key: 'above-offer-files' }))).toBe('  files  **/*.vtt')
+  await above.unmount()
+  w.states.home = { ...w.states.home, offer: null }
+  w.stamps.set(`${WS}/views/proposals.json`, 3)
+  await w.clock.advance(1100)
+  above = (await $.ui.mount(aboveAt(140))) as unknown as M
+  expect(await above.find({ type: 'Box', key: 'above-offer' })).toBeUndefined()
+  expect(shown(await above.drawn())).toBe('(the engine row)')
+  await above.unmount()
+})
+
+test('why accept could not start the build, and how to fix it, shows in red under the row\'s controls', async ($, on) => {
+  const w = world(on)
+  const reason = 'Leave plan mode (shift+tab), then accept.'
+  w.states.home = { ...w.states.home, offer: { ...OFFER, refused: reason } }
+  await start($, w)
+  const above = (await $.ui.mount(aboveAt(140))) as unknown as M
+  expect(shown(await above.find({ type: 'Box', key: 'above-offer-refused' }))).toBe(`  ${reason}`)
+  expect(JSON.stringify(await above.drawn())).toContain(`{"type":"Text","props":{"color":"error","wrap":"wrap"},"children":["${reason}"]}`)
+  await above.unmount()
+})
+
+// every agent's open notices, as home's state gives them (local.py _notices: newest first); each one's words name the
+// agent and the failure
+const SWITCHED = "Claude's safeguards switched the orientation's reply from Opus 5.5 to Opus 4.8."
+const BLOCKED = "Couldn't check for a view proposal: Claude's safeguards blocked the request."
+const FAILED = 'The build of the view Agent Network failed: its check found no rows.'
+const NOTICES = [
+  { id: 'n3', key: 'agent:view:agent-network', kind: 'view', text: FAILED, agent: 'View build: Agent Network', chat: 'b1', at: '2026-10-14T10:10:00Z', acts: [{ label: 'Retry', act: 'view-retry', slug: 'agent-network' }], open: 'agent' },
+  { id: 'n2', key: 'proposals', kind: 'proposals', text: BLOCKED, agent: 'View proposals', chat: '', at: '2026-10-14T10:05:00Z', acts: [{ label: 'Try again', act: 'view-propose-now' }, { label: 'Turn off view proposals', act: 'view-proposals-off' }], open: '' },
+  { id: 'n1', key: 'safeguards:o1', kind: 'safeguards', text: SWITCHED, agent: 'Orientation', chat: 'o1', at: '2026-10-14T10:00:00Z', acts: [], open: 'agent' },
+]
+
+test("every agent's open notices show above the prompt, newest first and under the view proposal: `notice` dim, then the words in red, wrapped whole, then the acts that fix it, open › to the agent's thread and dismiss", async ($, on) => {
+  const w = world(on)
+  w.states.home = { ...w.states.home, offer: OFFER, notices: NOTICES }
+  await start($, w)
+  const above = (await $.ui.mount(aboveAt(160))) as unknown as M
+  const json = JSON.stringify(await above.drawn())
+  // the view proposal's rows first, then the notices in the order home's state gives them
+  const order = ['above-offer', 'above-notice-n3', 'above-notice-n2', 'above-notice-n1'].map(k => json.indexOf(`"key":"${k}"`))
+  expect(order.every((at, i) => at >= 0 && (i === 0 || at > order[i - 1]!))).toBe(true)
+  expect(shown(await above.find({ type: 'Box', key: 'above-notice-n3' }))).toBe(`  notice${FAILED}retryopen ›dismiss`)
+  expect(shown(await above.find({ type: 'Box', key: 'above-notice-n2' }))).toBe(`  notice${BLOCKED}try againturn off view proposalsdismiss`)
+  expect(shown(await above.find({ type: 'Box', key: 'above-notice-n1' }))).toBe(`  notice${SWITCHED}open ›dismiss`)
+  for (const text of [FAILED, BLOCKED, SWITCHED]) expect(json).toContain(`{"type":"Text","props":{"color":"error","wrap":"wrap"},"children":["${text}"]}`)
+  await above.unmount()
+  // a survey, or an agent's own view, takes the place above the prompt
+  const other = (await $.ui.mount(aboveWith({ hasSurvey: true }))) as unknown as M
+  expect(shown(await other.drawn())).toBe('(the engine row)')
+  await other.unmount()
+})
+
+test('a notice of an agent with no chat of its own shows when only the open notices change (notices.json), and goes when thimble clears it', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  let above = (await $.ui.mount(aboveAt(140))) as unknown as M
+  expect(await above.find({ type: 'Box', key: 'above-notice-n2' })).toBeUndefined()
+  await above.unmount()
+  w.states.home = { ...w.states.home, notices: [NOTICES[1]!] }
+  w.stamps.set(`${WS}/notices.json`, 2)
+  await w.clock.advance(1100)
+  above = (await $.ui.mount(aboveAt(140))) as unknown as M
+  expect(shown(await above.find({ type: 'Box', key: 'above-notice-n2' }))).toBe(`  notice${BLOCKED}try againturn off view proposalsdismiss`)
+  await above.unmount()
+  w.states.home = { ...w.states.home, notices: [] }
+  w.stamps.set(`${WS}/notices.json`, 3)
+  await w.clock.advance(1100)
+  above = (await $.ui.mount(aboveAt(140))) as unknown as M
+  expect(await above.find({ type: 'Box', key: 'above-notice-n2' })).toBeUndefined()
+  await above.unmount()
+})
+
+test('a dismissed notice goes at once and stays gone when home is read again; a new notice of the same failure (an id of its own) shows', async ($, on) => {
+  const w = world(on)
+  w.states.home = { ...w.states.home, notices: [NOTICES[2]!] }
+  await start($, w)
+  let above = (await $.ui.mount(aboveAt(140))) as unknown as M
+  await above.press({ key: 'above-notice-n1-dismiss' })
+  await w.clock.settle()
+  expect(w.acts.at(-1)).toEqual({ kind: 'notice-dismiss', payload: { id: 'n1' } })
+  await above.unmount()
+  above = (await $.ui.mount(aboveAt(140))) as unknown as M
+  expect(await above.find({ type: 'Box', key: 'above-notice-n1' })).toBeUndefined()
+  await above.unmount()
+  // read again before thimble wrote the dismissal: still gone
+  w.stamps.set(`${WS}/notices.json`, 5)
+  await w.clock.advance(1100)
+  above = (await $.ui.mount(aboveAt(140))) as unknown as M
+  expect(await above.find({ type: 'Box', key: 'above-notice-n1' })).toBeUndefined()
+  await above.unmount()
+  w.states.home = { ...w.states.home, notices: [{ ...NOTICES[2]!, id: 'n8', at: '2026-10-14T10:20:00Z' }] }
+  w.stamps.set(`${WS}/notices.json`, 6)
+  await w.clock.advance(1100)
+  above = (await $.ui.mount(aboveAt(140))) as unknown as M
+  expect(shown(await above.find({ type: 'Box', key: 'above-notice-n8' }))).toBe(`  notice${SWITCHED}open ›dismiss`)
+  await above.unmount()
+})
+
+test('the toast row above the prompt: `thimble` dim, what is new, then `open ›` and `dismiss`', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  w.states.home = { ...w.states.home, cards: 14 }
+  w.stamps.set(`${WS}/notebooks`, 2)
+  await w.clock.advance(1100)
+  const above = (await $.ui.mount(aboveAt(140))) as unknown as M
+  expect(shown(await above.find({ type: 'Box', key: 'above-home' }))).toBe('  thimble2 new cardsopen ›dismiss')
+  expect(await above.find({ type: 'Button', key: 'above-home-dismiss' })).toBeTruthy()
+  await above.unmount()
+})

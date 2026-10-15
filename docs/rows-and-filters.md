@@ -1,8 +1,8 @@
 # Rows, filters, lanes, cards, the side panel and the transcript
 
-Most views share one layout: the top row with the controls that act on the whole view, an overview of the records on a
-time axis, the records themselves in a list under it, and the details of the record chosen. The view kit draws each of
-these parts, so a page lays them out and fills them rather than drawing its own:
+A view of events in time often has this layout: the top row with the controls that act on the whole view, an
+overview of the records on a time axis, the records themselves in a list under it, and the details of the record
+chosen. The view kit draws each of these parts, so a page lays them out and fills them rather than drawing its own:
 
 | part | call | what it is |
 |---|---|---|
@@ -39,7 +39,8 @@ inside the height it has.
 
 thimble keeps each part's state per view, with Color by's choice: Filter by's and Rows' choices, the values turned off,
 the series of the key turned off, the lanes folded, the divider's place and the side panel's width. Reset, at the end of
-Color by's row, turns every value and series back on and closes the side panel.
+Color by's row, puts the view back as it opens: Color by's choice and values as its `initial` says, every series back
+on, and the side panel closed (or with its `empty` line).
 
 ## Mount them
 
@@ -149,8 +150,9 @@ not anchor every record.
 `thimble.timeline(opts)` draws the overview in `mount` as lanes on one axis of times or numbers: a lane per group of
 `rows` (or of `groups(items)`), its name in a column `names` px wide (200 by default; with no range, as wide as its
 longest name, up to 200 and a third of the width) with its tree guide, and its records as marks in the Color by colors,
-gray with Off. It needs no other part: with no `range` it lays out its records' whole span and draws its own axis under
-the lanes, with no `rows` it draws one lane and no names, and with no Color by its marks are gray. With a range, lay the
+in the one series color (`var(--viz-1)`) with Off. It needs no other part: with no `range` it lays out its records'
+whole span and draws its own axis under the lanes, with no `rows` it draws one lane and no names, and with no Color by
+its marks take the one series color. With a range, lay the
 range and its axis out over the lanes with the same names column, so the lanes stand under them. `thimble.lanes` is its
 old name.
 
@@ -161,7 +163,7 @@ tl.draw(commits) // [{t: 1778922000, author: 'ana', text: 'Fix the parser'}]
 
 | option | what it is |
 |---|---|
-| `rows`, `range`, `color` | the lanes: the Rows control, a field's name or a function of a record; the time range (its `scale(width)`); and Color by (`color` or `colour`: the page's by default, `false` for gray marks) |
+| `rows`, `range`, `color` | the lanes: the Rows control, a field's name or a function of a record; the time range (its `scale(width)`); and Color by (`color` or `colour`: the page's by default, `false` for marks in the one series color) |
 | `time(item)`, `end(item)` | a record's place on the axis (`item.t` by default), a number, or a Date or an ISO time on an axis of time, else the record is left out; and its end, for a mark as wide as the record ran |
 | `unit` | the axis's unit with no range, as the time range's: `'s'` seconds since 1970 (the default), `'ms'`, or `'n'` a plain number such as a turn, a line or a score |
 | `band(lane)` | the spans the lane ran, `[[start, end]]`, drawn as a light band in Events (the key's "running") |
@@ -195,6 +197,7 @@ the lane's records by their place on the axis, so marks the view draws itself an
 | `g`, `over` | SVG elements the size of the lane's track, behind the kit's marks and over them (under the failures' ✕), which take SVG markup (`insertAdjacentHTML`) or elements; what falls outside the track is cut off |
 | `x(t)`, `scale`, `width`, `height` | a time's x on the lanes' scale (a number, a Date or an ISO time), the scale itself (`t(x)`, `from`, `to`), and the track's size in px |
 | `colorOf(record)` | the record's Color by color, null with Off or a value turned off |
+| `fill(record)` | the color the kit draws the record's mark in: its Color by color, the one series color with Off, the marks' gray for a value turned off or none |
 | `shade(t0, t1, {color, name, series, over})` | a shaded span as tall as the lane (a moment, a line), light gray or `color` at a low opacity; `name` is said in the tip over it; with `series` it shows while that series is on |
 | `on(id)` | whether a series of `series` shows; asking puts its entry in the key |
 
@@ -205,7 +208,7 @@ const tl = thimble.timeline({
   drawLane: (lane, ctx) => {
     for (const f of freezes) ctx.shade(f.start, f.end, { name: f.reason, series: 'freeze' })   // across every lane
     for (const c of lane.items.filter((c) => c.cost)) ctx.over.insertAdjacentHTML('beforeend',
-      `<circle cx="${ctx.x(c.t)}" cy="${ctx.height / 2}" r="2.5" fill="${ctx.colorOf(c) || 'gray'}"/>`)
+      `<circle cx="${ctx.x(c.t)}" cy="${ctx.height / 2}" r="2.5" fill="${ctx.fill(c)}"/>`)
   },
 })
 ```
@@ -322,9 +325,11 @@ out as tiles at least `--thimble-tile-w` (220 px) wide. A list of records with n
 
 ## The side panel
 
-`thimble.side({mount, width, min, key, onClose})` gives the list a side panel: `mount` holds the list, and the panel
-opens at its right, the list narrowing beside it. A record and a row's children open there, never under the row, so the
-list keeps its place.
+`thimble.side({mount, width, min, key, empty, onClose})` gives the list a side panel: `mount` holds the list, and the
+panel opens at its right, the list narrowing beside it. A record and a row's children open there, never under the row,
+so the list keeps its place. The panel is closed until the page opens a record in it. A view whose panel is part of
+its layout gives `empty`, one short line such as `'Click a session'`: the panel then shows as the view opens, with
+that line in place of a title and nothing under it, until the analyst clicks a record.
 
 ```js
 const side = thimble.side({ mount: '#body', onClose: () => { open = null; list() } })
@@ -338,8 +343,10 @@ listEl.addEventListener('click', (e) => {
 ```
 
 The panel opens `width` of the mount (0.4), never narrower than `min` px (280). A drag of its left edge resizes it, a
-double click on the edge puts it back, and thimble keeps its width per view. Escape in the panel or its × closes it.
-`isOpen`, `ref`, `body` and `width` read it; `open({title, sub, ref, html | render(body)})` and `close()` change it.
+double click on the edge puts it back, and thimble keeps its width per view. Escape in the panel or its × closes it,
+its `empty` line too; the page's `close()` and Reset bring the `empty` line back. `isOpen` (a record shows), `isEmpty`
+(the `empty` line shows), `ref`, `body` and `width` read it; `open({title, sub, ref, html | render(body)})` and
+`close()` change it.
 
 ## The transcript
 

@@ -186,19 +186,19 @@ def _entries(path: Path, forks: bool = True) -> list[_Entry]:
         if found:
             entries.extend(e for e in (_event(x, forks) for x in found) if e is not None)
             return
-        fields = dict(session.TASK_FIELD_RE.findall(text or ""))
-        agent_id = str(fields.get("task-id") or "").strip()
-        thread = fork_calls.get(str(fields.get("tool-use-id") or "").strip()) or fork_agents.get(agent_id)
-        if thread and agent_id:
-            fork_agents[agent_id] = thread
-            if forks:
-                got, read = _fork_entries(subagents / f"agent-{agent_id}.jsonl", thread, fork_read.get(agent_id, 0))
-                fork_read[agent_id] = read
-                entries.extend(got)
-            return
-        result, status = str(fields.get("result") or "").strip(), str(fields.get("status") or "").strip()
-        if result:
-            entries.append(_Entry(f"[notification {status}]" if status else "[notification]", result))
+        for fields in session.task_notices(text):
+            agent_id = str(fields.get("task-id") or "").strip()
+            thread = fork_calls.get(str(fields.get("tool-use-id") or "").strip()) or fork_agents.get(agent_id)
+            if thread and agent_id:
+                fork_agents[agent_id] = thread
+                if forks:
+                    got, read = _fork_entries(subagents / f"agent-{agent_id}.jsonl", thread, fork_read.get(agent_id, 0))
+                    fork_read[agent_id] = read
+                    entries.extend(got)
+                continue
+            result, status = str(fields.get("result") or "").strip(), str(fields.get("status") or "").strip()
+            if result:
+                entries.append(_Entry(f"[notification {status}]" if status else "[notification]", result))
 
     def prompt(text: str, origin: str | None) -> None:
         if origin == session.OLD_ORIGIN:  # an event in a transcript thimble 0.5.0 wrote
@@ -553,23 +553,30 @@ def canvas(c: str) -> str:
 
 def views(c: str) -> str:
     """The corpus's own views, each with the files it claims and what it is for, then the proposals not built yet (one
-    the orientation dropped is not among them)."""
+    an orientation from before 0.8.0 dropped, or a view proposal the analyst rejected, is not among them). The view proposal that waits
+    for the analyst's answer (views.open_offer) is listed as thimble's, so main leaves it to the analyst rather than
+    building it; a `suggested` row without `offered`, a 0.7.x orientation's viewer for a file type, is left out, and so
+    is the waiting view proposal while view proposals are off (views.propose_enabled), since the analyst then sees
+    none."""
     from . import views as views_mod  # noqa: PLC0415
 
     lines: list[str] = []
     try:
         listed = [v for v in views_mod.list_views(c) if v.get("origin") != "builtin" and v.get("ok")]
-        proposed = [p for p in views_mod.list_proposals(c) if p.get("status") not in ("built", "dropped")]
+        proposed = [p for p in views_mod.list_proposals(c) if p.get("status") not in ("built", "dropped", "suggested")]
+        offered = views_mod.open_offer(c) if views_mod.propose_enabled(c) else None
     except (OSError, ValueError):
         return ""
     for v in listed:
         lines.append(f"- view:{v['slug']} · {v['name']} · claims {', '.join(v.get('claims') or [])}")
         if v.get("description"):
             lines.append(f"  {v['description']}")
-    for p in proposed:
-        lines.append(f"- proposed, {p.get('status')}: {p.get('name') or p.get('slug')} · claims {', '.join(p.get('claims') or [])}")
-        if p.get("why"):
-            lines.append(f"  {' '.join(str(p['why']).split())}")
+    for p in [*proposed, *([offered] if offered else [])]:
+        what = (f"proposed, {p.get('status')}" if p is not offered
+                else "thimble's view proposal, waiting for the analyst's Accept or Reject")
+        lines.append(f"- {what}: {p.get('name') or p.get('slug')} · claims {', '.join(p.get('claims') or [])}")
+        if p.get("description"):
+            lines.append(f"  {' '.join(str(p['description']).split())}")
     return "\n".join(lines)
 
 

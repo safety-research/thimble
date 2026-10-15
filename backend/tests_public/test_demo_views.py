@@ -1,5 +1,5 @@
 """scripts/dev/demo_views.py, which scripts/sync_demo_views.sh runs: reviewed views go into a demo pre-cache in place of
-the orientation's own, each as the server serves it, renamed, and stamped with the digest of the files written, so
+the pre-cache's own, each as the server serves it, renamed, and stamped with the digest of the files written, so
 install keeps that version and the view shows at once."""
 from __future__ import annotations
 

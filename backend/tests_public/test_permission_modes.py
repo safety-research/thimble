@@ -99,12 +99,13 @@ async def test_each_agent_runs_in_its_row_else_in_main_s_mode_and_nothing_else_p
     assert "permissions" not in tools.schema_of("start_orientation")["properties"]
     seen: dict = {}
 
-    async def fake_start(c, brief, passes, **kw):
+    async def fake_start(c, brief, **kw):
         seen.update(kw)
         return subagents.refusal(subagents.HOOK, "stand-in")
 
     monkeypatch.setattr(orient_session, "start", fake_start)
     await tools.call(CORPUS, "start_orientation", {"brief": "", "permissions": "bypass"})
+    assert seen, "the start was called"
     assert "permissions" not in seen and "mode" not in seen, "a model's call chooses no mode"
 
     user.write_text(json.dumps({"permissions": {"disableBypassPermissionsMode": "disable"}}))
@@ -163,6 +164,92 @@ def test_a_server_restarted_under_main_follows_its_last_reported_mode_until_main
     session.attach(CORPUS, "sid-next", cwd)
     assert modes.mode_for(CORPUS, "orient") == "manual", "another session's mode is not main's"
     assert "permission_mode" not in agents.read_meta(CORPUS, agents.MAIN_ID)["attached"]
+
+
+async def test_main_s_terminal_says_once_per_session_that_main_runs_in_manual_mode_and_the_chip_follows_the_mode(
+        fake, monkeypatch):
+    """Only a mode main's hooks report counts: nothing is said before the first report. The first report of Manual mode
+    in a session answers the mode hook with the line main's terminal shows (modes.manual_line: shift+tab, or `thimble
+    --permission-mode auto`), and never again in that session; a new session hears it again. Main's meta carries the
+    chip's hint (`attached.manual`) while main is in Manual mode only, not in auto, plan or Accept edits mode, nor for a
+    mode note_plan only guesses. When the analyst's or the org's settings turn auto mode off, the line and the chip say
+    who did, with no way to switch. A relayed permission request carries no such hint any more."""
+    cwd = str(config.corpus_dir(CORPUS))
+    session.attach(CORPUS, "sid-main", cwd)
+
+    def attached() -> dict:
+        return agents.read_meta(CORPUS, agents.MAIN_ID)["attached"]
+
+    async def report(mode: str, sid: str = "sid-main") -> str | None:
+        got = await events.mode_route(events.ModeBody(cwd=cwd, session=sid, permission_mode=mode))
+        return got.get("terminal")
+
+    switch = modes.MANUAL_LINES["switch"]
+    assert "shift+tab" in switch and "`thimble --permission-mode auto`" in switch
+    assert "manual" not in attached(), "nothing before main reports its mode"
+    assert await report("auto") is None and "manual" not in attached()
+    assert await report("acceptEdits") is None and "manual" not in attached(), "Accept edits is not Manual mode"
+    assert await report("default") == switch and attached()["manual"] == "switch"
+    assert await report("default") is None and await report("manual") is None, "once per session"
+    assert attached()["manual"] == "switch"
+    assert await report("default", sid="sid-other") is None, "another session's report says nothing"
+    assert await report("auto") is None and "manual" not in attached(), "the chip goes with auto mode"
+    assert await report("default") is None and attached()["manual"] == "switch"
+    session._before_plan.clear()
+    session.note_plan(CORPUS, "sid-main", True)
+    assert "manual" not in attached(), "plan mode is not Manual mode"
+    session.note_plan(CORPUS, "sid-main", False)
+    assert attached()["permission_mode"] == "default" and "manual" not in attached(), \
+        "the mode before plan mode is only a guess of the mode main left it for (shift+tab may pick auto): no chip"
+    session.note_plan(CORPUS, "sid-main", True)
+    session._before_plan.clear()
+    session.note_plan(CORPUS, "sid-main", False)
+    assert attached()["permission_mode"] == "default" and "manual" not in attached(), "a guess shows no chip"
+    assert await report("default") is None and attached()["manual"] == "switch", "main's next report brings it back"
+    events._hold(CORPUS, "r1", "Bash", "x", "{}", tool_input={"command": "ls"})
+    [p] = agents.read_meta(CORPUS, agents.MAIN_ID)["permissions"]
+    assert "manual" not in p
+    events._drop(CORPUS, {"r1"})
+
+    session.detach(CORPUS, "sid-main", "ended")
+    session.attach(CORPUS, "sid-next", cwd)
+    user = fake.parent / "claude-config" / "settings.json"
+    user.parent.mkdir(parents=True, exist_ok=True)
+    user.write_text(json.dumps({"permissions": {"disableAutoMode": "disable"}}))
+    assert modes.auto_off() == "settings"
+    assert await report("default", sid="sid-next") == modes.MANUAL_LINES["settings"], "a new session hears it again"
+    assert attached()["manual"] == "settings" and "shift+tab" not in modes.MANUAL_LINES["settings"]
+    managed = fake.parent / "managed"
+    managed.mkdir(parents=True)
+    monkeypatch.setitem(cc_plugin.MANAGED_DIRS, sys.platform, managed)
+    (managed / "managed-settings.json").write_text(json.dumps({"disableAutoMode": "disable"}))
+    assert modes.auto_off() == "org" and modes.manual_line("default") == modes.MANUAL_LINES["org"]
+    assert await report("default", sid="sid-next") is None and attached()["manual"] == "org"
+    assert modes.manual_line("dontAsk") == modes.manual_line("bypassPermissions") == modes.manual_line(None) == ""
+
+
+def test_a_server_restarted_under_main_keeps_the_chip_and_says_nothing_again(fake):
+    """The chip's hint and the session's told mark live on main's meta, so a server restarted under the same session
+    neither loses the chip nor shows the line again; a mode note_plan only guessed, which is kept for the restart too,
+    shows no chip there either."""
+    cwd = str(config.corpus_dir(CORPUS))
+
+    def restart() -> dict:
+        session._live.clear()
+        session._modes.clear()
+        session.attach(CORPUS, "sid-main", cwd)
+        return agents.read_meta(CORPUS, agents.MAIN_ID)["attached"]
+
+    session._before_plan.clear()
+    session.attach(CORPUS, "sid-main", cwd)
+    assert session.note_mode(CORPUS, "sid-main", "default", tell=True) == modes.MANUAL_LINES["switch"]
+    held = restart()
+    assert held["manual"] == "switch" and held["permission_mode"] == "default"
+    assert session.note_mode(CORPUS, "sid-main", "default", tell=True) == ""
+    session.note_plan(CORPUS, "sid-main", True)
+    session.note_plan(CORPUS, "sid-main", False)
+    held = restart()
+    assert held["permission_mode"] == "default" and "manual" not in held, "the kept mode is a guess"
 
 
 # ----------------------------------------------------------------------------- Auto
@@ -235,3 +322,50 @@ async def test_the_hook_s_route_answers_for_the_session_its_shim_names(fake):
     other = agent_session.PermissionRequestBody(session="writer:report", tool_name="Bash", tool_input={"command": "ls"})
     assert (await agent_session.hook_request(CORPUS, other))["behavior"] == "deny", \
         "Bypass grants the hosted session's requests, never another session's"
+
+
+def test_bypass_runs_a_job_only_when_the_analyst_chose_it_in_settings(fake, analyst):
+    """Bypass for the dev row's jobs only by the analyst's choice in Settings, which bypass.json records (modes.choose,
+    from the settings PUT, a write only the analyst's browser makes): "bypass" written into thimble's config alone
+    counts as Manual, and a main that reports Bypass gives the rows that follow it Manual."""
+    cwd = str(config.corpus_dir(CORPUS))
+    session.attach(CORPUS, "sid-main", cwd)
+    session.note_mode(CORPUS, "sid-main", "bypassPermissions")
+    assert modes.mode_for(CORPUS, "dev") == "manual", "main in Bypass: the row that follows it runs in Manual"
+    session.note_mode(CORPUS, "sid-main", "auto")
+    assert modes.mode_for(CORPUS, "dev") == "auto"
+    userconf.global_file().parent.mkdir(parents=True, exist_ok=True)
+    userconf.global_file().write_text(json.dumps({"agents": {"dev": {"permissionMode": "bypass"}}}))
+    assert userconf.mode_rows(CORPUS) == {"dev": "bypass"} and modes.chosen() == set()
+    assert modes.mode_for(CORPUS, "dev") == "manual" and modes.rows(CORPUS) == {"dev": "manual"}, \
+        "written into the config by hand: Manual"
+    modes.choose({"dev": "bypass"})
+    assert modes.chosen() == {"dev"} and modes.mode_for(CORPUS, "dev") == "bypass"
+    record = userconf.bypass_file()
+    assert json.loads(record.read_text())["rows"] == ["dev"] and record.stat().st_mode & 0o777 == 0o600
+    modes.choose({"dev": "manual"})
+    assert modes.chosen() == set() and modes.mode_for(CORPUS, "dev") == "manual"
+    modes.choose({"views": "bypass", "writer": "bypass"})
+    assert modes.chosen() == {"dev"}, "an earlier build's row is the dev agent's; a row of no job is no choice"
+    modes.choose({"dev": None})
+    assert modes.chosen() == set()
+    record.unlink()
+    ledger.put_settings_route(CORPUS, analyst, {modes.SETTING: {"dev": "bypass"}})
+    assert json.loads(record.read_text())["rows"] == ["dev"], "the analyst's PUT records the choice"
+    assert modes.mode_for(CORPUS, "dev") == "bypass"
+    ledger.put_settings_route(CORPUS, analyst, {modes.SETTING: {"dev": None}})
+    assert json.loads(record.read_text())["rows"] == [] and modes.mode_for(CORPUS, "dev") == "auto"
+
+
+def test_the_manual_mode_notice_says_how_to_switch_or_who_turned_auto_mode_off(fake, monkeypatch):
+    """The `manual-mode` notice's words (modes.manual_notice), by who turns auto mode off; none outside Manual mode."""
+    monkeypatch.setattr(modes, "auto_off", lambda: "")
+    assert modes.manual_notice("default") == ("Manual mode: Claude Code asks before most commands. In your terminal, press "
+                                              "shift+tab for auto mode, or start with `thimble --permission-mode auto`.")
+    assert modes.manual_notice("auto") == modes.manual_notice("acceptEdits") == modes.manual_notice(None) == ""
+    monkeypatch.setattr(modes, "auto_off", lambda: "org")
+    assert modes.manual_notice("default") == ("Manual mode: Claude Code asks before most commands. Your organization "
+                                              "turned auto mode off.")
+    monkeypatch.setattr(modes, "auto_off", lambda: "settings")
+    assert modes.manual_notice("manual") == ("Manual mode: Claude Code asks before most commands. Your Claude Code "
+                                             "settings turn auto mode off (disableAutoMode).")

@@ -2337,12 +2337,17 @@ async def _shot_page(url: str, selector: str | None) -> ToolResult:
     run_shot = _optional("dev", "run_shot")
     if run_shot is None:
         return _not_available("screenshot", "dev", "run_shot")
+    from . import hook_auth  # noqa: PLC0415
+
     with tempfile.TemporaryDirectory(prefix="thimble-shot-") as d:
         out = Path(d) / "shot.png"
+        tok = hook_auth.mint_shot()  # the headless page holds no cookie: its reads of this server carry this token
         try:
-            code = await _maybe_await(run_shot(url, out, selector))
+            code = await _maybe_await(run_shot(url, out, selector, read_token=tok))
         except headless.Missing:
             return err(headless.NO_SCREENSHOTS)
+        finally:
+            hook_auth.drop_shot(tok)
         if not out.is_file():
             return err(f"screenshot failed (exit {code}): no image was written for {url}")
         data = base64.b64encode(out.read_bytes()).decode("ascii")
@@ -2465,16 +2470,22 @@ async def _shot_card_in_ui(c: str, cid: str, ui: str) -> ToolResult | None:
     url = f"{ui}/?{urlencode({'ws': c, 'ref': f'card:{cid}'})}"
     storage = {f"thimble:{c}:layout": json.dumps({"tab": "canvas", "chatOpen": False}),
                f"thimble:{c}:canvas-view": json.dumps({"x": 0, "y": 0, "scale": 1})}
+    from . import hook_auth  # noqa: PLC0415
+
     with tempfile.TemporaryDirectory(prefix="thimble-shot-") as d:
         png = Path(d) / "card.png"
+        tok = hook_auth.mint_shot()  # the headless page holds no cookie: its reads of this server carry this token
         try:
             code = await _maybe_await(run_shot(url, png, f'article.canvas-card[data-cell="{cid}"]', viewport=CARD_SHOT_VIEWPORT,
-                                               scale=CARD_SHOT_SCALE, storage=storage, settle=True, wait_ms=0))
+                                               scale=CARD_SHOT_SCALE, storage=storage, settle=True, wait_ms=0,
+                                               read_token=tok))
         except headless.Missing:
             return None
         except Exception:  # noqa: BLE001 — a missing node is the fallback's case, not an error to the model
             log.warning("card shot in the interface failed for card:%s", cid, exc_info=True)
             return None
+        finally:
+            hook_auth.drop_shot(tok)
         if code != 0 or not png.is_file():
             return None
         data = base64.b64encode(png.read_bytes()).decode("ascii")
@@ -2781,13 +2792,12 @@ async def _h_delete_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
 
 
 async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
-    """A proposal for a view written for how the corpus arranges its records, which a `thimble:view-builder` builds at
-    once (views.propose, dev.start_build) from its fields (views.SPEC_FIELDS), on the model and effort the call names,
-    else Settings' dev row. The orientation's proposals are built as follow-on starts of its own start, and held until
-    their views pass their checks, so each reaches the analyst as soon as it works. A viewer of unusual file types the
-    orientation proposes (views.offered_type_viewer) is stored `suggested`, offered in the File browser and built once
-    the analyst accepts it. A claim that matches no corpus file is refused, naming real paths near it; where views
-    cannot be built the proposal fails at once. A proposal from main's shim is one the analyst asked for: its result is
+    """A proposal for a view: what the analyst sees in it (`description`), what they do with it (`task`) and the files
+    it reads (`claims`), which a `thimble:view-builder` builds at once (views.propose, dev.start_build), reading those
+    files itself for the fields, keys and counts, on the model and effort the call names, else Settings' dev row. Since
+    0.8.0 the orientation proposes no views (it does not have this tool); thimble's own view proposals wait for the
+    analyst's Accept (views.offer). A claim that matches no corpus file is refused, naming real paths near it; where
+    views cannot be built the proposal fails at once. A proposal from main's shim is one the analyst asked for: its result is
     the exact Agent call that starts its builder, which main makes (`## start_job-subagent`), and the browser opens the
     view once built. A thread's fork's proposal is built the same way, by main's Agent call on a `start_agent` event
     (_ask_main), since the fork may not make it."""
@@ -2796,9 +2806,9 @@ async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     claims = args.get("claims")
     if isinstance(claims, str):
         claims = views._fold(claims)
-    spec = views.clean_spec(args)
-    given = {"name": args.get("name"), "why": args.get("why"), "claims": claims, **spec}
-    for k in ("name", "why", "claims", *(k for k, _ in views.SPEC_FIELDS)):
+    given = {"name": args.get("name"), "description": args.get("description"), "task": args.get("task"),
+             "claims": claims}
+    for k in ("name", "description", "task", "claims"):
         v = given.get(k)
         if not v or (isinstance(v, str) and not v.strip()):
             return err(f"propose_view: `{k}` is required")
@@ -2806,7 +2816,6 @@ async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     if unmatched:
         near = " ".join(hint("propose_view-near", claim=g, paths=", ".join(p)) for g, p in unmatched.items() if p)
         return err(" ".join(hint("propose_view-unmatched", claims=", ".join(unmatched), near=near).split()))
-    orient = session_kind(ctx.session) == ORIENT_SESSION
     typed = ctx.session is None  # main's own call: the build is main's Agent call
     fork = await _fork_of(ctx) if typed else None  # a thread's fork's call: main makes that Agent call (_ask_main)
     values = {k: str(args[k]) for k in ("model", "effort") if args.get(k)}
@@ -2815,17 +2824,13 @@ async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
 
         if (before := subagents.refusal_before(ctx.c)) is not None:
             return err(before.reason or f"propose_view: {before.kind}")
-    prop = await _maybe_await(views.propose(ctx.c, name=str(args["name"]).strip(), why=str(args["why"]).strip(),
-                                            claims=claims, arrangement="", proposed_by=ctx.created_by,
-                                            orientation=orient, asked=typed,
-                                            suggested=orient and views.offered_type_viewer(claims), spec=spec,
-                                            route=views.TYPED if typed else None, values=values or None))
+    prop = await _maybe_await(views.propose(ctx.c, name=str(args["name"]).strip(),
+                                            description=str(args["description"]).strip(), claims=claims,
+                                            task=str(args["task"]).strip(), proposed_by=ctx.created_by,
+                                            asked=typed, route=views.TYPED if typed else None, values=values or None))
     status = str(prop.get("status") or "queued")
-    if not prop.get("held"):
-        _chip(ctx.c, "view", str(prop.get("name") or prop.get("slug")), ref=f"view:{prop.get('slug')}", status=status)
+    _chip(ctx.c, "view", str(prop.get("name") or prop.get("slug")), ref=f"view:{prop.get('slug')}", status=status)
     claimed = ", ".join(prop.get("claims") or [])
-    if status == "suggested":
-        return ok(hint("propose_view-suggested", view=prop.get("name"), slug=prop.get("slug"), claims=claimed))
     # without Node 20+ or the frontend's packages the build fails at once (dev.start_build), and main is told why
     if why := await asyncio.to_thread(views.build_problem_for, ctx.c):
         if typed:
@@ -2836,7 +2841,7 @@ async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         return await _fork_build(ctx, str(prop["slug"]), what, fork, values)
     if typed:
         return await _typed_build(ctx, str(prop["slug"]), values)
-    if prop.get("revised") and not prop.get("held"):  # a view built under this name is changed in place (views.revise)
+    if prop.get("revised"):  # a view built under this name is changed in place (views.revise)
         return ok(hint("view-changing", view=prop.get("name"), slug=prop.get("slug")))
     return ok(hint("propose_view-proposed", view=prop.get("name"), slug=prop.get("slug"), claims=claimed))
 
@@ -3114,9 +3119,8 @@ async def _as_caller(c: str, name: str, tool_use_id: str | None) -> tuple[str, s
     """(why the call is refused, '' when it runs; the session it runs as) for a call through main's shim: the key of the
     agent of thimble's that made it (subagents.caller, from the caller hook's line, else the transcript that holds the
     call), or None for main's own. A call its caller may not make is refused (subagents.allowed): main's `critique`, the
-    critic's `add_card`, a tool of a part the orientation's run has off (orientation.part_on). A thread's fork's call
-    runs as main's own (_fork_of)."""
-    from . import orientation, orient_session, subagents  # noqa: PLC0415 — each imports this module
+    critic's `add_card`. A thread's fork's call runs as main's own (_fork_of)."""
+    from . import subagents  # noqa: PLC0415 — it imports this module
 
     canon = canonical(name)
     who = await subagents.caller(c, tool_use_id) if tool_use_id else None
@@ -3127,10 +3131,6 @@ async def _as_caller(c: str, name: str, tool_use_id: str | None) -> tuple[str, s
         return "", None
     if not subagents.allowed(who, canon):
         return f"{canon} is not available to {who.agent_type or 'this agent'}", None
-    if session_kind(who.key) == ORIENT_SESSION:
-        part = next((p for p, names in orient_session.PART_TOOLS.items() if canon in names), None)
-        if part is not None and not orientation.part_on(c, part):
-            return f"{canon} is not available in this run of the orientation, whose {part} output is off", None
     return "", who.key
 
 

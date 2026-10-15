@@ -89,7 +89,7 @@ let loaded = false
 const records = new Map() // a report opened in full -> its record
 const S = { report: null } // the report the pane shows in full
 
-const colour = colorBy({ fields: FIELDS_BY, onChange: () => assign() })
+const colour = colorBy({ fields: FIELDS_BY, initial: 'confidence', onChange: () => assign() })
 const q = search({ words: 'search reports', onChange: (text) => doSearch(text) })
 const range = timeRange({ onChange: () => {} })
 let rowsC = null

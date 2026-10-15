@@ -504,11 +504,11 @@ async def test_run_now_runs_an_orientation_program_again_with_the_cards_as_they_
     now; Run now runs the program as a follow-up with the earlier request and the cards, so it adds to them, and the
     offer goes."""
     chat = agents.new_agent(CORPUS, orientation.ROLE, orientation.TITLE, announce=False, brief="count the runs")["id"]
-    orientation.started(CORPUS, chat, passes=["final"])
+    orientation.started(CORPUS, chat)
     made = await tools.call(CORPUS, "add_card", {"question": "What does the corpus hold?", "kind": "note",
                                                   "text": "Three runs.", "takeaway": "Three runs."}, session="orient")
     assert not made.is_error, made.text
-    orientation.finished(CORPUS, chat, "done", "Three runs.", report=False)
+    orientation.finished(CORPUS, chat, "done", "Three runs.")
     agents.finish_agent(CORPUS, chat, "done", "Three runs.")
     folder = _extension(tmp_path, "again", {"agents/orientation": {"description": "Looks again.",
                                                                   "command": ["python", "o.py"]}},
@@ -537,8 +537,8 @@ async def test_an_orientation_program_s_start_marks_only_its_own_extension_as_or
     from app import orient_session
 
     chat = agents.new_agent(CORPUS, orientation.ROLE, orientation.TITLE, announce=False, brief="")["id"]
-    orientation.started(CORPUS, chat, passes=["final"])
-    orientation.finished(CORPUS, chat, "done", "Three runs.", report=False)
+    orientation.started(CORPUS, chat)
+    orientation.finished(CORPUS, chat, "done", "Three runs.")
     agents.finish_agent(CORPUS, chat, "done", "Three runs.")
     prog = _extension(tmp_path, "looker", {"agents/orientation": {"description": "Looks.", "command": ["python", "o.py"]}},
                       {"agents/orientation/o.py": "import thimble\nthimble.serve(lambda i: 'Looked.')\n"})
@@ -548,7 +548,7 @@ async def test_an_orientation_program_s_start_marks_only_its_own_extension_as_or
         assert extensions.add(str(folder), yes=True, say=lambda _: None) == [folder.name]
     await extensions.refresh(CORPUS)
     assert extensions.offered(CORPUS) == ["looker"], "thimble's own session that ran is gone, so no follow-up reaches it"
-    await orient_session.start(CORPUS, "count the runs", ("final",))
+    await orient_session.start(CORPUS, "count the runs")
     await _until(lambda: (r := orientation.read_run(CORPUS)) and r.get("program") == "looker"
                  and r.get("status") in ("done", "failed"), what="the program to end")
     assert extensions.offered(CORPUS) == ["notes"]

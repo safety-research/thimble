@@ -5,7 +5,7 @@ Playwright's own, is thimble's config's `browser` (launch).
 
 A launch that fails because the browser or its system libraries are missing stays failed for the rest of the server
 run: the log warns once, and whatever needs that browser is skipped. The words here reach models, so they say what is
-unavailable and never how to install it; `thimble doctor` names the commands."""
+unavailable and never how to install it; `thimble doctor --verbose` names the commands."""
 from __future__ import annotations
 
 import asyncio

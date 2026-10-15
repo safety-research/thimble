@@ -1,9 +1,10 @@
 // What holds a Claude Code session besides its permission requests (those wait on PermissionCard): an alert when a
 // terminal dialog holds it that the browser cannot answer, the rules the analyst's "don't ask again" answers added
 // (backend agent_session), a retry countdown after an API capacity error (ApiErrorCard), and a note when a run resumed
-// after a server restart (RESTARTED_LINE). The request fields the permission card shows (askFields, askWhat) are read
-// here too.
+// after a server restart (RESTARTED_LINE). The alert's × hides it until its text changes, and the restarted line's
+// hides it for the page. The request fields the permission card shows (askFields, askWhat) are read here too.
 import { useEffect, useState } from 'react'
+import { Button } from '../components/Button'
 import { ApiErrorCard } from './ApiError'
 import type { PermissionRequest, SessionAlert } from '../lib/types'
 
@@ -86,6 +87,10 @@ const WHAT_CHARS = 300
 
 export const RESTARTED_LINE = "Resumed after thimble's server restarted."
 
+// what the analyst dismissed, for the page: the alerts by their text, and the restarted line
+const hiddenAlerts = new Set<string>()
+let restartedHidden = false
+
 export function Holds({ alert, rules, restarted = false, onRetry, className = '' }: {
   alert?: SessionAlert | null
   /** what the analyst's "don't ask again" answers added to the session, in Claude Code's words */
@@ -96,16 +101,40 @@ export function Holds({ alert, rules, restarted = false, onRetry, className = ''
   onRetry?: () => Promise<unknown>
   className?: string
 }) {
+  const [, setHidden] = useState(0)
   const added = (rules ?? []).map((r) => r.text).filter(Boolean)
-  if (!alert && !added.length && !restarted) return null
+  const shownAlert = alert && (alert.kind === 'retry' || !hiddenAlerts.has(alert.text)) ? alert : null
+  const shownRestarted = restarted && !restartedHidden
+  if (!shownAlert && !added.length && !shownRestarted) return null
+  const dismiss = (label: string, hide: () => void) => (
+    <Button
+      variant="icon"
+      size="sm"
+      icon="x"
+      title="Dismiss"
+      aria-label="Dismiss"
+      className="chat-hold-x"
+      data-tel={label}
+      onClick={() => {
+        hide()
+        setHidden((n) => n + 1)
+      }}
+    />
+  )
   return (
     <div className={`chat-holds ${className}`.trim()}>
-      {restarted && <p className="chat-hold-restarted">{RESTARTED_LINE}</p>}
-      {alert && alert.kind === 'retry' ? (
-        <RetryAlert alert={alert} onRetry={onRetry} />
-      ) : alert ? (
+      {shownRestarted && (
+        <p className="chat-hold-restarted">
+          <span>{RESTARTED_LINE}</span>
+          {dismiss('hold-restarted-x', () => void (restartedHidden = true))}
+        </p>
+      )}
+      {shownAlert && shownAlert.kind === 'retry' ? (
+        <RetryAlert alert={shownAlert} onRetry={onRetry} />
+      ) : shownAlert ? (
         <div className="chat-hold" data-kind="alert" role="alert">
-          {alert.text}
+          <span className="chat-hold-text">{shownAlert.text}</span>
+          {dismiss('hold-alert-x', () => void hiddenAlerts.add(shownAlert.text))}
         </div>
       ) : null}
       {added.length > 0 && (

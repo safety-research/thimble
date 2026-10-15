@@ -1,9 +1,10 @@
 """`thimble demo --examples` (app/demo_examples.py): each worked example of custom views opens as the workspace
 example-<name> on a copy of its sample in THIMBLE_HOME, its view installed built so readers see it at once, its sample
-labels defined and applied through the server, and one URL, the start page with the page key, opened; a second run adds
-only what is missing, and --refresh copies the views and samples again. The server is stubbed."""
+labels defined and applied through the server, and one URL, the start page with a sign-in code, opened; a second run
+adds only what is missing, and --refresh copies the views and samples again. The server is stubbed."""
 import argparse
 import filecmp
+import hashlib
 import json
 import re
 import shutil
@@ -13,17 +14,27 @@ import pytest
 
 from app import cli, config, demo, demo_examples, views
 
-KEY = "pagekey"
+CODE = "c0de"
+
+
+COOKIE = "thimble-ui-1=c00kie-of-the-run"  # the sign-in the command makes for its writes (cli.browser_cookie)
 
 
 class FakeServer:
-    """The routes the command calls, over labels kept in memory, and every call it made."""
+    """The routes the command calls, over labels kept in memory, and every call it made. A write without the browser's
+    cookie is refused, as hook_auth.LocalWriteGuard refuses it."""
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, dict | None]] = []
         self.labels: dict[str, dict[str, dict]] = {}
+        self.signed_out: list[str] = []
 
-    def __call__(self, method: str, url: str, body: dict | None = None, timeout: float = 5.0):
+    def __call__(self, method: str, url: str, body: dict | None = None, timeout: float = 5.0, cookie: str | None = None):
+        if method != "GET" and cookie != COOKIE:
+            return 403, {"detail": "open thimble from the link shown under /thimble's reply"}
+        if url.endswith("/api/ui/signout"):
+            self.signed_out.append((body or {}).get("id"))
+            return 200, {"signed_out": True}
         self.calls.append((method, url, body))
         ws = url.split("/api/ws/")[1].split("/")[0]
         have = self.labels.setdefault(ws, {})
@@ -50,17 +61,18 @@ def world(tmp_path, monkeypatch):
     env = {"home": str(tmp_path / "home"), "workspaces_dir": str(config.WORKSPACES_DIR), "data_dir": str(tmp_path / "data")}
     monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
     monkeypatch.setattr(demo, "register", lambda folder, url: str(config.register_corpus(folder, exact=True)["name"]))
-    monkeypatch.setattr(cli, "ui_url", lambda name, key=True: f"http://127.0.0.1:1/{f'?ws={name}' if name else ''}"
-                                                              + (f"#k={KEY}" if key else ""))
+    monkeypatch.setattr(cli, "ui_url", lambda name, pair=False: f"http://127.0.0.1:1/{f'?ws={name}' if name else ''}"
+                                                                + (f"#p={CODE}" if pair else ""))
     views._folder_cache.clear()
     monkeypatch.setattr(views, "FOLDER_CACHE_S", 0.0)
-    return {"env": env, "server": FakeServer(), "lines": [], "shown": []}
+    return {"env": env, "server": FakeServer(), "lines": [], "shown": [], "signins": []}
 
 
 def run(w, root: Path | None = None, **kw) -> int:
     a = argparse.Namespace(**{"examples": True, "refresh": False, **kw})
     return demo_examples.run(a, w["lines"].append, lambda say: ("http://127.0.0.1:1", w["env"]), request=w["server"],
-                             root=root, show=lambda url: w["shown"].append(url) or True)
+                             root=root, show=lambda url: w["shown"].append(url) or True,
+                             signin=lambda url: w["signins"].append(url) or COOKIE)
 
 
 def said(w) -> str:
@@ -78,10 +90,11 @@ def installed(name: str, slug: str) -> dict:
     return json.loads((views.views_dir(name) / slug / views.VIEW_JSON).read_text("utf-8"))
 
 
-def test_every_worked_example_opens_as_a_workspace_with_its_view_built_and_its_labels_on(world):
+def test_every_worked_example_opens_as_a_workspace_with_its_view_built_and_its_labels_on(world, monkeypatch):
     """Each example of plugin/viewers: its sample copied into THIMBLE_HOME (not the repository) as the corpus of the
     workspace example-<name>, its view built so read_built serves it, each sample label defined, turned on and applied,
-    and one URL printed and opened, the start page with the page key."""
+    and one URL printed and opened, the start page with a sign-in code on a terminal."""
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
     w = world
     found = demo_examples.examples()
     assert [p.name for p in found] == sorted(p.name for p in views.EXAMPLES_DIR.iterdir() if (p / "view.json").is_file())
@@ -102,9 +115,26 @@ def test_every_worked_example_opens_as_a_workspace_with_its_view_built_and_its_l
         applied = [b for m, u, b in w["server"].calls if u.endswith("/apply") and f"/ws/{name}/" in u]
         assert sorted(json.dumps(b["paths"]) for b in applied) == sorted(json.dumps(s["paths"]) for s in specs)
     assert not (config.REPO_ROOT / "examples").exists()
-    # one URL, opened: the start page with the page key, whose rows open each example at its view (start_page.py)
-    assert re.findall(r"http://\S+", out) == [f"http://127.0.0.1:1/#k={KEY}"]
-    assert w["shown"] == [f"http://127.0.0.1:1/#k={KEY}"]
+    # the labels are the analyst's writes: one sign-in for the run, signed out at its end (its id, hook_auth.browser_id)
+    assert w["signins"] == ["http://127.0.0.1:1"]
+    assert w["server"].signed_out == [hashlib.sha256(COOKIE.split("=", 1)[1].encode()).hexdigest()[:12]]
+    # one URL, opened with a one-time sign-in code: the start page, whose rows open each example at its view
+    # (start_page.py); the browser spent the code, so the printed line names the page without it
+    assert re.findall(r"http://\S+", out) == ["http://127.0.0.1:1/"]
+    assert w["shown"] == [f"http://127.0.0.1:1/#p={CODE}"]
+
+
+def test_without_a_terminal_the_start_page_s_link_carries_no_sign_in_code(world, monkeypatch):
+    """Output that a program reads, such as an agent's Bash, can reach a model's context, so without a terminal the
+    printed link carries no sign-in code (cli.ui_url, as `thimble demo` and /thimble print it)."""
+    monkeypatch.setattr("sys.stdout.isatty", lambda: False)
+    w = world
+    a = argparse.Namespace(examples=True, refresh=False)
+    assert demo_examples.run(a, w["lines"].append, lambda say: ("http://127.0.0.1:1", w["env"]), request=w["server"],
+                             show=lambda url: w["shown"].append(url) and False, signin=lambda url: COOKIE) == 0
+    out = said(w)
+    assert re.findall(r"http://\S+", out) == ["http://127.0.0.1:1/"] and "#p=" not in out
+    assert w["shown"] == ["http://127.0.0.1:1/"]
 
 
 def test_a_second_run_adds_only_what_is_missing(world):
@@ -113,9 +143,11 @@ def test_a_second_run_adds_only_what_is_missing(world):
     said(w)
     stamps = {p.name: installed(f"example-{p.name}", p.name) for p in demo_examples.examples()}
     w["server"].calls.clear()
+    w["signins"].clear()
     assert run(w) == 0
     assert "sample copied" not in said(w)
     assert w["server"].writes() == [], "no label is defined or applied again"
+    assert w["signins"] == [], "and no browser signs in for nothing"
     assert {p.name: installed(f"example-{p.name}", p.name) for p in demo_examples.examples()} == stamps
     shutil.rmtree(views.views_dir("example-timeline") / "timeline")
     assert run(w) == 0
@@ -160,3 +192,18 @@ def test_the_command_needs_the_server_and_the_cli_takes_its_flags(world):
     assert "no server answers" in said(w) and not (Path(w["env"]["home"]) / "examples").exists()
     got = cli.build_parser().parse_args(["demo", "--examples", "--refresh"])
     assert got.examples and got.refresh and got.cmd == "demo"
+
+
+def test_a_sign_in_the_server_refuses_leaves_the_labels_undefined_and_says_so(world):
+    """Defining a label takes a browser's sign-in (cli.browser_cookie); when the server gives none, each example says
+    its labels were not defined, and nothing is written without the cookie."""
+    w = world
+
+    def refused(url):
+        raise RuntimeError(f"the server at {url} gave no sign-in code")
+
+    a = argparse.Namespace(examples=True, refresh=False)
+    assert demo_examples.run(a, w["lines"].append, lambda say: ("http://127.0.0.1:1", w["env"]), request=w["server"],
+                             show=lambda url: True, signin=refused) == 0
+    assert "the labels could not be defined: the server at http://127.0.0.1:1 gave no sign-in code" in said(w)
+    assert w["server"].writes() == [] and w["server"].signed_out == []

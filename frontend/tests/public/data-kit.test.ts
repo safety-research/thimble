@@ -635,7 +635,7 @@ describe('the table', () => {
     w.MAIL = MAIL
     w.opened = []
     w.eval(`
-      window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'folder', title: 'Folder' }] })
+      window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'folder', title: 'Folder' }], initial: 'folder' })
       window.filter = thimble.filterBy({ mount: '#filter', fields: [{ name: 'from', title: 'From' }], onChange: () => window.table.draw() })
       window.side = thimble.side({ mount: '#body' })
       window.search = thimble.search({ mount: '#search' })
@@ -776,7 +776,7 @@ describe('the table', () => {
     w.ISSUES = records('issues', ['open', 'closed', 'closed', 'closed', 'closed', 'closed'])
     w.NOTES = records('notes', ['draft', 'draft'])
     w.eval(`
-      window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'state', title: 'State' }] })
+      window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'state', title: 'State' }], initial: 'state' })
       const columns = [{ name: 'title', title: 'Title' }, { name: 'state', title: 'State' }]
       window.prs = thimble.table({ mount: '#prs', rows: PRS, columns, key: 'prs' })
       window.issues = thimble.table({ mount: '#issues', rows: ISSUES, columns, key: 'issues' })
@@ -1452,7 +1452,7 @@ describe('the messages', () => {
   test("a boxed message: a box beside its avatar, its head the author, what they did and the time over its subject, `to` and words; it shares no head; one with no words is its head alone; an event is never boxed", async () => {
     await load('<span id="colour"></span><div id="c"></div>')
     const w = win()
-    w.eval(`thimble.colorBy({ mount: '#colour', fields: [{ name: 'author', title: 'Author' }] })
+    w.eval(`thimble.colorBy({ mount: '#colour', fields: [{ name: 'author', title: 'Author' }], initial: 'author' })
       window.conv = thimble.messages({ mount: '#c' })`)
     w.conv.draw([
       { ref: 'pr#1', t: T, author: 'ana', box: true, said: 'opened this pull request', text: 'Fixes the **parser**.' },

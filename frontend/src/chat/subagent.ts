@@ -61,9 +61,9 @@ export const lastSession = (m: Pick<ChatMeta, 'session' | 'sessions'> | null | u
  * for one that can, an orientation stopped with Esc among them, whose message starts a continuation
  * (STOPPED_CONTINUE_LINE). */
 export function continueText(kind: Continue, sid: string): string {
-  if (kind === 'earlier-version') return 'This orientation ran in an earlier version of thimble and cannot be continued. Start a new orientation to explore further.'
+  if (kind === 'earlier-version') return 'This orientation ran in an earlier version of thimble and cannot be continued. Ask Claude in main for a new orientation to explore further.'
   if (kind === 'earlier-session')
-    return `This orientation ran in an earlier Claude Code session. To continue it, quit and run \`thimble -r ${sid || '<session id>'}\` in this folder, or start a new orientation.`
+    return `This orientation ran in an earlier Claude Code session. To continue it, quit and run \`thimble -r ${sid || '<session id>'}\` in this folder, or ask Claude in main for a new orientation.`
   return ''
 }
 
@@ -84,6 +84,12 @@ export const STOP_DONE_LINE = 'It had already ended.'
 /** The line when thimble could not stop it, and how to stop it in the terminal. */
 export const stopFailedLine = (reason: string): string =>
   `thimble could not stop it${reason ? `: ${reason.replace(/[.\s]+$/, '')}` : ''}. Stop it in your terminal: ↓ to it in the agent tray, Enter, then Esc.`
+
+/** The Stop of main when thimble's module does not run in main's session, which alone can end main's turn. */
+export const MAIN_ESC_LINE = 'To stop main, press Esc in your Claude Code terminal.'
+
+/** The line when thimble could not stop main's turn for another reason, and how to stop it in the terminal. */
+export const mainStopFailedLine = (reason: string): string => `thimble could not stop main: ${reason.replace(/[.\s]+$/, '')}. ${MAIN_ESC_LINE}`
 
 /** Without thimble's module in main's session, Stop is not offered; the card says how to stop it in the terminal. */
 export const NO_STOP_LINE = "To stop it, press Esc in its view in your terminal (↓ to it in the agent tray, then Enter)."

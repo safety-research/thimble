@@ -10,7 +10,7 @@
 //
 // Examples are the tour's own markup (./examples.json, ./steps), laid over the page under the dim and removed when
 // their step ends. Nothing the tour shows reaches the server.
-import { isMacPlatform, isPointKey, pointKeyHeld } from '../lib/platform'
+import { askKeyLabel, isMacPlatform, isPointKey, pointKeyHeld } from '../lib/platform'
 import { setGuard } from './freeze'
 import './tour.css'
 
@@ -676,7 +676,7 @@ export function createTour(snaps: Snaps): Tour {
           key = document.createElement('div')
           key.className = 'tour-key tour-in'
           key.dataset.demo = '1'
-          setMarkup(key, `<b>${MAC ? '⌘' : 'Ctrl'}</b><span>held down</span>`)
+          setMarkup(key, `<b>${askKeyLabel(MAC)}</b><span>held down</span>`)
           fx.append(key)
         }
         if (!on && key) {

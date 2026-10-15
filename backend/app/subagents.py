@@ -3,10 +3,10 @@ the view builders and reviewers (dev.py, view_review.py), the runs of report che
 tickets (dev.py, ticket_tools.py). Each is a named subagent with a fresh context, of a type thimble's plugin module
 registers (`thimble:<role>`, roles); the orientation's own subagents run as `thimble:orient-helper`.
 
-Starts. A click in the browser (Start, Write, Start it, …) starts its agent through the plugin's module, with no turn of
+Starts. A click in the browser (Write, a view proposal's Accept, Start it, …) starts its agent through the plugin's module, with no turn of
 main: start_job writes the pending request, then asks the module (module_bridge.request) to spawn it, and the module's
 answer ends the request ({agentId}, a deny of thimble's own --agent-check, Claude Code's concurrency limit, or no
-module). A follow-on start (a run's own next step, such as the orientation's report pass) goes the same way. A typed
+module). A follow-on start (a run's own next step, such as a view build's review) goes the same way. A typed
 request goes through main: the start tool records the pending request and returns the exact Agent call, which main
 makes; the plugin's --agent-check hook lets only that call through, and the mirror watches for a start that does not
 happen (R1–R3, session.py). The typed start of a thread's fork's start_orientation, propose_view, file_dev_ticket,
@@ -34,6 +34,11 @@ Runs and ends. A run is one turn sequence of an agent, from its start or a follo
 a turn's end, which ends the run only when no child of the agent runs and no hand-back follows within HANDBACK_WAIT_S.
 Each role's handlers (Type.started, Type.ended, Type.refused) do what its run's start, end and refusal mean for it.
 
+Notices. A start or a message that did not happen, and a run that ended failed, are told in the foreground with their
+fix (notices.agent_refused, agent_failed), under the agent's key; its next start and a run that ended done clear it. A
+role whose module settles what its end means (Type.own_notices: a view's build, a report check, a code ticket) tells
+its own failures there, since a run's status is not its outcome (a build that ends failed may be repaired).
+
 Attribution. A PreToolUse hook on thimble's tools records which agent makes each call (callers.jsonl); caller() names
 the agent, and its key is the session the call runs as (tools.call_route), a descendant's that of its thimble ancestor.
 
@@ -53,6 +58,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
@@ -82,9 +88,12 @@ ROLES = files.ROLES
 STEP_ROLE = agents.STEP_ROLE
 CLICK, FOLLOW_ON, TYPED = "click", "follow-on", "typed"
 ROUTES = (CLICK, FOLLOW_ON, TYPED)
-# the kinds a start that did not happen has (run.json `refused.kind`, a request's `refused_kind`)
-AUTO_MODE, NO_CALL, LIMIT, NOT_LAUNCHED, HOOK, EARLIER, NO_MODULE, ERROR = (
-    "auto-mode", "no-call", "limit", "not-launched", "hook", "earlier-session", "no-module", "error")
+# the kinds a start that did not happen has (run.json `refused.kind`, a request's `refused_kind`); the records of
+# earlier builds may also hold not-launched, for a main that thimble's launcher had not started
+AUTO_MODE, NO_CALL, LIMIT, HOOK, EARLIER, NO_MODULE, ERROR = (
+    "auto-mode", "no-call", "limit", "hook", "earlier-session", "no-module", "error")
+# a refused start in the first seconds after main attached says thimble's plugin is still connecting (refusal_before)
+CONNECT_GRACE_S = 30.0
 HANDBACK_WAIT_S = 5.0  # a turn's end with no running child ends the run once no hand-back follows within this
 # in auto mode Claude Code makes an agent that ended with text call SubagentHandback, a model step later
 AUTO_HANDBACK_WAIT_S = 30.0
@@ -149,7 +158,8 @@ class Type:
     Main's plan mode (_plan_end): `left_work` names `module:attr`, a function (c, run) of whether a run that plan mode
     held at its end left its work all the same (a writer's saved document); one that did not ends failed, not done. A
     role with none left nothing to count on then. With `gated` the role's end handler judges what the run left by its
-    gate, as after any run, and fails it with plan_failed_line when nothing passes (a view's build, a code ticket)."""
+    gate, as after any run, and fails it with plan_failed_line when nothing passes (a view's build, a code ticket).
+    With `own_notices` the role's module tells its failures itself (module note, notices)."""
 
     role: str
     kind: str | None
@@ -165,6 +175,7 @@ class Type:
     keeps_chat: bool = False
     left_work: str = ""
     gated: bool = False
+    own_notices: bool = False
 
 
 TYPES: dict[str, Type] = {
@@ -182,17 +193,18 @@ TYPES: dict[str, Type] = {
                    "app.write_session:subagent_refused", left_work="app.write_session:left_work"),
     "view-builder": Type("view-builder", tools.VIEW_SESSION, "dev", "dev", "dev", "app.view_tools:builder_definition",
                          "app.view_tools:BUILDER_TOOLS", "app.dev:build_started", "app.dev:build_ended",
-                         "app.dev:build_refused", gated=True),
+                         "app.dev:build_refused", gated=True, own_notices=True),
     "view-reviewer": Type("view-reviewer", tools.REVIEW_SESSION, "dev", "dev", "dev",
                           "app.view_tools:reviewer_definition", "app.view_tools:REVIEWER_TOOLS",
                           "app.view_review:subagent_started", "app.view_review:subagent_ended",
                           "app.view_review:subagent_refused", left_work="app.view_review:left_work"),
     "check": Type("check", tools.CHECK_SESSION, "check", "checks", "checks", "app.checks:definition",
                   "app.checks:OWN_TOOLS", "app.checks:subagent_started", "app.checks:subagent_ended",
-                  "app.checks:subagent_refused"),
+                  "app.checks:subagent_refused", own_notices=True),
     "dev-ticket": Type("dev-ticket", tools.TICKET_SESSION, "dev", "dev", "dev", "app.ticket_tools:definition",
                        "app.ticket_tools:TICKET_TOOLS", "app.dev:ticket_started", "app.dev:ticket_ended",
-                       "app.dev:ticket_refused", when="app.dev:tickets_run_here", keeps_chat=True, gated=True),
+                       "app.dev:ticket_refused", when="app.dev:tickets_run_here", keeps_chat=True, gated=True,
+                       own_notices=True),
     HELPER: Type(HELPER, None, None, "subagents", "orientation", "app.subagents:helper_definition"),
 }
 
@@ -310,9 +322,9 @@ def extension_types(c: str) -> dict[str, dict[str, Any]]:
 
 
 def write_dirs(c: str) -> list[Path]:
-    """The folders main's Bash may write in workspace `c`, its agents' work folders: orient/work, writers,
-    critique-work, check-work, views-work, the local extension's views and card-libs, where main installs the npm
-    packages its custom cards load (card_libs). They need not exist yet."""
+    """The agents' work folders in workspace `c`, which a card's trial may write (cardrun.trial_sandbox): orient/work,
+    writers, critique-work, check-work, views-work, the local extension's views and card-libs, where main installs the
+    npm packages its custom cards load (card_libs). They need not exist yet."""
     ws = config.workspace_path(c)
     return [ws / d for d in WORK_DIRS]
 
@@ -548,6 +560,31 @@ def _refused(c: str, rec: dict[str, Any]) -> None:
         _resolve(t.refused)(c, rec)
     except Exception:  # noqa: BLE001 — the request is refused either way
         log.exception("%s: the %s's refusal handler failed", c, rec.get("role"))
+    _tell_refused(c, t, rec)
+
+
+# why a typed start did not happen when main's turn ended without its call (NO_CALL), in the notice's words: the
+# refusal's own reason is main's last words then
+NO_CALL_WHY = "Claude ended its turn without the call that starts it; ask Claude again"
+
+
+def _tell_refused(c: str, t: Type, rec: dict[str, Any]) -> None:
+    """A start or a message that did not happen, told in the foreground (module note, notices), unless the role tells
+    its own."""
+    from . import notices  # noqa: PLC0415
+
+    kind = rec.get("kind")
+    if t.own_notices or kind not in ("start", "message"):
+        return
+    why = NO_CALL_WHY if rec.get("refused_kind") == NO_CALL else rec.get("reason") or rec.get("refused_kind")
+    try:
+        a = (agent(c, str(rec.get("agent") or "")) or {}) if kind == "message" else {}
+    except Exception:  # noqa: BLE001 — told without its chat
+        a = {}
+    chat = str(a.get("chat") or "") or None
+    title = str((rec.get("chat") or {}).get("title") or "") if isinstance(rec.get("chat"), dict) else ""
+    notices.agent_refused(c, role=t.role, key=rec.get("key") or rec.get("id"), why=why, chat=chat, title=title,
+                          message=kind == "message")
 
 
 def expire(c: str, rid: str) -> dict[str, Any] | None:
@@ -574,7 +611,7 @@ async def start_it(c: str, rid: str) -> Answer:
         return refusal(HOOK, "this request is not refused")
     if r.get("caller_role"):  # the critic: the module would start it as main's subagent, not its orientation's
         return refusal(HOOK, "an agent's own start (the orientation's critic) can't be started from the browser")
-    if (before := refusal_before(c, click=True)) is not None:  # as every click: unfenced or no module
+    if (before := refusal_before(c, click=True)) is not None:  # as every click: no module
         return before
     _set(c, rid, route=CLICK, state="pending", claimed_by=None, reason=None, refused_kind=None, again=files.now())
     return await _spawn(c, rid, r)
@@ -595,20 +632,41 @@ async def again(c: str, rid: str) -> Answer:
 # --------------------------------------------------------------------------- refusals before a start
 
 
-def refusal_before(c: str, click: bool = False) -> Answer | None:
-    """Why no agent of thimble's can start now in workspace `c`, before any request is made: main was not started by
-    `thimble` (not-launched), main is in plan mode (hook, start-plan-mode), or the module does not hold the long-poll
-    (no-module). None when nothing stands in the way. A `click` leaves plan mode to --agent-check, which reads main's mode
-    as the module's call runs: thimble hears main's mode only at main's turns, so after a shift+tab while main is idle
-    the mode it keeps is stale (live check L21), and the click would stay refused after the analyst left plan mode."""
-    from . import cc_plugin, module_bridge, session  # noqa: PLC0415
+def connecting(c: str) -> bool:
+    """Whether main's session in workspace `c` attached less than CONNECT_GRACE_S ago (session.current's `since`, an
+    ISO time; one that does not parse counts as old): the plugin's hooks module of a session /thimble just opened may
+    not have said hello yet."""
+    from . import session  # noqa: PLC0415
 
-    if not cc_plugin.main_fenced(c):
-        return refusal(NOT_LAUNCHED, tools.hint("start-refused-not-launched"))
+    lv = session.current(c)
+    try:
+        since = datetime.fromisoformat(str(lv.since)) if lv is not None else None
+    except (TypeError, ValueError):
+        return False
+    if since is None:
+        return False
+    if since.tzinfo is None:
+        since = since.replace(tzinfo=timezone.utc)
+    return 0 <= (datetime.now(timezone.utc) - since).total_seconds() < CONNECT_GRACE_S
+
+
+def refusal_before(c: str, click: bool = False) -> Answer | None:
+    """Why no agent of thimble's can start now in workspace `c`, before any request is made: main is in plan mode
+    (hook, start-plan-mode), or the module does not hold the long-poll (no-module): still connecting in the first
+    CONNECT_GRACE_S after main attached when Claude Code has not loaded it yet (start-refused-connecting), else
+    start-refused-no-module with why. None when nothing stands in the way. A `click` leaves plan mode to
+    --agent-check, which reads main's mode as the module's call runs: thimble hears main's mode only at main's turns, so
+    after a shift+tab while main is idle the mode it keeps is stale (live check L21), and the click would stay refused
+    after the analyst left plan mode."""
+    from . import module_bridge, session  # noqa: PLC0415
+
     if not click and session.main_mode(c) == files.PLAN_MODE:
         return refusal(HOOK, tools.hint("start-plan-mode"))
     if not module_bridge.live(c):
-        return refusal(NO_MODULE, tools.hint("start-refused-no-module", reason=str(module_bridge.why_not(c) or "")))
+        why = module_bridge.why_not(c)
+        if connecting(c) and why == module_bridge.NOT_LOADED:
+            return refusal(NO_MODULE, tools.hint("start-refused-connecting"))
+        return refusal(NO_MODULE, tools.hint("start-refused-no-module", reason=str(why or "")))
     return None
 
 
@@ -712,7 +770,7 @@ async def start_job(c: str, role: str, key: str, task: str, values: dict[str, An
     """One start of any role, for the agent of `key`, with the prompt `task` and the run's values. A click or a
     follow-on start writes the pending request, then asks the module to spawn it, and answers what the module did
     (Answer); a typed one records the request and answers the exact Agent call for the start tool's result. Without a
-    live module, or while main is in plan mode or not fenced, it refuses before making the request (refusal_before;
+    live module, or while main is in plan mode, it refuses before making the request (refusal_before;
     `check` False skips that, for a caller that checked). `request_id` is the request's id when the caller made it
     (request_id), for a prompt that names it. `chat` holds the fields of the agent's chat (its title, a
     writer's document), `work` its work folder (the scratch folders of its subagents), `call` the start tool's call
@@ -741,9 +799,8 @@ async def start_job(c: str, role: str, key: str, task: str, values: dict[str, An
 
 
 def make_work(c: str, work: Path) -> None:
-    """The agent's work folder made before it starts, as agent_session made a session's: main's sandbox lets Bash write
-    in the work folders (write_dirs) but not in the workspace around them, so an agent cannot make its own folder.
-    Only a folder inside the workspace."""
+    """The agent's work folder made before it starts, as agent_session made a session's, so the agent finds it in
+    place. Only a folder inside the workspace."""
     root = ws(c).resolve()
     try:
         if root not in work.resolve().parents:
@@ -761,7 +818,7 @@ async def _spawn(c: str, rid: str, r: dict[str, Any]) -> Answer:
     ans = await _bridge(c, "spawn", role=r.get("role"), values=r.get("values") or {}, prompt=inp.get("prompt"),
                         description=inp.get("description"), request=rid, what=_what(r), route=r.get("route") or CLICK)
     if ans.started:
-        meta = bind(c, str(ans.agent_id), rid)  # its chat, which the browser opens after a click (Start's thread)
+        meta = bind(c, str(ans.agent_id), rid)  # its chat, which the browser opens after a click (the started agent's thread)
         return Answer({**ans, "request": rid, **({"chat": meta["id"]} if meta and meta.get("id") else {})})
     if ans.get("expired"):
         expire(c, rid)
@@ -858,13 +915,29 @@ def message_request(c: str, agent_id: str, text: str, *, call: str | None = None
     return Answer({"request": rid, "input": inp})
 
 
+def unknown_agent_text(c: str, agent_id: str) -> str:
+    """Why a follow-up cannot reach an agent that is not in the registry: the earlier-session text with the session its
+    chat last ran under, which `thimble -r` resumes; the earlier-version text when no chat of the workspace names a
+    session for it, since the earlier-session text needs one."""
+    sid = ""
+    if agent_id:
+        for meta in agents.list_chats(c):
+            if meta.get("agent_id") == agent_id:
+                sessions = [str(s) for s in meta.get("sessions") or [meta.get("session")] if s]
+                sid = sessions[-1] if sessions else ""
+                break
+    if sid:
+        return tools.hint("orient-continue-earlier-session", session=sid)
+    return tools.hint("orient-continue-earlier-version")
+
+
 async def send(c: str, agent_id: str, text: str, *, values: dict[str, Any] | None = None, route: str = CLICK) -> Answer:
     """A follow-up sent from the browser: the pending message request, then the module's SendMessage, after it
     registers the run's own values when they differ from the role's latest registration (V1). Refused, with the text
-    kept, when the module is not live."""
+    kept, when the module is not live, and for an agent that is not in the registry (unknown_agent_text)."""
     a = agent(c, agent_id)
     if a is None:
-        return refusal(EARLIER, tools.hint("orient-continue-earlier-session", resume=""))
+        return refusal(EARLIER, unknown_agent_text(c, agent_id))
     before = refusal_before(c, click=route == CLICK)
     if before is not None:
         return before
@@ -907,6 +980,20 @@ async def stop(c: str, agent_id: str) -> Answer:
     if not ans.refused:
         mark_stopped_by(c, agent_id, STOPPED_ANALYST)
     return Answer({**ans, "request": rid})
+
+
+async def stop_main(c: str) -> Answer:
+    """The analyst's Stop of main: main's running turn ended through the module (`$.turn.abort`), as Esc ends it in the
+    terminal. Refused when the module is not live: the browser then says to press Esc in the terminal. A turn that had
+    ended already counts as done."""
+    from . import module_bridge  # noqa: PLC0415
+
+    if not module_bridge.live(c):
+        return refusal(NO_MODULE, str(module_bridge.why_not(c) or ""))
+    ans = await _bridge(c, "abort")
+    if ans.refused and ans.get("gone"):
+        return Answer({"done": True})
+    return ans
 
 
 def mark_stopped_by(c: str, agent_id: str, who: str) -> None:
@@ -1111,6 +1198,7 @@ def ensure_chat(c: str, agent_id: str) -> dict[str, Any] | None:
     run = _run(c, agent_id, {**a, "chat": meta["id"]})
     with contextlib.suppress(Exception):
         session.expect_agent(c, agent_id, str(meta["id"]), t.chat_role)
+    _started_notice(c, t, a.get("key"))
     if run is not None and t.started:
         try:
             _resolve(t.started)(c, run, r)
@@ -1143,6 +1231,7 @@ def _continue_chat(c: str, agent_id: str, a: dict[str, Any], r: dict[str, Any], 
     run = _run(c, agent_id, {**snap, "chat": chat, "run": k})
     with contextlib.suppress(Exception):
         session.expect_agent(c, agent_id, chat, t.chat_role)
+    _started_notice(c, t, snap.get("key"))
     if run is not None and t.started:
         try:
             _resolve(t.started)(c, run, r)
@@ -1171,12 +1260,40 @@ def run_again(c: str, agent_id: str, by: str = "") -> Run | None:
                                 **({"continue": None} if was_cancelled else {}))
     run = _run(c, agent_id, snap)
     t = TYPES[str(snap["role"])]
+    _started_notice(c, t, snap.get("key"))
     if run is not None and t.started:
         try:
             _resolve(t.started)(c, run, request(c, str(snap.get("request") or "")) or {})
         except Exception:  # noqa: BLE001
             log.exception("%s: the %s's start handler failed for run %s", c, t.role, run.k)
     return run
+
+
+def _started_notice(c: str, t: Type, key: Any) -> None:
+    """An agent started (a run, a follow-up, a continuation): a notice of its earlier failure or refusal goes (module
+    note, notices), unless its role tells its own."""
+    from . import notices  # noqa: PLC0415
+
+    if key and not t.own_notices:
+        notices.cleared(c, key)
+
+
+def _ended_notice(c: str, t: Type | None, snap: dict[str, Any], status: str, report: str | None,
+                  cls: str | None = None) -> None:
+    """A run ended: a failed one is told in the foreground with its fix, with Open on its chat, and one that ended done
+    clears the agent's notice and that of its helpers' API errors (module note, notices), unless its role tells its
+    own."""
+    from . import notices, session  # noqa: PLC0415
+
+    key = snap.get("key")
+    if t is None or t.own_notices or not key:
+        return
+    if status == "failed":
+        notices.agent_failed(c, role=t.role, key=key, error=report, chat=str(snap.get("chat") or "") or None, cls=cls)
+    elif status == "done":
+        notices.cleared(c, key)
+        with contextlib.suppress(Exception):
+            notices.clear(c, session.helper_key(snap["id"]))
 
 
 def _bare(model: str) -> str:
@@ -1236,10 +1353,15 @@ def run_ended(c: str, agent_id: str, status: str, report: str | None, *, source:
     handed back or was stopped. A run that main's plan mode held at its end, and that left no work, failed too, with
     its role's line (_plan_end). A run that ended already (another signal of the same end) is left alone. True when
     this call ended it."""
+    cls = None  # the class of the API error that failed it (session.api_error_class), for its notice
     if source != "handback" and status != "stopped":
         error = api_error(c, agent_id)  # read first: the transcript's tail may hold the run's hand-back, which ends it
         if error:
             status, report = "failed", error
+            from . import session  # noqa: PLC0415
+
+            with contextlib.suppress(Exception):
+                cls = session.agent_error_class(c, agent_id)
     status, report = _plan_end(c, agent_id, status, report)
     with update(c) as state:
         a = files.registry(state).get(agent_id)
@@ -1255,6 +1377,7 @@ def run_ended(c: str, agent_id: str, status: str, report: str | None, *, source:
     log.info("%s: %s %s run %s ended %s (%s)", c, snap.get("role") or "agent", agent_id, snap.get("run"), status,
              source or "?")
     t = TYPES.get(str(snap.get("role") or ""))
+    _ended_notice(c, t, {**snap, "id": agent_id}, status, report, cls)  # before the chat's end: its lines stay last
     if snap.get("chat") and not (t is not None and t.keeps_chat):
         try:
             fields = {"stopped_by": snap.get("stopped_by")} if status == "stopped" and snap.get("stopped_by") else {}

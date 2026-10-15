@@ -17,7 +17,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
-from conftest import UI_KEY
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
@@ -32,8 +31,8 @@ TOKEN = "t0ken-of-this-install"  # server.json's, which the hooks prove they hol
 
 def _signed(token: str = TOKEN) -> tuple[dict[str, str], str]:
     """A hook's headers for a fresh nonce, and the proof the server's answer must carry."""
-    nonce = os.urandom(8).hex()
-    return hook_auth.headers(token, nonce), hook_auth.sign(token, "server", nonce)
+    nonce = hook_auth.new_nonce()
+    return hook_auth.headers(token, 80, nonce), hook_auth.sign(token, "server", nonce)
 
 
 def _record_token(home: Path, token: str = TOKEN, **extra) -> None:
@@ -191,15 +190,15 @@ def test_a_queued_message_leaves_the_statusline_on_the_monitor_route_and_when_an
 
 def test_the_permission_hook_waits_on_main_s_meta_until_the_browser_answers(monkeypatch, tmp_path):
     monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "thome"))
-    _record_token(tmp_path / "thome", ui_key=UI_KEY)
-    client = TestClient(__import__("app.main", fromlist=["app"]).app, base_url="http://127.0.0.1",
-                        headers=_signed()[0])
+    _record_token(tmp_path / "thome")
+    client = TestClient(__import__("app.main", fromlist=["app"]).app, base_url="http://127.0.0.1")
     session.attach(CORPUS, SID, _cwd(), None)
     body = {"cwd": _cwd(), "session": SID, "tool_name": "Bash",
             "tool_input": {"command": "touch x", "description": "Create x"}}
     answers: list = []
     with client:
-        t = threading.Thread(target=lambda: answers.append(client.post("/api/events/permission", json=body)))
+        t = threading.Thread(target=lambda: answers.append(client.post("/api/events/permission", json=body,
+                                                                       headers=_signed()[0])))
         t.start()
         for _ in range(100):
             held = (agents.meta_or_none(CORPUS, agents.MAIN_ID) or {}).get("permissions") or []
@@ -207,19 +206,21 @@ def test_the_permission_hook_waits_on_main_s_meta_until_the_browser_answers(monk
                 break
             time.sleep(0.05)
         assert held and held[0]["tool"] == "Bash" and held[0]["what"] == "Create x" and '"touch x"' in held[0]["input"]
-        # an answer is the analyst's browser's alone: without the cookie the page gets for the link's key it is refused
+        # an answer is the analyst's browser's alone: without the cookie the page gets for the link's code it is refused,
+        # the hook's proof notwithstanding
         r = client.post(f"/api/ws/{CORPUS}/permission", json={"id": held[0]["id"], "allow": True})
         assert r.status_code == 403
         t.join(0.2)
         assert t.is_alive(), "the hook still waits"
-        assert client.post("/api/ui/key", json={"key": UI_KEY}).status_code == 204
+        assert client.post("/api/ui/key", json={"code": hook_auth.mint(CORPUS)}).status_code == 204
         r = client.post(f"/api/ws/{CORPUS}/permission", json={"id": held[0]["id"], "allow": True})
         assert r.status_code == 200
         t.join(10)
         assert answers[0].status_code == 200 and answers[0].json() == {"id": held[0]["id"], "behavior": "allow"}
         assert not agents.meta_or_none(CORPUS, agents.MAIN_ID).get("permissions")
         # answered in the terminal: the session moved on, and the hook's wait ends with no decision
-        t = threading.Thread(target=lambda: answers.append(client.post("/api/events/permission", json=body)))
+        t = threading.Thread(target=lambda: answers.append(client.post("/api/events/permission", json=body,
+                                                                       headers=_signed()[0])))
         t.start()
         for _ in range(100):  # the server's loop registers the ask and then puts it on main's meta, apart from this thread
             if events._asks and (agents.meta_or_none(CORPUS, agents.MAIN_ID) or {}).get("permissions"):
@@ -233,23 +234,28 @@ def test_the_permission_hook_waits_on_main_s_meta_until_the_browser_answers(monk
         assert [(r["event"], r.get("tool"), r.get("answer")) for r in log] == [
             ("asked", "Bash", None), ("answered", None, "allow"), ("asked", "Bash", None), ("answered", None, events.GONE_ANSWER)]
         assert log[0]["what"] == "Create x" and log[0]["chat"] == "main" and log[1]["id"] == log[0]["id"]
-        assert client.post("/api/events/permission", json={**body, "session": "not-main"}).status_code == 409
+        assert client.post("/api/events/permission", json={**body, "session": "not-main"},
+                           headers=_signed()[0]).status_code == 409
 
 
 class _Stand:
     """The server's delivery routes as the watcher sees them: `pull` answers in order from `answers` (a (status, body)
     pair each; 204 once they run out; status 0 closes the connection without an answer, as a server that crashed while
-    holding the poll), after calling `on_pull`, if given; `ack`, the permission hook and the held hook are recorded.
+    holding the poll), after calling `on_pull`, if given; `ack`, the permission hook, the held hook and the mode hook
+    are recorded, the mode hook answered with `mode` and a request for a sign-in code (POST /api/ui/pair) with `pair`.
     Each answer proves `token` as thimble's server does (app/hook_auth.py), none with `token` None, as a process that
     took the port; `unproven` counts the requests that did not prove the token."""
 
     def __init__(self, answers: list[tuple[int, dict]], permission: tuple[int, dict] = (200, {"behavior": None}),
                  on_pull=None, held: tuple[int, dict] = (200, {"text": ""}), token: str | None = TOKEN,
-                 agents: tuple[int, dict] = (200, {})) -> None:
+                 agents: tuple[int, dict] = (200, {}), mode: tuple[int, dict] = (200, {}),
+                 pair: tuple[int, dict] = (200, {"code": "c0de", "expires_s": 300})) -> None:
         self.answers = list(answers)
         self.permission = permission
         self.held = held
         self.agents = agents
+        self.mode = mode
+        self.pair = pair
         self.sent: list[str] = []  # every request's header values
         self.on_pull = on_pull
         self.token = token
@@ -261,7 +267,8 @@ class _Stand:
             def _prove(self) -> None:
                 outer.sent.extend(self.headers.values())
                 nonce = self.headers.get(hook_auth.NONCE_HEADER) or ""
-                if outer.token and self.headers.get(hook_auth.AUTH_HEADER) != hook_auth.sign(outer.token, "hook", nonce):
+                want = hook_auth.request_proof(outer.token or "", self.server.server_port, nonce)
+                if outer.token and self.headers.get(hook_auth.AUTH_HEADER) != want:
                     outer.unproven += 1
                 if outer.token:
                     self.send_header(hook_auth.PROOF_HEADER, hook_auth.sign(outer.token, "server", nonce))
@@ -302,6 +309,10 @@ class _Stand:
                     return self._reply(*outer.held)
                 if path == "/api/agents":
                     return self._reply(*outer.agents)
+                if path == "/api/events/mode":
+                    return self._reply(*outer.mode)
+                if path == "/api/ui/pair":
+                    return self._reply(*outer.pair)
                 self._reply(*(outer.permission if path == "/api/events/permission" else (200, {})))
 
             def log_message(self, *a):
@@ -352,6 +363,8 @@ def test_the_server_answers_a_hook_route_only_to_a_request_that_proves_the_token
         assert client.get("/api/health").status_code == 200, "no other route asks for it"
         # a session started before the update to 0.6.0 calls 0.5.0's routes, which answer as the new ones, proof and all
         assert client.post("/api/channel/held", json=body, headers=wrong).status_code == 401
+        assert client.post("/api/channel/held", json=body, headers=good).status_code == 401, "a nonce is taken once"
+        good, proof = _signed()
         r = client.post("/api/channel/held", json=body, headers=good)
         assert r.status_code == 200 and r.headers[hook_auth.PROOF_HEADER] == proof
         assert set(events.OLD_PATHS.values()) <= {*hook_auth.HOOK_PATHS, *hook_auth.SHIM_PATHS, "/api/events/main",
@@ -364,21 +377,185 @@ def test_the_server_answers_a_hook_route_only_to_a_request_that_proves_the_token
 
 
 def test_main_s_stop_hook_shows_the_link_thimble_up_left_once_and_only_as_it_ends(tmp_path):
-    """/thimble prints no link into the model's context, since the link carries the key to the analyst's cookie
-    (cli.LINK_LINE): main's Stop hook shows the link `server up` left, once, as a systemMessage, which Claude Code shows
-    the analyst and not the model."""
-    link = "http://127.0.0.1:8300/?ws=mini#k=the-ui-key"
+    """/thimble prints no link into the model's context (cli.LINK_LINE): main's Stop hook shows the link `server up` left,
+    once, as a systemMessage, which Claude Code shows the analyst and not the model, with a sign-in code the server
+    makes as the hook shows it (POST /api/ui/pair for the link's workspace), so the file never holds one."""
+    link = "http://127.0.0.1:8300/?ws=mini"
     (tmp_path / "thome" / "links").mkdir(parents=True)
     (tmp_path / "thome" / "links" / SID).write_text(link)
     stop = {"session_id": SID, "cwd": "/data/mini", "hook_event_name": "Stop", "permission_mode": "default"}
     stand = _Stand([])
     try:
         assert _watch(tmp_path, stand.port, {**stop, "hook_event_name": "UserPromptSubmit"}, "--mode").stdout == ""
-        assert json.loads(_watch(tmp_path, stand.port, stop, "--mode").stdout) == {"systemMessage": f"thimble: {link}"}
+        assert not [x for x in stand.seen if x[1] == "/api/ui/pair"], "no code before the link is shown"
+        assert json.loads(_watch(tmp_path, stand.port, stop, "--mode").stdout) == {
+            "systemMessage": f"thimble: {link}#p=c0de"}
+        assert ("POST", "/api/ui/pair", {"ws": "mini"}) in stand.seen
         assert _watch(tmp_path, stand.port, stop, "--mode").stdout == "", "once"
         (tmp_path / "thome" / "links" / SID).write_text(f"{link}\nthimble: WARNING - a note for the terminal")
         assert json.loads(_watch(tmp_path, stand.port, stop, "--mode").stdout) == {
-            "systemMessage": f"thimble: {link}\nthimble: WARNING - a note for the terminal"}, "the notes under the link"
+            "systemMessage": f"thimble: {link}#p=c0de\nthimble: WARNING - a note for the terminal"}, "the notes under it"
+        (tmp_path / "thome" / "links" / SID).write_text("http://127.0.0.1:8300/")
+        assert json.loads(_watch(tmp_path, stand.port, stop, "--mode").stdout) == {
+            "systemMessage": "thimble: http://127.0.0.1:8300/#p=c0de"}
+        assert stand.seen[-2:][0] == ("POST", "/api/ui/pair", {"ws": ""}), "the start page's code"
+    finally:
+        stand.close()
+
+
+def test_without_a_sign_in_code_the_stop_hook_shows_the_link_and_how_to_sign_in(tmp_path):
+    """A server that gives no code, by an error or by an answer without the server's proof: the hook shows the plain
+    link, which opens thimble read-only in a browser that is not signed in, and first under it the line that says how
+    to sign one in, before the notes."""
+    link = "http://127.0.0.1:8300/?ws=mini"
+    links = tmp_path / "thome" / "links"
+    links.mkdir(parents=True)
+    stop = {"session_id": SID, "cwd": "/data/mini", "hook_event_name": "Stop"}
+    watcher = _module()
+    want = f"thimble: {link}\n{watcher.NO_CODE_LINE}\nthimble: a note"
+    for stand in (_Stand([], pair=(500, {})), _Stand([], token=None)):
+        try:
+            (links / SID).write_text(f"{link}\nthimble: a note")
+            out = _watch(tmp_path, stand.port, stop, "--mode").stdout
+            assert json.loads(out) == {"systemMessage": want}, stand.pair
+        finally:
+            stand.close()
+
+
+def test_notes_the_server_left_with_no_link_show_under_main_s_next_reply_and_mint_no_code(tmp_path):
+    """The server leaves lines for main's terminal with no link (session.tell_terminal: an empty first line, such as a
+    new browser's sign-in): the Stop hook shows them and asks for no code."""
+    (tmp_path / "thome" / "links").mkdir(parents=True)
+    (tmp_path / "thome" / "links" / SID).write_text("\nthimble: a browser signed in to thimble at 10:42.\nthimble: two")
+    stop = {"session_id": SID, "cwd": "/data/mini", "hook_event_name": "Stop"}
+    stand = _Stand([])
+    try:
+        assert json.loads(_watch(tmp_path, stand.port, stop, "--mode").stdout) == {
+            "systemMessage": "thimble: a browser signed in to thimble at 10:42.\nthimble: two"}
+        assert not [x for x in stand.seen if x[1] == "/api/ui/pair"]
+        assert not (tmp_path / "thome" / "links" / SID).exists()
+    finally:
+        stand.close()
+
+
+def test_the_server_s_terminal_notes_land_after_the_link_or_on_their_own(tmp_path, monkeypatch):
+    """session.tell_terminal appends a line to the links file of the workspace's attached main, as a note after the link
+    /thimble left, or after an empty first line in a file of its own, readable by its owner alone; with no main
+    attached it writes nothing."""
+    home = tmp_path / "thome"
+    monkeypatch.setenv("THIMBLE_HOME", str(home))
+    assert session.tell_terminal(CORPUS, "thimble: one") is False
+    session.attach(CORPUS, SID, _cwd(), None)
+    assert session.tell_terminal(CORPUS, "thimble: one") is True
+    path = home / "links" / SID
+    assert path.read_text() == "\nthimble: one" and path.stat().st_mode & 0o077 == 0
+    assert session.tell_terminal(CORPUS, "thimble: two")
+    assert path.read_text() == "\nthimble: one\nthimble: two"
+    path.write_text("http://127.0.0.1:8300/?ws=mini")  # what /thimble leaves (cli.leave_link)
+    assert session.tell_terminal(CORPUS, "thimble: three")
+    assert path.read_text() == "http://127.0.0.1:8300/?ws=mini\nthimble: three"
+
+
+def _module():
+    """The watcher, loaded as a module (its shell line is a string to Python)."""
+    import importlib.machinery
+    import importlib.util
+
+    loader = importlib.machinery.SourceFileLoader("thimble_watch_for_test", str(WATCHER))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
+def _gated(tmp_path: Path, args: tuple[str, ...] = (), **env: str) -> bool:
+    """Whether a copy of the watcher, whose bin/thimble-python only records that it ran, starts Python for a hook run
+    with `env` (and THIMBLE_HOME, the test's)."""
+    bin_dir = tmp_path / "gate-bin"
+    bin_dir.mkdir(exist_ok=True)
+    ran = tmp_path / "python-ran"
+    ran.unlink(missing_ok=True)
+    (bin_dir / ".thimble-watch").write_text(WATCHER.read_text())
+    (bin_dir / ".thimble-watch").chmod(0o755)
+    (bin_dir / "thimble-python").write_text(f"#!/bin/sh\ntouch '{ran}'\n")
+    (bin_dir / "thimble-python").chmod(0o755)
+    base = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(tmp_path), "THIMBLE_HOME": str(tmp_path / "th")}
+    subprocess.run([str(bin_dir / ".thimble-watch"), *args], input="{}", capture_output=True, text=True,
+                   env={**base, **env}, timeout=10, check=False)
+    return ran.exists()
+
+
+def test_the_watcher_starts_python_only_in_a_folder_thimble_opened(tmp_path):
+    """The plugin's hooks run in every Claude Code session: in a folder with no marker in <thimble home>/active (the
+    path with each / made %, cli.mark_active) the watcher exits in its shell line, before Python starts. The marker lets
+    it through, and so do terminal mode (THIMBLE_WS), a session that names no folder and a path over 200 characters,
+    which gets no marker; --stream, --scratch and --work-budget are never gated. A session thimble starts itself
+    exits there as before."""
+    folder = "/data/some project/mini"
+    assert not _gated(tmp_path, CLAUDE_PROJECT_DIR=folder)
+    assert not _gated(tmp_path, ("--mode",), CLAUDE_PROJECT_DIR=folder)
+    active = tmp_path / "th" / "active"
+    active.mkdir(parents=True)
+    (active / folder.replace("/", "%")).touch()
+    assert _gated(tmp_path, CLAUDE_PROJECT_DIR=folder)
+    assert _gated(tmp_path, ("--mode",), CLAUDE_PROJECT_DIR=folder)
+    assert not _gated(tmp_path, CLAUDE_PROJECT_DIR=folder + "/sub"), "a marker is for its folder alone"
+    assert _gated(tmp_path, CLAUDE_PROJECT_DIR="/elsewhere", THIMBLE_WS="/w")
+    assert _gated(tmp_path)
+    assert _gated(tmp_path, CLAUDE_PROJECT_DIR="/" + "x" * 200)
+    for flag in ("--stream", "--scratch", "--work-budget"):
+        assert _gated(tmp_path, (flag,), CLAUDE_PROJECT_DIR="/elsewhere"), flag
+    assert not _gated(tmp_path, CLAUDE_PROJECT_DIR=folder, THIMBLE_SESSION="s", THIMBLE_SESSION_TOKEN="t")
+    home_default = tmp_path / ".thimble" / "active"
+    home_default.mkdir(parents=True)
+    (home_default / "%other").touch()
+    base = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(tmp_path)}
+    bin_dir = tmp_path / "gate-bin"
+    ran = tmp_path / "python-ran"
+    ran.unlink(missing_ok=True)
+    subprocess.run([str(bin_dir / ".thimble-watch")], input="{}", capture_output=True, text=True, timeout=10,
+                   env={**base, "CLAUDE_PROJECT_DIR": "/other"}, check=False)
+    assert ran.exists(), "without THIMBLE_HOME the marker is in ~/.thimble"
+
+
+def test_the_watcher_reaches_the_local_server_past_a_shell_s_proxy(tmp_path):
+    """A shell's HTTP_PROXY would send urllib's requests to 127.0.0.1 through the proxy: the watcher opens its requests
+    without one (LOOPBACK), so the mode hook still reaches the server and the Stop hook gets its code."""
+    link = "http://127.0.0.1:8300/?ws=mini"
+    (tmp_path / "thome" / "links").mkdir(parents=True)
+    (tmp_path / "thome" / "links" / SID).write_text(link)
+    stop = {"session_id": SID, "cwd": "/data/mini", "hook_event_name": "Stop", "permission_mode": "default"}
+    stand = _Stand([], mode=(200, {"terminal": "thimble: the line"}))
+    proxy = {"HTTP_PROXY": "http://127.0.0.1:9", "http_proxy": "http://127.0.0.1:9", "NO_PROXY": "", "no_proxy": ""}
+    try:
+        out = _watch(tmp_path, stand.port, stop, "--mode", extra=proxy).stdout
+        assert json.loads(out) == {"systemMessage": f"thimble: {link}#p=c0de\nthimble: the line"}
+    finally:
+        stand.close()
+
+
+def test_the_mode_hook_shows_the_line_the_server_answers_after_the_link_in_one_system_message(tmp_path):
+    """The server answers the mode hook with the line main's terminal shows once per session in Manual mode
+    (events.mode_route `terminal`): the hook shows it as its systemMessage, on a turn's start and on its end, after the
+    link on a Stop that has one, in the one systemMessage a hook gives; a subagent's report is never sent."""
+    line = "thimble: Claude Code is in Manual mode."
+    link = "http://127.0.0.1:8300/?ws=mini"
+    turn = {"session_id": SID, "cwd": "/data/mini", "hook_event_name": "UserPromptSubmit", "permission_mode": "default"}
+    stand = _Stand([], mode=(200, {"terminal": line}))
+    try:
+        assert json.loads(_watch(tmp_path, stand.port, turn, "--mode").stdout) == {"systemMessage": line}
+        sent = {"cwd": "/data/mini", "session": SID, "permission_mode": "default"}
+        assert ("POST", "/api/events/mode", sent) in stand.seen
+        (tmp_path / "thome" / "links").mkdir(parents=True)
+        (tmp_path / "thome" / "links" / SID).write_text(link)
+        stop = {**turn, "hook_event_name": "Stop"}
+        got = json.loads(_watch(tmp_path, stand.port, stop, "--mode").stdout)
+        assert got == {"systemMessage": f"thimble: {link}#p=c0de\n{line}"}
+        stand.mode = (200, {})
+        assert _watch(tmp_path, stand.port, stop, "--mode").stdout == ""
+        before = len(stand.seen)
+        assert _watch(tmp_path, stand.port, {**turn, "agent_id": "a1"}, "--mode").stdout == ""
+        assert len(stand.seen) == before, "a subagent's mode is not reported"
     finally:
         stand.close()
 
@@ -410,6 +587,31 @@ def test_the_hooks_do_nothing_without_server_json_or_with_a_server_that_cannot_p
     finally:
         stand.close()
     assert json.loads(r.stdout)["hookSpecificOutput"]["decision"] == {"behavior": "allow"} and stand.unproven == 0
+
+
+def test_the_permission_hook_sends_claude_code_s_suggestions_and_passes_on_what_always_allow_names(tmp_path):
+    """The permission hook relays the request's permission_suggestions, and an answer from the card's "Always allow"
+    names them as updatedPermissions, which the hook passes on in its decision, as Claude Code's own "Yes, and don't ask
+    again" applies them; a plain allow and a deny carry none."""
+    rules = [{"type": "addRules", "rules": [{"toolName": "mcp__plugin_thimble_thimble__add_card"}], "behavior": "allow",
+              "destination": "localSettings"}]
+    inp = {"session_id": SID, "cwd": "/data/mini", "tool_name": "mcp__plugin_thimble_thimble__add_card",
+           "tool_input": {"question": "How many files?"}, "hook_event_name": "PermissionRequest",
+           "permission_suggestions": rules}
+
+    def decision() -> dict:
+        return json.loads(_watch(tmp_path, stand.port, inp, "--permission").stdout)["hookSpecificOutput"]["decision"]
+
+    stand = _Stand([], permission=(200, {"id": "h1", "behavior": "allow", "updatedPermissions": rules}))
+    try:
+        assert decision() == {"behavior": "allow", "updatedPermissions": rules}
+        assert [b["suggestions"] for _, p, b in stand.seen if p == "/api/events/permission"] == [rules]
+        stand.permission = (200, {"id": "h2", "behavior": "allow"})
+        assert decision() == {"behavior": "allow"}
+        stand.permission = (200, {"id": "h3", "behavior": "deny", "updatedPermissions": rules})
+        assert "updatedPermissions" not in decision()
+    finally:
+        stand.close()
 
 
 def test_the_held_hook_lets_each_hand_back_through_and_still_delivers_the_held_events(tmp_path):

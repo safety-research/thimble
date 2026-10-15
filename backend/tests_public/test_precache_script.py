@@ -35,12 +35,11 @@ def test_it_waits_for_the_module_s_accepted_hello(tmp_path):
     assert pc.hello(tmp_path)["session"] == "s"
 
 
-def test_start_is_the_gate_s_defaults_and_the_run_s_values_only_when_named():
+def test_start_sends_no_switch_and_the_run_s_values_only_when_named():
     pc = _script()
-    body = pc.start_body(pc.options(["t", "c", "l"]))
-    assert body == {"text": "", "deck": True, "views": True, "report": True, "critique": False}
-    named = pc.start_body(pc.options(["t", "c", "l", "--no-report", "--critique", "--model", "opus", "--effort", "max"]))
-    assert named["report"] is False and named["critique"] is True and (named["model"], named["effort"]) == ("opus", "max")
+    assert pc.start_body(pc.options(["t", "c", "l"])) == {"text": ""}
+    named = pc.start_body(pc.options(["t", "c", "l", "--model", "opus", "--effort", "max"]))
+    assert named == {"text": "", "model": "opus", "effort": "max"}
 
 
 def test_the_quit_reaches_exit_and_stop_tasks_with_the_cursor_alone():

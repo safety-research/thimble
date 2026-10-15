@@ -322,7 +322,7 @@ const KIT_VIEW = (n = 3000) => `<!doctype html><html><head><style>${KIT_TOKENS} 
 <div class="top"><span id="colour"></span></div><div id="list"></div>
 <script>
 const rows = Array.from({ length: ${n} }, (_, i) => ({ kind: (i * 7) % 11 < 3 ? 'With links' : 'Text only', ref: 'm.jsonl#L' + (i + 1) }))
-window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }], strip: '#list', onChange: draw })
+window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }], initial: 'kind', strip: '#list', onChange: draw })
 function draw() {
   document.getElementById('list').innerHTML = rows.map((r) => '<div class="msg" data-anchor="' + r.ref + '"' + colour.attr(r) + '>message ' + r.ref.slice(9) + '</div>').join('')
 }

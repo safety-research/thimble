@@ -231,11 +231,13 @@ def test_an_agent_s_own_sandbox_switch_runs_it_outside_the_sandbox_without_the_e
     """The dev agent's own `sandbox: off` (code tickets keep their fence keys) runs it outside the sandbox without the
     enforce refusal, and so does a writer's for an extension's program that runs the writer, since a program is no
     subagent of main and keeps its agent's box keys. thimble's own writer does not read it: the writers share main's
-    fence. A value the key does not take is an error for either agent."""
+    fence. A value the key does not take is an error for either agent. (sandbox.enforce is off by default, so the test
+    turns it on.)"""
     monkeypatch.setattr(userconf, "sandbox_runs", lambda refresh=False: False)
+    _config({"sandbox": {"enforce": True}})
     with pytest.raises(userconf.ConfigError):
         userconf.session(CORPUS, "dev")
-    _config({"agents": {"dev": {"sandbox": "off"}, "writer": {"sandbox": "off"}}})
+    _config({"sandbox": {"enforce": True}, "agents": {"dev": {"sandbox": "off"}, "writer": {"sandbox": "off"}}})
     assert not userconf.session(CORPUS, "dev").sandboxed
     assert not userconf.session(CORPUS, "writer", program=True).sandboxed
     with pytest.raises(userconf.ConfigError):
@@ -257,8 +259,9 @@ def test_a_program_s_token_works_for_its_role_s_own_tools_only_and_only_while_it
     hook_auth.grant(run.token_id, run.token, run.allows)
 
     def headers() -> dict[str, str]:
-        nonce = os.urandom(8).hex()
-        return {**hook_auth.headers(run.token, nonce), hook_auth.AGENT_HEADER: run.token_id}
+        nonce = os.urandom(8).hex()  # as docs/agents.md says: a fresh random string, bound to no port or time
+        return {hook_auth.NONCE_HEADER: nonce, hook_auth.AUTH_HEADER: hook_auth.sign(run.token, "hook", nonce),
+                hook_auth.AGENT_HEADER: run.token_id}
 
     body = {"args": {"group": "all"}, "cwd": "/nowhere", "session": "main-would-be-refused"}
     with TestClient(app) as client:
@@ -283,8 +286,9 @@ def test_settings_name_each_role_s_agent_and_its_consent_settings(tmp_path, work
     rows = ledger.with_features({}, CORPUS)["agents"]
     assert rows["main"]["additions"] == ["survey"]
     assert rows["orient"]["way"] == "sdk" and rows["orient"]["extension"] == "survey"
-    assert (rows["main"]["network"], rows["main"]["data"], rows["main"]["sandbox"]) == ("on", "off", "on"), \
-        "main's fence, which thimble's agents share: the orientation's keys"
+    assert (rows["main"]["web"], rows["main"]["data"]) == ("ask", "off"), \
+        "thimble's rules for main and its agents: the orientation's keys"
+    assert not {"sandbox", "network"} & set(rows["main"]), "thimble adds no sandbox to main's session"
     assert rows["critic"]["web"] == "off" and "network" not in rows["critic"], "a critic's own fence keys are ignored"
     assert (rows["dev"]["network"], rows["dev"]["sandbox"]) == ("off", "off"), "the code tickets' own fence"
     assert rows["critic"]["way"] == "thimble" and rows["critic"]["config"] == "agents.critic"
@@ -318,7 +322,7 @@ async def test_a_command_harness_runs_the_orientation_through_thimble_s_tools(tm
     active.append(_extension(tmp_path, "harn", {"orientation": {"description": "A harness.",
                                                                 "command": ["python", "orient.py"]}},
                              {"agents/orientation/orient.py": HARNESS}))
-    res = await tools.call(CORPUS, "start_orientation", {"brief": "count the runs", "propose_views": False})
+    res = await tools.call(CORPUS, "start_orientation", {"brief": "count the runs"})
     assert not res.is_error, res.text
     rec = await _until(lambda: (r := orientation.read_run(CORPUS)) and r.get("status") in ("done", "failed") and r,
                        what="the orientation to end")
@@ -332,6 +336,13 @@ async def test_a_command_harness_runs_the_orientation_through_thimble_s_tools(tm
     assert "a stray print" not in log_text
     meta = json.loads((config.workspace_dir(CORPUS) / "chats" / f"{chat}.meta.json").read_text())
     assert meta["status"] == "done" and meta["way"] == "command" and meta["extension"] == "harn"
+    # the program ran without a sandbox: its thread says so, and one notice per extension, with Settings to turn it off
+    from app import notices
+
+    told = [n for n in notices.open_notices(CORPUS) if n.get("key") == "no-box:harn"]
+    assert len(told) == 1 and told[0]["kind"] == "sandbox" and told[0]["agent"] == "Extension: harn"
+    assert told[0]["action"] == notices.SETTINGS
+    assert told[0]["text"] == harness.NO_BOX_NOTICE.format(name="harn") and "`thimble doctor --verbose`" in told[0]["text"]
 
 
 async def test_a_failing_program_fails_its_run_with_the_end_of_its_stderr(tmp_path, data_tmp, workspaces_tmp, active,
@@ -383,6 +394,9 @@ thimble.serve(run)
     assert rec["status"] == "done", rec
     got = json.loads(orientation.summary(CORPUS))
     assert got["secret"] == "PermissionError" and got["corpus"] != "ok" and got["work"] == "ok", got
+    from app import notices
+
+    assert not [n for n in notices.open_notices(CORPUS) if str(n.get("key")).startswith("no-box:")], "boxed: no notice"
 
 
 def _free_port() -> int:
@@ -428,8 +442,8 @@ def test_the_example_sdk_orientation_runs_end_to_end_on_a_copy_of_a_corpus(tmp_p
     home = Path(os.environ["THIMBLE_HOME"])
     shutil.copytree(EXAMPLE, home / "extensions" / "orient-sdk")
     active.append(home / "extensions" / "orient-sdk")
-    r = httpx.post(f"{base}/api/tools/start_orientation", headers=plugin_headers(), timeout=60,
-                   json={"args": {"brief": "", "propose_views": False}, "workspace": CORPUS, "actor": "analyst"})
+    r = httpx.post(f"{base}/api/tools/start_orientation", headers=plugin_headers(base), timeout=60,
+                   json={"args": {"brief": ""}, "workspace": CORPUS, "actor": "analyst"})
     assert r.status_code == 200 and not r.json()["is_error"], r.text
     end = time.monotonic() + 90
     rec: dict = {}
@@ -605,7 +619,7 @@ async def test_a_javascript_command_harness_runs_the_orientation_with_thimble_s_
     active.append(_extension(tmp_path, "jsharn", {"orientation": {"description": "A JavaScript harness.",
                                                                   "command": ["node", "orient.mjs"]}},
                              {"agents/orientation/orient.mjs": JS_HARNESS}))
-    res = await tools.call(CORPUS, "start_orientation", {"brief": "count the runs", "propose_views": False})
+    res = await tools.call(CORPUS, "start_orientation", {"brief": "count the runs"})
     assert not res.is_error, res.text
     rec = await _until(lambda: (r := orientation.read_run(CORPUS)) and r.get("status") in ("done", "failed") and r,
                        what="the orientation to end")
@@ -635,6 +649,25 @@ def test_a_program_s_sessions_do_their_own_work_unasked_where_thimble_s_own_sess
     view = tmp_path / "views" / "v"
     dev = settings_of("dev", writes=(view,))
     assert f"Edit(/{view}/**)" in dev["permissions"]["allow"] and str(view) in dev["sandbox"]["filesystem"]["allowWrite"]
+
+
+def test_a_program_s_session_loads_thimble_s_plugin_once(tmp_path, workspaces_tmp, monkeypatch):
+    """A program's session loads thimble's plugin from --plugin-dir alone: its --settings turn off each thimble@* the
+    analyst's user, project or local settings enable, which would load a second MCP server and second hooks; other
+    plugins stay as they are."""
+    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
+    cc = tmp_path / "cc"
+    cc.mkdir()
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(cc))
+    (cc / "settings.json").write_text(json.dumps({"enabledPlugins": {"thimble@thimble": True, "other@x": True,
+                                                                     "thimble@old": False}}))
+    local = config.corpus_dir(CORPUS) / ".claude"
+    local.mkdir(exist_ok=True)
+    (local / "settings.local.json").write_text(json.dumps({"enabledPlugins": {"thimble@local": True}}))
+    argv = _session_argv(tmp_path, ["-p"])
+    settings = json.loads(argv[argv.index("--settings") + 1])
+    assert settings["enabledPlugins"] == {"thimble@thimble": False, "thimble@local": False}
+    assert argv[argv.index("--plugin-dir") + 1].endswith("plugin")
 
 
 def _session_argv(tmp_path, argv: list[str]) -> list[str]:
@@ -730,8 +763,8 @@ async def run(input):
 '''
     active.append(_extension(tmp_path, "pushy", {"orientation": {"description": "Pushes.", "sdk": "o.py"}},
                              {"agents/orientation/o.py": program}))
-    r = httpx.post(f"{base}/api/tools/start_orientation", headers=plugin_headers(), timeout=60,
-                   json={"args": {"brief": "", "propose_views": False}, "workspace": CORPUS, "actor": "analyst"})
+    r = httpx.post(f"{base}/api/tools/start_orientation", headers=plugin_headers(base), timeout=60,
+                   json={"args": {"brief": ""}, "workspace": CORPUS, "actor": "analyst"})
     assert r.status_code == 200 and not r.json()["is_error"], r.text
     end = time.monotonic() + 90
     rec: dict = {}
@@ -754,7 +787,7 @@ def test_a_program_s_chat_a_previous_server_left_running_ends_stopped_and_frees_
     from app import agents
 
     prog = agents.new_agent(CORPUS, orientation.ROLE, "Orientation", way="sdk", extension="x", announce=False)
-    orientation.started(CORPUS, prog["id"], passes=["final"])
+    orientation.started(CORPUS, prog["id"])
     own = agents.new_agent(CORPUS, "writer", "Write d", announce=False)
     assert orientation.active(CORPUS)
     from fastapi.testclient import TestClient
@@ -764,7 +797,7 @@ def test_a_program_s_chat_a_previous_server_left_running_ends_stopped_and_frees_
     with TestClient(app):
         assert agents.read_meta(CORPUS, prog["id"])["status"] == "stopped", "the server's start closes it"
     agents.update_agent(CORPUS, prog["id"], status="running")
-    orientation.started(CORPUS, prog["id"], passes=["final"])
+    orientation.started(CORPUS, prog["id"])
     assert harness.mark_left() == [f"{CORPUS}/{prog['id']}"]
     assert agents.read_meta(CORPUS, prog["id"])["status"] == "stopped"
     assert agents.read_meta(CORPUS, own["id"])["status"] == "running", "thimble's own sessions recover their own way"

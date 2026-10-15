@@ -32,7 +32,7 @@ import { DocChip, GroupChip, LabelChip } from './SurfaceChips'
 import { ViewChip } from './ViewChip'
 import { failureText, ReportProblemButton } from '../shell/ProblemReport'
 import { RefText } from './markdown'
-import { NO_STOP_LINE, PAUSED_LINE, STOP_DONE_LINE, isSubagent, runValues, stopFailedLine, stoppedLine, valuesText } from './subagent'
+import { MAIN_ESC_LINE, NO_STOP_LINE, PAUSED_LINE, STOP_DONE_LINE, isSubagent, mainStopFailedLine, runValues, stopFailedLine, stoppedLine, valuesText } from './subagent'
 
 const REFETCH_DEBOUNCE_MS = 150
 /** The roles of thimble's agents whose card lists their own subagents as steps and carries Stop: the orientation, a
@@ -121,9 +121,9 @@ export function openLabel(ws: string, name: string) {
     .catch(() => showTab('files'))
 }
 
-/** The section rows of what a run made: one per surface it landed on. `writer` is the writer of the orientation's
- * report pass, shown under Report with its document's chip or its progress. */
-export function madeSections(ws: string, made: Made, opts: { report?: string | null; writer?: OrientWriter | null } = {}): ToolSection[] {
+/** The section rows of what a run made: one per surface it landed on. `writer` is the writer of the report pass of an
+ * orientation from before 0.8.0 (its meta's `orient`), shown under Report with its document's chip or its progress. */
+export function madeSections(ws: string, made: Made, opts: { writer?: OrientWriter | null } = {}): ToolSection[] {
   const out: ToolSection[] = []
   if (made.views.length) {
     out.push({
@@ -181,7 +181,7 @@ export function madeSections(ws: string, made: Made, opts: { report?: string | n
     })
   }
   const writer = opts.writer ?? null
-  const docs = [...new Set([...made.docs, ...(opts.report ? [opts.report] : []), ...(writer ? [writer.doc] : [])])]
+  const docs = [...new Set([...made.docs, ...(writer ? [writer.doc] : [])])]
   if (docs.length) {
     out.push({
       key: 'report',
@@ -216,8 +216,6 @@ export interface AgentCardProps {
   log?: { meta: ChatMeta | null; records: readonly ChatRecord[]; error: string | null }
   /** open on its steps while it runs (the orientation in its own thread) */
   openWhileRunning?: boolean
-  /** a document the run's work led to, listed under Report (the orientation's report pass) */
-  report?: string | null
   /** the orientation's run the card stands for: 0 its first, then each follow-up; unset, its whole session */
   run?: number
   /** a running session's Stop shows on the card; its own thread has it on the composer instead */
@@ -227,24 +225,27 @@ export interface AgentCardProps {
   briefAbove?: boolean
 }
 
-/** The browser's Stop of one of thimble's agents (the orientation, a writer, a check's run): its chat is interrupted
- * (backend agents.interrupt_route), which stops it through thimble's plugin. A Stop that found the agent ended already
- * counts as done; one thimble could not pass on says how to stop it in the terminal. The analyst's own subagent of main,
- * which only main can stop, is asked of main, and a toast says so. Resolves true when the stop went through, was done
- * already or was asked of main, false otherwise. */
+/** The browser's Stop of one of thimble's agents (the orientation, a writer, a check's run), of main's turn or of a side
+ * thread's fork: its chat is interrupted (backend agents.interrupt_route), which stops it through thimble's plugin. A
+ * Stop that found it ended already counts as done; one thimble could not pass on says how to stop it in the terminal,
+ * for main with Esc (MAIN_ESC_LINE, which is all it says when thimble's module does not run in main's session). The
+ * analyst's own subagent of main, which only main can stop, is asked of main, and a toast says so. Resolves true when
+ * the stop went through, was done already or was asked of main, false otherwise. */
 export function stopSession(ws: string, chat: string, role: string): Promise<boolean> {
   track('chat-interrupt', { target: `chat:${chat}`, detail: { role } })
+  const main = chat === 'main'
+  const failed = (reason: string) => (main && !reason ? { text: MAIN_ESC_LINE } : { text: main ? mainStopFailedLine(reason) : stopFailedLine(reason), kind: 'error' as const })
   return api
     .interrupt(ws, chat)
     .then((r) => {
       if (r.stopped) return (r.done && bus.emit('toast', { text: STOP_DONE_LINE }), true)
       if (r.asked === 'main') return (bus.emit('toast', { text: 'Asked main to stop it.' }), true)
-      if (r.kind) return (bus.emit('toast', { text: stopFailedLine(r.reason ?? ''), kind: 'error' }), false)
+      if (r.kind) return (bus.emit('toast', failed(r.kind === 'no-module' && main ? '' : (r.reason ?? ''))), false)
       // the server answers `stopped: false` when it runs nothing for this chat, which would otherwise look as if Stop
       // had worked
       return (bus.emit('toast', { text: 'Could not stop it: thimble runs nothing for it.', kind: 'error' }), false)
     })
-    .catch((e: Error) => (bus.emit('toast', { text: stopFailedLine(e.message), kind: 'error' }), false))
+    .catch((e: Error) => (bus.emit('toast', failed(e.message)), false))
 }
 
 /** Write again on a writer that main's quit stopped: its request made anew as a click (subagents.again). */
@@ -425,7 +426,7 @@ function useUndoRun(ws: string, chat: string, run: number | undefined, want: boo
   return want && top === `${chat}/${run}`
 }
 
-function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = false, report, run, stopHere = true, briefAbove = false }: AgentCardProps & { log: NonNullable<AgentCardProps['log']> }) {
+function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = false, run, stopHere = true, briefAbove = false }: AgentCardProps & { log: NonNullable<AgentCardProps['log']> }) {
   const { meta, records, error } = log
   const all = useMemo(() => foldRecords(records), [records])
   // the run the card stands for, and whether a later one followed it (an earlier run has ended, whatever the chat's
@@ -466,14 +467,16 @@ function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = fals
   }, [running, chat, meta, metas])
   const waiting = !!waitingFor
   // the orientation's cards that name no group are in its deck (backend tools.default_group), so they count there; a
-  // view it proposed that was dropped when the analyst stopped it is not among what it made
+  // view an orientation from before 0.8.0 proposed that was dropped when the analyst stopped it is not among what it
+  // made
   const proposals = useProposals(ws)
   const made = useMemo(() => withoutDropped(role === 'orient' ? orientMade(madeBy(rows)) : madeBy(rows), proposals), [rows, role, proposals])
   const brief = useMemo(
     () => (followUp ? scoped!.messages.map(leadText).join('\n\n') : stripHarness(meta?.brief?.trim() || rows.find((r) => r.kind === 'user')?.text.trim() || '') || null),
     [followUp, scoped, meta?.brief, rows],
   )
-  // the writer of its report pass, which its Report section carries (the card for a run, that run's; else the latest)
+  // the writer of its report pass (an orientation from before 0.8.0), which its Report section carries (the card for a
+  // run, that run's; else the latest)
   const writer = useMemo(() => (role === 'orient' && metas ? orientWriterOf(orientWriters(metas.values()), chat, run) : null), [role, metas, chat, run])
   const [open, setOpen] = useState<boolean | null>(null)
   const shownOpen = open ?? (openWhileRunning && running)
@@ -533,7 +536,7 @@ function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = fals
         if (o) track('agent-row-expand', { target: `chat:${chat}`, detail: { role } })
         setOpen(o)
       }}
-      sections={madeSections(ws, made, { report, writer })}
+      sections={madeSections(ws, made, { writer })}
     />
   )
   if (!briefAbove || !brief) return card
@@ -547,31 +550,6 @@ function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = fals
       {card}
     </>
   )
-}
-
-/** The report the orientation's report pass wrote, once it is generated after the orientation began; null before. */
-function useOrientReport(ws: string, since: string | null | undefined): string | null {
-  const [slug, setSlug] = useState<string | null>(null)
-  useEffect(() => {
-    if (!since) return
-    let alive = true
-    // the written document, or its frame before a write
-    const look = () =>
-      api
-        .frame(ws, 'report')
-        .then((d) => {
-          const at = d.generated_at
-          if (alive && at && !d.partial && !d.frame && Date.parse(at) >= Date.parse(since)) setSlug('report')
-        })
-        .catch(() => undefined)
-    void look()
-    const off = bus.on('report', (e) => e.slug === 'report' && (e.status === 'generated' || e.status === 'verified') && void look())
-    return () => {
-      alive = false
-      off()
-    }
-  }, [ws, since])
-  return slug
 }
 
 /** Claude Code's API error line in a failed orientation's result, or null. Pure. */
@@ -590,18 +568,21 @@ export function failedLine(result: string | null | undefined): string {
 }
 
 /** Where the orientation finished, in main: what its first run left for review, then its card. A follow-up has a card of
- * its own where main asked for it. */
+ * its own where main asked for it. A report counts as the orientation's only when its report pass wrote it (a writer
+ * whose meta names the orientation, from before 0.8.0); since 0.8.0 the analyst asks for a report, which is theirs. */
 export function OrientLanding({ ws, chat }: { ws: string; chat: string }) {
   const log = useAgentLog(ws, chat)
   const runs = useMemo(() => orientRuns(foldRecords(log.records)), [log.records])
   const rows = runs[0].rows
   const proposals = useProposals(ws)
   const made = useMemo(() => withoutDropped(orientMade(madeBy(rows)), proposals), [rows, proposals])
-  const report = useOrientReport(ws, log.meta?.created_at)
+  const { metas } = useContext(ThreadsContext)
+  const writer = useMemo(() => (metas ? orientWriterOf(orientWriters(metas.values()), chat, 0) : null), [metas, chat])
+  const report = writer?.status === 'done'
   const status = runs.length > 1 ? 'done' : (log.meta?.status ?? 'running')
   // the cards for review are the deck's, counted as the canvas counts them: a label's card is one of them
   const cards = deckCards(made) || madeCards(made)
-  const list = reviewList({ views: made.views.length, cells: cards, labels: made.labels.length, report: !!report })
+  const list = reviewList({ views: made.views.length, cells: cards, labels: made.labels.length, report })
   const apiLine = status === 'failed' ? failedApiLine(log.meta?.result) : null
   return (
     <div className="chat-msg chat-landing" data-chat={chat}>
@@ -611,13 +592,13 @@ export function OrientLanding({ ws, chat }: { ws: string; chat: string }) {
         {list && (
           <>
             {' thimble has '}
-            <ReviewCounts views={made.views.length} cells={cards} labels={made.labels.length} report={!!report} />
+            <ReviewCounts views={made.views.length} cells={cards} labels={made.labels.length} report={report} />
             {' for you to review.'}
           </>
         )}
       </p>
       {apiLine && <ApiErrorCard line={apiLine} />}
-      <AgentCard ws={ws} chat={chat} role="orient" title="Orientation" log={log} report={report} run={0} />
+      <AgentCard ws={ws} chat={chat} role="orient" title="Orientation" log={log} run={0} />
     </div>
   )
 }

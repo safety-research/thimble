@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from conftest import UI_KEY, Listener, _record, card_wait
+from conftest import UI_COOKIE_VALUE, Listener, _record_paired, card_wait
 from fastapi import HTTPException
 from starlette.requests import Request
 
@@ -124,10 +124,11 @@ async def _clicked_ticket(title: str = "Bigger font") -> tuple[dict, str]:
 
 
 def _click(path: str = "/") -> Request:
-    """A click from the analyst's browser on localhost: it carries the cookie of the test server's ui_key."""
-    _record(ui_key=UI_KEY)
+    """A click from the analyst's browser on localhost: it carries the cookie of a browser signed in to the test
+    server (_record_paired)."""
+    _record_paired(UI_COOKIE_VALUE)
     return Request({"type": "http", "path": path, "client": ("127.0.0.1", 1),
-                    "headers": [(b"cookie", f"{hook_auth.ui_cookie()}={UI_KEY}".encode())]})
+                    "headers": [(b"cookie", f"{hook_auth.ui_cookie()}={UI_COOKIE_VALUE}".encode())]})
 
 
 async def test_a_click_prepares_the_ticket_and_starts_its_agent_through_the_module_in_its_thread(ticketing):
@@ -670,16 +671,15 @@ async def test_a_check_that_times_out_leaves_nothing_in_the_worktree(tmp_path):
     assert sorted(p.name for p in tree.iterdir()) == ["a.txt"]
 
 
-def test_a_preview_server_gets_a_private_server_json_so_a_local_tool_can_write_to_it(tmp_path):
-    """A server no supervisor starts (a box's preview, like the dev stack) still has a token and a ui_key, or
-    hook_auth.LocalWriteGuard would refuse every write to it: ticket_box.seed_home writes them, readable by the owner
-    alone, with no pid, a new token at each start and the ui_key kept."""
+def test_a_preview_server_gets_a_private_server_json_so_a_local_tool_can_use_its_token_routes(tmp_path):
+    """A server no supervisor starts (a box's preview, like the dev stack) still has a token, or a local tool could
+    use none of its token routes (hook_auth.guarded): ticket_box.seed_home writes it, readable by the owner alone,
+    with no pid and a new token at each start. No browser credential is in the file."""
     home = tmp_path / "preview" / "server" / "home"
     ticket_box.seed_home(home, 8301)
     first = json.loads((home / "server.json").read_text())
-    assert first["port"] == 8301 and first["api"] == "http://127.0.0.1:8301" and first["token"] and first["ui_key"]
-    assert "pid" not in first
+    assert first == {"port": 8301, "api": "http://127.0.0.1:8301", "token": first["token"]} and first["token"]
     assert (home / "server.json").stat().st_mode & 0o077 == 0 and home.stat().st_mode & 0o077 == 0
     ticket_box.seed_home(home, 8301)
     again = json.loads((home / "server.json").read_text())
-    assert again["ui_key"] == first["ui_key"] and again["token"] != first["token"]
+    assert set(again) == {"port", "api", "token"} and again["token"] != first["token"]

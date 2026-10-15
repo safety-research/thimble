@@ -20,7 +20,6 @@ export interface WorkspaceListProps {
 
 export function WorkspaceList({ rows, current, compact }: WorkspaceListProps) {
   const pathname = typeof window === 'undefined' ? '/' : window.location.pathname
-  const hash = typeof window === 'undefined' ? '' : window.location.hash
   return (
     <div className={`ws-list${compact ? ' ws-list-compact' : ''}`}>
       {groupWorkspaces(rows).map((g) => (
@@ -31,7 +30,7 @@ export function WorkspaceList({ rows, current, compact }: WorkspaceListProps) {
               const here = r.name === current
               return (
                 <li key={r.name}>
-                  <a className={`ws-row${here ? ' current' : ''}`} href={workspaceHref(r, pathname, hash)} aria-current={here ? 'page' : undefined} data-ws={r.name}>
+                  <a className={`ws-row${here ? ' current' : ''}`} href={workspaceHref(r, pathname)} aria-current={here ? 'page' : undefined} data-ws={r.name}>
                     <span className="ws-row-name">{workspaceLabel(r)}</span>
                     <span className="ws-row-about">
                       {r.kind === 'example' ? (

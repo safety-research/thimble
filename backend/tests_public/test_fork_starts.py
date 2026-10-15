@@ -164,15 +164,14 @@ ORIENT_WHAT = "the request for an orientation"
 
 async def test_a_fork_s_start_orientation_records_its_brief_and_options_and_asks_main_once(fork, bridge):
     """The fork's start_orientation is no longer refused with a line that sends the analyst to Start: the orientation's
-    start is recorded with the fork's brief, switches, model and effort, main gets one start_agent event that names the
+    start is recorded with the fork's brief, model and effort, main gets one start_agent event that names the
     orientation and carries the exact Agent call, and main's call from it starts the orientation. The fork's result
     says in one line that it is filed and main is starting the orientation."""
     meta, q, call = fork
     tid = call()
     assert await tools._as_caller(CORPUS, "start_orientation", tid) == ("", None), "the fork's call runs as main's"
     res = await tools.call(CORPUS, "start_orientation",
-                           {"brief": "the moderators", "generate_report": True, "propose_views": False,
-                            "critique": True, "model": "sonnet", "effort": "high"}, tool_use_id=tid)
+                           {"brief": "the moderators", "model": "sonnet", "effort": "high"}, tool_use_id=tid)
     assert not res.is_error, res.text
     assert res.text.endswith(tools.hint("start_agent-fork", what=ORIENT_WHAT, agent="the orientation"))
     assert "main is starting the orientation" in res.text and "AGENT CALL" not in res.text
@@ -184,23 +183,22 @@ async def test_a_fork_s_start_orientation_records_its_brief_and_options_and_asks
     assert note["terminal"] == f"start the orientation for {ORIENT_WHAT} (thread One account)"
     assert "start the orientation for it now" in note["content"]
     assert inp["subagent_type"] == "thimble:orientation" and inp["description"] == "orientation: the moderators"
-    assert "REQUEST the moderators" in inp["prompt"] and "CRITIQUE on" in inp["prompt"]
-    assert "OUTPUTS the deck, the report" in inp["prompt"] and "OFF view proposals" in inp["prompt"]
+    assert "REQUEST the moderators" in inp["prompt"]
     req = _asked_main(note, inp, meta)
     assert req["values"] == {"model": "claude-sonnet-5[1m]", "effort": "high"}
     rec = orientation.read_run(CORPUS)
     assert (rec["status"], rec["started_by"], rec["request"]) == ("starting", "typed", _rid(inp))
-    assert (rec["query"], rec["passes"], rec["critique"]) == ("the moderators", ["final", "report"], True)
+    assert (rec["query"], rec["passes"]) == ("the moderators", ["final"]) and "critique" not in rec
     assert (rec["model"], rec["effort"]) == ("claude-sonnet-5[1m]", "high")
     assert _main_claims(inp, "toolu_main_o") is None and subagents.request(CORPUS, _rid(inp))["state"] == "claimed"
 
 
 async def test_while_an_orientation_runs_a_fork_s_start_orientation_starts_nothing_as_main_s_own(fork, bridge):
-    """One orientation runs at a time. While one runs (a Start's), the fork's start_orientation gives what main's own
+    """One orientation runs at a time. While one runs (a click's), the fork's start_orientation gives what main's own
     call gives (start_orientation-running): nothing is recorded, main is asked for nothing and the running one is
     kept."""
     _, q, call = fork
-    ans = await orient_session.start(CORPUS, "the bots", ["final"], route=subagents.CLICK)
+    ans = await orient_session.start(CORPUS, "the bots", route=subagents.CLICK)
     assert ans.started
     running = orientation.read_run(CORPUS)
     reqs = dict(subagents.read(CORPUS).get("requests") or {})

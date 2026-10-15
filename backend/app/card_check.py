@@ -21,6 +21,11 @@ A check past check_timeout(effort) ends `error`; waits for API capacity are left
 kernel is always settled, even when the check is stopped mid-trial. Timings go to
 workspaces/<c>/card-checks/timings.jsonl and pictures under workspaces/<c>/card-checks/<card>/. A refused reading
 runs again on the fallback model, and the record's `note` says so (FALLBACK_NOTE).
+
+Notices. A check that failed by itself (its reading failed or was refused, capacity, its time ran out, an error, a
+revision it could not try) is told in the foreground (notices.post, NOTICE_KEY), and so is a reading Claude's
+safeguards switched to the fallback model (SAFEGUARDS_KEY); a check that ends `ok` clears the first. A card that did
+not draw, or whose revision was not kept, is the card's own outcome, which its details show.
 """
 from __future__ import annotations
 
@@ -71,6 +76,12 @@ CHANGED = "the card changed while it was checked"
 SERVER_STOPPED = "the server stopped while the check ran"
 SESSION_ENDED = "thimble stopped when its Claude Code session ended"  # a check stop_workspace ended
 FALLBACK_NOTE = "Downgrading {model} to {fallback}"  # the record's `note`
+NOTICE_KEY = "card-check"  # the notices' key of a check that failed (module note, notices)
+SAFEGUARDS_KEY = "safeguards:card-check"  # and of a reading the safeguards switched to the fallback model
+AGENT = "Card check"  # the check's name on its notices
+FAILED_TEXT = "The card check of the card \"{card}\" failed: {why}."
+FALLBACK_TEXT = "Claude's safeguards switched the card check's reading of \"{card}\" from {model} to {fallback}."
+CARD_WORDS = 80  # of the card's question or title a notice quotes
 UNTRIED = "its revision could not be tried"  # an `error` whose card runner gave no result (notebook.TrialUnavailable)
 READ_IDLE_S = 60.0  # a reading with no sign of life this long is stalled (model.structured's idle clock)
 PAUSE_POLL_S = 0.05  # how often a check waiting for a reading slot looks at its clock again (_within)
@@ -245,16 +256,46 @@ def _phase(run: _Run, name: str, **kw: Any) -> bool:
     return ok
 
 
-def _end(run: _Run, status: str, reason: str = "") -> None:
+def _end(run: _Run, status: str, reason: str = "", *, tell: bool = False) -> None:
     """End the check's record `status` with `reason`; when the record is stale because the card changed under the check, the
-    record is ended `stopped` saying so."""
+    record is ended `stopped` saying so. With `tell`, an `error` is the check's own failure, told in the foreground
+    (module note, notices); an `ok` clears that notice."""
     from . import checkstore  # noqa: PLC0415
 
     run.outcome, run.reason = status, reason
     if checkstore.finish(run.c, run.cid, run.check, status, reason, note=run.note):
+        if status == "ok":
+            _cleared(run)
+        elif tell and status == "error":
+            _notice(run, NOTICE_KEY, FAILED_TEXT, why=reason)
         return
     if checkstore.end_pending(run.c, run.cid, "stopped", CHANGED, check_id=run.check):
         run.outcome, run.reason = "stopped", CHANGED
+
+
+def _card_words(run: _Run) -> str:
+    cell = notebook_cell(run.c, run.cid) or {}
+    words = " ".join(str(cell.get("question") or cell.get("title") or f"card:{run.cid}").split())
+    return words if len(words) <= CARD_WORDS else words[: CARD_WORDS - 1].rsplit(" ", 1)[0] + "…"
+
+
+def _notice(run: _Run, key: str, text: str, *, why: str = "", **words: str) -> None:
+    """A notice of the check's (module note, notices). Never raises."""
+    from . import notices  # noqa: PLC0415
+
+    try:
+        reason, fix = notices.reason(why, server=True) if why else ("", None)
+        notices.post(run.c, kind="card-check", text=text.format(card=_card_words(run), why=reason, **words),
+                     agent=AGENT, action=fix, key=key)
+    except Exception:  # noqa: BLE001 — the check has ended either way
+        log.exception("card check: the notice for card:%s was not told", run.cid)
+
+
+def _cleared(run: _Run) -> None:
+    from . import notices  # noqa: PLC0415
+
+    with contextlib.suppress(Exception):
+        notices.clear(run.c, NOTICE_KEY)
 
 
 def _gone(run: _Run) -> None:
@@ -348,7 +389,7 @@ async def _guarded(run: _Run) -> None:
             except _Capacity as e:
                 why = str(e)
             if not waits:
-                _end(run, "error", f"{why}, and it still was after {len(CAPACITY_WAITS_S)} more tries")
+                _end(run, "error", f"{why}, and it still was after {len(CAPACITY_WAITS_S)} more tries", tell=True)
                 return
             wait = waits.pop(0)
             run.waited += wait
@@ -365,10 +406,10 @@ async def _guarded(run: _Run) -> None:
         limit = check_timeout(run.effort)
         log.warning("card check: card:%s ran past %.0f s at %s effort", run.cid, limit, run.effort)
         run.timing["timed_out_s"] = limit
-        _end(run, "error", f"it ran past its {limit:.0f} s at {run.effort or 'default'} effort")
+        _end(run, "error", f"it ran past its {limit:.0f} s at {run.effort or 'default'} effort", tell=True)
     except Exception as e:  # noqa: BLE001
         log.exception("card check: card:%s failed", run.cid)
-        _end(run, "error", f"{type(e).__name__}: {e}")
+        _end(run, "error", f"{type(e).__name__}: {e}", tell=True)
     finally:
         _current.reset(token)
         if _runs.get((run.c, run.cid)) is run:
@@ -501,7 +542,7 @@ async def _check(run: _Run) -> None:
                                                                 "effort": run.effort, "message": reading}):
             _gone(run)
             return
-        _end(run, "error", reading)
+        _end(run, "error", reading, tell=True)
         return
     assessment, card, model_used = reading
     failed = _failed(assessment)
@@ -824,7 +865,7 @@ async def _replace(run: _Run, cell: dict[str, Any], patch: dict[str, Any], faile
         timing["replace_ms"] = _ms(t0)
         timing["replacement"] = "untried"
         log.warning("card check: the replacement of card:%s could not be tried (%s)", cid, e)
-        _end(run, "error", f"{UNTRIED}: {e}")
+        _end(run, "error", f"{UNTRIED}: {e}", tell=True)
         return
     except Exception as e:  # noqa: BLE001 — a card gone meanwhile, or code on a card that runs none
         cand = None
@@ -1197,6 +1238,8 @@ async def _read(c: str, cell: dict[str, Any], png: bytes | None, run: _Run,
 
         run.note = FALLBACK_NOTE.format(model=model_label(res.refused_by), fallback=model_label(res.model_requested))
         run.timing["refused_by"] = res.refused_by
+        _notice(run, SAFEGUARDS_KEY, FALLBACK_TEXT, model=model_label(res.refused_by),
+                fallback=model_label(res.model_requested))
     if res.status != "ok" or not isinstance(res.output, dict):
         log.warning("card check: the reading of card:%s failed (%s: %s)", run.cid, res.status, res.detail)
         cls = "rate_limited" if res.status == "rate_limited" else retry.transient_class(None, res.detail)

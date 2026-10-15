@@ -10,7 +10,6 @@ after a dropped connection and runs until it is killed.
 """
 import json
 import os
-import secrets
 import sys
 import time
 import urllib.parse
@@ -45,7 +44,7 @@ def main() -> None:
         found = server()
         if found:
             try:
-                headers = hook_auth.headers(found[1], secrets.token_hex(16))
+                headers = hook_auth.headers(found[1], hook_auth.port_of(found[0]))
                 with httpx.Client(timeout=httpx.Timeout(None, connect=3.0)) as client:
                     with client.stream("GET", f"{found[0]}/api/events?{query}", headers=headers) as resp:
                         print(f"standin: subscribed, HTTP {resp.status_code}", flush=True)
@@ -54,7 +53,7 @@ def main() -> None:
                                 ws = json.loads(line[len("data:"):])["workspace"]
                                 named = httpx.post(f"{found[0]}/api/ws/{urllib.parse.quote(ws)}/session",
                                                    json={"session": SESSION, "cwd": corpus}, timeout=10.0,
-                                                   headers=hook_auth.headers(found[1], secrets.token_hex(16)))
+                                                   headers=hook_auth.headers(found[1], hook_auth.port_of(found[0])))
                                 print(f"standin: named the session, HTTP {named.status_code}", flush=True)
             except httpx.HTTPError as e:
                 print(f"standin: {type(e).__name__}: {e}", flush=True)

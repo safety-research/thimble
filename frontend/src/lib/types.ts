@@ -29,8 +29,8 @@ export interface ChatMeta {
   name?: string | null
   /** a writer's document (write_session.start) */
   doc?: string | null
-  /** a writer that answers the orientation's report pass: the orientation's chat and its run then; null on a writer
-     * the analyst asked for; may be absent (write_session.start) */
+  /** a writer that answered the report pass of an orientation from before 0.8.0: the orientation's chat and its run
+     * then; null on every writer since (backend write_session.NO_REPORT_PASS); absent on an older writer's chat */
   orient?: string | null
   orient_run?: number | null
   /** a thread that a comment's reply field opened: the comment, which its anchor line names beside its passage or step
@@ -53,7 +53,7 @@ export type ChipKind = 'say' | 'filter' | 'label' | 'ticket' | 'artifact' | 'vie
 /** One line of `chats/<id>.jsonl`; its index in the log is its id. */
 export type ChatRecord =
   | { type: 'user'; ts?: string; text: string; by?: RecordBy | 'main' | 'extension'; tray?: boolean; event?: string; run?: number; extension?: string }
-  | { type: 'text'; delta: string; parent_tool_use_id?: string; reply?: boolean; by?: RecordBy }
+  | { type: 'text'; delta: string; parent_tool_use_id?: string; reply?: boolean; by?: RecordBy; api_error?: string; refusal?: boolean }
   | { type: 'tool_use'; ts?: string; id: string; name: string; input: unknown; parent_tool_use_id?: string; n?: number }
   | { type: 'tool_result'; ts?: string; id: string; summary: string; is_error?: boolean; not_run?: boolean; cell_id?: string; label_card?: string; notebook?: string; parent_tool_use_id?: string }
   | { type: 'refs'; ts?: string; resolved: string[]; broken: string[]; why?: Record<string, string>; links?: unknown[]; unlinked?: unknown[] }
@@ -62,6 +62,32 @@ export type ChatRecord =
   | { type: 'chip'; ts?: string; kind: ChipKind | string; text: string; ref?: string; [k: string]: unknown }
   | { type: 'agent'; ts?: string; chat: string; role: string; title: string; run?: number; tool_use_id?: string; view?: string }
   | { type: 'shot'; ts?: string; phase: string; ticket: string; name: string; note?: string }
+  | { type: 'notice'; ts?: string; id?: string; key?: string | null; kind?: string; text?: string; agent?: string | null; action?: NoticeAction | NoticeAction[] | null; dismissed?: boolean; cleared?: boolean }
+
+/** What a notice's button does (backend notices.py): look for a view proposal again (`proposals-retry`), turn view
+ * proposals off (`proposals-off`), open Settings (`settings`), build the failed view `slug` again (`view-retry`), or
+ * sign out the browser whose id is `slug` (`sign-out`, a sign-in notice's). */
+export interface NoticeAction {
+  label: string
+  do: 'proposals-retry' | 'proposals-off' | 'settings' | 'view-retry' | 'sign-out' | (string & {})
+  slug?: string
+}
+
+/** A failure the analyst should know of, with an easy fix (backend notices.post), as `GET /ws/{c}/notices` lists the
+ * open ones and the stream's `notice` event sends a new one: one line naming the agent it happened to (`agent`, such as
+ * "Orientation" or "View build: Agent Network"), its fix as buttons (`action`, one or several), and the chat the agent
+ * writes in (`chat`, its thread, or main), where the notice is also a row. A later notice with the same `key` replaces
+ * it, and a fix that worked clears it (the event's `cleared`). */
+export interface Notice {
+  id: string
+  key?: string | null
+  kind?: string
+  text: string
+  agent?: string | null
+  chat?: string | null
+  action?: NoticeAction | NoticeAction[] | null
+  ts?: string
+}
 
 export interface ChatDetail {
   meta: ChatMeta
@@ -440,23 +466,29 @@ export interface Filters {
 
 // ---- views and proposals ----
 
-/** A view ticket's build: `dropped` is an orientation proposal that could not be built, shown nowhere (backend
- * views.drop); `suggested` a viewer for a file type, such as one the orientation proposes, shown only in the File
- * browser until the analyst accepts it (backend views.accept). */
+/** A view ticket's build: `dropped` is a view proposal the analyst rejected, or the proposal of an orientation from
+ * before 0.8.0 left out when the analyst stopped it, shown nowhere (backend views.drop); `suggested` a view proposal
+ * that waits for the analyst's Accept or Reject (backend views.offer), or a 0.7.x orientation's viewer for a file type,
+ * which no card shows (backend views.open_offer). */
 export type ProposalStatus = 'queued' | 'building' | 'built' | 'failed' | 'dropped' | 'suggested'
 
-/** A view ticket (the propose_view tool): what the analyst sees in the view and why, the files it reads, the unit and
- * the layout, and the state of the dev agent's build, whose agent chat is `chat`. */
+/** A view ticket (the propose_view tool): what the analyst sees in the view, what they do with it, the files it reads,
+ * and the state of the dev agent's build, whose agent chat is `chat`. The backend reads a 0.7.0 ticket's `why` as its
+ * `description` (views._normalize_proposal). */
 export interface Proposal {
   slug: string
   name: string
-  why: string
+  description: string
+  /** what the analyst does with the view; empty for a viewer for a file type and a 0.7.0 ticket */
+  task: string
   claims: string[]
+  /** the layout a viewer for a file type or a 0.7.0 ticket gave; empty for propose_view's tickets */
   arrangement: string
   proposed_by: string
   /** the analyst asked for it (backend views.propose): it opens by itself once built (files/viewReady.ts) */
   asked?: boolean
-  /** an orientation's proposal whose view has not passed its checks yet: its card shows the build, the views bar not */
+  /** the proposal of an orientation from before 0.8.0 whose view has not passed its checks yet: its card shows the
+   * build, the views bar not */
   held?: boolean
   /** its view is switched off in Settings (backend views.views_off): the views bar leaves it out */
   off?: boolean
@@ -475,7 +507,7 @@ export interface Proposal {
   agent_id?: string | null
   /** the builder's gate attempts so far (finish_view), of MAX_ATTEMPTS */
   attempt?: number
-  /** the repairs of an orientation's proposal so far: a fresh builder after a build that failed for good, of
+  /** the repairs of a proposal the analyst did not ask for so far: a fresh builder after a build that failed for good, of
    * VIEW_REPAIRS (dev.py build_ended); while one builds, its number. Absent or 0 for the first build */
   repairs?: number
   /** why a build stopped before its end: `quit` when the analyst's Claude Code session ended (Retry starts it again) */
@@ -487,6 +519,20 @@ export interface Proposal {
   values?: { model?: string; effort?: string } | null
   model?: string | null
   effort?: string | null
+  /** a view proposal thimble made to the analyst (backend views.offer): when, after what (`main`, `thread:<id>`,
+   * `orientation`, or `file` for a viewer proposed when a file was opened) and why. An open
+   * proposal is `suggested` with this; a `suggested` row without it is from an older version and never shows */
+  offered?: ProposalOffer | null
+  /** how the analyst answered the view proposal: Accept or Reject */
+  answer?: 'accepted' | 'rejected' | null
+  answered_at?: string | null
+}
+
+/** When and why thimble proposed the view (Proposal.offered). */
+export interface ProposalOffer {
+  at: string
+  after: string
+  why?: string
 }
 
 /** The review of a built view's pictures: running, done (with what it revised and what problems are left), failed
@@ -630,10 +676,6 @@ export interface ViewOpen {
 
 // ---- orientation ----
 
-/** The Start card's switches, start_orientation's: the orientation's deck (`final`), its view proposals, the report,
- * and its critic's review. */
-export type OrientPass = 'final' | 'views' | 'critique' | 'report'
-
 /** The efforts Claude Code takes, lowest first (cc_settings.EFFORTS): every effort menu of thimble's agents offers
  * these. Main's composer adds Ultracode (MainEffort). */
 export type OrientEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
@@ -661,9 +703,16 @@ export interface PermissionRequest {
   agent_chat?: string
   /** a Bash request's command, whole, which the card shows as code rather than the input's JSON */
   command?: string
-  /** what Claude Code's own "don't ask again" would add for the session (`Bash(npm test *)`, `all edits`), when the
-   * request suggests it: the card's third choice (backend agent_session, don't ask again) */
+  /** what Claude Code's own "don't ask again" would add (`Bash(npm test *)`, `all edits`), when the request suggests
+   * it: the card's third choice (backend agent_session, don't ask again). A code ticket's adds it for the session; main's
+   * keeps it where Claude Code would, which `always_tip` says (backend events._main_offer). */
   always?: string
+  /** on main's meta: the button of `always`, in the words of Claude Code's own permission dialog for it (backend
+   * permission_updates.main_words) */
+  always_label?: string
+  /** on main's meta: the tooltip of `always`, the whole of Claude Code's words for it and where Claude Code keeps it
+   * (backend permission_updates.main_words) */
+  always_tip?: string
   /** on main's meta: the thread or subagent chat whose agent asked, when the hook said which (backend events._hold) */
   chat?: string | null
   /** on main's meta: a request of one of thimble's subagents, which Claude Code asks in the terminal at once (it shows
@@ -691,8 +740,9 @@ export interface PermissionRequest {
   cut?: number
   /** why thimble itself asks, which the card says in place of the mode's reason (backend dev.CODE_WHY) */
   why?: string
-  /** the rule of main's fence that sends the call to the analyst (userconf.main_rules): an edit of thimble's config, an
-   * edit of the corpus, or a web call; `installs` and `commands` only on a code ticket's */
+  /** why thimble sends one of its server jobs' calls to the analyst whatever the permission mode (backend userconf
+   * ask_cause): `config` an edit of thimble's config, `data` an edit of the corpus, `commands` a command; `web` and
+   * `installs` as earlier versions sent them */
   asked_by?: 'config' | 'data' | 'web' | 'installs' | 'commands'
 }
 
@@ -704,18 +754,6 @@ export interface SessionAlert {
   reason?: string
   until?: string
   attempt?: number
-}
-
-/** The body of Start (`POST /ws/{c}/start`, orient_session.StartBody): the request (focus), start_orientation's four
- * switches, and the run's exact model and effort, each defaulting to Settings' orientation row. */
-export interface StartBody {
-  text?: string
-  deck: boolean
-  views: boolean
-  critique: boolean
-  report: boolean
-  model?: string
-  effort?: string
 }
 
 /** The kinds of a start or a follow-up that did not happen (backend subagents: run.json `refused.kind`). */
@@ -732,7 +770,7 @@ export interface Refusal {
   expired?: boolean
 }
 
-/** What a click start answers (Start, Write, Start it, Try again; subagents.Answer): the agent id when it started,
+/** What a click start answers (Write, Accept, Start it, Try again; subagents.Answer): the agent id when it started,
  * else the refusal's kind and reason; `request` is the pending request either way, `program` an extension's program
  * that runs it instead. */
 export interface StartAnswer {
@@ -767,14 +805,12 @@ export interface RunValues {
   effort?: string
 }
 
-/** The orientation's record (`GET /ws/{c}/orientation`, orient/run.json): its status, the request and switches, the
- * run's exact model and effort, who started it, the pending request, and for a start that did not happen its refusal.
- * {} before any orientation was asked for. */
+/** The orientation's record (`GET /ws/{c}/orientation`, orient/run.json): its status, the request, the run's exact
+ * model and effort, who started it, the pending request, and for a start that did not happen its refusal. {} before
+ * any orientation was asked for. */
 export interface OrientRun {
   status?: 'requested' | 'starting' | 'running' | 'done' | 'failed' | 'stopped' | 'refused' | (string & {})
   query?: string | null
-  passes?: string[]
-  critique?: boolean
   model?: string | null
   effort?: string | null
   route?: 'subagent' | 'program' | (string & {}) | null
@@ -985,7 +1021,8 @@ export interface DocVersion {
   n: number
   /** when it was written (ISO); empty when its record is gone */
   ts: string
-  /** who saved it: `first` for the first generation, the save's author (`terminal`, `analyst`, `chat:<id>`) otherwise */
+  /** who saved it: `first` for the first generation, the save's author (`terminal`, `analyst`, `chat:<id>`) otherwise;
+   * `analyst` for the analyst's own version before the first write and for a Restore */
   source: string
   /** what the analyst asked for, when the write was asked for with words */
   instructions: string | null
@@ -1002,6 +1039,8 @@ export interface DocVersion {
   /** the earlier saves of the writer run that wrote it, oldest first (its last save is the generation itself); or, where
      * the workspace has no per-run saves, the older generations one writer's chat saved, each with its `generation` */
   revisions: DocRevision[]
+  /** the draft (generation `n`, or its save `rev`) a Restore made current again as this generation */
+  restored?: { n: number; rev: number | null } | null
 }
 
 export interface DocRevision {
@@ -1189,27 +1228,30 @@ export interface Settings {
   config_error?: string
   /** the keys thimble's config files hold that this build reads and ignores, each as its key path (userconf.ignored) */
   config_ignored?: string[]
-  /** who runs each agent and what it may do (backend ledger.agent_rows): `main` carries main's fence, which thimble's
-   * agents share as its subagents; orient, writer, critic and checks name who runs them and their own `web`; `dev`,
-   * labels and cardCheck keep fences of their own */
+  /** who runs each agent and what it may do (backend ledger.agent_rows): `main` carries thimble's rules for main and
+   * its agents, its subagents; orient, writer, critic and checks name who runs them and their own `web`; `dev`, labels
+   * and cardCheck keep fences of their own */
   agents?: Partial<Record<AgentRowKey, AgentRow>> & { main?: MainFence }
   /** who runs each of thimble's seven tasks (backend ledger.task_rows) */
   tasks?: TaskRow[]
   /** the minutes a code ticket's permission request waits before it is declined (thimble's config `cardWait`) */
   card_wait?: number
+  /** View proposals: whether thimble proposes views after a turn and viewers for file types (thimble's config
+   * `views.propose`) */
+  propose_views?: boolean
+  /** the key held with a click to ask in the browser (thimble's config `askKey`, lib/platform): "meta" (⌘, Ctrl off a
+   * Mac) or "alt" (⌥, Alt) */
+  ask_key?: 'meta' | 'alt'
   [k: string]: unknown
 }
 
 /** The agent rows of the settings: thimble's subagents, the code tickets' dev agent and the two classifiers. */
 export type AgentRowKey = 'orient' | 'writer' | 'critic' | 'checks' | 'dev' | CallAgent
 
-/** Main's fence, which thimble's agents share (backend ledger.agent_rows `main`): the extensions adding to main's
- * prompt, its sandbox, whether the sandbox can run here, its network, web tools and edits of the corpus. */
+/** thimble's rules for main and its agents (backend ledger.agent_rows `main`): the extensions adding to main's prompt,
+ * its web tools and edits of the corpus. */
 export interface MainFence {
   additions: string[]
-  sandbox?: 'on' | 'off'
-  sandbox_runs?: boolean
-  network?: 'on' | 'off'
   web?: 'ask' | 'off' | 'allow'
   data?: 'ask' | 'allow' | 'off'
   config?: string
@@ -1256,6 +1298,10 @@ export interface SettingsPatch {
   models?: Record<string, Partial<ModelConf>>
   permission_modes?: Partial<Record<ModeAgent, OrientPermissions | null>>
   web?: Partial<Record<'orient' | 'writer' | 'critic' | 'checks', 'off' | null>>
+  /** View proposals: false turns them off, null puts back the default (on) */
+  propose_views?: boolean | null
+  /** the ask key: "alt", or null to put back the default ("meta") */
+  ask_key?: 'meta' | 'alt' | null
   [k: string]: unknown
 }
 
@@ -2000,6 +2046,9 @@ export interface LabelRowText extends LabelRow {
 
 // ---- the chat: the mirror of the analyst's session ----
 
+/** Which Manual-mode notice shows (Attached.manual). */
+export type ManualHint = 'switch' | 'org' | 'settings'
+
 /** The Claude Code session mirrored as main while `/thimble` has it attached. */
 export interface Attached {
   session: string
@@ -2016,12 +2065,21 @@ export interface Attached {
   /** whether the session's last reply ran in fast mode, as the mirror read it */
   fast?: boolean
   /** the permission mode Claude Code last reported to the session's hooks (default, acceptEdits, auto, plan,
-   * bypassPermissions, dontAsk), which each agent's permission mode follows until the analyst sets it (backend modes.py) */
+   * bypassPermissions, dontAsk), which the dev agent's program follows until the analyst sets its row, Bypass as Manual
+   * (backend modes.py) */
   permission_mode?: string
+  /** while that mode is Claude Code's Manual mode (backend modes.manual_hint), which Manual-mode notice shows (backend
+   * notices `manual-mode`): `switch` how to switch to auto mode, `org` or `settings` that the organization's or the
+   * analyst's Claude Code settings turn auto mode off */
+  manual?: ManualHint
+  /** main's terminal said once that the session runs in Manual mode (backend session.note_mode) */
+  manual_told?: boolean
   /** what the composer's fast-mode switch chose for main's next launch, while this session runs */
   fast_choice?: boolean
   /** the session that was main until this one took its place while it runs on in another terminal */
   after?: string
+  /** whether this session's shell commands run in Claude Code's sandbox, as /thimble saw it; information only */
+  sandbox?: boolean
 }
 /** Main's last session once none is attached: the folder it ran in is where `thimble --continue` resumes it. */
 export interface SessionEnded {
@@ -2040,17 +2098,14 @@ export interface ChatMeta {
   /** main only: the orientation's status from orient/run.json (requested, starting, running, done, failed, stopped or
    * refused), null before any orientation was asked for */
   orientation?: string | null
-  /** a thread, as the chat route gives it: `offer` once its latest question's run ended with an answer the analyst can
-   * hand back to main, `handed` once they did, '' while it runs or has none (backend threads.hand_back_state) */
-  hand_back?: 'offer' | 'handed' | ''
   /** a dev ticket's agent chat: the ticket it runs (dev.py) */
   ticket?: string | null
   /** a view ticket's agent chat: the slug of the proposal it builds (dev.run_view) */
   view?: string | null
   /** a view's agent chat that reviews it (view_review), not one that builds it */
   review?: boolean | null
-  /** a view ticket's agent chat: the analyst asked for the view, so it is their dev thread; the orientation's builds
-   * are not listed (dev._view_chat, chat/threads.ts) */
+  /** a view ticket's agent chat: the analyst asked for the view, so it is their dev thread; the builds of views nobody
+   * asked for, such as an orientation's from before 0.8.0, are not listed (dev._view_chat, chat/threads.ts) */
   asked?: boolean | null
   /** main, or a code ticket's session: a dialog holds the session where the browser cannot answer it */
   alert?: SessionAlert | null
@@ -2062,8 +2117,6 @@ export interface ChatMeta {
   /** the agent a session or a program runs as: thimble's own as `thimble:<role>`, an extension's program's as
    * `<extension>:<role or task>` (backend harness.start) */
   agent_type?: string | null
-  /** the orientation: its critique */
-  critique?: boolean
   /** a writer: the document it writes (write_session.py) */
   doc?: string | null
   /** one of thimble's agents: what it was asked, for its card, when its first message is longer (a writer's task) */
@@ -2103,11 +2156,7 @@ export interface ChatMeta {
   paused?: 'critique' | (string & {}) | null
   /** the latest run began with a message the analyst typed in Claude Code's agent tray */
   typed_in_tray?: boolean | null
-  // ---- main only (lane L: cc_plugin.main_fenced, launch.json, module_bridge) ----
-  /** main runs inside thimble's fence (cc_plugin.main_fenced) */
-  fenced?: boolean | null
-  /** `thimble` launched main (launch.json names its session) */
-  launched?: boolean | null
+  // ---- main only (module_bridge) ----
   /** thimble's hooks module holds the long poll for main (module_bridge.live) */
   module?: boolean | null
   /** why it does not (module_bridge.why_not), '' while it does */
@@ -2129,6 +2178,8 @@ export interface PrecachedMark {
   format?: string | null
   /** whether the orientation's Claude Code session came with it, so a message in its thread continues it */
   kept?: boolean | null
+  /** what the pre-cache holds (its manifest's counts), which the orientation's card names */
+  counts?: { cards?: number; labels?: number; views?: number; documents?: number } | null
 }
 
 /** A follow-up of the orientation as its chat's meta keeps it. */

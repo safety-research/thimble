@@ -38,7 +38,7 @@ const view = `<!doctype html><html><head><style>${TOKENS} body{margin:0;font:12p
 <script>
 const PRS = ${JSON.stringify(PRS)}
 const draw = () => (document.getElementById('col').innerHTML = PRS.map((pr) => thimble.recordCard({ ref: pr.ref, record: pr, key: '#' + pr.number, chips: [pr.claimant], title: pr.title })).join(''))
-window.colour = thimble.colourBy({ mount: '#colour', fields: [{ name: 'claimant', title: 'Claimant', values: ['agent-08', 'agent-21'] }], onChange: draw })
+window.colour = thimble.colourBy({ mount: '#colour', fields: [{ name: 'claimant', title: 'Claimant', values: ['agent-08', 'agent-21'] }], initial: 'claimant', onChange: draw })
 draw()
 </script></body></html>`
 

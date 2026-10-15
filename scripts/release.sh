@@ -25,8 +25,9 @@
 #   .claude-plugin/       marketplace.json listing ./plugin, its name set to --marketplace-name (default thimble-local,
 #                         so a zip install and the repo-as-marketplace "thimble" can coexist on one machine); every
 #                         plugin it lists must have its folder in the zip
-#   scripts/install.sh scripts/plugin.sh scripts/update.sh scripts/rebuild_ui.sh   what an install runs (plugin.sh is
-#                         `thimble plugin on|off`); scripts/dev/ never ships
+#   scripts/install.sh scripts/plugin.sh scripts/update.sh scripts/rebuild_ui.sh   what an install runs (plugin.sh
+#                         registers thimble's plugin: install.sh sources it; `thimble plugin status`); scripts/dev/ never
+#                         ships
 #   scripts/view_shot.mjs the headless page of a view's checks (backend/app/views.py runs it)
 #   scripts/ui_shot.mjs   the page screenshots of main's `screenshot` tool and of the dev agent (dev.py runs it)
 #   README.md LICENSE INSTALL.md docs/config.md docs/assets/thimble-banner.svg   the readme, the Apache-2.0 license,

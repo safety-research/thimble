@@ -4,7 +4,7 @@
 import { useState } from 'react'
 import { Menu, type MenuItem } from '../components/Menu'
 import { Spinner } from '../components/Spinner'
-import { describeDetail } from '../lib/api'
+import { describeDetail, signInNeeded } from '../lib/api'
 import { frameFonts } from '../lib/frame'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
@@ -32,6 +32,7 @@ function save(blob: Blob, name: string) {
 }
 
 async function fail(res: Response): Promise<never> {
+  await signInNeeded(res)
   let detail = res.statusText
   try {
     const body = await res.json()

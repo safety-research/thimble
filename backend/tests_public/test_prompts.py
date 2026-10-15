@@ -61,7 +61,7 @@ SUBAGENT_HINTS = {
     "start_writing-subagent": {"input"},
     "start_job-subagent": {"input"},
     "critique-subagent": {"input"},
-    "orient-subagent-prompt": {"request_id", "request", "outputs", "off", "critique"},
+    "orient-subagent-prompt": {"request_id", "request"},
     "orient-subagent-message": {"agent", "text"},
     "subagent-request": {"request_id"},
     "agent-check-exact": set(),
@@ -72,9 +72,13 @@ SUBAGENT_HINTS = {
     "critic-brief-file": {"path"},
     "critique-work-folder": {"path"},
     "check-task-file": {"path"},
-    "start-refused-not-launched": set(),
     "start-refused-no-module": {"reason"},
-    "orient-continue-earlier-session": {"resume"},
+    "start-refused-connecting": set(),
+    "module-deny-private": set(),
+    "module-deny-records": set(),
+    "module-deny-data": set(),
+    "module-deny-web": set(),
+    "orient-continue-earlier-session": {"session"},
     "orient-continue-earlier-version": set(),
     "module-started-note": {"role", "agent", "what", "how"},
     "follow-up-ran-on": {"model", "effort"},
@@ -250,8 +254,9 @@ def test_main_and_the_orientation_say_how_subagents_end_and_start(monkeypatch):
 
 
 def test_main_answers_a_question_itself_and_in_terminal_mode_answers_from_an_agents_outputs(tmp_path, monkeypatch):
-    """Main answers a question itself, even a broad one, and starts an orientation only when the analyst asks for one,
-    then still answers a question asked with it, as start_orientation's description and hints say in both modes. In
+    """Main decides when to start an orientation: when the analyst asks for one or their question needs a broad
+    analysis, then answers what it can itself while it runs, as start_orientation's description and hints say in both
+    modes. In
     terminal mode, once the orientation or a writer finished, main answers from its outputs with a link to each card
     and says where the rest is; browser mode keeps "never summarize", since the browser shows the agent's thread."""
     from app import events, subagent_files, tools
@@ -266,13 +271,13 @@ def test_main_answers_a_question_itself_and_in_terminal_mode_answers_from_an_age
             hints[mode] = {n: tools.hint(n, input="<input>", **note) for n in names}
             desc[mode] = tools.tool_sections(["start_orientation"])["start_orientation"][0]
     for mode in prompts.MODES:
-        assert "Start an orientation only when the analyst asks for one." in main[mode], mode
-        assert ('even a broad one such as "what\'s going on in this dataset?", is no such request: answer it yourself '
-                "in that turn, with a quick look and a few cards") in main[mode], mode
-        assert "start the orientation, then answer the question yourself while it runs" in main[mode], mode
-        assert "is no request for an orientation: answer it yourself" in desc[mode], mode
+        assert "You decide when to start an orientation, as Claude Code decides when to start a subagent." in main[mode]
+        assert ('or when their question needs a broad analysis of the corpus, such as "what\'s going on in this '
+                'dataset?"') in main[mode], mode
+        assert "Then answer what you can yourself while it runs, with a quick look and a few cards." in main[mode]
+        assert "or when their question needs a broad analysis of the corpus" in desc[mode], mode
         assert "then answer that question yourself after the call" in hints[mode]["start_orientation-subagent"], mode
-        assert "only when they ask for an orientation" in hints[mode]["message_orientation-none"], mode
+        assert "or call `start_orientation` for a new orientation" in hints[mode]["message_orientation-none"], mode
     [answer] = [line for line in main["terminal"].splitlines() if line.startswith("- When the orientation or a writer")]
     assert all(part in answer for part in ("under the `↳` line", "`list_cards` on the group `Orientation`",
                                            "`read_ref`", "in a few sentences", "[↗](card:<id>)",
@@ -450,17 +455,20 @@ def test_the_event_kinds_are_the_same_in_both_modes(monkeypatch):
     assert found["browser"] == found["terminal"] and "thread" in found["terminal"]
 
 
-def test_the_orientation_parts_leave_out_cleanly_in_both_modes(monkeypatch):
-    """orient_session leaves out parts of orient.md by heading and by line, strictly; each of those headings and
-    lines is still there in terminal mode."""
-    from app import orient_session
+def test_the_orientation_s_prompt_has_no_switches_views_or_report_pass_in_either_mode(monkeypatch):
+    """Since 0.8.0 the orientation is a plain subagent: orient.md, whole in both modes, asks for its deck, offers the
+    critic as its own choice, and names no switch of its run, no view it proposes and no report thimble writes after
+    it; start_orientation takes only the request, the model and the effort."""
+    from app import tools
 
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
     for mode in prompts.MODES:
         text = prompts.agent_prompt("orient", {s: "<x>" for s in prompts.slots("orient", mode)}, mode)
-        lines = [*orient_session.LINES.values(), *orient_session.OUTPUT_LINES, *orient_session.VIEWS_LINES]
-        out = prompts.without(text, orient_session.PARTS.values(), lines)
-        assert all(line not in out for line in lines), mode
+        assert "#### The deck" in text and "when a review would help, call `critique`" in text, mode
+        for gone in ("propose_view", "#### Views", "#### The report", "Your first message names the outputs",
+                     "turns the critique on"):
+            assert gone not in text, (mode, gone)
+    assert set(tools.schema_of("start_orientation")["properties"]) == {"brief", "model", "effort"}
 
 
 # The hint sections the terminal-mode lanes name (modes PLAN.md, Prompt modes), with exactly their placeholders.

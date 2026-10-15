@@ -1,19 +1,19 @@
 # Demo pre-caches
 
-`thimble demo` (backend/app/demo.py) downloads each dataset from its publisher and installs the orientation in
-`demos/<dataset>/`, which was run ahead of time on the same bytes. thimble then opens on that orientation's cards,
-labels, views and report. Each folder holds plain text files, so a reviewer can read it in a diff before it is
-committed.
+`thimble demo` (backend/app/demo.py) downloads each dataset from its publisher and installs the analysis in
+`demos/<dataset>/`, which was run ahead of time on the same bytes: the orientation's cards and labels, and the views and
+the report the workspace has. thimble then opens on them as a demo page. Each folder holds plain text files, so a
+reviewer can read it in a diff before it is committed.
 
-A pre-cache holds the orientation's outputs and nothing else: `thimble demo --export --outputs-only` writes it. thimble
+A pre-cache holds the analysis's outputs and nothing else: `thimble demo --export --outputs-only` writes it. thimble
 redistributes none of the datasets, so a pre-cache carries no copy of their records: no Claude Code transcript, no
 conversation, no work file, and no data a view or a label derived from the records. Views rebuild their indexes from
 the download the first time they open. The export refuses a file that copies a long stretch of the dataset ([The
 threshold](#the-threshold)). `thimble demo --export` without `--outputs-only` writes a full export, which does not
 belong here ([The full export](#the-full-export)).
 
-A dataset with no folder here opens with no analysis yet: `thimble demo` says so in one line, and Start in the page
-runs the orientation. A folder is committed only after a maintainer has exported a run and reviewed it ([Making
+A dataset with no folder here opens with no analysis yet: `thimble demo` says so in one line, with the command that
+starts a session in the dataset's folder, where asking Claude for an orientation runs one. A folder is committed only after a maintainer has exported a run and reviewed it ([Making
 one](#making-one)).
 
 ## What a folder holds
@@ -37,16 +37,17 @@ one](#making-one)).
     each and the characters all of them hold);
   - `left_out` (each file left out, and why);
   - `gitleaks`, `user_name_scrubbed` and `flagged` (findings kept with `--allow-private`);
-  - `views`, when reviewed views took the place of the orientation's own (step 4 of [Making one](#making-one)): each
+  - `views`, when reviewed views took the place of the pre-cache's own (step 4 of [Making one](#making-one)): each
     view's slug, name and version, and the reviewed view it came from.
-- `workspace/`: the orientation's outputs, by their paths in the workspace:
+- `workspace/`: the analysis's outputs, by their paths in the workspace:
   - `notebooks/`: the cards with their outputs;
   - `investigations/main/*.json`: the documents (the report);
   - `concepts/*.json` and `labels/*.jsonl`: the labels' definitions and their values by record ref. A value row
     keeps the ref, the value, the confidence, the source and the labeler's one-line rationale, and drops `spans`, the
     texts a label marked;
   - `extension/extension.json`, `extension/views/<slug>/` (`view.json` and the view's code: `.html`, `.js`, `.mjs`,
-    `.css`, `.py`, `.md`, `.svg`) and `views/proposals.json`: the views' code and manifests, without their caches;
+    `.css`, `.py`, `.md`, `.svg`) and `views/proposals.json`: the views' code and manifests, without their caches, and
+    without a view proposal that waits for an answer;
   - `orient/run.json` and `orient/summary.md`: the orientation's record, without its session;
   - `chats/<id>.meta.json` and an empty `chats/<id>.jsonl`: the orientation's thread, without its log;
   - `calls/<id>.jsonl`: the calls the report or a card cites (`call:<chat>/<n>`), each with its input and an
@@ -66,8 +67,8 @@ Each also has a `@@THIMBLE_DASHED_…@@` form for where a path is spelled with d
 Left out: the conversations (main's chat, the threads, the orientation's log and its steps), the call logs but for
 the calls cited, the orientation's work files, label indexes (`*.sqlite`), views' indexes, caches, earlier versions and
 the excerpts their keys cite (`views/key-refs.json`), the cards' edit history and card checks, the event stream,
-kernels, the scratch mirror of the corpus, telemetry, settings, sessions, permissions, undo, hidden files, pictures and
-every file that is not text. The manifest lists each with the reason. The manifest itself is scrubbed and checked
+kernels, the scratch mirror of the corpus, telemetry, settings, sessions, permissions, undo, the open and dismissed
+notices, the view proposer's job and run log, hidden files, pictures and every file that is not text. The manifest lists each with the reason. The manifest itself is scrubbed and checked
 like the workspace's files, since it carries the orientation's request and the paths of the files left out.
 
 ## The threshold
@@ -99,18 +100,24 @@ labels and views held, so a card that quotes a record passes, and a card or call
 It fills in the placeholders for the new folders and installs `workspace/` as the dataset's workspace, and ends the
 orientation's thread with the coverage line the manifest's `orientation` keeps, as a live run's thread ends. It marks
 the workspace pre-cached: `precached.json` in the workspace, and `precached` in the orientation's record and its thread's
-meta. In the browser, the orientation's thread then opens with a card titled "This is a frozen demo session": "To start
-a live session from scratch with this dataset, run" and the command, `cd <folder> && thimble`, with a Copy button.
-Until a session first attaches, the page stays readable rather than grayed under the card that asks for one, and the
-composer gives way to the same sentence and command. A message to the orientation is refused, since its session was not
-kept.
+meta. In the browser the workspace is then a demo page until a session first attaches, rather than grayed under the
+card that asks for one:
+- the top bar shows a Demo tag, whose tooltip says "Example data and a finished analysis; Claude isn't connected here";
+- Files, the views, the canvas, the report, labels and filters work as they do without a session;
+- the orientation's thread opens with a card that says it ran in advance, when, on what model and what it left;
+- the chat's composer is disabled, so nothing can be typed there, and hovering it shows "This is a demo and thimble
+  isn't connected to a live Claude Code session." Ask about this, a card's or the report's request, and each button
+  that starts an agent show the same note in the chat in place of the request, and keep what was typed;
+- no view proposal shows, and the tour says it is a demo.
+
+A message to the orientation is refused, since its session was not kept.
 
 The mark's `view` is the manifest's when the folder holds that view. The dataset's row on the start page then opens
 the workspace on that view rather than on Files, and so does a browser's first open of the workspace without a ref in
 its address.
 
-It starts no Claude Code session unless `--attach`. Without it, it prints the same sentence and command for each
-dataset.
+It starts no Claude Code session unless `--attach`. Without it, it prints for each dataset "To start a live session
+from scratch with this dataset, run" and the command, `cd <folder> && thimble`.
 
 A session attached to a pre-cached workspace starts fresh. Its `/thimble` gives it what the orientation left as its
 context once: the canvas (each card's question and takeaway), the views and the documents, with the full text of
@@ -121,15 +128,18 @@ each one written (backend/app/precached.py).
 1. Download the dataset as a user would, so the orientation runs on the same bytes. Point `--precaches` at an empty
    folder so that no pre-cache is installed: `thimble demo collusion-wiki --dir ~/demo-src --precaches /tmp/none`.
 2. Run the orientation in `~/demo-src/collusion-wiki` by one of two routes:
-   - **By hand.** Run `thimble` there. In Start, set the orientation's model to Opus 5.5 at xhigh effort, and start
-     it with no prompt. Keep the session running, since the orientation and the writer of its report run as its
-     subagents, and answer in the terminal any permission request your permission mode leaves to you.
+   - **By hand.** Run `thimble` there, then `/thimble:orient --model claude-opus-5-5 --effort xhigh` in the
+     terminal, and once the orientation has finished, `/thimble:write report`. Keep the session running, since the
+     orientation and the writer of its report run as its subagents, and answer in the terminal any permission request
+     your permission mode leaves to you.
    - **Scripted.** Run `scripts/dev/precache_orientation.py`, which runs `thimble` on a tmux socket of its own and
-     presses Start as the browser does.
+     posts the start the browser sent before 0.8.0 (POST /api/ws/<c>/start). Since 0.8.0 the orientation writes no
+     report of its own, so this route leaves none; take the route by hand for a pre-cache with a report.
 
-   Wait until it is done: its views built and its report written. Claude's cyber safeguards flag mythos-5 under Opus
-   5.5. On 2026-10-05, an earlier demo dataset ran to the end on claude-opus-4-8, but the same safeguard stopped its
-   critic, two verification agents and one view build (the orientation's thread says so).
+   Wait until it is done: the orientation finished, each view proposal you accepted built, and its report written.
+   Claude's cyber safeguards flag mythos-5 under Opus 5.5. On 2026-10-05, an earlier demo dataset ran to the end on
+   claude-opus-4-8, but the same safeguard stopped its critic, two verification agents and one view build (the
+   orientation's thread says so).
 3. Export it from the checkout: `thimble demo --export demo-collusion-wiki demos/ --outputs-only` (the workspace's name,
    which `thimble demo` makes demo-<dataset>, or its folder). This writes `demos/collusion-wiki/`, replacing an earlier
    pre-cache there. The export refuses, listing
@@ -150,7 +160,7 @@ each one written (backend/app/precached.py).
    (backend/app/labels_store.py: `cover` lines, as a code label run over whole files writes its quiet value), keep the
    other rows, and export again. Every record then reads the same value and the counts are the same; a record a cover
    holds reads with confidence 1 and is named by its line (`#L<n>`).
-4. To show reviewed views in place of the ones the orientation built, run `scripts/sync_demo_views.sh --from <the
+4. To show reviewed views in place of the pre-cache's own views, run `scripts/sync_demo_views.sh --from <the
    THIMBLE_HOME that holds them>`. For each dataset it lists, it takes each reviewed view as thimble serves it there,
    names it as the dataset's view, stamps it with the digest of its files so that install shows it at once, drops the
    pre-cache's other views and their proposals, and updates the manifest and README.md (scripts/dev/demo_views.py).
@@ -181,8 +191,9 @@ gitleaks' findings) and what it left out, each with its size. The manifest holds
 
 `thimble demo <dataset> --precaches <out>` installs it. Each transcript goes where Claude Code keeps it, under a new
 session id that the workspace's files name in place of the old one, so every thread shows its steps. Its agents ran as
-subagents of the exporter's session, so none of them can be continued: the orientation's thread says so, and Start
-runs a new orientation.
+subagents of the exporter's session, so none of them can be continued: the orientation's thread says so. A session
+started in the dataset's folder runs a new orientation when asked. Neither format carries the exporter's open notices,
+the view proposer's job or a view proposal that waits for an answer, and install takes them out of an older export.
 
 A full export holds the dataset's text, so `scripts/check_content.py` refuses it under `demos/`.
 

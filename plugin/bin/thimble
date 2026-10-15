@@ -12,15 +12,15 @@
 #   thimble feedback ["description"] [--no-logs]
 #                                        write a problem report (a zip) to send the developer, and say how to send it
 #                                        (bash, below: it needs no server and no working supervisor)
-#   thimble doctor | fix | revert | stop | restart | up
-#                                        the supervisor's subcommands (backend/app/cli.py); fix and revert only in a
+#   thimble doctor [--verbose] | unpair | fix | revert | stop | restart | up
+#                                        the supervisor's subcommands (backend/app/cli.py): doctor's checklist, or its
+#                                        full detail; unpair signs out every browser; fix and revert only in a
 #                                        development install (a git clone), since they change thimble's own code
 #   thimble list                         the workspaces by id: each registered folder's, and its archived runs, with when
 #                                        each was last used and the sessions open on it (backend/app/runs.py)
 #   thimble purge <id>… [-y] [--dry-run] delete workspaces or archived runs by id, printing what went; never the folder a
 #                                        workspace read or Claude Code's transcripts (backend/app/runs.py)
-#   thimble plugin on | off | status     thimble in every Claude Code session, or only in the sessions this command
-#                                        starts, which load its plugin either way (scripts/plugin.sh, bash: it needs no
+#   thimble plugin status                which thimble plugin Claude Code has (scripts/plugin.sh, bash: it needs no
 #                                        venv)
 #   thimble mode [browser | terminal] [--default] | --unset [--default]
 #                                        the mode `thimble` starts in, in this folder or by default: browser (the server
@@ -42,9 +42,9 @@
 #                                        of its sample in $THIMBLE_HOME/examples with its view built, and open the start
 #                                        page; --refresh copies them again (backend/app/demo_examples.py)
 #   thimble launch-args [--cwd <p>] [--settings <s>]
-#                                        what a session starts with: the plugin folder, the --allowedTools, --effort and
-#                                        --settings values, the tools that end a turn without text, main's --name, then
-#                                        main's prompt
+#                                        what a session starts with: the plugin folder, the --effort and --settings
+#                                        values, the tools that end a turn without text, main's --name, then main's
+#                                        prompt
 #   thimble prompt <name>… [--cwd <p>]   prompt files rendered for a session in <p> (the injected command of the
 #                                        /thimble and shared skills and of the SessionStart hook); in a session
 #                                        thimble started in its own work folder, the ones its server rendered
@@ -79,7 +79,7 @@ plugin="$(cd "$here/.." && pwd -P)"
 
 # the supervisor's subcommands (backend/app/cli.py build_parser) plus the `server` group; `up` is an alias of `ensure`.
 # `uninstall` is the bash function below, so it works with backend/.venv missing or broken.
-SUPERVISOR_COMMANDS=" server up ensure stop restart doctor fix revert update list purge extension launch-args prompt demo "
+SUPERVISOR_COMMANDS=" server up ensure stop restart doctor unpair fix revert update list purge extension launch-args prompt demo "
 
 # usage: what `thimble help` prints, the commands an analyst uses; the header above has the details. `server`,
 # `status`, `launch-args`, `prompt`, `state` and `act` run when typed and are not listed (CONTRIBUTING.md has them).
@@ -103,13 +103,13 @@ usage: thimble [claude flags...]          start thimble in this folder: a new Cl
                                           delete workspaces or archived runs by id, after asking
        thimble extension add <folder | git URL | name> [--yes] | on <name> | off <name> | list | remove <name>
                                           add, switch on or off, list or remove extensions
-       thimble plugin on | off | status   thimble in every Claude Code session (/thimble in any `claude`), or
-                                          only in the sessions `thimble` starts
+       thimble plugin status              which thimble plugin Claude Code has
        thimble mode [browser | terminal] [--default] | --unset [--default]
                                           where `thimble` in this folder shows its work: in the browser, or in
                                           the terminal alone with no server (--default: every folder without
                                           its own mode)
-       thimble doctor                     what is installed and running, and what is wrong
+       thimble doctor [--verbose]         a checklist of what works, with the fix for each problem
+       thimble unpair                     sign out every browser
        thimble feedback ["what went wrong"] [--no-logs]
                                           write a problem report to send the developer
        thimble update [--from <zip>]      bring the install up to date
@@ -188,7 +188,8 @@ feedback() {
 # thimble uninstall [--yes] [--keep-home]: bash, so it works when the venv is missing or inside the tree being removed.
 # It touches only the plugin registration and the trust entry install.sh added, the lines install.sh added to shell
 # startup files (recorded in $THIMBLE_HOME/shell-startup: exactly those lines go, and a file it created goes once it holds
-# nothing else), ~/.local/bin/thimble and $THIMBLE_HOME; a tree outside $THIMBLE_HOME (a clone) is left in place with
+# nothing else), ~/.local/bin/thimble (the link in $THIMBLE_BIN_DIR, when set, as install.sh puts it there) and
+# $THIMBLE_HOME; a tree outside $THIMBLE_HOME (a clone) is left in place with
 # its workspaces. The `rm -rf` is guarded:
 # $THIMBLE_HOME is canonicalized once, `/`, $HOME and relative paths are refused, and it is removed only when it holds
 # thimble state. The recorded
@@ -214,7 +215,7 @@ uninstall() {
     esac
   done
   [ -n "${HOME:-}" ] || { printf 'thimble uninstall: HOME is not set\n' >&2; exit 2; }
-  local home_raw="${THIMBLE_HOME:-}" home home_note="" home_state=0 link="$HOME/.local/bin/thimble" tree="" kind="" name="" name_note=""
+  local home_raw="${THIMBLE_HOME:-}" home home_note="" home_state=0 link="${THIMBLE_BIN_DIR:-$HOME/.local/bin}/thimble" tree="" kind="" name="" name_note=""
   local inside=0 pid="" port="" pid_note="" conf="" planned="" pport="" link_ours=0 link_why="" stop_how="" have_claude=0 ans cwd rc
   local nsteps=0 ndone=0 nleft=0 left="" id_ok=0 id_conf="" id_note="" changed=0 undo=0 undo_py="" undo_cmd="" undone=1
   local reg="" reg_ok=1 reg_from="" reg_other="" mkt="" sh_record="" sh_files=() sh_ok=1 kind_ f_ line_
@@ -590,11 +591,10 @@ case "${1:-}" in
     exit 2;;
 esac
 
-# The session: Claude Code in this folder with the plugin loaded, whose hooks bring it the browser's events. Main runs
-# inside thimble's fence (cli.main_fence, in its --settings): Claude Code's sandbox on, the corpus read-only, writes only
-# in the agents' work folders, thimble's token files unreadable, and every subagent main starts inherits it. thimble's
+# The session: Claude Code in this folder with the plugin loaded, whose hooks bring it the browser's events. thimble's
 # agents are subagents of main, whose types the plugin's hooks module registers (plugin/hooks/thimble.ts); without the
-# module they cannot start, and the launch says so.
+# module they cannot start, and the launch says so. Main and its agents run in the permission mode the analyst starts
+# Claude Code in: the launch adds no permission rule and no sandbox.
 # `launch-args` prints the plugin folder to load with --plugin-dir, or nothing when Claude Code has the plugin copy
 # installed and loads it already. Main's prompt is appended to the system prompt, since Claude Code cuts MCP server
 # instructions at about 2 KB and an appended prompt reaches every fork whole.
@@ -605,8 +605,8 @@ esac
 # --session-id is the id launch-args chose for a new session and wrote into the workspace's launch.json, from which the
 # hooks module's bridge takes main's session; it is left out when the analyst's flags name the session themselves.
 # --launcher-pid is this script's own pid ($$), and the subshell that execs `claude` writes its own pid over it just
-# before, so launch.json names main's `claude` process before main starts: the bridge reads from that process's command line whether main runs inside thimble's fence, and so
-# accepts the module's hello inside session.start, in time for main's first agent listing.
+# before, so launch.json names main's `claude` process before main starts: the bridge accepts the module's hello from
+# that process inside session.start, in time for main's first agent listing.
 # The env line's switches are exported (CLAUDE_CODE_DISABLE_AGENT_VIEW=1: no "Move to background" and no ← agent view),
 # the variables the unset line names are unset, and the note lines are printed before Claude Code starts.
 # --name is `thimble:main · <workspace>` (cli.main_name), since `claude agents` and /resume list the sessions of every
@@ -614,11 +614,10 @@ esac
 # left unnamed takes it, and so does one the analyst renamed with /rename), and an -n/--name among the analyst's own
 # flags wins.
 # --settings carries thimble's statusline and the composer's fast mode, merged into the analyst's own --settings, since
-# Claude Code reads only the last one. --allowedTools lets the thimble tools and the plugin's skills run without a
-# permission prompt, since a fork answering the browser must not wait on a terminal nobody watches; nothing is denied.
-# THIMBLE_LAUNCHED tells /thimble that main's prompt is appended already. launch-args starts the server and waits for it
-# before claude starts, so the hooks module registers thimble's agent types inside the session's start; the session
-# opens with /thimble, which opens this folder as a workspace (and starts the server if it is down).
+# Claude Code reads only the last one. THIMBLE_LAUNCHED tells /thimble that main's prompt is appended already.
+# launch-args starts the server and waits for it before claude starts, so the hooks module registers thimble's agent
+# types inside the session's start; the session opens with /thimble, which opens this folder as a workspace (and starts
+# the server if it is down).
 # Terminal mode (`thimble mode terminal`, backend/app/launch_mode.py; launch-args' mode line names it) starts the same
 # session with no server and no first prompt: launch-args starts no server and writes the hooks module's roles file, the
 # mode line names the renderer plugin (mods/thimble-term), loaded with a second --plugin-dir, and the export line names
@@ -627,6 +626,17 @@ esac
 # by its name (`thimble-run card <id>`). A THIMBLE_MODE or THIMBLE_WS from the calling shell is dropped first.
 # A workspace is open in one mode at a time: while another terminal runs it in the other mode, launch-args prints why on
 # stderr and exits 3 (cli.LAUNCH_REFUSED_EXIT), and the launcher starts nothing.
+# thimble talks to its own server on 127.0.0.1. Keep that traffic off any HTTP proxy the shell sets: every process of the
+# session (Claude Code, its hooks module, the MCP shim, the server launch-args starts) reads NO_PROXY / no_proxy. Only
+# here: a subcommand runs Python, whose app/config.py adds the same for itself and its children and keeps the shell's
+# values for /thimble's proxy line (cli.proxy_unsafe), which this edit would hide.
+for _np in NO_PROXY no_proxy; do
+  case ",${!_np:-}," in
+    *,127.0.0.1,*) ;;
+    *) export "$_np=${!_np:+${!_np},}127.0.0.1,localhost" ;;
+  esac
+done
+unset _np
 command -v claude >/dev/null 2>&1 || {
   printf 'thimble: the `claude` CLI is not on PATH. thimble runs inside Claude Code: install it (https://docs.anthropic.com/en/docs/claude-code), then run thimble again.\n' >&2
   exit 1; }
@@ -670,8 +680,6 @@ out="$(cd "$repo/backend" && THIMBLE_CALLER_CWD="$cwd" \
   printf 'thimble: could not render the session prompt (see the lines above); run `thimble doctor`\n' >&2; exit 1; }
 plugin_dir="${out%%$'\n'*}"
 rest="${out#*$'\n'}"
-allowed="${rest%%$'\n'*}"
-rest="${rest#*$'\n'}"
 effort="${rest%%$'\n'*}"
 rest="${rest#*$'\n'}"
 settings="${rest%%$'\n'*}"
@@ -702,7 +710,7 @@ fi
 last=""
 if [ "$cont" = 1 ]; then last="${rest%%$'\n'*}"; rest="${rest#*$'\n'}"; fi
 prompt="$rest"
-tools=(--allowedTools "$allowed" --settings "$settings")
+tools=(--settings "$settings")
 # an --effort among the analyst's own flags is their choice, so thimble's default is left out
 for a in "$@"; do case "$a" in --effort | --effort=*) effort="";; esac; done
 [ -z "$effort" ] || tools+=(--effort "$effort")

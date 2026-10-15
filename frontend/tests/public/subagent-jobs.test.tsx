@@ -19,7 +19,7 @@ import { runLine } from '../../src/report/checkComments.ts'
 import { nextRefusals, useWriteRefusals, writingAfter } from '../../src/report/writeFailures.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
-const P = (slug: string, extra: Partial<Proposal> = {}): Proposal => ({ slug, name: slug, why: '', claims: [], arrangement: '', proposed_by: 'orient', status: 'building', ts: '', chat: `c-${slug}`, ...extra }) as Proposal
+const P = (slug: string, extra: Partial<Proposal> = {}): Proposal => ({ slug, name: slug, description: '', task: '', claims: [], arrangement: '', proposed_by: 'orient', status: 'building', ts: '', chat: `c-${slug}`, ...extra }) as Proposal
 let proposals: Proposal[] = []
 let posted: [string, unknown][] = []
 beforeEach(() => {

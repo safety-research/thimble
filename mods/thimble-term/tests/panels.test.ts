@@ -65,31 +65,19 @@ test("a thread that answers: what it is about, dim, before its first question; `
   await pane.unmount()
 })
 
-test("a finished thread's answer: `hand back to main` (h) sends it to main once, then the panel says it was handed back; a running thread offers none", async ($, on) => {
+test("a finished thread's answer ends its panel: no `hand back to main`, and no key sends the answer to main", async ($, on) => {
   const w = world(on)
+  // a meta as 0.7.0's thimble gave it, which offered the answer to main
   w.chats.t1 = { meta: { ...THREAD_T1.meta, hand_back: 'offer' }, events: THREAD_T1.events }
-  // a thread still answering offers none, whatever its meta says
-  w.chats.t2 = { meta: { ...w.states.threads[2], hand_back: 'offer' }, events: [{ type: 'user', text: 'which pages were deleted?' }, { type: 'tool_use', id: 'u1', name: 'Bash', input: {} }] }
   await start($, w)
-  let pane = await home($, w)
-  pane = await homeClick($, w, pane, '"which pages were deleted?"')
-  let text = shown(await pane.drawn())
+  const pane = await homeClick($, w, await home($, w), '"why is events.jsonl bigger?"')
+  const text = shown(await pane.drawn())
   expect(text).not.toContain('hand back')
-  await pane.unmount()
-  pane = await home($, w)
-  pane = await homeClick($, w, pane, '"why is events.jsonl bigger?"')
-  text = shown(await pane.drawn())
-  expect(text).toContain('hand back to main')
-  expect(text).toContain('↑↓ to choose · Enter or a to ask · h to hand back · b to go back · x to close')
-  await pane.press({ key: 'hk-hand-back' })
-  await w.clock.settle()
-  expect(w.acts.filter(a => a.kind === 'hand-back')).toEqual([{ kind: 'hand-back', payload: { thread: 't1' } }])
-  await pane.unmount()
-  pane = (await $.ui.mount(PANE)) as unknown as M
-  text = shown(await pane.drawn())
-  expect(text).toContain('handed back to main')
-  expect(text).not.toContain('h to hand back')
+  expect(text).toContain('↑↓ to choose · Enter or a to ask · b to go back · x to close')
   expect(((await pane.findAll({ type: 'Button' })) as { key?: string }[]).some(b => b.key === 'thread-hand-back')).toBe(false)
+  await pane.press({ key: 'hk-hand-back' }).catch(() => undefined)
+  await w.clock.settle()
+  expect(w.acts.filter(a => a.kind === 'hand-back')).toEqual([])
   await pane.unmount()
 })
 

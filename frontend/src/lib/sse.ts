@@ -1,4 +1,8 @@
-// Server-sent events on the browser side: an EventSource that reconnects after a hard failure or a stall.
+// Server-sent events on the browser side: an EventSource that reconnects after a hard failure or a stall. A stream the
+// server closed (an answer that is no stream, such as the 401 of a browser that is no longer signed in) makes the page
+// ask whether it is still signed in (lib/api checkSignedIn), so a signed-out tab shows shell/SignIn's line rather than
+// that the server is down.
+import { checkSignedIn } from './api'
 
 /** The server's keepalive cadence (backend EventSourceResponse ping=15). */
 export const PING_MS = 15_000
@@ -66,6 +70,7 @@ export function openStream(url: string, opts: StreamOptions): () => void {
       interrupted = true
       opts.onDown?.()
       if (cur.readyState !== EventSource.CLOSED) return
+      void checkSignedIn()
       clear()
       const wait = Math.min(RETRY_MS * 2 ** failures, RETRY_MAX_MS)
       failures++

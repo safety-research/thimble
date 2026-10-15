@@ -1,13 +1,15 @@
 // @vitest-environment jsdom
-// The end of an orientation's or a writer's thread that handed its summary back to main (src/chat/ChatPanel.tsx
+// The end of an orientation's or a writer's thread that sent its summary to main (src/chat/ChatPanel.tsx
 // orientMessages, src/chat/HandBack.tsx HandedBack): the SubagentHandback call and the text after it become one folded
-// hand-back row, drawn as the quiet line `Handed back to main`, which a click opens on the summary as the thread's
+// hand-back row, drawn as the quiet line `Summary sent to main`, which a click opens on the summary as the thread's
 // markdown and a second click folds; with no summary there is no extra row. What main receives is not changed here.
+// Where the call shows unfolded, as a call's line, it reads `Sent its summary to main`, and its summary shows once the
+// line is opened.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { orientMessages } from '../../src/chat/ChatPanel.tsx'
-import { HANDED_BACK } from '../../src/chat/HandBack.tsx'
-import { foldRecords, orientSummaries } from '../../src/chat/model.ts'
+import { SUMMARY_SENT } from '../../src/chat/HandBack.tsx'
+import { callLineText, callToolName, foldRecords, HANDBACK_LINE, orientSummaries, plainStep, runTools, stepText, toolDisplayName, toolGroupName, type ToolRow } from '../../src/chat/model.ts'
 import { Rows } from '../../src/chat/Rows.tsx'
 import type { ChatRecord } from '../../src/lib/types.ts'
 import { mount, unmountAll } from './mount.tsx'
@@ -64,7 +66,8 @@ describe('the hand-back row', () => {
   test('shows one quiet line with the summary folded; a click opens it as markdown, a second folds it', async () => {
     const el = await mount(<Rows rows={orientMessages(foldRecords(records(SUMMARY)))} ws="w" chat="o1" calls="o1" />)
     const line = el.querySelector('.chat-hand-back')
-    expect(line?.textContent).toBe(HANDED_BACK)
+    expect(line?.textContent).toBe(SUMMARY_SENT)
+    expect(SUMMARY_SENT).toBe('Summary sent to main')
     expect(line?.getAttribute('data-state')).toBe('handed')
     expect(el.textContent).not.toContain('1,204 revisions')
     expect(head(el).getAttribute('aria-expanded')).toBe('false')
@@ -87,5 +90,42 @@ describe('the hand-back row', () => {
   test('with no summary the thread ends with no hand-back line', async () => {
     const el = await mount(<Rows rows={orientMessages(foldRecords(records('')))} ws="w" chat="o1" calls="o1" />)
     expect(el.querySelector('.chat-hand-back')).toBeNull()
+  })
+})
+
+describe('the hand-back call unfolded', () => {
+  test("its name reads `Sent its summary to main`, as the folded row's `Summary sent to main`, wherever it shows", () => {
+    expect(HANDBACK_LINE).toBe('Sent its summary to main')
+    expect(callToolName('SubagentHandback')).toBe('Sent its summary to main')
+    expect(callToolName('Bash')).toBe('Bash')
+    expect(toolDisplayName('SubagentHandback')).toBe('SubagentHandback')
+    expect(callLineText('SubagentHandback', { message: SUMMARY }, 'w')).toBe('Sent its summary to main')
+    const call = foldRecords(records(SUMMARY)).find((r) => r.kind === 'tool' && r.name === 'SubagentHandback') as ToolRow
+    expect(plainStep(call)).toBe('Sent its summary to main')
+    expect(stepText(call)).toBe('Sent its summary to main')
+    expect(toolGroupName('SubagentHandback')).toBe('Sent its summary to main')
+    expect(runTools([call]).tools).toEqual([{ name: 'Sent its summary to main', n: 1 }])
+  })
+
+  test('in a thread, its card and its step unfolded read so, and never the wire name', async () => {
+    const el = await mount(<Rows rows={foldRecords(records(SUMMARY)).slice(1)} ws="w" chat="t1" />)
+    const card = el.querySelector<HTMLElement>('.chat-tool[data-tool="SubagentHandback"]')!
+    expect(card.querySelector('.chat-tool-name')?.textContent).toBe('Sent its summary to main')
+    await act(async () => card.querySelector<HTMLElement>('[role="button"]')!.click())
+    expect(card.textContent).toContain('Sent its summary to main')
+    expect(el.textContent).not.toContain('SubagentHandback')
+  })
+
+  test("in a run of calls, its line unfolded reads so, and opens on the summary", async () => {
+    const rows = foldRecords(records(SUMMARY)).slice(1).filter((r) => r.kind !== 'text')
+    const el = await mount(<Rows rows={rows} ws="w" chat="o1" calls="o1" />)
+    expect(el.querySelector('.chat-callrun-chip')?.textContent).toContain('Sent its summary to main')
+    await act(async () => el.querySelector<HTMLButtonElement>('.chat-callrun-chip')!.click())
+    const line = el.querySelector<HTMLElement>('.chat-call[data-tool="SubagentHandback"]')!
+    expect(line.querySelector('.chat-call-tool')?.textContent).toBe('Sent its summary to main')
+    expect(line.querySelector('.chat-call-target')).toBeNull()
+    expect(el.textContent).not.toContain('SubagentHandback')
+    await act(async () => line.querySelector<HTMLButtonElement>('.chat-call-chip')!.click())
+    expect(line.textContent).toContain('1,204 revisions')
   })
 })

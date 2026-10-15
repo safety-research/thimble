@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-// Stop in the composer, as in Claude (src/components/Composer.tsx, src/chat/ChatPanel.tsx composerStopOf): while an
-// agent the browser can stop runs, the send square is its stop square while the field is empty and the send square
-// again once there is text; a step's thread carries its running parent's Stop. The Stop goes out through stopRun (a
-// session's through stopSession, a ticket's through dev.stop_ticket, a view's build or review through its own route)
-// and says in a toast when it could not stop; in an agent's own thread its card leaves Stop to the composer (AgentCard
-// stopHere). The transcript of a running dev ticket carries no Stop of its own (src/chat/TicketStatus.tsx).
+// Stop in the composer, as in Claude (src/components/Composer.tsx, src/chat/ChatPanel.tsx composerStopOf): while what
+// the browser can stop runs (main's turn, a side thread's fork, one of thimble's agents), the send square is its stop
+// square while the field is empty and the send square again once there is text; a step's thread carries its running
+// parent's Stop. The Stop goes out through stopRun (main's, a thread's or a session's through stopSession, a ticket's
+// through dev.stop_ticket, a view's build or review through its own route) and says in a toast when it could not stop;
+// in an agent's own thread its card leaves Stop to the composer (AgentCard stopHere). The transcript of a running dev
+// ticket carries no Stop of its own (src/chat/TicketStatus.tsx).
 import { act } from 'react'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { ComposerFrame } from '../../src/components/Composer.tsx'
@@ -84,9 +85,15 @@ describe('what the composer stops (composerStopOf)', () => {
     expect(composerStopOf('dev', meta('d1', 'running'), null)).toBeNull()
   })
 
-  test("main and its threads: none, since the browser cannot stop main's turn", () => {
-    expect(composerStopOf('main', meta('main', 'running'), null)).toBeNull()
-    expect(composerStopOf('thread', meta('th1', 'running'), null)).toBeNull()
+  test("main while its turn runs; a side thread while its fork runs, not while its question waits for main to fork it", () => {
+    const chat = (id: string, more: Partial<ChatMeta>) => ({ id, ...more }) as ChatMeta
+    expect(composerStopOf('main', chat('main', { running: true }), null)).toEqual({ kind: 'session', chat: 'main', role: 'main', label: 'Stop main' })
+    expect(composerStopOf('main', chat('main', { running: false }), null)).toBeNull()
+    const fork = { agent_id: 'afork1' }
+    expect(composerStopOf('thread', chat('th1', { running: true, fork }), null)).toEqual({ kind: 'session', chat: 'th1', role: 'thread', label: 'Stop the thread' })
+    expect(composerStopOf('thread', chat('th1', { running: false, fork }), null)).toBeNull()
+    expect(composerStopOf('thread', chat('th1', { running: true }), null)).toBeNull()
+    expect(composerStopOf('thread', chat('th1', { running: true, fork: { agent_id: 'afork1', ended: '2026-10-15T10:00:00Z' } }), null)).toBeNull()
   })
 
   test("a view's thread: the build while it is queued or building, else the review while it runs", () => {
@@ -167,6 +174,36 @@ describe('the Stop sent', () => {
     const t = toasts()
     expect(await stopSession('mini', 'o1', 'orient')).toBe(true)
     expect(t.seen).toEqual([{ text: 'It had already ended.' }])
+    t.off()
+  })
+
+  test("main's Stop and a thread's go to their chat's interrupt; main stopped resolves true with no toast", async () => {
+    const sent: string[] = []
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      if (!url.includes('/telemetry')) sent.push(`${init?.method ?? 'GET'} ${url}`)
+      return new Response(JSON.stringify({ stopped: true }), { status: 200, headers: { 'content-type': 'application/json' } })
+    })
+    const t = toasts()
+    expect(await stopRun('mini', { kind: 'session', chat: 'main', role: 'main', label: 'Stop main' }, () => undefined)).toBe(true)
+    expect(await stopRun('mini', { kind: 'session', chat: 'th1', role: 'thread', label: 'Stop the thread' }, () => undefined)).toBe(true)
+    expect(sent).toEqual(['POST /api/ws/mini/chats/main/interrupt', 'POST /api/ws/mini/chats/th1/interrupt'])
+    expect(t.seen).toEqual([])
+    t.off()
+  })
+
+  test("without thimble's module in main's session, main's Stop says to press Esc in the terminal; another failure says why", async () => {
+    const t = toasts()
+    answer({ stopped: false, kind: 'no-module', reason: "Claude Code did not load thimble's hooks module" })
+    expect(await stopSession('mini', 'main', 'main')).toBe(false)
+    answer({ stopped: false, kind: 'error', reason: 'the request timed out.' })
+    expect(await stopSession('mini', 'main', 'main')).toBe(false)
+    answer({ detail: 'down' }, 500)
+    expect(await stopSession('mini', 'main', 'main')).toBe(false)
+    expect(t.seen).toEqual([
+      { text: 'To stop main, press Esc in your Claude Code terminal.' },
+      { text: 'thimble could not stop main: the request timed out. To stop main, press Esc in your Claude Code terminal.', kind: 'error' },
+      { text: 'thimble could not stop main: 500 down. To stop main, press Esc in your Claude Code terminal.', kind: 'error' },
+    ])
     t.off()
   })
 

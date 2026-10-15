@@ -1,8 +1,8 @@
 """The server's side of thimble's hooks module (plugin/hooks/thimble.ts): how a click in the browser reaches Claude Code's
 `$.agent.spawn`, `SendMessage` and `TaskStop` in main's session with no turn of main.
 
-The module runs inside main's `claude` process, in thimble's launched interactive main only, and starts no process. It
-says hello (POST /api/module/hello), fetches the roles it registers (GET /api/module/roles, from subagents.roles) and
+The module runs inside main's `claude` process, in thimble's interactive main only (one the launcher started, or one
+in which /thimble expanded), and starts no process. It says hello (POST /api/module/hello), fetches the roles it registers (GET /api/module/roles, from subagents.roles) and
 what the workspace's record holds (GET /api/module/state), then holds a long poll (GET /api/module/next) that hands it
 the requests made for its main session, one at a time; it answers each (POST /api/module/result), and posts the end of
 each run of an agent it started (POST /api/module/ended), since its other hooks skip those agents. Every route is
@@ -12,17 +12,17 @@ so a process that holds the port can neither hand the module requests nor read t
 A hello is accepted only from main's session: the one launch.json names (while it names none, the one /thimble made
 main), or the one `--rekey` moved it to after a /clear or an in-session /resume (rekey), in either order, since the
 module sees the new id within tens of milliseconds of the SessionStart hook (spike V2): a hello for an id that is not
-main yet is held up to HELLO_HOLD_S for a rekey that names it. Main must also run inside thimble's fence
-(cc_plugin.main_fenced), so a THIMBLE_LAUNCHED that a child session inherited gets no requests; that is read from main's
-command line, never from anything the module or main reports. At session start, before /thimble attaches main, the
-command line is that of the process launch.json names (`pid`: main's `claude`, which the launcher writes, _launched):
-the hello is accepted when its session is launch.json's and that process's command line is a fenced `claude` that names
-the session, so the module registers thimble's types inside session.start, in time for main's first agent listing.
-Where that check cannot be made (no pid in launch.json, the process gone, a command line that is not that `claude`, or a
-session /clear moved main to), the fence is read once main's session has opened thimble (/thimble attached it, _opened),
-and a hello before then is asked again later rather than refused. launch.json is the launcher's: the server makes it
-when it registers the workspace, kernels see it read-only and main's Edit is denied it (subagent_files). The long poll
-hands out requests for that session only, so two mains in one folder never take each other's clicks.
+main yet is held up to HELLO_HOLD_S for a rekey that names it. Main is the session /thimble or the launcher made
+main; a session that only inherited THIMBLE_LAUNCHED is another session, which gets NOT_MAIN. At session start, before
+/thimble attaches main, the hello is accepted when its session is launch.json's and the process launch.json names
+(`pid`: main's `claude`, which the launcher writes, _launched) is a `claude` whose command line names the session, so
+the module registers thimble's types inside session.start, in time for main's first agent listing. Where that check
+cannot be made (no pid in launch.json, the process gone, a command line that is not that `claude`, or a session /clear
+moved main to), a hello is accepted once main's session has opened thimble (/thimble attached it, _opened), and a hello
+before then is asked again later rather than refused. launch.json is the launcher's, or /thimble's for a session it
+made main (`via: skill`): the server makes it when it registers the workspace, kernels see it read-only and the hooks
+module refuses file tools its edit (userconf.module_rules). The long poll hands out requests for that session only, so
+two mains in one folder never take each other's clicks.
 
 `request(c, op, **args)` is how the rest of the server asks (lane B's clicks, follow-ups and stops, lane E's jobs). It
 waits up to REQUEST_TIMEOUT_S for the module's answer, after which the request expires and the answer is `no-module`:
@@ -32,8 +32,9 @@ starts an agent after its card said it did not. An Answer is a dict with exactly
                 `queued`: a message waits for a running agent's next tool round rather than resuming it)
     deny        thimble's own PreToolUse refused the call (the reason as Claude Code gives it)
     limit       Claude Code's concurrent-subagent limit (its own text, with the number)
-    error       anything else (`gone`: the agent had ended already or belongs to another session)
-    ok          a register or a note went through
+    error       anything else (`gone`: the agent had ended already or belongs to another session, or no turn of
+                main's ran)
+    ok          a register, an abort or a note went through
     no-module   no module holds the long poll for main's session (the reason, why_not), or none answered in time
                 (`expired`: true)
 Ops and their arguments:
@@ -43,6 +44,8 @@ Ops and their arguments:
                                           one-line note (hint module-started-note, with `what`, a server-checked name)
     send   agent, text, role, values      register the run's values if needed, then SendMessage
     stop   agent                          TaskStop
+    abort                                 `$.turn.abort` of main's running turn (the analyst's Stop of main), answered
+                                          once that turn completed
     note   text                           `$.session.append` to main
 `request` is a coroutine for the server's loop; request_blocking is the same call from a worker thread.
 
@@ -63,9 +66,9 @@ registration made during the turn.
 Terminal mode (the session launch.json names runs in terminal mode: transport is "file") has no server and no HTTP.
 The module takes the same requests from the workspace's subagents.json and writes everything it says to module.json,
 both in the trusted folder (subagent_files.py):
-    roles       trusted/roles.json {at, digest, roles}: the roles GET /api/module/roles would serve (roles_file, which
-                the launcher writes and push_roles and sync_roles write again); the module registers them again when
-                the file changes
+    roles       trusted/roles.json {at, digest, roles, rules}: what GET /api/module/roles would serve (roles_file, which
+                the launcher writes and push_roles and sync_roles write again); the module registers the roles again
+                and takes the rules when the file changes
     requests    entries of subagents.json's `requests` of kind `module`, {op, args, module: pending, session,
                 asked_at, expires_at} (subagent_files.add_module_request): the module takes those of main's session
                 that are pending and not past `expires_at`, one at a time in the order they were asked
@@ -76,12 +79,15 @@ both in the trusted folder (subagent_files.py):
                 plan mode as its poll saw it
 request() writes the entry and reads module.json for the answer, up to REQUEST_TIMEOUT_S; an entry that expires is
 marked so (the module no longer takes it), and a late answer of a spawn gets its agent stopped (reconcile). Only
-processes outside main's sandbox ask (the MCP shim, the hooks' backend calls, the renderer's acts), since main's Bash
-cannot write the trusted folder.
+thimble's own processes ask (the MCP shim, the hooks' backend calls, the renderer's acts).
 
-The browser reads main's state from main's meta (main_meta, which agents.py's main routes add): whether main runs inside
-thimble's fence, whether the launcher started it, and whether the module is live, with why_not when it is not. Each
-time the module goes live or stops being live, main's chat is notified, so an open page reads it again (_show).
+The browser reads main's state from main's meta (main_meta, which agents.py's main routes add): whether the module is
+live, with why_not when it is not. Each time the module goes live or stops being live, main's chat is notified, so an
+open page reads it again (_show).
+
+The roles route also carries the rules the module enforces on file tools and the web tools (userconf.module_rules:
+the token files, thimble's records, the corpus when its edits are off, and the web when it is off), and roles.json
+carries them in terminal mode; the digest the server keeps of what it served covers both (_served).
 """
 from __future__ import annotations
 
@@ -119,11 +125,11 @@ HELLO_HOLD_S = 5.0  # a hello for a session that is not main yet waits this long
 ROLES_CHECK_S = 2.0  # how often a held long poll looks whether the files the roles are rendered from changed
 EXPIRED_KEPT = 64  # expired requests remembered for their late answers
 REKEYS_KEPT = 32
-OPS = ("register", "spawn", "send", "stop", "note")
+OPS = ("register", "spawn", "send", "stop", "abort", "note")
 ANSWER_KEYS = ("agentId", "deny", "limit", "error", "ok")
 NO_MODULE = "no-module"
 REGISTRY = "trusted/subagents.json"  # lane B's record of thimble's agents, in the workspace (module note; subagent_files)
-LAUNCH = "trusted/launch.json"  # written by `thimble launch-args` (lane A): {session, at, fenced, switches, unset, pid}
+LAUNCH = "trusted/launch.json"  # written by the launcher or /thimble: {session, at, via, mode, switches, unset, pid}
 NOTE_HINT = sf.NOTE_HINT  # prompts/tools.md: {role}, {agent}, {what}, {how}
 AGENT = "{agent}"  # left in a note for the module to fill with the agent id it got
 HOW = sf.HOW  # module-started-note's {how}, by the route of the agent's start
@@ -135,11 +141,10 @@ NO_MODULE_ENV = "THIMBLE_NO_MODULE"
 NOT_LOADED = "Claude Code did not load thimble's hooks module"
 NOT_ANSWERING = "Your Claude Code session's thimble module did not answer"
 NOT_MAIN = "this Claude Code session is not thimble's main session in this folder"
-NOT_FENCED = "main does not run inside thimble's sandbox"
 NO_MAIN = "thimble knows no main session in this folder yet"
 # main's session as launch.json names it has not opened thimble yet: the launcher's first prompt, /thimble, attaches it
-# (session.current) only after the module's first hello at session start, and its `claude` process, whose command line
-# says whether it is fenced, is known only then (session.main_pid), unless launch.json's pid names it (_launched)
+# (session.current) only after the module's first hello at session start, and its `claude` process is known only then
+# (session.main_pid), unless launch.json's pid names it (_launched)
 NOT_OPEN = "main's session has not opened thimble yet"
 WAIT_REASONS = (NO_MAIN, NOT_OPEN)  # a hello refused for one of these is asked again later (409), never refused for good
 ENDED_STATES = frozenset({"ended", "stopped", "killed", "completed", "failed", "done", "refused", "expired"})
@@ -181,7 +186,7 @@ class _Bridge:
     idle: str = ""  # why the last hello was refused
     problem: str = ""  # what the module reported it could not do (a role it could not register)
     shown: bool = False  # live() as main's chat was last notified of it (_show); a page reads it when it opens
-    served: str = ""  # the digest of the roles the module fetched last (roles_route)
+    served: str = ""  # the digest of the roles and rules the module fetched last (roles_route, _served)
     stamp: tuple = ()  # roles_stamp when the roles were last compared with `served`
     checked: float = 0.0  # monotonic, when a held poll last looked at roles_stamp (_watch_roles)
     checking: bool = False
@@ -315,23 +320,11 @@ def moved_to(c: str, sid: str) -> str:
     return sid
 
 
-def _fenced(c: str) -> bool:
-    from . import cc_plugin  # noqa: PLC0415
-
-    try:
-        return bool(cc_plugin.main_fenced(c))
-    except Exception:  # noqa: BLE001 — main's command line could not be read
-        log.debug("main_fenced(%s) failed", c, exc_info=True)
-        return False
-
-
 def _opened(c: str, sid: str) -> bool:
     """Whether main's session `sid` is the one the server follows (session.current: /thimble attached it), or one that
     session moved to within its `claude` process by /clear or /resume (rekey) before the server followed, and its
-    `claude` process is known (session.main_pid). Until then main's command line cannot be read, so whether main is
-    fenced is not known yet: a server that was already up when `thimble` started main would otherwise read no command
-    line, or the last main's, and refuse the module for the whole session (NOT_OPEN), unless launch.json's process
-    shows it (_launched)."""
+    `claude` process is known (session.main_pid). Until then a hello waits (NOT_OPEN), unless launch.json's process
+    shows main (_launched)."""
     from . import session  # noqa: PLC0415
 
     cur = session.current(c)
@@ -359,10 +352,9 @@ def _names(argv: list[str], sid: str) -> bool:
 def _launched(c: str, sid: str) -> bool:
     """Whether main's session `sid` is the one launch.json names, and the process launch.json names (`pid`: main's
     `claude`, which the launcher writes there as it starts it) runs now as `claude` (_is_claude) with a command line
-    that names `sid` (_names) and is fenced (cc_plugin.fenced_argv, the check main_fenced makes). False when the check cannot
-    be made: no pid, the process gone, or a command line that is not that `claude`, such as another process that took
-    the pid later."""
-    from . import cc_plugin, procs  # noqa: PLC0415
+    that names `sid` (_names). False when the check cannot be made: no pid, the process gone, or a command line that is
+    not that `claude`, such as another process that took the pid later."""
+    from . import procs  # noqa: PLC0415
 
     rec = _launch(c)
     pid = rec.get("pid")
@@ -370,16 +362,15 @@ def _launched(c: str, sid: str) -> bool:
         return False
     try:
         argv = procs.argv(pid)
-        return (_is_claude(argv) and _names(argv, sid)
-                and cc_plugin.fenced_argv(argv, procs.cwd(pid) or Path.cwd()))
+        return _is_claude(argv) and _names(argv, sid)
     except Exception:  # noqa: BLE001 — a command line that cannot be read is no proof
         log.debug("the launcher's process %s in %s could not be read", pid, c, exc_info=True)
         return False
 
 
 def _refusal(c: str, sid: str) -> str:
-    """'' when a hello from `sid` may be accepted, else why not. Before main's session opened thimble, its fence is read
-    from the command line of the process launch.json names (_launched), else the hello waits (NOT_OPEN)."""
+    """'' when a hello from `sid` may be accepted, else why not. Before main's session opened thimble, the process
+    launch.json names shows main (_launched), else the hello waits (NOT_OPEN)."""
     main = main_session(c)
     if not main:
         return NO_MAIN
@@ -387,8 +378,6 @@ def _refusal(c: str, sid: str) -> str:
         return NOT_MAIN
     if not _opened(c, sid):
         return "" if _launched(c, sid) else NOT_OPEN
-    if not _fenced(c):
-        return NOT_FENCED
     return ""
 
 
@@ -494,6 +483,8 @@ def why_not(c: str) -> str:
     for key in ("disableAllHooks", "allowManagedHooksOnly"):
         if tier.get(key) is True:
             return f"your organization's managed settings set {key}"
+    if cc_plugin.managed_mods_only():
+        return f"your organization's managed settings set {cc_plugin.MODS_ONLY}"
     if file and out:
         if out.get("session") != main_session(c):
             return NOT_MAIN
@@ -504,17 +495,13 @@ def why_not(c: str) -> str:
 
 
 def main_meta(c: str) -> dict[str, Any]:
-    """What main's meta adds for the browser (module note): `fenced` (cc_plugin.main_fenced), `launched`
-    (cc_plugin.main_launched), `module` (live) and `module_why` (why_not, '' while live). Each is False, or the reason,
-    when main's session has not opened thimble yet. Never raises."""
-    from . import cc_plugin  # noqa: PLC0415
-
-    out: dict[str, Any] = {"fenced": False, "launched": False, "module": False, "module_why": ""}
-    for key, read in (("fenced", cc_plugin.main_fenced), ("launched", cc_plugin.main_launched), ("module", live)):
-        try:
-            out[key] = bool(read(c))
-        except Exception:  # noqa: BLE001 — a page still shows when one cannot be read
-            log.debug("main's %s in %s could not be read", key, c, exc_info=True)
+    """What main's meta adds for the browser (module note): `module` (live) and `module_why` (why_not, '' while live).
+    False, or the reason, when main's session has not opened thimble yet. Never raises."""
+    out: dict[str, Any] = {"module": False, "module_why": ""}
+    try:
+        out["module"] = live(c)
+    except Exception:  # noqa: BLE001 — a page still shows when it cannot be read
+        log.debug("main's module in %s could not be read", c, exc_info=True)
     if not out["module"]:
         try:
             out["module_why"] = why_not(c) or NOT_LOADED
@@ -748,6 +735,14 @@ def _digest(specs: dict[str, Any]) -> str:
     return hashlib.sha256(json.dumps(specs, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")).hexdigest()
 
 
+def _served(c: str) -> dict[str, Any]:
+    """What GET /api/module/roles serves and roles.json holds: `roles` (_specs) and `rules` (userconf.module_rules),
+    whose digest the server keeps (served), so a change of either has the module fetch both again."""
+    from . import userconf  # noqa: PLC0415
+
+    return {"roles": _specs(c), "rules": userconf.module_rules(c)}
+
+
 async def sync_roles(c: str, force: bool = False) -> bool:
     """Have the module register the roles again (push_roles) when those rendered now differ from those it fetched last
     (module note): always compared with `force`, as before a spawn, else only once roles_stamp changed since the last
@@ -766,7 +761,7 @@ async def sync_roles(c: str, force: bool = False) -> bool:
         b.stamp = stamp
         if not b.served:
             return False
-        digest = _digest(await asyncio.to_thread(_specs, c))
+        digest = _digest(await asyncio.to_thread(_served, c))
     except Exception:  # noqa: BLE001
         log.warning("the roles of %s could not be compared with the module's registration", c, exc_info=True)
         return False
@@ -798,27 +793,28 @@ def _watch_roles(c: str) -> None:
 # ---------------------------------------------------------------------------------------------------- terminal mode
 
 
-def _session_specs(c: str) -> dict[str, dict[str, Any]]:
-    """_specs rendered in the mode of workspace `c`'s session (launch.json's `mode`), whichever process asks: the
+def _session_served(c: str) -> dict[str, Any]:
+    """_served rendered in the mode of workspace `c`'s session (launch.json's `mode`), whichever process asks: the
     launcher writes roles.json before main starts, from a folder that is no corpus and with no THIMBLE_WS, where the
     prompts would otherwise render in browser mode."""
     from . import prompts  # noqa: PLC0415
 
     with prompts.rendering(sf.session_mode(config.workspace_dir(c))):
-        return _specs(c)
+        return _served(c)
 
 
 def roles_file(c: str) -> Path:
-    """trusted/roles.json of workspace `c` written (module note): `{at, digest, roles}`, the roles GET /api/module/roles
-    serves (subagents.roles as `$.agent.register` takes them), from which the module registers thimble's types in
-    terminal mode. The launcher writes it, and push_roles and sync_roles write it again. Its path."""
-    specs = _session_specs(c)
+    """trusted/roles.json of workspace `c` written (module note): `{at, digest, roles, rules}`, what GET
+    /api/module/roles serves (subagents.roles as `$.agent.register` takes them, and userconf.module_rules), from which
+    the module registers thimble's types and takes its rules in terminal mode. The launcher writes it, and push_roles
+    and sync_roles write it again. Its path."""
+    served = _session_served(c)
     ws = config.workspace_dir(c)
     sf.ensure(ws)
     path = sf.roles_path(ws)
     tmp = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(3)}.tmp")
     try:
-        tmp.write_text(json.dumps({"at": _now(), "digest": _digest(specs), "roles": specs}, indent=1,
+        tmp.write_text(json.dumps({"at": _now(), "digest": _digest(served), **served}, indent=1,
                                   ensure_ascii=False, default=str), "utf-8")
         os.chmod(tmp, 0o600)
         os.replace(tmp, path)
@@ -833,7 +829,7 @@ def _sync_roles_file(c: str) -> bool:
     True when it was written."""
     try:
         held = _read_json(sf.roles_path(config.workspace_dir(c)))
-        if held.get("digest") == _digest(_session_specs(c)):
+        if held.get("digest") == _digest(_session_served(c)):
             return False
         roles_file(c)
     except Exception:  # noqa: BLE001
@@ -985,10 +981,11 @@ class HelloBody(BaseModel):
 
 @router.post("/module/hello")
 async def hello_route(body: HelloBody) -> dict[str, Any]:
-    """The module's hello: accepted (200) from main's fenced session, held up to HELLO_HOLD_S for a rekey that names a
-    new main, else refused (403, with the reason recorded for why_not). 404 for a folder that is no workspace yet, and
-    409 while no main session is known or main's session has not opened thimble yet and launch.json's process cannot
-    show that main is fenced (WAIT_REASONS): the module says hello again later."""
+    """The module's hello: accepted (200) from main's session, held up to HELLO_HOLD_S for a rekey that names a new
+    main, else refused (403, with the reason recorded for why_not). 404 for a folder that is no workspace (a module that
+    /thimble turned on stays idle then, until the next /thimble), and 409 while no main session is known or main's
+    session has not opened thimble yet and launch.json's process cannot show main (WAIT_REASONS): the module says hello
+    again later."""
     _remember_loop()
     c = _workspace(body.cwd)
     b = _bridge(c)
@@ -1150,17 +1147,18 @@ def _spec(name: str, role: Any) -> dict[str, Any] | None:
 
 @router.get("/module/roles")
 async def roles_route(cwd: str, session: str) -> dict[str, Any]:
-    """The roles the module registers, from subagents.roles: `{roles: {name: spec}}`."""
+    """The roles the module registers, from subagents.roles, and the rules it enforces on file tools and the web
+    tools (userconf.module_rules): `{roles: {name: spec}, rules: {private, records, corpus, web_off, reasons}}`."""
     c = _workspace(cwd)
     b = _require(c, session)
     stamp = await asyncio.to_thread(roles_stamp, c)  # before the rendering, so a change during it is seen next time
-    out = await asyncio.to_thread(_specs, c)
+    out = await asyncio.to_thread(_served, c)
     digest = _digest(out)
     if digest != b.served:
         b.served = digest
         await asyncio.to_thread(_save, c, b)
     b.stamp = stamp
-    return {"roles": out}
+    return out
 
 
 def _role_of(kind: Any) -> str:

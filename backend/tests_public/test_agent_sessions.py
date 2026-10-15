@@ -8,12 +8,13 @@ from __future__ import annotations
 import asyncio
 import io
 import json
-import urllib.request
+import sys
+import time
 
 import pytest
 from conftest import card_wait
 
-from app import agent_session, agents, config, hook_auth, permission_hook, userconf
+from app import agent_session, agents, cc_plugin, config, hook_auth, permission_hook, userconf
 
 CORPUS = "mini"
 KEY = "dev:t1"
@@ -147,12 +148,13 @@ def test_the_permission_hook_hands_the_request_to_the_server_and_prints_its_deci
 
     def urlopen(req, timeout=None):
         nonce = req.get_header("X-thimble-nonce")
-        assert req.get_header("X-thimble-auth") == hook_auth.sign("tok", "hook", nonce)
+        assert req.get_header("X-thimble-auth") == hook_auth.request_proof("tok", 8311, nonce), "for its port alone"
+        assert abs(int(nonce.split(".")[0]) - time.time()) < 60, "and the time it was made"
         sent.append((req.full_url, json.loads(req.data)))
         assert timeout == permission_hook.TIMEOUT
         return Resp(json.dumps(answer).encode(), nonce)
 
-    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(permission_hook.LOOPBACK, "open", urlopen)  # its opener, which skips a shell's proxy
     monkeypatch.setenv("THIMBLE_SESSION", KEY)
     hook = {"hook_event_name": "PermissionRequest", "tool_name": "Bash", "tool_input": {"command": "ls"},
             "agent_id": "a1", "agent_type": "general-purpose", "session_id": "sid"}
@@ -186,3 +188,31 @@ def test_the_permission_hook_hands_the_request_to_the_server_and_prints_its_deci
     monkeypatch.delenv("THIMBLE_SESSION")
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(hook)))
     assert permission_hook.main(["--ws", CORPUS]) == 0 and capsys.readouterr().out == "", "not a session thimble started"
+
+
+async def test_no_don_t_ask_again_on_the_card_under_the_managed_rules_only_key(hosted, tmp_path, monkeypatch):
+    """Where the org's managed tier sets allowManagedPermissionRulesOnly, Claude Code ignores the rules a session saves
+    and its own dialog offers no "don't ask again", so the card offers none, neither Claude Code's suggestions nor a web
+    rule for the workspace, as main's card offers none (test_relayed_permissions); its Always then allows once."""
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-config"))
+    monkeypatch.setitem(cc_plugin.MANAGED_DIRS, sys.platform, tmp_path / "managed")  # the machine's own is not read
+    tier = tmp_path / "managed" / cc_plugin.MANAGED_FILE
+    tier.parent.mkdir(parents=True)
+    npm = {"command": "npm test", "description": "Run the tests"}
+    fetch = {"url": "https://vega.github.io/vega-lite/", "prompt": "What encodings are there?"}
+
+    async def card(tool: str, inp: dict, suggestions: list | None = None) -> tuple[asyncio.Future, dict]:
+        call = asyncio.ensure_future(agent_session.ask(CORPUS, KEY, tool, inp, suggestions=suggestions))
+        [p] = await _pending(hosted.chat)
+        return call, p
+
+    for managed_only in (True, False):
+        tier.write_text(json.dumps({"allowManagedPermissionRulesOnly": managed_only}))
+        call, p = await card("Bash", npm, [RULE])
+        assert ("always" in p) is not managed_only
+        assert agent_session.answer(CORPUS, hosted.chat, p["id"], True, always=True)
+        assert ("updatedPermissions" in await call) is not managed_only
+        call, p = await card("WebFetch", fetch)
+        assert ("keep" in p) is not managed_only
+        assert agent_session.answer(CORPUS, hosted.chat, p["id"], True)
+        assert (await call)["behavior"] == "allow"

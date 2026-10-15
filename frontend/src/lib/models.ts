@@ -80,7 +80,7 @@ export function loadSettings(ws: string, fresh = false): Promise<Settings> {
   return cache.get(ws)!
 }
 
-/** Forget the cached settings of `ws` after a save, and tell whoever shows them (the Start gate's effort). */
+/** Forget the cached settings of `ws` after a save, and tell whoever shows them (the view proposal's switch). */
 export const invalidateSettings = (ws: string): void => {
   cache.delete(ws)
   listeners.forEach((fn) => fn(ws))

@@ -46,8 +46,8 @@ switch overrides too.
 
 refresh() copies an active extension into workspaces/<c>/extensions/<name>/, since a kernel sees only the workspace and
 the corpus, and writes STATE_FILE in the workspace's registry folder, which a kernel cannot write
-(kernel_wrap.READ_ONLY_DIRS). Its shown views are installed, outside the orientation's four, and one it installed that
-nobody changed goes when it is no longer shown. An orientation that starts reads the active extensions' instructions in
+(kernel_wrap.READ_ONLY_DIRS). Its shown views are installed, never as an orientation's proposals, and one it installed
+that nobody changed goes when it is no longer shown. An orientation that starts reads the active extensions' instructions in
 its prompt. Where one already ran, an extension with orientation instructions that comes on is never sent to it on its
 own: Settings offers to run them now (offered), and Run now sends them as one follow-up (run_orientation). An extension
 whose program runs the orientation is offered the same way, and Run now runs its program again as a follow-up with the
@@ -57,7 +57,7 @@ slug, and goes when none gives one.
 
 Two active extensions that give the same view or card type, or that both replace the orientation's instructions, one
 role or one task, lose it both (the instructions, the role and the task stay thimble's), and `add`, Settings and
-`thimble doctor` name the conflict. Settings also says when another extension's program runs a role, so an addition to
+`thimble doctor --verbose` name the conflict. Settings also says when another extension's program runs a role, so an addition to
 it is not used.
 
 thimble ships some extensions (builtin_dir()); `add` adds one by name, and those of SHIPPED_ON are added on thimble's
@@ -1079,8 +1079,9 @@ def install_views(c: str) -> list[str]:
             if not (prop and prop.get("extension") == v["extension"] and views.stale_install(c, slug, d)):
                 continue
         try:
-            views.install_viewer(c, slug, d, v["claims"], why=v["note"] or v["description"], proposed_by="extension",
-                                 orientation=False, extension=v["extension"], libs=libs.get(v["extension"]) or None)
+            views.install_viewer(c, slug, d, v["claims"], description=v["note"] or v["description"],
+                                 proposed_by="extension", orientation=False, extension=v["extension"],
+                                 libs=libs.get(v["extension"]) or None)
         except HTTPException as e:
             log.warning("%s: the view %s of the extension %s was not installed: %s", c, slug, v["extension"], e.detail)
             continue

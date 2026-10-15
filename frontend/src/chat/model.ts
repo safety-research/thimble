@@ -25,6 +25,9 @@ export interface TextRow {
   kind: 'text'
   index: number
   text: string
+  /** Claude Code's API error line, as the server read it from its record (backend session.api_error_class): the
+   * failure's class, so the row is an error card whatever its words (withApiErrors) */
+  apiError?: string
 }
 export interface ToolResult {
   summary: string
@@ -89,6 +92,8 @@ export interface ErrorRow {
   index: number
   message: string
   errorKind?: string
+  /** an API error's class, as the server read it from Claude Code's record (failureOf), which the card names */
+  failure?: ApiFailure
   detail?: string
   /** an API error a view build waits out: the seconds it waits before it goes on (capacityNote) */
   wait?: number
@@ -115,7 +120,23 @@ export interface HandBackRow {
   index: number
   text: string
 }
-export type Row = UserRow | TextRow | ToolRow | ChipRow | AgentRow | ErrorRow | NoteRow | ShotRow | HandBackRow
+/** a failure the analyst should know of, with an easy fix (backend notices.post), as a row of the chat it happened in:
+ * one warning line that names the agent and the failure (chat/Notice.tsx). Its fix and × are on the notice above the
+ * composer while it is open; once a fix that worked cleared it, or the analyst dismissed it (`closed`), the row stays as
+ * a quiet line of the chat's history. `id` is the notice's own (the latest under its key), else its record's index */
+export interface NoticeRow {
+  kind: 'notice'
+  index: number
+  id: string
+  key?: string
+  /** the notice's kind (backend notices.post `kind`) */
+  noticeKind?: string
+  text: string
+  agent?: string
+  closed: boolean
+  ts?: string
+}
+export type Row = UserRow | TextRow | ToolRow | ChipRow | AgentRow | ErrorRow | NoteRow | ShotRow | HandBackRow | NoticeRow
 
 /** Find the tool row with `id` anywhere in `rows`, nested rows included. */
 function findTool(rows: Row[], id: string): ToolRow | undefined {
@@ -157,11 +178,14 @@ export function stageLine(delta: string): string | null {
  * Fold the records of a log into rows: a whole message is a text row of its own, a text delta extends the last text row
  * of its level, a stage line is a note. A record `skip` names is left out; every row keeps its record's index. An
  * `agent` record that names the tool call which started its chat (`tool_use_id`) follows that call's row, since the
- * mirror copies the call only once Claude Code flushes its transcript, so the record can come first in the log. Pure.
+ * mirror copies the call only once Claude Code flushes its transcript, so the record can come first in the log. A
+ * notice under the key of one still open replaces it in place, so a failure that happens again shows as one row; a
+ * notice's end closes its row. Pure.
  */
 export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<number>): Row[] {
   const rows: Row[] = []
   const calls = new Map<string, number>() // a top-level tool call's id -> its record's index, for the calls folded
+  const notices = new Map<string, NoticeRow>() // a notice's key -> its row while it is open
   records.forEach((e, index) => {
     if (e.type === 'tool_use' && !skip?.has(index) && typeof e.parent_tool_use_id !== 'string') calls.set(e.id, index)
   })
@@ -184,8 +208,13 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
           rows.push({ kind: 'note', index, text: stage })
           return
         }
+        // Claude Code's API error line, which the server marked by its record: a row of its own
+        if (typeof e.api_error === 'string' && e.api_error) {
+          into.push({ kind: 'text', index, text: e.delta, apiError: e.api_error })
+          return
+        }
         const last = into[into.length - 1]
-        if (last && last.kind === 'text' && !wholeMessage(e)) last.text += e.delta
+        if (last && last.kind === 'text' && !last.apiError && !wholeMessage(e)) last.text += e.delta
         else into.push({ kind: 'text', index, text: e.delta })
         return
       }
@@ -216,6 +245,32 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
       case 'shot':
         rows.push({ kind: 'shot', index, phase: e.phase, ticket: e.ticket, name: e.name, note: e.note })
         return
+      case 'notice': {
+        // the end of a notice (a fix that worked, or the analyst's ×): its row stays, closed; a later notice under its
+        // key is a row of its own
+        if (e.dismissed || e.cleared) {
+          const id = e.id
+          const row = (id ? rows.find((r): r is NoticeRow => r.kind === 'notice' && r.id === id) : undefined) ?? (e.key ? notices.get(e.key) : undefined)
+          if (!row) return
+          row.closed = true
+          if (row.key) notices.delete(row.key)
+          return
+        }
+        const text = typeof e.text === 'string' ? e.text.trim() : ''
+        if (!text) return
+        const fields = { id: e.id ? String(e.id) : `#${index}`, text, ...(e.kind ? { noticeKind: e.kind } : {}), ...(typeof e.agent === 'string' && e.agent.trim() ? { agent: e.agent.trim() } : {}), ...(e.ts ? { ts: e.ts } : {}) }
+        // a notice under the key of one still open replaces it in place
+        const open = e.key ? notices.get(e.key) : undefined
+        if (open) {
+          delete open.agent
+          Object.assign(open, fields)
+          return
+        }
+        const row: NoticeRow = { kind: 'notice', index, ...(e.key ? { key: e.key } : {}), closed: false, ...fields }
+        if (e.key) notices.set(e.key, row)
+        rows.push(row)
+        return
+      }
       default:
         return
     }
@@ -249,6 +304,17 @@ export function toolDisplayName(name: string): string {
   return OLD_TOOL_NAMES[bare] ?? bare
 }
 
+/** What a SubagentHandback call's line and step say: the agent sent its summary to main, as its folded row says
+ * (HandBack's `Summary sent to main`); its summary shows once the line is opened. */
+export const HANDBACK_LINE = 'Sent its summary to main'
+
+/** The tool a call's line, chip or step names (Rows CallLine, runTools, stepText; a card of calls by toolGroupName):
+ * toolDisplayName, but a SubagentHandback in words (HANDBACK_LINE). Pure. */
+export function callToolName(name: string): string {
+  const n = toolDisplayName(name)
+  return n === 'SubagentHandback' ? HANDBACK_LINE : n
+}
+
 const str = (v: unknown): string => (v == null ? '' : String(v))
 const oneLine = (s: string, max = 110): string => {
   const t = s.replace(/\s+/g, ' ').trim()
@@ -269,7 +335,7 @@ export function underCorpus(text: string, ws: string): string {
  * refund tickets/`). Pure. */
 export function callLineText(name: string, input: unknown, ws: string): string {
   const target = underCorpus(toolSummary(name, input, ws), ws)
-  return target ? `${toolDisplayName(name)} ${target}` : toolDisplayName(name)
+  return target ? `${callToolName(name)} ${target}` : callToolName(name)
 }
 
 /** The tools that read or write one file, and the input keys that name it. */
@@ -367,6 +433,9 @@ const TARGET_KEYS: readonly string[] = ['description', 'title', 'name', 'query',
 export function toolSummary(name: string, input: unknown, ws = ''): string {
   const inp = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>
   switch (toolDisplayName(name)) {
+    case 'SubagentHandback':
+      // its line says it all (HANDBACK_LINE); the summary is the call's input, shown once the line is opened
+      return ''
     case 'Read':
       return corpusRelative(str(inp.file_path ?? inp.path))
     case 'Grep':
@@ -547,7 +616,7 @@ export const TOOL_GROUPS: Record<string, string> = {
 
 export function toolGroupName(name: string): string {
   const n = toolDisplayName(name)
-  return TOOL_GROUPS[n] ?? toolWord(name)
+  return TOOL_GROUPS[n] ?? (n === 'SubagentHandback' ? HANDBACK_LINE : toolWord(name))
 }
 
 export interface ToolGroup {
@@ -624,7 +693,7 @@ export const RUN_TOOLS_SHOWN = 3
 export function runTools(tools: readonly ToolRow[]): { tools: { name: string; n: number }[]; more: number } {
   const counts = new Map<string, number>()
   for (const t of tools) {
-    const name = toolDisplayName(t.name)
+    const name = callToolName(t.name)
     counts.set(name, (counts.get(name) ?? 0) + 1)
   }
   // a Map keeps the order of first use, and the sort is stable, so ties keep it
@@ -661,7 +730,7 @@ export function toolMeta(tools: readonly ToolRow[]): string {
 /** A call as one step of its card: its wire name and what it was about (add_card · Agents per run). */
 export function stepText(t: ToolRow): string {
   const summary = toolSummary(t.name, t.input)
-  return summary ? `${toolDisplayName(t.name)} · ${summary}` : toolDisplayName(t.name)
+  return summary ? `${callToolName(t.name)} · ${summary}` : callToolName(t.name)
 }
 
 /** The question of each card the calls in `rows` made or edited, by card id, nested calls included. Pure. */
@@ -817,7 +886,7 @@ export function plainStep(t: ToolRow, questions: ReadonlyMap<string, string> = n
     case 'Skill':
       return with_('Loaded skill', str(inp.skill ?? inp.name))
     case 'SubagentHandback':
-      return 'Handed back its summary'
+      return HANDBACK_LINE
     default:
       return with_(toolWord(t.name), toolSummary(t.name, t.input))
   }
@@ -1099,15 +1168,16 @@ export interface MainContext {
   /** when each subagent ran, from its chat's creation to its end (null while it runs): a label run started then is the
    * subagent's, and its card lists the label */
   runs: readonly { from: string; to: string | null }[]
-  /** the views the orientation's calls proposed (madeBy's views of its rows): its card lists them under Views, and
-   * while it runs the views bar in Files shows them, so main writes no note of its own for them */
+  /** the views the orientation's calls proposed (madeBy's views of its rows; an orientation from before 0.8.0, since
+   * one proposes none now): its card lists them under Views, so main writes no note of its own for them */
   views?: readonly string[]
-  /** the writers of the orientation's report pass (orientWriters): the orientation's card shows each under Report, so
-   * main writes no row for its start or its saves */
+  /** the writers of the report pass of an orientation from before 0.8.0 (orientWriters): the orientation's card shows
+   * each under Report, so main writes no row for its start or its saves */
   orientWriters?: readonly OrientWriter[]
 }
 
-/** A writer that answers the orientation's report pass, which the orientation's card carries under Report. */
+/** A writer that answers the report pass of an orientation from before 0.8.0, which the orientation's card carries
+ * under Report. */
 export interface OrientWriter {
   chat: string
   /** the orientation's chat, and the run of it whose card carries the writer (0 for its first) */
@@ -1128,9 +1198,11 @@ export const ORIENT_WRITER_GAP_MS = 60_000
 type WriterMeta = { id: string; role: string; created_at: string; status?: string | null; ts_end?: string | null; doc?: string | null; orient?: string | null; orient_run?: number | null }
 
 /**
- * The writers of the orientation's report pass among `metas`: a writer whose meta names the orientation (`orient`), or,
- * for a meta with no `orient`, a report writer that started while an orientation ran or within ORIENT_WRITER_GAP_MS of
- * its end. A writer whose `orient` is null was asked for by the analyst and keeps its rows in main. Pure.
+ * The writers of the report pass of an orientation from before 0.8.0 among `metas`: a writer whose meta names the
+ * orientation (`orient`), or, for an older meta with no `orient` at all, a report writer that started while an
+ * orientation ran or within ORIENT_WRITER_GAP_MS of its end. A writer whose `orient` is null was asked for by the
+ * analyst and keeps its rows in main. Every writer since 0.8.0 carries `orient` (backend write_session.start), so the
+ * inference reads old records only. Pure.
  */
 export function orientWriters(metas: Iterable<WriterMeta>): OrientWriter[] {
   const all = [...metas]
@@ -1227,28 +1299,46 @@ export const API_ERROR_KIND = 'api-error'
 export const isApiError = (text: string): boolean => text.trim().startsWith(API_ERROR)
 
 /** Claude Code's error line after the words a reply streamed before the request failed (`Now the page: API Error:
- * Server error mid-response. The response above may be incomplete.`): one of its own wordings, running to the end. */
-const TRAILING_API_ERROR = /(?:^|\s)(API Error: (?:Repeated \d{3}|\d{3} \{|Server error|Connection error|Rate limit|Request timed out|Request was aborted|[^\n]{0,40}overloaded)[\s\S]*)$/
+ * Server error mid-response. The response above may be incomplete.`): one of its own wordings, running to the end, a
+ * refusal by Claude's safeguards among them. */
+const TRAILING_API_ERROR = /(?:^|\s)(API Error: (?:Repeated \d{3}|\d{3} \{|Server error|Connection error|Rate limit|Request timed out|Request was aborted|[^\n]{0,40}overloaded|[^\n]{0,60}safeguards|[^\n]{0,100}Usage Policy|Claude can.t help with this)[\s\S]*)$/
+
+/** Claude Code 2.1.300's error lines that do not start with "API Error" (a sign-in, a model the account cannot use),
+ * as the whole of a text: what a record from before the server marked them (`api_error`) shows, and a failed run's
+ * result. */
+const WHOLE_API_ERROR = /^(?:Not logged in · Please run \/login|Please run \/login · API Error: \d{3}\b[^\n]*|Failed to authenticate\. API Error: \d{3}\b[^\n]*|Invalid API key · [^\n]*|There's an issue with the selected model \([^\n]*)$/
 
 /** Where Claude Code's API error line begins in a text: 0 when the text is the line, the offset of a line that ends a
  * reply cut short, -1 for none. Pure. */
 export function apiErrorAt(text: string): number {
   const t = text.trimEnd()
-  if (isApiError(t)) return t.length - t.trimStart().length
+  if (isApiError(t) || WHOLE_API_ERROR.test(t.trim())) return t.length - t.trimStart().length
   const m = TRAILING_API_ERROR.exec(t)
   return m ? t.length - m[1].length : -1
 }
 
-/** The kinds of failure an API error card names, sorted as the backend's retry.transient_class sorts them, and `other`
- * for an error that is none of them (a request the API refused). */
-export type ApiFailure = 'overloaded' | 'rate_limited' | 'server_error' | 'connection' | 'other'
+/** The kinds of failure an API error card names, sorted as the backend's retry.transient_class sorts them; `auth`
+ * (401), `forbidden` (403), `not_found` (404, a model id the account or provider does not have) and `refused` (a
+ * request Claude's safeguards or the usage policy stopped), which no retry fixes; and `other` for an error that is none
+ * of them. */
+export type ApiFailure = 'overloaded' | 'rate_limited' | 'server_error' | 'connection' | 'auth' | 'forbidden' | 'not_found' | 'refused' | 'other'
 
-const FAILURE_OF_STATUS: Readonly<Record<number, ApiFailure>> = { 429: 'rate_limited', 500: 'server_error', 502: 'server_error', 503: 'server_error', 504: 'server_error', 529: 'overloaded' }
-const FAILURE_OF_BODY: Readonly<Record<string, ApiFailure>> = { overloaded_error: 'overloaded', api_error: 'server_error', server_error: 'server_error', rate_limit_error: 'rate_limited' }
+const FAILURE_OF_STATUS: Readonly<Record<number, ApiFailure>> = { 401: 'auth', 403: 'forbidden', 404: 'not_found', 429: 'rate_limited', 500: 'server_error', 502: 'server_error', 503: 'server_error', 504: 'server_error', 529: 'overloaded' }
+const FAILURE_OF_BODY: Readonly<Record<string, ApiFailure>> = { overloaded_error: 'overloaded', api_error: 'server_error', server_error: 'server_error', rate_limit_error: 'rate_limited', authentication_error: 'auth', permission_error: 'forbidden', not_found_error: 'not_found' }
 const STATUS_TEXT = /\b(?:HTTP|API Error:?|Error code:?|status(?: code)?:?)\s*(\d{3})\b/i
 const BARE_STATUS = /\b(429|5\d\d)\b/
-const BODY_TEXT = /\b(overloaded_error|api_error|server_error|rate_limit_error)\b/i
+const BODY_TEXT = /\b(overloaded_error|api_error|server_error|rate_limit_error|authentication_error|permission_error|not_found_error)\b/i
 const CONNECTION_TEXT = /connection error|connection reset|connection refused|econnreset|econnrefused|etimedout|socket hang up|fetch failed|network error/i
+/** A request Claude's safeguards stopped, in Claude Code's words or the API's (backend model.py's refusal detail):
+ * "Opus 5.5's safeguards flagged this message", "… Usage Policy …", or "Claude can't help with this. Start a new session
+ * to continue." */
+const REFUSED_TEXT = /safeguards|usage polic|can['’]t help with this/i
+/** Claude Code's refusal that takes the session with it: only a new session goes on. */
+const NEW_SESSION_TEXT = /start a new session/i
+/** Claude Code 2.1.300's lines of a sign-in that failed and of a model the account cannot use, which name no status
+ * ("Not logged in · Please run /login", "There's an issue with the selected model (…)") */
+const AUTH_TEXT = /not logged in|please run \/login|invalid api key|failed to authenticate|authentication_failed|oauth token/i
+const NOT_FOUND_TEXT = /issue with the selected model|model_not_found/i
 
 /** What an API error says failed, and the HTTP status it names (`Repeated 529 Overloaded errors`: 529), from Claude
  * Code's error line or the server's words for it; the same patterns the backend's retry.transient_class reads. Pure. */
@@ -1256,20 +1346,32 @@ export function apiFailure(text: string): { failure: ApiFailure; status: number 
   const named = STATUS_TEXT.exec(text)?.[1] ?? BARE_STATUS.exec(text)?.[1]
   const status = named ? Number(named) : null
   const body = BODY_TEXT.exec(text)?.[1]?.toLowerCase()
-  const failure: ApiFailure = /overloaded/i.test(text)
-    ? 'overloaded'
-    : status != null && FAILURE_OF_STATUS[status]
-      ? FAILURE_OF_STATUS[status]
-      : body
-        ? FAILURE_OF_BODY[body]
-        : /rate[ _-]?limit/i.test(text)
-          ? 'rate_limited'
-          : /server error/i.test(text)
-            ? 'server_error'
-            : CONNECTION_TEXT.test(text)
-              ? 'connection'
-              : 'other'
+  const failure: ApiFailure = REFUSED_TEXT.test(text)
+    ? 'refused'
+    : /overloaded/i.test(text)
+      ? 'overloaded'
+      : status != null && FAILURE_OF_STATUS[status]
+        ? FAILURE_OF_STATUS[status]
+        : body
+          ? FAILURE_OF_BODY[body]
+          : AUTH_TEXT.test(text)
+            ? 'auth'
+            : NOT_FOUND_TEXT.test(text)
+              ? 'not_found'
+              : /rate[ _-]?limit/i.test(text)
+                ? 'rate_limited'
+                : /server error/i.test(text)
+                  ? 'server_error'
+                  : CONNECTION_TEXT.test(text)
+                    ? 'connection'
+                    : 'other'
   return { failure, status }
+}
+
+/** The failure a class the server read from Claude Code's record names (backend session.api_error_class: its
+ * apiErrorStatus and `error`, before its words), else null for one this page does not know. Pure. */
+export function failureOf(kind: string | null | undefined): ApiFailure | null {
+  return kind && kind in FAILURE_WORDS ? (kind as ApiFailure) : null
 }
 
 const FAILURE_WORDS: Readonly<Record<ApiFailure, string>> = {
@@ -1277,13 +1379,53 @@ const FAILURE_WORDS: Readonly<Record<ApiFailure, string>> = {
   rate_limited: "Anthropic's API rate limit was reached",
   server_error: "Anthropic's API had a server error",
   connection: "The connection to Anthropic's API failed",
+  auth: "Claude Code's login or API key was refused",
+  forbidden: 'Your account may not make this request',
+  not_found: "This model isn't available to your account",
+  refused: "Claude's safeguards stopped this request",
   other: "Anthropic's API returned an error",
 }
 
-/** What happened, in the card's head: the failure in plain words and its status (Anthropic's API is overloaded (529)). Pure. */
-export function apiFailureText(text: string): string {
-  const { failure, status } = apiFailure(text)
-  return status != null ? `${FAILURE_WORDS[failure]} (${status})` : FAILURE_WORDS[failure]
+/** Where a failure's fix runs (Matt, 10-14: the browser can't run /login or /model): `browser`, a button or a reply
+ * here (Retry, a rephrased request from the composer), or `terminal`, the Claude Code terminal where thimble runs,
+ * whose fix the card says after "In your terminal:" and which no button here can take. */
+export const FIX_WHERE: Readonly<Record<ApiFailure, 'browser' | 'terminal'>> = {
+  overloaded: 'browser',
+  rate_limited: 'browser',
+  server_error: 'browser',
+  connection: 'browser',
+  auth: 'terminal',
+  forbidden: 'terminal',
+  not_found: 'terminal',
+  refused: 'browser',
+  other: 'browser',
+}
+
+/** What the analyst does about a failure no retry fixes, after its words in the card's head: a fix in the terminal
+ * (FIX_WHERE) after "In your terminal:", to which `{then}` adds ", then Retry" where the card has Retry. */
+const FAILURE_FIX: Readonly<Partial<Record<ApiFailure, string>>> = {
+  auth: 'In your terminal: run /login (or claude auth login in a shell){then}.',
+  forbidden: "In your terminal: check your sign-in (/login) and your account's or organization's settings{then}.",
+  not_found: "In your terminal: run /model to pick another model (thimble's own agents take theirs from Settings){then}.",
+  refused: 'rephrase or narrow the request and send it again.',
+}
+const NEW_SESSION_FIX = 'In your terminal: run /clear to start a new session, then send a rephrased or narrower request here.'
+
+/** What happened, in the card's head: the failure in plain words and its status (Anthropic's API is overloaded (529)),
+ * then what to do when no retry fixes it, and where (FIX_WHERE). A refusal names no status, which says nothing of why.
+ * `failure` is the class the server read from Claude Code's record (failureOf), which decides before the words do;
+ * `retry`, whether the card offers Retry, which a fix in the terminal comes before. Pure. */
+export function apiFailureText(text: string, opts: { failure?: ApiFailure | null; retry?: boolean } = {}): string {
+  const read = apiFailure(text)
+  const failure = opts.failure ?? read.failure
+  // a failure of no known class in Claude Code's own words (a spend limit, say), which say more than a generic head
+  const own = text.trim().split('\n', 1)[0].trim()
+  if (failure === 'other' && own && !isApiError(own)) return own.length > 300 ? `${own.slice(0, 299).trimEnd()}…` : own
+  const status = read.status != null && FAILURE_OF_STATUS[read.status] === failure ? read.status : failure === read.failure ? read.status : null
+  const head = status != null && failure !== 'refused' ? `${FAILURE_WORDS[failure]} (${status})` : FAILURE_WORDS[failure]
+  const fix = (failure === 'refused' && NEW_SESSION_TEXT.test(text) ? NEW_SESSION_FIX : FAILURE_FIX[failure])?.replace('{then}', opts.retry ? ', then Retry' : '')
+  if (!fix) return head
+  return FIX_WHERE[failure] === 'terminal' || fix === NEW_SESSION_FIX ? `${head}. ${fix}` : `${head}: ${fix}`
 }
 
 /** The line a view build's run writes when the API ended a turn and the build waits it out (backend dev.run_view):
@@ -1298,12 +1440,17 @@ export function waitText(seconds: number): string {
   return seconds >= 60 ? `${Math.round(seconds / 60)} min` : `${Math.round(seconds)} s`
 }
 
-/** Rows with each of Claude Code's API error lines as an error row (API_ERROR_KIND) in place of its text row; a line
- * that ends a reply cut short is split off, the error row's index half a step on so each row keeps its own key. Pure. */
+/** Rows with each of Claude Code's API error lines as an error row (API_ERROR_KIND) in place of its text row: a row
+ * the server marked by its record (`apiError`, with its class) whole, else a line its words show, where one that ends
+ * a reply cut short is split off, the error row's index half a step on so each row keeps its own key. Pure. */
 export function withApiErrors<T extends { kind: string }>(rows: readonly T[]): (T | ErrorRow)[] {
   return rows.flatMap((r): (T | ErrorRow)[] => {
     const t = r as unknown as TextRow
     if (r.kind !== 'text') return [r]
+    if (t.apiError) {
+      const failure = failureOf(t.apiError)
+      return [{ kind: 'error', index: t.index, message: t.text.trim(), errorKind: API_ERROR_KIND, ...(failure ? { failure } : {}) }]
+    }
     const at = apiErrorAt(t.text)
     if (at < 0) return [r]
     const error: ErrorRow = { kind: 'error', index: at === 0 ? t.index : t.index + 0.5, message: t.text.slice(at).trim(), errorKind: API_ERROR_KIND }
@@ -1320,7 +1467,7 @@ export function apiRetry(records: readonly ChatRecord[], skip?: ReadonlySet<numb
     if (skip?.has(i)) continue
     if (e.type === 'user' || e.type === 'tool_use' || e.type === 'agent') return null
     if (e.type !== 'text' || e.parent_tool_use_id) continue
-    const at = apiErrorAt(e.delta)
+    const at = e.api_error ? 0 : apiErrorAt(e.delta)
     if (at < 0) return null
     for (let j = i - 1; j >= 0; j--) {
       const u = records[j]
@@ -1350,8 +1497,8 @@ export function isFeedbackChip(e: ChatRecord): boolean {
 /**
  * The records of main's log its transcript leaves out, by index: Agent or Workflow calls whose agents show as their own
  * card or thread (with their results), text that repeats a summary the orientation handed back, label runs a subagent
- * or a call in main started, view chips the orientation proposed, the orientation's report writer's start and saves
- * (isOrientWriterRecord), main's look at the agent tray (list_agents), session lines (isSessionLine) and feedback chips
+ * or a call in main started, view chips of the views an orientation from before 0.8.0 proposed and the start and saves
+ * of its report pass's writer (isOrientWriterRecord), main's look at the agent tray (list_agents), session lines (isSessionLine) and feedback chips
  * (isFeedbackChip). Pure.
  */
 export function mainSkips(records: readonly ChatRecord[], ctx: MainContext): Set<number> {

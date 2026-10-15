@@ -39,6 +39,7 @@ async def test_write_starts_the_writer_through_the_module_with_its_context_file(
     assert spawn["description"] == "writer: report" and spawn["what"] == "report"
     meta = agents.read_meta(CORPUS, subagents.agent(CORPUS, ans.agent_id)["chat"])
     assert meta["role"] == "writer" and meta["doc"] == "report" and meta["title"] == "Write report"
+    assert "orient" in meta and meta["orient"] is None, "no report pass, so the browser guesses none (orientWriters)"
     again = await write_session.start(CORPUS, "report", route=subagents.CLICK)
     assert again.kind == "hook", "a second writer of the document"
 
@@ -82,6 +83,23 @@ def test_a_shrunken_context_removes_the_extra_files_of_an_earlier_one(workspaces
     assert [p.name for p in paths] == ["context.md"]
     folder = write_session.work_dir(CORPUS, "report")
     assert sorted(p.name for p in folder.glob("context*.md")) == ["context.md"]
+
+
+def test_a_full_context_file_of_dense_table_lines_is_under_the_read_file_size_cap(workspaces_tmp, monkeypatch):
+    """A context file as full as CONTEXT_PART_CHARS lets it be, of dense table rows with characters UTF-8 writes in two
+    to four bytes, is under the Read tool's file-size cap (256KB) on disk, and so is any part, at four bytes a character
+    at most. The tool's other cap, 25k tokens a call, cannot be measured offline, since no tokenizer runs here, so
+    CONTEXT_PART_CHARS keeps its margin for that cap by estimate (its comment)."""
+    cap = 256 * 1024
+    row = "|{i:06d}|r{i}.jsonl#L{i}|0.{i:04d}|✓|€{i}|東京|🙂|—|\n"
+    text = "".join(row.format(i=i) for i in range(4 * write_session.CONTEXT_PART_CHARS // len(row)))
+    monkeypatch.setattr(write_session.context, "render", lambda *a, **k: text)
+    paths = write_session.write_context(CORPUS, {"slug": "report", "name": "Report"}, "", "")
+    assert len(paths) >= 3
+    full = max(paths, key=lambda p: len(p.read_text("utf-8")))
+    assert len(full.read_text("utf-8")) > write_session.CONTEXT_PART_CHARS - 2 * len(row), "as full as a part gets"
+    assert all(p.stat().st_size < cap for p in paths)
+    assert 4 * write_session.CONTEXT_PART_CHARS < cap
 
 
 async def test_two_typed_writers_of_two_documents_are_claimed_by_their_request_ids(bridge, models, workspaces_tmp):
@@ -183,7 +201,7 @@ async def test_critique_writes_the_brief_and_gives_the_orientation_its_agent_cal
         return None
 
     monkeypatch.setattr(critique_session, "checks_text", no_checks)
-    ans = await orient_session.start(CORPUS, "", ["final"], critique=True, route=subagents.CLICK)
+    ans = await orient_session.start(CORPUS, "", route=subagents.CLICK)
     ctx = type("Ctx", (), {"c": CORPUS, "session": "orient", "tool_use_id": "toolu_cq"})()
     res = await critique_session.tool_critique(ctx, {"context": "My account."})
     assert not res.is_error, res.text
@@ -218,7 +236,7 @@ async def test_a_critic_start_the_orientation_never_makes_ends_with_its_run(brid
         return None
 
     monkeypatch.setattr(critique_session, "checks_text", no_checks)
-    ans = await orient_session.start(CORPUS, "", ["final"], critique=True, route=subagents.CLICK)
+    ans = await orient_session.start(CORPUS, "", route=subagents.CLICK)
     ctx = type("Ctx", (), {"c": CORPUS, "session": "orient", "tool_use_id": "toolu_cq"})()
     res = await critique_session.tool_critique(ctx, {"context": "My account."})
     inp = json.loads(res.text.split("AGENT CALL ", 1)[1].splitlines()[0])
@@ -302,25 +320,6 @@ async def test_a_thimble_agent_s_request_is_answered_at_once_and_its_card_has_no
         assert agents.read_meta(CORPUS, agents.MAIN_ID)["permissions"] == [], "the tool's PostToolUse closed the card"
     finally:
         session._live.pop(CORPUS, None)
-
-
-def test_the_card_names_the_fence_s_rule_that_asks(monkeypatch, workspaces_tmp):
-    from app import userconf
-
-    # userconf.main_rules's own shape: Rule(behavior, rule, cause), of which only the ask rules send a request
-    monkeypatch.setattr(userconf, "main_rules",
-                        lambda c: [userconf.Rule("deny", "Edit(//data/corpus/kept/**)", "state"),
-                                   userconf.Rule("ask", "Edit(//data/corpus/**)", "data"),
-                                   userconf.Rule("ask", "WebFetch", "web"),
-                                   userconf.Rule("allow", "WebSearch", "web")])
-    assert events._asked_by(CORPUS, "Edit", {"file_path": "/data/corpus/kept/a.jsonl"}) == "data"
-    assert events._asked_by(CORPUS, "Edit", {"file_path": "/data/corpus/a.jsonl"}) == "data"
-    assert events._asked_by(CORPUS, "WebFetch", {"url": "https://x"}) == "web"
-    assert events._asked_by(CORPUS, "WebSearch", {"query": "x"}) is None, "an allow rule sends nothing"
-    assert events._asked_by(CORPUS, "Bash", {"command": "ls"}) is None
-    assert events._asked_by(CORPUS, "Write", {"file_path": "/data/corpus/new.txt"}) == "data", "Edit covers Write"
-    assert events._asked_by(CORPUS, "NotebookEdit", {"notebook_path": "/data/corpus/n.ipynb"}) == "data"
-    assert events._asked_by(CORPUS, "Edit", {"file_path": "/data/corpus-2/a.jsonl"}) is None, "a folder, not a prefix"
 
 
 def test_a_code_ticket_s_runner_reads_no_project_settings(workspaces_tmp, monkeypatch):

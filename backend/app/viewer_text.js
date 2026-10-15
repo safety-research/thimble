@@ -318,12 +318,13 @@
     return root.outerHTML
   }
 
-  // a click on Show more or less, or on a link; a ⌘-click is the bridge's, which asks about the record. It stops there,
+  // a click on Show more or less, or on a link; a ⌘-click is the bridge's, which asks about the record, and so is a
+  // click the bridge took for one with the ask key Settings picks (⌥-click), which it marks handled. It stops there,
   // so a card the text is in does not open as well
   document.addEventListener(
     'click',
     function (e) {
-      if (e.metaKey || e.ctrlKey || !e.target || !e.target.closest) return
+      if (e.metaKey || e.ctrlKey || e.defaultPrevented || !e.target || !e.target.closest) return
       var root = e.target.closest('.thimble-text')
       if (!root) return
       var more = e.target.closest('.thimble-text-more')

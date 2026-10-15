@@ -8,7 +8,7 @@ here="$(cd "$(dirname "$0")" && pwd -P)"
 app="$("$here/thimble-app-dir")" || exit 1
 py="$app/backend/.venv/bin/python"
 if [ ! -x "$py" ]; then
-  echo "thimble: $app/backend/.venv is missing — run $app/scripts/install.sh" >&2
+  echo "thimble: $app/backend/.venv is missing — run $app/scripts/install.sh (or INSTALL.md, Manual install, step 2)" >&2
   exit 1
 fi
 THIMBLE_APP_DIR="$app" exec "$py" "$@"

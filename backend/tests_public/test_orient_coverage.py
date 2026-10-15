@@ -6,7 +6,8 @@ file is not read by lines) to its transcript as the analyst and the agents see i
 second line of main's `orient` event and of summary.md, and the end of the next run's prompt, after its messages. A
 command that only counted or listed shows no line and counts nothing. Mid-run the orientation hears nothing of it: its
 add_card and critique calls get no note. A critique's first message has the line in place of the unread check. The
-critique itself is off unless Start or the call turns it on."""
+critique is the orientation's own choice: its prompt offers it, no switch of a start turns it on or off, and its tool
+answers whatever an earlier version's record says."""
 from __future__ import annotations
 
 import asyncio
@@ -28,7 +29,7 @@ async def chat(workspaces_tmp):
     """The orientation's chat, its first run going."""
     calls.forget()
     made = agents.new_agent(CORPUS, orientation.ROLE, orientation.TITLE, announce=False, brief="")["id"]
-    orientation.started(CORPUS, made, passes=["final"])
+    orientation.started(CORPUS, made)
     yield made
     calls.forget()
     orient_session._closing.pop(CORPUS, None)
@@ -381,13 +382,20 @@ async def test_the_critic_s_first_message_has_the_line_in_place_of_the_unread_ch
     assert "were opened by no card" not in text
 
 
-def test_the_critique_is_off_unless_start_or_the_call_turns_it_on(workspaces_tmp):
-    assert "critique" not in orient_session.parts_of({}, ("final", "views"))
-    assert "critique" in orient_session.parts_of({"critique": True}, ("final", "views"))
-    assert "`critique`" not in orient_session.system_prompt(CORPUS, "", orient_session.parts_of({}, ("final",)))
-    orientation.start_requested(CORPUS, {"passes": ["final"]})
-    assert orientation.read_run(CORPUS)["critique"] is False and not orientation.part_on(CORPUS, "critique")
-    orientation.run_file(CORPUS).unlink()
-    orientation.start_requested(CORPUS, {"passes": ["final"], "critique": "true"})
-    assert orientation.part_on(CORPUS, "critique") and orientation.part_on(CORPUS, "final")
-    assert not orientation.part_on(CORPUS, "views")
+async def test_the_critique_is_the_orientation_s_choice_with_no_switch(workspaces_tmp):
+    """The orientation's prompt offers the critique whatever its start said; a start records no critique switch and
+    keeps its deck; and tools._as_caller refuses the orientation neither `critique` nor a card tool, also on the record
+    of an earlier version whose critique or deck was off."""
+    assert "when a review would help, call `critique`" in orient_session.system_prompt(CORPUS, "")
+    orientation.start_requested(CORPUS, {"text": "", "passes": ["views"], "critique": False})
+    rec = orientation.read_run(CORPUS)
+    assert rec["passes"] == ["final"] and "critique" not in rec and orientation.deck_of(rec)
+    assert "critique" in orient_session.ORIENT_TOOLS and "propose_view" not in orient_session.ORIENT_TOOLS
+    orientation._write_run(CORPUS, {**rec, "passes": ["views"], "critique": False})  # an earlier version's record
+    ws = config.workspace_dir(CORPUS)
+    with subagents.update(CORPUS) as state:
+        sf.registry(state)["orient1"] = {"key": orient_session.KEY, "role": "orientation", "status": "running"}
+    sf.add_caller(ws, "toolu_o1", "orient1", "thimble:orientation")
+    sf.add_caller(ws, "toolu_o2", "orient1", "thimble:orientation")
+    assert await tools._as_caller(CORPUS, "critique", "toolu_o1") == ("", orient_session.KEY)
+    assert await tools._as_caller(CORPUS, "add_card", "toolu_o2") == ("", orient_session.KEY)

@@ -10,8 +10,8 @@ subagents' `tmp_*` folders and the large files no card uses are deleted there (w
 The transcript. Raw transcripts run to megabytes of JSON and Read cuts lines at 2,000 characters, so the critique
 renders the orientation's agent transcript and its descendants' into one digest, each tool call under its ref in the
 orientation's call store (`call:<chat>/<n>`) with its input and the first lines of its result. The digest is written to
-`<workspace>/critique/<chat>/transcript.md`, which main's fence lets every agent read. `chat:<orientation chat>`
-resolves to the same digest, a page at a time.
+`<workspace>/critique/<chat>/transcript.md`, where the critic reads it. `chat:<orientation chat>` resolves to the same
+digest, a page at a time.
 
 The brief. `critique` writes the critic's first message to `critique/<chat>/brief.md`: what to review, the drafts, the
 digest, the orientation's context, the coverage checks' findings led by the coverage line, and the analyst's
@@ -28,7 +28,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -413,20 +412,11 @@ def write_digest(c: str, caller: Caller) -> Path | None:
 
 
 def drafts(c: str) -> list[str]:
-    """The parts of the first message that name the orientation's drafts: `## critique-deck` when its deck is on, and
-    `## critique-proposals` with each view it proposed, since no tool lists proposals."""
-    from . import views  # noqa: PLC0415
-
-    out: list[str] = []
+    """The part of the first message that names the orientation's drafts: `## critique-deck`, its deck (none for a
+    record from before 0.8.0 whose start turned the deck off). Since 0.8.0 an orientation proposes no views, so a
+    workspace's views, its old orientation's among them, are not its drafts."""
     run = orientation.read_run(c) or {}
-    if orientation.deck_of(run):
-        out.append(tools.hint("critique-deck", deck=orientation.GROUP_PATHS["deck"]))
-    mine = [p for p in views.list_proposals(c) if (p.get("orientation") or p.get("held")) and p.get("status") != "dropped"]
-    if mine:
-        rows = "\n".join(f"- {p.get('name')}: {p.get('why')} Claims {', '.join(p.get('claims') or [])}.\n"
-                         + textwrap.indent(views.spec_lines(p), "  ") for p in mine)
-        out.append(tools.hint("critique-proposals", proposals=rows))
-    return out
+    return [tools.hint("critique-deck", deck=orientation.GROUP_PATHS["deck"])] if orientation.deck_of(run) else []
 
 async def checks_text(c: str, chat: str | None = None) -> str | None:
     """What the coverage checks found for workspace `c`, as the first message lists it, with the coverage line of the
