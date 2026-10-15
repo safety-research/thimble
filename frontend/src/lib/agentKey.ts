@@ -1,13 +1,14 @@
 // ⌘ while typing: with the caret in text that can go to the agent (a report block, a slide's or the story's text, a
 // card's question), holding ⌘ (Ctrl off a Mac, lib/platform) tints that text in the accent, and ⌘↵ sends it to main as
 // a request made at that place (a `card` event, prompts/main.md). Text registers as a zone: the element that holds the
-// focus while it is typed in, and what ⌘↵ would send from it now. The ⌘ pointer (pointer/CmdPointer) keeps the mouse:
-// once the mouse moves with ⌘ held the tint goes, since the analyst is pointing. A shortcut (⌘ with another key) shows
-// no tint: the tint waits TINT_DELAY_MS after ⌘ goes down and goes at the next key.
+// focus while it is typed in, and what ⌘↵ would send from it now. ⌘ here is the shortcuts' key (lib/platform
+// modKeyHeld) whichever key Settings picks for asking. The ⌘ pointer (pointer/CmdPointer) keeps the mouse: once the
+// mouse moves with ⌘ held the tint goes, since the analyst is pointing or dragging. A shortcut (⌘ with another key)
+// shows no tint: the tint waits TINT_DELAY_MS after ⌘ goes down and goes at the next key.
 import { api } from './api'
 import { bus } from './bus'
 import { demoStop } from './demo'
-import { isMacPlatform, isPointKey, pointKeyHeld } from './platform'
+import { isMacPlatform, isModKey, modKeyHeld } from './platform'
 
 /** How long (ms) ⌘ stays down alone before the tint shows. */
 export const TINT_DELAY_MS = 180
@@ -52,7 +53,7 @@ function clear(): void {
 
 function onKeyDown(e: KeyboardEvent): void {
   const mac = isMacPlatform()
-  if (e.key === 'Enter' && pointKeyHeld(e, mac) && !e.shiftKey && !e.altKey && !e.isComposing) {
+  if (e.key === 'Enter' && modKeyHeld(e, mac) && !e.shiftKey && !e.altKey && !e.isComposing) {
     const t = current()
     if (!t) return
     e.preventDefault()
@@ -61,7 +62,7 @@ function onKeyDown(e: KeyboardEvent): void {
     if (!demoStop()) t.send()
     return
   }
-  if (isPointKey(e.key, mac)) {
+  if (isModKey(e.key, mac)) {
     if (armedAt) return
     armedAt = { ...mouse }
     timer = window.setTimeout(() => {
@@ -78,7 +79,7 @@ function onKeyDown(e: KeyboardEvent): void {
 }
 
 function onKeyUp(e: KeyboardEvent): void {
-  if (isPointKey(e.key) || !pointKeyHeld(e)) clear()
+  if (isModKey(e.key) || !modKeyHeld(e)) clear()
 }
 
 function onMouseMove(e: MouseEvent): void {

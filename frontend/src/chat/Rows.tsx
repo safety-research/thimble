@@ -25,7 +25,7 @@ import { teleport } from '../lib/teleport'
 import { track } from '../lib/telemetry'
 import { chipIcon, chipPending, docSave, sameDocRun, settleChip, settledWord, type Settled } from './chips'
 import { ChatMarkdown, ChipContext, RefText } from './markdown'
-import { API_ERROR_KIND, callLineText, callPieces, capacityNote, corpusRelative, durationText, groupState, groupTools, isRawCall, labelRunName, leadText, madeBy, QUIET_RE, runTools, stripHarness, toolDisplayName, toolMeta, toolSteps, toolSummary, underCorpus, type AgentRow as AgentRowT, type BranchRow, type CallsRow, type ChipRow as ChipRowT, type ErrorRow as ErrorRowT, type Row, type ToolGroup, type ToolRow as ToolRowT, waitText } from './model'
+import { API_ERROR_KIND, callLineText, callPieces, callToolName, capacityNote, corpusRelative, durationText, groupState, groupTools, isRawCall, labelRunName, leadText, madeBy, QUIET_RE, runTools, stripHarness, toolDisplayName, toolMeta, toolSteps, toolSummary, underCorpus, type AgentRow as AgentRowT, type BranchRow, type CallsRow, type ChipRow as ChipRowT, type ErrorRow as ErrorRowT, type Row, type ToolGroup, type ToolRow as ToolRowT, waitText } from './model'
 import { Note, ShotCard, ThreadChip, ThreadsContext } from './Notes'
 import { AgentCard, OrientLanding, openLabel } from './AgentCard'
 import { ApiErrorCard } from './ApiError'
@@ -554,7 +554,7 @@ export function CallLine({ tool, ws, running, calls, startOpen = false }: { tool
   const focused = ref && focus?.ref === ref ? focus : null
   const [open, setOpen] = useState(startOpen)
   const rowEl = useRef<HTMLDivElement>(null)
-  const name = toolDisplayName(tool.name)
+  const name = callToolName(tool.name)
   const summary = toolSummary(tool.name, tool.input, ws)
   const refs = targetRefs(tool.name, summary)
   const target = refs ? '' : underCorpus(summary, ws)
@@ -603,7 +603,7 @@ export function CallLine({ tool, ws, running, calls, startOpen = false }: { tool
     </>
   )
   return (
-    <div ref={rowEl} className={`chat-call${open && opens ? ' open' : ''}`} data-tool={name} data-state={state} data-call={tool.n} data-anchor={ref ?? undefined} data-anchor-text={ref ? lineText : undefined}>
+    <div ref={rowEl} className={`chat-call${open && opens ? ' open' : ''}`} data-tool={toolDisplayName(tool.name)} data-state={state} data-call={tool.n} data-anchor={ref ?? undefined} data-anchor-text={ref ? lineText : undefined}>
       <span className="chat-call-head">
         <span className="chat-call-state" aria-hidden={running || failed ? undefined : true}>
           {running ? <Spinner size={10} label="running" /> : failed ? <Mark kind="failed" label="failed" className="chat-call-mark" /> : state === 'skipped' ? '–' : <span className="chat-call-dot" />}

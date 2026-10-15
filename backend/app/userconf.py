@@ -81,6 +81,9 @@ PROMPT_FILES = {"orientation": "orient", "critic": "critic", "writer": "writer",
                 "labels": "labels", "cardCheck": "card-check"}
 SANDBOX_USES = ("when-available", "never")
 BROWSERS = ("system", "bundled", "off")
+# `askKey`: the key held with a click to ask about what it points at in the browser (pointer/CmdPointer), "meta" (⌘, or
+# Ctrl off a Mac) or "alt" (⌥, or Alt); the other one places a card freely on the canvas (ask_key)
+ASK_KEYS = ("meta", "alt")
 WEB = ("ask", "off", "allow")
 NETWORK = ("off", "on")
 AGENT_SANDBOX = ("on", "off")
@@ -121,6 +124,7 @@ DEFAULTS: dict[str, Any] = {
     "sandbox": {"use": "when-available", "enforce": False},
     "browser": None,
     "cardWait": CARD_WAIT_MINUTES,
+    "askKey": None,
     "extensions": {},
     "agents": {
         # the orientation's web, network and data are main's fence's (module note, one fence); subagentModel and
@@ -298,6 +302,16 @@ def card_wait_s() -> float:
     return (got if got is not None else CARD_WAIT_MINUTES) * 60.0
 
 
+def ask_key() -> str:
+    """The key held with a click to ask in the browser: `askKey` of the file in thimble's home, else "meta", also when
+    the file has an error."""
+    try:
+        got = _raw(global_file()).get("askKey")
+    except ConfigError:
+        got = None
+    return got if got in ASK_KEYS else ASK_KEYS[0]
+
+
 def propose_views(c: str | None) -> bool:
     """Whether thimble shows the analyst view proposals in workspace `c` (views.propose_enabled): on unless
     `views.propose` is false, and on while the config has an error, as the other keys then take their defaults
@@ -330,7 +344,7 @@ def _problems(data: dict[str, Any], scope: str, base: Path) -> list[str]:
                            f"{', '.join(known)}{more}")
         return True
 
-    keys("", data, (*IGNORED_TOP, "sandbox", "browser", "cardWait", "extensions", "agents", "views"))
+    keys("", data, (*IGNORED_TOP, "sandbox", "browser", "cardWait", "askKey", "extensions", "agents", "views"))
     if "browser" in data:
         if scope != "global":
             out.append("browser is set for the whole machine, in the config in thimble's home, not per workspace")
@@ -342,6 +356,11 @@ def _problems(data: dict[str, Any], scope: str, base: Path) -> list[str]:
         elif data["cardWait"] is not None and _card_wait(data["cardWait"]) is None:
             out.append(f"cardWait is {json.dumps(data['cardWait'])}; it takes a number of minutes above 0 and up to "
                        f"{CARD_WAIT_MAX}, or null")
+    if "askKey" in data:
+        if scope != "global":
+            out.append("askKey is set for the whole machine, in the config in thimble's home, not per workspace")
+        else:
+            one_of("askKey", data["askKey"], ASK_KEYS, null=True)
     box = data.get("sandbox")
     if "sandbox" in data and keys("sandbox", box, ("use", "enforce")):
         if "use" in box:

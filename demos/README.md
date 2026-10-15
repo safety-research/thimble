@@ -105,9 +105,9 @@ card that asks for one:
 - the top bar shows a Demo tag, whose tooltip says "Example data and a finished analysis; Claude isn't connected here";
 - Files, the views, the canvas, the report, labels and filters work as they do without a session;
 - the orientation's thread opens with a card that says it ran in advance, when, on what model and what it left;
-- the composer stays and takes typing. A message, Ask about this, a card's or the report's request, and each button
-  that starts an agent show one note in the chat in place of the request, and keep what was typed: "This is a demo, so
-  Claude isn't connected here. To ask about your own files, run thimble in a folder of transcripts.";
+- the chat's composer is disabled, so nothing can be typed there, and hovering it shows "This is a demo and thimble
+  isn't connected to a live Claude Code session." Ask about this, a card's or the report's request, and each button
+  that starts an agent show the same note in the chat in place of the request, and keep what was typed;
 - no view proposal shows, and the tour says it is a demo.
 
 A message to the orientation is refused, since its session was not kept.

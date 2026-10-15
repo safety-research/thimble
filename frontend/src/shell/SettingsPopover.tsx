@@ -9,15 +9,17 @@
 // Claude Code's levels, and a model that runs with no effort shows none. An agent's row applies to its next start. A
 // save sends only the changed fields so defaults stay defaults (thimble's config, backend userconf.py). Choices that
 // cannot take effect are dimmed with the reason in a tooltip. Every row names its model exactly, never `default`.
-// Under the table, the View proposals switch (PROPOSE_NOTE), which a view proposal's Don't ask again turns off;
-// then thimble's rules for main and its agents, the subagents of the analyst's Claude Code session (web, edits of the
-// data, and whether the session's shell runs in Claude Code's sandbox), with the CLAUDE.md files each agent reads;
+// Under the table, the View proposals switch (PROPOSE_NOTE), which a view proposal's Don't ask again turns off; the
+// Ask key choice, ⌘-click or ⌥-click (Ctrl-click or Alt-click off a Mac), whose other key places a card freely on the
+// canvas (thimble's config `askKey`, lib/platform); then thimble's rules for main and its agents, the subagents of the
+// analyst's Claude Code session (web, edits of the data, and whether the session's shell runs in Claude Code's
+// sandbox), with the CLAUDE.md files each agent reads;
 // then the one agent with a permission mode of its own, an extension's program that runs the dev agent, shown only
 // where one does, and its own fence; then labels and the card check, which have no mode; then how long a code
 // ticket's question about thimble's code waits on its card (cardWait); then the extensions added to thimble, each with
 // its switch for this workspace (ExtensionsSettings).
 import { useEffect, useState } from 'react'
-import { Button } from '../components/Button'
+import { Button, Segmented } from '../components/Button'
 import { Chip } from '../components/Chip'
 import { TextInput } from '../components/Field'
 import { Menu, type MenuItem } from '../components/Menu'
@@ -30,6 +32,7 @@ import { ExtensionsSettings, answeredRuns, changedLocalViews, changedViews, exte
 import { hasEffort, hasFastMode, invalidateSettings, loadSettings, modelChoices, modelLabel, sameModel } from '../lib/models'
 import { EFFORTS, ROLES, type AgentRow, type Attached, type CallAgent, type Extensions, type MainEffort, type MainFence, type ModeAgent, type ModelConf, type OrientPermissions, type Settings, type SettingsPatch, type TaskRow } from '../lib/types'
 import { bus } from '../lib/bus'
+import { askKeyLabel, isMacPlatform, setAskKey, type AskKey } from '../lib/platform'
 import { EFFORT_CHOICES, FastBolt, MODEL_TIP, NEXT_LAUNCH, effortWord, mainEffort, mainFast, noFastTip } from '../chat/ModelLine'
 
 type Models = Record<string, ModelConf>
@@ -249,6 +252,20 @@ export const NEXT_START_LINE = "An agent's row applies to its next start; a run 
 export const PROPOSE_LABEL = 'View proposals'
 export const PROPOSE_NOTE = 'thimble may propose a view for your task above the reply box. Nothing builds until you accept it.'
 
+/** The Ask key choice's name, its options as the platform writes them (⌘-click and ⌥-click on a Mac, Ctrl-click and
+ * Alt-click elsewhere), and its note: what the other key does. */
+export const ASK_KEY_LABEL = 'Ask key'
+export const askKeyOptions = (mac: boolean): { value: AskKey; label: string }[] =>
+  (['meta', 'alt'] as const).map((k) => ({ value: k, label: `${askKeyLabel(mac, k)}-click` }))
+export const askKeyNote = (mac: boolean, key: AskKey): string =>
+  `${askKeyLabel(mac, key)}-click asks about anything in thimble; ${askKeyLabel(mac, key === 'alt' ? 'meta' : 'alt')}-drag places a card freely on the canvas.`
+
+/** What a save sends for the ask key: "alt", null to put back the default (⌘), nothing when the choice did not change.
+ * Pure. */
+export function changedAskKey(loaded: Settings | null, key: AskKey): { ask_key?: 'alt' | null } {
+  return (loaded?.ask_key === 'alt' ? 'alt' : 'meta') === key ? {} : { ask_key: key === 'alt' ? 'alt' : null }
+}
+
 /** What a save sends for View proposals: false to turn them off, null to put back the default (on), nothing when the
  * switch did not change. Pure. */
 export function changedPropose(loaded: Settings | null, on: boolean): { propose_views?: false | null } {
@@ -372,6 +389,9 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
   const [runAnswers, setRunAnswers] = useState<Record<string, boolean>>({})
   // View proposals (thimble's config `views.propose`)
   const [propose, setPropose] = useState(true)
+  // the ask key (thimble's config `askKey`)
+  const [ask, setAsk] = useState<AskKey>('meta')
+  const mac = isMacPlatform()
 
   useEffect(() => {
     if (!open) return
@@ -391,6 +411,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
         setModeRows(s.permission_modes ?? {})
         setWeb(webRows(s))
         setPropose(s.propose_views !== false)
+        setAsk(s.ask_key === 'alt' ? 'alt' : 'meta')
         setAttached(a)
         const fast = mainFast(a)
         setModels({ ...(s.models ?? {}), main: { model: a?.model ?? '', effort: mainEffort(a), fast: !!fast } })
@@ -411,13 +432,17 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
       const modes = changedModes(settings?.permission_modes, modeRows)
       const webs = changedWeb(webRows(settings), web)
       const proposeNow = changedPropose(settings, propose)
-      if (Object.keys(changed).length || Object.keys(modes).length || Object.keys(webs).length || 'propose_views' in proposeNow)
+      const askNow = changedAskKey(settings, ask)
+      if (Object.keys(changed).length || Object.keys(modes).length || Object.keys(webs).length || 'propose_views' in proposeNow || 'ask_key' in askNow)
         await api.putSettings(ws, {
           ...(Object.keys(changed).length ? { models: changed } : {}),
           ...(Object.keys(modes).length ? { permission_modes: modes } : {}),
           ...(Object.keys(webs).length ? { web: webs } : {}),
           ...proposeNow,
+          ...askNow,
         })
+      // the pointer, the canvas, the tour and the views' frames take the key at once
+      if ('ask_key' in askNow) setAskKey(ask)
       for (const [name, how] of extensionCalls(exts?.extensions ?? [], extOn)) {
         if (how === 'add') await api.addExtension(ws, name)
         else await api.switchExtension(ws, name, how === 'on')
@@ -591,6 +616,18 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
                 <Switch checked={propose} onChange={() => setPropose(!propose)} aria-label={PROPOSE_LABEL} />
               </span>
               <span className="settings-agent-line">{PROPOSE_NOTE}</span>
+            </div>
+          </div>
+        )}
+        {settings && (
+          <div className="settings-grid settings-modes settings-auto" role="table" aria-label={ASK_KEY_LABEL}>
+            <div className="settings-row settings-headrow" role="row">
+              <span className="label">pointer</span>
+            </div>
+            <div className="settings-row" role="row" data-auto="ask-key" data-key={ask}>
+              <span className="settings-role">{ASK_KEY_LABEL}</span>
+              <Segmented className="settings-ask-key" size="sm" track label={ASK_KEY_LABEL} options={askKeyOptions(mac)} value={ask} onChange={setAsk} />
+              <span className="settings-agent-line">{askKeyNote(mac, ask)}</span>
             </div>
           </div>
         )}

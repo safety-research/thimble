@@ -59,7 +59,7 @@ import { ProposalCard } from './ProposalCard'
 import { NoticeStrip } from './Notice'
 import { PrecachedCard, precachedMark, takesFollowUps } from './Precached'
 import { DemoNote } from './DemoNote'
-import { demoStop, useDemo } from '../lib/demo'
+import { DEMO_NOTE, demoStop, useDemo } from '../lib/demo'
 import { pendingRequests } from './permissions'
 
 const LIST_DEBOUNCE_MS = 300
@@ -605,7 +605,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   // which is known once main's meta has loaded
   const attached = main.meta?.attached ?? null
   const detached = !!main.meta && !attached
-  // a demo page (lib/demo): no view proposal, and a send shows the demo note and keeps the text
+  // a demo page (lib/demo): no view proposal, and the composer is disabled, its hover saying why
   const demo = useDemo()
   // the orientation the composer would reach, when it cannot take a message here: an earlier Claude Code session's or an
   // earlier version's, whose text takes the composer's place (backend orient_session.latest's 409 and 410)
@@ -832,7 +832,8 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
               onSend={send}
               sending={target.to === 'orient' ? sendingOrient : target.to === 'view' ? sendingView : target.to === 'main' ? main.streaming : chat.streaming}
               placeholder={`Reply in ${target.to === 'main' ? 'main' : target.to === 'orient' ? labels.get(target.chat) ?? 'orient' : curPath}…`}
-              disabled={chat.loading || !!chat.error}
+              disabled={demo || chat.loading || !!chat.error}
+              tip={demo ? DEMO_NOTE : undefined}
               stop={stopWhat ? { label: stopWhat.label, onStop: stopNow, busy: stopping === stopKey } : undefined}
               thread={current}
             />

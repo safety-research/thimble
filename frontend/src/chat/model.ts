@@ -304,6 +304,17 @@ export function toolDisplayName(name: string): string {
   return OLD_TOOL_NAMES[bare] ?? bare
 }
 
+/** What a SubagentHandback call's line and step say: the agent sent its summary to main, as its folded row says
+ * (HandBack's `Summary sent to main`); its summary shows once the line is opened. */
+export const HANDBACK_LINE = 'Sent its summary to main'
+
+/** The tool a call's line, chip or step names (Rows CallLine, runTools, stepText; a card of calls by toolGroupName):
+ * toolDisplayName, but a SubagentHandback in words (HANDBACK_LINE). Pure. */
+export function callToolName(name: string): string {
+  const n = toolDisplayName(name)
+  return n === 'SubagentHandback' ? HANDBACK_LINE : n
+}
+
 const str = (v: unknown): string => (v == null ? '' : String(v))
 const oneLine = (s: string, max = 110): string => {
   const t = s.replace(/\s+/g, ' ').trim()
@@ -324,7 +335,7 @@ export function underCorpus(text: string, ws: string): string {
  * refund tickets/`). Pure. */
 export function callLineText(name: string, input: unknown, ws: string): string {
   const target = underCorpus(toolSummary(name, input, ws), ws)
-  return target ? `${toolDisplayName(name)} ${target}` : toolDisplayName(name)
+  return target ? `${callToolName(name)} ${target}` : callToolName(name)
 }
 
 /** The tools that read or write one file, and the input keys that name it. */
@@ -422,6 +433,9 @@ const TARGET_KEYS: readonly string[] = ['description', 'title', 'name', 'query',
 export function toolSummary(name: string, input: unknown, ws = ''): string {
   const inp = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>
   switch (toolDisplayName(name)) {
+    case 'SubagentHandback':
+      // its line says it all (HANDBACK_LINE); the summary is the call's input, shown once the line is opened
+      return ''
     case 'Read':
       return corpusRelative(str(inp.file_path ?? inp.path))
     case 'Grep':
@@ -602,7 +616,7 @@ export const TOOL_GROUPS: Record<string, string> = {
 
 export function toolGroupName(name: string): string {
   const n = toolDisplayName(name)
-  return TOOL_GROUPS[n] ?? toolWord(name)
+  return TOOL_GROUPS[n] ?? (n === 'SubagentHandback' ? HANDBACK_LINE : toolWord(name))
 }
 
 export interface ToolGroup {
@@ -679,7 +693,7 @@ export const RUN_TOOLS_SHOWN = 3
 export function runTools(tools: readonly ToolRow[]): { tools: { name: string; n: number }[]; more: number } {
   const counts = new Map<string, number>()
   for (const t of tools) {
-    const name = toolDisplayName(t.name)
+    const name = callToolName(t.name)
     counts.set(name, (counts.get(name) ?? 0) + 1)
   }
   // a Map keeps the order of first use, and the sort is stable, so ties keep it
@@ -716,7 +730,7 @@ export function toolMeta(tools: readonly ToolRow[]): string {
 /** A call as one step of its card: its wire name and what it was about (add_card · Agents per run). */
 export function stepText(t: ToolRow): string {
   const summary = toolSummary(t.name, t.input)
-  return summary ? `${toolDisplayName(t.name)} · ${summary}` : toolDisplayName(t.name)
+  return summary ? `${callToolName(t.name)} · ${summary}` : callToolName(t.name)
 }
 
 /** The question of each card the calls in `rows` made or edited, by card id, nested calls included. Pure. */
@@ -872,7 +886,7 @@ export function plainStep(t: ToolRow, questions: ReadonlyMap<string, string> = n
     case 'Skill':
       return with_('Loaded skill', str(inp.skill ?? inp.name))
     case 'SubagentHandback':
-      return 'Handed back its summary'
+      return HANDBACK_LINE
     default:
       return with_(toolWord(t.name), toolSummary(t.name, t.input))
   }

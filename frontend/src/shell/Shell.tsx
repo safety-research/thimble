@@ -20,6 +20,8 @@ import { ViewSurface } from '../files/ViewSurface'
 import { api } from '../lib/api'
 import { bus, type Tab } from '../lib/bus'
 import { onDemoNote, useDemo } from '../lib/demo'
+import { loadSettings, onSettingsChange } from '../lib/models'
+import { setAskKey } from '../lib/platform'
 import { isReplay, useWorkspaceEvents } from '../lib/events'
 import { track } from '../lib/telemetry'
 import { notePress, pressedPane, renewPress, setShownSurfaces, setSurfaceDrag } from '../lib/surfaces'
@@ -104,6 +106,23 @@ function useSize(el: HTMLElement | null, guess: () => { w: number; h: number }) 
 export function Shell({ ws }: { ws: string }) {
   useWorkspaceEvents(ws)
   useEffect(() => bus.on('wsReset', (e) => e.workspace === ws && window.location.reload()), [ws])
+  // the ask key Settings picks (thimble's config `askKey`, lib/platform), read with the settings and again whenever
+  // they change, for the pointer, the canvas, the tour and the views' frames
+  useEffect(() => {
+    let alive = true
+    const read = (w: string) => {
+      if (w !== ws) return
+      loadSettings(ws)
+        .then((s) => alive && setAskKey(s.ask_key))
+        .catch(() => undefined)
+    }
+    read(ws)
+    const off = onSettingsChange(read)
+    return () => {
+      alive = false
+      off()
+    }
+  }, [ws])
   const key = storageKey(ws, 'layout')
   const [layout, setLayout] = useState<Layout>(() => readLayout(key))
   const [liveWidth, setLiveWidth] = useState(layout.chatWidth)

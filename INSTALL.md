@@ -126,9 +126,9 @@ outside the sandbox. `thimble doctor` says whether the sandbox is on.
 /thimble shows the dashboard's link under its reply. The link carries a one-time code: opening it signs this browser in
 to thimble. The code then stops working, as it does 5 minutes after it was shown or when a newer link for the workspace
 is shown; opening it in a browser that is signed in already changes nothing. A browser that is not signed in shows
-only a line that says to open the link. For a new link, run `thimble up` in a shell. thimble's server answers only on
-this computer, and only to a signed-in browser or to thimble's own programs, since another account on the same
-computer can reach thimble's port too.
+only a line that says so and says to open the link. For a new link, run `thimble up` in a shell. thimble's server
+answers only on this computer, and only to a signed-in browser or to thimble's own programs, since another account on
+the same computer can reach thimble's port too.
 
 Each new sign-in prints a line in your terminal under Claude's next reply, and shows a notice in thimble with
 **Sign it out**. If a sign-in was not you, click Sign it out, or run `thimble unpair` in a shell, which signs out every
@@ -565,9 +565,9 @@ orientation. It prints one URL and opens it in your browser without a Claude Cod
 lists the datasets you downloaded (and any other folder open in thimble), each row opening its workspace on the
 dataset's main view rather than on Files; in a workspace, the folder name in the top bar opens the same list.
 Until a session attaches, each dataset's workspace is a demo page: the top bar shows a Demo tag, everything that works
-without Claude works, and the orientation's thread says it ran in advance. The composer takes typing, but a message,
-or any action that needs Claude, shows one note in the chat: "This is a demo, so Claude isn't connected here. To ask
-about your own files, run thimble in a folder of transcripts."
+without Claude works, and the orientation's thread says it ran in advance. The chat's composer is disabled, and
+hovering it says "This is a demo and thimble isn't connected to a live Claude Code session." Any other action that
+needs Claude shows the same note in the chat.
 
 The demo is static: it starts no Claude Code session and asks nothing about one. `--attach` starts one in the
 dataset's folder, once `claude auth status` says you are logged in (when you are not, it says how to log in). Without
