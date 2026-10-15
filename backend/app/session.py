@@ -14,10 +14,12 @@ once no workspace has a main session the server stops itself (cli.stop_self).
 The tail translates transcript records into main's log (`by: terminal`): the analyst's lines (not /thimble's own turn
 or local commands such as /model), browser events, task notifications, peer messages, tool calls and results, text,
 and `done` at turn_duration; any record shape it does not cover disables it with one `error` record. Safety stops,
-interrupts and long waits (read from `<claude config>/sessions/<pid>.json`) become one note each; a reply Claude's
-safeguards switched to another model becomes a notice (notices.py, FALLBACK_TEXT), shown in the foreground and kept in
-its chat, main's or an agent's, and so does an API error that stops a side thread's fork or a helper of one of
-thimble's agents (_sub_error; thimble's agents' own failures are told where their runs end, subagents.run_ended).
+interrupts and long waits (read from `<claude config>/sessions/<pid>.json`) become one note each, and so does the
+analyst's Stop of main in the browser, which leaves no record in the transcript and ends the turn (turn_stopped); a
+reply Claude's safeguards switched to another model becomes a notice (notices.py, FALLBACK_TEXT), shown in the
+foreground and kept in its chat, main's or an agent's, and so does an API error that stops a side thread's fork or a
+helper of one of thimble's agents (_sub_error; thimble's agents' own failures are told where their runs end,
+subagents.run_ended).
 At the end of each turn of main the view proposer hears whether the turn answered the analyst (proposer.turn_ended),
 and when a side thread answers (proposer.trigger).
 
@@ -158,6 +160,7 @@ INTERRUPT_RE = re.compile(r"^\[Request interrupted by user[^\]]*\]$")
 SAFETY_TEXT = "Claude's safety check stopped a response, and the session is trying it once more"
 SAFETY_STOP_TEXT = "The session stopped: Claude's safety check ended this turn"
 INTERRUPTED_TEXT = "The turn was interrupted in the terminal"
+STOPPED_TEXT = "The turn was stopped in the browser"
 WAITING_TEXT = "The session is waiting for you in the terminal"
 WAITING_FOR = {"permission prompt": "a permission prompt", "dialog open": "a dialog is open",
                "input needed": "a request for input", "sandbox request": "a sandboxed command asks for network access"}
@@ -1411,6 +1414,30 @@ def _interrupted(lv: Live) -> None:
     a stop held the turn, it was the safety check that ended the turn; else the analyst did."""
     if lv.turn_open:
         _stopped(lv, SAFETY_STOP_TEXT if lv.held_by_check or (lv.flagged and not lv.answered) else INTERRUPTED_TEXT)
+
+
+def turn_stopped(c: str, *, stopped: bool = True) -> None:
+    """The analyst's Stop ended main's turn (subagents.stop_main: `$.turn.abort`, which writes neither an interrupt's
+    line nor a turn_duration record into the transcript): what the transcript holds of the turn is read first, then the
+    turn ends with its note, as an interrupt in the terminal ends it (a start it missed is not asked for again), and the
+    cursor keeps it ended. A prompt the read finds after the stopped turn (one that waited, which Claude Code takes up
+    at once) opened the next turn, which goes on. With `stopped` false, Claude Code ran no turn of main's when the Stop
+    came: only a turn an interrupt or a safety stop ended (its note is in) and that the mirror still holds open ends,
+    with no note of its own; any other is one whose end the mirror has yet to read."""
+    lv = _live.get(c)
+    if lv is None:
+        return
+    was, since = lv.turn_open, lv.turn_since
+    _read_now(lv)
+    if not lv.turn_open or (was and lv.turn_since != since):
+        return
+    if not stopped and not lv.stop_noted:
+        return
+    if stopped:
+        _stopped(lv, STOPPED_TEXT)
+    _end_turn(lv)
+    lv.saved = -1  # _save_cursor writes the ended turn even when the transcript did not grow
+    _save_cursor(lv)
 
 
 def _user_line(lv: Live, text: str, by: str = TERMINAL, **extra: Any) -> None:

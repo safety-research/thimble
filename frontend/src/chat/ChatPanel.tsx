@@ -65,30 +65,34 @@ import { pendingRequests } from './permissions'
 const LIST_DEBOUNCE_MS = 300
 const ANCHORS_SHOWN = 6
 
-/** What the composer's stop square stops in the thread shown: the session of the orientation, a writer or a check's
- * run (backend agents.interrupt_route), the dev ticket the thread runs (dev.stop_ticket), or the view's build
- * (views.stop_build) or its review's revision (view_review.stop) in the view's thread. */
+/** What the composer's stop square stops in the thread shown: main's turn, a side thread's fork, or the session of the
+ * orientation, a writer or a check's run (backend agents.interrupt_route), the dev ticket the thread runs
+ * (dev.stop_ticket), or the view's build (views.stop_build) or its review's revision (view_review.stop) in the view's
+ * thread. */
 export type ComposerStop =
   | { kind: 'session'; chat: string; role: string; label: string }
   | { kind: 'ticket'; ticket: string; label: string }
   | { kind: 'view'; slug: string; review: boolean; label: string }
 
 const STOP_LABELS: Readonly<Record<string, string>> = { orient: 'Stop the orientation', writer: 'Stop the writer', check: 'Stop the check' }
+export const STOP_MAIN = 'Stop main'
+export const STOP_THREAD = 'Stop the thread'
 
-type StopMeta = Pick<ChatMeta, 'id' | 'status'> & Partial<Pick<ChatMeta, 'role' | 'agent_type'>>
+type StopMeta = Pick<ChatMeta, 'id' | 'status'> & Partial<Pick<ChatMeta, 'role' | 'agent_type' | 'running' | 'fork'>>
 
 /** Whether a chat is the critique's, a step of the orientation run by its critic (`thimble:critic`) or an extension's
  * critic program. Pure. */
 const isCritique = (m: StopMeta | null): boolean => !!m && m.role === 'step' && !!m.agent_type?.endsWith(':critic')
 const CRITIQUE_STOP = 'Stop the critique'
 
-/** The Stop the composer carries for the thread shown, while what it stops runs: a session's (STOP_LABELS), its dev
+/** The Stop the composer carries for the thread shown, while what it stops runs: main's while its turn runs, a side
+ * thread's while its fork runs (none while its question waits for main to fork it), a session's (STOP_LABELS), its dev
  * ticket's, or, in a view's thread, the view's build while its proposal is queued or building and else its review's
  * while the review runs (`view`, the thread's proposal). A step, a part of its parent's session whose composer sends to
  * that parent (threads.composerTarget), carries its parent's Stop (`parent`, the step's parent chat) while the parent
  * runs. The critique's thread, and a step of the critic's, stops only the critique, which the orientation then goes on
- * without. Null for main and its threads, whose turn the browser cannot stop, and for a ticket that waits in the queue
- * (its Discard is at the thread's foot) or that an older chat of a retried ticket ran. Pure. */
+ * without. Null for a ticket that waits in the queue (its Discard is at the thread's foot) or that an older chat of a
+ * retried ticket ran. Pure. */
 export function composerStopOf(
   kind: ThreadKind | null,
   meta: StopMeta | null,
@@ -97,6 +101,8 @@ export function composerStopOf(
   view: Pick<Proposal, 'slug' | 'status' | 'chat' | 'review'> | null = null,
 ): ComposerStop | null {
   if (!meta) return null
+  if (kind === 'main') return meta.running ? { kind: 'session', chat: meta.id, role: 'main', label: STOP_MAIN } : null
+  if (kind === 'thread') return meta.running && meta.fork?.agent_id && !meta.fork.ended ? { kind: 'session', chat: meta.id, role: 'thread', label: STOP_THREAD } : null
   if (kind === 'orient' || kind === 'writer' || kind === 'check') return meta.status === 'running' ? { kind: 'session', chat: meta.id, role: kind, label: STOP_LABELS[kind] } : null
   if (kind === 'step' && isCritique(meta)) return meta.status === 'running' ? { kind: 'session', chat: meta.id, role: 'critic', label: CRITIQUE_STOP } : null
   if (kind === 'step' && parent && isCritique(parent)) return parent.status === 'running' ? { kind: 'session', chat: parent.id, role: 'critic', label: CRITIQUE_STOP } : null

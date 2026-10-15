@@ -966,6 +966,20 @@ async def stop(c: str, agent_id: str) -> Answer:
     return Answer({**ans, "request": rid})
 
 
+async def stop_main(c: str) -> Answer:
+    """The analyst's Stop of main: main's running turn ended through the module (`$.turn.abort`), as Esc ends it in the
+    terminal. Refused when the module is not live: the browser then says to press Esc in the terminal. A turn that had
+    ended already counts as done."""
+    from . import module_bridge  # noqa: PLC0415
+
+    if not module_bridge.live(c):
+        return refusal(NO_MODULE, str(module_bridge.why_not(c) or ""))
+    ans = await _bridge(c, "abort")
+    if ans.refused and ans.get("gone"):
+        return Answer({"done": True})
+    return ans
+
+
 def mark_stopped_by(c: str, agent_id: str, who: str) -> None:
     with update(c) as state:
         a = files.registry(state).get(agent_id)

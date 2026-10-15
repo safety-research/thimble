@@ -42,6 +42,7 @@ ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 CELL_REF_RE = re.compile(r"^(?:card|cell):([A-Za-z0-9_-]+)")  # a card ref, by either prefix (cite.CARD_RE)
 SUMMARY_LIMIT = 300  # chars of a tool result kept in the log
 STOPPED_LINE = "stopped"
+NO_FORK = "no-fork"  # the Stop of a side thread that has no fork to stop (interrupt_route)
 AGENT_STATUSES = ("running", "done", "failed", "stopped")
 # the browser's SSE reads these; a coalesced `chat` record on the workspace stream tells every other page to re-read
 EVENT_COALESCE_S = 0.25
@@ -1053,9 +1054,31 @@ async def interrupt_route(c: str, chat_id: str, request: Request) -> dict:
     """Stop: one of thimble's agents, any role's chat (route subagent), through the module (subagents.stop, TaskStop),
     which is a click, so the analyst's cookie (403 without it); a stop of an agent that had ended counts as done
     ({stopped, done}); without the module {stopped: false, kind: no-module}, and the card says to press Esc in the
-    agent's view. A server task stops as before. Main and its threads run in the analyst's session, which the browser
-    does not interrupt; the analyst's own subagent of main is main's to stop, so main is asked to."""
+    agent's view. Main's running turn ends through the module as Esc ends it (subagents.stop_main, `$.turn.abort`), and
+    the mirror ends the turn (session.turn_stopped); a side thread's fork stops as an agent does (TaskStop of the fork
+    that answers it), {stopped: false, kind: no-fork} while it has none. Both are clicks too. A server task stops as
+    before; the analyst's own subagent of main is main's to stop, so main is asked to."""
+    if chat_id == MAIN_ID:
+        from . import session, subagents  # noqa: PLC0415 — each imports this module
+
+        subagents.analyst_only(request)
+        ans = await subagents.stop_main(c)
+        if ans.refused:
+            return {"stopped": False, "kind": ans.kind, "reason": ans.reason}
+        session.turn_stopped(c, stopped=not ans.get("done"))
+        return {"stopped": True, **({"done": True} if ans.get("done") else {})}
     meta = read_meta(c, chat_id)
+    if meta.get("kind") == KIND_THREAD:
+        from . import subagents  # noqa: PLC0415
+
+        subagents.analyst_only(request)
+        fork = meta.get("fork") if isinstance(meta.get("fork"), dict) else {}
+        if not fork.get("agent_id") or fork.get("ended"):
+            return {"stopped": False, "kind": NO_FORK, "reason": "its fork has not started yet"}
+        ans = await subagents.stop(c, str(fork["agent_id"]))
+        if ans.refused:
+            return {"stopped": False, "kind": ans.kind, "reason": ans.reason}
+        return {"stopped": True, **({"done": True} if ans.get("done") else {})}
     if meta.get("kind") != KIND_AGENT:
         return {"stopped": False}
     if meta.get("route") == "subagent" and meta.get("agent_id"):

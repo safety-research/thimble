@@ -32,8 +32,9 @@ starts an agent after its card said it did not. An Answer is a dict with exactly
                 `queued`: a message waits for a running agent's next tool round rather than resuming it)
     deny        thimble's own PreToolUse refused the call (the reason as Claude Code gives it)
     limit       Claude Code's concurrent-subagent limit (its own text, with the number)
-    error       anything else (`gone`: the agent had ended already or belongs to another session)
-    ok          a register or a note went through
+    error       anything else (`gone`: the agent had ended already or belongs to another session, or no turn of
+                main's ran)
+    ok          a register, an abort or a note went through
     no-module   no module holds the long poll for main's session (the reason, why_not), or none answered in time
                 (`expired`: true)
 Ops and their arguments:
@@ -43,6 +44,8 @@ Ops and their arguments:
                                           one-line note (hint module-started-note, with `what`, a server-checked name)
     send   agent, text, role, values      register the run's values if needed, then SendMessage
     stop   agent                          TaskStop
+    abort                                 `$.turn.abort` of main's running turn (the analyst's Stop of main), answered
+                                          once that turn completed
     note   text                           `$.session.append` to main
 `request` is a coroutine for the server's loop; request_blocking is the same call from a worker thread.
 
@@ -122,7 +125,7 @@ HELLO_HOLD_S = 5.0  # a hello for a session that is not main yet waits this long
 ROLES_CHECK_S = 2.0  # how often a held long poll looks whether the files the roles are rendered from changed
 EXPIRED_KEPT = 64  # expired requests remembered for their late answers
 REKEYS_KEPT = 32
-OPS = ("register", "spawn", "send", "stop", "note")
+OPS = ("register", "spawn", "send", "stop", "abort", "note")
 ANSWER_KEYS = ("agentId", "deny", "limit", "error", "ok")
 NO_MODULE = "no-module"
 REGISTRY = "trusted/subagents.json"  # lane B's record of thimble's agents, in the workspace (module note; subagent_files)

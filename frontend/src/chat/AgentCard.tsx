@@ -32,7 +32,7 @@ import { DocChip, GroupChip, LabelChip } from './SurfaceChips'
 import { ViewChip } from './ViewChip'
 import { failureText, ReportProblemButton } from '../shell/ProblemReport'
 import { RefText } from './markdown'
-import { NO_STOP_LINE, PAUSED_LINE, STOP_DONE_LINE, isSubagent, runValues, stopFailedLine, stoppedLine, valuesText } from './subagent'
+import { MAIN_ESC_LINE, NO_STOP_LINE, PAUSED_LINE, STOP_DONE_LINE, isSubagent, mainStopFailedLine, runValues, stopFailedLine, stoppedLine, valuesText } from './subagent'
 
 const REFETCH_DEBOUNCE_MS = 150
 /** The roles of thimble's agents whose card lists their own subagents as steps and carries Stop: the orientation, a
@@ -225,24 +225,27 @@ export interface AgentCardProps {
   briefAbove?: boolean
 }
 
-/** The browser's Stop of one of thimble's agents (the orientation, a writer, a check's run): its chat is interrupted
- * (backend agents.interrupt_route), which stops it through thimble's plugin. A Stop that found the agent ended already
- * counts as done; one thimble could not pass on says how to stop it in the terminal. The analyst's own subagent of main,
- * which only main can stop, is asked of main, and a toast says so. Resolves true when the stop went through, was done
- * already or was asked of main, false otherwise. */
+/** The browser's Stop of one of thimble's agents (the orientation, a writer, a check's run), of main's turn or of a side
+ * thread's fork: its chat is interrupted (backend agents.interrupt_route), which stops it through thimble's plugin. A
+ * Stop that found it ended already counts as done; one thimble could not pass on says how to stop it in the terminal,
+ * for main with Esc (MAIN_ESC_LINE, which is all it says when thimble's module does not run in main's session). The
+ * analyst's own subagent of main, which only main can stop, is asked of main, and a toast says so. Resolves true when
+ * the stop went through, was done already or was asked of main, false otherwise. */
 export function stopSession(ws: string, chat: string, role: string): Promise<boolean> {
   track('chat-interrupt', { target: `chat:${chat}`, detail: { role } })
+  const main = chat === 'main'
+  const failed = (reason: string) => (main && !reason ? { text: MAIN_ESC_LINE } : { text: main ? mainStopFailedLine(reason) : stopFailedLine(reason), kind: 'error' as const })
   return api
     .interrupt(ws, chat)
     .then((r) => {
       if (r.stopped) return (r.done && bus.emit('toast', { text: STOP_DONE_LINE }), true)
       if (r.asked === 'main') return (bus.emit('toast', { text: 'Asked main to stop it.' }), true)
-      if (r.kind) return (bus.emit('toast', { text: stopFailedLine(r.reason ?? ''), kind: 'error' }), false)
+      if (r.kind) return (bus.emit('toast', failed(r.kind === 'no-module' && main ? '' : (r.reason ?? ''))), false)
       // the server answers `stopped: false` when it runs nothing for this chat, which would otherwise look as if Stop
       // had worked
       return (bus.emit('toast', { text: 'Could not stop it: thimble runs nothing for it.', kind: 'error' }), false)
     })
-    .catch((e: Error) => (bus.emit('toast', { text: stopFailedLine(e.message), kind: 'error' }), false))
+    .catch((e: Error) => (bus.emit('toast', failed(e.message)), false))
 }
 
 /** Write again on a writer that main's quit stopped: its request made anew as a click (subagents.again). */

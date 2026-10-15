@@ -5,7 +5,7 @@ import { createHmac } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 
-import { ACTIVATE_WAIT_MS, PRIVATE_FALLBACK, RETRY_MS, hmac, register } from './thimble'
+import { ABORT_WAIT_MS, ACTIVATE_WAIT_MS, PRIVATE_FALLBACK, RETRY_MS, hmac, register } from './thimble'
 
 type Json = Record<string, any>
 
@@ -128,6 +128,7 @@ function engine(opts: Options = {}) {
   let sid = MAIN
   let spawnAnswer = (args: Json): Json => ({ agentId: `agent-${log.length}`, model: now[args.subagentType]?.model })
   let toolAnswer = (input: Json): Json => ({ result: { success: true }, text: `Resuming agent ${input.to}` })
+  let abortAnswer = async (_input: Json): Promise<void> => undefined
   let checkReason = 'Claude requested permissions to write, but you haven\'t granted it yet.' // Claude Code's decision for a write
   /** where a path lands, every link followed; undefined when it leads nowhere (no file, and no folder of one) */
   const land = (path: string): string | undefined => {
@@ -167,6 +168,7 @@ function engine(opts: Options = {}) {
       }),
     },
     tool: { call: vi.fn(async (input: Json) => toolAnswer(input)), check: vi.fn(async (_input: Json) => ({ decision: 'ask', reason: checkReason })) },
+    turn: { abort: vi.fn(async (input: Json) => abortAnswer(input)) },
     session: {
       id: vi.fn(async () => sid),
       append: vi.fn(async (args: Json) => ({ uuid: 'u1', message: args.message })),
@@ -182,6 +184,10 @@ function engine(opts: Options = {}) {
     setSession: (s: string) => { sid = s },
     onSpawn: (f: (args: Json) => Json) => { spawnAnswer = f },
     onTool: (f: (input: Json) => Json) => { toolAnswer = f },
+    /** what $.turn.abort does: resolves, or rejects with Claude Code's reason */
+    onAbort: (f: (input: Json) => Promise<void>) => { abortAnswer = f },
+    /** a model turn's start through the turn.start hook: main's (no agentId) or an agent's */
+    turnStart: (agentId: string | undefined, turnId: string) => hooks['turn.start']($, { text: '', turnId, ...(agentId === undefined ? {} : { agentId }) }, async () => ({ turnId })),
     /** the reason Claude Code's permission decision gives for a write now: in plan mode it says so */
     onCheck: (reason: string) => { checkReason = reason },
     start: () => hooks['session.start']($, { cwd: CWD, surface: opts.interactive === false ? null : 'terminal', isInteractive: opts.interactive ?? true }, async () => ({ cwd: CWD })),
@@ -523,6 +529,45 @@ describe('requests', () => {
     expect(e.$.tool.check).toHaveBeenLastCalledWith({ tool: 'Write', input: { file_path: '/tmp/.thimble-plan-probe', content: '' } })
     expect(e.$.tool.call).not.toHaveBeenCalledWith(expect.objectContaining({ tool: 'Write' })) // never written
     await e.end('other')
+  })
+
+  it("stops main's running turn with $.turn.abort, by the id main's turn.start carried, and answers once that turn completed", async () => {
+    const e = await started()
+    // the wait for the turn's end is long enough here that only the turn's end ends it
+    const sleep = e.$.clock.sleep
+    e.$.clock.sleep = (ms: number) => (ms === ABORT_WAIT_MS ? new Promise(r => setTimeout(r, 5000)) : sleep(ms))
+    await e.turnStart(undefined, 'turn-7')
+    await e.turnStart('a1', 'turn-8') // an agent's turn is not main's
+    const said: string[] = []
+    e.onAbort(async () => {
+      said.push('abort')
+      setTimeout(() => void e.complete(undefined, '', { turnId: 'turn-7', reason: 'aborted', isAborted: true }).then(() => said.push('completed')), 20)
+    })
+    expect(await e.server.answer(e.server.push('abort'))).toEqual({ ok: true })
+    expect(e.$.turn.abort).toHaveBeenCalledTimes(1)
+    expect(e.$.turn.abort).toHaveBeenCalledWith({ turnId: 'turn-7' })
+    expect(said).toEqual(['abort', 'completed'])
+    // once it completed, no turn of main's runs: a second Stop has nothing to end
+    expect(await e.server.answer(e.server.push('abort'))).toMatchObject({ error: expect.any(String), gone: true })
+    expect(e.$.turn.abort).toHaveBeenCalledTimes(1)
+  })
+
+  it("says main's turn had ended when none runs, or when Claude Code says so; any other refusal is an error", async () => {
+    const e = await started()
+    expect(await e.server.answer(e.server.push('abort'))).toMatchObject({ error: expect.any(String), gone: true })
+    await e.turnStart(undefined, 'turn-1')
+    await e.complete(undefined, 'Done.', { turnId: 'turn-1' })
+    expect(await e.server.answer(e.server.push('abort'))).toMatchObject({ error: expect.any(String), gone: true })
+    expect(e.$.turn.abort).not.toHaveBeenCalled()
+    await e.turnStart(undefined, 'turn-2')
+    e.onAbort(async () => { throw new Error('thimble: $.turn.abort: turn-2 is already ending') })
+    expect(await e.server.answer(e.server.push('abort'))).toMatchObject({ error: expect.stringContaining('already ending'), gone: true })
+    e.onAbort(async () => { throw new Error('something else') })
+    const other = await e.server.answer(e.server.push('abort'))
+    expect(other).toEqual({ error: 'Error: something else' })
+    // a turn whose end does not come is still answered, after ABORT_WAIT_MS
+    e.onAbort(async () => undefined)
+    expect(await e.server.answer(e.server.push('abort'))).toEqual({ ok: true })
   })
 
   it('appends a note on a note request', async () => {
