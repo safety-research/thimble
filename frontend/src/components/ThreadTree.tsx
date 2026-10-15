@@ -55,6 +55,9 @@ export interface ThreadTreeProps {
    * card's first row */
   aside?: ReactNode
   className?: string
+  /** a chat whose run the folded card does not count while the current thread starts: main, whose short turn that
+   * starts the thread's fork is the thread's start, not work elsewhere */
+  starter?: string | null
 }
 
 /** A typed name as the thread keeps it: one line, trimmed, never empty. Pure. */
@@ -152,11 +155,12 @@ const GUIDE_X = 10
 const INDENT = 14
 
 /** What wants attention elsewhere: the threads that run, those holding a reply the analyst has not read (the current
- * one is being read), and those a prompt waits on. Pure. */
-export function attention(nodes: readonly ThreadNode[], current: string): { running: number; unread: number; waiting: number } {
+ * one is being read), and those a prompt waits on. The run of `starter`, the chat that starts the current thread, is
+ * not counted. Pure. */
+export function attention(nodes: readonly ThreadNode[], current: string, starter: string | null = null): { running: number; unread: number; waiting: number } {
   const others = nodes.filter((n) => n.id !== current)
   return {
-    running: others.filter((n) => n.running).length,
+    running: others.filter((n) => n.running && n.id !== starter).length,
     unread: others.filter((n) => n.unread).length,
     waiting: nodes.filter((n) => n.waiting).length,
   }
@@ -177,7 +181,7 @@ export function inKeptOrder(nodes: readonly ThreadNode[], kept: readonly string[
     .map((x) => x.n)
 }
 
-export function ThreadTree({ nodes: live, current, onPick, collapsed, onCollapsedChange, onRename, onDelete, aside, className }: ThreadTreeProps) {
+export function ThreadTree({ nodes: live, current, onPick, collapsed, onCollapsedChange, onRename, onDelete, aside, className, starter = null }: ThreadTreeProps) {
   // the order the rows had when the tree opened, held while it stays open; a new thread goes after them (inKeptOrder)
   const kept = useRef<string[] | null>(null)
   if (collapsed) kept.current = null
@@ -203,7 +207,7 @@ export function ThreadTree({ nodes: live, current, onPick, collapsed, onCollapse
   }, [above])
 
   const cur = nodes.find((n) => n.id === current)
-  const att = attention(nodes, current)
+  const att = attention(nodes, current, starter)
   const filtering = query.trim() !== ''
   const rows = filtering ? filterRows(nodes, query) : treeRows(nodes, folded)
   const toggleFold = (id: string) =>

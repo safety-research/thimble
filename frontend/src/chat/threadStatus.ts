@@ -1,14 +1,16 @@
-// What a thread shows of its work that its own log does not say: where its question is while nothing of the run shows
-// yet (with main, which has not forked the thread, or with the fork of main that answers it), and the edits main made
-// itself to the cards the thread is anchored on, which land in main's log rather than the thread's.
+// What a thread shows of its work that its own log does not say: its strip's line, in the thread's own words (starting
+// while its question waits for its fork, which a short turn of main starts, then working while the fork answers it),
+// and the edits main made itself to the cards the thread is anchored on, which land in main's log rather than the
+// thread's.
 import type { ChatMeta, ChatRecord } from '../lib/types'
 import { toolDisplayName, type Row, type ToolRow } from './model'
 
 /** `sent`: the question waits for main to fork the thread; `working`: a fork of main answers it. */
 export type ThreadStage = 'sent' | 'working'
 
-/** What a working thread's line says at each stage. */
-export const STAGE_TEXT: Record<ThreadStage, string> = { sent: 'Sent to main', working: 'Main is working on it' }
+/** What a working thread's line says at each stage, from the thread's own point of view: main's short turn that starts
+ * the fork is the thread's start, and the fork's work is the thread's. */
+export const STAGE_TEXT: Record<ThreadStage, string> = { sent: 'Starting this thread…', working: 'Working' }
 
 /** Where a running thread's question is (ThreadStage); null while the thread does not run. Pure. */
 export function threadStage(meta: Pick<ChatMeta, 'fork'> | null | undefined, running: boolean): ThreadStage | null {
