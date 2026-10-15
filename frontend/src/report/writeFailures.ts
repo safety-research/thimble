@@ -81,11 +81,12 @@ export function nextRefusals(cur: Readonly<Record<string, WriteRefusal>>, ev: Ws
 }
 
 /** Whether a document is being written after a `report` event's status: true once its write starts (`generating`),
- * false once it ends saved, failed or refused (a start the module refused after the write began, such as Claude Code's
- * concurrency limit, live check L19), else null (no change). Pure. */
+ * false once it ends saved, failed, refused (a start the module refused after the write began, such as Claude Code's
+ * concurrency limit, live check L19) or stopped before it saved (no failure: the document stays as it was, live check
+ * L4-04d), else null (no change). Pure. */
 export function writingAfter(status: unknown): boolean | null {
   if (status === 'generating') return true
-  if (status === 'generated' || status === 'failed' || status === 'refused') return false
+  if (status === 'generated' || status === 'failed' || status === 'refused' || status === 'stopped') return false
   return null
 }
 

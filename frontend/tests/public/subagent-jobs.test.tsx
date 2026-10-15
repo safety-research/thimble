@@ -3,7 +3,8 @@
 // building with the tray's direction, a repair's count, failed or stopped by main's quit with Retry and its Build menu
 // (Retry is a click to the build route with the run's model and effort), a refused start with Start it; a report
 // check's row that went stale after the analyst's own edits, with Run (src/report/Checks.tsx); a writer's start that
-// did not happen, which stays on its document (src/report/writeFailures.ts).
+// did not happen, which stays on its document, and a writer the analyst stopped, which is no failure
+// (src/report/writeFailures.ts).
 import { act } from 'react'
 import { buildStage } from '../../src/chat/ChatPanel.tsx'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
@@ -16,7 +17,7 @@ import { refreshProposals } from '../../src/lib/proposals.ts'
 import type { Proposal } from '../../src/lib/types.ts'
 import { staleOf, staleText } from '../../src/report/Checks.tsx'
 import { runLine } from '../../src/report/checkComments.ts'
-import { nextRefusals, useWriteRefusals, writingAfter } from '../../src/report/writeFailures.ts'
+import { failedText, nextFailures, nextRefusals, useWriteRefusals, writingAfter } from '../../src/report/writeFailures.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 const P = (slug: string, extra: Partial<Proposal> = {}): Proposal => ({ slug, name: slug, description: '', task: '', claims: [], arrangement: '', proposed_by: 'orient', status: 'building', ts: '', chat: `c-${slug}`, ...extra }) as Proposal
@@ -128,6 +129,18 @@ describe("a report check's row", () => {
     expect(staleText(2)).toBe('2 passages changed since checked')
     expect(staleText(1)).toBe('1 passage changed since checked')
     expect(runLine({ status: 'running', chat: '', started: '', comments: 0, summary: '', waiting: 'queued' })).toBe('Queued: at most 3 checks run at once')
+  })
+})
+
+describe('a writer the analyst stopped', () => {
+  test('ends the Writing state with no failure card and no mark on the tab (live check L4-04d)', () => {
+    // the server says `stopped` when the writer was stopped before it saved: the document stays as it was
+    expect(writingAfter('stopped')).toBe(false)
+    const writing = nextFailures({}, { type: 'report', slug: 'report', status: 'generating', seq: 1 } as never)
+    expect(nextFailures(writing, { type: 'report', slug: 'report', status: 'stopped', run: null, seq: 2 } as never)).toEqual({})
+    // a writer that ended unsaved for another reason still fails, in a sentence of its own
+    const failed = nextFailures({}, { type: 'report', slug: 'report', status: 'failed', note: 'The writer ended without saving the document.', chat: 'w1', seq: 3 } as never)
+    expect(failedText(failed.report)).toBe('The report was not written. The writer ended without saving the document.')
   })
 })
 
