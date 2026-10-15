@@ -31,15 +31,9 @@ For a development build, clone the repo and run `bash scripts/install.sh`. See [
 
 ## Usage
 
-In a folder with files you'd like to analyze, start `claude` and type `/thimble`. It prints the dashboard's link under
-its reply; open it to sign your browser in. In a session that was open when you installed thimble, run
-`/reload-plugins` first.
+Run `thimble` in a folder with files you'd like to analyze, just like you run `claude`. Use `thimble mode terminal|browser` to switch between browser and terminal modes (see below).
 
-- `thimble` in the folder does the same in one step, and adds terminal mode and `thimble -c`, which continues your
-  last conversation there ([what it adds](INSTALL.md#start-thimble)).
-- Each start is a new conversation on the same workspace (cards, report, labels).
-- thimble follows your Claude Code permission mode. For fewer prompts, start in auto mode: `claude --permission-mode
-  auto` or `thimble --permission-mode auto`. For API keys and cloud providers, see [Authentication](INSTALL.md#authentication).
+- To attach thimble to a running Claude Code session, run `/thimble`.
 
 ### Terminal mode
 
