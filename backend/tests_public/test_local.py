@@ -1043,8 +1043,9 @@ async def test_the_shim_in_terminal_mode_runs_calls_itself_keeps_fd_1_and_subscr
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), H)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     _record(token=PLUGIN_TOKEN, port=httpd.server_address[1])
+    # THIMBLE_MODE as the launcher sets it for a session it starts in terminal mode (launch_mode.ENV)
     env = {**os.environ, "THIMBLE_CARD_CHECK": "off", "THIMBLE_CWD": str(term),
-           "THIMBLE_WORKSPACES_DIR": str(config.WORKSPACES_DIR)}
+           "THIMBLE_WORKSPACES_DIR": str(config.WORKSPACES_DIR), "THIMBLE_MODE": "terminal"}
     params = StdioServerParameters(command=str(config.REPO_ROOT / "plugin" / "bin" / "thimble-mcp"), args=[], env=env,
                                    cwd=str(term))
     fds: dict[str, str] = {}
