@@ -88,7 +88,7 @@ Claude Code (tested with 2.1.295), with its hooks modules on, macOS or Linux, an
 
 ## Security & Privacy
 
-thimble is a research prototype. Please report any security issues privately to [@mjoerke](https://github.com/mjoerke). thimble runs on top of Claude Code: it does not collect any data of its own and all authentication and billing is managed by `claude`. It adds no sandbox or permission rules to your Claude Code session.
+thimble is a research prototype. Please report any security issues privately to [@mjoerke](https://github.com/mjoerke). thimble runs on top of Claude Code: it does not collect any data of its own and all authentication and billing is managed by `claude`. It adds no sandbox or permission rules to your Claude Code session. Its local server answers only on this computer, and only to a browser signed in with thimble's link or to thimble's own programs.
 
 ## License
 

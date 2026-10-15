@@ -126,7 +126,8 @@ outside the sandbox. `thimble doctor` says whether the sandbox is on.
 /thimble shows the dashboard's link under its reply. The link carries a one-time code: opening it signs this browser in
 to thimble. The code then stops working, as it does 5 minutes after it was shown or when a newer link for the workspace
 is shown; opening it in a browser that is signed in already changes nothing. A browser that is not signed in shows
-thimble, but each change it tries says to open the link. For a new link, run `thimble up` in a shell.
+only a line that says to open the link. For a new link, run `thimble up` in a shell. thimble's server answers only on
+this computer, and only to a signed-in browser or to thimble's own programs.
 
 Each new sign-in prints a line in your terminal under Claude's next reply, and shows a notice in thimble with
 **Sign it out**. If a sign-in was not you, click Sign it out, or run `thimble unpair` in a shell, which signs out every
