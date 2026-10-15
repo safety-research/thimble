@@ -125,6 +125,9 @@ COMMAND_RE = re.compile(r"<command-name>(.*?)</command-name>", re.S)
 COMMAND_ARGS_RE = re.compile(r"<command-args>(.*?)</command-args>", re.S)
 LOCAL_CAVEAT = "<local-command-caveat>"  # the meta record before a local command's line (module note, the table)
 CONNECT_COMMANDS = ("/thimble", "/thimble:thimble")  # /thimble's command line, whose turn is not mirrored (module note)
+# /thimble:ask's command line: a message for a thread, the orientation or a view's build, as that chat's composer in the
+# browser sends it, so its turn is no analyst's turn of main (Live.turn_analyst)
+ASK_COMMANDS = ("/thimble:ask",)
 TASK_FIELD_RE = re.compile(r"<(task-id|tool-use-id|status|result|summary)>(.*?)</\1>", re.S)
 # one task's notification: Claude Code puts the notifications of tasks that end together in one message
 TASK_NOTICE_RE = re.compile(r"<task-notification>(.*?)</task-notification>", re.S)
@@ -269,8 +272,8 @@ class Live:
         self.turn_open = False
         self.fresh = False  # the turn has had no assistant record yet: another opening record still counts
         # the open turn answers the analyst: opened by a line they typed or their message from the browser, not by a
-        # thread question (the thread's fork answers it), a task notification, a Monitor's re-arm or a start_agent
-        # event (proposer.turn_ended)
+        # thread question from the browser or the terminal's /thimble:ask (the thread's fork answers it), a task
+        # notification, a Monitor's re-arm or a start_agent event (proposer.turn_ended)
         self.turn_analyst = False
         self.last_cut: str | None = None  # the uuid of main's last turn_duration record, where a fork of it resumes
         self.context_tokens = 0  # the tokens main's last reply read: input, cache read and cache written (_note_model)
@@ -1414,9 +1417,12 @@ def _interrupted(lv: Live) -> None:
         _stopped(lv, SAFETY_STOP_TEXT if lv.held_by_check or (lv.flagged and not lv.answered) else INTERRUPTED_TEXT)
 
 
-def _user_line(lv: Live, text: str, by: str = TERMINAL, **extra: Any) -> None:
+def _user_line(lv: Live, text: str, by: str = TERMINAL, *, analyst: bool = True, **extra: Any) -> None:
+    """A line the analyst typed in main's terminal; `analyst` False for one whose message another chat answers
+    (ASK_COMMANDS), which leaves the turn as it was for the proposer (Live.turn_analyst)."""
     _open_turn(lv)
-    lv.fresh = lv.turn_analyst = True
+    lv.fresh = True
+    lv.turn_analyst = lv.turn_analyst or analyst
     _rec(lv, "user", text=text, by=by, **extra)
 
 
@@ -3163,7 +3169,7 @@ def translate(lv: Live, line: bytes | str) -> None:
                 # /thimble's own turn is not mirrored (module note, the table): turn_open stays False, so its reply
                 # is skipped too
             elif command is not None:
-                _user_line(lv, command)
+                _user_line(lv, command, analyst=command.split()[0] not in ASK_COMMANDS)
             elif not text.lstrip().startswith("<"):
                 _user_line(lv, text.strip())
         return

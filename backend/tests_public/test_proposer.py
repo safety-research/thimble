@@ -218,6 +218,28 @@ async def test_a_side_thread_question_runs_one_fork_after_the_thread_answers(cwd
     assert f["cut"] == "cut-r" and cards[0]["offered"]["after"] == f"thread:{tid}"
 
 
+async def test_a_side_thread_question_typed_with_thimble_ask_runs_one_fork_after_the_thread_answers(cwd, tmp_path,
+                                                                                                  cards, forks):
+    """/thimble:ask in main's terminal sends a side thread's question as the thread's composer in the browser does:
+    main's turn that hands it to the thread's fork is no analyst's turn of main either, so the proposer runs once,
+    after the thread answers, also when that run shows no card. A line the analyst types to main still is their turn."""
+    forks.answer = stream("```json\n" + json.dumps({"show": False, "why": "Nothing new to show."}) + "\n```")
+    lv, p = _attach(cwd, tmp_path)
+    tid = agents.new_thread(CORPUS, None, None, "Replies")["id"]
+    agents.Recorder(CORPUS, tid).record("user", text="Which agent replies most?")
+    ask = ("<command-message>thimble:ask</command-message>\n<command-name>/thimble:ask</command-name>\n"
+           "<command-args>Replies Which agent replies most?</command-args>")
+    _append(p, lv, [_human(ask), _assistant(_say("I asked the thread's fork.")), _end("cut-a")])
+    await _settle()
+    assert forks == [] and proposer.pending(CORPUS) is None, "main's relay turn runs nothing"
+    session._proposer_after_thread(lv, tid)  # the thread's fork answered
+    await _settle()
+    assert [f["cut"] for f in forks] == ["cut-a"]
+    _append(p, lv, _turn("Who replies to whom on the board?", "cut-m"))
+    await _settle()
+    assert [f["cut"] for f in forks] == ["cut-a", "cut-m"]
+
+
 async def test_a_thread_and_an_orientation_wait_for_main_and_run_once_with_both_sentences(cwd, tmp_path, cards,
                                                                                        forks):
     """A side thread's answer and an orientation's end that come while main works on something else (here a
