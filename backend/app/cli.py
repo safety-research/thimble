@@ -1964,8 +1964,9 @@ def given_settings(cwd: Path, given: str) -> Any:
 def modules_off(cwd: Path, given: str = "") -> str:
     """Why Claude Code will not load thimble's hooks module in a session the launcher starts in `cwd`, as far as the
     launch can tell: the org's managed settings turn hooks modules off (`disableAllHooks`, or `allowManagedHooksOnly`
-    without thimble enabled there), the analyst's settings or `given` --settings set `disableAllHooks`, or NO_MODULE_ENV
-    is set; '' otherwise. An untrusted folder or Claude Code's own switch shows only after the launch, as no hello."""
+    without thimble enabled there, or the security plugin's `allowManagedModsOnly`, cc_plugin.managed_mods_only), the
+    analyst's settings or `given` --settings set `disableAllHooks`, or NO_MODULE_ENV is set; '' otherwise. An untrusted
+    folder or Claude Code's own switch shows only after the launch, as no hello."""
     tier = cc_plugin.managed() or {}
     if tier.get("disableAllHooks") is True:
         return "your organization's managed settings set disableAllHooks"
@@ -1974,6 +1975,8 @@ def modules_off(cwd: Path, given: str = "") -> str:
         if not (isinstance(enabled, dict) and any(str(k).startswith(f"{PLUGIN_NAME}@") and v is True
                                                   for k, v in enabled.items())):
             return "your organization's managed settings set allowManagedHooksOnly"
+    if cc_plugin.managed_mods_only():
+        return f"your organization's managed settings set {cc_plugin.MODS_ONLY}"
     if os.environ.get(NO_MODULE_ENV, "").strip():
         return f"{NO_MODULE_ENV} is set"
     own = given_settings(cwd, given)
@@ -3585,7 +3588,7 @@ def _hooks_fix(why: str) -> str:
     """The fix line for modules_off's reason `why`."""
     if why.startswith(NO_MODULE_ENV):
         return f"In a shell: unset {NO_MODULE_ENV}, then restart claude"
-    setting = "allowManagedHooksOnly" if "allowManagedHooksOnly" in why else "disableAllHooks"
+    setting = next((s for s in ("allowManagedHooksOnly", cc_plugin.MODS_ONLY) if s in why), "disableAllHooks")
     if "organization" in why:
         return f"Ask your administrator: your organization's Claude Code settings set {setting}"
     return f"In your Claude Code settings: remove {setting}, then restart claude"

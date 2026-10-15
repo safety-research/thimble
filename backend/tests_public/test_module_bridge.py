@@ -942,3 +942,15 @@ def test_rekey_in_terminal_mode_leaves_the_record_the_hook_wrote(terminal):
     before = _registry()["module"]
     module_bridge.rekey(CORPUS, MAIN, NEW)
     assert _registry()["module"] == before and before["notes"]["session"] == NEW
+
+
+def test_why_not_names_the_security_plugin_s_allow_managed_mods_only(monkeypatch):
+    """A start refused for want of the module gives the managed setting that keeps it out, the security plugin's
+    allowManagedModsOnly as well as disableAllHooks and allowManagedHooksOnly, not only that Claude Code did not load
+    it."""
+    _launch()
+    monkeypatch.setattr(cc_plugin, "managed", lambda environ=None: {
+        "pluginConfigs": {"cc-plugin-sec-default@builtin": {"options": {"allowManagedModsOnly": True}}}})
+    assert module_bridge.why_not(CORPUS) == "your organization's managed settings set allowManagedModsOnly"
+    monkeypatch.setattr(cc_plugin, "managed", lambda environ=None: None)
+    assert module_bridge.why_not(CORPUS) == module_bridge.NOT_LOADED

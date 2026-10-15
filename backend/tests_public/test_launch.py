@@ -274,3 +274,17 @@ def test_the_launch_says_nothing_about_the_permission_mode(corpus, tmp_path):
         user.write_text(json.dumps(own))
         notes = cli.launch_args(corpus).split("\n")[NOTES]
         assert "Manual" not in notes and "shift+tab" not in notes and "auto mode" not in notes, own
+
+
+def test_the_launch_and_the_doctor_name_the_security_plugin_s_allow_managed_mods_only(corpus, monkeypatch):
+    """Where the organization's managed settings set the security plugin's allowManagedModsOnly, Claude Code loads no
+    hooks module of a plugin a person installs, so thimble's agents can't start: the launch's note line, the doctor's
+    check and its fix name the setting, as for allowManagedHooksOnly."""
+    why = "your organization's managed settings set allowManagedModsOnly"
+    monkeypatch.setattr(cc_plugin, "managed", lambda environ=None: {
+        "pluginConfigs": {"cc-plugin-sec-default@builtin": {"options": {"allowManagedModsOnly": True}}}})
+    assert cli.modules_off(corpus) == why
+    assert cli.MODULES_OFF_LINE.format(reason=why) in cli.launch_args(corpus).split("\n")[NOTES].split("\t")
+    assert cli.module_line(corpus).startswith(f"off: Claude Code's hooks modules are off ({why})")
+    assert cli._hooks_fix(why) == ("Ask your administrator: your organization's Claude Code settings set "
+                                   "allowManagedModsOnly")

@@ -7,7 +7,9 @@ or in the `--settings` the session's `claude` was started with (the launcher pas
 org's managed tier (`disableAllHooks`, or `allowManagedHooksOnly` without this plugin enabled there), main
 arms a Monitor on the watcher instead: the MONITOR route (`route`). The managed tier is the org's server-managed
 settings (remote-settings.json in Claude Code's config dir) when they exist, else managed-settings.json with its
-managed-settings.d drop-ins in the platform's managed folder (`managed`).
+managed-settings.d drop-ins in the platform's managed folder (`managed`). Where an organization manages Claude Code, its
+built-in security plugin (SEC_DEFAULT) also refuses the hooks module, though not the hooks, of every plugin a person
+installs when the managed tier sets its option `allowManagedModsOnly` (`managed_mods_only`).
 
 A plugin copy names its marketplace (`marketplace`): `inline` for a `--plugin-dir` copy, `<marketplace>` for an
 installed one, which is a copy in Claude Code's plugin cache or, for a directory marketplace, the plugin folder in that
@@ -36,6 +38,11 @@ REMOTE_SETTINGS = "remote-settings.json"  # the org's server-managed settings, i
 MANAGED_DIRS = {"darwin": Path("/Library/Application Support/ClaudeCode"), "linux": Path("/etc/claude-code")}
 MANAGED_FILE = "managed-settings.json"
 MANAGED_DROPINS = "managed-settings.d"
+# Claude Code's built-in security plugin, seated outermost where an organization manages Claude Code (managed settings
+# on the machine, or a Team or Enterprise account) unless managed prependPlugins leaves it out; its options are the
+# managed tier's pluginConfigs -> SEC_DEFAULT -> options (module note)
+SEC_DEFAULT = "cc-plugin-sec-default@builtin"
+MODS_ONLY = "allowManagedModsOnly"  # its option that keeps out the hooks modules of the plugins a person installs
 USER_SETTINGS = "settings.json"
 PROJECT_SETTINGS = (Path(".claude") / "settings.json", Path(".claude") / "settings.local.json")
 HOOK, MONITOR = "hook", "monitor"  # the routes (module note)
@@ -164,6 +171,24 @@ def managed_blocks(root: Path, environ: Mapping[str, str] | None = None) -> bool
         if not (isinstance(enabled, dict) and enabled.get(f"{PLUGIN}@{marketplace(root, environ)}") is True):
             return True
     return False
+
+
+def managed_mods_only(environ: Mapping[str, str] | None = None) -> bool:
+    """Whether the org's managed tier keeps thimble's hooks module from loading (module note): the security plugin's
+    MODS_ONLY set to anything but false, with that plugin seated (managed prependPlugins, when it is a list, names it),
+    and thimble in neither of the organization's own seats (managed prependPlugins and appendPlugins)."""
+    tier = managed(environ) or {}
+
+    def get(d: Any, key: str) -> Any:
+        return d.get(key) if isinstance(d, dict) else None
+
+    options = get(get(get(tier, "pluginConfigs"), SEC_DEFAULT), "options")
+    if not isinstance(options, dict) or MODS_ONLY not in options or options[MODS_ONLY] is False:
+        return False
+    prepend, append = tier.get("prependPlugins"), tier.get("appendPlugins")
+    seats = [str(p) for seat in (prepend, append) if isinstance(seat, list) for p in seat]
+    seated = not isinstance(prepend, list) or SEC_DEFAULT in (str(p) for p in prepend)
+    return seated and not any(p.split("@", 1)[0] == PLUGIN for p in seats)
 
 
 def managed_rules_only(environ: Mapping[str, str] | None = None) -> bool:
