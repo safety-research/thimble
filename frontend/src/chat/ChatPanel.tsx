@@ -10,7 +10,7 @@
 // (OrientStart). A view proposal waits above the composer until the analyst answers it (ProposalCard), except while the
 // product tour runs (lib/touring). A failure of main or of any of thimble's agents shows as a notice with its fix under
 // the proposal's place, above the composer of whichever chat is open, and as a row in the chat it happened in
-// (Notice.tsx). While main runs outside thimble's fence, a banner says so (UnfencedBanner).
+// (Notice.tsx); while main runs in Claude Code's Manual mode, the Manual-mode notice shows there in red.
 import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -47,7 +47,6 @@ import { countMessages, isUnread, markSeen, readSeen, type SeenMap } from './see
 import { AgentCard, stopSession, useAgentRows } from './AgentCard'
 import { OrientStart, startedChat, useOrientRun } from './OrientStart'
 import { CONTINUE_HERE_LINE, PAUSED_LINE, STOPPED_CONTINUE_LINE, continueOf, continueText, lastSession } from './subagent'
-import { UnfencedBanner } from '../shell/UnfencedBanner'
 import { ViewChip } from './ViewChip'
 import { replayHeld } from './pending'
 import { ThreadRows } from './ThreadRows'
@@ -770,7 +769,6 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
             aside={onCollapse && <Button variant="icon" size="sm" icon="panel-left" title="Collapse the chat" className="chat-head-collapse" onClick={onCollapse} />}
           />
         </header>
-        <UnfencedBanner main={main.meta} />
         <div
           className="chat-list"
           ref={listRef}

@@ -1,13 +1,11 @@
 // @vitest-environment jsdom
-// What else the browser says about thimble's agents as subagents of main: the banner while main runs outside thimble's
-// fence (src/shell/UnfencedBanner.tsx), the line on the session-gone card naming the agents main's quit stopped
-// (src/shell/SessionGone.tsx), and in a thread, where each message came from, a follow-up not passed on with Send
-// again, and the line when a typed follow-up ran on the role's current values (src/chat/Rows.tsx).
+// What else the browser says about thimble's agents as subagents of main: the line on the session-gone card naming the
+// agents main's quit stopped (src/shell/SessionGone.tsx), and in a thread, where each message came from, a follow-up not
+// passed on with Send again, and the line when a typed follow-up ran on the role's current values (src/chat/Rows.tsx).
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ChipRow, byLabel, devStarted, notPassedOn } from '../../src/chat/Rows.tsx'
 import { stoppedAgentsLine } from '../../src/shell/SessionGone.tsx'
-import { NO_SANDBOX_LINE, UNFENCED_LINE, UnfencedBanner, unfencedLine } from '../../src/shell/UnfencedBanner.tsx'
 import type { ChatMeta } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
@@ -22,20 +20,6 @@ beforeEach(() => {
 afterEach(() => {
   unmountAll()
   vi.unstubAllGlobals()
-})
-
-const attached = { session: 's', cwd: '/c', since: '' }
-
-describe('the unfenced banner', () => {
-  test('a plain claude, or a session without the sandbox, gets the warning; a fenced main and a meta that does not say get none', async () => {
-    expect(unfencedLine({ attached, launched: false, fenced: false })).toBe(UNFENCED_LINE)
-    expect(unfencedLine({ attached, launched: true, fenced: false })).toBe(NO_SANDBOX_LINE)
-    expect(unfencedLine({ attached, launched: true, fenced: true })).toBeNull()
-    expect(unfencedLine({ attached })).toBeNull()
-    expect(unfencedLine({ attached: null, launched: false })).toBeNull()
-    const el = await mount(<UnfencedBanner main={{ attached, launched: false, fenced: false }} />)
-    expect(el.querySelector('.chat-unfenced')?.textContent).toBe(UNFENCED_LINE)
-  })
 })
 
 describe('the session-gone card', () => {

@@ -1905,25 +1905,6 @@ button.model-line-part[aria-expanded='true'] {
   flex-basis: 100%;
   color: var(--text-secondary) !important;
 }
-/* the plain-claude warning at the top of the chat (shell/UnfencedBanner) */
-.chat-unfenced {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  margin: 0 8px 6px;
-  padding: 8px 10px;
-  border: 1px solid var(--status-negative);
-  border-radius: var(--radius-card);
-  background: var(--status-negative-soft);
-  color: var(--text-primary);
-  font: var(--type-body-sm);
-  overflow-wrap: anywhere;
-}
-.chat-unfenced-ico {
-  flex: none;
-  margin-top: 2px;
-  color: var(--status-negative);
-}
 /* in place of the composer: an orientation an earlier session or version ran, which takes no message here */
 .chat-continue {
   display: flex;
