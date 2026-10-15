@@ -960,7 +960,7 @@ def session(c: str | None, agent: str, *, sandbox: bool = True, program: bool = 
     """What the config asks of a session of `agent` in workspace `c` (agent_conf); `sandbox` False for a session the
     caller runs outside the sandbox, `program` for an extension's program that runs the agent or one of its tasks
     (module note, extensions' programs). The dev agent, or a program, runs outside the sandbox when its own `sandbox` is
-    "off". ConfigError when the config has an error, or requires the sandbox (`sandbox.enforce`, on by default) and the
+    "off". ConfigError when the config has an error, or requires the sandbox (`sandbox.enforce`, off by default) and the
     session of an agent whose sandbox is on would run outside it (NO_SANDBOX)."""
     conf = load(c)
     box = conf["sandbox"]
@@ -987,7 +987,7 @@ def config_files(c: str | None) -> list[Path]:
     return [global_file(), *([workspace_file(c)] if c else [])]
 
 
-LINKS_DIR = "links"  # under thimble's home: the dashboard link with its key, briefly (cli.LINKS_DIR)
+LINKS_DIR = "links"  # under thimble's home: the dashboard link, with no code, and notes for main's terminal (cli.LINKS_DIR)
 # the workspace's files and folders main and its agents may not edit, since thimble keeps its records there: the checks,
 # the chats, the extensions' state, the run record, the folder of the files the hooks trust (trusted/: subagents.json,
 # callers.jsonl, launch.json), the views' state (proposals with their attempt counts, the versions readers are served),
