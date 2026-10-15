@@ -822,19 +822,26 @@ async function main() {
       return { detail: fit.detail }
     })
 
-    await step('signin-gate', 'A browser with no cookie sees only the line naming the way in and reads nothing; a read answers it 401, and the signed-in browser 200', async () => {
+    await step('signin-gate', 'A browser with no cookie sees only the line naming the way in, is answered no read and polls nothing; a read answers it 401, and the signed-in browser 200', async () => {
       const origin = new URL(WS.url).origin
       const fresh = await browser.newContext({ viewport: SIZES[0] })
       try {
         const p = await fresh.newPage()
-        const reads = []
+        const reads = []  // `<status> <path>` of each GET of the API
+        let asked = 0  // GETs of the API (a write, such as the telemetry's, is refused 403 and never repeated)
         p.on('request', (r) => {
           const u = new URL(r.url())
-          if (u.origin === origin && u.pathname.startsWith('/api/') && r.method() === 'GET') reads.push(u.pathname)
+          if (u.origin === origin && u.pathname.startsWith('/api/') && r.method() === 'GET') asked++
+        })
+        p.on('response', (r) => {
+          const u = new URL(r.url())
+          if (u.origin === origin && u.pathname.startsWith('/api/') && r.request().method() === 'GET') reads.push(`${r.status()} ${u.pathname}`)
         })
         await p.goto(`${origin}/?ws=${encodeURIComponent(WS.name)}`)
         const line = p.locator('.signin-line')
         await line.waitFor({ timeout: ACTION_MS })
+        await p.waitForTimeout(1_000)
+        const before = asked
         await p.waitForTimeout(3_000)  // long enough for an app that polls to show it
         const s = await shot(p, 'signin-gate')
         const want = SIGN_IN_LINE.replace(/`/g, '')
@@ -842,15 +849,17 @@ async function main() {
         const whole = (await p.locator('body').innerText()).replace(/\s+/g, ' ').trim()
         check(said === want && whole === want, `the page without a cookie shows "${whole.slice(0, 200)}", not only "${want}"`)
         check((await line.locator('code').innerText()) === 'thimble up', 'the line does not draw `thimble up` as code')
-        const other = [...new Set(reads.filter((r) => r !== '/api/ui/paired' && r !== '/api/health'))]
-        check(!other.length, `the page without a cookie read ${other.join(', ')}`)
+        // /api/health and /api/ui/paired answer anyone; any other read (the page asks one to confirm) is refused
+        const answered = [...new Set(reads.filter((r) => !/^\d+ \/api\/(health|ui\/paired)$/.test(r) && !r.startsWith('401 ')))]
+        check(!answered.length, `the page without a cookie was answered ${answered.join(', ')}`)
+        check(asked === before, `the page without a cookie went on reading the API: ${asked - before} GETs in 3 s`)
         const unsigned = await fresh.request.get(`${origin}/api/workspaces`)
         const refused = await unsigned.json().catch(() => null)
         check(unsigned.status() === 401 && refused?.signin === true && typeof refused?.detail === 'string',
           `GET /api/workspaces without a cookie answered ${unsigned.status()} ${JSON.stringify(refused)?.slice(0, 160)}, not 401 {detail, signin: true}`)
         const signed = await page.request.get(`${origin}/api/workspaces`)
         check(signed.status() === 200, `GET /api/workspaces with the browser's cookie answered ${signed.status()}, not 200`)
-        return { detail: `"${said}" and nothing else, reading only ${[...new Set(reads)].join(', ') || 'nothing'}; GET /api/workspaces 401 {signin: true} without the cookie, 200 with it`, shots: [s] }
+        return { detail: `"${said}" and nothing else; its reads ${[...new Set(reads)].join(', ') || 'none'}, then none for 3 s; GET /api/workspaces 401 {signin: true} without the cookie, 200 with it`, shots: [s] }
       } finally {
         await fresh.close()
       }

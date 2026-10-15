@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 // Signing in (src/shell/SignIn.tsx, src/lib/api.ts, src/lib/sse.ts): every read of the server's data needs a signed-in
-// browser (backend hook_auth: 401 {detail, signin: true} without one). The page shows the app only to a browser that is
-// signed in (GET /ui/paired, after the claim of the link's code); any other sees one line naming the way in, and the
-// app never mounts, so nothing polls. A code the server refused with 410 starts the line with that. A read refused for
+// browser (backend hook_auth: 401 {detail, signin: true} without one), or a read credential of thimble's own, such as
+// the one its screenshot tool sends. The page shows the app only to a browser that is signed in (GET /ui/paired, after
+// the claim of the link's code) or whose reads the server answers all the same (GET /tour); any other sees one line
+// naming the way in, and the app never mounts, so nothing polls. A code the server refused with 410 starts the line with that. A read refused for
 // want of sign-in, or a stream closed while the browser is no longer signed in, brings the line back; a new link opened
 // in the tab, or the tab shown again, checks once more.
 import { act, createElement } from 'react'
@@ -13,6 +14,8 @@ const LINE = 'Open the link /thimble shows in your terminal, or run thimble up i
 const GONE = 'This link was used or has expired: '
 
 let paired: boolean | 'down' = false
+// the server answers reads without the sign-in, as it does for the screenshot tool's credential
+let reads = false
 let keyStatus = 204
 let refuse: RegExp | null = null
 let requests: string[] = []
@@ -22,6 +25,7 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 
 beforeEach(() => {
   paired = false
+  reads = false
   keyStatus = 204
   refuse = null
   requests = []
@@ -39,7 +43,8 @@ beforeEach(() => {
       if (paired === 'down') throw new TypeError('Failed to fetch')
       return json({ paired, id: paired ? 'abc123def456' : '' })
     }
-    if (refuse?.test(u)) return json({ detail: 'sign in', signin: true }, 401)
+    const read = (init.method ?? 'GET') === 'GET' && u !== '/api/health'
+    if (refuse?.test(u) || (read && paired !== true && !reads)) return json({ detail: 'sign in', signin: true }, 401)
     return json({})
   })
 })
@@ -71,7 +76,15 @@ describe('the sign-in gate', () => {
     expect(el.textContent).toBe(LINE)
     expect(el.querySelector('code')?.textContent).toBe('thimble up')
     expect(el.querySelector('.stand-in-app')).toBeNull()
-    expect(requests).toEqual(['GET /api/ui/paired'])
+    // /ui/paired says no, and one read the server guards (refused) confirms it
+    expect(requests).toEqual(['GET /api/ui/paired', 'GET /api/tour'])
+  })
+
+  test("a page whose reads the server answers although /ui/paired says no (the screenshot tool's) sees the app", async () => {
+    reads = true
+    const { el } = await gate()
+    expect(el.querySelector('.stand-in-app')?.textContent).toBe('the app')
+    expect(requests).toEqual(['GET /api/ui/paired', 'GET /api/tour'])
   })
 
   test('a link whose code the server refused with 410 says so first', async () => {
@@ -188,7 +201,7 @@ describe('the page hears that it is signed out', () => {
     expect(heard).toBe(1)
   })
 
-  test('when the stream is closed and the browser is no longer signed in, and not while the browser retries it', async () => {
+  test('when the stream is closed and the server no longer answers its reads, and not while the browser retries it', async () => {
     class FakeSource {
       static all: FakeSource[] = []
       static CLOSED = 2
@@ -229,6 +242,15 @@ describe('the page hears that it is signed out', () => {
     es2.onerror?.()
     await settle()
     again()
+    // not signed in, but the server answers its reads (the screenshot tool's page): nothing either
+    paired = false
+    reads = true
+    const third = openStream('/api/ws/logs/events', { onEvent: () => undefined })
+    const es3 = FakeSource.all[2]
+    es3.readyState = FakeSource.CLOSED
+    es3.onerror?.()
+    await settle()
+    third()
     off()
     expect(heard).toBe(1)
   })

@@ -159,12 +159,20 @@ async function learnBrowser(): Promise<Paired | null> {
   }
 }
 
-/** Whether this browser is signed in, as GET /ui/paired answered after the claim of the link's code (the read that
- * learns its id, not one more); null when the server did not answer. `again` reads it anew. For shell/SignIn. */
+/** Whether the server answers this page's reads: this browser is signed in, as GET /ui/paired answered after the claim
+ * of the link's code (the read that learns its id, not one more), or else a read the server guards answers all the
+ * same (GET /tour), as it does for a page thimble's screenshot tool loads with a read credential of its own, which
+ * /ui/paired does not count. null when the server did not answer. `again` asks /ui/paired anew. For shell/SignIn. */
 export async function signedIn(again = false): Promise<boolean | null> {
   await claimKey()
   const got = again ? await learnBrowser() : await afterClaim
-  return got ? got.paired === true : null
+  if (!got) return null
+  if (got.paired === true) return true
+  try {
+    return (await fetch(`${BASE}/tour`)).status !== 401
+  } catch {
+    return null
+  }
 }
 
 /** A link with a code opened in a tab already on its page changes only the address's hash, and loads nothing: the code
@@ -196,14 +204,11 @@ export async function signInNeeded(res: Response): Promise<boolean> {
   return true
 }
 
-/** After a stream the server closed (lib/sse): when this browser is no longer signed in, the page learns it (bus
- * `signedOut`), so it shows shell/SignIn's line rather than that the server is down. A read that fails says nothing. */
+/** After a stream the server closed (lib/sse): when the server no longer answers this page's reads (signedIn), the
+ * page learns it (bus `signedOut`), so it shows shell/SignIn's line rather than that the server is down. A server that
+ * does not answer says nothing: lib/sse's own failure stands. */
 export async function checkSignedIn(): Promise<void> {
-  try {
-    if ((await api.paired())?.paired === false) bus.emit('signedOut', {})
-  } catch {
-    /* the server does not answer: lib/sse's own failure stands */
-  }
+  if ((await signedIn(true)) === false) bus.emit('signedOut', {})
 }
 
 /** A click start's answer as the server's subagents.Answer gives it, with its refusal's `kind` and `reason` filled in
