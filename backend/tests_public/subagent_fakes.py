@@ -23,6 +23,8 @@ HINTS = {
     "writer-context-file": "READ {path} FIRST",
     "writer-context-files": "READ {n} FILES {paths} FIRST",
     "critic-brief-file": "READ {path} FIRST",
+    "critic-brief-files": "READ {n} FILES {paths} FIRST",
+    "check-task-files": "READ {n} FILES {paths} FIRST",
     "start-refused-no-module": "NO MODULE: {reason}",
     "orient-continue-earlier-session": "EARLIER SESSION: {session}",
     "orient-continue-earlier-version": "EARLIER VERSION",

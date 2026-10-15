@@ -9,16 +9,20 @@ subagents' `tmp_*` folders and the large files no card uses are deleted there (w
 
 The transcript. Raw transcripts run to megabytes of JSON and Read cuts lines at 2,000 characters, so the critique
 renders the orientation's agent transcript and its descendants' into one digest, each tool call under its ref in the
-orientation's call store (`call:<chat>/<n>`) with its input and the first lines of its result. The digest is written to
-`<workspace>/critique/<chat>/transcript.md`, where the critic reads it. `chat:<orientation chat>` resolves to the same
+orientation's call store (`call:<chat>/<n>`) with its input and the first lines of its result, and no line longer than
+CALL_CHARS (a long line of an agent's text is wrapped). The digest is written to
+`<workspace>/critique/<chat>/transcript.md`, where the critic reads it; when one Read call cannot return it whole, the
+brief gives how many of its lines one call returns whole wherever it starts (read_parts.window), so the critic pages
+through it with offset and limit and no call trips the Read tool's caps. `chat:<orientation chat>` resolves to the same
 digest, a page at a time.
 
 The brief. `critique` writes the critic's first message to `critique/<chat>/brief.md`: what to review, the drafts, the
 digest, the orientation's context, the coverage checks' findings led by the coverage line, and the analyst's
-conversation with main. It records a pending start of the critic for the orientation's run and returns the exact Agent
-call (`## critique-subagent`); the orientation makes it, ends its turn, and revises when the critic's report arrives as a
-message (F1). Meanwhile its chat is `paused: critique`. The critic's chat is a step of the orientation's chat titled
-`critique`.
+conversation with main; a brief too large for one Read call is written as brief.md, brief-2.md… (read_parts), each small
+enough that Read returns it whole, and the critic's prompt names them in order. It records a pending start of the critic
+for the orientation's run and returns the exact Agent call (`## critique-subagent`); the orientation makes it, ends its
+turn, and revises when the critic's report arrives as a message (F1). Meanwhile its chat is `paused: critique`. The
+critic's chat is a step of the orientation's chat titled `critique`.
 
 An extension's program can run the critique instead (program_critique): it gets the same digest, through one Caller
 for both, and its report is the tool's result; the orientation's end stops it.
@@ -32,7 +36,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import agents, config, orient_checks, orientation, session, subagents, tools, work_files
+from . import agents, config, orient_checks, orientation, read_parts, session, subagents, tools, work_files
 from .ledger import write_under
 
 log = logging.getLogger("thimble.critique_session")
@@ -42,7 +46,7 @@ ROLE = "critic"  # its role among subagents.TYPES
 TITLE = "critique"  # its step's title, so the browser names it `<caller>/critique`
 DIGEST_DIR = "critique"  # the one folder outside the corpus and the work folders the critic reads
 WORK_DIR = "critique-work"  # critique-work/<chat>, the critic's own folder, where it may write
-BRIEF_FILE = "brief.md"  # in critique/<chat>: the critic's first message
+BRIEF_FILE = "brief.md"  # in critique/<chat>: the critic's first message, with brief-2.md… when one file is too large
 SKILLS = ("thimble:shared",)
 OWN_TOOLS = ("read_ref", "list_cards")  # the critic's thimble tools
 
@@ -62,7 +66,15 @@ CALL_CHARS = 1_500  # chars of a call's line, under the 2,000 at which Read cuts
 
 DIGEST_CHARS = 2_000_000  # a guard against a runaway session
 
-DIGEST_PAGE_LINES = 600  # of the digest a `chat:` ref reads at once (resolve_chat)
+DIGEST_PAGE_LINES = 600  # of the digest a `chat:` ref reads at once (resolve_chat), within DIGEST_PAGE_CHARS
+
+# characters of the digest a `chat:` ref reads at once, so that one read_ref result stays whole in the session that
+# reads it. Claude Code (2.1.300) saves a tool result of more than 50,000 characters to a file and shows the model a 2KB
+# preview of it, and an MCP result its estimate (4 characters a token) puts past 12,500 tokens is counted, and past
+# 25,000 tokens (MAX_MCP_OUTPUT_TOKENS) saved to a file in its place; 40,000 characters stay under the first with room
+# for the result's other lines, and under the second at about 3 characters a token. 600 lines of CALL_CHARS were
+# 900,000.
+DIGEST_PAGE_CHARS = 40_000
 
 CONTEXT_CHARS = 400_000  # of the analyst's conversation with main in the first message
 
@@ -224,6 +236,22 @@ def agent_transcripts(c: str, chat: str, agent_id: str) -> list[tuple[str, Path]
 def _cut(s: str, n: int) -> str:
     return s if len(s) <= n else s[: n - 1].rstrip() + "…"
 
+def _wrap(line: str, width: int = CALL_CHARS - 1) -> list[str]:
+    """A line of an agent's text as lines of at most `width` characters, broken at a space where one falls in the
+    second half of a line and mid-word where none does, every word kept; a quoted line's (`> `) continuations quoted
+    too. The spaces at a break go, so no continuation starts with one and reads as a result line indented under a call
+    (INDENT). One character under CALL_CHARS leaves room for the `\\` that escapes a line starting with `#` (render)."""
+    lead = "> " if line.startswith("> ") else ""
+    out: list[str] = []
+    while len(line) > width:
+        at = line.rfind(" ", width // 2, width) + 1 or width
+        out.append(line[:at].rstrip(" ") or line[:at])
+        rest = line[at:].lstrip(" ")
+        if not rest:
+            return out
+        line = lead + rest
+    return [*out, line]
+
 def _short_values(v: Any) -> Any:
     if isinstance(v, str):
         return _cut(v, VALUE_CHARS)
@@ -256,11 +284,12 @@ def _result_lines(text: str, is_error: bool, limit: int = RESULT_LINES, root: st
         shown = [INDENT + "✗ " + shown[0][len(INDENT):]] + shown[1:] if shown else [INDENT + "✗"]
     return shown
 
-def render(title: str, path: Path, root: str = "", refs: "tuple[str, str] | None" = None) -> str:
+def render(title: str, path: Path, root: str = "", refs: "tuple[str, str] | None" = None, wrap: bool = True) -> str:
     """One transcript as the digest shows it: `# <title>`, then its brief, its text and each tool call under its ref
     with its result beneath, corpus paths relative to `root`. `refs` (workspace, orientation chat) names the call store
     numbering the refs; without it calls are numbered from 1. Reminders, ToolSearch and unreadable lines are left out.
-    """
+    A long line of an agent's text is wrapped (_wrap), or with `wrap` false kept one line, as the context engine reads
+    the digest: an entry for each line (context.orientation_part)."""
     from . import calls  # noqa: PLC0415
 
     entries: list[tuple[str, Any]] = []  # ("text", str) or ("call", tool_use_id)
@@ -315,7 +344,8 @@ def render(title: str, path: Path, root: str = "", refs: "tuple[str, str] | None
     for kind, value in entries:
         out.append("")
         if kind == "text":  # a heading an agent wrote is escaped, so `# ` begins an agent's part alone
-            out.append("\n".join("\\" + ln if ln.startswith("#") else ln for ln in value.splitlines()))
+            out.append("\n".join("\\" + ln if ln.startswith("#") else ln
+                                 for whole in value.splitlines() for ln in (_wrap(whole) if wrap else [whole])))
         else:
             out.append(lines_[value])
             out.extend(results.get(value, []))
@@ -328,19 +358,21 @@ def digest(caller: Caller) -> str:
     return digest_of(caller.c, caller.calls, caller.transcripts(), caller.cwd)
 
 
-def digest_of(c: str, chat: str, parts: "list[tuple[str, Path]]", root: str) -> str:
-    text = "\n\n".join(render(title, path, root, (c, chat)) for title, path in parts)
+def digest_of(c: str, chat: str, parts: "list[tuple[str, Path]]", root: str, wrap: bool = True) -> str:
+    text = "\n\n".join(render(title, path, root, (c, chat), wrap) for title, path in parts)
     if len(text) > DIGEST_CHARS:
         left = text[DIGEST_CHARS:].count("\n") + 1
         text = text[:DIGEST_CHARS] + "\n" + tools.hint("critique-transcript-cut", n=f"{left:,}")
     return text
 
-_digests: dict[tuple[str, str], tuple[tuple, str]] = {}  # (workspace, chat) -> (the transcripts' sizes, the digest)
+# (workspace, chat, wrap) -> (the transcripts' sizes, the digest)
+_digests: dict[tuple[str, str, bool], tuple[tuple, str]] = {}
 
 
-def chat_digest(c: str, chat: str) -> str:
+def chat_digest(c: str, chat: str, wrap: bool = True) -> str:
     """The digest of the orientation chat `chat` (its agent's transcripts, or an earlier version's session's, running or
-    not), '' when the chat is no orientation's or its transcript is gone; kept while the transcripts do not grow."""
+    not), '' when the chat is no orientation's or its transcript is gone; kept while the transcripts do not grow. With
+    `wrap` false an agent's long lines stay whole (render)."""
     meta = agents.meta_or_none(c, chat) or {}
     if meta.get("role") != orientation.ROLE or not (meta.get("agent_id") or meta.get("session")):
         return ""
@@ -351,22 +383,22 @@ def chat_digest(c: str, chat: str) -> str:
     if not parts:
         return ""
     sizes = tuple(session._size(p) for _, p in parts)
-    hit = _digests.get((c, chat))
+    hit = _digests.get((c, chat, wrap))
     if hit is not None and hit[0] == sizes:
         return hit[1]
     try:
         root = str(config.corpus_dir(c))
     except Exception:  # noqa: BLE001 — a corpus that is gone leaves absolute paths
         root = ""
-    text = digest_of(c, chat, parts, root)
-    _digests[(c, chat)] = (sizes, text)
+    text = digest_of(c, chat, parts, root, wrap)
+    _digests[(c, chat, wrap)] = (sizes, text)
     return text
 
 
 def resolve_chat(c: str, p: dict[str, Any], ref: str) -> dict[str, Any]:
-    """`chat:<orientation chat>` and `chat:<chat>#L<a>-L<b>` as refs.resolve answers: a DIGEST_PAGE_LINES page of the
-    digest, with a `## digest-more` line naming the next page's ref. RefError 404 when the chat is no orientation's or
-    its transcript is gone."""
+    """`chat:<orientation chat>` and `chat:<chat>#L<a>-L<b>` as refs.resolve answers: a page of the digest, at most
+    DIGEST_PAGE_LINES lines and DIGEST_PAGE_CHARS characters, with a `## digest-more` line naming the next page's ref
+    (_page_end). RefError 404 when the chat is no orientation's or its transcript is gone."""
     from .refs import RefError  # noqa: PLC0415 — refs imports this module lazily
 
     chat = str(p["chat_id"])
@@ -378,12 +410,24 @@ def resolve_chat(c: str, p: dict[str, Any], ref: str) -> dict[str, Any]:
     b = min(int(p.get("end_line") or (a + DIGEST_PAGE_LINES - 1)), a + DIGEST_PAGE_LINES - 1, len(lines))
     if a > len(lines):
         raise RefError(f"chat:{chat} has {len(lines)} lines", 404)
-    body = "\n".join(lines[a - 1 : b])
+    b = _page_end(lines, a, b)
+    body = _cut("\n".join(lines[a - 1 : b]), DIGEST_PAGE_CHARS)
     if b < len(lines):
         body += "\n" + tools.hint("digest-more", ref=f"chat:{chat}#L{b + 1}-L{min(b + DIGEST_PAGE_LINES, len(lines))}",
                                   total=f"{len(lines):,}")
     return {"ref": ref, "kind": "chat", "excerpt": body,
             "meta": {"chat": chat, "line": a, "end_line": b, "lines": len(lines)}}
+
+
+def _page_end(lines: list[str], a: int, b: int) -> int:
+    """The last line of a page of `lines` from line `a` (1-based) to at most `b` that keeps the page within
+    DIGEST_PAGE_CHARS characters; `a` itself when that one line is longer, which the page then cuts."""
+    size = 0
+    for n in range(a, b + 1):
+        size += len(lines[n - 1]) + (n > a)
+        if size > DIGEST_PAGE_CHARS:
+            return max(a, n - 1)
+    return b
 
 
 def work_dir(c: str, chat: str) -> Path:
@@ -430,10 +474,23 @@ async def checks_text(c: str, chat: str | None = None) -> str | None:
         log.warning("%s: the coverage checks failed (%s)", c, e)
     return None
 
+def transcript_line(path: Path) -> str:
+    """The brief's line that names the digest at `path`: Read opens it, or, when one Read call cannot return it whole,
+    how many lines it has and how many of them one call returns whole wherever it starts (read_parts.window)."""
+    try:
+        lines = path.read_text("utf-8").rstrip("\n").split("\n")
+    except (OSError, UnicodeDecodeError):
+        lines = []
+    window = read_parts.window(lines)
+    if window >= len(lines):
+        return tools.hint("critique-transcript", path=str(path))
+    return tools.hint("critique-transcript-window", path=str(path), lines=f"{len(lines):,}", window=window)
+
+
 def first_message(c: str, transcript: Path | None, context: str, checks: str | None = None) -> str:
     """The critic's first message (its brief), with `checks`, what checks_text found."""
     parts = [tools.hint("critique-task"), *drafts(c),
-             tools.hint("critique-transcript", path=str(transcript)) if transcript else tools.hint("critique-no-transcript")]
+             transcript_line(transcript) if transcript else tools.hint("critique-no-transcript")]
     if context.strip():
         parts.append(tools.hint("critique-context", context=context.strip()))
     if checks is not None:
@@ -454,7 +511,7 @@ async def brief(c: str, caller: Caller, context: str = "") -> tuple[Path | None,
 
 
 async def tool_critique(ctx: Any, args: dict[str, Any]) -> Any:
-    """The `critique` tool, the orientation's: the digest and the brief written (critique/<chat>/brief.md), a pending
+    """The `critique` tool, the orientation's: the digest and the brief written (critique/<chat>/brief.md…), a pending
     start of the critic for the orientation's run, and the exact Agent call the orientation makes, then ends its turn
     and revises when the report arrives (`## critique-subagent`). Its chat is `paused: critique` meanwhile. An
     extension's program runs the critique instead (program_critique)."""
@@ -470,12 +527,12 @@ async def tool_critique(ctx: Any, args: dict[str, Any]) -> Any:
     if subagents.running(ctx.c, key):
         return tools.err(tools.hint("critique-running"))
     _, text = await brief(ctx.c, caller, str(args.get("context") or ""))
-    path = digest_dir(ctx.c, caller.chat) / BRIEF_FILE
-    try:
-        write_under(config.workspace_dir(ctx.c), path, text + "\n")  # a kernel can write the workspace
+    try:  # a kernel can write the workspace
+        paths = read_parts.write(config.workspace_dir(ctx.c), digest_dir(ctx.c, caller.chat) / BRIEF_FILE, text + "\n")
     except OSError as e:
         return tools.err(f"critique: the brief was not written ({e})")
-    task = "\n\n".join(x for x in (tools.hint("critique-task"), tools.hint("critic-brief-file", path=str(path))) if x)
+    where = read_parts.named(paths, "critic-brief-file", "critic-brief-files")
+    task = "\n\n".join(x for x in (tools.hint("critique-task"), where) if x)
     ans = await subagents.start_job(ctx.c, ROLE, key, task, subagents.values_for(ctx.c, ROLE), subagents.TYPED,
                                     description=TITLE, chat={"title": TITLE, "parent": caller.chat,
                                                              "brief": tools.hint("critique-task")},

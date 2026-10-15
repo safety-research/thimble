@@ -1326,6 +1326,10 @@ None of {passages} is a passage of a written document. `read_ref` on a document 
 
 Your task is in {path}: the check's instructions, the document with the id of every passage, the passages to comment on and what the workspace holds about them. Read it whole first.
 
+## check-task-files
+
+Your task is in {n} files, in this order: {paths}. They hold the check's instructions, the document with the id of every passage, the passages to comment on and what the workspace holds about them. Read each one whole, in that order, first.
+
 ## add_comment-no-passage
 
 {ref} is no passage of report:{doc}. `read_ref` on report:{doc} gives each passage's id.
@@ -1422,6 +1426,10 @@ Its drafted deck is the group `{deck}`, which `list_cards` lists.
 
 Its transcript, rendered as its steps, is `{path}`, which Read opens.
 
+## critique-transcript-window
+
+Its transcript, rendered as its steps, is `{path}`, {lines} lines long. One Read call returns at most {window} of its lines whole, so read it with offset and limit, {window} lines at a time or fewer.
+
 ## critique-no-transcript
 
 Its transcript was not found, so review its analysis from its cards.
@@ -1467,6 +1475,10 @@ Change nothing in it, since thimble lets only this call through. Then end your t
 ## critic-brief-file
 
 Your brief is in {path}. Read it whole before anything else.
+
+## critic-brief-files
+
+Your brief is in {n} files, in this order: {paths}. Read each one whole, in that order, before anything else.
 
 ## critique-work-folder
 
