@@ -11,9 +11,10 @@ import shutil
 import sys
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 
-from fastapi import Body, FastAPI
+from fastapi import Body, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.datastructures import MutableHeaders
 from starlette.exceptions import HTTPException
@@ -405,6 +406,37 @@ async def _startup() -> None:
         log.exception("recording the source fingerprint failed")
 
 
+# what a new sign-in of a browser shows (signed_in), in each workspace whose main may act for it, at {at} (HH:MM)
+SIGNED_IN_NOTICE = ("A browser signed in to thimble at {at}. If it was not you, click Sign it out, or run `thimble unpair`"
+                    " in a shell to sign out every browser.")
+SIGNED_IN_LINE = "thimble: a browser signed in to thimble at {at}. If it was not you, run `thimble unpair` in a shell."
+
+
+def signed_in(ws: object, browser: str) -> None:
+    """A browser signed in with a link's code (hook_auth.claim): each workspace it may act in hears of it twice, as a
+    notice with Sign it out (sign-in:<browser>) and as a line under main's next reply in its terminal
+    (session.tell_terminal), which the browser cannot hide. The workspaces are the one the link named, when it is
+    registered, and each whose main this server follows. The browser that signed in shows no notice of its own sign-in
+    (its id, GET /api/ui/paired)."""
+    from . import notices, session  # noqa: PLC0415
+
+    name = ws if isinstance(ws, str) else ""
+    places: list[str] = []
+    if name:
+        try:
+            config.corpus_dir(name)
+            places.append(name)
+        except ValueError:
+            pass
+    places += [c for c in session.attached_workspaces() if c not in places]
+    at = datetime.now().strftime("%H:%M")
+    for c in places:
+        notices.post(c, kind="sign-in", key=f"sign-in:{browser}", text=SIGNED_IN_NOTICE.format(at=at),
+                     action={"label": "Sign it out", "do": "sign-out", "slug": browser})
+        session.tell_terminal(c, SIGNED_IN_LINE.format(at=at))
+    log.warning("a browser signed in to thimble (%s)", name or "the start page")
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="thimble", version="0.0.1", lifespan=_lifespan)
     # Every page reaches /api same-origin, from the built UI or through Vite's proxy; only a dev stack trusts the Vite
@@ -450,9 +482,37 @@ def create_app() -> FastAPI:
         return {"ok": True, "leader": os.getsid(0), "boot": config.BOOT_ID, "ui": ui_build(), **install}
 
     @app.post("/api/ui/key")
-    def ui_key(body: dict = Body(...)):
-        # the key of the page's link, traded for the cookie a change of permission modes needs (hook_auth.claim)
-        return hook_auth.claim(body.get("key"))
+    def ui_claim(request: Request, body: dict = Body(...)):  # a link's one-time code, traded for the browser's cookie
+        r, new = hook_auth.claim(body, request)
+        if new:
+            signed_in(body.get("ws"), new)
+        return r
+
+    @app.post("/api/ui/pair")  # token only (hook_auth.guarded): Stop hook, `thimble up`
+    def ui_pair(body: dict = Body(default={})) -> dict:
+        return {"code": hook_auth.mint(str(body.get("ws") or "")), "expires_s": hook_auth.PAIR_TTL_S}
+
+    @app.post("/api/ui/unpair", status_code=204)  # token only: `thimble unpair`
+    def ui_unpair() -> None:
+        hook_auth.unpair()
+
+    @app.post("/api/ui/signout")  # cookie: a sign-in notice's "Sign it out"
+    def ui_signout(body: dict = Body(...)) -> dict:
+        from . import notices, session  # noqa: PLC0415
+
+        browser = str(body.get("id") or "")
+        done = hook_auth.sign_out(browser)
+        if browser:  # its notice goes wherever it was posted, also when the browser was signed out already
+            ws = body.get("ws")
+            for c in dict.fromkeys([*([str(ws)] if ws else []), *session.attached_workspaces()]):
+                with contextlib.suppress(ValueError):
+                    config.corpus_dir(c)
+                    notices.clear(c, f"sign-in:{browser}")
+        return {"signed_out": done}
+
+    @app.get("/api/ui/paired")
+    def ui_paired(request: Request) -> dict:
+        return {"paired": hook_auth.analyst(request), "id": hook_auth.browser_id(request)}
 
     # the built UI, last: a mount at / matches everything the routes above did not
     dist = frontend_dist()

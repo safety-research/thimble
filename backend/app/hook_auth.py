@@ -23,11 +23,15 @@ HMAC-SHA256 under SESSION_KEY with the workspace and the session's key (session_
 name only with a token it signed for that workspace (session_proven). The key is a file in thimble's home that no agent
 may read (userconf.private_paths), and it outlives a restart, as the sessions a restart resumes do.
 
-A change of permission modes, and an answer to a permission request, must come from the analyst's browser (analyst).
-The dashboard link carries the `ui_key` of server.json after `#k=`; the page trades it for an HttpOnly, SameSite=Strict
-cookie named for this server's port (claim, ui_cookie), which such a request must carry. Only the analyst's terminal
-shows that link (cli.py leave_link), never the model's context, so a process that cannot read server.json, such as a
-notebook kernel in bubblewrap that the model writes cells for, can do neither.
+Everything the analyst does in thimble (a message, a click, a permission answer, a change of Settings or of a permission
+mode) must come from a signed-in browser (analyst). The dashboard link carries a one-time code after `#p=`, which the
+server makes when the link is shown (mint: main's Stop hook, `thimble up`); the page trades it for an HttpOnly,
+SameSite=Strict cookie (claim), and the code then stops working, as it does PAIR_TTL_S after it was made or when a newer
+code for the same workspace is made. A browser that is signed in already spends a code with no change. The server keeps
+only the sha256 of each code and of each browser's cookie (PAIRED_FILE, read at start and then kept in memory), so no
+file, transcript or link holds a credential that lasts. The token proves only the routes hooks, the shim, the module and
+the CLI use (guarded); with it a process can mint a code, and each new sign-in prints a line in main's terminal and posts
+a notice.
 """
 from __future__ import annotations
 
@@ -40,12 +44,14 @@ import re
 import secrets
 import tempfile
 import threading
+import time
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 
 HOOK_PATHS = frozenset({
     "/api/events/pull", "/api/events/ack", "/api/events/held", "/api/events/mode", "/api/events/permission",
@@ -58,6 +64,14 @@ SHIM_PATHS = frozenset({"/api/events"})
 MODULE_PREFIX = "/api/module/"  # the hooks module's routes (app/module_bridge.py): every one, whatever the method
 TOOL_PREFIX = "/api/tools/"  # POST /api/tools/<name>; GET /api/tools/holdings is the CLI's and stays open
 SESSION_HOOK_PATHS = re.compile(r"/api/ws/[^/]+/(sessions/permission|calls/ref)")
+# the routes only thimble's CLI posts to (cli._request, which proves the token), and the pairing routes the Stop hook and
+# `thimble up` / `thimble unpair` call
+CLI_PATHS = frozenset({
+    "/api/corpora/register", "/api/dev/announce", "/api/dev/revert", "/api/extensions/refresh", "/api/subagents/caller",
+    "/api/ui/pair", "/api/ui/unpair",
+})
+CLI_WS_PATHS = re.compile(r"/api/ws/[^/]+/(session|precached/context|archive|restore|rename)")  # POST
+CLI_WS_DELETE = re.compile(r"/api/ws/[^/]+")  # DELETE: a workspace removed (`thimble rm`)
 NONCE_HEADER = "x-thimble-nonce"
 AGENT_HEADER = "x-thimble-agent"  # the id of an agent's token (module note)
 AGENT_SCOPE = "thimble_agent"  # where a request proven with an agent's token keeps its id, in the ASGI scope's state
@@ -67,26 +81,29 @@ NONCE_MAX = 128  # characters
 SESSION_KEY = "session.key"  # in thimble's home: the secret session tokens are signed with (module note)
 SESSION_TOKEN_ENV = "THIMBLE_SESSION_TOKEN"
 _secret_lock = threading.Lock()
-UI_COOKIE = "thimble-ui"  # the cookie's name before the port was added to it (ui_cookie), which browsers still hold
+UI_COOKIE = "thimble-ui"  # the cookie's name, with this server's port after it (ui_cookie)
 UI_COOKIE_AGE_S = 400 * 24 * 3600  # the longest a browser keeps a cookie
 # The cookie the browser holds (claim) and analyst() and LocalWriteGuard check. A cookie is not bound to a port, so the
 # path is what keeps it from the browser's requests to other services on 127.0.0.1, except requests to their own /api/
 # paths. It covers the whole API, not just /api/ws/, so a browser proves itself to LocalWriteGuard on every write route.
 UI_COOKIE_PATH = "/api/"
-LEGACY_COOKIE_PATHS = ("/api/ws/", "/api/")  # where UI_COOKIE was set; claim and a moved cookie delete it there
+PAIRED_FILE = "paired.json"  # in thimble's home: [{hash, at}], the sha256 of each signed-in browser's cookie (claim)
+PAIR_TTL_S = 300  # a link's sign-in code works this long after it was made (mint), and once
+PAIR_MAX = 16  # sign-in codes alive at once, the newest kept
+PAIRED_MAX = 8  # browsers signed in at once, the newest kept
 # a click route's 403 without the analyst's cookie: every such click, not only the permission answers (live check L32)
 ANALYST_ONLY = ("only the analyst's own thimble page can do this (start, message or stop thimble's agents, build a view,"
                 " answer a permission request, change a permission mode): open it from the link shown under /thimble's"
                 " reply, or printed by `thimble up` in a shell, and click there")
 
-# A write to the local API (any method but GET/HEAD/OPTIONS) must prove it comes from thimble's own browser (the ui_key
-# cookie) or a local tool that can read server.json (the hook proof). A notebook kernel runs model-authored code with
-# the host's network and can reach this server on 127.0.0.1, but the sandbox hides server.json from it (its token and
-# ui_key), so it can produce neither and is refused. Request headers, including Origin, are forgeable by such a caller,
-# so the Origin check alone is no boundary against it (http_guard).
+# A write to the local API (any method but GET/HEAD/OPTIONS) is either a token route (guarded: the plugin, the CLI, a
+# program's grant), which needs the hook proof, or an analyst route, which needs a signed-in browser's cookie (analyst).
+# A notebook kernel can reach this server on 127.0.0.1 but holds neither.
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 WRITE_REFUSED = ("open thimble from the link shown under /thimble's reply, or printed by `thimble up` in a shell, to"
                  " make changes")
+CODE_GONE = ("This sign-in link was already used or has expired. Run `thimble up` in a shell for a new one, or type"
+             " /thimble in your terminal.")
 
 _cache: tuple[tuple[str, int, int], dict] | None = None
 # the tokens of the programs thimble runs, by id: (the whole token, whether its grant allows a method and path)
@@ -128,9 +145,12 @@ def headers(token: str, nonce: str) -> dict[str, str]:
 
 
 def guarded(method: str, path: str) -> bool:
-    """Whether a request needs the proof: a hook's, the shim's or the hooks module's route, or a tool call."""
+    """Whether a request needs the proof: a hook's, the shim's or the hooks module's route, a tool call, or a route only
+    the CLI calls (CLI_PATHS, CLI_WS_PATHS, CLI_WS_DELETE)."""
     return (path in HOOK_PATHS or path in SHIM_PATHS or path.startswith(MODULE_PREFIX)
-            or (method == "POST" and path.startswith(TOOL_PREFIX)) or SESSION_HOOK_PATHS.fullmatch(path) is not None)
+            or (method == "POST" and path.startswith(TOOL_PREFIX)) or SESSION_HOOK_PATHS.fullmatch(path) is not None
+            or (method == "POST" and (path in CLI_PATHS or CLI_WS_PATHS.fullmatch(path) is not None))
+            or (method == "DELETE" and CLI_WS_DELETE.fullmatch(path) is not None))
 
 
 def _state() -> dict:
@@ -237,42 +257,156 @@ def ui_cookie() -> str:
     return f"{UI_COOKIE}-{port}" if port.isdigit() else UI_COOKIE
 
 
-def key_cookie(cookies: dict[str, str]) -> tuple[bool, bool]:
-    """(proves, legacy): whether `cookies` hold server.json's ui_key, and whether only under UI_COOKIE, the name a
-    browser that claimed the key before the port was added to it still holds, at /api/ws/ (moved by LocalWriteGuard)."""
-    key = _field("ui_key")
-    if not key:
-        return False, False
-    name = ui_cookie()
-    if _same(cookies.get(name, ""), key):
-        return True, False
-    if name != UI_COOKIE and _same(cookies.get(UI_COOKIE, ""), key):
-        return True, True
-    return False, False
+def _sha(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8", "surrogateescape")).hexdigest()
+
+
+def _now() -> float:
+    """The clock codes expire by."""
+    return time.monotonic()
+
+
+# a live sign-in code's sha256 -> (when it expires on _now's clock, the workspace it was made for or ""); in memory
+# only, so a restart voids every code
+_codes: dict[str, tuple[float, str]] = {}
+# the signed-in browsers, [{hash, at}], as read from PAIRED_FILE in thimble's home at the first use (the home named
+# beside them) and then kept: another process's later edit of the file is not read until the next start
+_paired: list[dict[str, str]] | None = None
+_paired_home = ""
+_pair_lock = threading.Lock()
+
+
+def mint(ws: str = "") -> str:
+    """A new sign-in code for the link of workspace `ws` ("" for the start page): it works once, for PAIR_TTL_S, and a
+    newer code for the same workspace voids it. Expired codes go, and at most PAIR_MAX stay alive."""
+    code = secrets.token_urlsafe(16)
+    now = _now()
+    with _pair_lock:
+        live = sorted(((h, v) for h, v in _codes.items() if v[0] > now and v[1] != ws), key=lambda kv: kv[1][0])
+        _codes.clear()
+        _codes.update(live[-(PAIR_MAX - 1):])
+        _codes[_sha(code)] = (now + PAIR_TTL_S, ws)
+    return code
+
+
+def _spend(code: object) -> bool:
+    """Spend the code `code`: whether it was alive."""
+    if not isinstance(code, str) or not code:
+        return False
+    with _pair_lock:
+        got = _codes.pop(_sha(code), None)
+    return got is not None and got[0] > _now()
+
+
+def _paired_file() -> Path:
+    return home() / PAIRED_FILE
+
+
+def _entries() -> list[dict[str, str]]:
+    """The signed-in browsers (module note), read from PAIRED_FILE at the first use for this home."""
+    global _paired, _paired_home
+    where = str(home())
+    if _paired is not None and _paired_home == where:
+        return _paired
+    try:
+        raw = json.loads(_paired_file().read_text("utf-8"))
+    except (OSError, ValueError):
+        raw = []
+    got = [{"hash": str(e["hash"]), "at": str(e.get("at") or "")} for e in (raw if isinstance(raw, list) else [])
+           if isinstance(e, dict) and isinstance(e.get("hash"), str) and re.fullmatch(r"[0-9a-f]{64}", e["hash"])]
+    _paired, _paired_home = got[-PAIRED_MAX:], where
+    return _paired
+
+
+def _save(entries: list[dict[str, str]]) -> None:
+    """`entries` as the signed-in browsers, in memory and written through to PAIRED_FILE (whole, readable by its owner
+    alone); an empty list deletes the file."""
+    global _paired, _paired_home
+    _paired, _paired_home = entries[-PAIRED_MAX:], str(home())
+    path = _paired_file()
+    if not _paired:
+        with contextlib.suppress(FileNotFoundError):
+            path.unlink()
+        return
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{PAIRED_FILE}.")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(_paired, indent=1))
+        os.replace(tmp, path)
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+
+
+def _cookie_hash(request: Request) -> str:
+    """The sha256 of the browser's cookie, when it is one of a signed-in browser; '' otherwise."""
+    value = request.cookies.get(ui_cookie(), "")
+    if not value:
+        return ""
+    want = _sha(value)
+    with _pair_lock:
+        known = [e["hash"] for e in _entries()]
+    return want if any(_same(want, h) for h in known) else ""
 
 
 def analyst(request: Request) -> bool:
-    """Whether `request` carries the cookie claim gave for server.json's ui_key."""
-    return key_cookie(request.cookies)[0]
+    """Whether `request` comes from a signed-in browser: it carries a cookie claim gave, which no sign_out or unpair
+    took back."""
+    return bool(_cookie_hash(request))
 
 
-def set_cookie(r: Response, key: str) -> Response:
-    """`r` with this server's cookie for `key` (ui_cookie, at UI_COOKIE_PATH), and UI_COOKIE deleted where it was
-    set."""
-    r.delete_cookie(UI_COOKIE, path="/")  # and none for every path, which other services' pages would get too
-    if ui_cookie() != UI_COOKIE:
-        for path in LEGACY_COOKIE_PATHS:
-            r.delete_cookie(UI_COOKIE, path=path)
-    r.set_cookie(ui_cookie(), key, max_age=UI_COOKIE_AGE_S, path=UI_COOKIE_PATH, httponly=True, samesite="strict")
+def browser_id(request: Request) -> str:
+    """The id of the signed-in browser `request` comes from, the first 12 hex digits of its cookie's sha256; '' for a
+    request from no signed-in browser."""
+    return _cookie_hash(request)[:12]
+
+
+def set_cookie(r: Response, value: str) -> Response:
+    """`r` with this server's cookie `value` (ui_cookie, at UI_COOKIE_PATH)."""
+    r.set_cookie(ui_cookie(), value, max_age=UI_COOKIE_AGE_S, path=UI_COOKIE_PATH, httponly=True, samesite="strict")
     return r
 
 
-def claim(key: object) -> Response:
-    """The cookie for the ui_key `key` from the page's link; 403 for any other key."""
-    want = _field("ui_key")
-    if not (want and isinstance(key, str) and _same(key, want)):
-        return Response(status_code=403)
-    return set_cookie(Response(status_code=204), want)
+def _gone() -> Response:
+    return JSONResponse({"detail": CODE_GONE}, status_code=410)
+
+
+def claim(body: Any, request: Request) -> tuple[Response, str]:
+    """(the answer to a page's POST /api/ui/key with its link's code, the id of the browser it signed in or ''): a
+    signed-in browser spends the code and gets 204 and nothing more; any other browser with a live code gets 204 with a
+    new cookie, whose sha256 joins the signed-in browsers; anything else, an old {key} body included, 410 CODE_GONE."""
+    code = body.get("code") if isinstance(body, dict) else None
+    if analyst(request):
+        _spend(code)
+        return Response(status_code=204), ""
+    if not _spend(code):
+        return _gone(), ""
+    cookie = secrets.token_urlsafe(32)
+    digest = _sha(cookie)
+    at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with _pair_lock:
+        _save([*[e for e in _entries() if e["hash"] != digest], {"hash": digest, "at": at}])
+    return set_cookie(Response(status_code=204), cookie), digest[:12]
+
+
+def unpair() -> None:
+    """Sign every browser out: no cookie proves anything until a browser signs in again."""
+    with _pair_lock:
+        _save([])
+
+
+def sign_out(browser: str) -> bool:
+    """Sign out the browser whose id (browser_id) is `browser`; whether one was signed in."""
+    if not re.fullmatch(r"[0-9a-f]{12}", browser or ""):
+        return False
+    with _pair_lock:
+        held = _entries()
+        kept = [e for e in held if not e["hash"].startswith(browser)]
+        if len(kept) == len(held):
+            return False
+        _save(kept)
+    return True
 
 
 class HookAuth:
@@ -309,7 +443,7 @@ class HookAuth:
 
 def write_guarded(method: str, path: str) -> bool:
     """Whether LocalWriteGuard gates this request: a write (not GET/HEAD/OPTIONS) to the local API, but not /api/ui/key,
-    where the browser trades the ui_key for the cookie before it holds one."""
+    where the browser trades its link's code for the cookie before it holds one."""
     return method not in SAFE_METHODS and _api(path) and path != "/api/ui/key"
 
 
@@ -327,39 +461,20 @@ def hook_proof(headers: Headers, method: str = "", path: str = "") -> bool:
 
 
 class LocalWriteGuard:
-    """403 for a write to the local API that proves neither the ui_key cookie (the browser) nor the token (the plugin,
-    the CLI or a view build's check). The notebook kernel runs model-authored code with the host's network and can reach
-    this server on 127.0.0.1, but the sandbox hides server.json from it, so it can prove neither and changes nothing
-    here.
-
-    A request that proves the key only with UI_COOKIE, the name before the port was added to it, also gets this server's
-    cookie at UI_COOKIE_PATH on its answer, so a browser that claimed the key before holds it on every /api/ path from
-    its next /api/ws/ request on, without the link. Pure ASGI."""
+    """403 for a write to the local API that is no token route and comes from no signed-in browser (analyst): the token
+    proves only the routes guarded() names, which HookAuth checks, so neither a process that reads server.json nor a
+    notebook kernel that reaches 127.0.0.1 changes anything else here. Pure ASGI."""
 
     def __init__(self, app) -> None:
         self.app = app
 
     async def __call__(self, scope, receive, send) -> None:
-        if scope["type"] != "http" or not _api(scope.get("path", "")):
+        path, method = scope.get("path", ""), scope.get("method", "")
+        if (scope["type"] != "http" or not _api(path) or guarded(method, path) or not write_guarded(method, path)
+                or analyst(Request(scope))):
             await self.app(scope, receive, send)
             return
-        proves, legacy = key_cookie(Request(scope).cookies)
-        guarded = write_guarded(scope.get("method", ""), scope["path"])
-        if guarded and not proves and not hook_proof(Headers(scope=scope), scope.get("method", ""), scope["path"]):
-            body = json.dumps({"detail": WRITE_REFUSED}).encode()
-            await send({"type": "http.response.start", "status": 403,
-                        "headers": [(b"content-type", b"application/json"),
-                                    (b"content-length", str(len(body)).encode())]})
-            await send({"type": "http.response.body", "body": body})
-            return
-        if not legacy:
-            await self.app(scope, receive, send)
-            return
-        moved = [(k, v) for k, v in set_cookie(Response(), _field("ui_key")).raw_headers if k == b"set-cookie"]
-
-        async def moving(message) -> None:
-            if message["type"] == "http.response.start":
-                message["headers"] = [*message.get("headers", []), *moved]
-            await send(message)
-
-        await self.app(scope, receive, moving)
+        body = json.dumps({"detail": WRITE_REFUSED}).encode()
+        await send({"type": "http.response.start", "status": 403,
+                    "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())]})
+        await send({"type": "http.response.body", "body": body})

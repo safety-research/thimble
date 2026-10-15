@@ -258,18 +258,12 @@ class PreviewError(RuntimeError):
 
 
 def seed_home(home: Path, port: int) -> None:
-    """<home>/server.json for a server no supervisor starts: its address, a new token and the ui_key it held, in a
-    folder only its owner reads, as cli.write_state writes the live server's, so a tool that reads it can write to that
-    server (hook_auth.LocalWriteGuard). No pid, so no `thimble` command takes it for a server of its own."""
+    """<home>/server.json for a server no supervisor starts: its address and a new token, in a folder only its owner
+    reads, as cli.write_state writes the live server's, so a tool that reads it can use that server's token routes
+    (hook_auth.guarded). No pid, so no `thimble` command takes it for a server of its own."""
     config.private_dir(home)
     p = home / "server.json"
-    try:
-        held = json.loads(p.read_text("utf-8"))
-    except (OSError, ValueError):
-        held = {}
-    held = held if isinstance(held, dict) else {}
-    state = {"port": port, "api": f"http://127.0.0.1:{port}", "token": cli.new_token(),
-             "ui_key": held.get("ui_key") or cli.new_token()}
+    state = {"port": port, "api": f"http://127.0.0.1:{port}", "token": cli.new_token()}
     tmp = p.with_suffix(".json.tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as f:

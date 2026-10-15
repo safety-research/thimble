@@ -17,7 +17,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
-from conftest import UI_KEY
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
@@ -191,7 +190,7 @@ def test_a_queued_message_leaves_the_statusline_on_the_monitor_route_and_when_an
 
 def test_the_permission_hook_waits_on_main_s_meta_until_the_browser_answers(monkeypatch, tmp_path):
     monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "thome"))
-    _record_token(tmp_path / "thome", ui_key=UI_KEY)
+    _record_token(tmp_path / "thome")
     client = TestClient(__import__("app.main", fromlist=["app"]).app, base_url="http://127.0.0.1",
                         headers=_signed()[0])
     session.attach(CORPUS, SID, _cwd(), None)
@@ -207,12 +206,13 @@ def test_the_permission_hook_waits_on_main_s_meta_until_the_browser_answers(monk
                 break
             time.sleep(0.05)
         assert held and held[0]["tool"] == "Bash" and held[0]["what"] == "Create x" and '"touch x"' in held[0]["input"]
-        # an answer is the analyst's browser's alone: without the cookie the page gets for the link's key it is refused
+        # an answer is the analyst's browser's alone: without the cookie the page gets for the link's code it is refused,
+        # the hook's proof notwithstanding
         r = client.post(f"/api/ws/{CORPUS}/permission", json={"id": held[0]["id"], "allow": True})
         assert r.status_code == 403
         t.join(0.2)
         assert t.is_alive(), "the hook still waits"
-        assert client.post("/api/ui/key", json={"key": UI_KEY}).status_code == 204
+        assert client.post("/api/ui/key", json={"code": hook_auth.mint(CORPUS)}).status_code == 204
         r = client.post(f"/api/ws/{CORPUS}/permission", json={"id": held[0]["id"], "allow": True})
         assert r.status_code == 200
         t.join(10)
