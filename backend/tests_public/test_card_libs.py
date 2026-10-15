@@ -16,7 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 from test_view_libs import install, no_npm  # noqa: F401 — the fixture, used by name
 
-from app import card_libs, cli, config, notebook, render, subagents, tools, view_libs, views
+from app import card_libs, config, notebook, render, subagents, tools, view_libs, views
 
 CORPUS = "mini"
 
@@ -56,7 +56,7 @@ async def test_a_card_naming_vega_embed_gets_thimble_s_vega_builds_in_order(work
 async def test_main_installs_a_package_in_card_libs_and_add_card_bundles_it_with_its_version_and_hash(workspaces_tmp,
                                                                                                     no_npm):
     folder = config.workspace_path(CORPUS) / card_libs.FOLDER
-    assert folder in cli.write_dirs(CORPUS) and folder in subagents.write_dirs(CORPUS), "main's Bash installs there"
+    assert folder in subagents.write_dirs(CORPUS), "main's Bash installs there"
     res = await call("add_card", kind="custom", question="Graph", html="<svg id=g></svg>", libs=["tiny-graph@2"])
     assert res.is_error and "add_card: " + view_libs.NOT_INSTALLED.format(name="tiny-graph", where=folder, raw="tiny-graph@2") in res.text
     assert f"cd {folder} && npm install --ignore-scripts --cache .npm-cache tiny-graph@2" in res.text
