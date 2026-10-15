@@ -719,7 +719,7 @@ export function ChipRow({ item, ws }: { item: ChipRowT; ws: string }) {
   }
   if (item.chip === 'follow_up_ran_on') return <Note className="chat-chip-row chat-ran-on" data-chip="follow_up_ran_on" text={item.text} />
   if (item.chip === 'view_failed') {
-    // an orientation's proposal that failed through its repairs: the line, and the view's chip with ✕ and Retry
+    // a proposal nobody asked for that failed through its repairs: the line, and the view's chip with ✕ and Retry
     const target = item.ref ? parseRef(item.ref) : null
     const slug = target?.kind === 'view' ? target.slug : null
     return <Note className="chat-chip-row" data-chip="view_failed" text={item.text} chips={<ViewChip ws={ws} slug={slug} name={item.view || slug || ''} />} />

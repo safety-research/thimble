@@ -89,14 +89,14 @@ export function composerTarget(kind: ThreadKind | null, meta: Pick<ChatMeta, 'id
   return { to: 'main' }
 }
 
-/** Whether the chat is the build of a view the orientation proposed, which the analyst never asked for (backend
- * dev._view_chat marks the build of one they asked for `asked`). Pure. */
+/** Whether the chat is the build of a view the analyst never asked for, such as one an orientation from before 0.8.0
+ * proposed (backend dev._view_chat marks the build of one they asked for `asked`). Pure. */
 export function orientBuild(m: Pick<ChatMeta, 'kind' | 'role'> & { view?: string | null; asked?: boolean | null }): boolean {
   return m.kind === 'agent' && m.role === 'dev' && !!m.view && !m.asked
 }
 
-/** Whether the analyst did not start the chat themselves: the build of a view the orientation proposed (its view's
- * chip is its home) or a report check's run (the Checks pane's). Pure. */
+/** Whether the analyst did not start the chat themselves: the build of a view nobody asked for (its view's chip is its
+ * home) or a report check's run (the Checks pane's). Pure. */
 export function startedByThimble(m: Pick<ChatMeta, 'kind' | 'role'> & { view?: string | null; asked?: boolean | null }): boolean {
   return orientBuild(m) || (m.kind === 'agent' && m.role === 'check')
 }

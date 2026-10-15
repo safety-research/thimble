@@ -1,5 +1,5 @@
 // The version of a view a pane shows (backend views.VERSIONS_SUBDIR): the one it opened with, until the analyst reloads,
-// so a newer one, from a change, the review or the orientation, never reloads under them. ViewUpdated is the quiet
+// so a newer one, from a change or the review, never reloads under them. ViewUpdated is the quiet
 // notice, in the design system's style, that a newer one is there; its × hides it until a version newer than the one it
 // was dismissed for.
 import { useCallback, useEffect, useRef, useState } from 'react'

@@ -1483,8 +1483,8 @@ export function isFeedbackChip(e: ChatRecord): boolean {
 /**
  * The records of main's log its transcript leaves out, by index: Agent or Workflow calls whose agents show as their own
  * card or thread (with their results), text that repeats a summary the orientation handed back, label runs a subagent
- * or a call in main started, view chips the orientation proposed, the orientation's report writer's start and saves
- * (isOrientWriterRecord), main's look at the agent tray (list_agents), session lines (isSessionLine) and feedback chips
+ * or a call in main started, view chips of the views an orientation from before 0.8.0 proposed and the start and saves
+ * of its report pass's writer (isOrientWriterRecord), main's look at the agent tray (list_agents), session lines (isSessionLine) and feedback chips
  * (isFeedbackChip). Pure.
  */
 export function mainSkips(records: readonly ChatRecord[], ctx: MainContext): Set<number> {
