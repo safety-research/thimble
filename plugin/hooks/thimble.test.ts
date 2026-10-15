@@ -982,7 +982,7 @@ describe('the proof', () => {
   it("is app/hook_auth.py's HMAC-SHA256, short and long keys alike", async () => {
     // hmac.new(key.encode(), b'hook:abc123', hashlib.sha256).hexdigest(), as app/hook_auth.py signs
     const proofs: [string, string][] = [
-      [TOKEN, 'b3034a19a9d45af99002a6aa0066868888c4b8858bfadf9e8957b8f7507bb7de'],
+      [TOKEN, 'b3034a19a9d45af99002a6aa0066868888c4b8858bfadf9e8957b8f7507bb7de'], // gitleaks:allow  the test token's proof, not a key
       ['k'.repeat(64), 'c725b8497add2bc1fe195f4357a2698c72d2a7525d995c65c760785fbd7ade3c'],
       ['long-'.repeat(40), 'a3d9cf09189641b0ec9c3016ba36330c1ba61ed0e5b1ae0a25b4f73ebfd7b5e6'],
     ]
