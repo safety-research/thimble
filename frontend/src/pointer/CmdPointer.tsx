@@ -11,6 +11,7 @@
 // screen: a switch to another tab or a collapsed frame hides it, its text kept, and it comes back beside the element
 // when the element is back (onScreen); a send under way goes on.
 import { useEffect, useRef, useState } from 'react'
+import { agentTinted } from '../lib/agentKey'
 import { api } from '../lib/api'
 import { demoStop } from '../lib/demo'
 import { bus } from '../lib/bus'
@@ -182,7 +183,9 @@ export function CmdPointer({ ws }: { ws: string }) {
       if (t) highlight.text(t.range)
       else highlight.region(a.el)
     }
-    // on a Mac, ⌘ held alone waits HOLD_MS before the pointer shows, at what the pointer is over (`at`, its last place)
+    // on a Mac, ⌘ held alone waits HOLD_MS before the pointer shows, at what the pointer is over (`at`, its last place);
+    // while ⌘↵'s tint shows on the text being typed (lib/agentKey), the highlight waits for the mouse to move, as the
+    // tint goes then
     let wait: number | null = null
     let at: { x: number; y: number } | null = null
     const unwait = () => {
@@ -192,7 +195,7 @@ export function CmdPointer({ ws }: { ws: string }) {
     const shown = () => {
       wait = null
       on()
-      if (at && !press.current && !highlight.isHeld()) follow(document.elementFromPoint(at.x, at.y), at.x, at.y)
+      if (at && !press.current && !highlight.isHeld() && !agentTinted()) follow(document.elementFromPoint(at.x, at.y), at.x, at.y)
     }
     const onKeyDown = (e: KeyboardEvent) => {
       if (!mac) {

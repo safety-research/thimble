@@ -1,8 +1,9 @@
 // ⌘ and the shortcuts that share it on a Mac (src/pointer/CmdPointer.tsx HOLD_MS), in a real browser that reports a
 // Mac: the pointer and its highlight show only once ⌘ has been held alone for about 300 ms, at what the pointer is
 // over; a key pressed with ⌘ (⌘C, ⌘V) turns them off until ⌘ is released, and a key pressed before then keeps them
-// off; a ⌘-click opens the box at once. Off a Mac, Ctrl still shows them at once. A tester: "the command key for most
-// ppl is for copy pasting i think".
+// off; a ⌘-click opens the box at once. While the caret is in text that ⌘↵ sends, its tint shows and the highlight
+// waits for the mouse to move. Off a Mac, Ctrl still shows them at once. A tester: "the command key for most ppl is for
+// copy pasting i think".
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { afterAll, beforeAll, test } from 'vitest'
@@ -30,6 +31,7 @@ async function open(mac: boolean): Promise<Page> {
       contentType: 'text/html',
       body: `<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/bundle.css"></head><body>
         <section data-panel="canvas"><div data-anchor="card:a" style="position:absolute;left:100px;top:100px;width:300px;height:150px"></div></section>
+        <div id="zone" style="position:absolute;left:100px;top:400px"><textarea id="ta">Latency rose on the second day.</textarea></div>
         <div id="root"></div></body></html>`,
     })
   })
@@ -42,7 +44,16 @@ async function open(mac: boolean): Promise<Page> {
 beforeAll(async () => {
   script = await bundle(
     'pointer-cmd-hold',
-    [`import '${src('styles/index.css')}'`, `import { createRoot } from 'react-dom/client'`, `import { CmdPointer } from '${src('pointer/CmdPointer.tsx')}'`, `createRoot(document.getElementById('root')!).render(<CmdPointer ws="w" />)`],
+    [
+      `import '${src('styles/index.css')}'`,
+      `import { createRoot } from 'react-dom/client'`,
+      `import { CmdPointer } from '${src('pointer/CmdPointer.tsx')}'`,
+      `import { addAgentZone, tintElement } from '${src('lib/agentKey.ts')}'`,
+      // text that ⌘↵ sends while the caret is in it, tinted through data-agent as the report's blocks are
+      `const ta = () => document.getElementById('ta')`,
+      `addAgentZone(document.getElementById('zone')!, () => (document.activeElement === ta() ? { tint: tintElement(ta), send: () => {} } : null))`,
+      `createRoot(document.getElementById('root')!).render(<CmdPointer ws="w" />)`,
+    ],
     { loader: { '.css': 'css', '.woff2': 'empty', '.woff': 'empty' }, conditions: ['style'] },
   )
   css = readFileSync(script.replace(/\.js$/, '.css'), 'utf8')
@@ -104,6 +115,22 @@ test('on a Mac a ⌘-click opens the box at once', async () => {
   await page.mouse.click(250, 175)
   await page.keyboard.up('Meta')
   await page.waitForSelector('.pointer-box', { timeout: 2000 })
+  await page.close()
+})
+
+test("on a Mac, while ⌘↵'s tint shows on the text being typed, the highlight waits for the mouse to move", async () => {
+  const page = await open(true)
+  await page.focus('#ta')
+  await page.mouse.move(250, 175)
+  await page.keyboard.down('Meta')
+  await page.waitForTimeout(450)
+  const tinted = () => page.evaluate(() => document.getElementById('ta')!.hasAttribute('data-agent'))
+  assert.equal(await tinted(), true, 'the text ⌘↵ would send is tinted')
+  assert.deepEqual(await pointer(page), { on: true, hl: false }, 'the pointer is on, with no highlight over the card yet')
+  await page.mouse.move(262, 182)
+  assert.equal(await tinted(), false, 'a move takes the tint away')
+  assert.deepEqual(await pointer(page), { on: true, hl: true }, 'and the highlight follows the mouse')
+  await page.keyboard.up('Meta')
   await page.close()
 })
 

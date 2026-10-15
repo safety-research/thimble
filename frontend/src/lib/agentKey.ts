@@ -101,6 +101,9 @@ function listen(on: boolean): void {
   document[method]('focusout', clear, true)
 }
 
+/** Whether the tint shows now: ⌘ held with the caret in text that ⌘↵ would send, the mouse not moved since. */
+export const agentTinted = (): boolean => shown != null
+
 /** Registers text that ⌘↵ can send: `target` is read when ⌘ goes down or Enter is pressed with it, while the focus is
  * inside `root`. Returns the unregister. */
 export function addAgentZone(root: HTMLElement, target: () => AgentTarget | null): () => void {
