@@ -47,9 +47,9 @@ async def test_write_starts_the_writer_through_the_module_with_its_context_file(
 
 
 async def test_a_large_context_is_written_in_files_a_read_call_returns_whole(bridge, models, workspaces_tmp, monkeypatch):
-    """A context past the Read tool's caps as one file (#17) is written as files of at most read_parts.PART_CHARS,
+    """A context past the Read tool's caps as one file (#17) is written as files of at most read_parts.READ_UNITS,
     every one named in the writer's prompt, so the writer reads each whole without tripping a cap."""
-    monkeypatch.setattr(read_parts, "PART_CHARS", 1_000)
+    monkeypatch.setattr(read_parts, "READ_UNITS", 1_000)
     big = "\n".join(f"line {i} " + "x" * 90 for i in range(60))  # ~6k characters: past the (patched) cap
     monkeypatch.setattr(write_session.context, "render", lambda *a, **k: big)
     ans = await write_session.start(CORPUS, "report", route=subagents.CLICK)
@@ -66,7 +66,7 @@ async def test_a_large_context_is_written_in_files_a_read_call_returns_whole(bri
 
 
 def test_a_shrunken_context_removes_the_extra_files_of_an_earlier_one(workspaces_tmp, monkeypatch):
-    monkeypatch.setattr(read_parts, "PART_CHARS", 100)
+    monkeypatch.setattr(read_parts, "READ_UNITS", 100)
     t = {"slug": "report", "name": "Report"}
     monkeypatch.setattr(write_session.context, "render", lambda *a, **k: "x" * 350)
     assert len(write_session.write_context(CORPUS, t, "", "")) == 4
@@ -78,20 +78,20 @@ def test_a_shrunken_context_removes_the_extra_files_of_an_earlier_one(workspaces
 
 
 def test_a_full_context_file_of_dense_table_lines_is_under_the_read_file_size_cap(workspaces_tmp, monkeypatch):
-    """A context file as full as read_parts.PART_CHARS lets it be, of dense table rows with characters UTF-8 writes in
-    two to four bytes, is under the Read tool's file-size cap (256KB) on disk, and so is any part, at four bytes a
-    character at most. The tool's other cap, 25k tokens a call, cannot be measured offline, since no tokenizer runs
-    here, so PART_CHARS keeps its margin for that cap by estimate (its comment)."""
+    """A context file as full as read_parts.READ_UNITS lets it be, of dense table rows with characters UTF-8 writes in
+    two to four bytes, is under the Read tool's file-size cap (256KB) on disk, and so is any part, at three bytes a
+    UTF-16 code unit at most. The tool's other cap, 25k tokens a call, Read does not count a file of at most READ_UNITS
+    code units against (test_read_parts)."""
     cap = 256 * 1024
     row = "|{i:06d}|r{i}.jsonl#L{i}|0.{i:04d}|✓|€{i}|東京|🙂|—|\n"
-    text = "".join(row.format(i=i) for i in range(4 * read_parts.PART_CHARS // len(row)))
+    text = "".join(row.format(i=i) for i in range(4 * read_parts.READ_UNITS // len(row)))
     monkeypatch.setattr(write_session.context, "render", lambda *a, **k: text)
     paths = write_session.write_context(CORPUS, {"slug": "report", "name": "Report"}, "", "")
     assert len(paths) >= 3
-    full = max(paths, key=lambda p: len(p.read_text("utf-8")))
-    assert len(full.read_text("utf-8")) > read_parts.PART_CHARS - 2 * len(row), "as full as a part gets"
+    full = max(read_parts.units(p.read_text("utf-8")) for p in paths)
+    assert read_parts.READ_UNITS >= full > read_parts.READ_UNITS - 2 * read_parts.units(row), "as full as a part gets"
     assert all(p.stat().st_size < cap for p in paths)
-    assert 4 * read_parts.PART_CHARS < cap
+    assert 3 * read_parts.READ_UNITS < cap
 
 
 async def test_two_typed_writers_of_two_documents_are_claimed_by_their_request_ids(bridge, models, workspaces_tmp):
@@ -221,8 +221,8 @@ async def test_critique_writes_the_brief_and_gives_the_orientation_its_agent_cal
 async def test_a_large_brief_is_written_in_files_a_read_call_returns_whole(bridge, models, workspaces_tmp,
                                                                           monkeypatch):
     """The orientation's account of its analysis, which has no limit, and the coverage checks' findings can take the
-    brief past what one Read call returns: it is written as brief.md, brief-2.md… of at most read_parts.PART_CHARS
-    characters each, under the Read tool's file-size cap, and the critic's prompt names every one in order."""
+    brief past what one Read call returns: it is written as brief.md, brief-2.md… of at most read_parts.READ_UNITS
+    code units each, under the Read tool's file-size cap, and the critic's prompt names every one in order."""
     from app import orient_session
 
     found = "\n".join(f"- logs/day-{i:04d}.jsonl: no call opened it, and no card names its field `actor_id`"
@@ -244,7 +244,8 @@ async def test_a_large_brief_is_written_in_files_a_read_call_returns_whole(bridg
     text = "".join(p.read_text() for p in paths)
     assert len(text) > 100_000, "one file would fail a Read call whole"
     assert len(paths) >= 3 and all(p.is_file() for p in paths)
-    assert all(len(p.read_text()) <= read_parts.PART_CHARS and p.stat().st_size < 256 * 1024 for p in paths)
+    assert all(read_parts.units(p.read_text()) <= read_parts.READ_UNITS and p.stat().st_size < 256 * 1024
+               for p in paths)
     assert "Finding 0:" in text and "Finding 699:" in text and "day-0899" in text, "the brief whole"
     assert f"READ {len(paths)} FILES {', '.join(str(p) for p in paths)} FIRST" in inp["prompt"]
 
@@ -326,7 +327,7 @@ async def test_a_long_digest_s_brief_gives_a_window_one_read_call_returns_whole(
                                                                              monkeypatch):
     """A digest past what one Read call returns is named in the brief with its line count and a window of lines one
     call returns whole wherever it starts: every run of that many lines, with Read's line-number prefix, is at most
-    read_parts.PART_CHARS characters. A digest that fits is named as before."""
+    read_parts.READ_UNITS code units. A digest that fits is named as before."""
     from app import orient_session
 
     async def no_checks(c, chat=None):
@@ -350,10 +351,11 @@ async def test_a_long_digest_s_brief_gives_a_window_one_read_call_returns_whole(
     [line] = [x for x in brief.splitlines() if x.startswith("TRANSCRIPT ")]
     assert line.startswith(f"TRANSCRIPT {transcript} LINES 1,200 WINDOW ")
     window = int(line.rsplit(" ", 1)[1])
-    sizes = [len(r) + 1 + read_parts.LINE_PREFIX_CHARS for r in transcript.read_text().rstrip("\n").split("\n")]
+    sizes = [read_parts.units(r) + 1 + read_parts.LINE_PREFIX_CHARS
+             for r in transcript.read_text().rstrip("\n").split("\n")]
     assert 1 < window < len(sizes)
-    assert all(sum(sizes[i:i + window]) <= read_parts.PART_CHARS for i in range(len(sizes))), "safe from any line"
-    assert any(sum(sizes[i:i + window + 1]) > read_parts.PART_CHARS for i in range(len(sizes))), "and no smaller"
+    assert all(sum(sizes[i:i + window]) <= read_parts.READ_UNITS for i in range(len(sizes))), "safe from any line"
+    assert any(sum(sizes[i:i + window + 1]) > read_parts.READ_UNITS for i in range(len(sizes))), "and no smaller"
     transcript.write_text("call:c1/1 Bash ls\n")
     assert critique_session.transcript_line(transcript) == f"TRANSCRIPT {transcript} WHOLE"
 
