@@ -31,7 +31,7 @@ from urllib.parse import urlsplit, urlunsplit
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from . import cardrun, cite, config, frames, headless, prompts
+from . import cardrun, cite, config, frames, headless, prompts, read_parts
 from .kernel_thimble import CARD_MIME  # a card type's graphic, which counts as a chart and is read through its listing
 
 log = logging.getLogger("thimble.tools")
@@ -78,6 +78,13 @@ CELL_READ_LIMIT = 40_000
 WARM_REFS_MAX = 20  # an example's quoted refs a view reads, resolved off the loop before add_card or edit_card reads them
 LINE_LIMIT = 160  # chars of a takeaway / md text on a `cells` line
 CALL_ARG_CHARS = 80  # chars of one argument on a result's `$` line (call_line)
+# of one read_ref result, in UTF-16 code units (read_parts.units), so that it stays whole in the session that reads it:
+# Claude Code (2.1.300) saves a tool result of more than 50,000 characters to a file and shows the model a 2KB preview
+# of it, and an MCP result its estimate (4 characters a token) puts past 12,500 tokens is counted, and past 25,000
+# tokens (MAX_MCP_OUTPUT_TOKENS) saved to a file in its place. read_parts.READ_UNITS is under the first and never
+# counted, whatever the text; this leaves room in it for the call line (call_line, `$ read_ref ref="…"`) that comes
+# first.
+READ_REF_UNITS = read_parts.READ_UNITS - 2 * CALL_ARG_CHARS - 40
 TAKEAWAY_AUTHOR = "model"  # cell.takeaway_author for a takeaway written with edit_card (the analyst's is `analyst`)
 TAKEAWAY_WORDS = 40  # the words a takeaway may run to, which the `## takeaway-long` line of prompts/tools.md states
 ERROR_MIME = "application/vnd.thimble.error+json"
@@ -2043,7 +2050,7 @@ async def _h_read_ref(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     if ref.startswith("call:"):
         from . import calls  # noqa: PLC0415
 
-        text, bad = calls.tool_read_ref(ctx.c, ref)
+        text, bad = calls.tool_read_ref(ctx.c, ref, READ_REF_UNITS)
         return err(text) if bad else ok(text)
     return await _read_excerpt(ctx, ref)
 
