@@ -5,7 +5,9 @@
 // (`data-anchor-parts`) the innermost part is taken (parts.ts). The click also captures a picture (capture.ts), and
 // Enter posts a thread to the analyst's Claude Code session. A view's frame sends its own hover and click through the bus
 // (pointHover, pointAt, cmdHeld). Off a Mac, Ctrl does what ⌘ does (lib/platform). The send lets go of the highlight
-// and opens the thread in the chat column.
+// and opens the thread in the chat column. The box shows only while the element it is about is on screen: a switch to
+// another tab or a collapsed frame hides it, its text kept, and it comes back beside the element when the element is
+// back (onScreen); a send under way goes on.
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { demoStop } from '../lib/demo'
@@ -13,10 +15,10 @@ import { bus } from '../lib/bus'
 import { isMacPlatform, isPointKey, pointKeyHeld } from '../lib/platform'
 import { track } from '../lib/telemetry'
 import { token } from '../lib/vizTheme'
-import { anchorsInSelection, cellOf, chunkAt, isDrag, joinAnchors, lastLine, nearestAnchor, pressRoot, rangeContext, selectionTextWithin, textHitAt, type Anchor, type Box } from './anchors'
+import { anchorsInSelection, cellOf, chunkAt, isDrag, isShown, joinAnchors, lastLine, nearestAnchor, pressRoot, rangeContext, selectionTextWithin, textHitAt, toBox, type Anchor, type Box } from './anchors'
 import { capturePng, commonElement, describeElement, type ElementInfo } from './capture'
 import { cmdCursors } from './cursor'
-import { highlight } from './highlight'
+import { carried, highlight } from './highlight'
 import { partOf, type Part } from './parts'
 import { PointerBox, regionPlace, type Place } from './PointerBox'
 
@@ -38,7 +40,43 @@ interface Ask {
   place?: Place
   /** the chat shown in the chat panel when the element is in it, which the thread hangs under */
   parent?: string | null
+  /** the element the box is about, which shows the box while it is on screen, and its box when `rect` was taken */
+  el: Element
+  from: Box
+  /** how the highlight marks it again when it is back: whole, or `rect` inside it; the text of a span, `range`, while
+   * the element is the same */
+  mark: 'region' | 'box'
+  range?: Range
 }
+
+/** What an opened box is given: everything but where its element was when it opened, which openBox takes. */
+type Opened = Omit<Ask, 'from'>
+
+/**
+ * The element a box is about as it is on screen now: the element itself while it is laid out (a hidden tab's elements
+ * are not); once it has left the page, the element drawn anew in its place, with its `data-anchor`, in the panel it was
+ * in (a card a collapsed frame no longer drew, once the frame opens again); else null.
+ */
+export function onScreen(el: Element, panel: Element | null): Element | null {
+  if (el.isConnected) return isShown(el) ? el : null
+  const anchor = el.getAttribute('data-anchor')
+  if (!anchor) return null
+  const esc = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(anchor) : anchor.replace(/["\\]/g, '\\$&')
+  const root: ParentNode = panel?.isConnected ? panel : document
+  return Array.from(root.querySelectorAll(`[data-anchor="${esc}"]`)).find(isShown) ?? null
+}
+
+/** Where a region's box goes beside the element drawn anew: as beside the element, keeping the side of the element
+ * itself when the box first went beside it as a cell holding a part (a point of a chart). */
+function placeAgain(old: Place | undefined, el: Element): Place {
+  const p = regionPlace(el)
+  return old?.host && !p.host && !p.under ? { ...p, host: toBox(el.getBoundingClientRect()) } : p
+}
+
+/** how often (ms) a hidden box looks for its element again */
+const GONE_MS = 200
+const nextFrame = (fn: () => void): number => (typeof requestAnimationFrame === 'function' ? requestAnimationFrame(fn) : window.setTimeout(fn, 16))
+const cancelFrame = (id: number): void => (typeof cancelAnimationFrame === 'function' ? cancelAnimationFrame(id) : window.clearTimeout(id))
 
 /** The element's description, the start of its picture, where a box about it goes and the chat it is in, for a box
  * about `el`; `shot` is what the picture shows, the element itself unless given. */
@@ -57,10 +95,16 @@ const BESIDE: Place = { under: false }
 
 const cmdOn = () => document.body.hasAttribute('data-cmd')
 
+const near = (a: Box, b: Box): boolean => Math.abs(a.left - b.left) < 0.5 && Math.abs(a.top - b.top) < 0.5 && Math.abs(a.right - b.right) < 0.5 && Math.abs(a.bottom - b.bottom) < 0.5
+
 export function CmdPointer({ ws }: { ws: string }) {
   const [box, setBox] = useState<Ask | null>(null)
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
+  // the element the box is about is off screen: the box is not drawn, and keeps its text
+  const [hidden, setHidden] = useState(false)
+  // the panel the box's element is in, where the element drawn anew is looked for
+  const panel = useRef<Element | null>(null)
   const boxEl = useRef<HTMLElement>(null)
   // a ⌘-press in flight: where it started, the panel it started in, `dragged` once it moved far enough
   const press = useRef<{ x: number; y: number; root: ParentNode; dragged: boolean } | null>(null)
@@ -85,9 +129,11 @@ export function CmdPointer({ ws }: { ws: string }) {
       bus.emit('cmdHeld', { on: false, cursor: '' })
       highlight.clear()
     }
-    const openBox = (b: Ask) => {
+    const openBox = (b: Opened) => {
       setDraft('')
-      setBox(b)
+      setHidden(false)
+      panel.current = b.el.closest('[data-panel]')
+      setBox({ ...b, from: toBox(b.el.getBoundingClientRect()) })
     }
     const inBox = (t: EventTarget | null) => !!boxEl.current?.contains(t as Node)
     // what the pointer is on: the report block it is in, else the part of a card under it, else a word of an anchored
@@ -155,12 +201,13 @@ export function CmdPointer({ ws }: { ws: string }) {
       const text = rangeContext(anchors, selectionTextWithin(sel, p.root as Node))
       const rect = (sel && sel.rangeCount ? lastLine(sel.getRangeAt(sel.rangeCount - 1)) : null) ?? anchors[anchors.length - 1].el.getBoundingClientRect()
       // the selection's lines hold as the highlight: the box takes the focus and the native selection with it
+      const range = sel && sel.rangeCount ? sel.getRangeAt(0).cloneRange() : undefined
       highlight.retarget()
-      if (sel && sel.rangeCount) highlight.text(sel.getRangeAt(0))
+      if (range) highlight.text(range)
       highlight.hold()
       track('pointer-open', { target: anchor, detail: { range: anchors.length } })
       const held = commonElement(anchors.map((a) => a.el)) ?? anchors[0].el
-      openBox({ anchor, anchors: anchors.map((a) => a.anchor), text, rect, span: true, ...pointAt(held) })
+      openBox({ anchor, anchors: anchors.map((a) => a.anchor), text, rect, span: true, ...pointAt(held), el: held, mark: 'region', range })
     }
     const onClick = (e: MouseEvent) => {
       if (swallowClick.current) {
@@ -182,7 +229,7 @@ export function CmdPointer({ ws }: { ws: string }) {
         highlight.region(cell.el)
         highlight.hold()
         track('pointer-open', { target: cell.anchor, detail: { cell: true } })
-        openBox({ anchor: cell.anchor, anchors: [cell.anchor], text: cell.text, rect: cell.el.getBoundingClientRect(), span: false, ...pointAt(cell.el) })
+        openBox({ anchor: cell.anchor, anchors: [cell.anchor], text: cell.text, rect: cell.el.getBoundingClientRect(), span: false, ...pointAt(cell.el), el: cell.el, mark: 'region' })
         return
       }
       // a card's part is picked as a region, the card drawn around it
@@ -192,7 +239,7 @@ export function CmdPointer({ ws }: { ws: string }) {
         lightPart(part)
         highlight.hold()
         track('pointer-open', { target: part.anchor, detail: { part: true } })
-        openBox({ anchor: part.anchor, anchors: [part.anchor], text: part.text, rect: part.rect ?? part.el.getBoundingClientRect(), span: false, ...pointAt(part.el, a.el) })
+        openBox({ anchor: part.anchor, anchors: [part.anchor], text: part.text, rect: part.rect ?? part.el.getBoundingClientRect(), span: false, ...pointAt(part.el, a.el), el: a.el, mark: 'box' })
         return
       }
       const t = textHitAt(e.clientX, e.clientY, a.el)
@@ -203,8 +250,8 @@ export function CmdPointer({ ws }: { ws: string }) {
       else highlight.region(a.el)
       highlight.hold()
       track('pointer-open', { target: a.anchor })
-      const at = pointAt(a.el)
-      openBox(chunk ? { anchor: a.anchor, anchors: [a.anchor], text: chunk.text, rect: lastLine(chunk.range) ?? t!.rect, span: true, ...at } : { anchor: a.anchor, anchors: [a.anchor], text: a.text, rect: a.el.getBoundingClientRect(), span: false, ...at })
+      const at = { ...pointAt(a.el), el: a.el, mark: 'region' as const }
+      openBox(chunk ? { anchor: a.anchor, anchors: [a.anchor], text: chunk.text, rect: lastLine(chunk.range) ?? t!.rect, span: true, ...at, range: chunk.range } : { anchor: a.anchor, anchors: [a.anchor], text: a.text, rect: a.el.getBoundingClientRect(), span: false, ...at })
     }
     const onBlur = () => {
       off()
@@ -224,7 +271,7 @@ export function CmdPointer({ ws }: { ws: string }) {
       track('pointer-open', { target: anchor, detail: { frame: true } })
       // inside a viewer's frame, whose sandbox cannot be drawn from here: the element is named by its view (`view:<slug>`),
             // so the thread can reach that view's ticket
-      openBox({ anchor, anchors: [anchor], text: element ? `${element}\n${text}`.trim() : text, rect, span: false, info: { surface: 'files', element: view ? `view:${view}` : 'view', selector: '' }, image: Promise.resolve(null) })
+      openBox({ anchor, anchors: [anchor], text: element ? `${element}\n${text}`.trim() : text, rect, span: false, info: { surface: 'files', element: view ? `view:${view}` : 'view', selector: '' }, image: Promise.resolve(null), el: frame, mark: 'box' })
     })
     // a control that asks about its element (a card's Ask about this): the box opens as a ⌘-click on the element opens it
     const offAsk = bus.on('askAbout', ({ el }) => {
@@ -233,7 +280,7 @@ export function CmdPointer({ ws }: { ws: string }) {
       highlight.region(a.el)
       highlight.hold()
       track('pointer-open', { target: a.anchor, detail: { via: 'ask' } })
-      openBox({ anchor: a.anchor, anchors: [a.anchor], text: a.text, rect: a.el.getBoundingClientRect(), span: false, ...pointAt(a.el) })
+      openBox({ anchor: a.anchor, anchors: [a.anchor], text: a.text, rect: a.el.getBoundingClientRect(), span: false, ...pointAt(a.el), el: a.el, mark: 'region' })
     })
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', onKeyUp)
@@ -259,8 +306,51 @@ export function CmdPointer({ ws }: { ws: string }) {
     }
   }, [])
 
+  // the box shows while its element is on screen (onScreen). A switch to another tab or a collapsed frame takes the
+  // element away: the box is not drawn, keeps its text, and leaves the ⌘ pointer free for what is on screen. Once the
+  // element, or the element drawn anew in its place, is back, the box comes back beside it with the highlight on it. A
+  // send under way goes on, and closes the box when it is done.
+  useEffect(() => {
+    if (!box) return
+    let id = 0
+    let gone = false
+    // each frame while the box shows; while it is hidden, every GONE_MS
+    let later = 0
+    const tick = () => {
+      const now = onScreen(box.el, panel.current)
+      if (!now) {
+        if (!gone) {
+          gone = true
+          highlight.release()
+          setHidden(true)
+        }
+      } else if (gone || now !== box.el) {
+        const at = toBox(now.getBoundingClientRect())
+        const moved = carried(box.rect, box.from, at) ?? at
+        const rect = near(moved, box.rect) ? box.rect : moved
+        highlight.retarget()
+        if (box.range && now === box.el) highlight.text(box.range)
+        else if (box.mark === 'box') highlight.box(new DOMRect(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top), now)
+        else highlight.region(now)
+        highlight.hold()
+        setHidden(false)
+        const place = gone && !box.span ? placeAgain(box.place, now) : box.place
+        setBox((b) => (b === box ? { ...box, el: now, from: at, rect, place } : b))
+        return
+      }
+      if (gone) later = window.setTimeout(tick, GONE_MS)
+      else id = nextFrame(tick)
+    }
+    id = nextFrame(tick)
+    return () => {
+      cancelFrame(id)
+      window.clearTimeout(later)
+    }
+  }, [box])
+
   const close = () => {
     setBox(null)
+    setHidden(false)
     highlight.release()
   }
   const submit = async () => {
@@ -282,7 +372,7 @@ export function CmdPointer({ ws }: { ws: string }) {
   }
   return (
     <>
-      {box && (
+      {box && !hidden && (
         <PointerBox
           ref={boxEl}
           rect={box.rect}
