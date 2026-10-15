@@ -1,7 +1,9 @@
 // The figure block: a canvas card embedded in the report, with its question, `from canvas` and ×, its output at the
 // card's width (or its body, for cards with no run), and a caption edited in place. Before a card is picked the block is
-// the picker. Locked (a scene, a slide), the caption is text; `FigureView` is the same figure outside the editor.
-import { useContext, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react'
+// the picker. Locked (a scene, a slide), the caption is text; `FigureView` is the same figure outside the editor. A
+// figure follows its card: when the card changes (the stream's `cell` record) it is read again and drawn in place, and a
+// caption that still says the card's takeaway word for word takes the new takeaway.
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { BlockNoteEditor } from '@blocknote/core'
 import { CardBody } from '../canvas/bodies'
 import { useConceptDetail, useConcepts } from '../canvas/concepts'
@@ -14,6 +16,7 @@ import { CARD_MIME, chartLabels, figureKind, isVegaLite, Output, outIndex, pickM
 import { GlyphCites } from '../components/RefChip'
 import { Spinner } from '../components/Spinner'
 import { api } from '../lib/api'
+import { bus } from '../lib/bus'
 import { hhmm } from '../lib/time'
 import { parseRef } from '../lib/refs'
 import { teleport } from '../lib/teleport'
@@ -22,6 +25,9 @@ import { useReportCtx } from './context'
 import { figureCandidates, readableText } from './model'
 
 const FIGURE_TABLE_ROWS = 20
+/** How long a figure waits after its card's last change before it reads the card again, ms: the stream replays a
+ * workspace's history when it opens, and a run changes a card several times. */
+const FIGURE_REFETCH_MS = 300
 /** The narrowest a figure's chart is laid out, px. In a narrower column (a narrow window, with the margin beside the
  * text) the chart keeps this width and scrolls in its box, as a wide table does: fitted narrower, its views get too
  * small to read. */
@@ -34,11 +40,16 @@ export interface FigureBlockProps {
 
 const figureCells = new Map<string, Promise<Cell | null>>()
 
-/** The cell a figure shows, fetched once per workspace and cell: any card, with outputs (a run) or without (a note, an
- * example, a label). */
-export function fetchFigureCell(ws: string, ref: string): Promise<Cell | null> {
+/** The card id a figure's `cell` names: `card:<id>`, or the bare id. */
+const cellIdOf = (ref: string): string => {
   const p = parseRef(ref)
-  const cellId = p?.kind === 'cell' ? p.cellId : ref
+  return p?.kind === 'cell' ? p.cellId : ref
+}
+
+/** The cell a figure shows, fetched once per workspace and cell until the card changes: any card, with outputs (a run)
+ * or without (a note, an example, a label). */
+export function fetchFigureCell(ws: string, ref: string): Promise<Cell | null> {
+  const cellId = cellIdOf(ref)
   const key = `${ws}:${cellId}`
   let hit = figureCells.get(key)
   if (!hit) {
@@ -54,9 +65,23 @@ export function fetchFigureCell(ws: string, ref: string): Promise<Cell | null> {
   return hit
 }
 
-/** A card changed on the canvas (a rerun, a new takeaway): the next figure that shows it fetches it again. */
-export function forgetFigureCell(ws: string, cellId: string): void {
-  figureCells.delete(`${ws}:${cellId}`)
+// A card changed on the canvas (a rerun, a new takeaway, a delete): the next read of it fetches it again. This handler is
+// registered as the module loads, before any figure's own, so the figures that show the card share one new fetch.
+bus.on('cell', (e) => {
+  for (const key of Array.from(figureCells.keys())) if (key.endsWith(`:${e.cell}`)) figureCells.delete(key)
+})
+
+/** A card's takeaway as a caption says it: the words without citations, else its question, as a figure's caption starts
+ * (FigurePicker, ReportPage captionOf). */
+export const captionFrom = (cell: Pick<Cell, 'takeaway' | 'title'>): string => readableText(cell.takeaway || cell.title || '')
+
+/** The caption a figure takes when its card changes from `was` to `now`: the new takeaway while the caption still says
+ * the old one word for word (the analyst has not edited it), else null to keep it. A card with no takeaway yet (a rerun
+ * clears it until a new one is written) changes no caption. Pure. */
+export function followedCaption(caption: string, was: Pick<Cell, 'takeaway' | 'title'>, now: Pick<Cell, 'takeaway' | 'title'>): string | null {
+  const next = readableText(now.takeaway || '')
+  if (!next || readableText(caption) !== captionFrom(was) || next === readableText(caption)) return null
+  return next
 }
 
 function storedFigure(sections: { figures?: WriteupFigure[] }[] | undefined, id: string): WriteupFigure | undefined {
@@ -74,7 +99,7 @@ export function FigureBlock({ block, editor }: FigureBlockProps) {
     if (readOnly) return null
     return (
       <div className="wu-fig wu-fig-pick" contentEditable={false}>
-        <FigurePicker ws={ws} onPick={(c) => setProps({ cell: `card:${c.id}`, caption: block.props.caption || readableText(c.takeaway || c.title || '') })} onClose={remove} />
+        <FigurePicker ws={ws} onPick={(c) => setProps({ cell: `card:${c.id}`, caption: block.props.caption || captionFrom(c) })} onClose={remove} />
       </div>
     )
   }
@@ -116,16 +141,50 @@ function Figure({ ws, id, cellRef, caption, stored, readOnly, bare = false, onCa
   const [width, setWidth] = useState(0)
   const [cell, setCell] = useState<Cell | null | undefined>(undefined)
   const concepts = useConcepts(ws)
+  // the card as the caption last followed it, the latest caption and its setter, read by the card's updates
+  const followed = useRef<Cell | null>(null)
+  const captionNow = useRef({ caption, onCaption })
+  captionNow.current = { caption, onCaption }
 
+  // the card, read again whenever it changes, so the figure redraws in place; while the card runs again the figure keeps
+  // what it showed, and only the newest read is shown
   useEffect(() => {
     let live = true
+    let seq = 0
+    let timer: number | null = null
     setCell(undefined)
+    followed.current = null
     if (!cellRef) return
-    void fetchFigureCell(ws, cellRef).then((c) => live && setCell(c))
+    const id = cellIdOf(cellRef)
+    const read = () => {
+      const mine = ++seq
+      void fetchFigureCell(ws, cellRef).then((c) => {
+        if (!live || mine !== seq) return
+        setCell((prev) => (c && prev && c.status === 'running' ? prev : c))
+      })
+    }
+    read()
+    const off = bus.on('cell', (e) => {
+      if (e.cell !== id && e.cell !== followed.current?.id) return
+      if (timer != null) window.clearTimeout(timer)
+      timer = window.setTimeout(read, FIGURE_REFETCH_MS)
+    })
     return () => {
       live = false
+      if (timer != null) window.clearTimeout(timer)
+      off()
     }
   }, [ws, cellRef])
+  // a caption that still says the card's takeaway follows it to the new one
+  useEffect(() => {
+    if (!cell) return
+    const was = followed.current
+    const { caption: now, onCaption: set } = captionNow.current
+    const next = was && set ? followedCaption(now, was, cell) : null
+    // a card with no takeaway yet is not followed, so the caption is matched against the takeaway it had
+    if (!was || cell.takeaway || !was.takeaway) followed.current = cell
+    if (next != null) set?.(next)
+  }, [cell])
   useLayoutEffect(() => {
     const el = box
     if (!el) return
