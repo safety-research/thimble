@@ -1128,6 +1128,8 @@ def _finish(act: _Active, status: str, summary: str) -> None:
                     from . import report_types  # noqa: PLC0415
 
                     report_types.write_doc(c, investigation.MAIN, act.doc, doc)
+                    # the open pages read the document again, so the comments this run replaced leave its margin
+                    report_types._emit(c, {"type": "report", "slug": act.doc, "status": "commented"})
             now = {p["fp"] for p in ps}
             rec["seen"] = sorted({fp for fp in rec.get("seen") or [] if fp in now} | set(act.fps))
         rec["stale"] = len(to_cover(check, act.doc, doc)) if doc is not None and check.get("shown") else 0

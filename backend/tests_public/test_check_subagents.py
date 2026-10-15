@@ -195,10 +195,20 @@ async def test_a_run_s_end_supersedes_its_covered_comments_and_records_what_it_s
     subagents.run_ended(CORPUS, first.agent, "done", "Commented on 1 passage.", source="handback")
     assert _run("judgment")["comments"] == 1 and len(_run("judgment")["seen"]) == len(first.fps)
     second = await _started("judgment")
+    told = _commented()
     subagents.run_ended(CORPUS, second.agent, "done", "Commented on 0 passages.", source="handback")
     d = report_types.read_doc(CORPUS, investigation.MAIN, "report")
     [cm] = [c for c in d.get("comments") or [] if c.get("check") == "judgment"]
     assert cm["status"] != "open" and cm["superseded_by"] == second.run
+    assert _commented() == told + 1, "the open pages hear that the report's comments changed, and drop the replaced one"
+
+
+def _commented() -> int:
+    """How many records on the stream said that the report's comments changed (a page reads the report again)."""
+    path = investigation.inv_dir(CORPUS, investigation.MAIN) / "events.jsonl"
+    rows = investigation._read_jsonl(path) if path.exists() else []
+    return sum(1 for e in rows
+               if e.get("type") == "report" and e.get("slug") == "report" and e.get("status") == "commented")
 
 
 async def test_a_run_s_task_lists_its_check_s_open_comments_its_end_replaces(doc, bridge):
