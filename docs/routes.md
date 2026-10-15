@@ -12,7 +12,7 @@ Every write to the local API (any method but GET, HEAD and OPTIONS) needs a cred
 - **cookie**: a signed-in browser's cookie. Everything the analyst does in thimble.
 - **none**: a read, which needs no credential.
 
-266 routes, 152 of them writes: 36 token, 1 code, 1 agent token, 120 cookie, 108 none.
+265 routes, 151 of them writes: 36 token, 1 code, 1 agent token, 119 cookie, 108 none.
 
 | Method | Path | Module | Credential |
 |---|---|---|---|
@@ -134,7 +134,6 @@ Every write to the local API (any method but GET, HEAD and OPTIONS) needs a cred
 | GET | `/api/ws/{c}/chats/{chat_id}` | agents | none |
 | PUT | `/api/ws/{c}/chats/{chat_id}` | agents | cookie |
 | POST | `/api/ws/{c}/chats/{chat_id}/ask-again` | agents | cookie |
-| POST | `/api/ws/{c}/chats/{chat_id}/hand-back` | agents | cookie |
 | POST | `/api/ws/{c}/chats/{chat_id}/interrupt` | agents | cookie |
 | POST | `/api/ws/{c}/chats/{chat}/permission` | agent_session | cookie |
 | GET | `/api/ws/{c}/checks` | checks | none |

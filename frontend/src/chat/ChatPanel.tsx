@@ -5,12 +5,12 @@
 // thread works, a strip of its steps rides behind the composer, and every permission request waits on one card above
 // it (PermissionCard). The composer sends where threads.composerTarget says, and while the agent a thread shows (or a
 // step's parent) runs and the browser can stop it, the composer's send square is its Stop (composerStopOf). A thread
-// whose run ended without a reply offers Ask again, and one whose run ended with an answer offers Hand back to main
-// (HandBack). Main opens empty with its composer, as Claude Code does; a start that did not happen shows its card in main
-// (OrientStart). A view proposal waits above the composer until the analyst answers it (ProposalCard), except while the
-// product tour runs (lib/touring). A failure of main or of any of thimble's agents shows as a notice with its fix under
-// the proposal's place, above the composer of whichever chat is open, and as a row in the chat it happened in
-// (Notice.tsx); while main runs in Claude Code's Manual mode, the Manual-mode notice shows there in red.
+// whose run ended without a reply offers Ask again. Main opens empty with its composer, as Claude Code does; a start that
+// did not happen shows its card in main (OrientStart). A view proposal waits above the composer until the analyst
+// answers it (ProposalCard), except while the product tour runs (lib/touring). A failure of main or of any of thimble's
+// agents shows as a notice with its fix under the proposal's place, above the composer of whichever chat is open, and
+// as a row in the chat it happened in (Notice.tsx); while main runs in Claude Code's Manual mode, the Manual-mode
+// notice shows there in red.
 import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -38,7 +38,6 @@ import { Composer } from './Composer'
 import { mainEffort, mainFast, NEXT_LAUNCH } from './ModelLine'
 import { API_ERROR_KIND, apiRetry, branchIndex, capacityNote, foldRecords, landedTexts, madeBy, mainSkips, orientRuns, orientSummaries, orientWriters, QUIET_RE, sessionSteps, stepEnded, toolSteps, withApiErrors, withBranches, withCallNumbers, type MainContext, type Row, type ShotRow } from './model'
 import { Holds, useRetryText } from './Holds'
-import { HandBack } from './HandBack'
 import { TicketStatus, useTicket } from './TicketStatus'
 import { Divider, Note, ThreadChip, ThreadsContext } from './Notes'
 import { RefText } from './markdown'
@@ -865,8 +864,7 @@ export function threadRetry(rows: readonly Row[], running: boolean, ask: () => P
 }
 
 /** A fork of main: main up to the branch, the line that says when, what it was asked about, then its own rows, and Ask
- * again under a run that ended without a reply, or Retry on an API error that ended it; under a run that ended with an
- * answer, Hand back to main (HandBack). */
+ * again under a run that ended without a reply, or Retry on an API error that ended it. */
 export function ThreadView({ ws, meta, chat, main, skip, branches, detached }: { ws: string; meta: ChatMeta; chat: ChatState; main: ChatState; skip: ReadonlySet<number>; branches: { id: string; created_at: string; anchors: string[] }[]; detached: boolean }) {
   const cut = useMemo(() => branchIndex(main.records, meta.created_at), [main.records, meta.created_at])
   const inherited = useMemo(() => {
@@ -898,7 +896,6 @@ export function ThreadView({ ws, meta, chat, main, skip, branches, detached }: {
       )}
       <ThreadRows rows={chat.rows} edits={edits} ws={ws} chat={meta.id} streaming={chat.streaming} retry={threadRetry(chat.rows, chat.running, () => api.askAgain(ws, meta.id).then(() => chat.reload()))} />
       {canAskAgain(chat.records, chat.running) && <AskAgain ws={ws} id={meta.id} detached={detached} onAsked={chat.reload} />}
-      {!chat.running && <HandBack ws={ws} id={meta.id} state={meta.hand_back} detached={detached} onDone={chat.reload} />}
     </>
   )
 }
