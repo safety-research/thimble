@@ -1076,7 +1076,7 @@ def mark_left() -> list[str]:
                 agents.finish_agent(c, chat, "stopped", LEFT_LINE)
                 rec = orientation.read_run(c) or {}
                 if rec.get("status") == "running" and (rec.get("chats") or {}).get(orientation.ROLE) == chat:
-                    orientation.finished(c, chat, "stopped", LEFT_LINE, report=False)
+                    orientation.finished(c, chat, "stopped", LEFT_LINE)
                 closed.append(f"{c}/{chat}")
             except Exception:  # noqa: BLE001 — never fails the start
                 log.exception("%s: program chat %s, left running, was not closed", c, chat)

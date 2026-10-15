@@ -256,15 +256,14 @@ def request(c: str, brief: str, **fields: Any) -> dict[str, Any]:
 
 
 @_run_change
-def started(c: str, chat_id: str, *, session: str | None = None, pid: int | None = None,
-            passes: "list[str] | None" = None, agent_id: str | None = None, route: str | None = None) -> dict[str, Any]:
+def started(c: str, chat_id: str, *, session: str | None = None, pid: int | None = None, agent_id: str | None = None,
+            route: str | None = None) -> dict[str, Any]:
     """The orientation's agent (or program) started: a starting or requested run becomes running with its chat, as
-    run 0, its agent id and route, and an orientation no start asked for opens a run of its own. `passes` given win
-    over the record's; without them a requested run keeps its own and a new run has the deck."""
+    run 0, its agent id and route, and an orientation no start asked for opens a run of its own. A requested run keeps
+    its passes, and a new run has the deck."""
     run = read_run(c)
     asked = bool(run and run.get("status") in ("requested", "starting"))
-    if passes is None:
-        passes = list((run or {}).get("passes") or [DECK]) if asked else [DECK]
+    passes = list((run or {}).get("passes") or [DECK]) if asked else [DECK]
     groups = ensure_groups(c, deck=True) if DECK in passes else {}
     extra = {k: v for k, v in (("session", session), ("pid", pid), ("agent_id", agent_id), ("route", route)) if v is not None}
     fresh = {"run": 0, "followups": [], "coverage": None, "coverage_told": False}
@@ -285,12 +284,11 @@ def started(c: str, chat_id: str, *, session: str | None = None, pid: int | None
 
 
 @_run_change
-def finished(c: str, chat_id: str, status: str, result: str | None, report: bool = False) -> dict[str, Any] | None:
+def finished(c: str, chat_id: str, status: str, result: str | None) -> dict[str, Any] | None:
     """The first run stopped: its last message is kept as summary.md, the run ends with the session's status, and main's
     chat gets the orientation's landing (an `artifact` chip naming its chat), with the deck when it has cards, and for a
     failed run always, since the landing is where main's chat says it failed and why. A notification for another
-    session, or for a run already ended, changes nothing. `report` changes nothing either: since 0.8.0 a report is
-    written only when the analyst asks for one, and harness.py still passes it."""
+    session, or for a run already ended, changes nothing."""
     run = read_run(c)
     if not run or (run.get("chats") or {}).get(ROLE) != chat_id or run.get("status") not in RUNNING:
         return None
