@@ -47,7 +47,8 @@ request), except OPEN_READS. Two narrow credentials stand in where neither can b
 good for SHOT_TTL_S on GET and HEAD alone, kept in memory as its sha256. A view's frame is sandboxed with an opaque
 origin, which the browser sends no SameSite=Strict cookie from, so the one URL it loads, the view's media route, carries
 a key in its path (media_key: an HMAC under SESSION_KEY of the workspace and the view), good for that view's media
-alone.
+alone. What let a read through is asked again before each later part of its answer goes out, so a browser signed out,
+or a shot whose token ended, gets nothing more on an event stream it opened before (read_still_allowed).
 """
 from __future__ import annotations
 
@@ -651,30 +652,80 @@ class LocalWriteGuard:
         await send({"type": "http.response.body", "body": body})
 
 
-def read_allowed(scope: dict) -> bool:
-    """Whether a gated read may go on: it comes from a signed-in browser (analyst), carries a hook proof (the plugin, the
-    CLI; an agent's token proves no read, as its grant allows none), a live shot token (shot_proven), or is a view's
-    media route with that view's key (media_proven)."""
+def read_still_allowed(scope: dict) -> Callable[[], bool] | None:
+    """Whether a gated read may go on, as a check that asks again: None when nothing lets it through; otherwise a
+    function that answers whether what let it through still does. That is a signed-in browser (analyst) until it is
+    signed out (sign_out, unpair), a live shot token (shot_proven) until it expires or its shot ends, a view's media
+    route with that view's key (media_proven) while the key holds, and a hook proof (the plugin, the CLI; an agent's
+    token proves no read, as its grant allows none) always, since the server's next start ends the request anyway."""
     path, method = scope.get("path", ""), scope.get("method", "")
     h = Headers(scope=scope)
-    return (analyst(Request(scope)) or proven(scope) or shot_proven(h, method)
-            or (method in READ_METHODS and media_proven(path)))
+    digest = _cookie_hash(Request(scope))
+    if digest:
+        return lambda: _signed_in(digest)
+    if proven(scope):
+        return lambda: True
+    if shot_proven(h, method):
+        return lambda: shot_proven(h, method)
+    if method in READ_METHODS and media_proven(path):
+        return lambda: media_proven(path)
+    return None
+
+
+def read_allowed(scope: dict) -> bool:
+    """Whether a gated read may go on (read_still_allowed)."""
+    return read_still_allowed(scope) is not None
+
+
+def _signed_in(digest: str) -> bool:
+    """Whether the browser whose cookie's sha256 is `digest` is still signed in."""
+    with _pair_lock:
+        return any(_same(digest, e["hash"]) for e in _entries())
+
+
+def _while(still: Callable[[], bool], receive, send):
+    """(receive, send) for a read that may go on while `still()` holds: each part of the answer's body goes out only
+    while it does, and once it does not the answer ends there, empty, and the app hears that the client left. So an event
+    stream a browser opened sends nothing once that browser is signed out, nor a shot's once its token ends."""
+    ended = False
+
+    async def receive_until() -> dict:
+        if ended:
+            return {"type": "http.disconnect"}
+        return await receive()
+
+    async def send_while(message) -> None:
+        nonlocal ended
+        if ended:
+            return
+        if message["type"] == "http.response.body" and not still():
+            ended = True
+            await send({"type": "http.response.body", "body": b"", "more_body": False})
+            return
+        await send(message)
+
+    return receive_until, send_while
 
 
 class LocalReadGuard:
     """401 for a read of the local API (read_guarded) that read_allowed refuses, so another account on the computer, or
     a notebook kernel, that reaches 127.0.0.1 reads none of the analyst's chats, cards, reports or files through
     thimble. The body is {detail: SIGN_IN_NEEDED, signin: true}, which tells the page to show its sign-in line; a HEAD
-    gets no body. A token route is HookAuth's to answer. Pure ASGI."""
+    gets no body. A token route is HookAuth's to answer. A read it lets through stops at the first part of its answer
+    sent after what let it through no longer does (read_still_allowed, _while): an event stream, which never ends by
+    itself, ends at its next event or ping once its browser is signed out. Pure ASGI."""
 
     def __init__(self, app) -> None:
         self.app = app
 
     async def __call__(self, scope, receive, send) -> None:
         path, method = scope.get("path", ""), scope.get("method", "")
-        if (scope["type"] != "http" or not read_guarded(method, path) or guarded(method, path)
-                or read_allowed(scope)):
+        if scope["type"] != "http" or not read_guarded(method, path) or guarded(method, path):
             await self.app(scope, receive, send)
+            return
+        still = read_still_allowed(scope)
+        if still is not None:
+            await self.app(scope, *_while(still, receive, send))
             return
         body = b"" if method == "HEAD" else json.dumps({"detail": SIGN_IN_NEEDED, "signin": True}).encode()
         headers = [(b"content-length", str(len(body)).encode())]

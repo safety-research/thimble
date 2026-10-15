@@ -281,3 +281,91 @@ async def test_a_ticket_s_shot_hands_the_server_s_token_to_its_run(monkeypatch, 
     assert calls[-1] == ("http://127.0.0.1:5301/?ws=mini", {"own_origin": False, "read_token": "token-of-http://127.0.0.1:8301"})
     assert await dev._take_shot(t, Log(), "after", "http://127.0.0.1:5301", api="http://127.0.0.1:9", home=tmp_path)
     assert calls[-1][1]["read_token"] is None, "a server with no token for it: shot without one"
+
+
+# ---- what a read was let through by, asked again while its answer streams
+
+
+@pytest.fixture()
+def served(monkeypatch):
+    """thimble's app on a free port in a thread (a real server, since an event stream never ends); its base URL.
+    THIMBLE_PORT names the port, as the supervisor's does, so the cookie's name is that server's."""
+    import socket  # noqa: PLC0415
+    import threading  # noqa: PLC0415
+    import time  # noqa: PLC0415
+
+    import uvicorn  # noqa: PLC0415
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    monkeypatch.setenv("THIMBLE_PORT", str(port))
+    monkeypatch.delenv("THIMBLE_DEV", raising=False)
+    server = uvicorn.Server(uvicorn.Config(main.create_app(), host="127.0.0.1", port=port, log_level="warning",
+                                           lifespan="off"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    end = time.monotonic() + 15
+    while not server.started and time.monotonic() < end:
+        time.sleep(0.05)
+    assert server.started
+    yield f"http://127.0.0.1:{port}"
+    server.should_exit = True
+    thread.join(10)
+
+
+@pytest.mark.real_read_guard
+def test_an_event_stream_a_browser_opened_ends_once_that_browser_is_signed_out(served, workspaces_tmp, monkeypatch):
+    """A workspace's event stream, opened with a browser's cookie, stops at the first event after that browser is signed
+    out (a sign-in notice's "Sign it out") or every browser is (`thimble unpair`), as INSTALL.md tells the analyst to do
+    for a sign-in that was not theirs: the event never reaches the stream, which ends, and the cookie reads nothing
+    more. Before that, events arrive as they are written."""
+    import threading  # noqa: PLC0415
+    import time  # noqa: PLC0415
+
+    import httpx  # noqa: PLC0415
+    from conftest import UI_COOKIE_VALUE, _record_paired  # noqa: PLC0415
+
+    from app import agents, investigation  # noqa: PLC0415
+
+    monkeypatch.setattr(investigation, "EVENTS_POLL_S", 0.2)  # how often the stream tails the file for new events
+    agents.ensure_main("mini")
+    log = investigation.inv_dir("mini", investigation.MAIN) / "events.jsonl"
+    seq = [100]
+
+    def write(text: str) -> None:  # an event another process wrote, as the stream's tail finds one
+        seq[0] += 1
+        with log.open("a", encoding="utf-8") as f:
+            f.write(json.dumps({"seq": seq[0], "type": "probe", "text": text}) + "\n")
+
+    def until(ok, s: float = 10.0) -> bool:
+        end = time.monotonic() + s
+        while not ok() and time.monotonic() < end:
+            time.sleep(0.05)
+        return ok()
+
+    other = "a-second-browser-s-cookie-value-for-the-test"
+    for cookie, revoke in ((UI_COOKIE_VALUE, lambda: hook_auth.sign_out(hook_auth._sha(UI_COOKIE_VALUE)[:12])),
+                           (other, hook_auth.unpair)):
+        _record_paired(cookie)
+        jar = {hook_auth.ui_cookie(): cookie}
+        got: list[str] = []
+        ended = threading.Event()
+
+        def read() -> None:
+            with httpx.Client(cookies=jar, timeout=30) as c, c.stream("GET", f"{served}/api/ws/mini/events") as r:
+                got.append(str(r.status_code))
+                for line in r.iter_lines():
+                    got.append(line)
+            ended.set()
+
+        threading.Thread(target=read, daemon=True).start()
+        assert until(lambda: any("live" in x for x in got)), got
+        assert got[0] == "200"
+        write(f"before {cookie}")
+        assert until(lambda: any(f"before {cookie}" in x for x in got)), "an event reaches the open stream"
+        revoke()
+        write(f"after {cookie}")
+        assert ended.wait(10), "the stream ended"
+        assert not any(f"after {cookie}" in x for x in got), "the event written after the sign-out never arrived"
+        assert httpx.get(f"{served}/api/ws/mini/canvas", cookies=jar).status_code == 401
