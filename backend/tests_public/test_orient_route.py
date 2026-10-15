@@ -91,22 +91,18 @@ async def test_a_second_start_while_one_starts_or_runs_starts_nothing(bridge, mo
     assert second.is_error and second.text.endswith(tools.hint("start_orientation-running"))
 
 
-@pytest.mark.parametrize("why", ["no-module", "not-launched", "plan"])
-async def test_start_orientation_is_refused_without_the_module_in_plan_mode_or_unlaunched(bridge, models,
-                                                                                        workspaces_tmp, monkeypatch,
-                                                                                        why):
-    from app import cc_plugin, session
+@pytest.mark.parametrize("why", ["no-module", "plan"])
+async def test_start_orientation_is_refused_without_the_module_or_in_plan_mode(bridge, models, workspaces_tmp,
+                                                                              monkeypatch, why):
+    from app import session
 
     if why == "no-module":
         bridge.is_live, bridge.reason = False, "Claude Code did not load thimble's hooks module"
-    elif why == "not-launched":
-        monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: False, raising=False)
     else:
         monkeypatch.setattr(session, "main_mode", lambda c: "plan")
     res = await tools.call(CORPUS, "start_orientation", {"brief": ""})
     assert res.is_error
-    want = {"no-module": "NO MODULE: Claude Code did not load thimble's hooks module", "not-launched": "NOT LAUNCHED",
-            "plan": "PLAN MODE"}[why]
+    want = {"no-module": "NO MODULE: Claude Code did not load thimble's hooks module", "plan": "PLAN MODE"}[why]
     assert res.text.endswith(want), res.text
     assert orientation.read_run(CORPUS) is None, "the analyst typed it and reads main's answer"
 

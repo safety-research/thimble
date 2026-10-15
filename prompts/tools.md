@@ -1238,6 +1238,10 @@ The analyst asked for this in the side thread {thread}, which they opened on thi
 
 thimble's agents can't start in this session: Claude Code's hooks modules are off ({reason}). Main, its threads, cards and labels still work. Once modules are on, quit and run `thimble -c` in this folder.
 
+## start-refused-connecting
+
+thimble's plugin is still connecting to this session, so thimble's agents can't start yet. Try again in a few seconds.
+
 ## module-started-note
 
 thimble: the analyst started thimble's {role} for {what} {how}, as your subagent {agent}. Its report goes to the analyst in thimble, so when it hands back, reply in one short line, and do nothing about it unless the analyst asks.
