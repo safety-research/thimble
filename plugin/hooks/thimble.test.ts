@@ -534,6 +534,20 @@ describe('turning on with /thimble where skill.prompt passes over the plugin (a 
     expect(server.hellos.length).toBe(2)
   })
 
+  it('takes a marker the session had when it started (claude -c, --resume) as an earlier /thimble: only a new one turns it on', async () => {
+    const e = plain()
+    marked(e) // /thimble ran in an earlier run of this session
+    await e.start()
+    await e.complete(undefined)
+    await e.complete(undefined)
+    await new Promise(r => setTimeout(r, 30))
+    expect(e.$.http.fetch).not.toHaveBeenCalled()
+    marked(e)
+    await e.complete(undefined)
+    await until(() => e.server.polls.length > 0)
+    expect(e.server.hellos.length).toBe(1)
+  })
+
   it('says hello once for a /thimble that skill.prompt and the marker both report (no managed organization)', async () => {
     const server = new Server()
     server.helloStatus = () => 404 // a folder /thimble did not open
@@ -565,13 +579,13 @@ describe('turning on with /thimble where skill.prompt passes over the plugin (a 
     })
   }
 
-  it('looks only at the marker’s file system entry, once per turn of main’s, in a session the launcher did not start', async () => {
+  it('looks only at the marker’s file system entry, at session.start and once per turn of main’s, in a session the launcher did not start', async () => {
     const e = plain()
     await e.start()
     await e.complete(undefined)
     await e.complete('agent-1')
     expect(e.$.fs.read).not.toHaveBeenCalled()
-    expect(e.$.fs.stat.mock.calls.map(([p]) => p)).toEqual([MARKER])
+    expect(e.$.fs.stat.mock.calls.map(([p]) => p)).toEqual([MARKER, MARKER])
     const launched = engine({ serverUp: false })
     await launched.start()
     launched.$.fs.stat.mockClear()
@@ -909,8 +923,10 @@ describe('the file guard', () => {
     expect(await e.tool({ tool: 'Read', file_path: `${CWD}/board.jsonl` })).toEqual(ran)
     const idle = engine({ env: { THIMBLE_LAUNCHED: undefined } })
     await idle.start()
+    const marker = [`${T}/up/${MAIN}.active`] // session.start looks at /thimble's marker, and at nothing else
+    expect(idle.$.fs.stat.mock.calls.map(([p]) => p)).toEqual(marker)
     expect(await idle.tool({ tool: 'Read', file_path: `${T}/server.json` })).toEqual(ran)
-    expect(idle.$.fs.stat).not.toHaveBeenCalled()
+    expect(idle.$.fs.stat.mock.calls.map(([p]) => p)).toEqual(marker)
   })
 
   it('refuses a link to a token file, comparing where the path lands', async () => {

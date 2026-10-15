@@ -11,12 +11,14 @@
 // each /thimble: where an organization manages Claude Code (managed settings on the machine, or a Team or Enterprise
 // account), Claude Code seats its built-in security plugin, and skill.prompt passes over the plugins a person installs,
 // while turn.complete still reaches them. Whichever of the two comes first stands for that /thimble; a marker the
-// module has seen (its mtime and size) never turns it on again. In a session the launcher did not start, it waits for
-// that server at most ACTIVATE_WAIT_MS after /thimble, then says hello once at the end of each of main's turns; a
-// refused hello, or a folder the server does not know, leaves it idle until the next /thimble. Anywhere else it
-// registers nothing and fetches nothing, and looks at nothing but that marker's file system entry once per turn of
-// main's. It starts no process: $.http.fetch only, every request proving the token of server.json and every answer
-// proving it back (app/hook_auth.py), so a process on the port can neither hand it requests nor read them.
+// module has seen (its mtime and size) never turns it on again, and neither does one the session already had when it
+// started, from a /thimble of an earlier run of the session (`claude -c` or --resume, then /thimble again, as the
+// skill.prompt route needs). In a session the launcher did not start, it waits for that server at most
+// ACTIVATE_WAIT_MS after /thimble, then says hello once at the end of each of main's turns; a refused hello, or a folder
+// the server does not know, leaves it idle until the next /thimble. Anywhere else it registers nothing and fetches
+// nothing, and looks at nothing but that marker's file system entry at session.start and once per turn of main's. It
+// starts no process: $.http.fetch only, every request proving the token of server.json and every answer proving it
+// back (app/hook_auth.py), so a process on the port can neither hand it requests nor read them.
 //
 // The file guard (tool.call), from the moment the scope check passes: it refuses a call of a file tool (Read, Edit,
 // Write, MultiEdit, NotebookEdit, Grep, Glob) on thimble's token files, a call of an edit tool on thimble's records or,
@@ -939,15 +941,20 @@ function namesPrivate(m: State, e: Json): boolean {
 
 const moduleOn = async ($: Engine): Promise<boolean> => OFF.has(((await $.env.get('THIMBLE_NO_MODULE')) ?? '').trim().toLowerCase())
 
+/** The stamp of this session's marker, <home>/up/<session>.active as app/cli.py hook_marker_path names it; '' for none. */
+async function markerStamp($: Engine): Promise<string> {
+  const name = (await $.session.id()).replace(/[^A-Za-z0-9_-]/g, '')
+  return name ? await stamp($, `${await thimbleHome($)}/up/${name}.active`) : ''
+}
+
 /** At the end of main's turn: whether /thimble's hook left a marker for this session that the module has not seen
- *  (module note), <home>/up/<session>.active as app/cli.py hook_marker_path names it, and no skill.prompt reported the
- *  same /thimble in this turn. With THIMBLE_NO_MODULE it looks at nothing. */
+ *  (module note), and no skill.prompt reported the same /thimble in this turn. With THIMBLE_NO_MODULE it looks at
+ *  nothing. */
 async function expanded($: Engine, m: State): Promise<boolean> {
   const reported = m.expanded
   m.expanded = false
   if (!(await moduleOn($))) return false
-  const name = (await $.session.id()).replace(/[^A-Za-z0-9_-]/g, '')
-  const seen = name ? await stamp($, `${await thimbleHome($)}/up/${name}.active`) : ''
+  const seen = await markerStamp($)
   if (!seen || seen === m.marker) return false
   m.marker = seen
   return !reported
@@ -963,7 +970,12 @@ export const register: Register = on => {
     // the scope check, before any fetch or registration: interactive first, then launched by thimble (else idle until
     // /thimble, skill.prompt), module not off
     if (!e.isInteractive) return r
-    if (!(await $.env.get('THIMBLE_LAUNCHED'))) return r
+    if (!(await $.env.get('THIMBLE_LAUNCHED'))) {
+      // a marker the session already has is a /thimble of an earlier run of it (claude -c, --resume), which a resumed
+      // session types again, as for skill.prompt: it counts as seen (module note)
+      if (await moduleOn($)) m.marker = await markerStamp($)
+      return r
+    }
     if (!(await moduleOn($))) return r
     m.launched = true
     // terminal mode: THIMBLE_WS's launch.json says so (module note); browser mode otherwise
