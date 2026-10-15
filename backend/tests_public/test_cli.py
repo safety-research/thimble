@@ -869,10 +869,17 @@ def test_real_up_starts_a_detached_server_idempotently_and_stop_ends_it(home, da
         assert cli.pid_alive(pid) and st["port"] == port and st["env"]["data_dir"] == str(data)
         assert os.getsid(pid) == pid, "uvicorn is its own session leader"
         assert int(Path(f"/proc/{pid}/stat").read_text().split()[3]) != os.getpid()
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=5) as r:
+        from app import hook_auth  # noqa: PLC0415
+
+        proven = urllib.request.Request(f"http://127.0.0.1:{port}/api/health",
+                                        headers=hook_auth.headers(st["token"], "n0nce-of-the-test"))
+        with urllib.request.urlopen(proven, timeout=5) as r:
             health = json.loads(r.read())
             assert {k: health[k] for k in ("ok", "leader")} == {"ok": True, "leader": pid}, "the server names the pid server.json records"
             assert len(str(health.get("boot") or "")) == 8, "and a boot token new for each start"
+            assert health["home"] == str(home.resolve()), "and its home, to the token's holder"
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=5) as r:
+            assert set(json.loads(r.read())) == {"ok", "boot", "ui"}, "no pid or path to a caller without the token"
         t1 = time.monotonic()
         out2 = subprocess.run(cmd, cwd=BACKEND, env=env, capture_output=True, text=True, timeout=30)
         assert out2.stdout.splitlines() == lines and json.loads((home / "server.json").read_text())["pid"] == pid

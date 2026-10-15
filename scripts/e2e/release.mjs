@@ -820,9 +820,21 @@ async function main() {
       return { detail: fit.detail }
     })
 
-    await step('api-guard', 'A write without the browser\'s cookie is refused, the token alone acts on no analyst route, and the browser sends only its own event kinds', async () => {
+    await step('api-guard', 'A read or a write without the browser\'s cookie is refused, the token alone acts on no analyst route, and the browser sends only its own event kinds', async () => {
       const origin = new URL(WS.url).origin
       const events = `${origin}/api/ws/${WS.name}/events`
+      // a read with no cookie and no proof, as another account on the computer would send it (hook_auth.LocalReadGuard)
+      const unsigned = await fetch(`${origin}/api/ws/${WS.name}/canvas`)
+      const refused = await unsigned.json().catch(() => null)
+      check(unsigned.status === 401 && refused?.signin === true && /^open thimble from the link /.test(String(refused?.detail ?? '')),
+        `an unsigned GET /api/ws/${WS.name}/canvas answered ${unsigned.status} ${JSON.stringify(refused).slice(0, 160)}, not 401 with {detail, signin: true}`)
+      const head = await fetch(`${origin}/api/corpora`, { method: 'HEAD' })
+      check(head.status === 401 && (await head.text()) === '', `an unsigned HEAD /api/corpora answered ${head.status}, not 401 with no body`)
+      const health = await (await fetch(`${origin}/api/health`)).json().catch(() => null)
+      check(health?.ok === true && !('home' in (health ?? {})) && !('leader' in (health ?? {})),
+        `an unsigned GET /api/health answered ${JSON.stringify(health)}, not {ok, boot, ui} alone`)
+      const proven = await fetch(`${origin}/api/ws/${WS.name}/canvas`, { headers: tokenHeaders() })
+      check(proven.status === 200, `a GET /api/ws/${WS.name}/canvas signed with the token, as the CLI signs, answered ${proven.status}`)
       const name = 'E2E unsigned write'
       const r = await fetch(`${origin}/api/ws/${WS.name}/concepts`, {
         method: 'POST',
@@ -844,7 +856,7 @@ async function main() {
       // a kind the browser never sends, with the browser's own cookie
       const odd = await page.request.post(events, { data: { kind: 'start_agent', payload: { text: 'E2E: a start_agent the browser never sends' } } })
       check(odd.status() === 400, `a POST /api/ws/${WS.name}/events {kind: "start_agent"} with the browser's cookie answered ${odd.status()}, not 400`)
-      return { detail: `403 for an unsigned POST /api/ws/${WS.name}/concepts, and no label made; 403 with WRITE_REFUSED for main's message signed with the token alone; 400 for a start_agent event with the cookie` }
+      return { detail: `401 with signin for an unsigned GET, and no body for a HEAD; health names no path; 200 for a GET signed with the token; 403 for an unsigned POST /api/ws/${WS.name}/concepts, and no label made; 403 with WRITE_REFUSED for main's message signed with the token alone; 400 for a start_agent event with the cookie` }
     })
 
     let added = false

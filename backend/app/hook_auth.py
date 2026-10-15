@@ -32,6 +32,10 @@ only the sha256 of each code and of each browser's cookie (PAIRED_FILE, read at 
 file, transcript or link holds a credential that lasts. The token proves only the routes hooks, the shim, the module and
 the CLI use (guarded); with it a process can mint a code, and each new sign-in prints a line in main's terminal and posts
 a notice.
+
+Reads are gated too (LocalReadGuard), since another account on a shared computer reaches the loopback port as well:
+every GET or HEAD under /api needs the signed-in browser's cookie or a hook proof (the CLI sends one with every
+request), except OPEN_READS.
 """
 from __future__ import annotations
 
@@ -102,6 +106,12 @@ WRITE_REFUSED = ("open thimble from the link shown under /thimble's reply, or pr
                  " make changes")
 CODE_GONE = ("This sign-in link was already used or has expired. Run `thimble up` in a shell for a new one, or type"
              " /thimble in your terminal.")
+# A read of the local API (GET or HEAD) needs a signed-in browser's cookie or a hook proof too (LocalReadGuard), except
+# these: the supervisor's, the plugin's and the page's health check, and the page's question whether it is signed in
+OPEN_READS = frozenset({"/api/health", "/api/ui/paired"})
+READ_METHODS = frozenset({"GET", "HEAD"})
+SIGN_IN_NEEDED = ("open thimble from the link shown under /thimble's reply, or printed by `thimble up` in a shell, to"
+                  " see it")
 
 _cache: tuple[tuple[str, int, int], dict] | None = None
 # the tokens of the programs thimble runs, by id: (the whole token, whether its grant allows a method and path)
@@ -445,6 +455,11 @@ def write_guarded(method: str, path: str) -> bool:
     return method not in SAFE_METHODS and _api(path) and path != "/api/ui/key"
 
 
+def read_guarded(method: str, path: str) -> bool:
+    """Whether LocalReadGuard gates this request: a read (GET or HEAD) of the local API, but not OPEN_READS."""
+    return method in READ_METHODS and _api(path) and path not in OPEN_READS
+
+
 def _api(path: str) -> bool:
     return path == "/api" or path.startswith("/api/")
 
@@ -475,4 +490,34 @@ class LocalWriteGuard:
         body = json.dumps({"detail": WRITE_REFUSED}).encode()
         await send({"type": "http.response.start", "status": 403,
                     "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())]})
+        await send({"type": "http.response.body", "body": body})
+
+
+def read_allowed(scope: dict) -> bool:
+    """Whether a gated read may go on: it comes from a signed-in browser (analyst) or carries a hook proof (the plugin,
+    the CLI; an agent's token proves no read, as its grant allows none)."""
+    path, method = scope.get("path", ""), scope.get("method", "")
+    return analyst(Request(scope)) or hook_proof(Headers(scope=scope), method, path)
+
+
+class LocalReadGuard:
+    """401 for a read of the local API (read_guarded) that read_allowed refuses, so another account on the computer, or
+    a notebook kernel, that reaches 127.0.0.1 reads none of the analyst's chats, cards, reports or files through
+    thimble. The body is {detail: SIGN_IN_NEEDED, signin: true}, which tells the page to show its sign-in line; a HEAD
+    gets no body. A token route is HookAuth's to answer. Pure ASGI."""
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        path, method = scope.get("path", ""), scope.get("method", "")
+        if (scope["type"] != "http" or not read_guarded(method, path) or guarded(method, path)
+                or read_allowed(scope)):
+            await self.app(scope, receive, send)
+            return
+        body = b"" if method == "HEAD" else json.dumps({"detail": SIGN_IN_NEEDED, "signin": True}).encode()
+        headers = [(b"content-length", str(len(body)).encode())]
+        if body:
+            headers.insert(0, (b"content-type", b"application/json"))
+        await send({"type": "http.response.start", "status": 401, "headers": headers})
         await send({"type": "http.response.body", "body": body})

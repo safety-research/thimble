@@ -169,6 +169,7 @@ RESTART_MARK_S = 60.0  # a `source_restart` mark in server.json younger than thi
 REFUSED_LINE = "thimble: {path} is not a folder to open as a workspace; say /thimble from the folder that holds the corpus."
 TAKEOVER_LINE = ("thimble: this session is main now. The session {other} in another terminal no longer hears the "
                  "browser, and is main again once this one exits.")
+FOREIGN_UNNAMED = "<its THIMBLE_HOME>"  # foreign_home's answer for a server that names no home to this install
 FOREIGN_LINE = ("thimble: port {port} is held by the thimble server of another install (THIMBLE_HOME {other}), so this "
                 "install does not use it. Set THIMBLE_PORT to a free port, or stop that server with "
                 "`THIMBLE_HOME={other} thimble server stop`.")
@@ -434,12 +435,16 @@ def health_leader(url: str | None = None) -> int | None:
 
 
 def foreign_home(url: str | None = None) -> str | None:
-    """The THIMBLE_HOME of the server answering at `url` when it is another install's; None when it is this install's, names
-    none, or nothing answers. Two installs share a port by default."""
+    """The THIMBLE_HOME of the server answering at `url` when it is another install's; None when it is this install's, or
+    nothing answers. Two installs share a port by default. A server names its home only to a request that proves its
+    token (main's /api/health), so a healthy server that names none took this install's proof for no proof: another
+    install's or another account's, whose home is FOREIGN_UNNAMED here."""
     status, body = _request("GET", f"{url or api_url()}/api/health", timeout=HEALTH_TIMEOUT_S)
-    other = body.get("home") if status == 200 and isinstance(body, dict) else None
-    if not isinstance(other, str) or not other:
+    if status != 200 or not isinstance(body, dict) or body.get("ok") is not True:
         return None
+    other = body.get("home")
+    if not isinstance(other, str) or not other:
+        return FOREIGN_UNNAMED
     try:
         same = Path(other).resolve() == home().expanduser().resolve()
     except OSError:

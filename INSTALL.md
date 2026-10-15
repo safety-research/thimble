@@ -91,7 +91,7 @@ What protects what:
 | | thimble, always | Claude Code's sandbox (optional) | Your permission mode |
 |---|---|---|---|
 | thimble's token files | Claude's file tools can't read or edit them | Shell commands can't read or write them | A shell command that reads them asks (Manual) or is judged (auto) |
-| Acting as you in the browser | Needs this browser's sign-in; a link's code works once, for 5 minutes; each new sign-in shows a line in your terminal | Shell commands can't make a sign-in | Shell commands that try follow your mode |
+| Reading or acting as you in the browser | Needs this browser's sign-in; a link's code works once, for 5 minutes; each new sign-in shows a line in your terminal | Shell commands can't make a sign-in | Shell commands that try follow your mode |
 | The folder you opened | File-tool edits refused when `data` is `"off"` | Shell commands can still write it | Edits ask (Manual), are judged (auto) or run (Bypass) |
 | thimble's own jobs | Never in Bypass unless you choose it in Settings | — | Follow your session's mode, Bypass as Manual |
 | Code tickets and view builds | You approve each change before it reaches thimble's code | Their shell commands are contained like yours | Your session's mode, Bypass included |
@@ -126,7 +126,8 @@ outside the sandbox. `thimble doctor` says whether the sandbox is on.
 /thimble shows the dashboard's link under its reply. The link carries a one-time code: opening it signs this browser in
 to thimble. The code then stops working, as it does 5 minutes after it was shown or when a newer link for the workspace
 is shown; opening it in a browser that is signed in already changes nothing. A browser that is not signed in shows
-thimble, but each change it tries says to open the link. For a new link, run `thimble up` in a shell.
+none of your workspaces, only a line that says to open the link. For a new link, run `thimble up` in a shell. Another
+account on the same computer can reach thimble's port too, so thimble answers no read without a sign-in or its token.
 
 Each new sign-in prints a line in your terminal under Claude's next reply, and shows a notice in thimble with
 **Sign it out**. If a sign-in was not you, click Sign it out, or run `thimble unpair` in a shell, which signs out every
