@@ -88,10 +88,10 @@ ROLES = files.ROLES
 STEP_ROLE = agents.STEP_ROLE
 CLICK, FOLLOW_ON, TYPED = "click", "follow-on", "typed"
 ROUTES = (CLICK, FOLLOW_ON, TYPED)
-# the kinds a start that did not happen has (run.json `refused.kind`, a request's `refused_kind`); not-launched is only in
-# the records of earlier builds, which refused a main that thimble's launcher had not started
-AUTO_MODE, NO_CALL, LIMIT, NOT_LAUNCHED, HOOK, EARLIER, NO_MODULE, ERROR = (
-    "auto-mode", "no-call", "limit", "not-launched", "hook", "earlier-session", "no-module", "error")
+# the kinds a start that did not happen has (run.json `refused.kind`, a request's `refused_kind`); the records of
+# earlier builds may also hold not-launched, for a main that thimble's launcher had not started
+AUTO_MODE, NO_CALL, LIMIT, HOOK, EARLIER, NO_MODULE, ERROR = (
+    "auto-mode", "no-call", "limit", "hook", "earlier-session", "no-module", "error")
 # a refused start in the first seconds after main attached says thimble's plugin is still connecting (refusal_before)
 CONNECT_GRACE_S = 30.0
 HANDBACK_WAIT_S = 5.0  # a turn's end with no running child ends the run once no hand-back follows within this
