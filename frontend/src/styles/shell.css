@@ -958,6 +958,14 @@ button.settings-ext-name:hover .settings-ext-caret {
   color: var(--text-secondary);
 }
 
+/* the one line a browser that is not signed in sees in place of the app (SignIn), where the start page's title stands */
+.signin-line {
+  max-width: var(--w-card);
+  margin: 0 auto;
+  padding: 40px 16px;
+  font: var(--type-body);
+  color: var(--text-primary);
+}
 /* -------- the start page (StartPage): the page with no workspace in its URL. The top bar's brand, a title and the
    workspaces in groups (WorkspaceList), in a column as wide as a card. The switcher (TopBar) draws the same list in a
    popover, denser -------- */

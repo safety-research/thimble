@@ -5,6 +5,7 @@
 // route is held to the same rules without a line of its own.
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import * as client from '../../src/lib/api.ts'
+import { bus } from '../../src/lib/bus.ts'
 import { commentsApi } from '../../src/report/commentsApi.ts'
 
 type Call = { url: string; method: string; headers: Record<string, string>; body: unknown }
@@ -108,6 +109,36 @@ describe('the API client', () => {
       ['POST', '/api/ws/w/views/proposals/agent%20timeline/reject'],
       ['POST', '/api/ws/w/views/propose-now'],
     ])
+  })
+
+  test('every request the server refuses for want of sign-in (401, signin: true) tells the page it is signed out', async () => {
+    let heard = 0
+    const off = bus.on('signedOut', () => heard++)
+    vi.stubGlobal('fetch', async (url: unknown, init: RequestInit = {}) => {
+      calls.push({ url: String(url), method: init.method ?? 'GET', headers: (init.headers ?? {}) as Record<string, string>, body: init.body })
+      return new Response('{"detail":"sign in","signin":true}', { status: 401, headers: { 'content-type': 'application/json' } })
+    })
+    const silent: string[] = []
+    let asked = 0
+    try {
+      for (const [clientName, methods] of Object.entries(CLIENTS)) {
+        for (const [name, fn] of Object.entries(methods)) {
+          if (typeof fn !== 'function') continue
+          calls = []
+          heard = 0
+          const result = (fn as (...a: unknown[]) => unknown)(WS, 'id-1', 1, 2, 3, 4)
+          if (typeof result === 'string') continue
+          await Promise.resolve(result).catch(() => undefined)
+          if (!calls.length) continue
+          asked++
+          if (!heard) silent.push(`${clientName}.${name}`)
+        }
+      }
+    } finally {
+      off()
+    }
+    expect(asked).toBeGreaterThan(80)
+    expect(silent).toEqual([])
   })
 
   test('the routes thimble removed with its headless agents are gone from the client', () => {
