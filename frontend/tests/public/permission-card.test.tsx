@@ -210,11 +210,13 @@ describe("main's requests and those of thimble's agents, its subagents", () => {
 
   test("main's own request offers Always allow as Claude Code suggests and words it, and the click posts always", async () => {
     // as the backend words it after Claude Code's own dialog (permission_updates.main_words)
-    const label = "Allow, and don't ask again for Add Card"
-    const tip = "Allow, and don't ask again for plugin:thimble:thimble \u2014 Add Card commands in /w/mini. Claude Code saves this in this folder's local settings (.claude/settings.local.json)."
+    const label = 'Allow, and don\u2019t ask again for Add Card'
+    const tip = "Allow, and don\u2019t ask again for plugin:thimble:thimble \u2014 Add Card commands in /w/mini. Claude Code saves this in this folder's local settings (.claude/settings.local.json)."
     const m = req('m4', { tool: 'mcp__plugin_thimble_thimble__add_card', what: 'mcp__plugin_thimble_thimble__add_card', always: 'mcp__plugin_thimble_thimble__add_card', always_label: label, always_tip: tip })
     expect(alwaysChoice(m)).toEqual({ label, tip })
-    expect(alwaysChoice({ ...m, always_label: undefined, always_tip: undefined })).toEqual({ label: 'Always allow mcp__plugin_thimble_thimble__add_card', tip: "Allow, and don't ask again for mcp__plugin_thimble_thimble__add_card for the rest of this session" })
+    expect(alwaysChoice({ ...m, always_label: undefined, always_tip: undefined })).toEqual({ label: 'Always allow mcp__plugin_thimble_thimble__add_card', tip: 'Allow, and don\u2019t ask again for mcp__plugin_thimble_thimble__add_card for the rest of this session' })
+    // a web rule kept for the workspace, in the card's own words with the apostrophe of Claude Code's Bash rows
+    expect(alwaysChoice({ ...m, always: undefined, keep: 'web search' })?.tip).toBe('Allow, and don\u2019t ask again for web searches in this workspace')
     const el = await mount(<PermissionCard ws="mini" asks={[{ chat: 'main', request: m }]} metas={metas} labels={new Map()} />)
     expect([...el.querySelectorAll('.chat-perm-acts button')].map((b) => b.textContent)).toEqual(['Allow', label, 'Deny'])
     await armed()

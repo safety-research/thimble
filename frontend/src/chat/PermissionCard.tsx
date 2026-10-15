@@ -29,10 +29,11 @@ import { ThreadChip } from './Notes'
 import { askedBy, askingAgent, asksTo, askThread, askWhy, type PendingAsk } from './permissions'
 
 /** A request's "don't ask again" choice: the button's label, and its tooltip saying what it keeps and where (for main's
- * request, as the backend words it after Claude Code's own dialog). Pure. */
+ * request, as the backend words it after Claude Code's own dialog), with the curly apostrophe of Claude Code's Bash
+ * rows as the backend's words have it. Pure. */
 export function alwaysChoice(p: PermissionRequest): { label: string; tip: string } | null {
-  if (p.keep) return { label: `Always allow ${p.keep}`, tip: `Allow, and don't ask again for ${p.keep === 'web search' ? 'web searches' : p.keep} in this workspace` }
-  if (p.always) return { label: p.always_label || `Always allow ${p.always}`, tip: p.always_tip || `Allow, and don't ask again for ${p.always} for the rest of this session` }
+  if (p.keep) return { label: `Always allow ${p.keep}`, tip: `Allow, and don\u2019t ask again for ${p.keep === 'web search' ? 'web searches' : p.keep} in this workspace` }
+  if (p.always) return { label: p.always_label || `Always allow ${p.always}`, tip: p.always_tip || `Allow, and don\u2019t ask again for ${p.always} for the rest of this session` }
   return null
 }
 
