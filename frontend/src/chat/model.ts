@@ -1154,15 +1154,16 @@ export interface MainContext {
   /** when each subagent ran, from its chat's creation to its end (null while it runs): a label run started then is the
    * subagent's, and its card lists the label */
   runs: readonly { from: string; to: string | null }[]
-  /** the views the orientation's calls proposed (madeBy's views of its rows): its card lists them under Views, and
-   * while it runs the views bar in Files shows them, so main writes no note of its own for them */
+  /** the views the orientation's calls proposed (madeBy's views of its rows; an orientation from before 0.8.0, since
+   * one proposes none now): its card lists them under Views, so main writes no note of its own for them */
   views?: readonly string[]
-  /** the writers of the orientation's report pass (orientWriters): the orientation's card shows each under Report, so
-   * main writes no row for its start or its saves */
+  /** the writers of the report pass of an orientation from before 0.8.0 (orientWriters): the orientation's card shows
+   * each under Report, so main writes no row for its start or its saves */
   orientWriters?: readonly OrientWriter[]
 }
 
-/** A writer that answers the orientation's report pass, which the orientation's card carries under Report. */
+/** A writer that answers the report pass of an orientation from before 0.8.0, which the orientation's card carries
+ * under Report. */
 export interface OrientWriter {
   chat: string
   /** the orientation's chat, and the run of it whose card carries the writer (0 for its first) */
@@ -1183,9 +1184,11 @@ export const ORIENT_WRITER_GAP_MS = 60_000
 type WriterMeta = { id: string; role: string; created_at: string; status?: string | null; ts_end?: string | null; doc?: string | null; orient?: string | null; orient_run?: number | null }
 
 /**
- * The writers of the orientation's report pass among `metas`: a writer whose meta names the orientation (`orient`), or,
- * for a meta with no `orient`, a report writer that started while an orientation ran or within ORIENT_WRITER_GAP_MS of
- * its end. A writer whose `orient` is null was asked for by the analyst and keeps its rows in main. Pure.
+ * The writers of the report pass of an orientation from before 0.8.0 among `metas`: a writer whose meta names the
+ * orientation (`orient`), or, for an older meta with no `orient` at all, a report writer that started while an
+ * orientation ran or within ORIENT_WRITER_GAP_MS of its end. A writer whose `orient` is null was asked for by the
+ * analyst and keeps its rows in main. Every writer since 0.8.0 carries `orient` (backend write_session.start), so the
+ * inference reads old records only. Pure.
  */
 export function orientWriters(metas: Iterable<WriterMeta>): OrientWriter[] {
   const all = [...metas]
