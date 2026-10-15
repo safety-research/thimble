@@ -1951,6 +1951,12 @@ button.model-line-part[aria-expanded='true'] {
   font: var(--type-body-sm);
   white-space: nowrap;
 }
+/* in the spinner's place while Claude Code asks the builder in the terminal (ViewChip), and on a card's note line */
+.view-chip-wait,
+.chat-sub-wait-dot {
+  width: 8px;
+  height: 8px;
+}
 button.view-chip-values {
   display: inline-flex;
   align-items: center;

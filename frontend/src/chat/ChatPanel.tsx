@@ -53,7 +53,7 @@ import { mainEdits, STAGE_TEXT, threadStage, type ThreadStage } from './threadSt
 import { answeredSince, composerTarget, pickItems, threadKind, threadLabels, threadNodes, threadsRunning, type ThreadKind } from './threads'
 import { RoleChip } from './RoleChip'
 import { useChat, type ChatState } from './useChat'
-import { pendingAsks, waitingAt, waitingChats } from './waiting'
+import { pendingAsks, TERMINAL_WAIT, terminalWaits, waitingAt, waitingChats } from './waiting'
 import { PermissionCard } from './PermissionCard'
 import { ProposalCard } from './ProposalCard'
 import { NoticeStrip } from './Notice'
@@ -463,15 +463,17 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
     for (const p of main.meta?.permissions ?? []) if (p.chat) ids.add(p.chat)
     return ids
   }, [chats, main.meta?.permissions])
+  // the chats of thimble's agents that wait in the terminal, where Claude Code asks them, and the chats they run under
+  const terminalIds = useMemo(() => terminalWaits(main.meta, chats), [chats, main.meta])
   const items = useMemo(
     () =>
       pickItems(
         chats,
         (m) => (m.id === current ? chat.running : !!m.running),
         (m) => (m.id === current ? false : isUnread(seen, m.id, m.n_messages)),
-        { current, waiting: waitingIds },
+        { current, waiting: waitingIds, terminal: terminalIds },
       ),
-    [chats, current, chat.running, seen, waitingIds],
+    [chats, current, chat.running, seen, waitingIds, terminalIds],
   )
   const labels = useMemo(() => threadLabels(items), [items])
   // a thread the analyst left while it answered says so once its answer is in: a toast with its chip, beside the dot
@@ -583,7 +585,10 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   // open (chat/waiting.ts)
   const stripped = !!strip
   const waitingFor = useMemo(() => (stripped && stripSession ? waitingAt(stripSession.id, metaMap.values()) : null), [stripped, stripSession, metaMap])
-  const waiting = !!waitingFor
+  // the session the strip follows waits on a permission prompt in the terminal, its own or a step's: the strip says so
+  const inTerminal = stripped && !!stripSession && terminalIds.has(stripSession.id)
+  if (strip && inTerminal) strip.title = TERMINAL_WAIT
+  const waiting = !!waitingFor || inTerminal
   // every request of every session that waits for the analyst, on the one card above the composer
   const asks = useMemo(() => pendingRequests(main.meta, metaMap.values()), [main.meta, metaMap])
   // the latest orientation, which the orientation's composer and main's message_orientation reach
@@ -1186,7 +1191,8 @@ function TicketView({ ws, id, chat, mainRecords, ticket, onTicket: setTicket }: 
 }
 
 /** The strip behind the composer's top edge while the thread works: the spinner, what it is doing, how many steps; it
- * opens on the steps. A pending permission prompt shows a still dot in place of the spinner; a session waiting to retry
+ * opens on the steps. A pending permission prompt shows a still dot in place of the spinner (and one Claude Code asks
+ * in the terminal makes the title TERMINAL_WAIT, set by the caller); a session waiting to retry
  * after an API capacity error shows a countdown row with Retry now. */
 function TaskStrip({ title, steps, count, open, onToggle, waiting = false, retry = null, onRetry }: { title: string; steps: ToolStep[]; count: string; open: boolean; onToggle: () => void; waiting?: boolean; retry?: SessionAlert | null; onRetry?: () => Promise<unknown> }) {
   const retryLine = useRetryText(retry)

@@ -15,8 +15,11 @@ Each event is queued per workspace and session (_pending), and the plugin's watc
 runs as the plugin's asyncRewake hooks, which wake the session with the event (the HOOK route), or, where the plugin's
 hooks are off, as main's Monitor (the MONITOR route, cc_plugin.route). Permission prompts come from the
 PermissionRequest hook; since Claude Code does not signal that hook when the analyst answers in the terminal, the server
-ends the wait itself (clear_permissions, release_asks, agent_moved). A prompt's card offers "Always allow" where Claude
-Code's own dialog offers "don't ask again", in that dialog's words (permission_updates.main_words): the request's
+ends the wait itself (clear_permissions, release_asks, agent_moved). A prompt of one of thimble's agents is asked in the
+terminal alone (`terminal` on its entry, which the browser shows as that agent waiting for the analyst's answer there);
+it ends with its call's result (calls_done), its agent's end (agent_moved), or once Claude Code's record of main's
+session says no dialog is open after it was seen open (terminal_dialogs). A prompt's card offers "Always allow" where
+Claude Code's own dialog offers "don't ask again", in that dialog's words (permission_updates.main_words): the request's
 permission_suggestions that dialog applies for the tool, each kept where Claude Code gave it
 (permission_updates.main_offer), none when the org's managed tier sets allowManagedPermissionRulesOnly (_main_offer).
 
@@ -126,6 +129,10 @@ _taken: dict[str, tuple[str, str, dict[str, Any], float]] = {}  # event id -> (w
 _waiters: dict[str, set[tuple[asyncio.AbstractEventLoop, asyncio.Future]]] = {}  # workspace -> its waiting pulls
 _asks: dict[str, "Ask"] = {}  # hook permission id -> the request waiting for the analyst
 _terminal: dict[str, "Ask"] = {}  # hook permission id -> a request of thimble's agents the terminal answers (its card)
+# the requests of _terminal seen open while Claude Code's record of main's session said a dialog was open in the
+# terminal (terminal_dialogs), and by workspace when that record last began to say none is
+_seen_open: set[str] = set()
+_closed_since: dict[str, float] = {}
 _offers: dict[str, list[dict[str, Any]]] = {}  # hook permission id -> what its card's "Always allow" adds (_main_offer)
 # (workspace, session) -> (event id, line) of events its watcher wrote out, and lines that send no event, to print
 _lines: dict[tuple[str, str], list[tuple[str, str]]] = {}
@@ -952,7 +959,9 @@ async def sessions_route() -> dict[str, Any]:
 
 def _asking_chat(c: str, agent: str | None) -> str | None:
     """The chat of the subagent or fork `agent` of main's session (a thread whose fork it is, or a subagent's chat),
-    so the browser can mark the thread that waits; None for main or an agent no chat follows."""
+    so the browser can mark the thread that waits; for one of thimble's agents or a descendant that no chat names yet,
+    the chat subagents.json gives it or its nearest ancestor (_registry_chat); None for main or an agent no chat
+    follows."""
     from . import agents  # noqa: PLC0415
 
     if not agent:
@@ -960,6 +969,26 @@ def _asking_chat(c: str, agent: str | None) -> str | None:
     for meta in agents.list_chats(c):
         if (meta.get("fork") or {}).get("agent_id") == agent or meta.get("agent_id") == agent:
             return str(meta["id"])
+    return _registry_chat(c, agent)
+
+
+def _registry_chat(c: str, agent: str) -> str | None:
+    """The chat subagents.json records for `agent`, else for the agent it descends from that is nearest to it (a
+    helper of the orientation's whose own chat the mirror has not made yet asks for the orientation); None for an agent
+    the registry does not hold."""
+    from . import subagents  # noqa: PLC0415
+
+    seen: set[str] = set()
+    at: str | None = agent
+    try:
+        while at and at not in seen:
+            seen.add(at)
+            rec = subagents.agent(c, at) or {}
+            if rec.get("chat"):
+                return str(rec["chat"])
+            at = str(rec.get("parent") or "") or None
+    except Exception:  # noqa: BLE001 — a registry that cannot be read names no chat
+        return None
     return None
 
 
@@ -1150,8 +1179,10 @@ async def permission_route(c: str, body: PermissionAnswer, request: Request) -> 
 
 def clear_permissions(c: str) -> None:
     """Main's session is no longer waiting on a prompt of its own: end the hooks of main's own requests and drop them,
-    and any a previous server's hook left. A subagent's or fork's request stays, as agent_moved ends it."""
-    agents_asking = {i for i, a in _asks.items() if a.c == c and a.agent}
+    and any a previous server's hook left. A subagent's or fork's request stays, as agent_moved ends it, and so does a
+    prompt of thimble's agents that the terminal asks (_terminal), which ends as terminal_dialogs, calls_done or
+    agent_moved says."""
+    agents_asking = {i for i, a in (*_asks.items(), *_terminal.items()) if a.c == c and a.agent}
     for request_id in [i for i, a in _asks.items() if a.c == c and not a.agent]:
         _answer_ask(request_id, None)
     _drop(c, keep=agents_asking)
@@ -1176,8 +1207,33 @@ def asking(c: str) -> set[str]:
 def _end_terminal(c: str, gone: set[str]) -> None:
     for request_id in gone:
         _terminal.pop(request_id, None)
+        _seen_open.discard(request_id)
     if gone:
         _drop(c, gone)
+
+
+# how long Claude Code's record of main's session must say no dialog is open before the prompts of thimble's agents seen
+# open are taken as answered (terminal_dialogs): a record that changes between two dialogs of a queue for a moment
+# ends none of them
+TERMINAL_CLOSED_S = 1.0
+
+
+def terminal_dialogs(c: str, open_: bool) -> None:
+    """What Claude Code's record of main's session says as the mirror reads it (session._watch_wait): whether a dialog
+    is open in the terminal (`open_`), where Claude Code asks every prompt of thimble's agents. Each of their prompts
+    open while the record says one is is marked seen; once the record has said for TERMINAL_CLOSED_S that none is, the
+    analyst has answered every one, so the seen ones end and the browser stops showing their agents as waiting, though a
+    call the analyst allowed may run long before its result ends the prompt (calls_done). A prompt never seen while a
+    dialog was open waits for its call's result or its agent's end, since a record read just after the prompt opened
+    may not show its dialog yet."""
+    mine = {i for i, a in _terminal.items() if a.c == c}
+    if open_:
+        _closed_since.pop(c, None)
+        _seen_open.update(mine)
+        return
+    since = _closed_since.setdefault(c, time.monotonic())
+    if time.monotonic() - since >= TERMINAL_CLOSED_S:
+        _end_terminal(c, mine & _seen_open)
 
 
 # (workspace, agent, '' for main) -> the call_keys of its prompts the analyst answered here whose results have not come
@@ -1201,7 +1257,8 @@ def call_key(tool: str, tool_input: Any) -> tuple[str, str]:
 
 def agent_moved(c: str, agent: str, after: float) -> None:
     """The subagent or fork `agent` stopped (`after` infinite), or wrote a record at `after`: the prompts it opened
-    before then are gone, so their hooks' waits end. The mirror calls it when an agent stops; a prompt of a working
+    before then are gone, so their hooks' waits end. The mirror calls it when an agent stops, and subagents.run_ended
+    when a run of one of thimble's agents ends (a Stop of one whose prompt was open); a prompt of a working
     agent ends with its call's result (calls_done), since an agent with several calls open goes on writing while
     their prompts wait."""
     gone = {i for i, a in _asks.items() if a.c == c and a.agent == agent and a.at < after}
@@ -1258,3 +1315,5 @@ async def shutdown() -> None:
         _answer_ask(request_id, None)
     _answered.clear()
     _terminal.clear()
+    _seen_open.clear()
+    _closed_since.clear()

@@ -358,14 +358,16 @@ def test_bypass_runs_a_job_only_when_the_analyst_chose_it_in_settings(fake, anal
 
 
 def test_the_manual_mode_notice_says_how_to_switch_or_who_turned_auto_mode_off(fake, monkeypatch):
-    """The `manual-mode` notice's words (modes.manual_notice), by who turns auto mode off; none outside Manual mode."""
+    """The `manual-mode` notice's words (modes.manual_notice), by who turns auto mode off; none outside Manual mode.
+    Each says that thimble's agents wait in the terminal, where Claude Code asks their prompts, so an agent that waits
+    there does not look as if it worked on."""
+    asks = ("Manual mode: Claude Code asks before most commands, and thimble's agents wait in your terminal until you "
+            "answer there.")
     monkeypatch.setattr(modes, "auto_off", lambda: "")
-    assert modes.manual_notice("default") == ("Manual mode: Claude Code asks before most commands. In your terminal, press "
-                                              "shift+tab for auto mode, or start with `thimble --permission-mode auto`.")
+    assert modes.manual_notice("default") == (f"{asks} In your terminal, press shift+tab for auto mode, or start with "
+                                              "`thimble --permission-mode auto`.")
     assert modes.manual_notice("auto") == modes.manual_notice("acceptEdits") == modes.manual_notice(None) == ""
     monkeypatch.setattr(modes, "auto_off", lambda: "org")
-    assert modes.manual_notice("default") == ("Manual mode: Claude Code asks before most commands. Your organization "
-                                              "turned auto mode off.")
+    assert modes.manual_notice("default") == f"{asks} Your organization turned auto mode off."
     monkeypatch.setattr(modes, "auto_off", lambda: "settings")
-    assert modes.manual_notice("manual") == ("Manual mode: Claude Code asks before most commands. Your Claude Code "
-                                             "settings turn auto mode off (disableAutoMode).")
+    assert modes.manual_notice("manual") == f"{asks} Your Claude Code settings turn auto mode off (disableAutoMode)."
