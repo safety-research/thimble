@@ -224,11 +224,52 @@ def test_main_s_offer_is_claude_code_s_suggestions_with_each_destination_and_onl
     assert permission_updates.main_offer(None) == permission_updates.main_offer("x") == []
     # a session thimble started still keeps every update for the session alone
     assert {u["destination"] for u in agent_session.offer(WC + OUTSIDE)} == {"session"}
-    assert permission_updates.main_tip(WC) == ("Allow, and don't ask again for Bash(wc -l *) in this folder (your "
-                                               "project local settings)")
-    assert permission_updates.main_tip(WC + OUTSIDE) == ("Allow, and don't ask again for Bash(wc -l *) in this "
-                                                         "folder (your project local settings); files in notes/, all "
-                                                         "edits for the rest of this session")
+    saved = "Claude Code saves this in this folder's local settings (.claude/settings.local.json)."
+    assert permission_updates.main_words(WC) == {"always_label": "Allow, and don\u2019t ask again for: wc -l *",
+                                                 "always_tip": f"Allow, and don\u2019t ask again for: wc -l *. {saved}"}
+    # several updates in Claude Code's order (the switch of mode, folders, rules), joined as it joins its rows
+    assert permission_updates.main_words(WC + OUTSIDE) == {
+        "always_label": ("Allow, and switch to accept edits; always allow access to notes/; don\u2019t ask again for: "
+                         "wc -l *"),
+        "always_tip": ("Allow, and switch to accept edits (auto-approve file edits and common file commands) for this "
+                       "session; always allow access to /data/notes for this session; don\u2019t ask again for: "
+                       f"wc -l *. {saved}")}
+
+
+def test_main_s_card_words_its_offer_as_claude_code_s_own_dialog_does():
+    """The rows Claude Code 2.1.300's terminal dialog showed for these permission_suggestions, with the card's "Allow"
+    for its "Yes": the button short, the tooltip whole and with where Claude Code keeps the update."""
+    words = permission_updates.main_words
+    saved = "Claude Code saves this in this folder's local settings (.claude/settings.local.json)."
+    # "Yes, and don't ask again for plugin:thimble:thimble — Add Card commands in <folder>"
+    assert words(ADD_CARD, "/w/corpus") == {
+        "always_label": "Allow, and don't ask again for plugin:thimble:thimble \u2014 Add Card commands",
+        "always_tip": ("Allow, and don't ask again for plugin:thimble:thimble \u2014 Add Card commands in /w/corpus. "
+                       f"{saved}")}
+    # "Yes, and don’t ask again for: npm run *"
+    npm = [{"type": "addRules", "rules": [{"toolName": "Bash", "ruleContent": "npm run *"}], "behavior": "allow",
+            "destination": "localSettings"}]
+    assert words(npm, "/w/corpus") == {"always_label": "Allow, and don\u2019t ask again for: npm run *",
+                                       "always_tip": f"Allow, and don\u2019t ask again for: npm run *. {saved}"}
+    # a Write outside the folder: "Yes, and switch to accept edits (auto-approve file edits and common file commands)
+    # for this session; Yes, and always allow access to /data/notes for this session"
+    assert words(OUTSIDE[::-1], "/w/corpus") == words(OUTSIDE, "/w/corpus") == {
+        "always_label": "Allow, and switch to accept edits; always allow access to notes/",
+        "always_tip": ("Allow, and switch to accept edits (auto-approve file edits and common file commands) for this "
+                       "session; always allow access to /data/notes for this session")}
+    # "Yes, allow reading from /data/notes during this session"
+    read = [{"type": "addRules", "rules": [{"toolName": "Read", "ruleContent": "//data/notes/**"}], "behavior": "allow",
+             "destination": "session"}]
+    assert words(read, "/w/corpus") == {"always_label": "Allow reading from notes/",
+                                        "always_tip": "Allow reading from /data/notes during this session"}
+    # another server's tool, saved for every folder
+    other = [{"type": "addRules", "rules": [{"toolName": "mcp__demo__list_open_items"}], "behavior": "allow",
+              "destination": "userSettings"}]
+    assert words(other, "/w/corpus") == {
+        "always_label": "Allow, and don't ask again for demo \u2014 List Open Items commands",
+        "always_tip": ("Allow, and don't ask again for demo \u2014 List Open Items commands. Claude Code saves this in "
+                       "your user settings, for any project.")}
+    assert permission_updates.tool_words("Bash") == "Bash"
 
 
 async def test_always_allow_on_main_s_card_answers_with_exactly_what_the_card_named(monkeypatch):
@@ -236,8 +277,10 @@ async def test_always_allow_on_main_s_card_answers_with_exactly_what_the_card_na
     monkeypatch.setattr(hook_auth, "analyst", lambda request: True)
     call, entry = await _ask(ADD_CARD)
     assert entry["always"] == "mcp__plugin_thimble_thimble__add_card"
-    assert entry["always_tip"] == ("Allow, and don't ask again for mcp__plugin_thimble_thimble__add_card in this "
-                                   "folder (your project local settings)")
+    assert entry["always_label"] == "Allow, and don't ask again for plugin:thimble:thimble \u2014 Add Card commands"
+    assert entry["always_tip"] == ("Allow, and don't ask again for plugin:thimble:thimble \u2014 Add Card commands in "
+                                   f"{config.corpus_dir(CORPUS)}. Claude Code saves this in this folder's local "
+                                   "settings (.claude/settings.local.json).")
     assert events._offers == {entry["id"]: ADD_CARD}, "the suggestions are stored with the request"
     await events.permission_route(CORPUS, events.PermissionAnswer(id=entry["id"], allow=True, always=True), Browser())
     got = await asyncio.wait_for(call, 5)

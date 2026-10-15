@@ -705,7 +705,11 @@ export interface PermissionRequest {
    * it: the card's third choice (backend agent_session, don't ask again). A code ticket's adds it for the session; main's
    * keeps it where Claude Code would, which `always_tip` says (backend events._main_offer). */
   always?: string
-  /** on main's meta: the tooltip of `always`, what it adds and where Claude Code keeps it (backend permission_updates.main_tip) */
+  /** on main's meta: the button of `always`, in the words of Claude Code's own permission dialog for it (backend
+   * permission_updates.main_words) */
+  always_label?: string
+  /** on main's meta: the tooltip of `always`, the whole of Claude Code's words for it and where Claude Code keeps it
+   * (backend permission_updates.main_words) */
   always_tip?: string
   /** on main's meta: the thread or subagent chat whose agent asked, when the hook said which (backend events._hold) */
   chat?: string | null
