@@ -13,6 +13,7 @@ backend/tests_public/test_route_auth.py fails until the table is written again. 
     cookie           a signed-in browser's cookie (hook_auth.analyst): every other write
     cookie or token  a read (GET) of every other route (hook_auth.LocalReadGuard): a signed-in browser's cookie, or the
                      token proven as above (the CLI); a page screenshot carries a shot token instead
+    media key        a view's media route, whose URL carries a key for that view alone (hook_auth.media_key)
     none             the reads hook_auth.OPEN_READS names: the health check and whether the browser is signed in
 """
 from __future__ import annotations
@@ -23,7 +24,8 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 OUT = REPO / "docs" / "routes.md"
-CREDENTIALS = ("token", "code", "agent token", "cookie", "cookie or token", "none")
+CREDENTIALS = ("token", "code", "agent token", "cookie", "cookie or token", "media key", "none")
+MEDIA_KEY_ROUTE = "/api/ws/{c}/views/{slug}/media/{key}"
 SKIPPED = ("HEAD", "OPTIONS")  # answered beside GET; never a write
 
 
@@ -48,7 +50,7 @@ def credential(method: str, path: str, websocket: bool = False) -> str:
     if method in hook_auth.SAFE_METHODS:
         if path in hook_auth.OPEN_READS:
             return "none"
-        return "cookie or token"
+        return "media key" if path == MEDIA_KEY_ROUTE else "cookie or token"
     return "cookie"
 
 
@@ -104,6 +106,8 @@ def render(table: list[tuple[str, str, str, str]]) -> str:
         "- **cookie or token**: a read, which needs a signed-in browser's cookie or the token, proven as above (the CLI",
         "  proves it with every request). A screenshot of the page carries a shot token instead, good for reads alone",
         "  and for two minutes.",
+        "- **media key**: a view's media route, whose URL carries a key for that view alone, since the view's sandboxed",
+        "  frame sends no cookie.",
         "- **none**: the health check, which names no path or pid without the token, and whether the browser is signed",
         "  in.",
         "",

@@ -35,9 +35,12 @@ a notice.
 
 Reads are gated too (LocalReadGuard), since another account on a shared computer reaches the loopback port as well:
 every GET or HEAD under /api needs the signed-in browser's cookie or a hook proof (the CLI sends one with every
-request), except OPEN_READS. A screenshot of the page (tools.py, dev.py) runs a headless browser with no cookie, so it
-carries a shot token (mint_shot) in SHOT_HEADER instead: random, good for SHOT_TTL_S on GET and HEAD alone, kept in
-memory as its sha256.
+request), except OPEN_READS. Two narrow credentials stand in where neither can be sent. A screenshot of the page
+(tools.py, dev.py) runs a headless browser with no cookie, so it carries a shot token (mint_shot) in SHOT_HEADER: random,
+good for SHOT_TTL_S on GET and HEAD alone, kept in memory as its sha256. A view's frame is sandboxed with an opaque
+origin, which the browser sends no SameSite=Strict cookie from, so the one URL it loads, the view's media route, carries
+a key in its path (media_key: an HMAC under SESSION_KEY of the workspace and the view), good for that view's media
+alone.
 """
 from __future__ import annotations
 
@@ -116,6 +119,8 @@ SIGN_IN_NEEDED = ("open thimble from the link shown under /thimble's reply, or p
                   " see it")
 SHOT_HEADER = "x-thimble-shot"  # a page screenshot's read-only token (mint_shot)
 SHOT_TTL_S = 120  # a shot token's life: dev.SHOT_TIMEOUT_S (90 s) ends the headless run before it
+# the view media route with its key (media_key), as the frame's browser asks for it
+MEDIA_PATH = re.compile(r"/api/ws/([^/]+)/views/([^/]+)/media/([0-9a-f]{32})")
 
 _cache: tuple[tuple[str, int, int], dict] | None = None
 # the tokens of the programs thimble runs, by id: (the whole token, whether its grant allows a method and path)
@@ -341,6 +346,27 @@ def shot_proven(headers: Headers, method: str) -> bool:
     return until is not None and until > _now()
 
 
+def media_key(c: str, slug: str) -> str:
+    """The key in the URL of view `slug`'s media route in workspace `c` (module note): the same for every load of the
+    view, so the frame's document, and its ETag, stay the same."""
+    return hmac.new(_session_secret(True), f"view-media\n{c}\n{slug}".encode("utf-8"), hashlib.sha256).hexdigest()[:32]
+
+
+def media_key_ok(c: str, slug: str, key: str) -> bool:
+    """Whether `key` is media_key's for view `slug` of workspace `c`."""
+    secret = _session_secret(False)
+    if not secret or not key:
+        return False
+    want = hmac.new(secret, f"view-media\n{c}\n{slug}".encode("utf-8"), hashlib.sha256).hexdigest()[:32]
+    return _same(key, want)
+
+
+def media_proven(path: str) -> bool:
+    """Whether `path` is a view's media route with that view's key (MEDIA_PATH, media_key)."""
+    m = MEDIA_PATH.fullmatch(path)
+    return m is not None and media_key_ok(m.group(1), m.group(2), m.group(3))
+
+
 def _paired_file() -> Path:
     return home() / PAIRED_FILE
 
@@ -530,10 +556,12 @@ class LocalWriteGuard:
 
 def read_allowed(scope: dict) -> bool:
     """Whether a gated read may go on: it comes from a signed-in browser (analyst), carries a hook proof (the plugin, the
-    CLI; an agent's token proves no read, as its grant allows none) or a live shot token (shot_proven)."""
+    CLI; an agent's token proves no read, as its grant allows none), a live shot token (shot_proven), or is a view's
+    media route with that view's key (media_proven)."""
     path, method = scope.get("path", ""), scope.get("method", "")
     h = Headers(scope=scope)
-    return analyst(Request(scope)) or hook_proof(h, method, path) or shot_proven(h, method)
+    return (analyst(Request(scope)) or hook_proof(h, method, path) or shot_proven(h, method)
+            or (method in READ_METHODS and media_proven(path)))
 
 
 class LocalReadGuard:

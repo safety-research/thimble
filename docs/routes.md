@@ -14,10 +14,12 @@ none:
 - **cookie or token**: a read, which needs a signed-in browser's cookie or the token, proven as above (the CLI
   proves it with every request). A screenshot of the page carries a shot token instead, good for reads alone
   and for two minutes.
+- **media key**: a view's media route, whose URL carries a key for that view alone, since the view's sandboxed
+  frame sends no cookie.
 - **none**: the health check, which names no path or pid without the token, and whether the browser is signed
   in.
 
-263 routes, 153 of them writes: 37 token, 1 code, 1 agent token, 120 cookie, 102 cookie or token, 2 none.
+264 routes, 153 of them writes: 37 token, 1 code, 1 agent token, 120 cookie, 102 cookie or token, 1 media key, 2 none.
 
 | Method | Path | Module | Credential |
 |---|---|---|---|
@@ -275,6 +277,7 @@ none:
 | GET | `/api/ws/{c}/views/{slug}/frame` | views | cookie or token |
 | POST | `/api/ws/{c}/views/{slug}/marks` | views | cookie |
 | GET | `/api/ws/{c}/views/{slug}/media` | views | cookie or token |
+| GET | `/api/ws/{c}/views/{slug}/media/{key}` | views | media key |
 | PUT | `/api/ws/{c}/views/{slug}/on` | views | cookie |
 | GET | `/api/ws/{c}/views/{slug}/problems` | views | cookie or token |
 | POST | `/api/ws/{c}/views/{slug}/records` | views | cookie |
