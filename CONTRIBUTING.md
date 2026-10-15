@@ -15,7 +15,8 @@ bash scripts/install.sh   # backend/.venv with the test extras, frontend/dist, ~
 ## Run it
 
 ```
-thimble server up                  # the server on port 8300, detached; prints the URL
+thimble server up                  # the server on port 8300, detached; prints the URL. Where 8300 is taken, a free
+                                   # port, which server.json records; THIMBLE_PORT names the one port to use
 THIMBLE_DEV=1 thimble server up    # plus Vite on 5300 with hot reload; the URL is Vite's
 thimble server status | stop | restart
 thimble status                     # one line: the server, the orientation, the queue

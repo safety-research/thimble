@@ -1126,9 +1126,14 @@ def test_the_doctor_prints_a_checklist_a_person_can_read(home, monkeypatch, fake
         "thimble's agents start after /thimble here"]
     assert rows[5][1].startswith("Card code runs")
 
-    # the port taken by another program; not signed in; the plugin off; Claude Code's sandbox set but unable to run
+    # the port taken by another program: no problem without THIMBLE_PORT, since the next start passes over it
     monkeypatch.setattr(cli, "listening", lambda p: True)
     monkeypatch.setattr(cli, "stuck_server", lambda url=None: None)
+    assert ("✓", "") == {line: (mark, fix) for mark, line, fix in checklist(cli.doctor_check_text(corpus))}[
+        "Server not running (it starts with /thimble)"]
+    # the port THIMBLE_PORT names taken by another program; not signed in; the plugin off; Claude Code's sandbox set
+    # but unable to run
+    monkeypatch.setenv("THIMBLE_PORT", "21101")
     fake_claude.write_text(json.dumps({"loggedIn": False}))
     monkeypatch.setattr(cli, "plugin_facts", lambda cwd: facts._replace(enabled=False))
     monkeypatch.setattr(cli, "own_sandbox_set", lambda cwd: True)
