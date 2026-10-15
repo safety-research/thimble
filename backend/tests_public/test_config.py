@@ -50,6 +50,34 @@ def test_a_claude_thimble_starts_keeps_the_users_proxy_certificate_and_gateway_s
     assert set(network) <= set(config.launch_environ(env)), "what every `claude` thimble runs gets"
 
 
+def test_a_claude_thimble_starts_gets_the_sign_in_environment_of_the_analysts_session():
+    """Every CLAUDE* variable Claude Code reads to sign in reaches a `claude` thimble starts, so it signs in as the
+    analyst's session does and keeps its tokens where that session keeps them: the federation token cache, the
+    credential store, OAuth, an environment token's account, the cloud providers' credential settings, a host's
+    credentials and the managed settings that choose the login. A host's token refresh (it reaches main alone) and the
+    calling cloud session's own tokens stay out."""
+    sign_in = ["CLAUDE_CODE_FEDERATION_CACHE_DIR", "CLAUDE_SECURESTORAGE_CONFIG_DIR", "CLAUDE_CODE_FORCE_WINDOWS_CREDMAN",
+               "CLAUDE_CODE_DISABLE_AUTH_REFRESH_LOCK", "CLAUDE_CODE_CUSTOM_OAUTH_URL", "CLAUDE_CODE_OAUTH_CLIENT_ID",
+               "CLAUDE_CODE_DESIGN_OAUTH_CLIENT_ID", "CLAUDE_CODE_OAUTH_401_WAIT_MS", "CLAUDE_CODE_AUTH_FAIL_EXIT_MS",
+               "CLAUDE_LOCAL_OAUTH_API_BASE", "CLAUDE_LOCAL_OAUTH_APPS_BASE", "CLAUDE_LOCAL_OAUTH_CONSOLE_BASE",
+               "CLAUDE_TRUSTED_DEVICE_TOKEN", "CLAUDE_CODE_ACCOUNT_UUID", "CLAUDE_CODE_ACCOUNT_TAGGED_ID",
+               "CLAUDE_CODE_ORGANIZATION_UUID", "CLAUDE_CODE_USER_EMAIL", "CLAUDE_CODE_SUBSCRIPTION_TYPE",
+               "CLAUDE_CODE_RATE_LIMIT_TIER", "CLAUDE_CODE_HFI_BEARER_TOKEN", "CLAUDE_CODE_SKIP_AWS_CRED_CACHE",
+               "CLAUDE_CODE_AWS_CHAIN_RESOLVE_TIMEOUT_MS", "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
+               "CLAUDE_CODE_HOST_CREDS_FILE", "CLAUDE_CODE_HOST_AUTH_ENV_VAR", "CLAUDE_CODE_HOST_GATEWAY_LINEAGE",
+               "CLAUDE_CODE_MANAGED_SETTINGS_PATH", "CLAUDE_CODE_REMOTE_SETTINGS_PATH",
+               "ANTHROPIC_FEDERATION_RULE_ID", "ANTHROPIC_ORGANIZATION_ID", "ANTHROPIC_SERVICE_ACCOUNT_ID",
+               "ANTHROPIC_WORKSPACE_ID", "ANTHROPIC_IDENTITY_TOKEN_FILE", "ANTHROPIC_CONFIG_DIR", "ANTHROPIC_PROFILE"]
+    left_out = ["CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH", "CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH",
+                "CLAUDE_CODE_HOST_AUTH_REFRESH_TIMEOUT_MS", "CLAUDE_CODE_SESSION_ACCESS_TOKEN",
+                "CLAUDE_SESSION_INGRESS_TOKEN_FILE", "CLAUDE_CODE_WEBSOCKET_AUTH_FILE_DESCRIPTOR",
+                "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_CODE_FEDERATION_CACHE_DIR_EXTRA"]
+    env = {name: f"/made/up/{i}" for i, name in enumerate([*sign_in, *left_out])}
+    assert set(config.passed_environ(env)) == set(sign_in)
+    launched = config.launch_environ(env)
+    assert {k: launched.get(k) for k in sign_in} == {k: env[k] for k in sign_in}, "what every `claude` thimble runs gets"
+
+
 def test_not_logged_in_names_the_login_and_where_the_other_ways_are(monkeypatch):
     """thimble has no login of its own: the alert names `claude auth login` and points to INSTALL.md's Authentication
     section for the other ways, and nothing longer."""
