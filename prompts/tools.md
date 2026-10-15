@@ -1726,6 +1726,14 @@ The message is in the thread {thread}, which waits for the fork you started for 
 
 The analyst pressed Stop on {title}, your subagent `{agent_id}`, in thimble. Stop it with TaskStop.
 
+## main-stopped-note
+
+thimble: the analyst pressed Stop in thimble and ended your turn, and any command that turn was running was stopped too. Leave that work stopped: do not run its calls again or take up its request unless the analyst asks again.
+
+## thread-stopped-note
+
+thimble: the analyst pressed Stop in thimble on the side thread {thread}, which stopped its fork `{agent_id}`. Leave it stopped: do not message, continue or restart it unless the analyst asks.
+
 ## message_orientation-empty
 
 The message is empty. Pass what the analyst asks the orientation as `message`.
