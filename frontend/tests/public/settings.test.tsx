@@ -3,13 +3,14 @@
 // effort that runs, Claude Code's levels in every agent's effort menu and none for a model that runs with none, fast
 // mode only for the classifiers, main and `thimble fix` (on the dev row), the view proposals' and the refusal's
 // rows, the orientation subagents' row with its effort, a web switch per agent; the View proposals switch, sent only
-// when it changed; main's fence, which thimble's agents, code tickets' among them, share; one permission row, the dev
-// agent's program's, only where an extension runs one; cardWait; no installs row.
+// when it changed; thimble's rules for main and its agents, code tickets' among them (web and data follow the session's
+// mode, and the shell runs in Claude Code's sandbox where /thimble saw one); one permission row, the dev agent's
+// program's, only where an extension runs one, where a session in Bypass counts as Manual; cardWait; no installs row.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { MAIN_MODE_LINE, PROPOSE_LABEL, SettingsPopover, TICKET_FAST, cardWaitLine, changedPropose, changedRoles, changedWeb, fenceLine, lockedWhy, memoryWords, modeRowShown, rolesOf, roleEfforts, webRows } from '../../src/shell/SettingsPopover.tsx'
+import { BYPASS_LINE, MAIN_MODE_LINE, PROPOSE_LABEL, SESSION_BYPASS_NOTE, SettingsPopover, TICKET_FAST, agentMode, cardWaitLine, changedPropose, changedRoles, changedWeb, fenceLine, lockedWhy, memoryWords, modeRowShown, rolesOf, roleEfforts, webRows } from '../../src/shell/SettingsPopover.tsx'
 import { invalidateSettings } from '../../src/lib/models.ts'
-import type { Settings } from '../../src/lib/types.ts'
+import type { Attached, Settings } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 const row = (extra: Record<string, unknown> = {}) => ({ way: 'thimble', extension: '', additions: [], conflict: [], web: 'ask', config: 'agents.x', ...extra })
@@ -32,7 +33,7 @@ const SETTINGS: Settings = {
   config_ignored: ['agents.writer.fast'],
   card_wait: 10,
   agents: {
-    main: { additions: [], sandbox: 'on', sandbox_runs: true, network: 'on', web: 'ask', data: 'ask', config: 'agents.orientation' },
+    main: { additions: [], web: 'ask', data: 'ask', config: 'agents.orientation' },
     orient: row({ config: 'agents.orientation' }),
     critic: row({ web: 'off', config: 'agents.critic' }),
     writer: row({ config: 'agents.writer', memory: 'off' }),
@@ -41,13 +42,19 @@ const SETTINGS: Settings = {
   } as Settings['agents'],
 }
 let puts: unknown[] = []
+/** main's session, as main's chat gives it */
+let attached: Attached | null = null
+/** what GET /settings answers */
+let settings: Settings = SETTINGS
 beforeEach(() => {
   puts = []
+  attached = null
+  settings = SETTINGS
   invalidateSettings('mini')
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
     if (init?.method === 'PUT') puts.push([String(url), JSON.parse(String(init.body))])
-    const body = String(url).includes('/settings') ? SETTINGS : String(url).includes('/extensions') ? { extensions: [], conflicts: [] } : { meta: { id: 'main', attached: null } }
+    const body = String(url).includes('/settings') ? settings : String(url).includes('/extensions') ? { extensions: [], conflicts: [] } : { meta: { id: 'main', attached } }
     return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
   })
 })
@@ -91,8 +98,12 @@ describe('the rules', () => {
     expect(changedPropose({ ...SETTINGS, propose_views: false }, true)).toEqual({ propose_views: null })
   })
 
-  test("main's fence in words, and the CLAUDE.md files each agent reads", () => {
-    expect(fenceLine(SETTINGS.agents!.main)).toBe('sandbox on · network on · asks before the web · asks to edit data')
+  test("thimble's rules for main and its agents in words, and the CLAUDE.md files each agent reads", () => {
+    const main = SETTINGS.agents!.main!
+    expect(fenceLine(main)).toBe('web follows your mode · data edits follow your mode · shell follows your mode')
+    expect(fenceLine(main, true)).toBe("web follows your mode · data edits follow your mode · shell in Claude Code's sandbox")
+    expect(fenceLine({ ...main, web: 'off', data: 'off' }, false)).toBe('no web · never edits data · shell follows your mode')
+    expect(fenceLine({ ...main, web: 'allow', data: 'allow' })).toBe('web follows your mode · data edits follow your mode · shell follows your mode')
     expect(memoryWords('off')).toBe('CLAUDE.md files: off')
     expect(memoryWords(undefined)).toBe('CLAUDE.md files: on')
   })
@@ -114,7 +125,10 @@ describe('the popover', () => {
     expect(doc.querySelectorAll('.settings-row[data-role="labels"] .fast-bolt')).toHaveLength(1)
     expect(doc.querySelector('.settings-row[data-role="critic"] [role="switch"]')?.getAttribute('aria-checked')).toBe('false')
     expect(doc.querySelector('.settings-next-start')?.textContent).toMatch(/applies to its next start/)
-    expect(doc.querySelector('.settings-fence-line')?.textContent).toBe('sandbox on · network on · asks before the web · asks to edit data')
+    expect(doc.querySelector('.settings-fence-line')?.textContent).toBe('web follows your mode · data edits follow your mode · shell follows your mode')
+    expect(doc.querySelector('.settings-fence .settings-headrow')?.textContent).toMatch(/^thimble's rules/)
+    expect(doc.querySelector('.settings-fence-note')?.textContent).toBe("Your Claude Code session and thimble's agents, its subagents.")
+    expect(doc.textContent).not.toMatch(/fence/i)
     expect(doc.querySelectorAll('[data-mode-agent]')).toHaveLength(0)
     expect(doc.querySelector('.settings-main-mode')?.textContent).toBe(MAIN_MODE_LINE)
     expect(doc.querySelector('.settings-card-wait')?.textContent).toBe(cardWaitLine(10))
@@ -181,5 +195,44 @@ describe('the popover', () => {
     } finally {
       SETTINGS.agents!.dev = dev
     }
+  })
+
+  test("main's row says the shell runs in Claude Code's sandbox where /thimble saw one", async () => {
+    attached = { session: 's1', cwd: '/c', since: '', sandbox: true }
+    const anchor = document.createElement('button')
+    document.body.appendChild(anchor)
+    await mount(<SettingsPopover ws="mini" anchor={anchor} open onClose={() => {}} />)
+    await settle()
+    await settle()
+    expect(document.body.querySelector('.settings-fence-line')?.textContent).toBe("web follows your mode · data edits follow your mode · shell in Claude Code's sandbox")
+  })
+
+  test("a session in Bypass reaches the dev agent's program as Manual; only a row the server answers Bypass is Bypass, with Claude Code's warning", async () => {
+    expect(agentMode({}, 'dev', 'bypassPermissions')).toBe('manual')
+    expect(agentMode({}, 'dev', 'auto')).toBe('auto')
+    expect(agentMode({ dev: 'bypass' }, 'dev', 'default')).toBe('bypass')
+    expect(agentMode({}, 'dev', 'auto', ['auto'])).toBe('manual')
+    const program = { ...SETTINGS, agents: { ...SETTINGS.agents, dev: { ...SETTINGS.agents!.dev!, way: 'sdk' as const, extension: 'ext' } } }
+    attached = { session: 's1', cwd: '/c', since: '', permission_mode: 'bypassPermissions' }
+    settings = program
+    const anchor = document.createElement('button')
+    document.body.appendChild(anchor)
+    await mount(<SettingsPopover ws="mini" anchor={anchor} open onClose={() => {}} />)
+    await settle()
+    await settle()
+    const chip = () => document.body.querySelector<HTMLButtonElement>('[data-mode-agent="dev"] .settings-mode')!
+    expect(chip().textContent).toBe("Manual (your session's)")
+    expect(document.body.querySelector('.settings-modes-warn')).toBeNull()
+    await act(async () => chip().click())
+    expect(document.querySelector('.menu-item[data-item="session"] .menu-item-note')?.textContent).toBe(SESSION_BYPASS_NOTE)
+    unmountAll()
+    // a row the server answers as Bypass: the analyst chose it in Settings
+    settings = { ...program, permission_modes: { dev: 'bypass' } }
+    invalidateSettings('mini')
+    await mount(<SettingsPopover ws="mini" anchor={anchor} open onClose={() => {}} />)
+    await settle()
+    await settle()
+    expect(chip().textContent).toBe('Bypass')
+    expect(document.body.querySelector('.settings-modes-warn')?.textContent).toBe(BYPASS_LINE)
   })
 })

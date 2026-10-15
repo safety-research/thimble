@@ -65,10 +65,11 @@ export type ChatRecord =
   | { type: 'notice'; ts?: string; id?: string; key?: string | null; kind?: string; text?: string; agent?: string | null; action?: NoticeAction | NoticeAction[] | null; dismissed?: boolean; cleared?: boolean }
 
 /** What a notice's button does (backend notices.py): look for a view proposal again (`proposals-retry`), turn view
- * proposals off (`proposals-off`), open Settings (`settings`), or build the failed view `slug` again (`view-retry`). */
+ * proposals off (`proposals-off`), open Settings (`settings`), build the failed view `slug` again (`view-retry`), or
+ * sign out the browser whose id is `slug` (`sign-out`, a sign-in notice's). */
 export interface NoticeAction {
   label: string
-  do: 'proposals-retry' | 'proposals-off' | 'settings' | 'view-retry' | (string & {})
+  do: 'proposals-retry' | 'proposals-off' | 'settings' | 'view-retry' | 'sign-out' | (string & {})
   slug?: string
 }
 
@@ -730,8 +731,9 @@ export interface PermissionRequest {
   cut?: number
   /** why thimble itself asks, which the card says in place of the mode's reason (backend dev.CODE_WHY) */
   why?: string
-  /** the rule of main's fence that sends the call to the analyst (userconf.main_rules): an edit of thimble's config, an
-   * edit of the corpus, or a web call; `installs` and `commands` only on a code ticket's */
+  /** why thimble sends one of its server jobs' calls to the analyst whatever the permission mode (backend userconf
+   * ask_cause): `config` an edit of thimble's config, `data` an edit of the corpus, `commands` a command; `web` and
+   * `installs` as earlier versions sent them */
   asked_by?: 'config' | 'data' | 'web' | 'installs' | 'commands'
 }
 
@@ -1214,9 +1216,9 @@ export interface Settings {
   config_error?: string
   /** the keys thimble's config files hold that this build reads and ignores, each as its key path (userconf.ignored) */
   config_ignored?: string[]
-  /** who runs each agent and what it may do (backend ledger.agent_rows): `main` carries main's fence, which thimble's
-   * agents share as its subagents; orient, writer, critic and checks name who runs them and their own `web`; `dev`,
-   * labels and cardCheck keep fences of their own */
+  /** who runs each agent and what it may do (backend ledger.agent_rows): `main` carries thimble's rules for main and
+   * its agents, its subagents; orient, writer, critic and checks name who runs them and their own `web`; `dev`, labels
+   * and cardCheck keep fences of their own */
   agents?: Partial<Record<AgentRowKey, AgentRow>> & { main?: MainFence }
   /** who runs each of thimble's seven tasks (backend ledger.task_rows) */
   tasks?: TaskRow[]
@@ -1231,13 +1233,10 @@ export interface Settings {
 /** The agent rows of the settings: thimble's subagents, the code tickets' dev agent and the two classifiers. */
 export type AgentRowKey = 'orient' | 'writer' | 'critic' | 'checks' | 'dev' | CallAgent
 
-/** Main's fence, which thimble's agents share (backend ledger.agent_rows `main`): the extensions adding to main's
- * prompt, its sandbox, whether the sandbox can run here, its network, web tools and edits of the corpus. */
+/** thimble's rules for main and its agents (backend ledger.agent_rows `main`): the extensions adding to main's prompt,
+ * its web tools and edits of the corpus. */
 export interface MainFence {
   additions: string[]
-  sandbox?: 'on' | 'off'
-  sandbox_runs?: boolean
-  network?: 'on' | 'off'
   web?: 'ask' | 'off' | 'allow'
   data?: 'ask' | 'allow' | 'off'
   config?: string
@@ -2030,7 +2029,7 @@ export interface LabelRowText extends LabelRow {
 
 // ---- the chat: the mirror of the analyst's session ----
 
-/** What the Manual-mode chip says (Attached.manual). */
+/** Which Manual-mode notice shows (Attached.manual). */
 export type ManualHint = 'switch' | 'org' | 'settings'
 
 /** The Claude Code session mirrored as main while `/thimble` has it attached. */
@@ -2049,11 +2048,12 @@ export interface Attached {
   /** whether the session's last reply ran in fast mode, as the mirror read it */
   fast?: boolean
   /** the permission mode Claude Code last reported to the session's hooks (default, acceptEdits, auto, plan,
-   * bypassPermissions, dontAsk), which each agent's permission mode follows until the analyst sets it (backend modes.py) */
+   * bypassPermissions, dontAsk), which the dev agent's program follows until the analyst sets its row, Bypass as Manual
+   * (backend modes.py) */
   permission_mode?: string
-  /** while that mode is Claude Code's Manual mode (backend modes.manual_hint), what the top bar's Manual-mode chip says:
-   * `switch` how to switch to auto mode, `org` or `settings` that the organization's or the analyst's Claude Code
-   * settings turn auto mode off */
+  /** while that mode is Claude Code's Manual mode (backend modes.manual_hint), which Manual-mode notice shows (backend
+   * notices `manual-mode`): `switch` how to switch to auto mode, `org` or `settings` that the organization's or the
+   * analyst's Claude Code settings turn auto mode off */
   manual?: ManualHint
   /** main's terminal said once that the session runs in Manual mode (backend session.note_mode) */
   manual_told?: boolean
@@ -2061,6 +2061,8 @@ export interface Attached {
   fast_choice?: boolean
   /** the session that was main until this one took its place while it runs on in another terminal */
   after?: string
+  /** whether this session's shell commands run in Claude Code's sandbox, as /thimble saw it; information only */
+  sandbox?: boolean
 }
 /** Main's last session once none is attached: the folder it ran in is where `thimble --continue` resumes it. */
 export interface SessionEnded {
@@ -2140,11 +2142,7 @@ export interface ChatMeta {
   paused?: 'critique' | (string & {}) | null
   /** the latest run began with a message the analyst typed in Claude Code's agent tray */
   typed_in_tray?: boolean | null
-  // ---- main only (lane L: cc_plugin.main_fenced, launch.json, module_bridge) ----
-  /** main runs inside thimble's fence (cc_plugin.main_fenced) */
-  fenced?: boolean | null
-  /** `thimble` launched main (launch.json names its session) */
-  launched?: boolean | null
+  // ---- main only (module_bridge) ----
   /** thimble's hooks module holds the long poll for main (module_bridge.live) */
   module?: boolean | null
   /** why it does not (module_bridge.why_not), '' while it does */

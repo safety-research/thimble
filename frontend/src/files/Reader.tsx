@@ -193,7 +193,7 @@ function ReaderViewer({ ws, view, path, targetRef, labels, onRaw }: { ws: string
       )}
       {residueOpen && <ResidueList notes={notes} onPick={pick} />}
       {failure && <ViewFailed name={view.name} detail={failure} onRaw={onRaw} />}
-      {pin.stale && <ViewUpdated onReload={() => (setFailure(null), void pin.reload())} className="reader-viewer-updated" />}
+      {pin.stale && <ViewUpdated onReload={() => (setFailure(null), void pin.reload())} onDismiss={pin.dismiss} className="reader-viewer-updated" />}
       <ViewerFrame
         key={`${view.slug}:${pin.pinned ?? ''}`}
         version={pin.pinned || undefined}

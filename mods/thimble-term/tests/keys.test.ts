@@ -33,6 +33,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
+import { KEPT_FILE, parseKept, resetKept } from '../hooks/kept'
 import { width } from '../hooks/lib'
 import { RELAY, UNFOCUSED_HINT } from '../hooks/panel'
 import { CWD, WS, shown, takesKeys, viewFrame, world } from './fixtures'
@@ -1460,4 +1461,32 @@ test('a notice\'s open › goes to the thread of the agent it names: an agent\'s
   await row.unmount()
   s = await seen($, SHORT)
   expect(s.text).toContain('why is events.jsonl so much bigger?')
+})
+
+test("keys · home · toast: `dismiss` marks what is new as seen, as opening home does, and opens no panel", async ($, on) => {
+  resetKept()
+  const w = world(on)
+  await start($, w)
+  w.states.home = { ...w.states.home, cards: 14 }
+  w.stamps.set(`${WS}/notebooks`, 2)
+  await w.clock.advance(1100)
+  let above = (await $.ui.mount(ABOVE)) as unknown as M
+  expect(shown(await above.drawn())).toContain('2 new cards')
+  await above.press({ key: 'above-home-dismiss' })
+  await above.unmount()
+  await w.clock.settle()
+  expect(w.opened).not.toContain(PANEL)
+  // seen: the row is gone, after a relaunch too (kept.ts)
+  above = (await $.ui.mount(ABOVE)) as unknown as M
+  expect(shown(await above.drawn())).not.toContain('new card')
+  await above.unmount()
+  expect(parseKept(w.files.get(`${WS}/${KEPT_FILE}`) ?? '').seen?.cards).toBe(14)
+  // what arrives after shows again
+  w.states.home = { ...w.states.home, cards: 15 }
+  w.stamps.set(`${WS}/notebooks`, 3)
+  await w.clock.advance(1100)
+  above = (await $.ui.mount(ABOVE)) as unknown as M
+  expect(shown(await above.drawn())).toContain('1 new card')
+  await above.unmount()
+  expect(w.opened).not.toContain(PANEL)
 })

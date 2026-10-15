@@ -355,7 +355,7 @@ colored is said under each.
 
 ↳ thread · "How many delete events are in events.jsonl? One number." · answered · new
 ↳ view · Wiki Pages · built · new
-  thimble   3 new cards  open ›
+  thimble   3 new cards  open ›  dismiss
 ```
 
 The same reply's first row under the pointer, and a passage a thread was asked about:
@@ -411,8 +411,9 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   green while it is new, `failed` in red. A thread's row names the turn's question; a stop is not news. A view's row
   stands under the answer that proposed it.
 - One row above the prompt, the toast, at column 2: `thimble` dim, what is new in the workspace since home was last opened
-  (`3 new cards`), `open ›`, which opens home; the row is gone once home is opened. Side threads have their `↳` rows and
-  thimble's agents Claude Code's agent tray, so no row repeats them.
+  (`3 new cards`), `open ›`, which opens home, and `dismiss`, which marks them seen without opening home; the row is
+  gone once home is opened. Side threads have their `↳` rows and thimble's agents Claude Code's agent tray, so no row
+  repeats them.
 - The view proposal's rows above the prompt, while one waits for the analyst's answer, whatever the panel shows:
   `view proposal` in the accent on the label column, the view's name in bold, then `accept`, `reject` and `don't ask
   again`; under the name what the view would show, then the task it serves after `task` dim (for a viewer of a file
@@ -434,7 +435,10 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   thimble's config is, which the terminal has in place of the browser's Settings, and leaves the row. An act or
   `dismiss` takes the row away at once and thimble writes the dismissal, so it stays gone after a relaunch; a failure
   that comes again is a new row. An act thimble refuses leaves the row, with why in a toast. A notice that thimble
-  clears (a later success) goes when home's state is read again.
+  clears (a later success) goes when home's state is read again. Two notices that are not failures show the same way:
+  the Manual-mode notice while main runs in Claude Code's Manual mode, which says how to switch to auto mode and goes by
+  itself when main reports auto mode, and the notice of a browser's sign-in, with no act (its words name `thimble
+  unpair`).
 - The panel's row above the prompt, only while Claude Code leaves the panel undrawn (an open it was not asked for, from
   main's tool or a click in a card, on a terminal narrower than 144 columns, or 110 for a panel opened before): `panel`
   dim, `Home is ready`, then `open panel` and `dismiss`. `open panel` opens the panel from its press, as `/thimble`

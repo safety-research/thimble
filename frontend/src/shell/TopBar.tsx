@@ -1,8 +1,7 @@
 // The top bar: at the left the thimble mark and the corpus's folder in mono, which opens the switcher, the server's
 // workspaces as the start page lists them (WorkspaceList), this one marked; the surfaces' tabs over the main area
-// (a click shows the surface, a drag takes it to a pane); at the right the Manual-mode chip while main's session runs
-// in Claude Code's Manual mode (ManualChip), Undo and Redo (shell/undo.ts), Report a problem, the links toggle, the
-// theme popover and the settings gear.
+// (a click shows the surface, a drag takes it to a pane); at the right Undo and Redo (shell/undo.ts), Report a problem,
+// the links toggle, the theme popover and the settings gear.
 import { useEffect, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { Button, type TabOption } from '../components/Button'
 import { Icon } from '../components/Icon'
@@ -11,9 +10,8 @@ import { Spinner } from '../components/Spinner'
 import { api } from '../lib/api'
 import { bus, type ProblemPrefill, type Tab } from '../lib/bus'
 import { toggleLinks, useLinksVisible } from '../lib/links'
-import type { Attached, WorkspaceRow } from '../lib/types'
+import type { WorkspaceRow } from '../lib/types'
 import { shortPath, shownPath } from '../lib/workspace'
-import { ManualChip } from './ManualChip'
 import { ProblemReportPopover } from './ProblemReport'
 import { SettingsPopover } from './SettingsPopover'
 import { ThemePopover } from './ThemePopover'
@@ -30,11 +28,9 @@ export interface TopBarProps {
   tabs: readonly SurfaceTab[]
   onTab: (tab: Tab) => void
   onTabDrag: (e: ReactPointerEvent, tab: Tab) => void
-  /** main's session, whose Manual mode the chip shows (Attached.manual) */
-  attached?: Pick<Attached, 'session' | 'manual'> | null
 }
 
-export function TopBar({ ws, tabs, onTab, onTabDrag, attached }: TopBarProps) {
+export function TopBar({ ws, tabs, onTab, onTabDrag }: TopBarProps) {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [gear, setGear] = useState<HTMLButtonElement | null>(null)
   const [themeOpen, setThemeOpen] = useState(false)
@@ -99,7 +95,6 @@ export function TopBar({ ws, tabs, onTab, onTabDrag, attached }: TopBarProps) {
         ))}
       </nav>
       <span className="shell-spacer" />
-      <ManualChip ws={ws} attached={attached} />
       <span ref={setTools} className="shell-tools">
         <Button variant="icon" icon="undo" title={undoTip(history.labels)} aria-label="Undo" disabled={!history.labels.undo && !history.labels.held} onClick={history.undo} data-tel="undo" />
         <Button variant="icon" icon="redo" title={history.labels.redo ? `Redo: ${history.labels.redo}` : 'Redo'} aria-label="Redo" disabled={!history.labels.redo} onClick={history.redo} data-tel="redo" />

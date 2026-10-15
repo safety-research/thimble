@@ -293,7 +293,6 @@ export function Shell({ ws }: { ws: string }) {
           setPanes((p) => show(p, id))
         }}
         onTabDrag={startDrag}
-        attached={metas.find((m) => m.kind === 'main')?.attached}
       />
       <div className="shell-body">
         {layout.chatOpen ? (

@@ -1532,6 +1532,23 @@ button.model-line-part[aria-expanded='true'] {
   margin: 0 0 6px;
   border-radius: var(--radius-card);
 }
+/* an alert and the restarted line end in their × (Holds), which takes no height of its own */
+.chat-hold[data-kind='alert'],
+.chat-hold-restarted {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 6px;
+}
+.chat-hold-text,
+.chat-hold-restarted > span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.chat-hold-x.btn {
+  flex: none;
+  margin: -4px -4px -4px 0;
+}
 /* above the composer the foot floats over the chat's rows, so the card's wash sits on the card's own surface, as the
    permission card's does, and no row shows through its text (live check L3) */
 .chat-foot .chat-hold {
@@ -1756,6 +1773,19 @@ button.model-line-part[aria-expanded='true'] {
   margin-top: 3px;
   color: var(--status-warning);
 }
+/* the Manual-mode notice (backend notices `manual-mode`): the problem red of a failure for its edge, glyph and words, in
+   both themes (the tokens change with the theme) */
+.chat-notice[data-kind='manual-mode']:not([data-closed]) {
+  border-color: var(--status-negative);
+  background: var(--status-negative-soft);
+  color: var(--status-negative);
+}
+.chat-foot .chat-notice[data-kind='manual-mode']:not([data-closed]) {
+  background: color-mix(in oklab, var(--status-negative) 12%, var(--surface-card));
+}
+.chat-notice[data-kind='manual-mode']:not([data-closed]) .chat-notice-ico {
+  color: var(--status-negative);
+}
 .chat-notice-body {
   display: flex;
   flex: 1 1 auto;
@@ -1904,25 +1934,6 @@ button.model-line-part[aria-expanded='true'] {
 .chat-sub-stopped {
   flex-basis: 100%;
   color: var(--text-secondary) !important;
-}
-/* the plain-claude warning at the top of the chat (shell/UnfencedBanner) */
-.chat-unfenced {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  margin: 0 8px 6px;
-  padding: 8px 10px;
-  border: 1px solid var(--status-negative);
-  border-radius: var(--radius-card);
-  background: var(--status-negative-soft);
-  color: var(--text-primary);
-  font: var(--type-body-sm);
-  overflow-wrap: anywhere;
-}
-.chat-unfenced-ico {
-  flex: none;
-  margin-top: 2px;
-  color: var(--status-negative);
 }
 /* in place of the composer: an orientation an earlier session or version ran, which takes no message here */
 .chat-continue {

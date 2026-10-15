@@ -55,6 +55,7 @@ import type {
   Writeup,
 } from './types'
 import { heavy } from './limit'
+import { setBrowserId, showCodeGone } from './notices'
 
 const BASE = '/api'
 
@@ -75,41 +76,79 @@ export function describeDetail(d: unknown): string {
 let keyReady: Promise<void> | null = null
 const CLAIM_WAITS_MS = [0, 500, 2000] // before each try of the claim while the server does not answer
 
-/** Trade the key in the link thimble showed (`#k=`) for the cookie that proves this browser to the server (permission
- * answers and mode changes, and every write behind hook_auth.LocalWriteGuard), and take it out of the address once the
- * server has answered. Memoised: with no key in the link the cookie the browser already holds stands; a claim the server
- * never answered leaves the key in the address and is tried again by the next call. `j` awaits it, so a write never
- * races the claim. */
+/** The address's hash as parameters: `p` is a link's sign-in code. */
+const hashParams = (): URLSearchParams => new URLSearchParams(window.location.hash.slice(1))
+
+/** The address with `params` as its hash (none when empty), in place: no reload, no history entry. */
+function setHash(params: URLSearchParams): void {
+  const rest = params.toString()
+  window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + (rest ? `#${rest}` : ''))
+}
+
+/** Sign this browser in with the one-time code in the link thimble showed (`#p=`, made as the link is shown: backend
+ * hook_auth.mint), which the server trades for the cookie that every analyst action needs (backend
+ * hook_auth.LocalWriteGuard), and take the code out of the address once the server has answered. 204: signed in, or
+ * signed in already. 410 (or any other refusal): the code was used, replaced by a newer one, or expired, which a
+ * notice this page makes says (lib/notices showCodeGone). The key an earlier version's link carried (`k` in the hash)
+ * is taken out of the address and never sent. After the claim the page asks which browser it is (GET /ui/paired), so
+ * it leaves out the notice of its own sign-in (lib/notices setBrowserId). Memoised: with no code in the link the
+ * cookie the browser already holds stands; a claim the server never answered leaves the code in the address and is
+ * tried again by the next call. `j` awaits it, so a write never races the claim. */
 export function claimKey(): Promise<void> {
   if (keyReady) return keyReady
   if (typeof window === 'undefined') return (keyReady = Promise.resolve())
-  const key = new URLSearchParams(window.location.hash.slice(1)).get('k')
-  keyReady = key ? claim(key) : Promise.resolve()
+  const hash = hashParams()
+  if (hash.has('k')) {
+    hash.delete('k')
+    setHash(hash)
+  }
+  const code = hash.get('p')
+  keyReady = (code ? claim(code) : Promise.resolve(true)).then((answered) => {
+    if (answered) void learnBrowser()
+  })
   return keyReady
 }
 
-async function claim(key: string): Promise<void> {
+async function claim(code: string): Promise<boolean> {
+  const ws = new URLSearchParams(window.location.search).get('ws')
   for (const wait of CLAIM_WAITS_MS) {
     if (wait) await new Promise((r) => setTimeout(r, wait))
     try {
-      const res = await fetch(`${BASE}/ui/key`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key }) })
-      // 204 claimed it, 403 names a key that is not this server's: neither changes on another try
-      if (res.status === 204 || res.status === 403) {
-        if (new URLSearchParams(window.location.hash.slice(1)).get('k') === key) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search)
-        return
+      const res = await fetch(`${BASE}/ui/key`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(ws ? { code, ws } : { code }) })
+      // 204 signed in, 410 (or any refusal) a code that is gone: neither changes on another try
+      if (res.status === 204 || (res.status >= 400 && res.status < 500)) {
+        const now = hashParams()
+        if (now.get('p') === code) {
+          now.delete('p')
+          setHash(now)
+        }
+        if (res.status !== 204) showCodeGone()
+        return true
       }
     } catch {
       /* no answer: try again */
     }
   }
   keyReady = null
+  return false
 }
 
-/** A link with a key opened in a tab already on its page changes only the address's hash, and loads nothing. */
+/** This browser's id (GET /ui/paired), for lib/notices; a read that fails leaves it unknown. */
+async function learnBrowser(): Promise<void> {
+  try {
+    const got = await api.paired()
+    setBrowserId(typeof got?.id === 'string' ? got.id : '')
+  } catch {
+    /* unknown: every sign-in notice shows */
+  }
+}
+
+/** A link with a code opened in a tab already on its page changes only the address's hash, and loads nothing. */
 export function claimOnHashChange(): void {
   if (typeof window === 'undefined') return
   window.addEventListener('hashchange', () => {
-    if (!new URLSearchParams(window.location.hash.slice(1)).get('k')) return
+    const hash = hashParams()
+    if (!hash.get('p') && !hash.has('k')) return
     keyReady = null
     void claimKey()
   })
@@ -403,6 +442,12 @@ export const api = {
   notices: (c: string) => j<unknown[]>(`${ws(c)}/notices`),
   /** × on a notice, or a fix of the analyst's that went through: the server forgets it (backend notices.dismiss_route). */
   dismissNotice: (c: string, id: string) => j<{ dismissed: boolean }>(`${ws(c)}/notices/${enc(id)}/dismiss`, { method: 'POST' }),
+  /** Whether this browser is signed in, and its id: the first 12 hex digits of its cookie's hash, '' when not signed in
+   * (backend main.ui_paired). */
+  paired: () => j<{ paired: boolean; id: string }>(`${BASE}/ui/paired`),
+  /** A sign-in notice's Sign it out: the server signs the browser `id` out and clears its notice in workspace `c`
+   * (backend main.ui_signout). */
+  signOut: (id: string, c?: string) => j<{ signed_out: boolean }>(`${BASE}/ui/signout`, { method: 'POST', body: JSON.stringify(c ? { id, ws: c } : { id }) }),
   retryProposal: (c: string, slug: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/retry`, { method: 'POST' }),
   /** Build or Retry on a proposal's chip (`POST /ws/{c}/views/{slug}/build`): a click that starts a view builder through
    * thimble's plugin, with the run's model and effort (Settings' dev row when left out). */

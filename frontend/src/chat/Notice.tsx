@@ -8,13 +8,14 @@
 // that failed, or that the server could not start, says why in a toast and leaves it. A failure of main's own request
 // shows in the strip only while another chat is open, since main's chat shows its API error card. In the agent's own
 // chat the notice is also a row (NoticeRow), the same words without buttons, kept as a quiet line of the chat's history
-// once the notice is closed; while it is open the strip shows it there.
+// once the notice is closed; while it is open the strip shows it there. The Manual-mode notice (kind `manual-mode`,
+// while main runs in Claude Code's Manual mode) is drawn in the problem red instead (styles/chat.css).
 import { useState, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
-import { dismissNotice, noticeActions, useNotices, useNoticesRead } from '../lib/notices'
+import { dismissNotice, noticeActions, useNotices, useNoticesRead, usePageNotices } from '../lib/notices'
 import { refreshProposals } from '../lib/proposals'
 import { track } from '../lib/telemetry'
 import type { Notice, NoticeAction } from '../lib/types'
@@ -22,14 +23,15 @@ import type { NoticeRow as NoticeRowT } from './model'
 import { proposalsOff } from './ProposalCard'
 
 /** The actions a notice's button can run; one with another `do` shows no button. */
-export const NOTICE_DOS: readonly string[] = ['proposals-retry', 'proposals-off', 'settings', 'view-retry']
+export const NOTICE_DOS: readonly string[] = ['proposals-retry', 'proposals-off', 'settings', 'view-retry', 'sign-out']
 
 /** Whether `action` is one this page can run. Pure. */
-export const runnable = (action: NoticeAction): boolean => NOTICE_DOS.includes(action.do) && (action.do !== 'view-retry' || !!action.slug)
+export const runnable = (action: NoticeAction): boolean => NOTICE_DOS.includes(action.do) && ((action.do !== 'view-retry' && action.do !== 'sign-out') || !!action.slug)
 
 /** Run a notice's action: true when the failure is answered and the notice can go (Open Settings leaves it). A fix the
  * server could not start (a check that cannot run now, a build refused at once) throws with its reason, which the
- * toast says, and the notice stays. Try again names the notice's key, so the check that failed is the one run again. */
+ * toast says, and the notice stays. Try again names the notice's key, so the check that failed is the one run again.
+ * Sign it out signs out the browser a sign-in notice names (its slug). */
 export async function runNotice(ws: string, action: NoticeAction, notice?: Pick<Notice, 'key'>): Promise<boolean> {
   switch (action.do) {
     case 'proposals-retry': {
@@ -50,6 +52,10 @@ export async function runNotice(ws: string, action: NoticeAction, notice?: Pick<
       if (row?.refused) throw new Error(row.refused.reason || 'the build could not start')
       return true
     }
+    case 'sign-out':
+      if (!action.slug) return false
+      await api.signOut(action.slug, ws)
+      return true
     default:
       return false
   }
@@ -149,6 +155,20 @@ export function NoticeStrip({ ws, current, labels, onOpen }: { ws: string; curre
     <div className="chat-notices" role="region" aria-label="Notices">
       {notices.map((n) => (
         <ForegroundNotice key={n.key || n.id} ws={ws} notice={n} current={current} agent={noticeAgent(n, labels)} onOpen={onOpen} />
+      ))}
+    </div>
+  )
+}
+
+/** The notices this page made (lib/notices showPageNotice), on the start page, which has no workspace and no chat: a
+ * link's sign-in code that was used or expired. */
+export function PageNoticeStrip() {
+  const notices = usePageNotices()
+  if (!notices.length) return null
+  return (
+    <div className="chat-notices start-notices" role="region" aria-label="Notices">
+      {notices.map((n) => (
+        <ForegroundNotice key={n.key || n.id} ws="" notice={n} current="" agent="" onOpen={() => undefined} />
       ))}
     </div>
   )

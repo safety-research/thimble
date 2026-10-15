@@ -1,7 +1,8 @@
 // thimble's start page: the page whose URL names no workspace, which `thimble demo` opens, or names one this server does
 // not hold (a tab kept from another run or another server). A title and the server's workspaces in groups
-// (WorkspaceList), each row opening its workspace.
+// (WorkspaceList), each row opening its workspace; above them a link's sign-in code that was used or expired.
 import { useEffect, useState } from 'react'
+import { PageNoticeStrip } from '../chat/Notice'
 import { Icon } from '../components/Icon'
 import { Spinner } from '../components/Spinner'
 import { api } from '../lib/api'
@@ -29,6 +30,7 @@ export function StartPage({ missing }: { missing?: string | null }) {
       </header>
       <main className="start-main">
         <h1 className="start-title">Workspaces</h1>
+        <PageNoticeStrip />
         {missing && <p className="start-missing">No workspace “{missing}” on this server.</p>}
         {error ? (
           <p className="start-error">{error}</p>

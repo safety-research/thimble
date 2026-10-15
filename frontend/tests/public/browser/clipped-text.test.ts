@@ -217,6 +217,7 @@ function answer(route: Route) {
   if (p.startsWith('/api/')) {
     const method = req.method()
     if (p === '/api/ui/key') return route.fulfill({ status: 204, body: '' })
+    if (p === '/api/ui/paired') return json({ paired: true, id: 'x' })
     if (p === `/api/ws/${WS}/events`) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: ': open\n\n' })
     if (p === `/api/corpora/${WS}/sources` && url.searchParams.get('depth') === '1') return json(folder((url.searchParams.get('path') ?? '').replace(/^\.$/, '')))
     if (p === `/api/corpora/${WS}/source`) return json(sourcePage(url.searchParams.get('path') ?? 'README.md'))
