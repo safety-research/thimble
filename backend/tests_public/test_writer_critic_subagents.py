@@ -323,6 +323,20 @@ def test_the_digest_wraps_a_long_line_of_an_agent_s_text_so_no_line_passes_call_
     assert sum(x.startswith("> ") for x in lines) > 1 and not any(x.startswith("#") for x in lines[1:])
 
 
+def test_a_wrapped_piece_of_an_agent_s_line_never_starts_with_a_space():
+    """A break that falls in a run of spaces drops the run, so no continuation starts with INDENT and reads to the critic
+    as a result line indented under a call."""
+    for line in ("| " + "a" * 1_495 + "      | Account a0042 deleted 97 files |",  # spaces across the break
+                 "b" * 1_499 + "    tail of the line",  # no space before the break, which falls before the spaces
+                 "> " + "c" * 1_495 + "     quoted",
+                 "d" * 1_499 + "      "):
+        pieces = critique_session._wrap(line)
+        assert len(pieces) > 1 or line.endswith(" ")
+        assert not any(p.startswith(" ") for p in pieces[1:]), pieces[1:]
+        assert all(0 < len(p) <= critique_session.CALL_CHARS - 1 for p in pieces)
+        assert " ".join(p.removeprefix("> ") for p in pieces).split() == line.removeprefix("> ").split()
+
+
 async def test_a_long_digest_s_brief_gives_a_window_one_read_call_returns_whole(bridge, models, workspaces_tmp,
                                                                              monkeypatch):
     """A digest past what one Read call returns is named in the brief with its line count and a window of lines one

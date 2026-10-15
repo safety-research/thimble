@@ -239,13 +239,17 @@ def _cut(s: str, n: int) -> str:
 def _wrap(line: str, width: int = CALL_CHARS - 1) -> list[str]:
     """A line of an agent's text as lines of at most `width` characters, broken at a space where one falls in the
     second half of a line and mid-word where none does, every word kept; a quoted line's (`> `) continuations quoted
-    too. One character under CALL_CHARS leaves room for the `\\` that escapes a line starting with `#` (render)."""
+    too. The spaces at a break go, so no continuation starts with one and reads as a result line indented under a call
+    (INDENT). One character under CALL_CHARS leaves room for the `\\` that escapes a line starting with `#` (render)."""
     lead = "> " if line.startswith("> ") else ""
     out: list[str] = []
     while len(line) > width:
         at = line.rfind(" ", width // 2, width) + 1 or width
         out.append(line[:at].rstrip(" ") or line[:at])
-        line = lead + line[at:]
+        rest = line[at:].lstrip(" ")
+        if not rest:
+            return out
+        line = lead + rest
     return [*out, line]
 
 def _short_values(v: Any) -> Any:
