@@ -1422,12 +1422,6 @@ Review the orientation's analysis and its drafts.
 
 Its drafted deck is the group `{deck}`, which `list_cards` lists.
 
-## critique-proposals
-
-The views it proposed, each with what the analyst sees in it, what they do with it and the files it reads.
-
-{proposals}
-
 ## critique-transcript
 
 Its transcript, rendered as its steps, is `{path}`, which Read opens.

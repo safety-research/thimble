@@ -554,19 +554,21 @@ Each build is checked against the copy the demo's orientations ran on; a source 
 warning, and the Transluce build goes on with what it got. `~/.thimble/demo/SOURCES.md` lists who published each
 dataset, where it was downloaded from and what each build changes. The Transluce dataset states no license.
 
-The command then registers each folder. Where [demos/](demos/README.md) in the repository has a pre-cached
-orientation for the dataset, it installs it as the folder's workspace: the cards, labels, views and report. A
-pre-cache holds the orientation's outputs alone, so its Claude Code session is not included. A dataset without one
-opens with no analysis yet; ask Claude in the page or the terminal for an orientation. It prints one URL and opens it
-in your browser without a Claude Code session: thimble's start page, which lists the datasets you downloaded (and any
-other folder open in thimble), each row opening its workspace on the dataset's main view rather than on Files; in a
-workspace, the folder name in the top bar opens the same list.
-The orientation's thread opens with a card that says it is a frozen demo session, with the command that starts a live
-session from scratch with the dataset.
+The command then registers each folder. Where [demos/](demos/README.md) in the repository has a pre-cached orientation
+for the dataset, it installs it as the folder's workspace: the cards, labels, views and report. A pre-cache holds the
+orientation's outputs alone, so its Claude Code session is not included. A dataset without one opens with no analysis
+yet; to run one, start a session in its folder (`cd ~/.thimble/demo/<name> && thimble`) and ask Claude for an
+orientation. It prints one URL and opens it in your browser without a Claude Code session: thimble's start page, which
+lists the datasets you downloaded (and any other folder open in thimble), each row opening its workspace on the
+dataset's main view rather than on Files; in a workspace, the folder name in the top bar opens the same list.
+Until a session attaches, each dataset's workspace is a demo page: the top bar shows a Demo tag, everything that works
+without Claude works, and the orientation's thread says it ran in advance. The composer takes typing, but a message,
+or any action that needs Claude, shows one note in the chat: "This is a demo, so Claude isn't connected here. To ask
+about your own files, run thimble in a folder of transcripts."
 
 The demo is static: it starts no Claude Code session and asks nothing about one. `--attach` starts one in the
 dataset's folder, once `claude auth status` says you are logged in (when you are not, it says how to log in). Without
-it, it prints for each dataset the command the card gives, which starts a live session; `thimble -c` in the same folder
+it, it prints for each dataset the command that starts a live session there; `thimble -c` in the same folder
 continues the last session later:
 
 ```bash
