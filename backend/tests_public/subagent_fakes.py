@@ -21,6 +21,7 @@ HINTS = {
     "agent-check-message": "ONLY WHEN THE ANALYST ASKS",
     "start-plan-mode": "PLAN MODE",
     "writer-context-file": "READ {path} FIRST",
+    "writer-context-files": "READ {n} FILES {paths} FIRST",
     "critic-brief-file": "READ {path} FIRST",
     "start-refused-no-module": "NO MODULE: {reason}",
     "orient-continue-earlier-session": "EARLIER SESSION: {session}",
