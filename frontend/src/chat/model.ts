@@ -1401,6 +1401,9 @@ const NEW_SESSION_FIX = 'In your terminal: run /clear to start a new session, th
 export function apiFailureText(text: string, opts: { failure?: ApiFailure | null; retry?: boolean } = {}): string {
   const read = apiFailure(text)
   const failure = opts.failure ?? read.failure
+  // a failure of no known class in Claude Code's own words (a spend limit, say), which say more than a generic head
+  const own = text.trim().split('\n', 1)[0].trim()
+  if (failure === 'other' && own && !isApiError(own)) return own.length > 300 ? `${own.slice(0, 299).trimEnd()}…` : own
   const status = read.status != null && FAILURE_OF_STATUS[read.status] === failure ? read.status : failure === read.failure ? read.status : null
   const head = status != null && failure !== 'refused' ? `${FAILURE_WORDS[failure]} (${status})` : FAILURE_WORDS[failure]
   const fix = (failure === 'refused' && NEW_SESSION_TEXT.test(text) ? NEW_SESSION_FIX : FAILURE_FIX[failure])?.replace('{then}', opts.retry ? ', then Retry' : '')

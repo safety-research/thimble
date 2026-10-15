@@ -423,8 +423,8 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   bind no key: a letter typed goes to the prompt.
 - The notice rows, under them, newest first: every open notice of every agent thimble runs (the orientation and its
   helpers, the critic, writers, view builds and reviews, report checks, code tickets and the dev agent, card checks,
-  labels, the view proposer), since Claude Code's own output shows only main's requests (a notice of Claude's
-  safeguards on main's own reply is left out, as Claude Code shows that one). One row each: `notice` dim on the label
+  labels, the view proposer), since Claude Code's own output shows only main's requests (a notice of main's own reply,
+  a switch of Claude's safeguards or an API error, is left out, as Claude Code shows those). One row each: `notice` dim on the label
   column, then the notice's words in red, which name the agent and the failure, wrapped whole (a safeguard's block, or
   its switch to another model; an API error that stopped the agent; an agent that ended failed or was refused; a view
   build, a check or a label run that failed; a check for a view proposal that failed or that a fallback model

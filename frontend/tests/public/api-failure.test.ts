@@ -31,6 +31,12 @@ describe('API errors no retry fixes', () => {
     expect(apiFailureText('Not logged in · Please run /login')).toBe("Claude Code's login or API key was refused. In your terminal: run /login (or claude auth login in a shell).")
   })
 
+  test("a failure of no known class that is not Claude Code's API Error line reads in its own words", () => {
+    const credits = "You're out of usage credits. Switch to another model to continue."
+    expect(apiFailureText(credits, { failure: 'other' })).toBe(credits)
+    expect(apiFailureText('API Error: 400 {"error":{"type":"invalid_request_error"}}', { failure: 'other' })).toBe("Anthropic's API returned an error (400)")
+  })
+
   test('each failure says where its fix runs: the terminal for /login and /model, which the browser cannot run', () => {
     expect(FIX_WHERE).toEqual({ overloaded: 'browser', rate_limited: 'browser', server_error: 'browser', connection: 'browser', auth: 'terminal', forbidden: 'terminal', not_found: 'terminal', refused: 'browser', other: 'browser' })
     for (const [failure, where] of Object.entries(FIX_WHERE)) {
