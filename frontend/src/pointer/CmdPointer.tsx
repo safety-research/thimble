@@ -49,23 +49,52 @@ interface Ask {
    * the element is the same */
   mark: 'region' | 'box'
   range?: Range
+  /** where the element, a view's frame, is found again once it is drawn anew (homeOf); null for any other element */
+  home: Home | null
 }
 
 /** What an opened box is given: everything but where its element was when it opened, which openBox takes. */
-type Opened = Omit<Ask, 'from'>
+type Opened = Omit<Ask, 'from' | 'home'>
+
+/** Where a view's frame, which has no `data-anchor` of its own, is found again once it is drawn anew: in the nearest
+ * anchored element around it (a card), else in the surface it is in (a view's pane), by its title. */
+export interface Home {
+  anchor: string | null
+  surface: string | null
+  title: string | null
+}
+
+/** The Home of a view's frame (an iframe); null for any other element, which is found again by its `data-anchor`. */
+export function homeOf(el: Element): Home | null {
+  if (el.tagName !== 'IFRAME' || el.hasAttribute('data-anchor')) return null
+  return {
+    anchor: el.parentElement?.closest('[data-anchor]')?.getAttribute('data-anchor') ?? null,
+    surface: el.closest('[data-surface]')?.getAttribute('data-surface') ?? null,
+    title: el.getAttribute('title'),
+  }
+}
+
+const escAttr = (v: string): string => (typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(v) : v.replace(/["\\]/g, '\\$&'))
+const shownAll = (root: ParentNode, sel: string): Element[] => Array.from(root.querySelectorAll(sel)).filter(isShown)
 
 /**
  * The element a box is about as it is on screen now: the element itself while it is laid out (a hidden tab's elements
  * are not); once it has left the page, the element drawn anew in its place, with its `data-anchor`, in the panel it was
- * in (a card a collapsed frame no longer drew, once the frame opens again); else null.
+ * in (a card a collapsed frame no longer drew, once the frame opens again), or, for a view's frame, the frame drawn anew
+ * at its `home` (in its card, or in its view's pane); else null.
  */
-export function onScreen(el: Element, panel: Element | null): Element | null {
+export function onScreen(el: Element, panel: Element | null, home: Home | null = null): Element | null {
   if (el.isConnected) return isShown(el) ? el : null
-  const anchor = el.getAttribute('data-anchor')
-  if (!anchor) return null
-  const esc = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(anchor) : anchor.replace(/["\\]/g, '\\$&')
   const root: ParentNode = panel?.isConnected ? panel : document
-  return Array.from(root.querySelectorAll(`[data-anchor="${esc}"]`)).find(isShown) ?? null
+  const anchor = el.getAttribute('data-anchor')
+  if (anchor) return shownAll(root, `[data-anchor="${escAttr(anchor)}"]`)[0] ?? null
+  if (!home || (!home.anchor && !home.surface)) return null
+  const hosts = home.anchor ? shownAll(root, `[data-anchor="${escAttr(home.anchor)}"]`) : shownAll(document, `[data-surface="${escAttr(home.surface!)}"]`)
+  for (const h of hosts) {
+    const hit = shownAll(h, 'iframe').find((e) => e.getAttribute('title') === home.title)
+    if (hit) return hit
+  }
+  return null
 }
 
 /** Where a region's box goes beside the element drawn anew: as beside the element, keeping the side of the element
@@ -137,7 +166,7 @@ export function CmdPointer({ ws }: { ws: string }) {
       setDraft('')
       setHidden(false)
       panel.current = b.el.closest('[data-panel]')
-      setBox({ ...b, from: toBox(b.el.getBoundingClientRect()) })
+      setBox({ ...b, from: toBox(b.el.getBoundingClientRect()), home: homeOf(b.el) })
     }
     const inBox = (t: EventTarget | null) => !!boxEl.current?.contains(t as Node)
     // what the pointer is on: the report block it is in, else the part of a card under it, else a word of an anchored
@@ -356,7 +385,7 @@ export function CmdPointer({ ws }: { ws: string }) {
     // each frame while the box shows; while it is hidden, every GONE_MS
     let later = 0
     const tick = () => {
-      const now = onScreen(box.el, panel.current)
+      const now = onScreen(box.el, panel.current, box.home)
       if (!now) {
         if (!gone) {
           gone = true
@@ -373,7 +402,8 @@ export function CmdPointer({ ws }: { ws: string }) {
         else highlight.region(now)
         highlight.hold()
         setHidden(false)
-        const place = gone && !box.span ? placeAgain(box.place, now) : box.place
+        // a view's frame keeps the place it had: its box went beside the frame's element, which only the frame knows
+        const place = gone && !box.span && !box.home ? placeAgain(box.place, now) : box.place
         setBox((b) => (b === box ? { ...box, el: now, from: at, rect, place } : b))
         return
       }
