@@ -19,7 +19,7 @@ thimble server up                  # the server on port 8300, detached; prints t
 THIMBLE_DEV=1 thimble server up    # plus Vite on 5300 with hot reload; the URL is Vite's
 thimble server status | stop | restart
 thimble status                     # one line: the server, the orientation, the queue
-thimble doctor                     # the install state, versions, port and the log's recent errors, with the lines
+thimble doctor --verbose           # the install state, versions, port and the log's recent errors, with the lines
                                    # only a development install prints: the turn endings, the source changed since
                                    # the server started, the validation stack, the last apply and the dev tickets
 thimble fix                        # the server will not start: the dev agent repairs it in the checkout, asking first
