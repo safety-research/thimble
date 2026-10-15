@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # scripts/sync_demo_views.sh — copy the reviewed views into the demo pre-caches (demos/<dataset>/), in place of the
-# views their orientations built, named as the dataset's views and stamped so that `thimble demo` shows them at once.
+# pre-caches' own views, named as the dataset's views and stamped so that `thimble demo` shows them at once.
 #
 #   scripts/sync_demo_views.sh --from HOME [--dry-run] [DATASET...]
 #
