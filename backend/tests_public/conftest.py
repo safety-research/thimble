@@ -236,6 +236,24 @@ def mark_open(home: Path, folder: Path | str) -> None:
         (d / path.replace("/", "%")).touch()
 
 
+def earlier_orientation_proposal(c: str, name: str, description: str, claims: list[str], arrangement: str = "") -> str:
+    """A proposal as an orientation from before 0.8.0 stored it (views.propose with `orientation`, which 0.8.0 took out),
+    for the tests of what thimble still does with such a row: `orientation` and `held`, a follow-on start, announced as
+    queued (views._emit marks it held) and its build queued. Its slug."""
+    from app import views  # noqa: PLC0415
+
+    name = views.title_case(name)
+    with views._proposals_lock:
+        slug = views._unique_slug(c, name)
+        row = {"slug": slug, "name": name, "description": description, "task": "", "claims": list(claims),
+               "arrangement": arrangement, "proposed_by": "analyst", "status": "queued", "ts": views._now(),
+               "orientation": True, "held": True, "route": views.FOLLOW_ON}
+        views._save_proposals(c, [*views.list_proposals(c), row])
+    views._emit(c, slug, "queued")
+    views._queue(c, slug)
+    return slug
+
+
 @pytest.fixture()
 def plugin_headers():
     """A function giving the headers thimble's plugin sends to the routes only it may call (app/hook_auth.py), for a

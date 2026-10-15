@@ -726,7 +726,7 @@ button.chat-call-chip:hover,
 .chat-chip-settled-failed {
   color: var(--status-negative);
 }
-/* the writer of the orientation's report pass, after its document's chip on the orientation's card (AgentCard
+/* the writer of the report pass of an orientation from before 0.8.0, after its document's chip on its card (AgentCard
    madeSections): the spinner (or ✕), a quiet word and its thread's chip, until it has written */
 .chat-task-writer {
   display: inline-flex;

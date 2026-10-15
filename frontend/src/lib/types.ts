@@ -29,8 +29,8 @@ export interface ChatMeta {
   name?: string | null
   /** a writer's document (write_session.start) */
   doc?: string | null
-  /** a writer that answers the orientation's report pass: the orientation's chat and its run then; null on a writer
-     * the analyst asked for; may be absent (write_session.start) */
+  /** a writer that answered the report pass of an orientation from before 0.8.0: the orientation's chat and its run
+     * then; null on every writer since (backend write_session.NO_REPORT_PASS); absent on an older writer's chat */
   orient?: string | null
   orient_run?: number | null
   /** a thread that a comment's reply field opened: the comment, which its anchor line names beside its passage or step
@@ -466,9 +466,10 @@ export interface Filters {
 
 // ---- views and proposals ----
 
-/** A view ticket's build: `dropped` is an orientation proposal that could not be built, shown nowhere (backend
- * views.drop); `suggested` a viewer for a file type, such as one the orientation proposes, shown only in the File
- * browser until the analyst accepts it (backend views.accept). */
+/** A view ticket's build: `dropped` is a view proposal the analyst rejected, or the proposal of an orientation from
+ * before 0.8.0 left out when the analyst stopped it, shown nowhere (backend views.drop); `suggested` a view proposal
+ * that waits for the analyst's Accept or Reject (backend views.offer), or a 0.7.x orientation's viewer for a file type,
+ * which no card shows (backend views.open_offer). */
 export type ProposalStatus = 'queued' | 'building' | 'built' | 'failed' | 'dropped' | 'suggested'
 
 /** A view ticket (the propose_view tool): what the analyst sees in the view, what they do with it, the files it reads,
@@ -486,7 +487,8 @@ export interface Proposal {
   proposed_by: string
   /** the analyst asked for it (backend views.propose): it opens by itself once built (files/viewReady.ts) */
   asked?: boolean
-  /** an orientation's proposal whose view has not passed its checks yet: its card shows the build, the views bar not */
+  /** the proposal of an orientation from before 0.8.0 whose view has not passed its checks yet: its card shows the
+   * build, the views bar not */
   held?: boolean
   /** its view is switched off in Settings (backend views.views_off): the views bar leaves it out */
   off?: boolean
@@ -505,7 +507,7 @@ export interface Proposal {
   agent_id?: string | null
   /** the builder's gate attempts so far (finish_view), of MAX_ATTEMPTS */
   attempt?: number
-  /** the repairs of an orientation's proposal so far: a fresh builder after a build that failed for good, of
+  /** the repairs of a proposal the analyst did not ask for so far: a fresh builder after a build that failed for good, of
    * VIEW_REPAIRS (dev.py build_ended); while one builds, its number. Absent or 0 for the first build */
   repairs?: number
   /** why a build stopped before its end: `quit` when the analyst's Claude Code session ended (Retry starts it again) */
@@ -2097,8 +2099,8 @@ export interface ChatMeta {
   view?: string | null
   /** a view's agent chat that reviews it (view_review), not one that builds it */
   review?: boolean | null
-  /** a view ticket's agent chat: the analyst asked for the view, so it is their dev thread; the orientation's builds
-   * are not listed (dev._view_chat, chat/threads.ts) */
+  /** a view ticket's agent chat: the analyst asked for the view, so it is their dev thread; the builds of views nobody
+   * asked for, such as an orientation's from before 0.8.0, are not listed (dev._view_chat, chat/threads.ts) */
   asked?: boolean | null
   /** main, or a code ticket's session: a dialog holds the session where the browser cannot answer it */
   alert?: SessionAlert | null

@@ -352,6 +352,8 @@ def test_the_holder_hears_every_agent_end_the_server_hears(workspaces_tmp, tmp_p
     seen = json.loads(out.stdout.strip().splitlines()[-1])
     assert seen["before"] == list(local_hooks.END_LISTENERS)
     assert "app.checks._writer_ended" in seen["hooks"]
+    listening = {h.rsplit(".", 1)[0] for h in seen["hooks"]}
+    assert all(f"app.{n}" in listening for n in local_hooks.END_LISTENERS), "each module named registers a handler"
 
 
 async def test_while_an_agent_runs_its_thread_shows_each_step_with_no_other_hook(ws, project, module, monkeypatch):

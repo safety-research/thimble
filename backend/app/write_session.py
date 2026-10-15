@@ -30,6 +30,9 @@ ROLE = "writer"  # the agent chat's role, and its role among subagents.TYPES
 WRITTEN_KIND = "written"  # the event kind that tells main a writer ended (prompts/main.md)
 CONTEXT_CHARS = 600_000  # of the context file, about 150k tokens
 CONTEXT_FILE = "context.md"  # in its work folder: what it reads first
+# a new writer's chat fields of the orientation's report pass, which 0.8.0 took out: `orient` null says the writer is no
+# report pass, so the browser does not guess one from when it ran (frontend chat/model.ts orientWriters)
+NO_REPORT_PASS: dict[str, Any] = {"orient": None, "orient_run": 0}
 WORK_DIR = "writers"  # workspaces/<c>/writers/<doc>, a writer's own folder, where it may write
 SKILLS = ("thimble:shared",)  # shared.md, loaded before its first turn (U3)
 OWN_TOOLS = ("read_ref", "list_cards", "add_card", "edit_card", "delete_card", "screenshot", "write_document",
@@ -90,8 +93,7 @@ def running(c: str, doc: str) -> bool:
 
 
 async def start(c: str, doc: str, request: str = "", after: str = "", *, route: str = subagents.CLICK,
-                values: "dict[str, Any] | None" = None, call: str | None = None, orient: str | None = None,
-                orient_run: int = 0) -> subagents.Answer:
+                values: "dict[str, Any] | None" = None, call: str | None = None) -> subagents.Answer:
     """Start the writer of `doc` for workspace `c` with the analyst's request and passage and the run's values (each
     defaulting to Settings' writer row): a click or a follow-on start through the module, or a typed one's pending
     request and exact Agent call (subagents.start_job). The context file is written off the event loop first.
@@ -103,15 +105,12 @@ async def start(c: str, doc: str, request: str = "", after: str = "", *, route: 
     key = session_key(doc)
     if running(c, doc):
         return subagents.refusal(subagents.HOOK, tools.hint("start_writing-running", doc=doc))
-    # the orientation's report pass: the writer carries its chat and run, and its card shows the writer (module note)
-    pending = report_types.write_pending(c, doc) or {}
-    fields = {"orient": orient or pending.get("orient") or None, "orient_run": orient_run or pending.get("orient_run") or 0}
     from . import roles  # noqa: PLC0415
 
     agent = roles.agent_for(c, "writer")
     if agent.code and agent.replacing is not None:
         prompt = await asyncio.to_thread(first_message, c, t, request, after)
-        start_program(c, doc, t, request, after, prompt, agent.replacing, fields)
+        start_program(c, doc, t, request, after, prompt, agent.replacing)
         return subagents.Answer({"program": agent.replacing.extension})
     if route == subagents.TYPED or route == subagents.CLICK:
         before = subagents.refusal_before(c, click=route == subagents.CLICK)
@@ -124,13 +123,12 @@ async def start(c: str, doc: str, request: str = "", after: str = "", *, route: 
     ans = await subagents.start_job(c, ROLE, key, task(t, request, after, path), subagents.values_for(c, ROLE, values),
                                     route, description=f"writer: {doc}",
                                     chat={"title": f"Write {doc}", "doc": doc, "brief": task_text(t, request, after),
-                                          **fields},
+                                          **NO_REPORT_PASS},
                                     work=work_dir(c, doc), call=call, check=False)
     return ans
 
 
-def start_program(c: str, doc: str, t: dict[str, Any], request: str, after: str, context_text: str, part: Any,
-                  orient: dict[str, Any]) -> Any:
+def start_program(c: str, doc: str, t: dict[str, Any], request: str, after: str, context_text: str, part: Any) -> Any:
     """The writer of `doc` run by an extension's program (harness.py): its input is the document, its type, the
     request and what thimble's writer reads first; it writes through write_document and edit_document, and main hears
     what it returns."""
@@ -140,7 +138,7 @@ def start_program(c: str, doc: str, t: dict[str, Any], request: str, after: str,
                       {"doc": doc, "type": {k: t.get(k) for k in ("slug", "name", "kind", "description") if k in t},
                        "request": request, "after": after, "context": context_text},
                       OWN_TOOLS, work_dir(c, doc), chat_role=ROLE,
-                      fields={"doc": doc, "brief": task_text(t, request, after), **orient})
+                      fields={"doc": doc, "brief": task_text(t, request, after), **NO_REPORT_PASS})
 
     def ended(_run: Any, status: str, summary: str) -> None:
         subagents.tell_main(c, WRITTEN_KIND, {"text": summary or "", "status": status, "doc": doc})

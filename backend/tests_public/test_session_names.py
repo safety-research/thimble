@@ -505,8 +505,8 @@ async def test_the_statusline_shows_the_orientation_and_its_cards_and_the_listin
 
 
 def test_the_orientation_waiting_names_its_critic_or_its_own_subagents(workspaces_tmp, monkeypatch):
-    """Live check L13: with critique off the statusline said the orientation was waiting for its critique while it
-    waited for a helper it had started. The row names the child it waits for: its critic, else its subagents."""
+    """Live check L13: the statusline said the orientation was waiting for its critique while it waited for a helper
+    it had started and no critic ran. The row names the child it waits for: its critic, else its subagents."""
     from app import events, subagent_files as sf, subagents
 
     monkeypatch.setattr(events, "asking", lambda c: set())

@@ -10,8 +10,8 @@ subagents' `tmp_*` folders and the large files no card uses are deleted there (w
 The transcript. Raw transcripts run to megabytes of JSON and Read cuts lines at 2,000 characters, so the critique
 renders the orientation's agent transcript and its descendants' into one digest, each tool call under its ref in the
 orientation's call store (`call:<chat>/<n>`) with its input and the first lines of its result. The digest is written to
-`<workspace>/critique/<chat>/transcript.md`, which main's fence lets every agent read. `chat:<orientation chat>`
-resolves to the same digest, a page at a time.
+`<workspace>/critique/<chat>/transcript.md`, where the critic reads it. `chat:<orientation chat>` resolves to the same
+digest, a page at a time.
 
 The brief. `critique` writes the critic's first message to `critique/<chat>/brief.md`: what to review, the drafts, the
 digest, the orientation's context, the coverage checks' findings led by the coverage line, and the analyst's

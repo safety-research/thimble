@@ -786,7 +786,7 @@ def test_a_program_s_chat_a_previous_server_left_running_ends_stopped_and_frees_
     from app import agents
 
     prog = agents.new_agent(CORPUS, orientation.ROLE, "Orientation", way="sdk", extension="x", announce=False)
-    orientation.started(CORPUS, prog["id"], passes=["final"])
+    orientation.started(CORPUS, prog["id"])
     own = agents.new_agent(CORPUS, "writer", "Write d", announce=False)
     assert orientation.active(CORPUS)
     from fastapi.testclient import TestClient
@@ -796,7 +796,7 @@ def test_a_program_s_chat_a_previous_server_left_running_ends_stopped_and_frees_
     with TestClient(app):
         assert agents.read_meta(CORPUS, prog["id"])["status"] == "stopped", "the server's start closes it"
     agents.update_agent(CORPUS, prog["id"], status="running")
-    orientation.started(CORPUS, prog["id"], passes=["final"])
+    orientation.started(CORPUS, prog["id"])
     assert harness.mark_left() == [f"{CORPUS}/{prog['id']}"]
     assert agents.read_meta(CORPUS, prog["id"])["status"] == "stopped"
     assert agents.read_meta(CORPUS, own["id"])["status"] == "running", "thimble's own sessions recover their own way"

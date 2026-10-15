@@ -39,6 +39,7 @@ async def test_write_starts_the_writer_through_the_module_with_its_context_file(
     assert spawn["description"] == "writer: report" and spawn["what"] == "report"
     meta = agents.read_meta(CORPUS, subagents.agent(CORPUS, ans.agent_id)["chat"])
     assert meta["role"] == "writer" and meta["doc"] == "report" and meta["title"] == "Write report"
+    assert "orient" in meta and meta["orient"] is None, "no report pass, so the browser guesses none (orientWriters)"
     again = await write_session.start(CORPUS, "report", route=subagents.CLICK)
     assert again.kind == "hook", "a second writer of the document"
 

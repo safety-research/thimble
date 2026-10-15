@@ -88,10 +88,10 @@ ROLES = files.ROLES
 STEP_ROLE = agents.STEP_ROLE
 CLICK, FOLLOW_ON, TYPED = "click", "follow-on", "typed"
 ROUTES = (CLICK, FOLLOW_ON, TYPED)
-# the kinds a start that did not happen has (run.json `refused.kind`, a request's `refused_kind`); not-launched is only in
-# the records of earlier builds, which refused a main that thimble's launcher had not started
-AUTO_MODE, NO_CALL, LIMIT, NOT_LAUNCHED, HOOK, EARLIER, NO_MODULE, ERROR = (
-    "auto-mode", "no-call", "limit", "not-launched", "hook", "earlier-session", "no-module", "error")
+# the kinds a start that did not happen has (run.json `refused.kind`, a request's `refused_kind`); the records of
+# earlier builds may also hold not-launched, for a main that thimble's launcher had not started
+AUTO_MODE, NO_CALL, LIMIT, HOOK, EARLIER, NO_MODULE, ERROR = (
+    "auto-mode", "no-call", "limit", "hook", "earlier-session", "no-module", "error")
 # a refused start in the first seconds after main attached says thimble's plugin is still connecting (refusal_before)
 CONNECT_GRACE_S = 30.0
 HANDBACK_WAIT_S = 5.0  # a turn's end with no running child ends the run once no hand-back follows within this
@@ -322,9 +322,9 @@ def extension_types(c: str) -> dict[str, dict[str, Any]]:
 
 
 def write_dirs(c: str) -> list[Path]:
-    """The folders main's Bash may write in workspace `c`, its agents' work folders: orient/work, writers,
-    critique-work, check-work, views-work, the local extension's views and card-libs, where main installs the npm
-    packages its custom cards load (card_libs). They need not exist yet."""
+    """The agents' work folders in workspace `c`, which a card's trial may write (cardrun.trial_sandbox): orient/work,
+    writers, critique-work, check-work, views-work, the local extension's views and card-libs, where main installs the
+    npm packages its custom cards load (card_libs). They need not exist yet."""
     ws = config.workspace_path(c)
     return [ws / d for d in WORK_DIRS]
 
@@ -915,13 +915,29 @@ def message_request(c: str, agent_id: str, text: str, *, call: str | None = None
     return Answer({"request": rid, "input": inp})
 
 
+def unknown_agent_text(c: str, agent_id: str) -> str:
+    """Why a follow-up cannot reach an agent that is not in the registry: the earlier-session text with the session its
+    chat last ran under, which `thimble -r` resumes; the earlier-version text when no chat of the workspace names a
+    session for it, since the earlier-session text needs one."""
+    sid = ""
+    if agent_id:
+        for meta in agents.list_chats(c):
+            if meta.get("agent_id") == agent_id:
+                sessions = [str(s) for s in meta.get("sessions") or [meta.get("session")] if s]
+                sid = sessions[-1] if sessions else ""
+                break
+    if sid:
+        return tools.hint("orient-continue-earlier-session", session=sid)
+    return tools.hint("orient-continue-earlier-version")
+
+
 async def send(c: str, agent_id: str, text: str, *, values: dict[str, Any] | None = None, route: str = CLICK) -> Answer:
     """A follow-up sent from the browser: the pending message request, then the module's SendMessage, after it
     registers the run's own values when they differ from the role's latest registration (V1). Refused, with the text
-    kept, when the module is not live."""
+    kept, when the module is not live, and for an agent that is not in the registry (unknown_agent_text)."""
     a = agent(c, agent_id)
     if a is None:
-        return refusal(EARLIER, tools.hint("orient-continue-earlier-session", session=""))
+        return refusal(EARLIER, unknown_agent_text(c, agent_id))
     before = refusal_before(c, click=route == CLICK)
     if before is not None:
         return before

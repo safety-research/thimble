@@ -15,7 +15,7 @@ import json
 from pathlib import Path
 
 import pytest
-from conftest import Listener
+from conftest import Listener, earlier_orientation_proposal
 from fastapi.testclient import TestClient
 
 from app import agents, config, dev, events, orient_session, orientation, prompts, session, subagents, tools, view_review, view_tools, views
@@ -91,6 +91,11 @@ def _draft(slug: str, html: str = "<p>posts</p>") -> None:
 
 def _propose(name: str = "Posts", **kw) -> str:
     return views.propose(CORPUS, name, "to read the board", ["board.jsonl"], "one row per post", **kw)["slug"]
+
+
+def _earlier(name: str = "Posts") -> str:
+    """A proposal as an orientation from before 0.8.0 stored it: held, with its build queued."""
+    return earlier_orientation_proposal(CORPUS, name, "to read the board", ["board.jsonl"], "one row per post")
 
 
 def _prop(slug: str) -> dict:
@@ -277,9 +282,12 @@ def test_a_viewer_for_a_file_type_keeps_its_arrangement_for_the_builder(board, m
     from fastapi import HTTPException
 
     monkeypatch.setattr(views, "_queue", lambda c, slug: None)
-    slug = views.propose(CORPUS, "Board Lines", "Each line of the board as a post.", ["board.jsonl"],
-                         "One post per line, its body in full.", "files", False, False, True)["slug"]
-    prop = _prop(slug)
+    monkeypatch.setattr(views, "build_problem", lambda: "")
+    row, why = views.offer(CORPUS, name="Board Lines", description="Each line of the board as a post.", task="",
+                           claims=["board.jsonl"], after="file", why="Lines read as posts.", proposed_by="files",
+                           arrangement="One post per line, its body in full.")
+    assert why == ""
+    prop = _prop(row["slug"])
     assert (prop["status"], prop["description"], prop["task"]) == ("suggested", "Each line of the board as a post.", "")
     assert views.proposal_lines(prop).endswith("- The unit and the layout: One post per line, its body in full.")
     with pytest.raises(HTTPException) as e:
@@ -597,7 +605,7 @@ async def test_a_fork_s_start_main_missed_is_refused_when_its_turn_was_stopped_o
 async def test_an_orientation_s_proposal_builds_as_a_follow_on_start_when_the_pool_has_room(board, bridge, gates,
                                                                                              monkeypatch):
     monkeypatch.setattr(dev, "VIEW_POOL", 1)
-    first, second = _propose("Posts", orientation=True), _propose("Threads", orientation=True)
+    first, second = _earlier("Posts"), _earlier("Threads")
     await _until(lambda: len(bridge.ops("spawn")) == 1, "the first build never started")
     await asyncio.sleep(0.05)
     assert len(bridge.ops("spawn")) == 1 and (CORPUS, second) in dev._view_queue, "at most VIEW_POOL builds start"
@@ -615,7 +623,7 @@ async def test_a_held_proposal_s_build_sends_its_view_events_marked_held_for_its
     sent: list[dict] = []
     monkeypatch.setattr(investigation, "emit", lambda c, inv, event: sent.append(event))
     monkeypatch.setattr(dev, "VIEW_POOL", 1)
-    first, second = _propose("Posts", orientation=True), _propose("Threads", orientation=True)
+    first, second = _earlier("Posts"), _earlier("Threads")
     await _until(lambda: any(e["slug"] == first and e["status"] == "building" for e in sent), "no building event")
     held = [e for e in sent if e["slug"] in (first, second)]
     assert held and all(e.get("held") is True for e in held), held
@@ -843,7 +851,7 @@ async def test_an_orientation_s_failing_proposal_is_repaired_then_fails_with_ret
     orientation's thread, which also gets one line with the view's chip. A view the analyst asked for fails at once."""
     orient = agents.new_agent(CORPUS, orientation.ROLE, orientation.TITLE)["id"]
     orientation._write_run(CORPUS, {"status": "running", "chats": {orientation.ROLE: orient}})
-    slug = _propose(orientation=True)
+    slug = _earlier()
     agent = await _started(slug, route=subagents.FOLLOW_ON)
     _draft(slug, "<p>FAIL</p>")
     for n in range(1, dev.VIEW_REPAIRS + 1):
@@ -880,7 +888,7 @@ async def test_an_orientation_s_failing_proposal_is_repaired_then_fails_with_ret
 async def test_a_builder_stopped_after_its_last_attempt_ends_as_finish_view_said_and_is_repaired(board, bridge, gates,
                                                                                                 hints, monkeypatch):
     monkeypatch.setattr(view_tools, "FINISH_GRACE_S", 0.05)
-    slug = _propose(orientation=True)
+    slug = _earlier()
     agent = await _started(slug, route=subagents.FOLLOW_ON)
     _draft(slug, "<p>FAIL</p>")
     for _ in range(dev.MAX_ATTEMPTS):
@@ -928,7 +936,7 @@ async def test_a_build_main_s_plan_mode_held_at_its_end_fails_with_retry_saying_
     the builder followed main and could only read and plan. A build that ends there with no view that passes fails
     with Retry and the line that says why, and no repair starts; an orientation's proposal shows in the views list,
     failed. A builder that left a passing view before plan mode held it is built, as the gate says after any run."""
-    slug = _propose(orientation=True)
+    slug = _earlier()
     agent = await _started(slug, route=subagents.FOLLOW_ON)
     subagents.saw_plan_mode(CORPUS, agent)
     subagents.run_ended(CORPUS, agent, "done", "My plan is in the plan file.", source="handback")

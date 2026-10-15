@@ -29,7 +29,7 @@ async def chat(workspaces_tmp):
     """The orientation's chat, its first run going."""
     calls.forget()
     made = agents.new_agent(CORPUS, orientation.ROLE, orientation.TITLE, announce=False, brief="")["id"]
-    orientation.started(CORPUS, made, passes=["final"])
+    orientation.started(CORPUS, made)
     yield made
     calls.forget()
     orient_session._closing.pop(CORPUS, None)

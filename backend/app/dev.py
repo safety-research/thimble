@@ -36,21 +36,23 @@ short, ends stopped with Retry.
 
 View builds. A view proposal is built at once by a `thimble:view-builder`, a subagent of the analyst's Claude Code
 session (subagents.py), at most VIEW_POOL at once (queue_view); the others wait queued, and a start Claude Code refuses
-at its subagent limit goes back to the queue. A build is part of the start that asked for it: an orientation's proposal
-a follow-on start of the orientation's, Build, Retry and a change asked for in the browser clicks, each started through
-thimble's plugin module; main's propose_view gives main the exact Agent call (start_build), and a thread's fork's
-propose_view or file_dev_ticket on a view gives it to main in a `start_agent` event (tools._ask_main). The builder
-writes the view's three files in the view's folder, checks its draft with the `view_check` tool as often as it wants,
-and calls `finish_view`, where the server runs the gates of record and counts its attempts (view_tools.py). Its end
-(build_ended, _settle) is the backstop: a builder that ended without a pass gets the gate once; an orientation's
-proposal that still fails gets up to VIEW_REPAIRS new builders started with what failed, and then fails with Retry,
-which the orientation's thread says (_repairs_failed); a view the analyst asked for fails with Retry at once. A change to a built view goes to the view's last builder as a message when
-it can still be reached in main's session, so it keeps its context, else to a new builder; a change that fails leaves
-the view as it was (views.end_revision). A pass starts the view's review (view_review.py). The orientation's Stop stops
-the builds of the views it proposed (stop_orientation_views); the Stop in a build's thread, or on its builder, ends the
-build failed with Retry (views.stop_build, _view_stopped). Main's quit ends every builder with main, and their views
-fail with MAIN_ENDED and Retry; nothing starts again by itself. Where an active extension runs the dev agent with a
-program (roles.py), that program builds the view instead, turn by turn (program_build), checked the same way.
+at its subagent limit goes back to the queue. A build is part of the start that asked for it: Build, Retry and a change
+asked for in the browser are clicks, and a repair, or the build of a proposal an orientation from before 0.8.0 left, is
+a follow-on start, each started through thimble's plugin module; main's propose_view gives main the exact Agent call
+(start_build), and a thread's fork's propose_view or file_dev_ticket on a view gives it to main in a `start_agent` event
+(tools._ask_main). The builder writes the view's three files in the view's folder, checks its draft with the
+`view_check` tool as often as it wants, and calls `finish_view`, where the server runs the gates of record and counts
+its attempts (view_tools.py). Its end (build_ended, _settle) is the backstop: a builder that ended without a pass gets
+the gate once; a proposal the analyst did not ask for, such as an orientation's from before 0.8.0, that still fails gets
+up to VIEW_REPAIRS new builders started with what failed, and then fails with Retry, which the orientation's thread says
+(_repairs_failed); a view the analyst asked for fails with Retry at once. A change to a built view goes to the view's
+last builder as a message when it can still be reached in main's session, so it keeps its context, else to a new
+builder; a change that fails leaves the view as it was (views.end_revision). A pass starts the view's review
+(view_review.py). The orientation's Stop stops the builds of the views an orientation from before 0.8.0 proposed
+(stop_orientation_views); the Stop in a build's thread, or on its builder, ends the build failed with Retry
+(views.stop_build, _view_stopped). Main's quit ends every builder with main, and their views fail with MAIN_ENDED and
+Retry; nothing starts again by itself. Where an active extension runs the dev agent with a program (roles.py), that
+program builds the view instead, turn by turn (program_build), checked the same way.
 
 Notices. A view whose build failed after the repairs it gets, a change to a view that failed, a build that did not
 start, and a code ticket that failed are told in the foreground with their fix (notices.post, under the agent's key
@@ -142,7 +144,8 @@ POLL_S = float(os.environ.get("THIMBLE_DEV_POLL_S", "3") or "3")  # between two 
 UNLISTED_POLLS = 10  # polls a session's state may be unknown before the run gives up on it
 LOOPBACK = {"127.0.0.1", "::1", "localhost", "testclient"}
 MAX_ATTEMPTS = max(1, int(os.environ.get("THIMBLE_DEV_MAX_ATTEMPTS", "3") or "3"))
-# the new builders an orientation's view gets after a builder's attempts ran out, each told what failed (_settle)
+# the new builders a view the analyst did not ask for gets after a builder's attempts ran out, each told what failed
+# (_settle)
 VIEW_REPAIRS = max(0, int(os.environ.get("THIMBLE_VIEW_REPAIRS", "2") or "2"))
 # A turn runs until its session ends it or the analyst stops it: once the session has shown no activity for
 # QUIET_NOTE_S (nothing new in its transcript or its subagents'), its thread says so (QUIET_LINE), and again each time
@@ -2870,11 +2873,12 @@ _no_module_looks: dict[str, int] = {}
 # (workspace, slug) that recover_views queued again after a restart: it starts only in the main session that queued it
 _recovered: set[tuple[str, str]] = set()
 VIEW_STOPPED = "The build was stopped."  # a build the analyst stopped: its chat's end and its proposal's error
-ORIENTATION_STOPPED = "the orientation was stopped"  # the builds of the views an orientation proposed (stop_orientation_views)
+# the builds of the views an orientation from before 0.8.0 proposed (stop_orientation_views)
+ORIENTATION_STOPPED = "the orientation was stopped"
 WORKSPACE_CLOSED = "the workspace was archived"  # the builds of a workspace that is archived or reset (stop_views)
 # why a view's build stopped that is no failure of it: a change, a replacement or a deletion that takes over
 TAKEN_OVER = ("revised", "replaced", "deleted", WORKSPACE_CLOSED)
-# the stage line of a repair: an orientation's build that ran out of attempts starts again with a new builder
+# the stage line of a repair: a build nobody asked for that ran out of attempts starts again with a new builder
 REPAIR_LINE = "the view did not pass, so a new builder builds it again from what failed (repair {n} of {of})"
 UNCHANGED_LINE = "the builder changed none of the view's files"
 ORPHANED_LINE = "the build ended while thimble's server was not running"
@@ -3320,9 +3324,9 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
     - it ended without a pass and never called finish_view: the gate runs once, and a pass registers the view;
     - still not built while main's plan mode held it at its end, where it could only read and plan: the view fails
       with Retry and that reason (subagents.plan_failed_line), and no repair starts;
-    - still not built: a change to a built view leaves the view as it was, an orientation's proposal gets up to
-      VIEW_REPAIRS new builders started with what failed, and then fails with Retry (_repairs_failed), and a view the
-      analyst asked for fails with Retry."""
+    - still not built: a change to a built view leaves the view as it was, a proposal the analyst did not ask for gets
+      up to VIEW_REPAIRS new builders started with what failed, and then fails with Retry (_repairs_failed), and a view
+      the analyst asked for fails with Retry."""
     from . import subagents, view_review, view_tools, views  # noqa: PLC0415
 
     prop = views.read_proposal(c, slug)
@@ -3363,7 +3367,7 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
             prop = views.update_proposal(c, slug, last_report="\n".join(views.gate_lines(rep))[:ERROR_CHARS]) or prop
     if status == "done" and finish.get("result") != "stop" and subagents.ended_in_plan(c, run.agent_id, run.k):
         if not prop.get("revision"):
-            views.update_proposal(c, slug, held=None)  # an orientation's proposal shows in the views list, failed
+            views.update_proposal(c, slug, held=None)  # a held proposal shows in the views list, failed
         _view_failed(c, slug, subagents.plan_failed_line(view_tools.BUILDER), run.chat)
         return
     failure = (str(finish.get("report") or prop.get("last_report") or "")
@@ -3431,9 +3435,10 @@ async def stop_views(c: str) -> None:
 
 
 def stop_orientation_views(c: str) -> list[str]:
-    """The analyst stopped the orientation: the builds of the views it proposed stop, queued or running, and so do the
-    reviews of its views, so none of its builds starts after the Stop. A new view is dropped, and a change to a built
-    view leaves the view as it was. Views and changes the analyst asked for go on. The slugs stopped."""
+    """The analyst stopped the orientation: the builds of the views an orientation from before 0.8.0 proposed stop,
+    queued or running, and so do the reviews of those views, so none of their builds starts after the Stop. A new view
+    is dropped, and a change to a built view leaves the view as it was. Views and changes the analyst asked for go on.
+    The slugs stopped."""
     from . import view_review, views  # noqa: PLC0415
 
     stopped: list[str] = []
@@ -3610,10 +3615,11 @@ FAILED_WHY_CHARS = 240
 
 
 def _repairs_failed(c: str, slug: str, why: str, chat: str | None = None) -> None:
-    """An orientation's proposal whose build failed through its VIEW_REPAIRS repairs fails as a view the analyst asked
-    for does (_view_failed), no longer held: its chip, in the views list and in the orientation's thread, shows ✕ with
-    why and Retry, which builds it again with its repairs. The orientation's thread also gets one line that says so,
-    with the view's chip. Nothing is chipped in main, since the analyst never asked for it."""
+    """A proposal the analyst did not ask for, such as an orientation's from before 0.8.0, whose build failed through
+    its VIEW_REPAIRS repairs fails as a view the analyst asked for does (_view_failed), no longer held: its chip, in the
+    views list and in the orientation's thread, shows ✕ with why and Retry, which builds it again with its repairs. The
+    orientation's thread also gets one line that says so, with the view's chip. Nothing is chipped in main, since the
+    analyst never asked for it."""
     from . import orientation, views  # noqa: PLC0415
 
     views.update_proposal(c, slug, held=None)  # no longer held back from the views list (views.held_slugs)
@@ -3707,7 +3713,7 @@ async def _program_task(c: str, slug: str, part: Any) -> None:
 async def program_build(c: str, slug: str, part: Any) -> None:
     """A build an extension's program runs in place of thimble's builder: up to MAX_ATTEMPTS turns of the program
     (program_view_turn), the gates of record after each and what failed sent back, then the view registered and its
-    review started, or the build's failure (VIEW_REPAIRS more tries for an orientation's proposal)."""
+    review started, or the build's failure (VIEW_REPAIRS more tries for a proposal the analyst did not ask for)."""
     from . import view_review, views  # noqa: PLC0415
 
     prop = views.read_proposal(c, slug)

@@ -287,14 +287,14 @@ async def test_a_follow_up_to_an_earlier_version_s_or_session_s_orientation_is_r
     from app import session
 
     chat = agents.new_agent(CORPUS, orientation.ROLE, orientation.TITLE, session="s0")["id"]
-    orientation.started(CORPUS, chat, passes=["final"])
+    orientation.started(CORPUS, chat)
     with pytest.raises(HTTPException) as e:
         await orient_session.message_route(CORPUS, orient_session.MessageBody(text="hi"), analyst)
     assert e.value.status_code == 410 and e.value.detail == HINTS["orient-continue-earlier-version"]
     res = await tools.call(CORPUS, "message_orientation", {"message": "hi"})
     assert res.is_error and res.text.endswith(HINTS["orient-continue-earlier-version"])
     agents.finish_agent(CORPUS, chat, "done")
-    orientation.finished(CORPUS, chat, "done", "Done.", report=False)
+    orientation.finished(CORPUS, chat, "done", "Done.")
     agent = await _orientation()
     with subagents.update(CORPUS) as state:
         sf.registry(state)[agent]["sessions"] = ["11111111-1111-4111-8111-111111111111"]
@@ -735,7 +735,7 @@ async def test_a_workspace_0_5_0_left_loads_lists_and_renders_and_its_orientatio
                             pid=2 ** 22 + 7)["id"]
     _, log = agents.paths(CORPUS, chat)
     agents.append(log, {"type": "assistant", "text": "Surveyed 40 files."})
-    orientation.started(CORPUS, chat, passes=["final"])
+    orientation.started(CORPUS, chat)
     (ws / subagents.OLD_BG_FILE).write_text(json.dumps([{"short": "b50c2d3", "chat": chat}]))
     (ws / "tray.json").write_text(json.dumps({"entries": [{"name": "orient", "short": "b50c2d3"}]}))
     stopped: list[str] = []

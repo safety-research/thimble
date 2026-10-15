@@ -17,7 +17,7 @@ export type Events = {
   orient: { status: string; [k: string]: unknown }
   report: { slug: string; status: string; span?: string }
   /** `asked`: a view the analyst asked for is built (files/viewReady.ts); `version`: a new version of it passed its checks */
-  /** `held`: one of the orientation's proposals before its view first passes, which only its chip follows */
+  /** `held`: the proposal of an orientation from before 0.8.0 before its view first passes, which only its chip follows */
   /** `accepted`: the first build of a view the analyst accepted from a view proposal (files/viewReady.ts) */
   view: { slug: string; status: string; path?: string; chat?: string; asked?: boolean; accepted?: boolean; version?: string; held?: boolean }
   ticket: { id: string; n: number; status: string }
