@@ -1,17 +1,18 @@
 // A demo page: a workspace read without a Claude Code session, a pre-cache `thimble demo` installed or a worked example
 // `thimble demo --examples` opened, while no session has attached to it (shell/SessionGone sets it, isDemoPage). What
 // works without a session stays as it is: Files, views, the canvas, the report, labels and filters. The top bar wears
-// a Demo tag (shell/DemoTag). An action that needs the session (a message from the composer, Ask about this, a card's
-// ask, a request in the report, an agent's start) asks demoStop() first: on a demo page that shows one calm note in the
-// chat (chat/DemoNote), opens the chat column when it is folded, and the action stops there and keeps what was typed.
+// a Demo tag (shell/DemoTag). The chat's composer is disabled, so nothing can be typed there, and hovering it shows
+// DEMO_NOTE. Any other action that needs the session (Ask about this, a card's ask, a request in the report, an agent's
+// start) asks demoStop() first: on a demo page that shows the same note in the chat (chat/DemoNote), opens the chat
+// column when it is folded, and the action stops there and keeps what was typed.
 import { useSyncExternalStore } from 'react'
 import type { ChatMeta } from './types'
 
 /** The top bar's tag on a demo page, and its tooltip. */
 export const DEMO_TAG = 'Demo'
 export const DEMO_TIP = "Example data and a finished analysis; Claude isn't connected here"
-/** The chat's note when an action needs Claude on a demo page. */
-export const DEMO_NOTE = "This is a demo, so Claude isn't connected here. To ask about your own files, run thimble in a folder of transcripts."
+/** What hovering the disabled composer shows on a demo page, and the chat's note when an action needs Claude there. */
+export const DEMO_NOTE = "This is a demo and thimble isn't connected to a live Claude Code session."
 
 let demo = false
 // the note's count: 0 while it is hidden, else how many actions asked for it since it showed

@@ -471,8 +471,9 @@ const scrollTo = (api: Api, el: Element | null | undefined, above = 120, smooth 
 }
 const inReport = (api: Api, sel: string) => (api.els.root as HTMLElement | undefined)?.querySelector<HTMLElement>(sel) ?? null
 
-/** What the steps about the chat and the ⌘-click box say: on a demo page (`demo`, lib/demo), that Claude isn't
- * connected there, and what the chat is once thimble runs in the analyst's own folder. */
+/** What the steps about the chat and the ⌘-click box say: on a demo page (`demo`, lib/demo), that thimble isn't
+ * connected to a live Claude Code session there, so the chat takes no typing, and what the chat is in a live
+ * session. */
 export function sessionTexts(demo: boolean): { chat: [string, string]; terminal: [string, string]; ask: string } {
   if (!demo) {
     return {
@@ -482,7 +483,7 @@ export function sessionTexts(demo: boolean): { chat: [string, string]; terminal:
     }
   }
   return {
-    chat: ['The chat', "This is a demo, so Claude isn't connected here. When you run thimble in a folder of your own, this chat is your Claude Code session: ask it anything about the files."],
+    chat: ['The chat', "This is a demo and thimble isn't connected to a live Claude Code session, so you can't type here. In a live session, this chat is your Claude Code session: ask it anything about the files."],
     terminal: ['Your terminal', 'When you run thimble yourself, the session also runs in the terminal where you started it. It shows the same conversation, and you can type in either.'],
     ask: 'Type a question and press Enter. With Claude connected, the answer comes in a new thread in the chat.',
   }

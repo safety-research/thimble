@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 // A demo page (src/lib/demo.ts): a pre-cache's or a worked example's workspace read without a Claude Code session, while
-// none has attached to it. The top bar's Demo tag says so, with its tooltip and nothing else. The composer stays and
-// takes typing; a send shows one calm note in the chat, keeps the typed text and reaches no server. The same note
-// stands in for every other action that needs Claude (Ask about this, a card's ask, a report's request, an agent's
-// start), which each ask demoStop() first. No view proposal card shows there, and the tour says it is a demo.
+// none has attached to it. The top bar's Demo tag says so, with its tooltip and nothing else. The chat's composer is
+// disabled, so nothing can be typed, and hovering it shows exactly "This is a demo and thimble isn't connected to a
+// live Claude Code session." The same note shows in the chat for every other action that needs Claude (Ask about this, a
+// card's ask, a report's request, an agent's start), which each ask demoStop() first, and keeps what was typed. No view
+// proposal card shows there, and the tour says it is a demo and that the chat takes no typing.
 import { act } from 'react'
+import { TIP_DELAY_MS } from '../../src/components/Tooltip.tsx'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ChatPanel } from '../../src/chat/ChatPanel.tsx'
 import { DemoNote } from '../../src/chat/DemoNote.tsx'
@@ -71,13 +73,14 @@ describe('what the page shows', () => {
     expect(tag.tabIndex).toBe(0)
   })
 
-  test('the note shows once an action stopped, says where to go, and × hides it until the next', async () => {
+  test('the note shows once an action stopped, says thimble is not connected, and × hides it until the next', async () => {
     setDemo(true)
     const el = await mount(<DemoNote />)
     expect(el.querySelector('.chat-demo-note')).toBeNull()
     await act(async () => void demoStop())
     expect(el.querySelector('.chat-demo-note-text')?.textContent).toBe(DEMO_NOTE)
-    expect(DEMO_NOTE).toBe("This is a demo, so Claude isn't connected here. To ask about your own files, run thimble in a folder of transcripts.")
+    expect(DEMO_NOTE).toBe("This is a demo and thimble isn't connected to a live Claude Code session.")
+    expect(DEMO_NOTE).not.toMatch(/your own|folder|run thimble/)
     expect(el.querySelectorAll('.chat-demo-note').length).toBe(1)
     await act(async () => void demoStop())
     expect(el.querySelectorAll('.chat-demo-note').length).toBe(1) // one note, however many actions
@@ -88,25 +91,33 @@ describe('what the page shows', () => {
     await act(async () => dismissDemoNote())
   })
 
-  test('the composer stays and takes typing; a send shows the note, keeps the text and posts nothing', async () => {
+  test('the composer is disabled, so nothing can be typed, and hovering it shows exactly the note', async () => {
     setDemo(true)
     const el = await mount(<ChatPanel ws="demo-collusion-wiki" />)
     await settle()
     await settle()
     const field = el.querySelector('.chat-composer textarea') as HTMLTextAreaElement
     expect(field).not.toBeNull()
+    expect(field.disabled).toBe(true)
+    expect(el.querySelector<HTMLButtonElement>('.chat-composer .composer-send')?.disabled).toBe(true)
     expect(el.querySelector('[data-precached-bar]')).toBeNull()
-    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+    expect(document.querySelector('.tip')).toBeNull()
+    const form = el.querySelector('.chat-composer') as HTMLElement
     await act(async () => {
-      setter.call(field, 'Which agents merged most?')
-      field.dispatchEvent(new Event('input', { bubbles: true }))
+      form.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' }))
+      await new Promise((r) => setTimeout(r, TIP_DELAY_MS + 50))
     })
-    await act(async () => field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
-    await settle()
-    expect(el.querySelector('.chat-demo-note-text')?.textContent).toBe(DEMO_NOTE)
-    expect((el.querySelector('.chat-composer textarea') as HTMLTextAreaElement).value).toBe('Which agents merged most?')
+    expect(document.querySelector('.tip')?.textContent).toBe("This is a demo and thimble isn't connected to a live Claude Code session.")
     expect(posted.filter((p) => p.includes('/events') || p.includes('/chats'))).toEqual([])
     expect(el.querySelector('.chat-offer')).toBeNull()
+  })
+
+  test('outside a demo the composer takes typing and shows no tip', async () => {
+    const el = await mount(<ChatPanel ws="mini" />)
+    await settle()
+    await settle()
+    expect((el.querySelector('.chat-composer textarea') as HTMLTextAreaElement).disabled).toBe(false)
+    expect(el.querySelector('.chat-composer')?.hasAttribute('data-tipped')).toBe(false)
   })
 
   test("the tour's steps about the chat say it is a demo there, and stay as they were elsewhere", () => {
@@ -115,7 +126,8 @@ describe('what the page shows', () => {
     expect(live[0].title).toBe('Your Claude Code session')
     expect(live[0].body).toBe('This chat is your Claude Code session: ask it anything about the files.')
     expect(demo[0].title).toBe('The chat')
-    expect(demo[0].body).toContain("This is a demo, so Claude isn't connected here.")
+    expect(demo[0].body).toBe("This is a demo and thimble isn't connected to a live Claude Code session, so you can't type here. In a live session, this chat is your Claude Code session: ask it anything about the files.")
+    expect(demo[0].body).not.toMatch(/folder of your own|run thimble/)
     expect(demo[1].body).not.toContain('where you started thimble.')
     expect(demo.some((s) => s.body === sessionTexts(true).ask)).toBe(true)
     expect(demo.length).toBe(live.length)

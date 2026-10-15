@@ -2,7 +2,7 @@
 // same files. The orientation's thread opens with a card that says so: when it ran, on what model, what it left, and
 // whether its Claude Code session came with it (a full export's mark says `kept`, and a message in its thread then
 // continues it). Once a session is attached the card says so. Until then the page is a demo page (lib/demo): the
-// composer stays, and a message sent from it shows the chat's demo note (chat/DemoNote) rather than going anywhere.
+// composer is disabled, and hovering it says why (lib/demo DEMO_NOTE).
 import { Card } from '../components/Card'
 import type { ChatMeta, PrecachedMark } from '../lib/types'
 
