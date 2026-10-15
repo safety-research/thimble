@@ -130,6 +130,51 @@ describe('a report figure follows its card', () => {
   })
 })
 
+describe('a figure whose card changed while it was not on the page', () => {
+  /** The card now, after an edit `e1` of its takeaway, and its version before that edit. */
+  const edited = (before: Partial<Cell>) => {
+    card = cellOf({ takeaway: 'Two runs in three end early.', edited: [{ id: 'e0', by: 'main', ts: '2026-10-15T10:00:00Z', fields: ['code'] }, { id: 'e1', by: 'main', ts: '2026-10-15T11:00:00Z', fields: ['takeaway'] }] })
+    return vi.spyOn(api, 'cardVersion').mockImplementation(async (_ws, _id, entry) => ({ card: 'c1', before: entry, by: 'main', ts: '', fields: ['takeaway'], version: { ...cellOf({}), ...before } }) as never)
+  }
+
+  test('a caption that says an earlier takeaway takes the new one as the figure first reads the card', async () => {
+    const versions = edited({ takeaway: 'Most runs [[end early|card:c1]].' })
+    const { editor } = await figure('Most runs end early.', 'w-mount-1')
+    await settle()
+    expect(versions).toHaveBeenCalledWith('w-mount-1', 'c1', 'e1')
+    expect(versions).not.toHaveBeenCalledWith('w-mount-1', 'c1', 'e0')
+    expect(editor.updateBlock).toHaveBeenCalledWith('f1', { props: { cell: 'card:c1', caption: 'Two runs in three end early.' } })
+  })
+
+  test('a caption made from the question takes the takeaway the card got since', async () => {
+    edited({ takeaway: '' })
+    const { editor } = await figure('How many runs end early?', 'w-mount-2')
+    await settle()
+    expect(editor.updateBlock).toHaveBeenCalledWith('f1', { props: { cell: 'card:c1', caption: 'Two runs in three end early.' } })
+  })
+
+  test('a caption that says no earlier takeaway stays, and one that says the takeaway reads no version', async () => {
+    const versions = edited({ takeaway: 'Most runs end early.' })
+    const mine = await figure('Early ends cluster in one topic.', 'w-mount-3')
+    await settle()
+    expect(versions).toHaveBeenCalledTimes(1)
+    expect(mine.editor.updateBlock).not.toHaveBeenCalled()
+    unmountAll()
+    versions.mockClear()
+    const same = await figure('Two runs in three end early.', 'w-mount-4')
+    await settle()
+    expect(versions).not.toHaveBeenCalled()
+    expect(same.editor.updateBlock).not.toHaveBeenCalled()
+  })
+
+  test('a locked figure keeps a caption that says an earlier takeaway', async () => {
+    edited({ takeaway: 'Most runs end early.' })
+    const { editor } = await figure('Most runs end early.', 'w-mount-5', { locked: true })
+    await settle()
+    expect(editor.updateBlock).not.toHaveBeenCalled()
+  })
+})
+
 describe('followedCaption', () => {
   const was = { title: 'Q', takeaway: 'Most runs [[end early|card:c1]].' }
   test('follows a caption that says the old takeaway without its citations', () => {

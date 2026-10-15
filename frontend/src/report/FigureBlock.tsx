@@ -2,7 +2,8 @@
 // card's width (or its body, for cards with no run), and a caption edited in place. Before a card is picked the block is
 // the picker. Locked (a scene, a slide), the caption is text; `FigureView` is the same figure outside the editor. A
 // figure follows its card: when the card changes (the stream's `cell` record) it is read again and drawn in place, and a
-// caption that still says the card's takeaway word for word takes the new takeaway, unless the analyst locked the figure.
+// caption that still says the card's takeaway word for word takes the new takeaway, also after a change made while the
+// figure was not on the page (captionSource), unless the analyst locked the figure.
 // In the editor the question line is a handle that moves the figure, as the block's actions in the gutter do.
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { SideMenuExtension, type BlockNoteEditor } from '@blocknote/core'
@@ -22,7 +23,7 @@ import { hhmm } from '../lib/time'
 import { parseRef } from '../lib/refs'
 import { track } from '../lib/telemetry'
 import { teleport } from '../lib/teleport'
-import type { Cell, WriteupFigure } from '../lib/types'
+import type { CardVersion, Cell, WriteupFigure } from '../lib/types'
 import { useReportCtx } from './context'
 import { anchorFor, figureCandidates, readableText } from './model'
 
@@ -84,6 +85,36 @@ export function followedCaption(caption: string, was: Pick<Cell, 'takeaway' | 't
   const next = readableText(now.takeaway || '')
   if (!next || readableText(caption) !== captionFrom(was) || next === readableText(caption)) return null
   return next
+}
+
+/** A card as it stood before one of its edits, by workspace, card and edit: read once, since it never changes. */
+const figureVersions = new Map<string, Promise<CardVersion['version'] | null>>()
+
+function versionBefore(ws: string, cellId: string, entry: string): Promise<CardVersion['version'] | null> {
+  const key = `${ws}:${cellId}:${entry}`
+  let hit = figureVersions.get(key)
+  if (!hit) {
+    hit = api.cardVersion(ws, cellId, entry).then(
+      (v) => v.version,
+      () => null,
+    )
+    figureVersions.set(key, hit)
+  }
+  return hit
+}
+
+/** The card as it stood when `caption` said its takeaway word for word (else its question), from the versions before
+ * its edits of its takeaway or question, newest first; null when the caption says none of them. For a figure whose card
+ * changed while no figure of it was on the page, such as before the Report was first shown or while the page was closed. */
+export async function captionSource(ws: string, cell: Pick<Cell, 'id' | 'edited'>, caption: string): Promise<Pick<Cell, 'takeaway' | 'title'> | null> {
+  const said = readableText(caption)
+  if (!said) return null
+  const edits = (cell.edited ?? []).filter((e) => e.id && e.fields?.some((f) => f === 'takeaway' || f === 'title')).reverse()
+  for (const e of edits) {
+    const v = await versionBefore(ws, cell.id, e.id as string)
+    if (v && captionFrom(v) === said) return v
+  }
+  return null
 }
 
 function storedFigure(sections: { figures?: WriteupFigure[] }[] | undefined, id: string): WriteupFigure | undefined {
@@ -204,6 +235,11 @@ function Figure({ ws, id, cellRef, caption, stored, readOnly, bare = false, onCa
   const followed = useRef<Cell | null>(null)
   const captionNow = useRef({ caption, onFollow })
   captionNow.current = { caption, onFollow }
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => void (mounted.current = false)
+  }, [])
 
   // the card, read again whenever it changes, so the figure redraws in place; while the card runs again the figure keeps
   // what it showed, and only the newest read is shown
@@ -243,7 +279,17 @@ function Figure({ ws, id, cellRef, caption, stored, readOnly, bare = false, onCa
     // a card with no takeaway yet is not followed, so the caption is matched against the takeaway it had
     if (!was || cell.takeaway || !was.takeaway) followed.current = cell
     if (next != null) set?.(next)
-  }, [cell])
+    // the first read: a caption that says an earlier takeaway of the card, which changed while this figure was not on
+    // the page, follows it as well, unless the caption or the card changed meanwhile
+    if (was || !set || !cell.takeaway || readableText(now) === captionFrom(cell)) return
+    void captionSource(ws, cell, now).then((source) => {
+      const cur = captionNow.current
+      const card = followed.current
+      if (!source || !mounted.current || cur.caption !== now || card?.id !== cell.id) return
+      const carried = followedCaption(cur.caption, source, card)
+      if (carried != null) cur.onFollow?.(carried)
+    })
+  }, [cell, ws])
   useLayoutEffect(() => {
     const el = box
     if (!el) return
