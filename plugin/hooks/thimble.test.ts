@@ -374,6 +374,113 @@ describe('turning on with /thimble, in a session the launcher did not start', ()
   })
 })
 
+// Where an organization manages Claude Code (managed settings on the machine, or a Team or Enterprise account), Claude
+// Code seats its built-in security plugin, and skill.prompt passes over the plugins a person installs: /thimble never
+// reaches the module's hook. /thimble's own hook still runs and leaves <home>/up/<session>.active (app/cli.py hook_up),
+// written anew at each /thimble, which the module looks at when main's turn ends.
+describe('turning on with /thimble where skill.prompt passes over the plugin (a managed organization)', () => {
+  const plain = (opts: Options = {}) => engine({ ...opts, env: { THIMBLE_LAUNCHED: undefined, ...(opts.env ?? {}) } })
+  const MARKER = `${HOME}/.thimble/up/${MAIN}.active`
+  /** what /thimble's hook writes (app/cli.py hook_up); each write moves the file's mtime on */
+  const marked = (e: ReturnType<typeof engine>, path = MARKER) => e.writeFile(path, { cwd: CWD, action: '', at: Date.now() / 1000 })
+
+  it('turns on at the end of main’s turn after /thimble’s hook left the session’s marker, with no skill.prompt', async () => {
+    const e = plain()
+    await e.start()
+    await e.complete(undefined)
+    expect(e.$.http.fetch).not.toHaveBeenCalled()
+    marked(e)
+    await e.complete('agent-1') // an agent's turn: nothing
+    await new Promise(r => setTimeout(r, 30))
+    expect(e.$.http.fetch).not.toHaveBeenCalled()
+    await e.complete(undefined)
+    await until(() => e.server.polls.length > 0)
+    expect(e.server.hellos[0]).toEqual({ cwd: CWD, session: MAIN, version: '0.6.0', problem: '' })
+    expect(e.$.agent.register).toHaveBeenCalledTimes(7)
+    expect(await e.tool({ tool: 'Read', file_path: `${HOME}/.thimble/server.json` })).toEqual({ deny: PRIVATE_FALLBACK })
+  })
+
+  it('waits ACTIVATE_WAIT_MS for a server that accepts it, as after skill.prompt', async () => {
+    const server = new Server()
+    server.helloStatus = () => 409 // no main known yet
+    const e = plain({ server, fakeClock: true })
+    await e.start()
+    marked(e)
+    await e.complete(undefined)
+    await until(() => server.hellos.length > 0)
+    for (let n = -1, i = 0; i < 400 && server.hellos.length !== n; i++) {
+      n = server.hellos.length
+      await new Promise(r => setTimeout(r, 20))
+    }
+    expect(server.hellos.length).toBe(ACTIVATE_WAIT_MS / RETRY_MS + 1)
+  })
+
+  it('acts on a marker once: after a refused hello it stays idle until /thimble writes the marker again', async () => {
+    const server = new Server()
+    server.helloStatus = () => 403 // another session is main
+    const e = plain({ server })
+    await e.start()
+    marked(e)
+    await e.complete(undefined)
+    await until(() => server.hellos.length === 1)
+    await e.complete(undefined)
+    await e.complete(undefined)
+    await new Promise(r => setTimeout(r, 30))
+    expect(server.hellos.length).toBe(1)
+    server.helloStatus = () => 200
+    marked(e)
+    await e.complete(undefined)
+    await until(() => server.polls.length > 0)
+    expect(server.hellos.length).toBe(2)
+  })
+
+  it('says hello once for a /thimble that skill.prompt and the marker both report (no managed organization)', async () => {
+    const server = new Server()
+    server.helloStatus = () => 404 // a folder /thimble did not open
+    const e = plain({ server })
+    await e.start()
+    marked(e) // the hook runs before the skill expands
+    await e.skill('thimble:thimble')
+    await until(() => server.hellos.length === 1)
+    await e.complete(undefined)
+    await e.complete(undefined)
+    await new Promise(r => setTimeout(r, 30))
+    expect(server.calls).toEqual(['POST /api/module/hello'])
+  })
+
+  for (const [why, opts, path] of [
+    ['for another session’s marker', {}, `${HOME}/.thimble/up/${NEW}.active`],
+    ['for a marker in another thimble home', {}, '/elsewhere/up/11111111-1111-4111-8111-111111111111.active'],
+    ['with THIMBLE_NO_MODULE', { env: { THIMBLE_NO_MODULE: '1' } }, MARKER],
+    ['in claude -p (isInteractive false)', { interactive: false }, MARKER],
+  ] as [string, Options, string][]) {
+    it(`does nothing ${why}`, async () => {
+      const e = plain(opts)
+      await e.start()
+      marked(e, path)
+      await e.complete(undefined)
+      await new Promise(r => setTimeout(r, 30))
+      expect(e.$.http.fetch).not.toHaveBeenCalled()
+      expect(e.$.agent.register).not.toHaveBeenCalled()
+    })
+  }
+
+  it('looks only at the marker’s file system entry, once per turn of main’s, in a session the launcher did not start', async () => {
+    const e = plain()
+    await e.start()
+    await e.complete(undefined)
+    await e.complete('agent-1')
+    expect(e.$.fs.read).not.toHaveBeenCalled()
+    expect(e.$.fs.stat.mock.calls.map(([p]) => p)).toEqual([MARKER])
+    const launched = engine({ serverUp: false })
+    await launched.start()
+    launched.$.fs.stat.mockClear()
+    await launched.complete(undefined)
+    expect(launched.$.fs.stat).not.toHaveBeenCalledWith(MARKER, expect.anything())
+    expect(launched.$.fs.stat).not.toHaveBeenCalledWith(MARKER)
+  })
+})
+
 describe('registration', () => {
   it('registers the six roles and the helper inside session.start, each with a full model id and an explicit effort', async () => {
     const e = engine()
