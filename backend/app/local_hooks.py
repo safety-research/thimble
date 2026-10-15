@@ -121,9 +121,9 @@ def _try_lock(ws: Path, name: str = MIRROR_LOCK) -> int | None:
 
 
 # the modules that hear an agent's end only once imported (agents.on_agent_finished at their import), as the server
-# imports every module at its start: a writer's end starts the shown checks (checks), the orientation's report pass
-# follows its writer (orient_session), and the document follows its writer (report_types)
-END_LISTENERS = ("checks", "orient_session", "report_types")
+# imports every module at its start: a writer's end starts the shown checks (checks), and the document follows its
+# writer (report_types)
+END_LISTENERS = ("checks", "report_types")
 
 
 def listen() -> None:
