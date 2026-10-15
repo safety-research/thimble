@@ -268,6 +268,42 @@ describe('the strip above the composer, and the rows', () => {
     expect(el.querySelector('.chat-notices')).toBeNull()
   })
 
+  test("a failure told again in the same words shows once while its notice is open: an earlier closed row under its key waits, and shows again once it closes", async () => {
+    // live review: a side thread's reply switched again after the analyst dismissed the first notice, and the thread
+    // showed the first notice's row and the strip's notice, the same sentence twice
+    const SWITCHED = 'Claude\'s safeguards switched a reply of the side thread "Which agents merged most?" from Opus 5.5 to Opus 4.8.'
+    const EARLIER = 'Claude\'s safeguards switched a reply of the side thread "Which agents merged most?" from Opus 5.5 to Opus 4.7.'
+    const key = 'safeguards:t2'
+    const agent = 'Side thread: Which agents merged most?'
+    open = [{ id: 'n3', key, kind: 'safeguards', agent, chat: 't2', text: SWITCHED }]
+    const records = [
+      record('n1', EARLIER, { key, kind: 'safeguards', agent }),
+      { type: 'notice', dismissed: true, key } as ChatRecord,
+      { type: 'user', text: 'Which agents merged most of each other’s PRs?', by: 'browser' } as ChatRecord,
+      record('n2', SWITCHED, { key, kind: 'safeguards', agent }),
+      { type: 'text', delta: 'agent-07 merged 14, agent-03 merged 9.', reply: true } as ChatRecord,
+      { type: 'notice', dismissed: true, key } as ChatRecord,
+      { type: 'user', text: 'And who approved without a review comment?', by: 'browser' } as ChatRecord,
+      record('n3', SWITCHED, { key, kind: 'safeguards', agent }),
+      { type: 'text', delta: 'Five approvals came with no comment, all from agent-11.', reply: true } as ChatRecord,
+    ]
+    const el = await mount(
+      <>
+        <ThreadRows rows={foldRecords(records)} edits={new Map()} ws="nt-again" chat="t2" />
+        <NoticeStrip ws="nt-again" current="t2" onOpen={() => undefined} />
+      </>,
+    )
+    await settle()
+    const saying = (text: string) => [...el.querySelectorAll('.chat-notice')].filter((n) => n.textContent?.includes(text))
+    expect(saying(SWITCHED)).toHaveLength(1)
+    expect(saying(SWITCHED)[0].closest('.chat-notices')).not.toBeNull()
+    // a closed row in other words is history the strip does not say
+    expect([...el.querySelectorAll('.chat-notice-row')].map((r) => r.getAttribute('data-notice'))).toEqual(['n1'])
+    await live({ id: 'n3', key, cleared: true })
+    expect(el.querySelector('.chat-notices')).toBeNull()
+    expect([...el.querySelectorAll('.chat-notice-row')].map((r) => [r.getAttribute('data-notice'), r.hasAttribute('data-closed')])).toEqual([['n1', true], ['n2', true], ['n3', true]])
+  })
+
   test("a fix the server could not start says why and the notice stays", async () => {
     open = [{ id: 'a', key: 'proposals', text: BLOCKED, action: TRY }, { id: 'c', key: 'v', chat: 'dev-1', text: BUILD, action: { label: 'Retry', do: 'view-retry', slug: 'agent-network' } }]
     vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {

@@ -777,6 +777,9 @@ button.settings-ext-name:hover .settings-ext-caret {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+.shell-toast-text code {
+  font: var(--type-mono-sm);
+}
 
 /* -------- the theme popover (shell/ThemePopover): Paper as a segmented track, Accent as seven swatches -------- */
 .theme-pop {

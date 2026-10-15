@@ -8,7 +8,8 @@
 // that failed, or that the server could not start, says why in a toast and leaves it. A failure of main's own request
 // shows in the strip only while another chat is open, since main's chat shows its API error card. In the agent's own
 // chat the notice is also a row (NoticeRow), the same words without buttons, kept as a quiet line of the chat's history
-// once the notice is closed; while it is open the strip shows it there. The Manual-mode notice (kind `manual-mode`,
+// once the notice is closed; while it is open the strip shows it there, and an earlier closed row under its key in the
+// same words waits too, so the words show once. The Manual-mode notice (kind `manual-mode`,
 // while main runs in Claude Code's Manual mode) is drawn in the problem red instead (styles/chat.css).
 import { useState, type ReactNode } from 'react'
 import { Button } from '../components/Button'
@@ -174,15 +175,24 @@ export function PageNoticeStrip() {
   )
 }
 
+/** Whether the strip says what a notice's row says, so the row waits (NoticeRow): the row's own notice is open (by its
+ * id, or its key while the log has not closed the row), or, for a row the log closed, a later notice under its key that
+ * says the same words is open, as when Claude's safeguards switch a thread's reply again after the analyst dismissed
+ * the first notice. `open` is the open notices, once read. Pure. */
+export function stripSays(item: Pick<NoticeRowT, 'id' | 'key' | 'text' | 'closed'>, open: readonly Pick<Notice, 'id' | 'key' | 'text'>[]): boolean {
+  return open.some((n) => (item.closed ? !!item.key && n.key === item.key && n.text === item.text : n.id === item.id || (!!item.key && n.key === item.key)))
+}
+
 /** A notice as a row of the chat it happened in, for its history: a quiet line, without the agent's name (the chat is
- * its own), once a fix cleared it or the analyst dismissed it. While it is open the strip above the composer shows it
- * with its fix, in this chat too, so the row waits (it shows only while the open notices are not read). */
+ * its own), once a fix cleared it or the analyst dismissed it. While the strip above the composer shows it with its fix,
+ * in this chat too, or shows a later notice in the same words, the row waits (stripSays); it shows only while the open
+ * notices are not read. */
 export function NoticeRow({ item, ws }: { item: NoticeRowT; ws: string }) {
   const open = useNotices(ws)
   const read = useNoticesRead(ws)
-  // open while the log has not closed it and, once the open notices are read, they hold it
-  const closed = item.closed || (read && !open.some((n) => n.id === item.id || (!!item.key && n.key === item.key)))
-  if (!closed && read) return null
+  if (read && stripSays(item, open)) return null
+  // open while the log has not closed it and the open notices are not read yet; once they are, any row shown is closed
+  const closed = item.closed || read
   return (
     <div className="chat-notice chat-notice-row" role="note" data-notice={item.id} data-key={item.key} data-kind={item.noticeKind} data-closed={closed || undefined}>
       <Icon name="warning" size={13} className="chat-notice-ico" />
