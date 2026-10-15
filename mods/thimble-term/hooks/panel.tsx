@@ -12,7 +12,8 @@
 //   cite      a citation: its value as a link, its status in plain words, its lines with the value marked, or the card
 //             it names in its border with the cited mark lit; red when its place does not hold it
 //   ask       the question field of a new side thread about what was asked about
-//   threads   the threads as a tree under main, the selected one (`thread`) under the second rule, the ask field
+//   threads   the threads as a tree under main, the selected one (`thread`) under the second rule (alone, with no tree,
+//             when it is the only one), its chat drawn as Claude Code draws one, the ask field
 //   label     a label after the browser's label editor: its name, type and scope; its prompt (or pattern or code) to edit;
 //             run on a sample or on all; counts, examples and cards folded. labels: every label
 //   docs      the documents; doc, one document drawn as main's chat draws a reply, its figures as cards, its comments
@@ -22,7 +23,7 @@
 //   views     the views, one row each; view, one view as one line (the browser draws views)
 import type { BoxProps, ButtonProps, ElementConstructor, MatchedEvent, RenderElement, TextProps } from 'claude-code'
 
-import type { ChatNavStep, ChatThread, TermPanel, TermThread, TermVerdict } from '../types'
+import type { ChatNavStep, ChatThread, TermPanel, TermThread, TermThreadRow, TermVerdict } from '../types'
 import type { ThimbleLabel } from './cell'
 import { ACCENT, FRESH, LINK, MARGIN_W, controlsEl, fieldEls, fitHints, fitTo, freshSeg, hasMargin, headerEls, hintLines, hintsEl, lineEl, linkSeg, marginKey, pointed, ruleEl, setHead, spread, subLine, takeHead } from './chrome'
 import { chipLook, chipName, citeLabel, plainCites, quoteSpan, quotedWords, wrapAround } from './cite'
@@ -33,7 +34,7 @@ import { citationOf, placeOf, targetLabel } from './gestures'
 import type { Gesture, Target } from './gestures'
 import { FIRST as HOME_FIRST, HOME_HINTS, groupCards, homeLayout, homePick, homeReduce, labelHue, NAME_WHOLE } from './home'
 import type { HomeAct, HomeCardGroup, HomeData, HomeFile, HomeLabel, HomeLayout, HomeOpen, HomeReport, HomeThread, HomeUi, HomeView } from './home'
-import { chipLabel, chipWords, cid, clip, cutLine, fmt, itemsRow, labelRef, middleCut, labelState, labelStateWords, noControls, outputLine, quoted, recordFields, reportRef, stoppedTurn, windowAt } from './lib'
+import { cardsInline, chipLabel, chipWords, cid, clip, cutLine, fmt, itemsRow, labelRef, middleCut, labelState, labelStateWords, noControls, outputLine, quoted, recordFields, reportRef, stoppedTurn, windowAt } from './lib'
 import type { Citation } from './lib'
 import { linesEl, setListKeys, takeListKeys } from './lines'
 import type { LineHit } from './lines'
@@ -1940,12 +1941,48 @@ function threadLine(t: ChatThread): Seg {
   return dim(first.replace(/\*\*|__|`/g, '').trim() || (t.loading ? '' : 'answered'))
 }
 
+// the threads whose subject shows whole under their `about` row, by the thread's id: v, or a press on the row
+const subjectOpen = new Set<string>()
+
+/** What a thread's subject shows past its `about` row, in the word its key names (`v to show the passage`): `card`,
+ *  `lines` (a file's), `answer` (a whole answer of main's), `passage`; '' when the row holds it whole. */
+function subjectWord(row: TermThreadRow, about: string): string {
+  const anchor = (row.anchor ?? '').split(',')[0] ?? ''
+  if (/^(?:card|cell):[A-Za-z0-9_-]+/.test(anchor)) return 'card'
+  if (subjectFile(anchor)) return 'lines'
+  const words = row.anchorText ?? ''
+  if (!passageRows(words, 999).length || saidIn(about, words)) return ''
+  return row.element === ANSWER_ELEMENT ? 'answer' : 'passage'
+}
+
+/** The analyst's question in a side thread, as Claude Code draws a prompt in its chat: `❯` dim in the margin, the words
+ *  wrapped at the type area, on the prompt's background across it. */
+function promptEl(els: El, q: string, cols: number, key: string): RenderElement | null {
+  const { Box, Text } = els
+  const rows = plainCites(q).split('\n').flatMap(l => (l.trim() ? wrapRows(l, cols, 999) : []))
+  if (!rows.length) return null
+  return (
+    <Box key={marginKey(key)} flexDirection="column">
+      {rows.map((r, i) => (
+        <Text key={`${key}-${i}`} backgroundColor={COLORS.prompt} wrap="truncate-end">
+          <Text dimColor backgroundColor={COLORS.prompt}>{i ? '  ' : '❯ '}</Text>
+          <Text backgroundColor={COLORS.prompt}>{`${r}${' '.repeat(Math.max(0, cols - width(r)))}`}</Text>
+        </Text>
+      ))}
+    </Box>
+  )
+}
+
 /** The threads panel (SPEC.md, section 7, "The threads panel"): its title and a dim subtitle; under the rule the
  *  tree, a root per place a thread was asked from (`main`, or `report "…"`) with a blank row between them, each thread
  *  under the thread it was asked from, its question in quotation marks with guides, the first line of its latest
- *  answer dim under it, `N questions` dim and `new` in green at R; the selected thread (`❯`, accent) under the second
- *  rule: what it is about, its questions and answers drawn as main's chat draws a reply, `stop` (s) while it answers,
- *  then the `ask` field. ↑↓ or j k choose, Enter or a give the field the keys, 1-9 open the first nine. */
+ *  answer dim under it (none while a thread is open: the open thread's chat is below), `N questions` dim and `new` in
+ *  green at R; the selected thread (`❯`, accent) under the second rule: what it is about on one dim row, then its chat
+ *  as Claude Code draws one (each question after `❯` on the prompt's background, a blank row, its answer after `⏺` with
+ *  the cards it cites where it cites them), `stop` (s) while it answers, then the `ask` field. A thread open alone,
+ *  with no other thread, has no list: its question is the title row's last step and what it is about the row under
+ *  it. ↑↓ or j k choose, Enter or a give the field the keys, v shows what the thread is about whole, 1-9 open the
+ *  first nine. */
 async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<RenderElement> {
   if (e.surface === 'mobile') return none(cx, e, 'Threads need a surface with text fields.')
   const els = cx.els(e) as El
@@ -1957,20 +1994,49 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
   const threads = (await Promise.all(ids.map(id => threadOfRow(cx, id)))).filter((t): t is ChatThread => t !== null)
   const unreadOf = (id: string) => rows.find(r => r.id === id)?.unread ?? 0
   const fresh = rows.filter(t => t.unread).length
-  const body: RenderElement[] = [...headerEls(els, { title: 'Threads', cols, sub: subLine([plural(threads.length, 'thread'), fresh ? freshSeg(fresh) : null]) })]
+  const t = selected ? threads.find(x => x.id === selected) : undefined
+  // one thread, open: no list above it, which would repeat its question and its answer
+  const alone = Boolean(t) && threads.length === 1
+  // what it is about, on one dim row cut at the type area; the thing itself (a card, a file's lines, a passage) whole
+  // under it on demand (v, or a press on the row)
+  const row = t ? rows.find(r => r.id === t.id) : undefined
+  const about = t ? await aboutName(cx, row) : ''
+  const word = t && row ? subjectWord(row, about) : ''
+  const subjectShown = Boolean(t && word && subjectOpen.has(t.id))
+  const flip = t && word
+    ? () => {
+        if (subjectOpen.delete(t.id)) subjectWhole.delete(t.id)
+        else {
+          subjectOpen.add(t.id)
+          subjectWhole.add(t.id)
+        }
+        void cx.bumpPanel()
+      }
+    : null
+  const aboutWords = about ? cut(`about ${about}`, cols) : ''
+  const aboutEl = !aboutWords ? null : flip ? (
+    <Box key="thread-about" flexDirection="row">
+      <Button key="thread-about-press" label={aboutWords} plain dimColor onPress={flip} />
+    </Box>
+  ) : (
+    <Text key="thread-about" dimColor wrap="truncate-end">
+      {aboutWords}
+    </Text>
+  )
+  const body: RenderElement[] = [...headerEls(els, { title: 'Threads', cols, ...(alone ? { more: aboutEl ? [aboutEl] : [] } : { sub: subLine([plural(threads.length, 'thread'), fresh ? freshSeg(fresh) : null]) }) })]
   // a root per place: the threads asked from a document under it, the rest under main
-  const byId = new Map(threads.map(t => [t.id, t]))
-  const rootOf = (t: ChatThread): ChatThread => {
+  const byId = new Map(threads.map(x => [x.id, x]))
+  const rootOf = (x: ChatThread): ChatThread => {
     const seen = new Set<string>()
-    let cur = t
+    let cur = x
     while (cur.parent && byId.has(cur.parent) && !seen.has(cur.id)) {
       seen.add(cur.id)
       cur = byId.get(cur.parent)!
     }
     return cur
   }
-  const placeOf = (t: ChatThread) => {
-    const el = rows.find(r => r.id === rootOf(t).id)?.element ?? ''
+  const placeOf = (x: ChatThread) => {
+    const el = rows.find(r => r.id === rootOf(x).id)?.element ?? ''
     return /^report:/.test(el) ? el.split('#')[0]! : 'main'
   }
   const docs = await surfaceValue(cx, 'docs')
@@ -1983,7 +2049,7 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
   let drawn = 0
   let more = 0
   for (const [pi, place] of places.entries()) {
-    const tree = threadTree(threads.filter(t => placeOf(t) === place))
+    const tree = threadTree(threads.filter(x => placeOf(x) === place))
     if (!tree.length) continue
     if (pi > 0) lines.push([])
     lines.push(pointed([{ s: place === 'main' ? 'main' : `report ${quoted(clip(docTitle(place.slice(7)), 60))}` }], false))
@@ -2000,10 +2066,14 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
       const right: Line = [...(asked > 1 ? [dim(`${asked} questions`)] : []), ...(n ? [...(asked > 1 ? [{ s: '  ' }] : []), freshSeg()] : [])]
       const y = lines.length
       lines.push(pointed(spread([{ s: guide, fg: COLORS.rule }, { s: threadTitle(r.t) }], right, cols), r.t.id === selected))
-      const second = threadLine(r.t)
-      lines.push(pointed([{ s: lead.slice(0, guide.length), fg: COLORS.rule }, { ...second, s: cut(second.s, Math.max(10, cols - guide.length)) }], false))
       const open = () => openThread(cx, r.t.id)
-      hits.push({ y, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: open }, { y: y + 1, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: open })
+      hits.push({ y, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: open })
+      // the first line of its answer, while no thread is open below the list
+      if (!t) {
+        const second = threadLine(r.t)
+        lines.push(pointed([{ s: lead.slice(0, guide.length), fg: COLORS.rule }, { ...second, s: cut(second.s, Math.max(10, cols - guide.length)) }], false))
+        hits.push({ y: y + 1, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: open })
+      }
       order.push(r.t)
     }
   }
@@ -2013,7 +2083,6 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
     hits.push({ y: lines.length, x0: MARGIN_W + 2, x1: MARGIN_W + 2 + words.length, row: false, run: () => openPanel(cx, { view: 'threads', title: 'Threads' }) })
     lines.push(pointed([{ s: '  ' }, dim(words)], false))
   }
-  const t = selected ? threads.find(x => x.id === selected) : undefined
   const running = t?.turns.at(-1)?.state === 'running'
   const askKey = t ? `ask-${cid(t.id)}` : ''
   // the module's own move of the ring raises no ui.focus: the hint row names the field's keys once the ring is there
@@ -2028,7 +2097,7 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
     const at = order.findIndex(x => x.id === selected)
     await openThread(cx, order[Math.max(0, Math.min(order.length - 1, at < 0 ? (d > 0 ? 0 : order.length - 1) : at + d))]!.id)
   }
-  body.push(linesEl(cx, e, marginKey('threads-tree'), lines, hits, cols + MARGIN_W, k => (k === 'up' || k === 'k' ? step(-1) : k === 'down' || k === 'j' ? step(1) : k === 'return' || k === 'enter' ? focusAsk() : undefined)))
+  if (!alone) body.push(linesEl(cx, e, marginKey('threads-tree'), lines, hits, cols + MARGIN_W, k => (k === 'up' || k === 'k' ? step(-1) : k === 'down' || k === 'j' ? step(1) : k === 'return' || k === 'enter' ? focusAsk() : undefined)))
   // each thread a press away by its key too, for a surface that draws no Client: no row of its own
   body.unshift(
     <Box key="thread-presses" width={0} height={0} flexShrink={0} overflow="hidden" flexDirection="row">
@@ -2037,38 +2106,74 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
       ))}
     </Box>,
   )
-  const keys: Key[] = order.slice(0, 9).map((x, i) => ({ key: `t${i}`, hotkey: String(i + 1), onPress: () => void openThread(cx, x.id) }))
+  const keys: Key[] = alone ? [] : order.slice(0, 9).map((x, i) => ({ key: `t${i}`, hotkey: String(i + 1), onPress: () => void openThread(cx, x.id) }))
   const stop = t && running && rt.sc ? () => void act(cx, rt.sc!, 'stop', { agent: t.id }).then(r => (!r.ok ? cx.toast(`thimble: the thread was not stopped: ${r.error}`) : undefined)) : null
+  let field: RenderElement | null = null
   if (t) {
-    body.push(ruleEl(els, cols, 'rule-thread'))
-    // what it is about, dim, then the thing itself (a passage's words unless `about` holds them whole), above its first
-    // question
-    const row = rows.find(r => r.id === t.id)
-    const about = await aboutName(cx, row)
-    if (about) body.push(<Text key="thread-about" dimColor wrap="truncate-end">{cut(`about ${about}`, cols)}</Text>)
-    const words = row?.anchorText ?? ''
-    if (row) body.push(...(await subjectEls(cx, e, { anchor: row.anchor ?? '', text: saidIn(about, words) ? '' : words }, cols, t.id)))
+    // a blank row between the parts of the chat, none right under a rule (rule 10)
+    let underRule = true
+    const gap = (key: string) => {
+      if (!underRule) body.push(<Text key={key}> </Text>)
+      underRule = false
+    }
+    if (!alone) {
+      body.push(ruleEl(els, cols, 'rule-thread'))
+      if (aboutEl) {
+        body.push(aboutEl)
+        underRule = false
+      }
+    }
+    if (subjectShown && row) {
+      const words = row.anchorText ?? ''
+      const subject = await subjectEls(cx, e, { anchor: row.anchor ?? '', text: saidIn(about, words) ? '' : words }, cols, t.id)
+      if (subject.length) {
+        body.push(...subject)
+        underRule = false
+      }
+    }
     let k = 0
     for (const turn of t.turns) {
       k++
-      if (k > 1) body.push(<Text key={`thread-gap-${k}`}> </Text>)
-      body.push(<Text key={`thread-q-${k}`} wrap="wrap">{quoted(plainCites(turn.q))}</Text>)
-      if (turn.state === 'running') {
-        const partial = turn.partial.trim()
-        body.push(<Text key={`thread-run-${k}`} dimColor wrap="truncate-end">{cut(`◌ ${plural(turn.tools, 'tool call')}${partial ? ` · ${clip(partial, cols - 30)}` : ''}`, cols)}</Text>)
-      } else if (stoppedTurn(turn)) body.push(<Text key={`thread-err-${k}`} dimColor wrap="wrap">{turn.a.trim().replace(/([^.!?])$/, '$1.')}</Text>)
-      else if (turn.state === 'error') body.push(<Text key={`thread-err-${k}`} color={COLORS.problem} wrap="wrap">{`× ${turn.a}`}</Text>)
-      else if (turn.a.trim()) body.push(<Box key={marginKey(`thread-answer-${k}`)} flexDirection="column">{await drawReply(cx, e, turn.a, cols, { margin: PANEL_MARGIN, prefix: `t${k}-`, ask: tgt => void openAsk(cx, tgt), open: id => void openThread(cx, id) })}</Box>)
-      // the cards the turn made, under its answer, each in its frame, as main's chat draws a turn's cards
-      for (const [ci, id] of (turn.cards ?? []).entries()) body.push(<Box key={`thread-card-${k}-${ci}`} flexDirection="column">{await cardBlock(cx, e, id, cols, `th${k}-${ci}`, { order: ci + 1 })}</Box>)
+      // the question, as Claude Code draws a prompt
+      const q = promptEl(els, turn.q, cols, `thread-q-${k}`)
+      if (q) {
+        gap(`thread-gap-q-${k}`)
+        body.push(q)
+      }
+      // its answer after a blank row: what the turn is doing, or how it ended, or the answer after Claude Code's ⏺
+      // with the cards it cites where it cites them and the turn's other cards after it
+      const status =
+        turn.state === 'running' ? (
+          <Text key={`thread-run-${k}`} dimColor wrap="truncate-end">
+            {cut(`◌ ${plural(turn.tools, 'tool call')}${turn.partial.trim() ? ` · ${clip(turn.partial.trim(), cols - 30)}` : ''}`, cols)}
+          </Text>
+        ) : stoppedTurn(turn) ? (
+          <Text key={`thread-err-${k}`} dimColor wrap="wrap">
+            {turn.a.trim().replace(/([^.!?])$/, '$1.')}
+          </Text>
+        ) : turn.state === 'error' ? (
+          <Text key={`thread-err-${k}`} color={COLORS.problem} wrap="wrap">{`× ${turn.a}`}</Text>
+        ) : null
+      const md = cardsInline(turn.state === 'done' ? turn.a.trim() : '', turn.cards ?? [])
+      if (status) {
+        gap(`thread-gap-a-${k}`)
+        body.push(status)
+      }
+      if (md) {
+        gap(`thread-gap-c-${k}`)
+        body.push(
+          <Box key={marginKey(`thread-answer-${k}`)} flexDirection="column">
+            {await drawReply(cx, e, md, cols, { margin: PANEL_MARGIN, first: turn.state === 'done', cardGaps: true, prefix: `t${k}-`, ask: tgt => void openAsk(cx, tgt), open: id => void openThread(cx, id) })}
+          </Box>,
+        )
+      }
     }
-    if (stop) {
-      body.push(controlsEl(els, [<Button key="thread-stop" label="stop" plain onPress={stop} />], 'thread-controls')!)
-      keys.push({ key: 'stop', hotkey: 's', onPress: stop })
-    }
-    // the field for the next question, a blank row under the answer, its placeholder saying what it takes
-    body.push(
-      <Box key="ask-row" flexDirection="row" marginTop={1}>
+    if (stop) keys.push({ key: 'stop', hotkey: 's', onPress: stop })
+    if (flip) keys.push({ key: 'subject', hotkey: 'v', onPress: flip })
+    // the field for the next question, its placeholder saying what it takes: under the second rule when the thread
+    // stands alone, else a blank row under the chat (a panel has two rules at most)
+    field = (
+      <Box key="ask-row" flexDirection="row" {...(alone ? {} : { marginTop: 1 })}>
         <Input
           key={fieldKey(askKey)}
           placeholder="ask a follow-up question"
@@ -2083,11 +2188,21 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
             })
           }}
         />
-      </Box>,
+      </Box>
     )
     keys.push({ key: 'ask', hotkey: 'a', onPress: () => void focusAsk() })
   }
-  body.push(hintsRow(els, ['↑↓ to choose', ...(t ? ['Enter or a to ask'] : []), ...(stop ? ['s to stop'] : [])], cols))
+  const stopEl = stop ? <Button key="thread-stop" label="stop" plain onPress={stop} /> : null
+  const subjectHint = word ? `v to ${subjectShown ? 'hide' : 'show'} the ${word}` : ''
+  const hints = alone
+    ? ['a to ask', ...(subjectHint ? [subjectHint] : []), ...(stop ? ['s to stop'] : [])]
+    : ['↑↓ to choose', ...(t ? ['Enter or a to ask'] : []), ...(subjectHint ? [subjectHint] : []), ...(stop ? ['s to stop'] : [])]
+  if (alone) body.push(...bottomRows(cx, e, cols, [stopEl], [field], hints))
+  else {
+    if (stopEl) body.push(controlsEl(els, [stopEl], 'thread-controls')!)
+    if (field) body.push(field)
+    body.push(hintsRow(els, hints, cols))
+  }
   const hk = hiddenKeys(cx, e, keys)
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>
 }
