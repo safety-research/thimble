@@ -39,6 +39,8 @@ const STEP_MS = 120_000
 const PENDING = {}
 const MARKS = '.reader-gutter-cell.is-lit, .reader-span[data-concept], [data-concept], [data-thimble-label]'
 const SLOW_S = 20
+// the one line a browser that is not signed in sees (frontend shell/SignIn), its span in backticks drawn as code
+const SIGN_IN_LINE = 'Open the link /thimble shows in your terminal, or run `thimble up` in a shell.'
 
 let shotN = 0
 const fontMisses = []
@@ -820,9 +822,60 @@ async function main() {
       return { detail: fit.detail }
     })
 
-    await step('api-guard', 'A write without the browser\'s cookie is refused, the token alone acts on no analyst route, and the browser sends only its own event kinds', async () => {
+    await step('signin-gate', 'A browser with no cookie sees only the line naming the way in and reads nothing; a read answers it 401, and the signed-in browser 200', async () => {
+      const origin = new URL(WS.url).origin
+      const fresh = await browser.newContext({ viewport: SIZES[0] })
+      try {
+        const p = await fresh.newPage()
+        const reads = []
+        p.on('request', (r) => {
+          const u = new URL(r.url())
+          if (u.origin === origin && u.pathname.startsWith('/api/') && r.method() === 'GET') reads.push(u.pathname)
+        })
+        await p.goto(`${origin}/?ws=${encodeURIComponent(WS.name)}`)
+        const line = p.locator('.signin-line')
+        await line.waitFor({ timeout: ACTION_MS })
+        await p.waitForTimeout(3_000)  // long enough for an app that polls to show it
+        const s = await shot(p, 'signin-gate')
+        const want = SIGN_IN_LINE.replace(/`/g, '')
+        const said = (await line.innerText()).replace(/\s+/g, ' ').trim()
+        const whole = (await p.locator('body').innerText()).replace(/\s+/g, ' ').trim()
+        check(said === want && whole === want, `the page without a cookie shows "${whole.slice(0, 200)}", not only "${want}"`)
+        check((await line.locator('code').innerText()) === 'thimble up', 'the line does not draw `thimble up` as code')
+        const other = [...new Set(reads.filter((r) => r !== '/api/ui/paired' && r !== '/api/health'))]
+        check(!other.length, `the page without a cookie read ${other.join(', ')}`)
+        const unsigned = await fresh.request.get(`${origin}/api/workspaces`)
+        const refused = await unsigned.json().catch(() => null)
+        check(unsigned.status() === 401 && refused?.signin === true && typeof refused?.detail === 'string',
+          `GET /api/workspaces without a cookie answered ${unsigned.status()} ${JSON.stringify(refused)?.slice(0, 160)}, not 401 {detail, signin: true}`)
+        const signed = await page.request.get(`${origin}/api/workspaces`)
+        check(signed.status() === 200, `GET /api/workspaces with the browser's cookie answered ${signed.status()}, not 200`)
+        return { detail: `"${said}" and nothing else, reading only ${[...new Set(reads)].join(', ') || 'nothing'}; GET /api/workspaces 401 {signin: true} without the cookie, 200 with it`, shots: [s] }
+      } finally {
+        await fresh.close()
+      }
+    })
+
+    await step('api-guard', 'A write without the browser\'s cookie is refused, a read without the cookie or the token is refused, the token alone acts on no analyst route, and the browser sends only its own event kinds', async () => {
       const origin = new URL(WS.url).origin
       const events = `${origin}/api/ws/${WS.name}/events`
+      // a read with neither the cookie nor the token: 401 with signin, HEAD with no body; the token reads, as the CLI does
+      const concepts = `${origin}/api/ws/${WS.name}/concepts`
+      const read = await fetch(concepts)
+      const readBody = await read.json().catch(() => null)
+      check(read.status === 401 && readBody?.signin === true && typeof readBody?.detail === 'string',
+        `an unsigned GET /api/ws/${WS.name}/concepts answered ${read.status} ${JSON.stringify(readBody)?.slice(0, 160)}, not 401 {detail, signin: true}`)
+      const head = await fetch(concepts, { method: 'HEAD' })
+      const headBody = await head.text()
+      check(head.status === 401 && headBody === '', `an unsigned HEAD /api/ws/${WS.name}/concepts answered ${head.status} with ${headBody.length} bytes, not 401 with none`)
+      const tokenRead = await fetch(concepts, { headers: tokenHeaders() })
+      check(tokenRead.status === 200, `a GET /api/ws/${WS.name}/concepts signed with the token answered ${tokenRead.status}, not 200`)
+      const health = await fetch(`${origin}/api/health`)
+      const healthKeys = Object.keys((await health.json().catch(() => null)) ?? {}).sort()
+      check(health.status === 200 && healthKeys.join() === 'boot,ok,ui', `an unsigned GET /api/health answered ${health.status} with ${healthKeys.join(', ')}, not 200 with boot, ok, ui`)
+      const paired = await fetch(`${origin}/api/ui/paired`)
+      const pairedBody = await paired.json().catch(() => null)
+      check(paired.status === 200 && pairedBody?.paired === false, `an unsigned GET /api/ui/paired answered ${paired.status} ${JSON.stringify(pairedBody)}`)
       const name = 'E2E unsigned write'
       const r = await fetch(`${origin}/api/ws/${WS.name}/concepts`, {
         method: 'POST',
@@ -844,7 +897,7 @@ async function main() {
       // a kind the browser never sends, with the browser's own cookie
       const odd = await page.request.post(events, { data: { kind: 'start_agent', payload: { text: 'E2E: a start_agent the browser never sends' } } })
       check(odd.status() === 400, `a POST /api/ws/${WS.name}/events {kind: "start_agent"} with the browser's cookie answered ${odd.status()}, not 400`)
-      return { detail: `403 for an unsigned POST /api/ws/${WS.name}/concepts, and no label made; 403 with WRITE_REFUSED for main's message signed with the token alone; 400 for a start_agent event with the cookie` }
+      return { detail: `401 {signin: true} for an unsigned GET /api/ws/${WS.name}/concepts, 401 with no body for HEAD, 200 signed with the token; /api/health and /api/ui/paired open, health with boot, ok and ui only; 403 for an unsigned POST /api/ws/${WS.name}/concepts, and no label made; 403 with WRITE_REFUSED for main's message signed with the token alone; 400 for a start_agent event with the cookie` }
     })
 
     let added = false
