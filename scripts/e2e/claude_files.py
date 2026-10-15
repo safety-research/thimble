@@ -8,7 +8,8 @@ and compares it after the run.
 
 The comparison exits 1 and names each difference when a plugin, a marketplace or the link changed, a folder trusted
 before is no longer trusted, or a folder in the run's folder became trusted. A folder outside the run's folder trusted
-during the run is not counted, since other Claude Code sessions trust folders too.
+during the run is not counted, since other Claude Code sessions trust folders too, and neither is the official
+marketplace when it appears with its own source (OFFICIAL_MARKETPLACE).
 """
 import json
 import os
@@ -67,7 +68,20 @@ def snapshot() -> dict:
     }
 
 
+# Claude Code adds its official marketplace on its own at its first interactive start in a config folder (2.1.300: a
+# fresh CLAUDE_CONFIG_DIR gains this entry in plugins/known_marketplaces.json within a second of the start, with no
+# thimble and no plugin; `claude -p`, `claude --version`, `claude auth status` and `claude plugin list` add nothing).
+# A run whose config folder had never started Claude Code interactively finds it added by the hooks module's contract
+# check, which starts it, so only this entry's appearance, with this source, is not counted. Its removal, another
+# source under its name and any other marketplace still are.
+OFFICIAL_MARKETPLACE = ("claude-plugins-official", {"source": "github", "repo": "anthropics/claude-plugins-official"})
+
+
 def differences(before: dict, after: dict, run: Path) -> list[str]:
+    name, source = OFFICIAL_MARKETPLACE
+    was, now = before.get("marketplaces"), after.get("marketplaces")
+    if isinstance(was, dict) and isinstance(now, dict) and name not in was and now.get(name) == source:
+        after = {**after, "marketplaces": {k: v for k, v in now.items() if k != name}}
     out = [f"{k}: {json.dumps(before.get(k))} → {json.dumps(after.get(k))}"
            for k in sorted(set(before) | set(after)) if k != "trusted" and before.get(k) != after.get(k)]
     was, now = set(before.get("trusted") or []), set(after.get("trusted") or [])
