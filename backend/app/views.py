@@ -5196,12 +5196,15 @@ async def suggest(c: str, rel: str) -> str | None:
     model call reads the file's start (prompts/file-viewer.md) and says whether a viewer would help; a yes is a view
     proposal claiming the suffix's glob (offer, `proposed_by` "files", after "file"), shown on the same card as the
     proposer's, and the suffix's answer `suggested`; a no is the suffix's answer `none`, so it is never asked again. The
-    view proposal's slug, or None. No call is made while view proposals are off (propose_enabled), one waits, or views
-    cannot be built here. A call that fails, or a view proposal that offer refuses, caches nothing, so the next file of
-    the type asks again. A call that fails is also a notice, with Try again (_check_failed); a call that answers
+    view proposal's slug, or None. No call is made while no Claude Code session listens (events.reachable: a demo
+    page, which shows no view proposal), while view proposals are off (propose_enabled), one waits, or views cannot be
+    built here. A call that fails, or a view proposal that offer refuses, caches nothing, so the next file of the type
+    asks again. A call that fails is also a notice, with Try again (_check_failed); a call that answers
     clears it, or, when its view proposal came from the refusal row's model, says so (SUGGEST_FALLBACK)."""
-    from . import tasks  # noqa: PLC0415
+    from . import events, tasks  # noqa: PLC0415
 
+    if not events.reachable(c):
+        return None
     if not await asyncio.to_thread(propose_enabled, c) or await asyncio.to_thread(open_offer, c) is not None:
         return None
     got = await asyncio.to_thread(suggestion_for, c, rel)
