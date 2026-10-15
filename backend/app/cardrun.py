@@ -798,8 +798,8 @@ async def run_trial(c: str, cid: str, code: str) -> tuple[str, int]:
 def trial_sandbox(c: str) -> dict[str, Any] | None:
     """srt's settings for a trial in workspace `c` where srt runs (kernel_wrap.srt_works): no network; thimble's token
     files and links folder unreadable; writes only to the agents' work folders and the card folders; the corpus and the
-    workspace's config.json and settings.json not writable. These are the filesystem rules main's fence gave a trial,
-    without the fence. None where srt can't run, where main's Bash runs `thimble-run` without a sandbox too."""
+    workspace's config.json and settings.json not writable. None where srt can't run, where main's Bash runs
+    `thimble-run` without a sandbox too."""
     from . import kernel_wrap, srt, subagents, userconf  # noqa: PLC0415
 
     if not kernel_wrap.srt_works(srt.node(), srt.package(config.REPO_ROOT)):

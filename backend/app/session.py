@@ -787,8 +787,8 @@ def note_plan(c: str, sid: str | None, plan: bool) -> None:
     """thimble's module saw main's session go into plan mode, or out of it, while main was idle (it asks Claude Code's
     permission decision every few seconds, module_bridge.mode_route): the mode becomes plan, or goes back to the one
     before (default when none was known), until main's hooks report the mode at its next turn (live check L21: a
-    shift+tab while main was idle reached thimble only at main's next turn, so held checks waited and the Start line
-    was stale). The mode it goes back to is a guess, since a shift+tab out of plan mode, or the plan's approval, may
+    shift+tab while main was idle reached thimble only at main's next turn, so held checks waited and the browser showed
+    the old mode). The mode it goes back to is a guess, since a shift+tab out of plan mode, or the plan's approval, may
     pick another, so it shows no Manual-mode notice."""
     cur = main_mode(c)
     if plan and cur != "plan":

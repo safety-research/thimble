@@ -846,7 +846,7 @@ def rekey(state: dict[str, Any], old: str, new: str) -> list[str]:
 
 
 # module-started-note's {how}, by the route of the agent's start: the analyst's click, the next step of a run they asked
-# for (a writer after the orientation, a view build it proposed), or main's own Agent call for a typed request
+# for (a view build's review or repair, a check after a writer), or main's own Agent call for a typed request
 HOW = {"click": "in the browser", "follow-on": "as the next step of a run they asked for in thimble",
        "typed": "through your own Agent call"}
 NOTE_HINT = "module-started-note"  # prompts/tools.md: {role}, {agent}, {what}, {how}

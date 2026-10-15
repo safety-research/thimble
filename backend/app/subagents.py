@@ -322,9 +322,9 @@ def extension_types(c: str) -> dict[str, dict[str, Any]]:
 
 
 def write_dirs(c: str) -> list[Path]:
-    """The folders main's Bash may write in workspace `c`, its agents' work folders: orient/work, writers,
-    critique-work, check-work, views-work, the local extension's views and card-libs, where main installs the npm
-    packages its custom cards load (card_libs). They need not exist yet."""
+    """The agents' work folders in workspace `c`, which a card's trial may write (cardrun.trial_sandbox): orient/work,
+    writers, critique-work, check-work, views-work, the local extension's views and card-libs, where main installs the
+    npm packages its custom cards load (card_libs). They need not exist yet."""
     ws = config.workspace_path(c)
     return [ws / d for d in WORK_DIRS]
 

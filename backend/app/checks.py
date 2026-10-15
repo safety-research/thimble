@@ -671,7 +671,7 @@ def definition(c: str) -> dict[str, Any]:
 
 
 def work_dir(c: str, cid: str, doc: str) -> Path:
-    """A run's own folder, check-work/<id>-<doc>, which main's fence lets its agent write (subagents.write_dirs)."""
+    """A run's own folder, check-work/<id>-<doc>, among the agents' work folders (subagents.write_dirs)."""
     return config.workspace_dir(c) / WORK_DIR / f"{cid}-{doc}"
 
 

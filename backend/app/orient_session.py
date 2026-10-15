@@ -8,8 +8,7 @@ Agent call main makes (tool_start_orientation); a thread's fork's call gives tha
 The browser no longer sends it, since its chat opens without a Start; scripts/dev/precache_orientation.py does. Both
 take the request (the focus) and the run's model and effort, which default to Settings (choices_of); no switch decides
 what the orientation does. Once an orientation has ended, the tool starts another only when someone asked for it since
-(asked_for). Without thimble's plugin module, in plan mode, or in a session the launcher did not start, no orientation
-starts (subagents.refusal_before).
+(asked_for). Without thimble's plugin module, or in plan mode, no orientation starts (subagents.refusal_before).
 
 The prompt. The registration (subagent_definition) holds prompts/orient.md's body rendered for the workspace, its
 instructions (prompts/orient-instructions.md, or the workspace's `orient_instructions` setting) and the active
@@ -1047,10 +1046,10 @@ def choices_of(args: dict[str, Any]) -> tuple[str, dict[str, Any]]:
 
 async def tool_start_orientation(ctx: Any, args: dict[str, Any]) -> Any:
     """The `start_orientation` tool: the pending start of the orientation with the request and the run's model and
-    effort (choices_of), and the exact Agent call main makes (`## start_orientation-subagent`).
-    Refused while one runs, when nobody asked for a new one since the latest ended (asked_for), without the module, in
-    plan mode, and in a session the launcher did not start. A thread's fork's call starts the orientation the same way,
-    by main's Agent call on a `start_agent` event (tools._ask_main), since the fork may not make it."""
+    effort (choices_of), and the exact Agent call main makes (`## start_orientation-subagent`). Refused while one runs,
+    when nobody asked for a new one since the latest ended (asked_for), without the module, and in plan mode. A thread's
+    fork's call starts the orientation the same way, by main's Agent call on a `start_agent` event (tools._ask_main),
+    since the fork may not make it."""
     from . import session  # noqa: PLC0415
 
     brief, values = choices_of(args)

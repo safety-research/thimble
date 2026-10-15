@@ -97,11 +97,11 @@ VIEW_TERM = "view.term.js"  # a view's terminal program, beside its page (term_v
 NOT_BROWSER = ("This view was built in terminal mode, so only the terminal draws it. To see it, quit, run "
                "`thimble mode terminal`, and start `thimble` again in this folder.")
 TOOLS_PROMPT = "tools"  # prompts/tools.md, whose lowercase sections are the lines the view tools' results carry
-# a view ticket's status on its proposal row; `dropped` is an orientation proposal left out when the analyst stopped the
-# orientation before its view was built, or a view proposal the analyst rejected (answer_offer, its `answer`). An
-# orientation's proposal (before 0.8.0; one proposes none now) carries `held: true` until its view first passes its
-# checks (mark_built) or fails through its repairs (dev._repairs_failed): it builds at once, and the analyst hears of it
-# only then.
+# a view ticket's status on its proposal row; `dropped` is the proposal of an orientation from before 0.8.0 left out
+# when the analyst stopped the orientation before its view was built, or a view proposal the analyst rejected
+# (answer_offer, its `answer`). An orientation's proposal (before 0.8.0; one proposes none now) carries `held: true`
+# until its view first passes its checks (mark_built) or fails through its repairs (dev._repairs_failed): it builds at
+# once, and the analyst hears of it only then.
 # `suggested` with an `offered` object is a view proposal thimble shows the analyst (offer), after a turn (proposer.py)
 # or for a file type opened in the File browser (suggest), which builds only once the analyst accepts it (accept). A
 # `suggested` row without `offered` is an orientation's viewer for a file type, as 0.7.x stored them, which is never
@@ -3055,10 +3055,9 @@ def message(c: str, slug: str, text: str, *, by: str = "browser", route: str = C
 
 def click_refused(c: str, slug: str) -> dict[str, Any] | None:
     """A Build, Retry or accept click that cannot start a builder now, refused at once as a start is
-    (subagents.refusal_before: main not started by `thimble`, or no hooks module; in plan mode --agent-check refuses
-    the builder's start as it runs): the proposal keeps its status and records the refusal, which its chip shows. None
-    when nothing stands in the way. Queued instead, the build waited for a session that could start it and started by
-    itself later (live check L15)."""
+    (subagents.refusal_before: no hooks module; in plan mode --agent-check refuses the builder's start as it runs): the
+    proposal keeps its status and records the refusal, which its chip shows. None when nothing stands in the way. Queued
+    instead, the build waited for a session that could start it and started by itself later (live check L15)."""
     from . import subagents  # noqa: PLC0415
 
     before = subagents.refusal_before(c, click=True)
@@ -3112,10 +3111,11 @@ def stop_build(c: str, slug: str) -> dict[str, Any]:
 
 
 def drop(c: str, slug: str, why: str) -> dict[str, Any] | None:
-    """Leave an orientation's proposal out once the analyst stopped the orientation before its view was built
-    (dev.stop_orientation_views): the row stays as `dropped` with the reason, so every chip that names it knows to hide,
-    its draft folder is removed, and `view {dropped}` goes on the stream. None when there is no such proposal. A
-    proposal whose build failed through its repairs is not dropped: it fails with Retry (dev._repairs_failed)."""
+    """Leave the proposal of an orientation from before 0.8.0 out once the analyst stopped the orientation before its
+    view was built (dev.stop_orientation_views): the row stays as `dropped` with the reason, so every chip that names it
+    knows to hide, its draft folder is removed, and `view {dropped}` goes on the stream. None when there is no such
+    proposal. A proposal whose build failed through its repairs is not dropped: it fails with Retry
+    (dev._repairs_failed)."""
     prop = update_proposal(c, slug, status="dropped", error=" ".join(str(why or "").split())[:ERROR_MAX] or None)
     if prop is None:
         return None
@@ -5366,9 +5366,9 @@ def _recover(c: str) -> None:
 
 @router.get("/ws/{c}/views/proposals")
 async def list_proposals_route(c: str) -> list[dict[str, Any]]:
-    """The proposals. A held one, an orientation's proposal whose view has not passed its checks yet, is listed with
-    `held` for the orientation's card, and the views bar leaves it out, as it leaves out one listed with `off`, whose
-    view is switched off in Settings (views_off)."""
+    """The proposals. A held one, the proposal of an orientation from before 0.8.0 whose view has not passed its checks
+    yet, is listed with `held` for the orientation's card, and the views bar leaves it out, as it leaves out one listed
+    with `off`, whose view is switched off in Settings (views_off)."""
     config.workspace_dir(c)
     _bind_loop()
     _recover(c)
