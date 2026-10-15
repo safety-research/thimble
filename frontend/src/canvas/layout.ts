@@ -2,8 +2,8 @@
 //
 // The board is an infinite plane of frames (groups) and cards (cells). A frame's children are laid out by its flow (a
 // column, or a row for a split group) in order: the group's cards, with a nested group after `order` of them. A child
-// with a `pos` is placed free inside the frame. A collapsed frame shows its nested groups and its first card, with the
-// edges of the others stacked under it. Root frames sit at their `pos`, or below the root before them; loose cards sit
+// with a `pos` is placed free inside the frame. A thread's frame that no one has placed stands right of the card it is
+// about. A collapsed frame shows its nested groups and its first card, with the edges of the others stacked under it. Root frames sit at their `pos`, or below the root before them; loose cards sit
 // at their own `pos`. Empty thread groups are not drawn. `View` is the plane's pan and zoom.
 import type { ChipTone } from '../components/Chip'
 import { isUnread, type SeenMap } from '../chat/seen'
@@ -59,6 +59,8 @@ export interface BoardGroup {
   flow: Flow
   pos: Pos | null
   order: number | null
+  /** the card it stands beside, right of it: a thread's frame that no one has placed, about a card of its frame */
+  beside: string | null
   thread: boolean
   /** its name on the board: a thread's frame drops the `main/` of its path */
   name: string
@@ -119,7 +121,7 @@ export function boardOf(data: CanvasResponse): Board {
   for (const g of data.groups) {
     if (!drawn.has(g.id)) continue
     const thread = isThreadGroup(g)
-    groups.push({ id: g.id, group: g, parent: parentOf(g), flow: flowOf(g), pos: g.pos ?? null, order: g.order ?? null, thread, name: thread ? g.title.replace(/^main\//, '') : g.title })
+    groups.push({ id: g.id, group: g, parent: parentOf(g), flow: flowOf(g), pos: g.pos ?? null, order: g.order ?? null, beside: null, thread, name: thread ? g.title.replace(/^main\//, '') : g.title })
   }
   const group = new Map(groups.map((g) => [g.id, g] as const))
   const cells: BoardCell[] = []
@@ -129,12 +131,10 @@ export function boardOf(data: CanvasResponse): Board {
     // a stored width is the analyst's resize (only the resize grip writes one); none takes the default
     cells.push({ id: c.id, cell: c, parent, pos: c.pos ?? null, w: c.width ? clampWidth(c.width) : CARD_W, h: c.height ? clampHeight(c.height) : null })
   }
-  // a thread's frame that no one has placed sits right after its anchor card in the anchor's frame
+  // a thread's frame that no one has placed stands beside its anchor card, when that card is in the frame around it
   for (const g of groups) {
     if (!g.thread || g.pos || g.order != null || !g.parent || !g.group.anchor) continue
-    const flow = cells.filter((c) => c.parent === g.parent && !c.pos)
-    const at = flow.findIndex((c) => c.id === g.group.anchor)
-    if (at >= 0) g.order = at + 1
+    if (cells.some((c) => c.id === g.group.anchor && c.parent === g.parent)) g.beside = g.group.anchor
   }
   return { groups, cells, group, cellById: new Map(cells.map((c) => [c.id, c] as const)) }
 }
@@ -143,13 +143,13 @@ export type Kid = { t: 'g'; it: BoardGroup } | { t: 'c'; it: BoardCell }
 
 /**
  * A frame's children in order: its cards as stored, with each nested group after `order` of the cards in the flow
- * (null: after all, in their own order), then the children placed free.
+ * (null: after all, in their own order), then the children placed free, then the frames that stand beside a card.
  */
 export function kidsOf(board: Board, parent: string | null): Kid[] {
   const cells = board.cells.filter((c) => c.parent === parent)
   const groups = board.groups.filter((g) => g.parent === parent)
   const flowCells = cells.filter((c) => !c.pos)
-  const flowGroups = groups.filter((g) => !g.pos).map((g, i) => ({ g, i })).sort((a, b) => (a.g.order ?? Infinity) - (b.g.order ?? Infinity) || a.i - b.i).map((x) => x.g)
+  const flowGroups = groups.filter((g) => !g.pos && !g.beside).map((g, i) => ({ g, i })).sort((a, b) => (a.g.order ?? Infinity) - (b.g.order ?? Infinity) || a.i - b.i).map((x) => x.g)
   const out: Kid[] = []
   let gi = 0
   for (let i = 0; i <= flowCells.length; i++) {
@@ -159,6 +159,7 @@ export function kidsOf(board: Board, parent: string | null): Kid[] {
   while (gi < flowGroups.length) out.push({ t: 'g', it: flowGroups[gi++] })
   for (const c of cells) if (c.pos) out.push({ t: 'c', it: c })
   for (const g of groups) if (g.pos) out.push({ t: 'g', it: g })
+  for (const g of groups) if (!g.pos && g.beside) out.push({ t: 'g', it: g })
   return out
 }
 
@@ -192,10 +193,11 @@ export function layoutBoard(board: Board, open: ReadonlySet<string>, heights: Re
   const shown = (g: BoardGroup): Kid[] => {
     const all = kidsOf(board, g.id)
     if (open.has(g.id)) return all
-    // collapsed: the nested groups and the first card, in their flow order, each at its flow place
+    // collapsed: the nested groups and the first card, in their flow order, each at its flow place; a thread's frame
+    // still stands beside that card when it is about it
     const first = all.find((k) => k.t === 'c' && !k.it.pos) ?? all.find((k) => k.t === 'c')
     const kept: Kid[] = all.filter((k) => k.t === 'g' || k === first)
-    return kept.map((k) => (k.t === 'g' ? { t: 'g', it: { ...k.it, pos: null } } : { t: 'c', it: { ...k.it, pos: null } }))
+    return kept.map((k) => (k.t === 'g' ? { t: 'g', it: { ...k.it, pos: null, beside: k.it.beside && k.it.beside === first?.it.id ? k.it.beside : null } } : { t: 'c', it: { ...k.it, pos: null } }))
   }
   const measure = (g: BoardGroup): { w: number; h: number } => {
     const ks = shown(g)
@@ -203,7 +205,11 @@ export function layoutBoard(board: Board, open: ReadonlySet<string>, heights: Re
     let y = HEAD
     let maxW = 0
     let maxH = 0
+    // what stands in the frame, a frame with its title's room above it, which a frame beside a card does not cover
+    const taken: Rect[] = []
+    const besides: { k: Kid & { t: 'g' }; at: Pos | null; card: BoardCell | null }[] = []
     for (const k of ks) {
+      if (k.t === 'g' && k.it.beside) continue
       const s = k.t === 'g' ? measure(k.it) : { w: k.it.w, h: cellHeight(k.it, heights) }
       const title = k.t === 'g' ? TITLE : 0
       let p: Pos
@@ -216,6 +222,27 @@ export function layoutBoard(board: Board, open: ReadonlySet<string>, heights: Re
         y += s.h + GAP + title
       }
       rel.set(k.it.id, p)
+      taken.push({ x: p.x, y: p.y - title, w: s.w, h: s.h + title })
+      maxW = Math.max(maxW, p.x + s.w)
+      maxH = Math.max(maxH, p.y + s.h)
+    }
+    for (const k of ks) {
+      if (k.t !== 'g' || !k.it.beside) continue
+      const card = board.cellById.get(k.it.beside)
+      const at = rel.get(k.it.beside)
+      besides.push(card && at ? { k, at, card } : { k, at: null, card: null })
+    }
+    // a thread's frame beside the card it is about: right of the card, its title level with the card's top, and moved
+    // down past what it would cover, so two such frames stack downward; in the order of their cards
+    besides.sort((a, b) => (a.at?.y ?? Infinity) - (b.at?.y ?? Infinity))
+    for (const { k, at, card } of besides) {
+      const s = measure(k.it)
+      // (one whose card is not laid out goes below what stands in the frame)
+      const box = at && card ? { x: at.x + card.w + GAP, y: at.y, w: s.w, h: s.h + TITLE } : { x: PAD, y: HEAD, w: s.w, h: s.h + TITLE }
+      box.y = clearBelow(box, taken)
+      const p = { x: box.x, y: box.y + TITLE }
+      rel.set(k.it.id, p)
+      taken.push(box)
       maxW = Math.max(maxW, p.x + s.w)
       maxH = Math.max(maxH, p.y + s.h)
     }
