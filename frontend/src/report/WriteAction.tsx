@@ -1,11 +1,13 @@
 // The Report bar's primary action: Write on a document not written yet, which asks for it at once, and Revise on a
 // written one, which asks in a sheet under the button before a writer starts on a new draft. Writing while one runs,
-// with Stop beside it (StopWriter).
+// with Stop beside it (StopWriter); while Claude Code asks that writer a permission prompt in the terminal, the words
+// TERMINAL_WAIT with a still dot in the button's place, since the writer does nothing until the analyst answers there.
 import { useEffect, useRef, useState } from 'react'
 import { stopSession } from '../chat/AgentCard'
 import { STOP_HOLD_MS } from '../chat/ChatPanel'
 import { Button } from '../components/Button'
 import { Popover } from '../components/Menu'
+import { TERMINAL_WAIT } from '../chat/waiting'
 
 /** Stop on the writer that runs (`chat`), beside Writing: the same call as Stop in the writer's thread (the composer's
  * Stop, chat/ChatPanel stopRun, which is stopSession). Busy from the request until the writer ends, which takes the
@@ -29,11 +31,13 @@ export function StopWriter({ ws, chat }: { ws: string; chat: string }) {
   )
 }
 
-export function WriteAction({ name, written, busy, disabled, history, onWrite }: {
+export function WriteAction({ name, written, busy, waiting = false, disabled, history, onWrite }: {
   /** the document's name, as the bar's chip shows it */
   name: string
   written: boolean
   busy: boolean
+  /** while busy: the writer waits on a permission prompt in the terminal */
+  waiting?: boolean
   disabled?: boolean
   /** its drafts are listed in History */
   history?: boolean
@@ -52,6 +56,14 @@ export function WriteAction({ name, written, busy, disabled, history, onWrite }:
     if (busy) return
     if (written) setAsking((a) => !a)
     else onWrite()
+  }
+  if (busy && waiting) {
+    return (
+      <span className="wu-wait" role="status">
+        <span className="dot tt-waiting wu-wait-dot" aria-hidden="true" />
+        {TERMINAL_WAIT}
+      </span>
+    )
   }
   return (
     <>

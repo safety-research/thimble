@@ -1,6 +1,7 @@
 // Files' views: File browser, then every view written for this corpus, one exclusive choice (Segmented), a view whose
 // newer version builds or is reviewed with its chip shimmering; then proposals not built yet (spinner while building, a
-// still warning dot while its session waits for permission, a warning icon and Retry on failure); then New view, a
+// still warning dot while its session waits for permission or Claude Code asks its builder in the terminal, a warning
+// icon and Retry on failure); then New view, a
 // field that asks main for one. A view or a proposal shows × on hover, which deletes it once confirmed. A row across
 // the top of Files, or, while Files shows in a pane beside another, in that pane's head (`compact`, portalled by
 // FilesTab), where what does not fit goes in a ⋯ menu (viewsFit.ts). The views list is the shared one (lib/views.ts).
@@ -12,7 +13,7 @@ import { Icon, type IconName } from '../components/Icon'
 import { Menu, Popover } from '../components/Menu'
 import { Spinner } from '../components/Spinner'
 import { Tipped } from '../components/Tooltip'
-import { pendingAsks, useChatMetas } from '../chat/waiting'
+import { pendingAsks, TERMINAL_WAIT, terminalWaits, useChatMetas } from '../chat/waiting'
 import { failedWhy } from '../chat/ViewChip'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
@@ -129,18 +130,19 @@ export function useViews(ws: string): { views: BuiltView[]; proposals: Proposal[
   return { ...barList(list ?? [], proposals ?? []), ready: list != null && proposals != null }
 }
 
-/** The spinner's words for a proposal's build: queued, building, or waiting for permission while a request of its
- * session is on the card. Pure. */
-export function buildLabel(status: Proposal['status'], asking: boolean): string {
+/** The spinner's words for a proposal's build: queued, building, waiting for permission while a request of its
+ * session is on the card, or (`terminal`) waiting for the analyst's answer to its builder's permission prompt in the
+ * terminal, where Claude Code asks it. Pure. */
+export function buildLabel(status: Proposal['status'], asking: boolean | 'terminal'): string {
   if (status === 'queued') return 'Queued'
-  return asking ? 'Waiting for permission' : 'Building'
+  return asking === 'terminal' ? TERMINAL_WAIT : asking ? 'Waiting for permission' : 'Building'
 }
 
 /** A proposal in the bar: the view's button as the bar draws a view, its state after the name, a click that opens the
  * build's thread; for a failed build (a view the analyst asked for or accepted) a warning icon with why on hover
  * (failedWhy: a stop at main's quit says so, as the chat's chip does), and Retry beside it; × on hover to delete it
  * (`onDismiss` gets the proposal's box, which a confirm sits by). */
-export function ProposalOption({ ws, p, onDismiss, size, asking = false }: { ws: string; p: Proposal; onDismiss: (at: HTMLElement) => void; size: 'md' | 'lg'; asking?: boolean }) {
+export function ProposalOption({ ws, p, onDismiss, size, asking = false }: { ws: string; p: Proposal; onDismiss: (at: HTMLElement) => void; size: 'md' | 'lg'; asking?: boolean | 'terminal' }) {
   const [retrying, setRetrying] = useState(false)
   const pending = p.status === 'queued' || p.status === 'building'
   const failed = p.status === 'failed'
@@ -285,7 +287,10 @@ export function ViewsBar({ ws, value, onChange, views, proposals, compact = fals
   // the builds whose session waits for permission, read from their chats only while a build runs
   const metas = useChatMetas(ws, pending.some((p) => p.status === 'building' && !!p.chat))
   const askingChats = new Set(metas.filter((m) => pendingAsks(m).length > 0).map((m) => m.id))
-  const askingFor = (p: Proposal) => p.status === 'building' && !!p.chat && askingChats.has(p.chat)
+  // the builds whose builder, a subagent of main, waits on a permission prompt in the terminal
+  const terminalChats = terminalWaits(null, metas)
+  const askingFor = (p: Proposal): boolean | 'terminal' =>
+    p.status === 'building' && !!p.chat && (terminalChats.has(p.chat) ? 'terminal' : askingChats.has(p.chat))
   const active = options.findIndex((o) => o.value === value)
   const names = [...options.map((o) => o.label), ...pending.map((p) => p.name)].join('\u0000')
 
@@ -317,7 +322,7 @@ export function ViewsBar({ ws, value, onChange, views, proposals, compact = fals
   const hiddenProposals = pending.filter((_, i) => !shows(options.length + i))
   const overflow = [
     ...hiddenOptions.map((o) => ({ id: o.value, label: o.label, icon: o.icon, checked: o.value === value, note: o.note, onSelect: () => onChange(o.value) })),
-    ...hiddenProposals.map((p) => ({ id: `p:${p.slug}`, label: p.name, icon: 'view' as const, note: askingFor(p) ? 'waiting for permission' : STATE_NOTE[p.status], disabled: !p.chat, onSelect: () => openBuild(p) })),
+    ...hiddenProposals.map((p) => ({ id: `p:${p.slug}`, label: p.name, icon: 'view' as const, note: askingFor(p) ? buildLabel(p.status, askingFor(p)).toLowerCase() : STATE_NOTE[p.status], disabled: !p.chat, onSelect: () => openBuild(p) })),
   ]
 
   const confirm = <DeleteViewConfirm asked={removing} onClose={() => setRemoving(null)} onDelete={() => removing && void remove(removing)} />

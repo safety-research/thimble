@@ -3,7 +3,7 @@
 // (DocMenus.tsx), Export (ExportMenu.tsx), the story's Read, the lock note (LockNote.tsx), History (History.tsx) and the primary action,
 // Write or Revise (WriteAction.tsx, where Revise asks first), which asks the analyst's session for the document (a
 // `write` browser event; `report` stream events follow it). While a writer of the document runs, Stop stands beside
-// Writing (WriteAction.tsx StopWriter). A failed write stays on its document (writeFailures.ts) with Retry until dismissed or written. A document
+// Writing (WriteAction.tsx StopWriter), and while Claude Code asks that writer in the terminal the bar says so. A failed write stays on its document (writeFailures.ts) with Retry until dismissed or written. A document
 // not written yet is its frame (GET …/frame). The views' module (Documents.tsx) is imported once in an effect rather than
 // with React.lazy, whose Suspense retry can stall; documents are kept by slug so a switch never shows an empty body.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -23,7 +23,7 @@ import type { AnyDoc, TypesState, Writeup } from '../lib/types'
 import { readStorage, writeStorage } from '../lib/workspace'
 import { ReportProblemButton } from '../shell/ProblemReport'
 import { writerDoc } from '../chat/threads'
-import { useChatMetas } from '../chat/waiting'
+import { terminalWaits, useChatMetas } from '../chat/waiting'
 import { NewDocMenu, TypeActions } from './DocMenus'
 import type { DocFilter } from './Editor'
 import { DraftDiff, HistoryMenu, PastDraft } from './History'
@@ -292,6 +292,8 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
   // a writer's session of this document that runs: the write goes on after its first save (the stream says
   // `generated` then), so the primary action stays Writing, never Revise, until the session ends
   const writer = chats.find((m) => m.role === 'writer' && m.status === 'running' && writerDoc(m) === slug) ?? null
+  // that writer waits on a permission prompt Claude Code asks in the terminal: the bar says so in place of Writing
+  const writerWaits = !!writer && terminalWaits(null, chats).has(writer.id)
   // a document is being written while its write is pending or a writer of it runs (which goes on after its first save)
   const writingOf = (s: string) => !!generating[s] || types?.[s]?.status === 'generating' || chats.some((m) => m.role === 'writer' && m.status === 'running' && writerDoc(m) === s)
   const busy = writingSlug === slug || !!generating[slug] || types?.[slug]?.status === 'generating' || !!writer
@@ -398,6 +400,7 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
           name={ownType(slug) ? docLabel(slug, types) : docLabel(slug, types).toLowerCase()}
           written={written}
           busy={busy}
+          waiting={writerWaits}
           disabled={(load.state === 'loading' && !held) || load.state === 'error'}
           history={!isPage && !isVideo}
           onWrite={() => void write()}

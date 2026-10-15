@@ -12,6 +12,7 @@
 import type { ThreadNode } from '../components/ThreadTree'
 import { hhmm } from '../lib/time'
 import type { ChatMeta } from '../lib/types'
+import { TERMINAL_WAIT } from './waiting'
 
 /** What a chat is: main, a thread (a fork of main), the orientation, a writer, a report check's run on a document, a
  * dev ticket's session (a view build among them), or a step of the orientation or a writer (a subagent or
@@ -42,6 +43,9 @@ export interface PickItem {
   hidden?: boolean
   /** a permission prompt of its session or its fork waits for the analyst */
   waiting?: boolean
+  /** what its waiting mark says, when not that it waits for the analyst: TERMINAL_WAIT while Claude Code asks its agent
+   * in the terminal */
+  waitText?: string
 }
 
 export interface PickOptions {
@@ -49,6 +53,8 @@ export interface PickOptions {
   current?: string | null
   /** the chats a permission prompt waits on (chat/waiting.ts, and main's prompts that name their thread) */
   waiting?: ReadonlySet<string>
+  /** the chats whose agent waits on a permission prompt in the terminal (chat/waiting.ts terminalWaits) */
+  terminal?: ReadonlySet<string>
 }
 
 const byCreation = (a: ChatMeta, b: ChatMeta) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0)
@@ -210,7 +216,8 @@ export function pickItems(chats: readonly ChatMeta[], running: (m: ChatMeta) => 
     const shown = m.id === opts.current
     // a thread with nothing in it (asked nothing yet, or its first question never went out) is noise in the tree
     const empty = kind === 'thread' && !m.n_messages && !isRunning
-    const waiting = !!opts.waiting?.has(m.id)
+    const inTerminal = !!opts.terminal?.has(m.id)
+    const waiting = !!opts.waiting?.has(m.id) || inTerminal
     // every dev ticket is listed (the orientation's view builds among them); a report check's run only while it runs
     const left = kind === 'dev' ? false : (startedByThimble(m) && !isRunning) || empty
     return {
@@ -229,6 +236,7 @@ export function pickItems(chats: readonly ChatMeta[], running: (m: ChatMeta) => 
       endTs: m.ts_end ?? null,
       hidden: !shown && left,
       waiting,
+      ...(inTerminal ? { waitText: TERMINAL_WAIT } : {}),
     }
   }
   const kids = new Map<string, ChatMeta[]>()
@@ -292,6 +300,7 @@ export function threadNodes(items: readonly PickItem[]): ThreadNode[] {
       running: it.running,
       unread: it.unread,
       waiting: it.waiting,
+      ...(it.waitText ? { waitText: it.waitText } : {}),
       time: endTime,
       ended: it.ended ?? undefined,
       fixed: it.isMain,
