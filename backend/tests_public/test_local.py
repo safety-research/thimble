@@ -833,7 +833,7 @@ async def test_state_home_gives_every_agent_s_open_notices_newest_first_with_the
                                                                                                      monkeypatch):
     """Every agent's open notices reach the rows above the prompt, since Claude Code's own terminal shows only main's
     requests: the orientation's, a view build's, a writer's, the view proposer's. Each says how its own thread opens. A
-    notice of Claude's safeguards on main's own reply is left out: Claude Code shows that one."""
+    notice of Claude's safeguards on main's own reply, or of its API error, is left out: Claude Code shows those."""
     from app import agents
 
     assert (await local.state(CORPUS, "home"))["notices"] == []
@@ -858,6 +858,8 @@ async def test_state_home_gives_every_agent_s_open_notices_newest_first_with_the
         _notice(id="n5", key="empty", text="  ", ts="2026-10-14T11:00:00Z"),
         _notice(id="n6", key="safeguards:main", kind="safeguards", text="Claude's safeguards switched this reply.",
                 agent=None, chat="main", ts="2026-10-14T11:00:00Z"),
+        _notice(id="n7", key="main:api", kind="api", text="Claude's reply in main failed: Claude Code isn't signed in.",
+                agent="Main", chat="main", ts="2026-10-14T11:00:00Z"),
     ])
     got = (await local.state(CORPUS, "home"))["notices"]
     assert [n["id"] for n in got] == ["n4", "n3", "n2", "n1"], "newest first; a tie keeps the later one first"

@@ -466,8 +466,8 @@ def _offer(c: str) -> dict[str, Any] | None:
 # Every agent's open notices (notices.py: a failure with its fix, from the orientation and its helpers, the critic,
 # writers, view builds and reviews, report checks, code tickets and the dev agent, card checks, labels and the view
 # proposer), which the rows above the prompt show, since Claude Code's own terminal shows only main's requests; a notice
-# of Claude's safeguards on main's own reply (kind "safeguards" in main's chat) is left out, as Claude Code shows it
-# there. Each action maps to the act that takes it in the terminal: a `thimble act` kind, or for `settings` (Open
+# of main's own request (kind "safeguards" or notices.API in main's chat: a reply the safeguards switched, an API error)
+# is left out, as Claude Code shows it there. Each action maps to the act that takes it in the terminal: a `thimble act` kind, or for `settings` (Open
 # Settings: the terminal has no Settings pane) "settings", which says where thimble's config is, since Settings writes it.
 NOTICE_ACTS = {"proposals-retry": "view-propose-now", "proposals-off": "view-proposals-off", "view-retry": "view-retry",
                "settings": "settings"}
@@ -500,7 +500,7 @@ def _notices(c: str) -> list[dict[str, Any]]:
     from . import agents, notices  # noqa: PLC0415
 
     rows = [n for n in notices.open_notices(c) if isinstance(n, dict) and str(n.get("text") or "").strip()
-            and not (n.get("chat") == agents.MAIN_ID and n.get("kind") == "safeguards")]
+            and not (n.get("chat") == agents.MAIN_ID and n.get("kind") in ("safeguards", notices.API))]
     rows = sorted(reversed(rows), key=lambda n: str(n.get("ts") or ""), reverse=True)  # newest first, ties as given
     out: list[dict[str, Any]] = []
     for n in rows:

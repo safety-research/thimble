@@ -57,6 +57,30 @@ async def test_a_start_that_did_not_happen_is_told_and_the_next_start_clears_it(
     assert ans.started and _open("agent:writer:report") is None
 
 
+async def test_a_run_s_api_error_is_told_by_its_record_s_class_and_a_done_run_clears_its_helpers_notice(bridge,
+                                                                                                      monkeypatch):
+    """Claude Code 2.1.300's 404 line names no status; the mirror's class from the record (model_not_found) gives the
+    fix, and the helpers' notice under the agent's id goes when the agent's run ends done."""
+    from app import session
+
+    ans = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK,
+                                    chat={"title": "Write report", "doc": "report"})
+    line = ("There's an issue with the selected model (claude-opus-9-9). It may not exist or you may not have access to "
+            "it. Run /model to pick a different model.")
+    monkeypatch.setattr(subagents, "api_error", lambda c, a: line)
+    monkeypatch.setattr(session, "agent_error_class", lambda c, a: "not_found")
+    subagents.run_ended(CORPUS, ans.agent_id, "done", "", source="module")
+    n = _open("agent:writer:report")
+    assert n["text"] == ("The writer of report failed: its model isn't available to your account; pick another model "
+                         "in Settings.") and n["action"] == notices.SETTINGS
+    notices.post(CORPUS, kind="agent", text="A helper of the writer stopped with an error.",
+                 key=session.helper_key(ans.agent_id))
+    monkeypatch.setattr(subagents, "api_error", lambda c, a: None)
+    subagents.run_again(CORPUS, ans.agent_id, "coordinator")
+    subagents.run_ended(CORPUS, ans.agent_id, "done", "Written.", source="module")
+    assert notices.open_notices(CORPUS) == []
+
+
 async def test_a_typed_start_main_did_not_make_says_so_not_main_s_words(bridge):
     ans = await subagents.start_job(CORPUS, "orientation", "orient", "o", {}, subagents.TYPED)
     subagents.refuse(CORPUS, ans["request"], "I'll look at the board first.", subagents.NO_CALL)
@@ -165,7 +189,8 @@ def test_a_card_check_that_failed_by_itself_is_told_and_a_card_s_own_outcome_is_
     card_check._end(run, "error", "the model's reading failed (Not logged in · Please run /login)", tell=True)
     n = _open(card_check.NOTICE_KEY)
     assert n["text"].startswith('The card check of the card "Who replies most?" failed: Claude Code isn\'t signed in '
-                                "for thimble's server; run /login")
+                                "for thimble's server. In your terminal: run /login")
+    assert n["text"].endswith("run `thimble server restart`.") and n["action"] is None
     assert n["agent"] == "Card check" and n["chat"] is None
     card_check._end(run, "ok")
     assert _open(card_check.NOTICE_KEY) is None

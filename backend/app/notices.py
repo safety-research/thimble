@@ -24,8 +24,12 @@ true} for one taken away. GET /api/ws/{c}/notices gives the open ones, so a page
 Keys: `agent:<the agent's key>` for an agent of thimble's (agent_key: subagents.py for its runs and starts, dev.py for
 view builds and code tickets, checks.py for report checks), `proposals` for the view proposer (proposer.py),
 `safeguards:<chat>` for a reply Claude's safeguards switched to another model (session.py), `thread:<chat>` and
-`helper:<agent id>` for a side thread's or an orientation helper's API error (session.py), `card-check` (card_check.py)
-and `label:<id>` (concepts.py). post and clear never raise: a failure to tell is logged.
+`helper:<agent id>` for a side thread's or a helper's API error, `main:api` for main's own (session.py), `card-check`
+(card_check.py) and `label:<id>` (concepts.py). post and clear never raise: a failure to tell is logged.
+
+A failure of Anthropic's API is told in plain words with its fix, and each fix says where it runs (reason, API_WORDS):
+in the browser with its button, or "In your terminal: …" for one only Claude Code's terminal can run, such as /login or
+/model.
 """
 from __future__ import annotations
 
@@ -38,7 +42,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from . import agents, config, investigation, ledger, retry
 
@@ -58,10 +62,12 @@ router = APIRouter(lifespan=_lifespan)
 _loop: asyncio.AbstractEventLoop | None = None
 
 TYPE = "notice"  # the event's type on the workspace stream, and the row's type in a chat's log
+API = "api"  # the kind of a notice of main's own request that Anthropic's API failed (session.py), which main's chat
+# shows as its API error card: no row, and the foreground strip leaves it out while main is open
 ACTIONS = ("proposals-retry", "proposals-off", "settings", "view-retry")
 NOTICES_FILE = "notices.json"  # in the workspace folder: the open notices, oldest first
 OPEN_MAX = 50  # open notices kept; the oldest go first
-TEXT_CHARS = 360  # a notice's text at most, cut at a word
+TEXT_CHARS = 480  # a notice's text at most, cut at a word (long enough for a fix in the terminal and its words)
 REASON_CHARS = 280  # a failure's own words inside a notice at most
 SETTINGS = {"label": "Open Settings", "do": "settings"}
 
@@ -156,10 +162,12 @@ def _row(c: str, chat: str, rec: dict[str, Any]) -> None:
 
 
 def post(c: str, *, kind: str, text: str, agent: str | None = None, chat: str | None = None, action: Any = None,
-         key: str | None = None) -> dict[str, Any] | None:
+         key: str | None = None, row: bool = True) -> dict[str, Any] | None:
     """Tell the analyst in the foreground that something failed (module note): an open notice, replacing the one under
-    the same `key`, a row in the agent's chat `chat` when it has one, and the `notice` event. `kind` names what failed
-    ("agent", "safeguards", "view", "proposals", "card-check", "label"). The notice, or None when it was not written."""
+    the same `key`, a row in the agent's chat `chat` when it has one (not with `row` false: the chat shows the failure
+    itself, as main's API error card does), and the `notice` event. `kind` names what failed ("agent", "safeguards",
+    "view", "proposals", "card-check", "label", API for main's own request). The notice, or None when it was not
+    written."""
     text = _short(text, TEXT_CHARS)
     if not text:
         raise ValueError("a notice says something")
@@ -177,7 +185,7 @@ def post(c: str, *, kind: str, text: str, agent: str | None = None, chat: str | 
     except (OSError, ValueError, HTTPException):
         log.warning("%s: a notice was not written: %s", c, text, exc_info=True)
         return None
-    if rec["chat"]:
+    if rec["chat"] and row:
         try:
             _row(c, rec["chat"], rec)
         except (OSError, ValueError, HTTPException):
@@ -227,35 +235,67 @@ def dismiss(c: str, notice_id: str) -> bool:
 # working sign-in (Claude Code 2.1.300: "Not logged in · Please run /login", error authentication_failed)
 REFUSED_RE = re.compile(r"safeguards|usage polic|can't help with this", re.I)
 AUTH_RE = re.compile(r"not logged in|invalid api key|please run /login|authentication_failed|authentication failed|"
-                     r"oauth token|\b401\b", re.I)
+                     r"failed to authenticate|oauth token|\b401\b", re.I)
 FORBIDDEN_RE = re.compile(r"\b403\b|forbidden|permission_error", re.I)
-NOT_FOUND_RE = re.compile(r"\b404\b|not_found_error|model\b[^.]{0,80}(?:not found|does not exist|isn't available)",
-                          re.I)
-API_WORDS: dict[str, tuple[str, str]] = {  # a failure's class -> (what happened, what the analyst does)
-    "refused": ("Claude's safeguards stopped its request", "rephrase or narrow the request and try again"),
-    "auth": ("Claude Code isn't signed in", "run /login"),
-    "forbidden": ("your account may not make this request (403)",
-                  "check your sign-in and your organization's settings, or pick another model in Settings"),
-    "not_found": ("its model isn't available to your account", "pick another model in Settings"),
-    "overloaded": ("Anthropic's API is overloaded", "try again in a few minutes"),
-    "rate_limited": ("Anthropic's API rate limit was reached", "try again in a few minutes"),
-    "server_error": ("Anthropic's API had a server error", "try again"),
-    "connection": ("the connection to Anthropic's API failed", "check the network and try again"),
-}
+NOT_FOUND_RE = re.compile(r"\b404\b|not_found_error|model_not_found|issue with the selected model|"
+                          r"model\b[^.]{0,80}(?:not found|does not exist|isn't available)", re.I)
+# the HTTP status an error line names ("Please run /login · API Error: 401 …", "API Error: 403 {…}"), which decides
+# before the line's other words do
+STATUS_RE = re.compile(r"\b(?:API Error|Error code|HTTP|status(?: code)?):?\s*(\d{3})\b", re.I)
+# Claude Code's API error record (isApiErrorMessage) names its failure in `apiErrorStatus` and `error`; these decide
+# its class before its words, which change between versions (session.api_error_class)
+STATUS_CLASS = {401: "auth", 403: "forbidden", 404: "not_found", 429: "rate_limited", 500: "server_error",
+                502: "server_error", 503: "server_error", 504: "server_error", 529: "overloaded"}
+ERROR_CLASS = {"authentication_failed": "auth", "model_not_found": "not_found", "rate_limit": "rate_limited",
+               "overloaded": "overloaded", "server_error": "server_error"}
 
+# Where a failure's fix runs (Matt, 10-14: the browser can't run /login or /model): BROWSER, a button or a reply there
+# (Retry, Try again, a rephrased request, Settings), or TERMINAL, the Claude Code terminal where thimble runs, whose
+# fix the words name after "In your terminal:" and which offers no button.
+BROWSER, TERMINAL = "browser", "terminal"
+# a failure's class -> (what happened, what the analyst does, where they do it)
+API_WORDS: dict[str, tuple[str, str, str]] = {
+    "refused": ("Claude's safeguards stopped its request", "rephrase or narrow the request and try again", BROWSER),
+    "auth": ("Claude Code isn't signed in", "In your terminal: run /login (or `claude auth login` in a shell)",
+             TERMINAL),
+    "forbidden": ("your account may not make this request (403)",
+                  "In your terminal: check your sign-in (/login) and your account's or organization's settings",
+                  TERMINAL),
+    "not_found": ("its model isn't available to your account", "pick another model in Settings", BROWSER),
+    "overloaded": ("Anthropic's API is overloaded", "try again in a few minutes", BROWSER),
+    "rate_limited": ("Anthropic's API rate limit was reached", "try again in a few minutes", BROWSER),
+    "server_error": ("Anthropic's API had a server error", "try again", BROWSER),
+    "connection": ("the connection to Anthropic's API failed", "check the network and try again", BROWSER),
+}
+# a model main's session asked for, which only Claude Code's /model changes (a side thread's fork runs on main's)
+MAIN_MODEL_FIX = "In your terminal: run /model to pick another model"
 
 # the fix of a sign-in failure of a call thimble's server makes itself (the view proposer, card checks, labels), whose
 # environment is the one the server started with
 SERVER_AUTH = ("Claude Code isn't signed in for thimble's server",
-               "run /login, or if you changed your sign-in (for example exported ANTHROPIC_API_KEY), run "
-               "`thimble server restart`")
+               "In your terminal: run /login (or `claude auth login` in a shell), or if you changed your sign-in (for "
+               "example exported ANTHROPIC_API_KEY), run `thimble server restart`", TERMINAL)
 
 
-def failure_class(text: Any) -> str | None:
-    """The class of an API failure from its error line (API_WORDS' keys), or None for any other failure."""
+def fix_where(cls: Any) -> str:
+    """Where the fix of a failure of class `cls` (API_WORDS' keys) runs: BROWSER or TERMINAL; BROWSER for any other
+    failure, whose words say what to do."""
+    return API_WORDS.get(str(cls or ""), ("", "", BROWSER))[2]
+
+
+def failure_class(text: Any, *, status: Any = None, error: Any = None) -> str | None:
+    """The class of an API failure (API_WORDS' keys), or None for any other failure: Claude's safeguards by the line's
+    words, then the record's HTTP `status` and `error` kind (Claude Code's apiErrorStatus and error), then the status
+    the line names, then its other words."""
     t = str(text or "")
     if REFUSED_RE.search(t):
         return "refused"
+    if isinstance(status, int) and not isinstance(status, bool) and status in STATUS_CLASS:
+        return STATUS_CLASS[status]
+    if str(error or "") in ERROR_CLASS:
+        return ERROR_CLASS[str(error)]
+    if (m := STATUS_RE.search(t)) and int(m.group(1)) in STATUS_CLASS:
+        return STATUS_CLASS[int(m.group(1))]
     if AUTH_RE.search(t):
         return "auth"
     if FORBIDDEN_RE.search(t):
@@ -265,15 +305,22 @@ def failure_class(text: Any) -> str | None:
     return retry.transient_class(None, t)
 
 
-def reason(text: Any, *, server: bool = False) -> tuple[str, Any]:
-    """A failure's words for a notice and the action that fixes it: an API failure in plain words with its fix (Open
-    Settings for a model the account cannot use; for a sign-in failure of a call the server made itself, `server`, the
-    server's fix), any other failure in its own words, shortened."""
-    cls = failure_class(text)
-    if cls is not None:
-        words, fix = SERVER_AUTH if server and cls == "auth" else API_WORDS[cls]
-        return f"{words}; {fix}", SETTINGS if cls in ("forbidden", "not_found") else None
-    return _gist(text, REASON_CHARS).rstrip(".") or "no reason was given", None
+def reason(text: Any, *, server: bool = False, cls: str | None = None, main_model: bool = False) -> tuple[str, Any]:
+    """A failure's words for a notice and the action that fixes it: an API failure (of class `cls` when the caller read
+    it from Claude Code's record, else by its words) in plain words with its fix, a fix in the terminal after "In your
+    terminal:" (TERMINAL) and one in the browser with its button (Open Settings for a model the account cannot use);
+    for a sign-in failure of a call the server made itself (`server`) the server's fix, and for a model main's session
+    asked for (`main_model`, a side thread's fork) Claude Code's /model. Any other failure in its own words,
+    shortened."""
+    cls = cls if cls in API_WORDS else failure_class(text)
+    if cls is None:
+        return _gist(text, REASON_CHARS).rstrip(".") or "no reason was given", None
+    words, fix, where = SERVER_AUTH if server and cls == "auth" else API_WORDS[cls]
+    if cls == "not_found" and main_model:
+        fix, where = MAIN_MODEL_FIX, TERMINAL
+    if where == TERMINAL:
+        return f"{words}. {fix}", None
+    return f"{words}; {fix}", SETTINGS if cls == "not_found" else None
 
 
 # --------------------------------------------------------------------------- thimble's agents
@@ -328,12 +375,13 @@ def chat_title(c: str, chat: Any) -> str:
 
 
 def agent_failed(c: str, *, role: str, key: Any, error: Any, chat: str | None = None, title: str = "",
-                 action: Any = None) -> dict[str, Any] | None:
-    """An agent of thimble's ended failed with `error` (its report or Claude Code's API error line): the notice
-    "<agent> failed: <why>; <fix>." under its key, with Open on its chat. Never raises."""
+                 action: Any = None, cls: str | None = None) -> dict[str, Any] | None:
+    """An agent of thimble's ended failed with `error` (its report or Claude Code's API error line, of class `cls` when
+    its record named one): the notice "<agent> failed: <why and fix>." under its key, with Open on its chat. Never
+    raises."""
     try:
         name, subject = who(role, title or chat_title(c, chat))
-        why, fix = reason(error)
+        why, fix = reason(error, cls=cls)
         return post(c, kind="agent", text=f"{subject} failed: {why}.", agent=name, chat=chat, key=agent_key(key),
                     action=action if action is not None else fix)
     except Exception:  # noqa: BLE001 — a failure not told is no reason to fail what reports it
@@ -375,7 +423,11 @@ async def list_route(c: str) -> list[dict[str, Any]]:
 
 
 @router.post("/ws/{c}/notices/{notice_id}/dismiss")
-async def dismiss_route(c: str, notice_id: str) -> dict[str, Any]:
-    """The analyst's x: {dismissed: bool}."""
+async def dismiss_route(c: str, notice_id: str, request: Request) -> dict[str, Any]:
+    """The analyst's x: {dismissed: bool}. 403 without the analyst's browser cookie: the server's token, which main's
+    shim holds, does not take a notice away from the analyst (subagents.analyst_only)."""
+    from . import subagents  # noqa: PLC0415
+
+    subagents.analyst_only(request)
     config.workspace_dir(c)
     return {"dismissed": dismiss(c, notice_id)}

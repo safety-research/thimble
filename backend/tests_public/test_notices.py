@@ -68,13 +68,19 @@ def test_a_bad_action_is_refused_and_old_notices_go_first(monkeypatch):
     assert [n["id"] for n in notices.open_notices(CORPUS)] == ids[2:]
 
 
-def test_get_notices_gives_the_open_ones_and_the_x_dismisses():
+def test_get_notices_gives_the_open_ones_and_the_x_dismisses(analyst):
+    from app import hook_auth
+
     client = TestClient(main.create_app())
     assert client.get(f"/api/ws/{CORPUS}/notices").json() == []
     n = notices.post(CORPUS, kind="agent", text="The orientation failed: it broke.", agent="Orientation",
                      key="agent:orientation")
     got = client.get(f"/api/ws/{CORPUS}/notices").json()
     assert [(x["id"], x["text"], x["agent"]) for x in got] == [(n["id"], n["text"], "Orientation")]
+    assert client.post(f"/api/ws/{CORPUS}/notices/{n['id']}/dismiss").status_code == 403, \
+        "only the analyst's x takes a notice away"
+    assert len(client.get(f"/api/ws/{CORPUS}/notices").json()) == 1
+    client.cookies.set(hook_auth.ui_cookie(), analyst.cookies[hook_auth.ui_cookie()])
     assert client.post(f"/api/ws/{CORPUS}/notices/{n['id']}/dismiss").json() == {"dismissed": True}
     assert client.get(f"/api/ws/{CORPUS}/notices").json() == []
 
@@ -93,10 +99,19 @@ async def test_a_notice_from_a_worker_thread_reaches_the_stream_on_the_loop(monk
      "Claude's safeguards stopped its request; rephrase or narrow the request and try again", None),
     ("API Error: Claude can't help with this. Start a new session to continue.",
      "Claude's safeguards stopped its request; rephrase or narrow the request and try again", None),
-    ("Not logged in · Please run /login", "Claude Code isn't signed in; run /login", None),
+    ("Not logged in · Please run /login",
+     "Claude Code isn't signed in. In your terminal: run /login (or `claude auth login` in a shell)", None),
+    ("Please run /login · API Error: 401 Invalid bearer token",
+     "Claude Code isn't signed in. In your terminal: run /login (or `claude auth login` in a shell)", None),
     ("API Error: 403 {\"type\":\"error\",\"error\":{\"type\":\"permission_error\"}}",
-     "your account may not make this request (403); check your sign-in and your organization's settings, or pick "
-     "another model in Settings", notices.SETTINGS),
+     "your account may not make this request (403). In your terminal: check your sign-in (/login) and your account's "
+     "or organization's settings", None),
+    ("Please run /login · API Error: 403 Your API key does not have permission to use the specified resource.",
+     "your account may not make this request (403). In your terminal: check your sign-in (/login) and your account's "
+     "or organization's settings", None),
+    ("There's an issue with the selected model (claude-opus-9-9). It may not exist or you may not have access to it. "
+     "Run /model to pick a different model.", "its model isn't available to your account; pick another model in "
+     "Settings", notices.SETTINGS),
     ("API Error: 404 model: claude-x not found", "its model isn't available to your account; pick another model in "
      "Settings", notices.SETTINGS),
     ("API Error: Repeated 529 Overloaded errors", "Anthropic's API is overloaded; try again in a few minutes", None),
@@ -105,6 +120,38 @@ async def test_a_notice_from_a_worker_thread_reaches_the_stream_on_the_loop(monk
 ])
 def test_a_failure_s_words_name_the_fix(line, words, fix):
     assert notices.reason(line) == (words, fix)
+
+
+@pytest.mark.parametrize("status,error,cls", [
+    (401, "authentication_failed", "auth"), (403, "authentication_failed", "forbidden"), (404, "model_not_found",
+                                                                                          "not_found"),
+    (529, "server_error", "overloaded"), (None, "model_not_found", "not_found"), (None, "rate_limit", "rate_limited"),
+])
+def test_claude_code_s_record_fields_decide_the_class_before_its_words(status, error, cls):
+    """Claude Code 2.1.300's records (isApiErrorMessage) name the failure in apiErrorStatus and `error`; a 403 says
+    authentication_failed and "Failed to authenticate", but is no sign-in failure."""
+    assert notices.failure_class("Failed to authenticate. API Error: something", status=status, error=error) == cls
+
+
+def test_each_fix_says_where_it_runs():
+    """The browser can't run /login or /model: a fix only the terminal can run says "In your terminal:" and has no
+    button; one the browser can run has its words, and its button where one fixes it."""
+    where = {cls: notices.fix_where(cls) for cls in notices.API_WORDS}
+    assert where == {"refused": "browser", "auth": "terminal", "forbidden": "terminal", "not_found": "browser",
+                     "overloaded": "browser", "rate_limited": "browser", "server_error": "browser",
+                     "connection": "browser"}
+    for cls, at in where.items():
+        words, action = notices.reason("x", cls=cls)
+        assert ("In your terminal: " in words) == (at == "terminal"), cls
+        if at == "terminal":
+            assert action is None, cls
+    assert notices.reason("x", cls="not_found", main_model=True) == (
+        "its model isn't available to your account. In your terminal: run /model to pick another model", None), \
+        "main's model (a side thread's fork's) changes only with Claude Code's /model"
+    words, action = notices.reason("x", cls="auth", server=True)
+    assert words == ("Claude Code isn't signed in for thimble's server. In your terminal: run /login (or `claude auth "
+                     "login` in a shell), or if you changed your sign-in (for example exported ANTHROPIC_API_KEY), run "
+                     "`thimble server restart`") and action is None
 
 
 def test_a_long_reason_keeps_its_first_sentence_and_its_fix():

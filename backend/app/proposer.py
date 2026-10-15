@@ -24,8 +24,9 @@ and rejected proposals, deleted views) and what just happened; the answer is one
 
 Each run appends a line to the run log (LOG_FILE). Every failure tells the analyst in the foreground with an easy fix
 (notices.post, NOTICE_KEY): a request Claude's safeguards blocked (Try again, Turn off view proposals), Claude Code not
-signed in for thimble's server (/login or `thimble server restart`, Try again), and any other failure (Try again). A
-proposal that came from a fallback model is shown with a notice saying so. A run that works clears the notice.
+signed in for thimble's server (in the terminal: /login or `thimble server restart`, then Try again), and any other
+failure (Try again). A proposal that came from a fallback model is shown with a notice saying so. A run that works
+clears the notice.
 """
 from __future__ import annotations
 
@@ -69,8 +70,8 @@ REFUSED_RE, AUTH_RE = notices.REFUSED_RE, notices.AUTH_RE
 REFUSAL = "refusal"  # the stop_reason of a reply the model's safeguards stopped
 
 NOTICE_REFUSED = "Couldn't check for a view proposal: Claude's safeguards blocked the request."
-NOTICE_AUTH = ("Couldn't check for a view proposal: Claude Code isn't signed in for thimble's server. Run /login, or if "
-               "you changed your sign-in (for example exported ANTHROPIC_API_KEY), run `thimble server restart`.")
+# its fix runs in the terminal (notices.SERVER_AUTH), then Try again here
+NOTICE_AUTH = f"Couldn't check for a view proposal: {notices.SERVER_AUTH[0]}. {notices.SERVER_AUTH[1]}. Then Try again."
 NOTICE_FAILED = "Couldn't check for a view proposal: {reason}."
 NOTICE_FALLBACK = "This view proposal came from {fallback}: Claude's safeguards switched models."
 TRY_AGAIN = {"label": "Try again", "do": "proposals-retry"}

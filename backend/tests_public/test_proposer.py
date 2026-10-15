@@ -305,7 +305,8 @@ async def test_no_sign_in_says_how_to_sign_in(cwd, tmp_path, cards, forks):
     assert _runs()[0]["status"] == "auth"
     n = _shown_notice()
     assert n["text"].startswith("Couldn't check for a view proposal: Claude Code isn't signed in for thimble's server.")
-    assert "Run /login" in n["text"] and "`thimble server restart`" in n["text"]
+    assert "In your terminal: run /login" in n["text"] and "`thimble server restart`" in n["text"]
+    assert n["text"].endswith("Then Try again."), "the fix runs in the terminal, then Try again here"
     assert n["action"] == {"label": "Try again", "do": "proposals-retry"}
 
 

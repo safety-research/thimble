@@ -426,14 +426,38 @@ async def test_a_file_type_check_that_fails_is_a_notice_and_try_again_checks_tha
         "with no file type's check failed, Try again is the proposer's"
 
 
+async def test_try_again_on_the_proposer_s_notice_runs_the_proposer_while_a_file_type_s_failure_is_kept(corpus,
+                                                                                                     analyst,
+                                                                                                     monkeypatch):
+    """Both notices offer Try again: each runs the check whose notice it is, by the notice's key."""
+    _fake_notices(monkeypatch)
+    monkeypatch.setattr(views, "_suggest_failed", {CORPUS: "run.trace"})
+    asked: list[str] = []
+    _fake_proposer(monkeypatch, lambda c: asked.append(c) or {"started": True})
+    again: list[str] = []
+
+    async def suggest_again(c: str, rel: str) -> None:
+        again.append(rel)
+
+    monkeypatch.setattr(views, "_suggest_again", suggest_again)
+    proposer_notice = views.ProposeNowBody(key="proposals")
+    assert await views.propose_now_route(CORPUS, analyst, proposer_notice) == {"started": True}
+    assert asked == [CORPUS] and views._suggest_failed == {CORPUS: "run.trace"}, "the file type's failure is kept"
+    file_notice = views.ProposeNowBody(key=views.SUGGEST_NOTICE_KEY)
+    assert await views.propose_now_route(CORPUS, analyst, file_notice) == {"started": True}
+    await asyncio.gather(*views._suggest_tasks)
+    assert again == ["run.trace"] and asked == [CORPUS]
+
+
 @pytest.mark.parametrize(("result", "reason", "turn_off"), [
     ({"status": "refused", "detail": "the model refused the request (stop_reason refusal)"},
      "Claude's safeguards blocked the request.", True),
     ({"status": "error", "detail": "the session reported an error: API Error: Claude's safeguards flagged this message"},
      "Claude's safeguards blocked the request.", True),
     ({"status": "error", "detail": "the model call failed (authentication_failed)"},
-     "Claude Code isn't signed in for thimble's server. Run /login, or if you changed your sign-in (for example "
-     "exported ANTHROPIC_API_KEY), run `thimble server restart`.", False),
+     "Claude Code isn't signed in for thimble's server. In your terminal: run /login (or `claude auth login` in a "
+     "shell), or if you changed your sign-in (for example exported ANTHROPIC_API_KEY), run `thimble server restart`. "
+     "Then Try again.", False),
     ({"status": "no_tool_call", "detail": "the file_viewer tool was never called"},
      "Claude's answer couldn't be read.", False),
     ({"status": "rate_limited", "detail": "the subscription's rate limit is exhausted"},

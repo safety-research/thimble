@@ -229,6 +229,7 @@ class Sub:
         # Claude Code's error line when the latest reply of its current run is an API error (isApiErrorMessage: a
         # refusal by the model's safeguards, retries run out), else None (agent_error)
         self.api_error: str | None = None
+        self.api_error_class: str | None = None  # its class (api_error_class), with api_error
         # the model its current run replies on (its first reply's, without a `[1m]` tag), and the other model Claude
         # Code switched its replies to since, while they stay there (a downgrade, _sub_safeguards)
         self.run_model: str | None = None
@@ -272,6 +273,7 @@ class Live:
         self.turn_analyst = False
         self.last_cut: str | None = None  # the uuid of main's last turn_duration record, where a fork of it resumes
         self.context_tokens = 0  # the tokens main's last reply read: input, cache read and cache written (_note_model)
+        self.api_failed = False  # a request of the open turn ended in Claude Code's API error line (_main_api_error)
         self.turn_threads: list[str] = []  # the threads whose events reached the turn (_release_threads)
         self.handed: list[str] = []  # the threads whose events main got in a tool's result (handed)
         self.forked: set[str] = set()  # the threads the turn forked or sent a follow-up to
@@ -454,7 +456,8 @@ def _turn_state(lv: Live) -> dict:
             "last_failed": lv.last_failed,
             "relays": {k: [sub.agent_id, inp] for k, (sub, inp) in lv.relays.items() if sub.agent_id},
             # the proposer's (proposer.turn_ended): a turn's first line and its end are often read by different passes
-            "turn_analyst": lv.turn_analyst, "last_cut": lv.last_cut, "context_tokens": lv.context_tokens}
+            "turn_analyst": lv.turn_analyst, "last_cut": lv.last_cut, "context_tokens": lv.context_tokens,
+            "api_failed": lv.api_failed}
 
 
 def _take_turn(lv: Live, cur: dict) -> None:
@@ -475,6 +478,7 @@ def _take_turn(lv: Live, cur: dict) -> None:
     lv.last_tool = str(cur.get("last_tool") or "") or None
     lv.last_failed = bool(cur.get("last_failed"))
     lv.turn_analyst = bool(cur.get("turn_analyst"))
+    lv.api_failed = bool(cur.get("api_failed"))
     lv.last_cut = str(cur.get("last_cut") or "") or None
     tokens = cur.get("context_tokens")
     lv.context_tokens = tokens if isinstance(tokens, int) and not isinstance(tokens, bool) and tokens > 0 else 0
@@ -1203,7 +1207,7 @@ def _open_turn(lv: Live) -> None:
         lv.turn_open, lv.fresh, lv.wrote, lv.turn_threads, lv.forked = True, True, False, list(lv.handed), set()
         lv.flagged, lv.answered, lv.held_by_check, lv.stop_noted = False, True, False, False
         lv.turn_calls, lv.turn_text, lv.turn_since = set(), "", _now()
-        lv.turn_analyst = False
+        lv.turn_analyst = lv.api_failed = False
     agents.set_running(lv.c, agents.MAIN_ID, True)
 
 
@@ -1233,6 +1237,8 @@ def _end_turn(lv: Live, cut: str | None = None) -> None:
     _ask_again(lv, again)
     if was_open:
         _cards_checked(lv)
+        if not lv.api_failed:  # the turn answered: an earlier failure of main's requests is over
+            _main_api_cleared(lv)
         _proposer_turn(lv, cut)
 
 
@@ -1251,8 +1257,8 @@ def _proposer_turn(lv: Live, cut: str | None) -> None:
     for a view proposal at `cut`."""
     from . import proposer  # noqa: PLC0415 — proposer imports context, which imports this module
 
-    try:
-        proposer.turn_ended(lv.c, sid=lv.sid, analyst=lv.turn_analyst, cut=cut)
+    try:  # a turn that ended in an API error answered nothing
+        proposer.turn_ended(lv.c, sid=lv.sid, analyst=lv.turn_analyst and not lv.api_failed, cut=cut)
     except Exception:  # noqa: BLE001 — a proposal not looked for is no reason to fail the mirror
         log.exception("%s: the view proposer did not hear of main's turn end", lv.c)
 
@@ -1855,6 +1861,58 @@ def api_error_of(rec: dict) -> str | None:
     return text or str(rec.get("error") or "") or "API Error"
 
 
+def api_error_class(rec: dict) -> str | None:
+    """The class of the failure an API error record says (notices.API_WORDS' keys: refused, auth, forbidden,
+    not_found, overloaded, …), read from the record's own fields before its words (stop_reason refusal, apiErrorStatus,
+    `error`; notices.failure_class), since Claude Code's wording changes between versions. None for another record, or
+    a failure of no known class."""
+    from . import notices  # noqa: PLC0415
+
+    text = api_error_of(rec)
+    if text is None:
+        return None
+    if _blocked(rec):
+        return "refused"
+    return notices.failure_class(text, status=rec.get("apiErrorStatus"), error=rec.get("error"))
+
+
+def _api_fields(rec: dict) -> dict[str, Any]:
+    """The fields a text record of an API error line carries: `api_error`, its class ("other" for a failure of no
+    known class), which the browser's error card shows with its fix, and `refusal` for a request the safeguards
+    blocked. {} for another record."""
+    if api_error_of(rec) is None:
+        return {}
+    return {"api_error": api_error_class(rec) or "other", **({"refusal": True} if _blocked(rec) else {})}
+
+
+MAIN_API_KEY = "main:api"  # the notices' key of a failure of main's own request (_main_api_error)
+MAIN_API_TEXT = "Claude's reply in main failed: {why}."
+MAIN_API_AGENT = "Main"
+
+
+def _main_api_error(lv: Live, rec: dict) -> None:
+    """A request of main's ended in Claude Code's API error line: main's chat shows it as its API error card, and a
+    notice tells the analyst wherever else they look, with Open on main (notices.API: no row, and the strip leaves it
+    out while main is open). A turn that answers clears it (_main_api_cleared). Never raises."""
+    from . import notices  # noqa: PLC0415
+
+    lv.api_failed = True
+    try:
+        cls = api_error_class(rec)
+        why, fix = notices.reason(api_error_of(rec), cls=cls, main_model=True)
+        notices.post(lv.c, kind=notices.API, text=MAIN_API_TEXT.format(why=why), agent=MAIN_API_AGENT,
+                     chat=agents.MAIN_ID, action=fix, key=MAIN_API_KEY, row=False)
+    except Exception:  # noqa: BLE001 — main's chat shows the error all the same
+        log.exception("%s: main's API error was not told", lv.c)
+
+
+def _main_api_cleared(lv: Live) -> None:
+    from . import notices  # noqa: PLC0415
+
+    with contextlib.suppress(Exception):
+        notices.clear(lv.c, MAIN_API_KEY)
+
+
 def _blocked(rec: dict) -> bool:
     """Whether an assistant record is Claude Code's API error line for a request the model's safeguards blocked."""
     msg = rec.get("message") if isinstance(rec.get("message"), dict) else {}
@@ -1926,20 +1984,26 @@ def _switched(c: str, chat: str, model: Any, fallback: Any, *, sub: Sub | None =
 
 def _sub_error(lv: Live, sub: Sub) -> None:
     """An API error stopped a side thread's fork or a helper of one of thimble's agents (sub.api_error): a notice with
-    its fix (notices.reason), under the thread's or the helper's key. Thimble's own agents' failures are told where
-    their runs end (subagents.run_ended); main's own subagents report to main."""
+    its fix (notices.reason), under the thread's key, or for a helper the key of the agent it helps, so helpers that
+    fail alike update one notice (cleared when that agent's run ends done, subagents.run_ended). Thimble's own agents'
+    failures are told where their runs end (subagents.run_ended); main's own subagents report to main."""
     from . import notices  # noqa: PLC0415
 
     if not sub.api_error or sub.thimble or not (sub.thread or sub.root):
         return
     try:
         name, subject = _sub_who(lv.c, sub)
-        why, fix = notices.reason(sub.api_error)
-        key = f"thread:{sub.chat}" if sub.thread else f"helper:{sub.agent_id or sub.chat}"
+        why, fix = notices.reason(sub.api_error, cls=sub.api_error_class, main_model=sub.thread)
+        key = f"thread:{sub.chat}" if sub.thread else helper_key(sub.root or sub.agent_id or sub.chat)
         notices.post(lv.c, chat=sub.chat, kind="agent", text=SUB_ERROR_TEXT.format(subject=subject, why=why),
                      agent=name, action=fix, key=key)
     except Exception:  # noqa: BLE001
         log.exception("%s: the API error in %s was not told", lv.c, sub.chat)
+
+
+def helper_key(agent_id: Any) -> str:
+    """The notices' key of the API errors of the helpers of one of thimble's agents (_sub_error), by that agent's id."""
+    return f"helper:{agent_id}"
 
 
 def agent_error(c: str, agent_id: str) -> str | None:
@@ -1956,6 +2020,13 @@ def agent_error(c: str, agent_id: str) -> str | None:
         return None
     _tail_sub(lv, sub)
     return sub.api_error
+
+
+def agent_error_class(c: str, agent_id: str) -> str | None:
+    """The class of agent_error's failure (api_error_class), as the mirror read it with the line; None for none."""
+    lv = _live.get(c)
+    sub = _sub_by(lv, agent_id=agent_id) if lv is not None else None
+    return sub.api_error_class if sub is not None and sub.api_error else None
 
 
 def agent_answer(c: str, agent_id: str) -> str | None:
@@ -2811,7 +2882,7 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
         if prompt and prompt.strip() and not prompt.lstrip().startswith("<"):
             if INTERRUPT_RE.match(prompt.strip()):
                 return 0  # the stop's own line: the chat's end says it was stopped
-            sub.api_error = None  # a new run's prompt, which may run on another model (subagents.ran_on)
+            sub.api_error = sub.api_error_class = None  # a new run's prompt, which may run on another model
             sub.run_model = sub.switched_to = None
             if sub.skip_prompt:
                 sub.skip_prompt = False
@@ -2852,9 +2923,10 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
     if rec.get("type") != "assistant":
         return 0
     sub.api_error = api_error_of(rec)
+    sub.api_error_class = api_error_class(rec) if sub.api_error else None
     _sub_error(lv, sub)
     _sub_safeguards(lv, sub, rec)
-    blocked = _blocked(rec)
+    api = _api_fields(rec)
     if sub.thimble and not sub.ran:
         msg = rec.get("message") if isinstance(rec.get("message"), dict) else {}
         if isinstance(msg.get("model"), str):
@@ -2872,8 +2944,7 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
             if text.strip():
                 sub.last_text = text.strip()
                 sub.note = None
-                sub.rec.text(text, by=TERMINAL, **({"reply": True} if sub.thread else {}),
-                             **({"refusal": True} if blocked else {}))
+                sub.rec.text(text, by=TERMINAL, **({"reply": True} if sub.thread else {}), **api)
                 n += 1
             elif sub.thread:
                 sub.note = _note_words(b["text"]) or sub.note
@@ -3051,17 +3122,23 @@ def translate(lv: Live, line: bytes | str) -> None:
     if t != "assistant":
         return
     _note_model(lv, rec)
+    api = _api_fields(rec)
+    if api:
+        _main_api_error(lv, rec)
     if not lv.turn_open:
-        return  # /thimble's own turn, or one the tail joined in the middle of: mirroring starts at the next
+        # /thimble's own turn, or one the tail joined in the middle of: mirroring starts at the next. Its request that
+        # failed is main's API error card all the same, since the browser shows nothing else of it (Matt, 10-14)
+        if api:
+            _text(lv, str(api_error_of(rec)), **api)
+        return
     lv.fresh = False
     # the retry after a stop, if there was one, is writing; after the dialog, the analyst chose to go on
     lv.answered, lv.held_by_check = True, False
-    blocked = _blocked(rec)
     for b in _blocks(rec):
         if b["type"] == "text":
             if not isinstance(b.get("text"), str):
                 raise Unreadable("a text block without text")
-            _text(lv, b["text"], **({"refusal": True} if blocked else {}))
+            _text(lv, b["text"], **api)
         elif b["type"] == "tool_use":
             if not isinstance(b.get("id"), str) or not isinstance(b.get("name"), str):
                 raise Unreadable("a tool_use block without id or name")

@@ -267,11 +267,72 @@ def test_an_api_error_of_the_orientation_s_helper_is_told_and_one_of_main_s_own_
     monkeypatch.setattr(subagents, "agent", lambda c, a: {"role": "orientation", "chat": orient} if a == "o1" else None)
     helper = session.Sub(CORPUS, step, "toolu_h", "h1", role=agents.STEP_ROLE)
     helper.root = "o1"
-    session.translate_sub(lv, helper, json.dumps({**_api_error("API Error: Repeated 529 Overloaded errors"),
-                                                  "error": "server_error"}))
-    (n,) = _open("helper:h1")
+    overloaded = _api_error("API Error: Repeated 529 Overloaded errors")  # Claude Code 2.1.300's record of a 529
+    overloaded.update(error="server_error", apiErrorStatus=529)
+    overloaded["message"]["stop_reason"] = "stop_sequence"
+    session.translate_sub(lv, helper, json.dumps(overloaded))
+    (n,) = _open("helper:o1")
     assert n["text"] == ("A helper of the orientation stopped with an error: Anthropic's API is overloaded; try again "
                          "in a few minutes.") and n["chat"] == step
     own = session.Sub(CORPUS, step, "toolu_m", "m1")
     session.translate_sub(lv, own, json.dumps(_api_error(BLOCK)))
-    assert [n["key"] for n in notices.open_notices(CORPUS)] == ["helper:h1"], "main hears its own subagent's error"
+    assert [n["key"] for n in notices.open_notices(CORPUS)] == ["helper:o1"], "main hears its own subagent's error"
+
+
+# --------------------------------------------------------------------------- main's own requests
+
+# Claude Code 2.1.300's records of a request Anthropic's API failed (isApiErrorMessage with apiErrorStatus and error;
+# the API error screenshots' probes, 10-14), whose words name neither the failure nor its fix the same way twice
+LOGIN = {"type": "assistant", "isApiErrorMessage": True, "error": "authentication_failed", "apiErrorStatus": 401,
+         "message": {"role": "assistant", "model": "<synthetic>", "stop_reason": "stop_sequence",
+                     "content": [_say("Please run /login · API Error: 401 Invalid bearer token")]}}
+NO_MODEL = {"type": "assistant", "isApiErrorMessage": True, "error": "model_not_found", "apiErrorStatus": 404,
+            "message": {"role": "assistant", "model": "<synthetic>", "stop_reason": "stop_sequence",
+                        "content": [_say("There's an issue with the selected model (claude-opus-9-9). It may not "
+                                         "exist or you may not have access to it. Run /model to pick a different "
+                                         "model.")]}}
+THIMBLE = {"type": "user", "origin": {"kind": "human"},
+           "message": {"content": "<command-name>/thimble</command-name>\n<command-args></command-args>"}}
+
+
+def test_main_s_api_error_is_its_card_with_its_class_and_a_notice_for_the_other_chats(cwd, tmp_path, monkeypatch):
+    from app import proposer
+
+    turns: list[dict] = []
+    monkeypatch.setattr(proposer, "turn_ended", lambda c, **kw: turns.append(kw))
+    lv, p = _attach(cwd, tmp_path)
+    _append(p, lv, [_human("Who replies most?"), LOGIN, _end("c1")])
+    (text,) = [r for r in _log() if r["type"] == "text"]
+    assert text["api_error"] == "auth", "the class from the record's fields, for the browser's card"
+    (n,) = _open(session.MAIN_API_KEY)
+    assert n["text"] == ("Claude's reply in main failed: Claude Code isn't signed in. In your terminal: run /login "
+                         "(or `claude auth login` in a shell).")
+    assert n["chat"] == agents.MAIN_ID and n["kind"] == notices.API and n["action"] is None
+    assert _notices() == [], "main's chat shows its API error card, not a notice row as well"
+    assert turns[-1]["analyst"] is False, "a turn that failed answered nothing, so no view proposal is looked for"
+    _append(p, lv, [_human("Again."), NO_MODEL, _end("c2")])
+    (n,) = _open(session.MAIN_API_KEY)
+    assert n["text"] == ("Claude's reply in main failed: its model isn't available to your account. In your terminal: "
+                         "run /model to pick another model."), "main's model changes only in the terminal"
+    _append(p, lv, [_human("Again."), _assistant(_say("Agent B.")), _end("c3")])
+    assert _open(session.MAIN_API_KEY) == [], "a turn that answered clears it"
+    assert turns[-1]["analyst"] is True
+
+
+def test_a_first_turn_that_failed_shows_in_main(cwd, tmp_path):
+    """/thimble's own turn is not mirrored, but its failure is: the browser would show nothing of it else."""
+    lv, p = _attach(cwd, tmp_path)
+    _append(p, lv, [THIMBLE, LOGIN, _end("c1")])
+    (text,) = [r for r in _log() if r["type"] == "text"]
+    assert text["api_error"] == "auth" and text["delta"].startswith("Please run /login")
+    assert _open(session.MAIN_API_KEY), "and in the foreground"
+
+
+def test_a_blocked_request_of_main_is_refused_whatever_its_words(cwd, tmp_path):
+    lv, p = _attach(cwd, tmp_path)
+    block = {**LOGIN, "error": "invalid_request", "apiErrorStatus": None,
+             "message": {**LOGIN["message"], "stop_reason": "refusal", "content": [_say("API Error: the request was "
+                                                                                       "declined.")]}}
+    _append(p, lv, [_human("Look at the logs."), block, _end("c1")])
+    (text,) = [r for r in _log() if r["type"] == "text"]
+    assert text["api_error"] == "refused" and text["refusal"] is True

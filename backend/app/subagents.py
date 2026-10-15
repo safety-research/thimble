@@ -1229,18 +1229,22 @@ def _started_notice(c: str, t: Type, key: Any) -> None:
         notices.cleared(c, key)
 
 
-def _ended_notice(c: str, t: Type | None, snap: dict[str, Any], status: str, report: str | None) -> None:
+def _ended_notice(c: str, t: Type | None, snap: dict[str, Any], status: str, report: str | None,
+                  cls: str | None = None) -> None:
     """A run ended: a failed one is told in the foreground with its fix, with Open on its chat, and one that ended done
-    clears the agent's notice (module note, notices), unless its role tells its own."""
-    from . import notices  # noqa: PLC0415
+    clears the agent's notice and that of its helpers' API errors (module note, notices), unless its role tells its
+    own."""
+    from . import notices, session  # noqa: PLC0415
 
     key = snap.get("key")
     if t is None or t.own_notices or not key:
         return
     if status == "failed":
-        notices.agent_failed(c, role=t.role, key=key, error=report, chat=str(snap.get("chat") or "") or None)
+        notices.agent_failed(c, role=t.role, key=key, error=report, chat=str(snap.get("chat") or "") or None, cls=cls)
     elif status == "done":
         notices.cleared(c, key)
+        with contextlib.suppress(Exception):
+            notices.clear(c, session.helper_key(snap["id"]))
 
 
 def _bare(model: str) -> str:
@@ -1300,10 +1304,15 @@ def run_ended(c: str, agent_id: str, status: str, report: str | None, *, source:
     handed back or was stopped. A run that main's plan mode held at its end, and that left no work, failed too, with
     its role's line (_plan_end). A run that ended already (another signal of the same end) is left alone. True when
     this call ended it."""
+    cls = None  # the class of the API error that failed it (session.api_error_class), for its notice
     if source != "handback" and status != "stopped":
         error = api_error(c, agent_id)  # read first: the transcript's tail may hold the run's hand-back, which ends it
         if error:
             status, report = "failed", error
+            from . import session  # noqa: PLC0415
+
+            with contextlib.suppress(Exception):
+                cls = session.agent_error_class(c, agent_id)
     status, report = _plan_end(c, agent_id, status, report)
     with update(c) as state:
         a = files.registry(state).get(agent_id)
@@ -1319,7 +1328,7 @@ def run_ended(c: str, agent_id: str, status: str, report: str | None, *, source:
     log.info("%s: %s %s run %s ended %s (%s)", c, snap.get("role") or "agent", agent_id, snap.get("run"), status,
              source or "?")
     t = TYPES.get(str(snap.get("role") or ""))
-    _ended_notice(c, t, snap, status, report)  # before the chat's end, so the chat's own last lines stay its last
+    _ended_notice(c, t, {**snap, "id": agent_id}, status, report, cls)  # before the chat's end: its lines stay last
     if snap.get("chat") and not (t is not None and t.keeps_chat):
         try:
             fields = {"stopped_by": snap.get("stopped_by")} if status == "stopped" and snap.get("stopped_by") else {}

@@ -5028,8 +5028,10 @@ SUGGEST_NOTICE_KEY = "view-proposal-file"
 SUGGEST_AGENT = "View proposals"  # the name its notices give, as the proposer's do
 SUGGEST_FAILED = "Couldn't check for a view proposal for {files}: {reason}."
 SUGGEST_REFUSED = "Claude's safeguards blocked the request"
-SUGGEST_AUTH = ("Claude Code isn't signed in for thimble's server. Run /login, or if you changed your sign-in (for "
-                "example exported ANTHROPIC_API_KEY), run `thimble server restart`")
+# notices.SERVER_AUTH, whose fix runs in the terminal, then Try again here
+SUGGEST_AUTH = ("Claude Code isn't signed in for thimble's server. In your terminal: run /login (or `claude auth login` "
+                "in a shell), or if you changed your sign-in (for example exported ANTHROPIC_API_KEY), run "
+                "`thimble server restart`. Then Try again")
 SUGGEST_FALLBACK = "This view proposal came from {model}: Claude's safeguards switched models."
 SUGGEST_REASON_CHARS = 160  # of the call's own detail in the notice
 SUGGEST_TRY_AGAIN = {"label": "Try again", "do": "proposals-retry"}
@@ -5479,15 +5481,21 @@ async def reject_route(c: str, slug: str, request: Request) -> dict[str, Any]:
     return answer_offer(c, slug, "rejected")
 
 
+class ProposeNowBody(BaseModel):
+    key: str | None = None  # the notice's key: SUGGEST_NOTICE_KEY for a file type's check, else the proposer's
+
+
 @router.post("/ws/{c}/views/propose-now")
-async def propose_now_route(c: str, request: Request) -> dict[str, Any]:
-    """Try again on a notice that thimble could not check for a view proposal, a click. When a file type's check failed
-    last (suggest), that file type is checked again ({started: true}); otherwise the proposer checks now
-    (proposer.run_now). Either starts the check and answers at once."""
+async def propose_now_route(c: str, request: Request, body: ProposeNowBody | None = None) -> dict[str, Any]:
+    """Try again on a notice that thimble could not check for a view proposal, a click. The notice of a file type's
+    check (`key` SUGGEST_NOTICE_KEY, or no key) checks the file type that failed last again (suggest, {started: true});
+    any other, or one with no file type's failure kept, has the proposer check now (proposer.run_now). Either starts
+    the check and answers at once."""
     _click(request)
     config.workspace_dir(c)
     _bind_loop()
-    if (rel := _suggest_failed.pop(c, None)) is not None:
+    key = body.key if body is not None else None
+    if key in (None, SUGGEST_NOTICE_KEY) and (rel := _suggest_failed.pop(c, None)) is not None:
         task = asyncio.get_running_loop().create_task(_suggest_again(c, rel), name=f"view-proposal-file-{c}")
         _suggest_tasks.add(task)
         task.add_done_callback(_suggest_tasks.discard)
