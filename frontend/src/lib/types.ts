@@ -731,8 +731,9 @@ export interface PermissionRequest {
   cut?: number
   /** why thimble itself asks, which the card says in place of the mode's reason (backend dev.CODE_WHY) */
   why?: string
-  /** the rule of main's fence that sends the call to the analyst (userconf.main_rules): an edit of thimble's config, an
-   * edit of the corpus, or a web call; `installs` and `commands` only on a code ticket's */
+  /** why thimble sends one of its server jobs' calls to the analyst whatever the permission mode (backend userconf
+   * ask_cause): `config` an edit of thimble's config, `data` an edit of the corpus, `commands` a command; `web` and
+   * `installs` as earlier versions sent them */
   asked_by?: 'config' | 'data' | 'web' | 'installs' | 'commands'
 }
 
