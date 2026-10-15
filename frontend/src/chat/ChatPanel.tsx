@@ -49,7 +49,7 @@ import { CONTINUE_HERE_LINE, PAUSED_LINE, STOPPED_CONTINUE_LINE, continueOf, con
 import { ViewChip } from './ViewChip'
 import { replayHeld } from './pending'
 import { ThreadRows } from './ThreadRows'
-import { mainEdits, STAGE_TEXT, threadStage, type ThreadStage } from './threadStatus'
+import { mainEdits, mainRelays, STAGE_TEXT, threadStage, type ThreadStage } from './threadStatus'
 import { answeredSince, composerTarget, pickItems, threadKind, threadLabels, threadNodes, threadsRunning, type ThreadKind } from './threads'
 import { RoleChip } from './RoleChip'
 import { useChat, type ChatState } from './useChat'
@@ -576,6 +576,9 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   const waitingTicket = kind === 'dev' && !curMeta?.view && ticket?.status === 'queued'
   // where the thread's question is while it runs: waiting for its fork (main's short turn starts it), or with its fork
   const stage = kind === 'thread' ? threadStage(curMeta, running) : null
+  // main's turn that only takes the thread's question to its fork is the thread's start: the thread's tree does not
+  // show it as main at work
+  const starter = kind === 'thread' && mainRelays(main.records, main.running, chat.records, running) ? 'main' : null
   const strip = waitingTicket ? null : orienting ? taskStrip('orient', true, agentRows.get(orienting.id) ?? [], metaMap) : taskStrip(kind, running, chat.rows, metaMap, !!curMeta?.view, stage)
   // the orientation waits for its critic's report: the strip says so (subagents' `paused: critique`)
   const pausedFor = (orienting ?? (kind === 'orient' ? curMeta : null))?.paused === 'critique'
@@ -781,7 +784,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
             }}
             onRename={rename}
             onDelete={remove}
-            starter={stage === 'sent' ? 'main' : null}
+            starter={starter}
             aside={onCollapse && <Button variant="icon" size="sm" icon="panel-left" title="Collapse the chat" className="chat-head-collapse" onClick={onCollapse} />}
           />
         </header>

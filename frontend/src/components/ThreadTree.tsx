@@ -55,8 +55,9 @@ export interface ThreadTreeProps {
    * card's first row */
   aside?: ReactNode
   className?: string
-  /** a chat whose run the folded card does not count while the current thread starts: main, whose short turn that
-   * starts the thread's fork is the thread's start, not work elsewhere */
+  /** a chat whose run the tree does not show while it starts the current thread: main, whose short turn that takes the
+   * thread's question to its fork is the thread's start, not work elsewhere (no spinner on its row, no count in the
+   * folded card) */
   starter?: string | null
 }
 
@@ -186,7 +187,8 @@ export function ThreadTree({ nodes: live, current, onPick, collapsed, onCollapse
   const kept = useRef<string[] | null>(null)
   if (collapsed) kept.current = null
   else if (!kept.current) kept.current = live.map((n) => n.id)
-  const nodes = useMemo(() => inKeptOrder(live, kept.current), [live, collapsed])
+  // the starter's run is the current thread's start: its row shows no spinner, and the folded card does not count it
+  const nodes = useMemo(() => inKeptOrder(starter ? live.map((n) => (n.id === starter && n.running ? { ...n, running: false } : n)) : live, kept.current), [live, collapsed, starter])
   const [editing, setEditing] = useState<{ id: string; draft: string } | null>(null)
   const [menu, setMenu] = useState<{ id: string; el: HTMLElement } | null>(null)
   const [confirming, setConfirming] = useState<string | null>(null)

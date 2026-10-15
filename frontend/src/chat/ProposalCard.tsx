@@ -1,7 +1,8 @@
 // A view proposal (backend views.offer: after a turn, a side thread's answer or the orientation's end, or a viewer for
 // the type of a file opened in Files), as one card above the chat's composer in the accent: "View proposal", the
-// view's name in bold and what it shows (for a file-type viewer, then the files it reads), then Accept, which builds it as a view the analyst asked for, Reject, and a quiet Don't ask again, which turns view
-// proposals off (Settings turns them on again). The oldest open proposal shows (openOffer); a `suggested` row without
+// view's name in bold and what it shows (for a file-type viewer, then the files it reads), then Accept, which builds
+// it as a view the analyst asked for, Reject, and a quiet Don't ask again, which turns view proposals off (Settings
+// turns them on again). The oldest open proposal shows (openOffer); a `suggested` row without
 // `offered` is from an older version and never shows, and nothing shows while view proposals are off. A new proposal
 // ignores clicks for ARM_MS, so a double click never answers it unread. An Accept that cannot start a build now keeps
 // the proposal and says why, and what to do, under its buttons. The card never takes the focus, and a request that

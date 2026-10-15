@@ -1,7 +1,7 @@
 // What a thread shows of its work that its own log does not say: its strip's line, in the thread's own words (starting
 // while its question waits for its fork, which a short turn of main starts, then working while the fork answers it),
-// and the edits main made itself to the cards the thread is anchored on, which land in main's log rather than the
-// thread's.
+// whether main's open turn is only that start (mainRelays), and the edits main made itself to the cards the thread is
+// anchored on, which land in main's log rather than the thread's.
 import type { ChatMeta, ChatRecord } from '../lib/types'
 import { toolDisplayName, type Row, type ToolRow } from './model'
 
@@ -30,6 +30,32 @@ export function editedCard(row: Pick<ToolRow, 'input'>): string | null {
 }
 
 const time = (ts: string | undefined): number => (ts ? Date.parse(ts) : NaN)
+
+/**
+ * Whether main's open turn only takes the thread's latest question to its fork (it forks the thread, or passes the
+ * question on): main and the thread run, main's last turn ended before the question came, and since then main has had
+ * no message from the analyst and done nothing before the question. That turn is the thread's own start, so the thread
+ * does not show it as main's work. Pure.
+ */
+export function mainRelays(mainRecords: readonly ChatRecord[], mainRunning: boolean, threadRecords: readonly ChatRecord[], threadRunning: boolean): boolean {
+  if (!mainRunning || !threadRunning) return false
+  let at = NaN
+  for (let i = threadRecords.length - 1; i >= 0; i--) {
+    const r = threadRecords[i]
+    if (r.type === 'user' && !r.tray) {
+      at = time(r.ts)
+      break
+    }
+  }
+  if (Number.isNaN(at)) return false
+  for (let i = mainRecords.length - 1; i >= 0; i--) {
+    const r = mainRecords[i]
+    if (r.type === 'done' || r.type === 'error') return time(r.ts) <= at
+    if (r.type === 'user') return false
+    if ('ts' in r && r.ts && time(r.ts) < at) return false
+  }
+  return true
+}
 
 /**
  * Main's own edits of the cards the thread is anchored on (`anchors`), keyed by the index of the question each answered:
