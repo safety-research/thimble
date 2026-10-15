@@ -23,6 +23,7 @@ from app import cli, config, procs
 
 SECRET = "sk-ant-test-secret-never-written"  # gitleaks:allow  a fake key asserting nothing writes it
 NAME_SESSION = cli.name_session  # the named_sessions fixture replaces it; a test of what it sends puts it back
+INSTALLED_COPY = cli.installed_copy  # before conftest's autouse fixture stands it in
 BACKEND = Path(__file__).resolve().parents[1]
 
 pytestmark = pytest.mark.usefixtures("named_sessions")
@@ -604,7 +605,7 @@ def test_the_doctor_names_the_mode_its_source_the_renderer_and_what_terminal_mod
     ran in when that was another, whether terminal mode's renderer can load, and in terminal mode where a card's code
     runs (main's Bash, in Claude Code's sandbox when it can run) and whether its optional card checks run (a headless
     Chromium and the built frontend)."""
-    from app import cc_plugin, launch_mode
+    from app import cc_plugin, cc_settings, launch_mode
 
     monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: False)
     monkeypatch.setattr(cli, "listening", lambda p: False)
@@ -620,7 +621,7 @@ def test_the_doctor_names_the_mode_its_source_the_renderer_and_what_terminal_mod
     renderer = tmp_path / "tree" / "mods" / "thimble-term"
     monkeypatch.setattr(cli, "renderer_root", lambda: renderer)
     text = cli.doctor_text()
-    assert line(text, "mode (") == (f"  mode (a session `thimble` starts in {corpus}): browser (thimble's default; "
+    assert line(text, "mode (") == (f"  mode (a session in {corpus}): browser (thimble's default; "
                                     "`thimble mode` changes it)")
     assert line(text, "terminal renderer") == (f"  terminal renderer: cannot load ({renderer} is missing), so terminal "
                                                "mode draws none of thimble's work; browser mode does not need it")
@@ -633,7 +634,9 @@ def test_the_doctor_names_the_mode_its_source_the_renderer_and_what_terminal_mod
     text = cli.doctor_text()
     assert line(text, "mode (").endswith("terminal (set for this folder; `thimble mode` changes it)")
     assert line(text, "terminal renderer") == f"  terminal renderer: {renderer} (thimble-term), loaded only in terminal mode"
-    assert "runs in main's Bash, inside Claude Code's sandbox" in line(text, "terminal mode's card code")
+    assert line(text, "terminal mode's card code").endswith(
+        "runs in main's Bash with your user's access; Claude Code asks about or judges each thimble-run command, as for "
+        "any command; a card check's trial runs in the sandbox runtime where it can run")
     assert line(text, "terminal mode's card checks").endswith("on: a card is checked, and a screenshot drawn, with the "
                                                               "headless Chromium and the built frontend")
     monkeypatch.setattr(cli, "headless_fetched", lambda browsers_json: False)
@@ -643,7 +646,15 @@ def test_the_doctor_names_the_mode_its_source_the_renderer_and_what_terminal_mod
     assert line(text, "terminal mode's card checks").endswith("off, since there is no headless Chromium and no "
                                                               "frontend build: cards are not checked and screenshots "
                                                               "are not drawn")
-    assert "without a sandbox, with your user's access" in line(text, "terminal mode's card code")
+    assert "with your user's access" in line(text, "terminal mode's card code")
+    monkeypatch.setattr(cli, "terminal_views_wrap", lambda: "")
+    monkeypatch.setattr(cc_settings, "kernel_setup", lambda: (["sudo apt-get install -y bubblewrap"], "set up bubblewrap"))
+    assert line(cli.doctor_text(), "terminal mode's views").endswith(
+        "can't run (neither the sandbox runtime nor bubblewrap runs here); to add bubblewrap, run: sudo apt-get install "
+        "-y bubblewrap")
+    assert "apt-get" not in line(cli.doctor_text(commands=False), "terminal mode's views")
+    monkeypatch.setattr(cli, "terminal_views_wrap", lambda: "bubblewrap")
+    assert line(cli.doctor_text(), "terminal mode's views") == "  terminal mode's views: bubblewrap"
     with cli.server_dirs():
         config.register_corpus(corpus, exact=True)
         ws = config.workspace_dir("logs")
@@ -936,34 +947,43 @@ def test_the_doctor_says_when_the_analyst_s_own_sandbox_makes_a_folder_in_the_co
     from app import cc_settings
 
     monkeypatch.setattr(cc_settings, "config_dir", lambda: tmp_path / "cc")
+    monkeypatch.setattr(cli.cc_plugin, "claude_pid", lambda environ=None: None)
+    monkeypatch.setattr(cli.cc_plugin, "managed", lambda environ=None: None)
+    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
     corpus = tmp_path / "corpus"
     (corpus / ".claude").mkdir(parents=True)
-    assert cli.own_sandbox_line(corpus) == "off"
+    off = "off (optional: INSTALL.md shows the settings that turn it on)"
+    assert cli.own_sandbox_line(corpus) == off
     (tmp_path / "cc").mkdir()
     (tmp_path / "cc" / "settings.json").write_text(json.dumps({"sandbox": {"enabled": True}}))
     assert ".claude/.cc-writes/" in cli.own_sandbox_line(corpus) and str(corpus) in cli.own_sandbox_line(corpus)
+    monkeypatch.setenv("THIMBLE_SANDBOX", "0")
+    assert cli.own_sandbox_line(corpus).startswith("on in your settings, but it can't run here")
+    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
     (corpus / ".claude" / "settings.local.json").write_text(json.dumps({"sandbox": {"enabled": False}}))
-    assert cli.own_sandbox_line(corpus) == "off", "a later settings file turns it off"
+    assert cli.own_sandbox_line(corpus) == off, "a later settings file turns it off"
 
 
 def test_the_doctor_s_sandbox_line_follows_the_config(monkeypatch):
-    """Every agent's Bash uses the sandbox where it runs; sandbox.use "never" turns it off. Without it main runs
-    unfenced and thimble's agents can't start, and sandbox.enforce refuses to start `thimble fix` too."""
+    """`thimble fix` and extension programs run their Bash in Claude Code's sandbox where it runs; sandbox.use "never"
+    turns it off. Without it they run as they are, `thimble fix` asking first and a program posting a notice, unless
+    sandbox.enforce refuses them."""
     from app import cc_settings, userconf
 
     conf = {"sandbox": {"use": "when-available", "enforce": False}}
     monkeypatch.setattr(userconf, "load_or_defaults", lambda c=None: (conf, ""))
     monkeypatch.setattr(cc_settings, "sandbox_missing", lambda: [])
-    assert "every agent's Bash runs in it" in cli.sandbox_lines()[0]
+    assert cli.sandbox_lines()[0].startswith("  bash sandbox (thimble fix and extension programs): runs; ")
+    assert ".cc-writes" not in cli.sandbox_lines()[0] and "fence" not in cli.sandbox_lines()[0]
     conf["sandbox"]["use"] = "never"
-    assert "off in thimble's config" in cli.sandbox_lines()[0]
-    assert "thimble's agents can't start" in cli.sandbox_lines()[0]
+    assert cli.sandbox_lines() == ["  bash sandbox (thimble fix and extension programs): off in thimble's config "
+                                   "(sandbox.use \"never\"); they run without it (thimble fix asks you first; an "
+                                   "extension program's notice says so)"]
     conf["sandbox"] = {"use": "when-available", "enforce": True}
     monkeypatch.setattr(cc_settings, "sandbox_missing", lambda: ["bubblewrap"])
     monkeypatch.setattr(cc_settings, "sandbox_setup", lambda: ([], ""))
-    assert cli.sandbox_lines() == ["  bash sandbox: off, missing bubblewrap; main runs without thimble's fence and "
-                                   "thimble's agents can't start; thimble's config (sandbox.enforce) also refuses to "
-                                   "start `thimble fix`"]
+    assert cli.sandbox_lines() == ["  bash sandbox (thimble fix and extension programs): off, missing bubblewrap; "
+                                   "thimble's config (sandbox.enforce) refuses to start them without it"]
 
 
 def test_requests_to_thimble_s_own_server_skip_the_shell_s_proxy(home, monkeypatch):
@@ -997,3 +1017,172 @@ def test_requests_to_thimble_s_own_server_skip_the_shell_s_proxy(home, monkeypat
     finally:
         server.shutdown()
         server.server_close()
+
+
+INTERNAL_WORDS = re.compile(r"fence|module|delivery|turn ending|ui_key|server\.json", re.I)
+
+
+def checklist(text: str) -> list[tuple[str, str, str]]:
+    """(mark, line, fix) of each ✓ or ! line of the checklist, the fix line under a problem, '' for none; asserts the
+    head, the tail, the lengths and the words."""
+    rows = text.splitlines()
+    assert rows[0] == "thimble doctor" and rows[-1] == cli.DETAILS_LINE
+    out: list[tuple[str, str, str]] = []
+    for row in rows[1:-1]:
+        assert not INTERNAL_WORDS.search(row), row
+        if row.startswith("  "):
+            assert out and out[-1][0] == "!" and not out[-1][2] and len(row) <= cli.FIX_LINE_MAX, row
+            out[-1] = (*out[-1][:2], row.strip())
+        else:
+            assert row[:2] in ("✓ ", "! ") and len(row) <= cli.CHECK_LINE_MAX, row
+            out.append((row[0], row[2:], ""))
+    assert all(fix for mark, _, fix in out if mark == "!"), "a fix line under each problem"
+    return out
+
+
+def test_the_doctor_prints_a_checklist_a_person_can_read(home, monkeypatch, fake_claude, tmp_path, capsys):
+    """`thimble doctor`: one line per area, ✓ or !, at most 80 characters, no internal names, and under each problem
+    one line with its fix and where to run it; `--verbose` prints today's full text."""
+    from app import cc_settings, config, launch_mode
+
+    monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: False)
+    monkeypatch.setattr(cli, "listening", lambda p: False)
+    monkeypatch.setattr(cli, "network_probe", lambda status=None, timeout_s=3.0: (True, ""))
+    facts = cli.PluginFacts("thimble", cli.own_version(), True, True, cli.PLUGIN_DIR, True)
+    monkeypatch.setattr(cli, "plugin_facts", lambda cwd: facts)
+    monkeypatch.setattr(cli, "_views_check", lambda: cli.Check(True, "Views and screenshots ready"))
+    monkeypatch.setattr(cli.cc_plugin, "claude_pid", lambda environ=None: None)
+    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
+    corpus = tmp_path / "logs"
+    corpus.mkdir()
+    rows = checklist(cli.doctor_check_text(corpus))
+    assert [mark for mark, _, _ in rows] == ["✓"] * 8, rows
+    assert rows[0][1] == f"{cli._thimble_named()} · Claude Code {cli.TESTED_CLAUDE_CODE}"
+    assert [line for _, line, _ in rows[1:]] == [
+        "Signed in to Claude", "Server not running (it starts with /thimble)", "Plugin on in Claude Code",
+        "Claude Code's sandbox: off (optional)", rows[5][1], "Views and screenshots ready",
+        "thimble's agents start after /thimble here"]
+    assert rows[5][1].startswith("Card code runs")
+
+    # the port taken by another program; not signed in; the plugin off; Claude Code's sandbox set but unable to run
+    monkeypatch.setattr(cli, "listening", lambda p: True)
+    monkeypatch.setattr(cli, "stuck_server", lambda url=None: None)
+    fake_claude.write_text(json.dumps({"loggedIn": False}))
+    monkeypatch.setattr(cli, "plugin_facts", lambda cwd: facts._replace(enabled=False))
+    monkeypatch.setattr(cli, "own_sandbox_set", lambda cwd: True)
+    monkeypatch.setenv("THIMBLE_SANDBOX", "0")
+    rows = {line: (mark, fix) for mark, line, fix in checklist(cli.doctor_check_text(corpus))}
+    assert rows[f"Port {cli.port()} is taken by another program"] == (
+        "!", "In a shell: stop that program, then thimble server restart")
+    assert rows["Not signed in to Claude"] == ("!", "In a shell: claude auth login")
+    assert rows["Plugin is off in Claude Code"] == ("!", "In the Claude Code terminal: /plugin, then turn thimble on")
+    assert rows["Claude Code's sandbox is on in your settings but can't run here"][0] == "!"
+    monkeypatch.setattr(cli, "stuck_server", lambda url=None: 4242)
+    assert ("!", "In a shell: thimble server restart") in [
+        (m, f) for m, line, f in checklist(cli.doctor_check_text(corpus)) if line == "The server is stuck (pid 4242)"]
+
+    # terminal mode with no sandbox for its views; the plugin of another install; a problem past 80 characters
+    launch_mode.set_folder(corpus, "terminal")
+    monkeypatch.setattr(cli, "terminal_views_wrap", lambda: "")
+    monkeypatch.setattr(cli, "plugin_facts", lambda cwd: cli.PluginFacts("other", "0.7.0", True, False, None, False,
+                                                                          "/opt/thimble"))
+    monkeypatch.setattr(cli, "_version_check", lambda: cli.Check(False, "word " * 30, "In a shell: " + "x " * 60))
+    rows = checklist(cli.doctor_check_text(corpus))
+    lines = {line: (mark, fix) for mark, line, fix in rows}
+    assert lines["Terminal mode can't show views: no sandbox for them here"] == (
+        "!", "thimble doctor --verbose names the commands that install bubblewrap")
+    assert lines["Another install's plugin is on"] == ("!", "thimble doctor --verbose names the commands that switch it")
+    assert rows[0][1].endswith("…") and rows[0][2].endswith("…"), "cut at a word"
+    monkeypatch.setattr(cc_settings, "own_sandbox", lambda cwd: False)
+
+    # `--verbose` prints today's text; the checklist names it last
+    monkeypatch.setattr(cli, "doctor_text", lambda commands=True: "the full text")
+    monkeypatch.setattr(cli, "ship_extensions", lambda: None)
+    monkeypatch.setenv("THIMBLE_CALLER_CWD", str(corpus))
+    assert cli.main(["doctor", "--verbose"]) == 0 and capsys.readouterr().out == "the full text\n"
+    assert cli.main(["doctor"]) == 0 and capsys.readouterr().out.rstrip().endswith(cli.DETAILS_LINE)
+    assert config.workspace_for_cwd(str(corpus)) is None, "the doctor registers nothing"
+
+
+def test_the_doctor_s_agents_line_follows_the_last_session(home, monkeypatch, tmp_path, claude_global_config):
+    """thimble's agents: they start after /thimble in a folder thimble never opened; once a session said hello, they can
+    start; a session where they stayed idle, an untrusted workspace folder, or Claude Code's hooks off each get a
+    problem line with its fix."""
+    from app import cc_plugin
+
+    monkeypatch.setattr(cc_plugin, "MANAGED_DIRS", {})
+    for name in (cli.NO_MODULE_ENV,):
+        monkeypatch.delenv(name, raising=False)
+    data = tmp_path / "data"
+    data.mkdir()
+    monkeypatch.setenv("THIMBLE_DATA_DIR", str(data))
+    monkeypatch.setenv("THIMBLE_WORKSPACES_DIR", str(tmp_path / "ws"))
+    corpus = tmp_path / "logs"
+    corpus.mkdir()
+
+    def agents() -> cli.Check:
+        with cli.server_dirs():
+            return cli._agents_check(corpus)
+
+    assert agents() == cli.Check(True, "thimble's agents start after /thimble here"), "never opened: trust is asked then"
+    with cli.server_dirs():
+        config.register_corpus(corpus, exact=True)
+        ws = config.workspace_dir("logs")
+    assert agents() == cli.Check(False, "Claude Code doesn't trust this folder yet",
+                                 "In a shell: run claude here and accept the prompt")
+    claude_global_config.write_text(json.dumps({"projects": {str(tmp_path): {"hasTrustDialogAccepted": True}}}))
+    (ws / "trusted" / "subagents.json").write_text(json.dumps({"module": {"session": "s1", "at": "t"}}))
+    assert agents() == cli.Check(True, "thimble's agents can start in this folder")
+    (ws / "trusted" / "subagents.json").write_text(json.dumps({"module": {"session": "s1", "idle": "no hooks module"}}))
+    got = agents()
+    assert not got.ok and got.line == "thimble's agents didn't start in the last session"
+    assert got.fix == "In the Claude Code terminal: /thimble; thimble doctor --verbose says why"
+    monkeypatch.setenv(cli.NO_MODULE_ENV, "1")
+    assert agents() == cli.Check(False, "thimble's agents can't start: Claude Code's hooks are off",
+                                 f"In a shell: unset {cli.NO_MODULE_ENV}, then restart claude")
+    monkeypatch.delenv(cli.NO_MODULE_ENV)
+    (tmp_path / "claude-home" / "settings.json").write_text(json.dumps({"disableAllHooks": True}))
+    assert agents().fix == "In your Claude Code settings: remove disableAllHooks, then restart claude"
+
+
+def test_installed_copy_takes_any_thimble_plugin_of_this_install_and_notes_one_that_differs(home, tmp_path, monkeypatch):
+    """Claude Code's thimble plugin, whatever its marketplace's name: a cache copy that finds this tree and whose files
+    equal plugin/ but for those a release leaves out (the module's tests, its types, tsconfig.json) is the copy main
+    loads; one whose files differ makes the launch load plugin/ too and say how to update it; another install's is not
+    this install's. The doctor's plugin line names each case."""
+    import shutil as sh
+
+    cache = tmp_path / "cc" / "plugins" / "cache" / "thimble" / "thimble" / "0.8.0"
+    sh.copytree(cli.PLUGIN_DIR, cache, ignore=sh.ignore_patterns("thimble.test.ts", "types", "tsconfig.json",
+                                                                   "__pycache__", "node_modules"))
+    (cache / "bin" / "thimble-app-dir").write_text(f'#!/bin/sh\necho "{config.REPO_ROOT}"\n')
+    (cache / "bin" / "thimble-app-dir").chmod(0o755)
+    path = tmp_path / "path"
+    path.mkdir()
+    listed = [{"id": "thimble@thimble", "enabled": True, "version": "0.8.0", "installPath": str(cache)}]
+    (tmp_path / "listed.json").write_text(json.dumps(listed))
+    (path / "claude").write_text(f'#!/bin/sh\ncase "$*" in *"marketplace list"*) echo "[]";; '
+                                 f'*"plugin list"*) cat {tmp_path / "listed.json"};; esac\n')
+    (path / "claude").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{path}:/usr/bin:/bin")
+    # the stand-in's bin/thimble-app-dir names this tree directly, where plugin/'s finds it by its place
+    monkeypatch.setattr(cli, "_plugin_files", lambda root, real_files=cli._plugin_files: {
+        k: v for k, v in real_files(root).items() if k != "bin/thimble-app-dir"})
+    cli.LAUNCH_NOTES.clear()
+    assert INSTALLED_COPY(tmp_path) == cli.Installed(cache.resolve(), "thimble")
+    assert cli.LAUNCH_NOTES == [] and cli.plugin_line(tmp_path).endswith("0.8.0, on, this install's")
+    (cache / "hooks" / "thimble.ts").write_text("// another build\n")
+    assert INSTALLED_COPY(tmp_path) is None
+    assert cli.LAUNCH_NOTES == [cli.PLUGIN_DIFFERS_LINE.format(name="thimble", version="0.8.0")]
+    assert "claude plugin marketplace update thimble && claude plugin update thimble@thimble" in cli.LAUNCH_NOTES[0]
+    assert "differ" in cli.plugin_line(tmp_path) and "claude plugin update thimble@thimble" in cli.plugin_line(tmp_path)
+    assert "claude plugin" not in cli.plugin_line(tmp_path, commands=False)
+    cli.LAUNCH_NOTES.clear()
+    (cache / "bin" / "thimble-app-dir").write_text('#!/bin/sh\necho "/opt/other-thimble"\n')
+    assert INSTALLED_COPY(tmp_path) is None and cli.LAUNCH_NOTES == []
+    assert "from another install (/opt/other-thimble)" in cli.plugin_line(tmp_path)
+    (tmp_path / "listed.json").write_text(json.dumps([{**listed[0], "enabled": False}]))
+    assert cli.plugin_line(tmp_path).startswith("thimble@thimble 0.8.0, off, from another install")
+    (tmp_path / "listed.json").write_text("[]")
+    assert cli.plugin_line(tmp_path).startswith(f"not added: bash {config.REPO_ROOT / 'scripts' / 'install.sh'}")
+    assert cli.plugin_line(tmp_path, commands=False) == "not added to Claude Code"

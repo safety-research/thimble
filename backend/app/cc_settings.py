@@ -321,6 +321,50 @@ def _apparmor_needed(bwrap: str) -> bool:
         return True
 
 
+# kernel_setup's packages: bubblewrap alone, which the card kernel's and terminal views' sandbox needs (no socat)
+KERNEL_PACKAGE_INSTALL = (("apt-get", "apt-get install -y bubblewrap"), ("dnf", "dnf install -y bubblewrap"),
+                          ("zypper", "zypper install -y bubblewrap"), ("pacman", "pacman -S --needed bubblewrap"),
+                          ("apk", "apk add bubblewrap"))
+
+
+def kernel_setup() -> tuple[list[str], str]:
+    """(the root commands that would let bubblewrap make a sandbox on this machine, what they do or why there are none),
+    for the doctor's card code and terminal views lines: sandbox_setup for bubblewrap alone, with the AppArmor profile
+    when bwrap needs one, and no socat. [] off Linux, where bubblewrap runs (kernel_wrap.works), or when no root command
+    is at hand. The commands are printed, never run."""
+    if sys.platform != "linux":
+        return [], ""
+    import shutil  # noqa: PLC0415
+
+    from . import kernel_wrap  # noqa: PLC0415
+
+    if kernel_wrap.works():
+        return [], ""
+    found = shutil.which("bwrap")
+    bwrap = found or "/usr/bin/bwrap"
+    profile = _apparmor_needed(bwrap)
+    what = " and ".join(filter(None, ["bubblewrap" if not found else "",
+                                      "an AppArmor profile that lets bwrap create user namespaces" if profile else ""]))
+    if not what:
+        return [], "bwrap is installed but cannot create a sandbox here (user namespaces may be off, as in some containers)"
+    root = os.geteuid() == 0
+    if not root and not shutil.which("sudo"):
+        return [], f"setting up {what} needs root: ask an administrator"
+    sudo = "" if root else "sudo "
+    cmds: list[str] = []
+    if not found:
+        install = next((cmd for tool, cmd in KERNEL_PACKAGE_INSTALL if shutil.which(tool)), None)
+        if install is None:
+            return [], "install bubblewrap with this system's package manager"
+        cmds.append(sudo + install)
+    if profile:
+        path = APPARMOR_DIR / "bwrap"
+        text = APPARMOR_PROFILE.format(bwrap=bwrap).replace("\n", "\\n")
+        cmds.append(f"printf '{text}' | {sudo}tee {path} >/dev/null")
+        cmds.append(f"{sudo}apparmor_parser -r {path}")
+    return cmds, f"set up {what}"
+
+
 def sandbox_setup() -> tuple[list[str], str]:
     """(the root commands that would make the sandbox run on this machine, what they do or why there are none), for
     `thimble doctor`: [] when it runs, off Linux, or when no root command is at hand (not root and no
