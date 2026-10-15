@@ -4,8 +4,9 @@
 // declined unanswered. The card keeps showing the request it shows while others arrive, are answered or time out. Its
 // head names the requesting thread (askThread); the body says who asks, what the call does, every later call that waits
 // on the same answer (scrolled), and why it asks, then Allow, Always allow (where Claude Code offers a rule: for main's
-// request what its own "don't ask again" adds, kept where Claude Code keeps it; for a session thimble started a rule for
-// the session, or for a web call its site or web search in the workspace; the scope in its tooltip) and Deny, in one row. A
+// request what its own "don't ask again" adds, kept where Claude Code keeps it and worded as its dialog words it; for a
+// session thimble started a rule for the session, or for a web call its site or web search in the workspace; the scope
+// in its tooltip) and Deny, in one row. A
 // request declined unanswered says so, with Dismiss, and Dismiss all when several were. When auto mode's classifier
 // could not judge a call, the request of a session thimble started offers the switch to Manual, and to Bypass unless
 // the analyst's Claude Code settings turn it off. An answer takes its request off the card at once and the next request
@@ -28,10 +29,10 @@ import { ThreadChip } from './Notes'
 import { askedBy, askingAgent, asksTo, askThread, askWhy, type PendingAsk } from './permissions'
 
 /** A request's "don't ask again" choice: the button's label, and its tooltip saying what it keeps and where (for main's
- * request, as the backend words it). Pure. */
+ * request, as the backend words it after Claude Code's own dialog). Pure. */
 export function alwaysChoice(p: PermissionRequest): { label: string; tip: string } | null {
   if (p.keep) return { label: `Always allow ${p.keep}`, tip: `Allow, and don't ask again for ${p.keep === 'web search' ? 'web searches' : p.keep} in this workspace` }
-  if (p.always) return { label: `Always allow ${p.always}`, tip: p.always_tip || `Allow, and don't ask again for ${p.always} for the rest of this session` }
+  if (p.always) return { label: p.always_label || `Always allow ${p.always}`, tip: p.always_tip || `Allow, and don't ask again for ${p.always} for the rest of this session` }
   return null
 }
 

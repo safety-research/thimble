@@ -16,8 +16,9 @@ runs as the plugin's asyncRewake hooks, which wake the session with the event (t
 hooks are off, as main's Monitor (the MONITOR route, cc_plugin.route). Permission prompts come from the
 PermissionRequest hook; since Claude Code does not signal that hook when the analyst answers in the terminal, the server
 ends the wait itself (clear_permissions, release_asks, agent_moved). A prompt's card offers "Always allow" where Claude
-Code's own dialog offers "don't ask again": the request's permission_suggestions, each kept where Claude Code gave it
-(permission_updates.main_offer), none when the org's managed tier sets allowManagedPermissionRulesOnly (_main_offer).
+Code's own dialog offers "don't ask again", in that dialog's words (permission_updates.main_words): the request's
+permission_suggestions, each kept where Claude Code gave it (permission_updates.main_offer), none when the org's managed
+tier sets allowManagedPermissionRulesOnly (_main_offer).
 
 Main's terminal shows each event as one line (terminal_line): the analyst's words after SAID, with the thread or button
 they belong to, else a short line saying what happened. Claude Code shows a woken turn only as the hook's fixed summary,
@@ -986,12 +987,14 @@ def _main_offer(suggestions: Any, preview: str) -> list[dict[str, Any]]:
 
 
 def _hold(c: str, request_id: str, tool: str, what: str, preview: str, agent: str | None = None,
-          tool_input: Any = None, terminal: bool = False, offer: list[dict[str, Any]] | None = None) -> None:
+          tool_input: Any = None, terminal: bool = False, offer: list[dict[str, Any]] | None = None,
+          cwd: str = "") -> None:
     """Put a relayed permission request on main's meta, where the browser shows it; `chat` names the thread or subagent
     chat whose agent asked, when the hook said which (_asking_chat), and `terminal` says the terminal answers it, so the
     card shows it without buttons. `tool_input` is the call's input, which the card shows as `preview`. An `offer`
-    (_main_offer) is the card's "Always allow": `always` names what it adds and `always_tip` where Claude Code keeps it
-    (permission_updates.offer_text, main_tip)."""
+    (_main_offer) is the card's "don't ask again": `always` names what it adds (permission_updates.offer_text), and
+    `always_label` and `always_tip` are its button and tooltip, in the words of Claude Code's own dialog for the
+    session in `cwd`, the tooltip with where Claude Code keeps it (permission_updates.main_words)."""
     from . import agents  # noqa: PLC0415
 
     meta = agents.ensure_main(c)
@@ -1000,7 +1003,7 @@ def _hold(c: str, request_id: str, tool: str, what: str, preview: str, agent: st
     entry = {"id": request_id, "tool": tool, "what": what or tool, "input": preview[:PERMISSION_INPUT_CHARS],
              "since": _now(), **({"cut": len(preview)} if len(preview) > PERMISSION_INPUT_CHARS else {}),
              **({"chat": chat} if chat else {}), **({"terminal": True} if terminal else {}),
-             **({"always": permission_updates.offer_text(offer), "always_tip": permission_updates.main_tip(offer)}
+             **({"always": permission_updates.offer_text(offer), **permission_updates.main_words(offer, cwd)}
                 if offer else {})}
     pending.append(entry)
     meta["permissions"] = pending
@@ -1083,7 +1086,8 @@ async def hook_permission_route(request: Request, body: HookPermission) -> dict[
     offer = _main_offer(body.suggestions, preview)
     if offer:
         _offers[request_id] = offer
-    _hold(c, request_id, body.tool_name, what, preview, body.agent_id or None, body.tool_input, offer=offer)
+    _hold(c, request_id, body.tool_name, what, preview, body.agent_id or None, body.tool_input, offer=offer,
+          cwd=body.cwd)
     try:
         while not fut.done():
             try:

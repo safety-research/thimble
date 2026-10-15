@@ -57,6 +57,7 @@ what you changed:
 cd backend && THIMBLE_SKIP_KEY=1 .venv/bin/python -m pytest tests_public/test_<module>.py -q
 cd frontend && npm run typecheck && npx vitest run tests/public/<name>
 cd frontend && npx vitest run --config vitest.browser.config.ts tests/public/browser/<name>   # headless Chromium
+cd plugin && claude plugin validate . && claude plugin test .   # the hooks module; the frontend's vitest runs it too
 ```
 
 The backend's tests run on a small synthetic corpus (`backend/tests_public/mini_corpus.py`) and fake every model call

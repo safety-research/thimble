@@ -8,12 +8,14 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
 import time
 import types
 from dataclasses import dataclass
+from pathlib import Path
 
 import httpx
 import pytest
@@ -942,3 +944,14 @@ def test_rekey_in_terminal_mode_leaves_the_record_the_hook_wrote(terminal):
     before = _registry()["module"]
     module_bridge.rekey(CORPUS, MAIN, NEW)
     assert _registry()["module"] == before and before["notes"]["session"] == NEW
+
+
+def test_the_module_s_refusal_before_the_rules_come_says_what_module_deny_private_says():
+    """Until the rules come, the hooks module refuses a token file in its own words (PRIVATE_FALLBACK in
+    plugin/hooks/thimble.ts): prompts/tools.md's module-deny-private, the words the rules carry (userconf.module_rules).
+    The module's test runs where it cannot read prompts/tools.md (claude plugin test), so this test checks it."""
+    repo = Path(config.REPO_ROOT)
+    module = (repo / "plugin" / "hooks" / "thimble.ts").read_text("utf-8")
+    [said] = re.findall(r'^export const PRIVATE_FALLBACK = ("[^"\\\n]*(?:\\.[^"\\\n]*)*")$', module, re.M)
+    section = (repo / "prompts" / "tools.md").read_text("utf-8").split("\n## module-deny-private\n")[1].split("\n## ")[0]
+    assert json.loads(said) == section.strip()

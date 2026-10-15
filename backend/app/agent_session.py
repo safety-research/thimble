@@ -23,7 +23,9 @@ wait on the same card (`groups`), each listed on it whole, up to WEB_ALSO_MAX. T
 
 Don't ask again. The request's `permission_suggestions` become the card's third choice (offer); chosen, they are sent
 as `updatedPermissions` with destination session and kept on the chat's meta (RULES_KEY). Main's own requests, which
-events.py relays, offer them with the destination Claude Code gave each (permission_updates.main_offer).
+events.py relays, offer them with the destination Claude Code gave each (permission_updates.main_offer). Where the org's
+managed tier sets allowManagedPermissionRulesOnly, Claude Code ignores the rules a session saves and its own dialog
+offers no "don't ask again", so no card offers one, for the session or for the workspace (rules_ignored).
 
 Auto mode. A call auto mode's classifier refuses never reaches the PermissionRequest hook, so the hook also runs on
 PermissionDenied: the card asks the analyst, and an allow answers `retry` and is remembered (`grants`, `passes`, for
@@ -64,8 +66,8 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from . import agents, cc_settings, config, hook_auth, modes, permission_hook, sandbox_allow, session, tools, \
-    userconf
+from . import agents, cc_plugin, cc_settings, config, hook_auth, modes, permission_hook, sandbox_allow, session, \
+    tools, userconf
 from .ledger import atomic_write_text
 from .permission_updates import EDIT_MODE, WORKSPACE, allowing, offer_text, rule_text
 
@@ -617,7 +619,8 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
     whole = json.dumps(inp, ensure_ascii=False, default=str) if inp is not None else ""
     command = _command(tool_name, inp)
     cut = _cut(tool_name, inp, whole)
-    updates = [] if cut else web_offer(web) if web else offer(suggestions) if event == REQUEST else []
+    updates = ([] if cut or rules_ignored() else web_offer(web) if web else offer(suggestions) if event == REQUEST
+               else [])
     limit = userconf.card_wait_s()
     entry = {"id": rid, "tool": tool_name, "what": _what(tool_name, inp), "input": whole[:PERMISSION_INPUT_CHARS],
              "since": _now(), **command, **({"cut": cut} if cut else {}),
@@ -787,6 +790,12 @@ def _cut(tool_name: str, inp: Any, whole: str) -> int:
 def _asker(run: Run, agent_id: str, agent_type: str | None) -> dict[str, Any]:
     """Who asks, when a subagent or a workflow agent of the session does: its id and type as the hook gives them."""
     return {"agent_id": agent_id, "agent_type": agent_type}
+
+
+def rules_ignored() -> bool:
+    """Whether the org's managed tier sets allowManagedPermissionRulesOnly (module note, don't ask again), under which
+    the card offers no "don't ask again", as main's offers none (events._main_offer)."""
+    return cc_plugin.managed_rules_only({config.CONFIG_DIR_ENV: str(config.claude_config_dir())})
 
 
 def offer(suggestions: Any) -> list[dict[str, Any]]:
