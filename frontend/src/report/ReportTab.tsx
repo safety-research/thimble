@@ -335,12 +335,20 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
     </div>
   )
   const closePast = useCallback(() => setPast(null), [])
+  // Restore in History: the restored draft is the current one, shown in the editor
+  const onRestored = useCallback(
+    (saved: AnyDoc) => {
+      onSaved(saved)
+      setPast(null)
+    },
+    [onSaved],
+  )
   const pastShown = past != null && written && !isPage && !isVideo
   const view = pastShown ? (
     past.view.kind === 'diff' ? (
       <DraftDiff ws={ws} slug={slug} from={past.view.from} to={past.view.to} rows={past.rows} onClose={closePast} />
     ) : (
-      <PastDraft ws={ws} slug={slug} target={past.view.target} rows={past.rows} onClose={closePast} />
+      <PastDraft ws={ws} slug={slug} target={past.view.target} rows={past.rows} onClose={closePast} onRestored={onRestored} />
     )
   ) : shown && (bodyDoc || (isPage && load.state === 'none')) ? (
       views ? (

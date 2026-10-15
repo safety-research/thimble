@@ -1,7 +1,9 @@
 // A written document's history in the Report tab: a sheet of its drafts, newest first (historyModel.ts historyRows over
 // GET …/types/{slug}/versions), each with its number, time, author, length and what changed. A writer run is one draft,
-// its earlier saves folded under it. A past draft or save shows read-only in place of the editor (PastDraft) with Back to
-// current; Compare shows what changed between two saves (DraftDiff, diffModel.ts diffDocs). There is no restore.
+// its earlier saves folded under it; the analyst's own notes and figures from before the first write are Draft 1, theirs.
+// A past draft or save shows read-only in place of the editor (PastDraft) with Back to current and Restore, which makes
+// it the newest draft again, as the analyst's (backend report_types.restore_draft), as a card's History restores a card;
+// the top bar's Undo reverts a Restore. Compare shows what changed between two saves (DraftDiff, diffModel.ts diffDocs).
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
@@ -250,10 +252,13 @@ export interface PastDraftProps {
   /** the history's rows, for the band's name and meta */
   rows: HistoryRow[]
   onClose: () => void
+  /** the document after Restore made this draft the newest again */
+  onRestored?: (doc: AnyDoc) => void
 }
 
-/** A band over a past draft or a diff: its name, a mono line, what changed, Open writer's chat, Back to current. */
-function Band({ name, meta, changes, writer, onClose }: { name: string; meta: string; changes?: string[]; writer?: string | null; onClose: () => void }) {
+/** A band over a past draft or a diff: its name, a mono line, what changed, Open writer's chat, Back to current, and
+ * for a past draft Restore. */
+function Band({ name, meta, changes, writer, onClose, restore }: { name: string; meta: string; changes?: string[]; writer?: string | null; onClose: () => void; restore?: { onRestore: () => void; busy: boolean; disabled: boolean } }) {
   return (
     <div className="wu-past-band">
       <div className="wu-past-band-text">
@@ -275,6 +280,11 @@ function Band({ name, meta, changes, writer, onClose }: { name: string; meta: st
       <Button variant="secondary" size="sm" onClick={onClose}>
         Back to current
       </Button>
+      {restore && (
+        <Button variant="primary" size="sm" className="wu-past-restore" busy={restore.busy} disabled={restore.disabled} onClick={restore.onRestore}>
+          Restore
+        </Button>
+      )}
     </div>
   )
 }
@@ -318,14 +328,29 @@ function Loading({ docs, error, what }: { docs: unknown; error: string | null; w
   )
 }
 
-/** A past draft, or an earlier save of a run, read-only, under a band that names it and goes back to the current one. */
-export function PastDraft({ ws, slug, target, rows, onClose }: PastDraftProps) {
+/** A past draft, or an earlier save of a run, read-only, under a band that names it, goes back to the current one, and
+ * restores it: Restore makes it the newest draft, as the analyst's, and shows that draft in the editor. */
+export function PastDraft({ ws, slug, target, rows, onClose, onRestored }: PastDraftProps) {
   const { docs, error } = useSaves(ws, slug, [target])
   const doc = docs?.[0] ?? null
   const row = rows.find((r) => r.n === target.n) ?? null
   const sections = doc ? sectionsOf(doc) : []
   const total = rows.length
   const name = `${draftName(rows, target)}${target.rev == null && total ? ` of ${total}` : ''}`
+  const [restoring, setRestoring] = useState(false)
+  const restore = async () => {
+    if (restoring) return
+    setRestoring(true)
+    track('ui-click', { target: `report:${slug}`, detail: { action: 'history-restore', draft: target.n, save: target.rev } })
+    try {
+      const saved = await docsApi.restore(ws, slug, target.n, target.rev)
+      onRestored?.(saved)
+    } catch (e) {
+      bus.emit('toast', { text: `Could not restore the draft. ${(e as Error).message}`, kind: 'error' })
+    } finally {
+      setRestoring(false)
+    }
+  }
   return (
     <div className="wu-past" data-draft={target.n} data-save={target.rev ?? undefined}>
       <Band
@@ -334,6 +359,7 @@ export function PastDraft({ ws, slug, target, rows, onClose }: PastDraftProps) {
         changes={target.rev == null ? row?.changes : undefined}
         writer={row?.writer}
         onClose={onClose}
+        restore={onRestored ? { onRestore: () => void restore(), busy: restoring, disabled: !doc } : undefined}
       />
       <div className="wu-past-scroll">
         <Loading docs={doc} error={error} what="draft" />

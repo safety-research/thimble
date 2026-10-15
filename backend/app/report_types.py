@@ -838,6 +838,36 @@ def write_frame(c: str, inv_id: str, slug: str, frame: dict[str, Any]) -> None:
     undo.doc_written(c, inv_id, slug, "frame", prior if isinstance(prior, dict) else None, frame)
 
 
+def has_content(doc: dict[str, Any]) -> bool:
+    """Whether a frame or a document holds anything: a word or a figure."""
+    if doc_words(doc) > 0:
+        return True
+    return any(isinstance(f, dict) and f.get("cell") for u in units(doc)
+               for f in [u.get("figure"), *(u.get("figures") or [])])
+
+
+def analyst_draft(c: str, inv_id: str, slug: str, frame: dict[str, Any]) -> dict[str, Any]:
+    """The analyst's frame as the document's first draft, theirs, dated when they last saved it."""
+    draft = {k: copy.deepcopy(v) for k, v in frame.items() if k != "frame"}
+    try:
+        ts = datetime.fromtimestamp(frame_file(c, inv_id, slug).stat().st_mtime, timezone.utc).isoformat(timespec="seconds")
+    except OSError:
+        ts = _now()
+    draft.update(generation=1, generated_at=ts, written_by=ANALYST, words=doc_words(draft))
+    return draft
+
+
+def keep_analyst_draft(c: str, inv_id: str, slug: str, draft: dict[str, Any]) -> None:
+    """Store `draft` (analyst_draft) as the document, generation 1 by the analyst, just before the first save replaces
+    it: History lists it, and the save's undo step goes back to it. Its own write is no undo step, since the frame it
+    stands for is the document as the analyst left it."""
+    from . import versions  # noqa: PLC0415
+
+    with docs_lock(c, inv_id):
+        write_json(_inv(c, inv_id) / f"{slug}.json", draft)
+    versions.record_analyst_draft(c, inv_id, slug, draft)
+
+
 def frame_or_doc(c: str, inv_id: str, slug: str) -> tuple[dict[str, Any], bool]:
     """(the written document when there is one, else the frame, else an empty frame; whether it is the document)."""
     t = _require_type(c, slug)
@@ -2450,12 +2480,15 @@ async def tool_write_document(ctx: Any, args: dict[str, Any]) -> Any:
         return tools.err(tools.hint("write_document-form", doc=slug) or f"write_document: the {slug} is not written from markdown")
     inv = investigation.MAIN
     prev = read_doc(ctx.c, inv, slug)
+    frame = read_frame(ctx.c, inv, slug) if prev is None else None
+    # the analyst's own version before the first save: kept as the first draft, theirs, which the save then replaces
+    first = analyst_draft(ctx.c, inv, slug, frame) if frame is not None and has_content(frame) else None
     # one writer run is one generation: a later save of the run that wrote the current generation updates it in place,
     # the save it replaces kept as a revision (versions.add_revision), and `base`, what the generation is compared
     # with, is still the generation before the run
     run_key = writer_run(ctx)
     same_run = bool(run_key and prev is not None and prev.get("writer_run") == run_key)
-    base = versions.previous_of(ctx.c, inv, slug, int(prev.get("generation") or 1)) if same_run and prev else prev
+    base = versions.previous_of(ctx.c, inv, slug, int(prev.get("generation") or 1)) if same_run and prev else (prev or first)
     raw = parse_markdown(text, form)
     what_changed = (raw.pop("what_changed", None) or versions.pop_what_changed(raw)) if base is not None else []
     # the cards the writer's figure lines named, to say which of them the saved document shows
@@ -2465,7 +2498,8 @@ async def tool_write_document(ctx: Any, args: dict[str, Any]) -> Any:
         doc = normalize(t, raw, _Refs(ctx.c))
     except HTTPException as e:
         return tools.err(f"write_document: {e.detail}")
-    frame = read_frame(ctx.c, inv, slug) if prev is None else None
+    if first is not None:
+        keep_analyst_draft(ctx.c, inv, slug, first)
     pending = write_pending(ctx.c, slug) or {}
     refused: list[str] = []
     finish_generation(ctx.c, inv, slug, doc, request=pending.get("request"), frame=frame, refused=refused, by=ctx.cell_author,
@@ -2492,7 +2526,7 @@ async def tool_write_document(ctx: Any, args: dict[str, Any]) -> Any:
     _emit(ctx.c, {"type": "report", "slug": slug, "status": "generated", "by": ctx.cell_author, "run": event})
     if not same_run:  # one chat row per run: the run's later saves update the generation its row names
         try:
-            agents.chip(ctx.c, "artifact", "wrote" if doc["generation"] <= 1 else "revised", ref=f"report:{slug}",
+            agents.chip(ctx.c, "artifact", "wrote" if prev is None else "revised", ref=f"report:{slug}",
                         status="generated", generation=doc["generation"], writer=_writer_chat(ctx))
         except Exception:  # noqa: BLE001
             log.debug("chip not written", exc_info=True)
@@ -3587,6 +3621,53 @@ async def revision_route(c: str, inv_id: str, slug: str, n: int, i: int) -> dict
     slug = _check_slug(slug, custom=False)
     _require_type(c, slug)
     return story.upgrade(copy.deepcopy(versions.revision_of(c, inv_id, slug, n, i, _load(c, inv_id, slug))))
+
+
+# what a restored draft leaves behind of the writer run that wrote it: it is the analyst's draft now
+RESTORE_DROPS = ("frame", "writer_run", "revision", "what_changed", "instructions", "lock_reverts", "generation_failed")
+
+
+def restore_draft(c: str, inv_id: str, slug: str, n: int, rev: int | None = None) -> dict[str, Any]:
+    """Restore in History: generation `n` (or its earlier save `rev`) made the document's newest generation, as the
+    analyst's, with the comments of the current one carried onto it as for any new generation; the current one stays
+    in History, and the top bar's Undo goes back to it (store's undo step). Returns the document. 404 for a draft not
+    kept, 409 for the current draft itself."""
+    from . import revise_diff, versions  # noqa: PLC0415
+
+    cur = _load(c, inv_id, slug)
+    current = max(int(cur.get("generation") or 1), 1)
+    if rev is None and n == current:
+        raise HTTPException(409, "that draft is the current one")
+    old = versions.revision_of(c, inv_id, slug, n, rev, cur) if rev is not None else versions.document_of(c, inv_id, slug, n, cur)
+    doc = {k: copy.deepcopy(v) for k, v in old.items() if k not in RESTORE_DROPS}
+    doc["generation"] = current + 1
+    doc["comments"] = carry_comments(cur, doc, doc["generation"])
+    doc["snapshot"] = revise_diff.snapshot(c, inv_id, doc)
+    doc.update(generated_at=_now(), written_by=ANALYST, words=doc_words(doc))
+    store(c, inv_id, slug, doc)
+    versions.record(c, inv_id, slug, cur, doc, source=versions.ANALYST_SOURCE, instructions=None,
+                    restored={"n": int(n), "rev": None if rev is None else int(rev)})
+    if inv_id == investigation.MAIN:
+        _emit(c, {"type": "report", "slug": slug, "status": "edited", "by": ANALYST})
+    return _load(c, inv_id, slug)
+
+
+@router.post("/ws/{c}/investigations/{inv_id}/types/{slug}/versions/{n}/restore")
+async def restore_version_route(c: str, inv_id: str, slug: str, n: int) -> dict[str, Any]:
+    """Restore: draft `n` made the newest draft again, as the analyst's (restore_draft)."""
+    investigation.inv_dir(c, inv_id)
+    slug = _check_slug(slug, custom=False)
+    _require_type(c, slug)
+    return restore_draft(c, inv_id, slug, n)
+
+
+@router.post("/ws/{c}/investigations/{inv_id}/types/{slug}/versions/{n}/revisions/{i}/restore")
+async def restore_revision_route(c: str, inv_id: str, slug: str, n: int, i: int) -> dict[str, Any]:
+    """Restore: save `i` of draft `n` made the newest draft, as the analyst's (restore_draft)."""
+    investigation.inv_dir(c, inv_id)
+    slug = _check_slug(slug, custom=False)
+    _require_type(c, slug)
+    return restore_draft(c, inv_id, slug, n, i)
 
 
 @router.get("/ws/{c}/investigations/{inv_id}/types/{slug}/export")
