@@ -95,6 +95,21 @@ def manual_line(claude_mode: str | None) -> str:
     return MANUAL_LINES[hint] if hint else ""
 
 
+MANUAL_NOTICE = "Manual mode: Claude Code asks before most commands."
+MANUAL_NOTICES = {
+    "switch": f"{MANUAL_NOTICE} In your terminal, press shift+tab for auto mode, or start with "
+              "`thimble --permission-mode auto`.",
+    "org": f"{MANUAL_NOTICE} Your organization turned auto mode off.",
+    "settings": f"{MANUAL_NOTICE} Your Claude Code settings turn auto mode off (disableAutoMode).",
+}
+
+
+def manual_notice(claude_mode: str | None) -> str:
+    """The `manual-mode` notice's words when main reports `claude_mode` (MANUAL_NOTICES), '' outside Manual mode."""
+    hint = manual_hint(claude_mode)
+    return MANUAL_NOTICES[hint] if hint else ""
+
+
 def refused(mode: Any) -> str | None:
     """Why `mode` cannot be chosen, or None when it can."""
     if mode not in MODES:
