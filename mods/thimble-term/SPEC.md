@@ -163,6 +163,7 @@ the type area runs from A0 to R.
 | accent | `suggestion` | a panel's title; the selected row's `❯` and its text; `view proposal` above the prompt | where you are; a view proposal waiting for an answer |
 | new | `success` | the word `new` and `N new` | new |
 | tip | `userMessageBackground`, a background | the tip of the citation under the pointer | |
+| prompt | `userMessageBackground`, a background | a side thread's question, across the type area, as Claude Code draws a prompt | the analyst's question |
 | inline code | `permission` | inline code in thimble-term's own paragraphs | code |
 | palette | `SERIES`, seven hues that keep 3:1 on both panels; `LABEL_HUES` and `PICKED_HUES`, the browser's eighteen label colors moved to keep it too | `●`, marks, bars, swatches | a value of the color field |
 | red | `error` | a problem's words and its `×` or `!` | a problem |
@@ -210,6 +211,8 @@ outside this table.
 | `✓` | confirmed: thimble's links check found the cited value, the analyst agreed with a record | text |
 | **margin** | | |
 | `❯` | the selected row | accent |
+| `❯` on the prompt background | the analyst's question in a side thread, as Claude Code marks a prompt | dim |
+| `⏺` | an answer: main's reply (Claude Code's own) and a side thread's answer | text |
 | `?` | ask a side thread about this passage (shown under the pointer; under the header for a file's chosen record) | link |
 | `↳` | a side thread was asked here (in a reply's margin, a click opens it); the start of a `↳` row | link in the margin; dim on a row |
 | **navigation** | | |
@@ -382,7 +385,8 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   it, mid-sentence or at its end, the same in a reply, a thread's answer, a document, a card's takeaway and every line of
   plain words (a preview: the threads tree's answer row, the New thread view's passage, a caption, a `source` row),
   where it reads `[ card ]` in that line's own color, as the line's other citations read as their words. It stays where
-  the card it names is drawn under the reply or as a figure. Brackets main put around it alone are left out
+  the card it names is drawn under the reply or as a figure. In a side thread's answer a chip of a whole card is the
+  card itself, drawn after the paragraph that cites it (section 7, "The threads panel"), never `[ card ]`. Brackets main put around it alone are left out
   (`([[card:<id>]])` reads `[ card ]`). A click opens its place as any citation's does (the card, the file at its line,
   the label, the document at its passage); under the pointer it is inverse and its tip names the place in full, then
   its status (`card "How many pages does each wiki have?" · found`, `events.jsonl line 12 · ◌ checking`); a place that
@@ -611,40 +615,68 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   names keep their room, with their size alone at R.
 - The orientation's coverage line, when an orientation ran.
 
-**The threads panel** (what `show all threads` opens, and where a thread opens):
+**The threads panel** (what `show all threads` opens, and where a thread opens). A thread open alone, with no other
+thread (Matt, 2026-10-15, of such a thread: "presentation of the chat has bad information hierarchy in terminal mode in a
+side thread"):
+
+```
+  home › threads › "what's the breakdown of file size? 3.6gb is mostly video?"
+  about "The files show 7 participants, P1 to P7. Each one has a…"
+  ──────────────────────────────────────────────────────────────────────────────────────────────
+❯ what's the breakdown of file size? 3.6gb is mostly video?
+
+⏺ Yes. The 7 screen recordings are about 3.7 GB, 95 of every 100 bytes. The thimble session
+  logs are 174 MB and the 7 transcripts are under 1 MB.
+
+  ╭────────────────────────────────────────────────────────────────────────────────────────────╮
+  │ How much of the corpus's 3.6 GB is video, and how much is logs and transcripts?            │
+  │                                                                                            │
+  │ video (.mp4)                          ██████████████████████████████████████████    3695.5 │
+  ╰────────────────────────────────────────────────────────────────────────────────────────────╯
+  ──────────────────────────────────────────────────────────────────────────────────────────────
+  ask a follow-up question
+  a to ask · v to show the passage · b to go back · x to close
+```
+
+With several threads, one open:
 
 ```
   home › threads › "How many delete events are in events.jsonl? One number."
   2 threads · 1 new
   ──────────────────────────────────────────────────────────────────────────────────────────────
   main
-❯ ├ "How many delete events are in events.jsonl? One number."                               new
-  │ There are 5,217 delete events in events.jsonl.
-  └ "Which wiki got the most revisions on June 18, and from how many labels?"
-    dse got the most revisions on June 18: 5,884 of the 6,543.
+❯ ├ "How many delete events are in events.jsonl? One number."
+  └ "Which wiki got the most revisions on June 18, and from how many labels?"                 new
   ──────────────────────────────────────────────────────────────────────────────────────────────
   about events.jsonl line 12
-     11  {"event": "save", "page": "Welcome", "ts": "2026-06-16T08:59:58Z"}
-     12  {"event": "delete", "page": "Probe 1", "ts": "2026-06-16T09:00:02Z"}
-     13  {"event": "delete", "page": "Probe 2", "ts": "2026-06-16T09:00:05Z"}
-  "How many delete events are in events.jsonl? One number."
-  There are 5,217 delete events in events.jsonl.
+
+❯ How many delete events are in events.jsonl? One number.
+
+⏺ There are 5,217 delete events in events.jsonl.
 
   ask a follow-up question
-  ↑↓ to choose · Enter to open · a to ask · b to go back · x to close
+  ↑↓ to choose · Enter or a to ask · v to show the lines · b to go back · x to close
 ```
 
 - A tree: a root per place a thread was asked from (`main`, `report "…"`) at A0, a blank row between roots; its
   threads under it with guides; a thread asked from a thread one level deeper. Each thread's row is its question in
-  quotation marks; its secondary row is the first line of its latest answer, dim (`stopped` dim for a stop, the
-  analyst's or the end of the Claude Code session; a failure `×` in red; before its answer is read, only what its
-  record says, never `answered`); `N questions` dim at R when there is more than one.
-- The selected thread (`❯`, accent) shows under the second rule: what it is about (named as home names it), dim, then
-  the thing itself (its subject, below), then its questions and answers, drawn as main's chat draws a reply, `stop` while it answers, then, a blank row under the
-  answer, the field for the next question, its placeholder dim (`ask a follow-up question`); Enter's word is `ask`.
-  1-9 open the first nine threads. A thread's answer is its first reply (`reply_in_thread`) or its run's end: what its
-  fork writes after the reply, as it makes a card, is its working and is not drawn, and two texts a tool call parts are
-  two paragraphs. The cards the thread made stand under its answer, each in its frame, as under main's reply.
+  quotation marks; while no thread is open, its secondary row is the first line of its latest answer, dim (`stopped` dim
+  for a stop, the analyst's or the end of the Claude Code session; a failure `×` in red; before its answer is read, only
+  what its record says, never `answered`); while one is open below, no secondary row, so no line of an answer repeats
+  the open thread's chat; `N questions` dim at R when there is more than one.
+- The selected thread (`❯`, accent) shows under the second rule: what it is about on one dim row (`about <what>`,
+  named as home names it, cut at the type area), then its chat as Claude Code draws one: each question after `❯` (dim)
+  in the margin, its words in the text color on Claude Code's prompt background across the type area, unquoted; a
+  blank row; the answer after Claude Code's `⏺` in the margin, drawn as main's chat draws a reply; a blank row between
+  turns. `stop` while it answers, then, a blank row under the chat, the field for the next question, its placeholder dim
+  (`ask a follow-up question`); Enter's word is `ask`. 1-9 open the first nine threads. A thread's answer is its first
+  reply (`reply_in_thread`) or its run's end: what its fork writes after the reply, as it makes a card, is its working
+  and is not drawn, and two texts a tool call parts are two paragraphs. A card the answer cites by a chip alone
+  (`[[card:<id>]]`) is drawn where it is cited, after the paragraph that cites it, never as `[ card ]`; the other cards
+  the turn made stand after the answer; each in its frame, once, with a blank row before it and after it (none next to
+  a rule).
+- A thread open alone, with no other thread, has no list: the title row's last step is its question, and what it is
+  about is the row under it, in the subtitle's place; its field stands under the second rule.
 - A new thread (one with no question yet): `about <what>` as its dim subtitle, its subject (below), then the question's
   field alone, its placeholder dim. `<what>` is a card by its question (`card "…"`), a
   citation's words in quotation marks (a value alone, `4579`, as it shows; a chip by its place in full words, which
@@ -652,13 +684,15 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   answer ›`), which the thread keeps. The field is Claude Code's Input, one row that shows the start of a long question:
   no hook scrolls it to the cursor, and its placeholder is drawn dim with the terminal's reset, which drops the panel's
   background behind it in a light theme.
-- A thread's subject, the thing it is about, stands above its chat and its field, in a new thread and in the thread as
-  its chat grows (Matt, 2026-10-07: "keep that thing above the chat so I know what I'm referencing"): a card in its
-  frame (section 2, rule 11), a value the thread was asked about lit on it; a file's cited line with up to two lines on
-  each side, as the citation panel draws lines (the cited one in the text color, the value or the whole line on the
-  selection background, the others dim, their numbers in a dim column at A2); a passage or a quote as its words,
-  wrapped, a heading bold, unless `about` holds them whole. At most 6 rows of it (a card's plot or body, the rows under
-  it then left out), then `… N more` dim, which shows it whole; never `… 1 more`.
+- A thread's subject, the thing it is about (Matt, 2026-10-07: "keep that thing above the chat so I know what I'm
+  referencing"): above a new thread's field, and in an open thread on demand, whole, between its `about` row and its
+  first question (`v`, or a press on the `about` row; the hint row names what it shows: `v to show the card`, `the
+  lines`, `the passage`, `the answer`): a card in its frame (section 2, rule 11), a value the thread was asked about lit
+  on it; a file's cited line with up to two lines on each side, as the citation panel draws lines (the cited one in the
+  text color, the value or the whole line on the selection background, the others dim, their numbers in a dim column at
+  A2); a passage or a quote as its words, wrapped, a heading bold, unless `about` holds them whole (then there is no
+  `v`). Above a new thread's field at most 6 rows of it (a card's plot or body, the rows under it then left out), then
+  `… N more` dim, which shows it whole; never `… 1 more`.
 
 **The citation panel:**
 

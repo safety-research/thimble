@@ -34,7 +34,8 @@ Claude Code's panel chrome, no right-click menu.
   citations show as links and a card's line as `◌ <its question>`, never `[[…]]`; a citation typed into the prompt is
   blue and underlined too. A chip, a citation that names only its place (`[[card:<id>]]`, `[↗](<ref>)`), reads as its
   place's short name in brackets in the link color, `[ card ]` or `[ events.jsonl line 12 ]`, alike in replies, thread
-  answers, documents, takeaways and previews; its tip names the place in full. Every cut is at a word (`hooks/lib.ts` `cut`). Main's end token, `(shown in the dashboard)`, is not
+  answers, documents, takeaways and previews, except a whole card's chip in a thread's answer, which is the card itself,
+  drawn after its paragraph; its tip names the place in full. Every cut is at a word (`hooks/lib.ts` `cut`). Main's end token, `(shown in the dashboard)`, is not
   shown. Off the terminal a cited block is
   Markdown, each citation a link to its file and a problem marked `×`.
 - **The footer** under a turn's answer (its last part that cites or embeds a card), one blank row below it: `N citations
@@ -87,9 +88,12 @@ Claude Code's panel chrome, no right-click menu.
   code with what it printed; a citation (its value as a link with `◌` or a red `×`, its status in plain words, the
   sentence it stands in, its lines with the value marked (the whole line where it shows none), a file's as a window
   that ↑↓ and the wheel scroll through the whole file, or the card it names with the cited mark lit, a `follow-up`
-  field when opened from a side thread); the threads (a tree with a root per place, `main` or `report "…"`, the selected
-  thread under it with what it is about above its chat: a card in its frame, a file's cited lines, a passage's words,
-  cut to 6 rows and `… N more`; a new thread shows it above its field too; `stop` while it answers, the ask field); a label; the documents and one document (a report with its
+  field when opened from a side thread); the threads (a tree with a root per place, `main` or `report "…"`, one row a
+  thread while one is open; the selected thread under it, or alone with no tree when it is the only one: what it is
+  about on one dim row, `v` showing it whole (a card in its frame, a file's cited lines, a passage's words), then its
+  chat as Claude Code draws one, each question after `❯` on the prompt's background and each answer after `⏺`, its
+  cards where it cites them; a new thread shows its subject above its field, cut to 6 rows and `… N more`; `stop` while
+  it answers, the ask field); a label; the documents and one document (a report with its
   contents, a deck or a story one slide or beat at a time, the retell controls; its comments, a check's, Claude's or the
   analyst's, under the passages they are on, ↑↓ to choose one, `r` to resolve it, `v` to show the resolved ones; `e`
   to edit a report as Markdown, its cards as their lines, saved as the browser's editor saves it); the file browser, after the
