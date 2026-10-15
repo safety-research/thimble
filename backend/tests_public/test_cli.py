@@ -1186,3 +1186,20 @@ def test_installed_copy_takes_any_thimble_plugin_of_this_install_and_notes_one_t
     (tmp_path / "listed.json").write_text("[]")
     assert cli.plugin_line(tmp_path).startswith(f"not added: bash {config.REPO_ROOT / 'scripts' / 'install.sh'}")
     assert cli.plugin_line(tmp_path, commands=False) == "not added to Claude Code"
+
+
+def test_thimble_fix_asks_before_a_session_with_no_sandbox_edits_thimble_s_code(monkeypatch):
+    """`thimble fix` runs a session that edits thimble's code without asking; where it has no sandbox it asks first in
+    the terminal (dev.FIX_QUESTION), and anything but yes stops it."""
+    from app import dev
+
+    asked: list[str] = []
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr(dev, "fix_contained", lambda: False)
+    monkeypatch.setattr("builtins.input", lambda q: asked.append(q) or "y")
+    assert cli.fix_refusal() == "" and asked == [f"thimble fix: {dev.FIX_QUESTION} [y/N] "]
+    assert "no sandbox" in dev.FIX_QUESTION and dev.FIX_QUESTION != dev.CODE_QUESTION
+    monkeypatch.setattr("builtins.input", lambda q: "")
+    assert cli.fix_refusal() == cli.FIX_DECLINED
+    monkeypatch.setattr(dev, "fix_contained", lambda: True)
+    assert cli.fix_refusal() == "", "contained: nothing to ask"

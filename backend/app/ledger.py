@@ -393,10 +393,9 @@ def with_features(stored: dict[str, Any], c: str | None = None) -> dict[str, Any
 
 
 def agent_rows(c: str | None) -> dict[str, Any]:
-    """Who runs each agent thimble starts and what it may do. Two fences: `main`'s, which thimble's agents share as main's
-    subagents (its sandbox, whether the sandbox can run here, its network, web tools and edits of the corpus, the
-    orientation's keys in thimble's config, userconf's one fence), with the extensions that add to main's prompt; and
-    `dev`'s, which `thimble fix` and an extension's program that runs the dev agent keep. Each other agent's row
+    """Who runs each agent thimble starts and what it may do. `main`'s row: thimble's rules for main and its agents (web,
+    data) and the extensions that add to main's prompt; and `dev`'s, the fence `thimble fix` and an extension's program
+    that runs the dev agent keep (its sandbox, whether the sandbox can run here, its network, web tools and edits). Each other agent's row
     (orient, writer, critic, checks) names its role's agent (roles.public: thimble's own, or an extension's prompt, Agent SDK program or command,
     with the extensions that add to its prompt and a conflict) and its own `web`, "off" or main's. `labels` and
     `cardCheck` (userconf.CALLS) follow, by their config names: who runs their tasks (`tasks`, the first one an
@@ -414,7 +413,9 @@ def agent_rows(c: str | None) -> dict[str, Any]:
         return {"sandbox": "on" if on else "off", "sandbox_runs": runs, "network": mine.get("network") or "on",
                 "web": mine.get("web") or "ask", "data": mine.get("data") or "ask", "config": f"agents.{agent}"}
 
-    out: dict[str, Any] = {"main": {"additions": by_role["main"]["additions"], **fence("orientation")}}
+    main = fence("orientation")
+    out: dict[str, Any] = {"main": {"additions": by_role["main"]["additions"], "web": main["web"], "data": main["data"],
+                                    "config": main["config"]}}
     for agent in userconf.SUBAGENT_ROLES:
         role = by_role.get(agent) or blank
         out[userconf.ROLES[agent]] = {"way": role["way"], "extension": role["extension"],
@@ -542,6 +543,8 @@ def put_settings(c: str, settings: dict[str, Any]) -> dict[str, Any]:
         userconf.save(c, patch)
         if roles_changed:
             push_roles(c)
+    if isinstance(settings.get(modes.SETTING), dict):  # a Bypass row takes effect only as the analyst's choice here
+        modes.choose(settings[modes.SETTING])
     settings = {k: v for k, v in settings.items() if k not in (modes.SETTING, WEB_KEY, PROPOSE_KEY)}
     if config.MODELS_KEY in settings:
         settings[config.MODELS_KEY] = {k: v for k, v in models.items() if k == "main"}

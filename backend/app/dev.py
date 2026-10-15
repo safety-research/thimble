@@ -11,7 +11,7 @@ and answers the exact Agent call, which main makes and auto mode judges (start_t
 is prepared the same way, and main gets the call in a `start_agent` event (tools._ask_main), since a fork may not start
 subagents. While another ticket runs, main's ticket waits for the analyst's Start (`held`), since no ticket starts
 without a click or main's call. Preparing cuts a git worktree off the live branch (worktree_path, under worktrees_dir,
-the one folder of thimble's home that main's fence lets main's Bash and its subagents write), takes the before shot, and
+in thimble's home), takes the before shot, and
 opens the ticket's thread, which the agent's chat takes over (subagents.ensure_chat, `adopt`). The agent edits the
 worktree, checks its change with the `ticket_checks` tool as often as it wants, and calls `finish_ticket`, where the
 server commits every change in the worktree to the ticket's branch and runs the gates of record, counting the attempts
@@ -58,16 +58,16 @@ notices.agent_key: Retry on a view), since the analyst may be in another chat; a
 ticket that starts or is applied, clear it (_view_notice, _ticket_notice). Main's quit and the analyst's Stop tell
 nothing.
 
-Permissions. A ticket's agent and a view builder are subagents of main: they run in main's permission mode and fence,
-and ask as main does, in the analyst's terminal. thimble's own questions about its code stay on the ticket's card, in
+Permissions. A ticket's agent and a view builder are subagents of main: they run in main's permission mode, Bypass
+included, and ask as main does, in the analyst's terminal. thimble's own questions about its code stay on the ticket's card, in
 every mode, Bypass included (CODE_TOOL): its chat hosts the ticket's key (agent_session.host) for them alone, and a
 question nobody answers within the card's wait (userconf.card_wait_s) is a no.
 
 Containment. A ticket is contained where thimble's sandbox runtime works (ticket_box): its gates, and the server that
 shows its before and after shots, run in the ticket's box, with no network, no home folder and writes only to the
 worktree and the ticket's cache folder, and the server's git commands in the worktree run hardened (WORKTREE_GIT). The
-agent's own Bash runs in main's sandbox, which writes the worktrees and not the live checkout or its git folder, so only
-the server commits to the ticket's branch (commit_worktree) and moves it. Its code first runs outside a sandbox once
+agent's own Bash runs as main's does; its prompt tells it to change only the worktree, and the server commits to the
+ticket's branch (commit_worktree) and moves it. Its code first runs outside a sandbox once
 merged, so thimble asks the analyst, in every mode, just before the merge (APPLY_QUESTION, on the card; `thimble fix` in
 the terminal). The merge takes the commit that passed, by its id (the ticket's `change`). Anything but an Allow ends
 the ticket stopped with its branch kept. Where the box can't run, the ticket runs its gates on the validation stack,
@@ -76,7 +76,7 @@ outside the sandbox, so thimble also asks before it starts (CODE_QUESTION); a no
 thimble's config. `thimble fix`'s session runs with the dev agent's `agents.dev` settings (userconf.py, dev_config) and
 the dev row's fast mode; agent_session's module note says what the config adds. Its Bash runs in the sandbox where it
 can run, and its sandbox also writes what a commit in its worktree writes into the checkout's git folder (ticket_fence).
-A ticket's agent and a view builder run inside main's fence, on the dev agent's model and effort unless their run names
+A ticket's agent and a view builder run as main's subagents, on the dev agent's model and effort unless their run names
 its own, and without web tools while the dev agent's `web` is off (subagents.roles); Claude Code gives a subagent no
 fast mode of its own.
 """
@@ -611,7 +611,7 @@ class GitError(RuntimeError):
     pass
 
 
-# A ticket's agent writes its worktree (main's fence), and `thimble fix`'s session also the worktree's own git folder
+# A ticket's agent writes its worktree, and `thimble fix`'s session also the worktree's own git folder
 # (ticket_fence), so the server's git commands there run with no fsmonitor command and no hooks, with the git folders named from the live checkout's side
 # (GIT_DIR, GIT_COMMON_DIR, GIT_WORK_TREE) so that no `.git` file or commondir the session wrote is read, and only while
 # the worktree still points where it should (_check_worktree).
@@ -621,8 +621,8 @@ WORKTREE_MOVED = ("the ticket's worktree no longer points at the live checkout's
 
 
 def _in_worktrees(cwd: Path) -> bool:
-    """Whether `cwd` is in the folder of the tickets' worktrees, by its name or by where it leads. Main's fence lets
-    main's Bash and its subagents write that folder, so a link there in place of a worktree is in it too: its git
+    """Whether `cwd` is in the folder of the tickets' worktrees, by its name or by where it leads. Main's Bash and its
+    subagents may write that folder, so a link there in place of a worktree is in it too: its git
     commands are checked (_check_worktree), and never run in the folder the link leads to, such as the live checkout."""
     trees = worktrees_dir()
     try:
@@ -709,8 +709,7 @@ def dev_home() -> Path:
 
 
 def worktrees_dir() -> Path:
-    """The tickets' worktrees and nothing else, so main's fence lets main's Bash and its subagents write this folder
-    (cli.main_fence) and never the boxes beside it."""
+    """The tickets' worktrees and nothing else, apart from the boxes beside them, which no agent writes."""
     return dev_home() / "trees"
 
 
@@ -1948,6 +1947,9 @@ APPLY_UNANSWERED = "not applied because nobody answered within {wait}. The chang
 # where the ticket's checks can't run in a box (ticket_box.problem), the question comes before the ticket starts too
 CODE_QUESTION = ("This edits thimble's own code, which then runs outside the sandbox (its test server, its checks and "
                  "git). Allow?")
+# what `thimble fix` asks in the terminal before it starts where its session has no sandbox (cli.fix_refusal)
+FIX_QUESTION = ("thimble fix runs a Claude Code session that runs commands and edits thimble's code without asking you, "
+                "and here it has no sandbox. Allow?")
 CODE_WHY = ("The ticket's checks can't run in a sandbox here ({why}), so thimble asks this before every code ticket, in "
             "every permission mode. Unanswered, the ticket is canceled after {wait}.")
 CODE_NOT_ALLOWED = "the analyst did not allow it to edit thimble's own code, so it did not start"

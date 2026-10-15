@@ -6,21 +6,28 @@ builds (IGNORED_ROWS) are read and ignored, so an earlier config or tab stays va
 
 A row the analyst has not set follows main: the mode Claude Code reports to main's hooks (session.note_mode), which
 thimble keeps until main reports again, over a restart of the server under the same session too, Manual before the first
-report. So such a program runs in Bypass only when main does, or when the analyst chose Bypass for it in thimble's
-config or on a session's card (that session alone, agent_session.set_mode), each a write only the analyst's browser may
-make (hook_auth.analyst). A mode the analyst's or the org's Claude Code settings turn off (disabled) is never used.
-Main's own mode is Claude Code's alone.
+report, and Manual while main runs in Bypass. A row set to Bypass takes effect only once the analyst chose Bypass for it
+in Settings (chosen: a record only the analyst's browser can make, hook_auth.analyst, and file tools may not edit);
+"bypass" written into the config alone counts as Manual. A mode the analyst's or the org's Claude Code settings turn off
+(disabled) is never used. Main's own mode is Claude Code's alone, and code tickets' agents and view builders, which are
+main's subagents, run in it.
 
 Manual and Bypass both run Claude Code's manual mode (FLAGS): in Bypass thimble grants every request itself
 (agent_session.ask), so a card switches between them without restarting the session. Auto runs Claude Code's auto mode.
 
 While main reports Claude Code's Manual mode (subagent_files.MANUAL_MODES), Claude Code asks before most commands of
-main's and of thimble's agents. The first time main reports it in a session, main's terminal says so once, with how to
-switch to auto mode, or who turned auto mode off (manual_line: session.note_mode in browser mode, the watcher's mode
-hook in terminal mode), and the browser shows a chip while it lasts (`attached.manual`, manual_hint).
+main's and of thimble's agents. thimble then shows the notice `manual-mode` (manual_notice) in red: in the browser above
+the chat's composer, in terminal mode above Claude Code's prompt, until main reports another mode or the analyst
+dismisses it, which holds for the workspace (notices.py). In browser mode, main's terminal also says so once per session
+(manual_line, session.note_mode).
 """
 from __future__ import annotations
 
+import json
+import os
+import tempfile
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from . import cc_settings
@@ -95,6 +102,23 @@ def manual_line(claude_mode: str | None) -> str:
     return MANUAL_LINES[hint] if hint else ""
 
 
+# the words of the `manual-mode` notice (notices.py), by manual_hint, in the browser above the composer and in terminal
+# mode's band above Claude Code's prompt
+MANUAL_NOTICE = "Manual mode: Claude Code asks before most commands."
+MANUAL_NOTICES = {
+    "switch": f"{MANUAL_NOTICE} In your terminal, press shift+tab for auto mode, or start with "
+              "`thimble --permission-mode auto`.",
+    "org": f"{MANUAL_NOTICE} Your organization turned auto mode off.",
+    "settings": f"{MANUAL_NOTICE} Your Claude Code settings turn auto mode off (disableAutoMode).",
+}
+
+
+def manual_notice(claude_mode: str | None) -> str:
+    """The `manual-mode` notice's words when main reports `claude_mode` (MANUAL_NOTICES), '' outside Manual mode."""
+    hint = manual_hint(claude_mode)
+    return MANUAL_NOTICES[hint] if hint else ""
+
+
 def refused(mode: Any) -> str | None:
     """Why `mode` cannot be chosen, or None when it can."""
     if mode not in MODES:
@@ -111,18 +135,63 @@ def session_mode(c: str) -> str:
     return OF_CLAUDE.get(session.main_mode(c) or "", "manual")
 
 
-def rows(c: str) -> dict[str, str]:
-    """The rows thimble's config sets for workspace `c`."""
+def chosen() -> set[str]:
+    """The rows the analyst chose Bypass for in Settings: userconf.bypass_file, which only `choose` writes (from the
+    settings PUT, a write only the analyst's browser may make) and which file tools may not edit (module_rules)."""
     from . import userconf  # noqa: PLC0415 — userconf reads config, which the session modules import
 
-    return userconf.mode_rows(c)
+    try:
+        got = json.loads(userconf.bypass_file().read_text("utf-8"))
+    except (OSError, ValueError):
+        return set()
+    rows = got.get("rows") if isinstance(got, dict) else None
+    return {str(r) for r in rows if r in AGENTS} if isinstance(rows, list) else set()
+
+
+def choose(patch: dict[str, Any]) -> None:
+    """Record a Settings PUT's `permission_modes`: a row set to Bypass joins `chosen`, any other value or None leaves
+    it. Written atomically, mode 600."""
+    from . import config, userconf  # noqa: PLC0415
+
+    if not isinstance(patch, dict):
+        return
+    now = chosen()
+    for agent, mode in patch.items():
+        row = EARLIER.get(agent, agent)
+        if row not in AGENTS:
+            continue
+        if mode == "bypass":
+            now.add(row)
+        else:
+            now.discard(row)
+    path = userconf.bypass_file()
+    config.private_dir(path.parent)
+    rec = {"rows": sorted(now), "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+    fd, tmp = tempfile.mkstemp(prefix=".bypass.", dir=str(path.parent))  # mode 600
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(rec, indent=1) + "\n")
+        os.replace(tmp, path)
+    finally:
+        Path(tmp).unlink(missing_ok=True)
+
+
+def rows(c: str) -> dict[str, str]:
+    """The rows thimble's config sets for workspace `c`, a Bypass the analyst did not choose in Settings read as
+    Manual."""
+    from . import userconf  # noqa: PLC0415 — userconf reads config, which the session modules import
+
+    ok = chosen()
+    return {r: ("manual" if m == "bypass" and r not in ok else m) for r, m in userconf.mode_rows(c).items()}
 
 
 def mode_for(c: str, agent: str) -> str:
-    """The mode an agent of workspace `c` starts in: its row, else main's, else Manual, whichever is not turned off."""
+    """The mode an agent of workspace `c` starts in: its row (rows), else main's with Bypass read as Manual, else Manual,
+    whichever is not turned off."""
     off = disabled()
     agent = EARLIER.get(agent, agent)
-    return next(m for m in (rows(c).get(agent), session_mode(c), "manual") if m and m not in off)
+    main = session_mode(c)
+    return next(m for m in (rows(c).get(agent), "manual" if main == "bypass" else main, "manual") if m and m not in off)
 
 
 def patch_error(patch: Any) -> str | None:

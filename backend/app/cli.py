@@ -3743,7 +3743,7 @@ FIX_DECLINED = "thimble fix did not run: you did not allow it."
 
 def fix_refusal() -> str:
     """'' when `thimble fix` may start, else why it did not: it needs a terminal to ask in, and where its ticket is not
-    contained (dev.fix_contained) the analyst's Allow before it starts (dev.CODE_QUESTION)."""
+    contained (dev.fix_contained) the analyst's Allow before it starts (dev.FIX_QUESTION)."""
     from . import dev  # noqa: PLC0415
 
     if not sys.stdin.isatty():
@@ -3751,7 +3751,7 @@ def fix_refusal() -> str:
     if dev.fix_contained():
         return ""
     try:
-        answer = input(f"thimble fix: {dev.CODE_QUESTION} [y/N] ")
+        answer = input(f"thimble fix: {dev.FIX_QUESTION} [y/N] ")
     except EOFError:
         answer = ""
     return "" if answer.strip().lower() in ("y", "yes") else FIX_DECLINED

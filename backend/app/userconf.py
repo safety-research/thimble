@@ -92,6 +92,7 @@ CARD_WAIT_MINUTES = 10
 CARD_WAIT_MAX = permission_hook.TIMEOUT // 120
 SERVER_JSON = "server.json"  # in thimble's home: the server's address and the token of its local API (hook_auth)
 MAIN_MODES = "main-modes.json"  # in thimble's home: the permission mode main last reported, per workspace (session.note_mode)
+BYPASS_JSON = "bypass.json"  # in thimble's home: the rows the analyst chose Bypass for in Settings (modes.chosen)
 SESSION_KEY = "session.key"  # in thimble's home: the secret of the sessions' tokens (hook_auth.SESSION_KEY)
 EDIT_TOOLS = ("Edit", "MultiEdit", "Write", "NotebookEdit")
 MEMORY = ("inherit", "on", "off")
@@ -178,6 +179,12 @@ def global_file() -> Path:
 def main_modes_file() -> Path:
     """$THIMBLE_HOME/main-modes.json, which every row that follows main reads its mode from after a restart (modes.py)."""
     return global_file().parent / MAIN_MODES
+
+
+def bypass_file() -> Path:
+    """$THIMBLE_HOME/bypass.json: {"rows": [...], "at": iso}, the rows the analyst chose Bypass for in Settings, which
+    only modes.choose writes (modes.chosen)."""
+    return global_file().parent / BYPASS_JSON
 
 
 def workspace_file(c: str) -> Path:

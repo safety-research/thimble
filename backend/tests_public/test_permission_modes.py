@@ -321,3 +321,50 @@ async def test_the_hook_s_route_answers_for_the_session_its_shim_names(fake):
     other = agent_session.PermissionRequestBody(session="writer:report", tool_name="Bash", tool_input={"command": "ls"})
     assert (await agent_session.hook_request(CORPUS, other))["behavior"] == "deny", \
         "Bypass grants the hosted session's requests, never another session's"
+
+
+def test_bypass_runs_a_job_only_when_the_analyst_chose_it_in_settings(fake, analyst):
+    """Bypass for the dev row's jobs only by the analyst's choice in Settings, which bypass.json records (modes.choose,
+    from the settings PUT, a write only the analyst's browser makes): "bypass" written into thimble's config alone
+    counts as Manual, and a main that reports Bypass gives the rows that follow it Manual."""
+    cwd = str(config.corpus_dir(CORPUS))
+    session.attach(CORPUS, "sid-main", cwd)
+    session.note_mode(CORPUS, "sid-main", "bypassPermissions")
+    assert modes.mode_for(CORPUS, "dev") == "manual", "main in Bypass: the row that follows it runs in Manual"
+    session.note_mode(CORPUS, "sid-main", "auto")
+    assert modes.mode_for(CORPUS, "dev") == "auto"
+    userconf.global_file().parent.mkdir(parents=True, exist_ok=True)
+    userconf.global_file().write_text(json.dumps({"agents": {"dev": {"permissionMode": "bypass"}}}))
+    assert userconf.mode_rows(CORPUS) == {"dev": "bypass"} and modes.chosen() == set()
+    assert modes.mode_for(CORPUS, "dev") == "manual" and modes.rows(CORPUS) == {"dev": "manual"}, \
+        "written into the config by hand: Manual"
+    modes.choose({"dev": "bypass"})
+    assert modes.chosen() == {"dev"} and modes.mode_for(CORPUS, "dev") == "bypass"
+    record = userconf.bypass_file()
+    assert json.loads(record.read_text())["rows"] == ["dev"] and record.stat().st_mode & 0o777 == 0o600
+    modes.choose({"dev": "manual"})
+    assert modes.chosen() == set() and modes.mode_for(CORPUS, "dev") == "manual"
+    modes.choose({"views": "bypass", "writer": "bypass"})
+    assert modes.chosen() == {"dev"}, "an earlier build's row is the dev agent's; a row of no job is no choice"
+    modes.choose({"dev": None})
+    assert modes.chosen() == set()
+    record.unlink()
+    ledger.put_settings_route(CORPUS, analyst, {modes.SETTING: {"dev": "bypass"}})
+    assert json.loads(record.read_text())["rows"] == ["dev"], "the analyst's PUT records the choice"
+    assert modes.mode_for(CORPUS, "dev") == "bypass"
+    ledger.put_settings_route(CORPUS, analyst, {modes.SETTING: {"dev": None}})
+    assert json.loads(record.read_text())["rows"] == [] and modes.mode_for(CORPUS, "dev") == "auto"
+
+
+def test_the_manual_mode_notice_says_how_to_switch_or_who_turned_auto_mode_off(fake, monkeypatch):
+    """The `manual-mode` notice's words (modes.manual_notice), by who turns auto mode off; none outside Manual mode."""
+    monkeypatch.setattr(modes, "auto_off", lambda: "")
+    assert modes.manual_notice("default") == ("Manual mode: Claude Code asks before most commands. In your terminal, press "
+                                              "shift+tab for auto mode, or start with `thimble --permission-mode auto`.")
+    assert modes.manual_notice("auto") == modes.manual_notice("acceptEdits") == modes.manual_notice(None) == ""
+    monkeypatch.setattr(modes, "auto_off", lambda: "org")
+    assert modes.manual_notice("default") == ("Manual mode: Claude Code asks before most commands. Your organization "
+                                              "turned auto mode off.")
+    monkeypatch.setattr(modes, "auto_off", lambda: "settings")
+    assert modes.manual_notice("manual") == ("Manual mode: Claude Code asks before most commands. Your Claude Code "
+                                             "settings turn auto mode off (disableAutoMode).")

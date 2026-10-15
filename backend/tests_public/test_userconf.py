@@ -94,8 +94,8 @@ def test_every_agent_s_network_is_on_by_default_and_settings_shows_it_so(workspa
     and the two fences the settings show say "on"."""
     monkeypatch.setenv("THIMBLE_SANDBOX", "1")
     rows = ledger.agent_rows(CORPUS)
-    assert rows["main"]["network"] == rows["dev"]["network"] == "on"
-    assert rows["main"]["config"] == "agents.orientation" and rows["main"]["sandbox"] == "on"
+    assert rows["dev"]["network"] == "on"
+    assert rows["main"]["config"] == "agents.orientation" and "sandbox" not in rows["main"], "main row has no sandbox key"
     assert not any("network" in rows[r] for r in ("orient", "writer", "critic", "checks")), "they share main's"
     for agent in (*userconf.SUBAGENT_ROLES, *userconf.MODE_ROWS):
         conf = userconf.session(CORPUS, agent, sandbox=True)

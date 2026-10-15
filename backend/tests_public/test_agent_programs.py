@@ -283,8 +283,9 @@ def test_settings_name_each_role_s_agent_and_its_consent_settings(tmp_path, work
     rows = ledger.with_features({}, CORPUS)["agents"]
     assert rows["main"]["additions"] == ["survey"]
     assert rows["orient"]["way"] == "sdk" and rows["orient"]["extension"] == "survey"
-    assert (rows["main"]["network"], rows["main"]["data"], rows["main"]["sandbox"]) == ("on", "off", "on"), \
-        "main's fence, which thimble's agents share: the orientation's keys"
+    assert (rows["main"]["web"], rows["main"]["data"]) == ("ask", "off"), \
+        "thimble's rules for main and its agents: the orientation's keys"
+    assert not {"sandbox", "network"} & set(rows["main"]), "thimble adds no sandbox to main's session"
     assert rows["critic"]["web"] == "off" and "network" not in rows["critic"], "a critic's own fence keys are ignored"
     assert (rows["dev"]["network"], rows["dev"]["sandbox"]) == ("off", "off"), "the code tickets' own fence"
     assert rows["critic"]["way"] == "thimble" and rows["critic"]["config"] == "agents.critic"
