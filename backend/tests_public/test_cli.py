@@ -793,3 +793,36 @@ def test_the_doctor_s_sandbox_line_follows_the_config(monkeypatch):
     assert cli.sandbox_lines() == ["  bash sandbox: off, missing bubblewrap; main runs without thimble's fence and "
                                    "thimble's agents can't start; thimble's config (sandbox.enforce) also refuses to "
                                    "start `thimble fix`"]
+
+
+def test_requests_to_thimble_s_own_server_skip_the_shell_s_proxy(home, monkeypatch):
+    """A shell's HTTP_PROXY with no NO_PROXY for 127.0.0.1 would send urllib's loopback requests to that proxy:
+    `_request` and `healthy` open them without any proxy (config.LOOPBACK), so they still reach the local server."""
+    import http.server
+
+    class Health(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 — http.server's name
+            body = json.dumps({"ok": True}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Health)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        url = f"http://127.0.0.1:{server.server_address[1]}"
+        for name in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"):
+            monkeypatch.setenv(name, "http://127.0.0.1:9")
+        for name in ("NO_PROXY", "no_proxy"):
+            monkeypatch.delenv(name, raising=False)
+        assert urllib.request.getproxies().get("http") == "http://127.0.0.1:9", "the proxy is in effect for urllib"
+        assert cli._request("GET", f"{url}/api/health") == (200, {"ok": True})
+        assert cli.healthy(url) is True
+    finally:
+        server.shutdown()
+        server.server_close()

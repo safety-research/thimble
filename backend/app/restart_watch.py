@@ -18,6 +18,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+# config.LOOPBACK's opener, in the standard library this copy keeps to: the health check skips any proxy the shell sets
+LOOPBACK = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 LOG_LINES = 40  # of the server log kept in rollback.json, which the ticket's chat shows
 
 
@@ -31,7 +33,7 @@ def say(line: str) -> None:
 
 def health(port: int) -> dict[str, Any] | None:
     try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=2.0) as r:
+        with LOOPBACK.open(f"http://127.0.0.1:{port}/api/health", timeout=2.0) as r:
             body = json.loads(r.read() or b"{}")
     except Exception:  # noqa: BLE001
         return None

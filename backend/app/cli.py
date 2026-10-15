@@ -380,7 +380,7 @@ def _server_environ(env: dict[str, Any], p: int, ui: int) -> dict[str, str]:
 
 def healthy(url: str | None = None, timeout: float = HEALTH_TIMEOUT_S) -> bool:
     try:
-        with urllib.request.urlopen(f"{url or api_url()}/api/health", timeout=timeout) as r:
+        with config.LOOPBACK.open(f"{url or api_url()}/api/health", timeout=timeout) as r:
             return r.status == 200 and bool(json.loads(r.read() or b"{}").get("ok"))
     except Exception:  # noqa: BLE001
         return False
@@ -584,7 +584,7 @@ def _request(method: str, url: str, body: dict | None = None, timeout: float = 5
         headers.update(hook_auth.headers(tok, secrets.token_hex(16)))
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with config.LOOPBACK.open(req, timeout=timeout) as r:  # never through the shell's proxy
             raw = r.read()
             status = r.status
     except urllib.error.HTTPError as e:

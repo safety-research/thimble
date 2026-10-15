@@ -76,6 +76,8 @@ CONTENTS_ROOM = 4000  # kept back for contents.txt
 BLOB_CHARS = 2000
 DOCTOR_TIMEOUT_S = 30.0
 HEALTH_TIMEOUT_S = 2.0
+# config.LOOPBACK's opener, kept in the standard library: the health check skips any proxy the shell sets
+LOOPBACK = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 CLAUDE_TIMEOUT_S = 10.0
 ISSUE_TEXT_MAX = 1500  # of the description in the new-issue link, so the URL stays well under what GitHub accepts
 ISSUE_VERSIONS = ("thimble", "Claude Code", "OS")  # the versions.txt lines a new issue carries, each without its path
@@ -228,7 +230,7 @@ def api_url() -> str:
 
 def server_answers(url: str) -> bool:
     try:
-        with urllib.request.urlopen(f"{url}/api/health", timeout=HEALTH_TIMEOUT_S) as r:
+        with LOOPBACK.open(f"{url}/api/health", timeout=HEALTH_TIMEOUT_S) as r:
             return r.status == 200 and bool(json.loads(r.read() or b"{}").get("ok"))
     except Exception:  # noqa: BLE001
         return False

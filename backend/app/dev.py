@@ -98,7 +98,6 @@ import sys
 import tempfile
 import threading
 import time
-import urllib.request
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -1063,7 +1062,7 @@ def _free_port() -> int:
 def _health(url: str, timeout: float = 1.0) -> dict[str, Any] | None:
     """/api/health's body at `url` when it answers ok, else None. Blocking."""
     try:
-        with urllib.request.urlopen(f"{url}/api/health", timeout=timeout) as r:
+        with config.LOOPBACK.open(f"{url}/api/health", timeout=timeout) as r:
             body = json.loads(r.read() or b"{}")
     except Exception:  # noqa: BLE001
         return None

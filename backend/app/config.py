@@ -12,6 +12,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -22,6 +23,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 # new for every start of the server's code, an execv restart and a reload among them: /api/health carries it, so the
 # watch over a restart (restart_watch.py) tells the restarted server from the one before it
 BOOT_ID = os.urandom(4).hex()
+# opens thimble's requests to its own server on 127.0.0.1 without any proxy the shell sets (HTTP_PROXY and the like):
+# urllib would send them to that proxy unless no_proxy names the host
+LOOPBACK = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 def default_data_dir() -> Path:
