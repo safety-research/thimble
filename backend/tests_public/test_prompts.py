@@ -72,6 +72,7 @@ SUBAGENT_HINTS = {
     "critic-brief-file": {"path"},
     "critic-brief-files": {"paths", "n"},
     "critique-work-folder": {"path"},
+    "critique-transcript-window": {"path", "lines", "window"},
     "check-task-file": {"path"},
     "check-task-files": {"paths", "n"},
     "start-refused-no-module": {"reason"},

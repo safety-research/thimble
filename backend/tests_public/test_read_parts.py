@@ -46,3 +46,19 @@ def test_named_names_one_file_or_every_part_in_order(monkeypatch, tmp_path):
     a, b, c = (tmp_path / n for n in ("task.md", "task-2.md", "task-3.md"))
     assert read_parts.named([a], "x-file", "x-files") == f"READ {a}"
     assert read_parts.named([a, b, c], "x-file", "x-files") == f"READ 3: {a}, {b}, {c}"
+
+
+def test_window_is_the_most_lines_one_read_call_returns_whole_from_any_line():
+    """Every run of `window` lines, each with Read's line-number prefix, fits the cap, and one more line does not fit
+    somewhere. Lines of the digest's longest (CALL_CHARS, 1,500) come to under 50 a window, as the 25k-token cap at
+    about 3 characters a token needs; a file that fits whole is all its lines."""
+    lines = [("y" * 1_400 if i % 5 == 0 else "z" * 90) for i in range(2_000)]
+    w = read_parts.window(lines)
+    sizes = [len(x) + 1 + read_parts.LINE_PREFIX_CHARS for x in lines]
+    assert all(sum(sizes[i:i + w]) <= read_parts.PART_CHARS for i in range(len(lines)))
+    assert any(sum(sizes[i:i + w + 1]) > read_parts.PART_CHARS for i in range(len(lines)))
+    dense = read_parts.window(["d" * 1_500] * 500)
+    assert dense == read_parts.PART_CHARS // (1_500 + 1 + read_parts.LINE_PREFIX_CHARS) and dense < 50
+    assert read_parts.window(["short"] * 10) == 10
+    assert read_parts.window(["v" * (2 * read_parts.PART_CHARS), "short"]) == 1, "a line past the cap alone: 1"
+    assert read_parts.window([]) == 1

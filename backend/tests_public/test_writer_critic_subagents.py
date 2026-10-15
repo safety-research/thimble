@@ -304,6 +304,59 @@ def test_the_digest_of_a_subagent_orientation_holds_its_descendants_found_by_par
     assert "another agent's words" not in digest
 
 
+def test_the_digest_wraps_a_long_line_of_an_agent_s_text_so_no_line_passes_call_chars(tmp_path):
+    """A paragraph an agent wrote on one line, a long prompt and a long heading come out as lines of at most CALL_CHARS
+    with every word kept, so a window of lines the brief gives (read_parts.window) holds however the agents wrote."""
+    words = [f"w{i:05d}" for i in range(2_000)]
+    para = " ".join(words)
+    recs = [{"type": "user", "message": {"role": "user", "content": para}},
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": f"Found it.\n{para}\n# {para}"}]}}]
+    path = tmp_path / "agent.jsonl"
+    path.write_text("".join(json.dumps(r) + "\n" for r in recs))
+    out = critique_session.render("Orientation", path)
+    lines = out.split("\n")
+    assert max(len(x) for x in lines) <= critique_session.CALL_CHARS
+    seen = " ".join(x.removeprefix("> ").removeprefix("\\").removeprefix("# ") for x in lines[1:]).split()
+    assert seen == [*words, "Found", "it.", *words, *words], "every word, in order"
+    assert sum(x.startswith("> ") for x in lines) > 1 and not any(x.startswith("#") for x in lines[1:])
+
+
+async def test_a_long_digest_s_brief_gives_a_window_one_read_call_returns_whole(bridge, models, workspaces_tmp,
+                                                                             monkeypatch):
+    """A digest past what one Read call returns is named in the brief with its line count and a window of lines one
+    call returns whole wherever it starts: every run of that many lines, with Read's line-number prefix, is at most
+    read_parts.PART_CHARS characters. A digest that fits is named as before."""
+    from app import orient_session
+
+    async def no_checks(c, chat=None):
+        return None
+
+    monkeypatch.setattr(critique_session, "checks_text", no_checks)
+    real = tools.descriptions
+    hints = {"critique-transcript-window": "TRANSCRIPT {path} LINES {lines} WINDOW {window}",
+             "critique-transcript": "TRANSCRIPT {path} WHOLE"}
+    monkeypatch.setattr(tools, "descriptions", lambda: {**real(), **hints})
+    rows = [f"call:c1/{i} Bash " + "x" * (1_400 if i % 3 == 0 else 120) for i in range(1_200)]
+    monkeypatch.setattr(critique_session, "digest", lambda caller: "\n".join(rows))
+    ans = await orient_session.start(CORPUS, "", route=subagents.CLICK)
+    ctx = type("Ctx", (), {"c": CORPUS, "session": "orient", "tool_use_id": "toolu_cq"})()
+    res = await critique_session.tool_critique(ctx, {"context": "My account."})
+    assert not res.is_error, res.text
+    folder = config.workspace_dir(CORPUS) / "critique" / subagents.agent(CORPUS, ans.agent_id)["chat"]
+    transcript = folder / critique_session.DIGEST_FILE
+    assert len(transcript.read_text()) > 500_000
+    brief = "".join(p.read_text() for p in sorted(folder.glob("brief*.md")))
+    [line] = [x for x in brief.splitlines() if x.startswith("TRANSCRIPT ")]
+    assert line.startswith(f"TRANSCRIPT {transcript} LINES 1,200 WINDOW ")
+    window = int(line.rsplit(" ", 1)[1])
+    sizes = [len(r) + 1 + read_parts.LINE_PREFIX_CHARS for r in transcript.read_text().rstrip("\n").split("\n")]
+    assert 1 < window < len(sizes)
+    assert all(sum(sizes[i:i + window]) <= read_parts.PART_CHARS for i in range(len(sizes))), "safe from any line"
+    assert any(sum(sizes[i:i + window + 1]) > read_parts.PART_CHARS for i in range(len(sizes))), "and no smaller"
+    transcript.write_text("call:c1/1 Bash ls\n")
+    assert critique_session.transcript_line(transcript) == f"TRANSCRIPT {transcript} WHOLE"
+
+
 # --------------------------------------------------------------------------- permission requests
 
 

@@ -9,8 +9,11 @@ subagents' `tmp_*` folders and the large files no card uses are deleted there (w
 
 The transcript. Raw transcripts run to megabytes of JSON and Read cuts lines at 2,000 characters, so the critique
 renders the orientation's agent transcript and its descendants' into one digest, each tool call under its ref in the
-orientation's call store (`call:<chat>/<n>`) with its input and the first lines of its result. The digest is written to
-`<workspace>/critique/<chat>/transcript.md`, where the critic reads it. `chat:<orientation chat>` resolves to the same
+orientation's call store (`call:<chat>/<n>`) with its input and the first lines of its result, and no line longer than
+CALL_CHARS (a long line of an agent's text is wrapped). The digest is written to
+`<workspace>/critique/<chat>/transcript.md`, where the critic reads it; when one Read call cannot return it whole, the
+brief gives how many of its lines one call returns whole wherever it starts (read_parts.window), so the critic pages
+through it with offset and limit and no call trips the Read tool's caps. `chat:<orientation chat>` resolves to the same
 digest, a page at a time.
 
 The brief. `critique` writes the critic's first message to `critique/<chat>/brief.md`: what to review, the drafts, the
@@ -225,6 +228,18 @@ def agent_transcripts(c: str, chat: str, agent_id: str) -> list[tuple[str, Path]
 def _cut(s: str, n: int) -> str:
     return s if len(s) <= n else s[: n - 1].rstrip() + "…"
 
+def _wrap(line: str, width: int = CALL_CHARS - 1) -> list[str]:
+    """A line of an agent's text as lines of at most `width` characters, broken at a space where one falls in the
+    second half of a line and mid-word where none does, every word kept; a quoted line's (`> `) continuations quoted
+    too. One character under CALL_CHARS leaves room for the `\\` that escapes a line starting with `#` (render)."""
+    lead = "> " if line.startswith("> ") else ""
+    out: list[str] = []
+    while len(line) > width:
+        at = line.rfind(" ", width // 2, width) + 1 or width
+        out.append(line[:at].rstrip(" ") or line[:at])
+        line = lead + line[at:]
+    return [*out, line]
+
 def _short_values(v: Any) -> Any:
     if isinstance(v, str):
         return _cut(v, VALUE_CHARS)
@@ -316,7 +331,8 @@ def render(title: str, path: Path, root: str = "", refs: "tuple[str, str] | None
     for kind, value in entries:
         out.append("")
         if kind == "text":  # a heading an agent wrote is escaped, so `# ` begins an agent's part alone
-            out.append("\n".join("\\" + ln if ln.startswith("#") else ln for ln in value.splitlines()))
+            out.append("\n".join("\\" + ln if ln.startswith("#") else ln
+                                 for whole in value.splitlines() for ln in _wrap(whole)))
         else:
             out.append(lines_[value])
             out.extend(results.get(value, []))
@@ -431,10 +447,23 @@ async def checks_text(c: str, chat: str | None = None) -> str | None:
         log.warning("%s: the coverage checks failed (%s)", c, e)
     return None
 
+def transcript_line(path: Path) -> str:
+    """The brief's line that names the digest at `path`: Read opens it, or, when one Read call cannot return it whole,
+    how many lines it has and how many of them one call returns whole wherever it starts (read_parts.window)."""
+    try:
+        lines = path.read_text("utf-8").rstrip("\n").split("\n")
+    except (OSError, UnicodeDecodeError):
+        lines = []
+    window = read_parts.window(lines)
+    if window >= len(lines):
+        return tools.hint("critique-transcript", path=str(path))
+    return tools.hint("critique-transcript-window", path=str(path), lines=f"{len(lines):,}", window=window)
+
+
 def first_message(c: str, transcript: Path | None, context: str, checks: str | None = None) -> str:
     """The critic's first message (its brief), with `checks`, what checks_text found."""
     parts = [tools.hint("critique-task"), *drafts(c),
-             tools.hint("critique-transcript", path=str(transcript)) if transcript else tools.hint("critique-no-transcript")]
+             transcript_line(transcript) if transcript else tools.hint("critique-no-transcript")]
     if context.strip():
         parts.append(tools.hint("critique-context", context=context.strip()))
     if checks is not None:

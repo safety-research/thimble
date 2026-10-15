@@ -4,7 +4,9 @@ Read refuses a file over 256KB and returns at most 25k tokens a call, and dense 
 characters to a token, so a file of about 75k-100k characters fails whole, and an offset/limit window of dense lines can
 fail too. write cuts a text that one call cannot return at line ends (cut) into <name>.md, <name>-2.md… of at most
 PART_CHARS characters each, which the agent's prompt names in order (named): a writer's context (write_session), a
-check's task file (checks) and the critic's brief (critique_session)."""
+check's task file (checks) and the critic's brief (critique_session). window gives how many lines of a file too large
+to read whole one Read call returns whole wherever it starts, for the critic's transcript digest, which stays one file
+that the critic reads in windows and an extension's program gets whole."""
 from __future__ import annotations
 
 import re
@@ -18,6 +20,7 @@ from .ledger import write_under
 # so 60k characters come to about 20k tokens before Read adds a line-number prefix to every line, close to the cap,
 # while 40k come to about 13k. At 4 bytes a character at most, 40k characters are at most 160KB.
 PART_CHARS = 40_000
+LINE_PREFIX_CHARS = 8  # what Read puts before each line it returns, its number and a tab, which a window counts
 
 
 def cut(text: str, limit: int | None = None) -> list[str]:
@@ -72,3 +75,24 @@ def named(written: list[Path], one: str, many: str) -> str:
         return tools.hint(one, path=str(written[0]))
     return tools.hint(many, n=len(written), paths=", ".join(str(p) for p in written))
 
+
+def window(lines: list[str], limit: int | None = None) -> int:
+    """How many of a file's `lines` one Read call returns whole wherever it starts: every run of that many lines, each
+    with Read's line-number prefix (LINE_PREFIX_CHARS), is at most `limit` (PART_CHARS) characters. All of them when the
+    file fits, and at least 1."""
+    limit = PART_CHARS if limit is None else max(1, limit)
+    sizes = [len(x) + 1 + LINE_PREFIX_CHARS for x in lines]
+    n = len(sizes)
+    best, j, total = n, 0, 0
+    for i in range(n):
+        if j < i:
+            j, total = i, 0
+        while j < n and total + sizes[j] <= limit:
+            total += sizes[j]
+            j += 1
+        if j == n:  # a window from here reaches the end, which a shorter read past the end returns whole too
+            break
+        best = min(best, max(1, j - i))
+        if j > i:
+            total -= sizes[i]
+    return max(1, best)
