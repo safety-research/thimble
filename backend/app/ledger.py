@@ -473,7 +473,7 @@ PUT_KEYS = frozenset({*SETTINGS_DEFAULTS, config.MODELS_KEY, "permission_modes",
 
 def web_patch(rows: Any) -> dict[str, Any]:
     """The Settings pane's web switches as a patch of thimble's config: each row's agent `web` "off", or None for back to
-    main's rule. ValueError for a row or a value it does not take; the orientation's web is main's fence's, so it is
+    main's rule. ValueError for a row or a value it does not take; the orientation's web is main's row's, so it is
     not among the rows."""
     if not isinstance(rows, dict):
         raise ValueError("web: a map of rows to \"off\" or null")

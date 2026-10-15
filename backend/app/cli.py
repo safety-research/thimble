@@ -40,8 +40,8 @@ while the server is idle restarts the backend (THIMBLE_NO_AUTORESTART=1 disables
 `config`, `procs`, `cc_plugin`, `launch_mode` and the standard library (others lazily), never `app.notebook`.
 
 Terminal mode (`thimble mode terminal`, launch_mode.py) starts no server: launch-args then registers the folder and
-writes launch.json with `mode: terminal`, the hooks module's roles file and main's fence with the card folders, and the
-launcher loads the renderer plugin (TERMINAL_RENDERER) and opens Claude Code with no first prompt. `server up --hook`
+writes launch.json with `mode: terminal` and the hooks module's roles file, and the launcher loads the renderer plugin
+(TERMINAL_RENDERER) and opens Claude Code with no first prompt. `server up --hook`
 and /thimble start nothing there and print the `thimble-terminal-home` hint (terminal_session). One mode per workspace
 at a time: `thimble`, and a /thimble that opens the browser, refuse while launch.json names a live `claude` of the
 other mode (open_elsewhere).
@@ -262,13 +262,14 @@ def new_token() -> str:
 
 def write_state(state: dict[str, Any]) -> None:
     """server.json, written whole into the private home (ensure_home), with the token the file held when `state` names
-    none, else a new one (hook_auth.py). A `ui_key` of earlier builds is dropped: a browser signs in with a one-time
-    code (ui_url)."""
+    none, else a new one (hook_auth.py). The browser key earlier builds kept here is dropped: a browser signs in with a
+    one-time code (ui_url)."""
     ensure_home()
     held = read_state()
     if not state.get("token"):
         state = {**state, "token": held.get("token") or new_token()}
-    state = {k: v for k, v in state.items() if k != "ui_key"}
+    state = dict(state)
+    state.pop("ui_key", None)
     p = server_json()
     tmp = p.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(state, indent=2) + "\n", "utf-8")
@@ -1983,8 +1984,8 @@ def modules_off(cwd: Path, given: str = "") -> str:
 
 def register_here(cwd: Path) -> str | None:
     """Register the folder `cwd` as a corpus, as a session's /thimble would (open_workspace with `here`: the folder
-    itself, with the path the analyst named it by, caller_alias), so that the fence and launch.json have their workspace
-    before main starts; its name. None for a folder `up` refuses ($HOME or /) or one that cannot be registered."""
+    itself, with the path the analyst named it by, caller_alias), so that launch.json has its workspace before main
+    starts; its name. None for a folder `up` refuses ($HOME or /) or one that cannot be registered."""
     if refused(cwd):
         return None
     told, alias = caller_alias(cwd)
@@ -4248,11 +4249,10 @@ def update_script() -> Path:
     return config.REPO_ROOT / "scripts" / "update.sh"
 
 
-# install.sh's answers to its questions, --plugin and --no-plugin, --no-modify-path and --modify-path, and
-# --require-pinned, which `thimble update` passes on to it through update.sh; --trust-workspaces and
-# --no-trust-workspaces, 0.5.0's, are passed on too for this release, and install.sh ignores them with a line that says so
+# the flags `thimble update` passes on to install.sh through update.sh: for 0.8.x install.sh ignores all but --no-plugin
+# and --require-pinned, with a line that says so (0.7's sandbox, plugin and startup-file flags)
 INSTALL_FLAGS = ("--sandbox-deps", "--no-sandbox-deps", "--plugin", "--no-plugin", "--no-modify-path", "--modify-path",
-                 "--trust-workspaces", "--no-trust-workspaces", "--require-pinned")
+                 "--require-pinned")
 
 
 def _gh_ok(gh: str, *args: str) -> bool:
