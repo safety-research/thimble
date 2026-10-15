@@ -14,16 +14,21 @@ import { ACTIVATE_WAIT_MS, PRIVATE_FALLBACK, RETRY_MS, hmac, register } from './
 
 type Json = Record<string, any>
 
-type MockFn<F extends (...args: any[]) => any> = F & { mock: { calls: Parameters<F>[] }; mockImplementation: (impl: F) => MockFn<F> }
+type MockFn<F extends (...args: any[]) => any> = F & {
+  mock: { calls: Parameters<F>[] }
+  mockImplementation: (impl: F) => MockFn<F>
+  mockClear: () => MockFn<F>
+}
 
 /** A mock function, as vitest's vi.fn: it runs `impl`, or the one mockImplementation gave it later, on each call and
- *  keeps the call's arguments in `mock.calls`. */
+ *  keeps the call's arguments in `mock.calls`, which mockClear empties. */
 function fn<F extends (...args: any[]) => any>(impl: F): MockFn<F> {
   const calls: Parameters<F>[] = []
   let run = impl
   const spy = Object.assign((...args: Parameters<F>) => { calls.push(args); return run(...args) }, {
     mock: { calls },
     mockImplementation: (next: F) => { run = next; return spy },
+    mockClear: () => { calls.length = 0; return spy },
   }) as unknown as MockFn<F>
   return spy
 }
