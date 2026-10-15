@@ -16,25 +16,18 @@ https://github.com/user-attachments/assets/e8b0c9d8-1bc0-4ccb-a5ac-4c311cea02d4
 
 ### With Claude (recommended)
 
-    claude "install thimble from https://github.com/safety-research/thimble"
+```
+claude "install thimble from https://github.com/safety-research/thimble"
+```
+Instructions for agents installing thimble on the user's behalf are in [CLAUDE.md](CLAUDE.md).
 
-Claude installs thimble for you, following the Installing section of [CLAUDE.md](CLAUDE.md). It asks you only the
-questions the installer lists, often none.
-
-### With the installer
+### Manual installation
 
 1. Download the zip from the [latest release](https://github.com/safety-research/thimble/releases/latest).
 2. Unzip it.
 3. Run `bash scripts/install.sh` inside the unzipped folder.
 
-For a development build, clone the repo and run `bash scripts/install.sh`. The installer adds thimble's plugin to
-Claude Code with Claude Code's own plugin commands, and the `thimble` command to `~/.local/bin`. It runs no sudo and adds
-no permission rules or sandbox to your Claude Code setup.
-
-### By hand
-
-[INSTALL.md, Manual install](INSTALL.md#manual-install) lists each step. A few things work differently there, and
-INSTALL.md says which.
+For a development build, clone the repo and run `bash scripts/install.sh`. See [INSTALL.md](INSTALL.md) for detailed installation instructions.
 
 ## Usage
 
@@ -84,11 +77,11 @@ To switch a directory to terminal mode, run `thimble mode terminal` in it, then 
 
 ## Requirements
 
-Claude Code (tested with 2.1.300), with its hooks modules on, macOS or Linux, and Python 3.12+ ([uv](https://docs.astral.sh/uv/) recommended). Node 20+ is needed for custom views (the viewers the dev agent builds for your data), for the sandbox card code and code tickets run in, and for a development build. [INSTALL.md](INSTALL.md) has the details. On Linux, card code runs in a sandbox where bubblewrap can create one (`thimble doctor` says whether it does).
+Claude Code (tested with 2.1.300), with its hooks modules on, macOS or Linux, and Python 3.12+ ([uv](https://docs.astral.sh/uv/) recommended). Node 20+ is needed for custom views (the viewers the dev agent builds for your data), for the sandbox card code and code tickets run in, and for a development build. 
 
 ## Security & Privacy
 
-thimble is a research prototype. Please report any security issues privately to [@mjoerke](https://github.com/mjoerke). thimble runs on top of Claude Code: it does not collect any data of its own and all authentication and billing is managed by `claude`. It adds no sandbox or permission rules to your Claude Code session. Its local server answers only on this computer, and only to a browser signed in with thimble's link or to thimble's own programs.
+thimble is a research prototype. Please report any security issues privately to [@mjoerke](https://github.com/mjoerke). thimble runs on top of Claude Code: it does not collect any data of its own and all authentication and billing is managed by `claude`.
 
 ## License
 
