@@ -204,7 +204,9 @@ def test_thimble_port_taken_gets_todays_answer_and_without_it_the_port_is_passed
                                                                           else ours(u, timeout)))
         monkeypatch.setattr(cli, "foreign_home", lambda u=None: ("/other/home" if (u or cli.api_url()) == url
                                                                  and theirs["healthy"] else None))
-        foreign = cli.FOREIGN_LINE.format(port=p, other="/other/home")
+        foreign = cli.FOREIGN_LINE.format(port=p)
+        assert foreign == (f"thimble: port {p} (set by THIMBLE_PORT) is in use by another program. Set THIMBLE_PORT "
+                           "to a free port, or unset it and thimble picks one.")
 
         monkeypatch.setenv("THIMBLE_PORT", str(p))
         assert cli.main(["up", "--cwd", str(data / "mini")]) == 0
@@ -304,7 +306,7 @@ def test_two_thimble_homes_side_by_side_each_start_and_find_their_own_server(tmp
         st_b = json.loads((homes["b"] / "server.json").read_text())
         ports.append(st_b["port"])
         assert st_b["port"] != shared and second[0] == f"thimble: http://127.0.0.1:{st_b['port']}/?ws=mini", second
-        assert not any("another install" in ln for ln in second), "no FOREIGN_LINE without THIMBLE_PORT"
+        assert not any("(set by THIMBLE_PORT)" in ln for ln in second), "no FOREIGN_LINE without THIMBLE_PORT"
         assert st_a["pid"] != st_b["pid"] and cli.pid_alive(st_a["pid"]) and cli.pid_alive(st_b["pid"])
         for name, st in (("a", st_a), ("b", st_b)):
             health = _health(homes[name])

@@ -122,7 +122,7 @@ def test_server_for_launch_starts_and_waits_for_the_server_and_never_stops_the_l
     monkeypatch.setattr(cli, "ensure_running", broken)
     assert SERVER_FOR_LAUNCH("logs") == []
     monkeypatch.setattr(cli, "foreign_home", lambda url=None: "/other/home")
-    assert SERVER_FOR_LAUNCH("logs") == [cli.FOREIGN_LINE.format(port=cli.port(), other="/other/home")]
+    assert SERVER_FOR_LAUNCH("logs") == [cli.FOREIGN_LINE.format(port=cli.port())]
 
 
 def test_launch_json_names_the_launchers_pid_where_kernels_and_file_tools_cannot_change_it(corpus):
