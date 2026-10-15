@@ -77,3 +77,31 @@ export function docSave(kind: string, ref: string | undefined | null, text: stri
   if (n == null) return { verb: text === 'wrote' ? 'wrote' : 'revised' }
   return { verb: n <= 1 ? 'wrote' : 'revised', generation: n }
 }
+
+/** The fields of a chip row that say which document save it is. */
+export interface SaveChip {
+  chip: string
+  text: string
+  ref?: string
+  generation?: number
+  writer?: string
+  chat?: string
+}
+
+/** The document a save chip is on, '' for a chip that is no document save. Pure. */
+function savedDoc(c: SaveChip): string {
+  if (!docSave(c.chip, c.ref, c.text, c.generation)) return ''
+  const p = parseRef(c.ref!)
+  return p?.kind === 'report' ? p.slug : ''
+}
+
+/**
+ * Whether chip `b` is a later save of the document chip `a` saved, by the same run: both are document saves (docSave)
+ * of one document, from one writer's chat. A writer's saves and edits of its document then read as one row, the
+ * latest (Rows.shownRows). A save that names no writer is no run's, so it stays a row of its own. Pure.
+ */
+export function sameDocRun(a: SaveChip, b: SaveChip): boolean {
+  if (a.chat || b.chat || !a.writer || a.writer !== b.writer) return false
+  const doc = savedDoc(a)
+  return !!doc && doc === savedDoc(b)
+}

@@ -23,7 +23,7 @@ import { callRef, parseRef } from '../lib/refs'
 import { CITED } from '../lib/tableCell'
 import { teleport } from '../lib/teleport'
 import { track } from '../lib/telemetry'
-import { chipIcon, chipPending, docSave, settleChip, settledWord, type Settled } from './chips'
+import { chipIcon, chipPending, docSave, sameDocRun, settleChip, settledWord, type Settled } from './chips'
 import { ChatMarkdown, ChipContext, RefText } from './markdown'
 import { API_ERROR_KIND, callLineText, callPieces, capacityNote, corpusRelative, durationText, groupState, groupTools, isRawCall, labelRunName, leadText, madeBy, QUIET_RE, runTools, stripHarness, toolDisplayName, toolMeta, toolSteps, toolSummary, underCorpus, type AgentRow as AgentRowT, type BranchRow, type CallsRow, type ChipRow as ChipRowT, type ErrorRow as ErrorRowT, type Row, type ToolGroup, type ToolRow as ToolRowT, waitText } from './model'
 import { Note, ShotCard, ThreadChip, ThreadsContext } from './Notes'
@@ -66,8 +66,8 @@ export type ShownRow = Exclude<Row, ToolRowT> | ToolGroup | CallsRow | BranchRow
 const isLabelRun = (r: { kind: string; role?: string }): r is AgentRowT => r.kind === 'agent' && r.role === 'labels'
 
 /** The rows as the transcript shows them: consecutive raw calls (model.isRawCall) as one run of chip lines, other calls
- * of one kind folded into one card, consecutive view chips into one note (duplicates dropped), and consecutive label
- * runs into one card. A view build's capacity wait joins the error row before it. A line saying the session shows no
+ * of one kind folded into one card, consecutive view chips into one note (duplicates dropped), consecutive saves of one
+ * document by one writer as one row, the latest (chips.sameDocRun), and consecutive label runs into one card. A view build's capacity wait joins the error row before it. A line saying the session shows no
  * activity holds only until the next row. With `each`, every call is a chip line of its own. Pure. */
 export function shownRows(rows: readonly (Row | BranchRow)[], each = false): ShownRow[] {
   const out: ShownRow[] = []
@@ -86,6 +86,14 @@ export function shownRows(rows: readonly (Row | BranchRow)[], each = false): Sho
       if (last && last.kind === 'calls') last.tools.push(...r.tools)
       else out.push({ kind: 'calls', index: r.index, tools: [...r.tools] })
       continue
+    }
+    if (r.kind === 'chip') {
+      // a run's saves of one document in a row are one row, the latest
+      const last = out[out.length - 1]
+      if (last?.kind === 'chip' && sameDocRun(last, r)) {
+        out[out.length - 1] = r
+        continue
+      }
     }
     if (r.kind === 'chip' && r.chip === 'view') {
       const key = r.ref || r.text
