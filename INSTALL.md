@@ -91,7 +91,7 @@ What protects what:
 | | thimble, always | Claude Code's sandbox (optional) | Your permission mode |
 |---|---|---|---|
 | thimble's token files | Claude's file tools can't read or edit them | Shell commands can't read or write them | A shell command that reads them asks (Manual) or is judged (auto) |
-| Reading or acting as you in the browser | Needs this browser's sign-in; a link's code works once, for 5 minutes; each new sign-in shows a line in your terminal | Shell commands can't make a sign-in | Shell commands that try follow your mode |
+| Reading or acting as you in the browser | Needs this browser's sign-in, which the browser sends to thimble alone; a link's code works once, for 5 minutes; each new sign-in shows a line in your terminal | Shell commands can't make a sign-in | Shell commands that try follow your mode |
 | The folder you opened | File-tool edits refused when `data` is `"off"` | Shell commands can still write it | Edits ask (Manual), are judged (auto) or run (Bypass) |
 | thimble's own jobs | Never in Bypass unless you choose it in Settings | — | Follow your session's mode, Bypass as Manual |
 | Code tickets and view builds | You approve each change before it reaches thimble's code | Their shell commands are contained like yours | Your session's mode, Bypass included |
@@ -129,6 +129,13 @@ is shown; opening it in a browser that is signed in already changes nothing. A b
 only a line that says so and says to open the link. For a new link, run `thimble up` in a shell. thimble's server
 answers only on this computer, and only to a signed-in browser or to thimble's own programs, since another account on
 the same computer can reach thimble's port too.
+
+The sign-in is a cookie that the browser sends to thimble and to no other program. A browser sends a cookie for
+127.0.0.1 or localhost to every server on that address, whatever its port, so thimble's cookie is scoped to a path that
+holds a random key, which only thimble's page in this browser knows. A web page that another program on this computer
+serves, such as a project's development server, never gets the cookie. If this browser loses the page's stored data
+(you clear the site's data, use a private window, or the browser removes data it has not used for some days), the page
+shows the sign-in line again: open the link /thimble shows, or run `thimble up`, to sign in again.
 
 Each new sign-in prints a line in your terminal under Claude's next reply, and shows a notice in thimble with
 **Sign it out**. If a sign-in was not you, click Sign it out, or run `thimble unpair` in a shell, which signs out every

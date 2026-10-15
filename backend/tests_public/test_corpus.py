@@ -120,7 +120,7 @@ def test_register_route_lists_and_serves_a_directory_without_a_manifest(data_tmp
 def test_a_file_read_counts_as_the_analysts_view_only_with_the_analysts_cookie(monkeypatch):
     """The view log (viewlog), which the telemetry export merges, records the browser's reads of a file. Card code
     reads through the same routes without the analyst's cookie (hook_auth.analyst), so its reads are not recorded."""
-    from conftest import UI_COOKIE_VALUE, _record_paired
+    from conftest import UI_COOKIE_VALUE, UI_KEY_VALUE, _record_paired
 
     from app import hook_auth, viewlog
 
@@ -131,6 +131,9 @@ def test_a_file_read_counts_as_the_analysts_view_only_with_the_analysts_cookie(m
     assert viewlog.rows("mini") == []
     c.cookies.set(hook_auth.ui_cookie(), UI_COOKIE_VALUE)
     assert c.get("/api/corpora/mini/source", params={"path": "agents/agent-01.jsonl"}).status_code == 200
+    assert viewlog.rows("mini") == [], "the cookie counts only under its browser's path"
+    page = f"/b/{UI_KEY_VALUE}"  # where the page asks (hook_auth.browser_path)
+    assert c.get(f"{page}/api/corpora/mini/source", params={"path": "agents/agent-01.jsonl"}).status_code == 200
     assert [(r["actor"], r["path"]) for r in viewlog.rows("mini")] == [("analyst", "agents/agent-01.jsonl")]
 
 

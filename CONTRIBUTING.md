@@ -71,6 +71,11 @@ THIMBLE_HOME and walks the UI in headless Chromium on a copy of a synthetic corp
 of each step (`--help` lists its options). It uses your own Claude login for its one model call, a one-turn `claude -p`,
 and it leaves your Claude Code settings and your `thimble` command as they were.
 
+`node scripts/e2e/cookie_path.mjs` checks, in Chromium, Firefox and WebKit, that the browser's sign-in reaches thimble
+and no other server on 127.0.0.1 or localhost: it starts this checkout's server with the built UI in a temporary home,
+signs a browser in with a link, and opens another server's page that asks for thimble's API paths. It needs
+`frontend/dist` and Playwright's three browsers (`cd frontend && npx playwright install chromium firefox webkit`).
+
 ## Layout
 
 | what | where |

@@ -57,8 +57,11 @@ import type {
 import { bus } from './bus'
 import { heavy } from './limit'
 import { clearCodeGone, setBrowserId, showCodeGone } from './notices'
+import { apiBase, setBrowserKey } from './browserKey'
 
-const BASE = '/api'
+// Every path below starts with apiBase(): `/b/<key>/api` once this browser holds its key, which the server scopes the
+// browser's cookie to (lib/browserKey), else `/api`. It is read at each request, so a key a later sign-in gives (in
+// this tab or another) is used at once.
 
 /** FastAPI `detail` as one line: a string, pydantic's `{loc, msg}` list, or an object with a message. */
 export function describeDetail(d: unknown): string {
@@ -94,8 +97,10 @@ function setHash(params: URLSearchParams): void {
 
 /** Sign this browser in with the one-time code in the link thimble showed (`#p=`, made as the link is shown: backend
  * hook_auth.mint), which the server trades for the cookie that every read of the server's data and every analyst
- * action needs (backend hook_auth), and take the code out of the address once the server has answered. 204: signed
- * in, or signed in already. 410 (or any other refusal): the code was used, replaced by a newer one, or expired, which
+ * action needs (backend hook_auth), and take the code out of the address once the server has answered. 200 {key}:
+ * signed in, with the key of the path the cookie is scoped to, which the page keeps (lib/browserKey) and sends every
+ * later request under. 204: signed in already (the claim went under this browser's path with its cookie), so the key
+ * it holds stands. 410 (or any other refusal): the code was used, replaced by a newer one, or expired, which
  * shell/SignIn's line and a notice this page makes say (claimRefused, lib/notices showCodeGone; a later sign-in takes
  * the notice away). The key an earlier version's link carried (`k` in the hash)
  * is taken out of the address and never sent. After the claim the page asks which browser it is (GET /ui/paired), so
@@ -122,16 +127,24 @@ async function claim(code: string): Promise<boolean> {
   for (const wait of CLAIM_WAITS_MS) {
     if (wait) await new Promise((r) => setTimeout(r, wait))
     try {
-      const res = await fetch(`${BASE}/ui/key`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(ws ? { code, ws } : { code }) })
-      // 204 signed in, 410 (or any refusal) a code that is gone: neither changes on another try
-      if (res.status === 204 || (res.status >= 400 && res.status < 500)) {
+      const res = await fetch(`${apiBase()}/ui/key`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(ws ? { code, ws } : { code }) })
+      // 200 or 204 signed in, 410 (or any refusal) a code that is gone: neither changes on another try
+      const signed = res.status === 200 || res.status === 204
+      if (signed || (res.status >= 400 && res.status < 500)) {
+        if (res.status === 200) {
+          try {
+            setBrowserKey(((await res.json()) as { key?: unknown } | null)?.key)
+          } catch {
+            /* no key in the answer: the page goes on without one, and shows the sign-in line */
+          }
+        }
         const now = hashParams()
         if (now.get('p') === code) {
           now.delete('p')
           setHash(now)
         }
         codeGone = res.status === 410
-        if (res.status !== 204) showCodeGone()
+        if (!signed) showCodeGone()
         else clearCodeGone()
         return true
       }
@@ -169,7 +182,7 @@ export async function signedIn(again = false): Promise<boolean | null> {
   if (!got) return null
   if (got.paired === true) return true
   try {
-    return (await fetch(`${BASE}/tour`)).status !== 401
+    return (await fetch(`${apiBase()}/tour`)).status !== 401
   } catch {
     return null
   }
@@ -264,7 +277,7 @@ export function takeLines(text: string, last = false): { lines: string[]; rest: 
 }
 
 const enc = encodeURIComponent
-const ws = (c: string) => `${BASE}/ws/${enc(c)}`
+const ws = (c: string) => `${apiBase()}/ws/${enc(c)}`
 const inv = (c: string, slug: string) => `${ws(c)}/investigations/main/types/${enc(slug)}`
 
 /** How a message stream ended: `ended` when the last record was the turn's `done`, `failed` on a rejected request. */
@@ -278,46 +291,46 @@ export interface EventPosted {
 
 export const api = {
   // ---- the product tour's first-launch state, one for the install (backend tour.py) ----
-  tour: () => j<{ seen: boolean }>(`${BASE}/tour`),
-  tourSeen: () => j<{ seen: boolean }>(`${BASE}/tour/seen`, { method: 'POST' }),
+  tour: () => j<{ seen: boolean }>(`${apiBase()}/tour`),
+  tourSeen: () => j<{ seen: boolean }>(`${apiBase()}/tour/seen`, { method: 'POST' }),
   // ---- corpora and files ----
-  corpora: () => j<CorpusInfo[]>(`${BASE}/corpora`),
+  corpora: () => j<CorpusInfo[]>(`${apiBase()}/corpora`),
   /** `GET /workspaces`: every workspace this server knows, as the start page lists them (backend start_page.py). */
-  workspaces: () => j<WorkspaceRow[]>(`${BASE}/workspaces`),
-  sources: (c: string) => j<SourceInfo[]>(`${BASE}/corpora/${enc(c)}/sources`),
-  source: (c: string, path: string, start = 1, count = 100) => j<SourcePage>(`${BASE}/corpora/${enc(c)}/source${q({ path, start, count })}`),
+  workspaces: () => j<WorkspaceRow[]>(`${apiBase()}/workspaces`),
+  sources: (c: string) => j<SourceInfo[]>(`${apiBase()}/corpora/${enc(c)}/sources`),
+  source: (c: string, path: string, start = 1, count = 100) => j<SourcePage>(`${apiBase()}/corpora/${enc(c)}/source${q({ path, start, count })}`),
   /** `clamp`: a line past the end answers with the file's last lines, not a 404 (a move made while the count is an estimate) */
   sourceAround: (c: string, path: string, line: number, before = 50, after = 50, clamp = false) =>
-    j<SourcePage>(`${BASE}/corpora/${enc(c)}/source/around${q({ path, line, before, after, clamp: clamp ? 1 : undefined })}`),
+    j<SourcePage>(`${apiBase()}/corpora/${enc(c)}/source/around${q({ path, line, before, after, clamp: clamp ? 1 : undefined })}`),
   /** `GET /corpora/{c}/source/lines`: a file's line count, an estimate while a big file's line index is being built. */
-  sourceLines: (c: string, path: string) => j<SourceLines>(`${BASE}/corpora/${enc(c)}/source/lines${q({ path })}`),
+  sourceLines: (c: string, path: string) => j<SourceLines>(`${apiBase()}/corpora/${enc(c)}/source/lines${q({ path })}`),
   /** `GET /corpora/{c}/source/turns`: `count` turns of a JSON transcript from turn `start`, or around `line`; with
    * `span`, a span of that line (block and UTF-16 offsets), around the turn holding the words it quotes. */
   sourceTurns: (c: string, path: string, start = 0, count = 200, line?: number, span?: { block: number; start: number; end: number }) =>
-    j<SourceTurns>(`${BASE}/corpora/${enc(c)}/source/turns${q({ path, start, count, line, block: span?.block, char_start: span?.start, char_end: span?.end })}`),
+    j<SourceTurns>(`${apiBase()}/corpora/${enc(c)}/source/turns${q({ path, start, count, line, block: span?.block, char_start: span?.start, char_end: span?.end })}`),
   /** `GET /corpora/{c}/source/speakers`: the names the corpus gives speaker ids (`ids`, joined by commas) that a file
    * keeps under `key` (an agents.jsonl beside it, whose records carry an id and a name). */
-  speakerNames: (c: string, path: string, key: string, ids: string) => j<{ names: Record<string, string> }>(`${BASE}/corpora/${enc(c)}/source/speakers${q({ path, key, ids })}`),
+  speakerNames: (c: string, path: string, key: string, ids: string) => j<{ names: Record<string, string> }>(`${apiBase()}/corpora/${enc(c)}/source/speakers${q({ path, key, ids })}`),
   /** the keys of the file's records that name a kind or a who, over the whole file (backend source_keys.py) */
-  sourceKeys: (c: string, path: string, bins?: number) => j<SourceKeys>(`${BASE}/corpora/${enc(c)}/source/keys${q({ path, bins })}`),
+  sourceKeys: (c: string, path: string, bins?: number) => j<SourceKeys>(`${apiBase()}/corpora/${enc(c)}/source/keys${q({ path, bins })}`),
   /** the file's records with a time, in time order, for the Timeline mode (backend source_events.py) */
-  sourceEvents: (c: string, path: string) => j<SourceEvents>(`${BASE}/corpora/${enc(c)}/source/events${q({ path })}`),
+  sourceEvents: (c: string, path: string) => j<SourceEvents>(`${apiBase()}/corpora/${enc(c)}/source/events${q({ path })}`),
   /** the Timeline mode's page as its sandboxed frame loads it: the view kit over files_timeline.html */
   timelinePage: async (c: string): Promise<string> => {
-    const res = await fetch(`${BASE}/corpora/${enc(c)}/source/timeline`)
+    const res = await fetch(`${apiBase()}/corpora/${enc(c)}/source/timeline`)
     if (!res.ok) throw await failed(res)
     return res.text()
   },
   /** The URL a PDF of the corpus opens from in the browser's viewer, at `page` when given. */
-  pdfUrl: (c: string, path: string, page?: number | null) => `${BASE}/corpora/${enc(c)}/pdf/${path.split('/').map(enc).join('/')}${page ? `#page=${page}` : ''}`,
+  pdfUrl: (c: string, path: string, page?: number | null) => `${apiBase()}/corpora/${enc(c)}/pdf/${path.split('/').map(enc).join('/')}${page ? `#page=${page}` : ''}`,
   /** `GET /corpora/{c}/download/<path>`: the file as it is on disk, an attachment under its own name (the File browser's
    * Download). */
-  downloadUrl: (c: string, path: string) => `${BASE}/corpora/${enc(c)}/download/${path.split('/').map(enc).join('/')}`,
+  downloadUrl: (c: string, path: string) => `${apiBase()}/corpora/${enc(c)}/download/${path.split('/').map(enc).join('/')}`,
   /** `GET /corpora/{c}/source/find`: the lines of one file past `after` that hold `text`, searched on the server. */
   findInSource: (c: string, path: string, text: string, after = 0, signal?: AbortSignal) =>
-    j<SourceFind>(`${BASE}/corpora/${enc(c)}/source/find${q({ path, q: text, after: after || undefined })}`, { signal }),
+    j<SourceFind>(`${apiBase()}/corpora/${enc(c)}/source/find${q({ path, q: text, after: after || undefined })}`, { signal }),
   /** `GET /corpora/{c}/sources/find`: the files whose path holds every word of `text`, best first. */
-  findFiles: (c: string, text: string, signal?: AbortSignal) => j<FileFind>(`${BASE}/corpora/${enc(c)}/sources/find${q({ q: text })}`, { signal }),
+  findFiles: (c: string, text: string, signal?: AbortSignal) => j<FileFind>(`${apiBase()}/corpora/${enc(c)}/sources/find${q({ q: text })}`, { signal }),
   /** `GET /corpora/{c}/sources/grep`: the files whose text holds `text`, each handed to `onFile` as the server finds it,
    * how many files it has read to `onProgress`, then the closing line to `onDone`. `onSearch` hears the search's id,
    * which stopGrep takes, as the stream opens. Resolves when the stream ends; rejects on a refusal or an abort. */
@@ -330,7 +343,7 @@ export const api = {
     onProgress?: (p: GrepProgress) => void,
     onSearch?: (id: number) => void,
   ): Promise<void> => {
-    const res = await fetch(`${BASE}/corpora/${enc(c)}/sources/grep${q({ q: text })}`, { signal })
+    const res = await fetch(`${apiBase()}/corpora/${enc(c)}/sources/grep${q({ q: text })}`, { signal })
     if (!res.ok || !res.body) {
       await signInNeeded(res)
       let detail = res.statusText
@@ -363,16 +376,16 @@ export const api = {
   /** `POST /corpora/{c}/sources/grep/stop`: stop the content search `search` (grepFiles' onSearch); its stream then
    * ends with its closing line. */
   stopGrep: (c: string, search: number) =>
-    j<{ stopped: boolean }>(`${BASE}/corpora/${enc(c)}/sources/grep/stop`, { method: 'POST', body: JSON.stringify({ search }) }),
-  forgeTables: (c: string, path: string) => j<{ name: string; row_count: number }[]>(`${BASE}/corpora/${enc(c)}/forge/tables${q({ path })}`),
+    j<{ stopped: boolean }>(`${apiBase()}/corpora/${enc(c)}/sources/grep/stop`, { method: 'POST', body: JSON.stringify({ search }) }),
+  forgeTables: (c: string, path: string) => j<{ name: string; row_count: number }[]>(`${apiBase()}/corpora/${enc(c)}/forge/tables${q({ path })}`),
   forgeRows: (c: string, path: string, table: string, offset = 0, limit = 100, order?: string, where?: string) =>
-    j<{ table: string; columns: string[]; rows: any[][]; pk: string; total: number }>(`${BASE}/corpora/${enc(c)}/forge/rows${q({ path, table, offset, limit, order, where })}`),
+    j<{ table: string; columns: string[]; rows: any[][]; pk: string; total: number }>(`${apiBase()}/corpora/${enc(c)}/forge/rows${q({ path, table, offset, limit, order, where })}`),
   forgeQuery: (c: string, path: string, sql: string) =>
-    j<{ columns: string[]; rows: any[][]; truncated: boolean }>(`${BASE}/corpora/${enc(c)}/forge/query${q({ path })}`, { method: 'POST', body: JSON.stringify({ sql }) }),
-  resolveRef: (c: string, ref: string) => j<ResolvedRef>(`${BASE}/corpora/${enc(c)}/ref${q({ ref })}`),
+    j<{ columns: string[]; rows: any[][]; truncated: boolean }>(`${apiBase()}/corpora/${enc(c)}/forge/query${q({ path })}`, { method: 'POST', body: JSON.stringify({ sql }) }),
+  resolveRef: (c: string, ref: string) => j<ResolvedRef>(`${apiBase()}/corpora/${enc(c)}/ref${q({ ref })}`),
   /** `GET /corpora/{c}/csv-rows?path=&lines=a-b`: the rows of a CSV or TSV file that start on lines a..b, [line, n] each,
    * n the number a row is cited by (`<path>#row=<n>`). */
-  csvRows: (c: string, path: string, a: number, b: number) => j<{ rows: [number, number][] }>(`${BASE}/corpora/${enc(c)}/csv-rows${q({ path, lines: `${a}-${b}` })}`),
+  csvRows: (c: string, path: string, a: number, b: number) => j<{ rows: [number, number][] }>(`${apiBase()}/corpora/${enc(c)}/csv-rows${q({ path, lines: `${a}-${b}` })}`),
 
   // ---- chats ----
   chats: (c: string) => j<ChatMeta[]>(`${ws(c)}/chats`),
@@ -510,10 +523,10 @@ export const api = {
   dismissNotice: (c: string, id: string) => j<{ dismissed: boolean }>(`${ws(c)}/notices/${enc(id)}/dismiss`, { method: 'POST' }),
   /** Whether this browser is signed in, and its id: the first 12 hex digits of its cookie's hash, '' when not signed in
    * (backend main.ui_paired). */
-  paired: () => j<{ paired: boolean; id: string }>(`${BASE}/ui/paired`),
+  paired: () => j<{ paired: boolean; id: string }>(`${apiBase()}/ui/paired`),
   /** A sign-in notice's Sign it out: the server signs the browser `id` out and clears its notice in workspace `c`
    * (backend main.ui_signout). */
-  signOut: (id: string, c?: string) => j<{ signed_out: boolean }>(`${BASE}/ui/signout`, { method: 'POST', body: JSON.stringify(c ? { id, ws: c } : { id }) }),
+  signOut: (id: string, c?: string) => j<{ signed_out: boolean }>(`${apiBase()}/ui/signout`, { method: 'POST', body: JSON.stringify(c ? { id, ws: c } : { id }) }),
   retryProposal: (c: string, slug: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/retry`, { method: 'POST' }),
   /** Build or Retry on a proposal's chip (`POST /ws/{c}/views/{slug}/build`): a click that starts a view builder through
    * thimble's plugin, with the run's model and effort (Settings' dev row when left out). */
@@ -620,19 +633,19 @@ export const api = {
     }),
 
   // ---- tickets ----
-  tickets: (workspace: string) => j<Ticket[]>(`${BASE}/dev/tickets${q({ workspace })}`),
-  ticket: (id: string) => j<Ticket>(`${BASE}/dev/tickets/${enc(id)}`),
+  tickets: (workspace: string) => j<Ticket[]>(`${apiBase()}/dev/tickets${q({ workspace })}`),
+  ticket: (id: string) => j<Ticket>(`${apiBase()}/dev/tickets/${enc(id)}`),
   /** the address of a ticket's before or after shot (`GET /dev/tickets/{id}/shots/{name}`), for an <img> */
-  ticketShotUrl: (id: string, name: string) => `${BASE}/dev/tickets/${enc(id)}/shots/${enc(name)}`,
-  fileTicket: (body: NewTicketBody) => j<Ticket>(`${BASE}/dev/tickets`, { method: 'POST', body: JSON.stringify(body) }),
-  retryTicket: (id: string) => j<Ticket>(`${BASE}/dev/tickets/${enc(id)}/retry`, { method: 'POST' }),
+  ticketShotUrl: (id: string, name: string) => `${apiBase()}/dev/tickets/${enc(id)}/shots/${enc(name)}`,
+  fileTicket: (body: NewTicketBody) => j<Ticket>(`${apiBase()}/dev/tickets`, { method: 'POST', body: JSON.stringify(body) }),
+  retryTicket: (id: string) => j<Ticket>(`${apiBase()}/dev/tickets/${enc(id)}/retry`, { method: 'POST' }),
   /** Start on main's ticket that waited while another ran: it starts through the plugin module once nothing else runs */
-  startTicket: (id: string) => j<Ticket>(`${BASE}/dev/tickets/${enc(id)}/start`, { method: 'POST' }),
+  startTicket: (id: string) => j<Ticket>(`${apiBase()}/dev/tickets/${enc(id)}/start`, { method: 'POST' }),
   /** whether code tickets run here (`tickets` is '' in a development install), for Report a problem's File a code ticket */
-  devStatus: () => j<DevStatus>(`${BASE}/dev/status`),
-  dismissTicket: (id: string) => j<Ticket>(`${BASE}/dev/tickets/${enc(id)}/dismiss`, { method: 'POST' }),
+  devStatus: () => j<DevStatus>(`${apiBase()}/dev/status`),
+  dismissTicket: (id: string) => j<Ticket>(`${apiBase()}/dev/tickets/${enc(id)}/dismiss`, { method: 'POST' }),
   /** stop a running ticket: nothing is applied and it ends `stopped`, which Retry runs again */
-  stopTicket: (id: string) => j<{ ok: boolean }>(`${BASE}/dev/tickets/${enc(id)}/stop`, { method: 'POST' }),
+  stopTicket: (id: string) => j<{ ok: boolean }>(`${apiBase()}/dev/tickets/${enc(id)}/stop`, { method: 'POST' }),
 
   // ---- settings ----
   settings: (c: string) => j<Settings>(`${ws(c)}/settings`),
@@ -694,9 +707,9 @@ export const feedbackApi = {
   /** `POST /ws/{c}/feedback`: writes the bundle on the server's machine and answers where it is and how to send it. */
   prepare: (c: string, body: import('./types').ProblemReportBody) => j<import('./types').ProblemReport>(`${ws(c)}/feedback`, { method: 'POST', body: JSON.stringify(body) }),
   /** `POST /feedback/reveal`: shows the bundle in the file manager of the server's machine. */
-  reveal: (path: string) => j<{ ok: boolean }>(`${BASE}/feedback/reveal`, { method: 'POST', body: JSON.stringify({ path }) }),
+  reveal: (path: string) => j<{ ok: boolean }>(`${apiBase()}/feedback/reveal`, { method: 'POST', body: JSON.stringify({ path }) }),
   /** `GET /feedback/download`: the zip itself, for a browser on another machine than the server. */
-  downloadUrl: (path: string) => `${BASE}/feedback/download?path=${enc(path)}`,
+  downloadUrl: (path: string) => `${apiBase()}/feedback/download?path=${enc(path)}`,
 }
 
 // --- label cards: the details drawer (canvas/LabelDetails.tsx) ---
@@ -799,13 +812,13 @@ export function stampQueries(paths: readonly string[]): string[] {
 
 export const scaleApi = {
   /** `GET /corpora/{c}/sources?path=<folder>&depth=1`: the folder's own files and subfolders ('' is the root). */
-  folder: (c: string, path: string) => j<FolderListing>(`${BASE}/corpora/${enc(c)}/sources${q({ path: path || '.', depth: 1 })}`),
+  folder: (c: string, path: string) => j<FolderListing>(`${apiBase()}/corpora/${enc(c)}/sources${q({ path: path || '.', depth: 1 })}`),
   /** `GET /corpora/{c}/sources/stamps?path=…`: each folder's stamp now, null for one that is gone, so the tree lists
    * again only the folders whose stamp is not their listing's; as many requests as stampQueries makes. */
   stamps: async (c: string, paths: readonly string[]) => {
     const stamps: Record<string, string | null> = {}
     for (const query of stampQueries(paths))
-      Object.assign(stamps, (await j<{ stamps: Record<string, string | null> }>(`${BASE}/corpora/${enc(c)}/sources/stamps?${query}`)).stamps)
+      Object.assign(stamps, (await j<{ stamps: Record<string, string | null> }>(`${apiBase()}/corpora/${enc(c)}/sources/stamps?${query}`)).stamps)
     return { stamps }
   },
   /** `GET /ws/{c}/labels?path=&lines=a-b`: every concept's rows on lines a..b of one file, plus its whole-file rows. */

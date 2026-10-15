@@ -841,9 +841,10 @@ async def test_a_view_s_frame_loads_its_media_by_a_key_in_the_url_and_that_key_r
     """The frame is sandboxed with an opaque origin, from which the browser sends no SameSite=Strict cookie, so the one
     URL it may load, its view's media route, carries the view's key in its path (hook_auth.media_key): the frame's
     policy and its media URL name that URL, the read guard lets it through with no cookie, Range included, and refuses
-    another view's key, a made-up one and none. The page's own media route takes the cookie, as before."""
+    another view's key, a made-up one and none. The page's own media route takes the cookie, as before, under the
+    page's own path (hook_auth.browser_path); the frame's media URL is on the API's own path, with no browser's key."""
     import httpx  # noqa: PLC0415
-    from conftest import UI_COOKIE_VALUE, _record_paired  # noqa: PLC0415
+    from conftest import UI_COOKIE_VALUE, _record_paired, browser_base  # noqa: PLC0415
 
     from app import hook_auth, main  # noqa: PLC0415
 
@@ -857,7 +858,7 @@ async def test_a_view_s_frame_loads_its_media_by_a_key_in_the_url_and_that_key_r
     base = f"/api/ws/{CORPUS}/views/shots/media"
     shot = {"path": "shot.png"}
     transport = httpx.ASGITransport(app=main.create_app())
-    async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as page, \
+    async with httpx.AsyncClient(transport=transport, base_url=browser_base("http://127.0.0.1")) as page, \
             httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as frame:
         page.cookies.set(hook_auth.ui_cookie(), UI_COOKIE_VALUE)
         r = await page.get(f"/api/ws/{CORPUS}/views/shots/frame", params={"origin": "http://127.0.0.1:8300"})
@@ -887,16 +888,16 @@ async def test_a_view_s_media_key_works_only_while_the_browser_or_shot_that_load
     import logging  # noqa: PLC0415
 
     import httpx  # noqa: PLC0415
-    from conftest import UI_COOKIE_VALUE, _record_paired  # noqa: PLC0415
+    from conftest import UI_COOKIE_VALUE, UI_KEY_VALUE, _record_paired  # noqa: PLC0415
 
     from app import feedback, hook_auth, main  # noqa: PLC0415
 
     (config.DATA_DIR / CORPUS / "shot.png").write_bytes(PNG)
     views.write_view(CORPUS, "shots", reader=THREADS_READER, html=THREADS_HTML,
                      **{**VIEW, "name": "Shots", "claims": ["board.jsonl", "shot.png"]})
-    other = "the-cookie-of-another-browser-in-this-test"
+    other, other_key = "the-cookie-of-another-browser-in-this-test", "the-key-of-another-browser"
     _record_paired(UI_COOKIE_VALUE)
-    _record_paired(other)
+    _record_paired(other, other_key)
     frame_url = f"/api/ws/{CORPUS}/views/shots/frame"
     base = f"/api/ws/{CORPUS}/views/shots/media"
     shot = {"path": "shot.png"}
@@ -906,16 +907,16 @@ async def test_a_view_s_media_key_works_only_while_the_browser_or_shot_that_load
         return doc.split("/views/shots/media/", 1)[1][:32]
 
     async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as c:
-        async def frame_key(**kw) -> str:
-            r = await c.get(frame_url, params={"origin": "http://127.0.0.1:8300"}, **kw)
+        async def frame_key(page: str = "", **kw) -> str:  # `page`: the browser's path the page asks under
+            r = await c.get(page + frame_url, params={"origin": "http://127.0.0.1:8300"}, **kw)
             assert r.status_code == 200, r.text[:200]
             return key_in(r.text)
 
         async def works(key: str) -> bool:
             return (await c.get(f"{base}/{key}", params=shot)).status_code == 200
 
-        mine = await frame_key(headers={"cookie": f"{hook_auth.ui_cookie()}={UI_COOKIE_VALUE}"})
-        theirs = await frame_key(headers={"cookie": f"{hook_auth.ui_cookie()}={other}"})
+        mine = await frame_key(f"/b/{UI_KEY_VALUE}", headers={"cookie": f"{hook_auth.ui_cookie()}={UI_COOKIE_VALUE}"})
+        theirs = await frame_key(f"/b/{other_key}", headers={"cookie": f"{hook_auth.ui_cookie()}={other}"})
         assert mine != theirs and await works(mine) and await works(theirs)
         assert hook_auth.sign_out(hook_auth._sha(UI_COOKIE_VALUE)[:12])
         assert not await works(mine), "signed out: its key is void"

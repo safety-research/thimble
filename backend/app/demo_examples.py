@@ -35,7 +35,7 @@ PREFIX = "example-"  # of each copy's folder name, so of its workspace's name
 LABELS_JSON = "labels.json"
 APPLY_TIMEOUT_S = 180.0  # one sample label's apply, which the server answers once it ends
 Request = Callable[..., "tuple[int, Any]"]
-SignIn = Callable[[str], str]  # cli.browser_cookie: a browser's sign-in at the server's URL, as `name=value`
+SignIn = Callable[[str], str]  # cli.browser_cookie: a browser's sign-in at the server's URL, as `name=value; Path=...`
 
 
 def examples(root: Path | None = None) -> list[Path]:
@@ -160,11 +160,12 @@ def open_example(src: Path, url: str, env: dict[str, Any], refresh: bool, say: C
 
 
 def sign_out(url: str, cookie: str, request: Request) -> None:
-    """Sign out the browser whose cookie `cookie` (`name=value`) is, as its notice's Sign it out does: its id is the
-    first 12 hex digits of the value's sha256 (hook_auth.browser_id)."""
+    """Sign out the browser whose cookie `cookie` (`name=value; Path=...`, cli.browser_cookie) is, as its notice's Sign
+    it out does: its id is the first 12 hex digits of the value's sha256 (hook_auth.browser_id)."""
     import hashlib  # noqa: PLC0415
 
-    value = cookie.split("=", 1)[1] if "=" in cookie else cookie
+    value = cookie.split(";", 1)[0].strip()
+    value = value.split("=", 1)[1] if "=" in value else value
     request("POST", f"{url}/api/ui/signout", {"id": hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]},
             cookie=cookie)
 

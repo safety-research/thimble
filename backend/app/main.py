@@ -24,7 +24,7 @@ from starlette.staticfiles import StaticFiles
 from . import config
 from .errors import ErrorLog
 from . import hook_auth
-from .hook_auth import HookAuth, LocalReadGuard, LocalWriteGuard
+from .hook_auth import BrowserPath, HookAuth, LocalReadGuard, LocalWriteGuard
 from .http_guard import OriginCheck, SecurityHeaders, dev_origins
 
 # every line of thimble's own loggers carries a wall-clock stamp, so the server log can be read against the other logs
@@ -122,12 +122,14 @@ if os.environ.get("THIMBLE_ACCESS_LOG", "").strip().lower() != "all":
 
 
 class HideMediaKeys(logging.Filter):
-    """A view's media key (hook_auth.media_key) in a line's text arguments shown as `<key>` (hook_auth.hide_media_keys):
-    uvicorn's access line names the URL of every failed request and the timing line that of a slow one, and the server
-    log goes into a problem report."""
+    """A view's media key (hook_auth.media_key) and a browser's key in a URL under its path (hook_auth.browser_path),
+    in a line's text arguments, shown as `<key>` (hook_auth.hide_media_keys): uvicorn's access line names the URL of
+    every failed request and of every write, and the timing line that of a slow one, and the server log goes into a
+    problem report."""
 
     def filter(self, record: logging.LogRecord) -> bool:
-        if isinstance(record.args, tuple) and any(isinstance(a, str) and "/media/" in a for a in record.args):
+        if isinstance(record.args, tuple) and any(isinstance(a, str) and ("/media/" in a or "/b/" in a)
+                                                  for a in record.args):
             record.args = tuple(hook_auth.hide_media_keys(a) if isinstance(a, str) else a for a in record.args)
         return True
 
@@ -470,7 +472,8 @@ def create_app() -> FastAPI:
     app.add_middleware(SecurityHeaders)  # outside the two checks, so their refusals carry the headers too
     app.add_middleware(RequestTiming)  # times the whole stack
     app.add_middleware(CompleteStreams)  # sees every response's last message
-    app.add_middleware(OldEventRoutes)  # added last = outermost: the checks see the new path
+    app.add_middleware(OldEventRoutes)  # the checks see the new path
+    app.add_middleware(BrowserPath)  # added last = outermost: /b/<key>/api/... goes on as /api/... (hook_auth)
 
     for name in ROUTER_MODULES:
         try:

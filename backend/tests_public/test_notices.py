@@ -81,7 +81,8 @@ def test_get_notices_gives_the_open_ones_and_the_x_dismisses(analyst):
         "only the analyst's x takes a notice away"
     assert len(client.get(f"/api/ws/{CORPUS}/notices").json()) == 1
     client.cookies.set(hook_auth.ui_cookie(), analyst.cookies[hook_auth.ui_cookie()])
-    assert client.post(f"/api/ws/{CORPUS}/notices/{n['id']}/dismiss").json() == {"dismissed": True}
+    page = f"/b/{hook_auth.path_key(analyst.scope)}"  # where the analyst's page asks (hook_auth.browser_path)
+    assert client.post(f"{page}/api/ws/{CORPUS}/notices/{n['id']}/dismiss").json() == {"dismissed": True}
     assert client.get(f"/api/ws/{CORPUS}/notices").json() == []
 
 

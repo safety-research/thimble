@@ -17,7 +17,8 @@ from app import cli, config, demo, demo_examples, views
 CODE = "c0de"
 
 
-COOKIE = "thimble-ui-1=c00kie-of-the-run"  # the sign-in the command makes for its writes (cli.browser_cookie)
+# the sign-in the command makes for its writes (cli.browser_cookie): the cookie and the browser path it is scoped to
+COOKIE = "thimble-ui-1=c00kie-of-the-run; Path=/b/the-key-of-the-run-s-browser/api/"
 
 
 class FakeServer:
@@ -117,7 +118,8 @@ def test_every_worked_example_opens_as_a_workspace_with_its_view_built_and_its_l
     assert not (config.REPO_ROOT / "examples").exists()
     # the labels are the analyst's writes: one sign-in for the run, signed out at its end (its id, hook_auth.browser_id)
     assert w["signins"] == ["http://127.0.0.1:1"]
-    assert w["server"].signed_out == [hashlib.sha256(COOKIE.split("=", 1)[1].encode()).hexdigest()[:12]]
+    value = COOKIE.split(";", 1)[0].split("=", 1)[1]
+    assert w["server"].signed_out == [hashlib.sha256(value.encode()).hexdigest()[:12]]
     # one URL, opened with a one-time sign-in code: the start page, whose rows open each example at its view
     # (start_page.py); the browser spent the code, so the printed line names the page without it
     assert re.findall(r"http://\S+", out) == ["http://127.0.0.1:1/"]

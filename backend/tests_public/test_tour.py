@@ -40,7 +40,7 @@ def test_an_unreadable_state_file_offers_the_tour_again():
 def test_only_a_signed_in_browser_records_the_offer(monkeypatch):
     """Recording the offer is a write like any other: a page or a notebook kernel without a signed-in browser's cookie
     records nothing."""
-    from conftest import UI_COOKIE_VALUE, _record_paired
+    from conftest import UI_COOKIE_VALUE, UI_KEY_VALUE, _record_paired
 
     from app import hook_auth
 
@@ -51,4 +51,4 @@ def test_only_a_signed_in_browser_records_the_offer(monkeypatch):
     assert c.post("/api/tour/seen").status_code == 403
     assert c.get("/api/tour").json() == {"seen": False}
     c.cookies.set(hook_auth.ui_cookie(), UI_COOKIE_VALUE)
-    assert c.post("/api/tour/seen").json() == {"seen": True}
+    assert c.post(f"/b/{UI_KEY_VALUE}/api/tour/seen").json() == {"seen": True}  # under the page's key (hook_auth)

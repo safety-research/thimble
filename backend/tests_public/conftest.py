@@ -201,6 +201,7 @@ def _thimble_home_off_the_user(tmp_path, monkeypatch):
 
 PLUGIN_TOKEN = "t0ken-of-the-test-server"
 UI_COOKIE_VALUE = "cookie-of-the-test-browser"  # the cookie of a browser signed in to the test server (_record_paired)
+UI_KEY_VALUE = "key-of-the-test-browser"  # the key of that browser's path, /b/<key>/api/ (hook_auth.browser_path)
 
 
 def card_wait(minutes: float | None) -> float:
@@ -265,26 +266,51 @@ def plugin_headers():
     return lambda url="http://testserver": hook_auth.headers(PLUGIN_TOKEN, hook_auth.port_of(url))
 
 
-def _record_paired(cookie: str = UI_COOKIE_VALUE) -> None:
-    """A browser signed in to the test server with the cookie `cookie`: its sha256 among hook_auth's signed-in browsers
-    and in the test's paired.json, as a claim of a link's code leaves it."""
+def _record_paired(cookie: str = UI_COOKIE_VALUE, key: str = UI_KEY_VALUE) -> None:
+    """A browser signed in to the test server with the cookie `cookie` and the key `key`: the sha256 of both among
+    hook_auth's signed-in browsers and in the test's paired.json, as a claim of a link's code leaves them."""
     from app import hook_auth
 
     with hook_auth._pair_lock:
         held = [e for e in hook_auth._entries() if e["hash"] != hook_auth._sha(cookie)]
-        hook_auth._save([*held, {"hash": hook_auth._sha(cookie), "at": "2026-10-15T00:00:00+00:00"}])
+        hook_auth._save([*held, {"hash": hook_auth._sha(cookie), "key": hook_auth._sha(key),
+                                 "at": "2026-10-15T00:00:00+00:00"}])
+
+
+def browser_base(base_url: str = "http://testserver", key: str = UI_KEY_VALUE) -> str:
+    """A TestClient's base_url under the path of the browser key `key` (hook_auth.browser_path), so that
+    `client.get("/api/x")` asks /b/<key>/api/x, as the page of a browser signed in with that key asks it."""
+    return f"{base_url.rstrip('/')}/b/{key}/"
+
+
+def sign_in(client, code: str, ws: str | None = None) -> str:
+    """Trade the link's code `code` at POST /api/ui/key as the page does (200 {key}), then send `client`'s later
+    requests under the path of that key (browser_base), as the page sends them: the cookie the claim set, scoped to
+    that path, goes with them. The key."""
+    r = client.post("/api/ui/key", json={"code": code, **({"ws": ws} if ws else {})})
+    assert r.status_code == 200 and r.json().get("key"), (r.status_code, r.text)
+    key = r.json()["key"]
+    client.base_url = browser_base(str(client.base_url), key)
+    return key
+
+
+def browser_request(cookie: str = UI_COOKIE_VALUE, key: str = UI_KEY_VALUE):
+    """A request as an analyst route takes it from the page of a browser holding `cookie` and `key`: the cookie, and
+    the key hook_auth.BrowserPath took off its path."""
+    from starlette.requests import Request
+
+    from app import hook_auth
+
+    return Request({"type": "http", "headers": [(b"cookie", f"{hook_auth.ui_cookie()}={cookie}".encode())],
+                    "state": {hook_auth.BROWSER_KEY_SCOPE: key}})
 
 
 @pytest.fixture()
 def analyst():
     """A request from the analyst's browser as the analyst routes take it: it carries the cookie of a browser this
-    fixture signs in (_record_paired; app/hook_auth.py)."""
-    from starlette.requests import Request
-
-    from app import hook_auth
-
+    fixture signs in, under that browser's path (_record_paired, browser_request; app/hook_auth.py)."""
     _record_paired(UI_COOKIE_VALUE)
-    return Request({"type": "http", "headers": [(b"cookie", f"{hook_auth.ui_cookie()}={UI_COOKIE_VALUE}".encode())]})
+    return browser_request()
 
 
 @pytest.fixture(autouse=True)

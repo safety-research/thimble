@@ -126,13 +126,14 @@ def test_a_write_needs_a_signed_in_browser_so_neither_a_kernel_nor_the_token_rea
     in server.json, which the plugin and the CLI prove, reaches only the token routes (hook_auth.guarded), so a process
     that reads server.json is refused here too, in the words the page shows today. A read needs the cookie too
     (hook_auth.LocalReadGuard), or the CLI's proof; the browser's claim of a link's code stays open."""
-    from conftest import UI_COOKIE_VALUE, _record_paired
+    from conftest import UI_COOKIE_VALUE, UI_KEY_VALUE, _record_paired
 
     from app import hook_auth
 
     monkeypatch.setenv("THIMBLE_PORT", "8300")
     _record_paired(UI_COOKIE_VALUE)
     c = TestClient(app_prod, base_url="http://testserver")
+    page = f"/b/{UI_KEY_VALUE}"  # where the signed-in browser's page asks (hook_auth.browser_path)
 
     # the kernel: no cookie, no proof, on several write routes, and even forging the server's own Origin
     for headers in ({}, {"Origin": "http://testserver"}, {"Sec-Fetch-Site": "same-origin"}):
@@ -152,11 +153,12 @@ def test_a_write_needs_a_signed_in_browser_so_neither_a_kernel_nor_the_token_rea
     not_ascii = {hook_auth.NONCE_HEADER: "n", hook_auth.AUTH_HEADER: "\u00e9".encode("latin-1")}
     assert c.put(THEME_PATH, json=THEME, headers=not_ascii).status_code == 403
 
-    # a signed-in browser's cookie, under this server's name
+    # a signed-in browser's cookie, under this server's name, on the path of that browser's key alone
     c.cookies.set(hook_auth.ui_cookie(), UI_COOKIE_VALUE)
-    assert c.put(THEME_PATH, json=THEME).status_code == 200
+    assert c.put(page + THEME_PATH, json=THEME).status_code == 200
+    assert c.put(THEME_PATH, json=THEME).status_code == 403, "the cookie on the API's own path"
     c.cookies.set(hook_auth.ui_cookie(), "not-a-signed-in-cookie")
-    assert c.put(THEME_PATH, json=THEME).status_code == 403
+    assert c.put(page + THEME_PATH, json=THEME).status_code == 403
     c.cookies.clear()
 
     # a read needs the cookie too (it was open before 0.8.0), however the kernel forges its Origin, or the CLI's proof
@@ -165,10 +167,11 @@ def test_a_write_needs_a_signed_in_browser_so_neither_a_kernel_nor_the_token_rea
         assert (r.status_code, r.json()) == (401, {"detail": hook_auth.SIGN_IN_NEEDED, "signin": True}), headers
     assert c.get("/api/corpora", headers=plugin_headers()).status_code == 200
     c.cookies.set(hook_auth.ui_cookie(), UI_COOKIE_VALUE)
-    assert c.get("/api/corpora").status_code == 200
+    assert c.get(page + "/api/corpora").status_code == 200
+    assert c.get("/api/corpora").status_code == 401, "the cookie on the API's own path"
     c.cookies.clear()
     # the claim of a link's code needs no credential
-    assert c.post("/api/ui/key", json={"code": hook_auth.mint("mini")}).status_code == 204
+    assert c.post("/api/ui/key", json={"code": hook_auth.mint("mini")}).status_code == 200
 
 
 @pytest.mark.real_write_guard
@@ -181,18 +184,21 @@ def test_two_servers_on_one_machine_keep_their_own_cookies(app_prod, monkeypatch
     monkeypatch.setenv("THIMBLE_PORT", "8300")
     c = TestClient(app_prod, base_url="http://testserver")
     r = c.post("/api/ui/key", json={"code": hook_auth.mint()})
-    assert r.status_code == 204
-    set_cookies = r.headers.get_list("set-cookie")
+    assert r.status_code == 200
+    key = r.json()["key"]
+    set_cookies = [h for h in r.headers.get_list("set-cookie") if "Max-Age=0" not in h]  # beside an old one's deletion
     assert len(set_cookies) == 1 and set_cookies[0].startswith("thimble-ui-8300=")
-    assert "Path=/api/" in set_cookies[0] and "HttpOnly" in set_cookies[0] and "SameSite=strict" in set_cookies[0]
-    mine = c.cookies.get("thimble-ui-8300")
+    assert f"Path=/b/{key}/api/" in set_cookies[0]
+    assert "HttpOnly" in set_cookies[0] and "SameSite=strict" in set_cookies[0]
+    mine = c.cookies.get("thimble-ui-8300", path=hook_auth.browser_path(key))
+    page = f"/b/{key}"
 
     # the other server's cookie, which the browser sends to every port of 127.0.0.1, is not this server's
     c.cookies.clear()
     c.cookies.set("thimble-ui-8302", "the-other-servers-cookie")
-    assert c.put(THEME_PATH, json=THEME).status_code == 403
+    assert c.put(page + THEME_PATH, json=THEME).status_code == 403
     c.cookies.set("thimble-ui-8300", mine)
-    assert c.put(THEME_PATH, json=THEME).status_code == 200
+    assert c.put(page + THEME_PATH, json=THEME).status_code == 200
 
 
 # the write routes 0.4.0 added: extensions, card types and a card's Keep and Open as view
@@ -214,15 +220,15 @@ def test_the_extension_routes_take_writes_from_the_browser_or_from_the_cli_alone
     """Each write route of extensions and card types refuses a caller with neither a signed-in browser's cookie nor the
     token, as card code is, even with a same-origin Origin. The browser's cookie reaches each analyst route, and the
     CLI's proof reaches /api/extensions/refresh, its token route, alone; neither reaches the other's."""
-    from conftest import UI_COOKIE_VALUE, _record_paired
+    from conftest import UI_COOKIE_VALUE, UI_KEY_VALUE, _record_paired
 
     from app import hook_auth
 
     _record_paired(UI_COOKIE_VALUE)
     c = TestClient(app_prod, base_url="http://testserver")
 
-    def detail(**kw):
-        r = c.request(method, path, json=body, **kw)
+    def detail(base: str = "", **kw):
+        r = c.request(method, base + path, json=body, **kw)
         return r.status_code, (r.json() if r.headers.get("content-type") == "application/json" else {}).get("detail")
 
     token_route = hook_auth.guarded(method, path)
@@ -230,7 +236,7 @@ def test_the_extension_routes_take_writes_from_the_browser_or_from_the_cli_alone
     by_token = detail(headers=plugin_headers())
     assert by_token[0] not in (401, 403) if token_route else by_token == (403, hook_auth.WRITE_REFUSED)
     c.cookies.set(hook_auth.ui_cookie(), UI_COOKIE_VALUE)
-    by_cookie = detail()
+    by_cookie = detail(f"/b/{UI_KEY_VALUE}")  # the page asks under its key's path (hook_auth.browser_path)
     assert by_cookie[0] == 401 if token_route else by_cookie[1] != hook_auth.WRITE_REFUSED
 
 

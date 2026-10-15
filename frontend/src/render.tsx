@@ -11,6 +11,7 @@ import { CardFace } from './canvas/CardFace'
 import { CARD_PAD_X } from './canvas/Cell'
 import { CanvasContext, type CanvasCtx } from './canvas/context'
 import { kindOf } from './canvas/layout'
+import { apiPath } from './lib/browserKey'
 import { registerCells, registerConcepts } from './lib/cellName'
 import { setAccent, setPaper, type Accent, type Paper } from './lib/theme'
 import type { Cell, Concept, ConceptDetail } from './lib/types'
@@ -73,6 +74,7 @@ let n = 0
 const realFetch = window.fetch.bind(window)
 window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
   const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, location.href)
+  url.pathname = apiPath(url.pathname) // a path under a browser's key (lib/browserKey) stands for its API path
   if (!url.pathname.startsWith('/api/')) return realFetch(input, init)
   const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
   if (/^\/api\/corpora\/[^/]+\/ref$/.test(url.pathname)) {

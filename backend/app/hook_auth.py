@@ -33,12 +33,23 @@ may read (userconf.private_paths), and it outlives a restart, as the sessions a 
 Everything the analyst does in thimble (a message, a click, a permission answer, a change of Settings or of a permission
 mode) must come from a signed-in browser (analyst). The dashboard link carries a one-time code after `#p=`, which the
 server makes when the link is shown (mint: main's Stop hook, `thimble up`); the page trades it for an HttpOnly,
-SameSite=Strict cookie (claim), and the code then stops working, as it does PAIR_TTL_S after it was made or when a newer
-code for the same workspace is made. A browser that is signed in already spends a code with no change. The server keeps
-only the sha256 of each code and of each browser's cookie (PAIRED_FILE, read at start and then kept in memory), so no
-file, transcript or link holds a credential that lasts. The token proves only the routes hooks, the shim, the module and
-the CLI use (guarded); with it a process can mint a code, and each new sign-in prints a line in main's terminal and posts
-a notice.
+SameSite=Strict cookie and a random key of that browser's own (claim), and the code then stops working, as it does
+PAIR_TTL_S after it was made or when a newer code for the same workspace is made. A browser that is signed in already
+spends a code with no change. The server keeps only the sha256 of each code, and of each browser's cookie and key
+(PAIRED_FILE, read at start and then kept in memory), so no file, transcript or link holds a credential that lasts. The
+token proves only the routes hooks, the shim, the module and the CLI use (guarded); with it a process can mint a code,
+and each new sign-in prints a line in main's terminal and posts a notice.
+
+A cookie is bound to a host and a path, never to a port, so a browser sends a cookie of 127.0.0.1 to every server on
+127.0.0.1 (and one of localhost to every server on localhost) whose page asks for a path the cookie covers. A cookie
+scoped to /api/ would reach any other program on the computer that serves a page the analyst opens (a project's dev
+server, another account's server) as soon as that page asks for one of its own /api/ paths. So each browser's cookie is
+scoped to a path of its own, /b/<key>/api/ (browser_path), where <key> is the random key the claim gives that browser
+alone. The page keeps the key (frontend lib/browserKey) and sends every request to the API under that path, which
+BrowserPath takes off again before any check or route sees the request; the cookie counts only on the path of the key
+it was given with (_cookie_hash). No other page knows the key, so the browser sends the cookie to no other server, on
+any port or host name. A browser that lost its key (cleared site data, a private window, a new browser) shows the
+sign-in line, and the link signs it in again with a new cookie and key.
 
 Reads are gated too (LocalReadGuard), since another account on a shared computer reaches the loopback port as well:
 every GET or HEAD under /api needs the signed-in browser's cookie or a hook proof (the CLI sends one with every
@@ -106,11 +117,18 @@ SESSION_TOKEN_ENV = "THIMBLE_SESSION_TOKEN"
 _secret_lock = threading.Lock()
 UI_COOKIE = "thimble-ui"  # the cookie's name, with this server's port after it (ui_cookie)
 UI_COOKIE_AGE_S = 400 * 24 * 3600  # the longest a browser keeps a cookie
-# The cookie the browser holds (claim) and analyst() and LocalWriteGuard check. A cookie is not bound to a port, so the
-# path is what keeps it from the browser's requests to other services on 127.0.0.1, except requests to their own /api/
-# paths. It covers the whole API, not just /api/ws/, so a browser proves itself to LocalWriteGuard on every write route.
-UI_COOKIE_PATH = "/api/"
-PAIRED_FILE = "paired.json"  # in thimble's home: [{hash, at}], the sha256 of each signed-in browser's cookie (claim)
+# The cookie the browser holds (claim) and analyst() and LocalWriteGuard check is scoped to its browser's own path,
+# BROWSER_PREFIX + <key> + "/api/" (browser_path, module note), which covers the whole API under that path, so a browser
+# proves itself to LocalWriteGuard on every write route.
+BROWSER_PREFIX = "/b/"
+# a request under a browser's path: (its key, the API path it stands for); a key is secrets.token_urlsafe's alphabet
+BROWSER_PATH = re.compile(r"/b/([A-Za-z0-9_-]{16,128})(/api(?:/.*)?)", re.DOTALL)
+BROWSER_KEY_SCOPE = "thimble_browser_key"  # where BrowserPath keeps a request's key, in the ASGI scope's state
+BROWSER_KEY_BYTES = 24  # a browser's key: secrets.token_urlsafe of this many bytes (32 characters)
+# The path earlier builds scoped the cookie to, which every server on 127.0.0.1 received; a claim deletes one there.
+OLD_COOKIE_PATH = "/api/"
+# in thimble's home: [{hash, key, at}], the sha256 of each signed-in browser's cookie and key (claim)
+PAIRED_FILE = "paired.json"
 PAIR_TTL_S = 300  # a link's sign-in code works this long after it was made (mint), and once
 # a click route's 403 without the analyst's cookie: every such click, not only the permission answers (live check L32)
 ANALYST_ONLY = ("only the analyst's own thimble page can do this (start, message or stop thimble's agents, build a view,"
@@ -427,11 +445,14 @@ def media_key_ok(c: str, slug: str, key: str) -> bool:
 
 # a view's media key where a URL shows it in text, such as a line of the server log (hide_media_keys)
 MEDIA_KEY_TEXT = re.compile(r"(/views/[^/?#\s]+/media/)[0-9a-f]{32}")
+# a browser's key where a URL under its path shows it in text (hide_media_keys)
+BROWSER_KEY_TEXT = re.compile(r"(/b/)[A-Za-z0-9_-]{16,128}(/api\b)")
 
 
 def hide_media_keys(text: str) -> str:
-    """`text` with each view media key in a URL (MEDIA_KEY_TEXT) shown as `<key>`."""
-    return MEDIA_KEY_TEXT.sub(r"\1<key>", text)
+    """`text` with each view media key in a URL (MEDIA_KEY_TEXT) and each browser's key in a URL under its path
+    (BROWSER_KEY_TEXT) shown as `<key>`."""
+    return BROWSER_KEY_TEXT.sub(r"\1<key>\2", MEDIA_KEY_TEXT.sub(r"\1<key>", text))
 
 
 def media_proven(path: str) -> bool:
@@ -444,8 +465,14 @@ def _paired_file() -> Path:
     return home() / PAIRED_FILE
 
 
+def _sha_hex(value: object) -> bool:
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+
 def _entries() -> list[dict[str, str]]:
-    """The signed-in browsers (module note), read from PAIRED_FILE at the first use for this home."""
+    """The signed-in browsers (module note), read from PAIRED_FILE at the first use for this home. An entry without the
+    sha256 of a key (an earlier build's, whose cookie was scoped to OLD_COOKIE_PATH) signs no browser in: that browser
+    signs in again with the link."""
     global _paired, _paired_home
     where = str(home())
     if _paired is not None and _paired_home == where:
@@ -454,8 +481,9 @@ def _entries() -> list[dict[str, str]]:
         raw = json.loads(_paired_file().read_text("utf-8"))
     except (OSError, ValueError):
         raw = []
-    got = [{"hash": str(e["hash"]), "at": str(e.get("at") or "")} for e in (raw if isinstance(raw, list) else [])
-           if isinstance(e, dict) and isinstance(e.get("hash"), str) and re.fullmatch(r"[0-9a-f]{64}", e["hash"])]
+    got = [{"hash": str(e["hash"]), "key": str(e["key"]), "at": str(e.get("at") or "")}
+           for e in (raw if isinstance(raw, list) else [])
+           if isinstance(e, dict) and _sha_hex(e.get("hash")) and _sha_hex(e.get("key"))]
     _paired, _paired_home = got, where
     return _paired
 
@@ -481,20 +509,34 @@ def _save(entries: list[dict[str, str]]) -> None:
             os.unlink(tmp)
 
 
+def browser_path(key: str) -> str:
+    """The path the cookie of the browser whose key is `key` is scoped to, and under which its page sends every request
+    to the API (module note): /b/<key>/api/."""
+    return f"{BROWSER_PREFIX}{key}/api/"
+
+
+def path_key(scope: dict) -> str:
+    """The key of the browser path a request came under (BrowserPath), '' for a request to the API's own path."""
+    return str((scope.get("state") or {}).get(BROWSER_KEY_SCOPE) or "")
+
+
 def _cookie_hash(request: Request) -> str:
-    """The sha256 of the browser's cookie, when it is one of a signed-in browser; '' otherwise."""
+    """The sha256 of the browser's cookie, when it is one of a signed-in browser and the request came under the path of
+    the key that browser was given with it (path_key); '' otherwise, a signed-in browser's cookie on the API's own path
+    or on another key's path among them."""
     value = request.cookies.get(ui_cookie(), "")
-    if not value:
+    key = path_key(request.scope)
+    if not value or not key:
         return ""
-    want = _sha(value)
+    want, key_hash = _sha(value), _sha(key)
     with _pair_lock:
-        known = [e["hash"] for e in _entries()]
-    return want if any(_same(want, h) for h in known) else ""
+        known = [(e["hash"], e["key"]) for e in _entries()]
+    return want if any(_same(want, h) and _same(key_hash, k) for h, k in known) else ""
 
 
 def analyst(request: Request) -> bool:
     """Whether `request` comes from a signed-in browser: it carries a cookie claim gave, which no sign_out or unpair
-    took back."""
+    took back, under the path of the key claim gave with it (_cookie_hash)."""
     return bool(_cookie_hash(request))
 
 
@@ -504,9 +546,11 @@ def browser_id(request: Request) -> str:
     return _cookie_hash(request)[:12]
 
 
-def set_cookie(r: Response, value: str) -> Response:
-    """`r` with this server's cookie `value` (ui_cookie, at UI_COOKIE_PATH)."""
-    r.set_cookie(ui_cookie(), value, max_age=UI_COOKIE_AGE_S, path=UI_COOKIE_PATH, httponly=True, samesite="strict")
+def set_cookie(r: Response, value: str, key: str) -> Response:
+    """`r` with this server's cookie `value` (ui_cookie) scoped to the path of the browser key `key` (browser_path), and
+    the deletion of a cookie of that name an earlier build scoped to OLD_COOKIE_PATH."""
+    r.set_cookie(ui_cookie(), value, max_age=UI_COOKIE_AGE_S, path=browser_path(key), httponly=True, samesite="strict")
+    r.delete_cookie(ui_cookie(), path=OLD_COOKIE_PATH, httponly=True, samesite="strict")
     return r
 
 
@@ -516,8 +560,9 @@ def _gone() -> Response:
 
 def claim(body: Any, request: Request) -> tuple[Response, str]:
     """(the answer to a page's POST /api/ui/key with its link's code, the id of the browser it signed in or ''): a
-    signed-in browser spends the code and gets 204 and nothing more; any other browser with a live code gets 204 with a
-    new cookie, whose sha256 joins the signed-in browsers; anything else, an old {key} body included, 410 CODE_GONE."""
+    signed-in browser (which posts under its own path) spends the code and gets 204 and nothing more; any other browser
+    with a live code gets 200 {key} with a new cookie scoped to that key's path (set_cookie), and the sha256 of both
+    join the signed-in browsers; anything else, an old {key} body included, 410 CODE_GONE."""
     code = body.get("code") if isinstance(body, dict) else None
     if analyst(request):
         _spend(code)
@@ -525,11 +570,12 @@ def claim(body: Any, request: Request) -> tuple[Response, str]:
     if not _spend(code):
         return _gone(), ""
     cookie = secrets.token_urlsafe(32)
+    key = secrets.token_urlsafe(BROWSER_KEY_BYTES)
     digest = _sha(cookie)
     at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     with _pair_lock:
-        _save([*[e for e in _entries() if e["hash"] != digest], {"hash": digest, "at": at}])
-    return set_cookie(Response(status_code=204), cookie), digest[:12]
+        _save([*[e for e in _entries() if e["hash"] != digest], {"hash": digest, "key": _sha(key), "at": at}])
+    return set_cookie(JSONResponse({"key": key}), cookie, key), digest[:12]
 
 
 def unpair() -> None:
@@ -671,6 +717,27 @@ def read_guarded(method: str, path: str) -> bool:
 
 def _api(path: str) -> bool:
     return path == "/api" or path.startswith("/api/")
+
+
+class BrowserPath:
+    """A request under a browser's path, /b/<key>/api/... (BROWSER_PATH, module note), goes on as the API path it stands
+    for, /api/..., with <key> kept in the request's state (BROWSER_KEY_SCOPE, path_key), so every check, route and log
+    line after this sees the API's own path, and _cookie_hash counts the cookie only with the key it was given with. Any
+    other request goes on as it came. Pure ASGI, outermost."""
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        m = BROWSER_PATH.fullmatch(scope.get("path", "")) if scope["type"] in ("http", "websocket") else None
+        if m is not None:
+            key, path = m.group(1), m.group(2)
+            raw = scope.get("raw_path")
+            head = f"{BROWSER_PREFIX}{key}".encode("ascii")
+            raw = raw[len(head):] if isinstance(raw, bytes) and raw.startswith(head) else path.encode("utf-8")
+            scope = {**scope, "path": path, "raw_path": raw,
+                     "state": {**(scope.get("state") or {}), BROWSER_KEY_SCOPE: key}}
+        await self.app(scope, receive, send)
 
 
 class LocalWriteGuard:

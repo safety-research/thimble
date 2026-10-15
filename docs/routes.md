@@ -8,7 +8,7 @@ none:
 
 - **token**: the token in `server.json`, proven with each request. The plugin's hooks, its MCP shim, its hooks
   module and thimble's CLI use these routes, and only these.
-- **code**: a link's one-time sign-in code, which the page trades for the browser's cookie.
+- **code**: a link's one-time sign-in code, which the page trades for the browser's cookie and its key.
 - **agent token**: the token of one run of an extension's program.
 - **cookie**: a signed-in browser's cookie. Everything the analyst does in thimble.
 - **cookie or token**: a read, which needs a signed-in browser's cookie or the token, proven as above (the CLI
@@ -18,6 +18,12 @@ none:
   frame sends no cookie.
 - **none**: the health check, which names no path or pid without the token, and whether the browser is signed
   in.
+
+A browser's cookie is scoped to a path of its own, `/b/<key>/api/`, where `<key>` is random and given to
+that browser alone with the cookie. The page sends every request under that path (`/b/<key>/api/ws/...`
+for `/api/ws/...`), the server takes the prefix off, and the cookie counts only with its own key. A browser
+never sends the cookie to another server on 127.0.0.1 or localhost, whatever its port, since no other page
+knows the key.
 
 265 routes, 154 of them writes: 37 token, 1 code, 1 agent token, 121 cookie, 102 cookie or token, 1 media key, 2 none.
 
