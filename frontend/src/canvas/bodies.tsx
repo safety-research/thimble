@@ -311,9 +311,10 @@ export function LabelMeta({ label: k }: { label: Pick<Concept, 'kind' | 'unit' |
  * button that sets the scope's filter, every value's share of the same total (details labelShares); the units that
  * total is of the label row states. Under it the Rule disclosure, closed, which opens the classifier's prompt, pattern
  * or code, and Definition and records, which opens the label's definition and its records under each value in the
- * card's details (DetailPanel LabelDetails). The card shows no record of the corpus itself (Matt 2026-10-15: "examples
- * in label card should always be collapsed by default, and we have to be very careful here"). While a run goes on, a
- * line says how far it has come.
+ * card's details (DetailPanel LabelDetails); it shows only on the board and in focus mode, where those details open,
+ * not in a report's figure or the card harness's picture. The card shows no record of the corpus itself (Matt
+ * 2026-10-15: "examples in label card should always be collapsed by default, and we have to be very careful here").
+ * While a run goes on, a line says how far it has come.
  */
 function LabelBody({ cellId, conceptId, concept, error }: { cellId: string; conceptId: string; concept: ConceptDetail | null; error: string | null }) {
   const ctx = useContext(CanvasContext)
@@ -397,17 +398,21 @@ function LabelBody({ cellId, conceptId, concept, error }: { cellId: string; conc
           {progress ? `applying · ${progress}` : 'applying'}
         </div>
       )}
-      <div className="bcell-label-foot">
-        {spec && (
-          <button type="button" className="bcell-label-rule-toggle" aria-expanded={ruleOpen} onMouseDown={(e) => e.stopPropagation()} onClick={() => setRuleOpen((o) => !o)}>
-            <Icon name={ruleOpen ? 'chevron-down' : 'chevron-right'} size={12} />
-            Rule ({known.kind})
-          </button>
-        )}
-        <Button variant="ghost" size="sm" icon="panel-right" className="bcell-label-records" onMouseDown={(e) => e.stopPropagation()} onClick={records}>
-          Definition and records
-        </Button>
-      </div>
+      {(spec || ctx.openDetail) && (
+        <div className="bcell-label-foot">
+          {spec && (
+            <button type="button" className="bcell-label-rule-toggle" aria-expanded={ruleOpen} onMouseDown={(e) => e.stopPropagation()} onClick={() => setRuleOpen((o) => !o)}>
+              <Icon name={ruleOpen ? 'chevron-down' : 'chevron-right'} size={12} />
+              Rule ({known.kind})
+            </button>
+          )}
+          {ctx.openDetail && (
+            <Button variant="ghost" size="sm" icon="panel-right" className="bcell-label-records" onMouseDown={(e) => e.stopPropagation()} onClick={records}>
+              Definition and records
+            </Button>
+          )}
+        </div>
+      )}
       {spec && ruleOpen && (
         <div className="bcell-label-def">
           {known.kind === 'prompt' ? (

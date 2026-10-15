@@ -19,7 +19,7 @@ export interface CanvasCtx {
   /** open the chat a card came from */
   openThread: (cell: Cell) => void
   /** open a card's details in the panel at the board's right (a label card's Definition and records); none where no
-   * board holds the card, as in the card harness */
+   * board holds the card, as in a report's figure and the card harness, where a label card offers no such button */
   openDetail?: (cellId: string) => void
 }
 

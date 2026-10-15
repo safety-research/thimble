@@ -142,3 +142,10 @@ test("Definition and records opens the card's details, where the label's records
   await act(async () => open.click())
   expect(openDetail).toHaveBeenCalledWith('c1')
 })
+
+test("where no board holds the card (a report's figure, the card harness), it offers no Definition and records, whose details could not open there", async () => {
+  const { el } = await card()
+  const labels = [...el.querySelectorAll<HTMLButtonElement>('.bcell-label button')].map((b) => b.textContent)
+  expect(labels).toContain('Rule (code)')
+  expect(labels).not.toContain('Definition and records')
+})
