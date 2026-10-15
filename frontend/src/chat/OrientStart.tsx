@@ -1,7 +1,6 @@
-// The orientation's start as main's chat shows it before its thread exists: "Starting…" while the start is on its way
-// (a click's answer normally comes within a second, so the card shows only after STARTING_AFTER_MS; a typed start shows
-// it until main makes the call), and the card of a start that did not happen (chat/Refused), with Start it and Dismiss
-// as its kind offers them. Once the agent starts, main's log holds its "Orientation started in" row and its thread
+// The orientation's start as main's chat shows it before its thread exists: "Starting…" while a typed start waits for
+// main to make its call, and the card of a start that did not happen (chat/Refused), with Start it and Dismiss as its
+// kind offers them. Once the agent starts, main's log holds its "Orientation started in" row and its thread
 // opens. The record is read from `GET /ws/{c}/orientation`, again on the stream's `orient` events and while it says
 // `starting`.
 import { useEffect, useState } from 'react'
@@ -12,8 +11,6 @@ import type { OrientRun, Refusal, StartAnswer } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { RefusedCard } from './Refused'
 
-/** How long a click's start goes unanswered before the card says Starting… */
-export const STARTING_AFTER_MS = 1000
 /** How often a record that says `starting` is read again. */
 const STARTING_POLL_MS = 1500
 
@@ -59,40 +56,30 @@ export function startedChat(a: StartAnswer | null | undefined): string | null {
 /** What a dismissal of a refusal keeps: its request, else when it happened. Pure. */
 export const refusalKey = (r: Pick<Refusal, 'request' | 'at'>): string => r.request || r.at || 'refused'
 
-/** Whether main's chat says Starting…: a click with no answer for STARTING_AFTER_MS, or a record that says `starting`
- * (a typed start main has not made yet). Pure. */
-export function startingShown(run: OrientRun | null, pendingSince: number | null, now: number): boolean {
-  if (pendingSince != null) return now - pendingSince >= STARTING_AFTER_MS
+/** Whether main's chat says Starting…: a record that says `starting` (a typed start main has not made yet). Pure. */
+export function startingShown(run: OrientRun | null): boolean {
   return run?.status === 'starting'
 }
 
 const dismissedKey = (ws: string) => storageKey(ws, 'orient-refused-dismissed')
 
-export function OrientStart({ ws, run, answer, pendingSince, onStarted }: {
+export function OrientStart({ ws, run, answer, onStarted }: {
   ws: string
   run: OrientRun | null
-  /** what this tab's click start answered, while the record is read again */
+  /** what a click start (a refused start's Start it) answered, while the record is read again */
   answer: StartAnswer | null
-  /** when this tab's click start went out, while it waits for its answer */
-  pendingSince: number | null
   onStarted: (a: StartAnswer) => void
 }) {
   const [dismissed, setDismissed] = useState<string[]>(() => readStorage<string[]>(dismissedKey(ws), []))
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    if (pendingSince == null) return
-    const t = window.setTimeout(() => setNow(Date.now()), Math.max(0, STARTING_AFTER_MS - (Date.now() - pendingSince)) + 10)
-    return () => window.clearTimeout(t)
-  }, [pendingSince])
-  if (startingShown(run, pendingSince, Math.max(now, pendingSince ?? 0))) {
+  if (startingShown(run)) {
     return (
-      <div className="chat-msg chat-starting" role="status" data-by={pendingSince != null ? 'click' : run?.started_by ?? undefined}>
+      <div className="chat-msg chat-starting" role="status" data-by={run?.started_by ?? undefined}>
         <Spinner size={11} label="Starting" />
-        <span className="chat-starting-text">{pendingSince != null || run?.started_by !== 'typed' ? 'Starting the orientation…' : 'Your Claude Code session is starting the orientation…'}</span>
+        <span className="chat-starting-text">{run?.started_by !== 'typed' ? 'Starting the orientation…' : 'Your Claude Code session is starting the orientation…'}</span>
       </div>
     )
   }
-  const refusal = pendingSince == null ? shownRefusal(run, answer, dismissed) : null
+  const refusal = shownRefusal(run, answer, dismissed)
   if (!refusal) return null
   return (
     <RefusedCard

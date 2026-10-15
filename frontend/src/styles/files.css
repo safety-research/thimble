@@ -1411,9 +1411,6 @@
   background: var(--chip-bg-hover);
   box-shadow: inset 0 0 0 1px var(--chip-edge-hover);
 }
-.files-proposal-tip.tip {
-  max-width: min(460px, calc(100vw - 16px));
-}
 /* the bar's icon buttons: Find in the file, and Download (Reader DownloadButton) right after it; Download last in the
    bar, with no mode switch after it, sits 8px from the bar's end, as the mode switch does */
 .reader-find-open.btn,

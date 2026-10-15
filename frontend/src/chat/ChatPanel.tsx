@@ -794,7 +794,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
               <>
                 {precached?.orientation && !mainRows.length && <Note className="chat-origin" text="The orientation ran in advance:" chips={<ThreadChip id={precached.orientation} />} />}
                 <Rows rows={withBranches(mainRows, main.records, branches)} ws={ws} chat="main" streaming={main.streaming} retry={mainRetry} />
-                <OrientStart ws={ws} run={orientRun.run} answer={startAnswer} pendingSince={null} onStarted={(a) => onStartAnswer(a)} />
+                <OrientStart ws={ws} run={orientRun.run} answer={startAnswer} onStarted={(a) => onStartAnswer(a)} />
               </>
             )}
             {!chat.loading && !chat.error && kind === 'thread' && curMeta && <ThreadView ws={ws} meta={curMeta} chat={chat} main={main} skip={mainSkip} branches={branches} detached={detached} />}

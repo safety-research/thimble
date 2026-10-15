@@ -11,7 +11,7 @@ import { TextInput } from '../components/Field'
 import { Icon, type IconName } from '../components/Icon'
 import { Menu, Popover } from '../components/Menu'
 import { Spinner } from '../components/Spinner'
-import { Tipped, useTooltip } from '../components/Tooltip'
+import { Tipped } from '../components/Tooltip'
 import { pendingAsks, useChatMetas } from '../chat/waiting'
 import { failedWhy } from '../chat/ViewChip'
 import { api } from '../lib/api'
@@ -81,7 +81,7 @@ export interface BuiltView {
   version?: string
   /** the review of its pictures, from its proposal */
   review?: ViewReview
-  /** a newer version of it builds (a change, the orientation's improvement or a dev ticket) */
+  /** a newer version of it builds (a change or a dev ticket) */
   updating?: boolean
   /** its page draws label controls of its own (elements with data-label), so the Labels sidebar does not open by itself */
   label_controls?: boolean
@@ -116,8 +116,8 @@ export function barList(list: readonly View[], all: readonly Proposal[]): { view
       .filter((v) => !proposals.some((p) => p.slug === v.slug))
       .map((v) => ({ slug: v.slug, name: v.name, first_file: v.first_file, files: v.files, n_files: v.n_files, claims: v.claims, built: v.built, version: v.version, label_controls: v.label_controls, libs: v.libs, builtin: v.origin === 'builtin' })),
   ]
-  // a viewer the File browser suggests for a file type shows there alone until it is accepted, and an orientation's
-  // view appears once it is built
+  // a view proposal (`suggested`) waits on the chat's card until it is accepted, and a held proposal (an orientation's
+  // from before 0.8.0) appears once it is built
   return { views: built, proposals: proposals.filter((p) => !listed.includes(p) && p.status !== 'built' && p.status !== 'dropped' && p.status !== 'suggested' && !p.held) }
 }
 
@@ -137,19 +137,15 @@ export function buildLabel(status: Proposal['status'], asking: boolean): string 
 }
 
 /** A proposal in the bar: the view's button as the bar draws a view, its state after the name, a click that opens the
- * build's thread; for a failed build (a view the analyst asked for, or an orientation's proposal after its repairs) a
- * warning icon with why on hover (failedWhy: a stop at main's quit says so, as the chat's chip does), and Retry beside
- * it; × on hover to delete it (`onDismiss` gets the proposal's box, which a confirm sits by). A viewer
- * suggested for a file type (in the File browser's mode row) wears the sparkle, shows its description on hover, and a
- * click builds it (`onAccept` runs then). */
-export function ProposalOption({ ws, p, onDismiss, onAccept, size, asking = false }: { ws: string; p: Proposal; onDismiss: (at: HTMLElement) => void; onAccept?: () => void; size: 'md' | 'lg'; asking?: boolean }) {
+ * build's thread; for a failed build (a view the analyst asked for or accepted) a warning icon with why on hover
+ * (failedWhy: a stop at main's quit says so, as the chat's chip does), and Retry beside it; × on hover to delete it
+ * (`onDismiss` gets the proposal's box, which a confirm sits by). */
+export function ProposalOption({ ws, p, onDismiss, size, asking = false }: { ws: string; p: Proposal; onDismiss: (at: HTMLElement) => void; size: 'md' | 'lg'; asking?: boolean }) {
   const [retrying, setRetrying] = useState(false)
-  const [accepting, setAccepting] = useState(false)
-  const suggested = p.status === 'suggested' && !accepting
-  const pending = p.status === 'queued' || p.status === 'building' || accepting
+  const pending = p.status === 'queued' || p.status === 'building'
   const failed = p.status === 'failed'
-  const { props: tipProps, tip } = useTooltip(suggested ? p.description : null, 'files-proposal-tip')
   const retry = () => {
+    if (demoStop()) return
     track('view-build', { target: `view:${p.slug}`, detail: { again: true } })
     setRetrying(true)
     api
@@ -158,33 +154,21 @@ export function ProposalOption({ ws, p, onDismiss, onAccept, size, asking = fals
       .catch((e: Error) => bus.emit('toast', { text: `Could not retry ${p.name}. ${e.message}`, kind: 'error' }))
       .finally(() => setRetrying(false))
   }
-  const accept = () => {
-    track('view-build', { target: `view:${p.slug}`, detail: { suggested: true } })
-    setAccepting(true)
-    onAccept?.()
-    api
-      .acceptProposal(ws, p.slug)
-      .then(() => refreshProposals(ws))
-      .catch((e: Error) => bus.emit('toast', { text: `Could not build ${p.name}. ${e.message}`, kind: 'error' }))
-      .finally(() => setAccepting(false))
-  }
-  const icon = <Icon name={suggested ? 'sparkle' : failed ? 'warning' : 'view'} size={14} className={failed ? 'seg-ico files-proposal-failed' : 'seg-ico'} />
+  const icon = <Icon name={failed ? 'warning' : 'view'} size={14} className={failed ? 'seg-ico files-proposal-failed' : 'seg-ico'} />
   return (
-    <span className={`seg seg-${size} files-proposal`} data-status={accepting ? 'queued' : p.status}>
+    <span className={`seg seg-${size} files-proposal`} data-status={p.status}>
       <span className="seg-removable">
         <button
           type="button"
           className="seg-opt files-proposal-opt"
           data-anchor={`view:${p.slug}`}
           data-anchor-text={p.name}
-          disabled={!suggested && !p.chat}
+          disabled={!p.chat}
           onClick={() => {
-            if (suggested) return accept()
             if (!p.chat) return
             track('chip-teleport', { target: `chat:${p.chat}`, detail: { kind: 'view-build' } })
             openThread(p.chat, 'view')
           }}
-          {...tipProps}
         >
           {failed && failedWhy(p) ? <Tipped text={failedWhy(p)}>{icon}</Tipped> : icon}
           <span className="seg-label">{p.name}</span>
@@ -194,12 +178,11 @@ export function ProposalOption({ ws, p, onDismiss, onAccept, size, asking = fals
                 <span className="dot tt-waiting files-proposal-wait" role="status" aria-label={buildLabel(p.status, asking)} />
               </Tipped>
             ) : (
-              <Spinner size={10} label={accepting ? 'Queued' : buildLabel(p.status, asking)} />
+              <Spinner size={10} label={buildLabel(p.status, asking)} />
             ))}
         </button>
         <Button variant="icon" size="sm" icon="x" title="Delete" aria-label={`Delete ${p.name}`} className="seg-remove" onClick={(e) => onDismiss(e.currentTarget.closest<HTMLElement>('.files-proposal') ?? e.currentTarget)} />
       </span>
-      {tip}
       {failed && (
         <Button size="sm" className="files-proposal-retry" busy={retrying} aria-label={`Retry ${p.name}`} onClick={retry}>
           Retry

@@ -9,8 +9,8 @@
 // click that starts a builder through thimble's plugin, and its menu picks the run's model and effort (Settings' dev
 // row by default). A start that did not happen says why, with Start it where the kind takes it (chat/Refused). A
 // proposal dropped when the analyst stopped the orientation is not drawn (lib/proposals isDropped). A built view whose
-// last change failed (`failed_change`) shows the same as a failed one. A suggested viewer for a file type, which the
-// File browser offers beside Raw, is a plain name until it is accepted.
+// last change failed (`failed_change`) shows the same as a failed one. A view proposal (`suggested`), which waits on
+// the chat's card, is a plain name until it is accepted.
 import { useEffect, useState } from 'react'
 import type { MouseEvent } from 'react'
 import { Button } from '../components/Button'
