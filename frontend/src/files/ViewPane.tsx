@@ -101,7 +101,7 @@ export function ViewPane({ ws, view, path, picked, targetRef, quote, onQuoteMiss
           <span className="view-pane-name">{view.name}</span>
           <ViewHeadLine ws={ws} name={view.name} notes={notes} shownLabels={shownLabels} residueOpen={residueOpen} onResidue={toggleResidue} files={{ list: files, n: view.n_files ?? files.length, onPick: openFile }} libs={view.libs} />
         </div>
-        {pin.stale && <ViewUpdated onReload={reload} className="view-pane-updated" />}
+        {pin.stale && <ViewUpdated onReload={reload} onDismiss={pin.dismiss} className="view-pane-updated" />}
         {filter && filterLabel && <ViewFilter ws={ws} filter={filter} name={filterLabel.name} hidden={hidden} className="view-pane-filter" />}
         {view.review && <ReviewMark ws={ws} slug={view.slug} review={view.review} onUndo={pin.follow} />}
       </div>

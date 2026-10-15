@@ -837,6 +837,11 @@ button.settings-ext-name:hover .settings-ext-caret {
 .shell-down code {
   font-family: var(--font-mono);
 }
+/* the line's × (ServerDown, NewVersion), at its end */
+.shell-down-x.btn {
+  flex: none;
+  margin: -4px -6px -4px 0;
+}
 /* a newer build is served (shell/NewVersion): the same line with a hairline edge and a Reload button */
 .shell-newer {
   align-items: center;
