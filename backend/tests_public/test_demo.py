@@ -493,6 +493,8 @@ def test_install_fills_the_placeholders_and_marks_the_workspace_precached(tmp_pa
     mark = json.loads((new_ws / demo.MARKER).read_text())
     assert mark["dataset"] == "toy" and mark["folder"] == str(new_corpus) and mark["orientation"] == "o1"
     assert mark["model"] == "claude-opus-5-5" and mark["created"]
+    # what it holds, which the orientation's card in the browser names
+    assert mark["counts"] == {"cards": 3, "labels": 1, "views": 1, "documents": 1}
     run = json.loads((new_ws / "orient" / "run.json").read_text())
     assert run["status"] == "done" and run["precached"] == mark and "session" not in run
     meta = json.loads((new_ws / "chats" / "o1.meta.json").read_text())
@@ -599,6 +601,91 @@ def test_the_coverage_line_goes_with_the_precache_to_the_end_of_the_orientation_
                      "text": line}]
     # a record without a line (an export made before it was kept) installs with the empty log
     assert demo.coverage_line({"coverage": 1}) is None and demo.coverage_line({"coverage": "  "}) is None
+
+
+PENDING = {
+    "views/proposals.json": json.dumps([
+        {"slug": "v1", "name": "Page threads", "status": "built", "claims": ["a.jsonl"]},
+        {"slug": "trace-steps", "name": "Trace Steps", "status": "suggested", "claims": ["**/*.trace"],
+         "offered": {"at": "2026-10-14T10:00:00Z", "after": "file", "why": "Traces read as steps."}},
+        {"slug": "old-viewer", "name": "Old Viewer", "status": "suggested", "claims": ["**/*.vtt"]}]),
+    "views/suggestions.json": json.dumps({".trace": {"answer": "suggested", "slug": "trace-steps", "ts": "t"},
+                                          ".vtt": {"answer": "none", "ts": "t"}}),
+    "notices.json": json.dumps([{"id": "n1", "key": "proposals", "text": "Couldn't check for a view proposal."}]),
+    "notices-dismissed.json": json.dumps({"manual-mode": "t"}),
+    "views/proposer.json": json.dumps({"job": {"after": ["main"], "sid": "s-exporter", "cut": "u9"}}),
+    "views/proposer.jsonl": json.dumps({"status": "ok", "sid": "s-exporter"}) + "\n",
+}
+
+
+def pending_workspace(tmp_path: Path) -> tuple[Path, Path]:
+    """A workspace that holds what was pending for its exporter (PENDING): (the workspace, the corpus)."""
+    root = tmp_path / "a"
+    corpus = root / "corpus"
+    corpus.mkdir(parents=True)
+    (corpus / "a.jsonl").write_text(json.dumps({"body": CORPUS_TEXT}) + "\n")
+    ws = make_workspace(root, corpus, root)
+    for rel, text in PENDING.items():
+        (ws / rel).parent.mkdir(parents=True, exist_ok=True)
+        (ws / rel).write_text(text)
+    return ws, corpus
+
+
+def slugs(path: Path) -> list[str]:
+    return [r["slug"] for r in json.loads(path.read_text())]
+
+
+def test_exports_leave_out_what_was_pending_for_the_exporter_and_install_takes_it_from_an_older_one(tmp_path):
+    """A view proposal that waits for the exporter's answer, their notices and the view proposer's job and run log would
+    show a card or a notice on every machine that installs the export: neither format carries them, and install takes
+    them out of an export made before."""
+    ws, corpus = pending_workspace(tmp_path)
+    out = tmp_path / "out" / "toy"
+    m = demo.export_outputs(ws, corpus, out, name="toy", home=tmp_path / "a", user="", scan=no_scan)
+    assert slugs(out / "workspace" / demo.PROPOSALS) == ["v1", "old-viewer"], "a 0.7 viewer row is no card; it stays"
+    left = {f["path"]: f["why"] for f in m["left_out"]}
+    for rel in demo.PENDING_LEFT_OUT:
+        assert left[rel] == demo.PENDING_LEFT_OUT[rel] and not (out / "workspace" / rel).exists()
+    full = tmp_path / "full" / "toy"
+    m = demo.export_full(ws, corpus, full, name="toy", home=tmp_path / "a", user="", scan=no_scan,
+                         claude_dir=tmp_path / "no-claude")
+    names = {f["path"] for f in m["files"]}
+    assert not set(demo.PENDING_LEFT_OUT) & names
+    assert {f["path"]: f["why"] for f in m["left_out"]}["views/proposer.json"] == demo.PENDING_LEFT_OUT["views/proposer.json"]
+    assert slugs(full / "workspace" / demo.PROPOSALS) == ["v1", "old-viewer"]
+    # the file type whose answer was the proposal left out is asked again; another type's answer stays
+    assert set(json.loads((full / "workspace" / demo.SUGGESTIONS).read_text())) == {".vtt"}
+    # an export made before it left them out: install takes them out
+    older = json.loads((full / demo.MANIFEST).read_text())
+    for rel, text in PENDING.items():
+        (full / "workspace" / rel).write_text(text)
+        if rel not in names:
+            older["files"].append({"path": rel, "bytes": len(text)})
+    (full / demo.MANIFEST).write_text(json.dumps(older))
+    new_ws = tmp_path / "b" / "toy"
+    demo.install(full, new_ws, corpus, home=tmp_path / "b", claude_dir=tmp_path / "b-claude")
+    assert not [rel for rel in demo.PENDING_LEFT_OUT if (new_ws / rel).exists()]
+    assert slugs(new_ws / demo.PROPOSALS) == ["v1", "old-viewer"]
+    assert set(json.loads((new_ws / demo.SUGGESTIONS).read_text())) == {".vtt"}
+
+
+def test_a_readme_names_the_switches_of_a_run_from_before_0_8_0_only(tmp_path):
+    # since 0.8.0 an orientation's record holds the deck alone; its views and documents came from the analyst after it
+    assert demo.outputs_of({"passes": ["final"]}) == ""
+    assert demo.outputs_of({"passes": ["final", "views", "report"], "critique": True}) == \
+        "; outputs final, views, report, critique on"
+    assert demo.outputs_of({"passes": []}) == "; outputs none"
+    out, _, m = made(tmp_path)  # a record with passes final and views, as 0.6.0 wrote
+    readme = (out / "README.md").read_text()
+    assert "; outputs final, views." in readme and "opens on its cards, labels, views and documents" in readme
+    m = {**m, "orientation": {**m["orientation"], "passes": ["final"]},
+         "views": [{"slug": "v1", "name": "Page threads", "from": "review"}]}
+    readme = demo.readme(m)
+    assert "; outputs" not in readme and "It holds 3 cards, 1 label, 1 view and 1 document" in readme
+    assert "in place of the pre-cache's own views" in readme and "orientation's own" not in readme
+    full = demo.readme_full({**m, "version": demo.FULL_VERSION, "files": [], "transcripts": [], "inventory": {}})
+    assert "continues the orientation's session" not in full and "; outputs" not in full
+    assert "no prompt.\n" in full
 
 
 def test_install_refuses_paths_outside_the_workspace_and_files_of_other_kinds(tmp_path):
@@ -743,9 +830,12 @@ def test_demo_downloads_installs_opens_and_says_how_to_attach(tmp_path, fake_wor
     text = said(w)
     assert "installed as workspace demo-one: 3 cards, 1 label, 1 view, 1 document" in text
     assert "downloads these datasets from their sources" in text
-    assert "two opens without a pre-cached orientation; ask Claude in the page or the terminal to run one" in text
+    # a static page has no Claude to ask: the line says where a session starts
+    assert (f"two opens without a pre-cached orientation; to run one, start a session there (`cd {w['root'] / 'two'} "
+            "&& thimble`) and ask Claude for an orientation") in text
+    assert "ask Claude in the page" not in text
     assert f"cd {w['root'] / 'one'} && thimble # one" in text and f"cd {w['root'] / 'two'} && thimble # two" in text
-    # no session attached: for each dataset the frozen demo's one sentence and command, as the browser's card gives them
+    # no session attached: for each dataset one sentence and the command that starts a session there
     assert text.count(f"{demo.FROZEN_LINE} cd ") == 2
     assert "No Claude Code session is attached" not in text and "thimble -c" not in text and "starts fresh" not in text
     assert w["started"] == []  # no terminal here, so nothing is asked and no session starts
