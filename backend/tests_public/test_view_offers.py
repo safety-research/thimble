@@ -472,9 +472,10 @@ async def test_try_again_on_the_proposer_s_notice_runs_the_proposer_while_a_file
     ({"status": "error", "detail": "the session reported an error: API Error: Claude's safeguards flagged this message"},
      "Claude's safeguards blocked the request.", True),
     ({"status": "error", "detail": "the model call failed (authentication_failed)"},
-     "Claude Code isn't signed in for thimble's server. In your terminal: run /login (or `claude auth login` in a "
-     "shell), or if you changed your sign-in (for example exported ANTHROPIC_API_KEY), run `thimble server restart`. "
-     "Then Try again.", False),
+     "Claude Code isn't signed in. In your terminal: run /login (or `claude auth login` in a shell).", False),
+    ({"status": "error", "detail": "the model call failed: API Error: 403 permission_error"},
+     "access was refused for this account or organization (403). In your terminal: run /login to check the account, "
+     "or check your organization's settings.", False),
     ({"status": "no_tool_call", "detail": "the file_viewer tool was never called"},
      "Claude's answer couldn't be read.", False),
     ({"status": "rate_limited", "detail": "the subscription's rate limit is exhausted"},
