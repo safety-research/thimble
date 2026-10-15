@@ -107,9 +107,18 @@ export function showPageNotice(n: Notice): void {
   touchAll()
 }
 
+const CODE_GONE_ID = `${PAGE_NOTICE}code-gone`
+
 /** The link's sign-in code was used, replaced or expired (POST /ui/key answered 410, or refused it otherwise). */
 export function showCodeGone(): void {
-  showPageNotice({ id: `${PAGE_NOTICE}code-gone`, key: `${PAGE_NOTICE}code-gone`, kind: 'sign-in', text: CODE_GONE_TEXT })
+  showPageNotice({ id: CODE_GONE_ID, key: CODE_GONE_ID, kind: 'sign-in', text: CODE_GONE_TEXT })
+}
+
+/** A later link's code signed this browser in: the notice that an earlier one was gone goes. */
+export function clearCodeGone(): void {
+  if (!page.some((n) => n.id === CODE_GONE_ID)) return
+  page = withoutNotice(page, { id: CODE_GONE_ID })
+  touchAll()
 }
 
 /** The notices this page made, for the start page, which has no workspace. */

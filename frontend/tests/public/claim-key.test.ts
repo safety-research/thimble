@@ -1,6 +1,6 @@
 // The page's sign-in with the one-time code in thimble's link (src/lib/api.ts claimKey): `#p=` is posted with the
 // workspace of `?ws=`, and leaves the address once the server has answered; a code that is gone (410) shows the
-// page's own notice, whose × sends nothing; a claim the server never answered is tried again; a link opened in a tab
+// page's own notice, whose × sends nothing, until a later link signs the browser in; a claim the server never answered is tried again; a link opened in a tab
 // already on its page (a change of the hash alone) is claimed too; an earlier version's `#k=` leaves the address and is
 // never sent. After the claim the page asks which browser it is (GET /ui/paired). Every write waits for the claim
 // (backend hook_auth.LocalWriteGuard).
@@ -99,6 +99,27 @@ test('a code that is gone leaves the address and shows the page its own notice, 
   await notices.dismissNotice('logs', gone)
   expect(pageNotices(notices)).toEqual([])
   expect(requests.slice(before)).toEqual([])
+})
+
+test('a later link whose code signs the browser in takes the notice away, and a refusal other than 410 is no gone code', async () => {
+  const loc = stubPage('#p=old', '?ws=logs')
+  answers = [410, 204, 403]
+  const { claimKey, claimOnHashChange, claimRefused } = await import('../../src/lib/api.ts')
+  const notices = await import('../../src/lib/notices.ts')
+  await claimKey()
+  expect(claimRefused()).toBe(true)
+  expect(pageNotices(notices)).toHaveLength(1)
+  claimOnHashChange()
+  loc.hash = '#p=fresh'
+  listeners.hashchange()
+  await claimKey()
+  expect(claimRefused()).toBe(false)
+  expect(pageNotices(notices)).toEqual([])
+  loc.hash = '#p=other'
+  listeners.hashchange()
+  await claimKey()
+  expect(claimRefused()).toBe(false)
+  expect(posts).toEqual(['{"code":"old","ws":"logs"}', '{"code":"fresh","ws":"logs"}', '{"code":"other","ws":"logs"}'])
 })
 
 test('a claim the server does not answer is tried again, and the code stays in the address until it is', async () => {
