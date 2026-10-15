@@ -173,6 +173,16 @@ async function settle(page, ms = 400) {
   await page.waitForTimeout(ms)
 }
 
+/** The base the signed-in page `p` asks the API under: /b/<key>/api once it holds its key, which the server scopes the
+ * browser's cookie to (frontend lib/browserKey), else /api. */
+async function apiBase(p) {
+  const key = await p.evaluate(() => localStorage.getItem('thimble-browser-key') || '').catch(() => '')
+  return key ? `/b/${key}/api` : '/api'
+}
+
+/** An API path as the page names it without its browser's key: /b/<key>/api/x is /api/x. */
+const apiPath = (pathname) => pathname.replace(/^\/b\/[A-Za-z0-9_-]+(?=\/api(\/|$))/, '')
+
 async function sessionGone(page) {
   return (await page.getByText('No Claude Code session connected').count()) > 0
 }
@@ -440,11 +450,18 @@ async function main() {
       let paired = null
       const until = Date.now() + 10_000
       while (Date.now() < until) {
-        paired = await (await page.request.get(`${origin}/api/ui/paired`)).json().catch(() => null)
+        paired = await (await page.request.get(`${origin}${await apiBase(page)}/ui/paired`)).json().catch(() => null)
         if (paired?.paired === true) break
         await page.waitForTimeout(500)
       }
       check(paired?.paired === true, `the page did not sign in with the link's code: GET /api/ui/paired gave ${JSON.stringify(paired)}`)
+      // the cookie is scoped to this browser's own path, so the browser sends it to no other server's /api/ paths
+      const base = await apiBase(page)
+      const jar = (await page.context().cookies(origin)).filter((c) => c.name.startsWith('thimble-ui-'))
+      check(base !== '/api' && jar.length === 1 && `${jar[0].path.replace(/\/$/, '')}` === base,
+        `the browser's cookie is scoped to ${jar.map((c) => c.path).join(', ') || 'no path'}, not to its own ${base}/`)
+      const plain = await (await page.request.get(`${origin}/api/ui/paired`)).json().catch(() => null)
+      check(plain?.paired === false, `GET /api/ui/paired, outside the browser's own path, gave ${JSON.stringify(plain)}`)
       check(!(await page.locator('.chat-gate').count()), 'main shows the Start gate (.chat-gate)')
       check(!(await page.getByRole('button', { name: 'Start', exact: true }).count()), 'main shows a Start button')
       await hideNotices(page)
@@ -664,7 +681,7 @@ async function main() {
       const shelf = join(TREE, 'plugin', 'viewers')
       const examples = existsSync(shelf) ? readdirSync(shelf, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name) : []
       const slugs = async (q) => {
-        const r = await page.request.get(`${origin}/api/ws/${WS.name}/views${q}`)
+        const r = await page.request.get(`${origin}${await apiBase(page)}/ws/${WS.name}/views${q}`)
         const got = await r.json().catch(() => null)
         return Array.isArray(got) ? got.map((v) => String(v?.slug ?? '')) : []
       }
@@ -763,7 +780,9 @@ async function main() {
 
     await step('view-slow-call', `A view call of ${SLOW_S} s ends with its data, and holds up neither the File browser nor another view call`, async () => {
       const r = await page.evaluate(async ({ ws, slug, sleep }) => {
-        const post = (query) => fetch(`/api/ws/${ws}/views/${slug}/records`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query }) })
+        const key = localStorage.getItem('thimble-browser-key')
+        const base = key ? `/b/${key}/api` : '/api'
+        const post = (query) => fetch(`${base}/ws/${ws}/views/${slug}/records`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query }) })
         const timed = async (f) => {
           const t = performance.now()
           const res = await f()
@@ -771,7 +790,7 @@ async function main() {
         }
         const slow = timed(() => post({ sleep }))
         await new Promise((ok) => setTimeout(ok, 1_000))
-        const list = await timed(() => fetch(`/api/corpora/${ws}/sources?path=&depth=1`))
+        const list = await timed(() => fetch(`${base}/corpora/${ws}/sources?path=&depth=1`))
         const other = await timed(() => post({}))
         return { slow: await slow, list, other }
       }, { ws: WS.name, slug: VIEW.slug, sleep: SLOW_S })
@@ -832,11 +851,11 @@ async function main() {
         let asked = 0  // GETs of the API (a write, such as the telemetry's, is refused 403 and never repeated)
         p.on('request', (r) => {
           const u = new URL(r.url())
-          if (u.origin === origin && u.pathname.startsWith('/api/') && r.method() === 'GET') asked++
+          if (u.origin === origin && apiPath(u.pathname).startsWith('/api/') && r.method() === 'GET') asked++
         })
         p.on('response', (r) => {
           const u = new URL(r.url())
-          if (u.origin === origin && u.pathname.startsWith('/api/') && r.request().method() === 'GET') reads.push(`${r.status()} ${u.pathname}`)
+          if (u.origin === origin && apiPath(u.pathname).startsWith('/api/') && r.request().method() === 'GET') reads.push(`${r.status()} ${apiPath(u.pathname)}`)
         })
         await p.goto(`${origin}/?ws=${encodeURIComponent(WS.name)}`)
         const line = p.locator('.signin-line')
@@ -858,7 +877,7 @@ async function main() {
         const refused = await unsigned.json().catch(() => null)
         check(unsigned.status() === 401 && refused?.signin === true && typeof refused?.detail === 'string',
           `GET /api/workspaces without a cookie answered ${unsigned.status()} ${JSON.stringify(refused)?.slice(0, 160)}, not 401 {detail, signin: true}`)
-        const signed = await page.request.get(`${origin}/api/workspaces`)
+        const signed = await page.request.get(`${origin}${await apiBase(page)}/workspaces`)
         check(signed.status() === 200, `GET /api/workspaces with the browser's cookie answered ${signed.status()}, not 200`)
         return { detail: `"${said}" and nothing else; its reads ${[...new Set(reads)].join(', ') || 'none'}, then none for 3 s; GET /api/workspaces 401 {signin: true} without the cookie, 200 with it`, shots: [s] }
       } finally {
@@ -892,7 +911,7 @@ async function main() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ name, kind: 'regex', spec: 'x', labels: ['x', 'other'] }),
       })
-      const list = await page.request.get(`${origin}/api/ws/${WS.name}/concepts`)
+      const list = await page.request.get(`${origin}${await apiBase(page)}/ws/${WS.name}/concepts`)
       const made = JSON.stringify(await list.json().catch(() => null)).includes(name)
       check(r.status === 403 && !made, `an unsigned POST /api/ws/${WS.name}/concepts answered ${r.status}${made ? ', and the label was made' : ''}`)
       // main's message, signed with server.json's token as a hook or the CLI signs: an analyst route takes the cookie alone
@@ -905,7 +924,7 @@ async function main() {
       check(signed.status === 403 && /^open thimble from the link .*to make changes$/.test(said),
         `a POST /api/ws/${WS.name}/events {kind: "main"} signed with the token answered ${signed.status} ${said.slice(0, 160)}, not 403 with hook_auth.WRITE_REFUSED`)
       // a kind the browser never sends, with the browser's own cookie
-      const odd = await page.request.post(events, { data: { kind: 'start_agent', payload: { text: 'E2E: a start_agent the browser never sends' } } })
+      const odd = await page.request.post(`${origin}${await apiBase(page)}/ws/${WS.name}/events`, { data: { kind: 'start_agent', payload: { text: 'E2E: a start_agent the browser never sends' } } })
       check(odd.status() === 400, `a POST /api/ws/${WS.name}/events {kind: "start_agent"} with the browser's cookie answered ${odd.status()}, not 400`)
       return { detail: `401 {signin: true} for an unsigned GET /api/ws/${WS.name}/concepts, 401 with no body for HEAD, 200 signed with the token; /api/health and /api/ui/paired open, health with boot, ok and ui only; 403 for an unsigned POST /api/ws/${WS.name}/concepts, and no label made; 403 with WRITE_REFUSED for main's message signed with the token alone; 400 for a start_agent event with the cookie` }
     })
