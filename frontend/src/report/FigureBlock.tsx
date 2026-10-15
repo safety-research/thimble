@@ -2,9 +2,10 @@
 // card's width (or its body, for cards with no run), and a caption edited in place. Before a card is picked the block is
 // the picker. Locked (a scene, a slide), the caption is text; `FigureView` is the same figure outside the editor. A
 // figure follows its card: when the card changes (the stream's `cell` record) it is read again and drawn in place, and a
-// caption that still says the card's takeaway word for word takes the new takeaway.
-import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import type { BlockNoteEditor } from '@blocknote/core'
+// caption that still says the card's takeaway word for word takes the new takeaway. In the editor the question line is
+// a handle that moves the figure, as the block's actions in the gutter do.
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
+import { SideMenuExtension, type BlockNoteEditor } from '@blocknote/core'
 import { CardBody } from '../canvas/bodies'
 import { useConceptDetail, useConcepts } from '../canvas/concepts'
 import { CanvasContext } from '../canvas/context'
@@ -19,10 +20,11 @@ import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { hhmm } from '../lib/time'
 import { parseRef } from '../lib/refs'
+import { track } from '../lib/telemetry'
 import { teleport } from '../lib/teleport'
 import type { Cell, WriteupFigure } from '../lib/types'
 import { useReportCtx } from './context'
-import { figureCandidates, readableText } from './model'
+import { anchorFor, figureCandidates, readableText } from './model'
 
 const FIGURE_TABLE_ROWS = 20
 /** How long a figure waits after its card's last change before it reads the card again, ms: the stream replays a
@@ -89,8 +91,55 @@ function storedFigure(sections: { figures?: WriteupFigure[] }[] | undefined, id:
   return undefined
 }
 
+/** What makes the question line a handle that moves the figure block: the drag the block's actions in the gutter start
+ * (BlockNote's side menu, Editor.tsx BlockActions), so it shows the same drop line and lands the same way. None outside
+ * an editor that has the side menu. */
+export interface FigureDrag {
+  onDragStart: (e: DragEvent<HTMLElement>) => void
+  onDragEnd: () => void
+}
+
+/** The end of the question-line drag that is under way, waiting for its drop (figureDrag). */
+let pendingDrop: (() => void) | null = null
+
+function figureDrag(editor: BlockNoteEditor<any, any, any>, blockId: string, slug: string): FigureDrag | undefined {
+  const sideMenu = editor.getExtension?.(SideMenuExtension)
+  if (!sideMenu) return undefined
+  const stopWaiting = () => {
+    if (pendingDrop) document.removeEventListener('drop', pendingDrop)
+    pendingDrop = null
+  }
+  return {
+    onDragStart: (e) => {
+      const block = editor.getBlock(blockId)
+      if (!block) return e.preventDefault()
+      const source = e.currentTarget
+      stopWaiting()
+      sideMenu.blockDragStart(e, block)
+      // a drop that moves the figure takes the question line that started the drag off the page with its old block, so
+      // its dragend never reaches the page: once the drop is handled, the drag is ended here, the drag picture taken
+      // away, and the page hears the end it would have heard (the editor's caret and focus, BlockNote's drag state)
+      const dropped = () => {
+        stopWaiting()
+        window.setTimeout(() => {
+          if (source.isConnected) return // its own dragend comes
+          sideMenu.blockDragEnd()
+          document.dispatchEvent(new Event('dragend'))
+        }, 0)
+      }
+      pendingDrop = dropped
+      document.addEventListener('drop', dropped)
+      track('ui-click', { target: anchorFor(slug, { id: block.id, type: block.type }), detail: { action: 'block-move', handle: 'question' } })
+    },
+    onDragEnd: () => {
+      stopWaiting()
+      sideMenu.blockDragEnd()
+    },
+  }
+}
+
 export function FigureBlock({ block, editor }: FigureBlockProps) {
-  const { ws, docRef, readOnly } = useReportCtx()
+  const { ws, slug, docRef, readOnly } = useReportCtx()
   const stored = storedFigure(docRef.current?.sections, block.id)
   const setProps = (props: Partial<{ cell: string; caption: string }>) => editor.updateBlock(block.id, { props: { ...block.props, ...props } })
   const remove = () => editor.removeBlocks([block.id])
@@ -103,7 +152,8 @@ export function FigureBlock({ block, editor }: FigureBlockProps) {
       </div>
     )
   }
-  return <Figure ws={ws} id={block.id} cellRef={block.props.cell} caption={block.props.caption} stored={stored} readOnly={!!readOnly} onCaption={(v) => setProps({ caption: v })} onRemove={remove} />
+  const drag = readOnly ? undefined : figureDrag(editor, block.id, slug)
+  return <Figure ws={ws} id={block.id} cellRef={block.props.cell} caption={block.props.caption} stored={stored} readOnly={!!readOnly} onCaption={(v) => setProps({ caption: v })} onRemove={remove} drag={drag} />
 }
 
 /** A figure standing on its own, outside the editor, from its stored record: a scene's or a slide's figure. `bare`
@@ -124,6 +174,8 @@ interface FigureProps {
   bare?: boolean
   onCaption?: (caption: string) => void
   onRemove?: () => void
+  /** the question line's drag, in the editor */
+  drag?: FigureDrag
 }
 
 /** The width inside an element's padding, where its children lay out. */
@@ -132,7 +184,7 @@ function contentWidth(el: HTMLElement): number {
   return Math.floor(el.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0))
 }
 
-function Figure({ ws, id, cellRef, caption, stored, readOnly, bare = false, onCaption, onRemove }: FigureProps) {
+function Figure({ ws, id, cellRef, caption, stored, readOnly, bare = false, onCaption, onRemove, drag }: FigureProps) {
   const pending = !cellRef && !!stored?.make && (stored.status ?? 'pending') === 'pending'
   // Measure the figure's own element, not its body: the body draws nothing until it has a width, so a body measured at 0
     // in a hidden tab would stay at 0. A width of 0 keeps the last one, so the chart is not redrawn on every tab switch.
@@ -231,7 +283,9 @@ function Figure({ ws, id, cellRef, caption, stored, readOnly, bare = false, onCa
     <figure className="wu-fig" ref={setBox} data-fig={id} data-anchor={cellRef || undefined} data-anchor-text={caption || cell?.title || ''} data-anchor-parts="" contentEditable={false}>
       {!pending && (
         <div className="wu-fig-head">
-          <span className="wu-fig-q">{cell?.title || (cell === null ? 'The card is gone' : '')}</span>
+          <span className="wu-fig-q" draggable={drag ? true : undefined} onDragStart={drag?.onDragStart} onDragEnd={drag?.onDragEnd}>
+            {cell?.title || (cell === null ? 'The card is gone' : '')}
+          </span>
           {cellRef && (
             <button type="button" className="wu-fig-from" onClick={() => teleport(cellRef)}>
               from canvas

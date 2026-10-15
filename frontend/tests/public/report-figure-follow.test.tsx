@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 // A report figure follows its card (src/report/FigureBlock.tsx): when the card changes, the stream's `cell` record makes
 // the figure read it again and draw it in place, and a caption that still says the card's old takeaway word for word
-// takes the new one. A caption the analyst edited stays as they wrote it.
+// takes the new one. A caption the analyst edited stays as they wrote it. In the editor the question line is a handle
+// that moves the figure, with the drag the block actions in the gutter start.
 import { act } from 'react'
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
 import { api } from '../../src/lib/api'
@@ -122,5 +123,60 @@ describe('followedCaption', () => {
   })
   test("a caption made from the question follows the card's first takeaway", () => {
     expect(followedCaption('Q', { title: 'Q', takeaway: '' }, { title: 'Q', takeaway: 'Few runs end early.' })).toBe('Few runs end early.')
+  })
+})
+
+describe("a figure's question line moves it", () => {
+  /** An editor with BlockNote's side menu, whose drag calls are recorded. */
+  const withSideMenu = () => {
+    const sideMenu = { blockDragStart: vi.fn(), blockDragEnd: vi.fn() }
+    const block = { id: 'f1', type: 'figure', props: { cell: 'card:c1', caption: '' } }
+    const editor = { updateBlock: vi.fn(), removeBlocks: vi.fn(), getBlock: vi.fn(() => block), getExtension: vi.fn(() => sideMenu) }
+    return { sideMenu, editor, block }
+  }
+  const dragEvent = (type: string) => {
+    const e = new Event(type, { bubbles: true, cancelable: true }) as Event & { dataTransfer: unknown; clientY: number }
+    e.dataTransfer = { setData: () => {}, clearData: () => {} }
+    e.clientY = 0
+    return e
+  }
+
+  test('a drag on the question line starts the drag the gutter starts, and its dragend ends it', async () => {
+    const { sideMenu, editor, block } = withSideMenu()
+    window.history.replaceState(null, '', '/?ws=w-drag-1')
+    const el = await mount(<FigureBlock block={block} editor={editor as never} />)
+    await settle()
+    const q = el.querySelector<HTMLElement>('.wu-fig-q')!
+    expect(q.getAttribute('draggable')).toBe('true')
+    await act(async () => void q.dispatchEvent(dragEvent('dragstart')))
+    expect(sideMenu.blockDragStart).toHaveBeenCalledTimes(1)
+    expect(sideMenu.blockDragStart.mock.calls[0][1]).toBe(block)
+    await act(async () => void q.dispatchEvent(dragEvent('dragend')))
+    expect(sideMenu.blockDragEnd).toHaveBeenCalledTimes(1)
+  })
+
+  test('a drop that takes the question line off the page ends the drag, and the page hears its end', async () => {
+    const { sideMenu, editor, block } = withSideMenu()
+    window.history.replaceState(null, '', '/?ws=w-drag-2')
+    const el = await mount(<FigureBlock block={block} editor={editor as never} />)
+    await settle()
+    const q = el.querySelector<HTMLElement>('.wu-fig-q')!
+    await act(async () => void q.dispatchEvent(dragEvent('dragstart')))
+    const ends: Event[] = []
+    const heard = (e: Event) => void ends.push(e)
+    document.addEventListener('dragend', heard)
+    // the drop moves the block: its old element, with the question line, leaves the page
+    el.remove()
+    document.dispatchEvent(dragEvent('drop'))
+    await settle()
+    document.removeEventListener('dragend', heard)
+    expect(sideMenu.blockDragEnd).toHaveBeenCalledTimes(1)
+    expect(ends).toHaveLength(1)
+  })
+
+  test('a locked figure, and one outside the editor, has no handle', async () => {
+    const el = await mount(<FigureBlock block={{ id: 'f1', props: { cell: 'card:c1', caption: '' } }} editor={{ updateBlock: vi.fn(), removeBlocks: vi.fn() } as never} />)
+    await settle()
+    expect(el.querySelector('.wu-fig-q')?.hasAttribute('draggable')).toBe(false)
   })
 })
