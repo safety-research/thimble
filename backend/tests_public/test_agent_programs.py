@@ -231,11 +231,13 @@ def test_an_agent_s_own_sandbox_switch_runs_it_outside_the_sandbox_without_the_e
     """The dev agent's own `sandbox: off` (code tickets keep their fence keys) runs it outside the sandbox without the
     enforce refusal, and so does a writer's for an extension's program that runs the writer, since a program is no
     subagent of main and keeps its agent's box keys. thimble's own writer does not read it: the writers share main's
-    fence. A value the key does not take is an error for either agent."""
+    fence. A value the key does not take is an error for either agent. (sandbox.enforce is off by default, so the test
+    turns it on.)"""
     monkeypatch.setattr(userconf, "sandbox_runs", lambda refresh=False: False)
+    _config({"sandbox": {"enforce": True}})
     with pytest.raises(userconf.ConfigError):
         userconf.session(CORPUS, "dev")
-    _config({"agents": {"dev": {"sandbox": "off"}, "writer": {"sandbox": "off"}}})
+    _config({"sandbox": {"enforce": True}, "agents": {"dev": {"sandbox": "off"}, "writer": {"sandbox": "off"}}})
     assert not userconf.session(CORPUS, "dev").sandboxed
     assert not userconf.session(CORPUS, "writer", program=True).sandboxed
     with pytest.raises(userconf.ConfigError):

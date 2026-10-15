@@ -57,7 +57,7 @@ def test_the_fence_keeps_the_corpus_read_only_and_lets_main_write_only_the_agent
     box, perms = fence["sandbox"], _rules(fence)
     ws = config.WORKSPACES_DIR.resolve() / "logs"
     assert box["enabled"] and not box["allowUnsandboxedCommands"] and not box["autoAllowBashIfSandboxed"]
-    assert box["failIfUnavailable"] is True, "sandbox.enforce, on by default"
+    assert box["failIfUnavailable"] is False, "sandbox.enforce, off by default"
     fs = box["filesystem"]
     assert fs["allowWrite"] == [str(ws / d) for d in ("orient/work", "writers", "critique-work", "check-work",
                                                        "views-work", "extension/views", "card-libs")]
