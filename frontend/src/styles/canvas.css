@@ -739,9 +739,6 @@ body[data-cmd] .board-stage * {
 .bcell-failed {
   color: var(--status-negative);
 }
-.bcell-spacer {
-  flex: 1;
-}
 
 /* -------- bodies (canvas/bodies.tsx) -------- */
 .bcell.is-sized .bcell-output,
