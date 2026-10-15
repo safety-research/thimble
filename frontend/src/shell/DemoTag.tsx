@@ -1,5 +1,6 @@
 // The Demo tag beside the workspace's folder in the top bar, on a demo page only (lib/demo): example data and a finished
-// analysis, with no Claude Code session behind the page. Its tooltip says so; nothing else on the page explains it.
+// analysis, with no Claude Code session behind the page. Its tooltip says so; the line under the top bar (DemoLine) says
+// the data is not the analyst's own.
 import { Chip } from '../components/Chip'
 import { useTooltip } from '../components/Tooltip'
 import { DEMO_TAG, DEMO_TIP, useDemo } from '../lib/demo'

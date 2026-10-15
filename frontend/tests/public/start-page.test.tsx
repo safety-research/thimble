@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 // thimble's start page (src/shell/StartPage.tsx) and the top bar's switcher (TopBar WorkspaceSwitcher), which draw the
-// server's workspaces (GET /workspaces) in the groups Demo, Examples and Your folders, an empty group left out, each row
+// server's workspaces (GET /workspaces) in the groups Demo, Examples and Your folders, an empty group left out, under one
+// line that says the demo datasets are example data while one is listed, each row
 // a link to its workspace, a demo shown by its dataset's name rather than its workspace's demo-<dataset>, and a demo or an
 // example opened at the view its row names. A URL with no workspace, or with one the server does not hold, is the start
 // page (App), and one naming a workspace renamed since goes to its new name; a workspace opened the first time without a
@@ -9,6 +10,7 @@ import { act } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import App from '../../src/App.tsx'
 import { bus } from '../../src/lib/bus.ts'
+import { DEMO_START_LINE } from '../../src/lib/demo.ts'
 import { CODE_GONE_TEXT, showCodeGone } from '../../src/lib/notices.ts'
 import type { CorpusInfo, WorkspaceRow } from '../../src/lib/types.ts'
 import { groupWorkspaces, openingRef, renamedTo, storageKey, withWorkspace, workspaceHref, workspaceLabel } from '../../src/lib/workspace.ts'
@@ -101,8 +103,26 @@ test('a URL with no workspace is the start page: a title and the rows, each a li
   expect(logs.textContent).toContain('~/data/logs')
   expect(el.querySelector('[aria-current]')).toBeNull()
   expect(el.querySelector('.start-missing')).toBeNull()
-  // no paragraph explains anything: the title, the group titles and the rows
-  expect(el.querySelectorAll('p').length).toBe(0)
+  // no paragraph explains anything: the title, the line that says the demo datasets are example data, the group titles
+  // and the rows
+  expect([...el.querySelectorAll('p')].map((p) => p.className)).toEqual(['start-demo'])
+})
+
+test('while a demo dataset is listed, the line under the title says it is example data, not your files, and how to open your own folder', async () => {
+  const el = await mount(<App />)
+  await settle()
+  const line = el.querySelector('.start-title + .start-demo') as HTMLElement
+  expect(DEMO_START_LINE).toBe('The demo datasets are example data, not your files. To open your own folder, run `thimble` in it.')
+  expect(line.textContent).toBe('The demo datasets are example data, not your files. To open your own folder, run thimble in it.')
+  expect([...line.querySelectorAll('code')].map((c) => c.textContent)).toEqual(['thimble'])
+  // with no demo dataset, no line, and no other paragraph
+  unmountAll()
+  served = ROWS.filter((r) => r.kind !== 'demo')
+  const mine = await mount(<App />)
+  await settle()
+  expect(mine.querySelectorAll('a.ws-row').length).toBe(2)
+  expect(mine.querySelector('.start-demo')).toBeNull()
+  expect(mine.querySelectorAll('p').length).toBe(0)
 })
 
 test("a link's sign-in code that is gone shows under the title, and its × takes it away with no request", async () => {

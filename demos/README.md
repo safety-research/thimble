@@ -102,7 +102,9 @@ orientation's thread with the coverage line the manifest's `orientation` keeps, 
 the workspace pre-cached: `precached.json` in the workspace, and `precached` in the orientation's record and its thread's
 meta. In the browser the workspace is then a demo page until a session first attaches, rather than grayed under the
 card that asks for one:
-- the top bar shows a Demo tag, whose tooltip says "Example data and a finished analysis; Claude isn't connected here";
+- the top bar shows a Demo tag, whose tooltip says "Example data and a finished analysis; Claude isn't connected here",
+  and the line under it says "This is example data, not your files. To open your own folder, run `thimble` in it." The
+  start page, which `thimble demo` opens, says the same over its demo datasets;
 - Files, the views, the canvas, the report, labels and filters work as they do without a session;
 - the orientation's thread opens with a card that says it ran in advance, when, on what model and what it left;
 - the chat's composer is disabled, so nothing can be typed there, and hovering it shows "This is a demo and thimble

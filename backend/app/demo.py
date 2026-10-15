@@ -32,9 +32,10 @@ the datasets), which archives it and installs the pre-cache again. When it holds
 than the one here (precache_outdated), a line says so and names the command, `thimble demo --refresh <name>`.
 
 Attaching. The demo is static: it opens the start page and starts no Claude Code session. Each workspace it installed
-is then a demo page in the browser until a session attaches to it (frontend lib/demo): a Demo tag in the top bar,
-everything that works without a session, and one note in the chat for an action that needs Claude, which says it is a
-demo. Unless a full pre-cache's session was kept, it prints for each dataset the line FROZEN_LINE and the command that
+is then a demo page in the browser until a session attaches to it (frontend lib/demo): a Demo tag in the top bar and a
+line under it that says it is example data, not the analyst's files, and how to open their own folder (as the start
+page says over its demo datasets), everything that works without a session, and one note in the chat for an action
+that needs Claude, which says it is a demo. Unless a full pre-cache's session was kept, it prints for each dataset the line FROZEN_LINE and the command that
 starts a session in the dataset's folder, `cd <folder> && thimble`, and nothing else (attach_lines). --attach starts
 one at once, after `claude auth status` says a login is configured (when it says none, it says how to log in); with it,
 or a kept session, it prints how to attach later, and that `thimble -c` there continues the last session. A session

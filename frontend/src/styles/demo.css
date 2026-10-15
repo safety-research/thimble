@@ -1,5 +1,6 @@
-/* A demo page (lib/demo): the Demo tag beside the workspace's folder in the top bar (shell/DemoTag), and the chat's
-   note when an action needs Claude there (chat/DemoNote), a .chat-continue line with its × at the right. */
+/* A demo page (lib/demo): the Demo tag beside the workspace's folder in the top bar (shell/DemoTag), the line under the
+   top bar (below), and the chat's note when an action needs Claude there (chat/DemoNote), a .chat-continue line with its
+   × at the right. */
 .shell-demo {
   flex: none;
   cursor: default;
@@ -11,4 +12,22 @@
 .chat-demo-note-x {
   flex: none;
   margin: -4px -6px -4px 0;
+}
+/* The line under the top bar on a demo page (shell/DemoLine), on the window's paper over the chat column and the panes,
+   its left edge at the brand's; and the start page's line under its title while it lists a demo dataset (StartPage) */
+.shell-demo-line {
+  flex: none;
+  margin: 0;
+  padding: 0 24px 10px;
+  color: var(--text-secondary);
+  font: var(--type-ui-sm);
+}
+.start-demo {
+  margin: -12px 0 24px;
+  color: var(--text-secondary);
+  font: var(--type-body);
+}
+.shell-demo-line code,
+.start-demo code {
+  font: var(--type-mono-sm);
 }
