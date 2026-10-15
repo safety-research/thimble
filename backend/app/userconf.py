@@ -51,7 +51,7 @@ import sys
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, NamedTuple
+from typing import Any, Callable
 
 from . import config, permission_hook, sandbox_allow
 
@@ -978,23 +978,13 @@ def session(c: str | None, agent: str, *, sandbox: bool = True, program: bool = 
     return Session(c, agent, mine, sandbox and runs, enforced=bool(box["enforce"]))
 
 
-# --------------------------------------------------------------------------- main's fence
+# --------------------------------------------------------------------------- the hooks module's rules
 
 
 def config_files(c: str | None) -> list[Path]:
     """thimble's config files, whose edits ask (module note, edits of the config): the one in thimble's home and the
     workspace's."""
     return [global_file(), *([workspace_file(c)] if c else [])]
-
-
-class Rule(NamedTuple):
-    """One permission rule of main's fence (main_rules): Claude Code's `behavior` list it goes in (ask, deny or allow),
-    the rule, and its `cause`: `data` (an edit of the corpus), `config` (an edit of thimble's config), `web` (the web
-    tools), `private` (thimble's token files and the links folder) or `state` (the files thimble keeps its records in)."""
-
-    behavior: str
-    rule: str
-    cause: str
 
 
 LINKS_DIR = "links"  # under thimble's home: the dashboard link with its key, briefly (cli.LINKS_DIR)
@@ -1022,38 +1012,6 @@ def checkout_git() -> list[Path]:
     installed copy."""
     git = config.REPO_ROOT / ".git"
     return [git] if git.exists() else []
-
-
-def main_rules(c: str) -> list[Rule]:
-    """The permission rules of main's fence for workspace `c` (cli.main_fence; module note, one fence), each with its
-    cause: an edit of the corpus asks, or is denied or left to the mode, by the orientation's `data`; an edit of
-    thimble's config files or the workspace's settings.json asks; the web tools are denied or allowed by its `web`, and
-    at "ask" get no rule, so the permission mode decides (module note, one fence); main's kept mode, the workspace's
-    records (STATE_PATHS), the code tickets' (dev_files) and the live checkout's git folder (checkout_git) are not
-    edited; the token files and the links folder are neither read nor edited; the critique folder is read unasked,
-    since the critic reads its digest and brief there. No rule for installs, which follow Claude Code's permission mode. A config with an
-    error gives the defaults' rules."""
-    conf = agent_conf(load_or_defaults(c)[0], "orientation")
-    ws = config.WORKSPACES_DIR.resolve() / c
-    out: list[Rule] = []
-    corpus = f"Edit(/{Path(os.path.realpath(config.corpus_dir(c)))}/**)"
-    if conf["data"] == "ask":
-        out.append(Rule("ask", corpus, "data"))
-    elif conf["data"] == "off":
-        out.append(Rule("deny", corpus, "data"))
-    out += [Rule("ask", f"Edit(/{f})", "config") for f in [*config_files(c), ws / "settings.json"]]
-    web = {"off": "deny", "allow": "allow"}.get(conf["web"])
-    if web:
-        out += [Rule(web, t, "web") for t in WEB_TOOLS]
-    out.append(Rule("deny", f"Edit(/{main_modes_file()})", "state"))
-    out += [Rule("deny", f"Edit(/{ws / p})", "state") for p in STATE_PATHS]
-    out += [Rule("deny", f"Edit(/{f})", "state") for f in dev_files()]
-    out += [Rule("deny", f"Edit(/{g}/**)", "state") for g in checkout_git()]
-    out += [Rule("deny", r, "private") for r in private_rules()]
-    links = global_file().parent / LINKS_DIR
-    out += [Rule("deny", f"Read(/{links}/**)", "private"), Rule("deny", f"Edit(/{links}/**)", "private")]
-    out.append(Rule("allow", f"Read(/{ws / 'critique'}/**)", "state"))
-    return out
 
 
 def _spellings(*paths: Path | str) -> list[str]:

@@ -1,5 +1,5 @@
-"""No agent thimble starts leaves anything in the corpus folder. thimble's own agents are subagents of main, whose fence
-keeps the corpus read-only (cli.main_fence), and write in work folders outside it (subagents.write_dirs). Claude Code's
+"""No agent thimble starts leaves anything in the corpus folder. thimble's own agents are subagents of main, which run in
+main's permission mode and write in work folders outside the corpus (subagents.write_dirs). Claude Code's
 Bash sandbox makes a folder of its own in the folder a sandboxed command starts in, so every `claude -p` session thimble
 starts itself (a code ticket's, an extension's program's) runs in a folder of its own with the corpus added, and each of
 its Bash commands starts there again: a `cd` into the corpus does not carry over to the next command

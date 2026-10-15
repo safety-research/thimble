@@ -3534,7 +3534,7 @@ def build_problem_for(c: str) -> str:
 def build_problem() -> str:
     """Why a view cannot be built and checked on this machine, '' when it can: the checks need Node 20+ and the
     frontend's packages. The line reaches the orientation and main too, so it names what is missing and no command
-    (`thimble doctor` names them)."""
+    (`thimble doctor --verbose` names them)."""
     version = ""
     if node := shutil.which("node"):  # the one shoot runs
         with contextlib.suppress(OSError):

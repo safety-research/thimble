@@ -209,10 +209,8 @@ async def test_without_a_live_module_a_start_is_refused_before_any_request(bridg
 async def test_in_plan_mode_nothing_starts_and_a_plain_claude_is_no_refusal(bridge, models, monkeypatch):
     """With the module live, a session thimble's launcher did not start starts agents as the launcher's does: no
     refusal before the request. Plan mode still refuses a typed start."""
-    from app import cc_plugin, session
+    from app import session
 
-    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: False, raising=False)
-    monkeypatch.setattr(cc_plugin, "main_launched", lambda c: False, raising=False)
     assert subagents.refusal_before(CORPUS) is None and subagents.refusal_before(CORPUS, click=True) is None
     monkeypatch.setattr(session, "main_mode", lambda c: "plan")
     ans = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.TYPED)

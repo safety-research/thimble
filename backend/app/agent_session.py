@@ -238,8 +238,8 @@ def shared_prompt(cwd: Path) -> str:
 
 def own_rules() -> list[str]:
     """The --allowedTools of every session thimble starts (module note, permissions): every tool of the plugin's thimble
-    server, by the server's rule main's launcher passes too (cli.MCP_TOOLS_RULE), and each of the plugin's own skills by
-    its exact name, for the plugin copy the session loads (cli.skill_rules)."""
+    server (cli.MCP_TOOLS_RULE), and each of the plugin's own skills by its exact name, for the plugin copy the session
+    loads (cli.skill_rules)."""
     from . import cli  # noqa: PLC0415 — cli is large, and the rules are the launcher's
 
     return [cli.MCP_TOOLS_RULE, *cli.skill_rules(PLUGIN_DIR)]

@@ -838,8 +838,8 @@ async def instance_route(c: str) -> dict:
 
 
 def _main_state(c: str) -> dict:
-    """What main's meta adds for the browser (module_bridge.main_meta): `fenced`, `launched`, `module` and `module_why`,
-    which the unfenced banner and a refused start read."""
+    """What main's meta adds for the browser (module_bridge.main_meta): `module` and `module_why`, which a refused start
+    reads."""
     from . import module_bridge  # noqa: PLC0415 — module_bridge imports the session modules
 
     return module_bridge.main_meta(c)

@@ -57,7 +57,7 @@ slug, and goes when none gives one.
 
 Two active extensions that give the same view or card type, or that both replace the orientation's instructions, one
 role or one task, lose it both (the instructions, the role and the task stay thimble's), and `add`, Settings and
-`thimble doctor` name the conflict. Settings also says when another extension's program runs a role, so an addition to
+`thimble doctor --verbose` name the conflict. Settings also says when another extension's program runs a role, so an addition to
 it is not used.
 
 thimble ships some extensions (builtin_dir()); `add` adds one by name, and those of SHIPPED_ON are added on thimble's

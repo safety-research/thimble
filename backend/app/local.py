@@ -14,9 +14,9 @@ mode, whose server owns it. A process that lost its environment (THIMBLE_HOME) f
 home and does nothing.
 
 Code a model wrote never runs in the shim: card code, code labels and the rerun of cards after a label changed run
-through `thimble-run` in the caller's Bash, inside main's sandbox (cardrun.py). The shim runs the jobs a tool leaves
-running (a prompt label's run, the card check of a card `thimble-run` wrote) on its event loop, and they end with the
-session, as browser-mode jobs end with it.
+through `thimble-run` in the caller's Bash, with the caller's permission mode (cardrun.py). The shim runs the jobs a
+tool leaves running (a prompt label's run, the card check of a card `thimble-run` wrote) on its event loop, and they end
+with the session, as browser-mode jobs end with it.
 
     python -m app.local state <surface> --cwd <dir> [args]    prints JSON (STATE_USAGE)
     python -m app.local act <kind> --cwd <dir> '<json>'        prints {ok, ...} (ACT_USAGE)
@@ -54,9 +54,8 @@ NOT_TERMINAL = ("`{name}` was not run: this workspace's session runs in browser 
                 "the tools. Start it again with `thimble`.")
 
 _started: set[str] = set()  # the workspaces this process has served a call for (_start)
-# The plugin copy this session loaded, which the shim names from its own path (plugin/bin/thimble-mcp): the launcher's
-# `--allowedTools` rule for the card runner names that copy's bin/thimble-run (cli.launch_args), so the commands the
-# tools give name it too (cardrun.bin_path). None outside the shim.
+# The plugin copy this session loaded, which the shim names from its own path (plugin/bin/thimble-mcp), so the commands
+# the tools give name that copy's bin/thimble-run (cardrun.bin_path). None outside the shim.
 PLUGIN_ROOT: Path | None = None
 
 

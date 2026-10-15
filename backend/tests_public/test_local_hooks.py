@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from terminal_fakes import FileModule, write_launch
 
-from app import agents, cc_plugin, config, event_files, events, local_hooks, orient_session, orientation, session
+from app import agents, config, event_files, events, local_hooks, orient_session, orientation, session
 from app import subagent_files as sf
 from app import subagents
 
@@ -30,7 +30,6 @@ COVERAGE = "It opened 3 of 7 files · 12% of records."
 @pytest.fixture(autouse=True)
 def _fresh(workspaces_tmp, tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-config"))
-    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: True)
     monkeypatch.setattr(local_hooks, "SETTLE_S", 0.3)
     monkeypatch.setattr(local_hooks, "TICK_S", 0.05)
     monkeypatch.setattr(subagents, "HANDBACK_WAIT_S", 0.2)

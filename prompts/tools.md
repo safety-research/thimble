@@ -1209,14 +1209,6 @@ thimble's agents continue only when the analyst asks. If they asked, call messag
 
 Your Claude Code session is in plan mode, where thimble's agents would have to ask you before every card and every edit, so none of them starts or takes a message there. Switch out of plan mode first (shift+tab in your terminal).
 
-## start-refused-not-launched
-
-This session was not started with `thimble`, so it and its subagents run without thimble's sandbox and can change your files, and thimble's agents cannot start in it. Quit and run `thimble` in this folder.
-
-## start-refused-unfenced
-
-This session was started with `thimble`, but it runs without thimble's sandbox: {reason}. So thimble's agents cannot start in it. Main, its threads, cards and labels still work. `thimble doctor` says what to fix; on Linux, `install.sh --sandbox-deps` installs the sandbox's packages. Then quit and run `thimble -c` in this folder.
-
 ## start_agent-fork
 
 Filed {what}. Main is starting {agent}, and the analyst has nothing to do. Tell the analyst in one line in the thread that it is filed and main is starting {agent}.

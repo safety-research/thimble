@@ -1,6 +1,6 @@
 """Stand-ins for what other lanes of the subagent change own, for the tests of thimble's agents as subagents
-(subagents.py): the plugin module's bridge (app.module_bridge), main's fence check (cc_plugin.main_fenced) and the hint
-sections prompts/tools.md gains for them. Each is a fixture a test asks for by name."""
+(subagents.py): the plugin module's bridge (app.module_bridge) and the hint sections prompts/tools.md gains for them.
+Each is a fixture a test asks for by name."""
 from __future__ import annotations
 
 import sys
@@ -22,8 +22,6 @@ HINTS = {
     "start-plan-mode": "PLAN MODE",
     "writer-context-file": "READ {path} FIRST",
     "critic-brief-file": "READ {path} FIRST",
-    "start-refused-not-launched": "NOT LAUNCHED",
-    "start-refused-unfenced": "UNFENCED: {reason}",
     "start-refused-no-module": "NO MODULE: {reason}",
     "orient-continue-earlier-session": "EARLIER SESSION: {session}",
     "orient-continue-earlier-version": "EARLIER VERSION",
@@ -81,9 +79,9 @@ class FakeBridge:
 
 @pytest.fixture()
 def bridge(monkeypatch) -> FakeBridge:
-    """A FakeBridge installed as app.module_bridge, with main fenced (cc_plugin.main_fenced) and the hints of HINTS."""
+    """A FakeBridge installed as app.module_bridge, with the hints of HINTS."""
     import app
-    from app import cc_plugin, tools
+    from app import tools
 
     fake = FakeBridge()
     mod = types.ModuleType("app.module_bridge")
@@ -93,7 +91,6 @@ def bridge(monkeypatch) -> FakeBridge:
     # `from . import module_bridge` reads the package's attribute first, which the real bridge sets once any test has
     # imported it, so the fake replaces that too
     monkeypatch.setattr(app, "module_bridge", mod, raising=False)
-    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: True, raising=False)
     real = tools.descriptions
     monkeypatch.setattr(tools, "descriptions", lambda: {**real(), **HINTS})
     return fake

@@ -71,8 +71,6 @@ SUBAGENT_HINTS = {
     "critic-brief-file": {"path"},
     "critique-work-folder": {"path"},
     "check-task-file": {"path"},
-    "start-refused-not-launched": set(),
-    "start-refused-unfenced": {"reason"},
     "start-refused-no-module": {"reason"},
     "start-refused-connecting": set(),
     "module-deny-private": set(),
