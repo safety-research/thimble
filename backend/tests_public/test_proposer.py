@@ -218,6 +218,34 @@ async def test_a_side_thread_question_runs_one_fork_after_the_thread_answers(cwd
     assert f["cut"] == "cut-r" and cards[0]["offered"]["after"] == f"thread:{tid}"
 
 
+async def test_a_side_thread_question_main_answers_itself_runs_one_fork_after_main_s_turn(cwd, tmp_path, cards, forks):
+    """Main may answer a side thread's question itself with reply_in_thread, so no fork's end runs the proposer (live
+    check: it then ran 0 times). Main's own reply, by the caller hook's line with no agent, runs it once, after main's
+    turn ends, at that turn's cut. A fork's reply_in_thread runs nothing itself, since the fork's end does."""
+    from app import subagent_files, threads, tools
+
+    lv, p = _attach(cwd, tmp_path)
+    tid = agents.new_thread(CORPUS, None, None, "Replies")["id"]
+    agents.Recorder(CORPUS, tid).record("user", text="Which agent replies most?")
+    event = f'<thimble-event kind="thread" thread="{tid}" event="ev5">Which agent replies most?</thimble-event>'
+    _append(p, lv, [{"type": "user", "origin": {"kind": "task-notification"}, "message": {"content": event}}])
+    ws = config.workspace_dir(CORPUS)
+    subagent_files.add_caller(ws, "toolu_fork1", "a0fork", "fork")
+    await threads.tool_reply_in_thread(tools.Ctx(CORPUS, tools.ANALYST, tool_use_id="toolu_fork1"),
+                                       {"thread": tid, "text": "Agent B, from the fork."})
+    await _settle()
+    assert proposer.pending(CORPUS) is None, "a fork's reply: its end runs the proposer"
+    subagent_files.add_caller(ws, "toolu_main1", "", "")
+    await threads.tool_reply_in_thread(tools.Ctx(CORPUS, tools.ANALYST, tool_use_id="toolu_main1"),
+                                       {"thread": tid, "text": "Agent B replies most."})
+    await _settle()
+    assert forks == [] and proposer.pending(CORPUS)["after"] == [f"thread:{tid}"], "it waits for main's turn to end"
+    _append(p, lv, [_assistant(_say("I answered in the thread.")), _end("cut-t")])
+    await _settle()
+    (f,) = forks
+    assert f["cut"] == "cut-t" and cards[0]["offered"]["after"] == f"thread:{tid}"
+
+
 async def test_a_side_thread_question_typed_with_thimble_ask_runs_one_fork_after_the_thread_answers(cwd, tmp_path,
                                                                                                   cards, forks):
     """/thimble:ask in main's terminal sends a side thread's question as the thread's composer in the browser does:

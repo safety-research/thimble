@@ -813,7 +813,30 @@ async def tool_reply_in_thread(ctx: Any, args: dict[str, Any]) -> Any:
         threads = [m["id"] for m in agents.list_chats(ctx.c) if m.get("kind") == agents.KIND_THREAD]
         return tools.err(f"reply_in_thread: no thread {thread_id!r}; the threads are {', '.join(threads) or '(none)'}")
     reply(ctx.c, thread_id, text, by=ctx.cell_author, posted=True)
+    if _mains_own_call(ctx):
+        _proposer_after_main_reply(ctx.c, thread_id)
     return tools.ok(f"replied in thread {thread_id}")
+
+
+def _mains_own_call(ctx: Any) -> bool:
+    """Whether the thimble call of `ctx` is main's own, by the line the caller hook wrote before Claude Code made it: a
+    line that names no agent (subagents.caller). False for a fork's or another subagent's call, and for a call with no
+    line."""
+    from . import subagent_files  # noqa: PLC0415
+
+    line = subagent_files.find_caller(ctx.ws, str(getattr(ctx, "tool_use_id", None) or ""))
+    return line is not None and not line.get("agent_id")
+
+
+def _proposer_after_main_reply(c: str, thread_id: str) -> None:
+    """Main answered a side thread itself, with no fork, whose end would have run the view proposer
+    (session._proposer_after_thread): it runs once for this answer (proposer.trigger), after main's turn ends."""
+    from . import proposer  # noqa: PLC0415 — proposer imports context, which imports session
+
+    try:
+        proposer.trigger(c, f"thread:{thread_id}")
+    except Exception:  # noqa: BLE001 — a proposal not looked for is no reason to fail the reply
+        log.exception("%s: the view proposer did not hear of main's answer in thread %s", c, thread_id)
 
 
 # the roles of the agent chats the thread tree lists besides the threads (the frontend's chat/threads.ts threadKind)
