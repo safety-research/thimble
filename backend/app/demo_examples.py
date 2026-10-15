@@ -175,9 +175,11 @@ def run(args: argparse.Namespace, say: Callable[[str], None],
             failed += 1
     say("")
     if opened:
-        page = demo.start_url(key=True)
-        say(f"  Open at {page}")
-        if (show or demo.open_page)(page):
+        coded = demo.start_url(pair=True)
+        if (show or demo.open_page)(coded):  # the browser spent the code, so the line names the page without it
+            say(f"  Open at {demo.start_url(pair=False)}")
             say("  (opened in your browser)")
+        else:
+            say(f"  Open at {coded}")
         say("Reload a page after `thimble demo --examples --refresh` to see edits to plugin/viewers.")
     return 1 if failed else 0

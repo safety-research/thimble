@@ -978,28 +978,23 @@ async def test_main_s_quit_stops_a_change_to_a_built_view_which_says_so_and_keep
     assert "stopped_by" not in _prop(slug), "Retry clears it"
 
 
-async def test_retry_in_a_plain_claude_or_without_the_module_is_refused_at_once_and_queues_nothing(board, bridge, gates,
-                                                                                                monkeypatch):
-    """Live check L15: Retry clicked while main was a plain `claude` queued the build under the session launch.json
+async def test_retry_without_the_module_is_refused_at_once_and_queues_nothing(board, bridge, gates, monkeypatch):
+    """Live check L15: Retry clicked while main could not start agents queued the build under the session launch.json
     named, where it waited and would have started by itself once that session came back. A Build, Retry or accept click
-    is refused at once as Start is: the proposal stays failed with the refusal, and nothing is queued or spawned."""
-    from app import cc_plugin
-
+    is refused at once as Start is: the proposal stays failed with the refusal, and nothing is queued or spawned. Once
+    the module is live the build starts, in a plain `claude` as in one the launcher started."""
     row = {"name": "Posts", "why": "to read the board", "claims": ["board.jsonl"], "arrangement": "one row per post",
            "proposed_by": "analyst", "status": "failed", "ts": "2026-10-01T00:00:00+00:00", "route": subagents.CLICK}
     views._save_proposals(CORPUS, [{**row, "slug": "posts"}, {**row, "slug": "viewer", "name": "Viewer",
                                                                "status": "suggested"}])
     views._bind_loop()  # as the click routes do
     monkeypatch.setattr(dev, "VIEW_POOL", 2)
-    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: False, raising=False)
-    got = views.retry(CORPUS, "posts")
-    assert got["status"] == "failed" and got["refused"]["kind"] == subagents.NOT_LAUNCHED
-    assert got["error"] == got["refused"]["reason"], "the toast and the chip say why it did not start"
-    assert views.accept(CORPUS, "viewer")["refused"]["kind"] == subagents.NOT_LAUNCHED
-    assert _prop("viewer")["status"] == "suggested"
-    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: True, raising=False)
     bridge.is_live, bridge.reason = False, "THIMBLE_NO_MODULE is set"
-    assert views.retry(CORPUS, "posts")["refused"]["kind"] == subagents.NO_MODULE
+    got = views.retry(CORPUS, "posts")
+    assert got["status"] == "failed" and got["refused"]["kind"] == subagents.NO_MODULE
+    assert got["error"] == got["refused"]["reason"], "the toast and the chip say why it did not start"
+    assert views.accept(CORPUS, "viewer")["refused"]["kind"] == subagents.NO_MODULE
+    assert _prop("viewer")["status"] == "suggested"
     await asyncio.sleep(0.05)
     assert (CORPUS, "posts") not in dev._view_queue and not bridge.ops("spawn")
     bridge.is_live = True

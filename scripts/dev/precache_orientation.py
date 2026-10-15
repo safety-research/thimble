@@ -11,7 +11,7 @@ plugin module starts in an interactive main, and the module does nothing in `cla
     corpus folder, in a tmux server of its own (`tmux -L <socket>`), with CLAUDE_CODE_DISABLE_AGENT_VIEW=1 and
     DISABLE_AUTOUPDATER=1; it answers the folder-trust question if Claude Code asks it;
   - it waits for the module's hello (subagents.json's `module`), then posts the start the browser's Start sent before
-    0.8.0, with the page's key (the ui_key cookie of server.json): POST /api/ws/<c>/start, whose --model and --effort
+    0.8.0, with a browser sign-in (cli.browser_cookie): POST /api/ws/<c>/start, whose --model and --effort
     name the run's, else Settings decide. Since 0.8.0 the server ignores the body's switches (deck, views, report,
     critique; --no-report and --critique), so the orientation proposes no views, writes no report and decides on its
     own critique;
@@ -195,7 +195,7 @@ def main() -> int:
     tree, corpus, logs = Path(opts.tree).resolve(), str(Path(opts.corpus).resolve()), Path(opts.logs).resolve()
     sys.path.insert(0, str(tree / "backend"))
     logs.mkdir(parents=True, exist_ok=True)
-    from app import cli, config, hook_auth  # noqa: PLC0415
+    from app import cli, config  # noqa: PLC0415
 
     def note(kind: str, **fields: Any) -> None:
         with (logs / "events.jsonl").open("a", encoding="utf-8") as f:
@@ -207,7 +207,7 @@ def main() -> int:
         return 1
     c = str(body["name"])
     ws = config.workspace_dir(c)
-    note("registered", workspace=c, url=cli.ui_url(c, key=False))
+    note("registered", workspace=c, url=cli.ui_url(c))
 
     term = Terminal(opts.socket)
     command = launch_command(tree, opts.mode, dict(os.environ))
@@ -234,7 +234,7 @@ def main() -> int:
         note("hello", module=said, after_s=round(time.time() - launched, 1))
         if not opts.attach:
             start = start_body(opts)
-            cookie = f"{hook_auth.ui_cookie()}={cli.read_state().get('ui_key') or ''}"
+            cookie = cli.browser_cookie(cli.api_url())
             s, res = press_start(f"{cli.api_url()}/api/ws/{c}/start", cookie, start)
             note("start", status=s, result=res, payload=start)
             if s != 200 or not isinstance(res, dict) or res.get("kind") or not res.get("agentId"):

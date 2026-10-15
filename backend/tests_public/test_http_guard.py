@@ -280,6 +280,6 @@ def test_thimble_extension_tells_the_server_with_the_token(app_prod, plugin_head
             raise urllib.error.HTTPError(req.full_url, r.status_code, "", {}, io.BytesIO(r.content))
         return Answer(r.content)
 
-    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(cli.config.LOOPBACK, "open", urlopen)  # the CLI's loopback opener, which skips any proxy
     status, body = cli._request("POST", "http://127.0.0.1:8300/api/extensions/refresh", {})
     assert (status, seen) == (200, [200]) and "workspaces" in body

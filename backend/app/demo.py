@@ -1860,12 +1860,12 @@ def start_session(folder: Path) -> None:
     os.execve(str(launcher), [str(launcher)], env)
 
 
-def start_url(key: bool | None = None) -> str:
-    """thimble's start page (the page with no workspace in its URL, which lists every workspace: start_page.py), with
-    the key that lets it answer permission requests: when it goes to a terminal, unless `key` says."""
+def start_url(pair: bool | None = None) -> str:
+    """thimble's start page (the page with no workspace in its URL, which lists every workspace: start_page.py), with a
+    one-time sign-in code when it goes to a terminal, unless `pair` says (cli.ui_url)."""
     from . import cli  # noqa: PLC0415
 
-    return cli.ui_url(None, key=sys.stdout.isatty() if key is None else key)
+    return cli.ui_url(None, pair=sys.stdout.isatty() if pair is None else pair)
 
 
 def open_page(url: str) -> bool:
@@ -2047,10 +2047,12 @@ def run(args: argparse.Namespace, *, get: Callable[[str], bytes] = demo_data.htt
     say("")
     # one URL whatever the run opened: the start page, which lists every dataset downloaded (start_page.py)
     if url and any(name for _, _, name in opened):
-        page = start_url()
-        say(f"  Open at {page}")
-        if show(page):
+        coded = start_url()
+        if show(coded):  # the browser spent the code, so the line names the page without it
+            say(f"  Open at {start_url(pair=False)}")
             say("  (opened in your browser)")
+        else:
+            say(f"  Open at {coded}")
     if not url:
         say("  no server answers, so nothing is open; `thimble` in a folder below starts it")
     pick, login_said = attach_choice(args, [f for _, f, _ in opened], say, auth)

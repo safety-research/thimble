@@ -285,8 +285,9 @@ def test_settings_name_each_role_s_agent_and_its_consent_settings(tmp_path, work
     rows = ledger.with_features({}, CORPUS)["agents"]
     assert rows["main"]["additions"] == ["survey"]
     assert rows["orient"]["way"] == "sdk" and rows["orient"]["extension"] == "survey"
-    assert (rows["main"]["network"], rows["main"]["data"], rows["main"]["sandbox"]) == ("on", "off", "on"), \
-        "main's fence, which thimble's agents share: the orientation's keys"
+    assert (rows["main"]["web"], rows["main"]["data"]) == ("ask", "off"), \
+        "thimble's rules for main and its agents: the orientation's keys"
+    assert not {"sandbox", "network"} & set(rows["main"]), "thimble adds no sandbox to main's session"
     assert rows["critic"]["web"] == "off" and "network" not in rows["critic"], "a critic's own fence keys are ignored"
     assert (rows["dev"]["network"], rows["dev"]["sandbox"]) == ("off", "off"), "the code tickets' own fence"
     assert rows["critic"]["way"] == "thimble" and rows["critic"]["config"] == "agents.critic"
@@ -334,6 +335,13 @@ async def test_a_command_harness_runs_the_orientation_through_thimble_s_tools(tm
     assert "a stray print" not in log_text
     meta = json.loads((config.workspace_dir(CORPUS) / "chats" / f"{chat}.meta.json").read_text())
     assert meta["status"] == "done" and meta["way"] == "command" and meta["extension"] == "harn"
+    # the program ran without a sandbox: its thread says so, and one notice per extension, with Settings to turn it off
+    from app import notices
+
+    told = [n for n in notices.open_notices(CORPUS) if n.get("key") == "no-box:harn"]
+    assert len(told) == 1 and told[0]["kind"] == "sandbox" and told[0]["agent"] == "Extension: harn"
+    assert told[0]["action"] == notices.SETTINGS
+    assert told[0]["text"] == harness.NO_BOX_NOTICE.format(name="harn") and "`thimble doctor --verbose`" in told[0]["text"]
 
 
 async def test_a_failing_program_fails_its_run_with_the_end_of_its_stderr(tmp_path, data_tmp, workspaces_tmp, active,
@@ -385,6 +393,9 @@ thimble.serve(run)
     assert rec["status"] == "done", rec
     got = json.loads(orientation.summary(CORPUS))
     assert got["secret"] == "PermissionError" and got["corpus"] != "ok" and got["work"] == "ok", got
+    from app import notices
+
+    assert not [n for n in notices.open_notices(CORPUS) if str(n.get("key")).startswith("no-box:")], "boxed: no notice"
 
 
 def _free_port() -> int:
@@ -637,6 +648,25 @@ def test_a_program_s_sessions_do_their_own_work_unasked_where_thimble_s_own_sess
     view = tmp_path / "views" / "v"
     dev = settings_of("dev", writes=(view,))
     assert f"Edit(/{view}/**)" in dev["permissions"]["allow"] and str(view) in dev["sandbox"]["filesystem"]["allowWrite"]
+
+
+def test_a_program_s_session_loads_thimble_s_plugin_once(tmp_path, workspaces_tmp, monkeypatch):
+    """A program's session loads thimble's plugin from --plugin-dir alone: its --settings turn off each thimble@* the
+    analyst's user, project or local settings enable, which would load a second MCP server and second hooks; other
+    plugins stay as they are."""
+    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
+    cc = tmp_path / "cc"
+    cc.mkdir()
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(cc))
+    (cc / "settings.json").write_text(json.dumps({"enabledPlugins": {"thimble@thimble": True, "other@x": True,
+                                                                     "thimble@old": False}}))
+    local = config.corpus_dir(CORPUS) / ".claude"
+    local.mkdir(exist_ok=True)
+    (local / "settings.local.json").write_text(json.dumps({"enabledPlugins": {"thimble@local": True}}))
+    argv = _session_argv(tmp_path, ["-p"])
+    settings = json.loads(argv[argv.index("--settings") + 1])
+    assert settings["enabledPlugins"] == {"thimble@thimble": False, "thimble@local": False}
+    assert argv[argv.index("--plugin-dir") + 1].endswith("plugin")
 
 
 def _session_argv(tmp_path, argv: list[str]) -> list[str]:

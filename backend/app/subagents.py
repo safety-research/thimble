@@ -58,6 +58,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
@@ -87,9 +88,12 @@ ROLES = files.ROLES
 STEP_ROLE = agents.STEP_ROLE
 CLICK, FOLLOW_ON, TYPED = "click", "follow-on", "typed"
 ROUTES = (CLICK, FOLLOW_ON, TYPED)
-# the kinds a start that did not happen has (run.json `refused.kind`, a request's `refused_kind`)
+# the kinds a start that did not happen has (run.json `refused.kind`, a request's `refused_kind`); not-launched is only in
+# the records of earlier builds, which refused a main that thimble's launcher had not started
 AUTO_MODE, NO_CALL, LIMIT, NOT_LAUNCHED, HOOK, EARLIER, NO_MODULE, ERROR = (
     "auto-mode", "no-call", "limit", "not-launched", "hook", "earlier-session", "no-module", "error")
+# a refused start in the first seconds after main attached says thimble's plugin is still connecting (refusal_before)
+CONNECT_GRACE_S = 30.0
 HANDBACK_WAIT_S = 5.0  # a turn's end with no running child ends the run once no hand-back follows within this
 # in auto mode Claude Code makes an agent that ended with text call SubagentHandback, a model step later
 AUTO_HANDBACK_WAIT_S = 30.0
@@ -607,7 +611,7 @@ async def start_it(c: str, rid: str) -> Answer:
         return refusal(HOOK, "this request is not refused")
     if r.get("caller_role"):  # the critic: the module would start it as main's subagent, not its orientation's
         return refusal(HOOK, "an agent's own start (the orientation's critic) can't be started from the browser")
-    if (before := refusal_before(c, click=True)) is not None:  # as every click: unfenced or no module
+    if (before := refusal_before(c, click=True)) is not None:  # as every click: no module
         return before
     _set(c, rid, route=CLICK, state="pending", claimed_by=None, reason=None, refused_kind=None, again=files.now())
     return await _spawn(c, rid, r)
@@ -628,25 +632,41 @@ async def again(c: str, rid: str) -> Answer:
 # --------------------------------------------------------------------------- refusals before a start
 
 
+def connecting(c: str) -> bool:
+    """Whether main's session in workspace `c` attached less than CONNECT_GRACE_S ago (session.current's `since`, an
+    ISO time; one that does not parse counts as old): the plugin's hooks module of a session /thimble just opened may
+    not have said hello yet."""
+    from . import session  # noqa: PLC0415
+
+    lv = session.current(c)
+    try:
+        since = datetime.fromisoformat(str(lv.since)) if lv is not None else None
+    except (TypeError, ValueError):
+        return False
+    if since is None:
+        return False
+    if since.tzinfo is None:
+        since = since.replace(tzinfo=timezone.utc)
+    return 0 <= (datetime.now(timezone.utc) - since).total_seconds() < CONNECT_GRACE_S
+
+
 def refusal_before(c: str, click: bool = False) -> Answer | None:
-    """Why no agent of thimble's can start now in workspace `c`, before any request is made: main runs outside thimble's
-    fence (not-launched: main was not started by `thimble`, start-refused-not-launched, or it was and runs without the
-    sandbox, start-refused-unfenced with cli.unfenced_reason), main is in plan mode (hook, start-plan-mode), or the module
-    does not hold the long-poll (no-module). None when nothing stands in the way. A `click` leaves plan mode to
+    """Why no agent of thimble's can start now in workspace `c`, before any request is made: main is in plan mode
+    (hook, start-plan-mode), or the module does not hold the long-poll (no-module): still connecting in the first
+    CONNECT_GRACE_S after main attached when Claude Code has not loaded it yet (start-refused-connecting), else
+    start-refused-no-module with why. None when nothing stands in the way. A `click` leaves plan mode to
     --agent-check, which reads main's mode as the module's call runs: thimble hears main's mode only at main's turns, so
     after a shift+tab while main is idle the mode it keeps is stale (live check L21), and the click would stay refused
     after the analyst left plan mode."""
-    from . import cc_plugin, cli, module_bridge, session  # noqa: PLC0415
+    from . import module_bridge, session  # noqa: PLC0415
 
-    if not cc_plugin.main_fenced(c):
-        if cc_plugin.main_launched(c):
-            why = cli.unfenced_reason(c) or "thimble could not add its fence to the session's settings"
-            return refusal(NOT_LAUNCHED, tools.hint("start-refused-unfenced", reason=why))
-        return refusal(NOT_LAUNCHED, tools.hint("start-refused-not-launched"))
     if not click and session.main_mode(c) == files.PLAN_MODE:
         return refusal(HOOK, tools.hint("start-plan-mode"))
     if not module_bridge.live(c):
-        return refusal(NO_MODULE, tools.hint("start-refused-no-module", reason=str(module_bridge.why_not(c) or "")))
+        why = module_bridge.why_not(c)
+        if connecting(c) and why == module_bridge.NOT_LOADED:
+            return refusal(NO_MODULE, tools.hint("start-refused-connecting"))
+        return refusal(NO_MODULE, tools.hint("start-refused-no-module", reason=str(why or "")))
     return None
 
 
@@ -750,7 +770,7 @@ async def start_job(c: str, role: str, key: str, task: str, values: dict[str, An
     """One start of any role, for the agent of `key`, with the prompt `task` and the run's values. A click or a
     follow-on start writes the pending request, then asks the module to spawn it, and answers what the module did
     (Answer); a typed one records the request and answers the exact Agent call for the start tool's result. Without a
-    live module, or while main is in plan mode or not fenced, it refuses before making the request (refusal_before;
+    live module, or while main is in plan mode, it refuses before making the request (refusal_before;
     `check` False skips that, for a caller that checked). `request_id` is the request's id when the caller made it
     (request_id), for a prompt that names it. `chat` holds the fields of the agent's chat (its title, a
     writer's document), `work` its work folder (the scratch folders of its subagents), `call` the start tool's call
@@ -779,9 +799,8 @@ async def start_job(c: str, role: str, key: str, task: str, values: dict[str, An
 
 
 def make_work(c: str, work: Path) -> None:
-    """The agent's work folder made before it starts, as agent_session made a session's: main's sandbox lets Bash write
-    in the work folders (write_dirs) but not in the workspace around them, so an agent cannot make its own folder.
-    Only a folder inside the workspace."""
+    """The agent's work folder made before it starts, as agent_session made a session's, so the agent finds it in
+    place. Only a folder inside the workspace."""
     root = ws(c).resolve()
     try:
         if root not in work.resolve().parents:
