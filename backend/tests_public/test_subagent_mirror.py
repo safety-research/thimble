@@ -766,7 +766,8 @@ async def test_an_orientation_stopped_with_esc_is_recorded_as_one_claude_code_re
     """Live check L9: Esc in the agent view makes Claude Code mark the agent stopped by the user ("was stopped by user"
     in its notification), and every later SendMessage fails with "was stopped by the user and won't be resumed". The
     mirror records that stop as final (stopped_by user, the chat's `continue: stopped-by-user`), from the notification
-    or from the error main's own SendMessage got, so the browser offers a new orientation instead of a follow-up."""
+    or from the error main's own SendMessage got, so a message in its thread starts a continuation instead of a
+    follow-up (U2)."""
     lv, chat, path = await _click_orientation(bridge, project)
     _write(Path(lv.transcript_path), _notice(AGENT, "killed", summary='Agent "orientation: x" was stopped by user'), END)
     session.tail_once(lv)

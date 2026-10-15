@@ -366,7 +366,7 @@ def _views_section(c: str) -> str:
                 out.append(f"- {name}: {desc} {who}, and the analyst accepted it; {state[status]}.")
             elif status == "suggested":
                 out.append(f"- {name}: {desc} {who}; it waits for the analyst's answer.")
-        elif status in state:  # main's proposals and the orientation's (a dropped or legacy row is left out)
+        elif status in state:  # main's proposals, and an older orientation's (a dropped or legacy row is left out)
             out.append(f"- {name}: {desc} {state[status].capitalize()}.")
     have = {p["slug"] for p in rows}
     out += [f"- {_one(v.get('name'))}: {_one(v.get('description'))} Built." for s, v in built.items() if s not in have]

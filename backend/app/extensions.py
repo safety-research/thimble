@@ -46,8 +46,8 @@ switch overrides too.
 
 refresh() copies an active extension into workspaces/<c>/extensions/<name>/, since a kernel sees only the workspace and
 the corpus, and writes STATE_FILE in the workspace's registry folder, which a kernel cannot write
-(kernel_wrap.READ_ONLY_DIRS). Its shown views are installed, outside the orientation's four, and one it installed that
-nobody changed goes when it is no longer shown. An orientation that starts reads the active extensions' instructions in
+(kernel_wrap.READ_ONLY_DIRS). Its shown views are installed, never as an orientation's proposals, and one it installed
+that nobody changed goes when it is no longer shown. An orientation that starts reads the active extensions' instructions in
 its prompt. Where one already ran, an extension with orientation instructions that comes on is never sent to it on its
 own: Settings offers to run them now (offered), and Run now sends them as one follow-up (run_orientation). An extension
 whose program runs the orientation is offered the same way, and Run now runs its program again as a follow-up with the
