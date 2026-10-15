@@ -85,6 +85,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import fcntl
+import hmac
 import json
 import logging
 import os
@@ -128,6 +129,7 @@ STACK_UI_PORT = int(os.environ.get("THIMBLE_STACK_UI_PORT") or "5301")
 STACK_ENABLED = os.environ.get("THIMBLE_DEV_STACK", "1").strip().lower() not in ("0", "false", "no", "off")
 STACK_WAIT_S = 90
 SHOT_TIMEOUT_S = 90
+SHOT_TOKEN_ENV = "THIMBLE_SHOT_TOKEN"  # the shot token scripts/ui_shot.mjs sends with the page's reads (run_shot)
 GATE_TIMEOUT_S = 900
 # The tools `thimble fix`'s session uses without a permission request, since nobody can answer one: its file tools,
 # Bash, skills and workflows (module note, `thimble fix`). The session has every tool of a default Claude Code session
@@ -1195,6 +1197,11 @@ def stack_script() -> Path:
     return REPO / "scripts" / "dev" / "dev_stack.sh"
 
 
+def stack_home() -> Path:
+    """The validation stack's own thimble home, where dev_stack.sh writes its server.json with its token."""
+    return dev_home() / "stack.home"
+
+
 async def start_stack(tid: str, wt: Path, workspace: str | None) -> dict[str, str] | None:
     """`scripts/dev/dev_stack.sh start` on the worktree (8301/5301, a snapshot copy of the workspace). None when disabled
     or unavailable. Seam for tests."""
@@ -1232,10 +1239,12 @@ def shot_script() -> Path:
 async def run_shot(url: str, out: Path, selector: str | None = None, *, info_out: Path | None = None,
                    viewport: str | None = None, scale: float | None = None, storage: dict[str, str] | None = None,
                    press: list[str] | None = None, wait_ms: int | None = None, settle: bool = False,
-                   offline: bool = False, own_origin: bool = False) -> int:
+                   offline: bool = False, own_origin: bool = False, read_token: str | None = None) -> int:
     """`node scripts/ui_shot.mjs`: 0 ok, 2 selector not found (the viewport is written instead), 1 error, -1 timeout.
-    Options map to the script's options of the same names. headless.Missing when the browser is missing, which stays so
-    for the rest of the server run."""
+    Options map to the script's options of the same names. `read_token` is a shot token (hook_auth.mint_shot) of the
+    server the page reads from, which the script sends with the page's reads of that server's API; it goes in the
+    script's environment (SHOT_TOKEN_ENV), never on its command line, which other accounts can see. headless.Missing
+    when the browser is missing, which stays so for the rest of the server run."""
     path = headless.launch(headless.PAGES)
     if path is None or headless.missing(headless.PAGES):
         raise headless.Missing(headless.missing(headless.PAGES))
@@ -1256,6 +1265,9 @@ async def run_shot(url: str, out: Path, selector: str | None = None, *, info_out
     if wait_ms is not None:
         cmd += ["--wait", str(int(wait_ms))]
     env = {**os.environ, **({userconf.BROWSER_ENV: path} if path else {})}
+    env.pop(SHOT_TOKEN_ENV, None)
+    if read_token:
+        env[SHOT_TOKEN_ENV] = read_token
     proc = await asyncio.create_subprocess_exec(*cmd, cwd=str(REPO), stdout=asyncio.subprocess.PIPE,
                                                 stderr=asyncio.subprocess.PIPE, env=env)
     try:
@@ -1289,10 +1301,40 @@ def target_selector(target: dict[str, Any] | None) -> str | None:
     return str(t.get("stable_selector") or t.get("selector") or "") or None
 
 
+def shot_token(api: str, home: Path) -> str:
+    """A shot token (hook_auth.mint_shot) from the server at `api`, which a page shot of that server's UI needs for its
+    reads (LocalReadGuard): its POST /api/ui/shot, proven with the token in `home`/server.json as the CLI proves one,
+    and its answer's proof checked. '' when there is no token, the server answers otherwise (a 404 from a tree older
+    than the route) or proves nothing back, so the shot goes without one."""
+    import urllib.request  # noqa: PLC0415
+
+    try:
+        state = json.loads((home / "server.json").read_text("utf-8"))
+    except (OSError, ValueError):
+        return ""
+    tok = state.get("token") if isinstance(state, dict) else None
+    if not isinstance(tok, str) or not tok:
+        return ""
+    nonce = secrets.token_hex(16)
+    req = urllib.request.Request(f"{api.rstrip('/')}/api/ui/shot", data=b"{}", method="POST",
+                                 headers={"Content-Type": "application/json", **hook_auth.headers(tok, nonce)})
+    try:
+        with config.LOOPBACK.open(req, timeout=5.0) as r:
+            proof = r.headers.get(hook_auth.PROOF_HEADER, "")
+            body = json.loads(r.read() or b"{}")
+    except Exception:  # noqa: BLE001 — an HTTP error (a 404 from an older tree) or no answer: no token
+        return ""
+    if not hmac.compare_digest(proof.encode(), hook_auth.sign(tok, "server", nonce).encode()):
+        return ""
+    got = body.get("token") if isinstance(body, dict) else None
+    return got if isinstance(got, str) else ""
+
+
 async def _take_shot(t: dict[str, Any], run_log: Log, phase: str, base_url: str | None, *,
-                     own_origin: bool = False) -> str | None:
+                     own_origin: bool = False, api: str | None = None, home: Path | None = None) -> str | None:
     """The before or after shot of the ticket's target on the stack (`own_origin` for a server in the ticket's box,
-    whose page then reaches nothing but that server); the file name stored on the ticket, or None."""
+    whose page then reaches nothing but that server); the file name stored on the ticket, or None. `api` and `home`
+    name the server the page reads from and its thimble home, whose shot token (shot_token) the page's reads carry."""
     if not base_url:
         return None
     selector = target_selector(t.get("target"))
@@ -1301,7 +1343,10 @@ async def _take_shot(t: dict[str, Any], run_log: Log, phase: str, base_url: str 
     d.mkdir(parents=True, exist_ok=True)
     out = d / f"{phase}.png"
     try:
-        code = await run_shot(url, out, selector, own_origin=own_origin)
+        tok = await asyncio.to_thread(shot_token, api, home) if api and home is not None else ""
+        if api and not tok:
+            log.info("%s shot of ticket %s: the server at %s gave no shot token; shot without one", phase, t["id"], api)
+        code = await run_shot(url, out, selector, own_origin=own_origin, read_token=tok or None)
     except Exception as e:  # noqa: BLE001
         run_log.stage(f"{phase} shot failed: {type(e).__name__}: {e}")
         return None
@@ -2078,7 +2123,7 @@ async def _preview_shot(t: dict[str, Any], run_log: Log, phase: str, box: ticket
         run_log.stage(f"no {phase} shot: the ticket's server did not start in the sandbox ({last_error_line(str(e))})")
         return None
     try:
-        return await _take_shot(t, run_log, phase, url, own_origin=True)
+        return await _take_shot(t, run_log, phase, url, own_origin=True, api=url, home=Path(env["THIMBLE_HOME"]))
     finally:
         await preview.stop()
 
@@ -2239,7 +2284,8 @@ async def _prepare_and_start(run: Run, t: dict[str, Any], route: str, call: str 
         stack = await start_stack(tid, wt, c)
         run_log.stage(f"validation stack {'up at ' + stack['ui'] if stack else 'not available'}")
         rec = _update(tid, stack=stack) or rec
-        before_shot = await _take_shot(rec, run_log, "before", stack["ui"] if stack else None)
+        before_shot = await _take_shot(rec, run_log, "before", stack["ui"] if stack else None,
+                                       api=(stack or {}).get("api"), home=stack_home())
     values = subagents.values_for(c, TICKET_ROLE, rec.get("values") or None)
     rec = _update(tid, values=values) or rec
     task = build_ticket_task(rec, worktree=wt, work=work, before_shot=before_shot, in_box=in_box, stack=stack)
@@ -2470,7 +2516,8 @@ async def _settle_ticket(run: Run, t: dict[str, Any], agent_id: str, status: str
         if box is not None:
             after = await _preview_shot(t, run_log, "after", box, touched)
         else:
-            after = await _take_shot(t, run_log, "after", (t.get("stack") or {}).get("ui"))
+            after = await _take_shot(t, run_log, "after", (t.get("stack") or {}).get("ui"),
+                                     api=(t.get("stack") or {}).get("api"), home=stack_home())
         before = (_get(tid) or t).get("before_shot")
         if before and after:
             differ = (shots_dir(tid) / before).read_bytes() != (shots_dir(tid) / after).read_bytes()

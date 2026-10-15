@@ -275,15 +275,19 @@ def _pairing_fresh():
     from app import hook_auth
 
     hook_auth._codes.clear()
+    hook_auth._shots.clear()
     hook_auth._paired = None
     yield
     hook_auth._codes.clear()
+    hook_auth._shots.clear()
     hook_auth._paired = None
 
 
 def pytest_configure(config):
     config.addinivalue_line(
         "markers", "real_write_guard: keep hook_auth.LocalWriteGuard on for a test (the suite bypasses it by default)")
+    config.addinivalue_line(
+        "markers", "real_read_guard: keep hook_auth.LocalReadGuard on for a test (the suite bypasses it by default)")
 
 
 @pytest.fixture(autouse=True)
@@ -297,6 +301,18 @@ def _write_guard_off(request, monkeypatch):
     from app import hook_auth
 
     monkeypatch.setattr(hook_auth, "write_guarded", lambda method, path: False)
+
+
+@pytest.fixture(autouse=True)
+def _read_guard_off(request, monkeypatch):
+    """As _write_guard_off, for reads: a test's TestClient stands in for the signed-in browser, which proves itself to
+    hook_auth.LocalReadGuard with its cookie, so a route test reads with no credential; a test marked
+    `real_read_guard` keeps the real guard."""
+    if "real_read_guard" in request.keywords:
+        return
+    from app import hook_auth
+
+    monkeypatch.setattr(hook_auth, "read_guarded", lambda method, path: False)
 
 
 @pytest.fixture(autouse=True)

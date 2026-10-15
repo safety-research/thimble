@@ -32,6 +32,15 @@ only the sha256 of each code and of each browser's cookie (PAIRED_FILE, read at 
 file, transcript or link holds a credential that lasts. The token proves only the routes hooks, the shim, the module and
 the CLI use (guarded); with it a process can mint a code, and each new sign-in prints a line in main's terminal and posts
 a notice.
+
+Reads are gated too (LocalReadGuard), since another account on a shared computer reaches the loopback port as well:
+every GET or HEAD under /api needs the signed-in browser's cookie or a hook proof (the CLI sends one with every
+request), except OPEN_READS. Two narrow credentials stand in where neither can be sent. A screenshot of the page
+(tools.py, dev.py) runs a headless browser with no cookie, so it carries a shot token (mint_shot) in SHOT_HEADER: random,
+good for SHOT_TTL_S on GET and HEAD alone, kept in memory as its sha256. A view's frame is sandboxed with an opaque
+origin, which the browser sends no SameSite=Strict cookie from, so the one URL it loads, the view's media route, carries
+a key in its path (media_key: an HMAC under SESSION_KEY of the workspace and the view), good for that view's media
+alone.
 """
 from __future__ import annotations
 
@@ -68,7 +77,7 @@ SESSION_HOOK_PATHS = re.compile(r"/api/ws/[^/]+/(sessions/permission|calls/ref)"
 # `thimble up` / `thimble unpair` call
 CLI_PATHS = frozenset({
     "/api/corpora/register", "/api/dev/announce", "/api/dev/revert", "/api/extensions/refresh", "/api/subagents/caller",
-    "/api/ui/pair", "/api/ui/unpair",
+    "/api/ui/pair", "/api/ui/unpair", "/api/ui/shot",
 })
 CLI_WS_PATHS = re.compile(r"/api/ws/[^/]+/(session|precached/context|archive|restore|rename)")  # POST
 CLI_WS_DELETE = re.compile(r"/api/ws/[^/]+")  # DELETE: a workspace removed (`thimble rm`)
@@ -102,6 +111,16 @@ WRITE_REFUSED = ("open thimble from the link shown under /thimble's reply, or pr
                  " make changes")
 CODE_GONE = ("This sign-in link was already used or has expired. Run `thimble up` in a shell for a new one, or type"
              " /thimble in your terminal.")
+# A read of the local API (GET or HEAD) needs a signed-in browser's cookie or a hook proof too (LocalReadGuard), except
+# these: the supervisor's, the plugin's and the page's health check, and the page's question whether it is signed in
+OPEN_READS = frozenset({"/api/health", "/api/ui/paired"})
+READ_METHODS = frozenset({"GET", "HEAD"})
+SIGN_IN_NEEDED = ("open thimble from the link shown under /thimble's reply, or printed by `thimble up` in a shell, to"
+                  " see it")
+SHOT_HEADER = "x-thimble-shot"  # a page screenshot's read-only token (mint_shot)
+SHOT_TTL_S = 120  # a shot token's life: dev.SHOT_TIMEOUT_S (90 s) ends the headless run before it
+# the view media route with its key (media_key), as the frame's browser asks for it
+MEDIA_PATH = re.compile(r"/api/ws/([^/]+)/views/([^/]+)/media/([0-9a-f]{32})")
 
 _cache: tuple[tuple[str, int, int], dict] | None = None
 # the tokens of the programs thimble runs, by id: (the whole token, whether its grant allows a method and path)
@@ -296,6 +315,58 @@ def _spend(code: object) -> bool:
     return got is not None and got[0] > _now()
 
 
+# a live shot token's sha256 -> when it expires on _now's clock; in memory only, so a restart voids every one
+_shots: dict[str, float] = {}
+
+
+def mint_shot() -> str:
+    """A new shot token (module note): good on GET and HEAD for SHOT_TTL_S, or until drop_shot. Expired ones go."""
+    tok = secrets.token_urlsafe(24)
+    now = _now()
+    with _pair_lock:
+        for h in [h for h, until in _shots.items() if until <= now]:
+            del _shots[h]
+        _shots[_sha(tok)] = now + SHOT_TTL_S
+    return tok
+
+
+def drop_shot(tok: str) -> None:
+    """The shot token `tok` stops working (its shot ended)."""
+    with _pair_lock:
+        _shots.pop(_sha(tok or ""), None)
+
+
+def shot_proven(headers: Headers, method: str) -> bool:
+    """Whether a read carries a live shot token in SHOT_HEADER; never a write."""
+    tok = headers.get(SHOT_HEADER, "")
+    if method not in READ_METHODS or not tok:
+        return False
+    with _pair_lock:
+        until = _shots.get(_sha(tok))
+    return until is not None and until > _now()
+
+
+def media_key(c: str, slug: str) -> str:
+    """The key in the URL of view `slug`'s media route in workspace `c` (module note): the same for every load of the
+    view, so the frame's document, and its ETag, stay the same."""
+    return hmac.new(_session_secret(True), f"view-media\n{c}\n{slug}".encode("utf-8"), hashlib.sha256).hexdigest()[:32]
+
+
+def media_key_ok(c: str, slug: str, key: str) -> bool:
+    """Whether `key` is media_key's for view `slug` of workspace `c`."""
+    secret = _session_secret(False)
+    if not secret or not key:
+        return False
+    want = hmac.new(secret, f"view-media\n{c}\n{slug}".encode("utf-8"), hashlib.sha256).hexdigest()[:32]
+    return _same(key, want)
+
+
+def media_proven(path: str) -> bool:
+    """Whether `path` is a view's media route with that view's key (MEDIA_PATH, media_key)."""
+    m = MEDIA_PATH.fullmatch(path)
+    return m is not None and media_key_ok(m.group(1), m.group(2), m.group(3))
+
+
 def _paired_file() -> Path:
     return home() / PAIRED_FILE
 
@@ -445,6 +516,11 @@ def write_guarded(method: str, path: str) -> bool:
     return method not in SAFE_METHODS and _api(path) and path != "/api/ui/key"
 
 
+def read_guarded(method: str, path: str) -> bool:
+    """Whether LocalReadGuard gates this request: a read (GET or HEAD) of the local API, but not OPEN_READS."""
+    return method in READ_METHODS and _api(path) and path not in OPEN_READS
+
+
 def _api(path: str) -> bool:
     return path == "/api" or path.startswith("/api/")
 
@@ -475,4 +551,37 @@ class LocalWriteGuard:
         body = json.dumps({"detail": WRITE_REFUSED}).encode()
         await send({"type": "http.response.start", "status": 403,
                     "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())]})
+        await send({"type": "http.response.body", "body": body})
+
+
+def read_allowed(scope: dict) -> bool:
+    """Whether a gated read may go on: it comes from a signed-in browser (analyst), carries a hook proof (the plugin, the
+    CLI; an agent's token proves no read, as its grant allows none), a live shot token (shot_proven), or is a view's
+    media route with that view's key (media_proven)."""
+    path, method = scope.get("path", ""), scope.get("method", "")
+    h = Headers(scope=scope)
+    return (analyst(Request(scope)) or hook_proof(h, method, path) or shot_proven(h, method)
+            or (method in READ_METHODS and media_proven(path)))
+
+
+class LocalReadGuard:
+    """401 for a read of the local API (read_guarded) that read_allowed refuses, so another account on the computer, or
+    a notebook kernel, that reaches 127.0.0.1 reads none of the analyst's chats, cards, reports or files through
+    thimble. The body is {detail: SIGN_IN_NEEDED, signin: true}, which tells the page to show its sign-in line; a HEAD
+    gets no body. A token route is HookAuth's to answer. Pure ASGI."""
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        path, method = scope.get("path", ""), scope.get("method", "")
+        if (scope["type"] != "http" or not read_guarded(method, path) or guarded(method, path)
+                or read_allowed(scope)):
+            await self.app(scope, receive, send)
+            return
+        body = b"" if method == "HEAD" else json.dumps({"detail": SIGN_IN_NEEDED, "signin": True}).encode()
+        headers = [(b"content-length", str(len(body)).encode())]
+        if body:
+            headers.insert(0, (b"content-type", b"application/json"))
+        await send({"type": "http.response.start", "status": 401, "headers": headers})
         await send({"type": "http.response.body", "body": body})

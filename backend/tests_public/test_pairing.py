@@ -215,3 +215,24 @@ def test_a_new_sign_in_shows_a_notice_in_the_named_and_the_attached_workspace_an
     r = another.post("/api/ui/key", json={"code": hook_auth.mint(), "ws": "no-such-workspace"})
     assert r.status_code == 204, "a link of no registered workspace still signs in, and tells the attached main"
     assert line != (hook_auth.home() / "links" / SID).read_text()
+
+
+@pytest.mark.real_read_guard
+def test_a_browser_reads_nothing_until_it_signs_in_and_nothing_after_unpair(client, plugin_headers):
+    """hook_auth.LocalReadGuard: a browser without the cookie reads no data (401 and the body that tells the page to
+    show its sign-in line; a HEAD with no body), only whether it is signed in and the health check, and reads once it
+    traded its link's code; `thimble unpair` takes that back, while the CLI's proof still reads."""
+    refused = {"detail": hook_auth.SIGN_IN_NEEDED, "signin": True}
+    r = client.get(f"/api/ws/{CORPUS}/canvas")
+    assert (r.status_code, r.json()) == (401, refused)
+    head = client.head("/api/corpora")
+    assert (head.status_code, head.content, head.headers.get("content-length")) == (401, b"", "0")
+    assert client.get("/api/ui/paired").json() == {"paired": False, "id": ""}
+    assert set(client.get("/api/health").json()) == {"ok", "boot", "ui"}, "no path or pid without the token"
+    assert client.post("/api/ui/key", json={"code": hook_auth.mint(CORPUS)}).status_code == 204
+    assert client.get("/api/corpora").status_code == 200
+    assert client.get(f"/api/ws/{CORPUS}/canvas").status_code == 200
+    assert client.post("/api/ui/unpair", headers=plugin_headers()).status_code == 204
+    r = client.get("/api/corpora")
+    assert (r.status_code, r.json()) == (401, refused)
+    assert client.get("/api/corpora", headers=plugin_headers()).status_code == 200

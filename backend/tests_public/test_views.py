@@ -839,6 +839,49 @@ async def test_the_frame_route_sends_the_document_again_only_when_it_changed(ws,
         assert changed.status_code == 200 and changed.headers["etag"] != tag and "<!-- changed -->" in changed.text
 
 
+PNG = bytes.fromhex("89504e470d0a1a0a0000000d4948445200000001000000010804000000b51c0c020000000b4944415478da63646000"
+                    "0000060002308150cf0000000049454e44ae426082")
+
+
+@pytest.mark.real_read_guard
+async def test_a_view_s_frame_loads_its_media_by_a_key_in_the_url_and_that_key_reaches_nothing_else(ws, inproc, bound):
+    """The frame is sandboxed with an opaque origin, from which the browser sends no SameSite=Strict cookie, so the one
+    URL it may load, its view's media route, carries the view's key in its path (hook_auth.media_key): the frame's
+    policy and its media URL name that URL, the read guard lets it through with no cookie, Range included, and refuses
+    another view's key, a made-up one and none. The page's own media route takes the cookie, as before."""
+    import httpx  # noqa: PLC0415
+    from conftest import UI_COOKIE_VALUE, _record_paired  # noqa: PLC0415
+
+    from app import hook_auth, main  # noqa: PLC0415
+
+    (config.DATA_DIR / CORPUS / "shot.png").write_bytes(PNG)
+    views.write_view(CORPUS, "shots", reader=THREADS_READER, html=THREADS_HTML,
+                     **{**VIEW, "name": "Shots", "claims": ["board.jsonl", "shot.png"]})
+    _record_paired(UI_COOKIE_VALUE)
+    key = hook_auth.media_key(CORPUS, "shots")
+    media = f"http://127.0.0.1:8300/api/ws/{CORPUS}/views/shots/media/{key}"
+    base = f"/api/ws/{CORPUS}/views/shots/media"
+    shot = {"path": "shot.png"}
+    transport = httpx.ASGITransport(app=main.create_app())
+    async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as page, \
+            httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as frame:
+        page.cookies.set(hook_auth.ui_cookie(), UI_COOKIE_VALUE)
+        r = await page.get(f"/api/ws/{CORPUS}/views/shots/frame", params={"origin": "http://127.0.0.1:8300"})
+        assert r.status_code == 200 and f"img-src data: blob: {media};" in r.text and f'"media": "{media}"' in r.text
+        again = await page.get(f"/api/ws/{CORPUS}/views/shots/frame", params={"origin": "http://127.0.0.1:8300"})
+        assert again.headers["etag"] == r.headers["etag"], "the key is the same for every load"
+        got = await frame.get(f"{base}/{key}", params=shot)
+        assert (got.status_code, got.content, got.headers["content-type"]) == (200, PNG, "image/png")
+        part = await frame.get(f"{base}/{key}", params=shot, headers={"Range": "bytes=0-3"})
+        assert (part.status_code, part.content) == (206, PNG[:4])
+        assert (await frame.get(f"{base}/{key}", params={"path": "notes.md"})).status_code == 403, "claimed files only"
+        for url in (f"{base}/{hook_auth.media_key(CORPUS, 'threads')}", f"{base}/{'0' * 32}", f"{base}/x", base):
+            assert (await frame.get(url, params=shot)).status_code == 401, url
+        assert (await frame.get(f"/api/ws/{CORPUS}/views/shots/frame")).status_code == 401
+        assert (await page.get(base, params=shot)).content == PNG, "the page's own route, with the cookie"
+        assert (await page.get(f"{base}/{'0' * 32}", params=shot)).status_code == 404, "the route checks the key too"
+
+
 async def test_no_thread_is_read_as_a_question_from_a_view_s_own_box(ws, inproc, bound):
     """Views have no question box: a thread about a view, a record it shows or with the box's old selector gets the
     anchor's content only."""

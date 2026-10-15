@@ -169,6 +169,7 @@ RESTART_MARK_S = 60.0  # a `source_restart` mark in server.json younger than thi
 REFUSED_LINE = "thimble: {path} is not a folder to open as a workspace; say /thimble from the folder that holds the corpus."
 TAKEOVER_LINE = ("thimble: this session is main now. The session {other} in another terminal no longer hears the "
                  "browser, and is main again once this one exits.")
+FOREIGN_UNNAMED = "<its THIMBLE_HOME>"  # foreign_home's answer for a server that names no home to this install
 FOREIGN_LINE = ("thimble: port {port} is held by the thimble server of another install (THIMBLE_HOME {other}), so this "
                 "install does not use it. Set THIMBLE_PORT to a free port, or stop that server with "
                 "`THIMBLE_HOME={other} thimble server stop`.")
@@ -200,7 +201,6 @@ MANUAL_RESTART = "manual restart"  # dev.PLAIN_REASONS
 RUNNING_HEAD = "thimble: running now:"
 RUNNING_BACK_LINE = ("A restart stops them. Once the server is back, the orientations and writers resume by themselves, "
                      "and a view build or dev ticket starts again.")
-RUNNING_ENDS = " (the restart ends it)"
 RESTART_QUESTION = "Restart the server now? [y/N] "
 RESTART_UNASKED_LINE = "thimble: not restarted, since there is no terminal to ask in; pass --yes to restart anyway."
 RESTART_DECLINED_LINE = "thimble: not restarted."
@@ -209,8 +209,7 @@ STOP_BACK_LINE = ("A stop ends them. The server's next start resumes the orienta
 STOP_QUESTION = "Stop the server now? [y/N] "
 STOP_UNASKED_LINE = "thimble: not stopped, since there is no terminal to ask in; pass --yes to stop anyway."
 STOP_DECLINED_LINE = "thimble: not stopped."
-RUNNING_KINDS = {"orient": "the orientation", "writer": "the writer", "check": "the report check",
-                 "view": "the view build"}
+RUNNING_ORIENT = "the orientation"
 NOTICES: list[str] = []  # lines `ensure_running` leaves for `cmd_ensure`
 MAIN = "main"
 
@@ -436,12 +435,16 @@ def health_leader(url: str | None = None) -> int | None:
 
 
 def foreign_home(url: str | None = None) -> str | None:
-    """The THIMBLE_HOME of the server answering at `url` when it is another install's; None when it is this install's, names
-    none, or nothing answers. Two installs share a port by default."""
+    """The THIMBLE_HOME of the server answering at `url` when it is another install's; None when it is this install's, or
+    nothing answers. Two installs share a port by default. A server names its home only to a request that proves its
+    token (main's /api/health), so a healthy server that names none took this install's proof for no proof: another
+    install's or another account's, whose home is FOREIGN_UNNAMED here."""
     status, body = _request("GET", f"{url or api_url()}/api/health", timeout=HEALTH_TIMEOUT_S)
-    other = body.get("home") if status == 200 and isinstance(body, dict) else None
-    if not isinstance(other, str) or not other:
+    if status != 200 or not isinstance(body, dict) or body.get("ok") is not True:
         return None
+    other = body.get("home")
+    if not isinstance(other, str) or not other:
+        return FOREIGN_UNNAMED
     try:
         same = Path(other).resolve() == home().expanduser().resolve()
     except OSError:
@@ -1143,24 +1146,10 @@ def spawn_restart() -> int:
 
 
 def running_work(url: str) -> list[str]:
-    """What a restart of the server at `url` would interrupt, one line each: the sessions it runs and the views it builds
-    (`GET /api/sessions/running`), then the dev ticket it runs. Empty when nothing runs."""
-    lines: list[str] = []
-    status, body = _request("GET", f"{url}/api/sessions/running", timeout=5.0)
-    if status == 200 and isinstance(body, list):
-        for item in body:
-            if not isinstance(item, dict):
-                continue
-            kind = str(item.get("kind") or "")
-            what = RUNNING_KINDS.get(kind, kind or "a session")
-            if kind == "orient":
-                what += f" (follow-up {item['run']})" if int(item.get("run") or 0) > 0 else ""
-            elif item.get("title"):
-                what += f" \"{item['title']}\""
-            lines.append(f"{item.get('workspace')}: {what}{'' if item.get('resumes') else RUNNING_ENDS}")
-    else:
-        names = _workspace_names(Path(resolve_env()["workspaces_dir"]))
-        lines.extend(f"{c}: {RUNNING_KINDS['orient']}" for c in names if orient_status(c) == "running")
+    """What a restart of the server at `url` would interrupt, one line each: the orientations whose run.json says they
+    run, then the dev ticket the server runs (`GET /api/dev/status`). Empty when nothing runs."""
+    names = _workspace_names(Path(resolve_env()["workspaces_dir"]))
+    lines = [f"{c}: {RUNNING_ORIENT}" for c in names if orient_status(c) == "running"]
     status, body = _request("GET", f"{url}/api/dev/status", timeout=3.0)
     if status == 200 and isinstance(body, dict) and body.get("running"):
         cur = body.get("current") if isinstance(body.get("current"), dict) else {}
