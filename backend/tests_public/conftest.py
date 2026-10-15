@@ -553,6 +553,7 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setenv(cli.LAUNCHED_ENV, "1")
     monkeypatch.setattr(cli, "health_leader", lambda url=None: None)
     monkeypatch.setattr(cli, "foreign_home", lambda url=None: None)  # nor refuses one: another test covers that
+    monkeypatch.setattr(cli, "port_free", lambda p: True)  # nor passes over a live server's port (test_port.py does)
     monkeypatch.delenv(cli.SANDBOX_ENV, raising=False)
     return tmp_path / "home"
 

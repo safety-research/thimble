@@ -1754,9 +1754,12 @@ def _server(say: Callable[[str], None]) -> tuple[str | None, dict[str, Any]]:
     if cli.refuse_foreign(url):
         return None, env
     try:
-        up = cli.ensure_running(cli.WAIT_S)
+        up: bool | None = cli.ensure_running(cli.WAIT_S)
     except TimeoutError:
-        up = cli.healthy(url)
+        up = None
+    url = cli.api_url()  # where the server runs: its start passes over a port that is not free (cli.pick_port)
+    if up is None:
+        up = cli.serves(url)
     if not up:
         why = cli.start_failure(url)
         say(f"  no thimble server answers: {why}" if why else f"  the thimble server did not start (see {cli.log_path()})")
