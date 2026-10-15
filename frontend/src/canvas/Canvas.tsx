@@ -483,7 +483,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   live.current = { data, board, lay, view, sel, open, heights }
 
   // frames opened by a click on their collapsed deck or by a teleport (not by their title): each collapses again at a
-  // click outside it. Kept for the page's life only.
+  // click on the bare board outside it, never at a click on a card or a frame's title. Kept for the page's life only.
   const peeked = useRef<Set<string>>(new Set())
   const peek = (ids: string[]) => {
     for (const g of ids) peeked.current.add(g)
@@ -636,8 +636,8 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
       setMarquee(null)
       const { board: b, lay: l, open: o } = live.current
       if (big || !b || !l) return
-      // a click outside a frame its deck opened collapses it; a click on a collapsed frame (the edges of its deck among
-      // it) opens it
+      // a click on the bare board outside a frame its deck opened collapses it; a click on a collapsed frame (the edges
+      // of its deck among it) opens it
       const g = frameAt(b, l, p0)
       collapsePeeked(g)
       if (g && !o.has(g)) {
@@ -694,8 +694,8 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
       setDrag(null)
       if (moved && last) return dropCard(last)
       if (moved) return
-      // a click on a card is outside every other frame its deck opened; on a collapsed frame's card it opens the frame
-      collapsePeeked(bc.parent)
+      // a click on a card collapses no frame (a tester: "i always accidentally click to collapse"); on a collapsed
+      // frame's card it opens the frame
       if (bc.parent && !live.current.open.has(bc.parent)) {
         track('ui-click', { target: `group:${bc.parent}`, detail: { action: 'expand', via: 'card' } })
         peek([bc.parent])
@@ -795,7 +795,6 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
       clickTimer.current = window.setTimeout(() => {
         clickTimer.current = null
         clickOn.current = null
-        collapsePeeked(gid)
         peeked.current.delete(gid)
         track('ui-click', { target: `group:${gid}`, detail: { action: live.current.open.has(gid) ? 'collapse' : 'expand' } })
         setOpen((cur) => {
