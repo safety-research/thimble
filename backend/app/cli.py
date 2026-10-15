@@ -33,8 +33,11 @@ Claude Code's Bash sandbox gives each command its own network and pid namespace,
 command and the host's cannot be reached. So /thimble's work runs in the plugin's UserPromptExpansion hook, which Claude
 Code runs outside the sandbox just before the skill's commands (`server up --hook`, hook_up): it keeps what `up` printed
 in <home>/up/<session>.json, and the skill's `up` prints that (take_hook_result), or does the work itself when the hook
-left nothing. In the sandbox without the hook's result `up` starts nothing and prints the `sandbox.excludedCommands`
-entries that would run it outside (sandbox_line). `restart` and `stop` name the work
+left nothing. The hook also leaves <home>/up/<session>.active, which says /thimble expanded in that session: the hooks
+module looks at it at the end of main's turn, since where an organization manages Claude Code its skill.prompt event
+passes over the plugins a person installs (plugin/hooks/thimble.ts). In the sandbox without the hook's result `up`
+starts nothing and prints the `sandbox.excludedCommands` entries that would run it outside (sandbox_line). `restart`
+and `stop` name the work
 they would interrupt (running_work) and ask first unless `--yes`. In dev mode an `up` that finds the source tree changed
 while the server is idle restarts the backend (THIMBLE_NO_AUTORESTART=1 disables it). This module imports only
 `config`, `procs`, `cc_plugin`, `launch_mode` and the standard library (others lazily), never `app.notebook`.
@@ -183,6 +186,8 @@ SANDBOX_NO_HOOKS_LINE = ("thimble: WARNING - Claude Code's Bash sandbox is on in
                          "outside the sandbox, so there is no link. To fix it, add \"{rule}\" and \"{watch}\" to "
                          "sandbox.excludedCommands in {settings}, then say /thimble again.")
 HOOK_RESULTS_DIR = "up"  # under <home>: what /thimble's hook left for the skill's command to print (hook_up)
+# beside a result: the marker that /thimble expanded in its session, which the hooks module looks for (module note)
+HOOK_MARKER_SUFFIX = ".active"
 # under <home>: an empty file for each folder thimble opened (mark_active), which the plugin's watcher looks for before it
 # starts Python, so hooks in a folder thimble never opened exit at once (plugin/bin/.thimble-watch's second line)
 ACTIVE_DIR = "active"
@@ -3846,16 +3851,37 @@ def hook_result_path(session: str) -> Path | None:
     return home() / HOOK_RESULTS_DIR / f"{name}.json" if name else None
 
 
+def hook_marker_path(session: str) -> Path | None:
+    """<home>/up/<session>.active, named as hook_result_path names the result; None for an id it gives no name."""
+    path = hook_result_path(session)
+    return path.with_suffix(HOOK_MARKER_SUFFIX) if path else None
+
+
+def _write_private(path: Path, data: dict[str, Any]) -> None:
+    """`data` as JSON at `path`, written whole (a temporary file, then a rename) in a folder only its owner reads."""
+    config.private_dir(path.parent)
+    fd, tmp = tempfile.mkstemp(prefix=".up.", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        os.replace(tmp, path)
+    finally:
+        Path(tmp).unlink(missing_ok=True)
+
+
 def hook_up(raw: str) -> int:
     """`server up --hook`, /thimble's UserPromptExpansion hook (module note, the Bash sandbox): `up` for the hook's
-    session, folder and arguments, with what it prints kept for the skill's `up` (take_hook_result). It prints nothing,
-    since a hook's output would reach the model beside the skill's."""
+    session, folder and arguments, with what it prints kept for the skill's `up` (take_hook_result). Before `up` it
+    writes the session's marker (hook_marker_path) anew, which turns the hooks module on at the end of main's turn
+    where Claude Code does not run the module's skill.prompt hook. It prints nothing, since a hook's output would reach
+    the model beside the skill's."""
     try:
         hook = json.loads(raw)
     except ValueError:
         return 0
     path = hook_result_path(str(hook.get("session_id") or "")) if isinstance(hook, dict) else None
-    if path is None:
+    marker = hook_marker_path(str(hook.get("session_id") or "")) if isinstance(hook, dict) else None
+    if path is None or marker is None:
         return 0
     args = str(hook.get("command_args") or "")
     try:
@@ -3864,18 +3890,15 @@ def hook_up(raw: str) -> int:
         words = args.split()
     action, archive = (words + ["", ""])[:2]
     cwd = os.environ.get("CLAUDE_PROJECT_DIR") or str(hook.get("cwd") or "") or os.getcwd()
+    try:
+        _write_private(marker, {"cwd": cwd, "action": action, "at": time.time()})
+    except OSError as e:  # `up` still runs; the module turns on only where skill.prompt reaches it
+        _log(f"/thimble's marker for session {hook['session_id']} was not written: {e}")
     path.unlink(missing_ok=True)
     out = io.StringIO()
     with redirect_stdout(out):
         cmd_server_up(argparse.Namespace(cwd=cwd, session=str(hook["session_id"]), action=action, archive=archive))
-    config.private_dir(path.parent)
-    fd, tmp = tempfile.mkstemp(prefix=".up.", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump({"cwd": cwd, "action": action, "archive": archive, "at": time.time(), "text": out.getvalue()}, f)
-        os.replace(tmp, path)
-    finally:
-        Path(tmp).unlink(missing_ok=True)
+    _write_private(path, {"cwd": cwd, "action": action, "archive": archive, "at": time.time(), "text": out.getvalue()})
     return 0
 
 
