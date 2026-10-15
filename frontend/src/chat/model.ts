@@ -1393,7 +1393,7 @@ const FAILURE_FIX: Readonly<Partial<Record<ApiFailure, string>>> = {
   auth: 'In your terminal: run /login (or claude auth login in a shell){then}.',
   forbidden: "In your terminal: check your sign-in (/login) and your account's or organization's settings{then}.",
   not_found: "In your terminal: run /model to pick another model (thimble's own agents take theirs from Settings){then}.",
-  refused: 'rephrase or narrow the request and send it again',
+  refused: 'rephrase or narrow the request and send it again.',
 }
 const NEW_SESSION_FIX = 'In your terminal: run /clear to start a new session, then send a rephrased or narrower request here.'
 

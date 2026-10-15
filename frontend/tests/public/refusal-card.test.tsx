@@ -11,7 +11,7 @@ test('a refusal says what to do and has no Retry; an overloaded API keeps its Re
   const again = async () => undefined
   let el = await mount(<ApiErrorCard line="API Error: Opus 5.5's safeguards flagged this message (cyber). Claude Code can't respond to this message with Opus 5.5." retrying="Not retried. The turn ended here." onRetry={again} />)
   expect(el.querySelector('.chat-apierr')?.getAttribute('data-failure')).toBe('refused')
-  expect(el.querySelector('.chat-apierr-what')?.textContent).toBe("Claude's safeguards stopped this request: rephrase or narrow the request and send it again")
+  expect(el.querySelector('.chat-apierr-what')?.textContent).toBe("Claude's safeguards stopped this request: rephrase or narrow the request and send it again.")
   expect(el.querySelector('.chat-apierr-retry')).toBeNull()
   expect(el.querySelector('.chat-apierr-retrying')?.textContent).toBe('Not retried. The turn ended here.')
   unmountAll()

@@ -65,7 +65,7 @@ describe('API errors no retry fixes', () => {
 })
 
 describe("a request Claude's safeguards stopped", () => {
-  const REFUSED = "Claude's safeguards stopped this request: rephrase or narrow the request and send it again"
+  const REFUSED = "Claude's safeguards stopped this request: rephrase or narrow the request and send it again."
 
   test('named whole, by Claude Code\'s words, the API\'s usage policy or thimble\'s own detail, with no status', () => {
     const blocked = "API Error: 400 This request triggered restrictions on violative cyber content and was blocked under Anthropic's Usage Policy. To learn more, see https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback."
