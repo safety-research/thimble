@@ -8,7 +8,8 @@
 // that failed, or that the server could not start, says why in a toast and leaves it. A failure of main's own request
 // shows in the strip only while another chat is open, since main's chat shows its API error card. In the agent's own
 // chat the notice is also a row (NoticeRow), the same words without buttons, kept as a quiet line of the chat's history
-// once the notice is closed; while it is open the strip shows it there.
+// once the notice is closed; while it is open the strip shows it there. The Manual-mode notice (kind `manual-mode`,
+// while main runs in Claude Code's Manual mode) is drawn in the problem red instead (styles/chat.css).
 import { useState, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
