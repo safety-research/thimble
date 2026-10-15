@@ -48,6 +48,33 @@ def test_the_workspace_s_file_overrides_the_home_s_key_by_key_and_errors_name_th
     assert "agents.critic.prompt names gone.md" in userconf.problem()
 
 
+def test_the_ask_key_is_meta_unless_settings_or_the_file_in_thimble_s_home_picks_alt(workspaces_tmp, analyst):
+    """`askKey`, the key held with a click to ask in the browser, is "meta" by default and on an error; Settings' Ask
+    key choice writes it to the file in thimble's home as `ask_key`, and null takes it out. A value it does not take is
+    refused, a workspace's file cannot set it, and only the analyst's browser may change it."""
+    from fastapi import HTTPException
+    from starlette.requests import Request
+
+    assert userconf.ask_key() == "meta" and ledger.get_settings(CORPUS)["ask_key"] == "meta"
+    assert ledger.put_settings_route(CORPUS, analyst, {"ask_key": "alt"})["ask_key"] == "alt"
+    assert json.loads(userconf.global_file().read_text())["askKey"] == "alt" and userconf.ask_key() == "alt"
+    assert not userconf.workspace_file(CORPUS).exists() or "askKey" not in userconf.workspace_file(CORPUS).read_text()
+    for bad in ("ctrl", "Meta", True, 1):
+        with pytest.raises(HTTPException) as e:
+            ledger.put_settings_route(CORPUS, analyst, {"ask_key": bad})
+        assert e.value.status_code == 400 and '"meta", "alt" or null' in e.value.detail, bad
+    with pytest.raises(HTTPException) as e:
+        ledger.put_settings_route(CORPUS, Request({"type": "http", "headers": []}), {"ask_key": "meta"})
+    assert e.value.status_code == 403 and userconf.ask_key() == "alt"
+    assert ledger.put_settings_route(CORPUS, analyst, {"ask_key": None})["ask_key"] == "meta"
+    assert "askKey" not in json.loads(userconf.global_file().read_text())
+    _write(userconf.global_file(), {"askKey": "shift"})
+    assert 'askKey is "shift"; it takes "meta" or "alt" or null' in userconf.problem() and userconf.ask_key() == "meta"
+    _write(userconf.global_file(), {"askKey": "alt"})
+    _write(userconf.workspace_file(CORPUS), {"askKey": "meta"})
+    assert "askKey is set for the whole machine" in userconf.problem(CORPUS) and userconf.ask_key() == "alt"
+
+
 def test_an_earlier_build_s_models_and_modes_move_to_the_workspace_s_file(workspaces_tmp):
     """The models and permission modes an earlier build kept in settings.json move to that workspace's own file, so it
     runs as it did; main's model settings and the rest stay. View builds' row of old was the dev agent's, the stricter one

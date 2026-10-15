@@ -17,7 +17,7 @@ import { api, canvasApi, isNotFound } from '../lib/api'
 import { bus } from '../lib/bus'
 import { isReplay } from '../lib/events'
 import { CHECK_WORDS, checkState, type CheckFilterState } from '../lib/cardCheck'
-import { pointKeyHeld } from '../lib/platform'
+import { freeKeyHeld, pointKeyHeld } from '../lib/platform'
 import { takesSideways } from '../lib/scrolls'
 import { registerCells } from '../lib/cellName'
 import { parseRef } from '../lib/refs'
@@ -156,7 +156,7 @@ interface Drag {
   y: number
   target: string | null
   ins: Insertion | null
-  /** a card placed free (no gap under the pointer, or ⌥) */
+  /** a card placed free (no gap under the pointer, or the free key: ⌥, or ⌘ when ⌥ asks) */
   free: boolean
   /** the target is not where it is now */
   move: boolean
@@ -656,7 +656,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
       e.stopPropagation()
       return pan(e)
     }
-    // ⌘ belongs to the pointer (a thread on the card); a control in the card handles its own press
+    // the ask key belongs to the pointer (a thread on the card); a control in the card handles its own press
     if (e.button !== 0 || pointKeyHeld(e) || (e.target as HTMLElement).closest('button, a, textarea, input, select, iframe, .chip, .refchip')) return
     e.stopPropagation()
     e.preventDefault()
@@ -685,8 +685,10 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
       const target = frameAt(b2, l2, p)
       // a collapsed frame takes a card at the end of its deck, never free or between the cards it does not show
       const shut = !!target && !live.current.open.has(target)
-      const ins = target && !ev.altKey && !shut ? insertionAt(b2, l2, target, p, id) : null
-      last = { t: 'c', id, x: r.x + p.x - p0.x, y: r.y + p.y - p0.y, target, ins, free: !shut && (ev.altKey || !ins), move: !!target && target !== bc.parent }
+      // the key Settings did not pick for asking (⌥ by default, else ⌘) places the card free (lib/platform freeKeyHeld)
+      const free = freeKeyHeld(ev)
+      const ins = target && !free && !shut ? insertionAt(b2, l2, target, p, id) : null
+      last = { t: 'c', id, x: r.x + p.x - p0.x, y: r.y + p.y - p0.y, target, ins, free: !shut && (free || !ins), move: !!target && target !== bc.parent }
       setDrag(last)
     }
     const up = () => {

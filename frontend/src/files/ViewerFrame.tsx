@@ -44,6 +44,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { viewFonts, viewStyle, withFrameStyle } from '../lib/frame'
+import { getAskKey, onAskKey } from '../lib/platform'
 import { recordOf } from '../lib/refs'
 import { notePress } from '../lib/surfaces'
 import { teleport } from '../lib/teleport'
@@ -597,8 +598,8 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
           restoring.current = null
           if (st) void reopen(st)
           else void sendOpen(target.current)
-          // the ⌘ arrow up front, so a ⌘ pressed while the frame has the focus shows it too
-          post({ type: P + 'cmd', on: document.body.hasAttribute('data-cmd'), cursor: cmdCursors(token('--accent')).arrow })
+          // the ⌘ arrow and the ask key up front, so a ⌘ pressed while the frame has the focus shows it too
+          post({ type: P + 'cmd', on: document.body.hasAttribute('data-cmd'), cursor: cmdCursors(token('--accent')).arrow, key: getAskKey() })
           return
         }
         case P + 'state': {
@@ -715,10 +716,13 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
       }
     }
     window.addEventListener('message', onMessage)
-    const offCmd = bus.on('cmdHeld', ({ on, cursor }) => post({ type: P + 'cmd', on, cursor }))
+    const offCmd = bus.on('cmdHeld', ({ on, cursor }) => post({ type: P + 'cmd', on, cursor, key: getAskKey() }))
+    // the ask key Settings picks, which the frame's own key events follow (backend/app/viewer_bridge.js)
+    const offKey = onAskKey(() => ready.current && post({ type: P + 'cmd', on: document.body.hasAttribute('data-cmd'), cursor: cmdCursors(token('--accent')).arrow, key: getAskKey() }))
     return () => {
       window.removeEventListener('message', onMessage)
       offCmd()
+      offKey()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ws, slug, marks, version, frameId, stopCall])

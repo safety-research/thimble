@@ -488,8 +488,9 @@ export function sessionTexts(demo: boolean): { chat: [string, string]; terminal:
   }
 }
 
-/** The tour, for a pointer key written `key` (⌘ on a Mac, Ctrl elsewhere). With the chat column folded (`chat` false)
- * the steps about the chat are left out; on a demo page (`demo`) they say it is a demo (sessionTexts). */
+/** The tour, for the ask key written `key` (⌘ or ⌥ on a Mac, Ctrl or Alt elsewhere, as Settings picks). With the chat
+ * column folded (`chat` false) the steps about the chat are left out; on a demo page (`demo`) they say it is a demo
+ * (sessionTexts). */
 export function tourSteps(key: string, chat = true, demo = false): Step[] {
   const said = sessionTexts(demo)
   const steps: Step[] = [

@@ -1239,6 +1239,9 @@ export interface Settings {
   /** View proposals: whether thimble proposes views after a turn and viewers for file types (thimble's config
    * `views.propose`) */
   propose_views?: boolean
+  /** the key held with a click to ask in the browser (thimble's config `askKey`, lib/platform): "meta" (⌘, Ctrl off a
+   * Mac) or "alt" (⌥, Alt) */
+  ask_key?: 'meta' | 'alt'
   [k: string]: unknown
 }
 
@@ -1297,6 +1300,8 @@ export interface SettingsPatch {
   web?: Partial<Record<'orient' | 'writer' | 'critic' | 'checks', 'off' | null>>
   /** View proposals: false turns them off, null puts back the default (on) */
   propose_views?: boolean | null
+  /** the ask key: "alt", or null to put back the default ("meta") */
+  ask_key?: 'meta' | 'alt' | null
   [k: string]: unknown
 }
 

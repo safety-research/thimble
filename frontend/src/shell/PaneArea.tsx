@@ -8,6 +8,7 @@ import { createPortal } from 'react-dom'
 import { Button } from '../components/Button'
 import { Icon, type IconName } from '../components/Icon'
 import { Menu } from '../components/Menu'
+import { pointKeyHeld } from '../lib/platform'
 import { setFilesViewsSlot } from '../lib/surfaces'
 import { drop, isView, previewOf, ratioAt, zoneAt, type Divider, type PaneRect, type Panes, type Rect, type SurfaceId, type Zone } from './panes'
 
@@ -208,8 +209,9 @@ export function usePaneDrag(opts: { area: HTMLElement | null; geometry: Geometry
   const live = useRef(opts)
   live.current = opts
   const start = useCallback((e: ReactPointerEvent, surface: SurfaceId) => {
-    // a press with ⌘ or Ctrl is the pointing gesture (pointer/CmdPointer), not a drag
-    if (e.button !== 0 || e.metaKey || e.ctrlKey) return
+    // a press with ⌘ or Ctrl, or with the ask key Settings picks (⌥ or Alt), is the pointing gesture
+    // (pointer/CmdPointer), not a drag
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || pointKeyHeld(e)) return
     const x0 = e.clientX
     const y0 = e.clientY
     let on = false

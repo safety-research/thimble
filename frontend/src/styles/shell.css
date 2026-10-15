@@ -472,6 +472,10 @@
 .settings-mode {
   justify-self: start;
 }
+/* the Ask key choice (SettingsPopover's ASK_KEY_LABEL): ⌘-click or ⌥-click */
+.settings-ask-key {
+  justify-self: start;
+}
 /* labels' and the card check's cell where the others have their mode's menu (SettingsPopover's CALL_ROWS) */
 .chip.settings-mode-none {
   color: var(--text-secondary);

@@ -5,11 +5,14 @@
 // rows, the orientation subagents' row with its effort, a web switch per agent; the View proposals switch, sent only
 // when it changed; thimble's rules for main and its agents, code tickets' among them (web and data follow the session's
 // mode, and the shell runs in Claude Code's sandbox where /thimble saw one); one permission row, the dev agent's
-// program's, only where an extension runs one, where a session in Bypass counts as Manual; cardWait; no installs row.
+// program's, only where an extension runs one, where a session in Bypass counts as Manual; cardWait; no installs row;
+// the Ask key choice, ⌘-click or ⌥-click (Ctrl-click or Alt-click off a Mac), sent only when it changed and taken by
+// the page at once.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { BYPASS_LINE, MAIN_MODE_LINE, PROPOSE_LABEL, SESSION_BYPASS_NOTE, SettingsPopover, TICKET_FAST, agentMode, cardWaitLine, changedPropose, changedRoles, changedWeb, fenceLine, lockedWhy, memoryWords, modeRowShown, rolesOf, roleEfforts, webRows } from '../../src/shell/SettingsPopover.tsx'
+import { ASK_KEY_LABEL, BYPASS_LINE, MAIN_MODE_LINE, PROPOSE_LABEL, askKeyNote, askKeyOptions, changedAskKey, SESSION_BYPASS_NOTE, SettingsPopover, TICKET_FAST, agentMode, cardWaitLine, changedPropose, changedRoles, changedWeb, fenceLine, lockedWhy, memoryWords, modeRowShown, rolesOf, roleEfforts, webRows } from '../../src/shell/SettingsPopover.tsx'
 import { invalidateSettings } from '../../src/lib/models.ts'
+import { getAskKey, setAskKey } from '../../src/lib/platform.ts'
 import type { Attached, Settings } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
@@ -98,6 +101,21 @@ describe('the rules', () => {
     expect(changedPropose({ ...SETTINGS, propose_views: false }, true)).toEqual({ propose_views: null })
   })
 
+  test('the ask key: ⌘-click or ⌥-click, Ctrl-click or Alt-click off a Mac; a save sends "alt", null for ⌘, nothing when unchanged', () => {
+    expect(askKeyOptions(true)).toEqual([
+      { value: 'meta', label: '⌘-click' },
+      { value: 'alt', label: '⌥-click' },
+    ])
+    expect(askKeyOptions(false).map((o) => o.label)).toEqual(['Ctrl-click', 'Alt-click'])
+    expect(askKeyNote(true, 'meta')).toBe('⌘-click asks about anything in thimble; ⌥-drag places a card freely on the canvas.')
+    expect(askKeyNote(true, 'alt')).toBe('⌥-click asks about anything in thimble; ⌘-drag places a card freely on the canvas.')
+    expect(askKeyNote(false, 'alt')).toBe('Alt-click asks about anything in thimble; Ctrl-drag places a card freely on the canvas.')
+    expect(changedAskKey(SETTINGS, 'meta')).toEqual({})
+    expect(changedAskKey(SETTINGS, 'alt')).toEqual({ ask_key: 'alt' })
+    expect(changedAskKey({ ...SETTINGS, ask_key: 'alt' }, 'alt')).toEqual({})
+    expect(changedAskKey({ ...SETTINGS, ask_key: 'alt' }, 'meta')).toEqual({ ask_key: null })
+  })
+
   test("thimble's rules for main and its agents in words, and the CLAUDE.md files each agent reads", () => {
     const main = SETTINGS.agents!.main!
     expect(fenceLine(main)).toBe('web follows your mode · data edits follow your mode · shell follows your mode')
@@ -158,6 +176,51 @@ describe('the popover', () => {
     await act(async () => [...doc.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Save')!.click())
     await settle()
     expect(puts).toEqual([['/api/ws/mini/settings', { propose_views: false }]])
+  })
+
+  test('the Ask key choice, ⌘ by default: picking the other key and saving sends it, and the page takes it at once', async () => {
+    setAskKey('meta')
+    const anchor = document.createElement('button')
+    document.body.appendChild(anchor)
+    try {
+      await mount(<SettingsPopover ws="mini" anchor={anchor} open onClose={() => {}} />)
+      await settle()
+      await settle()
+      const doc = document.body
+      const row = doc.querySelector('.settings-row[data-auto="ask-key"]')!
+      expect(row.querySelector('.settings-role')?.textContent).toBe(ASK_KEY_LABEL)
+      expect(ASK_KEY_LABEL).toBe('Ask key')
+      const options = [...row.querySelectorAll<HTMLButtonElement>('[role="radio"]')]
+      // jsdom reports no Mac
+      expect(options.map((o) => [o.textContent, o.getAttribute('aria-checked')])).toEqual([
+        ['Ctrl-click', 'true'],
+        ['Alt-click', 'false'],
+      ])
+      expect(row.querySelector('.settings-agent-line')?.textContent).toBe(askKeyNote(false, 'meta'))
+      await act(async () => options[1].click())
+      expect(row.querySelector('.settings-agent-line')?.textContent).toBe(askKeyNote(false, 'alt'))
+      expect(getAskKey()).toBe('meta')
+      await act(async () => [...doc.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Save')!.click())
+      await settle()
+      expect(puts).toEqual([['/api/ws/mini/settings', { ask_key: 'alt' }]])
+      expect(getAskKey()).toBe('alt')
+    } finally {
+      setAskKey('meta')
+    }
+  })
+
+  test('the Ask key choice shows the key the settings hold, and a save without a change sends none', async () => {
+    settings = { ...SETTINGS, ask_key: 'alt' }
+    const anchor = document.createElement('button')
+    document.body.appendChild(anchor)
+    await mount(<SettingsPopover ws="mini" anchor={anchor} open onClose={() => {}} />)
+    await settle()
+    await settle()
+    const doc = document.body
+    expect(doc.querySelector('.settings-row[data-auto="ask-key"] [role="radio"][aria-checked="true"]')?.textContent).toBe('Alt-click')
+    await act(async () => [...doc.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Save')!.click())
+    await settle()
+    expect(puts).toEqual([])
   })
 
   test("the dev row's fast switch is thimble fix's, and a save sends it", async () => {

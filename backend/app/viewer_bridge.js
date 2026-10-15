@@ -78,9 +78,10 @@
 //   hidden {n, self}       frame to page: how many anchored refs the bridge hides or dims for the label filter, null
 //                          while thimble has not answered for every anchored ref, and whether the page filters its
 //                          records itself (it registered onLabels)
-//   cmd {on, cursor}       page to frame: the page's ⌘ pointer went on or off, and the page's ⌘ arrow as a CSS cursor
+//   cmd {on, cursor, key}  page to frame: the page's ⌘ pointer went on or off, and the page's ⌘ arrow as a CSS cursor
 //                          value, which this page shows while ⌘ is held so the pointer over the frame is the same one
-//                          pointer
+//                          pointer; `key` is the ask key Settings picks, "meta" (⌘, Ctrl off a Mac) or "alt" (⌥, Alt),
+//                          which the frame's own key events and ⌘-click follow (the page's lib/platform.ts)
 //   state {id}             page to frame, answered by state {id, state}: what the analyst is looking at, before a newer
 //                          version of the view is loaded in its place: {ref, scroll, fields, segs} (pageState)
 //   restore {state}        page to frame: that state put back in the newer version's page, as far as it fits (restore)
@@ -674,6 +675,7 @@
         }
       }
     } else if (d.type === P + 'cmd') {
+      if (d.key === 'alt' || d.key === 'meta') askAlt = d.key === 'alt'
       setCmdCursor(d.cursor)
       pageCmd = !!d.on
       cmdHeld(d.on)
@@ -722,13 +724,21 @@
     if (on) root.setAttribute('data-thimble-cmd', '')
     else root.removeAttribute('data-thimble-cmd')
   }
-  // Off a Mac, Ctrl does what ⌘ does, since the desktop keeps the Super key for itself (the page's lib/platform.ts)
+  // Off a Mac, Ctrl does what ⌘ does, since the desktop keeps the Super key for itself (the page's lib/platform.ts).
+  // With the ask key "alt" (the `cmd` message's key), ⌥ (Alt) points and asks in place of ⌘ (Ctrl).
   var MAC = /mac|iphone|ipad|ipod/i.test((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '')
+  var askAlt = false
   function held(e) {
+    if (askAlt) return !!e.altKey
     return MAC ? e.metaKey : e.metaKey || e.ctrlKey
   }
   function isPointKey(key) {
+    if (askAlt) return key === 'Alt'
     return key === 'Meta' || (!MAC && key === 'Control')
+  }
+  // another modifier held with the ask key, which makes it a shortcut's start rather than a point
+  function otherHeld(e) {
+    return e.shiftKey || e.ctrlKey || (askAlt ? e.metaKey : e.altKey)
   }
   // On a Mac ⌘ is also the key of every shortcut (⌘C, ⌘V, ⌘Z), as on the page (pointer/CmdPointer): ⌘ points once it
   // has been held alone for HOLD_MS, and a key pressed with it lets go until ⌘ is released. The page's own ⌘ pointer
@@ -740,7 +750,7 @@
   // what the pointer was last over, which ⌘ held long enough points at without a move
   var lastOver = null
   function pointing(e) {
-    return MAC ? e.metaKey && (pageCmd || ownCmd) : held(e)
+    return MAC ? held(e) && (pageCmd || ownCmd) : held(e)
   }
   function unwait() {
     if (ownWait != null) clearTimeout(ownWait)
@@ -771,7 +781,7 @@
     'mousemove',
     function (e) {
       lastOver = e.target
-      if (MAC && !e.metaKey) {
+      if (MAC && !held(e)) {
         unwait()
         ownCmd = false
       }
@@ -789,8 +799,8 @@
       if (isPointKey(e.key)) cmdHeld(true)
       return
     }
-    if (e.key === 'Meta') {
-      if (e.repeat || ownWait != null || ownCmd || e.shiftKey || e.altKey || e.ctrlKey) return
+    if (isPointKey(e.key)) {
+      if (e.repeat || ownWait != null || ownCmd || otherHeld(e)) return
       ownWait = setTimeout(function () {
         ownWait = null
         ownCmd = true
@@ -801,10 +811,10 @@
           post({ type: P + 'point', rect: rectOf(hit.el) })
         }
       }, HOLD_MS)
-    } else if (e.metaKey) letGo()
+    } else if (held(e)) letGo()
   })
   addEventListener('keyup', function (e) {
-    if (MAC && e.key === 'Meta') {
+    if (MAC && isPointKey(e.key)) {
       unwait()
       ownCmd = false
     }

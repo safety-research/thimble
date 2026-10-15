@@ -9,13 +9,15 @@
 // once. Off a Mac, Ctrl does what ⌘ does (lib/platform), at once, and lets go at a key pressed with it. The send lets
 // go of the highlight and opens the thread in the chat column. The box shows only while the element it is about is on
 // screen: a switch to another tab or a collapsed frame hides it, its text kept, and it comes back beside the element
-// when the element is back (onScreen); a send under way goes on.
+// when the element is back (onScreen); a send under way goes on. ⌘ here stands for the ask key Settings picks
+// (lib/platform pointKeyHeld): ⌘ by default, or ⌥, which then holds alone for HOLD_MS on a Mac as ⌘ does, and lets go
+// at a key pressed with it (⌥ types a letter's accent there); off a Mac, Ctrl or Alt, at once.
 import { useEffect, useRef, useState } from 'react'
 import { agentTinted } from '../lib/agentKey'
 import { api } from '../lib/api'
 import { demoStop } from '../lib/demo'
 import { bus } from '../lib/bus'
-import { isMacPlatform, isPointKey, pointKeyHeld } from '../lib/platform'
+import { getAskKey, isMacPlatform, isPointKey, pointKeyHeld } from '../lib/platform'
 import { track } from '../lib/telemetry'
 import { token } from '../lib/vizTheme'
 import { anchorsInSelection, cellOf, chunkAt, isDrag, isShown, joinAnchors, lastLine, nearestAnchor, pressRoot, rangeContext, selectionTextWithin, textHitAt, toBox, type Anchor, type Box } from './anchors'
@@ -204,10 +206,11 @@ export function CmdPointer({ ws }: { ws: string }) {
         else if (cmdOn()) off()
         return
       }
-      if (e.key === 'Meta') {
+      if (isPointKey(e.key, mac)) {
         // ⌘ pressed with another key already down is a shortcut's start: it stays off until ⌘ is released
-        if (!e.repeat && wait == null && !cmdOn() && !e.shiftKey && !e.altKey && !e.ctrlKey) wait = window.setTimeout(shown, HOLD_MS)
-      } else if (e.metaKey) {
+        const other = e.shiftKey || e.ctrlKey || (getAskKey() === 'alt' ? e.metaKey : e.altKey)
+        if (!e.repeat && wait == null && !cmdOn() && !other) wait = window.setTimeout(shown, HOLD_MS)
+      } else if (held(e)) {
         // a key pressed with ⌘ is a shortcut (⌘C, ⌘V, ⌘Z), not a point: the pointer lets go until ⌘ is released
         unwait()
         off()
