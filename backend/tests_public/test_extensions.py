@@ -400,7 +400,7 @@ async def test_an_added_extension_runs_in_every_workspace_and_its_view_where_it_
     assert "tally/a.jsonl  " in fit["asked"][0] and '"who": "ana"' in fit["asked"][0]
 
     prop = views.read_proposal(CORPUS, "tally")
-    assert prop["extension"] == "ext-min" and prop["orientation"] is False, "outside the orientation's four"
+    assert prop["extension"] == "ext-min" and prop["orientation"] is False, "never an orientation's proposal"
     assert views.read_built(CORPUS, "tally")["ok"]
     row = extensions.public(CORPUS)["extensions"][0]
     assert row["views"] == [{"slug": "tally", "name": "Tally", "shown": True, "note": "Each record says who did a task.",

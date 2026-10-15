@@ -99,8 +99,9 @@ NOT_BROWSER = ("This view was built in terminal mode, so only the terminal draws
 TOOLS_PROMPT = "tools"  # prompts/tools.md, whose lowercase sections are the lines the view tools' results carry
 # a view ticket's status on its proposal row; `dropped` is an orientation proposal left out when the analyst stopped the
 # orientation before its view was built, or a view proposal the analyst rejected (answer_offer, its `answer`). An
-# orientation's proposal carries `held: true` until its view first passes its checks (mark_built) or fails through its
-# repairs (dev._repairs_failed): it builds at once, and the analyst hears of it only then.
+# orientation's proposal (before 0.8.0; one proposes none now) carries `held: true` until its view first passes its
+# checks (mark_built) or fails through its repairs (dev._repairs_failed): it builds at once, and the analyst hears of it
+# only then.
 # `suggested` with an `offered` object is a view proposal thimble shows the analyst (offer), after a turn (proposer.py)
 # or for a file type opened in the File browser (suggest), which builds only once the analyst accepts it (accept). A
 # `suggested` row without `offered` is an orientation's viewer for a file type (propose with `suggested`), as 0.7.x
@@ -268,8 +269,8 @@ def _now() -> str:
 
 def _emit(c: str, slug: str, status: str, **extra: Any) -> None:
     """The `view` event on the workspace stream. investigation.emit runs on the event loop only, so a caller in a
-    worker thread (a route's blocking part) hands it to the bound loop. A held proposal's build (one of the
-    orientation's, before its view first passes) says `held`: its chip in the orientation's thread follows it, while
+    worker thread (a route's blocking part) hands it to the bound loop. A held proposal's build (an orientation's from
+    before 0.8.0, before its view first passes) says `held`: its chip in the orientation's thread follows it, while
     the views bar and the view-ready toast wait for the view to be built (mark_built) (live checks L19, L25)."""
     event = {"type": "view", "slug": slug, "status": status, **extra}
     if slug in held_slugs(c):
@@ -891,8 +892,8 @@ def _write_off(c: str, slug: str, on: bool) -> None:
 
 
 def held_slugs(c: str) -> set[str]:
-    """The slugs of the orientation's proposals whose views have not passed their checks yet, read from the stored rows
-    (list_proposals reads list_views)."""
+    """The slugs of an orientation's proposals (before 0.8.0) whose views have not passed their checks yet, read from the
+    stored rows (list_proposals reads list_views)."""
     try:
         p = proposals_path(c)
         raw = read_json(p, []) if p.is_file() else []
@@ -997,8 +998,8 @@ def write_view(c: str, slug: str, *, name: str, description: str, claims: Any = 
 
 def mark_built(c: str, slug: str) -> dict[str, Any]:
     """Register the view in the slug's folder: `built` stamped into its view.json (the only writer of that field), its
-    memo dropped, and a proposal under the slug marked built, and no longer held, so an orientation's view reaches the
-    analyst as soon as it passes its checks. Emits `view {slug, status: built}`, with `asked` for a view the analyst
+    memo dropped, and a proposal under the slug marked built, and no longer held, so an orientation's view (before
+    0.8.0) reaches the analyst as soon as it passes its checks. Emits `view {slug, status: built}`, with `asked` for a view the analyst
     asked for, which the browser then opens. The first build of a view proposal the analyst accepted (accept) says
     `accepted` instead: the browser marks the view new and leaves it closed; a change to it later (revise) says
     neither."""
@@ -1114,7 +1115,7 @@ def read_version(c: str, slug: str, version: str) -> dict[str, Any] | None:
 
 def delete_view(c: str, slug: str) -> None:
     """Remove the view and the proposal it was built from, stopping a change being made to it; it is kept in
-    DELETED_FILE, so the orientation never proposes it again. Its `view:` refs keep resolving through key-refs.json. A
+    DELETED_FILE, so no view proposal takes its name again. Its `view:` refs keep resolving through key-refs.json. A
     built-in viewer is not deleted."""
     from . import dev  # noqa: PLC0415
 
@@ -2570,8 +2571,9 @@ def title_case(name: Any) -> str:
     return " ".join("-".join(p[:1].upper() + p[1:] for p in w.split("-")) for w in words)
 
 
-# the views the orientation may propose in a workspace, those the analyst deleted included; a viewer it suggests for a
-# file type is not counted, nor a view dropped
+# the views an orientation from before 0.8.0 might propose in a workspace, those the analyst deleted included; a viewer
+# it suggested for a file type is not counted, nor a view dropped. Since 0.8.0 the orientation has no propose_view, so
+# no call passes `orientation` to propose.
 VIEW_PROPOSALS_MAX = 4
 
 
@@ -3174,7 +3176,7 @@ def drop(c: str, slug: str, why: str) -> dict[str, Any] | None:
 
 def delete_proposal(c: str, slug: str) -> None:
     """Delete the proposal: its build is stopped, its folder removed, and its view with it when it was built; it is kept
-    in DELETED_FILE, so the orientation never proposes it again. A change to a built view that is dismissed while it is
+    in DELETED_FILE, so no view proposal takes its name again. A change to a built view that is dismissed while it is
     made stops, and the view is put back as it was."""
     from . import dev  # noqa: PLC0415
 
@@ -5028,10 +5030,11 @@ SUGGEST_NOTICE_KEY = "view-proposal-file"
 SUGGEST_AGENT = "View proposals"  # the name its notices give, as the proposer's do
 SUGGEST_FAILED = "Couldn't check for a view proposal for {files}: {reason}."
 SUGGEST_REFUSED = "Claude's safeguards blocked the request"
-# notices.SERVER_AUTH, whose fix runs in the terminal, then Try again here
-SUGGEST_AUTH = ("Claude Code isn't signed in for thimble's server. In your terminal: run /login (or `claude auth login` "
-                "in a shell), or if you changed your sign-in (for example exported ANTHROPIC_API_KEY), run "
-                "`thimble server restart`. Then Try again")
+# no sign-in, and access refused for the account or its organization (403): each fix runs in the terminal, with Try
+# again here, in the words the proposer's notices use (proposer.NOTICE_AUTH, NOTICE_FORBIDDEN)
+SUGGEST_AUTH = "Claude Code isn't signed in. In your terminal: run /login (or `claude auth login` in a shell)"
+SUGGEST_FORBIDDEN = ("access was refused for this account or organization (403). In your terminal: run /login to check "
+                     "the account, or check your organization's settings")
 SUGGEST_FALLBACK = "This view proposal came from {model}: Claude's safeguards switched models."
 SUGGEST_REASON_CHARS = 160  # of the call's own detail in the notice
 SUGGEST_TRY_AGAIN = {"label": "Try again", "do": "proposals-retry"}
@@ -5196,12 +5199,15 @@ async def suggest(c: str, rel: str) -> str | None:
     model call reads the file's start (prompts/file-viewer.md) and says whether a viewer would help; a yes is a view
     proposal claiming the suffix's glob (offer, `proposed_by` "files", after "file"), shown on the same card as the
     proposer's, and the suffix's answer `suggested`; a no is the suffix's answer `none`, so it is never asked again. The
-    view proposal's slug, or None. No call is made while view proposals are off (propose_enabled), one waits, or views
-    cannot be built here. A call that fails, or a view proposal that offer refuses, caches nothing, so the next file of
-    the type asks again. A call that fails is also a notice, with Try again (_check_failed); a call that answers
+    view proposal's slug, or None. No call is made while no Claude Code session listens (events.reachable: a demo
+    page, which shows no view proposal), while view proposals are off (propose_enabled), one waits, or views cannot be
+    built here. A call that fails, or a view proposal that offer refuses, caches nothing, so the next file of the type
+    asks again. A call that fails is also a notice, with Try again (_check_failed); a call that answers
     clears it, or, when its view proposal came from the refusal row's model, says so (SUGGEST_FALLBACK)."""
-    from . import tasks  # noqa: PLC0415
+    from . import events, tasks  # noqa: PLC0415
 
+    if not events.reachable(c):
+        return None
     if not await asyncio.to_thread(propose_enabled, c) or await asyncio.to_thread(open_offer, c) is not None:
         return None
     got = await asyncio.to_thread(suggestion_for, c, rel)
@@ -5253,13 +5259,17 @@ async def suggest(c: str, rel: str) -> str | None:
 
 def _failure_of(res: Any) -> str:
     """Why a file type's check for a view proposal gave no answer, in a few words for its notice: Claude's safeguards
-    (SUGGEST_REFUSED), no sign-in (SUGGEST_AUTH), an answer that could not be read, or the call's own detail."""
+    (SUGGEST_REFUSED), no sign-in (SUGGEST_AUTH), access refused (SUGGEST_FORBIDDEN), an answer that could not be read,
+    or the call's own detail."""
     from . import notices  # noqa: PLC0415 — notices imports agents, which imports this module
 
     status, detail = str(getattr(res, "status", "") or ""), _one(getattr(res, "detail", "") or "")
     if status == "refused" or notices.REFUSED_RE.search(detail):
         return SUGGEST_REFUSED
-    if notices.AUTH_RE.search(detail):
+    cls = notices.failure_class(detail)
+    if cls == "forbidden":
+        return SUGGEST_FORBIDDEN
+    if cls == "auth":
         return SUGGEST_AUTH
     if status in ("ok", "truncated", "no_tool_call"):
         return "Claude's answer couldn't be read"
@@ -5273,7 +5283,7 @@ def _check_failed(c: str, rel: str, suffix: str, reason: str) -> None:
     log.info("no viewer suggestion for %s/%s: %s", c, rel, reason)
     _suggest_failed[c] = rel
     action = [SUGGEST_TRY_AGAIN, SUGGEST_TURN_OFF] if reason == SUGGEST_REFUSED else SUGGEST_TRY_AGAIN
-    if reason not in (SUGGEST_REFUSED, SUGGEST_AUTH):
+    if reason not in (SUGGEST_REFUSED, SUGGEST_AUTH, SUGGEST_FORBIDDEN):
         reason = reason.rstrip(".")
         reason = reason if len(reason) <= SUGGEST_REASON_CHARS else reason[:SUGGEST_REASON_CHARS - 1].rstrip() + "…"
     files = f"{suffix} files" if suffix else "files without a suffix"

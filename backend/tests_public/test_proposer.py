@@ -304,9 +304,23 @@ async def test_no_sign_in_says_how_to_sign_in(cwd, tmp_path, cards, forks):
     await _one_turn(cwd, tmp_path)
     assert _runs()[0]["status"] == "auth"
     n = _shown_notice()
-    assert n["text"].startswith("Couldn't check for a view proposal: Claude Code isn't signed in for thimble's server.")
-    assert "In your terminal: run /login" in n["text"] and "`thimble server restart`" in n["text"]
-    assert n["text"].endswith("Then Try again."), "the fix runs in the terminal, then Try again here"
+    # as short as main's own sign-in card, whose fix runs in the terminal; Try again stays here
+    assert n["text"] == ("Couldn't check for a view proposal: Claude Code isn't signed in. In your terminal: run /login "
+                         "(or `claude auth login` in a shell).")
+    assert n["action"] == {"label": "Try again", "do": "proposals-retry"}
+
+
+@pytest.mark.parametrize("error_text", ["API Error: 403 {\"type\":\"error\",\"error\":{\"type\":\"permission_error\"}}",
+                                        "Please run /login · API Error: 403 Forbidden"])
+async def test_access_refused_has_its_own_words_not_the_sign_in_s(cwd, tmp_path, cards, forks, error_text):
+    forks.answer = stream(error="unknown", stop="stop_sequence", error_text=error_text)
+    await _one_turn(cwd, tmp_path)
+    assert _runs()[0]["status"] == "forbidden"
+    n = _shown_notice()
+    assert n["text"] == ("Couldn't check for a view proposal: access was refused for this account or organization "
+                         "(403). In your terminal: run /login to check the account, or check your organization's "
+                         "settings.")
+    assert "isn't signed in" not in n["text"]
     assert n["action"] == {"label": "Try again", "do": "proposals-retry"}
 
 

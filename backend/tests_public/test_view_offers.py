@@ -15,7 +15,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from app import config, context, ledger, userconf, views
+from app import config, context, events, ledger, userconf, views
 
 CORPUS = "offers"
 CLICK_REFUSED = views.click_refused  # the real one, which the corpus fixture replaces
@@ -35,8 +35,9 @@ def resolve(index, locator):
 
 @pytest.fixture()
 def corpus(tmp_path, monkeypatch, workspaces_tmp) -> SimpleNamespace:
-    """A corpus of a board and a trace file, where views can be built (build_problem) and no build or click starts
-    anything (_queue, click_refused). The `view` events go to the list the fixture returns, as (slug, status, extra)."""
+    """A corpus of a board and a trace file, where views can be built (build_problem), a session listens (reachable)
+    and no build or click starts anything (_queue, click_refused). The `view` events go to the list the fixture returns,
+    as (slug, status, extra)."""
     d = tmp_path / "data" / CORPUS
     d.mkdir(parents=True)
     (d / "manifest.json").write_text(json.dumps({"name": CORPUS}))
@@ -46,6 +47,7 @@ def corpus(tmp_path, monkeypatch, workspaces_tmp) -> SimpleNamespace:
     monkeypatch.setattr(views, "build_problem", lambda: "")
     monkeypatch.setattr(views, "_queue", lambda c, slug: queued.append(slug))
     monkeypatch.setattr(views, "click_refused", lambda c, slug: None)
+    monkeypatch.setattr(events, "reachable", lambda c: True)
     monkeypatch.delenv(views.PROPOSE_ENV, raising=False)
     queued: list[str] = []
     sent: list[tuple[str, str, dict]] = []
@@ -284,6 +286,21 @@ async def test_the_file_type_proposal_makes_no_call_while_view_proposals_are_off
     assert views.open_offer(CORPUS)["slug"] == slug and corpus.queued == []
 
 
+async def test_a_demo_page_makes_no_file_type_call_and_shows_no_view_proposal(corpus, monkeypatch):
+    # a workspace no Claude Code session listens to (a demo page, `thimble demo`): no model call on the analyst's
+    # account, no view proposal card, and no answer kept, so the type is asked once a session listens
+    from app import tasks
+
+    calls: list[str] = []
+    answer = {"help": True, "name": "trace steps", "why": "Traces read as steps.", "arrangement": "One row per step."}
+    monkeypatch.setattr(tasks, "call", _viewer_call(answer, calls))
+    monkeypatch.setattr(events, "reachable", lambda c: False)
+    assert await views.suggest(CORPUS, "run.trace") is None and calls == []
+    assert views.open_offer(CORPUS) is None and views.suggestions(CORPUS) == {}
+    monkeypatch.setattr(events, "reachable", lambda c: True)
+    assert await views.suggest(CORPUS, "run.trace") is not None and calls == [".trace"]
+
+
 async def test_a_file_type_proposal_that_cannot_be_written_keeps_no_answer(corpus, monkeypatch):
     from app import tasks
 
@@ -455,9 +472,10 @@ async def test_try_again_on_the_proposer_s_notice_runs_the_proposer_while_a_file
     ({"status": "error", "detail": "the session reported an error: API Error: Claude's safeguards flagged this message"},
      "Claude's safeguards blocked the request.", True),
     ({"status": "error", "detail": "the model call failed (authentication_failed)"},
-     "Claude Code isn't signed in for thimble's server. In your terminal: run /login (or `claude auth login` in a "
-     "shell), or if you changed your sign-in (for example exported ANTHROPIC_API_KEY), run `thimble server restart`. "
-     "Then Try again.", False),
+     "Claude Code isn't signed in. In your terminal: run /login (or `claude auth login` in a shell).", False),
+    ({"status": "error", "detail": "the model call failed: API Error: 403 permission_error"},
+     "access was refused for this account or organization (403). In your terminal: run /login to check the account, "
+     "or check your organization's settings.", False),
     ({"status": "no_tool_call", "detail": "the file_viewer tool was never called"},
      "Claude's answer couldn't be read.", False),
     ({"status": "rate_limited", "detail": "the subscription's rate limit is exhausted"},

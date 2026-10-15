@@ -2164,6 +2164,8 @@ export interface PrecachedMark {
   format?: string | null
   /** whether the orientation's Claude Code session came with it, so a message in its thread continues it */
   kept?: boolean | null
+  /** what the pre-cache holds (its manifest's counts), which the orientation's card names */
+  counts?: { cards?: number; labels?: number; views?: number; documents?: number } | null
 }
 
 /** A follow-up of the orientation as its chat's meta keeps it. */

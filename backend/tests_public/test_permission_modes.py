@@ -99,12 +99,13 @@ async def test_each_agent_runs_in_its_row_else_in_main_s_mode_and_nothing_else_p
     assert "permissions" not in tools.schema_of("start_orientation")["properties"]
     seen: dict = {}
 
-    async def fake_start(c, brief, passes, **kw):
+    async def fake_start(c, brief, **kw):
         seen.update(kw)
         return subagents.refusal(subagents.HOOK, "stand-in")
 
     monkeypatch.setattr(orient_session, "start", fake_start)
     await tools.call(CORPUS, "start_orientation", {"brief": "", "permissions": "bypass"})
+    assert seen, "the start was called"
     assert "permissions" not in seen and "mode" not in seen, "a model's call chooses no mode"
 
     user.write_text(json.dumps({"permissions": {"disableBypassPermissionsMode": "disable"}}))

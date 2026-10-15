@@ -1,7 +1,7 @@
 // The product tour's place in the shell. The first time this install's dashboard opens (backend tour.py, in thimble's
-// own home), once the shell is drawn with its session attached, a welcome asks whether to take the tour; the offer is
-// recorded as it shows, whatever the answer. Settings' Take the tour (the bus's `tour`) runs it again at any time. The
-// tour itself (../tour) loads only then. While it runs, telemetry records nothing and the chat shows no view proposal
+// own home), once the shell is drawn with its session attached, or on a demo page (lib/demo), whose steps say it is a
+// demo, a welcome asks whether to take the tour; the offer is recorded as it shows, whatever the answer. Settings' Take
+// the tour (the bus's `tour`) runs it again at any time. The tour itself (../tour) loads only then. While it runs, telemetry records nothing and the chat shows no view proposal
 // (lib/touring). When it closes, the focused pane shows the surface it showed before; a session that ends while it runs
 // closes it.
 import { useEffect } from 'react'
@@ -13,7 +13,8 @@ import { setTouring } from '../lib/touring'
 
 /** The chat column is open, not folded. */
 const chatOn = () => !!document.querySelector('.chat[data-panel="chat"]')
-/** The shell is drawn, a Claude Code session is attached, and the chat, when its column is open, shows its foot. */
+/** The shell is drawn, a Claude Code session is attached (or it is a demo page, `data-session` static), and the chat,
+ * when its column is open, shows its foot. */
 const ready = () => {
   const shell = document.querySelector<HTMLElement>('.shell')
   return !!shell && shell.dataset.session !== 'gone' && (shell.dataset.chat !== 'open' || !!document.querySelector('.chat[data-panel="chat"] .chat-foot'))

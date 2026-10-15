@@ -16,6 +16,7 @@ import { openThread } from '../chat/Notes'
 import { colourVar } from '../files/labels'
 import { checksApi } from '../lib/api'
 import { bus } from '../lib/bus'
+import { demoStop } from '../lib/demo'
 import { track } from '../lib/telemetry'
 import type { Check, CheckCover, CheckRun } from '../lib/types'
 import { refusalLine } from '../chat/Refused'
@@ -108,6 +109,7 @@ export function useChecks(ws: string): Checks {
 
   const create = useCallback(
     async (name: string, prompt: string, covers?: CheckCover[]) => {
+      if (demoStop()) return false
       try {
         const made = await checksApi.create(ws, { name: name.trim(), prompt: prompt.trim(), ...(covers ? { covers } : {}) })
         put(withCheck(current.current, made))
@@ -428,7 +430,8 @@ function CheckCard({ ws, doc, check, on, comments, onSave, onClose }: {
   const dirty = text.trim() !== check.prompt.trim()
   const ready = !!text.trim() && !busy && (dirty || (on && !running))
   const submit = async () => {
-    if (!ready) return
+    // a run, or a new prompt on a check that is on, which runs it again, needs Claude
+    if (!ready || ((!dirty || on) && demoStop())) return
     setBusy(true)
     let ok = false
     if (dirty) ok = await onSave(text.trim())

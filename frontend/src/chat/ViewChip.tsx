@@ -9,8 +9,8 @@
 // click that starts a builder through thimble's plugin, and its menu picks the run's model and effort (Settings' dev
 // row by default). A start that did not happen says why, with Start it where the kind takes it (chat/Refused). A
 // proposal dropped when the analyst stopped the orientation is not drawn (lib/proposals isDropped). A built view whose
-// last change failed (`failed_change`) shows the same as a failed one. A suggested viewer for a file type, which the
-// File browser offers beside Raw, is a plain name until it is accepted.
+// last change failed (`failed_change`) shows the same as a failed one. A view proposal (`suggested`), which waits on
+// the chat's card, is a plain name until it is accepted.
 import { useEffect, useState } from 'react'
 import type { MouseEvent } from 'react'
 import { Button } from '../components/Button'
@@ -21,6 +21,7 @@ import { Spinner } from '../components/Spinner'
 import { Tipped } from '../components/Tooltip'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
+import { demoStop } from '../lib/demo'
 import { hasEffort, loadSettings, modelChoices, modelLabel, sameModel } from '../lib/models'
 import { findProposal, refreshProposals, useProposals } from '../lib/proposals'
 import { track } from '../lib/telemetry'
@@ -160,7 +161,7 @@ export function ViewChip({ ws, slug, name, className }: Props) {
   }
   // Retry and Try again: a new builder through thimble's plugin, with the Build menu's values
   const retry = () => {
-    if (!p) return
+    if (!p || demoStop()) return
     track('view-build', { target: `view:${p.slug}`, detail: { again: true, ...values } })
     setRetrying(true)
     api

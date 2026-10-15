@@ -7,7 +7,7 @@
     thimble demo --examples [--refresh]
 
 The command lists the datasets (demo_data.DATASETS) with their sources, credits and sizes, asks before each download
-(--yes answers yes for all), rebuilds each dataset from its publisher's files into DIR/<name> (default ~/thimble-demo)
+(--yes answers yes for all), rebuilds each dataset from its publisher's files into DIR/<name> (default ~/.thimble/demo)
 and checks it against the copy the orientations ran on. thimble redistributes none of the data: each dataset comes from
 its publisher, and DIR/SOURCES.md says from where. It then registers the folder as the workspace demo-<name> (names,
 below), installs that dataset's pre-cache as its workspace when demos/ (or --precaches DIR) has one (a dataset without
@@ -31,16 +31,22 @@ Reinstalling. A workspace that holds an analysis already stays as it is, unless 
 the datasets), which archives it and installs the pre-cache again. When it holds an older install of the pre-cache
 than the one here (precache_outdated), a line says so and names the command, `thimble demo --refresh <name>`.
 
-Attaching. The demo is static: it opens the start page and starts no Claude Code session. --attach starts one (`thimble`
-in the dataset's folder), after `claude auth status` says a login is configured (when it says none, it says how to log
-in). Without it, and unless a full pre-cache's session was kept, it prints for each dataset what the orientation's card
-in the browser says of a frozen demo session (FROZEN_LINE) and the command, `cd <folder> && thimble`, and nothing else
-(attach_lines); with it, or a kept session, how to attach later, and that `thimble -c` there continues the last session.
-A session attached to a pre-cached workspace starts fresh, with the canvas and the report as its context (precached.py).
+Attaching. The demo is static: it opens the start page and starts no Claude Code session. Each workspace it installed
+is then a demo page in the browser until a session attaches to it (frontend lib/demo): a Demo tag in the top bar,
+everything that works without a session, and one note in the chat for an action that needs Claude, which says it is a
+demo. Unless a full pre-cache's session was kept, it prints for each dataset the line FROZEN_LINE and the command that
+starts a session in the dataset's folder, `cd <folder> && thimble`, and nothing else (attach_lines). --attach starts
+one at once, after `claude auth status` says a login is configured (when it says none, it says how to log in); with it,
+or a kept session, it prints how to attach later, and that `thimble -c` there continues the last session. A session
+attached to a pre-cached workspace starts fresh, with the canvas and the report as its context (precached.py).
 
 The export writes one of two formats, a folder with `thimble-demo-precache.json` (the manifest), `README.md` (the
 source's notice first, then what the folder holds) and `workspace/`; absolute paths are written as placeholders
 (demo_scrub.PLACEHOLDERS) and filled in on install. It ends with an inventory of what it wrote (inventory_lines).
+Neither format carries what was pending for the exporter alone: the open and dismissed notices, the view proposer's
+job and run log (PENDING_LEFT_OUT), and a view proposal that waits for an answer (without_offers), which on another
+machine would show a card or a notice about a session it never ran. Install takes them out of an older export too
+(drop_pending).
 
 The full export (the default, version FULL_VERSION). Everything of the workspace but what thimble rebuilds or what
 belongs to this machine's processes and sessions (full_kept; the hooks' `trusted` folder among them): the cards, documents, labels with every row (rationales and the
@@ -65,9 +71,10 @@ and no folder of another version.
 
 Install fills in the placeholders, writes the workspace but a `trusted` folder an older export kept, ends the
 orientation's thread with the coverage line the manifest keeps (coverage_line), and marks it pre-cached (MARKER, and
-`precached` in the orientation's record and its thread's meta): the orientation's thread then says it ran in advance
-and offers to attach a fresh session. From the outputs alone a follow-up to it is refused, since its session was not kept; from a full
-export the mark says `kept` and a follow-up resumes the installed session.
+`precached` in the orientation's record and its thread's meta): the orientation's thread then says it ran in advance,
+when, on what model and what it left (the mark's `counts`, the manifest's). From the outputs alone a follow-up to it is
+refused, since its session was not kept; from a full export the mark says `kept` and a follow-up resumes the installed
+session.
 
 The view it opens on. Either export takes `--view SLUG`, one of the workspace's views, and the manifest's `view` keeps
 it; install copies it to the mark's `view` when the pre-cache holds that view (opening_view). The start page's row of
@@ -171,6 +178,17 @@ LEFT_OUT = {
     "views": "the views' earlier versions and the excerpts their keys cite, rebuilt",
     TRUSTED: TRUSTED_WHY,
 }
+# What no export carries, and install takes out of an older one (drop_pending): what was pending for the exporter alone,
+# which on another machine would show a notice, or run a proposer's job, about a session that machine never ran. A view
+# proposal that waits for the exporter's answer is taken out of views/proposals.json too (without_offers).
+PENDING_LEFT_OUT = {
+    "notices.json": "the exporter's open notices",
+    "notices-dismissed.json": "the notices the exporter dismissed",
+    "views/proposer.json": "the view proposer's pending job, with the exporter's session",
+    "views/proposer.jsonl": "the view proposer's run log",
+}
+PROPOSALS = "views/proposals.json"
+SUGGESTIONS = "views/suggestions.json"  # a file type's answer, which may name a view proposal's slug
 # paths a pre-cache may hold: relative, no `..`, no backslash
 SAFE_NAME = re.compile(r"^(?!/)(?!.*(?:^|/)\.\.(?:/|$))[^\\\x00]+$")
 
@@ -242,6 +260,49 @@ def _dump(obj: Any) -> bytes:
     return json.dumps(obj, ensure_ascii=False, indent=1).encode("utf-8")
 
 
+def without_offers(data: bytes) -> tuple[bytes, set[str]]:
+    """views/proposals.json without the view proposals that wait for the exporter's answer (a `suggested` row with
+    `offered`, views.offer), and their slugs; `data` itself when it holds none or is not a list."""
+    try:
+        rows = json.loads(data)
+    except ValueError:
+        return data, set()
+    if not isinstance(rows, list):
+        return data, set()
+    waiting = [r for r in rows if isinstance(r, dict) and r.get("status") == "suggested"
+               and isinstance(r.get("offered"), dict)]
+    if not waiting:
+        return data, set()
+    return _dump([r for r in rows if not any(r is w for w in waiting)]), {str(w.get("slug") or "") for w in waiting}
+
+
+def without_answers(data: bytes, slugs: set[str]) -> bytes:
+    """views/suggestions.json without the file types whose answer names one of the view proposals `slugs` (taken out by
+    without_offers), so such a type is asked again; `data` itself when none does."""
+    try:
+        answers = json.loads(data)
+    except ValueError:
+        return data
+    if not isinstance(answers, dict) or not slugs:
+        return data
+    left = {k: v for k, v in answers.items() if not (isinstance(v, dict) and str(v.get("slug") or "") in slugs)}
+    return data if len(left) == len(answers) else _dump(left)
+
+
+def drop_pending(ws: Path) -> None:
+    """Take out of the workspace folder `ws` what no export carries (PENDING_LEFT_OUT, and a view proposal that waits
+    for an answer with its file type's answer), which an export made before it left them out may hold."""
+    for rel in PENDING_LEFT_OUT:
+        (ws / rel).unlink(missing_ok=True)
+    p = ws / PROPOSALS
+    data, gone = without_offers(p.read_bytes()) if p.is_file() else (b"", set())
+    if gone:
+        p.write_bytes(data)
+        q = ws / SUGGESTIONS
+        if q.is_file():
+            q.write_bytes(without_answers(q.read_bytes(), gone))
+
+
 # --------------------------------------------------------------------------- the pre-cache: export
 
 
@@ -258,6 +319,8 @@ def kept(rel: Path, chat: str) -> str | None:
     s, top = rel.as_posix(), rel.parts[0]
     if chat and s in (f"chats/{chat}.meta.json", f"chats/{chat}.jsonl"):
         return None
+    if s in PENDING_LEFT_OUT:
+        return PENDING_LEFT_OUT[s]
     if top == "calls":
         return LEFT_OUT["calls"]
     if workspace_kind(s):
@@ -568,6 +631,8 @@ def export_outputs(ws: Path, corpus: Path, out: Path, *, name: str, home: Path |
                 data = b""  # the thread's log: its tool results quote the corpus
             elif rel.parts[0] == "labels":
                 data = label_rows(data)
+            elif s == PROPOSALS:
+                data, _ = without_offers(data)
         except ValueError as e:
             raise DemoError(f"{s} is not readable JSON: {e}") from e
         staged[s] = data.decode("utf-8")
@@ -711,6 +776,8 @@ OUTPUT_KINDS = {"notebooks": "cards", "investigations": "documents", "concepts":
 def full_kept(rel: Path) -> str | None:
     """None when a full export keeps the workspace file `rel` (relative to the workspace), else why it is left out."""
     top = rel.parts[0]
+    if rel.as_posix() in PENDING_LEFT_OUT:
+        return PENDING_LEFT_OUT[rel.as_posix()]
     if top in FULL_LEFT_OUT:
         return FULL_LEFT_OUT[top]
     for part in rel.parts[:-1]:
@@ -968,6 +1035,8 @@ def export_full(ws: Path, corpus: Path, out: Path, *, name: str, home: Path | No
                 tally["rationales"] += sum(1 for r in rows if r.get("rationale"))
                 tally["spans"] += sum(1 for r in rows if r.get("spans"))
 
+    # the view proposals that wait for the exporter's answer, which the export leaves out with their file types' answers
+    offers = without_offers((ws / PROPOSALS).read_bytes())[1] if (ws / PROPOSALS).is_file() else set()
     out.parent.mkdir(parents=True, exist_ok=True)
     stage = out.parent / f".{out.name}.new-{secrets.token_hex(4)}"
     try:
@@ -988,6 +1057,10 @@ def export_full(ws: Path, corpus: Path, out: Path, *, name: str, home: Path | No
                 data = _without(data, ("pid", "agent_id"))
             elif s == "chats/main.jsonl":
                 data, typed = main_chat(data)
+            elif s == PROPOSALS:
+                data, _ = without_offers(data)
+            elif s == SUGGESTIONS:
+                data = without_answers(data, offers)
             elif rel.parts[0] == "chats" and rel.name.endswith(".meta.json"):
                 data, live = chat_meta(data)
                 if live:
@@ -1218,8 +1291,7 @@ def readme_full(m: dict[str, Any]) -> str:
     lines += [f"# {m['dataset']}: full export", "",
               "`thimble demo --export` wrote this folder from a thimble workspace: everything it holds but what "
               "thimble rebuilds, with the Claude Code transcripts of the sessions thimble ran in it. `thimble demo "
-              f"{m['dataset']} --precaches <the folder above this one>` installs it, and a message in the "
-              "orientation's thread continues the orientation's session.", "",
+              f"{m['dataset']} --precaches <the folder above this one>` installs it.", "",
               "It holds the dataset's own text, which the transcripts and the call outputs quote: share it only where "
               "you may share the dataset.", ""]
     if m.get("credit"):
@@ -1228,12 +1300,21 @@ def readme_full(m: dict[str, Any]) -> str:
         int(x.get("bytes") or 0) + sum(int(f.get("bytes") or 0) for f in x.get("files") or [])
         for x in m.get("transcripts") or [])
     lines += [f"Made {str(m.get('created') or '')[:10]} with thimble {t.get('version') or '?'} "
-              f"({t.get('commit') or '?'}): {made_with(o)}; outputs {', '.join(o.get('passes') or []) or 'none'}"
-              f"{', critique on' if o.get('critique') else ''}.", "", "```",
+              f"({t.get('commit') or '?'}): {made_with(o)}{outputs_of(o)}.", "", "```",
               *inventory_lines(m, Path(str(m["dataset"])), size), "```", "",
               "Absolute paths are written as " + ", ".join(f"`{x}`" for x in PLACEHOLDERS.values())
               + " (and as `@@THIMBLE_DASHED_…@@` where a path is spelled with dashes), filled in on install.", ""]
     return "\n".join(lines)
+
+
+def outputs_of(o: dict[str, Any]) -> str:
+    """What a run from before 0.8.0 chose of its outputs, as its record's switches say (`; outputs final, views, report,
+    critique on`); '' for a run since 0.8.0, whose record holds the deck alone (`passes` ["final"]): its views and its
+    documents came after it, from the analyst, and the README counts them."""
+    passes = [str(p) for p in o.get("passes") or []]
+    if passes == ["final"] and not o.get("critique"):
+        return ""
+    return f"; outputs {', '.join(passes) or 'none'}{', critique on' if o.get('critique') else ''}"
 
 
 def opens_on(m: dict[str, Any]) -> str:
@@ -1256,7 +1337,7 @@ def readme(m: dict[str, Any]) -> str:
         lines += [f"> Notice from the source: {m['notice']}", ""]
     lines += [f"# {m['dataset']}: pre-cached orientation", "",
               f"`thimble demo {m['dataset']}` downloads the dataset from its publisher and installs this folder as its "
-              "workspace, so thimble opens on the orientation's cards, labels, views and documents."
+              "workspace, so thimble opens on its cards, labels, views and documents."
               + (f" The workspace opens on its view {opens_on(m)}." if m.get("view") else "")
               + " The orientation's Claude Code session is not here: a session the analyst attaches starts fresh, with "
               "the canvas and the report as its context.", ""]
@@ -1264,8 +1345,7 @@ def readme(m: dict[str, Any]) -> str:
         lines += [f"The data: {m['credit']}", ""]
     longest = (v.get("longest") or [{}])[0]
     lines += [f"- Made {str(m.get('created') or '')[:10]} with thimble {t.get('version') or '?'} "
-              f"({t.get('commit') or '?'}): {made_with(o)}; outputs {', '.join(o.get('passes') or []) or 'none'}"
-              f"{', critique on' if o.get('critique') else ''}.",
+              f"({t.get('commit') or '?'}): {made_with(o)}{outputs_of(o)}.",
               f"- It holds {plural(c.get('cards', 0), 'card')}, {plural(c.get('labels', 0), 'label')}, "
               f"{plural(c.get('views', 0), 'view')} and {plural(c.get('documents', 0), 'document')}, and "
               f"{plural(len(m.get('cited_calls') or []), 'call')} the report or a card cites, each cut to an excerpt.",
@@ -1276,7 +1356,7 @@ def readme(m: dict[str, Any]) -> str:
               f"{longest.get('chars', 0)} characters" + (f" (`{longest['path']}`)." if longest.get("path") else "."),
               *([f"- The orientation's coverage line, which install puts at the end of its thread: {o['coverage']}"]
                 if o.get("coverage") else []),
-              *([f"- The views are reviewed versions put in place of the orientation's own after the export "
+              *([f"- The views are reviewed versions put in place of the pre-cache's own views after the export "
                  "(scripts/sync_demo_views.sh), each stamped with the digest of its files so it shows at once: "
                  + ", ".join(f"{x.get('name')} (`{x.get('slug')}`, from `{x.get('from')}`)" for x in m["views"]) + "."]
                 if m.get("views") else []),
@@ -1504,7 +1584,7 @@ def install(src: Path, ws: Path, corpus: Path, *, home: Path | None = None,
                 "thimble": manifest.get("thimble"), "folder": str(corpus), "orientation": chat or None,
                 "ran": o.get("ended") or o.get("started"), "model": o.get("model"),
                 "format": "full" if full else "outputs-only", "kept": kept, "view": opens,
-                "digest": precache_digest(manifest)}
+                "counts": manifest.get("counts"), "digest": precache_digest(manifest)}
         (tmp / MARKER).write_text(json.dumps(mark, ensure_ascii=False, indent=1), "utf-8")
         if isinstance(run, dict):
             if not kept:
@@ -1524,6 +1604,7 @@ def install(src: Path, ws: Path, corpus: Path, *, home: Path | None = None,
             if line and not log.stat().st_size:  # the note a live run ends its thread with (orient_session)
                 log.write_text(json.dumps({"type": "chip", "ts": o.get("ended") or now(), "kind": COVERAGE_CHIP,
                                            "text": line}, ensure_ascii=False) + "\n", "utf-8")
+        drop_pending(tmp)  # an export made before it left them out
         from . import views  # noqa: PLC0415 — the views' module is the server's, loaded only here
 
         views.keep_installed(tmp)  # the pre-cache leaves out the views' kept versions, which readers need (read_built)
@@ -1805,7 +1886,8 @@ def place_precache(ds: Dataset, folder: Path, cat: dict[str, dict[str, Any]], ur
     name = register(folder, url, workspace_name(ds.name))
     pc = cat.get(ds.name)
     if pc is None:
-        say(f"  {ds.name} opens without a pre-cached orientation; ask Claude in the page or the terminal to run one")
+        say(f"  {ds.name} opens without a pre-cached orientation; to run one, start a session there "
+            f"(`cd {shell_folder(folder)} && thimble`) and ask Claude for an orientation")
         return name
     ws = Path(env["workspaces_dir"]) / name
     if ws.exists():
@@ -1911,7 +1993,7 @@ def attach_choice(args: argparse.Namespace, folders: list[Path], say: Callable[[
     return pick_folder(folders), False
 
 
-FROZEN_LINE = "To start a live session from scratch with this dataset, run"  # as the browser's card says it (Precached.tsx)
+FROZEN_LINE = "To start a live session from scratch with this dataset, run"  # before each dataset's command (attach_lines)
 
 
 def shell_folder(folder: Path) -> str:
@@ -1927,9 +2009,8 @@ def shell_folder(folder: Path) -> str:
 
 def attach_lines(opened: list[tuple[Dataset, Path, str | None]], precached: bool, attaching: Path | None,
                  login_said: bool = False, kept: bool = False) -> list[str]:
-    """How to start a session on each opened workspace. With no session attaching and no session kept, the frozen demo's
-    one sentence and command for each dataset, as the orientation's card in the browser gives them (FROZEN_LINE), and
-    nothing else. Otherwise how to attach a Claude Code session to each later, and to continue it, and how to log in
+    """How to start a session on each opened workspace. With no session attaching and no session kept, for each dataset
+    one sentence (FROZEN_LINE) and the command, and nothing else. Otherwise how to attach a Claude Code session to each later, and to continue it, and how to log in
     unless `login_said`. `kept`: a pre-cache was a full export, whose orientation's session came with it."""
     out = [""]
     if attaching is None and not kept:

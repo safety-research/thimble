@@ -194,7 +194,7 @@ async def test_a_fork_s_start_orientation_records_its_brief_and_options_and_asks
 
 
 async def test_while_an_orientation_runs_a_fork_s_start_orientation_starts_nothing_as_main_s_own(fork, bridge):
-    """One orientation runs at a time. While one runs (a Start's), the fork's start_orientation gives what main's own
+    """One orientation runs at a time. While one runs (a click's), the fork's start_orientation gives what main's own
     call gives (start_orientation-running): nothing is recorded, main is asked for nothing and the running one is
     kept."""
     _, q, call = fork

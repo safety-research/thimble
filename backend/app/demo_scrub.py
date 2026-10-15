@@ -2,8 +2,8 @@
 writes pre-caches with it, and scripts/check_content.py loads this file by its path to check demos/<dataset>/ the same
 way. A full export (`thimble demo --export`) also uses its placeholders, its scrub check and clean_transcript.
 
-The kinds of file (workspace_kind): a pre-cache holds the orientation's outputs and nothing else, each under its path in
-the workspace. The cards (notebooks/), the documents (investigations/<name>/*.json), the labels' definitions
+The kinds of file (workspace_kind): a pre-cache holds the analysis's outputs (the orientation's, and the views and
+documents the workspace has) and nothing else, each under its path in the workspace. The cards (notebooks/), the documents (investigations/<name>/*.json), the labels' definitions
 (concepts/) and their values by record ref (labels/*.jsonl), the views' code and manifests (extension/extension.json,
 each view's view.json and code in extension/views/<slug>/, and views/proposals.json), the orientation's record
 (orient/run.json, orient/summary.md), its thread's meta with an empty log (chats/<id>.meta.json, chats/<id>.jsonl) and

@@ -24,8 +24,9 @@ and rejected proposals, deleted views) and what just happened; the answer is one
 
 Each run appends a line to the run log (LOG_FILE). Every failure tells the analyst in the foreground with an easy fix
 (notices.post, NOTICE_KEY): a request Claude's safeguards blocked (Try again, Turn off view proposals), Claude Code not
-signed in for thimble's server (in the terminal: /login or `thimble server restart`, then Try again), and any other
-failure (Try again). A proposal that came from a fallback model is shown with a notice saying so. A run that works
+signed in (in the terminal: /login, as main's own card says it; Try again), access refused for the account or its
+organization (403: in the terminal, /login, or the organization's settings; Try again), and any other failure (Try
+again). A proposal that came from a fallback model is shown with a notice saying so. A run that works
 clears the notice.
 """
 from __future__ import annotations
@@ -64,14 +65,17 @@ TERMINAL_BUILTIN = ("thimble's panel shows every file in its built-in views: Raw
                     "as fit its type.")
 MAIN, ORIENTATION, THREAD = "main", "orientation", "thread:"
 REPLY_CHARS = 1_500  # of a thread's question quoted in the Now section
-# the words of an error that says the model's safeguards refused the request, and of one that says Claude Code has no
-# working sign-in (spike G: "Not logged in · Please run /login", error authentication_failed)
-REFUSED_RE, AUTH_RE = notices.REFUSED_RE, notices.AUTH_RE
+# the words of an error that says the model's safeguards refused the request, of one that says Claude Code has no
+# working sign-in (spike G: "Not logged in · Please run /login", error authentication_failed), of one that says the
+# account may not make the request (403), and the HTTP status a line names, which decides before its other words do
+REFUSED_RE, AUTH_RE, FORBIDDEN_RE, STATUS_RE = notices.REFUSED_RE, notices.AUTH_RE, notices.FORBIDDEN_RE, notices.STATUS_RE
 REFUSAL = "refusal"  # the stop_reason of a reply the model's safeguards stopped
 
 NOTICE_REFUSED = "Couldn't check for a view proposal: Claude's safeguards blocked the request."
-# its fix runs in the terminal (notices.SERVER_AUTH), then Try again here
-NOTICE_AUTH = f"Couldn't check for a view proposal: {notices.SERVER_AUTH[0]}. {notices.SERVER_AUTH[1]}. Then Try again."
+# its fix runs in the terminal, in the words of main's own sign-in card (notices.API_WORDS), with Try again here
+NOTICE_AUTH = f"Couldn't check for a view proposal: {notices.API_WORDS['auth'][0]}. {notices.API_WORDS['auth'][1]}."
+NOTICE_FORBIDDEN = ("Couldn't check for a view proposal: access was refused for this account or organization (403). In "
+                    "your terminal: run /login to check the account, or check your organization's settings.")
 NOTICE_FAILED = "Couldn't check for a view proposal: {reason}."
 NOTICE_FALLBACK = "This view proposal came from {fallback}: Claude's safeguards switched models."
 TRY_AGAIN = {"label": "Try again", "do": "proposals-retry"}
@@ -362,7 +366,7 @@ def _views_section(c: str) -> str:
                 out.append(f"- {name}: {desc} {who}, and the analyst accepted it; {state[status]}.")
             elif status == "suggested":
                 out.append(f"- {name}: {desc} {who}; it waits for the analyst's answer.")
-        elif status in state:  # main's proposals and the orientation's (a dropped or legacy row is left out)
+        elif status in state:  # main's proposals, and an older orientation's (a dropped or legacy row is left out)
             out.append(f"- {name}: {desc} {state[status].capitalize()}.")
     have = {p["slug"] for p in rows}
     out += [f"- {_one(v.get('name'))}: {_one(v.get('description'))} Built." for s, v in built.items() if s not in have]
@@ -516,7 +520,8 @@ def fallback_of(st: dict[str, Any], asked: str) -> str | None:
 
 def classify(st: dict[str, Any], obj: dict[str, Any] | None, timed_out: bool = False) -> str:
     """ok (a valid answer, from whichever model), refused (Claude's safeguards blocked the request), auth (Claude Code
-    has no working sign-in), timeout, unparsed (an answer that is not the object) or error."""
+    has no working sign-in: 401), forbidden (the account or its organization may not make the request: 403), timeout,
+    unparsed (an answer that is not the object) or error."""
     if obj is not None:
         return "ok"
     if timed_out:
@@ -526,9 +531,14 @@ def classify(st: dict[str, Any], obj: dict[str, Any] | None, timed_out: bool = F
                       *[str(e) for e in res.get("errors") or []]])
     if REFUSED_RE.search(said) or (REFUSAL in (st.get("stop_reasons") or []) and not st.get("texts")):
         return "refused"
-    if "authentication_failed" in (st.get("errors") or []) or res.get("api_error_status") in (401, 403) \
-            or AUTH_RE.search(said):
+    named = STATUS_RE.search(said)
+    status = res.get("api_error_status") or (int(named.group(1)) if named else None)
+    if status == 403:
+        return "forbidden"
+    if "authentication_failed" in (st.get("errors") or []) or status == 401 or AUTH_RE.search(said):
         return "auth"
+    if FORBIDDEN_RE.search(said):
+        return "forbidden"
     if res.get("is_error") or st.get("errors") or res.get("subtype", "success") != "success" or not st.get("texts"):
         return "error"
     return "unparsed"
@@ -694,6 +704,8 @@ def _tell(c: str, status: str, *, reason: str = "", fallback: str | None = None,
         tell(NOTICE_REFUSED, [TRY_AGAIN, TURN_OFF])
     elif status == "auth":
         tell(NOTICE_AUTH, TRY_AGAIN)
+    elif status == "forbidden":
+        tell(NOTICE_FORBIDDEN, TRY_AGAIN)
     elif status in ("timeout", "unparsed", "error"):
         tell(NOTICE_FAILED.format(reason=reason or REASONS[status]), TRY_AGAIN)
     elif offered and fallback:

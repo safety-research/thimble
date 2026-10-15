@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // The model line at a composer's foot (src/chat/ModelLine.tsx): fast mode's bolt names itself in the shared tooltip on
 // hover and on keyboard focus, wherever it is drawn, and a line of one of thimble's agents, which runs with no fast mode
-// of its own, has none. The Start card's line is start-gate.test.tsx's.
+// of its own, has none.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { FastBolt, ModelLine, fastTip, noFastTip } from '../../src/chat/ModelLine.tsx'

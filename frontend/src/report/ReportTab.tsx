@@ -14,6 +14,7 @@ import { Spinner } from '../components/Spinner'
 import { Tipped } from '../components/Tooltip'
 import { api, docsApi, isNotFound } from '../lib/api'
 import { bus } from '../lib/bus'
+import { demoStop } from '../lib/demo'
 import { parseRef } from '../lib/refs'
 import { track } from '../lib/telemetry'
 import { revealAnchor } from '../lib/teleport'
@@ -297,7 +298,7 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
   // `report` events (generating, then generated or failed) carry the write from there, so the button stays busy while
   // the writer works. A start that did not happen shows its card under the bar
   const write = async () => {
-    if (busy) return
+    if (busy || demoStop()) return
     const s = slug
     setWritingSlug(s)
     track('ui-click', { target: `ui:report-write`, detail: { slug: s } })
