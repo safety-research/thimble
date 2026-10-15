@@ -363,6 +363,24 @@ async def test_a_browser_follow_up_sends_through_the_module_with_the_run_s_value
     assert refused.kind == "no-module"
 
 
+async def test_a_follow_up_to_an_agent_the_registry_lacks_names_its_chat_s_session_or_none_at_all(bridge, models,
+                                                                                                hints):
+    """An agent that is not in the registry gets no SendMessage. The refusal gives the earlier-session text with the
+    session its chat last ran under, and never that text with an empty session ("thimble -r  ..."): with no session
+    known it gives the earlier-version text."""
+    sid = "11111111-1111-4111-8111-111111111111"
+    agents.new_agent(CORPUS, "orient", "orientation", route="subagent", agent_id="a-gone", session="s0",
+                     sessions=["s0", sid])
+    named = await subagents.send(CORPUS, "a-gone", "and April?")
+    assert (named.kind, named.reason) == (subagents.EARLIER, f"EARLIER SESSION: {sid}")
+    agents.new_agent(CORPUS, "orient", "orientation", route="subagent", agent_id="a-nosession", session="",
+                     sessions=[])
+    for agent_id in ("a-nosession", "a-unknown", ""):
+        none = await subagents.send(CORPUS, agent_id, "and May?")
+        assert (none.kind, none.reason) == (subagents.EARLIER, "EARLIER VERSION"), agent_id
+    assert not bridge.ops("send"), "nothing reaches the module"
+
+
 async def test_a_typed_follow_up_is_a_pending_message_request_and_its_exact_send_message(bridge, models):
     started = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)
     ans = subagents.message_request(CORPUS, started.agent_id, "and May?", call="toolu_m")

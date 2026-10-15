@@ -915,13 +915,29 @@ def message_request(c: str, agent_id: str, text: str, *, call: str | None = None
     return Answer({"request": rid, "input": inp})
 
 
+def unknown_agent_text(c: str, agent_id: str) -> str:
+    """Why a follow-up cannot reach an agent that is not in the registry: the earlier-session text with the session its
+    chat last ran under, which `thimble -r` resumes; the earlier-version text when no chat of the workspace names a
+    session for it, since the earlier-session text needs one."""
+    sid = ""
+    if agent_id:
+        for meta in agents.list_chats(c):
+            if meta.get("agent_id") == agent_id:
+                sessions = [str(s) for s in meta.get("sessions") or [meta.get("session")] if s]
+                sid = sessions[-1] if sessions else ""
+                break
+    if sid:
+        return tools.hint("orient-continue-earlier-session", session=sid)
+    return tools.hint("orient-continue-earlier-version")
+
+
 async def send(c: str, agent_id: str, text: str, *, values: dict[str, Any] | None = None, route: str = CLICK) -> Answer:
     """A follow-up sent from the browser: the pending message request, then the module's SendMessage, after it
     registers the run's own values when they differ from the role's latest registration (V1). Refused, with the text
-    kept, when the module is not live."""
+    kept, when the module is not live, and for an agent that is not in the registry (unknown_agent_text)."""
     a = agent(c, agent_id)
     if a is None:
-        return refusal(EARLIER, tools.hint("orient-continue-earlier-session", session=""))
+        return refusal(EARLIER, unknown_agent_text(c, agent_id))
     before = refusal_before(c, click=route == CLICK)
     if before is not None:
         return before
