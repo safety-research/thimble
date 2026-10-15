@@ -28,7 +28,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -413,19 +412,11 @@ def write_digest(c: str, caller: Caller) -> Path | None:
 
 
 def drafts(c: str) -> list[str]:
-    """The parts of the first message that name the orientation's drafts: `## critique-deck` when its deck is on, and
-    `## critique-proposals` with each view it proposed, since no tool lists proposals."""
-    from . import views  # noqa: PLC0415
-
-    out: list[str] = []
+    """The part of the first message that names the orientation's drafts: `## critique-deck`, its deck (none for a
+    record from before 0.8.0 whose start turned the deck off). Since 0.8.0 an orientation proposes no views, so a
+    workspace's views, its old orientation's among them, are not its drafts."""
     run = orientation.read_run(c) or {}
-    if orientation.deck_of(run):
-        out.append(tools.hint("critique-deck", deck=orientation.GROUP_PATHS["deck"]))
-    mine = [p for p in views.list_proposals(c) if (p.get("orientation") or p.get("held")) and p.get("status") != "dropped"]
-    if mine:
-        rows = "\n".join(f"- {p.get('name')}\n" + textwrap.indent(views.proposal_lines(p), "  ") for p in mine)
-        out.append(tools.hint("critique-proposals", proposals=rows))
-    return out
+    return [tools.hint("critique-deck", deck=orientation.GROUP_PATHS["deck"])] if orientation.deck_of(run) else []
 
 async def checks_text(c: str, chat: str | None = None) -> str | None:
     """What the coverage checks found for workspace `c`, as the first message lists it, with the coverage line of the

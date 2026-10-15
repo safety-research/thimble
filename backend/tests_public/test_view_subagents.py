@@ -258,9 +258,8 @@ async def test_a_0_7_0_proposal_loads_with_its_why_as_its_description_and_its_la
         assert "- The files it reads: board.jsonl" in text and "\n".join(layout) in text
         assert "What the analyst does with it" not in text
     assert "Make the rows blue." in change
-    [drafts] = critique_session.drafts(CORPUS)
-    assert "- Posts\n  - What the analyst sees: Each post in its thread" in drafts
-    assert "\n  - Zoom: Click a thread." in drafts
+    # an orientation's view from before 0.8.0 is no draft of a critique since: its brief names the deck alone
+    assert critique_session.drafts(CORPUS) == []
     assert "  Each post in its thread, as the board drew it." in context.views(CORPUS)
     res = await tools.call(CORPUS, "read_ref", {"ref": "view:posts"})
     assert "description: Each post in its thread, as the board drew it." in res.text and "Overview: A list" in res.text
