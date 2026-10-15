@@ -748,6 +748,10 @@ export const docsApi = {
   version: (c: string, slug: string, n: number) => j<AnyDoc>(`${inv(c, slug)}/versions/${n}`),
   /** `GET …/types/{slug}/versions/{n}/revisions/{i}`: an earlier save of the writer run that wrote generation `n`. */
   revision: (c: string, slug: string, n: number, i: number) => j<AnyDoc>(`${inv(c, slug)}/versions/${n}/revisions/${i}`),
+  /** `POST …/types/{slug}/versions/{n}[/revisions/{i}]/restore`: that draft, or that save of it, made the newest draft
+   * again, as the analyst's; answers the document. The top bar's Undo reverts it. */
+  restore: (c: string, slug: string, n: number, i: number | null) =>
+    j<AnyDoc>(`${inv(c, slug)}/versions/${n}${i != null ? `/revisions/${i}` : ''}/restore`, { method: 'POST' }),
   /** `GET /report-types/presets`: the presets + New offers. */
   presets: (c: string) => j<DocPreset[]>(`${ws(c)}/report-types/presets`),
   /** `POST /report-types/new`: a preset's document, a page, or one of the analyst's own from a name and a brief. */

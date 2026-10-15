@@ -1021,7 +1021,8 @@ export interface DocVersion {
   n: number
   /** when it was written (ISO); empty when its record is gone */
   ts: string
-  /** who saved it: `first` for the first generation, the save's author (`terminal`, `analyst`, `chat:<id>`) otherwise */
+  /** who saved it: `first` for the first generation, the save's author (`terminal`, `analyst`, `chat:<id>`) otherwise;
+   * `analyst` for the analyst's own version before the first write and for a Restore */
   source: string
   /** what the analyst asked for, when the write was asked for with words */
   instructions: string | null
@@ -1038,6 +1039,8 @@ export interface DocVersion {
   /** the earlier saves of the writer run that wrote it, oldest first (its last save is the generation itself); or, where
      * the workspace has no per-run saves, the older generations one writer's chat saved, each with its `generation` */
   revisions: DocRevision[]
+  /** the draft (generation `n`, or its save `rev`) a Restore made current again as this generation */
+  restored?: { n: number; rev: number | null } | null
 }
 
 export interface DocRevision {

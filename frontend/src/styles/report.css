@@ -505,6 +505,10 @@
 .wu-bar .btn-primary {
   margin-left: 6px;
 }
+/* Stop beside Writing while a writer runs */
+.wu-bar .wu-stop {
+  flex: none;
+}
 .wu-bar > .chip {
   margin-right: 4px;
 }
@@ -935,6 +939,10 @@
 .wu-root .prosemirror-dropcursor-inline {
   border-radius: 2px;
   background: var(--accent);
+}
+/* while something is dragged, a figure's frame (a custom card's page) lets the drag through to the page */
+.wu-zone[data-dragging] iframe {
+  pointer-events: none;
 }
 /* -------- the editor: BlockNote's variables mapped to the tokens. Its menus and toolbar take the opaque overlay; the
    editor itself draws nothing -------- */
@@ -1516,6 +1524,13 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
   min-width: 0;
   font: var(--type-question);
   color: var(--text-primary);
+}
+/* in the editor the question line moves the figure, as the block's actions do */
+.wu-fig-q[draggable='true'] {
+  cursor: grab;
+}
+.wu-fig-q[draggable='true']:active {
+  cursor: grabbing;
 }
 .wu-fig-from {
   flex: none;

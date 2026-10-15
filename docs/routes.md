@@ -19,7 +19,7 @@ none:
 - **none**: the health check, which names no path or pid without the token, and whether the browser is signed
   in.
 
-263 routes, 152 of them writes: 37 token, 1 code, 1 agent token, 119 cookie, 102 cookie or token, 1 media key, 2 none.
+265 routes, 154 of them writes: 37 token, 1 code, 1 agent token, 121 cookie, 102 cookie or token, 1 media key, 2 none.
 
 | Method | Path | Module | Credential |
 |---|---|---|---|
@@ -203,7 +203,9 @@ none:
 | PUT | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/units/{uid}` | report_types | cookie |
 | GET | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/versions` | report_types | cookie or token |
 | GET | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/versions/{n}` | report_types | cookie or token |
+| POST | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/versions/{n}/restore` | report_types | cookie |
 | GET | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/versions/{n}/revisions/{i}` | report_types | cookie or token |
+| POST | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/versions/{n}/revisions/{i}/restore` | report_types | cookie |
 | GET | `/api/ws/{c}/jobs` | jobs | cookie or token |
 | GET | `/api/ws/{c}/labels` | concepts | cookie or token |
 | GET | `/api/ws/{c}/labels/glob` | concepts | cookie or token |

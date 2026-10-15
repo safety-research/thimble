@@ -1,8 +1,33 @@
 // The Report bar's primary action: Write on a document not written yet, which asks for it at once, and Revise on a
-// written one, which asks in a sheet under the button before a writer starts on a new draft. Writing while one runs.
+// written one, which asks in a sheet under the button before a writer starts on a new draft. Writing while one runs,
+// with Stop beside it (StopWriter).
 import { useEffect, useRef, useState } from 'react'
+import { stopSession } from '../chat/AgentCard'
+import { STOP_HOLD_MS } from '../chat/ChatPanel'
 import { Button } from '../components/Button'
 import { Popover } from '../components/Menu'
+
+/** Stop on the writer that runs (`chat`), beside Writing: the same call as Stop in the writer's thread (the composer's
+ * Stop, chat/ChatPanel stopRun, which is stopSession). Busy from the request until the writer ends, which takes the
+ * button away, or STOP_HOLD_MS pass; a request that failed clears it at once, its toast saying why. */
+export function StopWriter({ ws, chat }: { ws: string; chat: string }) {
+  const [stopping, setStopping] = useState(false)
+  useEffect(() => {
+    if (!stopping) return
+    const t = window.setTimeout(() => setStopping(false), STOP_HOLD_MS)
+    return () => window.clearTimeout(t)
+  }, [stopping])
+  const stop = () => {
+    if (stopping) return
+    setStopping(true)
+    void stopSession(ws, chat, 'writer').then((ok) => ok || setStopping(false))
+  }
+  return (
+    <Button variant="ghost" icon="stop" className="wu-stop" busy={stopping} onClick={stop}>
+      Stop
+    </Button>
+  )
+}
 
 export function WriteAction({ name, written, busy, disabled, history, onWrite }: {
   /** the document's name, as the bar's chip shows it */

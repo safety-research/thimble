@@ -14,7 +14,6 @@ import { SidebarShow, useChecks, useSidebar } from './Checks'
 import { checkColumns, openComments, passageFlags, shownComments, type DocComment } from './checkComments'
 import { commentsApi } from './commentsApi'
 import { ReportEditor, type DocFilter, type EditorHandle } from './Editor'
-import { forgetFigureCell } from './FigureBlock'
 import { Margin, RAIL_ROOM } from './Margin'
 import { allSentences, paragraphOf, passageOrder, readableText, TITLE_ID } from './model'
 import { Sidebar } from './Sidebar'
@@ -49,10 +48,7 @@ export function useCanvas(ws: string): { cells: Cell[]; groups: Group[] } {
     }
     void read()
     const offs = [
-      bus.on('cell', (e) => {
-        forgetFigureCell(ws, e.cell)
-        later()
-      }),
+      bus.on('cell', later),
       bus.on('wsEvent', (ev) => {
         if (ev.type === 'notebook' || ev.type === 'group' || ev.type === 'canvas') later()
       }),

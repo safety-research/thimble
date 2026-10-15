@@ -65,17 +65,19 @@ export interface DocSave {
 }
 
 /**
- * What an `artifact` chip on a document says, as one quiet line: "wrote" for its first generation, "revised" for a
- * later one or an in-place edit. Reads the chip's `generation`, or the one its text names ("the report, generation 2").
- * Null when the chip is not on a document. Pure.
+ * What an `artifact` chip on a document says, as one quiet line: the verb the chip's text is ("wrote" for the first
+ * writer's save, which is generation 2 when the analyst's own notes are Draft 1; "revised" for a later one or an
+ * in-place edit), else "wrote" for a first generation and "revised" for a later one. Reads the chip's `generation`, or
+ * the one its text names ("the report, generation 2"). Null when the chip is not on a document. Pure.
  */
 export function docSave(kind: string, ref: string | undefined | null, text: string, generation?: number | null): DocSave | null {
   if (kind !== 'artifact' || !ref) return null
   const p = parseRef(ref)
   if (!p || p.kind !== 'report') return null
   const n = generation ?? (Number(/generation (\d+)\s*$/.exec(text)?.[1]) || undefined)
-  if (n == null) return { verb: text === 'wrote' ? 'wrote' : 'revised' }
-  return { verb: n <= 1 ? 'wrote' : 'revised', generation: n }
+  const said = text === 'wrote' || text === 'revised' ? text : null
+  if (n == null) return { verb: said ?? 'revised' }
+  return { verb: said ?? (n <= 1 ? 'wrote' : 'revised'), generation: n }
 }
 
 /** The fields of a chip row that say which document save it is. */
