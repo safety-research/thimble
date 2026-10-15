@@ -68,7 +68,6 @@ SUBAGENT_HINTS = {
     "agent-check-message": set(),
     "start-plan-mode": set(),
     "writer-context-file": {"path"},
-    "writer-context-files": {"paths", "n"},
     "critic-brief-file": {"path"},
     "critique-work-folder": {"path"},
     "check-task-file": {"path"},
