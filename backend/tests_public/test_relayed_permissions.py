@@ -212,7 +212,7 @@ def _answers() -> dict[str, str]:
 
 def test_main_s_offer_is_claude_code_s_suggestions_with_each_destination_and_only_what_allows():
     for given in (ADD_CARD, WC, OUTSIDE, WC + OUTSIDE):
-        assert permission_updates.main_offer(given) == given, "exactly as Claude Code gave them"
+        assert permission_updates.main_offer(given, "Write") == given, "exactly as Claude Code gave them"
     left_out = [
         {"type": "addRules", "rules": [{"toolName": "Bash"}], "behavior": "deny", "destination": "localSettings"},
         {"type": "removeRules", "rules": [{"toolName": "Bash"}], "behavior": "deny", "destination": "localSettings"},
@@ -220,8 +220,15 @@ def test_main_s_offer_is_claude_code_s_suggestions_with_each_destination_and_onl
         {"type": "addRules", "rules": [{"toolName": "Read"}], "behavior": "allow", "destination": "elsewhere"},
         {"type": "addDirectories", "directories": ["/data/x"]},
     ]
-    assert permission_updates.main_offer(left_out + WC) == WC
-    assert permission_updates.main_offer(None) == permission_updates.main_offer("x") == []
+    assert permission_updates.main_offer(left_out + WC, "Write") == WC
+    assert permission_updates.main_offer(None, "Write") == permission_updates.main_offer("x", "Write") == []
+    # the switch to acceptEdits only where Claude Code's own dialog offers it, its file edit dialog: its Bash dialog
+    # offers the rules and folders, its dialog for another tool the rules
+    for tool in ("Edit", "MultiEdit", "Write", "NotebookEdit"):
+        assert permission_updates.main_offer(WC + OUTSIDE, tool) == WC + OUTSIDE, tool
+    for tool in ("Bash", "mcp__plugin_thimble_thimble__add_card", "Read"):
+        assert permission_updates.main_offer(WC + OUTSIDE, tool) == WC + OUTSIDE[:1], tool
+        assert permission_updates.main_offer(OUTSIDE[1:], tool) == [], tool
     # a session thimble started still keeps every update for the session alone
     assert {u["destination"] for u in agent_session.offer(WC + OUTSIDE)} == {"session"}
     saved = "Claude Code saves this in this folder's local settings (.claude/settings.local.json)."
@@ -299,7 +306,24 @@ async def test_always_allow_on_main_s_card_answers_with_exactly_what_the_card_na
     assert events._offers == {}
 
 
-@pytest.mark.parametrize("managed", ["remote-settings.json in Claude Code's config dir", "managed-settings.json"])
+async def test_always_allow_on_a_bash_request_never_switches_main_s_mode(monkeypatch):
+    """Claude Code may suggest a folder and the switch to acceptEdits for a command that writes outside the folder; its
+    Bash dialog offers and applies the folder alone, so main's card does too, and its mode stays as it was. A Write
+    request's card offers both, as Claude Code's file edit dialog does."""
+    _main_attached()
+    monkeypatch.setattr(hook_auth, "analyst", lambda request: True)
+    call, entry = await _ask(OUTSIDE, "Bash", {"command": "touch /data/notes/x.txt"})
+    assert entry["always"] == "files in notes/"
+    assert entry["always_label"] == "Always allow access to notes/"
+    await events.permission_route(CORPUS, events.PermissionAnswer(id=entry["id"], allow=True, always=True), Browser())
+    assert await asyncio.wait_for(call, 5) == {"id": entry["id"], "behavior": "allow", "updatedPermissions": OUTSIDE[:1]}
+    call, entry = await _ask(OUTSIDE, "Write", {"file_path": "/data/notes/x.txt", "content": "x"})
+    assert entry["always_label"] == "Allow, and switch to accept edits; always allow access to notes/"
+    await events.permission_route(CORPUS, events.PermissionAnswer(id=entry["id"], allow=True, always=True), Browser())
+    assert await asyncio.wait_for(call, 5) == {"id": entry["id"], "behavior": "allow", "updatedPermissions": OUTSIDE}
+
+
+@pytest.mark.parametrize("managed",["remote-settings.json in Claude Code's config dir", "managed-settings.json"])
 async def test_no_always_allow_without_suggestions_or_under_the_managed_rules_only_key(managed, tmp_path, monkeypatch):
     _main_attached()
     monkeypatch.setattr(hook_auth, "analyst", lambda request: True)

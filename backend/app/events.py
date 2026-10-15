@@ -17,8 +17,8 @@ hooks are off, as main's Monitor (the MONITOR route, cc_plugin.route). Permissio
 PermissionRequest hook; since Claude Code does not signal that hook when the analyst answers in the terminal, the server
 ends the wait itself (clear_permissions, release_asks, agent_moved). A prompt's card offers "Always allow" where Claude
 Code's own dialog offers "don't ask again", in that dialog's words (permission_updates.main_words): the request's
-permission_suggestions, each kept where Claude Code gave it (permission_updates.main_offer), none when the org's managed
-tier sets allowManagedPermissionRulesOnly (_main_offer).
+permission_suggestions that dialog applies for the tool, each kept where Claude Code gave it
+(permission_updates.main_offer), none when the org's managed tier sets allowManagedPermissionRulesOnly (_main_offer).
 
 Main's terminal shows each event as one line (terminal_line): the analyst's words after SAID, with the thread or button
 they belong to, else a short line saying what happened. Claude Code shows a woken turn only as the hook's fixed summary,
@@ -975,12 +975,13 @@ def _thimble_agent(c: str, agent: str | None) -> bool:
         return False
 
 
-def _main_offer(suggestions: Any, preview: str) -> list[dict[str, Any]]:
-    """What the card's "Always allow" adds to a relayed request of main's session (module note): its
-    permission_suggestions as Claude Code gave them (permission_updates.main_offer); [] when it suggests none, when the
-    card shows only the start of the request (as for every card's "don't ask again"), or when the org's managed tier
-    sets allowManagedPermissionRulesOnly, under which Claude Code ignores the rules a session saves."""
-    updates = permission_updates.main_offer(suggestions)
+def _main_offer(suggestions: Any, preview: str, tool: str) -> list[dict[str, Any]]:
+    """What the card's "Always allow" adds to a relayed request of main's session for `tool` (module note): its
+    permission_suggestions as Claude Code gave them, as far as Claude Code's own dialog for the tool applies them
+    (permission_updates.main_offer); [] when it suggests none, when the card shows only the start of the request (as
+    for every card's "don't ask again"), or when the org's managed tier sets allowManagedPermissionRulesOnly, under
+    which Claude Code ignores the rules a session saves."""
+    updates = permission_updates.main_offer(suggestions, tool)
     if not updates or len(preview) > PERMISSION_INPUT_CHARS:
         return []
     return [] if cc_plugin.managed_rules_only({config.CONFIG_DIR_ENV: str(config.claude_config_dir())}) else updates
@@ -1083,7 +1084,7 @@ async def hook_permission_route(request: Request, body: HookPermission) -> dict[
     fut: asyncio.Future = loop.create_future()
     _asks[request_id] = Ask(c, loop, fut, time.monotonic(), time.time(), body.agent_id or None,
                             call_key(body.tool_name, body.tool_input))
-    offer = _main_offer(body.suggestions, preview)
+    offer = _main_offer(body.suggestions, preview, body.tool_name)
     if offer:
         _offers[request_id] = offer
     _hold(c, request_id, body.tool_name, what, preview, body.agent_id or None, body.tool_input, offer=offer,

@@ -26,6 +26,10 @@ SAVED_IN = {"localSettings": "this folder's local settings (.claude/settings.loc
 DESTINATIONS = (*SESSION_ONLY, *SAVED_IN)
 # Claude Code's name for acceptEdits in its permission dialog
 EDIT_MODE_WORDS = "accept edits (auto-approve file edits and common file commands)"
+# the tools whose permission dialog in Claude Code 2.1.300, its file edit dialog, offers the switch to acceptEdits that
+# Claude Code suggests: its Bash dialog offers only rules and folders, and its other dialogs only rules, so their
+# "don't ask again" never switches the mode, though the request's suggestions may hold that switch (main_offer)
+MODE_DIALOG_TOOLS = ("Edit", "MultiEdit", "Write", "NotebookEdit")
 
 
 def allowing(suggestions: Any, keep: bool) -> list[dict[str, Any]]:
@@ -53,11 +57,13 @@ def allowing(suggestions: Any, keep: bool) -> list[dict[str, Any]]:
     return out
 
 
-def main_offer(suggestions: Any) -> list[dict[str, Any]]:
-    """The updates of a request of main's session that its card in the browser offers as "Always allow": the allow
-    rules, working directories and switch to acceptEdits Claude Code suggested, each with the `destination` Claude Code
-    gave it (events.hook_permission_route); [] when it suggests none."""
-    return allowing(suggestions, keep=True)
+def main_offer(suggestions: Any, tool: str) -> list[dict[str, Any]]:
+    """The updates of a request of main's session for `tool` that its card in the browser offers as "Always allow": the
+    allow rules, working directories and switch to acceptEdits Claude Code suggested, each with the `destination` Claude
+    Code gave it (events.hook_permission_route), the switch only where Claude Code's own dialog offers it
+    (MODE_DIALOG_TOOLS); [] when it suggests none."""
+    updates = allowing(suggestions, keep=True)
+    return updates if tool in MODE_DIALOG_TOOLS else [u for u in updates if u["type"] != "setMode"]
 
 
 def rule_text(rule: dict[str, Any]) -> str:
