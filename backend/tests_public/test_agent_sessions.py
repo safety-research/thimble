@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import io
 import json
-import urllib.request
 
 import pytest
 from conftest import card_wait
@@ -152,7 +151,7 @@ def test_the_permission_hook_hands_the_request_to_the_server_and_prints_its_deci
         assert timeout == permission_hook.TIMEOUT
         return Resp(json.dumps(answer).encode(), nonce)
 
-    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(permission_hook.LOOPBACK, "open", urlopen)  # its opener, which skips a shell's proxy
     monkeypatch.setenv("THIMBLE_SESSION", KEY)
     hook = {"hook_event_name": "PermissionRequest", "tool_name": "Bash", "tool_input": {"command": "ls"},
             "agent_id": "a1", "agent_type": "general-purpose", "session_id": "sid"}
