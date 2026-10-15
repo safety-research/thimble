@@ -708,7 +708,8 @@ CLICKS = [("post", "/api/ws/mini/start", {"text": ""}),
           ("post", "/api/ws/mini/write", {"doc": "report"}),
           ("post", "/api/ws/mini/orientation/message", {"text": "hi"}),
           ("post", "/api/ws/mini/subagents/start-it", {"request": "req_0000000000"}),
-          ("post", "/api/ws/mini/subagents/again", {"request": "req_0000000000"})]
+          ("post", "/api/ws/mini/subagents/again", {"request": "req_0000000000"}),
+          ("post", "/api/ws/mini/chats/main/interrupt", {})]
 
 
 @pytest.mark.real_write_guard

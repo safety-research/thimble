@@ -5,12 +5,12 @@
 // thread works, a strip of its steps rides behind the composer, and every permission request waits on one card above
 // it (PermissionCard). The composer sends where threads.composerTarget says, and while the agent a thread shows (or a
 // step's parent) runs and the browser can stop it, the composer's send square is its Stop (composerStopOf). A thread
-// whose run ended without a reply offers Ask again, and one whose run ended with an answer offers Hand back to main
-// (HandBack). Main opens empty with its composer, as Claude Code does; a start that did not happen shows its card in main
-// (OrientStart). A view proposal waits above the composer until the analyst answers it (ProposalCard), except while the
-// product tour runs (lib/touring). A failure of main or of any of thimble's agents shows as a notice with its fix under
-// the proposal's place, above the composer of whichever chat is open, and as a row in the chat it happened in
-// (Notice.tsx); while main runs in Claude Code's Manual mode, the Manual-mode notice shows there in red.
+// whose run ended without a reply offers Ask again. Main opens empty with its composer, as Claude Code does; a start that
+// did not happen shows its card in main (OrientStart). A view proposal waits above the composer until the analyst
+// answers it (ProposalCard), except while the product tour runs (lib/touring). A failure of main or of any of thimble's
+// agents shows as a notice with its fix under the proposal's place, above the composer of whichever chat is open, and
+// as a row in the chat it happened in (Notice.tsx); while main runs in Claude Code's Manual mode, the Manual-mode
+// notice shows there in red.
 import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -38,7 +38,6 @@ import { Composer } from './Composer'
 import { mainEffort, mainFast, NEXT_LAUNCH } from './ModelLine'
 import { API_ERROR_KIND, apiRetry, branchIndex, capacityNote, foldRecords, landedTexts, madeBy, mainSkips, orientRuns, orientSummaries, orientWriters, QUIET_RE, sessionSteps, stepEnded, toolSteps, withApiErrors, withBranches, withCallNumbers, type MainContext, type Row, type ShotRow } from './model'
 import { Holds, useRetryText } from './Holds'
-import { HandBack } from './HandBack'
 import { TicketStatus, useTicket } from './TicketStatus'
 import { Divider, Note, ThreadChip, ThreadsContext } from './Notes'
 import { RefText } from './markdown'
@@ -66,30 +65,34 @@ import { pendingRequests } from './permissions'
 const LIST_DEBOUNCE_MS = 300
 const ANCHORS_SHOWN = 6
 
-/** What the composer's stop square stops in the thread shown: the session of the orientation, a writer or a check's
- * run (backend agents.interrupt_route), the dev ticket the thread runs (dev.stop_ticket), or the view's build
- * (views.stop_build) or its review's revision (view_review.stop) in the view's thread. */
+/** What the composer's stop square stops in the thread shown: main's turn, a side thread's fork, or the session of the
+ * orientation, a writer or a check's run (backend agents.interrupt_route), the dev ticket the thread runs
+ * (dev.stop_ticket), or the view's build (views.stop_build) or its review's revision (view_review.stop) in the view's
+ * thread. */
 export type ComposerStop =
   | { kind: 'session'; chat: string; role: string; label: string }
   | { kind: 'ticket'; ticket: string; label: string }
   | { kind: 'view'; slug: string; review: boolean; label: string }
 
 const STOP_LABELS: Readonly<Record<string, string>> = { orient: 'Stop the orientation', writer: 'Stop the writer', check: 'Stop the check' }
+export const STOP_MAIN = 'Stop main'
+export const STOP_THREAD = 'Stop the thread'
 
-type StopMeta = Pick<ChatMeta, 'id' | 'status'> & Partial<Pick<ChatMeta, 'role' | 'agent_type'>>
+type StopMeta = Pick<ChatMeta, 'id' | 'status'> & Partial<Pick<ChatMeta, 'role' | 'agent_type' | 'running' | 'fork'>>
 
 /** Whether a chat is the critique's, a step of the orientation run by its critic (`thimble:critic`) or an extension's
  * critic program. Pure. */
 const isCritique = (m: StopMeta | null): boolean => !!m && m.role === 'step' && !!m.agent_type?.endsWith(':critic')
 const CRITIQUE_STOP = 'Stop the critique'
 
-/** The Stop the composer carries for the thread shown, while what it stops runs: a session's (STOP_LABELS), its dev
+/** The Stop the composer carries for the thread shown, while what it stops runs: main's while its turn runs, a side
+ * thread's while its fork runs (none while its question waits for main to fork it), a session's (STOP_LABELS), its dev
  * ticket's, or, in a view's thread, the view's build while its proposal is queued or building and else its review's
  * while the review runs (`view`, the thread's proposal). A step, a part of its parent's session whose composer sends to
  * that parent (threads.composerTarget), carries its parent's Stop (`parent`, the step's parent chat) while the parent
  * runs. The critique's thread, and a step of the critic's, stops only the critique, which the orientation then goes on
- * without. Null for main and its threads, whose turn the browser cannot stop, and for a ticket that waits in the queue
- * (its Discard is at the thread's foot) or that an older chat of a retried ticket ran. Pure. */
+ * without. Null for a ticket that waits in the queue (its Discard is at the thread's foot) or that an older chat of a
+ * retried ticket ran. Pure. */
 export function composerStopOf(
   kind: ThreadKind | null,
   meta: StopMeta | null,
@@ -98,6 +101,8 @@ export function composerStopOf(
   view: Pick<Proposal, 'slug' | 'status' | 'chat' | 'review'> | null = null,
 ): ComposerStop | null {
   if (!meta) return null
+  if (kind === 'main') return meta.running ? { kind: 'session', chat: meta.id, role: 'main', label: STOP_MAIN } : null
+  if (kind === 'thread') return meta.running && meta.fork?.agent_id && !meta.fork.ended ? { kind: 'session', chat: meta.id, role: 'thread', label: STOP_THREAD } : null
   if (kind === 'orient' || kind === 'writer' || kind === 'check') return meta.status === 'running' ? { kind: 'session', chat: meta.id, role: kind, label: STOP_LABELS[kind] } : null
   if (kind === 'step' && isCritique(meta)) return meta.status === 'running' ? { kind: 'session', chat: meta.id, role: 'critic', label: CRITIQUE_STOP } : null
   if (kind === 'step' && parent && isCritique(parent)) return parent.status === 'running' ? { kind: 'session', chat: parent.id, role: 'critic', label: CRITIQUE_STOP } : null
@@ -865,8 +870,7 @@ export function threadRetry(rows: readonly Row[], running: boolean, ask: () => P
 }
 
 /** A fork of main: main up to the branch, the line that says when, what it was asked about, then its own rows, and Ask
- * again under a run that ended without a reply, or Retry on an API error that ended it; under a run that ended with an
- * answer, Hand back to main (HandBack). */
+ * again under a run that ended without a reply, or Retry on an API error that ended it. */
 export function ThreadView({ ws, meta, chat, main, skip, branches, detached }: { ws: string; meta: ChatMeta; chat: ChatState; main: ChatState; skip: ReadonlySet<number>; branches: { id: string; created_at: string; anchors: string[] }[]; detached: boolean }) {
   const cut = useMemo(() => branchIndex(main.records, meta.created_at), [main.records, meta.created_at])
   const inherited = useMemo(() => {
@@ -898,7 +902,6 @@ export function ThreadView({ ws, meta, chat, main, skip, branches, detached }: {
       )}
       <ThreadRows rows={chat.rows} edits={edits} ws={ws} chat={meta.id} streaming={chat.streaming} retry={threadRetry(chat.rows, chat.running, () => api.askAgain(ws, meta.id).then(() => chat.reload()))} />
       {canAskAgain(chat.records, chat.running) && <AskAgain ws={ws} id={meta.id} detached={detached} onAsked={chat.reload} />}
-      {!chat.running && <HandBack ws={ws} id={meta.id} state={meta.hand_back} detached={detached} onDone={chat.reload} />}
     </>
   )
 }

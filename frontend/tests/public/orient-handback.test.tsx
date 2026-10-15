@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
-// The end of an orientation's or a writer's thread that handed its summary back to main (src/chat/ChatPanel.tsx
+// The end of an orientation's or a writer's thread that sent its summary to main (src/chat/ChatPanel.tsx
 // orientMessages, src/chat/HandBack.tsx HandedBack): the SubagentHandback call and the text after it become one folded
-// hand-back row, drawn as the quiet line `Handed back to main`, which a click opens on the summary as the thread's
+// hand-back row, drawn as the quiet line `Summary sent to main`, which a click opens on the summary as the thread's
 // markdown and a second click folds; with no summary there is no extra row. What main receives is not changed here.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { orientMessages } from '../../src/chat/ChatPanel.tsx'
-import { HANDED_BACK } from '../../src/chat/HandBack.tsx'
+import { SUMMARY_SENT } from '../../src/chat/HandBack.tsx'
 import { foldRecords, orientSummaries } from '../../src/chat/model.ts'
 import { Rows } from '../../src/chat/Rows.tsx'
 import type { ChatRecord } from '../../src/lib/types.ts'
@@ -64,7 +64,8 @@ describe('the hand-back row', () => {
   test('shows one quiet line with the summary folded; a click opens it as markdown, a second folds it', async () => {
     const el = await mount(<Rows rows={orientMessages(foldRecords(records(SUMMARY)))} ws="w" chat="o1" calls="o1" />)
     const line = el.querySelector('.chat-hand-back')
-    expect(line?.textContent).toBe(HANDED_BACK)
+    expect(line?.textContent).toBe(SUMMARY_SENT)
+    expect(SUMMARY_SENT).toBe('Summary sent to main')
     expect(line?.getAttribute('data-state')).toBe('handed')
     expect(el.textContent).not.toContain('1,204 revisions')
     expect(head(el).getAttribute('aria-expanded')).toBe('false')

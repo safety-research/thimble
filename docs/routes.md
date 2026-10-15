@@ -19,7 +19,7 @@ none:
 - **none**: the health check, which names no path or pid without the token, and whether the browser is signed
   in.
 
-264 routes, 153 of them writes: 37 token, 1 code, 1 agent token, 120 cookie, 102 cookie or token, 1 media key, 2 none.
+263 routes, 152 of them writes: 37 token, 1 code, 1 agent token, 119 cookie, 102 cookie or token, 1 media key, 2 none.
 
 | Method | Path | Module | Credential |
 |---|---|---|---|
@@ -142,7 +142,6 @@ none:
 | GET | `/api/ws/{c}/chats/{chat_id}` | agents | cookie or token |
 | PUT | `/api/ws/{c}/chats/{chat_id}` | agents | cookie |
 | POST | `/api/ws/{c}/chats/{chat_id}/ask-again` | agents | cookie |
-| POST | `/api/ws/{c}/chats/{chat_id}/hand-back` | agents | cookie |
 | POST | `/api/ws/{c}/chats/{chat_id}/interrupt` | agents | cookie |
 | POST | `/api/ws/{c}/chats/{chat}/permission` | agent_session | cookie |
 | GET | `/api/ws/{c}/checks` | checks | cookie or token |

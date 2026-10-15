@@ -37,14 +37,17 @@
 // - holds GET /api/module/next and handles the requests one at a time, in order, so a role's registration and the
 //   spawn that needs it are never split by another request: register (all roles again), spawn (register the role with
 //   the run's values if they differ, $.agent.spawn with no `model`, then the one-line note the server rendered), send
-//   (register if needed, then SendMessage), stop (TaskStop of the agent and of the shells the server names), note
-//   ($.session.append). It never starts, sends or stops anything the server did not ask for;
+//   (register if needed, then SendMessage), stop (TaskStop of the agent and of the shells the server names), abort
+//   (the analyst's Stop of main: $.turn.abort of main's running turn, by the id its turn.start carried, answered once
+//   that turn completed or ABORT_WAIT_MS passed), note ($.session.append). It never starts, sends or stops anything the
+//   server did not ask for;
 // - agent.spawn: an Agent call for one of thimble's roles whose prompt's first line names a typed request, main's or a
 //   subagent's (a subagent of main's own may start thimble's agents, as Claude Code lets a subagent start subagents;
 //   a thread's fork makes none: main makes the call for it, tools._ask_main), gets that request's full model id, and
 //   the agent it starts that request's effort, which turn.step sets on its every request;
 //   a child of such an agent whose type is not thimble's gets the same effort (its model it inherits already). These
 //   hooks never see a run of an agent this module started, which is why clicks register instead;
+// - turn.start and turn.complete of main's own turns: the id of main's running turn, which abort names;
 // - turn.complete: posts the end of each run of an agent it started (POST /api/module/ended), with why it ended and,
 //   for a refusal, what the API said of it, since its other hooks skip those agents;
 // - session.end: on /clear and /resume keeps its poll, waits for the new session id, says hello again under it,
@@ -88,6 +91,12 @@ export const SESSION_TICK_MS = 25
 // the timeout of /thimble's own hook, which starts the server (hooks.json, UserPromptExpansion)
 export const ACTIVATE_WAIT_MS = 600_000
 const QUICK_MS = 1000 // a poll answered sooner than this with nothing is a server that is stopping
+// how long abort waits for main's turn to complete after $.turn.abort, so that its answer comes once Claude Code has
+// ended the turn
+export const ABORT_WAIT_MS = 3000
+// $.turn.abort's refusal when main's turn had ended already, or was ending (no turn runs, another turn runs, or this
+// one is ending)
+const NO_TURN = /no turn is running|is not the running turn|is already ending/i
 // Claude Code's text when it runs as many subagents as it allows: the Agent tool's, and $.agent.spawn's when as many of
 // this plugin's spawns run as CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS allows ("thimble: $.agent.spawn refused: 2 spawns are
 // running at once", which it throws; live check L19)
@@ -219,6 +228,8 @@ type State = {
   helloing: { sid: string; said: Promise<Hello> } | null
   leaving: string // the session /clear or /resume is taking main away from, until the new one is known
   plan: boolean | null // whether main's session was in plan mode at the last look, as the server heard it
+  turn: string // main's running model turn: the id its turn.start carried, '' once it completed
+  turnEnded: (() => void)[] // what waits for the end of `turn` (abortTurn)
 }
 
 function fresh(): State {
@@ -226,7 +237,7 @@ function fresh(): State {
     active: false, interactive: false, launched: false, armed: false, expanded: false, marker: '', user: '', home: '',
     homeReal: '', rules: null,
     cwd: '', session: '', version: '', gen: 0, server: null, roles: {}, registered: {}, efforts: {},
-    requests: {}, started: new Set(), queue: Promise.resolve(), helloing: null, leaving: '', plan: null,
+    requests: {}, started: new Set(), queue: Promise.resolve(), helloing: null, leaving: '', plan: null, turn: '', turnEnded: [],
     file: false, ws: '', writing: Promise.resolve(), stamps: {}, n: 0,
     out: { session: '', version: '', load: '', beat: 0, plan: null, plan_at: 0, problem: '', taken: [], answers: {}, ended: [] },
   }
@@ -499,6 +510,8 @@ async function handle($: Engine, m: State, req: Request): Promise<Answer> {
         return await send($, m, text(a.agent), text(a.text), text(a.role), values)
       case 'stop':
         return await stopAgent($, text(a.agent), Array.isArray(a.shells) ? a.shells.map(text).filter(Boolean) : [])
+      case 'abort':
+        return await abortTurn($, m)
       case 'note':
         return await note($, text(a.text))
       default:
@@ -560,6 +573,21 @@ async function stopAgent($: Engine, agent: string, shells: string[] = []): Promi
   const said = text(r.text)
   if (r.isError) return { error: said || 'TaskStop failed', ...(GONE.test(said) ? { gone: true } : {}) }
   return { agentId: agent, text: said }
+}
+
+/** The analyst's Stop of main: main's running turn ended as Esc in the terminal ends it, with $.turn.abort and the id its
+ *  turn.start carried, answered once the turn completed or ABORT_WAIT_MS passed; `gone` when no turn of main's runs. */
+async function abortTurn($: Engine, m: State): Promise<Answer> {
+  const turn = m.turn
+  if (!turn) return { error: 'main is not running a turn', gone: true }
+  try {
+    await $.turn.abort({ turnId: turn })
+  } catch (err) {
+    const why = String(err)
+    return NO_TURN.test(why) ? { error: why, gone: true } : { error: why }
+  }
+  if (m.turn === turn) await Promise.race([new Promise<void>(resolve => m.turnEnded.push(resolve)), $.clock.sleep(ABORT_WAIT_MS)])
+  return { ok: true }
 }
 
 async function note($: Engine, line: string): Promise<Answer> {
@@ -1027,8 +1055,19 @@ export const register: Register = on => {
     return yield* next(effort !== undefined && e.effort !== undefined ? { ...e, effort: effort as typeof e.effort } : e)
   })
 
+  // main's own turns, whatever the scope check found, so that a stop of main names the turn that runs (abortTurn)
+  on('turn.start', async ($, e, next) => {
+    const r = await next(e)
+    if (e.agentId === undefined) m.turn = e.turnId
+    return r
+  })
+
   on('turn.complete', async ($, e, next) => {
     const r = await next(e)
+    if (e.agentId === undefined && e.turnId === m.turn) {
+      m.turn = ''
+      for (const ended of m.turnEnded.splice(0)) ended()
+    }
     if (m.active && e.agentId !== undefined && m.started.has(e.agentId)) {
       const refusal = e.reason === 'refusal' && isObj(e.refusal) ? { refusal: e.refusal } : {}
       if (m.file) {

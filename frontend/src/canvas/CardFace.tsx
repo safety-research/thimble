@@ -44,8 +44,6 @@ export interface CardFaceProps {
   chrome?: ReactNode
   /** last in the card: the grip and the unread dot */
   after?: ReactNode
-  /** the stop control on the running line */
-  stop?: ReactNode
   /** the field edited in place, and where the click that opened it landed, for the caret */
   editing?: CardField | null
   editAt?: { x: number; y: number } | null
@@ -125,8 +123,6 @@ function Face(p: CardFaceProps) {
         <div className="bcell-run" role="status">
           <Spinner size={10} label="running" />
           <span>running</span>
-          <span className="bcell-spacer" />
-          {p.stop}
         </div>
       )}
       {p.asking && !running && (

@@ -68,7 +68,6 @@ export const CellCard = memo(function CellCard(p: CellCardProps) {
   const dimmed = ctx.keep != null && !ctx.keep.has(cell.id)
   const unread = ctx.unread.has(cell.id)
   const [card, setCard] = useState<HTMLElement | null>(null)
-  const [stopping, setStopping] = useState(false)
   // where the click that opened the takeaway's editor landed, for the caret
   const [editAt, setEditAt] = useState<{ x: number; y: number } | null>(null)
 
@@ -100,19 +99,6 @@ export const CellCard = memo(function CellCard(p: CellCardProps) {
       setEditAt(at)
       p.onEdit(cell.id, field)
     }, DOUBLE_MS)
-  }
-  const stop = async () => {
-    if (!thread.chatId || stopping) return
-    setStopping(true)
-    track('ui-click', { target: `cell:${cell.id}`, detail: { action: 'stop', chat: thread.chatId } })
-    try {
-      await api.interrupt(ctx.ws, thread.chatId)
-      ctx.refresh()
-    } catch (e) {
-      fail(e)
-    } finally {
-      setStopping(false)
-    }
   }
   // ⌘↵ in the question typed in place: the question is saved, then sent to main as a request on this card, which shows
   // `sent to main` until main's turn ends
@@ -175,13 +161,6 @@ export const CellCard = memo(function CellCard(p: CellCardProps) {
         onTextDown={textDown}
         onTextClick={textClick}
         onCheckAgain={() => void checkAgain(ctx, cell)}
-        stop={
-          thread.chatId && thread.writable ? (
-            <Button variant="ghost" size="sm" busy={stopping} onMouseDown={(e) => e.stopPropagation()} onClick={() => void stop()}>
-              stop
-            </Button>
-          ) : null
-        }
         chrome={
           <div className="bcell-top">
             {(thread.name || time || unread) && (
