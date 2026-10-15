@@ -3,15 +3,16 @@
 // browser (backend hook_auth: 401 {detail, signin: true} without one), or a read credential of thimble's own, such as
 // the one its screenshot tool sends. The page shows the app only to a browser that is signed in (GET /ui/paired, after
 // the claim of the link's code) or whose reads the server answers all the same (GET /tour); any other sees one line
-// naming the way in, and the app never mounts, so nothing polls. A code the server refused with 410 starts the line with that. A read refused for
+// that says it isn't signed in and names the way in, and the app never mounts, so nothing polls. A code the server
+// refused with 410 says so first. A read refused for
 // want of sign-in, or a stream closed while the browser is no longer signed in, brings the line back; a new link opened
 // in the tab, or the tab shown again, checks once more.
 import { act, createElement } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { mount, settle, unmountAll } from './mount.tsx'
 
-const LINE = 'Open the link /thimble shows in your terminal, or run thimble up in a shell.'
-const GONE = 'This link was used or has expired: '
+const LINE = "This browser isn't signed in. Open the link /thimble shows in your terminal, or run thimble up in a shell."
+const GONE = "This link was used or has expired, so this browser isn't signed in. Open the link /thimble shows in your terminal, or run thimble up in a shell."
 
 let paired: boolean | 'down' = false
 // the server answers reads without the sign-in, as it does for the screenshot tool's credential
@@ -57,18 +58,18 @@ afterEach(() => {
 async function gate() {
   const api = await import('../../src/lib/api.ts')
   const { bus } = await import('../../src/lib/bus.ts')
-  const { SignInGate, SIGN_IN_LINE, CODE_GONE_START } = await import('../../src/shell/SignIn.tsx')
+  const { SignInGate, SIGN_IN_LINE, CODE_GONE_LINE } = await import('../../src/shell/SignIn.tsx')
   const el = await mount(createElement(SignInGate, null, createElement('div', { className: 'stand-in-app' }, 'the app')))
   await settle()
   await settle()
-  return { el, api, bus, SIGN_IN_LINE, CODE_GONE_START }
+  return { el, api, bus, SIGN_IN_LINE, CODE_GONE_LINE }
 }
 
 describe('the sign-in gate', () => {
-  test('the line and its start are the contract the server and the release test share', async () => {
-    const { SIGN_IN_LINE, CODE_GONE_START } = await gate()
-    expect(SIGN_IN_LINE).toBe('Open the link /thimble shows in your terminal, or run `thimble up` in a shell.')
-    expect(CODE_GONE_START).toBe(GONE)
+  test('the lines are the contract the server and the release test share, and each starts by saying the browser is not signed in', async () => {
+    const { SIGN_IN_LINE, CODE_GONE_LINE } = await gate()
+    expect(SIGN_IN_LINE).toBe("This browser isn't signed in. Open the link /thimble shows in your terminal, or run `thimble up` in a shell.")
+    expect(CODE_GONE_LINE).toBe("This link was used or has expired, so this browser isn't signed in. Open the link /thimble shows in your terminal, or run `thimble up` in a shell.")
   })
 
   test('a browser that is not signed in sees only the line, and the app never mounts or reads', async () => {
@@ -92,7 +93,8 @@ describe('the sign-in gate', () => {
     keyStatus = 410
     const { el } = await gate()
     expect(posts).toEqual(['{"code":"old","ws":"logs"}'])
-    expect(el.textContent).toBe(GONE + LINE)
+    expect(el.textContent).toBe(GONE)
+    expect(el.querySelector('code')?.textContent).toBe('thimble up')
     expect(el.querySelector('.stand-in-app')).toBeNull()
   })
 

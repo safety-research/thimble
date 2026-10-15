@@ -40,7 +40,7 @@ const PENDING = {}
 const MARKS = '.reader-gutter-cell.is-lit, .reader-span[data-concept], [data-concept], [data-thimble-label]'
 const SLOW_S = 20
 // the one line a browser that is not signed in sees (frontend shell/SignIn), its span in backticks drawn as code
-const SIGN_IN_LINE = 'Open the link /thimble shows in your terminal, or run `thimble up` in a shell.'
+const SIGN_IN_LINE = "This browser isn't signed in. Open the link /thimble shows in your terminal, or run `thimble up` in a shell."
 
 let shotN = 0
 const fontMisses = []
