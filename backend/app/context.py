@@ -446,11 +446,13 @@ def _orientation_chat(c: str) -> str:
 def orientation_part(c: str, focus: tuple[str, ...] = ()) -> _Part | None:
     """The latest orientation's digest as a part, an entry for each line that is not indented with the lines indented
     under it (a call and its result), at three levels: whole, without the indented lines, with each line shortened to
-    ORIENT_LINE_CHARS; None when no orientation ran or its transcript is gone."""
+    ORIENT_LINE_CHARS; None when no orientation ran or its transcript is gone. The digest is read with an agent's long
+    lines whole, not wrapped as the critic reads it, so a paragraph is one entry, kept whole when it touches a focus
+    ref."""
     from . import critique_session  # noqa: PLC0415
 
     chat = _orientation_chat(c)
-    text = critique_session.chat_digest(c, chat) if chat else ""
+    text = critique_session.chat_digest(c, chat, wrap=False) if chat else ""
     if not text:
         return None
     groups: list[list[str]] = []

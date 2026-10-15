@@ -337,6 +337,38 @@ def test_a_wrapped_piece_of_an_agent_s_line_never_starts_with_a_space():
         assert " ".join(p.removeprefix("> ") for p in pieces).split() == line.removeprefix("> ").split()
 
 
+def test_the_context_engine_keeps_a_long_orientation_paragraph_that_names_a_focus_ref_whole(workspaces_tmp, tmp_path,
+                                                                                          monkeypatch):
+    """The critic's digest wraps a long line of an agent's text, but the context engine's orientation part
+    (context.orientation_part), which a check, the writer and the card check get, reads each line whole: a paragraph
+    is one entry, so one that names a focus ref, such as the card a check covers, is shown whole within any budget, its
+    start and end with it, and without a focus it is cut to one short line rather than split into many."""
+    from app import context, session
+
+    sid = "5b1c2d3e-0000-4000-8000-00000000c042"
+    proj = tmp_path / "projects" / "-corpus"
+    folder = proj / sid / "subagents"
+    folder.mkdir(parents=True)
+    (proj / f"{sid}.jsonl").write_text("")
+    monkeypatch.setattr(session, "find_transcript", lambda s, config_dir=None: str(proj / f"{s}.jsonl"))
+    words = [f"word{i:04d}" for i in range(1_200)]
+    words[600] = "[[card:c0042]]"
+    para = "The account of night 3: " + " ".join(words)
+    rec = {"type": "assistant", "timestamp": "2026-10-06T00:00:00Z",
+           "message": {"content": [{"type": "text", "text": f"Short note.\n{para}"}]}}
+    (folder / "agent-o1.jsonl").write_text(json.dumps(rec) + "\n")
+    (folder / "agent-o1.meta.json").write_text(json.dumps({"agentType": "thimble:orientation"}))
+    chat = agents.new_agent(CORPUS, orientation.ROLE, orientation.TITLE, route="subagent", agent_id="o1",
+                            session=sid, sessions=[sid])["id"]
+    monkeypatch.setattr(context, "_orientation_chat", lambda c: chat)
+    assert max(len(x) for x in critique_session.chat_digest(CORPUS, chat).split("\n")) <= critique_session.CALL_CHARS
+    out = context.render(CORPUS, budget=2_000, focus=["card:c0042"], parts=("orientation",))
+    assert para in out, "the paragraph whole"
+    cut = context.orientation(CORPUS, 1_500)
+    assert "Short note." in cut and "The account of night 3" in cut and "word1199" not in cut
+    assert sum(ln.startswith("The account of night 3") for ln in cut.splitlines()) == 1
+
+
 async def test_a_long_digest_s_brief_gives_a_window_one_read_call_returns_whole(bridge, models, workspaces_tmp,
                                                                              monkeypatch):
     """A digest past what one Read call returns is named in the brief with its line count and a window of lines one

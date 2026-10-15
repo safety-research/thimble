@@ -284,11 +284,12 @@ def _result_lines(text: str, is_error: bool, limit: int = RESULT_LINES, root: st
         shown = [INDENT + "✗ " + shown[0][len(INDENT):]] + shown[1:] if shown else [INDENT + "✗"]
     return shown
 
-def render(title: str, path: Path, root: str = "", refs: "tuple[str, str] | None" = None) -> str:
+def render(title: str, path: Path, root: str = "", refs: "tuple[str, str] | None" = None, wrap: bool = True) -> str:
     """One transcript as the digest shows it: `# <title>`, then its brief, its text and each tool call under its ref
     with its result beneath, corpus paths relative to `root`. `refs` (workspace, orientation chat) names the call store
     numbering the refs; without it calls are numbered from 1. Reminders, ToolSearch and unreadable lines are left out.
-    """
+    A long line of an agent's text is wrapped (_wrap), or with `wrap` false kept one line, as the context engine reads
+    the digest: an entry for each line (context.orientation_part)."""
     from . import calls  # noqa: PLC0415
 
     entries: list[tuple[str, Any]] = []  # ("text", str) or ("call", tool_use_id)
@@ -344,7 +345,7 @@ def render(title: str, path: Path, root: str = "", refs: "tuple[str, str] | None
         out.append("")
         if kind == "text":  # a heading an agent wrote is escaped, so `# ` begins an agent's part alone
             out.append("\n".join("\\" + ln if ln.startswith("#") else ln
-                                 for whole in value.splitlines() for ln in _wrap(whole)))
+                                 for whole in value.splitlines() for ln in (_wrap(whole) if wrap else [whole])))
         else:
             out.append(lines_[value])
             out.extend(results.get(value, []))
@@ -357,19 +358,21 @@ def digest(caller: Caller) -> str:
     return digest_of(caller.c, caller.calls, caller.transcripts(), caller.cwd)
 
 
-def digest_of(c: str, chat: str, parts: "list[tuple[str, Path]]", root: str) -> str:
-    text = "\n\n".join(render(title, path, root, (c, chat)) for title, path in parts)
+def digest_of(c: str, chat: str, parts: "list[tuple[str, Path]]", root: str, wrap: bool = True) -> str:
+    text = "\n\n".join(render(title, path, root, (c, chat), wrap) for title, path in parts)
     if len(text) > DIGEST_CHARS:
         left = text[DIGEST_CHARS:].count("\n") + 1
         text = text[:DIGEST_CHARS] + "\n" + tools.hint("critique-transcript-cut", n=f"{left:,}")
     return text
 
-_digests: dict[tuple[str, str], tuple[tuple, str]] = {}  # (workspace, chat) -> (the transcripts' sizes, the digest)
+# (workspace, chat, wrap) -> (the transcripts' sizes, the digest)
+_digests: dict[tuple[str, str, bool], tuple[tuple, str]] = {}
 
 
-def chat_digest(c: str, chat: str) -> str:
+def chat_digest(c: str, chat: str, wrap: bool = True) -> str:
     """The digest of the orientation chat `chat` (its agent's transcripts, or an earlier version's session's, running or
-    not), '' when the chat is no orientation's or its transcript is gone; kept while the transcripts do not grow."""
+    not), '' when the chat is no orientation's or its transcript is gone; kept while the transcripts do not grow. With
+    `wrap` false an agent's long lines stay whole (render)."""
     meta = agents.meta_or_none(c, chat) or {}
     if meta.get("role") != orientation.ROLE or not (meta.get("agent_id") or meta.get("session")):
         return ""
@@ -380,15 +383,15 @@ def chat_digest(c: str, chat: str) -> str:
     if not parts:
         return ""
     sizes = tuple(session._size(p) for _, p in parts)
-    hit = _digests.get((c, chat))
+    hit = _digests.get((c, chat, wrap))
     if hit is not None and hit[0] == sizes:
         return hit[1]
     try:
         root = str(config.corpus_dir(c))
     except Exception:  # noqa: BLE001 — a corpus that is gone leaves absolute paths
         root = ""
-    text = digest_of(c, chat, parts, root)
-    _digests[(c, chat)] = (sizes, text)
+    text = digest_of(c, chat, parts, root, wrap)
+    _digests[(c, chat, wrap)] = (sizes, text)
     return text
 
 
