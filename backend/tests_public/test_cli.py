@@ -22,6 +22,7 @@ import pytest
 from app import cli, config, procs
 
 SECRET = "sk-ant-test-secret-never-written"  # gitleaks:allow  a fake key asserting nothing writes it
+NAME_SESSION = cli.name_session  # the named_sessions fixture replaces it; a test of what it sends puts it back
 BACKEND = Path(__file__).resolve().parents[1]
 
 pytestmark = pytest.mark.usefixtures("named_sessions")
@@ -154,22 +155,25 @@ def test_up_prints_the_url_and_opens_a_sessions_folder(home, data, monkeypatch, 
         if u.endswith("/precached/context"):  # no workspace here was installed from a pre-cache
             return 200, {"text": ""}
         posted.append((u, b))
+        if u.endswith("/api/ui/pair"):  # a server that makes no sign-in codes
+            return 404, {"detail": "Not Found"}
         return 201, {"name": Path(b["path"]).name}
 
     monkeypatch.setattr(cli, "_request", request)
     rc = cli.main(["up", "--cwd", str(data / "mini" / "agents"), "--session", "s9"])
-    key = json.loads((home / "server.json").read_text())["ui_key"]
-    # the link carries the key to the analyst's cookie, so what the skill puts in the model's context holds none: the
-    # session's Stop hook shows the link it left
+    # what the skill puts in the model's context holds no link: the session's Stop hook shows the link it left, with a
+    # sign-in code it gets as it shows it, so the file holds none
     assert rc == 0 and capsys.readouterr().out.splitlines() == [cli.LINK_LINE]
-    assert (home / "links" / "s9").read_text() == f"http://127.0.0.1:5300/?ws=mini#k={key}"
-    assert posted == [], "a folder inside the data dir is known already"
+    assert (home / "links" / "s9").read_text() == "http://127.0.0.1:5300/?ws=mini"
+    assert "ui_key" not in json.loads((home / "server.json").read_text())
+    posted.clear()  # the session's name and the like, told to the server
     folder = tmp_path / "calls"
     folder.mkdir()
     assert cli.main(["ensure", "--cwd", str(folder), "--session", "s9"]) == 0
     assert capsys.readouterr().out.splitlines() == [cli.LINK_LINE]
-    assert (home / "links" / "s9").read_text() == f"http://127.0.0.1:5300/?ws=calls#k={key}"
-    assert posted == [("http://127.0.0.1:8300/api/corpora/register", {"path": str(folder), "exact": True})]
+    assert (home / "links" / "s9").read_text() == "http://127.0.0.1:5300/?ws=calls"
+    assert posted[0] == ("http://127.0.0.1:8300/api/corpora/register", {"path": str(folder), "exact": True})
+    posted.clear()
     (tmp_path / "cc").mkdir()
     (tmp_path / "cc" / "settings.json").write_text(json.dumps({"disableAllHooks": True}))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
@@ -177,23 +181,216 @@ def test_up_prints_the_url_and_opens_a_sessions_folder(home, data, monkeypatch, 
     url, note, mark = capsys.readouterr().out.splitlines()
     assert url == "thimble: http://127.0.0.1:5300/?ws=calls", "no hook to show it"
     assert note == cli.MONITOR_NOTE and mark.startswith(cli.MONITOR_MARK), "main's Monitor brings the browser's events"
+    posted.clear()
     assert cli.main(["up", "--cwd", str(folder)]) == 0, "a bare up read by a program"
-    assert capsys.readouterr().out.splitlines() == ["thimble: http://127.0.0.1:5300/"] and len(posted) == 2
+    assert capsys.readouterr().out.splitlines() == ["thimble: http://127.0.0.1:5300/"]
+    assert posted == [], "no code minted"
     monkeypatch.setattr(cli, "to_terminal", lambda: True)
     assert cli.main(["up", "--cwd", str(folder)]) == 0, "a bare up from a shell"
-    assert capsys.readouterr().out.splitlines() == [f"thimble: http://127.0.0.1:5300/#k={key}"]
+    # the server gave no code: the plain link, and why it opens read-only
+    assert capsys.readouterr().out.splitlines() == ["thimble: http://127.0.0.1:5300/",
+                                                    cli.NO_CODE_LINE.format(log=cli.log_path())]
+    assert posted == [("http://127.0.0.1:8300/api/ui/pair", {})], "the code is minted at the API, not at Vite"
+
+    def minting(m, u, b=None, timeout=5.0):
+        if u.endswith("/api/ui/pair"):
+            posted.append((u, b))
+            return 200, {"code": f"c{len(posted)}", "expires_s": 300}
+        return request(m, u, b, timeout)
+
+    monkeypatch.setattr(cli, "_request", minting)
+    posted.clear()
+    assert cli.main(["up", "--cwd", str(folder)]) == 0
+    assert capsys.readouterr().out.splitlines() == ["thimble: http://127.0.0.1:5300/#p=c1"]
+    assert cli.ui_url("calls", pair=True) == "http://127.0.0.1:5300/?ws=calls#p=c2"
+    assert posted[-1] == ("http://127.0.0.1:8300/api/ui/pair", {"ws": "calls"})
+    assert cli.ui_url("calls") == "http://127.0.0.1:5300/?ws=calls" and len(posted) == 2, "no code unless asked"
     assert cli.build_parser().parse_args(["up"]).cmd == "up" and cli.build_parser().parse_args(["ensure"]).cmd == "ensure"
 
 
-def test_slash_thimble_in_a_plain_claude_prints_the_link_line_alone(home, data, monkeypatch, capsys):
-    """/thimble in a plain `claude` opens thimble as the launcher does: no warning that it was not started with
-    `thimble`, since thimble adds no sandbox to either; the Stop hook shows the link alone."""
+def test_slash_thimble_in_a_plain_claude_says_what_its_environment_lacks_and_leaves_it_for_the_stop_hook(
+        home, data, monkeypatch, capsys, tmp_path):
+    """/thimble in a plain `claude` opens thimble as the launcher does. What the launcher would have given main and the
+    session lacks gets a line each, printed (the model relays thimble: lines) and left under the link for the Stop hook
+    (live check L15: a reply may leave a line out): an effort or subagent model variable set in the environment or in an
+    `env` block of the analyst's settings, and a proxy that no NO_PROXY keeps off 127.0.0.1. The server gets their
+    keys and writes its own words. A launched main gets the link alone."""
     _healthy_no_process(monkeypatch)
-    monkeypatch.setattr(cli, "_request", lambda m, u, b=None, timeout=5.0: (404, {}))
+    told = []
+
+    def request(m, u, b=None, timeout=5.0):
+        if u.endswith("/session"):
+            told.append(b)
+            return 200, {}
+        return 404, {}
+
+    monkeypatch.setattr(cli, "_request", request)
     monkeypatch.setattr(cli, "launched", lambda: False)
+    monkeypatch.setattr(cli.cc_plugin, "claude_pid", lambda environ=None: None)
+    monkeypatch.setattr(cli, "name_session", NAME_SESSION)
+    for name in (*cli.UNSET_VARS, *cli.PROXY_VARS, *cli.NO_PROXY_VARS):
+        monkeypatch.delenv(name, raising=False)
     assert cli.main(["up", "--cwd", str(data / "mini" / "agents"), "--session", "s7"]) == 0
     assert capsys.readouterr().out.splitlines() == [cli.LINK_LINE]
-    assert "\n" not in (home / "links" / "s7").read_text()
+    assert "\n" not in (home / "links" / "s7").read_text() and told[-1]["warnings"] == []
+    monkeypatch.setenv("CLAUDE_CODE_SUBAGENT_MODEL", "haiku")
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:3128")
+    monkeypatch.setenv("NO_PROXY", "corp.example")
+    (tmp_path / "claude-home" / "settings.json").write_text(json.dumps({"env": {cli.EFFORT_ENV: "high"}}))
+    assert cli.main(["up", "--cwd", str(data / "mini" / "agents"), "--session", "s7"]) == 0
+    lines = [cli.SETUP_ENV_LINE.format(name=cli.EFFORT_ENV),
+             cli.SETUP_ENV_LINE.format(name="CLAUDE_CODE_SUBAGENT_MODEL"), cli.SETUP_PROXY_LINE]
+    assert capsys.readouterr().out.splitlines() == [cli.LINK_LINE, *lines]
+    assert (home / "links" / "s7").read_text().split("\n") == ["http://127.0.0.1:5300/?ws=mini", *lines]
+    assert told[-1]["warnings"] == [f"env:{cli.EFFORT_ENV}", "env:CLAUDE_CODE_SUBAGENT_MODEL", "proxy"]
+    assert not [w for w in told[-1]["warnings"] if " " in w], "keys only: the server writes the words"
+    monkeypatch.setenv("NO_PROXY", "corp.example, localhost")
+    assert cli.proxy_unsafe() is False and cli.setup_warnings(data) == [f"env:{cli.EFFORT_ENV}",
+                                                                         "env:CLAUDE_CODE_SUBAGENT_MODEL"]
+    monkeypatch.setattr(cli, "launched", lambda: True)
+    assert cli.main(["up", "--cwd", str(data / "mini" / "agents"), "--session", "s6"]) == 0
+    assert capsys.readouterr().out.splitlines() == [cli.LINK_LINE]
+    assert "\n" not in (home / "links" / "s6").read_text() and told[-1]["warnings"] == []
+
+
+def test_slash_thimble_makes_its_session_main_with_a_launch_record_and_marks_the_folder(home, data, monkeypatch,
+                                                                                        capsys, tmp_path):
+    """/thimble in a session the launcher did not start writes launch.json for it (`via: skill`, its `claude` process,
+    its CLAUDE_CONFIG_DIR), which the hooks module's bridge reads; a record that names the same `claude` already, as
+    the launcher's does, is left alone. The folder is marked active, as itself and as its real path, for the plugin's
+    watcher, and the server hears whether Claude Code's own sandbox is on."""
+    _healthy_no_process(monkeypatch)
+    told = []
+    monkeypatch.setattr(cli, "_request", lambda m, u, b=None, timeout=5.0:
+                        (told.append(b) or (200, {})) if u.endswith("/session") else (404, {}))
+    monkeypatch.setattr(cli.cc_plugin, "claude_pid", lambda environ=None: 4242)
+    monkeypatch.setattr(cli, "own_sandbox_here", lambda cwd: True)
+    monkeypatch.setattr(cli, "name_session", NAME_SESSION)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-home"))
+    link = tmp_path / "mini-link"
+    link.symlink_to(data / "mini", target_is_directory=True)
+    assert cli.main(["up", "--cwd", str(link), "--session", "s5"]) == 0
+    assert capsys.readouterr().out.splitlines() == [cli.LINK_LINE]
+    assert told[-1] == {"session": "s5", "cwd": str(link), "warnings": [], "sandbox": True}
+    with cli.server_dirs():
+        rec = cli.read_launch("mini")
+    assert {k: rec[k] for k in ("session", "pid", "via", "mode", "config_dir")} == {
+        "session": "s5", "pid": 4242, "via": "skill", "mode": "browser", "config_dir": str(tmp_path / "claude-home")}
+    assert "fenced" not in rec
+    marks = {p.name for p in (home / cli.ACTIVE_DIR).iterdir()}
+    assert marks == {str(link).replace("/", "%"), str((data / "mini").resolve()).replace("/", "%")}
+    with cli.server_dirs():
+        path = config.workspace_path("mini") / cli.LAUNCH_FILE
+    path.write_text(json.dumps({**rec, "at": "kept", "via": "launcher's"}))
+    assert cli.main(["up", "--cwd", str(link), "--session", "s5"]) == 0
+    assert json.loads(path.read_text())["at"] == "kept", "the same claude: the record is left alone"
+
+
+def test_a_launch_record_from_slash_thimble_is_live_while_its_claude_runs_that_session_or_one_it_moved_to(
+        home, data, tmp_path):
+    """open_elsewhere reads launch.json's `claude`: a record /thimble wrote (`via: skill`) names a `claude` whose
+    command line need not name its session, so Claude Code's own record of that process
+    (<config_dir>/sessions/<pid>.json) must name the record's session, or one subagents.json records as moved from it
+    (/clear)."""
+    from app import subagent_files
+
+    cc = tmp_path / "cc"
+    (cc / "sessions").mkdir(parents=True)
+    main = _claude_process(tmp_path, "--permission-mode", "auto")
+    try:
+        rec = {"session": "s1", "pid": main.pid, "via": "skill", "config_dir": str(cc), "mode": "terminal"}
+        assert cli.live_launch(rec) is False, "no record of the process"
+        (cc / "sessions" / f"{main.pid}.json").write_text(json.dumps({"pid": main.pid, "sessionId": "s1"}))
+        assert cli.live_launch(rec) is True
+        (cc / "sessions" / f"{main.pid}.json").write_text(json.dumps({"pid": main.pid, "sessionId": "s2"}))
+        assert cli.live_launch(rec, "mini") is False, "another session"
+        with cli.server_dirs():
+            ws = config.workspace_dir("mini")
+            state = subagent_files.read(ws)
+            subagent_files.rekey(state, "s1", "s2")
+            subagent_files.state_path(ws).write_text(json.dumps(state))
+            assert cli.live_launch(rec, "mini") is True, "/clear moved the session"
+            (ws / cli.LAUNCH_FILE).write_text(json.dumps(rec))
+            assert cli.open_elsewhere("mini", "browser") == cli.OPEN_ELSEWHERE_LINE.format(mode="terminal")
+        assert cli.live_launch({**rec, "via": ""}) is False, "the launcher's record needs its session in argv"
+    finally:
+        main.kill()
+        main.wait()
+    assert cli.live_launch(rec, "mini") is False, "gone"
+
+
+def test_unpair_signs_every_browser_out_and_says_how_to_sign_in_again(home, monkeypatch, capsys):
+    """`thimble unpair` asks the server to forget every browser (POST /api/ui/unpair) and removes paired.json, so a
+    server that starts later knows none either. When the server does not do it, the line says so and how to fix it."""
+    asked = []
+    monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: True)
+    monkeypatch.setattr(cli, "_request", lambda m, u, b=None, timeout=5.0: asked.append((m, u)) or (204, None))
+    cli.ensure_home()
+    (home / cli.PAIRED_FILE).write_text("[]")
+    assert cli.main(["unpair"]) == 0
+    assert asked == [("POST", f"{cli.api_url()}/api/ui/unpair")] and not (home / cli.PAIRED_FILE).exists()
+    assert capsys.readouterr().out.splitlines() == [cli.UNPAIRED_LINE]
+    assert "`thimble up`" in cli.UNPAIRED_LINE
+    monkeypatch.setattr(cli, "_request", lambda m, u, b=None, timeout=5.0: (404, {"detail": "Not Found"}))
+    assert cli.main(["unpair"]) == 1
+    out = capsys.readouterr().out
+    assert out.startswith("thimble: the server did not sign the browsers out (it answered 404)")
+    assert out.rstrip().endswith("In a shell: thimble server restart")
+    monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: False)
+    assert cli.main(["unpair"]) == 0 and capsys.readouterr().out.splitlines() == [cli.UNPAIRED_LINE], "server down"
+
+
+def test_browser_cookie_mints_a_code_and_trades_it_without_the_token(home, monkeypatch):
+    """A script's browser sign-in: a code from POST /api/ui/pair (with the token), traded at POST /api/ui/key with no
+    token, as a browser trades it; the cookie it sets comes back as `name=value`. A refusal raises."""
+    import http.server
+
+    seen: list[tuple[str, dict, bool]] = []
+
+    class Server(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802 — http.server's name
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])) or b"{}")
+            seen.append((self.path, body, any(k.lower().startswith("x-thimble") for k in self.headers.keys())))
+            if self.path == "/api/ui/pair":
+                out, cookie = json.dumps({"code": "c0de", "expires_s": 300}).encode(), None
+            elif body.get("code") == "c0de":
+                out, cookie = b"", "thimble-ui-8300=s3cret; Path=/api/; HttpOnly; SameSite=Strict"
+            else:
+                self.send_response(410)
+                self.end_headers()
+                return
+            self.send_response(200 if out else 204)
+            if cookie:
+                self.send_header("Set-Cookie", cookie)
+            self.send_header("Content-Length", str(len(out)))
+            self.end_headers()
+            self.wfile.write(out)
+
+        def log_message(self, *a):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Server)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        url = f"http://127.0.0.1:{server.server_address[1]}"
+        cli.write_state({"port": server.server_address[1]})
+        assert cli.browser_cookie(url) == "thimble-ui-8300=s3cret"
+        assert [(path, body) for path, body, _ in seen] == [("/api/ui/pair", {}), ("/api/ui/key", {"code": "c0de"})]
+        assert seen[0][2] is True and seen[1][2] is False, "the mint proves the token, the claim does not"
+        monkeypatch.setattr(cli, "pair_code", lambda api, name: "spent")
+        with pytest.raises(RuntimeError, match="refused the sign-in code"):
+            cli.browser_cookie(url)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_write_state_drops_a_ui_key_an_earlier_build_kept(home):
+    cli.write_state({"port": 8300, "token": "t", "ui_key": "old"})
+    assert "ui_key" not in cli.read_state()
+    (home / "server.json").write_text(json.dumps({"port": 8300, "token": "t", "ui_key": "old"}))
+    cli.write_state({"port": 8301})
+    assert cli.read_state() == {"port": 8301, "token": "t"}
 
 
 def test_the_launcher_and_slash_thimble_say_nothing_of_claude_code_s_trust(home, data, monkeypatch, capsys,
@@ -655,7 +852,8 @@ def test_real_up_starts_a_detached_server_idempotently_and_stop_ends_it(home, da
         # the link's line alone: the workspace holds nothing from an earlier run, so there is nothing to resume
         st = json.loads((home / "server.json").read_text())
         assert out.returncode == 0 and lines == [cli.LINK_LINE], out
-        assert (home / "links" / "it-1").read_text() == f"http://127.0.0.1:{port}/?ws=mini#k={st['ui_key']}"
+        assert (home / "links" / "it-1").read_text() == f"http://127.0.0.1:{port}/?ws=mini", "no code in the file"
+        assert "ui_key" not in st
         pid = st["pid"]
         assert cli.pid_alive(pid) and st["port"] == port and st["env"]["data_dir"] == str(data)
         assert os.getsid(pid) == pid, "uvicorn is its own session leader"

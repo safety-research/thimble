@@ -942,15 +942,17 @@ def test_demo_attach_and_no_attach_answer_without_asking(fake_world, monkeypatch
 
 
 def test_demo_prints_and_opens_one_url_the_start_page(tmp_path, fake_world, monkeypatch):
-    """Two datasets or one, the command prints one URL and opens it: the start page (no workspace in the URL), with the
-    page key when it prints to a terminal; the attach lines follow as before."""
+    """Two datasets or one, the command prints one URL and opens it: the start page (no workspace in the URL), with a
+    one-time sign-in code when it prints to a terminal. A browser it opened spent that code, so the line it prints then
+    names the page without it; with no browser opened the printed link carries the code. The attach lines follow as
+    before."""
     w = fake_world
     pre = precache_for(tmp_path, "one")
     from app import cli
 
     monkeypatch.setattr(demo, "register", lambda folder, url, name=None: name or folder.name)
-    monkeypatch.setattr(cli, "ui_url", lambda name, key=True: f"http://127.0.0.1:1/{f'?ws={name}' if name else ''}"
-                                                              + ("#k=pagekey" if key else ""))
+    monkeypatch.setattr(cli, "ui_url", lambda name, pair=False: f"http://127.0.0.1:1/{f'?ws={name}' if name else ''}"
+                                                                + ("#p=c0de" if pair else ""))
     w["server"] = lambda say: ("http://127.0.0.1:1", w["env"])
     assert run(w, args(names=["one", "two"], dir=str(w["root"]), precaches=str(pre))) == 0
     text = said(w)
@@ -959,13 +961,19 @@ def test_demo_prints_and_opens_one_url_the_start_page(tmp_path, fake_world, monk
     assert "?ws=" not in text and "is open at" not in text
     assert f"cd {w['root'] / 'one'} && thimble # one" in text and demo.FROZEN_LINE in text
     assert w["started"] == []
-    # one dataset: still the start page; on a terminal, with the key
+    # one dataset: still the start page; on a terminal, the browser opens it with a code and the line names it plain
     terminal(monkeypatch, [])
     w["shown"].clear()
     w["lines"].clear()
     assert run(w, args(names=["two"], dir=str(w["root"]))) == 0
-    assert w["shown"] == ["http://127.0.0.1:1/#k=pagekey"]
-    assert re.findall(r"http://\S+", said(w)) == ["http://127.0.0.1:1/#k=pagekey"]
+    assert w["shown"] == ["http://127.0.0.1:1/#p=c0de"]
+    assert re.findall(r"http://\S+", said(w)) == ["http://127.0.0.1:1/"] and "(opened in your browser)" in said(w)
+    # no browser opened (no desktop): the printed link carries the code
+    w["lines"].clear()
+    assert demo.run(args(names=["two"], dir=str(w["root"])), get=w["get"], say=w["lines"].append, server=w["server"],
+                    start=w["started"].append, show=lambda url: False, auth=lambda: w["auth"]) == 0
+    text = said(w)
+    assert re.findall(r"http://\S+", text) == ["http://127.0.0.1:1/#p=c0de"] and "opened in your browser" not in text
 
 
 def test_demo_asks_before_downloading_and_needs_a_terminal_to_ask(fake_world, monkeypatch):

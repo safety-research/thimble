@@ -3,12 +3,12 @@
     thimble server up [--cwd <path>] [--session <id>] [--action status|fix|repair|fresh|restore|feedback]
                       [--archive <name>]
     thimble server status [--cwd <path>] | repair | stop [--yes] | restart [--keep-vite] [--yes]
-    thimble doctor | fix | revert | stop [--yes] | restart [--keep-vite] [--yes]
+    thimble doctor [--verbose] | unpair | fix | revert | stop [--yes] | restart [--keep-vite] [--yes]
     thimble update [--from <zip>] [--dry-run]
     thimble feedback ["description"] [--no-logs]   (a problem report as a zip; feedback.py)
     thimble list                           (the workspaces by id, archived runs included; runs.py)
     thimble purge <id>… [--dry-run]        (delete workspaces or archived runs by id; runs.py)
-    thimble launch-args --cwd <path>       (the launcher's: plugin folder, allowed tools, main's effort and settings, turn tools, main's name, session id, env, unset, note, mode and export lines, main's prompt)
+    thimble launch-args --cwd <path>       (the launcher's: plugin folder, main's effort and settings, turn tools, main's name, session id, env, unset, note, mode and export lines, main's prompt)
     thimble prompt <name>… [--cwd <path>]  (prompt files rendered for a session in <path>, for skills and hooks)
     thimble extension add <folder | git URL | built-in name> [--yes] | on <name> | off <name> | list | remove <name>
                                                                                               (extensions.py)
@@ -20,14 +20,14 @@ exits 0, since a skill fails whole when its command exits non-zero. `--action fr
 <workspaces>/.archive/; `--action restore` restores an archive. Where the plugin's hooks are off, /thimble also prints
 the command main's Monitor runs (cc_plugin.route, monitor_lines).
 
-<home> is `~/.thimble` or THIMBLE_HOME. <home>/server.json records {port, pid, url, repo, env, token, ui_key}, readable
-by its owner alone; `token` is new at each start and is what the plugin's hooks prove they hold, and `ui_key`, kept
-across starts, is what the link gives the browser to answer permission requests and change permission modes
-(hook_auth.py). Only a terminal gets that link: `up` from a shell prints it, and /thimble prints LINK_LINE for main's
-Stop hook to show it (leave_link). Its `pid` is trusted only while it is a thimble server on its port (is_server checks
-the command line and working folder, since a pid recorded inside a sandbox's pid namespace can name an unrelated host
-process). reconcile makes the record true before `up` acts on it. A server whose /api/health names another
-THIMBLE_HOME belongs to another install and is refused.
+<home> is `~/.thimble` or THIMBLE_HOME. <home>/server.json records {port, pid, url, repo, env, token}, readable by its
+owner alone; `token` is new at each start and is what the plugin's hooks and this CLI prove they hold (hook_auth.py). A
+browser signs in with a one-time code from ui_url(pair=True), never with a value from this file. Only a terminal gets a
+link with a code: `up` from a shell prints one, and /thimble prints LINK_LINE for main's Stop hook to show the link,
+which gets its code as the hook shows it (leave_link). `thimble unpair` signs every browser out. Its `pid` is trusted
+only while it is a thimble server on its port (is_server checks the command line and working folder, since a pid
+recorded inside a sandbox's pid namespace can name an unrelated host process). reconcile makes the record true before
+`up` acts on it. A server whose /api/health names another THIMBLE_HOME belongs to another install and is refused.
 
 Claude Code's Bash sandbox gives each command its own network and pid namespace, where a server would die with the
 command and the host's cannot be reached. So /thimble's work runs in the plugin's UserPromptExpansion hook, which Claude
@@ -135,8 +135,8 @@ RESUME_LINE = "thimble: resuming the dashboard from your last run; `/thimble fre
 # the orientation left as context (precached.py)
 PRECACHED_LINE = ("thimble: opening the orientation that ran in advance on these files; this session starts fresh, "
                   "from its cards and report; `/thimble fresh` starts over")
-# what /thimble prints in place of the link, which carries the ui_key and so is kept out of the model's context: main's
-# Stop hook shows it under the reply (leave_link, plugin/bin/.thimble-watch)
+# what /thimble prints in place of the link: main's Stop hook shows the link under the reply with a sign-in code it gets
+# as it shows it (leave_link, plugin/bin/.thimble-watch link_lines), outside the model's context
 LINK_LINE = "thimble: the dashboard link is under this reply (or run `thimble up` in a shell)"
 LINKS_DIR = "links"  # under <home>: the link each session's Stop hook shows once
 FRESH_LINE = ("thimble: Cleared the session at {cwd}. The last run is archived at {path}. To bring it back, run: "
@@ -260,14 +260,14 @@ def new_token() -> str:
 
 
 def write_state(state: dict[str, Any]) -> None:
-    """server.json, written whole into the private home (ensure_home), with the token and the ui_key the file held when
-    `state` names none, else new ones (hook_auth.py)."""
+    """server.json, written whole into the private home (ensure_home), with the token the file held when `state` names
+    none, else a new one (hook_auth.py). A `ui_key` of earlier builds is dropped: a browser signs in with a one-time
+    code (ui_url)."""
     ensure_home()
     held = read_state()
     if not state.get("token"):
         state = {**state, "token": held.get("token") or new_token()}
-    if not state.get("ui_key"):
-        state = {**state, "ui_key": held.get("ui_key") or new_token()}
+    state = {k: v for k, v in state.items() if k != "ui_key"}
     p = server_json()
     tmp = p.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(state, indent=2) + "\n", "utf-8")
@@ -512,9 +512,12 @@ def sandbox_line(cwd: Path) -> str:
     return SANDBOX_LINE.format(rule=sandbox_rule(), settings=settings, log=log_path())
 
 
-def _request(method: str, url: str, body: dict | None = None, timeout: float = 5.0) -> tuple[int, Any]:
+def _request(method: str, url: str, body: dict | None = None, timeout: float = 5.0,
+             cookie: str | None = None) -> tuple[int, Any]:
     """(status, parsed json | text). Transport failures are (0, message); an HTTP error is (status, its body). The
-    request proves the server's token (hook_auth) so its writes pass LocalWriteGuard, which a notebook kernel cannot."""
+    request proves the server's token (hook_auth), which the routes of hooks, the plugin and this CLI need; a write the
+    analyst's browser makes needs a signed-in browser's `cookie` (`name=value`, browser_cookie), sent as the Cookie
+    header. A notebook kernel holds neither."""
     from . import hook_auth  # noqa: PLC0415
 
     data = json.dumps(body).encode() if body is not None else None
@@ -522,6 +525,8 @@ def _request(method: str, url: str, body: dict | None = None, timeout: float = 5
     tok = hook_auth.token()
     if tok:
         headers.update(hook_auth.headers(tok, secrets.token_hex(16)))
+    if cookie:
+        headers["Cookie"] = cookie
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
         with config.LOOPBACK.open(req, timeout=timeout) as r:  # never through the shell's proxy
@@ -1295,13 +1300,62 @@ def open_workspace(cwd: Path, data_dir: Path, url: str | None, *, here: bool = F
     return None, False
 
 
-def ui_url(name: str | None, key: bool = True) -> str:
-    """The UI port in dev mode (its own Vite), else the API port where the built UI is served, with `key` the key that
-    lets the page answer permission requests and change permission modes (hook_auth.claim)."""
+PAIR_TIMEOUT_S = 3.0
+PAIRED_FILE = "paired.json"  # in <home>: the hashes of the browsers signed in (hook_auth.PAIRED_FILE)
+NO_CODE_LINE = ("thimble: the server gave no sign-in code, so this link opens thimble read-only in a browser that is "
+                "not signed in yet; see {log}.")
+UNPAIRED_LINE = ("thimble: every browser is signed out of thimble. To sign one in again, open the link /thimble shows, "
+                 "or run `thimble up` in a shell.")
+UNPAIR_FAILED_LINE = ("thimble: the server did not sign the browsers out ({why}), so they stay signed in until it "
+                      "restarts. In a shell: thimble server restart")
+
+
+def pair_code(api: str, name: str | None) -> str:
+    """A one-time sign-in code for a browser from the server at `api` (`POST /api/ui/pair`, which needs the token:
+    hook_auth.mint), for workspace `name`; a newer code for the same workspace voids it. '' when the server gives none,
+    which is logged."""
+    status, body = _request("POST", f"{api}/api/ui/pair", {"ws": name} if name else {}, timeout=PAIR_TIMEOUT_S)
+    code = body.get("code") if status == 200 and isinstance(body, dict) else None
+    if isinstance(code, str) and code:
+        return code
+    _log(f"no sign-in code from {api}: {status} {str(body)[:200]}")
+    return ""
+
+
+def ui_url(name: str | None, pair: bool = False) -> str:
+    """The UI port in dev mode (its own Vite), else the API port where the built UI is served, and with `pair` a
+    one-time sign-in code after `#p=` (hook_auth.mint, pair_code), which the page trades for the browser's cookie. The
+    URL without a code when the server gives none."""
     st = read_state()
     base = str(st.get("url") or api_url())
-    k = f"#k={st['ui_key']}" if key and st.get("ui_key") else ""
-    return f"{base}/?ws={name}{k}" if name else f"{base}/{k}"
+    url = f"{base}/?ws={name}" if name else f"{base}/"
+    code = pair_code(str(st.get("api") or api_url()), name) if pair else ""
+    return f"{url}#p={code}" if code else url
+
+
+def browser_cookie(url: str | None = None) -> str:
+    """A browser's sign-in, for scripts (scripts/dev/precache_orientation.py, scripts/e2e): a code from the server at
+    `url` (pair_code), traded at `POST /api/ui/key` with no token, as a browser trades it; the cookie it sets, as
+    `name=value` for _request's `cookie`. Each call is a new sign-in, with its terminal line and notice. RuntimeError
+    when the server gives no code or no cookie."""
+    base = url or api_url()
+    code = pair_code(base, None)
+    if not code:
+        raise RuntimeError(f"the server at {base} gave no sign-in code; see {log_path()}")
+    req = urllib.request.Request(f"{base}/api/ui/key", data=json.dumps({"code": code}).encode(), method="POST",
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with config.LOOPBACK.open(req, timeout=PAIR_TIMEOUT_S) as r:
+            set_cookies = r.headers.get_all("Set-Cookie") or []
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"the server at {base} refused the sign-in code ({e.code})") from None
+    except OSError as e:
+        raise RuntimeError(f"the server at {base} did not answer the sign-in: {e}") from None
+    for raw in set_cookies:
+        name, _, value = raw.split(";", 1)[0].strip().partition("=")
+        if name and value:
+            return f"{name}={value}"
+    raise RuntimeError(f"the server at {base} set no cookie for the sign-in")
 
 
 def leave_link(session: str, url: str, notes: "list[str] | tuple[str, ...]" = ()) -> bool:
@@ -1531,12 +1585,17 @@ def installed_copy(cwd: Path) -> Installed | None:
     return None
 
 
-def name_session(url: str, name: str, session: str, cwd: Path) -> str | None:
-    """Tell the server which Claude Code session asked (`POST /api/ws/{c}/session`). Returns the session this one took main
-    over from while it still runs in another terminal, else None."""
+def name_session(url: str, name: str, session: str, cwd: Path, sandbox: bool | None = None,
+                 warnings: "list[str] | tuple[str, ...]" = ()) -> str | None:
+    """Tell the server which Claude Code session asked (`POST /api/ws/{c}/session`), whether Claude Code's own sandbox
+    is on in it (`sandbox`, own_sandbox_here; None when not known) and the keys of what its environment lacks
+    (`warnings`, setup_warnings), whose words the server writes. Returns the session this one took main over from while
+    it still runs in another terminal, else None."""
+    body: dict[str, Any] = {"session": session, "cwd": str(cwd), "warnings": list(warnings)}
+    if sandbox is not None:
+        body["sandbox"] = sandbox
     try:
-        status, body = _request("POST", f"{url}/api/ws/{urllib.parse.quote(name)}/session",
-                                {"session": session, "cwd": str(cwd)}, timeout=3.0)
+        status, body = _request("POST", f"{url}/api/ws/{urllib.parse.quote(name)}/session", body, timeout=3.0)
         if status != 200:
             _log(f"session {session} for {name}: {status} {str(body)[:200]}")
             return None
@@ -1545,6 +1604,82 @@ def name_session(url: str, name: str, session: str, cwd: Path) -> str | None:
     except Exception as e:  # noqa: BLE001 — never a traceback in the skill text
         _log(f"session {session} for {name}: {type(e).__name__}: {e}")
         return None
+
+
+# What /thimble says about a session the launcher did not start, which lacks what the launcher gives main: a line for
+# each of UNSET_VARS its environment or its Claude Code settings set, and one for a shell proxy that no NO_PROXY keeps
+# off 127.0.0.1. The model relays these lines, and the Stop hook shows them under the reply too (leave_link's notes);
+# the server posts a `setup` notice for each key (setup_warnings), in words it writes itself (notices.setup_text).
+SETUP_ENV_LINE = ("thimble: {name} is set in this session, so thimble's agents may not run on the models and efforts "
+                  "Settings name. To fix it, quit, unset it and start claude again, or start with `thimble`, which "
+                  "unsets it.")
+SETUP_PROXY_LINE = ("thimble: your shell sets a proxy, so thimble's plugin may not reach thimble's server. Quit, add "
+                    "127.0.0.1 and localhost to NO_PROXY, and start claude again.")
+PROXY_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")
+NO_PROXY_VARS = ("NO_PROXY", "no_proxy")
+LOOPBACK_NAMES = ("127.0.0.1", "localhost", "*")  # a NO_PROXY entry that keeps thimble's requests off the proxy
+PROXY_KEY = "proxy"  # setup_warnings' key for the proxy; `env:<NAME>` for a variable
+
+
+def env_set_here(cwd: Path) -> list[str]:
+    """The UNSET_VARS a session in `cwd` has: set in this process's environment (the session's), or by an `env` block
+    of the analyst's Claude Code settings (cc_settings.settings_env), '' counting as unset."""
+    from . import cc_settings  # noqa: PLC0415
+
+    return [name for name in UNSET_VARS
+            if os.environ.get(name, "").strip() or (cc_settings.settings_env(cwd, name) or "").strip()]
+
+
+def proxy_unsafe() -> bool:
+    """Whether this session's environment sets an HTTP proxy and no NO_PROXY or no_proxy names 127.0.0.1 or localhost,
+    so a request of the plugin's to thimble's server could go to the proxy."""
+    if not any(os.environ.get(name, "").strip() for name in PROXY_VARS):
+        return False
+    named = {part.strip().lower() for name in NO_PROXY_VARS for part in os.environ.get(name, "").split(",")}
+    return not named & set(LOOPBACK_NAMES)
+
+
+def setup_warnings(cwd: Path) -> list[str]:
+    """The keys of setup_lines' cases for the server's `setup` notices: `env:<NAME>` and `proxy`; [] in a session the
+    launcher started, which unsets the variables and keeps loopback requests off the proxy."""
+    if launched():
+        return []
+    return [*(f"env:{name}" for name in env_set_here(cwd)), *([PROXY_KEY] if proxy_unsafe() else [])]
+
+
+def setup_lines(cwd: Path) -> list[str]:
+    """What /thimble prints, and leaves for the Stop hook, for setup_warnings' cases; [] in a session the launcher
+    started."""
+    if launched():
+        return []
+    return [*(SETUP_ENV_LINE.format(name=name) for name in env_set_here(cwd)),
+            *([SETUP_PROXY_LINE] if proxy_unsafe() else [])]
+
+
+def _sandbox_on(d: Any) -> bool:
+    box = d.get("sandbox") if isinstance(d, dict) else None
+    return isinstance(box, dict) and box.get("enabled") is True
+
+
+def own_sandbox_set(cwd: Path) -> bool:
+    """Whether Claude Code's own sandbox is turned on for the session this command runs in, or for a session in `cwd`:
+    by the analyst's settings for `cwd` (cc_settings.own_sandbox), the `--settings` of this session's `claude`
+    (cc_plugin.settings_arg) or the org's managed settings (cc_plugin.managed)."""
+    from . import cc_settings  # noqa: PLC0415
+
+    if cc_settings.own_sandbox(cwd):
+        return True
+    pid = cc_plugin.claude_pid()
+    flags = cc_plugin.settings_arg(procs.argv(pid), cwd) if pid else None
+    return _sandbox_on(flags) or _sandbox_on(cc_plugin.managed())
+
+
+def own_sandbox_here(cwd: Path) -> bool:
+    """Whether Claude Code's own sandbox runs in this session: it can run on this machine (cc_settings.sandbox_ok) and
+    it is turned on (own_sandbox_set). thimble neither needs it nor turns it on; Settings and the doctor say which."""
+    from . import cc_settings  # noqa: PLC0415
+
+    return cc_settings.sandbox_ok() and own_sandbox_set(cwd)
 
 
 def agent_definition(name: str) -> tuple[str, dict[str, Any]]:
@@ -3367,6 +3502,23 @@ def terminal_home_line() -> str:
         return TERMINAL_HOME_LINE
 
 
+def made_main(name: str, session: str, cwd: Path) -> None:
+    """After /thimble made `session` main of workspace `name`: the folder marked active for the plugin's hooks
+    (mark_active), and, in a session the launcher did not start, launch.json written for it (`via: skill`, with its
+    `claude` process and its CLAUDE_CONFIG_DIR), which the hooks module's bridge reads; a record that names this
+    `claude` already, as the launcher's does, is left alone. Never raises."""
+    mark_active(cwd)
+    try:
+        with server_dirs():
+            rec = read_launch(name)
+            pid = cc_plugin.claude_pid()
+            if pid and rec.get("pid") != pid:
+                launch_record(name, session, {}, [], pid, modules_off=modules_off(cwd), mode=launch_mode.BROWSER,
+                              via=VIA_SKILL, config_dir=os.environ.get("CLAUDE_CONFIG_DIR", ""))
+    except Exception as e:  # noqa: BLE001 — never a traceback in the skill text
+        _log(f"launch.json of {name} for session {session} was not written: {type(e).__name__}: {e}")
+
+
 def cmd_ensure(args: argparse.Namespace) -> int:
     cwd = Path(args.cwd or os.environ.get("THIMBLE_CALLER_CWD") or os.getcwd())
     if args.session:
@@ -3453,13 +3605,21 @@ def cmd_ensure(args: argparse.Namespace) -> int:
         else:
             given = precached_context(url, name, str(args.session)) if name and args.session else ""
             second = [PRECACHED_LINE] if given else [RESUME_LINE] if not opened and resumes(url, name) else []
-        # with the plugin's hooks off no Stop hook shows the link, so the page opens without the key
+        # a plain `claude`: what its environment lacks goes under the link too, which the Stop hook shows whatever
+        # main's reply holds
+        setup = setup_lines(cwd) if args.session else []
+        # with the plugin's hooks off no Stop hook shows the link, so the page opens without a sign-in code; a link
+        # printed here reaches the model, so only a shell's own terminal gets one with a code
         if (args.session and not cc_plugin.hooks_blocked(cwd, plugin_root())
-                and leave_link(str(args.session), ui_url(name))):
+                and leave_link(str(args.session), ui_url(name), setup)):
             print(LINK_LINE)
         else:
-            print(f"thimble: {ui_url(name, key=not args.session and to_terminal())}")
-        for line in second:
+            pair = not args.session and to_terminal()
+            link = ui_url(name, pair=pair)
+            print(f"thimble: {link}")
+            if pair and "#p=" not in link:
+                print(NO_CODE_LINE.format(log=log_path()))
+        for line in [*second, *setup]:
             print(line)
         status = config.auth_status(cwd=cwd)
         if args.session:
@@ -3469,9 +3629,11 @@ def cmd_ensure(args: argparse.Namespace) -> int:
                 if line not in mark:
                     print(line)
         if name and args.session:
-            replaced = name_session(url, name, str(args.session), cwd)
+            replaced = name_session(url, name, str(args.session), cwd, sandbox=own_sandbox_here(cwd),
+                                    warnings=setup_warnings(cwd))
             if replaced:
                 print(TAKEOVER_LINE.format(other=replaced[:8]))
+            made_main(name, str(args.session), cwd)
         if not env["dev"] and not has_ui_build():
             _log(config.NO_UI_BUILD_HINT)
             print(NO_UI_LINE)
@@ -3567,6 +3729,24 @@ def cmd_doctor(_: argparse.Namespace) -> int:
     ship_extensions()
     print(doctor_text())
     return 0
+
+
+def cmd_unpair(_: argparse.Namespace) -> int:
+    """`thimble unpair`: every browser signed out (`POST /api/ui/unpair` when the server answers, which forgets them at
+    once), and <home>/paired.json removed, so a server that starts later knows none either."""
+    url = api_url()
+    why = ""
+    if healthy(url):
+        status, body = _request("POST", f"{url}/api/ui/unpair", {})
+        if status not in (200, 204):
+            why = f"it answered {status or str(body)[:120]}"
+            _log(f"unpair: {status} {str(body)[:200]}")
+    try:
+        (home() / PAIRED_FILE).unlink(missing_ok=True)
+    except OSError as e:
+        why = why or f"{home() / PAIRED_FILE} could not be removed: {e.strerror}"
+    print(UNPAIR_FAILED_LINE.format(why=why) if why else UNPAIRED_LINE)
+    return 1 if why else 0
 
 
 def cmd_fix(_: argparse.Namespace) -> int:
@@ -3920,7 +4100,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("stop", help="stop the server (by pid); asks first while work runs")
     add_yes_flag(sp, "stop")
     sp.set_defaults(fn=cmd_stop)
-    for name, fn, help_ in (("doctor", cmd_doctor, "print the state; works with the server down"),
+    dr = sub.add_parser("doctor", help="a checklist of what works, with the fix for each problem; works with the "
+                                       "server down")
+    dr.add_argument("--verbose", action="store_true", help="the full detail: paths, pids, ports, every switch, the log")
+    dr.set_defaults(fn=cmd_doctor)
+    for name, fn, help_ in (("unpair", cmd_unpair, "sign out every browser"),
                             ("fix", cmd_fix, "development install, server down: run the fix ticket in the live checkout, "
                                                     "then restart"),
                             ("revert", cmd_revert, "development install: undo the last change thimble's dev agent applied")):
@@ -3956,7 +4140,7 @@ def build_parser() -> argparse.ArgumentParser:
     for flag in INSTALL_FLAGS:
         u.add_argument(flag, dest="install_flags", action="append_const", const=flag, help="passed on to install.sh")
     u.set_defaults(fn=cmd_update)
-    la = sub.add_parser("launch-args", help="for plugin/bin/thimble: the plugin folder, the --allowedTools, --effort and --settings values, the tools that end a turn without text, main's --name, the session id, the env, unset and note lines, then main's prompt")
+    la = sub.add_parser("launch-args", help="for plugin/bin/thimble: the plugin folder, the --effort and --settings values, the tools that end a turn without text, main's --name, the session id, the env, unset and note lines, then main's prompt")
     la.add_argument("--cwd")
     la.add_argument("--resume", action="store_true", help="a line before the prompt: the folder's last main session")
     la.add_argument("--settings", help="the analyst's own --settings, which thimble's are merged into")

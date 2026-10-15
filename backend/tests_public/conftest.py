@@ -537,7 +537,8 @@ def named_sessions(monkeypatch) -> list[tuple]:
     from app import cli
 
     named: list[tuple] = []
-    monkeypatch.setattr(cli, "name_session", lambda url, name, session, cwd: named.append((name, session, str(cwd))))
+    monkeypatch.setattr(cli, "name_session",
+                        lambda url, name, session, cwd, **kw: named.append((name, session, str(cwd))))
     return named
 
 

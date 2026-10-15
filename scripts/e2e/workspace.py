@@ -4,9 +4,10 @@
 
 Registers the folder with the running server (POST /api/corpora/register, signed as the CLI signs it), saves
 fixture-view/ as a built view of the workspace (views.write_view, as scripts/dev/examples.py saves the worked examples),
-creates a regex label over the JSONL files and applies it through the server's API (no model runs), does the same for a
-label on each file that is not read by lines (ANY_FILE: a CSV, a PDF, a SQLite database) and asks for the refs of the
-records it matched, and prints one JSON line: {name, url, dir (the workspace's folder), view: {slug, ok, error?},
+signs in as the analyst's browser for the label calls (cli.browser_cookie), creates a regex label over the JSONL files
+and applies it through the server's API (no model runs), does the same for a label on each file that is not read by
+lines (ANY_FILE: a CSV, a PDF, a SQLite database) and asks for the refs of the records it matched, and prints one JSON
+line: {name, url (with a one-time sign-in code for the page), dir (the workspace's folder), view: {slug, ok, error?},
 label: {name, ok, counts?, error?}, any_file: [{kind, path, name, ok, refs?, counts?, error?}]}. Run it in the
 environment (THIMBLE_HOME, THIMBLE_PORT) the server runs in.
 """
@@ -40,30 +41,32 @@ def save_view(name: str) -> dict:
     return {"slug": v.get("slug", SLUG), "ok": bool(v.get("ok", True))}
 
 
-def apply_label(name: str) -> dict:
+def apply_label(name: str, cookie: str) -> dict:
     base = f"{cli.api_url()}/api/ws/{name}/concepts"
-    status, body = cli._request("POST", base, LABEL)
+    status, body = cli._request("POST", base, LABEL, cookie=cookie)
     if status not in (200, 201) or not isinstance(body, dict) or not body.get("id"):
         return {"name": LABEL["name"], "ok": False, "error": f"create → {status} {str(body)[:200]}"}
-    status, run = cli._request("POST", f"{base}/{body['id']}/apply", {"paths": [LABEL["glob"]], "wait": True}, timeout=120)
+    status, run = cli._request("POST", f"{base}/{body['id']}/apply", {"paths": [LABEL["glob"]], "wait": True},
+                               timeout=120, cookie=cookie)
     if status not in (200, 201, 202):
         return {"name": LABEL["name"], "ok": False, "error": f"apply → {status} {str(run)[:200]}"}
     counts = run.get("counts") if isinstance(run, dict) else None
     return {"name": LABEL["name"], "ok": True, "counts": counts}
 
 
-def any_file_label(name: str, kind: str, path: str, spec: str) -> dict:
+def any_file_label(name: str, kind: str, path: str, spec: str, cookie: str) -> dict:
     out = {"kind": kind, "path": path, "name": f"Finds {kind}", "ok": False}
     base = f"{cli.api_url()}/api/ws/{name}/concepts"
     body = {"name": out["name"], "kind": "regex", "spec": spec, "labels": ["hit", "other"], "shown": kind == "CSV rows",
             "glob": path}
-    status, made = cli._request("POST", base, body)
+    status, made = cli._request("POST", base, body, cookie=cookie)
     if status not in (200, 201) or not isinstance(made, dict) or not made.get("id"):
         return {**out, "error": f"create → {status} {str(made)[:200]}"}
-    status, run = cli._request("POST", f"{base}/{made['id']}/apply", {"paths": [path], "wait": True}, timeout=120)
+    status, run = cli._request("POST", f"{base}/{made['id']}/apply", {"paths": [path], "wait": True}, timeout=120,
+                               cookie=cookie)
     if status not in (200, 201, 202):
         return {**out, "error": f"apply → {status} {str(run)[:200]}"}
-    status, rows = cli._request("GET", f"{base}/{made['id']}/rows?value=hit&limit=10")
+    status, rows = cli._request("GET", f"{base}/{made['id']}/rows?value=hit&limit=10", cookie=cookie)
     if status != 200 or not isinstance(rows, dict):
         return {**out, "error": f"rows → {status} {str(rows)[:200]}"}
     refs = [str(r["ref"]) for r in rows.get("rows") or [] if isinstance(r, dict) and r.get("ref")]
@@ -80,18 +83,26 @@ def main() -> int:
         view = save_view(name)
     except Exception as e:  # noqa: BLE001 — the view step reports it; the workspace stands without the view
         view = {"slug": SLUG, "ok": False, "error": f"{type(e).__name__}: {e}"}
+    try:  # the label routes are the analyst's, which only a signed-in browser's cookie reaches
+        cookie = cli.browser_cookie(cli.api_url())
+    except RuntimeError as e:
+        cookie, signed_out = "", f"no browser sign-in: {e}"
+    else:
+        signed_out = ""
     try:
-        label = apply_label(name)
+        label = (apply_label(name, cookie) if cookie else
+                 {"name": LABEL["name"], "ok": False, "error": signed_out})
     except Exception as e:  # noqa: BLE001 — the labels step reports it
         label = {"name": LABEL["name"], "ok": False, "error": f"{type(e).__name__}: {e}"}
     any_file = []
     for kind, path, spec in ANY_FILE:
         try:
-            any_file.append(any_file_label(name, kind, path, spec))
+            any_file.append(any_file_label(name, kind, path, spec, cookie) if cookie else
+                            {"kind": kind, "path": path, "ok": False, "error": signed_out})
         except Exception as e:  # noqa: BLE001 — the labels-any-file step reports it
             any_file.append({"kind": kind, "path": path, "ok": False, "error": f"{type(e).__name__}: {e}"})
-    print(json.dumps({"name": name, "url": cli.ui_url(name), "dir": str(config.workspace_dir(name)), "view": view,
-                      "label": label, "any_file": any_file}))
+    print(json.dumps({"name": name, "url": cli.ui_url(name, pair=True), "dir": str(config.workspace_dir(name)),
+                      "view": view, "label": label, "any_file": any_file}))
     return 0
 
 

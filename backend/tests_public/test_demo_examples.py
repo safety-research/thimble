@@ -1,7 +1,7 @@
 """`thimble demo --examples` (app/demo_examples.py): each worked example of custom views opens as the workspace
 example-<name> on a copy of its sample in THIMBLE_HOME, its view installed built so readers see it at once, its sample
-labels defined and applied through the server, and one URL, the start page with the page key, opened; a second run adds
-only what is missing, and --refresh copies the views and samples again. The server is stubbed."""
+labels defined and applied through the server, and one URL, the start page with a sign-in code, opened; a second run
+adds only what is missing, and --refresh copies the views and samples again. The server is stubbed."""
 import argparse
 import filecmp
 import json
@@ -13,7 +13,7 @@ import pytest
 
 from app import cli, config, demo, demo_examples, views
 
-KEY = "pagekey"
+CODE = "c0de"
 
 
 class FakeServer:
@@ -50,8 +50,8 @@ def world(tmp_path, monkeypatch):
     env = {"home": str(tmp_path / "home"), "workspaces_dir": str(config.WORKSPACES_DIR), "data_dir": str(tmp_path / "data")}
     monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
     monkeypatch.setattr(demo, "register", lambda folder, url: str(config.register_corpus(folder, exact=True)["name"]))
-    monkeypatch.setattr(cli, "ui_url", lambda name, key=True: f"http://127.0.0.1:1/{f'?ws={name}' if name else ''}"
-                                                              + (f"#k={KEY}" if key else ""))
+    monkeypatch.setattr(cli, "ui_url", lambda name, pair=False: f"http://127.0.0.1:1/{f'?ws={name}' if name else ''}"
+                                                                + (f"#p={CODE}" if pair else ""))
     views._folder_cache.clear()
     monkeypatch.setattr(views, "FOLDER_CACHE_S", 0.0)
     return {"env": env, "server": FakeServer(), "lines": [], "shown": []}
@@ -81,7 +81,7 @@ def installed(name: str, slug: str) -> dict:
 def test_every_worked_example_opens_as_a_workspace_with_its_view_built_and_its_labels_on(world):
     """Each example of plugin/viewers: its sample copied into THIMBLE_HOME (not the repository) as the corpus of the
     workspace example-<name>, its view built so read_built serves it, each sample label defined, turned on and applied,
-    and one URL printed and opened, the start page with the page key."""
+    and one URL printed and opened, the start page with a sign-in code."""
     w = world
     found = demo_examples.examples()
     assert [p.name for p in found] == sorted(p.name for p in views.EXAMPLES_DIR.iterdir() if (p / "view.json").is_file())
@@ -102,9 +102,10 @@ def test_every_worked_example_opens_as_a_workspace_with_its_view_built_and_its_l
         applied = [b for m, u, b in w["server"].calls if u.endswith("/apply") and f"/ws/{name}/" in u]
         assert sorted(json.dumps(b["paths"]) for b in applied) == sorted(json.dumps(s["paths"]) for s in specs)
     assert not (config.REPO_ROOT / "examples").exists()
-    # one URL, opened: the start page with the page key, whose rows open each example at its view (start_page.py)
-    assert re.findall(r"http://\S+", out) == [f"http://127.0.0.1:1/#k={KEY}"]
-    assert w["shown"] == [f"http://127.0.0.1:1/#k={KEY}"]
+    # one URL, opened with a one-time sign-in code: the start page, whose rows open each example at its view
+    # (start_page.py); the browser spent the code, so the printed line names the page without it
+    assert re.findall(r"http://\S+", out) == ["http://127.0.0.1:1/"]
+    assert w["shown"] == [f"http://127.0.0.1:1/#p={CODE}"]
 
 
 def test_a_second_run_adds_only_what_is_missing(world):
