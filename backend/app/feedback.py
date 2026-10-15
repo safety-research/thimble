@@ -439,7 +439,8 @@ def versions(user_agent: str = "", workspace: str | None = None) -> dict[str, st
 
 
 def doctor() -> str:
-    """`thimble doctor`, within DOCTOR_TIMEOUT_S; a line that says why when cli.py cannot be imported or it fails."""
+    """`thimble doctor --verbose` (cli.doctor_text), within DOCTOR_TIMEOUT_S; a line that says why when cli.py cannot be
+    imported or it fails."""
     cli = _lazy("cli")
     if cli is None:
         return "thimble doctor could not run: cli.py failed to import (import-error.txt)"
@@ -975,7 +976,7 @@ def build(description: str = "", *, workspace: tuple[str, Path] | None = None, s
            "thimble and its install, whether the server answers, the OS, Python, Claude Code and the browser")
     doc = doctor()
     b.text("doctor.txt", (doc if logs else without_log(doc)) + "\n",
-           "`thimble doctor` (it names the auth path in use, never a secret)")
+           "`thimble doctor --verbose` (it names the auth path in use, never a secret)")
     if _import_errors:
         b.text("import-error.txt", "\n".join(f"app.{k}:\n{v}" for k, v in _import_errors.items()),
                "why a module of the supervisor could not be imported")

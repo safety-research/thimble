@@ -64,6 +64,17 @@ def sources(cwd: Path) -> list[Path]:
     return [config_dir() / "settings.json", cwd / PROJECT_SETTINGS, cwd / LOCAL_SETTINGS, *([managed] if managed else [])]
 
 
+def enabled_thimbles(cwd: Path) -> list[str]:
+    """The `thimble@*` keys `enabledPlugins` sets to true in the user's, the project's and the folder's local settings
+    for a session in `cwd` (sources without the managed tier, whose plugins a session's --settings cannot turn off)."""
+    on: dict[str, bool] = {}
+    for path in sources(cwd)[:3]:
+        plugins = _read(path).get("enabledPlugins")
+        if isinstance(plugins, dict):
+            on.update({str(k): v is True for k, v in plugins.items() if str(k).startswith("thimble@")})
+    return [k for k, v in on.items() if v]
+
+
 def analyst_tiers() -> list[dict[str, Any]]:
     """The settings that are the analyst's own wherever a session runs, lowest precedence first: the user's settings.json
     and the org's managed tier (cc_plugin.managed: server-managed settings, else the managed file with its drop-ins). A
