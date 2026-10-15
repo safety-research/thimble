@@ -66,7 +66,15 @@ CALL_CHARS = 1_500  # chars of a call's line, under the 2,000 at which Read cuts
 
 DIGEST_CHARS = 2_000_000  # a guard against a runaway session
 
-DIGEST_PAGE_LINES = 600  # of the digest a `chat:` ref reads at once (resolve_chat)
+DIGEST_PAGE_LINES = 600  # of the digest a `chat:` ref reads at once (resolve_chat), within DIGEST_PAGE_CHARS
+
+# characters of the digest a `chat:` ref reads at once, so that one read_ref result stays whole in the session that
+# reads it. Claude Code (2.1.300) saves a tool result of more than 50,000 characters to a file and shows the model a 2KB
+# preview of it, and an MCP result its estimate (4 characters a token) puts past 12,500 tokens is counted, and past
+# 25,000 tokens (MAX_MCP_OUTPUT_TOKENS) saved to a file in its place; 40,000 characters stay under the first with room
+# for the result's other lines, and under the second at about 3 characters a token. 600 lines of CALL_CHARS were
+# 900,000.
+DIGEST_PAGE_CHARS = 40_000
 
 CONTEXT_CHARS = 400_000  # of the analyst's conversation with main in the first message
 
@@ -381,9 +389,9 @@ def chat_digest(c: str, chat: str) -> str:
 
 
 def resolve_chat(c: str, p: dict[str, Any], ref: str) -> dict[str, Any]:
-    """`chat:<orientation chat>` and `chat:<chat>#L<a>-L<b>` as refs.resolve answers: a DIGEST_PAGE_LINES page of the
-    digest, with a `## digest-more` line naming the next page's ref. RefError 404 when the chat is no orientation's or
-    its transcript is gone."""
+    """`chat:<orientation chat>` and `chat:<chat>#L<a>-L<b>` as refs.resolve answers: a page of the digest, at most
+    DIGEST_PAGE_LINES lines and DIGEST_PAGE_CHARS characters, with a `## digest-more` line naming the next page's ref
+    (_page_end). RefError 404 when the chat is no orientation's or its transcript is gone."""
     from .refs import RefError  # noqa: PLC0415 — refs imports this module lazily
 
     chat = str(p["chat_id"])
@@ -395,12 +403,24 @@ def resolve_chat(c: str, p: dict[str, Any], ref: str) -> dict[str, Any]:
     b = min(int(p.get("end_line") or (a + DIGEST_PAGE_LINES - 1)), a + DIGEST_PAGE_LINES - 1, len(lines))
     if a > len(lines):
         raise RefError(f"chat:{chat} has {len(lines)} lines", 404)
-    body = "\n".join(lines[a - 1 : b])
+    b = _page_end(lines, a, b)
+    body = _cut("\n".join(lines[a - 1 : b]), DIGEST_PAGE_CHARS)
     if b < len(lines):
         body += "\n" + tools.hint("digest-more", ref=f"chat:{chat}#L{b + 1}-L{min(b + DIGEST_PAGE_LINES, len(lines))}",
                                   total=f"{len(lines):,}")
     return {"ref": ref, "kind": "chat", "excerpt": body,
             "meta": {"chat": chat, "line": a, "end_line": b, "lines": len(lines)}}
+
+
+def _page_end(lines: list[str], a: int, b: int) -> int:
+    """The last line of a page of `lines` from line `a` (1-based) to at most `b` that keeps the page within
+    DIGEST_PAGE_CHARS characters; `a` itself when that one line is longer, which the page then cuts."""
+    size = 0
+    for n in range(a, b + 1):
+        size += len(lines[n - 1]) + (n > a)
+        if size > DIGEST_PAGE_CHARS:
+            return max(a, n - 1)
+    return b
 
 
 def work_dir(c: str, chat: str) -> Path:

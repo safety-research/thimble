@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from pathlib import Path
 
@@ -355,6 +356,54 @@ async def test_a_long_digest_s_brief_gives_a_window_one_read_call_returns_whole(
     assert any(sum(sizes[i:i + window + 1]) > read_parts.PART_CHARS for i in range(len(sizes))), "and no smaller"
     transcript.write_text("call:c1/1 Bash ls\n")
     assert critique_session.transcript_line(transcript) == f"TRANSCRIPT {transcript} WHOLE"
+
+
+async def test_read_ref_pages_a_long_digest_in_results_that_stay_under_claude_code_s_tool_result_cap(
+        workspaces_tmp, tmp_path, monkeypatch):
+    """A page of `chat:<orientation chat>` holds at most DIGEST_PAGE_CHARS characters, so one read_ref result stays
+    under the 50,000 characters past which Claude Code 2.1.300 saves a tool result to a file and shows a 2KB preview
+    (and under its 25,000-token cap on an MCP result), where 600 lines of CALL_CHARS were 900,000. Each page's
+    `digest-more` line names the next page from the line after its last, so paging reads the whole digest, every line
+    once."""
+    from app import session
+
+    sid = "70e0e27e-eb46-462b-8a9a-57b2e924dca2"
+    proj = tmp_path / "projects" / "-corpus"
+    folder = proj / sid / "subagents"
+    folder.mkdir(parents=True)
+    (proj / f"{sid}.jsonl").write_text("")
+    monkeypatch.setattr(session, "find_transcript", lambda s, config_dir=None: str(proj / f"{s}.jsonl"))
+    paras = "\n".join(" ".join(f"p{i:03d}w{j:03d}" for j in range(160)) for i in range(700))
+    rec = {"type": "assistant", "timestamp": "2026-10-06T00:00:00Z",
+           "message": {"content": [{"type": "text", "text": paras}]}}
+    (folder / "agent-o1.jsonl").write_text(json.dumps(rec) + "\n")
+    (folder / "agent-o1.meta.json").write_text(json.dumps({"agentType": "thimble:orientation"}))
+    chat = agents.new_agent(CORPUS, orientation.ROLE, orientation.TITLE, route="subagent", agent_id="o1",
+                            session=sid, sessions=[sid])["id"]
+    digest = critique_session.chat_digest(CORPUS, chat)
+    assert len(digest) > 1_000_000 and max(len(x) for x in digest.split("\n")) > 1_400
+    total = f"{len(digest.split(chr(10))):,}"
+    ref, pages, seen = f"chat:{chat}", 0, []
+    while ref:
+        r = await tools.call(CORPUS, "read_ref", {"ref": ref})
+        assert not r.is_error, r.text
+        assert len(r.text) <= 50_000, f"{ref}: {len(r.text):,} characters"
+        body = r.text.split(f"{ref} (chat)\n", 1)[1]
+        page, _, last = body.rpartition("\n")
+        found = re.search(r"chat:[\w-]+#L\d+-L\d+", last)
+        ref = found.group(0) if found and last == tools.hint("digest-more", ref=found.group(0), total=total) else ""
+        seen.append(page if ref else body)
+        pages += 1
+    assert pages > 25 and "\n".join(seen) == digest, "every line once, in order"
+
+
+def test_a_digest_page_ends_before_the_line_that_would_pass_its_cap(monkeypatch):
+    monkeypatch.setattr(critique_session, "DIGEST_PAGE_CHARS", 100)
+    lines = ["a" * 40, "b" * 40, "c" * 40, "d" * 300, "e"]
+    assert critique_session._page_end(lines, 1, 5) == 2, "81 characters with the line break, and a third line is 122"
+    assert critique_session._page_end(lines, 3, 5) == 3
+    assert critique_session._page_end(lines, 4, 5) == 4, "a line longer than a page alone, which the page cuts"
+    assert critique_session._page_end(lines, 1, 1) == 1 and critique_session._page_end(lines, 5, 5) == 5
 
 
 # --------------------------------------------------------------------------- permission requests
