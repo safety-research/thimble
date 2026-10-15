@@ -34,7 +34,8 @@ def proof(handler: BaseHTTPRequestHandler, token: str | None = TOKEN) -> str | N
     app/hook_auth.py does; None when the request does not prove `token` (thimble's server would answer 401), or with
     `token` None (a process that is not thimble's)."""
     nonce = handler.headers.get(hook_auth.NONCE_HEADER) or ""
-    if not token or not nonce or handler.headers.get(hook_auth.AUTH_HEADER) != hook_auth.sign(token, "hook", nonce):
+    want = hook_auth.request_proof(token or "", handler.server.server_port, nonce)
+    if not token or not nonce or handler.headers.get(hook_auth.AUTH_HEADER) != want:
         return None
     return hook_auth.sign(token, "server", nonce)
 

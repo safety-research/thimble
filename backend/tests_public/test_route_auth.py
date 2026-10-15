@@ -86,7 +86,8 @@ def test_every_read_needs_the_cookie_or_the_token_and_only_the_open_reads_answer
     # an extension program's token, whose grant allows the POST of its tools alone (harness.Run.allows)
     hook_auth.grant("a1", "a1.s3cret", lambda method, path: method == "POST" and path.startswith("/api/tools/"))
     try:
-        agent = {hook_auth.AGENT_HEADER: "a1", **hook_auth.headers("a1.s3cret", "n0nce")}
+        agent = {hook_auth.AGENT_HEADER: "a1", hook_auth.NONCE_HEADER: "n0nce",
+                 hook_auth.AUTH_HEADER: hook_auth.sign("a1.s3cret", "hook", "n0nce")}
         reads = [p for m, p, _, _ in rows if m == "GET" and not hook_auth.guarded(m, p)]
         gated = [p for p in reads if p not in hook_auth.OPEN_READS]
         assert sorted(set(reads) - set(gated)) == sorted(hook_auth.OPEN_READS) and len(gated) >= 100

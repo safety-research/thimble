@@ -5,16 +5,23 @@ sessions thimble starts (app/permission_hook.py).
 
 Any process on the machine can reach a loopback port, and the plugin runs in every Claude Code session that has it,
 so each side proves it holds the token the supervisor writes into <home>/server.json (readable by its owner alone,
-cli.write_state) without sending it: a request carries a fresh nonce and HMAC-SHA256(token, "hook:" + nonce), and the
-answer carries HMAC-SHA256(token, "server:" + nonce). HookAuth answers a request on a guarded route without a valid
-proof with 401. A hook or shim that finds no server.json, no token in it, or no valid proof on the answer sends
-nothing or believes nothing, so a process that holds the recorded port learns nothing from the plugin and cannot answer
-it.
+cli.write_state) without sending it: a request carries a fresh nonce, `<unix time>.<random hex>` (new_nonce), and
+HMAC-SHA256(token, "hook@<port>:" + nonce) for the port it was sent to (request_proof), and the answer carries
+HMAC-SHA256(token, "server:" + nonce). The server checks the proof against the port it listens on, refuses one whose
+time is more than PROOF_TTL_S away from its own clock, and takes each nonce once (proven). So a proof a client sent to
+another process, such as another account's program that holds the recorded port while thimble's server runs on
+another, proves nothing anywhere: not on this server's port, not later, not twice. HookAuth answers a request on a
+guarded route without a valid proof with 401. A hook or shim that finds no server.json, no token in it, or no valid
+proof on the answer sends nothing more or believes nothing, so a process that holds the recorded port learns nothing
+from the plugin and cannot answer it.
 
 A program thimble runs for one of its agents (harness.py) cannot read server.json. It gets a token of its own instead,
 `<id>.<secret>`, valid while it runs and only on the routes its grant allows (grant): its requests carry AGENT_HEADER
-with the id and prove the whole token the same way, and the answer proves it back. The request's scope then holds the
-id under AGENT_SCOPE, so a route acts for that agent alone.
+with the id and HMAC-SHA256(token, "hook:" + nonce) for any fresh nonce (docs/agents.md documents it for extension
+programs, and its WebSocket to the session route proves the token the same way, harness._proven), and the answer proves
+it back. That proof is bound to no port or time: the program is handed the address of the server that runs it, so it
+sends the token nowhere else, and the token stops working when the run ends. The request's scope then holds the id
+under AGENT_SCOPE, so a route acts for that agent alone.
 
 A session thimble starts tells its tool calls apart from main's by THIMBLE_SESSION, which its shim sends with each
 call. Any process can set that variable, the user's own sessions included, so the name alone
@@ -54,9 +61,11 @@ import secrets
 import tempfile
 import threading
 import time
+from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlsplit
 
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.requests import Request
@@ -87,6 +96,9 @@ AGENT_SCOPE = "thimble_agent"  # where a request proven with an agent's token ke
 AUTH_HEADER = "x-thimble-auth"
 PROOF_HEADER = "x-thimble-proof"
 NONCE_MAX = 128  # characters
+# a request's proof is good while the time in its nonce is this close to the server's clock, and once (module note)
+PROOF_TTL_S = 300
+PROOF_SCOPE = "thimble_proof"  # where a request's checked proof is kept in the ASGI scope's state (proven_by)
 SESSION_KEY = "session.key"  # in thimble's home: the secret session tokens are signed with (module note)
 SESSION_TOKEN_ENV = "THIMBLE_SESSION_TOKEN"
 _secret_lock = threading.Lock()
@@ -152,13 +164,32 @@ def agent_of(scope: dict) -> str:
 
 
 def sign(token: str, role: str, nonce: str) -> str:
-    """The proof `role` ("hook" or "server") gives for `nonce`."""
+    """The proof `role` gives for `nonce`: "server" on an answer, "hook" on an agent program's request (module note).
+    The request of a tool that read server.json proves request_proof."""
     return hmac.new(token.encode("utf-8"), f"{role}:{nonce}".encode("utf-8"), hashlib.sha256).hexdigest()
 
 
-def headers(token: str, nonce: str) -> dict[str, str]:
-    """A hook's request headers for `nonce`."""
-    return {NONCE_HEADER: nonce, AUTH_HEADER: sign(token, "hook", nonce)}
+def new_nonce() -> str:
+    """A fresh nonce for a request's proof: the Unix time it was made, a dot, and random hex (module note)."""
+    return f"{int(time.time())}.{secrets.token_hex(16)}"
+
+
+def port_of(url: str) -> int:
+    """The port a request to `url` goes to: the one it names, else 80 (443 for https)."""
+    u = urlsplit(url)
+    return u.port or (443 if u.scheme == "https" else 80)
+
+
+def request_proof(token: str, port: int, nonce: str) -> str:
+    """The proof a request to the server listening on `port` gives for `nonce` (module note)."""
+    return hmac.new(token.encode("utf-8"), f"hook@{int(port)}:{nonce}".encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def headers(token: str, port: int, nonce: str | None = None) -> dict[str, str]:
+    """A request's proof headers for the server on `port` (port_of a URL), with a fresh nonce unless `nonce` is given;
+    the answer's proof is sign(token, "server", <the nonce>)."""
+    nonce = nonce or new_nonce()
+    return {NONCE_HEADER: nonce, AUTH_HEADER: request_proof(token, port, nonce)}
 
 
 def guarded(method: str, path: str) -> bool:
@@ -478,8 +509,85 @@ def sign_out(browser: str) -> bool:
     return True
 
 
+# the nonces of the proofs taken in the last PROOF_TTL_S, each -> the time (on _wall's clock) after which its proof is
+# refused for its age anyway, oldest first; in memory only (module note)
+_seen: OrderedDict[str, float] = OrderedDict()
+_seen_lock = threading.Lock()
+
+
+def _wall() -> float:
+    """The clock a nonce's time is read against: the wall clock, which the clients on this computer share."""
+    return time.time()
+
+
+def _nonce_time(nonce: str) -> int | None:
+    """The Unix time at the head of a nonce new_nonce made; None for any other nonce."""
+    head, dot, rest = nonce.partition(".")
+    return int(head) if dot and rest and head.isascii() and head.isdigit() and len(head) <= 12 else None
+
+
+def _own_port(scope: dict) -> int | None:
+    """The port this server took the request on (the ASGI scope's `server`), 80 or 443 when a test transport names
+    none; when the scope names no server (a socket whose address could not be read), the port the supervisor or a
+    ticket's box started it on (THIMBLE_PORT), else None."""
+    server = scope.get("server")
+    if not server or len(server) < 2:
+        port = os.environ.get("THIMBLE_PORT", "").strip()
+        return int(port) if port.isascii() and port.isdigit() else None
+    if server[1] is None:
+        return 443 if scope.get("scheme") == "https" else 80
+    try:
+        return int(server[1])
+    except (TypeError, ValueError):
+        return None
+
+
+def _check(scope: dict) -> tuple[str, str] | None:
+    """(the token, the agent's id or '') a request proves (module note): its nonce's time within PROOF_TTL_S of _wall,
+    its proof request_proof's for this server's port, and its nonce not taken before, which it then is; for an agent's
+    token, sign's "hook" proof of its nonce. None otherwise."""
+    h = Headers(scope=scope)
+    nonce = h.get(NONCE_HEADER, "")
+    tok, aid = _token_for(h, scope.get("method", ""), scope.get("path", ""))
+    if not tok or not nonce or len(nonce) > NONCE_MAX:
+        return None
+    if aid:  # an agent program's token proves its request as docs/agents.md says (module note): the program is handed
+        # the address of the server that runs it, and the token stops working when its run ends
+        return (tok, aid) if _same(h.get(AUTH_HEADER, ""), sign(tok, "hook", nonce)) else None
+    when = _nonce_time(nonce)
+    port = _own_port(scope)
+    if when is None or port is None:
+        return None
+    now = _wall()
+    if abs(now - when) > PROOF_TTL_S or not _same(h.get(AUTH_HEADER, ""), request_proof(tok, port, nonce)):
+        return None
+    with _seen_lock:
+        while _seen and next(iter(_seen.values())) < now:
+            _seen.popitem(last=False)
+        if nonce in _seen:
+            return None
+        _seen[nonce] = when + PROOF_TTL_S
+    return tok, aid
+
+
+def proven_by(scope: dict) -> tuple[str, str] | None:
+    """_check's answer for the request `scope`, worked out once per request and kept in its state (PROOF_SCOPE), since
+    a nonce is taken once and both a guard and a route may ask."""
+    state = scope.setdefault("state", {})
+    if PROOF_SCOPE not in state:
+        state[PROOF_SCOPE] = _check(scope) if Headers(scope=scope).get(NONCE_HEADER) else None
+    return state[PROOF_SCOPE]
+
+
+def proven(scope: dict) -> bool:
+    """Whether the request `scope` carries a valid hook proof (proven_by): a local tool that read the token (the plugin,
+    the CLI), or an agent's token on a request its grant allows."""
+    return proven_by(scope) is not None
+
+
 class HookAuth:
-    """401 for a request on a guarded route without a valid proof; the proof of this server on every answer to one."""
+    """401 for a request on a guarded route without a valid proof (proven_by); the proof of this server on every answer
+    to one."""
 
     def __init__(self, app) -> None:
         self.app = app
@@ -488,17 +596,15 @@ class HookAuth:
         if scope["type"] != "http" or not guarded(scope.get("method", ""), scope.get("path", "")):
             await self.app(scope, receive, send)
             return
-        h = Headers(scope=scope)
-        nonce = h.get(NONCE_HEADER, "")
-        tok, aid = _token_for(h, scope.get("method", ""), scope.get("path", ""))
-        if not tok or not nonce or len(nonce) > NONCE_MAX or not hmac.compare_digest(
-                h.get(AUTH_HEADER, ""), sign(tok, "hook", nonce)):
+        got = proven_by(scope)
+        if got is None:
             body = json.dumps({"detail": "only thimble's plugin may call this route"}).encode()
             await send({"type": "http.response.start", "status": 401,
                         "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())]})
             await send({"type": "http.response.body", "body": body})
             return
-        proof = sign(tok, "server", nonce)
+        tok, aid = got
+        proof = sign(tok, "server", Headers(scope=scope).get(NONCE_HEADER, ""))
         if aid:
             scope.setdefault("state", {})[AGENT_SCOPE] = aid
 
@@ -523,15 +629,6 @@ def read_guarded(method: str, path: str) -> bool:
 
 def _api(path: str) -> bool:
     return path == "/api" or path.startswith("/api/")
-
-
-def hook_proof(headers: Headers, method: str = "", path: str = "") -> bool:
-    """Whether `headers` carry a valid hook proof: a local tool that read the token (the plugin, the CLI), or an agent's
-    token on a request its grant allows."""
-    tok = _token_for(headers, method, path)[0]
-    nonce = headers.get(NONCE_HEADER, "")
-    return bool(tok and nonce and len(nonce) <= NONCE_MAX
-                and _same(headers.get(AUTH_HEADER, ""), sign(tok, "hook", nonce)))
 
 
 class LocalWriteGuard:
@@ -560,7 +657,7 @@ def read_allowed(scope: dict) -> bool:
     media route with that view's key (media_proven)."""
     path, method = scope.get("path", ""), scope.get("method", "")
     h = Headers(scope=scope)
-    return (analyst(Request(scope)) or hook_proof(h, method, path) or shot_proven(h, method)
+    return (analyst(Request(scope)) or proven(scope) or shot_proven(h, method)
             or (method in READ_METHODS and media_proven(path)))
 
 

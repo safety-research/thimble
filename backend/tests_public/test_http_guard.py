@@ -148,7 +148,7 @@ def test_a_write_needs_a_signed_in_browser_so_neither_a_kernel_nor_the_token_rea
     # the token alone is refused on an analyst route, word for word as a page without the cookie is
     r = c.put(THEME_PATH, json=THEME, headers=plugin_headers())
     assert r.status_code == 403 and r.json()["detail"] == hook_auth.WRITE_REFUSED
-    assert c.put(THEME_PATH, json=THEME, headers=hook_auth.headers("wrong-token", "n0nce")).status_code == 403
+    assert c.put(THEME_PATH, json=THEME, headers=hook_auth.headers("wrong-token", 80)).status_code == 403
     not_ascii = {hook_auth.NONCE_HEADER: "n", hook_auth.AUTH_HEADER: "\u00e9".encode("latin-1")}
     assert c.put(THEME_PATH, json=THEME, headers=not_ascii).status_code == 403
 
@@ -252,7 +252,7 @@ def test_thimble_extension_tells_the_server_with_the_token(app_prod, plugin_head
         status = 200
 
     def urlopen(req, timeout=None):
-        r = c.request(req.get_method(), req.full_url.removeprefix("http://127.0.0.1:8300"), content=req.data,
+        r = c.request(req.get_method(), req.full_url, content=req.data,  # the whole URL: its port is in the proof
                       headers=dict(req.header_items()))
         seen.append(r.status_code)
         if r.status_code >= 400:

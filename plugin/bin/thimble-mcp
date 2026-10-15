@@ -50,7 +50,6 @@ import inspect
 import json
 import logging
 import os
-import secrets
 import sys
 import urllib.parse
 from pathlib import Path
@@ -136,10 +135,11 @@ def server() -> tuple[str, str] | None:
     return None
 
 
-def signed(token: str) -> tuple[dict[str, str], str]:
-    """A request's headers proving `token` for a fresh nonce, and the proof the server's answer must carry."""
-    nonce = secrets.token_hex(16)
-    return hook_auth.headers(token, nonce), hook_auth.sign(token, "server", nonce)
+def signed(token: str, base: str) -> tuple[dict[str, str], str]:
+    """A request's headers proving `token` to the server at `base` for a fresh nonce (good on that port alone, for a few
+    minutes, once), and the proof the server's answer must carry."""
+    nonce = hook_auth.new_nonce()
+    return hook_auth.headers(token, hook_auth.port_of(base), nonce), hook_auth.sign(token, "server", nonce)
 
 
 def proven(resp: httpx.Response, proof: str) -> bool:
@@ -258,7 +258,7 @@ async def call_server(name: str, args: dict[str, Any], tool_use_id: str | None =
                 await anyio.sleep(0.5)
                 continue
             base, token = found
-            headers, proof = signed(token)
+            headers, proof = signed(token, base)
             try:
                 resp: httpx.Response | None = await client.post(f"{base}/api/tools/{name}", json=body, headers=headers)
             except (httpx.ConnectError, httpx.ConnectTimeout):
@@ -429,7 +429,7 @@ async def subscription(route: str) -> None:
             found = server()
             if found is None:
                 raise ConnectionError(f"no token in {server_json()}")
-            headers, proof = signed(found[1])
+            headers, proof = signed(found[1], found[0])
             async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=3.0), trust_env=False) as client:
                 async with client.stream("GET", f"{found[0]}/api/events?{query}", headers=headers) as resp:
                     if resp.status_code != 200 or not proven(resp, proof):

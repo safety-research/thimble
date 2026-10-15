@@ -95,12 +95,13 @@ async function hideNotices(page) {
   }
 }
 
-/** The request headers of a write signed with the token in the run's server.json, as thimble's hooks and CLI sign one
- * (backend/app/hook_auth.py: a nonce and HMAC-SHA256(token, "hook:" + nonce)). */
-function tokenHeaders() {
+/** The request headers of a request to `url` signed with the token in the run's server.json, as thimble's hooks and CLI
+ * sign one (backend/app/hook_auth.py: a nonce `<unix time>.<hex>` and HMAC-SHA256(token, "hook@<port>:" + nonce)). */
+function tokenHeaders(url) {
   const token = JSON.parse(readFileSync(join(env.THIMBLE_HOME, 'server.json'), 'utf8')).token
-  const nonce = randomUUID().replace(/-/g, '')
-  return { 'x-thimble-nonce': nonce, 'x-thimble-auth': createHmac('sha256', token).update(`hook:${nonce}`).digest('hex') }
+  const nonce = `${Math.floor(Date.now() / 1000)}.${randomUUID().replace(/-/g, '')}`
+  const port = new URL(url).port || '80'
+  return { 'x-thimble-nonce': nonce, 'x-thimble-auth': createHmac('sha256', token).update(`hook@${port}:${nonce}`).digest('hex') }
 }
 
 let currentPage = null
@@ -877,7 +878,7 @@ async function main() {
       const head = await fetch(concepts, { method: 'HEAD' })
       const headBody = await head.text()
       check(head.status === 401 && headBody === '', `an unsigned HEAD /api/ws/${WS.name}/concepts answered ${head.status} with ${headBody.length} bytes, not 401 with none`)
-      const tokenRead = await fetch(concepts, { headers: tokenHeaders() })
+      const tokenRead = await fetch(concepts, { headers: tokenHeaders(concepts) })
       check(tokenRead.status === 200, `a GET /api/ws/${WS.name}/concepts signed with the token answered ${tokenRead.status}, not 200`)
       const health = await fetch(`${origin}/api/health`)
       const healthKeys = Object.keys((await health.json().catch(() => null)) ?? {}).sort()
@@ -897,7 +898,7 @@ async function main() {
       // main's message, signed with server.json's token as a hook or the CLI signs: an analyst route takes the cookie alone
       const signed = await fetch(events, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', ...tokenHeaders() },
+        headers: { 'content-type': 'application/json', ...tokenHeaders(events) },
         body: JSON.stringify({ kind: 'main', payload: { text: 'E2E: a message signed with the token alone' } }),
       })
       const said = String((await signed.json().catch(() => null))?.detail ?? '')

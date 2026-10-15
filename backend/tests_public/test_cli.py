@@ -872,7 +872,7 @@ def test_real_up_starts_a_detached_server_idempotently_and_stop_ends_it(home, da
         from app import hook_auth  # noqa: PLC0415
 
         proven = urllib.request.Request(f"http://127.0.0.1:{port}/api/health",
-                                        headers=hook_auth.headers(st["token"], "n0nce-of-the-test"))
+                                        headers=hook_auth.headers(st["token"], port))
         with urllib.request.urlopen(proven, timeout=5) as r:
             health = json.loads(r.read())
             assert {k: health[k] for k in ("ok", "leader")} == {"ok": True, "leader": pid}, "the server names the pid server.json records"

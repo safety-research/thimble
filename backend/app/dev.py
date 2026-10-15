@@ -1315,9 +1315,11 @@ def shot_token(api: str, home: Path) -> str:
     tok = state.get("token") if isinstance(state, dict) else None
     if not isinstance(tok, str) or not tok:
         return ""
-    nonce = secrets.token_hex(16)
-    req = urllib.request.Request(f"{api.rstrip('/')}/api/ui/shot", data=b"{}", method="POST",
-                                 headers={"Content-Type": "application/json", **hook_auth.headers(tok, nonce)})
+    nonce = hook_auth.new_nonce()
+    url = f"{api.rstrip('/')}/api/ui/shot"
+    req = urllib.request.Request(url, data=b"{}", method="POST",
+                                 headers={"Content-Type": "application/json",
+                                          **hook_auth.headers(tok, hook_auth.port_of(url), nonce)})
     try:
         with config.LOOPBACK.open(req, timeout=5.0) as r:
             proof = r.headers.get(hook_auth.PROOF_HEADER, "")

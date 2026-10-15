@@ -528,8 +528,8 @@ def _request(method: str, url: str, body: dict | None = None, timeout: float = 5
     data = json.dumps(body).encode() if body is not None else None
     headers = {"Content-Type": "application/json"}
     tok = hook_auth.token()
-    if tok:
-        headers.update(hook_auth.headers(tok, secrets.token_hex(16)))
+    if tok:  # good only on the port `url` names, for a few minutes, once: a process that holds that port gains nothing
+        headers.update(hook_auth.headers(tok, hook_auth.port_of(url)))
     if cookie:
         headers["Cookie"] = cookie
     req = urllib.request.Request(url, data=data, method=method, headers=headers)

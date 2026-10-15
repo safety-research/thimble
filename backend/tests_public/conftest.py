@@ -239,11 +239,12 @@ def mark_open(home: Path, folder: Path | str) -> None:
 @pytest.fixture()
 def plugin_headers():
     """A function giving the headers thimble's plugin sends to the routes only it may call (app/hook_auth.py), for a
-    fresh nonce each time, proving the token this fixture records in the test's server.json."""
+    fresh nonce each time, proving the token this fixture records in the test's server.json to the server at `url`: by
+    default TestClient's and httpx.ASGITransport's, on port 80; a live server's base URL for one."""
     from app import hook_auth
 
     _record(token=PLUGIN_TOKEN)
-    return lambda: hook_auth.headers(PLUGIN_TOKEN, os.urandom(8).hex())
+    return lambda url="http://testserver": hook_auth.headers(PLUGIN_TOKEN, hook_auth.port_of(url))
 
 
 def _record_paired(cookie: str = UI_COOKIE_VALUE) -> None:

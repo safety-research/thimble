@@ -240,8 +240,11 @@ function refuse(m: State): void {
 async function call($: Engine, m: State, method: string, path: string, body?: Json): Promise<Reply | null> {
   const server = m.server ?? (m.server = await findServer($))
   if (!server) return null
-  const nonce = hex(crypto.getRandomValues(new Uint8Array(16)))
-  const headers: Record<string, string> = { 'x-thimble-nonce': nonce, 'x-thimble-auth': await hmac(server.token, `hook:${nonce}`) }
+  // app/hook_auth.py's headers: the nonce's time and the port make the proof good on that port alone, for a few minutes,
+  // once, so a process that holds the recorded port while thimble's server runs on another gains nothing from it
+  const nonce = `${Math.floor(Date.now() / 1000)}.${hex(crypto.getRandomValues(new Uint8Array(16)))}`
+  const port = /:(\d+)$/.exec(server.base)?.[1] ?? '80'
+  const headers: Record<string, string> = { 'x-thimble-nonce': nonce, 'x-thimble-auth': await hmac(server.token, `hook@${port}:${nonce}`) }
   let payload: string | undefined
   if (body !== undefined) {
     headers['content-type'] = 'application/json'

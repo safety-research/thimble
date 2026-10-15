@@ -31,8 +31,8 @@ TOKEN = "t0ken-of-this-install"  # server.json's, which the hooks prove they hol
 
 def _signed(token: str = TOKEN) -> tuple[dict[str, str], str]:
     """A hook's headers for a fresh nonce, and the proof the server's answer must carry."""
-    nonce = os.urandom(8).hex()
-    return hook_auth.headers(token, nonce), hook_auth.sign(token, "server", nonce)
+    nonce = hook_auth.new_nonce()
+    return hook_auth.headers(token, 80, nonce), hook_auth.sign(token, "server", nonce)
 
 
 def _record_token(home: Path, token: str = TOKEN, **extra) -> None:
@@ -191,14 +191,14 @@ def test_a_queued_message_leaves_the_statusline_on_the_monitor_route_and_when_an
 def test_the_permission_hook_waits_on_main_s_meta_until_the_browser_answers(monkeypatch, tmp_path):
     monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "thome"))
     _record_token(tmp_path / "thome")
-    client = TestClient(__import__("app.main", fromlist=["app"]).app, base_url="http://127.0.0.1",
-                        headers=_signed()[0])
+    client = TestClient(__import__("app.main", fromlist=["app"]).app, base_url="http://127.0.0.1")
     session.attach(CORPUS, SID, _cwd(), None)
     body = {"cwd": _cwd(), "session": SID, "tool_name": "Bash",
             "tool_input": {"command": "touch x", "description": "Create x"}}
     answers: list = []
     with client:
-        t = threading.Thread(target=lambda: answers.append(client.post("/api/events/permission", json=body)))
+        t = threading.Thread(target=lambda: answers.append(client.post("/api/events/permission", json=body,
+                                                                       headers=_signed()[0])))
         t.start()
         for _ in range(100):
             held = (agents.meta_or_none(CORPUS, agents.MAIN_ID) or {}).get("permissions") or []
@@ -219,7 +219,8 @@ def test_the_permission_hook_waits_on_main_s_meta_until_the_browser_answers(monk
         assert answers[0].status_code == 200 and answers[0].json() == {"id": held[0]["id"], "behavior": "allow"}
         assert not agents.meta_or_none(CORPUS, agents.MAIN_ID).get("permissions")
         # answered in the terminal: the session moved on, and the hook's wait ends with no decision
-        t = threading.Thread(target=lambda: answers.append(client.post("/api/events/permission", json=body)))
+        t = threading.Thread(target=lambda: answers.append(client.post("/api/events/permission", json=body,
+                                                                       headers=_signed()[0])))
         t.start()
         for _ in range(100):  # the server's loop registers the ask and then puts it on main's meta, apart from this thread
             if events._asks and (agents.meta_or_none(CORPUS, agents.MAIN_ID) or {}).get("permissions"):
@@ -233,7 +234,8 @@ def test_the_permission_hook_waits_on_main_s_meta_until_the_browser_answers(monk
         assert [(r["event"], r.get("tool"), r.get("answer")) for r in log] == [
             ("asked", "Bash", None), ("answered", None, "allow"), ("asked", "Bash", None), ("answered", None, events.GONE_ANSWER)]
         assert log[0]["what"] == "Create x" and log[0]["chat"] == "main" and log[1]["id"] == log[0]["id"]
-        assert client.post("/api/events/permission", json={**body, "session": "not-main"}).status_code == 409
+        assert client.post("/api/events/permission", json={**body, "session": "not-main"},
+                           headers=_signed()[0]).status_code == 409
 
 
 class _Stand:
@@ -265,7 +267,8 @@ class _Stand:
             def _prove(self) -> None:
                 outer.sent.extend(self.headers.values())
                 nonce = self.headers.get(hook_auth.NONCE_HEADER) or ""
-                if outer.token and self.headers.get(hook_auth.AUTH_HEADER) != hook_auth.sign(outer.token, "hook", nonce):
+                want = hook_auth.request_proof(outer.token or "", self.server.server_port, nonce)
+                if outer.token and self.headers.get(hook_auth.AUTH_HEADER) != want:
                     outer.unproven += 1
                 if outer.token:
                     self.send_header(hook_auth.PROOF_HEADER, hook_auth.sign(outer.token, "server", nonce))
@@ -360,6 +363,8 @@ def test_the_server_answers_a_hook_route_only_to_a_request_that_proves_the_token
         assert client.get("/api/health").status_code == 200, "no other route asks for it"
         # a session started before the update to 0.6.0 calls 0.5.0's routes, which answer as the new ones, proof and all
         assert client.post("/api/channel/held", json=body, headers=wrong).status_code == 401
+        assert client.post("/api/channel/held", json=body, headers=good).status_code == 401, "a nonce is taken once"
+        good, proof = _signed()
         r = client.post("/api/channel/held", json=body, headers=good)
         assert r.status_code == 200 and r.headers[hook_auth.PROOF_HEADER] == proof
         assert set(events.OLD_PATHS.values()) <= {*hook_auth.HOOK_PATHS, *hook_auth.SHIM_PATHS, "/api/events/main",

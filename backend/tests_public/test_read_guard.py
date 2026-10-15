@@ -33,8 +33,91 @@ def test_health_names_its_home_and_pid_only_to_the_token_s_holder(client, plugin
     assert set(client.get("/api/health").json()) == {"ok", "boot", "ui"}
     full = client.get("/api/health", headers=plugin_headers()).json()
     assert full["home"] == str(hook_auth.home().resolve()) and full["leader"] and full["app"]
-    wrong = hook_auth.headers("another-install-s-token", "n0nce")
+    wrong = hook_auth.headers("another-install-s-token", 80)
     assert set(client.get("/api/health", headers=wrong).json()) == {"ok", "boot", "ui"}
+
+
+@pytest.mark.real_read_guard
+@pytest.mark.real_write_guard
+def test_a_proof_works_once_on_the_port_it_was_sent_to_and_only_for_a_few_minutes(client, plugin_headers, monkeypatch):
+    """hook_auth.request_proof binds a request's proof to the server's port and to the time in its nonce, and the server
+    takes each nonce once: a proof sent to another port (a process that holds the recorded port while thimble's server
+    runs on another), one used before, one older than PROOF_TTL_S, and the unbound proof of earlier builds prove
+    nothing, on a read, on a token route, or to the health check."""
+    plugin_headers()  # records this server's token
+    tok = hook_auth.token()
+    pair = {"method": "POST", "url": "/api/ui/pair", "json": {}}
+    assert client.get("/api/corpora", headers=hook_auth.headers(tok, 27787)).json() == REFUSED
+    assert client.request(**pair, headers=hook_auth.headers(tok, 27787)).status_code == 401
+    assert set(client.get("/api/health", headers=hook_auth.headers(tok, 27787)).json()) == {"ok", "boot", "ui"}
+    once = hook_auth.headers(tok, 80)
+    assert client.get("/api/corpora", headers=once).status_code == 200
+    assert client.get("/api/corpora", headers=once).json() == REFUSED, "a nonce is taken once"
+    assert client.request(**pair, headers=once).status_code == 401, "on any route"
+    nonce = hook_auth.new_nonce()
+    unbound = {hook_auth.NONCE_HEADER: nonce, hook_auth.AUTH_HEADER: hook_auth.sign(tok, "hook", nonce)}
+    assert client.get("/api/corpora", headers=unbound).json() == REFUSED, "the unbound proof of earlier builds"
+    assert client.request(**pair, headers=unbound).status_code == 401
+    old = hook_auth.headers(tok, 80)
+    later = hook_auth._wall() + hook_auth.PROOF_TTL_S + 1
+    monkeypatch.setattr(hook_auth, "_wall", lambda: later)
+    assert client.get("/api/corpora", headers=old).json() == REFUSED, "too old"
+    early = hook_auth.headers(tok, 80, f"{int(later) + hook_auth.PROOF_TTL_S + 60}.abc")
+    assert client.get("/api/corpora", headers=early).json() == REFUSED, "a time ahead of the server's clock"
+    fresh = hook_auth.headers(tok, 80, f"{int(later)}.{'f' * 32}")
+    assert client.get("/api/corpora", headers=fresh).status_code == 200, "a fresh one still works"
+    assert once[hook_auth.NONCE_HEADER] not in hook_auth._seen, "a nonce too old to pass is forgotten"
+
+
+def test_a_server_whose_socket_names_no_address_checks_a_proof_against_the_port_it_was_started_on(plugin_headers,
+                                                                                                 monkeypatch):
+    """A ticket box's server serves sockets the host hands it (app/handoff_serve.py); should a scope name no server, the
+    proof is checked against THIMBLE_PORT, which the supervisor and the box set, and refused without one."""
+    plugin_headers()
+
+    def scope(port: int) -> dict:
+        h = hook_auth.headers(hook_auth.token(), port)
+        return {"type": "http", "method": "GET", "path": "/api/corpora", "server": None,
+                "headers": [(k.encode(), v.encode()) for k, v in h.items()]}
+
+    monkeypatch.setenv("THIMBLE_PORT", "27755")
+    assert hook_auth.proven(scope(27755)) and not hook_auth.proven(scope(27756))
+    monkeypatch.delenv("THIMBLE_PORT")
+    assert not hook_auth.proven(scope(27755))
+
+
+@pytest.mark.real_read_guard
+def test_a_proof_the_cli_sent_to_a_process_on_its_port_reads_nothing_here(client, plugin_headers):
+    """A process that holds the port the CLI asks (another account's, after a restart, or a stale THIMBLE_PORT) keeps
+    the proof headers of the CLI's health check (foreign_home, which `thimble up` runs first); replayed at thimble's
+    server on its own port, they read nothing and mint no sign-in code."""
+    import socket  # noqa: PLC0415
+    import threading  # noqa: PLC0415
+
+    plugin_headers()
+    got: dict[str, str] = {}
+    with socket.socket() as srv:
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+
+        def answer() -> None:
+            conn, _ = srv.accept()
+            with conn:
+                for line in conn.recv(65536).decode("latin-1").split("\r\n")[1:]:
+                    k, sep, v = line.partition(":")
+                    if sep:
+                        got[k.strip().lower()] = v.strip()
+                body = b'{"ok": true, "boot": "x", "ui": null}'
+                conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\n"
+                             b"Connection: close\r\n\r\n%s" % (len(body), body))
+
+        t = threading.Thread(target=answer, daemon=True)
+        t.start()
+        cli.foreign_home(f"http://127.0.0.1:{srv.getsockname()[1]}")
+        t.join(5)
+    kept = {k: got[k] for k in (hook_auth.NONCE_HEADER, hook_auth.AUTH_HEADER)}
+    assert client.get("/api/corpora", headers=kept).json() == REFUSED
+    assert client.post("/api/ui/pair", json={}, headers=kept).status_code == 401
 
 
 def test_the_cli_takes_a_server_that_names_no_home_for_another_install_s(monkeypatch):
@@ -121,7 +204,8 @@ async def test_the_screenshot_script_gets_the_shot_token_in_its_environment_neve
 
 
 def _opener(c: TestClient, base: str, seen: list):
-    """A stand-in for config.LOOPBACK.open that sends each request to the TestClient `c`, as a server at `base`."""
+    """A stand-in for config.LOOPBACK.open that sends each request to the TestClient `c`, as a server at `base`: the
+    whole URL, since the request's proof holds its port."""
 
     class Answer(io.BytesIO):
         status = 200
@@ -137,7 +221,8 @@ def _opener(c: TestClient, base: str, seen: list):
             return False
 
     def urlopen(req, timeout=None):
-        r = c.request(req.get_method(), req.full_url.removeprefix(base), content=req.data,
+        assert req.full_url.startswith(base), req.full_url
+        r = c.request(req.get_method(), req.full_url, content=req.data,
                       headers=dict(req.header_items()))
         seen.append((req.full_url, r.status_code))
         if r.status_code >= 400:

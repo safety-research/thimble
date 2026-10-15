@@ -1186,13 +1186,14 @@ def test_the_server_renames_an_earlier_demo_workspace_and_refuses_while_a_sessio
 
     w = named_world
     pre, old = old_demo(w, tmp_path)
-    client = TestClient(main.create_app(), headers=plugin_headers())  # the rename is the CLI's route: it proves the token
+    client = TestClient(main.create_app())
     calls: list[tuple[str, str]] = []
 
     def request(method, url, body=None, timeout=5.0):
         path = url.removeprefix("http://127.0.0.1:1")
         calls.append((method, path))
-        r = client.request(method, path, json=body)
+        # the rename is the CLI's route: it proves the token, with a nonce of its own each time
+        r = client.request(method, path, json=body, headers=plugin_headers())
         return r.status_code, r.json()
 
     monkeypatch.setattr(cli, "_request", request)
@@ -1205,11 +1206,12 @@ def test_the_server_renames_an_earlier_demo_workspace_and_refuses_while_a_sessio
     assert "the demo workspace one-2 keeps its name, since a Claude Code session has it open" in text
     assert "run `thimble demo` again to rename it demo-one (`thimble purge one-2` removes it)" in text
     # the route refuses on its own too, the moment it is asked
-    assert client.post("/api/ws/one-2/rename", json={"to": "demo-one"}).status_code == 409
+    assert client.post("/api/ws/one-2/rename", json={"to": "demo-one"}, headers=plugin_headers()).status_code == 409
     monkeypatch.delitem(events._subs, "one-2")
-    assert client.post("/api/ws/one-2/rename", json={"to": "one"}).status_code == 409  # the analyst's name
-    assert client.post("/api/ws/one-2/rename", json={"to": "../x"}).status_code == 400
-    assert client.post("/api/ws/nothing/rename", json={"to": "demo-x"}).status_code == 404
+    assert client.post("/api/ws/one-2/rename", json={"to": "one"},
+                       headers=plugin_headers()).status_code == 409  # the analyst's name
+    assert client.post("/api/ws/one-2/rename", json={"to": "../x"}, headers=plugin_headers()).status_code == 400
+    assert client.post("/api/ws/nothing/rename", json={"to": "demo-x"}, headers=plugin_headers()).status_code == 404
     # once it is closed, the next run renames it through the server
     w["lines"].clear()
     assert run(w, args(names=["one"], dir=str(w["root"]), precaches=str(pre))) == 0

@@ -484,7 +484,7 @@ def create_app() -> FastAPI:
         # worker thread, which can wait behind threads that compute: the supervisor and the plugin give a health call 1
         # to 2 s (cli.HEALTH_TIMEOUT_S) before they take the server for one that is starting or gone.
         out = {"ok": True, "boot": config.BOOT_ID, "ui": ui_build()}
-        if hook_auth.hook_proof(request.headers, "GET", "/api/health"):
+        if hook_auth.proven(request.scope):
             out.update({"leader": os.getsid(0), **install})
         return out
 
