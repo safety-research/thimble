@@ -6,10 +6,12 @@
 //   status: pass | fail | skip. A step with `pending` waits for work that is not merged yet; report.py reports its failure
 //   as expected.
 // Environment: THIMBLE_E2E_TREE (the tree thimble runs from), THIMBLE_E2E_CORPUS (the corpus copy), THIMBLE_E2E_WS (what
-// workspace.py printed), THIMBLE_E2E_SHOTS, THIMBLE_E2E_RESULTS, THIMBLE_E2E_FIXTURE (the fixture extension's folder).
+// workspace.py printed, its url with a one-time sign-in code after #p=), THIMBLE_E2E_SHOTS, THIMBLE_E2E_RESULTS,
+// THIMBLE_E2E_FIXTURE (the fixture extension's folder), and THIMBLE_HOME (the run's, whose server.json holds the token
+// the api-guard step signs with).
 import { spawnSync } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
-import { appendFileSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { createHmac, randomUUID } from 'node:crypto'
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { basename, dirname, join, relative } from 'node:path'
 
@@ -68,18 +70,35 @@ async function dismissTour(page) {
   }
 }
 
-// the notices hidden so far (a notice with a Hide button sits over the views bar), for the first-load step's detail
+// the notices hidden so far (a notice above the composer or over the views bar covers what is under it), for the
+// first-load step's detail
 const notices = []
+const NOTICE = '[role=alert], [role=status], [class*="alert"], [class*="notice"], [class*="toast"]'
 
-/** Press Hide on each notice that shows one, as the analyst would to get at what is under it. */
+/** Close each notice, as the analyst would to get at what is under it: its Hide button, or its × (aria-label Dismiss,
+ * chat/Notice.tsx). Never one of its actions, such as Sign it out or Retry. */
 async function hideNotices(page) {
-  for (const b of await page.getByRole('button', { name: 'Hide', exact: true }).all()) {
+  const close = page.getByRole('button', { name: 'Hide', exact: true }).or(page.locator('button[aria-label="Dismiss"]'))
+  for (const b of await close.elementHandles().catch(() => [])) {
     if (!(await b.isVisible().catch(() => false))) continue
-    const text = await b.evaluate((el) => (el.closest('[role=alert], [role=status], [class*="alert"], [class*="notice"], [class*="toast"]') || el.parentElement)?.innerText || '').catch(() => '')
-    const line = text.replace(/\s+/g, ' ').replace(/\s*Hide\s*$/, '').trim()
+    const text = await b.evaluate((el, sel) => {  // the notice's words, without its buttons' labels
+      const box = el.closest(sel)?.cloneNode(true)
+      box?.querySelectorAll('button').forEach((x) => x.remove())
+      return box ? box.textContent : null
+    }, NOTICE).catch(() => null)
+    if (text === null) continue  // not a notice's
+    const line = text.replace(/\s+/g, ' ').trim()
     if (line && !notices.includes(line)) notices.push(line)
     await b.click({ timeout: 3_000 }).catch(() => undefined)
   }
+}
+
+/** The request headers of a write signed with the token in the run's server.json, as thimble's hooks and CLI sign one
+ * (backend/app/hook_auth.py: a nonce and HMAC-SHA256(token, "hook:" + nonce)). */
+function tokenHeaders() {
+  const token = JSON.parse(readFileSync(join(env.THIMBLE_HOME, 'server.json'), 'utf8')).token
+  const nonce = randomUUID().replace(/-/g, '')
+  return { 'x-thimble-nonce': nonce, 'x-thimble-auth': createHmac('sha256', token).update(`hook:${nonce}`).digest('hex') }
 }
 
 let currentPage = null
@@ -405,17 +424,29 @@ async function main() {
   const files = corpusFiles(CORPUS)
 
   try {
-    await step('first-load', 'The UI opens on the workspace', async () => {
+    await step('first-load', 'The UI opens on the workspace, signed in with the link\'s one-time code, with no Start gate', async () => {
       check(WS.url, 'workspace.py printed no URL')
-      await page.goto(WS.url)
+      check(/#p=[^&]+/.test(WS.url), `workspace.py printed a link with no sign-in code (#p=): ${WS.url.split('#')[0]}`)
+      await page.goto(WS.url)  // the page trades the code for its cookie (POST /api/ui/key)
       await waitShell(page)
       await page.waitForTimeout(2_000)
       const s = await shot(page, 'first-load')
       check(!(await sessionGone(page)), 'the page shows "No Claude Code session connected"')
       check((await page.getByRole('tab', { name: 'Report', exact: true }).count()) > 0, 'no Report tab')
+      const origin = new URL(WS.url).origin
+      let paired = null
+      const until = Date.now() + 10_000
+      while (Date.now() < until) {
+        paired = await (await page.request.get(`${origin}/api/ui/paired`)).json().catch(() => null)
+        if (paired?.paired === true) break
+        await page.waitForTimeout(500)
+      }
+      check(paired?.paired === true, `the page did not sign in with the link's code: GET /api/ui/paired gave ${JSON.stringify(paired)}`)
+      check(!(await page.locator('.chat-gate').count()), 'main shows the Start gate (.chat-gate)')
+      check(!(await page.getByRole('button', { name: 'Start', exact: true }).count()), 'main shows a Start button')
       await hideNotices(page)
       const shown = notices.length ? `; hid the notice "${notices.join('" and "')}"` : ''
-      return { detail: `${WS.name} at ${WS.url.split('#')[0]}, in ${browserName}${shown}`, shots: [s] }
+      return { detail: `${WS.name} at ${WS.url.split('#')[0]}, in ${browserName}, signed in; no Start gate${shown}`, shots: [s] }
     })
 
     await step('welcome', 'The first-launch welcome asks about the tour, and Skip goes straight to the workbench', async () => {
@@ -789,8 +820,9 @@ async function main() {
       return { detail: fit.detail }
     })
 
-    await step('api-guard', 'A write to the API without the browser\'s cookie or the token is refused', async () => {
+    await step('api-guard', 'A write without the browser\'s cookie is refused, the token alone acts on no analyst route, and the browser sends only its own event kinds', async () => {
       const origin = new URL(WS.url).origin
+      const events = `${origin}/api/ws/${WS.name}/events`
       const name = 'E2E unsigned write'
       const r = await fetch(`${origin}/api/ws/${WS.name}/concepts`, {
         method: 'POST',
@@ -800,7 +832,19 @@ async function main() {
       const list = await page.request.get(`${origin}/api/ws/${WS.name}/concepts`)
       const made = JSON.stringify(await list.json().catch(() => null)).includes(name)
       check(r.status === 403 && !made, `an unsigned POST /api/ws/${WS.name}/concepts answered ${r.status}${made ? ', and the label was made' : ''}`)
-      return { detail: `403 for an unsigned POST /api/ws/${WS.name}/concepts, and no label made` }
+      // main's message, signed with server.json's token as a hook or the CLI signs: an analyst route takes the cookie alone
+      const signed = await fetch(events, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...tokenHeaders() },
+        body: JSON.stringify({ kind: 'main', payload: { text: 'E2E: a message signed with the token alone' } }),
+      })
+      const said = String((await signed.json().catch(() => null))?.detail ?? '')
+      check(signed.status === 403 && /^open thimble from the link .*to make changes$/.test(said),
+        `a POST /api/ws/${WS.name}/events {kind: "main"} signed with the token answered ${signed.status} ${said.slice(0, 160)}, not 403 with hook_auth.WRITE_REFUSED`)
+      // a kind the browser never sends, with the browser's own cookie
+      const odd = await page.request.post(events, { data: { kind: 'start_agent', payload: { text: 'E2E: a start_agent the browser never sends' } } })
+      check(odd.status() === 400, `a POST /api/ws/${WS.name}/events {kind: "start_agent"} with the browser's cookie answered ${odd.status()}, not 400`)
+      return { detail: `403 for an unsigned POST /api/ws/${WS.name}/concepts, and no label made; 403 with WRITE_REFUSED for main's message signed with the token alone; 400 for a start_agent event with the cookie` }
     })
 
     let added = false
