@@ -133,6 +133,28 @@ def test_claude_code_s_record_fields_decide_the_class_before_its_words(status, e
     assert notices.failure_class("Failed to authenticate. API Error: something", status=status, error=error) == cls
 
 
+@pytest.mark.parametrize("line", [
+    "API Error: Connection refused — a firewall or proxy may be blocking it (ECONNREFUSED)",
+    "API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)",
+    "API Error: No internet route — check your connection or VPN (ENETUNREACH)",
+    "API Error: Couldn't connect through your proxy (ERR_PROXY_TUNNEL) — the proxy refused the tunnel: check its "
+    "credentials and that it allows this host",
+    "API Error: Unable to connect to API. Check your internet connection",
+    "API Error: Connection to the API was lost (ECONNRESET). This is usually temporary — try again.",
+])
+def test_a_request_that_never_reached_the_api_is_a_connection_failure_though_its_record_says_server_error(line):
+    """Claude Code 2.1.300 records a connection failure with `error` server_error and no apiErrorStatus (live check
+    11: a proxy that refused the connection showed as "Anthropic's API had a server error"). Its words say no answer
+    came, so the notice says the connection failed."""
+    assert notices.failure_class(line, status=None, error="server_error") == "connection"
+    assert notices.reason(line, cls="connection") == (
+        "the connection to Anthropic's API failed; check the network and try again", None)
+    assert notices.failure_class("API Error: 500 Internal server error. This is a server-side issue, usually temporary "
+                                 "— try again in a moment.", status=500, error="server_error") == "server_error"
+    assert notices.failure_class("API Error: The API is at capacity — this is usually temporary. Try again in a "
+                                 "moment.", error="server_error") == "server_error", "an answer came: a server error"
+
+
 def test_each_fix_says_where_it_runs():
     """The browser can't run /login or /model: a fix only the terminal can run says "In your terminal:" and has no
     button; one the browser can run has its words, and its button where one fixes it."""

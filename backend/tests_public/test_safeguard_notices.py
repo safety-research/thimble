@@ -319,6 +319,25 @@ def test_main_s_api_error_is_its_card_with_its_class_and_a_notice_for_the_other_
     assert turns[-1]["analyst"] is True
 
 
+def test_main_s_request_that_reached_no_api_says_the_connection_failed(cwd, tmp_path):
+    """Claude Code 2.1.300 records a refused connection (a proxy or firewall) with `error` server_error and no
+    apiErrorStatus, as live check 11's transcript has it; the card and the notice say the connection failed, not that
+    the API had a server error, and a turn that answers clears the notice."""
+    refused = {"type": "assistant", "isApiErrorMessage": True, "error": "server_error",
+               "message": {"role": "assistant", "model": "<synthetic>", "stop_reason": "stop_sequence",
+                           "content": [_say("API Error: Connection refused — a firewall or proxy may be blocking "
+                                            "it (ECONNREFUSED)")]}}
+    lv, p = _attach(cwd, tmp_path)
+    _append(p, lv, [_human("Who replies most?"), refused, _end("c1")])
+    (text,) = [r for r in _log() if r["type"] == "text"]
+    assert text["api_error"] == "connection"
+    (n,) = _open(session.MAIN_API_KEY)
+    assert n["text"] == ("Claude's reply in main failed: the connection to Anthropic's API failed; check the network "
+                         "and try again.")
+    _append(p, lv, [_human("Again."), _assistant(_say("Agent B.")), _end("c2")])
+    assert _open(session.MAIN_API_KEY) == []
+
+
 def test_a_first_turn_that_failed_shows_in_main(cwd, tmp_path):
     """/thimble's own turn is not mirrored, but its failure is: the browser would show nothing of it else."""
     lv, p = _attach(cwd, tmp_path)

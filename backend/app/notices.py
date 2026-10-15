@@ -335,6 +335,15 @@ STATUS_CLASS = {401: "auth", 403: "forbidden", 404: "not_found", 429: "rate_limi
                 502: "server_error", 503: "server_error", 504: "server_error", 529: "overloaded"}
 ERROR_CLASS = {"authentication_failed": "auth", "model_not_found": "not_found", "rate_limit": "rate_limited",
                "overloaded": "overloaded", "server_error": "server_error"}
+# Claude Code 2.1.300's words for a request that got no answer from Anthropic's API, which it records with `error`
+# server_error and no apiErrorStatus: "API Error: Connection refused — a firewall or proxy may be blocking it
+# (ECONNREFUSED)", "Unable to connect to API (…)", "Can't reach the API server — check your internet or DNS (ENOTFOUND)",
+# "Couldn't connect through your proxy (…)", "Connection to the API was lost (…)", and the like
+CONNECTION_RE = re.compile(r"unable to connect to api|connection refused|connection dropped|can[’']t reach the api server|"
+                           r"no internet route|couldn[’']t connect through your proxy|connection to the api was lost|"
+                           r"connection lost before|connection closed before|request timed out|"
+                           r"\b(?:econnrefused|econnreset|enotfound|eai_again|enetunreach|ehostunreach|etimedout)\b",
+                           re.I)
 
 # Where a failure's fix runs (Matt, 10-14: the browser can't run /login or /model): BROWSER, a button or a reply there
 # (Retry, Try again, a rephrased request, Settings), or TERMINAL, the Claude Code terminal where thimble runs, whose
@@ -372,13 +381,16 @@ def fix_where(cls: Any) -> str:
 
 def failure_class(text: Any, *, status: Any = None, error: Any = None) -> str | None:
     """The class of an API failure (API_WORDS' keys), or None for any other failure: Claude's safeguards by the line's
-    words, then the record's HTTP `status` and `error` kind (Claude Code's apiErrorStatus and error), then the status
-    the line names, then its other words."""
+    words, then the record's HTTP `status` (Claude Code's apiErrorStatus), then a connection failure by its words where
+    the line names no status (CONNECTION_RE: Claude Code records one as server_error), then the record's `error` kind,
+    then the status the line names, then its other words."""
     t = str(text or "")
     if REFUSED_RE.search(t):
         return "refused"
     if isinstance(status, int) and not isinstance(status, bool) and status in STATUS_CLASS:
         return STATUS_CLASS[status]
+    if CONNECTION_RE.search(t) and not STATUS_RE.search(t):
+        return "connection"
     if str(error or "") in ERROR_CLASS:
         return ERROR_CLASS[str(error)]
     if (m := STATUS_RE.search(t)) and int(m.group(1)) in STATUS_CLASS:
