@@ -4,10 +4,12 @@
 // anchors it touches. Report blocks (`data-anchor-cell`) are taken whole (anchors.ts cellOf); inside a card
 // (`data-anchor-parts`) the innermost part is taken (parts.ts). The click also captures a picture (capture.ts), and
 // Enter posts a thread to the analyst's Claude Code session. A view's frame sends its own hover and click through the bus
-// (pointHover, pointAt, cmdHeld). Off a Mac, Ctrl does what ⌘ does (lib/platform). The send lets go of the highlight
-// and opens the thread in the chat column. The box shows only while the element it is about is on screen: a switch to
-// another tab or a collapsed frame hides it, its text kept, and it comes back beside the element when the element is
-// back (onScreen); a send under way goes on.
+// (pointHover, pointAt, cmdHeld). On a Mac ⌘ is also every shortcut's key, so the pointer shows once ⌘ has been held
+// alone for HOLD_MS, and a key pressed with ⌘ (⌘C, ⌘V, ⌘Z) lets go of it until ⌘ is released; a ⌘-press points at
+// once. Off a Mac, Ctrl does what ⌘ does (lib/platform), at once, and lets go at a key pressed with it. The send lets
+// go of the highlight and opens the thread in the chat column. The box shows only while the element it is about is on
+// screen: a switch to another tab or a collapsed frame hides it, its text kept, and it comes back beside the element
+// when the element is back (onScreen); a send under way goes on.
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { demoStop } from '../lib/demo'
@@ -94,6 +96,8 @@ const UNDER: Place = { under: true }
 const BESIDE: Place = { under: false }
 
 const cmdOn = () => document.body.hasAttribute('data-cmd')
+/** On a Mac, how long ⌘ is held alone before the pointer shows: a shortcut presses its key with ⌘ well within it. */
+export const HOLD_MS = 300
 
 const near = (a: Box, b: Box): boolean => Math.abs(a.left - b.left) < 0.5 && Math.abs(a.top - b.top) < 0.5 && Math.abs(a.right - b.right) < 0.5 && Math.abs(a.bottom - b.bottom) < 0.5
 
@@ -149,24 +153,57 @@ export function CmdPointer({ ws }: { ws: string }) {
       if (t) highlight.text(t.range)
       else highlight.region(a.el)
     }
+    // on a Mac, ⌘ held alone waits HOLD_MS before the pointer shows, at what the pointer is over (`at`, its last place)
+    let wait: number | null = null
+    let at: { x: number; y: number } | null = null
+    const unwait = () => {
+      if (wait != null) window.clearTimeout(wait)
+      wait = null
+    }
+    const shown = () => {
+      wait = null
+      on()
+      if (at && !press.current && !highlight.isHeld()) follow(document.elementFromPoint(at.x, at.y), at.x, at.y)
+    }
     const onKeyDown = (e: KeyboardEvent) => {
-      if (isPointKey(e.key, mac) || (mac && e.metaKey)) on()
-      // off a Mac, Ctrl with another key is a shortcut (Ctrl+C, Ctrl+Z), not a point: the pointer lets go of it
-      else if (!mac && cmdOn()) off()
+      if (!mac) {
+        if (isPointKey(e.key, mac)) on()
+        // off a Mac, Ctrl with another key is a shortcut (Ctrl+C, Ctrl+Z), not a point: the pointer lets go of it
+        else if (cmdOn()) off()
+        return
+      }
+      if (e.key === 'Meta') {
+        // ⌘ pressed with another key already down is a shortcut's start: it stays off until ⌘ is released
+        if (!e.repeat && wait == null && !cmdOn() && !e.shiftKey && !e.altKey && !e.ctrlKey) wait = window.setTimeout(shown, HOLD_MS)
+      } else if (e.metaKey) {
+        // a key pressed with ⌘ is a shortcut (⌘C, ⌘V, ⌘Z), not a point: the pointer lets go until ⌘ is released
+        unwait()
+        off()
+      }
     }
     const onKeyUp = (e: KeyboardEvent) => {
-      if (isPointKey(e.key, mac) || !held(e)) off()
+      if (isPointKey(e.key, mac) || !held(e)) {
+        unwait()
+        off()
+      }
     }
     const onMouseDown = (e: MouseEvent) => {
       if (!held(e) || e.button !== 0) return
       if (inBox(e.target)) return
+      // a ⌘-press points at once, before ⌘ has been held for HOLD_MS: its text selects for a ⌘-drag
+      unwait()
+      on()
       press.current = { x: e.clientX, y: e.clientY, root: pressRoot(e.target), dragged: false }
       document.body.setAttribute('data-cmd-press', '1')
     }
     const onMouseMove = (e: MouseEvent) => {
+      at = { x: e.clientX, y: e.clientY }
       // a ⌘ whose key-up never arrived (a system shortcut such as ⌘⇧4 took it) ends at the next move made without ⌘,
       // so the page never stays in the ⌘ state with its text selectable
-      if (cmdOn() && !held(e)) off()
+      if (!held(e)) {
+        unwait()
+        if (cmdOn()) off()
+      }
       const p = press.current
       if (p) {
         if (!p.dragged && isDrag(p, { x: e.clientX, y: e.clientY })) {
@@ -254,6 +291,7 @@ export function CmdPointer({ ws }: { ws: string }) {
       openBox(chunk ? { anchor: a.anchor, anchors: [a.anchor], text: chunk.text, rect: lastLine(chunk.range) ?? t!.rect, span: true, ...at, range: chunk.range } : { anchor: a.anchor, anchors: [a.anchor], text: a.text, rect: a.el.getBoundingClientRect(), span: false, ...at })
     }
     const onBlur = () => {
+      unwait()
       off()
       endPress()
     }
@@ -300,6 +338,7 @@ export function CmdPointer({ ws }: { ws: string }) {
       document.removeEventListener('mousemove', onMouseMove, true)
       document.removeEventListener('mouseup', onMouseUp, true)
       document.removeEventListener('click', onClick, true)
+      unwait()
       off()
       endPress()
       highlight.release()
