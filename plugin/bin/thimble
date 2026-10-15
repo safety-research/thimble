@@ -188,7 +188,8 @@ feedback() {
 # thimble uninstall [--yes] [--keep-home]: bash, so it works when the venv is missing or inside the tree being removed.
 # It touches only the plugin registration and the trust entry install.sh added, the lines install.sh added to shell
 # startup files (recorded in $THIMBLE_HOME/shell-startup: exactly those lines go, and a file it created goes once it holds
-# nothing else), ~/.local/bin/thimble and $THIMBLE_HOME; a tree outside $THIMBLE_HOME (a clone) is left in place with
+# nothing else), ~/.local/bin/thimble (the link in $THIMBLE_BIN_DIR, when set, as install.sh puts it there) and
+# $THIMBLE_HOME; a tree outside $THIMBLE_HOME (a clone) is left in place with
 # its workspaces. The `rm -rf` is guarded:
 # $THIMBLE_HOME is canonicalized once, `/`, $HOME and relative paths are refused, and it is removed only when it holds
 # thimble state. The recorded
@@ -214,7 +215,7 @@ uninstall() {
     esac
   done
   [ -n "${HOME:-}" ] || { printf 'thimble uninstall: HOME is not set\n' >&2; exit 2; }
-  local home_raw="${THIMBLE_HOME:-}" home home_note="" home_state=0 link="$HOME/.local/bin/thimble" tree="" kind="" name="" name_note=""
+  local home_raw="${THIMBLE_HOME:-}" home home_note="" home_state=0 link="${THIMBLE_BIN_DIR:-$HOME/.local/bin}/thimble" tree="" kind="" name="" name_note=""
   local inside=0 pid="" port="" pid_note="" conf="" planned="" pport="" link_ours=0 link_why="" stop_how="" have_claude=0 ans cwd rc
   local nsteps=0 ndone=0 nleft=0 left="" id_ok=0 id_conf="" id_note="" changed=0 undo=0 undo_py="" undo_cmd="" undone=1
   local reg="" reg_ok=1 reg_from="" reg_other="" mkt="" sh_record="" sh_files=() sh_ok=1 kind_ f_ line_

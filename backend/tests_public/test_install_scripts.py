@@ -886,12 +886,16 @@ def test_uninstall_removes_the_plugin_only_when_it_is_registered_from_this_insta
 
 
 def test_thimble_bin_dir_moves_the_command_s_link_and_leaves_the_one_in_local_bin_alone(tmp_path):
-    """With THIMBLE_BIN_DIR set, the `thimble` link goes there, and a ~/.local/bin/thimble into another tree stays."""
+    """With THIMBLE_BIN_DIR set, the `thimble` link goes there, and a ~/.local/bin/thimble into another tree stays.
+    Uninstall with the same THIMBLE_BIN_DIR removes that link and still leaves the other one (live check 4.h left a
+    broken link in THIMBLE_BIN_DIR)."""
     tree = fake_tree(tmp_path / "release")
     dest = tmp_path / "home" / ".thimble" / "app"
     bin_ = stub_bin(tmp_path)
+    claude_stub(bin_)
     own = tmp_path / "own-bin"
-    env = env_for(tmp_path, PATH=f"{bin_}:/usr/bin:/bin", THIMBLE_BIN_DIR=str(own))
+    env = env_for(tmp_path, PATH=f"{bin_}:/usr/bin:/bin", THIMBLE_BIN_DIR=str(own), STUB_LOG=str(tmp_path / "claude.log"),
+                  CLAUDE_STATE=str(tmp_path / "claude.json"))
     other = tmp_path / "other" / "plugin" / "bin" / "thimble"
     local = Path(env["HOME"]) / ".local" / "bin" / "thimble"
     local.parent.mkdir(parents=True)
@@ -901,6 +905,11 @@ def test_thimble_bin_dir_moves_the_command_s_link_and_leaves_the_one_in_local_bi
                        timeout=60)
     assert r.returncode == 0, r.stdout + r.stderr
     assert os.readlink(own / "thimble") == str(dest / "plugin" / "bin" / "thimble")
+    assert os.readlink(local) == str(other)
+    r = subprocess.run(["bash", str(dest / "plugin" / "bin" / "thimble"), "uninstall", "--yes"], capture_output=True,
+                       text=True, env=env, stdin=subprocess.DEVNULL, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert not (own / "thimble").is_symlink(), r.stdout
     assert os.readlink(local) == str(other)
 
 
