@@ -125,6 +125,8 @@ def deferred_in_main(name: str | None) -> bool:
     calls it at once."""
     spec = REGISTRY.get(str(name or ""))
     return spec is not None and (not spec.sessions or None in spec.sessions) and spec.name not in ALWAYS_LOADED
+
+
 # the tools a feature switch turns off (features.py), by the switch: they stay listed, since thimble's agents share
 # main's listing, and a call refuses with the tool's `## <tool>-off` hint (call)
 FEATURE_TOOLS = {"apply_label": "labels", "run_check": "checks"}

@@ -493,9 +493,7 @@ def send(c: str, kind: str, text: str, fields: dict[str, Any], *, thread: str | 
          line: str = "") -> dict[str, Any]:
     """Send an event whose body server code built (threads.flush and ask_again), with its `line` in main's terminal:
     {id, kind, delivered}. The caller has logged whatever the chats show, and checked that a session listens."""
-    from . import session  # noqa: PLC0415
-
-    from . import disclose  # noqa: PLC0415
+    from . import disclose, session  # noqa: PLC0415
 
     event_id = secrets.token_hex(4)
     session.expect(c, event_id, thread=thread)

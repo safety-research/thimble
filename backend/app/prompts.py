@@ -26,8 +26,9 @@ Later parts. `{{later:<name>}}…{{/later}}` marks a part of main's guidance tha
 uses its feature (guide.py, disclose.py). Every rendering keeps the part's text and drops its markers (KEEP), so each
 other prompt that includes the file reads it as before; inside `later_parts(DROP)` the parts are left out, but those
 named in `keep`, and inside `later_parts(MARK)` each part is kept between the sentinels of LATER_PART_RE, which
-later_texts reads (without_marks and without_parts give KEEP's and DROP's text from it). A part stays inside one file, holds no other part, and is read after the flag blocks, so a part may
-sit inside a flag block or hold one whole. A marker alone on its line takes the line with it, as a flag block's does.
+later_texts reads (without_marks and without_parts give KEEP's and DROP's text from it). A part stays inside one file,
+holds no other part, and is read after the flag blocks, so a part may sit inside a flag block or hold one whole. A
+marker alone on its line takes the line with it, as a flag block's does.
 """
 from __future__ import annotations
 

@@ -105,18 +105,18 @@ def render(cwd: str, sid: str | None = None) -> str:
     """The guide for session `sid` in the folder `cwd` (module note): the lead line, a blank line, then main's prompt
     with the feature flags of the analyst's switches, without its later parts but those the workspace uses; without
     `sid`, main's prompt alone. For a session, the later parts it had are forgotten and the inline ones marked."""
-    from . import disclose, prompts  # noqa: PLC0415
+    from . import cli, config, disclose, prompts  # noqa: PLC0415
 
     c = _workspace(cwd)
-    keep = disclose.inline(c)
+    with cli.server_dirs():
+        keep = disclose.inline(c)
     text = _rendered(cwd, prompts.DROP, keep)
     if not sid:
         return text
     if c:
-        from . import config  # noqa: PLC0415
-
         try:
-            disclose.reset(config.workspace_dir(c), disclose.main_key(Path(), sid), keep)
+            with cli.server_dirs():
+                disclose.reset(config.workspace_dir(c), disclose.main_key(Path(), sid), keep)
         except (OSError, ValueError):
             log.warning("the later parts of session %s's guidance could not be reset", sid, exc_info=True)
     return f"{lead(sid)}\n\n{text}"
@@ -188,5 +188,5 @@ def holds_lead(text: str, sid: str) -> bool:
     return LEAD_PREFIX.format(marker=marker(sid)) in text
 
 
-__all__ = ["LEAD", "LATER_LEAD", "later_parts", "render", "digest", "owed", "mark", "unmark", "take_if_owed", "marker", "reset", "holds_lead",
-           "flags", "lead", "sent"]
+__all__ = ["LEAD", "LATER_LEAD", "later_parts", "render", "digest", "owed", "mark", "unmark", "take_if_owed", "marker",
+           "reset", "holds_lead", "flags", "lead", "sent"]
