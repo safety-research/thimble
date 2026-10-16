@@ -2,7 +2,9 @@
 
 A ticket is one record of dev/tickets.jsonl (repo root, gitignored), numbered per workspace, with shots under
 dev/tickets/<id>/shots/. Filing opens the ticket's thread (a chat of role dev) and lands a chip in main; tickets run one
-at a time, urgent first, and only in a development install (a git checkout of thimble: RELEASE_LINE).
+at a time, urgent first, in every install whose tree is a git repository (a git checkout of thimble, or a release
+install with the git baseline install.sh makes; else RELEASE_LINE). Where the ticket passed its checks, its change
+waits for the analyst's Allow on its browser card, and the notice `ticket:<id>` says so in the terminal (_allow_notice).
 
 The ticket's agent. A code ticket is worked by a `thimble:dev-ticket`, a subagent of the analyst's Claude Code session
 (subagents.py), on Settings' dev row's model and effort. A ticket filed in the browser, Retry and Start are clicks: the
@@ -173,8 +175,13 @@ STATUSES = ("queued", "running", "applied", "applied, restart pending", "failed"
 FAILED = ("failed", "needs manual merge", "rolled back", "stopped")
 # Why this server cannot run a code ticket (ticket_problem, runner_problem). Each is shown to the analyst in the ticket's
 # thread and passed to main in file_dev_ticket's result.
-RELEASE_LINE = ("thimble's own code can only be changed in a development install (a git clone of thimble), and this is "
-                "a release install. Send the request with Report a problem in the top bar instead.")
+RELEASE_LINE = ("thimble's own code can only be changed in an install that is a git repository, and this install is not "
+                "one. `thimble update` makes it one; or send the request with Report a problem in the top bar instead.")
+# a change to the browser UI in an install that cannot rebuild it (no frontend/node_modules, as a release install)
+FRONTEND_FIX = "This install cannot rebuild the browser UI. Install thimble from a git clone to change the UI."
+# the notice of a ticket whose change passed its checks and waits for the analyst's Allow on its browser card
+ALLOW_TEXT = "ticket {n} passed its checks and waits for your Allow"
+ALLOW_ACT = "ticket-open"  # the notice's act, which opens the ticket in the browser (local.NOTICE_ACTS)
 NO_RUNNER_LINE = "This server runs no dev tickets (THIMBLE_DEV_STACK is off, as on a validation stack)."
 NO_CLAUDE_LINE = "The dev agent runs in Claude Code, and `{bin}` is not on the PATH of thimble's server."
 RESTART_PREFIXES = ("backend/app/", "plugin/")
@@ -514,8 +521,10 @@ def file_ticket(workspace: str | None, title: str, body: str, source: str = "ana
 
 
 def ticket_problem() -> str:
-    """Why this server runs no code ticket, '' when it does: the live tree is not a git checkout (RELEASE_LINE), or
-    the server is itself a validation stack (NO_RUNNER_LINE)."""
+    """Why this server runs no code ticket, '' when it does: the live tree is no git repository (RELEASE_LINE; a release
+    install gets a git baseline from install.sh, so every install runs them), or the server is itself a validation
+    stack (NO_RUNNER_LINE). An install without the validation stack's tools runs the gates it can: a change to the
+    browser UI fails its gate with FRONTEND_FIX."""
     if not (REPO / ".git").exists():
         return RELEASE_LINE
     if not STACK_ENABLED:
@@ -1154,8 +1163,8 @@ async def run_gates(tree: Path, touched: list[str], *, scratch: Path | None = No
             else:
                 code, out = res
                 steps.append({"name": name, "ok": code == 0, "tail": out[-3000:]})
-    elif frontend:
-        steps.append({"name": "tsc", "ok": False, "tail": "frontend/node_modules is missing in the worktree"})
+    elif frontend:  # an install with no frontend/node_modules (a release install) cannot rebuild the UI
+        steps.append({"name": "tsc", "ok": False, "tail": FRONTEND_FIX})
     if backend:
         tests = _tests_for(touched, tree)
         py = tree / "backend" / ".venv" / "bin" / "python"
@@ -2528,7 +2537,12 @@ async def _settle_ticket(run: Run, t: dict[str, Any], agent_id: str, status: str
             differ = (shots_dir(tid) / before).read_bytes() != (shots_dir(tid) / after).read_bytes()
             _update(tid, shots_differ=differ)
         _host_card(t)
-        if why := await _apply_refusal(t, touched, branch):
+        _allow_notice(t, True)
+        try:
+            why = await _apply_refusal(t, touched, branch)
+        finally:
+            _allow_notice(t, False)
+        if why:
             raise NotAllowed(why)
         restart = "requested" if needs_restart(touched) else None
         res = await _apply(t, wt, branch, base, touched, restart, run_log, box, change)
@@ -2722,6 +2736,28 @@ def _finish(rec: dict[str, Any], summary: str | None) -> None:
 # a code ticket's end the notices tell (module note, notices), by its status: {subject} the ticket, {why} the reason
 TICKET_TEXTS = {"failed": "{subject} failed: {why}.", "needs manual merge": "{subject} needs a manual merge: {why}.",
                 "rolled back": "{subject} was rolled back: {why}."}
+
+
+def _allow_notice(t: dict[str, Any], waiting: bool) -> None:
+    """While a ticket's change waits for the analyst's Allow on its browser card, the notice `ticket:<id>` (ALLOW_TEXT)
+    says so in the terminal's band too, with an act that opens the ticket in the browser; it goes once answered. Never
+    raises."""
+    from . import notices  # noqa: PLC0415
+
+    c = t.get("workspace")
+    if not c:
+        return
+    key = ticket_key(str(t["id"]))
+    try:
+        if not waiting:
+            notices.clear(str(c), key)
+            return
+        # the act needs notices.ACTIONS and local.NOTICE_ACTS to know it (runtime lane); until then only dismiss
+        act = {"label": "open ›", "do": ALLOW_ACT, "slug": key} if ALLOW_ACT in notices.ACTIONS else None
+        notices.post(str(c), kind="agent", text=ALLOW_TEXT.format(n=t.get("n") or t["id"]), agent="Code ticket",
+                     action=act, key=key, row=False)
+    except Exception:  # noqa: BLE001 — the card asks either way
+        log.debug("the Allow notice of ticket %s was not posted", t.get("id"), exc_info=True)
 
 
 def _ticket_notice(rec: dict[str, Any]) -> None:
