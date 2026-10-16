@@ -48,7 +48,7 @@ test('no summary line before activation; after it, citations and coverage, `open
   await before.unmount()
 })
 
-test('after activation the line counts from state: citations ✓ and ×, coverage as the read share of the data by size, or the files read with no index yet; nothing is new at activation', { timeoutMs: 30_000 }, async ($, on) => {
+test('after activation the line counts from state: citations that failed (none for those that checked out), coverage as the read share of the data by size, or the files read with no index yet; nothing is new at activation', { timeoutMs: 30_000 }, async ($, on) => {
   const w = panelWorld(on)
   w.t.citeIndex = [
     { id: 'c1', raw: CHAT, display: '4579', ref: 'README.md#L3', row: 'r1', at: 1 },
@@ -58,10 +58,10 @@ test('after activation the line counts from state: citations ✓ and ×, coverag
   w.t.coverageSummary = SUMMARY
   await start($, w)
   const m = await band($)
-  expect(await line(m)).toBe('  thimblecitations ✓1 ×1coverage 15%open ›')
+  expect(await line(m)).toBe('  thimblecitations 1 failedcoverage 15%open ›')
   expect(await m.find({ type: 'Button', key: 'above-summary-dismiss' })).toBeUndefined()
-  // `×1` in red
-  expect(JSON.stringify(await m.find({ type: 'Box', key: 'above-summary' }))).toContain('×1')
+  // `1 failed` in red
+  expect(JSON.stringify(await m.find({ type: 'Box', key: 'above-summary' }))).toContain('"color":"error"},"children":["1 failed"]')
   await m.unmount()
   // under 1%: a decimal kept
   w.t.coverageSummary = { ...SUMMARY, size: { read: 30_000, searched: 0, total: 14_000_000 } }
@@ -90,7 +90,7 @@ test("a feature that is off shows no item: citation marks, coverage, labels' uns
   w.unsure = [{ id: 'd9b51617', name: 'links through a fetch proxy', noFit: 2, unsure: 1, total: 3, rows: [] }]
   await start($, w)
   const on1 = await band($)
-  expect(await line(on1)).toBe('  thimblecitations ✓1coverage 15%labels 3 unsurechecks ◌open ›')
+  expect(await line(on1)).toBe('  thimblecoverage 15%labels 3 unsurechecks ◌open ›')
   await on1.unmount()
   w.t.settings = featuresOff('citationMarks', 'coverage', 'labels', 'checks')
   const off = await band($)
@@ -130,7 +130,7 @@ test('`cards 2 new` and `documents 1 new` appear for new ones and clear when the
   await m.unmount()
 })
 
-test('`×N` counts the chat citations not found and the problems of the cards\' links checks', { timeoutMs: 30_000 }, async ($, on) => {
+test('`N failed` counts the chat citations not found and the problems of the cards\' links checks', { timeoutMs: 30_000 }, async ($, on) => {
   const w = panelWorld(on)
   w.cells.ff73e071 = { ...w.cells.ff73e071, verification: { links: { status: 'done', checked: true, resolved: [], broken: [{ value: '14592', ref: 'card:ff73e071#revisions/TOTAL', why: 'a script got 14591', source: '14591' }], typed: [{ value: '4579', ref: 'card:ff73e071#pages/TOTAL', why: 'the code types it in' }] } } }
   w.t.citeIndex = [{ id: 'c2', raw: BAD, display: '99', ref: 'README.md#L99', row: 'r1', at: 2 }]
@@ -139,7 +139,7 @@ test('`×N` counts the chat citations not found and the problems of the cards\' 
   await $.command.run({ command: 'thimble:thimble', args: 'card ff73e071' } as never)
   await w.clock.settle()
   const m = await band($)
-  expect(await line(m)).toContain('citations ×3')
+  expect(await line(m)).toContain('citations 3 failed')
   await m.unmount()
 })
 
@@ -160,13 +160,18 @@ for (const columns of [104, 80]) {
     const w = panelWorld(on)
     w.t.coverageSummary = SUMMARY
     w.t.citeIndex = [{ id: 'c1', raw: CHAT, display: '4579', ref: 'README.md#L3', row: 'r1', at: 1 }]
-    w.t.verdicts = { [cid(CHAT)]: { status: 'ok' } }
+    // a citation that failed, so the line has a citations item (one that checked out shows none)
+    w.t.verdicts = { [cid(CHAT)]: { status: 'missing' } }
     const pl = placing(w, columns)
     await start($, w)
     w.states.home = { ...w.states.home, cards: 13, views: 1 }
     await changed(w, 'notebooks')
     const m = await band($, columns)
-    for (const key of ['coverage', 'citations', 'cards']) {
+    // the items the width leaves whole (at 80 columns `citations 1 failed` can push `coverage` off the line)
+    const drawn = []
+    for (const key of ['coverage', 'citations', 'cards']) if (await m.find({ type: 'Button', key: `above-summary-${key}` })) drawn.push(key)
+    expect(drawn).toContain('citations')
+    for (const key of drawn) {
       const before = pl.log.length
       await m.press({ key: `above-summary-${key}` })
       await w.clock.settle()

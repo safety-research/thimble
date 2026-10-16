@@ -3,7 +3,7 @@
 // answer, the open notices (the workspace's and the terminal's own, notices.tsx), the one SSH row of a remote press
 // (offramp.ts), and last the summary line, the one row that stays:
 //
-//   thimble   cards 2 new   citations ✓18 ×1   coverage 2%   labels 1 new 3 unsure   threads 1 new   …   open ›   dismiss
+//   thimble   cards 2 new   citations 1 failed   coverage 2%   labels 1 new 3 unsure   threads 1 new   …   open ›   dismiss
 //
 // An item shows only after activation, only when it is not zero, and only for a feature that is on; `new` is green and
 // `×N` red. Each item is a plain Button whose press opens the panel at its section (the open is the person's own, so
@@ -192,11 +192,12 @@ export function itemWidth(it: Pick<SummaryItem, 'segs'>): number {
   return it.segs.reduce((n, s) => n + [...s.s].length, 0)
 }
 
-/** The citations' counts: chat citations checked and found (✓), and the problems of chat citations and of the cards'
- *  links checks (×). */
-export async function citationCounts(cx: Ctx): Promise<{ ok: number; bad: number }> {
+/** The citations' counts: chat citations checked and found, those still being checked, and the problems of chat
+ *  citations and of the cards' links checks. */
+export async function citationCounts(cx: Ctx): Promise<{ ok: number; bad: number; pending: number }> {
   let ok = 0
   let bad = 0
+  let pending = 0
   const seen = new Set<string>()
   for (const c of await cx.citeIndex()) {
     const id = cid(c.raw)
@@ -205,12 +206,13 @@ export async function citationCounts(cx: Ctx): Promise<{ ok: number; bad: number
     const v = await cx.verdict(id)
     if (v?.status === 'missing' || v?.status === 'differs') bad++
     else if (v?.status === 'ok') ok++
+    else if (!v) pending++
   }
   for (const id of rt.shown) {
     const l = (await cx.card(id))?.links as (NonNullable<Awaited<ReturnType<Ctx['card']>>>['links'] & { quiet?: unknown[] }) | undefined
     if (l) bad += l.broken.length + (l.typed ?? []).length + (Array.isArray(l.quiet) ? l.quiet.length : 0)
   }
-  return { ok, bad }
+  return { ok, bad, pending }
 }
 
 /** The summary line's items, in order, each only when not zero and its feature on; and whether any is new. */
@@ -236,7 +238,9 @@ export async function summaryItems(cx: Ctx): Promise<{ items: SummaryItem[]; fre
   })
   if (f.citationMarks) {
     const c = await citationCounts(cx)
-    add('citations', 'citations', [...(c.ok ? [{ s: `✓${num(c.ok)}` }] : []), ...(c.bad ? [{ s: `×${num(c.bad)}`, fg: COLORS.problem }] : [])], () => openCitations(cx))
+    // no mark for citations that checked out: only those still being checked (◌) and those that failed (red)
+    const segs = [...(c.pending ? [{ s: `◌ checking ${num(c.pending)}`, d: true }] : []), ...(c.bad ? [{ s: `${num(c.bad)} failed`, fg: COLORS.problem }] : [])]
+    if (segs.length) add('citations', 'citations', segs, () => openCitations(cx))
   }
   if (f.coverage) {
     const s = await cx.coverageSummary()
