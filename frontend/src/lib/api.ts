@@ -58,6 +58,7 @@ import { bus } from './bus'
 import { heavy } from './limit'
 import { clearCodeGone, setBrowserId, showCodeGone } from './notices'
 import { apiBase, setBrowserKey, setServerPort } from './browserKey'
+import type { AnswerComments } from '../chat/answerComments'
 
 // Every path below starts with apiBase(): `/b/<key>/api` once this browser holds its key, which the server scopes the
 // browser's cookie to (lib/browserKey), else `/api`. It is read at each request, so a key a later sign-in gives (in
@@ -633,6 +634,10 @@ export const api = {
       body: JSON.stringify({ kind: 'card', payload: { text: body.text, group: `request:${body.request}`, ...(body.doc ? { doc: body.doc } : {}), ...(body.after ? { after: body.after } : {}), ...(body.card ? { card: body.card } : {}) } }),
     }),
 
+  // ---- the checks' comments on Claude's answers (backend answer_comments.py; chat/answerComments.ts) ----
+  answerComments: (c: string) => j<AnswerComments>(`${ws(c)}/answer-comments`),
+  dismissAnswerComment: (c: string, id: string) => j<{ ok: boolean }>(`${ws(c)}/answer-comments/${enc(id)}/dismiss`, { method: 'POST' }),
+  reopenAnswerComment: (c: string, id: string) => j<{ ok: boolean }>(`${ws(c)}/answer-comments/${enc(id)}/reopen`, { method: 'POST' }),
   // ---- tickets ----
   tickets: (workspace: string) => j<Ticket[]>(`${apiBase()}/dev/tickets${q({ workspace })}`),
   ticket: (id: string) => j<Ticket>(`${apiBase()}/dev/tickets/${enc(id)}`),

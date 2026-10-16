@@ -105,6 +105,9 @@ function fanOut(ev: WsEvent): void {
       if (notice) bus.emit('notice', { chat, notice, gone: null, foreground: rest.foreground !== false, replay: replaying })
       return
     }
+    case 'answer-comments':
+      bus.emit('answerComments', {})
+      return
     case 'session-ended':
       // main's session of this workspace ended (backend main.session_ended): the page stops (lib/stale); a record of the
       // history is an earlier session's

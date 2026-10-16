@@ -8,6 +8,7 @@
 // first. The server's `stopping` event (it stops for good), the challenge failing, and MAX_FAILURES failed reconnects
 // in a row stop the page, and with it every stream.
 import { checkSignedIn } from './api'
+import { browserKey } from './browserKey'
 import { bus } from './bus'
 import { markSuspect, MAX_FAILURES, pageStopped, stopPage, verified } from './stale'
 
@@ -91,9 +92,13 @@ export function openStream(url: string, opts: StreamOptions): () => void {
     if (closed) void checkSignedIn()
     retry()
   }
-  // a reopen sends credentials: only once the challenge passed (lib/stale verified)
+  // a reopen sends credentials: only once the challenge passed (lib/stale verified); a page with no key has none to send
   const reopen = async () => {
     if (released) return
+    if (!browserKey()) {
+      open()
+      return
+    }
     const v = await verified()
     if (released) return
     if (v === 'stopped') release()

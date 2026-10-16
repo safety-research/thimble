@@ -8,7 +8,7 @@
 // neighbors, also under protan and deutan vision, each place is on every paper the hue show_label's name for it says (a
 // stored color is a place, so a place never changes hue), the first five new values take (LABEL_ORDER) are five hues,
 // and Dark's chestnut, brown and navy, which a dark paper lightens, stay apart from orange and sky.
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { describe, expect, test } from 'vitest'
 import { LABEL_ORDER, LABEL_WHEEL } from '../../src/files/labels.ts'
 import { MPL_CYCLE, MPL_LABELS, restyle } from '../../src/lib/svg.ts'
@@ -279,8 +279,11 @@ test("the label colours' copies are the light paper's: the charts' fallbacks and
 })
 
 test("thimble-term's copies: its picker's places around the wheel, show_label's names, and each place's hue the light paper's", () => {
-  // the mod imports nothing outside its folder, so it keeps its own copies, each an array on one line
-  const mod = (file: string) => readFileSync(new URL(`../../../mods/thimble-term/hooks/${file}`, import.meta.url), 'utf8')
+  // the mod imports nothing outside its folder, so it keeps its own copies, each an array on one line; 0.9.0 moved it
+  // into the plugin (plugin/hooks/term/), and a tree from before the move has it under mods/thimble-term/hooks/
+  const moved = new URL('../../../plugin/hooks/term/', import.meta.url)
+  const base = existsSync(moved) ? moved : new URL('../../../mods/thimble-term/hooks/', import.meta.url)
+  const mod = (file: string) => readFileSync(new URL(file, base), 'utf8')
   const list = (src: string, name: string): unknown[] => JSON.parse(new RegExp(`^export const ${name}\\b[^=]*= (\\[.*\\])(?: as const)?$`, 'm').exec(src)![1].replace(/'/g, '"'))
   const labels = mod('labels.ts')
   expect(list(labels, 'LABEL_WHEEL')).toEqual(LABEL_WHEEL)

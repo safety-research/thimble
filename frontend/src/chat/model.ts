@@ -25,6 +25,9 @@ export interface TextRow {
   kind: 'text'
   index: number
   text: string
+  /** the uuids of the transcript rows its text came from (the mirror's text records), which a check's comment on an
+   * answer names (chat/answerComments.ts) */
+  uuids?: string[]
   /** Claude Code's API error line, as the server read it from its record (backend session.api_error_class): the
    * failure's class, so the row is an error card whatever its words (withApiErrors) */
   apiError?: string
@@ -214,8 +217,11 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
           return
         }
         const last = into[into.length - 1]
-        if (last && last.kind === 'text' && !last.apiError && !wholeMessage(e)) last.text += e.delta
-        else into.push({ kind: 'text', index, text: e.delta })
+        const uuid = typeof e.uuid === 'string' && e.uuid ? e.uuid : null
+        if (last && last.kind === 'text' && !last.apiError && !wholeMessage(e)) {
+          last.text += e.delta
+          if (uuid) last.uuids = [...(last.uuids ?? []), uuid]
+        } else into.push({ kind: 'text', index, text: e.delta, ...(uuid ? { uuids: [uuid] } : {}) })
         return
       }
       case 'tool_use':

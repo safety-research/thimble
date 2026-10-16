@@ -1977,3 +1977,53 @@ button.view-chip-values:hover,
 button.view-chip-values[aria-expanded='true'] {
   color: var(--text-secondary);
 }
+/* a check's comment on a passage of Claude's answer (chat/answerComments.ts): the passage tinted in its check's colour,
+   stronger while its comment is open under the answer */
+.chat-text mark.answer-tint {
+  color: inherit;
+  background: color-mix(in srgb, var(--tint) 18%, transparent);
+  border-radius: var(--radius-hl);
+  cursor: pointer;
+}
+.chat-text mark.answer-tint-open {
+  background: color-mix(in srgb, var(--tint) 32%, transparent);
+}
+.chat-text mark.answer-tint:focus-visible {
+  outline: 1px solid var(--tint);
+}
+.answer-comment {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--tint);
+  border-radius: var(--radius-card);
+  background: var(--surface-card);
+}
+.answer-comment-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.answer-comment-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--tint);
+}
+.answer-comment-check {
+  font-weight: 600;
+}
+.answer-comment-text {
+  margin: 0;
+}
+.answer-comment-details summary {
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.answer-comment-acts {
+  display: flex;
+  justify-content: flex-end;
+}
