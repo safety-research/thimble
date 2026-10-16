@@ -2532,7 +2532,8 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   // the definition: a prompt label's model first, the model its calls run on (the label's own, else the labels row of
   // Settings), as the analyst reads its name; then the prompt it runs (Matt, v9 review, item k)
   if (kind === 'prompt' && l.run_model) rows.push(fieldLine('model:', <Text wrap="truncate-end">{l.run_model}</Text>))
-  // the definition, whole, in a field to edit (field.tsx, in a border as the search box is): a click gives it the
+  // the definition, whole, in a field to edit (field.tsx, in a border as the search box is): `edit` in the accent at
+  // its last row's end while it rests, so it reads as editable (Matt, v9 review, item m); a click gives it the
   // keyboard, Enter saves it (in code, ctrl+s)
   const defName = kind === 'prompt' ? 'prompt' : kind === 'regex' ? 'pattern' : 'code'
   const shownDef = kind === l.kind ? definitionOf(l) : ''
@@ -2545,7 +2546,7 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
       fieldLine(
         `${defName}:`,
         <Box key="lb-def" flexDirection="column" borderStyle="round" borderColor={COLORS.rule} paddingX={1}>
-          <Client key={`lb-def-${id}-${kind}`} module="./field.tsx" width={defW} props={JSON.parse(JSON.stringify({ name: `label-body:${id}`, text: shownDef, cols: defW, placeholder: `the ${defName}: click to write it`, multiline: kind === 'code' }))} />
+          <Client key={`lb-def-${id}-${kind}`} module="./field.tsx" width={defW} props={JSON.parse(JSON.stringify({ name: `label-body:${id}`, text: shownDef, cols: defW, placeholder: `the ${defName}: click to write it`, multiline: kind === 'code', edit: 'edit', editColor: ACCENT }))} />
         </Box>,
       ),
     )

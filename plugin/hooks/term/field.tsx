@@ -3,13 +3,15 @@
 // the cursor (inverse) on the cell clicked and gives the field the keyboard: typing inserts, Backspace and Delete
 // remove, the arrows, Home and End move. Enter saves (in a `multiline` field, such as code, Enter breaks the line and
 // ctrl+s saves). Each change posts the text to the hooks module as a draft, and a save posts it to be stored, as
-// `{type: 'field', name, text, save}`, so a control beside the field (a run) can store what was typed first.
+// `{type: 'field', name, text, save}`, so a control beside the field (a run) can store what was typed first. At rest
+// the field shows `edit` (props.edit, in props.editColor) at its last row's end, so it reads as editable; a click on
+// it, as anywhere in the field, gives the field the keyboard, and the word goes while the field has it.
 import type { ClientModule } from 'claude-code'
 
 import { width } from './draw'
 import { send } from './gestures'
 
-type Props = { name: string; text: string; cols: number; placeholder?: string; multiline?: boolean }
+type Props = { name: string; text: string; cols: number; placeholder?: string; multiline?: boolean; edit?: string; editColor?: string }
 /** `base`: the text the hooks module drew it with; `text`: what the field holds now; `at`: the cursor's index; `on`: a
  *  click gave it the keyboard. */
 type S = { base: string; text: string; at: number; on: boolean }
@@ -117,17 +119,23 @@ const Field: ClientModule<Props, S> = (props, surface) => {
   if (!prev || st !== prev) surface.setState(st)
   if (!st.text && !st.on) return Box({ flexDirection: 'column', width: cols, children: [Text({ dimColor: true, children: props.placeholder || ' ' })] })
   const cur = rowOf(rows, st.at)
-  return Box({
-    flexDirection: 'column',
-    width: cols,
-    children: rows.map((r, i) => {
-      const line = st.text.slice(r.start, r.end)
-      if (!st.on || i !== cur) return Text({ wrap: 'truncate-end', children: line || ' ' })
-      const k = st.at - r.start
-      const under = st.text[st.at] && st.at < r.end ? st.text[st.at]! : ' '
-      return Text({ wrap: 'truncate-end', children: [line.slice(0, k), Text({ inverse: true, children: under }), line.slice(k + (under === ' ' && st.at >= r.end ? 0 : 1))] })
-    }),
+  const lines = rows.map((r, i) => {
+    const line = st.text.slice(r.start, r.end)
+    if (!st.on || i !== cur) return Text({ wrap: 'truncate-end', children: line || ' ' })
+    const k = st.at - r.start
+    const under = st.text[st.at] && st.at < r.end ? st.text[st.at]! : ' '
+    return Text({ wrap: 'truncate-end', children: [line.slice(0, k), Text({ inverse: true, children: under }), line.slice(k + (under === ' ' && st.at >= r.end ? 0 : 1))] })
   })
+  if (props.edit && !st.on) {
+    // `edit` at the last row's end, two cells after its words; a row of its own when it does not fit there
+    const last = rows[rows.length - 1]!
+    const words = st.text.slice(last.start, last.end).replace(/\s+$/, '')
+    const room = cols - width(props.edit)
+    const mark = Text({ ...(props.editColor ? { color: props.editColor } : {}), children: props.edit })
+    if (width(words) + 2 <= room) lines[lines.length - 1] = Text({ wrap: 'truncate-end', children: [words + ' '.repeat(room - width(words)), mark] })
+    else lines.push(Text({ wrap: 'truncate-end', children: [' '.repeat(Math.max(0, room)), mark] }))
+  }
+  return Box({ flexDirection: 'column', width: cols, children: lines })
 }
 
 export default Field

@@ -1,8 +1,8 @@
 // The label panel's parity with the browser's label editor and Labels pane: a label's marks shown or hidden in Files
-// and the views (`marks: shown on records in Files and views  hide`), a value's color chosen by the names show_label
-// takes, a filter by a value, the held-out agreement and `… N more` records in the examples, rename, and the undo of a
-// delete in the labels list. Each change goes through `thimble act` (label-show, label-filter, label, label-undelete).
-// `claude plugin test plugin`.
+// and the views (`marks: shown on records in Files and views  hide`), its definition's `edit`, a value's color chosen
+// by the names show_label takes, a filter by a value, the held-out agreement and `… N more` records in the examples,
+// rename, and the undo of a delete in the labels list. Each change goes through `thimble act` (label-show,
+// label-filter, label, label-undelete). `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
@@ -168,6 +168,40 @@ test("a label over files shows or hides its marks in Files and the views from it
   pane = await press($, w, pane, 'lo-off')
   expect(w.acts).toContainEqual({ kind: 'label-show', payload: { label: LABEL.id, on: false } })
   expect(shown(await pane.drawn())).toContain('marks:hidden in Files and viewsshow')
+  await pane.unmount()
+})
+
+test("the label's definition reads as editable: `edit` in the accent at its last row's end while it rests, gone once a click gives it the keyboard", async ($, on) => {
+  // Matt (v9 review, item m): the definition did not look editable
+  const w = world(on)
+  const pane = await labelPanel($, w)
+  const field = `lb-def-${LABEL.id}-regex`
+  expect((await pane.find({ type: 'Client', key: field }))?.props).toMatchObject({ props: { edit: 'edit', editColor: 'suggestion' } })
+  // the field's own drawing: its one row, then `edit` against its right edge
+  const before = JSON.stringify(await pane.drawn({ in: field }))
+  expect(before).toContain('{"type":"Text","props":{"color":"suggestion"},"children":["edit"]}')
+  expect(shown(await pane.drawn({ in: field }))).toMatch(/^r\\\.jina\\\.ai\|proxy\\\. +edit$/)
+  // a click on it, as anywhere in the field, gives the field the keyboard: the cursor, and no `edit`
+  await pane.pointer({ type: 'down', x: 3, y: 0, button: 'left', in: field } as never)
+  const after = JSON.stringify(await pane.drawn({ in: field }))
+  expect(after).not.toContain('"edit"')
+  expect(after).toContain('"inverse":true')
+  await pane.unmount()
+})
+
+test("a definition whose last row leaves no room for `edit` takes it on a row of its own, against the right edge", async ($, on) => {
+  const w = world(on)
+  // the field is 102 cells wide in this pane (116 less the label column, the border and its padding), a row 101 cells
+  label(w).spec = 'x'.repeat(101)
+  const pane = await labelPanel($, w)
+  const field = `lb-def-${LABEL.id}-regex`
+  // the region as the terminal lays it out (the kit gives a Client the viewport's columns until told)
+  await pane.resize({ columns: 102, rows: 3, in: field })
+  const rowsDrawn = (((await pane.drawn({ in: field })) as { children?: unknown[] }).children ?? []).map(r => shown(r))
+  expect(rowsDrawn).toHaveLength(2)
+  expect(rowsDrawn[0]).toBe('x'.repeat(101))
+  expect(rowsDrawn[1]).toMatch(/^ +edit$/)
+  expect(rowsDrawn[1]!.length).toBe(rowsDrawn[0]!.length + 1)
   await pane.unmount()
 })
 
