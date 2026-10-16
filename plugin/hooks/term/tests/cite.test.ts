@@ -247,6 +247,40 @@ test("a click on a citation still being verified opens a panel that says so, its
   await pane.unmount()
 })
 
+test("a click on a citation whose place is still being read: the panel says `◌ being verified`, then what was found once the read ends", async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  let release: () => void = () => undefined
+  w.holdResolve = new Promise<void>(r => (release = r))
+  const text = 'It has [4,579](README.md#L3) pages.'
+  let ui = (await $.ui.mount(MESSAGE('m1', text))) as unknown as M
+  await w.clock.advance(300)
+  await ui.unmount()
+  ui = (await $.ui.mount(MESSAGE('m1', text))) as unknown as M
+  // still checked in the chat: ` ◌` part of the link, one purple underlined run with the value
+  expect(JSON.stringify(await ui.drawn({ in: 'para-1' }))).toContain('{"type":"Text","props":{"color":"merged","underline":true},"children":["4,579 ◌"]}')
+  await ui.pointer({ type: 'down', x: 8, y: 0, button: 'left', in: 'para-1' } as never)
+  await ui.pointer({ type: 'up', x: 8, y: 0, button: 'left', in: 'para-1' } as never)
+  await ui.unmount()
+  await w.clock.advance(50)
+  let pane = (await $.ui.mount(PANE)) as unknown as M
+  let tree = await pane.drawn()
+  expect(JSON.stringify(tree)).toContain('{"s":"4,579","b":true,"fg":"merged","u":true},{"s":" ◌","b":true,"fg":"merged","u":true}')
+  expect(shown(await pane.find({ key: 'cite-sub' }))).toBe('◌ being verified')
+  expect(shown(tree)).toContain('how◌ thimble is reading its place')
+  await pane.unmount()
+  // the read ends: the panel says what was found, and the ◌ goes
+  release()
+  await w.clock.advance(1100)
+  await w.clock.settle()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  tree = await pane.drawn()
+  expect(shown(await pane.find({ key: 'cite-sub' }))).toBe('found')
+  expect(shown(tree)).toContain('thimble read the cited line and found the value there')
+  expect(JSON.stringify(tree)).not.toContain('◌')
+  await pane.unmount()
+})
+
 test("a file citation says how thimble verified it, its history, and asks a side thread for a script where no code verified it", async ($, on) => {
   const w = world(on)
   await start($, w)

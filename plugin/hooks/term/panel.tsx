@@ -1858,7 +1858,7 @@ async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   // the subtitle names the place only where no `from` row does: under one, a citation found is `found`; while it is
   // checked, it says it is being verified
   const verifying = (s: string) => s.replace(`${SPIN} checking`, `${SPIN} being verified`).replace(`${SPIN} being checked`, `${SPIN} being verified`)
-  const status0 = bare ? (pending ? `${SPIN} being verified` : red ? 'not found' : check.state === 'running' ? `${SPIN} being verified` : '') : verifying(await citeStatus(cx, c, v, check))
+  const status0 = pending ? `${SPIN} being verified` : bare ? (red ? 'not found' : check.state === 'running' ? `${SPIN} being verified` : '') : verifying(await citeStatus(cx, c, v, check))
   const said = rows.length && !red ? status0.replace(/^found (?:on the card|in the command's output(?:, line \d+(?:-\d+)?)?|in .+?)(?=;|,|$)/, 'found') : status0
   const sub = [said, why].filter(Boolean).join(' · ')
   if (sub) body.push(lineEl(els, [{ s: sub, fg: bad ? COLORS.problem : COLORS.dim }], 'cite-sub', true))
