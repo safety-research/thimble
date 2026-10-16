@@ -65,8 +65,8 @@ import { setTheme } from './paint'
 
 /** /thimble's description and argument hint (the command.describe hook). */
 export const THIMBLE_DESCRIPTION =
-  "Turns thimble on in this folder and opens its panel in this terminal. `/thimble open` opens the browser workbench; `coverage`, `citations`, `checks`, `threads`, `cite <n>`, `card <n>`, `files [path[:line]]` and `documents` open those."
-export const THIMBLE_ARGS = '[open | coverage | citations | checks | threads | cite <n> | card <n> | files [path[:line]] | documents]'
+  "Turns thimble on in this folder and opens its panel in this terminal. `/thimble open` opens the browser workbench; `coverage`, `citations`, `checks`, `threads`, `cite <n>`, `card <n>`, `files <path[:line]>` and `documents` open those."
+export const THIMBLE_ARGS = '[open | coverage | citations | checks | threads | cite <n> | card <n> | files <path[:line]> | documents]'
 /** What `/thimble` says (the model reads it too; logged in PROMPT-CHANGES.md): thimble is on, its panel is open, and how
  *  to reach the browser workbench. */
 export const HOME_LINE = 'thimble is on in this folder. Its panel is open in the terminal; /thimble open opens the browser workbench.'
@@ -100,7 +100,7 @@ const panelTickA = atom(panelTickRef, 0)
 
 /** `/thimble <what>`, a keyboard way to what the chat and the panel draw: `open` (the browser workbench), `coverage`,
  *  `citations`, `checks`, `threads`, `cite [n]` (the n-th citation of the last reply), `card [n|id]` (the n-th card of
- *  the last turn, or a card by its id), `files [path[:line]]`, `documents`. What it says, or null for plain `/thimble`
+ *  the last turn, or a card by its id), `files <path[:line]>`, `documents`. What it says, or null for plain `/thimble`
  *  (home). */
 async function thimbleCommand(cx: Ctx, args: string): Promise<string | null> {
   const [what = '', ...rest] = args.trim().split(/\s+/)
@@ -158,9 +158,10 @@ async function thimbleCommand(cx: Ctx, args: string): Promise<string | null> {
       return `thimble: card ${n} of ${ids.length}`
     }
     case 'files': {
+      // the terminal has no file browser (Matt, 10-16): Coverage lists the files; a path opens its lines at a place
       if (!arg) {
-        await openPanel(cx, { view: 'files', title: 'Files' })
-        return 'thimble: the file browser is open'
+        await openCoverage(cx)
+        return 'thimble: Coverage lists the files; `/thimble files <path[:line]>` opens one at a line'
       }
       const m = /^(.*?)(?::(\d+))?$/.exec(arg)
       const path = (m?.[1] ?? arg).replace(/^\.\//, '')
@@ -169,7 +170,7 @@ async function thimbleCommand(cx: Ctx, args: string): Promise<string | null> {
       return `thimble: ${path}${line ? ` line ${line}` : ''} is open`
     }
     default:
-      return `thimble: \`/thimble\` opens home; \`/thimble open\` opens the browser; \`coverage\`, \`citations\`, \`checks\`, \`threads\`, \`cite [n]\`, \`card [n]\`, \`files [path[:line]]\` and \`documents\` open those`
+      return `thimble: \`/thimble\` opens home; \`/thimble open\` opens the browser; \`coverage\`, \`citations\`, \`checks\`, \`threads\`, \`cite [n]\`, \`card [n]\`, \`files <path[:line]>\` and \`documents\` open those`
   }
 }
 

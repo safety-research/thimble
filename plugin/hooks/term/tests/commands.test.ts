@@ -68,11 +68,11 @@ test('`/thimble card <n>` opens the n-th card of the last turn in the card pane;
   expect(await run($, 'card zz000000')).toBe('thimble: no such card in this workspace')
 })
 
-test('`/thimble files [path[:line]]` opens the file browser, or a file at a record', async ($, on) => {
+test('`/thimble files <path[:line]>` opens a file at a record; with no path, Coverage (the terminal has no file browser)', async ($, on) => {
   const w = world(on)
   await start($, w)
-  expect(await run($, 'files')).toBe('thimble: the file browser is open')
-  expect(w.panes.at(-1)!.title).toBe('Files')
+  expect(await run($, 'files')).toBe('thimble: Coverage lists the files; `/thimble files <path[:line]>` opens one at a line')
+  expect(w.panes.at(-1)!.title).toBe('Coverage')
   expect(await run($, 'files README.md:3')).toBe('thimble: README.md line 3 is open')
   await w.clock.settle()
   const pane = (await $.ui.mount(PANE)) as unknown as M
@@ -96,7 +96,7 @@ test("/thimble's description once thimble is on says what it does here: on in th
   // 0.9.0: /thimble turns thimble on and names the new routes (SPEC-v2 5.5 item 3)
   expect(said.description).toMatch(/^Turns thimble on in this folder and opens its panel in this terminal/)
   expect(said.description).not.toContain('server')
-  expect(said.argumentHint).toBe('[open | coverage | citations | checks | threads | cite <n> | card <n> | files [path[:line]] | documents]')
+  expect(said.argumentHint).toBe('[open | coverage | citations | checks | threads | cite <n> | card <n> | files <path[:line]> | documents]')
   // another command is described as it declares itself
   const other = (await $.command.describe({ command: 'thimble:orient', description: 'Orient the analyst.', isHidden: false, immediate: false, provider: { plugin: 'thimble', tier: 'plugin' } } as never)) as { description: string }
   expect(other.description).toBe('Orient the analyst.')

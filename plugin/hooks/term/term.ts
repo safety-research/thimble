@@ -145,26 +145,6 @@ export const rt = {
   timers: false,
 }
 
-/** The most files one `thimble state opens` reads the head of (backend local.py OPENS_MAX). */
-const OPENS_MAX = 100
-
-/** What the listed files of plain text open as, read for those not read yet or changed since (at most OPENS_MAX a
- *  read): a file that opens as a transcript shows `transcript` as its type, as its preview and its view say. */
-export async function readOpens(cx: Ctx): Promise<void> {
-  if (!rt.sc) return
-  const got = (await cx.surface('files')) as SurfaceGot | undefined
-  const list = got?.ok ? (Array.isArray(got.value) ? got.value : (got.value as { files?: unknown })?.files) : []
-  const files = (Array.isArray(list) ? list : []).filter((f): f is { path: string; kind?: unknown; size_bytes?: unknown; size?: unknown } => Boolean(f) && typeof (f as { path?: unknown }).path === 'string')
-  const sizeOf = (f: { size_bytes?: unknown; size?: unknown }) => (typeof f.size_bytes === 'number' ? f.size_bytes : typeof f.size === 'number' ? f.size : 0)
-  const want = files.filter(f => (!f.kind || f.kind === 'text') && rt.opens.get(f.path)?.size !== sizeOf(f)).slice(0, OPENS_MAX)
-  if (!want.length) return
-  const r = await readState(cx, rt.sc, 'opens', [JSON.stringify(want.map(f => f.path))])
-  if (!r.ok) return
-  const as = (r.value ?? {}) as Record<string, unknown>
-  for (const f of want) rt.opens.set(f.path, { size: sizeOf(f), as: typeof as[f.path] === 'string' ? (as[f.path] as string) : '' })
-  await cx.bumpPanel()
-}
-
 const iso = (ms: number) => new Date(ms).toISOString()
 
 export function panelColumns(): number {
@@ -414,8 +394,7 @@ export async function loadPanel(cx: Ctx, p: TermPanel): Promise<void> {
   switch (p.view) {
     case 'home':
       // its surfaces read at once, so home draws what changed within one read's time of opening
-      await Promise.all([readSurface(cx, 'canvas', 'cards', ['--since', iso(0)]), readSurface(cx, 'home-full', 'home'), readSurface(cx, 'labels', 'labels'), readSurface(cx, 'docs', 'docs'), readSurface(cx, 'files', 'files'), refreshThreads(cx)])
-      await readOpens(cx)
+      await Promise.all([readSurface(cx, 'canvas', 'cards', ['--since', iso(0)]), readSurface(cx, 'home-full', 'home'), readSurface(cx, 'labels', 'labels'), readSurface(cx, 'docs', 'docs'), refreshThreads(cx)])
       return
     case 'card':
       if (p.card) await loadCards(cx, [p.card])
@@ -748,8 +727,6 @@ export function paneTitle(p: TermPanel): string {
       return `Label: ${p.title}`
     case 'docs':
       return 'Documents'
-    case 'files':
-      return 'Files'
     default:
       return p.title || 'thimble'
   }
@@ -1261,7 +1238,8 @@ export const applyUi: UiApply = async (cx, kind, args) => {
   }
   if (kind === 'layout') {
     const first = surfaces.find(s => s !== 'canvas') ?? surfaces[0] ?? ''
-    if (first === 'files') await openPanel(cx, { view: 'files', title: 'Files' })
+    // the browser's Files: in the terminal, Coverage lists the files (there is no file browser)
+    if (first === 'files') await openPanel(cx, { view: 'coverage', title: 'Coverage' })
     else if (first === 'report') await openPanel(cx, { view: 'docs', title: 'Documents' })
     else if (first) await openHome(cx)
     return

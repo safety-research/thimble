@@ -1,15 +1,14 @@
-// The file browser and a file (SPEC.md, section 7, "The file browser"), after the browser's Files
-// (frontend/src/files): a folder tree the keys move through, folders that fold; a find by name and by words (`f`),
-// what it found in place of the tree; the chosen file's preview in the mode it opens in; a file in the modes that fit
-// it (Table for records, CSV rows and a database's rows, Transcript, Text, JSON, Raw), as the browser offers them; the
-// labels that are on marking the records they labeled in their values' hues, and the files they labeled in the tree.
+// A file in the panel (SPEC.md, section 7, "The file browser", a file), opened only to verify a place: a citation's,
+// a label's record, a card's source. The terminal has no file browser (Matt, 10-16: people view files their own way;
+// Coverage lists the files). A file shows in the modes that fit it (Table for records, CSV rows and a database's rows,
+// Transcript, Text, JSON, Raw), as the browser offers them; the labels that are on mark the records they labeled in
+// their values' hues.
 //
-//   files   the tree, or what the find found; the chosen row's preview under the second rule
 //   file    a file's records in a mode, the chosen one lit, its place a link and a blue `?` under the header; a
 //           database's tables, then a table's rows
 //
 // It draws through the panel's frame (panel.tsx drawsView) and reads through term.ts (loadsView): `thimble state
-// files`, `turns`, `find`, `grep`, `marks`, `tables`, `rows` and `labels`, the routes the browser's Files reads.
+// files <path>`, `turns`, `marks`, `tables`, `rows` and `labels`, the routes the browser's Files reads.
 import type { RenderElement } from 'claude-code'
 
 import type { TermFilesUi, TermPanel } from './types'
@@ -17,9 +16,9 @@ import { LINK, MARGIN_W, headerEls, lineEl, linkSeg, marginKey, pointed, ruleEl,
 import type { Ctx } from './ctx'
 import { amount, cut, demojibake, lineWidth, placeWords, turnTimes, valueColour, width, wrapRows } from './draw'
 import type { Line, Seg } from './draw'
-import { GREP_MIN, csvCells, delimiterOf, dirOf, fileTree, fileType, filesOf, firstChoice, fmtSize, grepOf, isDatabase, jsonOf, labelCovers, onLabels, readsAsText, recordMarks, tableScore, treeRows, turnsRead, unfoldTo, wholeJson } from './files'
+import { csvCells, delimiterOf, fileType, isDatabase, jsonOf, labelCovers, onLabels, readsAsText, recordMarks, tableScore, turnsRead, wholeJson } from './files'
 import type { FileEntry, FileMode, GrepFile, OnLabel, TreeRow } from './files'
-import { NAME_WHOLE, labelHue } from './home'
+import { labelHue } from './home'
 import { clip, cutLine, middleCut, noControls } from './lib'
 import { linesEl, setListKeys } from './lines'
 import type { LineHit } from './lines'
@@ -27,7 +26,7 @@ import { labelsOf } from './model'
 import { COLORS } from './paint'
 import { RELAY, bottomRows, drawsView, fieldHintsRow, hiddenKeys, hintHeight, hintsRow, none, openAsk, openCite, openFile, openLabel, panelHasKeys, paneRows, relayField, windowList } from './panel'
 import type { PaneEvent } from './panel'
-import { loadsView, openList, openPanel, readFilePage, readOpens, readSurface, rt, surfaceValue } from './term'
+import { loadsView, navBack, openPanel, readFilePage, readSurface, rt, surfaceValue } from './term'
 
 type Obj = Record<string, unknown>
 const isObj = (v: unknown): v is Obj => Boolean(v) && typeof v === 'object' && !Array.isArray(v)
@@ -38,10 +37,6 @@ const dim = (s: string): Seg => ({ s, fg: COLORS.dim })
 
 // ------------------------------------------------------------------------------------------------ state
 
-// whether the find's field takes typing now (the relay's Input stands for it), and the generation of its reads, so a
-// read the analyst typed past is not started
-let finding = false
-let findGen = 0
 // the page of a file the file view read last, which a choice moved on it does not read again
 let lastPage = ''
 // the file view's find (the browser's find bar): the file it is in, its words, whether its field takes typing, the
@@ -75,27 +70,6 @@ async function readMarks(cx: Ctx, path: string, a: number, b: number): Promise<v
   await readSurface(cx, key, 'marks', [path, '--lines', `${a}-${b}`])
   readAt.set(key, stamp)
 }
-
-/** What the preview of a chosen file reads: its first page (and the turns of a whole-file JSON transcript), or a
- *  database's tables; the marks of its first lines. */
-async function readPreview(cx: Ctx, path: string, start = 1): Promise<void> {
-  if (isDatabase(path)) {
-    if (!(await cx.surface(`tables:${path}`))) await readSurface(cx, `tables:${path}`, 'tables', [path])
-    return
-  }
-  const key = await readFilePage(cx, path, start)
-  const page = await surfaceValue<Obj>(cx, key)
-  if (page?.ok && wholeJson(page.value)) {
-    const t = turnsRead({ path })
-    if (!(await cx.surface(t.key))) await readSurface(cx, t.key, 'turns', t.args)
-  }
-  if (page?.ok && delimiterOf(path) && start > 1 && !(await cx.surface(`file:${path}:1`))) await readFilePage(cx, path, 1)
-  if (page?.ok) {
-    const ls = pageLines(page.value)
-    if (ls.length) await readMarks(cx, path, ls[0]!.n, ls.at(-1)!.n)
-  }
-}
-
 
 // ------------------------------------------------------------------------------------------------ a page's records
 
@@ -447,447 +421,6 @@ function drawLines(ls: readonly { n: number; text: string }[], o: DrawOpts & { w
   return d
 }
 
-// ------------------------------------------------------------------------------------------------ the file browser
-
-/** Where a row of what the find found opens: a file, at a line for a matching line's row (`<path>#L<n>`). */
-function foundPlace(key: string): { path: string; line?: number } | null {
-  if (!key) return null
-  const m = /^(.*)#L(\d+)$/.exec(key)
-  return m ? { path: m[1]!, line: Number(m[2]) } : { path: key.replace(/^(?:named|text):/, '') }
-}
-
-/** The find's words and the line a name's file opens at, when they end in `:<n>` (`README.md:3`), as the browser's
- *  search reads them (frontend/src/files/find.ts parseFileQuery). */
-function queryLine(q: string): { text: string; line?: number } {
-  const m = /^(.+?):(\d+)$/.exec(q.trim())
-  return m ? { text: m[1]!.trim(), line: Number(m[2]) } : { text: q.trim() }
-}
-
-/** The find: its words typed (the relay's field holds them) and the reads of what they name, the names at once and the
- *  files' text once typing pauses, from GREP_MIN letters; a read typed past is not started. */
-async function findWords(cx: Ctx, q: string): Promise<void> {
-  const gen = ++findGen
-  const ui = await cx.filesUi()
-  await cx.setFilesUi({ ...ui, query: q, found: '' })
-  await cx.bumpPanel()
-  const words = queryLine(q).text
-  if (!words) return
-  cx.later(150, () => {
-    if (gen !== findGen) return
-    void (async () => {
-      if (!(await cx.surface(`find:${words}`))) await readSurface(cx, `find:${words}`, 'find', [words])
-      await cx.bumpPanel()
-    })()
-  })
-  if (words.length >= GREP_MIN)
-    cx.later(300, () => {
-      if (gen !== findGen) return
-      void (async () => {
-        if (!(await cx.surface(`grep:${words}`))) await readSurface(cx, `grep:${words}`, 'grep', [words])
-        await cx.bumpPanel()
-      })()
-    })
-}
-
-/** The find begun (`f`): the relay's Input takes typing as its field, the ring on it. */
-async function startFind(cx: Ctx): Promise<void> {
-  finding = true
-  await cx.focus(RELAY.pick).catch(() => false)
-  await cx.bumpPanel()
-}
-
-/** The find cleared: the tree again, the row chosen there. */
-async function clearFind(cx: Ctx): Promise<void> {
-  finding = false
-  findGen++
-  const ui = await cx.filesUi()
-  await cx.setFilesUi({ ...ui, query: '', found: '' })
-  await cx.bumpPanel()
-}
-
-/** A file opened from the browser: its folders open there, so Backspace finds its row; a line chosen in it. */
-async function openFrom(cx: Ctx, path: string, line?: number): Promise<void> {
-  finding = false
-  const ui = await cx.filesUi()
-  await cx.setFilesUi(unfoldTo({ ...ui, pick: path }, path))
-  await openFile(cx, path, line ? Math.max(1, line - 5) : 1, line)
-}
-
-/** The file browser (SPEC.md, section 7, "The file browser"): the tree of folders that fold, each folder's count and
- *  size, each file's type and size and a `●` for each label that is on and labeled it; or, while the find holds words,
- *  what it found: the files named by them, then the files whose text holds them with their first matching lines. The
- *  chosen row's preview under the second rule, in the mode its file opens in. */
-async function drawFiles(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
-  const els = cx.els(e)
-  const { Box, Text, Button } = els
-  const cols = Math.max(30, e.props.bodyColumns)
-  const got = await surfaceValue(cx, 'files')
-  if (!got) return none(cx, e, '◌ reading the files')
-  if (!got.ok) return <Box flexDirection="column"><Text color={COLORS.problem} wrap="wrap">{`× ${got.error}`}</Text></Box>
-  const files = filesOf(got).map(f => ({ ...f, kind: fileType(f.path, f.kind, rt.opens.get(f.path)?.as) }))
-  const ui = await cx.filesUi()
-  const on = await labelsOn(cx)
-  // Esc gave the keys to the prompt: the find types no more, and a letter is a key of the panel's again
-  if (!panelHasKeys()) finding = false
-  const query = ui.query ?? ''
-  const facts = [plural(files.length, 'file'), ...(on.length ? [`${plural(on.length, 'label')} on`] : [])]
-  // the find's field, in the header: what it holds, the cursor after it while it takes typing
-  const field: RenderElement[] =
-    finding || query
-      ? [
-          <Box key="files-find" flexDirection="row">
-            <Text dimColor>{'find  '}</Text>
-            <Text>{clip(query, cols - 8)}</Text>
-            {finding ? <Text inverse>{' '}</Text> : null}
-          </Box>,
-        ]
-      : []
-  const body: RenderElement[] = [...headerEls(els, { title: 'Files', cols, sub: subLine(facts), more: field })]
-  if (finding) relayField({ text: query, send: t => findWords(cx, t), enter: () => enterFound(cx) })
-  const root = `${(await cx.root().catch(() => '')).split('/').filter(Boolean).at(-1) ?? 'folder'}/`
-  const listed = query.trim() ? await foundRows(cx, query.trim(), files, on, cols) : treeLines(cx, files, ui, on, root, cols)
-  // the preview of the chosen row's file
-  const hints = finding ? ['↑↓ to choose', 'Enter to open'] : query ? ['↑↓ to choose', 'Enter to open', 'f to find', 'Backspace to clear the find'] : ['↑↓ to choose', 'Enter to open', 'Space to fold', 'f to find']
-  const hintH = finding ? hintHeight([...hints, 'Esc to leave the field'], cols) : hintHeight(hints, cols)
-  const rows = paneRows()
-  const firstLines = rows ? Math.max(0, Math.min(6, rows - 1 - body.length - 2 - 1 - hintH - 8)) : 6
-  const preview = await previewEls(cx, e, listed.chosen, cols, firstLines, on)
-  const win = windowList('files', listed.lines.slice(listed.fixed), listed.hits.map(h => ({ ...h, y: h.y - listed.fixed })).filter(h => h.y >= 0), listed.pickY - listed.fixed, rows - 1 - body.length - listed.fixed - preview.length - hintH, () => cx.bumpPanel())
-  body.push(linesEl(cx, e, marginKey('files-tree'), [...listed.lines.slice(0, listed.fixed), ...win.lines], [...listed.hits.filter(h => h.y < listed.fixed), ...win.hits.map(h => ({ ...h, y: h.y + listed.fixed }))], cols + MARGIN_W, listed.onKey))
-  body.unshift(
-    <Box key="file-presses" width={0} height={0} flexShrink={0} overflow="hidden" flexDirection="row">
-      {files.map((f, i) => <Button key={`file-open-${i}`} label={f.path} plain onPress={() => void openFrom(cx, f.path)} />)}
-    </Box>,
-  )
-  body.push(...preview)
-  body.push(finding ? fieldHintsRow(els, hints, cols) : hintsRow(els, hints, cols))
-  // `f` begins the find; none while its field takes typing, where every letter is the field's
-  const hk = finding ? null : hiddenKeys(cx, e, [{ key: 'find', hotkey: 'f', onPress: () => void startFind(cx) }])
-  return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>
-}
-
-/** A list the file browser draws: its lines (the first `fixed` of them stay as the rest is cut to the pane), the hits,
- *  the chosen row's line and what it previews, and what the list's keys do. */
-type Listed = { lines: Line[]; hits: LineHit[]; fixed: number; pickY: number; chosen: { path: string; line?: number } | null; onKey: (k: string) => Promise<void> | void }
-
-/** The label marks after a file's name in the tree: a `●` in each label's hue for each label that is on, highlights a
- *  value (litValues) and labeled the file, a space between them. */
-function fileDots(on: readonly OnLabel[], path: string): Seg[] {
-  const ls = on.filter(l => l.lit.length > 0 && labelCovers(l, path))
-  return ls.length ? [{ s: '  ' }, ...ls.flatMap((l, i): Seg[] => [...(i ? [{ s: ' ' }] : []), { s: '●', fg: labelHue(l.values, l.colors) }])] : []
-}
-
-/** The tree: a folder's row (its fold marker at its depth's edge, its name, its file count dim, its size against R),
- *  its folders under it 2 cells in, then its files 2 cells further with their label marks, type and size; the chosen
- *  row in the accent; Enter or a second click opens a file and folds a folder, Space folds the chosen row's folder. */
-function treeLines(cx: Ctx, files: readonly FileEntry[], ui: TermFilesUi, on: readonly OnLabel[], root: string, cols: number): Listed {
-  const top = fileTree(files, root)
-  const rows = treeRows(top, ui)
-  const sizeW = Math.max(4, ...files.map(f => fmtSize(f.size).length))
-  // the type column, unless beside it a file's name (up to NAME_WHOLE cells) would be cut: the column goes first, as on
-  // home (live check term-fix10, new quirk 6)
-  const kindW0 = Math.max(4, ...files.map(f => width(f.kind)))
-  const deepest = Math.max(0, ...rows.map(r => r.depth))
-  const longest = Math.max(0, ...files.map(f => width(f.path.slice(dirOf(f.path).length))))
-  const typed = cols - 2 * deepest - 2 - kindW0 - sizeW - 6 >= Math.min(NAME_WHOLE, longest)
-  const kindW = typed ? kindW0 : 0
-  const typeCol = (s: string): Seg[] => (typed ? [dim(s.padEnd(kindW)), { s: '  ' }] : [])
-  const lines: Line[] = []
-  const hits: LineHit[] = []
-  const known = new Set(rows.map(r => r.key))
-  // the row chosen: the analyst's when the tree shows it, else the nearest folder of it that shows, else the first
-  let pick = ui.pick
-  if (!known.has(pick)) {
-    const up = pick ? [`dir:${dirOf(pick)}`, ...foldersOfKey(pick).reverse()].find(k => known.has(k)) : undefined
-    pick = up ?? firstChoice(files, ui)
-  }
-  const pickRow = rows.find(r => r.key === pick)
-  const chosen = pickRow?.file ? { path: pickRow.file.path } : null
-  let pickY = -1
-  const choose = (key: string) => async () => {
-    const cur = await cx.filesUi()
-    await cx.setFilesUi({ ...cur, pick: key })
-    if (!key.startsWith('dir:') && !key.startsWith('more:')) await readPreview(cx, key)
-    await cx.bumpPanel()
-  }
-  // a folder folded or unfolded, the choice on its row
-  const flip = (f: { dir: string }, open: boolean) => async () => {
-    const key = `dir:${f.dir}`
-    const cur = await cx.filesUi()
-    const without = (xs: string[]) => xs.filter(x => x !== key)
-    await cx.setFilesUi(open ? { ...cur, pick: key, folded: [...without(cur.folded), key], unfolded: without(cur.unfolded) } : { ...cur, pick: key, folded: without(cur.folded), unfolded: [...without(cur.unfolded), key] })
-    await cx.bumpPanel()
-  }
-  const whole = (dir: string) => async () => {
-    const cur = await cx.filesUi()
-    await cx.setFilesUi({ ...cur, pick: `more:${dir}`, whole: [...(cur.whole ?? []).filter(x => x !== dir), dir] })
-    await cx.bumpPanel()
-  }
-  lines.push(pointed(spread([{ s: '    ' }, dim('name')], [...typeCol('type'), dim('size'.padStart(sizeW))], cols), false))
-  for (const r of rows) {
-    const y = lines.length
-    if (r.key === pick) pickY = y
-    const lead = ' '.repeat(2 * r.depth)
-    if (r.folder) {
-      const open = folderShownOpen(ui, r, top)
-      hits.push({ y, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: flip(r.folder, open) })
-      lines.push(pointed(spread([{ s: `${lead}${open ? '▾' : '▸'} ` }, { s: r.folder.name }, dim(`  ${num(r.folder.count)}`)], [...typeCol(''), dim(fmtSize(r.folder.size).padStart(sizeW))], cols), r.key === pick))
-    } else if (r.file) {
-      const f = r.file
-      const dots = fileDots(on, f.path)
-      const name = middleCut(f.path.slice(dirOf(f.path).length), Math.max(8, cols - width(lead) - 2 - lineWidth(dots) - (typed ? kindW + 2 : 0) - sizeW - 4))
-      hits.push({ y, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: r.key === pick ? () => openFrom(cx, f.path) : choose(f.path) })
-      lines.push(pointed(spread([{ s: `${lead}  ` }, { s: name }, ...dots], [...typeCol(f.kind), dim(fmtSize(f.size).padStart(sizeW))], cols), r.key === pick, true))
-    } else if (r.more) {
-      const words = `… ${num(r.more)} more`
-      const dir = r.key.slice(5)
-      hits.push({ y, x0: MARGIN_W + width(lead) + 2, x1: MARGIN_W + width(lead) + 2 + width(words), row: false, run: whole(dir) })
-      lines.push(pointed([{ s: `${lead}  ` }, dim(words)], r.key === pick))
-    }
-  }
-  if (!files.length) lines.push(pointed([{ s: '  ' }, dim('none')], false))
-  const order = rows.map(r => r.key)
-  const step = async (d: number) => {
-    if (!order.length) return
-    const at = order.indexOf(pick)
-    await choose(order[Math.max(0, Math.min(order.length - 1, at < 0 ? 0 : at + d))]!)()
-  }
-  const onKey = (k: string) => {
-    if (k === 'up' || k === 'k') return step(-1)
-    if (k === 'down' || k === 'j') return step(1)
-    const r = pickRow
-    if (!r) return undefined
-    // Enter opens the chosen file, folds the chosen folder, shows a folder whole from its `… N more`
-    if (k === 'return' || k === 'enter') return r.file ? openFrom(cx, r.file.path) : r.folder ? flip(r.folder, folderShownOpen(ui, r, top))() : whole(r.key.slice(5))()
-    // Space folds the chosen row's folder, the choice onto the folder's row
-    if (k === 'space' || k === ' ') {
-      if (r.folder) return flip(r.folder, folderShownOpen(ui, r, top))()
-      const parent = [...rows.slice(0, rows.indexOf(r))].reverse().find(x => x.folder && x.depth === r.depth - 1)
-      if (parent?.folder) return flip(parent.folder, true)()
-    }
-    return undefined
-  }
-  return { lines, hits, fixed: 1, pickY, chosen, onKey }
-}
-
-/** The folder keys a row's key stands in, outermost first. */
-function foldersOfKey(key: string): string[] {
-  const path = key.replace(/^(?:dir|more):/, '')
-  const parts = (key.startsWith('dir:') || key.startsWith('more:') ? path : dirOf(path)).split('/').filter(Boolean)
-  return parts.map((_p, i) => `dir:${parts.slice(0, i + 1).join('/')}/`)
-}
-
-/** Whether a folder's row shows open though nothing shows under it (an open folder with no files of its own). */
-function folderShownOpen(ui: TermFilesUi, r: TreeRow, top: readonly { dir: string }[]): boolean {
-  if (!r.folder) return false
-  const first = top[0]?.dir === r.folder.dir && r.depth === 0
-  return first ? !ui.folded.includes(`dir:${r.folder.dir}`) : ui.unfolded.includes(`dir:${r.folder.dir}`)
-}
-
-/** What the find found, in place of the tree (the browser's Files search): `Named` and its count, the files whose path
- *  holds every word, each by its path with its type and size; then `In the text` and its count, each file whose text
- *  holds the words with its matches against R and its first matching lines under it, each line's number in a dim
- *  column and the match on the selection background; `◌ searching` while the text is read, and how many files it read
- *  when it stopped short. ↑↓ choose a file or a line, Enter opens it there. */
-async function foundRows(cx: Ctx, q: string, files: readonly FileEntry[], on: readonly OnLabel[], cols: number): Promise<Listed> {
-  const ui = await cx.filesUi()
-  const asked = queryLine(q)
-  q = asked.text
-  const named = await surfaceValue(cx, `find:${q}`)
-  const grep = q.length >= GREP_MIN ? await surfaceValue(cx, `grep:${q}`) : undefined
-  const kinds = new Map(files.map(f => [f.path, f]))
-  const namedFiles = filesOf(named).map(f => kinds.get(f.path) ?? { ...f, kind: fileType(f.path, f.kind) })
-  const found = grep?.ok ? grepOf(grep.value) : null
-  const lines: Line[] = []
-  const hits: LineHit[] = []
-  const keys: string[] = []
-  const places = new Map<string, { path: string; line?: number }>()
-  const sizeW = Math.max(4, ...namedFiles.map(f => fmtSize(f.size).length))
-  const kindW = Math.max(4, ...namedFiles.map(f => width(f.kind)))
-  let pick = ui.found ?? ''
-  const rowKeys: string[] = []
-  // the rows the keys choose, in order, then the chosen one (the first when none is)
-  for (const f of namedFiles) rowKeys.push(`named:${f.path}`)
-  for (const g of found?.files ?? []) {
-    rowKeys.push(`text:${g.path}`)
-    for (const m of g.matches) rowKeys.push(`${g.path}#L${m.line}`)
-  }
-  if (!rowKeys.includes(pick)) pick = rowKeys[0] ?? ''
-  let pickY = -1
-  const choose = (key: string) => async () => {
-    const cur = await cx.filesUi()
-    await cx.setFilesUi({ ...cur, found: key })
-    const at = foundPlace(key)
-    if (at) await readPreview(cx, at.path, at.line ? Math.max(1, at.line - 2) : 1)
-    await cx.bumpPanel()
-  }
-  // a row the keys choose: what it previews (`place`), and the line its file opens at (a file found in the text: its
-  // first match)
-  const row = (key: string, place: { path: string; line?: number }, l: Line, whole = true, at = place.line) => {
-    const y = lines.length
-    if (key === pick) pickY = y
-    keys.push(key)
-    places.set(key, place)
-    hits.push({ y, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: key === pick ? () => openFrom(cx, place.path, at) : choose(key) })
-    lines.push(pointed(l, key === pick, whole))
-  }
-  // the files named
-  lines.push(pointed([{ s: 'Named', b: true }, ...(named?.ok ? [dim(` (${num(namedFiles.length)})`)] : [])], false))
-  if (!named) lines.push(pointed([{ s: '  ' }, dim('◌ finding')], false))
-  else if (!named.ok) lines.push(pointed([{ s: '  ' }, { s: `× ${named.error}`, fg: COLORS.problem }], false))
-  else if (!namedFiles.length) lines.push(pointed([{ s: '  ' }, dim('none')], false))
-  for (const f of namedFiles) {
-    const right: Line = [dim(f.kind.padEnd(kindW)), { s: '  ' }, dim(fmtSize(f.size).padStart(sizeW))]
-    const dots = fileDots(on, f.path)
-    row(`named:${f.path}`, asked.line ? { path: f.path, line: asked.line } : { path: f.path }, spread([{ s: '  ' }, { s: middleCut(f.path, Math.max(8, cols - 2 - lineWidth(dots) - lineWidth(right) - 2)) }, ...dots], right, cols))
-  }
-  // the files whose text holds the words
-  lines.push([])
-  const hitsN = (found?.files ?? []).reduce((n, g) => n + g.total, 0)
-  const more = found ? !found.complete || (found.files ?? []).some(g => !g.complete) : false
-  lines.push(pointed(spread([{ s: 'In the text', b: true }, ...(found ? [dim(` (${num(found.files.length)})`)] : [])], found?.files.length ? [dim(`${plural(hitsN, 'match', 'matches')}${more ? '+' : ''}`)] : [], cols), false))
-  if (q.length < GREP_MIN) lines.push(pointed([{ s: '  ' }, dim(`${GREP_MIN} letters or more`)], false))
-  else if (!grep) lines.push(pointed([{ s: '  ' }, dim("◌ searching the files' text")], false))
-  else if (!grep.ok) lines.push(pointed([{ s: '  ' }, { s: `× ${grep.error}`, fg: COLORS.problem }], false))
-  else if (!found!.files.length) lines.push(pointed([{ s: '  ' }, dim('none')], false))
-  for (const g of found?.files ?? []) {
-    const count = dim(`${plural(g.total, 'match', 'matches')}${g.complete ? '' : '+'}`)
-    row(`text:${g.path}`, { path: g.path }, spread([{ s: '  ' }, { s: middleCut(g.path, Math.max(8, cols - 2 - lineWidth([count]) - 2)) }, ...fileDots(on, g.path)], [count], cols), true, g.matches[0]?.line)
-    const nw = Math.max(1, ...g.matches.map(m => String(m.line).length))
-    for (const m of g.matches) row(`${g.path}#L${m.line}`, { path: g.path, line: m.line }, matchLine(m, nw, cols), false)
-  }
-  if (found && !found.complete && found.of) lines.push(pointed([{ s: '  ' }, dim(`searched ${num(found.scanned)} of ${num(found.of)} files`)], false))
-  const at = keys.indexOf(pick)
-  const onKey = (k: string) => {
-    if (k === 'up' || k === 'k' || k === 'down' || k === 'j') {
-      if (!keys.length) return undefined
-      const d = k === 'up' || k === 'k' ? -1 : 1
-      return choose(keys[Math.max(0, Math.min(keys.length - 1, at < 0 ? 0 : at + d))]!)()
-    }
-    if (k === 'return' || k === 'enter') return enterFound(cx)
-    if (k === 'backspace' || k === 'delete') return clearFind(cx)
-    return undefined
-  }
-  const chosen = places.get(pick) ?? null
-  return { lines, hits, fixed: 0, pickY, chosen, onKey }
-}
-
-/** A matching line of what the find found: its number right-aligned in a dim column at A4, then its words around the
- *  match, the match on the selection background. */
-function matchLine(m: GrepFile['matches'][number], nw: number, cols: number): Line {
-  const room = Math.max(10, cols - 4 - nw - 2)
-  const text = noControls(m.text)
-  let [a, b] = m.hit
-  let shown = text
-  if (width(text) > room) {
-    // the match kept in view: from a few words before it, `…` where the line goes on
-    let from = Math.max(0, Math.min(a - Math.floor(room / 3), text.length - room))
-    if (from > 0) {
-      // from the word after the cut, `…` right against it
-      const sp = text.indexOf(' ', from)
-      if (sp >= 0 && sp < a) from = sp + 1
-      shown = `…${text.slice(from)}`
-      a -= from - 1
-      b -= from - 1
-    }
-    shown = cut(shown, room)
-  }
-  a = Math.max(0, Math.min(a, shown.length))
-  b = Math.max(a, Math.min(b, shown.length))
-  return [{ s: '    ' }, dim(`${String(m.line).padStart(nw)}  `), { s: shown.slice(0, a) }, { s: shown.slice(a, b), bg: COLORS.selected }, { s: shown.slice(b) }]
-}
-
-/** Enter in the find: the chosen row's file opened, at its line for a matching line; with nothing found, the field
- *  stops taking typing. */
-async function enterFound(cx: Ctx): Promise<void> {
-  const ui = await cx.filesUi()
-  const asked = queryLine(ui.query ?? '')
-  const q = asked.text
-  let key = ui.found ?? ''
-  if (!key) {
-    const named = filesOf(await surfaceValue(cx, `find:${q}`))
-    const grep = await surfaceValue(cx, `grep:${q}`)
-    const g = grep?.ok ? grepOf(grep.value).files[0] : undefined
-    key = named[0] ? `named:${named[0].path}` : g ? `text:${g.path}` : ''
-  }
-  const at = foundPlace(key)
-  if (at && key.startsWith('named:') && asked.line) at.line = asked.line
-  if (!at) {
-    finding = false
-    return cx.bumpPanel()
-  }
-  if (key.startsWith('text:')) {
-    const grep = await surfaceValue(cx, `grep:${q}`)
-    const g = grep?.ok ? grepOf(grep.value).files.find(x => x.path === at.path) : undefined
-    return openFrom(cx, at.path, g?.matches[0]?.line)
-  }
-  return openFrom(cx, at.path, at.line)
-}
-
-/** The chosen file's preview under the second rule: its name, what it opens in at R, then its first rows in that mode
- *  (at most `n`); a matching line's file from a few lines before the match, the line lit. */
-async function previewEls(cx: Ctx, e: PaneEvent, at: { path: string; line?: number } | null, cols: number, n: number, on: readonly OnLabel[]): Promise<RenderElement[]> {
-  if (!at) return []
-  const els = cx.els(e)
-  const { Text } = els
-  const out: RenderElement[] = [ruleEl(els, cols, 'rule-preview')]
-  const path = at.path
-  if (isDatabase(path)) {
-    const t = await surfaceValue(cx, `tables:${path}`)
-    out.push(lineEl(els, spread([{ s: path }], [dim('opens as tables')], cols), 'preview-name'))
-    if (!t) out.push(<Text key="preview-wait" dimColor>◌ reading</Text>)
-    else if (!t.ok) out.push(<Text key="preview-err" color={COLORS.problem} wrap="truncate-end">{`× ${t.error}`}</Text>)
-    else {
-      const tables = (Array.isArray(t.value) ? t.value : []).filter(isObj).slice(0, n)
-      const nw = Math.max(4, ...tables.map(x => width(num(Number(x.row_count) || 0))))
-      tables.forEach((x, i) => out.push(lineEl(els, spread([{ s: str(x.name) }], [dim(`${num(Number(x.row_count) || 0).padStart(nw)} rows`)], cols), `preview-${i}`)))
-    }
-    return out
-  }
-  const start = at.line ? Math.max(1, at.line - 2) : 1
-  const page = await surfaceValue<Obj>(cx, `file:${path}:${start}`)
-  const as = page?.ok ? opensAs(path, page.value) : ''
-  out.push(lineEl(els, spread([{ s: path }], as ? [dim(`opens as ${as}`)] : [], cols), 'preview-name'))
-  if (page && !page.ok) out.push(<Text key="preview-err" color={COLORS.problem} wrap="truncate-end">{`× ${page.error}`}</Text>)
-  if (!page) out.push(<Text key="preview-wait" dimColor>◌ reading</Text>)
-  if (!page?.ok || page.value.binary || !n) return out
-  const pg = page.value
-  const ls = pageLines(pg)
-  const marks = ls.length ? await surfaceValue(cx, marksKey(path, ls[0]!.n, ls.at(-1)!.n)) : undefined
-  const covering = on.filter(l => labelCovers(l, path))
-  const rm = recordMarks(marks?.ok ? marks.value : [], covering, path)
-  const gutter = gutterOf(covering.filter(l => [...rm.lines.values()].some(m => m.has(l.id))), rm.lines)
-  const o: DrawOpts = { cols, chosen: at.line ?? 0, gutter, pick: () => () => undefined, labeled: rm.lines.size > 0, max: n }
-  let d: Drawn
-  const head1 = delimiterOf(path) && start > 1 ? await surfaceValue<Obj>(cx, `file:${path}:1`) : undefined
-  const header = head1?.ok ? (rawLines(head1.value)[0]?.text ?? null) : null
-  const mode = at.line ? 'match' : as
-  if (mode === 'transcript') {
-    const tp = wholeJson(pg) ? await surfaceValue<Obj>(cx, turnsRead({ path }).key) : undefined
-    const turns = wholeJson(pg) ? (tp?.ok ? turnsOfPage(tp.value) : null) : turnsOf(pg)
-    d = turns ? drawTranscript(turns, { ...o, byIndex: wholeJson(pg), isChosen: () => false, compact: true }) : drawLines(rawLines(pg), { ...o, wrap: false, md: false })
-  } else if (mode === 'table') d = drawTable(tableOf(path, pg, header) ?? { heads: [], rows: [] }, o)
-  else if (mode === 'text') d = drawLines(rawLines(pg), { ...o, wrap: true, md: /\.(md|markdown)$/i.test(path) })
-  // a matching line: it and the lines after it, wrapped, so its match shows
-  else if (mode === 'match') d = drawLines(rawLines(pg).filter(l => l.n >= at.line!), { ...o, wrap: true, md: false })
-  else d = drawLines(rawLines(pg), { ...o, wrap: false, md: false })
-  // whole records, as many as the rows hold; a first record longer than them cut, its last row ending in `…`
-  const ys = [...d.at.values()].sort((a, b) => a - b)
-  let shown = d.lines.slice(0, n)
-  if (d.lines.length > n) {
-    const next = ys.find(y => y >= n)
-    const last = [...ys].reverse().find(y => y < n)
-    if (last !== undefined && last > (ys[0] ?? 0) && (next === undefined || next > n)) shown = d.lines.slice(0, last)
-    else if (shown.length) {
-      const row = shown.at(-1)!
-      const seg = row.at(-1)!
-      shown = [...shown.slice(0, -1), [...row.slice(0, -1), { ...seg, s: cut(seg.s, Math.max(1, width(seg.s) - 1)) }]]
-    }
-  }
-  shown.forEach((l, i) => out.push(lineEl(els, l.slice(1), `preview-${i}`)))
-  return out
-}
-
 // ------------------------------------------------------------------------------------------------ a file
 
 const rowsKey = (p: TermPanel) => `rows:${p.path}:${p.table}:${p.start ?? 1}:${p.sort ?? ''}`
@@ -925,11 +458,13 @@ async function matchAt(cx: Ctx, p: TermPanel, line: number): Promise<void> {
   await openPanel(cx, { ...p, line, turn: undefined, ...(onPage ? {} : { start: Math.max(1, line - 5) }) }, { replace: true })
 }
 
-/** A file (SPEC.md, "The file browser", a file): its name as the title; under it its type, its records and the lines
- *  shown of how many, `earlier  later` at R; the tabs of the modes it reads in (1 2 3); the chosen record (a
- *  citation's, a click's, ↑↓) lit, its place a link and a blue `?` under the header; a row per label that is on and
- *  labeled the file, its values in their hues, which mark each record they labeled in a column before it; Backspace
- *  back to the file browser. A database: its tables, then a table's rows. */
+/** A file (SPEC.md, "The file browser", a file), opened to verify a place (a citation's, a label's record, a card's
+ *  source): its name as the title; under it its type, its records and the lines shown of how many, `earlier  later` at
+ *  R; the tabs of the modes it reads in (1 2 3); the chosen record (a citation's, a click's, ↑↓) lit, its place a link
+ *  and a blue `?` under the header; a row per label that is on and labeled the file, its values in their hues, which
+ *  mark each record they labeled in a column before it; b back where it was opened from (Backspace too, where the
+ *  list has the key). The terminal
+ *  has no file browser (Matt, 10-16). A database: its tables, then a table's rows. */
 async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElement> {
   if (p.path && isDatabase(p.path)) return drawDatabase(cx, e, p)
   const els = cx.els(e)
@@ -984,9 +519,10 @@ async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   const rm = recordMarks(marksGot?.ok ? marksGot.value : [], covering, path)
   const marking = marksGot?.ok ? covering : []
   const gutter = gutterOf(covering.filter(l => [...rm.lines.values()].some(m => m.has(l.id))), rm.lines)
-  // Backspace goes back to the file browser: ← reaches no element of a pane (listKeysEl)
+  // b goes back where the file was opened from (Backspace too, where the list has the key): ← reaches no element of a
+  // pane (listKeysEl)
   const finds = !jsonMode && ls.length > 0
-  const fileHints = inFile.typing ? ['↑↓ for the lines it found', 'Enter to stay there'] : [...(modes.length > 1 ? [`${modes.map((_m, i) => i + 1).join(' ')} for the tabs`] : []), '↑↓ to choose', 'Enter to open', ...(finds ? ['f to find'] : []), 'Backspace for the files']
+  const fileHints = inFile.typing ? ['↑↓ for the lines it found', 'Enter to stay there'] : [...(modes.length > 1 ? [`${modes.map((_m, i) => i + 1).join(' ')} for the tabs`] : []), '↑↓ to choose', 'Enter to open', ...(finds ? ['f to find'] : [])]
   const tab = (m: FileMode) =>
     m === mode ? <Text key={`tab-${m}`} inverse>{` ${TAB_NAME[m]} `}</Text> : <Button key={`tab-${m}`} label={` ${TAB_NAME[m]} `} plain onPress={() => void openPanel(cx, { ...p, mode: m }, { replace: true })} />
   // a page, a tab, a sort or a line chosen in place: back leads where the file was opened from (live check term-fix9,
@@ -1048,13 +584,10 @@ async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   const chosen = jsonMode ? (pickedTurn?.n ?? 0) : mode === 'json' ? (jsonRecs.has(inPage) ? inPage : ([...jsonRecs.keys()][0] ?? 0)) : inPage
   const choose = (n: number) => () => here({ ...p, line: n })
   const chooseTurn = (t: Turn) => () => here({ ...p, line: t.n, turn: t.i, from: tstart })
-  // Backspace: the file browser in place of the file, the file chosen there and its folders open (live check
-  // term-fix9, quirk 7)
+  // Backspace: where the file was opened from, as b
   const back = async () => {
     inFile = { path: '', text: '', typing: false, gen: inFile.gen + 1 }
-    const ui = await cx.filesUi()
-    await cx.setFilesUi(unfoldTo({ ...ui, pick: path, query: '', found: '' }, path))
-    return openList(cx, { view: 'files', title: 'Files' })
+    return navBack(cx)
   }
   // while the find's field takes typing ↑↓ choose among the lines it found, the one before or after the chosen line
   const stepFound = (dd: number) => {
@@ -1186,7 +719,7 @@ function cutLineSegs(l: Line, n: number): Line {
 
 /** A database file (the browser's Database view): its tables, each with its rows against R, Enter opening one; a
  *  table's rows as a table (paged 100 at a time, `earlier  later`; a click on a column's name sorts by it), the chosen
- *  row lit; Backspace from a table to its tables, from the tables to the files. */
+ *  row lit; Backspace from a table to its tables, from the tables where the file was opened from. */
 async function drawDatabase(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElement> {
   const els = cx.els(e)
   const { Box, Text, Button } = els
@@ -1199,11 +732,9 @@ async function drawDatabase(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<Render
   const tables = (Array.isArray(tgot.value) ? tgot.value : []).filter(isObj).map(t => ({ name: str(t.name), rows: Number(t.row_count) || 0 }))
   const back = async () => {
     if (p.table) return here({ ...p, table: undefined, start: 1, line: undefined, sort: undefined })
-    const ui = await cx.filesUi()
-    await cx.setFilesUi(unfoldTo({ ...ui, pick: path, query: '', found: '' }, path))
-    return openList(cx, { view: 'files', title: 'Files' })
+    return navBack(cx)
   }
-  const hints = ['↑↓ to choose', 'Enter to open', p.table ? 'Backspace for the tables' : 'Backspace for the files']
+  const hints = ['↑↓ to choose', 'Enter to open', ...(p.table ? ['Backspace for the tables'] : [])]
   if (!p.table) {
     const body: RenderElement[] = [...headerEls(els, { title: p.title || path, cols, sub: subLine(['database', plural(tables.length, 'table')]) })]
     const pick = tables.find(t => t.name === p.slug)?.name ?? tables[0]?.name ?? ''
@@ -1298,30 +829,9 @@ async function drawDatabase(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<Render
   return <Box flexDirection="column">{body}</Box>
 }
 
-/** The file browser and a file registered with the panel (views.ts registerPanelViews calls it once): their reads
- *  (term.ts loadsView) and their drawings (panel.tsx drawsView). */
+/** A file registered with the panel (views.ts registerPanelViews calls it once): its reads (term.ts loadsView) and its
+ *  drawing (panel.tsx drawsView). */
 export function registerFilesView(): void {
-  loadsView('files', async cx => {
-    lastPage = ''
-    await readSurface(cx, 'files', 'files')
-    await readOpens(cx)
-    await readLabels(cx)
-    // the row chosen: the analyst's, else the first file the tree shows (live check term-fix9, quirk 7: no row was chosen
-    // as the browser opened); the chosen file's preview under the list
-    let ui = await cx.filesUi()
-    if (!ui.pick) {
-      const first = firstChoice(filesOf(await surfaceValue(cx, 'files')), ui)
-      if (first) {
-        ui = { ...ui, pick: first }
-        await cx.setFilesUi(ui)
-      }
-    }
-    const at = ui.query ? foundPlace(ui.found ?? '') : null
-    if (at && (ui.found ?? '').startsWith('named:') && queryLine(ui.query ?? '').line) at.line = queryLine(ui.query ?? '').line
-    if (at) await readPreview(cx, at.path, at.line ? Math.max(1, at.line - 2) : 1)
-    else if (ui.pick && !ui.pick.startsWith('dir:') && !ui.pick.startsWith('more:')) await readPreview(cx, ui.pick)
-  })
-
   loadsView('file', async (cx, p) => {
     if (!p.path) return
     await readLabels(cx)
@@ -1347,7 +857,6 @@ export function registerFilesView(): void {
       if (ls.length) await readMarks(cx, p.path, ls[0]!.n, ls.at(-1)!.n)
     }
   })
-  drawsView('files', (cx, e) => drawFiles(cx, e))
   drawsView('file', drawFile)
 }
 

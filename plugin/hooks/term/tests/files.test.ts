@@ -1,7 +1,7 @@
-// The file browser and a file as thimble-term draws them: a name cut in
-// its middle, a folder of one type's dim dots, what a file opens as, Space to fold; a file opened at a cited record with
-// that record lit and its place and `?` under the view; a transcript by thimble's sniff, its tool calls folded; a table
-// of records sorted by a column; ← back to the files; a file that cannot be read. `claude plugin test plugin`.
+// A file as thimble-term draws it, opened to verify a place (the terminal has no file browser, Matt 10-16): a file
+// opened at a cited record with that record lit and its place and `?` under the view; a transcript by thimble's sniff,
+// its tool calls folded; a table of records sorted by a column; ← back where it was opened from; a file that cannot be
+// read. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
@@ -47,78 +47,23 @@ async function start($: E, w: World): Promise<void> {
   await w.clock.settle()
 }
 
-/** The file browser, through a tool's layout record. */
+/** Home, the step a file opened by `/thimble files <path>` goes back to. */
 async function browser($: E, w: World): Promise<M> {
-  w.states.ui = [{ n: 1, kind: 'layout', args: { layout: 'one', surfaces: ['files'] } }]
-  w.stamps.set(`${WS}/ui.jsonl`, 7)
-  await w.clock.advance(1100)
+  await $.command.run({ command: 'thimble:thimble', args: '' } as never)
+  await w.clock.settle()
   return (await $.ui.mount(PANE)) as unknown as M
 }
 
-/** The tree's row that shows `text` chosen: a click on it, unless it is chosen already (the first file is, as the
- *  browser opens: live check term-fix9, quirk 7), where a click would open it. */
-async function chooseRow($: E, w: World, pane: M, text: string): Promise<M> {
-  const rows = ((await pane.drawn({ in: 'm:files-tree' })) as { children?: unknown[] }).children ?? []
-  if (shown(rows.find(r => shown(r).includes(text))).startsWith('❯')) return pane
-  return openRow($, w, pane, text, 1)
-}
-
-/** A click on the tree's row that shows `text`, twice (the first chooses, the second opens); a row chosen already (the
- *  first file, chosen as the browser opens) opens at the first. */
-async function openRow($: E, w: World, pane: M, text: string, times = 2): Promise<M> {
-  for (let i = 0; i < times; i++) {
-    const tree = await pane.drawn({ in: 'm:files-tree' }).catch(() => null)
-    if (!tree) break
-    const rows = (tree as { children?: unknown[] }).children ?? []
-    await pane.pointer({ type: 'down', x: 6, y: rows.findIndex(r => shown(r).includes(text)), button: 'left', in: 'm:files-tree' } as never)
-    await w.clock.settle()
-    await pane.redraw()
-  }
+/** The file named `text` (a listed file's path, or the end of it) opened at its first lines, by `/thimble files`. */
+async function openRow($: E, w: World, pane: M, text: string, _times = 2): Promise<M> {
+  const f = (w.states.files as { path: string }[]).find(x => x.path === text || x.path.endsWith(`/${text}`))
+  await $.command.run({ command: 'thimble:thimble', args: `files ${f?.path ?? text}` } as never)
+  await w.clock.settle()
+  await pane.redraw()
   return pane
 }
 
-test("the file browser: a long name cut in its middle, its extension kept; no dots, a folder's size; the chosen file says what it opens as; Space folds its folder", async ($, on) => {
-  const w = world(on)
-  w.states.files = [
-    { path: 'README.md', kind: 'markdown', size_bytes: 10 },
-    { path: 'chat.jsonl', kind: 'records', size_bytes: 10 },
-    { path: 'logs/a-very-long-file-name-that-will-not-fit-in-the-column-at-all-really-not.jsonl', kind: 'records', size_bytes: 10 },
-    { path: 'logs/b.jsonl', kind: 'records', size_bytes: 10 },
-  ]
-  w.pages['chat.jsonl'] = CHAT
-  await start($, w)
-  let pane = await browser($, w)
-  pane = await chooseRow($, w, pane, 'chat.jsonl')
-  const tree = ((await pane.drawn({ in: 'm:files-tree' })) as { children?: unknown[] }).children ?? []
-  const chosen = tree.find(r => shown(r).includes('chat.jsonl'))
-  // the chosen row in the accent across, `❯` before it
-  expect(shown(chosen)).toMatch(/^❯/)
-  expect(JSON.stringify(chosen)).toContain('"color":"suggestion"')
-  expect(shown(await pane.drawn())).toContain('opens as transcript')
-  // no file has a dot, as home lists them: the type column names the type (live check New 10); its name at A4
-  const readme = tree.find(r => shown(r).includes('README.md'))
-  expect(shown(tree)).not.toContain('●')
-  expect(shown(readme)).toMatch(/^ {6}README\.md /)
-  // each folder's size against R, as home shows it
-  expect(shown(tree.find(r => shown(r).includes('wiki/')))).toMatch(/▾ wiki\/ {2}2 +20 B$/)
-  // Space folds the chosen file's folder
-  await pane.key({ key: 'space', in: 'm:files-tree' } as never)
-  await w.clock.settle()
-  await pane.redraw()
-  expect(shown(await pane.drawn({ in: 'm:files-tree' }))).toContain('▸ wiki/')
-  await pane.unmount()
-  pane = (await $.ui.mount(PANE)) as unknown as M
-  const rows = ((await pane.drawn({ in: 'm:files-tree' })) as { children?: unknown[] }).children ?? []
-  await pane.pointer({ type: 'down', x: 4, y: rows.findIndex(r => shown(r).includes('logs/')), button: 'left', in: 'm:files-tree' } as never)
-  await w.clock.settle()
-  await pane.redraw()
-  const logs = (((await pane.drawn({ in: 'm:files-tree' })) as { children?: unknown[] }).children ?? []).filter(r => /\.jsonl/.test(shown(r)) && /a-very/.test(shown(r)))
-  expect(shown(logs[0])).toMatch(/a-very-long-file-name-th[^ ]*…[^ ]*-not\.jsonl/)
-  expect(shown(tree.find(r => shown(r).includes('logs/')) ?? '')).toMatch(/logs\/ {2}2 +20 B$/)
-  await pane.unmount()
-})
-
-test("a citation's file opens at its record, lit, with its place a link and a blue `?` under the view; ← goes back to the files", async ($, on) => {
+test("a citation's file opens at its record, lit, with its place a link and a blue `?` under the view; ← goes back to the citation", async ($, on) => {
   const w = world(on)
   await start($, w)
   let ui = (await $.ui.mount(MESSAGE('m1', 'The README says [4,579](README.md#L3) pages.'))) as unknown as M
@@ -141,7 +86,9 @@ test("a citation's file opens at its record, lit, with its place a link and a bl
   await w.clock.settle()
   await pane.unmount()
   pane = (await $.ui.mount(PANE)) as unknown as M
-  expect(await pane.find({ type: 'Client', key: 'm:files-tree' })).toBeDefined()
+  // where the file was opened from: the citation, never a file browser
+  expect(await pane.find({ type: 'Client', key: 'm:files-tree' })).toBeUndefined()
+  expect(w.panes.at(-1)!.title).toBe('Citation')
   await pane.unmount()
 })
 
@@ -208,25 +155,6 @@ test("a transcript's turn shows its words in up to three rows; its time column t
   await pane.unmount()
 })
 
-test('the file browser lists each folder in natural order, as home does; a folder\'s count after its name', async ($, on) => {
-  const w = world(on)
-  w.states.files = [
-    { path: 'pages.jsonl', kind: 'text', size_bytes: 10 },
-    { path: 'run-10.jsonl', kind: 'text', size_bytes: 10 },
-    { path: 'run-2.jsonl', kind: 'text', size_bytes: 10 },
-    { path: 'events.jsonl', kind: 'events', size_bytes: 10 },
-  ]
-  await start($, w)
-  const pane = await browser($, w)
-  const tree = ((((await pane.drawn({ in: 'm:files-tree' })) as { children?: unknown[] }).children ?? []) as unknown[]).map(r => shown(r))
-  const names = tree.filter(r => /\.jsonl/.test(r)).map(r => r.replace(/^❯/, '').trim().split(/\s+/)[0])
-  expect(names).toEqual(['events.jsonl', 'pages.jsonl', 'run-2.jsonl', 'run-10.jsonl'])
-  // the first file is chosen as the browser opens (live check term-fix9, quirk 7)
-  expect(tree.find(r => r.includes('events.jsonl'))).toMatch(/^❯/)
-  expect(tree.find(r => r.includes('run-2.jsonl'))).toMatch(/jsonl +10 B$/)
-  await pane.unmount()
-})
-
 test('a file of uniform records opens as a table of their keys, as the browser scores it; a click on a column sorts by it, again the other way', async ($, on) => {
   const w = world(on)
   w.states.files = [{ path: 'runs.jsonl', kind: 'records', size_bytes: 10 }]
@@ -264,44 +192,12 @@ test('a file that cannot be read says why in the panel and in a toast', async ($
   await pane.unmount()
 })
 
-test("a file thimble knows only as text that opens as a transcript says `transcript` in the type column, in the file browser and on home, as its preview and its view do", async ($, on) => {
-  const w = world(on)
-  w.states.files = [{ path: 'agent-chat.jsonl', kind: 'text', size_bytes: 10 }, { path: 'pages.jsonl', kind: 'text', size_bytes: 10 }]
-  // thimble's sniff, read for the files of plain text (live check Q17)
-  w.opens = { 'agent-chat.jsonl': 'transcript' }
-  w.pages['agent-chat.jsonl'] = { ...CHAT, path: 'agent-chat.jsonl', kind: 'text' }
-  await start($, w)
-  let pane = await browser($, w)
-  await w.clock.settle()
-  await pane.redraw()
-  const tree = ((await pane.drawn({ in: 'm:files-tree' })) as { children?: unknown[] }).children ?? []
-  expect(shown(tree.find(r => shown(r).includes('agent-chat.jsonl')))).toMatch(/agent-chat\.jsonl +transcript +10 B$/)
-  expect(shown(tree.find(r => shown(r).includes('pages.jsonl')))).toMatch(/pages\.jsonl +jsonl +10 B$/)
-  expect(w.calls.some(c => c[2] === 'opens' && JSON.parse(c[5]!).includes('agent-chat.jsonl'))).toBe(true)
-  pane = await chooseRow($, w, pane, 'agent-chat.jsonl')
-  expect(shown(await pane.drawn())).toContain('opens as transcript')
-  await pane.unmount()
-  await $.command.run({ command: 'thimble:thimble', args: '' } as never)
-  await w.clock.settle()
-  const home = (await $.ui.mount(PANE)) as unknown as M
-  const lines = (((await home.drawn({ in: 'm:home' })) as { children?: unknown[] }).children ?? []).map(r => shown(r))
-  expect(lines.find(l => l.includes('agent-chat.jsonl'))).toMatch(/agent-chat\.jsonl +transcript +10 B$/)
-  await home.unmount()
-})
-
-test("the Raw tab shows a file's lines as the file holds them: a transcript's records as their JSON lines; the file browser's preview shows the mode the file opens in", async ($, on) => {
+test("the Raw tab shows a file's lines as the file holds them: a transcript's records as their JSON lines", async ($, on) => {
   const w = world(on)
   w.states.files = [{ path: 'chat.jsonl', kind: 'records', size_bytes: 10 }]
   w.pages['chat.jsonl'] = CHAT
   await start($, w)
   let pane = await browser($, w)
-  pane = await chooseRow($, w, pane, 'chat.jsonl')
-  // the preview: the file's first turns, as it opens, each on one row, not its lines
-  const preview = shown(await pane.drawn())
-  expect(preview).toContain('opens as transcript')
-  expect(preview).toContain('Who saved the page?')
-  expect(preview).not.toContain('{"author": "alice"')
-  // a second click on the chosen file opens it
   pane = await openRow($, w, pane, 'chat.jsonl', 1)
   await pane.press({ key: 'hk-tab3' })
   await w.clock.settle()
@@ -311,36 +207,6 @@ test("the Raw tab shows a file's lines as the file holds them: a transcript's re
   // live check New 12: Raw showed each record's words
   expect(body).toContain('{"author": "bob", "body": "An agent did, twice.", "at": "10:01"}')
   expect(body).toContain('{"type": "tool_use", "name": "Read", "at": "10:02"}')
-  await pane.unmount()
-})
-
-test("a click on the path's `files` step goes back to the file browser, never a step pushed after the file", async ($, on) => {
-  const w = world(on)
-  await start($, w)
-  let ui = (await $.ui.mount(MESSAGE('m1', 'The README says [4,579](README.md#L3) pages.'))) as unknown as M
-  await w.clock.advance(300)
-  await ui.unmount()
-  ui = (await $.ui.mount(MESSAGE('m1', 'The README says [4,579](README.md#L3) pages.'))) as unknown as M
-  await ui.pointer({ type: 'down', x: 18, y: 0, button: 'left', in: 'para-1' } as never)
-  await ui.pointer({ type: 'up', x: 18, y: 0, button: 'left', in: 'para-1' } as never)
-  await ui.unmount()
-  await w.clock.settle()
-  let pane = (await $.ui.mount(PANE)) as unknown as M
-  await pane.press({ key: 'hk-files' })
-  await w.clock.settle()
-  await pane.unmount()
-  pane = (await $.ui.mount(PANE)) as unknown as M
-  expect(shown(await pane.find({ key: 'way' }))).toMatch(/home › citation 4,579 › files › README\.md/)
-  const up = ((await pane.findAll({ type: 'Button' })) as { key?: string }[]).find(b => String(b.key).startsWith('crumb-up-'))!
-  await pane.press({ key: up.key! })
-  await w.clock.settle()
-  await pane.unmount()
-  pane = (await $.ui.mount(PANE)) as unknown as M
-  const way = shown(await pane.find({ key: 'way' }))
-  // the list is the current step, by its title
-  expect(way).toMatch(/home › citation 4,579 › Files(?! ›)/)
-  expect(way).not.toContain('README.md')
-  expect(await pane.find({ type: 'Client', key: 'm:files-tree' })).toBeDefined()
   await pane.unmount()
 })
 
@@ -373,8 +239,6 @@ test("a whole-file JSON transcript shows the turns thimble parses from the whole
   w.turns['agent.json'] = STORE_TURNS
   await start($, w)
   let pane = await browser($, w)
-  pane = await chooseRow($, w, pane, 'agent.json')
-  expect(shown(await pane.drawn())).toContain('opens as transcript')
   pane = await openRow($, w, pane, 'agent.json', 1)
   expect(w.calls.some(c => c[2] === 'turns' && c[5] === 'agent.json')).toBe(true)
   const text = shown(await pane.drawn())
@@ -402,7 +266,7 @@ test("a whole-file JSON transcript shows the turns thimble parses from the whole
   await pane.unmount()
 })
 
-test("a whole-file JSON transcript whose parse finds no turns opens as its lines, and the type column stops saying transcript", async ($, on) => {
+test("a whole-file JSON transcript whose parse finds no turns opens as its lines", async ($, on) => {
   const w = world(on)
   w.states.files = [{ path: 'agent.json', kind: 'text', size_bytes: 10 }]
   w.opens = { 'agent.json': 'transcript' }
@@ -415,11 +279,5 @@ test("a whole-file JSON transcript whose parse finds no turns opens as its lines
   expect(text).not.toContain('holds no messages')
   expect(text).toContain('json · lines 1-1 of 1')
   expect(shown(await pane.drawn({ in: 'm:file-body' }))).toContain('{"agent": "a7"')
-  await pane.key({ key: 'backspace', in: 'm:file-body' } as never)
-  await w.clock.settle()
-  await pane.unmount()
-  pane = (await $.ui.mount(PANE)) as unknown as M
-  const tree = ((await pane.drawn({ in: 'm:files-tree' })) as { children?: unknown[] }).children ?? []
-  expect(shown(tree.find(r => shown(r).includes('agent.json')))).toMatch(/agent\.json +json +10 B$/)
   await pane.unmount()
 })
