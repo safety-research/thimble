@@ -55,7 +55,9 @@ def test_each_role_is_registered_with_a_full_model_id_an_explicit_effort_and_a_f
     front, body = prompts.frontmatter("orient-helper")
     assert roles["orient-helper"]["description"] == front["description"].strip() and roles["orient-helper"]["prompt"] == body.strip(), \
         "the helper's fixed description and prompt are prompts/orient-helper.md's"
-    assert roles["writer"]["skills"][0] == roles["critic"]["skills"][0] == "thimble:shared"
+    # 0.9.0 has no shared skill (SPEC-v2 3.1): the writer's and the critic's prompts end with the shared guidance
+    assert "skills" not in roles["writer"] and "skills" not in roles["critic"]
+    assert "## Communicating" in roles["writer"]["prompt"] and "## Communicating" in roles["critic"]["prompt"]
 
 
 def test_the_orientation_s_registration_holds_its_prompt_and_takes_main_s_tools_and_propose_view_away(models, hints):
