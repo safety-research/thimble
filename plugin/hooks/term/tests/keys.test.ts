@@ -237,7 +237,7 @@ for (const rows of [SHORT, TALL]) {
     expect(w.closed).toContain(PANEL)
   })
 
-  test(`keys · home · summary line · ${size}: open › gives the panel the keys, the new card's group unfolded and the card chosen; open › marks nothing seen`, async ($, on) => {
+  test(`keys · home · thimble line · ${size}: the cards' item gives the panel the keys, the new card's group unfolded and the card chosen`, async ($, on) => {
     // live check term-fix8, quirk 6
     const w = world(on)
     await start($, w)
@@ -253,8 +253,8 @@ for (const rows of [SHORT, TALL]) {
     w.paneFocused = false
     w.grantOnReopen = true
     let above = (await $.ui.mount(ABOVE)) as unknown as M
-    expect(shown(await above.drawn())).toContain('cards 2 new')
-    await above.press({ key: 'above-summary-open' })
+    expect(shown(await above.drawn())).toContain('cards 14 •')
+    await above.press({ key: 'above-summary-cards' })
     await above.unmount()
     await w.clock.advance(300)
     expect(w.paneFocused).toBe(true)
@@ -263,13 +263,12 @@ for (const rows of [SHORT, TALL]) {
     named(s.hint, ['↑↓ to choose', 'Enter to open', 'Space to fold'])
     expect(s.chosen).toContain('When were pages deleted?')
     expect(s.rows.find(r => r.includes('When were pages deleted?'))).toMatch(/new$/)
-    // 0.9.0 (SPEC-v2 3.8): the summary line stays while home shows, and `open ›` marks nothing seen: what arrives
-    // meanwhile adds to the cards' `new`
+    // the thimble line stays while home shows (0.9.0, the owner's notes 10-16 21:15), its count read again
     w.states.home = { ...w.states.home, cards: 15 }
     w.stamps.set(`${WS}/notebooks`, 3)
     await w.clock.advance(1100)
     above = (await $.ui.mount(ABOVE)) as unknown as M
-    expect(shown(await above.drawn())).toContain('cards 3 new')
+    expect(shown(await above.drawn())).toContain('cards 15')
     await above.unmount()
     await down($, w)
     expect((await seen($, rows, 'home')).chosen).toContain('Who deleted them?')
@@ -1419,7 +1418,7 @@ test('a notice\'s open › goes to the thread of the agent it names: an agent\'s
   expect(s.text).toContain('why is events.jsonl so much bigger?')
 })
 
-test("keys · home · summary line: `dismiss` marks what is new as seen and opens no panel", async ($, on) => {
+test("keys · home · thimble line: the cards' item clears the cards' `•`, after a relaunch too; what arrives after shows it again", async ($, on) => {
   resetKept()
   const w = world(on)
   await start($, w)
@@ -1427,14 +1426,14 @@ test("keys · home · summary line: `dismiss` marks what is new as seen and open
   w.stamps.set(`${WS}/notebooks`, 2)
   await w.clock.advance(1100)
   let above = (await $.ui.mount(ABOVE)) as unknown as M
-  expect(shown(await above.drawn())).toContain('cards 2 new')
-  await above.press({ key: 'above-summary-dismiss' })
+  expect(shown(await above.drawn())).toContain('cards 14 •')
+  await above.press({ key: 'above-summary-cards' })
   await above.unmount()
   await w.clock.settle()
-  expect(w.opened).not.toContain(PANEL)
-  // seen: the `new` is gone, after a relaunch too (kept.ts)
+  expect(w.opened).toContain(PANEL)
+  // seen: the `•` is gone, after a relaunch too (kept.ts)
   above = (await $.ui.mount(ABOVE)) as unknown as M
-  expect(shown(await above.drawn())).not.toContain(' new')
+  expect(shown(await above.drawn())).not.toContain('•')
   await above.unmount()
   expect(parseKept(w.files.get(`${WS}/${KEPT_FILE}`) ?? '').seen?.cards).toBe(14)
   // what arrives after shows again
@@ -1442,7 +1441,6 @@ test("keys · home · summary line: `dismiss` marks what is new as seen and open
   w.stamps.set(`${WS}/notebooks`, 3)
   await w.clock.advance(1100)
   above = (await $.ui.mount(ABOVE)) as unknown as M
-  expect(shown(await above.drawn())).toContain('cards 1 new')
+  expect(shown(await above.drawn())).toContain('cards 15 •')
   await above.unmount()
-  expect(w.opened).not.toContain(PANEL)
 })
