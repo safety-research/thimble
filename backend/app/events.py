@@ -32,10 +32,16 @@ them. A message the analyst sends while main's turn runs reaches the session onl
 the turn ends, so main's statusline shows its words at once, after QUEUED, until the held hook prints its line
 (queued_line, which tray.agents_route adds to the statusline).
 
-Terminal mode (the session launch.json names runs in terminal mode, subagent_files.session_mode) has no server, so no
-subscription, watcher poll or in-memory queue: post() writes the event to the workspace's events/queue.jsonl, a quiet
-one to held-events.json (event_files.py), and main's watcher takes it from the file. An event reaches main while main's
-`claude` process runs (launch.json's pid); none is refused for want of a subscription.
+On local transport (subagent_files.transport: before the analyst's first press of the browser workbench, and always for
+a peer) no server holds the session's events, so there is no subscription, watcher poll or in-memory queue: post()
+writes the event to the workspace's events/queue.jsonl, a quiet one to held-events.json (event_files.py), and the
+session's watcher takes it from the file. An event reaches main while main's `claude` process runs (launch.json's pid);
+none is refused for want of a subscription. An event names the session it is for (post's `session`): a process of a
+session posts for its own session (local.session_here) unless the caller names one, so a peer's label run tells the peer
+alone; an event for main names none. Only this server's own process (SERVING, set by its lifespan) queues events in
+memory, and only for main once main's transport is the server; every other process writes the file, and this server takes
+main's waiting events and held notes from it into its queue at each pull of main's watcher (_drain_files), so an event
+that a process started before the press posts after it still reaches main, once and in order.
 
 A session started before an update to 0.6.0 runs 0.5.0's MCP shim, and perhaps the hooks of 0.5.0's cached plugin copy,
 until Claude Code restarts. Those call the routes 0.5.0 named for Claude Code channels, which answer as their new routes
@@ -65,10 +71,15 @@ from . import subagent_files as files
 log = logging.getLogger("thimble.events")
 
 
+SERVING = False  # True in thimble's server process, whose lifespan sets it (module note)
+
+
 @asynccontextmanager
 async def _lifespan(app: Any):
     from . import session  # noqa: PLC0415
 
+    global SERVING
+    SERVING = True
     session.start_sweep()  # detaches a session recorded as main whose shim does not come back after a restart
     yield
 
@@ -99,7 +110,7 @@ DORMANT = "dormant"  # _pull_state: another session is main now, and this one is
 HOOK_ASK_PREFIX = "h"  # the ids of the permission requests the PermissionRequest hook relays
 SAID = "› "  # opens the analyst's own words in main's terminal (terminal_line)
 QUEUED = "queued from the browser: "  # opens the statusline's line of a message main has not got yet (queued_line)
-QUEUED_TERMINAL = "queued: "  # the same in terminal mode, where the analyst's words come from the terminal's panes
+QUEUED_TERMINAL = "queued: "  # the same on local transport, where the analyst's words come from the terminal's panes
 LINE_CHARS = 160  # of an event's line in main's terminal: about two lines
 NOTICES_KEPT = 50  # a session's queued messages kept for its statusline; the oldest go first
 # 0.5.0's routes (module note) -> the route each answers as. A 0.5.0 shim's own relay of a channel's permission prompt
@@ -207,14 +218,15 @@ def connected_workspaces() -> list[str]:
     return sorted(c for c, subs in _subs.items() if subs)
 
 
-def reachable(c: str) -> bool:
-    """Whether an event posted now reaches a session: a subscription of the session that is main, or a session main just
-    continued in whose shim has not subscribed yet (_awaits_shim). Another `claude` in the folder subscribes too, and
-    never gets main's events, nor does a parked session (_publish). In terminal mode, which has no subscription, main's
-    `claude` process runs (launch.json's pid), whose watcher takes the event from the queue file."""
-    ws = _terminal_ws(c)
+def reachable(c: str, session: str | None = None) -> bool:
+    """Whether an event posted now reaches its session (main's when `session` is None): a subscription of the session
+    that is main, or a session main just continued in whose shim has not subscribed yet (_awaits_shim). Another `claude`
+    in the folder subscribes too, and never gets main's events, nor does a parked session (_publish). Through the queue
+    file (_queue_ws), which has no subscription, main's `claude` process runs (launch.json's pid), whose watcher, or this
+    server, takes the event from the file; an event for a peer is taken by the peer's own watcher."""
+    ws = _queue_ws(c, session)
     if ws is not None:
-        return files.main_pid(ws) is not None
+        return bool(session) or files.main_pid(ws) is not None
     _read_main(c)
     main = _main_sid(c)
     return _awaits_shim(c) or bool(main and any(sub.session == main for sub in _live_subs(c, main)))
@@ -253,8 +265,7 @@ def build_note(kind: str, event_id: str, text: str, fields: dict[str, Any], *,
 # MEANWHILE (prompts/main.md)
 QUIET_KINDS = frozenset({"orient", "written", "labeled", "view", "card_types"})
 MEANWHILE = "meanwhile:"
-HELD_FILE = "held-events.json"  # in the workspace: the quiet events waiting, as notes, across restarts
-_held: dict[str, list[dict[str, Any]]] = {}  # workspace -> HELD_FILE's notes, once read
+HELD_FILE = "held-events.json"  # in the workspace: the quiet events waiting, as notes, across restarts (event_files.HELD)
 
 
 def describe(kind: str, payload: dict[str, Any]) -> str:
@@ -308,20 +319,24 @@ def _cut(line: str, n: int) -> str:
 
 
 def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind: bool = True,
-         mirror: bool = True, line: str | None = None, event_id: str | None = None) -> dict[str, Any]:
-    """Send one event to the workspace's session: {id, kind, delivered, thread?}. A `main` event shows in main's chat
-    as the analyst's line unless `mirror` is False, for a request server code writes to main, which passes the `line`
-    main's terminal shows instead of terminal_line's. `event_id` is the event's id when the caller recorded it first
-    (a START_AGENT event's request keeps it). 409 when no session listens, 400 for a kind main.md names no bullet for
-    (when `check_kind`), or for a message with no text."""
-    from . import agents, session, threads  # noqa: PLC0415
+         mirror: bool = True, line: str | None = None, event_id: str | None = None,
+         session: str | None = None) -> dict[str, Any]:
+    """Send one event to a session of the workspace: {id, kind, delivered, thread?}. `session` names the session it is
+    for; with none, a process of a session posts for its own (local.session_here) and this server for main, and an event
+    for main's session is main's (module note). A `main` event shows in main's chat as the analyst's line unless
+    `mirror` is False, for a request server code writes to main, which passes the `line` main's terminal shows instead
+    of terminal_line's. `event_id` is the event's id when the caller recorded it first (a START_AGENT event's request
+    keeps it). 409 when no session listens, 400 for a kind main.md names no bullet for (when `check_kind`), or for a
+    message with no text."""
+    from . import agents, session as session_mod, threads  # noqa: PLC0415
 
     kind = str(kind or "").strip()
     payload = dict(payload or {})
     if check_kind and kind not in kinds():
         raise HTTPException(400, f"unknown event kind {kind!r}; the kinds are {', '.join(kinds())} (prompts/{PROMPT}.md)")
-    ws = _terminal_ws(c)
-    if not reachable(c):
+    to = _addressee(c, session)
+    ws = _queue_ws(c, to)
+    if not reachable(c, to):
         raise HTTPException(409, NOT_LISTENING.format(cwd=config.corpus_dir(c)))
     event_id = event_id or secrets.token_hex(4)
     out: dict[str, Any] = {"id": event_id, "kind": kind}
@@ -348,22 +363,24 @@ def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind
         note = build_note(kind, event_id, words or describe(kind, payload), payload,
                           cap=None if kind == START_AGENT else BODY_CHARS)
     note["terminal"] = terminal_line(kind, words, payload) if line is None else line
+    if to:
+        out["session"] = to
     if kind in QUIET_KINDS:
         if ws is None:
             _keep_held(c, [*held(c), note])
         else:
-            event_files.hold(ws, note)
+            event_files.hold(ws, note, to)
         out.update(delivered=0, held=True)
         log.info("%s: event %s kind=%s held for the next event", c, event_id, kind)
         _observe(c, kind, seen, out)
         return out
-    session.expect(c, event_id, thread=out.get("thread"))
+    session_mod.expect(c, event_id, thread=out.get("thread"))
     if ws is None:
         out["delivered"] = _publish(c, note)
     else:
-        event_files.append(ws, note, render)
+        event_files.append(ws, note, render, to)
         out["delivered"] = 1
-        log.info("%s: event %s kind=%s queued for main's watcher", c, event_id, kind)
+        log.info("%s: event %s kind=%s queued for %s's watcher", c, event_id, kind, to or "main")
     _observe(c, kind, seen, out)
     return out
 
@@ -374,50 +391,81 @@ def held_line(note: dict[str, Any]) -> str:
     return f"[{attrs}] {' '.join(str(note.get('content') or '').split())}"
 
 
-def _terminal_ws(c: str) -> Path | None:
-    """The workspace folder of `c` when its session runs in terminal mode (module note), else None."""
+def _addressee(c: str, session: str | None) -> str | None:
+    """The session an event is for, or None for main's (module note): `session` when given, else in a process of a
+    session that session (local.session_here), never in this server; None when that is main's session."""
+    if session is None and not SERVING:
+        from . import local  # noqa: PLC0415
+
+        session = local.session_here()
+    if not session:
+        return None
+    try:
+        main = files.main_session(config.workspace_path(c))
+    except (ValueError, OSError):
+        main = ""
+    return None if not main or session == main else session
+
+
+def _queue_ws(c: str, session: str | None = None) -> Path | None:
+    """The workspace folder of `c` whose event files take an event for `session` (main's when None), or None when this
+    server's own queue takes it: in this server, for main, once main's transport is the server (module note)."""
     try:
         ws = config.workspace_path(c)
     except ValueError:
         return None
-    return ws if files.terminal(ws) else None
+    if SERVING and not session and files.transport(ws) == files.SERVER:
+        return None
+    return ws
+
+
+def _drain_files(c: str) -> int:
+    """In this server, once main's transport is the server: main's events that a process of the session wrote to the
+    event queue file after the press (or before it, not taken yet), queued for main's watcher in the order they were
+    posted, and main's held notes there joined to this server's (module note). How many events it queued."""
+    if not SERVING:
+        return 0
+    try:
+        ws = config.workspace_path(c)
+    except ValueError:
+        return 0
+    if files.transport(ws) != files.SERVER:
+        return 0
+    got = event_files.drain(ws)
+    main = _main_sid(c) or files.main_session(ws)
+    for rec in got:
+        note = {"rendered": str(rec.get("text") or ""), "terminal": str(rec.get("said") or rec.get("line") or ""),
+                "meta": {"kind": str(rec.get("kind") or ""), "event": str(rec.get("id") or "")}}
+        _pending.setdefault((c, main or ""), deque()).append(note)
+    if got:
+        log.info("%s: %d event(s) from the queue file queued for main's watcher", c, len(got))
+        _wake(c)
+    return len(got)
 
 
 def held(c: str) -> list[dict[str, Any]]:
-    """The quiet events waiting for the workspace's next event, as notes (in terminal mode, event_files')."""
-    ws = _terminal_ws(c)
-    if ws is not None:
-        return event_files.held(ws)
-    if c not in _held:
-        try:
-            notes = json.loads((config.workspace_dir(c) / HELD_FILE).read_text("utf-8"))
-        except (OSError, ValueError):
-            notes = []
-        _held[c] = [n for n in notes if isinstance(n, dict)] if isinstance(notes, list) else []
-    return list(_held[c])
+    """The quiet events waiting for main's next event, as notes (event_files: the workspace's held-events.json, which
+    this server and the session's processes share)."""
+    try:
+        return event_files.held(config.workspace_path(c))
+    except ValueError:
+        return []
 
 
 def _keep_held(c: str, notes: list[dict[str, Any]]) -> None:
-    _held[c] = list(notes)
     path = config.workspace_dir(c) / HELD_FILE
     try:
-        if notes:
-            ledger.atomic_write_text(path, json.dumps(notes, ensure_ascii=False))
-        else:
-            path.unlink(missing_ok=True)
+        event_files.keep_held(config.workspace_dir(c), notes)
     except OSError:
         log.warning("%s: the held events were not saved to %s", c, path, exc_info=True)
 
 
 def pop_held(c: str) -> list[dict[str, Any]]:
-    """The quiet events waiting, as notes, and no longer waiting."""
-    ws = _terminal_ws(c)
-    if ws is not None:
-        return event_files.pop_held(ws)
-    notes = held(c)
-    if notes:
-        _keep_held(c, [])
-    return notes
+    """Main's quiet events waiting, as notes, and no longer waiting."""
+    try:
+        return event_files.pop_held(config.workspace_dir(c))
+    except (ValueError, OSError):
+        return []
 
 
 def meanwhile(notes: list[dict[str, Any]]) -> str:
@@ -447,7 +495,7 @@ def send(c: str, kind: str, text: str, fields: dict[str, Any], *, thread: str | 
     event_id = secrets.token_hex(4)
     session.expect(c, event_id, thread=thread)
     note = {**build_note(kind, event_id, text, fields), "terminal": line}
-    ws = _terminal_ws(c)
+    ws = _queue_ws(c)
     if ws is not None:
         event_files.append(ws, note, render)
         return {"id": event_id, "kind": kind, "delivered": 1}
@@ -457,8 +505,8 @@ def send(c: str, kind: str, text: str, fields: dict[str, Any], *, thread: str | 
 def show(c: str, line: str) -> None:
     """A line for main's terminal about something the analyst did in the browser that sends main no event (a follow-up
     to the orientation), printed as main's next turn begins (held_route); kept only on the hook route, whose held hook
-    runs on every turn. In terminal mode it waits in the event queue for the held hook (event_files.show)."""
-    ws = _terminal_ws(c)
+    runs on every turn. On local transport it waits in the event queue for the held hook (event_files.show)."""
+    ws = _queue_ws(c)
     if ws is not None:
         event_files.show(ws, line)
         return
@@ -593,7 +641,9 @@ def _wake(c: str) -> None:
 
 def render(note: dict[str, Any]) -> str:
     """An event as the model reads it: `<thimble-event kind="…" event="…" …>`, the body on its own lines, then
-    `</thimble-event>` (escaped inside the body)."""
+    `</thimble-event>` (escaped inside the body); an event taken from the queue file comes rendered (_drain_files)."""
+    if note.get("rendered"):
+        return str(note["rendered"])
     meta = {str(k): str(v) for k, v in (note.get("meta") or {}).items()}
     attrs = " ".join(f'{k}="{html.escape(v, quote=True)}"' for k, v in meta.items())
     body = str(note.get("content") or "").replace(f"</{TAG}>", f"&lt;/{TAG}&gt;")
@@ -651,7 +701,7 @@ def queued_line(c: str, sid: str | None, chars: int = 110) -> str:
     main."""
     if not sid or sid != _main_sid(c):
         return ""
-    ws = _terminal_ws(c)
+    ws = _queue_ws(c)
     waiting = event_files.queued_words(ws) if ws is not None else [words for _, words in _notices.get((c, sid), [])]
     if not waiting:
         return ""
@@ -854,6 +904,7 @@ async def pull_route(request: Request, cwd: str, session: str | None = None, wai
     deadline = time.monotonic() + min(max(wait, 0.0), PULL_WAIT_MAX_S)
     while True:
         _requeue(c)
+        _drain_files(c)
         state = _pull_state(c, sid, pid)
         if state == GONE:
             raise HTTPException(410, "another session is main in this workspace now")

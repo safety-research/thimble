@@ -131,19 +131,23 @@ async def test_a_card_run_by_thimble_run_stores_what_a_kernel_run_stores(term):
         assert tools._format_cell_result(full, lines=tools.result_lines(CORPUS)) in done.stdout
 
 
-async def test_the_command_names_thimble_run_by_its_name_and_runs_from_the_sessions_path(term):
-    """The command add_card gives names `thimble-run` with no install path, so its row in the terminal, running or done,
-    reads `thimble-run card <id>`; it runs as given in a shell whose PATH starts with the plugin copy's bin/, as the
-    launcher's export line sets it (cli.launch_args)."""
+async def test_the_command_names_thimble_run_by_its_name_and_runs_from_the_sessions_path(term, monkeypatch):
+    """The command add_card gives names `thimble-run` with no install path when this plugin copy's bin/ is on the
+    session's PATH (Claude Code puts a plugin's bin/ there), so its row in the terminal reads `thimble-run card <id>`;
+    without it on PATH (0.9.0: no launcher puts it there) the command names the runner by its full path. Either runs as
+    given."""
+    path = os.environ.get("PATH", "")
+    monkeypatch.setenv("PATH", os.pathsep.join([str(cardrun.bin_path().parent), path]))
     res = await call(term, "add_card", question="names", code="print(2 + 2)")
     cid = card_id(res)
     assert cardrun.command("card", cid) == f"thimble-run card {cid}"
     assert f"thimble-run card {cid}" in text(res) and str(cardrun.bin_path()) not in text(res)
-    env = {**os.environ, "PATH": os.pathsep.join([str(cardrun.bin_path().parent), os.environ.get("PATH", "")])}
-    done = subprocess.run(cardrun.command("card", cid), shell=True, cwd=term, env=env, capture_output=True, text=True,
-                          timeout=120)
+    done = subprocess.run(cardrun.command("card", cid), shell=True, cwd=term, env=dict(os.environ), capture_output=True,
+                          text=True, timeout=120)
     assert done.returncode == 0, done.stdout + done.stderr
     assert done.stdout.startswith(f"card:{cid}\n") and "4" in done.stdout
+    monkeypatch.setenv("PATH", path)
+    assert cardrun.command("card", cid) == f"{cardrun.bin_path()} card {cid}"
 
 
 async def test_what_a_child_process_writes_is_in_the_card(term):
@@ -456,11 +460,10 @@ async def test_the_shim_starts_the_watch_before_any_call_so_a_resumed_sessions_c
             break
         await asyncio.sleep(0.1)
     assert started == [cid] and "check" not in notebook.get_cell(CORPUS, cid)
-    # a folder of no terminal-mode workspace starts nothing
-    _mode("browser")
+    # a folder of no workspace starts nothing
     cardrun.CardWatch.stop_all()
     local._started.clear()
-    assert local.begin(str(term)) is None and not cardrun.CardWatch._tasks
+    assert local.begin(str(term.parent)) is None and not cardrun.CardWatch._tasks
 
 
 async def test_the_watch_ends_a_run_whose_process_is_gone(term):
@@ -490,13 +493,15 @@ async def test_the_watch_ends_a_run_whose_process_is_gone(term):
     assert cell["outputs"][0][notebook.ERROR_MIME]["ename"] == cardrun.DEAD_ENAME
 
 
-async def test_thimble_run_refuses_a_browser_mode_workspace_and_a_missing_card(term):
+async def test_thimble_run_runs_after_the_press_and_refuses_a_missing_card(term):
+    """One card runner before and after a press of the browser workbench (R8): a workspace whose main runs on the server
+    still runs its cards through `thimble-run`."""
     assert "no card:nope" in run(term, "card", "nope").stdout
     _mode("browser")
     cid = notebook.insert_cell(CORPUS, notebook.create_notebook(config.workspace_dir(CORPUS), "G")["id"],
                                notebook.new_cell("code", "test", "q", code="print(1)"))["id"]
-    refused = run(term, "card", cid)
-    assert refused.returncode == 1 and "browser mode" in refused.stdout
+    ran = run(term, "card", cid)
+    assert ran.returncode == 0 and ran.stdout.startswith(f"card:{cid}\n"), ran.stdout
     assert run(term).returncode == 2
 
 

@@ -1,6 +1,6 @@
-"""thimble's backend without its server (app/local.py): in a terminal-mode workspace every tool runs in the calling
-process and opens no socket; a folder of no workspace and a browser-mode workspace are refused; `thimble state` gives
-the JSON the server's GET routes give and `thimble act` makes the changes its POST routes make; a process that lost its
+"""thimble's backend without its server (app/local.py): on local transport every tool runs in the calling process and
+opens no socket; a folder of no workspace and a session another took main from are refused; `thimble state` gives the
+JSON the server's GET routes give and `thimble act` makes the changes its POST routes make; a process that lost its
 environment does nothing; and the MCP shim in terminal mode keeps fd 1 for its stream and subscribes to nothing."""
 from __future__ import annotations
 
@@ -164,13 +164,23 @@ async def test_list_agents_counts_a_side_threads_running_fork_in_terminal_mode(t
     assert tray.thread_rows_files(CORPUS) == [], "a fork of another session does not run in this one"
 
 
-async def test_the_tools_refuse_a_folder_of_no_workspace_and_a_browser_mode_workspace(term, tmp_path):
+async def test_the_tools_refuse_a_folder_of_no_workspace_and_a_session_another_took_main_from(term, tmp_path):
+    """No mode refuses a call any more (0.9.0): the shim picks the transport per call. A session in launch.json's
+    `moved` (another session took main, activate.take_main) is refused with TAKEOVER_LINE."""
     res = await local.call("list_cards", {"group": "all"}, cwd=str(tmp_path))
     assert res["is_error"] and "not inside a corpus thimble knows" in text(res)
     assert not (config.WORKSPACES_DIR / tmp_path.name).exists(), "no tool call registers a folder"
     _mode("browser")
     res = await call(term, "list_cards", group="all")
-    assert res["is_error"] and "browser mode" in text(res)
+    assert not res["is_error"], "a 0.8.0 browser-mode record no longer refuses a local call"
+    ws = config.workspace_dir(CORPUS)
+    (ws / "trusted" / "launch.json").write_text(json.dumps({"session": "s-main", "transport": "local",
+                                                            "moved": ["s-old"], "peers": ["s-peer"]}))
+    res = await local.call("list_cards", {"group": "all"}, cwd=str(term), caller="s-old")
+    assert res["is_error"] and text(res) == local.TAKEOVER_LINE.format(name="list_cards")
+    for caller in ("s-main", "s-peer", None):
+        res = await local.call("list_cards", {"group": "all"}, cwd=str(term), caller=caller)
+        assert not res["is_error"], caller
 
 
 async def test_the_shims_end_ends_the_label_scan_pools_workers(term):
@@ -227,7 +237,7 @@ async def test_state_gives_what_the_routes_give(term):
     await call(term, "apply_label", scope="files", name="bash", predicate={"kind": "regex", "text": "Bash"},
                paths=["agents/*.jsonl"])
     home = await local.state(CORPUS, "home")
-    assert home["cards"] == 2 and home["labels"] == 1 and home["mode"] == "terminal" and home["unread"] == []
+    assert home["cards"] == 2 and home["labels"] == 1 and home["transport"] == "local" and home["unread"] == []
     assert home["views"] == [], "the views built for this corpus, as a list the home panel draws; no built-in viewer"
     assert home["coverage"] is None, "no orientation ran: no coverage line"
     # a view proposed and not built yet is listed with its state, when it was proposed and the files it claims; a
@@ -998,7 +1008,7 @@ def test_the_command_line_prints_json_and_an_error(term):
     assert out.returncode == 1 and "not JSON" in json.loads(out.stdout)["error"]
     _mode("browser")
     out = _cli("act", "seen", '{"thread": "x"}', "--cwd", str(term))
-    assert out.returncode == 1 and "browser mode" in json.loads(out.stdout)["error"]
+    assert out.returncode == 1 and json.loads(out.stdout) == {"error": "no such chat: x"}, "no mode refuses an act"
 
 
 def test_a_process_that_lost_its_environment_does_nothing(term, tmp_path):

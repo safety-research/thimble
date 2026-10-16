@@ -730,7 +730,7 @@ def test_a_fork_that_ends_with_its_session_may_be_forked_again_at_once(cwd, monk
     from app import subagent_files as files
     from app import subagents
 
-    monkeypatch.setattr(files, "terminal", lambda ws: True)
+    monkeypatch.setattr(files, "transport", lambda ws, sid=None: files.LOCAL)
     thread = agents.new_thread(CORPUS, None, None, "Days")
     tid = thread["id"]
     agents.update_agent(CORPUS, tid, **{threads.FORK_NAME_KEY: "which-days"})

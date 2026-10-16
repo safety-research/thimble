@@ -1692,8 +1692,8 @@ def _workspace(body: HookBody) -> str:
     return c
 
 
-# Each hook's body below is what its route does once the hook wrote its record: the server's route in browser mode, and
-# in terminal mode the hook's backend call (local_hooks.py), with no HTTP.
+# Each hook's body below is what its route does once the hook wrote its record: the server's route once main's transport
+# is the server, and on local transport the hook's backend call (local_hooks.py), with no HTTP.
 
 
 def hook_started(c: str, hook: dict[str, Any]) -> dict[str, Any]:
@@ -1838,13 +1838,13 @@ def fork_check(c: str, tool_input: dict[str, Any], tool_use_id: str | None = Non
 
 
 def fork_ended(c: str, thread_id: str) -> None:
-    """A thread's fork stopped, so a new Agent call may fork it again (fork_check); in terminal mode, where the
+    """A thread's fork stopped, so a new Agent call may fork it again (fork_check); on local transport, where the
     --agent-check hook keeps the forks starting in subagents.json by their description (subagent_files.fork_check),
     each description that names the thread goes."""
     from . import session  # noqa: PLC0415
 
     _forking.pop((c, thread_id), None)
-    if not files.terminal(config.workspace_path(c)):
+    if files.transport(config.workspace_path(c)) != files.LOCAL:
         return
     with update(c) as state:
         table = state.get(files.FORKING)

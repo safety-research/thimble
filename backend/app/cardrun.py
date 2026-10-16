@@ -1,23 +1,23 @@
-"""Card code run in the caller's Bash, for terminal mode: `thimble-run card <cell> | label <label> | stale`, and
-`thimble-run trial <cell>`, which the shim's card check starts itself.
+"""Card code run in the caller's Bash: `thimble-run card <cell> | label <label> | stale`, and `thimble-run trial <cell>`,
+which the shim's card check starts itself.
 
-In browser mode a card's code runs in a kernel the server owns. Terminal mode has no server, and code a model wrote never
-runs in the MCP shim: add_card and edit_card store the card with a `run` record ({state: waiting, by: bash, script}) and
-answer with one Bash command (`## card-run`); a code label answers with `## label-run`, and cards that read a changed
-label with `## cards-stale`. The caller runs the command in its Bash, as its permission mode decides and in Claude
+Code a model wrote never runs in the MCP shim or the server: add_card and edit_card store the card with a `run` record
+({state: waiting, by: bash, script}) and answer with one Bash command (`## card-run`); a code label answers with
+`## label-run`, and cards that read a changed label with `## cards-stale`. This holds before and after a press of the
+browser workbench (one card runner), and the browser's Run asks main to run the command. The caller runs the command in its Bash, as its permission mode decides and in Claude
 Code's own sandbox when the analyst turned that on, where `thimble-run` runs the code as a kernel cell would: one IPython shell (LocalKernel) set up with the kernel's own startup lines
 (notebook.startup_lines: Altair's mimetype renderer, pandas' column width, the figure formatter, the page's faces, the
 cell-reads hook and the `thimble` module with WS set), thimble's matplotlibrc and the inline backend's SVG figures,
 then the same storage path as a kernel run (notebook._execute_cell: output bounding, memos, reads, labels read). The
 cell runs in the process's main thread, as in a kernel, with a SIGALRM time limit standing in for a kernel's SIGINT,
 while the event loop runs in a thread of its own (serve). It writes the card's outputs into the group under the store's
-lock and prints what add_card prints in browser mode, and exits 0, or 1 when the code errored. No kernel lasts between
+lock and prints what add_card prints, and exits 0, or 1 when the code errored. No kernel lasts between
 runs, so each run loads its data again. A run writes only the folders write_dirs names; it writes no canvas history or
 undo step and starts no chat.
 
 The shim's CardWatch sees a group file change and records each run that ended (canvas_history, undo), starts the card
 check of a card marked `check: "pending"` (a run that ended with add_card's `takeaway`; card_check.start skips it as
-browser mode does without Chromium or the built frontend), and marks interrupted a run whose `thimble-run` is gone (its
+it does without Chromium or the built frontend), and marks interrupted a run whose `thimble-run` is gone (its
 run lock is free: hold_run), such as one Bash's timeout killed. The check tries the code of its revision of a card
 through `thimble-run trial`, which the shim starts in Anthropic's sandbox runtime where it runs (trial_sandbox), and
 otherwise with the user's access (trial).
@@ -65,29 +65,39 @@ def in_runner() -> bool:
 
 
 def defers(c: str) -> bool:
-    """Whether a run of card code asked for in workspace `c` goes to `thimble-run` instead of running here: a terminal-
-    mode workspace, in a process that is no card runner (the MCP shim, the hooks, `thimble act`)."""
-    from . import local  # noqa: PLC0415
-
-    return not in_runner() and local.terminal(c)
+    """Whether a run of card code asked for in workspace `c` goes to `thimble-run` instead of running here: in every
+    process that is no card runner (the MCP shim, the server, the hooks, `thimble act`), whatever the transport, since
+    `thimble-run` in main's Bash is the one card runner (module note)."""
+    return not in_runner()
 
 
 # --------------------------------------------------------------------------- the command and its folders
 
 
 def bin_path() -> Path:
-    """`thimble-run` in the plugin copy this session loaded (local.PLUGIN_ROOT), whose path the launcher's allow rule
-    names, else in this tree's plugin/."""
+    """`thimble-run` in the plugin copy this session loaded (local.PLUGIN_ROOT), else in this tree's plugin/."""
     from . import local  # noqa: PLC0415
 
     return (local.PLUGIN_ROOT or config.REPO_ROOT / "plugin") / "bin" / BIN
 
 
+def on_path() -> bool:
+    """Whether `thimble-run` by its name is this plugin copy's (bin_path) on this process's PATH, as Claude Code puts a
+    plugin's bin/ there."""
+    import shutil  # noqa: PLC0415
+
+    found = shutil.which(BIN)
+    try:
+        return bool(found) and Path(found).resolve() == bin_path().resolve()
+    except OSError:
+        return False
+
+
 def command(kind: str, ident: str = "") -> str:
-    """The Bash command that runs `thimble-run <kind> [<ident>]`, which main's `--allowedTools` lets run without asking:
-    `thimble-run` by its name, with no install path, since the launcher puts this copy's bin/ first on the session's
-    PATH in terminal mode (cli.launch_args), so the command's row in the terminal reads `thimble-run card <id>`."""
-    return shlex.join([BIN, kind, *([ident] if ident else [])])
+    """The Bash command that runs `thimble-run <kind> [<ident>]`: `thimble-run` by its name when it is on the session's
+    PATH (on_path), so the command's row in the terminal reads `thimble-run card <id>`, else by its full path in this
+    plugin copy."""
+    return shlex.join([BIN if on_path() else str(bin_path()), kind, *([ident] if ident else [])])
 
 
 def write_dirs(c: str) -> list[Path]:
@@ -652,8 +662,7 @@ def run_alive(ws: Path, cid: str) -> bool:
 
 
 async def run_card(c: str, cid: str) -> tuple[str, int]:
-    """Run card `cid`'s code (module note): (the text add_card answers with in browser mode, 0, or 1 when the code
-    errored)."""
+    """Run card `cid`'s code (module note): (the text add_card answers with, 0, or 1 when the code errored)."""
     from . import card_check, notebook, tools  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
@@ -740,8 +749,8 @@ async def run_label(c: str, ident: str) -> tuple[str, int]:
 
 async def run_stale(c: str) -> tuple[str, int]:
     """Run again every card that read a label at an older revision (concepts.stale_cards, notebook.rerun_on_labels).
-    (The cards that need their author, as rerun_readers tells main of them in browser mode: each one whose takeaway the
-    new output left behind, or that failed, with its output; 0, or 1 when one failed.)"""
+    (The cards that need their author, as rerun_readers tells main of them: each one whose takeaway the new output left
+    behind, or that failed, with its output; 0, or 1 when one failed.)"""
     from . import concepts, notebook  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
@@ -766,7 +775,7 @@ async def run_stale(c: str) -> tuple[str, int]:
 # --------------------------------------------------------------------------- thimble-run trial: a card check's revision
 #
 # The card check runs in the shim, and it tries the code of its revision of a card before it keeps it
-# (notebook.trial_run). In browser mode the revision runs on the card's kernel; in terminal mode the shim starts
+# (notebook.trial_run). On the server the revision runs on the card's kernel; on local transport the shim starts
 # `thimble-run trial <card>` itself (trial), with the revision's code on its stdin, in Anthropic's sandbox runtime where
 # it runs (trial_sandbox), and otherwise with the user's access, and with the shim's environment less its keys. The runner runs the code as a
 # card run would, stores nothing, and prints the run as one JSON line (TRIAL_FIELDS), which the shim reads back. No
@@ -914,11 +923,10 @@ async def trial(c: str, cid: str, code: str, timeout_s: float | None) -> dict[st
 
 
 class CardWatch:
-    """A task of the shim's event loop in terminal mode: once a second it looks at the workspace's group files, and
-    when one changed it starts the card check of each card marked `check: "pending"` (card_check.start, which skips a
-    card without Chromium or the built frontend as browser mode does) and marks interrupted a card whose `thimble-run`
-    process is gone mid-run (its run lock is free: hold_run). The check runs on this loop and ends with the session, as a
-    browser-mode check ends with its server."""
+    """A task of the shim's event loop: once a second it looks at the workspace's group files, and when one changed it
+    starts the card check of each card marked `check: "pending"` (card_check.start, which skips a card without Chromium
+    or the built frontend) and marks interrupted a card whose `thimble-run` process is gone mid-run (its run lock is
+    free: hold_run). The check runs on this loop and ends with the session, as a server's check ends with its server."""
 
     _tasks: dict[str, asyncio.Task] = {}
 
@@ -1059,10 +1067,6 @@ def main(argv: list[str]) -> int:
     local.settle_dirs()
     try:
         c = _workspace(ident if kind in ("card", TRIAL) else None)
-        from . import local  # noqa: PLC0415
-
-        if not local.terminal(c):
-            raise RunError("thimble-run: this workspace's session runs in browser mode, where the kernel runs cards")
         install()
         stop = _on_term(c, ident if kind == "card" else "")  # a trial stores nothing to end
         try:

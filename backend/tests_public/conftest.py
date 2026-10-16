@@ -389,16 +389,27 @@ def _view_tickets_held(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _no_held_events():
-    """The quiet events events.post holds for the next event and the modes main's hooks reported are module state:
-    none carries over from another test."""
-    from app import events, session
+def _serving():
+    """The backend's code runs here as thimble's server runs it (events.SERVING, which the server's lifespan sets): an
+    event for main whose transport is the server goes to the server's own queue. A test of another process of the
+    session (the MCP shim, a hook, `thimble act`) sets it False."""
+    from app import events
 
-    for held in (events._held, session._modes):
-        held.clear()
+    events.SERVING = True
     yield
-    for held in (events._held, session._modes):
-        held.clear()
+    events.SERVING = True
+
+
+@pytest.fixture(autouse=True)
+def _no_held_events():
+    """The modes main's hooks reported are module state: none carries over from another test. (The quiet events
+    events.post holds for the next event live in the workspace's held-events.json, which each test's workspace has
+    its own of.)"""
+    from app import session
+
+    session._modes.clear()
+    yield
+    session._modes.clear()
 
 
 LISTENER_SID = "5e55a000-0000-4000-8000-0000000000aa"

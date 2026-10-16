@@ -35,13 +35,21 @@ the start tool, or got the `start_agent` event that carries a thread's fork's st
 the request when it did not happen; a start_agent event a turn missed is posted once more first (_ask_again). A Workflow
 call is one agent chat whose members are the run's agent transcripts.
 
-Terminal mode (launch.json names a session in terminal mode, subagent_files.session_mode) has no server to follow main.
-Main is the session launch.json names, followed through the moves --rekey recorded, and current() gives every process a
-Live of it that reads nothing. The mirror runs in passes, from the hooks' backend calls (local_hooks.py): catch_up
-attaches main from sessions.json's cursor as a restarted server would, reads main's and every subagent's transcript to
-their ends and saves the cursor, with no tail task, grace or waits. The cursor keeps what R2 and R3 need across passes. Main ends a turn with
-nothing for the analyst without text, or with END_TOKEN where Claude Code asks for text (terminal_tools.py); no chat
-shows END_TOKEN, nor a line that opens with TERMINAL_ONLY."""
+On local transport (subagent_files.transport: before the analyst's first press of the browser workbench) no server
+follows main. Main is the session launch.json names, followed through the moves --rekey recorded, and current() gives
+every process a Live of it that reads nothing. The mirror runs in passes, from the hooks' backend calls
+(local_hooks.py): catch_up attaches main from sessions.json's cursor as a restarted server would, reads main's and every
+subagent's transcript to their ends and saves the cursor, with no tail task, grace or waits, one pass at a time
+(PASS_LOCK). The cursor keeps what R2 and R3 need across passes. After the press this server follows main: its attach
+waits for a pass under way (PASS_LOCK) and reads on from the cursor that pass saved, so the mirror has no gap and no
+duplicate (H4), and catch_up reads nothing more. Main ends a turn with nothing for the analyst without text, or with
+END_TOKEN where Claude Code asks for text (terminal_tools.py); no chat shows END_TOKEN, nor a line that opens with
+TERMINAL_ONLY.
+
+At the end of each of main's turns the checks hear of it twice: the shown checks over the cards run on the cards that
+changed (checks.main_turn_ended), and the checks over Claude's answers get the turn's text rows as Claude wrote them,
+each with its record's uuid, and the turn's tool calls (checks.answer_ended), which decides whether the turn answered
+from data. Main's text records carry that uuid, so the browser can anchor a check's comment on its passage."""
 from __future__ import annotations
 
 import asyncio
@@ -297,11 +305,13 @@ class Live:
         self.turn_calls: set[str] = set()  # the ids of main's tool calls in the turn (R3, _end_turn)
         self.turn_since: str | None = None  # when the turn opened, which the checks over the cards look from (_end_turn)
         self.turn_text = ""  # main's last text in the turn, the reason R3 quotes
+        self.turn_rows: list[dict] = []  # the turn's text rows as Claude wrote them: {uuid, text} (_answer_checked)
+        self.turn_tools: list[dict] = []  # the turn's tool calls: {name, input}, inputs cut (_brief, _answer_checked)
         self.thimble_calls: dict[str, dict] = {}  # tool_use id of main's call for one of thimble's agents -> {name, input}
         # tool_use id of main's SendMessage to a subagent -> (its Sub, the call's input): shown in its chat once the call
         # ran, since a hook (thimble's --agent-check) or auto mode may refuse it
         self.relays: dict[str, tuple] = {}
-        # relays a pass of the mirror in terminal mode handed on as [agent id, input], until their Subs are known
+        # relays a pass of the mirror on local transport handed on as [agent id, input], until their Subs are known
         self.pending_relays: dict[str, list] = {}
         self.after_start = False  # main's last call was a start of thimble's or its tool: a bare `Bash true` next is hidden
         self.last_tool: str | None = None  # the name of main's last tool call (_nudged)
@@ -361,6 +371,8 @@ SHIM_PIDS_KEPT = 256  # _shim_pids and _shim_configs keep the newest this many
 STAMP_LINES = 200  # _began_since looks this far into a transcript for its first record with a timestamp
 CURSOR_CALLS = 200  # the cursor keeps the names of main's newest this many tool calls, for results that come later
 TURN_TEXT_KEPT = 4_000  # chars of main's last text in the turn the cursor keeps (R3's reason)
+TURN_ROWS_KEPT = 200  # the turn's last text rows the cursor keeps for the checks over Claude's answers
+TURN_TOOLS_KEPT = 500  # the turn's last tool calls the cursor keeps for them
 SUBS_KEY = "subs"  # sessions.json: each followed subagent transcript's place, by its path (_sub_places)
 CONTINUED = "continued"  # sessions.json's reason for a session that continued in another (_continue)
 FROM_KEY = "continues"  # sessions.json: {session, transcript, at} of the session this one continues (_continue)
@@ -465,9 +477,12 @@ def _turn_state(lv: Live) -> dict:
             "seen": [k for k in lv.seen if k.split(":", 1)[-1] in names],
             "watch_calls": [i for i in lv.watch_calls if i in names], "sends": lv.sends,
             "turn_threads": lv.turn_threads, "forked": sorted(lv.forked),
-            # R2 and R3 (module note), which a pass of the mirror in terminal mode hands to the next
+            # R2 and R3 (module note), which a pass of the mirror on local transport hands to the next
             "thimble_calls": lv.thimble_calls, "turn_calls": sorted(lv.turn_calls)[-CURSOR_CALLS:],
             "turn_text": lv.turn_text[-TURN_TEXT_KEPT:], "after_start": lv.after_start, "last_tool": lv.last_tool,
+            # the checks over Claude's answers (_answer_checked): a turn's text and its end are often read by
+            # different passes
+            "turn_rows": lv.turn_rows[-TURN_ROWS_KEPT:], "turn_tools": lv.turn_tools[-TURN_TOOLS_KEPT:],
             "last_failed": lv.last_failed,
             "relays": {k: [sub.agent_id, inp] for k, (sub, inp) in lv.relays.items() if sub.agent_id},
             # the proposer's (proposer.turn_ended): a turn's first line and its end are often read by different passes
@@ -489,6 +504,8 @@ def _take_turn(lv: Live, cur: dict) -> None:
     lv.thimble_calls = {str(k): v for k, v in calls.items() if isinstance(v, dict)} if isinstance(calls, dict) else {}
     lv.turn_calls = {str(i) for i in cur.get("turn_calls") or []}
     lv.turn_text = str(cur.get("turn_text") or "")
+    lv.turn_rows = [r for r in cur.get("turn_rows") or [] if isinstance(r, dict)]
+    lv.turn_tools = [t for t in cur.get("turn_tools") or [] if isinstance(t, dict)]
     lv.after_start = bool(cur.get("after_start"))
     lv.last_tool = str(cur.get("last_tool") or "") or None
     lv.last_failed = bool(cur.get("last_failed"))
@@ -544,13 +561,46 @@ def _learn_config(lv: Live, reported: str | None) -> bool:
 # --------------------------------------------------------------------------- attach and detach
 
 
-def _terminal_ws(c: str) -> Path | None:
-    """The workspace folder of `c` when the session launch.json names runs in terminal mode (module note), else None."""
+def _local_ws(c: str) -> Path | None:
+    """The workspace folder of `c` while main runs on local transport (module note), else None."""
     try:
         ws = config.workspace_path(c)
     except ValueError:
         return None
-    return ws if sfiles.terminal(ws) else None
+    return ws if sfiles.transport(ws) == sfiles.LOCAL else None
+
+
+PASS_LOCK = "mirror.pass.lock"  # in the workspace folder: held by a pass of the mirror (catch_up) while it reads
+HANDOVER_S = 15.0  # how long this server's attach waits for a pass under way to end (H4)
+
+
+@contextlib.contextmanager
+def _pass_lock(ws: Path, wait_s: float | None = None):
+    """PASS_LOCK held for the block: waited for (None) or for at most `wait_s`, after which the block runs without it."""
+    import fcntl  # noqa: PLC0415
+
+    try:
+        fd = os.open(Path(ws) / PASS_LOCK, os.O_RDONLY | os.O_CREAT, 0o600)
+    except OSError:
+        fd = -1
+    if fd >= 0:
+        end = None if wait_s is None else time.monotonic() + wait_s
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | (0 if end is None else fcntl.LOCK_NB))
+                break
+            except BlockingIOError:
+                if time.monotonic() >= end:
+                    log.warning("%s: a pass of the mirror held %s past %.0f s", ws.name, PASS_LOCK, wait_s or 0)
+                    break
+                time.sleep(0.02)
+            except OSError:
+                break
+    try:
+        yield
+    finally:
+        if fd >= 0:
+            os.close(fd)
 
 
 def attached_workspaces() -> list[str]:
@@ -586,20 +636,20 @@ def tell_terminal(c: str, line: str) -> bool:
 
 
 def current(c: str) -> Live | None:
-    """The session that is main in workspace `c`: the one this server follows, or in terminal mode the one launch.json
+    """The session that is main in workspace `c`: the one this server follows, or on local transport the one launch.json
     names, followed through the moves --rekey recorded (_terminal_main), when no pass of the mirror in this process
     attached it (catch_up)."""
     lv = _live.get(c)
-    if lv is None and (ws := _terminal_ws(c)) is not None:
+    if lv is None and (ws := _local_ws(c)) is not None:
         return _terminal_main(c, ws)
     return lv
 
 
-_shadows: dict[str, Live] = {}  # workspace -> main as current() gives it in terminal mode, which reads nothing
+_shadows: dict[str, Live] = {}  # workspace -> main as current() gives it on local transport, which reads nothing
 
 
 def _terminal_main(c: str, ws: Path) -> Live | None:
-    """Main in terminal mode as a Live that reads nothing (no tail, not in _live): its id, its folder, its transcript and
+    """Main on local transport as a Live that reads nothing (no tail, not in _live): its id, its folder, its transcript and
     its `claude` process (launch.json's pid), for the code that asks which session is main. None while launch.json names
     none."""
     sid = sfiles.main_session(ws)
@@ -656,6 +706,10 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
               pid or stored.get("pid"))
     _learn_config(lv, config_dir)
     lv.transcript_path = lv.transcript_path or find_transcript(sid, lv.config_dir)
+    if restored and _handing_over(c):
+        # H4: a pass of the mirror that runs now on local transport ends first, and its cursor is the one read on from
+        with _pass_lock(config.workspace_path(c), HANDOVER_S):
+            stored = sessions(c).get(sid) or {}
     if restored:
         lv.since = str(stored.get("since") or lv.since)
         _restore_cursor(lv, stored.get("cursor"))
@@ -700,6 +754,17 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
     _resume_work(c)
     log.info("%s: session %s attached (%s)", c, sid, "restored" if restored else "new")
     return lv
+
+
+def _handing_over(c: str) -> bool:
+    """Whether this server follows main of workspace `c` after a press (events.SERVING and main's transport is the
+    server), where passes of the mirror on local transport may have read main until now (H4)."""
+    from . import events  # noqa: PLC0415
+
+    try:
+        return events.SERVING and sfiles.transport(config.workspace_path(c)) == sfiles.SERVER
+    except ValueError:
+        return False
 
 
 def _kept_modes() -> dict[str, Any]:
@@ -816,9 +881,9 @@ def note_plan(c: str, sid: str | None, plan: bool) -> None:
 
 def main_mode(c: str) -> str | None:
     """The permission mode main's hooks last reported (note_mode), by Claude Code's name, to this server or, for the
-    session it restarted under, to the one before it; None before the first report. In terminal mode, as the files say
+    session it restarted under, to the one before it; None before the first report. On local transport, as the files say
     (subagent_files.main_mode: the mode hook's record, and the module's plan poll)."""
-    if (ws := _terminal_ws(c)) is not None:
+    if (ws := _local_ws(c)) is not None:
         return sfiles.main_mode(ws)
     lv, got = _live.get(c), _modes.get(c)
     return got[1] if lv is not None and got is not None and got[0] == lv.sid else None
@@ -852,7 +917,7 @@ def _restore_subs(lv: Live, places: Any = None, *, revive: bool = True) -> None:
             lv.subs.append(sub)
         elif (meta.get("kind") == agents.KIND_THREAD and fork.get("tool_use_id") and fork.get("session") == lv.sid
               and not fork.get("ended") and not threads.settled(lv.c, str(meta["id"]))):
-            # its Agent call was read and its file not yet found (terminal mode reads each in its own process): the
+            # its Agent call was read and its file not yet found (local transport reads each in its own process): the
             # file, which names the thread by its question only, joins the thread by the call's tool_use id
             lv.subs.append(Sub(lv.c, str(meta["id"]), fork.get("tool_use_id"), None, thread=True))
         # a chat of one of thimble's agents (route subagent), its role's or a descendant's step, is followed to its end
@@ -993,7 +1058,7 @@ def _moved_main(c: str, sid: str) -> Live | None:
 def main_pid(c: str) -> int | None:
     """The pid of the `claude` process main's session runs in: what its shim reported, else (after a restart, before
     that shim came back) what sessions.json recorded for the session main's meta names."""
-    if (ws := _terminal_ws(c)) is not None:
+    if (ws := _local_ws(c)) is not None:
         return sfiles.main_pid(ws)  # main's `claude`, which the launcher wrote there, for the session's life
     cur = _live.get(c)
     if cur is not None:
@@ -1142,10 +1207,10 @@ def _stop_agents(c: str) -> None:
 
 def _resume_work(c: str) -> None:
     """A session is main in workspace `c`: the view builds a server restart left are attached again (dev.resume_views).
-    Nothing main's quit stopped starts again by itself. Nothing in terminal mode, where no server restarts."""
+    Nothing main's quit stopped starts again by itself. Nothing on local transport, where no server restarts."""
     from . import dev  # noqa: PLC0415 — dev imports this module
 
-    if _terminal_ws(c) is not None:
+    if _local_ws(c) is not None:
         return
     for fn in (dev.resume_views,):
         try:
@@ -1307,6 +1372,7 @@ def _open_turn(lv: Live) -> None:
         lv.turn_open, lv.fresh, lv.wrote, lv.turn_threads, lv.forked = True, True, False, list(lv.handed), set()
         lv.flagged, lv.answered, lv.held_by_check, lv.stop_noted = False, True, False, False
         lv.turn_calls, lv.turn_text, lv.turn_since = set(), "", _now()
+        lv.turn_rows, lv.turn_tools = [], []
         lv.turn_analyst = lv.api_failed = False
     agents.set_running(lv.c, agents.MAIN_ID, True)
 
@@ -1337,6 +1403,7 @@ def _end_turn(lv: Live, cut: str | None = None) -> None:
     _ask_again(lv, again)
     if was_open:
         _cards_checked(lv)
+        _answer_checked(lv)
         if not lv.api_failed:  # the turn answered: an earlier failure of main's requests is over
             _main_api_cleared(lv)
         _proposer_turn(lv, cut)
@@ -1350,6 +1417,38 @@ def _cards_checked(lv: Live) -> None:
         checks.main_turn_ended(lv.c, lv.turn_since or lv.since)
     except Exception:  # noqa: BLE001 — a check that does not run is no reason to fail the mirror
         log.exception("%s: the checks over the cards did not start at main's turn end", lv.c)
+
+
+def _answer_checked(lv: Live) -> None:
+    """The checks over Claude's answers hear of the turn (checks.answer_ended, module note): its text rows as Claude wrote
+    them, each with its record's uuid, the uuid of its first text row as the turn's, and its tool calls. A turn with no
+    text row tells nothing."""
+    from . import checks  # noqa: PLC0415
+
+    rows = [r for r in lv.turn_rows if str(r.get("text") or "").strip()]
+    if not rows:
+        return
+    turn = {"sid": lv.sid, "turn": str(rows[0].get("uuid") or ""), "rows": [dict(r) for r in rows],
+            "tools": [dict(t) for t in lv.turn_tools], "at": time.time()}
+    try:
+        checks.answer_ended(lv.c, turn)
+    except Exception:  # noqa: BLE001 — a check that does not run is no reason to fail the mirror
+        log.exception("%s: the checks over Claude's answer did not start at main's turn end", lv.c)
+
+
+INPUT_CHARS = 4000  # of each text value of a turn's tool call kept for the checks over Claude's answers (_brief)
+
+
+def _brief(value: Any) -> Any:
+    """A tool call's input as the turn keeps it (Live.turn_tools): every text value cut at INPUT_CHARS, the rest as it
+    is."""
+    if isinstance(value, str):
+        return value[:INPUT_CHARS]
+    if isinstance(value, dict):
+        return {str(k): _brief(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_brief(v) for v in value]
+    return value
 
 
 def _proposer_turn(lv: Live, cut: str | None) -> None:
@@ -1480,11 +1579,12 @@ def _browser_event(lv: Live, raw: str, *, mid_turn: bool) -> None:
     if event_id and event_id in _expected:
         _expected.discard(event_id)
         return
-    if event_id and (ws := _terminal_ws(lv.c)) is not None:
+    if event_id:
         from . import event_files  # noqa: PLC0415
 
-        if event_files.posted(ws, event_id):  # posted by another process of the session, which logged it (events.post)
-            return
+        with contextlib.suppress(ValueError):
+            if event_files.posted(config.workspace_path(lv.c), event_id):
+                return  # posted by another process of the session through the queue file, which logged it (events.post)
     if kind == "main" or not kind:
         lv.wrote = True
         agents.mirror(lv.c, "user", by=BROWSER, text=body.strip(), event=event_id or None)
@@ -1657,12 +1757,19 @@ def visible(text: str) -> str:
     return "\n".join(ln for ln in text.split("\n") if not ln.lstrip().startswith(TERMINAL_ONLY)).strip()
 
 
-def _text(lv: Live, text: str, **extra: Any) -> None:
+def _text(lv: Live, text: str, uuid: str = "", **extra: Any) -> None:
+    """One text block of main's: kept raw with its record's `uuid` among the turn's rows (_answer_checked), and written
+    to main's chat as a chat shows it (visible), with that uuid."""
+    if uuid and lv.turn_open:
+        if lv.turn_rows and lv.turn_rows[-1].get("uuid") == uuid:
+            lv.turn_rows[-1] = {"uuid": uuid, "text": f"{lv.turn_rows[-1]['text']}\n{text}"}
+        else:
+            lv.turn_rows.append({"uuid": uuid, "text": text})
     text = visible(text)
     if not text.strip():
         return
     lv.turn_text = text
-    _rec(lv, "text", delta=text, **extra)
+    _rec(lv, "text", delta=text, **({"uuid": uuid} if uuid else {}), **extra)
 
 
 def _tool_use(lv: Live, tool_use_id: str, name: str, tool_input: Any) -> None:
@@ -1672,10 +1779,12 @@ def _tool_use(lv: Live, tool_use_id: str, name: str, tool_input: Any) -> None:
     if f"use:{tool_use_id}" in lv.seen:
         return
     lv.seen.add(f"use:{tool_use_id}")
+    inp = tool_input if isinstance(tool_input, dict) else {}
+    if lv.turn_open:
+        lv.turn_tools.append({"name": name, "input": _brief(inp)})
     if name in PLUMBING_TOOLS:
         lv.hidden.add(tool_use_id)
         return
-    inp = tool_input if isinstance(tool_input, dict) else {}
     after_start, lv.after_start = lv.after_start, False
     if after_start and name == "Bash" and str(inp.get("command") or "").strip() == "true":
         lv.hidden.add(tool_use_id)  # main's empty call after a start of thimble's (module note): no row (U5)
@@ -1771,7 +1880,7 @@ def _tool_result(lv: Live, tool_use_id: str, content: Any, is_error: bool = Fals
         lv.forked.discard(tid)
         threads.fork_lost(lv.c, tid)
     relay = lv.relays.pop(tool_use_id, None)
-    if relay is None and tool_use_id in lv.pending_relays:  # a call an earlier pass read (terminal mode)
+    if relay is None and tool_use_id in lv.pending_relays:  # a call an earlier pass read (local transport)
         agent_id, inp = lv.pending_relays.pop(tool_use_id)
         held = _sub_by(lv, agent_id=str(agent_id or ""))
         relay = (held, inp if isinstance(inp, dict) else {}) if held is not None else None
@@ -1912,7 +2021,7 @@ def _request_of(lv: Live, tool_use_id: str, name: str, inp: dict) -> str | None:
         return hit
     want = str(inp.get(key) or "")
     # never one another call claimed: a later call with the same text may have claimed it before this pass read the
-    # denied call's result (terminal mode reads in passes)
+    # denied call's result (local transport reads in passes)
     found = [rid for rid, r in reqs.items() if isinstance(r, dict) and r.get("kind") == kind and r.get("route") == subagents.TYPED
              and r.get("state") in ("pending", "claimed") and not r.get("claimed_by")
              and str((r.get("input") or {}).get(key) or "") == want]
@@ -2187,17 +2296,17 @@ def agent_answer(c: str, agent_id: str) -> str | None:
 
 def main_quit(c: str, sid: str) -> None:
     """Main's SessionEnd hook said it quit (subagents.end_route): main detaches now and the workspace's jobs stop at
-    once (_stop_agents), without the grace a lost subscription waits. In terminal mode main detaches alone: the jobs of
+    once (_stop_agents), without the grace a lost subscription waits. On local transport main detaches alone: the jobs of
     the session ran in its own processes, which end with it."""
     lv = _live.get(c)
-    if lv is None and (ws := _terminal_ws(c)) is not None and sid and sid == sfiles.main_session(ws):
-        detach(c, sid, "ended")  # terminal mode: no pass attached main in this process; its record ends all the same
+    if lv is None and (ws := _local_ws(c)) is not None and sid and sid == sfiles.main_session(ws):
+        detach(c, sid, "ended")  # local transport: no pass attached main in this process; its record ends all the same
         return
     if lv is None or (sid and lv.sid != sid):
         return
     _cancel_grace(c)
     detach(c, lv.sid, "ended")
-    if _live.get(c) is None and _terminal_ws(c) is None:  # in terminal mode no server's jobs run, and none stops
+    if _live.get(c) is None and _local_ws(c) is None:  # on local transport no server's jobs run, and none stops
         _stop_agents(c)
 
 
@@ -3285,7 +3394,7 @@ def translate(lv: Live, line: bytes | str) -> None:
         if b["type"] == "text":
             if not isinstance(b.get("text"), str):
                 raise Unreadable("a text block without text")
-            _text(lv, b["text"], **api)
+            _text(lv, b["text"], uuid=str(rec.get("uuid") or ""), **api)
         elif b["type"] == "tool_use":
             if not isinstance(b.get("id"), str) or not isinstance(b.get("name"), str):
                 raise Unreadable("a tool_use block without id or name")
@@ -3368,7 +3477,7 @@ def _tail_once(lv: Live) -> None:
         if sub.finish and not sub.done and time.monotonic() - sub.quiet_since >= SUB_QUIET_S:
             _finish_sub(lv, sub, *sub.finish)
     _save_cursor(lv)  # the subagents' places, and the runs that ended
-    if _terminal_ws(lv.c) is None:  # in terminal mode the analyst sees the wait in the terminal itself
+    if _local_ws(lv.c) is None:  # on local transport the analyst sees the wait in the terminal itself
         _watch_wait(lv)
 
 
@@ -3533,8 +3642,8 @@ async def _tail(lv: Live) -> None:
 
 
 def _ensure_tail(lv: Live) -> None:
-    if lv.degraded or (lv.task is not None and not lv.task.done()) or _terminal_ws(lv.c) is not None:
-        return  # in terminal mode the mirror reads in passes (catch_up), never as a task
+    if lv.degraded or (lv.task is not None and not lv.task.done()) or _local_ws(lv.c) is not None:
+        return  # on local transport the mirror reads in passes (catch_up), never as a task
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
@@ -3542,19 +3651,26 @@ def _ensure_tail(lv: Live) -> None:
     lv.task = loop.create_task(_tail(lv), name=f"tail:{lv.c}:{lv.sid}")
 
 
-# --------------------------------------------------------------------------- terminal mode
+# --------------------------------------------------------------------------- local transport
 
 
 def catch_up(c: str) -> Live | None:
-    """Terminal mode (module note): one pass of the mirror. Main is attached in this process when it is not yet, from
-    sessions.json's cursor as a restarted server attaches it (a session no pass read yet is read from launch.json's
-    time, so a new session's first turn is read too); a move of main since the cursor's session (/clear, /resume) is
-    followed as _follow follows it; then main's transcript and every subagent's are read to their ends (tail_once,
-    with a look for new subagent files) and the cursor is saved. No tail task, grace or wait. The Live, or None outside
-    terminal mode or while launch.json names no session."""
-    ws = _terminal_ws(c)
+    """Local transport (module note): one pass of the mirror, under PASS_LOCK. Main is attached in this process when it
+    is not yet, from sessions.json's cursor as a restarted server attaches it (a session no pass read yet is read from
+    launch.json's time, so a new session's first turn is read too); a move of main since the cursor's session (/clear,
+    /resume) is followed as _follow follows it; then main's transcript and every subagent's are read to their ends
+    (tail_once, with a look for new subagent files) and the cursor is saved. No tail task, grace or wait. The Live, or
+    None once main runs on the server or while launch.json names no session."""
+    ws = _local_ws(c)
     if ws is None:
         return None
+    with _pass_lock(ws):
+        if _local_ws(c) is None:  # the press came while this pass waited for the one before
+            return None
+        return _catch_up(c, ws)
+
+
+def _catch_up(c: str, ws: Path) -> Live | None:
     sid = sfiles.main_session(ws)
     if not sid:
         return None
@@ -3585,7 +3701,7 @@ def catch_up(c: str) -> Live | None:
 
 
 def _attach_pass(c: str, ws: Path, sid: str) -> Live | None:
-    """attach() for a pass of the mirror in terminal mode: main's session `sid` in its `claude` process (launch.json's
+    """attach() for a pass of the mirror on local transport: main's session `sid` in its `claude` process (launch.json's
     pid); a session no pass read yet starts at the first record written since launch.json's time (_offset_since)."""
     try:
         cwd = str(config.corpus_dir(c))
