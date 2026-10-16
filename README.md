@@ -31,17 +31,20 @@ For a development build, clone the repo and run `bash scripts/install.sh`. See [
 
 ## Usage
 
-Run `thimble` in a folder with files you'd like to analyze, just like you run `claude`. Use `thimble mode terminal|browser` to switch between browser and terminal modes (see below).
+Run `claude` in a folder with files you'd like to analyze. thimble's plugin loads in every session and stays out of the
+way until you use it: it turns on at Claude's first read of a data file in the folder, when you type `/thimble`, or when
+Claude uses a thimble tool (a plan card or a label in a coding session).
 
-- To attach thimble to a running Claude Code session, run `/thimble`.
+Once it is on, thimble draws its work in the terminal: cards and checked citations under Claude's replies, a dim line
+that says how much of the data Claude saw, a one-line summary above the prompt, and a panel with Coverage, Citations,
+Labels, Threads, Views and Checks. Type `/thimble open`, or press `o` in the panel, to open the browser workbench on the
+same session, signed in, for the chat, the canvas, the File browser, views and reports. Over SSH the panel shows the
+tunnel command and a one-time link instead.
 
-### Terminal mode
+![thimble in the terminal: cards under a reply, and the citation panel beside the chat](docs/assets/thimble-term.png)
 
-In terminal mode, thimble operates as a Claude Code mod and shows its work directly in the terminal, with no server or browser.
-
-![terminal mode: cards under a reply, and the citation panel beside the chat](docs/assets/thimble-term.png)
-
-To switch a directory to terminal mode, run `thimble mode terminal` in it, then `thimble`. `thimble mode browser` switches it back.
+Each feature has a switch in `/config` → thimble and in the browser's Settings: Turn on when Claude reads data, View
+proposals, Labels, Checks, Citation marks, Coverage and Card check.
 
 ## Commands
 
@@ -49,20 +52,22 @@ To switch a directory to terminal mode, run `thimble mode terminal` in it, then 
 
 | Command | What it does |
 |---|---|
-| `/thimble` | open this folder in thimble and print the dashboard link |
+| `/thimble` | turn thimble on in this folder and open its panel |
+| `/thimble open` | open the browser workbench on this session, signed in |
+| `/thimble coverage`, `/thimble citations`, `/thimble checks` | open the panel at that section |
 | `/thimble fresh` | archive this workspace and open an empty one |
 | `/thimble restore [<name>]` | bring an archived workspace back |
 | `/thimble:orient [focus]` | start an orientation |
 | `/thimble:label <name> [definition]` | define a label and apply it to the records |
-| `/thimble:write [report\|slides\|story] [request]` | start a writer on a document |
+| `/thimble:write [report\|slides\|story] [request]` | start a writer on a document (in the browser workbench) |
 
 **From a shell** (`thimble help` lists every command)
 
 | Command | What it does |
 |---|---|
-| `thimble` | start Claude Code with thimble in this folder (a shortcut for `claude`, then `/thimble`); `thimble -c` continues the last session |
+| `thimble` | start Claude Code in this folder and open the browser workbench; `thimble -c` continues the last session |
+| `thimble open` | open the browser workbench for this folder's running session |
 | `thimble demo` | download the [demo datasets](demos/README.md) and open them in the browser |
-| `thimble mode browser\|terminal` | show thimble's work in the browser or in the terminal |
 | `thimble list`, `thimble purge <id>` | list the workspaces, or delete one |
 | `thimble doctor` | a checklist of what is installed and running, with the fix for each problem (`--verbose` for the details) |
 | `thimble unpair` | sign out every browser |
