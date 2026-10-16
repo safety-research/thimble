@@ -57,4 +57,3 @@ SURFACES = {"checks": _checks}
 ACTS = {"comment-resolve": _act_comment_resolve, "comment-reopen": _act_comment_reopen}
 STATE_USAGE = ", checks"
 ACT_USAGE = ", comment-resolve {doc, comment}, comment-reopen {doc, comment}"
-
