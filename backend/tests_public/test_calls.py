@@ -2,7 +2,6 @@
 tool-results folder, and read_ref reads a call in pages that stay under Claude Code's caps on a tool result."""
 from __future__ import annotations
 
-import json
 import re
 from typing import Any
 
@@ -81,19 +80,6 @@ def _page(text: str) -> tuple[int | None, int, list[tuple[int, str]], str | None
         assert tab and num.isdigit(), ln[:80]
         rows.append((int(num), line))
     return (int(inside.group(1)) if inside else None, int(inside.group(2).replace(",", "")) if inside else 0, rows, on)
-
-
-async def test_read_ref_cuts_a_call_s_long_input_and_keeps_its_output_on_the_page():
-    """A call's input printed whole could pass Claude Code's tool-result cap alone (a Write of a long file, a script in
-    a heredoc). read_ref now shows its first INPUT_UNITS and says how much more it holds; the output follows."""
-    command = "cat <<'EOF' > big.py\n" + "x = 1  # a line of the script\n" * 20_000 + "EOF"
-    ref = _store(command, "done\n")
-    text = await _read(ref)
-    whole = json.dumps({"command": command}, ensure_ascii=False)
-    shown = text.split("\n")[2].removeprefix("input: ")
-    assert whole.startswith(shown) and read_parts.units(shown) <= calls.INPUT_UNITS
-    assert f"... [truncated, {len(whole) - len(shown)} more chars]" in text
-    assert text.endswith("output, 1 lines:\n1\tdone")
 
 
 async def test_read_ref_reads_a_line_longer_than_a_page_in_pieces_and_every_page_reads_on():

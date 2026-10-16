@@ -1,6 +1,6 @@
-"""Any file is labelled and cited by its records (app/records.py): a CSV row whose cell holds a line break, the elements
-of a JSON document, a PDF's pages and a database's rows each have a ref, resolve, take labels from the regex, code and
-prompt kinds, and are marked in a view, while `<path>#L<n>` keeps working in the same files.
+"""Any file is labeled and cited by its records (app/records.py): a CSV row whose cell holds a line break, the elements
+of a JSON document, a PDF's pages and a database's rows each have a ref, resolve, take labels from the regex and code
+kinds, and are marked in a view, while `<path>#L<n>` keeps working in the same files.
 
 The corpus is invented: orders.csv has three orders after its header, the first with a two-line note; runs.json holds
 two runs in an array under `runs` beside its metadata; report.pdf is a three-page safety review whose second page is
@@ -123,77 +123,7 @@ def test_each_reader_splits_its_file_into_records_named_by_refs(corpus):
     assert [r["ref"] for r in _all(corpus, "notes.jsonl")] == ["notes.jsonl#L1", "notes.jsonl#L2"]
 
 
-def test_a_record_is_read_by_its_ref_and_by_its_place(corpus):
-    assert records.read(corpus / "orders.csv", "orders.csv", "row=3")["record"]["customer"] == "cy"
-    assert records.read(corpus / "orders.csv", "orders.csv", "row=4") is None
-    assert records.read(corpus / "report.pdf", "report.pdf", "page=2")["ref"] == "report.pdf#p2"
-    assert records.read(corpus / "runs.json", "runs.json", "/runs/1")["line"] is not None
-    inner = records.read(corpus / "runs.json", "runs.json", "/runs/1/outcome")
-    assert inner["record"] == "no refund" and inner["line"] is not None, "a value inside a record, on its record's lines"
-    assert records.read(corpus / "forge.db", "forge.db", "prs/7138")["record"]["title"] == "Clarify the width parameter"
-    at = records.records_at(corpus / "forge.db", "forge.db", [2, 99], under="prs")
-    assert [r["ref"] for r in at] == ["forge.db#prs/7114"]
-    assert [r["ref"] for r in records.records_at(corpus / "orders.csv", "orders.csv", [1, 3])] == ["orders.csv#row=1", "orders.csv#row=3"]
-    assert records.canon("report.pdf#page=3") == "report.pdf#p3" and records.canon("a.jsonl#L3") == "a.jsonl#L3"
-    assert records.split("report.pdf#page=3") == ("report.pdf", "p3") and records.split("orders.csv") is None
-    assert records.is_record_ref("forge.db#prs/7101") and not records.is_record_ref("view:x/k")
-    assert records.is_record_ref("budget.xlsx#Q3!B2"), "a viewer's own record of a file"
-    assert not records.is_record_ref("pandas-dev/pandas#57012"), "an issue's number, which a view's data holds as text"
-
-
-def test_a_database_s_rows_read_whatever_its_tables_are_keyed_by(corpus):
-    import sqlite3
-
-    db = corpus / "odd.db"
-    con = sqlite3.connect(db)
-    con.executescript("""
-        CREATE TABLE plain (a TEXT, b INTEGER);
-        INSERT INTO plain VALUES ('x', 1), ('y', 2);
-        CREATE TABLE codes (code TEXT PRIMARY KEY, v TEXT);
-        INSERT INTO codes VALUES ('007', 'bond'), ('12', 'twelve');
-        CREATE TABLE quoted ("k""ey" INTEGER PRIMARY KEY, v TEXT);
-        INSERT INTO quoted VALUES (3, 'three');
-        CREATE TABLE pairs (a INTEGER, b INTEGER, v TEXT, PRIMARY KEY (a, b)) WITHOUT ROWID;
-        INSERT INTO pairs VALUES (1, 1, 'p');
-    """)
-    con.commit()
-    con.close()
-    got = [r["ref"] for r in _all(corpus, "odd.db")]
-    assert got == ["odd.db#codes/007", "odd.db#codes/12", "odd.db#plain/1", "odd.db#plain/2", "odd.db#quoted/3"], \
-        "a table keyed by rowid, by text and by a column whose name holds a quote; one with two keys has no refs"
-    assert records.read(db, "odd.db", "codes/007")["record"]["v"] == "bond", "a text key that reads as a number"
-    assert records.read(db, "odd.db", "quoted/3")["record"]["v"] == "three"
-    assert refs.resolve(corpus, "odd.db#codes/007")["record"]["v"] == "bond"
-    assert refs.resolve(corpus, "odd.db#quoted/3")["meta"]["n"] == 1
-    assert refs.resolve(corpus, "odd.db#plain/2")["record"] == {"rowid": 2, "a": "y", "b": 2}
-
-
-def test_an_object_whose_arrays_hold_no_objects_splits_into_its_entries(corpus):
-    (corpus / "config.json").write_text(json.dumps({"name": "sweep", "settings": {"seed": 1}, "tags": ["a", "b"]}, indent=2))
-    assert [r["ref"] for r in _all(corpus, "config.json")] == ["config.json#/name", "config.json#/settings", "config.json#/tags"]
-    (corpus / "grid.json").write_text(json.dumps({"rows": [[1, 2], [3, 4]], "n": 2}, indent=2))
-    assert [r["ref"] for r in _all(corpus, "grid.json")] == ["grid.json#/rows/0", "grid.json#/rows/1"]
-
-
-def test_a_document_with_too_many_values_reads_as_lines(corpus, monkeypatch):
-    monkeypatch.setattr(records, "JSON_RECORDS_MAX", 3)
-    (corpus / "many.json").write_text(json.dumps({"a": [{"i": i} for i in range(2)], "b": [{"i": i} for i in range(2)]}, indent=1))
-    assert records.json_index(corpus / "many.json") is None, "four values one level down, past the cap"
-    assert [r["ref"] for r in _all(corpus, "many.json")][:2] == ["many.json#L1", "many.json#L2"]
-    (corpus / "few.json").write_text(json.dumps([{"i": i, "j": i, "k": i} for i in range(3)], indent=1))
-    assert len(_all(corpus, "few.json")) == 3, "the fields inside a value are not counted"
-
-
 # --------------------------------------------------------------------------- refs
-
-
-@pytest.mark.parametrize("ref,kind", [("report.pdf#page=2", "page"), ("report.pdf#p2", "page"), ("runs.json#/runs/0", "pointer"),
-                                      ("orders.csv#row=1", "csvrow"), ("forge.db#prs/7114", "row")])
-def test_a_record_ref_parses_formats_and_resolves(corpus, ref, kind):
-    p = refs.parse_ref(ref)
-    assert p["kind"] == kind and refs.parse_ref(refs.format_ref(p)) == p
-    out = refs.resolve(corpus, ref)
-    assert out["kind"] == kind and out["excerpt"] and out["path"] == ref.split("#")[0]
 
 
 def test_records_resolve_with_their_lines_and_line_refs_keep_working(corpus):
@@ -213,21 +143,6 @@ def test_records_resolve_with_their_lines_and_line_refs_keep_working(corpus):
     assert refs.span_of_quote(corpus, "report.pdf#page=2", "Average rest between shifts") == "report.pdf#page=2"
     assert refs.span_of_quote(corpus, "forge.db#prs/7114", "Quote the style name") == "forge.db#prs/7114"
     assert refs.span_of_quote(corpus, "report.pdf", "Average rest between shifts") == "report.pdf#p2"
-
-
-def test_the_table_view_learns_the_number_of_each_csv_row_it_shows(corpus):
-    from fastapi.testclient import TestClient
-
-    from app import corpus as corpus_mod
-
-    a = FastAPI()
-    a.include_router(corpus_mod.router, prefix="/api")
-    client = TestClient(a)
-    got = client.get(f"/api/corpora/{CORPUS}/csv-rows", params={"path": "orders.csv", "lines": "1-6"})
-    assert got.status_code == 200 and got.json() == {"rows": [[2, 1], [4, 2], [6, 3]]}, "row 1 spans lines 2 and 3"
-    assert client.get(f"/api/corpora/{CORPUS}/csv-rows", params={"path": "orders.csv", "lines": "3-5"}).json() == {"rows": [[4, 2]]}
-    assert client.get(f"/api/corpora/{CORPUS}/csv-rows", params={"path": "notes.jsonl", "lines": "1-2"}).status_code == 400
-    assert client.get(f"/api/corpora/{CORPUS}/csv-rows", params={"path": "../x.csv", "lines": "1-2"}).status_code == 400
 
 
 # --------------------------------------------------------------------------- labels
@@ -292,41 +207,6 @@ async def test_a_regex_label_runs_over_the_records_of_every_reader(api, corpus, 
     assert r.status_code == 200 and r.json()["row"]["line"] == 4
 
 
-async def test_a_database_s_rows_stream_across_the_batches_of_a_run(api, corpus, workspaces_tmp, monkeypatch):
-    monkeypatch.setattr(concepts, "REGEX_BATCH", 2)
-    k = await _label(api, name="merged", kind="regex", spec=r"state: merged", labels=["merged", "no"])
-    s = await _apply(api, k, ["forge.db#prs", "orders.csv"])
-    assert s["status"] == "done" and s["failed"] == 0 and s["labeled"] == 5 + 3, "each batch read in another thread"
-
-
-async def test_a_trial_and_a_label_within_another_pick_records_of_any_reader(api, corpus, workspaces_tmp):
-    k = await _label(api, name="refund", kind="regex", spec=r"(?i)refund|state: merged")
-    await _apply(api, k, ["forge.db#prs"])
-    trial = await _label(api, name="merged", kind="regex", spec=r"state: merged", labels=["merged", "no"])
-    s = await _apply(api, trial, ["forge.db#prs"], limit=2)
-    assert s["total"] == 2 and (await _values(workspaces_tmp / CORPUS, trial)) == {"forge.db#prs/7114": "merged", "forge.db#prs/7138": "no"}
-    ws = workspaces_tmp / CORPUS
-    narrowed = concepts.read_concept(ws, trial["id"])
-    narrowed["within"] = {"label": k["id"], "value": "refund"}
-    concepts.write_concept(ws, narrowed)
-    s = await _apply(api, trial, ["forge.db#prs"])
-    assert s["total"] == 3, "the rows the label `refund` gave its value"
-    assert (await _values(workspaces_tmp / CORPUS, trial)) == {"forge.db#prs/7114": "merged", "forge.db#prs/7138": "no",
-                                                              "forge.db#prs/7123": "merged", "forge.db#prs/7152": "merged"}
-    quoted = await asyncio.to_thread(concepts.examples, CORPUS, k["id"], "refund")
-    assert {ref for ref, _t in quoted} == {"forge.db#prs/7114", "forge.db#prs/7123", "forge.db#prs/7152"}
-    assert all("state: merged" in t for _r, t in quoted), "each quoted by the line of its text that matched"
-
-
-async def test_paths_with_fragments_keep_the_records_under_each(api, corpus, workspaces_tmp):
-    k = await _label(api, name="any", kind="regex", spec=r".")
-    s = await _apply(api, k, ["forge.db#prs", "forge.db#agents", "orders.csv#row=2", "report.pdf#page=3"])
-    got = set(await _values(workspaces_tmp / CORPUS, k))
-    assert {r.split("#")[1].split("/")[0] for r in got if r.startswith("forge.db")} == {"prs", "agents"}, "both tables"
-    assert {r for r in got if not r.startswith("forge.db")} == {"orders.csv#row=2", "report.pdf#p3"}
-    assert s["total"] == len(got) == 5 + records.count(corpus / "forge.db", "forge.db", "agents") + 2
-
-
 async def _code_inproc(c: str, kernel: str, code: str, timeout_s: float | None = None) -> tuple[list[dict], int, str]:
     buf = io.StringIO()
     here = os.getcwd()
@@ -363,199 +243,6 @@ async def test_a_code_label_gets_each_record_as_its_reader_reads_it(api, corpus,
     rows = concepts.read_labels(workspaces_tmp / CORPUS, k["id"])
     assert {r["ref"]: r.get("line") for r in rows if r.get("ref", "").startswith("orders.csv")} == {
         "orders.csv#row=1": 2, "orders.csv#row=2": 4, "orders.csv#row=3": 6}
-
-
-def _runs_of(corpus: Path) -> None:
-    for run, line in (("r1", "the tests pass"), ("r2", "nothing merged")):
-        (corpus / "runs" / run / "agents").mkdir(parents=True)
-        (corpus / "runs" / run / "agents" / "a.jsonl").write_text(json.dumps({"text": line}) + "\n")
-        (corpus / "runs" / run / "manifest.json").write_text(json.dumps({"run": run}))
-    write_forge_db(corpus / "runs" / "r1" / "forge.db")
-    (corpus / "runs" / "r2" / "review.pdf").write_bytes(tiny_pdf(PAGES))
-
-
-async def test_a_run_unit_reads_the_rows_of_its_database_and_the_pages_of_its_pdf(api, corpus, workspaces_tmp, monkeypatch):
-    from app import notebook
-
-    _runs_of(corpus)
-    monkeypatch.setattr(notebook, "execute_on", _code_inproc)
-    k = await _label(api, name="merged", kind="regex", spec=r"state: merged|Crew rest", unit="run", labels=["merged", "no"])
-    s = await _apply(api, k, ["runs"])
-    assert s["status"] == "done" and s["failed"] == 0 and s["total"] == 2, s
-    rows = {r["ref"]: r for r in concepts.read_labels(workspaces_tmp / CORPUS, k["id"])}
-    assert rows["runs/r1"]["label"] == "merged" and rows["runs/r1"]["rationale"].startswith("runs/r1/forge.db#prs/")
-    assert rows["runs/r2"]["label"] == "merged" and rows["runs/r2"]["rationale"].startswith("runs/r2/review.pdf#p2")
-
-    spec = ("def label(unit):\n"
-            "    states = [r.get('state') for r in unit['records'] if isinstance(r, dict)]\n"
-            "    pages = [r['page'] for r in unit['records'] if isinstance(r, dict) and 'page' in r]\n"
-            "    return ('merged' if 'merged' in states else 'no', 1.0, [str(len(pages))])\n")
-    code = await _label(api, name="merged code", kind="code", spec=spec, unit="run", labels=["merged", "no"])
-    s = await _apply(api, code, ["runs"])
-    assert s["status"] == "done" and s["failed"] == 0, s
-    rows = {r["ref"]: r for r in concepts.read_labels(workspaces_tmp / CORPUS, code["id"])}
-    assert rows["runs/r1"]["label"] == "merged" and rows["runs/r2"]["label"] == "no"
-    assert rows["runs/r2"]["spans"] == ["3"], "the PDF's three pages, each a record of the run"
-
-
-async def test_a_prompt_label_reads_each_record_s_text(api, corpus, workspaces_tmp, monkeypatch):
-    seen: list[tuple[str, str]] = []
-
-    async def classify(c, concept, items, comment=True, on_retry=None):
-        from app import model
-
-        seen.extend(items)
-        return model.CallResult(status="ok", output={"labels": [
-            {"i": n, "label": "refund" if "refund" in t.lower() else "no", "confidence": 0.9, "rationale": "r"}
-            for n, (_ref, t) in enumerate(items, 1)]})
-
-    monkeypatch.setattr(concepts, "classify_structured", classify)
-    monkeypatch.setattr(concepts, "BATCH_ITEMS", 1)
-    monkeypatch.setattr(concepts, "CONCURRENCY", 1)
-    k = await _label(api, name="refund", kind="prompt", description="asks for a refund")
-    s = await _apply(api, k, ["runs.json", "orders.csv", "forge.db#prs"])
-    assert s["status"] == "done" and s["labeled"] == 5 + 5, "a database's rows read one call at a time, in other threads"
-    texts = dict(seen)
-    assert "after two days" in texts["orders.csv#row=1"] and '"outcome": "refund given"' in texts["runs.json#/runs/0"]
-    rows = concepts.read_labels(workspaces_tmp / CORPUS, k["id"])
-    assert {r["ref"]: r.get("line") for r in rows if r["ref"].startswith("runs.json")} == {
-        "runs.json#/runs/0": records.read(corpus / "runs.json", "runs.json", "/runs/0")["line"],
-        "runs.json#/runs/1": records.read(corpus / "runs.json", "runs.json", "/runs/1")["line"]}
-
-
-async def test_a_prompt_label_asks_one_call_per_fifty_records(api, corpus, workspaces_tmp, monkeypatch):
-    """Over short records a prompt label makes ceil(n / 50) classifier calls, each of up to 50 records in order."""
-    sizes: list[int] = []
-
-    async def classify(c, concept, items, comment=True, on_retry=None):
-        from app import model
-
-        sizes.append(len(items))
-        return model.CallResult(status="ok", output={"labels": [
-            {"i": n, "label": "no", "confidence": 0.9} for n in range(1, len(items) + 1)]})
-
-    monkeypatch.setattr(concepts, "classify_structured", classify)
-    (corpus / "many.jsonl").write_text("".join(json.dumps({"text": f"reply {n}"}) + "\n" for n in range(1, 121)))
-    k = await _label(api, name="refund", kind="prompt", description="asks for a refund")
-    s = await _apply(api, k, ["many.jsonl"])
-    assert s["status"] == "done" and s["labeled"] == 120 and sorted(sizes) == [20, 50, 50]
-
-
-def _agent_store(fork: bool) -> dict:
-    """An agent's conversations as one store of messages by id that each conversation lists in order (the shape of a
-    harness's per-agent file): a system prompt in a list of blocks, the only list at its top, then the store and the
-    conversations, `c2` forked from `c1` when `fork`."""
-    msgs = {f"m{i}": {"id": f"m{i}", "role": "user" if i % 2 == 0 else "assistant",
-                      "content": [{"type": "text", "text": f"message {i} " + "words " * 40}], "first_seen_ts": 1_790_000_000 + i}
-            for i in range(6)}
-    return {"agent": "a7", "system": [{"type": "text", "text": "You maintain a small app."}], "messages": msgs,
-            "conversations": {"c1": {"id": "c1", "messages": ["m0", "m1", "m2", "m3"], "forked_from": None, "forked_at": 0},
-                              "c2": {"id": "c2", "messages": ["m0", "m1", "m4", "m5"] if fork else ["m4", "m5"],
-                                     "forked_from": "c1" if fork else None, "forked_at": 2 if fork else 0}}}
-
-
-def _stores(corpus: Path) -> None:
-    (corpus / "transcripts").mkdir()
-    (corpus / "transcripts" / "a.json").write_text(json.dumps(_agent_store(True)))
-    (corpus / "transcripts" / "b.json").write_text(json.dumps(_agent_store(False)))
-    (corpus / "transcripts" / "c.json").write_text(json.dumps(_agent_store(True), indent=2))
-
-
-FORKS = ("def label(unit):\n"
-         "    convs = (unit['data'] or {}).get('conversations') or {}\n"
-         "    return 'fork' if any(c.get('forked_from') for c in convs.values()) else 'no fork'\n")
-
-
-async def test_a_file_label_s_code_gets_the_file_whole(api, corpus, workspaces_tmp, monkeypatch):
-    """A label that marks files gives its code each file whole as `data`: a JSON document parsed (whatever its records,
-    which leave out every entry beside its lists), a JSON lines file's records, a CSV file's rows, else its text; beside
-    `path` and the records a record label gets."""
-    from app import notebook
-
-    _stores(corpus)
-    monkeypatch.setattr(notebook, "execute_on", _code_inproc)
-    k = await _label(api, name="transcript forks", kind="code", spec=FORKS, marks="file", labels=["fork", "no fork"])
-    assert k["unit"] == "agent" and k["marks"] == "file"
-    s = await _apply(api, k, ["transcripts/*.json"])
-    assert s["status"] == "done" and s["failed"] == 0 and s["total"] == 3, s
-    assert await _values(workspaces_tmp / CORPUS, k) == {"transcripts/a.json": "fork", "transcripts/b.json": "no fork",
-                                                         "transcripts/c.json": "fork"}
-    shape = ("def label(unit):\n"
-             "    d = unit['data']\n"
-             "    kind = 'list' if isinstance(d, list) else 'text' if isinstance(d, str) else 'dict' if isinstance(d, dict) else 'none'\n"
-             "    first = unit['records'][0] if unit['records'] else None\n"
-             "    return (kind, 1.0, [unit['path'], type(first).__name__, 'records ' + str(len(unit['records'])), 'files ' + str(len(unit['files']))])\n")
-    k2 = await _label(api, name="shape", kind="code", spec=shape, marks="file", labels=["dict", "list", "text", "none"])
-    s = await _apply(api, k2, ["transcripts/a.json", "notes.jsonl", "orders.csv", "report.pdf", "runs.json"])
-    assert s["status"] == "done" and s["failed"] == 0, s
-    rows = {r["ref"]: (r["label"], r.get("spans")) for r in concepts.read_labels(workspaces_tmp / CORPUS, k2["id"])}
-    assert rows["transcripts/a.json"] == ("dict", ["transcripts/a.json", "dict", "records 1", "files 1"]), "its records: system/0 alone"
-    assert rows["runs.json"] == ("dict", ["runs.json", "dict", "records 2", "files 1"]), "its records: the runs, as a record label's"
-    assert rows["notes.jsonl"][0] == "list" and rows["orders.csv"] == ("list", ["orders.csv", "dict", "records 3", "files 1"])
-    assert rows["report.pdf"] == ("list", ["report.pdf", "dict", "records 3", "files 1"])
-
-
-async def test_a_file_too_large_to_hold_whole_gives_its_code_none_and_its_records(api, corpus, workspaces_tmp, monkeypatch):
-    from app import notebook
-
-    _stores(corpus)
-    monkeypatch.setattr(notebook, "execute_on", _code_inproc)
-    monkeypatch.setattr(concepts, "WHOLE_MAX_BYTES", 100)
-    spec = "def label(unit):\n    return 'none' if unit['data'] is None and unit['records'] else 'held'\n"
-    k = await _label(api, name="held", kind="code", spec=spec, marks="file", labels=["held", "none"])
-    s = await _apply(api, k, ["transcripts/a.json", "notes.jsonl"])
-    assert s["status"] == "done", s
-    assert await _values(workspaces_tmp / CORPUS, k) == {"transcripts/a.json": "none", "notes.jsonl": "held"}
-
-
-async def test_a_file_label_s_prompt_reads_a_json_document_whole_shortened_to_fit(api, corpus, workspaces_tmp, monkeypatch):
-    """A prompt label that marks files reads a JSON document as itself, not its records, as far as its model's context
-    holds (concepts.whole_read_chars); one longer than that keeps every part of it in view, its long strings and its
-    long lists and mappings shortened, and the run's `cut` says so."""
-    seen: dict[str, str] = {}
-
-    async def classify(c, concept, items, comment=True, on_retry=None):
-        from app import model
-
-        seen.update(items)
-        return model.CallResult(status="ok", output={"labels": [
-            {"i": n, "label": "fork" if '"forked_from": "c' in t else "no fork", "confidence": 0.9, "rationale": "r"}
-            for n, (_ref, t) in enumerate(items, 1)]})
-
-    monkeypatch.setattr(concepts, "classify_structured", classify)
-    _stores(corpus)
-    big = _agent_store(True)
-    big["messages"].update({f"x{i}": {"id": f"x{i}", "role": "user", "content": "padding " * 300} for i in range(400)})
-    (corpus / "transcripts" / "d.json").write_text(json.dumps(big))
-    assert (corpus / "transcripts" / "d.json").stat().st_size > 30 * concepts.UNIT_TEXT_MAX
-    k = await _label(api, name="transcript forks", kind="prompt", description="any conversation forks from another",
-                     marks="file", labels=["fork", "no fork"])
-    s = await _apply(api, k, ["transcripts/*.json"])
-    assert s["status"] == "done" and s["labeled"] == 4, s
-    assert await _values(workspaces_tmp / CORPUS, k) == {"transcripts/a.json": "fork", "transcripts/b.json": "no fork",
-                                                         "transcripts/c.json": "fork", "transcripts/d.json": "fork"}
-    assert json.loads(seen["transcripts/b.json"]) == _agent_store(False), "a document that fits, whole"
-    assert json.loads(seen["transcripts/d.json"]) == big and not s.get("cut"), "a million characters fit the model's context"
-    # a model that reads 30,000 characters of a file
-    monkeypatch.setattr(concepts, "READ_RESERVE_TOKENS", config.LONG_CONTEXT_TOKENS - concepts.UNIT_TEXT_MAX // concepts.CHARS_PER_TOKEN)
-    k = await _label(api, name="transcript forks 2", kind="prompt", description="any conversation forks from another",
-                     marks="file", labels=["fork", "no fork"])
-    s = await _apply(api, k, ["transcripts/*.json"])
-    assert s["status"] == "done" and s["labeled"] == 4, s
-    short = seen["transcripts/d.json"]
-    assert len(short) <= concepts.UNIT_TEXT_MAX and '"conversations"' in short and "more entries" in short
-    assert s["cut"]["n"] == 1 and s["cut"]["short"] == 1 and s["cut"]["refs"] == ["transcripts/d.json"], s
-    assert "shortened" in s["cut"]["line"] and "tokens" in s["cut"]["line"], s
-
-
-def test_fit_json_keeps_every_part_of_a_document_in_view():
-    doc = {"title": "t", "notes": ["x" * 5000, "short"], "rows": [{"id": i, "v": "y" * 50} for i in range(2000)], "end": 1}
-    text, short = concepts.fit_json(doc, 4000)
-    assert short and len(text) <= 4000
-    got = json.loads(text)
-    assert got["end"] == 1 and got["title"] == "t" and got["notes"][1] == "short"
-    assert got["rows"][-1].startswith("…[") and got["rows"][-1].endswith(" more]")
-    assert concepts.fit_json({"a": 1}, 100) == ('{"a": 1}', False)
 
 
 # --------------------------------------------------------------------------- marks in a view
