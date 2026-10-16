@@ -560,7 +560,7 @@ export const register: Register = (on, options) => {
   // /thimble as the typeahead and /help describe it once thimble is on: what it does here
   on('command.describe', async ($, e, next) => {
     if (!rt.sc || (e.command !== 'thimble:thimble' && e.command !== 'thimble')) return next(e)
-    return next({ ...e, description: THIMBLE_DESCRIPTION, argumentHint: THIMBLE_ARGS })
+    return next({ ...e, description: THIMBLE_DESCRIPTION })
   })
 
   // the feature switches: a person's /config change of a thimble row reaches thimble's config at once (settings.ts),

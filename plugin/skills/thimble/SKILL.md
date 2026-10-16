@@ -2,8 +2,6 @@
 name: thimble
 description: thimble gives a human analyst a workspace beside this session, with a chat, the files, cards and a report written from the work. `/thimble` turns thimble on in this folder and gives this session thimble's guidance, with a warning when Claude Code hooks are off in it (thimble then connects through a Monitor). `/thimble open` opens the browser workbench, starting the server if needed. `/thimble fresh` archives the folder's workspace and opens an empty one, `/thimble restore <name>` brings an archived run back and `/thimble restore` lists them (`resume` does the same). `/thimble status` prints one line, `/thimble fix` repairs a server that will not start, `/thimble feedback` writes a problem report (a zip of the logs) to send the developer.
 disable-model-invocation: true
-argument-hint: "[open | fresh | restore [<name>] | status | fix | feedback]"
-arguments: [action, archive]
 allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/bin/thimble activate *) Bash(${CLAUDE_PLUGIN_ROOT}/bin/thimble guide *) Bash(${CLAUDE_PLUGIN_ROOT}/bin/thimble server up *) Bash(${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch --stream *)
 ---
 
@@ -11,7 +9,7 @@ allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/bin/thimble activate *) Bash(${CLAUDE_
 
 !`${CLAUDE_PLUGIN_ROOT}/bin/thimble guide --if-owed --mark --session "${CLAUDE_SESSION_ID}" --cwd "${CLAUDE_PROJECT_DIR}" 2>&1`
 
-!`${CLAUDE_PLUGIN_ROOT}/bin/thimble server up --cwd "${CLAUDE_PROJECT_DIR}" --session "${CLAUDE_SESSION_ID}" --action "$action" --archive "$archive" 2>&1`
+!`${CLAUDE_PLUGIN_ROOT}/bin/thimble server up --cwd "${CLAUDE_PROJECT_DIR}" --session "${CLAUDE_SESSION_ID}" --action "$0" --archive "$1" 2>&1`
 
 When this message holds thimble's guidance, which opens with a line that starts `thimble guidance`, that guidance is yours for the rest of this session, as its first line says. It does not change your reply to this command. When Claude Code shows only the start of it and names a file that holds all of it, Read that file before you reply to anything.
 
