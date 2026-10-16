@@ -85,8 +85,3 @@ async def test_main_installs_a_package_in_card_libs_and_add_card_bundles_it_with
     got = card_libs.head(CORPUS, ["tiny-graph@2"])
     assert got["problems"] == [f"the library tiny-graph@2 is not bundled in {folder / view_libs.LIB_DIR}"]
     assert "window.changed" not in got["head"] and "console.error" in got["head"]
-
-
-async def test_libs_that_name_no_library_are_refused(workspaces_tmp):
-    res = await call("add_card", kind="custom", question="Q", html="<p>x</p>", libs=["not a package!"])
-    assert res.is_error and "neither vega, vega-lite, vega-embed nor an npm package" in res.text

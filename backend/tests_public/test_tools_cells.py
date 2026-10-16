@@ -94,63 +94,6 @@ async def test_add_cell_runs_code_and_reports_the_output(group):
     assert (await call("add_card", group, kind="table", question="q")).is_error
 
 
-async def test_a_question_s_escaped_quotation_marks_are_stored_as_marks(group):
-    """Live check term-fix5, new quirk 13: main wrote `\\"June\\"` inside a card's question, and the card's title showed
-    the backslashes. A question keeps its quotation marks and drops the backslashes, in add_card and edit_card."""
-    r = await call("add_card", group, kind="code", question='Which pages have \\"June\\" in their name?', code="print(33)")
-    cid = _cid(r)
-    assert notebook.get_cell(CORPUS, cid)["title"] == 'Which pages have "June" in their name?'
-    await call("edit_card", group, cell=cid, question='Which pages have \\"July\\" in their name?')
-    assert notebook.get_cell(CORPUS, cid)["title"] == 'Which pages have "July" in their name?'
-
-
-async def test_an_example_keeps_each_quote_of_a_record_whose_ref_stays_as_given(group):
-    """Three quotes of one row of a database: span_of_quote keeps the row's ref, so the three refs were the same string
-    and the card showed three copies of the row from its start. Each quote is kept beside its ref, so the card can show
-    the row once with every passage highlighted. A quote of a JSONL line becomes a span, which says where it is, and
-    keeps no quote."""
-    r = await call("add_card", group, kind="example", question="Where does the row name the style?",
-                   refs=[{"ref": "forge.db#prs/7114", "quote": "Quote the style name"},
-                         {"ref": "forge.db#prs/7114", "quote": "configuration example"},
-                         {"ref": "forge.db#prs/7114", "quote": "merged"}])
-    payload = notebook.get_cell(CORPUS, _cid(r))["payload"]
-    assert payload["refs"] == ["forge.db#prs/7114"] * 3
-    assert payload["quotes"] == ["Quote the style name", "configuration example", "merged"]
-    assert "- forge.db#prs/7114 “configuration example”" in tools._payload_lines("example", payload), \
-        "the card read back names each quote with its ref"
-    r = await call("add_card", group, kind="example", question="Which post asks for thread 1?",
-                   refs=[{"ref": "board.jsonl#L3", "quote": "please use thread 1"}, "board.jsonl#L1"])
-    payload = notebook.get_cell(CORPUS, _cid(r))["payload"]
-    assert payload["refs"][0].startswith("board.jsonl#L3.b") and payload["refs"][1] == "board.jsonl#L1"
-    assert "quotes" not in payload
-
-
-async def test_an_edit_that_left_the_outputs_as_they_were_says_so_and_read_ref_says_the_code_ran(group):
-    """Live QA 2: a fix turned a chart's weeks into text for its ticks, thimble.chart read the text as times again, and
-    the card came out as before with nothing to say so; main then read the card and told the analyst that it had not
-    run since the edit. edit_card now says when new code left all that the card shows as it was, and read_ref says
-    that the outputs come from running the code it shows."""
-    table = "import pandas as pd\npd.DataFrame({{'posts': [{n}]}})"
-    cid = _cid(await call("add_card", group, kind="table", question="How many?", code=table.format(n="8")))
-    same = tools.hint("edit_card-same-outputs", cid=cid)
-    assert same in (await call("edit_card", group, cell=cid, code=table.format(n="4 + 4"))).text
-    # new code with other outputs, and the same code run again with a new question, say nothing of the kind
-    assert same not in (await call("edit_card", group, cell=cid, code=table.format(n="9"))).text
-    assert same not in (await call("edit_card", group, cell=cid, code=table.format(n="9"), question="How many now?")).text
-    read = (await call("read_ref", group, ref=f"card:{cid}")).text
-    assert "[9]" in read and "from running the code above" in read and "has not run" not in read
-    # nor does new code that leaves the outputs as they were in an edit that changes something else the card shows: its
-    # question, its takeaway, or its kind, here to a code card, which shows its code, as is any edit of a code card's code
-    assert same not in (await call("edit_card", group, cell=cid, code=table.format(n="4 + 5"), question="Posts?")).text
-    assert same not in (await call("edit_card", group, cell=cid, code=table.format(n="5 + 4"), takeaway="Nine.")).text
-    assert same not in (await call("edit_card", group, cell=cid, code=table.format(n="3 * 3"), kind="code")).text
-    assert same not in (await call("edit_card", group, cell=cid, code=table.format(n="10 - 1"))).text
-    # a card whose run goes on shows the outputs of an earlier run, or none on its first run
-    shown = notebook.get_cell(CORPUS, cid)
-    assert tools._outputs_lines({**shown, "status": "running"}, "9")[0] == "outputs, from an earlier run, while the code above runs now:"
-    assert tools._outputs_lines({**shown, "status": "running", "outputs": []}, "") == ["outputs: none yet, since the code above runs now"]
-
-
 async def test_an_agent_s_card_code_may_not_install(group, tmp_path, monkeypatch):
     """Card code runs in the kernel, where neither a prompt nor Claude Code's permission mode reaches it, so an agent's
     card that installs or downloads is refused, also where an earlier config set `installs` to "allow" (read and

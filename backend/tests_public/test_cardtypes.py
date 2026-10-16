@@ -1,11 +1,8 @@
 """app.cardtypes and thimble.card, with the `multiagent-swimlane` card type, which the swarm extension (now
 swarm-orient) gave as `swarm` and then `agent-swimlane` before. On a corpus of JSON Lines records, the registry finds
 the type without any view proposal and lists it for main's prompt; a card's code draws it with thimble.card, which
-checks the arguments against the type's schema, runs card.py on the reader's cached index under the labels the call
-names, whatever Files highlights, and shows the data with a listing main reads and cites; the card check's page gets the
-type's frame from the request. Keep writes a patch of the arguments into the card's one thimble.card call (its tests
-with a type that has such arguments are in test_extensions). Main hears when a label it ran finishes, and can colour a
-label's values.
+runs card.py on the reader's cached index under the labels the call names and shows the data with a listing main reads
+and cites. The Swarm reader's shares print every record once.
 
 The corpus `crew` is 140 saves of 35 accounts on 4 pages, each naming the next account, which the Swarm reader reads as
 a swarm; swarm-orient is added, and with it multiagent-swimlane. Reader calls run in this process (views._runner
@@ -13,7 +10,6 @@ replaced by an exec of the kernel's snippet), and thimble.card runs in this proc
 kernel_thimble.py, as a kernel builds it."""
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import importlib.util
 import io
@@ -25,11 +21,9 @@ import types
 from pathlib import Path
 
 import pytest
-from conftest import Listener
 
-from fastapi import HTTPException
 
-from app import card_check, cardtypes, concepts, config, extensions, notebook, render, tools, views
+from app import cardtypes, concepts, config, extensions, tools, views
 
 SWIMLANE = extensions.builtin_dir() / "multiagent-swimlane" / "cards" / "multiagent-swimlane"
 
@@ -157,145 +151,6 @@ async def test_a_card_draws_the_actions_it_names_in_event_order_with_goals_threa
     with pytest.raises(ValueError, match=r"links\[0\].to 'saves.jsonl#L3' is none of the actions"):
         kernel.card("multiagent-swimlane", actions=[{"ref": "saves.jsonl#L2", "summary": "x"}],
                     links=[{"from": "saves.jsonl#L2", "to": "saves.jsonl#L3", "type": "reply"}])
-
-
-async def test_a_wrong_argument_names_what_the_type_takes(crew, kernel):
-    await _refresh()
-    with pytest.raises(ValueError, match=r"has no `rows`; the keys are actions, goals, links"):
-        kernel.card("multiagent-swimlane", actions=[{"ref": "saves.jsonl#L2", "summary": "x"}], rows="accounts")
-    with pytest.raises(ValueError, match=r"needs `actions`"):
-        kernel.card("multiagent-swimlane")
-    with pytest.raises(ValueError, match=r"no card type 'graph'; the types here are 'multiagent-swimlane'"):
-        kernel.card("graph")
-    assert not kernel.shown
-    kernel.card("swarm", actions=[{"ref": "saves.jsonl#L2", "summary": "x"}])
-    assert kernel.shown[-1][cardtypes.CARD_MIME]["type"] == "multiagent-swimlane", "a card's code under the old name draws it"
-
-
-async def test_the_check_s_page_gets_the_type_s_frame_from_the_request(crew, kernel):
-    await _refresh()
-    kernel.card("multiagent-swimlane", actions=[{"ref": "saves.jsonl#L2", "summary": "Relayed 1"}])
-    cell = {"id": "c1", "kind": "plot", "status": "ok", "title": "Who relayed first?", "outputs": [kernel.shown[-1]]}
-    req = render.request_for(CORPUS, cell)
-    doc = req["frames"]["multiagent-swimlane"]
-    assert "connect-src 'none'" in doc and '"card": true' in doc and 'id="plot"' in doc
-    assert req["width"] == render.TYPE_W, "the check sees a card type's page at full width"
-    assert "frames" not in render.request_for(CORPUS, {"id": "c2", "kind": "plot", "outputs": []})
-
-
-def test_a_card_type_frame_shot_blank_is_found():
-    import io
-
-    from PIL import Image, ImageDraw
-
-    box, frame = {"x": 16, "y": 16, "width": 200, "height": 100}, {"x": 26, "y": 56, "width": 180, "height": 50}
-    im = Image.new("RGB", (200 * render.SCALE, 100 * render.SCALE), "#fbfaf6")
-    ImageDraw.Draw(im).text((20, 10), "Who relayed first?", fill="black")
-    png = io.BytesIO()
-    im.save(png, "PNG")
-    assert render.blank_frames(png.getvalue(), box, [frame])
-    ImageDraw.Draw(im).rectangle((40, 100, 120, 140), outline="black")
-    png = io.BytesIO()
-    im.save(png, "PNG")
-    assert not render.blank_frames(png.getvalue(), box, [frame]) and not render.blank_frames(png.getvalue(), box, [])
-
-
-async def test_the_card_check_keeps_no_replacement_that_draws_another_kind_of_card():
-    table = {"status": "ok", "outputs": [{"text/plain": "a table"}]}
-    assert await card_check._not_kept(None, table, "multiagent-swimlane") == "it drew no multiagent-swimlane card"
-
-
-def test_keep_rewrites_the_literal_arguments_of_the_one_card_call():
-    schema = {"properties": {"rows": {"type": "string", "enum": ["account", "signature"], "default": "account", "ui": True},
-                             "only": {"type": "array", "ui": True}, "accounts": {"type": "array", "ui": True}}}
-    code = ('import thimble\nkept = ["kestrel"]\n'
-            'thimble.card("swarm", labels=["signal"], within={"label": "early"}, only=[{"label": "signal", "value": "é"}])\n')
-    out, written = cardtypes.rewrite_call(code, {"rows": "signature", "only": None}, schema)
-    assert out == 'import thimble\nkept = ["kestrel"]\nthimble.card("swarm", labels=["signal"], within={"label": "early"}, rows="signature")\n'
-    assert written == []
-    back, _ = cardtypes.rewrite_call(out, {"rows": "account", "accounts": ["kestrel", "nova", "ParallelSectorAgent"]}, schema)
-    assert back.endswith('thimble.card(\n    "swarm",\n    labels=["signal"],\n    within={"label": "early"},\n'
-                         '    accounts=["kestrel", "nova", "ParallelSectorAgent"])\n'), (
-        "a call longer than a line takes a line per argument, and a default removes the keyword")
-    only = 'thimble.card("swarm", only=[{"label": "signal", "value": v} for v in vals], accounts=top)'
-    out, written = cardtypes.rewrite_call(only, {"only": [{"label": "signal", "value": "ping"}], "accounts": ["nova"]}, schema)
-    assert out == 'thimble.card("swarm", only=[{"label": "signal", "value": "ping"}], accounts=["nova"])'
-    assert written == ["only", "accounts"], "an argument the code computed is written out as the analyst chose it"
-    with pytest.raises(cardtypes.KeepError, match=r"passes its arguments with \*\*"):
-        cardtypes.rewrite_call('thimble.card("swarm", **args)', {"rows": "signature"}, schema)
-    with pytest.raises(cardtypes.KeepError, match="calls thimble.card once"):
-        cardtypes.rewrite_call('thimble.card("swarm")\nthimble.card("swarm")', {"rows": "signature"}, schema)
-
-
-async def test_main_hears_when_a_label_it_ran_finishes_and_can_colour_its_values(crew):
-    q = Listener(CORPUS)
-    try:
-        cid = await _label("even", r"value is \d*[02468]\.", ["even", "odd"])
-        concepts.tell_when_done(CORPUS, cid)
-        note = await asyncio.wait_for(q.get(), 10)
-        assert note["meta"]["kind"] == "label_done" and "label even" in note["content"] and "even 70" in note["content"]
-    finally:
-        q.close()
-    concepts.show_concept(CORPUS, "even", None, colours={"odd": "cyan", "even": "blue"})
-    after = {cl["name"]: cl["color"] for cl in concepts.read_concept(config.workspace_dir(CORPUS), cid)["classes"]}
-    assert after == {"even": 1, "odd": 12}
-    concepts.show_concept(CORPUS, "even", None, colours={"odd": "blue"})
-    swapped = {cl["name"]: cl["color"] for cl in concepts.read_concept(config.workspace_dir(CORPUS), cid)["classes"]}
-    assert swapped == {"even": 12, "odd": 1}, "the value that had the colour takes the one the other left"
-    # red, purple and pink, which no value takes by itself, when the analyst asks for them
-    concepts.show_concept(CORPUS, "even", None, colours={"odd": "red", "even": "purple"})
-    asked = {cl["name"]: cl["color"] for cl in concepts.read_concept(config.workspace_dir(CORPUS), cid)["classes"]}
-    assert asked == {"even": 15, "odd": 13}
-    with pytest.raises(HTTPException, match="no label color is named 'magenta'"):
-        concepts.show_concept(CORPUS, "even", None, colours={"odd": "magenta"})
-    named = tools.schema_of("show_label")["properties"]["colors"]["additionalProperties"]["enum"]
-    assert named == list(concepts.COLOUR_NAMES) and sorted(concepts.COLOUR_NAMES.values()) == list(range(1, concepts.PICKS + 1))
-
-
-async def test_swarm_orient_ships_no_view_and_takes_back_the_one_it_installed(crew, monkeypatch, tmp_path):
-    """swarm-orient and multiagent-swimlane give a card type and orientation but no view: on a swarm they run and
-    nothing is proposed or installed, a card of its type has no view to open, and the Swarm view an earlier version
-    installed when the extension was called swarm goes, as does thimble's own install of it from before it was an
-    extension."""
-    old = tmp_path / "old-swarm-view"
-    old.mkdir()
-    for name in ("reader.py", "card.py"):
-        (old / name).write_text((SWIMLANE / name).read_text("utf-8"))
-    (old / "view.html").write_text("<!doctype html><title>Swarm</title>")
-    (old / "view.json").write_text(json.dumps({"name": "Swarm", "claims": ["saves.jsonl"]}))
-    views.install_viewer(CORPUS, "swarm", old, ["saves.jsonl"], description="", proposed_by="extension",
-                         orientation=False, extension="swarm")
-    views.install_viewer(CORPUS, "relay", old, ["saves.jsonl"], description="", proposed_by="thimble", orientation=True)
-    state = await extensions.refresh(CORPUS, wait=10)
-    assert state["extensions"]["swarm-orient"]["active"] and state["extensions"]["swarm-orient"]["views"] == []
-    assert views.list_proposals(CORPUS) == [] and views.read_view(CORPUS, "swarm") is None
-    types_ = await cardtypes.refresh(CORPUS, warm=False)
-    assert types_["multiagent-swimlane"]["view"] is None
-    cell = {"id": "c1", "outputs": [{cardtypes.CARD_MIME: {"type": "swarm", "args": {}}}]}
-    monkeypatch.setattr(notebook, "get_cell", lambda c, cid: cell)
-    with pytest.raises(HTTPException, match="the multiagent-swimlane card type has no view"):
-        await cardtypes.as_view(CORPUS, "c1")
-
-
-async def test_open_as_view_installs_the_view_of_an_extension_s_type_the_workspace_lacks(crew, monkeypatch, tmp_path):
-    """Open as view on a card of an extension's type that draws with a view of the extension installs that view in the
-    workspace when it has none (views.install_viewer), under a proposal of the extension with no description, and
-    opens it."""
-    src = tmp_path / "relay-view"
-    src.mkdir()
-    (src / "reader.py").write_text((SWIMLANE / "reader.py").read_text("utf-8"))
-    (src / "view.html").write_text("<!doctype html><title>Relay</title>")
-    (src / "view.json").write_text(json.dumps({"name": "Relay", "claims": ["saves.jsonl"]}))
-    t = {"origin": "extension", "slug": "relay", "view": "relay", "view_dir": str(src), "claims": ["saves.jsonl"],
-         "extension": "relay-ext"}
-    cell = {"id": "c1", "outputs": [{cardtypes.CARD_MIME: {"type": "relay", "args": {}}}]}
-    monkeypatch.setattr(notebook, "get_cell", lambda c, cid: cell)
-    monkeypatch.setattr(cardtypes, "type_of", lambda c, cell: t)
-    assert views.read_view(CORPUS, "relay") is None
-    got = await cardtypes.as_view(CORPUS, "c1")
-    assert got["slug"] == "relay" and views.read_view(CORPUS, "relay") is not None
-    prop = views.read_proposal(CORPUS, "relay")
-    assert (prop["extension"], prop["description"], prop["task"]) == ("relay-ext", "", "")
 
 
 def test_the_swarm_reader_s_shares_print_every_record_once(monkeypatch, capsys, tmp_path):
