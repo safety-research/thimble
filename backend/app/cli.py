@@ -2114,6 +2114,51 @@ def cmd_launch_args(args: argparse.Namespace) -> int:
 # the SessionStart hook's lead before main's guide, after /clear or /compact, in a session without the terminal UI
 # (the hooks module): Claude Code shows a hook's output of more than about 10,000 characters only in part, with the file
 # that holds all of it
+VIA_SKILL = "skill"  # 0.8.0's launch.json `via` for a session /thimble made main; live_launch reads every record as one
+
+
+def _claude_session(pid: int, config_dir: str | None) -> str:
+    """The session Claude Code's own record of the process `pid` names (`<config dir>/sessions/<pid>.json`, its
+    `sessionId`), in `config_dir`, else in the config dir thimble serves (config.claude_config_dir); '' when there is
+    none."""
+    got = _read_json((Path(config_dir) if config_dir else config.claude_config_dir()) / "sessions" / f"{pid}.json")
+    return str(got.get("sessionId") or "") if isinstance(got, dict) else ""
+
+
+def _moved_from(sid: str, c: str | None) -> set[str]:
+    """The sessions main's session `sid` moved to (/clear, /resume), as workspace `c`'s subagents.json records them
+    (subagent_files.moves); empty without a workspace or a record."""
+    from . import subagent_files  # noqa: PLC0415 — standard library only
+
+    try:
+        moved = subagent_files.moves(subagent_files.read(config.workspace_path(c))) if c else {}
+    except (OSError, ValueError, KeyError):
+        moved = {}
+    out: set[str] = set()
+    while sid in moved and moved[sid] not in out:
+        sid = moved[sid]
+        out.add(sid)
+    return out
+
+
+def live_launch(rec: Mapping[str, Any], c: str | None = None) -> bool:
+    """Whether the session a launch.json record names as main runs now (activate.main_alive): its `pid`, main's
+    `claude` process, runs as Claude Code's `claude` (its program, or the script node runs, is named claude), and Claude
+    Code's own record of that process (`<config_dir>/sessions/<pid>.json`, _claude_session) names the record's session,
+    or one workspace `c`'s subagents.json records as moved from it (_moved_from). `via` no longer matters: no launcher
+    names the session on `claude`'s command line. False for a pid that is gone, unreadable, or another process that
+    took the pid later."""
+    pid = rec.get("pid")
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 1 or pid == os.getpid():
+        return False
+    argv = procs.argv(pid)
+    if not any(Path(a).name.lower() in ("claude", "claude.exe") for a in argv[:2]):
+        return False
+    sid = str(rec.get("session") or "")
+    now = _claude_session(pid, str(rec.get("config_dir") or "") or None)
+    return not sid or (bool(now) and (now == sid or now in _moved_from(sid, c)))
+
+
 def session_marker(session: str) -> dict[str, Any] | None:
     """The session marker activation writes, <home>/up/<session>.active (C1: {cwd, ws, path, via, role, mod, at}); None
     when the session never turned thimble on, or the file cannot be read."""
