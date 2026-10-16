@@ -10,6 +10,8 @@ import type { On } from 'claude-code'
 import { mock } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
+import { citeHighlight } from '../paint'
+
 export const WS = '/home/a/.thimble/app/workspaces/wiki'
 export const CWD = '/corpus/wiki'
 export const CLI = '/tree/plugin/bin/thimble'
@@ -242,6 +244,8 @@ export type World = {
   activate: Record<string, unknown>
   activations: string[][]
   holdActivate: Promise<void> | null
+  /** set: `thimble state resolve` answers only once it settles (a citation still being checked) */
+  holdResolve: Promise<void> | null
   /** the guide: owed or not, how many times it was marked sent and unmarked */
   guide: string
   guideOwed: boolean
@@ -372,6 +376,7 @@ export function world(on: On, opts: { mode?: string; ws?: string | null; active?
     activate: { ok: true, session: SID, ws: 'wiki', path: WS, role: 'main', took_over: null, first_in_folder: true },
     activations: [],
     holdActivate: null,
+    holdResolve: null,
     guide: GUIDE,
     guideOwed: true,
     marked: 0,
@@ -607,6 +612,7 @@ export function world(on: On, opts: { mode?: string; ws?: string | null; active?
         return out(Object.fromEntries(paths.filter(p => w.opens[p]).map(p => [p, w.opens[p]])))
       }
       case 'resolve': {
+        if (w.holdResolve) await w.holdResolve
         const refs = JSON.parse(rest[0] ?? '[]') as string[]
         return out(Object.fromEntries(refs.map(r => [r, w.resolve[r] ?? RESOLVE[r] ?? { error: `no such place: ${r}`, status: 404 }])))
       }
@@ -827,4 +833,14 @@ export async function aTurn($: Engine, w: World, row: string, text: string, body
   await $.session.append({ door: 'response', origin: { kind: 'model', model: 'm' }, uuid: row, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text }] } } as never).catch(() => undefined)
   await $.turn.complete({ turnId: `t-${row}`, answer: text, durationMs: 5, reason: 'answer', isAborted: false } as never)
   await w.clock.settle()
+}
+
+/** The background a cited value stands on in its place (paint.ts citeHighlight: the citation's purple), in either
+ *  theme, as a pattern. */
+export const CITED_BG = `(?:${citeHighlight('dark')}|${citeHighlight('light')})`
+
+/** A drawing's JSON holds a Text of exactly `words` on the cited value's purple. */
+export function citedText(words: string): RegExp {
+  const lit = JSON.stringify(words).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`\\{"type":"Text","props":\\{"backgroundColor":"${CITED_BG}"\\},"children":\\[${lit}\\]\\}`)
 }

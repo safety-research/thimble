@@ -1,6 +1,6 @@
 // A paragraph (or a table) of a reply that holds citations: a Client surface module, drawn on Claude Code's drawing
-// thread (no `$`). It wraps the block to its region, draws each citation as a link (cite.ts), ◌ beside a citation a
-// fix round or a verification is working on, draws the citation under the pointer in inverse with its tip on a quiet
+// thread (no `$`). It wraps the block to its region, draws each citation as a link (cite.ts), ` ◌` as part of a
+// citation a fix round or a verification is working on, draws the citation under the pointer in inverse with its tip on a quiet
 // box beside it, and hands each press to gestures.tsx with what is under the pointer: a citation, a table row, or the
 // sentence of the word there. A right-click does what a click does.
 //

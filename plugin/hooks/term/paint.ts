@@ -62,6 +62,14 @@ export function tintOf(hex: string, theme: Theme, share: number): string {
   return `#${a.map((v, i) => Math.round(v * share + b[i]! * (1 - share)).toString(16).padStart(2, '0')).join('')}`
 }
 
+/** Where a citation's value stands in its place (its cited lines, a card's cited cell or row, the code that types it):
+ *  Claude Code's violet (COLORS.cite: rgb(175,135,255) on dark themes, rgb(135,0,255) on light) blended toward the
+ *  theme's background, so the text on it keeps its own colour (v9 review: "the cited value highlighted in purple in the
+ *  source text"). */
+export function citeHighlight(theme: Theme = painted.theme): string {
+  return theme === 'light' ? tintOf('#8700ff', 'light', 0.18) : tintOf('#af87ff', 'dark', 0.35)
+}
+
 // What each colour means (SPEC.md, "The visual system", section 4): letters in the text colour or dim; lines in
 // the rule grey; links in blue; citations in purple; a panel's title and its selected row in the accent; the word "new" in green; a palette
 // hue only on the glyphs and marks of a region's one colour field; red only for a problem; the selection background on

@@ -4,8 +4,8 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { wrapAround } from '../cite'
-import { CWD, DOC, shown, world } from './fixtures'
+import { firstCode, literalAt, wrapAround } from '../cite'
+import { CITED_BG, CWD, DOC, WS, citedText, shown, world } from './fixtures'
 import type { World } from './fixtures'
 
 type M = Mounted<'terminal'>
@@ -33,15 +33,54 @@ async function clickCite($: E, w: World, text: string, x: number): Promise<M> {
   return (await $.ui.mount(PANE)) as unknown as M
 }
 
-test("a card value's citation draws the card in its border with the cited cell on the selection background", async ($, on) => {
+test("a card value's citation opens the card's data row and code that hold it, the value on the citation's purple, never the plot", async ($, on) => {
+  // v9 review (i): "a citation of a number on a card opens the code or data holding the literal, not the plot"
   const w = world(on)
   await start($, w)
   const pane = await clickCite($, w, 'dse has [[3908|card:ff73e071#pages/dse]] pages.', 9)
-  const text = shown(await pane.drawn())
+  const tree = await pane.drawn()
+  const text = shown(tree)
   // the `from` row names the place, so the subtitle says `found` alone (live check New 7)
   expect(shown(await pane.find({ key: 'cite-sub' }))).toBe('found')
   expect(text).toContain('card "What does the export hold per wiki?"')
-  expect(JSON.stringify(await pane.drawn())).toMatch(/"backgroundColor":"selectionBg"\},"children":\["\s*3,?908\s*"\]/)
+  expect(text).toContain("howthe card's code computed it, and thimble found it in the card's output")
+  // the data row: the column names, then the cited row, its value on the citation's purple
+  expect(shown(await pane.find({ key: 'cite-data-0' }))).toBe('wiki  pages  revisions')
+  expect(shown(await pane.find({ key: 'cite-data-2' }))).toBe('dse    3908      13403')
+  expect(JSON.stringify(await pane.find({ key: 'cite-data-2' }))).toMatch(new RegExp(`"backgroundColor":"${CITED_BG}"\\},"children":\\[" 3908"\\]`))
+  // the card's code, numbered; no frame, so no plot
+  expect(shown(await pane.find({ key: 'cite-code-0' }))).toBe("1  pages = pd.read_json('pages.jsonl', lines=True)")
+  expect(text).not.toContain('╭')
+  expect(shown(await pane.find({ key: 'h-hints' }))).toContain('c for the card')
+  await pane.unmount()
+})
+
+test("a card value its code types in: the literal lit on the citation's purple in the code, and the links check says so", async ($, on) => {
+  const w = world(on)
+  Object.assign(w.cells.ff73e071!, {
+    code: "import pandas as pd\n# the counts as the README gives them\ncounts = {'dse': 3908, 'probier': 601}\ndf = pd.DataFrame(counts.items())\ndf",
+    takeaway: 'dse has [[3908|card:ff73e071#pages/dse]] pages.',
+    verification: { status: 'ok', links: { status: 'ok', checked: true, resolved: [], broken: [], typed: [{ value: '3908', ref: 'card:ff73e071#pages/dse', why: 'typed in the code, line 3, not computed' }] } },
+  })
+  await start($, w)
+  w.toolText = 'card:ff73e071\n[out0: table]'
+  await $.turn.start({ text: 'How big?', turnId: 't1' } as never)
+  await $.session.append({ door: 'response', origin: { kind: 'model', model: 'm' }, uuid: 'r1', message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'Here.' }] } } as never).catch(() => undefined)
+  await $.tool.call({ tool: 'mcp__plugin_thimble_thimble__add_card', tool_use_id: 'u1' } as never)
+  await $.turn.complete({ turnId: 't1', answer: 'Here.', durationMs: 5, reason: 'answer', isAborted: false } as never)
+  await w.clock.advance(300)
+  const ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
+  // the takeaway: `dse has 3908 pages.`, the value at column 8
+  await ui.pointer({ type: 'down', x: 9, y: 0, button: 'left', in: 'para-tk-t0-1' } as never)
+  await ui.pointer({ type: 'up', x: 9, y: 0, button: 'left', in: 'para-tk-t0-1' } as never)
+  await ui.unmount()
+  await w.clock.settle()
+  const pane = (await $.ui.mount(PANE)) as unknown as M
+  const text = shown(await pane.drawn())
+  expect(text).toContain("howthe card's code types it in rather than computes it")
+  // the code's line that types it, numbered, the literal on the citation's purple
+  expect(shown(await pane.find({ key: 'cite-code-2' }))).toBe("3  counts = {'dse': 3908, 'probier': 601}")
+  expect(JSON.stringify(await pane.find({ key: 'cite-code-2' }))).toMatch(citedText('3908'))
   await pane.unmount()
 })
 
@@ -57,7 +96,7 @@ test('a cited table row past the rows a card draws takes the place of the last o
   const text = shown(await pane.drawn())
   expect(text).toContain('w19')
   expect(text).not.toContain('w15')
-  expect(JSON.stringify(await pane.drawn())).toMatch(/"backgroundColor":"selectionBg"\},"children":\["\s*118\s*"\]/)
+  expect(JSON.stringify(await pane.drawn())).toMatch(new RegExp(`"backgroundColor":"${CITED_BG}"\\},"children":\\["\\s*118\\s*"\\]`))
   await pane.unmount()
 })
 
@@ -77,7 +116,7 @@ test('a value after a tab is lit where it stands', async ($, on) => {
   w.pages['data.tsv'] = { path: 'data.tsv', kind: 'text', total_lines: 2, start: 1, records: [{ line: 1, record: { text: 'wiki\tpages' } }, { line: 2, record: { text: 'dse\t3908\tpages' } }] }
   await start($, w)
   const pane = await clickCite($, w, 'dse has [3908](data.tsv#L2) pages.', 9)
-  expect(JSON.stringify(await pane.drawn({ in: 'm:cite-lines' }))).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["3908"]}')
+  expect(JSON.stringify(await pane.drawn({ in: 'm:cite-lines' }))).toMatch(citedText('3908'))
   await pane.unmount()
 })
 
@@ -104,12 +143,12 @@ test("a click on an example's record opens its place with the passage the card q
     return (await $.ui.mount(PANE)) as unknown as M
   }
   let pane = await open(0)
-  expect(JSON.stringify(await pane.drawn({ in: 'm:cite-lines' }))).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["4,579 wiki pages"]}')
+  expect(JSON.stringify(await pane.drawn({ in: 'm:cite-lines' }))).toMatch(citedText('4,579 wiki pages'))
   await pane.unmount()
   pane = await open(1)
   const text = shown(await pane.drawn())
   expect(text).toContain('quoted')
-  expect(JSON.stringify(await pane.drawn())).toContain('"backgroundColor":"selectionBg"},"children":["not in the line"]')
+  expect(JSON.stringify(await pane.drawn())).toMatch(new RegExp(`"backgroundColor":"${CITED_BG}"\\},"children":\\["not in the line"\\]`))
   await pane.unmount()
 })
 
@@ -167,6 +206,134 @@ test("a takeaway's citation opens a panel that agrees with the chat: no mark aft
   await pane.unmount()
 })
 
+/** A turn of main that made card ff73e071, then a click on its takeaway at column `x`: the citation panel, mounted. */
+async function clickTakeaway($: E, w: World, x: number): Promise<M> {
+  w.toolText = 'card:ff73e071\n[out0: table]'
+  await $.turn.start({ text: 'How big?', turnId: 't1' } as never)
+  await $.session.append({ door: 'response', origin: { kind: 'model', model: 'm' }, uuid: 'r1', message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'Here.' }] } } as never).catch(() => undefined)
+  await $.tool.call({ tool: 'mcp__plugin_thimble_thimble__add_card', tool_use_id: 'u1' } as never)
+  await $.turn.complete({ turnId: 't1', answer: 'Here.', durationMs: 5, reason: 'answer', isAborted: false } as never)
+  await w.clock.advance(300)
+  const ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
+  await ui.pointer({ type: 'down', x, y: 0, button: 'left', in: 'para-tk-t0-1' } as never)
+  await ui.pointer({ type: 'up', x, y: 0, button: 'left', in: 'para-tk-t0-1' } as never)
+  await ui.unmount()
+  await w.clock.settle()
+  return (await $.ui.mount(PANE)) as unknown as M
+}
+
+test("a click on a citation still being verified opens a panel that says so, its ◌ part of the title, and that changes when the check ends", async ($, on) => {
+  // v9 review (g): "clicking a citation still being verified: the panel shows that it is being verified"
+  const w = world(on)
+  Object.assign(w.cells.ff73e071!, { verification: { status: 'checking', links: { status: 'pending', checked: false, resolved: [], broken: [] } } })
+  await start($, w)
+  // the takeaway: `The export holds 4579 pages …`, the value at column 17
+  let pane = await clickTakeaway($, w, 18)
+  let tree = await pane.drawn()
+  expect(JSON.stringify(tree)).toContain('{"s":"4579","b":true,"fg":"merged","u":true},{"s":" ◌","b":true,"fg":"merged","u":true}')
+  expect(shown(await pane.find({ key: 'cite-sub' }))).toBe('found; ◌ being verified')
+  expect(shown(tree)).toContain("the card's code computed it, and thimble found it in the card's output; ◌ its card's links check is running")
+  await pane.unmount()
+  // the check ends: the card is read again, and the panel says what it found, with no ◌
+  Object.assign(w.cells.ff73e071!, { verification: { status: 'ok', links: { status: 'ok', checked: true, resolved: [{ value: '4579', ref: 'card:ff73e071#pages/TOTAL' }], broken: [] } } })
+  w.stamps.set(`${WS}/notebooks`, 2)
+  await w.clock.advance(1100)
+  await w.clock.settle()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  tree = await pane.drawn()
+  expect(shown(await pane.find({ key: 'cite-sub' }))).toBe('found, and a script got the same number')
+  expect(shown(tree)).toContain("and its card's links check found the same value")
+  expect(JSON.stringify(tree)).not.toContain('◌')
+  await pane.unmount()
+})
+
+test("a click on a citation whose place is still being read: the panel says `◌ being verified`, then what was found once the read ends", async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  let release: () => void = () => undefined
+  w.holdResolve = new Promise<void>(r => (release = r))
+  const text = 'It has [4,579](README.md#L3) pages.'
+  let ui = (await $.ui.mount(MESSAGE('m1', text))) as unknown as M
+  await w.clock.advance(300)
+  await ui.unmount()
+  ui = (await $.ui.mount(MESSAGE('m1', text))) as unknown as M
+  // still checked in the chat: ` ◌` part of the link, one purple underlined run with the value
+  expect(JSON.stringify(await ui.drawn({ in: 'para-1' }))).toContain('{"type":"Text","props":{"color":"merged","underline":true},"children":["4,579 ◌"]}')
+  await ui.pointer({ type: 'down', x: 8, y: 0, button: 'left', in: 'para-1' } as never)
+  await ui.pointer({ type: 'up', x: 8, y: 0, button: 'left', in: 'para-1' } as never)
+  await ui.unmount()
+  await w.clock.advance(50)
+  let pane = (await $.ui.mount(PANE)) as unknown as M
+  let tree = await pane.drawn()
+  expect(JSON.stringify(tree)).toContain('{"s":"4,579","b":true,"fg":"merged","u":true},{"s":" ◌","b":true,"fg":"merged","u":true}')
+  expect(shown(await pane.find({ key: 'cite-sub' }))).toBe('◌ being verified')
+  expect(shown(tree)).toContain('how◌ thimble is reading its place')
+  await pane.unmount()
+  // the read ends: the panel says what was found, and the ◌ goes
+  release()
+  await w.clock.advance(1100)
+  await w.clock.settle()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  tree = await pane.drawn()
+  expect(shown(await pane.find({ key: 'cite-sub' }))).toBe('found')
+  expect(shown(tree)).toContain('thimble read the cited line and found the value there')
+  expect(JSON.stringify(tree)).not.toContain('◌')
+  await pane.unmount()
+})
+
+test("a file citation says how thimble verified it, its history, and asks a side thread for a script where no code verified it", async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  let pane = await clickCite($, w, 'It has [4,579](README.md#L3) pages.', 8)
+  const text = shown(await pane.drawn())
+  expect(text).toContain('howthimble read the cited line and found the value there; no script recomputed it')
+  expect(text).toContain('historyunchanged since Claude wrote it')
+  await pane.press({ key: 'cite-script' })
+  await w.clock.settle()
+  // a side thread about the citation, asked for the script that recomputes the value
+  expect(w.acts.find(a => a.kind === 'thread')?.payload).toMatchObject({
+    anchor: 'README.md#L3',
+    anchor_text: 'It has 4,579 pages.',
+    message: 'Write and run a short script that recomputes 4,579 from the raw files. Show the script and what it printed, and say whether it agrees with the citation.',
+  })
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  // the panel shows the thread, its question its step
+  expect(shown(await pane.find({ type: 'Box', key: 'way' }))).toContain('threads › "Write and run a short script that recomputes 4,579')
+  await pane.unmount()
+})
+
+test("a citation a side thread wrote a script for shows that script under `script`, and no longer asks for one", async ($, on) => {
+  const w = world(on)
+  const question = 'Write and run a short script that recomputes 4,579 from the raw files. Show the script and what it printed, and say whether it agrees with the citation.'
+  const meta = { id: 't9', kind: 'thread', role: 'thread', title: '"4,579"', anchor: 'README.md#L3', anchor_text: 'It has 4,579 pages.', question, parent: 'main', created_at: '2026-10-06T10:07:00+00:00', running: false, answers: 1, seen: 1 }
+  w.states.threads.push(meta as never)
+  w.chats.t9 = { meta, events: [{ type: 'user', text: question }, { type: 'text', delta: 'The script:\n\n```python\nn = sum(1 for _ in open("pages.jsonl"))\nprint(f"RESULT: {n:,}")\n```\n\nIt printed `RESULT: 4,579`, which agrees.', reply: true }, { type: 'done', result: 'answered' }] }
+  await start($, w)
+  const pane = await clickCite($, w, 'It has [4,579](README.md#L3) pages.', 8)
+  await w.clock.settle()
+  await pane.redraw()
+  const text = shown(await pane.drawn())
+  expect(text).toContain("scripta side thread's script")
+  expect(text).toContain('1  n = sum(1 for _ in open("pages.jsonl"))')
+  expect(text).toContain('2  print(f"RESULT: {n:,}")')
+  expect(text).not.toContain('ask for a script')
+  expect(text).not.toContain('no script recomputed it')
+  await pane.unmount()
+})
+
+test("a citation of a command's output names the command that printed it", async ($, on) => {
+  const w = world(on)
+  w.resolve['call:c0wc0001#L1'] = { ref: 'call:c0wc0001#L1', kind: 'call', excerpt: '14591 revisions.jsonl', meta: { name: 'Bash', line: 'wc -l revisions.jsonl', lines: 1, span: { line: 1, end_line: 1, text: '14591 revisions.jsonl' } } }
+  await start($, w)
+  const pane = await clickCite($, w, 'It has [[14591|call:c0wc0001#L1]] revisions.', 8)
+  const text = shown(await pane.drawn())
+  expect(text).toContain('howthe command printed it, and thimble found it in its output')
+  expect(text).toContain('command$ wc -l revisions.jsonl')
+  expect(text).not.toContain('ask for a script')
+  await pane.unmount()
+})
+
 test('a file citation written without words names its place once: no `from` row, and its label marked in the sentence', async ($, on) => {
   const w = world(on)
   await start($, w)
@@ -213,6 +380,19 @@ test('a cited line too long for the panel wraps at its spaces, never inside a wo
   expect(hit.text.slice(hit.hi![0], hit.hi![1])).toBe('event log')
   // a word wider than the row breaks where the row ends
   expect(wrapAround('x'.repeat(50), null, 20, 4).map(r => r.text.length)).toEqual([20, 20, 10])
+})
+
+test("a cited value's literal is found in code as code types it, never inside a longer number or a name; a script is an answer's first code block", () => {
+  expect(literalAt('counts = [3908, 601]', '3908')).toEqual([10, 14])
+  expect(literalAt('x = 3_908', '3,908')).toEqual([4, 9])
+  expect(literalAt('s = "3,908 pages"', '3,908')).toEqual([5, 10])
+  expect(literalAt('v = 3908.0', '3908')).toEqual([4, 10])
+  expect(literalAt('rate = 12.55', '12.5')).toEqual([7, 12])
+  expect(literalAt('pct = 45', '45%')).toEqual([6, 8])
+  expect(literalAt('print("dse")', 'dse')).toEqual([7, 10])
+  for (const line of ['n = 13908', 'v = 39080', 'a = x3908', 'df']) expect(literalAt(line, '3908')).toBeNull()
+  expect(firstCode('The script:\n\n```python\nimport json\nprint(1)\n```\n\nRESULT: 3')).toEqual({ lang: 'python', code: 'import json\nprint(1)' })
+  expect(firstCode('no code here, only `inline`')).toBeNull()
 })
 
 test("a context line wider than the panel is cut with `…` right against its words, never after a space", async ($, on) => {
@@ -307,8 +487,9 @@ test("a file citation opens on its whole file: the cited line lit whole for a pl
   await start($, w)
   const pane = await clickCite($, w, 'See [[log.txt#L450]] for the restart.', 5)
   const { rows, json } = await windowRows(pane)
-  // the panel's 36 rows less the title row, the rule, the source row, the second rule, `ask about it` and the hint row
-  expect(rows.length).toBe(36 - 6)
+  // the panel's 36 rows less the title row, the rule, the source, how and history rows, the second rule, `ask about
+  // it` and the hint row
+  expect(rows.length).toBe(36 - 8)
   const nums = rows.map(r => Number(/^\s+(\d+)\s{2}line/.exec(r)?.[1] ?? 0))
   const firstShown = nums.find(n => n > 0)!
   const lastShown = [...nums].reverse().find(n => n > 0)!
@@ -320,7 +501,7 @@ test("a file citation opens on its whole file: the cited line lit whole for a pl
   expect(at).toBeGreaterThan(3)
   expect(at).toBeLessThan(rows.length / 2)
   // the cited line lit whole (it names no value), its number in the text colour; the lines around it dim
-  expect(json).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["line 450 of the log"]}')
+  expect(json).toMatch(citedText('line 450 of the log'))
   expect(json).toMatch(/"color":"inactive"\},"children":\["\s*449 {2}line 449 of the log"\]/)
   expect(json).toMatch(/"color":"inactive"\},"children":\["\s*460 {2}line 460 of the log"\]/)
   await pane.unmount()
@@ -333,7 +514,7 @@ test('a value cited in a file is lit where it stands, not its whole line; the pa
   await start($, w)
   const pane = await clickCite($, w, 'It names [line 450](log.txt#L450) once.', 10)
   const { json } = await windowRows(pane)
-  expect(json).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["line 450"]}')
+  expect(json).toMatch(citedText('line 450'))
   expect(json).not.toContain('"children":["line 450 of the log"]}')
   // the page that holds the cited line's lines was read from its start (term.ts citePage), never the file's first page
   const reads = w.calls.filter(c => c[2] === 'files' && c[5] === 'log.txt').map(c => c.slice(6).join(' '))
@@ -354,7 +535,7 @@ test('every file citation opens in the window over its file: from a reply, a car
     const { rows, json } = await windowRows(pane)
     expect(rows.some(r => /^\s+450 {2}line 450 of the log$/.test(r))).toBe(true)
     expect(rows.at(-1)).toMatch(/↓ \d+ more$/)
-    expect(json).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["line 450"]}')
+    expect(json).toMatch(citedText('line 450'))
     await pane.unmount()
   }
   // a reply

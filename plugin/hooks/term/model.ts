@@ -395,6 +395,8 @@ export function verdictOf(c: Citation, res: Resolution | null, at = 0): TermVerd
     out.path = str(res.path)
     if (typeof res.line === 'number') out.line = res.line
     out.lines = linesOf(res, c.display)
+    // a command's output: the command that printed it, as its row names it (calls.py chip_line)
+    if (kind === 'call' && str(meta.line)) out.command = str(meta.line)
   }
   if (!showsValue(c.display)) return { ...out, why: 'the place resolves; the citation shows no value' }
   const where = span && 'value' in span ? str(span.value) : span && 'text' in span ? str(span.text) : kind === 'cell' ? str(res.excerpt) : out.lines.filter(l => l.hit).map(l => l.text).join('\n') || str(res.excerpt)
