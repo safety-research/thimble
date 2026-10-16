@@ -675,14 +675,20 @@ export async function cardBlock(cx: Ctx, e: ResolveInput, id: string, w: number,
   } else {
     if (opts.takeaway !== false && tc.takeaway.trim()) rows.push(<Box flexDirection="column" width={inner}>{await drawReply(cx, e, tc.takeaway, inner, { margin: 0, prefix: `tk-${key}-`, card: id })}</Box>)
   }
-  return (
+  const framed = (
     <Box flexDirection="column" width={w} borderStyle="round" borderColor={COLORS.rule} paddingX={1}>
-      {arrow ? (
-        <Box key={`arrow-${key}-${id}`} position="absolute" top={-1} left={Math.max(0, w - 6)}>
-          {arrow}
-        </Box>
-      ) : null}
       {rows}
+    </Box>
+  )
+  if (!arrow) return framed
+  // the ↗ over the end of the border row: a box laid over the frame from outside it (a box inside a border paints
+  // only within it)
+  return (
+    <Box flexDirection="column" width={w}>
+      {framed}
+      <Box key={`arrow-${key}-${id}`} position="absolute" top={0} left={Math.max(0, w - 6)}>
+        {arrow}
+      </Box>
     </Box>
   )
 }

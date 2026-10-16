@@ -26,7 +26,7 @@ test("in fullscreen a card's border row ends with a ↗ that opens the card in t
   await withCard($, w, 'ff73e071')
   const ui = (await $.ui.mount(MESSAGE('r1', true))) as unknown as M
   const json = JSON.stringify(await ui.drawn())
-  expect(json).toMatch(/"key":"arrow-t0-ff73e071","position":"absolute","top":-1/)
+  expect(json).toMatch(/"key":"arrow-t0-ff73e071","position":"absolute","top":0/)
   await ui.press({ key: 'open-t0-ff73e071' })
   expect(w.toasts.at(-1)).toContain('card:ff73e071')
   await ui.unmount()
