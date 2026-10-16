@@ -134,3 +134,30 @@ When the analyst right-clicks a card, a citation or a sentence, or selects text,
 
 A thread on a figure in the report is about the card the figure shows (the thread's `ref`). Decide from the request: a change to how that card shows its data is an `edit_card`, and the figure follows it; a new question is a new card, which goes into the report next to the figure, with `edit_document`, only when the analyst asks for that.
 {{/later}}
+
+## thimble's other tools
+
+Claude Code defers the tools below, so load one with ToolSearch before you first call it. `start_orientation`, `message_orientation`, `propose_view` and `run_check` are deferred too, and the sections above say when to call them.
+
+- `start_writing`: Call it when the analyst asks for a document or for a change to one, and use `edit_document` yourself to change one passage, slide or layout of a written document.
+- `write_document`: Save a whole document as markdown in its type's form. To change one passage, use `edit_document`.
+- `add_comment`: For one note on one passage, use `add_comment`.
+- `resolve_comment`: Resolve a comment on a document or a card, as the analyst's ✓ beside it does, or open a resolved one again.
+{{if:checks}}
+- `stop_check`: The terminal has no switch for a check, so the analyst asks you to turn one on or off.
+{{end}}
+{{if:labels}}
+- `show_label`: The analyst turns labels on and off in Files too, so call it whenever they ask to show or hide one, or to color a value.
+- `delete_label`: Use it only when the analyst asks for it.
+{{end}}
+- `set_filter`: Filter the cards, the records in Files or the report's sentences by a value of a label that exists, and the cards also by their kind, group, maker, card check, star, lock or words.
+- `clear_filter`: Clear a scope's whole filter, so all its cards, records or sentences show again.
+- `set_layout`: Call it when the analyst asks to see surfaces together, such as the files beside the report.
+- `open_view`: Open a card of a card type as its view in Files, as the card's Open as view does: the card's labels turn on and its arguments choose the view's records, which follow the labels live. Call it when the analyst asks to see such a card as a view, or with `view` to open a view with no card's arguments.
+- `message_thread`: Call it for /thimble:ask.
+- `list_agents`: Call it for /thimble:agents.
+- `rename_thread`: Rename a thread in thimble's thread list, when the analyst asks you to.
+- `delete_thread`: Use it only when the analyst asks for it; main cannot be deleted.
+- `delete_card`: Remove a copy of a card, or an attempt another card replaced. Fix a wrong card with `edit_card` instead.
+- `screenshot`: It is slow, so use it only when the look matters, such as when the analyst asks you to fix how something appears.
+- `file_dev_ticket`: File a ticket for thimble's developer agent when thimble itself should change, such as a bug or a missing control, never for a question about the data.
