@@ -2,24 +2,24 @@
 // folder's sessions made, in SPEC-v2 J4's order: coverage (what Claude read or searched of the data files),
 // citations (the problems first), labels with their counts and their records of no fit or unsure, side threads (those
 // with answers not yet read first), views (built, building, proposed), the checks' open comments on answers, cards
-// grouped by the question that made them, documents, and the files by folder. Each heading opens its section's view,
-// each row the panel that shows it. A section of a feature that is off is left out. A file in the `listed` state counts
-// neither its records nor its reading: it shows its kind and its size.
+// grouped by the question that made them, and documents. Each heading opens its section's view, each row the panel that
+// shows it. A section of a feature that is off is left out. The terminal has no file browser (Matt, 10-16): Coverage
+// lists the files, and a file's lines show only to verify a citation, a label's records or a card's source.
 //
 // This file lays the panel out as styled lines and their hit regions, without `$`; register.tsx gathers the data
 // (homeData), draws the lines in the Client homeview.tsx and acts on a click or a key. It follows the visual system
 // (SPEC.md, section 7, "Home"): one column under the title row's `Home`; a section heading bold with its count dim in
 // parentheses and `N new` in green, a blank row above it; an item's state glyph at A0 and its name at A2, regular,
 // its metadata dim against the right edge and `new` in green there while it is new; card groups and folders that fold
-// with `▸ ▾`, the newest group and the first folder open. Each line starts with the 2-cell margin, where `❯` marks the
+// with `▸ ▾`, the newest group open. Each line starts with the 2-cell margin, where `❯` marks the
 // row the keys chose.
 import type { Line, Seg } from './draw'
-import { lineWidth, share as pct, valueColour, width, wrapRows } from './draw'
+import { lineWidth, valueColour, width } from './draw'
 import { FRESH, MARGIN_W, fitTo, headingLine, hintLines, pointed, ruleLine, spread } from './chrome'
 import { COLORS } from './paint'
 import { cutMiddle, quoted } from './lib'
 
-export type SectionId = 'coverage' | 'citations' | 'checks' | 'views' | 'reports' | 'threads' | 'cards' | 'labels' | 'files'
+export type SectionId = 'coverage' | 'citations' | 'checks' | 'views' | 'reports' | 'threads' | 'cards' | 'labels'
 
 /** What a click opens: an item in its own panel, or a section's own panel. */
 export type HomeOpen =
@@ -28,17 +28,16 @@ export type HomeOpen =
   | { kind: 'thread'; id: string }
   | { kind: 'card'; id: string }
   | { kind: 'label'; name: string }
-  | { kind: 'file'; path: string }
   | { kind: 'cite'; ref: string; display: string | null; card?: string }
   | { kind: 'comment'; id: string }
-  | { kind: 'pane'; view: 'views' | 'reports' | 'threads' | 'labels' | 'files' | 'coverage' | 'citations' | 'checks'; title: string; folder?: string }
+  | { kind: 'pane'; view: 'views' | 'reports' | 'threads' | 'labels' | 'coverage' | 'citations' | 'checks'; title: string }
 
-/** A click's act: open something, fold or unfold a card group or a folder (`key`, `open` as it is drawn now), show a
- *  section whole. */
+/** A click's act: open something, fold or unfold a card group (`key`, `open` as it is drawn now), show a section
+ *  whole. */
 export type HomeAct = { op: 'open'; open: HomeOpen } | { op: 'fold'; key: string; open: boolean } | { op: 'more'; sec: SectionId; next?: string }
 
-/** What the analyst chose: the groups and folders folded or unfolded against their default (the newest group and the
- *  first folder open), the sections shown whole, and the row the keys chose (its key). */
+/** What the analyst chose: the groups folded or unfolded against their default (the newest group open), the sections
+ *  shown whole, and the row the keys chose (its key). */
 export type HomeUi = { folded: string[]; unfolded: string[]; more: string[]; pick: string }
 
 export const HOME_UI_EMPTY: HomeUi = { folded: [], unfolded: [], more: [], pick: '' }
@@ -56,8 +55,6 @@ export type HomeCardGroup = { head: string; from: 'answer' | 'thread' | 'report'
 /** `ran`: whether the label has a run, as its panel's `last run on …` or `not run yet` says (a label a stopped thread
  *  left is none); absent is true. */
 export type HomeLabel = { slug: string; name: string; kind: string; trial: boolean; counts: Record<string, number>; values: string[]; paths: string[]; running: boolean; ran?: boolean; state?: string; fresh?: boolean; colors?: Record<string, number>; noFit?: number; unsure?: number }
-/** thimble-term: a file whose reading thimble does not count (`listed`) has no state glyph and shows its kind. */
-export type HomeFile = { file: string; records: number | null; size: number; seen: number; state: 'read' | 'scanned' | 'untouched' | 'listed'; ranges: number[][]; kind?: string }
 /** A citation as home lists it (citesview.tsx): its value, its place in words, how it stands, the card it is on. */
 export type HomeCite = { key: string; value: string; place: string; verdict: string; why: string; ref: string; card?: string; n?: number }
 /** A check's open comment on a passage of an answer (C9). */
@@ -68,7 +65,6 @@ export type HomeData = {
   threads: HomeThread[]
   cardGroups: HomeCardGroup[]
   labels: HomeLabel[]
-  files: HomeFile[]
   /** this session's coverage line (`read 2% · searched 41% of the data`), '' while it read no data file; null when
    *  coverage is off */
   coverage: string | null
@@ -78,8 +74,6 @@ export type HomeData = {
   comments?: HomeComment[] | null
   /** labels are off: no Labels section */
   noLabels?: boolean
-  /** the folder's own name, which heads the files at its top */
-  root?: string
 }
 
 /** The cards of answers, threads and reports, each under the first question that made it (`groups` in the order the
@@ -124,7 +118,6 @@ export type HomeRow = {
   fold?: string
   open?: boolean
   depth?: number
-  more?: number
   act: HomeAct
 }
 
@@ -388,73 +381,6 @@ function labelsSection(ls: readonly HomeLabel[]): HomeSection {
   }
 }
 
-/** A share of records read, in whole percent as every share (draw.ts share). */
-function share(seen: number, total: number): string {
-  if (!total || !seen) return ''
-  return pct(seen, total)
-}
-
-/** thimble-term: a size in words (`756 KB`), for a file whose records are not counted. */
-function sizeWords(n: number): string {
-  return n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : n >= 1e3 ? `${Math.round(n / 1e3)} KB` : `${n} B`
-}
-
-/** The files at most an open folder lists before `… N more`. */
-const FOLDER_FILES = 20
-
-function filesSection(fs: readonly HomeFile[], root: string, ui: HomeUi): HomeSection {
-  const by = new Map<string, HomeFile[]>()
-  // a folder by the name the file browser gives it: its path in the corpus (`collusion-wiki/`), and the corpus's own
-  // files under the corpus folder's name
-  for (const f of fs) {
-    const cut = f.file.lastIndexOf('/')
-    const folder = cut < 0 ? `${root}/` : `${f.file.slice(0, cut)}/`
-    by.set(folder, [...(by.get(folder) ?? []), f])
-  }
-  // the corpus's own folder first, the others in natural order, as the file browser lists them
-  const top = `${root}/`
-  const folders = [...by.entries()].sort(([a], [b]) => (a === b ? 0 : a === top ? -1 : b === top ? 1 : a.localeCompare(b, undefined, { numeric: true })))
-  const recs = (xs: readonly HomeFile[]) => xs.reduce((k, f) => k + (f.records ?? 0), 0)
-  const seen = (xs: readonly HomeFile[]) => xs.reduce((k, f) => k + Math.min(f.seen, f.records ?? 0), 0)
-  const cols = (records: string, read: string): Seg[] => [{ s: records }, { s: '  ' }, dim(read)]
-  // thimble-term: where no reading is counted, the columns are the files' kind (text, left) then size (a number, on R)
-  const listed = fs.length > 0 && fs.every(f => f.state === 'listed')
-  return {
-    id: 'files',
-    name: 'Files',
-    count: fs.length,
-    heads: listed ? [dim('type'), { s: '  ' }, dim('size')] : [dim('records'), { s: '  ' }, dim('read')],
-    summary: joined([fs.length && !listed ? `${num(fs.filter(f => f.state === 'read').length)} of ${num(fs.length)} read` : '']),
-    pane: { kind: 'pane', view: 'files', title: 'Files' },
-    rows: folders.map(([folder, files], i) => {
-      const fold = `files:${folder}`
-      const open = isOpen(ui, fold, i === 0)
-      const sorted = [...files].sort((a, b) => a.file.localeCompare(b.file, undefined, { numeric: true }))
-      return {
-        key: `folder:${folder}`,
-        glyph: { mark: open ? '▾' : '▸' },
-        title: folder,
-        // its count of files dim after its name, as the file browser shows it; under the columns only what they head
-        after: [dim(`  ${num(files.length)}`)],
-        right: listed ? [{ s: '' }, { s: '  ' }, dim(sizeWords(files.reduce((k, f) => k + f.size, 0)))] : cols(num(recs(files)), share(seen(files), recs(files)) || '0%'),
-        fold,
-        open,
-        // a folder of 21 shows all 21: `… 1 more` would take the row the file takes
-        more: sorted.length > FOLDER_FILES + 1 ? sorted.length - FOLDER_FILES : 0,
-        kids: sorted.slice(0, sorted.length > FOLDER_FILES + 1 ? FOLDER_FILES : sorted.length).map(f => ({
-          key: `file:${f.file}`,
-          // a listed file has no state glyph: a blank in its place keeps its name at A4
-          glyph: f.state === 'listed' ? { mark: ' ' } : f.state === 'read' ? DONE : NOT_STARTED,
-          title: f.file.split('/').at(-1) ?? f.file,
-          right: f.state === 'listed' ? [dim(f.kind ?? ''), { s: '  ' }, dim(sizeWords(f.size))] : cols(f.records !== null ? num(f.records) : `${num(f.size)} B`, f.state === 'read' ? share(f.seen, f.records ?? 0) || '0%' : f.state === 'scanned' ? 'counted' : ''),
-          act: { op: 'open', open: { kind: 'file', path: f.file } } as HomeAct,
-        })),
-        act: { op: 'fold', key: fold, open },
-      }
-    }),
-  }
-}
-
 /** Coverage (SPEC-v2 J5): this session's coverage line, its heading opening the Coverage view. */
 function coverageSection(line: string): HomeSection {
   return {
@@ -502,13 +428,13 @@ function checksSection(cs: readonly HomeComment[]): HomeSection {
   }
 }
 
-/** Whether a group or folder shows open: its default unless the analyst folded or unfolded it. */
+/** Whether a group shows open: its default unless the analyst folded or unfolded it. */
 function isOpen(ui: HomeUi, key: string, byDefault: boolean): boolean {
   return byDefault ? !ui.folded.includes(key) : ui.unfolded.includes(key)
 }
 
 /** Every section, in SPEC-v2 J4's order: what this session read and how its citations and labels stand, what it asked
- *  and made, what the checks said, then its cards, documents and files. A section of a feature that is off is left out
+ *  and made, what the checks said, then its cards and documents. A section of a feature that is off is left out
  *  (coverage, citations, labels, checks), and so are coverage, citations and checks while they hold nothing. */
 export function homeSections(d: HomeData, ui: HomeUi = HOME_UI_EMPTY): HomeSection[] {
   // the sections of what this session read, its citations and the checks' comments show once they hold something
@@ -521,7 +447,6 @@ export function homeSections(d: HomeData, ui: HomeUi = HOME_UI_EMPTY): HomeSecti
     ...(d.comments?.length ? [checksSection(d.comments)] : []),
     cardsSection(d.cardGroups, ui),
     reportsSection(d.reports),
-    filesSection(d.files, d.root || 'folder', ui),
   ]
 }
 
@@ -591,29 +516,6 @@ function itemLine(row: HomeRow, x: number, w: number): Line {
   return spread(left, right, w)
 }
 
-/** The figures of a section's rows set in shared columns: each row's right part padded so its last column ends on R
- *  and the columns before it line up (the files' records and share). */
-function alignRight(sec: HomeSection): void {
-  if (sec.id !== 'files') return
-  const rows = sec.rows.flatMap(r => [r, ...(r.kids ?? [])])
-  // the files' right parts are [count?, gap, records, gap, read]: pad records and read to their columns
-  const parts = rows.map(r => r.right ?? [])
-  const first = sec.heads?.[0]?.s.trim() || 'records'
-  const recW = Math.max(width(first), ...parts.map(p => width(p.at(-3)?.s ?? '')))
-  const readW = Math.max(width(sec.heads?.at(-1)?.s.trim() || 'read'), ...parts.map(p => width(p.at(-1)?.s ?? '')))
-  // text aligns left, numbers right: a listed file's kind is text (its first column), its size a number
-  const textFirst = first === 'type'
-  for (const r of rows) {
-    const p = r.right ?? []
-    if (p.length < 3) continue
-    const rec = p.at(-3)!
-    const read = p.at(-1)!
-    r.right = [...p.slice(0, -3), { ...rec, s: textFirst ? rec.s.padEnd(recW) : rec.s.padStart(recW) }, { s: '  ' }, { ...read, s: read.s.padStart(readW) }]
-  }
-  const last = sec.heads?.at(-1)?.s.trim() || 'read'
-  sec.heads = [dim(textFirst ? first.padEnd(recW) : first.padStart(recW)), { s: '  ' }, dim(last.padStart(readW))]
-}
-
 /** A row without `new` in a section where some row has it: its right part ends where the others' words end, before the
  *  cells `new` takes (live check term-fix9, low quirk: `table  new` beside `table` put the kinds in two columns). */
 function besideNew(r: HomeRow): HomeRow {
@@ -622,25 +524,7 @@ function besideNew(r: HomeRow): HomeRow {
 }
 const NEW_W = '  new'.length
 
-/** The cells of a file's name the type column never cuts: a name up to this long is whole beside the column, or the
- *  column goes. */
-export const NAME_WHOLE = 32
-
-/** The files section without its type column, when beside it a file's name (up to NAME_WHOLE cells) would be cut (live
- *  check term-fix10, new quirk 6: `agent-c…` beside the column); else as it is. */
-function withoutType(sec: HomeSection, w: number): HomeSection {
-  if (sec.id !== 'files' || sec.heads?.[0]?.s.trim() !== 'type') return sec
-  const files = sec.rows.flatMap(r => r.kids ?? [])
-  const longest = Math.max(0, ...files.map(f => width(f.title)))
-  const rightW = Math.max(0, ...files.map(f => lineWidth(f.right ?? [])))
-  if (w - 4 - 2 - rightW >= Math.min(NAME_WHOLE, longest)) return sec
-  const sizeOnly = (r: HomeRow): HomeRow => ({ ...r, ...(r.right && r.right.length >= 3 ? { right: [...r.right.slice(0, -3), r.right.at(-1)!] } : {}), ...(r.kids ? { kids: r.kids.map(sizeOnly) } : {}) })
-  return { ...sec, heads: sec.heads.slice(-1), rows: sec.rows.map(sizeOnly) }
-}
-
 function sectionLines(out: Lines, sec: HomeSection, ui: HomeUi, w: number): void {
-  alignRight(sec)
-  sec = withoutType(sec, w)
   if (sec.rows.some(r => r.fresh || (r.open && r.kids?.some(k => k.fresh)))) sec = { ...sec, rows: sec.rows.map(r => ({ ...besideNew(r), ...(r.kids ? { kids: r.kids.map(besideNew) } : {}) })) }
   const head = headingLine(sec.name, sec.count, sec.news ?? 0)
   out.push(spread(head, sec.heads ?? [], w), sec.pane ? { x0: 0, x1: lineWidth(head), row: false, act: { op: 'open', open: sec.pane } } : undefined)
@@ -654,10 +538,8 @@ function sectionLines(out: Lines, sec: HomeSection, ui: HomeUi, w: number): void
     out.push(itemLine(r, 0, w), { x0: 0, x1: w, row: true, act: r.act, pick: r.key })
     if (r.meta?.length) out.push([{ s: '  ' }, ...fitTo(r.meta, w - 2)], { x0: 0, x1: w, row: true, act: r.act })
     if (r.kids && r.open) {
-      // a group's cards at A2 under its name; a folder's files with their glyphs at A2 and their names at A4
+      // a group's cards at A2 under its name
       for (const k of r.kids) out.push(itemLine(k, k.glyph ? 2 : 0, w), { x0: 2, x1: w, row: true, act: k.act, pick: k.key })
-      // a folder's `… N more` is a row the keys choose too: Enter shows the folder whole in the file browser
-      if (r.more) out.push([{ s: '    ' }, dim(`… ${num(r.more)} more`)], { x0: 4, x1: 4 + width(`… ${num(r.more)} more`), row: false, act: { op: 'open', open: { kind: 'pane', view: 'files', title: 'Files', folder: r.title } }, pick: `more:${r.key}` })
     }
   }
   // the section's `… N more` is a row the keys choose: Enter or Space shows the section whole, the choice on its first

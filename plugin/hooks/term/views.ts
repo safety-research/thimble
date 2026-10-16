@@ -1,5 +1,5 @@
-// The panel's views drawn by modules of their own, registered once (register.tsx calls registerPanelViews): the file
-// browser and a file (filesview.tsx), coverage (coverageview.tsx), the citations (citesview.tsx) and the checks on
+// The panel's views drawn by modules of their own, registered once (register.tsx calls registerPanelViews): a file,
+// opened to verify a place (filesview.tsx; the terminal has no file browser), coverage (coverageview.tsx), the citations (citesview.tsx) and the checks on
 // answers (checksview.tsx), each through panel.tsx drawsView and term.ts loadsView; and what a terminal view's acts do.
 // refreshSummary counts again what the summary line above the prompt shows (term.ts tick calls it when the workspace
 // changes). The other files of the panel's lane are reached through this one.

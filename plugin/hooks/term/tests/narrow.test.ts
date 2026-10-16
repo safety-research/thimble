@@ -117,7 +117,7 @@ test('key hints too long for their row go on to a second row, never cut; a list 
     expect(width(r)).toBeLessThanOrEqual(56)
     expect(r).not.toContain('…')
   }
-  for (const h of ['↑↓ to choose', 'Enter to open', 'Backspace for the files', 'x to close']) expect(rows.join(' · ')).toContain(h)
+  for (const h of ['↑↓ to choose', 'Enter to open', 'f to find', 'x to close']) expect(rows.join(' · ')).toContain(h)
   // the cut lines leave the hint rows in the pane: the path row, the header (title, facts, rule), the chosen record, the
   // lines, two hint rows
   const body = ((await pane.drawn({ in: 'm:file-body' })) as { children?: unknown[] }).children ?? []
@@ -344,7 +344,7 @@ test("a label's shares add up to 100%, on its card and in its panel's counts", a
   await pane.unmount()
 })
 
-test("in a narrow pane names stay readable: home's label bar shrinks, then goes; the type column goes before a file's name is cut", async ($, on) => {
+test("in a narrow pane names stay readable: home's label bar shrinks, then goes", async ($, on) => {
   // live check term-fix10, new quirk 6: `● age…  ████████████████████  1,900` on home, and `agent-c…`, `pages.j…` beside
   // the file browser's 10-cell type column
   const w = world(on)
@@ -375,28 +375,6 @@ test("in a narrow pane names stay readable: home's label bar shrinks, then goes;
     const label = rows.find(r => r.includes('agent-chat purpose'))
     // the name whole: at 39 with no bar, at 44 beside a short one
     expect(label).toMatch(body === 39 ? /● agent-chat purpose +14,591$/ : /● agent-chat purpose +█{6,19} {2}14,591$/)
-    // home's files: the type column goes before a name is cut
-    expect(rows.find(r => r.includes('agent-chat.jsonl'))).toMatch(/^ {6}agent-chat\.jsonl +1\.2 MB$/)
-    expect(rows.find(r => r.startsWith('  Files'))).not.toContain('type')
     for (const r of rows) expect(width(r)).toBeLessThanOrEqual(body - 4 + 2)
-  }
-  expect((await homeRows(96)).find(r => r.startsWith('  Files'))).toMatch(/type {2,}size$/)
-  // the file browser: the same
-  await $.command.run({ command: 'thimble:thimble', args: 'files' } as never)
-  await w.clock.settle()
-  for (const body of [37, 96]) {
-    const pane = await look($, body)
-    const tree = (((await pane.drawn({ in: 'm:files-tree' })) as { children?: unknown[] }).children ?? []).map(r => shown(r).replace(/\s+$/, ''))
-    await pane.unmount()
-    const chat = tree.find(r => r.includes('agent-chat'))!
-    expect(chat).toContain('agent-chat.jsonl')
-    expect(tree.find(r => r.includes('pages'))).toContain('pages.jsonl')
-    if (body === 37) {
-      expect(tree[0]).not.toContain('type')
-      expect(chat).not.toContain('transcript')
-    } else {
-      expect(tree[0]).toMatch(/type +size$/)
-      expect(chat).toMatch(/transcript +1\.2 MB$/)
-    }
   }
 })

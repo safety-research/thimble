@@ -224,16 +224,32 @@ test("the label's counts apply the analyst's verdicts, as thimble.labels() reads
   await again.unmount()
 })
 
-test("a label whose first run stopped part way counts its scope in its panel: `run on all N` and `N records`", async ($, on) => {
-  // live check term-fix10, low quirk: `run on all` with no number and `scope: pages.jsonl` with no count, though
-  // `thimble state` gave the scope's 4,579 records (scope_total)
+test("a label whose first run stopped part way counts its scope in its panel: `run on all N`, and the files its glob matches", async ($, on) => {
+  // live check term-fix10, low quirk: `run on all` with no number, though `thimble state` gave the scope's 4,579
+  // records (scope_total); 0.9.0 (Matt, 19:05): the scope row says what its count is, `<glob> · 1 file matches`
   const w = world(on)
-  w.states.labels = [{ ...LABEL, glob: 'pages.jsonl', last_run: null, applications: [], label_stats: { n_labeled: 1900, counts: { none: 1800, 'proxy-link': 100 } }, scope_total: 4579 }] as never
+  w.states.labels = [{ ...LABEL, glob: 'pages.jsonl', last_run: null, applications: [], label_stats: { n_labeled: 1900, counts: { none: 1800, 'proxy-link': 100 } }, scope_total: 4579, scope_files: 1, run_model: 'Haiku 4.5' }] as never
   const pane = await labelPanel($, w)
   const text = shown(await pane.drawn())
   expect(text).toContain('stopped at 1,900 of 4,579')
   expect(text).toContain('run on all 4,579')
-  expect(text).toMatch(/scope:\s*4,579 records/)
+  expect(text).toMatch(/scope:\s*· 1 file matches/)
+  expect(text).not.toContain('4,579 records')
+  // a regex label has no model row
+  expect(text).not.toContain('model:')
+  await pane.unmount()
+})
+
+test("a prompt label's panel has a `model:` row, the model its calls run on; its scope says how many files match", async ($, on) => {
+  // Matt (19:05): the label panel shows the model a prompt label uses, and the scope's count says what it is
+  const w = world(on)
+  w.states.labels = [{ ...LABEL, kind: 'prompt', glob: 'agents/*.jsonl', scope_files: 3, run_model: 'Haiku 4.5' }] as never
+  const pane = await labelPanel($, w)
+  const text = shown(await pane.drawn())
+  expect(text).toMatch(/model:\s*Haiku 4\.5/)
+  expect(text).toMatch(/scope:\s*· 3 files match/)
+  expect(text.indexOf('type:')).toBeLessThan(text.indexOf('model:'))
+  expect(text.indexOf('model:')).toBeLessThan(text.indexOf('scope:'))
   await pane.unmount()
 })
 

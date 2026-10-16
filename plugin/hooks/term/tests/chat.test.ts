@@ -663,6 +663,33 @@ test("main's `↳ The writer …` line is said once: a later row about the same 
   expect(await draw('r3', '↳ The writer finished the slides; thimble shows them.')).toContain('The writer finished the slides')
 })
 
+test("under main's `↳ The writer finished …` row, a line links the document out to the browser workbench, once", async ($, on) => {
+  // Matt (10-16): documents are read-only in the terminal; when the writer finishes, a line under the turn links out to
+  // the browser workbench, where the document is read whole, edited, and its figures and history shown
+  const w = world(on)
+  const writer = { name: 'thimble:writer', label: 'writer: report', state: 'running', kind: 'subagent', chat: 'w1', role: 'writer', started: '2026-10-06T10:10:00+00:00' }
+  ;(w.states.agents.rows as unknown[]).push(writer)
+  await start($, w)
+  await w.clock.advance(1100)
+  // the writer ends: its chat and the documents change, and the documents are read again (band.tsx noteWriters)
+  writer.state = 'done'
+  w.stamps.set(`${WS}/chats`, 2)
+  w.stamps.set(`${WS}/investigations/main`, 2)
+  await w.clock.advance(1100)
+  const line = '↳ The writer finished the report; thimble shows it.'
+  const ui = (await $.ui.mount(MESSAGE('r1', line))) as unknown as M
+  expect(shown(await ui.drawn())).toContain('↳ document "Agents used the dse wiki as a relay" · read and edit it in the browser ↗')
+  await ui.press({ key: 'written-open-r1' })
+  await w.clock.settle()
+  await ui.unmount()
+  // the press (offramp.ts): `thimble open` on the document's ref
+  expect(w.calls.some(c => c[1] === 'open' && c.includes('report:report'))).toBe(true)
+  // a later row about the same run says nothing more
+  const again = (await $.ui.mount(MESSAGE('r2', `${line}\n\nThe thread is asked.`))) as unknown as M
+  expect(shown(await again.drawn())).not.toContain('↳ document')
+  await again.unmount()
+})
+
 test("main's `↳` line for one of thimble's agents is said once a run: not again for the run's task notification after its hand-back, after a resume too", async ($, on) => {
   // live QA on 0.7.0 (10-10): `↳ The view builder finished` once for the builder's hand-back and again for Claude
   // Code's task notification of the same run, which the browser's chat hides

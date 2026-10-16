@@ -21,7 +21,8 @@
 //             labels: every label, its records of no category fit and those it is unsure of under it
 //   docs      the documents; doc, one document drawn as main's chat draws a reply, its figures as cards, its comments
 //             under the passages they are on (report.ts), read only: the browser workbench edits documents
-//   files     the file browser and a file: filesview.tsx, through drawsView
+//   file      a file's lines at a place, to verify a citation, a label's records or a card's source: filesview.tsx,
+//             through drawsView (the terminal has no file browser: Coverage lists the files)
 //   coverage, citations, checks   coverageview.tsx, citesview.tsx, checksview.tsx, through drawsView (views.ts)
 //   agent     one of thimble's agents: what it is doing and its latest steps
 //   views     the views, one row each; view, one view as one line (the browser draws views)
@@ -33,11 +34,11 @@ import { ACCENT, FRESH, LINK, MARGIN_W, controlsEl, fieldEls, fitHints, fitTo, f
 import { chipLook, chipName, citeLabel, plainCites, quoteSpan, quotedWords, wrapAround } from './cite'
 import { MAX_BARS, MAX_NODES, MAX_TABLE_ROWS, amount, cardLayout, cut, cutRef, demojibake, labelHead, lineWidth, placeWords, shade, share, shares, turnTimes, valueColour, width, wrapRows } from './draw'
 import type { BarRow, CardData, Cell, Item, Layout, Line, Seg } from './draw'
-import { fileRef, fileType, filesOf } from './files'
+import { fileRef } from './files'
 import { citationOf, placeOf, targetLabel } from './gestures'
 import type { Gesture, Target } from './gestures'
-import { FIRST as HOME_FIRST, HOME_HINTS, groupCards, homeLayout, homePick, homeReduce, labelHue, NAME_WHOLE } from './home'
-import type { HomeAct, HomeCardGroup, HomeCite, HomeComment, HomeData, HomeFile, HomeLabel, HomeLayout, HomeOpen, HomeReport, HomeThread, HomeUi, HomeView } from './home'
+import { FIRST as HOME_FIRST, HOME_HINTS, groupCards, homeLayout, homePick, homeReduce, labelHue } from './home'
+import type { HomeAct, HomeCardGroup, HomeCite, HomeComment, HomeData, HomeLabel, HomeLayout, HomeOpen, HomeReport, HomeThread, HomeUi, HomeView } from './home'
 import { cardsInline, chipLabel, chipWords, cid, clip, cutLine, fmt, itemsRow, labelRef, middleCut, labelState, labelStateWords, noControls, outputLine, quoted, recordFields, reportRef, stoppedTurn, windowAt } from './lib'
 import type { Citation } from './lib'
 import { linesEl, setListKeys, takeListKeys } from './lines'
@@ -452,7 +453,6 @@ function upOf(s: ChatNavStep, earlier: readonly ChatNavStep[]): TermPanel | null
   if (s.view === 'thread') return earlier.some(x => x.view === 'thread' || x.view === 'threads') ? null : { view: 'threads', title: 'Threads' }
   if (s.view === 'label') return before?.view === 'labels' ? null : { view: 'labels', title: 'Labels' }
   if (s.view === 'doc') return before?.view === 'docs' ? null : { view: 'docs', title: 'Documents' }
-  if (s.view === 'file') return before?.view === 'files' ? null : { view: 'files', title: 'Files' }
   if (s.view === 'view') return before?.view === 'views' ? null : { view: 'views', title: 'Views' }
   return null
 }
@@ -463,7 +463,7 @@ const BROWSER_W = 3
 
 // a list's step as the title names it where it is the current step (`home › Threads`); earlier on the path it reads as
 // its lower-case kind word (`home › threads › "…"`)
-const LIST_TITLES: Record<string, string> = { home: 'Home', threads: 'Threads', labels: 'Labels', docs: 'Documents', files: 'Files', views: 'Views', ask: 'New thread', citations: 'Citations' }
+const LIST_TITLES: Record<string, string> = { home: 'Home', threads: 'Threads', labels: 'Labels', docs: 'Documents', views: 'Views', ask: 'New thread', citations: 'Citations' }
 
 /** The current step's words: a list's title; a thread by its question; else the step as the path names it, with the
  *  subject's name as the view gave it (a card's whole question). */
@@ -495,8 +495,6 @@ export function browserRef(p: TermPanel | null): string {
       return p.slug ? `report:${p.slug}` : 'home'
     case 'view':
       return p.slug ? `view:${p.slug}` : 'home'
-    case 'files':
-      return 'files:'
     case 'file':
       return p.path ? `files:${p.path}` : 'files:'
     case 'coverage':
@@ -1112,8 +1110,6 @@ export async function homeData(cx: Ctx): Promise<HomeData> {
         }
       })
     : []
-  const files: HomeFile[] = filesOf(await surfaceValue(cx, 'files')).map(f => ({ file: f.path, records: null, size: f.size, seen: 0, state: 'listed', ranges: [], kind: fileType(f.path, f.kind, rt.opens.get(f.path)?.as) }))
-  const root = (await cx.root().catch(() => '')).split('/').filter(Boolean).at(-1) ?? 'folder'
   // 0.9.0 (SPEC-v2 J4): this session's coverage, its citations, the checks' comments on answers, each while its feature
   // is on; the labels' records of no fit and unsure
   const f = await featuresOf(cx)
@@ -1125,7 +1121,7 @@ export async function homeData(cx: Ctx): Promise<HomeData> {
   const coverage = f.coverage ? noControls((await cx.coverageSummary())?.line ?? '') : null
   const cites: HomeCite[] | null = f.citationMarks ? (await citeItems(cx)).map(c => ({ key: c.key, value: noControls(c.value), place: noControls(citePlace(c.ref)), verdict: c.verdict, why: c.why, ref: c.ref, ...(c.card ? { card: c.card, n: c.n } : {}) })) : null
   const comments: HomeComment[] | null = f.checks ? (await openComments(cx)).map(c => ({ id: c.id, check: noControls(c.checkName), colour: hueOf(c.color || 2), quote: noControls(c.quote) })) : null
-  return { views, reports, threads, cardGroups, labels, files, coverage, cites, comments, noLabels: !f.labels, root }
+  return { views, reports, threads, cardGroups, labels, coverage, cites, comments, noLabels: !f.labels }
 }
 
 /** When a card was made (ms), as the canvas lists it. */
@@ -1238,28 +1234,18 @@ async function homeOpen(cx: Ctx, o: HomeOpen): Promise<void> {
       const hit = got?.ok ? labelsOf(got.value).find(l => l.name === o.name || l.id === o.name) : undefined
       return openLabel(cx, hit?.id ?? o.name, o.name)
     }
-    case 'file':
-      return openFile(cx, o.path)
     case 'cite':
       return o.card ? openCard(cx, o.card) : openCite(cx, o.ref, o.display)
     case 'comment':
       return openChecks(cx, o.id)
     case 'pane': {
-      // a folder's `… N more`: the file browser with that folder whole
-      if (o.view === 'files' && o.folder) {
-        const root = `${(await cx.root().catch(() => '')).split('/').filter(Boolean).at(-1) ?? 'folder'}/`
-        // home names a folder as the file browser does: its path, the corpus's own files by the corpus folder's name
-        const dir = o.folder === root ? '' : o.folder
-        const ui = await cx.filesUi()
-        await cx.setFilesUi({ ...ui, whole: [...(ui.whole ?? []).filter(x => x !== dir), dir], unfolded: [...ui.unfolded.filter(x => x !== `dir:${dir}`), `dir:${dir}`], folded: ui.folded.filter(x => x !== `dir:${dir}`) })
-      }
       // a section's list: its `new` on the summary line cleared (band.tsx)
       if (o.view === 'reports') return openSection(cx, 'docs')
       if (o.view === 'threads' || o.view === 'labels' || o.view === 'views') return openSection(cx, o.view)
       if (o.view === 'coverage') return openCoverage(cx)
       if (o.view === 'citations') return openCitations(cx)
       if (o.view === 'checks') return openChecks(cx)
-      return openPanel(cx, o.view === 'files' ? { view: 'files', title: 'Files' } : { view: 'home', title: 'Home' })
+      return openPanel(cx, { view: 'home', title: 'Home' })
     }
   }
 }
@@ -2057,8 +2043,9 @@ function promptEl(els: El, q: string, cols: number, key: string): RenderElement 
   )
 }
 
-/** The threads panel (SPEC.md, section 7, "The threads panel"): its title and a dim subtitle; under the rule the
- *  tree, a root per place a thread was asked from (`main`, or `report "…"`) with a blank row between them, each thread
+/** The threads panel (SPEC.md, section 7, "The threads panel"): its title; under the rule the tree, a root per place
+ *  a thread was asked from (`main`, or `report "…"`, its count of threads dim at R and `N new` in green) with a blank
+ *  row between them, each thread
  *  under the thread it was asked from, its question in quotation marks with guides, the first line of its latest
  *  answer dim under it (none while a thread is open: the open thread's chat is below), `N questions` dim and `new` in
  *  green at R; the selected thread (`❯`, accent) under the second rule: what it is about on one dim row, then its chat
@@ -2077,7 +2064,6 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
   const ids = [...rows.map(r => r.id), ...(selected && !rows.some(r => r.id === selected) ? [selected] : [])]
   const threads = (await Promise.all(ids.map(id => threadOfRow(cx, id)))).filter((t): t is ChatThread => t !== null)
   const unreadOf = (id: string) => rows.find(r => r.id === id)?.unread ?? 0
-  const fresh = rows.filter(t => t.unread).length
   const t = selected ? threads.find(x => x.id === selected) : undefined
   // one thread, open: no list above it, which would repeat its question and its answer
   const alone = Boolean(t) && threads.length === 1
@@ -2107,7 +2093,9 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
       {aboutWords}
     </Text>
   )
-  const body: RenderElement[] = [...headerEls(els, { title: 'Threads', cols, ...(alone ? { more: aboutEl ? [aboutEl] : [] } : { sub: subLine([plural(threads.length, 'thread'), fresh ? freshSeg(fresh) : null]) }) })]
+  // no subtitle: each root's row holds how many threads stand under it and how many are new (Matt, 19:05: `2 threads`
+  // on a line of its own under `main` read as one more row of the tree)
+  const body: RenderElement[] = [...headerEls(els, { title: 'Threads', cols, ...(alone ? { more: aboutEl ? [aboutEl] : [] } : {}) })]
   // a root per place: the threads asked from a document under it, the rest under main
   const byId = new Map(threads.map(x => [x.id, x]))
   const rootOf = (x: ChatThread): ChatThread => {
@@ -2136,7 +2124,10 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
     const tree = threadTree(threads.filter(x => placeOf(x) === place))
     if (!tree.length) continue
     if (pi > 0) lines.push([])
-    lines.push(pointed([{ s: place === 'main' ? 'main' : `report ${quoted(clip(docTitle(place.slice(7)), 60))}` }], false))
+    const under = threads.filter(x => placeOf(x) === place)
+    const news = under.filter(x => unreadOf(x.id)).length
+    const counts: Line = [dim(plural(under.length, 'thread')), ...(news ? [{ s: '  ' }, freshSeg(news)] : [])]
+    lines.push(pointed(spread([{ s: place === 'main' ? 'main' : `report ${quoted(clip(docTitle(place.slice(7)), 60))}` }], counts, cols), false))
     for (const r of tree) {
       if (drawn >= cap) {
         more++
@@ -2366,7 +2357,8 @@ let labelPainting = ''
 
 /** The label panel, after the browser's label editor (SPEC.md, section 7, "The label panel"): its header block,
  *  the label's name in the accent and bold after a ● in its colour, its type (prompt, regex or code: the one in use on
- *  the selection background) and its scope (the files, editable, and how many records), then the rule; the prompt (or
+ *  the selection background), a prompt label's model, and its scope (the files, editable, and how many files match),
+ *  then the rule; the prompt (or
  *  pattern or code) in a field to edit, Enter saving it (`thimble act label`); `run on a sample` and `run on all N`,
  *  which save what was typed first and run it (`thimble act label-run`), `rename` (`thimble act label`) and `delete`,
  *  which asks once in the panel (y deletes, n keeps; `thimble act label-delete`); a label over files is turned on or off
@@ -2503,7 +2495,12 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
       </Box>,
     ),
   )
-  const scopeCount = scopeN !== null ? `${num(scopeN)} ${unit}` : ''
+  // a prompt label: the model its calls run on (the label's own, else the labels row of Settings), as the analyst reads
+  // its name
+  if (kind === 'prompt' && l.run_model) rows.push(fieldLine('model:', <Text wrap="truncate-end">{l.run_model}</Text>))
+  // a label over files: how many files its glob matches (`1 file matches`), so the count does not read as a link; the
+  // records stand in `run on all N`. A label over cards or sentences: how many it holds
+  const scopeCount = files ? (typeof l.scope_files === 'number' ? (l.scope_files === 1 ? '1 file matches' : `${num(l.scope_files)} files match`) : '') : scopeN !== null ? `${num(scopeN)} ${unit}` : ''
   rows.push(
     fieldLine(
       'scope:',
@@ -2512,7 +2509,7 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
           <Box flexGrow={1} flexShrink={1}>
             <Input key={fieldKey(`lb-glob-${id}`)} value={drafts.get(`${id}:glob`) ?? l.glob ?? ''} submitLabel="save" onInput={v => void drafts.set(`${id}:glob`, v)} onSubmit={v => void (v.trim() ? save({ glob: v.trim() }) : undefined)} />
           </Box>
-          {scopeCount ? <Text dimColor>{`  ${scopeCount}`}</Text> : null}
+          {scopeCount ? <Text dimColor>{` · ${scopeCount}`}</Text> : null}
         </Box>
       ) : (
         <Text wrap="wrap">

@@ -581,11 +581,6 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   Labels (1)
   ● edit purpose                                                            ██████████▌█████▌███   30
     prompt · a sample of 30 · revisions.jsonl  ● links or data 15  ● message to agents 8  ● other 7
-
-  Files (4)                                                                       type       size
-  ▾ collusion-wiki/  4                                                                     41.6 MB
-      events.jsonl                                                                events     5.4 MB
-      revisions.jsonl                                                             text      33.5 MB
   ↑↓ to choose · Enter to open · x to close
 ```
 
@@ -609,13 +604,9 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   has a dim `○`, `not run yet` at R and no bar, as its panel says. A run going says `◌ labeling 3,000 of 4,579`, and a
   first run that stopped part way (a quit) `stopped at 3,150 of 4,579`, alike on home, the labels list, the label panel
   and the label card.
-- Files by folder, the corpus's own first, each folder's files in natural order: a folder row named as the file browser
-  names it (its path, `collusion-wiki/`; the corpus's own files under the corpus folder's name), with its file count dim
-  after its name and its size under `size`; when it is unfolded, its files at A4 with their type, then their size. A
-  file's type is thimble's kind; for a file thimble knows only as text, what it opens as when that is not its lines
-  (`transcript`, as its preview and its view say), else its format (`jsonl`). The first folder is open; a folder shows its first 20 files, and `… N more` shows the folder whole.
-  Where a file's name (up to 32 cells of it) would be cut beside the type column, the type column is left out and the
-  names keep their room, with their size alone at R.
+- No Files section (Matt, 2026-10-16): the terminal has no file browser. Coverage lists the files, what Claude read
+  and what it searched; a file's lines show only to verify a place (a citation's, a label's records, a card's source)
+  or in a custom view. `/thimble files` with no path opens Coverage.
 - The orientation's coverage line, when an orientation ran.
 
 **The threads panel** (what `show all threads` opens, and where a thread opens). A thread open alone, with no other
@@ -645,9 +636,8 @@ With several threads, one open:
 
 ```
   home › threads › "How many delete events are in events.jsonl? One number."
-  2 threads · 1 new
   ──────────────────────────────────────────────────────────────────────────────────────────────
-  main
+  main                                                                        2 threads  1 new
 ❯ ├ "How many delete events are in events.jsonl? One number."
   └ "Which wiki got the most revisions on June 18, and from how many labels?"                 new
   ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -661,7 +651,9 @@ With several threads, one open:
   ↑↓ to choose · Enter or a to ask · v to show the lines · b to go back · x to close
 ```
 
-- A tree: a root per place a thread was asked from (`main`, `report "…"`) at A0, a blank row between roots; its
+- No subtitle. A tree: a root per place a thread was asked from (`main`, `report "…"`) at A0, its count of threads
+  dim at R and `N new` in green (Matt, 2026-10-16: the count on a line of its own read as a row), a blank row between
+  roots; its
   threads under it with guides; a thread asked from a thread one level deeper. Each thread's row is its question in
   quotation marks; while no thread is open, its secondary row is the first line of its latest answer, dim (`stopped` dim
   for a stop, the analyst's or the end of the Claude Code session; a failure `×` in red; before its answer is read, only
@@ -762,7 +754,10 @@ relay (↑↓, Enter, Space, Backspace, a sign typed) and as hotkeys (a letter, 
 typing, every key. The wheel over it reaches it with the frame's cell under the pointer, so that it moves the list
 there alone. A view built in browser mode is one line that says so, and how to open it in browser mode.
 
-**The file browser**, after the browser's Files (`frontend/src/files`: its tree, its search, its reader's modes):
+**The file browser** (removed in 0.9.0, Matt 2026-10-16: people view files their own way; the terminal shows a file
+only to verify a place, and Coverage lists the files). What follows of the tree, its find and its preview is kept as
+the record of 0.8.0; a file (below) still opens at a place, and b goes back where it was opened from.
+After the browser's Files (`frontend/src/files`: its tree, its search, its reader's modes):
 
 ```
   home › Files
@@ -863,7 +858,8 @@ there alone. A view built in browser mode is one line that says so, and how to o
   home › labels › edit purpose
   name:      ● edit purpose
   type:      prompt  regex  code
-  scope:     revisions.jsonl                                                     14,591 records
+  model:     Haiku 4.5
+  scope:     revisions.jsonl · 1 file matches
   in files:  on  off
   ──────────────────────────────────────────────────────────────────────────────────────────────
   prompt:    ╭─────────────────────────────────────────────────────────────────────────────────╮
@@ -887,8 +883,10 @@ there alone. A view built in browser mode is one line that says so, and how to o
 ```
 
 - The header: `name:` the label's name in the accent and bold after a `●` in its color; `type:` the kinds, the one in
-  use on the selection background, the others a click away; `scope:` its files, a field, and how many records against
-  R; for a label over files, `in files:` whether it is on in Files and the views (`on  off`, the one in use on the
+  use on the selection background, the others a click away; for a prompt label, `model:` the model its calls run on
+  (the label's own, else Settings' row for labels); `scope:` its files, a field, and how many files they match (`· 1
+  file matches`, `· 3 files match`; Matt, 2026-10-16: a bare count read as a link), or for a label over cards or
+  sentences how many it holds; for a label over files, `in files:` whether it is on in Files and the views (`on  off`, the one in use on the
   selection background, the other a click or `o` away, `thimble act label-show`), which a view opens colored by, as in
   the browser. Then the rule.
 - The definition whole in a field to edit, under its kind's name (`prompt`, `pattern` or `code`; code through the

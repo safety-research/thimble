@@ -65,8 +65,8 @@ import { setTheme } from './paint'
 
 /** /thimble's description and argument hint (the command.describe hook). */
 export const THIMBLE_DESCRIPTION =
-  "Turns thimble on in this folder and opens its panel in this terminal. `/thimble open` opens the browser workbench; `coverage`, `citations`, `checks`, `threads`, `cite <n>`, `card <n>`, `files [path[:line]]` and `documents` open those."
-export const THIMBLE_ARGS = '[open | coverage | citations | checks | threads | cite <n> | card <n> | files [path[:line]] | documents]'
+  "Turns thimble on in this folder and opens its panel in this terminal. `/thimble open` opens the browser workbench; `coverage`, `citations`, `checks`, `threads`, `cite <n>`, `card <n>`, `files <path[:line]>` and `documents` open those."
+export const THIMBLE_ARGS = '[open | coverage | citations | checks | threads | cite <n> | card <n> | files <path[:line]> | documents]'
 /** What `/thimble` says (the model reads it too; logged in PROMPT-CHANGES.md): thimble is on, its panel is open, and how
  *  to reach the browser workbench. */
 export const HOME_LINE = 'thimble is on in this folder. Its panel is open in the terminal; /thimble open opens the browser workbench.'
@@ -100,7 +100,7 @@ const panelTickA = atom(panelTickRef, 0)
 
 /** `/thimble <what>`, a keyboard way to what the chat and the panel draw: `open` (the browser workbench), `coverage`,
  *  `citations`, `checks`, `threads`, `cite [n]` (the n-th citation of the last reply), `card [n|id]` (the n-th card of
- *  the last turn, or a card by its id), `files [path[:line]]`, `documents`. What it says, or null for plain `/thimble`
+ *  the last turn, or a card by its id), `files <path[:line]>`, `documents`. What it says, or null for plain `/thimble`
  *  (home). */
 async function thimbleCommand(cx: Ctx, args: string): Promise<string | null> {
   const [what = '', ...rest] = args.trim().split(/\s+/)
@@ -158,9 +158,10 @@ async function thimbleCommand(cx: Ctx, args: string): Promise<string | null> {
       return `thimble: card ${n} of ${ids.length}`
     }
     case 'files': {
+      // the terminal has no file browser (Matt, 10-16): Coverage lists the files; a path opens its lines at a place
       if (!arg) {
-        await openPanel(cx, { view: 'files', title: 'Files' })
-        return 'thimble: the file browser is open'
+        await openCoverage(cx)
+        return 'thimble: Coverage lists the files; `/thimble files <path[:line]>` opens one at a line'
       }
       const m = /^(.*?)(?::(\d+))?$/.exec(arg)
       const path = (m?.[1] ?? arg).replace(/^\.\//, '')
@@ -169,7 +170,7 @@ async function thimbleCommand(cx: Ctx, args: string): Promise<string | null> {
       return `thimble: ${path}${line ? ` line ${line}` : ''} is open`
     }
     default:
-      return `thimble: \`/thimble\` opens home; \`/thimble open\` opens the browser; \`coverage\`, \`citations\`, \`checks\`, \`threads\`, \`cite [n]\`, \`card [n]\`, \`files [path[:line]]\` and \`documents\` open those`
+      return `thimble: \`/thimble\` opens home; \`/thimble open\` opens the browser; \`coverage\`, \`citations\`, \`checks\`, \`threads\`, \`cite [n]\`, \`card [n]\`, \`files <path[:line]>\` and \`documents\` open those`
   }
 }
 
@@ -329,6 +330,33 @@ async function footerEl(cx: Ctx, e: ResolveInput & { requestId: string }): Promi
       <Box flexShrink={0}>
         <Button key={`ask-answer-${e.requestId}`} label="ask about this answer ›" plain onPress={() => openAsk(cx, { kind: 'sentence', text: withoutNotes(ans.text).slice(0, 6000), label: 'this answer' }, { element: ANSWER_ELEMENT })} />
       </Box>
+    </Box>
+  )
+}
+
+/** The line under the row that says a writer's end (main's `↳ The writer finished …`, the first row that says it): the
+ *  document it wrote, a press away in the browser workbench, where it is read whole, edited, and its figures and history
+ *  shown; the terminal reads documents only (Matt, 10-16). The writer's document by its name (`writer: <slug>`), else
+ *  the one written last, as the documents were read when the writer ended (band.tsx noteWriters); its slug alone when
+ *  they were not read. None while the writer writes, or after it failed or stopped. */
+async function writtenEl(cx: Ctx, e: ResolveInput & { requestId: string }, text: string): Promise<RenderElement | null> {
+  if (!saysWriter(text)) return null
+  const chat = rt.writerOf.get(e.requestId)
+  const agents = (await cx.agents()) ?? []
+  const agent = chat ? agents.find(a => a.chat === chat) : agents.filter(a => a.role === 'writer').sort((a, b) => a.started.localeCompare(b.started)).at(-1)
+  if (agent?.state === 'running' || /fail|error|stop/i.test(agent?.state ?? '')) return null
+  // drawing reads only: the documents as read when the writer ended
+  const got = await surfaceValue(cx, 'docs')
+  const docs = got?.ok ? docsOf(got.value) : []
+  const named = (agent?.label ?? '').replace(/^writer:\s*/i, '').trim()
+  const written = docs.filter(d => d.status !== 'generating' && d.status !== 'error')
+  const doc = (named ? written.find(d => d.slug === named || d.title === named) : undefined) ?? written.sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0))[0] ?? (named && /^[\w-]+$/.test(named) && !got ? { slug: named, title: named } : undefined)
+  if (!doc) return null
+  const { Box, Text, Button } = cx.els(e)
+  return (
+    <Box key={`written-${e.requestId}`} marginLeft={MARGIN} marginTop={1} flexDirection="row">
+      <Text dimColor>{'↳ document '}</Text>
+      <Button key={`written-open-${e.requestId}`} label={`${quoted(clip(clean(doc.title), 60))} · read and edit it in the browser ↗`} plain onPress={() => void openInBrowser(cx, `report:${doc.slug}`)} />
     </Box>
   )
 }
@@ -822,8 +850,10 @@ export const register: Register = (on, options) => {
     // and none of main's `↳` lines that answer a subagent run's second report, whose first an earlier row answered
     const repeats = rt.repeats.get(e.requestId)
     const text = await withoutSaidWriter(cx, e.requestId, namedThreads(withoutToldThreads(withoutEnd(repeats ? withoutLines(said, repeats) : said), rows, rt.told), rows))
+    // the document a writer finished, linked out to the browser workbench under the row that says so
+    const written = await writtenEl(cx, e, text)
     const live = e.surface === 'terminal' || e.surface === 'desktop'
-    if (!ids.length && !told && !views && !footer && !coverage && text === e.props.text && !live && !needsDrawing(text)) return next(e)
+    if (!ids.length && !told && !views && !footer && !coverage && !written && text === e.props.text && !live && !needsDrawing(text)) return next(e)
     const { Box } = $.ui.resolve(e)
     // the reply fills the terminal's width, less 2, its cards as wide as its prose
     const cols = (e.viewport?.columns ?? 100) - 2
@@ -834,12 +864,13 @@ export const register: Register = (on, options) => {
     const cards = await drawCards(cx, e, ids, cols, t => openAsk(cx, t), id => openThread(cx, id))
     // a block that held only a line the terminal UI hides: nothing (ctrl+o's view still draws the reply's time and model
     // above it, which no hook reaches; the engine's own block with no text draws the same)
-    if (!body.length && !cards && !told && !views && !footer && !coverage) return <Box />
+    if (!body.length && !cards && !told && !views && !footer && !coverage && !written) return <Box />
     // one blank row above, as above Claude Code's own reply rows: the engine's row carries that margin itself, and this
     // tree takes the row's place, so without it the reply sits right under the person's message
     return (
       <Box flexDirection="column" marginTop={1}>
         {body}
+        {written}
         {cards}
         {footer}
         {coverage}

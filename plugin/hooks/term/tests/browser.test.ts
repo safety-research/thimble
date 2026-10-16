@@ -1,9 +1,7 @@
-// The file browser after the browser's Files, drawn as the rows of text a 120-column pane shows: a folder tree whose
-// folders nest and fold, a folder of one folder joined to it; the find by name and by words (`f`), its field in the
-// header taking typing, what it found in place of the tree, Enter opening a matching line chosen; the labels that are
-// on marking the files they labeled in the tree and the records they labeled in a file, in their values' hues; a file in
-// the mode that fits it (a CSV file's rows as a table, Markdown as text, one record as JSON, a database's tables and
-// rows); the chosen file's preview in that mode. `claude plugin test plugin`.
+// A file after the browser's Files, drawn as the rows of text a 120-column pane shows (the terminal has no file
+// browser, Matt 10-16: a file opens only to verify a place): the labels that are on marking the records they labeled
+// in a file, in their values' hues; a file in the mode that fits it (a CSV file's rows as a table, Markdown as text, one
+// record as JSON, a database's tables and rows); a file's find (`f`); files.ts's helpers. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
@@ -108,8 +106,9 @@ async function typeInto($: Engine, w: World, text: string): Promise<void> {
   await pane.unmount()
 }
 
+/** Home, the step a file opened by `/thimble files <path>` goes back to. */
 async function browser($: Engine, w: World): Promise<void> {
-  await $.command.run({ command: 'thimble:thimble', args: 'files' } as never)
+  await $.command.run({ command: 'thimble:thimble', args: '' } as never)
   await w.clock.settle()
 }
 
@@ -135,140 +134,16 @@ const CSV = {
   ],
 }
 
-test('the tree: folders nest 2 cells a level, folders before files, a folder of one folder joined to it; Enter unfolds a folder, Space folds it', async ($, on) => {
-  const w = world(on)
-  w.states.files = NESTED
-  w.pages['pages.csv'] = CSV
-  await start($, w)
-  await browser($, w)
-  let r = await rows($, w)
-  const at = (s: string) => r.find(x => x.includes(s)) ?? ''
-  expect(at('wiki/')).toMatch(/^ {3}▾ wiki\/ {2}2 +4 KB$/)
-  // the corpus's own files, then each folder folded; `logs/` holds one folder of one folder: one row
-  expect(at('logs/only/deep/')).toMatch(/^ {3}▸ logs\/only\/deep\/ {2}1 +300 B$/)
-  expect(at('runs/')).toMatch(/^ {3}▸ runs\/ {2}3 +93 KB$/)
-  expect(r.indexOf(at('logs/only/deep/'))).toBeLessThan(r.indexOf(at('runs/')))
-  // ↓ to runs/, Enter unfolds it: its folder first (folded), then its file, each 2 cells further in
-  for (let i = 0; i < 4; i++) await listKey($, w, 'files-tree', 'down')
-  r = await rows($, w)
-  expect(at('runs/')).toMatch(/^ ❯ ▸ runs\//)
-  await listKey($, w, 'files-tree', 'return')
-  r = await rows($, w)
-  const runs = r.indexOf(at('runs/'))
-  expect(r[runs + 1]).toMatch(/^ {5}▸ 2026-06\/ {2}2 +92 KB$/)
-  expect(r[runs + 2]).toMatch(/^ {7}notes\.txt +txt +900 B$/)
-  await listKey($, w, 'files-tree', 'down')
-  await listKey($, w, 'files-tree', 'return')
-  r = await rows($, w)
-  expect(r[runs + 2]).toMatch(/^ {9}agent-a\.jsonl +agent +40 KB$/)
-  // Space on a file folds its folder, the choice on the folder's row
-  await listKey($, w, 'files-tree', 'down')
-  await listKey($, w, 'files-tree', 'space')
-  r = await rows($, w)
-  expect(at('2026-06/')).toMatch(/^ ❯ {3}▸ 2026-06\//)
-  expect(r.join('\n')).not.toContain('agent-a.jsonl')
-})
-
-test("the find: `f` gives its field the typing, the words in the header with the cursor after them; what it found in place of the tree, the files named, then the text's matching lines with the match lit; Enter opens a line chosen", async ($, on) => {
-  const w = world(on)
-  w.states.files = NESTED
-  w.found.relay = { q: 'relay', files: [{ path: 'runs/notes.txt', kind: 'text', size_bytes: 900 }], total: 1 }
-  w.grepped.relay = {
-    q: 'relay',
-    files: [
-      { path: 'runs/2026-06/agent-a.jsonl', total: 7, complete: true, matches: [{ line: 12, text: 'the wiki served as a relay between runs', hit: [20, 25] }, { line: 40, text: '…a relay page', hit: [3, 8] }] },
-      { path: 'README.md', total: 1, complete: true, matches: [{ line: 3, text: 'An export used as a relay.', hit: [19, 24] }] },
-    ],
-    done: { done: true, files: 2, hits: 8, scanned: 6, of: 6, complete: true },
-  }
-  w.pages['runs/2026-06/agent-a.jsonl'] = (from: number) => ({ path: 'runs/2026-06/agent-a.jsonl', kind: 'agent', total_lines: 60, start: from, records: Array.from({ length: 50 }, (_, i) => ({ line: from + i, record: { text: `line ${from + i}` } })) })
-  await start($, w)
-  await browser($, w)
-  await press($, w, 'hk-find')
-  let r = await rows($, w)
-  // the field, empty, its cursor; the hint row says what the keys do while it takes typing
-  expect(r.find(x => x.startsWith('   find'))).toBeDefined()
-  expect(r.at(-1)).toBe('   ↑↓ to choose · Enter to open · Esc to leave the field')
-  await typeInto($, w, 'relay')
-  r = await rows($, w)
-  expect(w.calls.some(c => c[2] === 'find' && c[5] === 'relay')).toBe(true)
-  expect(w.calls.some(c => c[2] === 'grep' && c[5] === 'relay')).toBe(true)
-  const at = (s: string) => r.findIndex(x => x.includes(s))
-  expect(r[at('find  relay')]).toBe('   find  relay')
-  expect(r[at('Named')]).toBe('   Named (1)')
-  expect(r[at('Named') + 1]).toMatch(/^ ❯ {3}runs\/notes\.txt +txt +900 B$/)
-  expect(r[at('Named') + 2]).toBe('')
-  expect(r[at('In the text')]).toMatch(/^ {3}In the text \(2\) +8 matches$/)
-  expect(r[at('In the text') + 1]).toMatch(/^ {5}runs\/2026-06\/agent-a\.jsonl +7 matches$/)
-  expect(r[at('In the text') + 2]).toBe('       12  the wiki served as a relay between runs')
-  // the match on the selection background
-  const pane = (await $.ui.mount(PANE())) as unknown as M
-  expect(JSON.stringify(await pane.drawn({ in: 'm:files-tree' }))).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["relay"]}')
-  await pane.unmount()
-  // Esc gives the keys to the prompt: the field types no more, its words stay; with the keys back, Backspace would
-  // clear them and `f` types into the field again
-  w.paneFocused = false
-  r = await rows($, w)
-  expect(r.at(-1)).toBe('   click the panel for its keys')
-  w.paneFocused = true
-  await takesKeys($)
-  r = await rows($, w)
-  expect(r).toContain('   find  relay')
-  expect(r.at(-1)).toBe('   ↑↓ to choose · Enter to open · f to find · Backspace to clear the find · x to close')
-  let drawn = (await $.ui.mount(PANE())) as unknown as M
-  expect(JSON.stringify(await drawn.find({ key: 'files-find' } as never))).not.toContain('"inverse":true')
-  await drawn.unmount()
-  await press($, w, 'hk-find')
-  drawn = (await $.ui.mount(PANE())) as unknown as M
-  expect(JSON.stringify(await drawn.find({ key: 'files-find' } as never))).toContain('"inverse":true')
-  await drawn.unmount()
-  // ↓ ↓ onto the first matching line, Enter opens its file at that line, chosen
-  await listKey($, w, 'files-tree', 'down')
-  await listKey($, w, 'files-tree', 'down')
-  r = await rows($, w)
-  expect(r.find(x => x.startsWith(' ❯'))).toContain('12  the wiki served')
-  expect(r.join('\n')).toContain('runs/2026-06/agent-a.jsonl')
-  await listKey($, w, 'files-tree', 'return')
-  r = await rows($, w)
-  expect(r.join('\n')).toContain('↗ runs/2026-06/agent-a.jsonl line 12  ?')
-  // Backspace back to the files clears the find: the tree, the file chosen, its folders open; words that end in
-  // `:<n>` open a file named by them at line n
-  w.found['notes'] = { q: 'notes', files: [{ path: 'runs/notes.txt', kind: 'text', size_bytes: 900 }], total: 1 }
-  w.pages['runs/notes.txt'] = { path: 'runs/notes.txt', kind: 'text', total_lines: 9, start: 1, records: Array.from({ length: 9 }, (_, i) => ({ line: i + 1, record: { text: `note ${i + 1}` } })) }
-  await listKey($, w, 'file-body', 'backspace')
-  r = await rows($, w)
-  expect(r.join('\n')).not.toContain('Named')
-  expect(r.find(x => x.startsWith(' ❯'))).toMatch(/agent-a\.jsonl/)
-  await press($, w, 'hk-find')
-  await typeInto($, w, 'notes:7')
-  expect(w.calls.some(c => c[2] === 'find' && c[5] === 'notes')).toBe(true)
-  const ready = (await $.ui.mount(PANE())) as unknown as M
-  await ready.input({ key: 'keys-pick', kind: 'submit', text: 'notes:7' } as never)
-  await w.clock.settle()
-  await ready.unmount()
-  r = await rows($, w)
-  expect(r.join('\n')).toContain('↗ runs/notes.txt line 7  ?')
-})
-
-test('the labels that are on: a `●` in the label\'s hue after each file it labeled; in the file, its row of values and a `●` in its value\'s hue before each record it labeled', async ($, on) => {
+test('the labels that are on: in a file, its row of values and a `●` in its value\'s hue before each record it labeled', async ($, on) => {
   const w = world(on)
   w.states.files = [{ path: 'revisions.jsonl', kind: 'records', size_bytes: 52_000_000 }, { path: 'README.md', kind: 'markdown', size_bytes: 1800 }]
   w.states.labels = [{ ...LABEL, shown: true }] as never
   w.pages['revisions.jsonl'] = { path: 'revisions.jsonl', kind: 'records', total_lines: 3, start: 1, records: [{ line: 1, record: { wiki: 'dse', body: 'see https://r.jina.ai/x' } }, { line: 2, record: { wiki: 'dse', body: 'Welcome' } }, { line: 3, record: { wiki: 'probier', body: 'proxy.example' } }] }
   w.marks['revisions.jsonl'] = [{ concept_id: LABEL.id, name: LABEL.name, labels: LABEL.labels, unit: 'record', rows: [{ ref: 'revisions.jsonl#L1', label: 'proxy-link', analyst: null }, { ref: 'revisions.jsonl#L2', label: 'proxy-link', analyst: 'none' }, { ref: 'revisions.jsonl#L3', label: 'proxy-link', analyst: null }] }]
   await start($, w)
-  await browser($, w)
-  let r = await rows($, w)
-  expect(r.find(x => x.includes('Files'))).toBeDefined()
-  expect(r.find(x => x.includes('2 files · 1 label on'))).toBeDefined()
-  expect(r.find(x => x.includes('revisions.jsonl'))).toMatch(/revisions\.jsonl {2}● +records +52\.0 MB$/)
-  expect(r.find(x => x.includes('README.md'))).not.toContain('●')
-  let pane = (await $.ui.mount(PANE())) as unknown as M
-  expect(JSON.stringify(await pane.drawn({ in: 'm:files-tree' }))).toContain('{"type":"Text","props":{"color":"#8b86f9"},"children":["●"]}')
-  await pane.unmount()
   await $.command.run({ command: 'thimble:thimble', args: 'files revisions.jsonl' } as never)
   await w.clock.settle()
-  r = await rows($, w)
+  let r = await rows($, w)
   expect(w.calls.some(c => c[2] === 'marks' && c[5] === 'revisions.jsonl' && c[7] === '1-3')).toBe(true)
   expect(r.find(x => x.includes('label  '))).toBe(`   label  ${LABEL.name} ↗  ● proxy-link  ● none`)
   // the table's rows, each after its value's `●` when the label highlights it (the analyst's `none` for line 2, the
@@ -276,7 +151,7 @@ test('the labels that are on: a `●` in the label\'s hue after each file it lab
   const body = r.filter(x => /^ {3}[● ] {2}(dse|probier)/.test(x))
   expect(body.length).toBe(3)
   expect(r.find(x => x.includes('Welcome'))).toMatch(/^ {6}dse/)
-  pane = (await $.ui.mount(PANE())) as unknown as M
+  const pane = (await $.ui.mount(PANE())) as unknown as M
   const drawn = JSON.stringify(await pane.drawn({ in: 'm:file-body' }))
   expect(drawn).toContain('{"type":"Text","props":{"color":"#8b86f9"},"children":["●"]}')
   expect(drawn).not.toContain('{"type":"Text","props":{"color":"inactive"},"children":["●"]}')
@@ -316,28 +191,24 @@ test("two labels on: before each record a mark cell per label, in the order they
   await pane.unmount()
 })
 
-test("the file browser's marks take the colors the analyst chose for the label's values, as the label panel draws them", async ($, on) => {
+test("a file's marks take the colors the analyst chose for the label's values, as the label panel draws them", async ($, on) => {
   const w = world(on)
   w.states.files = [{ path: 'revisions.jsonl', kind: 'records', size_bytes: 52_000_000 }]
   w.states.labels = [{ ...LABEL, shown: true, classes: [{ name: 'proxy-link', color: 10, highlight: true }, { name: 'none', color: 0, highlight: false }] }] as never
   w.pages['revisions.jsonl'] = { path: 'revisions.jsonl', kind: 'records', total_lines: 2, start: 1, records: [{ line: 1, record: { wiki: 'dse', body: 'see https://r.jina.ai/x' } }, { line: 2, record: { wiki: 'dse', body: 'Welcome' } }] }
   w.marks['revisions.jsonl'] = [{ concept_id: LABEL.id, name: LABEL.name, labels: LABEL.labels, unit: 'record', rows: [{ ref: 'revisions.jsonl#L1', label: 'proxy-link', analyst: null }, { ref: 'revisions.jsonl#L2', label: 'none', analyst: null }] }]
   await start($, w)
-  await browser($, w)
-  let pane = (await $.ui.mount(PANE())) as unknown as M
-  expect(JSON.stringify(await pane.drawn({ in: 'm:files-tree' }))).toContain(`{"type":"Text","props":{"color":"${LABEL_HUES[9]}"},"children":["●"]}`)
-  await pane.unmount()
   await $.command.run({ command: 'thimble:thimble', args: 'files revisions.jsonl' } as never)
   await w.clock.settle()
   await rows($, w)
-  pane = (await $.ui.mount(PANE())) as unknown as M
+  const pane = (await $.ui.mount(PANE())) as unknown as M
   const drawn = JSON.stringify(await pane.drawn({ in: 'm:file-body' }))
   expect(drawn).toContain(`{"type":"Text","props":{"color":"${LABEL_HUES[9]}"},"children":["●"]}`)
   expect(drawn).not.toContain('#8b86f9')
   await pane.unmount()
 })
 
-test("the file browser marks only the values whose class has `highlight`, as the browser's Files does: the tree's dot, the records' marks; the label's row lists every value, the others dim", async ($, on) => {
+test("a file marks only the values whose class has `highlight`, as the browser's Files does: the records' marks; the label's row lists every value, the others dim", async ($, on) => {
   const w = world(on)
   w.states.files = [{ path: 'revisions.jsonl', kind: 'records', size_bytes: 52_000_000 }]
   // the analyst turned the highlight off for proxy-link and on for none
@@ -345,12 +216,9 @@ test("the file browser marks only the values whose class has `highlight`, as the
   w.pages['revisions.jsonl'] = { path: 'revisions.jsonl', kind: 'records', total_lines: 2, start: 1, records: [{ line: 1, record: { wiki: 'dse', body: 'see https://r.jina.ai/x' } }, { line: 2, record: { wiki: 'dse', body: 'Welcome' } }] }
   w.marks['revisions.jsonl'] = [{ concept_id: LABEL.id, name: LABEL.name, labels: LABEL.labels, unit: 'record', rows: [{ ref: 'revisions.jsonl#L1', label: 'proxy-link', analyst: null }, { ref: 'revisions.jsonl#L2', label: 'none', analyst: null }] }]
   await start($, w)
-  await browser($, w)
-  let r = await rows($, w)
-  expect(r.find(x => x.includes('revisions.jsonl'))).toMatch(/revisions\.jsonl {2}● +records/)
   await $.command.run({ command: 'thimble:thimble', args: 'files revisions.jsonl' } as never)
   await w.clock.settle()
-  r = await rows($, w)
+  const r = await rows($, w)
   expect(r.find(x => x.includes('r.jina.ai'))).toMatch(/^ {6}dse/)
   expect(r.find(x => x.includes('Welcome'))).toMatch(/^ {3}● {2}dse/)
   const pane = (await $.ui.mount(PANE())) as unknown as M
@@ -361,25 +229,14 @@ test("the file browser marks only the values whose class has `highlight`, as the
   await pane.unmount()
 })
 
-test('a file in the mode that fits it: a CSV file as a table under its first line\'s names, Markdown as text, one record as JSON; the preview in that mode', async ($, on) => {
+test('a file in the mode that fits it: a CSV file as a table under its first line\'s names, Markdown as text, one record as JSON', async ($, on) => {
   const w = world(on)
   w.states.files = NESTED
   w.pages['pages.csv'] = CSV
   await start($, w)
-  await browser($, w)
-  // pages.csv chosen as the browser opens: its preview a table under its first line's names; README.md's its text,
-  // its heading without its marks
-  let r = await rows($, w)
-  expect(r.find(x => x.includes('opens as'))).toMatch(/^ {3}pages\.csv +opens as table$/)
-  const top = r.findIndex(x => x.includes('opens as'))
-  expect(r.slice(top + 1, top + 3)).toEqual(['   wiki       pages  title', '   dse        3,908  Welcome, agents'])
-  await listKey($, w, 'files-tree', 'down')
-  r = await rows($, w)
-  expect(r.find(x => x.includes('opens as'))).toMatch(/^ {3}README\.md +opens as text$/)
-  expect(r).toContain('   1  Collusion wiki')
   await $.command.run({ command: 'thimble:thimble', args: 'files pages.csv' } as never)
   await w.clock.settle()
-  r = await rows($, w)
+  let r = await rows($, w)
   expect(r).toContain('   csv · 3 rows · lines 1-4 of 4')
   expect(r.find(x => x.includes(' Table '))).toBe('   Table  Raw')
   const head = r.findIndex(x => /wiki +pages +title/.test(x))
@@ -408,19 +265,16 @@ test('a file in the mode that fits it: a CSV file as a table under its first lin
   await listKey($, w, 'file-body', 'down').catch(() => undefined)
 })
 
-test("a database: its tables, each with its rows; Enter opens one as a table of its rows, paged; Backspace back to its tables, then to the files", async ($, on) => {
+test("a database: its tables, each with its rows; Enter opens one as a table of its rows, paged; Backspace back to its tables, then where it was opened from", async ($, on) => {
   const w = world(on)
   w.states.files = [{ path: 'forge.db', kind: 'forge', size_bytes: 90_000 }]
   w.tables['forge.db'] = [{ name: 'agents', row_count: 3 }, { name: 'prs', row_count: 140 }]
   w.rows['forge.db:agents'] = { table: 'agents', columns: ['id', 'role', 'status'], rows: [['agent-01', 'worker', 'Waiting'], ['agent-02', 'worker', 'Reviewing'], ['agent-03', 'worker', 'Testing']], pk: 'id', total: 3 }
   await start($, w)
   await browser($, w)
+  await $.command.run({ command: 'thimble:thimble', args: 'files forge.db' } as never)
+  await w.clock.settle()
   let r = await rows($, w)
-  expect(r.find(x => x.includes('opens as tables'))).toMatch(/^ {3}forge\.db +opens as tables$/)
-  expect(r.find(x => x.startsWith('   agents'))).toMatch(/agents +3 rows$/)
-  expect(r.find(x => x.includes('forge.db') && x.includes('database'))).toBeDefined()
-  await listKey($, w, 'files-tree', 'return')
-  r = await rows($, w)
   expect(r).toContain('   database · 2 tables')
   expect(r.find(x => x.includes('agents'))).toMatch(/^ ❯ agents +3 rows$/)
   await listKey($, w, 'file-body', 'return')
@@ -436,8 +290,7 @@ test("a database: its tables, each with its rows; Enter opens one as a table of 
   r = await rows($, w)
   expect(r).toContain('   database · 2 tables')
   await listKey($, w, 'file-body', 'backspace')
-  r = await rows($, w)
-  expect(r.find(x => x.startsWith(' ❯'))).toContain('forge.db')
+  expect(w.panes.at(-1)!.title).toBe('Home')
   void WS
 })
 
@@ -450,7 +303,7 @@ test("a file's find (`f`): its field under the tabs, the lines of the whole file
   await w.clock.settle()
   await takesKeys($)
   let r = await rows($, w, 30)
-  expect(r.at(-1)).toBe('   ↑↓ to choose · Enter to open · 1 2 for the tabs · f to find · Backspace for the files · x to close')
+  expect(r.at(-1)).toBe('   ↑↓ to choose · Enter to open · 1 2 for the tabs · f to find · x to close')
   await press($, w, 'hk-find')
   r = await rows($, w, 30)
   expect(r.at(-1)).toBe('   ↑↓ for the lines it found · Enter to stay there · Esc to leave the field')

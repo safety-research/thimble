@@ -98,6 +98,11 @@ test('the threads tree has a root per place: main, and a document a thread was a
   expect(tree).toContain('main')
   expect(tree).toContain('report "Agents used the dse wiki as a relay"')
   expect(tree.indexOf('main')).toBeLessThan(tree.indexOf('report "'))
+  // each root's row holds its count of threads at R (Matt, 19:05: no `2 threads` line of its own above the tree)
+  const rows = (((await pane.drawn({ in: 'm:threads-tree' })) as { children?: unknown[] }).children ?? []).map(r => shown(r))
+  expect(rows.find(r => /^\s*main\b/.test(r))).toMatch(/^\s*main\s+1 thread\b/)
+  expect(rows.find(r => r.includes('report "'))).toMatch(/report "Agents used the dse wiki as a relay"\s+1 thread\b/)
+  expect(shown(await pane.drawn())).not.toContain('2 threads')
   await pane.press({ key: 'hk-t0' })
   await w.clock.settle()
   await pane.unmount()
@@ -183,7 +188,7 @@ test("the pane's title says what the panel shows; a draft in the prompt keeps th
   expect(w.panes.at(-1)!.title).toBe('Home')
 })
 
-test("home: views by state, the glyph alone saying it; documents under that word; a thread's subject and an earlier session's; files' kind then size; the coverage line", async ($, on) => {
+test("home: views by state, the glyph alone saying it; documents under that word; a thread's subject and an earlier session's; no files", async ($, on) => {
   const w = world(on)
   w.states.home = { ...w.states.home, views: [{ slug: 'edit-bursts', name: 'Edit Bursts', status: 'proposed', ts: '2026-10-07T01:00:00Z', files: ['revisions.jsonl'] }, { slug: 'board', name: 'Board', status: 'built', ts: '2026-10-07T02:00:00Z', files: ['board.jsonl'] }], coverage: 'Coverage: 2 of 3 files opened; data/ never.' } as never
   w.states.threads[1]!.created_at = '2020-01-01T00:00:00+00:00'
@@ -210,13 +215,9 @@ test("home: views by state, the glyph alone saying it; documents under that word
   expect(at('"Would 23 June')).toMatch(/"Would 23 June still have the most deletions[^"]*…" +about 3908 {5}$/)
   // a thread asked about a passage has no subject at R: its sentence would cut the question beside it
   expect(at('"which pages were deleted?"')).not.toContain('about')
-  expect(at('Files (3)')).toMatch(/type {9}size$/)
-  expect(at('README.md')).toMatch(/markdown {5}2 KB$/)
-  // a folder's count after its name, dim, as the file browser shows it; only its size under `size`; a folder named as
-  // the file browser names it: its path, the corpus's own files under the corpus folder's name
-  expect(at('wiki/')).toMatch(/▾ wiki\/ {2}2 +52\.0 MB$/)
-  expect(lines.find(l => /▸ data\//.test(l))).toMatch(/^\s*▸ data\/ {2}1 +2\.1 MB$/)
-  expect(lines.some(l => l.includes('wiki/data/'))).toBe(false)
+  // the terminal has no file browser (Matt, 10-16): Coverage lists the files, so home has no Files section
+  expect(lines.some(l => /^\s*Files \(/.test(l))).toBe(false)
+  expect(lines.some(l => l.includes('wiki/') || l.includes('README.md'))).toBe(false)
   // 0.9.0 (SPEC-v2 J4): the Coverage section replaces the line under the Files heading
   expect(lines.some(l => l.includes('Coverage: 2 of 3 files opened; data/ never.'))).toBe(false)
   // a label's ● in the label's color, as the label panel draws it beside its name
@@ -239,20 +240,19 @@ test('after a resume, a thread asked earlier in the same conversation is not an 
   await pane.unmount()
 })
 
-test("home's open folder of 21 files shows all 21; of 25, 20 and `… 5 more`, which shows the folder whole in the file browser", async ($, on) => {
+test("home lists no files and `/thimble files` opens Coverage: the terminal has no file browser", async ($, on) => {
+  // Matt (10-16): a file viewer in the terminal reinvents the wheel; files show only to verify a place, and the Files
+  // section folds into Coverage
   const w = world(on)
   w.states.files = Array.from({ length: 25 }, (_, i) => ({ path: `logs/run-${i + 1}.txt`, kind: 'text', size_bytes: 100 }))
   await start($, w)
-  let pane = await home($, w)
+  const pane = await home($, w)
   const rows = (((await pane.drawn({ in: 'm:home' })) as { children?: unknown[] }).children ?? []).map(r => shown(r))
-  expect(rows.filter(r => /run-\d+\.txt/.test(r)).length).toBe(20)
-  expect(rows.some(r => r.includes('… 5 more'))).toBe(true)
-  pane = await homeClick($, w, pane, '… 5 more', 8)
-  const tree = shown(await pane.drawn({ in: 'm:files-tree' }))
-  expect(tree).toContain('run-25.txt')
-  expect(tree).not.toContain('more')
+  expect(rows.some(r => /run-\d+\.txt|logs\//.test(r))).toBe(false)
   await pane.unmount()
-  w.states.files = Array.from({ length: 21 }, (_, i) => ({ path: `logs/run-${i + 1}.txt`, kind: 'text', size_bytes: 100 }))
+  await $.command.run({ command: 'thimble:thimble', args: 'files' } as never)
+  await w.clock.settle()
+  expect(w.panes.at(-1)!.title).toBe('Coverage')
 })
 
 test('the views pane: each view by its glyph and name, its files at R, `new` once built; ↑↓ choose, a click opens its line', async ($, on) => {
@@ -395,12 +395,14 @@ test('the key hints come in one order on every panel: choosing, Enter, Space, th
   // the panel's own keys pass ↑, ↓, Enter and Space to its list (panel.tsx RELAY)
   expect(JSON.stringify(await pane.drawn())).toContain('↑↓ to choose · Enter to open · Space to fold · x to close')
   await pane.unmount()
-  await $.command.run({ command: 'thimble:thimble', args: 'files' } as never)
+  await $.command.run({ command: 'thimble:thimble', args: 'files README.md:3' } as never)
   await w.clock.settle()
   await takesKeys($)
   pane = (await $.ui.mount(PANE)) as unknown as M
-  // the file browser's own key, `f` for its find, after Space
-  expect(shown(await pane.drawn())).toContain('↑↓ to choose · Enter to open · Space to fold · f to find · b to go back · x to close')
+  // a file's own key, `f` for its find, then back where it was opened from; no file browser to go back to
+  const hints = shown(await pane.drawn())
+  expect(hints).toContain('f to find · b to go back · x to close')
+  expect(hints).not.toContain('Backspace for the files')
   await pane.unmount()
 })
 
@@ -432,7 +434,7 @@ test("home shows `not run yet` for a label with no run, as its panel does, with 
   await pane.unmount()
 })
 
-test("home's sections in SPEC-v2 J4's order: Coverage, Citations, Labels, Threads, Views, Checks, Cards, Documents, Files; each heading opens its view; a feature that is off leaves its section out", { timeoutMs: 30_000 }, async ($, on) => {
+test("home's sections in SPEC-v2 J4's order: Coverage, Citations, Labels, Threads, Views, Checks, Cards, Documents (no Files: Coverage lists them); each heading opens its view; a feature that is off leaves its section out", { timeoutMs: 30_000 }, async ($, on) => {
   const w = panelWorld(on)
   w.t.coverageSummary = SUMMARY
   w.t.citeIndex = [{ id: 'c1', raw: '[[99|README.md#L99]]', display: '99', ref: 'README.md#L99', row: 'r1', at: 1 }]
@@ -441,7 +443,7 @@ test("home's sections in SPEC-v2 J4's order: Coverage, Citations, Labels, Thread
   await start($, w)
   let pane = await home($, w)
   const heads = (await homeLines(pane)).filter(l => /^ {2}[A-Z][a-z]+ \(\d+\)/.test(l)).map(l => l.trim().split(' (')[0])
-  expect(heads).toEqual(['Coverage', 'Citations', 'Labels', 'Threads', 'Views', 'Checks', 'Cards', 'Documents', 'Files'])
+  expect(heads).toEqual(['Coverage', 'Citations', 'Labels', 'Threads', 'Views', 'Checks', 'Cards', 'Documents'])
   const lines = await homeLines(pane)
   expect(lines.find(l => l.includes(SUMMARY.line))).toBeDefined()
   // the line in the owner's words: read and searched shares of the data by size (never seen, never records)
@@ -460,6 +462,6 @@ test("home's sections in SPEC-v2 J4's order: Coverage, Citations, Labels, Thread
   w.t.settings = featuresOff('coverage', 'citationMarks', 'labels', 'checks')
   pane = await home($, w)
   const off = (await homeLines(pane)).filter(l => /^ {2}[A-Z][a-z]+ \(\d+\)/.test(l)).map(l => l.trim().split(' (')[0])
-  expect(off).toEqual(['Threads', 'Views', 'Cards', 'Documents', 'Files'])
+  expect(off).toEqual(['Threads', 'Views', 'Cards', 'Documents'])
   await pane.unmount()
 })

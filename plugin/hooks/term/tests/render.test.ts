@@ -355,7 +355,9 @@ test('/thimble opens the home panel with no model turn: one column, the title Ho
   const pane = (await $.ui.mount(PANE)) as unknown as M
   const drawn = await pane.drawn({ in: 'm:home' })
   const home = shown(drawn)
-  for (const s of ['Documents', ' (1)', 'Agents used the dse wiki as a relay', 'Threads', '"why is events.jsonl bigger?"', 'Cards', '▾ ', 'Your work', 'Labels', 'links through a fetch proxy', 'Files', 'revisions.jsonl', '↑↓ to choose · Enter to open · Space to fold · x to close']) expect(home).toContain(s)
+  for (const s of ['Documents', ' (1)', 'Agents used the dse wiki as a relay', 'Threads', '"why is events.jsonl bigger?"', 'Cards', '▾ ', 'Your work', 'Labels', 'links through a fetch proxy', '↑↓ to choose · Enter to open · Space to fold · x to close']) expect(home).toContain(s)
+  // no Files section: the terminal has no file browser (Matt, 10-16)
+  expect(home).not.toContain('Files (')
   // the title row's `Home` in the accent and bold, the headings bold, `new` in green after an unread thread
   expect(JSON.stringify(await pane.find({ key: 'way' }))).toMatch(/"color":"suggestion","bold":true\},"children":\["Home"\]/)
   const json = JSON.stringify(drawn)
@@ -505,7 +507,7 @@ test('from home, a document opens drawn as a reply: its title, its contents, eac
   await pane.unmount()
 })
 
-test("a tool's layout record opens the file browser: folders that fold, a file chosen shows its first lines, Enter opens it", async ($, on) => {
+test("a tool's layout record for Files opens Coverage: the terminal has no file browser", async ($, on) => {
   const w = world(on)
   await start($, w)
   // set_layout(files) in a tool call of main's: a record in ui.jsonl, which the renderer follows
@@ -513,28 +515,7 @@ test("a tool's layout record opens the file browser: folders that fold, a file c
   w.stamps.set(`${WS}/ui.jsonl`, 7)
   await w.clock.advance(1100)
   expect(w.opened).toEqual(['thimble'])
-  const pane = (await $.ui.mount(PANE)) as unknown as M
-  const tree = shown(await pane.drawn({ in: 'm:files-tree' }))
-  for (const s of ['▾ wiki/', 'README.md', '▸ data/', 'markdown', '52.0 MB']) expect(tree).toContain(s)
-  expect(shown(await pane.drawn())).toContain('3 files')
-  // the first file is chosen as the browser opens (live check term-fix9, quirk 7): its first lines under the second rule
-  const y = await rowOf(pane, 'm:files-tree', 'README.md')
-  expect((((await pane.drawn({ in: 'm:files-tree' })) as { children?: unknown[] }).children ?? []).map(r => shown(r)).find(r => r.includes('README.md'))).toMatch(/^❯/)
-  expect(shown(await pane.drawn())).toContain('Collusion wiki')
-  // a click on the chosen file opens it on its lines
-  await pane.pointer({ type: 'down', x: 6, y, button: 'left', in: 'm:files-tree' } as never)
-  await w.clock.settle()
-  await pane.redraw()
-  const text = shown(await pane.drawn())
-  for (const s of ['files › README.md', 'markdown · lines 1-3 of 20', 'later']) expect(text).toContain(s)
-  // a Markdown file opens as its text (the browser's Rendered view): its heading bold without its marks, its blank
-  // line left out
-  const body = shown(await pane.drawn({ in: 'm:file-body' }))
-  for (const s of ['Collusion wiki', 'An export of 4,579']) expect(body).toContain(s)
-  expect(body).not.toContain('# Collusion')
-  expect(JSON.stringify(await pane.drawn({ in: 'm:file-body' }))).toContain('"bold":true')
-  expect(w.calls.some(c => c[2] === 'files' && c[5] === 'README.md')).toBe(true)
-  await pane.unmount()
+  expect(w.panes.at(-1)!.title).toBe('Coverage')
 })
 
 test("a label's panel: its name, type and scope, a rule, its pattern to edit; run on a sample or on all; counts, examples and cards folded", async ($, on) => {
@@ -550,7 +531,7 @@ test("a label's panel: its name, type and scope, a rule, its pattern to edit; ru
   let text = shown(drawn)
   // the header block: the name in the accent and bold after a ● in its colour, the type in use on the selection
   // background, the scope (its files, a field, and how many records); then the rule and the pattern, a field
-  for (const s of ['name', 'links through a fetch proxy', 'type', 'prompt', 'regex', 'code', 'scope', '14,591 records', '──', 'pattern', 'run on a sample', 'run on all 14,591', '▸ counts', '▸ examples', '▸ cards']) expect(text).toContain(s)
+  for (const s of ['name', 'links through a fetch proxy', 'type', 'prompt', 'regex', 'code', 'scope', '──', 'pattern', 'run on a sample', 'run on all 14,591', '▸ counts', '▸ examples', '▸ cards']) expect(text).toContain(s)
   // the scope's count with no leading dot
   expect(text).not.toContain('· 14,591')
   const json = JSON.stringify(drawn)

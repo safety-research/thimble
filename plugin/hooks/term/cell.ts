@@ -65,6 +65,10 @@ export type ThimbleLabel = {
   rev?: number
   /** the records its scope holds, given for a label with rows and no run that ended (backend local._scope_total) */
   scope_total?: number
+  /** how many files its glob matches, for a label over files (`thimble state label`, local._scope_facts) */
+  scope_files?: number
+  /** the model a prompt label's calls run on, by the name the analyst reads (`thimble state label`) */
+  run_model?: string
   /** its values in order with their color (1 to 12, 0 for none) and whether Files marks them while it is on */
   classes?: LabelClass[]
   /** on in Files and the views (a label over files) */

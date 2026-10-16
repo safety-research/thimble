@@ -11,8 +11,7 @@
 //   thread       a row click, after Esc                        ↑↓ Enter a s b x
 //   labels       a heading click, empty click                  ↑↓ Enter 1-9 b x, short and tall
 //   documents    /thimble documents                            ↑↓ Enter 1-9 x
-//   files        /thimble files, a row click, empty click      ↑↓ Enter Space b x, short and tall
-//   file         a row click, /thimble files <path>            ↑↓ Enter Backspace 1-3 x, short and tall; never ←
+//   file         /thimble files <path>                         ↑↓ Enter Backspace 1-3 x, short and tall; never ←
 //   views        a heading click                               ↑↓ Enter 1-9 b x
 //   view         a terminal view from the views list           ↑↓ Enter, its letters and signs, a click, a drag, the
 //                                                              wheel, every key while its field takes typing
@@ -728,75 +727,20 @@ const LONG = {
 for (const rows of [SHORT, TALL]) {
   const size = rows === SHORT ? 'short' : 'tall'
 
-  test(`keys · files · /thimble files, a row click and an empty click · ${size}: ↑↓ choose and stay in view, Space folds, Enter opens`, async ($, on) => {
-    const w = world(on)
-    w.states.files = [{ path: 'README.md', kind: 'markdown', size_bytes: 1800 }, ...Array.from({ length: 16 }, (_, i) => ({ path: `logs/run-${i + 1}.jsonl`, kind: 'records', size_bytes: 100 })), { path: 'log.txt', kind: 'text', size_bytes: 600 }]
-    w.pages['log.txt'] = LONG
-    await start($, w)
-    await $.command.run({ command: 'thimble:thimble', args: 'files' } as never)
-    await w.clock.settle()
-    await takesKeys($)
-    let s = await seen($, rows, 'files-tree')
-    // Space folds (restored: the relay's field takes it)
-    named(s.hint, ['↑↓ to choose', 'Enter to open', 'Space to fold', 'x to close'])
-    // a row is chosen as the browser opens, the first file of the first folder; the folder's row is a row the keys
-    // choose too (live check term-fix9, quirk 7)
-    expect(s.chosen).toContain('log.txt')
-    await up($, w)
-    expect((await seen($, rows, 'files-tree')).chosen).toMatch(/^▾ wiki\//)
-    await down($, w, 2)
-    expect((await seen($, rows, 'files-tree')).chosen).toContain('README.md')
-    // the logs/ folder unfolded by a click on its row: its files, the choice on the folder's row
-    await click($, w, rows, 'files-tree', 'logs/')
-    await takesKeys($)
-    expect((await seen($, rows, 'files-tree')).chosen).toMatch(/^▾ logs\//)
-    await down($, w, 12)
-    s = await seen($, rows, 'files-tree')
-    expect(s.chosen).toContain('run-12.jsonl')
-    expect(s.hint).toContain('Space to fold')
-    if (rows === TALL) expect(s.rows.some(r => /↑ \d+ more/.test(r))).toBe(true)
-    // Space folds the chosen file's folder, and the choice goes onto the folder's row, never a hidden file
-    await type($, w, rows, ' ')
-    s = await seen($, rows, 'files-tree')
-    expect(s.rows.join('\n')).not.toContain('run-12.jsonl')
-    expect(s.chosen).toMatch(/^▸ logs\//)
-    // Enter on a folder's row unfolds it, Space folds it again; neither opens a file
-    await enter($, w, rows)
-    s = await seen($, rows, 'files-tree')
-    expect(s.rows.join('\n')).toContain('run-1.jsonl')
-    expect(s.chosen).toMatch(/^▾ logs\//)
-    await type($, w, rows, ' ')
-    expect((await seen($, rows, 'files-tree')).rows.join('\n')).not.toContain('run-12.jsonl')
-    // an empty click (the column names' row is no hit) hands the keys back
-    w.focusAsked.length = 0
-    const pane = await look($, rows)
-    await pane.pointer({ type: 'down', x: 4, y: 0, button: 'left', in: 'm:files-tree' } as never)
-    await w.clock.settle()
-    await pane.unmount()
-    expect(w.focusAsked).toEqual([true])
-    await takesKeys($)
-    await up($, w, 30)
-    expect((await seen($, rows, 'files-tree')).chosen).toMatch(/^▾ wiki\//)
-    await down($, w)
-    await enter($, w, rows)
-    await takesKeys($)
-    expect((await seen($, rows, 'file-body')).rows.join('\n')).toContain('line 1 of the log')
-  })
-
-  test(`keys · file · a row click and /thimble files <path> · ${size}: ↑↓ choose and stay in view, Enter opens the citation, Backspace goes back; never ←`, async ($, on) => {
+  test(`keys · file · /thimble files <path> · ${size}: ↑↓ choose and stay in view, Enter opens the citation, b goes back where it was opened from; never ←`, async ($, on) => {
+    // the terminal has no file browser (Matt, 10-16): a file opens at a place, and b goes back there
     const w = world(on)
     w.states.files = [{ path: 'log.txt', kind: 'text', size_bytes: 600 }]
     w.pages['log.txt'] = LONG
     await start($, w)
-    await $.command.run({ command: 'thimble:thimble', args: 'files' } as never)
+    await $.command.run({ command: 'thimble:thimble', args: '' } as never)
+    await w.clock.settle()
+    await $.command.run({ command: 'thimble:thimble', args: 'files log.txt' } as never)
     await w.clock.settle()
     await takesKeys($)
-    // the one file is chosen as the browser opens: a click on it opens it
-    expect((await seen($, rows, 'files-tree')).chosen).toContain('log.txt')
-    await click($, w, rows, 'files-tree', 'log.txt')
-    await takesKeys($)
     let s = await seen($, rows, 'file-body')
-    named(s.hint, ['↑↓ to choose', 'Enter to open', 'Backspace for the files', 'x to close'])
+    named(s.hint, ['↑↓ to choose', 'Enter to open', 'b to go back', 'x to close'])
+    expect(s.hint).not.toContain('Backspace for the files')
     expect(s.hint).not.toContain('←')
     await down($, w)
     await takesKeys($)
@@ -816,26 +760,19 @@ for (const rows of [SHORT, TALL]) {
     expect((await seen($, rows)).text).toMatch(/citation/)
     await hotkey($, w, 'back')
     await takesKeys($)
-    // Backspace goes back to the file browser, the file chosen there
-    await backspace($, w, rows)
-    s = await seen($, rows, 'files-tree')
-    expect(s.text).toContain('Files')
-    expect(s.chosen).toContain('log.txt')
-    // from /thimble files <path>:<line>, the line chosen; Backspace: the browser, the file chosen there (live check
-    // term-fix9, quirk 7: no row was chosen)
+    // b goes back where the file was opened from: home (no file browser to go back to)
+    await hotkey($, w, 'back')
+    expect(w.panes.at(-1)!.title).toBe('Home')
+    // from /thimble files <path>:<line>, the line chosen
     await $.command.run({ command: 'thimble:thimble', args: 'files log.txt:30' } as never)
     await w.clock.settle()
     await takesKeys($)
     s = await seen($, rows, 'file-body')
     expect(s.rows.some(r => r.includes('line 30 of the log'))).toBe(true)
-    await backspace($, w, rows)
-    await takesKeys($)
-    s = await seen($, rows, 'files-tree')
-    expect(s.chosen).toContain('log.txt')
-    expect(s.text).toMatch(/^home › Files(?! ›)/)
     await type($, w, rows, 'x')
     expect(w.closed).toContain(PANEL)
   })
+
 }
 
 test('keys · file · a transcript: 1 2 3 4 for the tabs from the relay', async ($, on) => {
@@ -1052,7 +989,8 @@ test('keys · back from a new thread\'s form: the view shown names its own keys,
   await w.clock.advance(300)
   s = await seen($, SHORT, 'file-body')
   expect(s.relay).toBe(true)
-  named(s.hint, ['↑↓ to choose', 'Enter to open', 'Backspace for the files'])
+  named(s.hint, ['↑↓ to choose', 'Enter to open'])
+  expect(s.hint).not.toContain('Backspace for the files')
   await down($, w)
   expect((await seen($, SHORT, 'file-body')).rows.find(r => r.includes('line 4 of the log'))).toBeDefined()
 })
@@ -1203,10 +1141,8 @@ test('the path row: `show all threads` and `N new` on home alone; the threads pa
   await without(/home › views › Timeline$/)
   await $.command.run({ command: 'thimble:thimble', args: 'files README.md' } as never)
   await w.clock.settle()
-  await without(/home › files › README\.md$/)
-  await $.command.run({ command: 'thimble:thimble', args: 'files' } as never)
-  await w.clock.settle()
-  await without(/home › Files$/)
+  // no file browser step before a file (Matt, 10-16: the terminal has no file browser)
+  await without(/(?<!files) › README\.md$/)
   // a card, and a citation from it
   await $.command.run({ command: 'thimble:thimble', args: 'card ff73e071' } as never)
   await w.clock.settle()
@@ -1305,19 +1241,18 @@ test('keys · back after a line chosen in a file, and after a thread asked: wher
   w.states.files = [{ path: 'log.txt', kind: 'text', size_bytes: 600 }]
   w.pages['log.txt'] = LONG
   await start($, w)
-  await $.command.run({ command: 'thimble:thimble', args: 'files' } as never)
+  await $.command.run({ command: 'thimble:thimble', args: '' } as never)
   await w.clock.settle()
-  await takesKeys($)
-  await click($, w, SHORT, 'files-tree', 'log.txt')
+  await $.command.run({ command: 'thimble:thimble', args: 'files log.txt' } as never)
+  await w.clock.settle()
   await takesKeys($)
   await click($, w, SHORT, 'file-body', 'line 3 of the log')
   await click($, w, SHORT, 'file-body', 'line 7 of the log')
   await takesKeys($)
   await down($, w)
   await hotkey($, w, 'back')
-  let s = await seen($, SHORT, 'files-tree')
-  expect(s.text).toContain('Files')
-  expect(s.chosen).toContain('log.txt')
+  expect(w.panes.at(-1)!.title).toBe('Home')
+  let s = await seen($, SHORT)
   // a thread asked about a card: back from it shows the card
   await $.command.run({ command: 'thimble:thimble', args: 'card ff73e071' } as never)
   await w.clock.settle()
