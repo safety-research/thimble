@@ -18,8 +18,9 @@ in rounds, through two thimble tools (view_tools.py):
    before ROUNDS rounds it is told to take the pictures again; a failure puts the view back as it was before the round
    (REVISION_FAILED_NOTE). A review with no problems calls finish_review with nothing revised. While it edits, readers
    see the view as it last passed (views.read_built's digest rule).
-In terminal mode a picture is the view's program drawn as text (term_views.draw_check), as thimble-term's panel shows
-it: the overview 120 columns wide, then TERM_STATES, given in view_pictures' result itself; no browser is needed.
+For a view whose page is its terminal program (views.target_of `term-page`) a picture is the program drawn as text
+(term_views.draw_check), as the terminal panel shows it: the overview 120 columns wide, then TERM_STATES, given in
+view_pictures' result itself; no browser is needed.
 An extension's program that replaces the view-review task (tasks.program) reads the pictures in place of the reviewer:
 each view_pictures call passes them to it (review_input, the input docs/agents.md documents), and the reviewer gets the
 problems it found to fix. A program that fails ends the review failed with why (PROGRAM_FAILED_NOTE).
@@ -87,7 +88,7 @@ EXTRA_STATES = {"labels": views.PANE_NARROW, "filtered": views.PANE_NARROW, "det
                 "control": views.PANE_SIZE}
 EXTRA_SHOTS = 4
 CONTROLS_CLICKED = 3  # controls one `control` state clicks in turn
-# in terminal mode, the columns of the overview's drawing and the states the reviewer may ask to see beside it, each
+# for a terminal page, the columns of the overview's drawing and the states the reviewer may ask to see beside it, each
 # with its columns: the view 200 columns wide, the first place a citation opens, the place a ref names, and the view
 # after keys pressed in turn (as `thimble view text --keys` takes them)
 TERM_COLUMNS = 120
@@ -224,7 +225,8 @@ def after_built(c: str, slug: str) -> None:
     if view is None or view.get("origin") != "workspace" or prop is None:
         return
     _drop_copies(c, slug)
-    if not enabled() or not auto(c) or (not views.terminal(c) and headless.missing(headless.PAGES)):
+    term = views.target_of(c, slug) == views.TERM_PAGE
+    if not enabled() or not auto(c) or (not term and headless.missing(headless.PAGES)):
         if prop.get("review"):
             views.update_proposal(c, slug, review=None)
         return
@@ -263,10 +265,12 @@ async def begin(c: str, slug: str, *, again: bool = False, route: str = subagent
     if route == subagents.FOLLOW_ON:
         await subagents.out_of_plan(c)
     name = str(prop.get("name") or slug)
-    ans = await subagents.start_job(c, REVIEWER, key(slug), task(c, prop), subagents.values_for(c, REVIEWER), route,
-                                    description=f"review: {name}",
-                                    chat={"title": f"review: {name}", "view": slug, "review": True, "announce": False},
-                                    work=work_dir(c, slug))
+    with views.spawning(c, views.target_of(c, slug)):  # the reviewer's registration renders for the view's page
+        ans = await subagents.start_job(c, REVIEWER, key(slug), task(c, prop), subagents.values_for(c, REVIEWER), route,
+                                        description=f"review: {name}",
+                                        chat={"title": f"review: {name}", "view": slug, "review": True,
+                                              "announce": False},
+                                        work=work_dir(c, slug))
     if ans.refused and ans.get("request") is None:
         subagent_refused(c, {"kind": "start", "key": key(slug), "reason": ans.reason, "refused_kind": ans.kind})
     return ans
@@ -531,7 +535,7 @@ async def pictures(c: str, slug: str, agent_id: str, states: Any) -> tuple[str, 
     view = views.read_view(c, slug)
     if prop is None or view is None:
         raise NoPictures(f"view_pictures: the view {slug} is gone")
-    term = views.terminal(c)
+    term = views.target_of(c, slug) == views.TERM_PAGE  # the page its last build made
     if not term and headless.missing(headless.PAGES):
         raise NoPictures(NO_BROWSER_NOTE)
     review = review_of(prop)
@@ -565,7 +569,7 @@ async def pictures(c: str, slug: str, agent_id: str, states: Any) -> tuple[str, 
 
 
 async def draw(c: str, slug: str, wanted: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """The pictures of a view built in terminal mode: its draft's program drawn as text (term_views.draw_check) in each
+    """The pictures of a view built for the terminal: its draft's program drawn as text (term_views.draw_check) in each
     state `wanted`, the overview TERM_COLUMNS wide or one of TERM_STATES at its columns. Each result carries its state,
     ref, controls and why."""
     from . import term_views  # noqa: PLC0415
@@ -587,7 +591,7 @@ async def draw(c: str, slug: str, wanted: list[dict[str, Any]]) -> list[dict[str
 
 async def _drawn(c: str, slug: str, agent_id: str, prop: dict[str, Any], view: dict[str, Any],
                  wanted: list[dict[str, Any]], rnd: int, left: int, done: int) -> tuple[str, str, str]:
-    """pictures in terminal mode: the drawings of the states `wanted` (draw), each with what it shows and the text
+    """pictures of a terminal page: the drawings of the states `wanted` (draw), each with what it shows and the text
     itself, then what the checks found; the records the programs fetched; what an extension's program found."""
     shots = await draw(c, slug, wanted)
     if bad := [s for s in shots if not s.get("text")]:

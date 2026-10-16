@@ -1,5 +1,5 @@
-"""A view built in terminal mode (views.terminal): its builder is asked for view.term.js and reader.py in place of
-view.html (prompts/dev-view.md's terminal blocks), its gate runs the reader's checks and then draws the program as text
+"""A view built for the terminal (a build whose target is term-page, views.target_of): its builder is asked for
+view.term.js and reader.py in place of view.html (prompts/dev-view.md's term-page blocks), its gate runs the reader's checks and then draws the program as text
 (views.term_draws, term_views.draw_check) at 120 and 200 columns in light and dark and at the first place that resolved,
 with no browser, and fails on a program error, a timeout or a draw past the panel; its reviewer gets those drawings in
 place of pictures. The worked example Timeline passes; a broken program fails with what broke. Browser mode keeps its
@@ -119,14 +119,17 @@ BOARD_VIEW = {"name": "Board", "description": "The posts.", "scope": ["board.jso
 
 
 def test_a_build_in_terminal_mode_asks_for_view_term_js(board):
-    """The builder's registered prompt in terminal mode asks for view.term.js on the terminal kit, points to the kit's
-    doc and the worked examples' programs, and says nothing of view.html; in browser mode it is the page's as before.
-    The proposal's result says the view opens in thimble's panel in the terminal."""
-    with prompts.rendering("terminal"):
+    """The builder's registered prompt for a term-page build asks for view.term.js on the terminal kit, points to the
+    kit's doc and the worked examples' programs, and says nothing of view.html; for an html-page build it is the page's
+    as before (0.9.0: the build's target, views.spawning, in place of the session's mode). The proposal's result says
+    the view opens in thimble's panel in the terminal."""
+    with views.spawning("board", views.TERM_PAGE):
         term = view_tools.builder_definition("board")["prompt"]
+    with prompts.rendering("terminal"):
         proposed = tools.hint("propose_view-proposed", view="Board", slug="board", claims="board.jsonl")
-    with prompts.rendering("browser"):
+    with views.spawning("board", views.HTML_PAGE):
         page = view_tools.builder_definition("board")["prompt"]
+    with prompts.rendering("browser"):
         opened = tools.hint("propose_view-proposed", view="Board", slug="board", claims="board.jsonl")
     assert "view.term.js" in term and "terminal-views.md" in term and "thimble view text" in term
     assert all(f"`{x}`" in term for x in ("timeline", "linked-sessions", "repository"))

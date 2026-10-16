@@ -3205,10 +3205,12 @@ def build_task(c: str, prop: dict[str, Any], *, repair: str = "") -> str:
     more = [repair] if repair else []
     if prop.get("changed") or prop.get("change"):
         more.append(change_text(c, prop))
-    return prompts.render("dev-view-task", {
-        "name": str(prop.get("name") or slug), "slug": slug, "folder": str(views.views_dir(c) / slug),
-        "work": str(view_work_dir(c, slug)), "proposal": view_tools.fenced_proposal(prop),
-        "more": "\n\n".join(more)})
+    target = prop.get("target") if prop.get("target") in views.TARGETS else views.default_target(c)
+    with prompts.rendering(views.target_flags(c, target)):  # the page this build makes (views module note)
+        return prompts.render("dev-view-task", {
+            "name": str(prop.get("name") or slug), "slug": slug, "folder": str(views.views_dir(c) / slug),
+            "work": str(view_work_dir(c, slug)), "proposal": view_tools.fenced_proposal(prop),
+            "more": "\n\n".join(more)})
 
 
 def repair_text(report: str, n: int) -> str:
@@ -3231,11 +3233,15 @@ async def start_build(c: str, slug: str, route: str, values: dict[str, Any] | No
     if prop is None:
         _view_runs.pop(key, None)
         return subagents.refusal(subagents.ERROR, f"no proposal {slug}")
+    # the page this build makes (views module note): the one a change named, else the one of where it starts
+    target = prop.get("target") if prop.get("target") in views.TARGETS else views.default_target(c)
+    if prop.get("target") != target:
+        prop = views.update_proposal(c, slug, target=target) or prop
     if (part := view_program(c)) is not None:
         b = _view_runs.setdefault(key, _Build(route=route))
         b.task = asyncio.get_running_loop().create_task(_program_task(c, slug, part), name=f"view-program:{c}:{slug}")
         return subagents.Answer({"program": part.extension})
-    if why := await asyncio.to_thread(views.build_problem_for, c):
+    if why := await asyncio.to_thread(views.build_problem_for, c, target):
         _view_runs.pop(key, None)
         if prop.get("revision"):
             views.end_revision(c, slug, why, failed_change=str(prop.get("change") or ""))
@@ -3261,11 +3267,12 @@ async def start_build(c: str, slug: str, route: str, values: dict[str, Any] | No
         await subagents.out_of_plan(c)
     name = str(prop.get("name") or slug)
     asked = bool(prop.get("asked"))
-    ans = await subagents.start_job(c, _builder(), _key(slug), build_task(c, prop, repair=repair), vals, route,
-                                    description=f"view: {name}",
-                                    chat={"title": f"view: {name}", "view": slug, "announce": asked,
-                                          **({"asked": True} if asked else {})},
-                                    work=view_work_dir(c, slug), call=call)
+    with views.spawning(c, target):  # the builder's registration renders for this build's page
+        ans = await subagents.start_job(c, _builder(), _key(slug), build_task(c, prop, repair=repair), vals, route,
+                                        description=f"view: {name}",
+                                        chat={"title": f"view: {name}", "view": slug, "announce": asked,
+                                              **({"asked": True} if asked else {})},
+                                        work=view_work_dir(c, slug), call=call)
     if ans.typed:
         _view_runs[key] = _Build(request=str(ans.get("request") or ""), route=route)
         views.update_proposal(c, slug, status="building", request=ans.get("request"))

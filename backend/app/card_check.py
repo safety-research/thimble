@@ -108,9 +108,10 @@ def enabled() -> bool:
 
 def auto(c: str) -> bool:
     """Whether a card add_card or edit_card wrote is checked by itself in workspace `c`: thimble's config
-    `agents.cardCheck.auto` (docs/config.md), the workspace's file over the one in thimble's home. While neither sets
-    it, the workspace's settings.json `card_check` that the canvas's old switch wrote, else on. A config with an error
-    leaves the check on, as a fresh workspace has it."""
+    `agents.cardCheck.auto` (docs/config.md, the Card check feature switch), the workspace's file over the one in
+    thimble's home. While neither sets it, the workspace's settings.json `card_check` that the canvas's old switch
+    wrote, else on. A config with an error leaves the check on, as a fresh workspace has it. features.auto
+    `card_check` reads it."""
     from . import ledger, userconf  # noqa: PLC0415
 
     conf, _err = userconf.load_or_defaults(c)
@@ -183,6 +184,15 @@ def wants_check(cell: dict[str, Any] | None) -> bool:
     return cell.get("status") == "ok" if notebook.runnable(cell) else True
 
 
+def _feature_on(c: str) -> bool:
+    """The Card check feature switch (features.auto `card_check`, which is auto)."""
+    try:
+        from . import features  # noqa: PLC0415
+    except ImportError:  # STUB(C6): until the core lane's features.py lands
+        return auto(c)
+    return bool(features.auto(c, "card_check"))
+
+
 async def after_tool(c: str, name: str, args: dict[str, Any] | None, res: Any, *, session: str | None = None,
                      anchor: str | None = None) -> Any:
     """Called by tools.call with every result: starts the check of the card an add_card or edit_card result names. The
@@ -191,7 +201,7 @@ async def after_tool(c: str, name: str, args: dict[str, Any] | None, res: Any, *
         return res
     try:
         cid = card_of(name, args, res.text, anchor) if not res.is_error else None
-        if cid and auto(c):
+        if cid and _feature_on(c):
             start(c, cid, author_of(session))
     except Exception:  # noqa: BLE001 — the check never breaks a tool call
         log.exception("card check: after_tool failed for %s", name)

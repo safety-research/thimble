@@ -7,12 +7,13 @@ their message from the browser), at the cut of that turn's turn_duration record 
 answered (session._finish_sub), not at the end of main's turn that handed the thread's question, from the browser or
 from /thimble:ask in the terminal, to that fork; and once when the first run of an orientation ends done
 (orient_session). Each trigger merges into the workspace's pending job (JOB_FILE's `job`: the reasons, main's session
-and its cut), so a later pass of the mirror in terminal mode, or a restarted server, runs it. One loop per workspace
+and its cut), so a later pass of the mirror on the local transport, or a restarted server, runs it. One loop per workspace
 (_loop) waits DEBOUNCE_MAIN_S after a main turn, else DEBOUNCE_OTHER_S (longer than auto mode's hand-back wait, so an
 orientation's end merges with main's `↳` turn), and runs the job once main is idle; a main turn still open leaves it
 pending until that turn ends. A running fork is never cancelled; a trigger that comes meanwhile is the next job.
 
-The gate (due): view proposals are on (views.propose_enabled: PROPOSE_ENV, then Settings' View proposals switch),
+The gate (due): view proposals are on (the View proposals feature switch, features.auto `proposer`, which reads
+views.propose_enabled: PROPOSE_ENV, then Settings' View proposals switch),
 main is attached and idle with a cut to fork at, no view proposal card waits (views.open_offer), and views can be built
 here (views.build_problem_for). There is no other limit.
 
@@ -94,9 +95,13 @@ def _now() -> str:
 
 
 def enabled(c: str) -> bool:
-    """Whether view proposals are on in workspace `c` (views.propose_enabled: PROPOSE_ENV is not off and Settings'
-    switch is on)."""
-    return views.propose_enabled(c)
+    """Whether view proposals are on in workspace `c`: the feature switch View proposals (features.auto `proposer`,
+    which is views.propose_enabled: PROPOSE_ENV is not off and Settings' switch, `views.propose`, is on)."""
+    try:
+        from . import features  # noqa: PLC0415
+    except ImportError:  # STUB(C6): until the core lane's features.py lands
+        return views.propose_enabled(c)
+    return bool(features.auto(c, "proposer"))
 
 
 # --------------------------------------------------------------------------- the pending job
@@ -348,7 +353,8 @@ def _suffix(claims: Any) -> str:
 def _views_section(c: str) -> str:
     """The views the analyst has: each proposal row by how it stands, then each built view without a row, then each
     deleted one."""
-    out = ["## Views the analyst has", "", TERMINAL_BUILTIN if views.terminal(c) else BUILTIN]
+    # where a view the proposal builds is drawn first: the terminal's panel on the local transport, else the browser
+    out = ["## Views the analyst has", "", TERMINAL_BUILTIN if views.default_target(c) == views.TERM_PAGE else BUILTIN]
     rows = views.list_proposals(c)
     built = {v["slug"]: v for v in views.list_views(c)}
     state = {"built": "built", "queued": "building", "building": "building", "failed": "the build failed"}
@@ -402,8 +408,9 @@ def _now_section(c: str, after: list[str]) -> str:
 def assemble(c: str, job: dict[str, Any]) -> str:
     """The fork's message (module note): the proposer prompt, the threads, the orientation, the views the analyst has
     and what just happened (job's `after`)."""
-    mode = "terminal" if views.terminal(c) else "browser"
-    parts = [prompts.load(PROMPT, mode).strip(), _threads_section(c), _orientation_section(c), _views_section(c),
+    # the page a proposal it makes builds: view.term.js on the local transport, view.html after the press
+    flags = views.target_flags(c, views.default_target(c))
+    parts = [prompts.load(PROMPT, flags).strip(), _threads_section(c), _orientation_section(c), _views_section(c),
              _now_section(c, list(job.get("after") or []))]
     return "\n\n".join(p for p in parts if p) + "\n"
 

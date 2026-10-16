@@ -64,11 +64,12 @@ def slug_of(key: str | None) -> str:
 def builder_definition(c: str) -> dict[str, Any]:
     """The registration of `thimble:view-builder` for workspace `c` (subagents.roles adds its model, effort and
     `background`): prompts/dev.md with prompts/dev-view.md, the fixed part of every build, as its task (the dev agent's
-    prompt as the config or the active extensions change it), a fixed description, and the thimble tools that are not
-    a builder's taken away. The view a run builds is in its prompt (dev.build_task)."""
+    prompt as the config or the active extensions change it), rendered for the page the build starting now makes
+    (views.spawn_target; the module registers the type again before each spawn), a fixed description, and the thimble
+    tools that are not a builder's taken away. The view a run builds is in its prompt (dev.build_task)."""
     from . import dev, prompts, userconf, views  # noqa: PLC0415 — dev imports the view modules, which import this one
 
-    with prompts.custom(userconf.prompt_files(c, "dev")):
+    with prompts.custom(userconf.prompt_files(c, "dev")), prompts.rendering(views.target_flags(c, views.spawn_target(c))):
         prompt = prompts.render_dev("dev-view", {"corpus": str(config.corpus_dir(c)), "examples": str(views.EXAMPLES_DIR),
                                                  "docs": str(config.REPO_ROOT / "docs"),
                                                  "attempts": str(dev.MAX_ATTEMPTS)})
@@ -78,10 +79,12 @@ def builder_definition(c: str) -> dict[str, Any]:
 def reviewer_definition(c: str) -> dict[str, Any]:
     """The registration of `thimble:view-reviewer` for workspace `c`: the `review` section of prompts/view-review.md,
     the view-review task's part (tasks.py), as the active extensions change it, a fixed description, and the thimble
-    tools that are not a reviewer's taken away. The view a run reviews is in its prompt (view_review.task)."""
-    from . import prompts, tasks, view_review  # noqa: PLC0415
+    tools that are not a reviewer's taken away, rendered for the page of the view the review starting now looks at
+    (views.spawn_target). The view a run reviews is in its prompt (view_review.task)."""
+    from . import prompts, tasks, view_review, views  # noqa: PLC0415
 
-    with prompts.custom(tasks.files(c, view_review.PROMPT)):
+    with prompts.custom(tasks.files(c, view_review.PROMPT)), \
+            prompts.rendering(views.target_flags(c, views.spawn_target(c))):
         prompt = view_review.reviewer_prompt(c)
     return {"description": REVIEWER_DESCRIPTION, "prompt": prompt,
             "disallowedTools": [*tools.not_own(REVIEWER_TOOLS), "Monitor"]}  # a review ends with its turn

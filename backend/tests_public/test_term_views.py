@@ -373,9 +373,11 @@ async def test_a_program_that_fails_is_one_red_line_and_one_that_draws_nothing_d
         await term_views.draw_text(CORPUS, slug, cols=80, rows=5, wrap=DRAW_WRAP)
 
 
-async def test_a_view_built_in_browser_mode_has_no_terminal_program(board, inproc):
+async def test_a_view_built_for_the_browser_has_no_terminal_program_until_one_is_built(board, inproc):
+    """0.9.0 has no modes: a view whose only page is view.html says, in the terminal, that its terminal page is being
+    built (views.ensure_page builds it on the first open of a view that passed its checks)."""
     views.write_view(CORPUS, "page", name="Page", description="", scope=["board.jsonl"], reader=READER, html=HTML)
-    with pytest.raises(term_views.TermViewError, match="built in browser mode"):
+    with pytest.raises(term_views.TermViewError, match="building the terminal page"):
         await term_views.draw_text(CORPUS, "page", wrap=DRAW_WRAP)
     _view("import { draw } from 'thimble-term'\ndraw((d) => d.line('hi'))\n")
     rows = {r["slug"]: r for r in local._home_views(CORPUS)}
