@@ -6,7 +6,8 @@
 // chips of what it points at. Label runs in a row are one Label card, a step per label. A notice (a failure with its
 // fix, which the strip above the composer offers) is one warning line, quiet once it is closed (Notice.tsx). In main's
 // chat a check's comments on an answer tint their passages; a click on one, or a deep link to `answer:<turn>#s<n>`,
-// opens the comment under the answer (chat/answerComments.ts, AnswerComment.tsx).
+// opens the comment under the answer (chat/answerComments.ts, AnswerComment.tsx). A reply's citation of a card reads
+// `[ card:<name> ]`, as the terminal draws it (components/RefChip CardWordCites).
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -14,7 +15,7 @@ import { CodeText } from '../components/Code'
 import { Icon } from '../components/Icon'
 import { Mark } from '../components/Marks'
 import { UserMessage } from '../components/Message'
-import { RefChip, scrubIds } from '../components/RefChip'
+import { CardWordCites, RefChip, scrubIds } from '../components/RefChip'
 import { Spinner } from '../components/Spinner'
 import { ChipRun, ToolCard, type ToolState } from '../components/ToolCard'
 import { api } from '../lib/api'
@@ -203,7 +204,9 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
             return (
               <div key={r.index} className={`chat-msg chat-assistant${nested ? ' chat-nested' : ''}`}>
                 <div className="chat-text" data-anchor={anchorOf(r.index)} data-anchor-text={chat ? r.text : undefined}>
-                  <ChatMarkdown text={r.text} streaming={r === lastText} marks={own?.marks} />
+                  <CardWordCites.Provider value={true}>
+                    <ChatMarkdown text={r.text} streaming={r === lastText} marks={own?.marks} />
+                  </CardWordCites.Provider>
                 </div>
                 {open && <AnswerCommentCard comment={open} ws={ws} onDone={answers.dismiss} onClose={() => setOpened(null)} />}
               </div>
@@ -778,7 +781,9 @@ export function ChipRow({ item, ws }: { item: ChipRowT; ws: string }) {
     return (
       <div className="chat-msg chat-assistant chat-say" data-chip="say">
         <div className="chat-text">
-          <RefText text={item.text} workspace={ws} cite />
+          <CardWordCites.Provider value={true}>
+            <RefText text={item.text} workspace={ws} cite />
+          </CardWordCites.Provider>
         </div>
       </div>
     )

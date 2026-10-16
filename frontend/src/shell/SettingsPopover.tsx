@@ -256,7 +256,7 @@ export const FEATURE_ROWS: { key: FeatureKey; label: string; note: string }[] = 
   { key: 'autoActivate', label: 'Turn on when Claude reads data', note: "thimble turns on in a folder when Claude reads a data file there. Off, only /thimble, a thimble tool or /thimble open turns it on." },
   { key: 'labels', label: 'Labels', note: 'Claude can label every record of a file with a model.' },
   { key: 'checks', label: 'Checks', note: 'The checks that are on comment on answers that read data, and on documents.' },
-  { key: 'citationMarks', label: 'Citation marks', note: 'The terminal marks each citation in an answer ✓ or ×.' },
+  { key: 'citationMarks', label: 'Citation marks', note: 'thimble checks each citation in an answer and marks one it cannot verify red with ×.' },
   { key: 'coverage', label: 'Coverage', note: "A line under answers that read data says how much of the data Claude's tool calls saw." },
   { key: 'cardCheck', label: 'Card check', note: "thimble checks each new card's chart and citations." },
 ]

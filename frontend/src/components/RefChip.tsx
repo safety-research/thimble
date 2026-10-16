@@ -1,7 +1,8 @@
 // A ref on every surface. Standalone (no `value`) it is a Chip: the icon of what it points to and a short name, the
 // evidence chip for the data and the accent chip for the agent's work (refTone). Inside prose (`value`) it is an inline
 // citation: the text itself is the link, with a quiet accent underline. `cite` marks a citation; in GlyphCites contexts
-// a standalone citation is its target's glyph alone, a file's the glyph of its type (lib/fileGlyph). The links toggle
+// a standalone citation is its target's glyph alone, a file's the glyph of its type (lib/fileGlyph), except that a chat
+// reply's citation of a card reads `[ card:<name> ]` as in the terminal (CardWordCites). The links toggle
 // hides every citation (lib/links). Hovering shows the evidence in a label: the excerpt with the record's facts and the
 // cited words highlighted; for a table cell (`card:<id>#<col>/<row>`) the table around it, or in place when the table is
 // drawn right above; for printed output lines (`@out<i>#L<n>`) the lines around it; for a call (`call:<chat>/<n>`) the
@@ -63,8 +64,28 @@ export { decodeLabel }
 
 /** True where a standalone citation is its target's glyph alone, its name in the hover, so a long name does not crowd
  * the text: chat replies, inside a card's content wherever the card is drawn, and a report's text. A cited number stays
- * the link's text. */
+ * the link's text, and a chat reply's citation of a card its words (CardWordCites). */
 export const GlyphCites = createContext(false)
+
+/** True where a standalone citation of a card reads `[ card:<name> ]`, as the terminal draws it, in place of the card's
+ * glyph alone: a chat reply (chat/Rows). Like every citation it is purple and underlined, with the spinner after it
+ * while it is checked and red with × when it failed. */
+export const CardWordCites = createContext(false)
+
+/** What a standalone citation of a card says, as the terminal's chip says it (plugin/hooks/term/lib.ts chipWords):
+ * `[ card:<name> ]` for the card or a place on it, by the name it is cited by (Matt, 2026-10-16), `[ card output line 1 ]`
+ * for lines it printed, `[ card ]` while an older card's name is not known. Never the id of an older card. Null for a
+ * ref that is not a card's. */
+export function cardChipWords(ref: string): string | null {
+  const p = parseRef(ref)
+  if (p?.kind !== 'cell') return null
+  if (p.out != null && p.line != null) return p.endLine != null && p.endLine !== p.line ? `[ card output lines ${p.line}-${p.endLine} ]` : `[ card output line ${p.line} ]`
+  // the name the canvas knows the card by (its slug), else its id, which is its name for a card made since ids are
+  // names; an older card's random id (eight hex digits) is never shown
+  const known = cellLabel(p.cellId)
+  const name = known && known !== 'card' ? known : /^[0-9a-f]{8}$/.test(p.cellId) ? '' : p.cellId
+  return name ? `[ card:${name} ]` : '[ card ]'
+}
 
 /** The checks of the citations in the text below (lib/citeChecks): a card's takeaway, a document's sentences. */
 export const CiteChecksContext = createContext<CiteChecks | null>(null)
@@ -302,10 +323,14 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
   const wholeCell = parsed?.kind === 'cell' && parsed.col == null && parsed.out == null ? parsed.cellId : null
   const asText = value != null
   const icon = refIcon(ref)
-  // a standalone citation of a card, or inside a card or report text (GlyphCites), is its glyph alone with its name in
-  // the hover; a chip that lists what a step made keeps its name
+  // a standalone citation of a card in a chat reply (CardWordCites) reads `[ card:<name> ]`, as in the terminal
+  const cardWords = useContext(CardWordCites) && !asText && !!cite && parsed?.kind === 'cell'
+  const wordsOf = () => (cardWords ? (cardChipWords(ref) ?? '') : '')
+  const words = useSyncExternalStore(onNames, wordsOf, wordsOf)
+  // any other standalone citation of a card, or inside a card or report text (GlyphCites), is its glyph alone with its
+  // name in the hover; a chip that lists what a step made keeps its name
   const glyphCites = useContext(GlyphCites)
-  const iconOnly = !asText && !failed && !!cite && (glyphCites || parsed?.kind === 'cell')
+  const iconOnly = !asText && !cardWords && !failed && !!cite && (glyphCites || parsed?.kind === 'cell')
 
   const call = parsed?.kind === 'call' ? parsed : null
   useEffect(() => ensureRefName(ws, ref), [ws, ref])
@@ -502,8 +527,8 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
   }
 
   const kind = asText ? undefined : parsed?.kind
-  const anchorAttrs = anchor && !unresolved ? { 'data-anchor': ref, 'data-anchor-text': value ?? label } : {}
-  const cls = ['refchip', asText ? 'refchip-value' : '', cite ? 'refchip-citation' : '', iconOnly ? 'refchip-icon' : '', kind && INTERNAL.has(kind) ? 'refchip-internal' : '', failed ? 'broken' : '', checking ? 'refchip-checking' : '', quiet && !failed ? 'refchip-quiet' : '', unresolved ? 'refchip-unresolved' : '', compact ? 'refchip-compact' : '', late ? 'refchip-late' : '']
+  const anchorAttrs = anchor && !unresolved ? { 'data-anchor': ref, 'data-anchor-text': value ?? (cardWords ? words : label) } : {}
+  const cls = ['refchip', asText ? 'refchip-value' : '', cardWords ? 'refchip-words' : '', cite ? 'refchip-citation' : '', iconOnly ? 'refchip-icon' : '', kind && INTERNAL.has(kind) ? 'refchip-internal' : '', failed ? 'broken' : '', checking ? 'refchip-checking' : '', quiet && !failed ? 'refchip-quiet' : '', unresolved ? 'refchip-unresolved' : '', compact ? 'refchip-compact' : '', late ? 'refchip-late' : '']
     .filter(Boolean)
     .join(' ')
   const artifact = pop?.state === 'ok' && pop.cell ? primaryArtifact(pop.cell.outputs) : null
@@ -526,9 +551,9 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
 
   return (
     <>
-      {asText ? (
+      {asText || cardWords ? (
         <span ref={chipEl as React.Ref<HTMLSpanElement>} className={cls} data-ref={ref} {...anchorAttrs} tabIndex={interactive ? -1 : undefined} role={interactive ? 'link' : undefined} {...handlers}>
-          {shownValue(value ?? '')}
+          {asText ? shownValue(value ?? '') : words}
         </span>
       ) : (
         <Chip kind="ref" tone={refTone(ref)} as="span" ref={chipEl} icon={failed ? 'x' : icon} face={(kind && NAME_KINDS.has(kind)) || (call && !wordsFile(call)) ? 'sans' : 'mono'} className={cls} data-ref={ref} {...anchorAttrs} aria-label={iconOnly ? label : undefined} tabIndex={interactive ? -1 : undefined} role={interactive ? 'link' : undefined} {...handlers}>
@@ -536,7 +561,7 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
         </Chip>
       )}
       {checking && <Spinner size={8} className="refchip-mark refchip-spin" label="Checking this citation" />}
-      {failed && asText && (
+      {failed && (asText || cardWords) && (
         <span className="refchip-mark refchip-x" aria-label="Unable to verify">
           ×
         </span>

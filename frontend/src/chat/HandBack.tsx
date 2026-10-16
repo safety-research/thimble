@@ -3,6 +3,7 @@
 // main from the browser: main gets only each fork's closing `↳` line.
 import { useState } from 'react'
 import { Icon } from '../components/Icon'
+import { CardWordCites } from '../components/RefChip'
 import { ChatMarkdown } from './markdown'
 import { Note } from './Notes'
 
@@ -41,7 +42,9 @@ export function HandedBack({ text, anchor }: { text: string; anchor?: string }) 
       {open && (
         <div className="chat-msg chat-assistant chat-hand-back-summary">
           <div className="chat-text" data-anchor={anchor} data-anchor-text={anchor ? text : undefined}>
-            <ChatMarkdown text={text} />
+            <CardWordCites.Provider value={true}>
+              <ChatMarkdown text={text} />
+            </CardWordCites.Provider>
           </div>
         </div>
       )}
