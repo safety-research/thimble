@@ -12,6 +12,8 @@
 // The page opens as thimble 0.9.0 opens it, by the press (the first-load step): `thimble open --json` (backend
 // app/open_cmd.py) for the stand-in session, with a stand-in $BROWSER that records the redirect file it is given, which
 // this browser then opens; the code is in that file alone, never in the press's output.
+// THIMBLE_E2E_BROWSER picks the browser (chromium, the default, firefox or webkit) and THIMBLE_E2E_ONLY, a comma list of
+// steps, runs only those (the others are recorded as skipped): the sign-in steps run in each browser this way.
 import { spawnSync } from 'node:child_process'
 import { createHmac, randomUUID } from 'node:crypto'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
@@ -28,7 +30,9 @@ const RESULTS = env.THIMBLE_E2E_RESULTS
 const FIXTURE = env.THIMBLE_E2E_FIXTURE
 const OUT = join(SHOTS, '..')
 const require = createRequire(join(TREE, 'frontend', 'package.json'))
-const { chromium } = require('playwright')
+const playwright = require('playwright')
+const ENGINE = env.THIMBLE_E2E_BROWSER || 'chromium'
+const ONLY = new Set((env.THIMBLE_E2E_ONLY || '').split(',').map((x) => x.trim()).filter(Boolean))
 
 const SIZES = [
   { width: 1440, height: 900 },
@@ -115,6 +119,10 @@ let currentPage = null
 /** Run one step: its function returns {detail, shots} or throws; a step never stops the walk. A failing step without a
  * screenshot of its own gets one of the page as the failure left it. */
 async function step(name, title, fn, ms = STEP_MS) {
+  if (ONLY.size && !ONLY.has(name)) {
+    record(name, title, 'skip', `not among THIMBLE_E2E_ONLY (${[...ONLY].join(', ')})`)
+    return false
+  }
   let timer
   if (currentPage && name !== 'welcome' && name !== 'tour') await dismissTour(currentPage)
   if (currentPage) await hideNotices(currentPage)
@@ -455,9 +463,12 @@ async function unlockStep(page, st) {
 
 async function main() {
   // the full Chromium shows a PDF in a page when headless; the headless shell install.sh fetches does not
-  let browser = await chromium.launch({ channel: 'chromium' }).catch(() => null)
-  const browserName = browser ? `Chromium ${browser.version()}` : 'the headless shell'
-  if (!browser) browser = await chromium.launch()
+  const engine = playwright[ENGINE]
+  if (!engine) throw new Error(`THIMBLE_E2E_BROWSER names no browser Playwright drives: ${ENGINE}`)
+  let browser = ENGINE === 'chromium' ? await engine.launch({ channel: 'chromium' }).catch(() => null) : null
+  const full = !!browser
+  if (!browser) browser = await engine.launch()
+  const browserName = ENGINE === 'chromium' ? (full ? `Chromium ${browser.version()}` : 'the headless shell') : `${ENGINE} ${browser.version()}`
   const context = await browser.newContext({ viewport: SIZES[0] })
   const page = await context.newPage()
   currentPage = page
