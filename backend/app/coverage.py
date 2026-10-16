@@ -439,10 +439,8 @@ def job_argv(root: Path) -> list[str]:
 def feature_on(c: str) -> bool:
     """Whether the Coverage feature switch is on in workspace `c` (features.auto `coverage`): off, no fact is kept and
     no index job counts records."""
-    try:
-        from . import features  # noqa: PLC0415
-    except ImportError:  # STUB(C6): until the core lane's features.py lands, every feature is on
-        return True
+    from . import features  # noqa: PLC0415
+
     try:
         return bool(features.auto(c, "coverage"))
     except Exception:  # noqa: BLE001 — a config that cannot be read leaves coverage on, as a fresh install has it
@@ -898,10 +896,15 @@ def line_of(files_seen: int, files_total: int, records_seen: int, records_total:
             indexed: bool = True) -> str:
     """The summary line (module note): records first when every file is counted, files otherwise."""
     if not indexed:
-        return f"saw {files_seen:,} files"
+        return f"saw {files_seen:,} {_files(files_seen)}"
     if counted and records_total > 0:
-        return f"saw {_percent(records_seen, records_total)} of records ({files_seen:,} of {files_total:,} files)"
-    return f"saw {files_seen:,} of {files_total:,} files"
+        return (f"saw {_percent(records_seen, records_total)} of records ({files_seen:,} of {files_total:,} "
+                f"{_files(files_total)})")
+    return f"saw {files_seen:,} of {files_total:,} {_files(files_total)}"
+
+
+def _files(n: int) -> str:
+    return "file" if n == 1 else "files"
 
 
 def _open(c: str) -> tuple[sqlite3.Connection | None, bool]:

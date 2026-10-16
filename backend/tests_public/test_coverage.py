@@ -228,12 +228,14 @@ def test_summary_line_forms():
     assert coverage.line_of(3, 1_032_019, 0, 0, False) == "saw 3 of 1,032,019 files"
     assert coverage.line_of(3, 13, 9, 9, False) == "saw 3 of 13 files"
     assert coverage.line_of(3, 3, 0, 0, False, indexed=False) == "saw 3 files"
+    assert coverage.line_of(1, 1, 0, 0, False, indexed=False) == "saw 1 file"
+    assert coverage.line_of(1, 1, 5, 10, True) == "saw 50% of records (1 of 1 file)"
 
 
 def test_files_only_while_counting_and_without_an_index(corpus):
     c, root = corpus["c"], corpus["root"]
     s = _facts(c, [{"path": "events.jsonl", "how": "whole"}])
-    assert s["line"] == "saw 1 files" and s["counting"] is True and corpus["started"] == [c]
+    assert s["line"] == "saw 1 file" and s["counting"] is True and corpus["started"] == [c]
     # walked but not counted: files only
     conn = coverage._connect_rw(coverage.index_path(c))
     coverage.refresh(c, root, conn)
