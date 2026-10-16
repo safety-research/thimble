@@ -24,7 +24,6 @@ import pytest
 from app import cli, config, hook_auth, permission_hook, procs
 
 PORT_FREE = cli.port_free  # before the home fixture stands it in
-SERVER_FOR_LAUNCH = cli.server_for_launch  # before conftest's autouse fixture stands it in
 BACKEND = Path(__file__).resolve().parents[1]
 PLUGIN_BIN = config.REPO_ROOT / "plugin" / "bin"
 
@@ -190,8 +189,8 @@ def test_a_port_this_installs_own_stuck_server_holds_is_kept_so_the_failure_name
 
 def test_thimble_port_taken_gets_todays_answer_and_without_it_the_port_is_passed_over(server, data, monkeypatch,
                                                                                     capsys):
-    """THIMBLE_PORT names the port: another install's server there is refused with FOREIGN_LINE by `up` and the launch,
-    which start nothing, and another program there makes the start fail with the port line. Without THIMBLE_PORT the
+    """THIMBLE_PORT names the port: another install's server there is refused with FOREIGN_LINE by `up`, which starts
+    nothing, and another program there makes the start fail with the port line. (0.9.0's launch starts no server.) Without THIMBLE_PORT the
     same port is passed over: no FOREIGN_LINE, and the server starts on a free port."""
     held = _held()
     try:
@@ -211,11 +210,9 @@ def test_thimble_port_taken_gets_todays_answer_and_without_it_the_port_is_passed
         monkeypatch.setenv("THIMBLE_PORT", str(p))
         assert cli.main(["up", "--cwd", str(data / "mini")]) == 0
         assert capsys.readouterr().out.splitlines() == [foreign]
-        assert SERVER_FOR_LAUNCH("mini") == [foreign]
         assert server.calls == [], "refused: nothing started"
 
         monkeypatch.delenv("THIMBLE_PORT")
-        assert SERVER_FOR_LAUNCH("mini") == []
         assert cli.main(["up", "--cwd", str(data / "mini")]) == 0
         out = capsys.readouterr().out
         assert foreign not in out and len(server.ports) == 1 and server.ports[0] != p

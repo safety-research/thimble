@@ -1069,13 +1069,13 @@ def test_the_lines_install_sh_prints_let_a_new_login_shell_find_thimble_and_its_
 
 def test_help_lists_the_commands_an_analyst_uses_and_fix_and_revert_only_in_a_clone(tmp_path):
     """`thimble help` lists the commands an analyst uses. server, status, launch-args and prompt still run when typed but
-    are not listed, nor are state and act, terminal mode's renderer's; fix and revert change thimble's own code, so only
-    a development install (a git clone) lists them."""
-    listed = ("thimble [claude flags...]", "thimble demo", "thimble list", "thimble purge", "thimble extension",
-              "thimble plugin", "thimble mode", "thimble doctor", "thimble feedback", "thimble update",
+    are not listed, nor are state and act, the terminal UI's, nor mode, which 0.9.0 keeps only to say there are no modes
+    now; fix and revert change thimble's own code, so only a development install (a git clone) lists them."""
+    listed = ("thimble [claude flags...]", "thimble open", "thimble demo", "thimble list", "thimble purge",
+              "thimble extension", "thimble plugin", "thimble doctor", "thimble feedback", "thimble update",
               "thimble uninstall")
     unlisted = ("thimble server", "thimble status", "thimble launch-args", "thimble prompt", "thimble state",
-                "thimble act")
+                "thimble act", "thimble mode")
     for checkout in (False, True):
         tree = fake_tree(tmp_path / f"tree-{checkout}", checkout=checkout)
         thimble = ["bash", str(tree / "plugin" / "bin" / "thimble")]
@@ -1084,12 +1084,13 @@ def test_help_lists_the_commands_an_analyst_uses_and_fix_and_revert_only_in_a_cl
         assert all(c in r.stdout for c in listed), r.stdout
         assert not [c for c in unlisted if c in r.stdout], r.stdout
         assert ("thimble fix" in r.stdout and "thimble revert" in r.stdout) is checkout, r.stdout
-        # 0.5.0's `thimble cc-mod on` says how to start terminal mode instead, and changes nothing
-        for args in (["cc-mod", "on"], ["cc-mod"]):
+        # `thimble mode` and 0.5.0's `thimble cc-mod` say there are no modes now and how to open the browser, and
+        # change nothing
+        for args in (["cc-mod", "on"], ["cc-mod"], ["mode", "terminal"], ["mode"]):
             cc = subprocess.run([*thimble, *args], capture_output=True, text=True, env=env_for(tmp_path),
                                 stdin=subprocess.DEVNULL, timeout=30)
-            assert cc.returncode == 0 and "deprecated in version 0.6.0" in cc.stdout, (args, cc.stdout, cc.stderr)
-            assert "run `thimble mode terminal`, then `thimble`" in cc.stdout, cc.stdout
+            assert cc.returncode == 0 and cc.stdout == ("thimble has no modes now. Type /thimble open, or press o in "
+                                                        "thimble's panel, to open the browser.\n"), (args, cc.stdout)
         assert not (tmp_path / "home" / ".thimble" / "launch-modes.json").exists()
         for word in ("status", "server", "launch-args", "prompt"):
             typed = subprocess.run([*thimble, word], capture_output=True, text=True, env=env_for(tmp_path),

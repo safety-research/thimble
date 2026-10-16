@@ -65,26 +65,28 @@ def fake(monkeypatch, home):
 
 def test_up_gives_a_new_session_the_precached_context_once(home, data, monkeypatch, capsys):
     """/thimble in a session new to a workspace `thimble demo` installed from a pre-cache: the line says the session
-    starts fresh from the orientation's cards and report, and the context the server rendered follows the lines the
-    model repeats (precached.take_context answers it once per session)."""
+    starts fresh from the orientation's cards and report, and the context follows the lines the model repeats
+    (precached.take_context answers it once per session). 0.9.0: /thimble alone starts no server, so it takes the
+    context in its own process."""
+    from app import precached  # noqa: PLC0415
+
     _healthy_no_process(monkeypatch)
+    monkeypatch.setattr(cli, "_request", lambda m, u, b=None, timeout=5.0: (404, {"detail": "Not Found"}))
     asked = []
 
-    def request(m, u, b=None, timeout=5.0):
-        if m == "POST" and u.endswith("/api/ws/mini/precached/context"):
-            asked.append(b["session"])
-            return 200, {"text": "This workspace was installed from a pre-cache.\n\n## The canvas\n\n- card:c1" if len(asked) == 1 else ""}
-        return 404, {"detail": "Not Found"}
+    def take(c, session):
+        asked.append((c, session))
+        return "This workspace was installed from a pre-cache.\n\n## The canvas\n\n- card:c1" if len(asked) == 1 else ""
 
-    monkeypatch.setattr(cli, "_request", request)
+    monkeypatch.setattr(precached, "take_context", take)
     assert cli.main(["up", "--cwd", str(data / "mini" / "agents"), "--session", "s9"]) == 0
     out = capsys.readouterr().out
-    assert out.splitlines()[:2] == [cli.LINK_LINE, cli.PRECACHED_LINE] and out.rstrip().endswith("- card:c1")
+    assert out.splitlines()[:2] == [cli.ON_LINE, cli.PRECACHED_LINE] and out.rstrip().endswith("- card:c1")
     assert cli.main(["up", "--cwd", str(data / "mini" / "agents"), "--session", "s9"]) == 0
-    assert capsys.readouterr().out.splitlines() == [cli.LINK_LINE] and asked == ["s9", "s9"]
+    assert capsys.readouterr().out.splitlines() == [cli.ON_LINE] and [s for _, s in asked] == ["s9", "s9"]
     # a bare `thimble up` in a shell is no session: nothing is asked
     assert cli.main(["up", "--cwd", str(data / "mini" / "agents")]) == 0
-    assert asked == ["s9", "s9"]
+    assert len(asked) == 2
 
 
 def test_a_server_that_runs_but_does_not_answer_is_named_with_the_command_that_restarts_it(home, monkeypatch):
@@ -155,33 +157,44 @@ def test_up_prints_the_url_and_opens_a_sessions_folder(home, data, monkeypatch, 
             return 404, {"detail": "Not Found"}
         if u.endswith("/precached/context"):  # no workspace here was installed from a pre-cache
             return 200, {"text": ""}
+        if u.endswith("/archive"):  # /thimble fresh in a folder with no workspace yet
+            return 200, {"archived": None}
         posted.append((u, b))
         if u.endswith("/api/ui/pair"):  # a server that makes no sign-in codes
             return 404, {"detail": "Not Found"}
         return 201, {"name": Path(b["path"]).name}
 
     monkeypatch.setattr(cli, "_request", request)
-    rc = cli.main(["up", "--cwd", str(data / "mini" / "agents"), "--session", "s9"])
+    # 0.9.0: /thimble alone turns thimble on in the session and starts no server; /thimble fresh still opens the
+    # session's folder on the server
+    assert cli.main(["up", "--cwd", str(data / "mini" / "agents"), "--session", "s9"]) == 0
+    assert capsys.readouterr().out.splitlines() == [cli.ON_LINE] and not (home / "links" / "s9").exists()
+    assert posted == []
+    rc = cli.main(["up", "--cwd", str(data / "mini" / "agents"), "--session", "s9", "--action", "fresh"])
     # what the skill puts in the model's context holds no link: the session's Stop hook shows the link it left, with a
     # sign-in code it gets as it shows it, so the file holds none
-    assert rc == 0 and capsys.readouterr().out.splitlines() == [cli.LINK_LINE]
+    assert rc == 0 and capsys.readouterr().out.splitlines() == [cli.LINK_LINE, cli.NOTHING_ARCHIVED_LINE]
     assert (home / "links" / "s9").read_text() == "http://127.0.0.1:5300/?ws=mini"
     assert "ui_key" not in json.loads((home / "server.json").read_text())
     posted.clear()  # the session's name and the like, told to the server
     folder = tmp_path / "calls"
     folder.mkdir()
-    assert cli.main(["ensure", "--cwd", str(folder), "--session", "s9"]) == 0
-    assert capsys.readouterr().out.splitlines() == [cli.LINK_LINE]
+    assert cli.main(["ensure", "--cwd", str(folder), "--session", "s9", "--action", "fresh"]) == 0
+    assert capsys.readouterr().out.splitlines() == [cli.LINK_LINE, cli.NOTHING_ARCHIVED_LINE]
     assert (home / "links" / "s9").read_text() == "http://127.0.0.1:5300/?ws=calls"
     assert posted[0] == ("http://127.0.0.1:8300/api/corpora/register", {"path": str(folder), "exact": True})
     posted.clear()
     (tmp_path / "cc").mkdir()
     (tmp_path / "cc" / "settings.json").write_text(json.dumps({"disableAllHooks": True}))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
-    assert cli.main(["ensure", "--cwd", str(folder), "--session", "s8"]) == 0
-    url, note, mark = capsys.readouterr().out.splitlines()
+    assert cli.main(["ensure", "--cwd", str(folder), "--session", "s8", "--action", "fresh"]) == 0
+    url, second, note, mark = capsys.readouterr().out.splitlines()
     assert url == "thimble: http://127.0.0.1:5300/?ws=calls", "no hook to show it"
+    assert second == cli.NOTHING_ARCHIVED_LINE
     assert note == cli.MONITOR_NOTE and mark.startswith(cli.MONITOR_MARK), "main's Monitor brings the browser's events"
+    assert cli.main(["ensure", "--cwd", str(data / "mini" / "agents"), "--session", "s8"]) == 0
+    on, note2, mark2 = capsys.readouterr().out.splitlines()
+    assert on == cli.ON_LINE and note2 == note and mark2.startswith(cli.MONITOR_MARK), "/thimble alone arms it too"
     posted.clear()
     assert cli.main(["up", "--cwd", str(folder)]) == 0, "a bare up read by a program"
     assert capsys.readouterr().out.splitlines() == ["thimble: http://127.0.0.1:5300/"]
@@ -215,7 +228,7 @@ def test_slash_thimble_in_a_plain_claude_says_what_its_environment_lacks_and_lea
     session lacks gets a line each, printed (the model relays thimble: lines) and left under the link for the Stop hook
     (live check L15: a reply may leave a line out): an effort or subagent model variable set in the environment or in an
     `env` block of the analyst's settings, and a proxy that no NO_PROXY keeps off 127.0.0.1. The server gets their
-    keys and writes its own words. A launched main gets the link alone."""
+    keys and writes its own words. (0.9.0: no launcher unsets or keeps anything, so every session gets them.)"""
     _healthy_no_process(monkeypatch)
     told = []
 
@@ -226,15 +239,17 @@ def test_slash_thimble_in_a_plain_claude_says_what_its_environment_lacks_and_lea
         return 404, {}
 
     monkeypatch.setattr(cli, "_request", request)
-    monkeypatch.setattr(cli, "launched", lambda: False)
     monkeypatch.setattr(cli.cc_plugin, "claude_pid", lambda environ=None: None)
     monkeypatch.setattr(cli, "name_session", NAME_SESSION)
     for name in (*cli.UNSET_VARS, *cli.PROXY_VARS):
         monkeypatch.delenv(name, raising=False)
     for name in cli.NO_PROXY_VARS:  # as the session gave them to this process (config.GIVEN_NO_PROXY)
         monkeypatch.setitem(cli.config.GIVEN_NO_PROXY, name, "")
-    assert cli.main(["up", "--cwd", str(data / "mini" / "agents"), "--session", "s7"]) == 0
-    assert capsys.readouterr().out.splitlines() == [cli.LINK_LINE]
+    fresh = ["up", "--cwd", str(data / "mini" / "agents"), "--session", "s7", "--action", "fresh"]
+    assert cli.main(fresh[:-2]) == 0  # /thimble alone: no server, so nothing told and no link left
+    assert capsys.readouterr().out.splitlines() == [cli.ON_LINE] and told == []
+    assert cli.main(fresh) == 0
+    assert capsys.readouterr().out.splitlines() == [cli.LINK_LINE, cli.ARCHIVE_FAILED_LINE.format(log=cli.log_path())]
     assert "\n" not in (home / "links" / "s7").read_text() and told[-1]["warnings"] == []
     monkeypatch.setenv("CLAUDE_CODE_SUBAGENT_MODEL", "haiku")
     monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:3128")
@@ -242,28 +257,28 @@ def test_slash_thimble_in_a_plain_claude_says_what_its_environment_lacks_and_lea
     # what config made of it as it loaded, which keeps thimble's own requests off the proxy but not the plugin's
     monkeypatch.setenv("NO_PROXY", "corp.example,127.0.0.1,localhost")
     (tmp_path / "claude-home" / "settings.json").write_text(json.dumps({"env": {cli.EFFORT_ENV: "high"}}))
-    assert cli.main(["up", "--cwd", str(data / "mini" / "agents"), "--session", "s7"]) == 0
     lines = [cli.SETUP_ENV_LINE.format(name=cli.EFFORT_ENV),
              cli.SETUP_ENV_LINE.format(name="CLAUDE_CODE_SUBAGENT_MODEL"), cli.SETUP_PROXY_LINE]
-    assert capsys.readouterr().out.splitlines() == [cli.LINK_LINE, *lines]
+    assert cli.main(fresh[:-2]) == 0
+    assert capsys.readouterr().out.splitlines() == [cli.ON_LINE, *lines]
+    assert cli.main(fresh) == 0
+    assert capsys.readouterr().out.splitlines() == [cli.LINK_LINE, cli.ARCHIVE_FAILED_LINE.format(log=cli.log_path()),
+                                                    *lines]
     assert (home / "links" / "s7").read_text().split("\n") == ["http://127.0.0.1:5300/?ws=mini", *lines]
     assert told[-1]["warnings"] == [f"env:{cli.EFFORT_ENV}", "env:CLAUDE_CODE_SUBAGENT_MODEL", "proxy"]
     assert not [w for w in told[-1]["warnings"] if " " in w], "keys only: the server writes the words"
     monkeypatch.setitem(cli.config.GIVEN_NO_PROXY, "NO_PROXY", "corp.example, localhost")
     assert cli.proxy_unsafe() is False and cli.setup_warnings(data) == [f"env:{cli.EFFORT_ENV}",
                                                                          "env:CLAUDE_CODE_SUBAGENT_MODEL"]
-    monkeypatch.setattr(cli, "launched", lambda: True)
-    assert cli.main(["up", "--cwd", str(data / "mini" / "agents"), "--session", "s6"]) == 0
-    assert capsys.readouterr().out.splitlines() == [cli.LINK_LINE]
-    assert "\n" not in (home / "links" / "s6").read_text() and told[-1]["warnings"] == []
 
 
 def test_slash_thimble_makes_its_session_main_with_a_launch_record_and_marks_the_folder(home, data, monkeypatch,
                                                                                         capsys, tmp_path):
-    """/thimble in a session the launcher did not start writes launch.json for it (`via: skill`, its `claude` process,
-    its CLAUDE_CONFIG_DIR), which the hooks module's bridge reads; a record that names the same `claude` already, as
-    the launcher's does, is left alone. The folder is marked active, as itself and as its real path, for the plugin's
-    watcher, and the server hears whether Claude Code's own sandbox is on."""
+    """`up` for a session makes it main on the server (made_main, H1): launch.json written through activation's one
+    writer (activate.take_main and write_launch) with transport `server`, its `claude` process and its
+    CLAUDE_CONFIG_DIR, which the hooks module's bridge reads, and no mode; the switch is one way, so a later `up` keeps
+    it. The folder is marked active, as itself and as its real path, for the plugin's watcher, and the server hears
+    whether Claude Code's own sandbox is on."""
     _healthy_no_process(monkeypatch)
     told = []
     monkeypatch.setattr(cli, "_request", lambda m, u, b=None, timeout=5.0:
@@ -274,54 +289,40 @@ def test_slash_thimble_makes_its_session_main_with_a_launch_record_and_marks_the
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-home"))
     link = tmp_path / "mini-link"
     link.symlink_to(data / "mini", target_is_directory=True)
-    assert cli.main(["up", "--cwd", str(link), "--session", "s5"]) == 0
-    assert capsys.readouterr().out.splitlines() == [cli.LINK_LINE]
+    assert cli.main(["up", "--cwd", str(link), "--session", "s5", "--action", "fresh"]) == 0
+    assert capsys.readouterr().out.splitlines() == [cli.LINK_LINE, cli.ARCHIVE_FAILED_LINE.format(log=cli.log_path())]
     assert told[-1] == {"session": "s5", "cwd": str(link), "warnings": [], "sandbox": True}
     with cli.server_dirs():
         rec = cli.read_launch("mini")
-    assert {k: rec[k] for k in ("session", "pid", "via", "mode", "config_dir")} == {
-        "session": "s5", "pid": 4242, "via": "skill", "mode": "browser", "config_dir": str(tmp_path / "claude-home")}
-    assert "fenced" not in rec
+    assert {k: rec[k] for k in ("session", "pid", "via", "transport", "config_dir")} == {
+        "session": "s5", "pid": 4242, "via": "press", "transport": "server", "config_dir": str(tmp_path / "claude-home")}
+    assert "fenced" not in rec and "mode" not in rec
     marks = {p.name for p in (home / cli.ACTIVE_DIR).iterdir()}
     assert marks == {str(link).replace("/", "%"), str((data / "mini").resolve()).replace("/", "%")}
+    assert cli.main(["up", "--cwd", str(link), "--session", "s5"]) == 0  # /thimble alone: activation keeps it
     with cli.server_dirs():
-        path = config.workspace_path("mini") / cli.LAUNCH_FILE
-    path.write_text(json.dumps({**rec, "at": "kept", "via": "launcher's"}))
-    assert cli.main(["up", "--cwd", str(link), "--session", "s5"]) == 0
-    assert json.loads(path.read_text())["at"] == "kept", "the same claude: the record is left alone"
+        again = cli.read_launch("mini")
+    assert again["session"] == "s5" and again["transport"] == "server", "one way: the server stays"
 
 
-def test_a_launch_record_from_slash_thimble_is_live_while_its_claude_runs_that_session_or_one_it_moved_to(
-        home, data, tmp_path):
-    """open_elsewhere reads launch.json's `claude`: a record /thimble wrote (`via: skill`) names a `claude` whose
-    command line need not name its session, so Claude Code's own record of that process
-    (<config_dir>/sessions/<pid>.json) must name the record's session, or one subagents.json records as moved from it
-    (/clear)."""
-    from app import subagent_files
+def test_launch_json_is_written_only_through_activation_s_one_writer():
+    """3.7: activate.write_launch is the one writer of trusted/launch.json; made_main calls it with transport `server`,
+    and no other module of the backend writes the file (the launcher no longer does)."""
+    import inspect
 
-    cc = tmp_path / "cc"
-    (cc / "sessions").mkdir(parents=True)
-    main = _claude_process(tmp_path, "--permission-mode", "auto")
-    try:
-        rec = {"session": "s1", "pid": main.pid, "via": "skill", "config_dir": str(cc), "mode": "terminal"}
-        assert cli.live_launch(rec) is False, "no record of the process"
-        (cc / "sessions" / f"{main.pid}.json").write_text(json.dumps({"pid": main.pid, "sessionId": "s1"}))
-        assert cli.live_launch(rec) is True
-        (cc / "sessions" / f"{main.pid}.json").write_text(json.dumps({"pid": main.pid, "sessionId": "s2"}))
-        assert cli.live_launch(rec, "mini") is False, "another session"
-        with cli.server_dirs():
-            ws = config.workspace_dir("mini")
-            state = subagent_files.read(ws)
-            subagent_files.rekey(state, "s1", "s2")
-            subagent_files.state_path(ws).write_text(json.dumps(state))
-            assert cli.live_launch(rec, "mini") is True, "/clear moved the session"
-            (ws / cli.LAUNCH_FILE).write_text(json.dumps(rec))
-            assert cli.open_elsewhere("mini", "browser") == cli.OPEN_ELSEWHERE_LINE.format(mode="terminal")
-        assert cli.live_launch({**rec, "via": ""}) is False, "the launcher's record needs its session in argv"
-    finally:
-        main.kill()
-        main.wait()
-    assert cli.live_launch(rec, "mini") is False, "gone"
+    src = inspect.getsource(cli.made_main)
+    assert "activate.take_main(name, session, via)" in src
+    assert 'activate.write_launch(name, session, role="main", transport="server", via=via)' in src
+    writers = []
+    for path in sorted((BACKEND / "app").glob("*.py")):
+        text = path.read_text("utf-8")
+        if path.name in ("activate.py",):
+            continue
+        for n, line in enumerate(text.splitlines(), 1):
+            if re.search(r"launch_path\(|LAUNCH_FILE|launch\.json", line) and re.search(
+                    r"write_text|atomic_write|_replace\(|json\.dump\(|os\.replace", line):
+                writers.append(f"{path.name}:{n}: {line.strip()}")
+    assert writers == []
 
 
 def test_unpair_signs_every_browser_out_and_says_how_to_sign_in_again(home, monkeypatch, capsys):
@@ -424,8 +425,7 @@ def test_the_launcher_and_slash_thimble_say_nothing_of_claude_code_s_trust(home,
     monkeypatch.setattr(cli, "_request", lambda m, u, b=None, timeout=5.0: (404, {}))
     claude_global_config.write_text("{}")
     assert cli.main(["up", "--cwd", str(data / "mini" / "agents"), "--session", "s9"]) == 0
-    assert capsys.readouterr().out.splitlines() == [cli.LINK_LINE]
-    assert (home / "links" / "s9").read_text().strip().count("\n") == 0, "the Stop hook shows the link alone"
+    assert capsys.readouterr().out.splitlines() == [cli.ON_LINE]
     monkeypatch.setattr(cli, "launch_args", lambda cwd, resume=False, settings="", **kw: "args")
     monkeypatch.setattr(cli, "claude_code_warning", lambda v, once=True: None)
     assert cli.main(["launch-args", "--cwd", str(data / "mini")]) == 0
@@ -511,15 +511,18 @@ def test_claude_code_too_old_for_mods_older_or_newer_than_tested_each_get_their_
 
 
 def test_the_launcher_and_slash_thimble_say_how_claude_code_s_version_stands(home, data, monkeypatch, capsys, tmp_path):
-    """The launcher prints the version's line on the terminal before Claude Code starts, and /thimble in its output;
-    a newer Claude Code's hint comes once, at whichever shows it first."""
+    """launch-args' notes carry the version's line, which the launcher prints on the terminal before Claude Code starts,
+    and /thimble's `up` prints it in its output; a newer Claude Code's hint comes once, at whichever shows it first."""
     _healthy_no_process(monkeypatch)
     monkeypatch.setattr(cli, "_request", lambda m, u, b=None, timeout=5.0: (404, {}))
-    monkeypatch.setattr(cli, "launch_args", lambda cwd, resume=False, settings="", **kw: "args")
+    from app import terminal_tools
 
-    def launch() -> str:
+    monkeypatch.setattr(terminal_tools, "launch_value", lambda environ=None: "")
+
+    def launch() -> list[str]:
         assert cli.main(["launch-args", "--cwd", str(data / "mini")]) == 0
-        return capsys.readouterr().err
+        notes = capsys.readouterr().out.split("\n")[3]
+        return [n for n in notes.split("\t") if n]
 
     def slash_thimble() -> list[str]:
         assert cli.main(["up", "--cwd", str(data / "mini" / "agents"), "--session", "s9"]) == 0
@@ -529,18 +532,17 @@ def test_the_launcher_and_slash_thimble_say_how_claude_code_s_version_stands(hom
         claude_at(tmp_path, monkeypatch, v)
         warning = cli.claude_code_warning(v)
         assert warning.startswith("thimble: WARNING - ")
-        assert launch() == warning + "\n" and launch() == warning + "\n", "each launch"
-        assert slash_thimble() == [cli.LINK_LINE, warning]
+        assert launch() == [warning] and launch() == [warning], "each launch that asks launch-args"
+        assert slash_thimble() == [cli.ON_LINE, warning]
     claude_at(tmp_path, monkeypatch, cli.TESTED_CLAUDE_CODE)
-    assert launch() == "" and slash_thimble() == [cli.LINK_LINE]
+    assert launch() == [] and slash_thimble() == [cli.ON_LINE]
     claude_at(tmp_path, monkeypatch, "2.1.302")
     newer = cli.claude_code_warning("2.1.302", once=False)
-    assert launch() == newer + "\n"
-    assert launch() == "" and slash_thimble() == [cli.LINK_LINE], "told once on this machine"
+    assert launch() == [newer]
+    assert launch() == [] and slash_thimble() == [cli.ON_LINE], "told once on this machine"
     claude_at(tmp_path, monkeypatch, "2.1.303")
-    assert slash_thimble() == [cli.LINK_LINE, newer.replace("2.1.302", "2.1.303")] and launch() == ""
+    assert slash_thimble() == [cli.ON_LINE, newer.replace("2.1.302", "2.1.303")] and launch() == []
     assert "2.1.303 is newer" in line(cli.doctor_text(), "claude code:"), "the doctor says it each time"
-
 
 def test_doctor_says_what_claude_reports_about_its_login_and_never_a_value(home, monkeypatch, fake_claude):
     monkeypatch.setenv("ANTHROPIC_API_KEY", SECRET)
@@ -570,11 +572,11 @@ def test_the_doctor_a_model_reads_names_no_install_command_even_when_the_log_doe
     assert text.count(cli.LOG_LINE_LEFT_OUT) == 4, "three in the tail, one in the errors"
 
 
-def test_the_doctor_says_what_the_launch_sets_and_whether_the_module_ran(
+def test_the_doctor_says_whether_the_module_ran_and_how_the_session_reaches_thimble(
         home, monkeypatch, fake_claude, tmp_path, claude_global_config):
-    """For a session `thimble` starts in the folder: the switches it exports and the variables it unsets, safe mode,
-    and thimble's hooks module: off and why (managed settings, THIMBLE_NO_MODULE), its last hello, or why it stayed
-    idle, with an untrusted folder named. There is no fence line: thimble adds no sandbox to main's session."""
+    """For a session in the folder: safe mode, thimble's hooks module (off and why: managed settings, THIMBLE_NO_MODULE;
+    its last hello, or why it stayed idle, with an untrusted folder named), and its transport. There is no fence line
+    and no launch switches line (0.9.0: the `thimble` command exports only THIMBLE_OPEN, NO_PROXY and the turn tools)."""
     from app import cc_plugin
 
     monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: False)
@@ -591,22 +593,22 @@ def test_the_doctor_says_what_the_launch_sets_and_whether_the_module_ran(
     corpus.mkdir()
     monkeypatch.setenv("THIMBLE_CALLER_CWD", str(corpus))
     text = cli.doctor_text()
-    assert "fence" not in text
-    assert "CLAUDE_CODE_DISABLE_AGENT_VIEW=1" in line(text, "launch switches") and "none set here" in line(text, "launch")
+    assert "fence" not in text and "launch switches" not in text and "mode (" not in text and "renderer" not in text
     assert line(text, "safe mode") == "  safe mode: off"
     assert "no session here has run it yet" in line(text, "hooks module")
+    assert line(text, "transport (").endswith("thimble is not on in this folder yet (a data read, /thimble or "
+                                              "load_thimble turns it on)")
     with cli.server_dirs():
         config.register_corpus(corpus, exact=True)
         ws = config.workspace_dir("logs")
-    (ws / cli.LAUNCH_FILE).write_text(json.dumps({"session": "s1", "at": "2026-10-06T05:00:00"}))
+    (ws / cli.LAUNCH_FILE).write_text(json.dumps({"session": "s1-0000", "transport": "server", "at": 1.0}))
     (ws / "trusted" / "subagents.json").write_text(json.dumps({"module": {"session": "0b9d2f3e-1c2d", "version": "0.6.0",
                                                               "at": "2026-10-06T05:00:01"}}))
     claude_global_config.write_text(json.dumps({"projects": {str(tmp_path): {"hasTrustDialogAccepted": True}}}))
-    monkeypatch.setenv("CLAUDE_CODE_EFFORT_LEVEL", "high")
     text = cli.doctor_text()
-    assert "unsets CLAUDE_CODE_EFFORT_LEVEL (set here)" in line(text, "launch switches")
     assert line(text, "hooks module").endswith("it ran in the last session (hello from 0b9d2f3e at 2026-10-06T05:00:01, "
                                                "version 0.6.0)")
+    assert line(text, "transport (").endswith("server for main s1-0000 (after a press of the browser workbench)")
     (ws / "trusted" / "subagents.json").write_text(json.dumps({"module": {"session": "s2", "at": "t", "idle": "main does not run "
                                                                                                 "inside thimble's sandbox"}}))
     claude_global_config.write_text("{}")
@@ -620,14 +622,13 @@ def test_the_doctor_says_what_the_launch_sets_and_whether_the_module_ran(
                                                "so thimble's agents cannot start in this folder")
     assert line(text, "safe mode").startswith("  safe mode: on")
 
-
-def test_the_doctor_names_the_mode_its_source_the_renderer_and_what_terminal_mode_needs(
+def test_the_doctor_names_the_transport_where_card_code_runs_and_what_the_terminal_needs(
         home, monkeypatch, fake_claude, tmp_path):
-    """For a session `thimble` starts in the folder: its mode and where that comes from, the mode the last launch here
-    ran in when that was another, whether terminal mode's renderer can load, and in terminal mode where a card's code
-    runs (main's Bash, in Claude Code's sandbox when it can run) and whether its optional card checks run (a headless
-    Chromium and the built frontend)."""
-    from app import cc_plugin, cc_settings, launch_mode
+    """For a session in the folder: its transport (local before a press, with its peers and the sessions moved from
+    main; a 0.8.0 record named as such), where a card's code runs (main's Bash, before and after a press), whether the
+    optional card checks run (a headless Chromium and the built frontend), the terminal's views, server.json's
+    permissions and the markers; on local transport the module line reads module.json."""
+    from app import cc_plugin, cc_settings
 
     monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: False)
     monkeypatch.setattr(cli, "listening", lambda p: False)
@@ -640,62 +641,56 @@ def test_the_doctor_names_the_mode_its_source_the_renderer_and_what_terminal_mod
     corpus = tmp_path / "logs"
     corpus.mkdir()
     monkeypatch.setenv("THIMBLE_CALLER_CWD", str(corpus))
-    renderer = tmp_path / "tree" / "mods" / "thimble-term"
-    monkeypatch.setattr(cli, "renderer_root", lambda: renderer)
-    text = cli.doctor_text()
-    assert line(text, "mode (") == (f"  mode (a session in {corpus}): browser (thimble's default; "
-                                    "`thimble mode` changes it)")
-    assert line(text, "terminal renderer") == (f"  terminal renderer: cannot load ({renderer} is missing), so terminal "
-                                               "mode draws none of thimble's work; browser mode does not need it")
-    assert "terminal mode's card" not in text, "browser mode needs neither"
-    (renderer / ".claude-plugin").mkdir(parents=True)
-    (renderer / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "thimble-term"}))
-    launch_mode.set_folder(corpus, "terminal")
     monkeypatch.setattr(cli, "_browser_choice", lambda: ("bundled", ""))
     monkeypatch.setattr(cli, "headless_fetched", lambda browsers_json: True)
     text = cli.doctor_text()
-    assert line(text, "mode (").endswith("terminal (set for this folder; `thimble mode` changes it)")
-    assert line(text, "terminal renderer") == f"  terminal renderer: {renderer} (thimble-term), loaded only in terminal mode"
-    assert line(text, "terminal mode's card code").endswith(
+    assert line(text, "card code in main's Bash").endswith(
         "runs in main's Bash with your user's access; Claude Code asks about or judges each thimble-run command, as for "
         "any command; a card check's trial runs in the sandbox runtime where it can run")
-    assert line(text, "terminal mode's card checks").endswith("on: a card is checked, and a screenshot drawn, with the "
+    assert line(text, "card checks in the terminal").endswith("on: a card is checked, and a screenshot drawn, with the "
                                                               "headless Chromium and the built frontend")
+    assert line(text, "markers") == "  markers: 0 session markers, 0 folder markers"
     monkeypatch.setattr(cli, "headless_fetched", lambda browsers_json: False)
     monkeypatch.setattr(cli, "has_ui_build", lambda: False)
-    monkeypatch.setenv("THIMBLE_SANDBOX", "0")
     text = cli.doctor_text()
-    assert line(text, "terminal mode's card checks").endswith("off, since there is no headless Chromium and no "
+    assert line(text, "card checks in the terminal").endswith("off, since there is no headless Chromium and no "
                                                               "frontend build: cards are not checked and screenshots "
                                                               "are not drawn")
-    assert "with your user's access" in line(text, "terminal mode's card code")
     monkeypatch.setattr(cli, "terminal_views_wrap", lambda: "")
     monkeypatch.setattr(cc_settings, "kernel_setup", lambda: (["sudo apt-get install -y bubblewrap"], "set up bubblewrap"))
-    assert line(cli.doctor_text(), "terminal mode's views").endswith(
+    assert line(cli.doctor_text(), "views in the terminal").endswith(
         "can't run (neither the sandbox runtime nor bubblewrap runs here); to add bubblewrap, run: sudo apt-get install "
         "-y bubblewrap")
-    assert "apt-get" not in line(cli.doctor_text(commands=False), "terminal mode's views")
+    assert "apt-get" not in line(cli.doctor_text(commands=False), "views in the terminal")
     monkeypatch.setattr(cli, "terminal_views_wrap", lambda: "bubblewrap")
-    assert line(cli.doctor_text(), "terminal mode's views") == "  terminal mode's views: bubblewrap"
+    assert line(cli.doctor_text(), "views in the terminal") == "  views in the terminal: bubblewrap"
     with cli.server_dirs():
         config.register_corpus(corpus, exact=True)
         ws = config.workspace_dir("logs")
-    (ws / cli.LAUNCH_FILE).write_text(json.dumps({"session": "s1", "at": "2026-10-06T05:00:00", "mode": "browser"}))
-    assert line(cli.doctor_text(), "mode (").endswith("; the last launch here (2026-10-06T05:00:00) ran in browser mode")
-    # after a terminal-mode launch the module reads its roles from roles.json and writes its heartbeat to module.json
-    (ws / cli.LAUNCH_FILE).write_text(json.dumps({"session": "s1", "at": "2026-10-06T05:00:00", "mode": "terminal"}))
+    (ws / cli.LAUNCH_FILE).write_text(json.dumps({"session": "s1-0000", "transport": "local", "peers": ["p1"],
+                                                  "moved": ["m1", "m2"]}))
+    assert line(cli.doctor_text(), "transport (").endswith(
+        "local for main s1-0000 (no server); 1 peer session, local; 2 sessions moved from main")
+    (ws / cli.LAUNCH_FILE).write_text(json.dumps({"session": "s1", "mode": "terminal"}))
+    assert line(cli.doctor_text(), "transport (").endswith("launch.json is 0.8.0's (terminal mode)")
+    # on local transport the module reads its roles from roles.json and writes its heartbeat to module.json
+    (ws / cli.LAUNCH_FILE).write_text(json.dumps({"session": "s1", "transport": "local"}))
     got = line(cli.doctor_text(), "hooks module")
-    assert "no terminal-mode session here has run it yet" in got and "wrote no roles file" in got
+    assert "no session here has run it yet (it writes trusted/module.json" in got and "wrote no roles file" in got
     (ws / cli.ROLES_FILE).write_text(json.dumps({"at": "t", "roles": {}}))
     (ws / cli.MODULE_OUT).write_text(json.dumps({"session": "0b9d2f3e-1c2d", "version": "0.6.0", "beat": "t2",
                                                  "problem": "no roles yet"}))
     got = line(cli.doctor_text(), "hooks module")
-    assert ("it ran in the last session (terminal mode; heartbeat from 0b9d2f3e at t2, version 0.6.0); it reported: no "
-            "roles yet; Claude Code does not trust") in got and "roles file" not in got
+    assert ("it ran in the last session (heartbeat from 0b9d2f3e at t2, version 0.6.0); it reported: no roles yet; "
+            "Claude Code does not trust") in got and "roles file" not in got
     # the module writes its times in milliseconds since the epoch (plugin/hooks/thimble.ts)
     (ws / cli.MODULE_OUT).write_text(json.dumps({"session": "0b9d2f3e-1c2d", "version": "0.6.0", "beat": 1791262800000}))
     assert "heartbeat from 0b9d2f3e at 2026-10-06T05:00:00+00:00, version 0.6.0)" in line(cli.doctor_text(), "hooks module")
-
+    # server.json: 0600 as write_state writes it, else a warning with its fix
+    cli.write_state({"port": 1})
+    assert line(cli.doctor_text(), "server.json:") == "  server.json: present, 0o600"
+    cli.server_json().chmod(0o644)
+    assert "readable by others" in line(cli.doctor_text(), "server.json:")
 
 def _claude_process(tmp_path: Path, *args: str) -> subprocess.Popen:
     """A process whose command line is `<tmp_path>/claude <args>`, as /proc shows it: this Python by a link named
@@ -709,72 +704,6 @@ def _claude_process(tmp_path: Path, *args: str) -> subprocess.Popen:
             break
         time.sleep(0.01)
     return p
-
-
-def test_slash_thimble_in_terminal_mode_starts_nothing_and_prints_the_home_hint(home, data, monkeypatch, capsys,
-                                                                               tmp_path):
-    """In a session the launcher started in terminal mode, /thimble's hook and the skill's `up` start no server and
-    open nothing: the skill prints the `thimble-terminal-home` hint, which main repeats while the renderer opens the
-    home panel; `/thimble fresh` and the like say they need browser mode. A session that lost THIMBLE_MODE is still
-    known by launch.json's mode and session. The control, a browser-mode session, starts the server."""
-    from app import tools
-
-    started = []
-    monkeypatch.setattr(cli, "ensure_running", lambda wait: started.append(1) or True)
-    monkeypatch.setattr(cli, "_request", lambda *a, **k: (500, {}))
-    folder = data / "mini"
-    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(folder))
-    monkeypatch.setenv("THIMBLE_MODE", "terminal")
-    hook = {"session_id": "s7", "cwd": str(folder), "command_name": "thimble:thimble", "command_args": ""}
-    assert cli.hook_up(json.dumps(hook)) == 0 and capsys.readouterr().out == ""
-    skill = ["server", "up", "--cwd", str(folder), "--session", "s7", "--action", "", "--archive", ""]
-    assert cli.main(skill) == 0
-    hint = tools.hint(cli.TERMINAL_HOME_HINT).strip()
-    assert hint.startswith("thimble: ") and cli.terminal_home_line() == hint, "prompts/tools.md's hint, not the fallback"
-    assert capsys.readouterr().out.splitlines() == [hint], "the hook's result"
-    monkeypatch.setattr(tools, "descriptions", lambda: {cli.TERMINAL_HOME_HINT: "thimble: terminal mode. The home panel is open."})
-    monkeypatch.setenv(cli.SANDBOX_ENV, "1")  # the skill's own `up`, in main's sandbox, with no result of the hook's
-    assert cli.main(skill) == 0
-    assert capsys.readouterr().out.splitlines() == ["thimble: terminal mode. The home panel is open."]
-    assert cli.main([*skill[:-3], "fresh", "--archive", ""]) == 0
-    assert capsys.readouterr().out.splitlines() == [cli.TERMINAL_ACTION_LINE.format(action="fresh")]
-    assert cli.main(["server", "up", "--cwd", str(folder)]) == 0 and "terminal mode" in capsys.readouterr().out
-    assert started == [] and not cli.server_json().exists() and not (home / "links").exists()
-    monkeypatch.delenv(cli.SANDBOX_ENV)
-    monkeypatch.delenv("THIMBLE_MODE")
-    with cli.server_dirs():
-        ws = config.workspace_dir("mini")
-    (ws / cli.LAUNCH_FILE).write_text(json.dumps({"session": "s7", "mode": "terminal"}))
-    assert cli.main(skill) == 0 and capsys.readouterr().out.splitlines()[0].startswith("thimble: terminal mode")
-    assert started == []
-    (ws / cli.LAUNCH_FILE).write_text(json.dumps({"session": "s7", "mode": "browser"}))
-    assert cli.main(skill) == 0 and started == [1], "the control: browser mode starts the server"
-
-
-def test_slash_thimble_refuses_the_browser_while_the_workspace_is_open_in_terminal_mode(home, data, monkeypatch, capsys,
-                                                                                       tmp_path):
-    """One mode per workspace at a time: a /thimble that would open the browser on a workspace a terminal-mode session
-    runs in another terminal refuses, starting nothing; once that session is gone it opens as before."""
-    started = []
-    monkeypatch.setattr(cli, "ensure_running", lambda wait: started.append(1) or True)
-    monkeypatch.setattr(cli, "_request", lambda *a, **k: (500, {}))
-    folder = data / "mini"
-    with cli.server_dirs():
-        ws = config.workspace_dir("mini")
-    sid = "0b9d2f3e-1c2d-4e5f-8a9b-0c1d2e3f4a5b"
-    main = _claude_process(tmp_path, "--session-id", sid)
-    try:
-        (ws / cli.LAUNCH_FILE).write_text(json.dumps({"session": sid, "pid": main.pid, "mode": "terminal"}))
-        assert cli.main(["up", "--cwd", str(folder), "--session", "s2"]) == 0
-        assert capsys.readouterr().out.splitlines() == [cli.OPEN_ELSEWHERE_LINE.format(mode="terminal")]
-        assert started == []
-        assert cli.main(["up", "--cwd", str(folder), "--session", "s2", "--action", "status"]) == 0
-        assert "open in terminal mode" not in capsys.readouterr().out, "a status line opens nothing"
-    finally:
-        main.kill()
-        main.wait()
-    assert cli.main(["up", "--cwd", str(folder), "--session", "s2"]) == 0
-    assert "open in terminal mode" not in capsys.readouterr().out and started == [1]
 
 
 DEV_LINES = ("turn endings:", "source changed since start:", "validation stack:", "last apply:", "dev tickets:",
@@ -869,22 +798,24 @@ def test_real_up_starts_a_detached_server_idempotently_and_stop_ends_it(home, da
     if probe.returncode != 0:
         pytest.skip("app.main does not import in this tree: " + probe.stderr.strip().splitlines()[-1][:200])
     port = _free_port()
-    # a session the launcher started, with the plugin's hooks on, so /thimble prints the URL alone
+    # a session's /thimble fresh, with the plugin's hooks on, so it prints the link's line alone (0.9.0: /thimble alone
+    # starts no server)
     env = {**os.environ, "THIMBLE_HOME": str(home), "THIMBLE_PORT": str(port),
            "THIMBLE_DATA_DIR": str(data), "THIMBLE_WORKSPACES_DIR": str(tmp_path / "ws")}
     env.pop("THIMBLE_DEV", None)
     for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_PROFILE"):
         env.pop(k, None)
-    cmd = [sys.executable, "-m", "app.cli", "server", "up", "--cwd", str(data / "mini"), "--session", "it-1"]
+    cmd = [sys.executable, "-m", "app.cli", "server", "up", "--cwd", str(data / "mini"), "--session", "it-1", "--action",
+           "fresh"]
     pid = None
     try:
         t0 = time.monotonic()
         out = subprocess.run(cmd, cwd=BACKEND, env=env, capture_output=True, text=True, timeout=90)
         first = time.monotonic() - t0
         lines = out.stdout.splitlines()
-        # the link's line alone: the workspace holds nothing from an earlier run, so there is nothing to resume
+        # the link's line, and that the workspace held nothing from an earlier run to archive
         st = json.loads((home / "server.json").read_text())
-        assert out.returncode == 0 and lines == [cli.LINK_LINE], out
+        assert out.returncode == 0 and lines == [cli.LINK_LINE, cli.NOTHING_ARCHIVED_LINE], out
         assert (home / "links" / "it-1").read_text() == f"http://127.0.0.1:{port}/?ws=mini", "no code in the file"
         assert "ui_key" not in st
         pid = st["pid"]
@@ -904,7 +835,7 @@ def test_real_up_starts_a_detached_server_idempotently_and_stop_ends_it(home, da
             assert set(json.loads(r.read())) == {"ok", "boot", "ui"}, "no pid or path to a caller without the token"
         t1 = time.monotonic()
         out2 = subprocess.run(cmd, cwd=BACKEND, env=env, capture_output=True, text=True, timeout=30)
-        assert out2.stdout.splitlines() == lines and json.loads((home / "server.json").read_text())["pid"] == pid
+        assert out2.stdout.splitlines()[0] == cli.LINK_LINE and json.loads((home / "server.json").read_text())["pid"] == pid
         assert time.monotonic() - t1 < first + 1.0, "idempotent: no second start"
         assert len(_uvicorns_on(port)) == 1
         stop = subprocess.run([sys.executable, "-m", "app.cli", "stop"], cwd=BACKEND, env=env, capture_output=True,
@@ -936,23 +867,23 @@ def test_up_refuses_home_and_root_and_starts_nothing(home, data, monkeypatch, ca
 
 
 def test_up_in_the_bash_sandbox_prints_what_the_hook_did_outside_it(home, data, monkeypatch, capsys, tmp_path):
-    """/thimble's UserPromptExpansion hook runs `up` outside Claude Code's Bash sandbox and prints nothing; the skill's
-    `up` in the sandbox prints what the hook's did and starts nothing. With no result left for it, it names the
-    exclusions that would run it outside instead (the watcher's too when hooks are off), and a result for other
-    arguments is not taken."""
+    """/thimble's UserPromptExpansion hook runs outside Claude Code's Bash sandbox and prints nothing. For an action
+    that needs the server (fresh, restore, status, fix) it runs `up` there, and the skill's `up` in the sandbox prints
+    what the hook's did and starts nothing. With no result left for it, it names the exclusions that would run it
+    outside instead (the watcher's too when hooks are off), and a result for other arguments is not taken."""
     _healthy_no_process(monkeypatch)
     monkeypatch.setattr(cli, "_request", lambda m, u, b=None, timeout=5.0:
                         (201, {"name": Path(b["path"]).name}) if m == "POST" else (404, {}))
     folder = tmp_path / "calls"
     folder.mkdir()
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(folder))
-    hook = {"session_id": "s7", "cwd": str(folder), "command_name": "thimble:thimble", "command_args": ""}
+    hook = {"session_id": "s7", "cwd": str(folder), "command_name": "thimble:thimble", "command_args": "status"}
     assert cli.hook_up(json.dumps(hook)) == 0 and capsys.readouterr().out == ""
     started = []
     monkeypatch.setattr(cli, "ensure_running", lambda wait: started.append(1) or True)
     monkeypatch.setenv(cli.SANDBOX_ENV, "1")
-    skill = ["server", "up", "--cwd", str(folder), "--session", "s7", "--action", "", "--archive", ""]
-    assert cli.main(skill) == 0 and capsys.readouterr().out.splitlines() == [cli.LINK_LINE]
+    skill = ["server", "up", "--cwd", str(folder), "--session", "s7", "--action", "status", "--archive", ""]
+    assert cli.main(skill) == 0 and capsys.readouterr().out.startswith("thimble: ")
     assert cli.main(skill) == 0
     out = capsys.readouterr().out
     assert out.startswith("thimble: WARNING") and f'"{cli.sandbox_rule()}"' in out and started == []
@@ -963,43 +894,63 @@ def test_up_in_the_bash_sandbox_prints_what_the_hook_did_outside_it(home, data, 
     assert f'"{cli.sandbox_rule()}"' in out and f'"{cli.watch_rule()}"' in out and started == []
     settings.unlink()
     monkeypatch.delenv(cli.SANDBOX_ENV)
-    assert cli.hook_up(json.dumps(hook)) == 0 and started == [1]
+    assert cli.hook_up(json.dumps({**hook, "command_args": "fresh"})) == 0 and started == [1]
     started.clear()
     monkeypatch.setenv(cli.SANDBOX_ENV, "1")
-    assert cli.main([*skill[:-3], "fresh", "--archive", ""]) == 0
+    assert cli.main([*skill[:-3], "restore", "--archive", "x"]) == 0
     assert capsys.readouterr().out.startswith("thimble: WARNING") and started == []
 
+def test_slash_thimble_s_hook_turns_thimble_on_opens_the_browser_or_runs_up(home, monkeypatch, tmp_path):
+    """/thimble's hook (hook_up), outside the Bash sandbox: `/thimble` alone turns thimble on in the session
+    (activate.main with --via command and --hook: the session marker, no server, nothing printed); `/thimble open`
+    runs the press (open_cmd.main with --hook) and keeps its status line for the skill's `up`; another action runs `up`
+    and keeps its result for the skill's `up`. A hook input with no usable session id does nothing."""
+    from app import activate
 
-def test_slash_thimble_s_hook_leaves_the_session_s_marker_for_the_hooks_module(home, monkeypatch, tmp_path):
-    """/thimble's hook leaves <home>/up/<session>.active before its `up` runs, written anew at each /thimble: where an
-    organization manages Claude Code, the module's skill.prompt hook does not run, and the module turns on when it finds
-    a new marker at the end of main's turn (plugin/hooks/thimble.ts). The result for the skill's `up` is kept as before;
-    a hook input with no usable session id leaves nothing."""
-    seen = []
-
-    def up(args):
-        marker = cli.hook_marker_path(args.session)
-        seen.append(marker is not None and marker.is_file())
-        print(f"thimble: up {args.action}")
-
-    monkeypatch.setattr(cli, "cmd_server_up", up)
+    calls: list[tuple[str, list]] = []
+    monkeypatch.setattr(activate, "main", lambda argv: calls.append(("activate", argv)) or print("not shown") or 0)
+    monkeypatch.setattr(cli, "cmd_server_up", lambda args: calls.append(("up", [args.action])) or
+                        print(f"thimble: up {args.action}"))
     folder = tmp_path / "calls"
     folder.mkdir()
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(folder))
     hook = {"session_id": "s7", "cwd": str(folder), "command_name": "thimble:thimble", "command_args": ""}
     assert cli.hook_up(json.dumps(hook)) == 0
-    marker = home / "up" / "s7.active"
-    assert cli.hook_marker_path("s7") == marker and seen == [True], "the marker is there before `up` runs"
-    first = json.loads(marker.read_text("utf-8"))
-    assert first["cwd"] == str(folder) and first["action"] == ""
-    assert marker.parent.stat().st_mode & 0o077 == 0, "only its owner reads <home>/up"
+    assert calls == [("activate", ["activate", "--cwd", str(folder), "--session", "s7", "--via", "command", "--hook"])]
     assert cli.hook_up(json.dumps({**hook, "command_args": "status"})) == 0
-    second = json.loads(marker.read_text("utf-8"))
-    assert second["action"] == "status" and second["at"] > first["at"], "a new marker for each /thimble"
+    assert calls[-1] == ("up", ["status"])
     assert cli.take_hook_result("s7", folder, "status", "") == "thimble: up status\n"
-    assert marker.is_file(), "the skill's `up` takes the result and leaves the marker"
-    assert cli.hook_up(json.dumps({**hook, "session_id": "../"})) == 0 and len(seen) == 2
-    assert sorted(p.name for p in marker.parent.iterdir()) == ["s7.active"]
+    assert (home / "up").stat().st_mode & 0o077 == 0, "only its owner reads <home>/up"
+    calls.clear()
+    assert cli.hook_up(json.dumps({**hook, "session_id": "../"})) == 0 and calls == []
+    opened = {"ok": True, "port": 29999, "url": "http://127.0.0.1:29999/?ws=calls&ref=home", "opened": True,
+              "remote": False, "tunnel": None, "et": None, "link_file": None, "claim_file": "c", "proxy": False}
+    monkeypatch.setattr(cli, "run_open", lambda session, cwd, hook=False: calls.append(("open", [session, cwd, hook]))
+                        or opened)
+    assert cli.hook_up(json.dumps({**hook, "command_args": "open"})) == 0
+    assert calls == [("open", ["s7", str(folder), True])]
+    assert cli.take_hook_result("s7", folder, "open", "") == "thimble: opened in the browser · 127.0.0.1:29999\n"
+    remote = {**opened, "remote": True, "opened": False, "tunnel": "ssh -N -L 29999:127.0.0.1:29999 <your ssh host>",
+              "link_file": "/h/links/s7.json"}
+    [line] = cli.open_lines(remote)
+    assert "`ssh -N -L 29999:127.0.0.1:29999 <your ssh host>`" in line and "/h/links/s7.json" in line and "#p=" not in line
+    assert cli.open_lines(cli.OPEN_NOT_BUILT) == ["thimble: thimble open is not built yet wait for the browser lane"]
+
+
+def test_run_open_runs_the_press_in_process_and_reads_its_json(monkeypatch):
+    """run_open runs `thimble open --session --cwd [--hook] --json` (app/open_cmd.py, C12) in this process and returns
+    its JSON; before the browser lane builds it, the NOT_BUILT answer."""
+    import importlib.util  # noqa: PLC0415
+
+    if importlib.util.find_spec("app.open_cmd") is None:
+        assert cli.run_open("s7", "/w") == cli.OPEN_NOT_BUILT
+        return
+    from app import open_cmd  # noqa: PLC0415
+
+    seen = []
+    monkeypatch.setattr(open_cmd, "main", lambda argv: seen.append(argv) or print(json.dumps({"ok": True, "port": 1})))
+    assert cli.run_open("s7", "/w", hook=True) == {"ok": True, "port": 1}
+    assert seen == [["--session", "s7", "--cwd", "/w", "--hook", "--json"]]
 
 
 def test_the_doctor_says_when_the_analyst_s_own_sandbox_makes_a_folder_in_the_corpus(tmp_path, monkeypatch):
@@ -1123,7 +1074,7 @@ def checklist(text: str) -> list[tuple[str, str, str]]:
 def test_the_doctor_prints_a_checklist_a_person_can_read(home, monkeypatch, fake_claude, tmp_path, capsys):
     """`thimble doctor`: one line per area, ✓ or !, at most 80 characters, no internal names, and under each problem
     one line with its fix and where to run it; `--verbose` prints today's full text."""
-    from app import cc_settings, config, launch_mode
+    from app import cc_settings, config
 
     monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: False)
     monkeypatch.setattr(cli, "listening", lambda p: False)
@@ -1139,7 +1090,8 @@ def test_the_doctor_prints_a_checklist_a_person_can_read(home, monkeypatch, fake
     assert [mark for mark, _, _ in rows] == ["✓"] * 8, rows
     assert rows[0][1] == f"{cli._thimble_named()} · Claude Code {cli.TESTED_CLAUDE_CODE}"
     assert [line for _, line, _ in rows[1:]] == [
-        "Signed in to Claude", "Server not running (it starts with /thimble)", "Plugin on in Claude Code",
+        "Signed in to Claude", "Server not running (it starts when you press ↗ or type /thimble open)",
+        "Plugin on in Claude Code",
         "Claude Code's sandbox: off (optional)", rows[5][1], "Views and screenshots ready",
         "thimble's agents start after /thimble here"]
     assert rows[5][1].startswith("Card code runs")
@@ -1148,7 +1100,7 @@ def test_the_doctor_prints_a_checklist_a_person_can_read(home, monkeypatch, fake
     monkeypatch.setattr(cli, "listening", lambda p: True)
     monkeypatch.setattr(cli, "stuck_server", lambda url=None: None)
     assert ("✓", "") == {line: (mark, fix) for mark, line, fix in checklist(cli.doctor_check_text(corpus))}[
-        "Server not running (it starts with /thimble)"]
+        "Server not running (it starts when you press ↗ or type /thimble open)"]
     # the port THIMBLE_PORT names taken by another program; not signed in; the plugin off; Claude Code's sandbox set
     # but unable to run
     monkeypatch.setenv("THIMBLE_PORT", "21101")
@@ -1166,16 +1118,15 @@ def test_the_doctor_prints_a_checklist_a_person_can_read(home, monkeypatch, fake
     assert ("!", "In a shell: thimble server restart") in [
         (m, f) for m, line, f in checklist(cli.doctor_check_text(corpus)) if line == "The server is stuck (pid 4242)"]
 
-    # terminal mode with no sandbox for its views; the plugin of another install; a problem past 80 characters
-    launch_mode.set_folder(corpus, "terminal")
-    monkeypatch.setattr(cli, "terminal_views_wrap", lambda: "")
+    # server.json readable by others; the plugin of another install; a problem past 80 characters
+    cli.write_state({"port": 1})
+    cli.server_json().chmod(0o644)
     monkeypatch.setattr(cli, "plugin_facts", lambda cwd: cli.PluginFacts("other", "0.7.0", True, False, None, False,
                                                                           "/opt/thimble"))
     monkeypatch.setattr(cli, "_version_check", lambda: cli.Check(False, "word " * 30, "In a shell: " + "x " * 60))
     rows = checklist(cli.doctor_check_text(corpus))
     lines = {line: (mark, fix) for mark, line, fix in rows}
-    assert lines["Terminal mode can't show views: no sandbox for them here"] == (
-        "!", "thimble doctor --verbose names the commands that install bubblewrap")
+    assert lines["thimble's token file is readable by other accounts"] == ("!", "In a shell: thimble server restart")
     assert lines["Another install's plugin is on"] == ("!", "thimble doctor --verbose names the commands that switch it")
     assert rows[0][1].endswith("…") and rows[0][2].endswith("…"), "cut at a word"
     monkeypatch.setattr(cc_settings, "own_sandbox", lambda cwd: False)
@@ -1238,8 +1189,11 @@ def test_installed_copy_takes_any_thimble_plugin_of_this_install_and_notes_one_t
     import shutil as sh
 
     cache = tmp_path / "cc" / "plugins" / "cache" / "thimble" / "thimble" / "0.8.0"
-    sh.copytree(cli.PLUGIN_DIR, cache, ignore=sh.ignore_patterns("thimble.test.ts", "types", "tsconfig.json",
-                                                                   "__pycache__", "node_modules"))
+    # what a release's plugin/ holds (scripts/release.sh: no test of the hooks module), as Claude Code's cache keeps it
+    sh.copytree(cli.PLUGIN_DIR, cache, ignore=lambda d, names: [
+        n for n in names if n.endswith(".test.ts") or n in ("__pycache__", "node_modules")
+        or (n == "tests" and Path(d).name in ("hooks", "term")) or (n == "types" and Path(d).name == ".claude-plugin")
+        or (n == "tsconfig.json" and Path(d) == cli.PLUGIN_DIR)])
     (cache / "bin" / "thimble-app-dir").write_text(f'#!/bin/sh\necho "{config.REPO_ROOT}"\n')
     (cache / "bin" / "thimble-app-dir").chmod(0o755)
     path = tmp_path / "path"

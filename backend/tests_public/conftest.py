@@ -485,7 +485,8 @@ def _no_backoff_wait(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _no_plugin_list(monkeypatch):
-    """launch_args asks `claude plugin list` which plugin copy main loads (cli.installed_copy). Tests load plugin/."""
+    """launch_args asks `claude plugin list` which plugin copy the session loads (cli.installed_copy). Tests load
+    plugin/."""
     from app import cli
 
     monkeypatch.setattr(cli, "installed_copy", lambda cwd: None)
@@ -493,15 +494,11 @@ def _no_plugin_list(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _launch_writes_nothing_shared(monkeypatch):
-    """launch_args registers its folder (cli.register_here), starts thimble's server (cli.server_for_launch) and finds
-    the workspace's extensions again through it (cli.refresh_extensions). In a test it registers nothing, so the suite's
-    shared data folder gains no corpus, and starts and reaches no server: the default port may be a live server's. A
-    test of any of them replaces it again."""
+    """Activation registers its folder (cli.register_here). In a test it registers nothing, so the suite's shared data
+    folder gains no corpus. A test of it replaces it again."""
     from app import cli, config
 
     monkeypatch.setattr(cli, "register_here", lambda cwd: config.workspace_for_cwd(str(cwd)))
-    monkeypatch.setattr(cli, "server_for_launch", lambda c: [])
-    monkeypatch.setattr(cli, "refresh_extensions", lambda c: None)
 
 
 def _port_of(url: str | None, default: int) -> int:
@@ -575,7 +572,7 @@ def data_tmp(tmp_path, monkeypatch):
 @pytest.fixture()
 def home(tmp_path, monkeypatch):
     """A scratch THIMBLE_HOME and Claude Code config dir, a stand-in UI build, and no adoption of a real server: the
-    default port may be a live server's. `up` runs as in a session the launcher started."""
+    default port may be a live server's."""
     from app import cli, config
 
     monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "home"))
@@ -587,7 +584,6 @@ def home(tmp_path, monkeypatch):
     (tmp_path / "ui-dist" / "index.html").write_text("<html></html>")
     monkeypatch.setenv("THIMBLE_FRONTEND_DIST", str(tmp_path / "ui-dist"))
     monkeypatch.setattr(config, "FRONTEND_DIST", tmp_path / "ui-dist")
-    monkeypatch.setenv(cli.LAUNCHED_ENV, "1")
     monkeypatch.setattr(cli, "health_leader", lambda url=None: None)
     monkeypatch.setattr(cli, "foreign_home", lambda url=None: None)  # nor refuses one: another test covers that
     monkeypatch.setattr(cli, "port_free", lambda p: True)  # nor passes over a live server's port (test_port.py does)
