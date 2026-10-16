@@ -135,7 +135,7 @@ test('a card a thread was asked about keeps a blue ↳ beside its title; a click
   await pane.unmount()
 })
 
-test("the footer under a turn's answer: its citations and cards dim, its problems in red, and `ask about this answer ›`; only the answer part counts", async ($, on) => {
+test("the footer under a turn's answer: its citations and cards dim, `N failed` in red, and `ask about this answer ›`; only the answer part counts", async ($, on) => {
   const w = world(on)
   await start($, w)
   // a label's link (`[9,400](concept:<id>/none)`) is neither a citation nor a problem (live check term-fix6, new quirk 1)
@@ -154,11 +154,12 @@ test("the footer under a turn's answer: its citations and cards dim, its problem
   const ui = (await $.ui.mount(MESSAGE('r1', answer))) as unknown as M
   const footer = await ui.drawn({ in: 'footer-r1' } as never).catch(async () => (await ui.find({ key: 'footer-r1' })) as unknown)
   const text = shown(footer)
-  expect(text).toContain('2 citations · 1 card')
-  expect(text).toContain(' · 1 problem')
+  expect(text).toContain('2 citations · 1 card · 1 failed')
+  expect(text).not.toContain('problem')
+  expect(text).not.toContain('checking')
   expect(text).toContain('ask about this answer ›')
   expect(text).not.toContain('open as report')
-  expect(JSON.stringify(footer)).toContain('{"type":"Text","props":{"color":"error"},"children":[" · 1 problem"]}')
+  expect(JSON.stringify(footer)).toContain('{"type":"Text","props":{"color":"error"},"children":["1 failed"]}')
   await ui.press({ key: 'ask-answer-r1' })
   await ui.unmount()
   let pane = (await $.ui.mount(PANE)) as unknown as M
@@ -181,6 +182,33 @@ test("the footer under a turn's answer: its citations and cards dim, its problem
   await w.clock.settle()
   // a thread about the whole answer is marked so (its element), and keeps `about this answer` in the threads panel
   expect(w.acts.find(a => a.kind === 'thread')!.payload).toMatchObject({ anchor: null, anchor_text: 'The export holds 4579 pages and 14592 revisions, 9,400 of them without a proxy link.', element: 'answer' })
+  await pane.unmount()
+})
+
+test("the footer says `◌ checking N` while its citations are checked, no `failed` when none failed; a press on `N failed` opens the panel's Citations view", async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  const answer = 'The export holds [[4579|card:ff73e071#pages/TOTAL]] pages and [[14592|card:ff73e071#revisions/TOTAL]] revisions.'
+  w.toolText = 'card:ff73e071\n[out0: table]'
+  await $.turn.start({ text: 'How big?', turnId: 't1' } as never)
+  await append($, 'r1', [{ type: 'text', text: answer }])
+  await $.turn.complete({ turnId: 't1', answer, durationMs: 5, reason: 'answer', isAborted: false } as never)
+  // before the batch that checks them: both checking, nothing failed
+  let ui = (await $.ui.mount(MESSAGE('r1', answer))) as unknown as M
+  let text = shown(await ui.find({ key: 'footer-r1' }))
+  expect(text).toContain('2 citations · ◌ checking 2')
+  expect(text).not.toContain('failed')
+  await ui.unmount()
+  await w.clock.advance(300)
+  ui = (await $.ui.mount(MESSAGE('r1', answer))) as unknown as M
+  text = shown(await ui.find({ key: 'footer-r1' }))
+  expect(text).not.toContain('checking')
+  expect(text).toContain('2 citations · 1 failed')
+  await ui.press({ key: 'failed-r1' })
+  await ui.unmount()
+  await w.clock.settle()
+  const pane = (await $.ui.mount(PANE)) as unknown as M
+  expect(shown(await pane.drawn())).toContain('Citations')
   await pane.unmount()
 })
 
