@@ -10,7 +10,10 @@
 // chat the notice is also a row (NoticeRow), the same words without buttons, kept as a quiet line of the chat's history
 // once the notice is closed; while it is open the strip shows it there, and an earlier closed row under its key in the
 // same words waits too, so the words show once. The Manual-mode notice (kind `manual-mode`,
-// while main runs in Claude Code's Manual mode) is drawn in the problem red instead (styles/chat.css).
+// while main runs in Claude Code's Manual mode) is drawn in the problem red instead (styles/chat.css). The strip also
+// tells of new comments, which are no failure: one notice in the accent's colors (NewCommentsNotice, kind `comments`)
+// says how many comments the checks that are on left since the analyst last looked, and on what, with Show, which
+// opens the first of them, and × (report/newComments.ts); this page makes it, so the server holds no such notice.
 import { useState, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
@@ -18,10 +21,14 @@ import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { dismissNotice, noticeActions, useNotices, useNoticesRead, usePageNotices } from '../lib/notices'
 import { refreshProposals } from '../lib/proposals'
+import { useChecks } from '../report/Checks'
+import { CANVAS } from '../report/checkComments'
+import { newCommentsText, surfaceName, useNewComments, type NewComments } from '../report/newComments'
 import { track } from '../lib/telemetry'
 import type { Notice, NoticeAction } from '../lib/types'
 import type { NoticeRow as NoticeRowT } from './model'
 import { proposalsOff } from './ProposalCard'
+import { useDocLabels } from './SurfaceChips'
 
 /** The actions a notice's button can run; one with another `do` shows no button. */
 export const NOTICE_DOS: readonly string[] = ['proposals-retry', 'proposals-off', 'settings', 'view-retry', 'sign-out']
@@ -148,15 +155,43 @@ function ForegroundNotice({ ws, notice, current, agent, onOpen }: { ws: string; 
  * is shown, whose API error card main's chat shows with its fix (backend notices.API). Pure. */
 export const stripShows = (n: Pick<Notice, 'kind' | 'chat'>, current: string): boolean => !(n.kind === 'api' && n.chat === current)
 
-/** Every open notice of the workspace, above the composer of the chat shown (`current`), oldest first. */
+/** The new comments of the checks that are on, in one notice: how many and on what (newCommentsText), Show, which
+ * opens the first surface they are on at its first new comment, and ×. Both clear what they cover; so does opening one
+ * of the comments on the page. */
+export function NewCommentsNotice({ ws, news }: { ws: string; news: NewComments }) {
+  const docs = news.runs.map((r) => r.surface).filter((s) => s !== CANVAS)
+  const label = useDocLabels(ws, docs)
+  return (
+    <div className="chat-notice" role="status" data-notice="comments" data-kind="comments">
+      <Icon name="comment" size={13} className="chat-notice-ico" />
+      <div className="chat-notice-body">
+        <NoticeWords
+          agent=""
+          text={newCommentsText(news.runs, (s) => surfaceName(s, label(s)))}
+          after={
+            <button type="button" className="chat-notice-open" onClick={news.show}>
+              Show
+            </button>
+          }
+        />
+      </div>
+      <Button variant="icon" size="sm" icon="x" title="Dismiss" aria-label="Dismiss" className="chat-notice-x" onClick={news.dismiss} />
+    </div>
+  )
+}
+
+/** Every open notice of the workspace, above the composer of the chat shown (`current`), oldest first, then the new
+ * comments' notice. */
 export function NoticeStrip({ ws, current, labels, onOpen }: { ws: string; current: string; labels?: ReadonlyMap<string, string>; onOpen: (chat: string) => void }) {
   const notices = useNotices(ws).filter((n) => stripShows(n, current))
-  if (!notices.length) return null
+  const news = useNewComments(ws, useChecks(ws))
+  if (!notices.length && !news.runs.length) return null
   return (
     <div className="chat-notices" role="region" aria-label="Notices">
       {notices.map((n) => (
         <ForegroundNotice key={n.key || n.id} ws={ws} notice={n} current={current} agent={noticeAgent(n, labels)} onOpen={onOpen} />
       ))}
+      {news.runs.length > 0 && <NewCommentsNotice ws={ws} news={news} />}
     </div>
   )
 }

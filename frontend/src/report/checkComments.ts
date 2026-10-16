@@ -33,6 +33,8 @@ export interface DocComment {
   span: string[]
   /** the check whose run left it; null for the analyst's own and for Claude's notes */
   check: string | null
+  /** that run (a check's comment only) */
+  run?: string | null
   text: string
   author: string
   /** the refs the check's comment rests on */
@@ -79,7 +81,7 @@ export function openComments(comments: readonly WriteupComment[] | undefined, se
     const check = commentCheck(cm)
     if (check === UNVERIFIED) marked.add(sid)
     const span = cm.paragraph ? [...(paragraphs.get(sid) ?? [sid])] : [sid]
-    out.push({ id: cm.id, sid, span, check, text, author: cm.author, evidence: evidenceRefs(cm.evidence), tag: false, details: String(cm.details ?? '').trim() })
+    out.push({ id: cm.id, sid, span, check, run: cm.run ?? null, text, author: cm.author, evidence: evidenceRefs(cm.evidence), tag: false, details: String(cm.details ?? '').trim() })
   }
   for (const s of sentences) {
     if (!(s.tags ?? []).includes('unverified') || marked.has(s.id)) continue

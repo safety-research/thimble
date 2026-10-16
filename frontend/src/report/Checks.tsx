@@ -25,6 +25,7 @@ import { refusalLine } from '../chat/Refused'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { useDock, useFoldingSide, type FoldingSide } from '../shell/dock'
 import { sideKey } from './cards'
+import { PANE_KEY, useReveal } from './newComments'
 import { CANVAS, checkColour, checkLook, checksFor, countsByCheck, freeColour, nameTaken, rowCount, runLine, runOf, shownIds, withCheck, withRun, withShown, type CheckLook } from './checkComments'
 import { Chevron, Glyph, IconButton } from './icons'
 
@@ -33,6 +34,8 @@ const REFETCH_DEBOUNCE_MS = 150
 export interface Checks {
   /** every check, the built-ins first, as the server lists them */
   list: readonly Check[]
+  /** the server answered the list for this workspace at least once */
+  ready: boolean
   /** the ids of the checks that are on */
   on: ReadonlySet<string>
   /** how the page draws a check's comments: colour, name, place in the pane */
@@ -51,6 +54,7 @@ const toast = (what: string, e: unknown) => bus.emit('toast', { text: `${what} $
 /** The workspace's checks, read again when the stream says a run started or ended or a check changed. */
 export function useChecks(ws: string): Checks {
   const [list, setList] = useState<Check[]>([])
+  const [ready, setReady] = useState(false)
   const current = useRef<Check[]>(list)
   const put = useCallback((next: Check[]) => {
     current.current = next
@@ -63,7 +67,12 @@ export function useChecks(ws: string): Checks {
     const read = () =>
       checksApi
         .list(ws)
-        .then((l) => live && put(l))
+        .then((l) => {
+          if (!live) return
+          // the chat's notice strip reads the checks too: an odd answer leaves it standing
+          put(Array.isArray(l) ? l : [])
+          setReady(true)
+        })
         .catch(() => {
           /* the pane stands empty; the page still shows the analyst's own comments */
         })
@@ -72,6 +81,7 @@ export function useChecks(ws: string): Checks {
       timer = window.setTimeout(() => void read(), REFETCH_DEBOUNCE_MS)
     }
     put([])
+    setReady(false)
     void read()
     const offs = [
       // the run's state at once, then the list for what the run changed (its count, its line, a check main made)
@@ -142,7 +152,7 @@ export function useChecks(ws: string): Checks {
 
   const on = useMemo(() => shownIds(list), [list])
   const look = useMemo(() => checkLook(list), [list])
-  return { list, on, look, toggle, create, editPrompt }
+  return { list, ready, on, look, toggle, create, editPrompt }
 }
 
 /** The passages that changed since a run checked them (the analyst's own edits), while it does not run. Pure. */
@@ -244,8 +254,13 @@ export interface CommentsPaneProps {
 /** The Comments pane beside a document: its head (the count of comments shown, + for a new check, the sidebar's hide
  * toggle) and the rows of the checks that cover the documents. */
 export function CommentsPane({ ws, doc, checks, comments, onHide }: CommentsPaneProps) {
-  const key = storageKey(ws, 'report-checks-pane')
+  const key = storageKey(ws, PANE_KEY)
   const [open, setOpen] = useState<boolean>(() => readStorage<boolean>(key, true) !== false)
+  // the new comments notice's Show opens the pane (newComments.revealComments)
+  const reveal = useReveal(ws, doc)
+  useEffect(() => {
+    if (reveal) setOpen(true)
+  }, [reveal])
   const [adding, setAdding] = useState<HTMLElement | null>(null)
   const head = useRef<HTMLDivElement | null>(null)
   const list = useMemo(() => checksFor(checks.list, doc), [checks.list, doc])
