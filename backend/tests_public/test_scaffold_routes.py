@@ -113,8 +113,8 @@ def test_coverage_label_unsure_and_answer_comments_answer_their_stubs(setup):
         {"path": "/elsewhere/b.jsonl", "how": "whole", "by": "Read", "at": 4.0}]}
     got = answer(run(env, corpus, "act", "coverage", "--cwd", str(corpus), "--stdin", stdin=json.dumps(facts)))
     # the features lane's coverage (C7): with no index yet, the files the facts name; src/a.py and a path outside
-    # the corpus are dropped (the line in the owner's seen/searched words, 10-16)
-    assert got["ok"] is True and got["summary"]["line"] == "seen 1 file" and got["counting"] is True
+    # the corpus are dropped (the line in the owner's read/searched words, 10-16)
+    assert got["ok"] is True and got["summary"]["line"] == "read 1 file" and got["counting"] is True
     assert got["summary"]["files"]["seen"] == 1 and got["summary"]["records"]["counted"] is False
     state = answer(run(env, corpus, "state", "coverage", "--cwd", str(corpus), "--session", SID))
     assert state["summary"]["files"]["seen"] == 1 and state["folder"] == "" and isinstance(state["rows"], list)

@@ -1,4 +1,4 @@
-"""Coverage: what this session's tool calls saw or searched in the corpus.
+"""Coverage: what Claude read or searched in the corpus in this session, by its tool calls.
 
 The terminal UI's tracker (plugin/hooks/term/tracker.ts) notes a fact for each file a tool call of main or of its
 subagents touched, and at the end of each turn that has facts it runs `thimble act coverage --stdin` once with them as
@@ -17,39 +17,45 @@ those and, beside them, the corpus's other non-code files (images, audio, video,
 config, never a hidden file, a database's side file or a file without an extension, and inside a code tree only under a
 data folder.
 
-Units. unit_of decides what a file counts, by its type: `records` for the files thimble reads as rows or lines
-(RECORD_EXTS: JSON Lines, CSV, logs, text, SQLite tables), `files` for every other file of the universe (images, video,
-binaries, PDF and other documents). A row of the Coverage view holds files of one type, so it counts in one unit, and no
-number adds records to files.
+Units. unit_of decides what a file counts, by its type: `lines` for line-based text (LINE_EXTS: JSON Lines, CSV, TSV,
+logs, text, subtitles), every line of the file as an editor numbers them; `entries` for a JSON document's values and a
+database's rows (ENTRY_EXTS): the items of an array at a document's top, else the values of its object (the items of its
+arrays of objects where it has any, as records.py splits a document into records), and the rows of every table a
+database holds; `files` for every other file of the universe (images, video, binaries, PDF, Markdown, HTML, and formats
+nothing counts, such as parquet). A row of the Coverage view holds files of one type, so it counts in one unit, and no
+number adds two units. count_file counts a file in its unit.
 
 The index. A detached job (`python -m app.coverage index --cwd <corpus>`, under `flock <ws>/coverage/index.lock`, as
 `nice -n 19 ionice -c3` where those exist) walks the corpus (corpus_walk.walk), keeps one row per file of the universe
-in `<ws>/coverage/index.sqlite` keyed by (path, size, mtime) with its name pattern (name_pattern), and a totals table per
-(folder prefix at each depth, extension) with its files, bytes, records and the one name pattern its files share. A file
-that counts files gets 0 records at once; the job then counts the records of the others (records.count), one (folder,
-extension) group at a time, adding each group's records to the totals as it finishes and touching `<ws>/coverage/` so
-the terminal UI reads the summary again. A refresh stats again only the files of a folder whose listing changed, and in
-the other folders only the files that hold records (lines are added to them in place); it counts only the files whose
-size or mtime changed. A file that cannot be counted counts 0 records, and the job posts the `coverage:count` notice. An
-index of an earlier form (SCHEMA) is built again.
+in `<ws>/coverage/index.sqlite` keyed by (path, size, mtime) with its name pattern (name_pattern), and a totals table
+per (folder prefix at each depth, extension) with its files, bytes, count (`records`: lines or entries) and the one name
+pattern its files share. A file that counts files gets 0 at once; the job then counts the lines or entries of the others
+(count_file), one (folder, extension) group at a time, adding each group's count to the totals as it finishes and
+touching `<ws>/coverage/` so the terminal UI reads the summary again. A refresh stats again only the files of a folder
+whose listing changed, and in the other folders only the files of lines or entries (lines are added to them in place);
+it counts only the files whose size or mtime changed. A file that cannot be counted counts 0, and the job posts the
+`coverage:count` notice. An index of an earlier form (SCHEMA) is built again.
 
 Requests never walk or count: summary and level read the index alone, and start the job (once, under its lock) when the
 index is missing or was walked more than STALE_S ago. With no index yet the summary counts files from the facts only and
 says `counting`.
 
-Per file: `seen` when a `whole` or `part` fact names it; else `searched` when a `searched` fact names it or a folder
-fact is above it; else neither. Records seen: all of a `whole` file's, the union of a `part` file's line ranges (a
-line-based file) or page ranges (a PDF) within its records, else none. Records searched: all records of a searched file,
-and the records of a file seen in part that a search also touched, less the records seen. The reads of cards made since
-the session was turned on (`cell.reads`, the notebook's audit) and the files of labels run since then count as searched.
+Per file: read (`seen` in the rows and totals) when a `whole` or `part` fact names it: it entered Claude's context;
+else `searched` when a `searched` fact names it or a folder fact is above it: a search ran over it and only its matches
+came back; else neither. Lines or entries read: all of a `whole` file's, the union of a `part` file's line ranges within
+its lines (a line-based file), else none. Searched: all of a searched file's, and those of a file read in part that a
+search also touched, less those read. The reads of cards made since the session was turned on (`cell.reads`, the
+notebook's audit) and the files of labels run since then count as searched. The rows' and totals' `records_*` fields and
+the index's `records` column hold a count in the row's unit, lines or entries.
 
 Rows (level): at a level with FILE_ROWS files or fewer, one row per file (seen, then searched, then the others, by
 name). Otherwise one row per (folder right under the level, extension), which drills into that folder (a folder that
 holds only one folder and no file names the deeper folder); and the files right in the level: siblings that share a
 name pattern (PATTERN_MIN or more) are one row by their glob (`agent-*.jsonl`), the rest one row each when FILE_ROWS or
 fewer, else one row per type (a type of one file is its file's row). A pattern's or a type's row drills into its files.
-Every group is listed, the one of the most files first (then by size); a list of more than LIST_MAX rows says how many it leaves out (`more`). The totals
-(summary `totals`) hold the corpus's denominators per unit.
+Every group is listed, the one of the most files first (then by size); a list of more than LIST_MAX rows says how many
+it leaves out (`more`). The totals (summary `totals`) hold the corpus's denominators, one entry per unit it has: lines,
+entries, files.
 """
 from __future__ import annotations
 
@@ -79,7 +85,7 @@ log = logging.getLogger("thimble.coverage")
 DIR = "coverage"  # under the workspace
 INDEX = "index.sqlite"
 LOCK = "index.lock"
-SCHEMA = "3"  # the index's form: files with their name pattern (a uuid one part), totals with their shared pattern, folders' mtimes
+SCHEMA = "4"  # the index's form: files with their name pattern and count (lines or entries), totals, folders' mtimes
 STALE_S = 60.0  # a request starts the job when the index was walked longer ago than this
 START_DEBOUNCE_S = 5.0  # a process starts the job at most once in this long
 FILE_ROWS = 20  # at a level with this many files or fewer, the rows are files
@@ -89,9 +95,10 @@ NO_EXT = "(none)"
 SID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 HOWS = ("whole", "part", "searched")
 BYS = ("Read", "Bash", "search", "agent")
-UNITS = ("records", "files")
+UNITS = ("lines", "entries", "files")  # in the totals' order
+COUNTED = ("lines", "entries")  # the units the job counts; a file of the others counts itself
 COUNT_NOTICE = "coverage:count"  # the notice of files the job could not count (module note)
-COUNT_TEXT = "thimble could not count the records of {n} files: {reason}"
+COUNT_TEXT = "thimble could not count the lines or entries of {n}: {reason}"
 RETRY_ACT = "coverage-retry"  # the notice's act that starts the job again
 
 # The data rule (module note). The trigger's lists (plugin/hooks/term/activate.ts) and these are one rule.
@@ -106,12 +113,13 @@ NEVER_NAMES = ("package*.json", "tsconfig*.json", "*.lock", "composer.json", ".e
 DATA_SEGMENTS = frozenset("data datasets runs transcripts traces corpus corpora".split())
 CODE_TREE_MARKS = (".git", "package.json", "pyproject.toml", "setup.py", "Cargo.toml", "go.mod", "pom.xml",
                    "build.gradle", "Gemfile", "composer.json")
-LINE_READERS = ("lines", "csv")  # the readers whose records are lines, so a `part` fact's line range counts records
 # The universe beyond the data rule (module note): never these types, which are code, notebooks or build leftovers.
 NOT_CORPUS_EXTS = CODE_EXTS | frozenset("ipynb pyc pyo class o swp".split())
 DB_SIDE = re.compile(r"\.(db|sqlite|sqlite3)-(wal|shm|journal)$", re.I)
-# The types that count records (module note): those thimble reads as rows or lines.
-RECORD_EXTS = frozenset("jsonl ndjson json csv tsv log txt vtt srt db sqlite sqlite3".split())
+# The units' types (module note): line-based text counts lines; a JSON document and a database count entries.
+LINE_EXTS = frozenset("jsonl ndjson csv tsv log txt vtt srt".split())
+ENTRY_EXTS = frozenset("json db sqlite sqlite3".split())
+DB_EXTS = frozenset("db sqlite sqlite3".split())
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -178,10 +186,110 @@ def in_universe(rel: str, code_tree: bool) -> bool:
 
 
 def unit_of(rel_or_ext: str) -> str:
-    """What a file counts, by its type (module note): `records` or `files`. Takes a path, a name or an extension."""
+    """What a file counts, by its type (module note): `lines`, `entries` or `files`. Takes a path, a name or an
+    extension."""
     s = str(rel_or_ext or "")
     ext = ext_of(s) if ("." in s.rsplit("/", 1)[-1].lstrip(".") or "/" in s) else s.lower().lstrip(".")
-    return "records" if ext in RECORD_EXTS else "files"
+    return "lines" if ext in LINE_EXTS else "entries" if ext in ENTRY_EXTS else "files"
+
+
+# a JSON document's parts: a string (its escapes kept inside), one of the six marks, or a run of another value's bytes
+_JSON_PARTS = re.compile(rb'"[^"\\]*(?:\\.[^"\\]*)*"|[\[\]{},:]|[^\s\[\]{},:"]+', re.S)
+_OPEN_A, _CLOSE_A, _OPEN_O, _CLOSE_O, _COLON = 0x5B, 0x5D, 0x7B, 0x7D, 0x3A
+
+
+def json_entries(buf: Any) -> int | None:
+    """The entries of one JSON document in `buf` (bytes or an mmap), in one scan whatever its size: the items of an
+    array at its top; else the values of its object, or, where any of its values is an array whose first item is an
+    object or an array, the items of those arrays (records.py `_build_json` splits a document so); 1 for a scalar. None
+    when `buf` holds no value or more than one, or ends inside one."""
+    depth = 0
+    top: int | None = None  # the opening byte of the top value, or 0 for a scalar
+    done = False
+    children = 0
+    items = 0  # the items of the top object's arrays of objects or arrays
+    nested = False
+    in_array = False  # inside an array that is a value of the top object
+    count = 0
+    first: bool | None = None  # whether that array's first item is an object or an array
+    for m in _JSON_PARTS.finditer(buf):
+        b = buf[m.start()]
+        if isinstance(b, (bytes, bytearray)):
+            b = b[0]
+        if done:
+            return None
+        if depth == 0:
+            if b in (_OPEN_A, _OPEN_O):
+                top, depth = b, 1
+            elif b in (_CLOSE_A, _CLOSE_O, 0x2C, _COLON):
+                return None
+            else:
+                top, done = 0, True
+            continue
+        if b in (_OPEN_A, _OPEN_O):
+            if depth == 1:
+                if top == _OPEN_A:
+                    children += 1
+                elif b == _OPEN_A:
+                    in_array, count, first = True, 0, None
+            elif depth == 2 and in_array:
+                count += 1
+                if first is None:
+                    first = True
+            depth += 1
+        elif b in (_CLOSE_A, _CLOSE_O):
+            depth -= 1
+            if depth == 1 and in_array:
+                if first:
+                    nested, items = True, items + count
+                in_array = False
+            elif depth == 0:
+                done = True
+        elif b == _COLON:
+            if depth == 1 and top == _OPEN_O:
+                children += 1
+        elif b != 0x2C:  # a string, a number, true, false or null
+            if depth == 1 and top == _OPEN_A:
+                children += 1
+            elif depth == 2 and in_array:
+                count += 1
+                if first is None:
+                    first = False
+    if not done:
+        return None
+    if top == 0:
+        return 1
+    return items if top == _OPEN_O and nested else children
+
+
+def _value_lines(path: Path) -> int:
+    """The lines of a file that hold anything but white space: the values of a .json file of one value a line."""
+    n = 0
+    with open(path, "rb") as f:
+        for line in f:
+            if line.strip():
+                n += 1
+    return n
+
+
+def count_file(full: Path, rel: str, unit: str) -> int:
+    """A file's count in its unit (module note): its lines, or its entries (a JSON document's values, a database's
+    rows); 0 for a file of the `files` unit and for a binary file of a text type."""
+    from . import corpus, records  # noqa: PLC0415
+
+    if unit == "lines":
+        return 0 if corpus.sniff_binary(full) else corpus.line_count(full)
+    if unit != "entries":
+        return 0
+    if ext_of(rel) in DB_EXTS:
+        return int(records.count(full, rel))
+    if full.stat().st_size == 0 or corpus.sniff_binary(full):
+        return 0
+    import mmap  # noqa: PLC0415
+
+    with open(full, "rb") as f, mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+        n = json_entries(mm)
+    return _value_lines(full) if n is None else n
 
 
 _NAME_PART = re.compile(r"([^A-Za-z0-9]+)")
@@ -531,7 +639,7 @@ def job_argv(root: Path) -> list[str]:
 
 def feature_on(c: str) -> bool:
     """Whether the Coverage feature switch is on in workspace `c` (features.auto `coverage`): off, no fact is kept and
-    no index job counts records."""
+    no index job counts lines or entries."""
     from . import features  # noqa: PLC0415
 
     try:
@@ -577,7 +685,7 @@ def _fresh_or_start(c: str, conn: sqlite3.Connection | None) -> bool:
 
 def _file_row(root: Path, path: str, folder: str, name: str) -> tuple | None:
     """The index row of one file from a stat: (path, folder, ext, size, mtime_ns, records, pattern), records 0 for a
-    file that counts files and None (to count) for one that counts records; None when it is no regular file."""
+    file that counts files and None (to count) for one that counts lines or entries; None when it is no regular file."""
     try:
         st = _stat(root / path)
     except OSError:
@@ -585,14 +693,14 @@ def _file_row(root: Path, path: str, folder: str, name: str) -> tuple | None:
     if not stat_mod.S_ISREG(st.st_mode):
         return None
     ext = ext_of(name)
-    return (path, folder, ext, int(st.st_size), int(st.st_mtime_ns), None if unit_of(ext) == "records" else 0,
+    return (path, folder, ext, int(st.st_size), int(st.st_mtime_ns), None if unit_of(ext) in COUNTED else 0,
             name_pattern(name))
 
 
 def refresh(c: str, root: Path, conn: sqlite3.Connection) -> int:
-    """One walk into the index (module note): new and changed files in (those that count records uncounted), gone
-    files and folders out, a folder whose listing did not change stat'ed only for its files that hold records; the
-    totals made again when anything changed. How many rows changed."""
+    """One walk into the index (module note): new and changed files in (those that count lines or entries uncounted),
+    gone files and folders out, a folder whose listing did not change stat'ed only for its files of lines or entries;
+    the totals made again when anything changed. How many rows changed."""
     from . import corpus_walk  # noqa: PLC0415
 
     tree = code_tree(root)
@@ -672,23 +780,20 @@ def _touch(d: Path) -> None:
 
 
 def count_groups(c: str, root: Path, conn: sqlite3.Connection, d: Path | None = None) -> list[tuple[str, str]]:
-    """Count the records of every file not yet counted, one (folder, extension) group at a time: each group's rows and
-    its totals written in one transaction, then the coverage folder touched. [(path, why)] of the files that could not
-    be counted (counted as 0 records)."""
-    from . import records  # noqa: PLC0415
-
+    """Count the lines or entries of every file not yet counted (count_file), one (folder, extension) group at a time:
+    each group's rows and its totals written in one transaction, then the coverage folder touched. [(path, why)] of the
+    files that could not be counted (counted as 0)."""
     failed: list[tuple[str, str]] = []
     groups = conn.execute("SELECT DISTINCT folder, ext FROM files WHERE records IS NULL ORDER BY folder, ext").fetchall()
     for folder, ext in groups:
         rows = conn.execute("SELECT path FROM files WHERE folder = ? AND ext = ? AND records IS NULL", (folder, ext)).fetchall()
+        unit = unit_of(str(ext))
         done: list[tuple[int, str | None, str | None, str]] = []
         for (path,) in rows:
             full = root / path
             try:
-                reader = records.reader_of(full, path)
-                n = int(records.count(full, path)) if reader is not None else 0
-                done.append((n, reader, None, path))
-            except Exception as e:  # noqa: BLE001 — a file that cannot be counted counts 0 records
+                done.append((int(count_file(full, path, unit)), unit, None, path))
+            except Exception as e:  # noqa: BLE001 — a file that cannot be counted counts 0
                 why = f"{type(e).__name__}: {e}"[:200]
                 done.append((0, None, why, path))
                 failed.append((path, why))
@@ -712,8 +817,9 @@ def _count_notice(c: str, failed: list[tuple[str, str]]) -> None:
         if failed:
             # the act needs notices.ACTIONS and local.NOTICE_ACTS to know it (runtime lane); until then only dismiss
             act = [{"label": "Try again", "do": RETRY_ACT}] if RETRY_ACT in notices.ACTIONS else None
-            notices.post(c, kind="coverage", text=COUNT_TEXT.format(n=f"{len(failed):,}", reason=failed[0][1]),
-                         action=act, key=COUNT_NOTICE)
+            n = f"{len(failed):,} {'file' if len(failed) == 1 else 'files'}"
+            notices.post(c, kind="coverage", text=COUNT_TEXT.format(n=n, reason=failed[0][1]), action=act,
+                         key=COUNT_NOTICE)
         else:
             notices.clear(c, COUNT_NOTICE)
     except Exception:  # noqa: BLE001 — the counts are written either way
@@ -812,15 +918,14 @@ def _union(ranges: list[tuple[int, int]], hi: int) -> int:
     return total
 
 
-def _records_seen(m: _Facts, path: str, reader: str | None, records: int | None) -> int:
+def _records_seen(m: _Facts, path: str, ext: str, records: int | None) -> int:
+    """The lines or entries of a file that were read: all of a whole file's, the lines of a line-based file's parts."""
     if records is None or path not in m.seen:
         return 0
     if path in m.whole:
         return records
-    if reader in LINE_READERS and path in m.lines:
+    if unit_of(ext) == "lines" and path in m.lines:
         return _union(m.lines[path], records)
-    if reader == "pdf" and path in m.pages:
-        return _union(m.pages[path], records)
     return 0
 
 
@@ -936,7 +1041,7 @@ def _merge(c: str, sid: str, conn: sqlite3.Connection | None) -> tuple[_Facts, _
                 if os.path.isfile(root / p):
                     folder = p.rsplit("/", 1)[0] if "/" in p else ""
                     ext = ext_of(p)
-                    known[p] = (folder, ext, int(st.st_size), None if unit_of(ext) == "records" else 0, None,  # type: ignore[assignment]
+                    known[p] = (folder, ext, int(st.st_size), None if unit_of(ext) in COUNTED else 0, None,  # type: ignore[assignment]
                                 True)
     m.seen &= set(known)
     m.searched &= set(known)
@@ -953,7 +1058,7 @@ def _status(m: _Facts, path: str, folder: str, ext: str) -> str:
 
 
 def _covered(m: _Facts, idx: _Index, prefix: str, ext: str) -> tuple[int, int]:
-    """How many indexed files of `ext` under `prefix` the searched areas hold, and their records."""
+    """How many indexed files of `ext` under `prefix` the searched areas hold, and their lines or entries."""
     rel = [a for a, x in m.areas if x is None or x == ext]
     if any(a == "" or _inside(prefix, a) for a in rel):
         t = idx.totals(prefix, ext)
@@ -969,7 +1074,8 @@ def _covered(m: _Facts, idx: _Index, prefix: str, ext: str) -> tuple[int, int]:
 
 
 class _Tally:
-    """One row's counts as they add up: files, files seen and searched; records, records seen and searched."""
+    """One row's counts as they add up: files, files read (`seen`) and searched; its count in its unit (lines or
+    entries: `records`), read and searched."""
 
     KEYS = ("files", "seen", "searched", "records_seen", "records_searched", "records", "counted", "bytes")
 
@@ -997,7 +1103,7 @@ def _count(m: _Facts, base: Totals, covered: tuple[int, int], members: Iterable[
     g.add_totals(base)
     cov_files, cov_records = covered
     for path, row in members:
-        folder, ext, size, records, reader = row[:5]
+        folder, ext, size, records = row[:4]
         extra = len(row) > 5
         if extra:
             g.files += 1
@@ -1006,7 +1112,7 @@ def _count(m: _Facts, base: Totals, covered: tuple[int, int], members: Iterable[
         area = m.covers(path, folder, ext)
         if path in m.seen:
             g.seen += 1
-            rs = _records_seen(m, path, reader, records)
+            rs = _records_seen(m, path, ext, records)
             g.records_seen += rs
             if area and not extra:
                 cov_files -= 1
@@ -1089,19 +1195,20 @@ def percent(part: int, total: int) -> str:
 
 
 def line_of(totals: list[dict[str, Any]], indexed: bool = True, seen: int = 0, searched: int = 0) -> str:
-    """The summary line (module note): the seen and searched shares of the totals' first unit (records where the corpus
-    has any), the searched share only when not 0; files while the records are counted; files from the facts alone with
-    no index yet."""
+    """The summary line (module note): the read and searched shares of the totals' first unit (lines where the corpus
+    has any, else entries, else files), the searched share only when not 0; while that unit is counted, its files; with
+    no index yet, the files the facts name."""
+    def files(n: int) -> str:
+        return "file" if n == 1 else "files"
+
     if not indexed or not totals:
-        n = seen + searched
-        word = "file" if n == 1 else "files"
-        return f"seen {seen:,} · searched {searched:,} {word}" if searched else f"seen {seen:,} {word}"
+        return f"read {seen:,} · searched {searched:,} {files(seen + searched)}" if searched else \
+            f"read {seen:,} {files(seen)}"
     t = totals[0]
-    if t["unit"] == "records" and not (t.get("counted") and t["total"] > 0):
+    if t["unit"] in COUNTED and not (t.get("counted") and t["total"] > 0):
         n, s, x = int(t.get("files") or 0), int(t.get("files_seen") or 0), int(t.get("files_searched") or 0)
-        word = "file" if n == 1 else "files"
-        return f"seen {s:,} · searched {x:,} of {n:,} {word}" if x else f"seen {s:,} of {n:,} {word}"
-    words = f"seen {percent(t['seen'], t['total'])}"
+        return f"read {s:,} · searched {x:,} of {n:,} {files(n)}" if x else f"read {s:,} of {n:,} {files(n)}"
+    words = f"read {percent(t['seen'], t['total'])}"
     if t["searched"]:
         words += f" · searched {percent(t['searched'], t['total'])}"
     return f"{words} of {t['unit']}"
@@ -1113,10 +1220,11 @@ def _open(c: str) -> tuple[sqlite3.Connection | None, bool]:
 
 
 def summary(c: str, sid: str) -> dict[str, Any]:
-    """The session's coverage over the corpus: {files: {seen, searched, never, total} over every file, records: {seen,
-    searched, total, counted} over the files that count records, totals: one entry per unit the corpus has (records:
-    {unit, seen, searched, total, counted, files, files_seen, files_searched}; files: {unit, seen, searched, total}),
-    line, counting}. Reads the index only."""
+    """The session's coverage over the corpus: {files: {seen, searched, never, total} over every file, totals: one entry
+    per unit the corpus has, in UNITS' order (lines and entries: {unit, seen, searched, total, counted, files,
+    files_seen, files_searched}; files: {unit, seen, searched, total}), records: the first entry of lines or entries as
+    {unit, seen, searched, total, counted} (the earlier form's field; never two units added up), line, counting}. `seen`
+    is read. Reads the index only."""
     conn, indexed = _open(c)
     try:
         m, idx, known = _merge(c, sid, conn)
@@ -1129,21 +1237,25 @@ def summary(c: str, sid: str) -> dict[str, Any]:
             g.add(t)
         if not indexed:  # no index yet: the files the facts name
             g.files, g.seen, g.searched = len(known), len(m.seen), len(m.searched)
-        r, f = by_unit["records"], by_unit["files"]
-        counted = indexed and r.counted >= r.files
         totals: list[dict[str, Any]] = []
-        if indexed and r.files:
-            totals.append({"unit": "records", "seen": r.records_seen if counted else 0,
-                           "searched": r.records_searched if counted else 0, "total": r.records if counted else 0,
-                           "counted": counted, "files": r.files, "files_seen": r.seen, "files_searched": r.searched})
-        if indexed and f.files:
-            totals.append({"unit": "files", "seen": f.seen, "searched": f.searched, "total": f.files})
-        line = line_of(totals, indexed, g.seen, g.searched)
+        for unit in UNITS if indexed else ():
+            u = by_unit[unit]
+            if not u.files:
+                continue
+            if unit == "files":
+                totals.append({"unit": unit, "seen": u.seen, "searched": u.searched, "total": u.files})
+                continue
+            counted = u.counted >= u.files
+            totals.append({"unit": unit, "seen": u.records_seen if counted else 0,
+                           "searched": u.records_searched if counted else 0, "total": u.records if counted else 0,
+                           "counted": counted, "files": u.files, "files_seen": u.seen, "files_searched": u.searched})
+        first = next((t for t in totals if t["unit"] in COUNTED), None)
+        records = {k: first[k] for k in ("unit", "seen", "searched", "total", "counted")} if first else \
+            {"unit": "lines", "seen": 0, "searched": 0, "total": 0, "counted": False}
         return {"files": {"seen": g.seen, "searched": g.searched, "never": max(0, g.files - g.seen - g.searched),
                           "total": g.files},
-                "records": {"seen": r.records_seen if counted else 0, "searched": r.records_searched if counted else 0,
-                            "total": r.records if counted else 0, "counted": bool(counted and r.files)},
-                "totals": totals, "line": line, "counting": not (indexed and counted)}
+                "records": records, "totals": totals, "line": line_of(totals, indexed, g.seen, g.searched),
+                "counting": not indexed or any(not t["counted"] for t in totals if t["unit"] in COUNTED)}
     finally:
         if conn is not None:
             conn.close()

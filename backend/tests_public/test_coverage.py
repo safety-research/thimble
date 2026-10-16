@@ -1,12 +1,12 @@
-"""Coverage (app/coverage.py, `thimble state coverage`, `thimble act coverage`): what a session's tool calls saw or
-searched in the corpus. Facts merge per file (whole, a part's line or page ranges, searched), facts outside the corpus or
-on code files are dropped, a recursive search over a folder is one fact for every file under it, the cards' reads and the
-labels' runs count as searched. Each row counts one unit: records (rows or lines) for files thimble reads as records,
-files for images, binaries and documents, never both in one number. Rows group by folder and type, siblings that share a
-name pattern (5 or more) by their glob, and every group is listed (no `other`); a group drills in to its files. The
-totals hold the corpus's denominators per unit. An index of 1,032,019 files answers both requests in under 1 s without
-walking or counting. The index job starts once under its lock, under nice and ionice, and keys its rows by size and
-mtime."""
+"""Coverage (app/coverage.py, `thimble state coverage`, `thimble act coverage`): what Claude read or searched in the
+corpus in a session. Facts merge per file (whole, a part's line or page ranges, searched), facts outside the corpus or
+on code files are dropped, a recursive search over a folder is one fact for every file under it, the cards' reads and
+the labels' runs count as searched. Each row counts one unit: lines for line-based text, entries for a JSON document's
+values and a database's rows, files for everything else (images, binaries, documents), never two units in one number.
+Rows group by folder and type, siblings that share a name pattern (5 or more) by their glob, and every group is listed
+(no `other`); a group drills in to its files. The totals hold the corpus's denominators per unit. An index of 1,032,019
+files answers both requests in under 1 s without walking or counting. The index job starts once under its lock, under
+nice and ionice, and keys its rows by size and mtime."""
 from __future__ import annotations
 
 import fcntl
@@ -62,6 +62,11 @@ def _facts(c, facts, sid=SID, turn="t1"):
     return coverage.add_facts(c, sid, turn, facts)
 
 
+def _lines(p: Path) -> int:
+    """A file's lines, as a text editor numbers them."""
+    return len(p.read_bytes().splitlines())
+
+
 def test_is_data_follows_the_shared_case_list():
     cases = json.loads((HERE / "fixtures" / "data_files.json").read_text())["cases"]
     wrong = [c for c in cases if coverage.is_data(c["path"], c["codeTree"]) is not c["data"]]
@@ -80,6 +85,99 @@ def test_the_universe_and_each_file_s_unit_follow_the_shared_case_list():
     assert all(coverage.in_universe(c["path"], c["codeTree"]) for c in got["cases"] if c["data"])
 
 
+def test_each_format_counts_lines_entries_or_files():
+    """Lines for line-based text, entries for a JSON document's values and a database's rows, files for every other
+    file of the universe: images, PDF, Markdown, HTML, binaries, and formats nothing counts (parquet)."""
+    for ext in ("jsonl", "ndjson", "csv", "tsv", "log", "txt", "vtt", "srt"):
+        assert coverage.unit_of(f"a.{ext}") == coverage.unit_of(ext) == "lines"
+        assert coverage.unit_of(f"d/a.{ext.upper()}") == "lines"
+    for ext in ("json", "db", "sqlite", "sqlite3"):
+        assert coverage.unit_of(f"a.{ext}") == coverage.unit_of(f".{ext}") == "entries", ext
+    for ext in ("png", "jpg", "pdf", "md", "html", "htm", "xml", "eml", "parquet", "arrow", "xlsx", "duckdb", "mp4",
+                "wav", "bin", "tar.gz", "safetensors"):
+        assert coverage.unit_of(f"a.{ext}") == "files", ext
+    assert coverage.UNITS == ("lines", "entries", "files")
+    assert "records" not in coverage.UNITS
+
+
+def _count(root: Path, name: str) -> int:
+    return coverage.count_file(root / name, name, coverage.unit_of(name))
+
+
+def test_a_json_document_counts_its_entries_not_its_lines(tmp_path, monkeypatch):
+    """A JSON document counts its values: the items of an array at its top, else the values of its object (the items
+    of its arrays of objects where it has any, as records.py reads its records), whatever lines they take; a .json file
+    of one value a line counts its values; a document too big for records.py's index is counted by a scan."""
+    pretty = json.dumps([{"id": i, "tags": ["a", "b"], "text": "x"} for i in range(3)], indent=2)
+    (tmp_path / "array.json").write_text(pretty)
+    assert _lines(tmp_path / "array.json") > 20 and _count(tmp_path, "array.json") == 3
+    (tmp_path / "object.json").write_text(json.dumps({"a": 1, "b": [1, 2, 3], "c": {"d": [{"e": 1}]}, "f": None},
+                                                     indent=2))
+    assert _count(tmp_path, "object.json") == 4
+    chat = {"title": "t", "messages": [{"role": "user", "text": "hi"}, {"role": "assistant", "text": "yo"},
+                                        {"role": "user", "text": "{[,"}]}
+    (tmp_path / "chat.json").write_text(json.dumps(chat, indent=1))
+    assert _count(tmp_path, "chat.json") == 3
+    (tmp_path / "empty.json").write_text("[]\n")
+    (tmp_path / "blank.json").write_text("")
+    assert _count(tmp_path, "empty.json") == 0 and _count(tmp_path, "blank.json") == 0
+    (tmp_path / "values.json").write_text('{"a": 1}\n{"a": 2}\n\n{"a": 3}\n')
+    assert _count(tmp_path, "values.json") == 3
+    (tmp_path / "escaped.json").write_text(json.dumps(["a \\\" ] }, b", "c", "d"]))
+    assert _count(tmp_path, "escaped.json") == 3
+    # the same count as the records a citation or a label names in the documents records.py indexes
+    for name in ("array.json", "object.json", "chat.json", "escaped.json"):
+        assert _count(tmp_path, name) == records.count(tmp_path / name, name), name
+    # a document with more values than records.py indexes reads as lines there, and still counts its entries here
+    monkeypatch.setattr(records, "JSON_RECORDS_MAX", 2)
+    (tmp_path / "big.json").write_text(json.dumps([{"i": i} for i in range(5)], indent=2))
+    assert records.count(tmp_path / "big.json", "big.json") == _lines(tmp_path / "big.json") > 5
+    assert _count(tmp_path, "big.json") == 5
+
+
+def test_a_database_counts_the_rows_of_its_tables_as_entries(tmp_path):
+    for name in ("forge.db", "runs.sqlite", "app.sqlite3"):
+        con = sqlite3.connect(tmp_path / name)
+        con.execute("CREATE TABLE prs (id INTEGER PRIMARY KEY, title TEXT)")
+        con.execute("CREATE TABLE notes (body TEXT)")
+        con.executemany("INSERT INTO prs (title) VALUES (?)", [(f"t{i}",) for i in range(3)])
+        con.executemany("INSERT INTO notes (body) VALUES (?)", [(f"n{i}",) for i in range(4)])
+        con.commit()
+        con.close()
+        assert coverage.unit_of(name) == "entries" and _count(tmp_path, name) == 7, name
+
+
+def test_line_based_files_count_their_lines(tmp_path):
+    """Every line counts, a CSV's header line and each line of a quoted cell too, and a last line without its newline;
+    a binary file with a text type counts none."""
+    (tmp_path / "t.csv").write_text('id,body\n1,"two\nlines"\n2,x\n')
+    (tmp_path / "t.tsv").write_text("a\tb\n1\t2")
+    (tmp_path / "t.vtt").write_text("WEBVTT\n\n00:01.000 --> 00:02.000\nhello\n")
+    (tmp_path / "t.log").write_bytes(b"\x00\x01\x02binary\n" * 3)
+    assert [_count(tmp_path, n) for n in ("t.csv", "t.tsv", "t.vtt", "t.log")] == [4, 2, 4, 0]
+
+
+def test_a_part_of_a_csv_counts_the_lines_read(corpus):
+    c, root = corpus["c"], corpus["root"]
+    _index(c, root)
+    _facts(c, [{"path": "pull_requests.csv", "how": "part", "lines": [1, 3], "by": "Read"}])
+    row = next(r for r in coverage.rows(c, SID) if r["name"] == "pull_requests.csv")
+    assert (row["unit"], row["records_seen"], row["records_total"]) == ("lines", 3, 6)
+
+
+def test_the_totals_hold_one_entry_per_unit_the_corpus_has(corpus):
+    """A corpus of lines and entries only has no files line; the units come lines, entries, files."""
+    c, root = corpus["c"], corpus["root"]
+    for p in [root / "README.md", *(root / "prompts").iterdir()]:
+        p.unlink()
+    _index(c, root)
+    assert [t["unit"] for t in coverage.summary(c, SID)["totals"]] == ["lines", "entries"]
+    (root / "shot.png").write_bytes(b"\x89PNG")
+    corpus_walk.forget()
+    _index(c, root)
+    assert [t["unit"] for t in coverage.summary(c, SID)["totals"]] == ["lines", "entries", "files"]
+
+
 def test_facts_merge_whole_part_lines_pages_and_searched(corpus):
     c, root = corpus["c"], corpus["root"]
     _index(c, root)
@@ -93,16 +191,19 @@ def test_facts_merge_whole_part_lines_pages_and_searched(corpus):
     ])
     assert s["files"] == {"seen": 3, "searched": 1, "never": 17, "total": 21}
     # events: lines 1-70 of 140; board: all 20; agent-01: 3 of 10
-    assert s["records"]["counted"] is True
-    assert s["records"]["seen"] == 70 + 20 + 3
-    # the records of the files read as records: the five .md files count as files, not lines
-    total = sum(records.count(p, p.relative_to(root).as_posix()) for p in root.rglob("*")
-                if p.is_file() and coverage.in_universe(p.relative_to(root).as_posix(), False)
-                and coverage.unit_of(p.name) == "records")
-    assert s["records"]["total"] == total
-    # searched: all 5 rows of pull_requests.csv, and agent-01's 7 lines not seen (it was searched and read in part)
-    assert s["records"]["searched"] == 5 + 7
-    assert s["line"] == f"seen {coverage.percent(93, total)} · searched {coverage.percent(12, total)} of records"
+    lines = s["totals"][0]
+    assert lines["unit"] == "lines" and lines["counted"] is True
+    assert lines["seen"] == 70 + 20 + 3
+    # the lines of the line-based files: the five .md files count as files, manifest.json its entries
+    total = sum(_lines(p) for p in root.rglob("*") if p.is_file()
+                and coverage.in_universe(p.relative_to(root).as_posix(), False) and coverage.unit_of(p.name) == "lines")
+    assert lines["total"] == total
+    # searched: all 6 lines of pull_requests.csv (its header line too), and agent-01's 7 lines not read (it was
+    # searched and read in part)
+    assert lines["searched"] == 6 + 7
+    # `records` holds the first unit's numbers, never two units added up
+    assert s["records"] == {"unit": "lines", "seen": 93, "searched": 13, "total": total, "counted": True}
+    assert s["line"] == f"read {coverage.percent(93, total)} · searched {coverage.percent(13, total)} of lines"
     stored = coverage.read_facts(c, SID)
     assert len(stored) == 6 and all(f["turn"] == "t1" for f in stored)
     assert stored[2]["path"] == "board.jsonl"  # stored relative to the corpus
@@ -113,8 +214,8 @@ def test_a_document_read_in_part_counts_as_one_file_seen(corpus, monkeypatch):
     c, root = corpus["c"], corpus["root"]
     (root / "postmortem.pdf").write_bytes(b"%PDF-1.4 not really")
     counted: list[str] = []
-    real = records.count
-    monkeypatch.setattr(records, "count", lambda path, rel, under=None: counted.append(rel) or real(path, rel, under))
+    real = coverage.count_file
+    monkeypatch.setattr(coverage, "count_file", lambda full, rel, unit: counted.append(rel) or real(full, rel, unit))
     _index(c, root)
     assert "postmortem.pdf" not in counted and not any(r.endswith(".md") for r in counted)
     _facts(c, [{"path": "postmortem.pdf", "how": "part", "pages": [2, 5], "total": 12, "by": "Read"},
@@ -165,9 +266,9 @@ def test_a_recursive_search_over_a_folder_is_one_fact_for_every_data_file_under_
     assert s["files"]["seen"] == 1 and s["files"]["searched"] == 11
     agents = next(r for r in coverage.rows(c, SID) if r["folder"] == "agents")
     assert (agents["files"], agents["seen"], agents["searched"], agents["never"]) == (12, 1, 11, 0)
-    # in records: agent-03's 10 lines seen, the other 11 files' 110 lines searched
+    # in lines: agent-03's 10 lines read, the other 11 files' 110 lines searched
     assert (agents["unit"], agents["records_seen"], agents["records_searched"], agents["records_total"]) == \
-        ("records", 10, 110, 120)
+        ("lines", 10, 110, 120)
     # the whole corpus searched (grep -r with no folder): every other data file is searched
     s = _facts(c, [{"path": ".", "how": "searched", "folder": True, "by": "search"}])
     assert s["files"] == {"seen": 1, "searched": 20, "never": 0, "total": 21}
@@ -217,7 +318,7 @@ def test_rows_keep_the_hierarchy_and_say_where_each_file_is(corpus):
                        "README.md"}
     a = by["agent-*.jsonl"]
     assert (a["folder"], a["ext"], a["path"], a["match"], a["drill"], a["unit"]) == \
-        ("agents", ".jsonl", None, None, True, "records")
+        ("agents", ".jsonl", None, None, True, "lines")
     assert (a["files"], a["seen"], a["records_seen"], a["records_searched"], a["records_total"]) == (12, 1, 10, 0, 120)
     p = by[".md"]
     assert (p["folder"], p["unit"], p["files"], p["seen"], p["drill"]) == ("prompts", "files", 4, 0, True)
@@ -225,6 +326,7 @@ def test_rows_keep_the_hierarchy_and_say_where_each_file_is(corpus):
     assert (e["folder"], e["path"], e["drill"], e["records_seen"], e["records_total"]) == \
         ("", "events.jsonl", False, 140, 140)
     assert by["README.md"]["unit"] == "files" and by["README.md"]["folder"] == ""
+    assert (by["manifest.json"]["unit"], by["manifest.json"]["records_total"]) == ("entries", 2)  # its two keys
     assert all(r["folder"] != "." and r["key"] != "other" for r in rows)
     # the group of the most files first, then by size
     assert [(r["files"], r["bytes"]) for r in rows] == sorted(((r["files"], r["bytes"]) for r in rows), reverse=True)
@@ -257,8 +359,9 @@ def mixed(corpus):
 
 
 def test_each_row_counts_one_unit_and_the_totals_hold_each_unit(mixed):
-    """Data files count records (rows or lines), images, video and documents count files; one number never mixes the
-    two. The totals hold the corpus's denominators, one entry per unit."""
+    """Line-based files count lines, a JSON document and a database count entries, images, video and documents count
+    files; one number never mixes two units. The totals hold the corpus's denominators, one entry per unit, lines then
+    entries then files."""
     c, root = mixed["c"], mixed["root"]
     _index(c, root)
     png = sorted(p.name for p in (root / "images" / "day-1").iterdir())[0]
@@ -271,19 +374,24 @@ def test_each_row_counts_one_unit_and_the_totals_hold_each_unit(mixed):
     assert (img["folder"], img["unit"], img["files"], img["seen"], img["searched"], img["drill"]) == \
         ("images/day-1", "files", 30, 1, 0, True)
     db = rows["forge.db"]
-    assert (db["unit"], db["records_total"], db["records_seen"], db["records_searched"]) == ("records", 7, 0, 7)
+    assert (db["unit"], db["records_total"], db["records_seen"], db["records_searched"]) == ("entries", 7, 0, 7)
     assert rows["video.mp4"]["unit"] == "files" and rows["report.pdf"]["unit"] == "files"
     assert rows["report.pdf"]["folder"] == "docs"
-    recs, files = s["totals"]
-    record_files = 12 + 4 + 1  # agents, events, board, csv, manifest; forge.db
+    assert [t["unit"] for t in s["totals"]] == ["lines", "entries", "files"]
+    lines, entries, files = s["totals"]
+    line_files = 12 + 3  # agents, events, board, pull_requests.csv
     rels = [p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()]
-    total = sum(records.count(root / r, r) for r in rels if coverage.in_universe(r, False)
-                and coverage.unit_of(r) == "records")
-    assert recs == {"unit": "records", "seen": 40, "searched": 7, "total": total, "counted": True,
-                    "files": record_files, "files_seen": 1, "files_searched": 1}
+    total = sum(_lines(root / r) for r in rels if coverage.in_universe(r, False) and coverage.unit_of(r) == "lines")
+    assert total == 120 + 140 + 20 + 6
+    assert lines == {"unit": "lines", "seen": 40, "searched": 0, "total": total, "counted": True,
+                     "files": line_files, "files_seen": 1, "files_searched": 0}
+    # forge.db's 7 rows and manifest.json's 2 values
+    assert entries == {"unit": "entries", "seen": 0, "searched": 7, "total": 7 + 2, "counted": True, "files": 2,
+                       "files_seen": 0, "files_searched": 1}
     assert files == {"unit": "files", "seen": 1, "searched": 1, "total": 30 + 1 + 1 + 5}
-    assert s["files"] == {"seen": 2, "searched": 2, "never": record_files + 37 - 4, "total": record_files + 37}
-    assert s["line"] == f"seen {coverage.percent(40, total)} · searched {coverage.percent(7, total)} of records"
+    n = line_files + 2 + 37
+    assert s["files"] == {"seen": 2, "searched": 2, "never": n - 4, "total": n}
+    assert s["line"] == f"read {coverage.percent(40, total)} of lines"
     # a file row of a file the index does not hold yet keeps its unit
     (root / "late.png").write_bytes(b"\x89PNG")
     _facts(c, [{"path": "late.png", "how": "whole", "by": "Read"}])
@@ -316,22 +424,27 @@ def test_percent_forms():
     assert coverage.percent(1_000, 1_000) == "100%"
 
 
-def test_the_summary_line_is_the_totals_seen_and_searched_shares():
-    rec = {"unit": "records", "seen": 1_204, "searched": 0, "total": 48_310, "counted": True, "files": 13,
-           "files_seen": 3, "files_searched": 0}
-    assert coverage.line_of([rec]) == "seen 2% of records"
-    assert coverage.line_of([{**rec, "searched": 20_000}]) == "seen 2% · searched 41% of records"
-    assert coverage.line_of([{**rec, "seen": 0}]) == "seen 0% of records"
+def test_the_summary_line_is_the_totals_read_and_searched_shares():
+    lines = {"unit": "lines", "seen": 1_204, "searched": 0, "total": 48_310, "counted": True, "files": 13,
+             "files_seen": 3, "files_searched": 0}
+    assert coverage.line_of([lines]) == "read 2% of lines"
+    assert coverage.line_of([{**lines, "searched": 20_000}]) == "read 2% · searched 41% of lines"
+    assert coverage.line_of([{**lines, "seen": 0}]) == "read 0% of lines"
+    entries = {**lines, "unit": "entries", "seen": 1, "total": 1}
     files = {"unit": "files", "seen": 3, "searched": 0, "total": 1_032_000}
-    # the line names one unit: records where the corpus has any; images are in the table
-    assert coverage.line_of([{**rec, "seen": 4_401, "total": 13_200_000}, files]) == "seen 0.03% of records"
-    assert coverage.line_of([files]) == "seen <0.01% of files"
-    counting = {**rec, "counted": False, "total": 0}
-    assert coverage.line_of([counting]) == "seen 3 of 13 files"
-    assert coverage.line_of([{**counting, "files_searched": 2}]) == "seen 3 · searched 2 of 13 files"
-    assert coverage.line_of([], indexed=False, seen=3) == "seen 3 files"
-    assert coverage.line_of([], indexed=False, seen=1) == "seen 1 file"
-    assert coverage.line_of([], indexed=False, seen=0, searched=2) == "seen 0 · searched 2 files"
+    # the line names one unit, the totals' first: lines where the corpus has any, else entries; images are in the table
+    assert coverage.line_of([{**lines, "seen": 4_401, "total": 13_200_000}, entries, files]) == "read 0.03% of lines"
+    assert coverage.line_of([entries, files]) == "read 100% of entries"
+    assert coverage.line_of([files]) == "read <0.01% of files"
+    counting = {**lines, "counted": False, "total": 0}
+    assert coverage.line_of([counting]) == "read 3 of 13 files"
+    assert coverage.line_of([{**counting, "files": 1, "files_seen": 1}]) == "read 1 of 1 file"
+    assert coverage.line_of([{**counting, "files_searched": 2}]) == "read 3 · searched 2 of 13 files"
+    assert coverage.line_of([], indexed=False, seen=3) == "read 3 files"
+    assert coverage.line_of([], indexed=False, seen=1) == "read 1 file"
+    assert coverage.line_of([], indexed=False, seen=0, searched=2) == "read 0 · searched 2 files"
+    every = [coverage.line_of([lines]), coverage.line_of([counting]), coverage.line_of([], indexed=False, seen=1)]
+    assert not any("seen" in w or "record" in w for w in every)
 
 
 def _letters(n: int) -> str:
@@ -385,12 +498,15 @@ def test_a_top_folder_of_1000_files_of_many_kinds_lists_every_group_by_pattern_o
     assert sum(r["files"] for r in rows) == coverage.summary(c, SID)["files"]["total"] == 1000 + 21
     runs = by["run_*.jsonl"]
     assert (runs["unit"], runs["files"], runs["records_total"], runs["records_seen"], runs["match"], runs["drill"]) == \
-        ("records", 300, 600, 2, "run_*.jsonl", True)
+        ("lines", 300, 600, 2, "run_*.jsonl", True)
     assert (by["img_*.png"]["unit"], by["img_*.png"]["files"], by["img_*.png"]["seen"]) == ("files", 200, 1)
-    assert by["trace-*.json"]["files"] == 150 and by["trace-*.json"]["unit"] == "records"
+    trace = by["trace-*.json"]
+    assert (trace["files"], trace["unit"], trace["records_total"]) == (150, "entries", 150)
     # the rest by type: the toy corpus's README.md and pull_requests.csv join their type's row
     assert (by[".md"]["files"], by[".md"]["unit"], by[".md"]["match"]) == (101, "files", ".md")
-    assert (by[".csv"]["files"], by[".csv"]["unit"]) == (51, "records")
+    assert (by[".csv"]["files"], by[".csv"]["unit"], by[".csv"]["records_total"]) == (51, "lines", 50 * 2 + 6)
+    assert {by[f".{ext}"]["unit"] for ext in ("pdf", "xml", "html", "wav", "parquet")} == {"files"}
+    assert by[".txt"]["unit"] == "lines"
     assert by[".jsonl"]["files"] == 2  # events.jsonl and board.jsonl, which share no pattern with run_*.jsonl
     for ext, n in kinds.items():
         assert by[f".{ext}"]["files"] == n
@@ -441,17 +557,19 @@ def test_a_folder_that_holds_only_one_folder_shows_the_deeper_folder(corpus):
 def test_files_only_while_counting_and_without_an_index(corpus):
     c, root = corpus["c"], corpus["root"]
     s = _facts(c, [{"path": "events.jsonl", "how": "whole"}])
-    assert s["line"] == "seen 1 file" and s["counting"] is True and corpus["started"] == [c]
-    # walked but not counted: the files that hold records, in files
+    assert s["line"] == "read 1 file" and s["counting"] is True and corpus["started"] == [c]
+    # walked but not counted: the files of the first unit (the 15 line-based files), in files
     conn = coverage._connect_rw(coverage.index_path(c))
     coverage.refresh(c, root, conn)
     conn.close()
     s = coverage.summary(c, SID)
-    assert s["line"] == "seen 1 of 16 files" and s["counting"] is True and s["records"]["counted"] is False
-    assert s["totals"][1] == {"unit": "files", "seen": 0, "searched": 0, "total": 5}  # the .md files need no count
+    assert s["line"] == "read 1 of 15 files" and s["counting"] is True and s["records"]["counted"] is False
+    assert [(t["unit"], t.get("counted")) for t in s["totals"]] == \
+        [("lines", False), ("entries", False), ("files", None)]
+    assert s["totals"][2] == {"unit": "files", "seen": 0, "searched": 0, "total": 5}  # the .md files need no count
     _index(c, root)
     line = coverage.summary(c, SID)["line"]
-    assert line.startswith("seen ") and line.endswith(" of records")
+    assert line.startswith("read ") and line.endswith(" of lines")
 
 
 async def test_state_and_act_surfaces(corpus):
@@ -522,6 +640,7 @@ async def test_a_seeded_index_of_a_million_files_answers_in_under_a_second(corpu
 
     monkeypatch.setattr(corpus_walk, "walk", no)
     monkeypatch.setattr(records, "count", no)
+    monkeypatch.setattr(coverage, "count_file", no)
     t0 = time.monotonic()
     got = await local.state(c, "coverage", ["--session", SID, "--summary"])
     took = time.monotonic() - t0
@@ -535,10 +654,10 @@ async def test_a_seeded_index_of_a_million_files_answers_in_under_a_second(corpu
     assert took < 1.0, took
     s = got["summary"]
     assert s["files"] == {"seen": 2, "searched": 34_400, "never": total - 2 - 34_400, "total": total}
-    assert s["records"] == {"seen": 14, "searched": 344_000, "total": total * 10, "counted": True}
-    assert s["totals"] == [{"unit": "records", "seen": 14, "searched": 344_000, "total": total * 10, "counted": True,
+    assert s["records"] == {"unit": "lines", "seen": 14, "searched": 344_000, "total": total * 10, "counted": True}
+    assert s["totals"] == [{"unit": "lines", "seen": 14, "searched": 344_000, "total": total * 10, "counted": True,
                             "files": total, "files_seen": 2, "files_searched": 34_400}]
-    assert s["line"] == f"seen <0.01% · searched {coverage.percent(344_000, total * 10)} of records"
+    assert s["line"] == f"read <0.01% · searched {coverage.percent(344_000, total * 10)} of lines"
     t0 = time.monotonic()
     got = coverage.level(c, SID)
     assert time.monotonic() - t0 < 1.0
@@ -574,6 +693,17 @@ def test_an_index_of_the_earlier_form_is_built_again(corpus):
     s = coverage.summary(c, SID)
     assert s["files"]["total"] == 21 and s["records"]["counted"] is True
     assert {r["name"] for r in coverage.rows(c, SID)} >= {"agent-*.jsonl", ".md"}
+    # an index of form 3 (CSV rows and a JSON document's lines counted as records) is built again too
+    conn = sqlite3.connect(p)
+    with conn:
+        conn.execute("UPDATE meta SET value = '3' WHERE key = 'schema'")
+        conn.execute("UPDATE files SET records = 5 WHERE path = 'pull_requests.csv'")
+    conn.close()
+    corpus["started"].clear()
+    assert coverage.summary(c, SID)["counting"] is True and corpus["started"] == [c]
+    _index(c, root)
+    csv = next(r for r in coverage.rows(c, SID) if r["name"] == "pull_requests.csv")
+    assert (csv["unit"], csv["records_total"]) == ("lines", 6)
 
 
 def test_the_job_starts_once_under_its_lock_with_nice_and_ionice(corpus, monkeypatch):
@@ -611,10 +741,10 @@ def test_the_job_starts_once_under_its_lock_with_nice_and_ionice(corpus, monkeyp
 def test_the_job_keys_rows_by_size_and_mtime(corpus, monkeypatch):
     c, root = corpus["c"], corpus["root"]
     counted: list[str] = []
-    real = records.count
-    monkeypatch.setattr(records, "count", lambda path, rel, under=None: counted.append(rel) or real(path, rel, under))
+    real = coverage.count_file
+    monkeypatch.setattr(coverage, "count_file", lambda full, rel, unit: counted.append(rel) or real(full, rel, unit))
     _index(c, root)
-    assert len(counted) == 16  # the files read as records; the five .md files count as files and need no count
+    assert len(counted) == 16  # the files of lines and entries; the five .md files count as files and need no count
     counted.clear()
     _index(c, root)
     assert counted == []
@@ -659,15 +789,16 @@ def test_a_file_that_cannot_be_counted_posts_the_count_notice(corpus, monkeypatc
     c, root = corpus["c"], corpus["root"]
     from app import notices
 
-    def count(path, rel, under=None):
+    def count(full, rel, unit):
         if rel == "board.jsonl":
             raise OSError("unreadable")
         return 1
 
-    monkeypatch.setattr(records, "count", count)
+    monkeypatch.setattr(coverage, "count_file", count)
     _index(c, root)
     open_ = [n for n in notices.open_notices(c) if n.get("key") == coverage.COUNT_NOTICE]
-    assert len(open_) == 1 and open_[0]["text"].startswith("thimble could not count the records of 1 files: OSError")
+    assert len(open_) == 1 and open_[0]["text"].startswith("thimble could not count the lines or entries of 1 file: "
+                                                           "OSError")
     assert coverage.summary(c, SID)["records"]["counted"] is True  # counted as 0, so the line has its percent
 
 

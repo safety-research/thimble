@@ -2,7 +2,7 @@
 local.py's (`thimble state` and `thimble act`), which registers them:
 
   thimble state coverage --session SID [--folder REL] [--match GROUP] [--summary]
-        {summary, folder, match, rows?, more?, counting}: what the session's tool calls saw or searched in the corpus,
+        {summary, folder, match, rows?, more?, counting}: what Claude read or searched in the corpus in the session,
         one level of it, or with --match the files of one group of that level (a name pattern or a type); no rows with
         --summary (coverage.py)
   thimble state label-unsure [--label ID] [--n 20] [--offset 0] [--counts]
