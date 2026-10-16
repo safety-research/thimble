@@ -29,7 +29,7 @@ import { answerOffer, dismissNotice, homeNotices, homeOffer, noticeAct, openHome
 import { COLORS } from './paint'
 import { readState } from './data'
 import { cxOf } from './ctx'
-import { PANEL, closePanel, openPanel, openPending, placedLater, retryPending, rt, surfaceValue } from './term'
+import { PANEL, closePanel, openPanel, openPending, placedLater, readSurface, retryPending, rt, surfaceValue } from './term'
 import { keepSeen, keptSeen } from './kept'
 import { openChecks } from './checksview'
 import { openCitations } from './citesview'
@@ -151,7 +151,11 @@ async function noteWriters(cx: Ctx): Promise<void> {
   const now = new Map((await cx.agents()).filter(a => a.role === 'writer').map(a => [a.chat || a.name, a] as const))
   const before = writers
   writers = new Map([...now].map(([k, a]) => [k, a.state]))
-  if (!before || browserShown()) return
+  if (!before) return
+  // the documents read again once a writer ends, so the line under the row that says so links its document
+  // (register.tsx writtenEl)
+  if ([...now].some(([k, a]) => before.get(k) === 'running' && a.state !== 'running')) await readSurface(cx, 'docs', 'docs')
+  if (browserShown()) return
   for (const [k, a] of now) {
     const was = before.get(k)
     const started = was === undefined && a.state === 'running'

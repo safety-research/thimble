@@ -319,6 +319,33 @@ async function footerEl(cx: Ctx, e: ResolveInput & { requestId: string }): Promi
   )
 }
 
+/** The line under the row that says a writer's end (main's `↳ The writer finished …`, the first row that says it): the
+ *  document it wrote, a press away in the browser workbench, where it is read whole, edited, and its figures and history
+ *  shown; the terminal reads documents only (Matt, 10-16). The writer's document by its name (`writer: <slug>`), else
+ *  the one written last, as the documents were read when the writer ended (band.tsx noteWriters); its slug alone when
+ *  they were not read. None while the writer writes, or after it failed or stopped. */
+async function writtenEl(cx: Ctx, e: ResolveInput & { requestId: string }, text: string): Promise<RenderElement | null> {
+  if (!saysWriter(text)) return null
+  const chat = rt.writerOf.get(e.requestId)
+  const agents = (await cx.agents()) ?? []
+  const agent = chat ? agents.find(a => a.chat === chat) : agents.filter(a => a.role === 'writer').sort((a, b) => a.started.localeCompare(b.started)).at(-1)
+  if (agent?.state === 'running' || /fail|error|stop/i.test(agent?.state ?? '')) return null
+  // drawing reads only: the documents as read when the writer ended
+  const got = await surfaceValue(cx, 'docs')
+  const docs = got?.ok ? docsOf(got.value) : []
+  const named = (agent?.label ?? '').replace(/^writer:\s*/i, '').trim()
+  const written = docs.filter(d => d.status !== 'generating' && d.status !== 'error')
+  const doc = (named ? written.find(d => d.slug === named || d.title === named) : undefined) ?? written.sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0))[0] ?? (named && /^[\w-]+$/.test(named) && !got ? { slug: named, title: named } : undefined)
+  if (!doc) return null
+  const { Box, Text, Button } = cx.els(e)
+  return (
+    <Box key={`written-${e.requestId}`} marginLeft={MARGIN} marginTop={1} flexDirection="row">
+      <Text dimColor>{'↳ document '}</Text>
+      <Button key={`written-open-${e.requestId}`} label={`${quoted(clip(clean(doc.title), 60))} · read and edit it in the browser ↗`} plain onPress={() => void openInBrowser(cx, `report:${doc.slug}`)} />
+    </Box>
+  )
+}
+
 /** A row of main's chat without its `↳ The writer …` line when an earlier row said that writer run's end (the run: the
  *  writer whose chat began last when the row was first drawn, kept with the row so a resumed session decides the same). */
 async function withoutSaidWriter(cx: Ctx, row: string, text: string): Promise<string> {
@@ -804,8 +831,10 @@ export const register: Register = (on, options) => {
     // and none of main's `↳` lines that answer a subagent run's second report, whose first an earlier row answered
     const repeats = rt.repeats.get(e.requestId)
     const text = await withoutSaidWriter(cx, e.requestId, namedThreads(withoutToldThreads(withoutEnd(repeats ? withoutLines(said, repeats) : said), rows, rt.told), rows))
+    // the document a writer finished, linked out to the browser workbench under the row that says so
+    const written = await writtenEl(cx, e, text)
     const live = e.surface === 'terminal' || e.surface === 'desktop'
-    if (!ids.length && !told && !views && !footer && !coverage && text === e.props.text && !live && !needsDrawing(text)) return next(e)
+    if (!ids.length && !told && !views && !footer && !coverage && !written && text === e.props.text && !live && !needsDrawing(text)) return next(e)
     const { Box } = $.ui.resolve(e)
     // the reply fills the terminal's width, less 2, its cards as wide as its prose
     const cols = (e.viewport?.columns ?? 100) - 2
@@ -816,10 +845,11 @@ export const register: Register = (on, options) => {
     const cards = await drawCards(cx, e, ids, cols, t => openAsk(cx, t), id => openThread(cx, id))
     // a block that held only a line the terminal UI hides: nothing (ctrl+o's view still draws the reply's time and model
     // above it, which no hook reaches; the engine's own block with no text draws the same)
-    if (!body.length && !cards && !told && !views && !footer && !coverage) return <Box />
+    if (!body.length && !cards && !told && !views && !footer && !coverage && !written) return <Box />
     return (
       <Box flexDirection="column">
         {body}
+        {written}
         {cards}
         {footer}
         {coverage}
