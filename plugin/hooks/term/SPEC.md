@@ -77,7 +77,7 @@ The horizontal unit is the cell and the indent step is 2 cells. The vertical uni
 
 | column | holds |
 | --- | --- |
-| 0 | Claude Code's `❯ ⏺ ✻`; the reply's margin: the `?` of the passage under the pointer, a passage's `↳`, each in the ⏺'s cell on the row where both fall; the `↳` that starts a `↳` row |
+| 0 | Claude Code's `❯ ⏺ ✻`; the reply's margin: a passage's dim `·`, the `?` that takes its place (or the ⏺'s) under the pointer, a passage's `↳`, each in the ⏺'s cell on the row where both fall; the `↳` that starts a `↳` row |
 | 2 | the reply's edge, where Claude Code's own reply text starts: prose, headings, a list's `-`, a card's left border, the footer; the words of a `↳` row; the toast above the prompt |
 | 4 | nested: a list item's text, a quote block, a card's content (inside its border and padding) |
 
@@ -404,8 +404,9 @@ The same reply's first row under the pointer, and a passage a thread was asked a
 - The cards a turn added or changed stand under the turn's last reply, each once, in its last state: those a
   `thimble-run` command ran too, a shell loop over several cards included. They, the footer and the `↳` rows are drawn
   again after `thimble --continue` or `--resume`.
-- The margin at column 0, the ⏺'s: the `?` (blue) of the passage under the pointer (a heading's asks about its whole
-  section, a card's about the card); a blue `↳` beside a passage or a card a thread was asked about (a passage also
+- The margin at column 0, the ⏺'s: a dim `·` beside each passage and card a side thread can be asked about, which
+  becomes the `?` (blue) of the passage under the pointer (a heading's asks about its whole section, a card's about the
+  card); a blue `↳` beside a passage or a card a thread was asked about (a passage also
   when the thread was asked about a citation of a value or a place in it; a card also when the thread was asked about a
   value it shows or a passage of its takeaway, a citation in it), which stays, and a click on it opens that thread in
   the threads panel. On the reply's first row the mark takes the ⏺'s cell: the `?` drawn over it under the pointer, a

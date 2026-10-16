@@ -180,9 +180,10 @@ const at = (rows: string[], text: string) => rows.findIndex(r => r.includes(text
 
 // ------------------------------------------------------------------------------------------------ main's chat
 
-test("main's reply and its card stand on Claude Code's own indent, column 2; the `?` takes the ⏺'s cell, never more indent", async ($, on) => {
+test("main's reply and its card stand on Claude Code's own indent, column 2; the `?` takes the ⏺'s cell or a passage's dot, never more indent", async ($, on) => {
   // Matt, 2026-10-07: "can we keep the same left indent for thimble content while keeping our ability to show the
-  // question mark? we could still indent 2 chars and replace the dot with ? when they overlap"
+  // question mark? we could still indent 2 chars and replace the dot with ? when they overlap"; 2026-10-16: the "?"
+  // "should be a dot that gets replaced with a question mark when you hover"
   const w = world(on)
   await start($, w)
   await turn($, w, 'r1', 'The export holds most of its pages in one wiki, dse.\n\nIts revisions follow the same split.')
@@ -195,7 +196,8 @@ test("main's reply and its card stand on Claude Code's own indent, column 2; the
   // the ⏺ at column 0 and the prose at 2, as Claude Code draws its own replies; the card's border, its takeaway and
   // the footer on the same edge
   expect(rest[0]).toBe('⏺ The export holds most of its pages in one wiki, dse.')
-  expect(rest[2]).toBe('  Its revisions follow the same split.')
+  // a later passage: a dim dot in the ⏺'s column, which the pointer turns into its `?`
+  expect(rest[2]).toBe('· Its revisions follow the same split.')
   expect(rest[at(rest, '╭')]).toMatch(/^ {2}╭─+╮$/)
   // the fixtures' thread t1 was asked about the card: its ↳ in the margin beside the card's title
   expect(rest[at(rest, 'What does the export hold per wiki?')]).toMatch(/^↳ │ What does the export hold per wiki\? +│$/)
@@ -215,6 +217,13 @@ test("main's reply and its card stand on Claude Code's own indent, column 2; the
   expect(words(marks[0])).toBe('⏺')
   expect(marks[1]!.props).toMatchObject({ position: 'absolute', top: 0, left: 0, display: 'none' })
   expect(marks[1]!.hover).toEqual({ display: 'flex' })
+  // a later passage's margin: the dim dot, and the same `?` over it
+  const second = (await ui.find({ type: 'Box', key: 'row-1-1' })) as Node
+  const dots = ((((second.children ?? []) as Node[])[0]!.children ?? []) as Node[])
+  expect(words(dots[0])).toBe('·')
+  expect(dots[0]!.props).toMatchObject({ dimColor: true })
+  expect(dots[1]!.props).toMatchObject({ position: 'absolute', top: 0, left: 0, display: 'none' })
+  expect(dots[1]!.hover).toEqual({ display: 'flex' })
   await ui.unmount()
 })
 
@@ -244,7 +253,7 @@ test("a passage a side thread was asked about keeps its `↳` in the ⏺'s cell 
   const rows = await screen(ui, 100)
   print('a reply whose first passage has a thread', rows)
   expect(rows[0]).toBe('↳ the deletions')
-  expect(rows[2]).toBe('  They came on one day.')
+  expect(rows[2]).toBe('· They came on one day.')
   expect(await ui.find({ type: 'Client', key: 'asked-1-0' })).toBeDefined()
   await ui.unmount()
 })

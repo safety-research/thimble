@@ -58,8 +58,8 @@ Claude Code's panel chrome, no right-click menu.
   does not hold its value (`thimble state resolve`); in a card's takeaway, `◌` after it while thimble's links check
   runs, `✓` once it found the value, a red `×` when it found another. The citation under the pointer shows its status in
   plain words on a quiet box (`found in README.md line 3`, `found on the card; its value is not checked`, `not found: …
-  does not exist`, and why). The blue `?` beside a passage, in the ⏺'s column (over the ⏺ on the reply's first row),
-  asks a side thread about it (a heading's about its whole section, a card's about the card); once one was asked, a
+  does not exist`, and why). A dim `·` beside a passage, in the ⏺'s column, becomes a blue `?` under the pointer (over
+  the ⏺ on the reply's first row), which asks a side thread about it (a heading's about its whole section, a card's about the card); once one was asked, a
   blue `↳` stays there and opens it. While main streams,
   citations show as links and a card's line as `◌ <its question>`, never `[[…]]`; a citation typed into the prompt is
   blue and underlined too. A chip, a citation that names only its place (`[[card:<id>]]`, `[↗](<ref>)`), reads as its

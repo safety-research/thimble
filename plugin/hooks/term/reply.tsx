@@ -52,6 +52,21 @@ export const MARGIN = 2
 /** A reply's margin in the panel (a side thread's answer, a document): its marks at M, its text at A0. */
 export const PANEL_MARGIN = 2
 
+/** The mark beside a passage or a card a side thread can be asked about, dim; the pointer turns it into a "?". */
+export const DOT = '·'
+
+/** The "?" that asks a side thread: blue under the pointer, drawn out of the flow over the cell's glyph (the ⏺ or a
+ *  passage's dot) and shown only while the pointer is over the row, which the row's keyed Box scopes (so its own Box
+ *  takes no key: a keyed one would scope its own hover, and a hidden Box is never under the pointer). */
+function askMark(cx: Ctx, e: ResolveInput, key: string, press: () => void): RenderElement {
+  const { Box, Button } = cx.els(e)
+  return (
+    <Box width={1} display="none" hover={{ display: 'flex' }} position="absolute" top={0} left={0}>
+      <Button key={key} label="?" plain hover={{ color: LINK }} onPress={press} />
+    </Box>
+  )
+}
+
 const CARD_REF = /^(?:card|cell):([A-Za-z0-9_-]+)(?:@[A-Za-z0-9_]+)?(?:#(.*))?$/
 const CALL_REF = /^call:[A-Za-z0-9_-]+(?:#L(\d+)(?:-L?(\d+))?)?$/
 
@@ -420,20 +435,14 @@ export async function drawReply(cx: Ctx, e: ResolveInput, text: string, width: n
     return () => opts.ask!({ kind: 'sentence', text: words.slice(0, 1200) })
   }
   // the margin's mark: a blue ↳ once a thread was asked about the passage, which stays; else a blue "?" shown under the
-  // pointer, over the ⏺ on the reply's first row (`over`), which it hides while it shows
-  const markOf = async (ask: Ask | undefined, over: boolean): Promise<{ el: RenderElement; asked: boolean } | null> => {
+  // pointer over the cell's glyph, the ⏺ on the reply's first row and a dim dot on any other passage's, which it hides
+  // while it shows (Matt, 2026-10-16: "a dot that gets replaced with a question mark when you hover")
+  const markOf = async (ask: Ask | undefined): Promise<{ el: RenderElement; asked: boolean } | null> => {
     if (!ask || !live) return null
     const tid = opts.open ? await threadAbout(cx, ask.words) : ''
     if (tid) return { asked: true, el: linesEl(cx, e, `asked-${ask.key}`, [[{ s: '↳', fg: LINK }]], [{ y: 0, x0: 0, x1: 1, row: false, run: () => opts.open?.(tid) }], 1) }
     if (!ask.press) return null
-    return {
-      asked: false,
-      el: (
-        <Box width={1} display="none" hover={{ display: 'flex' }} {...(over ? { position: 'absolute' as const, top: 0, left: 0 } : {})}>
-          <Button key={`ask-${ask.key}`} label="?" plain hover={{ color: LINK }} onPress={ask.press} />
-        </Box>
-      ),
-    }
+    return { asked: false, el: askMark(cx, e, `ask-${ask.key}`, ask.press) }
   }
   // a block's row: its margin (⏺ on the reply's first, a passage's mark in its cell), then the block, filling the column.
   // A flag stands on the row of the block it names (`flag.row`), in its check's color, over a ↳ or a "?" on that row
@@ -441,24 +450,25 @@ export async function drawReply(cx: Ctx, e: ResolveInput, text: string, width: n
     const mark = lead
     lead = ' '
     const dot = mark.trim() !== ''
-    const q = await markOf(ask, dot)
+    const q = await markOf(ask)
     const content = (
       <Box flexDirection="column" width={cols} flexShrink={1}>
         {el}
       </Box>
     )
     const flagEl = flag ? linesEl(cx, e, `flag-${ask?.key ?? `${prefix}${n}`}`, [[{ s: FLAG, fg: flag.color }]], [{ y: 0, x0: 0, x1: 1, row: false, run: () => opts.check?.(flag.id) }], 1) : null
-    // a ↳ takes the ⏺'s cell; a "?" lies over it, shown only under the pointer
+    // a ↳ takes the cell; a "?" lies over the ⏺ or a passage's dot, shown only under the pointer
+    const glyph = q?.asked ? null : dot ? <Text>{mark}</Text> : q ? <Text dimColor>{DOT}</Text> : <Text> </Text>
     const first = (
       <Box key="m0" flexDirection="row">
-        {dot && !q?.asked ? <Text>{mark}</Text> : null}
-        {q?.el ?? (dot ? null : <Text> </Text>)}
+        {glyph}
+        {q?.el ?? null}
       </Box>
     )
     const margin = !flagEl ? (
       <Box width={M} flexShrink={0} flexDirection="row" marginTop={ask?.top ?? 0}>
-        {dot && !q?.asked ? <Text>{mark}</Text> : null}
-        {q?.el ?? (dot ? null : <Text> </Text>)}
+        {glyph}
+        {q?.el ?? null}
       </Box>
     ) : (
       <Box width={M} flexShrink={0} flexDirection="column" marginTop={ask?.top ?? 0}>
@@ -698,28 +708,25 @@ export async function cardBlock(cx: Ctx, e: ResolveInput, id: string, w: number,
 }
 
 /** The cards a turn made, under its last reply, on the reply's text column (2), border to border: the border stands in
- *  for a blank row. The blue "?" in the margin beside each, under the pointer, asks a side thread about it; once one
- *  was asked, a blue ↳ stays there and opens it. */
+ *  for a blank row. A dim dot in the margin beside each title turns into a blue "?" under the pointer, which asks a
+ *  side thread about the card; once one was asked, a blue ↳ stays there and opens it. */
 export async function drawCards(cx: Ctx, e: ResolveInput, ids: readonly string[], cols: number, ask?: (t: Target) => void, open?: (thread: string) => void): Promise<RenderElement | null> {
   if (!ids.length) return null
-  const { Box, Button } = cx.els(e)
+  const { Box, Text } = cx.els(e)
   const live = e.surface === 'terminal' || e.surface === 'desktop'
   const w = Math.max(24, cols - MARGIN)
   const out: RenderElement[] = []
   for (const [i, id] of ids.entries()) {
     const card = await cardBlock(cx, e, id, w, `t${i}`, { order: i + 1 })
     const tid = live && open ? await threadAbout(cx, `card:${id}`) : ''
-    const mark = tid ? (
-      linesEl(cx, e, `asked-card-${i}`, [[{ s: '↳', fg: LINK }]], [{ y: 0, x0: 0, x1: 1, row: false, run: () => open?.(tid) }], 1)
-    ) : ask && live ? (
-      <Box width={1} display="none" hover={{ display: 'flex' }}>
-        <Button key={`ask-card-${i}`} label="?" plain hover={{ color: LINK }} onPress={() => ask({ kind: 'card', ref: `card:${id}`, cardId: id })} />
-      </Box>
-    ) : null
+    const asked = tid ? linesEl(cx, e, `asked-card-${i}`, [[{ s: '↳', fg: LINK }]], [{ y: 0, x0: 0, x1: 1, row: false, run: () => open?.(tid) }], 1) : null
+    const can = !tid && ask && live
     out.push(
       <Box key={`turn-card-${i}`} flexDirection="row">
         <Box width={MARGIN} flexShrink={0} flexDirection="row" marginTop={1}>
-          {mark}
+          {asked}
+          {can ? <Text dimColor>{DOT}</Text> : null}
+          {can ? askMark(cx, e, `ask-card-${i}`, () => ask?.({ kind: 'card', ref: `card:${id}`, cardId: id })) : null}
         </Box>
         <Box flexDirection="column" flexShrink={1}>
           {card}
