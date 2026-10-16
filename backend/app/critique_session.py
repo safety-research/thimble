@@ -4,8 +4,9 @@ itself (depth 2) after its `critique` call returns.
 The critic reviews the orientation's whole transcript and cards for coverage and competing accounts, and checks the
 drafted deck's claims against the calls that should support them. Its registration (definition) is prompts/critic.md
 with thimble's shared guidance at its end (write_session.shared_guidance: preamble.md and shared.md rendered for the
-workspace), the `critic` role's model and effort from Settings, and of thimble's tools OWN_TOOLS, so it adds no card. It writes only in its own work folder, critique-work/<chat>; when its run ends, its
-subagents' `tmp_*` folders and the large files no card uses are deleted there (work_files.after_run).
+workspace), the `critic` role's model and effort from Settings, and of thimble's tools OWN_TOOLS, so it adds no card. It
+writes only in its own work folder, critique-work/<chat>; when its run ends, its subagents' `tmp_*` folders and the
+large files no card uses are deleted there (work_files.after_run).
 
 The transcript. Raw transcripts run to megabytes of JSON and Read cuts lines at 2,000 characters, so the critique
 renders the orientation's agent transcript and its descendants' into one digest, each tool call under its ref in the

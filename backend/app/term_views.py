@@ -2,10 +2,10 @@
 
 A view built for the terminal (its build's target `term-page`, views.py) has view.term.js beside its reader.py: a
 program the view builder writes on the terminal view kit (term_kit/kit.mjs, docs/terminal-views.md). The program runs
-sandboxed, as a view's page runs in a sandboxed iframe: one process per open view, alive while the view is open, which reads no file, opens no socket and starts no
-process. It hears the panel's size, the theme, what thimble keeps for the view, the analyst's keys and clicks and the
-answers of its reader queries, and answers each with a frame: rows of styled runs, their hot regions, the keys it binds
-and the words of its hint row.
+sandboxed, as a view's page runs in a sandboxed iframe: one process per open view, alive while the view is open, which
+reads no file, opens no socket and starts no process. It hears the panel's size, the theme, what thimble keeps for the
+view, the analyst's keys and clicks and the answers of its reader queries, and answers each with a frame: rows of styled
+runs, their hot regions, the keys it binds and the words of its hint row.
 
     thimble-term ──POST /open /event /close──▶ host (this module, `thimble view host`) ──stdin──▶ sandboxed program
                  ◀────── stdout: frames ──────                                       ◀──stdout──  (runtime.mjs + kit)

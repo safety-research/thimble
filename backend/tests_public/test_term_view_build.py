@@ -1,9 +1,10 @@
 """A view built for the terminal (a build whose target is term-page, views.target_of): its builder is asked for
-view.term.js and reader.py in place of view.html (prompts/dev-view.md's term-page blocks), its gate runs the reader's checks and then draws the program as text
-(views.term_draws, term_views.draw_check) at 120 and 200 columns in light and dark and at the first place that resolved,
-with no browser, and fails on a program error, a timeout or a draw past the panel; its reviewer gets those drawings in
-place of pictures. The worked example Timeline passes; a broken program fails with what broke. Browser mode keeps its
-page and its pictures. Reader calls run in this process (views._runner), so no kernel starts."""
+view.term.js and reader.py in place of view.html (prompts/dev-view.md's term-page blocks), its gate runs the reader's
+checks and then draws the program as text (views.term_draws, term_views.draw_check) at 120 and 200 columns in light and
+dark and at the first place that resolved, with no browser, and fails on a program error, a timeout or a draw past the
+panel; its reviewer gets those drawings in place of pictures. The worked example Timeline passes; a broken program fails
+with what broke. Browser mode keeps its page and its pictures. Reader calls run in this process (views._runner), so no
+kernel starts."""
 from __future__ import annotations
 
 import json

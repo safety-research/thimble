@@ -94,9 +94,9 @@ async def _comment(act: checks._Active, ref: str, text: str, tid: str, details: 
 def test_the_built_ins_are_three_checks_over_the_documents_and_the_cards_and_only_important_details_is_on(
         workspaces_tmp):
     """0.7.0: Judgment calls, Unverifiable and Important details, in that order, each covering the documents and the
-    cards, and since 0.9.0 Claude's answers; Verified is no built-in any more, so a new workspace does not list it. Only Important details is on until the
-    analyst turns a check on or off (feedback on 0.8.0: "don't expose comments other than important details by
-    default")."""
+    cards, and since 0.9.0 Claude's answers; Verified is no built-in any more, so a new workspace does not list it. Only
+    Important details is on until the analyst turns a check on or off (feedback on 0.8.0: "don't expose comments other
+    than important details by default")."""
     config.workspace_dir(CORPUS).mkdir(parents=True, exist_ok=True)
     listed = checks.list_checks(CORPUS)
     assert [(c["id"], c["name"]) for c in listed] == [("judgment", "Judgment calls"), ("unverified", "Unverifiable"),

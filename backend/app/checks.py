@@ -641,10 +641,11 @@ def _auto(c: str) -> bool:
 
 def _current(c: str, cid: str, doc: str) -> _Active | None:
     """The run of check `cid` on `doc` that goes. After the press the server holds every run (_active). On the local
-    transport the process that starts a run (the shim for main's run_check, a hook's process for a writer's follow-on) is not the
-    one that hears its agent start and end (a hook's process) or takes its comments (the shim), so the check's file
-    decides: a run it records `running` that this process does not hold is taken up from the record, as recover takes
-    up a previous server's, and a run this process holds that the file records ended, or replaced, is let go."""
+    transport the process that starts a run (the shim for main's run_check, a hook's process for a writer's follow-on)
+    is not the one that hears its agent start and end (a hook's process) or takes its comments (the shim), so the
+    check's file decides: a run it records `running` that this process does not hold is taken up from the record, as
+    recover takes up a previous server's, and a run this process holds that the file records ended, or replaced, is let
+    go."""
     act = _active.get((c, cid, doc))
     if not _terminal(c):
         return act
@@ -834,10 +835,10 @@ async def start_run(c: str, cid: str, doc: str, *, passages_: list[str] | None =
     changed since `since` when it is given), or on Claude's answers (ANSWERS, answer_cover, of the answers kept since
     `since`, a time), and return its record, or None when it has nothing to cover, the document is not written or the
     check does not cover the cards or the answers. A running run of it on `doc` is stopped first. `notify` tells main
-    when it ends, never for a run over answers. Its agent starts as `route` says (subagents.start_job): a click (Run) or a follow-on start (a
-    writer's end, main's turn end) through main's module when a place is free (MAX_SESSIONS), queued otherwise; a typed
-    start (main's run_check) at once, as the exact Agent call main makes, which the record's `_answer` holds for the
-    tool."""
+    when it ends, never for a run over answers. Its agent starts as `route` says (subagents.start_job): a click (Run) or
+    a follow-on start (a writer's end, main's turn end) through main's module when a place is free (MAX_SESSIONS),
+    queued otherwise; a typed start (main's run_check) at once, as the exact Agent call main makes, which the record's
+    `_answer` holds for the tool."""
     from . import investigation as inv, report_types  # noqa: PLC0415
 
     check = read(c, cid)
