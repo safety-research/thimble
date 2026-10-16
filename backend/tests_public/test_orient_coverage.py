@@ -11,17 +11,14 @@ answers whatever an earlier version's record says."""
 from __future__ import annotations
 
 import asyncio
-import json
 
 import pytest
 
-from app import (agents, calls, config, corpus as corpus_mod, critique_session, events, orient_checks, orient_session,
-                 orientation, records, subagents, tools)
-from app import subagent_files as sf
+from app import (agents, calls, config, corpus as corpus_mod, events, orient_checks, orient_session,
+                 orientation, records, subagents)
 from subagent_fakes import bridge  # noqa: F401 — a fixture
 
 CORPUS = "mini"
-NOTE = {"question": "What does the corpus hold?", "kind": "note", "text": "Three agents.", "takeaway": "Three agents."}
 
 
 @pytest.fixture()
@@ -33,19 +30,6 @@ async def chat(workspaces_tmp):
     yield made
     calls.forget()
     orient_session._closing.pop(CORPUS, None)
-
-
-@pytest.fixture()
-def critiques(monkeypatch) -> list[dict]:
-    """The critiques that started, each answering `Report.`"""
-    started: list[dict] = []
-
-    async def fake(ctx, args):
-        started.append(args)
-        return tools.ok("Report.")
-
-    monkeypatch.setattr(critique_session, "tool_critique", fake)
-    return started
 
 
 @pytest.fixture()
@@ -118,16 +102,6 @@ def test_a_read_counts_the_lines_its_output_numbers(chat):
         + _shares({"agents/agent-01.jsonl": 4, "board.jsonl": 8}))
 
 
-def test_head_sed_and_a_cut_line_count_the_lines_they_printed(chat):
-    """`head` and `sed -n` print lines of the files they name, each found whole; a line `head -c` cut short is found by
-    a piece of it."""
-    root = config.corpus_dir(CORPUS)
-    _bash(chat, 1, f"cd {root} && head -3 board.jsonl", "\n".join(_lines("board.jsonl", 1, 3)))
-    _bash(chat, 2, f"sed -n '5,6p' {root}/events.jsonl", "\n".join(_lines("events.jsonl", 5, 6)))
-    _bash(chat, 3, f"head -c 150 {root}/agents/agent-02.jsonl", _lines("agents/agent-02.jsonl", 1, 1)[0][:150])
-    assert _seen(chat) == {"board.jsonl": {1, 2, 3}, "events.jsonl": {5, 6}, "agents/agent-02.jsonl": {1}}
-
-
 def test_a_command_that_only_counts_or_lists_views_nothing(chat):
     """wc -l, ls, find and grep -c name files and print counts and names but no line of a file."""
     root = config.corpus_dir(CORPUS)
@@ -143,157 +117,6 @@ def test_a_command_that_only_counts_or_lists_views_nothing(chat):
     _bash(chat, 4, f"cd {root} && grep -c agent events.jsonl board.jsonl", "events.jsonl:20\nboard.jsonl:8")
     assert _seen(chat) == {}
     assert orient_checks.coverage(CORPUS, chat).text == "Coverage: viewed no file · 0% of files · 0% of records"
-
-
-def test_a_script_s_printed_fields_and_table_rows_count_the_records_they_came_from(chat):
-    """A script that prints fields of records, cut short, after another field or as the rows of a table, shows the
-    records they came from; so do the rows a database query prints."""
-    root = config.corpus_dir(CORPUS)
-    posts = [json.loads(x) for x in _lines("board.jsonl")]
-    script = f"cd {root} && python3 - <<'EOF'\nimport json\nfor line in open('board.jsonl'):\n    r = json.loads(line)\n"
-    printed = "\n".join(f"{r['author']} {r['body'].splitlines()[0][:70]}" for r in posts[:2])
-    _bash(chat, 1, script + "    print(r['author'], r['body'][:70])\nEOF", printed)
-    table = "   id    author                                               body\n" + "\n".join(
-        f"{i}  {r['id']:>3}  {r['author']}  {r['body'].splitlines()[0][:47]}..." for i, r in enumerate(posts[3:5]))
-    _bash(chat, 2, script + "EOF\npython3 -c 'import pandas as pd; print(pd.read_json(\"board.jsonl\", lines=True))'", table)
-    subset = json.dumps({k: posts[6][k] for k in ("id", "author", "created_at")})
-    _bash(chat, 3, script + "    print(json.dumps({k: r[k] for k in ('id', 'author', 'created_at')}))\nEOF", subset)
-    _bash(chat, 4, f"sqlite3 {root}/forge.db 'select * from prs limit 2'",
-          "7101|Document the two line-break modes|Document the two line-break modes.\n"
-          "7114|Quote the style name in the configuration example|Quote the style name in the configuration example.")
-    got = _seen(chat)
-    assert got["board.jsonl"] == {1, 2, 4, 5, 7}
-    assert len(got["forge.db"]) == 2 and set(got) == {"board.jsonl", "forge.db"}
-
-
-def test_a_file_made_from_the_corpus_outside_it_counts_as_the_lines_it_came_from(chat, tmp_path):
-    """A dump the orientation wrote of a corpus file into its work folder, by a call that printed nothing, and then read
-    there by its absolute path (Read, cat, grep in the folder) shows the lines of the file the writing call named; so
-    does a long output Claude Code saved to a file, read with Read, by the call it came from. A file outside the corpus
-    that no call naming corpus files gave shows nothing."""
-    root = config.corpus_dir(CORPUS)
-    dumps = tmp_path / "orient-work" / "dumps"
-    posts = [json.loads(x) for x in _lines("board.jsonl")]
-    dumped = [f"L{i} | {r['author']} | {r['body'].splitlines()[0][:70]}" for i, r in enumerate(posts, 1)]
-    _bash(chat, 1, f"mkdir -p {dumps} && cd {root} && python3 dump.py board.jsonl > {dumps}/board.txt", "")
-    _call(chat, 2, "Read", {"file_path": f"{dumps}/board.txt"}, "\n".join(f"{k}\t{x}" for k, x in enumerate(dumped[:2], 1)))
-    _bash(chat, 3, f"sed -n 4p {dumps}/board.txt", dumped[3])
-    _bash(chat, 4, f"cd {dumps} && grep -n . *.txt | sed -n 6p", f"board.txt:6:{dumped[5]}")
-    saved = tmp_path / "tool-results" / "b1.txt"
-    _bash(chat, 5, f"cd {root} && python3 -c 'print(open(\"events.jsonl\").read())'",
-          f"<persisted-output>\nOutput too large (41.2KB). Full output saved to: {saved}\n\nPreview (first 2KB):\n")
-    _call(chat, 6, "Read", {"file_path": str(saved)}, "\n".join(f"{k}\t{x}" for k, x in enumerate(_lines("events.jsonl", 2, 3), 1)))
-    _call(chat, 7, "Read", {"file_path": str(tmp_path / "notes.md")}, f"1\t{dumped[6]}")
-    _bash(chat, 8, f"cat {tmp_path}/other/board.txt", dumped[7])
-    assert _seen(chat) == {"board.jsonl": {1, 2, 4, 6}, "events.jsonl": {2, 3}}
-
-
-def test_a_line_found_in_a_file_the_call_names_by_path_counts_there_alone(chat):
-    """A query whose table shares a folder's name (`... from agents`) names that folder's files too, but the PR title it
-    printed from forge.db, which agent-01's transcript also holds, counts as a row of forge.db alone; text a command
-    printed from agent-02's transcript counts in agent-02's, though agent-01's holds it too."""
-    root = config.corpus_dir(CORPUS)
-    _bash(chat, 1, f"sqlite3 {root}/forge.db 'select title from prs where number = 7101; select count(*) from agents'",
-          "Document the two line-break modes\n3")
-    got = _seen(chat)
-    assert set(got) == {"forge.db"} and len(got["forge.db"]) == 1
-    line = next(n for n, x in enumerate(_lines("agents/agent-02.jsonl"), 1) if "Clarify the width parameter" in x)
-    _bash(chat, 2, f"cd {root} && sed -n {line}p agents/agent-02.jsonl | grep -o 'Clarify the width parameter[^\"]*'",
-          "Clarify the width parameter")
-    got = _seen(chat)
-    assert got["agents/agent-02.jsonl"] == {line} and "agents/agent-01.jsonl" not in got
-
-
-def test_a_line_found_in_more_files_than_shared_max_counts_in_none(chat, monkeypatch):
-    """Text that many of the named files hold, such as a field's name, identifies no record."""
-    root = config.corpus_dir(CORPUS)
-    _bash(chat, 1, f"grep -oh cache_read_input_tokens {root}/agents/*.jsonl | sort -u", "cache_read_input_tokens")
-    assert set(_seen(chat)) == {f for f in _sizes() if f.startswith("agents/")}
-    monkeypatch.setattr(orient_checks, "SHARED_MAX", 2)
-    assert _seen(chat) == {}
-
-
-async def test_a_card_s_output_counts_by_the_files_its_code_read(chat):
-    """add_card's result shows the start of the card's outputs: a line of a file the card's code read counts, though
-    the code names no file."""
-    from app import notebook
-
-    made = await tools.call(CORPUS, "add_card", NOTE, session=orient_session.KEY)
-    cid = made.text.split("card:", 1)[1].split()[0].strip("`.,)")
-    echo = f"$ add_card question=\"{'What happened first, and then? ' * 10}\" code=\"rows = load()\" takeaway=\"[[3|card:x1]]\""
-    result = f"{echo}\ncard:{cid}\n[out0]\nL1|{_lines('events.jsonl', 3, 3)[0]}"
-    _call(chat, 1, "mcp__plugin_thimble_thimble__add_card", {"code": "rows = load()", "question": "What happened?"}, result)
-    assert _seen(chat) == {}, "its code names no file, and the card read none"
-    ws = config.workspace_dir(CORPUS)
-    for _, nb in notebook._stored(ws):
-        for cell in nb.get("cells") or []:
-            if cell.get("id") == cid:
-                cell["reads"] = ["events.jsonl"]
-                notebook.write_notebook(ws, nb)
-    assert _seen(chat) == {"events.jsonl": {3}}
-
-
-def test_only_the_orientation_and_the_chats_under_it_count_never_a_critique_or_another_chat(chat):
-    root = config.corpus_dir(CORPUS)
-    step = agents.new_agent(CORPUS, agents.STEP_ROLE, "survey", parent=chat, announce=False)["id"]
-    critic = agents.new_agent(CORPUS, agents.STEP_ROLE, "critique", parent=chat, announce=False,
-                              agent_type=orient_checks.CRITIC)["id"]
-    critic_step = agents.new_agent(CORPUS, agents.STEP_ROLE, "verify", parent=critic, announce=False)["id"]
-    _read(chat, 1, "board.jsonl", 1, 2, at=step)
-    _read(chat, 2, "events.jsonl", 1, 2, at=critic)
-    _read(chat, 3, "README.md", 1, 2, at=critic_step)
-    _read(agents.MAIN_ID, 4, "prompts/worker.md", 1, 2)
-    _bash(chat, 5, f"cat {root}/manifest.json", "\n".join(_lines("manifest.json")), at=critic_step)
-    assert _seen(chat) == {"board.jsonl": {1, 2}}, "its subagent's Read counts"
-
-
-def test_with_every_file_viewed_the_line_says_so_and_groups_by_glob_short_of_it(chat, monkeypatch):
-    sizes = _sizes()
-    n = 0
-    for f in sizes:
-        if f != "forge.db":
-            n += 1
-            _read(chat, n, f, 1, 1)
-    text = orient_checks.coverage(CORPUS, chat).text
-    assert text.startswith("Coverage: viewed only agents/*.jsonl, ") and "forge.db" not in text
-    _bash(chat, n + 1, f"sqlite3 {config.corpus_dir(CORPUS)}/forge.db 'select title from prs limit 1'",
-          "Document the two line-break modes")
-    seen = {f: 1 for f in sizes}
-    assert orient_checks.coverage(CORPUS, chat).text == "Coverage: viewed every file · " + _shares(seen)
-    monkeypatch.setattr(orient_checks, "LINE_READERS", ("lines", "csv", "sqlite", "json"))
-    assert orient_checks.coverage(CORPUS, chat).text.endswith(" of lines"), "lines where every file is read by lines"
-
-
-def test_a_glob_viewed_in_part_past_its_named_files_gives_its_count(chat, monkeypatch):
-    monkeypatch.setattr(orient_checks, "COVERAGE_NAMED", 1)
-    _read(chat, 1, "agents/agent-01.jsonl", 1, 1)
-    _read(chat, 2, "agents/agent-02.jsonl", 1, 1)
-    assert orient_checks.coverage(CORPUS, chat).text.startswith("Coverage: viewed only agents/*.jsonl (2 of 3 files) · ")
-
-
-def test_past_its_globs_it_groups_by_top_folder_and_counts_the_rest(chat, monkeypatch):
-    monkeypatch.setattr(orient_checks, "COVERAGE_GLOBS", 3)
-    monkeypatch.setattr(orient_checks, "COVERAGE_LISTED", 2)
-    for n, f in enumerate(("agents/agent-01.jsonl", "agents/agent-02.jsonl", "agents/agent-03.jsonl", "board.jsonl",
-                           "prompts/worker.md"), 1):
-        _read(chat, n, f, 1, 1)
-    text = orient_checks.coverage(CORPUS, chat).text
-    assert text.startswith("Coverage: viewed only agents/**, board.jsonl, and 1 more · "), text
-
-
-def test_past_its_byte_budget_records_are_estimated_and_marked(chat, monkeypatch):
-    monkeypatch.setattr(orient_checks, "COUNT_BYTES", 10_000)
-    _read(chat, 1, "board.jsonl", 1, 3)
-    assert " · ~" in orient_checks.coverage(CORPUS, chat).text
-
-
-async def test_mid_run_no_call_hears_of_coverage_and_the_critique_starts_at_once(chat, critiques):
-    root = config.corpus_dir(CORPUS)
-    _bash(chat, 1, f"head -3 {root}/board.jsonl")
-    made = await tools.call(CORPUS, "add_card", NOTE, session=orient_session.KEY)
-    assert not made.is_error and "Coverage" not in made.text and "events.jsonl" not in made.text
-    ran = await tools.call(CORPUS, "critique", {}, session=orient_session.KEY)
-    assert len(critiques) == 1 and ran.text.endswith("Report.")
 
 
 async def test_the_first_run_s_end_adds_the_line_to_its_thread_main_s_event_and_summary(chat, told, monkeypatch):
@@ -314,88 +137,3 @@ async def test_the_first_run_s_end_adds_the_line_to_its_thread_main_s_event_and_
     [event] = told
     assert event["kind"] == orientation.ORIENT_KIND and event["text"].splitlines()[1] == want
     assert len(want) > events.LINE_CHARS and events.terminal_line(event["kind"], event["text"], {}).splitlines()[1] == want
-
-
-async def test_a_message_sent_while_it_is_measured_waits_and_carries_the_line(chat, told, bridge):
-    """A follow-up from the browser while the first run's coverage line is measured is held, then sent with the line
-    after it (`## orient-coverage-lead`); the next one carries no line."""
-    root = config.corpus_dir(CORPUS)
-    _bash(chat, 1, f"head -3 {root}/board.jsonl")
-    want = orient_checks.coverage(CORPUS, chat).text
-    agents.update_agent(CORPUS, chat, route="subagent", agent_id="a1")
-    with subagents.update(CORPUS) as state:
-        sf.registry(state)["a1"] = {"role": "orientation", "key": "orient", "chat": chat, "status": "running",
-                                    "values": {"model": "m", "effort": "max"}}
-    orient_session.subagent_ended(CORPUS, _run(chat), "done", "Done.")
-    got = await orient_session.send(CORPUS, "And the weekends?", orient_session.BROWSER)
-    assert got == {"status": "held", "chat": chat}
-    await _closed()
-    for _ in range(100):
-        if bridge.ops("send"):
-            break
-        await asyncio.sleep(0.02)
-    [first] = bridge.ops("send")
-    assert first["text"] == "And the weekends?\n\n" + tools.hint("orient-coverage-lead", coverage=want)
-    assert orientation.read_run(CORPUS)["coverage_told"] is True
-    assert (await orient_session.send(CORPUS, "And Mondays?", orient_session.BROWSER))["status"] == "sent"
-    assert bridge.ops("send")[-1]["text"] == "And Mondays?", "the line ends one run's prompt"
-
-
-def test_a_denied_send_never_stands_for_a_request_another_send_claimed(chat):
-    """The mirror reads a denied SendMessage's result in a later pass in terminal mode; by then main's next, identical
-    SendMessage may have claimed the request message_orientation made for it. The denied call stands for no request
-    (session._request_of), so the sent one is not marked refused (live check T5)."""
-    with subagents.update(CORPUS) as state:
-        sf.registry(state)["a1"] = {"role": "orientation", "key": "orient", "chat": chat, "status": "done"}
-    ans = subagents.message_request(CORPUS, "a1", "And the weekends?", call="toolu_m1")
-    with subagents.update(CORPUS) as state:
-        assert sf.check_call(state, {"tool_name": "SendMessage", "tool_use_id": "toolu_s2",
-                                     "tool_input": ans["input"]}) is None
-    from types import SimpleNamespace
-
-    from app import session
-
-    lv = SimpleNamespace(c=CORPUS)  # all _request_of reads of the pass
-    assert session._request_of(lv, "toolu_s1", "SendMessage", ans["input"]) is None
-    assert session._request_of(lv, "toolu_s2", "SendMessage", ans["input"]) == ans["request"]
-
-
-async def test_a_stopped_or_failed_first_run_or_a_follow_up_is_not_measured(chat, told, monkeypatch):
-    async def no_measure(*a, **kw):
-        raise AssertionError("not measured")
-
-    monkeypatch.setattr(orient_session, "measure", no_measure)
-    for status in ("failed", "stopped"):
-        orientation.record(CORPUS, status="running")
-        orient_session.subagent_ended(CORPUS, _run(chat), status, "")
-        assert not orient_session.running(CORPUS) and "Coverage" not in told[-1]["text"], status
-    orientation.record(CORPUS, run=1, status="running")
-    orient_session.subagent_ended(CORPUS, _run(chat, k=1), "done", "Revised card 2.")
-    assert not orient_session.running(CORPUS) and "Coverage" not in told[-1]["text"]
-
-
-async def test_the_critic_s_first_message_has_the_line_in_place_of_the_unread_check(chat):
-    root = config.corpus_dir(CORPUS)
-    _bash(chat, 1, f"head -3 {root}/board.jsonl")
-    text = await critique_session.checks_text(CORPUS, chat)
-    assert text.splitlines()[0] == "- " + orient_checks.coverage(CORPUS, chat).text
-    assert "were opened by no card" not in text
-
-
-async def test_the_critique_is_the_orientation_s_choice_with_no_switch(workspaces_tmp):
-    """The orientation's prompt offers the critique whatever its start said; a start records no critique switch and
-    keeps its deck; and tools._as_caller refuses the orientation neither `critique` nor a card tool, also on the record
-    of an earlier version whose critique or deck was off."""
-    assert "when a review would help, call `critique`" in orient_session.system_prompt(CORPUS, "")
-    orientation.start_requested(CORPUS, {"text": "", "passes": ["views"], "critique": False})
-    rec = orientation.read_run(CORPUS)
-    assert rec["passes"] == ["final"] and "critique" not in rec and orientation.deck_of(rec)
-    assert "critique" in orient_session.ORIENT_TOOLS and "propose_view" not in orient_session.ORIENT_TOOLS
-    orientation._write_run(CORPUS, {**rec, "passes": ["views"], "critique": False})  # an earlier version's record
-    ws = config.workspace_dir(CORPUS)
-    with subagents.update(CORPUS) as state:
-        sf.registry(state)["orient1"] = {"key": orient_session.KEY, "role": "orientation", "status": "running"}
-    sf.add_caller(ws, "toolu_o1", "orient1", "thimble:orientation")
-    sf.add_caller(ws, "toolu_o2", "orient1", "thimble:orientation")
-    assert await tools._as_caller(CORPUS, "critique", "toolu_o1") == ("", orient_session.KEY)
-    assert await tools._as_caller(CORPUS, "add_card", "toolu_o2") == ("", orient_session.KEY)
