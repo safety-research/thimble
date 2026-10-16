@@ -117,7 +117,7 @@ async def test_every_tool_runs_in_process_and_opens_no_socket(term, no_sockets, 
     for name, given in args.items():
         res = await call(term, name, **given)
         assert isinstance(res.get("content"), list) and res["content"], name
-        assert text(res).startswith(f"$ {name}") or res["is_error"], (name, text(res))
+        assert not text(res).startswith("$ "), ("a result does not echo the call", name, text(res))
         assert "server" not in text(res).lower() or name in ("file_dev_ticket",), (name, text(res))
     assert no_sockets == []
     # what the calls made is in the workspace's files, as a server would have written it
@@ -212,8 +212,7 @@ async def test_a_code_ticket_is_refused_and_a_card_screenshot_needs_the_harness(
     res = await call(term, "file_dev_ticket", title="t", body="b")
     # 0.9.0 (SPEC-v2 3.16): code tickets are filed in every transport, so the terminal-mode refusal is gone
     assert "browser mode" not in text(res) and not tools.hint("ticket-terminal")
-    cid = re.search(r"card:([A-Za-z0-9_-]+)", text(await call(term, "add_card", question="q", kind="note", text="x"))
-                    .split("\n", 1)[1]).group(1)
+    cid = re.search(r"card:([A-Za-z0-9_-]+)", text(await call(term, "add_card", question="q", kind="note", text="x"))).group(1)
     res = await call(term, "screenshot", ref=f"card:{cid}")
     assert res["is_error"], "THIMBLE_RENDER is off in the suite: the harness cannot draw"
 

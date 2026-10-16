@@ -9,8 +9,8 @@ process (local transport) or posts it to `POST /api/tools/{name}` after the pres
 feature the analyst turned off (FEATURE_TOOLS) stays listed and refuses with one line (call). Its THIMBLE_SESSION
 (Ctx.session) says which session called: none for main, `orient`,
 `writer:<doc>`, `critique:orient` or `check:<id>:<doc>`. Tools whose machinery lives elsewhere run `tool_<name>(ctx,
-args)` in that module. Every result starts with the call as run (call_line); a card's result shows the first lines of
-each output, a chart as the rows it draws, and hint lines from prompts/tools.md. The card tools also answer to the
+args)` in that module. A result does not echo the call, which the model and the terminal have already; a card's
+result shows the first lines of each output, a chart as the rows it draws, and hint lines from prompts/tools.md. The card tools also answer to the
 alias names of the cell tools and `cell:` refs (Spec.aliases, ARG_ALIASES, cite.CARD_PREFIXES)."""
 from __future__ import annotations
 
@@ -81,13 +81,13 @@ RESULT_LINES_KEY = "run_cell_result_lines"  # settings.json; a persisted key, no
 CELL_READ_LIMIT = 40_000
 WARM_REFS_MAX = 20  # an example's quoted refs a view reads, resolved off the loop before add_card or edit_card reads them
 LINE_LIMIT = 160  # chars of a takeaway / md text on a `cells` line
-CALL_ARG_CHARS = 80  # chars of one argument on a result's `$` line (call_line)
+CALL_ARG_CHARS = 80  # chars of a value _cut keeps
 # of one read_ref result, in UTF-16 code units (read_parts.units), so that it stays whole in the session that reads it:
 # Claude Code (2.1.300) saves a tool result of more than 50,000 characters to a file and shows the model a 2KB preview
 # of it, and an MCP result its estimate (4 characters a token) puts past 12,500 tokens is counted, and past 25,000
 # tokens (MAX_MCP_OUTPUT_TOKENS) saved to a file in its place. read_parts.READ_UNITS is under the first and never
-# counted, whatever the text; this leaves room in it for the call line (call_line, `$ read_ref ref="…"`) that comes
-# first.
+# counted, whatever the text; this keeps the room 0.8.0 left for the call line results no longer start with, so a
+# result is cut where it was.
 READ_REF_UNITS = read_parts.READ_UNITS - 2 * CALL_ARG_CHARS - 40
 TAKEAWAY_AUTHOR = "model"  # cell.takeaway_author for a takeaway written with edit_card (the analyst's is `analyst`)
 TAKEAWAY_WORDS = 40  # the words a takeaway may run to, which the `## takeaway-long` line of prompts/tools.md states
@@ -702,7 +702,7 @@ async def call(c: str, name: str, args: dict[str, Any] | None, *, actor: str = A
     name = canonical(name)
     spec = REGISTRY[name]
     if (off := feature_refusal(c, name)) is not None:  # a feature the analyst turned off (FEATURE_TOOLS)
-        return with_call_line(name, args, err(off))
+        return err(off)
     # a follow-up of the orientation is one change the analyst asked for, so its steps are one undo (undo.batching)
     batch = None
     if session_kind(session) == ORIENT_SESSION:
@@ -718,7 +718,7 @@ async def call(c: str, name: str, args: dict[str, Any] | None, *, actor: str = A
         from . import card_check  # noqa: PLC0415 — card_check imports the harness
 
         res = await card_check.after_tool(c, name, args, res, session=session, anchor=anchor)
-    return with_call_line(name, args, res)
+    return res
 
 
 async def _run(spec: Spec, c: str, name: str, args: dict[str, Any] | None, actor: str, notebook: str | None, terminal: bool,
@@ -746,39 +746,8 @@ async def _run(spec: Spec, c: str, name: str, args: dict[str, Any] | None, actor
         return err(f"{name} failed: {type(e).__name__}: {e}")
 
 
-def call_line(name: str, args: dict[str, Any] | None) -> str:
-    """The first line of every result, the call as run, the way a shell echoes a command: `$ add_card kind=plot
-    question="..."`, strings quoted and cut to CALL_ARG_CHARS, other values as compact JSON."""
-    parts = [f"$ {name}"]
-    for k, v in (args or {}).items():
-        if v is None or not isinstance(k, str):
-            continue
-        if isinstance(v, str):
-            body = json.dumps(v, ensure_ascii=False)[1:-1]
-            parts.append(f'{k}="{_cut(body)}"')
-        elif isinstance(v, bool) or isinstance(v, (int, float)):
-            parts.append(f"{k}={json.dumps(v)}")
-        else:
-            try:
-                parts.append(f"{k}={_cut(json.dumps(v, ensure_ascii=False, separators=(',', ':'), default=str))}")
-            except (TypeError, ValueError):
-                parts.append(f"{k}={_cut(str(v))}")
-    return " ".join(parts)
-
-
 def _cut(s: str, n: int = CALL_ARG_CHARS) -> str:
     return s if len(s) <= n else s[: n - 1].rstrip() + "…"
-
-
-def with_call_line(name: str, args: dict[str, Any] | None, res: ToolResult) -> ToolResult:
-    """`res` with call_line(name, args) as its first line, ahead of the first text block (or as a new one)."""
-    line = call_line(name, args)
-    for b in res.content:
-        if b.get("type") == "text":
-            b["text"] = f"{line}\n{b.get('text', '')}" if str(b.get("text", "")) else line
-            return res
-    res.content.insert(0, {"type": "text", "text": line})
-    return res
 
 
 # --------------------------------------------------------------------------- shared helpers
