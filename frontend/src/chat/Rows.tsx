@@ -549,12 +549,14 @@ const REF_TARGET_TOOLS = new Set(['read_ref', 'screenshot', 'edit_card', 'delete
 /** The refs a call's target names, when it is a thimble call whose target is refs alone; null otherwise. Pure. */
 export function targetRefs(name: string, summary: string): string[] | null {
   if (!REF_TARGET_TOOLS.has(toolDisplayName(name))) return null
-  // a card named by its id alone, as edit_card and delete_card take it, is that card's ref
+  // a card named by its id alone, as edit_card and delete_card take it, is that card's ref: a name such as
+  // `prs-merged-week`, or an older card's random id
+  const byId = ['edit_card', 'delete_card'].includes(toolDisplayName(name))
   const parts = summary
     .split(',')
     .map((x) => x.trim())
     .filter(Boolean)
-    .map((x) => (/^[0-9a-f]{8}$/.test(x) ? `card:${x}` : x))
+    .map((x) => ((byId ? /^[A-Za-z0-9_-]+$/ : /^[0-9a-f]{8}$/).test(x) ? `card:${x}` : x))
   return parts.length && parts.every((x) => x.includes(':') && parseRef(x) != null) ? parts : null
 }
 
