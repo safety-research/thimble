@@ -74,11 +74,12 @@ Claude Code's panel chrome, no right-click menu.
   `/thimble:write` writes one.
 - **Cards.** Each card a turn of main added or changed (`add_card`, `edit_card`, `apply_label`, `thimble-run card`) is
   drawn once, under the turn's last reply, in its last state. Every card, wherever it is drawn (under a reply, the card
-  pane, the citation panel, a document), has a full round border; inside it, the title in bold (in inverse under the
-  pointer, a press asks a side thread), one blank row, then the plot or body directly; below the plot the readout (the
+  pane, the citation panel, a document), has a full round border; inside it, the title in bold, wrapped and never cut (in
+  inverse under the pointer, a press asks a side thread), with the card's id dim at the right of its first row
+  (`card:<name>`, as its chips read it), one blank row, then the plot or body directly; below the plot the readout (the
   value under the pointer, or the card's state), the label rows (the label's name a link with `↗`, which opens its
-  panel; its values in their colors, `changed since` once the label changed after the card ran), the params and the
-  takeaway. A card that read a label colors its marks by the label's values. A label card is a bar card of the label's
+  panel; its values in their colors, `changed since` once the label changed after the card ran), the params and,
+  after a blank row, the takeaway. A card that read a label colors its marks by the label's values. A label card is a bar card of the label's
   counts: its records are in the label panel. A card that cannot be read is one red line (`× card 2 cannot be drawn:
   …`). Claude Code's tool rows stay its own, folded, and no hex id is drawn, in the row or in ctrl+o's detailed view: a
   thimble tool's row names a card by its question (cut at a word, without straight quotation marks Claude Code would

@@ -32,14 +32,14 @@ import type { ChatNavStep, ChatThread, TermPanel, TermThread, TermThreadRow, Ter
 import type { ThimbleLabel } from './cell'
 import { ACCENT, FRESH, LINK, MARGIN_W, controlsEl, fieldEls, fitHints, fitTo, freshSeg, hasMargin, headerEls, hintLines, hintsEl, lineEl, linkSeg, marginKey, pointed, ruleEl, setBrowser, setHead, spread, subLine, takeBrowser, takeHead } from './chrome'
 import { chipLook, chipName, citeLabel, plainCites, quoteSpan, quotedWords, wrapAround } from './cite'
-import { MAX_BARS, MAX_NODES, MAX_TABLE_ROWS, amount, cardLayout, cut, cutRef, demojibake, labelHead, lineWidth, placeWords, shade, share, shares, turnTimes, valueColour, width, wrapRows } from './draw'
+import { MAX_BARS, MAX_NODES, MAX_TABLE_ROWS, amount, cardLayout, cut, cutRef, demojibake, labelHead, lineWidth, placeWords, shade, share, shares, titleLines, turnTimes, valueColour, width, wrapRows } from './draw'
 import type { BarRow, CardData, Cell, Item, Layout, Line, Seg } from './draw'
 import { fileRef } from './files'
 import { citationOf, placeOf, targetLabel } from './gestures'
 import type { Gesture, Target } from './gestures'
 import { FIRST as HOME_FIRST, HOME_HINTS, groupCards, homeLayout, homePick, homeReduce, labelHue } from './home'
 import type { HomeAct, HomeCardGroup, HomeCite, HomeComment, HomeData, HomeLabel, HomeLayout, HomeOpen, HomeReport, HomeThread, HomeUi, HomeView } from './home'
-import { cardsInline, chipLabel, chipWords, cid, clip, cutLine, fmt, itemsRow, labelRef, middleCut, labelState, labelStateWords, noControls, outputLine, quoted, recordFields, reportRef, stoppedTurn, windowAt } from './lib'
+import { cardTag, cardsInline, chipLabel, chipWords, cid, clip, cutLine, fmt, itemsRow, labelRef, middleCut, labelState, labelStateWords, noControls, outputLine, quoted, recordFields, reportRef, stoppedTurn, windowAt } from './lib'
 import type { Citation } from './lib'
 import { linesEl, setListKeys, takeListKeys } from './lines'
 import type { LineHit } from './lines'
@@ -1279,7 +1279,8 @@ async function drawCard(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
     void cx.submit(`Run this card again with Bash: thimble-run card ${id}`)
   }
   const code = p.mode === 'code'
-  const body: RenderElement[] = [...headerEls(els, { title: data.question, cols, sub: subLine([code ? 'its code' : tc.kind, by, ran, checked]) })]
+  // the subtitle opens with the card's id as its chips read it (`card:<name>`)
+  const body: RenderElement[] = [...headerEls(els, { title: data.question, cols, sub: subLine([cardTag(id), code ? 'its code' : tc.kind, by, ran, checked]) })]
   const runEl = busy ? <Text key="card-running">◌ running</Text> : tc.code ? <Button key="card-again" label="run again" plain onPress={again} /> : null
   const keys: Key[] = [{ key: 'ask', hotkey: 'a', onPress: ask }, ...(tc.code && !busy ? [{ key: 'again', hotkey: 'r', onPress: again }] : [])]
   const runHint = tc.code && !busy ? ['r to run again'] : []
@@ -1631,13 +1632,13 @@ function citedLines(card: CardData, v: TermVerdict, w: number, room: number): { 
 }
 
 /** A card the panel draws itself, laid out as every card is (reply.tsx cardBlock): a full round border in the rule grey
- *  with a cell of padding; its title in bold, a blank row, its body, then its label rows. */
+ *  with a cell of padding; its title in bold with its id (`card:<name>`), a blank row, its body, then its label rows. */
 function framedCard(cx: Ctx, e: PaneEvent, card: CardData, w: number, lines: Line[], key: string): RenderElement {
   const { Box, Text } = cx.els(e)
   const inner = Math.max(10, w - 4)
   return (
     <Box key={key} flexDirection="column" width={w} borderStyle="round" borderColor={COLORS.rule} paddingX={1}>
-      {paintLines(Box, Text, [[{ s: cut(card.question, inner), b: true }], [], ...lines, ...labelHead(card, inner).lines])}
+      {paintLines(Box, Text, [...titleLines(card.question, inner, cardTag(card.id)).lines, [], ...lines, ...labelHead(card, inner).lines])}
     </Box>
   )
 }

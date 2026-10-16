@@ -1,8 +1,8 @@
 // A card's insides as an interactive panel: a Client surface module, drawn on Claude Code's drawing thread (no `$`).
 // The card layout is Matt's (2026-10-07; SPEC.md rule 4 and section 2, rule 11): the border is the drawing's (reply.tsx
 // cardBlock, a Box with a full round border in the rule gray and a cell of padding), so the card's takeaway can stand
-// inside it too; in it, the card's title in bold, one blank row, then the plot or body
-// directly; everything else the card shows below the plot: the readout row (the value under the pointer, plain, or
+// inside it too; in it, the card's title in bold, wrapped and never cut, its id (`card:<name>`) dim at the right of its
+// first row, one blank row, then the plot or body directly; everything else the card shows below the plot: the readout row (the value under the pointer, plain, or
 // what thimble is doing to the card), the label rows, the params row. In the card pane the question is the panel's
 // title, so the region starts with the plot. The chart is text (block, braille and box-drawing characters), so the
 // Client can redraw it per pointer move: the mark under the pointer has its label in inverse and its value on the
@@ -15,7 +15,7 @@ import type { ClientModule, ClientSurface, RenderElement } from 'claude-code'
 
 import { focusItem } from './anim'
 import type { Focus } from './anim'
-import { cardLayout, cut, labelHead, width } from './draw'
+import { cardLayout, cut, labelHead, titleLines, width } from './draw'
 import type { CardData, CardMeta, Item, Line, Seg } from './draw'
 import { onPointer, send } from './gestures'
 import type { Target } from './gestures'
@@ -23,8 +23,8 @@ import { COLORS, paintLine } from './paint'
 
 /** `focus`: a mark to light while nothing is hovered, such as the step a story's beat names. `clip`: the rows of the
  *  plot or body drawn, the rest and the label and params rows left out (a side thread's subject, whose `… N more` is
- *  the drawing's). */
-type Props = { card: CardData; cols: number; plotRows?: number; debug?: boolean; meta?: CardMeta; pane?: boolean; focus?: Focus; clip?: number }
+ *  the drawing's). `name`: the card's id as its chip reads it (`card:<name>`), drawn on its title row. */
+type Props = { card: CardData; cols: number; plotRows?: number; debug?: boolean; meta?: CardMeta; pane?: boolean; focus?: Focus; clip?: number; name?: string }
 /** `cols`: the width the hover was set at; after a reflow it is stale. `act`: the param choice or label under the
  *  pointer. */
 type S = { hover: number; act: string; cols: number }
@@ -113,9 +113,10 @@ const Card: ClientModule<Props, S> = (props, surface) => {
   const body = clipped ? lay.lines.slice(0, props.clip) : lay.lines
   const prow = clipped ? null : paramRow(card, stale ? '' : st.act)
   const head = clipped ? { lines: [], slugs: [], hots: [] } : labelHead(card, inner, !stale && st.act.startsWith('label:') ? st.act.slice(6) : '')
-  // rows of the region: the title and the blank row under it (none in the pane), the body, then the readout row (where
-  // the card has marks to point at or a state to say), the label rows, the params row
-  const top = pane ? 0 : 2
+  // rows of the region: the title's rows and the blank row under them (none in the pane), the body, then the readout row
+  // (where the card has marks to point at or a state to say), the label rows, the params row
+  const title = pane ? { lines: [], spans: [] } : titleLines(card.question, inner, props.name ?? '', st.act === 'title' && !stale)
+  const top = pane ? 0 : title.lines.length + 1
   const readout = lay.items.length > 0 || Boolean(meta.busy) || Boolean(meta.error)
   const headTop = top + body.length + (readout ? 1 : 0)
   const prowY = headTop + head.lines.length
@@ -141,7 +142,7 @@ const Card: ClientModule<Props, S> = (props, surface) => {
     const slug = lhot && cx >= lhot.x0 && cx < lhot.x1 ? head.slugs[li] : undefined
     const i = hot || slug || ev.y - top >= body.length ? -1 : lay.hit(cx, ev.y - top)
     // the title is a hot spot: in inverse under the pointer, a press asks a side thread about the card
-    const onTitle = !pane && ev.y === 0 && cx >= 0 && cx < width(cut(card.question, inner))
+    const onTitle = !pane && ev.y >= 0 && ev.y < title.lines.length && cx >= 0 && cx < (title.spans[ev.y] ?? 0)
     const act = hot ? `${hot.param}=${hot.value}` : slug ? `label:${slug}` : onTitle ? 'title' : ''
     const plain = !ev.shift && !ev.ctrl && !ev.alt
     if (ev.type === 'down' || ev.type === 'up') {
@@ -191,8 +192,8 @@ const Card: ClientModule<Props, S> = (props, surface) => {
         ? { s: cut(meta.error, Math.max(12, Math.floor(inner * 0.6))), fg: COLORS.problem }
         : null
   const rows: RenderElement[] = []
-  // the title in bold, then one blank row (in the pane the question is the panel's title)
-  if (!pane) rows.push(paintLine(Text, [{ s: cut(card.question, inner), b: true, ...(st.act === 'title' && !stale ? { inv: true } : {}) }]), paintLine(Text, []))
+  // the title in bold with the card's id, then one blank row (in the pane the question is the panel's title)
+  if (!pane) rows.push(...title.lines.map(l => paintLine(Text, l)), paintLine(Text, []))
   // the plot or body, directly
   rows.push(...body.map(l => paintLine(Text, l)))
   // below it: the readout against the right edge, the label rows, the params row

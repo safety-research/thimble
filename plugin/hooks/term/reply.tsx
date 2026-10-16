@@ -29,12 +29,12 @@ import type { TermCard, TermLinks, TermVerdict } from './types'
 import { blockClaims, blockLayout, chipLook, citeLabel, passageIn, plainCites, richMarkdown, showsValue, streamLink, tintCells } from './cite'
 import type { ChipView, Tint } from './cite'
 import { LINK } from './chrome'
-import { cardLayout, cut, labelHead, placeWords, wrapRows } from './draw'
+import { cardLayout, labelHead, placeWords, titleLines, wrapRows } from './draw'
 import type { CardData, CardExample } from './draw'
 import { focusFromRef, focusItem } from './anim'
 import type { Focus } from './anim'
 import type { Target } from './gestures'
-import { bareCard, cardWords, chipPlace, cid, questionOf, citations, clip, curlyQuotes, isChip, labelRef, labelRunning, mdPieces, noteLabelName, noteQuestion, outputLine, parseReply, quoted, sectionsOf } from './lib'
+import { bareCard, cardTag, cardWords, chipPlace, cid, questionOf, citations, clip, curlyQuotes, isChip, labelRef, labelRunning, mdPieces, noteLabelName, noteQuestion, outputLine, parseReply, quoted, sectionsOf } from './lib'
 import { linesEl } from './lines'
 import type { Block, Citation, Run } from './lib'
 import { COLORS, FLAG, labelHex, paintLines, themeNow, tintOf } from './paint'
@@ -618,10 +618,11 @@ async function withQuotes(cx: Ctx, data: CardData): Promise<CardData> {
 export type CardOpts = { pane?: boolean; takeaway?: boolean; order?: number; in?: 'reply' | 'report'; focus?: Focus; clip?: { rows: number; more: () => void } }
 
 /** A card in a stream (a reply, a document, the panel), as Matt laid cards out (2026-10-07): a full round border in the
- *  rule grey with a cell of padding; inside, its title in bold, one blank row, then its plot or body directly, and below
- *  the plot everything else it shows: the readout and its state words, its label rows, its params (card.tsx draws
- *  these), then its takeaway, its citations as links. In the card pane the question is the panel's title. A card that
- *  cannot be read is one red line naming it by its place (`× card 2 cannot be drawn: …`), never by its id. */
+ *  rule grey with a cell of padding; inside, its title in bold, wrapped and never cut, with its id as its chips read it
+ *  (`card:<name>`) dim at the right of the first row, one blank row, then its plot or body directly, and below the plot
+ *  everything else it shows: the readout and its state words, its label rows, its params (card.tsx draws these), then
+ *  after a blank row its takeaway, its citations as links. In the card pane the question is the panel's title. A card
+ *  that cannot be read is one red line naming it by its place (`× card 2 cannot be drawn: …`), never by its id. */
 export async function cardBlock(cx: Ctx, e: ResolveInput, id: string, w: number, key: string, opts: CardOpts = {}): Promise<RenderElement> {
   const { Box, Text, Button } = cx.els(e)
   const live = e.surface === 'terminal' || e.surface === 'desktop'
@@ -648,6 +649,8 @@ export async function cardBlock(cx: Ctx, e: ResolveInput, id: string, w: number,
   }
   const meta = { ...(tc.busy ? { busy: tc.busy } : {}), ...(tc.error ? { error: tc.error } : {}) }
   const inner = Math.max(10, w - 4)
+  // the card's id on its title row, as its chip reads it (`card:<name>`); none while an older card's name is not read
+  const name = cardTag(id)
   const rows: RenderElement[] = []
   // a subject's card cut to its rows where it holds more than one row past them: its plot's first rows and its readout,
   // then `… N more` for the rest (the plot's other rows, the label and params rows, the takeaway)
@@ -664,13 +667,13 @@ export async function cardBlock(cx: Ctx, e: ResolveInput, id: string, w: number,
   }
   if (live) {
     const { Client } = cx.els(e)
-    rows.push(<Client key={`card-${key}-${id}`} module="./card.tsx" width={inner} props={JSON.parse(JSON.stringify({ card: data, cols: inner, meta, ...(opts.pane ? { pane: true, plotRows: 16 } : {}), ...(opts.focus ? { focus: opts.focus } : {}), ...(clip !== undefined ? { clip } : {}) }))} />)
+    rows.push(<Client key={`card-${key}-${id}`} module="./card.tsx" width={inner} props={JSON.parse(JSON.stringify({ card: data, cols: inner, meta, ...(name ? { name } : {}), ...(opts.pane ? { pane: true, plotRows: 16 } : {}), ...(opts.focus ? { focus: opts.focus } : {}), ...(clip !== undefined ? { clip } : {}) }))} />)
   } else {
     const state = meta.busy || meta.error ? [[{ s: meta.busy || meta.error || '', fg: meta.error ? COLORS.problem : COLORS.dim }]] : []
     const first = cardLayout(data, inner, -1)
     const lit = opts.focus ? focusItem(data, first.items, opts.focus) : -1
     const body = lit >= 0 ? cardLayout(data, inner, lit).lines : first.lines
-    rows.push(<Box flexDirection="column">{paintLines(Box, Text, [...(opts.pane ? [] : [[{ s: cut(data.question, inner), b: true }], []]), ...(clip !== undefined ? body.slice(0, clip) : body), ...state, ...(clip !== undefined ? [] : labelHead(data, inner).lines)])}</Box>)
+    rows.push(<Box flexDirection="column">{paintLines(Box, Text, [...(opts.pane ? [] : [...titleLines(data.question, inner, name).lines, []]), ...(clip !== undefined ? body.slice(0, clip) : body), ...state, ...(clip !== undefined ? [] : labelHead(data, inner).lines)])}</Box>)
   }
   // a custom card is HTML: the terminal draws its table or its words (cell.ts cardOfCell), and its link opens the whole
   // card in the browser (Matt, 2026-10-16: the link text is "view in browser")
@@ -684,9 +687,10 @@ export async function cardBlock(cx: Ctx, e: ResolveInput, id: string, w: number,
     const { Button } = cx.els(e)
     rows.push(<Box key={`more-row-${key}`} flexDirection="row"><Button key={`more-${key}`} label={`… ${hidden.toLocaleString('en-US')} more`} plain dimColor onPress={opts.clip!.more} /></Box>)
   } else if (opts.takeaway !== false && tc.takeaway.trim()) {
-    // a blank row between the label rows (or the custom card's link) and the takeaway, which would otherwise read as
-    // the takeaway's first line (Matt, 2026-10-16)
-    if (custom || labelHead(data, inner).lines.length) rows.push(<Text key={`gap-${key}-${id}`}> </Text>)
+    // a blank row before the takeaway, which would otherwise read as one with the row above it, the label row's or the
+    // card's last (Matt, 2026-10-16); none where the card's last row is its readout, blank while nothing is pointed at
+    const readoutLast = live && !custom && !labelHead(data, inner).lines.length && !(data.params ?? []).length && (cardLayout(data, inner, -1).items.length > 0 || Boolean(meta.busy || meta.error))
+    if (!readoutLast) rows.push(<Text key={`gap-${key}-${id}`}> </Text>)
     rows.push(<Box flexDirection="column" width={inner}>{await drawReply(cx, e, tc.takeaway, inner, { margin: 0, prefix: `tk-${key}-`, card: id })}</Box>)
   }
   const framed = (

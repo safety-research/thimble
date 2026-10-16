@@ -258,6 +258,76 @@ test("a passage a side thread was asked about keeps its `↳` in the ⏺'s cell 
   await ui.unmount()
 })
 
+test("a card's question wraps, never cut, its id `card:<name>` dim at the right of its first row, the words its chip reads; a dot beside it the pointer turns into `?`", async ($, on) => {
+  // Matt, 2026-10-16: a card's question was cut with "…"; a card citation should read `card:` and the card's name, and
+  // "the card that it's referencing ... has the ID somewhere in the card itself"
+  const w = world(on)
+  const question = "How many records does each file hold, and how many of them are the agents' messages to each other?"
+  Object.assign(w.cells.a0frame0!, { slug: 'records-per-file', title: question })
+  w.resolve['card:a0frame0'] = { ref: 'card:a0frame0', kind: 'cell', cell_id: 'a0frame0', excerpt: question }
+  await start($, w)
+  const text = 'Most records are messages [[card:a0frame0]].'
+  await turn($, w, 'r1', text, 'a0frame0')
+  const ui = (await $.ui.mount({ plugin: PANEL, component: 'AssistantMessage', requestId: 'r1', surface: 'terminal', viewport: { columns: 60, rows: 40 }, props: { text, isFirstOfReply: true } } as never)) as unknown as M
+  await w.clock.advance(300)
+  const rows = await screen(ui, 60)
+  print('a card with a long question, 60 columns', rows)
+  // the chip in the reply and the id on the card read the same
+  expect(rows[0]).toBe('⏺ Most records are messages [ card:records-per-file ].')
+  // the card's own rows: its question wrapped at words, whole, the id against the right edge of the first row, then
+  // one blank row
+  const key = 'card-t0-a0frame0'
+  const inner = Number(((await ui.find({ type: 'Client', key })) as Node).props?.width)
+  await ui.resize({ columns: inner, rows: 40, in: key } as never)
+  const own = (((await ui.drawn({ in: key })) as Node).children ?? []) as Node[]
+  const lines = own.map(r => words(r))
+  const blank = lines.findIndex(l => !l.trim())
+  expect(blank).toBeGreaterThan(1)
+  expect(lines[0]).toMatch(/^How many records does each +card:records-per-file$/)
+  expect([...lines[0]!].length).toBe(inner)
+  expect([lines[0]!.replace(/ +card:records-per-file$/, ''), ...lines.slice(1, blank)].join(' ')).toBe(question)
+  expect(lines.join('\n')).not.toContain('…')
+  expect(JSON.stringify(own[0])).toContain('{"type":"Text","props":{"color":"inactive"},"children":["card:records-per-file"]}')
+  expect(JSON.stringify(own[0])).toContain('"bold":true')
+  // beside the card's title, a dim dot; under the pointer its `?` (the card drawn at its width now)
+  const framed = await screen(ui, 60)
+  print('the same card drawn at its width', framed)
+  const title = at(framed, 'How many records does each')
+  expect(framed[title]).toMatch(/^· │ How many records does each +card:records-per-file │$/)
+  expect(framed[title + 1]).toMatch(/^ {2}│ file hold, and how many of them are the agents' +│$/)
+  expect((await screen(ui, 60, true))[title]).toMatch(/^\? │ How many records/)
+  // the title's second row is the title too: in inverse under the pointer, and a press asks a side thread about the card
+  await ui.pointer({ type: 'move', x: 2, y: 1, in: key } as never)
+  const lit = (((await ui.drawn({ in: key })) as Node).children ?? []) as Node[]
+  expect(JSON.stringify(lit[0])).toContain('"bold":true,"inverse":true')
+  expect(JSON.stringify(lit[1])).toContain('"bold":true,"inverse":true')
+  await ui.pointer({ type: 'down', x: 2, y: 1, button: 'left', in: key } as never)
+  await ui.pointer({ type: 'up', x: 2, y: 1, button: 'left', in: key } as never)
+  await ui.unmount()
+  await w.clock.settle()
+  const pane = await look($)
+  expect(shown(await pane.drawn())).toContain('New thread')
+  await pane.unmount()
+})
+
+test("a card's takeaway stands one blank row under the row above it, as under its label row", async ($, on) => {
+  // Matt, 2026-10-16: a card's answer ran on from the row above it; the readout row under a chart is that blank row
+  const w = world(on)
+  Object.assign(w.cells.n0note00!, { takeaway: 'The relay idea fits the board pages.' })
+  await start($, w)
+  await turn($, w, 'r1', 'Here.', 'n0note00')
+  const ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
+  await w.clock.advance(300)
+  const rows = await screen(ui, 100)
+  print('a note card with a takeaway', rows)
+  const note = at(rows, 'The dse wiki was used as a relay')
+  const take = at(rows, 'The relay idea fits the board pages.')
+  expect(note).toBeGreaterThan(0)
+  expect(take).toBe(note + 2)
+  expect(rows[note + 1]).toMatch(/^ {2}│ +│$/)
+  await ui.unmount()
+})
+
 // ------------------------------------------------------------------------------------------------ a bar chart by date
 
 const BY_DATE: ThimbleCell = {
@@ -502,7 +572,12 @@ test('a new thread about a card shows the card in its frame above the field: its
   // the card in its frame on the type area's edge: its title, a blank row, the first six rows of its table, then
   // `… N more` for the rows left out (its other rows and its takeaway)
   expect(rows[3]).toMatch(/^ {3}╭─+╮$/)
-  expect(rows[4]).toMatch(/^ {3}│ How many revisions did each label make\? +│$/)
+  expect(rows[4]).toMatch(/^ {3}│ How many revisions did each label make\? /)
+  // the card's id at the right of its title row, as its chips read it (the card's own drawing: this test's layout
+  // gives a Client the width it asks for, which a pane's padding narrows)
+  const subject = /"key":"(card-subject-[^"]*-t0tall00)"/.exec(JSON.stringify(await pane.drawn()))![1]!
+  const own = (((await pane.drawn({ in: subject })) as Node).children ?? []) as Node[]
+  expect(words(own[0])).toMatch(/^How many revisions did each label make\? +card:t0tall00$/)
   expect(rows[5]).toMatch(/^ {3}│ +│$/)
   expect(rows[6]).toMatch(/│ label +revisions +│$/)
   expect(rows.join('\n')).toContain('Agent04')

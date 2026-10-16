@@ -25,8 +25,9 @@ them. Colors are in `hooks/paint.ts`; `hooks/chrome.tsx` draws the panel's chrom
 2. Marks hang in a 2-cell margin left of that edge: `❯` on the selected row, `?` or `↳` by a passage; in the chat the
    margin is the ⏺'s, and a mark takes the ⏺'s cell on the row where both fall.
 3. Thimble's text fills its column, with no fixed measure; cards take the same width as the text.
-4. Every card has a full round border in the rule gray; inside it, its title in bold, a blank row, then its plot or
-   body, and everything else (the readout, the label rows, the params, the takeaway) below the plot.
+4. Every card has a full round border in the rule gray; inside it, its title in bold (wrapped, never cut) with its id
+   dim at the right of the first row (`card:<name>`, the words its chips read), a blank row, then its plot or body, and
+   everything else (the readout, the label rows, the params, then after a blank row the takeaway) below the plot.
 5. Every panel opens with its title row, the path from home with the current step last in the accent color and bold, then
    a dim subtitle, a rule; key hints end it.
 6. A panel's actions sit at its bottom, after a rule, where their result appears; the title row holds only navigation.

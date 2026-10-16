@@ -1,5 +1,5 @@
 // The visual system's checks (SPEC.md, section 8) over a reply that carries a card of each kind:
-// bold only on a card's title, a table's column names and the model's Markdown; green only on `new`; blue only on links,
+// bold only on a card's title (its id `card:<name>` dim beside it), a table's column names and the model's Markdown; green only on `new`; blue only on links,
 // `↗`, `?` and `↳`; no letters in a palette hue; one blank row under each card's title; every card in a full round border
 // in the rule grey; non-ASCII glyphs only from the symbol table; no centred row; no inverse at rest.
 // `claude plugin test plugin`.
@@ -79,7 +79,10 @@ test('a reply with a card of each kind keeps the visual system: weight, colour, 
     const rows = (drawn.children ?? []) as unknown[]
     if (rows.length < 3) problems.push(`${id}: ${rows.length} rows`)
     const title = leaves(rows[0])
-    if (!title.length || !title.every(l => l.st.bold || !l.s.trim())) problems.push(`${id}: its title is not bold`)
+    // the question bold, the card's id dim at the right of the row, as its chips read it
+    const tag = (l: { s: string; st: Record<string, unknown> }) => l.st.color === 'inactive' && !l.st.bold && l.s === `card:${id}`
+    if (!title.length || !title.every(l => l.st.bold || !l.s.trim() || tag(l))) problems.push(`${id}: its title is not bold`)
+    if (!/^[0-9a-f]{8}$/.test(id) && !title.some(tag)) problems.push(`${id}: no id on its title row`)
     if (leaves(rows[1]).some(l => l.s.trim())) problems.push(`${id}: no blank row under its title`)
     rows.slice(1).forEach((r, y) => {
       for (const l of leaves(r)) {
