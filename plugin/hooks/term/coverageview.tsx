@@ -250,6 +250,9 @@ export function windowUnits(key: string, units: readonly { key: string | null; l
   const unitHits: LineHit[] = units.flatMap((u, i) => (u.key === null ? [] : [{ y: i, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: run(u.key) }]))
   // two-line units: the slots leave a line for each count row and two for each unit
   const slots = per === 1 ? room : Math.floor((room - 2) / per) + 1
+  // windowList draws a list of fewer than 5 rows whole, as for a pane whose rows are not known; a short pane whose rows
+  // are known still cuts it, so the totals and the hints under it stay in view
+  if (room > 0 && slots < 5 && units.reduce((n, u) => n + u.lines.length, 0) > room) return shortWindow(units, at, room, per, run, cols)
   const win = windowList(key, firsts, unitHits, at, slots, bump)
   const which = new Map(firsts.map((l, i) => [l, i]))
   const lines: Line[] = []
@@ -262,6 +265,25 @@ export function windowUnits(key: string, units: readonly { key: string | null; l
       lines.push(ul)
     }
   })
+  return { lines, hits }
+}
+
+/** A list cut to a short pane's `room` lines: the whole rows around the chosen one (`at`), as many as leave a line for
+ *  one dim count row under them, which counts the rows cut off above and below (`↑ 3 more · ↓ 1 more`). */
+function shortWindow(units: readonly { key: string | null; lines: Line[] }[], at: number, room: number, per: number, run: (key: string) => (() => Promise<void> | void), cols: number): { lines: Line[]; hits: LineHit[] } {
+  const n = Math.max(1, Math.floor((room - 1) / per))
+  const top = Math.max(0, Math.min(units.length - n, Math.max(0, at) - n + 1))
+  const lines: Line[] = []
+  const hits: LineHit[] = []
+  for (const u of units.slice(top, top + n)) {
+    for (const l of u.lines) {
+      if (u.key !== null) hits.push({ y: lines.length, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: run(u.key) })
+      lines.push(l)
+    }
+  }
+  const down = units.length - top - n
+  const words = [top > 0 ? `↑ ${num(top)} more` : '', down > 0 ? `↓ ${num(down)} more` : ''].filter(Boolean).join(' · ')
+  if (words) lines.push(pointed([{ s: '  ' }, dim(words)], false))
   return { lines, hits }
 }
 

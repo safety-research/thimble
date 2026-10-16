@@ -10,7 +10,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { LEGEND, coverageLines, coverageTitle, cutPath, drillFolder, folderWords, measure, percent, unitWord } from '../coverageview'
+import { LEGEND, coverageLines, coverageTitle, cutPath, drillFolder, folderWords, measure, percent, unitWord, windowUnits } from '../coverageview'
 import type { CoverageRow } from '../coverageview'
 import { coverageWords } from '../band'
 import { COVERAGE_TOP, CWD, PANEL, SUMMARY, covRow, paneAt, panelWorld, takesKeys, words } from './fixtures-panel'
@@ -181,11 +181,36 @@ test('a narrow pane keeps every name whole: the legend goes first, then each row
     expect(totals.join('\n')).toMatch(/31 files/)
     await m.unmount()
   }
-  // wide enough but short: the legend goes before a row of the list does
-  const short = await pane($, 96, 14)
+  // wide enough but short: the legend goes before a row of the list does; the list is cut to the rows left under
+  // the header, the totals (one line a unit) and the hints, which stay in view
+  const short = await pane($, 96, 12)
   expect(await short.find({ type: 'Client', key: 'coverage-legend' })).toBeUndefined()
   expect((await listText(short, 'm:coverage-head'))[0]).toMatch(/^ {4}folder · files +read/)
+  const list = await listText(short, 'm:coverage-list')
+  expect(list.length).toBeLessThanOrEqual(4)
+  expect(list.at(-1)).toMatch(/↓ \d+ more$/)
+  expect(list.length - 1 + Number(/↓ (\d+) more/.exec(list.at(-1)!)?.[1])).toBe(5)
+  expect((await listText(short, 'm:coverage-totals')).at(-1)).toMatch(/31 files$/)
   await short.unmount()
+})
+
+test('a short pane cuts the list to its room too: the rows around the chosen one and one count row; a pane whose rows are not known draws it whole', () => {
+  const one = Array.from({ length: 7 }, (_, i) => ({ key: `k${i}`, lines: [[{ s: `row ${i}` }]] }))
+  const run = () => () => undefined
+  const bump = async () => {}
+  const shown = (at: number, room: number, units = one) => windowUnits(`short:${at}:${room}`, units, at, room, run, bump, 90)
+  expect(shown(0, 4).lines.map(plain)).toEqual(['row 0', 'row 1', 'row 2', '    ↓ 4 more'])
+  expect(shown(0, 4).hits.map(h => h.y)).toEqual([0, 1, 2])
+  expect(shown(5, 4).lines.map(plain)).toEqual(['row 3', 'row 4', 'row 5', '    ↑ 3 more · ↓ 1 more'])
+  expect(shown(6, 3).lines.map(plain)).toEqual(['row 5', 'row 6', '    ↑ 5 more'])
+  expect(shown(2, 1).lines.map(plain)).toEqual(['row 2', '    ↑ 2 more · ↓ 4 more'])
+  // a list that fits, and a pane whose rows are not known (classic), are drawn whole
+  expect(shown(0, 7).lines.length).toBe(7)
+  expect(shown(0, -9).lines.length).toBe(7)
+  // two lines a row: whole rows only
+  const two = one.map(u => ({ key: u.key, lines: [...u.lines, [{ s: '  numbers' }]] }))
+  expect(shown(0, 5, two).lines.map(plain)).toEqual(['row 0', '  numbers', 'row 1', '  numbers', '    ↓ 5 more'])
+  expect(shown(0, 5, two).hits.map(h => h.y)).toEqual([0, 1, 2, 3])
 })
 
 test('a long list scrolls under its header, and the totals stay under it', { timeoutMs: 30_000 }, async ($, on) => {
