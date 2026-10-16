@@ -13,7 +13,7 @@ import os
 
 import pytest
 
-from app import concepts, config, notebook, tools
+from app import cardrun, concepts, config, notebook, tools
 from app import model as model_mod
 
 CORPUS = "mini"
@@ -100,6 +100,7 @@ async def test_a_prompt_label_over_files_gives_each_transcript_one_value_from_it
 
 async def test_a_code_label_over_files_gets_each_transcript_whole(monkeypatch):
     monkeypatch.setattr(notebook, "execute_on", _code_inproc)
+    monkeypatch.setattr(cardrun, "defers", lambda c: False)  # this process stands in for the label runner (R8)
     rule = ("def label(unit):\n"
             "    assert unit['path'] and isinstance(unit['data'], list) and len(unit['data']) == len(unit['records'])\n"
             "    return ('ends in an error' if any(r.get('is_api_error_message') for r in unit['data']) else 'no', 1.0)\n")
