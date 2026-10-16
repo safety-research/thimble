@@ -51,7 +51,8 @@ test('each new notice posts one toast, once; the notices there at activation pos
   await pressBrowser($, w)
   await w.clock.advance(6000)
   await pressBrowser($, w)
-  expect(w.toasts.filter(t => t.startsWith("thimble: thimble's page did not start")).length).toBe(1)
+  // a notice whose text names thimble first toasts as it is (no `thimble: thimble's …`)
+  expect(w.toasts.filter(t => t.startsWith("thimble's page did not start")).length).toBe(1)
   await m.unmount()
 })
 

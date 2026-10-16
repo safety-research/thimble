@@ -615,7 +615,8 @@ export function world(on: On, opts: { mode?: string; ws?: string | null; active?
       case 'checks':
         return out(w.states.checks)
       case 'coverage':
-        return out({ summary: { files: { seen: 1, searched: 0, never: 2, total: 3 }, records: { seen: 10, total: 100, counted: true }, line: 'saw 10% of records (1 of 3 files)' }, folder: '', counting: false })
+        // no coverage summary yet (home and the summary line leave Coverage out); fixtures-panel.ts answers with rows
+        return out({ summary: null, folder: '', rows: [], counting: false })
       case 'answer-comments':
         return out({ comments: w.comments, running: w.running })
       default:

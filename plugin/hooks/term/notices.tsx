@@ -45,7 +45,8 @@ export function postNotice(cx: Ctx, key: string, text: string, acts: string[]): 
   const words = oneLine(text)
   if (!toasted.has(key)) {
     toasted.add(key)
-    cx.toast(`thimble: ${words}`)
+    // a notice's text that names thimble first (the activation's notices) toasts as it is, not `thimble: thimble …`
+    cx.toast(/^thimble\b/.test(words) ? words : `thimble: ${words}`)
   }
   void (async () => {
     const now = await cx.now()

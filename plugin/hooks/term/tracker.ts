@@ -391,5 +391,10 @@ export function summaryOf(v: unknown): CoverageSummary | null {
   const n = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? x : 0)
   const files = (s.files ?? {}) as Partial<CoverageSummary['files']>
   const records = (s.records ?? {}) as Partial<CoverageSummary['records']>
-  return { files: { seen: n(files.seen), searched: n(files.searched), never: n(files.never), total: n(files.total) }, records: { seen: n(records.seen), total: n(records.total), counted: records.counted === true }, line: s.line }
+  const unit = records.unit === 'lines' || records.unit === 'entries' ? { unit: records.unit } : {}
+  const searched = typeof records.searched === 'number' ? { searched: n(records.searched) } : {}
+  // the corpus's totals per unit and by size, which the summary line and the Coverage view read
+  const totals = Array.isArray(s.totals) ? { totals: s.totals.filter(t => t && typeof t === 'object' && typeof t.unit === 'string') } : {}
+  const size = s.size === null ? { size: null } : s.size && typeof s.size === 'object' ? { size: { read: n(s.size.read), searched: n(s.size.searched), total: n(s.size.total) } } : {}
+  return { files: { seen: n(files.seen), searched: n(files.searched), never: n(files.never), total: n(files.total) }, records: { ...unit, seen: n(records.seen), ...searched, total: n(records.total), counted: records.counted === true }, ...totals, ...size, line: s.line }
 }

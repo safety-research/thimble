@@ -47,4 +47,6 @@ test("activate:failed's toast says the reason cleaned", SLOW, async ($, on) => {
   await startSession($, w)
   await $.command.run({ command: 'thimble:thimble', args: '' } as never)
   expect(w.toasts).toContain('thimble could not open this folder: disk full')
+  // the notice's row is written after its toast
+  await w.clock.settle()
 })

@@ -88,12 +88,13 @@ test('a click on the tint or on the flag opens the panel at Checks on that comme
   await ui.pointer({ type: 'down', x, y: 0, button: 'left', in: para } as never)
   await ui.pointer({ type: 'up', x, y: 0, button: 'left', in: para } as never)
   await w.clock.settle()
-  expect(w.panes.at(-1)).toMatchObject({ id: 'thimble', title: 'Checks' })
+  // the Checks view on one comment is titled by its check (checksview.tsx, J7)
+  expect(w.panes.at(-1)).toMatchObject({ id: 'thimble', title: 'Important details' })
   const opened = w.panes.length
   await ui.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: flag } as never)
   await w.clock.settle()
   expect(w.panes.length).toBeGreaterThan(opened)
-  expect(w.panes.at(-1)).toMatchObject({ title: 'Checks' })
+  expect(w.panes.at(-1)).toMatchObject({ title: 'Important details' })
   await ui.unmount()
 })
 
