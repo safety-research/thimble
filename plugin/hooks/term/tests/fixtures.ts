@@ -384,7 +384,7 @@ export function world(on: On, opts: { mode?: string; ws?: string | null; active?
     mcp: [],
     listed: true,
     mcpError: '',
-    features: { autoActivate: true, viewProposals: true, labels: true, checks: true, citationMarks: true, coverage: true, cardCheck: true },
+    features: { viewProposals: true, labels: true, checks: true, citationMarks: true, coverage: true, cardCheck: true },
     sets: [],
     coverageLine: 'saw 1 of 3 files',
     coverage: [],

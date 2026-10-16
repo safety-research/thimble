@@ -9,7 +9,7 @@
 // Claude Code's levels, and a model that runs with no effort shows none. An agent's row applies to its next start. A
 // save sends only the changed fields so defaults stay defaults (thimble's config, backend userconf.py). Choices that
 // cannot take effect are dimmed with the reason in a tooltip. Every row names its model exactly, never `default`.
-// Under the table, thimble's feature switches (FEATURE_ROWS: Turn on when Claude reads data, View proposals, Labels,
+// Under the table, thimble's feature switches (FEATURE_ROWS: View proposals, Labels,
 // Checks, Citation marks, Coverage, Card check), the same switches as /config → thimble in the terminal, kept in
 // thimble's config (`features`, backend features.py; View proposals as `views.propose`, which a view proposal's Don't ask
 // again turns off); the Ask key choice, ⌘-click or ⌥-click (Ctrl-click or Alt-click off a Mac), whose other key places a card freely on the
@@ -250,10 +250,9 @@ export const PROPOSE_LABEL = 'View proposals'
 export const PROPOSE_NOTE = 'thimble may propose a view for your task above the reply box. Nothing builds until you accept it.'
 
 /** thimble's feature switches in Settings, the same rows as /config → thimble in the terminal, in that order (View
- * proposals between the first two, as PROPOSE_LABEL): each key as thimble's config `features` names it (backend
+ * proposals first, as PROPOSE_LABEL): each key as thimble's config `features` names it (backend
  * features.py), its name and what it does. Off, a feature runs nothing in the background. */
 export const FEATURE_ROWS: { key: FeatureKey; label: string; note: string }[] = [
-  { key: 'autoActivate', label: 'Turn on when Claude reads data', note: "thimble turns on in a folder when Claude reads a data file there. Off, only /thimble, a thimble tool or /thimble open turns it on." },
   { key: 'labels', label: 'Labels', note: 'Claude can label every record of a file with a model.' },
   { key: 'checks', label: 'Checks', note: 'The checks that are on comment on answers that read data, and on documents.' },
   { key: 'citationMarks', label: 'Citation marks', note: 'thimble checks each citation in an answer and marks one it cannot verify red with ×.' },
@@ -641,13 +640,6 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
             </div>
             {FEATURE_ROWS.map(({ key, label, note }, i) => (
               <Fragment key={key}>
-                <div className="settings-row" role="row" data-feature={key}>
-                  <span className="settings-role">{label}</span>
-                  <span className="settings-web" data-on={features[key]}>
-                    <Switch checked={features[key]} onChange={() => setFeatures((f) => ({ ...f, [key]: !f[key] }))} aria-label={label} />
-                  </span>
-                  <span className="settings-agent-line">{note}</span>
-                </div>
                 {i === 0 && (
                   <div className="settings-row" role="row" data-auto="propose-views">
                     <span className="settings-role">{PROPOSE_LABEL}</span>
@@ -657,6 +649,13 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
                     <span className="settings-agent-line">{PROPOSE_NOTE}</span>
                   </div>
                 )}
+                <div className="settings-row" role="row" data-feature={key}>
+                  <span className="settings-role">{label}</span>
+                  <span className="settings-web" data-on={features[key]}>
+                    <Switch checked={features[key]} onChange={() => setFeatures((f) => ({ ...f, [key]: !f[key] }))} aria-label={label} />
+                  </span>
+                  <span className="settings-agent-line">{note}</span>
+                </div>
               </Fragment>
             ))}
           </div>

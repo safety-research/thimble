@@ -1249,7 +1249,7 @@ export interface Settings {
 }
 
 /** thimble's feature switches (backend features.py; /config → thimble in the terminal shows the same). */
-export type FeatureKey = 'autoActivate' | 'labels' | 'checks' | 'citationMarks' | 'coverage' | 'cardCheck'
+export type FeatureKey = 'labels' | 'checks' | 'citationMarks' | 'coverage' | 'cardCheck'
 
 /** The agent rows of the settings: thimble's subagents, the code tickets' dev agent and the two classifiers. */
 export type AgentRowKey = 'orient' | 'writer' | 'critic' | 'checks' | 'dev' | CallAgent

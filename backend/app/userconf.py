@@ -80,7 +80,7 @@ PROGRAM_DEFAULTS = {"env": [], "sandbox": "on", "network": "on", "data": "ask"}
 PROMPT_FILES = {"orientation": "orient", "critic": "critic", "writer": "writer", "checks": "check", "dev": "dev",
                 "labels": "labels", "cardCheck": "card-check"}
 # the keys of `features` (features.BLOCK_KEYS): turn on when Claude reads data, labels, checks, citation marks, coverage
-FEATURES = ("autoActivate", "labels", "checks", "citationMarks", "coverage")
+FEATURES = ("labels", "checks", "citationMarks", "coverage")
 SANDBOX_USES = ("when-available", "never")
 BROWSERS = ("system", "bundled", "off")
 # `askKey`: the key held with a click to ask about what it points at in the browser (pointer/CmdPointer), "meta" (⌘, or

@@ -168,7 +168,7 @@ export function panelWorld(on: On, opts: { mode?: string; ws?: string | null } =
 
 /** Every feature on but those named. */
 export function featuresOff(...off: (keyof FeatureSettings)[]): FeatureSettings {
-  const all: FeatureSettings = { autoActivate: true, viewProposals: true, labels: true, checks: true, citationMarks: true, coverage: true, cardCheck: true }
+  const all: FeatureSettings = { viewProposals: true, labels: true, checks: true, citationMarks: true, coverage: true, cardCheck: true }
   for (const k of off) all[k] = false
   return all
 }

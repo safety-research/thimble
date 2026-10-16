@@ -52,7 +52,7 @@ import { turns } from './turns'
 import { registerBand } from './band'
 import { registerPanelViews } from './views'
 import { closeView, openViewState, sendEvent, viewFault, viewMessage } from './viewhost'
-import { LOAD_TOOL, act, activateNow, activateOnce, anyDataRead, appendGuide, candidatePaths, conversationEnded, deliverStarts, deliveryLost, followConversation, guideAfterCompact, isActive, mayActivate, owedGuide, preScope, resetActivation, restoreFromMarker, rowStored, sawLoadThimble } from './activate'
+import { LOAD_TOOL, act, activateNow, appendGuide, conversationEnded, deliverStarts, deliveryLost, followConversation, guideAfterCompact, isActive, owedGuide, preScope, resetActivation, restoreFromMarker, rowStored, sawLoadThimble } from './activate'
 import { onFlip, pushChange, resetSettings, setOptions, syncSoon } from './settings'
 import { factsHeld, factsOf, flushFacts, keepFacts, resetTracker } from './tracker'
 import { openInBrowser } from './offramp'
@@ -529,6 +529,14 @@ export const register: Register = (on, options) => {
     if ((await cx.env('THIMBLE_OPEN').catch(() => undefined)) === '1') {
       const turned = await activateNow(cx, 'launcher')
       if (turned.ok) await openInBrowser(cx, 'home')
+      return started
+    }
+    // as a regular Claude Code plugin: on from the start of every interactive session where the plugin is enabled
+    // (the owner, 10-16 22:45); a folder thimble refuses (the home folder, `/`) stays off without a notice
+    if (act.interactive && act.surface === 'terminal') {
+      act.refusedSaid = true
+      await activateNow(cx, 'command')
+      act.refusedSaid = false
     }
     return started
   })
@@ -648,20 +656,9 @@ export const register: Register = (on, options) => {
       deliverStarts(guide)
       return { ...res, context: [...(res.context ?? []), guide] } as typeof res
     }
-    // before thimble is on: a call that names no file passes as it is
-    const paths = candidatePaths(tool, input)
-    if (!paths.length && tool !== 'Grep') return next(e)
-    const res = await next(e)
-    if (res.deny !== undefined || res.isError) return res
-    const cx = cxOf($)
-    const pre = await preScope(cx)
-    // the data files it read, kept in memory for the first turn end once thimble is on (a coding session keeps none)
-    if (featureOn('coverage')) keepFacts(await factsOf(cx, pre, { tool, input, ...(e.agentId !== undefined ? { agentId: e.agentId } : {}), result: res.result, ...(res.text !== undefined ? { text: res.text } : {}) }))
-    if (!paths.length || !(await mayActivate(cx, pre)) || !(await anyDataRead(cx, pre, paths))) return res
-    const main = e.agentId === undefined
-    const { out, mine } = await activateOnce(cx, 'data', main ? 'context' : 'append', next.budget.remainingMs)
-    if (!out?.ok || !mine || !main || !out.context) return res
-    return { ...res, context: [...(res.context ?? []), out.context] } as typeof res
+    // thimble off in this session (a folder it refuses, a headless run, or the plugin turned off): a call passes as it
+    // is; reading data never turns thimble on (the owner, 10-16 22:45: a regular plugin, on from the session's start)
+    return next(e)
   }).catch(($, e, next) => next(e))
 
   // main's fork of a side thread runs with the thread's question as its description, which Claude Code's agent tray and

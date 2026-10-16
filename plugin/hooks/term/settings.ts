@@ -61,23 +61,6 @@ export function featureOn(key: FeatureKey): boolean {
   return (mem.now ?? optionsNow())[key]
 }
 
-/** "Turn on when Claude reads data" before activation (3.3): `options` when it differs from what was last synced (a
- *  /config change thimble's config has not heard of), else config.json's `features.autoActivate`, else `options`. One
- *  file read, no process. */
-export async function autoActivateOf(cx: Ctx, home?: string): Promise<boolean> {
-  const opts = optionsNow()
-  const synced = (await cx.storeGet(SYNCED_KEY)) as Partial<FeatureSettings> | undefined
-  const unpushed = synced && typeof synced.autoActivate === 'boolean' ? opts.autoActivate !== synced.autoActivate : opts.autoActivate !== FEATURES_ON.autoActivate
-  if (unpushed) return opts.autoActivate
-  try {
-    const config = JSON.parse(await cx.read(`${home ?? (await homeOf(cx))}/config.json`)) as { features?: { autoActivate?: unknown } }
-    const v = config?.features?.autoActivate
-    return typeof v === 'boolean' ? v : FEATURES_ON.autoActivate
-  } catch {
-    return opts.autoActivate
-  }
-}
-
 /** `thimble features [--set k=on|off …] --json` (C6): thimble's values after it, or why not. */
 async function features(cx: Ctx, sets: readonly string[]): Promise<{ settings: FeatureSettings | null; error: string }> {
   const sc = rt.sc

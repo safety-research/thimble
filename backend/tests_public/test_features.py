@@ -21,8 +21,7 @@ def _write(path, data) -> None:
 
 
 def test_every_switch_is_on_until_the_config_turns_it_off(workspaces_tmp):
-    assert features.KEYS == ("autoActivate", "viewProposals", "labels", "checks", "citationMarks", "coverage",
-                             "cardCheck")
+    assert features.KEYS == ("viewProposals", "labels", "checks", "citationMarks", "coverage", "cardCheck")
     assert features.settings() == ALL_ON and features.settings(CORPUS) == ALL_ON
     assert features.flags() == {"labels", "checks"}
     _write(userconf.global_file(), {"features": {"labels": False, "coverage": None, "citationMarks": True},
@@ -41,11 +40,11 @@ def test_every_switch_is_on_until_the_config_turns_it_off(workspaces_tmp):
 def test_the_settings_payload_carries_the_switches_and_only_the_analyst_changes_them(workspaces_tmp, analyst):
     got = ledger.get_settings(CORPUS)
     assert got[ledger.FEATURES_KEY] == {k: True for k in features.BLOCK_KEYS}
-    assert set(features.BLOCK_KEYS) == {"autoActivate", "labels", "checks", "citationMarks", "coverage"}
-    out = ledger.put_settings_route(CORPUS, analyst, {ledger.FEATURES_KEY: {"labels": False, "autoActivate": False}})
-    assert out[ledger.FEATURES_KEY] == {**{k: True for k in features.BLOCK_KEYS}, "labels": False, "autoActivate": False}
-    assert not features.on(CORPUS, "labels") and not features.on(None, "autoActivate")
-    assert json.loads(userconf.global_file().read_text())["features"] == {"labels": False, "autoActivate": False}
+    assert set(features.BLOCK_KEYS) == {"labels", "checks", "citationMarks", "coverage"}
+    out = ledger.put_settings_route(CORPUS, analyst, {ledger.FEATURES_KEY: {"labels": False, "coverage": False}})
+    assert out[ledger.FEATURES_KEY] == {**{k: True for k in features.BLOCK_KEYS}, "labels": False, "coverage": False}
+    assert not features.on(CORPUS, "labels") and not features.on(None, "coverage")
+    assert json.loads(userconf.global_file().read_text())["features"] == {"labels": False, "coverage": False}
     stored = ledger.ws_dir(CORPUS) / "settings.json"
     assert not stored.exists() or ledger.FEATURES_KEY not in json.loads(stored.read_text()), "never settings.json"
     with pytest.raises(HTTPException) as e:
@@ -55,7 +54,7 @@ def test_the_settings_payload_carries_the_switches_and_only_the_analyst_changes_
         with pytest.raises(HTTPException) as e:
             ledger.put_settings_route(CORPUS, analyst, {ledger.FEATURES_KEY: bad})
         assert e.value.status_code == 400, bad
-    out = ledger.put_settings_route(CORPUS, analyst, {ledger.FEATURES_KEY: {"labels": None, "autoActivate": None}})
+    out = ledger.put_settings_route(CORPUS, analyst, {ledger.FEATURES_KEY: {"labels": None, "coverage": None}})
     assert out[ledger.FEATURES_KEY] == {k: True for k in features.BLOCK_KEYS}
 
 

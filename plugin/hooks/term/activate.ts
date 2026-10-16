@@ -26,7 +26,7 @@ import type { Ctx } from './ctx'
 import { binOf, envOf, homeOf, parsePrinted } from './data'
 import { clean } from './lib'
 import { postNotice } from './notices'
-import { autoActivateOf, syncSoon } from './settings'
+import { syncSoon } from './settings'
 import { setTheme } from './paint'
 import { restoreKept, rt, startTimers } from './term'
 import { bashReads } from './tracker'
@@ -129,8 +129,6 @@ export const act = {
   /** the session id activation ran for (a /clear or /resume changes $.session.id()) */
   sid: '',
   pre: null as Pre | null,
-  /** "Turn on when Claude reads data", read once per session before activation (settings.ts autoActivateOf) */
-  auto: null as boolean | null,
   /** folders `thimble activate` refused: data reads there run no activation for the rest of the session */
   refused: new Set<string>(),
   refusedSaid: false,
@@ -154,7 +152,6 @@ export function resetActivation(e: { isInteractive?: boolean; surface?: string |
   act.surface = e.surface ?? ''
   act.sid = ''
   act.pre = null
-  act.auto = null
   act.refused = new Set()
   act.refusedSaid = false
   act.flight = null
@@ -219,14 +216,6 @@ export async function anyDataRead(cx: Ctx, pre: Pre, paths: readonly string[]): 
   return false
 }
 
-/** Whether a data read may turn thimble on in this session: a person at the terminal, the switch on, the folder not
- *  refused already. */
-export async function mayActivate(cx: Ctx, pre: Pre): Promise<boolean> {
-  if (!act.interactive || act.surface !== 'terminal') return false
-  if (act.refused.has(pre.real)) return false
-  if (act.auto === null) act.auto = await autoActivateOf(cx, pre.home)
-  return act.auto
-}
 
 // ------------------------------------------------------------------------------------------------ activation
 
@@ -236,7 +225,7 @@ export const NOT_LISTED_LINE = "thimble's tools did not load in this session; do
 export const REFUSED_TEXT = 'thimble does not open this folder (your home folder, `/`, a folder above them or a mount root). cd into the data folder and start `claude` there.'
 export const NOT_LISTED_TEXT = "thimble's tools did not load in this session."
 /** The toast of the first activation in a folder, which names the switch that stops it. */
-export const FIRST_TOAST = 'thimble is on in this folder · /thimble opens its panel · to stop this, /config → thimble → Turn on when Claude reads data'
+export const FIRST_TOAST = 'thimble is on in this folder · /thimble opens its panel · to turn it off, /plugin'
 /** The shim, as /mcp lists the plugin's server, and the tool the push calls. */
 export const SHIM = 'plugin:thimble:thimble'
 export const LOAD_TOOL = 'load_thimble'

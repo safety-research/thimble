@@ -73,8 +73,8 @@ def test_activation_registers_the_folder_and_writes_the_session_s_files(corpus):
     c = config.workspace_for_cwd(str(corpus))
     assert c and got["ws"] == c and got["role"] == "main" and got["first_in_folder"] is True
     assert got["path"] == str(config.workspace_dir(c)) and got["took_over"] is None
-    assert got["settings"] == {k: True for k in ("autoActivate", "viewProposals", "labels", "checks",
-                                                 "citationMarks", "coverage", "cardCheck")}
+    assert got["settings"] == {k: True for k in ("viewProposals", "labels", "checks", "citationMarks", "coverage",
+                                                 "cardCheck")}
     home = Path(os.environ["THIMBLE_HOME"])
     assert all((home / cli.ACTIVE_DIR / key).is_file() for key in cli.active_keys(corpus)), "the folder marker"
     ws = config.workspace_dir(c)

@@ -2,7 +2,7 @@
 # scripts/install.sh — install thimble: a git checkout in place (a Dev install), or an unzipped release, copied into
 # ~/.thimble/app (a Global install).
 #
-#   scripts/install.sh [--dry-run] [--verbose] [--browser bundled|system|off] [--no-plugin] [--dir DIR] [--dev]
+#   scripts/install.sh [--dry-run] [--verbose] [--browser bundled|system|off] [--dir DIR] [--dev]
 #                      [--python PATH] [--deps-only] [--require-pinned] [--marketplace-name NAME]
 #
 # It opens with one screen: what it found (Claude Code, Python or uv, Node, a browser, and on Linux whether card code and
@@ -27,8 +27,8 @@
 #   --dry-run              print the opening screen and the question if it remains, with its flags; change nothing.
 #                          An agent installing thimble for someone asks exactly that question (CLAUDE.md, Installing)
 #   --verbose              also print each command it runs and its output; with --dry-run, every step's commands
-#   --no-plugin            add nothing to Claude Code: no marketplace and no plugin (INSTALL.md, Manual install, step 6
-#                          says how to add it)
+#   --no-plugin            for thimble's own release tests only: add nothing to Claude Code (no marketplace, no
+#                          plugin). An install adds the plugin the way claude plugin install does; turn it off with /plugin
 #   --dir DIR              where the tree goes (default: this checkout, in place; $THIMBLE_HOME/app for a release)
 #   --dev                  also install the backend's test extras (a checkout always gets them)
 #   --python PATH          use the virtual environment of the python at PATH as backend/.venv: install.sh checks that it

@@ -51,7 +51,7 @@ const NARROW_LABEL = 10
 // ------------------------------------------------------------------------------------------------ shared state
 
 /** Every feature on: thimble's defaults, and what a session that has no settings yet reads. */
-export const FEATURES_ON: FeatureSettings = { autoActivate: true, viewProposals: true, labels: true, checks: true, citationMarks: true, coverage: true, cardCheck: true }
+export const FEATURES_ON: FeatureSettings = { viewProposals: true, labels: true, checks: true, citationMarks: true, coverage: true, cardCheck: true }
 
 /** The feature switches as the transcript's lane keeps them (C13 `settings`), every one on until then. */
 export async function featuresOf(cx: Ctx): Promise<FeatureSettings> {

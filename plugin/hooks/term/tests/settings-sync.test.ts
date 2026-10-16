@@ -6,7 +6,7 @@ import { expect, test } from 'claude-code/testing'
 import { CLI, CWD, startSession, world } from './fixtures'
 
 const SLOW = { timeoutMs: 30000 }
-const ALL_ON = { autoActivate: true, viewProposals: true, labels: true, checks: true, citationMarks: true, coverage: true, cardCheck: true }
+const ALL_ON = { viewProposals: true, labels: true, checks: true, citationMarks: true, coverage: true, cardCheck: true }
 const composer = (key: string, value: boolean, previous: boolean) => ({ key, value, previous, provider: { plugin: 'thimble', tier: 'user' }, origin: { kind: 'composer' } }) as never
 
 test("a person's /config change of a thimble switch pushes `features --set` with the new value, and synced follows", SLOW, async ($, on) => {

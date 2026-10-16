@@ -11,10 +11,10 @@ export type Dollar = EngineInterface
 export type { Activated, AnswerComment, CiteRow, CoverageSummary, FeatureSettings, SummarySeen } from './types'
 import type { FeatureSettings } from './types'
 
-export const FEATURE_KEYS = ['autoActivate', 'viewProposals', 'labels', 'checks', 'citationMarks', 'coverage', 'cardCheck'] as const
+export const FEATURE_KEYS = ['viewProposals', 'labels', 'checks', 'citationMarks', 'coverage', 'cardCheck'] as const
 export type FeatureKey = (typeof FEATURE_KEYS)[number]
 /** 0.8.0's behavior: every feature on. */
-export const FEATURES_ON: FeatureSettings = { autoActivate: true, viewProposals: true, labels: true, checks: true, citationMarks: true, coverage: true, cardCheck: true }
+export const FEATURES_ON: FeatureSettings = { viewProposals: true, labels: true, checks: true, citationMarks: true, coverage: true, cardCheck: true }
 
 // $.state keys under plugin 'thimble' (types/index.d.ts):
 //   activated: Activated | null            set by the transcript at activation

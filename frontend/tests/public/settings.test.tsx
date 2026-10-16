@@ -115,7 +115,7 @@ describe('the popover', () => {
 describe('the feature switches', () => {
 
   test('the switches round trip: they show what GET /settings answers, and Save PUTs the change', async () => {
-    settings = { ...SETTINGS, features: { autoActivate: true, labels: true, checks: false, citationMarks: true, coverage: true, cardCheck: true } }
+    settings = { ...SETTINGS, features: { labels: true, checks: false, citationMarks: true, coverage: true, cardCheck: true } }
     const anchor = document.createElement('button')
     document.body.appendChild(anchor)
     await mount(<SettingsPopover ws="mini" anchor={anchor} open onClose={() => {}} />)
@@ -123,15 +123,14 @@ describe('the feature switches', () => {
     await settle()
     const rows = [...document.body.querySelectorAll('.settings-features .settings-row:not(.settings-headrow)')]
     expect(rows.map((r) => r.querySelector('.settings-role')?.textContent)).toEqual([
-      'Turn on when Claude reads data', 'View proposals', 'Labels', 'Checks', 'Citation marks', 'Coverage', 'Card check'])
+      'View proposals', 'Labels', 'Checks', 'Citation marks', 'Coverage', 'Card check'])
     const sw = (key: string) => document.body.querySelector<HTMLButtonElement>(`[data-feature="${key}"] [role="switch"]`)!
     expect(sw('checks').getAttribute('aria-checked')).toBe('false')
     expect(sw('labels').getAttribute('aria-checked')).toBe('true')
     await act(async () => sw('labels').click())
     await act(async () => sw('checks').click())
-    await act(async () => sw('autoActivate').click())
     await act(async () => [...document.body.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Save')!.click())
     await settle()
-    expect(puts).toEqual([['/api/ws/mini/settings', { features: { autoActivate: false, labels: false, checks: null } }]])
+    expect(puts).toEqual([['/api/ws/mini/settings', { features: { labels: false, checks: null } }]])
   })
 })

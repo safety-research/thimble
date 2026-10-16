@@ -224,7 +224,8 @@ Either install:
   clone). Claude Code records the plugin in `~/.claude/settings.json` (`enabledPlugins`) and `~/.claude/plugins`.
   `/thimble` then works in any `claude` session. A re-run updates the plugin when its version changed and leaves it on
   or off as you set it. When Claude Code has another install's thimble plugin, or the one from GitHub, install.sh
-  leaves it and prints the commands that switch it. `--no-plugin` leaves your Claude Code plugins as they are;
+  leaves it and prints the commands that switch it. Like any Claude Code plugin, thimble is then on in every session;
+  `/plugin` turns it off, everywhere or for one project;
 - links the `thimble` command into `~/.local/bin`, and when that folder is not on your PATH (or `THIMBLE_HOME` is not
   `~/.thimble`), prints the line to add to your shell's startup file so that a new terminal finds it;
 - runs `thimble doctor`.
@@ -253,14 +254,9 @@ Start Claude Code in a folder of transcripts or other data, as usual:
     cd <folder>
     claude
 
-thimble's plugin loads in every session, and until you use it, it adds about 21 tokens to Claude's context (one tool
-name, `load_thimble`) and runs no server. It turns on in a folder:
-
-- at Claude's first read of a data file there (a CSV, JSONL, Parquet, SQLite or log file and the like; in a code
-  repository, only such a file in a `data/`, `runs/` or similar folder, or one of 1 MiB or more). A toast says so once
-  per folder. To keep thimble off until you ask, turn off `/config` → thimble → "Turn on when Claude reads data";
-- when you type `/thimble`, which also opens thimble's panel in the terminal;
-- when Claude uses a thimble tool, such as when you ask for a plan card or a label in a coding session.
+thimble is a regular Claude Code plugin: once installed it is on from the start of every session, in every folder but
+the ones it refuses (your home folder, `/` and the folders above them). The line above the prompt shows it is on. To turn
+it off, use `/plugin` (everywhere, or for one project). `/thimble` opens its panel in the terminal.
 
 Once on, Claude makes cards and checked citations, which the terminal draws under its replies, and one dim line under an
 answer that read data says how much of the data Claude's tool calls saw (Coverage). The line above the prompt sums up
@@ -277,8 +273,8 @@ start `claude` yourself and your shell sets `HTTP_PROXY` or `HTTPS_PROXY`, start
 `NO_PROXY="${NO_PROXY:+$NO_PROXY,}127.0.0.1,localhost"`, or thimble's plugin may not reach its server; thimble's panel
 says so when it sees a proxy.
 
-Each feature can be turned off: `/config` → thimble, or the browser's Settings, has a switch for each ("Turn on when
-Claude reads data", "View proposals", "Labels", "Checks", "Citation marks", "Coverage", "Card check"), and the two
+Each feature can be turned off: `/config` → thimble, or the browser's Settings, has a switch for each ("View
+proposals", "Labels", "Checks", "Citation marks", "Coverage", "Card check"), and the two
 places show the same switches ([docs/config.md](docs/config.md#features)).
 
 Don't move one of thimble's agents to the background (← or "Move to background"): thimble loses track of a moved agent.
@@ -403,8 +399,7 @@ Then [start thimble](#start-thimble).
 - **Updates.** `thimble update` runs install.sh, which turns a manual install into an install.sh install. It adds the
   plugin from the folder, unless Claude Code has the plugin from GitHub (or another install's): install.sh leaves that one
   as it is and prints the commands that switch it, so update the GitHub one yourself, with `claude plugin marketplace
-  update thimble` and `claude plugin update thimble@thimble`. `thimble update --no-plugin` leaves Claude Code's plugins
-  alone. To update by hand: get the new folder and keep `workspaces/`, do steps 2 and 3 again, run `claude plugin
+  update thimble` and `claude plugin update thimble@thimble`. To update by hand: get the new folder and keep `workspaces/`, do steps 2 and 3 again, run `claude plugin
   marketplace update <name>` and `claude plugin update thimble@<name>`, then `thimble server restart`. Claude Code installs
   a new plugin copy only when its version changes, and a session uses it only after a restart.
 - **Uninstall.** `thimble uninstall` removes `~/.thimble`, with a release in `~/.thimble/app` and its workspaces, and the

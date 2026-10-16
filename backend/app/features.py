@@ -1,18 +1,16 @@
 """thimble's feature switches: which of its features run, as the analyst sets them in `/config` → thimble, in the
 browser's Settings or with `thimble features --set`.
 
-One store, thimble's config file (userconf.py): five switches live in its `features` block and two in keys that 0.8.0
-already had. Each switch is on unless the config sets it false; null is the default, which is on.
+One store, thimble's config file (userconf.py): four switches live in its `features` block and two in keys that 0.8.0
+already had. thimble is on whenever its plugin is (a regular Claude Code plugin), so there is no switch for that. Each switch is on unless the config sets it false; null is the default, which is on.
 
     key              config path               what "off" does
-    autoActivate     features.autoActivate     a data read does not turn thimble on; /thimble, load_thimble, the
-                                               `thimble` command and a press still do
     viewProposals    views.propose             no view proposal after a turn (views.propose_enabled)
     labels           features.labels           the guide leaves out the Labels section and the label events, and
                                                apply_label refuses
     checks           features.checks           no automatic check runs, run_check refuses, and the guide leaves out
                                                the Checks section and the `checked` event
-    citationMarks    features.citationMarks    the terminal draws citations as plain links, with no ✓ or ×
+    citationMarks    features.citationMarks    the terminal draws citations as plain links, with no checking marks
     coverage         features.coverage         no coverage facts, no coverage line and no Coverage section
     cardCheck        agents.cardCheck.auto     no card check after a card tool (card_check.auto)
 
@@ -29,7 +27,6 @@ from . import userconf
 
 # The switches in the order /config and Settings show them, and where each one lives in thimble's config.
 PATHS: dict[str, tuple[str, ...]] = {
-    "autoActivate": ("features", "autoActivate"),
     "viewProposals": ("views", "propose"),
     "labels": ("features", "labels"),
     "checks": ("features", "checks"),

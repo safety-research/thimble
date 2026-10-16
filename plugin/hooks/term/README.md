@@ -6,11 +6,10 @@ thimble's terminal UI: the function hooks of thimble's plugin that draw thimble'
 that every hook passes through, except the path test of Read and Bash calls and `/thimble`, and it writes, spawns,
 fetches and draws nothing.
 
-**Turning on** (`activate.ts`). thimble turns on at the first data-file read of a person at the terminal (the data rule
-of SPEC-v2 3.3: data extensions outside a code tree; inside one, a data folder's files or big data files; never tests,
-samples, tools' folders or thimble's home), unless "Turn on when Claude reads data" is off (`/config` → thimble, or the
-browser's Settings, read from thimble's `config.json`); at `/thimble`; when Claude calls `load_thimble`; with the
-`thimble` command (`THIMBLE_OPEN=1`). Activation runs `thimble activate --mod --json` once (parallel calls share it
+**Turning on** (`activate.ts`). thimble is a regular Claude Code plugin: it turns on at the start of every session
+with a person at the terminal (register.tsx, `session.start`), quietly staying off in a folder `thimble activate`
+refuses; also at `/thimble` (which asks a refused folder again) and with the `thimble` command (`THIMBLE_OPEN=1`).
+Reading data turns nothing on. Activation runs `thimble activate --mod --json` once (parallel calls share it
 within their hook budget; a refused folder is asked once per session), pushes `load_thimble` to the shim with
 `$.mcp.call` so thimble's tools are listed, tells `thimble.ts` (`bridgeActivated`) and hands thimble's guide to Claude
 as the Read's context. The guide goes again when it is owed: with a prompt, with `/thimble`, after a compaction (a
@@ -38,8 +37,7 @@ browser's label color of its place) with a flag `⚑` in that color in the margi
 either opens the panel at Checks. On the main screen (classic) an answer taller than the screen keeps no tint (Claude
 Code reprints the transcript when such a row changes): its comments show in the panel.
 
-**Settings** (`settings.ts`). The seven switches (`/config` → thimble: Turn on when Claude reads data, View
-proposals, Labels, Checks, Citation marks, Coverage, Card check) stay in step with thimble's config, which the
+**Settings** (`settings.ts`). The six switches (`/config` → thimble: View proposals, Labels, Checks, Citation marks, Coverage, Card check) stay in step with thimble's config, which the
 browser's Settings writes. Coverage off draws no line and keeps no facts; Citation marks off draws citations as plain
 links and checks none; Checks off draws no tint.
 

@@ -44,7 +44,6 @@ in `features`; View proposals is `views.propose` above, and Card check is `agent
 
 | Switch | Key | Default | Off |
 |---|---|---|---|
-| Turn on when Claude reads data | `features.autoActivate` | on | Claude's reads of data files do not turn thimble on in a folder; `/thimble`, a thimble tool, `/thimble open` and the `thimble` command still do. The terminal reads this key before thimble is on, so turning it off in the browser holds in every later session. |
 | View proposals | `views.propose` | on | No view proposals after your turns. |
 | Labels | `features.labels` | on | Claude's guidance leaves labels out, `apply_label` refuses with a line that says the switch is off, and the panel has no Labels section. |
 | Checks | `features.checks` | on | No check runs by itself, on answers, cards or documents; `run_check` refuses; no tints on answers and no Checks section. |

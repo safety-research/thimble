@@ -11,12 +11,6 @@
   "mcpServers": "./.mcp.json",
   "types": "./hooks/term/types/index.d.ts",
   "userConfig": {
-    "autoActivate": {
-      "type": "boolean",
-      "title": "Turn on when Claude reads data",
-      "description": "Turn thimble on in a session the first time Claude reads a data file in the session's folder. /thimble turns it on either way.",
-      "default": true
-    },
     "viewProposals": {
       "type": "boolean",
       "title": "View proposals",

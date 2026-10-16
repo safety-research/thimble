@@ -204,7 +204,7 @@ export type TermFilesUi = { folded: string[]; unfolded: string[]; pick: string; 
 // ------------------------------------------------------------------------------------------------- 0.9.0 (SPEC-v2 C13)
 
 /** The per-feature switches (`/config` → thimble, the browser's Settings; `thimble features`, C6). */
-export type FeatureSettings = { autoActivate: boolean; viewProposals: boolean; labels: boolean; checks: boolean; citationMarks: boolean; coverage: boolean; cardCheck: boolean }
+export type FeatureSettings = { viewProposals: boolean; labels: boolean; checks: boolean; citationMarks: boolean; coverage: boolean; cardCheck: boolean }
 /** thimble on in this session (C2's answer): the workspace, the folder, how it turned on and the session's role. */
 export type Activated = { ws: string; path: string; cwd: string; via: string; role: 'main' | 'peer'; at: number }
 /** What Claude read (`seen`) or searched of the corpus in this session (`thimble state coverage --summary`): `totals` one

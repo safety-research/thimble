@@ -43,8 +43,9 @@ tunnel command and a one-time link instead.
 
 ![thimble in the terminal: cards under a reply, and the citation panel beside the chat](docs/assets/thimble-term.png)
 
-Each feature has a switch in `/config` → thimble and in the browser's Settings: Turn on when Claude reads data, View
-proposals, Labels, Checks, Citation marks, Coverage and Card check.
+thimble is a regular Claude Code plugin: once installed it is on in every session (turn it off with `/plugin`). Each
+feature has a switch in `/config` → thimble and in the browser's Settings: View proposals, Labels, Checks, Citation
+marks, Coverage and Card check.
 
 ## Commands
 
