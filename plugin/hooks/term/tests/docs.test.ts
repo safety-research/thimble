@@ -182,6 +182,9 @@ test("a document's sentence that cites a card whole keeps its chip, one of its f
     ...DOC,
     sections: [{ ...DOC.sections[0]!, paragraphs: [{ id: 'p1', sentences: [{ id: 'x1', text: 'The export holds four wikis [[card:ff73e071]].' }, { id: 'x2', text: 'The check was done [[card:a0frame0]].' }] }] }],
   }
+  // both cards exist, as the backend resolves them, so their chips have no mark (a place that does not resolve is red ×)
+  w.resolve['card:ff73e071'] = { ref: 'card:ff73e071', kind: 'cell', cell_id: 'ff73e071', excerpt: 'What does the export hold per wiki?' }
+  w.resolve['card:a0frame0'] = { ref: 'card:a0frame0', kind: 'cell', cell_id: 'a0frame0', excerpt: 'How many records does each file hold?' }
   await start($, w)
   let pane = await fromHome($, w, DOC.title)
   await w.clock.advance(1100)

@@ -404,8 +404,9 @@ test("every panel's header is one title row: the path, earlier steps dim and a c
   rows = await screen(pane, 96)
   print('the threads panel', rows.slice(0, 4))
   expect(rows[0]).toMatch(titled('   home › Threads'))
-  expect(rows[1]).toBe('   2 threads · 1 new')
-  expect(rows[2]!.trim()).toMatch(/^─+$/)
+  // no subtitle line: the root's row holds its count of threads and how many are new
+  expect(rows[1]!.trim()).toMatch(/^─+$/)
+  expect(rows[2]).toMatch(/^ {3}main +2 threads {2}1 new$/)
   expect(rows.join('\n')).not.toContain('‹ back')
   // `home` dim and a click away; `Threads` in the accent and bold
   const way = JSON.stringify(await pane.find({ type: 'Box', key: 'way' }))
@@ -769,8 +770,8 @@ test("several threads: the list one row a thread, then a rule, then the open thr
   const pane = await openedThread($, w, 'tz')
   const rows = await screen(pane, 96)
   print('two threads, the first open', rows)
-  expect(rows[1]).toBe('   2 threads')
-  expect(ruled(rows[2])).toBe(true)
+  expect(ruled(rows[1])).toBe(true)
+  expect(rows[2]).toMatch(/^ {3}main +2 threads$/)
   // the list: each thread its question alone while one is open; no line of an answer competes with the open thread's
   const first = rows.findIndex((r, i) => i > 2 && r.includes(`"${ASKED}"`))
   const second = rows.findIndex((r, i) => i > 2 && r.includes('"Which participant took longest?"'))
