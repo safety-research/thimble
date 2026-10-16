@@ -1737,7 +1737,8 @@ function sourceSegs(sentence: string, c: Citation): Line {
   // in quotation marks of the kind its words do not hold (lib.ts quoted)
   const [open, close] = quoted(flat) === flat ? ['', ''] : flat.includes('"') ? ['“', '”'] : ['"', '"']
   if (at < 0) return [{ s: `${open}${flat}${close}` }]
-  return [{ s: `${open}${flat.slice(0, at)}` }, { s: shown, fg: COLORS.cite, u: true }, { s: `${flat.slice(at + shown.length)}${close}` }]
+  // the cited span on the citation's purple, highlighted rather than underlined (the owner, 10-16 21:55)
+  return [{ s: `${open}${flat.slice(0, at)}` }, { s: shown, bg: citeHighlight() }, { s: `${flat.slice(at + shown.length)}${close}` }]
 }
 
 /** The citation panel's entry box (entry.tsx). In a citation opened from a side thread, its question goes on in that
@@ -1749,13 +1750,13 @@ async function citeEntry(cx: Ctx, e: PaneEvent, c: Citation, target: Target, sen
   const tid = threadBehind(nav.trail)
   if (!tid) {
     const key = `ask-cite-${cid(c.raw)}`
-    const el = askEntry(cx, e, { key, placeholder: 'ask about this citation', cols, target, ...(sentence ? { over: { anchorText: plainCites(sentence) } } : {}) })
+    const el = askEntry(cx, e, { key, placeholder: 'Ask about this citation', cols, target, ...(sentence ? { over: { anchorText: plainCites(sentence) } } : {}) })
     return { el, key, rows: entryHeight(key, cols) }
   }
   const key = fieldKey(`follow-${cid(tid)}`)
   const el = entryEl(cx, e, {
     key,
-    placeholder: 'ask a follow-up question',
+    placeholder: 'Ask a follow-up question',
     cols,
     onSubmit: q => {
       void (async () => {
@@ -1939,8 +1940,9 @@ async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   const look = chipLook(status, undefined, check.state)
   const bad = !look.spin && (red || look.state === 'failed')
   const checking = look.spin
-  // the title: the value, red once it failed; no ◌ or × after it, the bar says its state
-  const titleSegs: Line = [{ s: label, b: true, fg: bad ? COLORS.problem : COLORS.cite, u: true }]
+  // the title: the value highlighted on the citation's purple (red once it failed), not underlined; no ◌ or × after
+  // it, the bar says its state
+  const titleSegs: Line = [bad ? { s: label, b: true, fg: COLORS.problem } : { s: label, b: true, bg: citeHighlight() }]
   const opens = f ? () => openFile(cx, f.path, Math.max(1, (f.line ?? 1) - 5), f.line) : cardId ? () => openCard(cx, cardId) : null
   const body: RenderElement[] = []
   // the title row's current step: the value as its link, a click on it opening its place
@@ -2002,6 +2004,18 @@ async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
       const got = await startThread(cx, c.ref, p.sentence ? plainCites(p.sentence) : citeLabel(c), scriptQuestion(c), { title: targetLabel(target, 60) })
       if ('error' in got) return cx.toast(`thimble: ${got.error}`)
       await openThread(cx, got.id, scriptQuestion(c))
+    })()
+  // repair: a failed citation asks Claude, in a side thread about it, to fix the claim (the owner, 10-16: "only red if
+  // it fails, with an option to repair"); a takeaway's is fixed on its card with edit_card, a sentence's restated
+  const repairQuestion = () =>
+    `This citation failed thimble's check${why ? ` (${why})` : ''}: ${citeLabel(c)} → ${c.ref}. Find what the cited place actually shows, then fix the claim: ` +
+    (p.of ? `rewrite the takeaway of card:${p.of} with edit_card so its value and citation are right.` : 'give the corrected sentence with its citation.')
+  const repair = () =>
+    void (async () => {
+      const q = repairQuestion()
+      const got = await startThread(cx, c.ref, p.sentence ? plainCites(p.sentence) : citeLabel(c), q, { title: targetLabel(target, 60) })
+      if ('error' in got) return cx.toast(`thimble: ${got.error}`)
+      await openThread(cx, got.id, q)
     })()
   const canAsk = !pending && !kept && !scriptT && c.display !== null && v?.status !== 'missing' && e.surface !== 'mobile'
   // its revisions: one where a check rewrote it in place (what Claude wrote, what the check made it, and why)
@@ -2096,6 +2110,14 @@ async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
       <Text key="cite-bar-rule" color={COLORS.rule}>{'┄'.repeat(cols)}</Text>
       <Box key="cite-bar" flexDirection="row" columnGap={3}>
         {stateEl}
+        {bad && e.surface !== 'mobile' ? (
+          <Button key="cite-repair" plain onPress={repair}>
+            <Text>
+              <Text color={ACCENT} underline>repair</Text>
+              <Text dimColor> ›</Text>
+            </Text>
+          </Button>
+        ) : null}
         {historyEl}
       </Box>
     </Box>
@@ -2109,13 +2131,13 @@ async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
     body.push(framedCard(cx, e, lit.card, w, lit.lines, 'cite-card'))
   }
   const entry = await citeEntry(cx, e, c, target, p.sentence ?? '', cols)
-  let hints = [...(entry.el ? ['a to ask'] : []), ...(f ? ['f for its file'] : []), ...(cardId ? ['c for the card'] : []), ...(checking ? [] : ['v for how it was verified']), ...(revisions ? ['h for its history'] : []), ...(canAsk ? ['s for a script'] : [])]
+  let hints = [...(entry.el ? ['a to ask'] : []), ...(f ? ['f for its file'] : []), ...(cardId ? ['c for the card'] : []), ...(checking ? [] : ['v for how it was verified']), ...(revisions ? ['h for its history'] : []), ...(canAsk ? ['s for a script'] : []), ...(bad && e.surface !== 'mobile' ? ['r to repair'] : [])]
   if (!(v?.card && !v.lines.length) && v?.lines.length) {
     // the passage an example quotes, when the cited lines do not hold it
     const quotedRow = quote && status !== 'differs' && !v.lines.some(l => l.hit && quoteSpan(demojibake(l.text).replace(/\t/g, '  '), quote))
     // a file's lines: a window over the whole file, as tall as the rows the panel's other parts leave it (those above
     // it, a `quoted` row, the bar and what it opened, the entry box and its blank row, and the hint rows)
-    used += (quotedRow ? tall(clip(demojibake(quote), 600), cols - 8) : 0) + (entry.el ? 1 : 0) + entry.rows + hintHeight(['↑↓ to scroll', ...hints], cols)
+    used += (quotedRow ? tall(clip(demojibake(quote), 600), cols - 8) : 0) + entry.rows + hintHeight(['↑↓ to scroll', ...hints], cols)
     const win = v.path && typeof v.line === 'number' ? await citeWindow(cx, e, c.ref, v, cols, quote, Math.max(5, (bodyRows || 30) - used)) : null
     if (win?.scrolls) hints = ['↑↓ to scroll', ...hints]
     body.push(win?.el ?? <Box key="cite-lines" flexDirection="column">{lineRows(cx, e, v, cols, quote)}</Box>)
@@ -2129,9 +2151,8 @@ async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
     ...(checking ? [] : [{ key: 'how', hotkey: 'v', onPress: toggle('how') }]),
     ...(revisions ? [{ key: 'history', hotkey: 'h', onPress: toggle('history') }] : []),
     ...(canAsk ? [{ key: 'script', hotkey: 's', onPress: askScript }] : []),
+    ...(bad && e.surface !== 'mobile' ? [{ key: 'repair', hotkey: 'r', onPress: repair }] : []),
   ]
-  // a blank row between the bar and the entry box
-  if (entry.el) body.push(<Text key="cite-bar-gap"> </Text>)
   body.push(...bottomRows(cx, e, cols, [], [entry.el], hints, !entry.el))
   const hk = hiddenKeys(cx, e, keys)
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>
@@ -2635,7 +2656,7 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
     // prompt box stands under its transcript
     field = entryEl(cx, e, {
       key: fieldKey(askField),
-      placeholder: 'ask a follow-up question',
+      placeholder: 'Ask a follow-up question',
       cols,
       onSubmit: q => {
         // a question asked while the thread answers waits until its answer ends: thimble queues it

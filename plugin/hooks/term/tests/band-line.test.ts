@@ -241,7 +241,7 @@ test('`thimble` opens the panel at home, as `open ›` did, and clears the cards
   await m.unmount()
 })
 
-test('under the pointer a press gets the selection background on its words and the cell after them, its name underlines, and it does not invert', { timeoutMs: 30_000 }, async ($, on) => {
+test('under the pointer a press keeps its look (no background, no inverse) and only its name underlines', { timeoutMs: 30_000 }, async ($, on) => {
   const w = panelWorld(on)
   w.t.coverageSummary = SUMMARY
   await start($, w)
@@ -250,8 +250,8 @@ test('under the pointer a press gets the selection background on its words and t
   const lits = ((await presses(m)).children ?? []).filter(Boolean) as Node[]
   expect(lits.map(keyOf)).toEqual(['thimble', 'cards', 'threads', 'citations', 'labels', 'checks', 'coverage'].map(k => `above-summary-lit-${k}`))
   for (const lit of lits) {
-    // a keyed Box, the hover's scope: the selection background, the Button, then the one cell lit after its words
-    expect(lit.hover).toEqual({ backgroundColor: COLORS.selected })
+    // a keyed Box with no hover look of its own (no background): the Button, then the one cell after its words
+    expect(lit.hover).toBeUndefined()
     const kids = (lit.children ?? []).filter(Boolean) as Node[]
     expect(kids.map(k => k.type)).toEqual(['Button', 'Text'])
     expect(words(kids[1])).toBe(' ')

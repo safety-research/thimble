@@ -373,7 +373,7 @@ export function titleLines(question: string, cols: number, id = '', lit = false)
  * blue ↗ (a press on either opens the label in the panel), then its values each after a ● in its hue. A label card's
  * row says after the ↗, dim, how its label is defined and what it ran on (`code · revisions.jsonl`, `· a sample` for a
  * trial), as the browser's label row does; its bars name the values and its `all` row the total. `hover`: the slug of
- * the label under the pointer, its name and ↗ in inverse. `hots`: where each row's name and ↗ stand, the cells a press
+ * the label under the pointer, its name underlined. `hots`: where each row's name and ↗ stand, the cells a press
  * opens the label from.
  */
 export function labelHead(card: CardData, cols: number, hover = ''): { lines: Line[]; slugs: string[]; hots: { x0: number; x1: number }[] } {
@@ -385,7 +385,9 @@ export function labelHead(card: CardData, cols: number, hover = ''): { lines: Li
     const head: Line = [{ s: 'label  ', fg: COLORS.dim }]
     const nameW = Math.max(8, Math.min(width(l.name), Math.floor(cols * 0.55)))
     const x0 = lineWidth(head)
-    head.push({ s: cut(l.name, nameW), fg: COLORS.link, u: true, ...(on ? { inv: true } : {}) }, { s: ' ' }, { s: '↗', fg: COLORS.link, ...(on ? { inv: true } : {}) })
+    // the name in the accent, the color of what can be pressed, underlined only under the pointer, so a card's one
+    // underline color stays the citations' purple (the owner, 10-16 21:20)
+    head.push({ s: cut(l.name, nameW), fg: COLORS.accent, ...(on ? { u: true } : {}) }, { s: ' ' }, { s: '↗', fg: COLORS.accent })
     hots.push({ x0, x1: lineWidth(head) })
     const tail: Line = []
     if (card.kind === 'label' && card.label) {

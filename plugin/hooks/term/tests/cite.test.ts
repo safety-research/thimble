@@ -91,7 +91,7 @@ test("a card value its code types in: the literal lit on the citation's purple i
   await ui.unmount()
   await w.clock.settle()
   let pane = (await $.ui.mount(PANE)) as unknown as M
-  expect(shown(await pane.find({ key: 'cite-bar' }))).toBe('failed × ›history 0')
+  expect(shown(await pane.find({ key: 'cite-bar' }))).toBe('failed × ›repair ›history 0')
   pane = await pressBar($, w, pane, 'cite-state')
   expect(shown(await pane.find({ key: 'cite-how' }))).toBe("the card's code types it in rather than computes it")
   expect(shown(await pane.find({ key: 'cite-why' }))).toBe('typed in the code, line 3, not computed')
@@ -106,11 +106,11 @@ test("a citation whose place does not exist: its title red, `failed ×` red in t
   await start($, w)
   let pane = await clickCite($, w, 'It has [12](README.md#L99) wikis.', 8)
   const json = JSON.stringify(await pane.find({ type: 'Client', key: 'cite-title' }))
-  expect(json).toContain('"s":"12","b":true,"fg":"error","u":true')
+  expect(json).toContain('"s":"12","b":true,"fg":"error"}')
   // no mark after the title: the bar says its state (MATT-NOTES "Mockup feedback", panel C)
   expect(json).not.toContain('×')
   const bar = await pane.find({ key: 'cite-bar' })
-  expect(shown(bar)).toBe('failed × ›history 0')
+  expect(shown(bar)).toBe('failed × ›repair ›history 0')
   expect(JSON.stringify(bar)).toContain('{"type":"Text","props":{"color":"error","underline":true},"children":["failed"]}')
   pane = await pressBar($, w, pane, 'cite-state')
   expect(shown(await pane.find({ key: 'cite-how' }))).toBe('thimble looked for its place and found none')
@@ -157,7 +157,7 @@ test("a takeaway's citation opens a panel that agrees with the chat: no mark aft
   let pane = (await $.ui.mount(PANE)) as unknown as M
   const tree = await pane.drawn()
   // the title (a link, drawn in a Client): the value, purple and underlined, and no mark after it
-  expect(JSON.stringify(tree)).toContain('{"s":"4579","b":true,"fg":"merged","u":true}')
+  expect(JSON.stringify(tree)).toContain('{"s":"4579","b":true,"bg":"')
   expect(JSON.stringify(tree)).not.toContain('✓')
   // where it stands: the card, by its question, in place of the sentence (panel C)
   expect(shown(tree)).toContain('from the cardWhat does the export hold per wiki?')
@@ -237,7 +237,7 @@ test("a click on a citation whose place is still being read: the bar says `◌ c
   await w.clock.advance(50)
   let pane = (await $.ui.mount(PANE)) as unknown as M
   let tree = await pane.drawn()
-  expect(JSON.stringify(tree)).toContain('{"s":"4,579","b":true,"fg":"merged","u":true}')
+  expect(JSON.stringify(tree)).toContain('{"s":"4,579","b":true,"bg":"')
   expect(shown(await pane.find({ key: 'cite-bar' }))).toBe('◌ checking …history 0')
   await pane.unmount()
   // the read ends: the panel says what was found, and the ◌ goes

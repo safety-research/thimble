@@ -1,7 +1,7 @@
 // The entry box: Claude Code's own prompt box, drawn in the panel wherever the analyst asks a side thread a question
 // (SPEC.md, section 6, rule 27; Matt, 2026-10-16: the person types a follow-up directly, in a box like Claude Code's).
 // A rule above and a rule below in the prompt box's border color, from the margin's edge across the type area, and
-// between them `❯` in the margin and Claude Code's Input on the type area: two rows tall, taller as its text wraps, a
+// between them `❯` in the margin and Claude Code's Input on the type area: one row tall, taller as its text wraps, a
 // longer text scrolling within it. Enter asks; Shift+Enter breaks the line; Esc gives the keys back to the prompt. It
 // replaces the `ask about it` controls (a citation, a card, a check's comment) and the side thread's one-row `ask`
 // field, and while it holds the keys the panel draws no key-hint row (panel.tsx endHints), as Claude Code's prompt box
@@ -14,8 +14,8 @@ import { width } from './lib'
 import { COLORS } from './paint'
 import type { PaneEvent } from './panel'
 
-/** The rows the field takes at the least, as Claude Code's prompt box shows two lines to type in. */
-export const ENTRY_ROWS = 2
+/** The rows the field takes at the least: one, as Claude Code's prompt box shows at rest (the owner, 10-16 21:55). */
+export const ENTRY_ROWS = 1
 /** The rows it grows to at the most; a longer text scrolls within the field. */
 export const ENTRY_MAX = 10
 /** What Enter does in it, the word Claude Code's Input draws beside a field while it has the keys. */
@@ -56,7 +56,8 @@ export function entryRows(text: string, cols: number): number {
 
 /** The rows an entry box takes in the panel: its rules (the top one only with `top`) and its field. */
 export function entryHeight(key: string, cols: number, top = true): number {
-  return (top ? 1 : 0) + entryRows(drafts.get(key) ?? '', cols) + 1
+  // the blank row above the box, its rules and its field
+  return 1 + (top ? 1 : 0) + entryRows(drafts.get(key) ?? '', cols) + 1
 }
 
 export type EntryOpts = {
@@ -87,6 +88,8 @@ export function entryEl(cx: Ctx, e: PaneEvent, o: EntryOpts): RenderElement {
   const rows = entryRows(drafts.get(o.key) ?? '', o.cols)
   return (
     <Box key={marginKey(`entry-${o.key}`)} flexDirection="column">
+      {/* one blank row between what stands above and the box, as above Claude Code's own prompt */}
+      <Text key={`entry-gap-${o.key}`}> </Text>
       {o.top === false ? null : rule(`entry-top-${o.key}`)}
       <Box key={`entry-row-${o.key}`} flexDirection="row">
         <Box width={MARGIN_W} flexShrink={0}>

@@ -139,7 +139,7 @@ test("a reply's citation is a link, purple and underlined; a click opens the cit
   expect(shown(lines)).toContain('An export of 4,579 wiki pages')
   // no `ask about it`: the entry box, its placeholder saying what it takes
   expect(text).not.toContain('ask about it')
-  expect(((await pane.findAll({ type: 'Input' })) as { key?: string; props?: { placeholder?: string } }[]).find(i => String(i.key).startsWith('ask-cite-'))?.props?.placeholder).toBe('ask about this citation')
+  expect(((await pane.findAll({ type: 'Input' })) as { key?: string; props?: { placeholder?: string } }[]).find(i => String(i.key).startsWith('ask-cite-'))?.props?.placeholder).toBe('Ask about this citation')
   // the sentence it stands in, its value a link; no way back from main, so no `b`; no `in files` (the title opens it)
   expect(text).toContain('source')
   expect(text).toContain('"The README says 4,579 pages."')

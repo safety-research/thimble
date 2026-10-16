@@ -2,7 +2,7 @@
 // most these, top to bottom: a panel that waits undrawn and why (the narrow fallback), the view proposal waiting for an
 // answer, the open notices (the workspace's and the terminal's own, notices.tsx), the one SSH row of a remote press
 // (offramp.ts), and last the thimble line, the one row that stays while thimble is on (the owner's design, 10-16 21:30,
-// with the look of mock3/line2 A3 and A2's hover):
+// with the look of mock3/line2 A3; under the pointer the name underlines, 10-16 21:55):
 //
 //   thimble   cards 12 •   threads 2   citations 18 ◌  1 failed   labels 3 •   checks 2 •   coverage 15%
 //
@@ -298,9 +298,8 @@ export function fitItems<T extends Pick<SummaryItem, 'segs'> & Partial<Pick<Summ
   return { shown: [], cut: true, gap: GAP }
 }
 
-/** Under the pointer, a press of the thimble line: the selection background on its words and the cell after them,
- *  and no inverse (the Button's own look under the pointer); the focus still inverts it. */
-const LIT = { backgroundColor: COLORS.selected }
+/** Under the pointer, a press of the thimble line keeps its look (no inverse, no background): only its name
+ *  underlines (the owner's pick, 10-16 21:55); the focus still inverts it. */
 const NO_INVERSE = { inverse: false }
 
 // ------------------------------------------------------------------------------------------------ the band
@@ -447,8 +446,7 @@ export function registerBand(on: On): void {
       )
     }
     // the thimble line, the one row that stays while thimble is on: `thimble` bold, in the accent and underlined, which
-    // opens home; then the items that fit. Each press stands in a keyed Box with the cell after its words, the scope of
-    // its hover (the selection background on both, the name underlined)
+    // opens home; then the items that fit. Under the pointer an item's name underlines, nothing else changes
     const fit = fitItems(await summaryItems(cx), cols - LINE_LABEL_W)
     const segEl = (s: ItemSeg) =>
       s.fg || s.bold || s.dim || s.name ? (
@@ -462,7 +460,7 @@ export function registerBand(on: On): void {
       <Box key="above-summary" flexDirection="row">
         <Text>{'  '}</Text>
         <Box flexDirection="row" columnGap={fit.gap - 1} flexShrink={0}>
-          <Box key="above-summary-lit-thimble" flexDirection="row" flexShrink={0} hover={LIT}>
+          <Box key="above-summary-lit-thimble" flexDirection="row" flexShrink={0}>
             <Button key="above-summary-thimble" plain hover={NO_INVERSE} onPress={() => openHomeSeen(cx)}>
               <Text bold underline color={COLORS.accent}>
                 thimble
@@ -471,7 +469,7 @@ export function registerBand(on: On): void {
             <Text>{' '}</Text>
           </Box>
           {fit.shown.map(it => (
-            <Box key={`above-summary-lit-${it.key}`} flexDirection="row" flexShrink={0} hover={LIT}>
+            <Box key={`above-summary-lit-${it.key}`} flexDirection="row" flexShrink={0}>
               <Button key={`above-summary-${it.key}`} plain hover={NO_INVERSE} onPress={it.press}>
                 {it.segs.map(segEl)}
               </Button>
