@@ -153,8 +153,6 @@ export function panelWorld(on: On, opts: { mode?: string; ws?: string | null } =
       })
     return (on as unknown as (...a: unknown[]) => unknown)(ev, ...rest)
   }) as unknown as On
-  // this session's id, as Claude Code names its transcript
-  on('session.id', (() => ({ value: 's1' })) as never)
   // the transcript's values, as its lane would keep them
   on('state.get', { plugin: PANEL, key: 'citeIndex' } as never, (() => ({ value: { value: x().t.citeIndex, version: 1 } })) as never)
   on('state.get', { plugin: PANEL, key: 'answerComments' } as never, (() => ({ value: { value: x().t.answerComments, version: 1 } })) as never)

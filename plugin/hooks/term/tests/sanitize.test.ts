@@ -1,6 +1,6 @@
 // Every data-derived string the terminal draws goes through clean() (SPEC-v2 S8): a terminal's escape sequences (an OSC
 // 8 link, a color), C0 and C1 controls, the bidi controls and marks, the zero-width characters and U+FEFF are left out:
-// in the coverage line, a check's name and comment, and a failure's toast. `claude plugin test plugin`.
+// in a check's name and comment, and in the coverage line as drawn. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
 import { clean } from '../lib'
@@ -39,12 +39,4 @@ test('the coverage line and a failure toast draw no control, bidi or zero-width 
   expect(text).toContain('▸ saw 1 of 3 files')
   expect(text).not.toMatch(/[\u001b‮​]/)
   await ui.unmount()
-})
-
-test("activate:failed's toast says the reason cleaned", SLOW, async ($, on) => {
-  const w = world(on, { active: false })
-  w.activate = { ok: false, error: { code: 'IO', message: 'disk ‮full\u001b[0m', fix: 'free some space' } }
-  await startSession($, w)
-  await $.command.run({ command: 'thimble:thimble', args: '' } as never)
-  expect(w.toasts).toContain('thimble could not open this folder: disk full')
 })

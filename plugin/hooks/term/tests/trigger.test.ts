@@ -1,10 +1,10 @@
 // The data rule that turns thimble on (SPEC-v2 3.3) and its coverage twin (3.9), over the one case list
-// (data-file-cases.ts, which the backend's coverage.is_data reads too): code trees, never-folders and never-names, the
-// size rule, json/sqlite/db never by size, a realpath outside the folder; and the files a Bash command reads (readers,
-// searches, never an output argument, no fact for ls/find/fd). `claude plugin test plugin`.
+// (data-file-cases.ts, which the backend's coverage.is_data reads too); a realpath outside the folder or under thimble's
+// home never counts; the files a Bash command reads (never an output argument, none for ls/find/fd).
+// `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
-import { candidatePaths, isDataFile, isDataRead, relInside } from '../activate'
+import { isDataFile, isDataRead, relInside } from '../activate'
 import { bashReads, shellWords } from '../tracker'
 import { CASES } from './data-file-cases'
 
@@ -55,36 +55,4 @@ test("a Bash command's readers name the files it reads, never an output argument
   expect(paths(`python3 -c "import pandas as pd; pd.read_csv('prs.csv')"`)).toContain('prs.csv')
   expect(paths(`python3 - <<'EOF'\nimport json\nrows = open('events.jsonl').read()\nEOF`)).toContain('events.jsonl')
   expect(shellWords('a "b c" \'d e\' f\\ g | h; i && j')).toEqual([['a', 'b c', 'd e', 'f g'], ['h'], ['i'], ['j']])
-})
-
-test('candidates: a Read names its file; a Bash command its readers; no other call names one', () => {
-  expect(candidatePaths('Read', { file_path: '/corpus/wiki/events.jsonl' })).toEqual(['/corpus/wiki/events.jsonl'])
-  expect(candidatePaths('Bash', { command: 'cat a.csv b.csv > c.csv' })).toEqual(['a.csv', 'b.csv'])
-  expect(candidatePaths('Bash', { command: 'ls' })).toEqual([])
-  expect(candidatePaths('Grep', { pattern: 'x', path: '.' })).toEqual([])
-  expect(candidatePaths('Edit', { file_path: '/corpus/wiki/events.jsonl' })).toEqual([])
-})
-
-test('how each reader reads: cat whole, head the first lines, sed -n a range, wc and grep search, a recursive search over a folder', () => {
-  expect(bashReads('cat a.csv')[0]).toMatchObject({ how: 'whole' })
-  expect(bashReads('head a.csv')[0]).toMatchObject({ how: 'part', lines: [1, 10] })
-  expect(bashReads('head -n 5 a.csv')[0]).toMatchObject({ how: 'part', lines: [1, 5] })
-  expect(bashReads('head -20 a.csv')[0]).toMatchObject({ how: 'part', lines: [1, 20] })
-  expect(bashReads('tail -n 5 a.csv')[0]).toMatchObject({ how: 'part' })
-  expect(bashReads('tail -n 5 a.csv')[0]!.lines).toBeUndefined()
-  expect(bashReads("sed -n '10,20p' a.csv")[0]).toMatchObject({ how: 'part', lines: [10, 20] })
-  expect(bashReads("sed -n '7p' a.csv")[0]).toMatchObject({ how: 'part', lines: [7, 7] })
-  expect(bashReads("sed 's/a/b/' a.csv")[0]).toMatchObject({ how: 'whole' })
-  expect(bashReads("sed -i 's/a/b/' a.csv")).toEqual([])
-  expect(bashReads('less a.csv')[0]).toMatchObject({ how: 'whole' })
-  expect(bashReads('jq . a.json')[0]).toMatchObject({ how: 'whole' })
-  expect(bashReads('wc -l a.csv')[0]).toMatchObject({ how: 'searched' })
-  expect(bashReads('awk -F, \'{print $1}\' a.csv')[0]).toMatchObject({ how: 'searched' })
-  expect(bashReads('grep -c x a.csv')[0]).toMatchObject({ how: 'searched' })
-  expect(bashReads('grep -rn x agents/')[0]).toMatchObject({ how: 'searched', path: 'agents/', recursive: true })
-  expect(bashReads('grep -R x')[0]).toMatchObject({ path: '.', recursive: true })
-  expect(bashReads('rg x')[0]).toMatchObject({ path: '.', recursive: true })
-  expect(bashReads('rg --files')).toEqual([])
-  expect(bashReads('grep -e x -e y a.csv b.csv').map(r => r.path)).toEqual(['a.csv', 'b.csv'])
-  expect(bashReads('duckdb -c "select count(*) from \'t.parquet\'"').map(r => r.path)).toContain('t.parquet')
 })

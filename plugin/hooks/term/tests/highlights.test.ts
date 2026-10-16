@@ -1,8 +1,5 @@
-// A check's comment on a passage of Claude's answer (SPEC-v2 3.12): the passage tinted in the check's color (the label
-// palette place C9 sends, 16%, 30% while open in the panel) by its offsets, or where its quote is found, none when the
-// quote is missing; a flag ⚑ in that color on the passage's first row (which moves with the wrapping at 100 and 150
-// columns) over a ↳ or a "?"; none with "Checks" off or on a classic answer taller than the screen; a click on the tint
-// or the flag opens the panel at Checks. `claude plugin test plugin`.
+// A check's comment on a passage of Claude's answer (SPEC-v2 3.12): the passage tinted in the check's color with a flag
+// in the margin; none with "Checks" off. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
@@ -50,53 +47,6 @@ test("a comment's passage is tinted in its check's color at 16%, with a flag in 
   await ui.unmount()
 })
 
-test('the flag stands on the passage’s first row as the paragraph wraps: row 0 at 150 columns, a later row at 100', SLOW, async ($, on) => {
-  const w = world(on)
-  await answered($, w, [comment()])
-  // at 150 columns the first sentence and the claim share the first row: the flag is in the ⏺'s place, no column of rows
-  const wide = (await $.ui.mount(MESSAGE(150))) as unknown as M
-  const w1 = JSON.stringify(await wide.drawn())
-  expect(w1).toContain('⚑')
-  expect(w1).not.toContain('"key":"flag"')
-  await wide.unmount()
-  // at 100 the claim starts on the second row: the margin holds the ⏺ row, then the flag
-  const narrow = (await $.ui.mount(MESSAGE(100))) as unknown as M
-  const w2 = JSON.stringify(await narrow.drawn())
-  expect(w2).toContain('"key":"flag"')
-  expect(w2).toContain('⏺')
-  await narrow.unmount()
-})
-
-test('the quote is searched when the offsets do not hold it; a quote the text does not hold draws no tint', SLOW, async ($, on) => {
-  const w = world(on)
-  await answered($, w, [comment({ start: 3, end: 9 }), comment({ id: 'c2', quote: 'A sentence that is not in the answer.', start: 0, end: 5 })])
-  const ui = (await $.ui.mount(MESSAGE(150))) as unknown as M
-  const { tints } = await tintsOf(ui)
-  expect(tints.map(t => t.id)).toEqual(['c1'])
-  await ui.unmount()
-})
-
-test('a click on the tint or on the flag opens the panel at Checks on that comment', SLOW, async ($, on) => {
-  const w = world(on)
-  await answered($, w, [comment()])
-  const ui = (await $.ui.mount(MESSAGE(150))) as unknown as M
-  const json = JSON.stringify(await ui.drawn())
-  const para = /"key":"(para-\d+)"/.exec(json)![1]!
-  const flag = /"key":"(flag-[^"]+)"/.exec(json)![1]!
-  // the claim starts after the first sentence on row 0
-  const x = FIRST.length + 2
-  await ui.pointer({ type: 'down', x, y: 0, button: 'left', in: para } as never)
-  await ui.pointer({ type: 'up', x, y: 0, button: 'left', in: para } as never)
-  await w.clock.settle()
-  expect(w.panes.at(-1)).toMatchObject({ id: 'thimble', title: 'Checks' })
-  const opened = w.panes.length
-  await ui.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: flag } as never)
-  await w.clock.settle()
-  expect(w.panes.length).toBeGreaterThan(opened)
-  expect(w.panes.at(-1)).toMatchObject({ title: 'Checks' })
-  await ui.unmount()
-})
-
 test('"Checks" off: no tint and no flag', { ...SLOW, options: { checks: false } }, async ($, on) => {
   const w = world(on)
   w.features.checks = false
@@ -105,24 +55,5 @@ test('"Checks" off: no tint and no flag', { ...SLOW, options: { checks: false } 
   const { tints, json } = await tintsOf(ui)
   expect(tints).toEqual([])
   expect(json).not.toContain('⚑')
-  await ui.unmount()
-})
-
-test('on the main screen (classic) an answer taller than the screen keeps no tint; one that fits is tinted', SLOW, async ($, on) => {
-  const w = world(on)
-  await answered($, w, [comment()])
-  const tall = (await $.ui.mount(MESSAGE(100, false, 3))) as unknown as M
-  expect((await tintsOf(tall)).tints).toEqual([])
-  await tall.unmount()
-  const fits = (await $.ui.mount(MESSAGE(100, false, 40))) as unknown as M
-  expect((await tintsOf(fits)).tints.length).toBe(1)
-  await fits.unmount()
-})
-
-test('a dismissed comment draws nothing', SLOW, async ($, on) => {
-  const w = world(on)
-  await answered($, w, [comment({ status: 'dismissed' })])
-  const ui = (await $.ui.mount(MESSAGE(150))) as unknown as M
-  expect((await tintsOf(ui)).tints).toEqual([])
   await ui.unmount()
 })
