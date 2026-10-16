@@ -2451,7 +2451,7 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
     if (on !== shownOn) await showLabel(cx, id, { on })
   }
   // the header block: name, type, scope, each on the label column, as Matt wrote them (`name:`), and for a label over
-  // files whether its marks show in Files; then the definition
+  // files whether its marks show in Files; then the definition: the model and the prompt it runs
   const L = 'pattern:'.length + 2
   const fieldLine = (label: string, el: RenderElement) => (
     <Box key={`lf-${label}`} flexDirection="row">
@@ -2495,9 +2495,6 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
       </Box>,
     ),
   )
-  // a prompt label: the model its calls run on (the label's own, else the labels row of Settings), as the analyst reads
-  // its name
-  if (kind === 'prompt' && l.run_model) rows.push(fieldLine('model:', <Text wrap="truncate-end">{l.run_model}</Text>))
   // a label over files: how many files its glob matches (`1 file matches`), so the count does not read as a link; the
   // records stand in `run on all N`. A label over cards or sentences: how many it holds
   const scopeCount = files ? (typeof l.scope_files === 'number' ? (l.scope_files === 1 ? '1 file matches' : `${num(l.scope_files)} files match`) : '') : scopeN !== null ? `${num(scopeN)} ${unit}` : ''
@@ -2532,6 +2529,9 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
       ),
     )
   rows.push(ruleEl(els, cols, 'lb-rule'))
+  // the definition: a prompt label's model first, the model its calls run on (the label's own, else the labels row of
+  // Settings), as the analyst reads its name; then the prompt it runs (Matt, v9 review, item k)
+  if (kind === 'prompt' && l.run_model) rows.push(fieldLine('model:', <Text wrap="truncate-end">{l.run_model}</Text>))
   // the definition, whole, in a field to edit (field.tsx, in a border as the search box is): a click gives it the
   // keyboard, Enter saves it (in code, ctrl+s)
   const defName = kind === 'prompt' ? 'prompt' : kind === 'regex' ? 'pattern' : 'code'

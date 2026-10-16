@@ -1,6 +1,6 @@
 // The label panel as thimble-term draws it: its header as Matt wrote
-// it (`name:`, `type:`, `scope:`, the definition on the same column), `stop` while a run goes, a run's first error in
-// red, the labels list's digits. `claude plugin test plugin`.
+// it (`name:`, `type:`, `scope:`, the definition on the same column, a prompt label's model in it), its actions in the
+// accent, `stop` while a run goes, a run's first error in red, the labels list's digits. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
@@ -240,16 +240,25 @@ test("a label whose first run stopped part way counts its scope in its panel: `r
   await pane.unmount()
 })
 
-test("a prompt label's panel has a `model:` row, the model its calls run on; its scope says how many files match", async ($, on) => {
-  // Matt (19:05): the label panel shows the model a prompt label uses, and the scope's count says what it is
+test("a prompt label's panel has a `model:` row in its definition, right above the prompt it runs; its scope says how many files match", async ($, on) => {
+  // Matt (19:05): the label panel shows the model a prompt label uses, and the scope's count says what it is; (v9
+  // review, item k) the model row stands in the definition, under the rule, with the prompt
   const w = world(on)
-  w.states.labels = [{ ...LABEL, kind: 'prompt', glob: 'agents/*.jsonl', scope_files: 3, run_model: 'Haiku 4.5' }] as never
+  w.states.labels = [{ ...LABEL, kind: 'prompt', spec: 'Does the text link through a proxy?', glob: 'agents/*.jsonl', scope_files: 3, run_model: 'Haiku 4.5' }] as never
   const pane = await labelPanel($, w)
-  const text = shown(await pane.drawn())
+  const tree = (await pane.drawn()) as { children?: unknown[] }
+  const text = shown(tree)
   expect(text).toMatch(/model:\s*Haiku 4\.5/)
   expect(text).toMatch(/scope:\s*· 3 files match/)
-  expect(text.indexOf('type:')).toBeLessThan(text.indexOf('model:'))
-  expect(text.indexOf('model:')).toBeLessThan(text.indexOf('scope:'))
+  // the panel's rows in order: the header (type, scope, marks), the rule, then the model and the prompt
+  const rows = (tree.children ?? []).map(r => shown(r))
+  const at = (s: string) => rows.findIndex(r => r.startsWith(s))
+  for (const s of ['type:', 'scope:', 'marks:', '──', 'model:', 'prompt:']) expect(at(s)).toBeGreaterThanOrEqual(0)
+  expect(at('type:')).toBeLessThan(at('scope:'))
+  expect(at('scope:')).toBeLessThan(at('marks:'))
+  expect(at('marks:')).toBeLessThan(at('──'))
+  expect(at('model:')).toBe(at('──') + 1)
+  expect(at('prompt:')).toBe(at('model:') + 1)
   await pane.unmount()
 })
 
