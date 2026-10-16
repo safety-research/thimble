@@ -5,7 +5,8 @@
 // disabled, so nothing can be typed, and hovering it shows exactly "This is a demo and thimble isn't connected to a
 // live Claude Code session." The same note shows in the chat for every other action that needs Claude (Ask about this, a
 // card's ask, a report's request, an agent's start), which each ask demoStop() first, and keeps what was typed. No view
-// proposal card shows there, and the tour says it is a demo and that the chat takes no typing.
+// proposal card shows there, and the tour says it is a demo and that the chat takes no typing. The tour's welcome,
+// which dims the line, says it first.
 import { act } from 'react'
 import App from '../../src/App.tsx'
 import { TIP_DELAY_MS } from '../../src/components/Tooltip.tsx'
@@ -16,6 +17,7 @@ import { DEMO_LINE, DEMO_NOTE, DEMO_TAG, DEMO_TIP, demoStop, dismissDemoNote, is
 import type { ChatMeta } from '../../src/lib/types.ts'
 import { DemoLine } from '../../src/shell/DemoLine.tsx'
 import { DemoTag } from '../../src/shell/DemoTag.tsx'
+import { runTour } from '../../src/tour/run.ts'
 import { sessionTexts, tourSteps } from '../../src/tour/steps.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
@@ -177,5 +179,24 @@ describe('what the page shows', () => {
     expect(demo[1].body).not.toContain('where you started thimble.')
     expect(demo.some((s) => s.body === sessionTexts(true).ask)).toBe(true)
     expect(demo.length).toBe(live.length)
+  })
+
+  test("the tour's welcome says the line first on a demo page, then asks, and elsewhere only asks", () => {
+    const welcome = (demo: boolean) => {
+      setDemo(demo)
+      const tour = runTour({ welcome: true, chat: true })
+      const pop = document.querySelector('.tour-pop.tour-welcome') as HTMLElement
+      const seen = {
+        title: pop.querySelector('.tour-title')?.textContent,
+        body: [...pop.querySelectorAll('.tour-body')].map((p) => p.textContent),
+        code: [...pop.querySelectorAll('.tour-body code')].map((c) => c.textContent),
+        buttons: [...pop.querySelectorAll('button')].map((b) => b.textContent),
+      }
+      tour.end()
+      return seen
+    }
+    const asks = { title: 'Welcome to thimble', buttons: ['Skip', 'Take the tour'] }
+    expect(welcome(true)).toEqual({ ...asks, body: [DEMO_LINE.replace(/`/g, ''), 'Would you like a short tour?'], code: ['thimble'] })
+    expect(welcome(false)).toEqual({ ...asks, body: ['Would you like a short tour?'], code: [] })
   })
 })

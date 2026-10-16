@@ -2,10 +2,11 @@
 // `thimble demo --examples` opened, while no session has attached to it (shell/SessionGone sets it, isDemoPage). What
 // works without a session stays as it is: Files, views, the canvas, the report, labels and filters. The top bar wears
 // a Demo tag (shell/DemoTag), and a line under it says first that the page holds example data, not the analyst's
-// files, and how to open a folder of their own (shell/DemoLine). The chat's composer is disabled, so nothing can be
-// typed there, and hovering it shows DEMO_NOTE. Any other action that needs the session (Ask about this, a card's ask,
-// a request in the report, an agent's start) asks demoStop() first: on a demo page that shows the same note in the
-// chat (chat/DemoNote), opens the chat column when it is folded, and the action stops there and keeps what was typed.
+// files, and how to open a folder of their own (shell/DemoLine); the tour's welcome, which dims it, says it first too
+// (tour/run). The chat's composer is disabled, so nothing can be typed there, and hovering it shows DEMO_NOTE. Any
+// other action that needs the session (Ask about this, a card's ask, a request in the report, an agent's start) asks
+// demoStop() first: on a demo page that shows the same note in the chat (chat/DemoNote), opens the chat column when
+// it is folded, and the action stops there and keeps what was typed.
 import { useSyncExternalStore } from 'react'
 import type { ChatMeta } from './types'
 
@@ -14,8 +15,9 @@ export const DEMO_TAG = 'Demo'
 export const DEMO_TIP = "Example data and a finished analysis; Claude isn't connected here"
 /** What hovering the disabled composer shows on a demo page, and the chat's note when an action needs Claude there. */
 export const DEMO_NOTE = "This is a demo and thimble isn't connected to a live Claude Code session."
-/** The line under the top bar on a demo page (shell/DemoLine): example data, not the analyst's files, and how to open a
- * folder of their own. A span in backticks is drawn as code (DemoWords). */
+/** The line under the top bar on a demo page (shell/DemoLine), and the first line of the tour's welcome there
+ * (tour/run): example data, not the analyst's files, and how to open a folder of their own. A span in backticks is
+ * drawn as code (DemoWords). */
 export const DEMO_LINE = 'This is example data, not your files. To open your own folder, run `thimble` in it.'
 /** The start page's line under its title while it lists a demo dataset (shell/StartPage), in the same words. */
 export const DEMO_START_LINE = 'The demo datasets are example data, not your files. To open your own folder, run `thimble` in it.'
