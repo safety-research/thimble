@@ -177,7 +177,7 @@ MCP_TOOLS_RULE = "mcp__plugin_thimble_thimble"  # every tool of the plugin's thi
 # The agents defined for a session thimble starts with `--agents` (agent_definition: the writer's, the orientation's and
 # the critic's own sessions), each from a prompt file in a plugin agent's form (prompts.agent_file).
 AGENT_FIELDS = ("model", "effort", "background")  # the frontmatter fields passed on as they are
-PLUGIN_NAME = "thimble"  # the plugin's name, which prefixes its skills (`thimble:shared`) outside a plugin agent's file
+PLUGIN_NAME = "thimble"  # the plugin's name, which prefixes its skills (`thimble:orient`) outside a plugin agent's file
 RESTART_MARK_S = 60.0  # a `source_restart` mark in server.json younger than this means a restart is under way
 REFUSED_LINE = "thimble: {path} is not a folder to open as a workspace; say /thimble from the folder that holds the corpus."
 TAKEOVER_LINE = ("thimble: this session is main now. The session {other} in another terminal no longer hears the "
@@ -1905,7 +1905,7 @@ def agent_definition(name: str) -> tuple[str, dict[str, Any]]:
 
 def skill_rules(root: Path | None = None) -> list[str]:
     """The allow rules for the plugin's own skills, one per folder of the plugin copy's skills/ by exact name
-    (`Skill(thimble:shared)`). Without the rule Claude Code asks before loading the skill, so a background subagent would
+    (`Skill(thimble:orient)`). Without the rule Claude Code asks before loading the skill, so a background subagent would
     stop at a prompt nobody sees; a prefix rule `Skill(thimble:*)` would also match other plugins' skills starting with
     "thimble"."""
     skills = (root or plugin_root()) / "skills"

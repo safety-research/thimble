@@ -54,6 +54,12 @@ def test_each_role_is_registered_with_a_full_model_id_an_explicit_effort_and_a_f
     # 0.9.0 has no shared skill (SPEC-v2 3.1): the writer's and the critic's prompts end with the shared guidance
     assert "skills" not in roles["writer"] and "skills" not in roles["critic"]
     assert "## Communicating" in roles["writer"]["prompt"] and "## Communicating" in roles["critic"]["prompt"]
+    # the preamble once: their own body opens with it, and the shared guidance after it does not repeat it
+    from app import events  # noqa: PLC0415
+
+    preamble = events.render_prompts(("preamble",), str(config.corpus_dir(CORPUS))).strip().splitlines()[0]
+    for role in ("writer", "critic"):
+        assert roles[role]["prompt"].count(preamble) == 1, f"the {role}'s prompt holds the preamble once"
 
 
 # --------------------------------------------------------------------------- the files the hooks trust
