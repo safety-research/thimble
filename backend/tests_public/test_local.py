@@ -347,6 +347,26 @@ async def test_state_label_gives_the_scope_s_size_for_a_label_whose_run_never_en
     assert listed["scope_total"] == total
 
 
+async def test_state_label_gives_the_files_its_glob_matches_and_a_prompt_label_s_model(term):
+    """The label panel's header: `scope: <glob> · N files match`, and a `model:` row for a prompt label (the model its
+    calls run on, as the analyst reads its name). A regex label has no model."""
+    from app import concepts
+    from app.session import model_label
+
+    await call(term, "apply_label", scope="files", name="bash", predicate={"kind": "regex", "text": "Bash"},
+               paths=["agents/*.jsonl"])
+    label = await local.state(CORPUS, "label", ["bash"])
+    agents_dir = config.corpus_dir(CORPUS) / "agents"
+    assert label["scope_files"] == len(list(agents_dir.glob("*.jsonl"))) > 0
+    assert "run_model" not in label
+    ws = config.workspace_dir(CORPUS)
+    concept = concepts.load_concept(CORPUS, label["id"])[1]
+    concepts.write_concept(ws, {**concept, "kind": "prompt", "glob": "agents/agent-01.jsonl"})
+    prompt = await local.state(CORPUS, "label", ["bash"])
+    assert prompt["scope_files"] == 1
+    assert prompt["run_model"] == model_label(concepts.label_model(CORPUS, prompt)) != ""
+
+
 async def test_state_label_keeps_a_record_the_analyst_set_under_the_value_they_gave(term):
     """A record the analyst set to another value in the label panel stays among its examples, under the value they gave,
     with the value the label gave it and its words (live check New 10: its row came past the page each value shows, so it

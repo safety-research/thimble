@@ -654,11 +654,33 @@ async def _label(c: str, args: list[str], pos: list[str]) -> Any:
     # how many records that is (the label panel's counts, and its `set by you`)
     applied, moved = await asyncio.to_thread(concepts.verdicts_applied, ws, str(found["id"]), dict(out.get("counts") or {}))
     scope = await asyncio.to_thread(_scope_total, c, out)
+    facts = await asyncio.to_thread(_scope_facts, c, out)
     # the value of this label its scope's filter keeps (a label card's value, the Labels pane's funnel), else None
     f = concepts.read_filters(ws).get(concepts.SCOPE_OF_UNIT.get(str(out.get("unit")), "files")) or {}
     return {**out, "examples": ex, "rows": rows, "totals": totals, "verdicts": {"counts": applied, "set": moved},
             "filter": f.get("value") if f.get("concept") == found["id"] else None,
-            **({"scope_total": scope} if scope is not None else {})}
+            **({"scope_total": scope} if scope is not None else {}), **facts}
+
+
+def _scope_facts(c: str, label: dict[str, Any]) -> dict[str, Any]:
+    """What the label panel's header says beside a label's definition: how many files its glob matches (`scope_files`,
+    for a label over files) and the model a prompt label runs on, by the name the analyst reads (`run_model`,
+    concepts.label_model). A fact that cannot be read is left out. Blocking."""
+    from . import concepts  # noqa: PLC0415
+    from .session import model_label  # noqa: PLC0415
+
+    out: dict[str, Any] = {}
+    if label.get("unit") in concepts.FILE_UNITS:
+        try:
+            out["scope_files"] = len(concepts.match_paths(config.corpus_dir(c), concepts.glob_patterns(label.get("glob"))))
+        except Exception:  # noqa: BLE001 — a scope that cannot be matched is said without its count
+            log.debug("scope files not counted", exc_info=True)
+    if label.get("kind") == "prompt":
+        try:
+            out["run_model"] = model_label(concepts.label_model(c, label))
+        except Exception:  # noqa: BLE001 — no model row rather than no panel
+            log.debug("label model not read", exc_info=True)
+    return out
 
 
 def _verdict_rows(c: str, concept_id: str) -> list[dict[str, Any]]:

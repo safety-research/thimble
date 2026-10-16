@@ -2354,7 +2354,8 @@ let labelPainting = ''
 
 /** The label panel, after the browser's label editor (SPEC.md, section 7, "The label panel"): its header block,
  *  the label's name in the accent and bold after a ● in its colour, its type (prompt, regex or code: the one in use on
- *  the selection background) and its scope (the files, editable, and how many records), then the rule; the prompt (or
+ *  the selection background), a prompt label's model, and its scope (the files, editable, and how many files match),
+ *  then the rule; the prompt (or
  *  pattern or code) in a field to edit, Enter saving it (`thimble act label`); `run on a sample` and `run on all N`,
  *  which save what was typed first and run it (`thimble act label-run`), `rename` (`thimble act label`) and `delete`,
  *  which asks once in the panel (y deletes, n keeps; `thimble act label-delete`); a label over files is turned on or off
@@ -2491,7 +2492,12 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
       </Box>,
     ),
   )
-  const scopeCount = scopeN !== null ? `${num(scopeN)} ${unit}` : ''
+  // a prompt label: the model its calls run on (the label's own, else the labels row of Settings), as the analyst reads
+  // its name
+  if (kind === 'prompt' && l.run_model) rows.push(fieldLine('model:', <Text wrap="truncate-end">{l.run_model}</Text>))
+  // a label over files: how many files its glob matches (`1 file matches`), so the count does not read as a link; the
+  // records stand in `run on all N`. A label over cards or sentences: how many it holds
+  const scopeCount = files ? (typeof l.scope_files === 'number' ? (l.scope_files === 1 ? '1 file matches' : `${num(l.scope_files)} files match`) : '') : scopeN !== null ? `${num(scopeN)} ${unit}` : ''
   rows.push(
     fieldLine(
       'scope:',
@@ -2500,7 +2506,7 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
           <Box flexGrow={1} flexShrink={1}>
             <Input key={fieldKey(`lb-glob-${id}`)} value={drafts.get(`${id}:glob`) ?? l.glob ?? ''} submitLabel="save" onInput={v => void drafts.set(`${id}:glob`, v)} onSubmit={v => void (v.trim() ? save({ glob: v.trim() }) : undefined)} />
           </Box>
-          {scopeCount ? <Text dimColor>{`  ${scopeCount}`}</Text> : null}
+          {scopeCount ? <Text dimColor>{` · ${scopeCount}`}</Text> : null}
         </Box>
       ) : (
         <Text wrap="wrap">
