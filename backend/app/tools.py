@@ -113,6 +113,18 @@ ENTRY_TOOL = "load_thimble"
 SEARCH_HINT = "card plan chart table label classify records thimble"
 META_ALWAYS_LOAD = "anthropic/alwaysLoad"  # a listed tool's `_meta` key: loaded (true) or deferred (false or absent)
 META_SEARCH_HINT = "anthropic/searchHint"  # a listed tool's `_meta` key: the words ToolSearch matches
+# The tools main's shim lists loaded, with their schemas in every request: those an analysis answer uses (cards, reads,
+# labels) and a thread's reply. Main's shim lists every other tool deferred (alwaysLoad false), so Claude Code shows main
+# its name and loads it through ToolSearch when main first wants it; main.md's `thimble's other tools` says when.
+ALWAYS_LOADED = ("read_ref", "list_cards", "add_card", "edit_card", "apply_label", "reply_in_thread")
+
+
+def deferred_in_main(name: str | None) -> bool:
+    """Whether the analyst's session lists the tool `name` deferred (ALWAYS_LOADED): a tool main may call that is not
+    one of ALWAYS_LOADED. A tool only thimble's agents call stays loaded wherever a shim lists it, since its agent
+    calls it at once."""
+    spec = REGISTRY.get(str(name or ""))
+    return spec is not None and (not spec.sessions or None in spec.sessions) and spec.name not in ALWAYS_LOADED
 # the tools a feature switch turns off (features.py), by the switch: they stay listed, since thimble's agents share
 # main's listing, and a call refuses with the tool's `## <tool>-off` hint (call)
 FEATURE_TOOLS = {"apply_label": "labels", "run_check": "checks"}
