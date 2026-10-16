@@ -3101,7 +3101,10 @@ def retry(c: str, slug: str, values: dict[str, Any] | None = None) -> dict[str, 
     if again and (refused := click_refused(c, slug)) is not None:
         return refused
     if prop.get("status") == "built" and prop.get("failed_change") is not None:
-        return revise(c, slug, str(prop["failed_change"]), asked=True, route=CLICK, values=vals)
+        # a failed build of the page a view lacked (ensure_page) builds that page again, wherever Retry is pressed
+        missing = {MISSING_PAGE_REQUEST.format(page=PAGE_OF[t], place=MISSING_PAGE_PLACE[t]): t for t in TARGETS}
+        return revise(c, slug, str(prop["failed_change"]), asked=True, route=CLICK, values=vals,
+                      target=missing.get(str(prop["failed_change"])))
     if prop.get("status") != "failed":
         raise HTTPException(409, f"the view {prop['name']!r} is {prop.get('status')}, not failed")
     prop = update_proposal(c, slug, status="queued", error=None, refused=None, route=CLICK, repairs=0,
@@ -3560,7 +3563,8 @@ def has_page(view: dict[str, Any] | None, target: str) -> bool:
 def ensure_page(c: str, slug: str, target: str) -> bool:
     """The first open of a built view in the place whose page it lacks (module note): a revision that builds that page,
     reusing its reader.py, queued as a follow-on start (revise); nothing when the view has the page, is no workspace
-    view, never passed, or has a build queued or running. Whether one was queued."""
+    view, never passed, has a build queued or running, or that page's build failed (it waits for Retry). Whether one
+    was queued."""
     view = read_built(c, slug)
     if view is None or view.get("origin") != "workspace" or has_page(view, target):
         return False
@@ -3568,6 +3572,8 @@ def ensure_page(c: str, slug: str, target: str) -> bool:
     if prop is not None and prop.get("status") in PENDING:
         return False
     request = MISSING_PAGE_REQUEST.format(page=PAGE_OF[target], place=MISSING_PAGE_PLACE[target])
+    if prop is not None and prop.get("failed_change") == request:
+        return False  # its page's build failed: it waits for the analyst's Retry, not for the next open
     revise(c, slug, request, proposed_by="thimble", route=FOLLOW_ON, target=target)
     return True
 

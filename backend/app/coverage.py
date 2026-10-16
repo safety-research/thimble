@@ -168,9 +168,10 @@ def _inside(path: str, base: str) -> bool:
     return path == base or path.startswith(base.rstrip("/") + "/")
 
 
-def _corpus_rel(root: str, roots: tuple[str, ...], base: str, path: Any) -> str | None:
+def _corpus_rel(root: str, roots: tuple[str, ...], base: str, path: Any, homes: list[str] | None = None) -> str | None:
     """The path a fact names, relative to the corpus root ('' for the root itself), or None when it is outside the
-    corpus or under thimble's home or Claude Code's config. Lexical: a fact names what a call read by its path."""
+    corpus or under thimble's home or Claude Code's config (`homes`, _homes). Lexical: a fact names what a call read by
+    its path."""
     p = str(path or "").strip()
     if not p or "\0" in p:
         return None
@@ -181,7 +182,7 @@ def _corpus_rel(root: str, roots: tuple[str, ...], base: str, path: Any) -> str 
             break
     else:
         return None
-    if any(_inside(full, h) for h in _homes() if h not in roots):
+    if any(_inside(full, h) for h in (_homes() if homes is None else homes) if h not in roots):
         return None
     return rel
 
@@ -208,13 +209,14 @@ def clean_facts(c: str, facts: Iterable[Any], cwd: str | None = None) -> list[di
     roots = tuple(dict.fromkeys((os.path.normpath(str(root)), os.path.realpath(root))))
     base = os.path.normpath(cwd) if cwd and os.path.isabs(cwd) else str(root)
     tree = code_tree(root)
+    homes = _homes()
     out: list[dict[str, Any]] = []
     now = time.time()
     for f in facts if isinstance(facts, (list, tuple)) else ():
         if not isinstance(f, dict):
             continue
         how = str(f.get("how") or "")
-        rel = _corpus_rel(roots[0], roots, base, f.get("path"))
+        rel = _corpus_rel(roots[0], roots, base, f.get("path"), homes)
         if rel is None or how not in HOWS:
             continue
         by = str(f.get("by") or "")

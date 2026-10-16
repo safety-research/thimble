@@ -170,3 +170,18 @@ def test_view_proposals_follow_their_switch(workspaces_tmp, tmp_path, monkeypatc
     assert views.propose_enabled(c) is False and proposer.enabled(c) is False
     proposer.trigger(c, proposer.MAIN, cut="cut-1", sid="s1")
     assert proposer.pending(c) is None, "no job with view proposals off"
+
+
+def test_a_failed_page_build_waits_for_retry_and_retry_builds_that_page(workspaces_tmp, tmp_path, monkeypatch, queued):
+    c = _corpus(tmp_path, monkeypatch, "board", "server")
+    _built(c, "board", term=False, html=True)
+    assert views.ensure_page(c, "board", views.TERM_PAGE) is True
+    request = views.read_proposal(c, "board")["change"]
+    views.end_revision(c, "board", "the program did not draw", failed_change=request)
+    assert views.read_proposal(c, "board")["status"] == "built"
+    assert views.ensure_page(c, "board", views.TERM_PAGE) is False, "no build again on the next open"
+    monkeypatch.setattr(views, "click_refused", lambda c, slug: None)
+    views.retry(c, "board")
+    prop = views.read_proposal(c, "board")
+    assert (prop["status"], prop["target"], prop["change"]) == ("queued", views.TERM_PAGE, request)
+    assert len(queued) == 2
