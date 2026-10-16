@@ -549,12 +549,13 @@ export const register: Register = (on, options) => {
     await followConversation(cx)
     await navOrigin(cx, false)
     const said = await thimbleCommand(cx, args)
+    // the guide goes into main's conversation as a hidden row now: a command's `context` did not reach the model in
+    // 2.1.301, so a /thimble before the first question left main with no guidance and its answers cited nothing
     const guide = await owedGuide(cx)
-    if (guide) deliverStarts(guide)
-    const context = guide ? { context: [guide] } : {}
-    if (said !== null) return { text: said, ...context }
+    if (guide) await appendGuide(cx, guide)
+    if (said !== null) return { text: said }
     await openHome(cx)
-    return { text: HOME_LINE, ...context }
+    return { text: HOME_LINE }
   })
   // /thimble as the typeahead and /help describe it once thimble is on: what it does here
   on('command.describe', async ($, e, next) => {
@@ -580,6 +581,8 @@ export const register: Register = (on, options) => {
     if (!isActive()) return next(e)
     const cx = cxOf($)
     await followConversation(cx)
+    // a delivery still in flight when the person sends the next prompt never reached the conversation: owe it again
+    if (act.pending) deliveryLost()
     const guide = await owedGuide(cx)
     if (!guide) return next(e)
     deliverStarts(guide)
