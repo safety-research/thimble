@@ -340,7 +340,7 @@ test("a thread's answer is its first reply, in paragraphs, without the fork's wo
   expect(text).not.toContain('Making the card.')
   // the thread's card, which its answer does not cite, under its answer, in its frame (its body a card Client)
   const json = JSON.stringify(await pane.drawn())
-  expect(json).toMatch(/"key":"m:thread-answer-1"[^]*Two test pages, both on 4 June\.[^]*"borderStyle":"round"[^]*"module":"hooks\/card\.tsx"[^]*How many records does each file hold\?/)
+  expect(json).toMatch(/"key":"m:thread-answer-1"[^]*Two test pages, both on 4 June\.[^]*"borderStyle":"round"[^]*"module":"hooks\/term\/card\.tsx"[^]*How many records does each file hold\?/)
   await pane.unmount()
 })
 

@@ -38,7 +38,7 @@ test('`/thimble threads` opens the threads panel and says how many there are; `/
   expect(await run($, 'documents')).toBe('thimble: 1 document')
   expect(w.panes.at(-1)!.title).toBe('Documents')
   // the line shows as thimble's, not under the plugin's name
-  const row = await $.ui.mount({ plugin: 'thimble', component: 'CommandOutput', requestId: 'c1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { command: 'thimble:thimble', args: 'threads', text: 'thimble-term: thimble: 2 side threads', isErrored: false } } as never)
+  const row = await $.ui.mount({ plugin: 'thimble', component: 'CommandOutput', requestId: 'c1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { command: 'thimble:thimble', args: 'threads', text: 'thimble: thimble: 2 side threads', isErrored: false } } as never)
   expect(shown(await row.drawn())).toBe('thimble: 2 side threads')
   await row.unmount()
 })

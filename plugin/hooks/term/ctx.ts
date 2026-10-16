@@ -1,9 +1,17 @@
-// What register.tsx shares of the engine with thimble-term's other files (`$` itself never crosses an import): the host
-// calls they make and the state values they read and write, each a function bound to the `$` of the hook that made it.
-// A drawing builds its own (its reads subscribe it); a timer or a handler uses the one its hook built.
-import type { Elements, FsEntry, FsStat, HttpInit, HttpResponse, PaneOpenArgs, ProcessRunInit, ProcessRunResult, RenderElement, ResolveInput, UiOpenResult } from 'claude-code'
+// What the hooks share of the engine with the terminal UI's other files: the host calls they make and the state values
+// they read and write, each a function bound to the `$` of the hook that made it (cxOf). A drawing builds its own (its
+// reads subscribe it); a timer or a handler uses the one its hook built. `$` goes only into cxOf, which register.tsx
+// and band.tsx call.
+import { atom, update } from 'claude-code'
+import type { Elements, EngineInterface, FsEntry, FsStat, HttpInit, HttpResponse, PaneOpenArgs, ProcessRunInit, ProcessRunResult, RenderElement, ResolveInput, UiOpenResult } from 'claude-code'
 
 import type { ChatHomeUi, ChatNav, ChatNews, ChatSignal, TermAgent, TermAnswer, TermCard, TermFilesUi, TermHome, TermLabelUi, TermPanel, TermPending, TermThread, TermThreadRow, TermVerdict } from './types'
+import { HOME_UI_EMPTY } from './home'
+import { keepRow } from './kept'
+import { NAV_EMPTY } from './nav'
+import { FILES_UI_EMPTY, LABEL_UI_EMPTY, PANEL, rt } from './term'
+
+type Dollar = EngineInterface
 
 /** What `thimble state` printed for a surface the panel shows, or why it failed. */
 export type SurfaceGot = { ok: true; value: unknown } | { ok: false; error: string }
@@ -101,3 +109,176 @@ export type Ctx = {
 }
 
 export type { RenderElement }
+
+// the state the drawings read (types/index.d.ts)
+const CARDS = { plugin: 'thimble', key: 'cards' } as const
+const TURN_CARDS = { plugin: 'thimble', key: 'turnCards' } as const
+const VERDICTS = { plugin: 'thimble', key: 'verdicts' } as const
+const THREAD = { plugin: 'thimble', key: 'thread' } as const
+const THREAD_ROWS = { plugin: 'thimble', key: 'threadRows' } as const
+const ANSWERS = { plugin: 'thimble', key: 'answers' } as const
+const VIEW_ROWS = { plugin: 'thimble', key: 'viewRows' } as const
+const SURFACE = { plugin: 'thimble', key: 'surface' } as const
+const panelA = { plugin: 'thimble', key: 'panel' } as const
+const navRef = { plugin: 'thimble', key: 'nav' } as const
+const pendingRef = { plugin: 'thimble', key: 'pending' } as const
+const homeRef = { plugin: 'thimble', key: 'home' } as const
+const homeSeenRef = { plugin: 'thimble', key: 'homeSeen' } as const
+const agentsRef = { plugin: 'thimble', key: 'agents' } as const
+const threadsRef = { plugin: 'thimble', key: 'threads' } as const
+const newsRef = { plugin: 'thimble', key: 'threadNews' } as const
+const homeUiRef = { plugin: 'thimble', key: 'homeUi' } as const
+const labelUiRef = { plugin: 'thimble', key: 'labelUi' } as const
+const filesUiRef = { plugin: 'thimble', key: 'filesUi' } as const
+const panelTickRef = { plugin: 'thimble', key: 'panelTick' } as const
+const panelTickA = atom(panelTickRef, 0)
+
+/** The context the other files take, bound to a hook's `$`: every file that registers hooks builds it here, since a
+ *  hooks module passes `$` only to a function declared in its own file or imported from one of the module's files. */
+export function cxOf($: Dollar): Ctx {
+  // what main's chat draws under a row is kept in the workspace too, so a resumed session draws it again (kept.ts)
+  const io = { read: (path: string) => $.fs.read(path), write: (path: string, text: string) => $.fs.write(path, text) }
+  const keep = async (row: string, part: Parameters<typeof keepRow>[3]) => (rt.sc ? keepRow(io, rt.sc.ws, row, part) : undefined)
+  return {
+    now: () => $.clock.now().catch(() => Date.now()),
+    theme: async () => {
+      try {
+        const v = (await $.config.list()).find(r => r.key === 'theme')?.value
+        return /light/i.test(String(v ?? '')) ? 'light' : 'dark'
+      } catch {
+        return 'dark'
+      }
+    },
+    run: (argv, init) => $.process.run(argv, init),
+    runLong: async (argv, init) => {
+      const child = $.process.spawn({ argv, ...(init?.cwd ? { cwd: init.cwd } : {}), ...(init?.env ? { env: init.env } : {}) })
+      let stdout = ''
+      let stderr = ''
+      for await (const piece of child) {
+        if (piece.stream === 'stdout') stdout += piece.text
+        else stderr += piece.text
+      }
+      const end = await child.result
+      return { exitCode: end.code ?? 1, stdout, stderr }
+    },
+    spawnLines: (argv, init, onLine, onErr) => {
+      const child = $.process.spawn({ argv, ...(init.cwd ? { cwd: init.cwd } : {}), ...(init.env ? { env: init.env } : {}) })
+      const done = (async () => {
+        let buf = ''
+        try {
+          for await (const piece of child) {
+            if (piece.stream !== 'stdout') {
+              onErr?.(piece.text.slice(-500))
+              continue
+            }
+            buf += piece.text
+            let i = buf.indexOf('\n')
+            while (i >= 0) {
+              onLine(buf.slice(0, i))
+              buf = buf.slice(i + 1)
+              i = buf.indexOf('\n')
+            }
+          }
+        } catch (err) {
+          onErr?.(String(err).slice(0, 300))
+        }
+      })()
+      return { stop: () => void child.return(undefined as never).catch(() => undefined), done }
+    },
+    fetch: (url, init) => $.http.fetch(url, init),
+    read: path => $.fs.read(path),
+    write: (path, text) => $.fs.write(path, text),
+    stat: path => $.fs.stat(path),
+    list: path => $.fs.list(path),
+    // each variable by its literal name, so `claude plugin validate` lists what the module reads
+    env: async name => {
+      switch (name) {
+        case 'THIMBLE_WS':
+          return $.env.get('THIMBLE_WS')
+        case 'THIMBLE_TERM_CLI':
+          return $.env.get('THIMBLE_TERM_CLI')
+        case 'THIMBLE_HOME':
+          return $.env.get('THIMBLE_HOME')
+        case 'THIMBLE_PORT':
+          return $.env.get('THIMBLE_PORT')
+        case 'THIMBLE_UI_PORT':
+          return $.env.get('THIMBLE_UI_PORT')
+        default:
+          return undefined
+      }
+    },
+    root: () => $.session.root().catch(() => $.session.cwd()),
+    pluginRoot: $.plugin.root,
+    open: args => $.ui.open(args),
+    close: id => $.ui.close({ id }),
+    panes: () => $.ui.panes().catch(() => []),
+    later: (ms, fn) => void $.clock.after(ms, fn),
+    log: text => $.ui.log(text),
+    toast: text => $.ui.toast(text),
+    submit: async text => {
+      rt.own.add(text)
+      await $.prompt.submit({ text, asUser: true })
+    },
+    command: async (name, args) => void (await $.command.run({ command: name, args })),
+    promptText: async () => (await $.prompt.read().catch(() => ({ text: '' }))).text,
+    fill: async text => void (await $.prompt.fill({ text, mode: 'insert' }).catch(() => undefined)),
+    focus: async key => {
+      const r = await $.ui.focus({ requestId: PANEL, key }).catch(() => ({ deny: 'failed' }))
+      return !r.deny
+    },
+    scroll: async (key, block) => void (await $.ui.scroll({ to: { key }, in: PANEL, block: block ?? 'nearest' }).catch(() => undefined)),
+    els: e => $.ui.resolve(e as ResolveInput<'Pane', 'terminal'>),
+    card: async id => (await $.state.get({ ...CARDS, id })).value,
+    setCard: async (id, v) => void (await $.state.set({ ...CARDS, id }, v)),
+    turnCards: async row => (await $.state.get({ ...TURN_CARDS, id: row })).value ?? [],
+    setTurnCards: async (row, ids) => {
+      await $.state.set({ ...TURN_CARDS, id: row }, ids)
+      await keep(row, { cards: ids })
+    },
+    verdict: async id => (await $.state.get({ ...VERDICTS, id })).value,
+    setVerdict: async (id, v) => void (await $.state.set({ ...VERDICTS, id }, v)),
+    thread: async id => (await $.state.get({ ...THREAD, id })).value,
+    setThread: async (id, v) => void (await $.state.set({ ...THREAD, id }, v)),
+    threadRows: async row => (await $.state.get({ ...THREAD_ROWS, id: row })).value ?? [],
+    setThreadRows: async (row, rows) => {
+      await $.state.set({ ...THREAD_ROWS, id: row }, rows)
+      await keep(row, { threads: rows })
+    },
+    answer: async row => (await $.state.get({ ...ANSWERS, id: row })).value,
+    setAnswer: async (row, a) => {
+      await $.state.set({ ...ANSWERS, id: row }, a)
+      await keep(row, { answer: a })
+    },
+    viewRows: async row => (await $.state.get({ ...VIEW_ROWS, id: row })).value ?? [],
+    setViewRows: async (row, slugs) => {
+      await $.state.set({ ...VIEW_ROWS, id: row }, slugs)
+      await keep(row, { views: slugs })
+    },
+    surface: async key => (await $.state.get({ ...SURFACE, id: key })).value as never,
+    setSurface: async (key, v) => void (await $.state.set({ ...SURFACE, id: key }, v)),
+    panel: async () => (await $.state.get(panelA)).value ?? null,
+    setPanel: async p => void (await $.state.set(panelA, p)),
+    nav: async () => (await $.state.get(navRef)).value ?? NAV_EMPTY,
+    setNav: async n => void (await $.state.set(navRef, n)),
+    pending: async () => (await $.state.get(pendingRef)).value ?? null,
+    setPending: async p => void (await $.state.set(pendingRef, p)),
+    home: async () => (await $.state.get(homeRef)).value ?? null,
+    setHome: async h => void (await $.state.set(homeRef, h)),
+    homeSeen: async () => (await $.state.get(homeSeenRef)).value ?? null,
+    setHomeSeen: async h => void (await $.state.set(homeSeenRef, h)),
+    agents: async () => (await $.state.get(agentsRef)).value ?? [],
+    setAgents: async a => void (await $.state.set(agentsRef, a)),
+    threads: async () => (await $.state.get(threadsRef)).value ?? [],
+    setThreads: async t => void (await $.state.set(threadsRef, t)),
+    news: async () => (await $.state.get(newsRef)).value ?? { n: 0, one: '' },
+    setNews: async n => void (await $.state.set(newsRef, n)),
+    homeUi: async () => ({ ...HOME_UI_EMPTY, ...((await $.state.get(homeUiRef)).value ?? {}) }),
+    setHomeUi: async u => void (await $.state.set(homeUiRef, u)),
+    labelUi: async () => ({ ...LABEL_UI_EMPTY, ...((await $.state.get(labelUiRef)).value ?? {}) }),
+    setLabelUi: async u => void (await $.state.set(labelUiRef, u)),
+    filesUi: async () => ({ ...FILES_UI_EMPTY, ...((await $.state.get(filesUiRef)).value ?? {}) }),
+    setFilesUi: async u => void (await $.state.set(filesUiRef, u)),
+    panelTick: async () => (await $.state.get(panelTickRef)).value ?? 0,
+    bumpPanel: async () => void (await update($, panelTickA, n => (n ?? 0) + 1)),
+  }
+}

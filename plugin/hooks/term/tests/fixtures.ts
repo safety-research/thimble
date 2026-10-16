@@ -312,7 +312,8 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
     viewHost: { requests: [], frame: n => viewFrame(n), acts: () => [], started: 0 },
   }
   const ws = opts.ws === undefined ? WS : opts.ws
-  mock.env(on, { ...(ws ? { THIMBLE_WS: ws } : {}), THIMBLE_HOME: '/home/a/.thimble', THIMBLE_TERM_CLI: CLI })
+  // THIMBLE_NO_MODULE: thimble.ts, in the same hooks module, starts no bridge in these tests
+  mock.env(on, { ...(ws ? { THIMBLE_WS: ws } : {}), THIMBLE_HOME: '/home/a/.thimble', THIMBLE_TERM_CLI: CLI, THIMBLE_NO_MODULE: '1' })
   w.clock = mock.clock(on, { now: 1_790_000_000_000 })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.root', () => ({ value: CWD }))
