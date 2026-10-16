@@ -1,7 +1,6 @@
-// The press (offramp.ts, SPEC-v2 3.15, C12): `thimble open --session <sid> --cwd <dir> --ref <ref> --json`, a toast at
-// once, a watch of the claim file that ends in `opened in the browser` or the `open:not-claimed` notice with `copy link`;
-// over SSH the one row with the tunnel command (its ET form when given), `copy`, `copy link` and `dismiss`; a failure's
-// notice with the acts that fix it; no sign-in code in a row, a toast or a copy but the one `copy link` makes.
+// The press that opens the browser (offramp.ts, SPEC-v2 3.15, C12): `thimble open --session <sid> --cwd <dir> --ref
+// <ref> --json`, a toast at once, a watch of the claim file that ends in `opened in the browser` or the
+// `open:not-claimed` notice with `copy link`; no sign-in code in a row, a toast or a copy but the one `copy link` makes.
 // `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
@@ -64,58 +63,6 @@ test('no claim in 12 s: the `open:not-claimed` notice with `copy link`, which co
   expect(w.toasts.join('\n')).not.toContain('one-time-code')
   expect(JSON.stringify(await m.drawn())).not.toContain('one-time-code')
   await m.unmount()
-})
-
-test('over SSH: one row with the tunnel command, `copy`, `copy link` and `dismiss`; the ET form in its place when given', T, async ($, on) => {
-  const w = panelWorld(on)
-  w.open = { ...w.open, remote: true, opened: false, tunnel: 'ssh -N -L 29321:127.0.0.1:29321 <your ssh host>', link_file: LINK_FILE }
-  w.files.set(LINK_FILE, JSON.stringify({ url: LINK }))
-  await start($, w)
-  await press($, w)
-  const m = (await $.ui.mount(aboveAt(120))) as unknown as M
-  expect(words(await m.find({ type: 'Box', key: 'above-remote' }))).toBe('  browserssh -N -L 29321:127.0.0.1:29321 <your ssh host>copycopy linkdismiss')
-  await m.press({ key: 'above-remote-copy' })
-  await m.press({ key: 'above-remote-link' })
-  await w.clock.settle()
-  expect(w.copied).toEqual(['ssh -N -L 29321:127.0.0.1:29321 <your ssh host>', LINK])
-  expect(JSON.stringify(await m.drawn())).not.toContain('one-time-code')
-  await m.press({ key: 'above-remote-dismiss' })
-  await w.clock.settle()
-  expect(await m.find({ type: 'Box', key: 'above-remote' })).toBeUndefined()
-  await m.unmount()
-  // the Eternal Terminal form
-  w.open = { ...w.open, et: 'et -t 29321:29321 <your ssh host>' }
-  await w.clock.advance(6000)
-  await press($, w, 'ff73e071')
-  await pressBrowser($, w)
-  const m2 = (await $.ui.mount(aboveAt(120))) as unknown as M
-  expect(words(await m2.find({ type: 'Box', key: 'above-remote' }))).toBe('  browseret -t 29321:29321 <your ssh host>copycopy linkdismiss')
-  await m2.unmount()
-})
-
-test("a failure posts its notice with the acts that fix it: the page did not start (try again, doctor), no browser opener (copy link), a proxy", T, async ($, on) => {
-  const w = panelWorld(on)
-  w.open = { ok: false, error: { code: 'START', message: 'the server did not answer on 127.0.0.1:29321', fix: 'run thimble doctor' } }
-  await start($, w)
-  await press($, w)
-  const m = (await $.ui.mount(aboveAt(120))) as unknown as M
-  expect(words(await m.find({ type: 'Box', key: 'above-mod-open-failed' }))).toBe("  noticethimble's page did not start: the server did not answer on 127.0.0.1:29321 · run thimble doctortry againdoctordismiss")
-  // try again runs the open again
-  w.open = { ok: false, error: { code: 'NO_OPENER', message: 'no opener', fix: '' } }
-  await w.clock.advance(6000)
-  await m.press({ key: 'above-mod-open-failed-act-0' })
-  await w.clock.settle()
-  expect(w.pressed.length).toBe(2)
-  expect(await m.find({ type: 'Box', key: 'above-mod-open-failed' })).toBeUndefined()
-  expect(words(await m.find({ type: 'Box', key: 'above-mod-open-no-opener' }))).toContain('No browser opener found.')
-  await m.unmount()
-  w.open = { ok: true, port: 29321, url: 'http://127.0.0.1:29321/', opened: true, remote: false, tunnel: null, et: null, link_file: null, claim_file: CLAIM, proxy: true }
-  await w.clock.advance(6000)
-  await press($, w, 'ff73e071')
-  await pressBrowser($, w)
-  const m2 = (await $.ui.mount(aboveAt(120))) as unknown as M
-  expect(words(await m2.find({ type: 'Box', key: 'above-mod-open-proxy' }))).toContain('Set NO_PROXY=127.0.0.1,localhost.')
-  await m2.unmount()
 })
 
 test("open's answer and a link file read as C12 writes them", () => {

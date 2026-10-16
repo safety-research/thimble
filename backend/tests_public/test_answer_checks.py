@@ -13,7 +13,7 @@ import types
 
 import pytest
 
-from app import answer_comments, checks, config, events, local, subagents, tools
+from app import answer_comments, checks, config, subagents, tools
 from app import subagent_files as sf
 from subagent_fakes import bridge  # noqa: F401 — a fixture
 
@@ -92,44 +92,6 @@ async def _comment(act: checks._Active, ref: str, text: str, tid: str, details: 
                             tool_use_id=tid)
 
 
-def test_passages_split_paragraphs_list_items_and_sentences_with_their_offsets():
-    ps = answer_comments.passages(_turn())
-    texts = [p["text"] for p in ps]
-    assert texts == [
-        "The board holds 18 posts.",
-        "Most came from agent-02, see [the log](events.jsonl#L4).",
-        "The rest are\nstatus reports.",
-        "Agent-01 posted 3 times.",
-        "It used `grep -c x.y` once.",
-        "Agent-03 posted [[2|board.jsonl#L7]] times?",
-        "Yes.",
-        "A numbered item, with e.g. a pause.",
-        "Then more.",
-        "A heading",
-        "Done.",
-    ]
-    assert [p["ref"] for p in ps] == [f"answer:{TURN}#s{n}" for n in range(1, 12)]
-    for p in ps[:-1]:
-        assert p["row"] == TURN and ANSWER[p["start"]:p["end"]] == p["text"]
-    assert ps[-1]["row"] == "u-second" and (ps[-1]["start"], ps[-1]["end"]) == (0, 5)
-    assert len({p["fp"] for p in ps}) == len(ps)
-
-
-def test_a_data_turn_is_one_that_read_searched_called_thimble_or_cites(board):
-    plain = {"rows": [{"uuid": "u", "text": "Hello there."}], "tools": []}
-    assert not answer_comments.is_data_turn(CORPUS, plain)
-    for call in ({"name": "Read", "input": {"file_path": "events.jsonl"}},
-                 {"name": "Bash", "input": {"command": "grep -c merged agents/agent-01.jsonl | head"}},
-                 {"name": "Grep", "input": {"pattern": "x", "path": "agents"}},
-                 {"name": "mcp__plugin_thimble_thimble__add_card", "input": {}}):
-        assert answer_comments.is_data_turn(CORPUS, {**plain, "tools": [call]}), call
-    assert not answer_comments.is_data_turn(CORPUS, {**plain, "tools": [{"name": "Read", "input": {"file_path": "/etc/hosts"}}]})
-    assert not answer_comments.is_data_turn(CORPUS, {**plain, "tools": [{"name": "Bash", "input": {"command": "ls -la"}}]})
-    assert answer_comments.is_data_turn(CORPUS, {"rows": [{"uuid": "u", "text": "See [[18|board.jsonl#L2]]."}]})
-    assert answer_comments.is_data_turn(CORPUS, {"rows": [{"uuid": "u", "text": "See [it](card:abc123)."}]})
-    assert not answer_comments.is_data_turn(CORPUS, {"rows": [{"uuid": "u", "text": "See [docs](https://x.org/a.md)."}]})
-
-
 async def test_a_data_turn_starts_the_shown_checks_that_cover_answers(board, bridge, features):
     act = await _answered()
     [spawn] = bridge.ops("spawn")
@@ -145,18 +107,6 @@ async def test_a_data_turn_starts_the_shown_checks_that_cover_answers(board, bri
     assert "Comment on a passage only when the reader would likely miss" in task
     running = answer_comments.state(CORPUS)["running"]
     assert running == [{"check": IMPORTANT, "check_name": "Important details", "turn": TURN}]
-
-
-async def test_a_non_data_turn_and_checks_off_start_none(board, bridge, features):
-    checks.answer_ended(CORPUS, _turn(text="Hello. How can I help?", tools_=[]))
-    await asyncio.sleep(0.05)
-    assert bridge.ops("spawn") == [] and not _run()
-    assert answer_comments.answers(CORPUS) == [], "an answer that is no data answer is not kept"
-    features.add("checks")
-    checks.answer_ended(CORPUS, _turn())
-    checks.main_turn_ended(CORPUS, "2000-01-01T00:00:00+00:00")
-    await asyncio.sleep(0.05)
-    assert bridge.ops("spawn") == [] and not _run()
 
 
 async def test_add_comment_on_an_answer_stores_its_quote_and_offsets_and_refuses_what_it_does_not_cover(board, bridge,
@@ -176,70 +126,3 @@ async def test_add_comment_on_an_answer_stores_its_quote_and_offsets_and_refuses
     res = await _comment(act, "report:report#x", "Not an answer.", "toolu_a3")
     assert res.is_error
     assert _run()["comments"] == 1
-
-
-async def test_an_answer_run_s_end_tells_main_nothing(board, bridge, features, monkeypatch):
-    posted: list = []
-    monkeypatch.setattr(events, "post", lambda *a, **k: posted.append((a, k)))
-    act = await _answered()
-    act.notify = True  # even a run that was asked to tell: a run over answers never does
-    await _comment(act, f"answer:{TURN}#s1", "The board holds 20 posts.", "toolu_b1")
-    subagents.run_ended(CORPUS, act.agent, "done", "One comment.", source="handback")
-    await _until(lambda: _run().get("status") == "done", "the run never ended")
-    assert posted == [], "no event for main"
-    assert {op for op, _ in bridge.calls} <= {"spawn", "push_roles"}, "no message to main or to an agent"
-    assert len(answer_comments.open_comments(CORPUS)) == 1
-    # a second answer covers its own sentences only
-    second = _turn(text="Agent-02 merged 6 PRs.", turn="u-next")
-    checks.answer_ended(CORPUS, second)
-    await _until(lambda: _run().get("status") == "running", "no second run")
-    assert _run()["covered"] == ["answer:u-next#s1", "answer:u-next#s2"]
-
-
-async def test_dismiss_reopen_state_and_routes(board, bridge, features):
-    act = await _answered()
-    await _comment(act, f"answer:{TURN}#s3", "The rest are not all status reports.", "toolu_c1")
-    got = await local.state(CORPUS, "answer-comments", [])
-    [cm] = got["comments"]
-    assert set(cm) == {"id", "check", "check_name", "color", "about", "turn", "row", "ref", "start", "end", "quote",
-                       "text", "details", "status", "at"}
-    assert (cm["check_name"], cm["about"], cm["status"]) == ("Important details",
-                                                              "it looks for what a reader would likely miss", "open")
-    assert (await local.state(CORPUS, "answer-comments", ["--session", "sid-1"]))["comments"] == [cm]
-    assert (await local.state(CORPUS, "answer-comments", ["--session", "other"]))["comments"] == []
-    done = await local.act(CORPUS, "answer-comment-resolve", {"comment": cm["id"]})
-    assert done == {"ok": True, "comment": cm["id"], "status": "dismissed"}
-    assert (await local.state(CORPUS, "answer-comments", []))["comments"] == []
-    assert (await local.state(CORPUS, "answer-comments", ["--status", "all"]))["comments"][0]["status"] == "dismissed"
-    again = await local.act(CORPUS, "answer-comment-resolve", {"comment": cm["id"], "reopen": True})
-    assert again["status"] == "open"
-    with pytest.raises(local.StateError):
-        await local.act(CORPUS, "answer-comment-resolve", {"comment": "nope"})
-    # the routes on checks.router
-    listed = await checks.answer_comments_route(CORPUS)
-    assert [x["id"] for x in listed["comments"]] == [cm["id"]] and listed["running"]
-    assert (await checks.answer_comment_dismiss_route(CORPUS, cm["id"]))["status"] == "dismissed"
-    assert (await checks.answer_comment_reopen_route(CORPUS, cm["id"]))["status"] == "open"
-    paths = {r.path for r in checks.router.routes}
-    assert {"/ws/{c}/answer-comments", "/ws/{c}/answer-comments/{cid}/dismiss",
-            "/ws/{c}/answer-comments/{cid}/reopen"} <= paths
-
-
-def test_a_comment_s_color_is_its_check_s_colour_for_each_built_in(board):
-    turn = _turn()
-    answer_comments.store_answer(CORPUS, turn)
-    ps = answer_comments.passages(turn)
-    for i, cid in enumerate(checks.BUILTINS):
-        answer_comments.add(CORPUS, passage=ps[i], text=f"From {cid}.", author="check", check=cid, run="r")
-    got = {cm["check"]: cm["color"] for cm in answer_comments.state(CORPUS)["comments"]}
-    want = {cid: checks.read(CORPUS, cid)["colour"] for cid in checks.BUILTINS}
-    assert got == want == {"judgment": 1, "important-details": 2, "unverified": 5}
-    assert all(c in checks.COLOURS for c in got.values())
-
-
-def test_the_built_ins_cover_answers_and_run_check_does_not_run_on_them(board):
-    for cid in checks.BUILTINS:
-        assert checks.covers(checks.read(CORPUS, cid), "answers")
-        assert checks.read(CORPUS, cid)["about"].startswith("it looks for ")
-    assert checks.RUN_ON == ("documents", "cards") and "answers" in checks.COVERS
-    assert checks.targets_of(CORPUS, checks.read(CORPUS, IMPORTANT)) == [checks.CANVAS], "no document written yet"

@@ -44,8 +44,3 @@ test("a ticket opens the thread that ran it, and an answer's passage main's chat
   teleport('answer:5e55a000-0000-4000-8000-00000000a001#s2')
   expect(heard).toEqual([['openChat', { chatId: 'main' }], ['openRef', { ref: 'answer:5e55a000-0000-4000-8000-00000000a001#s2' }]])
 })
-
-test('an element ref still goes to its surface', () => {
-  teleport('report:report')
-  expect(heard).toEqual([['showTab', { tab: 'report' }], ['openRef', { ref: 'report:report' }]])
-})

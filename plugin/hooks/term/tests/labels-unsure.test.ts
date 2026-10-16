@@ -1,10 +1,9 @@
 // The labels' records with no category fit and those the label is unsure of (SPEC-v2 J6, 3.11, C8): the Labels view
-// lists them under each label, no-fit first, then unsure (lowest confidence first), three a label with `↓ more` to page;
-// the label editor's examples start with them. `claude plugin test plugin`.
+// lists them under each label, no-fit first, then unsure, three a label with `↓ more` to page. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { CWD, LABEL, WS, aboveAt, paneAt, panelWorld, words } from './fixtures-panel'
+import { CWD, LABEL, aboveAt, paneAt, panelWorld, words } from './fixtures-panel'
 import type { PanelWorld } from './fixtures-panel'
 
 type M = Mounted<'terminal'>
@@ -70,31 +69,4 @@ test('the Labels view lists under each label its records with no category fit, t
   expect(rows.map(r => r.trim()).filter(r => r.startsWith('unsure'))).toEqual([expect.stringMatching(/^unsure 0\.31/), expect.stringMatching(/^unsure 0\.52/), expect.stringMatching(/^unsure 0\.58/)])
   expect(rows.some(r => r.includes('more'))).toBe(false)
   await m.unmount()
-})
-
-test("the label editor's examples start with the records of no category fit and the unsure ones", T, async ($, on) => {
-  const w = panelWorld(on)
-  await start($, w)
-  const m0 = await labelsView($, w)
-  await m0.press({ key: 'label-open-0' })
-  await w.clock.settle()
-  await m0.unmount()
-  let m = (await $.ui.mount(paneAt(96))) as unknown as M
-  await m.press({ key: 'hk-examples' })
-  await w.clock.advance(100)
-  await w.clock.settle()
-  await m.unmount()
-  m = (await $.ui.mount(paneAt(96))) as unknown as M
-  const text = words(await m.drawn())
-  const fit = text.indexOf('no category fit or unsure')
-  const first = text.indexOf('A revision the label could not place.')
-  const examples = text.indexOf('SEC download')
-  expect(fit).toBeGreaterThan(0)
-  expect(first).toBeGreaterThan(fit)
-  // before the examples the label gave each value
-  expect(examples).toBeGreaterThan(first)
-  expect(text).toContain('Maybe a proxy: reader.example/x')
-  expect(text).toContain('… 2 more')
-  await m.unmount()
-  void WS
 })

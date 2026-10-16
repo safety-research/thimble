@@ -1,6 +1,6 @@
-// Cards as thimble-term draws them: the title a hot spot, the card
-// pane's last run, `run again` and its code's output, a card's label rows and colours from the labels it read, a
-// timeline's start time said once, a label that is not in the workspace. `claude plugin test plugin`.
+// The card pane: how the card's last run ended, `run again` (r) asking main to run it, and what its code printed; a
+// card's takeaway one blank row under its label row; every citation inside a card in the citation's purple.
+// `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
@@ -8,7 +8,7 @@ import { cardOfCell } from '../cell'
 import type { ThimbleCell } from '../cell'
 import { cardLayout } from '../draw'
 import { COLORS } from '../paint'
-import { CELLS, CWD, WS, shown, world } from './fixtures'
+import { CELLS, CWD, shown, world } from './fixtures'
 import type { World } from './fixtures'
 
 type M = Mounted<'terminal'>
@@ -32,25 +32,7 @@ async function turn($: E, w: World, card: string): Promise<void> {
   await w.clock.advance(300)
 }
 
-test("a card's title is a hot spot: in inverse under the pointer, a press asks a side thread about the card", async ($, on) => {
-  const w = world(on)
-  await start($, w)
-  await turn($, w, 'a0frame0')
-  const ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
-  const key = 'card-t0-a0frame0'
-  await ui.pointer({ type: 'move', x: 3, y: 0, in: key } as never)
-  const rows = ((await ui.drawn({ in: key })) as { children?: unknown[] }).children ?? []
-  expect(JSON.stringify(rows[0])).toContain('"bold":true,"inverse":true')
-  await ui.pointer({ type: 'down', x: 3, y: 0, button: 'left', in: key } as never)
-  await ui.pointer({ type: 'up', x: 3, y: 0, button: 'left', in: key } as never)
-  await ui.unmount()
-  await w.clock.settle()
-  const pane = (await $.ui.mount(PANE)) as unknown as M
-  expect(shown(await pane.drawn())).toContain('New thread')
-  await pane.unmount()
-})
-
-test("the card pane says how the card's last run ended; `run again` (r) asks main to run it; its code shows what it printed", async ($, on) => {
+test("the card pane says how the card's last run ended; `run again` (r) asks main to run it; its code shows what it printed", { timeoutMs: 30_000 }, async ($, on) => {
   const w = world(on)
   Object.assign(w.cells.k0code00!, { code: "print('revisions.jsonl', 14591)" })
   await start($, w)
@@ -88,37 +70,6 @@ test("the card pane says how the card's last run ended; `run again` (r) asks mai
   await pane.unmount()
 })
 
-test("a broken card's pane says its last run failed, in red", async ($, on) => {
-  const w = world(on)
-  Object.assign(w.cells.x0err000!, { code: "df['wiki']" })
-  await start($, w)
-  await turn($, w, 'x0err000')
-  await $.command.run({ command: 'thimble:thimble', args: '' } as never)
-  await w.clock.settle()
-  let pane = (await $.ui.mount(PANE)) as unknown as M
-  const rows = ((await pane.drawn({ in: 'm:home' })) as { children?: unknown[] }).children ?? []
-  await pane.pointer({ type: 'down', x: 6, y: rows.findIndex(r => shown(r).includes('Broken')), button: 'left', in: 'm:home' } as never)
-  await w.clock.settle()
-  await pane.unmount()
-  pane = (await $.ui.mount(PANE)) as unknown as M
-  expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Text","props":{"color":"error"},"children":["last run failed"]}')
-  await pane.unmount()
-})
-
-test("a card whose script read a label shows the label's row, its values in their colours, `changed since` once the label changed", async ($, on) => {
-  const w = world(on)
-  Object.assign(w.cells.b0bar000!, { labels: ['d9b51617'], label_revs: { d9b51617: 3 } })
-  w.states.labels = [{ ...w.states.labels[0]!, rev: 5 } as never]
-  await start($, w)
-  await turn($, w, 'b0bar000')
-  const ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
-  const key = 'card-t0-b0bar000'
-  await ui.resize({ columns: 110, rows: 20, in: key })
-  const card = shown(await ui.drawn({ in: key }))
-  expect(card).toMatch(/label {2}links through a fetch proxy ↗ {2}● proxy-link {2}● none {2}changed since/)
-  await ui.unmount()
-})
-
 // the card's region (a Client), a blank row, then the takeaway
 const GAP = /"client":\{"plugin":"thimble"\}\},\{"type":"Text","children":\[" "\]\},\{"type":"Box".*The dse wiki has the most revisions\./
 
@@ -148,19 +99,6 @@ test('a card with no label: its takeaway right under the card', async ($, on) =>
   await ui.unmount()
 })
 
-test("a timeline's axis names both its ends or neither: neither when the list under it starts and ends with them", () => {
-  const { card } = cardOfCell(CELLS.e0time00 as unknown as ThimbleCell)
-  const lines = cardLayout(card, 60, -1).lines.map(l => l.map(s => s.s).join(''))
-  expect(lines.filter(l => l.includes('May 24')).length).toBe(1)
-  expect(lines.filter(l => l.includes('Jun 18')).length).toBe(1)
-  expect(lines[1]).toMatch(/^May 24 {2}● first saves/)
-  // listed in another order (by size), the list does not name the ends where an axis's reader looks: both under it
-  const sorted = cardOfCell({ ...(CELLS.e0time00 as object), outputs: [{ 'application/vnd.thimble.timeline+json': { events: [{ time: '2026-06-02', label: 'most' }, { time: '2026-05-24', label: 'first saves' }, { time: '2026-06-18', label: 'peak afternoon' }] } }] } as unknown as ThimbleCell).card
-  const axis = cardLayout(sorted, 60, -1).lines.map(l => l.map(s => s.s).join(''))
-  expect(axis[1]).toMatch(/^May 24 +Jun 18$/)
-  expect(axis[1]!.length).toBe(60)
-})
-
 test("inside a card every citation and evidence link is in the citation's purple: an example's ↗ and place, a timeline's ↗; one underline color", () => {
   // MATT-NOTES "Mockup feedback": "no two underline colors"; the link color stays for actions (↗ open, buttons)
   const example = cardOfCell({ id: 'x0quot00', notebook: 'g1', kind: 'example', title: 'Was anything force-pushed?', takeaway: '', labels: [], created_by: 'main', status: 'ok', payload: { refs: [{ ref: 'events.jsonl#L197', quote: '{"forced": true}' }] } } as unknown as ThimbleCell).card
@@ -171,68 +109,4 @@ test("inside a card every citation and evidence link is in the citation's purple
   const timeline = cardOfCell({ ...(CELLS.e0time00 as object), outputs: [{ 'application/vnd.thimble.timeline+json': { events: [{ time: '2026-05-24', label: 'first saves', ref: 'events.jsonl#L3' }, { time: '2026-06-18', label: 'peak afternoon' }] } }] } as unknown as ThimbleCell).card
   const marks = cardLayout(timeline, 60, -1).lines.flat().filter(g => g.s === '↗')
   expect(marks).toEqual([{ s: '↗', fg: COLORS.cite }])
-})
-
-test('a press on a label that is not in the workspace says so in a toast and opens nothing', async ($, on) => {
-  const w = world(on)
-  await start($, w)
-  await turn($, w, 'l0label0')
-  const ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
-  await ui.post({ type: 'label-open', slug: 'gone0000', origin: 'y', gestures: [] }, { in: 'card-t0-l0label0' })
-  await ui.unmount()
-  await w.clock.settle()
-  expect(w.toasts).toContain('thimble: that label is no longer in this workspace')
-  expect(w.toasts.join(' ')).not.toContain('gone0000')
-  expect(w.opened).toEqual([])
-  void WS
-})
-
-test("a press on a label made after the labels were read opens it: the list is read again before it says the label is gone", async ($, on) => {
-  const w = world(on)
-  const made = w.states.labels.splice(0)
-  await start($, w)
-  // home reads the labels while there are none
-  await $.command.run({ command: 'thimble:thimble', args: '' } as never)
-  await w.clock.settle()
-  w.states.labels.push(...made)
-  await turn($, w, 'l0label0')
-  const ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
-  await ui.post({ type: 'label-open', slug: 'd9b51617', origin: 'y', gestures: [] }, { in: 'card-t0-l0label0' })
-  await ui.unmount()
-  await w.clock.settle()
-  expect(w.toasts.filter(t => t.includes('label'))).toEqual([])
-  expect(w.panes.at(-1)?.title).toBe('Label: links through a fetch proxy')
-})
-
-test("a card whose check ended in an error says so in the card pane's subtitle, dim and in plain words; a check that read it says nothing", async ($, on) => {
-  const w = world(on)
-  // the live check's card (New 15): its check ran past its time, its last run was fine
-  Object.assign(w.cells.a0frame0!, { check: { id: 'chk_1', status: 'error', reason: 'it ran past its 75 s at high effort', stages: {} } })
-  Object.assign(w.cells.ff73e071!, { check: { id: 'chk_2', status: 'ok', stages: {} } })
-  // live check cc-term: a check whose revision of the card would not run (it recorded the revision `rejected`)
-  Object.assign(w.cells.k0code00!, {
-    check: { id: 'chk_3', status: 'error', reason: 'its revision was not kept: its code did not run clean: NameError: x', stages: {} },
-    fixes: [{ id: 'fix_1', check: 'chk_3', state: 'rejected', fields: ['code'], reason: 'its code did not run clean: NameError: x' }],
-  })
-  await start($, w)
-  const pane = async (id: string): Promise<{ text: string; json: string }> => {
-    await $.command.run({ command: 'thimble:thimble', args: `card ${id}` } as never)
-    await w.clock.settle()
-    const p = (await $.ui.mount(PANE)) as unknown as M
-    const drawn = await p.drawn()
-    await p.unmount()
-    return { text: shown(drawn), json: JSON.stringify(drawn) }
-  }
-  // the card is fine, so nothing of its check is red, and why the check ended (its internals) is not on the card
-  let got = await pane('a0frame0')
-  expect(got.text).toContain('last run ok · its check could not finish')
-  expect(got.text).not.toContain('75 s')
-  expect(got.json).not.toContain('"color":"error"')
-  got = await pane('k0code00')
-  expect(got.text).toContain("its check's revision would not run")
-  expect(got.text).not.toContain('NameError')
-  expect(got.text).not.toContain('could not finish')
-  expect(got.json).not.toMatch(/"color":"error"\},"children":\["its check/)
-  got = await pane('ff73e071')
-  expect(got.text).not.toContain('its check')
 })

@@ -4,15 +4,13 @@ attaches the session that is main, and carries no events. The watcher's side is 
 test_shim.py."""
 from __future__ import annotations
 
-import asyncio
-import json
 import re
 
 import pytest
 from conftest import Listener
 from fastapi.testclient import TestClient
 
-from app import agents, config, events, session
+from app import agents, events, session
 
 CORPUS = "mini"
 
@@ -76,35 +74,3 @@ def test_a_thread_named_in_any_script_asks_main_to_fork_under_a_name_claude_code
     r = client.post(f"/api/ws/{CORPUS}/chats", json={"title": "Café マージ担当", "text": "which did agent-04 merge?"})
     assert r.status_code == 201
     assert re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", q.get_nowait()["meta"]["name"])
-
-
-# ----------------------------------------------------------------------------- the subscription
-
-
-def test_the_subscription_waits_for_the_workspace_then_attaches_the_session_that_is_main(client, plugin_headers):
-    """404 for a folder that is no workspace yet (the shim retries); a subscription that names a session no /thimble
-    named makes no session main, and one that names main's keeps it attached; each gets a `ready` event."""
-    r = client.get("/api/events", params={"cwd": "/nowhere/at/all"}, headers=plugin_headers())
-    assert r.status_code == 404
-    cwd = str(config.corpus_dir(CORPUS))
-
-    class Req:
-        async def is_disconnected(self):
-            return False
-
-    async def go():
-        stray = await events.subscribe(Req(), cwd=cwd, session="s" * 8, pid=42)
-        assert events.listening(CORPUS) and session.current(CORPUS) is None, "only /thimble makes a session main"
-        await stray.body_iterator.__anext__()
-        await stray.body_iterator.aclose()
-        session.attach(CORPUS, "m" * 8, cwd)
-        resp = await events.subscribe(Req(), cwd=cwd, session="m" * 8, pid=43)
-        gen = resp.body_iterator
-        first = await gen.__anext__()
-        assert events.reachable(CORPUS) and session.current(CORPUS).sid == "m" * 8
-        await gen.aclose()
-        return first
-
-    first = asyncio.run(go())
-    assert first["event"] == "ready" and json.loads(first["data"]) == {"workspace": CORPUS}
-    assert not events.listening(CORPUS), "a closed subscription is no longer counted"

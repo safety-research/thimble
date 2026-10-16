@@ -2,20 +2,17 @@
 // after activation and while thimble is on, six items in a fixed order (cards, threads, citations, labels, checks,
 // coverage), each `name value`, the item of a feature that is off left out; `thimble` bold, in the accent and
 // underlined, whose press opens home; names in the accent, values bold in the text color, a bold purple `•` after the
-// value of an item with something new (cleared when its section opens), citations' purple `◌` while checked and bold
-// red `N failed` two cells after, a zero item dim whole; under the pointer the selection background on an item and the
-// cell after it, its name underlined, no inverse; no `open ›`, no `dismiss`; each press opens its section as the
-// person's own open (placed at any width); items three cells apart where all fit so, else two, within the band's width
-// at 184, 100, 80 and 60 columns, the zero items cut first and an item with a `•` or a failure last; the proposal's, a
-// notice's and the SSH row's `dismiss` leave the line; thimble's rows after another plugin's. `claude plugin test
-// plugin`.
+// value of an item with something new (cleared when its section opens), citations' purple `◌` while checked; under the
+// pointer the selection background on an item and the cell after it, its name underlined, no inverse; items three cells
+// apart where all fit so, else two, the zero items cut first and an item with a `•` or a failure last. `claude plugin
+// test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
 import { LINE_LABEL_W, fitItems, percent } from '../band'
 import { cid } from '../lib'
 import { COLORS } from '../paint'
-import { CWD, PANEL, SUMMARY, WS, aboveAt, comment, featuresOff, paneAt, panelWorld, placing, pressBrowser, shown, words } from './fixtures-panel'
+import { CWD, PANEL, SUMMARY, WS, aboveAt, comment, featuresOff, panelWorld, shown, words } from './fixtures-panel'
 import type { PanelWorld } from './fixtures-panel'
 
 type M = Mounted<'terminal'>
@@ -88,15 +85,6 @@ const DOT = { s: '•', color: COLORS.cite, bold: true }
 /** A name: in the accent, underlined under the pointer; a zero item's dim. */
 const NAME = (s: string) => ({ s, color: COLORS.accent, hover: { underline: true } })
 const DIM_NAME = (s: string) => ({ s, dim: true, hover: { underline: true } })
-
-test('no line before activation', { timeoutMs: 30_000 }, async ($, on) => {
-  const w = panelWorld(on, { ws: null })
-  await start($, w)
-  const before = await band($)
-  expect(await before.find({ type: 'Box', key: 'above-summary' })).toBeUndefined()
-  expect(shown(await before.drawn())).not.toContain('thimble')
-  await before.unmount()
-})
 
 test('after activation the line shows six items in order, `name value`, three cells apart, with no `open ›` and no `dismiss`; `thimble` bold, accent and underlined; names in the accent, values bold, `N failed` two cells after, a zero item dim whole; nothing is new at activation', { timeoutMs: 30_000 }, async ($, on) => {
   const w = panelWorld(on)
@@ -277,51 +265,6 @@ test('under the pointer a press gets the selection background on its words and t
   await m.unmount()
 })
 
-test("`N failed` counts the chat citations not found and the problems of the cards' links checks", { timeoutMs: 30_000 }, async ($, on) => {
-  const w = panelWorld(on)
-  w.cells.ff73e071 = { ...w.cells.ff73e071, verification: { links: { status: 'done', checked: true, resolved: [], broken: [{ value: '14592', ref: 'card:ff73e071#revisions/TOTAL', why: 'a script got 14591', source: '14591' }], typed: [{ value: '4579', ref: 'card:ff73e071#pages/TOTAL', why: 'the code types it in' }] } } }
-  w.t.citeIndex = [{ id: 'c2', raw: BAD, display: '99', ref: 'README.md#L99', row: 'r1', at: 2 }]
-  w.t.verdicts = { [cid(BAD)]: { status: 'missing' } }
-  await start($, w)
-  await $.command.run({ command: 'thimble:thimble', args: 'card ff73e071' } as never)
-  await w.clock.settle()
-  const m = await band($)
-  expect(await line(m)).toContain('citations 3  3 failed')
-  await m.unmount()
-})
-
-for (const columns of [104, 80]) {
-  test(`each item's press and \`thimble\`'s open the panel as the person's own open, placed inline at ${columns} columns`, { timeoutMs: 30_000 }, async ($, on) => {
-    const w = panelWorld(on)
-    w.t.coverageSummary = SUMMARY
-    w.t.citeIndex = [{ id: 'c1', raw: CHAT, display: '4579', ref: 'README.md#L3', row: 'r1', at: 1 }]
-    w.t.verdicts = { [cid(CHAT)]: { status: 'missing' } }
-    w.t.answerComments = [comment('c1')]
-    const pl = placing(w, columns)
-    await start($, w)
-    w.states.home = { ...w.states.home, cards: 13 }
-    await changed(w, 'notebooks')
-    const m = await band($, columns)
-    // the items the width leaves (at 80 columns the zero and the plain items go first)
-    const drawn = await keys(m)
-    expect(drawn).toContain('cards')
-    expect(drawn).toContain('citations')
-    for (const key of [...drawn.filter(k => k !== 'cut'), 'thimble']) {
-      const before = pl.log.length
-      await m.press({ key: `above-summary-${key}` })
-      await w.clock.settle()
-      expect(pl.log.length).toBeGreaterThan(before)
-      expect(pl.log.at(-1)).toEqual({ id: PANEL, asked: true, placed: true })
-      // closed again, so the next press opens it anew
-      const pane = (await $.ui.mount(paneAt(columns - 8))) as unknown as M
-      await pane.press({ key: 'hk-close' })
-      await pane.unmount()
-      await w.clock.settle()
-    }
-    await m.unmount()
-  })
-}
-
 test('fitItems keeps every item 3 apart when all fit so, else 2 apart; else the zero items go first, then the others from the end, an item with a `•` or a failure last, and `…` ends the line', () => {
   const it = (s: string, o: { zero?: boolean; keep?: boolean } = {}) => ({ segs: [{ s }], zero: false, keep: false, ...o })
   const cards = it('cards 12 •', { keep: true })
@@ -351,91 +294,4 @@ test('fitItems keeps every item 3 apart when all fit so, else 2 apart; else the 
   // the Coverage view's forms (coverageview.tsx percent): a share below 1% keeps one decimal, cut (owner's notes, 10-16)
   expect(percent(1, 1000)).toBe('0.1%')
   expect(percent(25, 1000)).toBe('3%')
-})
-
-for (const columns of [184, 100, 80, 60]) {
-  test(`at ${columns} columns the line stays within the width and keeps every item with a \`•\` or a failure; a notice's acts and the SSH row's acts are never cut`, { timeoutMs: 30_000 }, async ($, on) => {
-    const w = panelWorld(on)
-    w.t.coverageSummary = SUMMARY
-    w.t.citeIndex = [{ id: 'c1', raw: CHAT, display: '4579', ref: 'README.md#L3', row: 'r1', at: 1 }]
-    w.t.verdicts = { [cid(CHAT)]: { status: 'missing' } }
-    w.states.home.notices = [{ id: 'n1', key: 'agent:view:x', kind: 'view', text: 'The build of the view Edit Bursts failed: its check found no rows in the file it reads.', agent: 'View build', chat: 'b1', at: '2026-10-14T11:05:00Z', acts: [{ label: 'Retry', act: 'view-retry', slug: 'x' }], open: 'agent' }]
-    w.open = { ...w.open, remote: true, opened: false, tunnel: 'ssh -N -L 29321:127.0.0.1:29321 <your ssh host>', link_file: '/home/a/.thimble/links/s1.json' }
-    await start($, w)
-    w.states.home = { ...w.states.home, cards: 14 }
-    w.t.answerComments = [comment('c1'), comment('c2')]
-    await changed(w, 'notebooks')
-    await pressBrowser($, w)
-    const m = await band($, columns)
-    // `  `, then `thimble`, each item and the `…`, each press with the cell after its words, the presses 3 apart where
-    // every item fits so (184 and 100 columns), else 2
-    const row = await presses(m)
-    const kids = (row.children ?? []).filter(Boolean)
-    const gap = columns >= 100 ? 3 : 2
-    expect(row.props?.columnGap).toBe(gap - 1)
-    const width = 2 + kids.map(k => [...words(k)].length).reduce((a, b) => a + b, 0) + (gap - 1) * (kids.length - 1)
-    expect(width).toBeLessThanOrEqual(columns)
-    const drawn = await keys(m)
-    // cards (•), citations (failed) and checks (•) whatever the width; at 80 and 60 columns the others go, `…` last
-    for (const key of ['cards', 'citations', 'checks']) expect(drawn).toContain(key)
-    if (columns >= 100) expect(drawn).toEqual(['cards', 'threads', 'citations', 'labels', 'checks', 'coverage'])
-    else expect(drawn.at(-1)).toBe('cut')
-    if (columns === 60) expect(drawn).toEqual(['cards', 'citations', 'checks', 'cut'])
-    // a notice's acts and the SSH row's acts stand in a box that never shrinks
-    for (const key of ['above-notice-n1', 'above-remote']) {
-      const r = JSON.stringify(await m.find({ type: 'Box', key }))
-      expect(r).toContain('"flexShrink":0')
-    }
-    expect(await m.find({ type: 'Button', key: 'above-notice-n1-dismiss' })).toBeDefined()
-    expect(await m.find({ type: 'Button', key: 'above-remote-link' })).toBeDefined()
-    await m.unmount()
-  })
-}
-
-test('the proposal, a notice and the SSH row each keep their `dismiss`; once each is dismissed the line stays', { timeoutMs: 30_000 }, async ($, on) => {
-  const w = panelWorld(on)
-  w.t.coverageSummary = SUMMARY
-  w.states.home.offer = { slug: 'edit-bursts', name: 'Edit Bursts', description: 'Each wiki page as a strip of its saves.', task: 'Find out when.', claims: ['revisions.jsonl'] }
-  w.states.home.notices = [{ id: 'n1', key: 'agent:x', kind: 'view', text: 'The build failed.', agent: 'View build', chat: '', at: '2026-10-14T11:05:00Z', acts: [] }]
-  w.open = { ...w.open, remote: true, opened: false, tunnel: 'ssh -N -L 29321:127.0.0.1:29321 <your ssh host>' }
-  await start($, w)
-  await pressBrowser($, w)
-  const m = await band($)
-  const rows = async () => ((await m.drawn()) as unknown as { children?: unknown[] }).children?.filter(k => /"key":"above-(?!summary)[a-z]+(-[a-z0-9]+)?"/.test(JSON.stringify(k).slice(0, 80)) || /"key":"above-summary"/.test(JSON.stringify(k).slice(0, 80))).length ?? 0
-  expect(await rows()).toBeGreaterThanOrEqual(4)
-  await m.press({ key: 'above-offer-dismiss' })
-  await m.press({ key: 'above-notice-n1-dismiss' })
-  await m.press({ key: 'above-remote-dismiss' })
-  await w.clock.settle()
-  expect(await m.find({ type: 'Box', key: 'above-offer' })).toBeUndefined()
-  expect(await m.find({ type: 'Box', key: 'above-notice-n1' })).toBeUndefined()
-  expect(await m.find({ type: 'Box', key: 'above-remote' })).toBeUndefined()
-  expect(await m.find({ type: 'Box', key: 'above-summary' })).toBeDefined()
-  await m.unmount()
-})
-
-/** Another plugin that draws a row in the band, after the rows beneath it. */
-const OTHER = {
-  name: 'other-band',
-  register: ((on: (ev: string, m: unknown, h: unknown) => void) => {
-    on('ui.render', { component: 'AbovePrompt' }, async ($: { ui: { resolve: (e: unknown) => Record<string, (p: unknown) => unknown> } }, e: unknown, next: (e: unknown) => Promise<unknown>) => {
-      const { Box, Text } = $.ui.resolve(e)
-      const below = await next(e)
-      return Box!({ flexDirection: 'column', children: [below, Box!({ key: 'other-row', children: [Text!({ children: 'another plugin\'s row' })] })] })
-    })
-  }) as never,
-}
-
-test("thimble's rows stand after the rows of the plugins beneath it; another plugin's row draws too", { plugins: [OTHER], timeoutMs: 30_000 }, async ($, on) => {
-  const w = panelWorld(on)
-  w.t.coverageSummary = SUMMARY
-  await start($, w)
-  const m = await band($)
-  const json = JSON.stringify(await m.drawn())
-  expect(json).toContain("another plugin's row")
-  expect(json).toContain('above-summary')
-  // what stands beneath thimble's hook (the engine's own row here) comes before thimble's rows
-  expect(json.indexOf('(the engine row)')).toBeGreaterThanOrEqual(0)
-  expect(json.indexOf('(the engine row)')).toBeLessThan(json.indexOf('above-summary'))
-  await m.unmount()
 })

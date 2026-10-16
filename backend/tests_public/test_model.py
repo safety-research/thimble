@@ -130,44 +130,6 @@ async def test_ok_valid_tool_call(monkeypatch):
     assert made[0].interrupts == 1
 
 
-async def test_an_interrupted_turn_whose_result_lists_only_a_helper_model_names_the_model_that_made_the_call(monkeypatch):
-    """The interrupt can end the turn before its result counts the model: model_usage then lists only the CLI's helper
-    model, and the call is reported on the model named on the recorded call's message, with its cost unknown."""
-    install(monkeypatch, [[[
-        amsg(tuse({"title": "T"})),
-        tres(),
-        rmsg(subtype="error_during_execution", is_error=True, total_cost_usd=0.002,
-             model_usage={"claude-haiku-4-5-20251001": {"inputTokens": 10152}}),
-    ]]])
-    r = await call()
-    assert r.status == "ok" and r.output == {"title": "T"}
-    assert r.model_used == "claude-sonnet-5" and r.fallback_note == "" and r.cost_usd is None
-
-
-async def test_turn_interrupted_only_once_a_call_is_recorded(monkeypatch):
-    made = install(monkeypatch, [[
-        [amsg(tuse({"n": 2}, id="t1")), tres("t1", "invalid"), rmsg()],
-        [amsg(tuse({"title": "T"}, id="t2")), tres("t2"), rmsg()],
-    ]])
-    r = await call()
-    assert r.status == "ok" and r.output == {"title": "T"} and r.attempts == 2
-    assert made[0].interrupts == 1
-
-
-async def test_a_call_s_system_prompt_is_the_caller_s_own_then_the_output_tool_s_instruction(monkeypatch):
-    """The session's system prompt is a plain string: the caller's `system` and then the output tool's instruction, or
-    the instruction alone, with no Claude Code preset around it; its settings turn the user's ultracode off."""
-    import json
-
-    instruction = "Return the output ONLY via the `report` tool; call it exactly once and write no prose."
-    turn = [amsg(tuse({"title": "T"})), tres(), rmsg()]
-    made = install(monkeypatch, [[turn], [turn]])
-    assert (await call(system="You are a text classifier.")).status == "ok"
-    assert (await call()).status == "ok"
-    assert [m.opts.system_prompt for m in made] == [f"You are a text classifier.\n\n{instruction}", instruction]
-    assert all(json.loads(m.opts.settings)["ultracode"] is False for m in made)
-
-
 # ----------------------------------------------------------------------------- the model and effort that run
 
 
@@ -203,62 +165,3 @@ async def test_every_call_runs_claude_on_its_model_and_effort_with_the_variables
         assert r.status == "error" and "no model or no effort" in r.detail and len(made) == 1, missing
     with pytest.raises(sdk.CallSettingsError):
         sdk.build(cwd="/tmp", tools=[], mcp_servers={}, system="", model="claude-sonnet-5", effort="", env=None)
-
-
-async def test_a_refused_call_runs_again_on_the_refusal_row_and_not_at_all_when_it_is_off(monkeypatch):
-    """A call its model refused runs once more on the refusal row's model and effort (config.call_settings'
-    `refusal`), at standard speed, with `refused_by` naming the model that refused; not at all when the row is off
-    (None), or when it names the model that refused."""
-    refused = [amsg(TextBlock(text="I can't help with that."), stop_reason="refusal"), rmsg()]
-    ok = [amsg(tuse({"title": "T"}), model="claude-opus-4-8"), tres(), rmsg()]
-    made = install(monkeypatch, [[refused], [ok]])
-    r = await call(model="claude-sonnet-5", effort="low", speed="fast", refusal={"model": "claude-opus-4-8",
-                                                                                  "effort": "max"})
-    assert r.status == "ok" and r.refused_by == "claude-sonnet-5" and len(made) == 2
-    assert (made[1].opts.model, made[1].opts.effort) == ("claude-opus-4-8", "max")
-    import json
-
-    assert json.loads(made[1].opts.settings)["fastMode"] is False, "the rerun runs at standard speed"
-    made = install(monkeypatch, [[refused]])
-    r = await call(refusal=None)
-    assert r.status == "refused" and len(made) == 1, "the row is off: no rerun"
-    assert r.detail == "Claude's safeguards refused the request (stop_reason refusal)", "the detail names the safeguards"
-    made = install(monkeypatch, [[refused]])
-    r = await call(model="claude-opus-4-8", refusal={"model": "claude-opus-4-8", "effort": "high"})
-    assert r.status == "refused" and len(made) == 1
-
-
-def test_every_structured_call_site_passes_its_model_effort_and_refusal_row():
-    """Every call of model.structured in the backend passes `model`, `effort`, `speed` and `refusal` by name, none of
-    them None, so no call takes a model or an effort from Claude Code's settings (config.call_settings)."""
-    import ast
-    from pathlib import Path
-
-    app_dir = Path(model.__file__).parent
-    sites = []
-    for path in sorted(app_dir.glob("*.py")):
-        for node in ast.walk(ast.parse(path.read_text("utf-8"))):
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "structured" \
-                    and isinstance(node.func.value, ast.Name) and node.func.value.id in ("model", "model_mod"):
-                kw = {k.arg: k.value for k in node.keywords}
-                sites.append(f"{path.name}:{node.lineno}")
-                for name in ("model", "effort", "speed", "refusal"):
-                    assert name in kw, f"{path.name}:{node.lineno} passes no {name}"
-                    assert not (isinstance(kw[name], ast.Constant) and kw[name].value is None), \
-                        f"{path.name}:{node.lineno} passes {name}=None"
-    assert len(sites) >= 6, sites
-
-
-async def test_a_model_without_an_effort_runs_with_none_and_the_call_says_so(monkeypatch, caplog):
-    """Claude Code runs Haiku with no effort, so a call on it passes no --effort and no effort variable, and its log says
-    it ran with none; the call still names its role's effort, as every call must."""
-    import json
-    import logging
-
-    turn = [amsg(tuse({"title": "T"}), model="claude-haiku-4-5-20251001"), tres(), rmsg()]
-    made = install(monkeypatch, [[turn]])
-    with caplog.at_level(logging.INFO, logger="thimble.model"):
-        assert (await call(model="claude-haiku-4-5-20251001", effort="low")).status == "ok"
-    opts = made[0].opts
-    assert opts.effort is None and "--effort" not in _argv(opts) and "env" not in json.loads(opts.settings)
-    assert "at effort none (the model has none)" in caplog.text

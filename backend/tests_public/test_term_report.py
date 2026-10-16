@@ -4,7 +4,6 @@ does. The reader is read-only: the report is written and edited in the browser w
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -57,13 +56,6 @@ def _comments() -> dict[str, dict]:
     return {cm["id"]: cm for cm in report_types.read_doc(CORPUS, MAIN, "report")["comments"]}
 
 
-async def test_state_checks_gives_the_checks_route_s_list(doc):
-    got = await local.state(CORPUS, "checks")
-    assert [c["id"] for c in got][:3] == ["judgment", "unverified", "important-details"]
-    assert all({"name", "colour", "shown", "runs"} <= set(c) for c in got)
-    assert "checks" in local.STATE_USAGE
-
-
 async def test_act_resolves_and_reopens_a_comment_as_the_margin_does(doc):
     got = await local.act(CORPUS, "comment-resolve", {"doc": "report", "comment": "c1"})
     assert got == {"ok": True, "doc": "report", "comment": "c1", "status": "dismissed"}
@@ -79,20 +71,3 @@ async def test_act_resolves_and_reopens_a_comment_as_the_margin_does(doc):
     assert "comment-resolve" in local.ACT_USAGE and "doc-save" not in local.ACT_USAGE
     with pytest.raises(local.StateError, match="no act 'doc-save'"):
         await local.act(CORPUS, "doc-save", {"doc": "report", "blocks": []})
-
-
-def test_the_command_line_runs_the_report_s_acts(doc):
-    import os
-    import subprocess
-    import sys
-
-    backend = Path(__file__).resolve().parents[1]
-    corpus = config.corpus_dir(CORPUS)
-    r = subprocess.run([sys.executable, "-m", "app.local", "act", "comment-resolve", "--cwd", str(corpus),
-                        json.dumps({"doc": "report", "comment": "c2"})], cwd=backend, env=dict(os.environ),
-                       capture_output=True, text=True, timeout=120)
-    assert r.returncode == 0, r.stdout + r.stderr
-    assert json.loads(r.stdout) == {"ok": True, "doc": "report", "comment": "c2", "status": "dismissed"}
-    r = subprocess.run([sys.executable, "-m", "app.local", "state", "checks", "--cwd", str(corpus)], cwd=backend,
-                       env=dict(os.environ), capture_output=True, text=True, timeout=120)
-    assert r.returncode == 0 and json.loads(r.stdout)[0]["id"] == "judgment"

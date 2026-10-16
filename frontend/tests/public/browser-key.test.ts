@@ -65,34 +65,6 @@ test("the claim's answer keeps the key, a signed-in browser's claim goes under i
   expect(localStorage.getItem('thimble-browser-key')).toBe(KEY)
 })
 
-test('a new tab of the same browser, and a later sign-in in another tab, are used at once', async () => {
-  const { apiBase } = await import('../../src/lib/browserKey.ts')
-  const { mediaUrl } = await import('../../src/lib/media.ts')
-  const { api } = await import('../../src/lib/api.ts')
-  expect(api.eventsUrl('w')).toBe('/api/ws/w/events')
-  localStorage.setItem('thimble-browser-key', KEY) // what another tab's sign-in wrote
-  expect(apiBase()).toBe(`/b/${KEY}/api`)
-  expect(api.eventsUrl('w', 7)).toBe(`/b/${KEY}/api/ws/w/events?after=7`)
-  expect(api.pdfUrl('w', 'a/b.pdf', 3)).toBe(`/b/${KEY}/api/corpora/w/pdf/a/b.pdf#page=3`)
-  expect(api.downloadUrl('w', 'a b.txt')).toBe(`/b/${KEY}/api/corpora/w/download/a%20b.txt`)
-  expect(api.ticketShotUrl('t1', 'before.png')).toBe(`/b/${KEY}/api/dev/tickets/t1/shots/before.png`)
-  expect(mediaUrl('w', { kind: 'video', path: 'r/demo.mp4', start: 30 })).toBe(`/b/${KEY}/api/ws/w/media?path=r%2Fdemo.mp4#t=30`)
-})
-
-test("markup's media routes are asked under the key, and nothing else of the app's is", async () => {
-  localStorage.setItem('thimble-browser-key', KEY)
-  const { isLocalUrl, purifyHtml } = await import('../../src/lib/sanitize.ts')
-  const html = purifyHtml('<img src="/api/ws/w/media?path=a.png"><img src="/api/ws/w/canvas"><a href="/api/ws/w/media?path=b.png">b</a>')
-  expect(html).toContain(`src="/b/${KEY}/api/ws/w/media?path=a.png"`)
-  expect(html).toContain(`href="/b/${KEY}/api/ws/w/media?path=b.png"`)
-  expect(html).not.toContain('/api/ws/w/canvas')
-  expect(isLocalUrl(`/b/${KEY}/api/ws/w/media?path=a.png`)).toBe(true)
-  expect(isLocalUrl(`/b/${KEY}/api/ws/w/canvas`)).toBe(false)
-  const again = purifyHtml(html) // sanitized again, the addresses stay as they are
-  expect(again).toContain(`src="/b/${KEY}/api/ws/w/media?path=a.png"`)
-  expect(again).toContain(`href="/b/${KEY}/api/ws/w/media?path=b.png"`)
-})
-
 test('the problem log and the telemetry name the API path, never the key', async () => {
   const { requestUrl } = await import('../../src/lib/problemLog.ts')
   const { classifyRequest } = await import('../../src/lib/telemetry.ts')

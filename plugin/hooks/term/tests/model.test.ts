@@ -1,17 +1,14 @@
-// What thimble-term reads from `thimble state` (hooks/model.ts, hooks/data.ts): a citation's check, a thread's chat as
-// turns, the lists, the cards a call of main's names, main's end token, the command and the scope.
-// `claude plugin test plugin`.
+// What thimble-term reads from `thimble state` (hooks/model.ts, hooks/data.ts): a citation's check against its place (a
+// clock time a value), the cards a call of main's names, the `thimble` command beside the plugin, a label's counts as
+// the routes give them; and where a reply's cited cards stand (lib.ts cardsInline). `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
 import { changed, cliOf, parsePrinted } from '../data'
-import { citations, dateIn, dateSpans, stoppedTurn, valueIn } from '../lib'
+import { cardsInline, citations, valueIn } from '../lib'
 import { showsValue } from '../cite'
-import { signalEnd } from '../signal'
-import { threadState } from '../nav'
 import { labelCard } from '../cell'
-import { agentsOf, aroundLine, cardsOfCall, cellsOf, docsOf, forkDescription, homeOf, jsonLine, labelCountNow, labelIdOf, labelLinkStale, labelOf, labelsOf, namedForks, namedThreads, recordLine, reportOf, resolutionOf, runShown, saysWriter, threadOf, threadRowsOf, verdictOf, withoutEnd, withoutNotes, withoutToldThreads, withoutWriterLines } from '../model'
-import { turnTimes, wrapRows } from '../draw'
-import { AGENTS, CELLS, RESOLVE, STATES, THREAD_T1, THREADS } from './fixtures'
+import { cardsOfCall, labelOf, labelsOf, resolutionOf, runShown, verdictOf } from '../model'
+import { RESOLVE } from './fixtures'
 
 const check = (raw: string) => {
   const c = citations(raw)[0]!
@@ -50,149 +47,6 @@ test("a card cell's citation compares its value with the cell; a citation that s
   expect(verdictOf(citations('[[1|README.md#L3]]')[0]!, null).status).toBe('pending')
 })
 
-test("a thread's chat as turns: its question, its answer's text, its tool calls, answered", () => {
-  const t = threadOf(THREAD_T1.meta as never, THREAD_T1.events as never)
-  expect(t.turns).toEqual([{ q: 'why is events.jsonl so much bigger?', a: 'It holds [[19913|card:a0frame0#records/events.jsonl]] rows, one per event.', state: 'done', tools: 1, partial: 'It holds [[19913|card:a0frame0#records/events.jsonl]] rows, one per event.', cards: [] }])
-  expect(t.label).toBe('What does the export hold per wiki?')
-  expect(t.parent).toBe('')
-  const failed = threadOf({ id: 'x' }, [{ type: 'user', text: 'q' }, { type: 'error', error: 'stopped by the analyst' }])
-  expect(failed.turns[0]).toMatchObject({ state: 'error', a: 'stopped by the analyst' })
-  // main's reply_in_thread is an answer though no `done` follows it (terminal mode)
-  const replied = threadOf({ id: 'y' }, [{ type: 'user', text: 'Is 2994 all of them?' }, { type: 'tool_use', name: 'Bash' }, { type: 'text', delta: 'Yes, for this file.', reply: true }, { type: 'user', text: 'And dorfwiki?' }])
-  expect(replied.turns.map(t => t.state)).toEqual(['done', 'running'])
-  expect(replied.turns[0]!.a).toBe('Yes, for this file.')
-  // a reply after the end that said main's turn ended unanswered: the reply is the answer, the end's words are gone
-  const late = threadOf({ id: 'z' }, [{ type: 'user', text: 'Is 2994 all of them?' }, { type: 'error', message: "Main's turn ended without answering in this thread", kind: 'unanswered' }, { type: 'text', delta: "Yes, I'm sure.", reply: true }])
-  expect(late.turns[0]).toMatchObject({ state: 'done', a: "Yes, I'm sure." })
-  // a thread stopped when Claude Code quit is a stop, not a failure, whatever its words (live check term-fix6, new
-  // quirk 2): no `failed` row in main's chat, `stopped` in the threads panel and home
-  const quit = threadOf({ id: 'q' }, [{ type: 'user', text: 'q' }, { type: 'error', message: 'The Claude Code session ended before this thread finished', kind: 'session-ended' }])
-  expect(quit.turns[0]).toMatchObject({ state: 'error', stopped: true })
-  expect(stoppedTurn(quit.turns[0]!) && signalEnd(quit, 1) === null && threadState(quit).words === 'stopped · 1 question').toBe(true)
-  expect(stoppedTurn(failed.turns[0]!)).toBe(true)
-  const boom = threadOf({ id: 'b' }, [{ type: 'user', text: 'q' }, { type: 'error', message: 'boom', kind: 'failed' }])
-  expect(stoppedTurn(boom.turns[0]!) || signalEnd(boom, 1) !== 'failed').toBe(false)
-})
-
-test("a thread's row says how its latest question stands (`turn`), which the threads panel shows until it reads the thread", () => {
-  const rows = threadRowsOf([{ id: 't9', kind: 'thread', title: 'x', running: false, answers: 1, seen: 1, turn: 'stopped' }])
-  expect(rows[0]!.turn).toBe('stopped')
-})
-
-test("main's `↳ The writer …` line is found and left out; its other lines stay", () => {
-  expect(saysWriter('↳ The writer finished the report; thimble shows it.')).toBe(true)
-  expect(saysWriter('↳ The report writer finished, and thimble shows the report.')).toBe(true)
-  expect(saysWriter('The writer of this page is A.')).toBe(false)
-  expect(saysWriter('↳ thread "Who is the writer?": answered.')).toBe(false)
-  expect(withoutWriterLines('↳ The writer finished the report; thimble shows it.\n\nThe thread is asked.')).toBe('The thread is asked.')
-})
-
-test("a prompt that reports on a subagent run names the agent: Claude Code's hand-back and its task notification; any other prompt none", () => {
-  // as Claude Code 2.1.295 writes them in main's transcript
-  expect(reportOf('Another Claude session sent a message:\n<agent-message from="a4bd4d0fe90cf1a5f">\n[Subagent hand-back] The text below is the final report of a subagent this session delegated to.')).toEqual({ agent: 'a4bd4d0fe90cf1a5f', kind: 'hand-back' })
-  expect(reportOf('<task-notification>\n<task-id>a4bd4d0fe90cf1a5f</task-id>\n<tool-use-id>toolu_01L</tool-use-id>\n<status>completed</status>\n</task-notification>')).toEqual({ agent: 'a4bd4d0fe90cf1a5f', kind: 'notice' })
-  // thimble's watcher wakes main with a notification of no task, and another session's message is no hand-back
-  expect(reportOf('<task-notification>\n<summary>thimble</summary>\n</task-notification>\nthimble browser event: <thimble-event kind="main">')).toBeNull()
-  expect(reportOf('Another Claude session sent a message:\n<agent-message from="s1">\nCan you look at this?')).toBeNull()
-  expect(reportOf('What else is in the export?')).toBeNull()
-})
-
-test("a day and a month in words cite a date written in digits: ISO or month and day, the year when both give one", () => {
-  // live check term-fix6, new quirk 7: `23 June` and `19 June` citing the cells `06-23` and `06-19` were red
-  for (const [d, cell] of [['23 June', '06-23'], ['19 June', '2026-06-19T18:21:02Z'], ['June 23, 2026', '2026-06-23'], ['23rd Jun', '06-23']] as const) expect(valueIn(d, cell)).toBe(true)
-  for (const [d, cell] of [['23 June', '06-24'], ['23 May', '06-23'], ['June 23, 2025', '2026-06-23'], ['23', '06-23']] as const) expect(valueIn(d, cell)).toBe(false)
-  const v = verdictOf(citations('[[23 June|card:c1#day/top]]')[0]!, { ref: 'card:c1#day/top', kind: 'cell', cell_id: 'c1', excerpt: 'day × top = 06-23', meta: { span: { col: 'day', row: 'top', value: '06-23' } } } as never)
-  expect(v.status).toBe('ok')
-})
-
-test("a thread's answer is its first reply: the fork's working words after it are left out, and texts a tool call parts are two paragraphs; the cards it made are its turn's", () => {
-  // the live check's thread (New 4): the answer, a tool call, then a note as the fork made its card, both marked reply
-  const t = threadOf({ id: 'f' }, [
-    { type: 'user', text: 'Is the 3,898 deletions figure supported anywhere in the event log?' },
-    { type: 'tool_use', name: 'Bash' },
-    { type: 'tool_result', summary: 'Exit code 1' },
-    { type: 'text', delta: 'No. The event log has 2 deletions in total. But no file in the corpus records any.', reply: true, by: 'terminal' },
-    { type: 'tool_use', name: 'Bash' },
-    { type: 'text', delta: 'Incidental (a page body length). Making the card.', reply: true, by: 'terminal' },
-    { type: 'tool_use', name: 'mcp__plugin_thimble_thimble__add_card' },
-    { type: 'tool_result', summary: '$ add_card …', cell_id: '9b0f8b3b' },
-    { type: 'tool_use', name: 'mcp__plugin_thimble_thimble__edit_card' },
-    { type: 'tool_result', summary: '$ edit_card …', cell_id: '9b0f8b3b' },
-  ])
-  expect(t.turns[0]!.a).toBe('No. The event log has 2 deletions in total. But no file in the corpus records any.')
-  expect(t.turns[0]!.a).not.toContain('Making the card')
-  expect(t.turns[0]!.state).toBe('done')
-  expect(t.turns[0]!.cards).toEqual(['9b0f8b3b'])
-  // streamed words a tool call parts, before any reply: two paragraphs, never `any.Incidental`
-  const streamed = threadOf({ id: 's' }, [{ type: 'user', text: 'q' }, { type: 'text', delta: 'First part.' }, { type: 'tool_use', name: 'Bash' }, { type: 'text', delta: 'Second part.' }, { type: 'done', result: '' }])
-  expect(streamed.turns[0]!.a).toBe('First part.\n\nSecond part.')
-  // deltas of one message still join as written
-  const deltas = threadOf({ id: 'd' }, [{ type: 'user', text: 'q' }, { type: 'text', delta: 'One ' }, { type: 'text', delta: 'message.' }, { type: 'done', result: '' }])
-  expect(deltas.turns[0]!.a).toBe('One message.')
-})
-
-test("main's own `↳ thread` line is left out for a thread whose row thimble-term drew; a fork and its notice name the thread by its question", () => {
-  const rows = [
-    { id: 't1', title: 'agent-chat:2', fork: 'agent-chat-2', question: 'Is the 3,898 deletions figure supported anywhere in the event log?' },
-    { id: 't2', title: '2,994', fork: '2-994', question: 'How many of the 2,994 dse revisions were made on 18 June?' },
-  ]
-  const told = new Set(['t2'])
-  // by its slug, as main writes it, and by its question in quotation marks; another thread's line stays
-  expect(withoutToldThreads('↳ thread 2-994: answered that 1,422 of them were.', rows, told)).toBe('')
-  expect(withoutToldThreads('↳ thread "How many of the 2,994 dse revisions…": answered.', rows, told)).toBe('')
-  expect(withoutToldThreads('↳ thread agent-chat-2: answered that nothing supports it.', rows, told)).toBe('↳ thread agent-chat-2: answered that nothing supports it.')
-  expect(withoutToldThreads('The card is above.\n\n↳ thread 2-994: answered.\n\nMore.', rows, told)).toBe('The card is above.\n\nMore.')
-  expect(withoutToldThreads('↳ thread 2-994: answered.', rows, new Set())).toBe('↳ thread 2-994: answered.')
-  // the Agent call's description and the notice that its fork finished
-  expect(namedForks('thread:agent-chat-2', rows)).toBe('thread "Is the 3,898 deletions figure supported…"')
-  expect(namedForks('Agent "thread:2-994" finished', rows)).toBe('Agent thread "How many of the 2,994 dse revisions…" finished')
-  expect(namedForks('thread:unknown-one', rows)).toBe('thread:unknown-one')
-  expect(namedForks('writer: report', rows)).toBe('writer: report')
-})
-
-test("main's `↳ thread <slug>:` line names the thread by its first question", () => {
-  const rows = [{ id: 't1', title: 'nearly-all-revisions-are', fork: 'nearly-all-revisions-are', question: 'Is 2994 all of the [[dse|card:a#x/y]] revisions in this file, and how sure is it?' }]
-  expect(namedThreads('↳ thread nearly-all-revisions-are: confirmed 2994 is every dse record.', rows)).toBe('↳ thread "Is 2994 all of the dse revisions in…": confirmed 2994 is every dse record.')
-  expect(namedThreads('↳ thread other-one: done.', rows)).toBe('↳ thread other-one: done.')
-  expect(namedThreads('No thread here.', rows)).toBe('No thread here.')
-})
-
-test("a turn's words in up to three rows, the last cut; a transcript's times as the clock, the day where it changes", () => {
-  expect(wrapRows('one two three', 20, 3)).toEqual(['one two three'])
-  const rows = wrapRows('alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu', 12, 3)
-  expect(rows.length).toBe(3)
-  expect(rows.slice(0, 2)).toEqual(['alpha beta', 'gamma delta'])
-  expect(rows[2]).toBe('epsilon…')
-  expect(rows.every(r => r.length <= 12)).toBe(true)
-  expect(wrapRows('x'.repeat(30), 12, 3)).toEqual(['x'.repeat(12), 'x'.repeat(12), 'x'.repeat(6)])
-  expect(wrapRows('x'.repeat(40), 12, 3)).toEqual(['x'.repeat(12), 'x'.repeat(12), `${'x'.repeat(11)}…`])
-  expect(turnTimes(['2026-06-18T07:40:01Z', '2026-06-18T07:41:00Z', '2026-06-19T09:00:00Z'])).toEqual([
-    { clock: '07:40:01', day: 'Jun 18, 2026' },
-    { clock: '07:41:00', day: '' },
-    { clock: '09:00:00', day: 'Jun 19, 2026' },
-  ])
-  expect(turnTimes(['10:00', '10:01'])).toEqual([{ clock: '10:00', day: '' }, { clock: '10:01', day: '' }])
-  expect(turnTimes(['2026-06-18T07:40:00Z', ''])).toEqual([{ clock: '07:40', day: 'Jun 18, 2026' }, { clock: '', day: '' }])
-})
-
-test('the threads list keeps side threads, each with its answers and those not read', () => {
-  const rows = threadRowsOf(THREADS)
-  expect(rows.map(r => r.id)).toEqual(['t1', 't2'])
-  expect(rows[0]).toMatchObject({ answers: 1, seen: 0, unread: 1, running: false, anchor: 'card:ff73e071' })
-  expect(rows[1]).toMatchObject({ running: true, unread: 0 })
-  expect(threadRowsOf([{ id: 'a', kind: 'thread', unread: true }])[0]!.unread).toBe(1)
-})
-
-test('the agents, the counts, the documents and the cells, from their routes', () => {
-  expect(agentsOf(AGENTS)).toEqual([{ name: 'thimble:orientation', label: 'orientation: the whole corpus', state: 'working', kind: 'subagent', chat: 'o1', role: 'orientation', started: '' }])
-  expect(homeOf(STATES.home)).toMatchObject({ cards: 12, labels: 1, docs: 1, threads: 2, files: 4 })
-  expect(homeOf({ counts: { cards: [1, 2], labels: 0 } })).toMatchObject({ cards: 2, labels: 0 })
-  expect(docsOf(STATES.docs)).toEqual([{ slug: 'report', title: 'Agents used the dse wiki as a relay', renderer: 'document', status: 'written', generation: 0, at: '' }])
-  expect(cellsOf(STATES.cards).length).toBe(Object.keys(CELLS).length)
-  expect(cellsOf([{ id: 'a' }, { nope: 1 }]).length).toBe(1)
-  expect(labelIdOf(CELLS.l0label0 as never)).toBe('d9b51617')
-})
-
 test('the cards a call of main names: add_card, edit_card, apply_label, and a card run in Bash', () => {
   const add = 'mcp__plugin_thimble_thimble__add_card'
   expect(cardsOfCall(add, { question: 'q' }, 'card:8c2264f4, your last card, still has no takeaway.\n\ncard:69d6b48a\n[out0: ...]')).toEqual(['69d6b48a'])
@@ -228,12 +82,6 @@ test('the cards a call of main names: add_card, edit_card, apply_label, and a ca
   expect(cardsOfCall('mcp__plugin_thimble_thimble__read_ref', {}, 'card:69d6b48a')).toEqual([])
 })
 
-test("main's end token is never shown", () => {
-  expect(withoutEnd('(shown in the dashboard)')).toBe('')
-  expect(withoutEnd('Done. **(shown in the dashboard).**')).toBe('Done.')
-  expect(withoutEnd('The dashboard shows it.')).toBe('The dashboard shows it.')
-})
-
 test('the thimble command beside the plugin, what a run printed, what changed', () => {
   expect(cliOf('/home/a/.thimble/app/plugin', undefined)).toBe('/home/a/.thimble/app/plugin/bin/thimble')
   expect(cliOf('/repo/plugin/.claude-plugin', undefined)).toBe('/repo/plugin/bin/thimble')
@@ -263,69 +111,6 @@ test("a label's counts as the concept routes give them, beside its fields, reach
   expect(labelOf({ id: 'k2', label_stats: { counts: { a: 1 } }, counts: { a: 9 } })!.label_stats).toEqual({ counts: { a: 1 } })
 })
 
-test("a JSON line's citation: the records around it one line each, as Raw draws them, and only the cited record over its rows", () => {
-  const pretty = (r: Record<string, unknown>) => JSON.stringify(r, null, 2)
-  const rec = (line: number, r: Record<string, unknown>) => ({ line, record: r, blocks: [{ text: pretty(r) }] })
-  const chat = (i: number) => ({ speaker: 'reviewer', time: `08:0${i}`, text: `line ${i} says "hi"`, n: [i, i + 1] })
-  const res = { kind: 'record', path: 'agent-chat.jsonl', line: 4, record: chat(4), blocks: [{ text: pretty(chat(4)) }], context: { before: [1, 2, 3].map(i => rec(i, chat(i))), after: [5, 6, 7].map(i => rec(i, chat(i))) } }
-  const v = verdictOf(citations('[[08:04|agent-chat.jsonl#L4]]')[0]!, res as never)
-  const around = v.lines.filter(l => !l.hit)
-  expect(around.map(l => l.n)).toEqual([1, 2, 3, 5, 6, 7])
-  expect(around[0]!.text).toBe('{"speaker": "reviewer", "time": "08:01", "text": "line 1 says \\"hi\\"", "n": [1, 2]}')
-  // the cited record over its rows, its first row numbered
-  const hit = v.lines.filter(l => l.hit)
-  expect(hit.length).toBe(pretty(chat(4)).split('\n').length)
-  expect(hit[0]!.n).toBe(4)
-  expect(v.lines.findIndex(l => l.hit)).toBe(3)
-  // a text line around it is its words; a line that is no JSON its raw words
-  expect(recordLine({ line: 1, record: { text: 'plain words' } })).toBe('plain words')
-  expect(recordLine({ line: 1, record: { _raw: '{not json' } })).toBe('{not json')
-  expect(jsonLine({ a: [1, { b: null }], c: 'x' })).toBe('{"a": [1, {"b": null}], "c": "x"}')
-})
-
-test("a citation's lines around the cited one are drawn as the cited one is: a transcript's words beside its words, JSON beside JSON", () => {
-  // live check term-fix10, low quirk: the cited line of agent-chat.jsonl read as its words, the lines around it as JSON
-  const said = (i: number) => ({ speaker: 'beta', ts: `2026-06-2${i}T09:00:00Z`, text: `message ${i} of the chat` })
-  const rec = (line: number, r: Record<string, unknown>) => ({ line, record: r, blocks: [{ kind: 'text', text: String(r.text) }] })
-  const res = { kind: 'span', path: 'agent-chat.jsonl', line: 4, record: said(4), blocks: [{ kind: 'text', text: said(4).text }], excerpt: 'message 4', context: { before: [2, 3].map(i => rec(i, said(i))), after: [5, 6].map(i => rec(i, said(i))) } }
-  const v = verdictOf(citations('[[agent-chat.jsonl#L4.b0:c0-9]]')[0]!, res as never)
-  expect(v.lines.map(l => l.text)).toEqual(['message 2 of the chat', 'message 3 of the chat', 'message 4 of the chat', 'message 5 of the chat', 'message 6 of the chat'])
-  expect(v.lines.map(l => l.hit)).toEqual([false, false, true, false, false])
-  // a record thimble reads no words in (its one block the record itself) stays its line of JSON
-  expect(aroundLine({ line: 1, record: { a: 1 }, blocks: [{ kind: 'raw', text: '{\n  "a": 1\n}' }] })).toBe('{"a": 1}')
-  // words over several rows read on one
-  expect(aroundLine({ line: 1, record: {}, blocks: [{ kind: 'text', text: 'one\ntwo' }, { kind: 'tool_use', text: 'Bash ls' }] })).toBe('one two Bash ls')
-})
-
-test("main's fork of a thread runs with the thread's question as its description; its prompt keeps `thread:<name>`", () => {
-  const rows = [{ id: 't1', title: 'raises the 3,898 count', fork: 'who-wrote-line-2', question: 'Who wrote line 2 of agent-chat.jsonl, and at what time? One sentence.' }]
-  expect(forkDescription({ subagent_type: 'fork', name: 'who-wrote-line-2', description: 'thread:who-wrote-line-2', prompt: 'thread:who-wrote-line-2' }, rows)).toBe('thread: Who wrote line 2 of agent-chat.jsonl…')
-  // not a fork, a thread not listed, or a prompt that does not name the fork: as main wrote it
-  expect(forkDescription({ subagent_type: 'general-purpose', description: 'thread:who-wrote-line-2', prompt: 'thread:who-wrote-line-2' }, rows)).toBeNull()
-  expect(forkDescription({ subagent_type: 'fork', description: 'thread:other', prompt: 'thread:other' }, rows)).toBeNull()
-  expect(forkDescription({ subagent_type: 'fork', description: 'thread:who-wrote-line-2', prompt: 'answer the thread' }, rows)).toBeNull()
-})
-
-test("a thread about a whole answer is told the answer without main's own `↳` lines", () => {
-  expect(withoutNotes('↳ The writer finished. You can read the report in thimble.\n\nThe page with the most revisions is A.')).toBe('The page with the most revisions is A.')
-})
-
-test("a day and a month with a time cite the time stamp that writes both; such a date is a value a citation shows", () => {
-  // live check term-fix7, new quirk 1: `4 June 2026 at 10:53:40 UTC` against 2026-06-04T10:53:40Z was not found
-  const stamp = '{"ts": "2026-06-04T10:53:40Z", "text": "Deleted TestFoobaAgent."}'
-  for (const d of ['4 June 2026 at 10:53:40 UTC', '4 June at 10:53', 'June 4, 2026, 10:53 UTC']) expect(dateIn(d, stamp)).toBe(true)
-  for (const d of ['4 June 2026 at 10:53:41 UTC', '4 June 2026 at 11:53 UTC', '5 June 2026 at 10:53:40 UTC']) expect(dateIn(d, stamp)).toBe(false)
-  expect(valueIn('4 June 2026 at 10:53:40 UTC', stamp)).toBe(true)
-  // the date marked where the line writes it
-  expect(dateSpans('4 June 2026 at 10:53:40 UTC', stamp)).toEqual([[8, 28]])
-  // live check term-fix7, new quirk 3: a date in words is a value, so main's replies check it (verdictOf)
-  for (const d of ['23 June', '4 June 2026 at 10:53 UTC', 'June 23']) expect(showsValue(d)).toBe(true)
-  expect(showsValue('its revisions')).toBe(false)
-  const v = verdictOf(citations('[[24 June|card:c1#day/06-23]]')[0]!, { ref: 'card:c1#day/06-23', kind: 'cell', cell_id: 'c1', excerpt: 'day × 06-23 = 06-23', meta: { span: { col: 'day', row: '06-23', value: '06-23' } } } as never)
-  expect(v.status).toBe('differs')
-  expect(v.why).toBe('the place shows 06-23')
-})
-
 test("a clock time is a value a citation shows: found where the line writes that time, red where it writes another (MATT-NOTES \"Mockup feedback\")", () => {
   // `14:52:11` read "its value is not checked, and a script got the same number" in its tip and "only its place is
   // checked" in its panel: a time is a value, checked at its place as a number is
@@ -343,15 +128,7 @@ test("a clock time is a value a citation shows: found where the line writes that
   expect(verdictOf(citations('[[14:58|events.jsonl#L197]]')[0]!, res as never).status).toBe('differs')
 })
 
-test("a link to a label says when the label counts another number now: the count with the verdicts", () => {
-  const label = { id: 'k1', labels: ['yes', 'no'], label_stats: { n_labeled: 4579, counts: { yes: 180, no: 4399 } }, verdicts: { counts: { yes: 179, no: 4400 }, set: 1 } } as never
-  expect(labelCountNow(label, 'yes')).toBe(179)
-  expect(labelCountNow(label, '')).toBe(4579)
-  expect(labelCountNow(label, 'maybe')).toBeNull()
-  expect(labelLinkStale('180', label, 'yes')).toBe('the label counts 179 now, with your verdicts')
-  expect(labelLinkStale('4,400', label, 'no')).toBe('')
-  expect(labelLinkStale('4,579', label, '')).toBe('')
-  // words, or a label it does not know, say nothing
-  expect(labelLinkStale('most', label, 'yes')).toBe('')
-  expect(labelLinkStale('3', null, 'yes')).toBe('')
+test('a card cited by a chip alone stands after the paragraph that cites it, its chip taken out of the sentence', () => {
+  const md = 'Yes. The transcripts are under 1 MB [[card:a1b2c3d4]].\nThe logs are the rest.\n\nThat is all.'
+  expect(cardsInline(md)).toBe('Yes. The transcripts are under 1 MB.\nThe logs are the rest.\n\n[[card:a1b2c3d4]]\n\nThat is all.')
 })

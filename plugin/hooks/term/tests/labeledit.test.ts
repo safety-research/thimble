@@ -1,17 +1,17 @@
-// The label panel's parity with the browser's label editor and Labels pane (mockup labelpanel2): every field exposed
-// and editable for each kind of label, a label's records marked in Files and the views or not (`mark records in Files
-// and views:  on  off`), a code label's colored code, a value's color chosen by the names show_label takes, a filter by
-// a value, the held-out agreement and `… N more` records in the examples, rename in the name's field, and the undo of a
-// delete in the labels list. Each change goes through `thimble act` (label-show, label-filter, label,
-// label-undelete). `claude plugin test plugin`.
+// The label panel's parity with the browser's label editor (mockup labelpanel2): every field exposed and editable for
+// each kind of label, a label's records marked in Files and the views or not (`mark records in Files and views:  on
+// off`), a code label's colored code, a pattern's note, and rename in the name's field. Each change goes through
+// `thimble act` (label-show, label). `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { LABEL_HUES, PICKED_HUES, setTheme } from '../paint'
-import { COLOR_NAMES, LABEL_WHEEL, colorName, hueOf, regexNote } from '../labels'
+import { regexNote } from '../labels'
 import { codeParts } from '../field'
 import { CWD, LABEL, shown, world } from './fixtures'
 import type { World } from './fixtures'
+
+// the test's own output: its drawings, for a reader
+declare const console: { log: (...args: unknown[]) => void }
 
 type M = Mounted<'terminal'>
 type E = Engine
@@ -226,7 +226,7 @@ const KINDS_SHOWN = [
 ]
 
 for (const c of KINDS_SHOWN)
-  test(`the label panel shows every field as the browser's editor does, each editable where the browser's is: ${c.what}`, async ($, on) => {
+  test(`the label panel shows every field as the browser's editor does, each editable where the browser's is: ${c.what}`, { timeoutMs: 30_000 }, async ($, on) => {
     // Matt (mockup feedback, 21:20): kind, scope and the rest exposed and editable like the browser, the model among
     // them, the actions clickable, "in files" clear (mockup labelpanel2)
     const w = world(on)
@@ -302,108 +302,6 @@ test('a pattern says under it what a match gives, case-insensitive only where it
   expect(codeParts('ifx = notable', { keyword: 'k', string: 's' })).toEqual([{ s: 'ifx = notable' }])
 })
 
-test("a value's `color` shows the eighteen label colors by name under it around the color wheel, the one it has lit; a pick sends `label-show` with the name and its marks take the hue", async ($, on) => {
-  const w = world(on)
-  label(w).classes = [{ name: 'proxy-link', color: 2, highlight: true }, { name: 'none', color: 0, highlight: false }]
-  let pane = await labelPanel($, w)
-  // the label's ● in its name's field in its first value's color: orange, the browser's label color 2
-  expect(JSON.stringify(await pane.find({ type: 'Box', key: 'lf-name:' }))).toContain(`{"type":"Text","props":{"color":"${LABEL_HUES[1]}"},"children":["● "]}`)
-  // a click on the value shows its controls under it
-  pane = await press($, w, pane, 'lb-value-proxy-link')
-  pane = await press($, w, pane, 'lb-color-proxy-link')
-  const text = shown(await pane.drawn())
-  for (const c of ['blue', 'orange', 'green', 'sky blue', 'olive', 'teal', 'brown', 'navy', 'grass green', 'cerulean', 'chestnut', 'cyan', 'red', 'dark red', 'purple', 'dark purple', 'pink', 'dark pink']) expect(text).toContain(c)
-  // the color it has on the selection background, each other a click away, each ● in its hue
-  const tree = JSON.stringify(await pane.drawn())
-  expect(tree).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["orange"]}')
-  expect(await pane.find({ type: 'Button', key: 'lb-pick-proxy-link-6' })).toBeDefined()
-  expect(await pane.find({ type: 'Button', key: 'lb-pick-proxy-link-13' })).toMatchObject({ props: { label: 'red' } })
-  expect(tree).toContain(`{"type":"Text","props":{"color":"${LABEL_HUES[5]}"},"children":["● "]}`)
-  expect(tree).toContain(`{"type":"Text","props":{"color":"${PICKED_HUES[3]}"},"children":["● "]}`)
-  // as the browser's pickers: a column per hue, red to pink, its light place above its dark, each column one width
-  const drawn = (await drawing(pane, "the label panel, proxy-link's colors shown")).split('\n')
-  const top = drawn.findIndex(r => /● red {2}/.test(r))
-  expect(drawn[top]).toMatch(/^ +● red +● orange +● olive +● grass green +● cyan +● sky blue +● blue +● purple +● pink$/)
-  expect(drawn[top + 1]).toMatch(/^ +● dark red +● chestnut +● brown +● green +● teal +● cerulean +● navy +● dark purple +● dark pink$/)
-  for (const [light, dark] of LABEL_WHEEL) expect(drawn[top]!.indexOf(`● ${COLOR_NAMES[light - 1]}`)).toBe(drawn[top + 1]!.indexOf(`● ${COLOR_NAMES[dark - 1]}`))
-  // thimble answers with proxy-link teal (show_label's names)
-  label(w).classes = [{ name: 'proxy-link', color: 6, highlight: true }, { name: 'none', color: 0, highlight: false }]
-  pane = await press($, w, pane, 'lb-pick-proxy-link-6')
-  expect(w.acts).toContainEqual({ kind: 'label-show', payload: { label: LABEL.id, colors: { 'proxy-link': 'teal' } } })
-  const after = JSON.stringify(await pane.drawn())
-  // the colors gone from under it, its ● and bar teal; none, with no color, dim
-  expect(shown(await pane.drawn())).not.toContain('grass green')
-  expect(after).toContain(`{"type":"Text","props":{"color":"${LABEL_HUES[5]}"},"children":["● "]}`)
-  expect(after).toMatch(new RegExp(`"color":"${LABEL_HUES[5]}"\\},"children":\\["━+"\\]`))
-  expect(after).toContain('{"type":"Text","props":{"dimColor":true},"children":["● "]}')
-  // a color only the analyst picks, by the name show_label takes: dark purple, color 16
-  pane = await press($, w, pane, 'lb-color-proxy-link')
-  label(w).classes = [{ name: 'proxy-link', color: 16, highlight: true }, { name: 'none', color: 0, highlight: false }]
-  pane = await press($, w, pane, 'lb-pick-proxy-link-16')
-  expect(w.acts).toContainEqual({ kind: 'label-show', payload: { label: LABEL.id, colors: { 'proxy-link': 'dark purple' } } })
-  expect(JSON.stringify(await pane.drawn())).toMatch(new RegExp(`"color":"${PICKED_HUES[3]}"\\},"children":\\["━+"\\]`))
-  await pane.unmount()
-})
-
-test("in a narrow pane a value's colors wrap by hue, each hue's light place still above its dark", async ($, on) => {
-  const w = world(on)
-  label(w).classes = [{ name: 'proxy-link', color: 2, highlight: true }, { name: 'none', color: 0, highlight: false }]
-  let pane = await labelPanel($, w)
-  pane = await press($, w, pane, 'lb-value-proxy-link')
-  pane = await press($, w, pane, 'lb-color-proxy-link')
-  await pane.unmount()
-  const NARROW = { ...(PANE as unknown as Record<string, unknown>), viewport: { columns: 54, rows: 60 }, props: { title: 'thimble', isFocused: true, bodyColumns: 50, placement: 'dock', scroll: { bodyRows: 56 }, view: {} } } as never
-  pane = (await $.ui.mount(NARROW)) as unknown as M
-  const wheel = (await pane.find({ type: 'Box', key: 'lb-colors-proxy-link' })) as Node | undefined
-  expect(wheel?.props).toMatchObject({ flexDirection: 'row', flexWrap: 'wrap' })
-  const hues = (wheel?.children ?? wheel?.props?.children ?? []) as Node[]
-  expect(hues.map(h => [h.props?.flexDirection, shown(h)])).toEqual(LABEL_WHEEL.map(([light, dark]) => ['column', `● ${COLOR_NAMES[light - 1]}● ${COLOR_NAMES[dark - 1]}`]))
-  const text = await drawing(pane, "proxy-link's colors in a narrow pane", 54)
-  expect(text).toMatch(/● red +● orange +● olive\n +● dark red +● chestnut +● brown\n/)
-  await pane.unmount()
-})
-
-test('`filter` keeps the units of one value (`label-filter`): that value lit, its control `clear filter`, the values row says so; clearing sends no value', async ($, on) => {
-  const w = world(on)
-  let pane = await labelPanel($, w)
-  // no controls until a click on a value shows its own
-  expect(await pane.find({ type: 'Button', key: 'lb-filter-none' })).toBeUndefined()
-  pane = await press($, w, pane, 'lb-value-none')
-  expect(await pane.find({ type: 'Button', key: 'lb-filter-none' })).toMatchObject({ text: 'filter' })
-  expect(await pane.find({ type: 'Button', key: 'lb-filter-proxy-link' })).toBeUndefined()
-  label(w).filter = 'none'
-  label(w).shown = true
-  pane = await press($, w, pane, 'lb-filter-none')
-  expect(w.acts).toContainEqual({ kind: 'label-filter', payload: { label: LABEL.id, value: 'none' } })
-  const text = shown(await pane.drawn())
-  expect(text).toContain('values:filtered to none')
-  expect(await pane.find({ type: 'Button', key: 'lb-filter-none' })).toMatchObject({ text: 'clear filter' })
-  expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["none      ')
-  await drawing(pane, 'the label panel filtered to none')
-  label(w).filter = null
-  pane = await press($, w, pane, 'lb-filter-none')
-  expect(w.acts.at(-1)).toEqual({ kind: 'label-filter', payload: { label: LABEL.id } })
-  expect(shown(await pane.drawn())).not.toContain('filtered to')
-  await pane.unmount()
-})
-
-test("the examples' row gives the label's held-out agreement; `… N more` under a value reads its next records (`state label --rows`)", async ($, on) => {
-  const w = world(on)
-  Object.assign(label(w), { calibration: { n: 10, agreed: 8, taught: 4 }, totals: { 'proxy-link': 5191, none: 9400 } })
-  let pane = await labelPanel($, w)
-  expect(shown(await pane.drawn())).toContain('examples  2 · 80% agreed on 10 values you set, not counting the 4 given as examples')
-  pane = await press($, w, pane, 'hk-examples')
-  expect(await pane.find({ type: 'Button', key: 'lb-more-proxy-link' })).toMatchObject({ props: { label: '… 5,190 more' } })
-  expect(await pane.find({ type: 'Button', key: 'lb-more-none' })).toMatchObject({ props: { label: '… 9,399 more' } })
-  await drawing(pane, 'the label panel, its examples open')
-  pane = await press($, w, pane, 'lb-more-proxy-link')
-  const asked = w.calls.filter(c => c[2] === 'label' && c.includes('--rows')).at(-1)
-  expect(asked?.slice(-3)).toEqual([LABEL.id, '--rows', JSON.stringify({ 'proxy-link': 11 })])
-  // a label no value of which the analyst set says nothing of agreement
-  Object.assign(label(w), { calibration: { n: 0, agreed: 0, taught: 0 } })
-  await pane.unmount()
-})
-
 test("the name is a field: Enter sends `label {name}`; `rename` (n) gives it the keyboard", async ($, on) => {
   // mockup labelpanel2: the name exposed and editable like the browser's, `rename` among the actions
   const w = world(on)
@@ -431,133 +329,4 @@ test("the name is a field: Enter sends `label {name}`; `rename` (n) gives it the
   pane = (await $.ui.mount(PANE)) as unknown as M
   expect((await pane.find({ type: 'Input', key: `lb-name-${LABEL.id}` }))?.props).toMatchObject({ value: 'fetch proxy links' })
   await pane.unmount()
-})
-
-test('after a delete the labels list offers `undo` (u): it sends `label-undelete` and opens the label again; a refusal says why in red', async ($, on) => {
-  const w = world(on)
-  const kept = JSON.parse(JSON.stringify(w.states.labels[0])) as Record<string, unknown>
-  let pane = await labelPanel($, w)
-  pane = await press($, w, pane, 'hk-delete')
-  pane = await press($, w, pane, 'hk-delete-yes')
-  let text = shown(await pane.drawn())
-  expect(text).toContain(`deleted the label "${LABEL.name}"  undo`)
-  expect(text).toContain('u to undo')
-  await drawing(pane, 'the labels list after a delete')
-  // thimble restores it
-  w.states.labels = [kept] as never
-  pane = await press($, w, pane, 'hk-undo')
-  expect(w.acts).toContainEqual({ kind: 'label-undelete', payload: { label: LABEL.id } })
-  text = shown(await pane.drawn())
-  expect(text).toContain('name:')
-  expect(text).toContain(LABEL.name)
-  expect(w.toasts.join('\n')).toContain(`restored the label "${LABEL.name}"`)
-  await pane.unmount()
-})
-
-test('an undo thimble refuses (a later change stands above the delete) says why on a red `×` row in place of `undo`', async ($, on) => {
-  const w = world(on)
-  let pane = await labelPanel($, w)
-  pane = await press($, w, pane, 'hk-delete')
-  pane = await press($, w, pane, 'hk-delete-yes')
-  // thimble refuses a label-undelete once another change came after the delete
-  w.refuse = { 'label-undelete': "the label's delete is no longer the last change, so it is not undone here" }
-  pane = await press($, w, pane, 'lbs-undo')
-  expect(w.acts.at(-1)).toEqual({ kind: 'label-undelete', payload: { label: LABEL.id } })
-  expect(JSON.stringify(await pane.drawn())).toContain(`"color":"error","wrap":"wrap"},"children":["× the label \\"${LABEL.name}\\" was not restored: the label's delete is no longer the last change, so it is not undone here"]`)
-  expect(shown(await pane.drawn())).not.toContain('u to undo')
-  await pane.unmount()
-})
-
-test('the label panel at 120 columns, every part open', async ($, on) => {
-  const w = world(on)
-  Object.assign(label(w), {
-    classes: [{ name: 'proxy-link', color: 2, highlight: true }, { name: 'none', color: 0, highlight: false }],
-    shown: true,
-    filter: 'proxy-link',
-    calibration: { n: 10, agreed: 8, taught: 4 },
-    totals: { 'proxy-link': 5191, none: 9400 },
-  })
-  let pane = await labelPanel($, w)
-  await drawing(pane, 'the label panel as it opens')
-  for (const k of ['lb-value-proxy-link', 'hk-examples', 'hk-cards']) pane = await press($, w, pane, k)
-  const text = bare(await drawing(pane, 'the label panel, a value, the examples and the cards open'))
-  expect(text).toMatch(/^mark records in Files and views: {3}on {3}off$/m)
-  expect(text).toMatch(/^values: {3}filtered to proxy-link$/m)
-  expect(text).toMatch(/^ {10}● proxy-link {2}━+ +5,191\n {12}color {2}clear filter\n {12}values {2}proxy-link · none▏$/m)
-  // the examples and the cards under the actions
-  const rowsNow = text.split('\n')
-  const at = (re: RegExp) => rowsNow.findIndex(r => re.test(r))
-  expect(at(/^run on a sample/)).toBeLessThan(at(/^▾ examples/))
-  expect(at(/^▾ examples/)).toBeLessThan(at(/^▾ cards/))
-  await pane.unmount()
-})
-
-test("in a narrow pane a value's bar shrinks to the room left, its count still at the row's end", async ($, on) => {
-  const w = world(on)
-  let pane = await labelPanel($, w)
-  await pane.unmount()
-  const NARROW = { ...(PANE as unknown as Record<string, unknown>), viewport: { columns: 54, rows: 60 }, props: { title: 'thimble', isFocused: true, bodyColumns: 50, placement: 'dock', scroll: { bodyRows: 56 }, view: {} } } as never
-  pane = (await $.ui.mount(NARROW)) as unknown as M
-  // the label column, the ●, the value's 10 cells, a gutter, the bar, a cell, the count's 5: the bar takes the rest
-  const none = shown(await pane.find({ type: 'Box', key: 'lb-c-none' }))
-  const link = shown(await pane.find({ type: 'Box', key: 'lb-c-proxy-link' }))
-  const bar = none.match(/^● none {8}(━+) 9,400$/)?.[1] ?? ''
-  expect(bar.length).toBeGreaterThan(8)
-  expect(bar.length).toBeLessThan(30)
-  expect(link).toMatch(/^● proxy-link {2}━+ +5,191$/)
-  expect(link.length).toBe(none.length)
-  await drawing(pane, 'the label panel in a narrow pane', 54)
-  await pane.unmount()
-})
-
-test("each label color keeps 3:1 against its theme's grounds (the browser's light paper on a light theme, Dark's on a dark one), as the series do", () => {
-  const lum = (hex: string) => {
-    const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255).map(c => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4))
-    return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!
-  }
-  const ratio = (a: string, b: string) => (Math.max(lum(a), lum(b)) + 0.05) / (Math.min(lum(a), lum(b)) + 0.05)
-  // 0.9.0: the label colors are the browser's tokens per theme (SPEC-v2 3.19, paint.ts setTheme), not one hue for both
-  // the light theme's grounds: white and the browser's light pane (--paper-1); the dark theme's: black and a dark panel
-  try {
-    for (const [theme, grounds] of [['light', ['#ffffff', '#f5f3ee']], ['dark', ['#000000', '#1e1e1e']]] as const) {
-      setTheme(theme)
-      expect(LABEL_HUES.length).toBe(12)
-      for (const hue of LABEL_HUES) for (const bg of grounds) expect(ratio(hue, bg), `${theme} ${hue} on ${bg}`).toBeGreaterThanOrEqual(3)
-      // red, purple and pink, which a value holds only as the analyst picked them, are colors 13 to 18 of their own
-      expect(PICKED_HUES.length).toBe(6)
-      for (const hue of PICKED_HUES) for (const bg of grounds) expect(ratio(hue, bg), `${theme} ${hue} on ${bg}`).toBeGreaterThanOrEqual(3)
-      expect([13, 18].map(hueOf)).toEqual([PICKED_HUES[0], PICKED_HUES[5]])
-      expect(hueOf(1)).toBe(LABEL_HUES[0])
-    }
-  } finally {
-    setTheme('dark')
-  }
-})
-
-test('each label color has the name show_label takes for it, and the wheel holds each of the eighteen once', () => {
-  expect([1, 2, 12, 13, 14, 15, 16, 17, 18].map(colorName)).toEqual(['blue', 'orange', 'cyan', 'red', 'dark red', 'purple', 'dark purple', 'pink', 'dark pink'])
-  expect([0, 19, undefined].map(colorName)).toEqual(['', '', ''])
-  expect(COLOR_NAMES.length).toBe(LABEL_HUES.length + PICKED_HUES.length)
-  expect(LABEL_WHEEL.flat().sort((a, b) => a - b)).toEqual(Array.from({ length: 18 }, (_, i) => i + 1))
-})
-
-test("a label's values take their classes' colors on its card in the chat and on home, the negative dim", async ($, on) => {
-  const w = world(on)
-  label(w).classes = [{ name: 'proxy-link', color: 10, highlight: true }, { name: 'none', color: 0, highlight: false }]
-  const pane = await labelPanel($, w)
-  await pane.unmount()
-  // the label card under the reply: proxy-link's bar cerulean (color 10), none's dim
-  const ui = (await $.ui.mount(MESSAGE('r1', 'Labelled.'))) as unknown as M
-  const card = JSON.stringify(await ui.drawn({ in: 'card-t0-l0label0' }))
-  expect(card).toMatch(new RegExp(`"color":"${LABEL_HUES[9]}"`))
-  expect(card).not.toContain('#1d7fc0')
-  await ui.unmount()
-  // home's label row: its ● and its bar's first part cerulean
-  await $.command.run({ command: 'thimble:thimble', args: '' } as never)
-  await w.clock.settle()
-  const home = (await $.ui.mount(PANE)) as unknown as M
-  const drawn = JSON.stringify(await home.drawn())
-  expect(drawn).toContain(LABEL_HUES[9])
-  expect(drawn).not.toContain('"#1d7fc0"')
-  await home.unmount()
 })

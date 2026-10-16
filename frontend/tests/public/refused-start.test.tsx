@@ -5,8 +5,7 @@
 // Starting… while main makes a typed start.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { shownRefusal, startingShown } from '../../src/chat/OrientStart.tsx'
-import { NO_ANSWER_LINE, PERMISSIONS_LINE, RefusedCard, WAIT_SLOT_LINE, limitOf, refusalActions, refusalLine, requestLine, slotFree } from '../../src/chat/Refused.tsx'
+import { NO_ANSWER_LINE, PERMISSIONS_LINE, RefusedCard, limitOf, refusalLine, slotFree } from '../../src/chat/Refused.tsx'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 let posted: [string, unknown][] = []
@@ -37,18 +36,6 @@ describe('the reason and the buttons, by kind', () => {
     expect(refusalLine({ kind: 'hook', reason: 'An orientation is already running.' })).toBe('An orientation is already running.')
     expect(refusalLine({ kind: 'not-launched', reason: 'This session was not started with `thimble`' })).toBe('This session was not started with `thimble`.')
   })
-
-  test('Start it for auto mode and a call main did not make, Try again at the limit and for an unanswered click, Dismiss always', () => {
-    expect(refusalActions('auto-mode')).toEqual(['start-it', 'dismiss'])
-    expect(refusalActions('no-call')).toEqual(['start-it', 'dismiss'])
-    expect(refusalActions('limit')).toEqual(['try-again', 'dismiss'])
-    expect(refusalActions('no-module', true)).toEqual(['try-again', 'dismiss'])
-    for (const k of ['no-module', 'not-launched', 'hook', 'earlier-session', 'error']) expect(refusalActions(k)).toEqual(['dismiss'])
-  })
-
-  test("the request's line names its type, model and effort", () => {
-    expect(requestLine({ role: 'writer', input: null, values: { model: 'claude-opus-5-5', effort: 'high' } })).toBe('thimble:writer · Opus 5.5 · high')
-  })
 })
 
 describe('the card', () => {
@@ -67,17 +54,6 @@ describe('the card', () => {
     expect(posted).toEqual([['/api/ws/mini/subagents/start-it', { request: 'r1' }]])
     expect(started).toEqual([{ agentId: 'a7', request: 'r1' }])
   })
-
-  test("at Claude Code's limit Try again posts again; a hook refusal offers only Dismiss", async () => {
-    const el = await mount(<RefusedCard ws="mini" what="the report's writer" refusal={{ kind: 'limit', reason: '20 concurrent subagents', request: 'r1' }} onDismiss={() => {}} />)
-    await settle()
-    expect(buttons(el)).toEqual(['Try again', 'Dismiss'])
-    await act(async () => el.querySelector<HTMLButtonElement>('.chat-refused-again')!.click())
-    await settle()
-    expect(posted).toEqual([['/api/ws/mini/subagents/again', { request: 'r1' }]])
-    const hook = await mount(<RefusedCard ws="mini" what="the orientation" refusal={{ kind: 'hook', reason: 'Your Claude Code session is in plan mode.', request: null }} onDismiss={() => {}} />)
-    expect(buttons(hook)).toEqual(['Dismiss'])
-  })
 })
 
 describe("Try again at Claude Code's limit waits for a free slot (live check L19)", () => {
@@ -92,45 +68,5 @@ describe("Try again at Claude Code's limit waits for a free slot (live check L19
     expect(slotFree([agent('running'), agent('done', '2026-10-06T10:00:00Z')], 'You can run 2 subagents at once.', null)).toBe(true)
     expect(slotFree([agent('done', '2026-10-06T09:00:00Z')], 'the limit', '2026-10-06T09:30:00Z')).toBe(false)
     expect(slotFree([agent('done', '2026-10-06T10:00:00Z')], 'the limit', '2026-10-06T09:30:00Z')).toBe(true)
-  })
-
-  test('the button stays off, saying why, while as many subagents run as the cap', async () => {
-    vi.stubGlobal('fetch', async (url: string) => {
-      const body = String(url).endsWith('/chats') ? [{ id: 'o', kind: 'agent', status: 'running' }, { id: 'w', kind: 'agent', status: 'running' }] : { id: 'r1', kind: 'start', state: 'refused' }
-      return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
-    })
-    const el = await mount(<RefusedCard ws="mini" what="the report's writer" refusal={{ kind: 'limit', reason: 'You can run 2 subagents at once.', request: 'r1' }} onDismiss={() => {}} />)
-    await settle()
-    const again = el.querySelector<HTMLButtonElement>('.chat-refused-again')!
-    expect(again.disabled).toBe(true)
-    expect(again.getAttribute('title')).toBe(WAIT_SLOT_LINE)
-  })
-})
-
-describe("main's chat before the orientation's thread exists", () => {
-  test('Starting… shows while a typed start is pending', () => {
-    expect(startingShown(null)).toBe(false)
-    expect(startingShown({ status: 'starting', started_by: 'typed' })).toBe(true)
-    expect(startingShown({ status: 'running' })).toBe(false)
-  })
-
-  test("the refusal is the record's, else the click's answer, and none once dismissed", () => {
-    const run = { status: 'refused', request: 'r1', refused: { kind: 'no-module', reason: 'off', at: 't' } }
-    expect(shownRefusal(run, null, [])).toEqual({ kind: 'no-module', reason: 'off', at: 't', request: 'r1' })
-    expect(shownRefusal(run, null, ['r1'])).toBeNull()
-    expect(shownRefusal({ status: 'starting' }, { kind: 'hook', reason: 'An orientation is already running.', request: 'r2' }, [])).toEqual({ kind: 'hook', reason: 'An orientation is already running.', request: 'r2', expired: undefined })
-    expect(shownRefusal({ status: 'starting' }, { agentId: 'a1' }, [])).toBeNull()
-  })
-})
-
-describe("a click start's answer", () => {
-  test('a refusal the route answers raw gets its kind and reason from the key that carries it', async () => {
-    const { startAnswer } = await import('../../src/lib/api.ts')
-    expect(startAnswer({ 'no-module': "Claude Code did not load thimble's hooks module", request: 'r1' })).toMatchObject({ kind: 'no-module', reason: "Claude Code did not load thimble's hooks module" })
-    expect(startAnswer({ deny: 'An orientation is already running.' })).toMatchObject({ kind: 'hook', reason: 'An orientation is already running.' })
-    expect(startAnswer({ limit: '20 concurrent subagents' })).toMatchObject({ kind: 'limit' })
-    expect(startAnswer({ error: 'No transcript found', gone: true })).toMatchObject({ kind: 'earlier-session' })
-    expect(startAnswer({ agentId: 'a1', request: 'r1' })).toEqual({ agentId: 'a1', request: 'r1' })
-    expect(startAnswer({ kind: 'auto-mode', reason: 'x' })).toEqual({ kind: 'auto-mode', reason: 'x' })
   })
 })

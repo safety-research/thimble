@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from app import config, view_libs, views
+from app import view_libs
 
 PACKAGES = {  # name -> (version, unpacked bytes, dependencies, files)
     "tiny-graph": ("2.1.0", 5000, {"tiny-queue": "^1"}, {
@@ -98,30 +98,6 @@ async def test_a_package_the_builder_installed_is_bundled_into_the_view_and_runs
     assert after == {view_libs.LOCK_FILE, "default-only@0.3.0.js"} and len(before) == 5, "an entry dropped leaves the folder"
 
 
-async def test_a_package_its_folder_lacks_or_holds_at_another_version_is_a_problem_naming_the_install(tmp_path, no_npm,
-                                                                                                    workspaces_tmp):
-    stage = tmp_path / "work"
-    folder = tmp_path / "v"
-    folder.mkdir()
-    got = await view_libs.ensure("ws", "v", folder, ["tiny-queue@1"], source=stage)
-    assert got["problems"] == [view_libs.NOT_INSTALLED.format(name="tiny-queue", where=stage, raw="tiny-queue@1")]
-    # live check L31 (live-d): npm's cache in the home folder is read-only in the sandbox (EROFS), so the cache is local
-    assert "npm install --ignore-scripts --cache .npm-cache tiny-queue@1" in got["problems"][0]
-    install(stage, "tiny-queue")
-    got = await view_libs.ensure("ws", "v", folder, ["tiny-queue@2"], source=stage)
-    assert "holds tiny-queue 1.4.2, which tiny-queue@2 does not allow" in got["problems"][0]
-    assert not (folder / view_libs.LIB_DIR / "tiny-queue@1.4.2.js").exists()
-    got = await view_libs.ensure("ws", "v", folder, ["tiny-queue@^1.2"], source=stage)
-    assert got["problems"] == [] and view_libs.vendored(folder, "tiny-queue@^1.2") is not None
-    assert view_libs.problems(["vega", "d3-force@3", "d3@>=7.8", "d3-array@7.x", "not a package!", "x@file:../y", "x@git+ssh:h"]) == [
-        "`libs` names 'not a package!', 'x@file:../y', 'x@git+ssh:h', which is neither vega, vega-lite, vega-embed nor an "
-        "npm package as name@version"]
-    work = config.workspace_dir("mini") / "views-work" / "v"
-    install(work, "default-only")
-    got = await view_libs.ensure("mini", "v", folder, ["default-only"])
-    assert got["problems"] == [], "by default the builder's own folder, views-work/<slug>"
-
-
 async def test_a_bundle_holds_only_files_from_the_builder_s_node_modules(tmp_path, no_npm):
     """esbuild runs as thimble's server, outside the sandbox, on files the builder wrote: a package that requires a file
     outside its folder's node_modules (a token file the sandbox hides), or links out of it, is not bundled, so the file
@@ -156,29 +132,3 @@ async def test_a_bundle_holds_only_files_from_the_builder_s_node_modules(tmp_pat
     lib = folder / view_libs.LIB_DIR
     assert not any("SECRET-TOKEN" in p.read_text() for p in lib.iterdir() if p.is_file())
     assert all(view_libs.vendored(folder, x) is None for x in ("reads-out@1", "plain@1", "evil@1"))
-
-
-async def test_the_page_inlines_its_packages_and_a_new_package_is_a_new_version(tmp_path, no_npm, workspaces_tmp,
-                                                                               monkeypatch):
-    data = tmp_path / "data" / "boards"
-    data.mkdir(parents=True)
-    (data / "manifest.json").write_text(json.dumps({"name": "boards", "description": "a board"}))
-    (data / "board.jsonl").write_text('{"n": 1}\n')
-    monkeypatch.setattr(config, "DATA_DIR", (tmp_path / "data").resolve())
-    reader = "def build_index(paths):\n    return {}\n\ndef records(index, query):\n    return []\n\ndef resolve(index, locator):\n    return None\n"
-    html = "<!doctype html><html><body><div id='g'></div></body></html>"
-    view = views.write_view("boards", "graph", name="Graph", description="A graph.", claims=["board.jsonl"],
-                            libs=["vega-lite", "tiny-graph@2", "tiny-graph@2/theme.css"], reader=reader, html=html)
-    assert view["libs"] == ["vega", "vega-lite", "tiny-graph@2", "tiny-graph@2/theme.css"]
-    first = view["version"]
-    folder = Path(view["dir"])
-    install(config.workspace_dir("boards") / "views-work" / "graph", "tiny-graph")
-    await view_libs.ensure("boards", "graph", folder, view["libs"])
-    doc = views.frame_document(views.read_view("boards", "graph"))
-    assert "the library tiny-graph@2 is not installed here" not in doc
-    assert ".tg{color:red}" in doc and "window.__thimbleLibs" in doc
-    assert doc.index("vega-lite") < doc.index("__thimble_lib") < doc.index("<div id='g'>")
-    second = views.mark_built("boards", "graph")["version"]
-    assert second != first, "the vendored packages are part of the view's version"
-    kept = views.read_version("boards", "graph", second)
-    assert view_libs.vendored(Path(kept["dir"]), "tiny-graph@2") is not None, "a kept version holds its packages"

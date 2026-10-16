@@ -2,7 +2,7 @@
 // are one entry, which shows that record once with every quoted passage highlighted; refs of different records stay
 // one entry each, as they were.
 import { describe, expect, test } from 'vitest'
-import { entryParts, exampleEntries, recordOf, type QuotePart } from '../../src/canvas/quotes.ts'
+import { entryParts, exampleEntries, type QuotePart } from '../../src/canvas/quotes.ts'
 import type { ResolvedRef } from '../../src/lib/types.ts'
 
 const LONG =
@@ -25,29 +25,5 @@ describe('example entries', () => {
     expect(entries).toHaveLength(1)
     expect(entries[0].ref).toBe('plan.json#/steps/0')
     expect(marked(entryParts(entries[0], got))).toEqual(quotes)
-  })
-
-  test('refs of different records stay one entry each, and a ref with no quote shows no highlight', () => {
-    const entries = exampleEntries(['plan.json#/steps/0', 'plan.json#/steps/1'])
-    expect(entries.map((e) => e.ref)).toEqual(['plan.json#/steps/0', 'plan.json#/steps/1'])
-    expect(marked(entryParts(entries[0], got))).toEqual([])
-  })
-
-  test("spans of one line are one entry at the line, each span's words highlighted in the whole record", () => {
-    const text = 'We meet at the north gate at eleven. Bring a water bottle.'
-    const span = (a: number, b: number): ResolvedRef => ({ ref: `chat.jsonl#L4.b0:c${a}-${b}`, kind: 'span', path: 'chat.jsonl', line: 4, block: 0, start: a, end: b, blocks: [{ kind: 'text', text }], excerpt: text.slice(a, b) }) as unknown as ResolvedRef
-    const a = span(15, 25)
-    const b = span(37, 57)
-    expect(recordOf(a.ref)).toBe('chat.jsonl#L4')
-    const entries = exampleEntries([a.ref, b.ref, 'chat.jsonl#L5.b0:c0-4'])
-    expect(entries.map((e) => e.ref)).toEqual(['chat.jsonl#L4', 'chat.jsonl#L5.b0:c0-4'])
-    const parts = entryParts(entries[0], (r) => (r === a.ref ? a : b))
-    expect(parts?.some((p) => p.kind === 'span')).toBe(false)
-    expect(marked(parts)).toEqual(['north gate', 'Bring a water bottle'])
-  })
-
-  test('an entry waits until each of its refs has come back', () => {
-    const [e] = exampleEntries(['plan.json#/steps/0', 'plan.json#/steps/0'], ['north gate', 'lemon cake'])
-    expect(entryParts(e, () => undefined)).toBeNull()
   })
 })

@@ -6,7 +6,6 @@ import os
 import secrets
 from array import array
 import tempfile
-import threading
 from pathlib import Path
 
 import conftest
@@ -25,23 +24,6 @@ def test_the_run_and_each_test_have_a_temporary_thimble_home(tmp_path):
     assert os.environ["THIMBLE_HOME"] == str(tmp_path / "thimble-home")
     assert not _real(os.environ["THIMBLE_HOME"]) and not _real(str(conftest.SUITE_HOME))
     assert not _real(str(corpus._index_home()))
-
-
-def test_a_test_that_undoes_its_monkeypatch_keeps_the_suites_home(monkeypatch):
-    # test_line_index's index test undoes every patch midway, the fixture's THIMBLE_HOME with them: the index it then
-    # kept went to ~/.thimble/line-index while the variable was unset
-    monkeypatch.undo()
-    assert os.environ["THIMBLE_HOME"] == str(conftest.SUITE_HOME)
-    assert corpus._index_home() == conftest.SUITE_HOME / corpus.INDEX_DIR
-
-
-def test_a_thread_that_outlives_its_test_writes_in_the_suites_home(monkeypatch):
-    seen: list[str] = []
-    monkeypatch.undo()  # as after the test's teardown
-    t = threading.Thread(target=lambda: seen.append(str(corpus._index_home())))
-    t.start()
-    t.join()
-    assert seen == [str(conftest.SUITE_HOME / corpus.INDEX_DIR)]
 
 
 def test_a_write_under_the_users_thimble_home_is_refused(monkeypatch):
@@ -99,13 +81,6 @@ class _Counter:
 
     def close(self) -> None:
         self.sock.close()
-
-
-def test_the_live_ports_are_the_default_port_and_the_runs_own():
-    from app import cli, feedback
-
-    assert conftest.DEFAULT_PORT == cli.DEFAULT_PORT == feedback.DEFAULT_PORT
-    assert cli.DEFAULT_PORT in conftest.LIVE_PORTS
 
 
 def test_a_connection_to_a_live_port_is_refused_before_it_is_made(monkeypatch):

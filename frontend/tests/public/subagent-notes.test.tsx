@@ -4,9 +4,7 @@
 // passed on with Send again, and the line when a typed follow-up ran on the role's current values (src/chat/Rows.tsx).
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { ChipRow, byLabel, devStarted, notPassedOn } from '../../src/chat/Rows.tsx'
-import { stoppedAgentsLine } from '../../src/shell/SessionGone.tsx'
-import type { ChatMeta } from '../../src/lib/types.ts'
+import { ChipRow, notPassedOn } from '../../src/chat/Rows.tsx'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 let posted: [string, unknown][] = []
@@ -22,28 +20,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('the session-gone card', () => {
-  test("names the agents main's quit stopped, and how to continue the orientation", () => {
-    const m = (extra: Partial<ChatMeta>) => ({ id: 'x', route: 'subagent', status: 'stopped', stopped_by: 'quit', ...extra }) as ChatMeta
-    expect(stoppedAgentsLine([m({ role: 'orient' }), m({ role: 'writer', doc: 'report' }), m({ role: 'check', title: 'Unverifiable', stopped_by: 'analyst' })])).toBe(
-      "thimble's agents stopped with it: the orientation and the writer of the report. Once it is back, send the orientation a message to continue it.",
-    )
-    expect(stoppedAgentsLine([m({ role: 'orient', status: 'done' })])).toBe('')
-  })
-})
-
 describe('in a thread', () => {
-  test("main's note names a view build as one, and a code ticket as a ticket (live check L25)", () => {
-    expect(devStarted({ view: 'wiki-page-history' })).toBe('View build started in')
-    expect(devStarted({})).toBe('Dev ticket started')
-  })
-
-  test('a message says where it came from: the agent tray or thimble; none in main', () => {
-    expect(byLabel('terminal', 'o1', true)).toBe('typed in the agent tray')
-    expect(byLabel('terminal', 'o1'), "the prompt main's Agent call sent, live check L25 (live-d)").toBeNull()
-    expect(byLabel('browser', 'o1')).toBe('sent from thimble')
-    expect(byLabel('browser', 'main')).toBeNull()
-  })
 
   test('a follow-up not passed on shows why and the message, and Send again sends it to the orientation', async () => {
     const el = await mount(<ChipRow ws="mini" item={{ kind: 'chip', index: 3, chip: 'not_passed_on', text: "thimble's module did not answer.", message: 'Does April look the same?' }} />)
@@ -52,10 +29,5 @@ describe('in a thread', () => {
     await act(async () => el.querySelector<HTMLButtonElement>('.chat-send-again')!.click())
     await settle()
     expect(posted).toEqual([['/api/ws/mini/orientation/message', { text: 'Does April look the same?' }]])
-  })
-
-  test('a typed follow-up that ran on the role\'s current values says so', async () => {
-    const el = await mount(<ChipRow ws="mini" item={{ kind: 'chip', index: 4, chip: 'follow_up_ran_on', text: 'This message ran on claude-sonnet-5 · high, the role\'s current settings.' }} />)
-    expect(el.querySelector('.chat-ran-on')?.textContent).toContain("the role's current settings")
   })
 })

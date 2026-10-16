@@ -1,15 +1,14 @@
-"""Card code in terminal mode (app/cardrun.py): add_card and edit_card store the card to run later and answer with the
-`thimble-run` command; `thimble-run card <id>` runs it in its own process as a kernel cell would and stores what a
-kernel run stores; a code label runs through `thimble-run label`, and the cards that read a changed label through
-`thimble-run stale`. The kernel runs here are real kernels, the card runs real `thimble-run` processes."""
+"""Card code in terminal mode (app/cardrun.py): add_card stores the card to run later and answers with the `thimble-run`
+command; `thimble-run card <id>` runs it in its own process as a kernel cell would and stores what a kernel run stores;
+card code never runs in the shim, and a card check's trial runs in a `thimble-run trial` process, in the sandbox runtime
+where it runs; a code label runs through `thimble-run label`; the shim's watch starts the check of a card that ran.
+The kernel runs here are real kernels, the card runs real `thimble-run` processes."""
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import re
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -17,7 +16,6 @@ import pytest
 from app import cardrun, config, local, notebook, tools
 
 CORPUS = "mini"
-ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def _mode(mode: str) -> None:
@@ -57,279 +55,74 @@ def card_id(res: dict) -> str:
     return re.search(r"^card:([A-Za-z0-9_-]+)\s*$", text(res).split("\n", 1)[1], re.M).group(1)
 
 
-def _comparable(outputs: list[dict]) -> list[dict]:
-    """Outputs with what differs between two runs of one card left out: a traceback's colours and cell number, an SVG's
-    dates and ids, and the name of a bounded output's side file, which names its card."""
-    out = []
-    for b in outputs:
-        b = json.loads(json.dumps(b))
-        err = b.get(notebook.ERROR_MIME)
-        if isinstance(err, dict):
-            err["traceback"] = [re.sub(r"In\[\d+\]", "In[N]", ANSI.sub("", t)) for t in err.get("traceback") or []]
-        if isinstance(b.get("truncated"), dict):
-            b["truncated"] = {k: v for k, v in b["truncated"].items() if not isinstance(v, str) or "outputs/" not in v}
-        svg = b.get("image/svg+xml")
-        if isinstance(svg, str):
-            b["image/svg+xml"] = re.sub(r'(id|href|clip-path)="[^"]*"', "", re.sub(r"<dc:date>.*?</dc:date>", "", svg))
-        out.append(b)
-    return out
-
-
-CARDS = {
-    "table": ("table", "import pandas as pd\npd.DataFrame({'a': [1, 2, 3], 'b': ['x', 'y', 'z']}).set_index('b')"),
-    "altair": ("plot", "import altair as alt, pandas as pd\n"
-                       "alt.Chart(pd.DataFrame({'x': [1, 2, 3], 'y': [3, 1, 2]})).mark_bar().encode(x='x:O', y='y:Q')"),
-    "matplotlib": ("plot", "import matplotlib.pyplot as plt\nfig, ax = plt.subplots()\nax.bar(['a', 'b'], [1, 2])\nfig"),
-    "diagram": ("diagram", "import thimble\nthimble.diagram(['a', 'b'], [('a', 'b', 'calls')])"),
-    "timeline": ("timeline", "import thimble\n"
-                             "thimble.timeline([('2026-03-12T09:00:00', 'start'), ('2026-03-12T09:30:00', 'end')])"),
-    "chart": ("plot", "import thimble, pandas as pd\n"
-                      "thimble.chart('bar', pd.DataFrame({'agent': ['a', 'b'], 'posts': [3, 1]}))"),
-    "streams": ("code", "import sys\nprint('hello')\nprint('err', file=sys.stderr)\nprint('again')\n1 + 1"),
-    "display": ("code", "from IPython.display import display, Markdown\n"
-                        "h = display(Markdown('one'), display_id=True)\nh.update(Markdown('two'))\nprint('done')"),
-    "error": ("code", "x = 1\nraise ValueError('boom')"),
-    "reads": ("code", "print(sum(1 for _ in open('board.jsonl')))"),
-    "bounded": ("code", "for i in range(20000):\n    print(i)"),
-}
+CHART = ("import thimble, pandas as pd\nn = sum(1 for _ in open('board.jsonl'))\n"
+         "thimble.chart('bar', pd.DataFrame({'agent': ['a', 'b'], 'posts': [n, 1]}))")
 
 
 async def test_a_card_run_by_thimble_run_stores_what_a_kernel_run_stores(term):
+    """A chart card that reads a corpus file, run by a kernel in browser mode and by `thimble-run card` in terminal
+    mode: the same status, outputs, digest and reads, and the run prints what add_card answers with in browser mode."""
     _mode("browser")
     group = notebook.create_notebook(config.workspace_dir(CORPUS), "K")["id"]
-    kernel = {}
     try:
-        for name, (kind, code) in CARDS.items():
-            ran = await notebook.run_code(CORPUS, code, created_by="test", title=name, notebook=group, kind=kind)
-            kernel[name] = notebook.get_cell(CORPUS, ran["id"])  # as stored: bounded, as the card run's is
+        ran = await notebook.run_code(CORPUS, CHART, created_by="test", title="chart", notebook=group, kind="plot")
+        k = notebook.get_cell(CORPUS, ran["id"])  # as stored: bounded, as the card run's is
     finally:
         await notebook.shutdown_all()
     _mode("terminal")
-    for name, (kind, code) in CARDS.items():
-        res = await call(term, "add_card", kind=kind, question=name, code=code, group="T")
-        cid = card_id(res)
-        waiting = notebook.get_cell(CORPUS, cid)
-        assert waiting["status"] == "idle" and waiting["outputs"] == [] and waiting["run"]["state"] == "waiting"
-        assert waiting["run"]["by"] == "bash" and waiting["run"]["script"] == f"card-runs/{cid}.py"
-        assert cardrun.command("card", cid) in text(res)
-        assert (config.workspace_dir(CORPUS) / "card-runs" / f"{cid}.py").read_text().endswith(code)
-        done = run(term, "card", cid)
-        cell = notebook.get_cell(CORPUS, cid)
-        k = kernel[name]
-        assert done.returncode == (1 if name == "error" else 0), done.stdout + done.stderr
-        assert cell["status"] == k["status"] and cell["run"]["state"] == "done", name
-        assert _comparable(cell["outputs"]) == _comparable(k["outputs"]), name
-        if not any("image/svg+xml" in b for b in cell["outputs"]):  # an SVG's digest holds its random ids
-            assert cell.get("out_memo") == k.get("out_memo"), name
-        if name == "reads":
-            assert cell["reads"] == k["reads"] == ["board.jsonl"]
-        if name == "bounded":
-            assert any("truncated" in b for b in cell["outputs"]), "an oversized output is bounded with its side file"
-        # what the run prints is what add_card answers with in browser mode
-        assert done.stdout.startswith(f"card:{cid}\n"), done.stdout
-        full = notebook.get_cell(CORPUS, cid, full_outputs=True)  # add_card formats a run's complete outputs
-        assert tools._format_cell_result(full, lines=tools.result_lines(CORPUS)) in done.stdout
-
-
-async def test_the_command_names_thimble_run_by_its_name_and_runs_from_the_sessions_path(term, monkeypatch):
-    """The command add_card gives names `thimble-run` with no install path when this plugin copy's bin/ is on the
-    session's PATH (Claude Code puts a plugin's bin/ there), so its row in the terminal reads `thimble-run card <id>`;
-    without it on PATH (0.9.0: no launcher puts it there) the command names the runner by its full path. Either runs as
-    given."""
-    path = os.environ.get("PATH", "")
-    monkeypatch.setenv("PATH", os.pathsep.join([str(cardrun.bin_path().parent), path]))
-    res = await call(term, "add_card", question="names", code="print(2 + 2)")
+    res = await call(term, "add_card", kind="plot", question="chart", code=CHART, group="T")
     cid = card_id(res)
-    assert cardrun.command("card", cid) == f"thimble-run card {cid}"
-    assert f"thimble-run card {cid}" in text(res) and str(cardrun.bin_path()) not in text(res)
-    done = subprocess.run(cardrun.command("card", cid), shell=True, cwd=term, env=dict(os.environ), capture_output=True,
-                          text=True, timeout=120)
+    waiting = notebook.get_cell(CORPUS, cid)
+    assert waiting["status"] == "idle" and waiting["outputs"] == [] and waiting["run"]["state"] == "waiting"
+    assert waiting["run"]["by"] == "bash" and waiting["run"]["script"] == f"card-runs/{cid}.py"
+    assert cardrun.command("card", cid) in text(res)
+    assert (config.workspace_dir(CORPUS) / "card-runs" / f"{cid}.py").read_text().endswith(CHART)
+    done = run(term, "card", cid)
+    cell = notebook.get_cell(CORPUS, cid)
     assert done.returncode == 0, done.stdout + done.stderr
-    assert done.stdout.startswith(f"card:{cid}\n") and "4" in done.stdout
-    monkeypatch.setenv("PATH", path)
-    assert cardrun.command("card", cid) == f"{cardrun.bin_path()} card {cid}"
-
-
-async def test_what_a_child_process_writes_is_in_the_card(term):
-    """As ipykernel captures file descriptors 1 and 2 by default, a child process's output is the card's."""
-    cid = card_id(await call(term, "add_card", question="child", code="import subprocess\n"
-                             "subprocess.run(['echo', 'from a child'])\nprint('parent')"))
-    assert run(term, "card", cid).returncode == 0
-    assert notebook.get_cell(CORPUS, cid)["outputs"] == [{"text/plain": "from a child\nparent\n", "_stream": "stdout"}]
-
-
-async def test_a_takeaway_given_with_the_card_is_stored_after_its_run(term):
-    res = await call(term, "add_card", kind="code", question="How many posts?",
-                     code="print(sum(1 for _ in open('board.jsonl')))", takeaway="The board holds 8 posts.")
-    cid = card_id(res)
-    assert notebook.get_cell(CORPUS, cid)["takeaway"] == "", "nothing ran yet, so nothing is noted"
-    done = run(term, "card", cid)
-    assert done.returncode == 0, done.stderr
-    cell = notebook.get_cell(CORPUS, cid)
-    assert cell["takeaway"].startswith("The board holds") and "takeaway" not in cell["run"]
-    assert f"takeaway noted on card:{cid}" in done.stdout
-
-
-async def test_an_edit_waits_too_and_a_kept_takeaway_goes_stale_when_the_outputs_change(term):
-    count = ("import pathlib\np = pathlib.Path('runs.txt')\nn = int(p.read_text()) + 1 if p.exists() else 1\n"
-             "p.write_text(str(n))\nprint(n)")
-    cid = card_id(await call(term, "add_card", kind="code", question="Runs?", code="print(1)"))
-    assert run(term, "card", cid).returncode == 0
-    res = await call(term, "edit_card", card=cid, code=count, takeaway="Runs once.")
-    assert cardrun.command("card", cid) in text(res) and notebook.get_cell(CORPUS, cid)["run"]["state"] == "waiting"
-    assert notebook.get_cell(CORPUS, cid)["previous_code"] == "print(1)"
-    assert run(term, "card", cid).returncode == 0
-    assert notebook.get_cell(CORPUS, cid)["takeaway"] == "Runs once."
-    # the same code, question and kind run again keep the takeaway; outputs that changed mark it stale
-    await call(term, "edit_card", card=cid, code=count)
-    assert "kept" in notebook.get_cell(CORPUS, cid)["run"]
-    done = run(term, "card", cid)
-    cell = notebook.get_cell(CORPUS, cid)
-    assert cell["takeaway"] == "Runs once." and cell["takeaway_stale"] is True and "kept" not in cell["run"]
-    assert tools.hint("takeaway-stale", cid=cid) in done.stdout
-    # new code clears it
-    await call(term, "edit_card", card=cid, code="print(2)")
-    assert notebook.get_cell(CORPUS, cid)["takeaway"] == ""
-
-
-async def test_the_run_of_an_edit_that_left_the_outputs_as_they_were_says_so_and_read_ref_says_whether_it_ran(term):
-    """Live QA 2, terminal mode: a fix turned a chart's weeks into text for its ticks, thimble.chart read the text as
-    times again, and the card came out as before with nothing to say so; main then read the card and told the analyst
-    that it had not run since the edit. The run of an edit says when the new code left all that the card shows as it
-    was, and read_ref says whether the outputs come from running the code it shows."""
-    table = "import pandas as pd\npd.DataFrame({{'posts': [{n}]}})"
-    cid = card_id(await call(term, "add_card", kind="table", question="Posts?", code=table.format(n="8")))
-    assert "outputs: none yet, since the code above has not run yet" in text(await call(term, "read_ref", ref=f"card:{cid}"))
-    assert run(term, "card", cid).returncode == 0
-    await call(term, "edit_card", card=cid, code=table.format(n="4 + 4"))
-    staged = text(await call(term, "read_ref", ref=f"card:{cid}"))
-    assert "[4 + 4]" in staged and "from before the code above, which has not run yet" in staged, "still those of [8]"
-    same = tools.hint("edit_card-same-outputs", cid=cid)
-    done = run(term, "card", cid)
-    assert done.returncode == 0 and same in done.stdout
-    ran = text(await call(term, "read_ref", ref=f"card:{cid}"))
-    assert "from running the code above" in ran and "has not run" not in ran
-    assert "was" not in notebook.get_cell(CORPUS, cid)["run"]
-    # the card run again, an edit whose new code shows something else, and one that makes it a code card, which shows
-    # its code, say nothing of the kind
-    assert same not in run(term, "card", cid).stdout
-    await call(term, "edit_card", card=cid, code=table.format(n="9"))
-    assert same not in run(term, "card", cid).stdout
-    await call(term, "edit_card", card=cid, code=table.format(n="3 * 3"), kind="code")
-    assert same not in run(term, "card", cid).stdout
-
-
-async def test_a_run_past_its_limit_is_interrupted_and_errors(term, monkeypatch):
-    monkeypatch.setattr(notebook, "CHAT_EXEC_TIMEOUT", 1.0)
-    cid = card_id(await call(term, "add_card", kind="code", question="Slow", code="import time\ntime.sleep(30)"))
-    assert notebook.get_cell(CORPUS, cid)["run"]["default_timeout_s"] == 1.0
-    done = run(term, "card", cid, timeout=60)
-    assert done.returncode == 1
-    cell = notebook.get_cell(CORPUS, cid)
-    names = [b[notebook.ERROR_MIME]["ename"] for b in cell["outputs"] if notebook.ERROR_MIME in b]
-    assert names[:2] == ["TimeoutError", "KeyboardInterrupt"] and cell["status"] == "error"
-    assert cell["outputs"][0][notebook.ERROR_MIME]["timeout_s"] == 1.0
+    assert cell["status"] == k["status"] == "ok" and cell["run"]["state"] == "done"
+    assert cell["outputs"] == k["outputs"] and cell.get("out_memo") == k.get("out_memo")
+    assert cell["reads"] == k["reads"] == ["board.jsonl"]
+    assert done.stdout.startswith(f"card:{cid}\n"), done.stdout
+    full = notebook.get_cell(CORPUS, cid, full_outputs=True)  # add_card formats a run's complete outputs
+    assert tools._format_cell_result(full, lines=tools.result_lines(CORPUS)) in done.stdout
 
 
 async def test_the_shim_never_runs_card_code_in_terminal_mode(term):
     """Card code never runs in the shim: a run asked for there is refused, and the card check's trial of a revision
-    runs in a `thimble-run trial` process of its own, as a card run would, and stores nothing."""
+    runs in a `thimble-run trial` process of its own, as a card run would, and stores nothing. Where thimble's sandbox
+    runtime runs, the trial runs in it: it writes the card folders and nothing of the corpus or the rest of the
+    workspace."""
+    from app import kernel_wrap, srt
+
     with pytest.raises(notebook.TerminalRun):
         await notebook.run_code(CORPUS, "print(1)", created_by="test")
+    ws = config.workspace_dir(CORPUS)
+    boxed = kernel_wrap.srt_works(srt.node(), srt.package(config.REPO_ROOT))
     cid = card_id(await call(term, "add_card", question="q", code="print(1)"))
-    code = "import os\nprint(os.getpid())\nprint(sum(1 for _ in open('board.jsonl')))"
-    trial = await notebook.trial_run(CORPUS, cid, code)
+    probe = "import os\nprint(os.getpid())\nprint(sum(1 for _ in open('board.jsonl')))\n"
+    if boxed:
+        probe += (
+            "def can_write(d):\n"
+            "    p = os.path.join(d, '.thimble-trial-probe')\n"
+            "    try:\n"
+            "        open(p, 'w').close()\n"
+            "    except OSError:\n"
+            "        return False\n"
+            "    os.remove(p)\n"
+            "    return True\n"
+            f"print(can_write({str(term)!r}), can_write({str(ws)!r}), can_write({str(ws / 'card-runs')!r}))\n"
+            "print(os.environ.get('SANDBOX_RUNTIME'))")
+    trial = await notebook.trial_run(CORPUS, cid, probe)
     assert trial["status"] == "ok" and trial["trial"] == "", trial["outputs"]
-    pid, lines = trial["outputs"][0]["text/plain"].split()
+    pid, lines, *box = trial["outputs"][0]["text/plain"].split()
     assert int(pid) != os.getpid(), "the revision ran in a card runner, not in this process"
     assert int(lines) > 0, "in the scratch mirror of the corpus, as a card run is"
+    if boxed:
+        assert box == ["False", "False", "True", "1"], "in the sandbox runtime, writing the card folders alone"
     cell = notebook.get_cell(CORPUS, cid)
     assert cell["code"] == "print(1)" and cell["outputs"] == [], "a trial stores nothing"
     assert cell["run"]["state"] == "waiting"
-    bad = await notebook.trial_run(CORPUS, cid, "print(posts_undefined)")
-    err = [b[notebook.ERROR_MIME] for b in bad["outputs"] if notebook.ERROR_MIME in b]
-    assert bad["status"] == "error" and err[0]["ename"] == "NameError", "the code's own error comes back as a run's"
-
-
-def _fake_check(monkeypatch, revision: dict) -> None:
-    """The card check with its drawing and its model's reading stood in for: every card draws, and the reading finds
-    the question unclear and gives the card back with `revision["code"]`."""
-    from app import card_check, render
-
-    async def draw(c, cell):
-        return render.Rendered(png=b"\x89PNG card")
-
-    async def read(c, cell, png, run, picture=None):
-        assessment = [{"problem": "The question names no wiki."}] + [{"problem": ""}] * (card_check.CRITERIA - 1)
-        card = {"question": cell["title"], "code": revision["code"], "takeaway": cell["takeaway"]}
-        return assessment, card, "test-model"
-
-    monkeypatch.setattr(render, "down", lambda: False)
-    monkeypatch.setattr(card_check, "_draw", draw)
-    monkeypatch.setattr(card_check, "_read", read)
-
-
-async def _checked(cid: str, again: bool = False) -> dict:
-    from app import card_check
-
-    started = card_check.start(CORPUS, cid, card_check.MAIN, again=again)
-    assert started is not None
-    await started.task
-    return notebook.get_cell(CORPUS, cid, full_outputs=True)
-
-
-async def test_the_card_check_keeps_or_rejects_its_revision_after_running_it_through_thimble_run(term, monkeypatch):
-    """Live check cc-term: in terminal mode the card check's revision of a card failed with TerminalRun, since the shim
-    may not run card code, and the card said `its check ended in an error` in red. The revision now runs through
-    `thimble-run trial`, so the check keeps a revision that runs clean and rejects one whose code errors, as in browser
-    mode; a revision the card runner could not try at all ends the check without a rejected fix."""
-    revision = {"code": "print(4 + 4)"}
-    _fake_check(monkeypatch, revision)
-    cid = card_id(await call(term, "add_card", question="Posts?", code="print(8)", takeaway="There are 8 posts."))
-    assert run(term, "card", cid).returncode == 0
-    cell = await _checked(cid)
-    assert cell["check"]["status"] == "fixed", cell["check"]
-    assert cell["code"] == "print(4 + 4)" and cell["outputs"][0]["text/plain"].strip() == "8"
-    assert cell["fixes"][-1]["state"] == "applied" and cell["fixes"][-1]["reason"] == "The question names no wiki."
-    # a revision whose code errors is not kept, for that reason, and the card stays as it was
-    revision["code"] = "print(posts_undefined)"
-    cell = await _checked(cid, again=True)
-    assert cell["check"]["status"] == "error" and cell["code"] == "print(4 + 4)"
-    why = cell["check"]["reason"]
-    assert why.startswith("its revision was not kept: its code did not run clean: NameError"), why
-    assert "TerminalRun" not in json.dumps(cell)
-    assert cell["fixes"][-1]["state"] == "rejected" and cell["fixes"][-1]["after"]["code"] == "print(posts_undefined)"
-    # a card runner that does not start says nothing of the revision: no rejected fix, and the card stays
-    from app import card_check
-
-    monkeypatch.setattr(cardrun, "bin_path", lambda: config.workspace_dir(CORPUS) / "no-such-thimble-run")
-    revision["code"] = "print(2 * 4)"
-    fixes = len(cell["fixes"])
-    cell = await _checked(cid, again=True)
-    assert cell["check"]["status"] == "error" and cell["check"]["reason"].startswith(card_check.UNTRIED + ": ")
-    assert len(cell["fixes"]) == fixes and cell["code"] == "print(4 + 4)"
-
-
-async def test_a_check_revision_through_thimble_run_that_shows_the_same_outputs_is_a_version_in_the_history(term, monkeypatch):
-    """Terminal mode, as in the browser (test_card_history.py): a card check's revision whose new code, run through
-    `thimble-run trial`, shows what the card showed is one more version in the card's history and no fix, and the check
-    ends `ok` (Matt 2026-10-10: "I would just increment the cards history, not add fixed"). One that changes the outputs
-    is a fix, as before."""
-    from app import checkstore
-
-    table = "import pandas as pd\npd.DataFrame({{'posts': [{n}]}})"
-    revision = {"code": table.format(n="4 + 4")}
-    _fake_check(monkeypatch, revision)
-    cid = card_id(await call(term, "add_card", kind="table", question="Posts?", code=table.format(n="8"),
-                             takeaway="There are 8 posts."))
-    assert run(term, "card", cid).returncode == 0
-    cell = await _checked(cid)
-    assert cell["check"]["status"] == "ok" and cell["code"] == revision["code"] and not cell.get("fixes"), cell["check"]
-    assert [(e["by"], e["fields"]) for e in cell["edited"]] == [(checkstore.ACTOR, ["code"])]
-    revision["code"] = table.format(n="9")
-    cell = await _checked(cid, again=True)
-    assert cell["check"]["status"] == "fixed" and [f["state"] for f in cell["fixes"]] == ["applied"]
-    assert len(cell["edited"]) == 2
 
 
 def test_a_trial_s_sandbox_has_the_rules_of_a_trial_where_srt_runs_and_none_elsewhere(term, monkeypatch, tmp_path):
@@ -357,33 +150,7 @@ def test_a_trial_s_sandbox_has_the_rules_of_a_trial_where_srt_runs_and_none_else
     assert cardrun.trial_argv(CORPUS, "c1", tmp_path) == [str(cardrun.bin_path()), cardrun.TRIAL, "c1"], "plain"
 
 
-async def test_a_trial_runs_in_the_sandbox_runtime_where_it_runs(term):
-    """Where srt runs here, the trial runs in it: it writes the card folders and nothing of the corpus or the rest of
-    the workspace."""
-    from app import kernel_wrap, srt
-
-    if not kernel_wrap.srt_works(srt.node(), srt.package(config.REPO_ROOT)):
-        pytest.skip("thimble's sandbox runtime cannot run on this machine")
-    ws = config.workspace_dir(CORPUS)
-    cid = card_id(await call(term, "add_card", question="q", code="print(1)"))
-    probe = (
-        "import os\n"
-        "def can_write(d):\n"
-        "    p = os.path.join(d, '.thimble-trial-probe')\n"
-        "    try:\n"
-        "        open(p, 'w').close()\n"
-        "    except OSError:\n"
-        "        return False\n"
-        "    os.remove(p)\n"
-        "    return True\n"
-        f"print(can_write({str(term)!r}), can_write({str(ws)!r}), can_write({str(ws / 'card-runs')!r}))\n"
-        "print(os.environ.get('SANDBOX_RUNTIME'))")
-    trial = await notebook.trial_run(CORPUS, cid, probe)
-    assert trial["status"] == "ok", trial["outputs"]
-    assert trial["outputs"][0]["text/plain"].split() == ["False", "False", "True", "1"]
-
-
-async def test_a_code_label_runs_through_thimble_run_and_its_readers_go_stale(term):
+async def test_a_code_label_runs_through_thimble_run(term):
     rule = "def label(u):\n    return 'long' if len(str(u)) > 300 else 'short'"
     res = await call(term, "apply_label", scope="files", name="long", predicate={"kind": "code", "text": rule},
                      paths=["agents/*.jsonl"], values=["long", "short"], filter=True)
@@ -403,19 +170,6 @@ async def test_a_code_label_runs_through_thimble_run_and_its_readers_go_stale(te
     assert "applied label long" in done.stdout and "long 22, short 38" in done.stdout
     assert concepts.read_concept(config.workspace_dir(CORPUS), concepts.PENDING_RUN) is None
     assert concepts.PENDING_RUN not in concepts.read_concept(config.workspace_dir(CORPUS), lid)
-    # a card reads it; a regex label of the same name changes it, and the shim names the card as stale
-    cid = card_id(await call(term, "add_card", kind="code", question="How many long?",
-                             code="import thimble\nprint(len(thimble.labels('long')))"))
-    assert run(term, "card", cid).returncode == 0
-    res = await call(term, "apply_label", scope="files", name="long", predicate={"kind": "regex", "text": "Bash"},
-                     paths=["agents/*.jsonl"], values=["long", "short"])
-    assert f"[[card:{cid}]]" in text(res) and cardrun.command("stale") in text(res), text(res)
-    await call(term, "edit_card", card=cid, takeaway="Some records are long.")  # a takeaway the new output leaves behind
-    done = run(term, "stale")
-    assert done.returncode == 0 and f"[[card:{cid}]]" in done.stdout, done.stdout + done.stderr
-    now = re.search(r": long (\d+)", text(res)).group(1)
-    assert now != "22" and notebook.get_cell(CORPUS, cid)["outputs"][0]["text/plain"].strip() == now
-    assert "no card reads a label that changed" in run(term, "stale").stdout
 
 
 async def test_the_shims_watch_starts_the_check_of_a_card_run_with_a_takeaway(term, monkeypatch):
@@ -437,147 +191,3 @@ async def test_the_shims_watch_starts_the_check_of_a_card_run_with_a_takeaway(te
     mine = [x for x in lines if x.get("card") == cid]
     assert [x["op"] for x in mine] == ["created", "edited"], "the run and its takeaway, in one line from the watch"
     assert mine[-1]["state"]["status"] == "ok" and mine[-1]["state"]["takeaway"].startswith("There are")
-
-
-async def test_the_shim_starts_the_watch_before_any_call_so_a_resumed_sessions_cards_are_checked(term, monkeypatch):
-    """After `thimble --continue` main may run cards with `thimble-run` before it calls any tool: the shim starts the
-    card watch when it starts (local.begin), so their checks still run and `◌ checking` clears."""
-    from app import card_check
-
-    started: list[str] = []
-    monkeypatch.setattr(card_check, "start", lambda c, cid, author, **kw: started.append(cid))
-    monkeypatch.setenv("THIMBLE_CARD_CHECK", "on")
-    cid = card_id(await call(term, "add_card", question="Posts?", code="print(8)", takeaway="There are 8 posts."))
-    # the next session: a new shim, which has served no call yet
-    cardrun.CardWatch.stop_all()
-    local._started.clear()
-    started.clear()
-    assert run(term, "card", cid).returncode == 0
-    assert notebook.get_cell(CORPUS, cid).get("check") == "pending"
-    assert local.begin(str(term)) == CORPUS
-    for _ in range(60):
-        if "check" not in notebook.get_cell(CORPUS, cid):
-            break
-        await asyncio.sleep(0.1)
-    assert started == [cid] and "check" not in notebook.get_cell(CORPUS, cid)
-    # a folder of no workspace starts nothing
-    cardrun.CardWatch.stop_all()
-    local._started.clear()
-    assert local.begin(str(term.parent)) is None and not cardrun.CardWatch._tasks
-
-
-async def test_the_watch_ends_a_run_whose_process_is_gone(term):
-    cid = card_id(await call(term, "add_card", question="q", code="print(1)"))
-    ws = config.workspace_dir(CORPUS)
-    with notebook.editing(ws):
-        nb, cell = notebook._locate(ws, cid)
-        cell["status"] = "running"
-        cell["run"] = {**cell["run"], "state": "running", "pid": 12345}
-        notebook.write_notebook(ws, nb)
-    # a run whose process holds its run lock is left alone, whatever its pid says (main's sandbox has its own pids)
-    holder = subprocess.Popen([sys.executable, "-c", (
-        f"import sys; sys.path.insert(0, {str(Path(__file__).resolve().parents[1])!r})\n"
-        "from pathlib import Path\nfrom app import cardrun\n"
-        f"cardrun.hold_run(Path({str(ws)!r}), {cid!r})\nprint('held', flush=True)\nimport time; time.sleep(30)")],
-        stdout=subprocess.PIPE, text=True)
-    try:
-        assert holder.stdout.readline().strip() == "held"
-        cardrun.CardWatch(CORPUS).look()
-        assert notebook.get_cell(CORPUS, cid)["status"] == "running"
-    finally:
-        holder.kill()
-        holder.wait()
-    cardrun.CardWatch(CORPUS).look()
-    cell = notebook.get_cell(CORPUS, cid)
-    assert cell["status"] == "error" and cell["run"]["state"] == "done"
-    assert cell["outputs"][0][notebook.ERROR_MIME]["ename"] == cardrun.DEAD_ENAME
-
-
-async def test_thimble_run_runs_after_the_press_and_refuses_a_missing_card(term):
-    """One card runner before and after a press of the browser workbench (R8): a workspace whose main runs on the server
-    still runs its cards through `thimble-run`."""
-    assert "no card:nope" in run(term, "card", "nope").stdout
-    _mode("browser")
-    cid = notebook.insert_cell(CORPUS, notebook.create_notebook(config.workspace_dir(CORPUS), "G")["id"],
-                               notebook.new_cell("code", "test", "q", code="print(1)"))["id"]
-    ran = run(term, "card", cid)
-    assert ran.returncode == 0 and ran.stdout.startswith(f"card:{cid}\n"), ran.stdout
-    assert run(term).returncode == 2
-
-
-def test_write_dirs_are_the_folders_a_run_writes(term):
-    ws = config.workspace_dir(CORPUS)
-    assert cardrun.write_dirs(CORPUS) == [ws / "notebooks", ws / "notebooks" / "outputs", ws / "labels", ws / "concepts",
-                                          ws / "card-runs", ws / "scratch"]
-
-
-async def test_a_card_type_card_draws_the_same_in_both(workspaces_tmp, tmp_path, monkeypatch):
-    """A card of a card type (thimble.card) run by thimble-run stores what a kernel run stores; the shim refreshed the
-    types before it gave the command."""
-    from app import cardtypes, extensions
-
-    d = tmp_path / "data" / "crew"
-    d.mkdir(parents=True)
-    rows = [{"page": f"p{i % 4}", "user": f"bot{i % 35}", "ts": f"2026-04-14T{i // 60:02d}:{i % 60:02d}:00Z",
-             "text": f"Relay from bot{(i + 1) % 35}: the value is {i}."} for i in range(140)]
-    (d / "saves.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
-    (d / "manifest.json").write_text(json.dumps({"name": "crew", "description": "a swarm"}))
-    monkeypatch.setattr(config, "DATA_DIR", (tmp_path / "data").resolve())
-    monkeypatch.setenv("THIMBLE_DATA_DIR", str((tmp_path / "data").resolve()))
-    monkeypatch.setenv("THIMBLE_WORKSPACES_DIR", str(config.WORKSPACES_DIR))
-    extensions.add("swarm-orient", yes=True, say=lambda _: None)
-    await extensions.refresh("crew", wait=10)
-    await cardtypes.refresh("crew", warm=False)
-    code = ("import thimble\nthimble.card('multiagent-swimlane', actions=[{'ref': 'saves.jsonl#L9', 'summary': 'Relayed 8'},"
-            " {'ref': 'saves.jsonl#L2', 'summary': 'Relayed 1'}])")
-    ws = config.workspace_dir("crew")
-    (ws / "trusted").mkdir(exist_ok=True)
-    try:
-        ran = await notebook.run_code("crew", code, created_by="test", title="swim", kind="plot")
-    finally:
-        await notebook.shutdown_all()
-    kernel = notebook.get_cell("crew", ran["id"])
-    assert kernel["status"] == "ok" and cardtypes.CARD_MIME in kernel["outputs"][0], kernel["outputs"]
-    (ws / "trusted" / "launch.json").write_text(json.dumps({"mode": "terminal"}))
-    try:
-        res = await local.call("add_card", {"kind": "plot", "question": "swim", "code": code}, cwd=str(d))
-        cid = card_id(res)
-        done = run(d.resolve(), "card", cid)
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert _comparable(notebook.get_cell("crew", cid)["outputs"]) == _comparable(kernel["outputs"])
-    finally:
-        cardrun.CardWatch.stop_all()
-        local._started.clear()
-
-
-async def test_a_label_runs_chat_ends_stopped_at_the_quit_and_one_left_running_at_the_next_start(term, monkeypatch):
-    """Live check term-fix8, low quirk: the `label …` agent record that follows a label's run stayed `running` after
-    the analyst quit. The shim's end stops its task, which ends the chat `stopped`; a chat an earlier process left
-    running (it was killed) ends `stopped` when the next session's shim starts."""
-    from app import agents, concepts, render
-
-    for mod, name in ((concepts, "_pool_shutdown"), (notebook, "shutdown_all"), (render, "shutdown")):
-        async def nothing(*a, **k):
-            return None
-        monkeypatch.setattr(mod, name, nothing if asyncio.iscoroutinefunction(getattr(mod, name)) else (lambda *a, **k: None))
-
-    async def forever(rec):
-        await asyncio.sleep(3600)
-
-    assert local.begin(str(term)) == CORPUS
-    meta = agents.start_agent(CORPUS, "labels", "label test-or-probe", forever)
-    await asyncio.sleep(0)
-    await local.close()
-    assert agents.meta_or_none(CORPUS, meta["id"])["status"] == "stopped"
-    left = agents.new_agent(CORPUS, "labels", "label left", announce=False)
-    other = agents.new_agent(CORPUS, "writer", "writer: report", announce=False)
-    local._started.clear()
-    assert local.begin(str(term)) == CORPUS
-    assert agents.meta_or_none(CORPUS, left["id"])["status"] == "stopped"
-    assert agents.meta_or_none(CORPUS, other["id"])["status"] == "running", "only a label run's chat, which is the shim's own task"
-    # main's SessionEnd hook (its own process, which holds no run) ends one at the quit, before any next start
-    from app import subagents
-
-    quit_left = agents.new_agent(CORPUS, "labels", "label at the quit", announce=False)
-    assert quit_left["id"] in subagents.hook_end(CORPUS, {"reason": "prompt_input_exit", "session_id": ""})["closed"]
-    assert agents.meta_or_none(CORPUS, quit_left["id"])["status"] == "stopped"

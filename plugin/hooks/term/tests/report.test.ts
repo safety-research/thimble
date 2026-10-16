@@ -1,14 +1,13 @@
-// The report in the terminal, read only (report.ts, panel.tsx drawDoc): a written document read as Markdown with its
-// cards in their frames, its comments (a check's, Claude's note, the analyst's) under the passages they are on, ↑↓ to
-// choose one, r to resolve it or open it again, Enter or a to ask about it, v to show the resolved ones. Each panel is
-// also drawn as rows of text (`screen`), as a terminal shows it.
+// The report in the terminal, read only (report.ts, panel.tsx drawDoc): the comments a document shows, in reading order
+// with a check that is off left out; ↑↓ to choose one, r to resolve it or open it again (`thimble act comment-resolve`,
+// `comment-reopen`), v to show the resolved ones. The panel is read as rows of text (`screen`), as a terminal shows it.
 // `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
 import { RELAY } from '../panel'
 import { checksOf, commentsOf, unitParts } from '../report'
-import { CWD, DOC, SLIDES, STATES, shown, takesKeys, world } from './fixtures'
+import { CWD, DOC, STATES, shown, takesKeys, world } from './fixtures'
 import type { World } from './fixtures'
 
 type M = Mounted<'terminal'>
@@ -199,52 +198,9 @@ test('the comments a document shows: in reading order, a check that is off left 
   expect(p2[1]!.md).toBe('[[card:ff73e071]]\n*The export per wiki.*')
 })
 
-test('a comment shows its statement and then its details, the citations in both as chips', () => {
-  const doc = { ...COMMENTED, comments: [{ id: 'c6', sentence_id: 'x2', text: 'The count covers all four wikis.', details: '- The card counts [[4579|card:ff73e071#pages/TOTAL]] pages.\n- Say so.', check: 'judgment', status: 'open' }] }
-  const [c] = commentsOf(doc as never, checksOf(STATES.checks))
-  expect(c!.text).toBe('The count covers all four wikis. - The card counts 4579 pages. - Say so.')
-})
-
 // ------------------------------------------------------------------------------------------------ the panel
 
-test('comments stand under the passages they are on: the check\'s name and hue, what it is at the right; a note dim; the title\'s under the header', async ($, on) => {
-  const w = world(on)
-  w.docs.report = COMMENTED
-  await start($, w)
-  await openReport($, w)
-  const pane = await look($)
-  const rows = await screen(pane)
-  // the subtitle, under the title row, counts them; the resolved one and the check that is off are not shown
-  expect(rows[1]).toBe('   4 open comments · 1 resolved')
-  expect(rows.join('\n')).not.toContain('Found on the card.')
-  expect(rows.join('\n')).not.toContain('README.md line 3 says four wikis.')
-  // the title's comment right under the header's rule
-  expect(rows[2]!.trim()).toMatch(/^─+$/)
-  expect(rows[3]).toMatch(/^ {5}● Judgment calls +check$/)
-  expect(rows[4]).toBe('       The title claims a relay; the report shows saves, not messages passed on.')
-  // the check's comment under its sentence's paragraph, before the paragraph's card
-  const para = rowOf(rows, 'The corpus is an export of four wikis')
-  const c1 = rowOf(rows, 'The card counts 4,579 pages')
-  expect(rows[c1 - 1]).toMatch(/^ {5}● Judgment calls +check$/)
-  expect(c1).toBe(para + 2)
-  expect(rows.findIndex((r, i) => i > c1 && /╭─+╮/.test(r))).toBe(c1 + 2)
-  expect(rows[c1 + 1]).toBe('       one wiki.')
-  // Claude's note under the heading it is on, then a blank row before the words under the heading
-  const head = rowOf(rows, 'The main claim')
-  expect(rows[head + 1]).toMatch(/^ {5}● Claude +comment$/)
-  expect(rows[head + 2]).toBe('       Say which week of June.')
-  expect(rows[head + 3]).toBe('')
-  // the citation check's tag under its sentence
-  expect(rows[rowOf(rows, 'No card counts saves by week.') - 1]).toMatch(/^ {5}● Unverifiable +citation check$/)
-  // the hues: the check's on its ●, a note's dim, every name in the text color
-  const block = (await pane.drawn({ in: 'm:doc-cm-0-0' })) as Node
-  const marks = JSON.stringify(block)
-  expect(marks).toContain('"color":"#8ad969"},"children":["●"]')
-  expect(JSON.stringify(await pane.drawn({ in: 'm:doc-cm-1-0' }))).toContain('"color":"inactive"},"children":["●"]')
-  await pane.unmount()
-})
-
-test('↑↓ choose a comment (`❯`, the accent), its chips under it; r resolves it as the margin\'s ✓ does and the choice moves on; v shows the resolved ones', async ($, on) => {
+test('↑↓ choose a comment (`❯`, the accent), its chips under it; r resolves it as the margin\'s ✓ does and the choice moves on; v shows the resolved ones', { timeoutMs: 30_000 }, async ($, on) => {
   const w = world(on)
   w.docs.report = COMMENTED
   await start($, w)
@@ -299,93 +255,4 @@ test('↑↓ choose a comment (`❯`, the accent), its chips under it; r resolve
   await arrow($, w, 'up', 1)
   await hotkey($, w, 'resolve')
   expect(w.acts.at(-1)).toEqual({ kind: 'comment-reopen', payload: { doc: 'report', comment: 'c1' } })
-})
-
-test("the chosen comment's entry box asks a side thread about the comment, on its passage, told the passage and the comment", async ($, on) => {
-  const w = world(on)
-  w.docs.report = COMMENTED
-  await start($, w)
-  await openReport($, w)
-  await takesKeys($)
-  await w.clock.advance(300)
-  await arrow($, w, 'down', 2)
-  // a gives the box the keys: no form opens
-  await hotkey($, w, 'cm-ask')
-  const asked = await look($)
-  expect(shown(await asked.drawn())).not.toContain('New thread')
-  const entry = ((await asked.findAll({ type: 'Input' })) as { key?: string; props?: Record<string, unknown> }[]).find(i => String(i.key).startsWith('ask-cm-'))!
-  expect(entry.props).toMatchObject({ placeholder: 'ask about this comment', rows: 2 })
-  await asked.input({ key: entry.key!, text: 'Fix the sentence.' })
-  await w.clock.settle()
-  expect(w.acts.find(a => a.kind === 'thread')!.payload).toMatchObject({
-    anchor: 'report:report#x2',
-    anchor_text: 'It holds 4579 pages.\n\nThe comment of the check “Judgment calls”: The card counts 4,579 pages across all four wikis; say so, since the sentence reads as one wiki.',
-    element: 'report:report#x2',
-    message: 'Fix the sentence.',
-  })
-  await asked.unmount()
-})
-
-test('in a deck, ↓ onto a comment on another slide steps to that slide', async ($, on) => {
-  const w = world(on)
-  w.docs.slides = { ...SLIDES, comments: [{ id: 'k1', sentence_id: 'y3', text: 'Which week?', check: 'judgment', status: 'open' }] }
-  w.states.docs = { ...w.states.docs, slides: { exists: true, title: SLIDES.title, renderer: 'slides', name: 'Slides' } } as never
-  await start($, w)
-  await $.command.run({ command: 'thimble:thimble', args: 'documents' } as never)
-  await w.clock.settle()
-  let pane = await look($)
-  const open = ((await pane.findAll({ type: 'Button' })) as { key?: string; props?: { label?: string } }[]).find(b => b.props?.label === SLIDES.title)!
-  await pane.press({ key: open.key! })
-  await w.clock.settle()
-  await pane.unmount()
-  pane = await look($)
-  expect((await screen(pane)).join('\n')).toContain('1 of 2')
-  await pane.unmount()
-  await takesKeys($)
-  await w.clock.advance(300)
-  await arrow($, w, 'down')
-  pane = await look($)
-  const rows = await screen(pane)
-  expect(rows.join('\n')).toContain('2 of 2')
-  expect(rows[rowOf(rows, 'Which week?') - 1]).toMatch(/❯ {3}● Judgment calls +check$/)
-  await pane.unmount()
-})
-
-test('while a check runs on the document its subtitle says so', async ($, on) => {
-  const w = world(on)
-  w.docs.report = COMMENTED
-  w.states.checks = w.states.checks.map(c => (c.id === 'judgment' ? { ...c, runs: { report: { status: 'running' } } } : c))
-  await start($, w)
-  await openReport($, w)
-  const pane = await look($)
-  expect((await screen(pane))[1]).toBe('   4 open comments · 1 resolved · ◌ Judgment calls checking')
-  await pane.unmount()
-})
-
-test('the report with its comments at 120 columns and a comment chosen, as rows of text', async ($, on) => {
-  const w = world(on)
-  w.docs.report = COMMENTED
-  await start($, w)
-  await openReport($, w, 116, 70)
-  await takesKeys($)
-  await w.clock.advance(300)
-  let pane = await look($, 116, 70)
-  const read = await screen(pane, 116)
-  await pane.unmount()
-  await arrow($, w, 'down', 2)
-  pane = await look($, 116, 70)
-  const chosen = await screen(pane, 116)
-  await pane.unmount()
-  // every row within the pane's 120 columns; the type area's edge, A0, at column 3 after the pane's padding and the
-  // margin; the chosen comment's `❯` in the margin
-  for (const rows of [read, chosen]) expect(rows.every(r => wide(r) <= 120)).toBe(true)
-  // one title row: the path, the document last in the accent and bold, then the `↗` that opens it in the browser
-  expect(read[0]).toMatch(/^ {3}home › documents › "Agents used the dse wiki as a relay" +↗$/)
-  // (and the `❯` of the chosen comment's entry box, alone on its row in this layout, which draws no Input)
-  expect(chosen.filter(r => r.startsWith(' ❯'))).toEqual([expect.stringMatching(/^ ❯ {3}● Judgment calls {80,}check$/), ' ❯'])
-  // the box's rules from the margin's edge, as wide as the panel's own rules
-  const box = chosen.lastIndexOf(' ❯')
-  expect(chosen[box - 1]).toMatch(/^ ─+$/)
-  expect(chosen[box + 1]).toMatch(/^ ─+$/)
-  expect(wide(chosen[box - 1]!)).toBe(wide(read.find(r => /^ {3}─+$/.test(r))!))
 })

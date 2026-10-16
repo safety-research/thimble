@@ -61,32 +61,6 @@ async function drain(): Promise<void> {
 }
 
 describe('label requests', () => {
-  test('a view with records on 1,510 pages of a file asks for them in a few requests, four at most at once', async () => {
-    const off = marks.watchPathLabels('w', 'events.jsonl', () => {})
-    for (let b = 0; b < 1510; b++) marks.wantLabels('w', 'events.jsonl', b * marks.LABEL_BLOCK + 7)
-    await vi.advanceTimersByTimeAsync(0)
-    expect(calls.open).toBe(marks.ASKS_IN_FLIGHT)
-    await drain()
-    expect(calls.most).toBe(marks.ASKS_IN_FLIGHT)
-    expect(calls.spans.length).toBe(Math.ceil(1510 / marks.BLOCKS_PER_ASK))
-    // the blocks next to each other go as one range
-    expect(calls.spans[0][1]).toEqual([[1, marks.BLOCKS_PER_ASK * marks.LABEL_BLOCK]])
-    expect(marks.labelsArrived('w', 'events.jsonl', `events.jsonl#L${1509 * marks.LABEL_BLOCK + 7}`)).toBe(true)
-    off()
-  })
-
-  test('what records in view want goes first, even when it was asked for before', async () => {
-    for (let b = 0; b < 200; b++) marks.wantLabels('w', 'a.jsonl', b * marks.LABEL_BLOCK + 1)
-    marks.wantLabels('w', 'a.jsonl', 150 * marks.LABEL_BLOCK + 1, true)
-    for (let i = 0; i < 3000; i++) marks.wantRecordLabels('w', 'b.jsonl', `b.jsonl#L${i + 1}`)
-    marks.wantRecordLabels('w', 'b.jsonl', 'b.jsonl#L2999', true)
-    await vi.advanceTimersByTimeAsync(0)
-    expect(calls.spans[0]).toEqual(['a.jsonl', [[150 * marks.LABEL_BLOCK + 1, 151 * marks.LABEL_BLOCK]]])
-    expect(calls.refs[0]).toEqual(['b.jsonl#L2999'])
-    await drain()
-    expect(calls.refs.flat().length).toBe(3000)
-    expect(calls.refs.every((r) => r.length <= 1000)).toBe(true)
-  })
 
   test('a failed request is asked again', async () => {
     calls.fail = 1

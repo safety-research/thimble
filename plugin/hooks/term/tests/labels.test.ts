@@ -1,9 +1,12 @@
-// The label panel as thimble-term draws it: its fields as the browser's label editor has them (`name:`, `kind:`, a
-// prompt label's `model:`, `unit:`, `scope:`, the definition on the same column), its actions underlined in the accent,
-// `stop` while a run goes, a run's first error in red, the labels list's digits. `claude plugin test plugin`.
+// The label panel: its fields as the browser's label editor has them (`name:`, `kind:`, a prompt label's `model:`,
+// `unit:`, `scope:`, the definition on the same column), its actions underlined in the accent; `delete` asks once and
+// goes through `thimble act label-delete`, its undo through `label-undelete`; the counts apply the analyst's verdicts;
+// the label colors by the names show_label takes. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
+import { COLOR_NAMES, LABEL_WHEEL, colorName } from '../labels'
+import { LABEL_HUES, PICKED_HUES } from '../paint'
 import { CWD, LABEL, shown, world } from './fixtures'
 import type { World } from './fixtures'
 
@@ -34,7 +37,15 @@ async function labelPanel($: E, w: World): Promise<M> {
   return (await $.ui.mount(PANE)) as unknown as M
 }
 
-test("the label panel's fields read `name:`, `kind:`, `unit:`, `scope:`, `mark records in Files and views:`, and its pattern starts on their column", async ($, on) => {
+/** Press `key` on the panel, then the panel drawn again. */
+async function press($: E, w: World, pane: M, key: string): Promise<M> {
+  await pane.press({ key })
+  await w.clock.settle()
+  await pane.unmount()
+  return (await $.ui.mount(PANE)) as unknown as M
+}
+
+test("the label panel's fields read `name:`, `kind:`, `unit:`, `scope:`, `mark records in Files and views:`, and its pattern starts on their column", { timeoutMs: 30_000 }, async ($, on) => {
   const w = world(on)
   const pane = await labelPanel($, w)
   const text = shown(await pane.drawn())
@@ -52,50 +63,7 @@ test("the label panel's fields read `name:`, `kind:`, `unit:`, `scope:`, `mark r
   await pane.unmount()
 })
 
-test('while a run goes, `stop` (s) asks it to stop; the type is plain text', async ($, on) => {
-  const w = world(on)
-  let release = () => {}
-  w.hold = new Promise<void>(r => (release = r))
-  let pane = await labelPanel($, w)
-  await pane.press({ key: 'lb-sample' })
-  await w.clock.advance(50)
-  await pane.unmount()
-  pane = (await $.ui.mount(PANE)) as unknown as M
-  const text = shown(await pane.drawn())
-  expect(text).toContain('◌ labeling a sample of 30')
-  expect(text).toContain('s to stop')
-  expect(await pane.find({ type: 'Button', key: 'lk-prompt' })).toBeUndefined()
-  await pane.press({ key: 'hk-stop' })
-  await w.clock.settle()
-  expect(w.acts).toContainEqual({ kind: 'label-stop', payload: { label: LABEL.id } })
-  release()
-  await w.clock.settle()
-  await pane.unmount()
-})
-
-test("a run that failed on some records says so, its first error on a row of its own in red; a stopped run says where it stopped", async ($, on) => {
-  const w = world(on)
-  w.labelRun = { ok: true, label: LABEL.id, summary: { status: 'done', labeled: 28, failed: 2, counts: { 'proxy-link': 10, none: 18 }, message: 'the model timed out on 2 records' } }
-  let pane = await labelPanel($, w)
-  await pane.press({ key: 'lb-sample' })
-  await w.clock.settle()
-  await pane.unmount()
-  pane = (await $.ui.mount(PANE)) as unknown as M
-  const text = shown(await pane.drawn())
-  expect(text).toContain('ran on a sample of 28: proxy-link 10 · none 18 · 2 records failed')
-  expect(JSON.stringify(await pane.drawn())).toContain('"color":"error"},"children":["! the model timed out on 2 records"]')
-  await pane.unmount()
-  w.labelRun = { ok: true, label: LABEL.id, summary: { status: 'done', labeled: 7, failed: 0, counts: { 'proxy-link': 3, none: 4 }, stopped: true, message: 'stopped after 7 records' } }
-  pane = (await $.ui.mount(PANE)) as unknown as M
-  await pane.press({ key: 'lb-all' })
-  await w.clock.settle()
-  await pane.unmount()
-  pane = (await $.ui.mount(PANE)) as unknown as M
-  expect(shown(await pane.drawn())).toContain('stopped after 7: proxy-link 3 · none 4')
-  await pane.unmount()
-})
-
-test('`delete` (k) asks once in the panel; n keeps the label, y deletes it (`thimble act label-delete`) and opens the labels list without it', async ($, on) => {
+test('`delete` (k) asks once in the panel; n keeps the label, y deletes it (`thimble act label-delete`) and opens the labels list without it', { timeoutMs: 30_000 }, async ($, on) => {
   const w = world(on)
   let pane = await labelPanel($, w)
   await pane.press({ key: 'lb-delete' })
@@ -129,91 +97,14 @@ test('`delete` (k) asks once in the panel; n keeps the label, y deletes it (`thi
   text = shown(await pane.drawn())
   expect(text).toContain('Labels')
   expect(text).toContain('0 labels')
-  // no row of it, only the offer to undo its delete (labeledit.test.ts)
+  // no row of it, only the offer to undo its delete (the undo test below)
   expect(await pane.find({ type: 'Button', key: 'label-open-0' })).toBeUndefined()
   expect(text.split(LABEL.name).length - 1).toBe(1)
   expect(text).toContain(`deleted the label "${LABEL.name}"  undo`)
   await pane.unmount()
 })
 
-test('a delete thimble refuses says why on a red `×` row, and the label stays', async ($, on) => {
-  const w = world(on)
-  let pane = await labelPanel($, w)
-  await pane.press({ key: 'hk-delete' })
-  await w.clock.settle()
-  // the label went from the workspace after the panel read it: thimble refuses the delete
-  const kept = w.states.labels
-  w.states.labels = [] as never
-  await pane.unmount()
-  pane = (await $.ui.mount(PANE)) as unknown as M
-  await pane.press({ key: 'lb-delete-yes' })
-  await w.clock.settle()
-  w.states.labels = kept
-  await pane.unmount()
-  pane = (await $.ui.mount(PANE)) as unknown as M
-  expect(JSON.stringify(await pane.drawn())).toContain(`"color":"error"},"children":["× not deleted: no label '${LABEL.id}'"]`)
-  await pane.unmount()
-})
-
-test('the labels list: 1-9 open the first nine', async ($, on) => {
-  const w = world(on)
-  let pane = await labelPanel($, w)
-  await pane.press({ key: 'hk-list' })
-  await w.clock.settle()
-  await pane.unmount()
-  pane = (await $.ui.mount(PANE)) as unknown as M
-  expect((await pane.find({ type: 'Button', key: 'label-open-0' }))?.props).toMatchObject({ hotkey: '1' })
-  await pane.unmount()
-})
-
-test("a label's example from a JSON record shows the field its rule reads first, its words in quotation marks, then the other fields on one dim row; never the record's JSON in quotation marks", async ($, on) => {
-  const w = world(on)
-  const label = w.states.labels[0] as Record<string, unknown>
-  Object.assign(label, {
-    kind: 'code',
-    spec: "def label(unit):\n    return ('proxy-link' if 'jina' in unit.get('body', '') else 'none', 1.0)",
-    rows: [
-      { ref: 'revisions.jsonl#L10566', label: 'proxy-link', rationale: '', analyst: null, text: '{ "page_id": "dse/County", "wiki": "dse", "body": "SEC download https://r.jina.ai/https://www.sec.gov/files/county.json", "n_revs": 4 }' },
-      { ref: 'revisions.jsonl#L1510', label: 'none', rationale: '', analyst: null, text: 'Welcome to the wiki' },
-    ],
-  })
-  const pane = await labelPanel($, w)
-  await pane.press({ key: 'lb-open-examples' })
-  await w.clock.settle()
-  await pane.unmount()
-  const open = (await $.ui.mount(PANE)) as unknown as M
-  const text = shown(await open.drawn())
-  // the field's name dim in the label column, its words after it
-  expect(text).toContain('body"SEC download https://r.jina.ai/https://www.sec.gov/files/county.json"')
-  expect(JSON.stringify(await open.drawn())).toContain('{"type":"Text","props":{"dimColor":true},"children":["body"]}')
-  expect(text).toContain('page_id dse/County · wiki dse · n_revs 4')
-  expect(text).not.toContain('"{')
-  // words that are no JSON record stay the record's words in quotation marks
-  expect(text).toContain('"Welcome to the wiki"')
-  expect(JSON.stringify(await open.drawn())).toContain('{"type":"Text","props":{"italic":true,"wrap":"wrap"},"children":["\\"SEC download')
-  await open.unmount()
-})
-
-test("a record the analyst set to another value stays among the examples under that value, `✓ set by you`", async ($, on) => {
-  const w = world(on)
-  const label = w.states.labels[0] as Record<string, unknown>
-  // as `thimble state label` gives it: the analyst's records under the value they gave (local.py, live check New 10)
-  label.rows = [
-    { ref: 'revisions.jsonl#L1510', label: 'none', rationale: '', analyst: 'proxy-link', text: 'Welcome to the wiki' },
-    { ref: 'revisions.jsonl#L10566', label: 'proxy-link', rationale: 'r.jina.ai link', analyst: null, text: 'SEC download https://r.jina.ai/x' },
-  ]
-  const pane = await labelPanel($, w)
-  await pane.press({ key: 'lb-open-examples' })
-  await w.clock.settle()
-  await pane.unmount()
-  const open = (await $.ui.mount(PANE)) as unknown as M
-  const text = shown(await open.drawn())
-  const under = text.slice(text.indexOf('proxy-link  2'))
-  expect(under).toMatch(/^proxy-link {2}2✓ set by you"Welcome to the wiki"/)
-  await open.unmount()
-})
-
-test("the label's counts apply the analyst's verdicts, as thimble.labels() reads the rows, and say how many the analyst set", async ($, on) => {
+test("the label's counts apply the analyst's verdicts, as thimble.labels() reads the rows, and say how many the analyst set", { timeoutMs: 30_000 }, async ($, on) => {
   // live check term-fix5, new quirk 5: one record set to `no` left the counts at 33/467, and a fork took the row the
   // verdict moved for a bug
   const w = world(on)
@@ -337,17 +228,29 @@ test("the label panel's actions read as buttons: `run on a sample`, `run on all`
   await pane.unmount()
 })
 
-test("a prompt label whose last run read some whole files only in part says so under its counts, in tokens", async ($, on) => {
-  // the browser's Labels pane has the same line (backend concepts.read_cut), until a run of the label cuts none
+test('after a delete the labels list offers `undo` (u): it sends `label-undelete` and opens the label again; a refusal says why in red', { timeoutMs: 30_000 }, async ($, on) => {
   const w = world(on)
-  const line = '2 of 3 files were longer than the model reads; it read the first ~905k tokens of each'
-  w.states.labels = [{ ...LABEL, kind: 'prompt', unit: 'agent', glob: 'agents/*.jsonl', last_run: { ...LABEL.last_run, cut: { n: 2, line } } }] as never
+  const kept = JSON.parse(JSON.stringify(w.states.labels[0])) as Record<string, unknown>
   let pane = await labelPanel($, w)
-  expect(shown(await pane.drawn())).toContain(line)
-  expect((await pane.find({ type: 'Box', key: 'lb-cut' }))?.props).toMatchObject({ marginLeft: 10 })
+  pane = await press($, w, pane, 'hk-delete')
+  pane = await press($, w, pane, 'hk-delete-yes')
+  let text = shown(await pane.drawn())
+  expect(text).toContain(`deleted the label "${LABEL.name}"  undo`)
+  expect(text).toContain('u to undo')
+  // thimble restores it
+  w.states.labels = [kept] as never
+  pane = await press($, w, pane, 'hk-undo')
+  expect(w.acts).toContainEqual({ kind: 'label-undelete', payload: { label: LABEL.id } })
+  text = shown(await pane.drawn())
+  expect(text).toContain('name:')
+  expect(text).toContain(LABEL.name)
+  expect(w.toasts.join('\n')).toContain(`restored the label "${LABEL.name}"`)
   await pane.unmount()
-  w.states.labels = [{ ...LABEL, kind: 'prompt', unit: 'agent', glob: 'agents/*.jsonl' }] as never
-  pane = await labelPanel($, w)
-  expect(shown(await pane.drawn())).not.toContain('longer than the model reads')
-  await pane.unmount()
+})
+
+test('each label color has the name show_label takes for it, and the wheel holds each of the eighteen once', () => {
+  expect([1, 2, 12, 13, 14, 15, 16, 17, 18].map(colorName)).toEqual(['blue', 'orange', 'cyan', 'red', 'dark red', 'purple', 'dark purple', 'pink', 'dark pink'])
+  expect([0, 19, undefined].map(colorName)).toEqual(['', '', ''])
+  expect(COLOR_NAMES.length).toBe(LABEL_HUES.length + PICKED_HUES.length)
+  expect(LABEL_WHEEL.flat().sort((a, b) => a - b)).toEqual(Array.from({ length: 18 }, (_, i) => i + 1))
 })

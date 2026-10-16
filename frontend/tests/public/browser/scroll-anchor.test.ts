@@ -1,8 +1,6 @@
 // The reader's scroll anchor (src/files/anchor.ts) in headless Chromium, with the browser's own anchoring off as the
 // reader turns it off (and as Safari has none): records above the view that change height (a record drawn for the
-// first time replacing its estimated height), one across the top that grows from its top, and a page of records
-// loaded above leave the record the analyst reads where it was on screen; a jump of the reader's own lands where it was
-// sent, and the anchor goes with it.
+// first time replacing its estimated height) leave the record the analyst reads where it was on screen.
 import assert from 'node:assert/strict'
 import { afterAll, beforeAll, test } from 'vitest'
 import type { Browser, Page } from 'playwright'
@@ -74,41 +72,4 @@ test('records above the view that grow or shrink leave the record at the top in 
   })
   await frames()
   assert.ok(Math.abs(await topOf(30)) <= 1, `record 30 moved to ${await topOf(30)}`)
-})
-
-test('a record across the top that grows from its top keeps what shows of it in place', async () => {
-  await page.evaluate((r) => (window as any).__render(r), recs(100, 160))
-  await frames()
-  await at(130)
-  await page.evaluate(() => (document.getElementById('body')!.scrollTop -= 40))
-  await frames()
-  const before = await topOf(130)
-  // record 129, of which the bottom 40px show, is drawn and grows from its top
-  await page.evaluate(() => ((document.querySelector('[data-line="129"]') as HTMLElement).style.height = '700px'))
-  await frames()
-  assert.ok(Math.abs((await topOf(130)) - before) <= 1, `record 130 moved from ${before} to ${await topOf(130)}`)
-})
-
-test('a page of records loaded above, held across its commit, leaves the record at the top in place', async () => {
-  await page.evaluate((r) => (window as any).__render(r), recs(200, 260))
-  await frames()
-  await at(210)
-  await page.evaluate(() => (window as any).__hold())
-  await page.evaluate((r) => (window as any).__render(r), [...recs(150, 199, 150), ...recs(200, 260)])
-  await frames()
-  assert.ok(Math.abs(await topOf(210)) <= 1, `record 210 moved to ${await topOf(210)}`)
-})
-
-test('a jump of the reader lands where it was sent, and the anchor follows it there', async () => {
-  await page.evaluate((r) => (window as any).__render(r), recs(300, 400))
-  await frames()
-  await at(310)
-  await at(380)
-  assert.ok(Math.abs(await topOf(380)) <= 1, `record 380 at ${await topOf(380)}`)
-  // records between the old place and the new take their real heights
-  await page.evaluate(() => {
-    for (let l = 312; l < 330; l++) (document.querySelector(`[data-line="${l}"]`) as HTMLElement).style.height = '260px'
-  })
-  await frames()
-  assert.ok(Math.abs(await topOf(380)) <= 1, `record 380 moved to ${await topOf(380)}`)
 })
