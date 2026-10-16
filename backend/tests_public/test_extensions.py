@@ -466,7 +466,8 @@ async def test_an_extension_view_that_fails_the_view_checks_is_hidden_and_settin
     _add()
     await extensions.refresh(CORPUS, wait=10)
     assert views.read_built(CORPUS, "tally")["ok"], "installed while its checks run"
-    for _ in range(600):
+    # the view checks drive a headless browser, which a busy CI runner can keep past half a minute
+    for _ in range(2400):
         if "ext-min/tally" in extensions.read_gates(CORPUS) and not any(not t.done() for t in extensions._gating.values()):
             break
         await asyncio.sleep(0.05)
