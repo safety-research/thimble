@@ -695,7 +695,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
     () => (openPath ? <OpenIn ws={ws} path={openPath} current={null} onOpen={(slug) => openIn(openPath, openRefAt, slug)} /> : null),
     [ws, openPath, openRefAt, openIn],
   )
-  const viewsBar = (compact: boolean) => <ViewsBar ws={ws} value={shownView || waitingView ? bar : BROWSER} onChange={pickBar} views={views} proposals={proposals} compact={compact} />
+  const viewsBar = (compact: boolean) => <ViewsBar ws={ws} value={shownView || waitingView ? bar : BROWSER} onChange={pickBar} views={views} compact={compact} />
   return (
     <div className="files-tab" data-panel="files" ref={rootRef}>
       {viewsSlot ? createPortal(viewsBar(true), viewsSlot) : viewsBar(false)}

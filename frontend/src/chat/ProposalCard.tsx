@@ -1,8 +1,8 @@
 // A view proposal (backend views.offer: after a turn, a side thread's answer or the orientation's end, or a viewer for
 // the type of a file opened in Files), as one card above the chat's composer in the accent: "View proposal", the
-// view's name in bold and what it shows, the analyst's task it serves (for a file-type viewer, the files it reads), then
-// Accept, which builds it as a view the analyst asked for, Reject, and a quiet Don't ask again, which turns view
-// proposals off (Settings turns them on again). The oldest open proposal shows (openOffer); a `suggested` row without
+// view's name in bold and what it shows (for a file-type viewer, then the files it reads), then Accept, which builds
+// it as a view the analyst asked for, Reject, and a quiet Don't ask again, which turns view proposals off (Settings
+// turns them on again). The oldest open proposal shows (openOffer); a `suggested` row without
 // `offered` is from an older version and never shows, and nothing shows while view proposals are off. A new proposal
 // ignores clicks for ARM_MS, so a double click never answers it unread. An Accept that cannot start a build now keeps
 // the proposal and says why, and what to do, under its buttons. The card never takes the focus, and a request that
@@ -31,11 +31,10 @@ export function openOffer(proposals: readonly Proposal[] | null | undefined): Pr
   return open.sort((a, b) => (at(a) < at(b) ? -1 : at(a) > at(b) ? 1 : 0))[0] ?? null
 }
 
-/** The line under the name: the analyst's task the view serves, or, for a viewer of a file type (no task), the files
- * it reads. Pure. */
+/** The line under the name: for a viewer of a file type (no task), the files it reads; none for a proposal with a
+ * task, which the card does not show. Pure. */
 export function offerFor(p: Pick<Proposal, 'task' | 'claims'>): string {
-  const task = p.task?.trim()
-  if (task) return `Task: ${task}`
+  if (p.task?.trim()) return ''
   const claims = (p.claims ?? []).filter(Boolean)
   return claims.length ? `For ${claims.join(', ')}` : ''
 }
@@ -144,7 +143,7 @@ export function ProposalCard({ ws }: { ws: string }) {
         <b className="chat-offer-name">{p.name}</b>
         {p.description && <span className="chat-offer-desc">{` ${p.description}`}</span>}
       </p>
-      {line && <p className="chat-offer-task">{line}</p>}
+      {line && <p className="chat-offer-files">{line}</p>}
       <div className="chat-offer-acts">
         <Button variant="primary" size="sm" className="chat-offer-accept" busy={busy === 'accept'} {...gate} onClick={accept}>
           Accept

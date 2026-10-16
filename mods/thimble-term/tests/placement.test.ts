@@ -141,7 +141,7 @@ test("why a pane waits, from Claude Code's answer: the width it places panes it 
 const OFFER = { slug: 'edit-bursts', name: 'Edit Bursts', description: 'Each wiki page as a strip of its saves over the days, bursts marked.', task: 'Find out when the agents edited the wiki together.', claims: ['revisions.jsonl'] }
 const aboveWith = (props: Record<string, unknown>) => ({ ...(aboveAt(140) as unknown as Record<string, unknown>), props: { hasSurvey: false, isWorking: false, view: {}, ...props } }) as never
 
-test('a view proposal waits above the prompt until it is answered: `view proposal` in the accent, its name in bold, what it would show and the task it serves whole, then accept, reject and don\'t ask again', async ($, on) => {
+test('a view proposal waits above the prompt until it is answered: `view proposal` in the accent, its name in bold, what it would show whole and not its task, then accept, reject and don\'t ask again', async ($, on) => {
   const w = world(on)
   w.states.home = { ...w.states.home, offer: OFFER }
   await start($, w)
@@ -149,11 +149,13 @@ test('a view proposal waits above the prompt until it is answered: `view proposa
   const drawn = await above.drawn()
   expect(shown(await above.find({ type: 'Box', key: 'above-offer' }))).toBe("  view proposalEdit Burstsacceptrejectdon't ask again")
   expect(shown(await above.find({ type: 'Box', key: 'above-offer-description' }))).toContain(OFFER.description)
-  expect(shown(await above.find({ type: 'Box', key: 'above-offer-task' }))).toBe(`  task  ${OFFER.task}`)
+  expect(await above.find({ type: 'Box', key: 'above-offer-task' })).toBeUndefined()
+  expect(await above.find({ type: 'Box', key: 'above-offer-files' })).toBeUndefined()
+  expect(shown(drawn)).not.toContain(OFFER.task)
   const json = JSON.stringify(drawn)
   expect(json).toContain('{"type":"Text","props":{"color":"suggestion"},"children":["  view proposal"]}')
   expect(json).toContain('{"type":"Text","props":{"bold":true,"wrap":"wrap"},"children":["Edit Bursts"]}')
-  // never cut: the description and the task wrap
+  // never cut: the description wraps
   expect(json).not.toContain(`"truncate-end"},"children":["${OFFER.description}`)
   await above.unmount()
   // a survey, or an agent's own view, takes the place above the prompt

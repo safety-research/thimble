@@ -1433,7 +1433,7 @@ button.model-line-part[aria-expanded='true'] {
   color: var(--text-accent);
 }
 .chat-offer-text,
-.chat-offer-task {
+.chat-offer-files {
   margin: 0;
   overflow-wrap: anywhere;
 }
@@ -1444,7 +1444,7 @@ button.model-line-part[aria-expanded='true'] {
 .chat-offer-desc {
   color: var(--text-secondary);
 }
-.chat-offer-task {
+.chat-offer-files {
   color: var(--text-secondary);
 }
 .chat-offer-acts {

@@ -971,9 +971,10 @@ export const register: Register = on => {
       )
     }
     // the view proposal waiting for the analyst's answer (proposer.py, or a viewer for a file type), until it is answered
-    // and whatever the panel shows: `view proposal` in the accent, its name in bold, what it would show and the task it
-    // serves wrapped whole, never behind a press; `accept`, `reject` and `don't ask again`, which turns view proposals
-    // off; why accept could not start its build, in red, under them (SPEC.md, "Main's chat")
+    // and whatever the panel shows: `view proposal` in the accent, its name in bold, what it would show (for a viewer of
+    // a file type, then its files) wrapped whole, never behind a press, and not the task it names; `accept`, `reject` and
+    // `don't ask again`, which turns view proposals off; why accept could not start its build, in red, under them
+    // (SPEC.md, "Main's chat")
     const offer = await homeOffer(cx)
     if (offer) {
       const accept = () => answerOffer(cx, offer.slug, 'accept')
@@ -998,8 +999,7 @@ export const register: Register = on => {
         </Box>,
       )
       if (offer.description) rows.push(under('above-offer-description', <Text wrap="wrap">{offer.description}</Text>))
-      if (offer.task) rows.push(under('above-offer-task', <Text wrap="wrap"><Text dimColor>{'task  '}</Text>{offer.task}</Text>))
-      else if (offer.claims.length) rows.push(under('above-offer-files', <Text wrap="wrap"><Text dimColor>{'files  '}</Text>{offer.claims.join(', ')}</Text>))
+      if (!offer.task && offer.claims.length) rows.push(under('above-offer-files', <Text wrap="wrap"><Text dimColor>{'files  '}</Text>{offer.claims.join(', ')}</Text>))
       if (offer.refused && !offer.pressed) rows.push(under('above-offer-refused', <Text color={COLORS.problem} wrap="wrap">{offer.refused}</Text>))
     }
     // every agent's open notices, newest first, under the view proposal's place: a failure with its fix (a safeguard's

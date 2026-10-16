@@ -420,8 +420,8 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   repeats them.
 - The view proposal's rows above the prompt, while one waits for the analyst's answer, whatever the panel shows:
   `view proposal` in the accent on the label column, the view's name in bold, then `accept`, `reject` and `don't ask
-  again`; under the name what the view would show, then the task it serves after `task` dim (for a viewer of a file
-  type, the files it claims after `files` dim), each wrapped whole and never cut, since nothing else shows them; why
+  again`; under the name what the view would show (for a viewer of a file type, then the files it claims after `files`
+  dim), each wrapped whole and never cut, since nothing else shows them, and not the task a proposal names; why
   accept could not start its build, and the fix, in red under them. A press shows `◌ accepting` or `◌ rejecting` until
   thimble has written the answer. The rows go once the proposal is answered, and while view proposals are off; `don't
   ask again` turns them off (`views.propose: false` in thimble's config) and a toast says how to turn them back on. They
