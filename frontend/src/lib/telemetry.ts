@@ -2,6 +2,7 @@
 // UI: a batch that fails is requeued, a handler that throws is swallowed. Three sources: the API requests the page
 // makes (one wrapped fetch), clicks on interactive elements, and the window's uncaught errors.
 import { apiBase, apiPath } from './browserKey'
+import { isSuspect, pageStopped } from './stale'
 import { workspaceFromUrl } from './workspace'
 
 export const CLIENT_KINDS = [
@@ -425,6 +426,9 @@ let selectTimer: number | null = null
 let lastSelection = ''
 
 function send(ws: string, records: TelemetryRecord[], beacon: boolean): boolean | Promise<boolean> {
+  // nothing under the browser's key while the page has stopped or waits for its server to prove itself (lib/stale):
+  // this send uses the fetch from before lib/stale wrapped it, and a beacon no wrapper sees
+  if (pageStopped() || isSuspect()) return false
   const url = `${apiBase()}/ws/${encodeURIComponent(ws)}/telemetry`
   const body = JSON.stringify(records)
   try {
