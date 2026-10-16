@@ -31,10 +31,10 @@ async function listText(m: M, key: string): Promise<string[]> {
   return (el?.props.props.lines ?? []).map(l => l.map(x => x.s).join('').replace(/\s+$/, ''))
 }
 
-/** The Labels view, from the summary line's `labels N unsure`. */
+/** The Labels view, from the thimble line's `labels N` (the labels' count; their records to check are in the view). */
 async function labelsView($: E, w: PanelWorld): Promise<M> {
   const band = (await $.ui.mount(aboveAt(120))) as unknown as M
-  expect(words(await band.find({ type: 'Box', key: 'above-summary' }))).toContain('labels 5 unsure')
+  expect(words(await band.find({ type: 'Box', key: 'above-summary' }))).toContain('labels 1')
   await band.press({ key: 'above-summary-labels' })
   await band.unmount()
   await w.clock.advance(100)

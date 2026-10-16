@@ -209,31 +209,34 @@ test('a click or a right-click on plain words opens nothing; the "?" beside a pa
   await pane.unmount()
 })
 
-test('the one row above the prompt is a toast: what is new since home was opened, `new` in green, gone once home opens; no row of threads or agents', async ($, on) => {
+test('the thimble line above the prompt: what the session started with is not new; a bold purple `•` after the cards that arrive, cleared once the cards\' item opens home; no row of threads or agents', async ($, on) => {
   const w = world(on)
   await start($, w)
   let above = (await $.ui.mount(ABOVE)) as unknown as M
-  // what the workspace held when the session started is not new; threads have their `↳` rows, agents Claude Code's tray
-  expect(shown(await above.drawn())).toBe('(the engine row)')
+  // what the workspace held when the session started is not new; threads have their `↳` rows, agents Claude Code's
+  // tray: the engine's row, then the thimble line alone
+  const first = shown(await above.drawn())
+  expect(first).toMatch(/^\(the engine row\)  thimble/)
+  expect(first).not.toContain('•')
+  expect(first).not.toContain('why is events.jsonl bigger?')
+  expect(first).not.toContain('orientation')
   await above.unmount()
-  // two cards arrive: the row says so, and open › opens home
+  // two cards arrive: a bold purple `•` after the cards' count, and the cards' item opens home
   w.states.home = { ...w.states.home, cards: 14 }
   w.stamps.set(`${WS}/notebooks`, 2)
   await w.clock.advance(1100)
   above = (await $.ui.mount(ABOVE)) as unknown as M
   const drawn = await above.drawn()
-  const text = shown(drawn)
-  // 0.9.0 (SPEC-v2 3.8): the summary line's `cards 2 new` in place of the toast's `2 new cards`
-  expect(text).toContain('cards 2 new')
-  expect(text).toContain('open ›')
-  expect(JSON.stringify(drawn)).toContain('{"type":"Text","props":{"color":"success"},"children":["new"]}')
-  await above.press({ key: 'above-summary-open' })
+  expect(shown(drawn)).toContain('cards 14 •')
+  expect(JSON.stringify(drawn)).toContain('{"type":"Text","props":{"color":"merged","bold":true},"children":["•"]}')
+  await above.press({ key: 'above-summary-cards' })
   expect(w.opened).toContain('thimble')
   await above.unmount()
   await w.clock.settle()
-  // 0.9.0 (SPEC-v2 3.8): `open ›` opens home and marks nothing seen, so the line stays
+  // seen: the line stays, without the `•`
   above = (await $.ui.mount(ABOVE)) as unknown as M
-  expect(shown(await above.drawn())).toContain('cards 2 new')
+  expect(shown(await above.drawn())).toContain('cards 14')
+  expect(shown(await above.drawn())).not.toContain('•')
   await above.unmount()
 })
 
@@ -247,8 +250,8 @@ test("home opened from the toast without the keys asks for them once more, and n
   await w.clock.advance(1100)
   w.paneFocused = false
   const above = (await $.ui.mount(ABOVE)) as unknown as M
-  // 0.9.0 (SPEC-v2 3.8): the summary line's `open ›`
-  await above.press({ key: 'above-summary-open' })
+  // 0.9.0: the thimble line's cards item
+  await above.press({ key: 'above-summary-cards' })
   await above.unmount()
   await w.clock.settle()
   // the pane's props say nothing of the keys (or say it has them); the engine's record says it has not: no key named
