@@ -1516,7 +1516,7 @@ async def _h_add_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         return ok(warn + res.text + (f"\n\n{line}" if line else ""))
     if cardrun.defers(ctx.c):  # the card runner: the code runs through `thimble-run` in the caller's Bash
         await cardrun.ready_types(ctx.c, code)
-        cell = notebook.new_cell(kind, ctx.cell_author, title, nb_id, code=code)
+        cell = notebook.new_cell(kind, ctx.cell_author, title, nb_id, code=code, workspace=ctx.c)
         cell[notebook.RUN_KEY] = cardrun.run_record(str(cell["id"]), takeaway=takeaway,
                                                     default_timeout_s=_default_timeout(ctx), session=ctx.session)
         cell = notebook.insert_cell(ctx.c, nb_id, cell)
@@ -1560,7 +1560,8 @@ def _add_data_cell(ctx: Ctx, nb_id: str, kind: str, title: str, payload: dict,
     """A new card with a payload and no code: stored and announced."""
     from . import notebook
 
-    cell = notebook.insert_cell(ctx.c, nb_id, notebook.new_cell(kind, ctx.cell_author, title, nb_id, payload=payload))
+    cell = notebook.insert_cell(ctx.c, nb_id, notebook.new_cell(kind, ctx.cell_author, title, nb_id, payload=payload,
+                                                                       workspace=ctx.c))
     cid = str(cell["id"])
     _remember_cell(ctx, nb_id, cid)
     return ok(f"card:{cid}" + "".join(f"\n\n{line}" for line in lines))

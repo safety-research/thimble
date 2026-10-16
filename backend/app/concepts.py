@@ -4030,7 +4030,8 @@ def label_card(c: str, concept: dict, group: str | None, created_by: str, questi
         from . import tools
 
         nb = notebook.read_notebook(ws, tools.analyst_notebook(c))
-    cell = notebook.new_cell("label", created_by, title or concept["name"], nb["id"], payload={"concept": concept["id"]})
+    cell = notebook.new_cell("label", created_by, title or concept["name"], nb["id"], payload={"concept": concept["id"]},
+                            workspace=c)
     notebook.insert_cell(c, nb["id"], cell)
     _emit(c, {"type": "cell", "notebook": nb["id"], "cell": cell["id"], "kind": "note"})
     return dict(cell)

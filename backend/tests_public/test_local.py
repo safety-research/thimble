@@ -1133,7 +1133,7 @@ async def test_a_new_label_s_card_with_no_group_named_gets_a_group_named_after_t
     await call(term, "add_card", question="Posts?", kind="note", text="Eight.", group="Deletes per day")
     res = text(await call(term, "apply_label", scope="files", name="bash", predicate={"kind": "regex", "text": "Bash"},
                           paths=["agents/*.jsonl"]))
-    cid = re.search(r"The label's card is \[\[card:([0-9a-f]+)\]\]", res)[1]
+    cid = re.search(r"The label's card is \[\[card:([A-Za-z0-9_-]+)\]\]", res)[1]
 
     def group_of(card: str) -> str:
         nb_id, _ = notebook.find_cell(ws, card)
@@ -1149,4 +1149,4 @@ async def test_a_new_label_s_card_with_no_group_named_gets_a_group_named_after_t
     assert titles.count("bash") == 1
     res = text(await call(term, "apply_label", scope="files", name="read", predicate={"kind": "regex", "text": "Read"},
                           paths=["agents/*.jsonl"], group="Deletes per day"))
-    assert group_of(re.search(r"The label's card is \[\[card:([0-9a-f]+)\]\]", res)[1]) == "Deletes per day"
+    assert group_of(re.search(r"The label's card is \[\[card:([A-Za-z0-9_-]+)\]\]", res)[1]) == "Deletes per day"

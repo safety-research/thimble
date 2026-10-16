@@ -49,7 +49,7 @@ async def test_create_and_run_print(client, corpus, workspaces_tmp):
     r = await client.post(f"/api/ws/{corpus}/notebooks/main/cells", json={"code": "print(1+1)"})
     assert r.status_code == 200
     cell = r.json()
-    assert len(cell["id"]) == 8 and cell["status"] == "idle" and cell["exec_count"] is None
+    assert cell["id"] == cell["slug"] == "card" and cell["status"] == "idle" and cell["exec_count"] is None
     assert cell["created_by"] == "user" and cell["outputs"] == []
 
     r = await client.post(f"/api/ws/{corpus}/notebooks/main/cells/{cell['id']}/run")

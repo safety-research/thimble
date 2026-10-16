@@ -1031,5 +1031,6 @@ def _resolve_cell(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, An
             meta["span"] = {"out": p["out"], "line": n, "text": "\n".join(lines[n - 1 : last])}
             if m_end is not None:
                 meta["span"]["end_line"] = last
-    return {"ref": ref, "kind": "cell", "cell_id": p["cell_id"], "notebook": nb_id, "record": cell,
+    # the card's id, also when the ref names it by its name (notebook.find_cell)
+    return {"ref": ref, "kind": "cell", "cell_id": str(cell.get("id") or p["cell_id"]), "notebook": nb_id, "record": cell,
             "excerpt": excerpt[:EXCERPT_MAX], "meta": meta}
