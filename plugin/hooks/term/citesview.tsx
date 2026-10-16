@@ -65,8 +65,8 @@ export async function citeItems(cx: Ctx): Promise<CiteItem[]> {
   return out.map((it, i) => ({ it, i })).sort((a, b) => ORDER.indexOf(a.it.verdict) - ORDER.indexOf(b.it.verdict) || a.i - b.i).map(x => x.it)
 }
 
-/** A verdict's glyph and words: `×` red for a value that is not there, `!` red for one no script checked, `◌` while it
- *  is checked, `✓` once found. */
+/** A verdict's glyph and words: `×` red for a value that is not there, `!` red for one no script checked, a dim `◌`
+ *  while it is checked, no glyph once found (never a ✓). */
 function verdictLook(it: CiteItem): { glyph: Seg; words: string } {
   switch (it.verdict) {
     case 'refuted':
@@ -80,9 +80,9 @@ function verdictLook(it: CiteItem): { glyph: Seg; words: string } {
     case 'quiet':
       return { glyph: { s: '!', fg: COLORS.problem }, words: it.why || 'not checked' }
     case 'pending':
-      return { glyph: { s: '◌' }, words: 'checking' }
+      return { glyph: { s: '◌', fg: COLORS.dim }, words: 'checking' }
     default:
-      return { glyph: { s: '✓' }, words: 'found' }
+      return { glyph: { s: ' ' }, words: 'found' }
   }
 }
 
@@ -136,9 +136,10 @@ async function drawCitations(cx: Ctx, e: PaneEvent, _p: TermPanel): Promise<Rend
   const { Box } = els
   const cols = Math.max(30, e.props.bodyColumns)
   const items = await citeItems(cx)
-  const ok = items.filter(x => x.verdict === 'ok').length
+  // as the footer under an answer counts them: `◌ checking N` while checks run, `N failed` in red
+  const checking = items.filter(x => x.verdict === 'pending').length
   const bad = items.filter(x => x.verdict !== 'ok' && x.verdict !== 'pending').length
-  const sub: (string | Seg)[] = [`${num(items.length)} citation${items.length === 1 ? '' : 's'}`, ok ? `✓${num(ok)}` : '', bad ? { s: `×${num(bad)}`, fg: COLORS.problem } : '']
+  const sub: (string | Seg)[] = [`${num(items.length)} citation${items.length === 1 ? '' : 's'}`, checking ? `◌ checking ${num(checking)}` : '', bad ? { s: `${num(bad)} failed`, fg: COLORS.problem } : '']
   const body: RenderElement[] = [...headerEls(els as never, { title: 'Citations', cols, sub: subLine(sub) })]
   // a pick given by its ref (openCitations) or by its row's key
   const chosen = items.find(x => x.key === citePick) ?? items.find(x => x.ref === citePick) ?? items[0]

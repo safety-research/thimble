@@ -63,7 +63,7 @@ export function tintOf(hex: string, theme: Theme, share: number): string {
 }
 
 // What each colour means (SPEC.md, "The visual system", section 4): letters in the text colour or dim; lines in
-// the rule grey; links in blue; a panel's title and its selected row in the accent; the word "new" in green; a palette
+// the rule grey; links in blue; citations in purple; a panel's title and its selected row in the accent; the word "new" in green; a palette
 // hue only on the glyphs and marks of a region's one colour field; red only for a problem; the selection background on
 // a choice in use. No other colour: no warning amber, and no green but "new".
 export const COLORS = {
@@ -81,8 +81,12 @@ export const COLORS = {
   selected: 'selectionBg',
   /** a problem, and only a problem */
   problem: 'error',
-  /** a link, underlined: a citation's value, the place after ↗, a label's name on a card; the "?" and "↳" margins */
+  /** a link, underlined: the place after ↗, a label's name on a card; the "?" and "↳" margins */
   link: 'remember',
+  /** a citation, underlined, wherever it stands (prose, a takeaway, a `[ card ]` chip, the prompt, its panel's title):
+   *  Claude Code's violet (rgb(175,135,255) on dark themes, rgb(135,0,255) on light, magenta on ANSI), the theme key
+   *  closest to the browser's citation purple */
+  cite: 'merged',
   /** where you are: a panel's title, the selected row */
   accent: 'suggestion',
   /** the word "new" and "N new" */

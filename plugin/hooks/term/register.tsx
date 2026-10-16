@@ -561,11 +561,11 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  // a citation typed or pasted into the prompt is painted there as the reply's are, blue and underlined
+  // a citation typed or pasted into the prompt is painted there as the reply's are, purple and underlined
   on('prompt.edit', async ($, e, next) => {
     const r = await next(e)
     if (!rt.sc) return r
-    const d = citeSpans(r.text).map(sp => ({ start: sp.at, end: sp.end, underline: true, color: COLORS.link }))
+    const d = citeSpans(r.text).map(sp => ({ start: sp.at, end: sp.end, underline: true, color: COLORS.cite }))
     return d.length ? { ...r, decorations: [...(r.decorations ?? []), ...d] } : r
   })
 

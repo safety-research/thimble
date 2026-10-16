@@ -1,5 +1,5 @@
 // Main's chat as thimble-term draws it: a reply's text on the grid (SPEC.md, "The visual system", "The
-// chat column"), each citation a link, blue and underlined (red when its place does not hold its value), and the cards
+// chat column"), each citation purple and underlined (red with × when its place does not hold its value), and the cards
 // the turn made under the turn's last reply, each once, in its last state and its border, its takeaway under it. Also
 // a side thread's answer and a document in the panel, on the panel's grid. Its data comes from thimble-term's state
 // (hooks/term.ts).
@@ -185,16 +185,16 @@ export async function citeStatus(cx: Ctx, c: Citation, v: TermVerdict | undefine
   return place
 }
 
-/** A citation as its link draws: its label, red with a problem, ◌ ✓ or × after it from thimble's links check of the
- *  card whose takeaway it is in (`card`), and its tip (its status in plain words, and why for a problem). A chip (a
+/** A citation as its link draws: its label, purple, red with × once it failed, ◌ after it while it is checked (its
+ *  place resolved, thimble's links check of the card whose takeaway it is in, `card`), and its tip (its status in plain words, and why for a problem). A chip (a
  *  citation with no words of its own, `[ card ]`) has its place in full words first in its tip (`card "How many pages…"
  *  · found`), since its brackets name it short. */
 export async function chipOf(cx: Ctx, c: Citation, card?: string): Promise<ChipView> {
   const chip = isChip(c) ? { chip: true } : {}
   // "Citation marks" off: a plain link, unchecked
   if (!featureOn('citationMarks')) return { label: citeLabel(c), state: 'link', mark: '', spin: false, tip: '', ...chip }
-  // a label's link (`[33](concept:<id>/yes)`): blue, no check, a click opens the label at its value; in a card's
-  // takeaway, red once the label counts another number (a verdict changed the counts), its tip the count now
+  // a label's link (`[33](concept:<id>/yes)`): purple, no check, a click opens the label at its value; in a card's
+  // takeaway, red with × once the label counts another number (a verdict changed the counts), its tip the count now
   const lr = labelRef(c.ref)
   if (lr) {
     const opens = lr.value ? `opens the label at its value ${quoted(lr.value)}` : 'opens the label'
@@ -204,7 +204,7 @@ export async function chipOf(cx: Ctx, c: Citation, card?: string): Promise<ChipV
     else if (!now) rt.wantLabels = true
     const stale = card ? labelLinkStale(c.display, now, lr.value) : ''
     const named = chip.chip && now?.name ? `label ${quoted(clip(now.name, 40))} · ` : ''
-    return { label: citeLabel(c), state: stale ? 'problem' : 'link', mark: '', spin: false, tip: stale ? `${stale} · ${opens}` : `${named}${opens}`, ...chip }
+    return { label: citeLabel(c), state: stale ? 'failed' : 'link', mark: stale ? '×' : '', spin: false, tip: stale ? `${stale} · ${opens}` : `${named}${opens}`, ...chip }
   }
   const v = await cx.verdict(cid(c.raw))
   const check = card ? linkCheck((await cx.card(card))?.links, c) : {}

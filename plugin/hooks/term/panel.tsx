@@ -1656,7 +1656,7 @@ function framedCard(cx: Ctx, e: PaneEvent, card: CardData, w: number, lines: Lin
   )
 }
 
-/** The sentence a citation stands in, its value blue and underlined (a chip blue, `[ card ]`), in quotation marks. */
+/** The sentence a citation stands in, its value purple and underlined (a chip too, `[ card ]`), in quotation marks. */
 function sourceSegs(sentence: string, c: Citation): Line {
   const flat = plainCites(sentence).replace(/\s+/g, ' ').trim()
   // a citation written without words stands in the sentence as its chip (`[ revisions.jsonl line 1 ]`)
@@ -1665,7 +1665,7 @@ function sourceSegs(sentence: string, c: Citation): Line {
   // in quotation marks of the kind its words do not hold (lib.ts quoted)
   const [open, close] = quoted(flat) === flat ? ['', ''] : flat.includes('"') ? ['“', '”'] : ['"', '"']
   if (at < 0) return [{ s: `${open}${flat}${close}` }]
-  return [{ s: `${open}${flat.slice(0, at)}` }, c.display === null ? { s: shown, fg: LINK } : linkSeg(shown), { s: `${flat.slice(at + shown.length)}${close}` }]
+  return [{ s: `${open}${flat.slice(0, at)}` }, { s: shown, fg: COLORS.cite, u: true }, { s: `${flat.slice(at + shown.length)}${close}` }]
 }
 
 /** In a citation opened from a side thread, a field whose question goes on in that thread, about the citation; the
@@ -1720,13 +1720,13 @@ async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   const cardId = /^(?:card|cell):([A-Za-z0-9_-]+)/.exec(c.ref)?.[1]
   // a place cited with no words keeps its line where its path is cut (`…/agent-ad502eca.jsonl line 20`)
   const label = c.display === null && fileRef(c.ref) ? cutRef(c.ref, Math.max(8, cols - 6)) : cut(await citeTitle(cx, c), Math.max(8, cols - 6))
-  // the takeaway's card's links check, as the chat marks the citation: ◌ while it runs, ✓ once a script got the value, a
-  // red × when it got another
+  // the takeaway's card's links check, as the chat marks the citation: a dim ◌ while it runs, nothing once a script got
+  // the value, a red × when it got another
   const check = p.of ? linkCheck((await cx.card(p.of))?.links, c) : {}
   const look = chipLook(status, undefined, check.state)
-  const bad = red || look.state === 'failed'
-  const mark: Seg | null = !v || look.spin ? { s: ' ◌' } : bad ? { s: ' ×', fg: COLORS.problem } : look.mark ? { s: ` ${look.mark}` } : null
-  const titleSegs: Line = [{ s: label, b: true, fg: bad ? COLORS.problem : LINK, u: true }, ...(mark ? [mark] : [])]
+  const bad = !look.spin && (red || look.state === 'failed')
+  const mark: Seg | null = !v || look.spin ? { s: ' ◌', fg: COLORS.dim } : bad ? { s: ' ×', fg: COLORS.problem } : null
+  const titleSegs: Line = [{ s: label, b: true, fg: bad ? COLORS.problem : COLORS.cite, u: true }, ...(mark ? [mark] : [])]
   const opens = f ? () => openFile(cx, f.path, Math.max(1, (f.line ?? 1) - 5), f.line) : cardId ? () => openCard(cx, cardId) : null
   const body: RenderElement[] = []
   // the title row's current step: the value as its link, a click on it opening its place

@@ -150,7 +150,7 @@ test("main's end token is hidden; a reply that is only the token draws nothing",
   await some.unmount()
 })
 
-test("a reply's citation is a link, blue and underlined; a click opens the citation panel on its place with the value marked", async ($, on) => {
+test("a reply's citation is a link, purple and underlined; a click opens the citation panel on its place with the value marked", async ($, on) => {
   const w = world(on)
   await start($, w)
   const ui = (await $.ui.mount(MESSAGE('m4', 'The README says [4,579](README.md#L3) pages.'))) as unknown as M
@@ -158,7 +158,7 @@ test("a reply's citation is a link, blue and underlined; a click opens the citat
   await ui.redraw()
   const para = await ui.drawn({ in: 'para-1' })
   expect(shown(para)).toContain('4,579')
-  expect(JSON.stringify(para)).toMatch(/"color":"remember"[^}]*"underline":true[^}]*\},"children":\["4,579"\]/)
+  expect(JSON.stringify(para)).toMatch(/"color":"merged"[^}]*"underline":true[^}]*\},"children":\["4,579"\]/)
   // the citation sits after "The README says " on the paragraph's first row
   await ui.pointer({ type: 'down', x: 18, y: 0, button: 'left', in: 'para-1' } as never)
   await ui.pointer({ type: 'up', x: 18, y: 0, button: 'left', in: 'para-1' } as never)

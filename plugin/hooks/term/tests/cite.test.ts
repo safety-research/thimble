@@ -142,7 +142,7 @@ test("a citation opened from a side thread has a `follow-up` field: its question
   await pane.unmount()
 })
 
-test("a takeaway's citation opens a panel that agrees with the chat: ✓ after its title, and `a script got the same number`", async ($, on) => {
+test("a takeaway's citation opens a panel that agrees with the chat: no mark after its purple title (never ✓), and `a script got the same number`", async ($, on) => {
   const w = world(on)
   Object.assign(w.cells.ff73e071!, { verification: { status: 'ok', links: { status: 'ok', checked: true, resolved: [{ value: '4579', ref: 'card:ff73e071#pages/TOTAL' }], broken: [] } } })
   await start($, w)
@@ -153,15 +153,16 @@ test("a takeaway's citation opens a panel that agrees with the chat: ✓ after i
   await $.turn.complete({ turnId: 't1', answer: 'Here.', durationMs: 5, reason: 'answer', isAborted: false } as never)
   await w.clock.advance(300)
   const ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
-  // the takeaway: `The export holds 4579 ✓ pages …`, the value at column 17
+  // the takeaway: `The export holds 4579 pages …`, the value at column 17
   await ui.pointer({ type: 'down', x: 18, y: 0, button: 'left', in: 'para-tk-t0-1' } as never)
   await ui.pointer({ type: 'up', x: 18, y: 0, button: 'left', in: 'para-tk-t0-1' } as never)
   await ui.unmount()
   await w.clock.settle()
   const pane = (await $.ui.mount(PANE)) as unknown as M
   const tree = await pane.drawn()
-  // the title (a link, drawn in a Client): the value, then ✓ in the text color
-  expect(JSON.stringify(tree)).toContain('{"s":"4579","b":true,"fg":"remember","u":true},{"s":" ✓"}')
+  // the title (a link, drawn in a Client): the value, purple and underlined, and no mark after it
+  expect(JSON.stringify(tree)).toContain('{"s":"4579","b":true,"fg":"merged","u":true}')
+  expect(JSON.stringify(tree)).not.toContain('✓')
   expect(shown(await pane.find({ key: 'cite-sub' }))).toBe('found, and a script got the same number')
   await pane.unmount()
 })

@@ -6,7 +6,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { paraLayout } from '../cite'
+import { chipLook, paraLayout } from '../cite'
 import { KEPT_FILE, parseKept } from '../kept'
 import { COLORS } from '../paint'
 import { CWD, WS, shown, world } from './fixtures'
@@ -57,7 +57,7 @@ test("a takeaway's citation of a value the card's code types in is a red × that
   await ui.unmount()
 })
 
-test("a takeaway's citations take thimble's links check: ✓ once it found the value, a red × with what the place shows, ◌ while it runs", async ($, on) => {
+test("a takeaway's citations take thimble's links check: no mark once it found the value (never ✓), a red × with what the place shows, ◌ while it runs", async ($, on) => {
   const w = world(on)
   Object.assign(w.cells.ff73e071!, {
     verification: { status: 'ok', links: { status: 'partial', checked: true, resolved: [{ value: '4579', ref: 'card:ff73e071#pages/TOTAL' }], broken: [{ value: '14592', ref: 'card:ff73e071#revisions/TOTAL', why: 'the place shows 14591', source: '14591' }] } },
@@ -66,7 +66,7 @@ test("a takeaway's citations take thimble's links check: ✓ once it found the v
   await turn($, w, [['r1', 'Here.']])
   let ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
   let chips = await chipsOf(ui, 'para-tk-t0-1')
-  expect(chips[0]).toMatchObject({ label: '4579', state: 'link', mark: '✓', spin: false })
+  expect(chips[0]).toMatchObject({ label: '4579', state: 'link', mark: '', spin: false })
   expect(chips[0]!.tip).toBe('found on the card, and a script got the same number')
   expect(chips[1]).toMatchObject({ label: '14592', state: 'failed', mark: '×' })
   expect(chips[1]!.tip).toBe('not found on the card, but a script got 14591 · the place shows 14591')
@@ -96,7 +96,7 @@ test("a citation's tip says its status in plain words: where it was found, a val
     'found in README.md line 5; its value is not checked',
     'not found: README.md line 99 does not exist · the place does not resolve: line 99 out of range (README.md has 20 lines)',
   ])
-  expect(chips[2]!.state).toBe('problem')
+  expect(chips[2]).toMatchObject({ state: 'failed', mark: '×', spin: false })
   await ui.unmount()
 })
 
@@ -184,6 +184,26 @@ test("the footer under a turn's answer: its citations and cards dim, its problem
   await pane.unmount()
 })
 
+test("a citation is purple and underlined, a dim ◌ right after it while it is checked, nothing once found, red with × once it failed for good", () => {
+  const runs = [{ text: 'It holds ' }, { text: '4,579', cite: { raw: '[[4,579|README.md#L3]]', ref: 'README.md#L3', display: '4,579' } }, { text: ' pages.' }]
+  const draw = (look: { state: 'link' | 'failed'; mark: string; spin: boolean }) => paraLayout({ prefix: '', heading: 0, quote: false, runs }, [{ label: '4,579', tip: '', ...look }], 80, -1).lines.flat()
+  // checking: purple, then a dim ◌ a cell after it
+  let segs = draw(chipLook('pending', undefined, undefined) as never)
+  expect(segs.find(g => g.s === '4,579')).toMatchObject({ fg: COLORS.cite, u: true })
+  expect(segs.find(g => g.s.includes('◌'))).toMatchObject({ s: ' ◌', fg: COLORS.dim })
+  // found, and a script got the same number: no mark at all
+  expect(chipLook('ok', undefined, 'verified')).toEqual({ state: 'link', mark: '', spin: false })
+  segs = draw(chipLook('ok', undefined, 'verified') as never)
+  expect(segs.map(g => g.s).join('')).toBe('It holds 4,579 pages.')
+  // the links check still runs on a value the place does not show: purple and ◌, not red yet
+  expect(chipLook('differs', undefined, 'running')).toEqual({ state: 'link', mark: '', spin: true })
+  // not there for good: red, × right after it
+  segs = draw(chipLook('differs', undefined, undefined) as never)
+  expect(segs.find(g => g.s === '4,579')).toMatchObject({ fg: COLORS.problem, u: true })
+  expect(segs.find(g => g.s.includes('×'))).toMatchObject({ s: ' ×', fg: COLORS.problem })
+  expect(chipLook('ok', undefined, 'refuted')).toEqual({ state: 'failed', mark: '×', spin: false })
+})
+
 test("a prompt thimble-term gave main itself gets no footer", async ($, on) => {
   const w = world(on)
   await start($, w)
@@ -254,13 +274,13 @@ test('a view main proposed: a `↳ view` row under the answer, its state dim, `n
   await ui.unmount()
 })
 
-test('a citation typed or pasted into the prompt is painted blue and underlined', async ($, on) => {
+test('a citation typed or pasted into the prompt is painted purple and underlined', async ($, on) => {
   const w = world(on)
   await start($, w)
   // prompt.edit is the composer's event, raised here as Claude Code raises it
   const edit = ($.prompt as unknown as { edit: (e: unknown) => Promise<unknown> }).edit
   const r = (await edit({ origin: { kind: 'composer' }, text: 'see ', cursor: 4, start: 4, end: 4, inputText: '[[4579|card:ff73e071#pages/TOTAL]] now' } as never)) as { text: string; decorations?: { start: number; end: number; underline?: boolean; color?: string }[] }
-  expect(r.decorations).toEqual([{ start: 4, end: 38, underline: true, color: 'remember' }])
+  expect(r.decorations).toEqual([{ start: 4, end: 38, underline: true, color: COLORS.cite }])
   void w
 })
 
@@ -343,7 +363,7 @@ test("a citation of a card's value in main's prose is checked again when the car
   await w.clock.advance(1100)
   ui = (await $.ui.mount(MESSAGE('m1', text))) as unknown as M
   const chip = (await chipsOf(ui, 'para-1'))[0]!
-  expect(chip.state).toBe('problem')
+  expect(chip).toMatchObject({ state: 'failed', mark: '×' })
   expect(chip.tip).toBe('not found on the card · the place shows 4000')
   await ui.unmount()
 })
@@ -501,6 +521,7 @@ test('a citation that names only its place (`[↗](ref)`) is a chip too: a card\
   const w = world(on)
   await start($, w)
   const text = 'The files hold 19913 events [↗](card:a0frame0@out0#L1). See [↗](README.md#L3) for the format.'
+  w.resolve['card:a0frame0@out0#L1'] = { ref: 'card:a0frame0@out0#L1', kind: 'cell', cell_id: 'a0frame0', excerpt: '19913', meta: { span: { line: 1 } } }
   await turn($, w, [['r1', text]])
   let ui = (await $.ui.mount(MESSAGE('r1', text))) as unknown as M
   await w.clock.advance(1100)
@@ -515,7 +536,7 @@ test('a citation that names only its place (`[↗](ref)`) is a chip too: a card\
   await ui.unmount()
 })
 
-test('a chip is drawn whole on one row, in the link color with no underline, its brackets its frame; inverse under the pointer', () => {
+test('a chip is drawn whole on one row, purple and underlined as every citation, its brackets its frame; inverse under the pointer', () => {
   const runs = [{ text: 'The pages are spread over four wikis, as the card shows ' }, { text: '[ card output line 1 ]', cite: { raw: '[[card:a0frame0@out0#L1]]', ref: 'card:a0frame0@out0#L1', display: null } }, { text: '.' }]
   const chip = { label: '[ card output line 1 ]', state: 'link' as const, mark: '', spin: false, tip: '', chip: true }
   for (const cols of [40, 60, 64, 80]) {
@@ -523,13 +544,13 @@ test('a chip is drawn whole on one row, in the link color with no underline, its
     const segs = lay.lines.flat().filter(g => g.s.includes('[') || g.s.includes(']'))
     // one segment, on one row, never cut at its spaces
     expect(segs.map(g => g.s)).toEqual(['[ card output line 1 ]'])
-    expect(segs[0]!.fg).toBe(COLORS.link)
-    expect(segs[0]!.u).toBeUndefined()
+    expect(segs[0]!.fg).toBe(COLORS.cite)
+    expect(segs[0]!.u).toBe(true)
     expect(lay.spans.filter(s => s.chip === 0).length).toBe(1)
   }
   const hover = paraLayout({ prefix: '', heading: 0, quote: false, runs }, [chip], 80, 0)
   expect(hover.lines.flat().find(g => g.s.startsWith('['))!.inv).toBe(true)
-  // a citation with words keeps its underline
+  // a citation with words is underlined too
   const value = paraLayout({ prefix: '', heading: 0, quote: false, runs: [{ text: '4,579', cite: { raw: '[[4,579|README.md#L3]]', ref: 'README.md#L3', display: '4,579' } }] }, [{ label: '4,579', state: 'link', mark: '', spin: false, tip: '' }], 80, -1)
   expect(value.lines.flat().find(g => g.s === '4,579')!.u).toBe(true)
 })
@@ -682,7 +703,7 @@ test("a takeaway's link to a label turns red once the label counts another numbe
   await turn($, w, [['r0', 'Labelled.']], { tool: 'mcp__plugin_thimble_thimble__apply_label', text: "The label's card is [[card:l0label0]].", input: {} })
   const ui = (await $.ui.mount(MESSAGE('r0', 'Labelled.'))) as unknown as M
   const chips = await chipsOf(ui, 'para-tk-t0-1')
-  expect(chips[0]).toMatchObject({ label: '5191', state: 'problem', mark: '' })
+  expect(chips[0]).toMatchObject({ label: '5191', state: 'failed', mark: '×' })
   expect(chips[0]!.tip).toBe('the label counts 5,190 now, with your verdicts · opens the label at its value "proxy-link"')
   // the records it labeled are still 14,591: blue
   expect(chips[1]).toMatchObject({ label: '14591', state: 'link' })
@@ -701,7 +722,7 @@ test("a date in words in main's reply is checked: one its place does not write i
   await ui.unmount()
   ui = (await $.ui.mount(MESSAGE('r1', text))) as unknown as M
   const chips = await chipsOf(ui, 'para-1')
-  expect(chips[0]).toMatchObject({ label: '24 June', state: 'problem' })
+  expect(chips[0]).toMatchObject({ label: '24 June', state: 'failed', mark: '×' })
   expect(chips[0]!.tip).toContain('not found on the card')
   expect(chips[1]).toMatchObject({ label: '23 June', state: 'link' })
   expect(chips[1]!.tip).toBe('found on the card')
