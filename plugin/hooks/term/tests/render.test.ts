@@ -165,13 +165,13 @@ test("a reply's citation is a link, purple and underlined; a click opens the cit
   await ui.unmount()
   expect(w.opened).toContain('thimble')
   await w.clock.settle()
-  const pane = (await $.ui.mount(PANE)) as unknown as M
+  let pane = (await $.ui.mount(PANE)) as unknown as M
   const text = shown(await pane.drawn())
-  // the title is the value as a link to its place; its status in plain words under it; then where it is from and its lines
+  // the title is the value as a link to its place; then the sentence it stands in, its place as a link and its lines;
+  // its state in the bar above the entry box (MATT-NOTES "Mockup feedback", panel C)
   expect(shown(await pane.drawn({ in: 'cite-title' }))).toBe('4,579')
-  // its status says `found` alone: the `from` row names the place (live check New 7)
-  expect(shown(await pane.find({ key: 'cite-sub' }))).toBe('found')
-  expect(text).toContain('fromREADME.md line 3')
+  expect(shown(await pane.drawn({ in: 'cite-place' }))).toBe('↗ README.md line 3')
+  expect(shown(await pane.find({ key: 'cite-bar' }))).toBe('checked ›history 0')
   // the cited lines: a window over the file (panel.tsx citeWindow), drawn by its Client
   const lines = await pane.drawn({ in: 'm:cite-lines' })
   expect(shown(lines)).toContain('An export of 4,579 wiki pages')
@@ -181,14 +181,17 @@ test("a reply's citation is a link, purple and underlined; a click opens the cit
   // the sentence it stands in, its value a link; no way back from main, so no `b`; no `in files` (the title opens it)
   expect(text).toContain('source')
   expect(text).toContain('"The README says 4,579 pages."')
-  // how it was verified, and the way to ask for a script where no code verified it; its history
-  expect(text).toContain('a to ask · f for its file · s for a script · x to close')
-  expect(text).toContain('thimble read the cited line and found the value there; no script recomputed it')
-  expect(text).toContain('unchanged since Claude wrote it')
+  // how it was verified, and the way to ask for a script where no code verified it, once `checked` is pressed
+  expect(text).toContain('a to ask · f for its file · v for how it was verified · s for a script · x to close')
   expect(text).not.toContain('in files')
   // the cited value on the citation's purple; no right-click menu anywhere
   expect(JSON.stringify(lines)).toMatch(citedText('4,579'))
   expect(text).not.toContain('open its lines')
+  await pane.press({ key: 'cite-state' })
+  await w.clock.settle()
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  expect(shown(await pane.find({ key: 'cite-how' }))).toBe('thimble read the cited line and found the value there; no script recomputed itask for a script')
   await pane.unmount()
 })
 

@@ -1022,6 +1022,14 @@ const DAY_MONTH_RE = /^(?:(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?|([A-Za-
 const ISO_DATE_RE = /(?<![\d-])(?:(\d{4})-)?(\d{2})-(\d{2})(?![\d-])/g
 const STAMP_CLOCK_RE = /^[T ](\d{1,2}:\d{2}(?::\d{2})?)(?![\d:])/
 const CLOCK_RE = /(?<![\d:])(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(?![\d:])/g
+// a clock time alone, as a value prose cites (`14:52`, `14:52:11`, `14:52:11.325`, `09:38 UTC`)
+const CLOCK_ONLY_RE = /^\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:\s*(?:UTC|GMT|Z))?$/i
+
+/** Whether a shown value is a clock time alone (`14:52`, `14:52:11 UTC`): a value its place can show, as a number is
+ *  (backend cite.is_clock). */
+export function isClock(display: string): boolean {
+  return CLOCK_ONLY_RE.test(display.trim())
+}
 
 /** The month, day, year and time of a shown value that is a day and a month in words (`23 June`, `4 June 2026 at
  *  10:53:40 UTC`), or null for any other words (backend cite._date_words). */
@@ -1095,11 +1103,13 @@ export function dateSpans(display: string, line: string): number[][] {
 }
 
 /** Whether a shown value is in a text: a number must match a whole number of it, a day and a month in words a date it
- *  writes in digits (dateIn), anything else is a substring. */
+ *  writes in digits (dateIn), a clock time a clock time it writes (clocksIn: `14:52` at `2026-08-30T14:52:11`, never
+ *  `4:52` at `14:52`), anything else is a substring. */
 export function valueIn(display: string, text: string): boolean {
   for (const m of text.matchAll(NUM_RE)) if (shownMatches(display, m[0])) return true
   if (dateIn(display, text)) return true
   const d = display.trim()
+  if (isClock(d)) return clocksIn(d, text)
   if (new RegExp(`^(?:${NUM_RE.source})$`).test(d)) return false
   let words = d
   if (words.length > 2 && QUOTES.includes(words[0]!) && QUOTES.includes(words.at(-1)!)) words = words.slice(1, -1)

@@ -475,6 +475,72 @@ test("a line chart over dates names its x in words, as a bar chart's labels read
 
 // ------------------------------------------------------------------------------------------------ the title row
 
+test("the citation panel as panel C: where the citation stands, its place as a link, its lines, then one bar above the entry box whose parts open above it", async ($, on) => {
+  // MATT-NOTES "Mockup feedback" (mock3/citepanel2/panels.png): one bottom bar for the state and the history
+  const w = world(on)
+  Object.assign(w.cells.ff73e071!, {
+    takeaway: 'The README says [[4,579|README.md#L3]] pages.',
+    verification: { status: 'ok', links: { status: 'ok', checked: true, resolved: [], broken: [{ value: '4,579', ref: 'README.md#L3', why: 'the line says 4,579', source: '4,579', was: '4,580', corrected: true }] } },
+  })
+  await start($, w)
+  await turn($, w, 'r1', 'Here.')
+  let ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
+  await w.clock.advance(300)
+  await ui.unmount()
+  ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
+  // `The README says 4,579 pages.`: the value at column 16
+  await ui.pointer({ type: 'down', x: 17, y: 0, button: 'left', in: 'para-tk-t0-1' } as never)
+  await ui.pointer({ type: 'up', x: 17, y: 0, button: 'left', in: 'para-tk-t0-1' } as never)
+  await ui.unmount()
+  await w.clock.settle()
+  let pane = await look($, 96, 30)
+  let rows = (await screen(pane, 96)).map(r => r.trim())
+  print('the citation panel at rest', rows)
+  const title = rows.findIndex(r => r.startsWith('home › citation 4,579'))
+  expect(rows[title + 1]).toMatch(/^─+$/)
+  expect(rows[title + 2]).toBe('from the card  What does the export hold per wiki?')
+  expect(rows[title + 3]).toBe('')
+  expect(rows[title + 4]).toBe('↗ README.md line 3')
+  expect(rows[title + 5]).toBe('')
+  // the lines, then a blank row, the dotted rule and the bar; a blank row, then the entry box
+  const bar = at(rows, 'checked ›')
+  expect(rows[bar]).toBe('checked ›   history 1 ›')
+  expect(rows[bar - 1]).toMatch(/^┄+$/)
+  expect(rows[bar - 2]).toBe('')
+  expect(rows.slice(title + 6, bar - 2).join('\n')).toContain('3  An export of 4,579 wiki pages and their revisions.')
+  expect(rows[bar + 1]).toBe('')
+  expect(rows[bar + 2]).toMatch(/^─+$/)
+  expect(rows[bar + 3]).toMatch(/^❯ ask about this citation/)
+  await pane.press({ key: 'cite-history' })
+  await w.clock.settle()
+  await pane.unmount()
+  pane = await look($, 96, 30)
+  rows = (await screen(pane, 96)).map(r => r.trim())
+  print('history pressed', rows)
+  const bar2 = at(rows, 'checked ›')
+  expect(rows[bar2]).toBe('checked ›   history 1 ⌄')
+  // above the bar after a blank row: what Claude wrote, what the check made it and why, then a blank row and the rule
+  expect(rows[bar2 - 1]).toMatch(/^┄+$/)
+  expect(rows.slice(bar2 - 5, bar2 - 1)).toEqual(['', 'Claude wrote 4,580', 'the check made it 4,579 · the line says 4,579', ''])
+  // the state word opens how it was verified in its place: one part at a time
+  await pane.press({ key: 'cite-state' })
+  await w.clock.settle()
+  await pane.unmount()
+  pane = await look($, 96, 30)
+  rows = (await screen(pane, 96)).map(r => r.trim())
+  print('checked pressed', rows)
+  const bar3 = at(rows, 'checked ⌄')
+  expect(rows[bar3]).toBe('checked ⌄   history 1 ›')
+  expect(rows.join('\n')).not.toContain('Claude wrote')
+  const how = at(rows, 'thimble read the cited line')
+  expect(rows.slice(how, bar3 - 3).join(' ')).toBe("thimble read the cited line and found the value there, and its card's links check found the same value; no script recomputed it")
+  expect(rows[how - 1]).toBe('')
+  // `ask for a script` on its own row under the words, then a blank row above the dotted rule
+  expect(rows[bar3 - 3]).toBe('ask for a script')
+  expect(rows[bar3 - 2]).toBe('')
+  await pane.unmount()
+})
+
 test("every panel's header is one title row: the path, earlier steps dim and a click away, the current step in the accent and bold; no `‹ back`", async ($, on) => {
   // Matt, 2026-10-07: "If we show Home > Threads (where threads is bold & colored) where home is clickable, we don't need
   // to show < back and home > threads above. can just be one line for title. it already says 'b to go back'"

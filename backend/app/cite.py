@@ -140,6 +140,14 @@ def shown_matches(token: str, shown: str, *, negative_ok: bool = False) -> bool:
 # A clock time as prose and outputs write it: `9:38`, `09:38`, `09:38:00`, `09:38:00.5` (the seconds' fraction is
 # not compared). _NUM_RE leaves clock times alone, so a display such as `09:38` or `00:56–01:00` holds no number.
 _CLOCK_RE = re.compile(r"(?<![\d:])(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(?![\d:])")
+# a clock time alone, as a value prose cites (`14:52`, `14:52:11`, `14:52:11.325`, `09:38 UTC`)
+_CLOCK_ONLY_RE = re.compile(r"\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:\s*(?:UTC|GMT|Z))?", re.I)
+
+
+def is_clock(display: str) -> bool:
+    """Whether a display is a clock time alone (`14:52`, `14:52:11 UTC`): a value its place can show, as a number is
+    (mods/thimble-term/hooks/lib.ts isClock)."""
+    return _CLOCK_ONLY_RE.fullmatch((display or "").strip()) is not None
 
 
 def clocks_in(display: str, text: str) -> bool:
@@ -291,12 +299,15 @@ def dates_shown(text: str) -> str | None:
 def value_in(display: str, excerpt: str, *, decrease: bool = False) -> bool:
     """Whether a value-ref's display is at the place it cites (verify._value_matches, report._value_matches): a number
     must cite a whole number token of the excerpt by shown_matches (a substring hit is not a receipt), or a whole number
-    the excerpt writes in words (in_words); a day and a month in words a date the excerpt writes as digits (date_in);
+    the excerpt writes in words (in_words); a day and a month in words a date the excerpt writes as digits (date_in); a
+    clock time alone a clock time of it (clocks_in: `14:52` at `2026-08-30T14:52:11`, never `4:52` at `14:52`);
     anything else is a substring of it, ignoring commas and case, the quotation marks around a quoted phrase left out."""
     if any(shown_matches(display, t, negative_ok=decrease) for t in _NUM_RE.findall(excerpt)):
         return True
     if date_in(display, excerpt):
         return True
+    if is_clock(display):
+        return clocks_in(display, excerpt)
     if _NUM_RE.fullmatch(display.strip()):
         return in_words(display, excerpt)  # `7` where the place writes "seven"
     words = display.strip()
@@ -1446,13 +1457,14 @@ def is_label_display(display: str) -> bool:
 
 
 def shows_value(display: str) -> bool:
-    """Whether a value-ref's display shows a value its place can be checked for: a number, quoted words or a day and a
-    month in words (mods/thimble-term/hooks/cite.ts showsValue). Other words, such as `its record` or `had the answer
-    cached`, only name the place they link to (live check term-fix6: `[[its record|pages.jsonl#L2]]` was marked red
-    because the line holds no such words)."""
+    """Whether a value-ref's display shows a value its place can be checked for: a number, quoted words, a day and a
+    month in words or a clock time alone (mods/thimble-term/hooks/cite.ts showsValue; a time such as `14:52:11` was
+    found but "not checked" in the terminal). Other words, such as `its record` or `had the answer cached`, only name
+    the place they link to (live check term-fix6: `[[its record|pages.jsonl#L2]]` was marked red because the line holds
+    no such words)."""
     d = (display or "").strip()
     quoted = len(d) > 2 and d[0] in QUOTE_MARKS and d[-1] in QUOTE_MARKS
-    return bool(_NUM_RE.search(d)) or quoted or day_month(d) is not None
+    return bool(_NUM_RE.search(d)) or quoted or day_month(d) is not None or is_clock(d)
 
 
 def _canonical_token(token: str) -> str:

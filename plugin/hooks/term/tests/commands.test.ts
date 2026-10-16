@@ -52,7 +52,7 @@ test('`/thimble cite <n>` opens the n-th citation of the last reply; without n i
   await w.clock.settle()
   expect(w.panes.at(-1)!.title).toBe('Citation')
   const pane = (await $.ui.mount(PANE)) as unknown as M
-  expect(shown(await pane.find({ key: 'cite-sub' }))).toBe('found')
+  expect(shown(await pane.find({ key: 'cite-bar' }))).toBe('checked ›history 0')
   await pane.unmount()
 })
 

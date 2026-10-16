@@ -12,10 +12,10 @@
 // the reply's first row the mark takes the ⏺'s cell (Matt, 2026-10-07: "indent 2 chars and replace the dot with ? when
 // they overlap"), so a mark never adds indent.
 //
-// A citation's state (cite.ts chipLook): ` ◌` as part of it, purple and underlined, while its place is resolved or
+// A citation's state (cite.ts chipLook): a purple ◌ one space after it, not underlined, while its place is resolved or
 // thimble's links check runs on a card's takeaway, nothing once it is found (never a ✓), a red × when it is not there or the check found another
-// value. A citation the check rewrote (another value, another place) reads as rewritten, with no mark; its panel shows
-// what Claude wrote. The citation under the pointer shows its status in plain words (where it was found, or why not)
+// value. A citation the check rewrote (another value, another place) reads as rewritten, with no mark and no words
+// beside it; its panel's history shows what Claude wrote. The citation under the pointer shows its status in plain words (where it was found, or why not)
 // on a quiet box. With "Citation marks" off a citation is a plain link: no mark, no check.
 //
 // A passage of main's answer a check commented on (SPEC-v2 3.12) is tinted in the check's color (16%, 30% while its
@@ -26,7 +26,7 @@
 import type { RenderElement, ResolveInput } from 'claude-code'
 
 import type { TermCard, TermLinks, TermVerdict } from './types'
-import { SPIN, blockClaims, blockLayout, chipLook, citeLabel, passageIn, plainCites, richMarkdown, showsValue, streamLink, tintCells } from './cite'
+import { SPIN, blockClaims, blockLayout, chipLook, citeLabel, isNumber, passageIn, plainCites, richMarkdown, showsValue, streamLink, tintCells } from './cite'
 import type { ChipView, Tint } from './cite'
 import { LINK } from './chrome'
 import { cardLayout, labelHead, placeWords, titleLines, wrapRows } from './draw'
@@ -182,12 +182,16 @@ export function linkCheck(l: TermLinks | undefined, c: Citation): { state?: stri
 }
 
 /** A citation's status in plain words (SPEC.md, section 5, "Words that recur"): `◌ checking`, `found on the
- *  card`, `found in revisions.jsonl line 10566`, `found in the command's output, line 1`, `found in …; its value is not
- *  checked` for words that show no value, `not found …`; after thimble's links check, `…, and a script got the same
- *  number`, `…, but a script got 5,883` or `…; ◌ being checked`. It agrees with the link's colour and mark. */
+ *  card`, `found in revisions.jsonl line 10566`, `found in the command's output, line 1`, `found in …; only its place
+ *  is checked` for words that show no value, `not found …`; after thimble's links check, `…, and a script got the same
+ *  number` (`the same value` for a value that is no number: a quote, a date, a time), `…, but a script got 5,883` or
+ *  `…; ◌ being checked`. Words that show no value never say what a script got: only their place is checked, so the
+ *  check's pass adds nothing to `found` (MATT-NOTES "Mockup feedback": one state for a time like 14:52:11). It agrees
+ *  with the link's color and mark. */
 export async function citeStatus(cx: Ctx, c: Citation, v: TermVerdict | undefined, check: { state?: string; why?: string; source?: string } = {}): Promise<string> {
   const where = whereWords(c.ref)
   const status = v?.status ?? 'pending'
+  const valued = c.display !== null && showsValue(c.display)
   const place =
     status === 'pending' || !v
       ? '◌ checking'
@@ -195,17 +199,17 @@ export async function citeStatus(cx: Ctx, c: Citation, v: TermVerdict | undefine
         ? `not found: ${await placeName(cx, c.ref)} does not exist`
         : status === 'differs'
           ? `not found ${where}`
-          : c.display !== null && !showsValue(c.display)
-            ? `found ${where}; its value is not checked`
+          : c.display !== null && !valued
+            ? `found ${where}; only its place is checked`
             : `found ${where}`
-  if (check.state === 'verified') return `${place}, and a script got the same number`
+  if (check.state === 'verified') return valued ? `${place}, and a script got the same ${isNumber(c.display!) ? 'number' : 'value'}` : place
   if (check.state === 'refuted') return `${place}, but a script got ${check.source || 'another value'}`
   if (check.state === 'typed') return `${place}, but ${check.why || 'typed in the code, not computed'}`
   if (check.state === 'running') return `${place}; ◌ being checked`
   return place
 }
 
-/** A citation as its link draws: its label, purple, red with × once it failed, ` ◌` as part of it while it is checked (its
+/** A citation as its link draws: its label, purple, red with × once it failed, a purple ◌ after it while it is checked (its
  *  place resolved, thimble's links check of the card whose takeaway it is in, `card`), and its tip (its status in plain words, and why for a problem). A chip (a
  *  citation with no words of its own, `[ card ]`) has its place in full words first in its tip (`card "How many pages…"
  *  · found`), since its brackets name it short. */
@@ -574,9 +578,8 @@ export async function drawReply(cx: Ctx, e: ResolveInput, text: string, width: n
       for (const r of block.runs) if (r.cite) urls.push(await placeUrl(cx, r.cite.ref))
       const md = richMarkdown(block, (c, k) => {
         const v = chips[k]
-        // the spinner inside the link, part of the citation (`[3,934 ◌](…)`); a problem's × after it
-        if (v?.spin) return streamLink({ ...c, display: `${citeLabel(c)} ${SPIN}` }, urls[k] ?? '')
-        const mark = v?.mark ? ` ${v.mark}` : v?.state === 'problem' ? ' ×' : ''
+        // the spinner after the link, not underlined (`[3,934](…) ◌`); a problem's × after it
+        const mark = v?.spin ? ` ${SPIN}` : v?.mark ? ` ${v.mark}` : v?.state === 'problem' ? ' ×' : ''
         return `${streamLink(c, urls[k] ?? '')}${mark}`
       })
       push(await row(<Markdown text={md} />), gapBefore(i))

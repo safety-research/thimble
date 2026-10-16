@@ -93,10 +93,41 @@ test("a citation's tip says its status in plain words: where it was found, a val
   const chips = await chipsOf(ui, 'para-1')
   expect(chips.map(c => c.tip)).toEqual([
     'found in README.md line 3',
-    'found in README.md line 5; its value is not checked',
+    'found in README.md line 5; only its place is checked',
     'not found: README.md line 99 does not exist · the place does not resolve: line 99 out of range (README.md has 20 lines)',
   ])
   expect(chips[2]).toMatchObject({ state: 'failed', mark: '×', spin: false })
+  await ui.unmount()
+})
+
+test("a time's tip says one state: found where its line writes it, red where it writes another; words with no value say only their place is checked, and never what a script got", async ($, on) => {
+  // MATT-NOTES "Mockup feedback": a time like 14:52:11 read "its value is not checked, and a script got the same
+  // number" in its tip and "only its place is checked" in its panel
+  const w = world(on)
+  const line = '{"id": 197, "ts": "2026-08-30T14:52:11.325+00:00", "agent": "agent-07", "action": "git.ref"}'
+  w.resolve['events.jsonl#L197'] = { ref: 'events.jsonl#L197', kind: 'record', path: 'events.jsonl', line: 197, blocks: [{ text: line }], excerpt: line }
+  await start($, w)
+  const text = 'agent-07 pushed at [14:52:11](events.jsonl#L197), not at [14:58](events.jsonl#L197), as [the event](events.jsonl#L197) says.'
+  let ui = (await $.ui.mount(MESSAGE('m1', text))) as unknown as M
+  await w.clock.advance(300)
+  await ui.unmount()
+  ui = (await $.ui.mount(MESSAGE('m1', text))) as unknown as M
+  const chips = await chipsOf(ui, 'para-1')
+  expect(chips.map(c => c.tip)).toEqual(['found in events.jsonl line 197', 'not found in events.jsonl line 197 · the value is not at its place', 'found in events.jsonl line 197; only its place is checked'])
+  expect(chips.map(c => c.state)).toEqual(['link', 'failed', 'link'])
+  await ui.unmount()
+  // in a card's takeaway, once the links check passed: a time got the same value; words with no value add nothing
+  Object.assign(w.cells.ff73e071!, {
+    takeaway: 'agent-07 pushed at [[14:52:11|events.jsonl#L197]], as [[the event|events.jsonl#L197]] says.',
+    verification: { status: 'ok', links: { status: 'ok', checked: true, resolved: [{ value: '14:52:11', ref: 'events.jsonl#L197' }, { value: 'the event', ref: 'events.jsonl#L197' }], broken: [] } },
+  })
+  await turn($, w, [['r1', 'Here.']])
+  ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
+  await w.clock.advance(300)
+  await ui.unmount()
+  ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
+  const tk = await chipsOf(ui, 'para-tk-t0-1')
+  expect(tk.map(c => c.tip)).toEqual(['found in events.jsonl line 197, and a script got the same value', 'found in events.jsonl line 197; only its place is checked'])
   await ui.unmount()
 })
 
@@ -215,19 +246,21 @@ test("the footer says `◌ checking N` while its citations are checked, no `fail
   await pane.unmount()
 })
 
-test("a citation is purple and underlined, ` ◌` part of it while it is checked (`4,579 ◌`, purple and underlined too), nothing once found, red with × once it failed for good", () => {
+test("a citation is purple and underlined, a purple ◌ a space after it while it is checked, neither underlined (`4,579 ◌`), nothing once found, red with × once it failed for good", () => {
   const runs = [{ text: 'It holds ' }, { text: '4,579', cite: { raw: '[[4,579|README.md#L3]]', ref: 'README.md#L3', display: '4,579' } }, { text: ' pages.' }]
   const lay = (look: { state: 'link' | 'failed'; mark: string; spin: boolean }, hover = -1) => paraLayout({ prefix: '', heading: 0, quote: false, runs }, [{ label: '4,579', tip: '', ...look }], 80, hover)
   const draw = (look: { state: 'link' | 'failed'; mark: string; spin: boolean }) => lay(look).lines.flat()
-  // checking: purple and underlined, then ` ◌` in the same style, one space apart: one link (v9 review)
+  // checking: the value purple and underlined, then a plain space and a purple ◌, not underlined (MATT-NOTES "Mockup
+  // feedback": `14:52` underlined, space, `◌` purple plain)
   let segs = draw(chipLook('pending', undefined, undefined) as never)
   expect(segs.find(g => g.s === '4,579')).toMatchObject({ fg: COLORS.cite, u: true })
-  expect(segs.find(g => g.s.includes('◌'))).toEqual({ s: ' ◌', fg: COLORS.cite, u: true })
+  expect(segs.find(g => g.s.includes('◌'))).toEqual({ s: '◌', fg: COLORS.cite })
+  expect(segs.filter(g => g.u).map(g => g.s).join('')).toBe('4,579')
   expect(segs.map(g => g.s).join('')).toBe('It holds 4,579 ◌ pages.')
-  // the spinner's cells are the citation's: a pointer over the ◌ is over the link, and under it both are inverse
+  // the spinner's cells are the citation's: a pointer over the ◌ is over the link; under it the value is inverse
   const checking = lay(chipLook('pending', undefined, undefined) as never)
   expect(checking.spans[0]).toMatchObject({ x0: 9, x1: 16 })
-  expect(lay(chipLook('pending', undefined, undefined) as never, 0).lines.flat().filter(g => g.inv).map(g => g.s).join('')).toBe('4,579 ◌')
+  expect(lay(chipLook('pending', undefined, undefined) as never, 0).lines.flat().filter(g => g.inv).map(g => g.s).join('')).toBe('4,579')
   // found, and a script got the same number: no mark at all
   expect(chipLook('ok', undefined, 'verified')).toEqual({ state: 'link', mark: '', spin: false })
   segs = draw(chipLook('ok', undefined, 'verified') as never)
@@ -241,7 +274,7 @@ test("a citation is purple and underlined, ` ◌` part of it while it is checked
   expect(chipLook('ok', undefined, 'refuted')).toEqual({ state: 'failed', mark: '×', spin: false })
 })
 
-test("a takeaway's value the check corrected in place reads as corrected with no mark; its panel shows what Claude wrote, what the check made it, and why", async ($, on) => {
+test("a takeaway's value the check corrected in place reads as corrected with no mark and no words beside it; its panel's `history 1` shows what Claude wrote, what the check made it, and why", async ($, on) => {
   const w = world(on)
   // the links check put 14591 in place of the 14592 Claude wrote (backend heal.py `corrected`)
   Object.assign(w.cells.ff73e071!, {
@@ -258,16 +291,27 @@ test("a takeaway's value the check corrected in place reads as corrected with no
   const chips = await chipsOf(ui, 'para-tk-t0-1')
   expect(chips[0]).toMatchObject({ label: '14591', state: 'link', mark: '', spin: false })
   expect(chips[0]!.tip).not.toContain('correct')
+  // no inline words for the rewrite (MATT-NOTES "Mockup feedback"): the card reads as it is now, nothing names 14592
+  const card = JSON.stringify(await ui.drawn())
+  expect(card).toContain('"label":"14591"')
+  expect(card).not.toMatch(/14592|rewritten|history on click/)
   // `The export holds 14591 revisions.`: the value at column 17
   await ui.pointer({ type: 'down', x: 18, y: 0, button: 'left', in: 'para-tk-t0-1' } as never)
   await ui.pointer({ type: 'up', x: 18, y: 0, button: 'left', in: 'para-tk-t0-1' } as never)
   await ui.unmount()
   await w.clock.settle()
-  const pane = (await $.ui.mount(PANE)) as unknown as M
+  let pane = (await $.ui.mount(PANE)) as unknown as M
+  // at rest only the bar says it: `checked ›   history 1 ›`
+  expect(shown(await pane.find({ key: 'cite-bar' }))).toBe('checked ›history 1 ›')
+  expect(shown(await pane.drawn())).not.toContain('Claude wrote')
+  await pane.press({ key: 'cite-history' })
+  await w.clock.settle()
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
   const text = shown(await pane.drawn())
-  expect(text).toMatch(/Claude wrote *14592/)
-  expect(text).toMatch(/check made it *14591/)
-  expect(text).toMatch(/why *the cited place shows 14591/)
+  expect(shown(await pane.find({ key: 'cite-history-0' }))).toBe('Claude wrote 14592')
+  expect(shown(await pane.find({ key: 'cite-history-1' }))).toBe('the check made it 14591 · the cited place shows 14591')
+  expect(shown(await pane.find({ key: 'cite-bar' }))).toBe('checked ›history 1 ⌄')
   expect(text).not.toContain('×')
   await pane.unmount()
 })
@@ -399,13 +443,13 @@ test("while main's reply streams, Claude Code is handed links and a card's place
   expect(stored.at(-1)).toBe(reply)
 })
 
-test('off the terminal a cited paragraph is Markdown, each citation a link to its file (its ◌ inside the link while it is checked) and a problem marked ×', async ($, on) => {
+test('off the terminal a cited paragraph is Markdown, each citation a link to its file (its ◌ after the link while it is checked, not underlined) and a problem marked ×', async ($, on) => {
   const w = world(on)
   await start($, w)
   const text = 'It says [4,579](README.md#L3) pages and [12](README.md#L99) wikis.'
   let ui = await $.ui.mount(MESSAGE('m1', text, 'mobile'))
-  // not checked yet: the spinner is part of the link's words
-  expect(JSON.stringify(await ui.drawn())).toContain(`It says [4,579 ◌](file://${CWD}/README.md) pages`)
+  // not checked yet: the spinner after the link, outside its words, so it is not underlined
+  expect(JSON.stringify(await ui.drawn())).toContain(`It says [4,579](file://${CWD}/README.md) ◌ pages`)
   await w.clock.advance(300)
   await ui.unmount()
   ui = await $.ui.mount(MESSAGE('m1', text, 'mobile'))

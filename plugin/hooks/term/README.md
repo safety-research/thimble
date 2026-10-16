@@ -55,10 +55,12 @@ Claude Code's panel chrome, no right-click menu.
   prose and the cards share one left edge, column 2, Claude Code's own (the ⏺ row's text), and one width: the
   terminal's, less 2 and the margin, with no measure; the cards follow the text and each other border to border. Each citation, `[[value|ref]]` or
   the Markdown link main writes for the terminal, is a link, purple and underlined; while it is checked (its place
-  resolved by `thimble state resolve`, and in a card's takeaway thimble's links check) ` ◌` is part of it, purple and
-  underlined too (`3,934 ◌`); nothing once it is found (never `✓`); red with a red `×` when its place does not exist or
-  does not hold its value, or the links check found another. The citation under the pointer shows its status in
-  plain words on a quiet box (`found in README.md line 3`, `found on the card; its value is not checked`, `not found: …
+  resolved by `thimble state resolve`, and in a card's takeaway thimble's links check) a purple `◌` follows it a space
+  after, neither underlined (`3,934 ◌`); nothing once it is found (never `✓`), and no words beside one a check rewrote;
+  red with a red `×` when its place does not exist or does not hold its value, or the links check found another. A
+  time (`14:52:11`) is a value, as a number is. Inside a card every citation and evidence link (an example's `↗
+  events.jsonl line 197`) is in the citation's purple. The citation under the pointer shows its status in plain words
+  on a quiet box (`found in README.md line 3`, `found in README.md line 5; only its place is checked`, `not found: …
   does not exist`, and why). A dim `·` beside a passage, in the ⏺'s column, becomes a blue `?` under the pointer (over
   the ⏺ on the reply's first row), which asks a side thread about it (a heading's about its whole section, a card's about the card); once one was asked, a
   blue `↳` stays there and opens it. While main streams,
@@ -117,13 +119,14 @@ Claude Code's panel chrome, no right-click menu.
   pane title says what it shows (`Citation`, `Threads`, `Label: …`, a card's question, a document's title). Its views:
   home (one column: views, documents, threads, cards by group with the newest open, labels, files by folder and the
   orientation's coverage line); a card with how its last run ended, `run again` (main runs `thimble-run card`), and its
-  code with what it printed; a citation (its value as a link, ` ◌` part of it while it is checked or a red `×`, its
-  verification's state in plain words, `◌ being verified` while it is checked, the sentence it stands in, `how` it was
-  verified: what thimble read and the code that computed or printed the value, or `ask for a script`, which asks a side
-  thread for one, whose script then shows; its `history`; its lines with the value on the citation's purple (the whole
-  line where it shows none), a file's as a window that ↑↓ and the wheel scroll through the whole file, or for a value
-  on a card the card's data row and code that hold it, never the plot; its entry box going on in the side thread it
-  was opened from); the threads (a tree with a root per place, `main` or `report "…"`, one row a
+  code with what it printed; a citation (its value as a link, red once it failed; the card or the sentence it stands
+  in; its place as a purple `↗` link; its lines with the value on the citation's purple (the whole line where it shows
+  none), a file's as a window that ↑↓ and the wheel scroll through the whole file, or for a value on a card the card's
+  data row and code that hold it, never the plot; one bar above the entry box, `checked ›   history N ›` (`◌ checking …`
+  while it is checked, `failed × ›` in red), its state word (`v`) opening how it was verified (what thimble read, the
+  code that computed or printed the value, what the links check got, why it failed, or `ask for a script`, which asks
+  a side thread for one, whose script then shows) and `history` (`h`) what Claude wrote and what the check made it; its
+  entry box going on in the side thread it was opened from); the threads (a tree with a root per place, `main` or `report "…"`, one row a
   thread while one is open; the selected thread under it, or alone with no tree when it is the only one: what it is
   about on one dim row, `v` showing it whole (a card in its frame, a file's cited lines, a passage's words), then its
   chat as Claude Code draws one, each question after `❯` on the prompt's background and each answer after `⏺`, its
