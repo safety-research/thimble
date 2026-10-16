@@ -1,17 +1,25 @@
 // The rows above the prompt (the AbovePrompt band, SPEC-v2 3.8): thimble's rows stand after other plugins' rows, at
 // most these, top to bottom: a panel that waits undrawn and why (the narrow fallback), the view proposal waiting for an
 // answer, the open notices (the workspace's and the terminal's own, notices.tsx), the one SSH row of a remote press
-// (offramp.ts), and last the summary line, the one row that stays:
+// (offramp.ts), and last the thimble line, the one row that stays while thimble is on (the owner's design, 10-16 21:30,
+// with the look of mock3/line2 A3 and A2's hover):
 //
-//   thimble   cards 2 new   citations 1 failed   coverage 2%   labels 1 new 3 unsure   threads 1 new   …   open ›   dismiss
+//   thimble   cards 12 •   threads 2   citations 18 ◌  1 failed   labels 3 •   checks 2 •   coverage 15%
 //
-// An item shows only after activation, only when it is not zero, and only for a feature that is on; `new` is green and
-// `×N` red. Each item is a plain Button whose press opens the panel at its section (the open is the person's own, so
-// Claude Code places it at any width); `open ›` opens home and marks nothing seen; `dismiss` marks every section seen and
-// opens nothing. The line is cut at its end to the band's width, `open ›` and `dismiss` never. A section's `new` clears
-// when the panel shows its list (labels, threads, views, documents, checks) or its item is pressed; the counts as last
-// seen are `$.state.seen` (C13), and a session's first count is what was there already, so nothing is new at
-// activation.
+// Six items, always in this order, each `name value`: the cards, the side threads, the citations of the session's
+// answers and takeaways, the labels, the checks' open comments, and the read share of the data by size. `thimble` is
+// bold, in the accent and underlined, and its press opens the panel's home (it is the line's `open ›`); a name is in
+// the accent, the color of what can be pressed, and its value bold in the text color; a bold purple `•` (the citation
+// purple) follows the value of an item with something new since the person last opened it; citations add a purple `◌`
+// while any is checked and a bold red `N failed`, two cells after, when any failed; an item whose value is 0 is dim
+// whole. The item of a feature that is off is left out. Each item is a plain Button whose press opens the panel at its
+// section (the open is the person's own, so Claude Code places it at any width); under the pointer it gets the
+// selection background, one cell past its words, and its name underlines, in place of the inverse a Button gets. The
+// line has no `dismiss`. Items stand three cells apart where all fit so, else two; where the band is too narrow even
+// then, the zero items go first, then the others from the end, never one with a `•` or a failure while another can go;
+// a dim `…` ends a line that lost any. A `•` clears when the panel shows its section (home for the cards; labels,
+// threads, checks) or its item is pressed; the counts as last seen are `$.state.seen` (C13), and a session's first
+// count is what was there already, so nothing is new at activation.
 //
 // register.tsx calls registerBand once; each hook builds its context with register.tsx's cxOf (imported, so `claude
 // plugin validate` follows `$` into it). refreshSummary (views.ts re-exports it; term.ts tick calls it when the workspace
@@ -21,7 +29,7 @@ import type { On, RenderElement } from 'claude-code'
 
 import type { AnswerComment, CoverageSummary, FeatureSettings, SummarySeen, TermPanel } from './types'
 import type { Ctx } from './ctx'
-import { cid, noControls } from './lib'
+import { citations, labelRef, noControls } from './lib'
 import { docsOf } from './model'
 import { dismissModNotice, modNotices, runNoticeAct, toastNewNotices } from './notices'
 import { browserShown, copyRemoteLink, copyTunnel, dismissLinks } from './offramp'
@@ -32,7 +40,7 @@ import { cxOf } from './ctx'
 import { PANEL, closePanel, openPanel, openPending, placedLater, readSurface, retryPending, rt, surfaceValue } from './term'
 import { keepSeen, keptSeen } from './kept'
 import { openChecks } from './checksview'
-import { openCitations } from './citesview'
+import { citeItems, openCitations } from './citesview'
 import { openCoverage, percent } from './coverageview'
 
 const ABOVE_LABEL = 16
@@ -63,7 +71,7 @@ export async function openComments(cx: Ctx): Promise<AnswerComment[]> {
   return (await cx.answerComments()).filter(c => c.status !== 'dismissed' && !hiddenComments.has(c.id))
 }
 
-/** What the summary line counts, now: each section's total, the threads' unread answers, the checks' comments. */
+/** What the thimble line's `•` compares, now: each section's total, the threads' unread answers, the checks' comments. */
 async function counts(cx: Ctx): Promise<SummarySeen & { unread: number }> {
   const home = await cx.home()
   const threads = await cx.threads()
@@ -80,12 +88,14 @@ async function counts(cx: Ctx): Promise<SummarySeen & { unread: number }> {
 }
 
 export type Section = 'cards' | 'labels' | 'docs' | 'views' | 'threads' | 'checks'
-export const SECTIONS: readonly Section[] = ['cards', 'labels', 'docs', 'views', 'threads', 'checks']
 
-/** These sections' `new` cleared: their counts now are what was seen. */
+/** These sections' `•` cleared: their counts now are what was seen. */
 export async function markSeen(cx: Ctx, sections: readonly Section[]): Promise<void> {
+  // before the session's first count (firstSeen, after the first read of the workspace) nothing is new, and counts
+  // taken now may be of nothing read yet (the home `/thimble` opens at activation): nothing to clear
+  const cur = await cx.seen()
+  if (!cur) return
   const now = await counts(cx)
-  const cur = (await cx.seen()) ?? now
   const next: SummarySeen = { ...cur, at: now.at }
   for (const s of sections) next[s] = now[s]
   await cx.setSeen(next)
@@ -112,18 +122,19 @@ export async function firstSeen(cx: Ctx): Promise<void> {
   await cx.setSeen({ cards: kept?.cards ?? now.cards, labels: kept?.labels ?? now.labels, docs: kept?.docs ?? now.docs, views: kept?.views ?? now.views, threads: now.threads, checks: now.checks, at: now.at })
 }
 
-/** A section's list opened in the panel, its `new` cleared: the open handed back, so a press's open is the person's. */
+/** A section's list opened in the panel, its `•` cleared: the open handed back, so a press's open is the person's. */
 export async function openSection(cx: Ctx, s: 'labels' | 'threads' | 'views' | 'docs'): Promise<void> {
   await markSeen(cx, [s])
   const titles = { labels: 'Labels', threads: 'Threads', views: 'Views', docs: 'Documents' }
   await openPanel(cx, { view: s, title: titles[s] })
 }
 
-/** The section a panel view is the list of, whose `new` clears when the panel shows it. */
-const LIST_OF: Record<string, Section> = { labels: 'labels', threads: 'threads', views: 'views', docs: 'docs', checks: 'checks' }
+/** The section a panel view shows, whose `•` clears when the panel shows it (home holds the cards). */
+const LIST_OF: Record<string, Section> = { home: 'cards', labels: 'labels', threads: 'threads', views: 'views', docs: 'docs', checks: 'checks' }
 
-/** The summary line's counts read again (views.ts re-exports it; term.ts tick calls it when the workspace changes): the
- *  labels' unsure counts, the first seen counts, a toast for each new notice of the workspace's. */
+/** The thimble line's counts read again (views.ts re-exports it; term.ts tick calls it when the workspace changes): the
+ *  labels' unsure counts (the panel's Labels view lists those records), the first seen counts, a toast for each new
+ *  notice of the workspace's. */
 export async function refreshSummary(cx: Ctx): Promise<void> {
   if (!rt.sc || !(await activeNow(cx))) return
   const f = await featuresOf(cx)
@@ -168,14 +179,14 @@ async function noteWriters(cx: Ctx): Promise<void> {
   }
 }
 
-// ------------------------------------------------------------------------------------------------ the summary line
+// ------------------------------------------------------------------------------------------------ the thimble line
 
-/** A share in the summary line's words, as the Coverage view and coverage.py say it (coverageview.tsx percent). */
+/** A share in the thimble line's words, as the Coverage view and coverage.py say it (coverageview.tsx percent). */
 export { percent }
 
-/** The summary line's coverage words: the read share of the data by size (`coverage 15%`, a decimal kept under 1%), as
- *  the Coverage view's total and the line under answers measure it; with no index yet (no size), the files read. One
- *  short item, no new words: the Coverage view holds searched and the rows' units. */
+/** The thimble line's coverage value: the read share of the data by size (`15%`, a decimal kept under 1%), as the
+ *  Coverage view's total and the line under answers measure it; with no index yet (no size), the files read. The
+ *  Coverage view holds searched and the rows' units. */
 export function coverageWords(s: CoverageSummary): string | null {
   if (s.size && s.size.total > 0) return percent(s.size.read, s.size.total)
   if (!(s.files.total > 0 || s.files.seen > 0)) return null
@@ -184,113 +195,113 @@ export function coverageWords(s: CoverageSummary): string | null {
 
 const num = (n: number) => Math.round(n).toLocaleString('en-US')
 
-/** One item of the summary line: its words as segments (`new` green, `×N` red), and its press. */
-export type SummaryItem = { key: string; segs: { s: string; fg?: string }[]; press: () => Promise<void> }
+/** The cells between two items of the thimble line (from the end of one's words to the start of the next one's, and
+ *  before its `…`): three where every item fits so, else two. */
+export const WIDE_GAP = 3
+export const GAP = 2
+/** The thimble line's own label, `  thimble` and the cell its hover lights after it (not the band's label column: the
+ *  line reads as one run, and its six items fit a 100-column terminal); each item is a gap past the one before. */
+export const LINE_LABEL_W = '  thimble'.length + 1
+
+/** A run of an item's words and its look: its name (in the accent, underlined under the pointer), its value (bold), a
+ *  mark in a color (`•`, `◌`, `N failed`), dim (a zero item's words). */
+export type ItemSeg = { s: string; fg?: string; bold?: boolean; dim?: boolean; name?: boolean }
+
+/** One item of the thimble line: its words, its press, whether its value is 0 (`zero`, dim whole and the first to go
+ *  where the line is cut) and whether it has a `•` or a failure (`keep`, the last to go). */
+export type SummaryItem = { key: string; segs: ItemSeg[]; press: () => Promise<void>; zero: boolean; keep: boolean }
 
 /** The width of an item's words. */
 export function itemWidth(it: Pick<SummaryItem, 'segs'>): number {
   return it.segs.reduce((n, s) => n + [...s.s].length, 0)
 }
 
-/** The citations' counts: chat citations checked and found, those still being checked, and the problems of chat
- *  citations and of the cards' links checks. */
-export async function citationCounts(cx: Ctx): Promise<{ ok: number; bad: number; pending: number }> {
-  let ok = 0
-  let bad = 0
-  let pending = 0
-  const seen = new Set<string>()
-  for (const c of await cx.citeIndex()) {
-    const id = cid(c.raw)
-    if (seen.has(id)) continue
-    seen.add(id)
-    const v = await cx.verdict(id)
-    if (v?.status === 'missing' || v?.status === 'differs') bad++
-    else if (v?.status === 'ok') ok++
-    else if (!v) pending++
-  }
+/** The citations of the session's answers and of its cards' takeaways: how many, how many are being checked, and how
+ *  many failed, as the Citations view lists them (citesview.tsx citeItems: a chat citation not found or refuted, a
+ *  takeaway's citation its links check found another value for, typed in or left unchecked). */
+export async function citationCounts(cx: Ctx): Promise<{ all: number; pending: number; bad: number }> {
+  const items = await citeItems(cx)
+  let all = items.filter(it => it.key.startsWith('chat:')).length
+  let pending = items.filter(it => it.verdict === 'pending').length
+  const bad = items.filter(it => it.verdict !== 'pending' && it.verdict !== 'ok').length
   for (const id of rt.shown) {
-    const l = (await cx.card(id))?.links as (NonNullable<Awaited<ReturnType<Ctx['card']>>>['links'] & { quiet?: unknown[] }) | undefined
-    if (l) bad += l.broken.length + (l.typed ?? []).length + (Array.isArray(l.quiet) ? l.quiet.length : 0)
+    const tc = await cx.card(id)
+    if (!tc) continue
+    const l = tc.links as (NonNullable<typeof tc.links> & { quiet?: unknown[] }) | undefined
+    const checked = l ? (Array.isArray(l.ok) ? l.ok.length : 0) + l.broken.length + (l.typed ?? []).length + (Array.isArray(l.quiet) ? l.quiet.length : 0) : 0
+    const n = Math.max(citations(tc.takeaway || '').filter(c => !labelRef(c.ref)).length, checked)
+    all += n
+    if (n && l?.pending) pending++
   }
-  return { ok, bad, pending }
+  return { all, pending, bad }
 }
 
-/** The summary line's items, in order, each only when not zero and its feature on; and whether any is new. */
-export async function summaryItems(cx: Ctx): Promise<{ items: SummaryItem[]; fresh: boolean }> {
+/** Home opened on the first new card, found by what was seen before this press (else the first new view, report or
+ *  label), and the cards seen: the press of `thimble` and of the cards' item. The `•` clears here, not only in the
+ *  panel's `state.set` hook, whose write draws the line again only at its next drawing. */
+export async function openHomeSeen(cx: Ctx): Promise<void> {
+  await openHomeNew(cx)
+  await markSeen(cx, ['cards'])
+}
+
+/** The thimble line's items, in their order: cards, threads, citations, labels, checks, coverage, each but the cards'
+ *  and the threads' only while its feature is on. */
+export async function summaryItems(cx: Ctx): Promise<SummaryItem[]> {
   const f = await featuresOf(cx)
   const now = await counts(cx)
   const seen = (await cx.seen()) ?? now
   const items: SummaryItem[] = []
-  let fresh = false
-  const isNew = (n: number) => (n > 0 ? [{ s: `${num(n)} ` }, { s: 'new', fg: COLORS.fresh }] : [])
-  const add = (key: string, word: string, parts: { s: string; fg?: string }[], press: () => Promise<void>) => {
-    if (!parts.length) return
-    const segs: { s: string; fg?: string }[] = [{ s: word }]
-    for (const p of parts) segs.push({ s: ' ' }, p)
-    items.push({ key, segs: segs.reduce<{ s: string; fg?: string }[]>((out, s) => (out.length && !s.fg && !out.at(-1)!.fg ? [...out.slice(0, -1), { s: out.at(-1)!.s + s.s }] : [...out, s]), []), press })
-  }
   const newOf = (k: Section) => Math.max(0, now[k] - seen[k])
-  const cards = newOf('cards')
-  if (cards) fresh = true
-  add('cards', 'cards', cards ? joinNew(isNew(cards)) : [], async () => {
-    await markSeen(cx, ['cards'])
-    await openHomeNew(cx)
-  })
+  // `name value`, then a `•` when something is new and the item's own marks (`N failed` two cells after what is before
+  // it, as the mockups have it); a zero item dim whole, with no marks
+  const add = (key: string, name: string, n: number, value: string, fresh: boolean, marks: ItemSeg[], press: () => Promise<void>) => {
+    const zero = n === 0
+    const segs: ItemSeg[] = zero ? [{ s: name, dim: true, name: true }, { s: ' ' }, { s: value, dim: true }] : [{ s: name, fg: COLORS.accent, name: true }, { s: ' ' }, { s: value, bold: true }]
+    if (!zero && fresh) segs.push({ s: ' ' }, { s: '•', fg: COLORS.cite, bold: true })
+    if (!zero) for (const m of marks) segs.push({ s: m.fg === COLORS.problem ? '  ' : ' ' }, m)
+    items.push({ key, segs, press, zero, keep: !zero && (fresh || marks.some(m => m.fg === COLORS.problem)) })
+  }
+  add('cards', 'cards', now.cards, num(now.cards), newOf('cards') > 0, [], () => openHomeSeen(cx))
+  const threads = (await cx.threads()).length
+  add('threads', 'threads', threads, num(threads), Math.min(now.unread, newOf('threads')) > 0, [], () => openSection(cx, 'threads'))
   if (f.citationMarks) {
     const c = await citationCounts(cx)
-    // no mark for citations that checked out: only those still being checked (◌) and those that failed (red)
-    const segs = [...(c.pending ? [{ s: `◌ checking ${num(c.pending)}`, d: true }] : []), ...(c.bad ? [{ s: `${num(c.bad)} failed`, fg: COLORS.problem }] : [])]
-    if (segs.length) add('citations', 'citations', segs, () => openCitations(cx))
+    // no mark for citations that checked out: only a `◌` while any is checked and `N failed` in red
+    const marks: ItemSeg[] = [...(c.pending ? [{ s: '◌', fg: COLORS.cite }] : []), ...(c.bad ? [{ s: `${num(c.bad)} failed`, fg: COLORS.problem, bold: true }] : [])]
+    add('citations', 'citations', c.all, num(c.all), false, marks, () => openCitations(cx))
   }
+  if (f.labels) add('labels', 'labels', now.labels, num(now.labels), newOf('labels') > 0, [], () => openSection(cx, 'labels'))
+  if (f.checks) add('checks', 'checks', now.checks, num(now.checks), newOf('checks') > 0, [], () => openChecks(cx))
   if (f.coverage) {
     const s = await cx.coverageSummary()
-    const words = s ? coverageWords(s) : null
-    if (words) add('coverage', 'coverage', [{ s: words }], () => openCoverage(cx))
+    const read = s ? (s.size && s.size.total > 0 ? s.size.read : s.files.seen) : 0
+    add('coverage', 'coverage', read > 0 ? 1 : 0, (s && coverageWords(s)) || '0%', false, [], () => openCoverage(cx))
   }
-  if (f.labels) {
-    const labels = newOf('labels')
-    if (labels) fresh = true
-    const unsure = (await cx.labelUnsure()).reduce((n, l) => n + l.noFit + l.unsure, 0)
-    add('labels', 'labels', [...joinNew(isNew(labels)), ...(unsure ? [{ s: `${num(unsure)} unsure` }] : [])], () => openSection(cx, 'labels'))
-  }
-  const threads = Math.min(now.unread, newOf('threads'))
-  if (threads) fresh = true
-  add('threads', 'threads', joinNew(isNew(threads)), () => openSection(cx, 'threads'))
-  const views = newOf('views')
-  if (views) fresh = true
-  add('views', 'views', joinNew(isNew(views)), () => openSection(cx, 'views'))
-  const docs = newOf('docs')
-  if (docs) fresh = true
-  add('docs', 'documents', joinNew(isNew(docs)), () => openSection(cx, 'docs'))
-  if (f.checks) {
-    const checks = newOf('checks')
-    if (checks) fresh = true
-    const running = (await cx.checksRunning()) > 0
-    add('checks', 'checks', [...joinNew(isNew(checks)), ...(running ? [{ s: '◌' }] : [])], () => openChecks(cx))
-  }
-  return { items, fresh }
+  return items
 }
 
-/** `N new` as one plain part and `new` in green, the parts the line's item joins with spaces. */
-function joinNew(parts: { s: string; fg?: string }[]): { s: string; fg?: string }[] {
-  return parts.length ? [{ s: parts[0]!.s.trimEnd() }, parts[1]!] : []
+/** The items that fit `room` cells (the band's width less LINE_LABEL_W), each `gap` cells past the one before (and the
+ *  first past `thimble`), in order: WIDE_GAP apart where all fit so, else GAP. Where all do not fit GAP apart, the zero
+ *  items go first, then the others from the end, those that `keep` (a `•` or a failure) last; a dim `…` (`gap` after
+ *  the last shown) ends the line. */
+export function fitItems<T extends Pick<SummaryItem, 'segs'> & Partial<Pick<SummaryItem, 'zero' | 'keep'>>>(items: readonly T[], room: number): { shown: T[]; cut: boolean; gap: number } {
+  const width = (xs: readonly T[], gap: number, cut: boolean) => xs.reduce((n, it) => n + itemWidth(it), 0) + gap * xs.length + (cut ? gap : 0)
+  for (const gap of [WIDE_GAP, GAP]) if (width(items, gap, false) <= room) return { shown: [...items], cut: false, gap }
+  const rank = (it: T) => (it.zero ? 0 : it.keep ? 2 : 1)
+  const order = items.map((it, i) => ({ it, i })).sort((a, b) => rank(a.it) - rank(b.it) || b.i - a.i)
+  const left = new Set(items)
+  for (const { it } of order) {
+    left.delete(it)
+    const shown = items.filter(x => left.has(x))
+    if (width(shown, GAP, true) <= room) return { shown, cut: true, gap: GAP }
+  }
+  return { shown: [], cut: true, gap: GAP }
 }
 
-/** The items that fit `room` cells, 3 apart, in order, the rest cut at the end (`…` dim in their place). */
-export function fitItems<T extends Pick<SummaryItem, 'segs'>>(items: readonly T[], room: number): { shown: T[]; cut: boolean } {
-  const shown: T[] = []
-  let used = 0
-  for (const [i, it] of items.entries()) {
-    const w = itemWidth(it) + (shown.length ? 3 : 0)
-    const last = i === items.length - 1
-    // a cut leaves room for its `…`
-    if (used + w + (last ? 0 : 4) <= room || (last && used + w <= room)) {
-      shown.push(it)
-      used += w
-    } else return { shown, cut: true }
-  }
-  return { shown, cut: false }
-}
+/** Under the pointer, a press of the thimble line: the selection background on its words and the cell after them,
+ *  and no inverse (the Button's own look under the pointer); the focus still inverts it. */
+const LIT = { backgroundColor: COLORS.selected }
+const NO_INVERSE = { inverse: false }
 
 // ------------------------------------------------------------------------------------------------ the band
 
@@ -435,28 +446,42 @@ export function registerBand(on: On): void {
         ]),
       )
     }
-    // the summary line, the one row that stays
-    const { items, fresh } = await summaryItems(cx)
-    if (items.length) {
-      const controls = 'open ›'.length + (fresh ? 3 + 'dismiss'.length : 0)
-      const fit = fitItems(items, cols - LW - controls - 3)
-      rows.push(
-        <Box key="above-summary" flexDirection="row">
-          {label('thimble')}
-          <Box flexDirection="row" columnGap={3} flexShrink={0}>
-            {fit.shown.map(it => (
-              <Button key={`above-summary-${it.key}`} plain dimColor onPress={it.press}>
-                {it.segs.map(s => (s.fg ? <Text color={s.fg}>{s.s}</Text> : s.s))}
-              </Button>
-            ))}
-            {fit.cut ? <Text key="above-summary-cut" dimColor>…</Text> : null}
-            <Button key="above-summary-open" label="open ›" plain onPress={() => openHomeNew(cx)} />
-            {fresh ? <Button key="above-summary-dismiss" label="dismiss" plain onPress={() => markSeen(cx, SECTIONS)} /> : null}
-          </Box>
-        </Box>,
+    // the thimble line, the one row that stays while thimble is on: `thimble` bold, in the accent and underlined, which
+    // opens home; then the items that fit. Each press stands in a keyed Box with the cell after its words, the scope of
+    // its hover (the selection background on both, the name underlined)
+    const fit = fitItems(await summaryItems(cx), cols - LINE_LABEL_W)
+    const segEl = (s: ItemSeg) =>
+      s.fg || s.bold || s.dim || s.name ? (
+        <Text {...(s.fg ? { color: s.fg } : {})} {...(s.bold ? { bold: true } : {})} {...(s.dim ? { dimColor: true } : {})} {...(s.name ? { hover: { underline: true } } : {})}>
+          {s.s}
+        </Text>
+      ) : (
+        s.s
       )
-    }
-    if (!rows.length) return theirs
+    rows.push(
+      <Box key="above-summary" flexDirection="row">
+        <Text>{'  '}</Text>
+        <Box flexDirection="row" columnGap={fit.gap - 1} flexShrink={0}>
+          <Box key="above-summary-lit-thimble" flexDirection="row" flexShrink={0} hover={LIT}>
+            <Button key="above-summary-thimble" plain hover={NO_INVERSE} onPress={() => openHomeSeen(cx)}>
+              <Text bold underline color={COLORS.accent}>
+                thimble
+              </Text>
+            </Button>
+            <Text>{' '}</Text>
+          </Box>
+          {fit.shown.map(it => (
+            <Box key={`above-summary-lit-${it.key}`} flexDirection="row" flexShrink={0} hover={LIT}>
+              <Button key={`above-summary-${it.key}`} plain hover={NO_INVERSE} onPress={it.press}>
+                {it.segs.map(segEl)}
+              </Button>
+              <Text>{' '}</Text>
+            </Box>
+          ))}
+          {fit.cut ? <Text key="above-summary-cut" dimColor>…</Text> : null}
+        </Box>
+      </Box>,
+    )
     return (
       <Box flexDirection="column">
         {theirs}

@@ -135,7 +135,7 @@ test("a session's first count is what home holds as seen, kept in the workspace;
   expect(kept().seen?.cards).toBe(14)
 })
 
-test('after a relaunch the toast counts what came before the quit and was never opened', async ($, on) => {
+test('after a relaunch the thimble line marks the cards made before the quit and never opened', async ($, on) => {
   // live check term-fix8, low quirk: no toast for the slides made before the quit and never opened
   resetKept()
   const w = world(on)
@@ -144,10 +144,9 @@ test('after a relaunch the toast counts what came before the quit and was never 
   w.states.home = { ...w.states.home, cards: 14, docs: { ...w.states.home.docs, slides: { exists: true, title: 'The relay in two slides' } } } as never
   await start($, w)
   const above = (await $.ui.mount(ABOVE)) as unknown as M
-  // 0.9.0 (SPEC-v2 3.8): the summary line's items and `open ›` in place of the toast's
-  expect(shown(await above.drawn())).toContain('cards 2 new')
-  expect(shown(await above.drawn())).toContain('documents 1 new')
-  await above.press({ key: 'above-summary-open' })
+  // 0.9.0: the thimble line's `•` after the cards' count in place of the toast's, and its cards item
+  expect(shown(await above.drawn())).toContain('cards 14 •')
+  await above.press({ key: 'above-summary-cards' })
   await above.unmount()
   await w.clock.settle()
   expect(parseKept(w.files.get(`${WS}/${KEPT_FILE}`) ?? '').seen?.cards).toBe(14)

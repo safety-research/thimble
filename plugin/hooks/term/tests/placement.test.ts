@@ -180,7 +180,10 @@ test('the row goes once the view proposal is answered or view proposals are off,
   await w.clock.advance(1100)
   above = (await $.ui.mount(aboveAt(140))) as unknown as M
   expect(await above.find({ type: 'Box', key: 'above-offer' })).toBeUndefined()
-  expect(shown(await above.drawn())).toBe('(the engine row)')
+  // only the thimble line stays after the engine's row
+  const left = shown(await above.drawn())
+  expect(left).toMatch(/^\(the engine row\)  thimble/)
+  expect(left).not.toContain('Captions')
   await above.unmount()
 })
 
@@ -272,14 +275,15 @@ test('a dismissed notice goes at once and stays gone when home is read again; a 
   await above.unmount()
 })
 
-test('the summary line above the prompt: `thimble` dim, what is new, then `open ›` and `dismiss`', async ($, on) => {
+test('the thimble line above the prompt: `thimble` (which opens home), then its six items, a `•` after what is new; no `open ›`, no `dismiss`', async ($, on) => {
   const w = world(on)
   await start($, w)
   w.states.home = { ...w.states.home, cards: 14 }
   w.stamps.set(`${WS}/notebooks`, 2)
   await w.clock.advance(1100)
   const above = (await $.ui.mount(aboveAt(140))) as unknown as M
-  expect(words(await above.find({ type: 'Box', key: 'above-summary' }))).toBe('  thimblecards 2 newopen ›dismiss')
-  expect(await above.find({ type: 'Button', key: 'above-summary-dismiss' })).toBeTruthy()
+  expect(words(await above.find({ type: 'Box', key: 'above-summary' }))).toBe('  thimble cards 14 • threads 2 citations 0 labels 1 checks 0 coverage 0% ')
+  expect(await above.find({ type: 'Button', key: 'above-summary-open' })).toBeUndefined()
+  expect(await above.find({ type: 'Button', key: 'above-summary-dismiss' })).toBeUndefined()
   await above.unmount()
 })
