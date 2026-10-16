@@ -116,10 +116,13 @@ Claude Code's panel chrome, no right-click menu.
   pane title says what it shows (`Citation`, `Threads`, `Label: …`, a card's question, a document's title). Its views:
   home (one column: views, documents, threads, cards by group with the newest open, labels, files by folder and the
   orientation's coverage line); a card with how its last run ended, `run again` (main runs `thimble-run card`), and its
-  code with what it printed; a citation (its value as a link with `◌` or a red `×`, its status in plain words, the
-  sentence it stands in, its lines with the value marked (the whole line where it shows none), a file's as a window
-  that ↑↓ and the wheel scroll through the whole file, or the card it names with the cited mark lit, a `follow-up`
-  field when opened from a side thread); the threads (a tree with a root per place, `main` or `report "…"`, one row a
+  code with what it printed; a citation (its value as a link, ` ◌` part of it while it is checked or a red `×`, its
+  verification's state in plain words, `◌ being verified` while it is checked, the sentence it stands in, `how` it was
+  verified: what thimble read and the code that computed or printed the value, or `ask for a script`, which asks a side
+  thread for one, whose script then shows; its `history`; its lines with the value on the citation's purple (the whole
+  line where it shows none), a file's as a window that ↑↓ and the wheel scroll through the whole file, or for a value
+  on a card the card's data row and code that hold it, never the plot; a `follow-up` field when opened from a side
+  thread); the threads (a tree with a root per place, `main` or `report "…"`, one row a
   thread while one is open; the selected thread under it, or alone with no tree when it is the only one: what it is
   about on one dim row, `v` showing it whole (a card in its frame, a file's cited lines, a passage's words), then its
   chat as Claude Code draws one, each question after `❯` on the prompt's background and each answer after `⏺`, its

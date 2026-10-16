@@ -7,6 +7,7 @@
 import type { ChatNav, ChatNavStep, ChatSignal, TermCard, TermFilesUi, TermHome, TermLabelUi, TermPanel, TermPending, TermThreadRow } from './types'
 import { busyWords, cardOfCell, checkOf, fixOf, linksOf, printed } from './cell'
 import type { ThimbleCell, ThimbleLabel } from './cell'
+import { SCRIPT_ASK } from './cite'
 import type { CardData, CardLabel } from './draw'
 import type { Ctx, SurfaceGot } from './ctx'
 import { act, actLong, changed, readState, signature } from './data'
@@ -279,8 +280,12 @@ async function refreshCards(cx: Ctx, labels: boolean): Promise<void> {
       await putCard(cx, cell)
     }
   }
-  // a card that waits for its run, runs or is checked is read whole, whatever its stamp says
-  for (const id of rt.shown) if (!read.has(id) && (await cx.card(id))?.busy) await loadCards(cx, [id])
+  // a card that waits for its run, runs or is checked is read whole, whatever its stamp says; so is one whose takeaway's
+  // links check runs, so its citations (in the chat and an open citation panel) say when the check ends
+  for (const id of rt.shown) {
+    const tc = read.has(id) ? undefined : await cx.card(id)
+    if (tc?.busy || tc?.links?.pending) await loadCards(cx, [id])
+  }
   if (labels) {
     // the label cards and the cards that read a label, with the labels as they are now
     rt.labelRead.clear()
@@ -409,6 +414,9 @@ export async function loadPanel(cx: Ctx, p: TermPanel): Promise<void> {
         // a file citation: the page of its file around the cited line, the start of the window the panel scrolls
         // through the whole file (panel.tsx citeWindow)
         else if (v?.path && typeof v.line === 'number' && v.lines.length) await readFilePage(cx, v.path, citePage(v.line - 10))
+        // the side thread asked for its verification script from the panel: its chat, which holds the script
+        const asked = [...(await cx.threads())].reverse().find(t => t.anchor === c.ref && (t.question ?? '').startsWith(SCRIPT_ASK))
+        if (asked) await readThread(cx, asked.id)
       }
       return
     }
@@ -1117,7 +1125,7 @@ async function followUi(cx: Ctx, apply: UiApply): Promise<void> {
 }
 
 /** The areas a panel view reads. */
-const PANEL_AREAS: Record<string, Area[]> = { home: ['cards', 'labels', 'docs', 'chats', 'views', 'agents'], files: ['labels'], file: ['labels'], views: ['views'], labels: ['labels'], label: ['labels', 'cards'], docs: ['docs', 'agents'], doc: ['docs', 'cards', 'agents', 'chats'], card: ['cards', 'labels'], cite: ['cards'], threads: ['chats'], thread: ['chats'] }
+const PANEL_AREAS: Record<string, Area[]> = { home: ['cards', 'labels', 'docs', 'chats', 'views', 'agents'], files: ['labels'], file: ['labels'], views: ['views'], labels: ['labels'], label: ['labels', 'cards'], docs: ['docs', 'agents'], doc: ['docs', 'cards', 'agents', 'chats'], card: ['cards', 'labels'], cite: ['cards', 'chats'], threads: ['chats'], thread: ['chats'] }
 
 /** One pass: what changed in the workspace since the last pass, read again where some drawing shows it. */
 export async function tick(cx: Ctx, ui: UiApply): Promise<void> {

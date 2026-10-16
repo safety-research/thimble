@@ -105,7 +105,8 @@ export type TermLinks = { pending: boolean; checked: boolean; ok: string[]; brok
 /** A citation as checked against `thimble state resolve`: ok (the place holds the value, or the citation shows none),
  *  differs (the place resolves, the value is not there), missing (the place does not resolve), pending (not checked
  *  yet). `why` says what was found; `lines` are the place's lines for the panel (`hit` on the cited ones, `spans` where
- *  the value stands), `card` the card a card ref names and `span` its cited column and row. */
+ *  the value stands), `card` the card a card ref names and `span` its cited column and row; `command` the command whose
+ *  output a call ref cites. */
 export type TermVerdict = {
   ref: string
   display: string | null
@@ -119,6 +120,7 @@ export type TermVerdict = {
   column?: string
   row?: string
   value?: string
+  command?: string
   at: number
 }
 

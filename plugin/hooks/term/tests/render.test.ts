@@ -179,7 +179,10 @@ test("a reply's citation is a link, purple and underlined; a click opens the cit
   // the sentence it stands in, its value a link; no way back from main, so no `b`; no `in files` (the title opens it)
   expect(text).toContain('source')
   expect(text).toContain('"The README says 4,579 pages."')
-  expect(text).toContain('a to ask · f for its file · x to close')
+  // how it was verified, and the way to ask for a script where no code verified it; its history
+  expect(text).toContain('a to ask · f for its file · s for a script · x to close')
+  expect(text).toContain('thimble read the cited line and found the value there; no script recomputed it')
+  expect(text).toContain('unchanged since Claude wrote it')
   expect(text).not.toContain('in files')
   // the cited value on the citation's purple; no right-click menu anywhere
   expect(JSON.stringify(lines)).toMatch(citedText('4,579'))

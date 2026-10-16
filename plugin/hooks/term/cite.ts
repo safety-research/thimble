@@ -151,6 +151,39 @@ export function scriptAim(display: string, ref: string): string {
   return `finds in the raw files the records that show what the sentence claims and ends with \`RESULT: <their place>\`, written as ${form}`
 }
 
+/** How a side thread is asked for the script that verifies a citation no code verified (the citation panel's `ask for
+ *  a script`): its question starts with these words, by which the panel finds the thread again. */
+export const SCRIPT_ASK = 'Write and run a short script that '
+
+/** The question a citation panel asks a side thread for a citation's verification script (scriptAim). */
+export function scriptQuestion(c: Citation): string {
+  return `${SCRIPT_ASK}${scriptAim(citeLabel(c), c.ref)}. Show the script and what it printed, and say whether it agrees with the citation.`
+}
+
+/** The first fenced code block of an answer (a side thread's script), its language and its code; null for none. */
+export function firstCode(text: string): { lang: string; code: string } | null {
+  const m = /^[ \t]*(`{3,}|~{3,})[ \t]*([\w+-]*)[^\n]*\n([\s\S]*?)\n[ \t]*\1[ \t]*$/m.exec(text)
+  return m ? { lang: m[2] || '', code: m[3]! } : null
+}
+
+const LITERAL_NUMBER = /^[-−]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?$/
+
+/** Where a cited value's literal stands in a line of code, or null: a number as code types it (`3908`, `3_908`,
+ *  `3,908` in a string, `3908.0`), not inside a longer number or a name; a value with words as written. */
+export function literalAt(line: string, value: string): [number, number] | null {
+  const v = value.trim().replace(/%$/, '')
+  if (!v) return null
+  if (LITERAL_NUMBER.test(v)) {
+    const [int, frac] = v.replace(/^[-−]/, '').replace(/,/g, '').split('.') as [string, string | undefined]
+    const digits = [...int].join('[,_]?')
+    const tail = frac ? `\\.${frac}\\d*` : '(?:\\.0+)?'
+    const m = new RegExp(`(?<![\\w.])-?${digits}${tail}(?![\\w])`).exec(line)
+    return m ? [m.index, m.index + m[0].length] : null
+  }
+  const at = line.indexOf(v)
+  return at >= 0 ? [at, at + v.length] : null
+}
+
 // ---------------------------------------------------------------------------------------- layout
 
 export type ChipSpan = { line: number; x0: number; x1: number; chip: number }
