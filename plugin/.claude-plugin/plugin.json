@@ -44,7 +44,7 @@
     "coverage": {
       "type": "boolean",
       "title": "Coverage",
-      "description": "What Claude's tool calls read, searched or never opened of the data files, under answers and in the panel.",
+      "description": "What Claude read or searched of the data files in this session, under answers and in the panel.",
       "default": true
     },
     "cardCheck": {
