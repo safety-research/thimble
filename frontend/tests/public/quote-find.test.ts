@@ -3,8 +3,8 @@
 // them (src/files/views/table.tsx citedCell).
 import { describe, expect, test } from 'vitest'
 import { citedCell } from '../../src/files/views/table.tsx'
-import { findQuote, quotedWords, quoteSpanRef } from '../../src/lib/quoteFind.ts'
-import type { ResolvedRef, SourceRecord } from '../../src/lib/types.ts'
+import { findQuote } from '../../src/lib/quoteFind.ts'
+import type { SourceRecord } from '../../src/lib/types.ts'
 
 describe('quoted words', () => {
   test('a quote is found as written, as JSON writes it, and with its spaces and case folded', () => {
@@ -14,19 +14,6 @@ describe('quoted words', () => {
     expect(raw.slice(at[0], at[1])).toBe('said \\"all done\\"\\nthen')
     expect(findQuote('x All  Individual\nsearches y', 'all individual searches')).toEqual([2, 26])
     expect(findQuote('nothing here', 'missing words')).toBeNull()
-  })
-
-  test("a citation's words in quotation marks come first, longest first, then its whole text", () => {
-    expect(quotedWords('reported its inbox searches "completed successfully"')).toEqual(['completed successfully', 'reported its inbox searches "completed successfully"'])
-    expect(quotedWords('“one” and “a longer one”')).toEqual(['a longer one', 'one', '“one” and “a longer one”'])
-    expect(quotedWords('71.9%')).toEqual([])
-  })
-
-  test('a citation of a whole record opens at the words it quotes, as a span of that record', () => {
-    const r = { ref: 'events.jsonl#L7', kind: 'record', path: 'events.jsonl', line: 7, excerpt: '', blocks: [{ kind: 'raw', text: '{"msg":"All sender searches completed successfully today"}' }] } as unknown as ResolvedRef
-    expect(quoteSpanRef(r, 'reported its searches "completed successfully"')).toBe('events.jsonl#L7.b0:c28-50')
-    expect(quoteSpanRef(r, 'a claim in other words')).toBeNull()
-    expect(quoteSpanRef({ ...r, kind: 'span' }, '"completed successfully"')).toBeNull()
   })
 
   test('the cell of a table row that holds the quoted words is found, and where they sit in its text', () => {

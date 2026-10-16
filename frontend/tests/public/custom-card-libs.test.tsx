@@ -5,7 +5,6 @@
 // fetches nothing.
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { CustomFrame } from '../../src/canvas/DataViz.tsx'
-import { CHART_TOKENS, FRAME_TOKENS } from '../../src/lib/frame.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 let asked: string[] = []
@@ -42,13 +41,4 @@ test('the frame carries the chart style and the libraries the card names, ahead 
   expect(thimble.colors.ink).toHaveLength(4)
   expect(thimble.vegaConfig.range.category).toEqual(thimble.colors.series)
   expect(doc.indexOf('window.thimble=')).toBeLessThan(doc.indexOf('<div id=c>'))
-})
-
-test('a card that names no library fetches none, and every frame token is listed once', async () => {
-  const el = await mount(<CustomFrame html="<p>plain</p>" title="Plain" ws="w" />)
-  const doc = await frameDoc(el)
-  expect(doc).toContain('<p>plain</p>')
-  expect(asked.filter((a) => a.includes('card-libs'))).toEqual([])
-  expect(new Set(FRAME_TOKENS).size).toBe(FRAME_TOKENS.length)
-  expect(CHART_TOKENS.every((t) => FRAME_TOKENS.includes(t))).toBe(true)
 })

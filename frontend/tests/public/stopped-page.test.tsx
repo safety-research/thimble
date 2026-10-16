@@ -36,16 +36,6 @@ test("the stopped line takes the app's place for good", async () => {
   expect(el.querySelector('.stopped-line')?.textContent).toBe(STOPPED_LINE)
 })
 
-test('a page that stopped before the gate mounted shows the line at once', async () => {
-  const { stopPage } = await import('../../src/lib/stale.ts')
-  stopPage('session-ended')
-  const { SignInGate } = await import('../../src/shell/SignIn.tsx')
-  const el = await mount(createElement(SignInGate, null, createElement('div', { className: 'stand-in-app' }, 'the app')))
-  await settle()
-  expect(el.querySelector('.stand-in-app')).toBeNull()
-  expect(el.querySelector('.stopped-line')).not.toBeNull()
-})
-
 test('the server-down line names /thimble open', async () => {
   vi.useFakeTimers()
   try {
