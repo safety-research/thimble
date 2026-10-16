@@ -48,7 +48,7 @@ Add a card, with its question and its content in one call. thimble returns `card
     "steps": {"type": "array", "items": {"type": "object", "properties": {"text": {"type": "string"}, "makes": {"type": "array", "items": {"type": "string"} }, "status": {"type": "string", "enum": ["not started", "running", "done", "needs you"]}, "note": {"type": "string", "description": "What happened in the step, in a line or two."}, "runs": {"type": "array", "items": {"type": "string"}, "description": "The description of each Agent call that runs the step, as you pass it to Agent. The card shows each one live."}, "details": {"type": "string", "description": "More about the step, such as how it works, which the analyst opens under it."} }, "required": ["text"] }, "description": "A plan card's steps in order, each one short line of what it does and the files or results it makes. A plan covers one phase, such as building and piloting, and its question names it, as in \"Plan: build the environment and pilot it\". A plan has no takeaway."},
     "follows": {"type": "string", "description": "For a plan of the next phase, card:<id> of the plan it follows."},
     "group": {"type": "string", "description": "The group's title or id. A new title makes a group."},
-    "takeaway": {"type": "string", "description": "The answer to the question in one or two sentences. In a takeaway, each number the card shows links to where the card shows it. Wrap the whole quantity and cite where you read the value, as in `[[31|card:<id>#outcome/merged]] of [[40|card:<id>#outcome/all]] runs`. On an example card, link the words of each claim to the record that shows them, as in `[[posted the answer|runs/r3.jsonl#L88]]`. A rewritten takeaway keeps every link that is right. The card's own id is written `card:<id>`, which thimble fills in."}
+    "takeaway": {"type": "string", "description": "The answer to the question in one or two sentences. Link its numbers and claims as Citations says for a takeaway. The card's own id is written `card:<id>`, which thimble fills in."}
   },
   "required": ["question"]
 }
@@ -73,7 +73,7 @@ Change a card in place and run it again, rather than adding a second card. It ta
     "libs": {"type": "array", "items": {"type": "string"} },
     "group": {"type": "string", "description": "The group to move the card to, its title or id. A new title makes a group."},
     "after": {"type": "string", "description": "The card to place it right after, card:<id>, or first."},
-    "takeaway": {"type": "string", "description": "The answer to the question in one or two sentences. In a takeaway, each number the card shows links to where the card shows it. Wrap the whole quantity and cite where you read the value, as in `[[31|card:<id>#outcome/merged]] of [[40|card:<id>#outcome/all]] runs`. On an example card, link the words of each claim to the record that shows them, as in `[[posted the answer|runs/r3.jsonl#L88]]`. A rewritten takeaway keeps every link that is right."}
+    "takeaway": {"type": "string", "description": "The answer to the question in one or two sentences. Link its numbers and claims as Citations says for a takeaway."}
   },
   "required": ["card"]
 }
