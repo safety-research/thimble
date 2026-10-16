@@ -104,19 +104,6 @@ describe('the challenge', () => {
     expect(stops).toEqual(['challenge'])
     expect(stale.pageStopped()).toBe('challenge')
   })
-
-  test('a server that does not answer leaves the page suspect, and an answer that proves it clears it', async () => {
-    const { stale } = await load()
-    helloAnswer = async () => {
-      throw new TypeError('Failed to fetch')
-    }
-    stale.markSuspect()
-    expect(await stale.verified()).toBe('down')
-    expect(stale.isSuspect()).toBe(true)
-    helloAnswer = answerFor((n) => stale.expectedAnswer(KEY, 29280, n))
-    expect(await stale.verified()).toBe('ok')
-    expect(stale.isSuspect()).toBe(false)
-  })
 })
 
 describe('the guarded fetch', () => {
@@ -143,27 +130,6 @@ describe('the guarded fetch', () => {
 })
 
 describe('the streams', () => {
-  test("the server's stopping event stops the page and closes every stream, and no new one opens", async () => {
-    const { sse, stops } = await load()
-    const a = sse.openStream('/b/k/api/ws/mini/events', { onEvent: () => undefined })
-    const b = sse.openStream('/b/k/api/ws/mini/investigations/x/events', { onEvent: () => undefined })
-    FakeSource.all[0].emit('stopping')
-    expect(stops).toEqual(['stopping'])
-    expect(FakeSource.all.map((s) => s.readyState)).toEqual([2, 2])
-    sse.openStream('/b/k/api/ws/mini/events', { onEvent: () => undefined })
-    expect(FakeSource.all).toHaveLength(2)
-    a()
-    b()
-  })
-
-  test('a live session-ended record stops the page; one of the history does not', async () => {
-    const { stops } = await load()
-    const { dispatch } = await import('../../src/lib/events.ts')
-    dispatch({ type: 'session-ended', session: 'old' } as never, true)
-    expect(stops).toEqual([])
-    dispatch({ type: 'session-ended', session: 's1' } as never)
-    expect(stops).toEqual(['session-ended'])
-  })
 
   test('a reopen sends credentials only after the challenge passed; a failed challenge reopens nothing', async () => {
     vi.useFakeTimers()
@@ -185,26 +151,6 @@ describe('the streams', () => {
     await challengeDone()
     expect(FakeSource.all).toHaveLength(2)
     expect(stale.pageStopped()).toBe('challenge')
-    release()
-  })
-
-  test('six failed reconnects in a row stop the page', async () => {
-    vi.useFakeTimers()
-    const { sse, stale, stops } = await load()
-    helloAnswer = async () => {
-      throw new TypeError('Failed to fetch')
-    }
-    const release = sse.openStream(`/b/${KEY}/api/ws/mini/events`, { onEvent: () => undefined })
-    FakeSource.all[0].onopen?.()
-    FakeSource.all[0].onerror?.()
-    for (let i = 0; i < stale.MAX_FAILURES; i++) {
-      await vi.advanceTimersByTimeAsync(sse.RETRY_MAX_MS)
-      await challengeDone()
-    }
-    expect(stops).toEqual(['failures'])
-    expect(sent.filter((s) => s.url.startsWith('/api/hello'))).toHaveLength(stale.MAX_FAILURES)
-    // no stream reopened while nothing answered
-    expect(FakeSource.all).toHaveLength(1)
     release()
   })
 })

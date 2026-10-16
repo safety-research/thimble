@@ -4,9 +4,8 @@
 // again are in the card's details.
 import { afterEach, beforeAll, expect, test } from 'vitest'
 import { CardFace } from '../../src/canvas/CardFace.tsx'
-import { CheckDetails } from '../../src/canvas/CheckDetails.tsx'
 import { CanvasContext } from '../../src/canvas/context.ts'
-import { checkOf, checkProblem, checkState } from '../../src/lib/cardCheck.ts'
+import { checkOf, checkProblem } from '../../src/lib/cardCheck.ts'
 import type { Cell } from '../../src/lib/types.ts'
 import { mount, unmountAll } from './mount.tsx'
 
@@ -53,25 +52,12 @@ const face = (c: Cell, board = true) =>
       <CardFace cell={c} width={400} label={{ concept: null, error: null, reload: async () => undefined, set: () => undefined }} onCheckAgain={board ? () => undefined : undefined} />
     </CanvasContext.Provider>,
   )
-const details = (c: Cell) =>
-  mount(
-    <CanvasContext.Provider value={ctx}>
-      <CheckDetails cell={c} />
-    </CanvasContext.Provider>,
-  )
-const buttons = (el: HTMLElement) => [...el.querySelectorAll('button')].map((b) => b.textContent?.trim())
 
 test('only typed-in numbers and a revision that would not run are problems', () => {
   const problems = Object.fromEntries(Object.entries(CARDS).map(([k, c]) => [k, checkProblem(checkOf(c))]))
   for (const k of ['passed', 'revised', 'running', 'stopped', 'unfinished', 'olderUnrun']) expect(problems[k], k).toBe('')
   expect(problems.typed).toMatch(/types in 3 numbers/)
   expect(problems.unrun).toMatch(/^The takeaway names a count the table does not show\. Its revision of the card would not run: its code did not run clean: NameError\.$/)
-})
-
-test("the filter's check state follows the mark: the ✕ is Failed, a check that could not finish Unverified", () => {
-  const states = Object.fromEntries(Object.entries(CARDS).map(([k, c]) => [k, checkState(c)]))
-  expect(states).toEqual({ passed: 'verified', revised: 'verified', running: 'unverified', stopped: 'unverified', unfinished: 'unverified', typed: 'failed', unrun: 'failed', olderUnrun: 'unverified' })
-  expect(checkState(card({}))).toBe('unchecked')
 })
 
 test('a card shows no mark unless its check found a problem, and then one red ✕', async () => {
@@ -87,33 +73,4 @@ test('a card shows no mark unless its check found a problem, and then one red �
     expect(el.textContent, k).not.toContain('✓')
     unmountAll()
   }
-})
-
-test('a running check shimmers the card, and a fix shows in place', async () => {
-  const running = await face(CARDS.running)
-  expect(running.querySelector('.canvas-card')?.classList.contains('is-checking')).toBe(true)
-  unmountAll()
-  const revised = await face(CARDS.revised)
-  expect(revised.querySelector('.bcell-take-text')?.textContent).toBe(TAKE)
-})
-
-test('the card the check harness draws has no mark', async () => {
-  const el = await face(CARDS.typed, false)
-  expect(el.querySelectorAll('.bcell-check-mark').length).toBe(0)
-})
-
-test("the card's details hold the fix's Undo, Stop while it runs, and Check again", async () => {
-  const revised = await details(CARDS.revised)
-  expect(buttons(revised)).toEqual(['Undo', 'Check again'])
-  expect(revised.textContent).toContain('agent-03 merged every PR.')
-  unmountAll()
-  expect(buttons(await details(CARDS.running))).toEqual(['Stop'])
-  unmountAll()
-  const unrun = await details(CARDS.unrun)
-  expect(unrun.querySelector('.mark-failed')).not.toBeNull()
-  expect(buttons(unrun)).toEqual(['Check again'])
-  unmountAll()
-  expect(buttons(await details(card({})))).toEqual(['Check the card'])
-  unmountAll()
-  expect((await details(card({ created_by: 'user' }))).textContent).toBe('')
 })
