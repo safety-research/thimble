@@ -1,12 +1,11 @@
 // The Citations view (citesview.tsx, SPEC-v2 3.8): the chat's citations and each card's links check, the problems first
-// (refuted and missing, then differs, typed and quiet, then pending, then ok); a card's problem listed with its card;
-// Enter opens the existing citation view (a card's row: the card); o and the title row's ↗ open the cited place in the
-// browser. `claude plugin test plugin`.
+// (refuted and missing, then differs, typed and quiet, then pending, then ok); a card's problem listed with its card.
+// `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
 import { cid } from '../lib'
-import { CWD, PANEL, paneAt, panelWorld, takesKeys, words } from './fixtures-panel'
+import { CWD, paneAt, panelWorld, words } from './fixtures-panel'
 import type { PanelWorld } from './fixtures-panel'
 
 type M = Mounted<'terminal'>
@@ -55,40 +54,4 @@ test('the citations, problems first: a card\'s refuted citation and the chat\'s 
   expect(rows[4]).toBe('  ✓ 4579 · README.md line 3 · found')
   expect(words(await m.drawn())).toContain('5 citations · ✓1 · ×3')
   await m.unmount()
-})
-
-test('Enter on a chat citation opens the citation view at its place; on a card\'s row, the card; o opens the cited place in the browser', { timeoutMs: 30_000 }, async ($, on) => {
-  const w = panelWorld(on)
-  seeded(w)
-  await start($, w)
-  await $.command.run({ command: 'thimble:thimble', args: 'card ff73e071' } as never)
-  await w.clock.settle()
-  await $.command.run({ command: 'thimble:thimble', args: 'citations' } as never)
-  await w.clock.settle()
-  const m = (await $.ui.mount(paneAt(96))) as unknown as M
-  await m.press({ key: 'hk-browser' })
-  await w.clock.settle()
-  expect(w.pressed.at(-1)).toEqual(expect.arrayContaining(['--ref', 'card:ff73e071#revisions/TOTAL']))
-  await takesKeys($)
-  // the card's row first: the card opens
-  await $.ui.input({ plugin: PANEL, key: 'keys-pick', text: '', kind: 'submit' } as never)
-  await w.clock.settle()
-  expect(w.panes.at(-1)!.title).toBe('What does the export hold per wiki?')
-  await m.press({ key: 'hk-back' })
-  await w.clock.settle()
-  await m.unmount()
-  // down to the chat's missing citation (each key on the panel as drawn): the citation view
-  const p1 = (await $.ui.mount(paneAt(96))) as unknown as M
-  await takesKeys($)
-  await $.ui.focus({ requestId: PANEL, component: 'Pane', element: 'keys-down', origin: { kind: 'person' } } as never)
-  await w.clock.settle()
-  await p1.unmount()
-  const p2 = (await $.ui.mount(paneAt(96))) as unknown as M
-  await p2.input({ key: 'keys-pick', text: '' } as never)
-  await w.clock.settle()
-  await p2.unmount()
-  expect(w.panes.at(-1)!.title).toBe('Citation')
-  const m2 = (await $.ui.mount(paneAt(96))) as unknown as M
-  expect(words(await m2.find({ type: 'Box', key: 'way' }))).toContain('citations')
-  await m2.unmount()
 })

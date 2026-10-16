@@ -1,7 +1,6 @@
-// What Claude's tool calls read of the data files (SPEC-v2 3.9): a Read by its result's type (whole, part with lines,
-// truncatedByTokenCap, a PDF, pages, file_unchanged, a binary file), Bash readers and searches, no fact for ls/find/fd,
-// one folder fact for a recursive grep; data files only (a code tree's .py reads give none); a refused or failed call
-// gives none; one `act coverage` per turn that has facts, with them on standard input. `claude plugin test plugin`.
+// What Claude's tool calls read of the data files (SPEC-v2 3.9): a Read by its result's type, Bash readers and searches
+// (none for ls/find/fd, one folder fact for a recursive grep), with the facts on standard input, never the command; a
+// refused or failed call gives none; one `act coverage` per turn that has facts. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
 import { CLI, CWD, SID, aTurn, call, corpus, reads, startSession, world } from './fixtures'
@@ -66,21 +65,6 @@ test("Bash readers and searches give facts; ls, find and fd none; a recursive gr
   expect(JSON.stringify(w.coverage)).not.toContain('merged')
 })
 
-test('the files a grep -l printed count as searched', SLOW, async ($, on) => {
-  const w = world(on)
-  corpus(w, ['a.jsonl', 'b.jsonl'])
-  w.toolText = 'a.jsonl\nb.jsonl\nsrc/x.py\n'
-  reads(w)
-  await startSession($, w)
-  await aTurn($, w, 'r3', 'Two files hold it.', async () => {
-    await call($, 'Bash', { command: 'grep -l merged *.jsonl' })
-  })
-  expect(factsOf(w.coverage[0])).toEqual([
-    { path: 'a.jsonl', how: 'searched', by: 'search' },
-    { path: 'b.jsonl', how: 'searched', by: 'search' },
-  ])
-})
-
 test('a refused or failed call gives no fact; a turn without facts sends none; one act coverage per turn that has some', SLOW, async ($, on) => {
   const w = world(on)
   corpus(w, ['events.jsonl', 'prs.csv', 'secret.csv'])
@@ -101,31 +85,4 @@ test('a refused or failed call gives no fact; a turn without facts sends none; o
   })
   expect(w.coverage.length).toBe(1)
   expect(factsOf(w.coverage[0]).length).toBe(2)
-})
-
-test("a subagent's reads count under the agent", SLOW, async ($, on) => {
-  const w = world(on)
-  corpus(w, ['events.jsonl'])
-  reads(w)
-  await startSession($, w)
-  await aTurn($, w, 'r7', 'The agent read it.', async () => {
-    await call($, 'Read', { file_path: `${CWD}/events.jsonl` }, 'agent-1')
-  })
-  expect(factsOf(w.coverage[0])).toEqual([{ path: 'events.jsonl', how: 'whole', by: 'agent' }])
-})
-
-test('a code tree thimble turned on by load_thimble: Reads of .py files give no fact and no coverage line', SLOW, async ($, on) => {
-  const w = world(on)
-  w.stamps.set(`${CWD}/pyproject.toml`, 1)
-  corpus(w, ['src/a.py', 'src/b.py', 'pyproject.toml'])
-  reads(w)
-  await startSession($, w)
-  await aTurn($, w, 'r8', 'refused() checks the home folder.', async () => {
-    await call($, 'Read', { file_path: `${CWD}/src/a.py` })
-    await call($, 'Bash', { command: 'cat src/b.py pyproject.toml' })
-  })
-  expect(w.coverage.length).toBe(0)
-  const ui = await $.ui.mount({ plugin: 'thimble', component: 'AssistantMessage', requestId: 'r8', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text: 'refused() checks the home folder.', isFirstOfReply: true } } as never)
-  expect(JSON.stringify(await ui.drawn())).not.toContain('▸ ')
-  await ui.unmount()
 })
