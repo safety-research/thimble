@@ -1,7 +1,8 @@
 ---
 name: Judgment calls
 color: 1
-covers: [documents, cards]
+covers: [documents, cards, answers]
+about: it looks for judgment shown as if the data said it
 shown: false
 ---
 

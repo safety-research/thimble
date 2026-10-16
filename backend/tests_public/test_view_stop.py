@@ -12,6 +12,7 @@ from fastapi import HTTPException
 
 from app import agents, config, dev, subagents, views
 from subagent_fakes import bridge  # noqa: F401 — a fixture
+from target_blocks import target_blocks  # noqa: F401 — the core lane's target flags, where prompts.py lacks them
 
 CORPUS = "boards"
 READER = '''

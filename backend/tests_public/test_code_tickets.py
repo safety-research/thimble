@@ -24,7 +24,7 @@ from conftest import UI_COOKIE_VALUE, UI_KEY_VALUE, Listener, _record_paired, ca
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from app import agent_session, agents, config, dev, events, hook_auth, ledger, modes, session, subagents, ticket_box, tools
+from app import agent_session, agents, config, dev, events, hook_auth, ledger, modes, notices, session, subagents, ticket_box, tools
 from app import subagent_files as sf
 from subagent_fakes import bridge, hints  # noqa: F401 — fixtures
 
@@ -183,8 +183,12 @@ async def test_the_agent_checks_finishes_and_the_analyst_s_allow_applies_the_cha
         assert (q["tool"], q["what"]) == (dev.CODE_TOOL, dev.APPLY_QUESTION) and "README.md" in q["why"]
         assert _git(repo, "rev-parse", "HEAD") == live and not (wt / "late.txt").exists()
         assert agents.read_meta(CORPUS, t["chat"])["status"] == "running", "the thread runs until the ticket ends"
+        # the terminal's band says the change waits for the Allow on the browser's card (notice ticket:<id>)
+        [waits] = [n for n in notices.open_notices(CORPUS) if n.get("key") == dev.ticket_key(t["id"])]
+        assert waits["text"] == dev.ALLOW_TEXT.format(n=rec["n"])
         assert agent_session.answer(CORPUS, t["chat"], q["id"], answer == "yes")
         await _until(lambda: dev._get(t["id"]).get("finished"), "the ticket did not end")
+        assert not [n for n in notices.open_notices(CORPUS) if n.get("key") == dev.ticket_key(t["id"])]
         rec = dev._get(t["id"])
         branch = f"dev/{t['id']}"
         if answer == "no":
@@ -442,8 +446,9 @@ async def test_a_queued_ticket_waits_for_main_s_module_after_a_restart_and_main_
 
 
 async def test_a_release_install_registers_no_ticket_agent_and_main_hears_why(ticketing, tmp_path, monkeypatch):
-    """Code tickets run only in a development install: elsewhere the module registers no `thimble:dev-ticket`, the
-    browser offers no ticket, and main's file_dev_ticket fails at once with the reason."""
+    """Code tickets run in an install whose tree is a git repository (a clone, or a release install with install.sh's
+    git baseline): in a tree that is none the module registers no `thimble:dev-ticket`, the browser offers no ticket,
+    and main's file_dev_ticket fails at once with the reason."""
     assert "dev-ticket" in subagents.roles(CORPUS) and dev.tickets_run_here(CORPUS)
     monkeypatch.setattr(dev, "REPO", tmp_path / "installed")
     assert "dev-ticket" not in subagents.roles(CORPUS) and not dev.tickets_run_here(CORPUS)

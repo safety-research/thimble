@@ -546,3 +546,21 @@ def test_main_s_prompt_comes_back_only_when_main_itself_compacted(tmp_path):
                                "timestamp": "2026-01-01T00:00:00+00:00"}) + "\n")
     assert not cli.main_itself({**hook, "transcript_path": str(old)}), "an earlier compaction of main's"
     assert Path(old).is_file()
+
+
+def test_the_critic_and_the_writer_hold_the_shared_guidance_and_load_no_skill(workspaces_tmp, mini_dir):
+    """0.9.0 has no shared skill: the critic's and the writer's registered prompts end with the shared guidance (preamble.md
+    and shared.md rendered for the corpus folder, the text the skill printed), and their registrations name no skills,
+    in their definitions and in their prompt files' frontmatter."""
+    config.workspace_dir(CORPUS)
+    shared = events.render_prompts(("preamble", "shared"), str(config.corpus_dir(CORPUS)))
+    assert "## Communicating" in shared and shared.startswith("thimble is a harness")
+    for mod, name in ((critique_session, "critic"), (write_session, "writer")):
+        d = mod.definition(CORPUS)
+        assert "skills" not in d, name
+        assert d["prompt"].endswith(shared), name
+        assert d["prompt"].count("## Communicating") == 1, name
+        front = (config.REPO_ROOT / "prompts" / f"{name}.md").read_text("utf-8").split("\n---\n", 1)[0]
+        assert "skills:" not in front, name
+    roles = subagents.roles(CORPUS)
+    assert "skills" not in roles["critic"] and "skills" not in roles["writer"]

@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 
 from app import agents, config, notices, orientation, proposer, session, views
+from target_blocks import target_blocks  # noqa: F401 — the core lane's target flags, where prompts.py lacks them
 
 CORPUS = "mini"
 SID = "a0b0c0d0-0000-4000-8000-0000000000a1"

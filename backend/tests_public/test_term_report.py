@@ -1,7 +1,6 @@
-"""The report in terminal mode (app/term_report.py, mods/thimble-term hooks/report.ts): `thimble state checks` gives the
-checks route's list, `thimble act comment-resolve` and `comment-reopen` change a comment as the margin's ✓ does, and
-`thimble act doc-save` saves the panel's edit as the browser's editor saves its blocks, so a kept passage keeps its id and
-its comments."""
+"""The report's reader in the terminal panel (app/term_report.py, plugin/hooks/term report.ts): `thimble state checks`
+gives the checks route's list, and `thimble act comment-resolve` and `comment-reopen` change a comment as the margin's ✓
+does. The reader is read-only: the report is written and edited in the browser workbench, so there is no `doc-save`."""
 from __future__ import annotations
 
 import json
@@ -77,44 +76,9 @@ async def test_act_resolves_and_reopens_a_comment_as_the_margin_does(doc):
         await local.act(CORPUS, "comment-resolve", {"doc": "report"})
     with pytest.raises(local.StateError, match="`doc` is empty"):
         await local.act(CORPUS, "comment-reopen", {"comment": "c1"})
-    assert "comment-resolve" in local.ACT_USAGE and "doc-save" in local.ACT_USAGE
-
-
-async def test_act_doc_save_keeps_the_ids_and_comments_of_what_the_edit_kept(doc):
-    """The editor's blocks with one sentence rewritten, a heading reworded and a paragraph added: the unchanged sentence
-    keeps its id and its check's comment, the heading its note; no `title` keeps the title."""
-    first, second = doc["sections"]
-    s1, s2 = report_types.unit_sentences(first)
-    blocks = [b.model_dump(exclude_none=True) for b in report_types.editor_blocks(doc)]
-    para = next(b for b in blocks if b["type"] == "paragraph")
-    para["text"] = para["text"].replace("All", "Every one of the")
-    head = next(b for b in blocks if b["type"] == "heading" and b["id"] == second["id"])
-    head["text"] = "What it leaves out"
-    blocks.append({"id": "", "type": "paragraph", "text": "A new paragraph of the analyst's."})
-    got = await local.act(CORPUS, "doc-save", {"doc": "report", "blocks": blocks})
-    assert got == {"ok": True, "doc": "report", "title": "One account issued every deletion", "sections": 2, "comments": 2}
-    saved = report_types.read_doc(CORPUS, MAIN, "report")
-    a, b = saved["sections"]
-    assert [x["id"] for x in report_types.unit_sentences(a)][1] == s2["id"] and b["id"] == second["id"]
-    assert b["heading"] == "What it leaves out"
-    assert [x["text"] for x in report_types.unit_sentences(b)] == ["Nothing before June.", "A new paragraph of the analyst's."]
-    assert _comments()["c1"]["sentence_id"] == s2["id"] and _comments()["c2"]["sentence_id"] == second["id"]
-    # the rewritten sentence's resolved comment goes with the words it was on
-    assert "c3" not in _comments() and report_types.unit_sentences(a)[0]["id"] != s1["id"]
-    events = [e for e in investigation._read_jsonl(investigation.inv_dir(CORPUS, MAIN) / "events.jsonl") if e.get("type") == "report"]
-    assert events[-1] == {**events[-1], "slug": "report", "status": "edited", "by": "analyst", "client": "terminal"}
-    # a title given is the new title
-    got = await local.act(CORPUS, "doc-save", {"doc": "report", "title": "A new title", "blocks": blocks})
-    assert report_types.read_doc(CORPUS, MAIN, "report")["title"] == "A new title"
-
-
-async def test_act_doc_save_refuses_what_is_not_the_editor_s_blocks(doc):
-    with pytest.raises(local.StateError, match="must be a list"):
-        await local.act(CORPUS, "doc-save", {"doc": "report", "blocks": "## A heading"})
-    with pytest.raises(local.StateError, match="do not read as the editor's"):
-        await local.act(CORPUS, "doc-save", {"doc": "report", "blocks": [{"text": "no type"}]})
-    with pytest.raises(local.StateError, match="unknown block type"):
-        await local.act(CORPUS, "doc-save", {"doc": "report", "blocks": [{"type": "table", "text": "x"}]})
+    assert "comment-resolve" in local.ACT_USAGE and "doc-save" not in local.ACT_USAGE
+    with pytest.raises(local.StateError, match="no act 'doc-save'"):
+        await local.act(CORPUS, "doc-save", {"doc": "report", "blocks": []})
 
 
 def test_the_command_line_runs_the_report_s_acts(doc):

@@ -1,7 +1,6 @@
 ---
 name: writer
 description: Writes or revises one of thimble's documents, such as the report. Only thimble starts it, through its plugin when the analyst clicks Write, or with the exact Agent call that the start_writing tool gives.
-skills: [shared]
 model: claude-opus-5-5
 effort: xhigh
 color: blue

@@ -33,12 +33,17 @@ the builder up to dev.MAX_ATTEMPTS times. Readers see only what a gate passed (r
 the view's folder after its pass reaches them only once a gate passes it. A change to a built view (revise) copies its
 files aside and restores them if the change fails. Progress is `view {slug, status, chat?}` on the workspace stream.
 
-In terminal mode (terminal) the builder writes view.term.js in place of view.html: a program on the terminal view kit
-(term_views.py) that thimble-term's panel draws. Its gate runs the same reader checks, then draws the program as text
-at 120 and 200 columns, in light and dark, and opened at the first place that resolved, then with the test label on
-and every choice of its Color by, Filter by and Rows tried (term_draws), with no browser: it fails on a program error, a
-timeout, a draw past the panel's rows or columns, or a choice that gives an error. The page's checks (the label marks,
-the layout, the page on a damaged copy of the files) are the browser's alone."""
+Pages. A view has the pages it has: view.html, which the browser workbench draws, and view.term.js, a program on the
+terminal view kit (term_views.py) that the terminal panel draws. Each build makes one, its target (TARGETS, a build
+target flag of the view prompts, prompts.rendering): `term-page` for a build started while the session's transport is
+local (before the analyst opens the browser), `html-page` after the press (default_target), kept on its proposal
+(target_of). The first open of a view in the place whose page it lacks builds that page as a revision that reuses the
+reader.py that passed (ensure_page): the browser shows "building the page for the browser…", the terminal "building the
+terminal page…". The gate of a `term-page` build runs the same reader checks, then draws the program as text at 120
+and 200 columns, in light and dark, and opened at the first place that resolved, then with the test label on and every
+choice of its Color by, Filter by and Rows tried (term_draws), with no browser: it fails on a program error, a timeout,
+a draw past the panel's rows or columns, or a choice that gives an error. The page's checks (the label marks, the
+layout, the page on a damaged copy of the files) are the browser's alone."""
 from __future__ import annotations
 
 import asyncio
@@ -94,8 +99,17 @@ KEY_REFS_FILE = "key-refs.json"  # view:<slug>/<key> -> {refs, excerpt, label, n
 INDEXES_SUBDIR = view_indexes.INDEXES_SUBDIR
 VIEW_JSON, READER_PY, VIEW_HTML = "view.json", "reader.py", "view.html"
 VIEW_TERM = "view.term.js"  # a view's terminal program, beside its page (term_views.py)
-NOT_BROWSER = ("This view was built in terminal mode, so only the terminal draws it. To see it, quit, run "
-               "`thimble mode terminal`, and start `thimble` again in this folder.")
+# the build targets of the view prompts (prompts.TARGETS) and the page each makes (module note)
+TERM_PAGE, HTML_PAGE = TARGETS = ("term-page", "html-page")
+PAGE_OF = {TERM_PAGE: VIEW_TERM, HTML_PAGE: VIEW_HTML}
+LEGACY_MODE_OF = {TERM_PAGE: "terminal", HTML_PAGE: "browser"}  # STUB(core): 0.8.0's prompts.py names modes
+# what the browser's frame shows while the page it lacks is built (ensure_page); term_views.BUILDING the terminal's
+BUILDING_HTML = "building the page for the browser…"
+# the change a build of the page a view lacks gets (revise, ensure_page): the builder's registered prompt names the
+# page of the target it builds
+MISSING_PAGE_REQUEST = ("Build the page this view lacks, {page}, for {place}. Keep reader.py, which passed its checks, "
+                        "and view.json as they are, unless the page cannot work without a change to them.")
+MISSING_PAGE_PLACE = {TERM_PAGE: "the terminal panel", HTML_PAGE: "the browser workbench"}
 TOOLS_PROMPT = "tools"  # prompts/tools.md, whose lowercase sections are the lines the view tools' results carry
 # a view ticket's status on its proposal row; `dropped` is the proposal of an orientation from before 0.8.0 left out
 # when the analyst stopped the orientation before its view was built, or a view proposal the analyst rejected
@@ -617,7 +631,7 @@ def _normalize_view(slug: str, raw: Any, *, where: Path | None = None, origin: s
         # checks read (module note); a file-type viewer thimble ships is never one
         "draft": origin == "workspace" and not raw.get("built"),
         # a view whose reader or page is missing is listed so it can be deleted, and never opens a citation; the page is
-        # view.html, or view.term.js for a view built in terminal mode
+        # view.html, or view.term.js for a view built for the terminal
         "ok": bool(d is not None and (d / READER_PY).is_file()
                    and ((d / VIEW_HTML).is_file() or (d / VIEW_TERM).is_file()) and claims),
         "dir": str(d) if d else None,
@@ -941,7 +955,7 @@ def _check_slug(slug: str) -> str:
 
 def source_problems(claims: Any, reader: str, html: str, libs: Any, page: str = VIEW_HTML) -> list[str]:
     """What makes a view's files unable to run, as lines for whoever wrote them: no claims, an empty reader or page (the
-    file `page` names: view.html, or view.term.js in terminal mode), a reader that does not parse or lacks one of its
+    file `page` names: view.html, or view.term.js for a term-page build), a reader that does not parse or lacks one of its
     three functions, a library that is no package."""
     out: list[str] = []
     if not _str_list(claims):
@@ -2991,14 +3005,15 @@ def end_revision(c: str, slug: str, error: str | None = None, *, failed_change: 
 
 def revise(c: str, slug: str, request: str, *, description: str | None = None, task: str | None = None,
            claims: Any = None, arrangement: str | None = None, proposed_by: str = "analyst", asked: bool = False,
-           route: str = CLICK, values: dict[str, Any] | None = None) -> dict[str, Any]:
+           route: str = CLICK, values: dict[str, Any] | None = None, target: str | None = None) -> dict[str, Any]:
     """A change to the view `slug`, as a build on its proposal (made from the view when it has none): `request` is the
     analyst's words, and given fields replace the proposal's. A `description` is the proposal made again (propose), so
     its task and arrangement replace the old ones with it, a 0.7.0 spec too. A built view's files are copied aside first
     (restore_built), and the proposal is marked `revision` and `changed`. Queued at once (dev.queue_view), as part of
     the start that asked for it (`route`), where a running builder of the view gets the change as a message, and a
     finished one that main's session can still reach runs again with it; a typed change (main's propose_view) is
-    started by its caller. 404 for no such view or proposal."""
+    started by its caller. `target` names the page the change builds (ensure_page); without it the build makes the
+    page of where it starts (default_target). 404 for no such view or proposal."""
     request = str(request or "").strip()
     _stop_review(c, slug)
     with _proposals_lock:
@@ -3018,7 +3033,9 @@ def revise(c: str, slug: str, request: str, *, description: str | None = None, t
         fields: dict[str, Any] = {"status": "building" if prop.get("status") == "building" else "queued", "error": None,
                                   "change": change or None, "changed": True, "revision": revision or None,
                                   "asked": True if asked else None, "failed_change": None, "ts": _now(),
-                                  "route": route, "refused": None, "stopped_by": None}
+                                  "route": route, "refused": None, "stopped_by": None,
+                                  # a change to a build that goes keeps its page; another builds where it starts
+                                  "target": target if target in TARGETS else prop.get("target") if pending else None}
         if values:
             fields["values"] = {k: str(v) for k, v in values.items() if v}
         if description := _one(description):
@@ -3084,7 +3101,10 @@ def retry(c: str, slug: str, values: dict[str, Any] | None = None) -> dict[str, 
     if again and (refused := click_refused(c, slug)) is not None:
         return refused
     if prop.get("status") == "built" and prop.get("failed_change") is not None:
-        return revise(c, slug, str(prop["failed_change"]), asked=True, route=CLICK, values=vals)
+        # a failed build of the page a view lacked (ensure_page) builds that page again, wherever Retry is pressed
+        missing = {MISSING_PAGE_REQUEST.format(page=PAGE_OF[t], place=MISSING_PAGE_PLACE[t]): t for t in TARGETS}
+        return revise(c, slug, str(prop["failed_change"]), asked=True, route=CLICK, values=vals,
+                      target=missing.get(str(prop["failed_change"])))
     if prop.get("status") != "failed":
         raise HTTPException(409, f"the view {prop['name']!r} is {prop.get('status')}, not failed")
     prop = update_proposal(c, slug, status="queued", error=None, refused=None, route=CLICK, repairs=0,
@@ -3167,9 +3187,9 @@ async def gate(c: str, slug: str, locators: list[str] | None = None, *, shot_dir
     """Whether the view in the slug's folder may be registered: its files' own problems (source_problems; view.json
     written by thimble alone once it names `built`), then, when there are none, check() with `locators` beside the
     sampled lines. The report check() returns, with the files' problems among its `problems`. With `picture` the page
-    as it opens is pictured for the session, or in terminal mode drawn as text (`drawing`). Each reader call of the
-    gate may take CHECK_CALL_S, so a reader that never answers fails the checks rather than holding its kernel. In
-    terminal mode the page is view.term.js, which needs no libraries and gets none of the page's notes."""
+    as it opens is pictured for the session, or for a `term-page` build drawn as text (`drawing`). Each reader call of
+    the gate may take CHECK_CALL_S, so a reader that never answers fails the checks rather than holding its kernel. A
+    `term-page` build's page is view.term.js, which needs no libraries and gets none of the page's notes."""
     token = _call_limit.set(CHECK_CALL_S)
     try:
         return await _gate(c, slug, locators, shot_dir=shot_dir, picture=picture)
@@ -3183,7 +3203,7 @@ async def _gate(c: str, slug: str, locators: list[str] | None, *, shot_dir: Path
     if not (d / VIEW_JSON).is_file():
         return {"ok": False, "view": None, "problems": [f"{d / VIEW_JSON} does not exist yet"], "checks": [], "page": None}
     raw = _view_json(d)
-    term = terminal(c)
+    term = target_of(c, slug) == TERM_PAGE
     page = VIEW_TERM if term else VIEW_HTML
     text = {n: (d / n).read_text("utf-8", errors="replace") if (d / n).is_file() else "" for n in (READER_PY, page)}
     problems = source_problems(raw.get("claims") if raw.get("claims") is not None else raw.get("scope"),
@@ -3378,9 +3398,9 @@ def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool
     page = Path(view["dir"]) / (view.get("page") or VIEW_HTML)
     if page.is_symlink() or Path(view["dir"]).is_symlink():
         raise HTTPException(404, f"the page of {view['slug']!r} is a symlink")
-    # a view built in terminal mode has no page: the frame says so (as term_views.NOT_TERMINAL says the reverse)
+    # a view built for the terminal has no page yet: the frame says it is being built (ensure_page)
     html = page.read_text("utf-8") if page.is_file() or not (Path(view["dir"]) / VIEW_TERM).is_file() else \
-        f"<p class=muted style='padding:16px'>{NOT_BROWSER}</p>"
+        f"<p class=muted style='padding:16px'>{BUILDING_HTML}</p>"
     fields = (view.get("derived") or []) if derived is None else derived
     who = json.dumps({"slug": view["slug"], "name": view["name"], "media": media, **({"card": True} if card else {}),
                       **({"derived": fields} if fields else {})}, ensure_ascii=False)
@@ -3468,18 +3488,92 @@ def _node_version(node: str, mtime_ns: int) -> str:
         return ""
 
 
-def terminal(c: str) -> bool:
-    """Whether workspace `c`'s session runs in terminal mode (local.terminal), where a view's page is its view.term.js
-    and its checks draw it as text (term_draws)."""
+def local_transport(c: str) -> bool:
+    """Whether workspace `c`'s session runs on the local transport, before the analyst opened the browser
+    (local.transport, C11)."""
     from . import local  # noqa: PLC0415
 
-    return local.terminal(c)
+    try:
+        return local.transport(c) == "local"
+    except (OSError, ValueError):
+        return False
 
 
-def build_problem_for(c: str) -> str:
-    """Why a view cannot be built and checked in workspace `c`, '' when it can: build_problem, but in terminal mode,
-    whose checks draw the view's program as text rather than load a page, only Node (term_views.node_problem)."""
-    if terminal(c):
+def default_target(c: str) -> str:
+    """The page a build started now makes (module note): `term-page` on the local transport, `html-page` after the
+    press."""
+    return TERM_PAGE if local_transport(c) else HTML_PAGE
+
+
+def target_of(c: str, slug: str) -> str:
+    """The page the view `slug`'s build makes, or made last: its proposal's `target`, else default_target."""
+    got = (read_proposal(c, slug) or {}).get("target")
+    return got if got in TARGETS else default_target(c)
+
+
+def target_flags(c: str | None, target: str) -> Any:
+    """The flags a view prompt renders with for a build of `target` (prompts.rendering): the analyst's feature flags
+    (features.flags) and the target."""
+    from . import features, prompts  # noqa: PLC0415
+
+    if not hasattr(prompts, "TARGETS"):  # STUB(core): 0.8.0's prompts.py renders a mode, which names the target
+        return LEGACY_MODE_OF[target]
+    return frozenset(features.flags(c)) | {target}
+
+
+# the target of the build or review this process starts now, by workspace, which the agent's registration renders
+# (view_tools.builder_definition and reviewer_definition, which the module registers again before each spawn)
+_spawning: dict[str, str] = {}
+
+
+@contextlib.contextmanager
+def spawning(c: str, target: str) -> Iterator[None]:
+    """Within the block, the view agents' registrations for workspace `c` render for `target` (spawn_target)."""
+    before = _spawning.get(c)
+    _spawning[c] = target
+    try:
+        yield
+    finally:
+        if before is None:
+            _spawning.pop(c, None)
+        else:
+            _spawning[c] = before
+
+
+def spawn_target(c: str) -> str:
+    """The target the view agents' registrations render for: the build or review starting now (spawning), else
+    default_target."""
+    return _spawning.get(c) or default_target(c)
+
+
+def has_page(view: dict[str, Any] | None, target: str) -> bool:
+    d = (view or {}).get("dir")
+    return bool(d) and (Path(d) / PAGE_OF[target]).is_file()
+
+
+def ensure_page(c: str, slug: str, target: str) -> bool:
+    """The first open of a built view in the place whose page it lacks (module note): a revision that builds that page,
+    reusing its reader.py, queued as a follow-on start (revise); nothing when the view has the page, is no workspace
+    view, never passed, has a build queued or running, or that page's build failed (it waits for Retry). Whether one
+    was queued."""
+    view = read_built(c, slug)
+    if view is None or view.get("origin") != "workspace" or has_page(view, target):
+        return False
+    prop = read_proposal(c, slug)
+    if prop is not None and prop.get("status") in PENDING:
+        return False
+    request = MISSING_PAGE_REQUEST.format(page=PAGE_OF[target], place=MISSING_PAGE_PLACE[target])
+    if prop is not None and prop.get("failed_change") == request:
+        return False  # its page's build failed: it waits for the analyst's Retry, not for the next open
+    revise(c, slug, request, proposed_by="thimble", route=FOLLOW_ON, target=target)
+    return True
+
+
+def build_problem_for(c: str, target: str | None = None) -> str:
+    """Why a view cannot be built and checked in workspace `c` for `target` (default_target when None), '' when it can:
+    build_problem, but for a `term-page`, whose checks draw the view's program as text rather than load a page, only
+    Node (term_views.node_problem)."""
+    if (target or default_target(c)) == TERM_PAGE:
         from . import term_views  # noqa: PLC0415
 
         return term_views.node_problem()
@@ -3858,7 +3952,7 @@ async def _check(c: str, slug: str, locators: list[str] | None = None, *, shot_d
     Fields of the fetched records that the lines they cite do not hold and `derived` does not list are noted
     (unlisted_derived). Without the headless browser the page is not loaded (its `page` is `unavailable`) and the other
     checks decide. With `picture` the page as it opens is pictured. Without `need_locators`, a view that no locator
-    or sampled line opens passes the rest. With `term`, a view built in terminal mode: its program is drawn as text
+    or sampled line opens passes the rest. With `term`, a term-page build: its program is drawn as text
     (term_draws) in place of the page's loads, which fails on a program error, a timeout or a draw past the panel, and
     the page's label, layout and damaged-copy checks are left out (the reader's run on the damaged copy is not). Returns
     {ok, view, index, checks, page, shots, coverage, unread, problems, notes}, and with `term` `draws` in place of
@@ -4015,7 +4109,7 @@ async def _derived_check(c: str, view: dict[str, Any], shots: list[dict[str, Any
 
 async def _term_check(c: str, slug: str, view: dict[str, Any], files: list[tuple[str, int, int]],
                       report: dict[str, Any], picture: bool) -> dict[str, Any]:
-    """The rest of _check for a view built in terminal mode, after its reader's checks: its program drawn as text
+    """The rest of _check for a term-page build, after its reader's checks: its program drawn as text
     (term_draws), each failed draw a problem (draw_problems), as each choice of the kit's parts that gave an error
     (choice_problems), the reader run on a damaged copy of the files (robust_check without the page), and the fields of
     the answers its draws got that are not listed as derived."""
@@ -4035,7 +4129,7 @@ async def _term_check(c: str, slug: str, view: dict[str, Any], files: list[tuple
 
 
 async def term_draws(c: str, slug: str, checks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """The draws of a view's program that its checks run in terminal mode (term_views.draw_check): as it opens at each
+    """The draws of a view's program that its checks run for a term-page build (term_views.draw_check): as it opens at each
     columns and theme of term_views.CHECK_DRAWS, then opened at the first place that resolved, at the first of them,
     then, where the first drew, as it opens there with the test label on and every choice of the kit's parts it drew
     tried in turn (`choices`, choice_problems), as the browser's checks' `choices` state tries a page's. Each carries
@@ -4421,8 +4515,8 @@ async def robust_check(c: str, slug: str, view: dict[str, Any], files: list[tupl
     real corpus may be: build_index and problems() must not fail, problems() must report the torn line, and the page
     must load without errors and, when `shown` (what the overview showed over the whole corpus) anchored records or
     units and the copy left nothing else out, show some too. The torn line goes in a file the reader reads to the end
-    and does not hide, since one it leaves out has no line to report. Without `page` (a view built in terminal mode)
-    only the reader runs on the copy."""
+    and does not hide, since one it leaves out has no line to report. Without `page` (a term-page build) only the
+    reader runs on the copy."""
     try:
         _, req = await asyncio.to_thread(_prepare, c, slug)
         ans = await _call(c, req, "shown")
@@ -5581,6 +5675,8 @@ async def frame_route(c: str, slug: str, request: Request, origin: str | None = 
     view = _view_or_404(c, slug, v)
     if not view["ok"]:
         raise HTTPException(409, f"the view {slug!r} has no reader.py, view.html or claims")
+    if view.get("origin") == "workspace" and not has_page(view, HTML_PAGE):
+        await asyncio.to_thread(ensure_page, c, slug, HTML_PAGE)  # its first open in the browser builds its page
     from . import hook_auth  # noqa: PLC0415
 
     try:
@@ -5840,8 +5936,8 @@ async def resolve_route(c: str, slug: str, ref: str, v: str | None = None) -> di
 async def check_answer(c: str, slug: str, locators: list[str], picture: bool) -> dict[str, Any]:
     """A builder's or reviewer's check of its draft (view_tools.tool_view_check): the gate with `locators` beside the
     sampled lines, the locators kept on the proposal for the gates of record (finish_view). {ok, lines, png, drawing},
-    `png` the path of a picture of the page as it opens when `picture` asks for one, or in terminal mode `drawing` the
-    view drawn as text as it opens."""
+    `png` the path of a picture of the page as it opens when `picture` asks for one, or for a term-page build
+    `drawing` the view drawn as text as it opens."""
     if locators and read_proposal(c, slug) is not None:
         update_proposal(c, slug, locators=locators)
     report = await gate(c, slug, locators or _kept_locators(c, slug), picture=picture)

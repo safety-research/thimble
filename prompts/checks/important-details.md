@@ -1,7 +1,8 @@
 ---
 name: Important details
 color: 2
-covers: [documents, cards]
+covers: [documents, cards, answers]
+about: it looks for what a reader would likely miss
 shown: true
 ---
 

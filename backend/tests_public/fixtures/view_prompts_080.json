@@ -1,0 +1,42 @@
+{
+ "dev-view": {
+  "term-page": {
+   "sha256": "2c06913ee1a1852f0e574345ac12b51df01a70fbe1b616a3002b40a961762827",
+   "chars": 10706
+  },
+  "html-page": {
+   "sha256": "45643f5de2f80e019a43f3446a40342315ff40acd4c936ddd4cdd7c545ff2408",
+   "chars": 16394
+  }
+ },
+ "view-review": {
+  "term-page": {
+   "sha256": "6da104347fe41925ddb6ba10654efc1e21f0cb309077f6f1a61e0cee61f874f6",
+   "chars": 3022
+  },
+  "html-page": {
+   "sha256": "5d4664d8ab0ba2e44fa316a14f73044f28913230695fa2c53336c62d3cfb4eb6",
+   "chars": 3177
+  }
+ },
+ "dev-view-task": {
+  "term-page": {
+   "sha256": "3ebdb2c0bc488125181be8f457acd39904767e1a08d3d7f18bc3ac20e55b9262",
+   "chars": 425
+  },
+  "html-page": {
+   "sha256": "8a7a7889ca6c22b25fac37d11a42e87c60ebd7238ac4ed31fe1dd91f34813452",
+   "chars": 472
+  }
+ },
+ "view-propose": {
+  "term-page": {
+   "sha256": "8b4257b443b20dd961dbf569c310c2b1c652c648ab2ca39c26cb8e354b11013f",
+   "chars": 4865
+  },
+  "html-page": {
+   "sha256": "a17dc2d6398e055dc666e91a2043da8760995a98b3a5a881408c20987b5cba4a",
+   "chars": 4839
+  }
+ }
+}

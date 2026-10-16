@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient
 from app import agents, config, dev, events, orient_session, orientation, prompts, session, subagents, tools, view_review, view_tools, views
 from app import subagent_files as sf
 from subagent_fakes import bridge, hints  # noqa: F401 — fixtures
+from target_blocks import target_blocks  # noqa: F401 — the core lane's target flags, where prompts.py lacks them
 
 CORPUS = "boards"
 READER = '''
