@@ -84,8 +84,13 @@ const hlOn = () => page.evaluate(() => document.querySelector('.pointer-hl')?.ha
 const rectOf = (sel: string) => page.evaluate((s) => document.querySelector<HTMLElement>(s)!.getBoundingClientRect().toJSON(), sel)
 
 test('a switch to another tab hides the box and its highlight, keeping its text, and the toolbar shows', async () => {
-  await page.evaluate(() => (window as any).__ask('a'))
-  await page.waitForSelector('.pointer-box textarea')
+  // the box listens on the bus once CmdPointer has mounted, which a loaded machine can put after the script tag's
+  // load: ask again until it opens, as a second ⌘-click would
+  await page.waitForFunction(() => {
+    if (document.querySelector('.pointer-box textarea')) return true
+    ;(window as any).__ask('a')
+    return false
+  }, undefined, { polling: 200 })
   await page.fill('.pointer-box textarea', 'why is this so high')
   await frames()
   assert.ok(await hlOn(), 'the highlight marks the card')
