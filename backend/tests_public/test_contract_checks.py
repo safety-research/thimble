@@ -207,7 +207,21 @@ def test_other_thimble_copies_are_turned_off_for_the_runs():
     env = cp.run_env({"CLAUDECODE": "1", "CLAUDE_CODE_EFFORT_LEVEL": "high", "THIMBLE_DEV": "1", "HOME": "/h"},
                      Path("/home"), 21240)
     assert "CLAUDECODE" not in env and "CLAUDE_CODE_EFFORT_LEVEL" not in env and "THIMBLE_DEV" not in env
-    assert env["THIMBLE_LAUNCHED"] == "1" and env["THIMBLE_PORT"] == "21240" and env["HOME"] == "/h"
+    assert env["THIMBLE_OPEN"] == "1" and env["THIMBLE_PORT"] == "21240" and env["HOME"] == "/h"
+    assert "THIMBLE_LAUNCHED" not in env
+
+
+def test_each_run_starts_as_a_session_thimble_is_on_in(tmp_path):
+    """0.9.0: the hooks module turns on from the session's marker, so each `claude -p` run gets a session id whose
+    marker names a workspace whose launch.json makes the session main on the server's transport: only the module's own
+    isInteractive check keeps it idle."""
+    home, folder = tmp_path / "home", tmp_path / "run-format"
+    sid = cp.mark_on(home, folder, tmp_path / "cwd")
+    marker = json.loads((home / "up" / f"{sid}.active").read_text())
+    launch = json.loads((Path(marker["path"]) / "trusted" / "launch.json").read_text())
+    assert launch == {"session": sid, "transport": "server", "via": "press"} and marker["mod"] is False
+    args = cp.run_args(folder, "m", "p", tmp_path, [], "m", sid)
+    assert args[:3] == ["-p", "--session-id", sid] and cp.mark_on(home, folder, tmp_path / "cwd") != sid
 
 
 # --------------------------------------------------------------------------------------------- the module check
@@ -229,6 +243,19 @@ def test_the_first_listing_must_hold_every_type_and_no_terminal_line():
     assert not cm.check_listing(listing, ["thimble:writer", "thimble:critic"], [], "")[0]
     assert not cm.check_listing(listing, ["thimble:writer"], [], "⎿  4 agent types available")[0]
     assert not cm.check_listing(None, ["thimble:writer"], [], "")[0]
+
+
+def test_the_types_count_from_every_listing_once_thimble_is_on():
+    """0.9.0: thimble's types register at activation, so a delta after the first listing may carry them."""
+    rows = [{"type": "attachment", "attachment": {"type": "agent_listing_delta", "isInitial": True, "addedTypes": ["Explore"]}},
+            {"type": "user", "message": {"content": "hello"}},
+            {"type": "attachment", "attachment": {"type": "agent_listing_delta", "isInitial": False,
+                                                  "addedTypes": ["thimble:writer", "thimble:orient-helper", "Explore"]}}]
+    listing = cm.activation_listing(rows)
+    assert listing["addedTypes"] == ["Explore", "thimble:writer", "thimble:orient-helper"] and listing["deltas"] == 2
+    assert cm.check_listing(listing, ["thimble:writer", "thimble:orient-helper"], [], "")[0]
+    assert not cm.check_listing(cm.first_listing(rows), ["thimble:writer"], [], "")[0]
+    assert cm.activation_listing([]) is None
 
 
 def test_values_are_read_from_each_request_of_the_transcript():
