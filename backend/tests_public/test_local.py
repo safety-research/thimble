@@ -112,7 +112,8 @@ def _args(c: str, corpus: Path) -> dict[str, dict]:
 async def test_every_tool_runs_in_process_and_opens_no_socket(term, no_sockets, monkeypatch):
     assert not (Path(os.environ["THIMBLE_HOME"]) / "server.json").exists()
     args = _args(CORPUS, term)
-    assert sorted(args) == sorted(tools.REGISTRY), "every tool of the registry is called"
+    # 0.9.0 (SPEC-v2 C5): load_thimble is answered by the shim itself, never through local.call
+    assert sorted(args) == sorted(n for n in tools.REGISTRY if n != tools.ENTRY_TOOL), "every tool of the registry is called"
     for name, given in args.items():
         res = await call(term, name, **given)
         assert isinstance(res.get("content"), list) and res["content"], name
@@ -199,7 +200,8 @@ async def test_the_shims_end_ends_the_label_scan_pools_workers(term):
 
 async def test_a_code_ticket_is_refused_and_a_card_screenshot_needs_the_harness(term):
     res = await call(term, "file_dev_ticket", title="t", body="b")
-    assert res["is_error"] and (tools.hint("ticket-terminal") or "browser mode") in text(res)
+    # 0.9.0 (SPEC-v2 3.16): code tickets are filed in every transport, so the terminal-mode refusal is gone
+    assert "browser mode" not in text(res) and not tools.hint("ticket-terminal")
     cid = re.search(r"card:([A-Za-z0-9_-]+)", text(await call(term, "add_card", question="q", kind="note", text="x"))
                     .split("\n", 1)[1]).group(1)
     res = await call(term, "screenshot", ref=f"card:{cid}")
@@ -1045,7 +1047,12 @@ async def test_the_shim_in_terminal_mode_runs_calls_itself_keeps_fd_1_and_subscr
     _record(token=PLUGIN_TOKEN, port=httpd.server_address[1])
     # THIMBLE_MODE as the launcher sets it for a session it starts in terminal mode (launch_mode.ENV)
     env = {**os.environ, "THIMBLE_CARD_CHECK": "off", "THIMBLE_CWD": str(term),
-           "THIMBLE_WORKSPACES_DIR": str(config.WORKSPACES_DIR), "THIMBLE_MODE": "terminal"}
+           "THIMBLE_WORKSPACES_DIR": str(config.WORKSPACES_DIR), "THIMBLE_MODE": "terminal",
+           "CLAUDE_CODE_SESSION_ID": "s-term"}
+    # 0.9.0 (SPEC-v2 3.5): the shim lists thimble's tools once the session marker says thimble is on in the session
+    up = Path(os.environ["THIMBLE_HOME"]) / "up"
+    up.mkdir(parents=True, exist_ok=True)
+    (up / "s-term.active").write_text(json.dumps({"cwd": str(term), "ws": CORPUS, "mod": False}))
     params = StdioServerParameters(command=str(config.REPO_ROOT / "plugin" / "bin" / "thimble-mcp"), args=[], env=env,
                                    cwd=str(term))
     fds: dict[str, str] = {}

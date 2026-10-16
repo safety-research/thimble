@@ -930,8 +930,10 @@ def test_roles_json_is_rendered_in_the_sessions_mode_from_any_folder(monkeypatch
     monkeypatch.delenv("THIMBLE_WS", raising=False)
     monkeypatch.delenv("THIMBLE_MODE", raising=False)
     monkeypatch.chdir(tmp_path)
+    # 0.9.0 (SPEC-v2 3.18): preamble.md's mode branches are merged, so both renderings carry the terminal's text and
+    # name the browser workbench, and 0.8.0's browser-only sentence is gone
     for mode, has, lacks in (("terminal", "the terminal, where thimble shows", "a browser interface"),
-                             ("browser", "a browser interface", "the terminal, where thimble shows")):
+                             ("browser", "the terminal, where thimble shows", "a browser interface")):
         write_launch(ws, session=MAIN, mode=mode)
         roles = json.loads(module_bridge.roles_file(CORPUS).read_text())["roles"]
         text = json.dumps(roles, ensure_ascii=False)
