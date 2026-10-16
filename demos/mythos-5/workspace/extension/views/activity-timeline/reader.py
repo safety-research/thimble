@@ -1,40 +1,35 @@
-# Activity Timeline: one agent transcript on a time axis, every record placed at its timestamp, so the shape of where the
-# hours went reads at a glance. The lanes are grouped by the page's Rows control (a label such as tactic, or a field),
-# colored by its Color by control and filtered by its Filter by control; a record opens in the side panel.
+# Activity Timeline: one agent transcript on a single time axis.
 #
-# The file (transcript.jsonl): one JSON object per line, in the order the agent ran. Each is a "message":
+# The file (transcript.jsonl): one record per line, each a JSON object with
 #   record     always "message"
-#   index      the record's stable key (an integer; the file skips some, so it is not the line number)
-#   role       System (the one system prompt), Assistant (almost all) or Human (the two context-compaction turns)
-#   type       TextMessage (reasoning or a reply) or ToolMessage (a tool call with its result)
-#   timestamp  ISO 8601 UTC. The simulated run spans 01:02 to 11:28; the System prompt and the two Human turns carry
-#              the wall-clock stamp of the harness (around 21:29), not a place in the run, and one create_tool record
-#              carries none.
-#   content    the text, on a TextMessage
-#   tool_name, tool_call, tool_result   the tool, its arguments and its output, on a ToolMessage
+#   index      the record's place in the run
+#   role       System (the one system prompt), Assistant (the agent) or Human (a prompt from the operator)
+#   type       TextMessage (it has `content`) or ToolMessage (it has `tool_name`, `tool_call`, `tool_result`)
+#   timestamp  when, ISO 8601 in UTC; the system prompt and the two context-compaction (Human) turns carry the
+#              export time instead of their own, and a few records have none or sit out of order
+#   content    on a TextMessage: the agent's reasoning (wrapped in <thinking> tags) or its prose, a human prompt, or
+#              the system prompt
+#   tool_name  on a ToolMessage: terminal, view_tool, create_tool or str_replace_tool
+#   tool_call  on a ToolMessage: the call's arguments (a terminal command's `text`, a file tool's `path`, ...)
+#   tool_result on a ToolMessage: what the call returned, as text
 #
-# The records (what the page groups, colors and filters by):
-#   time       when, in UTC (see "the cleaning")
-#   tool       the tool a ToolMessage called, Reasoning on a TextMessage (read from tool_name)
-#   role       System, Assistant or Human (read as the file holds it)
-#   A label over the file (such as tactic) is read from thimble, never worked out here: a judgment a label holds
-#   belongs to the label.
+# The records: every line becomes one record with the same fields, which the page lanes, filters and colors by.
+#   time   in UTC (below), role, kind and tool.
+#   kind   computed from role, type and content: a ToolMessage is `tool`; an Assistant TextMessage whose content
+#          opens with a thinking tag is `thinking`, else `text`; a Human turn is `prompt`; the system prompt is
+#          `system`.
+#   tool   the tool a ToolMessage calls, read from tool_name.
 #
-# The cleaning:
-#   time       the ISO stamp read in UTC; the System and Human records' harness stamp (hour 21) and the one record with
-#              no stamp are replaced by a time interpolated from the records around them in file order, so the two Human
-#              records land at the context compaction (~07:28-07:30) where they belong rather than off the axis
-#   boundaries the two Human records mark the context compaction, drawn as a flag on the axis
-#   bad lines  a line that is not one JSON message, such as a torn last line, is no record and problems() lists it
+# Time: most records carry their own timestamp. The system prompt, the context-compaction turns and a record with no
+# timestamp or one out of sequence take a time interpolated from the records around it, so the whole run stays in
+# order on the axis. The compaction is drawn on the axis as a flag at the Human turns' time.
 #
-# The method: build_index reads the one file by bytes (counting every byte through open()), keeps a small row per record
-# (time, line, tool, role, type) with the record's index and the byte span of its line, and sorts by time. records()
-# answers the page a page of rows at a time as columns; a record's text, its tool call and result are read back from the
-# line on demand. Labels apply when rows are served: each answer keeps only the rows thimble.kept holds, and carries each
-# row's value under the page's three choices (thimble.colour_value: the row's Tool or Role, or a label's value on it):
-# Color by's (v), Rows' (g, the row's lane) and Filter by's (f).
+# Labels (such as the tactic label the lanes group by) apply when records are served, never in the index: every
+# answer keeps only the records thimble.kept(ref) holds for, and while a label is the page's Color by, Filter by or
+# Rows, thimble.color_value gives each record the label's value on it. A record is keyed by its line,
+# transcript.jsonl#L<n>, as the labels key it.
 #
-# Units: one record, cited by its index (view:activity-timeline/<index>); L<n> opens the record on line n.
+# Places: a record on a line (L<n>). Units: a window of time (<from>..<to>).
 import bisect
 import json
 import re
@@ -42,361 +37,303 @@ from datetime import datetime, timezone
 
 import thimble
 
-TOOLS = ("", "terminal", "create_tool", "view_tool", "str_replace_tool", "insert_tool")
-ROLES = ("Assistant", "System", "Human")
-TYPES = ("TextMessage", "ToolMessage")
-T, L, TOOL, ROLE, TYP = 0, 1, 2, 3, 4  # a row's time (epoch seconds), line, then value indices
-OVERVIEW_ROWS = 4000  # rows one overview page returns
-TEXT_MAX = 400        # characters of a record's text a list row or hover gets
-# the names the page's fields give each value: Tool (Reasoning for a message with no tool call) and Role
-TOOL_NAME = {"": "Reasoning", "terminal": "terminal", "create_tool": "create", "view_tool": "view",
-             "str_replace_tool": "str_replace", "insert_tool": "insert"}
+TEXT_MAX = 400  # characters of a record's text a list row gets
+EXCERPT_RECORDS = 10  # records whose text a unit's excerpt quotes
+VERBS = {"view_tool": "view", "create_tool": "create", "str_replace_tool": "edit"}
+MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
-def _blob(rec):
-    """A record's text, tool call and the head of its result, lowered: what the search reads."""
-    parts = [rec.get("content") or ""]
-    tc = rec.get("tool_call")
-    if isinstance(tc, dict):
-        parts.append(" ".join(str(v) for v in tc.values()))
-    elif tc:
-        parts.append(str(tc))
-    tr = rec.get("tool_result")
-    if tr:
-        parts.append(str(tr)[:1500])
-    return " ".join(parts).lower()
-
-
-def _parse_time(s):
+def _epoch(s):
+    """Whole seconds since 1970 from an ISO 8601 time, a time without an offset read as UTC, or None."""
     if not s:
         return None
     try:
-        d = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
     except ValueError:
         return None
-    if d.tzinfo is None:
-        d = d.replace(tzinfo=timezone.utc)
-    return d.astimezone(timezone.utc)
+    return int((dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).timestamp())
 
 
-def _lines(path, offsets):
-    """(line number, text) of each line, recording each line's byte offset; every byte is read through open()."""
+def _iso(epoch):
+    return datetime.fromtimestamp(epoch, timezone.utc).strftime("%Y-%m-%dT%H:%M")
+
+
+def _when(epoch):
+    d = datetime.fromtimestamp(epoch, timezone.utc)
+    return f"{MONTHS[d.month - 1]} {d.day} {d:%H:%M}"
+
+
+def _clean(s):
+    return " ".join(str(s or "").replace("<thinking>", " ").replace("</thinking>", " ").split())
+
+
+def _reasoning(content):
+    return re.sub(r"</?thinking>\n?", "", content or "").strip()
+
+
+def _lines(path, offs):
+    """(line number, text) of every line of the file, recording each line's byte offset in `offs`."""
     with open(path, "rb") as fh:
         pos = 0
         for n, raw in enumerate(fh, 1):
-            offsets.append(pos)
+            offs.append(pos)
             pos += len(raw)
             yield n, raw.decode("utf-8", "replace").rstrip("\r\n")
 
 
+def _kind(role, typ, content):
+    if role == "System":
+        return "system"
+    if role == "Human":
+        return "prompt"
+    if typ == "ToolMessage":
+        return "tool"
+    return "thinking" if (content or "").lstrip().startswith("<thinking>") else "text"
+
+
+def _effective(raws):
+    """A time for every record: its own where it has one and keeps the run in order, else interpolated from the
+    records around it. The anchors are the longest run of records whose times do not decrease; the rest (no time, or
+    out of order, such as the system prompt and the compaction turns) fall between the anchors around them."""
+    n = len(raws)
+    present = [i for i in range(n) if raws[i] is not None]
+    tails, prev = [], [-1] * n
+    for i in present:
+        pos = bisect.bisect_right([raws[j] for j in tails], raws[i])
+        prev[i] = tails[pos - 1] if pos else -1
+        if pos == len(tails):
+            tails.append(i)
+        else:
+            tails[pos] = i
+    anchors = set()
+    k = tails[-1] if tails else -1
+    while k != -1:
+        anchors.add(k)
+        k = prev[k]
+    anc = sorted(anchors)
+    if not anc:
+        return [0] * n
+    eff = [None] * n
+    for i in range(n):
+        if i in anchors:
+            eff[i] = raws[i]
+            continue
+        pos = bisect.bisect_left(anc, i)
+        lo = anc[pos - 1] if pos else None
+        hi = anc[pos] if pos < len(anc) else None
+        if lo is None:
+            eff[i] = raws[hi]
+        elif hi is None:
+            eff[i] = raws[lo]
+        else:
+            eff[i] = int(raws[lo] + (i - lo) / (hi - lo) * (raws[hi] - raws[lo]))
+    return eff
+
+
 def build_index(paths):
-    """{"file": path, "rows": [[t, line, act, tool, role, typ]] in time order, "idx": [index per row], "spans": [[a,b]
-    per row], "offsets": [byte offset of line n], "line_rows": {line: row}, "idx_rows": {index: row}, "boundaries":
-    [row of each Human record], "problems": [{ref, why}], "bytes": total bytes}."""
+    """{"files": [path], "offsets": [[byte offset of line n] per file], "rows": [{f, line, t, role, kind, tool}] in
+    file order (which is time order), "by_line": {line: row}, "mark": the context-compaction flag or None, "span":
+    [first, last], "problems": [{ref, why}] of the lines that do not parse}."""
     files = list(paths)
-    path = files[0] if files else None
-    offsets, problems = [], []
-    parsed = []  # (line, record-dict or None, raw-text)
-    if path:
+    problems, rows, raws = [], [], []
+    for fi, path in enumerate([files[0]] if files else []):
+        offs = []
         try:
-            for n, text in _lines(path, offsets):
-                if not text.strip():
-                    parsed.append((n, None, text))
+            for n, line in _lines(path, offs):
+                if not line.strip():
                     continue
                 try:
-                    rec = json.loads(text)
+                    d = json.loads(line)
                 except ValueError:
-                    problems.append({"ref": f"{path}#L{n}", "why": "not one JSON message (a torn or malformed line)"})
-                    parsed.append((n, None, text))
-                    continue
-                if not isinstance(rec, dict):
                     problems.append({"ref": f"{path}#L{n}", "why": "not a JSON object"})
-                    parsed.append((n, None, text))
                     continue
-                parsed.append((n, rec, text))
+                if not isinstance(d, dict):
+                    problems.append({"ref": f"{path}#L{n}", "why": "not a transcript record (not a JSON object)"})
+                    continue
+                role, typ = str(d.get("role") or ""), str(d.get("type") or "")
+                content = d.get("content") if isinstance(d.get("content"), str) else ""
+                rows.append({"f": fi, "line": n, "role": role, "kind": _kind(role, typ, content),
+                             "tool": str(d.get("tool_name") or "")})
+                raws.append(_epoch(d.get("timestamp")))
         except OSError as e:
-            problems.append({"ref": f"{path or '?'}#L1", "why": f"the file cannot be read ({type(e).__name__})"})
-
-    recs = [(n, r) for n, r, _ in parsed if r is not None]
-    # placed time: real 2026 stamps not in hour 21; interpolate the rest from file-order neighbours
-    def real(r):
-        d = _parse_time(r.get("timestamp"))
-        return d if (d and d.hour != 21) else None
-    placed = [real(r) for _, r in recs]
-    last = None
-    for i in range(len(recs)):
-        if placed[i] is None:
-            placed[i] = last
-        else:
-            last = placed[i]
-    nxt = None
-    for i in range(len(recs) - 1, -1, -1):
-        if placed[i] is None:
-            placed[i] = nxt
-        else:
-            nxt = placed[i]
-
-    built = []
-    for (n, r), d in zip(recs, placed):
-        if d is None:
-            problems.append({"ref": f"{path}#L{n}", "why": "no time the reader can read or place"})
-            continue
-        tool = r.get("tool_name") or ""
-        ti = TOOLS.index(tool) if tool in TOOLS else 0
-        role = r.get("role") if r.get("role") in ROLES else "Assistant"
-        typ = r.get("type") if r.get("type") in TYPES else "TextMessage"
-        idx = r.get("index")
-        if not isinstance(idx, int) or isinstance(idx, bool):
-            idx = n
-        built.append({"t": int(d.timestamp()), "line": n, "tool": ti,
-                      "role": ROLES.index(role), "typ": TYPES.index(typ), "idx": idx,
-                      "human": role == "Human"})
-    built.sort(key=lambda r: (r["t"], r["line"]))
-
-    rows, idxlist, spans, line_rows, idx_rows, boundaries = [], [], [], {}, {}, []
-    for i, r in enumerate(built):
-        rows.append([r["t"], r["line"], r["tool"], r["role"], r["typ"]])
-        idxlist.append(r["idx"])
-        spans.append([r["line"], r["line"]])
-        line_rows[r["line"]] = i
-        idx_rows.setdefault(r["idx"], i)
-        if r["human"]:
-            boundaries.append(i)
-    return {"file": path, "rows": rows, "idx": idxlist, "spans": spans, "offsets": offsets,
-            "line_rows": line_rows, "idx_rows": idx_rows, "boundaries": boundaries,
-            "problems": problems, "names": {"tool": list(TOOLS), "role": list(ROLES), "typ": list(TYPES)}}
-
-
-# ---------------------------------------------------------------- reading records back
-
-def _read_lines(index, wanted):
-    """{line: raw text} for the wanted file lines, read back by seeking to each line's byte offset."""
-    out = {}
-    path, offs = index["file"], index["offsets"]
-    if not path or not wanted:
-        return out
-    try:
-        with open(path, "rb") as fh:
-            for n in sorted(set(wanted)):
-                if 1 <= n <= len(offs):
-                    fh.seek(offs[n - 1])
-                    out[n] = fh.readline().decode("utf-8", "replace").rstrip("\r\n")
-    except OSError:
-        pass
-    return out
-
-
-def _rec_of(raw):
-    try:
-        r = json.loads(raw)
-        return r if isinstance(r, dict) else {}
-    except ValueError:
-        return {}
-
-
-def _literal(rec):
-    """A record's text, word for word, for a citation excerpt: a TextMessage's content, or a ToolMessage's command (or,
-    failing that, its result). One field, so the excerpt is literally text the cited line holds."""
-    if rec.get("type") == "ToolMessage":
-        tc = rec.get("tool_call")
-        if isinstance(tc, dict):
-            v = tc.get("text") or tc.get("command") or tc.get("file_text") or tc.get("path") or tc.get("file_path")
-            if v:
-                return str(v)
-        elif tc:
-            return str(tc)
-        tr = rec.get("tool_result")
-        if tr:
-            return str(tr)
-        if isinstance(tc, dict):
-            return json.dumps(tc)
-        return ""
-    return str(rec.get("content") or "")
-
-
-def _first_line(rec):
-    """A record's text in one line: a TextMessage's content, or a tool call summarised with the head of its result."""
-    if rec.get("type") == "ToolMessage":
-        tc = rec.get("tool_call")
-        if isinstance(tc, dict):
-            arg = tc.get("text") or tc.get("command") or tc.get("file_text") or tc.get("path") or tc.get("file_path")
-            if not arg:
-                arg = " ".join(f"{k}={v}" for k, v in tc.items())
-        else:
-            arg = str(tc or "")
-        head = f"{rec.get('tool_name') or 'tool'}: {arg}"
-        res = str(rec.get("tool_result") or "").strip()
-        if res:
-            head += "  →  " + res
-        text = head
-    else:
-        text = str(rec.get("content") or "")
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
+            problems.append({"ref": f"{path}#L1", "why": f"cannot be read ({type(e).__name__})"})
+        offsets = [offs]
+    if not files:
+        offsets = []
+    eff = _effective(raws)
+    for r, t in zip(rows, eff):
+        r["t"] = t
+    human = [r["t"] for r in rows if r["role"] == "Human"]
+    mark = {"t": sum(human) // len(human), "label": "context compaction"} if human else None
+    span = [rows[0]["t"], rows[-1]["t"]] if rows else [0, 0]
+    return {"files": files, "offsets": offsets, "rows": rows,
+            "by_line": {r["line"]: i for i, r in enumerate(rows)},
+            "mark": mark, "span": span, "problems": problems}
 
 
 def _ref(index, i):
-    return f"{index['file']}#L{index['rows'][i][L]}"
+    r = index["rows"][i]
+    return f"{index['files'][r['f']]}#L{r['line']}"
 
 
-def _fields(index, row):
-    """A record's field values, which Color by, Rows and Filter by read by name (thimble.colour_value for a field)."""
-    return {"tool": TOOL_NAME[index["names"]["tool"][row[TOOL]]], "role": index["names"]["role"][row[ROLE]]}
-
-
-def _overview(index, keep, start=0, rows_by=None):
-    """A page of the rows the analyst's label filter keeps (and any in `keep`), from row `start`, as columns: r (row), t
-    (seconds since t0), ln (line), ix (the record's index), tool/role/typ (value indices), hu (1 on a Human record) and g
-    (the row's lane under the page's Rows choice, as the page sent rows.query()): a field's value or a label's value on
-    the record, None for none, so a lane grouped by a label is right on the first frame, before the page's anchored rows
-    are marked. The first page also carries t0, span, the value names and each context-compaction record's time."""
-    on = thimble.view_labels()
-    rows = index["rows"]
-    t0 = rows[0][T] if rows else 0
-    cols = {k: [] for k in ("r", "t", "ln", "ix", "tool", "role", "typ", "hu", "g")}
-    bset = set(index["boundaries"])
-    i = max(0, start)
-    while i < len(rows) and len(cols["r"]) < OVERVIEW_ROWS:
-        row, ref = rows[i], _ref(index, i)
-        cur = i
-        i += 1
-        if on["filter"] and cur not in keep and not thimble.kept(ref):
-            continue
-        vals = (cur, row[T] - t0, row[L], index["idx"][cur], row[TOOL], row[ROLE], row[TYP],
-                1 if cur in bset else 0,
-                thimble.colour_value(rows_by, ref, _fields(index, row)))
-        for k, v in zip(cols, vals):
-            cols[k].append(v)
-    page = {"cols": cols, "next": i if i < len(rows) else None}
-    if start <= 0:
-        page.update(t0=t0, span=[0, rows[-1][T] - t0 if rows else 0], names=index["names"],
-                    file=index["file"], total=len(rows),
-                    boundaries=[{"t": rows[b][T] - t0, "ln": rows[b][L], "ix": index["idx"][b]}
-                                for b in index["boundaries"]])
-    return page
-
-
-def _texts(index, want):
-    rows = index["rows"]
-    want = [i for i in want if isinstance(i, int) and not isinstance(i, bool) and 0 <= i < len(rows)][:2000]
-    raws = _read_lines(index, [rows[i][L] for i in want])
-    out = []
-    for i in want:
-        rec = _rec_of(raws.get(rows[i][L], ""))
-        out.append([i, _first_line(rec)[:TEXT_MAX]])
+def _read_rows(index, idxs):
+    """{row: {content, tool_call, tool_result}} for the wanted rows, read back from their lines."""
+    out, by_file = {}, {}
+    for i in idxs:
+        by_file.setdefault(index["rows"][i]["f"], []).append(i)
+    for fi, wanted in by_file.items():
+        with open(index["files"][fi], "rb") as fh:
+            for i in wanted:
+                fh.seek(index["offsets"][fi][index["rows"][i]["line"] - 1])
+                try:
+                    d = json.loads(fh.readline().decode("utf-8", "replace"))
+                except ValueError:
+                    d = {}
+                out[i] = {"content": d.get("content") if isinstance(d.get("content"), str) else "",
+                          "tool_call": d.get("tool_call") if isinstance(d.get("tool_call"), dict) else None,
+                          "tool_result": d.get("tool_result") if isinstance(d.get("tool_result"), str) else None}
     return out
 
 
-def _kept(index, i, keep=()):
-    return i in keep or thimble.kept(_ref(index, i))
+def _snippet(row, p):
+    """One line naming what the record is: a command, a file touched, or the start of the reasoning."""
+    if row["kind"] == "tool":
+        tc = p.get("tool_call") or {}
+        if row["tool"] == "terminal":
+            cmd = tc.get("text")
+            return _clean(cmd) if isinstance(cmd, str) and cmd.strip() else "(read terminal output)"
+        if row["tool"] in VERBS:
+            return f"{VERBS[row['tool']]} {tc.get('path') or ''}".strip()
+        return row["tool"] or "(tool)"
+    return _clean(p.get("content"))
 
 
-def _search(index, q):
-    q = str(q or "").strip().lower()
-    if not q:
-        return {"q": q, "rows": []}
+def _search_text(row, p):
+    parts = [row["role"], row["kind"], row["tool"], p.get("content") or ""]
+    tc = p.get("tool_call") or {}
+    parts += [v for k in ("text", "path", "old_str", "new_str", "file_text") if isinstance((v := tc.get(k)), str)]
+    if isinstance(p.get("tool_result"), str):
+        parts.append(p["tool_result"])
+    return " ".join(parts)
+
+
+def _overview(index, query, keep):
+    """The records the page shows, as columns: `r` the row, `t` its time, `ref`, `role`, `kind`, `tool`, `text` cut to
+    TEXT_MAX, `value` its Color by value and `group` its Rows group. The rows the label filter keeps whose text holds
+    the words `q`, and those in `keep` (a citation) whatever the filters. `counts` is Color by's values over the rows
+    Filter by keeps; `fcounts` Filter by's over every row. `span` and `mark` carry the axis's whole span and the
+    context-compaction flag."""
     rows = index["rows"]
-    raws = _read_lines(index, [r[L] for r in rows])
-    hits = []
+    choice, only, group_by = query.get("color"), query.get("filter"), query.get("rows")
+    q = str(query.get("q") or "").strip().lower()
+    parsed = _read_rows(index, range(len(rows)))
+    cols = {k: [] for k in ("r", "t", "ref", "role", "kind", "tool", "text", "value", "group")}
+    counts, fcounts = {}, {}
     for i, row in enumerate(rows):
-        rec = _rec_of(raws.get(row[L], ""))
-        if q in _blob(rec) and _kept(index, i):
-            hits.append(i)
-    return {"q": q, "rows": hits}
+        ref, p = _ref(index, i), parsed.get(i, {})
+        asked = i in keep
+        if not asked and q and q not in _search_text(row, p).lower():
+            continue
+        if not asked and not thimble.kept(ref):
+            continue
+        rec = {"ref": ref, "role": row["role"], "kind": row["kind"], "tool": row["tool"]}
+        value = thimble.color_value(choice, ref, rec)
+        shown = thimble.color_value(only, ref, rec)
+        shows = thimble.color_on(only, shown)
+        fcounts[shown or ""] = fcounts.get(shown or "", 0) + 1
+        if shows:
+            counts[value or ""] = counts.get(value or "", 0) + 1
+        if not shows and not asked:
+            continue
+        for k, v in zip(cols, (i, row["t"], ref, row["role"], row["kind"], row["tool"],
+                               _snippet(row, p)[:TEXT_MAX], value, thimble.color_value(group_by, ref, rec))):
+            cols[k].append(v)
+    return {"cols": cols, "counts": counts, "fcounts": fcounts, "next": None,
+            "span": index["span"], "mark": index["mark"]}
 
 
 def _record(index, i):
-    """One record in full: its fields, its whole text, tool call and tool result."""
+    """One record in full: its reasoning or its tool call and result, and its line as the file holds it."""
     rows = index["rows"]
     if not isinstance(i, int) or isinstance(i, bool) or not 0 <= i < len(rows):
         return None
-    row = rows[i]
-    raw = _read_lines(index, [row[L]]).get(row[L], "")
-    rec = _rec_of(raw)
-    tc = rec.get("tool_call")
-    if isinstance(tc, dict):
-        tc = {k: (v if isinstance(v, str) else json.dumps(v)) for k, v in tc.items()}
-    elif tc is not None:
-        tc = str(tc)
-    return {"r": i, "ref": _ref(index, i), "t": row[T], "line": row[L], "index": index["idx"][i],
-            "role": ROLES[row[ROLE]], "type": TYPES[row[TYP]],
-            "tool": TOOLS[row[TOOL]] or None, "timestamp": rec.get("timestamp"),
-            "time": datetime.fromtimestamp(row[T], timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "content": rec.get("content") or None, "tool_call": tc,
-            "tool_result": (str(rec.get("tool_result")) if rec.get("tool_result") is not None else None),
-            "human": i in set(index["boundaries"])}
+    row, p = rows[i], _read_rows(index, [i]).get(i, {})
+    with open(index["files"][row["f"]], "rb") as fh:
+        fh.seek(index["offsets"][row["f"]][row["line"] - 1])
+        raw = fh.readline().decode("utf-8", "replace").rstrip("\r\n")
+    return {"r": i, "ref": _ref(index, i), "t": row["t"], "role": row["role"], "kind": row["kind"],
+            "tool": row["tool"], "reasoning": _reasoning(p.get("content")), "call": p.get("tool_call"),
+            "result": p.get("tool_result"), "raw": raw}
 
 
 def records(index, query):
+    """{op: overview, color?, filter?, rows?, q?, keep?}: the records the page shows (_overview).
+    {op: record, r}: one record in full (_record). `keep` rows are kept whatever the label filter."""
     query = query or {}
-    keep = {int(x) for x in query.get("keep") or () if isinstance(x, int) and not isinstance(x, bool)}
-    op = query.get("op")
-    if op == "texts":
-        return {"texts": _texts(index, query.get("rows") or [])}
-    if op == "search":
-        return _search(index, query.get("q"))
-    if op == "record":
-        return {"record": _record(index, query.get("r"))}
-    start = query.get("from")
-    return _overview(index, keep, start if isinstance(start, int) and not isinstance(start, bool) else 0,
-                     query.get("rows"))
+    keep = {x for x in query.get("keep") or () if isinstance(x, int) and not isinstance(x, bool)}
+    if query.get("op") == "record":
+        return _record(index, query.get("r"))
+    return _overview(index, query, keep)
 
 
-# ---------------------------------------------------------------- places
+def _row_at(index, n):
+    """The row on line n, or the nearest row (the next, else the last before it)."""
+    rows = index["rows"]
+    if not rows:
+        return None
+    if n in index["by_line"]:
+        return index["by_line"][n]
+    lines = [r["line"] for r in rows]
+    k = bisect.bisect_left(lines, n)
+    return min(k, len(rows) - 1)
+
 
 def _excerpt(index, i):
-    raw = _read_lines(index, [index["rows"][i][L]]).get(index["rows"][i][L], "")
-    return _literal(_rec_of(raw))[:4000]
-
-
-def _label(index, i):
-    """A cited record in a few words: its tool, or Reasoning for a message with no tool call."""
-    return TOOL_NAME[index["names"]["tool"][index["rows"][i][TOOL]]]
+    p = _read_rows(index, [i]).get(i, {})
+    row = index["rows"][i]
+    if row["kind"] == "tool":
+        tc = p.get("tool_call") or {}
+        bits = [str(tc.get("text") or ""), str(tc.get("path") or ""), str(p.get("tool_result") or "")]
+        return "\n".join(b for b in bits if b.strip()) or _snippet(row, p)
+    return _reasoning(p.get("content")) or _snippet(row, p)
 
 
 def resolve(index, locator):
-    """view:activity-timeline/<index>: the record with that index. <file>#L<n>: the record on line n, or the
-    nearest."""
+    """<file>#L<n>: the record on that line, or the nearest one. view:<slug>/<from>..<to>: the records between two
+    UTC times, zoomed to them."""
     rows = index["rows"]
-    when = lambda i: datetime.fromtimestamp(rows[i][T], timezone.utc).strftime("%H:%M")  # noqa: E731
     if "key" in locator:
-        key = str(locator["key"]).strip()
-        i = None
-        if re.fullmatch(r"-?\d+", key) and int(key) in index["idx_rows"]:
-            i = index["idx_rows"][int(key)]
-        if i is None:
+        key = str(locator["key"])
+        m = re.fullmatch(r"(\d{4}-\d\d-\d\dT\d\d:\d\d)\.\.(\d{4}-\d\d-\d\dT\d\d:\d\d)", key)
+        if not m or (a := _epoch(m.group(1))) is None or (b := _epoch(m.group(2))) is None or b <= a:
             return None
-        text = _excerpt(index, i)
-        return {"excerpt": text, "label": f"#{index['idx'][i]} · {_label(index, i)} · {when(i)}",
-                "refs": [_ref(index, i)], "key": str(index["idx"][i]), "target": {"r": i}}
+        found = [i for i, r in enumerate(rows) if a <= r["t"] < b]
+        if not found:
+            return None
+        span = f"{_when(a)} to {_when(b)[-5:]}" if _when(a)[:-5] == _when(b)[:-5] else f"{_when(a)} to {_when(b)}"
+        lines = [_excerpt(index, i) for i in found[:EXCERPT_RECORDS]]
+        return {"excerpt": "\n".join(x for x in lines if x), "label": f"{span} · {len(found)} records",
+                "refs": [_ref(index, i) for i in found], "key": key, "target": {"from": _iso(a), "to": _iso(b)}}
     path, fragment = locator.get("path"), str(locator.get("fragment") or "")
-    m = re.fullmatch(r"L(\d+)(?:-L\d+)?", fragment)
-    if not m or path != index["file"]:
+    if path not in index["files"]:
         return None
-    n = int(m.group(1))
-    i = index["line_rows"].get(n)
-    if i is None and index["line_rows"]:
-        lines = sorted(index["line_rows"])
-        k = bisect.bisect_left(lines, n)
-        nearest = lines[k] if k < len(lines) else lines[-1]
-        i = index["line_rows"][nearest]
+    m = re.fullmatch(r"L(\d+)", fragment)
+    if not m:
+        return None
+    i = _row_at(index, int(m.group(1)))
     if i is None:
         return None
-    text = _excerpt(index, i)
-    return {"excerpt": text, "label": f"#{index['idx'][i]} · {_label(index, i)} · {when(i)}",
-            "refs": [_ref(index, i)], "key": str(index["idx"][i]), "target": {"r": i}}
+    row = index["rows"][i]
+    label = f"{row['role']} · {row['kind']}" + (f" · {row['tool']}" if row["tool"] else "")
+    return {"excerpt": _excerpt(index, i), "label": f"{label} · {_when(row['t'])[-5:]}",
+            "refs": [_ref(index, i)], "key": None, "target": {"r": i}}
+
+
+def derived(index):
+    return [{"record": "message", "field": "time", "from": "the record's timestamp", "kind": "computed",
+             "how": "read in UTC; a record with no timestamp or one out of sequence (the system prompt and the "
+                    "context-compaction turns carry the export time) takes a time interpolated from the records around it"}]
 
 
 def problems(index):
-    """The lines that are not one JSON message, each {ref, why}, which thimble lists beside the page."""
     return index["problems"]
-
-
-def unplaced(index):
-    """Records the reader read but the page cannot place. Every parsed record is placed in time, so there are none."""
-    return []
-
-
-def hidden(index):
-    """Files in scope left unread on purpose. The one claimed file is read whole, so there are none."""
-    return []

@@ -30,6 +30,7 @@ import { noteOpened, openedBefore, openingRef, readStorage, storageKey, writeSto
 import { CmdPointer } from '../pointer/CmdPointer'
 import { ReportTab } from '../report/ReportTab'
 import { tabSignals, useTabDots, writing } from './dots'
+import { DemoLine } from './DemoLine'
 import { NewVersion } from './NewVersion'
 import { DragGhost, PaneArea, usePaneDrag, type SurfaceSpec } from './PaneArea'
 import {
@@ -317,6 +318,7 @@ export function Shell({ ws }: { ws: string }) {
         }}
         onTabDrag={startDrag}
       />
+      <DemoLine />
       <div className="shell-body">
         {layout.chatOpen ? (
           <>
