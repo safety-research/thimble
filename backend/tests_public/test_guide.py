@@ -40,13 +40,16 @@ def corpus(tmp_path, monkeypatch, workspaces_tmp):
     ("checks", ["## Checks\n", "- `checked`"], ["## Labels\n", "- `labeled`", "- `label_done`", "- `rerun`"]),
 ])
 def test_a_switched_off_feature_leaves_its_guidance_out(corpus, off, gone, kept):
-    on = guide.render(corpus)
+    def whole() -> str:  # the guide and the later parts that reach main on a feature's first use (disclose.py)
+        return "\n".join([guide.render(corpus), *(text for _, _, text in guide.later_parts(corpus))])
+
+    on = whole()
     assert all(g in on for g in gone + kept)
     features.set_settings({off: "off"}, "test")
-    text = guide.render(corpus)
+    text = whole()
     assert not [g for g in gone if g in text], off
     assert all(k in text for k in kept)
-    assert "\n\n\n" not in text, "a block of whole lines leaves no blank line"
+    assert "\n\n\n" not in guide.render(corpus), "a block of whole lines leaves no blank line"
 
 
 def test_take_if_owed_sends_the_guide_once_to_eight_callers_at_once(corpus):
