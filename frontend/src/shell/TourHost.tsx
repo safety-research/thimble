@@ -1,9 +1,10 @@
 // The product tour's place in the shell. The first time this install's dashboard opens (backend tour.py, in thimble's
-// own home), once the shell is drawn with its session attached, or on a demo page (lib/demo), whose steps say it is a
-// demo, a welcome asks whether to take the tour; the offer is recorded as it shows, whatever the answer. Settings' Take
-// the tour (the bus's `tour`) runs it again at any time. The tour itself (../tour) loads only then. While it runs, telemetry records nothing and the chat shows no view proposal
-// (lib/touring). When it closes, the focused pane shows the surface it showed before; a session that ends while it runs
-// closes it.
+// own home), once the shell is drawn with its session attached, or on a demo page (lib/demo), a welcome asks whether
+// to take the tour. On a demo page it first says that the page holds example data, and the steps say it is a demo;
+// elsewhere it says that the tour uses example data. The offer is recorded as it shows, whatever the answer. Settings'
+// Take the tour (the bus's `tour`) runs it again at any time. The tour itself (../tour) loads only then. While it runs,
+// telemetry records nothing and the chat shows no view proposal (lib/touring). When it closes, the focused pane shows
+// the surface it showed before; a session that ends while it runs closes it.
 import { useEffect } from 'react'
 import { api } from '../lib/api'
 import { bus, type Tab } from '../lib/bus'

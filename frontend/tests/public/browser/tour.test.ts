@@ -2,9 +2,10 @@
 // and fonts, against a made-up workspace whose every API answer this file gives, at 1440x900, 1920x1080 and a chat
 // column 355 px wide at DPR 2 (in a 1200 and a 1100 px window, where the Files sidebar folds). What it proves, measured
 // with getBoundingClientRect:
-//   - the first launch asks first (a welcome, "Would you like a short tour?", with Skip and Take the tour) and records
-//     the offer in thimble's own state (POST /api/tour/seen); a page loaded after that offers nothing; Settings' Take
-//     the tour replays the tour from step 1; with the chat column folded the tour leaves out its chat steps;
+//   - the first launch asks first (a welcome, "Would you like a short tour? The demo tour uses example data.", with
+//     Skip and Take the tour) and records the offer in thimble's own state (POST /api/tour/seen); a page loaded after
+//     that offers nothing; Settings' Take the tour replays the tour from step 1; with the chat column folded the tour
+//     leaves out its chat steps;
 //   - every step: each cutout lies inside the window, everything an example shows in a cutout lies inside that cutout,
 //     the popover lies inside the window, covers no cutout wherever the window has room for it beside the first, and its
 //     caret points at the first cutout;
@@ -1093,7 +1094,7 @@ test('the first launch asks first, records the offer in thimble’s own state, a
       count: !!document.querySelector('.tour-count'),
       holes: document.querySelectorAll('.tour-dim mask rect').length,
     }))
-    assert.deepEqual(w, { title: 'Welcome to thimble', text: 'Would you like a short tour?', buttons: ['Skip', 'Take the tour'], count: false, holes: 1 })
+    assert.deepEqual(w, { title: 'Welcome to thimble', text: 'Would you like a short tour? The demo tour uses example data.', buttons: ['Skip', 'Take the tour'], count: false, holes: 1 })
     assert.ok(await fontOk(page), 'the tour is drawn in Hanken Grotesk, loaded')
     assert.ok(server.seen, 'the offer is recorded once it shows')
     await page.click('.tour-pop [data-tour="skip"]')
