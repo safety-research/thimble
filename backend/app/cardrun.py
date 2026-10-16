@@ -4,15 +4,16 @@ which the shim's card check starts itself.
 Code a model wrote never runs in the MCP shim or the server: add_card and edit_card store the card with a `run` record
 ({state: waiting, by: bash, script}) and answer with one Bash command (`## card-run`); a code label answers with
 `## label-run`, and cards that read a changed label with `## cards-stale`. This holds before and after a press of the
-browser workbench (one card runner), and the browser's Run asks main to run the command. The caller runs the command in its Bash, as its permission mode decides and in Claude
-Code's own sandbox when the analyst turned that on, where `thimble-run` runs the code as a kernel cell would: one IPython shell (LocalKernel) set up with the kernel's own startup lines
-(notebook.startup_lines: Altair's mimetype renderer, pandas' column width, the figure formatter, the page's faces, the
-cell-reads hook and the `thimble` module with WS set), thimble's matplotlibrc and the inline backend's SVG figures,
+browser workbench (one card runner), and the browser's Run asks main to run the command. The caller runs the command in
+its Bash, as its permission mode decides and in Claude Code's own sandbox when the analyst turned that on, where
+`thimble-run` runs the code as a kernel cell would: one IPython shell (LocalKernel) set up with the kernel's own startup
+lines (notebook.startup_lines: Altair's mimetype renderer, pandas' column width, the figure formatter, the page's faces,
+the cell-reads hook and the `thimble` module with WS set), thimble's matplotlibrc and the inline backend's SVG figures,
 then the same storage path as a kernel run (notebook._execute_cell: output bounding, memos, reads, labels read). The
 cell runs in the process's main thread, as in a kernel, with a SIGALRM time limit standing in for a kernel's SIGINT,
 while the event loop runs in a thread of its own (serve). It writes the card's outputs into the group under the store's
-lock and prints what add_card prints, and exits 0, or 1 when the code errored. No kernel lasts between
-runs, so each run loads its data again. A run writes only the folders write_dirs names; it writes no canvas history or
+lock and prints what add_card prints, and exits 0, or 1 when the code errored. No kernel lasts between runs, so each run
+loads its data again. A run writes only the folders write_dirs names; it writes no canvas history or
 undo step and starts no chat.
 
 The shim's CardWatch sees a group file change and records each run that ended (canvas_history, undo), starts the card

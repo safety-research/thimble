@@ -19,18 +19,21 @@
 `server up` (alias `ensure`) starts the server from a shell or for a /thimble action that needs it (fresh, restore,
 status, fix, feedback): `GET /api/health`, then under `flock <home>/server.lock` spawn uvicorn on the server's port
 (port) as its own session leader (plus Vite on 5300 when THIMBLE_DEV is on), wait for health, map the cwd to a
-workspace, print `thimble: <url>` (LINK_LINE in a session), and name the session to the server. A press of the browser
-workbench (`thimble open`, app/open_cmd.py) is the session's way to start it; it makes the session main on the server
-(made_main), which switches its transport to the server for the rest of the session (subagent_files.transport). It always
-exits 0, since a skill fails whole when its command exits non-zero. `--action fresh` moves the workspace aside into
-<workspaces>/.archive/; `--action restore` restores an archive. Where the plugin's hooks are off, /thimble also prints
-the command main's Monitor runs (cc_plugin.route, monitor_lines).
+workspace, print `thimble: <url>` (LINK_LINE in a session), and name the session to the server. /thimble alone starts
+no server: its hook and the skill's own commands turn thimble on in the session (app/activate.py), and `up` prints the
+line that says so (on_here). A press of the browser workbench (`thimble open`, app/open_cmd.py; /thimble open, run_open)
+is the session's way to start the server; it makes the session main on the server (made_main), which switches its
+transport to the server for the rest of the session (subagent_files.transport). It always exits 0, since a skill fails
+whole when its command exits non-zero. `--action fresh` moves the workspace aside into <workspaces>/.archive/;
+`--action restore` restores an archive. Where the plugin's hooks are off, /thimble also prints the command main's
+Monitor runs (cc_plugin.route, monitor_lines).
 
 <home> is `~/.thimble` or THIMBLE_HOME. <home>/server.json records {port, pid, url, repo, env, token}, written 0600
-(write_state) in the 0700 home, readable by its owner alone; `token` is new at each start and is what the plugin's hooks and this CLI prove they hold (hook_auth.py). A
-browser signs in with a one-time code from ui_url(pair=True), never with a value from this file. Only a terminal gets a
-link with a code: `up` from a shell prints one, and /thimble prints LINK_LINE for main's Stop hook to show the link,
-which gets its code as the hook shows it (leave_link). `thimble unpair` signs every browser out. Its `pid` is trusted
+(write_state) in the 0700 home, readable by its owner alone; `token` is new at each start and is what the plugin's
+hooks and this CLI prove they hold (hook_auth.py). A browser signs in with a one-time code from ui_url(pair=True), never
+with a value from this file. Only a terminal gets a link with a code: `up` from a shell prints one, and /thimble fresh
+and restore print LINK_LINE for main's Stop hook to show the link, which gets its code as the hook shows it
+(leave_link). `thimble unpair` signs every browser out. Its `pid` is trusted
 only while it is a thimble server on its port (is_server checks the command line and working folder, since a pid
 recorded inside a sandbox's pid namespace can name an unrelated host process). reconcile makes the record true before
 `up` acts on it. A server whose /api/health names another THIMBLE_HOME belongs to another install.
