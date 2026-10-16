@@ -5,7 +5,7 @@ import { expect, test } from 'claude-code/testing'
 import { busyWords, cardOfCell, htmlTable, labelCard, linksOf, sortedBars } from '../cell'
 import type { ThimbleCell } from '../cell'
 import { cardLayout, cut, labelHead, placeWords, share } from '../draw'
-import { CHIP_MAX, chipLabel, citations, clip, cutLine, cutMiddle, dateIn, dateSpans, formatted, itemsRow, labelState, labelStateWords, noteLabelName, noteQuestion, quoted, recordFields, valueIn, width, windowAt } from '../lib'
+import { CHIP_MAX, chipLabel, citations, clip, cutLine, cutMiddle, dateIn, dateSpans, formatted, itemsRow, labelState, labelStateWords, noteLabelName, noteName, noteQuestion, quoted, recordFields, valueIn, width, windowAt } from '../lib'
 import { chipName, plainCites } from '../cite'
 import { targetLabel } from '../gestures'
 import { fitPath, pathWidth } from '../nav'
@@ -57,13 +57,20 @@ test('a diagram from its payload (from and to) and a timeline from its output dr
   expect(text('e0time00').join('\n')).toContain('peak afternoon')
 })
 
-test('an example card lists its records; a note is prose; a custom card its words; a code card what it printed', () => {
+test('an example card lists its records; a note is prose; a custom card its words or its table; a code card what it printed', () => {
   const ex = cardOfCell(of('a20ecb55')).card
   expect(ex.kind).toBe('example')
   expect(ex.examples!.map(x => x.ref)).toEqual(['README.md#L3', 'README.md#L5'])
   expect(text('a20ecb55').join('\n')).toContain('README.md line 3')
   expect(text('n0note00')).toEqual(['The dse wiki was used as a relay and as a message board.'])
   expect(text('c0cust00')).toEqual(['45%', 'of all saves landed in one afternoon'])
+  // a custom card's table is a table card; one with no words draws nothing of its own (its link opens the browser)
+  const table = '<h2>Saves</h2><table><tr><th>wiki</th><th>saves</th></tr><tr><td>dse</td><td>1,204</td></tr><tr><td>probier</td><td>88</td></tr></table>'
+  const custom = cardOfCell({ ...of('c0cust00'), payload: { html: table } } as ThimbleCell).card
+  expect(custom.kind).toBe('table')
+  expect(custom.columns).toEqual(['wiki', 'saves'])
+  expect(custom.rows).toEqual([['dse', 1204], ['probier', 88]])
+  expect(cardOfCell({ ...of('c0cust00'), payload: { html: '<canvas></canvas>' } } as ThimbleCell).card.note).toBe('')
   expect(text('k0code00')).toEqual(['revisions.jsonl 14591', 'events.jsonl 19913'])
 })
 
@@ -421,7 +428,7 @@ test("a label example's fields cut at whole pairs, never `·…` or a key withou
   expect(cutLine('Words of a Markdown file run on past the room they have here', 30)).toBe(cut('Words of a Markdown file run on past the room they have here', 30))
 })
 
-test("a place cited with a passage of its line reads as its line; a chip names its place short, a card `card`, a file's line by the file's name and the line", () => {
+test("a place cited with a passage of its line reads as its line; a chip names its place short, a card `card:<name>`, a file's line by the file's name and the line", () => {
   // live check term-fix5, new quirks 3 and 4: `↗ agent-chat.jsonl#L2.b0:c0-120`, and `card L1`
   expect(placeWords('collusion-wiki/agent-chat.jsonl#L2.b0:c0-120')).toBe('collusion-wiki/agent-chat.jsonl line 2')
   expect(placeWords('collusion-wiki/agent-chat.jsonl#L2.b1')).toBe('collusion-wiki/agent-chat.jsonl line 2')
@@ -437,8 +444,15 @@ test("a place cited with a passage of its line reads as its line; a chip names i
   const long = chip('a/collusion-wiki-revisions-of-every-page.jsonl#L10879')
   expect(long).toMatch(/^\[ collus\S*…\S*-page\.jsonl line 10879 \]$/)
   expect(width(long)).toBeLessThanOrEqual(CHIP_MAX + 4)
+  // a card by its name (Matt, 2026-10-16): its id, which is the name of its question, or an older card's name once read;
+  // `card` while an older card's random id is all there is, never the id
   expect(chip('card:c0ffee00')).toBe('[ card ]')
   expect(chip('card:c0ffee00#wiki/dse')).toBe('[ card ]')
+  expect(chip('card:how-many-prs')).toBe('[ card:how-many-prs ]')
+  expect(chip('card:how-many-prs#wiki/dse')).toBe('[ card:how-many-prs ]')
+  expect(chip('cell:prs-merged-week-12')).toBe('[ card:prs-merged-week-12 ]')
+  noteName('c0ffee00', 'wikis-most-revisions')
+  expect(chip('card:c0ffee00')).toBe('[ card:wikis-most-revisions ]')
   expect(chip('card:c0ffee00@out0#L1')).toBe('[ card output line 1 ]')
   expect(chip('card:c0ffee00@out0#L1-L3')).toBe('[ card output lines 1-3 ]')
   expect(chip('call:a1b2c3#L4')).toBe('[ output line 4 ]')

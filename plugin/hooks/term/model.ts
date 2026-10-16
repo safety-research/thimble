@@ -116,11 +116,19 @@ export function cardsOfCall(tool: string, input: unknown, text: string): string[
   return []
 }
 
-/** The card ids a Bash command that runs `thimble-run card` names: after `thimble-run card`, or in a shell loop's list
- *  (`for c in 2d10d7f3 9b4bb0cb; do $B card $c; done`). */
+/** The card ids a Bash command that runs `thimble-run card` names: after `card` or `card:`, or in a shell loop's list
+ *  (`for c in prs-merged 9b4bb0cb; do $B card $c; done`); a name such as `prs-merged` or an older card's random id. */
 export function runIds(command: string): string[] {
   if (!/thimble-run\b/.test(command) || !/\bcard\b/.test(command)) return []
-  return [...new Set([...command.matchAll(/(?:card:)?\b([0-9a-f]{8})\b/g)].map(m => m[1]!))]
+  const out = new Set<string>()
+  for (const m of command.matchAll(/\bcard(?::|\s+['"]?)([A-Za-z0-9_][A-Za-z0-9_-]*)/g)) out.add(m[1]!)
+  for (const m of command.matchAll(/\bfor\s+\w+\s+in\s+([^;\n]+)[;\n]/g)) {
+    for (const w of m[1]!.split(/\s+/)) {
+      const id = w.replace(/^['"]|['"]$/g, '')
+      if (/^[A-Za-z0-9_][A-Za-z0-9_-]*$/.test(id)) out.add(id)
+    }
+  }
+  return [...out]
 }
 
 /** A Bash command that runs `thimble-run`, as its row shows it: the verb, and for `card` each card by its question

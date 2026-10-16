@@ -219,6 +219,10 @@ test('the cards a call of main names: add_card, edit_card, apply_label, and a ca
   expect(runShown(loop, long)).toBe('thimble-run card "What are the main events in the corpus…", "Which five pages have the most…"')
   expect(runShown('B="/x/plugin/bin/thimble-run"; for c in 2d10d7f3 9b4bb0cb; do "$B" card "$c"; done', () => undefined)).toBe('thimble-run card · 2 cards')
   for (const shown of [runShown(loop, q), runShown(loop, () => undefined)]) expect(shown).not.toMatch(/\/mnt|[0-9a-f]{8}/)
+  // a card named by its question (`card:prs-merged-week`), in a loop beside an older card's random id
+  const named = (id: string) => ({ 'prs-merged-week': 'How many PRs merged per week?', '9b4bb0cb': 'Which ten pages have the most revisions?' })[id]
+  expect(runShown('/tree/plugin/bin/thimble-run card prs-merged-week', named)).toBe('thimble-run card "How many PRs merged per week?"')
+  expect(runShown('B=/x/thimble-run; for c in prs-merged-week 9b4bb0cb; do $B card "$c"; done', named)).toBe('thimble-run card "How many PRs merged per week?", "Which ten pages have the most revisions?"')
   // output naming cards from a command that runs no thimble-run is no card of the turn
   expect(cardsOfCall('Bash', { command: 'grep card notes.txt' }, 'card:2d10d7f3')).toEqual([])
   expect(cardsOfCall('mcp__plugin_thimble_thimble__read_ref', {}, 'card:69d6b48a')).toEqual([])

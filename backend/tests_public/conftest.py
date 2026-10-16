@@ -171,10 +171,12 @@ def workspaces_tmp(tmp_path, monkeypatch):
 @pytest.fixture(autouse=True)
 def _workspaces_off_the_checkout(tmp_path, monkeypatch):
     """Every test's workspaces live under its own tmp dir. config.WORKSPACES_DIR defaults to the checkout's
-    workspaces/, which a running server may be using."""
-    from app import config
+    workspaces/, which a running server may be using. What this process remembers of a workspace's canvas history goes
+    too: card ids are names of their questions, so another test's card can have this test's card's id."""
+    from app import canvas_history, config
 
     monkeypatch.setattr(config, "WORKSPACES_DIR", tmp_path / "workspaces")
+    canvas_history.forget()
 
 
 @pytest.fixture(autouse=True)

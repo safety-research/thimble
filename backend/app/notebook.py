@@ -780,7 +780,11 @@ def _bound_stream(ws: Path, cell_id: str, i: int, bundle: dict) -> dict:
 def _drop_side_files(ws: Path, cell_id: str) -> None:
     d = ws / OUTPUTS_DIR
     if d.is_dir() and ID_RE.match(cell_id or ""):
+        # only `<id>-<n>.txt`: a card named `runs` must not take `runs-compare-0.txt`, another card's file
+        own = re.compile(rf"{re.escape(cell_id)}-\d+\.txt")
         for p in d.glob(f"{cell_id}-*.txt"):
+            if not own.fullmatch(p.name):
+                continue
             try:
                 p.unlink()
             except OSError:
@@ -1250,10 +1254,19 @@ def cell_slugs(ws: Path) -> dict[str, str]:
     return out
 
 
+def _names_taken(ws: Path, but: str | None = None) -> set[str]:
+    """Every card's id and name in the workspace, card `but` aside: what a new id or name must not be."""
+    return {x for cid, slug in cell_slugs(ws).items() if cid != but for x in (cid, slug)}
+
+
+def mint_id(ws: Path, title: str) -> str:
+    """A new card's id: the name of its question (slug_of), base-2, base-3 … when a card has it as its id or name."""
+    return unique_slug(slug_of(title), _names_taken(ws))
+
+
 def _name_cell(ws: Path, cell: dict) -> None:
-    """Store a name made from the card's question on it, one no other card of the workspace has."""
-    taken = {slug for cid, slug in cell_slugs(ws).items() if cid != cell.get("id")}
-    cell["slug"] = unique_slug(slug_of(cell.get("title") or ""), taken)
+    """Store a name made from the card's question on it, one no other card of the workspace has as its name or id."""
+    cell["slug"] = unique_slug(slug_of(cell.get("title") or ""), _names_taken(ws, cell.get("id")))
 
 
 def with_slugs(ws: Path, cells: list[dict]) -> list[dict]:
@@ -1381,7 +1394,7 @@ def set_parent(ws: Path, nb: dict, parent: str | None) -> None:
 
 
 def _locate(ws: Path, cell_id: str) -> tuple[dict, dict] | None:
-    """(notebook, cell) for a cell id, searching every notebook (cell ids are random, hence globally unique)."""
+    """(notebook, cell) for a cell id, searching every notebook (cell ids are unique across a workspace)."""
     for _, nb in _stored(ws):
         for c in nb["cells"]:
             if c.get("id") == cell_id:
@@ -1389,10 +1402,24 @@ def _locate(ws: Path, cell_id: str) -> tuple[dict, dict] | None:
     return None
 
 
+def _locate_name(ws: Path, name: str) -> tuple[dict, dict] | None:
+    """(notebook, cell) for a card's name (cell_slugs), which a chip shows: a card with an older id, or one whose
+    question changed since its id was made, is cited by its name too."""
+    if not name:
+        return None
+    for _, nb in _stored(ws):
+        for c in nb["cells"]:
+            if c.get("slug") == name:
+                return nb, c
+    cid = next((i for i, n in cell_slugs(ws).items() if n == name), None)
+    return _locate(ws, cid) if cid else None
+
+
 def find_cell(ws: Path, cell_id: str) -> tuple[str, dict] | None:
-    """(group id, cell) for a cell id, searching every group (cell ids are random, hence unique across a workspace).
-    Every reader of refs comes through here, so a `card:<id>` stays a live ref wherever its card moved."""
-    hit = _locate(ws, cell_id)
+    """(group id, cell) for a cell id, or else a card's name (_locate_name), searching every group (cell ids are unique
+    across a workspace). Every reader of refs comes through here, so a `card:<id>` stays a live ref wherever its card
+    moved."""
+    hit = _locate(ws, cell_id) or _locate_name(ws, cell_id)
     return (hit[0]["id"], hit[1]) if hit else None
 
 
@@ -1444,9 +1471,10 @@ def _find(nb: dict, cell_id: str) -> dict:
 
 
 def new_cell(kind: str, created_by: str, title: str = "", notebook: str = MAIN, *, code: str | None = None,
-             payload: dict | None = None, created_at_event: int | None = None) -> dict:
+             payload: dict | None = None, created_at_event: int | None = None, workspace: str | None = None) -> dict:
     """A new cell of `kind`, not yet stored. A runnable kind takes `code`, a data kind `payload`, a diagram or a
-    timeline one of the two. ValueError for a kind outside CELL_KINDS or a combination that does not fit."""
+    timeline one of the two. ValueError for a kind outside CELL_KINDS or a combination that does not fit. Given its
+    `workspace`, its id is a readable name of its question (mint_id), also its name; else a random one."""
     if kind not in CELL_KINDS:
         raise ValueError(f"kind must be one of {', '.join(CELL_KINDS)}, not {kind!r}")
     data = kind in DATA_KINDS or (kind in PAYLOAD_KEYS and code is None)
@@ -1466,6 +1494,8 @@ def new_cell(kind: str, created_by: str, title: str = "", notebook: str = MAIN, 
             cell["labels"] = [cell["payload"]["concept"]]
     else:
         cell.update(code=str(code or ""), exec_count=None, status="idle", outputs=[])
+    if workspace:
+        cell["id"] = cell["slug"] = mint_id(_ws(workspace), title)
     return cell
 
 
@@ -3709,8 +3739,8 @@ async def _run_code(
         # the target is gone: append a fresh cell
     nb_id = notebook or active_notebook_id(workspace)
     nb = load_notebook(workspace, nb_id)
-    cell = new_cell(kind or DEFAULT_KIND, created_by, title, nb_id, code=code, created_at_event=created_at_event)
-    _name_cell(_ws(workspace), cell)
+    cell = new_cell(kind or DEFAULT_KIND, created_by, title, nb_id, code=code, created_at_event=created_at_event,
+                    workspace=workspace)
     nb["cells"].append(cell)
     _emit(workspace, cell)
     return await _execute_cell(workspace, nb, cell, kernel, timeout_s, default_timeout_s)
@@ -4098,7 +4128,7 @@ async def create_cell(c: str, nb: str, body: NewCell) -> dict:
     load_notebook(c, nb)  # 404 before anything is made
     try:
         cell = new_cell(body.kind, body.created_by, body.title, nb, code=body.code, payload=body.payload,
-                        created_at_event=body.created_at_event)
+                        created_at_event=body.created_at_event, workspace=c)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     return insert_cell(c, nb, cell, body.after)
@@ -4132,10 +4162,13 @@ async def update_cell_by_id(c: str, cell_id: str, body: CellEdit) -> dict:
 
 @router.get("/ws/{c}/cells/{cell_id}")
 async def get_cell_route(c: str, cell_id: str) -> dict:
+    """The card by its id or its name (find_cell), with its name (with_slugs), which its chip shows."""
     cell = get_cell(c, cell_id)
+    if cell is None and (hit := find_cell(_ws(c), cell_id)) is not None:  # a card's name, as a chip shows it
+        cell = get_cell(c, hit[1]["id"])
     if cell is None:
         raise HTTPException(404, f"no such card: {cell_id}")
-    return cell
+    return with_slugs(_ws(c), [cell])[0]
 
 
 @router.get("/ws/{c}/cells/{cell_id}/versions/{entry}")

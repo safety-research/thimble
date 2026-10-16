@@ -16,6 +16,8 @@ export type ThimbleCell = {
   id: string
   kind?: string
   title?: string
+  /** its name, a slug of its question (backend notebook.slug_of), which its chip shows: `[ card:prs-merged-week ]` */
+  slug?: string
   takeaway?: string
   status?: string
   text?: string
@@ -423,7 +425,14 @@ export function cardOfCell(cell: ThimbleCell, label?: ThimbleLabel | null): Draw
   const kind = cell.kind ?? 'code'
   const payload = cell.payload && typeof cell.payload === 'object' ? cell.payload : null
   if (kind === 'note') return { card: { ...blank(cell, 'note'), note: String(payload?.text ?? cell.text ?? '') }, error }
-  if (kind === 'custom') return { card: { ...blank(cell, 'note'), note: htmlText(String(payload?.html ?? '')) || 'a custom card: the browser draws it' }, error }
+  if (kind === 'custom') {
+    // HTML the terminal cannot draw: its table, else its words (a value and what it means); the card's link opens the
+    // whole card in the browser (reply.tsx cardBlock)
+    const html = String(payload?.html ?? '')
+    const rows = htmlTable(html)
+    if (rows.length > 1) return { card: { ...blank(cell, 'table'), columns: rows[0]!, rows: rows.slice(1).map(r => r.map(numberOr)), total: rows.length - 1 }, error }
+    return { card: { ...blank(cell, 'note'), note: htmlText(html) }, error }
+  }
   if (kind === 'plan') return { card: { ...blank(cell, 'note'), note: planText(payload?.steps) }, error }
   if (kind === 'example') {
     const refs = Array.isArray(payload?.refs) ? (payload!.refs as unknown[]) : []

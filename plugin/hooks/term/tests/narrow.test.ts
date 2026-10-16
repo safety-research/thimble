@@ -259,7 +259,7 @@ test("a document's cards are read before it is drawn: a sentence's chip of a car
     pane = await look($, 96)
   }
   const drawn = JSON.stringify(await pane.drawn())
-  expect(drawn).toContain('"label":"[ card ]"')
+  expect(drawn).toContain('"label":"[ card:a0frame0 ]"')
   expect(drawn).toContain('"tip":"card \\"How many records does each file hold?\\" · ')
   expect(drawn).not.toMatch(/a card|the card ·/)
   await pane.unmount()

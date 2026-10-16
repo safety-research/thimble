@@ -298,6 +298,23 @@ export function noteQuestion(id: string, question: string | undefined): void {
   if (questions.size > 2000) questions.delete(questions.keys().next().value!)
 }
 
+// the cards' names read so far, by id (term.ts notes each with its question): what a chip of a card shows
+const names = new Map<string, string>()
+
+/** A card's name (its slug, such as `prs-merged-week`), noted when the card is read, for its chip. */
+export function noteName(id: string, name: string | undefined): void {
+  if (!name) return
+  names.delete(id)
+  names.set(id, name)
+  if (names.size > 2000) names.delete(names.keys().next().value!)
+}
+
+/** The name a card's chip shows (`card:<name>`): its name as noted, else its id, which is its name for a card made
+ *  since ids are names; '' for an older card's random id (eight hex digits) whose name is not read yet. */
+export function cardName(id: string): string {
+  return names.get(id) ?? (/^[0-9a-f]{8}$/.test(id) ? '' : id)
+}
+
 /** A card's question as noted (noteQuestion); '' for a card not read yet. */
 export function questionOf(id: string): string {
   return questions.get(id) ?? ''
@@ -327,8 +344,8 @@ export function outputLine(ref: string): { card: string; first: number; last: nu
 }
 
 /** A chip: a citation that names only its place, with no words of its own (`[[card:<id>]]`, `[↗](<ref>)`), which the
- *  browser draws as a chip; its own kind of citation (Matt, 2026-10-07). Every surface draws it as `[ card ]`
- *  (chipText), never as words of the sentence. */
+ *  browser draws as a chip; its own kind of citation (Matt, 2026-10-07). Every surface draws it as
+ *  `[ card:prs-merged-week ]` (chipText), never as words of the sentence. */
 export function isChip(c: Citation): boolean {
   return c.display === null
 }
@@ -336,8 +353,9 @@ export function isChip(c: Citation): boolean {
 /** The most cells a chip's words take, its brackets aside. */
 export const CHIP_MAX = 30
 
-/** What a chip says inside its brackets, short (Matt, 2026-10-07): `card` for a card or one of its cells, `card output
- *  line 1` for a line it printed, `events.jsonl line 12` for a file's line (its name cut in its middle, the line kept),
+/** What a chip says inside its brackets, short (Matt, 2026-10-07): `card:<name>` for a card or one of its cells, by
+ *  the name it is cited by (Matt, 2026-10-16: `[ card:how-many-prs ]`, never `[ card:8fa134 ]`; cardName), `card` while
+ *  an older card's name is not read; `card output line 1` for a line it printed, `events.jsonl line 12` for a file's line (its name cut in its middle, the line kept),
  *  a label by its name (`edit purpose`, `edit purpose · yes` for a value), `report`, `slides` or `story` for a document
  *  or a passage of one, `output line 1` for a command's output. Never an id. */
 export function chipWords(c: Citation): string {
@@ -354,6 +372,10 @@ export function chipWords(c: Citation): string {
   const [base = '', frag = ''] = c.ref.split('#', 2)
   const out = outputLine(c.ref)
   if (out) return out.last !== out.first ? `card output lines ${out.first}-${out.last}` : `card output line ${out.first}`
+  const whole = /^(?:card|cell):([A-Za-z0-9_-]+)(?:@\d+)?$/.exec(base)
+  const named = whole ? cardName(whole[1]!) : ''
+  // a card's name is never cut: the chip is what the analyst cites it by
+  if (named) return `card:${named}`
   if (/^(?:card|cell):/.test(base)) return 'card'
   if (base.startsWith('call:')) {
     const call = /^L(\d+)(?:-L?(\d+))?$/.exec(frag)

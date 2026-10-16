@@ -92,7 +92,7 @@ class Notes:
                 res = refs.resolve(self.corpus, ref) or {}
             except Exception:  # noqa: BLE001 — a ref that no longer resolves keeps its label
                 res = {}
-            quote = "" if re.fullmatch(r"card:[0-9a-f]{8}", ref) else _collapse(res.get("excerpt") or "")
+            quote = "" if re.fullmatch(r"(?:card|cell):[A-Za-z0-9_-]+", ref) else _collapse(res.get("excerpt") or "")
             if len(quote) > QUOTE_CHARS:
                 quote = quote[: QUOTE_CHARS - 1].rstrip() + "…"
         card = None
