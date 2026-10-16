@@ -169,18 +169,13 @@ async function noteWriters(cx: Ctx): Promise<void> {
 /** A share in the summary line's words, as the Coverage view and coverage.py say it (coverageview.tsx percent). */
 export { percent }
 
-/** The summary line's coverage words: the read share of the totals' first unit (lines where the corpus has any, else
- *  entries, else files, as the first totals row and the line under answers say it), or the files read while its lines
- *  or entries are counted. One short item, no new words: the Coverage view holds searched, the units and the
- *  denominators. */
+/** The summary line's coverage words: the read share of the data by size (`coverage 15%`, a decimal kept under 1%), as
+ *  the Coverage view's total and the line under answers measure it; with no index yet (no size), the files read. One
+ *  short item, no new words: the Coverage view holds searched and the rows' units. */
 export function coverageWords(s: CoverageSummary): string | null {
-  const t = s.totals?.[0]
-  if (t) {
-    if (t.unit !== 'files' && !(t.counted && t.total > 0)) return `${num(t.files_seen ?? 0)} of ${num(t.files ?? 0)} ${t.files === 1 ? 'file' : 'files'}`
-    return percent(t.seen, t.total)
-  }
+  if (s.size && s.size.total > 0) return percent(s.size.read, s.size.total)
   if (!(s.files.total > 0 || s.files.seen > 0)) return null
-  return s.records.counted && s.records.total > 0 ? percent(s.records.seen, s.records.total) : `${num(s.files.seen)} of ${num(s.files.total)} files`
+  return `${num(s.files.seen)} of ${num(s.files.total)} ${s.files.total === 1 ? 'file' : 'files'}`
 }
 
 const num = (n: number) => Math.round(n).toLocaleString('en-US')

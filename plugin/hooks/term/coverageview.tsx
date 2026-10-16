@@ -3,32 +3,32 @@
 // <rel>] [--match <group>]` (C7). One level a view: a row per folder and type, per name pattern (`agent-*.jsonl`) or per
 // file, every group listed (the list scrolls; no `other`), in one name column: a file at the top by its name alone, a
 // nested row with its folder dim before its name or pattern. Each row counts one unit, named in the row: lines for
-// line-based text, entries for a JSON document's values and a database's rows, files for everything else. Read (it
-// entered Claude's context) and searched (a search ran over it and only matches came back) each show a count and a
-// percent, in their colors; a wide pane says so in a legend under the subtitle. A totals row under the list holds the
-// corpus's denominators, one line per unit. Enter on a folder's row drills into the folder, on a pattern's or a type's
-// row lists its files (`b` back), on a file's row opens 0.8.0's file view; `o` and the title row's `↗` open Files in
-// the browser at the folder.
+// line-based text, entries for a JSON document's values and a database's rows, files for everything else. Read (it was
+// pulled into Claude's context) and searched (grep, a script or a label reviewed it) each show a count and a percent,
+// in their colors; a wide pane says so in a legend under the subtitle. One total under the list measures the whole
+// corpus by size (`corpus total` in a folder or a group): the bytes read and searched, each with its share, and the
+// corpus's size in the total column. Enter on a folder's row drills into the folder, on a pattern's or a type's row
+// lists its files (`b` back), on a file's row opens 0.8.0's file view; `o` and the title row's `↗` open Files in the
+// browser at the folder.
 //
 //   home › Coverage
 //   what Claude read or searched in this session
-//   read: entered Claude's context · searched: a search ran over it, only matches came back
-//   ──────────────────────────────────────────────────────────────────────────────────────
-//       folder · files                   read      searched            total
-//   ❯ ▸ agents/ agent-*.jsonl         800  16%    400   8%      4,800 lines
-//       events.jsonl                  140 100%      0   0%        140 lines
-//       forge.db                        0   0%    587 100%        587 entries
-//     ▸ images/day-1/ .png              1 3.3%      0   0%         30 files
+//   read: pulled into Claude's context · searched: grep, a script, or a label reviewed it
+//   ─────────────────────────────────────────────────────────────────────────────────────
+//       folder · files                    read       searched            total
+//   ❯ ▸ agents/ agent-*.jsonl          800  16%     400   8%      4,800 lines
+//       events.jsonl                   140 100%       0   0%        140 lines
+//       forge.db                         0   0%     587 100%        587 entries
+//     ▸ images/day-1/ .png               1 3.3%       0   0%         30 files
 //       ──────────────────────────────────────────────────────────────────
-//       total                         940  15%    400   6%      6,140 lines
-//                                       0   0%    587 100%        587 entries
-//                                       1 2.7%      0   0%         37 files
+//       total                       2.1 MB  15%  340 KB   2%       14.0 MB
 import type { RenderElement } from 'claude-code'
 
-import type { CoverageTotal, TermPanel } from './types'
+import type { CoverageSize, CoverageTotal, TermPanel } from './types'
 import { MARGIN_W, headerEls, marginKey, pointed, setBrowser, subLine } from './chrome'
 import type { Ctx, SurfaceGot } from './ctx'
 import type { Line, Seg } from './draw'
+import { fmtSize } from './files'
 import { cut, noControls, width } from './lib'
 import { linesEl } from './lines'
 import type { LineHit } from './lines'
@@ -39,7 +39,7 @@ import { loadsView, navOrigin, openPanel, readSurface, rt, surfaceValue } from '
 
 /** What a row counts: lines (line-based text), entries (a JSON document's values, a database's rows) or files. */
 export type CoverageUnit = CoverageTotal['unit']
-export type { CoverageTotal }
+export type { CoverageSize, CoverageTotal }
 
 /** A row of `thimble state coverage` (C7): a folder's files of one type, a name pattern's files, or one file. `seen`
  *  counts the files read; `records_*` count lines or entries, the row's unit. */
@@ -63,17 +63,17 @@ export type CoverageRow = {
 }
 
 
-type CoverageState = { summary?: { line?: string; totals?: CoverageTotal[] }; folder?: string; match?: string | null; rows?: CoverageRow[]; more?: number; counting?: boolean }
+type CoverageState = { summary?: { line?: string; size?: CoverageSize | null }; folder?: string; match?: string | null; rows?: CoverageRow[]; more?: number; counting?: boolean }
 
 const num = (n: number) => Math.round(n).toLocaleString('en-US')
 const dim = (s: string): Seg => ({ s, fg: COLORS.dim })
 const GAP = 2
 
-/** The legend a wide pane shows under the subtitle: what read and searched mean. */
-export const LEGEND = "read: entered Claude's context · searched: a search ran over it, only matches came back"
+/** The legend a wide pane shows under the subtitle: what read and searched mean (the owner's words). */
+export const LEGEND = "read: pulled into Claude's context · searched: grep, a script, or a label reviewed it"
 /** The legend as a line: read and searched in their colors, the rest dim. */
 function legendLine(): Line {
-  return [{ s: 'read', fg: COLORS.series[0] }, dim(": entered Claude's context · "), { s: 'searched', fg: COLORS.series[1] }, dim(': a search ran over it, only matches came back')]
+  return [{ s: 'read', fg: COLORS.series[0] }, dim(": pulled into Claude's context · "), { s: 'searched', fg: COLORS.series[1] }, dim(': grep, a script, or a label reviewed it')]
 }
 /** The list rows a pane keeps, at least, before it shows the legend (or all of the list's, when fewer). */
 const LEGEND_ROWS = 8
@@ -137,7 +137,16 @@ function nameOf(r: CoverageRow): string {
   return noControls(r.name ?? (r.path ? r.path.split('/').at(-1) ?? r.path : r.ext || '(none)'))
 }
 
-type Cells = { mark: string; folder: string; name: string; unit: CoverageUnit | null; read: number | null; searched: number | null; total: number | null; counting: boolean; label?: string }
+/** A line's parts: a row's counts in its unit, or the total's sizes (`count` writes a read or searched amount; the
+ *  total column is a number and its unit, the unit in the units' column). */
+type Cells = { mark: string; folder: string; name: string; read: number | null; searched: number | null; total: number | null; counting: boolean; label?: string; count: (n: number) => string; totalNum: string; totalUnit: string }
+
+/** A size in two parts, its number and its unit (`14.0`, `MB`), so the unit stands in the units' column. */
+function sizeParts(n: number): [string, string] {
+  const s = fmtSize(n)
+  const at = s.lastIndexOf(' ')
+  return [s.slice(0, at), s.slice(at + 1)]
+}
 
 /** The layout a type area allows: each row on one line, or in the narrowest panes on two (its name whole, then its
  *  numbers), with the counts while they fit. */
@@ -150,29 +159,29 @@ const TIERS: Tier[] = [
 /** The indent of a two-line row's numbers, under its name. */
 const TWO_INDENT = 4
 
-/** The rows, the corpus's totals and a note of the rows left out, as lines in a type area `cols` wide: the header (read
+/** The rows, the corpus's total and a note of the rows left out, as lines in a type area `cols` wide: the header (read
  *  and searched in their colors, which the numbers keep), one line a row (`▸` on one that drills in) in one name column,
- *  and under the list a rule and one totals line per unit. Where a row does not fit on one line it takes two, so its
- *  name stays whole, and last the counts go (the percents and the units stay). `wide`: each row on one line with its
- *  counts, the layout in which the view may show its legend. */
-export function coverageLines(rows: readonly CoverageRow[], pick: string, cols: number, o: { totals?: readonly CoverageTotal[]; drilled?: boolean; more?: number; level?: string } = {}): { head: Line[]; lines: Line[]; units: { key: string | null; lines: Line[] }[]; totals: Line[]; hits: { y: number; key: string }[]; picks: string[]; wide: boolean } {
+ *  and under the list a rule and one total of the whole corpus by size (`size`; `corpus total` in a folder or a group):
+ *  the bytes read and searched with their shares, and the corpus's size. Where a row does not fit on one line it takes
+ *  two, so its name stays whole, and last the counts and sizes go (the percents, the units and the corpus's size stay).
+ *  `wide`: each row on one line with its counts, the layout in which the view may show its legend. */
+export function coverageLines(rows: readonly CoverageRow[], pick: string, cols: number, o: { size?: CoverageSize | null; drilled?: boolean; more?: number; level?: string } = {}): { head: Line[]; lines: Line[]; units: { key: string | null; lines: Line[] }[]; totals: Line[]; hits: { y: number; key: string }[]; picks: string[]; wide: boolean } {
   // the folder the view shows names the files right in it no more than the top's: the title already says where
   const here = folderWords(o.level ?? '')
   const cells: Cells[] = rows.map(r => {
     const m = measure(r)
-    return { mark: r.drill ? '▸ ' : '  ', folder: folderWords(r.folder), name: nameOf(r), unit: m.unit, read: m.seen, searched: m.searched, total: m.total, counting: m.total === null }
+    return { mark: r.drill ? '▸ ' : '  ', folder: folderWords(r.folder), name: nameOf(r), read: m.seen, searched: m.searched, total: m.total, counting: m.total === null, count: num, totalNum: m.total === null ? '' : num(m.total), totalUnit: m.total === null ? '' : unitWord(m.unit, m.total) }
   })
-  const totals: Cells[] = (o.totals ?? []).map((t, i) => {
-    const counting = t.unit !== 'files' && t.counted === false
-    return { mark: '  ', folder: '', name: '', unit: t.unit, read: counting ? null : t.seen, searched: counting ? null : t.searched, total: counting ? null : t.total, counting, label: i === 0 ? (o.drilled ? 'corpus total' : 'total') : '' }
-  })
+  const size = o.size && o.size.total > 0 ? o.size : null
+  const [sizeNum, sizeUnit] = size ? sizeParts(size.total) : ['', '']
+  const totals: Cells[] = size ? [{ mark: '  ', folder: '', name: '', read: size.read, searched: size.searched, total: size.total, counting: false, label: o.drilled ? 'corpus total' : 'total', count: fmtSize, totalNum: sizeNum, totalUnit: sizeUnit }] : []
   const all = [...cells, ...totals]
   const pctOf = (n: number | null, c: Cells) => (n === null || c.total === null ? '' : percent(n, c.total))
-  const countW = (k: 'read' | 'searched') => Math.max(1, ...all.map(c => (c[k] === null ? 0 : width(num(c[k]!)))))
+  const countW = (k: 'read' | 'searched') => Math.max(1, ...all.map(c => (c[k] === null ? 0 : width(c.count(c[k]!)))))
   const pctW = (k: 'read' | 'searched') => Math.max(2, ...all.map(c => width(pctOf(c[k], c))))
   const rc = countW('read'), rp = pctW('read'), xc = countW('searched'), xp = pctW('searched')
-  const unitW = Math.max(1, ...all.map(c => (c.total === null || c.unit === null ? 0 : width(unitWord(c.unit, c.total)))))
-  const totalNumW = Math.max(1, ...all.map(c => (c.total === null ? (c.counting ? width('counting') - unitW - 1 : 0) : width(num(c.total)))))
+  const unitW = Math.max(1, ...all.map(c => width(c.totalUnit)))
+  const totalNumW = Math.max(1, ...all.map(c => (c.total === null ? (c.counting ? width('counting') - unitW - 1 : 0) : width(c.totalNum))))
   const totalW = Math.max('total'.length, totalNumW + 1 + unitW)
   const colW = (t: Tier) => ({ read: Math.max('read'.length, t.counts ? rc + 1 + rp : rp), searched: Math.max('searched'.length, t.counts ? xc + 1 + xp : xp) })
   const numbersW = (t: Tier) => {
@@ -191,13 +200,13 @@ export function coverageLines(rows: readonly CoverageRow[], pick: string, cols: 
     const n = c[k]
     const colw = k === 'read' ? w.read : w.searched
     if (n === null) return [{ s: ' '.repeat(colw) }]
-    const words = tier.counts ? `${num(n).padStart(k === 'read' ? rc : xc)} ${pctOf(n, c).padStart(k === 'read' ? rp : xp)}` : pctOf(n, c).padStart(k === 'read' ? rp : xp)
+    const words = tier.counts ? `${c.count(n).padStart(k === 'read' ? rc : xc)} ${pctOf(n, c).padStart(k === 'read' ? rp : xp)}` : pctOf(n, c).padStart(k === 'read' ? rp : xp)
     return [{ s: words.padStart(colw), ...(n > 0 ? { fg } : { fg: COLORS.dim }) }]
   }
   const totalCell = (c: Cells): Seg[] => {
     if (c.counting) return [dim('counting'.padStart(totalW))]
-    if (c.total === null || c.unit === null) return [{ s: ' '.repeat(totalW) }]
-    return [{ s: num(c.total).padStart(totalW - unitW - 1) }, dim(` ${unitWord(c.unit, c.total).padEnd(unitW)}`)]
+    if (c.total === null) return [{ s: ' '.repeat(totalW) }]
+    return [{ s: c.totalNum.padStart(totalW - unitW - 1) }, dim(` ${c.totalUnit.padEnd(unitW)}`)]
   }
   const numbers = (c: Cells): Line => [
     ...numCell(c, 'read', COLORS.series[0]!),
@@ -220,7 +229,7 @@ export function coverageLines(rows: readonly CoverageRow[], pick: string, cols: 
   const rowLines = (c: Cells): Line[] => {
     if (!tier.two) return [[{ s: c.mark }, ...where(c, nameW), { s: ' '.repeat(GAP) }, ...numbers(c)]]
     const nums: Line = [{ s: ' '.repeat(2 + TWO_INDENT) }, ...numbers(c)]
-    return c.label === '' ? [nums] : [[{ s: c.mark }, ...where(c, nameW)], nums]
+    return [[{ s: c.mark }, ...where(c, nameW)], nums]
   }
   // the header: the columns' names, dim, with read and searched in their colors (the legend's colors)
   const numbersHead: Seg[] = [{ s: 'read'.padStart(w.read), fg: COLORS.series[0] }, { s: ' '.repeat(GAP) }, { s: 'searched'.padStart(w.searched), fg: COLORS.series[1] }, { s: ' '.repeat(GAP) }, dim('total'.padStart(totalW))]
@@ -324,7 +333,8 @@ async function drawCoverage(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<Render
   setBrowser(`files:${folder}`)
   const got = (await surfaceValue<CoverageState>(cx, keyOf(folder, match))) as SurfaceGot | undefined
   const st = got?.ok ? (got.value as CoverageState) : null
-  const totals = st?.summary?.totals ?? (await cx.coverageSummary())?.totals ?? []
+  // the whole corpus's total by size, at every level: the level's own answer, else the session's summary
+  const size = st?.summary?.size !== undefined ? st.summary.size : ((await cx.coverageSummary())?.size ?? null)
   const sub: (string | Seg)[] = ['what Claude read or searched in this session']
   const counting: RenderElement[] = st?.counting ? [<Text key="cov-line" dimColor wrap="wrap">◌ counting lines and entries</Text>] : []
   const header = (more: RenderElement[]) => headerEls(els as never, { title: coverageTitle(folder, match), cols, sub: subLine(sub), more })
@@ -333,7 +343,7 @@ async function drawCoverage(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<Render
   const rows = (st?.rows ?? []).filter(r => r && typeof r.key === 'string')
   const pickKey = keyOf(folder, match)
   const pick = rows.find(r => r.key === picks.get(pickKey))?.key ?? rows[0]?.key ?? ''
-  const lay = coverageLines(rows, pick, cols, { totals, drilled: Boolean(folder || match), more: st?.more ?? 0, level: folder })
+  const lay = coverageLines(rows, pick, cols, { size, drilled: Boolean(folder || match), more: st?.more ?? 0, level: folder })
   // an open from the view stands on the panel's trail after it (home › coverage › agents/), as a press in the panel does
   const open = async (r: CoverageRow) => {
     if (!r.path && !r.drill) return
@@ -361,7 +371,7 @@ async function drawCoverage(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<Render
     }
     return undefined
   }
-  // the lines the list has room for under the header (its subtitle, `more` and its rule), the column names, the totals
+  // the lines the list has room for under the header (its subtitle, `more` and its rule), the column names, the total
   // and the hints
   const roomUnder = (more: number) => paneRows() - 1 - (2 + more) - (rows.length ? lay.head.length : 0) - lay.totals.length - hintHeight(hints, cols)
   // the legend in a wide pane only: what gives way first, before a row goes to two lines or the list loses a row

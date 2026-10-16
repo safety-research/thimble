@@ -69,7 +69,7 @@ export type HomeData = {
   cardGroups: HomeCardGroup[]
   labels: HomeLabel[]
   files: HomeFile[]
-  /** this session's coverage line (`read 2% · searched 41% of lines`), '' while it read no data file; null when
+  /** this session's coverage line (`read 2% · searched 41% of the data`), '' while it read no data file; null when
    *  coverage is off */
   coverage: string | null
   /** the session's citations, the problems first; null when citation marks are off */

@@ -48,7 +48,7 @@ test('no summary line before activation; after it, citations and coverage, `open
   await before.unmount()
 })
 
-test('after activation the line counts from state: citations ✓ and ×, coverage as a percent or files while records are counted; nothing is new at activation', { timeoutMs: 30_000 }, async ($, on) => {
+test('after activation the line counts from state: citations ✓ and ×, coverage as the read share of the data by size, or the files read with no index yet; nothing is new at activation', { timeoutMs: 30_000 }, async ($, on) => {
   const w = panelWorld(on)
   w.t.citeIndex = [
     { id: 'c1', raw: CHAT, display: '4579', ref: 'README.md#L3', row: 'r1', at: 1 },
@@ -58,13 +58,19 @@ test('after activation the line counts from state: citations ✓ and ×, coverag
   w.t.coverageSummary = SUMMARY
   await start($, w)
   const m = await band($)
-  expect(await line(m)).toBe(`  thimblecitations ✓1 ×1coverage ${percent(1344, 48_450)}open ›`)
+  expect(await line(m)).toBe('  thimblecitations ✓1 ×1coverage 15%open ›')
   expect(await m.find({ type: 'Button', key: 'above-summary-dismiss' })).toBeUndefined()
   // `×1` in red
   expect(JSON.stringify(await m.find({ type: 'Box', key: 'above-summary' }))).toContain('×1')
   await m.unmount()
-  // lines not counted yet: the files that hold them (summary totals, the owner's units of 10-16)
-  w.t.coverageSummary = { ...SUMMARY, records: { seen: 0, total: 0, counted: false }, totals: [{ unit: 'lines', seen: 0, searched: 0, total: 0, counted: false, files: 13, files_seen: 3, files_searched: 1 }] }
+  // under 1%: a decimal kept
+  w.t.coverageSummary = { ...SUMMARY, size: { read: 30_000, searched: 0, total: 14_000_000 } }
+  const m1 = await band($)
+  expect(await line(m1)).toContain(`coverage ${percent(30_000, 14_000_000)}`)
+  expect(percent(30_000, 14_000_000)).toBe('0.2%')
+  await m1.unmount()
+  // no index yet (no size): the files read
+  w.t.coverageSummary = { ...SUMMARY, records: { seen: 0, total: 0, counted: false }, size: null }
   const m2 = await band($)
   expect(await line(m2)).toContain('coverage 3 of 13 files')
   await m2.unmount()
@@ -84,7 +90,7 @@ test("a feature that is off shows no item: citation marks, coverage, labels' uns
   w.unsure = [{ id: 'd9b51617', name: 'links through a fetch proxy', noFit: 2, unsure: 1, total: 3, rows: [] }]
   await start($, w)
   const on1 = await band($)
-  expect(await line(on1)).toBe(`  thimblecitations ✓1coverage ${percent(1344, 48_450)}labels 3 unsurechecks ◌open ›`)
+  expect(await line(on1)).toBe('  thimblecitations ✓1coverage 15%labels 3 unsurechecks ◌open ›')
   await on1.unmount()
   w.t.settings = featuresOff('citationMarks', 'coverage', 'labels', 'checks')
   const off = await band($)

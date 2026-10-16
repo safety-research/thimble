@@ -207,8 +207,12 @@ export type Activated = { ws: string; path: string; cwd: string; via: string; ro
 
 /** What Claude read (`seen`) or searched of the corpus in this session (`thimble state coverage --summary`): `totals` one
  *  entry per unit the corpus has, lines (line-based text), then entries (a JSON document's values, a database's rows),
- *  then files (everything else); `records` the first of lines or entries, with its unit. */
-export type CoverageSummary = { files: { seen: number; searched: number; never: number; total: number }; records: { unit?: 'lines' | 'entries'; seen: number; searched?: number; total: number; counted: boolean }; totals?: CoverageTotal[]; line: string }
+ *  then files (everything else); `records` the first of lines or entries, with its unit; `size` the whole corpus's
+ *  total by size (null with no index yet); `line` the line under answers (`read 2% · searched 41% of the data`). */
+export type CoverageSummary = { files: { seen: number; searched: number; never: number; total: number }; records: { unit?: 'lines' | 'entries'; seen: number; searched?: number; total: number; counted: boolean }; totals?: CoverageTotal[]; size?: CoverageSize | null; line: string }
+
+/** The corpus's total by size, in bytes: what Claude read, what was searched and not read, and the corpus's size. */
+export type CoverageSize = { read: number; searched: number; total: number }
 
 /** One unit's totals over the corpus: read (`seen`), searched and the total in that unit; for lines and entries, whether
  *  they are counted yet and the files that hold them. */

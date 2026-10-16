@@ -46,7 +46,8 @@ export const SUMMARY: CoverageSummary = {
     { unit: 'entries', seen: 0, searched: 587, total: 587, counted: true, files: 1, files_seen: 0, files_searched: 1 },
     { unit: 'files', seen: 1, searched: 0, total: 31 },
   ],
-  line: 'read 3% · searched 0.8% of lines',
+  size: { read: 2_100_000, searched: 340_000, total: 14_000_000 },
+  line: 'read 15% · searched 2% of the data',
 }
 
 /** A row of `thimble state coverage` with the fields a test leaves out at their empty values. */
