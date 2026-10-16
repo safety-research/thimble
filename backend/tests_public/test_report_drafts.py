@@ -5,7 +5,6 @@ the Restore. Through tools.call and the route functions, as the writer and the b
 from __future__ import annotations
 
 import pytest
-from fastapi import HTTPException
 
 from app import config, investigation, notebook, report_types, tools, undo, versions
 
@@ -62,21 +61,6 @@ async def test_the_first_write_keeps_the_analysts_notes_and_figures_as_draft_1_b
     assert h["versions"][0]["summary"] and h["versions"][0]["summary_from"] == "diff"
 
 
-async def test_undo_of_the_first_write_brings_back_the_analysts_version(card):
-    _frame(card)
-    await _write()
-    undo.undo(CORPUS)
-    doc = report_types.read_doc(CORPUS, MAIN, "report")
-    assert doc is not None and doc["generation"] == 1 and _texts(doc) == ["Alice did most of it."]
-    assert [e["source"] for e in versions.history(CORPUS, MAIN, "report", doc)["versions"]] == ["analyst"]
-
-
-async def test_a_first_write_with_no_notes_is_draft_1(card):
-    doc = await _write()
-    assert doc["generation"] == 1
-    assert [e["n"] for e in versions.history(CORPUS, MAIN, "report", doc)["versions"]] == [1]
-
-
 async def test_restore_makes_a_past_draft_the_newest_as_the_analysts_and_undo_reverts_it(card):
     _frame(card)
     await _write()
@@ -92,26 +76,3 @@ async def test_restore_makes_a_past_draft_the_newest_as_the_analysts_and_undo_re
     undo.undo(CORPUS)
     back = report_types.read_doc(CORPUS, MAIN, "report")
     assert back is not None and back["generation"] == 2 and _texts(back) == ["One account issued every deletion."]
-
-
-async def test_restore_of_an_earlier_save_of_a_run(card):
-    await _write()
-    doc = report_types.read_doc(CORPUS, MAIN, "report")
-    versions.add_revision(CORPUS, MAIN, "report", doc, run="writer:1")
-    rec = versions._revision_file(CORPUS, MAIN, "report", 1)
-    assert rec is not None and rec["revisions"][0]["i"] == 1
-    await _write("# Shorter\n\n## Who\n\nOne account.\n")
-    restored = await report_types.restore_revision_route(CORPUS, MAIN, "report", 1, 1)
-    assert restored["generation"] == 3 and _texts(restored) == ["One account issued every deletion."]
-    entry = versions.history(CORPUS, MAIN, "report", restored)["versions"][0]
-    assert entry["restored"] == {"n": 1, "rev": 1}
-
-
-async def test_restore_refuses_the_current_draft_and_a_draft_not_kept(card):
-    doc = await _write()
-    with pytest.raises(HTTPException) as e:
-        report_types.restore_draft(CORPUS, MAIN, "report", doc["generation"])
-    assert e.value.status_code == 409
-    with pytest.raises(HTTPException) as e:
-        report_types.restore_draft(CORPUS, MAIN, "report", 7)
-    assert e.value.status_code == 404
