@@ -2045,8 +2045,9 @@ function promptEl(els: El, q: string, cols: number, key: string): RenderElement 
   )
 }
 
-/** The threads panel (SPEC.md, section 7, "The threads panel"): its title and a dim subtitle; under the rule the
- *  tree, a root per place a thread was asked from (`main`, or `report "…"`) with a blank row between them, each thread
+/** The threads panel (SPEC.md, section 7, "The threads panel"): its title; under the rule the tree, a root per place
+ *  a thread was asked from (`main`, or `report "…"`, its count of threads dim at R and `N new` in green) with a blank
+ *  row between them, each thread
  *  under the thread it was asked from, its question in quotation marks with guides, the first line of its latest
  *  answer dim under it (none while a thread is open: the open thread's chat is below), `N questions` dim and `new` in
  *  green at R; the selected thread (`❯`, accent) under the second rule: what it is about on one dim row, then its chat
@@ -2065,7 +2066,6 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
   const ids = [...rows.map(r => r.id), ...(selected && !rows.some(r => r.id === selected) ? [selected] : [])]
   const threads = (await Promise.all(ids.map(id => threadOfRow(cx, id)))).filter((t): t is ChatThread => t !== null)
   const unreadOf = (id: string) => rows.find(r => r.id === id)?.unread ?? 0
-  const fresh = rows.filter(t => t.unread).length
   const t = selected ? threads.find(x => x.id === selected) : undefined
   // one thread, open: no list above it, which would repeat its question and its answer
   const alone = Boolean(t) && threads.length === 1
@@ -2095,7 +2095,9 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
       {aboutWords}
     </Text>
   )
-  const body: RenderElement[] = [...headerEls(els, { title: 'Threads', cols, ...(alone ? { more: aboutEl ? [aboutEl] : [] } : { sub: subLine([plural(threads.length, 'thread'), fresh ? freshSeg(fresh) : null]) }) })]
+  // no subtitle: each root's row holds how many threads stand under it and how many are new (Matt, 19:05: `2 threads`
+  // on a line of its own under `main` read as one more row of the tree)
+  const body: RenderElement[] = [...headerEls(els, { title: 'Threads', cols, ...(alone ? { more: aboutEl ? [aboutEl] : [] } : {}) })]
   // a root per place: the threads asked from a document under it, the rest under main
   const byId = new Map(threads.map(x => [x.id, x]))
   const rootOf = (x: ChatThread): ChatThread => {
@@ -2124,7 +2126,10 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
     const tree = threadTree(threads.filter(x => placeOf(x) === place))
     if (!tree.length) continue
     if (pi > 0) lines.push([])
-    lines.push(pointed([{ s: place === 'main' ? 'main' : `report ${quoted(clip(docTitle(place.slice(7)), 60))}` }], false))
+    const under = threads.filter(x => placeOf(x) === place)
+    const news = under.filter(x => unreadOf(x.id)).length
+    const counts: Line = [dim(plural(under.length, 'thread')), ...(news ? [{ s: '  ' }, freshSeg(news)] : [])]
+    lines.push(pointed(spread([{ s: place === 'main' ? 'main' : `report ${quoted(clip(docTitle(place.slice(7)), 60))}` }], counts, cols), false))
     for (const r of tree) {
       if (drawn >= cap) {
         more++
