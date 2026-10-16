@@ -133,6 +133,8 @@ export type TermPanel = {
   label?: string
   slug?: string
   path?: string
+  /** the Coverage view's group of a folder's files: a name pattern (`agent-*.jsonl`) or a type (`.md`) */
+  match?: string
   start?: number
   /** a file's record chosen (a citation's line), lit; a file's table sorted by a column (`<column>:asc|desc`) */
   line?: number
@@ -203,8 +205,13 @@ export type FeatureSettings = { autoActivate: boolean; viewProposals: boolean; l
 /** thimble turned on in this session (`thimble activate`): the workspace, the folder, what turned it on and the role. */
 export type Activated = { ws: string; path: string; cwd: string; via: string; role: 'main' | 'peer'; at: number }
 
-/** What this session's tool calls saw of the data files (`thimble state coverage --summary`). */
-export type CoverageSummary = { files: { seen: number; searched: number; never: number; total: number }; records: { seen: number; total: number; counted: boolean }; line: string }
+/** What this session's tool calls saw of the corpus (`thimble state coverage --summary`): `totals` one entry per unit the
+ *  corpus has, records (rows or lines of data files) first, then files (images, binaries, documents). */
+export type CoverageSummary = { files: { seen: number; searched: number; never: number; total: number }; records: { seen: number; searched?: number; total: number; counted: boolean }; totals?: CoverageTotal[]; line: string }
+
+/** One unit's totals over the corpus: seen, searched and the total in that unit; for records, whether they are counted
+ *  yet and the files that hold them. */
+export type CoverageTotal = { unit: 'records' | 'files'; seen: number; searched: number; total: number; counted?: boolean; files?: number; files_seen?: number; files_searched?: number }
 
 /** A citation main's chat drew: its id (lib.ts cid), its raw spelling, its shown value, its ref, its row and when. */
 export type CiteRow = { id: string; raw: string; display: string | null; ref: string; row: string; at: number }

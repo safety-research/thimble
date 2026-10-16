@@ -63,11 +63,16 @@ test('after activation the line counts from state: citations ✓ and ×, coverag
   // `×1` in red
   expect(JSON.stringify(await m.find({ type: 'Box', key: 'above-summary' }))).toContain('×1')
   await m.unmount()
-  // records not counted yet: the files
-  w.t.coverageSummary = { ...SUMMARY, records: { seen: 0, total: 0, counted: false } }
+  // records not counted yet: the files that hold them (summary totals, the owner's units of 10-16)
+  w.t.coverageSummary = { ...SUMMARY, records: { seen: 0, total: 0, counted: false }, totals: [{ unit: 'records', seen: 0, searched: 0, total: 0, counted: false, files: 13, files_seen: 3, files_searched: 1 }] }
   const m2 = await band($)
   expect(await line(m2)).toContain('coverage 3 of 13 files')
   await m2.unmount()
+  // a summary without totals (the transcript lane's stand-in): the files, as before
+  w.t.coverageSummary = { files: SUMMARY.files, records: { seen: 0, total: 0, counted: false }, line: 'seen 3 of 13 files' }
+  const m3 = await band($)
+  expect(await line(m3)).toContain('coverage 3 of 13 files')
+  await m3.unmount()
 })
 
 test("a feature that is off shows no item: citation marks, coverage, labels' unsure, checks", { timeoutMs: 30_000 }, async ($, on) => {
@@ -181,7 +186,8 @@ test('fitItems keeps whole items 3 apart and cuts the rest at the end, leaving r
   expect(cut.cut).toBe(true)
   expect(fitItems(items, 12)).toEqual({ shown: [], cut: true })
   expect(percent(0, 10)).toBe('0%')
-  expect(percent(1, 1000)).toBe('<1%')
+  // the Coverage view's forms (coverageview.tsx percent): a share below 1% keeps one decimal, cut (owner's notes, 10-16)
+  expect(percent(1, 1000)).toBe('0.1%')
   expect(percent(25, 1000)).toBe('3%')
 })
 
