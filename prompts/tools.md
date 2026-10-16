@@ -1,6 +1,6 @@
 # Tools
 
-The file has three parts, and the server reads each `## ` section by its name. First comes each tool, its description, which a model reads to choose the tool, and under it the input schema. Then `instructions`, the short text the thimble server gives every session that loads the plugin. Last come the lines thimble adds to a tool's result in one situation, each named by that situation, such as `card-errored`, with each `{name}` in it filled in by the server.
+The file has two parts, and the server reads each `## ` section by its name. First comes each tool, its description, which a model reads to choose the tool, and under it the input schema. Then come the lines thimble adds to a tool's result in one situation, each named by that situation, such as `card-errored`, with each `{name}` in it filled in by the server. The view tools' text differs by the page a view build makes, by the build targets of app/prompts.py.
 
 ## read_ref
 
@@ -32,7 +32,7 @@ List a group's cards, one line each with its id, kind, question and the start of
 
 ## add_card
 
-Add a card, with its question and its content in one call. {{if:browser}}thimble runs the code and returns `card:<id>` and the start of each output.{{end}}{{if:terminal}}thimble returns `card:<id>` and a command that runs the code. Run it with Bash, and it prints the start of each output.{{end}} Give its takeaway here, or with `edit_card` once you have read the output.
+Add a card, with its question and its content in one call. thimble returns `card:<id>` and a command that runs the code. Run it with Bash, and it prints the start of each output. Give its takeaway here, or with `edit_card` once you have read the output.
 
 ```json
 {
@@ -204,7 +204,7 @@ Clear a scope's whole filter, so all its cards, records or sentences show again.
 
 ## set_layout
 
-{{if:browser}}Lay out the browser's main area, right of the chat, as panes that each show one surface: `files`, `canvas`, `report`, or a view on its own as `view:<slug>`. Call it when the analyst asks to see surfaces together, such as the files beside the report. The analyst can also drag the panes into place.{{end}}{{if:terminal}}Open thimble's panel in the terminal on surfaces, each in a pane: `files`, `canvas` for the cards, `report`, or a view on its own as `view:<slug>`. Call it when the analyst asks to see surfaces together, such as the files beside the report.{{end}}
+Open thimble's panel in the terminal on surfaces, each in a pane: `files`, `canvas` for the cards, `report`, or a view on its own as `view:<slug>`. Call it when the analyst asks to see surfaces together, such as the files beside the report. In the browser workbench it lays out the main area, right of the chat, as those panes, and the analyst can also drag the panes into place.
 
 ```json
 {
@@ -293,7 +293,7 @@ Comment on one sentence, paragraph or heading of a written document, or on a car
 {
   "type": "object",
   "properties": {
-    "ref": {"type": "string", "description": "report:<doc>#<id> of a sentence or a heading, report:<doc>#p<id> of a paragraph, card:<id> of a card, card:<id>#step-<n> of a plan's step."},
+    "ref": {"type": "string", "description": "report:<doc>#<id> of a sentence or a heading, report:<doc>#p<id> of a paragraph, card:<id> of a card, card:<id>#step-<n> of a plan's step, answer:<turn>#s<n> of a sentence of Claude's answer."},
     "text": {"type": "string", "description": "The statement: one short, clear sentence of about 20 words."},
     "details": {"type": "string", "description": "The evidence for the statement, with its citations, in plain sentences or a few bullets of about 120 words at most."}
   },
@@ -388,7 +388,7 @@ Delete a thread and its chat from the workspace, stopping its session if it runs
 
 ## screenshot
 
-{{if:browser}}Get a picture of what the analyst sees in the browser, such as a card as thimble draws it.{{end}}{{if:terminal}}Get a picture of a card as thimble draws it. In terminal mode it takes no other picture.{{end}} It is slow, so use it only when the look matters, such as when the analyst asks you to fix how something appears.
+Get a picture of a card as thimble draws it. Once the analyst has opened the browser workbench, it also takes a picture of what they see there. It is slow, so use it only when the look matters, such as when the analyst asks you to fix how something appears.
 
 ```json
 {
@@ -483,7 +483,7 @@ Run a report check over the written documents or the cards, a question asked of 
 
 ## stop_check
 
-Turn a report check off, {{if:browser}}as the switch in the Comments pane does, {{end}}which hides its {{if:browser}}tints and {{end}}comments and stops its runs. Its comments are kept, and `run_check` turns it on again.{{if:terminal}} The terminal has no switch for a check, so the analyst asks you to turn one on or off.{{end}}
+Turn a report check off, as the switch in the browser workbench's Comments pane does, which hides its tints and comments and stops its runs. Its comments are kept, and `run_check` turns it on again. The terminal has no switch for a check, so the analyst asks you to turn one on or off.
 
 ```json
 {
@@ -514,14 +514,14 @@ File a ticket for thimble's developer agent when thimble itself should change, s
 
 ## view_check
 
-Check the view you build or review, as often as you want: the checks thimble runs on every view, which say what failed and what they noted. Pass as `locators` the refs that sampling may miss, such as a key of each unit the view gives, and `picture` to get {{if:browser}}a picture of the page as it opens, whose path Read opens{{end}}{{if:terminal}}the view as it opens, drawn as text as the panel shows it{{end}}.
+Check the view you build or review, as often as you want: the checks thimble runs on every view, which say what failed and what they noted. Pass as `locators` the refs that sampling may miss, such as a key of each unit the view gives, and `picture` to get {{if:html-page}}a picture of the page as it opens, whose path Read opens{{end}}{{if:term-page}}the view as it opens, drawn as text as the panel shows it{{end}}.
 
 ```json
 {
   "type": "object",
   "properties": {
     "locators": {"type": "array", "items": {"type": "string"}, "description": "Refs to check beside the sampled lines, such as `<path>#L<n>` or `view:<slug>/<key>`."},
-    "picture": {"type": "boolean", "description": "{{if:browser}}Also take a picture of the page as it opens, 1048 px wide with no label on.{{end}}{{if:terminal}}Also draw the view as text as it opens, 120 columns wide with no label on.{{end}}"}
+    "picture": {"type": "boolean", "description": "{{if:html-page}}Also take a picture of the page as it opens, 1048 px wide with no label on.{{end}}{{if:term-page}}Also draw the view as text as it opens, 120 columns wide with no label on.{{end}}"}
   }
 }
 ```
@@ -564,7 +564,7 @@ Take pictures of the view you review, whose paths Read opens. The first call giv
 }
 ```
 
-## view_pictures@terminal
+## view_pictures@term-page
 
 Draw the view you review as text, as thimble's panel shows it. The first call gives the view as it opens, 120 columns wide; ask for other states in `states`, up to four more.
 
@@ -627,9 +627,16 @@ Finish your ticket: thimble commits every change in the worktree to the ticket's
 }
 ```
 
-## instructions
+## load_thimble
 
-These tools act on thimble, the analyst's workspace for this corpus beside this session: a chat, the corpus's files, cards and a report, which thimble shows {{if:browser}}in the browser{{end}}{{if:terminal}}in the terminal{{end}}. A session that opened thimble, with /thimble or the `thimble` command, and each thimble subagent, also has thimble's full instructions. If yours has none, thimble cannot reach this session yet, so tell the analyst to type /thimble.
+Turn on thimble in this session. thimble adds cards (tables, charts and plan cards that the terminal draws), labels that a model applies to every record of a file, and checked citations. Call this once before you make a card, a plan card or a label. It returns thimble's guidance, and thimble's other tools load after it.
+
+```json
+{
+  "type": "object",
+  "properties": {}
+}
+```
 
 ## card-errored
 
@@ -755,6 +762,14 @@ The takeaway of its card card:{cid} was written for the run before; write it aga
 
 {cards} read this label before it changed. Once its counts are final, thimble runs each of them again on the label as it is now, so leave them as they are.
 
+## apply_label-off
+
+Labels are off in thimble's Settings, so no label ran. Ask the analyst to turn Labels on (/config → thimble → Labels) if they want one.
+
+## run_check-off
+
+Checks are off in thimble's Settings, so no check ran. Ask the analyst to turn Checks on (/config → thimble → Checks) if they want one.
+
 ## label-run
 
 The label's code did not run yet. Run this command with Bash next: `{command}`. It runs your function on each unit and prints the label's result with its counts.
@@ -861,11 +876,11 @@ The film reported: {errors}
 
 ## screenshot-terminal
 
-screenshot cannot take this picture in terminal mode. There it draws only a card, and only when Chromium and thimble's built page are installed, which `thimble doctor` shows. `read_ref` on the card reads what the analyst sees.
+screenshot cannot take this picture until the analyst opens the browser workbench. Until then it draws only a card, and only when Chromium and thimble's built page are installed, which `thimble doctor` shows. `read_ref` on the card reads what the analyst sees.
 
 ## propose_view-proposed
 
-Proposed the view {view} (view:{slug}) over {claims}. The dev agent is building it now, and it opens in {{if:browser}}Files{{end}}{{if:terminal}}thimble's panel in the terminal{{end}} when its checks pass.
+Proposed the view {view} (view:{slug}) over {claims}. The dev agent is building it now, and it opens in thimble's panel in the terminal when its checks pass, and in Files in the browser workbench.
 
 ## propose_view-unmatched
 
@@ -905,15 +920,11 @@ Filed {label}, but it cannot run here, so it failed at once: {why} Tell the anal
 
 ## file_dev_ticket-waits
 
-Filed {label}. {running} runs now, and code tickets run one at a time, so this one waits until the analyst starts it with Start on its card{{if:browser}} in the browser{{end}}. Tell the analyst in one line.
+Filed {label}. {running} runs now, and code tickets run one at a time, so this one waits until the analyst starts it with Start on its card in the browser workbench. Tell the analyst in one line.
 
 ## file_dev_ticket-start
 
 Filed {label}: {title}. {start}
-
-## ticket-terminal
-
-This call filed nothing: code tickets run only in browser mode for now, since the analyst allows each one on its card there. Tell the analyst so in one line: to file it, they quit, run `thimble mode browser`, start `thimble` again and ask again.
 
 ## view-media-unplayable
 
@@ -993,7 +1004,7 @@ The records they show:
 
 {records}
 
-## view-pictures@terminal
+## view-pictures@term-page
 
 The pictures, each the view drawn as text as the panel shows it:
 
@@ -1251,10 +1262,6 @@ thimble refused this edit, since thimble's config turns edits of the corpus off 
 thimble refused this call, since thimble's config turns the web tools off (agents.orientation.web is "off").
 
 ## module-started-note
-
-thimble: the analyst started thimble's {role} for {what} {how}, as your subagent {agent}. Its report goes to the analyst in thimble, so when it hands back, reply in one short line, and do nothing about it unless the analyst asks.
-
-## module-started-note@terminal
 
 thimble: the analyst started thimble's {role} for {what} {how}, as your subagent {agent}. When it hands back, reply as your prompt says for a hand-back, and do nothing more about it unless the analyst asks.
 
