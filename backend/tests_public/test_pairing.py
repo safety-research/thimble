@@ -86,8 +86,8 @@ def test_a_code_works_once():
     again, none = _claim(code)
     assert _gone(again) and none == ""
     # 0.9.0: no `thimble up` link; the way to a new code is /thimble open or the panel's o
-    assert hook_auth.CODE_GONE == ("This sign-in link was already used or has expired. Type /thimble open in your Claude"
-                                   " Code terminal for a new one, or press o in thimble's panel.")
+    assert hook_auth.CODE_GONE == ("This sign-in link was already used or has expired. Type `/thimble open` in your"
+                                   " Claude Code terminal for a new one, or press o in thimble's panel.")
 
 
 def test_a_code_expires_and_a_newer_code_for_the_workspace_leaves_it_ten_seconds(monkeypatch):

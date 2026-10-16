@@ -6,10 +6,13 @@
 // images and media, downloads, PDFs) goes under that path, which the server takes off again (hook_auth.BrowserPath). No
 // other page knows the key, so the browser sends the cookie to no other server. Without a key (never signed in here, or
 // its site data cleared) requests go to /api/ itself, where the server reads them as a browser that is not signed in.
-// Pure but for localStorage.
+// Beside the key the page keeps the port the server that gave it listens on (the claim's `port`), which the stale-tab
+// challenge binds its answer to (lib/stale). Pure but for localStorage.
 
 /** Where the key is kept in localStorage. */
 export const KEY_ITEM = 'thimble-browser-key'
+/** Where the port of the server that gave the key is kept (lib/stale challengePort). */
+export const PORT_ITEM = 'thimble-server-port'
 /** A key as the server makes it (secrets.token_urlsafe), which BrowserPath takes; anything else is no key. */
 const KEY_RE = /^[A-Za-z0-9_-]{16,128}$/
 /** A path under some browser's key: its prefix and the API path it stands for. */
@@ -46,10 +49,36 @@ export function setBrowserKey(key: unknown): boolean {
   }
 }
 
+/** The port the server that gave this browser its key listens on, 0 when none is kept. */
+export function serverPort(): number {
+  try {
+    const got = Number(store()?.getItem(PORT_ITEM) ?? '')
+    return Number.isInteger(got) && got > 0 && got < 65536 ? got : 0
+  } catch {
+    return 0
+  }
+}
+
+/** Keep the port the claim answered beside the key; a value that is no port is not kept. */
+export function setServerPort(port: unknown): void {
+  if (typeof port !== 'number' || !Number.isInteger(port) || port <= 0 || port >= 65536) return
+  try {
+    store()?.setItem(PORT_ITEM, String(port))
+  } catch {
+    /* storage blocked: the challenge uses the page's own port */
+  }
+}
+
 /** The base of every API path this page asks for: `/b/<key>/api` with a key, else `/api`. */
 export function apiBase(): string {
   const key = browserKey()
   return key ? `/b/${key}/api` : '/api'
+}
+
+/** The API's own path for `path` (`/api` + path), never under a key: the stale-tab challenge (lib/stale), which must
+ * carry no credential to a server that has not proved itself. */
+export function plainApiPath(path: string): string {
+  return `/api${path}`
 }
 
 /** `url`, an address of the API (`/api` or a path under it, or such a path on this page's origin), under this browser's

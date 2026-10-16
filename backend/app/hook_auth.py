@@ -155,14 +155,14 @@ TOUCH_S = 3600  # a browser's `used` is written to PAIRED_FILE at most this ofte
 HELLO_PATH = "/api/hello"  # the stale-tab challenge (hello): open, answered without credentials
 # a click route's 403 without the analyst's cookie: every such click, not only the permission answers (live check L32)
 ANALYST_ONLY = ("only the analyst's own thimble page can do this (start, message or stop thimble's agents, build a view,"
-                " change Settings): open it with /thimble open in the Claude Code terminal, and click there")
+                " change Settings): open it with `/thimble open` in the Claude Code terminal, and click there")
 
 # A write to the local API (any method but GET/HEAD/OPTIONS) is either a token route (guarded: the plugin, the CLI, a
 # program's grant), which needs the hook proof, or an analyst route, which needs a signed-in browser's cookie (analyst).
 # A notebook kernel can reach this server on 127.0.0.1 but holds neither.
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
-WRITE_REFUSED = "open thimble's page with /thimble open in the Claude Code terminal to make changes"
-CODE_GONE = ("This sign-in link was already used or has expired. Type /thimble open in your Claude Code terminal for a"
+WRITE_REFUSED = "open thimble's page with `/thimble open` in the Claude Code terminal to make changes"
+CODE_GONE = ("This sign-in link was already used or has expired. Type `/thimble open` in your Claude Code terminal for a"
              " new one, or press o in thimble's panel.")
 OTHER_USER = "This sign-in belongs to another account on this computer."  # the claim route's 403 (same_user)
 # A read of the local API (GET or HEAD) needs a signed-in browser's cookie or a hook proof too (LocalReadGuard), except

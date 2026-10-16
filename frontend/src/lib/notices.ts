@@ -71,7 +71,7 @@ export function withoutNotice(list: readonly Notice[], gone: { id?: string; key?
 
 /** The words of backend hook_auth.CODE_GONE: the sign-in code of the link this page opened was used, replaced by a
  * newer one, or expired. */
-export const CODE_GONE_TEXT = 'This sign-in link was already used or has expired. Run `thimble up` in a shell for a new one, or type /thimble in your terminal.'
+export const CODE_GONE_TEXT = "This sign-in link was already used or has expired. Type `/thimble open` in your Claude Code terminal for a new one, or press o in thimble's panel."
 /** The start of the id of a notice this page made, which the server does not hold. */
 export const PAGE_NOTICE = 'page:'
 

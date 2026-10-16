@@ -57,7 +57,7 @@ import type {
 import { bus } from './bus'
 import { heavy } from './limit'
 import { clearCodeGone, setBrowserId, showCodeGone } from './notices'
-import { apiBase, setBrowserKey } from './browserKey'
+import { apiBase, setBrowserKey, setServerPort } from './browserKey'
 
 // Every path below starts with apiBase(): `/b/<key>/api` once this browser holds its key, which the server scopes the
 // browser's cookie to (lib/browserKey), else `/api`. It is read at each request, so a key a later sign-in gives (in
@@ -99,7 +99,7 @@ function setHash(params: URLSearchParams): void {
  * hook_auth.mint), which the server trades for the cookie that every read of the server's data and every analyst
  * action needs (backend hook_auth), and take the code out of the address once the server has answered. 200 {key}:
  * signed in, with the key of the path the cookie is scoped to, which the page keeps (lib/browserKey) and sends every
- * later request under. 204: signed in already (the claim went under this browser's path with its cookie), so the key
+ * later request under, and the port the server listens on, which the page's stale-tab challenge needs (lib/stale). 204: signed in already (the claim went under this browser's path with its cookie), so the key
  * it holds stands. 410 (or any other refusal): the code was used, replaced by a newer one, or expired, which
  * shell/SignIn's line and a notice this page makes say (claimRefused, lib/notices showCodeGone; a later sign-in takes
  * the notice away). The key an earlier version's link carried (`k` in the hash)
@@ -133,7 +133,8 @@ async function claim(code: string): Promise<boolean> {
       if (signed || (res.status >= 400 && res.status < 500)) {
         if (res.status === 200) {
           try {
-            setBrowserKey(((await res.json()) as { key?: unknown } | null)?.key)
+            const got = (await res.json()) as { key?: unknown; port?: unknown } | null
+            if (setBrowserKey(got?.key)) setServerPort(got?.port)
           } catch {
             /* no key in the answer: the page goes on without one, and shows the sign-in line */
           }

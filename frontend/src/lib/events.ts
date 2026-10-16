@@ -2,12 +2,13 @@
 // the workspace's history, then the server sends `live` (backend investigation._stream); isReplay tells whether the
 // record being dispatched is from that history, so one-time effects (a toast, a tab dot) happen only for new records.
 // When `/thimble fresh` or `resume` replaces the log, the server sends `reset`, the bus gets `wsReset` and the shell
-// reloads the page.
+// reloads the page. A new `session-ended` record stops the page (lib/stale).
 import { useEffect } from 'react'
 import { api } from './api'
 import { bus } from './bus'
 import { parseNotice } from './notices'
 import { openStream } from './sse'
+import { stopPage } from './stale'
 import type { ViewQuery, WsEvent } from './types'
 
 let replaying = false
@@ -104,6 +105,11 @@ function fanOut(ev: WsEvent): void {
       if (notice) bus.emit('notice', { chat, notice, gone: null, foreground: rest.foreground !== false, replay: replaying })
       return
     }
+    case 'session-ended':
+      // main's session of this workspace ended (backend main.session_ended): the page stops (lib/stale); a record of the
+      // history is an earlier session's
+      if (!replaying) stopPage('session-ended')
+      return
     case 'filter':
       bus.emit('filter',{ scope: rest.scope as 'files' | 'canvas' | 'report', concept: typeof rest.concept === 'string' ? rest.concept : undefined, value: typeof rest.value === 'string' ? rest.value : undefined })
       return
