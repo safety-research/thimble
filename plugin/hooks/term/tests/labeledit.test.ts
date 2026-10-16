@@ -1,7 +1,8 @@
-// The label panel's parity with the browser's label editor and Labels pane: a label over files turned on or off in Files
-// (`in files: on off`), a value's color chosen by the names show_label takes, a filter by a value, the held-out
-// agreement and `… N more` records in the examples, rename, and the undo of a delete in the labels list. Each change
-// goes through `thimble act` (label-show, label-filter, label, label-undelete). `claude plugin test plugin`.
+// The label panel's parity with the browser's label editor and Labels pane: a label's marks shown or hidden in Files
+// and the views (`marks: shown on records in Files and views  hide`), a value's color chosen by the names show_label
+// takes, a filter by a value, the held-out agreement and `… N more` records in the examples, rename, and the undo of a
+// delete in the labels list. Each change goes through `thimble act` (label-show, label-filter, label, label-undelete).
+// `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
@@ -73,7 +74,8 @@ function rows(n: unknown, w: number): string[] {
     }
     return [s.slice(0, w)]
   }
-  if (o.type === 'Button') return [String(p.label ?? o.label ?? '')]
+  // a Button: its label, else its words (an action's words are its child, chrome.tsx actionEl)
+  if (o.type === 'Button') return [String(p.label ?? o.label ?? flat(o))]
   if (o.type === 'Input') return [`${String(p.value ?? p.placeholder ?? '')}▏`]
   if (o.type === 'Client') {
     // a field's text, or a list's lines of segments (lines.tsx)
@@ -145,24 +147,27 @@ async function drawing(pane: M, what: string, columns = 120): Promise<string> {
 
 // ------------------------------------------------------------------------------------------------ the tests
 
-test('a label over files is turned on or off in Files from its panel: `in files:` lit on the one in use; f and a click send `label-show`', async ($, on) => {
-  // 0.9.0 (SPEC-v2 J4): `o` opens every view's object in the browser, so the label's Files switch is `f`
+test("a label over files shows or hides its marks in Files and the views from its panel: `marks:` says which in words, its action changes it; f and a click send `label-show`", async ($, on) => {
+  // 0.9.0 (SPEC-v2 J4): `o` opens every view's object in the browser, so the label's marks switch is `f`; (Matt, v9
+  // review, item l) `in files: on off` did not say what it turns on
   const w = world(on)
   let pane = await labelPanel($, w)
   let text = shown(await pane.drawn())
-  expect(text).toContain('in files:onoff')
-  expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["off"]}')
-  expect(text).toContain('f to show in files')
+  expect(text).toContain('marks:hidden in Files and viewsshow')
+  expect(text).not.toContain('in files')
+  expect((await pane.find({ type: 'Button', key: 'lo-on' }))?.children[0]).toMatchObject({ type: 'Text', props: { color: 'suggestion' } })
+  expect(text).toContain('f to show marks')
   // thimble answers the act with the label on
   label(w).shown = true
   pane = await press($, w, pane, 'hk-files-on')
   expect(w.acts).toContainEqual({ kind: 'label-show', payload: { label: LABEL.id, on: true } })
   text = shown(await pane.drawn())
-  expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["on"]}')
-  expect(text).toContain('f to hide in files')
+  expect(text).toContain('marks:shown on records in Files and viewshide')
+  expect(text).toContain('f to hide marks')
   label(w).shown = false
   pane = await press($, w, pane, 'lo-off')
   expect(w.acts).toContainEqual({ kind: 'label-show', payload: { label: LABEL.id, on: false } })
+  expect(shown(await pane.drawn())).toContain('marks:hidden in Files and viewsshow')
   await pane.unmount()
 })
 
@@ -338,7 +343,7 @@ test('the label panel at 120 columns, every part open', async ($, on) => {
   await drawing(pane, 'the label panel as it opens')
   for (const k of ['hk-counts', 'hk-examples', 'hk-cards']) pane = await press($, w, pane, k)
   const text = await drawing(pane, 'the label panel, counts, examples and cards open')
-  expect(text).toContain('in files:  on  off')
+  expect(text).toContain('marks:    shown on records in Files and views  hide')
   expect(text).toMatch(/proxy-link\s+█+─*\s+5,191\s+36%\s+color\s+clear filter/)
   await pane.unmount()
 })

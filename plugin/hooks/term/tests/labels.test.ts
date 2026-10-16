@@ -36,11 +36,11 @@ test("the label panel's header reads `name:`, `type:`, `scope:`, and its pattern
   const pane = await labelPanel($, w)
   const text = shown(await pane.drawn())
   for (const s of ['name:', 'type:', 'scope:', 'pattern:']) expect(text).toContain(s)
-  // each label in a column 11 cells wide (a label over files' `in files:` and a gutter), the field after it
-  expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Box","props":{"key":"lf-pattern:","flexDirection":"row"},"children":[{"type":"Box","props":{"width":11,"flexShrink":0}')
+  // each label in a column 10 cells wide (the longest, `pattern:`, and a gutter), the field after it
+  expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Box","props":{"key":"lf-pattern:","flexDirection":"row"},"children":[{"type":"Box","props":{"width":10,"flexShrink":0}')
   // each folded part's key by what it opens (live check New 11)
-  // 0.9.0 (SPEC-v2 J4): the label's Files switch is `f`; `o` opens it in the browser
-  expect(text).toContain('r to run a sample · n to rename · k to delete · f to show in files')
+  // 0.9.0 (SPEC-v2 J4): the label's marks switch is `f`; `o` opens it in the browser
+  expect(text).toContain('r to run a sample · n to rename · k to delete · f to show marks')
   expect(text).toContain('c counts, e examples, d cards · l for labels')
   await pane.unmount()
 })

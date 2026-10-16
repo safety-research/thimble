@@ -2451,8 +2451,8 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
     if (on !== shownOn) await showLabel(cx, id, { on })
   }
   // the header block: name, type, scope, each on the label column, as Matt wrote them (`name:`), and for a label over
-  // files whether it is on in Files; then the definition
-  const L = (files ? 'in files:' : 'pattern:').length + 2
+  // files whether its marks show in Files; then the definition
+  const L = 'pattern:'.length + 2
   const fieldLine = (label: string, el: RenderElement) => (
     <Box key={`lf-${label}`} flexDirection="row">
       <Box width={L} flexShrink={0}>
@@ -2519,19 +2519,15 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
       ),
     ),
   )
-  // on or off in Files and the views: the one in use on the selection background, the other a click away
+  // whether Files and the views mark its records with its values, in words, and the action that changes it (Matt, v9
+  // review, item l: `in files: on off` did not say what it turns on)
   if (files)
     rows.push(
       fieldLine(
-        'in files:',
-        <Box flexDirection="row" columnGap={2}>
-          {([true, false] as const).map(on =>
-            on === shownOn ? (
-              <Text key={`lo-${on ? 'on' : 'off'}`} backgroundColor={COLORS.selected}>{on ? 'on' : 'off'}</Text>
-            ) : (
-              <Button key={`lo-${on ? 'on' : 'off'}`} label={on ? 'on' : 'off'} plain onPress={() => void turn(on)()} />
-            ),
-          )}
+        'marks:',
+        <Box flexDirection="row" columnGap={2} flexWrap="wrap">
+          <Text key="lo-state">{shownOn ? 'shown on records in Files and views' : 'hidden in Files and views'}</Text>
+          {actionEl(els, shownOn ? 'lo-off' : 'lo-on', shownOn ? 'hide' : 'show', () => void turn(!shownOn)())}
         </Box>,
       ),
     )
@@ -2618,7 +2614,8 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
     // the field takes the letters; its Enter renames
   } else if (!running && !st.running) keys.push({ key: 'sample', hotkey: 'r', onPress: () => void run(sample)() }, { key: 'rename', hotkey: 'n', onPress: () => void askRename() }, { key: 'delete', hotkey: 'k', onPress: () => void askDelete() })
   else if (running || follower) keys.push({ key: 'stop', hotkey: 's', onPress: stop })
-  // f turns a label over files on or off in Files (o opens the label in the browser, as in every view)
+  // f shows or hides the marks of a label over files in Files and the views (o opens the label in the browser, as in
+  // every view)
   if (files && !asking && !renaming) keys.push({ key: 'files-on', hotkey: 'f', onPress: () => void turn(!shownOn)() })
   // the counts, the examples and the cards, folded
   const toggle = (part: string, words: string, n: number | null, note = '') => (
@@ -2894,7 +2891,7 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
       els,
       [
         ...(running || follower ? ['s to stop'] : st.running || asking || renaming ? [] : ['r to run a sample', 'n to rename', 'k to delete']),
-        ...(files && !asking && !renaming ? [shownOn ? 'f to hide in files' : 'f to show in files'] : []),
+        ...(files && !asking && !renaming ? [shownOn ? 'f to hide marks' : 'f to show marks'] : []),
         'c counts, e examples, d cards',
         'l for labels',
       ],
