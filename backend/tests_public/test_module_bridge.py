@@ -937,13 +937,18 @@ def test_roles_json_is_rendered_the_same_for_every_transport_from_any_folder(mon
     monkeypatch.chdir(tmp_path)
     # 0.9.0 (SPEC-v2 3.18): preamble.md's mode branches are merged, so both renderings carry the terminal's text and
     # name the browser workbench, and 0.8.0's browser-only sentence is gone
+    # The view builder and its reviewer are told which page they build (SPEC-v2 3.13: `view.term.js` on the local
+    # transport, `view.html` after a press), so their prompts follow the transport; every other role reads the same.
     seen = []
+    targets = []
     for transport in ("local", "server"):
         write_launch(ws, session=MAIN, transport=transport)
         roles = json.loads(module_bridge.roles_file(CORPUS).read_text())["roles"]
         assert roles, transport
-        seen.append(json.dumps(roles, ensure_ascii=False, sort_keys=True))
-    assert seen[0] == seen[1]
+        targets.append({k: v for k, v in roles.items() if k in ("view-builder", "view-reviewer")})
+        seen.append(json.dumps({k: v for k, v in roles.items() if k not in ("view-builder", "view-reviewer")},
+                               ensure_ascii=False, sort_keys=True))
+    assert seen[0] == seen[1] and targets[0] != targets[1]
     assert "the terminal, where thimble shows" in seen[0] and "a browser interface" not in seen[0]
 
 

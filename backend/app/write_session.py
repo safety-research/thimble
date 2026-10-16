@@ -1,7 +1,8 @@
 """A writer: `thimble:writer`, a subagent of the analyst's Claude Code session for one document (subagents.py).
 
-Its registration (definition) is prompts/writer.md with shared.md loaded as the skill `thimble:shared`, the `writer`
-role's model and effort from Settings, and of thimble's tools OWN_TOOLS. Its run's prompt names its task and its
+Its registration (definition) is prompts/writer.md with thimble's shared guidance (preamble.md and shared.md, rendered
+for the workspace as the shared skill printed them before 0.9.0; shared_guidance) at its end, the `writer` role's model
+and effort from Settings, and of thimble's tools OWN_TOOLS. Its run's prompt names its task and its
 context, writers/<doc>/context.md, that holds the whole context (context.render, CONTEXT_CHARS) followed by the task,
 which it reads first; a context too large for one Read call is written as several files (read_parts), each small enough
 that Read returns it whole. One writer runs per document. Write in the browser is a click (write_route), through
@@ -34,7 +35,6 @@ CONTEXT_FILE = "context.md"  # in its work folder: what it reads first, with con
 # report pass, so the browser does not guess one from when it ran (frontend chat/model.ts orientWriters)
 NO_REPORT_PASS: dict[str, Any] = {"orient": None, "orient_run": 0}
 WORK_DIR = "writers"  # workspaces/<c>/writers/<doc>, a writer's own folder, where it may write
-SKILLS = ("thimble:shared",)  # shared.md, loaded before its first turn (U3)
 OWN_TOOLS = ("read_ref", "list_cards", "add_card", "edit_card", "delete_card", "screenshot", "write_document",
              "edit_document")  # a writer's thimble tools
 
@@ -59,16 +59,31 @@ def first_message(c: str, t: dict[str, Any], request: str = "", after: str = "")
     return context.render(c, task_text(t, request, after), budget=CONTEXT_CHARS, focus=(f"report:{t['slug']}",))
 
 
+def shared_guidance(c: str) -> str:
+    """thimble's shared guidance for an agent of workspace `c` that does not get it from main's prompt (the writer, the
+    critic): preamble.md and shared.md rendered for the corpus folder, with its view citation forms and card types, as
+    `thimble prompt preamble shared` prints them, with the analyst's feature switches (features.flags)."""
+    from . import events, prompts  # noqa: PLC0415
+
+    from . import features  # noqa: PLC0415
+
+    folder = str(config.corpus_dir(c))
+    if not hasattr(prompts, "TARGETS"):  # STUB(core): 0.8.0's prompts.py renders modes, not the guide's flags
+        return events.render_prompts(("preamble", "shared"), folder)
+    with prompts.rendering(features.flags(c)):
+        return events.render_prompts(("preamble", "shared"), folder)
+
+
 def definition(c: str) -> dict[str, Any]:
     """The registration of `thimble:writer` for workspace `c` (subagents.roles adds its model, effort and
-    `background`): writer.md's body, its frontmatter's description, shared.md as the skill `thimble:shared`, and the
-    thimble tools that are not a writer's taken away."""
+    `background`): writer.md's body with thimble's shared guidance at its end (shared_guidance), its frontmatter's
+    description, and the thimble tools that are not a writer's taken away. It loads no skill."""
     from . import cli, prompts, userconf  # noqa: PLC0415
 
     with prompts.custom(userconf.prompt_files(c, "writer")):
         _, agent = cli.agent_definition(AGENT)
     out = {k: agent[k] for k in ("description", "prompt") if k in agent}
-    out["skills"] = list(dict.fromkeys([*SKILLS, *(agent.get("skills") or [])]))
+    out["prompt"] = f"{str(out.get('prompt') or '').rstrip()}\n\n{shared_guidance(c)}"
     out["disallowedTools"] = tools.not_own(OWN_TOOLS)
     return out
 

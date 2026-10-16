@@ -113,17 +113,21 @@ def test_coverage_label_unsure_and_answer_comments_answer_their_stubs(setup):
         {"path": "src/a.py", "how": "whole", "by": "Read", "at": 3.0},
         {"path": "/elsewhere/b.jsonl", "how": "whole", "by": "Read", "at": 4.0}]}
     got = answer(run(env, corpus, "act", "coverage", "--cwd", str(corpus), "--stdin", stdin=json.dumps(facts)))
-    assert got["ok"] is True and got["summary"]["line"] == "saw 1 file"
+    # the features lane's coverage (C7): with no index yet, the files the facts name; src/a.py and a path outside
+    # the corpus are dropped
+    assert got["ok"] is True and got["summary"]["line"] == "saw 1 file" and got["counting"] is True
     assert got["summary"]["files"]["seen"] == 1 and got["summary"]["records"]["counted"] is False
     state = answer(run(env, corpus, "state", "coverage", "--cwd", str(corpus), "--session", SID))
-    assert state["rows"] == [] and state["summary"]["line"] == "saw 1 file" and state["counting"] is False
+    assert state["summary"]["files"]["seen"] == 1 and state["folder"] == "" and isinstance(state["rows"], list)
     assert "rows" not in answer(run(env, corpus, "state", "coverage", "--cwd", str(corpus), "--session", SID,
                                     "--summary"))
     assert answer(run(env, corpus, "state", "label-unsure", "--cwd", str(corpus), "--counts")) == {"labels": []}
     assert answer(run(env, corpus, "state", "answer-comments", "--cwd", str(corpus), "--session", SID)) == \
         {"comments": [], "running": []}
-    assert answer(run(env, corpus, "act", "answer-comment-resolve", "--cwd", str(corpus),
-                      json.dumps({"comment": "c1", "reopen": False}))) == {"ok": True}
+    # a comment that is not there is refused (C9's act resolves a comment of the store)
+    r = run(env, corpus, "act", "answer-comment-resolve", "--cwd", str(corpus),
+            json.dumps({"comment": "c1", "reopen": False}))
+    assert "no comment 'c1'" in r.stdout
 
 
 def test_the_shim_lists_load_thimble_alone_in_a_folder_that_is_no_workspace(setup):

@@ -29,6 +29,10 @@ the analyst's last correction of it (rerun_after_verdicts), thimble runs every c
 and main hears which of them it should write a takeaway for again
 (`rerun`, or inside `label_done`). bring_current reruns labels whose rows were made under another definition before a
 card runs on POST .../regenerate.
+Unsure: under each label the terminal panel's Labels view and the label editor list first the records no category fit
+(no value, a value off the label's list, or a quiet value that says nothing; a yes/no label's quiet value is an answer),
+then those its classifier was unsure of (confidence under UNSURE_BELOW), least sure first (unsure, labels_store's
+Store.unsure); a record the analyst judged is in neither.
 Notices: a run that fails, or that leaves units it could not label, is told in the foreground (notices.post, under
 `label:<id>`), and so are classifier calls Claude's safeguards switched to the fallback model; a run with no failure
 clears the first (_label_notice).
@@ -792,6 +796,61 @@ def concept_rows(ws: Path, concept_id: str, value: str | None, limit: int, offse
             if window:
                 r["text"], r["match"] = window, span
     return {"rows": page, "total": total, "next": cursor}
+
+
+UNSURE_BELOW = 0.6  # a classifier row under this confidence is unsure (unsure)
+UNSURE_TEXT = 200  # chars of an unsure row's text
+
+
+def no_fit_values(concept: dict) -> list[str]:
+    """The quiet values (QUIET_VALUES) that say a record fit no category of the label, lowercase: none for a label with
+    one value that says something (yes or no), whose quiet value is an answer, not a record no category fit."""
+    loud = [v for v in concept.get("labels") or [] if str(v).casefold() not in QUIET_VALUES]
+    return sorted(QUIET_VALUES) if len(loud) > 1 else []
+
+
+def _unsure_of(ws: Path, concept: dict, n: int, offset: int) -> tuple[int, int, list[dict]]:
+    st, _ = _store(ws, concept["id"])
+    if st is None:
+        return 0, 0, []
+    try:
+        return st.unsure([str(v) for v in concept.get("labels") or []], no_fit_values(concept), UNSURE_BELOW, n, offset)
+    except sqlite3.Error:
+        log.debug("unsure: the store of %s could not be read", concept["id"], exc_info=True)
+        return 0, 0, []
+
+
+def unsure(c: str, label_id: str, n: int = 20, offset: int = 0) -> dict:
+    """{total, rows} of a label's records that no category fit (no value, a value off its list, or a quiet value that
+    says nothing, no_fit_values), then those its classifier was unsure of (confidence under UNSURE_BELOW, least sure
+    first), the ones the analyst judged left out; one page of `n` from `offset`, each row {ref, value, confidence, kind
+    ("no-fit" or "unsure"), text} with the unit's text cut at UNSURE_TEXT characters. Blocking (worker thread)."""
+    ws, concept = load_concept(c, label_id)
+    nofit, doubt, page = _unsure_of(ws, concept, max(1, int(n)), max(0, int(offset)))
+    texts = unit_texts(c, concept, [str(r["ref"]) for r in page], cap=UNSURE_TEXT) if page else {}
+    rows = [{"ref": str(r["ref"]), "value": r.get("label"), "confidence": r.get("confidence"), "kind": r["kind"],
+             "text": texts.get(str(r["ref"]), "")} for r in page]
+    return {"total": nofit + doubt, "rows": rows}
+
+
+def unsure_counts(c: str, label_id: str) -> dict:
+    """{noFit, unsure, total} of a label (unsure). Blocking (worker thread)."""
+    ws, concept = load_concept(c, label_id)
+    nofit, doubt, _ = _unsure_of(ws, concept, 0, 0)
+    return {"noFit": nofit, "unsure": doubt, "total": nofit + doubt}
+
+
+def unsure_state(c: str, label_id: str | None = None, n: int = 20, offset: int = 0, *, counts_only: bool = False) -> dict:
+    """`thimble state label-unsure`: {labels: [{id, name, noFit, unsure, total, rows?}]}, every label (trials left out)
+    with its counts, or with `label_id` that label with one page of its rows (unsure)."""
+    ws = _ws(c)
+    if label_id and not counts_only:
+        _, concept = load_concept(c, label_id)
+        got = unsure(c, label_id, n, offset)
+        return {"labels": [{"id": concept["id"], "name": concept["name"], **unsure_counts(c, label_id),
+                            "rows": got["rows"]}]}
+    wanted = [x for x in list_concepts(ws, trials=False) if not label_id or x["id"] == label_id]
+    return {"labels": [{"id": x["id"], "name": x["name"], **unsure_counts(c, x["id"])} for x in wanted]}
 
 
 def match_window(text: str, span: str) -> str | None:

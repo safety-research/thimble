@@ -2,7 +2,9 @@
 
 A ticket is one record of dev/tickets.jsonl (repo root, gitignored), numbered per workspace, with shots under
 dev/tickets/<id>/shots/. Filing opens the ticket's thread (a chat of role dev) and lands a chip in main; tickets run one
-at a time, urgent first, and only in a development install (a git checkout of thimble: RELEASE_LINE).
+at a time, urgent first, in every install whose tree is a git repository (a git checkout of thimble, or a release
+install with the git baseline install.sh makes; else RELEASE_LINE). Where the ticket passed its checks, its change
+waits for the analyst's Allow on its browser card, and the notice `ticket:<id>` says so in the terminal (_allow_notice).
 
 The ticket's agent. A code ticket is worked by a `thimble:dev-ticket`, a subagent of the analyst's Claude Code session
 (subagents.py), on Settings' dev row's model and effort. A ticket filed in the browser, Retry and Start are clicks: the
@@ -173,8 +175,13 @@ STATUSES = ("queued", "running", "applied", "applied, restart pending", "failed"
 FAILED = ("failed", "needs manual merge", "rolled back", "stopped")
 # Why this server cannot run a code ticket (ticket_problem, runner_problem). Each is shown to the analyst in the ticket's
 # thread and passed to main in file_dev_ticket's result.
-RELEASE_LINE = ("thimble's own code can only be changed in a development install (a git clone of thimble), and this is "
-                "a release install. Send the request with Report a problem in the top bar instead.")
+RELEASE_LINE = ("thimble's own code can only be changed in an install that is a git repository, and this install is not "
+                "one. `thimble update` makes it one; or send the request with Report a problem in the top bar instead.")
+# a change to the browser UI in an install that cannot rebuild it (no frontend/node_modules, as a release install)
+FRONTEND_FIX = "This install cannot rebuild the browser UI. Install thimble from a git clone to change the UI."
+# the notice of a ticket whose change passed its checks and waits for the analyst's Allow on its browser card
+ALLOW_TEXT = "ticket {n} passed its checks and waits for your Allow"
+ALLOW_ACT = "ticket-open"  # the notice's act, which opens the ticket in the browser (local.NOTICE_ACTS)
 NO_RUNNER_LINE = "This server runs no dev tickets (THIMBLE_DEV_STACK is off, as on a validation stack)."
 NO_CLAUDE_LINE = "The dev agent runs in Claude Code, and `{bin}` is not on the PATH of thimble's server."
 RESTART_PREFIXES = ("backend/app/", "plugin/")
@@ -514,8 +521,10 @@ def file_ticket(workspace: str | None, title: str, body: str, source: str = "ana
 
 
 def ticket_problem() -> str:
-    """Why this server runs no code ticket, '' when it does: the live tree is not a git checkout (RELEASE_LINE), or
-    the server is itself a validation stack (NO_RUNNER_LINE)."""
+    """Why this server runs no code ticket, '' when it does: the live tree is no git repository (RELEASE_LINE; a release
+    install gets a git baseline from install.sh, so every install runs them), or the server is itself a validation
+    stack (NO_RUNNER_LINE). An install without the validation stack's tools runs the gates it can: a change to the
+    browser UI fails its gate with FRONTEND_FIX."""
     if not (REPO / ".git").exists():
         return RELEASE_LINE
     if not STACK_ENABLED:
@@ -1154,8 +1163,8 @@ async def run_gates(tree: Path, touched: list[str], *, scratch: Path | None = No
             else:
                 code, out = res
                 steps.append({"name": name, "ok": code == 0, "tail": out[-3000:]})
-    elif frontend:
-        steps.append({"name": "tsc", "ok": False, "tail": "frontend/node_modules is missing in the worktree"})
+    elif frontend:  # an install with no frontend/node_modules (a release install) cannot rebuild the UI
+        steps.append({"name": "tsc", "ok": False, "tail": FRONTEND_FIX})
     if backend:
         tests = _tests_for(touched, tree)
         py = tree / "backend" / ".venv" / "bin" / "python"
@@ -2528,7 +2537,12 @@ async def _settle_ticket(run: Run, t: dict[str, Any], agent_id: str, status: str
             differ = (shots_dir(tid) / before).read_bytes() != (shots_dir(tid) / after).read_bytes()
             _update(tid, shots_differ=differ)
         _host_card(t)
-        if why := await _apply_refusal(t, touched, branch):
+        _allow_notice(t, True)
+        try:
+            why = await _apply_refusal(t, touched, branch)
+        finally:
+            _allow_notice(t, False)
+        if why:
             raise NotAllowed(why)
         restart = "requested" if needs_restart(touched) else None
         res = await _apply(t, wt, branch, base, touched, restart, run_log, box, change)
@@ -2722,6 +2736,28 @@ def _finish(rec: dict[str, Any], summary: str | None) -> None:
 # a code ticket's end the notices tell (module note, notices), by its status: {subject} the ticket, {why} the reason
 TICKET_TEXTS = {"failed": "{subject} failed: {why}.", "needs manual merge": "{subject} needs a manual merge: {why}.",
                 "rolled back": "{subject} was rolled back: {why}."}
+
+
+def _allow_notice(t: dict[str, Any], waiting: bool) -> None:
+    """While a ticket's change waits for the analyst's Allow on its browser card, the notice `ticket:<id>` (ALLOW_TEXT)
+    says so in the terminal's band too, with an act that opens the ticket in the browser; it goes once answered. Never
+    raises."""
+    from . import notices  # noqa: PLC0415
+
+    c = t.get("workspace")
+    if not c:
+        return
+    key = ticket_key(str(t["id"]))
+    try:
+        if not waiting:
+            notices.clear(str(c), key)
+            return
+        # the act needs notices.ACTIONS and local.NOTICE_ACTS to know it (runtime lane); until then only dismiss
+        act = {"label": "open ›", "do": ALLOW_ACT, "slug": key} if ALLOW_ACT in notices.ACTIONS else None
+        notices.post(str(c), kind="agent", text=ALLOW_TEXT.format(n=t.get("n") or t["id"]), agent="Code ticket",
+                     action=act, key=key, row=False)
+    except Exception:  # noqa: BLE001 — the card asks either way
+        log.debug("the Allow notice of ticket %s was not posted", t.get("id"), exc_info=True)
 
 
 def _ticket_notice(rec: dict[str, Any]) -> None:
@@ -3169,10 +3205,12 @@ def build_task(c: str, prop: dict[str, Any], *, repair: str = "") -> str:
     more = [repair] if repair else []
     if prop.get("changed") or prop.get("change"):
         more.append(change_text(c, prop))
-    return prompts.render("dev-view-task", {
-        "name": str(prop.get("name") or slug), "slug": slug, "folder": str(views.views_dir(c) / slug),
-        "work": str(view_work_dir(c, slug)), "proposal": view_tools.fenced_proposal(prop),
-        "more": "\n\n".join(more)})
+    target = prop.get("target") if prop.get("target") in views.TARGETS else views.default_target(c)
+    with prompts.rendering(views.target_flags(c, target)):  # the page this build makes (views module note)
+        return prompts.render("dev-view-task", {
+            "name": str(prop.get("name") or slug), "slug": slug, "folder": str(views.views_dir(c) / slug),
+            "work": str(view_work_dir(c, slug)), "proposal": view_tools.fenced_proposal(prop),
+            "more": "\n\n".join(more)})
 
 
 def repair_text(report: str, n: int) -> str:
@@ -3195,11 +3233,15 @@ async def start_build(c: str, slug: str, route: str, values: dict[str, Any] | No
     if prop is None:
         _view_runs.pop(key, None)
         return subagents.refusal(subagents.ERROR, f"no proposal {slug}")
+    # the page this build makes (views module note): the one a change named, else the one of where it starts
+    target = prop.get("target") if prop.get("target") in views.TARGETS else views.default_target(c)
+    if prop.get("target") != target:
+        prop = views.update_proposal(c, slug, target=target) or prop
     if (part := view_program(c)) is not None:
         b = _view_runs.setdefault(key, _Build(route=route))
         b.task = asyncio.get_running_loop().create_task(_program_task(c, slug, part), name=f"view-program:{c}:{slug}")
         return subagents.Answer({"program": part.extension})
-    if why := await asyncio.to_thread(views.build_problem_for, c):
+    if why := await asyncio.to_thread(views.build_problem_for, c, target):
         _view_runs.pop(key, None)
         if prop.get("revision"):
             views.end_revision(c, slug, why, failed_change=str(prop.get("change") or ""))
@@ -3225,11 +3267,12 @@ async def start_build(c: str, slug: str, route: str, values: dict[str, Any] | No
         await subagents.out_of_plan(c)
     name = str(prop.get("name") or slug)
     asked = bool(prop.get("asked"))
-    ans = await subagents.start_job(c, _builder(), _key(slug), build_task(c, prop, repair=repair), vals, route,
-                                    description=f"view: {name}",
-                                    chat={"title": f"view: {name}", "view": slug, "announce": asked,
-                                          **({"asked": True} if asked else {})},
-                                    work=view_work_dir(c, slug), call=call)
+    with views.spawning(c, target):  # the builder's registration renders for this build's page
+        ans = await subagents.start_job(c, _builder(), _key(slug), build_task(c, prop, repair=repair), vals, route,
+                                        description=f"view: {name}",
+                                        chat={"title": f"view: {name}", "view": slug, "announce": asked,
+                                              **({"asked": True} if asked else {})},
+                                        work=view_work_dir(c, slug), call=call)
     if ans.typed:
         _view_runs[key] = _Build(request=str(ans.get("request") or ""), route=route)
         views.update_proposal(c, slug, status="building", request=ans.get("request"))
@@ -3305,7 +3348,7 @@ def gate_step(c: str, slug: str, report: dict[str, Any], chat: str | None = None
     if not chat or agents.meta_or_none(c, str(chat)) is None:
         return
     loaded = "the page loaded" if (report.get("page") or {}).get("ok") else "the page was not loaded"
-    if report.get("draws") is not None:  # a view built in terminal mode: its program drawn as text (views.term_draws)
+    if report.get("draws") is not None:  # a term-page build: its program drawn as text (views.term_draws)
         loaded = "the program drew" if (report.get("page") or {}).get("ok") else "the program did not draw"
     Log(agents.Recorder(c, str(chat))).stage(
         f"checks passed: {len(report.get('checks') or [])} ref(s), {loaded}" if report.get("ok")

@@ -1,11 +1,11 @@
 """Terminal views: a view's view.term.js drawn in thimble-term's panel, as its view.html is drawn in the browser.
 
-A view built in terminal mode has view.term.js beside its reader.py: a program the view builder writes on the terminal
-view kit (term_kit/kit.mjs, docs/terminal-views.md). The program runs sandboxed, as a view's page runs in a sandboxed
-iframe: one process per open view, alive while the view is open, which reads no file, opens no socket and starts no
-process. It hears the panel's size, the theme, what thimble keeps for the view, the analyst's keys and clicks and the
-answers of its reader queries, and answers each with a frame: rows of styled runs, their hot regions, the keys it binds
-and the words of its hint row.
+A view built for the terminal (its build's target `term-page`, views.py) has view.term.js beside its reader.py: a
+program the view builder writes on the terminal view kit (term_kit/kit.mjs, docs/terminal-views.md). The program runs
+sandboxed, as a view's page runs in a sandboxed iframe: one process per open view, alive while the view is open, which
+reads no file, opens no socket and starts no process. It hears the panel's size, the theme, what thimble keeps for the
+view, the analyst's keys and clicks and the answers of its reader queries, and answers each with a frame: rows of styled
+runs, their hot regions, the keys it binds and the words of its hint row.
 
     thimble-term ──POST /open /event /close──▶ host (this module, `thimble view host`) ──stdin──▶ sandboxed program
                  ◀────── stdout: frames ──────                                       ◀──stdout──  (runtime.mjs + kit)
@@ -71,7 +71,7 @@ SYNC_WAIT_S = 2.0  # how long a sync waits for the program's answer
 # the longest message a program takes (runtime.mjs LINE_MAX): a reader answer longer than this reaches the program as an
 # error that says to page it, rather than being dropped, which would leave the view loading for good
 ANSWER_MAX = 16 * 1024 * 1024
-# the view checks' draws of a view built in terminal mode (views.term_draws): its columns and theme as it opens, each
+# the view checks' draws of a view built for the terminal (views.term_draws): its columns and theme as it opens, each
 # CHECK_ROWS tall, as a laptop's terminal and a large screen show the panel
 CHECK_DRAWS = ((120, "light"), (120, "dark"), (200, "light"), (200, "dark"))
 CHECK_ROWS = 40
@@ -85,8 +85,8 @@ IDLE_S = 600.0  # the host ends this long after its last view closed
 LINE_MAX = 8 * 1024 * 1024
 ENV_KEEP = ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ")
 TOKEN_HEADER = "x-thimble-token"
-NOT_TERMINAL = ("This view was built in browser mode, so only the browser draws it. To see it, quit, run `thimble mode "
-                "browser`, and start `thimble` again in this folder.")
+# what the panel shows while the page a view lacks for the terminal is built (views.ensure_page)
+BUILDING = "building the terminal page…"
 
 
 class TermViewError(Exception):
@@ -102,8 +102,9 @@ class SandboxError(TermViewError):
 
 def term_view(c: str, slug: str, *, live: bool = False) -> tuple[dict[str, Any], str]:
     """(the view as it last passed its checks, its view.term.js) for workspace `c`; TermViewError for a view that is
-    not there, never passed, or has no view.term.js (built in browser mode). `live`: the view's live folder, its draft,
-    which the view's checks draw (draw_check)."""
+    not there or never passed, and for one with no view.term.js yet (built for the browser), whose first open here
+    builds it (views.ensure_page) while the panel shows BUILDING. `live`: the view's live folder, its draft, which the
+    view's checks draw (draw_check)."""
     from . import views  # noqa: PLC0415
 
     view = views.read_view(c, slug) if live else views.read_built(c, slug)
@@ -111,7 +112,9 @@ def term_view(c: str, slug: str, *, live: bool = False) -> tuple[dict[str, Any],
         raise TermViewError(f"there is no view {slug!r}")
     path = Path(view["dir"]) / VIEW_TERM
     if not path.is_file():
-        raise TermViewError(NOT_TERMINAL)
+        if not live and view.get("origin") == "workspace":
+            views.ensure_page(c, slug, views.TERM_PAGE)
+        raise TermViewError(BUILDING)
     return view, path.read_text("utf-8")
 
 
@@ -238,7 +241,7 @@ def denied_roots() -> list[Path]:
 
 def node_problem() -> str:
     """Why no view program runs on this machine for want of Node, '' when its Node is NODE_MIN or newer: what a view
-    build in terminal mode needs (views.build_problem_for). The line reaches the orientation and main too, so it names
+    build for the terminal needs (views.build_problem_for). The line reaches the orientation and main too, so it names
     what is missing and no command."""
     from . import srt  # noqa: PLC0415
 

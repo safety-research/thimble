@@ -77,7 +77,7 @@ def basis(cell: dict) -> str:
 
 def _changes(fn: Any) -> Any:
     """Run a change to a card's check record under the groups' lock (notebook.editing), from the card's read to its
-    write, since the card check and `thimble-run` (terminal mode) write the same groups from two processes."""
+    write, since the card check and `thimble-run` (main's card runner) write the same groups from two processes."""
     import functools  # noqa: PLC0415
 
     @functools.wraps(fn)

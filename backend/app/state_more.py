@@ -1,19 +1,23 @@
-"""0.9.0's surfaces and acts beside local.py's (contracts C7, C8 and C9), which local.py registers:
+"""The surfaces and changes of coverage, the labels' unsure records and the checks' comments on Claude's answers, beside
+local.py's (`thimble state` and `thimble act`), which registers them:
 
-  thimble state coverage --cwd DIR --session SID [--folder REL] [--summary]
-                                       {"summary": Summary, "folder": REL, "rows": [Row], "counting": bool} (C7)
-  thimble state label-unsure --cwd DIR [--label ID] [--n 20] [--offset 0] [--counts]
-                                       {"labels": [{id, name, noFit, unsure, total, rows?}]} (C8)
-  thimble state answer-comments --cwd DIR [--session SID] [--status open|all]
-                                       {"comments": [...], "running": [...]} (C9)
-  thimble act coverage --cwd DIR --stdin   {"session", "turn", "facts"} on standard input -> {"ok": true, "summary"}
-  thimble act answer-comment-resolve --cwd DIR '{"comment": ID, "reopen": false}'   -> {"ok": true}
+  thimble state coverage --session SID [--folder REL] [--summary]
+        {summary, folder, rows?, counting}: what the session's tool calls read, searched or never opened in the
+        corpus's data files (coverage.py); no rows with --summary
+  thimble state label-unsure [--label ID] [--n 20] [--offset 0] [--counts]
+        {labels: [{id, name, noFit, unsure, total, rows?}]}: each label's records that no category fit, then those its
+        model was unsure of (concepts.unsure); rows only with --label
+  thimble state answer-comments [--session SID] [--status open|all]
+        {comments, running}: the checks' comments on the passages of Claude's answers (answer_comments.py)
 
-SCAFFOLD STUB (features lane): the answers are the stubs of coverage.py and answer_comments.py: no rows, no labels'
-unsure records, no comments. A failure is an HTTPException, which local.state and local.act turn into `{error}`.
-"""
+  thimble act coverage {session, turn, facts, cwd?}     a turn's facts (the terminal UI passes them on stdin)
+  thimble act coverage-retry {}                        the index job started again (the coverage:count notice's act)
+  thimble act answer-comment-resolve {comment, reopen?} a comment on an answer dismissed, or opened again
+
+A failure is an HTTPException or a ValueError, which local.state and local.act turn into `{error}`."""
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from fastapi import HTTPException
@@ -22,41 +26,73 @@ from fastapi import HTTPException
 def _flag(args: list[str], name: str, default: str | None = None) -> str | None:
     if name in args:
         i = args.index(name)
-        return args[i + 1] if i + 1 < len(args) else default
+        if i + 1 < len(args) and not args[i + 1].startswith("--"):
+            return args[i + 1]
     return default
+
+
+def _int(args: list[str], name: str, default: int) -> int:
+    v = _flag(args, name)
+    if v is None:
+        return default
+    try:
+        return int(v)
+    except ValueError:
+        raise HTTPException(400, f"{name} must be a whole number, not {v!r}") from None
+
+
+def _session(v: Any) -> str:
+    from . import coverage  # noqa: PLC0415
+
+    sid = str(v or "").strip()
+    if not coverage.SID_RE.match(sid):
+        raise HTTPException(400, "`session` must be the session's id")
+    return sid
 
 
 async def _coverage(c: str, args: list[str], pos: list[str]) -> Any:
     from . import coverage  # noqa: PLC0415
 
-    sid = _flag(args, "--session") or ""
-    folder = _flag(args, "--folder", "") or ""
-    out: dict[str, Any] = {"summary": coverage.summary(c, sid), "folder": folder, "counting": False}
-    if "--summary" not in args:
-        out["rows"] = coverage.rows(c, sid, folder)
-    return out
+    sid = _session(_flag(args, "--session"))
+    folder = str(_flag(args, "--folder") or "").strip().strip("/")
+    return await asyncio.to_thread(coverage.state, c, sid, folder, summary_only="--summary" in args)
 
 
 async def _label_unsure(c: str, args: list[str], pos: list[str]) -> Any:
-    return {"labels": []}
+    from . import concepts  # noqa: PLC0415
+
+    label = _flag(args, "--label")
+    n, offset = max(1, min(_int(args, "--n", 20), 200)), max(0, _int(args, "--offset", 0))
+    return await asyncio.to_thread(concepts.unsure_state, c, label, n, offset, counts_only="--counts" in args)
 
 
 async def _answer_comments(c: str, args: list[str], pos: list[str]) -> Any:
     from . import answer_comments  # noqa: PLC0415
 
     status = _flag(args, "--status", "open") or "open"
-    return {"comments": answer_comments.comments(c, _flag(args, "--session"), status),
-            "running": answer_comments.running(c)}
+    if status not in ("open", "all"):
+        raise HTTPException(400, "--status is open or all")
+    sid = _flag(args, "--session")
+    return await asyncio.to_thread(answer_comments.state, c, sid, status)
 
 
 async def _act_coverage(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     from . import coverage  # noqa: PLC0415
 
+    sid = _session(payload.get("session"))
     facts = payload.get("facts")
-    if facts is not None and not isinstance(facts, list):
+    if not isinstance(facts, list):
         raise HTTPException(400, "`facts` must be a list")
-    return {"summary": coverage.add_facts(c, str(payload.get("session") or ""), str(payload.get("turn") or ""),
-                                          facts or [])}
+    cwd = payload.get("cwd") if isinstance(payload.get("cwd"), str) else None
+    s = await asyncio.to_thread(coverage.add_facts, c, sid, str(payload.get("turn") or ""), facts, cwd)
+    return {"summary": {k: s[k] for k in ("files", "records", "line")}, "counting": s["counting"]}
+
+
+async def _act_coverage_retry(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    from . import coverage, notices  # noqa: PLC0415
+
+    notices.clear(c, coverage.COUNT_NOTICE)
+    return {"started": await asyncio.to_thread(coverage.start_index, c, force=True)}
 
 
 async def _act_answer_comment_resolve(c: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -65,12 +101,14 @@ async def _act_answer_comment_resolve(c: str, payload: dict[str, Any]) -> dict[s
     cid = str(payload.get("comment") or "").strip()
     if not cid:
         raise HTTPException(400, "`comment` is empty")
-    answer_comments.resolve(c, cid, bool(payload.get("reopen")))
-    return {}
+    reopen = payload.get("reopen") is True
+    got = await asyncio.to_thread(answer_comments.set_status, c, cid, "open" if reopen else "dismissed")
+    return {"comment": cid, "status": got["status"]}
 
 
 SURFACES = {"coverage": _coverage, "label-unsure": _label_unsure, "answer-comments": _answer_comments}
-ACTS = {"coverage": _act_coverage, "answer-comment-resolve": _act_answer_comment_resolve}
-STATE_USAGE = (", coverage --session <sid> [--folder <rel>] [--summary], label-unsure [--label <id>] [--n <n>] "
-               "[--offset <n>] [--counts], answer-comments [--session <sid>] [--status open|all]")
-ACT_USAGE = ", coverage --stdin {session, turn, facts}, answer-comment-resolve {comment, reopen?}"
+ACTS = {"coverage": _act_coverage, "coverage-retry": _act_coverage_retry,
+        "answer-comment-resolve": _act_answer_comment_resolve}
+STATE_USAGE = ", coverage --session SID [--folder REL] [--summary], label-unsure [--label ID] [--n N] [--offset K] " \
+              "[--counts], answer-comments [--session SID] [--status open|all]"
+ACT_USAGE = ", coverage {session, turn, facts, cwd?}, coverage-retry {}, answer-comment-resolve {comment, reopen?}"
