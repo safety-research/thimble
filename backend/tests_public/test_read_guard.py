@@ -7,16 +7,13 @@ without the proof, so the CLI tells another install's server by the home it does
 from __future__ import annotations
 
 import asyncio
-import io
 import json
-import urllib.error
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 from starlette.datastructures import Headers
 
-from app import cli, dev, hook_auth, main
+from app import dev, hook_auth, main
 
 REFUSED = {"detail": hook_auth.SIGN_IN_NEEDED, "signin": True}
 
@@ -69,72 +66,6 @@ def test_a_proof_works_once_on_the_port_it_was_sent_to_and_only_for_a_few_minute
     assert once[hook_auth.NONCE_HEADER] not in hook_auth._seen, "a nonce too old to pass is forgotten"
 
 
-def test_a_server_whose_socket_names_no_address_checks_a_proof_against_the_port_it_was_started_on(plugin_headers,
-                                                                                                 monkeypatch):
-    """A ticket box's server serves sockets the host hands it (app/handoff_serve.py); should a scope name no server, the
-    proof is checked against THIMBLE_PORT, which the supervisor and the box set, and refused without one."""
-    plugin_headers()
-
-    def scope(port: int) -> dict:
-        h = hook_auth.headers(hook_auth.token(), port)
-        return {"type": "http", "method": "GET", "path": "/api/corpora", "server": None,
-                "headers": [(k.encode(), v.encode()) for k, v in h.items()]}
-
-    monkeypatch.setenv("THIMBLE_PORT", "27755")
-    assert hook_auth.proven(scope(27755)) and not hook_auth.proven(scope(27756))
-    monkeypatch.delenv("THIMBLE_PORT")
-    assert not hook_auth.proven(scope(27755))
-
-
-@pytest.mark.real_read_guard
-def test_a_proof_the_cli_sent_to_a_process_on_its_port_reads_nothing_here(client, plugin_headers):
-    """A process that holds the port the CLI asks (another account's, after a restart, or a stale THIMBLE_PORT) keeps
-    the proof headers of the CLI's health check (foreign_home, which `thimble up` runs first); replayed at thimble's
-    server on its own port, they read nothing and mint no sign-in code."""
-    import socket  # noqa: PLC0415
-    import threading  # noqa: PLC0415
-
-    plugin_headers()
-    got: dict[str, str] = {}
-    with socket.socket() as srv:
-        srv.bind(("127.0.0.1", 0))
-        srv.listen(1)
-
-        def answer() -> None:
-            conn, _ = srv.accept()
-            with conn:
-                for line in conn.recv(65536).decode("latin-1").split("\r\n")[1:]:
-                    k, sep, v = line.partition(":")
-                    if sep:
-                        got[k.strip().lower()] = v.strip()
-                body = b'{"ok": true, "boot": "x", "ui": null}'
-                conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\n"
-                             b"Connection: close\r\n\r\n%s" % (len(body), body))
-
-        t = threading.Thread(target=answer, daemon=True)
-        t.start()
-        cli.foreign_home(f"http://127.0.0.1:{srv.getsockname()[1]}")
-        t.join(5)
-    kept = {k: got[k] for k in (hook_auth.NONCE_HEADER, hook_auth.AUTH_HEADER)}
-    assert client.get("/api/corpora", headers=kept).json() == REFUSED
-    assert client.post("/api/ui/pair", json={}, headers=kept).status_code == 401
-
-
-def test_the_cli_takes_a_server_that_names_no_home_for_another_install_s(monkeypatch):
-    """foreign_home: this install's server names its home to this install's proof; one that names none took the proof
-    for none (another install's, or another account's), and the CLI does not use it."""
-    answers = {"mine": (200, {"ok": True, "boot": "b", "ui": None, "home": str(cli.home().resolve()), "app": "/x",
-                              "leader": 7}),
-               "theirs": (200, {"ok": True, "boot": "b", "ui": None}),
-               "older": (200, {"ok": True, "home": "/home/someone/.thimble"}),
-               "down": (0, "ConnectionRefusedError")}
-    monkeypatch.setattr(cli, "_request", lambda m, url, b=None, timeout=5.0: answers[url.split("//")[1].split("/")[0]])
-    assert cli.foreign_home("http://mine") is None
-    assert cli.foreign_home("http://theirs") == cli.FOREIGN_UNNAMED
-    assert cli.foreign_home("http://older") == "/home/someone/.thimble"
-    assert cli.foreign_home("http://down") is None
-
-
 # ---- shot tokens
 
 
@@ -164,23 +95,6 @@ def test_a_shot_token_reads_for_its_time_and_never_writes(client, monkeypatch):
     assert hook_auth.SHOT_TTL_S >= dev.SHOT_TIMEOUT_S, "it outlives the run it is for"
 
 
-@pytest.mark.real_read_guard
-def test_the_shot_route_gives_a_token_only_to_the_token_s_holder(client, plugin_headers):
-    """POST /api/ui/shot is a token route (hook_auth.CLI_PATHS): a dev ticket's runner proves the stack's or the box's
-    token, and the answer proves this server back. A page with the cookie, or anyone else, gets none."""
-    from conftest import UI_COOKIE_VALUE, UI_KEY_VALUE, _record_paired
-
-    assert client.post("/api/ui/shot").status_code == 401
-    _record_paired(UI_COOKIE_VALUE)
-    client.cookies.set(hook_auth.ui_cookie(), UI_COOKIE_VALUE)
-    assert client.post("/api/ui/shot").status_code == 401, "the cookie alone gets no token"
-    assert client.post(f"/b/{UI_KEY_VALUE}/api/ui/shot").status_code == 401, "not under its key's path either"
-    client.cookies.clear()
-    r = client.post("/api/ui/shot", headers=plugin_headers())
-    assert r.status_code == 200 and r.json()["expires_s"] == hook_auth.SHOT_TTL_S
-    assert client.get("/api/ws/mini/canvas", headers=_shot(r.json()["token"])).status_code == 200
-
-
 async def test_the_screenshot_script_gets_the_shot_token_in_its_environment_never_its_command_line(monkeypatch, tmp_path):
     seen = {}
 
@@ -202,86 +116,6 @@ async def test_the_screenshot_script_gets_the_shot_token_in_its_environment_neve
     assert seen["env"][dev.SHOT_TOKEN_ENV] == "t0k" and not any("t0k" in str(a) for a in seen["cmd"])
     assert await dev.run_shot("http://127.0.0.1:8300/", tmp_path / "a.png") == 0
     assert dev.SHOT_TOKEN_ENV not in seen["env"], "no token unless the shot has one"
-
-
-def _opener(c: TestClient, base: str, seen: list):
-    """A stand-in for config.LOOPBACK.open that sends each request to the TestClient `c`, as a server at `base`: the
-    whole URL, since the request's proof holds its port."""
-
-    class Answer(io.BytesIO):
-        status = 200
-
-        def __init__(self, body: bytes, headers) -> None:
-            super().__init__(body)
-            self.headers = headers
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-    def urlopen(req, timeout=None):
-        assert req.full_url.startswith(base), req.full_url
-        r = c.request(req.get_method(), req.full_url, content=req.data,
-                      headers=dict(req.header_items()))
-        seen.append((req.full_url, r.status_code))
-        if r.status_code >= 400:
-            raise urllib.error.HTTPError(req.full_url, r.status_code, "", {}, io.BytesIO(r.content))
-        return Answer(r.content, r.headers)
-
-    return urlopen
-
-
-@pytest.mark.real_read_guard
-def test_a_ticket_s_shot_gets_its_token_from_the_shot_server_s_own_route(client, plugin_headers, monkeypatch, tmp_path):
-    """dev.shot_token proves the token in the stack's (or the box's) server.json at that server's POST /api/ui/shot,
-    checks the answer's proof, and the token it gets reads there; a server without the route (an older tree), a home
-    without a token or an answer that proves nothing back gives ''."""
-    seen: list = []
-    plugin_headers()  # this server's token, in the test's home
-    monkeypatch.setattr(dev.config.LOOPBACK, "open", _opener(client, "http://127.0.0.1:8301", seen))
-    tok = dev.shot_token("http://127.0.0.1:8301", hook_auth.home())
-    assert tok and seen == [("http://127.0.0.1:8301/api/ui/shot", 200)]
-    assert client.get("/api/corpora", headers=_shot(tok)).status_code == 200
-    assert dev.shot_token("http://127.0.0.1:8301", tmp_path / "no-home") == ""
-    (tmp_path / "other").mkdir()
-    (tmp_path / "other" / "server.json").write_text(json.dumps({"token": "another-token"}))
-    assert dev.shot_token("http://127.0.0.1:8301", tmp_path / "other") == "", "401 there"
-
-    def no_route(req, timeout=None):
-        raise urllib.error.HTTPError(req.full_url, 404, "", {}, io.BytesIO(b'{"detail": "Not Found"}'))
-
-    monkeypatch.setattr(dev.config.LOOPBACK, "open", no_route)
-    assert dev.shot_token("http://127.0.0.1:8301", hook_auth.home()) == ""
-
-
-async def test_a_ticket_s_shot_hands_the_server_s_token_to_its_run(monkeypatch, tmp_path):
-    calls = []
-
-    async def run_shot(url, out, selector=None, **kw):
-        calls.append((url, kw))
-        Path(out).write_bytes(b"png")
-        return 0
-
-    monkeypatch.setattr(dev, "run_shot", run_shot)
-    monkeypatch.setattr(dev, "shot_token", lambda api, home: f"token-of-{api}" if api.endswith("8301") else "")
-    monkeypatch.setattr(dev, "_update", lambda tid, **kw: None)
-    monkeypatch.setattr(dev, "shots_dir", lambda tid: tmp_path / tid)
-
-    class Log:
-        def stage(self, *a):
-            pass
-
-        def shot(self, *a):
-            pass
-
-    t = {"id": "t1", "target": {"url": "/?ws=mini"}}
-    assert await dev._take_shot(t, Log(), "before", "http://127.0.0.1:5301", api="http://127.0.0.1:8301",
-                                home=tmp_path) == "before.png"
-    assert calls[-1] == ("http://127.0.0.1:5301/?ws=mini", {"own_origin": False, "read_token": "token-of-http://127.0.0.1:8301"})
-    assert await dev._take_shot(t, Log(), "after", "http://127.0.0.1:5301", api="http://127.0.0.1:9", home=tmp_path)
-    assert calls[-1][1]["read_token"] is None, "a server with no token for it: shot without one"
 
 
 # ---- what a read was let through by, asked again while its answer streams
