@@ -143,7 +143,10 @@ def test_what_a_session_gets_from_the_config(workspaces_tmp, monkeypatch):
     assert f"Edit(/{userconf.global_file()})" in perms["ask"]
     assert f"Edit(/{userconf.global_file()})" not in perms["deny"], "an edit of the config asks, not refused"
     home = userconf.global_file().parent
-    assert userconf.private_paths() == [str(home / n) for n in ("server.json", "session.key", "paired.json")]
+    # 0.9.0 (SPEC-v2 5.1): the press's sign-in files (open/), its one-time links (links/) and the sessions' activation
+    # files with their guide markers (up/) are private too
+    assert userconf.private_paths() == [str(home / n) for n in ("server.json", "session.key", "paired.json", "open",
+                                                                 "links", "up")]
     for path in userconf.private_paths():
         assert f"Read(/{path})" in perms["deny"] and f"Edit(/{path})" in perms["deny"], path
     assert userconf.bypass_file() == home / "bypass.json" and f"Edit(/{userconf.bypass_file()})" in perms["deny"]

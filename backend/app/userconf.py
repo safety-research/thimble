@@ -79,6 +79,8 @@ PROGRAM_DEFAULTS = {"env": [], "sandbox": "on", "network": "on", "data": "ask"}
 # the prompt file under prompts/ that an agent's `prompt` replaces
 PROMPT_FILES = {"orientation": "orient", "critic": "critic", "writer": "writer", "checks": "check", "dev": "dev",
                 "labels": "labels", "cardCheck": "card-check"}
+# the keys of `features` (features.BLOCK_KEYS): turn on when Claude reads data, labels, checks, citation marks, coverage
+FEATURES = ("autoActivate", "labels", "checks", "citationMarks", "coverage")
 SANDBOX_USES = ("when-available", "never")
 BROWSERS = ("system", "bundled", "off")
 # `askKey`: the key held with a click to ask about what it points at in the browser (pointer/CmdPointer), "meta" (⌘, or
@@ -144,6 +146,9 @@ DEFAULTS: dict[str, Any] = {
     # `views.propose`: whether thimble shows the analyst view proposals, after a turn and for a file type
     # (propose_views); null is on, and the view proposal card's Don't ask again sets it false
     "views": {"propose": None},
+    # the feature switches of features.py that 0.8.0 had no key for, each true, false or null (on); set for the whole
+    # machine, in the file in thimble's home (feature)
+    "features": {k: None for k in FEATURES},
 }
 # `agents.cardCheck.auto`: whether the card check reads each new card by itself (card_check.auto); null is on
 DEFAULTS["agents"]["cardCheck"]["auto"] = None
@@ -158,16 +163,35 @@ EXTENSION_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 # the extensions thimble ships under a new name, by their old name: a config's settings of an old name are the new one's
 RENAMED_EXTENSIONS = {"swarm": "swarm-orient"}
 
+# in thimble's home: the press's sign-in redirect files (open_cmd) and each session's activation files (activate.py:
+# the session marker, its guide state and its guide marker, GUIDE_MARKER); LINKS_DIR, below, holds the one-time links of
+# a remote press
+OPEN_DIR = "open"
+UP_DIR = "up"
+GUIDE_MARKER = "guide-marker"
+
+
 def private_paths() -> list[str]:
     """The files the hooks module keeps from file tools, and an extension program's box from the program: the local
-    API's token, the key the sessions' tokens are signed with, and the hashes of the browsers signed in
-    (hook_auth.PAIRED_FILE)."""
-    return [str(global_file().parent / name) for name in (SERVER_JSON, SESSION_KEY, PAIRED_JSON)]
+    API's token, the key the sessions' tokens are signed with, the hashes of the browsers signed in
+    (hook_auth.PAIRED_FILE), the press's sign-in files and one-time links, and the sessions' activation files, whose
+    guide markers prove thimble's guidance (guide.py)."""
+    return [str(global_file().parent / name) for name in (SERVER_JSON, SESSION_KEY, PAIRED_JSON, OPEN_DIR, LINKS_DIR,
+                                                          UP_DIR)]
+
+
+PRIVATE_FOLDERS = (OPEN_DIR, "links", UP_DIR)  # the folders among private_paths, whose files the rules cover too
 
 
 def private_rules() -> list[str]:
-    """Claude Code's deny rules for reading and editing private_paths, which also cover Bash commands such as `cat`."""
-    return [rule for p in private_paths() for rule in (f"Read(/{p})", f"Edit(/{p})")]
+    """Claude Code's deny rules for reading and editing private_paths, which also cover Bash commands such as `cat`; a
+    folder's rules cover the files under it too (`/**`)."""
+    out: list[str] = []
+    for p in private_paths():
+        out += [f"Read(/{p})", f"Edit(/{p})"]
+        if Path(p).name in PRIVATE_FOLDERS:
+            out += [f"Read(/{p}/**)", f"Edit(/{p}/**)"]
+    return out
 
 
 class ConfigError(RuntimeError):
@@ -319,6 +343,14 @@ def propose_views(c: str | None) -> bool:
     return load_or_defaults(c)[0]["views"].get("propose") is not False
 
 
+def feature(c: str | None, key: str) -> bool:
+    """Whether the feature switch `key` of `features` (FEATURES) is on: not false in the file in thimble's home, and on
+    while the config has an error, as the other keys then take their defaults (load_or_defaults)."""
+    if key not in FEATURES:
+        raise ValueError(f"{key!r} is not a key of features; one of {', '.join(FEATURES)}")
+    return (load_or_defaults(c)[0].get("features") or {}).get(key) is not False
+
+
 def _words(values: tuple[str, ...]) -> str:
     quoted = [f'"{v}"' for v in values]
     return ", ".join(quoted[:-1]) + f" or {quoted[-1]}" if len(quoted) > 1 else quoted[0]
@@ -344,7 +376,15 @@ def _problems(data: dict[str, Any], scope: str, base: Path) -> list[str]:
                            f"{', '.join(known)}{more}")
         return True
 
-    keys("", data, (*IGNORED_TOP, "sandbox", "browser", "cardWait", "askKey", "extensions", "agents", "views"))
+    keys("", data, (*IGNORED_TOP, "sandbox", "browser", "cardWait", "askKey", "extensions", "agents", "views",
+                    "features"))
+    if "features" in data:
+        if scope != "global":
+            out.append("features are set for the whole machine, in the config in thimble's home, not per workspace")
+        elif keys("features", data["features"], FEATURES):
+            for k, v in data["features"].items():
+                if k in FEATURES and not isinstance(v, (bool, type(None))):
+                    out.append(f"features.{k} is {json.dumps(v)}; it takes true, false or null")
     if "browser" in data:
         if scope != "global":
             out.append("browser is set for the whole machine, in the config in thimble's home, not per workspace")
@@ -604,11 +644,12 @@ def set_extension_enabled(name: str, on: bool) -> None:
 
 
 def leaves(patch: dict[str, Any], at: tuple[str, ...] = ()) -> list[tuple[tuple[str, ...], Any]]:
-    """Each (path, value) of a nested patch; an object under `agents.<name>`, `sandbox` or `views` is walked, any other
-    value is a leaf."""
+    """Each (path, value) of a nested patch; an object under `agents.<name>`, `sandbox`, `views` or `features` is walked,
+    any other value is a leaf."""
     out: list[tuple[tuple[str, ...], Any]] = []
     for k, v in patch.items():
-        if isinstance(v, dict) and (len(at) < 2 and k in ("agents", "sandbox", "views") or at == ("agents",)):
+        if isinstance(v, dict) and (len(at) < 2 and k in ("agents", "sandbox", "views", "features")
+                                    or at == ("agents",)):
             out.extend(leaves(v, (*at, k)))
         else:
             out.append(((*at, k), v))
