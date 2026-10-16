@@ -264,7 +264,7 @@ test('the labels that are on: a `●` in the label\'s hue after each file it lab
   expect(r.find(x => x.includes('revisions.jsonl'))).toMatch(/revisions\.jsonl {2}● +records +52\.0 MB$/)
   expect(r.find(x => x.includes('README.md'))).not.toContain('●')
   let pane = (await $.ui.mount(PANE())) as unknown as M
-  expect(JSON.stringify(await pane.drawn({ in: 'm:files-tree' }))).toContain('{"type":"Text","props":{"color":"#1d7fc0"},"children":["●"]}')
+  expect(JSON.stringify(await pane.drawn({ in: 'm:files-tree' }))).toContain('{"type":"Text","props":{"color":"#8b86f9"},"children":["●"]}')
   await pane.unmount()
   await $.command.run({ command: 'thimble:thimble', args: 'files revisions.jsonl' } as never)
   await w.clock.settle()
@@ -278,7 +278,7 @@ test('the labels that are on: a `●` in the label\'s hue after each file it lab
   expect(r.find(x => x.includes('Welcome'))).toMatch(/^ {6}dse/)
   pane = (await $.ui.mount(PANE())) as unknown as M
   const drawn = JSON.stringify(await pane.drawn({ in: 'm:file-body' }))
-  expect(drawn).toContain('{"type":"Text","props":{"color":"#1d7fc0"},"children":["●"]}')
+  expect(drawn).toContain('{"type":"Text","props":{"color":"#8b86f9"},"children":["●"]}')
   expect(drawn).not.toContain('{"type":"Text","props":{"color":"inactive"},"children":["●"]}')
   // the label's row lists every value, the one it does not highlight dim
   expect(JSON.stringify(await pane.drawn({ in: 'file-label-0' }))).toContain('{"type":"Text","props":{"color":"inactive"},"children":["● none"]}')
@@ -333,7 +333,7 @@ test("the file browser's marks take the colors the analyst chose for the label's
   pane = (await $.ui.mount(PANE())) as unknown as M
   const drawn = JSON.stringify(await pane.drawn({ in: 'm:file-body' }))
   expect(drawn).toContain(`{"type":"Text","props":{"color":"${LABEL_HUES[9]}"},"children":["●"]}`)
-  expect(drawn).not.toContain('#1d7fc0')
+  expect(drawn).not.toContain('#8b86f9')
   await pane.unmount()
 })
 
