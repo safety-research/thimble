@@ -1,46 +1,20 @@
 // The terminal UI's contracts between its two lanes' files (SPEC-v2 C13): the shapes of the $.state values one file
-// writes and another reads (their keys are declared in types/index.d.ts), and what each side exports. The transcript's
-// side lives in activate.ts, settings.ts, tracker.ts and lib.ts; the panel's in band.tsx, views.ts, offramp.ts,
-// coverageview.tsx, citesview.tsx, checksview.tsx and notices.tsx. Types only: nothing here runs.
+// writes and another reads (declared with their keys in types/index.d.ts, which may import nothing, and re-exported
+// here), the feature switches' names and defaults, and what each side exports. The transcript's side lives in
+// activate.ts, settings.ts, tracker.ts and lib.ts; the panel's in band.tsx, views.ts, offramp.ts, coverageview.tsx,
+// citesview.tsx, checksview.tsx and notices.tsx. Types and constants only: nothing here runs.
 import type { EngineInterface } from 'claude-code'
 
 /** The hooks' `$`. */
 export type Dollar = EngineInterface
 
-/** The per-feature switches (`/config` → thimble, the browser's Settings; `thimble features`, C6). */
-export type FeatureSettings = { autoActivate: boolean; viewProposals: boolean; labels: boolean; checks: boolean; citationMarks: boolean; coverage: boolean; cardCheck: boolean }
+export type { Activated, AnswerComment, CiteRow, CoverageSummary, FeatureSettings, SummarySeen } from './types'
+import type { FeatureSettings } from './types'
+
 export const FEATURE_KEYS = ['autoActivate', 'viewProposals', 'labels', 'checks', 'citationMarks', 'coverage', 'cardCheck'] as const
 export type FeatureKey = (typeof FEATURE_KEYS)[number]
 /** 0.8.0's behavior: every feature on. */
 export const FEATURES_ON: FeatureSettings = { autoActivate: true, viewProposals: true, labels: true, checks: true, citationMarks: true, coverage: true, cardCheck: true }
-
-/** thimble on in this session (C2's answer): the workspace, the folder, how it turned on and the session's role. */
-export type Activated = { ws: string; path: string; cwd: string; via: string; role: 'main' | 'peer'; at: number }
-/** What a session's tool calls saw of the data files (C7 `Summary`). */
-export type CoverageSummary = { files: { seen: number; searched: number; never: number; total: number }; records: { seen: number; total: number; counted: boolean }; line: string }
-/** One chat citation the transcript drew. */
-export type CiteRow = { id: string; raw: string; display: string | null; ref: string; row: string; at: number }
-/** A check's comment on a passage of one of Claude's answers (C9, in the terminal's spelling). `color` is the check's
- *  label palette place, 1-8. */
-export type AnswerComment = {
-  id: string
-  check: string
-  checkName: string
-  color: number
-  about: string
-  turn: string
-  row: string
-  ref: string
-  start: number
-  end: number
-  quote: string
-  text: string
-  details: string
-  status: 'open' | 'dismissed'
-  at: string
-}
-/** The panel's per-section counts last seen (as 0.8.0's homeSeen). */
-export type SummarySeen = { cards: number; labels: number; docs: number; views: number; threads: number; checks: number; at: number }
 
 // $.state keys under plugin 'thimble' (types/index.d.ts):
 //   activated: Activated | null            set by the transcript at activation

@@ -1,4 +1,4 @@
-// thimble-term in a session, against the fixture states (tests/fixtures.ts): its scope, a turn's cards drawn once under
+// The terminal UI in a session, against the fixture states (tests/fixtures.ts): its scope, a turn's cards drawn once under
 // the turn's last reply, citations as links (red when they do not hold), main's end token hidden, the rows above the
 // prompt, /thimble, the panel's views, a label verdict, a side thread asked and answered.
 // `claude plugin test plugin`.
@@ -36,8 +36,10 @@ async function turn($: E, w: World, rows: [string, string][], call = { tool: 'mc
   await w.clock.advance(300)
 }
 
-test('outside terminal mode thimble-term draws nothing and runs nothing', async ($, on) => {
-  const w = world(on, { mode: 'browser' })
+// 0.9.0 (SPEC-v2 5.5): the gate is activation, not terminal mode. Was "outside terminal mode thimble-term draws nothing
+// and runs nothing": before activation it draws nothing and runs nothing; /thimble turns it on
+test('before activation it draws nothing and runs nothing; /thimble turns it on', { timeoutMs: 30000 }, async ($, on) => {
+  const w = world(on, { active: false })
   await start($, w)
   const ui = await $.ui.mount(MESSAGE('m1', 'The export holds [4579](card:ff73e071#pages/TOTAL) pages. (shown in the dashboard)'))
   expect(shown(await ui.drawn())).toBe('(the engine row)')
@@ -48,9 +50,12 @@ test('outside terminal mode thimble-term draws nothing and runs nothing', async 
   expect(w.calls).toEqual([])
   const r = await $.command.run({ command: 'thimble:thimble', args: '' } as never)
   expect(JSON.stringify(r)).not.toContain('terminal mode')
+  expect(w.activations.length).toBe(1)
+  await w.clock.advance(1000)
 })
 
-test('with no workspace in the environment it stays idle too', async ($, on) => {
+// Was "with no workspace in the environment it stays idle too": with no session marker it stays idle
+test('with no session marker (thimble never on in this session) it stays idle too', { timeoutMs: 30000 }, async ($, on) => {
   const w = world(on, { ws: null })
   await start($, w)
   expect(w.calls).toEqual([])
@@ -337,7 +342,7 @@ test('/thimble opens the home panel with no model turn: one column, the title Ho
   const r = (await $.command.run({ command: 'thimble:thimble', args: '' } as never)) as { text?: string }
   expect(r.text).toBe(HOME_LINE)
   // its row says the line as thimble's, not under the plugin's name
-  const row = await $.ui.mount({ plugin: 'thimble', component: 'CommandOutput', requestId: 'c1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { command: 'thimble:thimble', args: '', text: `thimble-term: ${HOME_LINE}`, isErrored: false } } as never)
+  const row = await $.ui.mount({ plugin: 'thimble', component: 'CommandOutput', requestId: 'c1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { command: 'thimble:thimble', args: '', text: `thimble: ${HOME_LINE}`, isErrored: false } } as never)
   expect(shown(await row.drawn())).toBe(HOME_LINE)
   await row.unmount()
   expect(w.opened).toEqual(['thimble'])

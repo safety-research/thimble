@@ -3,13 +3,16 @@
 // reads subscribe it); a timer or a handler uses the one its hook built. `$` goes only into cxOf, which register.tsx
 // and band.tsx call.
 import { atom, update } from 'claude-code'
-import type { Elements, EngineInterface, FsEntry, FsStat, HttpInit, HttpResponse, PaneOpenArgs, ProcessRunInit, ProcessRunResult, RenderElement, ResolveInput, UiOpenResult } from 'claude-code'
+import type { Elements, EngineInterface, FsEntry, FsStat, HttpInit, HttpResponse, McpToolResult, PaneOpenArgs, ProcessRunInit, ProcessRunResult, RenderElement, ResolveInput, UiOpenResult } from 'claude-code'
 
 import type { ChatHomeUi, ChatNav, ChatNews, ChatSignal, TermAgent, TermAnswer, TermCard, TermFilesUi, TermHome, TermLabelUi, TermPanel, TermPending, TermThread, TermThreadRow, TermVerdict } from './types'
 import { HOME_UI_EMPTY } from './home'
 import { keepRow } from './kept'
+import type { KeptRow } from './kept'
 import { NAV_EMPTY } from './nav'
 import { FILES_UI_EMPTY, LABEL_UI_EMPTY, PANEL, rt } from './term'
+import type { Activated, AnswerComment, CiteRow, CoverageSummary, FeatureSettings } from './contracts'
+import { bridgeActivated } from '../thimble.ts'
 
 type Dollar = EngineInterface
 
@@ -44,9 +47,11 @@ export type Ctx = {
   close: (id: string) => Promise<void>
   /** this plugin's open panes as the engine records them: placed, and holding the keyboard */
   panes: () => Promise<readonly { id: string; isPlaced: boolean; isFocused?: boolean }[]>
-  /** `fn` once, `ms` from now, beside the hook that asked */
-  later: (ms: number, fn: () => void) => void
+  /** `fn` once, `ms` from now, beside the hook that asked; `cancel()` before then stops it */
+  later: (ms: number, fn: () => void) => { cancel: () => void }
   log: (text: string) => void
+  /** a line of the debug log only (never the transcript) */
+  debug: (text: string) => void
   toast: (text: string) => void
   /** a prompt to main, as the analyst's (a code label's run, which only main's Bash runs; a new label described) */
   submit: (text: string) => Promise<void>
@@ -106,6 +111,44 @@ export type Ctx = {
   /** a count a drawing of the panel reads, so a bump draws it again */
   panelTick: () => Promise<number>
   bumpPanel: () => Promise<void>
+  // ---- 0.9.0: activation, the guide, settings (activate.ts, settings.ts)
+  /** this conversation's id, read per call (a /clear changes it) */
+  sessionId: () => Promise<string>
+  /** a path's stat with where it lands (`realPath`, links followed), or undefined when it cannot be read */
+  real: (path: string) => Promise<FsStat | undefined>
+  /** a tool of one of the session's MCP servers, called as the plugin (thimble's shim: `load_thimble`) */
+  mcp: (server: string, tool: string, args: Record<string, unknown>) => Promise<McpToolResult>
+  /** a hidden user row in main's conversation, which the model reads: whether the session stored it */
+  append: (text: string) => Promise<{ stored: boolean; reason?: string }>
+  /** this plugin's store, kept between sessions (`settings.synced`, the folders that had their toast) */
+  storeGet: (key: string) => Promise<unknown>
+  storeSet: (key: string, value: unknown) => Promise<void>
+  /** a /config row set as a person would (a thimble switch changed in the browser); `deny` when it was refused */
+  configSet: (key: string, value: boolean) => Promise<{ deny?: string }>
+  /** `fn` every `ms`, for the rest of the module's life */
+  every: (ms: number, fn: () => void) => void
+  /** thimble.ts told of an activation, so it registers thimble's agent types and turns its bridge on (C13) */
+  bridge: (a: Activated) => Promise<void>
+  /** what a kind of drawing draws asked again (the band once thimble turns on, /thimble's description) */
+  invalidate: (what: 'ui.render' | 'command.describe') => void
+  activated: () => Promise<Activated | null>
+  setActivated: (a: Activated | null) => Promise<void>
+  settings: () => Promise<FeatureSettings | undefined>
+  setSettings: (s: FeatureSettings) => Promise<void>
+  coverageLine: (row: string) => Promise<string | undefined>
+  setCoverageLine: (row: string, line: string) => Promise<void>
+  coverageSummary: () => Promise<CoverageSummary | null>
+  setCoverageSummary: (s: CoverageSummary | null) => Promise<void>
+  citeIndex: () => Promise<CiteRow[]>
+  setCiteIndex: (rows: CiteRow[]) => Promise<void>
+  answerComments: () => Promise<AnswerComment[]>
+  setAnswerComments: (c: AnswerComment[]) => Promise<void>
+  checksRunning: () => Promise<number>
+  setChecksRunning: (n: number) => Promise<void>
+  /** the comment the panel's Checks view shows (the panel lane writes it) */
+  checksOpen: () => Promise<string | null>
+  /** what kept.ts kept under a row put back in the state where the state holds none (no write of the file) */
+  restoreRow: (row: string, r: KeptRow) => Promise<void>
 }
 
 export type { RenderElement }
@@ -132,6 +175,14 @@ const labelUiRef = { plugin: 'thimble', key: 'labelUi' } as const
 const filesUiRef = { plugin: 'thimble', key: 'filesUi' } as const
 const panelTickRef = { plugin: 'thimble', key: 'panelTick' } as const
 const panelTickA = atom(panelTickRef, 0)
+const activatedRef = { plugin: 'thimble', key: 'activated' } as const
+const settingsRef = { plugin: 'thimble', key: 'settings' } as const
+const COVERAGE_LINE = { plugin: 'thimble', key: 'coverageLine' } as const
+const coverageSummaryRef = { plugin: 'thimble', key: 'coverageSummary' } as const
+const citeIndexRef = { plugin: 'thimble', key: 'citeIndex' } as const
+const answerCommentsRef = { plugin: 'thimble', key: 'answerComments' } as const
+const checksRunningRef = { plugin: 'thimble', key: 'checksRunning' } as const
+const checksOpenRef = { plugin: 'thimble', key: 'checksOpen' } as const
 
 /** The context the other files take, bound to a hook's `$`: every file that registers hooks builds it here, since a
  *  hooks module passes `$` only to a function declared in its own file or imported from one of the module's files. */
@@ -203,6 +254,12 @@ export function cxOf($: Dollar): Ctx {
           return $.env.get('THIMBLE_PORT')
         case 'THIMBLE_UI_PORT':
           return $.env.get('THIMBLE_UI_PORT')
+        case 'THIMBLE_OPEN':
+          return $.env.get('THIMBLE_OPEN')
+        case 'HOME':
+          return $.env.get('HOME')
+        case 'CLAUDE_CONFIG_DIR':
+          return $.env.get('CLAUDE_CONFIG_DIR')
         default:
           return undefined
       }
@@ -212,9 +269,11 @@ export function cxOf($: Dollar): Ctx {
     open: args => $.ui.open(args),
     close: id => $.ui.close({ id }),
     panes: () => $.ui.panes().catch(() => []),
-    later: (ms, fn) => void $.clock.after(ms, fn),
-    log: text => $.ui.log(text),
-    toast: text => $.ui.toast(text),
+    later: (ms, fn) => $.clock.after(ms, fn),
+    // a line or a toast after the session ended is lost, never an unhandled rejection
+    log: text => void Promise.resolve($.ui.log(text)).catch(() => undefined),
+    debug: text => void Promise.resolve($.ui.log(text, { to: 'debug' })).catch(() => undefined),
+    toast: text => void Promise.resolve($.ui.toast(text)).catch(() => undefined),
     submit: async text => {
       rt.own.add(text)
       await $.prompt.submit({ text, asUser: true })
@@ -280,5 +339,46 @@ export function cxOf($: Dollar): Ctx {
     setFilesUi: async u => void (await $.state.set(filesUiRef, u)),
     panelTick: async () => (await $.state.get(panelTickRef)).value ?? 0,
     bumpPanel: async () => void (await update($, panelTickA, n => (n ?? 0) + 1)),
+    sessionId: () => $.session.id(),
+    real: path => $.fs.stat(path, { resolve: true }).catch(() => undefined),
+    mcp: (server, tool, args) => $.mcp.call(server, tool, args),
+    append: async text => {
+      const r = await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } }).catch(err => ({ deny: String(err).slice(0, 200) }))
+      return r.deny === undefined ? { stored: true } : { stored: false, reason: r.deny }
+    },
+    storeGet: key => $.store.get(key).catch(() => undefined),
+    storeSet: async (key, value) => void (await $.store.set(key, value).catch(() => undefined)),
+    configSet: async (key, value) => {
+      const r = await $.config.set({ key, value }).catch(err => ({ deny: String(err).slice(0, 200) }))
+      return 'deny' in r && r.deny ? { deny: String(r.deny) } : {}
+    },
+    every: (ms, fn) => void $.clock.every(ms, fn),
+    bridge: a => bridgeActivated($, a),
+    invalidate: what => $.ui.invalidate(what),
+    activated: async () => (await $.state.get(activatedRef)).value ?? null,
+    setActivated: async a => void (await $.state.set(activatedRef, a)),
+    settings: async () => (await $.state.get(settingsRef)).value,
+    setSettings: async v => void (await $.state.set(settingsRef, v)),
+    coverageLine: async row => (await $.state.get({ ...COVERAGE_LINE, id: row })).value,
+    setCoverageLine: async (row, line) => {
+      await $.state.set({ ...COVERAGE_LINE, id: row }, line)
+      await keep(row, { coverage: line })
+    },
+    coverageSummary: async () => (await $.state.get(coverageSummaryRef)).value ?? null,
+    setCoverageSummary: async v => void (await $.state.set(coverageSummaryRef, v)),
+    citeIndex: async () => (await $.state.get(citeIndexRef)).value ?? [],
+    setCiteIndex: async rows => void (await $.state.set(citeIndexRef, rows)),
+    answerComments: async () => (await $.state.get(answerCommentsRef)).value ?? [],
+    setAnswerComments: async c => void (await $.state.set(answerCommentsRef, c)),
+    checksRunning: async () => (await $.state.get(checksRunningRef)).value ?? 0,
+    setChecksRunning: async n => void (await $.state.set(checksRunningRef, n)),
+    checksOpen: async () => (await $.state.get(checksOpenRef)).value ?? null,
+    restoreRow: async (row, r) => {
+      if (r.cards?.length && !(await $.state.get({ ...TURN_CARDS, id: row })).value?.length) await $.state.set({ ...TURN_CARDS, id: row }, r.cards)
+      if (r.answer && !(await $.state.get({ ...ANSWERS, id: row })).value) await $.state.set({ ...ANSWERS, id: row }, r.answer)
+      if (r.threads?.length && !(await $.state.get({ ...THREAD_ROWS, id: row })).value?.length) await $.state.set({ ...THREAD_ROWS, id: row }, r.threads)
+      if (r.views?.length && !(await $.state.get({ ...VIEW_ROWS, id: row })).value?.length) await $.state.set({ ...VIEW_ROWS, id: row }, r.views)
+      if (r.coverage && !(await $.state.get({ ...COVERAGE_LINE, id: row })).value) await $.state.set({ ...COVERAGE_LINE, id: row }, r.coverage)
+    },
   }
 }
