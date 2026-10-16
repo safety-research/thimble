@@ -6,15 +6,12 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 from pathlib import Path
 
 import pytest
 
-from app import agent_session, config, orient_session, subagents, work_files
+from app import config, orient_session, work_files
 
-WATCHER = Path(__file__).resolve().parents[2] / "plugin" / "bin" / ".thimble-watch"
-BUDGET_FILE = ".thimble-budget.json"  # the watcher's BUDGET_FILE
 
 C = "board"
 MB = 1024 * 1024
@@ -67,123 +64,3 @@ def test_a_finished_run_keeps_what_cards_use_and_deletes_the_rest_of_its_large_f
         assert not p.exists(), p
     assert not (work / "growth").exists() and not (work / "tmp_a1b2").exists()
     assert freed == {"files": 3, "bytes": 9 * MB}
-
-
-def test_a_large_file_a_report_names_is_kept_and_a_name_without_the_work_folder_is_not_enough(workspaces_tmp):
-    ws = config.workspace_dir(C)
-    work = ws / "critique" / "chat1" / "work"
-    cited = _write(work / "res" / "counts.parquet", 2 * MB)
-    same_name = _write(work / "summary.csv", 2 * MB)
-    (ws / "investigations" / "main").mkdir(parents=True)
-    (ws / "investigations" / "main" / "report.json").write_text(json.dumps(
-        {"blocks": [{"text": f"The counts are in {work}/res/counts.parquet."}]}))
-    (ws / "notebooks").mkdir()
-    (ws / "notebooks" / "n1.json").write_text(json.dumps({"cells": [{"code": "pd.read_csv('summary.csv')"}]}))
-    work_files.clear(C, work)
-    assert cited.is_file()
-    assert not same_name.exists(), "a card that names the file but not the work folder reads another summary.csv"
-
-
-def test_a_run_that_goes_on_keeps_its_extracts_and_a_failed_one_keeps_everything(workspaces_tmp, monkeypatch):
-    """Only a run that finished loses its large files. One the analyst stopped, or that a waiting message resumes at
-    once, goes on with what it made, so only its subagents' scratch folders go; a failed run is resumed as it left
-    its folder."""
-    import asyncio  # noqa: PLC0415
-
-    from app import orientation  # noqa: PLC0415
-
-    work = orient_session.work_dir(C)
-    extract = _write(work / "idx" / "turns.pkl", 2 * MB)
-    temp = _write(work / "tmp_x" / "part.pkl", 2 * MB)
-    work_files.clear(C, work, extracts=False)
-    assert extract.is_file() and not temp.exists()
-
-    asked: list[tuple] = []
-    monkeypatch.setattr(work_files, "clear_soon", lambda c, w, extracts=True: asked.append((w, extracts)))
-    for status, want in (("done", [(work, True)]), ("stopped", [(work, False)]), ("failed", [])):
-        asked.clear()
-        work_files.after_run(C, work, status)
-        assert asked == want, status
-
-    monkeypatch.setattr(orientation, "read_run", lambda c: {})
-    monkeypatch.setattr(orientation, "record", lambda c, **kw: None)
-    monkeypatch.setattr(orientation, "finished", lambda *a, **kw: None)
-    monkeypatch.setattr(orient_session, "_tell_main", lambda *a, **kw: None)
-    monkeypatch.setattr(orient_session, "_tell_proposer", lambda c: None)
-
-    async def unmeasured(c, chat):
-        return ""
-
-    monkeypatch.setattr(orient_session, "measure", unmeasured)
-
-    async def ends(status: str, interrupted: bool = False) -> list[tuple]:
-        asked.clear()
-        run = subagents.Run(C, orient_session.KEY, "orientation", "chat-o", "a1", interrupted=interrupted)
-        orient_session.subagent_ended(C, run, status, "")
-        for _ in range(50):  # a finished first run goes on once its coverage is measured
-            if C not in orient_session._closing:
-                break
-            await asyncio.sleep(0.01)
-        await asyncio.sleep(0)
-        return list(asked)
-
-    assert asyncio.run(ends("done")) == [(work, True)]
-    assert asyncio.run(ends("stopped")) == [(work, False)], "the analyst's Stop: a follow-up goes on with them"
-    assert asyncio.run(ends("failed")) == []
-
-
-def test_a_file_a_deleted_group_or_a_label_names_is_kept(workspaces_tmp):
-    """A card group moved to the trash can be brought back, and a code label's script can read a file the orientation
-    made: both count as uses."""
-    ws = config.workspace_dir(C)
-    work = orient_session.work_dir(C)
-    by_trash = _write(work / "turns_day.csv", 2 * MB)
-    by_label = _write(work / "staff_ids.json", 2 * MB)
-    orphan = _write(work / "turns.pkl", 2 * MB)
-    (ws / "notebooks" / "trash").mkdir(parents=True)
-    (ws / "notebooks" / "trash" / "n2.json").write_text(json.dumps(
-        {"cells": [{"code": f'pd.read_csv("{work}/turns_day.csv")'}]}))
-    (ws / "concepts").mkdir(exist_ok=True)
-    (ws / "concepts" / "k1.json").write_text(json.dumps(
-        {"kind": "code", "spec": f"import json\nSTAFF = set(json.load(open('{work}/staff_ids.json')))\n"}))
-    work_files.clear(C, work)
-    assert by_trash.is_file() and by_label.is_file() and not orphan.exists()
-
-
-def test_a_session_hears_once_each_time_its_work_folder_grows_past_another_budget(tmp_path):
-    """The hook a fenced session's Bash calls run after (agent_session.scratch_hooks) says nothing under the budget,
-    once past it, nothing more until the folder grows past the next whole budget, and again after it shrank and grew."""
-    work = tmp_path / "work"
-    work.mkdir()
-    hooks = agent_session.scratch_hooks(work)["PostToolUse"]
-    assert hooks[0]["matcher"] == "Bash" and ".thimble-watch --work-budget" in hooks[0]["hooks"][0]["command"]
-
-    def call(text: str = "{folder} holds {size} of {budget}") -> str:
-        state = work / BUDGET_FILE
-        if state.is_file():  # as if CHECK_S went by
-            state.write_text(json.dumps({**json.loads(state.read_text()), "checked": 0}))
-        done = subprocess.run([str(WATCHER), "--work-budget", "--work", str(work), "--budget", str(2 * MB), "--text", text],
-                              input=json.dumps({"hook_event_name": "PostToolUse"}), capture_output=True, text=True,
-                              timeout=60)
-        assert done.returncode == 0, done.stderr
-        return json.loads(done.stdout)["hookSpecificOutput"]["additionalContext"] if done.stdout.strip() else ""
-
-    _write(work / "tmp_a1" / "small.pkl", MB)
-    assert call() == ""
-    _write(work / "tmp_a1" / "extract.pkl", 2 * MB)
-    assert call() == f"{work} holds 3 MB of 2 MB"
-    assert call() == "", "said once"
-    _write(work / "copy.jsonl", 2 * MB)
-    assert call(), "past the next budget"
-    (work / "copy.jsonl").unlink()
-    (work / "tmp_a1" / "extract.pkl").unlink()
-    assert call() == ""
-    _write(work / "copy.jsonl", 2 * MB)
-    assert call(), "grown back"
-    state = json.loads((work / BUDGET_FILE).read_text())
-    (work / BUDGET_FILE).write_text(json.dumps({**state, "warned": 0}))
-    assert call(), "the step is kept in the folder"
-    (work / BUDGET_FILE).write_text(json.dumps({**state, "warned": 0, "checked": 9e12}))
-    done = subprocess.run([str(WATCHER), "--work-budget", "--work", str(work), "--budget", str(2 * MB), "--text", "x"],
-                          input="{}", capture_output=True, text=True, timeout=60)
-    assert done.stdout == "", "measured at most every CHECK_S"

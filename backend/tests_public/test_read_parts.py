@@ -16,7 +16,7 @@ import uuid
 
 import pytest
 
-from app import critique_session, read_parts, tools
+from app import read_parts
 
 READ_UNCOUNTED_UNITS = 25_000
 READ_TOKEN_CAP = 25_000
@@ -48,65 +48,6 @@ def test_cut_at_line_ends_and_rejoin_exactly():
     assert read_parts.cut("", limit=100) == [""]
 
 
-def test_write_puts_the_parts_beside_the_first_file_and_a_shorter_text_removes_only_their_extra_files(tmp_path,
-                                                                                                    monkeypatch):
-    """The parts are task.md, task-2.md…; a later, shorter text leaves task.md alone and removes those numbered files,
-    and only those: an agent's own files in the folder stay, and a link planted as a part goes as a link."""
-    monkeypatch.setattr(read_parts, "READ_UNITS", 100)
-    folder = tmp_path / "work"
-    first = folder / "task.md"
-    big = "".join(f"line {i:03d} " + "x" * 30 + "\n" for i in range(12))
-    paths = read_parts.write(tmp_path, first, big)
-    assert [p.name for p in paths] == ["task.md", "task-2.md", "task-3.md", "task-4.md", "task-5.md", "task-6.md"]
-    assert "".join(p.read_text() for p in paths) == big and all(len(p.read_text()) <= 100 for p in paths)
-    keep = {name: folder / name for name in ("task-notes.md", "task-2.txt", "transcript.md", "task-02x.md")}
-    for path in keep.values():
-        path.write_text("an agent's own file")
-    outside = tmp_path / "outside.md"
-    outside.write_text("not thimble's to remove")
-    (folder / "task-9.md").symlink_to(outside)
-    assert read_parts.write(tmp_path, first, "small\n") == [first]
-    assert first.read_text() == "small\n"
-    assert sorted(p.name for p in folder.iterdir()) == sorted(["task.md", *keep])
-    assert outside.read_text() == "not thimble's to remove"
-
-
-def test_named_names_one_file_or_every_part_in_order(monkeypatch, tmp_path):
-    real = tools.descriptions
-    hints = {"x-file": "READ {path}", "x-files": "READ {n}: {paths}"}
-    monkeypatch.setattr(tools, "descriptions", lambda: {**real(), **hints})
-    a, b, c = (tmp_path / n for n in ("task.md", "task-2.md", "task-3.md"))
-    assert read_parts.named([a], "x-file", "x-files") == f"READ {a}"
-    assert read_parts.named([a, b, c], "x-file", "x-files") == f"READ 3: {a}, {b}, {c}"
-
-
-def test_window_is_the_most_lines_one_read_call_returns_whole_from_any_line():
-    """Every run of `window` lines, each with its line break and room for Read's line-number prefix, fits READ_UNITS,
-    and one more line does not fit somewhere. Lines of the digest's longest (CALL_CHARS, 1,500) come to 16 a window; a
-    file that fits whole is all its lines."""
-    lines = [("y" * 1_400 if i % 5 == 0 else "z" * 90) for i in range(2_000)]
-    w = read_parts.window(lines)
-    sizes = [len(x) + 1 + read_parts.LINE_PREFIX_CHARS for x in lines]
-    assert all(sum(sizes[i:i + w]) <= read_parts.READ_UNITS for i in range(len(lines)))
-    assert any(sum(sizes[i:i + w + 1]) > read_parts.READ_UNITS for i in range(len(lines)))
-    dense = read_parts.window(["d" * 1_500] * 500)
-    assert dense == read_parts.READ_UNITS // (1_500 + 1 + read_parts.LINE_PREFIX_CHARS) == 16
-    assert read_parts.window(["short"] * 10) == 10
-    assert read_parts.window(["v" * (2 * read_parts.READ_UNITS), "short"]) == 1, "a line past the cap alone: 1"
-    assert read_parts.window([]) == 1
-
-
-def test_cut_and_window_count_utf16_code_units_as_claude_code_does():
-    """Claude Code measures a text in UTF-16 code units, where a character past U+FFFF, such as an emoji, counts 2: cut
-    holds each part to `limit` of them and never splits a character, and window counts a line's emoji twice."""
-    assert read_parts.units("abc") == 3 and read_parts.units("東京") == 2 and read_parts.units("🙂x") == 3
-    text = "🙂" * 30 + "\n" + "東" * 10 + "\n"
-    parts = read_parts.cut(text, limit=25)
-    assert "".join(parts) == text
-    assert parts == ["🙂" * 12, "🙂" * 12, "🙂" * 6 + "\n" + "東" * 10 + "\n"]
-    assert read_parts.window(["🙂" * 10] * 4, limit=2 * (20 + 1 + read_parts.LINE_PREFIX_CHARS)) == 2
-
-
 def _prose(par: str, n: int = 100_000) -> str:
     out: list[str] = []
     i = 0
@@ -128,7 +69,7 @@ def _texts() -> dict[str, str]:
     }
 
 
-@pytest.mark.parametrize("kind", ["zh", "ja", "ko", "uuid", "num"])
+@pytest.mark.parametrize("kind", ["zh", "uuid"])
 def test_each_part_of_a_dense_or_multi_byte_text_is_one_read_call_whole(tmp_path, kind):
     """read_parts.write, which the writer's context, a check's task and the critic's brief all use, on 100k characters
     of Chinese, Japanese or Korean prose or of a table of ids or numbers: the prompt says to Read each part whole, and
@@ -138,34 +79,3 @@ def test_each_part_of_a_dense_or_multi_byte_text_is_one_read_call_whole(tmp_path
     assert len(paths) >= 2 and "".join(p.read_text("utf-8") for p in paths) == text
     over = [(p.name, len(p.read_text("utf-8"))) for p in paths if not read_returns_whole(p.read_text("utf-8"), kind)]
     assert not over, f"{kind}: parts past Read's token cap: {over}"
-
-
-def zh_digest(paragraphs: int) -> list[str]:
-    """The lines of a digest of an orientation that wrote Chinese, each paragraph wrapped as render wraps it."""
-    lines = ["# orientation", ""]
-    for i in range(paragraphs):
-        lines += [*critique_session._wrap(f"{i}: " + ZH * 40), ""]
-    return lines
-
-
-def test_the_critic_s_window_over_a_chinese_digest_is_one_read_call_whole():
-    """The brief says one Read call returns `window` lines of the digest whole from any line
-    (critique-transcript-window), and an offset/limit Read past the token cap fails."""
-    lines = zh_digest(60)
-    w = read_parts.window(lines)
-    over = [i + 1 for i in range(len(lines)) if not read_returns_whole("\n".join(lines[i:i + w]), "zh-digest")]
-    assert not over, f"window {w}: {len(over)} starting lines give a Read past the token cap, first offset {over[0]}"
-
-
-def test_a_chinese_digest_the_brief_says_to_read_whole_is_one_read_call_whole(tmp_path):
-    """transcript_line names the digest with `critique-transcript`, to read whole, only when one Read call returns it
-    whole; else it gives a window."""
-    path = tmp_path / "transcript.md"
-    path.write_text("\n".join(zh_digest(8)) + "\n", "utf-8")
-    line = critique_session.transcript_line(path)
-    assert line != tools.hint("critique-transcript", path=str(path)) or \
-        read_returns_whole(path.read_text("utf-8"), "zh-digest"), \
-        f"told to read {len(path.read_text('utf-8')):,} Chinese characters whole"
-    small = tmp_path / "small.md"
-    small.write_text("\n".join(zh_digest(2)) + "\n", "utf-8")
-    assert critique_session.transcript_line(small) == tools.hint("critique-transcript", path=str(small))

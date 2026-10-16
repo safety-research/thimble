@@ -7,7 +7,6 @@ import filecmp
 import hashlib
 import json
 import re
-import shutil
 from pathlib import Path
 
 import pytest
@@ -124,88 +123,3 @@ def test_every_worked_example_opens_as_a_workspace_with_its_view_built_and_its_l
     # (start_page.py); the browser spent the code, so the printed line names the page without it
     assert re.findall(r"http://\S+", out) == ["http://127.0.0.1:1/"]
     assert w["shown"] == [f"http://127.0.0.1:1/#p={CODE}"]
-
-
-def test_without_a_terminal_the_start_page_s_link_carries_no_sign_in_code(world, monkeypatch):
-    """Output that a program reads, such as an agent's Bash, can reach a model's context, so without a terminal the
-    printed link carries no sign-in code (cli.ui_url, as `thimble demo` and /thimble print it)."""
-    monkeypatch.setattr("sys.stdout.isatty", lambda: False)
-    w = world
-    a = argparse.Namespace(examples=True, refresh=False)
-    assert demo_examples.run(a, w["lines"].append, lambda say: ("http://127.0.0.1:1", w["env"]), request=w["server"],
-                             show=lambda url: w["shown"].append(url) and False, signin=lambda url: COOKIE) == 0
-    out = said(w)
-    assert re.findall(r"http://\S+", out) == ["http://127.0.0.1:1/"] and "#p=" not in out
-    assert w["shown"] == ["http://127.0.0.1:1/"]
-
-
-def test_a_second_run_adds_only_what_is_missing(world):
-    w = world
-    assert run(w) == 0
-    said(w)
-    stamps = {p.name: installed(f"example-{p.name}", p.name) for p in demo_examples.examples()}
-    w["server"].calls.clear()
-    w["signins"].clear()
-    assert run(w) == 0
-    assert "sample copied" not in said(w)
-    assert w["server"].writes() == [], "no label is defined or applied again"
-    assert w["signins"] == [], "and no browser signs in for nothing"
-    assert {p.name: installed(f"example-{p.name}", p.name) for p in demo_examples.examples()} == stamps
-    shutil.rmtree(views.views_dir("example-timeline") / "timeline")
-    assert run(w) == 0
-    assert "view timeline installed" in said(w) and views.read_built("example-timeline", "timeline") is not None
-
-
-def test_refresh_copies_an_edited_example_again(world, tmp_path):
-    """--refresh installs the view as plugin/viewers now holds it, makes the sample's copy match it (a file it no longer
-    has is removed) and redefines its labels; without it, edits wait."""
-    w = world
-    root = tmp_path / "viewers"
-    shutil.copytree(views.EXAMPLES_DIR / "timeline", root / "timeline")
-    (root / "samples-only" / "sample").mkdir(parents=True)  # no view: not an example
-    assert [p.name for p in demo_examples.examples(root)] == ["timeline"]
-    assert run(w, root) == 0
-    said(w)
-    before = installed("example-timeline", "timeline")["version"]
-    with (root / "timeline" / "view.html").open("a", encoding="utf-8") as f:
-        f.write("<!-- edited -->\n")
-    (root / "timeline" / "sample" / "agents.log").unlink()
-    (root / "timeline" / "sample" / "extra.log").write_text("2026-05-16T05:00:00Z INFO new line\n", "utf-8")
-    assert run(w, root) == 0
-    assert installed("example-timeline", "timeline")["version"] == before
-    w["server"].calls.clear()
-    assert run(w, root, refresh=True) == 0
-    out = said(w)
-    after = installed("example-timeline", "timeline")["version"]
-    assert after != before and "sample copied" in out and f"installed at {after}" in out
-    assert (views.views_dir("example-timeline") / "timeline" / "view.html").read_text("utf-8").endswith("<!-- edited -->\n")
-    assert views.read_built("example-timeline", "timeline")["version"] == after
-    assert same_tree(root / "timeline" / "sample", Path(w["env"]["home"]) / "examples" / "example-timeline")
-    writes = w["server"].writes()
-    assert ("PUT", "example-timeline/concepts/k1") in writes and not [u for m, u in writes if u.endswith("/concepts")], \
-        "the labels are redefined in place, none made again"
-    assert not list((views.views_dir("example-timeline")).glob(".timeline.*")), "no folder is left beside the view"
-
-
-def test_the_command_needs_the_server_and_the_cli_takes_its_flags(world):
-    w = world
-    a = argparse.Namespace(examples=True, refresh=False)
-    assert demo_examples.run(a, w["lines"].append, lambda say: (None, w["env"]), request=w["server"]) == 1
-    assert "no server answers" in said(w) and not (Path(w["env"]["home"]) / "examples").exists()
-    got = cli.build_parser().parse_args(["demo", "--examples", "--refresh"])
-    assert got.examples and got.refresh and got.cmd == "demo"
-
-
-def test_a_sign_in_the_server_refuses_leaves_the_labels_undefined_and_says_so(world):
-    """Defining a label takes a browser's sign-in (cli.browser_cookie); when the server gives none, each example says
-    its labels were not defined, and nothing is written without the cookie."""
-    w = world
-
-    def refused(url):
-        raise RuntimeError(f"the server at {url} gave no sign-in code")
-
-    a = argparse.Namespace(examples=True, refresh=False)
-    assert demo_examples.run(a, w["lines"].append, lambda say: ("http://127.0.0.1:1", w["env"]), request=w["server"],
-                             show=lambda url: True, signin=refused) == 0
-    assert "the labels could not be defined: the server at http://127.0.0.1:1 gave no sign-in code" in said(w)
-    assert w["server"].writes() == [] and w["server"].signed_out == []

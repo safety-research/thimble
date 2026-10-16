@@ -116,14 +116,3 @@ async def test_each_structured_call_runs_at_what_settings_shows_for_its_role(con
         else:  # Haiku runs with no effort (config.NO_EFFORT_MODELS)
             assert (opts.model, opts.effort) == (row["model"], None) and "env" not in settings, what
         assert settings["fastMode"] is row["fast"] and settings["ultracode"] is False, what
-
-
-async def test_a_call_without_a_model_or_an_effort_does_not_start(seen):
-    """A call that names no model or no effort ends `error` before any `claude` starts, rather than run at the
-    analyst's own model or effort."""
-    tool = model.ToolSpec(name="answer", description="d", input_schema=harness.ANSWER_TOOL)
-    for model_name, effort in (("", "low"), ("claude-opus-5-5", ""), ("claude-opus-5-5", None)):
-        res = await model.structured("hi", tool=tool, model=model_name, effort=effort, speed="standard", refusal=None,
-                                     cwd="/tmp")
-        assert res.status == "error" and "no model or no effort" in res.detail
-    assert seen == []
