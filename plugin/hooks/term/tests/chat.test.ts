@@ -263,6 +263,25 @@ test("a takeaway's value the check corrected in place reads as corrected with no
   await pane.unmount()
 })
 
+test("a citation is checked as soon as it streams whole, before its block is drawn", async ($, on) => {
+  const w = world(on)
+  let chunks: { kind: string; index?: number; text?: string }[] = []
+  on('turn.step', async function* ($, e) {
+    for (const c of chunks) yield c as never
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: null } as never
+  })
+  await start($, w)
+  await $.turn.start({ text: 'How many?', turnId: 't1' } as never)
+  const reply = 'It holds [[4,579|README.md#L3]] pages and more'
+  chunks = [{ kind: 'text', index: 0, text: reply }]
+  for await (const _ of $.turn.step({ turnId: 't1', index: 0, model: 'm', messageCount: 1 } as never)) void _
+  // the line is not finished, and nothing drew it: the next batch checks its citation
+  await w.clock.advance(300)
+  const resolves = w.calls.filter(c => c[2] === 'resolve')
+  expect(resolves.length).toBe(1)
+  expect(resolves[0]!.join(' ')).toContain('README.md#L3')
+})
+
 test("a prompt thimble-term gave main itself gets no footer", async ($, on) => {
   const w = world(on)
   await start($, w)

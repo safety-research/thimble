@@ -47,7 +47,7 @@ import { MARGIN, chipOf, drawCards, drawReply, placeUrl, toolWords } from './rep
 import { COLORS } from './paint'
 import { isAnchor, signalEnd, signalQuestion } from './signal'
 import type { AppendedRow } from './signal'
-import { PANEL, loadCards, navOrigin, openHome, openPanel, paneTitle, panelColumns, placedLater, readSurface, rt, surfaceValue, takeKeys, threadsNow } from './term'
+import { PANEL, loadCards, navOrigin, openHome, openPanel, paneTitle, panelColumns, placedLater, queueCitations, readSurface, rt, surfaceValue, takeKeys, threadsNow } from './term'
 import { turns } from './turns'
 import { registerBand } from './band'
 import { registerPanelViews } from './views'
@@ -695,7 +695,11 @@ export const register: Register = (on, options) => {
         blocks.set(ch.index, st)
         const ahead = `${st.raw.slice(st.done)}${ch.text}`
         try {
-          for (const c of citations(ahead)) if (!urls.has(c.ref)) urls.set(c.ref, await placeUrl(cx, c.ref))
+          const cs = citations(ahead)
+          // each citation checked as soon as it has streamed whole (the next 250 ms batch), not when its block is drawn,
+          // so most checks end while the answer is still on screen
+          queueCitations(cs)
+          for (const c of cs) if (!urls.has(c.ref)) urls.set(c.ref, await placeUrl(cx, c.ref))
           for (const m of ahead.matchAll(/\[\[card:([A-Za-z0-9_-]+)\]\]/g)) if (!questions.has(m[1]!)) questions.set(m[1]!, ((await cx.card(m[1]!))?.data as CardData | null | undefined)?.question ?? '')
         } catch {
           // a link without its file still hides the raw spelling
