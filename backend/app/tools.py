@@ -377,16 +377,35 @@ def session_kind(session: str | None) -> str | None:
     return str(session).split(":", 1)[0] or None if session else None
 
 
+def private(spec: Spec) -> bool:
+    """Whether only thimble's agents call the tool: `sessions` of its own that leave main out (critique, view_check …)."""
+    return bool(spec.sessions) and None not in spec.sessions
+
+
 def list(role: str = ANALYST, session: str | None = None) -> "builtins.list[dict[str, Any]]":  # noqa: A001 — the contract names it `tools.list`
     """[{name, description, input_schema}] for the tools the role may use in the session `session` (a THIMBLE_SESSION),
-    in registry order, ENTRY_TOOL left out (entry_listing). A tool with `sessions` of its own is listed in those alone,
-    but main's shim (no session) lists them all, since thimble's agents are main's subagents and call through it: each
-    agent's registration takes away the tools that are not its own, and a call is refused when its caller may not make
-    it (call_route)."""
+    in registry order, ENTRY_TOOL left out (entry_listing). A tool with `sessions` of its own is listed in those alone.
+    Main's shim (no session) lists every tool but the private ones (private), since thimble's agents are main's
+    subagents and call through it: each agent's registration takes away the tools that are not its own, and a call is
+    refused when its caller may not make it (call_route). An agent's private tools come from a shim of its own that its
+    registration declares (private_list, subagents.private_server)."""
     role_of(role)
     kind = session_kind(session)
     names = [s.name for s in REGISTRY.values() if role in s.roles and s.name != ENTRY_TOOL
-             and (kind is None or not s.sessions or kind in s.sessions)]
+             and (not private(s) if kind is None else (not s.sessions or kind in s.sessions))]
+    secs = tool_sections(names)
+    return [{"name": n, "description": secs[n][0], "input_schema": secs[n][1]} for n in names]
+
+
+def private_names(kind: str | None) -> "builtins.list[str]":
+    """The private tools (private) of the agents of session kind `kind`, in registry order."""
+    return [s.name for s in REGISTRY.values() if kind and private(s) and kind in s.sessions]
+
+
+def private_list(kind: str | None) -> "builtins.list[dict[str, Any]]":
+    """list's entries for the private tools of session kind `kind`: what the shim an agent's registration declares
+    lists (plugin/bin/thimble-mcp --private <kind>)."""
+    names = private_names(kind)
     secs = tool_sections(names)
     return [{"name": n, "description": secs[n][0], "input_schema": secs[n][1]} for n in names]
 

@@ -294,6 +294,8 @@ export function countTools(rows: readonly Row[]): number {
 // ---- tools ----
 
 export const MCP_PREFIXES: readonly string[] = ['mcp__plugin_thimble_thimble__', 'mcp__thimble__']
+// an agent's own shim's tools (backend subagents.private_server): mcp__thimble-<role>__<tool>
+const PRIVATE_TOOL = /^mcp__thimble-[a-z-]+__/
 
 /** Alias names of the card tools and start_orientation (backend tools.TOOL_ALIASES), read as the current ones. */
 const OLD_TOOL_NAMES: Record<string, string> = {
@@ -663,7 +665,7 @@ const SHOWN_TOOLS: ReadonlySet<string> = new Set(['Workflow', 'Skill', 'Subagent
 export function isRawCall(name: string): boolean {
   const n = toolDisplayName(name)
   if (RAW_TOOLS.has(n)) return true
-  return !MCP_PREFIXES.some((p) => name.startsWith(p)) && !Object.hasOwn(TOOL_WORDS, n) && !Object.hasOwn(TOOL_GROUPS, n) && !SHOWN_TOOLS.has(n)
+  return !MCP_PREFIXES.some((p) => name.startsWith(p)) && !PRIVATE_TOOL.test(name) && !Object.hasOwn(TOOL_WORDS, n) && !Object.hasOwn(TOOL_GROUPS, n) && !SHOWN_TOOLS.has(n)
 }
 
 /** A piece of a run of calls as the transcript shows it: two or more calls in a row fold into one chip (`run`); a call

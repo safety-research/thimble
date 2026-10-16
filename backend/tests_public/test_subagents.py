@@ -172,6 +172,41 @@ async def test_the_critic_may_not_add_a_card_and_main_may_not_critique(bridge, m
     assert refused, "main's own call of the orientation's tool"
 
 
+def test_the_shim_of_main_lists_every_tool_but_the_agents_private_ones_which_their_own_shims_list(models):
+    from app import tools
+
+    names = [t["name"] for t in tools.list()]
+    assert "message_orientation" in names and "add_comment" in names and "load_thimble" not in names
+    private = ["critique", "view_check", "finish_view", "view_pictures", "finish_review", "ticket_checks", "finish_ticket"]
+    assert not set(private) & set(names), "main never lists a tool only thimble's agents call"
+    assert [s.name for s in tools.REGISTRY.values() if tools.private(s)] == private
+    assert [t["name"] for t in tools.private_list(tools.ORIENT_SESSION)] == ["critique"]
+    assert tools.private_names(tools.VIEW_SESSION) == ["view_check", "finish_view"]
+    assert tools.private_names(tools.REVIEW_SESSION) == ["view_check", "view_pictures", "finish_review"]
+    assert tools.private_names(tools.TICKET_SESSION) == ["ticket_checks", "finish_ticket"]
+    assert tools.private_names(tools.CRITIQUE_SESSION) == [] and tools.private_names(None) == []
+    # a session thimble starts lists its kind's tools as before, the private ones among them
+    assert "critique" in [t["name"] for t in tools.list(session="orient")]
+    # each type with private tools declares its own shim, which Claude Code starts with the agent
+    for role, kind in (("orientation", "orient"), ("view-builder", "view"), ("view-reviewer", "review"),
+                       ("dev-ticket", "ticket")):
+        got = subagents.private_server(CORPUS, subagents.TYPES[role])
+        assert list(got) == [f"thimble-{role}"]
+        server = got[f"thimble-{role}"]
+        assert server["command"].endswith("plugin/bin/thimble-mcp") and server["args"] == ["--private", kind]
+        assert server["alwaysLoad"] is True and server["env"]["THIMBLE_CWD"]
+    for role in ("critic", "writer", "check", subagents.HELPER):
+        assert subagents.private_server(CORPUS, subagents.TYPES[role]) is None
+    specs = subagents.roles(CORPUS)
+    assert [s for s in specs if specs[s].get("mcpServers")] == ["orientation", "view-builder", "view-reviewer"] + (
+        ["dev-ticket"] if "dev-ticket" in specs else [])
+    # a type whose thimble tools are limited takes away the others' private tools, which a parent's shim brings
+    assert "mcp__thimble-orientation__critique" in specs["critic"]["disallowedTools"]
+    assert "mcp__thimble-orientation__critique" not in specs["orientation"]["disallowedTools"]
+    assert "mcp__thimble-view-builder__finish_view" in specs["orientation"]["disallowedTools"]
+    assert not specs[subagents.HELPER].get("disallowedTools"), "the orientation's helpers keep every tool"
+
+
 # --------------------------------------------------------------------------- the clicks are the analyst's
 
 

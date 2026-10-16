@@ -1136,6 +1136,35 @@ async def test_the_shim_in_terminal_mode_runs_calls_itself_keeps_fd_1_and_subscr
     assert fds["1"] == fds["2"], "fd 1 points at stderr, the stream kept a copy of its own"
 
 
+async def test_an_agent_s_own_shim_lists_its_private_tools_alone_and_makes_no_start_of_main_s(term):
+    """An agent's own shim (thimble-mcp --private <kind>, which its registration declares): only that kind's private
+    tools, loaded, no instructions, no load_thimble, whatever the session's marker says; and its calls run as a second
+    process, which never makes the shim's start (local._start), whose marks of what an earlier session left running
+    would mark main's shim's running work."""
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+
+    env = {**os.environ, "THIMBLE_CARD_CHECK": "off", "THIMBLE_CWD": str(term),
+           "THIMBLE_WORKSPACES_DIR": str(config.WORKSPACES_DIR), "CLAUDE_CODE_SESSION_ID": "s-private"}
+    params = StdioServerParameters(command=str(config.REPO_ROOT / "plugin" / "bin" / "thimble-mcp"),
+                                   args=["--private", tools.REVIEW_SESSION], env=env, cwd=str(term))
+
+    async def run() -> tuple[list[Any], Any]:
+        async with stdio_client(params) as (r, w):
+            async with ClientSession(r, w) as s:
+                init = await s.initialize()
+                return (await s.list_tools()).tools, init.instructions
+
+    listed, instructions = await asyncio.wait_for(run(), 60)
+    assert [t.name for t in listed] == ["view_check", "view_pictures", "finish_review"] and not instructions
+    assert all((t.meta or {}).get(tools.META_ALWAYS_LOAD) is True for t in listed)
+    assert not (Path(os.environ["THIMBLE_HOME"]) / "up" / "s-private").exists(), "it records no listing of main's"
+    res = await local.call("read_ref", {"ref": "board.jsonl#L1"}, cwd=str(term), secondary=True)
+    assert not res["is_error"] and local._started == set()
+    await call(term, "read_ref", ref="board.jsonl#L1")
+    assert local._started == {CORPUS}
+
+
 def _children() -> list[int]:
     me = os.getpid()
     out = []

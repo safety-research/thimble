@@ -75,7 +75,7 @@ const SKILL_ARGS = new Set(['fresh', 'restore', 'status', 'fix', 'feedback'])
 
 // the text Claude Code stores as the reply of a turn that ended with none (its `<synthetic>` model's)
 const SYNTHETIC_RE = /^\s*No response requested\.\s*$/
-const THIMBLE_TOOL = /^mcp__plugin_thimble_thimble__/
+const THIMBLE_TOOL = /^mcp__(plugin_thimble_thimble|thimble-[a-z-]+)__/ // main's shim's tools, and an agent's own shim's
 const CARD_TOOL = /^mcp__plugin_thimble_thimble__(add_card|edit_card|apply_label)$/
 const VIEW_TOOL = /^mcp__plugin_thimble_thimble__propose_view$/
 

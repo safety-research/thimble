@@ -1,5 +1,6 @@
 """Which tools thimble lists, and when (app/tools.py, plugin/bin/thimble-mcp, contract C5): before thimble is on,
-load_thimble alone; once it is on, main's 0.8.0 set of 36 tools without load_thimble, every tool the guide names among
+load_thimble alone; once it is on, main's 29 tools (0.8.0's 36 less the 7 only thimble's agents call, which their own
+shims list) without load_thimble, every tool the guide names among
 them; a turn that ends on load_thimble still needs words (its result is the guidance the model reads)."""
 from __future__ import annotations
 

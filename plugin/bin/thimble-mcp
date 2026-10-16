@@ -45,12 +45,20 @@ its session hears events by: `hook`, or `monitor` where the plugin's hooks are o
 subscription attaches the session to its workspace and is its liveness; it carries no events, which the plugin's
 watcher takes from the server. It is renewed when the session id changes, which the shim checks at each keep-alive.
 
+An agent's own shim: `thimble-mcp --private <kind>` lists only the tools that agents of that session kind alone call
+(tools.private_list: the orientation's critique, a view build's and review's view_check …), which main's shim leaves
+out. Each such agent's registration declares it (subagents.private_server), so Claude Code starts it with the agent and
+main never lists those tools. It lists them from its start, with the view tools' text for the session's transport then;
+it never lists load_thimble, never watches the session or subscribes, and writes no listed.json. A call runs by the
+session's transport as main's shim's does; on the local transport as a second process (local.call `secondary`), which
+leaves the card watch and the marks of an earlier session's running work to main's shim.
+
 Protocol: the shim serves only the initialize-handshake protocol (2025-11-25 and earlier); a 2026-07-28
 `server/discover` probe is refused, and Claude Code falls back to the handshake. fd 1 is pointed at stderr once the MCP
 stream has its own copy of it (terminal_stdout), so a library or a child process that writes to stdout cannot corrupt
 the protocol.
 
-`thimble-mcp --list` prints the tool list as JSON, without MCP.
+`thimble-mcp --list` prints the tool list as JSON, without MCP (with `--private <kind>`, that agent's shim's).
 """
 import hmac
 import inspect
@@ -119,6 +127,16 @@ NO_SESSION = ("thimble could not tell which Claude Code session this is, so it d
 TOOL_USE_META = "claudecode/toolUseId"  # the key of Claude Code's id for a call in the request's `_meta`
 CTX_PARAM = "thimble_mcp_context"  # the generated handler's MCP context parameter (_tool), which no tool's schema lists
 _JSON_TYPES = {"string": str, "number": float, "integer": int, "boolean": bool, "array": list, "object": dict}
+PRIVATE_FLAG = "--private"  # `--private <kind>`: an agent's own shim (module note)
+
+
+def private_kind() -> str | None:
+    """The session kind whose private tools this shim lists (module note), or None for main's shim."""
+    args = sys.argv[1:]
+    if PRIVATE_FLAG in args:
+        i = args.index(PRIVATE_FLAG)
+        return args[i + 1] if i + 1 < len(args) and args[i + 1] else None
+    return None
 
 
 def own_session() -> tuple[str | None, str | None]:
@@ -368,7 +386,8 @@ async def call_local(name: str, args: dict[str, Any], tool_use_id: str | None = 
     """The local transport: run the call in this process (local.call) and return its answer as call_server would."""
     session, token = own_session()
     try:
-        payload = await local.call(name, args, cwd=cwd(), session=session, session_token=token, tool_use_id=tool_use_id)
+        payload = await local.call(name, args, cwd=cwd(), session=session, session_token=token, tool_use_id=tool_use_id,
+                                   secondary=bool(private_kind()))
     except Exception as e:  # noqa: BLE001 — the shim answers every call
         log.exception("%s failed in this process", name)
         return _error(f"{name} failed: {type(e).__name__}: {e}")
@@ -521,13 +540,14 @@ def marked(sid: str | None) -> bool:
 
 class Shim(MCPServer):
     """The MCP server, which records each tools/list it answers once thimble is on (listed.json, contract C4) and
-    answers load_thimble also once it is no longer listed (a push of the terminal mod after the model's own call)."""
+    answers load_thimble also once it is no longer listed (a push of the terminal mod after the model's own call).
+    An agent's own shim records nothing (module note)."""
 
     entry: Tool | None = None
 
     async def list_tools(self) -> list[mcp_types.Tool]:
         got = await super().list_tools()
-        if LIVE.on and not own_session()[0]:
+        if LIVE.on and not own_session()[0] and not private_kind():
             sid = session_id()
             if sid:
                 try:
@@ -556,10 +576,11 @@ def entry_entries() -> list[dict[str, Any]]:
 
 
 def tool_entries(transport: str | None = None) -> list[dict[str, Any]]:
-    """The tools this shim lists once thimble is on (module note): its session kind's, with the view tools' text for
-    the build target of `transport` (default: the session's now)."""
+    """The tools this shim lists once thimble is on (module note): an agent's private tools, else its session kind's,
+    with the view tools' text for the build target of `transport` (default: the session's now)."""
+    kind = private_kind()
     with prompts.rendering(prompts.DEFAULT_FLAGS | {target_of(transport or transport_now())}):
-        return tools.list(ROLE, session=own_session()[0])
+        return tools.private_list(kind) if kind else tools.list(ROLE, session=own_session()[0])
 
 
 async def go_live(wait: bool = True) -> bool:
@@ -686,8 +707,9 @@ async def serve(server: Shim) -> None:
     """MCPServer.run_stdio_async with the session watch beside the MCP session (watch_session), and in a session
     thimble started from the start, its tools listed."""
     low = server._lowlevel_server
-    # the parent is the `claude` process; a session thimble starts itself hears no browser events (its main does)
-    LIVE.route = None if own_session()[0] else cc_plugin.route(cwd(), HERE.parents[1])
+    # the parent is the `claude` process; a session thimble starts itself hears no browser events (its main does), nor
+    # does an agent's own shim
+    LIVE.route = None if own_session()[0] or private_kind() else cc_plugin.route(cwd(), HERE.parents[1])
     options = low.create_initialization_options(NotificationOptions(tools_changed=True))
     try:
         async with stdio_server() as (read_stream, write_stream):
@@ -697,24 +719,27 @@ async def serve(server: Shim) -> None:
                 dispatcher = JSONRPCDispatcher(read_stream, write_stream, inline_methods=frozenset({"initialize"}))
                 connection = Connection.for_loop(dispatcher)
                 LIVE.server, LIVE.connection = server, connection
-                if not own_session()[0]:
+                if not own_session()[0] and not private_kind():
                     tg.start_soon(watch_session, tg)
                 async with low.lifespan(low) as lifespan_context:
                     await serve_connection(low, dispatcher, connection=connection, lifespan_state=lifespan_context,
                                            init_options=options)
                 tg.cancel_scope.cancel()
     finally:
-        if LIVE.begun:
+        if LIVE.begun or private_kind():  # an agent's own shim stops what its calls started here (a browser, kernels)
             with anyio.CancelScope(shield=True):
                 await local.close()
 
 
 def build_server() -> Shim:
-    """The MCP server, with no instructions: in a session thimble started, its tools; in the analyst's session,
-    main's tools when the session is active already (a restart of the shim), else load_thimble alone (module
-    note)."""
+    """The MCP server, with no instructions: an agent's own shim, its private tools; in a session thimble started,
+    its tools; in the analyst's session, main's tools when the session is active already (a restart of the shim), else
+    load_thimble alone (module note)."""
     local.PLUGIN_ROOT = HERE.parents[1]  # this copy, whose bin/thimble-run the tools' commands name (cardrun.command)
     shim = Shim(tools.SERVER_NAME, instructions=None, tools=[])
+    if private_kind():
+        _set_tools(shim, tool_entries())
+        return shim
     shim.entry = _tool(entry_entries()[0], tool_meta(True))
     if own_session()[0]:
         _set_tools(shim, tool_entries(activate.SERVER))

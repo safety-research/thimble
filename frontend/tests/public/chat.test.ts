@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, test } from 'vitest'
-import { foldRecords, MCP_PREFIXES } from '../../src/chat/model.ts'
+import { foldRecords, isRawCall, MCP_PREFIXES, toolDisplayName } from '../../src/chat/model.ts'
 import type { ChatRecord } from '../../src/lib/types.ts'
 
 const ROOT = path.resolve(__dirname, '../../..')
@@ -51,5 +51,12 @@ describe('tool names', () => {
     const plugin = JSON.parse(readFileSync(path.join(ROOT, 'plugin/.claude-plugin/plugin.json'), 'utf8')) as { name: string }
     const mcp = JSON.parse(readFileSync(path.join(ROOT, 'plugin/.mcp.json'), 'utf8')) as { mcpServers: Record<string, unknown> }
     for (const server of Object.keys(mcp.mcpServers)) expect(MCP_PREFIXES).toContain(`mcp__plugin_${plugin.name}_${server}__`)
+  })
+
+  test("an agent's own shim's tools read as thimble's own by their bare name, never as raw calls (backend subagents.private_server)", () => {
+    expect(toolDisplayName('mcp__thimble-orientation__critique')).toBe('critique')
+    expect(isRawCall('mcp__thimble-orientation__critique')).toBe(false)
+    expect(isRawCall('mcp__thimble-view-builder__finish_view')).toBe(false)
+    expect(isRawCall(`${P}add_card`)).toBe(false)
   })
 })
