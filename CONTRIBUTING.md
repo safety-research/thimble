@@ -26,8 +26,8 @@ thimble doctor --verbose           # the install state, versions, port and the l
 thimble fix                        # the server will not start: the dev agent repairs it in the checkout, asking first
 thimble revert                     # undo the last change thimble's dev agent applied
 thimble launch-args | prompt <name>   # what a session starts with, and a prompt as a session gets it
-thimble mode [browser | terminal]  # the mode `thimble` starts this folder in; terminal mode starts no server
-thimble state <surface> | act <kind>  # terminal mode's renderer: a surface's JSON, or a click's effect, with no server
+thimble open [--ref REF] [--json]  # the press: the browser workbench on this folder's session, signed in (no code printed)
+thimble state <surface> | act <kind>  # the terminal UI's data: a surface's JSON, or a click's effect, with no server
 thimble view text <slug> --width 120  # a view's terminal program (view.term.js) drawn as text (docs/terminal-views.md)
 ```
 
@@ -35,8 +35,9 @@ thimble view text <slug> --width 120  # a view's terminal program (view.term.js)
 run whether or not they are listed. `fix` and `revert` refuse on a release install, since they change thimble's own
 code.
 
-`thimble` alone starts a Claude Code session in the current folder with the plugin loaded. Edits to `prompts/main.md` or
-`prompts/shared.md` reach a session only when it is started again, since they are its system prompt.
+`thimble` alone starts a Claude Code session in the current folder with the plugin loaded and opens the browser
+workbench. Edits to `prompts/main.md` or `prompts/shared.md` reach a session when thimble next gives Claude its guidance
+(when it turns on, after `/compact` or `/clear`, or after a feature switch that changes it).
 
 State lives under `~/.thimble` (`THIMBLE_HOME`): `server.json`, `server.log`, the registry of opened folders and
 `tour.json`, which records that the product tour was offered (delete it to see the first-launch welcome again).

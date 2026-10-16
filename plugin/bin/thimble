@@ -549,6 +549,7 @@ case "${1:-}" in
     repo="$("$here/thimble-app-dir" 2>/dev/null)" || { printf '{"ok": false, "error": {"code": "START", "message": "thimble cannot find its install", "fix": "run thimble doctor"}}\n'; exit 0; }
     export THIMBLE_CALLER_CWD="${THIMBLE_CALLER_CWD:-$PWD}" THIMBLE_PLUGIN_ROOT="$plugin"
     cd "$repo/backend"
+    shift  # open_cmd's own options follow; the word `open` is this case's
     exec "$here/thimble-python" -m app.open_cmd "$@";;
   state | act | view)
     # the terminal UI reads a surface and acts as the browser would, through thimble's backend in this process

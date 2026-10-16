@@ -6,14 +6,21 @@
 //   status: pass | fail | skip. A step with `pending` waits for work that is not merged yet; report.py reports its failure
 //   as expected.
 // Environment: THIMBLE_E2E_TREE (the tree thimble runs from), THIMBLE_E2E_CORPUS (the corpus copy), THIMBLE_E2E_WS (what
-// workspace.py printed, its url with a one-time sign-in code after #p=), THIMBLE_E2E_SHOTS, THIMBLE_E2E_RESULTS,
-// THIMBLE_E2E_FIXTURE (the fixture extension's folder), and THIMBLE_HOME (the run's, whose server.json holds the token
-// the api-guard step signs with).
+// workspace.py printed: the workspace's name), THIMBLE_E2E_SESSION (the stand-in session's id), THIMBLE_E2E_SHOTS,
+// THIMBLE_E2E_RESULTS, THIMBLE_E2E_FIXTURE (the fixture extension's folder), and THIMBLE_HOME (the run's, whose
+// server.json holds the token the api-guard step signs with).
+// The page opens as thimble 0.9.0 opens it, by the press (the first-load step): `thimble open --json` (backend
+// app/open_cmd.py) for the stand-in session, with a stand-in $BROWSER that records the redirect file it is given, which
+// this browser then opens; the code is in that file alone, never in the press's output.
+// E2E_BROWSER picks the browser (chromium, the default, firefox or webkit) and E2E_ONLY, a comma list of steps, runs only
+// those (the others are recorded as skipped): the sign-in steps run in each browser this way. (scripts/e2e_release.sh
+// passes the caller's environment on but thimble's own variables, THIMBLE_*, so these names carry no THIMBLE_.)
 import { spawnSync } from 'node:child_process'
 import { createHmac, randomUUID } from 'node:crypto'
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { basename, dirname, join, relative } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 const env = process.env
 const TREE = env.THIMBLE_E2E_TREE
@@ -24,7 +31,9 @@ const RESULTS = env.THIMBLE_E2E_RESULTS
 const FIXTURE = env.THIMBLE_E2E_FIXTURE
 const OUT = join(SHOTS, '..')
 const require = createRequire(join(TREE, 'frontend', 'package.json'))
-const { chromium } = require('playwright')
+const playwright = require('playwright')
+const ENGINE = env.E2E_BROWSER || 'chromium'
+const ONLY = new Set((env.E2E_ONLY || '').split(',').map((x) => x.trim()).filter(Boolean))
 
 const SIZES = [
   { width: 1440, height: 900 },
@@ -40,7 +49,9 @@ const PENDING = {}
 const MARKS = '.reader-gutter-cell.is-lit, .reader-span[data-concept], [data-concept], [data-thimble-label]'
 const SLOW_S = 20
 // the one line a browser that is not signed in sees (frontend shell/SignIn), its span in backticks drawn as code
-const SIGN_IN_LINE = "This browser isn't signed in. Open the link /thimble shows in your terminal, or run `thimble up` in a shell."
+const SIGN_IN_LINE = "This browser isn't signed in. Type `/thimble open` in your Claude Code terminal, or press o in thimble's panel."
+// where the page is, once the press opened it (first-load): its origin and its workspace
+let ORIGIN = WS.url ? new URL(WS.url).origin : ''
 
 let shotN = 0
 const fontMisses = []
@@ -109,6 +120,10 @@ let currentPage = null
 /** Run one step: its function returns {detail, shots} or throws; a step never stops the walk. A failing step without a
  * screenshot of its own gets one of the page as the failure left it. */
 async function step(name, title, fn, ms = STEP_MS) {
+  if (ONLY.size && !ONLY.has(name)) {
+    record(name, title, 'skip', `not among E2E_ONLY (${[...ONLY].join(', ')})`)
+    return false
+  }
   let timer
   if (currentPage && name !== 'welcome' && name !== 'tour') await dismissTour(currentPage)
   if (currentPage) await hideNotices(currentPage)
@@ -131,6 +146,34 @@ async function step(name, title, fn, ms = STEP_MS) {
 
 function check(ok, message) {
   if (!ok) throw new StepError(message)
+}
+
+const PRESS_UNSET = ['SSH_CONNECTION', 'SSH_TTY', 'ET_VERSION', 'TMUX', 'VSCODE_IPC_HOOK_CLI', 'THIMBLE_NO_BROWSER', 'CLAUDE_CODE_SESSION_ID', 'WAYLAND_DISPLAY']
+
+/** The press, as the terminal panel's o runs it: `thimble open --session <the stand-in's> --cwd <corpus> --ref <ref>
+ * --json` (backend app/open_cmd.py), its opener a stand-in $BROWSER that records the path it is given. {status, out, err,
+ * file}: the press's JSON, what it printed, and the redirect file the opener got ('' when none). */
+async function press(ref = 'home') {
+  const recorder = join(OUT, 'browser-stand-in.sh')
+  const opened = join(OUT, 'browser-opened.txt')
+  writeFileSync(recorder, `#!/bin/sh\nprintf '%s\\n' "$1" >> '${opened}'\n`, { mode: 0o755 })
+  rmSync(opened, { force: true })
+  const penv = { ...env, BROWSER: recorder, DISPLAY: env.DISPLAY || ':0' }
+  for (const k of PRESS_UNSET) delete penv[k]
+  const r = spawnSync(join(TREE, 'backend', '.venv', 'bin', 'python'), ['-m', 'app.open_cmd', '--session', env.THIMBLE_E2E_SESSION || '', '--cwd', CORPUS, '--ref', ref, '--json'],
+    { cwd: join(TREE, 'backend'), env: penv, encoding: 'utf8', timeout: 90_000 })
+  let status = null
+  try {
+    status = JSON.parse((r.stdout || '').trim().split('\n').pop() || 'null')
+  } catch {
+    status = null
+  }
+  let file = ''
+  for (let i = 0; i < 50 && !file; i++) {
+    file = existsSync(opened) ? readFileSync(opened, 'utf8').trim().split('\n')[0] : ''
+    if (!file) await new Promise((ok) => setTimeout(ok, 100))
+  }
+  return { status, out: r.stdout || '', err: r.stderr || '', file }
 }
 
 /** A screenshot of the viewport once the fonts are ready; a shot taken while the page has no loaded Hanken Grotesk face
@@ -421,9 +464,12 @@ async function unlockStep(page, st) {
 
 async function main() {
   // the full Chromium shows a PDF in a page when headless; the headless shell install.sh fetches does not
-  let browser = await chromium.launch({ channel: 'chromium' }).catch(() => null)
-  const browserName = browser ? `Chromium ${browser.version()}` : 'the headless shell'
-  if (!browser) browser = await chromium.launch()
+  const engine = playwright[ENGINE]
+  if (!engine) throw new Error(`E2E_BROWSER names no browser Playwright drives: ${ENGINE}`)
+  let browser = ENGINE === 'chromium' ? await engine.launch({ channel: 'chromium' }).catch(() => null) : null
+  const full = !!browser
+  if (!browser) browser = await engine.launch()
+  const browserName = ENGINE === 'chromium' ? (full ? `Chromium ${browser.version()}` : 'the headless shell') : `${ENGINE} ${browser.version()}`
   const context = await browser.newContext({ viewport: SIZES[0] })
   const page = await context.newPage()
   currentPage = page
@@ -437,16 +483,33 @@ async function main() {
   const files = corpusFiles(CORPUS)
 
   try {
-    await step('first-load', 'The UI opens on the workspace, signed in with the link\'s one-time code, with no Start gate', async () => {
-      check(WS.url, 'workspace.py printed no URL')
-      check(/#p=[^&]+/.test(WS.url), `workspace.py printed a link with no sign-in code (#p=): ${WS.url.split('#')[0]}`)
-      await page.goto(WS.url)  // the page trades the code for its cookie (POST /api/ui/key)
+    await step('first-load', 'The press opens the UI on the workspace through a redirect file, signed in with its one-time code, with no code in its output and no Start gate', async () => {
+      check(env.THIMBLE_E2E_SESSION, 'THIMBLE_E2E_SESSION names no stand-in session')
+      const p = await press('home')
+      check(p.status?.ok === true && p.status.opened === true && p.status.remote === false,
+        `thimble open answered ${JSON.stringify(p.status) || `no JSON (${p.err.slice(0, 300)})`}`)
+      check(p.file && existsSync(p.file), `the opener got no redirect file (${p.file || 'nothing'})`)
+      const page0 = readFileSync(p.file, 'utf8')
+      const code = (/#p=([A-Za-z0-9_-]+)/.exec(page0) || [])[1] || ''
+      check(code, 'the redirect file holds no sign-in code')
+      check(!p.out.includes(code) && !p.err.includes(code) && !p.out.includes('#p='), 'the press printed the sign-in code')
+      check((statSync(p.file).mode & 0o777) === 0o600 && (statSync(dirname(p.file)).mode & 0o777) === 0o700,
+        `the redirect file is ${(statSync(p.file).mode & 0o777).toString(8)} in a ${(statSync(dirname(p.file)).mode & 0o777).toString(8)} folder, not 600 in 700`)
+      WS.name = new URL(p.status.url).searchParams.get('ws') || WS.name
+      ORIGIN = new URL(p.status.url).origin
+      await page.goto(pathToFileURL(p.file).href)  // its meta refresh opens the page, which trades the code (POST /api/ui/key)
       await waitShell(page)
       await page.waitForTimeout(2_000)
       const s = await shot(page, 'first-load')
+      let claimed = false
+      for (let i = 0; i < 20 && !claimed; i++) {
+        claimed = existsSync(p.status.claim_file)
+        if (!claimed) await page.waitForTimeout(250)
+      }
+      check(claimed && !existsSync(p.file), `the claim left ${claimed ? '' : 'no claim mark; '}${existsSync(p.file) ? 'the redirect file in place' : ''}`)
       check(!(await sessionGone(page)), 'the page shows "No Claude Code session connected"')
       check((await page.getByRole('tab', { name: 'Report', exact: true }).count()) > 0, 'no Report tab')
-      const origin = new URL(WS.url).origin
+      const origin = ORIGIN
       let paired = null
       const until = Date.now() + 10_000
       while (Date.now() < until) {
@@ -457,7 +520,8 @@ async function main() {
       check(paired?.paired === true, `the page did not sign in with the link's code: GET /api/ui/paired gave ${JSON.stringify(paired)}`)
       // the cookie is scoped to this browser's own path, so the browser sends it to no other server's /api/ paths
       const base = await apiBase(page)
-      const jar = (await page.context().cookies(origin)).filter((c) => c.name.startsWith('thimble-ui-'))
+      // every cookie of the page's host: one filtered by the origin's URL would leave out a cookie scoped to /b/<key>/api/
+      const jar = (await page.context().cookies()).filter((c) => c.name.startsWith('thimble-ui-') && c.domain === new URL(origin).hostname)
       check(base !== '/api' && jar.length === 1 && `${jar[0].path.replace(/\/$/, '')}` === base,
         `the browser's cookie is scoped to ${jar.map((c) => c.path).join(', ') || 'no path'}, not to its own ${base}/`)
       const plain = await (await page.request.get(`${origin}/api/ui/paired`)).json().catch(() => null)
@@ -466,7 +530,7 @@ async function main() {
       check(!(await page.getByRole('button', { name: 'Start', exact: true }).count()), 'main shows a Start button')
       await hideNotices(page)
       const shown = notices.length ? `; hid the notice "${notices.join('" and "')}"` : ''
-      return { detail: `${WS.name} at ${WS.url.split('#')[0]}, in ${browserName}, signed in; no Start gate${shown}`, shots: [s] }
+      return { detail: `${WS.name} at ${p.status.url}, opened by the press through its redirect file (600 in a 700 folder; claimed and deleted), in ${browserName}, signed in; no code in the press's output; no Start gate${shown}`, shots: [s] }
     })
 
     await step('welcome', 'The first-launch welcome asks about the tour, and Skip goes straight to the workbench', async () => {
@@ -677,7 +741,7 @@ async function main() {
       await showFiles(page)
       const bar = (await page.locator('[data-anchor^="view:"]').allInnerTexts()).map((t) => t.trim())
       const s = await shot(page, 'views-bar')
-      const origin = new URL(WS.url).origin
+      const origin = ORIGIN
       const shelf = join(TREE, 'plugin', 'viewers')
       const examples = existsSync(shelf) ? readdirSync(shelf, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name) : []
       const slugs = async (q) => {
@@ -843,7 +907,7 @@ async function main() {
     })
 
     await step('signin-gate', 'A browser with no cookie sees only the line naming the way in, is answered no read and polls nothing; a read answers it 401, and the signed-in browser 200', async () => {
-      const origin = new URL(WS.url).origin
+      const origin = ORIGIN
       const fresh = await browser.newContext({ viewport: SIZES[0] })
       try {
         const p = await fresh.newPage()
@@ -868,7 +932,7 @@ async function main() {
         const said = (await line.innerText()).replace(/\s+/g, ' ').trim()
         const whole = (await p.locator('body').innerText()).replace(/\s+/g, ' ').trim()
         check(said === want && whole === want, `the page without a cookie shows "${whole.slice(0, 200)}", not only "${want}"`)
-        check((await line.locator('code').innerText()) === 'thimble up', 'the line does not draw `thimble up` as code')
+        check((await line.locator('code').innerText()) === '/thimble open', 'the line does not draw `/thimble open` as code')
         // /api/health and /api/ui/paired answer anyone; any other read (the page asks one to confirm) is refused
         const answered = [...new Set(reads.filter((r) => !/^\d+ \/api\/(health|ui\/paired)$/.test(r) && !r.startsWith('401 ')))]
         check(!answered.length, `the page without a cookie was answered ${answered.join(', ')}`)
@@ -886,7 +950,7 @@ async function main() {
     })
 
     await step('api-guard', 'A write without the browser\'s cookie is refused, a read without the cookie or the token is refused, the token alone acts on no analyst route, and the browser sends only its own event kinds', async () => {
-      const origin = new URL(WS.url).origin
+      const origin = ORIGIN
       const events = `${origin}/api/ws/${WS.name}/events`
       // a read with neither the cookie nor the token: 401 with signin, HEAD with no body; the token reads, as the CLI does
       const concepts = `${origin}/api/ws/${WS.name}/concepts`
@@ -921,7 +985,7 @@ async function main() {
         body: JSON.stringify({ kind: 'main', payload: { text: 'E2E: a message signed with the token alone' } }),
       })
       const said = String((await signed.json().catch(() => null))?.detail ?? '')
-      check(signed.status === 403 && /^open thimble from the link .*to make changes$/.test(said),
+      check(signed.status === 403 && said === "open thimble's page with `/thimble open` in the Claude Code terminal to make changes",
         `a POST /api/ws/${WS.name}/events {kind: "main"} signed with the token answered ${signed.status} ${said.slice(0, 160)}, not 403 with hook_auth.WRITE_REFUSED`)
       // a kind the browser never sends, with the browser's own cookie
       const odd = await page.request.post(`${origin}${await apiBase(page)}/ws/${WS.name}/events`, { data: { kind: 'start_agent', payload: { text: 'E2E: a start_agent the browser never sends' } } })

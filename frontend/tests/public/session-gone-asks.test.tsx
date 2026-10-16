@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 // With no Claude Code session attached the shell is inert under SessionGone's scrim (src/shell/SessionGone.tsx), yet the
-// sessions thimble started go on and ask: their permission card shows on the scrim, where it can be answered. Every
-// request is answered by a stand-in fetch.
-import { act } from 'react'
+// sessions thimble started may still ask: their permission card shows on the scrim, outside the inert part, read-only
+// (thimble 0.9.0 answers no permission request from the browser), and says to answer in the terminal. Every request the
+// page makes is recorded by a stand-in fetch.
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
-import { ARM_MS } from '../../src/chat/PermissionCard.tsx'
+import { TERMINAL_LINE } from '../../src/chat/PermissionCard.tsx'
 import type { ChatMeta } from '../../src/lib/types.ts'
 import { SessionGone } from '../../src/shell/SessionGone.tsx'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -21,7 +21,7 @@ beforeEach(() => {
   posted.length = 0
   vi.stubGlobal('fetch', async (url: unknown, init?: RequestInit) => {
     if (init?.method === 'POST') posted.push([String(url), JSON.parse(String(init.body ?? '{}'))])
-    const body = String(url).endsWith('/chats') ? CHATS : String(url).includes('/settings') ? {} : { answered: 'x' }
+    const body = String(url).endsWith('/chats') ? CHATS : String(url).includes('/settings') ? {} : {}
     return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
   })
 })
@@ -30,15 +30,13 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-test("the sessions' permission requests can be answered while no Claude Code session is connected", async () => {
+test("the sessions' permission requests show on the scrim, read-only, while no Claude Code session is connected", async () => {
   await mount(<SessionGone gone={{ ended: null, folder: '/corpus' }} ws="mini" />)
   await settle()
   const card = document.querySelector('.shell-gone .chat-perm')
   expect(card?.getAttribute('data-count')).toBe('2')
   expect(card?.closest('[inert]')).toBeNull()
-  await act(async () => new Promise((r) => setTimeout(r, ARM_MS + 30)))
-  await act(async () => (document.querySelector('.shell-gone .chat-perm-allow') as HTMLButtonElement).click())
-  await settle()
-  expect(posted).toEqual([['/api/ws/mini/chats/d1/permission', { id: 'r1', allow: true, shown: 0 }]])
-  expect(document.querySelector('.shell-gone .chat-perm')?.getAttribute('data-request')).toBe('r2')
+  expect(card?.querySelector('.chat-perm-allow, .chat-perm-deny, .chat-perm-dismiss')).toBeNull()
+  expect(card?.querySelector('.chat-perm-answer-there')?.textContent).toBe(TERMINAL_LINE)
+  expect(posted).toEqual([])
 })

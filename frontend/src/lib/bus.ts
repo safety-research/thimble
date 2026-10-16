@@ -32,8 +32,13 @@ export type Events = {
   checks: { id?: string }
   /** the comments on the cards changed (the stream's `canvas-comments` record) */
   canvasComments: { card?: string }
+  /** the checks' comments on Claude's answers changed (the stream's `answer-comments` record, chat/answerComments.ts) */
+  answerComments: Record<string, never>
   /** the stream connected or dropped */
   wsStream: { connected: boolean }
+  /** the page stopped and sends nothing more under its key (lib/stale): the server stopped for good, the workspace's
+   * session ended, reconnects failed, or the challenge failed */
+  pageStopped: { reason: 'stopping' | 'session-ended' | 'failures' | 'challenge' }
   /** a lazy chunk did not load and the server serves another build: ask for a reload (lib/chunkRecovery) */
   uiStale: Record<string, never>
   /** the workspace's log was replaced (`/thimble fresh` or `resume`): what the page shows is from the log that is gone */

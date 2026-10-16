@@ -1633,3 +1633,24 @@ def test_a_fresh_session_on_a_full_install_is_told_the_orientation_can_be_read_b
     assert text.startswith("This workspace was installed from a full export")
     assert "so `message_orientation` cannot reach it" in text, "a subagent of the exporter's session (lane D's wording)"
     assert precached.take_context("mini", "s1") == ""
+
+
+def test_open_page_opens_through_the_redirect_file_on_a_desktop_terminal_only(monkeypatch):
+    """`thimble demo` opens the start page through opener.open_url (a redirect file the analyst's account alone reads,
+    so the code is in no argv); not for output a program reads, and not in a remote terminal."""
+    from app import opener
+
+    opened: list[str] = []
+    monkeypatch.setattr(opener, "open_url", lambda url, **kw: opened.append(url) or opener.Opened(True, "xdg-open", None,
+                                                                                                    False))
+    monkeypatch.setattr(opener, "remote", lambda env=None, platform=None: opener.Remote(False, False, False, False,
+                                                                                         False, "a desktop session"))
+    monkeypatch.setattr(demo.sys.stdout, "isatty", lambda: True, raising=False)
+    assert demo.open_page("http://127.0.0.1:8300/#p=code") is True and opened == ["http://127.0.0.1:8300/#p=code"]
+    monkeypatch.setattr(demo.sys.stdout, "isatty", lambda: False, raising=False)
+    assert demo.open_page("http://127.0.0.1:8300/#p=code") is False and len(opened) == 1
+    monkeypatch.setattr(demo.sys.stdout, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr(opener, "remote", lambda env=None, platform=None: opener.Remote(True, True, False, False, True,
+                                                                                         "an SSH session"))
+    assert demo.open_page("http://127.0.0.1:8300/#p=code") is False and len(opened) == 1
+    assert "webbrowser" not in demo.__dict__, "no URL with a code goes to webbrowser's argv"

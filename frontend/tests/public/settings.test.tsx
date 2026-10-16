@@ -5,12 +5,13 @@
 // rows, the orientation subagents' row with its effort, a web switch per agent; the View proposals switch, sent only
 // when it changed; thimble's rules for main and its agents, code tickets' among them (web and data follow the session's
 // mode, and the shell runs in Claude Code's sandbox where /thimble saw one); one permission row, the dev agent's
-// program's, only where an extension runs one, where a session in Bypass counts as Manual; cardWait; no installs row;
-// the Ask key choice, ⌘-click or ⌥-click (Ctrl-click or Alt-click off a Mac), sent only when it changed and taken by
-// the page at once.
+// program's, only where an extension runs one, with Manual and Auto and no Bypass (0.9.0: a session or a row in Bypass
+// counts as Manual); cardWait; no installs row; the Ask key choice, ⌘-click or ⌥-click (Ctrl-click or Alt-click off a
+// Mac), sent only when it changed and taken by the page at once; thimble's feature switches, the same rows as /config →
+// thimble, in its order, each sent only when it changed (false off, null back on).
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { ASK_KEY_LABEL, BYPASS_LINE, MAIN_MODE_LINE, PROPOSE_LABEL, askKeyNote, askKeyOptions, changedAskKey, SESSION_BYPASS_NOTE, SettingsPopover, TICKET_FAST, agentMode, cardWaitLine, changedPropose, changedRoles, changedWeb, fenceLine, lockedWhy, memoryWords, modeRowShown, rolesOf, roleEfforts, webRows } from '../../src/shell/SettingsPopover.tsx'
+import { ASK_KEY_LABEL, FEATURE_ROWS, MAIN_MODE_LINE, MODE_OPTIONS, PROPOSE_LABEL, askKeyNote, askKeyOptions, changedAskKey, changedFeatures, featureRows, SettingsPopover, TICKET_FAST, agentMode, cardWaitLine, changedPropose, changedRoles, changedWeb, fenceLine, lockedWhy, memoryWords, modeRowShown, rolesOf, roleEfforts, webRows } from '../../src/shell/SettingsPopover.tsx'
 import { invalidateSettings } from '../../src/lib/models.ts'
 import { getAskKey, setAskKey } from '../../src/lib/platform.ts'
 import type { Attached, Settings } from '../../src/lib/types.ts'
@@ -270,10 +271,12 @@ describe('the popover', () => {
     expect(document.body.querySelector('.settings-fence-line')?.textContent).toBe("web follows your mode · data edits follow your mode · shell in Claude Code's sandbox")
   })
 
-  test("a session in Bypass reaches the dev agent's program as Manual; only a row the server answers Bypass is Bypass, with Claude Code's warning", async () => {
+  test("no Bypass: the dev agent's program offers Manual and Auto, and a session or a row in Bypass shows as Manual, with no warning", async () => {
+    // 0.9.0 (SPEC D47): Settings has no Bypass rows; backend modes.choose refuses bypass
+    expect(MODE_OPTIONS.map((o) => o.label)).toEqual(['Manual', 'Auto'])
     expect(agentMode({}, 'dev', 'bypassPermissions')).toBe('manual')
     expect(agentMode({}, 'dev', 'auto')).toBe('auto')
-    expect(agentMode({ dev: 'bypass' }, 'dev', 'default')).toBe('bypass')
+    expect(agentMode({ dev: 'bypass' }, 'dev', 'default')).toBe('manual')
     expect(agentMode({}, 'dev', 'auto', ['auto'])).toBe('manual')
     const program = { ...SETTINGS, agents: { ...SETTINGS.agents, dev: { ...SETTINGS.agents!.dev!, way: 'sdk' as const, extension: 'ext' } } }
     attached = { session: 's1', cwd: '/c', since: '', permission_mode: 'bypassPermissions' }
@@ -287,15 +290,54 @@ describe('the popover', () => {
     expect(chip().textContent).toBe("Manual (your session's)")
     expect(document.body.querySelector('.settings-modes-warn')).toBeNull()
     await act(async () => chip().click())
-    expect(document.querySelector('.menu-item[data-item="session"] .menu-item-note')?.textContent).toBe(SESSION_BYPASS_NOTE)
+    expect(document.querySelector('.menu-item[data-item="session"] .menu-item-note')?.textContent).toBe('Manual')
+    expect([...document.querySelectorAll('.menu-item')].map((m) => m.textContent)).not.toContain('Bypass')
     unmountAll()
-    // a row the server answers as Bypass: the analyst chose it in Settings
+    // a row an earlier version wrote as Bypass
     settings = { ...program, permission_modes: { dev: 'bypass' } }
     invalidateSettings('mini')
     await mount(<SettingsPopover ws="mini" anchor={anchor} open onClose={() => {}} />)
     await settle()
     await settle()
-    expect(chip().textContent).toBe('Bypass')
-    expect(document.body.querySelector('.settings-modes-warn')?.textContent).toBe(BYPASS_LINE)
+    expect(chip().textContent).toBe("Manual (your session's)")
+    expect(document.body.textContent).not.toMatch(/Bypass/)
+  })
+})
+
+describe('the feature switches', () => {
+  test('the same rows as /config → thimble, in its order, View proposals second; each on unless the settings turn it off', () => {
+    expect([FEATURE_ROWS[0].label, PROPOSE_LABEL, ...FEATURE_ROWS.slice(1).map((r) => r.label)]).toEqual([
+      'Turn on when Claude reads data', 'View proposals', 'Labels', 'Checks', 'Citation marks', 'Coverage', 'Card check'])
+    expect(featureRows(SETTINGS)).toEqual({ autoActivate: true, labels: true, checks: true, citationMarks: true, coverage: true, cardCheck: true })
+    expect(featureRows({ ...SETTINGS, features: { labels: false, coverage: true } }).labels).toBe(false)
+  })
+
+  test('a save sends only the switches that changed: false to turn one off, null to put it back on', () => {
+    const now = { ...featureRows(SETTINGS), labels: false, checks: false }
+    expect(changedFeatures(SETTINGS, now)).toEqual({ labels: false, checks: false })
+    const off = { ...SETTINGS, features: { coverage: false } }
+    expect(changedFeatures(off, { ...featureRows(off), coverage: true })).toEqual({ coverage: null })
+    expect(changedFeatures(off, featureRows(off))).toEqual({})
+  })
+
+  test('the switches round trip: they show what GET /settings answers, and Save PUTs the change', async () => {
+    settings = { ...SETTINGS, features: { autoActivate: true, labels: true, checks: false, citationMarks: true, coverage: true, cardCheck: true } }
+    const anchor = document.createElement('button')
+    document.body.appendChild(anchor)
+    await mount(<SettingsPopover ws="mini" anchor={anchor} open onClose={() => {}} />)
+    await settle()
+    await settle()
+    const rows = [...document.body.querySelectorAll('.settings-features .settings-row:not(.settings-headrow)')]
+    expect(rows.map((r) => r.querySelector('.settings-role')?.textContent)).toEqual([
+      'Turn on when Claude reads data', 'View proposals', 'Labels', 'Checks', 'Citation marks', 'Coverage', 'Card check'])
+    const sw = (key: string) => document.body.querySelector<HTMLButtonElement>(`[data-feature="${key}"] [role="switch"]`)!
+    expect(sw('checks').getAttribute('aria-checked')).toBe('false')
+    expect(sw('labels').getAttribute('aria-checked')).toBe('true')
+    await act(async () => sw('labels').click())
+    await act(async () => sw('checks').click())
+    await act(async () => sw('autoActivate').click())
+    await act(async () => [...document.body.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Save')!.click())
+    await settle()
+    expect(puts).toEqual([['/api/ws/mini/settings', { features: { autoActivate: false, labels: false, checks: null } }]])
   })
 })

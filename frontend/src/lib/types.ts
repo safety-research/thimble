@@ -53,7 +53,7 @@ export type ChipKind = 'say' | 'filter' | 'label' | 'ticket' | 'artifact' | 'vie
 /** One line of `chats/<id>.jsonl`; its index in the log is its id. */
 export type ChatRecord =
   | { type: 'user'; ts?: string; text: string; by?: RecordBy | 'main' | 'extension'; tray?: boolean; event?: string; run?: number; extension?: string }
-  | { type: 'text'; delta: string; parent_tool_use_id?: string; reply?: boolean; by?: RecordBy; api_error?: string; refusal?: boolean }
+  | { type: 'text'; delta: string; parent_tool_use_id?: string; reply?: boolean; by?: RecordBy; api_error?: string; refusal?: boolean; uuid?: string }
   | { type: 'tool_use'; ts?: string; id: string; name: string; input: unknown; parent_tool_use_id?: string; n?: number }
   | { type: 'tool_result'; ts?: string; id: string; summary: string; is_error?: boolean; not_run?: boolean; cell_id?: string; label_card?: string; notebook?: string; parent_tool_use_id?: string }
   | { type: 'refs'; ts?: string; resolved: string[]; broken: string[]; why?: Record<string, string>; links?: unknown[]; unlinked?: unknown[] }
@@ -1242,8 +1242,14 @@ export interface Settings {
   /** the key held with a click to ask in the browser (thimble's config `askKey`, lib/platform): "meta" (⌘, Ctrl off a
    * Mac) or "alt" (⌥, Alt) */
   ask_key?: 'meta' | 'alt'
+  /** thimble's feature switches, as thimble's config `features` resolves them (backend features.settings, ledger
+   * FEATURES_KEY): true or false each; a key it leaves out is on */
+  features?: Partial<Record<FeatureKey, boolean>>
   [k: string]: unknown
 }
+
+/** thimble's feature switches (backend features.py; /config → thimble in the terminal shows the same). */
+export type FeatureKey = 'autoActivate' | 'labels' | 'checks' | 'citationMarks' | 'coverage' | 'cardCheck'
 
 /** The agent rows of the settings: thimble's subagents, the code tickets' dev agent and the two classifiers. */
 export type AgentRowKey = 'orient' | 'writer' | 'critic' | 'checks' | 'dev' | CallAgent
@@ -1302,6 +1308,8 @@ export interface SettingsPatch {
   propose_views?: boolean | null
   /** the ask key: "alt", or null to put back the default ("meta") */
   ask_key?: 'meta' | 'alt' | null
+  /** the feature switches: false turns one off, null puts back the default (on) */
+  features?: Partial<Record<FeatureKey, false | null>>
   [k: string]: unknown
 }
 

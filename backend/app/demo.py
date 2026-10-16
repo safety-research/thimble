@@ -13,8 +13,9 @@ its publisher, and DIR/SOURCES.md says from where. It then registers the folder 
 below), installs that dataset's pre-cache as its workspace when demos/ (or --precaches DIR) has one (a dataset without
 one opens with no analysis yet, with a line saying so), and prints and opens one URL without a Claude Code session:
 thimble's start page, which lists every dataset downloaded (start_page.py), one run's or an earlier one's, by the
-dataset's name. --examples opens the worked examples of custom views on the same server instead (demo_examples.py), and
-the same start page.
+dataset's name. It opens the page through a redirect file only the analyst's account can read (open_page,
+app/opener.py), so the sign-in code is in no process's argv. --examples opens the worked examples of custom views on the
+same server instead (demo_examples.py), and the same start page.
 
 Names. Each dataset's workspace is demo-<name> (workspace_name), so it never takes the name of a folder of the analyst's
 own called <name>, nor gets a -2 beside one. A workspace an earlier `thimble demo` registered under another name (what
@@ -98,7 +99,6 @@ import sys
 import tempfile
 import textwrap
 import uuid
-import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable
@@ -1955,16 +1955,15 @@ def start_url(pair: bool | None = None) -> str:
 
 
 def open_page(url: str) -> bool:
-    """Open `url` in the analyst's browser where there is a desktop to show it; whether it was asked to."""
-    if not sys.stdout.isatty():
+    """Open `url`, which carries a one-time sign-in code, in the analyst's browser where there is a desktop to show it,
+    through a redirect file only the analyst's account can read (opener.open_url), so the code is in no process's argv;
+    whether a browser was asked to. Not for output a program reads, nor in a remote terminal (opener.remote), where a
+    browser would open on another computer or take over the terminal."""
+    from . import opener  # noqa: PLC0415
+
+    if not sys.stdout.isatty() or opener.remote().remote:
         return False
-    desktop = sys.platform == "darwin" or os.name == "nt" or os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
-    if not desktop:
-        return False  # a terminal browser would take over the terminal
-    try:
-        return webbrowser.open(url)
-    except webbrowser.Error:
-        return False
+    return opener.open_url(url).opened
 
 
 def claude_login(auth: Callable[[], dict[str, Any] | None]) -> tuple[bool | None, str]:

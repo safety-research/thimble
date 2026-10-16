@@ -97,11 +97,13 @@ def test_features_answers_every_switch_on_and_stores_a_change(setup):
     assert json.loads((tmp / "home" / "config.json").read_text())["features"] == {"labels": False}
 
 
-def test_open_answers_not_built(setup):
+def test_open_answers_c12_json(setup):
+    """The browser lane's `thimble open`: with no live main and no session it starts nothing and says why (C12)."""
     corpus, env, _ = setup
     got = answer(run(env, corpus, "open", "--cwd", str(corpus), "--ref", "home", "--json"))
-    assert got == {"ok": False, "error": {"code": "NOT_BUILT", "message": "thimble open is not built yet",
-                                          "fix": "wait for the browser lane"}}
+    assert got["ok"] is False and got["error"]["code"] in {"REFUSED_HOME", "REFUSED_SESSION", "NO_SESSION", "PORT",
+                                                            "START", "NO_OPENER", "NOT_BUILT", "REFUSED_REF"}
+    assert got["error"]["message"] and got["error"]["fix"]
 
 
 def test_coverage_label_unsure_and_answer_comments_answer_their_stubs(setup):

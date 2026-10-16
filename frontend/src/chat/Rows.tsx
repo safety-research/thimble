@@ -4,8 +4,10 @@
 // is such a line carrying its `call:` ref, so it can be cited and, open, shows its whole stored output with numbered
 // lines. Other runs of one kind of call are one card (Cards · 2 steps · 31s). Everything else is a quiet note with the
 // chips of what it points at. Label runs in a row are one Label card, a step per label. A notice (a failure with its
-// fix, which the strip above the composer offers) is one warning line, quiet once it is closed (Notice.tsx).
-import { createContext, useContext, useEffect, useRef, useState, type DragEvent } from 'react'
+// fix, which the strip above the composer offers) is one warning line, quiet once it is closed (Notice.tsx). In main's
+// chat a check's comments on an answer tint their passages; a click on one, or a deep link to `answer:<turn>#s<n>`,
+// opens the comment under the answer (chat/answerComments.ts, AnswerComment.tsx).
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
 import { CodeText } from '../components/Code'
@@ -21,10 +23,12 @@ import { callOutput, fetchCall, outputLines, setCallWords } from '../lib/calls'
 import { isDropped, useProposals } from '../lib/proposals'
 import { callRef, parseRef } from '../lib/refs'
 import { CITED } from '../lib/tableCell'
-import { teleport } from '../lib/teleport'
+import { revealAnchor, teleport } from '../lib/teleport'
 import { track } from '../lib/telemetry'
 import { chipIcon, chipPending, docSave, sameDocRun, settleChip, settledWord, type Settled } from './chips'
-import { ChatMarkdown, ChipContext, RefText } from './markdown'
+import { AnswerMarksContext, ChatMarkdown, ChipContext, RefText } from './markdown'
+import { AnswerCommentCard } from './AnswerComment'
+import { commentsOfRow, marksOf, useAnswerComments, type AnswerComment, type AnswerMark } from './answerComments'
 import { API_ERROR_KIND, callLineText, callPieces, callToolName, capacityNote, corpusRelative, durationText, groupState, groupTools, isRawCall, labelRunName, leadText, madeBy, QUIET_RE, runTools, stripHarness, toolDisplayName, toolMeta, toolSteps, toolSummary, underCorpus, type AgentRow as AgentRowT, type BranchRow, type CallsRow, type ChipRow as ChipRowT, type ErrorRow as ErrorRowT, type Row, type ToolGroup, type ToolRow as ToolRowT, waitText } from './model'
 import { Note, ShotCard, ThreadChip, ThreadsContext } from './Notes'
 import { AgentCard, OrientLanding, openLabel } from './AgentCard'
@@ -147,8 +151,39 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
   const toolPending = lastRow?.kind === 'tool' && !lastRow.result
   const anchorOf = (index: number) => (chat ? `chat:${chat}#${index}` : undefined)
   const shown = shownRows(rows, !!calls)
+  const answers = useAnswerComments(ws, chat === 'main' && !nested)
+  const [opened, setOpened] = useState<string | null>(null)
+  const [asked, setAsked] = useState<string | null>(null)
+  // each text row's comments and marks, recomputed when the comments or the open one change
+  const rowMarks = useMemo(() => {
+    const out = new Map<number, { comments: AnswerComment[]; marks: AnswerMark[] }>()
+    if (!answers.comments.length) return out
+    for (const r of shown) {
+      if (r.kind !== 'text') continue
+      const mine = commentsOfRow(r, answers.comments)
+      if (mine.length) out.set(r.index, { comments: mine, marks: marksOf(mine, opened) })
+    }
+    return out
+  }, [shown, answers.comments, opened])
+  const marksCtx = useMemo(() => ({ open: (id: string) => setOpened((cur) => (cur === id ? null : id)) }), [])
+  // a deep link or a teleport to `answer:<turn>#s<n>`: its comment opens once it is read, and its passage comes into view
+  useEffect(() => {
+    if (chat !== 'main' || nested) return
+    return bus.on('openRef', (e) => {
+      if (e.ref.startsWith('answer:')) setAsked(e.ref)
+    })
+  }, [chat, nested])
+  useEffect(() => {
+    if (!asked) return
+    const hit = answers.comments.find((c) => c.ref === asked && c.status === 'open')
+    if (!hit) return
+    setOpened(hit.id)
+    setAsked(null)
+    window.setTimeout(() => revealAnchor(asked), 0)
+  }, [asked, answers.comments])
   return (
     <ChipContext.Provider value={{ workspace: ws, broken: EMPTY, anchor: true }}>
+      <AnswerMarksContext.Provider value={marksCtx}>
       {shown.map((r, i) => {
         switch (r.kind) {
           case 'user':
@@ -162,14 +197,18 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
                 </UserMessage>
               </div>
             )
-          case 'text':
+          case 'text': {
+            const own = rowMarks.get(r.index)
+            const open = own?.comments.find((c) => c.id === opened)
             return (
               <div key={r.index} className={`chat-msg chat-assistant${nested ? ' chat-nested' : ''}`}>
                 <div className="chat-text" data-anchor={anchorOf(r.index)} data-anchor-text={chat ? r.text : undefined}>
-                  <ChatMarkdown text={r.text} streaming={r === lastText} />
+                  <ChatMarkdown text={r.text} streaming={r === lastText} marks={own?.marks} />
                 </div>
+                {open && <AnswerCommentCard comment={open} ws={ws} onDone={answers.dismiss} onClose={() => setOpened(null)} />}
               </div>
             )
+          }
           case 'tools':
             return <ToolGroupCard key={r.index} group={r} ws={ws} pending={streaming && i === shown.length - 1} />
           case 'calls':
@@ -218,6 +257,7 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
         }
       })}
       {streaming && !toolPending && <Working />}
+      </AnswerMarksContext.Provider>
     </ChipContext.Provider>
   )
 }

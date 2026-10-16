@@ -11,8 +11,9 @@ import { act, createElement } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { mount, settle, unmountAll } from './mount.tsx'
 
-const LINE = "This browser isn't signed in. Open the link /thimble shows in your terminal, or run thimble up in a shell."
-const GONE = "This link was used or has expired, so this browser isn't signed in. Open the link /thimble shows in your terminal, or run thimble up in a shell."
+// 0.9.0: the way in is the press (/thimble open, or o in the terminal panel), not a link /thimble shows or `thimble up`
+const LINE = "This browser isn't signed in. Type /thimble open in your Claude Code terminal, or press o in thimble's panel."
+const GONE = "This link was used or has expired, so this browser isn't signed in. Type /thimble open in your Claude Code terminal, or press o in thimble's panel."
 
 let paired: boolean | 'down' = false
 // the server answers reads without the sign-in, as it does for the screenshot tool's credential
@@ -68,14 +69,14 @@ async function gate() {
 describe('the sign-in gate', () => {
   test('the lines are the contract the server and the release test share, and each starts by saying the browser is not signed in', async () => {
     const { SIGN_IN_LINE, CODE_GONE_LINE } = await gate()
-    expect(SIGN_IN_LINE).toBe("This browser isn't signed in. Open the link /thimble shows in your terminal, or run `thimble up` in a shell.")
-    expect(CODE_GONE_LINE).toBe("This link was used or has expired, so this browser isn't signed in. Open the link /thimble shows in your terminal, or run `thimble up` in a shell.")
+    expect(SIGN_IN_LINE).toBe("This browser isn't signed in. Type `/thimble open` in your Claude Code terminal, or press o in thimble's panel.")
+    expect(CODE_GONE_LINE).toBe("This link was used or has expired, so this browser isn't signed in. Type `/thimble open` in your Claude Code terminal, or press o in thimble's panel.")
   })
 
   test('a browser that is not signed in sees only the line, and the app never mounts or reads', async () => {
     const { el } = await gate()
     expect(el.textContent).toBe(LINE)
-    expect(el.querySelector('code')?.textContent).toBe('thimble up')
+    expect(el.querySelector('code')?.textContent).toBe('/thimble open')
     expect(el.querySelector('.stand-in-app')).toBeNull()
     // /ui/paired says no, and one read the server guards (refused) confirms it
     expect(requests).toEqual(['GET /api/ui/paired', 'GET /api/tour'])
@@ -94,7 +95,7 @@ describe('the sign-in gate', () => {
     const { el } = await gate()
     expect(posts).toEqual(['{"code":"old","ws":"logs"}'])
     expect(el.textContent).toBe(GONE)
-    expect(el.querySelector('code')?.textContent).toBe('thimble up')
+    expect(el.querySelector('code')?.textContent).toBe('/thimble open')
     expect(el.querySelector('.stand-in-app')).toBeNull()
   })
 
@@ -203,7 +204,7 @@ describe('the page hears that it is signed out', () => {
     expect(heard).toBe(1)
   })
 
-  test('when the stream is closed and the server no longer answers its reads, and not while the browser retries it', async () => {
+  test('when the server closed the stream and no longer answers its reads, and not when the stream only dropped', async () => {
     class FakeSource {
       static all: FakeSource[] = []
       static CLOSED = 2
@@ -223,13 +224,18 @@ describe('the page hears that it is signed out', () => {
     const { bus } = await import('../../src/lib/bus.ts')
     let heard = 0
     const off = bus.on('signedOut', () => heard++)
-    const release = openStream('/api/ws/logs/events', { onEvent: () => undefined })
-    const es = FakeSource.all[0]
-    // the browser retries a dropped stream itself: no question of the server
-    es.onerror?.()
+    const dropped = openStream('/api/ws/logs/events', { onEvent: () => undefined })
+    // a dropped stream (the browser would retry it: CONNECTING): no question of the server; the page closes it and
+    // reopens it itself later (lib/stale: no retry of the browser's own, which would send the cookie unasked)
+    const es0 = FakeSource.all[0]
+    es0.onerror?.()
     await settle()
     expect(requests).not.toContain('GET /api/ui/paired')
+    expect(es0.readyState).toBe(FakeSource.CLOSED)
+    dropped()
     // the server closed it (a 401): the page asks whether it is still signed in
+    const release = openStream('/api/ws/logs/events', { onEvent: () => undefined })
+    const es = FakeSource.all[1]
     es.readyState = FakeSource.CLOSED
     es.onerror?.()
     await settle()
@@ -239,7 +245,7 @@ describe('the page hears that it is signed out', () => {
     // signed in still: nothing
     paired = true
     const again = openStream('/api/ws/logs/events', { onEvent: () => undefined })
-    const es2 = FakeSource.all[1]
+    const es2 = FakeSource.all[2]
     es2.readyState = FakeSource.CLOSED
     es2.onerror?.()
     await settle()
@@ -248,7 +254,7 @@ describe('the page hears that it is signed out', () => {
     paired = false
     reads = true
     const third = openStream('/api/ws/logs/events', { onEvent: () => undefined })
-    const es3 = FakeSource.all[2]
+    const es3 = FakeSource.all[3]
     es3.readyState = FakeSource.CLOSED
     es3.onerror?.()
     await settle()
