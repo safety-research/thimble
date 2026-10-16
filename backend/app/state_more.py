@@ -91,7 +91,7 @@ async def _act_coverage(c: str, payload: dict[str, Any]) -> dict[str, Any]:
 async def _act_coverage_retry(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     from . import coverage, notices  # noqa: PLC0415
 
-    notices.cleared(c, coverage.COUNT_NOTICE)
+    notices.clear(c, coverage.COUNT_NOTICE)
     return {"started": await asyncio.to_thread(coverage.start_index, c, force=True)}
 
 

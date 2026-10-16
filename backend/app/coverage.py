@@ -575,7 +575,7 @@ def _count_notice(c: str, failed: list[tuple[str, str]]) -> None:
             notices.post(c, kind="coverage", text=COUNT_TEXT.format(n=f"{len(failed):,}", reason=failed[0][1]),
                          action=act, key=COUNT_NOTICE)
         else:
-            notices.cleared(c, COUNT_NOTICE)
+            notices.clear(c, COUNT_NOTICE)
     except Exception:  # noqa: BLE001 — the counts are written either way
         log.debug("%s: the coverage count notice was not posted", c, exc_info=True)
 
