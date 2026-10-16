@@ -125,6 +125,11 @@ TYPED_RE = re.compile(r"^[^\n]*while you were working:\n(.*?)(?:\n\nThis is how 
 RELAYED_BY = agents.MAIN_ID  # `by` of a message main sent a thread's fork or a subagent, which its chat shows as from main
 COMMAND_RE = re.compile(r"<command-name>(.*?)</command-name>", re.S)
 COMMAND_ARGS_RE = re.compile(r"<command-args>(.*?)</command-args>", re.S)
+# what the analyst pasted into a prompt, as Claude Code 2.1.300 writes it into the prompt's text: the pasted text
+# between a `<pasted_content id="…">` line and a `</pasted_content id="…">` line (one id of 4 hex digits for every paste
+# of the prompt), with up to 2 line breaks around it, before, after or between what they typed. A prompt that is a paste
+# alone starts with the tag, as Claude Code's own records do (pastes).
+PASTE_RE = re.compile(r'\n{0,2}<pasted_content id="([0-9a-f]{4})">\n(.*?)\n</pasted_content id="\1">\n{0,2}', re.S)
 LOCAL_CAVEAT = "<local-command-caveat>"  # the meta record before a local command's line (module note, the table)
 CONNECT_COMMANDS = ("/thimble", "/thimble:thimble")  # /thimble's command line, whose turn is not mirrored (module note)
 # /thimble:ask's command line: a message for a thread, the orientation or a view's build, as that chat's composer in the
@@ -1500,6 +1505,22 @@ def _command_line(text: str) -> str | None:
         return None
     args = COMMAND_ARGS_RE.search(text)
     return " ".join(p for p in (m.group(1).strip(), (args.group(1).strip() if args else "")) if p)
+
+
+def pastes(text: str) -> list[tuple[bool, str]]:
+    """A prompt's text in pieces, in order: (True, the pasted text) for each paste (PASTE_RE) and (False, the text) for
+    what the analyst typed before, after or between them, without the line breaks Claude Code put around a paste. A
+    prompt without a paste is one typed piece."""
+    out: list[tuple[bool, str]] = []
+    at = 0
+    for m in PASTE_RE.finditer(text):
+        if m.start() > at:
+            out.append((False, text[at:m.start()]))
+        out.append((True, m.group(2)))
+        at = m.end()
+    if at < len(text) or not out:
+        out.append((False, text[at:]))
+    return out
 
 
 def browser_events(text: str) -> list[str]:

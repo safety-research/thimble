@@ -31,7 +31,7 @@ from urllib.parse import urlsplit, urlunsplit
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from . import cardrun, cite, config, frames, headless, prompts
+from . import cardrun, cite, config, frames, headless, prompts, read_parts
 from .kernel_thimble import CARD_MIME  # a card type's graphic, which counts as a chart and is read through its listing
 
 log = logging.getLogger("thimble.tools")
@@ -73,11 +73,19 @@ RESULT_LINES = 40
 RESULT_CHARS_PER_LINE = 50
 RESULT_OUTPUTS = 4
 RESULT_LINES_KEY = "run_cell_result_lines"  # settings.json; a persisted key, not renamed with the tool
-# chars of outputs read_ref returns for a card, a ceiling against a runaway print
+# chars of a data card's html or dataset that edit_card's result shows, a ceiling against a runaway payload; read_ref
+# fits a whole card within READ_REF_UNITS instead (_read_cell, _fitted)
 CELL_READ_LIMIT = 40_000
 WARM_REFS_MAX = 20  # an example's quoted refs a view reads, resolved off the loop before add_card or edit_card reads them
 LINE_LIMIT = 160  # chars of a takeaway / md text on a `cells` line
 CALL_ARG_CHARS = 80  # chars of one argument on a result's `$` line (call_line)
+# of one read_ref result, in UTF-16 code units (read_parts.units), so that it stays whole in the session that reads it:
+# Claude Code (2.1.300) saves a tool result of more than 50,000 characters to a file and shows the model a 2KB preview
+# of it, and an MCP result its estimate (4 characters a token) puts past 12,500 tokens is counted, and past 25,000
+# tokens (MAX_MCP_OUTPUT_TOKENS) saved to a file in its place. read_parts.READ_UNITS is under the first and never
+# counted, whatever the text; this leaves room in it for the call line (call_line, `$ read_ref ref="…"`) that comes
+# first.
+READ_REF_UNITS = read_parts.READ_UNITS - 2 * CALL_ARG_CHARS - 40
 TAKEAWAY_AUTHOR = "model"  # cell.takeaway_author for a takeaway written with edit_card (the analyst's is `analyst`)
 TAKEAWAY_WORDS = 40  # the words a takeaway may run to, which the `## takeaway-long` line of prompts/tools.md states
 ERROR_MIME = "application/vnd.thimble.error+json"
@@ -1991,8 +1999,9 @@ def takeaway_words(text: str) -> int:
     return sum(1 for w in re.sub(r"\[\[[^\[\]]*\]\]", " ", plain).split() if re.search(r"\w", w))
 
 
-def _payload_lines(kind: str, payload: dict) -> "builtins.list[str]":
-    """A data card's payload as the model reads it."""
+def _payload_lines(kind: str, payload: dict, limit: int | None = CELL_READ_LIMIT) -> "builtins.list[str]":
+    """A data card's payload as the model reads it, a custom card's html or a dataset cut at `limit` characters (None:
+    whole, for a caller that fits the lines itself)."""
     if kind == "note":
         return ["text:", str(payload.get("text") or "")]
     if kind == "example":
@@ -2004,8 +2013,8 @@ def _payload_lines(kind: str, payload: dict) -> "builtins.list[str]":
         return [f"label: concept:{payload.get('concept') or '?'}"]
     if kind == "custom":
         html = str(payload.get("html") or "")
-        if len(html) > CELL_READ_LIMIT:
-            html = html[:CELL_READ_LIMIT] + f"\n... [truncated, {len(html) - CELL_READ_LIMIT} more chars]"
+        if limit is not None and len(html) > limit:
+            html = html[:limit] + f"\n... [truncated, {len(html) - limit} more chars]"
         from . import view_libs  # noqa: PLC0415
 
         libs = view_libs.entries(payload.get("libs"))
@@ -2016,8 +2025,8 @@ def _payload_lines(kind: str, payload: dict) -> "builtins.list[str]":
         follows = [f"follows: card:{payload['follows']}"] if payload.get("follows") else []
         return [*follows, "steps:", *notebook.plan_lines({"kind": kind, "payload": payload})]
     body = json.dumps(payload.get("dataset"), ensure_ascii=False, default=str)
-    if len(body) > CELL_READ_LIMIT:
-        body = body[:CELL_READ_LIMIT] + f"\n... [truncated, {len(body) - CELL_READ_LIMIT} more chars]"
+    if limit is not None and len(body) > limit:
+        body = body[:limit] + f"\n... [truncated, {len(body) - limit} more chars]"
     return ["dataset:", body]
 
 
@@ -2043,7 +2052,7 @@ async def _h_read_ref(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     if ref.startswith("call:"):
         from . import calls  # noqa: PLC0415
 
-        text, bad = calls.tool_read_ref(ctx.c, ref)
+        text, bad = calls.tool_read_ref(ctx.c, ref, READ_REF_UNITS)
         return err(text) if bad else ok(text)
     return await _read_excerpt(ctx, ref)
 
@@ -2066,10 +2075,37 @@ def _outputs_lines(cell: dict, body: str) -> builtins.list[str]:
     return ["outputs, from before the code above, which has not run yet:", body or "(no text output)"]
 
 
+def _fitted(entries: "builtins.list[str]", limit: int) -> str:
+    """`entries` (the lines of a read, an entry such as a card's code holding several) as one text of at most `limit`
+    UTF-16 code units (read_parts.units): whole when they fit, else the shorter entries whole and each longer one cut to
+    an equal share of what those leave, with a line that says how many characters it leaves out."""
+    sizes = [read_parts.units(e) for e in entries]
+    room = limit - max(0, len(entries) - 1)  # the line breaks between the entries
+    if sum(sizes) <= room:
+        return "\n".join(entries)
+    longer = sorted(range(len(entries)), key=sizes.__getitem__)
+    while longer and sizes[longer[0]] <= room // len(longer):
+        room -= sizes[longer.pop(0)]
+    share = room // max(1, len(longer))
+    out = builtins.list(entries)
+    for i in longer:
+        text = entries[i]
+        mark = read_parts.units(f"\n... [truncated, {len(text)} more chars]")
+        k = read_parts._head(text, share - mark) if share > mark else 0
+        out[i] = f"{text[:k]}\n... [truncated, {len(text) - k} more chars]"
+    whole = "\n".join(out)
+    if read_parts.units(whole) <= limit:
+        return whole
+    # so many longer entries that a share holds less than the line that says what it leaves out: the text itself cut
+    mark = read_parts.units(f"\n... [truncated, {len(whole)} more chars]")
+    k = read_parts._head(whole, max(1, limit - mark))
+    return f"{whole[:k]}\n... [truncated, {len(whole) - k} more chars]"
+
+
 def _read_cell(ctx: Ctx, ref: str) -> ToolResult:
-    """A card whole: its group, kind, status, question, code, every addressed output up to CELL_READ_LIMIT chars (or a
-    data
-    card's payload), then its takeaway and labels; a span ref adds the value the span names."""
+    """A card whole: its group, kind, status, question, code, every addressed output (or a data card's payload), then
+    its takeaway and labels; a span ref adds the value the span names. The text stays within READ_REF_UNITS: when it
+    would pass them, its longest parts, such as its code and its outputs, share what the rest leaves (_fitted)."""
     from . import notebook, refs
 
     cid = _cell_id_of(ref)
@@ -2085,14 +2121,11 @@ def _read_cell(ctx: Ctx, ref: str) -> ToolResult:
     if run:
         lines += ["code:", str(cell.get("code") or "").rstrip()]
         texts, extras = _outputs_text(cell, addressed=True)
-        body = "\n".join(t for t in texts if t)
-        if len(body) > CELL_READ_LIMIT:
-            body = body[:CELL_READ_LIMIT] + f"\n... [truncated, {len(body) - CELL_READ_LIMIT} more chars]"
-        lines += _outputs_lines(cell, body)
+        lines += _outputs_lines(cell, "\n".join(t for t in texts if t))
         if extras:
             lines.append(f"({', '.join(sorted(extras))} output rendered; thimble shows it)")
     else:
-        lines += _payload_lines(kind, cell.get("payload") or {})
+        lines += _payload_lines(kind, cell.get("payload") or {}, limit=None)
         if kind == notebook.PLAN_KIND and (after := notebook.plans_following(ctx.ws, cid)):
             lines.append("followed by: " + ", ".join(f"card:{x}" for x in after))
     if str(cell.get("takeaway") or "").strip():
@@ -2109,7 +2142,7 @@ def _read_cell(ctx: Ctx, ref: str) -> ToolResult:
             lines.append(f"span {ref}: {span.get('value', span.get('text'))}" if span else f"span {ref}: not in the current output")
         except refs.RefError as e:
             lines.append(f"span {ref}: {e.detail}")
-    return ok(cite.canon_text("\n".join(lines)))
+    return ok(cite.canon_text(_fitted(lines, READ_REF_UNITS)))
 
 
 async def _read_excerpt(ctx: Ctx, ref: str) -> ToolResult:
