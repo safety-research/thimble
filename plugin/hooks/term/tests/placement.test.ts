@@ -275,14 +275,14 @@ test('a dismissed notice goes at once and stays gone when home is read again; a 
   await above.unmount()
 })
 
-test('the thimble line above the prompt: `thimble`, then its six items, a `•` after what is new; no `open ›`, no `dismiss`', async ($, on) => {
+test('the thimble line above the prompt: `thimble` (which opens home), then its six items, a `•` after what is new; no `open ›`, no `dismiss`', async ($, on) => {
   const w = world(on)
   await start($, w)
   w.states.home = { ...w.states.home, cards: 14 }
   w.stamps.set(`${WS}/notebooks`, 2)
   await w.clock.advance(1100)
   const above = (await $.ui.mount(aboveAt(140))) as unknown as M
-  expect(words(await above.find({ type: 'Box', key: 'above-summary' }))).toBe('  thimblecards 14 •threads 2citations 0labels 1checks 0coverage 0%')
+  expect(words(await above.find({ type: 'Box', key: 'above-summary' }))).toBe('  thimble cards 14 • threads 2 citations 0 labels 1 checks 0 coverage 0% ')
   expect(await above.find({ type: 'Button', key: 'above-summary-open' })).toBeUndefined()
   expect(await above.find({ type: 'Button', key: 'above-summary-dismiss' })).toBeUndefined()
   await above.unmount()

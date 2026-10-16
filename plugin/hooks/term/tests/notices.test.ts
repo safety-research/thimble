@@ -28,7 +28,7 @@ test('notices draw with every feature off: the workspace\'s and the terminal\'s 
   expect(words(await m.find({ type: 'Box', key: 'above-notice-n1' }))).toBe(`  notice${NOTICE.text}dismiss`)
   expect(words(await m.find({ type: 'Box', key: 'above-mod-open-failed' }))).toContain("thimble's page did not start: no server")
   // the thimble line stays while thimble is on, with only the cards and the threads: every feature with an item is off
-  expect(words(await m.find({ type: 'Box', key: 'above-summary' }))).toBe('  thimblecards 12threads 2')
+  expect(words(await m.find({ type: 'Box', key: 'above-summary' }))).toBe('  thimble cards 12 threads 2 ')
   await m.unmount()
 })
 
