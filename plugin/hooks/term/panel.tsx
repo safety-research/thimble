@@ -2776,8 +2776,10 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
         rows.push(
           <Box key={`lb-u-${r.ref}`} flexDirection="column" marginLeft={4}>
             <Box flexDirection="row" columnGap={2}>
-              <Box flexShrink={1}>{linesEl(cx, e, `lu-${cid(r.ref)}`, [[{ s: '↗', fg: LINK }, { s: ' ' }, linkSeg(cut(place, Math.max(8, cols - 40)))]], [{ y: 0, x0: 0, x1: 2 + width(cut(place, Math.max(8, cols - 40))), row: false, run: () => openCite(cx, r.ref, null) }], Math.min(cols - 4, 2 + width(cut(place, Math.max(8, cols - 40)))))}</Box>
-              <Text dimColor>{`${unsureWords(r)}${r.value ? ` · ${clip(r.value, 24)}` : ''}`}</Text>
+              <Box flexShrink={0}>{linesEl(cx, e, `lu-${cid(r.ref)}`, [[{ s: '↗', fg: LINK }, { s: ' ' }, linkSeg(cut(place, Math.max(8, cols - 40)))]], [{ y: 0, x0: 0, x1: 2 + width(cut(place, Math.max(8, cols - 40))), row: false, run: () => openCite(cx, r.ref, null) }], Math.min(cols - 4, 2 + width(cut(place, Math.max(8, cols - 40)))))}</Box>
+              <Box flexShrink={1}>
+                <Text dimColor wrap="truncate-end">{`${unsureWords(r)}${r.value ? ` · ${clip(r.value, 24)}` : ''}`}</Text>
+              </Box>
               <Box flexGrow={1} />
               <Box flexDirection="row" columnGap={2} flexWrap="wrap">
                 <Text dimColor>it is</Text>
@@ -2953,7 +2955,11 @@ async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
     const st = labelState(l, agents)
     const run = labelStateWords(st).replace(/^◌ /, '') || (l.trial ? `a sample of ${num(n)}` : `all ${num(n)}`)
     const u = unsureOn ? counts.get(l.id) : undefined
-    const facts = [`${l.kind ?? ''} · ${run}`, ...(u?.noFit ? [`${num(u.noFit)} no fit`] : []), ...(u?.unsure ? [`${num(u.unsure)} unsure`] : [])].join(' · ')
+    // the facts that leave the name its first 20 cells (or all of a shorter one): every fact, then the unsure counts
+    // alone (the rows under it say them too), then none
+    const tally = [...(u?.noFit ? [`${num(u.noFit)} no fit`] : []), ...(u?.unsure ? [`${num(u.unsure)} unsure`] : [])].join(' · ')
+    const keep = Math.min(20, width(l.name ?? l.id))
+    const facts = [[`${l.kind ?? ''} · ${run}`, tally].filter(Boolean).join(' · '), `${l.kind ?? ''} · ${run}`, ''].find(f => !f || cols - 4 - width(f) - 2 >= keep) ?? ''
     if (l.id === pick) pickAt = lines.length
     hits.push({ y: lines.length, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: () => openLabel(cx, l.id, l.name ?? l.id) })
     lines.push(pointed(spread([st.running ? { s: '◌' } : st.ran || st.stopped ? { s: '●' } : dim('○'), { s: ' ' }, { s: l.name ?? l.id }], [dim(facts)], cols), l.id === pick))
@@ -2963,7 +2969,7 @@ async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
     const un = got?.ok ? unsureOf(got.value) : null
     const vw = Math.min(16, Math.max(0, ...(un?.rows ?? []).map(r => width(r.value ?? ''))))
     for (const r of un?.rows ?? []) {
-      const lead = `  ${unsureWords(r).padEnd(12)}${vw ? `${clip(r.value ?? '', vw).padEnd(vw)}  ` : ''}`
+      const lead = `  ${unsureWords(r).padEnd(13)}${vw ? `${clip(r.value ?? '', vw).padEnd(vw)}  ` : ''}`
       hits.push({ y: lines.length, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: () => openCite(cx, r.ref, null) })
       lines.push(pointed([dim(lead), { s: clip(demojibake(noControls(r.text)).replace(/\s+/g, ' '), Math.max(10, cols - width(lead))) }], false))
     }
