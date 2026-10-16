@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from app import activate, cli, config, guide
+from app import activate, cli, config, features, guide
 
 MUST_KEEP = ("apply_label", "never a regex", "[[", "takeaway", "with its base", "edit_card",
              "Write nothing into the corpus")
@@ -33,6 +33,20 @@ def corpus(tmp_path, monkeypatch, workspaces_tmp):
     d.mkdir()
     (d / "events.jsonl").write_text('{"a": 1}\n')
     return str(d)
+
+
+@pytest.mark.parametrize("off, gone, kept", [
+    ("labels", ["## Labels\n", "- `labeled`", "- `label_done`", "- `rerun`", "never a regex"], ["## Checks\n", "- `checked`"]),
+    ("checks", ["## Checks\n", "- `checked`"], ["## Labels\n", "- `labeled`", "- `label_done`", "- `rerun`"]),
+])
+def test_a_switched_off_feature_leaves_its_guidance_out(corpus, off, gone, kept):
+    on = guide.render(corpus)
+    assert all(g in on for g in gone + kept)
+    features.set_settings({off: "off"}, "test")
+    text = guide.render(corpus)
+    assert not [g for g in gone if g in text], off
+    assert all(k in text for k in kept)
+    assert "\n\n\n" not in text, "a block of whole lines leaves no blank line"
 
 
 def test_take_if_owed_sends_the_guide_once_to_eight_callers_at_once(corpus):

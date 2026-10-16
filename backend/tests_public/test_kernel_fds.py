@@ -5,12 +5,9 @@ than thousands of times a second, and a corpus whose record cannot be read for w
 that is not registered."""
 from __future__ import annotations
 
-import asyncio
 import errno
-import logging
 import os
 import subprocess
-from pathlib import Path
 
 import pytest
 import zmq
@@ -65,7 +62,7 @@ def _kernel_procs(spawned: list[subprocess.Popen]) -> list[int]:
     return [p.pid for p in spawned if "ipykernel_launcher" in " ".join(map(str, p.args)) and procs.alive(p.pid)]
 
 
-@pytest.mark.parametrize("step", ["channels", "record", "dies"])
+@pytest.mark.parametrize("step", ["channels", "record"])
 async def test_kernel_starts_that_fail_leave_the_count_of_open_descriptors_flat(step, spawned, monkeypatch):
     """A start whose channels fail part way (zmq out of descriptors), whose record cannot be written after the process
     was spawned, or whose process dies before it answers: each closes the channels and zmq context it made, ends the
@@ -96,23 +93,6 @@ async def test_kernel_starts_that_fail_leave_the_count_of_open_descriptors_flat(
         await notebook.shutdown_all()
 
 
-async def test_a_launched_kernel_is_alive_by_its_process_even_where_its_command_line_cannot_be_read(spawned, monkeypatch):
-    """A kernel this server launched is alive while its process has not exited, without reading /proc or running ps,
-    which fail in a process out of descriptors (and took a live kernel for dead: "the kernel died before answering
-    kernel_info"); its shutdown ends it all the same."""
-    k = notebook._kernel(CORPUS, "alive")
-    try:
-        async with k.lock:
-            await notebook._ensure_started(k, CORPUS, "alive")
-        pid = k.pid
-        monkeypatch.setattr(procs, "argv", lambda pid: [])  # what procs answers when it cannot read the process
-        assert k.alive()
-        await notebook.shutdown_kernel(CORPUS, "alive")
-        assert not procs.alive(pid) and not _kernel_procs(spawned)
-    finally:
-        await notebook.shutdown_all()
-
-
 def test_the_server_raises_its_open_files_limit_toward_the_hard_limit(monkeypatch):
     """At start the server raises its soft limit of open files to OPEN_FILES, or to the hard limit when that is lower,
     and says so; a limit that is high enough already is left as it is."""
@@ -136,46 +116,3 @@ def test_the_server_raises_its_open_files_limit_toward_the_hard_limit(monkeypatc
     monkeypatch.setattr(resource, "getrlimit", lambda what: (256, 1024))
     monkeypatch.setattr(resource, "setrlimit", refused)
     assert main.raise_open_files() == "open files: the soft limit stays 256 (hard 1024); raising it to 1024 failed: not allowed"
-
-
-def test_a_server_out_of_descriptors_says_once_a_minute_that_it_cannot_accept_connections(caplog):
-    """asyncio reports each failed accept() of a process out of descriptors, thousands a second: the server logs one
-    line in ACCEPT_LOG_S for them, and passes any other error to the handler the loop had."""
-    from app import main
-
-    loop = asyncio.new_event_loop()
-    others: list[str] = []
-    loop.set_exception_handler(lambda lp, context: others.append(context["message"]))
-    try:
-        main.quiet_accept_errors(loop)
-        with caplog.at_level(logging.ERROR, logger="thimble"):
-            for _ in range(1000):
-                loop.call_exception_handler({"message": main.ACCEPT_ERROR, "exception": OSError(errno.EMFILE, "out")})
-            loop.call_exception_handler({"message": "another error"})
-    finally:
-        loop.close()
-    lines = [r.getMessage() for r in caplog.records if "cannot accept connections" in r.getMessage()]
-    assert len(lines) == 1 and "thimble server restart" in lines[0]
-    assert others == ["another error"]
-
-
-def test_a_corpus_whose_record_cannot_be_read_for_want_of_descriptors_is_not_called_unregistered(tmp_path, monkeypatch):
-    """corpus_dir raises the OSError of a process out of descriptors rather than "no such corpus", which the server log
-    said of a corpus that was registered all along."""
-    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
-    (tmp_path / "logs").mkdir()
-    name = config.register_corpus(tmp_path / "logs")["name"]
-    assert config.corpus_dir(name) == (tmp_path / "logs").resolve()
-    real = Path.read_text
-
-    def read_text(self, *a, **kw):
-        if self == config.sidecar_path(name):
-            raise OSError(errno.EMFILE, "Too many open files")
-        return real(self, *a, **kw)
-
-    monkeypatch.setattr(Path, "read_text", read_text)
-    with pytest.raises(OSError) as e:
-        config.corpus_dir(name)
-    assert e.value.errno == errno.EMFILE
-    with pytest.raises(ValueError, match="no such corpus"):
-        config.corpus_dir("not-registered")

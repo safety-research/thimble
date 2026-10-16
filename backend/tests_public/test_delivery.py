@@ -3,7 +3,7 @@ one watcher, in flight until acknowledged, a message main has not got yet shows 
 PermissionRequest hook's note is answered at once with no decision while its prompt shows on main's card, which the
 browser cannot answer (0.9.0: Claude Code asks in the terminal). The server answers a hook route only to a request that
 proves the token, and the hooks, run against a stand-in server, do nothing without server.json or with a server that
-cannot prove the token, and never print a permission decision."""
+cannot prove the token, never print a permission decision, and reach the local server past a shell's proxy."""
 from __future__ import annotations
 
 import asyncio
@@ -299,6 +299,22 @@ def test_main_s_stop_hook_shows_the_link_thimble_up_left_once_and_only_as_it_end
         assert json.loads(_watch(tmp_path, stand.port, stop, "--mode").stdout) == {
             "systemMessage": "thimble: http://127.0.0.1:8300/#p=c0de"}
         assert stand.seen[-2:][0] == ("POST", "/api/ui/pair", {"ws": ""}), "the start page's code"
+    finally:
+        stand.close()
+
+
+def test_the_watcher_reaches_the_local_server_past_a_shell_s_proxy(tmp_path):
+    """A shell's HTTP_PROXY would send urllib's requests to 127.0.0.1 through the proxy: the watcher opens its requests
+    without one (LOOPBACK), so the mode hook still reaches the server and the Stop hook gets its code."""
+    link = "http://127.0.0.1:8300/?ws=mini"
+    (tmp_path / "thome" / "links").mkdir(parents=True)
+    (tmp_path / "thome" / "links" / SID).write_text(link)
+    stop = {"session_id": SID, "cwd": "/data/mini", "hook_event_name": "Stop", "permission_mode": "default"}
+    stand = _Stand([], mode=(200, {"terminal": "thimble: the line"}))
+    proxy = {"HTTP_PROXY": "http://127.0.0.1:9", "http_proxy": "http://127.0.0.1:9", "NO_PROXY": "", "no_proxy": ""}
+    try:
+        out = _watch(tmp_path, stand.port, stop, "--mode", extra=proxy).stdout
+        assert json.loads(out) == {"systemMessage": f"thimble: {link}#p=c0de\nthimble: the line"}
     finally:
         stand.close()
 

@@ -7,8 +7,7 @@ UTF-16 code units comes back whole uncounted; past that Read counts its tokens, 
 gives only the first lines and an offset/limit Read fails. No tokenizer runs here, so a text's tokens are its code units
 times the tokens a character that Read counted in a live 2.1.300 session (claude-opus-5-5): Chinese 42,463 tokens for
 39,912 characters (a partial view, lines 1-348 of 697), and a 36-line window of a Chinese digest 40,461 for 36,990 (an
-error). Chinese is the densest text measured, past one token a character. test_check_subagents imports ZH and
-read_returns_whole."""
+error). Chinese is the densest text measured, past one token a character."""
 from __future__ import annotations
 
 from app import critique_session, read_parts
@@ -24,6 +23,16 @@ def read_returns_whole(text: str, kind: str) -> bool:
     """Whether one Read call of Claude Code 2.1.300 returns `text`, of a kind TOKENS_PER_CHAR measured, whole."""
     units = len(text.encode("utf-16-le")) // 2
     return units <= READ_UNCOUNTED_UNITS or units * TOKENS_PER_CHAR[kind] <= READ_TOKEN_CAP
+
+
+def test_cut_at_line_ends_and_rejoin_exactly():
+    text = "short\n" + "a" * 250 + "\n" + "tail\n"
+    parts = read_parts.cut(text, limit=100)
+    assert "".join(parts) == text
+    assert all(len(p) <= 100 for p in parts)
+    assert parts[0] == "short\n", "a line that does not fit the open part starts the next one"
+    assert parts[1] == "a" * 100 and parts[2] == "a" * 100, "a line past the cap alone is cut mid-line"
+    assert read_parts.cut("", limit=100) == [""]
 
 
 def test_write_puts_the_parts_beside_the_first_file_and_a_shorter_text_removes_only_their_extra_files(tmp_path,

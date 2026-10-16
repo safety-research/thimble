@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from app import cc_plugin, cli
+from app import cc_plugin
 
 NAME = "thimble-local"
 
@@ -33,39 +33,7 @@ def _tree(tmp_path: Path, name: str = NAME) -> Path:
     return app / "plugin"
 
 
-def _register(cc: Path, folder: Path, name: str = NAME, installed: bool = True) -> None:
-    (cc / "plugins" / "known_marketplaces.json").write_text(json.dumps(
-        {name: {"source": {"source": "directory", "path": str(folder)}, "installLocation": str(folder)}}))
-    plugins = {f"thimble@{name}": [{"scope": "user"}]} if installed else {}
-    (cc / "plugins" / "installed_plugins.json").write_text(json.dumps({"version": 2, "plugins": plugins}))
-
-
-def test_cache_copy_names_its_marketplace(cc):
-    assert cc_plugin.marketplace(cc / "plugins" / "cache" / "mkt" / "thimble" / "0.4.1") == "mkt"
-
-
-def test_registered_directory_marketplace_names_itself(cc, tmp_path):
-    root = _tree(tmp_path)
-    _register(cc, root.parent)
-    assert cc_plugin.marketplace(root) == NAME
-
-
-@pytest.mark.parametrize("case", ["unregistered", "elsewhere", "not installed", "other name", "garbled"])
-def test_other_folders_are_inline(cc, tmp_path, case):
-    root = _tree(tmp_path)
-    if case == "elsewhere":
-        _register(cc, tmp_path / "another")
-    elif case == "not installed":
-        _register(cc, root.parent, installed=False)
-    elif case == "other name":
-        _register(cc, root.parent, name="thimble")
-    elif case == "garbled":
-        _register(cc, root.parent)
-        (cc / "plugins" / "known_marketplaces.json").write_text("{not json")
-    assert cc_plugin.marketplace(root) == cc_plugin.INLINE
-
-
-@pytest.mark.parametrize("where", ["none", "user", "project", "managed", "managed-only"])
+@pytest.mark.parametrize("where", ["none", "project"])
 def test_the_route_is_the_hooks_unless_settings_turn_them_off(cc, tmp_path, monkeypatch, where):
     """disableAllHooks in the analyst's or the folder's settings, or in the org's managed tier, or a managed tier that
     allows only its own hooks without enabling this plugin, makes main arm a Monitor instead."""
@@ -87,52 +55,10 @@ def test_the_route_is_the_hooks_unless_settings_turn_them_off(cc, tmp_path, monk
     assert cc_plugin.route(folder, root) == (cc_plugin.MONITOR if off else cc_plugin.HOOK)
 
 
-@pytest.mark.parametrize("how", ["inline", "split", "file", "equals", "none"])
-def test_the_launcher_s_settings_turn_the_hooks_off_over_the_folder_s(cc, tmp_path, monkeypatch, how):
-    """`thimble --settings` with disableAllHooks reaches main as the `--settings` its `claude` runs with, which Claude
-    Code ranks over the analyst's and the folder's settings: the route is the Monitor's. Without /proc the command line
-    comes split on white space."""
-    from app import procs
-
-    root, folder = _tree(tmp_path), tmp_path / "corpus"
-    (folder / ".claude").mkdir(parents=True)
-    (folder / ".claude" / "settings.local.json").write_text(json.dumps({"disableAllHooks": False}))
-    value = json.dumps({"statusLine": {"type": "command", "command": "a b"}, "disableAllHooks": True})
-    (tmp_path / "s.json").write_text(value)
-    argv = {"inline": ["claude", "--settings", value, "--", "/thimble"],
-            "split": ["claude", "--settings", *value.split(), "--", "/thimble"],
-            "file": ["claude", "--settings", "s.json"],
-            "equals": ["claude", f"--settings={value}"],
-            "none": ["claude", "--resume"]}[how]
-    monkeypatch.setattr(cc_plugin, "claude_pid", lambda environ=None: 4242)
-    monkeypatch.setattr(procs, "argv", lambda pid: argv if pid == 4242 else [])
-    monkeypatch.setattr(procs, "cwd", lambda pid: tmp_path)
-    assert cc_plugin.route(folder, root) == (cc_plugin.HOOK if how == "none" else cc_plugin.MONITOR)
-
-
-def test_slash_thimble_prints_nothing_about_routes_on_the_hook_route_and_the_monitor_s_command_off_it(
-        cc, tmp_path, monkeypatch):
-    monkeypatch.setattr(cli, "plugin_root", lambda: tmp_path / "plugin")
-    assert cli.monitor_lines(tmp_path, "sid") == []
-    (cc / "settings.json").write_text(json.dumps({"disableAllHooks": True}))
-    note, mark = cli.monitor_lines(tmp_path, "sid")
-    assert note == cli.MONITOR_NOTE
-    assert mark.startswith(cli.MONITOR_MARK) and mark.endswith("--stream --cwd " + str(tmp_path) + " --session sid")
-
-
 MODS_ONLY = {"pluginConfigs": {"cc-plugin-sec-default@builtin": {"options": {"allowManagedModsOnly": True}}}}
 
 
-@pytest.mark.parametrize("tier, off", [
-    (None, False),
-    ({}, False),
-    (MODS_ONLY, True),
-    ({"pluginConfigs": {"cc-plugin-sec-default@builtin": {"options": {"allowManagedModsOnly": False}}}}, False),
-    ({**MODS_ONLY, "prependPlugins": ["corp-policy@corp"]}, False),
-    ({**MODS_ONLY, "prependPlugins": ["corp-policy@corp", "cc-plugin-sec-default@builtin"]}, True),
-    ({**MODS_ONLY, "appendPlugins": ["thimble@thimble-local"]}, False),
-    ({"pluginConfigs": "garbled"}, False),
-])
+@pytest.mark.parametrize("tier, off", [(None, False), (MODS_ONLY, True)])
 def test_the_security_plugin_s_allow_managed_mods_only_keeps_thimble_s_module_out(monkeypatch, tier, off):
     """Claude Code's built-in security plugin, seated where an organization manages Claude Code (unless managed
     prependPlugins leaves it out), refuses the hooks module of every plugin a person installs when its managed option

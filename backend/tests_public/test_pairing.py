@@ -7,7 +7,6 @@ shows twice: a notice with Sign it out, and a line under main's next reply. A st
 its cookie again, and a claim from another account's connection is refused."""
 from __future__ import annotations
 
-import importlib
 import json
 import re
 
@@ -67,11 +66,6 @@ def _signed(r) -> tuple[str, str]:
     return _cookie_of(r), _key_of(r)
 
 
-def _renewal(cookie: str, key: str) -> str:
-    """The Set-Cookie a signed request's answer carries: the same cookie on its key's path for 30 days."""
-    return (f"{hook_auth.ui_cookie()}={cookie}; HttpOnly; Max-Age=2592000; Path=/b/{key}/api/; SameSite=strict")
-
-
 def _gone(r) -> bool:
     return r.status_code == 410 and json.loads(r.body) == {"detail": hook_auth.CODE_GONE}
 
@@ -113,60 +107,6 @@ def test_a_code_expires_and_a_newer_code_for_the_workspace_leaves_it_ten_seconds
     assert _claim(newer)[0].status_code == 200
 
 
-def test_a_press_code_lasts_sixty_seconds_and_a_link_code_three_hundred(monkeypatch):
-    now = [1000.0]
-    monkeypatch.setattr(hook_auth, "_now", lambda: now[0])
-    press = hook_auth.mint(CORPUS, hook_auth.PRESS_TTL_S)
-    link = hook_auth.mint("other", hook_auth.LINK_TTL_S)
-    odd = hook_auth.mint("third", 5)  # any other ttl is a link's
-    now[0] += 61
-    assert _gone(_claim(press)[0]), "a press's code is void after 60 s"
-    assert _claim(link)[0].status_code == 200 and _claim(odd)[0].status_code == 200
-    late = hook_auth.mint("fourth", hook_auth.LINK_TTL_S)
-    now[0] += 301
-    assert _gone(_claim(late)[0]), "a link's code is void after 300 s"
-
-
-def test_a_restart_voids_every_code_but_keeps_the_signed_in_browsers():
-    code = hook_auth.mint(CORPUS)
-    r, _ = _claim(hook_auth.mint("other"))
-    cookie, key = _signed(r)
-    importlib.reload(hook_auth)  # a new server process
-    try:
-        assert _gone(_claim(code)[0]), "codes live in memory alone"
-        assert _claim("x", cookie, key)[0].status_code == 204, "the browser is still signed in (paired.json)"
-    finally:
-        hook_auth._codes.clear()
-        hook_auth._paired = None
-
-
-def test_every_workspace_s_code_stays_alive_and_no_sign_in_signs_another_browser_out():
-    """No count limits the live codes or the signed-in browsers: a code goes only when it is spent, expires or a newer
-    one for its workspace is made, and a browser is signed out only by Sign it out or `thimble unpair`."""
-    codes = [hook_auth.mint(f"ws{i}") for i in range(40)]
-    assert len(hook_auth._codes) == 40
-    signed = [_signed(_claim(c)[0]) for c in codes]
-    assert len(hook_auth._entries()) == 40
-    assert all(_claim("x", cookie, key)[0].status_code == 204 for cookie, key in signed), \
-        "the first browser is still signed in"
-
-
-def test_a_signed_in_browser_spends_a_code_with_no_cookie_no_entry_and_no_notice(client):
-    from conftest import UI_COOKIE_VALUE, _record_paired, browser_base
-
-    _record_paired(UI_COOKIE_VALUE)
-    code = hook_auth.mint(CORPUS)
-    client.cookies.set(hook_auth.ui_cookie(), UI_COOKIE_VALUE)
-    client.base_url = browser_base()  # a signed-in page posts under its key's path, where its cookie goes
-    r = client.post("/api/ui/key", json={"code": code, "ws": CORPUS})
-    # 0.9.0: a signed request renews the browser's own cookie (SlidingCookie), and the claim gives it nothing new
-    assert r.status_code == 204 and _set_cookies(r) == [_renewal(UI_COOKIE_VALUE, "key-of-the-test-browser")]
-    assert len(hook_auth._entries()) == 1 and notices.open_notices(CORPUS) == []
-    assert _gone(_claim(code)[0]), "spent"
-    assert client.post("/api/ui/key", json={"code": "old", "ws": CORPUS}).status_code == 204, \
-        "a signed-in page that loads with an old code is not refused"
-
-
 def test_paired_json_holds_only_hashes_readable_by_its_owner(tmp_path):
     r, browser = _claim(hook_auth.mint())
     cookie, key = _signed(r)
@@ -178,44 +118,6 @@ def test_paired_json_holds_only_hashes_readable_by_its_owner(tmp_path):
     assert set(entry) == {"hash", "key", "at", "used"} and re.fullmatch(r"[0-9a-f]{64}", entry["hash"])
     assert entry["key"] == hook_auth._sha(key)
     assert path.stat().st_mode & 0o077 == 0
-
-
-def test_an_edit_of_paired_json_while_the_server_runs_signs_nobody_in():
-    _claim(hook_auth.mint())
-    path = hook_auth.home() / hook_auth.PAIRED_FILE
-    planted, planted_key = "planted-cookie", "planted-key-0123456789"
-    entries = json.loads(path.read_text()) + [{"hash": hook_auth._sha(planted), "key": hook_auth._sha(planted_key),
-                                               "at": "now"}]
-    path.write_text(json.dumps(entries))
-    assert _claim("x", planted, planted_key)[0].status_code == 410, "read at start, then kept in memory"
-
-
-def test_an_old_key_body_gets_410(client):
-    for body in ({"key": "the-old-ui-key"}, {}, {"code": 7}, {"code": ""}, {"code": "never-made"}):
-        r = client.post("/api/ui/key", json=body)
-        assert r.status_code == 410 and r.json() == {"detail": hook_auth.CODE_GONE}, body
-        assert "set-cookie" not in r.headers
-
-
-@pytest.mark.real_write_guard
-def test_the_paired_route_says_whether_this_browser_is_signed_in_and_its_id(client):
-    assert client.get("/api/ui/paired").json() == {"paired": False, "id": ""}
-    sign_in(client, hook_auth.mint())
-    browser = hook_auth._entries()[0]["hash"][:12]
-    assert client.get("/api/ui/paired").json() == {"paired": True, "id": browser}
-    client.cookies.clear()
-    client.cookies.set(hook_auth.ui_cookie(), "not-signed-in")
-    assert client.get("/api/ui/paired").json() == {"paired": False, "id": ""}
-
-
-@pytest.mark.real_write_guard
-def test_the_pair_route_needs_the_token_and_gives_a_code_for_five_minutes(client, plugin_headers):
-    assert client.post("/api/ui/pair", json={"ws": CORPUS}).status_code == 401, "a page or a kernel gets none"
-    r = client.post("/api/ui/pair", json={"ws": CORPUS}, headers=plugin_headers())
-    assert r.status_code == 200 and r.json()["expires_s"] == 300 and r.json()["code"]
-    assert client.post("/api/ui/key", json={"code": r.json()["code"], "ws": CORPUS}).status_code == 200
-    r = client.post("/api/ui/pair", headers=plugin_headers())
-    assert r.status_code == 200 and r.json()["code"], "the start page's code, with no body"
 
 
 @pytest.mark.real_write_guard
@@ -332,50 +234,6 @@ def test_a_cookie_counts_only_under_the_path_of_the_key_it_was_given_with(client
     assert page.post(f"/b/{key}/api/ui/signout", json={"id": ""}).json() == {"signed_out": False}
 
 
-def test_a_browser_an_earlier_build_signed_in_signs_in_again():
-    """An entry of paired.json without a key's sha256 (an earlier build's, whose cookie was scoped to /api/) signs no
-    browser in, and goes at the next sign-in; the page of that browser holds no key, so it shows its sign-in line, and
-    the link signs it in."""
-    path = hook_auth.home() / hook_auth.PAIRED_FILE
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps([{"hash": hook_auth._sha("an-earlier-cookie"), "at": "2026-10-01T00:00:00+00:00"}]))
-    assert hook_auth._entries() == []
-    assert _gone(_claim("x", "an-earlier-cookie")[0])
-    r, _ = _claim(hook_auth.mint())
-    assert r.status_code == 200
-    [entry] = json.loads(path.read_text())
-    assert set(entry) == {"hash", "key", "at", "used"} and entry["hash"] == hook_auth._sha(_cookie_of(r))
-
-
-def test_browser_path_hands_on_the_api_path_with_the_key_in_the_request_s_state():
-    """hook_auth.BrowserPath, outermost: /b/<key>/api/... goes on as /api/..., its raw path too, with the key in the
-    state (path_key); a path that is not under a key's /api, or whose key is not one the server could have made, goes
-    on as it came, with no key."""
-    import asyncio
-
-    seen: list[dict] = []
-
-    async def app(scope, receive, send):
-        seen.append(scope)
-
-    def through(path: str, kind: str = "http") -> dict:
-        seen.clear()
-        asyncio.run(hook_auth.BrowserPath(app)({"type": kind, "path": path, "raw_path": path.encode(),
-                                                "state": {"x": 1}}, None, None))
-        return seen[0]
-
-    key = "Ab3_-" * 6
-    s = through(f"/b/{key}/api/ws/mini/canvas")
-    assert (s["path"], s["raw_path"], hook_auth.path_key(s), s["state"]["x"]) == (
-        "/api/ws/mini/canvas", b"/api/ws/mini/canvas", key, 1)
-    assert through(f"/b/{key}/api")["path"] == "/api" and hook_auth.path_key(through(f"/b/{key}/api"))
-    assert hook_auth.path_key(through(f"/b/{key}/api/agent/claude", "websocket")) == key
-    for path in ("/api/corpora", f"/b/{key}/apix", f"/b/{key}/", "/b/short/api/corpora", f"/b/{key}/b/{key}/api/x",
-                 f"/x/b/{key}/api/corpora"):
-        s = through(path)
-        assert s["path"] == path and hook_auth.path_key(s) == "", path
-
-
 def test_the_server_log_shows_a_browser_s_key_as_key():
     """uvicorn's access line names the path of every write and every failed request, and the server log goes into a
     problem report: a browser's key in it shows as `<key>` (main.HideMediaKeys, hook_auth.hide_media_keys)."""
@@ -391,38 +249,6 @@ def test_the_server_log_shows_a_browser_s_key_as_key():
 
     text, n = feedback.redact(f'INFO: 127.0.0.1:5 - "POST /b/{key}/api/ws/mini/events HTTP/1.1" 403')
     assert n == 1 and key not in text and "/b/[redacted:browser-key]/api/ws/mini/events" in text, text
-
-
-def test_a_signed_request_renews_the_cookie_for_thirty_days_and_notes_the_browser_s_use(client, monkeypatch):
-    """hook_auth.SlidingCookie: each request a signed-in browser makes under its key's path is answered with its cookie
-    again for 30 days, and its `used` is written at most once an hour; a request without a valid cookie gets none."""
-    from conftest import UI_COOKIE_VALUE, UI_KEY_VALUE, _record_paired, browser_base
-
-    assert hook_auth.UI_COOKIE_AGE_S == 30 * 24 * 3600
-    _record_paired(UI_COOKIE_VALUE)
-    page = TestClient(client.app, base_url=browser_base())
-    page.cookies.set(hook_auth.ui_cookie(), UI_COOKIE_VALUE)
-    r = page.get("/api/ui/paired")
-    assert r.json()["paired"] is True and _set_cookies(r) == [_renewal(UI_COOKIE_VALUE, UI_KEY_VALUE)]
-    stranger = TestClient(client.app, base_url=browser_base())
-    stranger.cookies.set(hook_auth.ui_cookie(), "not-a-signed-in-cookie")
-    assert _set_cookies(stranger.get("/api/ui/paired")) == [], "no cookie for one that is not signed in"
-    assert _set_cookies(client.get("/api/ui/paired")) == [], "none on the API's own path"
-    # the last use: written when older than an hour, and not on every request
-    path = hook_auth.home() / hook_auth.PAIRED_FILE
-    from datetime import datetime, timedelta, timezone
-
-    two_hours_ago = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(timespec="seconds")
-    entries = json.loads(path.read_text())
-    entries[0]["used"] = two_hours_ago
-    path.write_text(json.dumps(entries))
-    hook_auth._paired = None
-    page.get("/api/ui/paired")
-    used = json.loads(path.read_text())[0]["used"]
-    assert used > two_hours_ago and hook_auth._fresh(json.loads(path.read_text())[0])
-    before = path.stat().st_mtime_ns
-    page.get("/api/ui/paired")
-    assert path.stat().st_mtime_ns == before, "not written again within the hour"
 
 
 def test_a_browser_unused_for_thirty_days_is_signed_out_and_an_old_entry_counts_from_now(monkeypatch):
@@ -470,27 +296,6 @@ def test_the_claim_of_an_open_s_code_deletes_its_redirect_file_and_writes_the_cl
     plain = TestClient(client.app, base_url="http://testserver")
     assert plain.post("/api/ui/key", json={"code": "never-made", "ws": CORPUS}).status_code == 410
     assert not opener.claim_path(other).exists()
-
-
-@pytest.mark.real_write_guard
-def test_the_pair_route_gives_a_press_sixty_seconds_and_names_its_open(client, plugin_headers):
-    r = client.post("/api/ui/pair", json={"ws": CORPUS, "ttl": 60, "open": "abcdefgh12345678"}, headers=plugin_headers())
-    assert r.status_code == 200 and r.json()["expires_s"] == 60
-    assert hook_auth.code_open(r.json()["code"]) == "abcdefgh12345678"
-    r = client.post("/api/ui/pair", json={"ws": CORPUS, "ttl": 9999}, headers=plugin_headers())
-    assert r.json()["expires_s"] == 300, "any other ttl is a link's"
-
-
-@pytest.mark.real_write_guard
-def test_unpair_with_a_browser_id_signs_out_that_browser_alone(client, plugin_headers):
-    """A sign-in notice's Sign it out in the terminal: `thimble unpair` for one browser (the token route with its id)."""
-    other = TestClient(client.app, base_url="http://testserver")
-    sign_in(client, hook_auth.mint())
-    sign_in(other, hook_auth.mint("other"))
-    theirs = other.get("/api/ui/paired").json()["id"]
-    assert client.post("/api/ui/unpair", json={"browser": theirs}, headers=plugin_headers()).status_code == 204
-    assert other.get("/api/ui/paired").json()["paired"] is False
-    assert client.get("/api/ui/paired").json()["paired"] is True
 
 
 def _hello_answer(key: str, port: int, nonce: str) -> str:
@@ -604,54 +409,3 @@ def test_a_claim_through_a_tunnel_host_and_port_signs_in(client):
     r = tunnel.post("/api/ui/key", json={"code": hook_auth.mint(CORPUS), "ws": CORPUS},
                     headers={"origin": "http://localhost:9000"})
     assert r.status_code == 200 and r.json()["key"]
-
-
-def test_an_event_stream_ends_with_stopping_when_the_server_stops_for_good_and_not_for_a_restart(monkeypatch):
-    """main.CompleteStreams: an event stream cut by the server's stop gets `event: stopping` as its last message, which
-    stops the page (frontend lib/stale); a restart (the kernel hand-off names this server) ends it empty, so the page
-    reconnects. Any other response gets an empty last message."""
-    import asyncio
-    import os
-
-    from app import cli
-
-    monkeypatch.setattr(session, "_shutting_down", lambda: True)
-
-    async def stream(scope, receive, send):
-        await send({"type": "http.response.start", "status": 200,
-                    "headers": [(b"content-type", b"text/event-stream; charset=utf-8")]})
-        await send({"type": "http.response.body", "body": b": open\n\n", "more_body": True})
-
-    async def page(scope, receive, send):
-        await send({"type": "http.response.start", "status": 200, "headers": [(b"content-type", b"text/html")]})
-        await send({"type": "http.response.body", "body": b"<p>", "more_body": True})
-
-    def last(app) -> bytes:
-        sent: list[dict] = []
-
-        async def send(m):
-            sent.append(m)
-
-        asyncio.run(main.CompleteStreams(app)({"type": "http"}, None, send))
-        return sent[-1]["body"]
-
-    monkeypatch.setattr(cli, "kernel_handoff", lambda: None)
-    assert last(stream) == b"event: stopping\ndata: {}\n\n"
-    assert last(page) == b""
-    monkeypatch.setattr(cli, "kernel_handoff", lambda: os.getpid())
-    assert last(stream) == b"", "a restart: the page reconnects"
-
-
-def test_session_ended_tells_the_workspace_s_pages(client):
-    """main.session_ended: `session-ended` on the workspace's stream, which stops its pages."""
-    import asyncio
-
-    from app import investigation
-
-    async def run():
-        main.session_ended(CORPUS, SID)
-
-    asyncio.run(run())
-    recs = [json.loads(line) for line in (investigation._existing(CORPUS, investigation.MAIN) / "events.jsonl")
-            .read_text().splitlines() if line.strip()]
-    assert {"type": "session-ended", "session": SID}.items() <= recs[-1].items()

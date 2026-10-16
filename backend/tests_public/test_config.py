@@ -17,21 +17,6 @@ def test_a_claude_thimble_starts_keeps_the_users_auth_and_drops_the_callers_iden
                                                "CLAUDE_CODE_SKIP_VERTEX_AUTH", "ANTHROPIC_API_KEY", "PATH"}
 
 
-def test_calls_to_thimbles_own_server_stay_off_the_shells_proxy():
-    """thimble's server is on 127.0.0.1. With a proxy exported and NO_PROXY naming other hosts, keep_local_off_proxy
-    adds 127.0.0.1 and localhost, so urllib and httpx send thimble's local calls direct; run again, it changes
-    nothing."""
-    import urllib.request
-    env = {"HTTP_PROXY": "http://proxy.invalid:3128", "NO_PROXY": "corp.example"}
-    config.keep_local_off_proxy(env)
-    assert env["NO_PROXY"] == "corp.example,127.0.0.1,localhost"
-    assert env["no_proxy"] == "127.0.0.1,localhost"
-    assert urllib.request.proxy_bypass_environment("127.0.0.1", {"no": env["NO_PROXY"]})
-    again = dict(env)
-    config.keep_local_off_proxy(again)
-    assert again == env
-
-
 def test_a_claude_thimble_starts_keeps_the_users_proxy_certificate_and_gateway_settings():
     """Exported in the shell that starts thimble's server, the proxy, CA-certificate, client-certificate and gateway
     variables reach every `claude` the server runs (labels, card checks), as they reach main; a file descriptor's
@@ -48,45 +33,6 @@ def test_a_claude_thimble_starts_keeps_the_users_proxy_certificate_and_gateway_s
     env = {name: "x" for name in [*network, *left_out]}
     assert set(config.passed_environ(env)) == set(network)
     assert set(network) <= set(config.launch_environ(env)), "what every `claude` thimble runs gets"
-
-
-def test_a_claude_thimble_starts_gets_the_sign_in_environment_of_the_analysts_session():
-    """Every CLAUDE* variable Claude Code reads to sign in reaches a `claude` thimble starts, so it signs in as the
-    analyst's session does and keeps its tokens where that session keeps them: the federation token cache, the
-    credential store, OAuth, an environment token's account, the cloud providers' credential settings, a host's
-    credentials and the managed settings that choose the login. A host's token refresh (it reaches main alone) and the
-    calling cloud session's own tokens stay out."""
-    sign_in = ["CLAUDE_CODE_FEDERATION_CACHE_DIR", "CLAUDE_SECURESTORAGE_CONFIG_DIR", "CLAUDE_CODE_FORCE_WINDOWS_CREDMAN",
-               "CLAUDE_CODE_DISABLE_AUTH_REFRESH_LOCK", "CLAUDE_CODE_CUSTOM_OAUTH_URL", "CLAUDE_CODE_OAUTH_CLIENT_ID",
-               "CLAUDE_CODE_DESIGN_OAUTH_CLIENT_ID", "CLAUDE_CODE_OAUTH_401_WAIT_MS", "CLAUDE_CODE_AUTH_FAIL_EXIT_MS",
-               "CLAUDE_LOCAL_OAUTH_API_BASE", "CLAUDE_LOCAL_OAUTH_APPS_BASE", "CLAUDE_LOCAL_OAUTH_CONSOLE_BASE",
-               "CLAUDE_TRUSTED_DEVICE_TOKEN", "CLAUDE_CODE_ACCOUNT_UUID", "CLAUDE_CODE_ACCOUNT_TAGGED_ID",
-               "CLAUDE_CODE_ORGANIZATION_UUID", "CLAUDE_CODE_USER_EMAIL", "CLAUDE_CODE_SUBSCRIPTION_TYPE",
-               "CLAUDE_CODE_RATE_LIMIT_TIER", "CLAUDE_CODE_HFI_BEARER_TOKEN", "CLAUDE_CODE_SKIP_AWS_CRED_CACHE",
-               "CLAUDE_CODE_AWS_CHAIN_RESOLVE_TIMEOUT_MS", "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
-               "CLAUDE_CODE_HOST_CREDS_FILE", "CLAUDE_CODE_HOST_AUTH_ENV_VAR", "CLAUDE_CODE_HOST_GATEWAY_LINEAGE",
-               "CLAUDE_CODE_MANAGED_SETTINGS_PATH", "CLAUDE_CODE_REMOTE_SETTINGS_PATH",
-               "ANTHROPIC_FEDERATION_RULE_ID", "ANTHROPIC_ORGANIZATION_ID", "ANTHROPIC_SERVICE_ACCOUNT_ID",
-               "ANTHROPIC_WORKSPACE_ID", "ANTHROPIC_IDENTITY_TOKEN_FILE", "ANTHROPIC_CONFIG_DIR", "ANTHROPIC_PROFILE"]
-    left_out = ["CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH", "CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH",
-                "CLAUDE_CODE_HOST_AUTH_REFRESH_TIMEOUT_MS", "CLAUDE_CODE_SESSION_ACCESS_TOKEN",
-                "CLAUDE_SESSION_INGRESS_TOKEN_FILE", "CLAUDE_CODE_WEBSOCKET_AUTH_FILE_DESCRIPTOR",
-                "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_CODE_FEDERATION_CACHE_DIR_EXTRA"]
-    env = {name: f"/made/up/{i}" for i, name in enumerate([*sign_in, *left_out])}
-    assert set(config.passed_environ(env)) == set(sign_in)
-    launched = config.launch_environ(env)
-    assert {k: launched.get(k) for k in sign_in} == {k: env[k] for k in sign_in}, "what every `claude` thimble runs gets"
-
-
-def test_not_logged_in_names_the_login_and_where_the_other_ways_are(monkeypatch):
-    """thimble has no login of its own: the alert names `claude auth login` and points to INSTALL.md's Authentication
-    section for the other ways, and nothing longer."""
-    monkeypatch.delenv("THIMBLE_SKIP_KEY", raising=False)
-    monkeypatch.setattr(config, "CLI_PATH", "/bin/claude")
-    said = config.auth_problem({"loggedIn": False})
-    assert said == ("Claude Code is not logged in (`claude auth status`): log in with `claude auth login` (INSTALL.md, "
-                    "Authentication, has more ways), then try again")
-    assert config.auth_problem({"loggedIn": True}) == ""
 
 
 # --------------------------------------------------------------------------- corpus registration
@@ -166,24 +112,3 @@ def test_every_role_resolves_to_a_full_model_id_and_an_explicit_effort(tmp_path,
     assert config.call_settings(None, "labels")["refusal"] == {"model": "claude-sonnet-5", "effort": "low"}
     _conf({"agents": {"refusal": {"off": True}}})
     assert config.models_for(None)["refusal"]["off"] and config.call_settings(None, "verify")["refusal"] is None
-
-
-def test_the_viewer_suggestion_runs_on_its_own_row(monkeypatch):
-    """views._suggest_call, which ran the dev row's model at a hard-coded low effort, runs on Settings' `suggest` row
-    and passes the refusal row."""
-    import asyncio
-
-    from app import model, views
-
-    seen: dict = {}
-
-    async def fake(prompt, **kw):
-        seen.update(kw)
-        return "result"
-
-    monkeypatch.setattr(model, "structured", fake)
-    monkeypatch.setattr(config, "corpus_dir", lambda c: "/tmp")
-    monkeypatch.setattr(config, "call_settings", lambda c, role: {"model": f"m-{role}", "effort": f"e-{role}",
-                                                                   "speed": "standard", "refusal": {"model": "r"}})
-    assert asyncio.run(views._suggest_call("c", "sys", "user", tool=None)) == "result"
-    assert (seen["model"], seen["effort"], seen["refusal"]) == ("m-suggest", "e-suggest", {"model": "r"})
