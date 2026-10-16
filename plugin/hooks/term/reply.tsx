@@ -29,12 +29,12 @@ import type { TermCard, TermLinks, TermVerdict } from './types'
 import { blockClaims, blockLayout, chipLook, citeLabel, passageIn, plainCites, richMarkdown, showsValue, streamLink, tintCells } from './cite'
 import type { ChipView, Tint } from './cite'
 import { LINK } from './chrome'
-import { cardLayout, cut, labelHead, placeWords, wrapRows } from './draw'
+import { cardLayout, labelHead, placeWords, titleLines, wrapRows } from './draw'
 import type { CardData, CardExample } from './draw'
 import { focusFromRef, focusItem } from './anim'
 import type { Focus } from './anim'
 import type { Target } from './gestures'
-import { bareCard, cardWords, chipPlace, cid, questionOf, citations, clip, curlyQuotes, isChip, labelRef, labelRunning, mdPieces, noteLabelName, noteQuestion, outputLine, parseReply, quoted, sectionsOf } from './lib'
+import { bareCard, cardTag, cardWords, chipPlace, cid, questionOf, citations, clip, curlyQuotes, isChip, labelRef, labelRunning, mdPieces, noteLabelName, noteQuestion, outputLine, parseReply, quoted, sectionsOf } from './lib'
 import { linesEl } from './lines'
 import type { Block, Citation, Run } from './lib'
 import { COLORS, FLAG, labelHex, paintLines, themeNow, tintOf } from './paint'
@@ -51,6 +51,21 @@ import type { ThimbleLabel } from './cell'
 export const MARGIN = 2
 /** A reply's margin in the panel (a side thread's answer, a document): its marks at M, its text at A0. */
 export const PANEL_MARGIN = 2
+
+/** The mark beside a passage or a card a side thread can be asked about, dim; the pointer turns it into a "?". */
+export const DOT = '·'
+
+/** The "?" that asks a side thread: blue under the pointer, drawn out of the flow over the cell's glyph (the ⏺ or a
+ *  passage's dot) and shown only while the pointer is over the row, which the row's keyed Box scopes (so its own Box
+ *  takes no key: a keyed one would scope its own hover, and a hidden Box is never under the pointer). */
+function askMark(cx: Ctx, e: ResolveInput, key: string, press: () => void): RenderElement {
+  const { Box, Button } = cx.els(e)
+  return (
+    <Box width={1} display="none" hover={{ display: 'flex' }} position="absolute" top={0} left={0}>
+      <Button key={key} label="?" plain hover={{ color: LINK }} onPress={press} />
+    </Box>
+  )
+}
 
 const CARD_REF = /^(?:card|cell):([A-Za-z0-9_-]+)(?:@[A-Za-z0-9_]+)?(?:#(.*))?$/
 const CALL_REF = /^call:[A-Za-z0-9_-]+(?:#L(\d+)(?:-L?(\d+))?)?$/
@@ -420,20 +435,14 @@ export async function drawReply(cx: Ctx, e: ResolveInput, text: string, width: n
     return () => opts.ask!({ kind: 'sentence', text: words.slice(0, 1200) })
   }
   // the margin's mark: a blue ↳ once a thread was asked about the passage, which stays; else a blue "?" shown under the
-  // pointer, over the ⏺ on the reply's first row (`over`), which it hides while it shows
-  const markOf = async (ask: Ask | undefined, over: boolean): Promise<{ el: RenderElement; asked: boolean } | null> => {
+  // pointer over the cell's glyph, the ⏺ on the reply's first row and a dim dot on any other passage's, which it hides
+  // while it shows (Matt, 2026-10-16: "a dot that gets replaced with a question mark when you hover")
+  const markOf = async (ask: Ask | undefined): Promise<{ el: RenderElement; asked: boolean } | null> => {
     if (!ask || !live) return null
     const tid = opts.open ? await threadAbout(cx, ask.words) : ''
     if (tid) return { asked: true, el: linesEl(cx, e, `asked-${ask.key}`, [[{ s: '↳', fg: LINK }]], [{ y: 0, x0: 0, x1: 1, row: false, run: () => opts.open?.(tid) }], 1) }
     if (!ask.press) return null
-    return {
-      asked: false,
-      el: (
-        <Box width={1} display="none" hover={{ display: 'flex' }} {...(over ? { position: 'absolute' as const, top: 0, left: 0 } : {})}>
-          <Button key={`ask-${ask.key}`} label="?" plain hover={{ color: LINK }} onPress={ask.press} />
-        </Box>
-      ),
-    }
+    return { asked: false, el: askMark(cx, e, `ask-${ask.key}`, ask.press) }
   }
   // a block's row: its margin (⏺ on the reply's first, a passage's mark in its cell), then the block, filling the column.
   // A flag stands on the row of the block it names (`flag.row`), in its check's color, over a ↳ or a "?" on that row
@@ -441,24 +450,25 @@ export async function drawReply(cx: Ctx, e: ResolveInput, text: string, width: n
     const mark = lead
     lead = ' '
     const dot = mark.trim() !== ''
-    const q = await markOf(ask, dot)
+    const q = await markOf(ask)
     const content = (
       <Box flexDirection="column" width={cols} flexShrink={1}>
         {el}
       </Box>
     )
     const flagEl = flag ? linesEl(cx, e, `flag-${ask?.key ?? `${prefix}${n}`}`, [[{ s: FLAG, fg: flag.color }]], [{ y: 0, x0: 0, x1: 1, row: false, run: () => opts.check?.(flag.id) }], 1) : null
-    // a ↳ takes the ⏺'s cell; a "?" lies over it, shown only under the pointer
+    // a ↳ takes the cell; a "?" lies over the ⏺ or a passage's dot, shown only under the pointer
+    const glyph = q?.asked ? null : dot ? <Text>{mark}</Text> : q ? <Text dimColor>{DOT}</Text> : <Text> </Text>
     const first = (
       <Box key="m0" flexDirection="row">
-        {dot && !q?.asked ? <Text>{mark}</Text> : null}
-        {q?.el ?? (dot ? null : <Text> </Text>)}
+        {glyph}
+        {q?.el ?? null}
       </Box>
     )
     const margin = !flagEl ? (
       <Box width={M} flexShrink={0} flexDirection="row" marginTop={ask?.top ?? 0}>
-        {dot && !q?.asked ? <Text>{mark}</Text> : null}
-        {q?.el ?? (dot ? null : <Text> </Text>)}
+        {glyph}
+        {q?.el ?? null}
       </Box>
     ) : (
       <Box width={M} flexShrink={0} flexDirection="column" marginTop={ask?.top ?? 0}>
@@ -608,10 +618,11 @@ async function withQuotes(cx: Ctx, data: CardData): Promise<CardData> {
 export type CardOpts = { pane?: boolean; takeaway?: boolean; order?: number; in?: 'reply' | 'report'; focus?: Focus; clip?: { rows: number; more: () => void } }
 
 /** A card in a stream (a reply, a document, the panel), as Matt laid cards out (2026-10-07): a full round border in the
- *  rule grey with a cell of padding; inside, its title in bold, one blank row, then its plot or body directly, and below
- *  the plot everything else it shows: the readout and its state words, its label rows, its params (card.tsx draws
- *  these), then its takeaway, its citations as links. In the card pane the question is the panel's title. A card that
- *  cannot be read is one red line naming it by its place (`× card 2 cannot be drawn: …`), never by its id. */
+ *  rule grey with a cell of padding; inside, its title in bold, wrapped and never cut, with its id as its chips read it
+ *  (`card:<name>`) dim at the right of the first row, one blank row, then its plot or body directly, and below the plot
+ *  everything else it shows: the readout and its state words, its label rows, its params (card.tsx draws these), then
+ *  after a blank row its takeaway, its citations as links. In the card pane the question is the panel's title. A card
+ *  that cannot be read is one red line naming it by its place (`× card 2 cannot be drawn: …`), never by its id. */
 export async function cardBlock(cx: Ctx, e: ResolveInput, id: string, w: number, key: string, opts: CardOpts = {}): Promise<RenderElement> {
   const { Box, Text, Button } = cx.els(e)
   const live = e.surface === 'terminal' || e.surface === 'desktop'
@@ -638,6 +649,8 @@ export async function cardBlock(cx: Ctx, e: ResolveInput, id: string, w: number,
   }
   const meta = { ...(tc.busy ? { busy: tc.busy } : {}), ...(tc.error ? { error: tc.error } : {}) }
   const inner = Math.max(10, w - 4)
+  // the card's id on its title row, as its chip reads it (`card:<name>`); none while an older card's name is not read
+  const name = cardTag(id)
   const rows: RenderElement[] = []
   // a subject's card cut to its rows where it holds more than one row past them: its plot's first rows and its readout,
   // then `… N more` for the rest (the plot's other rows, the label and params rows, the takeaway)
@@ -654,13 +667,13 @@ export async function cardBlock(cx: Ctx, e: ResolveInput, id: string, w: number,
   }
   if (live) {
     const { Client } = cx.els(e)
-    rows.push(<Client key={`card-${key}-${id}`} module="./card.tsx" width={inner} props={JSON.parse(JSON.stringify({ card: data, cols: inner, meta, ...(opts.pane ? { pane: true, plotRows: 16 } : {}), ...(opts.focus ? { focus: opts.focus } : {}), ...(clip !== undefined ? { clip } : {}) }))} />)
+    rows.push(<Client key={`card-${key}-${id}`} module="./card.tsx" width={inner} props={JSON.parse(JSON.stringify({ card: data, cols: inner, meta, ...(name ? { name } : {}), ...(opts.pane ? { pane: true, plotRows: 16 } : {}), ...(opts.focus ? { focus: opts.focus } : {}), ...(clip !== undefined ? { clip } : {}) }))} />)
   } else {
     const state = meta.busy || meta.error ? [[{ s: meta.busy || meta.error || '', fg: meta.error ? COLORS.problem : COLORS.dim }]] : []
     const first = cardLayout(data, inner, -1)
     const lit = opts.focus ? focusItem(data, first.items, opts.focus) : -1
     const body = lit >= 0 ? cardLayout(data, inner, lit).lines : first.lines
-    rows.push(<Box flexDirection="column">{paintLines(Box, Text, [...(opts.pane ? [] : [[{ s: cut(data.question, inner), b: true }], []]), ...(clip !== undefined ? body.slice(0, clip) : body), ...state, ...(clip !== undefined ? [] : labelHead(data, inner).lines)])}</Box>)
+    rows.push(<Box flexDirection="column">{paintLines(Box, Text, [...(opts.pane ? [] : [...titleLines(data.question, inner, name).lines, []]), ...(clip !== undefined ? body.slice(0, clip) : body), ...state, ...(clip !== undefined ? [] : labelHead(data, inner).lines)])}</Box>)
   }
   // a custom card is HTML: the terminal draws its table or its words (cell.ts cardOfCell), and its link opens the whole
   // card in the browser (Matt, 2026-10-16: the link text is "view in browser")
@@ -674,9 +687,10 @@ export async function cardBlock(cx: Ctx, e: ResolveInput, id: string, w: number,
     const { Button } = cx.els(e)
     rows.push(<Box key={`more-row-${key}`} flexDirection="row"><Button key={`more-${key}`} label={`… ${hidden.toLocaleString('en-US')} more`} plain dimColor onPress={opts.clip!.more} /></Box>)
   } else if (opts.takeaway !== false && tc.takeaway.trim()) {
-    // a blank row between the label rows (or the custom card's link) and the takeaway, which would otherwise read as
-    // the takeaway's first line (Matt, 2026-10-16)
-    if (custom || labelHead(data, inner).lines.length) rows.push(<Text key={`gap-${key}-${id}`}> </Text>)
+    // a blank row before the takeaway, which would otherwise read as one with the row above it, the label row's or the
+    // card's last (Matt, 2026-10-16); none where the card's last row is its readout, blank while nothing is pointed at
+    const readoutLast = live && !custom && !labelHead(data, inner).lines.length && !(data.params ?? []).length && (cardLayout(data, inner, -1).items.length > 0 || Boolean(meta.busy || meta.error))
+    if (!readoutLast) rows.push(<Text key={`gap-${key}-${id}`}> </Text>)
     rows.push(<Box flexDirection="column" width={inner}>{await drawReply(cx, e, tc.takeaway, inner, { margin: 0, prefix: `tk-${key}-`, card: id })}</Box>)
   }
   const framed = (
@@ -698,28 +712,25 @@ export async function cardBlock(cx: Ctx, e: ResolveInput, id: string, w: number,
 }
 
 /** The cards a turn made, under its last reply, on the reply's text column (2), border to border: the border stands in
- *  for a blank row. The blue "?" in the margin beside each, under the pointer, asks a side thread about it; once one
- *  was asked, a blue ↳ stays there and opens it. */
+ *  for a blank row. A dim dot in the margin beside each title turns into a blue "?" under the pointer, which asks a
+ *  side thread about the card; once one was asked, a blue ↳ stays there and opens it. */
 export async function drawCards(cx: Ctx, e: ResolveInput, ids: readonly string[], cols: number, ask?: (t: Target) => void, open?: (thread: string) => void): Promise<RenderElement | null> {
   if (!ids.length) return null
-  const { Box, Button } = cx.els(e)
+  const { Box, Text } = cx.els(e)
   const live = e.surface === 'terminal' || e.surface === 'desktop'
   const w = Math.max(24, cols - MARGIN)
   const out: RenderElement[] = []
   for (const [i, id] of ids.entries()) {
     const card = await cardBlock(cx, e, id, w, `t${i}`, { order: i + 1 })
     const tid = live && open ? await threadAbout(cx, `card:${id}`) : ''
-    const mark = tid ? (
-      linesEl(cx, e, `asked-card-${i}`, [[{ s: '↳', fg: LINK }]], [{ y: 0, x0: 0, x1: 1, row: false, run: () => open?.(tid) }], 1)
-    ) : ask && live ? (
-      <Box width={1} display="none" hover={{ display: 'flex' }}>
-        <Button key={`ask-card-${i}`} label="?" plain hover={{ color: LINK }} onPress={() => ask({ kind: 'card', ref: `card:${id}`, cardId: id })} />
-      </Box>
-    ) : null
+    const asked = tid ? linesEl(cx, e, `asked-card-${i}`, [[{ s: '↳', fg: LINK }]], [{ y: 0, x0: 0, x1: 1, row: false, run: () => open?.(tid) }], 1) : null
+    const can = !tid && ask && live
     out.push(
       <Box key={`turn-card-${i}`} flexDirection="row">
         <Box width={MARGIN} flexShrink={0} flexDirection="row" marginTop={1}>
-          {mark}
+          {asked}
+          {can ? <Text dimColor>{DOT}</Text> : null}
+          {can ? askMark(cx, e, `ask-card-${i}`, () => ask?.({ kind: 'card', ref: `card:${id}`, cardId: id })) : null}
         </Box>
         <Box flexDirection="column" flexShrink={1}>
           {card}

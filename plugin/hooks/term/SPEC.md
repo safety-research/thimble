@@ -25,8 +25,9 @@ them. Colors are in `hooks/paint.ts`; `hooks/chrome.tsx` draws the panel's chrom
 2. Marks hang in a 2-cell margin left of that edge: `❯` on the selected row, `?` or `↳` by a passage; in the chat the
    margin is the ⏺'s, and a mark takes the ⏺'s cell on the row where both fall.
 3. Thimble's text fills its column, with no fixed measure; cards take the same width as the text.
-4. Every card has a full round border in the rule gray; inside it, its title in bold, a blank row, then its plot or
-   body, and everything else (the readout, the label rows, the params, the takeaway) below the plot.
+4. Every card has a full round border in the rule gray; inside it, its title in bold (wrapped, never cut) with its id
+   dim at the right of the first row (`card:<name>`, the words its chips read), a blank row, then its plot or body, and
+   everything else (the readout, the label rows, the params, then after a blank row the takeaway) below the plot.
 5. Every panel opens with its title row, the path from home with the current step last in the accent color and bold, then
    a dim subtitle, a rule; key hints end it.
 6. A panel's actions sit at its bottom, after a rule, where their result appears; the title row holds only navigation.
@@ -77,7 +78,7 @@ The horizontal unit is the cell and the indent step is 2 cells. The vertical uni
 
 | column | holds |
 | --- | --- |
-| 0 | Claude Code's `❯ ⏺ ✻`; the reply's margin: the `?` of the passage under the pointer, a passage's `↳`, each in the ⏺'s cell on the row where both fall; the `↳` that starts a `↳` row |
+| 0 | Claude Code's `❯ ⏺ ✻`; the reply's margin: a passage's dim `·`, the `?` that takes its place (or the ⏺'s) under the pointer, a passage's `↳`, each in the ⏺'s cell on the row where both fall; the `↳` that starts a `↳` row |
 | 2 | the reply's edge, where Claude Code's own reply text starts: prose, headings, a list's `-`, a card's left border, the footer; the words of a `↳` row; the toast above the prompt |
 | 4 | nested: a list item's text, a quote block, a card's content (inside its border and padding) |
 
@@ -121,9 +122,10 @@ the type area runs from A0 to R.
     actions). A panel has two at most. A rule spans the type area in the rule gray, and no blank row is ever next to it.
 11. **A card** has a full border with round corners in the rule gray and 1 cell of padding: in Ink, a `Box` with
     `borderStyle="round"`, `borderColor` the rule gray and `paddingX={1}`. Its left border sits on the stream's edge
-    (column 2 in the chat, A0 in a panel). Inside: the title row in bold, a blank row, then the plot or body; below the
-    plot, the readout row (the value under the pointer, plain, or what thimble is doing to the card), the label rows,
-    the params row and the takeaway. In the card pane the question is the panel's title, so the box starts with the
+    (column 2 in the chat, A0 in a panel). Inside: the title rows in bold (the question wrapped, never cut, the card's id
+    `card:<name>` dim at the right of the first), a blank row, then the plot or body; below the plot, the readout row
+    (the value under the pointer, plain, or what thimble is doing to the card), the label rows, the params row and,
+    after a blank row (the readout row where it is the last), the takeaway. In the card pane the question is the panel's title, so the box starts with the
     plot. In a stream a card's border stands in for blank rows next to it; a document's caption is dim on the row under
     the bottom border.
 12. Every item of a list takes the same number of rows: one, or a name row and a dim secondary row. The selected item
@@ -404,8 +406,9 @@ The same reply's first row under the pointer, and a passage a thread was asked a
 - The cards a turn added or changed stand under the turn's last reply, each once, in its last state: those a
   `thimble-run` command ran too, a shell loop over several cards included. They, the footer and the `↳` rows are drawn
   again after `thimble --continue` or `--resume`.
-- The margin at column 0, the ⏺'s: the `?` (blue) of the passage under the pointer (a heading's asks about its whole
-  section, a card's about the card); a blue `↳` beside a passage or a card a thread was asked about (a passage also
+- The margin at column 0, the ⏺'s: a dim `·` beside each passage and card a side thread can be asked about, which
+  becomes the `?` (blue) of the passage under the pointer (a heading's asks about its whole section, a card's about the
+  card); a blue `↳` beside a passage or a card a thread was asked about (a passage also
   when the thread was asked about a citation of a value or a place in it; a card also when the thread was asked about a
   value it shows or a passage of its takeaway, a citation in it), which stays, and a click on it opens that thread in
   the threads panel. On the reply's first row the mark takes the ⏺'s cell: the `?` drawn over it under the pointer, a
@@ -490,7 +493,7 @@ The same reply's first row under the pointer, and a passage a thread was asked a
 
 ```
 ╭──────────────────────────────────────────────────────────────────────╮
-│ Which ten labels have the most revisions?                            │
+│ Which ten labels have the most revisions?        card:top-ten-labels │
 │                                                                      │
 │ label                  revisions  pages  wikis                       │
 │ ─────────────────────  ─────────  ─────  ──────────                  │
@@ -549,8 +552,8 @@ The same reply's first row under the pointer, and a passage a thread was asked a
 - A note, a custom card, a code card and a card type's card: their words. A chart that is not a simple bar or line
   chart (a bar chart with its values written on its bars is one): a table of its rows.
 - A card that cannot be read: one red line named by its place (`× card 2 cannot be drawn: …`).
-- The card pane: the question is the panel's title and the subtitle reads the card's kind, who made it, `last run
-  ok` or `last run failed` (in red), and, when its card check ended in an error, `its check's revision would not run` or
+- The card pane: the question is the panel's title and the subtitle reads the card's id (`card:<name>`), its kind, who
+  made it, `last run ok` or `last run failed` (in red), and, when its card check ended in an error, `its check's revision would not run` or
   `its check could not finish`, dim like the rest, since the card itself is fine (red is only for a problem with the
   card); the box starts with the plot; at the bottom `code  run again  ask about it`. The
   code view lists the script with the `Code` element, its gutter at A0, no other indent, then `output`, the last lines

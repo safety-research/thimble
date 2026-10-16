@@ -315,6 +315,13 @@ export function cardName(id: string): string {
   return names.get(id) ?? (/^[0-9a-f]{8}$/.test(id) ? '' : id)
 }
 
+/** A card's id as its chip reads it and as its title row shows it (`card:<name>`); '' while an older card's name is not
+ *  read. */
+export function cardTag(id: string): string {
+  const name = cardName(id)
+  return name ? `card:${name}` : ''
+}
+
 /** A card's question as noted (noteQuestion); '' for a card not read yet. */
 export function questionOf(id: string): string {
   return questions.get(id) ?? ''

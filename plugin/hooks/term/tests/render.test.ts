@@ -409,9 +409,10 @@ test("a label card is a bar card of its counts with the label's row; a press on 
   expect(card).toContain('proxy-link')
   expect(card).toContain('links through a fetch proxy')
   expect(card).not.toContain('agree')
-  // the title in bold, a blank row, the bars, then below them the readout row and the label row: its name after "label  "
+  // the title in bold with the card's id at its right, a blank row, the bars, then below them the readout row and the
+  // label row: its name after "label  "
   const lines = ((await ui.drawn({ in: key })) as { children?: unknown[] }).children ?? []
-  expect(shown(lines[0])).toBe("links through a fetch proxy")
+  expect(shown(lines[0])).toMatch(/^links through a fetch proxy +card:l0label0$/)
   expect(JSON.stringify(lines[0])).toContain('"bold":true')
   expect(shown(lines[2])).toMatch(/^proxy-link/)
   const y = lines.findIndex(l => /^label {2}links through a fetch proxy/.test(shown(l)))

@@ -335,6 +335,40 @@ export function cutRef(ref: string, n: number): string {
 }
 
 /**
+ * A card's title rows: its question in bold, wrapped at words and never cut (Matt, 2026-10-16), and its id dim at the
+ * right end of the first row, `card:<name>`, the words its chip reads where a reply cites it. Where the first row would
+ * keep less than half the room for the question, the id stands at the right of a row of its own under the question.
+ * `lit`: the question in inverse (the title under the pointer). `spans`: the cells each row's words take, where a press
+ * on the title lands.
+ */
+export function titleLines(question: string, cols: number, id = '', lit = false): { lines: Line[]; spans: number[] } {
+  const q = question.replace(/\s+/g, ' ').trim()
+  const n = Math.max(1, cols)
+  const idW = id ? width(id) : 0
+  const room = n - idW - 2
+  const seg = (s: string): Seg => ({ s, b: true, ...(lit ? { inv: true } : {}) })
+  const idSeg = (pad: number): Seg[] => [{ s: ' '.repeat(Math.max(0, pad)) }, { s: id, fg: COLORS.dim }]
+  if (!id || idW > n) {
+    const rows = q ? wrapRows(q, n, 999) : []
+    return { lines: rows.map(r => [seg(r)]), spans: rows.map(width) }
+  }
+  // the first row's words, up to the id's room
+  const words = q ? q.split(' ') : []
+  let first = ''
+  let k = 0
+  while (k < words.length && width(first ? `${first} ${words[k]}` : words[k]!) <= room) first = first ? `${first} ${words[k++]}` : words[k++]!
+  if (room < n / 2 || (!first && words.length)) {
+    const rows = q ? wrapRows(q, n, 999) : []
+    return { lines: [...rows.map(r => [seg(r)]), idSeg(n - idW)], spans: [...rows.map(width), 0] }
+  }
+  const rest = k < words.length ? wrapRows(words.slice(k).join(' '), n, 999) : []
+  return {
+    lines: [[...(first ? [seg(first)] : []), ...idSeg(n - width(first) - idW)], ...rest.map(r => [seg(r)])],
+    spans: [width(first), ...rest.map(width)],
+  }
+}
+
+/**
  * The card's label rows, under its title, one per label: "label" dim, the label's name in blue and underlined, then a
  * blue ↗ (a press on either opens the label in the panel), then its values each after a ● in its hue. A label card's
  * row says after the ↗, dim, how its label is defined and what it ran on (`code · revisions.jsonl`, `· a sample` for a

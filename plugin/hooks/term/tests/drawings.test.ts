@@ -180,9 +180,10 @@ const at = (rows: string[], text: string) => rows.findIndex(r => r.includes(text
 
 // ------------------------------------------------------------------------------------------------ main's chat
 
-test("main's reply and its card stand on Claude Code's own indent, column 2; the `?` takes the ⏺'s cell, never more indent", async ($, on) => {
+test("main's reply and its card stand on Claude Code's own indent, column 2; the `?` takes the ⏺'s cell or a passage's dot, never more indent", async ($, on) => {
   // Matt, 2026-10-07: "can we keep the same left indent for thimble content while keeping our ability to show the
-  // question mark? we could still indent 2 chars and replace the dot with ? when they overlap"
+  // question mark? we could still indent 2 chars and replace the dot with ? when they overlap"; 2026-10-16: the "?"
+  // "should be a dot that gets replaced with a question mark when you hover"
   const w = world(on)
   await start($, w)
   await turn($, w, 'r1', 'The export holds most of its pages in one wiki, dse.\n\nIts revisions follow the same split.')
@@ -195,7 +196,8 @@ test("main's reply and its card stand on Claude Code's own indent, column 2; the
   // the ⏺ at column 0 and the prose at 2, as Claude Code draws its own replies; the card's border, its takeaway and
   // the footer on the same edge
   expect(rest[0]).toBe('⏺ The export holds most of its pages in one wiki, dse.')
-  expect(rest[2]).toBe('  Its revisions follow the same split.')
+  // a later passage: a dim dot in the ⏺'s column, which the pointer turns into its `?`
+  expect(rest[2]).toBe('· Its revisions follow the same split.')
   expect(rest[at(rest, '╭')]).toMatch(/^ {2}╭─+╮$/)
   // the fixtures' thread t1 was asked about the card: its ↳ in the margin beside the card's title
   expect(rest[at(rest, 'What does the export hold per wiki?')]).toMatch(/^↳ │ What does the export hold per wiki\? +│$/)
@@ -215,10 +217,17 @@ test("main's reply and its card stand on Claude Code's own indent, column 2; the
   expect(words(marks[0])).toBe('⏺')
   expect(marks[1]!.props).toMatchObject({ position: 'absolute', top: 0, left: 0, display: 'none' })
   expect(marks[1]!.hover).toEqual({ display: 'flex' })
+  // a later passage's margin: the dim dot, and the same `?` over it
+  const second = (await ui.find({ type: 'Box', key: 'row-1-1' })) as Node
+  const dots = ((((second.children ?? []) as Node[])[0]!.children ?? []) as Node[])
+  expect(words(dots[0])).toBe('·')
+  expect(dots[0]!.props).toMatchObject({ dimColor: true })
+  expect(dots[1]!.props).toMatchObject({ position: 'absolute', top: 0, left: 0, display: 'none' })
+  expect(dots[1]!.hover).toEqual({ display: 'flex' })
   await ui.unmount()
 })
 
-test("the person's message stays Claude Code's own row, and the reply under it keeps the engine's blank row above it", async ($, on) => {
+test("the person's message stays Claude Code's own row; the reply under it, or under the tool summary row, keeps the engine's blank row above it", async ($, on) => {
   // Matt, 2026-10-16: in the build's shots the reply sat right under the person's message, with no blank row between
   const w = world(on)
   await start($, w)
@@ -233,6 +242,18 @@ test("the person's message stays Claude Code's own row, and the reply under it k
   expect(root.props).toMatchObject({ flexDirection: 'column', marginTop: 1 })
   expect((await screen(ui, 100))[0]).toBe('⏺ The export holds most of its pages in one wiki, dse.')
   await ui.unmount()
+  // so does an answer under Claude Code's tool summary row (`Ran 5 shell commands, called plugin:thimble:thimble 3
+  // times`), which sat right under it in the v9 video (Matt, 2026-10-16)
+  w.toolText = 'card:ff73e071\n[out0: table]'
+  await $.turn.start({ text: 'And per wiki?', turnId: 't2' } as never)
+  await $.tool.call({ tool: 'mcp__plugin_thimble_thimble__add_card', tool_use_id: 'u2' } as never)
+  await append($, 'r2', 'Yes. Every number links to its source.')
+  await $.turn.complete({ turnId: 't2', answer: 'Yes. Every number links to its source.', durationMs: 5, reason: 'answer', isAborted: false } as never)
+  await w.clock.advance(300)
+  const after = (await $.ui.mount(MESSAGE('r2', 'Yes. Every number links to its source.'))) as unknown as M
+  expect(((await after.drawn()) as Node).props).toMatchObject({ flexDirection: 'column', marginTop: 1 })
+  expect((await screen(after, 100))[0]).toBe('⏺ Yes. Every number links to its source.')
+  await after.unmount()
 })
 
 test("a passage a side thread was asked about keeps its `↳` in the ⏺'s cell on the reply's first row", async ($, on) => {
@@ -244,8 +265,78 @@ test("a passage a side thread was asked about keeps its `↳` in the ⏺'s cell 
   const rows = await screen(ui, 100)
   print('a reply whose first passage has a thread', rows)
   expect(rows[0]).toBe('↳ the deletions')
-  expect(rows[2]).toBe('  They came on one day.')
+  expect(rows[2]).toBe('· They came on one day.')
   expect(await ui.find({ type: 'Client', key: 'asked-1-0' })).toBeDefined()
+  await ui.unmount()
+})
+
+test("a card's question wraps, never cut, its id `card:<name>` dim at the right of its first row, the words its chip reads; a dot beside it the pointer turns into `?`", async ($, on) => {
+  // Matt, 2026-10-16: a card's question was cut with "…"; a card citation should read `card:` and the card's name, and
+  // "the card that it's referencing ... has the ID somewhere in the card itself"
+  const w = world(on)
+  const question = "How many records does each file hold, and how many of them are the agents' messages to each other?"
+  Object.assign(w.cells.a0frame0!, { slug: 'records-per-file', title: question })
+  w.resolve['card:a0frame0'] = { ref: 'card:a0frame0', kind: 'cell', cell_id: 'a0frame0', excerpt: question }
+  await start($, w)
+  const text = 'Most records are messages [[card:a0frame0]].'
+  await turn($, w, 'r1', text, 'a0frame0')
+  const ui = (await $.ui.mount({ plugin: PANEL, component: 'AssistantMessage', requestId: 'r1', surface: 'terminal', viewport: { columns: 60, rows: 40 }, props: { text, isFirstOfReply: true } } as never)) as unknown as M
+  await w.clock.advance(300)
+  const rows = await screen(ui, 60)
+  print('a card with a long question, 60 columns', rows)
+  // the chip in the reply and the id on the card read the same
+  expect(rows[0]).toBe('⏺ Most records are messages [ card:records-per-file ].')
+  // the card's own rows: its question wrapped at words, whole, the id against the right edge of the first row, then
+  // one blank row
+  const key = 'card-t0-a0frame0'
+  const inner = Number(((await ui.find({ type: 'Client', key })) as Node).props?.width)
+  await ui.resize({ columns: inner, rows: 40, in: key } as never)
+  const own = (((await ui.drawn({ in: key })) as Node).children ?? []) as Node[]
+  const lines = own.map(r => words(r))
+  const blank = lines.findIndex(l => !l.trim())
+  expect(blank).toBeGreaterThan(1)
+  expect(lines[0]).toMatch(/^How many records does each +card:records-per-file$/)
+  expect([...lines[0]!].length).toBe(inner)
+  expect([lines[0]!.replace(/ +card:records-per-file$/, ''), ...lines.slice(1, blank)].join(' ')).toBe(question)
+  expect(lines.join('\n')).not.toContain('…')
+  expect(JSON.stringify(own[0])).toContain('{"type":"Text","props":{"color":"inactive"},"children":["card:records-per-file"]}')
+  expect(JSON.stringify(own[0])).toContain('"bold":true')
+  // beside the card's title, a dim dot; under the pointer its `?` (the card drawn at its width now)
+  const framed = await screen(ui, 60)
+  print('the same card drawn at its width', framed)
+  const title = at(framed, 'How many records does each')
+  expect(framed[title]).toMatch(/^· │ How many records does each +card:records-per-file │$/)
+  expect(framed[title + 1]).toMatch(/^ {2}│ file hold, and how many of them are the agents' +│$/)
+  expect((await screen(ui, 60, true))[title]).toMatch(/^\? │ How many records/)
+  // the title's second row is the title too: in inverse under the pointer, and a press asks a side thread about the card
+  await ui.pointer({ type: 'move', x: 2, y: 1, in: key } as never)
+  const lit = (((await ui.drawn({ in: key })) as Node).children ?? []) as Node[]
+  expect(JSON.stringify(lit[0])).toContain('"bold":true,"inverse":true')
+  expect(JSON.stringify(lit[1])).toContain('"bold":true,"inverse":true')
+  await ui.pointer({ type: 'down', x: 2, y: 1, button: 'left', in: key } as never)
+  await ui.pointer({ type: 'up', x: 2, y: 1, button: 'left', in: key } as never)
+  await ui.unmount()
+  await w.clock.settle()
+  const pane = await look($)
+  expect(shown(await pane.drawn())).toContain('New thread')
+  await pane.unmount()
+})
+
+test("a card's takeaway stands one blank row under the row above it, as under its label row", async ($, on) => {
+  // Matt, 2026-10-16: a card's answer ran on from the row above it; the readout row under a chart is that blank row
+  const w = world(on)
+  Object.assign(w.cells.n0note00!, { takeaway: 'The relay idea fits the board pages.' })
+  await start($, w)
+  await turn($, w, 'r1', 'Here.', 'n0note00')
+  const ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
+  await w.clock.advance(300)
+  const rows = await screen(ui, 100)
+  print('a note card with a takeaway', rows)
+  const note = at(rows, 'The dse wiki was used as a relay')
+  const take = at(rows, 'The relay idea fits the board pages.')
+  expect(note).toBeGreaterThan(0)
+  expect(take).toBe(note + 2)
+  expect(rows[note + 1]).toMatch(/^ {2}│ +│$/)
   await ui.unmount()
 })
 
@@ -493,7 +584,12 @@ test('a new thread about a card shows the card in its frame above the field: its
   // the card in its frame on the type area's edge: its title, a blank row, the first six rows of its table, then
   // `… N more` for the rows left out (its other rows and its takeaway)
   expect(rows[3]).toMatch(/^ {3}╭─+╮$/)
-  expect(rows[4]).toMatch(/^ {3}│ How many revisions did each label make\? +│$/)
+  expect(rows[4]).toMatch(/^ {3}│ How many revisions did each label make\? /)
+  // the card's id at the right of its title row, as its chips read it (the card's own drawing: this test's layout
+  // gives a Client the width it asks for, which a pane's padding narrows)
+  const subject = /"key":"(card-subject-[^"]*-t0tall00)"/.exec(JSON.stringify(await pane.drawn()))![1]!
+  const own = (((await pane.drawn({ in: subject })) as Node).children ?? []) as Node[]
+  expect(words(own[0])).toMatch(/^How many revisions did each label make\? +card:t0tall00$/)
   expect(rows[5]).toMatch(/^ {3}│ +│$/)
   expect(rows[6]).toMatch(/│ label +revisions +│$/)
   expect(rows.join('\n')).toContain('Agent04')
