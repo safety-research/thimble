@@ -680,6 +680,10 @@
 .wu-count-inline {
   margin-left: 4px;
 }
+/* the new comments' dot after the count (Checks.tsx NewCommentsDot), as far from it as on the canvas's Comments button */
+.wu-sec-head .wu-new-dot {
+  margin-left: 2px;
+}
 /* a check with no result on the document shown */
 .wu-count-none {
   color: var(--text-placeholder);

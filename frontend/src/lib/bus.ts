@@ -76,10 +76,8 @@ export type Events = {
   askAbout: { el: HTMLElement }
   /** the anchorable element under the pointer inside a view's frame while ⌘ is held; null when it left */
   pointHover: { rect: DOMRect | null }
-  /** a box to bring into view, in the page's coordinates: a box of a frame's page (a frame's `reveal`), or a comment
-   * beside its card with the card (the new comments notice's Show); the canvas pans to it when `frame`, the frame or
-   * the comment, is on it */
-  revealBox: { rect: DOMRect; frame: HTMLElement }
+  /** a box of a frame's page to bring into view (a frame's `reveal`): the canvas pans to it when the frame is on it */
+  revealBox: { rect: DOMRect; frame: HTMLIFrameElement }
   /** a citation in a card's text is hovered (`ref`) or left (null), so a card that draws records can show the one it
    * names */
   citeHover: { card: string; ref: string | null }

@@ -1,19 +1,14 @@
-// New comments: a check that is on ended a run that left comments the analyst has not looked at. The chat's notice
-// strip tells of them in one notice (chat/Notice NewCommentsNotice): how many there are and on what, with Show, which
-// opens the first surface they are on with its Comments pane and its first new comment open, and ×. A run counts once
-// it ends (the stream's `check` record, then the checks' list), so the notice grows as each run of a batch ends rather
-// than adding one per comment. The runs looked at are kept per browser and workspace (localStorage), so a reload shows
-// the notice again until the analyst looks: the first time a browser reads a workspace's checks, every run that has
-// ended counts as looked at, so only later runs are news. A run is looked at once Show opens its surface, × dismisses
-// the notice, or the analyst opens one of its comments on the page or on the canvas (markSeen).
-import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
-import { bus } from '../lib/bus'
-import { teleport } from '../lib/teleport'
-import { track } from '../lib/telemetry'
+// New comments: a check that is on ended a run that left comments the analyst has not looked at. The Comments pane of
+// the surface they are on carries the accent dot, named "New comments" (Checks.tsx NewCommentsDot): on the canvas the
+// toolbar's Comments button (canvas/Controls.tsx CommentsButton), beside a document its Comments pane's head
+// (Checks.tsx CommentsPane), so a run that commented on the Report alone marks the Report's pane alone. A run counts
+// once it ends (the stream's `check` record, then the checks' list). The runs looked at are kept per browser and
+// workspace (localStorage), so a reload shows the dot again until the analyst looks: the first time a browser reads a
+// workspace's checks, every run that has ended counts as looked at, so only later runs are news. A run is looked at
+// once the analyst opens its surface's Comments pane, or one of its comments on the page or on the canvas (markSeen).
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react'
 import type { Check } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
-import { CANVAS } from './checkComments'
-import { BUILTIN_SLUGS } from './model'
 
 /** One run that left comments the analyst has not looked at. */
 export interface NewRun {
@@ -49,33 +44,6 @@ export function endedRuns(checks: readonly RunsOf[]): string[] {
 
 /** Every run the checks list, running or not. Pure. */
 const allRuns = (checks: readonly RunsOf[]): string[] => checks.flatMap((c) => Object.values(c.runs ?? {}).flatMap((r) => (r?.run ? [r.run] : [])))
-
-/** The surfaces new runs commented on, in the order their first run ended, each with its count and its runs. Pure. */
-export function bySurface(runs: readonly NewRun[]): { surface: string; comments: number; runs: string[] }[] {
-  const out = new Map<string, { surface: string; comments: number; runs: string[] }>()
-  for (const r of runs) {
-    const s = out.get(r.surface) ?? { surface: r.surface, comments: 0, runs: [] }
-    s.comments += r.comments
-    s.runs.push(r.run)
-    out.set(r.surface, s)
-  }
-  return [...out.values()]
-}
-
-/** How the notice names a surface: the cards, a built-in document as its tab spells it after "the" (the Report), a
- * custom one by its name. Pure. */
-export function surfaceName(surface: string, docLabel: string): string {
-  if (surface === CANVAS) return 'the cards'
-  return (BUILTIN_SLUGS as readonly string[]).includes(surface) ? `the ${docLabel}` : docLabel
-}
-
-/** The notice's words: how many new comments, and on what. Pure. */
-export function newCommentsText(runs: readonly NewRun[], name: (surface: string) => string): string {
-  const n = runs.reduce((k, r) => k + r.comments, 0)
-  const places = bySurface(runs).map((s) => name(s.surface))
-  const where = places.length <= 1 ? (places[0] ?? '') : `${places.slice(0, -1).join(', ')} and ${places[places.length - 1]}`
-  return `${n} new comment${n === 1 ? '' : 's'} on ${where}`
-}
 
 // ---- the runs looked at, per workspace: null until this browser first read the workspace's checks ----
 
@@ -128,79 +96,6 @@ export function resetSeen(): void {
   seenStores.clear()
 }
 
-// ---- Show: the surface that holds the new comments opens them ----
-
-/** What Show asks of a surface: open its Comments pane and the first comment of these runs. */
-export interface Reveal {
-  ws: string
-  surface: string
-  runs: readonly string[]
-}
-
-/** The storage name of whether a document's Comments pane is open (Checks.tsx CommentsPane). */
-export const PANE_KEY = 'report-checks-pane'
-
-let reveal: Reveal | null = null
-const revealSubs = new Set<() => void>()
-
-/** Ask the surface `surface` (a document's slug, or CANVAS) of workspace `ws` to open the first comment of `runs`:
- * the report opens its sidebar's Comments pane (kept open, so a pane that mounts later opens too), the canvas opens the
- * comment beside its card. The surface takes the request once it can (takeReveal). */
-export function revealComments(ws: string, surface: string, runs: readonly string[]): void {
-  if (surface !== CANVAS) writeStorage(storageKey(ws, PANE_KEY), true)
-  reveal = { ws, surface, runs: [...runs] }
-  revealSubs.forEach((fn) => fn())
-}
-
-/** The surface took the request, or gave up on it. */
-export function takeReveal(): void {
-  if (!reveal) return
-  reveal = null
-  revealSubs.forEach((fn) => fn())
-}
-
-function subscribeReveal(fn: () => void): () => void {
-  revealSubs.add(fn)
-  return () => void revealSubs.delete(fn)
-}
-
-/** Show's request to surface `surface` of workspace `ws`, else null. */
-export function useReveal(ws: string, surface: string): Reveal | null {
-  const r = useSyncExternalStore(
-    subscribeReveal,
-    () => reveal,
-    () => null,
-  )
-  return r && r.ws === ws && r.surface === surface ? r : null
-}
-
-/** How long a surface waits for the comments Show asked for (the document or the cards read again) before it gives up
- * and shows the Comments pane alone. */
-export const REVEAL_WAIT_MS = 3000
-
-/** A surface's part of Show: once `comments` (those it shows, in reading order) hold one of the runs Show named and
- * `ready` (its checks are read), `open` opens the first; when none comes within REVEAL_WAIT_MS, `open(null)` shows the
- * Comments pane alone. */
-export function useTakeReveal<T extends { id: string; run?: string | null }>(ws: string, surface: string, comments: readonly T[], ready: boolean, open: (first: T | null) => void): void {
-  const r = useReveal(ws, surface)
-  const opener = useRef(open)
-  opener.current = open
-  useEffect(() => {
-    if (!r || !ready) return
-    const first = comments.find((c) => !!c.run && r.runs.includes(c.run))
-    if (first) {
-      takeReveal()
-      opener.current(first)
-      return
-    }
-    const t = window.setTimeout(() => {
-      takeReveal()
-      opener.current(null)
-    }, REVEAL_WAIT_MS)
-    return () => window.clearTimeout(t)
-  }, [r, ready, comments])
-}
-
 /** The analyst opened a comment of run `run`: that run is looked at. Before this browser first read the workspace's
  * checks nothing is kept, since that first read counts every ended run as looked at. */
 export function useLookedAt(ws: string, run: string | null | undefined): void {
@@ -209,39 +104,27 @@ export function useLookedAt(ws: string, run: string | null | undefined): void {
   }, [ws, run])
 }
 
-// ---- the notice ----
+// ---- the dot ----
 
 export interface NewComments {
-  /** the new runs, in the order they ended; empty when there is nothing to tell */
+  /** the new runs on the surface, in the order they ended; empty when there is nothing new there */
   runs: NewRun[]
-  /** Show: the first surface opens its new comments, which are then looked at */
-  show: () => void
-  /** ×: every new run is looked at */
-  dismiss: () => void
+  /** the analyst opened the surface's Comments pane: its new runs are looked at */
+  look: () => void
 }
 
-/** The new comments of workspace `ws`, for the notice strip, from its checks (Checks.tsx useChecks). */
-export function useNewComments(ws: string, checks: { list: readonly RunsOf[]; ready: boolean }): NewComments {
+/** The new comments of workspace `ws` on `surface` (a document's slug, or CANVAS), for the dot on its Comments pane,
+ * from the workspace's checks (Checks.tsx useChecks). */
+export function useNewComments(ws: string, checks: { list: readonly RunsOf[]; ready: boolean }, surface: string): NewComments {
   const seen = useSeenRuns(ws)
   const { list, ready } = checks
   // the first read of this workspace's checks in this browser: what has ended is not news
   useEffect(() => {
     if (ready && seen == null) markSeen(ws, endedRuns(list), allRuns(list))
   }, [ws, ready, seen, list])
-  const runs = useMemo(() => (ready && seen ? newRuns(list, seen) : []), [ready, seen, list])
-  const total = runs.reduce((k, r) => k + r.comments, 0)
-  const dismiss = useCallback(() => {
-    track('ui-click', { target: 'notice:comments', detail: { action: 'dismiss', comments: total } })
-    markSeen(ws, runs.map((r) => r.run), allRuns(list))
-  }, [ws, runs, list, total])
-  const show = useCallback(() => {
-    const first = bySurface(runs)[0]
-    if (!first) return
-    track('ui-click', { target: 'notice:comments', detail: { action: 'show', comments: first.comments, surface: first.surface } })
-    markSeen(ws, first.runs, allRuns(list))
-    revealComments(ws, first.surface, first.runs)
-    if (first.surface === CANVAS) bus.emit('showTab', { tab: 'canvas' })
-    else teleport(`report:${first.surface}`)
+  const runs = useMemo(() => (ready && seen ? newRuns(list, seen).filter((r) => r.surface === surface) : []), [ready, seen, list, surface])
+  const look = useCallback(() => {
+    if (runs.length) markSeen(ws, runs.map((r) => r.run), allRuns(list))
   }, [ws, runs, list])
-  return { runs, show, dismiss }
+  return { runs, look }
 }

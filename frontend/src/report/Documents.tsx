@@ -9,13 +9,12 @@ import { track } from '../lib/telemetry'
 import type { AnyDoc, DeckDoc, PageDoc, StoryDoc, VideoDoc, Writeup, WriteupComment } from '../lib/types'
 import { ReadProbe } from '../shell/dock'
 import { CommentsSidebar, SidebarShow, useChecks, useSidebar } from './Checks'
-import { shownComments } from './checkComments'
 import { commentsApi } from './commentsApi'
 import { DeckSidebar, DeckView, type DeckHandle } from './Deck'
 import type { DocFilter } from './Editor'
 import { docComments, EvidenceActions, type EvidenceActionsValue } from './Evidence'
 import { PageView } from './Page'
-import { useLookedAt, useTakeReveal } from './newComments'
+import { useLookedAt } from './newComments'
 import { ReportPage } from './ReportPage'
 import { SelectComment } from './SelectComment'
 import { StoryEditor, StorySidebar, type StoryEditorHandle } from './StoryEditor'
@@ -56,19 +55,8 @@ function Arranged({ ws, slug, renderer, doc, filter, client, drawer, onSaved, wr
   // the comment a click picked, while the document still has it open
   const picked = useMemo(() => comments.find((c) => c.id === pickedId) ?? null, [comments, pickedId])
   const viewRef = useRef<HTMLDivElement | null>(null)
-  // the comment picked is looked at, so the new comments notice leaves its run out; the notice's Show opens the sidebar
-  // with its Comments pane, and picks the first new comment
-  const shownList = useMemo(() => shownComments(comments, checks.on), [comments, checks.on])
+  // the comment picked is looked at, so the new comments' dot on the Comments pane leaves its run out
   useLookedAt(ws, picked?.run)
-  useTakeReveal(ws, slug, shownList, checks.ready, (first) => {
-    if (!side.shown) side.show()
-    if (!first) return
-    setPickedId(first.id)
-    window.requestAnimationFrame(() => {
-      const el = [...(viewRef.current?.querySelectorAll<HTMLElement>('[data-cids]') ?? [])].find((x) => (x.getAttribute('data-cids') ?? '').split(' ').includes(first.id))
-      el?.scrollIntoView({ block: 'center' })
-    })
-  })
   // a click on a tinted sentence picks its comment, the next one of the sentence's on each click; a click elsewhere in
   // the view lets it go, and a click in the evidence card or the selection's comment keeps it
   const onViewClick = (e: MouseEvent<HTMLDivElement>) => {

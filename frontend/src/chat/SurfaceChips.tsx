@@ -53,11 +53,11 @@ function loadTypes(ws: string): void {
     })
 }
 
-/** The workspace's document types, read while `need` (a custom document is named) and again on each `report` event. */
-function useTypes(ws: string, need: boolean): TypesState | null | undefined {
+function useDocName(ws: string, slug: string): string {
+  const builtin = (BUILTIN_SLUGS as readonly string[]).includes(slug)
   const [, bump] = useState(0)
   useEffect(() => {
-    if (!need || !ws) return
+    if (builtin || !ws) return
     const fn = () => bump((n) => n + 1)
     typesListeners.add(fn)
     if (!typesCache.has(ws)) loadTypes(ws)
@@ -66,21 +66,8 @@ function useTypes(ws: string, need: boolean): TypesState | null | undefined {
       typesListeners.delete(fn)
       off()
     }
-  }, [ws, need])
-  return typesCache.get(ws)
-}
-
-const isBuiltin = (slug: string): boolean => (BUILTIN_SLUGS as readonly string[]).includes(slug)
-
-function useDocName(ws: string, slug: string): string {
-  return docLabel(slug, useTypes(ws, !isBuiltin(slug)))
-}
-
-/** The names of documents `slugs` as their tabs spell them (Report, Slides, a workspace's own), for a line that names
- * several: the name of each slug. */
-export function useDocLabels(ws: string, slugs: readonly string[]): (slug: string) => string {
-  const types = useTypes(ws, slugs.some((s) => !isBuiltin(s)))
-  return (slug) => docLabel(slug, types)
+  }, [ws, builtin])
+  return docLabel(slug, typesCache.get(ws))
 }
 
 /** A note's words about a document with the type's name in them spelled as its tab spells it: "the report, generation

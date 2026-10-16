@@ -1,7 +1,10 @@
 // The board's controls. At the top right, the bar that adds to the board (Card · Group, and Group ⌘G for a multiple
 // selection) and Comments, which lists the checks that comment on the cards with their switches and counts, as the
-// Report's Comments pane does (report/Checks.tsx CheckRows), and + for a new one. At the bottom right: the search menu (the card filter, cardFilter.ts), the zoom and Fit, and the minimap,
-// where a press or drag moves the view. While a filter is set the minimap draws the kept cards in ink, the rest faint.
+// Report's Comments pane does (report/Checks.tsx CheckRows), and + for a new one; it carries the accent dot while a
+// check's run left comments on the cards that the analyst has not looked at, until the menu opens
+// (report/newComments.ts). At the bottom right: the search menu (the card filter, cardFilter.ts), the zoom and Fit, and
+// the minimap, where a press or drag moves the view. While a filter is set the minimap draws the kept cards in ink, the
+// rest faint.
 import { useEffect, useRef, useState, type MouseEvent, type WheelEvent } from 'react'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
@@ -14,8 +17,9 @@ import { CHECK_STATES, CHECK_WORDS } from '../lib/cardCheck'
 import { MINIMAP, zoomLabel, type Board, type Layout, type Minimap, type View } from './layout'
 import { shortcutLabel } from '../lib/platform'
 import type { CanvasComment } from '../lib/types'
-import { CheckRows, type Checks } from '../report/Checks'
+import { CheckRows, NewCommentsDot, type Checks } from '../report/Checks'
 import { CANVAS, checksFor } from '../report/checkComments'
+import { useNewComments } from '../report/newComments'
 import { IconButton } from '../report/icons'
 
 /** A label the canvas can be filtered by (its unit is the card), with its values and how many cards each marks. */
@@ -126,10 +130,15 @@ export function Controls(p: ControlsProps) {
   )
 }
 
-/** Comments in the top bar: the count of the comments shown on the cards, and a menu of the checks that comment on
- * them, each with its switch, its count and its card (CheckRows), with + for a new check over the cards. */
-function CommentsButton({ ws, checks, comments }: { ws: string; checks: Checks; comments: readonly CanvasComment[] }) {
+/** Comments in the top bar: the count of the comments shown on the cards, the new comments' dot, and a menu of the
+ * checks that comment on them, each with its switch, its count and its card (CheckRows), with + for a new check over
+ * the cards. While the menu is open, the new comments on the cards are looked at. */
+export function CommentsButton({ ws, checks, comments }: { ws: string; checks: Checks; comments: readonly CanvasComment[] }) {
   const [open, setOpen] = useState(false)
+  const { runs: fresh, look } = useNewComments(ws, checks, CANVAS)
+  useEffect(() => {
+    if (open) look()
+  }, [open, look])
   const [adding, setAdding] = useState<HTMLElement | null>(null)
   const btn = useRef<HTMLButtonElement>(null)
   const head = useRef<HTMLDivElement>(null)
@@ -145,6 +154,7 @@ function CommentsButton({ ws, checks, comments }: { ws: string; checks: Checks; 
         <Icon name="comment" size={14} />
         Comments
         {shown > 0 && <span className="bctl-comments-count">{shown}</span>}
+        {fresh.length > 0 && <NewCommentsDot />}
       </button>
       <Popover anchor={btn} open={open} onClose={close} align="end" width={280} label="Comments" className="bcomments">
         <div className="wu-checks bcomments-pane">

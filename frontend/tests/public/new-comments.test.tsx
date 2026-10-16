@@ -1,20 +1,21 @@
 // @vitest-environment jsdom
-// New comments (src/report/newComments.ts, src/chat/Notice.tsx NewCommentsNotice): when a check that is on ends a run
-// that left comments, the chat's notice strip says how many new comments there are and on what, in one notice for the
-// batch, with Show, which opens the first surface they are on with its Comments pane and its first new comment, and ×.
-// The runs that had ended when this browser first read the workspace's checks are not news; a run is looked at once
-// Show opens it, × dismisses it, or the analyst opens one of its comments, and that holds across a reload. Feedback on
-// 0.8.0: "add a notification banner to comments".
+// New comments (src/report/newComments.ts): when a check that is on ends a run that left comments, the Comments pane of
+// the surface they are on carries the accent dot ("New comments"): on the canvas the toolbar's Comments button
+// (canvas/Controls.tsx CommentsButton), beside a document its Comments pane's head (report/Checks.tsx CommentsPane).
+// Nothing shows in the chat's notice strip. The runs that had ended when this browser first read the workspace's checks
+// are not news; a run is looked at once the analyst opens its surface's Comments pane or one of its comments, and that
+// holds across a reload. Feedback on 0.8.0: "add a notification banner to comments", then "I wanted this as a purple
+// dot on the comments pane, no banner above replies".
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { CommentsButton } from '../../src/canvas/Controls.tsx'
 import { NoticeStrip } from '../../src/chat/Notice.tsx'
-import { bus } from '../../src/lib/bus.ts'
 import { dispatch } from '../../src/lib/events.ts'
 import type { Check, CheckRun } from '../../src/lib/types.ts'
 import { storageKey } from '../../src/lib/workspace.ts'
-import { CommentsPane, type Checks } from '../../src/report/Checks.tsx'
+import { CommentsPane, useChecks } from '../../src/report/Checks.tsx'
 import { CANVAS } from '../../src/report/checkComments.ts'
-import { newCommentsText, newRuns, PANE_KEY, resetSeen, REVEAL_WAIT_MS, revealComments, surfaceName, takeReveal, useLookedAt, useReveal, useTakeReveal, type NewRun } from '../../src/report/newComments.ts'
+import { newRuns, resetSeen, useLookedAt } from '../../src/report/newComments.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 const run = (id: string, comments: number, ended: string, status = 'done'): CheckRun => ({ run: id, status, chat: '', started: ended, ended, covered: [], seen: [], comments, summary: '' })
@@ -23,7 +24,6 @@ const check = (id: string, shown: boolean, runs: Record<string, CheckRun> = {}):
 beforeEach(() => {
   window.localStorage.clear()
   resetSeen()
-  takeReveal()
 })
 afterEach(() => {
   unmountAll()
@@ -31,7 +31,7 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-describe('what the notice tells', () => {
+describe('what is new', () => {
   test('the runs of the checks that are on that ended done with comments, not looked at, in the order they ended', () => {
     const list = [
       check('important-details', true, { report: run('r3', 2, '2026-10-15T10:03:00Z'), [CANVAS]: run('r1', 1, '2026-10-15T10:01:00Z') }),
@@ -41,17 +41,9 @@ describe('what the notice tells', () => {
     expect(newRuns(list, new Set()).map((r) => r.run)).toEqual(['r1', 'r2', 'r3'])
     expect(newRuns(list, new Set(['r2'])).map((r) => r.run)).toEqual(['r1', 'r3'])
   })
-
-  test('how many new comments, and on what: the cards, a built-in document after "the", a custom one by its name', () => {
-    const r = (surface: string, comments: number): NewRun => ({ check: 'c', surface, run: `${surface}-${comments}`, comments, ended: '' })
-    const name = (s: string) => surfaceName(s, s === 'report' ? 'Report' : 'Findings')
-    expect(newCommentsText([r('report', 1)], name)).toBe('1 new comment on the Report')
-    expect(newCommentsText([r('report', 3), r(CANVAS, 2)], name)).toBe('5 new comments on the Report and the cards')
-    expect(newCommentsText([r('findings', 1), r('report', 2), r(CANVAS, 1), r('report', 1)], name)).toBe('5 new comments on Findings, the Report and the cards')
-  })
 })
 
-describe('the notice in the strip', () => {
+describe('the dot on the Comments pane', () => {
   let server: Check[] = []
   beforeEach(() => {
     server = [check('judgment', false), check('unverified', false), check('important-details', true, { report: run('old', 4, '2026-10-15T09:00:00Z') })]
@@ -62,10 +54,31 @@ describe('the notice in the strip', () => {
       if (u.endsWith('/notices')) return json([])
       return json({})
     })
+    // jsdom has no ResizeObserver, which the Comments button's popover watches its size with
+    vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   })
 
-  const strip = async (ws: string) => {
-    const el = await mount(<NoticeStrip ws={ws} current="main" onOpen={() => undefined} />)
+  /** The canvas's Comments button and the Report's Comments pane, each holding the workspace's checks as its surface
+   * does, and the chat's notice strip. */
+  const Surfaces = ({ ws }: { ws: string }) => {
+    const canvas = useChecks(ws)
+    const report = useChecks(ws)
+    return (
+      <>
+        <div data-surface="canvas">
+          <CommentsButton ws={ws} checks={canvas} comments={[]} />
+        </div>
+        <div data-surface="report">
+          <CommentsPane ws={ws} doc="report" checks={report} comments={[]} />
+        </div>
+        <div data-surface="chat">
+          <NoticeStrip ws={ws} current="main" onOpen={() => undefined} />
+        </div>
+      </>
+    )
+  }
+  const surfaces = async (ws: string) => {
+    const el = await mount(<Surfaces ws={ws} />)
     await settle()
     return el
   }
@@ -76,121 +89,79 @@ describe('the notice in the strip', () => {
     await act(async () => void (await new Promise((res) => setTimeout(res, 250)))) // the list's read again after its debounce
     await settle()
   }
-  const notices = (el: HTMLElement) => [...el.querySelectorAll('.chat-notice')].map((n) => n.querySelector('.chat-notice-text')?.textContent)
+  /** The surfaces whose Comments pane's control carries the dot named "New comments". */
+  const dots = (el: HTMLElement) => {
+    const on: string[] = []
+    if (el.querySelector('[data-surface="canvas"] .bctl-comments .dot[aria-label="New comments"]')) on.push('canvas')
+    if (el.querySelector('[data-surface="report"] .wu-checks-head .wu-sec-head .dot[aria-label="New comments"]')) on.push('report')
+    return on
+  }
   const click = (el: Element | null | undefined) => act(async () => (el as HTMLButtonElement).click())
 
-  test('what ended before this browser read the checks is no news; a run that ends with comments is, one notice for the batch', async () => {
-    const el = await strip('nc-batch')
-    expect(notices(el)).toEqual([])
-    expect(JSON.parse(window.localStorage.getItem(storageKey('nc-batch', 'comments-seen')) ?? 'null')).toEqual(['old'])
+  test('what ended before this browser read the checks is no news; a run that ends with comments marks the pane of its surface alone', async () => {
+    const el = await surfaces('nc-dot')
+    expect(dots(el)).toEqual([])
+    expect(JSON.parse(window.localStorage.getItem(storageKey('nc-dot', 'comments-seen')) ?? 'null')).toEqual(['old'])
 
-    await ended('important-details', 'report', run('r1', 3, '2026-10-15T10:00:00Z'))
-    expect(notices(el)).toEqual(['3 new comments on the Report Show'])
-    const n = el.querySelector('.chat-notice')!
-    expect(n.getAttribute('data-kind')).toBe('comments')
-    expect([...n.querySelectorAll('button')].map((b) => b.textContent || b.getAttribute('aria-label'))).toEqual(['Show', 'Dismiss'])
+    await ended('important-details', CANVAS, run('r1', 3, '2026-10-15T10:00:00Z'))
+    expect(dots(el)).toEqual(['canvas'])
+    const dot = el.querySelector('[data-surface="canvas"] .bctl-comments .dot')!
+    expect([dot.getAttribute('role'), dot.getAttribute('title')]).toEqual(['img', 'New comments'])
 
+    await ended('unverified', 'report', run('r2', 4, '2026-10-15T10:01:00Z')) // off: its comments do not show, so no news
+    await ended('important-details', 'report', run('r3', 0, '2026-10-15T10:02:00Z')) // no comments
+    expect(dots(el)).toEqual(['canvas'])
     server = server.map((c) => (c.id === 'judgment' ? { ...c, shown: true } : c)) // the analyst turned it on
-    await ended('judgment', CANVAS, run('r2', 2, '2026-10-15T10:01:00Z'))
-    expect(notices(el)).toEqual(['5 new comments on the Report and the cards Show'])
-    await ended('unverified', 'report', run('r3', 4, '2026-10-15T10:02:00Z')) // off: its comments do not show, so no news
-    await ended('important-details', CANVAS, run('r4', 0, '2026-10-15T10:03:00Z'))
-    expect(notices(el)).toEqual(['5 new comments on the Report and the cards Show'])
+    await ended('judgment', 'slides', run('r4', 2, '2026-10-15T10:03:00Z')) // another document's pane, not the Report's
+    expect(dots(el)).toEqual(['canvas'])
+    await ended('judgment', 'report', run('r5', 2, '2026-10-15T10:04:00Z'))
+    expect(dots(el)).toEqual(['canvas', 'report'])
   })
 
-  test('Show opens the first surface at its new comments, and the notice keeps what is left; × dismisses the rest, across a reload', async () => {
-    const seen: unknown[] = []
-    const offs = [bus.on('showTab', (e) => void seen.push(['showTab', e.tab])), bus.on('openRef', (e) => void seen.push(['openRef', e.ref]))]
-    let asked: ReturnType<typeof useReveal> = null
-    const Report = () => {
-      asked = useReveal('nc-show', 'report')
-      return null
-    }
-    const el = await strip('nc-show')
-    await mount(<Report />)
-    server = server.map((c) => (c.id === 'judgment' ? { ...c, shown: true } : c))
+  test('the chat strip tells nothing of new comments: no notice above the reply box', async () => {
+    const el = await surfaces('nc-strip')
     await ended('important-details', 'report', run('r1', 3, '2026-10-15T10:00:00Z'))
-    await ended('judgment', CANVAS, run('r2', 2, '2026-10-15T10:01:00Z'))
+    await ended('important-details', CANVAS, run('r2', 2, '2026-10-15T10:01:00Z'))
+    expect(dots(el)).toEqual(['canvas', 'report'])
+    expect(el.querySelector('[data-surface="chat"]')!.innerHTML).toBe('')
+    expect(document.querySelector('.chat-notice, [data-kind="comments"]')).toBeNull()
+  })
 
-    await click([...el.querySelectorAll('.chat-notice button')].find((b) => b.textContent === 'Show'))
-    expect(seen).toEqual([['showTab', 'report'], ['openRef', 'report:report']])
-    expect(asked).toMatchObject({ surface: 'report', runs: ['r1'] })
-    expect(window.localStorage.getItem(storageKey('nc-show', PANE_KEY))).toBe('true')
-    expect(notices(el)).toEqual(['2 new comments on the cards Show'])
+  test("opening a surface's Comments pane clears its dot alone, across a reload; a later run marks it again", async () => {
+    const el = await surfaces('nc-open')
+    await ended('important-details', 'report', run('r1', 3, '2026-10-15T10:00:00Z'))
+    await ended('important-details', CANVAS, run('r2', 2, '2026-10-15T10:01:00Z'))
+    expect(dots(el)).toEqual(['canvas', 'report'])
 
-    await click(el.querySelector('.chat-notice [aria-label="Dismiss"]'))
-    expect(notices(el)).toEqual([])
+    await click(el.querySelector('[data-surface="canvas"] .bctl-comments'))
+    expect(document.querySelector('.bcomments')).not.toBeNull()
+    expect(dots(el)).toEqual(['report'])
+    // a run that ends on the cards while their pane is open is looked at there
+    server = server.map((c) => (c.id === 'judgment' ? { ...c, shown: true } : c))
+    await ended('judgment', CANVAS, run('r3', 1, '2026-10-15T10:02:00Z'))
+    expect(dots(el)).toEqual(['report'])
+
+    await click(el.querySelector('[data-surface="report"] .wu-checks-head .wu-sec-head'))
+    expect(dots(el)).toEqual([])
+
     unmountAll()
     resetSeen() // a reload reads what this browser kept
-    const again = await strip('nc-show')
-    expect(notices(again)).toEqual([])
-    await ended('important-details', 'report', run('r5', 1, '2026-10-15T10:05:00Z'))
-    expect(notices(again)).toEqual(['1 new comment on the Report Show'])
-    offs.forEach((off) => off())
+    const again = await surfaces('nc-open')
+    expect(dots(again)).toEqual([])
+    await ended('important-details', 'report', run('r4', 1, '2026-10-15T10:05:00Z'))
+    expect(dots(again)).toEqual(['report'])
   })
 
-  test('opening one of the new comments on the page is looking at it: the notice goes', async () => {
-    const el = await strip('nc-look')
+  test('opening one of the new comments on the page is looking at it: the dot goes', async () => {
+    const el = await surfaces('nc-look')
     await ended('important-details', 'report', run('r1', 3, '2026-10-15T10:00:00Z'))
-    expect(notices(el)).toEqual(['3 new comments on the Report Show'])
+    expect(dots(el)).toEqual(['report'])
     const Open = () => {
       useLookedAt('nc-look', 'r1')
       return null
     }
     await mount(<Open />)
     await settle()
-    expect(notices(el)).toEqual([])
-  })
-})
-
-describe("a surface's part of Show", () => {
-  type C = { id: string; run?: string | null }
-  test('it opens the first comment of the runs Show named, in reading order, once its checks are read', async () => {
-    const got: (C | null)[] = []
-    const comments: C[] = [{ id: 'a', run: 'r0' }, { id: 'b', run: 'r1' }, { id: 'c', run: 'r1' }]
-    const Surface = ({ ready }: { ready: boolean }) => {
-      useTakeReveal('nc-take', 'report', comments, ready, (c) => void got.push(c))
-      return null
-    }
-    await mount(<Surface ready={false} />)
-    act(() => revealComments('nc-take', 'report', ['r1']))
-    await settle()
-    expect(got).toEqual([])
-    unmountAll()
-    await mount(<Surface ready />)
-    await settle()
-    expect(got).toEqual([{ id: 'b', run: 'r1' }])
-    let left: unknown = 'unread'
-    const Probe = () => {
-      left = useReveal('nc-take', 'report')
-      return null
-    }
-    await mount(<Probe />)
-    expect(left).toBeNull()
-  })
-
-  test('with none of their comments after a while, it gives up and shows the Comments pane alone', async () => {
-    vi.useFakeTimers()
-    const got: (C | null)[] = []
-    const Surface = () => {
-      useTakeReveal('nc-wait', CANVAS, [{ id: 'a', run: 'r0' }], true, (c) => void got.push(c))
-      return null
-    }
-    await mount(<Surface />)
-    act(() => revealComments('nc-wait', CANVAS, ['r9']))
-    await act(async () => void vi.advanceTimersByTime(REVEAL_WAIT_MS - 10))
-    expect(got).toEqual([])
-    await act(async () => void vi.advanceTimersByTime(20))
-    expect(got).toEqual([null])
-  })
-
-  test("a document's Comments pane that the analyst folded opens for Show", async () => {
-    window.localStorage.setItem(storageKey('nc-pane', PANE_KEY), 'false')
-    const checks: Checks = { list: [check('important-details', true)], ready: true, on: new Set(['important-details']), look: { colour: () => '', name: (id) => id ?? '', rank: () => 0 }, toggle: () => undefined, create: async () => true, editPrompt: async () => true }
-    const el = await mount(<CommentsPane ws="nc-pane" doc="report" checks={checks} comments={[]} />)
-    expect(el.querySelector('.wu-checks-list')).toBeNull()
-    await act(async () => revealComments('nc-pane', 'report', ['r1']))
-    await settle()
-    expect(el.querySelector('.wu-checks-list .wu-check[data-check="important-details"]')).not.toBeNull()
+    expect(dots(el)).toEqual([])
   })
 })
