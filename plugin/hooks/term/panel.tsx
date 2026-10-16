@@ -2357,12 +2357,13 @@ let labelPainting = ''
 
 /** The label panel, after the browser's label editor (SPEC.md, section 7, "The label panel"): its header block,
  *  the label's name in the accent and bold after a ● in its colour, its type (prompt, regex or code: the one in use on
- *  the selection background), a prompt label's model, and its scope (the files, editable, and how many files match),
- *  then the rule; the prompt (or
- *  pattern or code) in a field to edit, Enter saving it (`thimble act label`); `run on a sample` and `run on all N`,
- *  which save what was typed first and run it (`thimble act label-run`), `rename` (`thimble act label`) and `delete`,
- *  which asks once in the panel (y deletes, n keeps; `thimble act label-delete`); a label over files is turned on or off
- *  in Files and the views (`in files: on off`, `thimble act label-show`). Then `▸ counts`, `▸ examples` and `▸ cards`,
+ *  the selection background), its scope (the files, editable, and how many files match), and for a label over files
+ *  whether Files and the views mark its records with its values (`marks: shown on records in Files and views  hide`,
+ *  `thimble act label-show`); then the rule and the definition: a prompt label's model, then the prompt (or pattern or
+ *  code) in a field to edit, `edit` in it at rest, Enter saving it (`thimble act label`); `run on a sample` and `run on
+ *  all N`, which save what was typed first and run it (`thimble act label-run`), `rename` (`thimble act label`) and
+ *  `delete`, which asks once in the panel (y deletes, n keeps; `thimble act label-delete`), each action in the accent
+ *  so it reads as a button (Matt, deck/video v9 review, items k to m). Then `▸ counts`, `▸ examples` and `▸ cards`,
  *  folded, nothing of them shown until one is opened: each value's `color` (the label colors by name) and `filter`
  *  (`thimble act label-filter`) in the counts, the held-out agreement and `… N more` records in the examples. */
 async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElement> {

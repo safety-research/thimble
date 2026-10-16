@@ -137,13 +137,15 @@ Claude Code's panel chrome, no right-click menu.
   line that says so).
 - **The label panel**, as Matt laid it out: `name:` its name in the accent and bold after a `●` in its color, `type:`
   (`prompt  regex  code`, the one in use on the selection background, the others a click away), `scope:` (its files, a
-  field, and how many records), for a label over files `in files:` (`on  off`, o, `thimble act label-show`), then a
-  rule; the prompt (or pattern, or code) whole in a field to edit, on the same
-  column (`hooks/field.tsx`: a click gives it the keyboard, Enter saves it, `thimble act label`); `run on a sample` and
-  `run on all N`, which save what was typed first and run it (`thimble act label-run`), and `stop` (s) while it runs
-  (`thimble act label-stop`), `rename` (n) and `delete` (k), whose undo the labels list then offers (u, `thimble act
-  label-undelete`); then `▸ counts` (with the values to edit, and each value's `color`, the eighteen label colors
-  around the color wheel by the names show_label takes, and `filter`, `thimble act label-show` and `label-filter`),
+  field, and how many records), for a label over files `marks:` (whether Files and the views mark its records, in
+  words, then `hide` or `show`, f, `thimble act label-show`), then a rule; a prompt label's `model:`, then the prompt
+  (or pattern, or code) whole in a field to edit, on the same column (`hooks/field.tsx`: `edit` in the accent at
+  rest, a click gives it the keyboard, Enter saves it, `thimble act label`); its actions in the accent: `run on a
+  sample` and `run on all N`, which save what was typed first and run it (`thimble act label-run`), and `stop` (s)
+  while it runs (`thimble act label-stop`), `rename` (n) and `delete` (k), whose undo the labels list then offers (u,
+  `thimble act label-undelete`); then `▸ counts` (with the values to edit, and each value's `color`, the eighteen
+  label colors around the color wheel by the names show_label takes, and `filter`, `thimble act label-show` and
+  `label-filter`),
   `▸ examples` (the held-out agreement; each record under its value, `agree` or another value, `thimble act verdict`;
   `… N more` per value, `thimble state label --rows`; a JSON record's other fields on one dim row cut at whole pairs) and
   `▸ cards` (the cards that use it, each a click away), folded. A label's values take their classes' colors wherever
