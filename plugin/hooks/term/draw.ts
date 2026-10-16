@@ -789,13 +789,14 @@ function timelineLayout(card: CardData, cols: number, hover: number): Layout {
     } else axisRows = 1
   }
   // one row per event: its time dim at the content's edge, under the axis's start time (in inverse under the
-  // pointer), its ● in hue, its words, and a blue ↗ when it has a record a click opens
+  // pointer), its ● in hue, its words, and a ↗ in the citation's purple when it has a record a click opens (its
+  // evidence, as an example's place)
   const tW = Math.min(Math.max(...shown.map(t => width(t))), 22)
   const owner: number[] = lines.map(() => -1)
   evs.forEach((e, i) => {
     const on = i === hover
     const label = fold(e.label, Math.max(8, cols - tW - 6))
-    const arrow: Seg[] = e.ref ? [{ s: ' ' }, { s: '↗', fg: COLORS.link }] : []
+    const arrow: Seg[] = e.ref ? [{ s: ' ' }, { s: '↗', fg: COLORS.cite }] : []
     const time = pad(shown[i]!, tW)
     lines.push([on ? { s: time, inv: true } : { s: time, fg: COLORS.dim }, { s: '  ' }, { s: '●', fg: mark(e) }, { s: ' ' }, { s: label[0]! }, ...(label.length === 1 ? arrow : [])])
     owner.push(i)
@@ -1165,10 +1166,11 @@ function tableLayout(card: CardData, cols: number, hover: number): Layout {
   }
 }
 
-/** A record's place as a link: a blue ↗, then its place in words, blue and underlined, in inverse while the record is
- *  under the pointer. */
+/** A record's place as a link, the evidence the card shows: a ↗, then its place in words, underlined, both in the
+ *  citation's purple as every citation in the card (MATT-NOTES "Mockup feedback": no two underline colors in a card; the
+ *  link color stays for actions), in inverse while the record is under the pointer. */
 function placeLink(ref: string, n: number, on: boolean): Seg[] {
-  return [{ s: '↗', fg: COLORS.link }, { s: ' ' }, { s: cutRef(ref, Math.max(4, n - 2)), fg: COLORS.link, u: true, ...(on ? { inv: true } : {}) }]
+  return [{ s: '↗', fg: COLORS.cite }, { s: ' ' }, { s: cutRef(ref, Math.max(4, n - 2)), fg: COLORS.cite, u: true, ...(on ? { inv: true } : {}) }]
 }
 
 /** A record's own words in quotation marks, in at most `max` rows of `room` columns; words that do not fit end in
@@ -1191,7 +1193,7 @@ function quoteLines(words: string, room: number, max: number): string[] {
 /**
  * Example records: per record, a ● at the content's edge (in its value's hue when a label the card read marks it, dim
  * when it marks it not, else the first hue) and thimble's note after it, regular; under the note, 2 cells in, the
- * record's words in quotation marks and italic, up to three rows, then ↗ and its place in blue and underlined, on the
+ * record's words in quotation marks and italic, up to three rows, then ↗ and its place in purple and underlined, on the
  * quote's last row where it fits, else on the row under it. A blank row between records.
  */
 function exampleLayout(card: CardData, cols: number, hover: number): Layout {

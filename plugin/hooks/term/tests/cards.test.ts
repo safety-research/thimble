@@ -7,6 +7,7 @@ import type { Engine, Mounted } from 'claude-code/testing'
 import { cardOfCell } from '../cell'
 import type { ThimbleCell } from '../cell'
 import { cardLayout } from '../draw'
+import { COLORS } from '../paint'
 import { CELLS, CWD, WS, shown, world } from './fixtures'
 import type { World } from './fixtures'
 
@@ -158,6 +159,18 @@ test("a timeline's axis names both its ends or neither: neither when the list un
   const axis = cardLayout(sorted, 60, -1).lines.map(l => l.map(s => s.s).join(''))
   expect(axis[1]).toMatch(/^May 24 +Jun 18$/)
   expect(axis[1]!.length).toBe(60)
+})
+
+test("inside a card every citation and evidence link is in the citation's purple: an example's ↗ and place, a timeline's ↗; one underline color", () => {
+  // MATT-NOTES "Mockup feedback": "no two underline colors"; the link color stays for actions (↗ open, buttons)
+  const example = cardOfCell({ id: 'x0quot00', notebook: 'g1', kind: 'example', title: 'Was anything force-pushed?', takeaway: '', labels: [], created_by: 'main', status: 'ok', payload: { refs: [{ ref: 'events.jsonl#L197', quote: '{"forced": true}' }] } } as unknown as ThimbleCell).card
+  const segs = cardLayout(example, 80, -1).lines.flat()
+  expect(segs.find(g => g.s === '↗')).toEqual({ s: '↗', fg: COLORS.cite })
+  expect(segs.find(g => g.s.startsWith('events.jsonl'))).toEqual({ s: 'events.jsonl line 197', fg: COLORS.cite, u: true })
+  expect(segs.some(g => g.fg === COLORS.link)).toBe(false)
+  const timeline = cardOfCell({ ...(CELLS.e0time00 as object), outputs: [{ 'application/vnd.thimble.timeline+json': { events: [{ time: '2026-05-24', label: 'first saves', ref: 'events.jsonl#L3' }, { time: '2026-06-18', label: 'peak afternoon' }] } }] } as unknown as ThimbleCell).card
+  const marks = cardLayout(timeline, 60, -1).lines.flat().filter(g => g.s === '↗')
+  expect(marks).toEqual([{ s: '↗', fg: COLORS.cite }])
 })
 
 test('a press on a label that is not in the workspace says so in a toast and opens nothing', async ($, on) => {

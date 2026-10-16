@@ -326,6 +326,23 @@ test("a day and a month with a time cite the time stamp that writes both; such a
   expect(v.why).toBe('the place shows 06-23')
 })
 
+test("a clock time is a value a citation shows: found where the line writes that time, red where it writes another (MATT-NOTES \"Mockup feedback\")", () => {
+  // `14:52:11` read "its value is not checked, and a script got the same number" in its tip and "only its place is
+  // checked" in its panel: a time is a value, checked at its place as a number is
+  const line = '{"id": 197, "ts": "2026-08-30T14:52:11.325+00:00", "agent": "agent-07", "action": "git.ref"}'
+  for (const d of ['14:52', '14:52:11', '14:52:11.325', '09:38 UTC']) expect(showsValue(d)).toBe(true)
+  for (const d of ['14:52', '14:52:11', '14:52:11.325']) expect(valueIn(d, line)).toBe(true)
+  // the same hour and minute, the same second when the time gives one; never a time inside another
+  for (const d of ['14:58', '14:52:12', '4:52']) expect(valueIn(d, line)).toBe(false)
+  expect(valueIn('09:38', 'at 9:38:00 the run began')).toBe(true)
+  const res = { ref: 'events.jsonl#L197', kind: 'record', path: 'events.jsonl', line: 197, blocks: [{ text: line }], excerpt: line }
+  const ok = verdictOf(citations('[[14:52|events.jsonl#L197]]')[0]!, res as never)
+  expect(ok).toMatchObject({ status: 'ok', why: 'the value is at its place' })
+  // the time marked where the line writes it
+  expect(ok.lines.find(l => l.hit)?.spans).toEqual([[line.indexOf('14:52'), line.indexOf('14:52') + 5]])
+  expect(verdictOf(citations('[[14:58|events.jsonl#L197]]')[0]!, res as never).status).toBe('differs')
+})
+
 test("a link to a label says when the label counts another number now: the count with the verdicts", () => {
   const label = { id: 'k1', labels: ['yes', 'no'], label_stats: { n_labeled: 4579, counts: { yes: 180, no: 4399 } }, verdicts: { counts: { yes: 179, no: 4400 }, set: 1 } } as never
   expect(labelCountNow(label, 'yes')).toBe(179)

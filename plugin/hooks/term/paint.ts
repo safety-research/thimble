@@ -71,9 +71,10 @@ export function citeHighlight(theme: Theme = painted.theme): string {
 }
 
 // What each colour means (SPEC.md, "The visual system", section 4): letters in the text colour or dim; lines in
-// the rule grey; links in blue; citations in purple; a panel's title and its selected row in the accent; the word "new" in green; a palette
-// hue only on the glyphs and marks of a region's one colour field; red only for a problem; the selection background on
-// a choice in use. No other colour: no warning amber, and no green but "new".
+// the rule grey; links in blue; citations in purple, a card's evidence links too; a panel's title and its selected row in
+// the accent; the word "new" and a citation panel's `checked` in green; a palette hue only on the glyphs and marks of a
+// region's one colour field; red only for a problem; the selection background on a choice in use. No other colour: no
+// warning amber, and no green but those two.
 export const COLORS = {
   /** the chart series: SERIES itself, so a theme change repaints them */
   series: SERIES,
@@ -99,6 +100,8 @@ export const COLORS = {
   accent: 'suggestion',
   /** the word "new" and "N new" */
   fresh: 'success',
+  /** a citation's state word `checked` in its panel's bar (MATT-NOTES "Mockup feedback", citation panel C) */
+  checked: 'success',
   /** the background of the tip of the citation under the pointer */
   tip: 'userMessageBackground',
   /** the background of the analyst's question in a side thread, as Claude Code draws a prompt in its chat */

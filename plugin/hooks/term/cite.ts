@@ -1,10 +1,10 @@
 // Citations as the analyst sees them (no `$`), shared by the hooks module, para.tsx and the tests.
 //
 // - Display (MATT-NOTES "Citation behavior"): every citation is purple and underlined, a `[ card ]` chip too. While it
-//   is checked (its place not resolved yet, a fix round or the card's links check working on it) a ◌ one space after its
-//   value is part of it, purple and underlined as the value (`3,934 ◌`, v9 review);
+//   is checked (its place not resolved yet, a fix round or the card's links check working on it) a purple ◌ follows its
+//   value one space after it, neither underlined (`3,934 ◌`, MATT-NOTES "Mockup feedback");
 //   on success the ◌ goes and nothing takes its place (never a ✓); a check that rewrote it leaves it as rewritten, with
-//   no mark; a permanent failure (the value is not at its place, the place does not exist, the links check got another
+//   no mark and no words beside it (its panel's history says what Claude wrote); a permanent failure (the value is not at its place, the place does not exist, the links check got another
 //   value) turns it red with × right after it. The model's Markdown is drawn as Claude Code draws it: bold bold, italic
 //   italic, inline code in the code colour, a heading bold.
 // - Layout: a reply's paragraph or table wrapped to its width, a citation's shown value whole and wrapping like the
@@ -18,7 +18,7 @@
 import type { ChatCorrection, ChatEnd, ChatFix, ChatFixItem, ChatVerify } from './types'
 import { lineWidth, placeWords, width } from './draw'
 import type { Line, Seg } from './draw'
-import { EMBED_RE, bareCard, cardWords, chipLabel, chipPlace, chipText, chipWords, cid, citations, citeEnd, citeSpans, dayMonth, inlineRuns, isChip, labelRef, linksAsSpans, outputLine, parseReply, plainLinks, prefix, questionOf, reportRef, shownMatches, valueIn, windowAt, withoutOwnParens } from './lib'
+import { EMBED_RE, bareCard, cardWords, chipLabel, chipPlace, chipText, chipWords, cid, citations, citeEnd, citeSpans, dayMonth, inlineRuns, isChip, isClock, labelRef, linksAsSpans, outputLine, parseReply, plainLinks, prefix, questionOf, reportRef, shownMatches, valueIn, windowAt, withoutOwnParens } from './lib'
 import type { Citation, Run, TableRuns } from './lib'
 import { COLORS } from './paint'
 
@@ -26,9 +26,9 @@ import { COLORS } from './paint'
  *  not at the place or the place does not exist; `fixing` while a fix round runs on it; `failed` when the fix round
  *  could not correct it or its verification failed (another value, a crash, no script). */
 export type ChipState = 'link' | 'problem' | 'fixing' | 'failed'
-/** `mark` is × (failed) or nothing, never ✓; `spin` while the citation is checked, drawn as ` ◌` in the link's own
- *  style. `chip`: a citation
- *  with no words of its own, drawn as `[ card ]` (its label holds the brackets), whole on one row. */
+/** `mark` is × (failed) or nothing, never ✓; `spin` while the citation is checked, drawn as a purple ◌ one space after
+ *  the link, not underlined. `chip`: a citation with no words of its own, drawn as `[ card ]` (its label holds the
+ *  brackets), whole on one row. */
 export type ChipView = { label: string; state: ChipState; mark: string; spin: boolean; tip: string; chip?: boolean }
 
 /** What a citation's link says: its shown value whole, or a short name of the place for one without a value. */
@@ -81,13 +81,14 @@ export function chipLook(status: string | undefined, fix: string | undefined, ve
 }
 
 /** A citation as styled segments: its label purple and underlined (red when it failed), a chip (`[ card ]`) too, in
- *  inverse under the pointer, so its color becomes the background; then, while it is checked, ` ◌` as part of the link
- *  (purple, underlined, inverse under the pointer with it: `3,934 ◌`), or a red × a cell apart once it failed. */
+ *  inverse under the pointer, so its color becomes the background; then, while it is checked, a space and a purple ◌,
+ *  neither underlined (`3,934 ◌`, MATT-NOTES "Mockup feedback"), or a red × a cell apart once it failed. The mark's
+ *  cells are the citation's: a pointer over them is over the link. */
 export function chipSegs(c: ChipView, hover: boolean, _frame = 0): Seg[] {
   const bad = !c.spin && (c.state === 'problem' || c.state === 'failed')
   const label: Seg = { s: c.label, fg: bad ? COLORS.problem : COLORS.cite, u: true, ...(hover ? { inv: true } : {}) }
-  // the mark a cell apart from the value: `19,931 ◌`, not `19,931◌`; the spinner in the link's own style, the space too
-  if (c.spin) return [label, { ...label, s: ` ${SPIN}` }]
+  // the mark a cell apart from the value: `19,931 ◌`, not `19,931◌`; only the value is underlined
+  if (c.spin) return [label, { s: ' ' }, { s: SPIN, fg: COLORS.cite }]
   return bad ? [label, { s: ' ×', fg: COLORS.problem }] : [label]
 }
 
@@ -95,12 +96,19 @@ export function chipSegs(c: ChipView, hover: boolean, _frame = 0): Seg[] {
 
 const NUMBER_RE = /^[-−]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?%?$/
 
-/** Whether a citation's words are a value its place can show, a number, a quote or a date in words (`23 June`, `4 June
- *  2026 at 10:53 UTC`, which dateIn checks), as the resolver (refs.py) reads them; live check term-fix7, new quirk 3: a
- *  wrong `[24 June](card:…#day/06-23)` was blue, "its value is not checked". Other words, as in
- *  [[its revisions|revisions.jsonl#L5603-L5625]], name the place and show no value. */
+/** Whether a citation's words are a number alone (`3,908`, `12.5%`). */
+export function isNumber(display: string): boolean {
+  return NUMBER_RE.test(display.trim())
+}
+
+/** Whether a citation's words are a value its place can show, a number, a quote, a date in words (`23 June`, `4 June
+ *  2026 at 10:53 UTC`, which dateIn checks) or a clock time (`14:52`, `14:52:11`, which clocksIn checks), as the
+ *  resolver (refs.py) reads them; live check term-fix7, new quirk 3: a wrong `[24 June](card:…#day/06-23)` was blue,
+ *  "its value is not checked"; a time the place holds read "its value is not checked, and a script got the same
+ *  number" (MATT-NOTES "Mockup feedback"). Other words, as in [[its revisions|revisions.jsonl#L5603-L5625]], name the
+ *  place and show no value: only their place is checked. */
 export function showsValue(display: string | null): boolean {
-  return display !== null && (NUMBER_RE.test(display.trim()) || quotedWords(display) !== '' || dayMonth(display) !== null)
+  return display !== null && (NUMBER_RE.test(display.trim()) || quotedWords(display) !== '' || dayMonth(display) !== null || isClock(display))
 }
 
 /** The place a file citation names after its "#" (L5603-L5625, row=12, a JSON pointer, table/key), or '' for a whole

@@ -51,7 +51,7 @@ import { focusFromRef } from './anim'
 import type { Focus } from './anim'
 import { NAV_EMPTY, backTarget, crumbSteps, fitPath, pathWidth, threadBehind, threadOnTrail, threadTitle, threadTree, withBack } from './nav'
 import { COLORS, citeHighlight, paintLines } from './paint'
-import { PANEL_MARGIN, cardBlock, cardName, citeStatus, claimCard, claimSentence, drawReply, linkCheck, placeName, plainWhy, scrubIds } from './reply'
+import { PANEL_MARGIN, cardBlock, cardName, claimCard, claimSentence, drawReply, linkCheck, placeName, plainWhy, scrubIds } from './reply'
 import { PANEL, citePage, closePanel, deleteLabel, filterLabel, inPanelNow, loadCards, navBack, navGo, openHome, openList, openPanel, panelOfStep, queueCitations, readDoc, readFilePage, readSurface, rt, runLabel, saveLabel, showLabel, startThread, stepOf, stopLabel, subjectFile, surfaceValue, threadMessage, undeleteLabel } from './term'
 import { COLOR_NAMES, LABEL_WHEEL, MORE_ROWS, UNSURE_PAGE, agreementLine, classColors, hueOf, labelArgs, labelGone, labelRows, setLabelGone, unsureArgs, unsureKey, unsureOf, unsureShown, unsureWords } from './labels'
 import { featuresOf, openComments, openSection } from './band'
@@ -368,8 +368,9 @@ export async function openCite(cx: Ctx, ref: string, display: string | null, mor
   // draws (`agent-chat.jsonl line 2`)
   const c = { raw: '', ref, display }
   const title = display === null && fileRef(ref) ? chipWords(c) : clip(await citeTitle(cx, c), 40)
-  // opened anew, a file citation's window starts at the cited lines again
+  // opened anew, a file citation's window starts at the cited lines again, and only its bar shows under them
   citeTops.delete(ref)
+  citeOpen.delete(citeKey(display, ref))
   await openPanel(cx, { view: 'cite', title, ref, display, ...(more.sentence ? { sentence: more.sentence } : {}), ...(more.quote ? { quote: more.quote } : {}), ...(more.of ? { of: more.of } : {}) })
 }
 
@@ -1858,10 +1859,11 @@ async function scriptThreadOf(cx: Ctx, ref: string): Promise<TermThreadRow | und
   return [...(await cx.threads())].reverse().find(t => t.anchor === ref && (t.question ?? '').startsWith(SCRIPT_ASK))
 }
 
-/** How a citation was verified, in words, for its panel's `how` row (v9 review): what thimble read to check it, what
- *  computed or printed the value it found there, and what the card's links check found; while the check runs, that it
- *  runs. */
-function howWords(c: Citation, v: TermVerdict | undefined, check: { state?: string }): string {
+/** How a citation was verified, in words, for what its panel's state word opens (v9 review; MATT-NOTES "Mockup
+ *  feedback"): what thimble read to check it, what computed or printed the value it found there, and what the card's
+ *  links check got; while the check runs, that it runs. Words that show no value only name their place: the check reads
+ *  that the place is there, and says so, never that a value was found. */
+function howWords(c: Citation, v: TermVerdict | undefined, check: { state?: string; source?: string }): string {
   if (!v || v.status === 'pending') return `${SPIN} thimble is reading its place`
   if (v.status === 'missing') return 'thimble looked for its place and found none'
   const shows = c.display !== null && showsValue(c.display)
@@ -1880,23 +1882,35 @@ function howWords(c: Citation, v: TermVerdict | undefined, check: { state?: stri
     words = shows ? `thimble read ${place} and ${v.status === 'differs' ? 'did not find the value there' : 'found the value there'}` : `thimble read ${place}${noValue}`
   }
   if (check.state === 'running') return `${words}; ${SPIN} its card's links check is running`
-  if (check.state === 'verified') return `${words}, and its card's links check found the same value`
-  if (check.state === 'refuted') return `${words}, but its card's links check found another value`
+  // the links check of words that show no value reads their place again: it adds nothing to what was found
+  if (check.state === 'verified') return shows ? `${words}, and its card's links check found the same value` : words
+  if (check.state === 'refuted') return `${words}, but its card's links check found ${check.source || 'another value'}`
   return words
 }
 
-/** The citation panel (SPEC.md, section 7, "The citation panel"): the title is the cited value, bold, purple and
- *  underlined (a link to its place; red when the value is not there), ` ◌` as part of it while it is checked and a red ×
- *  for a problem, nothing once found; the subtitle its verification's state in plain words (`◌ being verified` while
- *  it is checked: v9 review, "clicking a citation still being verified"). Under the rule `from` and `source` (the
- *  sentence it stands in, the value in it purple), `how` (what thimble read to verify it, and the code that computed or
- *  printed the value: a card's code, a command, or a side thread's script; for a place no code verified, `ask for a
- *  script`), `history` (unchanged, or `Claude wrote` the value or place as written, `check made it` the one it reads
- *  now, `why`); then where the value stands, on the citation's purple: a file's lines nested at A2, or for a value on
- *  a card the card's data row and the code that holds it (v9 review: "the code or data holding the literal, not the
- *  plot"; a card whose data has no rows drawn with its mark lit); at the bottom the entry box, whose question starts a
- *  side thread about the citation, or goes on in the side thread it was opened from. It reads its verdict and its card
- *  as they change, so it says when the check ends. */
+// what a citation's panel shows above its bar, by the citation (citeKey): `how` it was verified (its state word
+// opened it) or its `history`; none at rest, as the panel opens
+const citeOpen = new Map<string, 'how' | 'history'>()
+
+/** A citation's key among the panels' open parts: its words and its place. */
+function citeKey(display: string | null, ref: string): string {
+  return `${display ?? ''}|${ref}`
+}
+
+/** The citation panel (SPEC.md, section 7, "The citation panel"; MATT-NOTES "Mockup feedback", panel C): the title is
+ *  the cited value, bold, purple and underlined (a link to its place; red once it failed), with no mark: the bar says
+ *  its state. Under the rule `from the card` and the card's question for a citation in a card's takeaway, else `source`
+ *  (the sentence it stands in, the value in it purple); then its place as a link (`↗ events.jsonl line 197`, purple
+ *  and underlined, a press opens it); then where the value stands, on the citation's purple: a file's lines, a
+ *  command's lines under the command, or for a value on a card the card's data row and the code that holds it (v9
+ *  review: "the code or data holding the literal, not the plot"; a card whose data has no rows drawn with its mark
+ *  lit). At the bottom, above the entry box, one bar: the state word (`checked ›` green, `◌ checking …` while it is
+ *  checked, `failed × ›` red) and `history N ›`. A press on the state word (or `v`) opens how it was verified above
+ *  the bar: what thimble read, what computed or printed the value, what the card's links check got, why it failed, and
+ *  for a place no code verified `ask for a script` and the side thread's script; a press on `history` (or `h`) opens
+ *  what Claude wrote, what the check made it and why. The entry box's question starts a side thread about the
+ *  citation, or goes on in the side thread it was opened from. It reads its verdict and its card as they change, so
+ *  the bar says when the check ends. */
 async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElement> {
   const els = cx.els(e) as El
   const { Box, Text, Button } = cx.els(e)
@@ -1912,37 +1926,69 @@ async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   const cardId = /^(?:card|cell):([A-Za-z0-9_-]+)/.exec(c.ref)?.[1]
   // a place cited with no words keeps its line where its path is cut (`…/agent-ad502eca.jsonl line 20`)
   const label = c.display === null && fileRef(c.ref) ? cutRef(c.ref, Math.max(8, cols - 6)) : cut(await citeTitle(cx, c), Math.max(8, cols - 6))
-  // the takeaway's card's links check, as the chat marks the citation: ◌ while it runs, nothing once a script got
-  // the value, a red × when it got another
-  const check = p.of ? linkCheck((await cx.card(p.of))?.links, c) : {}
+  // the takeaway's card's links check, as the chat marks the citation: checking while it runs, failed when it got
+  // another value or found the value typed in the card's code
+  const ofCard = p.of ? await cx.card(p.of) : undefined
+  const check = p.of ? linkCheck(ofCard?.links, c) : {}
   const look = chipLook(status, undefined, check.state)
   const bad = !look.spin && (red || look.state === 'failed')
-  const titleSeg: Seg = { s: label, b: true, fg: bad ? COLORS.problem : COLORS.cite, u: true }
-  // while it is checked the spinner is part of the citation, in its style (`3,934 ◌`); a red × a cell apart once it failed
-  const mark: Seg | null = !v || look.spin ? { ...titleSeg, s: ` ${SPIN}` } : bad ? { s: ' ×', fg: COLORS.problem } : null
-  const titleSegs: Line = [titleSeg, ...(mark ? [mark] : [])]
+  const checking = look.spin
+  // the title: the value, red once it failed; no ◌ or × after it, the bar says its state
+  const titleSegs: Line = [{ s: label, b: true, fg: bad ? COLORS.problem : COLORS.cite, u: true }]
   const opens = f ? () => openFile(cx, f.path, Math.max(1, (f.line ?? 1) - 5), f.line) : cardId ? () => openCard(cx, cardId) : null
   const body: RenderElement[] = []
   // the title row's current step: the value as its link, a click on it opening its place
   setHead({ line: titleSegs, key: 'cite-title', ...(opens ? { press: () => void opens() } : {}) })
-  const why = red && v?.why ? await plainWhy(cx, v.why) : check.state === 'refuted' && check.why ? await plainWhy(cx, check.why) : ''
-  // a citation with no words is titled by its place: its subtitle does not name the place again, and it has none
-  // while the place is there
-  const bare = c.display === null
-  // `from` names the place, unless the title is the place already (a citation written without words)
-  const from = outputLine(c.ref) ? await placeName(cx, c.ref) : cardId ? await placeName(cx, `card:${cardId}`) : placeWords(c.ref)
-  const rows: [string, RenderElement | string, string?][] = from === (await citeTitle(cx, c)) ? [] : [['from', from]]
-  // the subtitle names the place only where no `from` row does: under one, a citation found is `found`; while it is
-  // checked, it says it is being verified
-  const verifying = (s: string) => s.replace(`${SPIN} checking`, `${SPIN} being verified`).replace(`${SPIN} being checked`, `${SPIN} being verified`)
-  const status0 = pending ? `${SPIN} being verified` : bare ? (red ? 'not found' : check.state === 'running' ? `${SPIN} being verified` : '') : verifying(await citeStatus(cx, c, v, check))
-  const said = rows.length && !red ? status0.replace(/^found (?:on the card|in the command's output(?:, line \d+(?:-\d+)?)?|in .+?)(?=;|,|$)/, 'found') : status0
-  const sub = [said, why].filter(Boolean).join(' · ')
-  if (sub) body.push(lineEl(els, [{ s: sub, fg: bad ? COLORS.problem : COLORS.dim }], 'cite-sub', true))
+  // why it failed: the resolver's reason, or the links check's (another value, a value the card's code types in)
+  const why = red && v?.why ? await plainWhy(cx, v.why) : (check.state === 'refuted' || check.state === 'typed') && check.why ? await plainWhy(cx, check.why) : ''
+  const tall = (words: string, w: number) => (words ? wrapRows(words, Math.max(1, w), 999).length : 0)
   body.push(ruleEl(els, cols, 'cite-rule'))
-  if (p.sentence) rows.push(['source', lineEl(els, sourceSegs(p.sentence, c), 'cite-source', true)])
-  // how it was verified: what thimble read, and the code that computed or printed the value (below, or a side thread's
-  // script); a place no code verified asks a side thread for a script
+  // the rows the panel's parts take, but for the file's window (which takes the rest): the title row and the rule
+  let used = 2
+  // where the citation stands: the card whose takeaway holds it, or the sentence
+  const question = ((ofCard?.data as CardData | null | undefined)?.question ?? '').trim()
+  const head: [string, RenderElement | string, string?][] = []
+  if (p.of && question) head.push(['from the card', question])
+  else if (p.sentence) head.push(['source', lineEl(els, sourceSegs(p.sentence, c), 'cite-source', true)])
+  if (head.length) {
+    const [k, val] = head[0]!
+    body.push(fieldEls(els, head, 'cite')!, <Text key="cite-from-gap"> </Text>)
+    used += tall(typeof val === 'string' ? val : sourceSegs(p.sentence ?? '', c).map(x => x.s).join(''), cols - width(k) - 2) + 1
+  }
+  // its place as a link, in the citation's purple as every evidence link; not for a citation titled by its place
+  const place = outputLine(c.ref) ? await placeName(cx, c.ref) : cardId ? await placeName(cx, `card:${cardId}`) : placeWords(c.ref)
+  if (place !== (await citeTitle(cx, c))) {
+    const placeLine: Line = [{ s: '↗', fg: COLORS.cite }, { s: ' ' }, { s: cut(place, Math.max(4, cols - 2)), fg: COLORS.cite, u: true }]
+    const pw = lineWidth(placeLine)
+    body.push(linesEl(cx, e, 'cite-place', [placeLine], opens ? [{ y: 0, x0: 0, x1: pw, row: false, run: () => void opens() }] : [], pw), <Text key="cite-place-gap"> </Text>)
+    used += 2
+  }
+  // the code that computed or printed the value, its literal on the citation's purple where the code types it: a card's
+  // code, the command, a side thread's script
+  const value = c.display !== null && showsValue(c.display) ? (quotedWords(c.display) || c.display) : ''
+  const tc = v?.card ? await cx.card(v.card) : undefined
+  const src: [string, RenderElement | string, string?][] = []
+  // the room right of the rows' labels (`command`, `data`, `code`)
+  const srcRoom = cols - (v?.command ? width('command') : width('data')) - 2
+  let codeRows = 0
+  const codeOf = (code: string, max: number, room: number, key: string, more?: () => void): RenderElement => {
+    const got = codeLines(code, value, room, max)
+    codeRows += got.lines.length + (got.more ? 1 : 0)
+    const moreEl = got.more ? (more ? <Button key={`${key}-more`} label={`… ${num(got.more)} more`} plain dimColor onPress={more} /> : <Text dimColor>{`… ${num(got.more)} more`}</Text>) : null
+    return <Box flexDirection="column">{[...got.lines.map((l, i) => lineEl(els, l, `${key}-${i}`)), ...(moreEl ? [moreEl] : [])]}</Box>
+  }
+  if (v?.command) src.push(['command', lineEl(els, [{ s: `$ ${v.command}`, fg: COLORS.code }], 'cite-command', true)])
+  // a value on a card: the card's data row that holds it, then its code (v9 review: never the plot)
+  const card = tc?.data as CardData | null | undefined
+  const dataRow = v?.card && !v.lines.length && card ? citedRow(card, v) : null
+  if (dataRow) src.push(['data', <Box flexDirection="column">{dataLines(dataRow, srcRoom).map((l, i) => lineEl(els, l, `cite-data-${i}`))}</Box>])
+  if (tc?.code?.trim() && v?.card && (value || outputLine(c.ref))) src.push(['code', codeOf(tc.code, 8, srcRoom, 'cite-code', () => void openCard(cx, v.card!, 'code'))])
+  if (src.length) {
+    body.push(fieldEls(els, src, 'cite-src')!)
+    used += src.reduce((n, [k, val]) => n + (k === 'code' ? 0 : k === 'data' ? 3 : tall(typeof val === 'string' ? val : `$ ${v?.command ?? ''}`, srcRoom)), 0) + codeRows
+  }
+  // how it was verified, opened by the state word: what thimble read, and for a place no code verified a side
+  // thread's script, or `ask for a script`
   const kept = !!v && (v.kind === 'cell' || Boolean(v.command) || /^(?:concept|report)$/.test(v.kind))
   const scriptT = !pending && !kept ? await scriptThreadOf(cx, c.ref) : undefined
   const askScript = () =>
@@ -1952,53 +1998,103 @@ async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
       await openThread(cx, got.id, scriptQuestion(c))
     })()
   const canAsk = !pending && !kept && !scriptT && c.display !== null && v?.status !== 'missing' && e.surface !== 'mobile'
-  const how = howWords(c, v, check)
-  rows.push([
-    'how',
-    canAsk ? (
-      <Box key="cite-how" flexDirection="row" flexWrap="wrap" columnGap={2}>
-        <Text wrap="wrap">{`${how}; no script recomputed it`}</Text>
-        <Button key="cite-script" label="ask for a script" plain onPress={askScript} />
-      </Box>
-    ) : (
-      how
-    ),
-  ])
-  // its revision history: what Claude wrote, what the check made it, and why; or that it reads as Claude wrote it
-  if (check.fixed) {
+  // its revisions: one where a check rewrote it in place (what Claude wrote, what the check made it, and why)
+  const revisions = check.fixed ? 1 : 0
+  const key = citeKey(c.display, c.ref)
+  let open = citeOpen.get(key)
+  if ((open === 'how' && checking) || (open === 'history' && !revisions)) open = undefined
+  const toggle = (part: 'how' | 'history') => () => {
+    if (citeOpen.get(key) === part) citeOpen.delete(key)
+    else citeOpen.set(key, part)
+    void cx.bumpPanel()
+  }
+  const detail: RenderElement[] = []
+  let detailRows = 0
+  if (open === 'how') {
+    const how = howWords(c, v, check)
+    const words = canAsk ? `${how}; no script recomputed it` : how
+    // `ask for a script` on its own row under the words, a control at A0
+    detail.push(
+      <Box key="cite-how" flexDirection="column">
+        <Text wrap="wrap" dimColor>{words}</Text>
+        {canAsk ? (
+          <Box flexDirection="row">
+            <Button key="cite-script" label="ask for a script" plain onPress={askScript} />
+          </Box>
+        ) : null}
+      </Box>,
+    )
+    detailRows += tall(words, cols) + (canAsk ? 1 : 0)
+    if (bad && why) {
+      detail.push(
+        <Box key="cite-why" flexDirection="row">
+          <Text wrap="wrap" dimColor>{why}</Text>
+        </Box>,
+      )
+      detailRows += tall(why, cols)
+    }
+    // a side thread's script for a place no code verified: its first code block, once it answered
+    if (scriptT) {
+      const tt = await cx.thread(scriptT.id)
+      const turn = tt?.events.length ? threadOf(tt.meta, tt.events).turns[0] : undefined
+      const script = turn?.a ? firstCode(turn.a) : null
+      const openIt = () => void openThread(cx, scriptT.id)
+      const state = scriptT.running || turn?.state === 'running' ? `${SPIN} a side thread is writing it` : script ? "a side thread's script" : 'a side thread was asked for one'
+      const rows: [string, RenderElement | string, string?][] = [['script', <Box flexDirection="row" columnGap={2}><Text dimColor>{state}</Text><Button key="cite-script-open" label="open ↳" plain onPress={openIt} /></Box>]]
+      const before = codeRows
+      if (script) rows.push(['', codeOf(script.code, 8, cols - 8, 'cite-script-code', openIt)])
+      detail.push(fieldEls(els, rows, 'cite-script')!)
+      detailRows += 1 + codeRows - before
+    }
+  } else if (open === 'history' && check.fixed) {
     const now = c.display !== null && check.fixed.was ? c.display : await placeName(cx, c.ref)
     const wrote = check.fixed.was || (await placeName(cx, check.fixed.from))
-    rows.push(['Claude wrote', wrote], ['check made it', now], ...(check.fixed.why ? [['why', await plainWhy(cx, check.fixed.why)] as [string, string]] : []))
-  } else if (!pending) rows.push(['history', 'unchanged since Claude wrote it', COLORS.dim])
-  // the code that computed or printed the value, its literal on the citation's purple where the code types it: a card's
-  // code, the command, a side thread's script
-  const value = c.display !== null && showsValue(c.display) ? (quotedWords(c.display) || c.display) : ''
-  const tc = v?.card ? await cx.card(v.card) : undefined
-  const fieldW = () => Math.max(0, ...rows.map(([k]) => width(k))) + 2
-  let codeRows = 0
-  const codeOf = (code: string, max: number, more?: () => void): RenderElement => {
-    const got = codeLines(code, value, cols - fieldW(), max)
-    codeRows += got.lines.length + (got.more ? 1 : 0)
-    const moreEl = got.more ? (more ? <Button key="cite-code-more" label={`… ${num(got.more)} more`} plain dimColor onPress={more} /> : <Text dimColor>{`… ${num(got.more)} more`}</Text>) : null
-    return <Box flexDirection="column">{[...got.lines.map((l, i) => lineEl(els, l, `cite-code-${i}`)), ...(moreEl ? [moreEl] : [])]}</Box>
+    const because = check.fixed.why ? await plainWhy(cx, check.fixed.why) : ''
+    const lines: Line[] = [
+      [dim('Claude wrote '), { s: wrote, b: true }],
+      [dim('the check made it '), { s: now, b: true }, ...(because ? [dim(` · ${because}`)] : [])],
+    ]
+    detail.push(<Box key="cite-history-rows" flexDirection="column">{lines.map((l, i) => lineEl(els, l, `cite-history-${i}`, true))}</Box>)
+    detailRows += lines.reduce((n, l) => n + tall(l.map(x => x.s).join(''), cols), 0)
   }
-  if (v?.command) rows.push(['command', lineEl(els, [{ s: `$ ${v.command}`, fg: COLORS.code }], 'cite-command', true)])
-  // a value on a card: the card's data row that holds it, then its code (v9 review: never the plot)
-  const card = tc?.data as CardData | null | undefined
-  const dataRow = v?.card && !v.lines.length && card ? citedRow(card, v) : null
-  if (dataRow) rows.push(['data', <Box flexDirection="column">{dataLines(dataRow, cols - fieldW()).map((l, i) => lineEl(els, l, `cite-data-${i}`))}</Box>])
-  if (tc?.code?.trim() && v?.card && (value || outputLine(c.ref))) rows.push(['code', codeOf(tc.code, 8, () => void openCard(cx, v.card!, 'code'))])
-  // a side thread's script for a place no code verified: its first code block, once it answered
-  if (scriptT) {
-    const tt = await cx.thread(scriptT.id)
-    const turn = tt?.events.length ? threadOf(tt.meta, tt.events).turns[0] : undefined
-    const script = turn?.a ? firstCode(turn.a) : null
-    const open = () => void openThread(cx, scriptT.id)
-    const state = scriptT.running || turn?.state === 'running' ? `${SPIN} a side thread is writing it` : script ? "a side thread's script" : 'a side thread was asked for one'
-    rows.push(['script', <Box flexDirection="row" columnGap={2}><Text dimColor>{state}</Text><Button key="cite-script-open" label="open ↳" plain onPress={open} /></Box>])
-    if (script) rows.push(['', codeOf(script.code, 8, open)])
-  }
-  if (rows.length) body.push(fieldEls(els, rows, 'cite')!)
+  // the bar: the state word, then the history, three cells apart; a part that opens ends `›`, `⌄` while it is open
+  const arrow = (on: boolean) => (on ? ' ⌄' : ' ›')
+  const stateEl = checking ? (
+    <Text key="cite-state">
+      <Text color={COLORS.cite}>{SPIN}</Text>
+      <Text dimColor> checking …</Text>
+    </Text>
+  ) : (
+    <Button key="cite-state" plain onPress={toggle('how')}>
+      <Text>
+        {bad ? <Text color={COLORS.problem} underline>failed</Text> : <Text color={COLORS.checked} underline>checked</Text>}
+        {bad ? <Text color={COLORS.problem}> ×</Text> : null}
+        <Text dimColor>{arrow(open === 'how')}</Text>
+      </Text>
+    </Button>
+  )
+  const historyEl = revisions ? (
+    <Button key="cite-history" plain onPress={toggle('history')}>
+      <Text>
+        <Text color={ACCENT} underline>history</Text>
+        <Text dimColor>{` ${revisions}${arrow(open === 'history')}`}</Text>
+      </Text>
+    </Button>
+  ) : (
+    <Text key="cite-history" dimColor>history 0</Text>
+  )
+  const bar = (
+    <Box key="cite-bar-rows" flexDirection="column" marginTop={1}>
+      {detail.length ? <Box key="cite-detail" flexDirection="column">{detail}</Box> : null}
+      {detail.length ? <Text key="cite-detail-gap"> </Text> : null}
+      <Text key="cite-bar-rule" color={COLORS.rule}>{'┄'.repeat(cols)}</Text>
+      <Box key="cite-bar" flexDirection="row" columnGap={3}>
+        {stateEl}
+        {historyEl}
+      </Box>
+    </Box>
+  )
+  used += 1 + (detail.length ? detailRows + 1 : 0) + 2
   const quote = p.quote || quotedWords(c.display)
   // a card whose data keeps no rows (a diagram, a timeline): the card as it draws, the cited mark lit
   if (v?.card && !v.lines.length && card && !dataRow) {
@@ -2007,28 +2103,29 @@ async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
     body.push(framedCard(cx, e, lit.card, w, lit.lines, 'cite-card'))
   }
   const entry = await citeEntry(cx, e, c, target, p.sentence ?? '', cols)
-  let hints = [...(entry.el ? ['a to ask'] : []), ...(f ? ['f for its file'] : []), ...(cardId ? ['c for the card'] : []), ...(canAsk ? ['s for a script'] : [])]
+  let hints = [...(entry.el ? ['a to ask'] : []), ...(f ? ['f for its file'] : []), ...(cardId ? ['c for the card'] : []), ...(checking ? [] : ['v for how it was verified']), ...(revisions ? ['h for its history'] : []), ...(canAsk ? ['s for a script'] : [])]
   if (!(v?.card && !v.lines.length) && v?.lines.length) {
     // the passage an example quotes, when the cited lines do not hold it
     const quotedRow = quote && status !== 'differs' && !v.lines.some(l => l.hit && quoteSpan(demojibake(l.text).replace(/\t/g, '  '), quote))
-    // a file's lines: a window over the whole file, as tall as the rows the panel's other parts leave it (the title
-    // row, the subtitle, the rule, the label/value rows and the code in them, a `quoted` row, the entry box and the
-    // hint rows)
-    const tall = (words: string, w: number) => (words ? wrapRows(words, Math.max(1, w), 999).length : 0)
-    const used =
-      2 +
-      tall(sub, cols) +
-      rows.reduce((n, [k, val]) => n + (k === 'code' || k === '' ? 0 : tall(typeof val === 'string' ? val : k === 'source' && p.sentence ? sourceSegs(p.sentence, c).map(x => x.s).join('') : k === 'how' ? `${how}; no script recomputed it  ask for a script` : ' ', cols - fieldW())), 0) +
-      codeRows +
-      (quotedRow ? tall(clip(demojibake(quote), 600), cols - 8) : 0) +
-      entry.rows +
-      hintHeight(['↑↓ to scroll', ...hints], cols)
+    // a file's lines: a window over the whole file, as tall as the rows the panel's other parts leave it (those above
+    // it, a `quoted` row, the bar and what it opened, the entry box and its blank row, and the hint rows)
+    used += (quotedRow ? tall(clip(demojibake(quote), 600), cols - 8) : 0) + (entry.el ? 1 : 0) + entry.rows + hintHeight(['↑↓ to scroll', ...hints], cols)
     const win = v.path && typeof v.line === 'number' ? await citeWindow(cx, e, c.ref, v, cols, quote, Math.max(5, (bodyRows || 30) - used)) : null
     if (win?.scrolls) hints = ['↑↓ to scroll', ...hints]
     body.push(win?.el ?? <Box key="cite-lines" flexDirection="column">{lineRows(cx, e, v, cols, quote)}</Box>)
     if (quotedRow) body.push(fieldEls(els, [['quoted', <Text wrap="wrap" backgroundColor={citeHighlight()}>{clip(demojibake(quote), 600)}</Text>]], 'cite-quoted')!)
   } else if (!v) body.push(<Text key="cite-wait" dimColor>{`${SPIN} reading its place`}</Text>)
-  const keys: Key[] = [...(entry.el ? [askKey(cx, entry.key)] : []), ...(f ? [{ key: 'files', hotkey: 'f', onPress: () => void opens?.() }] : []), ...(cardId ? [{ key: 'card', hotkey: 'c', onPress: () => void openCard(cx, cardId) }] : []), ...(canAsk ? [{ key: 'script', hotkey: 's', onPress: askScript }] : [])]
+  body.push(bar)
+  const keys: Key[] = [
+    ...(entry.el ? [askKey(cx, entry.key)] : []),
+    ...(f ? [{ key: 'files', hotkey: 'f', onPress: () => void opens?.() }] : []),
+    ...(cardId ? [{ key: 'card', hotkey: 'c', onPress: () => void openCard(cx, cardId) }] : []),
+    ...(checking ? [] : [{ key: 'how', hotkey: 'v', onPress: toggle('how') }]),
+    ...(revisions ? [{ key: 'history', hotkey: 'h', onPress: toggle('history') }] : []),
+    ...(canAsk ? [{ key: 'script', hotkey: 's', onPress: askScript }] : []),
+  ]
+  // a blank row between the bar and the entry box
+  if (entry.el) body.push(<Text key="cite-bar-gap"> </Text>)
   body.push(...bottomRows(cx, e, cols, [], [entry.el], hints, !entry.el))
   const hk = hiddenKeys(cx, e, keys)
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>

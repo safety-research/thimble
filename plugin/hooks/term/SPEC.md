@@ -55,10 +55,11 @@ Each channel has one meaning. A run the table does not cover is regular, in the 
 | a rule `─` | the end of a region: under a panel's header, above its bottom part | the line under a heading |
 | a border | a card, and a text field | a panel's regions |
 | **bold** | a title or a heading (rule 7) | names in a list, values, the selected row, new |
-| green | new | anything else |
+| green | new; a citation panel's `checked` | anything else |
 | diff green and red | the lines a diff added and removed, and their marks | anything else |
 | dim | secondary | a name, a number in a number column, a flagged value, a control |
-| blue, underlined | a link: a citation's value, the place after `↗`, a label's name on a card | controls, rows a click selects |
+| blue, underlined | a link: the place after `↗` outside a card, a label's name on a card | controls, rows a click selects |
+| purple, underlined | a citation's value; in a card, every citation and evidence link (`↗ events.jsonl line 197`), so a card has one underline color | controls |
 | blue, in brackets `[ … ]` | a chip: a citation that names only its place (`[ card ]`) | controls, a citation with words |
 | blue | the `?` and `↳` in the margin | |
 | accent | a panel's title, the selected row, `view proposal` above the prompt | anything else |
@@ -195,7 +196,7 @@ and, given `startLine`, its dim gutter of line numbers.
 22. **Red** marks a problem and only a problem: a failure, a citation whose value is not at its place, a card that
     cannot be drawn, a run's error, a document's warning or caution. `×` is a failure and `!` something usable with a
     problem. Negative numbers are drawn as positive ones are.
-23. No other color: no warning amber, and no green except `new` and a diff's added lines. A diff's added and removed
+23. No other color: no warning amber, and no green except `new`, a citation panel's `checked` and a diff's added lines. A diff's added and removed
     lines and their marks take Claude Code's own diff colors, `diffAddedWord` and `diffRemovedWord`, not `success` or
     `error`.
 
@@ -264,7 +265,8 @@ reads with thousands separators from 1,000 wherever thimble-term draws it; a num
 an id) reads as written. No hex or hash ids: a card is named by its question, a thread by its first question, a script
 by its file name. A citation's status reads `found on the card`, `found in revisions.jsonl line 10566`, `found in the
 command's output, line 1` or `not found: …`, then why for a problem; a citation in a card's takeaway reads `checking`
-while thimble's links check runs. In the citation panel, a citation still checked reads `◌ being verified`.
+while thimble's links check runs. Words that show no value (`the event`) read `found in …; only its place is checked`,
+and never what a script got. In the citation panel's bar, a citation still checked reads `◌ checking …`.
 
 ### 6. Controls and fields
 
@@ -417,10 +419,12 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   question). A label's link with a value
   (`[33](concept:<id>/yes)`) is neither a chip nor a problem in the footer.
 - A citation is its value in purple, underlined (MATT-NOTES "Citation behavior"). While it is checked (its place not
-  resolved yet; in a card's takeaway, while thimble's links check runs) ` ◌` is part of it, one cell after the value,
-  purple and underlined as the value (`3,934 ◌`, v9 review), and inverse with it under the pointer; nothing once it is
-  found, never `✓`; red, with a red `×` one cell after it, when its value is not at its place or the check found
-  another. The citation under the pointer is inverse, and its tip (its place and status in plain words, and why for a problem) sits
+  resolved yet; in a card's takeaway, while thimble's links check runs) a purple `◌` follows it one cell after the
+  value, neither the space nor the `◌` underlined (`3,934 ◌`, MATT-NOTES "Mockup feedback"), its cells the citation's;
+  nothing once it is found, never `✓`; red, with a red `×` one cell after it, when its value is not at its place or the
+  check found another. A citation a check rewrote reads as it is now, with no words beside it: its panel's `history`
+  says what Claude wrote. A value is a number, quoted words, a date in words or a clock time (`14:52`, `14:52:11`),
+  checked at its place; other words name their place, and only their place is checked. The citation under the pointer is inverse, and its tip (its place and status in plain words, and why for a problem) sits
   on the tip background on the row below it, or above it on a paragraph's last row. While main streams, a citation
   shows as a link and a card's line as `◌ <its question>`, never `[[…]]`.
 - The cards a turn added or changed stand under the turn's last reply, each once, in its last state: those a
@@ -562,11 +566,12 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   right-aligned in the card's column formats, as the browser's table writes them (`1,446`). Markdown tables in a reply take the same header.
 - A timeline: the axis across the content with its `●` marks in hue on a rule-gray line, its two end times dim under
   its ends, both or neither: neither when the list under it starts at the first time and ends at the last; then one
-  row per event: its time dim at the content's edge, a `●` in hue, its words, and a blue `↗` when it has
-  a record.
+  row per event: its time dim at the content's edge, a `●` in hue, its words, and a `↗` in the citation's purple when
+  it has a record (its evidence).
 - An example: per record, a `●` in hue at the content's edge and thimble's note after it, regular; under the note, at
-  +2, the record's words in quotation marks and italic, up to three rows, then `↗` and its place in blue and underlined,
-  on the quote's last row if it fits, else on the next. A blank row between records.
+  +2, the record's words in quotation marks and italic, up to three rows, then `↗` and its place in the citation's
+  purple, the place underlined (MATT-NOTES "Mockup feedback": no two underline colors in a card; the link blue stays
+  for actions), on the quote's last row if it fits, else on the next. A blank row between records.
 - A diagram: boxes and edges in the rule gray, node text in the text color, edge labels dim; a note's number in a dim
   column and its text dim.
 - A note, a custom card, a code card and a card type's card: their words. A chart that is not a simple bar or line
@@ -742,73 +747,91 @@ A thread at work, and turns that ended with no answer:
   `v`). Above a new thread's entry box at most 6 rows of it (a card's plot or body, the rows under it then left out), then
   `… N more` dim, which shows it whole; never `… 1 more`.
 
-**The citation panel:**
+**The citation panel** (MATT-NOTES "Mockup feedback": panel C, `mock3/citepanel2/panels.png`):
 
 ```
-  home › citation 4,579
-  found
+  home › citation 14:52
   ──────────────────────────────────────────────────────────────────────────────────────────────
-  from     README.md · line 3
-  source   "The README says 4,579 pages."
-  how      thimble read the cited line and found the value there; no script recomputed it  ask for a script
-  history  unchanged since Claude wrote it
-    2
-    3  An export of 4,579 wiki pages and their revisions.
-    4  Four wikis.
+  from the card  Was anything force-pushed in this run, and by whom?
+
+  ↗ events.jsonl line 197
+
+    195  {"id": 195, "ts": "2026-08-30T14:52:11.185+00:00", "agent": "agent-07", "actio…
+    196  {"id": 196, "ts": "2026-08-30T14:52:11.225+00:00", "agent": "agent-07", "actio…
+    197  {"id": 197, "ts": "2026-08-30T14:52:11.325+00:00", "agent": "agent-07",
+         "action": "git.ref", "params": {"ref": "refs/heads/pr/118", "forced": true}}
+    198  {"id": 198, "ts": "2026-08-30T14:54:00.490+00:00", "agent": "agent-07", "actio…
+
+  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+  checked ›   history 1 ›
+
 ────────────────────────────────────────────────────────────────────────────────────────────────
 ❯ ask about this citation
 
 ────────────────────────────────────────────────────────────────────────────────────────────────
-  a to ask · f for its file · s for a script · x to close
+  a to ask · f for its file · v for how it was verified · h for its history · s for a script · x to close
 ```
 
 ```
   home › citation 3908
-  found
   ──────────────────────────────────────────────────────────────────────────────────────────────
-  from     card "What does the export hold per wiki?"
-  source   "dse has 3908 pages."
-  how      the card's code computed it, and thimble found it in the card's output
-  history  unchanged since Claude wrote it
-  data     wiki  pages  revisions
-           ────  ─────  ─────────
-           dse    3908      13403
-  code     1  pages = pd.read_json('pages.jsonl', lines=True)
-           2  # one row per wiki
-           3  df
+  source  "dse has 3908 pages."
+
+  ↗ card "What does the export hold per wiki?"
+
+  data  wiki  pages  revisions
+        ────  ─────  ─────────
+        dse    3908      13403
+  code  1  pages = pd.read_json('pages.jsonl', lines=True)
+        2  # one row per wiki
+        3  df
+
+  the card's code computed it, and thimble found it in the card's output
+
+  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+  checked ⌄   history 0
+
 ────────────────────────────────────────────────────────────────────────────────────────────────
 ❯ ask about this citation
 
 ────────────────────────────────────────────────────────────────────────────────────────────────
-  a to ask · c for the card · x to close
+  a to ask · c for the card · v for how it was verified · x to close
 ```
 
 - The title, the title row's current step after `citation` (in the accent and bold), is the cited value, bold, purple
-  and underlined (a link to its place, in place of the accent), ` ◌` part of it while it is checked (bold, purple and
-  underlined as the value: `3,934 ◌`); red, with a red `×`, when it is not at its place. A citation in a card's takeaway takes the
-  card's links check as the chat does: ` ◌` while it runs, no mark and `, and a script got the same number` once it ran, a
-  red `×` when it got another value, or when the card's code types the value in (`, but typed in the code, line 4, not
-  computed`). A citation with no value is titled by its place in words, and then has no `from`
-  row and no subtitle while its place is there (`not found` and why when it is not), so the place is named once; its
-  `source` marks its chip in the sentence (purple, `[ agent-chat.jsonl line 2 ]`), and its step on the title row is its
-  chip's words (`citation agent-chat.jsonl line 2`). Under a `from` row, which names the place, a citation found says `found` alone (then what thimble's
-  links check says). Any other citation's subtitle is its verification's state in plain words (section 5) and why for a
-  problem.
-- A citation still being verified (v9 review (g)) opens like any other: its title ends ` ◌`, its subtitle says
-  `◌ being verified` (`found; ◌ being verified` while its card's links check runs), and `how` says what runs. The panel
-  reads its verdict and its card as they change (a card whose links check runs is read again at each pass), so it
-  says what the check found once it ends, and the ` ◌` goes.
-- Label/value rows: `from`, `source` (the reply's sentence in quotation marks, the cited value in it purple and
-  underlined); `how` (v9 review (h)): what thimble read to verify it and what computed or printed the value: `thimble
-  read the cited line and found the value there`, `the card's code computed it, and thimble found it in the card's
-  output` (then what its card's links check found), `the command printed it, …`, `the card's code types it in rather
-  than computes it`; for a place no code verified (a file's line, a record), `; no script recomputed it` and `ask for a
-  script` (`s`), which asks a side thread about the citation for a script that recomputes the value (cite.ts
-  scriptQuestion) and opens it; `history`: `unchanged since Claude wrote it` in the dim color, or, where a check
-  rewrote the citation, `Claude wrote` (the value or place as written), `check made it` (the one it reads now) and
-  `why`; `command` (`$ <the command>`, in the code color) for a command's output; `script` once a side thread was asked
-  for one (`◌ a side thread is writing it`, then `a side thread's script` and its first code block, numbered, at most 8
-  rows, `… N more` and `open ↳` opening the thread); `quoted` for a passage an example quotes.
+  and underlined (a link to its place, in place of the accent); red when it failed. It has no mark (no ` ◌`, no `×`)
+  and there is no subtitle: the bar says its state. A citation with no value is titled by its place in words, and then
+  has no place row, so the place is named once; its `source` marks its chip in the sentence (purple, `[
+  agent-chat.jsonl line 2 ]`), and its step on the title row is its chip's words (`citation agent-chat.jsonl line 2`).
+- Under the rule, where the citation stands: `from the card` and the card's question for a citation in a card's
+  takeaway, else `source`, the sentence in quotation marks with the cited value in it purple and underlined; a blank
+  row. Then its place as a link, `↗` and the place in the citation's purple, the place underlined (`↗ events.jsonl line
+  197`, `↗ card "What does the export hold per wiki?"`, `↗ card "…" output line 2`); a press on it opens the place, as
+  `f` or `c` does; a blank row.
+- The bar, above the entry box after a blank row and a dotted rule `┄` in the rule gray: the state word, then three
+  cells on `history N`. The state word is `checked` in green, underlined, then ` ›` dim, once thimble found the value at
+  its place (and the card's links check got the same, for a takeaway); `◌ checking …` (the `◌` purple, the words dim,
+  nothing to press) while its place is read or its card's links check runs; `failed` red and underlined, then a red
+  ` ×` and ` ›`, when the value is not at its place, the place does not exist, or the links check got another value or
+  found it typed in the card's code. `history` is in the accent and underlined, then its count and ` ›` dim: the
+  revisions a check made (1 where it rewrote the citation in place); `history 0` is dim and opens nothing. A part that
+  is open ends ` ⌄`. The panel reads its verdict and its card as they change (a card whose links check runs is read
+  again at each pass), so the bar says what the check found once it ends.
+- A press on the state word (or `v`, `v for how it was verified`) opens how it was verified above the bar, after a
+  blank row, dim, and a second press closes it: what thimble read and what computed or printed the value (`thimble read
+  the cited line and found the value there`, `the card's code computed it, and thimble found it in the card's output`,
+  `the command printed it, …`, `the card's code types it in rather than computes it`, `thimble looked for its place and
+  found none`), then what its card's links check got (`, and its card's links check found the same value`, `, but its
+  card's links check found 5,883`); for words that show no value `; its words show no value, so only its place is
+  checked`; for a place no code verified (a file's line, a record), `; no script recomputed it`, and `ask for a script`
+  on its own row under the words (`s`), which asks a side thread about the citation for a script that recomputes the value (cite.ts scriptQuestion)
+  and opens it; why it failed on its own row; `script` once a side thread was asked for one (`◌ a side thread is
+  writing it`, then `a side thread's script` and its first code block, numbered, at most 8 rows, `… N more` and `open
+  ↳` opening the thread). A press on `history` (or `h`) opens, in its place, `Claude wrote` and the value or place as
+  written, then `the check made it`, the one it reads now, and ` · ` why, the values bold. One part is open at a time;
+  a citation opened anew opens with both closed.
+- A command's output has `command` (`$ <the command>`, in the code color) above its lines; a passage an example quotes
+  that the lines do not hold, `quoted` under them.
 - Where the value stands, on the citation's purple (section 4): a file's lines (below); for a value on a card (v9
   review (i): "the code or data holding the literal, not the plot") `data`, the card's data row that holds it (a
   table's row by its first cell, a bar by its label, a line's point by its series and x: the column names bold, a rule
@@ -833,7 +856,7 @@ A thread at work, and turns that ended with no answer:
   nears it; at the file's end its last line is on the window's last row. Opened anew, a citation's window starts at its
   cited lines again; `b` back from its file finds it where it was. `f` (or a click on the title) opens the file view at
   the cited line.
-- The bottom: the entry box (rule 27). Its question starts a side thread about the citation (`ask about this
+- The bottom: the bar, then the entry box (rule 27). Its question starts a side thread about the citation (`ask about this
   citation`), opened over the citation, so b comes back to it; in a citation opened from a side thread it goes on in
   that thread, about the citation (`ask a follow-up question`), and the panel returns to the thread. `a` gives it the
   keys.

@@ -840,7 +840,7 @@ test('keys · citation · a file citation: ↑↓ and the wheel move its window 
   await takesKeys($)
   let s = await seen($, CITE_ROWS, 'cite-lines')
   expect(s.relay).toBe(true)
-  named(s.hint, ['↑↓ to scroll', 'a to ask', 'f for its file', 'x to close'])
+  named(s.hint, ['↑↓ to scroll', 'a to ask', 'f for its file', 'v for how it was verified', 'x to close'])
   const at0 = shownLines(s.rows).first
   expect(at0).toBeLessThan(450)
   expect(s.rows[0]!.trim()).toBe(`↑ ${at0 - 1} more`)
