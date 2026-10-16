@@ -218,6 +218,23 @@ test("main's reply and its card stand on Claude Code's own indent, column 2; the
   await ui.unmount()
 })
 
+test("the person's message stays Claude Code's own row, and the reply under it keeps the engine's blank row above it", async ($, on) => {
+  // Matt, 2026-10-16: in the build's shots the reply sat right under the person's message, with no blank row between
+  const w = world(on)
+  await start($, w)
+  await turn($, w, 'r1', 'The export holds most of its pages in one wiki, dse.')
+  const you = await $.ui.mount({ plugin: PANEL, component: 'UserMessage', requestId: 'u1', surface: 'terminal', viewport: { columns: 100, rows: 40 }, props: { text: 'What does the export hold?\n\nOne line.', origin: { kind: 'composer' }, isExpanded: false } } as never)
+  expect(shown(await you.drawn())).toBe('(the engine row)')
+  await you.unmount()
+  // the engine draws its reply row with `marginTop: 1`; thimble's tree takes that row's place, so it carries the margin
+  const ui = (await $.ui.mount(MESSAGE('r1', 'The export holds most of its pages in one wiki, dse.'))) as unknown as M
+  await w.clock.advance(300)
+  const root = (await ui.drawn()) as Node
+  expect(root.props).toMatchObject({ flexDirection: 'column', marginTop: 1 })
+  expect((await screen(ui, 100))[0]).toBe('⏺ The export holds most of its pages in one wiki, dse.')
+  await ui.unmount()
+})
+
 test("a passage a side thread was asked about keeps its `↳` in the ⏺'s cell on the reply's first row", async ($, on) => {
   // the fixtures' thread t2 was asked about the words `the deletions`
   const w = world(on)
@@ -788,5 +805,26 @@ test("a thread's turns keep a rhythm: a blank row between a question and its ans
   expect(rows[bottom + 3]).toBe('')
   expect(rows[bottom + 4]).toBe(' ⏺ P6 has 120 MB of them and P7 54 MB.')
   expect(JSON.stringify(await pane.find({ key: 'm:thread-q-2' }))).toContain(`"backgroundColor":"${COLORS.prompt}"`)
+  await pane.unmount()
+})
+
+test("a side thread's question as Claude Code draws a prompt: its blank lines kept on the prompt's background, `❯` in the inactive color", async ($, on) => {
+  const w = world(on)
+  sizeThread(w, [], [
+    { type: 'user', text: 'And the logs?\n\nBy participant, please.\n' },
+    { type: 'text', delta: 'P6 has 120 MB of them.', reply: true },
+    { type: 'done', result: 'P6 has 120 MB of them.' },
+  ])
+  await start($, w)
+  const pane = await openedThread($, w, 'tz')
+  const rows = await screen(pane, 96)
+  const q = rows.indexOf(' ❯ And the logs?')
+  expect(q).toBeGreaterThan(0)
+  expect(rows.slice(q, q + 5)).toEqual([' ❯ And the logs?', '', '   By participant, please.', '', ' ⏺ P6 has 120 MB of them.'])
+  const band = JSON.stringify(await pane.find({ key: 'm:thread-q-2' }))
+  // three rows on the prompt's background, the blank one between the paragraphs too; none for the trailing newline
+  expect(band.split(`"backgroundColor":"${COLORS.prompt}","wrap":"truncate-end"`).length - 1).toBe(3)
+  expect(band).toContain(`"color":"${COLORS.dim}","backgroundColor":"${COLORS.prompt}"`)
+  expect(band).not.toContain('"dimColor":true')
   await pane.unmount()
 })

@@ -816,8 +816,10 @@ export const register: Register = (on, options) => {
     // a block that held only a line the terminal UI hides: nothing (ctrl+o's view still draws the reply's time and model
     // above it, which no hook reaches; the engine's own block with no text draws the same)
     if (!body.length && !cards && !told && !views && !footer && !coverage) return <Box />
+    // one blank row above, as above Claude Code's own reply rows: the engine's row carries that margin itself, and this
+    // tree takes the row's place, so without it the reply sits right under the person's message
     return (
-      <Box flexDirection="column">
+      <Box flexDirection="column" marginTop={1}>
         {body}
         {cards}
         {footer}
