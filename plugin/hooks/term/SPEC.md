@@ -122,9 +122,10 @@ the type area runs from A0 to R.
     actions). A panel has two at most. A rule spans the type area in the rule gray, and no blank row is ever next to it.
 11. **A card** has a full border with round corners in the rule gray and 1 cell of padding: in Ink, a `Box` with
     `borderStyle="round"`, `borderColor` the rule gray and `paddingX={1}`. Its left border sits on the stream's edge
-    (column 2 in the chat, A0 in a panel). Inside: the title row in bold, a blank row, then the plot or body; below the
-    plot, the readout row (the value under the pointer, plain, or what thimble is doing to the card), the label rows,
-    the params row and the takeaway. In the card pane the question is the panel's title, so the box starts with the
+    (column 2 in the chat, A0 in a panel). Inside: the title rows in bold (the question wrapped, never cut, the card's id
+    `card:<name>` dim at the right of the first), a blank row, then the plot or body; below the plot, the readout row
+    (the value under the pointer, plain, or what thimble is doing to the card), the label rows, the params row and,
+    after a blank row (the readout row where it is the last), the takeaway. In the card pane the question is the panel's title, so the box starts with the
     plot. In a stream a card's border stands in for blank rows next to it; a document's caption is dim on the row under
     the bottom border.
 12. Every item of a list takes the same number of rows: one, or a name row and a dim secondary row. The selected item
@@ -492,7 +493,7 @@ The same reply's first row under the pointer, and a passage a thread was asked a
 
 ```
 ╭──────────────────────────────────────────────────────────────────────╮
-│ Which ten labels have the most revisions?                            │
+│ Which ten labels have the most revisions?        card:top-ten-labels │
 │                                                                      │
 │ label                  revisions  pages  wikis                       │
 │ ─────────────────────  ─────────  ─────  ──────────                  │
@@ -551,8 +552,8 @@ The same reply's first row under the pointer, and a passage a thread was asked a
 - A note, a custom card, a code card and a card type's card: their words. A chart that is not a simple bar or line
   chart (a bar chart with its values written on its bars is one): a table of its rows.
 - A card that cannot be read: one red line named by its place (`× card 2 cannot be drawn: …`).
-- The card pane: the question is the panel's title and the subtitle reads the card's kind, who made it, `last run
-  ok` or `last run failed` (in red), and, when its card check ended in an error, `its check's revision would not run` or
+- The card pane: the question is the panel's title and the subtitle reads the card's id (`card:<name>`), its kind, who
+  made it, `last run ok` or `last run failed` (in red), and, when its card check ended in an error, `its check's revision would not run` or
   `its check could not finish`, dim like the rest, since the card itself is fine (red is only for a problem with the
   card); the box starts with the plot; at the bottom `code  run again  ask about it`. The
   code view lists the script with the `Code` element, its gutter at A0, no other indent, then `output`, the last lines

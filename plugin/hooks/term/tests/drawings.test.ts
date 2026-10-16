@@ -227,7 +227,7 @@ test("main's reply and its card stand on Claude Code's own indent, column 2; the
   await ui.unmount()
 })
 
-test("the person's message stays Claude Code's own row, and the reply under it keeps the engine's blank row above it", async ($, on) => {
+test("the person's message stays Claude Code's own row; the reply under it, or under the tool summary row, keeps the engine's blank row above it", async ($, on) => {
   // Matt, 2026-10-16: in the build's shots the reply sat right under the person's message, with no blank row between
   const w = world(on)
   await start($, w)
@@ -242,6 +242,18 @@ test("the person's message stays Claude Code's own row, and the reply under it k
   expect(root.props).toMatchObject({ flexDirection: 'column', marginTop: 1 })
   expect((await screen(ui, 100))[0]).toBe('⏺ The export holds most of its pages in one wiki, dse.')
   await ui.unmount()
+  // so does an answer under Claude Code's tool summary row (`Ran 5 shell commands, called plugin:thimble:thimble 3
+  // times`), which sat right under it in the v9 video (Matt, 2026-10-16)
+  w.toolText = 'card:ff73e071\n[out0: table]'
+  await $.turn.start({ text: 'And per wiki?', turnId: 't2' } as never)
+  await $.tool.call({ tool: 'mcp__plugin_thimble_thimble__add_card', tool_use_id: 'u2' } as never)
+  await append($, 'r2', 'Yes. Every number links to its source.')
+  await $.turn.complete({ turnId: 't2', answer: 'Yes. Every number links to its source.', durationMs: 5, reason: 'answer', isAborted: false } as never)
+  await w.clock.advance(300)
+  const after = (await $.ui.mount(MESSAGE('r2', 'Yes. Every number links to its source.'))) as unknown as M
+  expect(((await after.drawn()) as Node).props).toMatchObject({ flexDirection: 'column', marginTop: 1 })
+  expect((await screen(after, 100))[0]).toBe('⏺ Yes. Every number links to its source.')
+  await after.unmount()
 })
 
 test("a passage a side thread was asked about keeps its `↳` in the ⏺'s cell on the reply's first row", async ($, on) => {
