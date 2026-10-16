@@ -64,12 +64,13 @@ import { act } from './data'
 import { closeView, onViewAct, openViewState, retryView, sendEvent, viewFaultOf, viewFor } from './viewhost'
 import { openInBrowser } from './offramp'
 import type { ViewFrame } from './viewhost'
+import { ENTRY_KEY, entryEl, entryHeight } from './entry'
 
 export type PaneEvent = MatchedEvent<'ui.render', { component: 'Pane'; requestId: string }>
 
 type Obj = Record<string, unknown>
 type El = { Box: ElementConstructor<BoxProps>; Text: ElementConstructor<TextProps>; Button: ElementConstructor<ButtonProps> }
-type Key = { key: string; hotkey: string; onPress: () => void }
+export type Key = { key: string; hotkey: string; onPress: () => void }
 const isObj = (v: unknown): v is Obj => Boolean(v) && typeof v === 'object' && !Array.isArray(v)
 const str = (v: unknown): string => (typeof v === 'string' ? v : v === null || v === undefined ? '' : String(v))
 const num = (n: number) => Math.round(n).toLocaleString('en-US')
@@ -90,10 +91,14 @@ export const ANSWER_ELEMENT = 'answer'
  *  `anchorText` (the words), `element` (where it was asked, a document's passage). */
 export type AskOver = { anchor?: string | null; anchorText?: string; element?: string; about?: string }
 
-/** A side thread about a target: the ask view, its question field first. A thread asked from inside the panel hangs
- *  under the thread on the panel's trail. Its words: a passage's, a mark's name and value, a card by its question, a
- *  citation's sentence. */
-export async function openAsk(cx: Ctx, t: Target, over: AskOver = {}): Promise<void> {
+/** What a new side thread about a target is told and named (the ask view's panel, and an entry box's thread): the
+ *  target, its anchor and words, `about` (what names it), the thread on the panel's trail it hangs under, and where it
+ *  was asked. */
+export type AskAbout = { target: Target; anchor: string | null; anchorText: string; about: string; parent?: string; element?: string }
+
+/** What a side thread about `t` is told and named. A thread asked from inside the panel hangs under the thread on the
+ *  panel's trail. Its words: a passage's, a mark's name and value, a card by its question, a citation's sentence. */
+export async function askAbout(cx: Ctx, t: Target, over: AskOver = {}): Promise<AskAbout> {
   const c = citationOf(t)
   const anchor = over.anchor !== undefined ? over.anchor : t.kind === 'sentence' ? null : t.cardId && t.kind !== 'record' && t.kind !== 'citation' ? `card:${t.cardId}` : c?.ref ?? (t.cardId ? `card:${t.cardId}` : null)
   const anchorText =
@@ -111,7 +116,58 @@ export async function openAsk(cx: Ctx, t: Target, over: AskOver = {}): Promise<v
   const parent = (await inPanelNow(cx)) ? threadOnTrail(((await cx.nav()) ?? NAV_EMPTY).trail) : ''
   // the subject as the thread and home name it (anchorName): a card by its question, a citation by its words
   const about = over.about ?? (t.kind === 'sentence' && t.label ? t.label : t.kind === 'card' && !t.text && anchorText ? anchorText : targetLabel(t, 60))
-  await openPanel(cx, { view: 'ask', title: 'Ask', target: t, anchor, anchorText, about, ...(parent ? { parent } : {}), ...(over.element ? { element: over.element } : {}) })
+  return { target: t, anchor, anchorText, about, ...(parent ? { parent } : {}), ...(over.element ? { element: over.element } : {}) }
+}
+
+/** A side thread about a target: the ask view, its entry box first (a `?` beside a passage, a card's title, a
+ *  selection, an answer's footer, a document's comment). */
+export async function openAsk(cx: Ctx, t: Target, over: AskOver = {}): Promise<void> {
+  await openPanel(cx, { view: 'ask', title: 'Ask', ...(await askAbout(cx, t, over)) })
+}
+
+/** A side thread started with question `q` about `a`, and opened in the panel: on top of the view it was asked from, so
+ *  b goes back there, or (`replace`) in place of the ask view. '' once it opened, else why it did not start. */
+export async function askNow(cx: Ctx, a: AskAbout, q: string, opts: { replace?: boolean } = {}): Promise<string> {
+  // a thread about a citation is titled by the citation's words, as the browser titles a chip's thread: what names its
+  // subject in the panel and on home (anchorName)
+  const title = a.target.kind === 'citation' && a.about ? a.about : ''
+  const got = await startThread(cx, a.anchor, a.anchorText, q, { ...(a.parent ? { parent: a.parent } : {}), ...(a.element ? { element: a.element } : {}), ...(title ? { title } : {}) })
+  if ('error' in got) return got.error
+  await openThread(cx, got.id, q, opts)
+  return ''
+}
+
+/** An entry box (entry.tsx) whose question starts a side thread about `t`, opened over the view it was asked from; a
+ *  thread that does not start says why in a toast. `a` gives it the keys (askKey). */
+export function askEntry(cx: Ctx, e: PaneEvent, o: { key: string; placeholder: string; cols: number; target: Target; over?: AskOver; top?: boolean }): RenderElement {
+  return entryEl(cx, e, {
+    key: fieldKey(o.key),
+    placeholder: o.placeholder,
+    cols: o.cols,
+    ...(o.top === false ? { top: false } : {}),
+    onSubmit: q => {
+      void (async () => {
+        const why = await askNow(cx, await askAbout(cx, o.target, o.over ?? {}), q)
+        if (why) cx.toast(`thimble: the side thread did not start: ${why}`)
+      })()
+    },
+  })
+}
+
+/** The key that gives an entry box the keys (`a`), as Enter or `a` does in the threads panel: the hint row then names
+ *  none, since a letter goes into the box. */
+export function askKey(cx: Ctx, key: string): Key {
+  return {
+    key: 'ask',
+    hotkey: 'a',
+    onPress: () =>
+      void (async () => {
+        // the module's own move of the ring raises no ui.focus: the hint row follows once the ring is there
+        if (!(await cx.focus(key))) return
+        rt.panelFocus = key
+        await cx.bumpPanel()
+      })(),
+  }
 }
 
 /** The views as home lists them (`thimble state home`): each by its slug and name, its state (built, building,
@@ -956,9 +1012,9 @@ function fieldKey(key: string): string {
   return key
 }
 
-// the panel's text fields by their keys, with what Enter does in each
+// the panel's text fields by their keys, with what Enter does in each; an entry box (entry.tsx) says it itself
 const FIELD_KEYS: [RegExp, string][] = [
-  [/^(?:ask-new|ask-|follow-)/, 'Enter to ask'],
+  [ENTRY_KEY, 'Enter to ask'],
   [/^(?:lb-glob-|lb-values-)/, 'Enter to save'],
   [/^lbs-describe$/, 'Enter to make it'],
   [/^lb-name-/, 'Enter to rename'],
@@ -971,7 +1027,9 @@ export function focusedField(key: string): string {
 
 /** A view's key hints with the way's after them, as bound now (rule 26: the hint row names only keys bound on it).
  *  While a text field holds the focus a letter goes into the field, so the hints are what Enter does there and that
- *  Esc leaves it. The list's Space and Backspace are bound as the view names them. */
+ *  Esc leaves it; while an entry box holds it, none: like Claude Code's prompt box it says what it takes itself (Matt,
+ *  2026-10-16: no `Enter to ask · Esc to leave the field` row). The list's Space and Backspace are bound as the view
+ *  names them. */
 function endHints(hints: readonly string[], autoFocus = ''): string[] {
   listExtraDrawing = { space: hints.some(h => h.startsWith('Space ')), backspace: hints.some(h => h.startsWith('Backspace ')) }
   // while the prompt holds the keys (Esc left a field, or a click on the prompt), a letter or Enter goes to the prompt,
@@ -980,7 +1038,9 @@ function endHints(hints: readonly string[], autoFocus = ''): string[] {
   if (!paneFocused || rt.typeThrough) return [UNFOCUSED_HINT]
   // `autoFocus`: the view's field that takes the ring as it opens, before any ui.focus says where the ring is; a ring
   // on a field this drawing does not draw (one of the view before, live check term-fix9, quirk 1) is on none
-  const field = rt.panelFocus ? (fieldsDrawing.has(rt.panelFocus) ? focusedField(rt.panelFocus) : '') : focusedField(autoFocus)
+  const ring = rt.panelFocus ? (fieldsDrawing.has(rt.panelFocus) ? rt.panelFocus : '') : autoFocus
+  if (ring && ENTRY_KEY.test(ring)) return []
+  const field = focusedField(ring)
   if (field) return [field, 'Esc to leave the field']
   // a list's keys only while the ring rests on them (listKeysHeld): until a ui.focus says so, ↑↓ walk the panel's
   // buttons and Enter presses the one the ring is on
@@ -994,13 +1054,16 @@ function endHints(hints: readonly string[], autoFocus = ''): string[] {
 /** The hint row while the panel does not hold the keys. */
 export const UNFOCUSED_HINT = 'click the panel for its keys'
 
+/** The key-hint row as bound now (endHints); none while an entry box holds the keys. */
 export function hintsRow(els: El, hints: readonly string[], cols: number, autoFocus = ''): RenderElement {
-  return hintsEl(els, endHints(hints, autoFocus), cols)
+  const named = endHints(hints, autoFocus)
+  return named.length ? hintsEl(els, named, cols) : els.Box({ key: 'h-hints', flexDirection: 'column' })
 }
 
 /** The rows a view's key hints take as the panel draws them now (hintLines): what a list cut to the pane leaves them. */
 export function hintHeight(hints: readonly string[], cols: number, autoFocus = ''): number {
-  return hintLines(endHints(hints, autoFocus), cols).length
+  const named = endHints(hints, autoFocus)
+  return named.length ? hintLines(named, cols).length : 0
 }
 
 /** The panel's bottom part (rule 25): the second rule, the actions 2 cells apart, the fields under them; then the
@@ -1010,6 +1073,17 @@ export function bottomRows(cx: Ctx, e: PaneEvent, cols: number, controls: (Rende
   const ctl = controlsEl(els, controls, 'bottom-controls')
   const fs = fields.filter((f): f is RenderElement => Boolean(f))
   return [...(rule && (ctl || fs.length) ? [ruleEl(els, cols, 'rule-bottom')] : []), ...(ctl ? [ctl] : []), ...fs, hintsRow(els, hints, cols, autoFocus)]
+}
+
+/** The bottom of a panel with an entry box (entry.tsx, rule 25): its actions 2 cells apart after a blank row, then the
+ *  box, whose top rule is the panel's second rule, then the key-hint row; without a box, bottomRows. */
+export function entryBottom(cx: Ctx, e: PaneEvent, cols: number, controls: (RenderElement | null | false)[], entry: RenderElement | null, hints: string[], fields: RenderElement[] = []): RenderElement[] {
+  if (!entry) return bottomRows(cx, e, cols, controls, fields, hints)
+  const els = cx.els(e) as El
+  const { Box } = els
+  const ctl = controlsEl(els, controls, 'bottom-controls')
+  const above = [...(ctl ? [ctl] : []), ...fields]
+  return [...(above.length ? [<Box key="bottom-controls-row" marginTop={1} flexDirection="column">{above}</Box>] : []), entry, hintsRow(els, hints, cols)]
 }
 
 /** An empty region (rule 28): dim words at A2. */
@@ -1255,9 +1329,10 @@ async function homeOpen(cx: Ctx, o: HomeOpen): Promise<void> {
 /** A card in the panel (SPEC.md, "Cards", the card pane): its question is the panel's title; its kind, who made
  *  it, how its last run ended (`last run failed` in red) and a card check that ended in an error (CHECK_UNRUN or
  *  CHECK_UNFINISHED) the dim subtitle; the card in its border, its takeaway
- *  under it; at the bottom `code  run again  ask about it` (`◌ running` while it runs). Its code (`mode: code`)
- *  through the `Code` element with its gutter at A0, then `output`, the last 8 lines its run printed; `card  run again
- *  ask about it` at the bottom. A run again goes to main, whose Bash runs a card (`thimble-run card`). */
+ *  under it; at the bottom `code  run again` (`◌ running` while it runs) and the entry box, whose question starts a
+ *  side thread about the card. Its code (`mode: code`) through the `Code` element with its gutter at A0, then `output`,
+ *  the last 8 lines its run printed; `card  run again` and the entry box at the bottom. A run again goes to main, whose
+ *  Bash runs a card (`thimble-run card`). */
 async function drawCard(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElement> {
   const els = cx.els(e) as El
   const { Box, Text, Button } = cx.els(e)
@@ -1272,7 +1347,8 @@ async function drawCard(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   // a card check that ended in an error says so in plain words, dim: the card itself is fine, and red is only for a
   // problem with the card (SPEC.md, Checks 3); why it ended is in the check's record, for main to read
   const checked: Seg | null = tc.check?.state === 'error' ? dim(tc.check.unrun ? CHECK_UNRUN : CHECK_UNFINISHED) : null
-  const ask = () => void openAsk(cx, { kind: 'card', ref: `card:${id}`, cardId: id, text: data.question })
+  const askKey0 = `ask-card-${id}`
+  const entry = e.surface === 'mobile' ? null : askEntry(cx, e, { key: askKey0, placeholder: 'ask about this card', cols, target: { kind: 'card', ref: `card:${id}`, cardId: id, text: data.question } })
   const busy = Boolean(tc.busy)
   const again = () => {
     if (busy) return
@@ -1282,7 +1358,8 @@ async function drawCard(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   // the subtitle opens with the card's id as its chips read it (`card:<name>`)
   const body: RenderElement[] = [...headerEls(els, { title: data.question, cols, sub: subLine([cardTag(id), code ? 'its code' : tc.kind, by, ran, checked]) })]
   const runEl = busy ? <Text key="card-running">◌ running</Text> : tc.code ? <Button key="card-again" label="run again" plain onPress={again} /> : null
-  const keys: Key[] = [{ key: 'ask', hotkey: 'a', onPress: ask }, ...(tc.code && !busy ? [{ key: 'again', hotkey: 'r', onPress: again }] : [])]
+  const keys: Key[] = [...(entry ? [askKey(cx, askKey0)] : []), ...(tc.code && !busy ? [{ key: 'again', hotkey: 'r', onPress: again }] : [])]
+  const askHint = entry ? ['a to ask'] : []
   const runHint = tc.code && !busy ? ['r to run again'] : []
   if (code) {
     body.push(tc.code ? codeRows(cx, e, tc.code, 400) : none(cx, e, 'no code'))
@@ -1308,11 +1385,11 @@ async function drawCard(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
       ),
     )
     keys.push({ key: 'card', hotkey: 'c', onPress: () => void openCard(cx, id) })
-    body.push(...bottomRows(cx, e, cols, [<Button key="card-card" label="card" plain onPress={() => void openCard(cx, id)} />, runEl, <Button key="card-ask" label="ask about it" plain onPress={ask} />], [], ['c for the card', ...runHint, 'a to ask', 'b to go back', 'x to close']))
+    body.push(...entryBottom(cx, e, cols, [<Button key="card-card" label="card" plain onPress={() => void openCard(cx, id)} />, runEl], entry, ['c for the card', ...runHint, ...askHint, 'b to go back', 'x to close']))
   } else {
     body.push(<Box key="card-box" flexDirection="column">{await cardBlock(cx, e, id, cols, 'pane', { pane: true })}</Box>)
     if (tc.code) keys.push({ key: 'code', hotkey: 'c', onPress: () => void openCard(cx, id, 'code') })
-    body.push(...bottomRows(cx, e, cols, [tc.code ? <Button key="card-code" label="code" plain onPress={() => void openCard(cx, id, 'code')} /> : null, runEl, <Button key="card-ask" label="ask about it" plain onPress={ask} />], [], [...(tc.code ? ['c for its code'] : []), ...runHint, 'a to ask', 'b to go back', 'x to close']))
+    body.push(...entryBottom(cx, e, cols, [tc.code ? <Button key="card-code" label="code" plain onPress={() => void openCard(cx, id, 'code')} /> : null, runEl], entry, [...(tc.code ? ['c for its code'] : []), ...runHint, ...askHint, 'b to go back', 'x to close']))
   }
   const hk = hiddenKeys(cx, e, keys)
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>
@@ -1656,36 +1733,35 @@ function sourceSegs(sentence: string, c: Citation): Line {
   return [{ s: `${open}${flat.slice(0, at)}` }, { s: shown, fg: COLORS.cite, u: true }, { s: `${flat.slice(at + shown.length)}${close}` }]
 }
 
-/** In a citation opened from a side thread, a field whose question goes on in that thread, about the citation; the
- *  panel then shows the thread. */
-async function followUpField(cx: Ctx, e: PaneEvent, about: string): Promise<RenderElement | null> {
-  if (e.surface === 'mobile') return null
+/** The citation panel's entry box (entry.tsx). In a citation opened from a side thread, its question goes on in that
+ *  thread, about the citation, and the panel then shows the thread; anywhere else it starts a side thread about the
+ *  citation, opened over the citation. Its key, for `a`, and the rows it takes. */
+async function citeEntry(cx: Ctx, e: PaneEvent, c: Citation, target: Target, sentence: string, cols: number): Promise<{ el: RenderElement | null; key: string; rows: number }> {
+  if (e.surface === 'mobile') return { el: null, key: '', rows: 0 }
   const nav = (await cx.nav()) ?? NAV_EMPTY
   const tid = threadBehind(nav.trail)
-  if (!tid) return null
-  const { Input } = cx.els(e)
-  return fieldRow(
-    cx,
-    e,
-    'follow-up',
-    <Input
-      key={fieldKey(`follow-${cid(tid)}`)}
-      submitLabel="ask"
-      onSubmit={v => {
-        const q = v.trim()
-        if (!q) return
-        void (async () => {
-          const r = await threadMessage(cx, tid, `${q} (about ${about})`)
-          if (r.error) return cx.toast(`thimble: ${r.error}`)
-          const now = (await cx.nav()) ?? NAV_EMPTY
-          let i = now.trail.length - 1
-          while (i >= 0 && now.trail[i]!.thread !== tid) i--
-          if (i >= 0) await navGo(cx, { trail: now.trail.slice(0, i + 1), back: withBack(now.back, now.trail) })
-        })()
-      }}
-    />,
-    'follow-row',
-  )
+  if (!tid) {
+    const key = `ask-cite-${cid(c.raw)}`
+    const el = askEntry(cx, e, { key, placeholder: 'ask about this citation', cols, target, ...(sentence ? { over: { anchorText: plainCites(sentence) } } : {}) })
+    return { el, key, rows: entryHeight(key, cols) }
+  }
+  const key = fieldKey(`follow-${cid(tid)}`)
+  const el = entryEl(cx, e, {
+    key,
+    placeholder: 'ask a follow-up question',
+    cols,
+    onSubmit: q => {
+      void (async () => {
+        const r = await threadMessage(cx, tid, `${q} (about ${c.raw})`)
+        if (r.error) return cx.toast(`thimble: ${r.error}`)
+        const now = (await cx.nav()) ?? NAV_EMPTY
+        let i = now.trail.length - 1
+        while (i >= 0 && now.trail[i]!.thread !== tid) i--
+        if (i >= 0) await navGo(cx, { trail: now.trail.slice(0, i + 1), back: withBack(now.back, now.trail) })
+      })()
+    },
+  })
+  return { el, key, rows: entryHeight(key, cols) }
 }
 
 /** The row of a card's data that holds a cited value (the resolver's column and row, as a mark's ref names them): the
@@ -1818,12 +1894,12 @@ function howWords(c: Citation, v: TermVerdict | undefined, check: { state?: stri
  *  script`), `history` (unchanged, or `Claude wrote` the value or place as written, `check made it` the one it reads
  *  now, `why`); then where the value stands, on the citation's purple: a file's lines nested at A2, or for a value on
  *  a card the card's data row and the code that holds it (v9 review: "the code or data holding the literal, not the
- *  plot"; a card whose data has no rows drawn with its mark lit); at the bottom `ask about it` and, for a citation
- *  opened from a side thread, the `follow-up` field. It reads its verdict and its card as they change, so it says when
- *  the check ends. */
+ *  plot"; a card whose data has no rows drawn with its mark lit); at the bottom the entry box, whose question starts a
+ *  side thread about the citation, or goes on in the side thread it was opened from. It reads its verdict and its card
+ *  as they change, so it says when the check ends. */
 async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElement> {
   const els = cx.els(e) as El
-  const { Box, Text, Button } = cx.els(e)
+  const { Box, Text } = cx.els(e)
   const cols = Math.max(30, e.props.bodyColumns)
   if (!p.ref) return none(cx, e)
   const c = { raw: p.display === null || p.display === undefined ? `[[${p.ref}]]` : `[[${p.display}|${p.ref}]]`, ref: p.ref, display: p.display ?? null }
@@ -1930,14 +2006,14 @@ async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
     const lit = citedLines(card, v, Math.max(10, w - 4), Math.max(8, (e.props.scroll?.bodyRows || 20) - 14))
     body.push(framedCard(cx, e, lit.card, w, lit.lines, 'cite-card'))
   }
-  const goOn = await followUpField(cx, e, c.raw)
-  let hints = ['a to ask', ...(f ? ['f for its file'] : []), ...(cardId ? ['c for the card'] : []), ...(canAsk ? ['s for a script'] : [])]
+  const entry = await citeEntry(cx, e, c, target, p.sentence ?? '', cols)
+  let hints = [...(entry.el ? ['a to ask'] : []), ...(f ? ['f for its file'] : []), ...(cardId ? ['c for the card'] : []), ...(canAsk ? ['s for a script'] : [])]
   if (!(v?.card && !v.lines.length) && v?.lines.length) {
     // the passage an example quotes, when the cited lines do not hold it
     const quotedRow = quote && status !== 'differs' && !v.lines.some(l => l.hit && quoteSpan(demojibake(l.text).replace(/\t/g, '  '), quote))
     // a file's lines: a window over the whole file, as tall as the rows the panel's other parts leave it (the title
-    // row, the subtitle, the rule, the label/value rows and the code in them, a `quoted` row, the rule, `ask about
-    // it`, the follow-up field and the hint rows)
+    // row, the subtitle, the rule, the label/value rows and the code in them, a `quoted` row, the entry box and the
+    // hint rows)
     const tall = (words: string, w: number) => (words ? wrapRows(words, Math.max(1, w), 999).length : 0)
     const used =
       2 +
@@ -1945,17 +2021,15 @@ async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
       rows.reduce((n, [k, val]) => n + (k === 'code' || k === '' ? 0 : tall(typeof val === 'string' ? val : k === 'source' && p.sentence ? sourceSegs(p.sentence, c).map(x => x.s).join('') : k === 'how' ? `${how}; no script recomputed it  ask for a script` : ' ', cols - fieldW())), 0) +
       codeRows +
       (quotedRow ? tall(clip(demojibake(quote), 600), cols - 8) : 0) +
-      2 +
-      (goOn ? 1 : 0) +
+      entry.rows +
       hintHeight(['↑↓ to scroll', ...hints], cols)
     const win = v.path && typeof v.line === 'number' ? await citeWindow(cx, e, c.ref, v, cols, quote, Math.max(5, (bodyRows || 30) - used)) : null
     if (win?.scrolls) hints = ['↑↓ to scroll', ...hints]
     body.push(win?.el ?? <Box key="cite-lines" flexDirection="column">{lineRows(cx, e, v, cols, quote)}</Box>)
     if (quotedRow) body.push(fieldEls(els, [['quoted', <Text wrap="wrap" backgroundColor={citeHighlight()}>{clip(demojibake(quote), 600)}</Text>]], 'cite-quoted')!)
   } else if (!v) body.push(<Text key="cite-wait" dimColor>{`${SPIN} reading its place`}</Text>)
-  const ask = () => void openAsk(cx, target, p.sentence ? { anchorText: plainCites(p.sentence) } : {})
-  const keys: Key[] = [{ key: 'ask', hotkey: 'a', onPress: ask }, ...(f ? [{ key: 'files', hotkey: 'f', onPress: () => void opens?.() }] : []), ...(cardId ? [{ key: 'card', hotkey: 'c', onPress: () => void openCard(cx, cardId) }] : []), ...(canAsk ? [{ key: 'script', hotkey: 's', onPress: askScript }] : [])]
-  body.push(...bottomRows(cx, e, cols, [<Button key="cite-ask" label="ask about it" plain onPress={ask} />], [goOn], hints))
+  const keys: Key[] = [...(entry.el ? [askKey(cx, entry.key)] : []), ...(f ? [{ key: 'files', hotkey: 'f', onPress: () => void opens?.() }] : []), ...(cardId ? [{ key: 'card', hotkey: 'c', onPress: () => void openCard(cx, cardId) }] : []), ...(canAsk ? [{ key: 'script', hotkey: 's', onPress: askScript }] : [])]
+  body.push(...bottomRows(cx, e, cols, [], [entry.el], hints, !entry.el))
   const hk = hiddenKeys(cx, e, keys)
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>
 }
@@ -2062,12 +2136,12 @@ async function subjectEls(cx: Ctx, e: PaneEvent, s: Subject, cols: number, key: 
 let asking = ''
 
 /** A new side thread (SPEC.md, section 7, "The threads panel", a thread with no question yet): `about <what>`
- *  as its dim subtitle, what it is about (subjectEls: the card, the cited lines, the passage), then the `ask` field,
- *  which has the keys. */
+ *  as its dim subtitle, what it is about (subjectEls: the card, the cited lines, the passage), then the entry box, which
+ *  has the keys. */
 async function drawAsk(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElement> {
   if (e.surface === 'mobile') return none(cx, e, 'A side thread needs a surface with text fields.')
   const els = cx.els(e) as El
-  const { Box, Text, Input } = cx.els(e)
+  const { Box, Text } = cx.els(e)
   const cols = Math.max(30, e.props.bodyColumns)
   // a citation's words in quotation marks, as every subject (aboutName); a citation with no words by its place, as it
   // shows; a card and a passage come quoted already
@@ -2080,37 +2154,29 @@ async function drawAsk(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEleme
   const lit = p.target?.kind === 'mark' && p.target.ref ? { lit: p.target.ref } : {}
   body.push(...(await subjectEls(cx, e, { anchor: p.anchor ?? '', text: said ? '' : words, ...(p.target?.kind === 'card' && p.target.cardId ? { card: p.target.cardId } : {}), ...lit }, cols, `ask:${p.anchor ?? ''}:${cid(words)}`)))
   if (asking) body.push(<Text key="ask-state" {...(asking.startsWith('×') ? { color: COLORS.problem } : { dimColor: true })}>{asking}</Text>)
-  // the field alone, its placeholder saying what it takes: Enter's word (`⏎ ask`) is the only `ask`
-  const field = (
-    <Box key="ask-row" flexDirection="row">
-      <Input
-        key={fieldKey('ask-new')}
-        autoFocus
-        placeholder="type your question"
-        submitLabel="ask"
-        onSubmit={v => {
-          void (async () => {
-            const q = v.trim()
-            if (!q) return
-            asking = '◌ asking'
-            await cx.bumpPanel()
-            // a thread about a citation is titled by the citation's words, as the browser titles a chip's thread: what
-            // names its subject in the panel and on home (anchorName)
-            const title = p.target?.kind === 'citation' && p.about ? p.about : ''
-            const got = await startThread(cx, p.anchor ?? null, p.anchorText ?? '', q, { ...(p.parent ? { parent: p.parent } : {}), ...(p.element ? { element: p.element } : {}), ...(title ? { title } : {}) })
-            asking = 'error' in got ? `× ${got.error}` : ''
-            // the thread takes the form's place on the way, so back leads where the form was asked from (live check
-            // term-fix9, quirk 12: back from a thread just asked showed an empty form)
-            if ('id' in got) await openThread(cx, got.id, q, { replace: true })
-            else await cx.bumpPanel()
-          })()
-        }}
-      />
-    </Box>
-  )
-  // the header's rule stands alone when nothing comes between it and the field: no second rule right under it
+  // the header's rule stands alone when nothing comes between it and the box: it is the box's top rule then
   const between = body.length > headerEls(els, { title: 'New thread', cols, sub: subLine(['x']) }).length
-  body.push(...bottomRows(cx, e, cols, [], [field], ['Enter to ask'], between, 'ask-new'))
+  // the entry box alone, its placeholder saying what it takes: Enter's word (`⏎ ask`) is the only `ask`
+  const field = entryEl(cx, e, {
+    key: fieldKey('ask-new'),
+    placeholder: 'type your question',
+    cols,
+    autoFocus: true,
+    top: between,
+    onSubmit: q => {
+      void (async () => {
+        asking = '◌ asking'
+        await cx.bumpPanel()
+        const target: Target = p.target ?? { kind: 'sentence', text: p.anchorText ?? '' }
+        // the thread takes the form's place on the way, so back leads where the form was asked from (live check
+        // term-fix9, quirk 12: back from a thread just asked showed an empty form)
+        const why = await askNow(cx, { target, anchor: p.anchor ?? null, anchorText: p.anchorText ?? '', about: p.about ?? '', ...(p.parent ? { parent: p.parent } : {}), ...(p.element ? { element: p.element } : {}) }, q, { replace: true })
+        asking = why ? `× ${why}` : ''
+        if (why) await cx.bumpPanel()
+      })()
+    },
+  })
+  body.push(...bottomRows(cx, e, cols, [], [field], ['Enter to ask'], false, 'ask-new'))
   return <Box flexDirection="column">{body}</Box>
 }
 
@@ -2223,6 +2289,44 @@ function promptEl(els: El, q: string, cols: number, key: string): RenderElement 
   )
 }
 
+/** A side thread's turn while it works, as Claude Code draws a turn at work: `⏺` dim in the margin and what it does
+ *  (`◌ 2 tool calls`, `◌ answering` before its first), then its latest words dim on a row under it after `⎿`, cut at
+ *  the row's end. */
+function workingEl(els: El, turn: { tools: number; partial: string }, cols: number, key: string): RenderElement {
+  const { Box, Text } = els
+  const latest = turn.partial.split('\n').map(l => l.trim()).filter(Boolean).at(-1) ?? ''
+  return (
+    <Box key={marginKey(key)} flexDirection="column">
+      <Text dimColor wrap="truncate-end">
+        {cut(`⏺ ◌ ${turn.tools ? plural(turn.tools, 'tool call') : 'answering'}`, cols + MARGIN_W)}
+      </Text>
+      {latest ? (
+        <Text key={`${key}-latest`} dimColor wrap="truncate-end">
+          {cut(`  ⎿  ${plainCites(latest).replace(/\*\*|__|`/g, '')}`, cols + MARGIN_W)}
+        </Text>
+      ) : null}
+    </Box>
+  )
+}
+
+/** A row under a side thread's question that says how its turn ended without an answer, as Claude Code says an
+ *  interrupt or an error under a prompt: `⎿` at A0, its words after two cells, wrapped there; dim, or in `color`. */
+function underEl(els: El, words: string, key: string, color?: string): RenderElement {
+  const { Box, Text } = els
+  return (
+    <Box key={key} flexDirection="row">
+      <Box width={3} flexShrink={0}>
+        <Text dimColor>⎿  </Text>
+      </Box>
+      <Box flexGrow={1} flexShrink={1}>
+        <Text wrap="wrap" {...(color ? { color } : { dimColor: true })}>
+          {words}
+        </Text>
+      </Box>
+    </Box>
+  )
+}
+
 /** The threads panel (SPEC.md, section 7, "The threads panel"): its title; under the rule the tree, a root per place
  *  a thread was asked from (`main`, or `report "…"`, its count of threads dim at R and `N new` in green) with a blank
  *  row between them, each thread
@@ -2237,7 +2341,7 @@ function promptEl(els: El, q: string, cols: number, key: string): RenderElement 
 async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<RenderElement> {
   if (e.surface === 'mobile') return none(cx, e, 'Threads need a surface with text fields.')
   const els = cx.els(e) as El
-  const { Box, Text, Input, Button } = cx.els(e)
+  const { Box, Text, Button } = cx.els(e)
   const cols = Math.max(30, e.props.bodyColumns)
   const rows = (await cx.threads()) ?? []
   // the threads listed, and the one selected though the list does not hold it yet (one just asked)
@@ -2339,12 +2443,12 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
     lines.push(pointed([{ s: '  ' }, dim(words)], false))
   }
   const running = t?.turns.at(-1)?.state === 'running'
-  const askKey = t ? `ask-${cid(t.id)}` : ''
-  // the module's own move of the ring raises no ui.focus: the hint row names the field's keys once the ring is there
-  // (live check term-fix8, quirk 7: the hint still named b while a typed b went into the field)
+  const askField = t ? `ask-${cid(t.id)}` : ''
+  // the module's own move of the ring raises no ui.focus: the hint row follows once the ring is there (live check
+  // term-fix8, quirk 7: the hint still named b while a typed b went into the field)
   const focusAsk = async () => {
-    if (!askKey || !(await cx.focus(askKey))) return
-    rt.panelFocus = askKey
+    if (!askField || !(await cx.focus(askField))) return
+    rt.panelFocus = askField
     await cx.bumpPanel()
   }
   const step = async (d: number) => {
@@ -2395,24 +2499,23 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
         gap(`thread-gap-q-${k}`)
         body.push(q)
       }
-      // its answer after a blank row: what the turn is doing, or how it ended, or the answer after Claude Code's ⏺
-      // with the cards it cites where it cites them and the turn's other cards after it
-      const status =
-        turn.state === 'running' ? (
-          <Text key={`thread-run-${k}`} dimColor wrap="truncate-end">
-            {cut(`◌ ${plural(turn.tools, 'tool call')}${turn.partial.trim() ? ` · ${clip(turn.partial.trim(), cols - 30)}` : ''}`, cols)}
-          </Text>
-        ) : stoppedTurn(turn) ? (
-          <Text key={`thread-err-${k}`} dimColor wrap="wrap">
-            {turn.a.trim().replace(/([^.!?])$/, '$1.')}
-          </Text>
-        ) : turn.state === 'error' ? (
-          <Text key={`thread-err-${k}`} color={COLORS.problem} wrap="wrap">{`× ${turn.a}`}</Text>
-        ) : null
+      // its answer as Claude Code draws a turn: while it works, a blank row, then `⏺` and what it does (`◌ 2 tool
+      // calls`), its latest words under it after `⎿`; a stop or a failure on a `⎿` row right under the question, as
+      // Claude Code says an interrupt or an error; or, after a blank row, the answer after `⏺` with the cards it cites
+      // where it cites them and the turn's other cards after it
+      const status: { el: RenderElement; gap: boolean } | null =
+        turn.state === 'running'
+          ? { el: workingEl(els, turn, cols, `thread-run-${k}`), gap: true }
+          : stoppedTurn(turn)
+            ? { el: underEl(els, turn.a.trim().replace(/([^.!?])$/, '$1.'), `thread-err-${k}`), gap: false }
+            : turn.state === 'error'
+              ? { el: underEl(els, `× ${turn.a.trim()}`, `thread-err-${k}`, COLORS.problem), gap: false }
+              : null
       const md = cardsInline(turn.state === 'done' ? turn.a.trim() : '', turn.cards ?? [])
       if (status) {
-        gap(`thread-gap-a-${k}`)
-        body.push(status)
+        if (status.gap) gap(`thread-gap-a-${k}`)
+        else underRule = false
+        body.push(status.el)
       }
       if (md) {
         gap(`thread-gap-c-${k}`)
@@ -2425,26 +2528,20 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
     }
     if (stop) keys.push({ key: 'stop', hotkey: 's', onPress: stop })
     if (flip) keys.push({ key: 'subject', hotkey: 'v', onPress: flip })
-    // the field for the next question, its placeholder saying what it takes: under the second rule when the thread
-    // stands alone, else a blank row under the chat (a panel has two rules at most)
-    field = (
-      <Box key="ask-row" flexDirection="row" {...(alone ? {} : { marginTop: 1 })}>
-        <Input
-          key={fieldKey(askKey)}
-          placeholder="ask a follow-up question"
-          submitLabel="ask"
-          onSubmit={v => {
-            const q = v.trim()
-            if (!q) return
-            // a question asked while the thread answers waits until its answer ends: thimble queues it
-            void threadMessage(cx, t.id, q).then(r => {
-              if (r.error) cx.toast(`thimble: ${r.error}`)
-              else if (r.queued || running) cx.toast('thimble: the side thread is still answering: your question waits until it ends')
-            })
-          }}
-        />
-      </Box>
-    )
+    // the entry box for the next question under the chat, its placeholder saying what it takes, as Claude Code's
+    // prompt box stands under its transcript
+    field = entryEl(cx, e, {
+      key: fieldKey(askField),
+      placeholder: 'ask a follow-up question',
+      cols,
+      onSubmit: q => {
+        // a question asked while the thread answers waits until its answer ends: thimble queues it
+        void threadMessage(cx, t.id, q).then(r => {
+          if (r.error) cx.toast(`thimble: ${r.error}`)
+          else if (r.queued || running) cx.toast('thimble: the side thread is still answering: your question waits until it ends')
+        })
+      },
+    })
     keys.push({ key: 'ask', hotkey: 'a', onPress: () => void focusAsk() })
   }
   const stopEl = stop ? <Button key="thread-stop" label="stop" plain onPress={stop} /> : null
@@ -2452,12 +2549,8 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
   const hints = alone
     ? ['a to ask', ...(subjectHint ? [subjectHint] : []), ...(stop ? ['s to stop'] : [])]
     : ['↑↓ to choose', ...(t ? ['Enter or a to ask'] : []), ...(subjectHint ? [subjectHint] : []), ...(stop ? ['s to stop'] : [])]
-  if (alone) body.push(...bottomRows(cx, e, cols, [stopEl], [field], hints))
-  else {
-    if (stopEl) body.push(controlsEl(els, [stopEl], 'thread-controls')!)
-    if (field) body.push(field)
-    body.push(hintsRow(els, hints, cols))
-  }
+  // `stop` under the chat after a blank row, then the entry box, whose top rule is the panel's second rule
+  body.push(...entryBottom(cx, e, cols, [stopEl], field, hints))
   const hk = hiddenKeys(cx, e, keys)
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>
 }
@@ -3423,9 +3516,17 @@ async function drawDoc(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEleme
         const to = stepPick(shown, chosen?.id ?? '', k === 'up' || k === 'k' ? -1 : 1)
         return to ? choose(to, true) : undefined
       }
-      if ((k === 'return' || k === 'enter') && chosen) return askComment(cx, doc, slug, chosen)
+      if ((k === 'return' || k === 'enter') && chosen) return focusEntry()
     })
     hints.push('↑↓ to choose a comment')
+  }
+  // the chosen comment's entry box (entry.tsx), whose question starts a side thread about the comment on its passage
+  let askBox: RenderElement | null = null
+  const entryKey = chosen ? `ask-cm-${cid(`${slug}:${chosen.id}`)}` : ''
+  const focusEntry = async () => {
+    if (!askBox || !(await cx.focus(entryKey))) return
+    rt.panelFocus = entryKey
+    await cx.bumpPanel()
   }
   if (chosen && !writing) {
     const flip = () => void resolveComment(cx, slug, chosen, shown)
@@ -3434,10 +3535,11 @@ async function drawDoc(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEleme
       keys.push({ key: 'resolve', hotkey: 'r', onPress: flip })
       hints.push(chosen.open ? 'r to resolve' : 'r to reopen')
     }
-    const ask = () => void askComment(cx, doc, slug, chosen)
-    controls.splice(chosen.tag ? 0 : 1, 0, <Button key="doc-cm-ask" label="ask about it" plain onPress={ask} />)
-    if (!story) keys.push({ key: 'cm-ask', hotkey: 'a', onPress: ask })
-    hints.push(story ? 'Enter to ask' : 'Enter or a to ask')
+    if (e.surface !== 'mobile') {
+      askBox = askEntry(cx, e, { key: entryKey, placeholder: 'ask about this comment', cols, ...commentAsk(doc, slug, chosen) })
+      if (!story) keys.push({ key: 'cm-ask', hotkey: 'a', onPress: () => void focusEntry() })
+      hints.push(story ? 'Enter to ask' : 'Enter or a to ask')
+    }
   }
   const resolvedN = all.filter(c => !c.open).length
   if (resolvedN && !writing) {
@@ -3482,7 +3584,8 @@ async function drawDoc(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEleme
   keys.push({ key: 'all', hotkey: 'l', onPress: allDocs })
   hints.push('l for all documents')
   const said = docSaid.get(slug)
-  body.push(...bottomRows(cx, e, cols, controls, said ? [<Text key="doc-said" color={COLORS.problem} wrap="wrap">{`! ${said}`}</Text>] : [], hints))
+  const saidEl = said ? [<Text key="doc-said" color={COLORS.problem} wrap="wrap">{`! ${said}`}</Text>] : []
+  body.push(...(askBox ? entryBottom(cx, e, cols, controls, askBox, hints, saidEl) : bottomRows(cx, e, cols, controls, saidEl, hints)))
   const hk = hiddenKeys(cx, e, keys)
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>
 }
@@ -3517,12 +3620,12 @@ async function resolveComment(cx: Ctx, slug: string, c: DocComment, shown: reado
   await cx.bumpPanel()
 }
 
-/** A side thread about a comment, as the browser's comment card's reply starts one: on the comment's passage, told the
- *  passage's words and the comment. */
-async function askComment(cx: Ctx, doc: Obj, slug: string, c: DocComment): Promise<void> {
+/** What a side thread about a comment is told, as the browser's comment card's reply starts one: on the comment's
+ *  passage, told the passage's words and the comment. */
+function commentAsk(doc: Obj, slug: string, c: DocComment): { target: Target; over: AskOver } {
   const words = passageWords(doc, c.sid)
   const anchor = `report:${slug}#${c.sid}`
-  await openAsk(cx, { kind: 'sentence', text: words }, { anchor, anchorText: `${words}\n\n${commentWho(c)}: ${c.text}`, element: anchor, about: `comment ${quoted(clip(c.text, 50))}` })
+  return { target: { kind: 'sentence', text: words }, over: { anchor, anchorText: `${words}\n\n${commentWho(c)}: ${c.text}`, element: anchor, about: `comment ${quoted(clip(c.text, 50))}` } }
 }
 
 // ------------------------------------------------------------------------------------------------ agents and views

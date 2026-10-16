@@ -1,6 +1,6 @@
 // The citation panel as thimble-term draws it: the cited mark lit on a
 // card (a cited row past the drawn rows too), the passage an example's record quotes, a tab before the value, a problem's
-// mark and reason, the follow-up field of a citation opened from a side thread. `claude plugin test plugin`.
+// mark and reason, the entry box of a citation opened from a side thread. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
@@ -152,7 +152,7 @@ test("a click on an example's record opens its place with the passage the card q
   await pane.unmount()
 })
 
-test("a citation opened from a side thread has a `follow-up` field: its question goes on in that thread, and the panel returns to it", async ($, on) => {
+test("a citation opened from a side thread has one entry box: its question goes on in that thread, and the panel returns to it", async ($, on) => {
   const w = world(on)
   w.resolve['card:a0frame0#records/events.jsonl'] = { ref: 'card:a0frame0#records/events.jsonl', kind: 'cell', cell_id: 'a0frame0', excerpt: 'records × events.jsonl = 19913', meta: { span: { col: 'records', row: 'events.jsonl', value: '19913' } } }
   await start($, w)
@@ -171,7 +171,11 @@ test("a citation opened from a side thread has a `follow-up` field: its question
   await w.clock.settle()
   await pane.unmount()
   pane = (await $.ui.mount(PANE)) as unknown as M
-  expect(shown(await pane.drawn())).toContain('follow-up')
+  // one entry box, the thread's: no box that starts another thread, no `ask about it`
+  const inputs = ((await pane.findAll({ type: 'Input' })) as { key?: string; props?: { placeholder?: string } }[]).filter(i => /^(?:ask-|follow-)/.test(String(i.key)))
+  expect(inputs.map(i => String(i.key))).toEqual([expect.stringMatching(/^follow-/)])
+  expect(inputs[0]!.props?.placeholder).toBe('ask a follow-up question')
+  expect(shown(await pane.drawn())).not.toContain('ask about it')
   await pane.input({ key: (((await pane.findAll({ type: 'Input' })) as { key?: string }[]).find(i => String(i.key).startsWith('follow-'))!.key)!, text: 'Why so many?' })
   await w.clock.settle()
   expect(w.acts).toContainEqual({ kind: 'thread-message', payload: { thread: 't1', message: 'Why so many? (about [[19913|card:a0frame0#records/events.jsonl]])' } })
@@ -487,9 +491,9 @@ test("a file citation opens on its whole file: the cited line lit whole for a pl
   await start($, w)
   const pane = await clickCite($, w, 'See [[log.txt#L450]] for the restart.', 5)
   const { rows, json } = await windowRows(pane)
-  // the panel's 36 rows less the title row, the rule, the source, how and history rows, the second rule, `ask about
-  // it` and the hint row
-  expect(rows.length).toBe(36 - 8)
+  // the panel's 36 rows less the title row, the rule, the source, how and history rows, the entry box (its two rules
+  // and its two rows) and the hint row
+  expect(rows.length).toBe(36 - 10)
   const nums = rows.map(r => Number(/^\s+(\d+)\s{2}line/.exec(r)?.[1] ?? 0))
   const firstShown = nums.find(n => n > 0)!
   const lastShown = [...nums].reverse().find(n => n > 0)!

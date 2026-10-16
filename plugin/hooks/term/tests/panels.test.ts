@@ -279,7 +279,7 @@ test('the views pane: each view by its glyph and name, its files at R, `new` onc
   await pane.unmount()
 })
 
-test("a thread about a citation names its subject by the citation's words in the ask view, the thread and home; the ask fields say what they take", async ($, on) => {
+test("the citation panel's entry box asks a side thread about the citation, named by the citation's words in the thread and home; the entry boxes say what they take", async ($, on) => {
   const w = world(on)
   await start($, w)
   const text = 'The export holds [[4579|card:ff73e071#pages/TOTAL]] pages.'
@@ -292,18 +292,28 @@ test("a thread about a citation names its subject by the citation's words in the
   await ui.unmount()
   await w.clock.settle()
   let pane = (await $.ui.mount(PANE)) as unknown as M
-  await pane.press({ key: 'cite-ask' })
+  let drawn = shown(await pane.drawn())
+  // no `ask about it`: the citation's entry box, Claude Code's prompt box, two rows tall, its placeholder saying what it
+  // takes; `ask` is only Enter's word
+  expect(await pane.find({ key: 'cite-ask' })).toBeUndefined()
+  expect(drawn).not.toContain('ask about it')
+  const entry = ((await pane.findAll({ type: 'Input' })) as { key?: string; props?: Record<string, unknown> }[]).find(i => String(i.key).startsWith('ask-cite-'))!
+  expect(entry.props).toMatchObject({ placeholder: 'ask about this citation', submitLabel: 'ask', rows: 2 })
+  expect(drawn).not.toMatch(/(^|[^a-z])ask {2}/)
+  await pane.input({ key: entry.key!, text: 'Is 4579 every page?' })
+  await w.clock.settle()
+  expect(w.acts.find(a => a.kind === 'thread')!.payload).toMatchObject({ anchor: 'card:ff73e071#pages/TOTAL', title: '4579', message: 'Is 4579 every page?' })
+  await pane.unmount()
+  // the thread opens over the citation, with no form between them: b goes back to the citation
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  drawn = shown(await pane.drawn())
+  expect(drawn).not.toContain('New thread')
+  expect(drawn).toContain('"Is 4579 every page?"')
+  await pane.press({ key: 'hk-back' })
   await w.clock.settle()
   await pane.unmount()
   pane = (await $.ui.mount(PANE)) as unknown as M
-  let drawn = shown(await pane.drawn())
-  expect(drawn).toContain('about 4579')
-  // the field alone, its placeholder saying what it takes; `ask` is only Enter's word
-  expect((await pane.find({ type: 'Input', key: 'ask-new' }))?.props).toMatchObject({ placeholder: 'type your question', submitLabel: 'ask' })
-  expect(drawn).not.toMatch(/(^|[^a-z])ask {2}/)
-  await pane.input({ key: 'ask-new', text: 'Is 4579 every page?' })
-  await w.clock.settle()
-  expect(w.acts.find(a => a.kind === 'thread')!.payload).toMatchObject({ anchor: 'card:ff73e071#pages/TOTAL', title: '4579', message: 'Is 4579 every page?' })
+  expect(shown(await pane.drawn({ in: 'cite-title' }))).toContain('4579')
   await pane.unmount()
   // the thread as thimble lists it: titled by the words, its anchor's sentence kept for the fork
   w.states.threads.push({ id: 't9', kind: 'thread', role: 'thread', title: '4579', anchor: 'card:ff73e071#pages/TOTAL', anchor_text: 'The export holds 4579 pages.', parent: 'main', created_at: '2026-10-06T10:05:00+00:00', running: false, answers: 1, seen: 1, question: 'Is 4579 every page?' } as never)
@@ -315,11 +325,12 @@ test("a thread about a citation names its subject by the citation's words in the
   drawn = shown(await pane.drawn())
   expect(drawn).toContain('about 4579')
   expect(drawn).not.toContain('about The export holds')
-  // the next question's field: a blank row under the answer, a placeholder
-  const row = (await pane.find({ type: 'Box', key: 'ask-row' })) as { props?: Record<string, unknown> } | undefined
-  expect(row?.props).toMatchObject({ marginTop: 1 })
+  // the next question's entry box under the chat: its rules in the prompt box's border color, `❯` in the margin
+  const box = JSON.stringify(((await pane.findAll({ type: 'Box' })) as { key?: string }[]).find(b => String(b.key).startsWith('m:entry-ask-')))
+  expect(box).toContain('"color":"promptBorder"')
+  expect(box).toContain('❯ ')
   const field = ((await pane.findAll({ type: 'Input' })) as { key?: string; props?: Record<string, unknown> }[]).find(i => String(i.key).startsWith('ask-'))
-  expect(field?.props).toMatchObject({ placeholder: 'ask a follow-up question' })
+  expect(field?.props).toMatchObject({ placeholder: 'ask a follow-up question', rows: 2 })
   await pane.unmount()
 })
 

@@ -1,8 +1,8 @@
 // The Checks view (checksview.tsx, SPEC-v2 J7): one comment of a check on a passage of Claude's answer, its passage with
 // the check's flag, the comment, the acts; `‹ 1 of 2 ›` and n p to step; d dismisses it (`thimble act
-// answer-comment-resolve`) and steps on; m puts a draft in the prompt; a asks a side thread about the passage; o opens
-// the comment in the browser (`answer:<turn>#s<n>`). With no open comment it lists the checks. `claude plugin test
-// plugin`.
+// answer-comment-resolve`) and steps on; m puts a draft in the prompt; the entry box asks a side thread about the
+// passage (a gives it the keys); o opens the comment in the browser (`answer:<turn>#s<n>`). With no open comment it lists
+// the checks. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
@@ -39,7 +39,13 @@ test('one comment: its check in the title row with `‹ 1 of 2 ›`, when and wh
   expect(text).toContain('⚑ ')
   expect(text).toContain('⚑ passageAfter 19 June there are 0 new messages to other agents on any page.')
   expect(text).toContain('commentThe label could not read 899 revisions whose text the dump hides.')
-  expect(words(await m.find({ type: 'Box', key: 'checks-acts' }))).toBe('ask about itput in the promptdismissopen in the browser')
+  expect(words(await m.find({ type: 'Box', key: 'checks-acts' }))).toBe('put in the promptdismissopen in the browser')
+  // no `ask about it`: Claude Code's prompt box under the acts, its rules in the prompt box's border color
+  expect(text).not.toContain('ask about it')
+  const box = JSON.stringify(await m.find({ type: 'Box', key: 'm:entry-ask-check-c1' }))
+  expect(box).toContain('"color":"promptBorder"')
+  expect(box).toContain('❯ ')
+  expect((await m.find({ type: 'Input', key: 'ask-check-c1' }))?.props).toMatchObject({ placeholder: 'ask about this comment', submitLabel: 'ask', rows: 2 })
   // n steps to the second comment
   await m.press({ key: 'hk-checks-n' })
   await w.clock.settle()
@@ -71,16 +77,20 @@ test('d dismisses the comment through `thimble act answer-comment-resolve` and t
   await m.unmount()
 })
 
-test('a asks a side thread about the passage, told the comment', { timeoutMs: 30_000 }, async ($, on) => {
+test('the entry box asks a side thread about the passage, told the comment; the thread opens over the comment', { timeoutMs: 30_000 }, async ($, on) => {
   const w = panelWorld(on)
   w.t.answerComments = TWO()
   await start($, w)
   const m = await opened($, w)
+  // a gives the box the keys (a press of the panel's own, no form opens)
   await m.press({ key: 'hk-checks-a' })
   await w.clock.settle()
+  expect(words(await m.drawn())).not.toContain('New thread')
+  await m.input({ key: 'ask-check-c1', text: 'Is that right?' })
+  await w.clock.settle()
+  expect(w.acts.find(a => a.kind === 'thread')!.payload).toMatchObject({ anchor: 'answer:r1#s1', element: 'answer:r1#s1', message: 'Is that right?' })
+  expect(String(w.acts.find(a => a.kind === 'thread')!.payload.anchor_text)).toContain("The Important details check's comment on this passage of the answer: The label could not read 899 revisions")
   expect(w.panes.at(-1)!.title).toBe('Threads')
-  const text = words(await m.drawn())
-  expect(text).toContain('After 19 June there are 0 new messages')
   await m.unmount()
 })
 

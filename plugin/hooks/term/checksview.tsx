@@ -6,11 +6,17 @@
 //   ───────────────────────────────────────────────────────────────────────────────
 //   ⚑ passage   After 19 June there are 0 new messages to other agents on any page.
 //     comment   The label could not read 899 revisions whose text the dump hides …
-//   ask about it   put in the prompt   dismiss   open in the browser
 //
-// `a` asks a side thread about the passage, told the comment; `m` puts a draft in the prompt (nothing is sent); `d`
-// dismisses the comment (`thimble act answer-comment-resolve`): its tint and flag go and the view moves to the next one;
-// `o` and the title row's `↗` open the comment in the browser (`answer:<turn>#s<n>`); `n` and `p` step. While a comment
+//   put in the prompt   dismiss   open in the browser
+// ─────────────────────────────────────────────────────────────────────────────────
+// ❯ ask about this comment
+//
+// ─────────────────────────────────────────────────────────────────────────────────
+//
+// The entry box (entry.tsx) asks a side thread about the passage, told the comment (`a` gives it the keys); `m` puts a
+// draft in the prompt (nothing is sent); `d` dismisses the comment (`thimble act answer-comment-resolve`): its tint and
+// flag go and the view moves to the next one; `o` and the title row's `↗` open the comment in the browser
+// (`answer:<turn>#s<n>`); `n` and `p` step. While a comment
 // shows, `$.state.checksOpen` names it (the transcript lights its passage more). With no open comment the view lists the
 // checks (`thimble state checks`): each one's name, on or off, and its comments; `o` opens the browser's Checks pane.
 import type { RenderElement } from 'claude-code'
@@ -26,7 +32,8 @@ import { clip, noControls, quoted } from './lib'
 import { linesEl } from './lines'
 import { COLORS } from './paint'
 import type { PaneEvent } from './panel'
-import { drawsView, hiddenKeys, hintsRow, none, openAsk } from './panel'
+import { askEntry, askKey, drawsView, entryBottom, hiddenKeys, hintsRow, none } from './panel'
+import type { AskOver } from './panel'
 import { checksOf } from './report'
 import { loadsView, openPanel, readSurface, rt, surfaceValue } from './term'
 import { openInBrowser } from './offramp'
@@ -91,10 +98,10 @@ async function dismiss(cx: Ctx, c: AnswerComment): Promise<void> {
   await stepTo(cx, left[Math.min(at, left.length - 1)])
 }
 
-/** A side thread about the passage, told the comment. */
-async function ask(cx: Ctx, c: AnswerComment): Promise<void> {
+/** What a side thread about a comment is told: its passage, and the comment. */
+function askOver(c: AnswerComment): AskOver {
   const quote = noControls(c.quote)
-  await openAsk(cx, { kind: 'sentence', text: quote }, { anchor: c.ref, anchorText: `${quote}\n\nThe ${noControls(c.checkName)} check's comment on this passage of the answer: ${noControls(c.text)}`, element: c.ref, about: `comment ${quoted(clip(noControls(c.text), 50))}` })
+  return { anchor: c.ref, anchorText: `${quote}\n\nThe ${noControls(c.checkName)} check's comment on this passage of the answer: ${noControls(c.text)}`, element: c.ref, about: `comment ${quoted(clip(noControls(c.text), 50))}` }
 }
 
 async function loadChecks(cx: Ctx): Promise<void> {
@@ -142,17 +149,19 @@ async function drawChecks(cx: Ctx, e: PaneEvent, _p: TermPanel): Promise<RenderE
   )
   const draft = () => void cx.fill(promptDraft(c))
   const browse = () => void openInBrowser(cx, c.ref)
-  body.push(
-    controlsEl(els as never, [
-      <Button key="checks-ask" label="ask about it" plain onPress={() => void ask(cx, c)} />,
-      <Button key="checks-prompt" label="put in the prompt" plain onPress={draft} />,
-      <Button key="checks-dismiss" label="dismiss" plain onPress={() => void dismiss(cx, c)} />,
-      <Button key="checks-browser" label="open in the browser" plain onPress={browse} />,
-    ], 'checks-acts')!,
-  )
-  body.push(hintsRow(els as never, ['a to ask', 'm to put it in the prompt', 'd to dismiss', 'o to open in the browser', ...(open.length > 1 ? ['n p for the next or previous'] : []), 'b to go back', 'x to close'], cols))
+  // the entry box, whose question starts a side thread about the passage, told the comment
+  const askAt = `ask-check-${c.id}`
+  const entry = e.surface === 'mobile' ? null : askEntry(cx, e, { key: askAt, placeholder: 'ask about this comment', cols, target: { kind: 'sentence', text: noControls(c.quote) }, over: askOver(c) })
+  const acts = controlsEl(els as never, [
+    <Button key="checks-prompt" label="put in the prompt" plain onPress={draft} />,
+    <Button key="checks-dismiss" label="dismiss" plain onPress={() => void dismiss(cx, c)} />,
+    <Button key="checks-browser" label="open in the browser" plain onPress={browse} />,
+  ], 'checks-acts')
+  const hints = [...(entry ? ['a to ask'] : []), 'm to put it in the prompt', 'd to dismiss', 'o to open in the browser', ...(open.length > 1 ? ['n p for the next or previous'] : []), 'b to go back', 'x to close']
+  if (entry) body.push(...entryBottom(cx, e, cols, [acts], entry, hints))
+  else body.push(acts!, hintsRow(els as never, hints, cols))
   const hk = hiddenKeys(cx, e, [
-    { key: 'checks-a', hotkey: 'a', onPress: () => void ask(cx, c) },
+    ...(entry ? [{ ...askKey(cx, askAt), key: 'checks-a' }] : []),
     { key: 'checks-m', hotkey: 'm', onPress: draft },
     { key: 'checks-d', hotkey: 'd', onPress: () => void dismiss(cx, c) },
     { key: 'checks-n', hotkey: 'n', onPress: () => void next() },

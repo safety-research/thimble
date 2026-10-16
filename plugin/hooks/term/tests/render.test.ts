@@ -175,7 +175,9 @@ test("a reply's citation is a link, purple and underlined; a click opens the cit
   // the cited lines: a window over the file (panel.tsx citeWindow), drawn by its Client
   const lines = await pane.drawn({ in: 'm:cite-lines' })
   expect(shown(lines)).toContain('An export of 4,579 wiki pages')
-  expect(text).toContain('ask about it')
+  // no `ask about it`: the entry box, its placeholder saying what it takes
+  expect(text).not.toContain('ask about it')
+  expect(((await pane.findAll({ type: 'Input' })) as { key?: string; props?: { placeholder?: string } }[]).find(i => String(i.key).startsWith('ask-cite-'))?.props?.placeholder).toBe('ask about this citation')
   // the sentence it stands in, its value a link; no way back from main, so no `b`; no `in files` (the title opens it)
   expect(text).toContain('source')
   expect(text).toContain('"The README says 4,579 pages."')
@@ -439,11 +441,12 @@ test("a side thread asked about a card: the ask field posts the thread, and the 
   await ui.unmount()
   const pane = (await $.ui.mount(PANE)) as unknown as M
   expect(shown(await pane.drawn())).toContain('New thread')
-  // its step reads `New thread`; the card it is about stands in its frame between the header and the field, a rule
-  // above the field
+  // its step reads `New thread`; the card it is about stands in its frame between the header and the entry box, the
+  // box's own rule above its field
   expect(shown(await pane.drawn())).toContain('home › New thread')
   expect(JSON.stringify(await pane.drawn())).toMatch(/"key":"card-subject-[^"]*-a0frame0"/)
-  expect(await pane.find({ key: 'rule-bottom' })).toBeDefined()
+  expect(await pane.find({ key: 'entry-top-ask-new' })).toBeDefined()
+  expect(await pane.find({ key: 'rule-bottom' })).toBeUndefined()
   await pane.input({ key: 'ask-new', text: 'Why is dse so big?' })
   await w.clock.settle()
   // the thread is told the card by its question, never its id

@@ -103,6 +103,8 @@ export const COLORS = {
   tip: 'userMessageBackground',
   /** the background of the analyst's question in a side thread, as Claude Code draws a prompt in its chat */
   prompt: 'userMessageBackground',
+  /** the rules above and below an entry box (entry.tsx), as Claude Code draws its prompt box's border */
+  entry: 'promptBorder',
   /** inline code in the mod's own paragraphs */
   code: 'permission',
 }

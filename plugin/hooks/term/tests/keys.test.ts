@@ -379,14 +379,15 @@ test('keys · thread · a row click and after Esc: ↑↓ step, Enter and a put 
   expect((await seen($, SHORT, 'threads-tree')).chosen).toContain('which pages were deleted?')
   await down($, w)
   await takesKeys($)
-  // Enter asks for the ring on the follow-up field ($.ui.focus, which this kit does not implement, so the move is played
-  // here as Claude Code makes it, and checked live); the field holding it, the hint says what Enter does there and that
-  // Esc leaves it
+  // Enter asks for the ring on the entry box ($.ui.focus, which this kit does not implement, so the move is played here
+  // as Claude Code makes it, and checked live); the box holding it, the panel draws no hint row, as Claude Code's prompt
+  // box has none (Matt, 2026-10-16: not "Enter to ask · Esc to leave the field")
   await enter($, w, SHORT)
   expect(w.filled).toEqual([])
   await askField($)
   s = await seen($, SHORT, 'threads-tree')
-  expect(s.hint).toBe('Enter to ask · Esc to leave the field')
+  expect(s.hint).toBe('')
+  expect(s.text).not.toContain('Esc to leave the field')
   // Esc leaves the pane; a click on the panel gives it the keys again, the ring on the list's keys
   await escAndBack($, w, SHORT, 'threads-tree')
   s = await seen($, SHORT, 'threads-tree')
@@ -395,7 +396,7 @@ test('keys · thread · a row click and after Esc: ↑↓ step, Enter and a put 
   await type($, w, SHORT, 'a')
   expect(w.filled).toEqual([])
   await askField($)
-  expect((await seen($, SHORT, 'threads-tree')).hint).toBe('Enter to ask · Esc to leave the field')
+  expect((await seen($, SHORT, 'threads-tree')).hint).toBe('')
 })
 
 // ------------------------------------------------------------------------------------------------ labels, documents, views
@@ -928,16 +929,31 @@ test('keys · card, label, document and a new thread: no relay; their letters wo
   await noList(['l for all documents'], 'hk-all', () => undefined)
   await takesKeys($)
   expect((await seen($, SHORT, 'docs-list')).hint).toContain('↑↓ to choose')
-  // a new thread: its field has the ring
+  // a card's entry box: a gives it the ring (played here as Claude Code moves it), and the panel draws no hint row
   await $.command.run({ command: 'thimble:thimble', args: 'card ff73e071' } as never)
   await w.clock.settle()
   const pane = await look($, SHORT)
   await pane.press({ key: 'hk-ask' })
   await w.clock.settle()
   await pane.unmount()
-  const ask = await seen($, SHORT)
+  await $.ui.focus({ requestId: PANEL, component: 'Pane', element: 'ask-card-ff73e071', origin: { kind: 'plugin', name: PANEL } } as never)
+  let ask = await seen($, SHORT)
   expect(ask.relay).toBe(false)
-  expect(ask.hint).toBe('Enter to ask · Esc to leave the field')
+  expect(ask.text).not.toContain('New thread')
+  expect(ask.hint).toBe('')
+  // a new thread's form: its entry box has the ring as it opens, and no hint row is drawn
+  w.states.files = [{ path: 'log.txt', kind: 'text', size_bytes: 600 }]
+  w.pages['log.txt'] = LONG
+  await $.command.run({ command: 'thimble:thimble', args: 'files log.txt:3' } as never)
+  await w.clock.settle()
+  await takesKeys($)
+  const file = await look($, SHORT)
+  await file.pointer({ type: 'down', x: width('↗ log.txt line 3  '), y: 0, button: 'left', in: 'file-detail' } as never)
+  await w.clock.settle()
+  await file.unmount()
+  ask = await seen($, SHORT)
+  expect(ask.text).toContain('New thread')
+  expect(ask.hint).toBe('')
 })
 
 // ------------------------------------------------------------------------------------------------ the way: back, lists, rows
@@ -949,17 +965,14 @@ test('keys · back from a new thread\'s form: the view shown names its own keys,
   await start($, w)
   await $.command.run({ command: 'thimble:thimble', args: 'card ff73e071' } as never)
   await w.clock.settle()
+  // a card's entry box holds the ring: no hint row
   await hotkey($, w, 'ask')
-  await $.ui.focus({ requestId: PANEL, component: 'Pane', element: 'ask-new', origin: { kind: 'plugin', name: PANEL } } as never)
-  expect((await seen($, SHORT)).hint).toBe('Enter to ask · Esc to leave the field')
-  // Esc, then a click on the card's step of the path; Claude Code puts the ring back where it was in the pane, on the
-  // form's field
+  await $.ui.focus({ requestId: PANEL, component: 'Pane', element: 'ask-card-ff73e071', origin: { kind: 'plugin', name: PANEL } } as never)
+  expect((await seen($, SHORT)).hint).toBe('')
+  // Esc; Claude Code then puts the ring back on a field the card does not draw (a form's, left by back): the card names
+  // its own keys
   w.paneFocused = false
   expect((await seen($, SHORT)).hint).toBe(UNFOCUSED_HINT)
-  let pane = await look($, SHORT)
-  await pane.press({ key: (await crumb(pane, 'card "What does the export'))! })
-  await w.clock.settle()
-  await pane.unmount()
   w.paneFocused = true
   await ring($, 'ask-new')
   await w.clock.advance(300)
@@ -968,6 +981,7 @@ test('keys · back from a new thread\'s form: the view shown names its own keys,
   expect(s.text).not.toContain('New thread')
   expect(s.hint).not.toContain('Enter to ask')
   named(s.hint, ['c for its code', 'a to ask', 'x to close'])
+  let pane: M
   // from a file's chosen line, whose view draws a list: back from the form, the ring goes onto the list's keys
   w.states.files = [{ path: 'log.txt', kind: 'text', size_bytes: 600 }]
   w.pages['log.txt'] = LONG
@@ -1256,9 +1270,8 @@ test('keys · back after a line chosen in a file, and after a thread asked: wher
   // a thread asked about a card: back from it shows the card
   await $.command.run({ command: 'thimble:thimble', args: 'card ff73e071' } as never)
   await w.clock.settle()
-  await hotkey($, w, 'ask')
   const pane = await look($, SHORT)
-  await pane.input({ key: 'ask-new', text: 'Why so many pages?' })
+  await pane.input({ key: 'ask-card-ff73e071', text: 'Why so many pages?' })
   await w.clock.settle()
   await pane.unmount()
   s = await seen($, SHORT)

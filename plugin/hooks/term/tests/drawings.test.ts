@@ -597,9 +597,11 @@ test('a new thread about a card shows the card in its frame above the field: its
   expect(rows.join('\n')).not.toContain('AgentRelent made the most.')
   const more = rows.find(r => /… \d+ more/.test(r))!
   expect(more).toMatch(/^ {3}│ … 9 more +│$/)
-  // then the field, under a rule
+  // then the entry box: a rule, `❯` and the field, a rule
   const field = at(rows, 'type your question')
-  expect(rows[field - 1]!.trim()).toMatch(/^─+$/)
+  expect(rows[field]).toBe(' ❯ type your question▏')
+  expect(rows[field - 1]).toMatch(/^ ─+$/)
+  expect(rows[field + 1]).toMatch(/^ ─+$/)
   expect(rows[field - 2]).toMatch(/^ {3}╰─+╯$/)
   // `… N more` shows the card whole, its takeaway too
   await pane.press({ key: (((await pane.findAll({ type: 'Button' })) as { key?: string }[]).find(b => /^more-/.test(String(b.key)))!).key! })
@@ -794,6 +796,8 @@ async function openedThread($: E, w: World, id: string): Promise<M> {
 }
 
 const ruled = (r: string | undefined) => /^ {3}─+$/.test(r ?? '')
+// an entry box's rule: from the margin's edge, as Claude Code's prompt box spans its column
+const boxRule = (r: string | undefined) => /^ ─+$/.test(r ?? '')
 
 test("a side thread alone: its question the title, one dim `about` row under it, then the chat as Claude Code draws one; no thread list", async ($, on) => {
   const w = world(on)
@@ -828,10 +832,15 @@ test("a side thread alone: its question the title, one dim `about` row under it,
   expect(text).not.toContain('[ card ]')
   expect(text).not.toContain('[[card')
   expect(text.split(SIZES.slice(0, 40)).length - 1).toBe(1)
-  // the field under the second rule; the keys in one dim row, `v` naming what it shows
+  // the entry box under the chat, as Claude Code's prompt box: a rule from the margin's edge, `❯` in the margin and the
+  // field, a rule; the keys in one dim row, `v` naming what it shows
   const bottom = rows.findIndex((r, i) => i > top && /^ {3}╰─+╯$/.test(r))
-  expect(ruled(rows[bottom + 1])).toBe(true)
-  expect(rows[bottom + 2]).toBe('   ask a follow-up question▏')
+  expect(boxRule(rows[bottom + 1])).toBe(true)
+  expect(rows[bottom + 2]).toBe(' ❯ ask a follow-up question▏')
+  expect(boxRule(rows[bottom + 3])).toBe(true)
+  // its rules end where the panel's do
+  expect(rows[bottom + 1]!.length).toBe(rows[2]!.length)
+  expect(JSON.stringify(await pane.find({ type: 'Input', key: (((await pane.findAll({ type: 'Input' })) as { key?: string }[]).find(i => /^ask-/.test(String(i.key)))!).key! }))).toContain('"rows":2')
   const hint = shown(await pane.find({ key: 'h-hints' })).trim()
   expect(hint).toBe('a to ask · v to show the passage · b to go back · x to close')
   // v shows the passage whole, under the rule and above the question; v again hides it
@@ -902,6 +911,52 @@ test("a thread's turns keep a rhythm: a blank row between a question and its ans
   expect(rows[bottom + 3]).toBe('')
   expect(rows[bottom + 4]).toBe(' ⏺ P6 has 120 MB of them and P7 54 MB.')
   expect(JSON.stringify(await pane.find({ key: 'm:thread-q-2' }))).toContain(`"backgroundColor":"${COLORS.prompt}"`)
+  await pane.unmount()
+})
+
+test("a side thread's turn at work as Claude Code draws one: a blank row, `⏺ ◌ N tool calls` dim, its latest words after `⎿`; `stop`, then the entry box", async ($, on) => {
+  const w = world(on)
+  sizeThread(w, [], [
+    { type: 'user', text: 'And the logs, by participant?' },
+    { type: 'tool_use', id: 'u2', name: 'Bash', input: {} },
+    { type: 'tool_use', id: 'u3', name: 'Bash', input: {} },
+    { type: 'text', delta: 'Reading the logs folder.\n\nCounting **by participant** now.' },
+  ])
+  Object.assign((w.chats.tz as { meta: Record<string, unknown> }).meta, { running: true })
+  await start($, w)
+  const pane = await openedThread($, w, 'tz')
+  const rows = await screen(pane, 96)
+  print('a thread at work', rows)
+  const q = rows.indexOf(' ❯ And the logs, by participant?')
+  expect(q).toBeGreaterThan(0)
+  expect(rows.slice(q, q + 7)).toEqual([' ❯ And the logs, by participant?', '', ' ⏺ ◌ 2 tool calls', '   ⎿  Counting by participant now.', '', '   stop', rows[q + 6]])
+  expect(boxRule(rows[q + 6])).toBe(true)
+  expect(rows[q + 7]).toBe(' ❯ ask a follow-up question▏')
+  const run = JSON.stringify(await pane.find({ key: 'm:thread-run-2' }))
+  expect(run).toContain('"dimColor":true')
+  await pane.unmount()
+})
+
+test("a side thread's turn that ended with no answer, as Claude Code says an interrupt or an error: a `⎿` row right under its question, dim for a stop, red with × for a failure", async ($, on) => {
+  const w = world(on)
+  sizeThread(w, [], [
+    { type: 'user', text: 'And the logs?' },
+    { type: 'error', kind: 'stopped', error: 'stopped by the analyst' },
+    { type: 'user', text: 'By participant?' },
+    { type: 'error', error: 'the fork ended: overloaded' },
+  ])
+  await start($, w)
+  const pane = await openedThread($, w, 'tz')
+  const rows = await screen(pane, 96)
+  print('a thread stopped, then failed', rows)
+  const q = rows.indexOf(' ❯ And the logs?')
+  expect(q).toBeGreaterThan(0)
+  expect(rows.slice(q, q + 5)).toEqual([' ❯ And the logs?', '   ⎿  stopped by the analyst.', '', ' ❯ By participant?', '   ⎿  × the fork ended: overloaded'])
+  expect(boxRule(rows[q + 5])).toBe(true)
+  const stopped = JSON.stringify(await pane.find({ key: 'thread-err-2' }))
+  expect(stopped).toContain('"dimColor":true')
+  expect(stopped).not.toContain('"color":"error"')
+  expect(JSON.stringify(await pane.find({ key: 'thread-err-3' }))).toContain('{"type":"Text","props":{"wrap":"wrap","color":"error"},"children":["× the fork ended: overloaded"]}')
   await pane.unmount()
 })
 

@@ -217,7 +217,9 @@ outside this table.
 | **margin** | | |
 | `❯` | the selected row | accent |
 | `❯` on the prompt background | the analyst's question in a side thread, as Claude Code marks a prompt | dim |
-| `⏺` | an answer: main's reply (Claude Code's own) and a side thread's answer | text |
+| `❯` between an entry box's rules | where the analyst types a question, as Claude Code's prompt box marks it | text |
+| `⏺` | an answer: main's reply (Claude Code's own) and a side thread's answer; dim, a side thread's turn at work | text |
+| `⎿` | under a side thread's question or its turn at work: its latest words, or how it ended without an answer, as Claude Code writes a result under a call or an interrupt under a prompt | dim |
 | `⚑` | a check commented on the passage that starts on this row (it wins over `↳` and `?` there) | the check's color |
 | `▸` | the coverage line under an answer: what the turn's calls saw of the data | dim |
 | `?` | ask a side thread about this passage (shown under the pointer; under the header for a file's chosen record) | link |
@@ -232,7 +234,7 @@ outside this table.
 | `█` and `▏▎▍▌▋▊▉` | a bar and its last eighth | hue (rule 20) |
 | `▁▂▃▄▅▆▇█` | a strip's bins | hue |
 | braille | a line chart's lines | hue |
-| `─ │ ├ └ ┤ ┬ ┴ ╭ ╮ ╰ ╯` | lines: rules, card borders, a field's border, tracks, axes, tree guides, a diagram's boxes | rule gray |
+| `─ │ ├ └ ┤ ┬ ┴ ╭ ╮ ╰ ╯` | lines: rules, card borders, a field's border, tracks, axes, tree guides, a diagram's boxes; an entry box's rules | rule gray; an entry box's in the prompt box's border color (`promptBorder`) |
 | `→ ← ↓ ↑` | the direction of a diagram's edge | rule gray |
 | `┊` | the pointer's column on a chart | rule gray |
 | `▼ ▲` | the column a table is sorted by | dim |
@@ -267,19 +269,26 @@ while thimble's links check runs. In the citation panel, a citation still checke
 ### 6. Controls and fields
 
 24. A control is a word or a few, in the text color and plain: no brackets, bold, color or underline at rest, inverse
-    under the pointer or the focus. Its words say what it does (`run again`, `ask about it`, `run on a sample`,
+    under the pointer or the focus. Its words say what it does (`run again`, `put in the prompt`, `run on a sample`,
     `as slides`, `show all threads`). The label panel's actions are the exception: in the accent, so they read as
-    buttons (Matt, deck/video v9 review; `chrome.tsx` `actionEl`).
+    buttons (Matt, deck/video v9 review; `chrome.tsx` `actionEl`). A question to a side thread is typed into an entry
+    box (rule 27), never asked through a control (Matt, 2026-10-16: an entry box in Claude Code's style in place of
+    `ask about it`).
 25. A panel's actions sit at its bottom, after the second rule, at A0, 2 cells apart, with their fields under them: that
-    is where a reply, a run's counts or a writer's state appear. The title row holds only navigation, against R
+    is where a reply, a run's counts or a writer's state appear. A panel with an entry box ends with it: its actions
+    stand above the box after a blank row, and the box's top rule is the panel's second rule (a citation, a card, a
+    check's comment, a document's chosen comment, a thread). The title row holds only navigation, against R
     (`earlier  later`). A reply's footer has its facts, then its controls after a gutter.
 26. The key-hint row is a panel's last row: dim and italic, at A0, the bound keys in Claude Code's words, parted by
     ` · ` (`↑↓ to choose · Enter to open · a to ask · b to go back · x to close`), in one order on every panel: choosing,
     Enter, Space, the panel's own keys, going back, closing. It names only keys that are bound on that panel (`b to go
     back` only where there is a way back). Nothing else in a panel or the chat says which key does
     what. The keys are Buttons with no label of their own, in a Box no row tall (`hiddenKeys`). While a text field
-    holds the panel's focus (the new thread's field, which takes it as the view opens; a follow-up field once clicked),
-    a letter goes into the field, so the row reads `Enter to ask · Esc to leave the field`; Esc gives the keys back to
+    holds the panel's focus (a label's name being renamed, the field `describe a new label`), a letter goes into the
+    field, so the row reads what Enter does and `Esc to leave the field` (`Enter to rename · Esc to leave the field`);
+    while an entry box holds it (a new thread's, which takes it as the view opens; any other once `a`, Enter or a click
+    gives it the keys) the panel draws no hint row, as Claude Code's prompt box has none (Matt, 2026-10-16: no
+    `Enter to ask · Esc to leave the field` row). Esc gives the keys back to
     the prompt, and while the prompt holds them the row names none of the panel's keys (a letter or Enter would go to
     the prompt, and Enter to main), only `click the panel for its keys`; so does every panel that opened without the
     keys (home from the toast's `open ›`), which asks for them once more a moment after it opened. A list (home, the
@@ -298,9 +307,14 @@ while thimble's links check runs. In the citation panel, a citation still checke
     rows shown at the row that leads it: on home its section's heading, and the top for the first row the keys choose,
     so every row can be reached by keys. No letter is a hotkey unless the hint row names it, or, in a view, the list
     its `?` opens: a word typed while the panel holds the keys (`table`) then reaches the prompt whole.
-27. A field: its label dim and lower case on the label column, the field on L, no colon (`ask`, `follow-up`,
-    `describe a new label`, the label panel's `prompt`). A field that shows all of its text (the label's prompt) has a
-    border in the rule gray; a click gives it the keyboard.
+27. A field: its label dim and lower case on the label column, the field on L, no colon (`describe a new label`, the
+    label panel's `prompt`). A field that shows all of its text (the label's prompt) has a border in the rule gray; a
+    click gives it the keyboard. An entry box, where the analyst asks a side thread (`entry.tsx`), is Claude Code's own
+    prompt box: a rule above and a rule below in the prompt box's border color, each from the margin's edge to R; `❯`
+    in the margin; Claude Code's Input on L, two rows tall, taller as its text wraps (at most 10, then it scrolls
+    within), its placeholder dim saying what it asks about (`ask about this citation`, `ask about this card`, `ask
+    about this comment`, `ask a follow-up question`, a new thread's `type your question`); Enter's word is `ask`,
+    Shift+Enter breaks the line. No label, and no other row says how to use it.
 28. An empty region shows `none`, dim, at A2.
 29. A right-click does what a click does. There is no menu.
 
@@ -561,7 +575,8 @@ The same reply's first row under the pointer, and a passage a thread was asked a
 - The card pane: the question is the panel's title and the subtitle reads the card's id (`card:<name>`), its kind, who
   made it, `last run ok` or `last run failed` (in red), and, when its card check ended in an error, `its check's revision would not run` or
   `its check could not finish`, dim like the rest, since the card itself is fine (red is only for a problem with the
-  card); the box starts with the plot; at the bottom `code  run again  ask about it`. The
+  card); the box starts with the plot; at the bottom `code  run again`, then the entry box (`ask about this card`),
+  whose question starts a side thread about the card, opened over it. The
   code view lists the script with the `Code` element, its gutter at A0, no other indent, then `output`, the last lines
   its run printed.
 
@@ -636,8 +651,10 @@ side thread"):
   │                                                                                            │
   │ video (.mp4)                          ██████████████████████████████████████████    3695.5 │
   ╰────────────────────────────────────────────────────────────────────────────────────────────╯
-  ──────────────────────────────────────────────────────────────────────────────────────────────
-  ask a follow-up question
+────────────────────────────────────────────────────────────────────────────────────────────────
+❯ ask a follow-up question
+
+────────────────────────────────────────────────────────────────────────────────────────────────
   a to ask · v to show the passage · b to go back · x to close
 ```
 
@@ -655,9 +672,31 @@ With several threads, one open:
 ❯ How many delete events are in events.jsonl? One number.
 
 ⏺ There are 5,217 delete events in events.jsonl.
+────────────────────────────────────────────────────────────────────────────────────────────────
+❯ ask a follow-up question
 
-  ask a follow-up question
+────────────────────────────────────────────────────────────────────────────────────────────────
   ↑↓ to choose · Enter or a to ask · v to show the lines · b to go back · x to close
+```
+
+A thread at work, and turns that ended with no answer:
+
+```
+❯ And the logs, by participant?
+
+⏺ ◌ 2 tool calls
+  ⎿  Counting by participant now.
+
+  stop
+────────────────────────────────────────────────────────────────────────────────────────────────
+```
+
+```
+❯ And the logs?
+  ⎿  stopped by the analyst.
+
+❯ By participant?
+  ⎿  × the fork ended: overloaded
 ```
 
 - No subtitle. A tree: a root per place a thread was asked from (`main`, `report "…"`) at A0, its count of threads
@@ -672,30 +711,35 @@ With several threads, one open:
   named as home names it, cut at the type area), then its chat as Claude Code draws one: each question after `❯` (dim)
   in the margin, its words in the text color on Claude Code's prompt background across the type area, unquoted; a
   blank row; the answer after Claude Code's `⏺` in the margin, drawn as main's chat draws a reply; a blank row between
-  turns. `stop` while it answers, then, a blank row under the chat, the field for the next question, its placeholder dim
-  (`ask a follow-up question`); Enter's word is `ask`. 1-9 open the first nine threads. A thread's answer is its first
+  turns. A turn at work, after a blank row: `⏺ ◌ N tool calls` dim (`◌ answering` before its first), then its latest
+  words dim on a row after `⎿` at A0, cut at R, as Claude Code draws a call at work. A turn that ended with no answer
+  says so on a `⎿` row right under its question, as Claude Code writes an interrupt or an error under a prompt: a
+  stop dim (`stopped by the analyst.`), a failure red after `×`. `stop` while it answers, after a blank row, then the
+  entry box for the next question (rule 27, `ask a follow-up question`), whose top rule is the panel's second rule.
+  1-9 open the first nine threads. A thread's answer is its first
   reply (`reply_in_thread`) or its run's end: what its fork writes after the reply, as it makes a card, is its working
   and is not drawn, and two texts a tool call parts are two paragraphs. A card the answer cites by a chip alone
   (`[[card:<id>]]`) is drawn where it is cited, after the paragraph that cites it, never as `[ card ]`; the other cards
   the turn made stand after the answer; each in its frame, once, with a blank row before it and after it (none next to
   a rule).
 - A thread open alone, with no other thread, has no list: the title row's last step is its question, and what it is
-  about is the row under it, in the subtitle's place; its field stands under the second rule.
-- A new thread (one with no question yet): `about <what>` as its dim subtitle, its subject (below), then the question's
-  field alone, its placeholder dim. `<what>` is a card by its question (`card "…"`), a
+  about is the row under it, in the subtitle's place; its entry box stands under its chat.
+- A new thread (one with no question yet): `about <what>` as its dim subtitle, its subject (below), then the entry box
+  alone (rule 27, `type your question`), which takes the keys as the view opens; with no subject the header's rule is
+  its top rule. A thread asked from a citation, a card or a comment needs no new thread's view: their panels have an
+  entry box of their own. `<what>` is a card by its question (`card "…"`), a
   citation's words in quotation marks (a value alone, `4579`, as it shows; a chip by its place in full words, which
   no tip names here: `card "How many pages…"`, `agent-chat.jsonl line 2`), a passage's words in quotation marks, or `this answer` for a whole answer (its footer's `ask about this
-  answer ›`), which the thread keeps. The field is Claude Code's Input, one row that shows the start of a long question:
-  no hook scrolls it to the cursor, and its placeholder is drawn dim with the terminal's reset, which drops the panel's
+  answer ›`), which the thread keeps. Its placeholder is drawn dim with the terminal's reset, which drops the panel's
   background behind it in a light theme.
 - A thread's subject, the thing it is about (Matt, 2026-10-07: "keep that thing above the chat so I know what I'm
-  referencing"): above a new thread's field, and in an open thread on demand, whole, between its `about` row and its
+  referencing"): above a new thread's entry box, and in an open thread on demand, whole, between its `about` row and its
   first question (`v`, or a press on the `about` row; the hint row names what it shows: `v to show the card`, `the
   lines`, `the passage`, `the answer`): a card in its frame (section 2, rule 11), a value the thread was asked about lit
   on it; a file's cited line with up to two lines on each side, as the citation panel draws lines (the cited one in the
   text color, the value or the whole line on the citation's purple, the others dim, their numbers in a dim column at
   A2); a passage or a quote as its words, wrapped, a heading bold, unless `about` holds them whole (then there is no
-  `v`). Above a new thread's field at most 6 rows of it (a card's plot or body, the rows under it then left out), then
+  `v`). Above a new thread's entry box at most 6 rows of it (a card's plot or body, the rows under it then left out), then
   `… N more` dim, which shows it whole; never `… 1 more`.
 
 **The citation panel:**
@@ -711,8 +755,10 @@ With several threads, one open:
     2
     3  An export of 4,579 wiki pages and their revisions.
     4  Four wikis.
-  ──────────────────────────────────────────────────────────────────────────────────────────────
-  ask about it
+────────────────────────────────────────────────────────────────────────────────────────────────
+❯ ask about this citation
+
+────────────────────────────────────────────────────────────────────────────────────────────────
   a to ask · f for its file · s for a script · x to close
 ```
 
@@ -730,8 +776,10 @@ With several threads, one open:
   code     1  pages = pd.read_json('pages.jsonl', lines=True)
            2  # one row per wiki
            3  df
-  ──────────────────────────────────────────────────────────────────────────────────────────────
-  ask about it
+────────────────────────────────────────────────────────────────────────────────────────────────
+❯ ask about this citation
+
+────────────────────────────────────────────────────────────────────────────────────────────────
   a to ask · c for the card · x to close
 ```
 
@@ -785,7 +833,10 @@ With several threads, one open:
   nears it; at the file's end its last line is on the window's last row. Opened anew, a citation's window starts at its
   cited lines again; `b` back from its file finds it where it was. `f` (or a click on the title) opens the file view at
   the cited line.
-- The bottom: `ask about it`, then the `follow-up` field when the citation was opened from a side thread.
+- The bottom: the entry box (rule 27). Its question starts a side thread about the citation (`ask about this
+  citation`), opened over the citation, so b comes back to it; in a citation opened from a side thread it goes on in
+  that thread, about the citation (`ask a follow-up question`), and the panel returns to the thread. `a` gives it the
+  keys.
 
 **The views pane:** `N views · N built`; one row per view, newest first: its glyph, its name, the files it claims dim
 at R, `new` in green until a built one is opened.
@@ -1009,8 +1060,10 @@ check`, then ` · resolved`), its words under the name at A4; a blank row before
 card. The title's stand under the header. The subtitle counts them (`4 open comments · 1 resolved`) and names a check
 that runs on the document (`◌ Judgment calls checking`). ↑↓ choose one (`❯`, its name in the accent, its refs as chips
 under its words), scrolled into view, the slide or section that holds it shown first; `r` resolves it, as the margin's
-✓ does, or opens a resolved one again; Enter or `a` asks a side thread about it on its passage; `v` shows the resolved
-ones, dim.
+✓ does, or opens a resolved one again; the chosen one's entry box (rule 27, `ask about this comment`) stands at the
+panel's bottom under the actions, and its question starts a side thread about the comment on its passage (Enter or `a`
+gives it the keys); `v` shows the resolved ones, dim. The Checks view of a comment on main's answer ends with its acts
+(`put in the prompt  dismiss  open in the browser`) and the same entry box.
 
 ```
   The corpus is an export of four wikis [ README.md line 3 ]. It holds 4579 pages.
@@ -1040,7 +1093,8 @@ session):
 3. No letters in a palette hue; letters in red only for problems; no other colored letters but check 2's and code's.
 4. No two blank rows in a row; no blank row next to a rule; one blank row under each card's title.
 5. Every card has a full round border in the rule gray.
-6. Every rule is as wide as its type area; a panel has two rules at most.
+6. Every rule is as wide as its type area; a panel has two rules at most. An entry box's rules are its border, from
+   the margin's edge to R, and its top rule stands for the panel's second rule.
 7. Every run that opens a row starts on M, A0, A2, A4, L, a table's column, a tree's guide or a folder's level in the file browser.
 8. Columns are parted by 2 spaces or more.
 9. No background but the panel's, the selection's and the tip's; no inverse but on the selected tab and under the pointer.
