@@ -1,9 +1,9 @@
-"""Permission prompts the PermissionRequest hook relays for main's background subagents (events.py, session.py): each
-asks while main's own turn is over, and stays on the card until the analyst answers it here, its call's result shows
-in the agent's transcript (answered in the terminal), or the agent stops, whatever main's turn does meanwhile. The
-card's "Always allow" offers exactly the permission_suggestions Claude Code gave, each kept where Claude Code gave it,
-and nothing without them or under the managed tier's allowManagedPermissionRulesOnly. Every transcript, Claude Code's
-session record and its managed settings are written by the test."""
+"""Permission prompts the PermissionRequest hook tells the server of (events.py, session.py): thimble makes no allow
+decision (0.9.0, S11), so the hook gets `behavior: null` at once and Claude Code asks in the terminal; the prompt shows
+on main's card without buttons while main's own turn is over, and stays until its call's result shows in the agent's
+transcript (answered in the terminal) or the agent stops, whatever main's turn does meanwhile. The words Claude Code's
+own dialog uses for its "don't ask again" are still computed (permission_updates), for the card's text. Every
+transcript, Claude Code's session record and its managed settings are written by the test."""
 from __future__ import annotations
 
 import asyncio
@@ -126,6 +126,10 @@ async def test_four_relayed_requests_stay_while_main_idles_on_its_background_age
     lv, files, calls, ids = await _main_waits_on_four_background_agents(tmp_path)
     asked = [ids[a] for a in AGENTS]
     assert _held() == asked
+    for a in AGENTS:  # the hook's note is answered at once, with no decision
+        assert calls[a].done() and calls[a].result() == {"id": ids[a], "behavior": None}
+    entries = (agents.meta_or_none(CORPUS, agents.MAIN_ID) or {}).get("permissions") or []
+    assert all(e.get("terminal") is True and "always" not in e for e in entries), "no buttons on the card"
     # main's turn ends, and Claude Code's record goes from the prompt to idle and back
     for status, waiting in [("waiting", session.PERMISSION_WAIT), ("idle", None), ("waiting", session.PERMISSION_WAIT),
                             ("busy", None), ("idle", None)]:
@@ -135,19 +139,19 @@ async def test_four_relayed_requests_stay_while_main_idles_on_its_background_age
             lv.wait = (session.PERMISSION_WAIT, 0.0, False)  # held long enough to be noted
         assert not lv.turn_open and lv.busy, "main's turn is over while its agents run"
         assert _held() == asked, f"with Claude Code {status}"
-    assert not any(c.done() for c in calls.values())
 
     # answered in the terminal: a1's call gets its result, and only its request leaves the card
     _write(files["a1"], [_result("bash_a1", "12 agents.jsonl")])
     session.tail_once(lv)
     assert _held() == [ids["a2"], ids["a3"], ids["a4"]]
-    assert (await asyncio.wait_for(calls["a1"], 5))["behavior"] is None
+    # the browser answers nothing: its answer route refuses, and the card stays
+    from fastapi import HTTPException
 
-    # answered here: the answer goes to a2's hook, and a2's result then answers no other request, though a4 asks to run
-    # the same command
     monkeypatch.setattr(hook_auth, "analyst", lambda request: True)
-    await events.permission_route(CORPUS, events.PermissionAnswer(id=ids["a2"], allow=True), Browser())
-    assert (await asyncio.wait_for(calls["a2"], 5))["behavior"] == "allow"
+    with pytest.raises(HTTPException) as refused:
+        await events.permission_route(CORPUS, events.PermissionAnswer(id=ids["a2"], allow=True), Browser())
+    assert refused.value.status_code == 409 and refused.value.detail == events.ANSWER_IN_TERMINAL
+    assert _held() == [ids["a2"], ids["a3"], ids["a4"]]
     _write(files["a2"], [_result("bash_a2", "3 villages.jsonl")])
     session.tail_once(lv)
     assert _held() == [ids["a3"], ids["a4"]]
@@ -157,17 +161,34 @@ async def test_four_relayed_requests_stay_while_main_idles_on_its_background_age
     session.tail_once(lv)
     assert _held() == [ids["a3"], ids["a4"]], "an unasked call ended a3's prompt"
 
-    # the two agents stop: nothing can still ask their prompts, so they leave the card and their hooks' waits end
+    # the two agents stop: nothing can still ask their prompts, so they leave the card
     note = "<task-notification>\n<task-id>{a}</task-id>\n<status>killed</status>\n</task-notification>"
     _write(tmp_path / f"{SID}.jsonl", [{"type": "user", "origin": {"kind": "task-notification"},
                                         "message": {"content": note.format(a=a)}} for a in ("a3", "a4")])
     session.tail_once(lv)
     assert _held() == []
-    assert [(await asyncio.wait_for(calls[a], 5))["behavior"] for a in ("a3", "a4")] == [None, None]
-    log = [json.loads(ln) for ln in (config.workspace_dir(CORPUS) / agents.PERMISSIONS_LOG).read_text().splitlines()]
-    answers = {r["id"]: r["answer"] for r in log if r["event"] == "answered"}
-    assert answers == {ids["a1"]: events.GONE_ANSWER, ids["a2"]: "allow", ids["a3"]: events.GONE_ANSWER,
-                       ids["a4"]: events.GONE_ANSWER}
+
+
+async def test_main_s_own_prompt_is_answered_at_once_and_its_card_goes_with_its_call_s_result(tmp_path):
+    """Main's own prompt too: the hook's note is answered at once with no decision, the card shows it without buttons
+    and with no "Always allow", and main's call's result takes it away."""
+    transcript = tmp_path / f"{SID}.jsonl"
+    transcript.write_text("")
+    lv = session.attach(CORPUS, SID, str(config.corpus_dir(CORPUS)), str(transcript), pid=PID)
+    assert lv is not None
+    session.tail_once(lv)
+    _write(transcript, [{"type": "user", "origin": {"kind": "human"}, "message": {"content": "Count."}},
+                        _assistant(_use("toolu_wc", "Bash", {"command": "wc -l a.jsonl"}))])
+    session.tail_once(lv)
+    got = await events.hook_permission_route(Req(), events.HookPermission(
+        cwd=str(config.corpus_dir(CORPUS)), session=SID, tool_name="Bash", tool_input={"command": "wc -l a.jsonl"},
+        suggestions=WC))
+    assert got["behavior"] is None
+    [entry] = (agents.meta_or_none(CORPUS, agents.MAIN_ID) or {}).get("permissions") or []
+    assert entry["id"] == got["id"] and entry["terminal"] is True and "always" not in entry
+    _write(transcript, [_result("toolu_wc", "4 a.jsonl")])
+    session.tail_once(lv)
+    assert _held() == []
 
 
 # what Claude Code 2.1.300 suggests for a call of one of thimble's tools and for a Bash command (its dialog's "Yes, and
@@ -179,35 +200,6 @@ WC = [{"type": "addRules", "rules": [{"toolName": "Bash", "ruleContent": "wc -l 
 OUTSIDE = [{"type": "addDirectories", "directories": ["/data/notes"], "destination": "session"},
            {"type": "setMode", "mode": "acceptEdits", "destination": "session"}]
 CARD_INPUT = {"question": "How many files are there?", "code": "len(files)"}
-
-
-def _main_attached() -> None:
-    assert session.attach(CORPUS, SID, str(config.corpus_dir(CORPUS)), None) is not None
-
-
-def _entry(request_id: str) -> dict:
-    return next(p for p in (agents.meta_or_none(CORPUS, agents.MAIN_ID) or {}).get("permissions") or []
-                if p["id"] == request_id)
-
-
-async def _ask(suggestions, tool_name: str = "mcp__plugin_thimble_thimble__add_card", tool_input=None,
-               agent_id: str | None = None) -> tuple[asyncio.Future, dict]:
-    """The hook relays one of main's prompts with Claude Code's suggestions; returns its call and its card entry."""
-    before = set(_held())
-    call = asyncio.ensure_future(events.hook_permission_route(Req(), events.HookPermission(
-        cwd=str(config.corpus_dir(CORPUS)), session=SID, tool_name=tool_name,
-        tool_input=CARD_INPUT if tool_input is None else tool_input, agent_id=agent_id, suggestions=suggestions)))
-    for _ in range(200):
-        await asyncio.sleep(0.01)
-        if set(_held()) - before:
-            break
-    [request_id] = set(_held()) - before
-    return call, _entry(request_id)
-
-
-def _answers() -> dict[str, str]:
-    log = [json.loads(ln) for ln in (config.workspace_dir(CORPUS) / agents.PERMISSIONS_LOG).read_text().splitlines()]
-    return {r["id"]: r["answer"] for r in log if r["event"] == "answered"}
 
 
 def test_main_s_offer_is_claude_code_s_suggestions_with_each_destination_and_only_what_allows():
@@ -294,85 +286,3 @@ def test_main_s_card_words_its_offer_as_claude_code_s_own_dialog_does():
     skill = [{"type": "addRules", "rules": [{"toolName": "Skill", "ruleContent": "thimble:shared"}], "behavior": "allow",
               "destination": "session"}]
     assert words(skill, "/w/corpus")["always_label"] == "Allow, and don\u2019t ask again for Skill(thimble:shared)"
-
-
-async def test_always_allow_on_main_s_card_answers_with_exactly_what_the_card_named(monkeypatch):
-    _main_attached()
-    monkeypatch.setattr(hook_auth, "analyst", lambda request: True)
-    call, entry = await _ask(ADD_CARD)
-    assert entry["always"] == "mcp__plugin_thimble_thimble__add_card"
-    assert entry["always_label"] == "Allow, and don\u2019t ask again for Add Card"
-    assert entry["always_tip"] == ("Allow, and don\u2019t ask again for plugin:thimble:thimble \u2014 Add Card commands "
-                                   f"in {config.corpus_dir(CORPUS)}. Claude Code saves this in this folder's local "
-                                   "settings (.claude/settings.local.json).")
-    assert events._offers == {entry["id"]: ADD_CARD}, "the suggestions are stored with the request"
-    await events.permission_route(CORPUS, events.PermissionAnswer(id=entry["id"], allow=True, always=True), Browser())
-    got = await asyncio.wait_for(call, 5)
-    assert got == {"id": entry["id"], "behavior": "allow", "updatedPermissions": ADD_CARD}
-    assert events._offers == {} and _held() == []
-    assert _answers()[entry["id"]] == "allow, don't ask again: mcp__plugin_thimble_thimble__add_card"
-
-    # Allow alone, or Deny, adds nothing
-    for allow in (True, False):
-        call, entry = await _ask(WC, "Bash", {"command": "wc -l agents.jsonl"})
-        assert entry["always"] == "Bash(wc -l *)"
-        await events.permission_route(CORPUS, events.PermissionAnswer(id=entry["id"], allow=allow, always=not allow),
-                                      Browser())
-        assert await asyncio.wait_for(call, 5) == {"id": entry["id"], "behavior": "allow" if allow else "deny"}
-        assert _answers()[entry["id"]] == ("allow" if allow else "deny")
-    assert events._offers == {}
-
-
-async def test_always_allow_on_a_bash_request_never_switches_main_s_mode(monkeypatch):
-    """Claude Code may suggest a folder and the switch to acceptEdits for a command that writes outside the folder; its
-    Bash dialog offers and applies the folder alone, so main's card does too, and its mode stays as it was. A Write
-    request's card offers both, as Claude Code's file edit dialog does."""
-    _main_attached()
-    monkeypatch.setattr(hook_auth, "analyst", lambda request: True)
-    call, entry = await _ask(OUTSIDE, "Bash", {"command": "touch /data/notes/x.txt"})
-    assert entry["always"] == "files in notes/"
-    assert entry["always_label"] == "Always allow access to notes/"
-    await events.permission_route(CORPUS, events.PermissionAnswer(id=entry["id"], allow=True, always=True), Browser())
-    assert await asyncio.wait_for(call, 5) == {"id": entry["id"], "behavior": "allow", "updatedPermissions": OUTSIDE[:1]}
-    call, entry = await _ask(OUTSIDE, "Write", {"file_path": "/data/notes/x.txt", "content": "x"})
-    assert entry["always_label"] == "Allow, and switch to accept edits; always allow access to notes/"
-    await events.permission_route(CORPUS, events.PermissionAnswer(id=entry["id"], allow=True, always=True), Browser())
-    assert await asyncio.wait_for(call, 5) == {"id": entry["id"], "behavior": "allow", "updatedPermissions": OUTSIDE}
-
-
-@pytest.mark.parametrize("managed",["remote-settings.json in Claude Code's config dir", "managed-settings.json"])
-async def test_no_always_allow_without_suggestions_or_under_the_managed_rules_only_key(managed, tmp_path, monkeypatch):
-    _main_attached()
-    monkeypatch.setattr(hook_auth, "analyst", lambda request: True)
-
-    async def once(suggestions, *args, **kw) -> dict:
-        """The card entry of a prompt the analyst answers with `always`, which then allows it once."""
-        call, entry = await _ask(suggestions, *args, **kw)
-        await events.permission_route(CORPUS, events.PermissionAnswer(id=entry["id"], allow=True, always=True),
-                                      Browser())
-        assert await asyncio.wait_for(call, 5) == {"id": entry["id"], "behavior": "allow"}
-        return entry
-
-    deny = [{"type": "addRules", "rules": [{"toolName": "Bash"}], "behavior": "deny", "destination": "localSettings"}]
-    for none in (None, [], deny):
-        assert "always" not in await once(none)
-    # a request the card shows only the start of offers none, as on every card
-    assert "always" not in await once(WC, "Bash", {"command": "wc -l " + "x" * events.PERMISSION_INPUT_CHARS})
-    # one of thimble's agents asks in the terminal, and its card has no buttons
-    monkeypatch.setattr(events, "_thimble_agent", lambda c, agent: agent == "t1")
-    call, entry = await _ask(ADD_CARD, agent_id="t1")
-    assert entry["terminal"] and "always" not in entry and (await asyncio.wait_for(call, 5))["behavior"] is None
-    assert events._offers == {}
-
-    if managed.startswith("remote"):
-        tier = tmp_path / "claude-config" / cc_plugin.REMOTE_SETTINGS
-    else:
-        tier = tmp_path / "managed" / cc_plugin.MANAGED_FILE
-    tier.parent.mkdir(parents=True, exist_ok=True)
-    tier.write_text(json.dumps({"allowManagedPermissionRulesOnly": True}))
-    assert "always" not in await once(ADD_CARD)
-    tier.write_text(json.dumps({"allowManagedPermissionRulesOnly": False}))
-    call, entry = await _ask(ADD_CARD)
-    assert entry["always"] == "mcp__plugin_thimble_thimble__add_card"
-    events.clear_permissions(CORPUS)
-    assert (await asyncio.wait_for(call, 5))["behavior"] is None and events._offers == {}

@@ -13,15 +13,11 @@ with held_route).
 Each event is queued per workspace and session (_pending), and the plugin's watcher takes it with a long poll
 (pull_route) as the text the model reads (render); unacknowledged events return to the queue after ACK_S. The watcher
 runs as the plugin's asyncRewake hooks, which wake the session with the event (the HOOK route), or, where the plugin's
-hooks are off, as main's Monitor (the MONITOR route, cc_plugin.route). Permission prompts come from the
-PermissionRequest hook; since Claude Code does not signal that hook when the analyst answers in the terminal, the server
-ends the wait itself (clear_permissions, release_asks, agent_moved). A prompt of one of thimble's agents is asked in the
-terminal alone (`terminal` on its entry, which the browser shows as that agent waiting for the analyst's answer there);
-it ends with its call's result (calls_done), its agent's end (agent_moved), or once Claude Code's record of main's
-session says no dialog is open after it was seen open (terminal_dialogs). A prompt's card offers "Always allow" where
-Claude Code's own dialog offers "don't ask again", in that dialog's words (permission_updates.main_words): the request's
-permission_suggestions that dialog applies for the tool, each kept where Claude Code gave it
-(permission_updates.main_offer), none when the org's managed tier sets allowManagedPermissionRulesOnly (_main_offer).
+hooks are off, as main's Monitor (the MONITOR route, cc_plugin.route). The PermissionRequest hook only tells the server
+that a prompt waits: every prompt, main's and its agents', is asked in the terminal alone, and thimble makes no allow
+decision (0.9.0, S11). Its entry is `terminal`, which the browser shows as waiting for the analyst's answer there; it
+ends with its call's result (calls_done), its agent's end (agent_moved), or once Claude Code's record of main's session
+says no dialog is open after it was seen open (terminal_dialogs).
 
 Main's terminal shows each event as one line (terminal_line): the analyst's words after SAID, with the thread or button
 they belong to, else a short line saying what happened. Claude Code shows a woken turn only as the hook's fixed summary,
@@ -65,7 +61,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 from sse_starlette import EventSourceResponse
 
-from . import cc_plugin, config, event_files, ledger, permission_updates, procs, prompts
+from . import cc_plugin, config, event_files, permission_updates, procs, prompts
 from . import subagent_files as files
 
 log = logging.getLogger("thimble.events")
@@ -1094,6 +1090,8 @@ def _hold(c: str, request_id: str, tool: str, what: str, preview: str, agent: st
 
 
 GONE_ANSWER = "none: answered in the terminal, or the session moved on"  # the permission log's word for a dropped request
+# the browser answer route's refusal (permission_route)
+ANSWER_IN_TERMINAL = "Answer this in your Claude Code terminal: thimble does not answer permission requests."
 
 
 def _drop(c: str, ids: set[str] | None = None, keep: set[str] | frozenset[str] = frozenset(),
@@ -1137,13 +1135,11 @@ class Ask(NamedTuple):
 
 @router.post("/events/permission")
 async def hook_permission_route(request: Request, body: HookPermission) -> dict[str, Any]:
-    """The PermissionRequest hook relays a prompt of main's session: it waits on main's meta until the analyst answers,
-    `{id, behavior: allow | deny}`, with `updatedPermissions`, what the card's "Always allow" named, when the analyst
-    chose it (_main_offer), or the prompt or hook goes away, `{id, behavior: null}`. A prompt of one of
-    thimble's agents (or a descendant) is answered `null` at once, since Claude Code shows no dialog while a hook holds
-    a background subagent's request (U6b): it shows on the card without buttons (`terminal`), and the terminal answers
-    it; the card goes with the call's result or the agent's end. 404 when the folder is no workspace, 409 when the
-    session is not main."""
+    """The PermissionRequest hook tells the server that a prompt of main's session, or of one of its subagents, waits in
+    the terminal, where the analyst answers it in Claude Code's own dialog: thimble makes no allow decision (0.9.0, S11).
+    The prompt shows on main's card without buttons (`terminal`) until the call's result, the agent's end or the dialog's
+    close ends it (calls_done, agent_moved, terminal_dialogs), and the answer is `{id, behavior: null}` at once, which
+    the hook ignores. 404 when the folder is no workspace, 409 when the session is not main."""
     c = config.workspace_for_cwd(body.cwd)
     if not c:
         raise HTTPException(404, f"{body.cwd} is not a thimble workspace")
@@ -1156,32 +1152,11 @@ async def hook_permission_route(request: Request, body: HookPermission) -> dict[
     preview = json.dumps(body.tool_input, ensure_ascii=False) if body.tool_input is not None else ""
     request_id = HOOK_ASK_PREFIX + secrets.token_hex(4)
     loop = asyncio.get_running_loop()
-    if _thimble_agent(c, body.agent_id):
-        _terminal[request_id] = Ask(c, loop, loop.create_future(), time.monotonic(), time.time(), body.agent_id,
-                                    call_key(body.tool_name, body.tool_input))
-        _hold(c, request_id, body.tool_name, what, preview, body.agent_id, body.tool_input, terminal=True)
-        return {"id": request_id, "behavior": None}
-    fut: asyncio.Future = loop.create_future()
-    _asks[request_id] = Ask(c, loop, fut, time.monotonic(), time.time(), body.agent_id or None,
-                            call_key(body.tool_name, body.tool_input))
-    offer = _main_offer(body.suggestions, preview, body.tool_name)
-    if offer:
-        _offers[request_id] = offer
-    _hold(c, request_id, body.tool_name, what, preview, body.agent_id or None, body.tool_input, offer=offer,
-          cwd=body.cwd)
-    try:
-        while not fut.done():
-            try:
-                await asyncio.wait_for(asyncio.shield(fut), PULL_TICK_S)
-            except asyncio.TimeoutError:
-                if await request.is_disconnected() or _stopping():  # Claude Code's own prompt stays open
-                    break
-    finally:
-        _asks.pop(request_id, None)
-        _offers.pop(request_id, None)
-        if not fut.done():
-            _drop(c, {request_id})  # the hook went away: Claude Code decided without it
-    return {"id": request_id, **(fut.result() if fut.done() else {"behavior": None})}
+    agent = body.agent_id or None
+    _terminal[request_id] = Ask(c, loop, loop.create_future(), time.monotonic(), time.time(), agent,
+                                call_key(body.tool_name, body.tool_input))
+    _hold(c, request_id, body.tool_name, what, preview, agent, body.tool_input, terminal=True)
+    return {"id": request_id, "behavior": None}
 
 
 def _answer_ask(request_id: str, behavior: str | None, updates: list[dict[str, Any]] | None = None) -> bool:
@@ -1207,25 +1182,14 @@ class PermissionAnswer(BaseModel):
 
 @router.post("/ws/{c}/permission")
 async def permission_route(c: str, body: PermissionAnswer, request: Request) -> dict[str, Any]:
-    """The analyst's answer to a relayed permission prompt of main's: it goes to the waiting hook, and the request leaves
-    the card. With `always`, an allow also adds what the card's "Always allow" named, exactly (_offers); a request
-    that offers none is allowed once. 403 for a request that is not the analyst's browser's (hook_auth.analyst), 404
-    when no such request waits."""
-    from . import agents, hook_auth  # noqa: PLC0415
+    """An answer to a relayed permission prompt from the browser: refused, 409, since thimble makes no allow decision
+    (0.9.0, S11) and Claude Code asks every prompt in the terminal; the card stays until the call's result or the
+    agent's end takes it away. 403 for a request that is not the analyst's browser's (hook_auth.analyst)."""
+    from . import hook_auth  # noqa: PLC0415
 
     if not hook_auth.analyst(request):
         raise HTTPException(403, hook_auth.ANALYST_ONLY)
-
-    meta = agents.ensure_main(c)
-    pending = [p for p in meta.get("permissions") or [] if isinstance(p, dict)]
-    if not any(p.get("id") == body.id for p in pending):
-        raise HTTPException(404, "no such permission request is waiting")
-    behavior = "allow" if body.allow else "deny"
-    chosen = _offers.get(body.id) if body.allow and body.always else None
-    said = f"allow, don't ask again: {permission_updates.offer_text(chosen)}" if chosen else behavior
-    _drop(c, {body.id}, answer=said)
-    _answer_ask(body.id, behavior, chosen)
-    return {"answered": body.id, "allow": body.allow}
+    raise HTTPException(409, ANSWER_IN_TERMINAL)
 
 
 def clear_permissions(c: str) -> None:
@@ -1344,9 +1308,8 @@ def calls_done(c: str, agent: str | None, done: "list[tuple[tuple[str, str], flo
         _answer_ask(request_id, None)
     if gone:
         _drop(c, gone)
-    if agent is not None:  # a call of one of thimble's agents ran: the terminal answered its prompt
-        keys = {key for key, _ in done}
-        _end_terminal(c, {i for i, a in _terminal.items() if a.c == c and a.agent == agent and a.call in keys})
+    keys = {key for key, _ in done}  # a call ran: the terminal answered its prompt
+    _end_terminal(c, {i for i, a in _terminal.items() if a.c == c and a.agent == agent and a.call in keys})
 
 
 def _now() -> str:
