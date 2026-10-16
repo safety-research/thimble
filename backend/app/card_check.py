@@ -185,12 +185,10 @@ def wants_check(cell: dict[str, Any] | None) -> bool:
 
 
 def _feature_on(c: str) -> bool:
-    """The Card check feature switch (features.auto `card_check`, which is auto)."""
-    try:
-        from . import features  # noqa: PLC0415
-    except ImportError:  # STUB(C6): until the core lane's features.py lands
-        return auto(c)
-    return bool(features.auto(c, "card_check"))
+    """The Card check feature switch: auto, which features.auto `card_check` reads."""
+    from . import features  # noqa: PLC0415
+
+    return auto(c) and bool(features.auto(c, "card_check"))
 
 
 async def after_tool(c: str, name: str, args: dict[str, Any] | None, res: Any, *, session: str | None = None,

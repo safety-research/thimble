@@ -65,10 +65,10 @@ def shared_guidance(c: str) -> str:
     `thimble prompt preamble shared` prints them, with the analyst's feature switches (features.flags)."""
     from . import events, prompts  # noqa: PLC0415
 
+    from . import features  # noqa: PLC0415
+
     folder = str(config.corpus_dir(c))
-    try:
-        from . import features  # noqa: PLC0415
-    except ImportError:  # STUB(C6): until the core lane's features.py lands, the prompts render as before
+    if not hasattr(prompts, "TARGETS"):  # STUB(core): 0.8.0's prompts.py renders modes, not the guide's flags
         return events.render_prompts(("preamble", "shared"), folder)
     with prompts.rendering(features.flags(c)):
         return events.render_prompts(("preamble", "shared"), folder)

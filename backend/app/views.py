@@ -3493,11 +3493,8 @@ def local_transport(c: str) -> bool:
     (local.transport, C11)."""
     from . import local  # noqa: PLC0415
 
-    transport = getattr(local, "transport", None)
-    if transport is None:  # STUB(C11): until the runtime lane's local.transport lands
-        return bool(local.terminal(c))
     try:
-        return transport(c) == "local"
+        return local.transport(c) == "local"
     except (OSError, ValueError):
         return False
 
@@ -3517,17 +3514,11 @@ def target_of(c: str, slug: str) -> str:
 def target_flags(c: str | None, target: str) -> Any:
     """The flags a view prompt renders with for a build of `target` (prompts.rendering): the analyst's feature flags
     (features.flags) and the target."""
-    from . import prompts  # noqa: PLC0415
+    from . import features, prompts  # noqa: PLC0415
 
     if not hasattr(prompts, "TARGETS"):  # STUB(core): 0.8.0's prompts.py renders a mode, which names the target
         return LEGACY_MODE_OF[target]
-    try:
-        from . import features  # noqa: PLC0415
-
-        base = features.flags(c)
-    except ImportError:  # STUB(C6)
-        base = prompts.DEFAULT_FLAGS
-    return frozenset(base) | {target}
+    return frozenset(features.flags(c)) | {target}
 
 
 # the target of the build or review this process starts now, by workspace, which the agent's registration renders

@@ -622,20 +622,15 @@ def _terminal(c: str) -> bool:
     from . import local  # noqa: PLC0415
 
     try:
-        transport = getattr(local, "transport", None)
-        if transport is None:  # STUB(C11): until the runtime lane's local.transport lands
-            return bool(local.terminal(c))
-        return transport(c) == "local"
+        return local.transport(c) == "local"
     except (OSError, ValueError):
         return False
 
 
 def _auto(c: str) -> bool:
     """Whether the `checks` feature is on in workspace `c` (features.auto, C6): off, no run starts by itself."""
-    try:
-        from . import features  # noqa: PLC0415
-    except ImportError:  # STUB(C6): until the core lane's features.py lands, every feature is on
-        return True
+    from . import features  # noqa: PLC0415
+
     return bool(features.auto(c, "checks"))
 
 

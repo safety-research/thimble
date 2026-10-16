@@ -95,13 +95,11 @@ def _now() -> str:
 
 
 def enabled(c: str) -> bool:
-    """Whether view proposals are on in workspace `c`: the feature switch View proposals (features.auto `proposer`,
-    which is views.propose_enabled: PROPOSE_ENV is not off and Settings' switch, `views.propose`, is on)."""
-    try:
-        from . import features  # noqa: PLC0415
-    except ImportError:  # STUB(C6): until the core lane's features.py lands
-        return views.propose_enabled(c)
-    return bool(features.auto(c, "proposer"))
+    """Whether view proposals are on in workspace `c`: views.propose_enabled (PROPOSE_ENV is not off and Settings'
+    switch, `views.propose`, is on), which the View proposals feature switch (features.auto `proposer`) reads."""
+    from . import features  # noqa: PLC0415
+
+    return views.propose_enabled(c) and bool(features.auto(c, "proposer"))
 
 
 # --------------------------------------------------------------------------- the pending job
