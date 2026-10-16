@@ -205,13 +205,14 @@ export type FeatureSettings = { autoActivate: boolean; viewProposals: boolean; l
 /** thimble turned on in this session (`thimble activate`): the workspace, the folder, what turned it on and the role. */
 export type Activated = { ws: string; path: string; cwd: string; via: string; role: 'main' | 'peer'; at: number }
 
-/** What this session's tool calls saw of the corpus (`thimble state coverage --summary`): `totals` one entry per unit the
- *  corpus has, records (rows or lines of data files) first, then files (images, binaries, documents). */
-export type CoverageSummary = { files: { seen: number; searched: number; never: number; total: number }; records: { seen: number; searched?: number; total: number; counted: boolean }; totals?: CoverageTotal[]; line: string }
+/** What Claude read (`seen`) or searched of the corpus in this session (`thimble state coverage --summary`): `totals` one
+ *  entry per unit the corpus has, lines (line-based text), then entries (a JSON document's values, a database's rows),
+ *  then files (everything else); `records` the first of lines or entries, with its unit. */
+export type CoverageSummary = { files: { seen: number; searched: number; never: number; total: number }; records: { unit?: 'lines' | 'entries'; seen: number; searched?: number; total: number; counted: boolean }; totals?: CoverageTotal[]; line: string }
 
-/** One unit's totals over the corpus: seen, searched and the total in that unit; for records, whether they are counted
- *  yet and the files that hold them. */
-export type CoverageTotal = { unit: 'records' | 'files'; seen: number; searched: number; total: number; counted?: boolean; files?: number; files_seen?: number; files_searched?: number }
+/** One unit's totals over the corpus: read (`seen`), searched and the total in that unit; for lines and entries, whether
+ *  they are counted yet and the files that hold them. */
+export type CoverageTotal = { unit: 'lines' | 'entries' | 'files'; seen: number; searched: number; total: number; counted?: boolean; files?: number; files_seen?: number; files_searched?: number }
 
 /** A citation main's chat drew: its id (lib.ts cid), its raw spelling, its shown value, its ref, its row and when. */
 export type CiteRow = { id: string; raw: string; display: string | null; ref: string; row: string; at: number }

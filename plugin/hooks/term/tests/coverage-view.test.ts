@@ -1,14 +1,16 @@
-// The Coverage view (coverageview.tsx; SPEC-v2 J5 with the owner's notes of 10-16, "Coverage + checks feedback"): its
-// rows from `thimble state coverage --session <sid>` (C7), folder, then type or pattern, then file; seen and searched
-// each a count and a percent in their colors; each row's unit named in the row (records for data files, files for
-// images, binaries and documents), never both in one number; no never column, no `new`, no summary sentence; a totals
-// row under the list with the corpus's denominators, one line per unit. Enter drills into a folder or a group (the same
-// view one level down) and b comes back; Enter on a file opens 0.8.0's file view; o and the title row's ↗ open Files in
-// the browser at the folder. `claude plugin test plugin`.
+// The Coverage view (coverageview.tsx; SPEC-v2 J5 with the owner's notes of 10-16, "Coverage + checks feedback" and
+// "Coverage polish round 2"): what Claude read or searched, its rows from `thimble state coverage --session <sid>` (C7)
+// in one name column (a nested row's folder dim before its name or pattern, a file at the top by its name alone), read
+// and searched each a count and a percent in their colors; each row's unit named in the row (lines for line-based text,
+// entries for a JSON document's values and a database's rows, files for everything else), never two units in one
+// number; no size, never or `new` column, no summary sentence; a totals row under the list with the corpus's
+// denominators, one line per unit; in a wide pane a legend of read and searched. Enter drills into a folder or a group
+// (the same view one level down) and b comes back; Enter on a file opens 0.8.0's file view; o and the title row's ↗ open
+// Files in the browser at the folder. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { coverageLines, coverageTitle, cutPath, drillFolder, folderWords, measure, percent, sizeWords, unitWord } from '../coverageview'
+import { LEGEND, coverageLines, coverageTitle, cutPath, drillFolder, folderWords, measure, percent, unitWord } from '../coverageview'
 import type { CoverageRow } from '../coverageview'
 import { coverageWords } from '../band'
 import { COVERAGE_TOP, CWD, PANEL, SUMMARY, covRow, paneAt, panelWorld, takesKeys, words } from './fixtures-panel'
@@ -48,7 +50,7 @@ async function rowClick(m: M, w: PanelWorld, text: string): Promise<void> {
   await w.clock.settle()
 }
 
-test('the coverage view: folder, files, seen and searched as counts and percents, the total with its unit, the size; a totals row of the corpus; no never column, no summary sentence', { timeoutMs: 30_000 }, async ($, on) => {
+test('the coverage view: one name column, read and searched as counts and percents, the total with its unit; a totals row of the corpus per unit; no size, no never column, no summary sentence; the words name Claude', { timeoutMs: 30_000 }, async ($, on) => {
   const w = panelWorld(on)
   w.t.coverageSummary = SUMMARY
   await start($, w)
@@ -56,35 +58,45 @@ test('the coverage view: folder, files, seen and searched as counts and percents
   await w.clock.settle()
   const m = await pane($)
   const head = await listText(m, 'm:coverage-head')
-  expect(head[0]).toMatch(/^ {4}folder +files +seen +searched +total +size$/)
+  expect(head[0]).toMatch(/^ {4}folder · files +read +searched +total$/)
   const top = await listText(m, 'm:coverage-list')
-  // a file at the top: (top level), never `.`; a database's rows are records
-  expect(top[0]).toMatch(/^❯ {3}\(top level\) +forge\.db +0 +0% +587 +100% +587 records +2\.1 MB$/)
-  expect(top[1]).toMatch(/^ {2}▸ agents\/ +agent-\*\.jsonl +1,204 +2% +400 +0\.8% +48,310 records +1\.2 MB$/)
+  // a file at the top by its name alone, never `(top level)` or `.`; a database's rows are entries
+  expect(top[0]).toMatch(/^❯ {3}forge\.db +0 +0% +587 +100% +587 entries$/)
+  // a nested row: its folder before its name or pattern, in the one column
+  expect(top[1]).toMatch(/^ {2}▸ agents\/ agent-\*\.jsonl +1,204 +2% +400 +0\.8% +48,310 lines$/)
   // screenshots count files, not lines
-  expect(top[2]).toMatch(/^ {2}▸ images\/day-1\/ +\.png +1 +3% +0 +0% +30 files +900 KB$/)
-  expect(top[3]).toMatch(/^ {4}\(top level\) +events\.jsonl +140 +100% +0 +0% +140 records +40 KB$/)
-  expect(top[4]).toMatch(/^ {2}▸ \(top level\) +run_\*\.jsonl +0 +0% +0 +0% +600 records +30 KB$/)
-  // every row names its unit in its total, one unit a row
-  for (const l of top) expect(l).toMatch(/ (records?|files?) +\S+ [KMG]?B$/)
+  expect(top[2]).toMatch(/^ {2}▸ images\/day-1\/ \.png +1 +3% +0 +0% +30 files$/)
+  expect(top[3]).toMatch(/^ {4}events\.jsonl +140 +100% +0 +0% +140 lines$/)
+  expect(top[4]).toMatch(/^ {2}▸ run_\*\.jsonl +0 +0% +0 +0% +600 lines$/)
+  // every row names its unit at its end, one unit a row; no size
+  for (const l of top) expect(l).toMatch(/\d (lines?|entry|entries|files?)$/)
   const totals = await listText(m, 'm:coverage-totals')
   expect(totals[0]).toMatch(/^ {4}─+$/)
-  expect(totals[1]).toMatch(/^ {4}total +1,344 +3% +400 +0\.8% +48,450 records$/)
-  expect(totals[2]).toMatch(/^ {4} +1 +3% +0 +0% +31 files$/)
+  expect(totals[1]).toMatch(/^ {4}total +1,344 +3% +400 +0\.8% +48,450 lines$/)
+  expect(totals[2]).toMatch(/^ {4} +0 +0% +587 +100% +587 entries$/)
+  expect(totals[3]).toMatch(/^ {4} +1 +3% +0 +0% +31 files$/)
   const drawn = words(await m.drawn())
-  expect(drawn).not.toContain('never')
+  for (const gone of ['never', 'seen', 'record', '(top level)', 'size', ' MB', ' KB', ' new', SUMMARY.line]) expect(drawn).not.toContain(gone)
   expect(drawn).not.toMatch(/saw \d|of records \(/)
-  expect(drawn).not.toContain(SUMMARY.line)
-  expect(drawn).not.toContain(' new')
-  expect(drawn).toContain("what this session's tool calls saw or searched")
-  // seen in the first series color, searched in the second; a zero stays dim; the header names them in those colors
+  expect(drawn).toContain('what Claude read or searched in this session')
+  // read in the first series color, searched in the second; a zero stays dim; the header names them in those colors
   const segs = await listSegs(m, 'm:coverage-list')
   const headSegs = (await listSegs(m, 'm:coverage-head'))[0]!
   const agents = segs[1]!
-  expect(agents.find(x => /1,204 +2%/.test(x.s))?.fg).toBe(headSegs.find(x => x.s.trim() === 'seen')?.fg)
+  expect(agents.find(x => /1,204 +2%/.test(x.s))?.fg).toBe(headSegs.find(x => x.s.trim() === 'read')?.fg)
   expect(agents.find(x => /400 +0\.8%/.test(x.s))?.fg).toBe(headSegs.find(x => x.s.trim() === 'searched')?.fg)
   expect(agents.find(x => /1,204/.test(x.s))?.fg).not.toBe(agents.find(x => /400 +0\.8%/.test(x.s))?.fg)
   expect(segs[0]!.find(x => /^ +0 +0%$/.test(x.s))?.fg).toBe('inactive')
+  // the folder before a nested row's name is dim; the name is not
+  expect(agents.find(x => x.s === 'agents/')?.fg).toBe('inactive')
+  expect(agents.find(x => x.s.startsWith('agent-*.jsonl'))?.fg).not.toBe('inactive')
+  // a wide pane: the legend under the subtitle, read and searched in their colors, the rest dim
+  const legend = await listSegs(m, 'coverage-legend')
+  expect(legend.map(plain)).toEqual([LEGEND])
+  expect(LEGEND).toBe("read: entered Claude's context · searched: a search ran over it, only matches came back")
+  expect(legend[0]!.find(x => x.s === 'read')?.fg).toBe(headSegs.find(x => x.s.trim() === 'read')?.fg)
+  expect(legend[0]!.find(x => x.s === 'searched')?.fg).toBe(headSegs.find(x => x.s.trim() === 'searched')?.fg)
+  expect(legend[0]!.filter(x => x.s !== 'read' && x.s !== 'searched').every(x => x.fg === 'inactive')).toBe(true)
   expect(w.calls.find(c => c[1] === 'state' && c[2] === 'coverage')).toEqual(expect.arrayContaining(['--session']))
   await m.unmount()
 })
@@ -100,7 +112,8 @@ test("Enter on a folder drills in, on a pattern lists its files, b comes back; t
   await rowClick(m, w, 'agents/')
   expect(w.calls.at(-1)).toEqual(expect.arrayContaining(['coverage', '--folder', 'agents']))
   const files = await listText(m, 'm:coverage-list')
-  expect(files.map(r => r.replace(/^. /, '').trim().split(/\s+/).slice(0, 2).join(' '))).toEqual(['agents/ agent-01.jsonl', 'agents/ agent-02.jsonl', 'agents/ agent-03.jsonl'])
+  // the files right in the folder the title names: their names alone
+  expect(files.map(r => r.replace(/^. /, '').trim().split(/\s+/)[0])).toEqual(['agent-01.jsonl', 'agent-02.jsonl', 'agent-03.jsonl'])
   expect(words(await m.find({ type: 'Box', key: 'way' }))).toContain('home › coverage › agents/')
   expect((await listText(m, 'm:coverage-totals'))[1]).toMatch(/^ {4}corpus total +1,344/)
   // b: back at the top; then the pattern's row: its files, the ones left out said in words
@@ -111,7 +124,7 @@ test("Enter on a folder drills in, on a pattern lists its files, b comes back; t
   expect(w.calls.at(-1)).toEqual(expect.arrayContaining(['coverage', '--match', 'run_*.jsonl']))
   expect(words(await m.find({ type: 'Box', key: 'way' }))).toContain('home › coverage › run_*.jsonl')
   const runs = await listText(m, 'm:coverage-list')
-  expect(runs.slice(0, 3).map(r => r.replace(/^. /, '').trim().split(/\s+/).slice(0, 3).join(' '))).toEqual(['(top level) run_0000.jsonl', '(top level) run_0001.jsonl', '(top level) run_0002.jsonl'])
+  expect(runs.slice(0, 3).map(r => r.replace(/^. /, '').trim().split(/\s+/).slice(0, 2).join(' '))).toEqual(['run_0000.jsonl 0', 'run_0001.jsonl 0', 'run_0002.jsonl 0'])
   expect(runs[3]).toMatch(/… 297 more not listed here \(the list holds the first 3\)/)
   await m.press({ key: 'hk-back' })
   await w.clock.settle()
@@ -140,7 +153,7 @@ test("Enter on a file opens 0.8.0's file view; o and the title row's ↗ open Fi
   await m.unmount()
 })
 
-test('a narrow pane keeps every name whole: the size goes, then folder and files share a column, then each row takes two lines; the counts go last; the percents and each unit stay', { timeoutMs: 30_000 }, async ($, on) => {
+test('a narrow pane keeps every name whole: the legend goes first, then each row takes two lines; the counts go last; the percents and each unit stay', { timeoutMs: 30_000 }, async ($, on) => {
   const w = panelWorld(on)
   w.t.coverageSummary = SUMMARY
   await start($, w)
@@ -153,16 +166,26 @@ test('a narrow pane keeps every name whole: the size goes, then folder and files
     const totals = await listText(m, 'm:coverage-totals')
     for (const l of [...head, ...top, ...totals]) expect([...l].length).toBeLessThanOrEqual(body + 2)
     expect(head.length).toBe(rowsPer)
-    const i = top.findIndex(l => /agents\/ +agent-\*\.jsonl/.test(l))
+    expect(head[0]).toMatch(/^ {4}folder · files/)
+    // the legend is only for a pane wide enough to hold it whole
+    expect(await m.find({ type: 'Client', key: 'coverage-legend' })).toBeUndefined()
+    const i = top.findIndex(l => /agents\/ agent-\*\.jsonl/.test(l))
     expect(i).toBe(rowsPer)
     const nums = rowsPer === 1 ? top[i]! : top[i + 1]!
-    expect(nums).toMatch(counts ? /1,204 +2% +400 +0\.8% +48,310 records$/ : /^ +2% +0\.8% +48,310 records$/)
-    const img = top.findIndex(l => /images\/day-1\/ +\.png/.test(l))
+    expect(nums).toMatch(counts ? /1,204 +2% +400 +0\.8% +48,310 lines$/ : /^ +2% +0\.8% +48,310 lines$/)
+    const img = top.findIndex(l => /images\/day-1\/ \.png/.test(l))
     expect(rowsPer === 1 ? top[img] : top[img + 1]).toMatch(/3% +(0 +)?0% +30 files$/)
-    expect(totals.join('\n')).toMatch(/48,450 records/)
+    expect(top.join('\n')).not.toContain('(top level)')
+    expect(totals.join('\n')).toMatch(/48,450 lines/)
+    expect(totals.join('\n')).toMatch(/587 entries/)
     expect(totals.join('\n')).toMatch(/31 files/)
     await m.unmount()
   }
+  // wide enough but short: the legend goes before a row of the list does
+  const short = await pane($, 96, 14)
+  expect(await short.find({ type: 'Client', key: 'coverage-legend' })).toBeUndefined()
+  expect((await listText(short, 'm:coverage-head'))[0]).toMatch(/^ {4}folder · files +read/)
+  await short.unmount()
 })
 
 test('a long list scrolls under its header, and the totals stay under it', { timeoutMs: 30_000 }, async ($, on) => {
@@ -176,32 +199,32 @@ test('a long list scrolls under its header, and the totals stay under it', { tim
   const list = await listText(m, 'm:coverage-list')
   expect(list.length).toBeLessThan(30)
   expect(list.at(-1)).toMatch(/↓ \d+ more/)
-  expect((await listText(m, 'm:coverage-head'))[0]).toMatch(/folder +files +seen/)
-  expect((await listText(m, 'm:coverage-totals'))[1]).toMatch(/total .* records$/)
+  expect((await listText(m, 'm:coverage-head'))[0]).toMatch(/folder · files +read/)
+  expect((await listText(m, 'm:coverage-totals'))[1]).toMatch(/total .* lines$/)
   await m.unmount()
   // two lines a row in a narrow pane: the list is cut between rows, and its count rows count rows
   const n = await pane($, 46, 30)
   const two = await listText(n, 'm:coverage-list')
   const more = Number(/↓ (\d+) more/.exec(two.at(-1)!)?.[1])
-  expect(two.at(-2)).toMatch(/ (files?|records?)$/)
+  expect(two.at(-2)).toMatch(/ (files?|lines?|entry|entries)$/)
   const shown = two.filter(l => /\.md$/.test(l.trim())).length
-  expect(two.filter(l => / (files?|records?)$/.test(l)).length).toBe(shown)
+  expect(two.filter(l => / (files?|lines?|entry|entries)$/.test(l)).length).toBe(shown)
   expect(shown + more).toBe(60)
   await n.unmount()
 })
 
-test("the rows' parts: units by row, percents as coverage.py says them, folders in words, paths cut in their middle, titles, the summary line's words", () => {
+test("the rows' parts: units by row and their singular forms, percents as coverage.py says them, folders in words, paths cut in their middle, titles, the summary line's words", () => {
   expect(drillFolder('', { folder: 'agents/' })).toBe('agents')
   expect(drillFolder('runs', { folder: 'r1/' })).toBe('runs/r1')
   expect(drillFolder('runs', { folder: 'runs/r1/' })).toBe('runs/r1')
-  expect(sizeWords(1_200_000)).toBe('1.2 MB')
-  expect(sizeWords(40_000)).toBe('40 KB')
   // the same forms as coverage.py percent (test_percent_forms)
   expect([percent(0, 100), percent(5, 0), percent(1, 3_000_000), percent(4_401, 13_200_000), percent(3, 1_000), percent(99, 10_000), percent(99, 100_000), percent(17, 100), percent(25, 1_000), percent(995, 1_000), percent(1_000, 1_000)])
     .toEqual(['0%', '0%', '<0.01%', '0.03%', '0.3%', '0.9%', '0.09%', '17%', '3%', '99%', '100%'])
-  expect([unitWord('records', 1), unitWord('files', 1), unitWord('files', 0), unitWord('records', 2)]).toEqual(['record', 'file', 'files', 'records'])
-  expect(folderWords('')).toBe('(top level)')
-  expect(folderWords('.')).toBe('(top level)')
+  expect([unitWord('lines', 1), unitWord('entries', 1), unitWord('files', 1)]).toEqual(['line', 'entry', 'file'])
+  expect([unitWord('lines', 0), unitWord('entries', 2), unitWord('files', 1_031_999)]).toEqual(['lines', 'entries', 'files'])
+  // the top level has no words: a file there shows its name alone
+  expect(folderWords('')).toBe('')
+  expect(folderWords('.')).toBe('')
   expect(folderWords('agents')).toBe('agents/')
   expect(cutPath('images/computer-use-turns/2025-04-02/', 24)).toBe('images/…/2025-04-02/')
   expect(cutPath('agents/', 24)).toBe('agents/')
@@ -210,24 +233,34 @@ test("the rows' parts: units by row, percents as coverage.py says them, folders 
   expect(coverageTitle('', 'run_*.jsonl')).toBe('run_*.jsonl')
   expect(coverageTitle('logs', '.txt')).toBe('logs/.txt')
   expect(coverageTitle('images/computer-use-turns/2025-04-02', '*.png')).toBe('2025-04-02/*.png')
-  // a row's one unit: records for a data file (null while counted), files for the others
+  // a row's one unit: entries for a database (null while counted), lines for line-based text, files for the others
   const db = COVERAGE_TOP[0]!
-  expect(measure(db)).toEqual({ unit: 'records', seen: 0, searched: 587, total: 587 })
+  expect(measure(db)).toEqual({ unit: 'entries', seen: 0, searched: 587, total: 587 })
+  expect(measure(COVERAGE_TOP[1]!)).toEqual({ unit: 'lines', seen: 1204, searched: 400, total: 48_310 })
   expect(measure(COVERAGE_TOP[2]!)).toEqual({ unit: 'files', seen: 1, searched: 0, total: 30 })
-  expect(measure({ ...db, records_total: null })).toEqual({ unit: 'records', seen: 0, searched: 587, total: null })
-  // while records are counted the row and the totals say so, and show no share
-  const counting = coverageLines([{ ...db, records_total: null }], db.key, 90, { totals: [{ unit: 'records', seen: 0, searched: 0, total: 0, counted: false, files: 1, files_seen: 0, files_searched: 1 }] })
+  expect(measure({ ...db, records_total: null })).toEqual({ unit: 'entries', seen: 0, searched: 587, total: null })
+  // one of each: the singular in the row and in the totals
+  const ones = coverageLines([covRow({ key: 'v', path: 'villages.jsonl', name: 'villages.jsonl', records_total: 1 }), covRow({ key: 'm', path: 'm.json', name: 'm.json', unit: 'entries', records_total: 1 }), covRow({ key: 'r', path: 'README.md', name: 'README.md', unit: 'files' })], '', 90, { totals: [{ unit: 'lines', seen: 0, searched: 0, total: 1, counted: true, files: 1, files_seen: 0, files_searched: 0 }, { unit: 'entries', seen: 1, searched: 0, total: 1, counted: true, files: 1, files_seen: 1, files_searched: 0 }, { unit: 'files', seen: 0, searched: 0, total: 1 }] })
+  expect(ones.lines.map(l => plain(l).trimEnd().split(/\s+/).at(-1))).toEqual(['line', 'entry', 'file'])
+  expect(ones.totals.slice(1).map(l => plain(l).trimEnd().split(/\s+/).at(-1))).toEqual(['line', 'entry', 'file'])
+  // no number mixes two units: each row and each totals line names one
+  for (const l of [...ones.lines, ...ones.totals.slice(1)]) expect(plain(l).match(/\b(lines?|entry|entries|files?)\b/g)?.length).toBe(1)
+  // while lines or entries are counted the row and the totals say so, and show no share
+  const counting = coverageLines([{ ...db, records_total: null }], db.key, 90, { totals: [{ unit: 'entries', seen: 0, searched: 0, total: 0, counted: false, files: 1, files_seen: 0, files_searched: 1 }] })
   expect(plain(counting.lines[0]!)).toMatch(/forge\.db +0 +587 +counting/)
   expect(plain(counting.totals[1]!).trimEnd()).toMatch(/total +counting$/)
-  // no line wider than its type area, at any width
+  // no line wider than its type area, at any width; one name column at every width
   for (const cols of [120, 90, 70, 58, 44, 36]) {
     const lay = coverageLines(COVERAGE_TOP, '', cols, { totals: SUMMARY.totals })
     for (const l of [...lay.head, ...lay.lines, ...lay.totals]) expect([...plain(l)].length).toBeLessThanOrEqual(cols + 2)
+    expect(plain(lay.head[0]!)).toMatch(/^ {4}folder · files/)
+    expect(lay.wide).toBe(cols >= 70)
   }
-  // the summary line's coverage words: the totals' first share, files while the records are counted
+  // the summary line's coverage words: the totals' first share, files while its lines or entries are counted
   expect(coverageWords(SUMMARY)).toBe('3%')
-  expect(coverageWords({ ...SUMMARY, totals: [{ unit: 'records', seen: 0, searched: 0, total: 0, counted: false, files: 13, files_seen: 3, files_searched: 1 }] })).toBe('3 of 13 files')
+  expect(coverageWords({ ...SUMMARY, totals: [{ unit: 'lines', seen: 0, searched: 0, total: 0, counted: false, files: 13, files_seen: 3, files_searched: 1 }] })).toBe('3 of 13 files')
+  expect(coverageWords({ ...SUMMARY, totals: [{ unit: 'entries', seen: 0, searched: 0, total: 0, counted: false, files: 2, files_seen: 1, files_searched: 0 }] })).toBe('1 of 2 files')
   expect(coverageWords({ ...SUMMARY, totals: [{ unit: 'files', seen: 2, searched: 0, total: 1_032_000 }] })).toBe('<0.01%')
   const old: CoverageRow = covRow({ key: 'x', unit: undefined, records_seen: 5, records_total: 10 })
-  expect(measure(old).unit).toBe('records')
+  expect(measure(old).unit).toBe('lines')
 })
