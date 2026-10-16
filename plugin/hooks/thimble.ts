@@ -35,7 +35,7 @@
 // What it does once it is on (over HTTP; through the files the same, below):
 // - registers thimble's roles and thimble:orient-helper from GET /api/module/roles (each with a full model id and an
 //   explicit effort, from Settings); when the server is up at session start this happens inside session.start, so the
-//   types are in main's first agent listing;
+//   types are registered before main's first request (agent.offer keeps them out of its listing, below);
 // - asks Claude Code's permission decision for a write it never makes every PLAN_POLL_MS and tells the server when main
 //   went into plan mode or out of it (POST /api/module/mode), which no event of Claude Code's says while main is idle;
 // - holds GET /api/module/next and handles the requests one at a time, in order, so a role's registration and the
@@ -46,6 +46,12 @@
 //   that turn completed or ABORT_WAIT_MS passed, after a TaskStop of each command of that turn the abort moved to the
 //   background, where Esc would have ended it), note ($.session.append). It never starts, sends or stops anything the
 //   server did not ask for;
+// - agent.offer and tool.call: thimble's types stay out of every model's agent listing, whose line for each spelled its
+//   "All tools except …" list, until an agent of the type has started in the session. A type is offered while an Agent
+//   call that names it runs, so main's typed starts and the orientation's own starts of its critic and helpers run as
+//   before ($.agent.spawn is no offer), and while a SendMessage call runs. Once an agent of a type has started, the
+//   type stays offered, since Claude Code checks the offer again when it resumes an agent: the orientation its critic
+//   reports to, an agent a SendMessage continues;
 // - agent.spawn: an Agent call for one of thimble's roles whose prompt's first line names a typed request, main's or a
 //   subagent's (a subagent of main's own may start thimble's agents, as Claude Code lets a subagent start subagents;
 //   a thread's fork makes none: main makes the call for it, tools._ask_main), gets that request's full model id, and
@@ -236,6 +242,8 @@ type State = {
   plan: boolean | null // whether main's session was in plan mode at the last look, as the server heard it
   turn: string // main's running model turn: the id its turn.start carried, '' once it completed
   turnEnded: (() => void)[] // what waits for the end of `turn` (abortTurn)
+  dispatching: Map<string, number> // thimble's types an Agent or SendMessage call offers while it runs, with how many
+  used: Set<string> // thimble's types an agent of which started in this session: offered from then on (agent.offer)
 }
 
 function fresh(): State {
@@ -243,8 +251,38 @@ function fresh(): State {
     active: false, interactive: false, user: '', home: '', homeReal: '', rules: null,
     cwd: '', session: '', version: '', gen: 0, server: null, roles: {}, registered: {}, efforts: {},
     requests: {}, started: new Set(), queue: Promise.resolve(), helloing: null, leaving: '', plan: null, turn: '', turnEnded: [],
+    dispatching: new Map(), used: new Set(),
     file: false, peer: false, rechecking: null, ws: '', writing: Promise.resolve(), stamps: {}, n: 0,
     out: { session: '', version: '', load: '', beat: 0, plan: null, plan_at: 0, problem: '', taken: [], answers: {}, ended: [] },
+  }
+}
+
+/** Whether `type` is one of the types this module registers (thimble:<role>, the helper and the extensions' agents). */
+const ours = (m: State, type: string): boolean => type.startsWith(`${PLUGIN}:`) && Object.prototype.hasOwnProperty.call(m.roles, type.slice(PLUGIN.length + 1))
+
+/** Every type this module registers, as Claude Code names it. */
+const allOurs = (m: State): string[] => Object.keys(m.roles).map(name => `${PLUGIN}:${name}`)
+
+/** The types of thimble's a call offers while it runs (agent.offer): the one an Agent call names, and all of them for a
+ *  SendMessage, which names an agent by its id and may resume it; none for any other call. */
+function dispatched(m: State, e: Json): string[] {
+  if (e.tool === 'SendMessage') return allOurs(m)
+  if (e.tool !== 'Agent' && e.tool !== 'Task') return []
+  const type = text(e.subagent_type)
+  return ours(m, type) ? [type] : []
+}
+
+/** `go` (the call) with `types` offered while it runs: counted, since the orientation starts several helpers at once. */
+async function offering<T>(m: State, types: string[], go: () => Promise<T>): Promise<T> {
+  for (const type of types) m.dispatching.set(type, (m.dispatching.get(type) ?? 0) + 1)
+  try {
+    return await go()
+  } finally {
+    for (const type of types) {
+      const left = (m.dispatching.get(type) ?? 1) - 1
+      if (left > 0) m.dispatching.set(type, left)
+      else m.dispatching.delete(type)
+    }
   }
 }
 
@@ -545,13 +583,14 @@ async function spawn($: Engine, m: State, role: string, prompt: string, descript
   if (r.deny !== undefined) return LIMIT.test(r.deny) ? { limit: r.deny } : { deny: r.deny }
   if (!r.agentId) return { error: 'Claude Code started no agent' }
   m.started.add(r.agentId)
+  m.used.add(`${PLUGIN}:${role}`)
   if (line) await note($, line.split('{agent}').join(r.agentId))
   return { agentId: r.agentId, model: r.model }
 }
 
 async function send($: Engine, m: State, agent: string, message: string, role: string, values: Values | undefined): Promise<Answer> {
   if (role && m.roles[role]) await ensure($, m, role, values)
-  const r = await $.tool.call({ tool: 'SendMessage', to: agent, message } as Parameters<Engine['tool']['call']>[0])
+  const r = await offering(m, allOurs(m), () => $.tool.call({ tool: 'SendMessage', to: agent, message } as Parameters<Engine['tool']['call']>[0]))
   if (r.deny !== undefined) return { deny: r.deny }
   const said = text(r.text)
   if (r.isError) return { error: said || 'SendMessage failed', ...(GONE.test(said) ? { gone: true } : {}) }
@@ -1124,16 +1163,23 @@ export const register: Register = on => {
     return r
   })
 
-  // the file guard, in every session (module note)
+  // thimble's types are offered to a model only inside an Agent call that names them, or once one started (module note)
+  on('agent.offer', async ($, e, next) => (ours(m, e.agent) && !m.dispatching.has(e.agent) && !m.used.has(e.agent) ? { isOffered: false } : next(e)))
+    .catch(($, e, next) => next(e)) // not a guard: if it fails, the type is offered as Claude Code offers it
+
+  // the file guard, in every session, and an Agent or SendMessage call with its types offered while it runs (module note)
   on('tool.call', async ($, e, next) => {
     const why = await refusal($, m, e as unknown as Json)
-    return why ? { deny: why } : next(e)
+    if (why) return { deny: why }
+    const types = dispatched(m, e as unknown as Json)
+    return types.length ? offering(m, types, () => next(e)) : next(e)
   }).catch(($, e, next) => (next.called ? next(e) : namesPrivate(m, e as unknown as Json) ? { deny: reason(m.rules ?? fallbackRules(m), 'private') } : next(e)))
 
   on('agent.spawn', async ($, e, next) => {
     if (!m.active) return next(e)
     const got = await spawning($, m, e)
     const r = await next(got.model ? { ...e, model: got.model } : e)
+    if (r.agentId && ours(m, e.subagentType ?? '')) m.used.add(e.subagentType ?? '') // offered from now on (module note)
     if (r.agentId) {
       if (got.effort !== undefined) m.efforts[r.agentId] = got.effort
       if (got.typed) delete m.requests[got.typed]
