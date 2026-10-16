@@ -513,12 +513,20 @@ export function linksOf(cell: ThimbleCell): TermLinks | undefined {
   if (!l || typeof l !== 'object') return undefined
   const entries = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is Record<string, unknown> => Boolean(x) && typeof x === 'object') : [])
   const key = (x: Record<string, unknown>) => `${x.value === null || x.value === undefined ? '' : String(x.value)}|${String(x.ref ?? '')}`
+  // a value the check corrected in place (heal.py `corrected`, `was` what Claude wrote) is right now: not broken
+  const corrected = (b: Record<string, unknown>) => b.corrected === true && typeof b.was === 'string'
+  const fixed = [
+    ...entries(l.broken).filter(corrected).map(b => ({ key: key(b), was: String(b.was), from: '', why: String(b.why ?? '') })),
+    // a value re-pointed at the place that shows it (`from` the place Claude cited)
+    ...entries(l.resolved).filter(r => typeof r.from === 'string' && r.from && r.from !== r.ref).map(r => ({ key: key(r), was: '', from: String(r.from), why: 'the value stands at another place' })),
+  ]
   return {
     pending: l.status === 'pending',
     checked: Boolean(l.checked),
-    ok: entries(l.resolved).map(key),
-    broken: entries(l.broken).map(b => ({ key: key(b), why: String(b.why ?? ''), source: b.source === null || b.source === undefined ? '' : String(b.source) })),
+    ok: [...entries(l.resolved).map(key), ...entries(l.broken).filter(corrected).map(key)],
+    broken: entries(l.broken).filter(b => !corrected(b)).map(b => ({ key: key(b), why: String(b.why ?? ''), source: b.source === null || b.source === undefined ? '' : String(b.source) })),
     typed: entries(l.typed).map(t => ({ key: key(t), why: String(t.why ?? '') })),
+    ...(fixed.length ? { fixed } : {}),
   }
 }
 

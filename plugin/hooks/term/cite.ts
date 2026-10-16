@@ -1,10 +1,11 @@
 // Citations as the analyst sees them (no `$`), shared by the hooks module, para.tsx and the tests.
 //
-// - Display: every citation is a link, blue and underlined; red when the value is not at the cited place or the place
-//   does not exist. A spinner follows a citation while a fix round or its verification works on it; then ✓ when its
-//   verification recomputed the value, or × (and red) when the verification failed (another value, a crash, no script
-//   written) or the fix round could not correct it. The model's Markdown is drawn as Claude Code draws it: bold bold,
-//   italic italic, inline code in the code colour, a heading bold.
+// - Display (MATT-NOTES "Citation behavior"): every citation is purple and underlined, a `[ card ]` chip too. A dim ◌
+//   follows it while it is checked (its place not resolved yet, a fix round or the card's links check working on it);
+//   on success the ◌ goes and nothing takes its place (never a ✓); a check that rewrote it leaves it as rewritten, with
+//   no mark; a permanent failure (the value is not at its place, the place does not exist, the links check got another
+//   value) turns it red with × right after it. The model's Markdown is drawn as Claude Code draws it: bold bold, italic
+//   italic, inline code in the code colour, a heading bold.
 // - Layout: a reply's paragraph or table wrapped to its width, a citation's shown value whole and wrapping like the
 //   words around it, with where each citation, word and table row lands, so a pointer finds what it is over.
 // - Fix rounds: the sentences a forked subagent is asked to rewrite, its answer read, and each corrected sentence put
@@ -24,9 +25,8 @@ import { COLORS } from './paint'
  *  not at the place or the place does not exist; `fixing` while a fix round runs on it; `failed` when the fix round
  *  could not correct it or its verification failed (another value, a crash, no script). */
 export type ChipState = 'link' | 'problem' | 'fixing' | 'failed'
-/** `mark` is ✓ (a script recomputed the value), × (failed) or nothing; `spin` while a fix round or a verification works
- *  on the citation, drawn as ◌. `chip`: a citation with no words of its own, drawn as `[ card ]` (its label holds the
- *  brackets), whole on one row and not underlined. */
+/** `mark` is × (failed) or nothing, never ✓; `spin` while the citation is checked, drawn as a dim ◌. `chip`: a citation
+ *  with no words of its own, drawn as `[ card ]` (its label holds the brackets), whole on one row. */
 export type ChipView = { label: string; state: ChipState; mark: string; spin: boolean; tip: string; chip?: boolean }
 
 /** What a citation's link says: its shown value whole, or a short name of the place for one without a value. */
@@ -69,22 +69,24 @@ export function verifying(verify: string | undefined): boolean {
   return verify === 'asked' || verify === 'running'
 }
 
-/** The state, mark and spinner of a citation. */
+/** The state, mark and spinner of a citation (`status` the resolver's, `pending` before it answered): while anything
+ *  still checks it, a purple link and ◌; then a purple link with no mark, or, when a check found it wrong for good, red
+ *  (`failed`) with ×. A citation a check rewrote is drawn as it now reads, with no mark. */
 export function chipLook(status: string | undefined, fix: string | undefined, verify: string | undefined): Pick<ChipView, 'state' | 'mark' | 'spin'> {
   const state = chipState(status, fix, verify)
-  const spin = state === 'fixing' || verifying(verify)
-  const mark = spin ? '' : state === 'failed' ? '×' : state === 'link' && verify === 'verified' ? '✓' : ''
-  return { state, mark, spin }
+  if (state === 'fixing' || verifying(verify) || status === 'pending') return { state: 'link', mark: '', spin: true }
+  return state === 'link' ? { state, mark: '', spin: false } : { state: 'failed', mark: '×', spin: false }
 }
 
-/** A citation as styled segments: its label blue and underlined (red with a problem), in inverse under the pointer, so
- *  its blue becomes the background; a chip (`[ card ]`) blue with no underline, its brackets marking it; then ◌ while it
- *  is worked on or its mark: ✓ in the text colour, × in red. */
+/** A citation as styled segments: its label purple and underlined (red when it failed), a chip (`[ card ]`) too, in
+ *  inverse under the pointer, so its color becomes the background; then a dim ◌ while it is checked, or a red × once it
+ *  failed, a cell apart from the label. */
 export function chipSegs(c: ChipView, hover: boolean, _frame = 0): Seg[] {
-  const segs: Seg[] = [{ s: c.label, fg: c.state === 'link' ? COLORS.link : COLORS.problem, ...(c.chip ? {} : { u: true }), ...(hover ? { inv: true } : {}) }]
-  // the mark a cell apart from the value, as the spinner is: `19,931 ✓`, not `19,931✓`
-  if (c.spin) segs.push({ s: ` ${SPIN}`, ...(c.state === 'link' ? {} : { fg: COLORS.problem }) })
-  else if (c.mark) segs.push({ s: ` ${c.mark}`, ...(c.mark === '✓' ? {} : { fg: COLORS.problem }) })
+  const bad = !c.spin && (c.state === 'problem' || c.state === 'failed')
+  const segs: Seg[] = [{ s: c.label, fg: bad ? COLORS.problem : COLORS.cite, u: true, ...(hover ? { inv: true } : {}) }]
+  // the mark a cell apart from the value: `19,931 ◌`, not `19,931◌`
+  if (c.spin) segs.push({ s: ` ${SPIN}`, fg: COLORS.dim })
+  else if (bad) segs.push({ s: ' ×', fg: COLORS.problem })
   return segs
 }
 

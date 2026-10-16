@@ -98,8 +98,9 @@ export type TermCard = {
 /** A card's takeaway as thimble's links check left it (backend verify.py, the cell's `verification.links`): `pending`
  *  while it runs; then each citation it linked (`ok`), each it found another value for (`broken`, with why and the
  *  value the place shows) and each whose value the card's code types in rather than computes (`typed`, with why), by
- *  `<value>|<ref>`. */
-export type TermLinks = { pending: boolean; checked: boolean; ok: string[]; broken: { key: string; why: string; source: string }[]; typed: { key: string; why: string }[] }
+ *  `<value>|<ref>`. `fixed`: each citation the check rewrote in place, by its key as it reads now, with what Claude wrote
+ *  (`was` its value, `from` its place; '' where the check kept it) and why. */
+export type TermLinks = { pending: boolean; checked: boolean; ok: string[]; broken: { key: string; why: string; source: string }[]; typed: { key: string; why: string }[]; fixed?: { key: string; was: string; from: string; why: string }[] }
 
 /** A citation as checked against `thimble state resolve`: ok (the place holds the value, or the citation shows none),
  *  differs (the place resolves, the value is not there), missing (the place does not resolve), pending (not checked

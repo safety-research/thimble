@@ -47,13 +47,14 @@ test('the citations, problems first: a card\'s refuted citation and the chat\'s 
   await w.clock.settle()
   const m = (await $.ui.mount(paneAt(96))) as unknown as M
   const rows = await listText(m, 'm:citations-list')
-  expect(rows.map(r => r.slice(2, 3))).toEqual(['×', '×', '!', '◌', '✓'])
+  expect(rows.map(r => r.slice(2, 3))).toEqual(['×', '×', '!', '◌', ' '])
   expect(rows[0]).toMatch(/^❯ × 14592 · revisions TOTAL · a script got 14591 +card 1$/)
   expect(rows[1]).toMatch(/^ {2}× 99 · README\.md line 99 · line 99 out of range$/)
   expect(rows[2]).toMatch(/^ {2}! 4579 · pages TOTAL · the code types it in +card 1$/)
   expect(rows[3]).toBe('  ◌ Each record · README.md line 5 · checking')
-  expect(rows[4]).toBe('  ✓ 4579 · README.md line 3 · found')
-  expect(words(await m.drawn())).toContain('5 citations · ✓1 · ×3')
+  // found: no glyph, never a ✓
+  expect(rows[4]).toBe('    4579 · README.md line 3 · found')
+  expect(words(await m.drawn())).toContain('5 citations · ◌ checking 1 · 3 failed')
   await m.unmount()
 })
 
