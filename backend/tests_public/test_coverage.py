@@ -423,3 +423,26 @@ def test_the_detached_job_indexes_the_corpus(corpus, monkeypatch):
         time.sleep(0.1)
     s = coverage.summary(c, SID)
     assert s["files"]["total"] == 21 and s["records"]["counted"] is True
+
+
+def test_the_coverage_switch_off_keeps_no_fact_and_starts_no_job(corpus, monkeypatch):
+    import sys
+    import types
+
+    c, root = corpus["c"], corpus["root"]
+    try:
+        from app import features as mod
+    except ImportError:  # the core lane's features.py, or a stand-in where it is not there
+        mod = types.ModuleType("app.features")
+        monkeypatch.setitem(sys.modules, "app.features", mod)
+        import app
+
+        monkeypatch.setattr(app, "features", mod, raising=False)
+    monkeypatch.setattr(mod, "auto", lambda c, kind: kind != "coverage", raising=False)
+    monkeypatch.setattr(coverage, "start_index", REAL_START)
+    runs: list = []
+    monkeypatch.setattr(coverage.subprocess, "Popen", lambda argv, **kw: runs.append(argv))
+    coverage._started.clear()
+    _facts(c, [{"path": "events.jsonl", "how": "whole"}])
+    assert coverage.read_facts(c, SID) == [] and runs == []
+    assert coverage.start_index(c, force=True) is False and runs == []

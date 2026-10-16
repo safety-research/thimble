@@ -242,9 +242,9 @@ def clean_facts(c: str, facts: Iterable[Any], cwd: str | None = None) -> list[di
 
 def add_facts(c: str, sid: str, turn: str, facts: Any, cwd: str | None = None) -> dict[str, Any]:
     """Append the turn's facts to the session's store (clean_facts drops the ones that do not count), then the
-    session's summary (summary)."""
+    session's summary (summary). With the Coverage switch off nothing is kept."""
     path = _facts_file(c, sid)
-    kept = clean_facts(c, facts, cwd)
+    kept = clean_facts(c, facts, cwd) if feature_on(c) else []
     t = str(turn or "")[:128]
     if kept:
         append_jsonl_many(path, ({**f, **({"turn": t} if t else {})} for f in kept))
@@ -434,11 +434,26 @@ def job_argv(root: Path) -> list[str]:
     return cmd
 
 
+def feature_on(c: str) -> bool:
+    """Whether the Coverage feature switch is on in workspace `c` (features.auto `coverage`): off, no fact is kept and
+    no index job counts records."""
+    try:
+        from . import features  # noqa: PLC0415
+    except ImportError:  # STUB(C6): until the core lane's features.py lands, every feature is on
+        return True
+    try:
+        return bool(features.auto(c, "coverage"))
+    except Exception:  # noqa: BLE001 — a config that cannot be read leaves coverage on, as a fresh install has it
+        return True
+
+
 def start_index(c: str, *, force: bool = False) -> bool:
-    """Start the index job for workspace `c`, detached, unless one holds its lock or this process started one in the
-    last START_DEBOUNCE_S. Whether it started one. Never raises."""
+    """Start the index job for workspace `c`, detached, unless the Coverage switch is off, one holds its lock or this
+    process started one in the last START_DEBOUNCE_S. Whether it started one. Never raises."""
     now = time.monotonic()
     if not force and now - _started.get(c, -1e9) < START_DEBOUNCE_S:
+        return False
+    if not feature_on(c):
         return False
     try:
         d = coverage_dir(c)
