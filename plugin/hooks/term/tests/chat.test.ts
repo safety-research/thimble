@@ -165,9 +165,12 @@ test("the footer under a turn's answer: its citations and cards dim, `N failed` 
   let pane = (await $.ui.mount(PANE)) as unknown as M
   const asking = shown(await pane.drawn())
   expect(asking).toContain('about this answer')
-  // the field holds the keys as the view opens, so a letter goes into the question: no `b` or `x` among the hints
-  expect(asking).toContain('Enter to ask · Esc to leave the field')
+  // the entry box holds the keys as the view opens, so a letter goes into the question: as under Claude Code's prompt
+  // box, no hint row (Matt, 2026-10-16: not "Enter to ask · Esc to leave the field")
+  expect(asking).not.toContain('Esc to leave the field')
+  expect(asking).not.toContain('Enter to ask')
   expect(asking).not.toContain('b to go back')
+  expect((await pane.find({ type: 'Input', key: 'ask-new' }))?.props).toMatchObject({ placeholder: 'type your question', submitLabel: 'ask', rows: 2, autoFocus: true })
   // Esc gave the keys back to the prompt (live check term-fix5, new quirk 6): no key of the panel's is named, since a
   // letter or Enter goes to the prompt now, only how to give the panel the keys again
   await pane.unmount()

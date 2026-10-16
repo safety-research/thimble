@@ -268,7 +268,14 @@ test('↑↓ choose a comment (`❯`, the accent), its chips under it; r resolve
   expect(rows[chosen + 2]).toBe('       one wiki.')
   expect(JSON.stringify(await pane.drawn({ in: 'm:doc-cm-0-0' }))).toContain('"color":"suggestion"},"children":[" Judgment calls')
   expect(shown(await pane.find({ key: 'h-hints' }))).toContain('↑↓ to choose a comment · Enter or a to ask · r to resolve')
-  expect(rows.join('\n')).toContain('resolve  ask about it')
+  // the chosen comment's entry box under the acts: `❯` in the margin between two rules, no `ask about it`
+  expect(rows.join('\n')).not.toContain('ask about it')
+  // (this layout draws no Input: the box's row shows its `❯` alone)
+  const box = rows.findIndex(r => r === ' ❯')
+  expect(box).toBeGreaterThan(chosen)
+  expect(rows[box - 1]).toMatch(/^ ─+$/)
+  expect(rows[box + 1]).toMatch(/^ ─+$/)
+  expect(rows[box - 2]).toMatch(/^ {3}resolve {2}/)
   await pane.unmount()
   await hotkey($, w, 'resolve')
   expect(w.acts.at(-1)).toEqual({ kind: 'comment-resolve', payload: { doc: 'report', comment: 'c1' } })
@@ -294,7 +301,7 @@ test('↑↓ choose a comment (`❯`, the accent), its chips under it; r resolve
   expect(w.acts.at(-1)).toEqual({ kind: 'comment-reopen', payload: { doc: 'report', comment: 'c1' } })
 })
 
-test('Enter or a asks a side thread about the chosen comment, on its passage, told the passage and the comment', async ($, on) => {
+test("the chosen comment's entry box asks a side thread about the comment, on its passage, told the passage and the comment", async ($, on) => {
   const w = world(on)
   w.docs.report = COMMENTED
   await start($, w)
@@ -302,9 +309,13 @@ test('Enter or a asks a side thread about the chosen comment, on its passage, to
   await takesKeys($)
   await w.clock.advance(300)
   await arrow($, w, 'down', 2)
+  // a gives the box the keys: no form opens
   await hotkey($, w, 'cm-ask')
   const asked = await look($)
-  await asked.input({ key: 'ask-new', text: 'Fix the sentence.' })
+  expect(shown(await asked.drawn())).not.toContain('New thread')
+  const entry = ((await asked.findAll({ type: 'Input' })) as { key?: string; props?: Record<string, unknown> }[]).find(i => String(i.key).startsWith('ask-cm-'))!
+  expect(entry.props).toMatchObject({ placeholder: 'ask about this comment', rows: 2 })
+  await asked.input({ key: entry.key!, text: 'Fix the sentence.' })
   await w.clock.settle()
   expect(w.acts.find(a => a.kind === 'thread')!.payload).toMatchObject({
     anchor: 'report:report#x2',
@@ -370,5 +381,11 @@ test('the report with its comments at 120 columns and a comment chosen, as rows 
   for (const rows of [read, chosen]) expect(rows.every(r => wide(r) <= 120)).toBe(true)
   // one title row: the path, the document last in the accent and bold, then the `↗` that opens it in the browser
   expect(read[0]).toMatch(/^ {3}home › documents › "Agents used the dse wiki as a relay" +↗$/)
-  expect(chosen.filter(r => r.startsWith(' ❯'))).toEqual([expect.stringMatching(/^ ❯ {3}● Judgment calls {80,}check$/)])
+  // (and the `❯` of the chosen comment's entry box, alone on its row in this layout, which draws no Input)
+  expect(chosen.filter(r => r.startsWith(' ❯'))).toEqual([expect.stringMatching(/^ ❯ {3}● Judgment calls {80,}check$/), ' ❯'])
+  // the box's rules from the margin's edge, as wide as the panel's own rules
+  const box = chosen.lastIndexOf(' ❯')
+  expect(chosen[box - 1]).toMatch(/^ ─+$/)
+  expect(chosen[box + 1]).toMatch(/^ ─+$/)
+  expect(wide(chosen[box - 1]!)).toBe(wide(read.find(r => /^ {3}─+$/.test(r))!))
 })

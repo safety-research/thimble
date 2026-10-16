@@ -501,9 +501,11 @@ test('a new thread about a card shows the card in its frame above the field: its
   expect(rows.join('\n')).not.toContain('AgentRelent made the most.')
   const more = rows.find(r => /… \d+ more/.test(r))!
   expect(more).toMatch(/^ {3}│ … 9 more +│$/)
-  // then the field, under a rule
+  // then the entry box: a rule, `❯` and the field, a rule
   const field = at(rows, 'type your question')
-  expect(rows[field - 1]!.trim()).toMatch(/^─+$/)
+  expect(rows[field]).toBe(' ❯ type your question▏')
+  expect(rows[field - 1]).toMatch(/^ ─+$/)
+  expect(rows[field + 1]).toMatch(/^ ─+$/)
   expect(rows[field - 2]).toMatch(/^ {3}╰─+╯$/)
   // `… N more` shows the card whole, its takeaway too
   await pane.press({ key: (((await pane.findAll({ type: 'Button' })) as { key?: string }[]).find(b => /^more-/.test(String(b.key)))!).key! })
@@ -698,6 +700,8 @@ async function openedThread($: E, w: World, id: string): Promise<M> {
 }
 
 const ruled = (r: string | undefined) => /^ {3}─+$/.test(r ?? '')
+// an entry box's rule: from the margin's edge, as Claude Code's prompt box spans its column
+const boxRule = (r: string | undefined) => /^ ─+$/.test(r ?? '')
 
 test("a side thread alone: its question the title, one dim `about` row under it, then the chat as Claude Code draws one; no thread list", async ($, on) => {
   const w = world(on)
@@ -732,10 +736,15 @@ test("a side thread alone: its question the title, one dim `about` row under it,
   expect(text).not.toContain('[ card ]')
   expect(text).not.toContain('[[card')
   expect(text.split(SIZES.slice(0, 40)).length - 1).toBe(1)
-  // the field under the second rule; the keys in one dim row, `v` naming what it shows
+  // the entry box under the chat, as Claude Code's prompt box: a rule from the margin's edge, `❯` in the margin and the
+  // field, a rule; the keys in one dim row, `v` naming what it shows
   const bottom = rows.findIndex((r, i) => i > top && /^ {3}╰─+╯$/.test(r))
-  expect(ruled(rows[bottom + 1])).toBe(true)
-  expect(rows[bottom + 2]).toBe('   ask a follow-up question▏')
+  expect(boxRule(rows[bottom + 1])).toBe(true)
+  expect(rows[bottom + 2]).toBe(' ❯ ask a follow-up question▏')
+  expect(boxRule(rows[bottom + 3])).toBe(true)
+  // its rules end where the panel's do
+  expect(rows[bottom + 1]!.length).toBe(rows[2]!.length)
+  expect(JSON.stringify(await pane.find({ type: 'Input', key: (((await pane.findAll({ type: 'Input' })) as { key?: string }[]).find(i => /^ask-/.test(String(i.key)))!).key! }))).toContain('"rows":2')
   const hint = shown(await pane.find({ key: 'h-hints' })).trim()
   expect(hint).toBe('a to ask · v to show the passage · b to go back · x to close')
   // v shows the passage whole, under the rule and above the question; v again hides it
