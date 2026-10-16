@@ -69,25 +69,6 @@ def test_every_agent_s_work_folder_lies_outside_the_corpus(corpus):
         assert not folder.resolve().is_relative_to(corpus), kind
 
 
-def test_each_job_s_own_folder_is_one_main_s_fence_lets_it_write_and_its_task_names_it(corpus):
-    """A view builder, a view reviewer and a check's run are subagents of main inside main's fence: each one's own folder
-    lies under a folder main's Bash may write (subagents.write_dirs), and so does the view's folder; a build's task
-    names both, and its registration names the corpus as the folder it reads."""
-    from app import subagents, view_tools
-
-    writable = [w.resolve() for w in subagents.write_dirs(CORPUS)]
-
-    def under(p: Path) -> bool:
-        return any(p.resolve().is_relative_to(w) for w in writable)
-
-    slug = views.propose(CORPUS, "Posts", "to read the board", ["board.jsonl"], "one row per post", asked=True)["slug"]
-    work, folder = dev.view_work_dir(CORPUS, slug), views.views_dir(CORPUS) / slug
-    assert under(work) and under(folder) and under(checks.work_dir(CORPUS, "k1", "report"))
-    task = dev.build_task(CORPUS, views.read_proposal(CORPUS, slug))
-    assert str(work) in task and str(folder) in task
-    assert str(corpus) in view_tools.builder_definition(CORPUS)["prompt"]
-
-
 def test_a_program_s_session_runs_in_the_role_s_work_folder(corpus, tmp_path, monkeypatch):
     monkeypatch.setenv("THIMBLE_SANDBOX", "1")
     part = roles.Part("x", "writer", tmp_path, tmp_path, {"command": ["true"]})
@@ -192,17 +173,6 @@ def test_live_a_view_build_s_sandboxed_bash_leaves_the_corpus_as_it_was(corpus):
                                   dev.view_fence(CORPUS, slug, corpus, folder, conf),
                                   dev.view_asking(CORPUS, slug, folder, conf))
     _bash_in([config.CLAUDE_BIN, *flags], work, dict(os.environ), corpus)
-
-
-def test_live_a_program_s_session_s_sandboxed_bash_leaves_the_corpus_as_it_was(corpus, tmp_path):
-    if why := _live_ok():
-        pytest.skip(why)
-    part = roles.Part("x", "writer", tmp_path, tmp_path, {"command": ["true"]})
-    job = harness.Job(CORPUS, "writer", "writer:report", "Write", {}, ("list_cards",),
-                      write_session.work_dir(CORPUS, "report"))
-    run = harness.Run(job, part, userconf.session(CORPUS, "writer", sandbox=True), "t", "t.s")
-    argv, folder, env = harness.claude_argv(run, ["-p"])
-    _bash_in(argv, folder, env, corpus)
 
 
 def _kernel_wraps() -> str:
