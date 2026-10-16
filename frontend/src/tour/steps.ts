@@ -1,7 +1,8 @@
 // The tour's steps (the shape engine.ts takes): which surface each needs, what it points at, where its popover sits,
-// what it says and what it brings. Every example is the tour's own (examples.json, captured from real thimble markup;
-// all but the views step's are marked Example); a step that asks the analyst to act acts only on that example, so
-// nothing reaches the server.
+// what it says and what it brings; and what the welcome before them says. Every example is the tour's own
+// (examples.json, captured from real thimble markup; all but the views step's are marked Example); a step that asks the
+// analyst to act acts only on that example, so nothing reaches the server.
+import { DEMO_LINE } from '../lib/demo'
 import { setMarkup, type Api, type Example, type Step } from './engine'
 import reportFigs from './report-figs.json'
 
@@ -487,6 +488,15 @@ export function sessionTexts(demo: boolean): { chat: [string, string]; terminal:
     terminal: ['Your terminal', 'When you run thimble yourself, the session also runs in the terminal where you started it. It shows the same conversation, and you can type in either.'],
     ask: 'Type a question and press Enter. With Claude connected, the answer comes in a new thread in the chat.',
   }
+}
+
+/** What the welcome says before its buttons, a paragraph of markup each: on a demo page (`demo`, lib/demo) DEMO_LINE
+ * first, its span in backticks drawn as code, then the question; elsewhere the question and that the tour uses example
+ * data. */
+export function welcomeTexts(demo: boolean): string[] {
+  const ask = 'Would you like a short tour?'
+  if (demo) return [DEMO_LINE.replace(/`([^`]*)`/g, '<code>$1</code>'), ask]
+  return [`${ask} The demo tour uses <b>example data</b>.`]
 }
 
 /** The tour, for the ask key written `key` (⌘ or ⌥ on a Mac, Ctrl or Alt elsewhere, as Settings picks). With the chat

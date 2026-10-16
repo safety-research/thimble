@@ -6,7 +6,7 @@
 // live Claude Code session." The same note shows in the chat for every other action that needs Claude (Ask about this, a
 // card's ask, a report's request, an agent's start), which each ask demoStop() first, and keeps what was typed. No view
 // proposal card shows there, and the tour says it is a demo and that the chat takes no typing. The tour's welcome,
-// which dims the line, says it first.
+// which dims the line, says it first; elsewhere the welcome says that the tour uses example data.
 import { act } from 'react'
 import App from '../../src/App.tsx'
 import { TIP_DELAY_MS } from '../../src/components/Tooltip.tsx'
@@ -181,7 +181,7 @@ describe('what the page shows', () => {
     expect(demo.length).toBe(live.length)
   })
 
-  test("the tour's welcome says the line first on a demo page, then asks, and elsewhere only asks", () => {
+  test("the tour's welcome says the line first on a demo page, then asks; elsewhere it asks and says the tour uses example data", () => {
     const welcome = (demo: boolean) => {
       setDemo(demo)
       const tour = runTour({ welcome: true, chat: true })
@@ -190,13 +190,14 @@ describe('what the page shows', () => {
         title: pop.querySelector('.tour-title')?.textContent,
         body: [...pop.querySelectorAll('.tour-body')].map((p) => p.textContent),
         code: [...pop.querySelectorAll('.tour-body code')].map((c) => c.textContent),
+        bold: [...pop.querySelectorAll('.tour-body b')].map((b) => b.textContent),
         buttons: [...pop.querySelectorAll('button')].map((b) => b.textContent),
       }
       tour.end()
       return seen
     }
     const asks = { title: 'Welcome to thimble', buttons: ['Skip', 'Take the tour'] }
-    expect(welcome(true)).toEqual({ ...asks, body: [DEMO_LINE.replace(/`/g, ''), 'Would you like a short tour?'], code: ['thimble'] })
-    expect(welcome(false)).toEqual({ ...asks, body: ['Would you like a short tour?'], code: [] })
+    expect(welcome(true)).toEqual({ ...asks, body: [DEMO_LINE.replace(/`/g, ''), 'Would you like a short tour?'], code: ['thimble'], bold: [] })
+    expect(welcome(false)).toEqual({ ...asks, body: ['Would you like a short tour? The demo tour uses example data.'], code: [], bold: ['example data'] })
   })
 })

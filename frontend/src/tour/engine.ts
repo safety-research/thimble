@@ -122,8 +122,8 @@ export interface StartOptions {
   at?: number
   /** the first launch: a small card asks first whether to take the tour */
   welcome?: boolean
-  /** a line the welcome says before it asks (a demo page's DEMO_LINE, lib/demo); a span in backticks is code */
-  lead?: string
+  /** what the welcome says above its buttons, a paragraph of markup each (./steps welcomeTexts) */
+  says?: string[]
   /** the tour was asked for again (Settings) */
   replay?: boolean
   /** shows a surface (the shell's own tab switch) */
@@ -448,15 +448,15 @@ export function createTour(snaps: Snaps): Tour {
     caret.style.transform = `rotate(${{ right: -45, left: 135, bottom: 45, top: -135 }[place]}deg)`
   }
 
-  // the welcome: centred over the whole page, dimmed; not a numbered step. Its `lead`, if any, comes first
+  // the welcome: centred over the whole page, dimmed; not a numbered step
   const drawWelcome = () => {
     setMarkup(mask, FULL)
     block.style.clipPath = ''
     open = null
     pop.classList.add('tour-welcome')
-    const lead = opts.lead ? `<p class="tour-body">${opts.lead.replace(/`([^`]*)`/g, '<code>$1</code>')}</p>` : ''
+    const says = (opts.says || []).map((p) => `<p class="tour-body">${p}</p>`).join('')
     const html = `<div class="tour-head"><div class="tour-title">Welcome to thimble</div></div>
-      ${lead}<p class="tour-body">Would you like a short tour?</p>
+      ${says}
       <div class="tour-foot">${btn('skip', 'btn-ghost tour-skip', 'Skip')}<span class="tour-spacer"></span>${btn('begin', 'btn-primary', 'Take the tour')}</div>`
     if (pop.dataset.html !== html) {
       setMarkup(pop, html)
