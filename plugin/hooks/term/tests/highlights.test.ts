@@ -98,6 +98,39 @@ test('a click on the tint or on the flag opens the panel at Checks on that comme
   await ui.unmount()
 })
 
+test('a citation inside a highlighted passage opens the citation; anywhere else on the highlight opens the comment', SLOW, async ($, on) => {
+  // Matt (18:30): the more specific target wins
+  const w = world(on)
+  const cited = 'After 19 June there are [0](README.md#L3) new messages to other agents on any page.'
+  const text = `${FIRST} ${cited}`
+  const at0 = text.indexOf(cited)
+  await startSession($, w)
+  await aTurn($, w, 'r1', text)
+  w.comments = [comment({ start: at0, end: at0 + cited.length, quote: cited })]
+  w.stamps.set(`${WS}/answer-comments.json`, 2)
+  await w.clock.advance(1100)
+  const msg = { plugin: 'thimble', component: 'AssistantMessage', requestId: 'r1', surface: 'terminal', viewport: { columns: 150, rows: 40, isFullscreen: true }, props: { text, isFirstOfReply: true } } as never
+  let ui = (await $.ui.mount(msg)) as unknown as M
+  await w.clock.advance(300)
+  await ui.unmount()
+  ui = (await $.ui.mount(msg)) as unknown as M
+  const { tints, json } = await tintsOf(ui)
+  expect(tints.map(t => t.id)).toEqual(['c1'])
+  const para = /"key":"(para-\d+)"/.exec(json)![1]!
+  // the citation's value `0`, inside the tint on row 0
+  const x = FIRST.length + 1 + 'After 19 June there are '.length
+  await ui.pointer({ type: 'down', x, y: 0, button: 'left', in: para } as never)
+  await ui.pointer({ type: 'up', x, y: 0, button: 'left', in: para } as never)
+  await w.clock.settle()
+  expect(w.panes.at(-1)).toMatchObject({ title: 'Citation' })
+  // the words before it (`are`), on the same tint: the comment
+  await ui.pointer({ type: 'down', x: x - 4, y: 0, button: 'left', in: para } as never)
+  await ui.pointer({ type: 'up', x: x - 4, y: 0, button: 'left', in: para } as never)
+  await w.clock.settle()
+  expect(w.panes.at(-1)).toMatchObject({ title: 'Important details' })
+  await ui.unmount()
+})
+
 test('"Checks" off: no tint and no flag', { ...SLOW, options: { checks: false } }, async ($, on) => {
   const w = world(on)
   w.features.checks = false
