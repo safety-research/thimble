@@ -18,9 +18,12 @@ Each tools/list the shim answers once thimble is on writes the record `<home>/up
 does a new session id (/clear, /resume) or a marker that appears.
 
 Placement (placement, live check LC12): plugin/.mcp.json sets no server `alwaysLoad`, so `claude` starts without
-waiting for the shim; load_thimble has no `anthropic/alwaysLoad` (deferred) and each tool of thimble's carries it true
-(loaded, and surfaced when it is first listed in the middle of a session). The fallback gives 0.8.0's
-form instead: load_thimble's alwaysLoad false and the other tools' absent; the shim takes it when .mcp.json gives the
+waiting for the shim; load_thimble has no `anthropic/alwaysLoad` (deferred). In the analyst's session, each tool of
+main's but those of tools.ALWAYS_LOADED carries it false (tools.deferred_in_main: deferred, so Claude Code shows main
+its name and ToolSearch loads its schema), and every other tool carries it true (loaded, and surfaced when it is first
+listed in the middle of a session): the everyday tools, and the tools only thimble's agents call, wherever a shim lists
+them. In a session thimble starts, each tool carries it true. The fallback gives 0.8.0's form instead: load_thimble's
+alwaysLoad false, the deferred tools' false and the other tools' absent; the shim takes it when .mcp.json gives the
 server `alwaysLoad: true`, so that one switch sets both.
 
 Tools are listed from disk (app.tools.list, schemas from prompts/tools.md), with the view tools' text for the page a
@@ -343,16 +346,20 @@ def placement() -> str:
     return "fallback" if always is True else "lc12"
 
 
-def tool_meta(entry: bool) -> dict[str, Any] | None:
-    """A listed tool's `_meta` by placement() (module note): load_thimble's search hint, and alwaysLoad true on each of
-    thimble's tools (absent on load_thimble); with the fallback, alwaysLoad false on load_thimble and none on the
-    others."""
+def tool_meta(entry: bool, name: str | None = None) -> dict[str, Any] | None:
+    """A listed tool's `_meta` by placement() (module note): load_thimble's search hint; in the analyst's session
+    alwaysLoad false on the tools tools.deferred_in_main names and true on the others, and in a session thimble starts
+    true on each (absent on load_thimble); with the fallback, alwaysLoad false on load_thimble and on the deferred tools,
+    and none on the others."""
+    fallback = placement() == "fallback"
     if entry:
         meta: dict[str, Any] = {tools.META_SEARCH_HINT: tools.SEARCH_HINT}
-        if placement() == "fallback":
+        if fallback:
             meta[tools.META_ALWAYS_LOAD] = False
         return meta
-    return None if placement() == "fallback" else {tools.META_ALWAYS_LOAD: True}
+    if not own_session()[0] and tools.deferred_in_main(name):
+        return {tools.META_ALWAYS_LOAD: False}
+    return None if fallback else {tools.META_ALWAYS_LOAD: True}
 
 
 def workspace() -> str | None:
@@ -568,7 +575,7 @@ class Shim(MCPServer):
 
 def _set_tools(server: MCPServer, entries: list[dict[str, Any]], entry: bool = False) -> None:
     """The tools `server` lists replaced by `entries`, each with its `_meta` (tool_meta)."""
-    server._tool_manager._tools = {t.name: t for t in (_tool(e, tool_meta(entry)) for e in entries)}
+    server._tool_manager._tools = {t.name: t for t in (_tool(e, tool_meta(entry, e["name"])) for e in entries)}
 
 
 def entry_entries() -> list[dict[str, Any]]:
