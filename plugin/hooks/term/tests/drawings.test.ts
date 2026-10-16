@@ -818,6 +818,52 @@ test("a thread's turns keep a rhythm: a blank row between a question and its ans
   await pane.unmount()
 })
 
+test("a side thread's turn at work as Claude Code draws one: a blank row, `⏺ ◌ N tool calls` dim, its latest words after `⎿`; `stop`, then the entry box", async ($, on) => {
+  const w = world(on)
+  sizeThread(w, [], [
+    { type: 'user', text: 'And the logs, by participant?' },
+    { type: 'tool_use', id: 'u2', name: 'Bash', input: {} },
+    { type: 'tool_use', id: 'u3', name: 'Bash', input: {} },
+    { type: 'text', delta: 'Reading the logs folder.\n\nCounting **by participant** now.' },
+  ])
+  Object.assign((w.chats.tz as { meta: Record<string, unknown> }).meta, { running: true })
+  await start($, w)
+  const pane = await openedThread($, w, 'tz')
+  const rows = await screen(pane, 96)
+  print('a thread at work', rows)
+  const q = rows.indexOf(' ❯ And the logs, by participant?')
+  expect(q).toBeGreaterThan(0)
+  expect(rows.slice(q, q + 7)).toEqual([' ❯ And the logs, by participant?', '', ' ⏺ ◌ 2 tool calls', '   ⎿  Counting by participant now.', '', '   stop', rows[q + 6]])
+  expect(boxRule(rows[q + 6])).toBe(true)
+  expect(rows[q + 7]).toBe(' ❯ ask a follow-up question▏')
+  const run = JSON.stringify(await pane.find({ key: 'm:thread-run-2' }))
+  expect(run).toContain('"dimColor":true')
+  await pane.unmount()
+})
+
+test("a side thread's turn that ended with no answer, as Claude Code says an interrupt or an error: a `⎿` row right under its question, dim for a stop, red with × for a failure", async ($, on) => {
+  const w = world(on)
+  sizeThread(w, [], [
+    { type: 'user', text: 'And the logs?' },
+    { type: 'error', kind: 'stopped', error: 'stopped by the analyst' },
+    { type: 'user', text: 'By participant?' },
+    { type: 'error', error: 'the fork ended: overloaded' },
+  ])
+  await start($, w)
+  const pane = await openedThread($, w, 'tz')
+  const rows = await screen(pane, 96)
+  print('a thread stopped, then failed', rows)
+  const q = rows.indexOf(' ❯ And the logs?')
+  expect(q).toBeGreaterThan(0)
+  expect(rows.slice(q, q + 5)).toEqual([' ❯ And the logs?', '   ⎿  stopped by the analyst.', '', ' ❯ By participant?', '   ⎿  × the fork ended: overloaded'])
+  expect(boxRule(rows[q + 5])).toBe(true)
+  const stopped = JSON.stringify(await pane.find({ key: 'thread-err-2' }))
+  expect(stopped).toContain('"dimColor":true')
+  expect(stopped).not.toContain('"color":"error"')
+  expect(JSON.stringify(await pane.find({ key: 'thread-err-3' }))).toContain('{"type":"Text","props":{"wrap":"wrap","color":"error"},"children":["× the fork ended: overloaded"]}')
+  await pane.unmount()
+})
+
 test("a side thread's question as Claude Code draws a prompt: its blank lines kept on the prompt's background, `❯` in the inactive color", async ($, on) => {
   const w = world(on)
   sizeThread(w, [], [

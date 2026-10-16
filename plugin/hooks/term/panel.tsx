@@ -2108,6 +2108,44 @@ function promptEl(els: El, q: string, cols: number, key: string): RenderElement 
   )
 }
 
+/** A side thread's turn while it works, as Claude Code draws a turn at work: `⏺` dim in the margin and what it does
+ *  (`◌ 2 tool calls`, `◌ answering` before its first), then its latest words dim on a row under it after `⎿`, cut at
+ *  the row's end. */
+function workingEl(els: El, turn: { tools: number; partial: string }, cols: number, key: string): RenderElement {
+  const { Box, Text } = els
+  const latest = turn.partial.split('\n').map(l => l.trim()).filter(Boolean).at(-1) ?? ''
+  return (
+    <Box key={marginKey(key)} flexDirection="column">
+      <Text dimColor wrap="truncate-end">
+        {cut(`⏺ ◌ ${turn.tools ? plural(turn.tools, 'tool call') : 'answering'}`, cols + MARGIN_W)}
+      </Text>
+      {latest ? (
+        <Text key={`${key}-latest`} dimColor wrap="truncate-end">
+          {cut(`  ⎿  ${plainCites(latest).replace(/\*\*|__|`/g, '')}`, cols + MARGIN_W)}
+        </Text>
+      ) : null}
+    </Box>
+  )
+}
+
+/** A row under a side thread's question that says how its turn ended without an answer, as Claude Code says an
+ *  interrupt or an error under a prompt: `⎿` at A0, its words after two cells, wrapped there; dim, or in `color`. */
+function underEl(els: El, words: string, key: string, color?: string): RenderElement {
+  const { Box, Text } = els
+  return (
+    <Box key={key} flexDirection="row">
+      <Box width={3} flexShrink={0}>
+        <Text dimColor>⎿  </Text>
+      </Box>
+      <Box flexGrow={1} flexShrink={1}>
+        <Text wrap="wrap" {...(color ? { color } : { dimColor: true })}>
+          {words}
+        </Text>
+      </Box>
+    </Box>
+  )
+}
+
 /** The threads panel (SPEC.md, section 7, "The threads panel"): its title; under the rule the tree, a root per place
  *  a thread was asked from (`main`, or `report "…"`, its count of threads dim at R and `N new` in green) with a blank
  *  row between them, each thread
@@ -2280,24 +2318,23 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
         gap(`thread-gap-q-${k}`)
         body.push(q)
       }
-      // its answer after a blank row: what the turn is doing, or how it ended, or the answer after Claude Code's ⏺
-      // with the cards it cites where it cites them and the turn's other cards after it
-      const status =
-        turn.state === 'running' ? (
-          <Text key={`thread-run-${k}`} dimColor wrap="truncate-end">
-            {cut(`◌ ${plural(turn.tools, 'tool call')}${turn.partial.trim() ? ` · ${clip(turn.partial.trim(), cols - 30)}` : ''}`, cols)}
-          </Text>
-        ) : stoppedTurn(turn) ? (
-          <Text key={`thread-err-${k}`} dimColor wrap="wrap">
-            {turn.a.trim().replace(/([^.!?])$/, '$1.')}
-          </Text>
-        ) : turn.state === 'error' ? (
-          <Text key={`thread-err-${k}`} color={COLORS.problem} wrap="wrap">{`× ${turn.a}`}</Text>
-        ) : null
+      // its answer as Claude Code draws a turn: while it works, a blank row, then `⏺` and what it does (`◌ 2 tool
+      // calls`), its latest words under it after `⎿`; a stop or a failure on a `⎿` row right under the question, as
+      // Claude Code says an interrupt or an error; or, after a blank row, the answer after `⏺` with the cards it cites
+      // where it cites them and the turn's other cards after it
+      const status: { el: RenderElement; gap: boolean } | null =
+        turn.state === 'running'
+          ? { el: workingEl(els, turn, cols, `thread-run-${k}`), gap: true }
+          : stoppedTurn(turn)
+            ? { el: underEl(els, turn.a.trim().replace(/([^.!?])$/, '$1.'), `thread-err-${k}`), gap: false }
+            : turn.state === 'error'
+              ? { el: underEl(els, `× ${turn.a.trim()}`, `thread-err-${k}`, COLORS.problem), gap: false }
+              : null
       const md = cardsInline(turn.state === 'done' ? turn.a.trim() : '', turn.cards ?? [])
       if (status) {
-        gap(`thread-gap-a-${k}`)
-        body.push(status)
+        if (status.gap) gap(`thread-gap-a-${k}`)
+        else underRule = false
+        body.push(status.el)
       }
       if (md) {
         gap(`thread-gap-c-${k}`)
