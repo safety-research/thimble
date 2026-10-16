@@ -260,7 +260,7 @@ reads with thousands separators from 1,000 wherever thimble-term draws it; a num
 an id) reads as written. No hex or hash ids: a card is named by its question, a thread by its first question, a script
 by its file name. A citation's status reads `found on the card`, `found in revisions.jsonl line 10566`, `found in the
 command's output, line 1` or `not found: …`, then why for a problem; a citation in a card's takeaway reads `checking`
-while thimble's links check runs.
+while thimble's links check runs. In the citation panel, a citation still checked reads `◌ being verified`.
 
 ### 6. Controls and fields
 
