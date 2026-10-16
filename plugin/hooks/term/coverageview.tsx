@@ -144,7 +144,7 @@ const TWO_INDENT = 4
  *  and searched in their colors, which the numbers keep), one line a row (`▸` on one that drills in), and under the list
  *  a rule and one totals line per unit. Where the columns do not fit the size goes first, then folder and files share a
  *  column, then each row takes two lines so its names stay whole, and last the counts go (the percents stay). */
-export function coverageLines(rows: readonly CoverageRow[], pick: string, cols: number, o: { totals?: readonly CoverageTotal[]; drilled?: boolean; more?: number; level?: string } = {}): { head: Line[]; lines: Line[]; totals: Line[]; hits: { y: number; key: string }[]; picks: string[] } {
+export function coverageLines(rows: readonly CoverageRow[], pick: string, cols: number, o: { totals?: readonly CoverageTotal[]; drilled?: boolean; more?: number; level?: string } = {}): { head: Line[]; lines: Line[]; units: { key: string | null; lines: Line[] }[]; totals: Line[]; hits: { y: number; key: string }[]; picks: string[] } {
   // the folder the view shows names the files right in it dim, as `(top level)` is: the title already says where
   const here = folderWords(o.level ?? '')
   const cells: Cells[] = rows.map(r => {
@@ -225,17 +225,42 @@ export function coverageLines(rows: readonly CoverageRow[], pick: string, cols: 
   const head: Line[] = tier.two
     ? [pointed([{ s: '  ' }, dim(cut('folder · files', nameW))], false), pointed([{ s: ' '.repeat(2 + TWO_INDENT) }, ...numbersHead], false)]
     : [pointed([{ s: '  ' }, ...(tier.split ? [dim('folder'.padEnd(folderW)), { s: ' '.repeat(GAP) }, dim('files'.padEnd(nameW))] : [dim(cut('folder · files', nameW).padEnd(nameW))]), { s: ' '.repeat(GAP) }, ...numbersHead], false)]
+  // each row's lines as one unit, so a list cut to the pane cuts between rows, never inside one
+  const units: { key: string | null; lines: Line[] }[] = rows.map((r, i) => ({ key: r.key, lines: rowLines(cells[i]!).map((l, k) => (k === 0 ? pointed(l, r.key === pick) : pointed(l, false))) }))
+  if (o.more && o.more > 0) units.push({ key: null, lines: [pointed([{ s: '  ' }, dim(cut(`… ${num(o.more)} more not listed here (the list holds the first ${num(rows.length)})`, cols - 2))], false)] })
   const lines: Line[] = []
   const hits: { y: number; key: string }[] = []
-  rows.forEach((r, i) => {
-    rowLines(cells[i]!).forEach((l, k) => {
-      hits.push({ y: lines.length, key: r.key })
-      lines.push(k === 0 ? pointed(l, r.key === pick) : pointed(l, false))
-    })
-  })
-  if (o.more && o.more > 0) lines.push(pointed([{ s: '  ' }, dim(cut(`… ${num(o.more)} more not listed here (the list holds the first ${num(rows.length)})`, cols - 2))], false))
+  for (const u of units) {
+    for (const l of u.lines) {
+      if (u.key !== null) hits.push({ y: lines.length, key: u.key })
+      lines.push(l)
+    }
+  }
   const totalLines: Line[] = totals.length ? [pointed([{ s: '  ' }, { s: '─'.repeat(Math.max(1, cols - 2)), fg: COLORS.rule }], false), ...totals.flatMap(t => rowLines(t).map(l => pointed(l, false)))] : []
-  return { head, lines, totals: totalLines, hits, picks: rows.map(r => r.key) }
+  return { head, lines, units, totals: totalLines, hits, picks: rows.map(r => r.key) }
+}
+
+/** A list of units (a row's one or two lines) cut to `room` lines by windowList over one line a unit, then each unit
+ *  drawn whole: the counts of the rows cut off above and below count rows, and no row is cut in half. */
+export function windowUnits(key: string, units: readonly { key: string | null; lines: Line[] }[], at: number, room: number, run: (key: string) => (() => Promise<void> | void), bump: () => Promise<void>, cols: number): { lines: Line[]; hits: LineHit[] } {
+  const per = Math.max(1, ...units.map(u => u.lines.length))
+  const firsts = units.map(u => u.lines[0]!)
+  const unitHits: LineHit[] = units.flatMap((u, i) => (u.key === null ? [] : [{ y: i, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: run(u.key) }]))
+  // two-line units: the slots leave a line for each count row and two for each unit
+  const slots = per === 1 ? room : Math.floor((room - 2) / per) + 1
+  const win = windowList(key, firsts, unitHits, at, slots, bump)
+  const which = new Map(firsts.map((l, i) => [l, i]))
+  const lines: Line[] = []
+  const hits: LineHit[] = []
+  win.lines.forEach((l, y) => {
+    const i = which.get(l)
+    const hs = win.hits.filter(h => h.y === y)
+    for (const ul of i === undefined ? [l] : units[i]!.lines) {
+      for (const h of hs) hits.push({ ...h, y: lines.length })
+      lines.push(ul)
+    }
+  })
+  return { lines, hits }
 }
 
 // the row the keys chose, by the level shown
@@ -296,11 +321,11 @@ async function drawCoverage(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<Render
     picks.set(pickKey, lay.picks[Math.max(0, Math.min(lay.picks.length - 1, at + d))] ?? '')
     return cx.bumpPanel()
   }
-  const hits: LineHit[] = lay.hits.map(h => ({ y: h.y, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: () => {
-    picks.set(pickKey, h.key)
-    const r = rows.find(x => x.key === h.key)
+  const run = (key: string) => () => {
+    picks.set(pickKey, key)
+    const r = rows.find(x => x.key === key)
     return r ? open(r) : undefined
-  } }))
+  }
   const hints = ['↑↓ to choose', ...(rows.some(r => r.drill || r.path) ? ['Enter to open a folder, a group or a file'] : []), 'o to open Files in the browser', ...(folder || match ? ['b to go back'] : []), 'x to close']
   const onKey = (k: string) => {
     if (k === 'up' || k === 'k') return step(-1)
@@ -313,8 +338,7 @@ async function drawCoverage(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<Render
   }
   if (rows.length) body.push(linesEl(cx, e, marginKey('coverage-head'), lay.head, [], cols + MARGIN_W))
   const room = paneRows() - 1 - body.length - (rows.length ? lay.head.length - 1 : 0) - lay.totals.length - hintHeight(hints, cols)
-  const at = lay.lines.findIndex((_, y) => lay.hits.some(h => h.y === y && h.key === pick))
-  const win = windowList(`coverage:${pickKey}`, lay.lines, hits, at, room, () => cx.bumpPanel())
+  const win = windowUnits(`coverage:${pickKey}`, lay.units, lay.units.findIndex(u => u.key === pick), room, run, () => cx.bumpPanel(), cols)
   if (rows.length) body.push(linesEl(cx, e, marginKey('coverage-list'), win.lines, win.hits, cols + MARGIN_W, onKey))
   else body.push(none(cx, e, st?.counting ? '◌ listing the corpus' : 'no files here count for coverage'))
   if (rows.length && lay.totals.length) body.push(linesEl(cx, e, marginKey('coverage-totals'), lay.totals, [], cols + MARGIN_W))

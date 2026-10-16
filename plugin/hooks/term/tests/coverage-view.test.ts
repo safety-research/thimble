@@ -179,6 +179,15 @@ test('a long list scrolls under its header, and the totals stay under it', { tim
   expect((await listText(m, 'm:coverage-head'))[0]).toMatch(/folder +files +seen/)
   expect((await listText(m, 'm:coverage-totals'))[1]).toMatch(/total .* records$/)
   await m.unmount()
+  // two lines a row in a narrow pane: the list is cut between rows, and its count rows count rows
+  const n = await pane($, 46, 30)
+  const two = await listText(n, 'm:coverage-list')
+  const more = Number(/↓ (\d+) more/.exec(two.at(-1)!)?.[1])
+  expect(two.at(-2)).toMatch(/ (files?|records?)$/)
+  const shown = two.filter(l => /\.md$/.test(l.trim())).length
+  expect(two.filter(l => / (files?|records?)$/.test(l)).length).toBe(shown)
+  expect(shown + more).toBe(60)
+  await n.unmount()
 })
 
 test("the rows' parts: units by row, percents as coverage.py says them, folders in words, paths cut in their middle, titles, the summary line's words", () => {
