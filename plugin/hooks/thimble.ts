@@ -1130,3 +1130,10 @@ export const register: Register = on => {
     return r
   })
 }
+
+/** Stand-in for the runtime lane's export (SPEC-v2 C13): the terminal UI calls it right after an activation it made or
+ *  saw, so the module registers thimble's agent types and turns its bridge on in this turn. It does nothing here. */
+export async function bridgeActivated($: Engine, a: { ws: string; path: string; cwd: string; via: string; role: 'main' | 'peer'; at: number }): Promise<void> {
+  void $
+  void a
+}

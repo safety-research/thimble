@@ -2,9 +2,56 @@
   "name": "thimble",
   "displayName": "thimble",
   "description": "A browser workspace beside a Claude Code session for making sense of a corpus of files: chat, files, a canvas of cards and a report. Start it with /thimble in a Claude Code session, or with the `thimble` command, a shortcut that runs Claude Code with this plugin and /thimble: the session is the main thread, the browser mirrors it, and what the analyst asks in the browser reaches the session through the plugin's hooks (hooks/hooks.json). One MCP server (the thimble tools), the /thimble and /thimble:orient skills, and the shared skill, which loads thimble's shared guidance for subagents that are not forks, since those get none of their parent's prompt. The orientation, its critic, a writer, the builder and the reviewer of a view, each run of a report check and the agent of a code ticket are subagents of the session, of the types the plugin's hooks module registers (hooks/thimble.ts).",
-  "version": "0.8.0",
-  "author": { "name": "Matthew Joerke" },
+  "version": "0.9.0",
+  "author": {
+    "name": "Matthew Joerke"
+  },
   "repository": "https://github.com/safety-research/thimble",
   "license": "Apache-2.0",
-  "mcpServers": "./.mcp.json"
+  "mcpServers": "./.mcp.json",
+  "types": "./hooks/term/types/index.d.ts",
+  "userConfig": {
+    "autoActivate": {
+      "type": "boolean",
+      "title": "Turn on when Claude reads data",
+      "description": "thimble turns on in a folder when Claude reads a data file there. Off: only /thimble, the thimble command or a thimble tool turn it on.",
+      "default": true
+    },
+    "viewProposals": {
+      "type": "boolean",
+      "title": "View proposals",
+      "description": "After a turn, thimble may propose a view of the files.",
+      "default": true
+    },
+    "labels": {
+      "type": "boolean",
+      "title": "Labels",
+      "description": "Claude can label every record of a file with a model.",
+      "default": true
+    },
+    "checks": {
+      "type": "boolean",
+      "title": "Checks",
+      "description": "Checks read Claude's answers and comment on passages.",
+      "default": true
+    },
+    "citationMarks": {
+      "type": "boolean",
+      "title": "Citation marks",
+      "description": "Citations show a check mark or a red cross once thimble checks them.",
+      "default": true
+    },
+    "coverage": {
+      "type": "boolean",
+      "title": "Coverage",
+      "description": "A line under answers says how much of the data Claude saw.",
+      "default": true
+    },
+    "cardCheck": {
+      "type": "boolean",
+      "title": "Card check",
+      "description": "A subagent checks each new card.",
+      "default": true
+    }
+  }
 }
