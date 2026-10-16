@@ -86,7 +86,7 @@ def test_open_database_is_read_only_and_checks_the_header(databases_data):
 # --------------------------------------------------------------------------- registration
 
 
-def test_register_route_lists_and_serves_a_directory_without_a_manifest(data_tmp, tmp_path):
+def test_register_route_lists_and_serves_a_directory_without_a_manifest(data_tmp, tmp_path, plugin_headers):
     import json
 
     from app import config, corpus
@@ -95,7 +95,7 @@ def test_register_route_lists_and_serves_a_directory_without_a_manifest(data_tmp
     (run / "agents").mkdir(parents=True)
     (run / "agents" / "agent-01.jsonl").write_text('{"type": "user", "text": "hi"}\n')
     (run / "notes.md").write_text("# notes\n")
-    r = client.post("/api/corpora/register", json={"path": str(run)})
+    r = client.post("/api/corpora/register", json={"path": str(run)}, headers=plugin_headers())
     assert r.status_code == 201, r.text
     rec = r.json()
     assert rec["name"] == "incident-run" and rec["manifest"] == {"name": "incident-run", "description": ""}
@@ -112,25 +112,28 @@ def test_register_route_lists_and_serves_a_directory_without_a_manifest(data_tmp
     page = client.get("/api/corpora/incident-run/source", params={"path": "agents/agent-01.jsonl"}).json()
     assert page["kind"] == "agent" and page["records"][0]["record"]["text"] == "hi"
     # idempotent, and a path inside an existing corpus is that corpus (nothing written)
-    assert client.post("/api/corpora/register", json={"path": str(run / "agents")}).json()["name"] == "incident-run"
-    assert client.post("/api/corpora/register", json={"path": str(data_tmp / "mini" / "agents")}).json()["name"] == "mini"
+    assert client.post("/api/corpora/register", json={"path": str(run / "agents")}, headers=plugin_headers()).json()["name"] == "incident-run"
+    assert client.post("/api/corpora/register", json={"path": str(data_tmp / "mini" / "agents")}, headers=plugin_headers()).json()["name"] == "mini"
     assert sorted(p.name for p in data_tmp.glob("*.corpus.json")) == ["incident-run.corpus.json"]
 
 
 def test_a_file_read_counts_as_the_analysts_view_only_with_the_analysts_cookie(monkeypatch):
     """The view log (viewlog), which the telemetry export merges, records the browser's reads of a file. Card code
     reads through the same routes without the analyst's cookie (hook_auth.analyst), so its reads are not recorded."""
-    from conftest import UI_KEY, _record
+    from conftest import UI_COOKIE_VALUE, UI_KEY_VALUE, _record_paired
 
     from app import hook_auth, viewlog
 
     monkeypatch.setattr(viewlog, "_recent", {})
-    _record(ui_key=UI_KEY)
+    _record_paired(UI_COOKIE_VALUE)
     c = TestClient(app)
     assert c.get("/api/corpora/mini/source", params={"path": "agents/agent-01.jsonl"}).status_code == 200
     assert viewlog.rows("mini") == []
-    c.cookies.set(hook_auth.ui_cookie(), UI_KEY)
+    c.cookies.set(hook_auth.ui_cookie(), UI_COOKIE_VALUE)
     assert c.get("/api/corpora/mini/source", params={"path": "agents/agent-01.jsonl"}).status_code == 200
+    assert viewlog.rows("mini") == [], "the cookie counts only under its browser's path"
+    page = f"/b/{UI_KEY_VALUE}"  # where the page asks (hook_auth.browser_path)
+    assert c.get(f"{page}/api/corpora/mini/source", params={"path": "agents/agent-01.jsonl"}).status_code == 200
     assert [(r["actor"], r["path"]) for r in viewlog.rows("mini")] == [("analyst", "agents/agent-01.jsonl")]
 
 
@@ -261,7 +264,7 @@ def test_the_stop_route_stops_only_the_search_it_names(monkeypatch):
     assert client.post("/api/corpora/nope/sources/grep/stop", json={"search": 1}).status_code == 404
 
 
-def test_a_folder_opened_through_a_symlink_shows_the_path_the_analyst_used(data_tmp, tmp_path):
+def test_a_folder_opened_through_a_symlink_shows_the_path_the_analyst_used(data_tmp, tmp_path, plugin_headers):
     """The registry keeps the folder's real path, and beside it the symlink the analyst opened it by, which the
     dashboard shows; a path that is not another way to the same folder is not kept, and null clears it."""
     real = tmp_path / "store" / "village"
@@ -270,16 +273,16 @@ def test_a_folder_opened_through_a_symlink_shows_the_path_the_analyst_used(data_
     link = tmp_path / "home" / "village"
     link.parent.mkdir()
     link.symlink_to(real)
-    rec = client.post("/api/corpora/register", json={"path": str(link), "exact": True, "shown": str(link)}).json()
+    rec = client.post("/api/corpora/register", json={"path": str(link), "exact": True, "shown": str(link)}, headers=plugin_headers()).json()
     assert rec["path"] == str(real.resolve()) and rec["shown"] == str(link)
     row = next(r for r in client.get("/api/corpora").json() if r["name"] == rec["name"])
     assert row["path"] == str(real.resolve()) and row["shown"] == str(link)
-    again = client.post("/api/corpora/register", json={"path": str(real), "exact": True}).json()
+    again = client.post("/api/corpora/register", json={"path": str(real), "exact": True}, headers=plugin_headers()).json()
     assert again["shown"] == str(link), "a registration that does not say keeps the path"
-    other = client.post("/api/corpora/register", json={"path": str(real), "exact": True, "shown": str(tmp_path)}).json()
+    other = client.post("/api/corpora/register", json={"path": str(real), "exact": True, "shown": str(tmp_path)}, headers=plugin_headers()).json()
     assert "shown" not in other
-    client.post("/api/corpora/register", json={"path": str(real), "exact": True, "shown": str(link)})
-    cleared = client.post("/api/corpora/register", json={"path": str(real), "exact": True, "shown": None}).json()
+    client.post("/api/corpora/register", json={"path": str(real), "exact": True, "shown": str(link)}, headers=plugin_headers())
+    cleared = client.post("/api/corpora/register", json={"path": str(real), "exact": True, "shown": None}, headers=plugin_headers()).json()
     assert "shown" not in cleared
 
 

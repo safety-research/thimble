@@ -13,8 +13,8 @@ import { usedCells } from './cards'
 import { SidebarShow, useChecks, useSidebar } from './Checks'
 import { checkColumns, openComments, passageFlags, shownComments, type DocComment } from './checkComments'
 import { commentsApi } from './commentsApi'
+import { useLookedAt } from './newComments'
 import { ReportEditor, type DocFilter, type EditorHandle } from './Editor'
-import { forgetFigureCell } from './FigureBlock'
 import { Margin, RAIL_ROOM } from './Margin'
 import { allSentences, paragraphOf, passageOrder, readableText, TITLE_ID } from './model'
 import { Sidebar } from './Sidebar'
@@ -49,10 +49,7 @@ export function useCanvas(ws: string): { cells: Cell[]; groups: Group[] } {
     }
     void read()
     const offs = [
-      bus.on('cell', (e) => {
-        forgetFigureCell(ws, e.cell)
-        later()
-      }),
+      bus.on('cell', later),
       bus.on('wsEvent', (ev) => {
         if (ev.type === 'notebook' || ev.type === 'group' || ev.type === 'canvas') later()
       }),
@@ -112,6 +109,8 @@ export function ReportPage({ ws, slug, doc, filter, client, onSaved }: ReportPag
   useEffect(() => {
     if (active && !shown.some((c) => c.id === active)) setActive(null)
   }, [active, shown])
+  // the comment open is looked at, so the new comments' dot on the Comments pane leaves its run out
+  useLookedAt(ws, shown.find((c) => c.id === active)?.run)
 
   // a click on a tinted passage opens its card (the next one of the passage's when one of them is open); a click
   // elsewhere on the page closes the open one

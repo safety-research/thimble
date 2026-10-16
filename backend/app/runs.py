@@ -377,7 +377,8 @@ def _delete(r: Row, data: Path, ws: Path, up: bool) -> str | None:
 
 def purge(ids: list[str], *, yes: bool = False, dry_run: bool = False, stdin: TextIO | None = None,
           out: Callable[[str], None] = print) -> int:
-    """Delete what the ids name, then say what went, one line each. `yes` and `stdin` are accepted and unused."""
+    """Delete what the ids name, then say what went, one line each, and remove a deleted workspace's folder marker
+    (cli.unmark_active). `yes` and `stdin` are accepted and unused."""
     del yes, stdin
     data, ws = dirs()
     probe = server(data, ws)
@@ -406,6 +407,8 @@ def purge(ids: list[str], *, yes: bool = False, dry_run: bool = False, stdin: Te
         for t in targets(picked):
             out(f"thimble purge: would delete {t}")
         return 0
+    from . import cli  # noqa: PLC0415 — cli imports this module lazily too
+
     errors = 0
     for r in picked:
         err = _delete(r, data, ws, probe.state == UP)
@@ -413,6 +416,8 @@ def purge(ids: list[str], *, yes: bool = False, dry_run: bool = False, stdin: Te
             errors += 1
             out(f"thimble purge: {err}")
         else:
+            if r.kind == "workspace" and r.folder:  # the plugin's hooks exit at once in that folder again
+                cli.unmark_active(r.folder)
             for t in targets([r]):
                 out(f"thimble purge: deleted {t}")
     if probe.state != UP and live:

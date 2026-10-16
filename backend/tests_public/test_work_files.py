@@ -109,7 +109,7 @@ def test_a_run_that_goes_on_keeps_its_extracts_and_a_failed_one_keeps_everything
     monkeypatch.setattr(orientation, "record", lambda c, **kw: None)
     monkeypatch.setattr(orientation, "finished", lambda *a, **kw: None)
     monkeypatch.setattr(orient_session, "_tell_main", lambda *a, **kw: None)
-    monkeypatch.setattr(orient_session, "_report", lambda c: None)
+    monkeypatch.setattr(orient_session, "_tell_proposer", lambda c: None)
 
     async def unmeasured(c, chat):
         return ""

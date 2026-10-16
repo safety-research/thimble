@@ -72,12 +72,13 @@ def stub_bin(tmp_path: Path) -> Path:
     return bin_
 
 
-ANSWERS = ("--browser", "off", "--no-sandbox-deps")  # install.sh's questions --deps-only asks, answered
+ANSWERS = ("--browser", "off")  # install.sh's question, answered
 
 # Claude Code's stand-in for the plugin commands: the marketplaces (name → folder) and the installed plugins are kept in
 # $CLAUDE_STATE, and each command is appended to $STUB_LOG. A plugin is its id (installed at user scope) or, as
 # `claude plugin list --json` lists one, {"id", "scope", "projectPath"}; `plugin uninstall --scope project|local` takes
-# out the one of the folder it runs in
+# out the one of the folder it runs in. `plugin install` and `plugin update` record the version of the plugin.json in
+# the marketplace's folder ("versions", else 0.0.1), and `plugin disable` and `enable` switch it ("disabled")
 CLAUDE_STUB = """#!{python} -I
 import json, os, sys
 path, args = os.environ["CLAUDE_STATE"], sys.argv[1:]
@@ -87,6 +88,7 @@ with open(os.environ.get("STUB_LOG", os.devnull), "a") as log:
 words = [a for a in args if a not in ("--json", "--scope", "user", "project", "local")]
 scope = args[args.index("--scope") + 1] if "--scope" in args else "user"
 here = os.path.realpath(os.getcwd())
+versions, disabled = state.get("versions", {}), state.get("disabled", [])
 
 
 def taken(p):
@@ -95,11 +97,21 @@ def taken(p):
     return p["id"] == words[2] and p["scope"] == scope and (scope == "user" or os.path.realpath(p["projectPath"]) == here)
 
 
+def folder_version(pid):
+    folder = state["marketplaces"].get(pid.split("@")[1], "")
+    return json.load(open(os.path.join(folder, "plugin", ".claude-plugin", "plugin.json")))["version"]
+
+
 if args[:1] == ["--version"]:
     print("2.1.286 (Claude Code)")
 elif words[:2] == ["plugin", "list"]:
-    print(json.dumps([p if isinstance(p, dict) else {"id": p, "version": "0.0.1", "scope": "user", "enabled": True}
+    print(json.dumps([p if isinstance(p, dict) else {"id": p, "version": versions.get(p, "0.0.1"), "scope": "user",
+                                                     "enabled": p not in disabled}
                       for p in state["plugins"]]))
+elif words[:2] in (["plugin", "disable"], ["plugin", "enable"]):
+    state["disabled"] = sorted(set(disabled) - {words[2]} | ({words[2]} if words[1] == "disable" else set()))
+elif words[:2] == ["plugin", "update"]:
+    state["versions"] = {**versions, words[2]: folder_version(words[2])}
 elif words[:3] == ["plugin", "marketplace", "list"]:
     print(json.dumps([{"name": n, "source": "directory", "path": f, "installLocation": f}
                       for n, f in state["marketplaces"].items()]))
@@ -116,6 +128,7 @@ elif words[:2] == ["plugin", "install"]:
         sys.exit("no such marketplace")
     state["plugins"] = sorted({p for p in state["plugins"] if isinstance(p, str)} | {words[2]}) + \\
         [p for p in state["plugins"] if isinstance(p, dict)]
+    state["versions"] = {**versions, words[2]: folder_version(words[2])}
 elif words[:2] == ["plugin", "uninstall"]:
     state["plugins"] = [p for p in state["plugins"] if not taken(p)]
 json.dump(state, open(path, "w"))
@@ -410,42 +423,74 @@ def test_uninstall_takes_back_what_an_earlier_install_wrote_into_claude_code_s_f
     assert not home.exists(), "removed once what it recorded was put back"
 
 
-@pytest.mark.skipif(not sys.platform.startswith("linux") or os.geteuid() == 0, reason="a Linux user who needs sudo")
-def test_install_sh_installs_the_sandbox_s_missing_packages_only_on_a_yes_and_through_sudo(tmp_path):
-    """Where bubblewrap and socat are missing, a run without a terminal needs --sandbox-deps or --no-sandbox-deps; a yes
-    runs the package manager's install through sudo, a no says the agents won't run and how to set the sandbox up later.
-    sudo and the package managers are stand-ins that only log."""
+def test_install_sh_installs_no_system_package_and_takes_0_7_s_flags_with_one_line(tmp_path):
+    """install.sh runs no sudo and no package manager, and has no sandbox question: its dry run names none, with every
+    step's commands. 0.7's --sandbox-deps, --no-sandbox-deps, --plugin, --modify-path and --no-modify-path are accepted
+    with one line that says they are ignored; the trust flags of 0.5.0 are unknown."""
     tree = fake_tree(tmp_path / "release")
     bin_ = stub_bin(tmp_path)
     log = tmp_path / "sudo.log"
     for name in ("sudo", "apt-get", "dnf", "pacman", "zypper", "apk", "apparmor_parser"):
         (bin_ / name).write_text(f'#!/bin/sh\necho "{name} $*" >> "$SUDO_LOG"\n')
         (bin_ / name).chmod(0o755)
-    tools = tmp_path / "tools"  # the system's programs, bwrap and socat left out
+    env = env_for(tmp_path, PATH=f"{bin_}:/usr/bin:/bin", SUDO_LOG=str(log))
+
+    def run(*flags: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(tmp_path / "app"), *ANSWERS,
+                               *flags], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=60)
+
+    r = run("--dry-run", "--verbose")
+    assert r.returncode == 0 and "Questions: none." in r.stdout, r.stdout + r.stderr
+    said = r.stdout.lower()
+    assert "sudo" not in said and "apt-get" not in said and "apparmor" not in said, r.stdout
+    script = (tree / "scripts" / "install.sh").read_text() + (tree / "scripts" / "plugin.sh").read_text()
+    for gone in ("plugin_write", "MOD_GONE", "apparmor", "shell_step", "sudo "):
+        assert gone not in script, gone
+    r = run("--sandbox-deps")
+    assert r.returncode == 0 and "Done: thimble" in r.stdout, r.stdout + r.stderr
+    assert not log.exists(), "no sudo and no package manager ran"
+    assert "  ✓ --sandbox-deps is ignored: thimble 0.8 always adds its plugin, installs no system package and writes no " \
+           "shell startup file" in r.stdout, r.stdout
+    r = run("--dry-run", "--no-sandbox-deps", "--plugin", "--modify-path", "--no-modify-path", "--plugin")
+    assert r.returncode == 0 and "--no-sandbox-deps, --plugin, --modify-path and --no-modify-path are ignored" in r.stdout
+    for flag in ("--trust-workspaces", "--no-trust-workspaces"):
+        r = run(flag)
+        assert r.returncode == 2 and f"unknown argument {flag}" in r.stderr, r.stdout + r.stderr
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="the card code row is Linux's")
+def test_the_opening_screen_says_whether_card_code_runs_in_bubblewrap(tmp_path):
+    """On Linux the opening screen has one row for card code's sandbox, from one bwrap probe: it runs, bwrap is
+    missing, or bwrap is there but can't create a sandbox. Nothing is installed either way."""
+    tree = fake_tree(tmp_path / "release")
+    bin_ = stub_bin(tmp_path)
+    tools = tmp_path / "tools"  # the system's programs, bwrap left out
     tools.mkdir()
     for folder in ("/usr/bin", "/bin"):
         for exe in Path(folder).iterdir():
-            if exe.name not in ("bwrap", "socat") and not (tools / exe.name).exists():
+            if exe.name != "bwrap" and not (tools / exe.name).exists():
                 (tools / exe.name).symlink_to(exe)
-    env = env_for(tmp_path, PATH=f"{bin_}:{tools}", SUDO_LOG=str(log))
 
-    def run(*flags: str) -> subprocess.CompletedProcess:
-        log.write_text("")
-        return subprocess.run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(tmp_path / "app"),
-                               "--deps-only", "--browser", "off", *flags], capture_output=True, text=True, env=env,
-                              stdin=subprocess.DEVNULL, timeout=60)
+    def opening(path: str) -> str:
+        r = subprocess.run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(tmp_path / "app"), *ANSWERS,
+                            "--dry-run"], capture_output=True, text=True, env=env_for(tmp_path, PATH=path),
+                           stdin=subprocess.DEVNULL, timeout=60)
+        assert r.returncode == 0, r.stdout + r.stderr
+        return r.stdout
 
-    r = run()
-    assert r.returncode == 1 and "--sandbox-deps or --no-sandbox-deps" in r.stderr, r.stdout + r.stderr
-    assert log.read_text() == ""
-    r = run("--no-sandbox-deps")
-    assert r.returncode == 0 and log.read_text() == "", r.stdout + r.stderr
-    later = f"set up Claude Code's sandbox, without which thimble's agents won't start: bash {tmp_path / 'app'}/scripts/install.sh --sandbox-deps"
-    assert "won't start until the sandbox works" in r.stdout and later in r.stdout, r.stdout
-    r = run("--sandbox-deps")
-    assert r.returncode == 0, r.stdout + r.stderr
-    assert "sudo apt-get install -y bubblewrap socat" in log.read_text().splitlines()
-    assert "still doesn't run" in r.stdout, "the stand-ins installed nothing"
+    hint = "; thimble doctor --verbose names the commands that add it"
+    out = opening(f"{bin_}:{tools}")
+    assert f"  ✓ card code: runs without a sandbox, and terminal mode shows no views (bubblewrap missing){hint}" in out, out
+    bwrap = tmp_path / "bwrap-bin" / "bwrap"
+    bwrap.parent.mkdir()
+    bwrap.write_text("#!/bin/sh\necho 'bwrap: No permissions to create new namespace' >&2\nexit 1\n")
+    bwrap.chmod(0o755)
+    out = opening(f"{bin_}:{bwrap.parent}:{tools}")
+    assert "card code: runs without a sandbox, and terminal mode shows no views (bubblewrap can't create a sandbox " \
+           f"here){hint}" in out, out
+    bwrap.write_text("#!/bin/sh\nexit 0\n")
+    out = opening(f"{bin_}:{bwrap.parent}:{tools}")
+    assert "  ✓ card code and terminal views sandbox: bubblewrap runs here" in out and "without a sandbox" not in out
 
 
 def pty_run(cmd: list[str], env: dict[str, str], typed: str | None) -> subprocess.CompletedProcess:
@@ -467,15 +512,16 @@ def pty_run(cmd: list[str], env: dict[str, str], typed: str | None) -> subproces
 def test_install_sh_asks_only_the_questions_that_remain_and_downloads_no_browser_without_a_yes(tmp_path):
     """Where no Chrome or Edge is found, the opening screen counts one question, the browser, and none about the plugin
     or Claude Code's trust. Without a terminal install.sh stops on it, having downloaded and written nothing; on a
-    terminal it asks it before it installs anything, downloads the browser only on a yes, and leaves Claude Code's
-    plugins and config alone. The commands it ran are in its log, not on the terminal. A re-run asks nothing and its dry
-    run lists no question; a flag changes an answer, and an earlier version's trust flag is ignored with a line."""
+    terminal it asks it before it installs anything, downloads the browser only on a yes, and adds thimble's plugin with
+    Claude Code's own commands, writing nothing into Claude Code's config itself. The commands it ran are in its log, not
+    on the terminal. A re-run asks nothing, changes no plugin and its dry run lists no question; a flag changes an
+    answer, and a flag of 0.7 is ignored with a line."""
     tree = fake_tree(tmp_path / "release")
     (tree / "backend" / "app").mkdir()
     shutil.copy(REPO / "backend" / "app" / "claude_changes.py", tree / "backend" / "app")
     bin_ = stub_bin(tmp_path)
-    (bin_ / "claude").write_text('#!/bin/sh\ncase "$1 $2" in "--version ") echo 2.1.284;; "plugin list") echo "[]";; esac\n')
-    (bin_ / "claude").chmod(0o755)
+    claude_stub(bin_)
+    claude_log = tmp_path / "claude.log"
     log, cache = tmp_path / "playwright.log", tmp_path / "cache" / "chromium_headless_shell-1"
 
     def run(*flags: str, typed: str | None = None) -> subprocess.CompletedProcess:
@@ -493,9 +539,11 @@ case "$*" in
 esac
 """)
             venv.chmod(0o755)
-        cmd = ["bash", str(tree / "scripts" / "install.sh"), "--no-sandbox-deps", *flags]
-        env = env_for(tmp_path, PATH=f"{bin_}:/usr/bin:/bin",
+        cmd = ["bash", str(tree / "scripts" / "install.sh"), *flags]
+        env = env_for(tmp_path, PATH=f"{bin_}:/usr/bin:/bin", STUB_LOG=str(claude_log),
+                      CLAUDE_STATE=str(tmp_path / "claude.json"),
                       THIMBLE_TEST_SYSTEM_BROWSER=f"chrome|Google Chrome|{tmp_path / 'no-chrome'}")
+        claude_log.write_text("")
         return pty_run(cmd, env, typed)
 
     home = tmp_path / "home"
@@ -508,6 +556,7 @@ esac
     assert "--plugin" not in r.stderr and "Questions: 1, next." in r.stdout
     assert "No Chrome or Edge for screenshots: a question below" in r.stdout
     assert not log.exists() and not conf.exists() and json.loads(cfg.read_text()) == {"projects": {}}
+    assert plugin_changes(claude_log) == []
     r = run(typed="y\n")  # download
     out = r.stdout
     assert r.returncode == 0, out + r.stderr
@@ -520,21 +569,23 @@ esac
     assert not record.exists(), "no answer about the plugin, so none recorded"
     assert json.loads(cfg.read_text()) == {"projects": {}}, "nothing written into Claude Code's config"
     assert "trust" not in out.replace(str(tmp_path), "").lower()
-    assert "✓ Claude Code's plugins left as they are" in out
+    dest = home / ".thimble" / "app"
+    assert plugin_changes(claude_log) == [f"plugin marketplace add {dest}", "plugin install --scope user thimble@thimble-local"]
+    assert "✓ Added thimble's plugin to Claude Code (thimble@thimble-local)" in out
     r = run(typed="")
     assert r.returncode == 0 and "[y/N]" not in r.stdout and "[Y/n]" not in r.stdout, r.stdout + r.stderr
-    assert "Questions: none." in r.stdout
+    assert "Questions: none." in r.stdout and plugin_changes(claude_log) == []
     assert "Playwright's headless Chromium for screenshots (your earlier answer; --browser changes it)" in r.stdout
     assert "headless Chromium     ~/.cache/ms-playwright (downloaded already)" in r.stdout
     assert "Screenshots use Playwright's headless Chromium, downloaded already" in r.stdout
     assert len(log.read_text().splitlines()) == 1
     r = run("--dry-run")
     assert "Nothing to ask: install with  bash " in r.stdout, r.stdout
-    r = run("--browser", "off", "--no-trust-workspaces")
+    r = run("--browser", "off", "--no-sandbox-deps")
     assert r.returncode == 0 and json.loads(conf.read_text()) == {"browser": "off"}, r.stdout + r.stderr
     assert json.loads(cfg.read_text()) == {"projects": {}} and len(log.read_text().splitlines()) == 1
-    assert ("✓ --no-trust-workspaces is ignored: thimble's agents no longer need a folder Claude Code trusts"
-            in r.stdout), "an earlier version's flag is accepted, with one line"
+    assert "✓ --no-sandbox-deps is ignored: thimble 0.8 always adds its plugin" in r.stdout, \
+        "an earlier version's flag is accepted, with one line"
     # an install before 0.3.0 kept no answers but downloaded the Chromium: an update without a terminal asks no browser
     # question
     conf.unlink()
@@ -557,8 +608,7 @@ def test_a_chrome_that_starts_is_used_without_asking_and_one_that_does_not_is_as
 
     def run(*flags: str) -> subprocess.CompletedProcess:
         return subprocess.run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(dest), "--deps-only",
-                               "--no-sandbox-deps", *flags], capture_output=True, text=True, env=env,
-                              stdin=subprocess.DEVNULL, timeout=60)
+                               *flags], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=60)
 
     r = run("--dry-run")
     assert r.returncode == 0 and f"✓ Google Chrome at {chrome}: screenshots use it, so nothing is downloaded" in r.stdout
@@ -575,9 +625,10 @@ def test_a_chrome_that_starts_is_used_without_asking_and_one_that_does_not_is_as
     assert "   - no, try Google Chrome anyway: --browser system" in r.stdout, r.stdout
 
 
-def test_the_plugin_is_registered_only_on_a_yes_and_uninstall_removes_only_what_install_added(tmp_path):
-    """install.sh --no-plugin registers nothing and records the no, so uninstall runs no `claude plugin` step; --plugin
-    registers at user scope and a later --no-plugin takes that back; uninstall removes what a yes registered."""
+def test_install_sh_adds_the_plugin_with_claude_code_s_commands_and_uninstall_removes_what_it_added(tmp_path):
+    """install.sh adds this install's folder as a marketplace and installs thimble from it at user scope, with Claude
+    Code's own commands, and says so on its opening screen; it removes the record 0.7's plugin question left. --no-plugin
+    runs no `claude plugin` command that changes anything. Uninstall removes what install added."""
     tree = fake_tree(tmp_path / "release")
     dest = tmp_path / "home" / ".thimble" / "app"
     bin_ = stub_bin(tmp_path)
@@ -586,70 +637,38 @@ def test_the_plugin_is_registered_only_on_a_yes_and_uninstall_removes_only_what_
     env = env_for(tmp_path, PATH=f"{bin_}:/usr/bin:/bin", STUB_LOG=str(log), CLAUDE_STATE=str(tmp_path / "claude.json"))
     record = Path(env["THIMBLE_HOME"]) / "plugin.json"
 
-    def run(cmd: list[str]) -> list[str]:
+    def run(cmd: list[str]) -> tuple[str, list[str]]:
         log.write_text("")
         r = subprocess.run(cmd, capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=60)
         assert r.returncode == 0, r.stdout + r.stderr
-        return plugin_changes(log)
-
-    def install(flag: str) -> list[str]:
-        return run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(dest), *ANSWERS, flag,
-                    ])
-
-    uninstall = ["bash", str(dest / "plugin" / "bin" / "thimble"), "uninstall", "--yes"]
-    assert install("--no-plugin") == [] and json.loads(record.read_text()) == {"answer": "no", "registered": ""}
-    assert run(uninstall) == [] and not record.exists()
-    assert install("--plugin") == [f"plugin marketplace add {dest}", "plugin marketplace update thimble-local",
-                                   "plugin install --scope user thimble@thimble-local",
-                                   "plugin update --scope user thimble@thimble-local"]
-    assert json.loads(record.read_text()) == {"answer": "yes", "registered": "thimble-local"}
-    taken_back = ["plugin uninstall thimble@thimble-local", "plugin marketplace remove thimble-local"]
-    assert install("--no-plugin") == taken_back and json.loads(record.read_text())["registered"] == ""
-    install("--plugin")
-    assert run(uninstall) == taken_back and not record.exists()
-
-
-def test_an_update_turns_thimble_cc_mod_off_where_an_earlier_version_turned_it_on(tmp_path):
-    """0.5.0's `thimble cc-mod on` installed thimble-cc-mod from this install's marketplace at project scope in a folder.
-    An update does what Claude Code does with a plugin that left its marketplace: `claude plugin uninstall` at each scope
-    it is installed at, in its folder, then one line naming the folders. A folder that is gone and the mod from another
-    install's marketplace are left alone, and a second run changes nothing."""
-    tree = fake_tree(tmp_path / "release")
-    dest = tmp_path / "home" / ".thimble" / "app"
-    bin_ = stub_bin(tmp_path)
-    claude_stub(bin_)
-    log, state = tmp_path / "claude.log", tmp_path / "claude.json"
-    env = env_for(tmp_path, PATH=f"{bin_}:/usr/bin:/bin", STUB_LOG=str(log), CLAUDE_STATE=str(state))
-    home = Path(env["HOME"])
-    one, two, other = home / "wiki", home / "runs" / "march", tmp_path / "elsewhere"
-    for d in (one, two, other):
-        d.mkdir(parents=True)
-    mod = "thimble-cc-mod@thimble-local"
-    left = [{"id": mod, "scope": "project", "projectPath": str(tmp_path / "deleted")},
-            {"id": "thimble-cc-mod@thimble", "scope": "project", "projectPath": str(other)}]
-    state.write_text(json.dumps({"marketplaces": {"thimble-local": str(dest), "thimble": str(tmp_path / "clone")},
-                                 "plugins": [{"id": mod, "scope": "project", "projectPath": str(one)},
-                                             {"id": mod, "scope": "local", "projectPath": str(two)}, *left]}))
-
-    def update() -> tuple[str, list[str]]:
-        log.write_text("")
-        r = subprocess.run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(dest), *ANSWERS],
-                           capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=60)
-        assert r.returncode == 0, r.stdout + r.stderr
         return r.stdout, plugin_changes(log)
 
-    out, changes = update()
-    assert changes == [f"plugin uninstall {mod} --scope project", f"plugin uninstall {mod} --scope local"], out
-    assert json.loads(state.read_text())["plugins"] == left
-    assert ("✓ Turned thimble-cc-mod off in ~/wiki and ~/runs/march: thimble 0.0.1 no longer has it (`thimble mode "
-            "terminal` shows thimble in the terminal)") in out, out
-    out, changes = update()
-    assert changes == [] and "thimble-cc-mod" not in out, out
+    def install(*flags: str) -> tuple[str, list[str]]:
+        return run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(dest), *ANSWERS, *flags])
+
+    uninstall = ["bash", str(dest / "plugin" / "bin" / "thimble"), "uninstall", "--yes"]
+    out, changes = install("--no-plugin")
+    assert changes == [] and "✓ thimble's plugin: left as it is (--no-plugin)" in out, out
+    assert "✓ Claude Code's plugins left as they are (--no-plugin)" in out
+    assert run(uninstall)[1] == []
+    out, changes = install("--dry-run")
+    assert changes == [] and ("✓ adds thimble's plugin with Claude Code's own commands: claude plugin marketplace add "
+                              "~/.thimble/app, then claude plugin install --scope user thimble@thimble-local (Claude Code "
+                              "writes it to ~/.claude/settings.json and ~/.claude/plugins)") in out, out
+    record.parent.mkdir(parents=True, exist_ok=True)
+    record.write_text(json.dumps({"answer": "no", "registered": ""}))  # 0.7's no
+    out, changes = install()
+    assert changes == [f"plugin marketplace add {dest}", "plugin install --scope user thimble@thimble-local"], out
+    assert "✓ Added thimble's plugin to Claude Code (thimble@thimble-local): /thimble works in any claude session" in out
+    assert "Next: in a folder of transcripts, start claude and type /thimble (in a session that was open before, " \
+           "/reload-plugins first), or run thimble there." in out, out
+    assert not record.exists(), "0.7's record goes once the plugin is in place"
+    assert run(uninstall)[1] == ["plugin uninstall thimble@thimble-local", "plugin marketplace remove thimble-local"]
 
 
 def test_uninstall_removes_the_marketplace_an_earlier_version_registered_without_the_plugin(tmp_path):
-    """An earlier version registered thimble's marketplace for a plugin of it this version no longer has, where a no had
-    left it out. A --no-plugin re-run leaves it; uninstall removes it."""
+    """An earlier version registered thimble's marketplace for a plugin of it this version no longer has. A --no-plugin
+    re-run leaves it; uninstall removes it."""
     tree = fake_tree(tmp_path / "release")
     dest = tmp_path / "home" / ".thimble" / "app"
     bin_ = stub_bin(tmp_path)
@@ -667,24 +686,23 @@ def test_uninstall_removes_the_marketplace_an_earlier_version_registered_without
     install = ["bash", str(tree / "scripts" / "install.sh"), "--dir", str(dest), *ANSWERS, "--no-plugin"]
     assert run(install)[1] == []
     state.write_text(json.dumps({"marketplaces": {"thimble-local": str(dest)}, "plugins": []}))
-    assert run(install)[1] == [] and json.loads(record.read_text()) == {"answer": "no", "registered": ""}
+    assert run(install)[1] == [] and not record.exists()
     out, changes = run(["bash", str(dest / "plugin" / "bin" / "thimble"), "uninstall", "--yes"])
     assert changes == ["plugin marketplace remove thimble-local"] and "which an earlier version registered" in out, out
     assert json.loads(state.read_text())["marketplaces"] == {}
 
 
-def test_thimble_plugin_on_and_off_add_and_take_back_thimble_in_every_session(tmp_path):
-    """install.sh changes no Claude Code plugin without --plugin or --no-plugin, and records no answer. `thimble plugin
-    on` registers this install's folder and installs thimble from it at user scope, showing each command; `status` says
-    which it is; a second `on`, and an install.sh re-run, change nothing; `off` takes back both; the record follows, so
-    uninstall removes only what is registered."""
+def test_a_re_run_updates_the_plugin_only_when_its_version_changed_and_leaves_it_off_when_it_is_off(tmp_path):
+    """A re-run over this install's plugin at the same version runs no install or update, and leaves it off when the user
+    turned it off; a new version runs `claude plugin update` and leaves it off still. `thimble plugin status` says which
+    plugin Claude Code has and whether it is on; 0.7's `thimble plugin on` and `off` say what replaced them and change
+    nothing."""
     tree = fake_tree(tmp_path / "release")
     dest = tmp_path / "home" / ".thimble" / "app"
     bin_ = stub_bin(tmp_path)
     claude_stub(bin_)
-    log = tmp_path / "claude.log"
-    env = env_for(tmp_path, PATH=f"{bin_}:/usr/bin:/bin", STUB_LOG=str(log), CLAUDE_STATE=str(tmp_path / "claude.json"))
-    record = Path(env["THIMBLE_HOME"]) / "plugin.json"
+    log, state = tmp_path / "claude.log", tmp_path / "claude.json"
+    env = env_for(tmp_path, PATH=f"{bin_}:/usr/bin:/bin", STUB_LOG=str(log), CLAUDE_STATE=str(state))
 
     def run(*cmd: str) -> tuple[str, list[str]]:
         log.write_text("")
@@ -695,34 +713,31 @@ def test_thimble_plugin_on_and_off_add_and_take_back_thimble_in_every_session(tm
     install = ("bash", str(tree / "scripts" / "install.sh"), "--dir", str(dest), *ANSWERS)
     thimble = ("bash", str(dest / "plugin" / "bin" / "thimble"))
     out, changes = run(*install)
-    assert changes == [] and not record.exists(), out
-    assert "✓ thimble is not added to your other Claude Code sessions: the thimble command loads it into the sessions " \
-           "it starts" in out
-    assert "plugin on" not in out, "the install points no one to thimble in every session"
-    assert run(*thimble, "plugin", "status")[0].startswith("thimble plugin: off: sessions you start with `thimble`")
-    added = [f"plugin marketplace add {dest}", "plugin marketplace update thimble-local",
-             "plugin install --scope user thimble@thimble-local", "plugin update --scope user thimble@thimble-local"]
-    out, changes = run(*thimble, "plugin", "on")
-    assert changes == added and f"+ claude plugin marketplace add {dest}" in out, out
-    assert "✓ thimble is in every Claude Code session now" in out
-    assert json.loads(record.read_text()) == {"answer": "yes", "registered": "thimble-local"}
-    assert run(*thimble, "plugin", "status")[0].startswith("thimble plugin: on: thimble@thimble-local, from this install (~/.thimble/app)")
-    out, changes = run(*thimble, "plugin", "on")
-    assert changes == [] and "✓ thimble is in every Claude Code session" in out, out
+    assert changes == [f"plugin marketplace add {dest}", "plugin install --scope user thimble@thimble-local"], out
+    assert run(*thimble, "plugin", "status")[0].startswith(
+        "thimble plugin: on: thimble@thimble-local 0.0.1, from this install (~/.thimble/app).")
+    run(str(bin_ / "claude"), "plugin", "disable", "thimble@thimble-local")
     out, changes = run(*install)
-    assert changes == [] and "✓ thimble stays in every Claude Code session (your earlier choice" in out, out
-    out, changes = run(*thimble, "plugin", "off")
-    assert changes == ["plugin uninstall thimble@thimble-local", "plugin marketplace remove thimble-local"], out
-    assert json.loads(record.read_text()) == {"answer": "no", "registered": ""}
-    assert run(*thimble, "plugin", "status")[0].startswith("thimble plugin: off")
-    out, changes = run(*thimble, "uninstall", "--yes")
-    assert changes == [] and not record.exists(), out
+    assert changes == [], out
+    assert "✓ updates thimble's plugin (thimble@thimble-local) when its version changed; on or off as you set it" in out
+    assert "✓ thimble's plugin in Claude Code is this install's (thimble@thimble-local 0.0.1); it is off in Claude Code, " \
+           "and /plugin turns it on" in out, out
+    (tree / "plugin" / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "thimble", "version": "0.0.2"}))
+    out, changes = run(*install)
+    assert changes == ["plugin marketplace update thimble-local", "plugin update --scope user thimble@thimble-local"], out
+    assert "✓ Updated thimble's plugin in Claude Code to 0.0.2 (thimble@thimble-local)" in out
+    assert json.loads(state.read_text())["disabled"] == ["thimble@thimble-local"], "still off"
+    assert run(*thimble, "plugin", "status")[0].startswith("thimble plugin: off: thimble@thimble-local 0.0.2")
+    for word, verb in (("on", "enable"), ("off", "disable")):
+        out, changes = run(*thimble, "plugin", word)
+        assert changes == [] and out == (f"thimble plugin {word} was removed in 0.8.0: install.sh adds thimble's plugin to "
+                                         "Claude Code. To turn it off or on, use /plugin in Claude Code, or in a shell: "
+                                         f"claude plugin {verb} thimble@thimble-local\n"), out
 
 
-def test_install_sh_asks_nothing_about_trust_and_takes_the_old_flags_with_one_line(tmp_path):
-    """install.sh has no trust question: it installs and says nothing of trust, writes nothing into Claude Code's
-    config, and --trust-workspaces or --no-trust-workspaces, which an earlier version's command line or `thimble update`
-    may pass, is accepted with one line that says it is ignored."""
+def test_install_sh_asks_nothing_about_trust_and_refuses_the_old_trust_flags(tmp_path):
+    """install.sh has no trust question: it installs and says nothing of trust and writes nothing into Claude Code's
+    config. --trust-workspaces and --no-trust-workspaces, 0.5.0's, are unknown arguments now."""
     tree = fake_tree(tmp_path / "release")
     (tree / "backend" / "app").mkdir()
     shutil.copy(REPO / "backend" / "app" / "claude_changes.py", tree / "backend" / "app")
@@ -742,9 +757,7 @@ def test_install_sh_asks_nothing_about_trust_and_takes_the_old_flags_with_one_li
     assert r.returncode == 0 and "Done: thimble" in r.stdout and not says_trust(r.stdout), r.stdout + r.stderr
     for flag in ("--trust-workspaces", "--no-trust-workspaces"):
         r = subprocess.run([*cmd, flag], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=60)
-        assert r.returncode == 0 and "Done: thimble" in r.stdout, r.stdout + r.stderr
-        assert [ln for ln in r.stdout.splitlines() if "trust" in ln.lower()] == [
-            f"  ✓ {flag} is ignored: thimble's agents no longer need a folder Claude Code trusts"], r.stdout
+        assert r.returncode == 2 and f"install.sh: unknown argument {flag}" in r.stderr, r.stdout + r.stderr
     assert json.loads(cfg.read_text()) == {"projects": {}}
 
 
@@ -770,18 +783,23 @@ def two_checkouts(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
 
 def test_install_sh_leaves_another_installs_plugin_and_command_as_they_are(tmp_path):
     """A second install under the same HOME finds Claude Code's thimble plugin registered from the first install's folder
-    and ~/.local/bin/thimble linked into it. Neither is its own: --no-plugin uninstalls nothing, --plugin adds no second
-    plugin beside it, and the link stays; install.sh names the first install's folder and the command that would switch
-    the link, and its dry run shows the same. On a terminal it asks before switching either. A THIMBLE_HOME shared with
-    the first install, whose record names that registration, does not make it the second's either."""
+    and ~/.local/bin/thimble linked into it. Neither is its own: install.sh adds no second plugin beside it and changes
+    neither, with or without --no-plugin; it names the first install's folder, the commands that switch the plugin and the
+    one that would switch the link, and its dry run shows the same. On a terminal it asks before switching the link, and
+    never about the plugin. Once the user has taken the first install's plugin out, a re-run adds the second's. A
+    THIMBLE_HOME shared with the first install, whose 0.7 record names that registration, does not make it the second's
+    either."""
     import pty
 
     first, second, env = two_checkouts(tmp_path)
     state, log = Path(env["CLAUDE_STATE"]), Path(env["STUB_LOG"])
-    link = Path(env["HOME"]) / ".local" / "bin" / "thimble"
+    home = Path(env["HOME"])
+    link = home / ".local" / "bin" / "thimble"
     registered, linked = state.read_text(), str(first / "plugin" / "bin" / "thimble")
     record = Path(env["THIMBLE_HOME"]) / "plugin.json"
     switch_link = f"ln -sfn {second}/plugin/bin/thimble {link}"
+    switch_plugin = "claude plugin uninstall thimble@thimble && claude plugin marketplace remove thimble, then bash " \
+                    f"{second}/scripts/install.sh"
 
     def run(*flags: str, typed: str | None = None) -> tuple[subprocess.CompletedProcess, list[str]]:
         log.write_text("")
@@ -799,34 +817,43 @@ def test_install_sh_leaves_another_installs_plugin_and_command_as_they_are(tmp_p
         assert r.returncode == 0, r.stdout + r.stderr
         return r, plugin_changes(log)
 
-    def untouched() -> bool:  # no startup file gets a line either, while `thimble` runs the first install
-        return state.read_text() == registered and os.readlink(link) == linked and marked(Path(env["HOME"])) == {}
+    def untouched() -> bool:  # and no startup file is written
+        return (state.read_text() == registered and os.readlink(link) == linked
+                and not any((home / f).exists() for f in STARTUP_FILES))
 
-    for flags in (("--plugin",), ("--no-plugin",), ("--plugin", "--dry-run"), ("--no-plugin", "--dry-run")):
+    for flags in ((), ("--no-plugin",), ("--dry-run",), ("--no-plugin", "--dry-run")):
         r, changes = run(*flags)
         assert changes == [] and untouched(), (flags, changes, r.stdout)
-        assert f"thimble@thimble, from {first}" in r.stdout and switch_link in r.stdout, r.stdout
-        assert "+ ln -sfn" not in r.stdout and "[y/N]" not in r.stdout
-    assert json.loads(record.read_text()) == {"answer": "no", "registered": ""}
-    r, changes = run("--plugin", typed="n\nn\n")
-    assert r.stdout.count("[y/N]") == 2 and changes == [] and untouched(), r.stdout
-    assert json.loads(record.read_text()) == {"answer": "yes", "registered": ""}
-    r, changes = run("--plugin", typed="y\ny\n")
-    assert changes == ["plugin uninstall thimble@thimble", "plugin marketplace remove thimble",
-                       f"plugin marketplace add {second}", "plugin marketplace update thimble",
-                       "plugin install --scope user thimble@thimble", "plugin update --scope user thimble@thimble"]
-    assert json.loads(state.read_text())["marketplaces"] == {"thimble": str(second)}
+        assert switch_link in r.stdout and "+ ln -sfn" not in r.stdout and "[y/N]" not in r.stdout, r.stdout
+        if "--no-plugin" not in flags:
+            assert f"another install's thimble@thimble (from {first}) stays; to switch: {switch_plugin}" in r.stdout
+    assert f"! Claude Code has another install's thimble plugin, thimble@thimble from {first}, so this install's is not " \
+           f"added\n  To use this install's plugin instead, in a shell: {switch_plugin}" in run()[0].stdout
+    assert not record.exists()
+    r, changes = run(typed="n\n")
+    assert r.stdout.count("[y/N]") == 1 and changes == [] and untouched(), r.stdout
+    r, changes = run(typed="y\n")
+    assert r.stdout.count("[y/N]") == 1 and changes == [] and state.read_text() == registered, r.stdout
     assert os.readlink(link) == f"{second}/plugin/bin/thimble"
-    assert marked(Path(env["HOME"])) == {".profile": [f'export PATH="$HOME/.local/bin:$PATH"  {MARK}',
-                                                      f'export THIMBLE_HOME="{env["THIMBLE_HOME"]}"  {MARK}']}, \
-        "once `thimble` runs the second install, its lines go in"
-    (Path(env["HOME"]) / ".profile").unlink()
+    assert not any((home / f).exists() for f in STARTUP_FILES), "the lines a new terminal needs are printed, not written"
+    assert "To run thimble in a new terminal, add these to ~/.profile:\n" \
+           f'  export PATH="$HOME/.local/bin:$PATH"\n  export THIMBLE_HOME="{env["THIMBLE_HOME"]}"\n' \
+           f"Until then: THIMBLE_HOME={env['THIMBLE_HOME']} ~/.local/bin/thimble\n" in r.stdout, \
+        "once `thimble` runs the second install, its lines are printed"
+    # the user takes the first install's plugin out, as install.sh said
+    subprocess.run([str(Path(env["PATH"].split(":")[0]) / "claude"), "plugin", "uninstall", "thimble@thimble"], env=env,
+                   check=True, timeout=60)
+    subprocess.run([str(Path(env["PATH"].split(":")[0]) / "claude"), "plugin", "marketplace", "remove", "thimble"],
+                   env=env, check=True, timeout=60)
+    r, changes = run()
+    assert changes == [f"plugin marketplace add {second}", "plugin install --scope user thimble@thimble"], r.stdout
+    assert json.loads(state.read_text())["marketplaces"] == {"thimble": str(second)}
     # the first install's own record, in a THIMBLE_HOME both installs share
     state.write_text(registered)
     link.unlink()
     link.symlink_to(linked)
     record.write_text(json.dumps({"answer": "yes", "registered": "thimble"}))
-    for flags in (("--no-plugin",), ("--plugin",)):
+    for flags in (("--no-plugin",), ()):
         r, changes = run(*flags)
         assert changes == [] and untouched(), (flags, changes, r.stdout)
 
@@ -859,12 +886,16 @@ def test_uninstall_removes_the_plugin_only_when_it_is_registered_from_this_insta
 
 
 def test_thimble_bin_dir_moves_the_command_s_link_and_leaves_the_one_in_local_bin_alone(tmp_path):
-    """With THIMBLE_BIN_DIR set, the `thimble` link goes there, and a ~/.local/bin/thimble into another tree stays."""
+    """With THIMBLE_BIN_DIR set, the `thimble` link goes there, and a ~/.local/bin/thimble into another tree stays.
+    Uninstall with the same THIMBLE_BIN_DIR removes that link and still leaves the other one (live check 4.h left a
+    broken link in THIMBLE_BIN_DIR)."""
     tree = fake_tree(tmp_path / "release")
     dest = tmp_path / "home" / ".thimble" / "app"
     bin_ = stub_bin(tmp_path)
+    claude_stub(bin_)
     own = tmp_path / "own-bin"
-    env = env_for(tmp_path, PATH=f"{bin_}:/usr/bin:/bin", THIMBLE_BIN_DIR=str(own))
+    env = env_for(tmp_path, PATH=f"{bin_}:/usr/bin:/bin", THIMBLE_BIN_DIR=str(own), STUB_LOG=str(tmp_path / "claude.log"),
+                  CLAUDE_STATE=str(tmp_path / "claude.json"))
     other = tmp_path / "other" / "plugin" / "bin" / "thimble"
     local = Path(env["HOME"]) / ".local" / "bin" / "thimble"
     local.parent.mkdir(parents=True)
@@ -875,11 +906,16 @@ def test_thimble_bin_dir_moves_the_command_s_link_and_leaves_the_one_in_local_bi
     assert r.returncode == 0, r.stdout + r.stderr
     assert os.readlink(own / "thimble") == str(dest / "plugin" / "bin" / "thimble")
     assert os.readlink(local) == str(other)
+    r = subprocess.run(["bash", str(dest / "plugin" / "bin" / "thimble"), "uninstall", "--yes"], capture_output=True,
+                       text=True, env=env, stdin=subprocess.DEVNULL, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert not (own / "thimble").is_symlink(), r.stdout
+    assert os.readlink(local) == str(other)
 
 
 # ----------------------------------------------------------------------------- the shell startup files
 
-MARK = "# added by thimble's installer"
+MARK = "# added by thimble's installer"  # what 0.7's installer ended each line it wrote with
 
 
 def full_install(tree: Path, env: dict[str, str], *flags: str, dest: Path | None = None) -> subprocess.CompletedProcess:
@@ -898,19 +934,15 @@ def uninstall_cmd(env: dict[str, str]) -> subprocess.CompletedProcess:
 STARTUP_FILES = (".bash_login", ".bash_profile", ".bashrc", ".config/fish/conf.d/thimble.fish", ".profile", ".zshrc")
 
 
-def marked(home: Path) -> dict[str, list[str]]:
-    """{a startup file under HOME: its lines that end with install.sh's mark}, for each that has one."""
-    found = {f: [ln for ln in (home / f).read_text().splitlines() if ln.endswith(MARK)]
-             for f in STARTUP_FILES if (home / f).is_file()}
-    return {f: lines for f, lines in found.items() if lines}
+def startup(home: Path) -> dict[str, str]:
+    """{each startup file under HOME: its text}."""
+    return {f: (home / f).read_text() for f in STARTUP_FILES if (home / f).exists()}
 
 
-def test_install_sh_puts_the_command_on_path_in_zsh_s_startup_file_once_and_uninstall_takes_back_exactly_that_line(
-        tmp_path):
-    """While PATH lacks ~/.local/bin, install.sh adds one line to ~/.zshrc, which the opening screen and the dry run name,
-    leaving every other byte of the file and its link into a dotfiles folder as they were; it ends with the command for
-    the terminal it ran in, which lacks the line, and no list of things left to do. A re-run adds nothing. Uninstall
-    removes exactly that line, and with it nothing else."""
+def test_install_sh_prints_the_line_a_new_terminal_needs_and_writes_no_startup_file(tmp_path):
+    """While PATH lacks ~/.local/bin, install.sh ends with the line to add to ~/.zshrc, and the command that runs thimble
+    in this terminal until then; it writes no startup file, and the opening screen says so beside the command. Once the
+    file has the line, or 0.7's marked line, a re-run prints no line. --no-modify-path is ignored, with one line."""
     tree = fake_tree(tmp_path / "release")
     env = env_for(tmp_path, PATH=f"{stub_bin(tmp_path)}:/usr/bin:/bin", SHELL="/usr/bin/zsh")
     home = Path(env["HOME"])
@@ -919,49 +951,66 @@ def test_install_sh_puts_the_command_on_path_in_zsh_s_startup_file_once_and_unin
     mine = "# mine\nalias ll='ls -l'\nexport EDITOR=vi"  # no newline at its end
     dotfiles.write_text(mine)
     (home / ".zshrc").symlink_to(dotfiles)
-    line = f'export PATH="$HOME/.local/bin:$PATH"  {MARK}'
+    line = 'export PATH="$HOME/.local/bin:$PATH"'
     dry = full_install(tree, env, "--dry-run")
-    assert "  shell startup         ~/.zshrc: a line that puts ~/.local/bin on PATH (--no-modify-path leaves it out)" \
-        in dry.stdout, dry.stdout
-    assert dotfiles.read_text() == mine, "a dry run writes nothing"
-    r = full_install(tree, env)
+    assert "  thimble command       ~/.local/bin/thimble (~/.local/bin is not on PATH: the last lines say what to add " \
+           "to your shell's startup file)" in dry.stdout, dry.stdout
+    r = full_install(tree, env, "--no-modify-path")
     assert r.returncode == 0, r.stdout + r.stderr
-    assert f"✓ Added to ~/.zshrc, so that a new terminal finds thimble:\n    {line}\n" in r.stdout, r.stdout
-    assert "This terminal started before ~/.zshrc had that line, so in it run: ~/.local/bin/thimble" in r.stdout
-    assert "Left for you" not in r.stdout and "add this line" not in r.stdout
-    assert (home / ".zshrc").is_symlink() and dotfiles.read_text() == f"{mine}\n{line}\n"
-    again = full_install(tree, env)
-    assert again.returncode == 0 and "shell startup" not in again.stdout and "Added to" not in again.stdout
-    assert dotfiles.read_text() == f"{mine}\n{line}\n", "a re-run adds nothing"
-    record = home / ".thimble" / "shell-startup"
-    assert f"added\t{home}/.zshrc\t{line}" in record.read_text().splitlines()
+    assert f"To run thimble in a new terminal, add this to ~/.zshrc: {line}\nUntil then: ~/.local/bin/thimble\n" in r.stdout
+    assert "Next: run thimble in a folder of transcripts." in r.stdout, "--no-plugin: the command, not /thimble"
+    assert "--no-modify-path is ignored" in r.stdout
+    assert dotfiles.read_text() == mine and (home / ".zshrc").is_symlink(), "no startup file is written"
+    assert not (home / ".thimble" / "shell-startup").exists()
+    for had in (line, f"{line}  {MARK}"):
+        dotfiles.write_text(f"{mine}\n{had}\n")
+        again = full_install(tree, env)
+        assert again.returncode == 0 and "add this" not in again.stdout and "Until then" not in again.stdout
+        assert "This terminal started before ~/.zshrc had that line, so in it run: ~/.local/bin/thimble" in again.stdout
+
+
+def test_uninstall_still_takes_back_exactly_the_lines_0_7_s_installer_added(tmp_path):
+    """0.7's install.sh wrote its lines itself and recorded them in $THIMBLE_HOME/shell-startup. Uninstall removes
+    exactly those lines, and a file it created once nothing else is in it."""
+    tree = fake_tree(tmp_path / "release")
+    bin_ = stub_bin(tmp_path)
+    claude_stub(bin_)
+    env = env_for(tmp_path, PATH=f"{bin_}:/usr/bin:/bin", SHELL="/usr/bin/zsh", CLAUDE_STATE=str(tmp_path / "claude.json"))
+    home = Path(env["HOME"])
+    assert full_install(tree, env).returncode == 0
+    line = f'export PATH="$HOME/.local/bin:$PATH"  {MARK}'
+    (home / ".zshrc").write_text(f"# mine\n{line}\n")
+    (home / ".config" / "fish" / "conf.d").mkdir(parents=True)
+    fish = home / ".config" / "fish" / "conf.d" / "thimble.fish"
+    fish_line = f'contains -- "$HOME/.local/bin" $PATH; or set -gx PATH "$HOME/.local/bin" $PATH  {MARK}'
+    fish.write_text(f"{fish_line}\n")
+    (home / ".thimble" / "shell-startup").write_text(f"added\t{home}/.zshrc\t{line}\ncreated\t{fish}\n"
+                                                     f"added\t{fish}\t{fish_line}\n")
     r = uninstall_cmd(env)
     assert r.returncode == 0 and f"+ remove from {home}/.zshrc: {line}" in r.stdout, r.stdout + r.stderr
-    assert dotfiles.read_text() == f"{mine}\n" and (home / ".zshrc").is_symlink()
+    assert (home / ".zshrc").read_text() == "# mine\n" and not fish.exists()
 
 
 @pytest.mark.parametrize("shell, files, path_line, home_line", [
-    ("/bin/bash", [".bashrc", ".profile"], 'export PATH="$HOME/.local/bin:$PATH"', 'export THIMBLE_HOME="$HOME/th"'),
-    ("/usr/bin/fish", [".config/fish/conf.d/thimble.fish"],
+    ("/bin/bash", "~/.bashrc and ~/.profile", 'export PATH="$HOME/.local/bin:$PATH"', 'export THIMBLE_HOME="$HOME/th"'),
+    ("/usr/bin/fish", "~/.config/fish/conf.d/thimble.fish",
      'contains -- "$HOME/.local/bin" $PATH; or set -gx PATH "$HOME/.local/bin" $PATH', 'set -gx THIMBLE_HOME "$HOME/th"'),
-    ("/bin/dash", [".profile"], 'export PATH="$HOME/.local/bin:$PATH"', 'export THIMBLE_HOME="$HOME/th"'),
+    ("/bin/dash", "~/.profile", 'export PATH="$HOME/.local/bin:$PATH"', 'export THIMBLE_HOME="$HOME/th"'),
 ])
-def test_each_shell_gets_its_own_startup_files_and_a_home_other_than_the_default_is_kept_set(tmp_path, shell, files,
-                                                                                              path_line, home_line):
-    """bash gets ~/.bashrc and the file a login shell reads, fish a conf.d file of its own in its syntax, sh ~/.profile;
-    with a THIMBLE_HOME other than ~/.thimble a second line sets it, and this terminal's command carries it. Uninstall
-    removes the lines and the files install.sh created."""
+def test_each_shell_gets_its_own_lines_and_a_home_other_than_the_default_is_kept_set(tmp_path, shell, files, path_line,
+                                                                                      home_line):
+    """bash's lines go in ~/.bashrc and the file a login shell reads, fish's in a conf.d file of its own in its syntax,
+    sh's in ~/.profile; with a THIMBLE_HOME other than ~/.thimble a second line sets it, and this terminal's command
+    carries it. Nothing is written."""
     tree = fake_tree(tmp_path / "release")
     env = env_for(tmp_path, PATH=f"{stub_bin(tmp_path)}:/usr/bin:/bin", SHELL=shell)
     home = Path(env["HOME"])
     env["THIMBLE_HOME"] = str(home / "th")
     r = full_install(tree, env)
     assert r.returncode == 0, r.stdout + r.stderr
-    assert marked(home) == {f: [f"{path_line}  {MARK}", f"{home_line}  {MARK}"] for f in files}, r.stdout
-    assert "lines that put ~/.local/bin on PATH and set THIMBLE_HOME (--no-modify-path leaves them out)" in r.stdout
-    assert "so in it run: THIMBLE_HOME=~/th ~/.local/bin/thimble" in r.stdout, r.stdout
-    assert uninstall_cmd(env).returncode == 0
-    assert not any((home / f).exists() for f in files), "the files it created are gone with their lines"
+    assert (f"To run thimble in a new terminal, add these to {files}:\n  {path_line}\n  {home_line}\n"
+            "Until then: THIMBLE_HOME=~/th ~/.local/bin/thimble\n") in r.stdout, r.stdout
+    assert startup(home) == {}
 
 
 def test_bash_s_login_file_that_sources_bashrc_gets_no_line_of_its_own(tmp_path):
@@ -970,43 +1019,32 @@ def test_bash_s_login_file_that_sources_bashrc_gets_no_line_of_its_own(tmp_path)
     home = Path(env["HOME"])
     (home / ".bash_profile").write_text('[ -f ~/.bashrc ] && . ~/.bashrc\n')
     (home / ".profile").write_text("# read only without ~/.bash_profile\n")
-    assert full_install(tree, env).returncode == 0
-    assert list(marked(home)) == [".bashrc"]
+    r = full_install(tree, env)
+    assert r.returncode == 0 and 'add this to ~/.bashrc: export PATH="$HOME/.local/bin:$PATH"\n' in r.stdout, r.stdout
 
 
-def test_no_modify_path_is_kept_until_modify_path_and_a_needless_or_unwritable_line_is_not_written(tmp_path):
-    """--no-modify-path writes nothing and says how to run thimble; a later run without the flag keeps that answer, and
-    --modify-path takes it back. With ~/.local/bin on PATH and the default home nothing is needed, so nothing is
-    written or shown. A shell install.sh writes no file for gets a warning that names what to set."""
+def test_a_needless_line_is_not_printed_and_another_shell_gets_what_to_set(tmp_path):
+    """With ~/.local/bin on PATH and the default home nothing is needed, so no line is printed and Next names
+    `thimble`. A shell install.sh knows no syntax for gets what to set, in words."""
     tree = fake_tree(tmp_path / "release")
     bin_ = stub_bin(tmp_path)
-    env = env_for(tmp_path, PATH=f"{bin_}:/usr/bin:/bin", SHELL="/bin/zsh")
-    home = Path(env["HOME"])
-    r = full_install(tree, env, "--no-modify-path")
-    assert r.returncode == 0 and marked(home) == {}, r.stdout + r.stderr
-    assert "  shell startup         left as it is (--no-modify-path)" in r.stdout
-    assert "Next: run ~/.local/bin/thimble in a folder of transcripts" in r.stdout
-    r = full_install(tree, env)
-    assert marked(home) == {} and "left as it is (your earlier --no-modify-path; --modify-path changes it)" in r.stdout
-    r = full_install(tree, env, "--modify-path")
-    assert list(marked(home)) == [".zshrc"] and "skip" not in (home / ".thimble" / "shell-startup").read_text().splitlines()
     (tmp_path / "o").mkdir()
     (tmp_path / "c").mkdir()
     other = env_for(tmp_path / "o", PATH=f"{bin_}:{tmp_path}/o/home/.local/bin:/usr/bin:/bin", SHELL="/bin/zsh")
     r = full_install(tree, other)
-    assert r.returncode == 0 and "shell startup" not in r.stdout and marked(Path(other["HOME"])) == {}
-    assert "Next: run thimble in a folder of transcripts" in r.stdout, r.stdout
+    assert r.returncode == 0 and "new terminal" not in r.stdout and "Until then" not in r.stdout, r.stdout
+    assert "Next: run thimble in a folder of transcripts" in r.stdout and "not on PATH" not in r.stdout, r.stdout
     csh = env_for(tmp_path / "c", PATH=f"{bin_}:/usr/bin:/bin", SHELL="/bin/tcsh")
     r = full_install(tree, csh)
-    assert r.returncode == 0 and marked(Path(csh["HOME"])) == {}
-    assert "! install.sh writes no startup file for your shell, tcsh, so set these in it for a new terminal:\n" \
-           "    ~/.local/bin on PATH" in r.stdout, r.stdout
+    assert r.returncode == 0 and startup(Path(csh["HOME"])) == {}
+    assert "To run thimble in a new terminal, set this in the startup file of your shell, tcsh:\n" \
+           "  ~/.local/bin on PATH\nUntil then: ~/.local/bin/thimble\n" in r.stdout, r.stdout
 
 
 @pytest.mark.parametrize("shell, run", [("bash", ["bash", "-lic"]), ("zsh", ["zsh", "-lic"]), ("fish", ["fish", "-lc"])])
-def test_a_new_login_shell_finds_thimble_and_its_home(tmp_path, shell, run):
-    """The lines install.sh wrote, read by the shell itself: a new login shell of the user's shell finds `thimble` at
-    the link and has THIMBLE_HOME."""
+def test_the_lines_install_sh_prints_let_a_new_login_shell_find_thimble_and_its_home(tmp_path, shell, run):
+    """The lines install.sh printed, added to the files it named as the user would, read by the shell itself: a new login
+    shell of the user's shell finds `thimble` at the link and has THIMBLE_HOME."""
     exe = shutil.which(shell)
     if not exe:
         pytest.skip(f"no {shell} here")
@@ -1014,7 +1052,15 @@ def test_a_new_login_shell_finds_thimble_and_its_home(tmp_path, shell, run):
     env = env_for(tmp_path, PATH=f"{stub_bin(tmp_path)}:/usr/bin:/bin", SHELL=exe)
     home = Path(env["HOME"])
     env["THIMBLE_HOME"] = str(home / "th")
-    assert full_install(tree, env).returncode == 0
+    r = full_install(tree, env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    said = r.stdout.split("To run thimble in a new terminal, add these to ", 1)[1].split("\nUntil then:")[0]
+    files, *lines = said.splitlines()
+    for f in files.rstrip(":").split(" and "):
+        target = home / f.removeprefix("~/")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("a") as fh:
+            fh.write("".join(f"{ln.strip()}\n" for ln in lines))
     login = {"HOME": str(home), "PATH": "/usr/bin:/bin", "TERM": "dumb", "SHELL": exe}
     out = subprocess.run([*run, 'command -v thimble; echo "home=$THIMBLE_HOME"'], capture_output=True, text=True,
                          env=login, stdin=subprocess.DEVNULL, timeout=60).stdout

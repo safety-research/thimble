@@ -81,14 +81,17 @@ def test_launch_args_put_mains_name_before_the_resume_id_and_the_prompt(tmp_path
     logs.mkdir(parents=True)
     monkeypatch.setattr(cli, "last_main", lambda cwd: "sid-last")
     plain = cli.launch_args(logs).split("\n")
-    assert plain[5] == cli.main_name(logs) == "thimble:main · logs"
-    assert cli.SESSION_ID_RE.fullmatch(plain[6]), "a new session's id, which launch.json records"
-    assert plain[7].split() == [f"{k}={v}" for k, v in cli.SWITCHES.items()]
-    assert plain[10:12] == ["browser", ""], "the mode line, and no export line in browser mode"
-    assert "\n".join(plain[12:]).strip() and "sid-last" not in plain[6:13], "the prompt follows the name and the lines"
+    assert plain[4] == cli.main_name(logs) == "thimble:main · logs"
+    assert cli.SESSION_ID_RE.fullmatch(plain[5]), "a new session's id, which launch.json records"
+    assert plain[6].split() == [f"{k}={v}" for k, v in cli.SWITCHES.items()] == ["CLAUDE_CODE_DISABLE_AGENT_VIEW=1"]
+    assert plain[9:11] == ["browser", ""], "the mode line, and no export line in browser mode"
+    assert "\n".join(plain[11:]).strip() and "sid-last" not in plain[5:12], "the prompt follows the name and the lines"
     resumed = cli.launch_args(logs, resume=True).split("\n")
-    assert resumed[5] == "thimble:main · logs" and resumed[6] == "" and resumed[12] == "sid-last"
-    assert resumed[13:] == plain[12:]
+    assert resumed[4] == "thimble:main · logs" and resumed[5] == "" and resumed[11] == "sid-last"
+    assert resumed[12:] == plain[11:]
+    settings = json.loads(plain[2])
+    assert not {"sandbox", "permissions"} & set(settings), "thimble adds no sandbox and no permission rule"
+    assert "THIMBLE_MAIN_FENCE" not in settings["env"] and not [ln for ln in plain[:11] if "mcp__" in ln]
 
 
 def _launcher(tmp_path: Path, lines: list[str]) -> tuple[Path, Path]:
@@ -116,7 +119,7 @@ def _launcher(tmp_path: Path, lines: list[str]) -> tuple[Path, Path]:
 def test_the_launcher_passes_mains_name_and_lets_the_analysts_win(tmp_path):
     import subprocess  # noqa: PLC0415
 
-    head = [str(tmp_path / "plugin"), "mcp__x", "", "{}", ""]
+    head = [str(tmp_path / "plugin"), "", "{}", ""]
     # no session id, the env, unset and note lines, browser mode and no exports
     lines = ["", "CLAUDE_CODE_DISABLE_AGENT_VIEW=1", "", "", "browser", ""]
     launcher, path = _launcher(tmp_path, [*head, "thimble:main · logs", *lines, "the prompt"])
@@ -133,7 +136,7 @@ def test_the_launcher_passes_mains_name_and_lets_the_analysts_win(tmp_path):
     assert argv[argv.index("--name") + 1] == "thimble:main · logs" and "--resume" not in argv
     assert argv[argv.index("--append-system-prompt") + 1] == "the prompt"
     assert argv[argv.index("--plugin-dir") + 1] == str(tmp_path / "plugin")
-    assert [a for a in argv if a.startswith("--")] == ["--plugin-dir", "--allowedTools", "--settings", "--name",
+    assert [a for a in argv if a.startswith("--")] == ["--plugin-dir", "--settings", "--name",
                                                        "--append-system-prompt", "--"], "no flag but these"
     argv = run("-c")
     assert argv[argv.index("--name") + 1] == "thimble:main · logs"
@@ -142,6 +145,36 @@ def test_the_launcher_passes_mains_name_and_lets_the_analysts_win(tmp_path):
     for own in (["-n", "mine"], ["--name", "mine"], ["--name=mine"]):
         argv = run(*own)
         assert "thimble:main · logs" not in argv and own[-1] in argv
+
+
+def test_the_launcher_keeps_the_session_off_the_proxy_and_hands_a_subcommand_the_shells_no_proxy(tmp_path):
+    """The session the launcher starts gets 127.0.0.1 and localhost in NO_PROXY and no_proxy, so its hooks module and
+    MCP shim reach thimble's server past a proxy the shell sets. A subcommand gets the shell's own values: /thimble's
+    hook runs `thimble server up` in a plain `claude`'s environment, and its proxy line reads what that session sets
+    (cli.proxy_unsafe), while app/config.py keeps the Python process's own requests off the proxy."""
+    import subprocess  # noqa: PLC0415
+
+    lines = [str(tmp_path / "plugin"), "", "{}", "", "thimble:main · w", "", "", "", "", "browser", "", "the prompt"]
+    launcher, path = _launcher(tmp_path, lines)
+    seen = tmp_path / "seen.txt"
+    py = tmp_path / "plugin" / "bin" / "thimble-python"
+    py.write_text(f'#!/bin/sh\ncase " $* " in *" launch-args "*) cat "{tmp_path}/launch-args.txt";; '
+                  f'*) printf "%s|%s\\n" "${{NO_PROXY-unset}}" "${{no_proxy-unset}}" > "{seen}";; esac\n')
+    (path / "claude").write_text(f'#!/bin/sh\nprintf "%s|%s\\n" "$NO_PROXY" "$no_proxy" > "{seen}"\n')
+    env = {"PATH": f"{path}:/usr/bin:/bin", "HOME": str(tmp_path), "HTTP_PROXY": "http://127.0.0.1:9"}
+
+    def run(*args: str, **extra: str) -> str:
+        seen.unlink(missing_ok=True)
+        subprocess.run(["bash", str(launcher), *args], check=True, capture_output=True, cwd=tmp_path,
+                       env={**env, **extra})
+        return seen.read_text().strip()
+
+    assert run() == "127.0.0.1,localhost|127.0.0.1,localhost"
+    assert run(NO_PROXY="corp.example") == "corp.example,127.0.0.1,localhost|127.0.0.1,localhost"
+    up = ["server", "up", "--cwd", str(tmp_path), "--session", "s1"]
+    assert run(*up) == "unset|unset", "the shell's values, which cli.proxy_unsafe reads"
+    assert run(*up, NO_PROXY="corp.example") == "corp.example|unset"
+    assert run("doctor") == "unset|unset"
 
 
 def test_without_the_plugin_registered_the_launcher_loads_its_own_plugin_folder(tmp_path, monkeypatch):
@@ -173,7 +206,7 @@ def test_without_the_plugin_registered_the_launcher_loads_its_own_plugin_folder(
 
     work = tmp_path / "w"
     work.mkdir()
-    launcher, cpath = _launcher(work, [str(work / "plugin"), "mcp__x", "", "{}", "", "thimble:main · w", "", "", "", "",
+    launcher, cpath = _launcher(work, [str(work / "plugin"), "", "{}", "", "thimble:main · w", "", "", "", "",
                                        "browser", "", "the prompt"])
     argv_out = tmp_path / "argv.txt"
     subprocess_env = {"PATH": f"{cpath}:/usr/bin:/bin", "HOME": str(tmp_path), "ARGV_OUT": str(argv_out)}
@@ -183,7 +216,7 @@ def test_without_the_plugin_registered_the_launcher_loads_its_own_plugin_folder(
     argv = argv_out.read_text().splitlines()
     assert argv[argv.index("--plugin-dir") + 1] == str(work / "plugin")
     assert "--dangerously-load-development-channels" not in argv
-    (work / "launch-args.txt").write_text("\n".join(["", "mcp__x", "", "{}", "", "thimble:main · w", "", "", "", "",
+    (work / "launch-args.txt").write_text("\n".join(["", "", "{}", "", "thimble:main · w", "", "", "", "",
                                                      "browser", "", "the prompt"]))
     subprocess.run(["bash", str(launcher)], check=True, capture_output=True, cwd=work, env=subprocess_env)
     argv = argv_out.read_text().splitlines()
@@ -193,16 +226,16 @@ def test_without_the_plugin_registered_the_launcher_loads_its_own_plugin_folder(
 def test_the_launcher_passes_the_session_id_exports_the_switches_unsets_the_variables_and_prints_the_notes(tmp_path):
     """The launcher passes launch-args' session id with --session-id, exports the env line's switches into `claude`'s
     environment, unsets the variables the unset line names, prints each note line before Claude Code starts, and tells
-    launch-args when the analyst's own flags name the session (-r, --session-id, --fork-session) or ask for safe mode.
-    It passes launch-args its own pid for launch.json, which `claude`'s replaces once it starts (the launcher outlives
-    `claude`, so `claude` is its child)."""
+    launch-args when the analyst's own flags name the session (-r, --session-id, --fork-session) or ask for safe mode; a
+    permission mode they name goes to `claude` alone. It passes launch-args its own pid for launch.json, which
+    `claude`'s replaces once it starts (the launcher outlives `claude`, so `claude` is its child)."""
     import subprocess  # noqa: PLC0415
 
-    head = [str(tmp_path / "plugin"), "mcp__x", "high", "{}", ""]
+    head = [str(tmp_path / "plugin"), "high", "{}", ""]
     sid = "0b9d2f3e-1c2d-4e5f-8a9b-0c1d2e3f4a5b"
     notes = "thimble: CLAUDE_CODE_EFFORT_LEVEL is unset\tthimble's agents can't start in this session: x."
     launcher, path = _launcher(tmp_path, [*head, "thimble:main · logs", sid,
-                                          "CLAUDE_CODE_DISABLE_AGENT_VIEW=1 CLAUDE_DISABLE_ADOPT=1",
+                                          "CLAUDE_CODE_DISABLE_AGENT_VIEW=1",
                                           "CLAUDE_CODE_EFFORT_LEVEL CLAUDE_CODE_SUBAGENT_MODEL", notes, "browser", "",
                                           "the prompt"])
     (path / "claude").write_text('#!/bin/sh\nfor a in "$@"; do printf "%s\\n" "$a"; done > "$ARGV_OUT"\n'
@@ -217,7 +250,8 @@ def test_the_launcher_passes_the_session_id_exports_the_switches_unsets_the_vari
     argv = argv_out.read_text().splitlines()
     assert argv[argv.index("--session-id") + 1] == sid and argv[argv.index("--effort") + 1] == "high"
     seen = dict(line.split("=", 1) for line in Path(f"{argv_out}.env").read_text().splitlines() if "=" in line)
-    assert seen["CLAUDE_CODE_DISABLE_AGENT_VIEW"] == "1" and seen["CLAUDE_DISABLE_ADOPT"] == "1"
+    assert seen["CLAUDE_CODE_DISABLE_AGENT_VIEW"] == "1" and "CLAUDE_DISABLE_ADOPT" not in seen
+    assert "--allowedTools" not in argv
     assert "CLAUDE_CODE_EFFORT_LEVEL" not in seen and "CLAUDE_CODE_SUBAGENT_MODEL" not in seen
     # thimble's plugin folders load unwatched, so a hook or Client of theirs that fails is told in the debug log, not in
     # main's chat; a value the analyst set is kept
@@ -235,6 +269,11 @@ def test_the_launcher_passes_the_session_id_exports_the_switches_unsets_the_vari
         subprocess.run(["bash", str(launcher), *flags], check=True, capture_output=True, cwd=tmp_path, env=env)
         assert told in asked.read_text().splitlines(), flags
         assert flags[-1] in argv_out.read_text().splitlines(), "the analyst's flags reach claude as they are"
+    for flags in (["--permission-mode", "auto"], ["--permission-mode=acceptEdits"], ["--dangerously-skip-permissions"]):
+        subprocess.run(["bash", str(launcher), *flags], check=True, capture_output=True, cwd=tmp_path, env=env)
+        argv = argv_out.read_text().splitlines()
+        assert argv[argv.index(flags[0]):][:len(flags)] == flags, "a permission mode reaches claude as it is"
+        assert not set(flags) & set(asked.read_text().splitlines()), "and launch-args is told none"
 
 
 @pytest.fixture()
@@ -294,51 +333,46 @@ def terminal_corpus(tmp_path, monkeypatch):
 def test_terminal_mode_launches_with_no_server_the_renderer_the_card_runner_and_the_session_s_environment(
         terminal_corpus, tmp_path):
     """Terminal mode: launch-args starts no server and asks none (its extensions are found here), writes launch.json
-    with `mode: terminal` and the hooks module's roles file; the allow rule for the card runner, main's fence letting
-    its Bash write the card folders, THIMBLE_MODE, THIMBLE_HOME, THIMBLE_WS and the data and workspaces folders in
-    main's --settings `env` and on the export line, the renderer's folder on the mode line, and main's prompt rendered
-    in that environment. Browser mode, the control, has none of these."""
+    with `mode: terminal` and the hooks module's roles file; THIMBLE_MODE, THIMBLE_HOME, THIMBLE_WS and the data and
+    workspaces folders in main's --settings `env` and on the export line, the renderer's folder on the mode line, and
+    main's prompt rendered in that environment. Browser mode, the control, has none of these. Neither mode gets an
+    allow rule or a sandbox: main's Bash runs the card runner as the permission mode decides."""
     t = terminal_corpus
     launch_mode.set_folder(t.folder, "terminal")
     lines = cli.launch_args(t.folder).split("\n")
     assert t.calls["server"] == [] and t.calls["refresh"] == [], "no server started or asked"
     assert t.calls["local"] == ["logs"] and t.calls["roles"] == ["logs"]
-    runner = f"Bash({cli.plugin_root() / cli.CARD_RUNNER} *)"
-    assert runner in lines[1].split(",") and "Bash(thimble-run *)" in lines[1].split(","), "by its path and its name"
-    settings = json.loads(lines[3])
+    settings = json.loads(lines[2])
+    assert not {"sandbox", "permissions"} & set(settings), "no sandbox and no allow rule"
     ws = str(t.ws.resolve())
     want = {"THIMBLE_MODE": "terminal", "THIMBLE_HOME": str((tmp_path / "home").resolve()), "THIMBLE_WS": ws,
             "THIMBLE_DATA_DIR": str((tmp_path / "data").resolve()), "THIMBLE_WORKSPACES_DIR": str(config.WORKSPACES_DIR)}
     assert {k: settings["env"].get(k) for k in want} == want
-    assert settings["env"][cli.cc_plugin.FENCE_MARK] == "1", "fenced as in browser mode"
-    allow = settings["sandbox"]["filesystem"]["allowWrite"]
-    assert {f"{ws}/notebooks", f"{ws}/labels", f"{ws}/card-runs"} <= set(allow)
     launch = str(config.workspace_dir("logs") / cli.LAUNCH_FILE)  # whose pid the launcher sets to main's `claude`
-    assert lines[10] == f"terminal\t{t.renderer}\t{launch}"
-    exported = dict(kv.split("=", 1) for kv in lines[11].split("\t"))
+    assert lines[9] == f"terminal\t{t.renderer}\t{launch}"
+    exported = dict(kv.split("=", 1) for kv in lines[10].split("\t"))
     assert {k: exported[k] for k in want} == want
     # the plugin copy's bin/ first on PATH, so main's Bash runs `thimble-run` by its name; main's --settings leave PATH
     assert exported["PATH"].split(os.pathsep)[0] == str(cli.plugin_root() / "bin") and "PATH" not in settings["env"]
     assert json.loads((t.ws / cli.LAUNCH_FILE).read_text())["mode"] == "terminal"
     assert t.calls["prompt_env"] == [{"THIMBLE_MODE": "terminal", "THIMBLE_WS": ws}], "main's prompt sees the mode"
     assert os.environ.get("THIMBLE_MODE") is None and os.environ.get("THIMBLE_WS") is None, "and only it"
-    assert "\n".join(lines[12:]).strip(), "main's prompt is appended as in browser mode"
+    assert "\n".join(lines[11:]).strip(), "main's prompt is appended as in browser mode"
 
     (t.renderer / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "other-plugin"}))
     lines = cli.launch_args(t.folder).split("\n")
-    assert lines[10] == f"terminal\t\t{launch}", "no renderer to load"
-    assert any(n.startswith("thimble: WARNING - terminal mode's renderer cannot load") for n in lines[9].split("\t"))
+    assert lines[9] == f"terminal\t\t{launch}", "no renderer to load"
+    assert any(n.startswith("thimble: WARNING - terminal mode's renderer cannot load") for n in lines[8].split("\t"))
 
     for k in t.calls.values():
         k.clear()
     launch_mode.set_folder(t.folder, "browser")
     lines = cli.launch_args(t.folder).split("\n")
     assert t.calls["server"] == ["logs"] and t.calls["refresh"] == ["logs"] and t.calls["roles"] == []
-    assert runner not in lines[1].split(",") and "Bash(thimble-run *)" not in lines[1].split(",")
-    settings = json.loads(lines[3])
+    settings = json.loads(lines[2])
     assert not {"THIMBLE_MODE", "THIMBLE_WS", "THIMBLE_HOME"} & set(settings["env"])
-    assert f"{ws}/notebooks" not in settings["sandbox"]["filesystem"]["allowWrite"]
-    assert lines[10:12] == [f"browser\t\t{launch}", ""]
+    assert not {"sandbox", "permissions"} & set(settings)
+    assert lines[9:11] == [f"browser\t\t{launch}", ""]
     assert json.loads((t.ws / cli.LAUNCH_FILE).read_text())["mode"] == "browser"
     assert t.calls["prompt_env"] == [{"THIMBLE_MODE": None, "THIMBLE_WS": None}]
 
@@ -391,7 +425,7 @@ def test_a_workspace_open_in_the_other_mode_refuses_the_launch(terminal_corpus, 
         main.wait()
     (t.ws / cli.LAUNCH_FILE).write_text(json.dumps(record))
     assert cli.open_elsewhere("logs") is None, "gone"
-    assert cli.launch_args(t.folder).split("\n")[10].startswith("terminal")
+    assert cli.launch_args(t.folder).split("\n")[9].startswith("terminal")
 
 
 def test_the_launcher_starts_terminal_mode_with_the_renderer_the_exports_and_no_first_prompt(tmp_path):
@@ -400,7 +434,7 @@ def test_the_launcher_starts_terminal_mode_with_the_renderer_the_exports_and_no_
     reaches no browser-mode session. A refused launch (exit 3) starts nothing and adds no line of its own."""
     import subprocess  # noqa: PLC0415
 
-    head = [str(tmp_path / "plugin"), "mcp__x", "", "{}", "", "thimble:main · logs", "", "CLAUDE_CODE_DISABLE_AGENT_VIEW=1",
+    head = [str(tmp_path / "plugin"), "", "{}", "", "thimble:main · logs", "", "CLAUDE_CODE_DISABLE_AGENT_VIEW=1",
             "", ""]
     exports = "THIMBLE_MODE=terminal\tTHIMBLE_WS=/w s/workspaces/logs\tTHIMBLE_HOME=/h"
     launcher, path = _launcher(tmp_path, [*head, "terminal\t/tree/mods/thimble-term", exports, "the prompt"])
@@ -448,7 +482,7 @@ def test_after_claude_exits_the_launcher_says_how_to_come_back_with_thimble_in_e
     ws = tmp_path / "ws"
     (ws / "trusted").mkdir(parents=True)
     (ws / "trusted" / "launch.json").write_text(json.dumps({"session": "s1", "pid": 1, "mode": "terminal"}))
-    head = [str(tmp_path / "plugin"), "mcp__x", "", "{}", "", "thimble:main · logs", "", "", "", ""]
+    head = [str(tmp_path / "plugin"), "", "{}", "", "thimble:main · logs", "", "", "", ""]
     exports = f"THIMBLE_MODE=terminal\tTHIMBLE_WS={ws}\tTHIMBLE_HOME=/h"
     launcher, path = _launcher(tmp_path, [*head, "terminal\t/tree/mods/thimble-term", exports, "the prompt"])
     (tmp_path / "launch-args.txt.resume").write_text("\n".join([*head, "terminal\t/tree/mods/thimble-term", exports,
@@ -501,8 +535,8 @@ async def test_the_statusline_shows_the_orientation_and_its_cards_and_the_listin
 
 
 def test_the_orientation_waiting_names_its_critic_or_its_own_subagents(workspaces_tmp, monkeypatch):
-    """Live check L13: with critique off the statusline said the orientation was waiting for its critique while it
-    waited for a helper it had started. The row names the child it waits for: its critic, else its subagents."""
+    """Live check L13: the statusline said the orientation was waiting for its critique while it waited for a helper
+    it had started and no critic ran. The row names the child it waits for: its critic, else its subagents."""
     from app import events, subagent_files as sf, subagents
 
     monkeypatch.setattr(events, "asking", lambda c: set())

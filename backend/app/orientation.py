@@ -1,31 +1,31 @@
 """The orientation as the server sees it: its record, for the readers that need it without its agent.
 
 No model runs here. The orientation is `thimble:orientation`, a subagent of the analyst's Claude Code session
-(orient_session.py, subagents.py, prompts/orient.md), started by Start in the browser (a click through thimble's plugin
-module) or by main's Agent call after `start_orientation`. Each takes the request and four switches (the deck, group
-`Orientation`; the views; the critique; the report) and the run's model and effort. This module keeps the run's record:
-asked for (start_requested), starting until the agent starts (started) or the start does not happen (refuse), and
-its end (finished).
+(orient_session.py, subagents.py, prompts/orient.md), started by main's Agent call after `start_orientation`, or by a
+click through thimble's plugin module (POST /ws/{c}/start, which a pre-cache sends; the page no longer does). Each takes
+the request and the run's model and effort, nothing else: the orientation decides how far to explore and whether to
+start a critic, and leaves its findings as cards in its deck, group `Orientation`. This module keeps the run's record:
+asked for (start_requested), starting until the agent starts (started) or the start does not happen (refuse), and its
+end (finished).
 
 The orientation's cards go to its deck, the root group `Orientation`, whatever group a call names, so the model never
-writes into the analyst's Your work. Its deck cards show on the canvas as it adds them; the first run's view proposals
-stay unlisted (holding) while they build. A follow-up continues the same agent, and its changes land in place, one Undo
-reverting them all.
+writes into the analyst's Your work. Its deck cards show on the canvas as it adds them. A follow-up continues the same
+agent, and its changes land in place, one Undo reverting them all.
 
-  orient/run.json    {status: requested|starting|running|done|failed|stopped|refused, passes, query, critique?,
-                      model?, effort?, route?: subagent|program, started_by?: click|typed, agent_id?, request?,
+  orient/run.json    {status: requested|starting|running|done|failed|stopped|refused, passes, query, model?, effort?,
+                      route?: subagent|program, started_by?: click|typed, agent_id?, request?,
                       refused?: {reason, kind, at, expired?}, requested?, started, ended, groups: {orientation},
                       chats: {orient?}, session?, error?, run (0 the first, then one per follow-up),
                       followups: [{run, status, started, ended, messages, added, revised, deleted, views}],
-                      report_asked?, coverage? (run 0's coverage line, orient_session.measure), coverage_told? (a
-                      later run's prompt carried it)}
+                      coverage? (run 0's coverage line, orient_session.measure), coverage_told? (a later run's prompt
+                      carried it)}
   orient/summary.md  the agent's last message, then run 0's coverage line, kept as a record for the export
 
-`query` is only ever the analyst's own words. A run with a `final` group uses it as its deck. `status` is the latest
-run's, so start_orientation refuses while any run goes. `model` and `effort` are the run's exact values.
-
-When run 0 ends, the held proposals appear, and the orientation's chat gets chips for them. When the report was asked
-for, orient_session starts the report's writer through the module (request_report) once the run ends.
+`passes` is `["final"]`, the deck (DECK), which the readers of a deck look for (deck_of, tray, thimble-agents). A record
+from before 0.8.0 may name other passes (`views`, `report`) and keep `critique`, `report_asked` and `revised_cards`,
+from the switches a start had then; it still loads, and nothing acts on those keys. `query` is only ever the analyst's
+own words. A run with a `final` group uses it as its deck. `status` is the latest run's, so start_orientation refuses
+while any run goes. `model` and `effort` are the run's exact values.
 """
 from __future__ import annotations
 
@@ -43,17 +43,15 @@ from .ledger import read_json, write_json
 log = logging.getLogger("thimble.orientation")
 
 PLUGIN = "thimble"  # the plugin's name (plugin/.claude-plugin/plugin.json), the scope of its agents and skills
-DEFAULT_CRITIQUE = False  # an orientation runs no critique unless Start or start_orientation's `critique` turns it on
+DECK = "final"  # a record's one pass, the deck (module note)
 ROLE = "orient"  # the orientation's chat role
 TITLE = "Orientation"  # the agent chat's title
 ORIENT_KIND = "orient"  # the event kind that tells main the orientation ended (prompts/main.md)
 GROUP_PATHS = {"deck": "Orientation"}  # the orientation's one group, its deck
-REPORT_DOC = "report"
 RUNNING = ("requested", "starting", "running")
 # a start that has no agent this long after it was asked for is taken as dropped (a click's answer comes within
 # module_bridge's wait, and a typed start ends with main's turn: subagents, R1–R3)
 REQUEST_WAIT_S = 600.0
-PART_SWITCHES = {"final": "final", "views": "views", "report": "report"}  # part_on: the parts the record's passes name
 # analyst-facing lines
 CARDS_CHIP = "the orientation's cards"
 FOLLOWUP_LABEL = "the orientation's follow-up"  # the undo label of a follow-up's changes (undo.batching)
@@ -114,8 +112,8 @@ def _run_change(fn: Any) -> Any:
 
 @_run_change
 def record(c: str, **fields: Any) -> dict[str, Any] | None:
-    """Set fields on the run's record (orient_session keeps Start's choices, the queue and the cards a follow-up
-    revised there); None when there is no record."""
+    """Set fields on the run's record (orient_session keeps the run's model and effort, the coverage line and the
+    extension whose program ran it there); None when there is no record."""
     run = read_run(c)
     if run is None:
         return None
@@ -128,25 +126,6 @@ def _emit(c: str, status: str, **fields: Any) -> None:
         investigation.emit(c, investigation.MAIN, {"type": "orient", "status": status, **fields})
     except Exception:  # noqa: BLE001 — the stream is a courtesy; run.json is the record
         log.warning("orientation %s: could not emit %s", c, status, exc_info=True)
-
-
-def flag(value: Any, default: bool) -> bool:
-    """A Start choice sent as a boolean, or as the string an event attribute carries."""
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str) and value.strip().lower() in ("true", "false"):
-        return value.strip().lower() == "true"
-    return default
-
-
-def part_on(c: str, part: str) -> bool:
-    """Whether the latest orientation's run has `part` on: an output its switches turned on (final, views, report), or
-    the critique. One registration serves every run, so a tool of a part that is off refuses a call instead of leaving
-    the agent's tools (orient_session.PART_TOOLS)."""
-    run = read_run(c) or {}
-    if part == "critique":
-        return bool(run.get("critique"))
-    return part in (run.get("passes") or [])
 
 
 def ensure_groups(c: str, deck: bool = False) -> dict[str, str]:
@@ -168,9 +147,9 @@ def ensure_groups(c: str, deck: bool = False) -> dict[str, str]:
 
 
 def deck_of(run: dict[str, Any] | None) -> str | None:
-    """The id of a run's deck when its deck is on: a recorded `final` group, else its Orientation group; None when off.
-    """
-    if not run or "final" not in (run.get("passes") or []):
+    """The id of a run's deck: a recorded `final` group, else its Orientation group; None for a record from before
+    0.8.0 whose start turned the deck off (its passes lack DECK)."""
+    if not run or DECK not in (run.get("passes") or []):
         return None
     groups = run.get("groups") or {}
     return str(groups.get("final") or groups.get("orientation") or "") or None
@@ -207,7 +186,7 @@ def _gone(run: dict[str, Any]) -> bool:
 
 def active(c: str) -> bool:
     """Whether an orientation has started and still runs: its chat is running and its session's process, when it has
-    one, is alive (a Start not yet taken up is not active)."""
+    one, is alive (a start not yet taken up is not active)."""
     run = read_run(c)
     chat = (run or {}).get("chats", {}).get(ROLE) if run and run.get("status") == "running" else None
     meta = agents.meta_or_none(c, str(chat)) if chat else None
@@ -215,8 +194,8 @@ def active(c: str) -> bool:
 
 
 def running(c: str) -> bool:
-    """Whether an orientation is running: its record says so and its agent chat has not ended, or a Start was sent
-    less than REQUEST_WAIT_S ago and main has not started the orientation yet (after that the request is taken as
+    """Whether an orientation is running: its record says so and its agent chat has not ended, or a start was asked
+    for less than REQUEST_WAIT_S ago and main has not started the orientation yet (after that the request is taken as
     dropped)."""
     run = read_run(c)
     if not run or run.get("status") not in RUNNING:
@@ -238,20 +217,18 @@ def running(c: str) -> bool:
 @_run_change
 def start_requested(c: str, payload: dict[str, Any]) -> dict[str, Any] | None:
     """A start of the orientation was asked for (orient_session.start): the run is recorded as `starting`, with its
-    passes, request, critique, the run's exact model and effort, the request id and who started it (`started_by`:
-    click or typed), and the deck is made when on. A start while an orientation runs keeps the running record."""
+    request, the run's exact model and effort, the request id and who started it (`started_by`: click or typed), and
+    its deck is made. A start while an orientation runs keeps the running record."""
     if running(c):
         log.info("%s: a start while an orientation runs; the record of the running one is kept", c)
         return None
     text = str(payload.get("text") or "").strip()
-    passes = [p for p in ("final", "views", "report") if p in (payload.get("passes") or [])]
-    return _write_run(c, {"status": "starting", "passes": passes, "query": text or None,
-                          "critique": flag(payload.get("critique"), DEFAULT_CRITIQUE),
+    return _write_run(c, {"status": "starting", "passes": [DECK], "query": text or None,
                           "model": payload.get("model") or None, "effort": payload.get("effort") or None,
                           "route": "subagent", "started_by": payload.get("started_by") or "click",
                           "request": payload.get("request"), "agent_id": None, "refused": None,
                           "requested": _now(), "started": None, "ended": None,
-                          "groups": ensure_groups(c, deck=True) if "final" in passes else {}, "chats": {}, "error": None})
+                          "groups": ensure_groups(c, deck=True), "chats": {}, "error": None})
 
 
 @_run_change
@@ -270,38 +247,26 @@ def refuse(c: str, reason: str, kind: str, **fields: Any) -> dict[str, Any] | No
 
 
 @_run_change
-def request(c: str, brief: str, passes: "list[str]", **fields: Any) -> dict[str, Any]:
-    """Record an orientation main asked for with no Start waiting, as a Start records one (start_requested): requested,
-    with its passes and brief, and the deck made when on. `fields` go on the record too."""
-    return _write_run(c, {"status": "requested", "passes": list(passes), "query": brief.strip() or None,
+def request(c: str, brief: str, **fields: Any) -> dict[str, Any]:
+    """Record a start of the orientation that an extension's program runs (orient_session.start), as start_requested
+    records thimble's own: requested, with its brief, and its deck made. `fields` go on the record too."""
+    return _write_run(c, {"status": "requested", "passes": [DECK], "query": brief.strip() or None,
                           "requested": _now(), "started": None, "ended": None,
-                          "groups": ensure_groups(c, deck=True) if "final" in passes else {}, "chats": {}, "error": None,
-                          **fields})
-
-
-def start_passes(payload: dict[str, Any]) -> list[str]:
-    """The outputs a Start turned on, from its switches (`final_notebook` for the deck, `propose_views`,
-    `generate_report`); with all three off the orientation leaves its thread. `analyze_data` and `report` are accepted
-    as alternate names."""
-    final = flag(payload.get("final_notebook", payload.get("analyze_data")), True)
-    views = flag(payload.get("propose_views"), True)
-    report = flag(payload.get("generate_report", payload.get("report")), False)
-    return [p for p, on in (("final", final), ("views", views), ("report", report)) if on]
+                          "groups": ensure_groups(c, deck=True), "chats": {}, "error": None, **fields})
 
 
 @_run_change
-def started(c: str, chat_id: str, *, session: str | None = None, pid: int | None = None,
-            passes: "list[str] | None" = None, agent_id: str | None = None, route: str | None = None) -> dict[str, Any]:
+def started(c: str, chat_id: str, *, session: str | None = None, pid: int | None = None, agent_id: str | None = None,
+            route: str | None = None) -> dict[str, Any]:
     """The orientation's agent (or program) started: a starting or requested run becomes running with its chat, as
-    run 0, its agent id and route, and an orientation nobody asked Start for opens a run of its own. `passes` from the
-    start win over the record's; without them a requested run keeps its own and a new run has deck and views."""
+    run 0, its agent id and route, and an orientation no start asked for opens a run of its own. A requested run keeps
+    its passes, and a new run has the deck."""
     run = read_run(c)
     asked = bool(run and run.get("status") in ("requested", "starting"))
-    if passes is None:
-        passes = list((run or {}).get("passes") or ["final", "views"]) if asked else ["final", "views"]
-    groups = ensure_groups(c, deck=True) if "final" in passes else {}
+    passes = list((run or {}).get("passes") or [DECK]) if asked else [DECK]
+    groups = ensure_groups(c, deck=True) if DECK in passes else {}
     extra = {k: v for k, v in (("session", session), ("pid", pid), ("agent_id", agent_id), ("route", route)) if v is not None}
-    fresh = {"run": 0, "followups": [], "report_asked": False, "coverage": None, "coverage_told": False}
+    fresh = {"run": 0, "followups": [], "coverage": None, "coverage_told": False}
     if run and asked:
         run.update(status="running", started=_now(), passes=list(passes), groups=groups, chats={ROLE: chat_id},
                    refused=None, **fresh, **extra)
@@ -319,12 +284,11 @@ def started(c: str, chat_id: str, *, session: str | None = None, pid: int | None
 
 
 @_run_change
-def finished(c: str, chat_id: str, status: str, result: str | None, report: bool = True) -> dict[str, Any] | None:
+def finished(c: str, chat_id: str, status: str, result: str | None) -> dict[str, Any] | None:
     """The first run stopped: its last message is kept as summary.md, the run ends with the session's status, and main's
     chat gets the orientation's landing (an `artifact` chip naming its chat), with the deck when it has cards, and for a
-    failed run always, since the landing is where main's chat says it failed and why. With `report`, a done run that
-    asked for the report asks for it. A notification for another session, or for a run already ended, changes
-    nothing."""
+    failed run always, since the landing is where main's chat says it failed and why. A notification for another
+    session, or for a run already ended, changes nothing."""
     run = read_run(c)
     if not run or (run.get("chats") or {}).get(ROLE) != chat_id or run.get("status") not in RUNNING:
         return None
@@ -339,8 +303,6 @@ def finished(c: str, chat_id: str, status: str, result: str | None, report: bool
     if cards or run["status"] == "failed":
         agents.chip(c, "artifact", CARDS_CHIP, ref=f"group:{deck}" if cards else None, chat=chat_id)
     _emit(c, run["status"], **({"error": run["error"]} if run.get("error") else {}))
-    if report and status == "done" and "report" in (run.get("passes") or []):
-        request_report(c)
     return read_run(c) or run
 
 
@@ -383,27 +345,3 @@ def run_finished(c: str, chat_id: str, k: int, status: str, made: dict[str, int]
         agents.update_agent(c, chat_id, followups=run.get("followups") or [])
     _emit(c, status, run=k, **made)
     return run
-
-
-@_run_change
-def request_report(c: str, request: str = "") -> bool:
-    """The report pass: the report's writer, started through thimble's module as part of the orientation's own start
-    (write_session.follow_on), with `request` its text (a revision's, naming the cards a follow-up changed), carrying
-    the orientation's chat and run so the browser shows it on the orientation's card. False when it could not start
-    (logged, never raised: the orientation itself is done)."""
-    from . import write_session  # noqa: PLC0415
-
-    run = read_run(c)
-    if run is None:
-        return False
-    chat = str((run.get("chats") or {}).get(ROLE) or "")
-    meta = agents.meta_or_none(c, chat) if chat else None
-    run["report_asked"] = True
-    _write_run(c, run)
-    try:
-        write_session.follow_on(c, REPORT_DOC, request.strip(), orient=chat or None,
-                                orient_run=int((meta or {}).get("run") or 0))
-    except Exception:  # noqa: BLE001
-        log.exception("orientation %s: the report pass did not start", c)
-        return False
-    return True

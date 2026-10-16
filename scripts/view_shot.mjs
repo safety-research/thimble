@@ -461,8 +461,13 @@ function findControl({ want, sel }) {
     return r.width >= 2 && r.height >= 2 && cs.visibility === 'visible' && cs.display !== 'none'
   }
   const text = (el) => norm(el.getAttribute('aria-label') || el.textContent || el.getAttribute('title') || el.value)
+  // a control's parts in elements of their own read with no space between them, as Color by's "Color by:" and its
+  // choice, so a name is also matched with its spaces left out
+  const loose = (s) => s.replace(/\s+/g, '')
+  const lw = loose(w)
   const controls = [...document.querySelectorAll(sel)].filter(seen)
-  let hit = controls.find((el) => el.tagName !== 'SELECT' && text(el) === w)
+  let hit = controls.find((el) => el.tagName !== 'SELECT' && text(el) === w) ||
+    controls.find((el) => el.tagName !== 'SELECT' && lw && loose(text(el)) === lw)
   if (!hit) {
     for (const s of document.querySelectorAll('select')) {
       const o = [...s.options].find((x) => norm(x.text) === w || norm(x.value) === w)
@@ -471,7 +476,10 @@ function findControl({ want, sel }) {
         return 'select'
       }
     }
-    hit = controls.find((el) => el.tagName !== 'SELECT' && w && text(el).includes(w))
+    // a name that starts a control's text before one inside it, so a menu's choice "State" is not Color by's "Color by:
+    // State"
+    hit = controls.find((el) => el.tagName !== 'SELECT' && w && (text(el).startsWith(w) || loose(text(el)).startsWith(lw))) ||
+      controls.find((el) => el.tagName !== 'SELECT' && w && (text(el).includes(w) || loose(text(el)).includes(lw)))
   }
   if (!hit) {
     let best = null

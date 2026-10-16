@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import asyncio
 
+from conftest import earlier_orientation_proposal
+
 from app import agents, card_check, checks, cli, concepts, dev, notebook, session
 
 
@@ -156,8 +158,7 @@ def test_stopping_the_orientation_stops_the_builds_of_its_views_and_no_other(wor
     from app import orient_session, views
 
     c = "mini"
-    ours = [views.propose(c, n, "why", ["board.jsonl"], "one row per post", orientation=True)["slug"]
-            for n in ("Posts", "Threads")]
+    ours = [earlier_orientation_proposal(c, n, "why", ["board.jsonl"], "one row per post") for n in ("Posts", "Threads")]
     asked = views.propose(c, "Timeline", "why", ["events.jsonl"], "one row per event", asked=True)["slug"]
 
     from app import subagents
@@ -190,7 +191,7 @@ def test_main_s_end_fails_every_queued_build_with_retry_and_none_starts_again(wo
     c = "mini"
     slugs = [views.propose(c, n, "why", ["board.jsonl"], "one row per post", asked=True)["slug"]
              for n in ("Posts", "Threads")]
-    slugs.append(views.propose(c, "Timeline", "why", ["events.jsonl"], "one row per event", orientation=True)["slug"])
+    slugs.append(earlier_orientation_proposal(c, "Timeline", "why", ["events.jsonl"], "one row per event"))
     assert dev.stop_workspace(c) == 3
     assert not dev._view_queue
     assert {s: ((views.read_proposal(c, s) or {}).get("status"), (views.read_proposal(c, s) or {}).get("error"))

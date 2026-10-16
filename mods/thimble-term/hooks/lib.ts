@@ -112,6 +112,59 @@ export function labelRef(ref: string): { id: string; value: string } | null {
 }
 export const EMBED_RE = /^\s*(?:\[\[card:([A-Za-z0-9_-]+)\]\]|!\[[^\]\n]*\]\(card:([A-Za-z0-9_-]+)\))\s*$/
 
+// a chip that names a whole card (`[[card:<id>]]`, `[[cell:<id>]]`, `[↗](card:<id>)`), with the brackets around it or
+// the space before it, which leave with it
+const CARD_CHIP_RE = /\s*\(\s*(?:\[\[(?:card|cell):([A-Za-z0-9_-]+)\]\]|\[↗\]\((?:card|cell):([A-Za-z0-9_-]+)\))\s*\)|\s*(?:\[\[(?:card|cell):([A-Za-z0-9_-]+)\]\]|\[↗\]\((?:card|cell):([A-Za-z0-9_-]+)\))/g
+
+/** A side thread's answer with each card it cites by a chip alone drawn where it cites it, never as `[ card ]`: the
+ *  chip taken out of its sentence and the card embedded on a line of its own after the sentence's paragraph; each card
+ *  once; `also`, the other cards the turn made, after the answer. A code fence is left as written. */
+export function cardsInline(text: string, also: readonly string[] = []): string {
+  const out: string[] = []
+  const placed = new Set<string>()
+  let pending: string[] = []
+  let fence = false
+  const flush = () => {
+    for (const id of pending) out.push('', `[[card:${id}]]`)
+    if (pending.length) out.push('')
+    pending = []
+  }
+  for (const line of text.split('\n')) {
+    if (fence || /^\s*```/.test(line)) {
+      if (/^\s*```/.test(line)) fence = !fence
+      out.push(line)
+      continue
+    }
+    const embed = EMBED_RE.exec(line)
+    if (embed) {
+      const id = (embed[1] ?? embed[2])!
+      // a card its paragraph cited and embeds right after: drawn there, not again after the paragraph
+      if (pending.includes(id)) pending = pending.filter(x => x !== id)
+      else if (placed.has(id)) continue
+      placed.add(id)
+      out.push(line)
+      continue
+    }
+    if (!line.trim()) {
+      flush()
+      out.push(line)
+      continue
+    }
+    const kept = line.replace(CARD_CHIP_RE, (_m: string, a?: string, b?: string, c?: string, d?: string) => {
+      const id = (a ?? b ?? c ?? d)!
+      if (!placed.has(id)) {
+        placed.add(id)
+        pending.push(id)
+      }
+      return ''
+    })
+    if (kept.trim()) out.push(kept)
+  }
+  flush()
+  const rest = also.filter(id => !placed.has(id)).map(id => `[[card:${id}]]`)
+  return [out.join('\n').replace(/\n{3,}/g, '\n\n').trim(), ...rest].filter(Boolean).join('\n\n')
+}
+
 function make(display: string | null, ref: string): Citation {
   return { raw: display === null ? `[[${ref}]]` : `[[${display}|${ref}]]`, ref, display }
 }

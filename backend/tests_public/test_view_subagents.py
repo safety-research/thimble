@@ -15,7 +15,7 @@ import json
 from pathlib import Path
 
 import pytest
-from conftest import Listener
+from conftest import Listener, earlier_orientation_proposal
 from fastapi.testclient import TestClient
 
 from app import agents, config, dev, events, orient_session, orientation, prompts, session, subagents, tools, view_review, view_tools, views
@@ -93,6 +93,11 @@ def _propose(name: str = "Posts", **kw) -> str:
     return views.propose(CORPUS, name, "to read the board", ["board.jsonl"], "one row per post", **kw)["slug"]
 
 
+def _earlier(name: str = "Posts") -> str:
+    """A proposal as an orientation from before 0.8.0 stored it: held, with its build queued."""
+    return earlier_orientation_proposal(CORPUS, name, "to read the board", ["board.jsonl"], "one row per post")
+
+
 def _prop(slug: str) -> dict:
     return views.read_proposal(CORPUS, slug) or {}
 
@@ -151,9 +156,8 @@ def test_main_s_note_of_a_view_build_names_its_view_and_a_ticket_s_names_none(bo
 
 
 async def test_main_s_propose_view_gives_the_exact_agent_call_its_hook_lets_through(board, bridge, gates, hints):
-    res = await tools.call(CORPUS, "propose_view", {"name": "Posts", "why": "to read the board",
-                                                    "claims": ["board.jsonl"], "unit": "a post", "overview": "a list",
-                                                    "zoom": "a post", "filter": "labels", "details": "the body",
+    res = await tools.call(CORPUS, "propose_view", {"name": "Posts", "description": "The board's posts as a list.",
+                                                    "task": "Read the board.", "claims": ["board.jsonl"],
                                                     "effort": "low"}, tool_use_id="toolu_main1")
     assert not res.is_error, res.text
     inp = json.loads(res.text.split("AGENT CALL ", 1)[1].splitlines()[0])
@@ -172,18 +176,123 @@ async def test_a_design_the_analyst_asked_main_for_reaches_the_builder_and_the_r
                                                                                                      gates, hints):
     # the reviewer keeps a visual design the proposal asks for (prompts/view-review.md), so main's propose_view fields,
     # which carry the analyst's request, reach the builder's task and the reviewer's task whole
-    why = "Each post as the board drew it, in the old forum's look: serif titles, blue links, quoted replies indented."
-    overview = "The thread list in a dense grid in the style of a spreadsheet, one row per post, with no gaps."
-    res = await tools.call(CORPUS, "propose_view", {"name": "Posts", "why": why, "claims": ["board.jsonl"],
-                                                    "unit": "a post", "overview": overview, "zoom": "a post",
-                                                    "filter": "labels", "details": "the body"},
+    description = ("Each post as the board drew it, in the old forum's look: serif titles, blue links, quoted replies "
+                   "indented.")
+    task = "Scan the thread list in a dense grid in the style of a spreadsheet, one row per post, with no gaps."
+    res = await tools.call(CORPUS, "propose_view", {"name": "Posts", "description": description, "task": task,
+                                                    "claims": ["board.jsonl"]},
                            tool_use_id="toolu_main2")
     assert not res.is_error, res.text
     builder = json.loads(res.text.split("AGENT CALL ", 1)[1].splitlines()[0])["prompt"]
     slug = next(p["slug"] for p in views.list_proposals(CORPUS))
     reviewer = view_review.task(CORPUS, _prop(slug))
     for prompt in (builder, reviewer):
-        assert why in prompt and overview in prompt
+        assert description in prompt and task in prompt
+
+
+async def test_the_reviewer_s_task_holds_the_proposal_and_no_analyst_context(board, bridge, gates, hints, monkeypatch):
+    """The review is a light pass over how the view draws, so its run's prompt holds the view and the proposal, and none
+    of the analyst's work: the context engine is not asked for it."""
+    res = await tools.call(CORPUS, "propose_view", {"name": "Posts", "description": "The posts by thread.",
+                                                    "task": "Find the threads where an agent asks for help.",
+                                                    "claims": ["board.jsonl"]}, tool_use_id="toolu_ctx")
+    assert not res.is_error, res.text
+    slug = next(p["slug"] for p in views.list_proposals(CORPUS))
+    seen = []
+    monkeypatch.setattr("app.context.render", lambda c, **kw: seen.append(kw) or "## The conversation\n\n[analyst] hi")
+    reviewer = view_review.task(CORPUS, _prop(slug))
+    assert "The posts by thread." in reviewer and "Find the threads where an agent asks for help." in reviewer
+    assert "- The files it reads: board.jsonl" in reviewer and f"`{slug}`" in reviewer
+    assert "[analyst] hi" not in reviewer and "The analyst's work" not in reviewer and not seen
+
+
+async def test_propose_view_takes_a_description_a_task_and_claims_and_the_builder_reads_the_layout_from_the_files(
+        board, bridge, gates, hints):
+    """0.8.0: propose_view takes name, description, task and claims; the overview, zoom, filter and details
+    emerge from the build, not up front. A call with the 0.7.0 fields alone is refused, and the proposal it stores
+    gives the builder what the analyst sees and does, the files, and no layout."""
+    old = {"name": "Posts", "why": "to read the board", "claims": ["board.jsonl"], "unit": "a post",
+           "overview": "a list", "zoom": "a post", "filter": "labels", "details": "the body"}
+    res = await tools.call(CORPUS, "propose_view", old, tool_use_id="toolu_old")
+    assert res.is_error and "`description` is required" in res.text
+    res = await tools.call(CORPUS, "propose_view", {"name": "Posts", "description": "The posts by thread.",
+                                                    "claims": ["board.jsonl"]}, tool_use_id="toolu_notask")
+    assert res.is_error and "`task` is required" in res.text
+    assert not views.list_proposals(CORPUS), "nothing is stored for a refused call"
+    res = await tools.call(CORPUS, "propose_view", {"name": "Posts", "description": "The posts by thread.",
+                                                    "task": "Find the threads where an agent asks for help.",
+                                                    "claims": ["board.jsonl"]}, tool_use_id="toolu_new")
+    assert not res.is_error, res.text
+    [row] = views.read_json(views.proposals_path(CORPUS), [])
+    assert (row["description"], row["task"], row["arrangement"]) == (
+        "The posts by thread.", "Find the threads where an agent asks for help.", "")
+    assert "why" not in row and "spec" not in row
+    builder = json.loads(res.text.split("AGENT CALL ", 1)[1].splitlines()[0])["prompt"]
+    assert "- What the analyst sees: The posts by thread." in builder
+    assert "- What the analyst wants to accomplish: Find the threads where an agent asks for help." in builder
+    assert "- The files it reads: board.jsonl" in builder
+    assert "Find the fields, keys and counts in the files themselves." in builder
+    assert "Unit:" not in builder and "The unit and the layout" not in builder
+
+
+async def test_a_0_7_0_proposal_loads_with_its_why_as_its_description_and_its_layout_for_the_dev_agent(board, bridge,
+                                                                                                    gates, hints):
+    """A proposal stored by 0.7.0 (`why`, the layout fields as `spec` and as `arrangement`, as the demos' pre-caches
+    keep them) still loads: its `why` reads as its description, and the builder, a change, the reviewer, read_ref,
+    main's context and the critique show its layout fields as they were proposed. Proposed again under its name, the
+    new fields replace the old layout."""
+    from app import context, critique_session
+
+    spec = {"unit": "One post, keyed by `id`.", "overview": "A list of threads.", "zoom": "Click a thread.",
+            "filter": "By label.", "details": "The post's body."}
+    arrangement = "\n".join(f"{label}: {spec[k]}" for k, label in views.LEGACY_SPEC_FIELDS)
+    row = {"slug": "posts", "name": "Posts", "why": "Each post in its thread, as the board drew it.",
+           "claims": ["board.jsonl"], "arrangement": arrangement, "spec": spec, "proposed_by": "orient",
+           "orientation": True, "status": "failed", "ts": "2026-10-01T00:00:00+00:00", "route": subagents.CLICK}
+    views._save_proposals(CORPUS, [row])
+    prop = _prop("posts")
+    assert (prop["description"], prop["task"]) == ("Each post in its thread, as the board drew it.", "")
+    assert "why" not in prop
+    layout = ["- Unit: One post, keyed by `id`.", "- Overview: A list of threads.", "- Zoom: Click a thread.",
+              "- Filter: By label.", "- Details: The post's body."]
+    builder = dev.build_task(CORPUS, prop)
+    change = dev.change_text(CORPUS, {**prop, "change": "Make the rows blue."})
+    reviewer = view_review.task(CORPUS, prop)
+    for text in (builder, change, reviewer):
+        assert "- What the analyst sees: Each post in its thread, as the board drew it." in text
+        assert "- The files it reads: board.jsonl" in text and "\n".join(layout) in text
+        assert "What the analyst does with it" not in text
+    assert "Make the rows blue." in change
+    # an orientation's view from before 0.8.0 is no draft of a critique since: its brief names the deck alone
+    assert critique_session.drafts(CORPUS) == []
+    assert "  Each post in its thread, as the board drew it." in context.views(CORPUS)
+    res = await tools.call(CORPUS, "read_ref", {"ref": "view:posts"})
+    assert "description: Each post in its thread, as the board drew it." in res.text and "Overview: A list" in res.text
+    views.revise(CORPUS, "posts", "", description="The posts by thread.", task="Find the threads that ask for help.",
+                 claims=["board.jsonl"], route=views.TYPED)
+    prop = _prop("posts")
+    assert (prop["description"], prop["task"], prop["arrangement"]) == (
+        "The posts by thread.", "Find the threads that ask for help.", "")
+    assert "spec" not in prop and "Unit:" not in dev.build_task(CORPUS, prop)
+
+
+def test_a_viewer_for_a_file_type_keeps_its_arrangement_for_the_builder(board, monkeypatch):
+    """A viewer suggested for a file type (views.suggest, prompts/file-viewer.md) gives a description and a free-text
+    arrangement, which the builder gets as the unit and the layout; a proposal without a description is refused."""
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(views, "_queue", lambda c, slug: None)
+    monkeypatch.setattr(views, "build_problem", lambda: "")
+    row, why = views.offer(CORPUS, name="Board Lines", description="Each line of the board as a post.", task="",
+                           claims=["board.jsonl"], after="file", why="Lines read as posts.", proposed_by="files",
+                           arrangement="One post per line, its body in full.")
+    assert why == ""
+    prop = _prop(row["slug"])
+    assert (prop["status"], prop["description"], prop["task"]) == ("suggested", "Each line of the board as a post.", "")
+    assert views.proposal_lines(prop).endswith("- The unit and the layout: One post per line, its body in full.")
+    with pytest.raises(HTTPException) as e:
+        views.propose(CORPUS, "Blank", " ", ["board.jsonl"])
+    assert e.value.status_code == 400 and "`description`" in str(e.value.detail)
 
 
 @pytest.mark.parametrize("mode", prompts.MODES)
@@ -196,6 +305,25 @@ def test_the_builder_and_the_reviewer_are_registered_to_keep_a_design_the_propos
     ask = "When the proposal asks for a visual design"
     assert ask in builder and "build that design" in builder
     assert ask in reviewer and "keep that design" in reviewer
+
+
+@pytest.mark.parametrize("mode", prompts.MODES)
+def test_the_builder_and_the_reviewer_use_color_for_the_task_hold_back_the_detail_panel_and_mirror_the_data(board, mode):
+    # prompts/dev-view.md's "A good view", in both modes: color one encoding at a time, Color by on the task's field (or
+    # a few of its values), never categories in shades of gray; the detail panel closed, or one short line until a click
+    # (the side panel's `empty`); a first screen in the chosen form, not a table of raw records; the data's structure
+    # mirrored, a network among the forms; and the units the data repeats compared before their details.
+    # prompts/view-review.md's clear problems keep the detail panel's rule
+    with prompts.rendering(mode):
+        roles = subagents.roles(CORPUS)
+    builder, reviewer = roles["view-builder"]["prompt"], roles["view-reviewer"]["prompt"]
+    assert "one encoding at a time" in builder and "shades of gray" in builder and "take a hue" in builder
+    assert "detail panel stays closed" in builder and "Click a session" in builder
+    assert "not a table of raw records" in builder
+    assert "who works with whom as a network" in builder and "before the details within one" in builder
+    assert "`initial`" in builder and "`{field, on: [values]}`" in builder and "`empty` option" in builder
+    # the reviewer is a light pass for clear problems in how the view draws: of these it keeps the detail panel
+    assert "detail panel stays closed" in reviewer and "Click a session" in reviewer
 
 
 async def test_main_s_message_to_a_view_s_build_thread_gives_the_exact_agent_call(board, bridge, gates, hints):
@@ -221,8 +349,7 @@ async def test_main_s_message_to_a_view_s_build_thread_gives_the_exact_agent_cal
 # --------------------------------------------------------------------------- a thread's fork's start, which main makes
 
 
-SPEC = {"why": "to read the tasks", "claims": ["board.jsonl"], "unit": "a task", "overview": "a table",
-        "zoom": "a task", "filter": "labels", "details": "the body"}
+SPEC = {"description": "The tasks as a table.", "task": "Read the tasks.", "claims": ["board.jsonl"]}
 
 
 @pytest.fixture()
@@ -478,7 +605,7 @@ async def test_a_fork_s_start_main_missed_is_refused_when_its_turn_was_stopped_o
 async def test_an_orientation_s_proposal_builds_as_a_follow_on_start_when_the_pool_has_room(board, bridge, gates,
                                                                                              monkeypatch):
     monkeypatch.setattr(dev, "VIEW_POOL", 1)
-    first, second = _propose("Posts", orientation=True), _propose("Threads", orientation=True)
+    first, second = _earlier("Posts"), _earlier("Threads")
     await _until(lambda: len(bridge.ops("spawn")) == 1, "the first build never started")
     await asyncio.sleep(0.05)
     assert len(bridge.ops("spawn")) == 1 and (CORPUS, second) in dev._view_queue, "at most VIEW_POOL builds start"
@@ -496,7 +623,7 @@ async def test_a_held_proposal_s_build_sends_its_view_events_marked_held_for_its
     sent: list[dict] = []
     monkeypatch.setattr(investigation, "emit", lambda c, inv, event: sent.append(event))
     monkeypatch.setattr(dev, "VIEW_POOL", 1)
-    first, second = _propose("Posts", orientation=True), _propose("Threads", orientation=True)
+    first, second = _earlier("Posts"), _earlier("Threads")
     await _until(lambda: any(e["slug"] == first and e["status"] == "building" for e in sent), "no building event")
     held = [e for e in sent if e["slug"] in (first, second)]
     assert held and all(e.get("held") is True for e in held), held
@@ -724,7 +851,7 @@ async def test_an_orientation_s_failing_proposal_is_repaired_then_fails_with_ret
     orientation's thread, which also gets one line with the view's chip. A view the analyst asked for fails at once."""
     orient = agents.new_agent(CORPUS, orientation.ROLE, orientation.TITLE)["id"]
     orientation._write_run(CORPUS, {"status": "running", "chats": {orientation.ROLE: orient}})
-    slug = _propose(orientation=True)
+    slug = _earlier()
     agent = await _started(slug, route=subagents.FOLLOW_ON)
     _draft(slug, "<p>FAIL</p>")
     for n in range(1, dev.VIEW_REPAIRS + 1):
@@ -761,7 +888,7 @@ async def test_an_orientation_s_failing_proposal_is_repaired_then_fails_with_ret
 async def test_a_builder_stopped_after_its_last_attempt_ends_as_finish_view_said_and_is_repaired(board, bridge, gates,
                                                                                                 hints, monkeypatch):
     monkeypatch.setattr(view_tools, "FINISH_GRACE_S", 0.05)
-    slug = _propose(orientation=True)
+    slug = _earlier()
     agent = await _started(slug, route=subagents.FOLLOW_ON)
     _draft(slug, "<p>FAIL</p>")
     for _ in range(dev.MAX_ATTEMPTS):
@@ -809,7 +936,7 @@ async def test_a_build_main_s_plan_mode_held_at_its_end_fails_with_retry_saying_
     the builder followed main and could only read and plan. A build that ends there with no view that passes fails
     with Retry and the line that says why, and no repair starts; an orientation's proposal shows in the views list,
     failed. A builder that left a passing view before plan mode held it is built, as the gate says after any run."""
-    slug = _propose(orientation=True)
+    slug = _earlier()
     agent = await _started(slug, route=subagents.FOLLOW_ON)
     subagents.saw_plan_mode(CORPUS, agent)
     subagents.run_ended(CORPUS, agent, "done", "My plan is in the plan file.", source="handback")
@@ -858,28 +985,23 @@ async def test_main_s_quit_stops_a_change_to_a_built_view_which_says_so_and_keep
     assert "stopped_by" not in _prop(slug), "Retry clears it"
 
 
-async def test_retry_in_a_plain_claude_or_without_the_module_is_refused_at_once_and_queues_nothing(board, bridge, gates,
-                                                                                                monkeypatch):
-    """Live check L15: Retry clicked while main was a plain `claude` queued the build under the session launch.json
+async def test_retry_without_the_module_is_refused_at_once_and_queues_nothing(board, bridge, gates, monkeypatch):
+    """Live check L15: Retry clicked while main could not start agents queued the build under the session launch.json
     named, where it waited and would have started by itself once that session came back. A Build, Retry or accept click
-    is refused at once as Start is: the proposal stays failed with the refusal, and nothing is queued or spawned."""
-    from app import cc_plugin
-
+    is refused at once as Start is: the proposal stays failed with the refusal, and nothing is queued or spawned. Once
+    the module is live the build starts, in a plain `claude` as in one the launcher started."""
     row = {"name": "Posts", "why": "to read the board", "claims": ["board.jsonl"], "arrangement": "one row per post",
            "proposed_by": "analyst", "status": "failed", "ts": "2026-10-01T00:00:00+00:00", "route": subagents.CLICK}
     views._save_proposals(CORPUS, [{**row, "slug": "posts"}, {**row, "slug": "viewer", "name": "Viewer",
                                                                "status": "suggested"}])
     views._bind_loop()  # as the click routes do
     monkeypatch.setattr(dev, "VIEW_POOL", 2)
-    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: False, raising=False)
-    got = views.retry(CORPUS, "posts")
-    assert got["status"] == "failed" and got["refused"]["kind"] == subagents.NOT_LAUNCHED
-    assert got["error"] == got["refused"]["reason"], "the toast and the chip say why it did not start"
-    assert views.accept(CORPUS, "viewer")["refused"]["kind"] == subagents.NOT_LAUNCHED
-    assert _prop("viewer")["status"] == "suggested"
-    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: True, raising=False)
     bridge.is_live, bridge.reason = False, "THIMBLE_NO_MODULE is set"
-    assert views.retry(CORPUS, "posts")["refused"]["kind"] == subagents.NO_MODULE
+    got = views.retry(CORPUS, "posts")
+    assert got["status"] == "failed" and got["refused"]["kind"] == subagents.NO_MODULE
+    assert got["error"] == got["refused"]["reason"], "the toast and the chip say why it did not start"
+    assert views.accept(CORPUS, "viewer")["refused"]["kind"] == subagents.NO_MODULE
+    assert _prop("viewer")["status"] == "suggested"
     await asyncio.sleep(0.05)
     assert (CORPUS, "posts") not in dev._view_queue and not bridge.ops("spawn")
     bridge.is_live = True
@@ -1025,29 +1147,27 @@ async def test_view_pictures_writes_the_overview_and_the_states_asked_for_into_t
     assert [Path(s["out"]).parent for s in states] == [dev.view_work_dir(CORPUS, slug) / "review" / "1"] * 2
     assert all(str(s["out"]) in res.text for s in states) and "1528" in res.text
     more = [{"state": "narrow", "why": "x"}, {"state": "labels", "why": "y"}, {"state": "filtered", "why": "z"}]
-    res = await _call("view_pictures", {"states": more}, reviewer, key)
-    assert len(pictures[-1]) == 2, "the round's overview is taken, and two more states are left"
+    left = view_review.EXTRA_SHOTS - 1
+    while left > 0:
+        res = await _call("view_pictures", {"states": more}, reviewer, key)
+        assert len(pictures[-1]) == min(len(more), left), "the round's overview is taken; the states left are shot"
+        left -= len(pictures[-1])
     res = await _call("view_pictures", {"states": more}, reviewer, key)
     assert res.is_error and "No picture is left" in res.text
 
 
-async def test_finish_review_keeps_a_passing_revision_counts_the_round_and_restores_a_failing_one(
-        board, bridge, gates, pictures, hints):
+async def test_finish_review_keeps_a_passing_revision_and_ends_the_review(board, bridge, gates, pictures, hints):
+    """One light pass: a revision that passes the view's checks is kept, and the review is done with it."""
     slug = _propose(asked=True)
     reviewer, key = await _reviewed(slug)
     folder = views.views_dir(CORPUS) / slug
     (folder / views.VIEW_HTML).write_text("<p>v2</p>")
     res = await _call("finish_review", {"revised": ["the axis names days"]}, reviewer, key)
-    assert res.text.endswith(tools.hint("finish-review-again"))
+    assert res.text.endswith(tools.hint("finish-review-done"))
     review = _prop(slug)["review"]
-    assert (review["round"], review["revised"], review["state"]) == (1, ["the axis names days"], "running")
-    assert views.passed_as_is(CORPUS, slug) and (folder / views.VIEW_HTML).read_text() == "<p>v2</p>"
-    (folder / views.VIEW_HTML).write_text("<p>FAIL</p>")
-    res = await _call("finish_review", {"revised": ["a legend"]}, reviewer, key)
-    assert res.text.endswith(tools.hint("finish-review-restored"))
-    assert (folder / views.VIEW_HTML).read_text() == "<p>v2</p>" and views.passed_as_is(CORPUS, slug)
-    review = _prop(slug)["review"]
-    assert review["note"] == view_review.REVISION_FAILED_NOTE and review["finished"]
+    assert (review["round"], review["revised"], review["state"]) == (1, ["the axis names days"], "done")
+    assert review["finished"] and views.passed_as_is(CORPUS, slug)
+    assert (folder / views.VIEW_HTML).read_text() == "<p>v2</p>"
     res = await _call("finish_review", {}, reviewer, key)
     assert res.text.endswith(tools.hint("finish-review-done")), "a call after the review ended runs nothing"
     subagents.run_ended(CORPUS, reviewer, "done", "Revised the axis.", source="handback")
@@ -1055,8 +1175,23 @@ async def test_finish_review_keeps_a_passing_revision_counts_the_round_and_resto
     assert view_review.undo(CORPUS, slug)["undo"] and (folder / views.VIEW_HTML).read_text() == "<p>v1</p>"
 
 
-async def test_a_review_with_no_problems_is_done_after_its_second_round_at_the_latest(board, bridge, gates, pictures,
-                                                                                    hints):
+async def test_finish_review_restores_a_failing_revision_and_ends_the_review(board, bridge, gates, pictures, hints):
+    """A revision that fails the view's checks is undone, back to the view as it last passed, and ends the review."""
+    slug = _propose(asked=True)
+    reviewer, key = await _reviewed(slug)
+    folder = views.views_dir(CORPUS) / slug
+    (folder / views.VIEW_HTML).write_text("<p>FAIL</p>")
+    res = await _call("finish_review", {"revised": ["a legend"]}, reviewer, key)
+    assert res.text.endswith(tools.hint("finish-review-restored"))
+    assert (folder / views.VIEW_HTML).read_text() == "<p>v1</p>" and views.passed_as_is(CORPUS, slug)
+    review = _prop(slug)["review"]
+    assert review["note"] == view_review.REVISION_FAILED_NOTE and review["finished"] and review["state"] == "done"
+    res = await _call("finish_review", {}, reviewer, key)
+    assert res.text.endswith(tools.hint("finish-review-done")), "a call after the review ended runs nothing"
+
+
+async def test_a_review_with_no_problems_is_done_after_its_last_round_at_the_latest(board, bridge, gates, pictures,
+                                                                                  hints):
     slug = _propose(asked=True)
     reviewer, key = await _reviewed(slug)
     res = await _call("finish_review", {"left": ["a taste in colours"]}, reviewer, key)
@@ -1064,8 +1199,8 @@ async def test_a_review_with_no_problems_is_done_after_its_second_round_at_the_l
     other = _propose("Threads", asked=True)
     second, key2 = await _reviewed(other)
     folder = views.views_dir(CORPUS) / other
-    for n, html in enumerate(("<p>v2</p>", "<p>v3</p>"), 1):
-        (folder / views.VIEW_HTML).write_text(html)
+    for n in range(1, view_review.ROUNDS + 1):
+        (folder / views.VIEW_HTML).write_text(f"<p>v{n + 1}</p>")
         res = await _call("finish_review", {"revised": [f"fix {n}"]}, second, key2)
     assert res.text.endswith(tools.hint("finish-review-done")) and _prop(other)["review"]["round"] == view_review.ROUNDS
 
@@ -1187,9 +1322,9 @@ def test_every_job_click_route_refuses_the_server_s_token_without_the_analyst_s_
 
 
 def test_the_module_registers_the_three_job_roles_on_their_settings_rows(board):
-    """subagents.roles holds `thimble:view-builder` and `thimble:view-reviewer` on Settings' dev row and `thimble:check`
-    on its checks row, each with an explicit effort, a fixed description, and the thimble tools that are not its own
-    taken away."""
+    """subagents.roles holds `thimble:view-builder` and `thimble:view-reviewer` on Settings' dev row and
+    `thimble:check` on its checks row, each with an explicit effort, a fixed description, and the thimble tools that
+    are not its own taken away."""
     roles = subagents.roles(CORPUS)
     assert {"orientation", "critic", "writer", "view-builder", "view-reviewer", "check", "orient-helper"} <= set(roles)
     own = {"view-builder": view_tools.BUILDER_TOOLS, "view-reviewer": view_tools.REVIEWER_TOOLS,
@@ -1197,6 +1332,7 @@ def test_the_module_registers_the_three_job_roles_on_their_settings_rows(board):
     for role, mine in own.items():
         r = roles[role]
         assert r["type"] == f"thimble:{role}" and r["background"] and r["description"].strip()
+        # the reviewer reads no analyst context (view_review.task), so it runs without the 1M-token window
         assert (r["model"], r["effort"]) == ("claude-opus-5-5", "high")
         assert not [n for n in mine if tools.thimble_tool(n) in r["disallowedTools"]]
         assert tools.thimble_tool("add_card") in r["disallowedTools"]

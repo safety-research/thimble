@@ -29,5 +29,5 @@ if [ -f "$home/app-dir" ]; then
     exit 0
   fi
 fi
-echo "thimble: the thimble tree was not found for the plugin at $here (no $home/app-dir pointing at an install, no THIMBLE_APP_DIR) — run scripts/install.sh from the thimble release or checkout" >&2
+echo "thimble: the thimble tree was not found for the plugin at $here (no $home/app-dir pointing at an install, no THIMBLE_APP_DIR) — run scripts/install.sh from the thimble release or checkout, or follow INSTALL.md, Manual install" >&2
 exit 1

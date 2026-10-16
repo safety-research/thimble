@@ -32,5 +32,5 @@ def test_the_served_config_dir_is_the_one_the_shim_reported(served, monkeypatch,
     assert client.get(f"/api/events?{q}", headers=plugin_headers()).status_code == 418
     # /thimble names the session, which attaches it with the config dir its shim reported, not one the request names
     r = client.post(f"/api/ws/{CORPUS}/session", json={"session": FIRST, "cwd": _cwd(), "env_pid": 1,
-                                                       "config_dir": str(tmp_path / "planted")})
+                                                       "config_dir": str(tmp_path / "planted")}, headers=plugin_headers())
     assert r.status_code == 200 and config.claude_config_dir() == tmp_path / "real-cc"

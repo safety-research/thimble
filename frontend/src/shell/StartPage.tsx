@@ -1,11 +1,16 @@
 // thimble's start page: the page whose URL names no workspace, which `thimble demo` opens, or names one this server does
 // not hold (a tab kept from another run or another server). A title and the server's workspaces in groups
-// (WorkspaceList), each row opening its workspace.
+// (WorkspaceList), each row opening its workspace; above them, while a demo dataset is listed, one line that says the
+// demo datasets are example data, not the analyst's files, and how to open a folder of their own (lib/demo
+// DEMO_START_LINE), and a link's sign-in code that was used or expired.
 import { useEffect, useState } from 'react'
+import { PageNoticeStrip } from '../chat/Notice'
 import { Icon } from '../components/Icon'
 import { Spinner } from '../components/Spinner'
 import { api } from '../lib/api'
+import { DEMO_START_LINE } from '../lib/demo'
 import type { WorkspaceRow } from '../lib/types'
+import { DemoWords } from './DemoLine'
 import { WorkspaceList } from './WorkspaceList'
 
 export function StartPage({ missing }: { missing?: string | null }) {
@@ -29,6 +34,12 @@ export function StartPage({ missing }: { missing?: string | null }) {
       </header>
       <main className="start-main">
         <h1 className="start-title">Workspaces</h1>
+        {rows?.some((r) => r.kind === 'demo') && (
+          <p className="start-demo" data-demo-line="">
+            <DemoWords text={DEMO_START_LINE} />
+          </p>
+        )}
+        <PageNoticeStrip />
         {missing && <p className="start-missing">No workspace “{missing}” on this server.</p>}
         {error ? (
           <p className="start-error">{error}</p>

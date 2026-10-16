@@ -14,28 +14,26 @@ https://github.com/user-attachments/assets/e8b0c9d8-1bc0-4ccb-a5ac-4c311cea02d4
 
 ## Installation
 
-### Quickstart (with Claude)
+### With Claude (recommended)
 
 ```
 claude "install thimble from https://github.com/safety-research/thimble"
 ```
-
 Instructions for agents installing thimble on the user's behalf are in [CLAUDE.md](CLAUDE.md).
 
-### Manual
+### Manual installation
 
 1. Download the zip from the [latest release](https://github.com/safety-research/thimble/releases/latest).
 2. Unzip it.
 3. Run `bash scripts/install.sh` inside the unzipped folder.
 
-For a development build, clone the repo and run `bash scripts/install.sh`. [INSTALL.md](INSTALL.md) covers requirements, updating and troubleshooting.
+For a development build, clone the repo and run `bash scripts/install.sh`. See [INSTALL.md](INSTALL.md) for detailed installation instructions.
 
 ## Usage
 
-Run `thimble` in a directory with files you'd like to analyze, just like you would run `claude`.
+Run `thimble` in a folder with files you'd like to analyze, just like you run `claude`. Use `thimble mode terminal|browser` to switch between browser and terminal modes (see below).
 
-- It starts a Claude Code session there with the thimble plugin loaded, inside thimble's sandbox, and prints the dashboard URL.
-- Each run starts a new conversation on the same workspace (cards, report, labels). `thimble --continue` picks up your last conversation in this folder instead.
+- To attach thimble to a running Claude Code session, run `/thimble`.
 
 ### Terminal mode
 
@@ -51,7 +49,7 @@ To switch a directory to terminal mode, run `thimble mode terminal` in it, then 
 
 | Command | What it does |
 |---|---|
-| `/thimble` | start the thimble server and print the dashboard URL |
+| `/thimble` | open this folder in thimble and print the dashboard link |
 | `/thimble fresh` | archive this workspace and open an empty one |
 | `/thimble restore [<name>]` | bring an archived workspace back |
 | `/thimble:orient [focus]` | start an orientation |
@@ -62,21 +60,22 @@ To switch a directory to terminal mode, run `thimble mode terminal` in it, then 
 
 | Command | What it does |
 |---|---|
-| `thimble` | start thimble in this folder; `thimble -c` continues the last session |
+| `thimble` | start Claude Code with thimble in this folder (a shortcut for `claude`, then `/thimble`); `thimble -c` continues the last session |
 | `thimble demo` | download the [demo datasets](demos/README.md) and open them in the browser |
 | `thimble mode browser\|terminal` | show thimble's work in the browser or in the terminal |
 | `thimble list`, `thimble purge <id>` | list the workspaces, or delete one |
-| `thimble doctor` | show what is installed and running, and what is wrong |
+| `thimble doctor` | a checklist of what is installed and running, with the fix for each problem (`--verbose` for the details) |
+| `thimble unpair` | sign out every browser |
 | `thimble feedback` | write a problem report (a zip) |
 | `thimble update`, `thimble uninstall` | update to the latest release, or uninstall |
 
 ## Requirements
 
-Claude Code (tested with 2.1.295), with its hooks modules on, macOS or Linux, and Python 3.12+ ([uv](https://docs.astral.sh/uv/) recommended). Node 20+ is needed for custom views (the viewers the dev agent builds for your data), for the sandbox card code and code tickets run in, and for a development build. [INSTALL.md](INSTALL.md) has the details.
+Claude Code (tested with 2.1.300), with its hooks modules on, macOS or Linux, and Python 3.12+ ([uv](https://docs.astral.sh/uv/) recommended). Node 20+ is needed for custom views (the viewers the dev agent builds for your data), for the sandbox card code and code tickets run in, and for a development build. 
 
 ## Security & Privacy
 
-thimble is a research prototype. Please report any security issues privately to [@mjoerke](https://github.com/mjoerke). thimble is runs on top of Claude Code: it does not collect any data of its own and all authentication and billing is managed by `claude`.
+thimble is a research prototype. Please report any security issues privately to [@mjoerke](https://github.com/mjoerke). thimble runs on top of Claude Code: it does not collect any data of its own and all authentication and billing is managed by `claude`.
 
 ## License
 

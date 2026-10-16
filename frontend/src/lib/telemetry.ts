@@ -1,6 +1,7 @@
 // The browser's record of what the analyst did, posted in batches to POST /ws/{c}/telemetry. Nothing here blocks the
 // UI: a batch that fails is requeued, a handler that throws is swallowed. Three sources: the API requests the page
 // makes (one wrapped fetch), clicks on interactive elements, and the window's uncaught errors.
+import { apiBase, apiPath } from './browserKey'
 import { workspaceFromUrl } from './workspace'
 
 export const CLIENT_KINDS = [
@@ -11,8 +12,6 @@ export const CLIENT_KINDS = [
   'panel-open',
   'panel-close',
   'tab-activate',
-  'start-toggle',
-  'start-run',
   'agent-row-expand',
   'chip-teleport',
   'pointer-open',
@@ -26,7 +25,6 @@ export const CLIENT_KINDS = [
   'thread-rename',
   'thread-delete',
   'thread-ask-again',
-  'thread-hand-back',
   'chat-retry',
   'ask-send',
   'notebook-switch',
@@ -219,7 +217,7 @@ export function classifyRequest(method: string, url: string, body?: string | nul
   } catch {
     return null
   }
-  const m = /^\/api\/ws\/([^/]+)\/(.*)$/.exec(u.pathname)
+  const m = /^\/api\/ws\/([^/]+)\/(.*)$/.exec(apiPath(u.pathname))
   if (!m) return null
   const parts = m[2].split('/').filter(Boolean)
   const [a, b, c] = parts
@@ -255,14 +253,6 @@ export function classifyRequest(method: string, url: string, body?: string | nul
   if (a === 'canvas' && b === 'active-group' && method === 'PUT') {
     const group = str(B()?.group)
     return group ? { kind: 'notebook-switch', target: `group:${group}` } : null
-  }
-  if (a === 'events' && !b && method === 'POST' && str(B()?.kind) === 'start') {
-    const payload = B()?.payload as Record<string, unknown> | undefined
-    // the switches by the start event's names (StartBody), `final` being the deck's; legacy start events name the deck's
-        // switch `analyze_data`, or carry `report` alone
-    const on = { final: payload?.final_notebook ?? payload?.analyze_data ?? true, views: payload?.propose_views ?? false, report: payload?.generate_report ?? payload?.report, critique: payload?.critique, ultracode: payload?.ultracode }
-    const passes = (['final', 'views', 'critique', 'report', 'ultracode'] as const).filter((p) => on[p] === true)
-    return { kind: 'start-run', target: null, detail: { passes, ...(str(payload?.effort) ? { effort: str(payload?.effort) } : {}), ...(str(payload?.permissions) ? { permissions: str(payload?.permissions) } : {}) } }
   }
   if (a === 'filters') {
     if (method === 'PUT') {
@@ -435,7 +425,7 @@ let selectTimer: number | null = null
 let lastSelection = ''
 
 function send(ws: string, records: TelemetryRecord[], beacon: boolean): boolean | Promise<boolean> {
-  const url = `/api/ws/${encodeURIComponent(ws)}/telemetry`
+  const url = `${apiBase()}/ws/${encodeURIComponent(ws)}/telemetry`
   const body = JSON.stringify(records)
   try {
     if (beacon && typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {

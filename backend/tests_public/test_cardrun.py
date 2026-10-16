@@ -328,22 +328,39 @@ async def test_a_check_revision_through_thimble_run_that_shows_the_same_outputs_
     assert len(cell["edited"]) == 2
 
 
-async def test_a_trial_runs_in_the_sandbox_main_runs_thimble_run_in(term, monkeypatch):
-    """Where main runs in thimble's fence, the trial runs in srt with the fence's filesystem rules and no network: it
-    writes the card folders and nothing of the corpus or the rest of the workspace."""
-    from app import cli, kernel_wrap, srt
+def test_a_trial_s_sandbox_has_the_rules_of_a_trial_where_srt_runs_and_none_elsewhere(term, monkeypatch, tmp_path):
+    """Where Anthropic's sandbox runtime runs, a card check's trial runs in it with no network, thimble's token files
+    (userconf.private_paths: server.json, and paired.json once the hooks lane adds it) and links folder unreadable,
+    writes only to the agents' work folders and the card folders, and the corpus and the workspace's config.json and
+    settings.json not writable. Where it can't run, the trial runs plain, as main's Bash runs `thimble-run`."""
+    from app import kernel_wrap, subagents, userconf
+
+    ws = config.workspace_path(CORPUS)
+    home = userconf.global_file().parent
+    monkeypatch.setattr(kernel_wrap, "srt_works", lambda node, package: True)
+    box = cardrun.trial_sandbox(CORPUS)
+    fs = box["filesystem"]
+    assert box["network"] == {"allowedDomains": [], "deniedDomains": []}
+    assert str(home / "server.json") in fs["denyRead"] and set(userconf.private_paths()) <= set(fs["denyRead"])
+    assert str(home / userconf.LINKS_DIR) in fs["denyRead"] and fs["allowRead"] == []
+    assert set(fs["allowWrite"]) == {str(d) for d in [*subagents.write_dirs(CORPUS), *cardrun.write_dirs(CORPUS)]}
+    assert str(config.workspace_dir(CORPUS) / "card-runs") in fs["allowWrite"]
+    assert str(ws) not in fs["allowWrite"] and str(term) not in fs["allowWrite"]
+    assert fs["denyWrite"] == [os.path.realpath(config.corpus_dir(CORPUS)), str(userconf.workspace_file(CORPUS)),
+                               str(ws / "settings.json")]
+    monkeypatch.setattr(kernel_wrap, "srt_works", lambda node, package: False)
+    assert cardrun.trial_sandbox(CORPUS) is None
+    assert cardrun.trial_argv(CORPUS, "c1", tmp_path) == [str(cardrun.bin_path()), cardrun.TRIAL, "c1"], "plain"
+
+
+async def test_a_trial_runs_in_the_sandbox_runtime_where_it_runs(term):
+    """Where srt runs here, the trial runs in it: it writes the card folders and nothing of the corpus or the rest of
+    the workspace."""
+    from app import kernel_wrap, srt
 
     if not kernel_wrap.srt_works(srt.node(), srt.package(config.REPO_ROOT)):
         pytest.skip("thimble's sandbox runtime cannot run on this machine")
-    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
     ws = config.workspace_dir(CORPUS)
-    (ws / "trusted" / "launch.json").write_text(json.dumps({"mode": "terminal", "fenced": True}))
-    box = cardrun.trial_sandbox(CORPUS)
-    fence = cli.main_fence(term, CORPUS, mode="terminal")["sandbox"]["filesystem"]
-    for key in ("allowWrite", "denyWrite", "denyRead"):
-        assert box["filesystem"][key] == fence[key], key
-    assert box["network"] == {"allowedDomains": [], "deniedDomains": []}
-    assert str(ws / "card-runs") in box["filesystem"]["allowWrite"]
     cid = card_id(await call(term, "add_card", question="q", code="print(1)"))
     probe = (
         "import os\n"
@@ -360,10 +377,6 @@ async def test_a_trial_runs_in_the_sandbox_main_runs_thimble_run_in(term, monkey
     trial = await notebook.trial_run(CORPUS, cid, probe)
     assert trial["status"] == "ok", trial["outputs"]
     assert trial["outputs"][0]["text/plain"].split() == ["False", "False", "True", "1"]
-    # main fenced, its fence not buildable here: the trial is not run unsandboxed
-    monkeypatch.setenv("THIMBLE_SANDBOX", "0")
-    with pytest.raises(notebook.TrialUnavailable):
-        await notebook.trial_run(CORPUS, cid, "print(1)")
 
 
 async def test_a_code_label_runs_through_thimble_run_and_its_readers_go_stale(term):

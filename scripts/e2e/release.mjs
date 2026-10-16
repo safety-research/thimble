@@ -6,10 +6,12 @@
 //   status: pass | fail | skip. A step with `pending` waits for work that is not merged yet; report.py reports its failure
 //   as expected.
 // Environment: THIMBLE_E2E_TREE (the tree thimble runs from), THIMBLE_E2E_CORPUS (the corpus copy), THIMBLE_E2E_WS (what
-// workspace.py printed), THIMBLE_E2E_SHOTS, THIMBLE_E2E_RESULTS, THIMBLE_E2E_FIXTURE (the fixture extension's folder).
+// workspace.py printed, its url with a one-time sign-in code after #p=), THIMBLE_E2E_SHOTS, THIMBLE_E2E_RESULTS,
+// THIMBLE_E2E_FIXTURE (the fixture extension's folder), and THIMBLE_HOME (the run's, whose server.json holds the token
+// the api-guard step signs with).
 import { spawnSync } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
-import { appendFileSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { createHmac, randomUUID } from 'node:crypto'
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { basename, dirname, join, relative } from 'node:path'
 
@@ -37,6 +39,8 @@ const STEP_MS = 120_000
 const PENDING = {}
 const MARKS = '.reader-gutter-cell.is-lit, .reader-span[data-concept], [data-concept], [data-thimble-label]'
 const SLOW_S = 20
+// the one line a browser that is not signed in sees (frontend shell/SignIn), its span in backticks drawn as code
+const SIGN_IN_LINE = "This browser isn't signed in. Open the link /thimble shows in your terminal, or run `thimble up` in a shell."
 
 let shotN = 0
 const fontMisses = []
@@ -68,18 +72,36 @@ async function dismissTour(page) {
   }
 }
 
-// the notices hidden so far (a notice with a Hide button sits over the views bar), for the first-load step's detail
+// the notices hidden so far (a notice above the composer or over the views bar covers what is under it), for the
+// first-load step's detail
 const notices = []
+const NOTICE = '[role=alert], [role=status], [class*="alert"], [class*="notice"], [class*="toast"]'
 
-/** Press Hide on each notice that shows one, as the analyst would to get at what is under it. */
+/** Close each notice, as the analyst would to get at what is under it: its Hide button, or its × (aria-label Dismiss,
+ * chat/Notice.tsx). Never one of its actions, such as Sign it out or Retry. */
 async function hideNotices(page) {
-  for (const b of await page.getByRole('button', { name: 'Hide', exact: true }).all()) {
+  const close = page.getByRole('button', { name: 'Hide', exact: true }).or(page.locator('button[aria-label="Dismiss"]'))
+  for (const b of await close.elementHandles().catch(() => [])) {
     if (!(await b.isVisible().catch(() => false))) continue
-    const text = await b.evaluate((el) => (el.closest('[role=alert], [role=status], [class*="alert"], [class*="notice"], [class*="toast"]') || el.parentElement)?.innerText || '').catch(() => '')
-    const line = text.replace(/\s+/g, ' ').replace(/\s*Hide\s*$/, '').trim()
+    const text = await b.evaluate((el, sel) => {  // the notice's words, without its buttons' labels
+      const box = el.closest(sel)?.cloneNode(true)
+      box?.querySelectorAll('button').forEach((x) => x.remove())
+      return box ? box.textContent : null
+    }, NOTICE).catch(() => null)
+    if (text === null) continue  // not a notice's
+    const line = text.replace(/\s+/g, ' ').trim()
     if (line && !notices.includes(line)) notices.push(line)
     await b.click({ timeout: 3_000 }).catch(() => undefined)
   }
+}
+
+/** The request headers of a request to `url` signed with the token in the run's server.json, as thimble's hooks and CLI
+ * sign one (backend/app/hook_auth.py: a nonce `<unix time>.<hex>` and HMAC-SHA256(token, "hook@<port>:" + nonce)). */
+function tokenHeaders(url) {
+  const token = JSON.parse(readFileSync(join(env.THIMBLE_HOME, 'server.json'), 'utf8')).token
+  const nonce = `${Math.floor(Date.now() / 1000)}.${randomUUID().replace(/-/g, '')}`
+  const port = new URL(url).port || '80'
+  return { 'x-thimble-nonce': nonce, 'x-thimble-auth': createHmac('sha256', token).update(`hook@${port}:${nonce}`).digest('hex') }
 }
 
 let currentPage = null
@@ -150,6 +172,16 @@ async function settle(page, ms = 400) {
   await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => undefined)
   await page.waitForTimeout(ms)
 }
+
+/** The base the signed-in page `p` asks the API under: /b/<key>/api once it holds its key, which the server scopes the
+ * browser's cookie to (frontend lib/browserKey), else /api. */
+async function apiBase(p) {
+  const key = await p.evaluate(() => localStorage.getItem('thimble-browser-key') || '').catch(() => '')
+  return key ? `/b/${key}/api` : '/api'
+}
+
+/** An API path as the page names it without its browser's key: /b/<key>/api/x is /api/x. */
+const apiPath = (pathname) => pathname.replace(/^\/b\/[A-Za-z0-9_-]+(?=\/api(\/|$))/, '')
 
 async function sessionGone(page) {
   return (await page.getByText('No Claude Code session connected').count()) > 0
@@ -374,17 +406,8 @@ async function tourState(page) {
   })
 }
 
-/** Unlock a gated step: press a Start inside the tour's example, else ⌘-click (Ctrl-click off macOS) the step's cutout. */
+/** Unlock a gated step: ⌘-click (Ctrl-click off macOS) the step's cutout. */
 async function unlockStep(page, st) {
-  const start = await page.evaluate(() => {
-    const b = [...document.querySelectorAll('.tour-ex button, .tour-root button')].find((x) => x.textContent?.trim() === 'Start')
-    const r = b?.getBoundingClientRect()
-    return r && r.width ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null
-  })
-  if (start) {
-    await page.mouse.click(start.x, start.y)
-    return 'Start'
-  }
   const at = st.hole || { x: SIZES[0].width / 2, y: SIZES[0].height / 2 }
   await page.mouse.move(at.x - 10, at.y)
   await page.keyboard.down('ControlOrMeta')
@@ -414,17 +437,36 @@ async function main() {
   const files = corpusFiles(CORPUS)
 
   try {
-    await step('first-load', 'The UI opens on the workspace', async () => {
+    await step('first-load', 'The UI opens on the workspace, signed in with the link\'s one-time code, with no Start gate', async () => {
       check(WS.url, 'workspace.py printed no URL')
-      await page.goto(WS.url)
+      check(/#p=[^&]+/.test(WS.url), `workspace.py printed a link with no sign-in code (#p=): ${WS.url.split('#')[0]}`)
+      await page.goto(WS.url)  // the page trades the code for its cookie (POST /api/ui/key)
       await waitShell(page)
       await page.waitForTimeout(2_000)
       const s = await shot(page, 'first-load')
       check(!(await sessionGone(page)), 'the page shows "No Claude Code session connected"')
       check((await page.getByRole('tab', { name: 'Report', exact: true }).count()) > 0, 'no Report tab')
+      const origin = new URL(WS.url).origin
+      let paired = null
+      const until = Date.now() + 10_000
+      while (Date.now() < until) {
+        paired = await (await page.request.get(`${origin}${await apiBase(page)}/ui/paired`)).json().catch(() => null)
+        if (paired?.paired === true) break
+        await page.waitForTimeout(500)
+      }
+      check(paired?.paired === true, `the page did not sign in with the link's code: GET /api/ui/paired gave ${JSON.stringify(paired)}`)
+      // the cookie is scoped to this browser's own path, so the browser sends it to no other server's /api/ paths
+      const base = await apiBase(page)
+      const jar = (await page.context().cookies(origin)).filter((c) => c.name.startsWith('thimble-ui-'))
+      check(base !== '/api' && jar.length === 1 && `${jar[0].path.replace(/\/$/, '')}` === base,
+        `the browser's cookie is scoped to ${jar.map((c) => c.path).join(', ') || 'no path'}, not to its own ${base}/`)
+      const plain = await (await page.request.get(`${origin}/api/ui/paired`)).json().catch(() => null)
+      check(plain?.paired === false, `GET /api/ui/paired, outside the browser's own path, gave ${JSON.stringify(plain)}`)
+      check(!(await page.locator('.chat-gate').count()), 'main shows the Start gate (.chat-gate)')
+      check(!(await page.getByRole('button', { name: 'Start', exact: true }).count()), 'main shows a Start button')
       await hideNotices(page)
       const shown = notices.length ? `; hid the notice "${notices.join('" and "')}"` : ''
-      return { detail: `${WS.name} at ${WS.url.split('#')[0]}, in ${browserName}${shown}`, shots: [s] }
+      return { detail: `${WS.name} at ${WS.url.split('#')[0]}, in ${browserName}, signed in; no Start gate${shown}`, shots: [s] }
     })
 
     await step('welcome', 'The first-launch welcome asks about the tour, and Skip goes straight to the workbench', async () => {
@@ -639,7 +681,7 @@ async function main() {
       const shelf = join(TREE, 'plugin', 'viewers')
       const examples = existsSync(shelf) ? readdirSync(shelf, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name) : []
       const slugs = async (q) => {
-        const r = await page.request.get(`${origin}/api/ws/${WS.name}/views${q}`)
+        const r = await page.request.get(`${origin}${await apiBase(page)}/ws/${WS.name}/views${q}`)
         const got = await r.json().catch(() => null)
         return Array.isArray(got) ? got.map((v) => String(v?.slug ?? '')) : []
       }
@@ -738,7 +780,9 @@ async function main() {
 
     await step('view-slow-call', `A view call of ${SLOW_S} s ends with its data, and holds up neither the File browser nor another view call`, async () => {
       const r = await page.evaluate(async ({ ws, slug, sleep }) => {
-        const post = (query) => fetch(`/api/ws/${ws}/views/${slug}/records`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query }) })
+        const key = localStorage.getItem('thimble-browser-key')
+        const base = key ? `/b/${key}/api` : '/api'
+        const post = (query) => fetch(`${base}/ws/${ws}/views/${slug}/records`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query }) })
         const timed = async (f) => {
           const t = performance.now()
           const res = await f()
@@ -746,7 +790,7 @@ async function main() {
         }
         const slow = timed(() => post({ sleep }))
         await new Promise((ok) => setTimeout(ok, 1_000))
-        const list = await timed(() => fetch(`/api/corpora/${ws}/sources?path=&depth=1`))
+        const list = await timed(() => fetch(`${base}/corpora/${ws}/sources?path=&depth=1`))
         const other = await timed(() => post({}))
         return { slow: await slow, list, other }
       }, { ws: WS.name, slug: VIEW.slug, sleep: SLOW_S })
@@ -798,18 +842,91 @@ async function main() {
       return { detail: fit.detail }
     })
 
-    await step('api-guard', 'A write to the API without the browser\'s cookie or the token is refused', async () => {
+    await step('signin-gate', 'A browser with no cookie sees only the line naming the way in, is answered no read and polls nothing; a read answers it 401, and the signed-in browser 200', async () => {
       const origin = new URL(WS.url).origin
+      const fresh = await browser.newContext({ viewport: SIZES[0] })
+      try {
+        const p = await fresh.newPage()
+        const reads = []  // `<status> <path>` of each GET of the API
+        let asked = 0  // GETs of the API (a write, such as the telemetry's, is refused 403 and never repeated)
+        p.on('request', (r) => {
+          const u = new URL(r.url())
+          if (u.origin === origin && apiPath(u.pathname).startsWith('/api/') && r.method() === 'GET') asked++
+        })
+        p.on('response', (r) => {
+          const u = new URL(r.url())
+          if (u.origin === origin && apiPath(u.pathname).startsWith('/api/') && r.request().method() === 'GET') reads.push(`${r.status()} ${apiPath(u.pathname)}`)
+        })
+        await p.goto(`${origin}/?ws=${encodeURIComponent(WS.name)}`)
+        const line = p.locator('.signin-line')
+        await line.waitFor({ timeout: ACTION_MS })
+        await p.waitForTimeout(1_000)
+        const before = asked
+        await p.waitForTimeout(3_000)  // long enough for an app that polls to show it
+        const s = await shot(p, 'signin-gate')
+        const want = SIGN_IN_LINE.replace(/`/g, '')
+        const said = (await line.innerText()).replace(/\s+/g, ' ').trim()
+        const whole = (await p.locator('body').innerText()).replace(/\s+/g, ' ').trim()
+        check(said === want && whole === want, `the page without a cookie shows "${whole.slice(0, 200)}", not only "${want}"`)
+        check((await line.locator('code').innerText()) === 'thimble up', 'the line does not draw `thimble up` as code')
+        // /api/health and /api/ui/paired answer anyone; any other read (the page asks one to confirm) is refused
+        const answered = [...new Set(reads.filter((r) => !/^\d+ \/api\/(health|ui\/paired)$/.test(r) && !r.startsWith('401 ')))]
+        check(!answered.length, `the page without a cookie was answered ${answered.join(', ')}`)
+        check(asked === before, `the page without a cookie went on reading the API: ${asked - before} GETs in 3 s`)
+        const unsigned = await fresh.request.get(`${origin}/api/workspaces`)
+        const refused = await unsigned.json().catch(() => null)
+        check(unsigned.status() === 401 && refused?.signin === true && typeof refused?.detail === 'string',
+          `GET /api/workspaces without a cookie answered ${unsigned.status()} ${JSON.stringify(refused)?.slice(0, 160)}, not 401 {detail, signin: true}`)
+        const signed = await page.request.get(`${origin}${await apiBase(page)}/workspaces`)
+        check(signed.status() === 200, `GET /api/workspaces with the browser's cookie answered ${signed.status()}, not 200`)
+        return { detail: `"${said}" and nothing else; its reads ${[...new Set(reads)].join(', ') || 'none'}, then none for 3 s; GET /api/workspaces 401 {signin: true} without the cookie, 200 with it`, shots: [s] }
+      } finally {
+        await fresh.close()
+      }
+    })
+
+    await step('api-guard', 'A write without the browser\'s cookie is refused, a read without the cookie or the token is refused, the token alone acts on no analyst route, and the browser sends only its own event kinds', async () => {
+      const origin = new URL(WS.url).origin
+      const events = `${origin}/api/ws/${WS.name}/events`
+      // a read with neither the cookie nor the token: 401 with signin, HEAD with no body; the token reads, as the CLI does
+      const concepts = `${origin}/api/ws/${WS.name}/concepts`
+      const read = await fetch(concepts)
+      const readBody = await read.json().catch(() => null)
+      check(read.status === 401 && readBody?.signin === true && /^thimble refused this read: /.test(String(readBody?.detail ?? '')),
+        `an unsigned GET /api/ws/${WS.name}/concepts answered ${read.status} ${JSON.stringify(readBody)?.slice(0, 160)}, not 401 {detail, signin: true}`)
+      const head = await fetch(concepts, { method: 'HEAD' })
+      const headBody = await head.text()
+      check(head.status === 401 && headBody === '', `an unsigned HEAD /api/ws/${WS.name}/concepts answered ${head.status} with ${headBody.length} bytes, not 401 with none`)
+      const tokenRead = await fetch(concepts, { headers: tokenHeaders(concepts) })
+      check(tokenRead.status === 200, `a GET /api/ws/${WS.name}/concepts signed with the token answered ${tokenRead.status}, not 200`)
+      const health = await fetch(`${origin}/api/health`)
+      const healthKeys = Object.keys((await health.json().catch(() => null)) ?? {}).sort()
+      check(health.status === 200 && healthKeys.join() === 'boot,ok,ui', `an unsigned GET /api/health answered ${health.status} with ${healthKeys.join(', ')}, not 200 with boot, ok, ui`)
+      const paired = await fetch(`${origin}/api/ui/paired`)
+      const pairedBody = await paired.json().catch(() => null)
+      check(paired.status === 200 && pairedBody?.paired === false, `an unsigned GET /api/ui/paired answered ${paired.status} ${JSON.stringify(pairedBody)}`)
       const name = 'E2E unsigned write'
       const r = await fetch(`${origin}/api/ws/${WS.name}/concepts`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ name, kind: 'regex', spec: 'x', labels: ['x', 'other'] }),
       })
-      const list = await page.request.get(`${origin}/api/ws/${WS.name}/concepts`)
+      const list = await page.request.get(`${origin}${await apiBase(page)}/ws/${WS.name}/concepts`)
       const made = JSON.stringify(await list.json().catch(() => null)).includes(name)
       check(r.status === 403 && !made, `an unsigned POST /api/ws/${WS.name}/concepts answered ${r.status}${made ? ', and the label was made' : ''}`)
-      return { detail: `403 for an unsigned POST /api/ws/${WS.name}/concepts, and no label made` }
+      // main's message, signed with server.json's token as a hook or the CLI signs: an analyst route takes the cookie alone
+      const signed = await fetch(events, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...tokenHeaders(events) },
+        body: JSON.stringify({ kind: 'main', payload: { text: 'E2E: a message signed with the token alone' } }),
+      })
+      const said = String((await signed.json().catch(() => null))?.detail ?? '')
+      check(signed.status === 403 && /^open thimble from the link .*to make changes$/.test(said),
+        `a POST /api/ws/${WS.name}/events {kind: "main"} signed with the token answered ${signed.status} ${said.slice(0, 160)}, not 403 with hook_auth.WRITE_REFUSED`)
+      // a kind the browser never sends, with the browser's own cookie
+      const odd = await page.request.post(`${origin}${await apiBase(page)}/ws/${WS.name}/events`, { data: { kind: 'start_agent', payload: { text: 'E2E: a start_agent the browser never sends' } } })
+      check(odd.status() === 400, `a POST /api/ws/${WS.name}/events {kind: "start_agent"} with the browser's cookie answered ${odd.status()}, not 400`)
+      return { detail: `401 {signin: true} for an unsigned GET /api/ws/${WS.name}/concepts, 401 with no body for HEAD, 200 signed with the token; /api/health and /api/ui/paired open, health with boot, ok and ui only; 403 for an unsigned POST /api/ws/${WS.name}/concepts, and no label made; 403 with WRITE_REFUSED for main's message signed with the token alone; 400 for a start_agent event with the cookie` }
     })
 
     let added = false

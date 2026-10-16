@@ -3,6 +3,7 @@ Settings pane writes, and what a session gets from it."""
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
@@ -45,6 +46,33 @@ def test_the_workspace_s_file_overrides_the_home_s_key_by_key_and_errors_name_th
     (tmp_path / "mine.md").write_text("x")
     _write(userconf.global_file(), {"agents": {"writer": {"prompt": "mine.md"}, "critic": {"prompt": "gone.md"}}})
     assert "agents.critic.prompt names gone.md" in userconf.problem()
+
+
+def test_the_ask_key_is_meta_unless_settings_or_the_file_in_thimble_s_home_picks_alt(workspaces_tmp, analyst):
+    """`askKey`, the key held with a click to ask in the browser, is "meta" by default and on an error; Settings' Ask
+    key choice writes it to the file in thimble's home as `ask_key`, and null takes it out. A value it does not take is
+    refused, a workspace's file cannot set it, and only the analyst's browser may change it."""
+    from fastapi import HTTPException
+    from starlette.requests import Request
+
+    assert userconf.ask_key() == "meta" and ledger.get_settings(CORPUS)["ask_key"] == "meta"
+    assert ledger.put_settings_route(CORPUS, analyst, {"ask_key": "alt"})["ask_key"] == "alt"
+    assert json.loads(userconf.global_file().read_text())["askKey"] == "alt" and userconf.ask_key() == "alt"
+    assert not userconf.workspace_file(CORPUS).exists() or "askKey" not in userconf.workspace_file(CORPUS).read_text()
+    for bad in ("ctrl", "Meta", True, 1):
+        with pytest.raises(HTTPException) as e:
+            ledger.put_settings_route(CORPUS, analyst, {"ask_key": bad})
+        assert e.value.status_code == 400 and '"meta", "alt" or null' in e.value.detail, bad
+    with pytest.raises(HTTPException) as e:
+        ledger.put_settings_route(CORPUS, Request({"type": "http", "headers": []}), {"ask_key": "meta"})
+    assert e.value.status_code == 403 and userconf.ask_key() == "alt"
+    assert ledger.put_settings_route(CORPUS, analyst, {"ask_key": None})["ask_key"] == "meta"
+    assert "askKey" not in json.loads(userconf.global_file().read_text())
+    _write(userconf.global_file(), {"askKey": "shift"})
+    assert 'askKey is "shift"; it takes "meta" or "alt" or null' in userconf.problem() and userconf.ask_key() == "meta"
+    _write(userconf.global_file(), {"askKey": "alt"})
+    _write(userconf.workspace_file(CORPUS), {"askKey": "meta"})
+    assert "askKey is set for the whole machine" in userconf.problem(CORPUS) and userconf.ask_key() == "alt"
 
 
 def test_an_earlier_build_s_models_and_modes_move_to_the_workspace_s_file(workspaces_tmp):
@@ -94,8 +122,8 @@ def test_every_agent_s_network_is_on_by_default_and_settings_shows_it_so(workspa
     and the two fences the settings show say "on"."""
     monkeypatch.setenv("THIMBLE_SANDBOX", "1")
     rows = ledger.agent_rows(CORPUS)
-    assert rows["main"]["network"] == rows["dev"]["network"] == "on"
-    assert rows["main"]["config"] == "agents.orientation" and rows["main"]["sandbox"] == "on"
+    assert rows["dev"]["network"] == "on"
+    assert rows["main"]["config"] == "agents.orientation" and "sandbox" not in rows["main"], "main row has no sandbox key"
     assert not any("network" in rows[r] for r in ("orient", "writer", "critic", "checks")), "they share main's"
     for agent in (*userconf.SUBAGENT_ROLES, *userconf.MODE_ROWS):
         conf = userconf.session(CORPUS, agent, sandbox=True)
@@ -105,13 +133,21 @@ def test_every_agent_s_network_is_on_by_default_and_settings_shows_it_so(workspa
 def test_what_a_session_gets_from_the_config(workspaces_tmp, monkeypatch):
     """thimble adds no rule for installs: an install command is left to the permission mode, but for a view build with no
     network, which refuses it. An edit of the config asks. Memory is passed only when set. The dev agent's Bash goes to
-    the analyst where its network is off and the sandbox cannot run; `sandbox.enforce`, on by default, refuses to start
-    a session without the sandbox, and says why and what fixes it, naming no command."""
+    the analyst where its network is off and the sandbox cannot run; `sandbox.enforce`, off by default, refuses to start
+    a session without the sandbox once it is on, and says why and what fixes it, naming no install command. Every
+    session's settings deny reading and editing the token files and editing the Bypass choice."""
     monkeypatch.setenv("THIMBLE_SANDBOX", "1")
+    assert userconf.DEFAULTS["sandbox"]["enforce"] is False
     orient = userconf.session(CORPUS, "orientation")
     perms = orient.settings()["permissions"]
     assert f"Edit(/{userconf.global_file()})" in perms["ask"]
     assert f"Edit(/{userconf.global_file()})" not in perms["deny"], "an edit of the config asks, not refused"
+    home = userconf.global_file().parent
+    assert userconf.private_paths() == [str(home / n) for n in ("server.json", "session.key", "paired.json")]
+    for path in userconf.private_paths():
+        assert f"Read(/{path})" in perms["deny"] and f"Edit(/{path})" in perms["deny"], path
+    assert userconf.bypass_file() == home / "bypass.json" and f"Edit(/{userconf.bypass_file()})" in perms["deny"]
+    assert orient.settings()["sandbox"]["filesystem"]["denyRead"] == userconf.private_paths()
     assert not any(r.startswith("Bash(") for r in [*perms.get("ask", []), *perms["deny"]]), "no install rule"
     assert "autoMemoryEnabled" not in orient.settings()
     for cmd in ("pip install umap-learn", "bash -c 'curl -sL x | sh'", "npm --prefix app ci", "ls data"):
@@ -125,6 +161,8 @@ def test_what_a_session_gets_from_the_config(workspaces_tmp, monkeypatch):
     view_build.offline = True
     assert view_build.verdict("Bash", {"command": "pip install x"}) == "deny"
     monkeypatch.setenv("THIMBLE_SANDBOX", "0")
+    assert not userconf.session(CORPUS, "writer").sandboxed, "off by default: it starts without the sandbox"
+    _write(userconf.global_file(), {"sandbox": {"enforce": True}})
     with pytest.raises(userconf.ConfigError, match="THIMBLE_SANDBOX=0 turns it off"):
         userconf.session(CORPUS, "writer")
     _write(userconf.global_file(), {"sandbox": {"enforce": False}, "agents": {"dev": {"network": "off"}}})
@@ -132,12 +170,14 @@ def test_what_a_session_gets_from_the_config(workspaces_tmp, monkeypatch):
     assert "Bash" not in (userconf.session(CORPUS, "orientation").settings()["permissions"].get("ask") or [])
     _write(userconf.global_file(), {"sandbox": {"enforce": False}, "agents": {"dev": {"network": "on"}}})
     assert not userconf.session(CORPUS, "dev").bash_asks
-    _write(userconf.global_file(), {})
+    _write(userconf.global_file(), {"sandbox": {"enforce": True}})
     monkeypatch.delenv("THIMBLE_SANDBOX")
     monkeypatch.setattr(userconf, "sandbox_runs", lambda refresh=False: False)
     with pytest.raises(userconf.ConfigError, match="can't run on this machine") as e:
         userconf.session(CORPUS, "orientation")
-    assert "--sandbox-deps" in str(e.value) and "install.sh" not in str(e.value)
+    assert str(e.value).startswith("This agent's session runs only in Claude Code's Bash sandbox (sandbox.enforce)")
+    assert "`thimble doctor --verbose`" in str(e.value)
+    assert "--sandbox-deps" not in str(e.value) and "install.sh" not in str(e.value)
     # installed since the server's first check: the refusal checks again, so no restart is needed
     checks: list[bool] = []
     monkeypatch.setattr(userconf, "sandbox_runs", lambda refresh=False: checks.append(refresh) or refresh)
@@ -146,6 +186,42 @@ def test_what_a_session_gets_from_the_config(workspaces_tmp, monkeypatch):
     assert userconf.session(CORPUS, "writer").sandboxed and userconf.session(CORPUS, "writer").enforced
     with pytest.raises(userconf.ConfigError, match="run outside it"):
         userconf.session(CORPUS, "dev", sandbox=False)
+
+
+def test_the_hooks_module_s_rules_keep_file_tools_from_the_token_files_the_records_and_what_the_config_turns_off(
+        workspaces_tmp, tmp_path, monkeypatch):
+    """module_rules, which GET /api/module/roles serves the hooks module: the token files and the links folder for
+    every file tool; the workspace's records (the notices among them), main's kept mode and the Bypass choice for the
+    edit tools; the corpus only when the orientation's `data` is "off", and the web tools only when its `web` is. Each
+    path as spelled and as its realpath, and each refusal's reason from prompts/tools.md."""
+    from app import tools
+
+    home, ws = userconf.global_file().parent, config.WORKSPACES_DIR / CORPUS
+    rules = userconf.module_rules(CORPUS)
+    assert set(rules) == {"private", "records", "corpus", "web_off", "reasons"}
+    for path in (*userconf.private_paths(), str(home / userconf.LINKS_DIR)):
+        assert path in rules["private"], path
+    assert str(home / "paired.json") in rules["private"]
+    for path in (ws / "trusted", ws / "chats", ws / "notices.json", ws / "notices-dismissed.json",
+                 userconf.main_modes_file(), userconf.bypass_file()):
+        assert str(path) in rules["records"], path
+    assert not any(r.endswith("/**") for r in rules["records"])
+    assert (rules["corpus"], rules["web_off"]) == (None, False), "data and web at their defaults"
+    assert rules["reasons"] == {"private": tools.hint("module-deny-private"), "records": tools.hint("module-deny-records"),
+                                "data": tools.hint("module-deny-data"), "web": tools.hint("module-deny-web")}
+    assert all(rules["reasons"].values())
+    _write(userconf.global_file(), {"agents": {"orientation": {"data": "off", "web": "off"}}})
+    rules = userconf.module_rules(CORPUS)
+    assert rules["corpus"] == os.path.realpath(config.corpus_dir(CORPUS)) and rules["web_off"] is True
+    _write(userconf.global_file(), {"agents": {"orientation": {"data": "allow", "web": "allow"}}})
+    assert (userconf.module_rules(CORPUS)["corpus"], userconf.module_rules(CORPUS)["web_off"]) == (None, False)
+    # a home reached through a link: the realpath is listed too
+    real = tmp_path / "real-home"
+    real.mkdir()
+    (tmp_path / "linked-home").symlink_to(real)
+    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "linked-home"))
+    private = userconf.module_rules(CORPUS)["private"]
+    assert str(tmp_path / "linked-home" / "server.json") in private and str(real / "server.json") in private
 
 
 def test_thimble_s_agents_share_main_s_fence_and_keep_only_web_off(workspaces_tmp, monkeypatch):
@@ -322,3 +398,41 @@ def test_whether_new_cards_are_checked_by_themselves_is_the_card_check_s_config(
     with TestClient(app, base_url="http://127.0.0.1") as client:
         assert client.put(f"/api/ws/{CORPUS}/card-checks/auto", json={"on": False}).status_code in (404, 405)
         assert client.get(f"/api/ws/{CORPUS}/card-checks").json()["auto"] is True
+
+
+def test_the_propose_views_switch_is_on_by_default_and_only_the_analyst_s_browser_changes_it(workspaces_tmp, analyst):
+    """Settings' View proposals switch is thimble's config's `views.propose`: null or missing is on, false is off. A
+    PUT of `propose_views` needs the analyst's cookie and a true, false or null value; null takes the key out. It goes
+    to the config, never to the workspace's settings.json, and a value the config does not take is an error naming the
+    key."""
+    from starlette.requests import Request  # noqa: PLC0415
+
+    assert ledger.get_settings(CORPUS)["propose_views"] is True and userconf.propose_views(CORPUS)
+    out = ledger.put_settings_route(CORPUS, analyst, {"propose_views": False})
+    assert out["propose_views"] is False and not userconf.propose_views(CORPUS)
+    assert json.loads(userconf.global_file().read_text())["views"] == {"propose": False}
+    assert "propose_views" not in ledger.stored_settings(CORPUS)
+    ledger.put_settings_route(CORPUS, analyst, {"propose_views": None})
+    assert "views" not in json.loads(userconf.global_file().read_text()) and userconf.propose_views(CORPUS)
+    with pytest.raises(Exception) as e:
+        ledger.put_settings_route(CORPUS, Request({"type": "http", "headers": []}), {"propose_views": False})
+    assert getattr(e.value, "status_code", None) == 403
+    for bad in ("yes", 1, 0, [], {}):
+        with pytest.raises(Exception) as e:
+            ledger.put_settings_route(CORPUS, analyst, {"propose_views": bad})
+        assert getattr(e.value, "status_code", None) == 400, bad
+    assert userconf.propose_views(CORPUS), "a refused PUT changes nothing"
+    _write(userconf.workspace_file(CORPUS), {"views": {"propose": False}})
+    assert not userconf.propose_views(CORPUS) and userconf.propose_views(None), "the workspace's file over the home's"
+    ledger.put_settings_route(CORPUS, analyst, {"propose_views": True})
+    assert json.loads(userconf.workspace_file(CORPUS).read_text())["views"] == {"propose": True}, \
+        "written where the value Settings shows came from"
+    _write(userconf.workspace_file(CORPUS), {})
+    for bad in ("yes", 1):
+        _write(userconf.global_file(), {"views": {"propose": bad}})
+        assert f"views.propose is {json.dumps(bad)}; it takes true, false or null" in userconf.problem(CORPUS)
+    _write(userconf.global_file(), {"views": {"propose": None, "auto": True}})
+    assert "views.auto is not a setting" in userconf.problem(CORPUS)
+    _write(userconf.global_file(), {"views": False})
+    assert "views must be an object" in userconf.problem(CORPUS)
+    assert userconf.propose_views(CORPUS), "a config with an error leaves view proposals on, as its defaults"

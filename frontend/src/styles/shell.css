@@ -472,6 +472,10 @@
 .settings-mode {
   justify-self: start;
 }
+/* the Ask key choice (SettingsPopover's ASK_KEY_LABEL): ⌘-click or ⌥-click */
+.settings-ask-key {
+  justify-self: start;
+}
 /* labels' and the card check's cell where the others have their mode's menu (SettingsPopover's CALL_ROWS) */
 .chip.settings-mode-none {
   color: var(--text-secondary);
@@ -777,6 +781,9 @@ button.settings-ext-name:hover .settings-ext-caret {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+.shell-toast-text code {
+  font: var(--type-mono-sm);
+}
 
 /* -------- the theme popover (shell/ThemePopover): Paper as a segmented track, Accent as seven swatches -------- */
 .theme-pop {
@@ -836,6 +843,11 @@ button.settings-ext-name:hover .settings-ext-caret {
 }
 .shell-down code {
   font-family: var(--font-mono);
+}
+/* the line's × (ServerDown, NewVersion), at its end */
+.shell-down-x.btn {
+  flex: none;
+  margin: -4px -6px -4px 0;
 }
 /* a newer build is served (shell/NewVersion): the same line with a hairline edge and a Reload button */
 .shell-newer {
@@ -953,6 +965,14 @@ button.settings-ext-name:hover .settings-ext-caret {
   color: var(--text-secondary);
 }
 
+/* the one line a browser that is not signed in sees in place of the app (SignIn), where the start page's title stands */
+.signin-line {
+  max-width: var(--w-card);
+  margin: 0 auto;
+  padding: 40px 16px;
+  font: var(--type-body);
+  color: var(--text-primary);
+}
 /* -------- the start page (StartPage): the page with no workspace in its URL. The top bar's brand, a title and the
    workspaces in groups (WorkspaceList), in a column as wide as a card. The switcher (TopBar) draws the same list in a
    popover, denser -------- */
@@ -978,6 +998,10 @@ button.settings-ext-name:hover .settings-ext-caret {
   font: var(--type-title);
   letter-spacing: var(--tracking-title);
   color: var(--text-primary);
+}
+/* a link's sign-in code that was used or expired (chat/Notice PageNoticeStrip), under the title */
+.start-notices {
+  margin: -12px 0 24px;
 }
 .start-missing,
 .start-empty {

@@ -6,6 +6,7 @@
 import { useEffect } from 'react'
 import { api } from './api'
 import { bus } from './bus'
+import { parseNotice } from './notices'
 import { openStream } from './sse'
 import type { ViewQuery, WsEvent } from './types'
 
@@ -54,6 +55,7 @@ function fanOut(ev: WsEvent): void {
           path: typeof rest.path === 'string' ? rest.path : undefined,
           chat: typeof rest.chat === 'string' ? rest.chat : undefined,
           asked: rest.asked === true || undefined,
+          accepted: rest.accepted === true || undefined,
           version: typeof rest.version === 'string' ? rest.version : undefined,
           held: rest.held === true || undefined,
         })
@@ -88,6 +90,20 @@ function fanOut(ev: WsEvent): void {
       // opened again
       if (!replaying && typeof rest.slug === 'string') bus.emit('openView', { slug: rest.slug, query: viewQuery(rest.query) })
       return
+    case 'notice': {
+      // a failure of main or of one of thimble's agents with its fix, or the end of one (backend notices.py): the open
+      // notices (lib/notices.ts) and the chat whose log holds its row follow it
+      const chat = typeof rest.chat === 'string' && rest.chat ? rest.chat : null
+      const id = typeof rest.id === 'string' && rest.id ? rest.id : undefined
+      const key = typeof rest.key === 'string' && rest.key ? rest.key : undefined
+      if (rest.cleared === true || rest.dismissed === true) {
+        if (id || key) bus.emit('notice', { chat, notice: null, gone: { ...(id ? { id } : {}), ...(key ? { key } : {}) }, foreground: false, replay: replaying })
+        return
+      }
+      const notice = parseNotice(rest)
+      if (notice) bus.emit('notice', { chat, notice, gone: null, foreground: rest.foreground !== false, replay: replaying })
+      return
+    }
     case 'filter':
       bus.emit('filter',{ scope: rest.scope as 'files' | 'canvas' | 'report', concept: typeof rest.concept === 'string' ? rest.concept : undefined, value: typeof rest.value === 'string' ? rest.value : undefined })
       return

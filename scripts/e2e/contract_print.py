@@ -353,6 +353,7 @@ def check_ends(runs: dict[str, dict]) -> tuple[bool, str]:
 # --------------------------------------------------------------------------------------------- the stand-in server
 
 def proof(token: str, nonce: str, side: str) -> str:
+    """hook_auth.sign (side "server") and hook_auth.request_proof (side "hook@<port>")."""
     return hmac.new(token.encode(), f"{side}:{nonce}".encode(), hashlib.sha256).hexdigest()
 
 
@@ -380,7 +381,7 @@ class Stub:
                 try:
                     self.send_response(status)
                     if nonce and hmac.compare_digest(self.headers.get("x-thimble-auth") or "",
-                                                     proof(stub.token, nonce, "hook")):
+                                                     proof(stub.token, nonce, f"hook@{port}")):
                         self.send_header("x-thimble-proof", proof(stub.token, nonce, "server"))
                     self.send_header("content-type", "application/json")
                     self.send_header("content-length", str(len(data)))

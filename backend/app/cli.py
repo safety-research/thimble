@@ -3,45 +3,55 @@
     thimble server up [--cwd <path>] [--session <id>] [--action status|fix|repair|fresh|restore|feedback]
                       [--archive <name>]
     thimble server status [--cwd <path>] | repair | stop [--yes] | restart [--keep-vite] [--yes]
-    thimble doctor | fix | revert | stop [--yes] | restart [--keep-vite] [--yes]
+    thimble doctor [--verbose] | unpair | fix | revert | stop [--yes] | restart [--keep-vite] [--yes]
     thimble update [--from <zip>] [--dry-run]
     thimble feedback ["description"] [--no-logs]   (a problem report as a zip; feedback.py)
     thimble list                           (the workspaces by id, archived runs included; runs.py)
     thimble purge <id>… [--dry-run]        (delete workspaces or archived runs by id; runs.py)
-    thimble launch-args --cwd <path>       (the launcher's: plugin folder, allowed tools, main's effort and settings, turn tools, main's name, session id, env, unset, note, mode and export lines, main's prompt)
+    thimble launch-args --cwd <path>       (the launcher's: plugin folder, main's effort and settings, turn tools, main's name, session id, env, unset, note, mode and export lines, main's prompt)
     thimble prompt <name>… [--cwd <path>]  (prompt files rendered for a session in <path>, for skills and hooks)
     thimble extension add <folder | git URL | built-in name> [--yes] | on <name> | off <name> | list | remove <name>
                                                                                               (extensions.py)
 
 `server up` (alias `ensure`) is the one starter: `GET /api/health`, then under `flock <home>/server.lock` spawn uvicorn
-on THIMBLE_PORT (8300) as its own session leader (plus Vite on 5300 when THIMBLE_DEV is on), wait for health, map the
-cwd to a workspace, print `thimble: <url>` (LINK_LINE in a session), and name the session to the server. It always
+on the server's port (port) as its own session leader (plus Vite on 5300 when THIMBLE_DEV is on), wait for health, map
+the cwd to a workspace, print `thimble: <url>` (LINK_LINE in a session), and name the session to the server. It always
 exits 0, since a skill fails whole when its command exits non-zero. `--action fresh` moves the workspace aside into
 <workspaces>/.archive/; `--action restore` restores an archive. Where the plugin's hooks are off, /thimble also prints
 the command main's Monitor runs (cc_plugin.route, monitor_lines).
 
-<home> is `~/.thimble` or THIMBLE_HOME. <home>/server.json records {port, pid, url, repo, env, token, ui_key}, readable
-by its owner alone; `token` is new at each start and is what the plugin's hooks prove they hold, and `ui_key`, kept
-across starts, is what the link gives the browser to answer permission requests and change permission modes
-(hook_auth.py). Only a terminal gets that link: `up` from a shell prints it, and /thimble prints LINK_LINE for main's
-Stop hook to show it (leave_link). Its `pid` is trusted only while it is a thimble server on its port (is_server checks
-the command line and working folder, since a pid recorded inside a sandbox's pid namespace can name an unrelated host
-process). reconcile makes the record true before `up` acts on it. A server whose /api/health names another
-THIMBLE_HOME belongs to another install and is refused.
+<home> is `~/.thimble` or THIMBLE_HOME. <home>/server.json records {port, pid, url, repo, env, token}, readable by its
+owner alone; `token` is new at each start and is what the plugin's hooks and this CLI prove they hold (hook_auth.py). A
+browser signs in with a one-time code from ui_url(pair=True), never with a value from this file. Only a terminal gets a
+link with a code: `up` from a shell prints one, and /thimble prints LINK_LINE for main's Stop hook to show the link,
+which gets its code as the hook shows it (leave_link). `thimble unpair` signs every browser out. Its `pid` is trusted
+only while it is a thimble server on its port (is_server checks the command line and working folder, since a pid
+recorded inside a sandbox's pid namespace can name an unrelated host process). reconcile makes the record true before
+`up` acts on it. A server whose /api/health names another THIMBLE_HOME belongs to another install.
+
+The port: THIMBLE_PORT when the caller sets it, else the one server.json records, else DEFAULT_PORT (8300). Without
+THIMBLE_PORT, a start whose port another program or another install's server holds starts on a free port instead
+(pick_port), and server.json records it, so every reader finds the server there: this CLI, the launcher, the plugin's
+shim, hooks and hooks module, and the browser link (ui_url). With THIMBLE_PORT that port alone is used: another
+install's server there is refused with FOREIGN_LINE, and another program there makes the start fail (port_line). Vite's
+UI port in dev mode follows the same rule with THIMBLE_UI_PORT (DEFAULT_UI_PORT, 5300).
 
 Claude Code's Bash sandbox gives each command its own network and pid namespace, where a server would die with the
 command and the host's cannot be reached. So /thimble's work runs in the plugin's UserPromptExpansion hook, which Claude
 Code runs outside the sandbox just before the skill's commands (`server up --hook`, hook_up): it keeps what `up` printed
 in <home>/up/<session>.json, and the skill's `up` prints that (take_hook_result), or does the work itself when the hook
-left nothing. In the sandbox without the hook's result `up` starts nothing and prints the `sandbox.excludedCommands`
-entries that would run it outside (sandbox_line). `restart` and `stop` name the work
+left nothing. The hook also leaves <home>/up/<session>.active, which says /thimble expanded in that session: the hooks
+module looks at it at the end of main's turn, since where an organization manages Claude Code its skill.prompt event
+passes over the plugins a person installs (plugin/hooks/thimble.ts). In the sandbox without the hook's result `up`
+starts nothing and prints the `sandbox.excludedCommands` entries that would run it outside (sandbox_line). `restart`
+and `stop` name the work
 they would interrupt (running_work) and ask first unless `--yes`. In dev mode an `up` that finds the source tree changed
 while the server is idle restarts the backend (THIMBLE_NO_AUTORESTART=1 disables it). This module imports only
 `config`, `procs`, `cc_plugin`, `launch_mode` and the standard library (others lazily), never `app.notebook`.
 
 Terminal mode (`thimble mode terminal`, launch_mode.py) starts no server: launch-args then registers the folder and
-writes launch.json with `mode: terminal`, the hooks module's roles file and main's fence with the card folders, and the
-launcher loads the renderer plugin (TERMINAL_RENDERER) and opens Claude Code with no first prompt. `server up --hook`
+writes launch.json with `mode: terminal` and the hooks module's roles file, and the launcher loads the renderer plugin
+(TERMINAL_RENDERER) and opens Claude Code with no first prompt. `server up --hook`
 and /thimble start nothing there and print the `thimble-terminal-home` hint (terminal_session). One mode per workspace
 at a time: `thimble`, and a /thimble that opens the browser, refuse while launch.json names a live `claude` of the
 other mode (open_elsewhere).
@@ -83,6 +93,7 @@ from . import cc_plugin, config, headless, launch_mode, procs
 DEFAULT_PORT = 8300
 DEFAULT_UI_PORT = 5300
 VALIDATION_PORTS = (8301, 5301)  # scripts/dev/dev_stack.sh's defaults; THIMBLE_STACK_PORT and _UI_PORT move them
+PORT_SCAN = 50  # the ports above a taken one that pick_port tries in turn, before it takes one the system gives
 BACKEND_DIR = config.REPO_ROOT / "backend"
 FRONTEND_DIR = config.REPO_ROOT / "frontend"
 PLUGIN_DIR = config.REPO_ROOT / "plugin"
@@ -107,7 +118,8 @@ SOURCE_CHANGED = "source changed"  # restart.json's title; dev.PLAIN_REASONS
 RESTARTED_LINE = "thimble: server restarted (source changed)"
 NOT_RESTARTED_LINE = "thimble: source changed since the server started; not restarting while {reason}"
 REGISTER_FAILED_LINE = "thimble: could not open {path} as a workspace (the server refused to register it); see {log} and say `/thimble` again."
-NO_UI_LINE = "thimble: the dashboard is not built yet, so its link shows no page; run `thimble doctor` in a shell for the fix."
+NO_UI_LINE = ("thimble: the dashboard is not built yet, so its link shows no page; run `thimble doctor --verbose` in a "
+              "shell for the fix.")
 NO_AUTH_LINE = "thimble: WARNING - {problem}. Nothing that calls a model runs until then."
 FEEDBACK = "feedback"  # /thimble feedback: the problem report (feedback.py)
 # where the server did not start: how to send the developer a problem report, which needs no server
@@ -124,9 +136,6 @@ MONITOR_NOTE = ("thimble: WARNING - your settings or your organization's turn th
                 "session, so thimble connects through a Monitor instead. Permission prompts appear only here in the "
                 "terminal, and Claude may ask you to confirm here what you approved in the browser. After /clear, say "
                 "/thimble again.")
-# the same in thimble's fence, which lets out only the /thimble of the session `thimble` started (SANDBOX_ACTIONS)
-MONITOR_NOTE_FENCED = MONITOR_NOTE.replace("After /clear, say /thimble again.",
-                                           "After /clear, quit and run `thimble -c` in this folder.")
 MONITOR_MARK = "thimble-monitor:"  # then the command main's Monitor runs (plugin/skills/thimble/SKILL.md)
 WATCHER = "bin/.thimble-watch"  # the plugin's hidden watcher, under its root
 FRESH = "fresh"  # /thimble fresh: the folder's workspace moved aside, an empty one opened
@@ -138,15 +147,9 @@ RESUME_LINE = "thimble: resuming the dashboard from your last run; `/thimble fre
 # the orientation left as context (precached.py)
 PRECACHED_LINE = ("thimble: opening the orientation that ran in advance on these files; this session starts fresh, "
                   "from its cards and report; `/thimble fresh` starts over")
-# what /thimble prints in place of the link, which carries the ui_key and so is kept out of the model's context: main's
-# Stop hook shows it under the reply (leave_link, plugin/bin/.thimble-watch)
+# what /thimble prints in place of the link: main's Stop hook shows the link under the reply with a sign-in code it gets
+# as it shows it (leave_link, plugin/bin/.thimble-watch link_lines), outside the model's context
 LINK_LINE = "thimble: the dashboard link is under this reply (or run `thimble up` in a shell)"
-# /thimble in a session the launcher did not start (no THIMBLE_LAUNCHED) and that runs outside thimble's fence
-# (cc_plugin.fenced_argv): main and its subagents run unfenced there, and thimble's agents cannot start, since the hooks
-# module serves only a launched, fenced main
-UNFENCED_LINE = ("thimble: WARNING - this session was not started with `thimble`, so it and its subagents run without "
-                 "thimble's sandbox and can change your files, and thimble's agents cannot start in it. Quit and run "
-                 "`thimble` in this folder.")
 LINKS_DIR = "links"  # under <home>: the link each session's Stop hook shows once
 FRESH_LINE = ("thimble: Cleared the session at {cwd}. The last run is archived at {path}. To bring it back, run: "
               "/thimble restore {name}")
@@ -173,14 +176,13 @@ MCP_TOOLS_RULE = "mcp__plugin_thimble_thimble"  # every tool of the plugin's thi
 # the critic's own sessions), each from a prompt file in a plugin agent's form (prompts.agent_file).
 AGENT_FIELDS = ("model", "effort", "background")  # the frontmatter fields passed on as they are
 PLUGIN_NAME = "thimble"  # the plugin's name, which prefixes its skills (`thimble:shared`) outside a plugin agent's file
-ANCHORS_DIR = "anchors"  # threads.IMAGE_DIR: each workspace's pictures of the elements its threads were opened on
 RESTART_MARK_S = 60.0  # a `source_restart` mark in server.json younger than this means a restart is under way
 REFUSED_LINE = "thimble: {path} is not a folder to open as a workspace; say /thimble from the folder that holds the corpus."
 TAKEOVER_LINE = ("thimble: this session is main now. The session {other} in another terminal no longer hears the "
                  "browser, and is main again once this one exits.")
-FOREIGN_LINE = ("thimble: port {port} is held by the thimble server of another install (THIMBLE_HOME {other}), so this "
-                "install does not use it. Set THIMBLE_PORT to a free port, or stop that server with "
-                "`THIMBLE_HOME={other} thimble server stop`.")
+FOREIGN_UNNAMED = "<its THIMBLE_HOME>"  # foreign_home's answer for a server that names no home to this install
+FOREIGN_LINE = ("thimble: port {port} (set by THIMBLE_PORT) is in use by another program. Set THIMBLE_PORT to a free "
+                "port, or unset it and thimble picks one.")
 SANDBOX_ENV = "SANDBOX_RUNTIME"  # "1" in a command Claude Code's Bash sandbox runs (module note, the Bash sandbox)
 # /thimble in the sandbox when the plugin's UserPromptExpansion hook left nothing (module note, the Bash sandbox)
 SANDBOX_LINE = ("thimble: WARNING - Claude Code's Bash sandbox is on in this session and keeps /thimble from reaching "
@@ -191,20 +193,13 @@ SANDBOX_NO_HOOKS_LINE = ("thimble: WARNING - Claude Code's Bash sandbox is on in
                          "reaching thimble's server, and with the plugin's hooks off nothing can start the server "
                          "outside the sandbox, so there is no link. To fix it, add \"{rule}\" and \"{watch}\" to "
                          "sandbox.excludedCommands in {settings}, then say /thimble again.")
-# In thimble's fence with the plugin's hooks off (main_fence), sandbox.excludedCommands lets out only the skill's own
-# command for these actions, exactly as Claude Code spells it for main's session (sandbox_rules): the plain /thimble and
-# /thimble status. Any other action, or the same command under another session id, stays in the sandbox, so main's Bash
-# cannot run `--action fresh` or `fix` outside it; the command then says what to do instead (fenced_sandbox_line). The
-# Monitor route's watcher is let out the same way, only as the command /thimble gives main's Monitor for main's session
-# (watch_rules); with the hooks on nothing is let out.
-SANDBOX_ACTIONS = ("", "status")
-FENCE_ACTION_LINE = ("thimble: Claude Code's hooks are off in this session, so thimble's sandbox lets /thimble reach "
-                     "thimble's server only to open the workspace or show its status. To run /thimble {words}, run "
-                     "`thimble server up --action {action}{archive}` in a terminal in this folder.")
-FENCE_SESSION_LINE = ("thimble: Claude Code's hooks are off in this session, so thimble's sandbox lets /thimble reach "
-                      "thimble's server only in the session `thimble` started, and /clear or /resume gave this session "
-                      "a new id. Quit, and run `thimble -c` in this folder.")
 HOOK_RESULTS_DIR = "up"  # under <home>: what /thimble's hook left for the skill's command to print (hook_up)
+# beside a result: the marker that /thimble expanded in its session, which the hooks module looks for (module note)
+HOOK_MARKER_SUFFIX = ".active"
+# under <home>: an empty file for each folder thimble opened (mark_active), which the plugin's watcher looks for before it
+# starts Python, so hooks in a folder thimble never opened exit at once (plugin/bin/.thimble-watch's second line)
+ACTIVE_DIR = "active"
+ACTIVE_KEY_MAX = 200  # a marker's name longer than this is not written; the watcher starts Python for such a folder
 # /thimble in a session the launcher started in terminal mode starts nothing: the renderer opens the home panel, and the
 # skill's command prints this hint of prompts/tools.md (TERMINAL_HOME_LINE when the file has none), which main repeats
 TERMINAL_HOME_HINT = "thimble-terminal-home"
@@ -218,7 +213,6 @@ MANUAL_RESTART = "manual restart"  # dev.PLAIN_REASONS
 RUNNING_HEAD = "thimble: running now:"
 RUNNING_BACK_LINE = ("A restart stops them. Once the server is back, the orientations and writers resume by themselves, "
                      "and a view build or dev ticket starts again.")
-RUNNING_ENDS = " (the restart ends it)"
 RESTART_QUESTION = "Restart the server now? [y/N] "
 RESTART_UNASKED_LINE = "thimble: not restarted, since there is no terminal to ask in; pass --yes to restart anyway."
 RESTART_DECLINED_LINE = "thimble: not restarted."
@@ -227,8 +221,7 @@ STOP_BACK_LINE = ("A stop ends them. The server's next start resumes the orienta
 STOP_QUESTION = "Stop the server now? [y/N] "
 STOP_UNASKED_LINE = "thimble: not stopped, since there is no terminal to ask in; pass --yes to stop anyway."
 STOP_DECLINED_LINE = "thimble: not stopped."
-RUNNING_KINDS = {"orient": "the orientation", "writer": "the writer", "check": "the report check",
-                 "view": "the view build"}
+RUNNING_ORIENT = "the orientation"
 NOTICES: list[str] = []  # lines `ensure_running` leaves for `cmd_ensure`
 MAIN = "main"
 
@@ -279,14 +272,15 @@ def new_token() -> str:
 
 
 def write_state(state: dict[str, Any]) -> None:
-    """server.json, written whole into the private home (ensure_home), with the token and the ui_key the file held when
-    `state` names none, else new ones (hook_auth.py)."""
+    """server.json, written whole into the private home (ensure_home), with the token the file held when `state` names
+    none, else a new one (hook_auth.py). The browser key earlier builds kept here is dropped: a browser signs in with a
+    one-time code (ui_url)."""
     ensure_home()
     held = read_state()
     if not state.get("token"):
         state = {**state, "token": held.get("token") or new_token()}
-    if not state.get("ui_key"):
-        state = {**state, "ui_key": held.get("ui_key") or new_token()}
+    state = dict(state)
+    state.pop("ui_key", None)
     p = server_json()
     tmp = p.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(state, indent=2) + "\n", "utf-8")
@@ -313,18 +307,29 @@ def _log(line: str) -> None:
 # ----------------------------------------------------------------------------- configuration resolution
 
 
+def explicit_port() -> int | None:
+    """THIMBLE_PORT when the caller set it to a port: the one port thimble then uses, or says is taken (module note).
+    None without it."""
+    v = (os.environ.get("THIMBLE_PORT") or "").strip()
+    return int(v) if v.isdigit() and 0 < int(v) < 65536 else None
+
+
 def port() -> int:
-    v = os.environ.get("THIMBLE_PORT")
-    if v and v.isdigit():
-        return int(v)
-    return int(read_state().get("port") or DEFAULT_PORT)
+    """THIMBLE_PORT, else the port server.json records (the one the last start bound, maybe one pick_port chose), else
+    DEFAULT_PORT."""
+    return explicit_port() or int(read_state().get("port") or DEFAULT_PORT)
+
+
+def explicit_ui_port() -> int | None:
+    """THIMBLE_UI_PORT when the caller set it to a port: the one port Vite then uses in dev mode. None without it."""
+    v = (os.environ.get("THIMBLE_UI_PORT") or "").strip()
+    return int(v) if v.isdigit() and 0 < int(v) < 65536 else None
 
 
 def ui_port() -> int:
-    v = os.environ.get("THIMBLE_UI_PORT")
-    if v and v.isdigit():
-        return int(v)
-    return int(read_state().get("ui_port") or DEFAULT_UI_PORT)
+    """THIMBLE_UI_PORT, else the UI port server.json records (maybe one start chose, as for the server's port), else
+    DEFAULT_UI_PORT."""
+    return explicit_ui_port() or int(read_state().get("ui_port") or DEFAULT_UI_PORT)
 
 
 def api_url(p: int | None = None) -> str:
@@ -380,7 +385,7 @@ def _server_environ(env: dict[str, Any], p: int, ui: int) -> dict[str, str]:
 
 def healthy(url: str | None = None, timeout: float = HEALTH_TIMEOUT_S) -> bool:
     try:
-        with urllib.request.urlopen(f"{url or api_url()}/api/health", timeout=timeout) as r:
+        with config.LOOPBACK.open(f"{url or api_url()}/api/health", timeout=timeout) as r:
             return r.status == 200 and bool(json.loads(r.read() or b"{}").get("ok"))
     except Exception:  # noqa: BLE001
         return False
@@ -390,6 +395,56 @@ def listening(p: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(0.3)
         return s.connect_ex(("127.0.0.1", p)) == 0
+
+
+def port_free(p: int) -> bool:
+    """Whether the server could bind 127.0.0.1:`p` now: nothing answers there and a bind succeeds, with SO_REUSEADDR as
+    uvicorn binds. Seam for tests."""
+    if listening(p):
+        return False
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind(("127.0.0.1", p))
+        except OSError:
+            return False
+    return True
+
+
+def pick_port(taken: int, avoid: tuple[int, ...] = ()) -> int:
+    """A free port where `taken` is not free (port_free): the first free one of the PORT_SCAN ports above it, passing
+    over the validation stack's ports and `avoid`, else one the system gives."""
+    skip = {*validation_ports(), *avoid}
+    for q in range(taken + 1, min(taken + 1 + PORT_SCAN, 65536)):
+        if q not in skip and port_free(q):
+            return q
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return int(s.getsockname()[1])
+
+
+def _this_home(other: Any) -> bool:
+    """Whether the path `other` is this install's THIMBLE_HOME."""
+    if not isinstance(other, str) or not other:
+        return False
+    try:
+        return Path(other).expanduser().resolve() == home().expanduser().resolve()
+    except OSError:
+        return other == str(home())
+
+
+def held_by_this_install(p: int, st: dict[str, Any]) -> bool:
+    """Whether this install's own server holds port `p`, answering or not: the pid server.json names is a thimble server
+    on `p`, or the process listening on `p` is a thimble server of this checkout started with this THIMBLE_HOME (or
+    whose environment cannot be read). start then keeps the port, so a stuck server is named (start_failure) rather
+    than left running beside a new one."""
+    if st.get("pid") and is_server(st.get("pid"), p, st.get("repo")):
+        return True
+    holder = procs.listener(p)
+    if not holder or not is_server(holder, p, st.get("repo")):
+        return False
+    env = procs.environ(holder)
+    return env is None or _this_home(env.get("THIMBLE_HOME") or os.path.join(env.get("HOME") or "~", ".thimble"))
 
 
 def pid_alive(pid: int | None) -> bool:
@@ -453,25 +508,36 @@ def health_leader(url: str | None = None) -> int | None:
 
 
 def foreign_home(url: str | None = None) -> str | None:
-    """The THIMBLE_HOME of the server answering at `url` when it is another install's; None when it is this install's, names
-    none, or nothing answers. Two installs share a port by default."""
+    """The THIMBLE_HOME of the server answering at `url` when it is another install's; None when it is this install's, or
+    nothing answers. Two installs start on the same default port, and the second passes over it (pick_port). A server
+    names its home only to a request that proves its token (main's /api/health), so a healthy server that names none
+    took this install's proof for no proof: another install's or another account's, whose home is FOREIGN_UNNAMED
+    here."""
     status, body = _request("GET", f"{url or api_url()}/api/health", timeout=HEALTH_TIMEOUT_S)
-    other = body.get("home") if status == 200 and isinstance(body, dict) else None
-    if not isinstance(other, str) or not other:
+    if status != 200 or not isinstance(body, dict) or body.get("ok") is not True:
         return None
-    try:
-        same = Path(other).resolve() == home().expanduser().resolve()
-    except OSError:
-        same = other == str(home())
-    return None if same else other
+    other = body.get("home")
+    if not isinstance(other, str) or not other:
+        return FOREIGN_UNNAMED
+    return None if _this_home(other) else other
+
+
+def serves(url: str | None = None) -> bool:
+    """Whether this install's server answers at `url` (default api_url): healthy, and not another install's
+    (foreign_home)."""
+    url = url or api_url()
+    return healthy(url) and foreign_home(url) is None
 
 
 def refuse_foreign(url: str | None = None) -> bool:
-    """Print FOREIGN_LINE and return True when another install's server holds the port (foreign_home)."""
+    """Print FOREIGN_LINE and return True when THIMBLE_PORT names the port and another install's server holds it
+    (foreign_home). Without THIMBLE_PORT nothing is refused: start passes over the port (pick_port)."""
+    if explicit_port() is None:
+        return False
     other = foreign_home(url)
     if other:
         _log(f"port {port()} is held by the thimble server of {other}; not used")
-        print(FOREIGN_LINE.format(port=port(), other=other))
+        print(FOREIGN_LINE.format(port=port()))
     return bool(other)
 
 
@@ -514,51 +580,10 @@ def sandbox_rule(root: Path | None = None) -> str:
     return f"{(root or plugin_root()) / 'bin' / 'thimble'} server up *"
 
 
-def sandbox_rules(root: Path, cwd: Path, session: str | None) -> list[str]:
-    """The `sandbox.excludedCommands` entries that let out the /thimble skill's own command for SANDBOX_ACTIONS in main's
-    session `session`, in the corpus `cwd`, with the plugin copy at `root`: exactly the command Claude Code runs once it
-    has put in the plugin root, the project folder (as `cwd` names it, and as its real path names it) and the session
-    id, without the `2>&1` the skill adds, which Claude Code leaves out of the match (module note: a command that differs
-    in any way stays in the sandbox). None without a session id, or where a value holds a character the skill's quotes
-    would not keep."""
-    if not session or not SESSION_ID_RE.fullmatch(session):
-        return []
-    folders = list(dict.fromkeys([str(cwd), os.path.realpath(cwd)]))
-    if any(ch in f for f in folders for ch in '"\\$`\n'):
-        return []
-    return [f'{root / "bin" / "thimble"} server up --cwd "{f}" --session "{session}" --action "{a}" --archive ""'
-            for f in folders for a in SANDBOX_ACTIONS]
-
-
-def fenced_sandbox_line(cwd: Path, action: str, archive: str) -> str:
-    """What /thimble prints in thimble's fence with the plugin's hooks off when its command ran in the sandbox (module
-    note, SANDBOX_ACTIONS): the terminal command for an action the fence keeps in, else that /clear or /resume changed
-    the session id; '' outside thimble's fence or with the hooks on."""
-    if os.environ.get(cc_plugin.FENCE_MARK, "").strip() != "1" or not cc_plugin.hooks_blocked(cwd, plugin_root()):
-        return ""
-    if action in SANDBOX_ACTIONS:
-        return FENCE_SESSION_LINE
-    named = f" --archive {shlex.quote(archive)}" if archive else ""
-    return FENCE_ACTION_LINE.format(words=" ".join(w for w in (action, archive) if w), action=shlex.quote(action),
-                                    archive=named)
-
-
 def watch_rule(root: Path | None = None) -> str:
     """The `sandbox.excludedCommands` entry that runs the Monitor route's watcher of the plugin copy at `root` (by
-    default plugin_root) outside the sandbox, for a session outside thimble's fence (sandbox_line)."""
+    default plugin_root) outside the sandbox, for a session whose plugin hooks are off (sandbox_line)."""
     return f"{(root or plugin_root()) / WATCHER} --stream *"
-
-
-def watch_rules(root: Path, cwd: Path, session: str | None) -> list[str]:
-    """The `sandbox.excludedCommands` entries that let out the Monitor route's watcher in thimble's fence: exactly the
-    command /thimble gives main's Monitor for main's session `session` (monitor_lines), with the corpus `cwd` as the
-    launcher names it and as its real path names it, as sandbox_rules does for the skill's command. Any other watcher
-    command, such as one for another folder or session, stays in the sandbox, where it cannot read the server's token.
-    None without a session id."""
-    if not session or not SESSION_ID_RE.fullmatch(session):
-        return []
-    return [shlex.join([str(root / WATCHER), "--stream", "--cwd", f, "--session", session])
-            for f in dict.fromkeys([str(cwd), os.path.realpath(cwd)])]
 
 
 def sandbox_line(cwd: Path) -> str:
@@ -572,19 +597,37 @@ def sandbox_line(cwd: Path) -> str:
     return SANDBOX_LINE.format(rule=sandbox_rule(), settings=settings, log=log_path())
 
 
-def _request(method: str, url: str, body: dict | None = None, timeout: float = 5.0) -> tuple[int, Any]:
+def browser_request(url: str, cookie: str) -> tuple[str, str]:
+    """(the URL, the Cookie header) of a request a signed-in browser makes, for a script holding browser_cookie's
+    `cookie` (`name=value; Path=/b/<key>/api/`): `url`, a URL of the server's API (/api/...), moved under the cookie's
+    path, where the server counts it (hook_auth.browser_path), and the cookie's `name=value`. A cookie that names no
+    such path leaves `url` as it is."""
+    pair, _, attrs = cookie.partition(";")
+    path = next((a.strip()[5:] for a in attrs.split(";") if a.strip().lower().startswith("path=")), "")
+    u = urllib.parse.urlsplit(url)
+    if path.startswith("/b/") and path.endswith("/api/") and (u.path == "/api" or u.path.startswith("/api/")):
+        url = urllib.parse.urlunsplit(u._replace(path=path[:-len("/api/")] + u.path))
+    return url, pair.strip()
+
+
+def _request(method: str, url: str, body: dict | None = None, timeout: float = 5.0,
+             cookie: str | None = None) -> tuple[int, Any]:
     """(status, parsed json | text). Transport failures are (0, message); an HTTP error is (status, its body). The
-    request proves the server's token (hook_auth) so its writes pass LocalWriteGuard, which a notebook kernel cannot."""
+    request proves the server's token (hook_auth), which the routes of hooks, the plugin and this CLI need; a write the
+    analyst's browser makes needs a signed-in browser's `cookie` (browser_cookie), sent as the Cookie header on the path
+    the cookie is scoped to (browser_request). A notebook kernel holds neither."""
     from . import hook_auth  # noqa: PLC0415
 
     data = json.dumps(body).encode() if body is not None else None
     headers = {"Content-Type": "application/json"}
     tok = hook_auth.token()
-    if tok:
-        headers.update(hook_auth.headers(tok, secrets.token_hex(16)))
+    if tok:  # good only on the port `url` names, for a few minutes, once: a process that holds that port gains nothing
+        headers.update(hook_auth.headers(tok, hook_auth.port_of(url)))
+    if cookie:
+        url, headers["Cookie"] = browser_request(url, cookie)
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with config.LOOPBACK.open(req, timeout=timeout) as r:  # never through the shell's proxy
             raw = r.read()
             status = r.status
     except urllib.error.HTTPError as e:
@@ -654,10 +697,22 @@ def vite_cmd(ui: int) -> list[str]:
 
 
 def start(p: int | None = None) -> dict[str, Any]:
-    """Spawn the backend (and Vite in dev mode) and write server.json. The caller holds the lock."""
-    p = p or port()
+    """Spawn the backend (and Vite in dev mode) and write server.json, which records the port. The caller holds the
+    lock. Without THIMBLE_PORT, when the port is not free and this install's own server does not hold it
+    (held_by_this_install), the server starts on a free port instead (pick_port); in dev mode, without THIMBLE_UI_PORT,
+    Vite does the same where the UI port is not free and no Vite of this install serves it (own_vite)."""
+    if p is None:
+        p = port()
+        if explicit_port() is None and not port_free(p) and not held_by_this_install(p, read_state()):
+            q = pick_port(p, (ui_port(),))
+            _log(f"port {p} is taken by another program or another install's server; starting on port {q}, a free one")
+            p = q
     ui = ui_port()
     env = resolve_env()
+    if env["dev"] and explicit_ui_port() is None and not port_free(ui) and not own_vite(read_state(), ui):
+        q = pick_port(ui, (p,))
+        _log(f"UI port {ui} is taken by another program or another install's Vite; Vite starts on port {q}, a free one")
+        ui = q
     environ = _server_environ(env, p, ui)
     if rotate_log(log_path()):
         _log(f"the previous log passed {human_bytes(LOG_ROTATE_BYTES)} and was moved to {log_path().name}.1")
@@ -681,6 +736,13 @@ def start(p: int | None = None) -> dict[str, Any]:
     }
     write_state(state)
     return state
+
+
+def own_vite(st: dict[str, Any], ui: int) -> bool:
+    """Whether the Vite server.json names runs on port `ui` (its command line names `vite` and `--port <ui>`): start
+    keeps that port and that Vite."""
+    vite = st.get("vite_pid")
+    return bool(vite) and pid_alive(vite) and argv_check("vite", f"--port {ui}")(int(vite)) is None
 
 
 def start_vite(ui: int, p: int, environ: dict[str, str] | None = None) -> int | None:
@@ -1036,9 +1098,11 @@ def starting(url: str) -> bool:
 
 def ensure_running(wait_s: float) -> bool:
     """Health, then under the lock start if still unhealthy and wait. Restarts Vite in dev mode when only it is down,
-    and a healthy server whose source changed since it started (auto_restart)."""
+    and a healthy server whose source changed since it started (auto_restart). Another install's server on the port is
+    not this install's (serves): start passes over the port then, and once more when another server took the free port
+    it chose before the new server bound it. The server is at api_url() after it returns."""
     url = api_url()
-    if healthy(url):
+    if serves(url):
         with lock():
             reconcile()
         verdict = auto_restart(url, wait_s)
@@ -1055,12 +1119,28 @@ def ensure_running(wait_s: float) -> bool:
         return True
     with lock():
         reconcile()
+        url = api_url()
         spawned = None
-        if not healthy(url) and not starting(url):
+        if not serves(url) and not starting(url):
             spawned = start().get("pid")
+            url = api_url()
         up = wait_healthy(url, wait_s, spawned)
+        if not up and spawned and lost_port(int(spawned)):
+            _log(f"another process took port {LAST_START.get('port')} before the server bound it; starting again")
+            spawned = start().get("pid")
+            url = api_url()
+            up = wait_healthy(url, wait_s, spawned)
         reconcile()  # a uvicorn that could not bind the port leaves no dead pid; the server answering is adopted
         return up
+
+
+def lost_port(spawned: int) -> bool:
+    """Whether the server `start` spawned as `spawned` exited because another process took its port, a free one when
+    start looked (a second install starting at the same moment): without THIMBLE_PORT a second start then picks again."""
+    p = int(LAST_START.get("port") or 0)
+    if explicit_port() is not None or not p or LAST_START.get("pid") != spawned or not spawned_exited(spawned):
+        return False
+    return listening(p) and procs.listener(p) != spawned
 
 
 # ----------------------------------------------------------------------------- source fingerprint, auto-restart
@@ -1190,30 +1270,18 @@ def spawn_restart() -> int:
     """`thimble restart --keep-vite --yes` as a detached session leader, so the restart outlives the caller; busy_reason
     has found the server idle, so it asks nothing. Seam for tests."""
     env = config.passed_environ()
-    env.update({"THIMBLE_HOME": str(home()), "THIMBLE_PORT": str(port())})
+    env["THIMBLE_HOME"] = str(home())
+    if explicit_port() is not None:  # else the restart reads the port from server.json, and may pass over it (start)
+        env["THIMBLE_PORT"] = str(explicit_port())
     return spawn([sys.executable, "-m", "app.cli", "restart", "--keep-vite", "--yes"], cwd=BACKEND_DIR, env=env,
                  log_file=log_path())
 
 
 def running_work(url: str) -> list[str]:
-    """What a restart of the server at `url` would interrupt, one line each: the sessions it runs and the views it builds
-    (`GET /api/sessions/running`), then the dev ticket it runs. Empty when nothing runs."""
-    lines: list[str] = []
-    status, body = _request("GET", f"{url}/api/sessions/running", timeout=5.0)
-    if status == 200 and isinstance(body, list):
-        for item in body:
-            if not isinstance(item, dict):
-                continue
-            kind = str(item.get("kind") or "")
-            what = RUNNING_KINDS.get(kind, kind or "a session")
-            if kind == "orient":
-                what += f" (follow-up {item['run']})" if int(item.get("run") or 0) > 0 else ""
-            elif item.get("title"):
-                what += f" \"{item['title']}\""
-            lines.append(f"{item.get('workspace')}: {what}{'' if item.get('resumes') else RUNNING_ENDS}")
-    else:
-        names = _workspace_names(Path(resolve_env()["workspaces_dir"]))
-        lines.extend(f"{c}: {RUNNING_KINDS['orient']}" for c in names if orient_status(c) == "running")
+    """What a restart of the server at `url` would interrupt, one line each: the orientations whose run.json says they
+    run, then the dev ticket the server runs (`GET /api/dev/status`). Empty when nothing runs."""
+    names = _workspace_names(Path(resolve_env()["workspaces_dir"]))
+    lines = [f"{c}: {RUNNING_ORIENT}" for c in names if orient_status(c) == "running"]
     status, body = _request("GET", f"{url}/api/dev/status", timeout=3.0)
     if status == 200 and isinstance(body, dict) and body.get("running"):
         cur = body.get("current") if isinstance(body.get("current"), dict) else {}
@@ -1355,13 +1423,65 @@ def open_workspace(cwd: Path, data_dir: Path, url: str | None, *, here: bool = F
     return None, False
 
 
-def ui_url(name: str | None, key: bool = True) -> str:
-    """The UI port in dev mode (its own Vite), else the API port where the built UI is served, with `key` the key that
-    lets the page answer permission requests and change permission modes (hook_auth.claim)."""
+PAIR_TIMEOUT_S = 3.0
+PAIRED_FILE = "paired.json"  # in <home>: the hashes of the browsers signed in (hook_auth.PAIRED_FILE)
+NO_CODE_LINE = ("thimble: the server gave no sign-in code, so this link opens thimble read-only in a browser that is "
+                "not signed in yet; see {log}.")
+UNPAIRED_LINE = ("thimble: every browser is signed out of thimble. To sign one in again, open the link /thimble shows, "
+                 "or run `thimble up` in a shell.")
+UNPAIR_FAILED_LINE = ("thimble: the server did not sign the browsers out ({why}), so they stay signed in until it "
+                      "restarts. In a shell: thimble server restart")
+
+
+def pair_code(api: str, name: str | None) -> str:
+    """A one-time sign-in code for a browser from the server at `api` (`POST /api/ui/pair`, which needs the token:
+    hook_auth.mint), for workspace `name`; a newer code for the same workspace voids it. '' when the server gives none,
+    which is logged."""
+    status, body = _request("POST", f"{api}/api/ui/pair", {"ws": name} if name else {}, timeout=PAIR_TIMEOUT_S)
+    code = body.get("code") if status == 200 and isinstance(body, dict) else None
+    if isinstance(code, str) and code:
+        return code
+    _log(f"no sign-in code from {api}: {status} {str(body)[:200]}")
+    return ""
+
+
+def ui_url(name: str | None, pair: bool = False) -> str:
+    """The UI port in dev mode (its own Vite), else the API port where the built UI is served, and with `pair` a
+    one-time sign-in code after `#p=` (hook_auth.mint, pair_code), which the page trades for the browser's cookie. The
+    URL without a code when the server gives none."""
     st = read_state()
     base = str(st.get("url") or api_url())
-    k = f"#k={st['ui_key']}" if key and st.get("ui_key") else ""
-    return f"{base}/?ws={name}{k}" if name else f"{base}/{k}"
+    url = f"{base}/?ws={name}" if name else f"{base}/"
+    code = pair_code(str(st.get("api") or api_url()), name) if pair else ""
+    return f"{url}#p={code}" if code else url
+
+
+def browser_cookie(url: str | None = None) -> str:
+    """A browser's sign-in, for scripts (scripts/dev/precache_orientation.py, scripts/e2e): a code from the server at
+    `url` (pair_code), traded at `POST /api/ui/key` with no token, as a browser trades it; the cookie it sets with the
+    path of the browser's key it is scoped to (hook_auth.browser_path), as `name=value; Path=/b/<key>/api/` for
+    _request's `cookie` (browser_request). Each call is a new sign-in, with its terminal line and notice. RuntimeError
+    when the server gives no code or no cookie."""
+    base = url or api_url()
+    code = pair_code(base, None)
+    if not code:
+        raise RuntimeError(f"the server at {base} gave no sign-in code; see {log_path()}")
+    req = urllib.request.Request(f"{base}/api/ui/key", data=json.dumps({"code": code}).encode(), method="POST",
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with config.LOOPBACK.open(req, timeout=PAIR_TIMEOUT_S) as r:
+            set_cookies = r.headers.get_all("Set-Cookie") or []
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"the server at {base} refused the sign-in code ({e.code})") from None
+    except OSError as e:
+        raise RuntimeError(f"the server at {base} did not answer the sign-in: {e}") from None
+    for raw in set_cookies:  # the cookie, beside the deletion of one an earlier build scoped to /api/
+        pair, _, attrs = raw.partition(";")
+        name, _, value = pair.strip().partition("=")
+        path = next((a.strip()[5:] for a in attrs.split(";") if a.strip().lower().startswith("path=")), "")
+        if name and value and path.startswith("/b/"):
+            return f"{name}={value}; Path={path}"
+    raise RuntimeError(f"the server at {base} set no cookie for the sign-in")
 
 
 def leave_link(session: str, url: str, notes: "list[str] | tuple[str, ...]" = ()) -> bool:
@@ -1376,6 +1496,36 @@ def leave_link(session: str, url: str, notes: "list[str] | tuple[str, ...]" = ()
         _log(f"the link for session {session} was not left: {e}")
         return False
     return bool(name)
+
+
+def active_keys(cwd: Path | str) -> list[str]:
+    """The marker names of the folder `cwd` (mark_active): its path as given and its real path, each with every `/`
+    replaced by `%`, as the watcher spells $CLAUDE_PROJECT_DIR; a name longer than ACTIVE_KEY_MAX is left out."""
+    given = os.path.abspath(str(cwd))
+    paths = dict.fromkeys([given, os.path.realpath(given)])
+    return [k for k in (p.replace("/", "%") for p in paths) if len(k) <= ACTIVE_KEY_MAX]
+
+
+def mark_active(cwd: Path | str) -> None:
+    """Mark the folder `cwd` as one thimble opened: an empty file, mode 600, for each of active_keys in <home>/active
+    (config.private_dir), which the plugin's watcher looks for. Never raises; a failure is logged."""
+    try:
+        d = config.private_dir(ensure_home() / ACTIVE_DIR)
+        for key in active_keys(cwd):
+            fd = os.open(d / key, os.O_WRONLY | os.O_CREAT, 0o600)
+            os.close(fd)
+            os.chmod(d / key, 0o600)
+    except OSError as e:
+        _log(f"the folder {cwd} was not marked active: {e}")
+
+
+def unmark_active(cwd: Path | str) -> None:
+    """Remove the folder `cwd`'s markers (mark_active), as `thimble purge` does. Never raises; a failure is logged."""
+    try:
+        for key in active_keys(cwd):
+            (home() / ACTIVE_DIR / key).unlink(missing_ok=True)
+    except OSError as e:
+        _log(f"the folder {cwd}'s active marker was not removed: {e}")
 
 
 def to_terminal() -> bool:
@@ -1481,21 +1631,13 @@ def monitor_lines(cwd: Path, session: str) -> list[str]:
     if cc_plugin.route(cwd, plugin_root()) != cc_plugin.MONITOR:
         return []
     watcher = shlex.join([str(plugin_root() / WATCHER), "--stream", "--cwd", str(cwd), "--session", session])
-    fenced = os.environ.get(cc_plugin.FENCE_MARK, "").strip() == "1"
-    return [MONITOR_NOTE_FENCED if fenced else MONITOR_NOTE, f"{MONITOR_MARK} {watcher}"]
+    return [MONITOR_NOTE, f"{MONITOR_MARK} {watcher}"]
 
 
 def launched() -> bool:
     """Whether the `thimble` launcher started this session, and so appended main's prompt to its system prompt: it
     exports LAUNCHED_ENV."""
     return bool(os.environ.get(LAUNCHED_ENV))
-
-
-def fenced_here(cwd: Path) -> bool:
-    """Whether the `claude` process this command runs under (cc_plugin.claude_pid) runs inside thimble's fence, read
-    from its command line (cc_plugin.fenced_argv); False when there is none."""
-    pid = cc_plugin.claude_pid()
-    return bool(pid) and cc_plugin.fenced_argv(procs.argv(pid), procs.cwd(pid) or cwd)
 
 
 def plugin_root() -> Path:
@@ -1505,15 +1647,26 @@ def plugin_root() -> Path:
 
 PLUGIN_LIST_TIMEOUT_S = 10.0
 COPY_IGNORED = ("__pycache__", ".DS_Store")  # what running or browsing a plugin copy adds to it
+# files of plugin/ a release leaves out of the plugin's copy, or Claude Code's cache does not keep, which say nothing of
+# whether two copies run the same code: the module's tests, its type declarations and their TypeScript config
+COPY_LEFT_OUT = ("hooks/thimble.test.ts", ".claude-plugin/types", "tsconfig.json")
+PLUGIN_DIFFERS_LINE = ("thimble: Claude Code's thimble plugin (thimble@{name} {version}) differs from this install's, so "
+                       "this session also loads this install's copy. To update it: claude plugin marketplace update "
+                       "{name} && claude plugin update thimble@{name}")
+LAUNCH_NOTES: list[str] = []  # lines installed_copy leaves for the launch's note line
 
 
 def _plugin_files(root: Path) -> dict[str, tuple[bytes, bool]]:
-    """Each file under `root` but COPY_IGNORED: its path relative to `root` → (its bytes, whether it is executable)."""
+    """Each file under `root` but COPY_IGNORED and COPY_LEFT_OUT: its path relative to `root` → (its bytes, whether it
+    is executable)."""
     out: dict[str, tuple[bytes, bool]] = {}
     for p in root.rglob("*"):
         rel = p.relative_to(root)
-        if p.is_file() and not any(part in COPY_IGNORED for part in rel.parts) and p.suffix != ".pyc":
-            out[rel.as_posix()] = (p.read_bytes(), os.access(p, os.X_OK))
+        name = rel.as_posix()
+        if (not p.is_file() or any(part in COPY_IGNORED for part in rel.parts) or p.suffix == ".pyc"
+                or any(name == x or name.startswith(f"{x}/") for x in COPY_LEFT_OUT)):
+            continue
+        out[name] = (p.read_bytes(), os.access(p, os.X_OK))
     return out
 
 
@@ -1525,6 +1678,21 @@ class Installed(NamedTuple):
     marketplace: str
 
 
+class PluginFacts(NamedTuple):
+    """The thimble plugin Claude Code has (plugin_facts): its marketplace ('' when none is added), its version, whether
+    it is on, whether it is this install's (a directory marketplace at this tree, or a cache copy that finds this tree),
+    the folder it runs from, whether its files equal this tree's plugin/, and the folder of the install it finds when it
+    is another's."""
+
+    marketplace: str = ""
+    version: str = ""
+    enabled: bool = False
+    ours: bool = False
+    root: Path | None = None
+    same: bool = False
+    other: str = ""
+
+
 def _claude_json(claude: str, args: list[str], cwd: Path) -> list[Any]:
     """The list a `claude ... --json` listing prints, [] when it fails or prints something else."""
     r = subprocess.run([claude, *args, "--json"], cwd=cwd, capture_output=True, text=True,
@@ -1533,48 +1701,111 @@ def _claude_json(claude: str, args: list[str], cwd: Path) -> list[Any]:
     return out if isinstance(out, list) else []
 
 
-def installed_copy(cwd: Path) -> Installed | None:
-    """The copy of this tree's plugin that Claude Code has installed and enables for `cwd` (`claude plugin list --json`),
-    which every session loads already, so the launcher adds no copy of plugin/ with --plugin-dir. When the marketplace is
-    a directory source at this tree, plugin/ itself is the copy; otherwise the cache copy counts when it matches plugin/
-    and finds this tree. None when there is no such copy, it is disabled, or anything fails."""
+def _app_dir(root: Path) -> str:
+    """The thimble folder a plugin copy at `root` finds (its bin/thimble-app-dir), '' when it finds none."""
+    found = subprocess.run([str(root / "bin" / "thimble-app-dir")], capture_output=True, text=True,
+                           timeout=PLUGIN_LIST_TIMEOUT_S, stdin=subprocess.DEVNULL, check=False)
+    return found.stdout.strip() if found.returncode == 0 else ""
+
+
+def own_version() -> str:
+    """This install's plugin version (plugin/.claude-plugin/plugin.json), '' when it cannot be read."""
+    rec = _read_json(PLUGIN_DIR / ".claude-plugin" / "plugin.json")
+    return str(rec.get("version") or "") if isinstance(rec, dict) else ""
+
+
+def plugin_facts(cwd: Path) -> PluginFacts | None:
+    """Which thimble plugin Claude Code has for `cwd` (`claude plugin list --json` and `claude plugin marketplace list
+    --json`), any `thimble@*`: this install's that is on first, then another's that is on, then this install's, then
+    another's; PluginFacts() when none is added. None when `claude` is not found or the listing fails."""
+    claude = shutil.which("claude")
+    if not claude:
+        return None
     try:
-        name = config.marketplace_name()
-        claude = shutil.which("claude")
-        if not name or not claude:
-            return None
-        listed = _claude_json(claude, ["plugin", "list"], cwd)
-        if not any(isinstance(p, dict) and p.get("id") == f"{PLUGIN_NAME}@{name}" and p.get("enabled") is True
-                   for p in listed):
-            return None
-        for m in _claude_json(claude, ["plugin", "marketplace", "list"], cwd):
-            if isinstance(m, dict) and m.get("name") == name and m.get("source") == "directory":
-                source = Path(str(m.get("path") or ""))
-                if source.is_absolute() and source.resolve() == config.REPO_ROOT.resolve():
-                    return Installed(PLUGIN_DIR.resolve(), name)
+        listed = [p for p in _claude_json(claude, ["plugin", "list"], cwd)
+                  if isinstance(p, dict) and str(p.get("id") or "").startswith(f"{PLUGIN_NAME}@")]
+        if not listed:
+            return PluginFacts()
+        dirs = {str(m.get("name")): Path(str(m.get("path") or "")) for m in
+                _claude_json(claude, ["plugin", "marketplace", "list"], cwd)
+                if isinstance(m, dict) and m.get("source") == "directory"}
+        here = config.REPO_ROOT.resolve()
+        found: list[PluginFacts] = []
         for p in listed:
-            if not (isinstance(p, dict) and p.get("id") == f"{PLUGIN_NAME}@{name}" and p.get("enabled") is True):
+            mp = str(p["id"]).split("@", 1)[1]
+            facts = {"marketplace": mp, "version": str(p.get("version") or ""), "enabled": p.get("enabled") is True}
+            source = dirs.get(mp)
+            if source is not None and source.is_absolute() and source.resolve() == here:
+                found.append(PluginFacts(**facts, ours=True, root=PLUGIN_DIR.resolve(), same=True))
                 continue
             root = Path(str(p.get("installPath") or ""))
-            if not (root.is_absolute() and root.is_dir()) or cc_plugin.marketplace(root) != name:
-                continue
-            found = subprocess.run([str(root / "bin" / "thimble-app-dir")], capture_output=True, text=True,
-                                   timeout=PLUGIN_LIST_TIMEOUT_S, stdin=subprocess.DEVNULL, check=False)
-            if found.returncode != 0 or Path(found.stdout.strip()).resolve() != config.REPO_ROOT.resolve():
-                continue
-            if _plugin_files(root) == _plugin_files(PLUGIN_DIR):
-                return Installed(root.resolve(), name)
+            app = _app_dir(root) if root.is_absolute() and root.is_dir() else ""
+            if app and Path(app).resolve() == here:
+                found.append(PluginFacts(**facts, ours=True, root=root.resolve(),
+                                         same=_plugin_files(root) == _plugin_files(PLUGIN_DIR)))
+            else:
+                found.append(PluginFacts(**facts, root=root if root.is_absolute() else None,
+                                         other=app or (str(source) if source else str(root))))
     except (OSError, ValueError, subprocess.SubprocessError):
         return None
+    return min(found, key=lambda f: (not f.enabled, not f.ours))
+
+
+def installed_copy(cwd: Path) -> Installed | None:
+    """The copy of this tree's plugin that Claude Code has installed and enables for `cwd` (plugin_facts), which every
+    session loads already, so the launcher adds no copy of plugin/ with --plugin-dir: plugin/ itself for a directory
+    marketplace at this tree, else a cache copy that finds this tree and whose files equal plugin/'s. When that copy's
+    files differ it returns None, so the launcher loads plugin/ too, and leaves PLUGIN_DIFFERS_LINE in LAUNCH_NOTES.
+    None when there is no such copy, it is off, or anything fails."""
+    facts = plugin_facts(cwd)
+    if facts is None or not (facts.ours and facts.enabled and facts.root is not None):
+        return None
+    if facts.same:
+        return Installed(facts.root, facts.marketplace)
+    LAUNCH_NOTES.append(PLUGIN_DIFFERS_LINE.format(name=facts.marketplace, version=facts.version or "?"))
     return None
 
 
-def name_session(url: str, name: str, session: str, cwd: Path) -> str | None:
-    """Tell the server which Claude Code session asked (`POST /api/ws/{c}/session`). Returns the session this one took main
-    over from while it still runs in another terminal, else None."""
+def plugin_add_commands() -> str:
+    """The commands that add this install's plugin to Claude Code, as install.sh runs them."""
+    return (f"claude plugin marketplace add {config.REPO_ROOT} && claude plugin install --scope user "
+            f"{PLUGIN_NAME}@{config.marketplace_name() or PLUGIN_NAME}")
+
+
+def plugin_line(cwd: Path, commands: bool = True, facts: PluginFacts | None = None) -> str:
+    """The doctor's plugin line: which thimble plugin Claude Code has (plugin_facts), and with `commands` the commands
+    that fix it."""
+    facts = plugin_facts(cwd) if facts is None else facts
+    if facts is None:
+        return "not checked: `claude plugin list --json` did not answer"
+    if not facts.marketplace:
+        return (f"not added: bash {config.REPO_ROOT / 'scripts' / 'install.sh'}, or {plugin_add_commands()}" if commands
+                else "not added to Claude Code")
+    name = f"{PLUGIN_NAME}@{facts.marketplace} {facts.version}".rstrip()
+    if not facts.ours:
+        switch = (f"; to use this install's: claude plugin uninstall {PLUGIN_NAME}@{facts.marketplace} && "
+                  f"{plugin_add_commands()}" if commands else "")
+        return f"{name}, {'on' if facts.enabled else 'off'}, from another install ({facts.other}){switch}"
+    if not facts.same:
+        mine = own_version()
+        what = (f"version {facts.version} differs from this install's {mine}" if facts.version != mine else
+                f"{name}'s files differ from this install's")
+        return (f"{what}: claude plugin marketplace update {facts.marketplace} && claude plugin update "
+                f"{PLUGIN_NAME}@{facts.marketplace}" if commands else what)
+    return f"{name}, on, this install's" if facts.enabled else f"{name}, off (/plugin turns it on)"
+
+
+def name_session(url: str, name: str, session: str, cwd: Path, sandbox: bool | None = None,
+                 warnings: "list[str] | tuple[str, ...]" = ()) -> str | None:
+    """Tell the server which Claude Code session asked (`POST /api/ws/{c}/session`), whether Claude Code's own sandbox
+    is on in it (`sandbox`, own_sandbox_here; None when not known) and the keys of what its environment lacks
+    (`warnings`, setup_warnings), whose words the server writes. Returns the session this one took main over from while
+    it still runs in another terminal, else None."""
+    body: dict[str, Any] = {"session": session, "cwd": str(cwd), "warnings": list(warnings)}
+    if sandbox is not None:
+        body["sandbox"] = sandbox
     try:
-        status, body = _request("POST", f"{url}/api/ws/{urllib.parse.quote(name)}/session",
-                                {"session": session, "cwd": str(cwd)}, timeout=3.0)
+        status, body = _request("POST", f"{url}/api/ws/{urllib.parse.quote(name)}/session", body, timeout=3.0)
         if status != 200:
             _log(f"session {session} for {name}: {status} {str(body)[:200]}")
             return None
@@ -1583,6 +1814,83 @@ def name_session(url: str, name: str, session: str, cwd: Path) -> str | None:
     except Exception as e:  # noqa: BLE001 — never a traceback in the skill text
         _log(f"session {session} for {name}: {type(e).__name__}: {e}")
         return None
+
+
+# What /thimble says about a session the launcher did not start, which lacks what the launcher gives main: a line for
+# each of UNSET_VARS its environment or its Claude Code settings set, and one for a shell proxy that no NO_PROXY keeps
+# off 127.0.0.1. The model relays these lines, and the Stop hook shows them under the reply too (leave_link's notes);
+# the server posts a `setup` notice for each key (setup_warnings), in words it writes itself (notices.setup_text).
+SETUP_ENV_LINE = ("thimble: {name} is set in this session, so thimble's agents may not run on the models and efforts "
+                  "Settings name. To fix it, quit, unset it and start claude again, or start with `thimble`, which "
+                  "unsets it.")
+SETUP_PROXY_LINE = ("thimble: your shell sets a proxy, so thimble's plugin may not reach thimble's server. Quit, add "
+                    "127.0.0.1 and localhost to NO_PROXY, and start claude again.")
+PROXY_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")
+NO_PROXY_VARS = ("NO_PROXY", "no_proxy")
+LOOPBACK_NAMES = ("127.0.0.1", "localhost", "*")  # a NO_PROXY entry that keeps thimble's requests off the proxy
+PROXY_KEY = "proxy"  # setup_warnings' key for the proxy; `env:<NAME>` for a variable
+
+
+def env_set_here(cwd: Path) -> list[str]:
+    """The UNSET_VARS a session in `cwd` has: set in this process's environment (the session's), or by an `env` block
+    of the analyst's Claude Code settings (cc_settings.settings_env), '' counting as unset."""
+    from . import cc_settings  # noqa: PLC0415
+
+    return [name for name in UNSET_VARS
+            if os.environ.get(name, "").strip() or (cc_settings.settings_env(cwd, name) or "").strip()]
+
+
+def proxy_unsafe() -> bool:
+    """Whether this session's environment sets an HTTP proxy and no NO_PROXY or no_proxy names 127.0.0.1 or localhost,
+    so a request of the plugin's to thimble's server could go to the proxy. NO_PROXY and no_proxy are read as the
+    session gave them to this process (config.GIVEN_NO_PROXY), since config adds 127.0.0.1 to both as it loads."""
+    if not any(os.environ.get(name, "").strip() for name in PROXY_VARS):
+        return False
+    named = {part.strip().lower() for name in NO_PROXY_VARS for part in config.GIVEN_NO_PROXY.get(name, "").split(",")}
+    return not named & set(LOOPBACK_NAMES)
+
+
+def setup_warnings(cwd: Path) -> list[str]:
+    """The keys of setup_lines' cases for the server's `setup` notices: `env:<NAME>` and `proxy`; [] in a session the
+    launcher started, which unsets the variables and keeps loopback requests off the proxy."""
+    if launched():
+        return []
+    return [*(f"env:{name}" for name in env_set_here(cwd)), *([PROXY_KEY] if proxy_unsafe() else [])]
+
+
+def setup_lines(cwd: Path) -> list[str]:
+    """What /thimble prints, and leaves for the Stop hook, for setup_warnings' cases; [] in a session the launcher
+    started."""
+    if launched():
+        return []
+    return [*(SETUP_ENV_LINE.format(name=name) for name in env_set_here(cwd)),
+            *([SETUP_PROXY_LINE] if proxy_unsafe() else [])]
+
+
+def _sandbox_on(d: Any) -> bool:
+    box = d.get("sandbox") if isinstance(d, dict) else None
+    return isinstance(box, dict) and box.get("enabled") is True
+
+
+def own_sandbox_set(cwd: Path) -> bool:
+    """Whether Claude Code's own sandbox is turned on for the session this command runs in, or for a session in `cwd`:
+    by the analyst's settings for `cwd` (cc_settings.own_sandbox), the `--settings` of this session's `claude`
+    (cc_plugin.settings_arg) or the org's managed settings (cc_plugin.managed)."""
+    from . import cc_settings  # noqa: PLC0415
+
+    if cc_settings.own_sandbox(cwd):
+        return True
+    pid = cc_plugin.claude_pid()
+    flags = cc_plugin.settings_arg(procs.argv(pid), cwd) if pid else None
+    return _sandbox_on(flags) or _sandbox_on(cc_plugin.managed())
+
+
+def own_sandbox_here(cwd: Path) -> bool:
+    """Whether Claude Code's own sandbox runs in this session: it can run on this machine (cc_settings.sandbox_ok) and
+    it is turned on (own_sandbox_set). thimble neither needs it nor turns it on; Settings and the doctor say which."""
+    from . import cc_settings  # noqa: PLC0415
+
+    return cc_settings.sandbox_ok() and own_sandbox_set(cwd)
 
 
 def agent_definition(name: str) -> tuple[str, dict[str, Any]]:
@@ -1658,16 +1966,14 @@ def main_choice(cwd: Path) -> dict[str, Any]:
     return main if isinstance(main, dict) else {}
 
 
-def launch_settings(cwd: Path, given: str = "", fence: dict[str, Any] | None = None,
-                    env: Mapping[str, str] | None = None) -> str:
+def launch_settings(cwd: Path, given: str = "", env: Mapping[str, str] | None = None) -> str:
     """The one `--settings` value the launcher passes main, since Claude Code reads only the last one: the analyst's own
     `given` (inline JSON, or a file relative to `cwd`) with thimble's statusline, chained to theirs (from `given`, else
     their own settings, cc_settings.own_statusline) at their refresh interval, and the composer's fast mode and
-    ultracode where they name none, and thimble's `fence` joined in (main_fence, with_fence). Its `env` holds UNSET_VARS
-    each as '', fenced or not: Claude Code reads an empty value as unset, and --settings rank above the analyst's own
-    settings files, so an `env` block there that sets one cannot override the agents' efforts and models either, as the
-    launcher's unset line keeps their shell's from it (BLANKED_LINE). `env` joins its `env` too: terminal mode's
-    terminal_env. `given` as it is when it cannot be read."""
+    ultracode where they name none. Its `env` holds UNSET_VARS each as '': Claude Code reads an empty value as unset,
+    and --settings rank above the analyst's own settings files, so an `env` block there that sets one cannot override
+    the agents' efforts and models either, as the launcher's unset line keeps their shell's from it (BLANKED_LINE).
+    `env` joins its `env` too: terminal mode's terminal_env. `given` as it is when it cannot be read."""
     from . import cc_settings, tray  # noqa: PLC0415
 
     own: Any = {}
@@ -1677,8 +1983,8 @@ def launch_settings(cwd: Path, given: str = "", fence: dict[str, Any] | None = N
         except (OSError, ValueError):
             own = None
         if not isinstance(own, dict):
-            print(f"thimble: WARNING - --settings {given} could not be read, so thimble's statusline and sandbox are "
-                  "left out", file=sys.stderr)
+            print(f"thimble: WARNING - --settings {given} could not be read, so thimble's statusline is left out",
+                  file=sys.stderr)
             return given.replace("\n", " ")
     line = own.get("statusLine")
     theirs = line if isinstance(line, dict) and isinstance(line.get("command"), str) else cc_settings.own_statusline()
@@ -1691,7 +1997,7 @@ def launch_settings(cwd: Path, given: str = "", fence: dict[str, Any] | None = N
         out.setdefault("ultracode", True)
     out["env"] = {**(out.get("env") if isinstance(out.get("env"), dict) else {}), **{name: "" for name in UNSET_VARS},
                   **(env or {})}
-    return json.dumps(with_fence(out, fence or {}))
+    return json.dumps(out)
 
 
 def workspace_name(cwd: Path) -> str:
@@ -1712,38 +2018,23 @@ def main_name(cwd: Path) -> str:
     return config.session_name("main", workspace_name(cwd))
 
 
-# --------------------------------------------------------------------------- main's fence
+# --------------------------------------------------------------------------- launch.json and terminal mode
 #
-# The launcher starts main inside thimble's fence (main_fence), through main's --settings, and every subagent main
-# starts, thimble's agents among them, inherits it, so one fence holds main and its agents: Claude Code's Bash sandbox
-# on with no command outside it, writes only in the agents' work folders (write_dirs) and Claude Code's own temp folder,
-# the corpus and the workspace's config not writable, thimble's token files and the links folder unreadable, the
-# network as the orientation's `network` says, and the permission rules of userconf.main_rules: an edit of the corpus or
-# of thimble's config asks, the web tools as `web` says, thimble's records not edited. Installs follow Claude Code's
-# permission mode. The fence's `env` carries cc_plugin.FENCE_MARK, which the server reads from main's command line
-# (cc_plugin.main_fenced). Every sandbox path is a folder or a file, at most with a trailing `/**`: on Linux Claude Code
-# drops any other glob without a warning (spike U19). Without the sandbox (thimble's config's `sandbox.use` "never", or
-# a machine where it cannot run) main starts without the fence, and the launch says so (NO_FENCE_LINES).
-#
-# The launch also writes launch.json in the workspace (LAUNCH_FILE, launch_record): main's session id, whether main is
-# fenced, the switches the launcher exports, the variables it unsets, and the launcher's own pid, which the launcher
-# replaces with main's `claude` process as it starts it (the mode line names the file). The hooks module's bridge accepts a hello only from that session
-# (module_bridge), reading from that pid's command line whether main is fenced, and `doctor` reads it. It also records
+# The launch writes launch.json in the workspace (LAUNCH_FILE, launch_record): main's session id, the switches the
+# launcher exports, the variables it unsets, and the launcher's own pid, which the launcher replaces with main's
+# `claude` process as it starts it (the mode line names the file). /thimble in a session the launcher did not start
+# writes it too, with `via: skill`, that session's `claude` process and its Claude Code config folder (cmd_ensure). The
+# hooks module's bridge accepts a hello only from that session (module_bridge), and `doctor` reads it. It also records
 # the mode the folder starts in (launch_mode.resolve), which every other process of the session reads from there
 # (launch_mode.session_mode).
 #
-# Terminal mode: the same session, the same fence and main's same prompt, with no server and no first prompt. The
-# launcher adds the renderer plugin (TERMINAL_RENDERER), which draws thimble's work in the terminal, and the
-# `--allowedTools` rule for the card runner (CARD_RUNNER), which runs a card's code in main's Bash; the fence lets main's
-# Bash write the card folders (card_dirs); main's --settings `env` and the launcher's exports carry terminal_env; and
-# launch-args writes the hooks module's roles file (write_roles), since no server hands it the roles.
+# Terminal mode: the same session and main's same prompt, with no server and no first prompt. The launcher adds the
+# renderer plugin (TERMINAL_RENDERER), which draws thimble's work in the terminal; main's Bash runs a card's code through
+# the card runner (CARD_RUNNER), which Claude Code's permission mode decides on as for any command; main's --settings
+# `env` and the launcher's exports carry terminal_env; and launch-args writes the hooks module's roles file
+# (write_roles), since no server hands it the roles.
 
-# the folders main's Bash may write, under the workspace (subagents.write_dirs, which this list stands in for until the
-# subagent paths are in): the orientation's work folder, the writers', the critics', the checks', the view builders',
-# the workspace's own views and the custom cards' npm packages (card_libs.FOLDER). The code tickets' worktrees are
-# outside the workspace (ticket_trees).
-WRITE_DIRS = ("orient/work", "writers", "critique-work", "check-work", "views-work", "extension/views", "card-libs")
-LAUNCH_FILE = "trusted/launch.json"  # in the workspace (subagent_files): {session, at, fenced, switches, unset, pid, modules_off, mode}
+LAUNCH_FILE = "trusted/launch.json"  # in the workspace (subagent_files): {session, at, switches, unset, pid, modules_off, mode, via, config_dir}
 TERMINAL_RENDERER = "mods/thimble-term"  # under the tree: the plugin `thimble-term` that draws thimble's work in the terminal
 RENDERER_NAME = "thimble-term"
 CARD_RUNNER = "bin/thimble-run"  # under the plugin copy: runs a card's code in the caller's Bash (`thimble-run card <cell>`)
@@ -1753,9 +2044,9 @@ NO_RENDERER_LINE = ("thimble: WARNING - terminal mode's renderer cannot load ({w
                     "browser workspace instead.")
 OPEN_ELSEWHERE_LINE = "thimble: This workspace is open in {mode} mode in another terminal. Quit that session first."
 LAUNCH_REFUSED_EXIT = 3  # launch-args' exit when the launch is refused (open_elsewhere); the launcher prints nothing more
-# exported into main's environment: no "Move to background" and no ← agent view, the ↓ tray kept (spike U11);
-# CLAUDE_DISABLE_ADOPT adds nothing to the first but does no harm
-SWITCHES = {"CLAUDE_CODE_DISABLE_AGENT_VIEW": "1", "CLAUDE_DISABLE_ADOPT": "1"}
+# exported into main's environment: no "Move to background" and no ← agent view, the ↓ tray kept, since moving a thimble
+# agent to the background takes it out of main's process (spike U11)
+SWITCHES = {"CLAUDE_CODE_DISABLE_AGENT_VIEW": "1"}
 NO_MODULE_ENV = "THIMBLE_NO_MODULE"  # set, main starts with thimble's hooks module idle (the live checks' switch)
 EFFORT_ENV = "CLAUDE_CODE_EFFORT_LEVEL"
 # unset for main and so for every agent it starts: the effort variable would override every agent's effort (spike m7),
@@ -1777,140 +2068,6 @@ SAFE_MODE_LINE = ("thimble: WARNING - Claude Code's safe mode is on (CLAUDE_CODE
                   "can't start. Run `thimble` without it.")
 MODULES_OFF_LINE = ("thimble's agents can't start in this session: Claude Code's hooks modules are off ({reason}). Main, "
                     "its threads, cards and labels still work.")
-NO_FENCE_LINES = {
-    "never": "thimble: WARNING - thimble's config turns the sandbox off (sandbox.use \"never\"), so main and thimble's "
-             "agents run without thimble's fence and can change your files.",
-    "missing": "thimble: WARNING - Claude Code's Bash sandbox can't run on this machine, so main and thimble's agents run "
-               "without thimble's fence and can change your files; `thimble doctor` says what is missing.",
-    "refused": "thimble: WARNING - thimble does not open this folder as a workspace (your home folder, /, or a folder it "
-               "could not register), so main runs without thimble's fence and thimble's agents cannot start here.",
-}
-
-
-def write_dirs(c: str) -> list[Path]:
-    """The folders main's Bash may write in workspace `c` (WRITE_DIRS): subagents.write_dirs once the subagent paths
-    are in, else this module's own list."""
-    try:
-        from . import subagents  # noqa: PLC0415 — the subagent paths, which import the session modules
-    except ImportError:
-        ws = config.WORKSPACES_DIR.resolve() / c
-        return [ws / d for d in WRITE_DIRS]
-    return [Path(p) for p in subagents.write_dirs(c)]
-
-
-def card_dirs(c: str) -> list[str]:
-    """The folders of workspace `c` the card runner writes in terminal mode (cardrun.write_dirs: the notebooks, their
-    outputs' side files, the labels and the card scripts), which main's fence lets main's Bash write there; [] in a
-    build without the card runner."""
-    try:
-        from . import cardrun  # noqa: PLC0415 — the card runner of terminal mode (the backend lane's)
-    except ImportError:
-        _log("launch-args: this build has no card runner (app/cardrun.py), so main's Bash may not write the card folders")
-        return []
-    return [str(d) for d in cardrun.write_dirs(c)]
-
-
-def fence_off(c: str | None) -> str:
-    """Why main starts without thimble's fence in workspace `c`: a key of NO_FENCE_LINES, `refused` for a folder `up`
-    refuses ($HOME or /) or one that could not be registered, or '' when it starts fenced."""
-    from . import cc_settings, userconf  # noqa: PLC0415
-
-    if not c:
-        return "refused"
-    box = userconf.load_or_defaults(c)[0]["sandbox"]
-    if box["use"] == "never":
-        return "never"
-    return "" if cc_settings.sandbox_ok() else "missing"
-
-
-def ticket_trees() -> list[Path]:
-    """The folder of the code tickets' worktrees in a development install (dev.worktrees_dir's rule, which this module
-    does not import), which main's fence lets main's Bash and its subagents write, a ticket's agent among them, and
-    which their Edit and Write tools reach (additionalDirectories); none in an installed copy."""
-    return [home() / "dev" / "trees"] if (config.REPO_ROOT / ".git").exists() else []
-
-
-def main_fence(cwd: Path, c: str | None = None, root: Path | None = None, session: str | None = None,
-               given: str = "", mode: str = launch_mode.BROWSER) -> dict[str, Any]:
-    """The --settings keys that put main, and every subagent it starts, inside thimble's fence for the corpus `cwd`,
-    workspace `c` (by default the one `cwd` is registered as), the plugin copy at `root`, main's session `session`
-    (module note, main's fence): `sandbox`, `permissions` (userconf.main_rules, and in a development install the code
-    tickets' worktrees as additionalDirectories, ticket_trees) and `env` (cc_plugin.FENCE_MARK). With the plugin's hooks off, /thimble's own command for SANDBOX_ACTIONS in that session and
-    the Monitor route's watcher command for it are let out of the sandbox, and no other (sandbox_rules, watch_rules);
-    `given` is the analyst's own --settings to the launcher, which may turn the hooks off (launch_hooks_blocked). In
-    terminal `mode` main's Bash may also write the card folders (card_dirs), where the card runner writes a card's
-    outputs. {} when fence_off says so. A config with an error fences main with the defaults' rules."""
-    from . import userconf  # noqa: PLC0415
-
-    c = c or config.workspace_for_cwd(str(cwd))
-    if fence_off(c):
-        return {}
-    assert c is not None
-    conf, _ = userconf.load_or_defaults(c)
-    main = userconf.agent_conf(conf, "orientation")
-    ws = config.WORKSPACES_DIR.resolve() / c
-    corpus = Path(os.path.realpath(config.corpus_dir(c)))
-    root = root or plugin_root()
-    excluded: list[str] = []
-    if launch_hooks_blocked(cwd, root, given):
-        # with the hooks off, the Monitor route's watcher must reach the server (spike U15), and /thimble's own command
-        # starts the server
-        excluded += [*watch_rules(root, cwd, session), *sandbox_rules(root, cwd, session)]
-    trees = [str(d) for d in ticket_trees()]
-    for tree in trees:
-        # Claude Code drops an additionalDirectories folder that does not exist as main starts, and the first ticket
-        # makes this one later, so outside auto mode a ticket's agent was asked about each Read of its worktree (live
-        # check L27 on 060-s4): the folder is made first
-        try:
-            Path(tree).mkdir(parents=True, exist_ok=True)
-        except OSError:
-            pass
-    cards = card_dirs(c) if mode == launch_mode.TERMINAL else []
-    fs = {"allowWrite": [*(str(d) for d in write_dirs(c)), *cards, *trees],
-          "denyWrite": [str(corpus), str(userconf.workspace_file(c)), str(ws / "settings.json")],
-          "denyRead": [*userconf.private_paths(), str(home() / LINKS_DIR)]}
-    box: dict[str, Any] = {"enabled": True, "failIfUnavailable": bool(conf["sandbox"]["enforce"]),
-                           "autoAllowBashIfSandboxed": False, "allowUnsandboxedCommands": False, "filesystem": fs,
-                           "excludedCommands": excluded}
-    if main.get("network") == "off":
-        box["network"] = {"deniedDomains": ["*"]}
-    perms: dict[str, list[str]] = {}
-    for rule in userconf.main_rules(c):
-        perms.setdefault(rule.behavior, []).append(rule.rule)
-    if trees:
-        perms["additionalDirectories"] = trees
-    return {"sandbox": box, "permissions": perms, "env": {cc_plugin.FENCE_MARK: "1"}}
-
-
-# the sandbox keys thimble's fence keeps whatever the analyst's own --settings say, since they would open it
-FENCE_KEYS = ("enabled", "allowUnsandboxedCommands")
-
-
-def with_fence(out: dict[str, Any], fence: dict[str, Any]) -> dict[str, Any]:
-    """`out` (main's --settings) with main_fence's keys joined in: each permission list and each sandbox list joined, the
-    analyst's own sandbox keys kept where they set one but FENCE_KEYS, the fence's `env` over theirs. `out` itself when
-    there is no fence."""
-    if not fence:
-        return out
-    merged = dict(out)
-    perms = dict(out.get("permissions") or {})
-    for key, rules in fence["permissions"].items():
-        perms[key] = list(dict.fromkeys([*(perms.get(key) or []), *rules]))
-    merged["permissions"] = perms
-    own_box = out.get("sandbox") if isinstance(out.get("sandbox"), dict) else {}
-    box = {**fence["sandbox"], **{k: v for k, v in own_box.items()
-                                  if k not in ("filesystem", "network", "excludedCommands", *FENCE_KEYS)}}
-    fs = dict(fence["sandbox"]["filesystem"])
-    for key, paths in (own_box.get("filesystem") or {}).items():
-        fs[key] = list(dict.fromkeys([*(fs.get(key) or []), *paths])) if isinstance(paths, list) else paths
-    box["filesystem"] = fs
-    if isinstance(own_box.get("excludedCommands"), list):
-        box["excludedCommands"] = list(dict.fromkeys([*own_box["excludedCommands"], *box["excludedCommands"]]))
-    if "network" in own_box or "network" in fence["sandbox"]:
-        box["network"] = {**(own_box.get("network") or {}), **(fence["sandbox"].get("network") or {})}
-    merged["sandbox"] = box
-    merged["env"] = {**(out.get("env") or {}), **fence["env"]}
-    return merged
 
 
 def given_settings(cwd: Path, given: str) -> Any:
@@ -1924,25 +2081,12 @@ def given_settings(cwd: Path, given: str) -> Any:
         return None
 
 
-def launch_hooks_blocked(cwd: Path, root: Path, given: str = "") -> bool:
-    """cc_plugin.hooks_blocked for the session the launcher is about to start: its --settings, `given`, rank above the
-    analyst's settings files as Claude Code ranks them, but cc_plugin.flag_settings cannot read them while that `claude`
-    does not run yet (live check L29: `--settings '{"disableAllHooks": true}'` left /thimble's command in the sandbox,
-    so /thimble could not reach the server). The org's managed tier still wins."""
-    own = given_settings(cwd, given)
-    v = own.get("disableAllHooks") if isinstance(own, dict) else None
-    if v is True:
-        return True
-    if v is False:
-        return cc_plugin.managed_blocks(root)
-    return cc_plugin.hooks_blocked(cwd, root)
-
-
 def modules_off(cwd: Path, given: str = "") -> str:
     """Why Claude Code will not load thimble's hooks module in a session the launcher starts in `cwd`, as far as the
     launch can tell: the org's managed settings turn hooks modules off (`disableAllHooks`, or `allowManagedHooksOnly`
-    without thimble enabled there), the analyst's settings or `given` --settings set `disableAllHooks`, or NO_MODULE_ENV
-    is set; '' otherwise. An untrusted folder or Claude Code's own switch shows only after the launch, as no hello."""
+    without thimble enabled there, or the security plugin's `allowManagedModsOnly`, cc_plugin.managed_mods_only), the
+    analyst's settings or `given` --settings set `disableAllHooks`, or NO_MODULE_ENV is set; '' otherwise. An untrusted
+    folder or Claude Code's own switch shows only after the launch, as no hello."""
     tier = cc_plugin.managed() or {}
     if tier.get("disableAllHooks") is True:
         return "your organization's managed settings set disableAllHooks"
@@ -1951,6 +2095,8 @@ def modules_off(cwd: Path, given: str = "") -> str:
         if not (isinstance(enabled, dict) and any(str(k).startswith(f"{PLUGIN_NAME}@") and v is True
                                                   for k, v in enabled.items())):
             return "your organization's managed settings set allowManagedHooksOnly"
+    if cc_plugin.managed_mods_only():
+        return f"your organization's managed settings set {cc_plugin.MODS_ONLY}"
     if os.environ.get(NO_MODULE_ENV, "").strip():
         return f"{NO_MODULE_ENV} is set"
     own = given_settings(cwd, given)
@@ -1966,8 +2112,8 @@ def modules_off(cwd: Path, given: str = "") -> str:
 
 def register_here(cwd: Path) -> str | None:
     """Register the folder `cwd` as a corpus, as a session's /thimble would (open_workspace with `here`: the folder
-    itself, with the path the analyst named it by, caller_alias), so that the fence and launch.json have their workspace
-    before main starts; its name. None for a folder `up` refuses ($HOME or /) or one that cannot be registered."""
+    itself, with the path the analyst named it by, caller_alias), so that launch.json has its workspace before main
+    starts; its name. None for a folder `up` refuses ($HOME or /) or one that cannot be registered."""
     if refused(cwd):
         return None
     told, alias = caller_alias(cwd)
@@ -1990,20 +2136,23 @@ LAUNCH_NO_SERVER_LINE = ("thimble: thimble's server did not start within {wait:.
 def server_for_launch(c: str) -> list[str]:
     """Start thimble's server for workspace `c` if it is down, and wait for it, before the launcher starts main
     (ensure_running, as `up` does): the note lines to print, the server's own notices among them, FOREIGN_LINE when
-    another install's server holds the port, and LAUNCH_NO_SERVER_LINE when it did not answer in time. Never raises:
-    the launch goes on, and /thimble starts the server then."""
+    THIMBLE_PORT names a port another install's server holds, and LAUNCH_NO_SERVER_LINE when it did not answer in time.
+    Never raises: the launch goes on, and /thimble starts the server then."""
     try:
         ensure_home()
         url = api_url()
-        other = foreign_home(url)
+        other = foreign_home(url) if explicit_port() is not None else None
         if other:
-            return [FOREIGN_LINE.format(port=port(), other=other)]
+            return [FOREIGN_LINE.format(port=port())]
         NOTICES.clear()
         try:
-            up = ensure_running(WAIT_S)
+            up: bool | None = ensure_running(WAIT_S)
         except TimeoutError as e:
             _log(str(e))
-            up = healthy(url)
+            up = None
+        url = api_url()  # where the server runs: start passes over a port that is not free (pick_port)
+        if up is None:
+            up = serves(url)
         notes = list(NOTICES)
         NOTICES.clear()
         if not up:
@@ -2105,11 +2254,41 @@ class LaunchRefused(Exception):
     """launch-args refuses the launch, with the line to print (open_elsewhere)."""
 
 
-def live_launch(rec: Mapping[str, Any]) -> bool:
+VIA_SKILL = "skill"  # launch.json's `via` when /thimble made a session the launcher did not start main (cmd_ensure)
+
+
+def _claude_session(pid: int, config_dir: str | None) -> str:
+    """The session Claude Code's own record of the process `pid` names (`<config dir>/sessions/<pid>.json`, its
+    `sessionId`), in `config_dir`, else in the config dir thimble serves (config.claude_config_dir); '' when there is
+    none."""
+    got = _read_json((Path(config_dir) if config_dir else config.claude_config_dir()) / "sessions" / f"{pid}.json")
+    return str(got.get("sessionId") or "") if isinstance(got, dict) else ""
+
+
+def _moved_from(sid: str, c: str | None) -> set[str]:
+    """The sessions main's session `sid` moved to (/clear, /resume), as workspace `c`'s subagents.json records them
+    (subagent_files.moves); empty without a workspace or a record."""
+    from . import subagent_files  # noqa: PLC0415 — standard library only
+
+    try:
+        moved = subagent_files.moves(subagent_files.read(config.workspace_path(c))) if c else {}
+    except (OSError, ValueError, KeyError):
+        moved = {}
+    out: set[str] = set()
+    while sid in moved and moved[sid] not in out:
+        sid = moved[sid]
+        out.add(sid)
+    return out
+
+
+def live_launch(rec: Mapping[str, Any], c: str | None = None) -> bool:
     """Whether the process a launch.json record names (`pid`: main's `claude`, which the launcher wrote there as it
     started it) runs now as Claude Code's `claude` (its program, or the script node runs, is named claude), naming the
-    record's session when it names one (`--session-id <sid>` or `--resume <sid>`, as the launcher passes it). False
-    for a pid that is gone, unreadable, or another process that took the pid later."""
+    record's session when it names one (`--session-id <sid>` or `--resume <sid>`, as the launcher passes it). A record
+    /thimble wrote (`via: skill`) names a `claude` the analyst started, whose command line need not name its session:
+    Claude Code's own record of that process (`<config_dir>/sessions/<pid>.json`, _claude_session) must name the
+    record's session, or one workspace `c`'s subagents.json records as moved from it (_moved_from). False for a pid
+    that is gone, unreadable, or another process that took the pid later."""
     pid = rec.get("pid")
     if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 1 or pid == os.getpid():
         return False
@@ -2117,6 +2296,9 @@ def live_launch(rec: Mapping[str, Any]) -> bool:
     if not any(Path(a).name.lower() in ("claude", "claude.exe") for a in argv[:2]):
         return False
     sid = str(rec.get("session") or "")
+    if rec.get("via") == VIA_SKILL:
+        now = _claude_session(pid, str(rec.get("config_dir") or "") or None)
+        return not sid or (bool(now) and (now == sid or now in _moved_from(sid, c)))
     return not sid or any(a == sid and i and argv[i - 1] in ("--session-id", "--resume", "-r")
                           or a in (f"--session-id={sid}", f"--resume={sid}") for i, a in enumerate(argv))
 
@@ -2129,18 +2311,21 @@ def open_elsewhere(c: str, mode: str | None = None) -> str | None:
         mode = launch_mode.resolve(config.corpus_dir(c))[0]
     rec = read_launch(c)
     other = rec.get("mode") if rec.get("mode") in launch_mode.MODES else launch_mode.BROWSER
-    if other == mode or not live_launch(rec):
+    if other == mode or not live_launch(rec, c):
         return None
     return OPEN_ELSEWHERE_LINE.format(mode=other)
 
 
-def launch_record(c: str, session: str | None, fenced: bool, switches: dict[str, str], unset: list[str],
-                  pid: int | None = None, modules_off: str = "", mode: str = launch_mode.BROWSER) -> None:
-    """Write launch.json in workspace `c` (module note, main's fence), with `pid`, the launcher's own process, when the
-    launcher names it, which the launcher then replaces with main's `claude` process as it starts it, `modules_off`, why the launch
-    found Claude Code's hooks modules off (modules_off), which the browser and the doctor give as the reason, and
-    `mode`, the mode the session starts in, which the session's other processes read (launch_mode.session_mode). Never
-    raises: a launch that cannot write it starts main, whose hooks module then stays idle."""
+def launch_record(c: str, session: str | None, switches: dict[str, str], unset: list[str], pid: int | None = None,
+                  modules_off: str = "", mode: str = launch_mode.BROWSER, via: str = "",
+                  config_dir: str | None = None) -> None:
+    """Write launch.json in workspace `c` (module note, launch.json), with `pid`, the launcher's own process, when the
+    launcher names it, which the launcher then replaces with main's `claude` process as it starts it, `modules_off`, why
+    the launch found Claude Code's hooks modules off (modules_off), which the browser and the doctor give as the reason,
+    and `mode`, the mode the session starts in, which the session's other processes read (launch_mode.session_mode).
+    /thimble's record of a session it made main has `via` (VIA_SKILL), its `claude` process as `pid` and that
+    session's CLAUDE_CONFIG_DIR as `config_dir`, each written when set. Never raises: a launch that cannot write it
+    starts main, whose hooks module then stays idle."""
     from .ledger import atomic_write_text  # noqa: PLC0415
 
     from . import subagent_files  # noqa: PLC0415 — standard library only
@@ -2149,12 +2334,15 @@ def launch_record(c: str, session: str | None, fenced: bool, switches: dict[str,
         ws = config.workspace_dir(c)
         subagent_files.ensure(ws)  # the trusted folder, in a workspace made before it
         path = ws / LAUNCH_FILE
-        rec: dict[str, Any] = {"session": session, "at": _now(), "fenced": fenced, "switches": switches,
-                               "unset": unset, "mode": mode}
+        rec: dict[str, Any] = {"session": session, "at": _now(), "switches": switches, "unset": unset, "mode": mode}
         if pid and pid > 1:
             rec["pid"] = int(pid)
         if modules_off:
             rec["modules_off"] = modules_off
+        if via:
+            rec["via"] = via
+        if config_dir:
+            rec["config_dir"] = config_dir
         atomic_write_text(path, json.dumps(rec, indent=1) + "\n")
     except (OSError, ValueError) as e:
         _log(f"launch-args: {LAUNCH_FILE} of {c} was not written: {e}")
@@ -2190,25 +2378,27 @@ def server_dirs() -> Iterator[None]:
 def launch_args(cwd: Path, resume: bool = False, settings: str = "", own_session: str | None = None,
                 safe_mode: bool = False, launcher_pid: int | None = None) -> str:
     """The launcher's values, one per line: the plugin folder to load with `--plugin-dir` ('' when the plugin copy is
-    one Claude Code has installed, installed_copy), the `--allowedTools` line, the `--effort` value ('' for none), the
-    `--settings` value (launch_settings, over the analyst's own `settings`, with thimble's fence), the value to export as
-    terminal_tools.ENV ('' when the `claude` it starts does not read it), main's `--name` (main_name), the session id to
-    pass with `--session-id` ('' when the analyst's own flags name the session, `own_session`, or `resume` continues
-    one), the env line (NAME=VALUE words to export: SWITCHES), the unset line (the names of UNSET_VARS the analyst's
+    one Claude Code has installed, installed_copy), the `--effort` value ('' for none), the `--settings` value
+    (launch_settings, over the analyst's own `settings`), the value to export as terminal_tools.ENV ('' when the
+    `claude` it starts does not read it), main's `--name` (main_name), the session id to pass with `--session-id` (''
+    when the analyst's own flags name the session, `own_session`, or `resume` continues one), the env line (NAME=VALUE words to export: SWITCHES), the unset line (the names of UNSET_VARS the analyst's
     environment sets), the note line (tab-separated lines to print before Claude Code starts), the mode line (the mode
     the folder starts in, launch_mode.resolve, then a tab and in terminal mode the renderer plugin's folder to load with
     `--plugin-dir`, when it can load, then a tab and the workspace's launch.json, whose `pid` the launcher sets to main's
-    `claude` process; the empty fields at its end are left out), the export line (tab-separated NAME=VALUE pairs to export: terminal_env and a PATH
-    with the plugin copy's bin/ first in terminal mode, else none), with `resume` the session to resume, then main's prompt, whose turn ending follows that
-    value.
+    `claude` process; the empty fields at its end are left out), the export line (tab-separated NAME=VALUE pairs to
+    export: terminal_env and a PATH with the plugin copy's bin/ first in terminal mode, else none), with `resume` the
+    session to resume, then main's prompt, whose turn ending follows that value. thimble adds no permission rule and no
+    sandbox to main's session: the plugin's skills carry their own `allowed-tools`, and every other call follows the
+    permission mode the analyst starts Claude Code in.
 
-    Before it prints, it registers the folder (register_here), refuses with LaunchRefused when the workspace is open in
-    the other mode (open_elsewhere), starts thimble's server and waits for it (server_for_launch; not in terminal mode),
+    Before it prints, it registers the folder (register_here) and marks it active for the plugin's hooks (mark_active),
+    refuses with LaunchRefused when the workspace is open in the other mode (open_elsewhere), starts thimble's server and waits for it (server_for_launch; not in terminal mode),
     finds the workspace's extensions again (refresh_extensions; in terminal mode local_extensions) and writes
     launch.json (launch_record), with `launcher_pid`, the launcher's own pid, until the launcher writes main's `claude`
     process there, and in terminal mode the hooks module's roles file (write_roles). Main's effort is explicit:
     models.main's, else the CLAUDE_CODE_EFFORT_LEVEL it unsets, else cc_settings.main_effort_flag; a stored ultracode
     runs at its level."""
+    LAUNCH_NOTES.clear()
     installed = installed_copy(cwd)
     root = installed.root if installed else plugin_root()
     with server_dirs():
@@ -2221,27 +2411,20 @@ def _launch_args(cwd: Path, resume: bool, settings: str, own_session: str | None
     from . import cc_settings, events, terminal_tools  # noqa: PLC0415 — needed by this subcommand alone
 
     c = register_here(cwd)
+    if c:
+        mark_active(cwd)
     mode = launch_mode.resolve(cwd)[0]
     terminal = mode == launch_mode.TERMINAL
     refusal = open_elsewhere(c, mode) if c else None
     if refusal:
         raise LaunchRefused(refusal)
-    notes: list[str] = []
+    notes: list[str] = list(LAUNCH_NOTES)  # the plugin copy's (installed_copy)
+    LAUNCH_NOTES.clear()
     if c and terminal:
         local_extensions(c)  # terminal mode asks no server, even one that runs
     elif c:
         notes += server_for_launch(c)  # before main, for its first agent listing
         refresh_extensions(c)
-    workspaces = Path(resolve_env()["workspaces_dir"]).resolve()
-    anchors = workspaces / "*" / ANCHORS_DIR
-    # on the Monitor route main arms its Monitor on the watcher again every 30 minutes, which must not wait on a prompt;
-    # only --stream, since the watcher's other modes report to the server as main's hooks
-    watcher = f"Bash({root / WATCHER} --stream *)"
-    # in terminal mode a card's code runs through the card runner in main's Bash, which must not wait on a prompt either,
-    # as a browser-mode card's code runs in the kernel unasked: by its name (cardrun.command), with this copy's bin/ first
-    # on the session's PATH (the export line), and by its path, as a command from before this release named it
-    runner = [f"Bash({RUNNER_NAME} *)", f"Bash({root / CARD_RUNNER} *)"] if terminal else []
-    tools_line = ",".join([MCP_TOOLS_RULE, f"Read(/{anchors}/**)", watcher, *runner, *skill_rules(root)])
     last = [last_main(cwd)] if resume else []
     turn_tools = terminal_tools.launch_value()
     # the session main runs as: one this launch names (--session-id) unless the analyst's flags or --continue name it
@@ -2253,10 +2436,6 @@ def _launch_args(cwd: Path, resume: bool, settings: str, own_session: str | None
         session_id = ""
     else:
         session = session_id = str(uuid.uuid4())
-    why_off = fence_off(c)
-    fence = {} if why_off else main_fence(cwd, c, root, session, given=settings, mode=mode)
-    if why_off in NO_FENCE_LINES:
-        notes.append(NO_FENCE_LINES[why_off])
     unset = [name for name in UNSET_VARS if os.environ.get(name, "").strip()]
     # set by an `env` block of the analyst's Claude Code settings: main's --settings blank them (launch_settings)
     blanked = [name for name in UNSET_VARS if name not in unset and (cc_settings.settings_env(cwd, name) or "").strip()]
@@ -2292,10 +2471,9 @@ def _launch_args(cwd: Path, resume: bool, settings: str, own_session: str | None
     # how to come back with thimble (plugin/bin/thimble)
     launch_file = str(config.workspace_dir(c) / LAUNCH_FILE) if c else ""
     mode_line = "\t".join([mode, renderer, launch_file]) if launch_file else "\t".join([mode, renderer]).rstrip("\t")
-    settings_value = launch_settings(cwd, settings, fence, env=exports)
-    if c:  # fenced as main's command line will show it (an unreadable --settings of the analyst's carries no fence)
-        launch_record(c, session, cc_plugin.fenced_argv(["claude", "--settings", settings_value], cwd), switches, unset,
-                      launcher_pid, modules_off=why_idle, mode=mode)
+    settings_value = launch_settings(cwd, settings, env=exports)
+    if c:
+        launch_record(c, session, switches, unset, launcher_pid, modules_off=why_idle, mode=mode)
         if terminal:
             write_roles(c)
     load = "" if installed or cc_plugin.marketplace(root) != cc_plugin.INLINE else str(root)
@@ -2307,7 +2485,7 @@ def _launch_args(cwd: Path, resume: bool, settings: str, own_session: str | None
     # runs the card runner the tools name without its install path (cardrun.command); main's --settings `env` leaves
     # PATH alone
     exported = {**exports, "PATH": os.pathsep.join([str(root / "bin"), os.environ.get("PATH", "")])} if terminal else exports
-    return "\n".join([load, tools_line, effort, settings_value, turn_tools,
+    return "\n".join([load, effort, settings_value, turn_tools,
                       main_name(cwd), session_id, " ".join(f"{k}={v}" for k, v in switches.items()), " ".join(unset),
                       "\t".join(notes), mode_line, "\t".join(f"{k}={v}" for k, v in exported.items()), *last, prompt])
 
@@ -2457,7 +2635,7 @@ def queue_depth(url: str, name: str | None) -> str:
 
 def status_line(name: str | None) -> str:
     url = api_url()
-    up = healthy(url)
+    up = serves(url)
     parts = [f"server {'up' if up else 'down'} at {url}", f"orientation: {orient_status(name)}",
              f"queue: {queue_depth(url, name) if up else 'n/a'}"]
     return "thimble: " + "; ".join(parts)
@@ -2506,7 +2684,7 @@ def auth_line(status: dict[str, Any] | None) -> str:
     if status is None:
         return "not known: `claude auth status --json` did not answer"
     if status.get("loggedIn") is False:
-        return "not logged in: log in with `claude`; nothing that calls a model runs until then"
+        return f"not logged in: {config.AUTH_HELP}; nothing that calls a model runs until then"
     return f"logged in ({status.get('authMethod') or '?'}, {status.get('apiProvider') or '?'}), as `claude auth status` reports"
 
 
@@ -2690,25 +2868,27 @@ def pages_line(commands: bool = True) -> str:
 
 
 def sandbox_lines(commands: bool = True) -> list[str]:
-    """The doctor's `bash sandbox` line: whether Claude Code's Bash sandbox can run (cc_settings.sandbox_ok), which the
-    agents' Bash then uses unless thimble's config says `sandbox.use` "never", and, when it cannot run, what it lacks and
-    with `commands` the root commands that install it. Where it runs, the line names the empty `.claude/.cc-writes/`
-    folder Claude Code creates in the folder a sandboxed command starts in, which is the agent's own folder."""
+    """The doctor's `bash sandbox` line: whether Claude Code's Bash sandbox can run (cc_settings.sandbox_ok), which
+    `thimble fix` and extension programs run their Bash in where it runs, unless thimble's config says `sandbox.use`
+    "never"; when it cannot run, what it lacks and with `commands` the root commands that install it. Without it they
+    run as they are: `thimble fix` asks first (dev.FIX_QUESTION) and an extension program posts a notice, unless
+    `sandbox.enforce` refuses them."""
     from . import cc_settings, userconf  # noqa: PLC0415
 
+    head = "  bash sandbox (thimble fix and extension programs): "
     try:
         missing = cc_settings.sandbox_missing()
         cmds, what = cc_settings.sandbox_setup() if missing else ([], "")
     except Exception as e:  # noqa: BLE001 — the doctor reports; it never fails on one of its lines
-        return [f"  bash sandbox: not checked ({type(e).__name__})"]
+        return [f"{head}not checked ({type(e).__name__})"]
     try:
         box = userconf.load_or_defaults()[0]["sandbox"]
     except Exception:  # noqa: BLE001
         box = userconf.DEFAULTS["sandbox"]
+    without = ("thimble's config (sandbox.enforce) refuses to start them without it" if box.get("enforce") else
+               "they run without it (thimble fix asks you first; an extension program's notice says so)")
     if box.get("use") == "never":
-        return ["  bash sandbox: off in thimble's config (sandbox.use \"never\"), so "
-                + ("thimble's config (sandbox.enforce) refuses to start the agents" if box.get("enforce") else
-                   "the agents' Bash runs with your user's access, limited only by each agent's permission mode")]
+        return [f"{head}off in thimble's config (sandbox.use \"never\"); {without}"]
     if not missing:
         from . import ticket_box  # noqa: PLC0415
 
@@ -2716,47 +2896,27 @@ def sandbox_lines(commands: bool = True) -> list[str]:
         tickets = ("a code ticket's checks and test server run in thimble's sandbox runtime, and its change reaches "
                    "thimble's own code only once you allow it" if not why else
                    f"a code ticket runs its checks and test server outside it, so it asks you before it starts: {why}")
-        return ["  bash sandbox: runs (every agent's Bash runs in it: no writes outside the agent's folder and no "
-                f"network unless the agent's network is \"on\"; {tickets}; Claude Code's sandbox adds an empty "
-                ".claude/.cc-writes/ folder to the agent's own folder, where its commands start)"]
-    after = ("thimble's config (sandbox.enforce) refuses to start the agents" if box.get("enforce") else
-             "the agents' Bash runs outside it, under each agent's permission mode")
-    head = "  bash sandbox: off, missing " + ", ".join(missing) + "; " + after
+        return [f"{head}runs; {tickets}"]
+    line = f"{head}off, missing " + ", ".join(missing) + f"; {without}"
     if not cmds or not commands:
-        return [head + (f"; {what}" if what else "")]
-    return [f"{head}. To turn it on, run these, which {what}, then `thimble restart`:", *(f"    {c}" for c in cmds)]
+        return [line + (f"; {what}" if what else "")]
+    return [f"{line}. To turn it on, run these, which {what}, then `thimble restart`:", *(f"    {c}" for c in cmds)]
 
 
 def own_sandbox_line(cwd: Path) -> str:
-    """The doctor's line on the analyst's own Claude Code sandbox for a session in `cwd` (cc_settings.own_sandbox): main's
-    Bash runs in that session, so with it on Claude Code adds an empty .claude/.cc-writes/ folder to `cwd`."""
+    """The doctor's line on Claude Code's own sandbox for a session in `cwd` (own_sandbox_here), which thimble neither
+    needs nor turns on: main's Bash runs in it when the analyst turns it on, and Claude Code then adds an empty
+    .claude/.cc-writes/ folder to `cwd`."""
     from . import cc_settings  # noqa: PLC0415
 
-    if not cc_settings.own_sandbox(cwd):
-        return "off"
-    return (f"on, so main's Bash adds an empty .claude/.cc-writes/ folder to {cwd}. That is Claude Code's sandbox in "
-            "your own session, which thimble leaves as it is")
-
-
-def fence_line(cwd: Path) -> str:
-    """The doctor's line on main's fence for a session the launcher starts in `cwd` (main_fence): on, or off and why,
-    with what the last launch here recorded (launch.json)."""
-    c = config.workspace_for_cwd(str(cwd))
-    if refused(cwd):
-        return "none: thimble does not open your home folder or / as a workspace"
-    if not c:
-        return ("on at the first `thimble` here, which registers the folder: main runs in Claude Code's sandbox with the "
-                "corpus read-only and writes only in thimble's agents' work folders")
-    why = fence_off(c)
-    if why == "never":
-        return "off: thimble's config turns the sandbox off (sandbox.use \"never\"), so main and its agents can change your files"
-    if why == "missing":
-        return "off: Claude Code's Bash sandbox can't run on this machine (the bash sandbox line says what is missing)"
-    last = read_launch(c)
-    seen = (f"; the last launch here ({last.get('at') or '?'}) was {'fenced' if last.get('fenced') else 'not fenced'}"
-            if last else "")
-    return ("on: main and thimble's agents, its subagents, run in Claude Code's sandbox with the corpus read-only, "
-            f"writes only in the agents' work folders, and thimble's token files unreadable{seen}")
+    if own_sandbox_here(cwd):
+        return (f"on, so main's Bash adds an empty .claude/.cc-writes/ folder to {cwd}. That is Claude Code's sandbox in "
+                "your own session, which thimble leaves as it is")
+    if own_sandbox_set(cwd):
+        missing = cc_settings.sandbox_missing()
+        return ("on in your settings, but it can't run here" + (f" (missing: {', '.join(missing)})" if missing else "")
+                + "; the bash sandbox line says what installs it")
+    return "off (optional: INSTALL.md shows the settings that turn it on)"
 
 
 def switches_line() -> str:
@@ -2793,7 +2953,7 @@ def folder_trusted(cwd: Path) -> bool | None:
 
 
 def module_line(cwd: Path) -> str:
-    """The doctor's line on thimble's hooks module for a session the launcher starts in `cwd`: what keeps Claude Code
+    """The doctor's line on thimble's hooks module for a session in `cwd`: what keeps Claude Code
     from loading it (modules_off, an untrusted folder), else what the last session here recorded (subagents.json's
     `module`: its hello, or why it stayed idle; after a terminal-mode launch, terminal_module_notes). thimble's agents
     cannot start without it."""
@@ -2824,8 +2984,8 @@ def module_line(cwd: Path) -> str:
         notes.insert(0, f"it ran in the last session (hello from {str(rec['session'])[:8]} at {rec.get('at') or '?'}"
                         + (f", version {rec['version']}" if rec.get("version") else "") + ")")
     else:
-        notes.insert(0, "no session here has run it yet (it says hello when `thimble` starts main); thimble's agents "
-                        "cannot start without it")
+        notes.insert(0, "no session here has run it yet (it says hello once /thimble or `thimble` opens this folder); "
+                        "thimble's agents cannot start without it")
     return "; ".join(notes)
 
 
@@ -2877,16 +3037,38 @@ def renderer_line() -> str:
 
 
 def terminal_card_line() -> str:
-    """The doctor's line on where a card's code runs in terminal mode: in main's Bash, through the card runner, inside
-    Claude Code's sandbox when it can run (Seatbelt on macOS, bubblewrap and socat on Linux)."""
-    from . import cc_settings  # noqa: PLC0415
+    """The doctor's line on where a card's code runs in terminal mode: in main's Bash, through the card runner, which
+    the permission mode decides on; a card check's trial in the sandbox runtime where it runs (cardrun.trial_sandbox)."""
+    return ("runs in main's Bash with your user's access; Claude Code asks about or judges each thimble-run command, as "
+            "for any command; a card check's trial runs in the sandbox runtime where it can run")
 
-    engine = "Seatbelt" if sys.platform == "darwin" else "bubblewrap and socat"
-    if cc_settings.sandbox_ok():
-        return f"runs in main's Bash, inside Claude Code's sandbox ({engine}): it reads the corpus and writes only the card folders"
-    missing = cc_settings.sandbox_missing()
-    return (f"runs in main's Bash without a sandbox, with your user's access, since Claude Code's sandbox ({engine}) "
-            f"can't run here{': missing ' + ', '.join(missing) if missing else ''} (the bash sandbox line says how to fix it)")
+
+def terminal_views_wrap() -> str:
+    """The sandbox terminal mode's views run in (term_views.sandbox_argv's choice): `srt`, `bubblewrap`, or '' where
+    neither runs, which leaves terminal mode without views."""
+    from . import kernel_wrap, srt  # noqa: PLC0415
+
+    node = srt.node()
+    if not node:
+        return ""
+    if kernel_wrap.srt_works(node, srt.package(config.REPO_ROOT)):
+        return "srt"
+    return "bubblewrap" if sys.platform.startswith("linux") and kernel_wrap.works() else ""
+
+
+def terminal_views_line(commands: bool = True) -> str:
+    """The doctor's line on terminal mode's views: the sandbox they run in, or that they can't run, and with `commands`
+    the commands that add bubblewrap."""
+    from . import cc_settings, srt  # noqa: PLC0415
+
+    wrap = terminal_views_wrap()
+    if wrap:
+        return wrap
+    if not srt.node():
+        return f"can't run (Node is not installed, and a terminal view runs in Node {NODE_MIN_MAJOR}+)"
+    cmds, what = cc_settings.kernel_setup() if commands else ([], "")
+    fix = f"; to add bubblewrap, run: {' && '.join(cmds)}" if cmds else (f"; {what}" if what else "")
+    return f"can't run (neither the sandbox runtime nor bubblewrap runs here){fix}"
 
 
 def terminal_checks_line() -> str:
@@ -2909,7 +3091,7 @@ def terminal_checks_line() -> str:
 # free disk, who holds the port, how a session started here would hear the browser, and whether the API host answers.
 # Each reader returns a short phrase and never raises, since the doctor must print even on a broken machine.
 
-TESTED_CLAUDE_CODE = "2.1.295"  # INSTALL.md and README.md name the same version (test_cli.py)
+TESTED_CLAUDE_CODE = "2.1.300"  # INSTALL.md and README.md name the same version (test_cli.py)
 MODS_CLAUDE_CODE = "2.1.287"  # the first Claude Code that loads plugin mods, thimble's hooks module, by default
 CLAUDE_CODE_SEEN_FILE = "claude_code.json"  # in <home>: the newer Claude Codes the analyst was told about
 NODE_MIN_MAJOR = 20  # custom views are built with Node 20+ (views.py)
@@ -3059,21 +3241,29 @@ def node_line(commands: bool = True) -> str:
                   + (f" (run `{fix}` again)" if commands else ""))
 
 
-def kernel_line() -> str:
+KERNEL_REACH = ("code from main and thimble's agents reaches it through a thimble tool call, which follows your "
+                "permission mode, and a card check's revision runs on it unasked")
+
+
+def kernel_line(commands: bool = True) -> str:
     """The doctor's `card code` line: the sandbox a notebook kernel starts in where its workspace names none
-    (config.resolve_kernel_wrap), and why it is not the sandbox runtime when it is not."""
-    from . import srt  # noqa: PLC0415
+    (config.resolve_kernel_wrap), why it is not the sandbox runtime when it is not, on Linux without one and with
+    `commands` the commands that add bubblewrap (cc_settings.kernel_setup), and what reaches the kernel
+    (KERNEL_REACH)."""
+    from . import cc_settings, srt  # noqa: PLC0415
 
     wrap, source = config.resolve_kernel_wrap({})
     by = f" ({config.KERNEL_WRAP_ENV})" if source == "env" else ""
     bounds = "it reads the corpus and the workspace, writes only the workspace, and keeps the network"
     if wrap == config.KERNEL_WRAP_SRT:
         engine = "Seatbelt" if sys.platform == "darwin" else "bubblewrap"
-        return f"runs in Anthropic's sandbox runtime{by} ({engine}): {bounds}"
+        return f"runs in Anthropic's sandbox runtime{by} ({engine}): {bounds}; {KERNEL_REACH}"
     why = "" if by else srt.missing(config.REPO_ROOT, srt.node()) or "the sandbox runtime can't run here"
     if wrap == config.KERNEL_WRAP_BWRAP:
-        return f"runs in bubblewrap{by}{f' ({why})' if why else ''}: {bounds}"
-    return f"runs unsandboxed, with your user's access{by}{f' ({why})' if why else ''}"
+        return f"runs in bubblewrap{by}{f' ({why})' if why else ''}: {bounds}; {KERNEL_REACH}"
+    cmds = cc_settings.kernel_setup()[0] if commands and sys.platform.startswith("linux") else []
+    fix = f"; to sandbox it, run: {' && '.join(cmds)}" if cmds else ""
+    return f"runs unsandboxed, with your user's access{by}{f' ({why})' if why else ''}{fix}; {KERNEL_REACH}"
 
 
 def python_line() -> str:
@@ -3147,17 +3337,16 @@ def api_host() -> str:
     return host or API_HOST
 
 
-def network_line(status: dict[str, Any] | None = None, timeout_s: float = NET_TIMEOUT_S) -> str:
-    """Whether a TCP connection to the API host on 443 opens within `timeout_s` (a thread bounds the name lookup,
-    which has no timeout of its own). Nothing is sent. Not checked for a provider other than Anthropic's API, as
-    `status` (config.auth_status) names it."""
+def network_probe(status: dict[str, Any] | None = None, timeout_s: float = NET_TIMEOUT_S) -> tuple[bool | None, str]:
+    """(whether a TCP connection to the API host on 443 opens within `timeout_s`, why not), with a thread bounding the
+    name lookup, which has no timeout of its own. Nothing is sent. (None, why) when it is not checked: for a provider
+    other than Anthropic's API, as `status` (config.auth_status) names it, or inside Claude Code's Bash sandbox."""
     host = api_host()
     provider = (status or {}).get("apiProvider")
     if provider and provider != "firstParty":
-        return f"not checked: model calls go to {provider}"
+        return None, f"model calls go to {provider}"
     if in_sandbox():  # the sandbox's own network namespace has no route out, whatever the machine has
-        return ("not checked: this runs inside Claude Code's Bash sandbox, which has no network (run `thimble doctor` "
-                "in a terminal)")
+        return None, "this runs inside Claude Code's Bash sandbox, which has no network (run `thimble doctor` in a terminal)"
     result: list[str] = []
 
     def probe() -> None:
@@ -3171,9 +3360,17 @@ def network_line(status: dict[str, Any] | None = None, timeout_s: float = NET_TI
     t.start()
     t.join(timeout_s + 0.5)
     if result and not result[0]:
-        return f"{host} answers"
-    why = result[0] if result else f"no answer within {timeout_s:.0f} s"
-    return f"cannot reach {host} ({why}); model calls fail until the network is back"
+        return True, ""
+    return False, result[0] if result else f"no answer within {timeout_s:.0f} s"
+
+
+def network_line(status: dict[str, Any] | None = None, timeout_s: float = NET_TIMEOUT_S) -> str:
+    """The doctor's network line (network_probe)."""
+    ok, why = network_probe(status, timeout_s)
+    if ok is None:
+        return f"not checked: {why}"
+    host = api_host()
+    return f"{host} answers" if ok else f"cannot reach {host} ({why}); model calls fail until the network is back"
 
 
 def versions_line() -> str:
@@ -3290,21 +3487,22 @@ def doctor_text(commands: bool = True) -> str:
     lines.append(f"  auth: {auth_line(status)}")
     lines.append(f"  network: {_checked(network_line, status)}")
     caller = Path(os.environ.get("THIMBLE_CALLER_CWD") or os.getcwd())
-    lines.append(f"  delivery (a session `thimble` starts in {caller}): {_checked(delivery_line, caller)}")
+    lines.append(f"  delivery (a session in {caller}): {_checked(delivery_line, caller)}")
     lines.append(f"  your session's bash sandbox: {_checked(own_sandbox_line, caller)}")
+    lines.append(f"  plugin: {_checked(plugin_line, caller, commands)}")
     with server_dirs():
-        lines.append(f"  main's fence (a session `thimble` starts in {caller}): {_checked(fence_line, caller)}")
         lines.append(f"  launch switches: {_checked(switches_line)}")
         lines.append(f"  safe mode: {_checked(safe_mode_line)}")
         lines.append(f"  hooks module (thimble's agents start through it): {_checked(module_line, caller)}")
-        lines.append(f"  mode (a session `thimble` starts in {caller}): {_checked(mode_line, caller)}")
+        lines.append(f"  mode (a session in {caller}): {_checked(mode_line, caller)}")
         lines.append(f"  terminal renderer: {_checked(renderer_line)}")
         if launch_mode.resolve(caller)[0] == launch_mode.TERMINAL:
             lines.append(f"  terminal mode's card code: {_checked(terminal_card_line)}")
             lines.append(f"  terminal mode's card checks (optional): {_checked(terminal_checks_line)}")
+            lines.append(f"  terminal mode's views: {_checked(terminal_views_line, commands)}")
     lines.append(f"  config: {_checked(config_line, Path(env['workspaces_dir']))}")
     lines.append(f"  browser: {_checked(browser_line)}")
-    lines.append(f"  card code: {_checked(kernel_line)}")
+    lines.append(f"  card code: {_checked(kernel_line, commands)}")
     lines.append(f"  card harness: {harness_line(url, up, commands)}")
     lines.append(f"  views and screenshots: {_checked(pages_line, commands)}")
     lines += sandbox_lines(commands)
@@ -3358,6 +3556,299 @@ def _log_lines(limit: int) -> list[str] | None:
     return lines[1:] if size > limit else lines
 
 
+# ----------------------------------------------------------------------------- the doctor's checklist
+#
+# `thimble doctor` prints a checklist a person reads (doctor_check_text): one line per area, ✓ or !, in plain words, and
+# under a problem one line with its fix and where to run it. The checks (doctor_checks) are built from the same facts as
+# the verbose lines above, never from their text; `thimble doctor --verbose`, `thimble feedback` and `thimble fix` keep
+# doctor_text.
+
+CHECK_LINE_MAX = 80  # a ✓ or ! line, its mark included
+FIX_LINE_MAX = 100  # a fix line, its indent included
+DETAILS_LINE = "Details: thimble doctor --verbose"
+VERBOSE_FIX = "thimble doctor --verbose"  # where a fix line sends the analyst for what the checklist leaves out
+
+
+class Check(NamedTuple):
+    """One line of the doctor's checklist: fine or not, what it says, and under a problem the fix with where it runs."""
+
+    ok: bool
+    line: str
+    fix: str = ""
+
+
+def _fit(text: str, limit: int) -> str:
+    """`text` cut at a word to at most `limit` characters, with "…" where it was cut."""
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    cut = text[: limit - 1].rsplit(" ", 1)[0].rstrip(",;:")
+    return f"{cut}…"
+
+
+def _tilde(path: Path | str) -> str:
+    """`path` with the home folder written `~`."""
+    p, h = str(path), str(Path.home())
+    return "~" + p[len(h):] if p == h or p.startswith(h + os.sep) else p
+
+
+def _version_check() -> Check:
+    v = claude_code_version()
+    head = _thimble_named()
+    if v is None:
+        return Check(True, head)
+    case = claude_code_case(v)
+    if case == TOO_OLD:
+        return Check(False, f"Claude Code {v} is older than thimble needs ({MODS_CLAUDE_CODE})",
+                     "In a shell: claude update")
+    note = {NEWER: f" (newer than the tested {TESTED_CLAUDE_CODE})",
+            OLDER: f" (older than the tested {TESTED_CLAUDE_CODE})"}.get(case or "", "")
+    return Check(True, f"{head} · Claude Code {v}{note}")
+
+
+def _sign_in_check() -> Check:
+    if not config.CLI_PATH:
+        return Check(False, "Claude Code is not installed", "Install Claude Code, or name its path with THIMBLE_CLAUDE_BIN")
+    status = config.auth_status()
+    if status is None:
+        return Check(False, "Claude Code did not say whether you are signed in", "In a shell: claude auth status")
+    if status.get("loggedIn") is False:
+        return Check(False, "Not signed in to Claude", "In a shell: claude auth login")
+    if network_probe(status)[0] is False:
+        return Check(False, "Claude's API doesn't answer from here",
+                     f"Check your network or proxy; {VERBOSE_FIX} has details")
+    return Check(True, "Signed in to Claude")
+
+
+def _server_check() -> Check:
+    st = read_state()
+    p = int(st.get("port") or port())
+    url = api_url(p)
+    if serves(url):
+        return Check(True, "Server running")
+    stuck = stuck_server(url)
+    if stuck:
+        return Check(False, f"The server is stuck (pid {stuck})", "In a shell: thimble server restart")
+    if listening(p) and explicit_port() is not None:  # without THIMBLE_PORT the next start passes over it (pick_port)
+        return Check(False, f"Port {p} is taken by another program",
+                     "In a shell: stop that program, then thimble server restart")
+    return Check(True, "Server not running (it starts with /thimble)")
+
+
+def _plugin_check(cwd: Path) -> Check:
+    facts = plugin_facts(cwd)
+    if facts is None:
+        if not config.CLI_PATH:
+            return Check(False, "Plugin not checked, since Claude Code is not installed",
+                         "Install Claude Code, then run thimble doctor again")
+        return Check(False, "Plugin not checked: Claude Code did not list its plugins", "In a shell: claude plugin list")
+    if not facts.marketplace or not (facts.ours or facts.enabled):
+        fix = f"In a shell: bash {_tilde(config.REPO_ROOT / 'scripts' / 'install.sh')}"
+        return Check(False, "Plugin not added to Claude Code",
+                     fix if len(fix) + 2 <= FIX_LINE_MAX else f"{VERBOSE_FIX} names the commands that add it")
+    if not facts.ours:
+        return Check(False, "Another install's plugin is on", f"{VERBOSE_FIX} names the commands that switch it")
+    if not facts.enabled:
+        return Check(False, "Plugin is off in Claude Code", "In the Claude Code terminal: /plugin, then turn thimble on")
+    if not facts.same:
+        mine = own_version()
+        what = f"Plugin {facts.version} differs from this install's {mine}" if facts.version != mine else \
+            "Plugin differs from this install's files"
+        return Check(False, what, f"In a shell: claude plugin update {PLUGIN_NAME}@{facts.marketplace}")
+    return Check(True, "Plugin on in Claude Code")
+
+
+def _sandbox_check(cwd: Path) -> Check:
+    if own_sandbox_here(cwd):
+        return Check(True, "Claude Code's sandbox: on")
+    if own_sandbox_set(cwd):
+        return Check(False, "Claude Code's sandbox is on in your settings but can't run here",
+                     f"{VERBOSE_FIX} names what to install")
+    return Check(True, "Claude Code's sandbox: off (optional)")
+
+
+def _card_code_check() -> Check:
+    wrap, source = config.resolve_kernel_wrap({})
+    if wrap in (config.KERNEL_WRAP_SRT, config.KERNEL_WRAP_BWRAP):
+        return Check(True, "Card code runs in a sandbox")
+    if source == "env":
+        why = f"{config.KERNEL_WRAP_ENV} says so"
+    elif sys.platform.startswith("linux"):
+        why = "no bubblewrap" if not shutil.which("bwrap") else "bubblewrap can't make one here"
+    else:
+        why = "the sandbox runtime can't run here"
+    return Check(True, f"Card code runs without a sandbox ({why})")
+
+
+def _views_check() -> Check:
+    exe = shutil.which("node")
+    v = None
+    if exe:
+        try:
+            v = version_tuple(subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=10).stdout)
+        except (OSError, subprocess.SubprocessError):
+            v = None
+    fix_node = f"Install Node {NODE_MIN_MAJOR} or later, then in a shell: thimble server restart"
+    if not exe:
+        return Check(False, "Node not found, so custom views can't run", fix_node)
+    if v and v[0] < NODE_MIN_MAJOR:
+        return Check(False, f"Node {'.'.join(map(str, v))} is too old, so custom views can't run", fix_node)
+    which, _ = _browser_choice()
+    if which == "off":
+        return Check(True, "Views ready; screenshots off (no browser chosen)")
+    if which != "system":
+        spec = importlib.util.find_spec("playwright")
+        backend = headless_fetched(Path(spec.origin).parent / "driver" / "package" / "browsers.json" if spec and
+                                   spec.origin else Path("-"))
+        front_json = FRONTEND_DIR / "node_modules" / "playwright-core" / "browsers.json"
+        front = not front_json.is_file() or headless_fetched(front_json)
+        if not (backend and front):
+            return Check(False, "No browser for screenshots", "In a shell: thimble update --browser bundled")
+    return Check(True, "Views and screenshots ready")
+
+
+def _hooks_fix(why: str) -> str:
+    """The fix line for modules_off's reason `why`."""
+    if why.startswith(NO_MODULE_ENV):
+        return f"In a shell: unset {NO_MODULE_ENV}, then restart claude"
+    setting = next((s for s in ("allowManagedHooksOnly", cc_plugin.MODS_ONLY) if s in why), "disableAllHooks")
+    if "organization" in why:
+        return f"Ask your administrator: your organization's Claude Code settings set {setting}"
+    return f"In your Claude Code settings: remove {setting}, then restart claude"
+
+
+def _agents_check(cwd: Path) -> Check:
+    why = modules_off(cwd)
+    if why:
+        return Check(False, "thimble's agents can't start: Claude Code's hooks are off", _hooks_fix(why))
+    c = config.workspace_for_cwd(str(cwd))
+    if c and folder_trusted(cwd) is False:  # a folder thimble never opened: Claude Code asks when claude starts there
+        return Check(False, "Claude Code doesn't trust this folder yet", "In a shell: run claude here and accept the prompt")
+    launch = read_launch(c)
+    again = "In the Claude Code terminal: /thimble"
+    if launch.get("modules_off"):
+        return Check(False, "thimble's agents didn't start in the last session: hooks were off", _hooks_fix(
+            str(launch["modules_off"])))
+    if c and launch.get("mode") == launch_mode.TERMINAL:
+        out = _read_json(config.workspace_path(c) / MODULE_OUT)
+        if isinstance(out, dict) and out.get("problem"):
+            return Check(False, "thimble's agents reported a problem in the last session",
+                         f"In a shell: thimble, then see {VERBOSE_FIX}")
+        if isinstance(out, dict) and out.get("session"):
+            return Check(True, "thimble's agents can start in this folder")
+        return Check(True, "thimble's agents start when you run thimble here")
+    try:
+        from . import subagent_files  # noqa: PLC0415 — standard library only
+
+        rec = (_read_json(subagent_files.state_path(config.workspace_path(c))) or {}).get("module") if c else None
+    except (OSError, ValueError, KeyError, AttributeError):
+        rec = None
+    if isinstance(rec, dict) and rec.get("idle"):
+        return Check(False, "thimble's agents didn't start in the last session", f"{again}; {VERBOSE_FIX} says why")
+    if isinstance(rec, dict) and rec.get("session"):
+        return Check(True, "thimble's agents can start in this folder")
+    return Check(True, "thimble's agents start after /thimble here")
+
+
+def _extension_checks() -> list[Check]:
+    """A problem line for each added extension that can't load, and for each thing two extensions both give."""
+    from . import extensions, userconf  # noqa: PLC0415
+
+    got = extensions.added()
+    if not got:
+        return []
+    off = userconf.extensions_off()
+    out: list[Check] = []
+    loadable: dict[str, dict[str, Any]] = {}
+    for name, root in got.items():
+        info = extensions.read_extension(root, name, set(got))
+        if info["problems"]:
+            out.append(Check(False, f"Extension {name} isn't loaded: {info['problems'][0]}",
+                             f"In Settings, turn it off, or fix it; {VERBOSE_FIX} has details"))
+        elif not extensions.config_off(name, off):
+            loadable[name] = {**info, "active": True}
+    what = {"view": "the view {slug}", "card": "the card type {slug}", "block": "the orientation's instructions",
+            "role": "{role}", "task": "the {slug} task"}
+    for kind, clash in extensions.conflicts(loadable).items():
+        for slug, names in clash.items():
+            both = ", ".join(names[:-1]) + f" and {names[-1]}"
+            gives = what.get(kind, "{slug}").format(slug=slug, role=extensions.ROLE_NAMES.get(slug, f"the {slug}"))
+            out.append(Check(False, f"Extensions {both} both give {gives}",
+                             f"In Settings, turn one off; {VERBOSE_FIX} lists them"))
+    return out
+
+
+def _when_wrong_checks(cwd: Path) -> list[Check]:
+    """The areas the checklist names only when something is wrong: thimble's config, the disk, the extensions, and
+    terminal mode in a folder whose mode is terminal."""
+    from . import userconf  # noqa: PLC0415
+
+    out: list[Check] = []
+    env = resolve_env()
+    workspaces = Path(env["workspaces_dir"])
+    over = sorted(q.parent.name for q in workspaces.glob(f"*/{userconf.FILE}")) if workspaces.is_dir() else []
+    errors = [e for e in [userconf.problem(), *(userconf.problem(c) for c in over)] if e]
+    if errors:
+        out.append(Check(False, f"thimble's config has an error: {errors[0]}",
+                         "Fix the file it names; no agent starts until then"))
+    for q in (home(), workspaces):
+        while not q.exists() and q != q.parent:
+            q = q.parent
+        try:
+            free = shutil.disk_usage(q).free
+        except OSError:
+            continue
+        if free < DISK_LOW_BYTES:
+            out.append(Check(False, f"Low disk space: {human_bytes(free)} free at {_tilde(q)}",
+                             "Free some space there; writes fail when the disk is full"))
+            break
+    out += _extension_checks()
+    if launch_mode.resolve(cwd)[0] == launch_mode.TERMINAL:
+        why = renderer_problem()
+        if why:
+            out.append(Check(False, f"Terminal mode can't draw: {why}",
+                             "In a shell: thimble update, or thimble mode browser"))
+        if not terminal_views_wrap():
+            out.append(Check(False, "Terminal mode can't show views: no sandbox for them here",
+                             f"{VERBOSE_FIX} names the commands that install bubblewrap"))
+    return out
+
+
+def _checked_check(area: str, fn, *args) -> list[Check]:
+    """A check's lines, or one line that says it could not be checked: the checklist prints whatever else it can."""
+    try:
+        got = fn(*args)
+    except Exception as e:  # noqa: BLE001 — the doctor reports; it never fails on one of its lines
+        return [Check(False, f"{area} not checked ({type(e).__name__})", f"{VERBOSE_FIX} has details")]
+    return got if isinstance(got, list) else [got]
+
+
+def doctor_checks(cwd: Path) -> list[Check]:
+    """The doctor's checklist for a session in `cwd`, in order: versions, sign-in, server, plugin, Claude Code's
+    sandbox, card code, views and screenshots, thimble's agents, then only what is wrong of the config, the disk, the
+    extensions and terminal mode."""
+    out = [*_checked_check("Versions", _version_check), *_checked_check("Sign-in", _sign_in_check),
+           *_checked_check("Server", _server_check), *_checked_check("Plugin", _plugin_check, cwd),
+           *_checked_check("Claude Code's sandbox", _sandbox_check, cwd),
+           *_checked_check("Card code", _card_code_check), *_checked_check("Views", _views_check)]
+    with server_dirs():
+        out += [*_checked_check("thimble's agents", _agents_check, cwd),
+                *_checked_check("Setup", _when_wrong_checks, cwd)]
+    return out
+
+
+def doctor_check_text(cwd: Path) -> str:
+    """What `thimble doctor` prints: `thimble doctor`, one `✓` or `!` line per check (doctor_checks), each at most
+    CHECK_LINE_MAX characters, a fix line under each problem, at most FIX_LINE_MAX, then DETAILS_LINE."""
+    lines = ["thimble doctor"]
+    for check in doctor_checks(cwd):
+        lines.append(_fit(f"{'✓' if check.ok else '!'} {check.line}", CHECK_LINE_MAX))
+        if not check.ok and check.fix:
+            lines.append("  " + _fit(check.fix, FIX_LINE_MAX - 2))
+    lines.append(DETAILS_LINE)
+    return "\n".join(lines)
+
+
 # ----------------------------------------------------------------------------- fix / revert / restart
 
 
@@ -3366,7 +3857,7 @@ def restart(*, keep_vite: bool = False) -> list[str]:
     lines = stop(vite=not keep_vite, kernels=False)
     _leave_restart_reason(MANUAL_RESTART)
     with lock():
-        if not healthy():
+        if not serves():
             start()
         up = wait_healthy(api_url(), WAIT_S)
     lines.append(f"server {'up' if up else 'did not come up'} at {api_url()}")
@@ -3382,7 +3873,7 @@ FIX_DECLINED = "thimble fix did not run: you did not allow it."
 
 def fix_refusal() -> str:
     """'' when `thimble fix` may start, else why it did not: it needs a terminal to ask in, and where its ticket is not
-    contained (dev.fix_contained) the analyst's Allow before it starts (dev.CODE_QUESTION)."""
+    contained (dev.fix_contained) the analyst's Allow before it starts (dev.FIX_QUESTION)."""
     from . import dev  # noqa: PLC0415
 
     if not sys.stdin.isatty():
@@ -3390,7 +3881,7 @@ def fix_refusal() -> str:
     if dev.fix_contained():
         return ""
     try:
-        answer = input(f"thimble fix: {dev.CODE_QUESTION} [y/N] ")
+        answer = input(f"thimble fix: {dev.FIX_QUESTION} [y/N] ")
     except EOFError:
         answer = ""
     return "" if answer.strip().lower() in ("y", "yes") else FIX_DECLINED
@@ -3486,16 +3977,37 @@ def hook_result_path(session: str) -> Path | None:
     return home() / HOOK_RESULTS_DIR / f"{name}.json" if name else None
 
 
+def hook_marker_path(session: str) -> Path | None:
+    """<home>/up/<session>.active, named as hook_result_path names the result; None for an id it gives no name."""
+    path = hook_result_path(session)
+    return path.with_suffix(HOOK_MARKER_SUFFIX) if path else None
+
+
+def _write_private(path: Path, data: dict[str, Any]) -> None:
+    """`data` as JSON at `path`, written whole (a temporary file, then a rename) in a folder only its owner reads."""
+    config.private_dir(path.parent)
+    fd, tmp = tempfile.mkstemp(prefix=".up.", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        os.replace(tmp, path)
+    finally:
+        Path(tmp).unlink(missing_ok=True)
+
+
 def hook_up(raw: str) -> int:
     """`server up --hook`, /thimble's UserPromptExpansion hook (module note, the Bash sandbox): `up` for the hook's
-    session, folder and arguments, with what it prints kept for the skill's `up` (take_hook_result). It prints nothing,
-    since a hook's output would reach the model beside the skill's."""
+    session, folder and arguments, with what it prints kept for the skill's `up` (take_hook_result). Before `up` it
+    writes the session's marker (hook_marker_path) anew, which turns the hooks module on at the end of main's turn
+    where Claude Code does not run the module's skill.prompt hook. It prints nothing, since a hook's output would reach
+    the model beside the skill's."""
     try:
         hook = json.loads(raw)
     except ValueError:
         return 0
     path = hook_result_path(str(hook.get("session_id") or "")) if isinstance(hook, dict) else None
-    if path is None:
+    marker = hook_marker_path(str(hook.get("session_id") or "")) if isinstance(hook, dict) else None
+    if path is None or marker is None:
         return 0
     args = str(hook.get("command_args") or "")
     try:
@@ -3504,18 +4016,15 @@ def hook_up(raw: str) -> int:
         words = args.split()
     action, archive = (words + ["", ""])[:2]
     cwd = os.environ.get("CLAUDE_PROJECT_DIR") or str(hook.get("cwd") or "") or os.getcwd()
+    try:
+        _write_private(marker, {"cwd": cwd, "action": action, "at": time.time()})
+    except OSError as e:  # `up` still runs; the module turns on only where skill.prompt reaches it
+        _log(f"/thimble's marker for session {hook['session_id']} was not written: {e}")
     path.unlink(missing_ok=True)
     out = io.StringIO()
     with redirect_stdout(out):
         cmd_server_up(argparse.Namespace(cwd=cwd, session=str(hook["session_id"]), action=action, archive=archive))
-    config.private_dir(path.parent)
-    fd, tmp = tempfile.mkstemp(prefix=".up.", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump({"cwd": cwd, "action": action, "archive": archive, "at": time.time(), "text": out.getvalue()}, f)
-        os.replace(tmp, path)
-    finally:
-        Path(tmp).unlink(missing_ok=True)
+    _write_private(path, {"cwd": cwd, "action": action, "archive": archive, "at": time.time(), "text": out.getvalue()})
     return 0
 
 
@@ -3561,6 +4070,23 @@ def terminal_home_line() -> str:
         return TERMINAL_HOME_LINE
 
 
+def made_main(name: str, session: str, cwd: Path) -> None:
+    """After /thimble made `session` main of workspace `name`: the folder marked active for the plugin's hooks
+    (mark_active), and, in a session the launcher did not start, launch.json written for it (`via: skill`, with its
+    `claude` process and its CLAUDE_CONFIG_DIR), which the hooks module's bridge reads; a record that names this
+    `claude` already, as the launcher's does, is left alone. Never raises."""
+    mark_active(cwd)
+    try:
+        with server_dirs():
+            rec = read_launch(name)
+            pid = cc_plugin.claude_pid()
+            if pid and rec.get("pid") != pid:
+                launch_record(name, session, {}, [], pid, modules_off=modules_off(cwd), mode=launch_mode.BROWSER,
+                              via=VIA_SKILL, config_dir=os.environ.get("CLAUDE_CONFIG_DIR", ""))
+    except Exception as e:  # noqa: BLE001 — never a traceback in the skill text
+        _log(f"launch.json of {name} for session {session} was not written: {type(e).__name__}: {e}")
+
+
 def cmd_ensure(args: argparse.Namespace) -> int:
     cwd = Path(args.cwd or os.environ.get("THIMBLE_CALLER_CWD") or os.getcwd())
     if args.session:
@@ -3590,8 +4116,7 @@ def cmd_ensure(args: argparse.Namespace) -> int:
         print(REFUSED_LINE.format(path=cwd))
         return 0
     if in_sandbox():  # a server started here would die with the command, and the host's is out of reach
-        print(fenced_sandbox_line(cwd, (args.action or "").strip(), (getattr(args, "archive", None) or "").strip())
-              or sandbox_line(cwd))
+        print(sandbox_line(cwd))
         return 0
     ensure_home()
     env = resolve_env()
@@ -3607,10 +4132,13 @@ def cmd_ensure(args: argparse.Namespace) -> int:
     NOTICES.clear()
     LAST_START.clear()
     try:
-        up = ensure_running(WAIT_S)
+        up: bool | None = ensure_running(WAIT_S)
     except TimeoutError as e:
         _log(str(e))
-        up = healthy(url)
+        up = None
+    url = api_url()  # where the server runs: start passes over a port that is not free (pick_port)
+    if up is None:
+        up = serves(url)
     notices = list(NOTICES)
     NOTICES.clear()
     may_register = up and registrable(cwd, args.session)
@@ -3648,18 +4176,22 @@ def cmd_ensure(args: argparse.Namespace) -> int:
         else:
             given = precached_context(url, name, str(args.session)) if name and args.session else ""
             second = [PRECACHED_LINE] if given else [RESUME_LINE] if not opened and resumes(url, name) else []
-        # a plain `claude`: the warning goes under the link too, which the Stop hook shows whatever main's reply holds
-        unfenced = bool(args.session) and not launched() and not fenced_here(cwd)
-        # with the plugin's hooks off no Stop hook shows the link, so the page opens without the key
+        # a plain `claude`: what its environment lacks goes under the link too, which the Stop hook shows whatever
+        # main's reply holds
+        setup = setup_lines(cwd) if args.session else []
+        # with the plugin's hooks off no Stop hook shows the link, so the page opens without a sign-in code; a link
+        # printed here reaches the model, so only a shell's own terminal gets one with a code
         if (args.session and not cc_plugin.hooks_blocked(cwd, plugin_root())
-                and leave_link(str(args.session), ui_url(name), [UNFENCED_LINE] if unfenced else [])):
+                and leave_link(str(args.session), ui_url(name), setup)):
             print(LINK_LINE)
         else:
-            print(f"thimble: {ui_url(name, key=not args.session and to_terminal())}")
-        for line in second:
+            pair = not args.session and to_terminal()
+            link = ui_url(name, pair=pair)
+            print(f"thimble: {link}")
+            if pair and "#p=" not in link:
+                print(NO_CODE_LINE.format(log=log_path()))
+        for line in [*second, *setup]:
             print(line)
-        if unfenced:
-            print(UNFENCED_LINE)
         status = config.auth_status(cwd=cwd)
         if args.session:
             lines = monitor_lines(cwd, str(args.session))
@@ -3668,9 +4200,11 @@ def cmd_ensure(args: argparse.Namespace) -> int:
                 if line not in mark:
                     print(line)
         if name and args.session:
-            replaced = name_session(url, name, str(args.session), cwd)
+            replaced = name_session(url, name, str(args.session), cwd, sandbox=own_sandbox_here(cwd),
+                                    warnings=setup_warnings(cwd))
             if replaced:
                 print(TAKEOVER_LINE.format(other=replaced[:8]))
+            made_main(name, str(args.session), cwd)
         if not env["dev"] and not has_ui_build():
             _log(config.NO_UI_BUILD_HINT)
             print(NO_UI_LINE)
@@ -3762,10 +4296,31 @@ def ship_extensions() -> None:
         print(f"thimble: the extensions thimble ships were not added: {type(e).__name__}: {e}", file=sys.stderr)
 
 
-def cmd_doctor(_: argparse.Namespace) -> int:
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """`thimble doctor`: the checklist (doctor_check_text) for the folder it runs in; with `--verbose` the full text
+    (doctor_text)."""
     ship_extensions()
-    print(doctor_text())
+    caller = Path(os.environ.get("THIMBLE_CALLER_CWD") or os.getcwd())
+    print(doctor_text() if getattr(args, "verbose", False) else doctor_check_text(caller))
     return 0
+
+
+def cmd_unpair(_: argparse.Namespace) -> int:
+    """`thimble unpair`: every browser signed out (`POST /api/ui/unpair` when the server answers, which forgets them at
+    once), and <home>/paired.json removed, so a server that starts later knows none either."""
+    url = api_url()
+    why = ""
+    if healthy(url):
+        status, body = _request("POST", f"{url}/api/ui/unpair", {})
+        if status not in (200, 204):
+            why = f"it answered {status or str(body)[:120]}"
+            _log(f"unpair: {status} {str(body)[:200]}")
+    try:
+        (home() / PAIRED_FILE).unlink(missing_ok=True)
+    except OSError as e:
+        why = why or f"{home() / PAIRED_FILE} could not be removed: {e.strerror}"
+    print(UNPAIR_FAILED_LINE.format(why=why) if why else UNPAIRED_LINE)
+    return 1 if why else 0
 
 
 def cmd_fix(_: argparse.Namespace) -> int:
@@ -3844,11 +4399,10 @@ def update_script() -> Path:
     return config.REPO_ROOT / "scripts" / "update.sh"
 
 
-# install.sh's answers to its questions, --plugin and --no-plugin, --no-modify-path and --modify-path, and
-# --require-pinned, which `thimble update` passes on to it through update.sh; --trust-workspaces and
-# --no-trust-workspaces, 0.5.0's, are passed on too for this release, and install.sh ignores them with a line that says so
+# the flags `thimble update` passes on to install.sh through update.sh: for 0.8.x install.sh ignores all but --no-plugin
+# and --require-pinned, with a line that says so (0.7's sandbox, plugin and startup-file flags)
 INSTALL_FLAGS = ("--sandbox-deps", "--no-sandbox-deps", "--plugin", "--no-plugin", "--no-modify-path", "--modify-path",
-                 "--trust-workspaces", "--no-trust-workspaces", "--require-pinned")
+                 "--require-pinned")
 
 
 def _gh_ok(gh: str, *args: str) -> bool:
@@ -4119,7 +4673,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("stop", help="stop the server (by pid); asks first while work runs")
     add_yes_flag(sp, "stop")
     sp.set_defaults(fn=cmd_stop)
-    for name, fn, help_ in (("doctor", cmd_doctor, "print the state; works with the server down"),
+    dr = sub.add_parser("doctor", help="a checklist of what works, with the fix for each problem; works with the "
+                                       "server down")
+    dr.add_argument("--verbose", action="store_true", help="the full detail: paths, pids, ports, every switch, the log")
+    dr.set_defaults(fn=cmd_doctor)
+    for name, fn, help_ in (("unpair", cmd_unpair, "sign out every browser"),
                             ("fix", cmd_fix, "development install, server down: run the fix ticket in the live checkout, "
                                                     "then restart"),
                             ("revert", cmd_revert, "development install: undo the last change thimble's dev agent applied")):
@@ -4155,7 +4713,7 @@ def build_parser() -> argparse.ArgumentParser:
     for flag in INSTALL_FLAGS:
         u.add_argument(flag, dest="install_flags", action="append_const", const=flag, help="passed on to install.sh")
     u.set_defaults(fn=cmd_update)
-    la = sub.add_parser("launch-args", help="for plugin/bin/thimble: the plugin folder, the --allowedTools, --effort and --settings values, the tools that end a turn without text, main's --name, the session id, the env, unset and note lines, then main's prompt")
+    la = sub.add_parser("launch-args", help="for plugin/bin/thimble: the plugin folder, the --effort and --settings values, the tools that end a turn without text, main's --name, the session id, the env, unset and note lines, then main's prompt")
     la.add_argument("--cwd")
     la.add_argument("--resume", action="store_true", help="a line before the prompt: the folder's last main session")
     la.add_argument("--settings", help="the analyst's own --settings, which thimble's are merged into")

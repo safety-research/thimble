@@ -14,6 +14,7 @@ import { DeckSidebar, DeckView, type DeckHandle } from './Deck'
 import type { DocFilter } from './Editor'
 import { docComments, EvidenceActions, type EvidenceActionsValue } from './Evidence'
 import { PageView } from './Page'
+import { useLookedAt } from './newComments'
 import { ReportPage } from './ReportPage'
 import { SelectComment } from './SelectComment'
 import { StoryEditor, StorySidebar, type StoryEditorHandle } from './StoryEditor'
@@ -54,6 +55,8 @@ function Arranged({ ws, slug, renderer, doc, filter, client, drawer, onSaved, wr
   // the comment a click picked, while the document still has it open
   const picked = useMemo(() => comments.find((c) => c.id === pickedId) ?? null, [comments, pickedId])
   const viewRef = useRef<HTMLDivElement | null>(null)
+  // the comment picked is looked at, so the new comments' dot on the Comments pane leaves its run out
+  useLookedAt(ws, picked?.run)
   // a click on a tinted sentence picks its comment, the next one of the sentence's on each click; a click elsewhere in
   // the view lets it go, and a click in the evidence card or the selection's comment keeps it
   const onViewClick = (e: MouseEvent<HTMLDivElement>) => {

@@ -132,7 +132,7 @@ async def _click_orientation(bridge, project: Path) -> tuple[session.Live, str, 
     transcript; its file appears under main's session folder."""
     lv = _attach(project)
     bridge.answers.append({"agentId": AGENT})
-    ans = await orient_session.start(CORPUS, "", ["final"], route=subagents.CLICK)
+    ans = await orient_session.start(CORPUS, "", route=subagents.CLICK)
     assert ans.agent_id == AGENT
     path = _agent_file(project, AGENT, agentType="thimble:orientation", toolUseId="toolu_plugin_105f7e7c43f6",
                        description="orientation: the whole corpus")
@@ -589,6 +589,43 @@ async def test_a_descendant_s_step_ends_at_its_task_notification_in_either_shape
         "the notice is no line of the orientation's thread"
 
 
+@pytest.mark.parametrize("shape", ["user", "attachment"])
+async def test_two_children_that_end_together_in_one_notification_message_both_end(bridge, project, ended, shape):
+    """Claude Code puts the notifications of two tasks that end together in one message, one block each, such as two
+    helpers of an orientation; read as one notification, the first helper kept its step running. Each ends."""
+    lv, chat, path = await _click_orientation(bridge, project)
+    with subagents.update(CORPUS) as state:
+        for h in ("h1", "h2"):
+            sf.registry(state)[h] = {"type": "thimble:orient-helper", "role": "orient-helper", "parent": AGENT,
+                                     "root": AGENT, "status": "running", "descendant": True}
+    for h in ("h1", "h2"):
+        child = _agent_file(project, h, agentType="thimble:orient-helper", description=f"survey {h}",
+                            parentAgentId=AGENT, toolUseId=f"toolu_{h}")
+        _write(child, _assistant(_use(f"toolu_{h}r", "Read", {"file_path": "/c/board.jsonl"})),
+               _result(f"toolu_{h}r", "1\tx"))
+    session.tail_once(lv)
+    steps = {m["agent_id"]: m["id"] for m in agents.list_chats(CORPUS) if m.get("role") == agents.STEP_ROLE}
+    note = "\n".join(f"<task-notification>\n<task-id>{h}</task-id>\n<tool-use-id>toolu_{h}</tool-use-id>\n"
+                     f"<status>completed</status>\n<summary>Agent \"survey {h}\" finished</summary>\n"
+                     f"</task-notification>" for h in ("h1", "h2"))
+    if shape == "user":
+        rec = {"type": "user", "isMeta": True, "origin": {"kind": "task-notification"},
+               "message": {"role": "user", "content": "[SYSTEM NOTIFICATION - NOT USER INPUT]\n\n" + note}}
+    else:
+        rec = {"type": "attachment", "attachment": {"type": "queued_command", "prompt": note,
+                                                    "commandMode": "task-notification"}}
+    _write(path, rec)
+    session.tail_once(lv)
+    assert [agents.read_meta(CORPUS, steps[h])["status"] for h in ("h1", "h2")] == ["done", "done"]
+
+
+def test_task_notices_reads_each_block_and_a_bare_notification_as_one():
+    two = "pre <task-notification><task-id>a</task-id><status>completed</status></task-notification>\n" \
+          "<task-notification><task-id>b</task-id><status>killed</status></task-notification>"
+    assert session.task_notices(two) == [{"task-id": "a", "status": "completed"}, {"task-id": "b", "status": "killed"}]
+    assert session.task_notices("<task-id>c</task-id>") == [{"task-id": "c"}]
+
+
 async def test_clear_carries_thimble_s_agents_into_the_new_session_read_from_the_start_of_its_file(bridge, project,
                                                                                                 ended):
     lv, chat, path = await _click_orientation(bridge, project)
@@ -729,7 +766,8 @@ async def test_an_orientation_stopped_with_esc_is_recorded_as_one_claude_code_re
     """Live check L9: Esc in the agent view makes Claude Code mark the agent stopped by the user ("was stopped by user"
     in its notification), and every later SendMessage fails with "was stopped by the user and won't be resumed". The
     mirror records that stop as final (stopped_by user, the chat's `continue: stopped-by-user`), from the notification
-    or from the error main's own SendMessage got, so the browser offers a new orientation instead of a follow-up."""
+    or from the error main's own SendMessage got, so a message in its thread starts a continuation instead of a
+    follow-up (U2)."""
     lv, chat, path = await _click_orientation(bridge, project)
     _write(Path(lv.transcript_path), _notice(AGENT, "killed", summary='Agent "orientation: x" was stopped by user'), END)
     session.tail_once(lv)

@@ -5,9 +5,10 @@ statement (`text`) and its `details`, and a comment stored before `details` read
 Done hides a comment, and one resolved as known before 0.7.0 reads as resolved; a run's end supersedes its check's
 earlier comments on what it covered; a deleted card's comments are not served; main's run_check with `on: cards` gives
 the exact Agent call, and main's own add_comment on a card is Claude's note. The built-ins, Judgment calls,
-Unverifiable and Important details, each cover the documents and the cards and are on until the analyst turns one off;
-these tests turn the other two off. The module is the fake bridge (subagent_fakes); an agent's end is
-subagents.run_ended. A plan card is the plan kind, its steps in payload.steps."""
+Unverifiable and Important details, each cover the documents and the cards; only Important details is on until the
+analyst turns a check on or off, and these tests turn the other two off as the analyst would. The module is the fake
+bridge (subagent_fakes); an agent's end is subagents.run_ended. A plan card is the plan kind, its steps in
+payload.steps."""
 from __future__ import annotations
 
 import asyncio
@@ -90,15 +91,18 @@ async def _comment(act: checks._Active, ref: str, text: str, tid: str, details: 
     return await tools.call(CORPUS, "add_comment", args, session=checks.session_key(IMPORTANT, checks.CANVAS), tool_use_id=tid)
 
 
-def test_the_built_ins_are_three_checks_each_on_and_over_the_documents_and_the_cards(workspaces_tmp):
-    """0.7.0: Judgment calls, Unverifiable and Important details, in that order, each on until the analyst turns it off
-    and covering the documents and the cards; Verified is no built-in any more, so a new workspace does not list it."""
+def test_the_built_ins_are_three_checks_over_the_documents_and_the_cards_and_only_important_details_is_on(
+        workspaces_tmp):
+    """0.7.0: Judgment calls, Unverifiable and Important details, in that order, each covering the documents and the
+    cards; Verified is no built-in any more, so a new workspace does not list it. Only Important details is on until the
+    analyst turns a check on or off."""
     config.workspace_dir(CORPUS).mkdir(parents=True, exist_ok=True)
     listed = checks.list_checks(CORPUS)
     assert [(c["id"], c["name"]) for c in listed] == [("judgment", "Judgment calls"), ("unverified", "Unverifiable"),
                                                       (IMPORTANT, "Important details")]
+    assert [(c["id"], c["shown"]) for c in listed] == [("judgment", False), ("unverified", False), (IMPORTANT, True)]
     for c in listed:
-        assert c["builtin"] is True and c["shown"] is True and c["covers"] == ["documents", "cards"], c
+        assert c["builtin"] is True and c["covers"] == ["documents", "cards"], c
         want = open(config.REPO_ROOT / "prompts" / "checks" / f"{c['id']}.md", encoding="utf-8").read()
         assert c["prompt"] == want.split("\n---\n", 1)[1].strip() and c["prompt"].endswith("If you are unsure, leave no comment.")
     assert checks.read(CORPUS, IMPORTANT)["prompt"].startswith("Comment on a passage only when the reader would likely miss")
@@ -141,6 +145,37 @@ def test_a_workspace_s_stored_built_ins_read_with_today_s_names_prompts_and_cove
     assert checks.names(CORPUS)["verified"] == "Verified" and checks.by_name(CORPUS, "Unverifiable")["id"] == "unverified"
     (config.workspace_dir(CORPUS) / checks.DIR / "verified.json").unlink()
     assert checks.create(CORPUS, "Verified", "Mark the checked claims.", created_by="analyst")["id"] == "verified-2"
+
+
+def test_a_workspace_from_0_8_0_shows_only_important_details_and_keeps_each_switch_the_analyst_set(workspaces_tmp):
+    """0.7.0 and 0.8.0 turned every built-in on and stored it whole, on, when it ran or a save marked it stale, so a
+    stored copy that is on says nothing of the analyst: there Judgment calls and Unverifiable read off, their runs kept,
+    and Important details on. A switch the analyst sets is stored with `shown_set` and stays, through the saves a run
+    makes, and so does a built-in stored off."""
+    ws = config.workspace_dir(CORPUS)
+    ws.mkdir(parents=True, exist_ok=True)
+    run = {"run": "r1", "status": "done", "comments": 2, "seen": ["abc"]}
+    for cid in checks.BUILTINS:
+        checks.save(CORPUS, {**checks.builtin(cid), "shown": True,
+                             "runs": {"report": dict(run), checks.CANVAS: dict(run)}})
+
+    def shown() -> list[tuple[str, bool]]:
+        return [(c["id"], c["shown"]) for c in checks.list_checks(CORPUS)]
+
+    assert shown() == [("judgment", False), ("unverified", False), (IMPORTANT, True)]
+    assert all(c["runs"] == {"report": run, checks.CANVAS: run} for c in checks.list_checks(CORPUS)), "the runs stay"
+
+    checks.edit(CORPUS, "judgment", shown=True)
+    checks.edit(CORPUS, IMPORTANT, shown=False)
+    stored = json.loads((ws / checks.DIR / "judgment.json").read_text())
+    assert (stored["shown"], stored["shown_set"]) == (True, True)
+    assert shown() == [("judgment", True), ("unverified", False), (IMPORTANT, False)], "the analyst's switches stay"
+    for cid in checks.BUILTINS:  # a run's end saves the check as it reads
+        checks.save(CORPUS, checks.read(CORPUS, cid))
+    assert shown() == [("judgment", True), ("unverified", False), (IMPORTANT, False)]
+
+    checks.save(CORPUS, {**checks.builtin(IMPORTANT), "shown": False, "runs": {}})  # turned off in 0.8.0, unmarked
+    assert checks.read(CORPUS, IMPORTANT)["shown"] is False, "a built-in stored off stays off"
 
 
 async def test_a_workspace_s_check_and_comments_stored_under_important_details_former_id_read_as_important_details(
@@ -326,19 +361,26 @@ async def test_main_s_turn_end_runs_important_details_on_the_unseen_cards_with_a
     assert len(bridge.ops("spawn")) == 1, "nothing unseen: no run"
 
 
-async def test_in_a_new_workspace_main_s_turn_end_runs_each_built_in_on_the_cards(workspaces_tmp, bridge, monkeypatch):
-    """The built-ins are on in a workspace that stored none of them, and each covers the cards: main's turn end starts
-    Judgment calls, Unverifiable and Important details on them."""
+async def test_in_a_new_workspace_main_s_turn_end_runs_important_details_alone_on_the_cards(workspaces_tmp, bridge,
+                                                                                             monkeypatch):
+    """Each built-in covers the cards, and only Important details is on in a workspace that stored none of them: main's
+    turn end starts it alone on them. Judgment calls, turned on by the analyst, runs at the next turn end."""
     rows = {"checks": {"model": "claude-opus-5-5", "effort": "high", "fast": False}}
     real = config.models_for
     monkeypatch.setattr(config, "models_for", lambda c=None: {**real(c), **{k: dict(v) for k, v in rows.items()}})
     config.workspace_dir(CORPUS).mkdir(parents=True, exist_ok=True)
     card = _card("What did the pilot show?", takeaway="Both agents merged their PR.")
     checks.main_turn_ended(CORPUS, "2000-01-01T00:00:00+00:00")
-    await _until(lambda: len(bridge.ops("spawn")) == 3, "the built-ins never started at main's turn end")
-    assert sorted(s["what"] for s in bridge.ops("spawn")) == [f"{cid} on {checks.CANVAS}" for cid in
-                                                             (IMPORTANT, "judgment", "unverified")]
-    assert all(_run(cid)["covered"] == [f"card:{card}"] for cid in checks.BUILTINS)
+    await _until(lambda: len(bridge.ops("spawn")) == 1, "Important details never started at main's turn end")
+    await asyncio.sleep(0.05)
+    assert [s["what"] for s in bridge.ops("spawn")] == [f"{IMPORTANT} on {checks.CANVAS}"]
+    assert _run(IMPORTANT)["covered"] == [f"card:{card}"]
+    assert not _run("judgment") and not _run("unverified")
+    checks.edit(CORPUS, "judgment", shown=True)
+    checks.main_turn_ended(CORPUS, "2000-01-01T00:00:00+00:00")
+    await _until(lambda: len(bridge.ops("spawn")) == 2, "the check turned on never started at main's turn end")
+    assert bridge.ops("spawn")[1]["what"] == f"judgment on {checks.CANVAS}"
+    assert _run("judgment")["covered"] == [f"card:{card}"]
 
 
 async def test_a_turn_end_covers_only_the_cards_changed_since_the_turn_began(board, bridge):

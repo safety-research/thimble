@@ -1,177 +1,85 @@
 {
   "name": "Wiki Page History",
-  "description": "Every wiki page with its revisions over time, colored by wiki, kind of save, the page's status (deleted or never deleted), kind of message, signature or any label, filtered by wiki, username, name and the time range; one page's revisions over time with the lines they added and removed, and its edit history in the range read as a wiki shows it: each revision a diff against the one before or, on a page used as a message thread, the message it left, by which username and IP prefix, with a link to its line and the administrator's deletes in place.",
-  "claims": [
-    "pages.jsonl",
+  "description": "Every wiki page with its saved revisions and the administrator's deletes over time, the pages in the time range listed by their revisions, usernames and deletes, and one page's history in the side panel: who wrote on it when, and each revision as what it added or removed against the one before, by username and IP prefix, with the deletes in place.",
+  "scope": [
     "revisions.jsonl",
     "events.jsonl",
+    "pages.jsonl",
     "labels.jsonl"
   ],
-  "accepts": [
-    {
-      "form": "L<n>",
-      "means": "the record on line <n>: a page of pages.jsonl opened with its history, a revision of revisions.jsonl shown in its page's history, a save, delete or request of events.jsonl at its place in the page's history (or by itself when no page holds it), a username of labels.jsonl with its pages"
-    }
-  ],
-  "units": [
-    {
-      "form": "<page_id>",
-      "means": "one wiki page, such as dse/StartSeite, with its whole edit history and delete events"
-    }
-  ],
-  "libs": [],
   "records": [
     {
-      "name": "page",
-      "one": "one wiki page of pages.jsonl with its revisions and delete events",
-      "fields": [
-        {
-          "name": "deletes",
-          "type": "number",
-          "derived": "computed",
-          "from": "events.jsonl delete events",
-          "how": "the delete events whose page_key is the page's"
-        },
-        {
-          "name": "first and last write",
-          "type": "time",
-          "derived": "cleaned",
-          "from": "first_write and last_write",
-          "how": "read as UTC seconds for the time axis"
-        },
-        {
-          "name": "status",
-          "type": "category",
-          "derived": "computed",
-          "from": "the page's delete events in events.jsonl",
-          "how": "deleted when at least one delete event names the page, else never deleted"
-        },
-        {
-          "name": "thread",
-          "type": "category",
-          "derived": "computed",
-          "from": "the kind of each of the page's revisions and their usernames",
-          "how": "true when two usernames or more left messages and at least half the revisions are messages; the history then opens as messages"
-        }
-      ]
-    },
-    {
       "name": "revision",
-      "one": "one stored revision of a page in revisions.jsonl",
+      "one": "one saved revision of a page, or one delete of it",
       "fields": [
         {
-          "name": "diff",
-          "type": "list",
-          "derived": "computed",
-          "from": "this revision's body and the previous revision's body",
-          "how": "compared line by line with the changed characters of paired lines marked and unchanged runs shortened"
-        },
-        {
-          "name": "base",
-          "type": "category",
-          "derived": "computed",
-          "from": "seq, n_revs_before and the page's delete events",
-          "how": "prev against the revision before, new for a page's first revision, deleted against an empty page after a delete, withheld when the corpus holds no earlier revision"
-        },
-        {
-          "name": "add",
-          "type": "number",
-          "derived": "computed",
-          "from": "the diff",
-          "how": "lines added"
-        },
-        {
-          "name": "rem",
-          "type": "number",
-          "derived": "computed",
-          "from": "the diff",
-          "how": "lines removed"
-        },
-        {
-          "name": "admin",
-          "type": "category",
-          "derived": "computed",
-          "from": "label and the actor_label of delete events",
-          "how": "true when the username is one that deleted pages"
-        },
-        {
-          "name": "time",
+          "name": "t",
           "type": "time",
           "derived": "cleaned",
-          "from": "time",
-          "how": "read as UTC seconds for the time axis and shown in UTC"
-        },
-        {
-          "name": "save",
-          "type": "category",
-          "derived": "computed",
-          "from": "seq, n_revs_before and the page's delete events",
-          "how": "New page for a page's first revision, Edit against the revision before, After a delete against an empty page, First stored when the corpus holds no earlier revision"
-        },
-        {
-          "name": "message",
-          "type": "text",
-          "derived": "computed",
-          "from": "the diff, or the body for the first stored revision",
-          "how": "the lines the diff adds, the whole body when earlier revisions are withheld"
+          "from": "time or write_date",
+          "how": "read as UTC seconds since 1970"
         },
         {
           "name": "kind",
           "type": "category",
-          "derived": "computed",
-          "from": "message",
-          "how": "With links when the text holds http:// or https:// or www., Text only when it holds none, after blanks and the stock new-page line and withheld placeholders are dropped; none when nothing is left"
-        },
-        {
-          "name": "signature",
-          "type": "text",
           "derived": "cleaned",
-          "from": "message",
-          "how": "the name after -- at the end of the last added line that ends in one"
+          "from": "a line of revisions.jsonl, or event_type delete",
+          "how": "save or delete"
         },
         {
-          "name": "signed",
+          "name": "user",
+          "type": "category",
+          "derived": "cleaned",
+          "from": "label, or a delete's actor_label",
+          "how": "as written, an empty label as no username"
+        },
+        {
+          "name": "before",
+          "type": "text",
+          "derived": "computed",
+          "from": "the page's revisions and deletes in time order",
+          "how": "the text of the revision before, empty for the first stored one and after a delete"
+        },
+        {
+          "name": "after",
           "type": "category",
           "derived": "computed",
-          "from": "signature and label",
-          "how": "Own username when the signature is the username ignoring case, Another name when it is not, Unsigned when the text ends in no signature"
+          "from": "the page's revisions and deletes in time order",
+          "how": "restored when the first save after a delete has the text from before it, else re-created"
         }
       ]
     },
     {
-      "name": "request",
-      "one": "one request event of events.jsonl shown in a page's history",
+      "name": "page",
+      "one": "one wiki page with its revisions and deletes",
       "fields": [
         {
-          "name": "page",
-          "type": "ref",
-          "derived": "computed",
-          "from": "request",
-          "how": "the page the id or keywords in the request URL name"
-        }
-      ]
-    },
-    {
-      "name": "username",
-      "one": "one username of labels.jsonl with its pages",
-      "fields": [
-        {
-          "name": "edits",
-          "type": "number",
-          "derived": "computed",
-          "from": "revisions.jsonl",
-          "how": "the username's revisions on each of its pages"
-        },
-        {
-          "name": "deletes",
-          "type": "number",
-          "derived": "computed",
-          "from": "events.jsonl delete events",
-          "how": "the delete events whose actor_label is the username"
+          "name": "key",
+          "type": "text",
+          "derived": "cleaned",
+          "from": "page_key of pages.jsonl, revisions.jsonl or a delete",
+          "how": "a page with no line in pages.jsonl named by its delete"
         }
       ]
     }
   ],
-  "built": "2026-10-09T01:32:08+00:00",
-  "version": "3e9b7d71656f"
+  "libs": [],
+  "accepts": [
+    {
+      "form": "L<n>",
+      "means": "line <n> of revisions.jsonl or events.jsonl: the revision or delete in its page's history in the side panel; of pages.jsonl: that page's history; of labels.jsonl: the pages with records by that username; a request of events.jsonl, which names no page, alone in the side panel"
+    }
+  ],
+  "units": [
+    {
+      "form": "<page_key>",
+      "means": "one page's whole history, such as dse~StartSeite"
+    },
+    {
+      "form": "user/<username>",
+      "means": "the pages with records by one username, listed"
+    }
+  ],
+  "built": "2026-10-15T23:31:42+00:00",
+  "version": "48d45e356ae6"
 }

@@ -3,20 +3,23 @@
 // launch (PUT session/effort and session/fast); thimble's agents (the orientation, the orientation's subagents run as
 // thimble:orient-helper, the critic, the writers, the dev agent of view builds, reviews and code tickets, the report checks),
 // with a "web" switch that keeps an agent off WebFetch and WebSearch, and on the dev row a fast switch for `thimble fix`
-// alone (backend config.FAST_OF_TICKETS); the classifiers (labels, the card check, the viewer suggestion), the only
+// alone (backend config.FAST_OF_TICKETS); the classifiers (labels, the card check, the view proposals), the only
 // other rows with fast mode; and the row a classifier's call runs again on when its model
 // refuses, or off. Then one row per agent of the extensions running here (`<extension>:<agent>`). The effort menu lists
 // Claude Code's levels, and a model that runs with no effort shows none. An agent's row applies to its next start. A
 // save sends only the changed fields so defaults stay defaults (thimble's config, backend userconf.py). Choices that
 // cannot take effect are dimmed with the reason in a tooltip. Every row names its model exactly, never `default`.
-// Under the table, main's fence, which thimble's agents share as subagents of the analyst's Claude Code session (its
-// sandbox, network, web and edits of the data), with the CLAUDE.md files each agent reads; then the one agent with a
-// permission mode of its own, an extension's program that runs the dev agent, shown only where one does, and its own
-// fence; then labels and the card check, which have no mode; then how long a code ticket's question about thimble's code
-// waits on its card (cardWait); then the extensions added to thimble, each with its switch for this workspace
-// (ExtensionsSettings).
+// Under the table, the View proposals switch (PROPOSE_NOTE), which a view proposal's Don't ask again turns off; the
+// Ask key choice, ⌘-click or ⌥-click (Ctrl-click or Alt-click off a Mac), whose other key places a card freely on the
+// canvas (thimble's config `askKey`, lib/platform); then thimble's rules for main and its agents, the subagents of the
+// analyst's Claude Code session (web, edits of the data, and whether the session's shell runs in Claude Code's
+// sandbox), with the CLAUDE.md files each agent reads;
+// then the one agent with a permission mode of its own, an extension's program that runs the dev agent, shown only
+// where one does, and its own fence; then labels and the card check, which have no mode; then how long a code
+// ticket's question about thimble's code waits on its card (cardWait); then the extensions added to thimble, each with
+// its switch for this workspace (ExtensionsSettings).
 import { useEffect, useState } from 'react'
-import { Button } from '../components/Button'
+import { Button, Segmented } from '../components/Button'
 import { Chip } from '../components/Chip'
 import { TextInput } from '../components/Field'
 import { Menu, type MenuItem } from '../components/Menu'
@@ -29,6 +32,7 @@ import { ExtensionsSettings, answeredRuns, changedLocalViews, changedViews, exte
 import { hasEffort, hasFastMode, invalidateSettings, loadSettings, modelChoices, modelLabel, sameModel } from '../lib/models'
 import { EFFORTS, ROLES, type AgentRow, type Attached, type CallAgent, type Extensions, type MainEffort, type MainFence, type ModeAgent, type ModelConf, type OrientPermissions, type Settings, type SettingsPatch, type TaskRow } from '../lib/types'
 import { bus } from '../lib/bus'
+import { askKeyLabel, isMacPlatform, setAskKey, type AskKey } from '../lib/platform'
 import { EFFORT_CHOICES, FastBolt, MODEL_TIP, NEXT_LAUNCH, effortWord, mainEffort, mainFast, noFastTip } from '../chat/ModelLine'
 
 type Models = Record<string, ModelConf>
@@ -57,11 +61,16 @@ export const MAIN_MODE_LINE = "thimble's agents, code tickets' among them, run i
 export const permissionChoice = (mode: string | null | undefined): OrientPermissions =>
   mode === 'auto' ? 'auto' : mode === 'bypassPermissions' ? 'bypass' : 'manual'
 
-/** The mode the dev agent's program starts in: its row, else the mode of the analyst's Claude Code session, else Manual,
+/** The mode the dev agent's program starts in: its row as the server answers it (a Bypass the analyst did not choose
+ * here answers as Manual), else the mode of the analyst's Claude Code session with Bypass as Manual, else Manual,
  * whichever their Claude Code settings do not turn off (backend modes.mode_for). Pure. */
 export function agentMode(rows: Settings['permission_modes'], agent: ModeAgent, sessionMode: string | null | undefined, off: readonly string[] = []): OrientPermissions {
-  return [rows?.[agent], permissionChoice(sessionMode), 'manual' as const].find((m): m is OrientPermissions => !!m && !off.includes(m))!
+  const session = permissionChoice(sessionMode)
+  return [rows?.[agent], session === 'bypass' ? ('manual' as const) : session, 'manual' as const].find((m): m is OrientPermissions => !!m && !off.includes(m))!
 }
+/** The note of the menu's "Your session's" item while the analyst's Claude Code session runs in Bypass, which reaches
+ * the dev agent's program only when chosen here. */
+export const SESSION_BYPASS_NOTE = 'Manual (Bypass only when chosen here)'
 
 /** The agents of thimble's config that are one model call each, listed after the dev agent's program; their settings
  * reach an extension's program that runs their tasks (backend userconf.CALLS). */
@@ -129,22 +138,25 @@ export function agentTip(row: AgentRow): string {
   return [who, ...added, ...reach, box, net, data, "It never reads thimble's key.", `Change these under ${row.config} in thimble's config.`].join('\n')
 }
 
-/** Main's fence in words: its sandbox, network, web calls and edits of the data. Pure. */
-export function fenceLine(f: MainFence | null | undefined): string {
+/** Main's row of thimble's rules, in words: its web, its edits of the data, and its shell (`box` while the session's
+ * shell commands run in Claude Code's sandbox, Attached.sandbox). */
+export const WEB_MAIN = { mode: 'web follows your mode', off: 'no web' } as const
+export const DATA_MAIN: Record<NonNullable<MainFence['data']>, string> = { ask: 'data edits follow your mode', allow: 'data edits follow your mode', off: 'never edits data' }
+export const SHELL_MAIN = { box: "shell in Claude Code's sandbox", mode: 'shell follows your mode' } as const
+
+/** thimble's rules for main and its agents in words: web, edits of the data and the shell, which runs in Claude Code's
+ * sandbox when `sandbox` (the session's Attached.sandbox). Pure. */
+export function fenceLine(f: MainFence | null | undefined, sandbox?: boolean | null): string {
   if (!f) return ''
-  const box = f.sandbox === 'off' ? 'sandbox off' : f.sandbox_runs === false ? 'no sandbox here' : 'sandbox on'
-  const web = f.web === 'off' ? 'no web' : f.web === 'allow' ? 'web allowed' : 'asks before the web'
-  return [box, `network ${f.network ?? 'on'}`, web, DATA_WORDS[f.data ?? 'ask']].join(' · ')
+  return [WEB_MAIN[f.web === 'off' ? 'off' : 'mode'], DATA_MAIN[f.data ?? 'ask'], SHELL_MAIN[sandbox ? 'box' : 'mode']].join(' · ')
 }
 
-/** What main's fence means, one sentence per line, for its tooltip. Pure. */
-export function fenceTip(f: MainFence): string {
-  const box = f.sandbox === 'off' ? 'Sandbox off: commands can write anywhere you can.'
-    : f.sandbox_runs === false ? 'The sandbox cannot run on this machine.'
-    : "Sandbox on: commands write only in thimble's work folders, never in the folder you opened."
-  const net = f.network === 'off' ? 'Network off: commands reach no host.' : 'Network on: commands can reach the internet.'
-  const web = f.web === 'off' ? 'Web off: no agent fetches pages or searches the web.' : f.web === 'allow' ? 'Web allowed: agents fetch pages and search without asking.' : 'Web: Claude Code asks you before an agent fetches a page or searches the web.'
-  return [box, net, web, DATA_TIP[f.data ?? 'ask'], `Change these under ${f.config ?? 'agents.orientation'} in thimble's config.`].join('\n')
+/** What thimble's rules for main and its agents mean, one sentence per line, for their tooltip. Pure. */
+export function fenceTip(f: MainFence, sandbox?: boolean | null): string {
+  const web = f.web === 'off' ? 'Web off: no agent fetches pages or searches the web.' : 'Web: a fetch or a search follows your permission mode.'
+  const data = f.data === 'off' ? 'Data off: no agent changes a file of your data.' : 'Data: an edit of a file of your data follows your permission mode.'
+  const shell = sandbox ? "Shell: commands run in Claude Code's sandbox." : sandbox === false ? "Shell: commands follow your permission mode. Claude Code's sandbox is off in this session." : 'Shell: commands follow your permission mode.'
+  return [web, data, shell, 'Everything else follows your Claude Code permission mode.', `Change web and data under ${f.config ?? 'agents.orientation'} in thimble's config.`].join('\n')
 }
 
 function AgentLine({ row }: { row: AgentRow }) {
@@ -159,12 +171,12 @@ function AgentLine({ row }: { row: AgentRow }) {
   )
 }
 
-function FenceLine({ fence }: { fence: MainFence }) {
-  const { props, tip } = useTooltip(fenceTip(fence), 'tip-lines', 'start')
+function FenceLine({ fence, sandbox }: { fence: MainFence; sandbox?: boolean | null }) {
+  const { props, tip } = useTooltip(fenceTip(fence, sandbox), 'tip-lines', 'start')
   return (
     <>
       <span className="settings-agent-line settings-fence-line" tabIndex={0} {...props}>
-        {fenceLine(fence)}
+        {fenceLine(fence, sandbox)}
       </span>
       {tip}
     </>
@@ -208,7 +220,7 @@ export const ROLE_LABEL: Record<string, string> = {
   writer: 'writers',
   checks: 'report checks',
   verify: 'card check',
-  suggest: 'viewer suggestion',
+  suggest: 'view proposals',
   refusal: 'if refused',
 }
 /** A row's note under its name: what it covers, where its id does not say. */
@@ -222,7 +234,7 @@ export const AGENT_ROLES = ['orient', 'subagents', 'critic', 'writer', 'dev', 'c
 /** The classifiers: one model call each, the only rows with fast mode but the dev row's, which is `thimble fix`'s. */
 export const CLASSIFIER_ROLES = ['labels', 'verify', 'suggest'] as const
 /** The agents whose web switch the table offers (backend userconf.SUBAGENT_ROLES less the orientation, whose web is
- * main's fence's). */
+ * main's rule). */
 export const WEB_ROWS = ['critic', 'writer', 'checks'] as const
 export type WebRow = (typeof WEB_ROWS)[number]
 /** The dev row's fast switch, by the name it shows: its fast mode reaches `thimble fix` alone, the one `claude -p` job
@@ -236,6 +248,29 @@ export const cardWaitLine = (minutes: number): string =>
   `A code ticket asks you before its change reaches thimble's own code; its card waits ${minutes} min (cardWait).`
 /** The line under the table. */
 export const NEXT_START_LINE = "An agent's row applies to its next start; a run that goes on keeps its own model and effort."
+/** The View proposals switch's name and note. */
+export const PROPOSE_LABEL = 'View proposals'
+export const PROPOSE_NOTE = 'thimble may propose a view for your task above the reply box. Nothing builds until you accept it.'
+
+/** The Ask key choice's name, its options as the platform writes them (⌘-click and ⌥-click on a Mac, Ctrl-click and
+ * Alt-click elsewhere), and its note: what the other key does. */
+export const ASK_KEY_LABEL = 'Ask key'
+export const askKeyOptions = (mac: boolean): { value: AskKey; label: string }[] =>
+  (['meta', 'alt'] as const).map((k) => ({ value: k, label: `${askKeyLabel(mac, k)}-click` }))
+export const askKeyNote = (mac: boolean, key: AskKey): string =>
+  `${askKeyLabel(mac, key)}-click asks about anything in thimble; ${askKeyLabel(mac, key === 'alt' ? 'meta' : 'alt')}-drag places a card freely on the canvas.`
+
+/** What a save sends for the ask key: "alt", null to put back the default (⌘), nothing when the choice did not change.
+ * Pure. */
+export function changedAskKey(loaded: Settings | null, key: AskKey): { ask_key?: 'alt' | null } {
+  return (loaded?.ask_key === 'alt' ? 'alt' : 'meta') === key ? {} : { ask_key: key === 'alt' ? 'alt' : null }
+}
+
+/** What a save sends for View proposals: false to turn them off, null to put back the default (on), nothing when the
+ * switch did not change. Pure. */
+export function changedPropose(loaded: Settings | null, on: boolean): { propose_views?: false | null } {
+  return (loaded?.propose_views !== false) === on ? {} : { propose_views: on ? null : false }
+}
 
 /** An extension's agent, whose row is keyed `<extension>:<agent>` as thimble's config keys it. */
 const isExtensionAgent = (role: string): boolean => role.includes(':')
@@ -322,9 +357,10 @@ function LockedChip({ why, label, children }: { why: string; label: string; chil
   )
 }
 
-/** An agent's web switch: on is the fence's rule, off keeps it off WebFetch and WebSearch (its disallowedTools). */
+/** An agent's web switch: on is main's rule, which follows the session's mode, off keeps it off WebFetch and WebSearch
+ * (its disallowedTools). */
 function WebSwitch({ role, on, onChange, why }: { role: string; on: boolean; onChange?: (on: boolean) => void; why?: string }) {
-  const { props, tip } = useTooltip(why ?? (on ? `Web: your fence's rule. Switch it off to keep the ${roleLabel(role)} off the web.` : `Web off: the ${roleLabel(role)} never fetches a page or searches the web.`))
+  const { props, tip } = useTooltip(why ?? (on ? `Web: your session's mode. Switch it off to keep the ${roleLabel(role)} off the web.` : `Web off: the ${roleLabel(role)} never fetches a page or searches the web.`))
   return (
     <>
       <span className={`settings-web${why ? ' settings-locked' : ''}`} data-on={on} {...props}>
@@ -351,6 +387,11 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
   const [localOn, setLocalOn] = useState<Record<string, boolean>>({})
   // each answer to an extension's question whether to run its orientation now, sent on Save
   const [runAnswers, setRunAnswers] = useState<Record<string, boolean>>({})
+  // View proposals (thimble's config `views.propose`)
+  const [propose, setPropose] = useState(true)
+  // the ask key (thimble's config `askKey`)
+  const [ask, setAsk] = useState<AskKey>('meta')
+  const mac = isMacPlatform()
 
   useEffect(() => {
     if (!open) return
@@ -369,6 +410,8 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
         setSettings(s)
         setModeRows(s.permission_modes ?? {})
         setWeb(webRows(s))
+        setPropose(s.propose_views !== false)
+        setAsk(s.ask_key === 'alt' ? 'alt' : 'meta')
         setAttached(a)
         const fast = mainFast(a)
         setModels({ ...(s.models ?? {}), main: { model: a?.model ?? '', effort: mainEffort(a), fast: !!fast } })
@@ -388,12 +431,18 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
       const changed = changedRoles(settings?.models ?? {}, models)
       const modes = changedModes(settings?.permission_modes, modeRows)
       const webs = changedWeb(webRows(settings), web)
-      if (Object.keys(changed).length || Object.keys(modes).length || Object.keys(webs).length)
+      const proposeNow = changedPropose(settings, propose)
+      const askNow = changedAskKey(settings, ask)
+      if (Object.keys(changed).length || Object.keys(modes).length || Object.keys(webs).length || 'propose_views' in proposeNow || 'ask_key' in askNow)
         await api.putSettings(ws, {
           ...(Object.keys(changed).length ? { models: changed } : {}),
           ...(Object.keys(modes).length ? { permission_modes: modes } : {}),
           ...(Object.keys(webs).length ? { web: webs } : {}),
+          ...proposeNow,
+          ...askNow,
         })
+      // the pointer, the canvas, the tour and the views' frames take the key at once
+      if ('ask_key' in askNow) setAskKey(ask)
       for (const [name, how] of extensionCalls(exts?.extensions ?? [], extOn)) {
         if (how === 'add') await api.addExtension(ws, name)
         else await api.switchExtension(ws, name, how === 'on')
@@ -530,7 +579,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
                   ) : (WEB_ROWS as readonly string[]).includes(role) ? (
                     <WebSwitch role={role} on={web[role as WebRow] ?? true} onChange={(on) => setWeb((w) => ({ ...w, [role]: on }))} />
                   ) : role === 'orient' || role === 'subagents' ? (
-                    <WebSwitch role={role} on={fence?.web !== 'off'} why={`The orientation and its subagents follow your fence's web rule (${fence?.config ?? 'agents.orientation'}.web in thimble's config).`} />
+                    <WebSwitch role={role} on={fence?.web !== 'off'} why={`The orientation and its subagents follow your session's web rule (${fence?.config ?? 'agents.orientation'}.web in thimble's config).`} />
                   ) : role === 'dev' ? (
                     <WebSwitch role={role} on={settings.agents?.dev?.web !== 'off'} why={DEV_WEB_WHY} />
                   ) : (
@@ -556,16 +605,42 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
             </p>
           </div>
         )}
-        {settings && fence && (
-          <div className="settings-grid settings-modes settings-fence" role="table" aria-label="Fence">
+        {settings && (
+          <div className="settings-grid settings-modes settings-auto" role="table" aria-label={PROPOSE_LABEL}>
             <div className="settings-row settings-headrow" role="row">
-              <span className="label">fence</span>
+              <span className="label">views</span>
+            </div>
+            <div className="settings-row" role="row" data-auto="propose-views">
+              <span className="settings-role">{PROPOSE_LABEL}</span>
+              <span className="settings-web" data-on={propose}>
+                <Switch checked={propose} onChange={() => setPropose(!propose)} aria-label={PROPOSE_LABEL} />
+              </span>
+              <span className="settings-agent-line">{PROPOSE_NOTE}</span>
+            </div>
+          </div>
+        )}
+        {settings && (
+          <div className="settings-grid settings-modes settings-auto" role="table" aria-label={ASK_KEY_LABEL}>
+            <div className="settings-row settings-headrow" role="row">
+              <span className="label">pointer</span>
+            </div>
+            <div className="settings-row" role="row" data-auto="ask-key" data-key={ask}>
+              <span className="settings-role">{ASK_KEY_LABEL}</span>
+              <Segmented className="settings-ask-key" size="sm" track label={ASK_KEY_LABEL} options={askKeyOptions(mac)} value={ask} onChange={setAsk} />
+              <span className="settings-agent-line">{askKeyNote(mac, ask)}</span>
+            </div>
+          </div>
+        )}
+        {settings && fence && (
+          <div className="settings-grid settings-modes settings-fence" role="table" aria-label="thimble's rules">
+            <div className="settings-row settings-headrow" role="row">
+              <span className="label">thimble's rules</span>
               <span className="label">what it lets agents do</span>
             </div>
             <div className="settings-row" role="row" data-fence="main">
               <span className="settings-role">Main and its agents</span>
-              <FenceLine fence={fence} />
-              <span className="settings-agent-line settings-fence-note">Your Claude Code session's sandbox, which thimble's agents share as its subagents.</span>
+              <FenceLine fence={fence} sandbox={attached?.sandbox} />
+              <span className="settings-agent-line settings-fence-note">Your Claude Code session and thimble's agents, its subagents.</span>
             </div>
             {(['orient', 'critic', 'writer', 'checks'] as const).map((agent) => {
               const row = settings.agents?.[agent]
@@ -589,7 +664,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
               const mode = agentMode(modeRows, agent, attached?.permission_mode, off)
               const pick = (m: OrientPermissions | undefined) => setModeRows((r) => ({ ...r, [agent]: m }))
               const items: MenuItem[] = [
-                { id: 'session', label: "Your session's", note: MODE_NAME[off.includes(own) ? 'manual' : own], checked: !picked, onSelect: () => pick(undefined) },
+                { id: 'session', label: "Your session's", note: own === 'bypass' ? SESSION_BYPASS_NOTE : MODE_NAME[off.includes(own) ? 'manual' : own], checked: !picked, onSelect: () => pick(undefined) },
                 ...MODE_OPTIONS.filter((o) => !off.includes(o.value)).map((o) => ({ id: o.value, label: o.label, checked: picked === o.value, onSelect: () => pick(o.value) })),
               ]
               const row = settings.agents?.[agent]

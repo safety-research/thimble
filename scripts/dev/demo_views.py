@@ -1,4 +1,4 @@
-"""Put reviewed views in a demo pre-cache (demos/<dataset>/) in place of its orientation's own views.
+"""Put reviewed views in a demo pre-cache (demos/<dataset>/) in place of the pre-cache's own views.
 
     backend/.venv/bin/python scripts/dev/demo_views.py <pre-cache folder> --from <workspace folder>
         --view <slug>[=<new slug>] [--view …] [--corpus <dataset folder>] [--suffix " (v2)"] [--dry-run]
@@ -82,7 +82,7 @@ def as_built(ws: Path, slug: str) -> tuple[Path, str]:
 def source_slug(ws: Path, src: str, dst: str) -> str:
     """The slug the reviewed view has in workspace folder `ws`: its plain slug `dst` once the review home has renamed it,
     else `src` (`…-v2`). While both are there, the one its gate passed last (`built`), the plain one on a tie: before the
-    rename the plain slug is still the orientation's own view, built hours before the reviewed one."""
+    rename the plain slug is still the pre-cache's own view, built hours before the reviewed one."""
     def built(slug: str) -> str | None:
         p = ws / VIEWS / slug / VIEW_JSON
         return str(json.loads(p.read_text("utf-8")).get("built") or "") if p.is_file() else None

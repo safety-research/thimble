@@ -445,7 +445,7 @@ test('a new thread about a card shows the card in its frame above the field: its
   await pane.unmount()
 })
 
-test("a thread's subject stays above its chat as the chat grows: the card it is about, between `about` and its first question", async ($, on) => {
+test("a thread's subject: one dim `about` row above its chat; v shows the card it is about whole between that row and its first question", async ($, on) => {
   const w = world(on)
   await start($, w)
   await $.command.run({ command: 'thimble:thimble', args: 'threads' } as never)
@@ -456,23 +456,35 @@ test("a thread's subject stays above its chat as the chat grows: the card it is 
   await pane.unmount()
   await w.clock.advance(1100)
   pane = await look($)
-  const rows = await screen(pane, 96)
+  let rows = await screen(pane, 96)
   print('a thread about a card', rows)
   // the thread named by its first question
   expect(rows[0]).toBe('   home › threads › "why is events.jsonl so much bigger?"')
-  const about = at(rows, 'about card "What does the export hold per wiki?"')
+  let about = at(rows, 'about card "What does the export hold per wiki?"')
   expect(about).toBeGreaterThan(0)
-  // the card right under it, in its frame, its takeaway inside; then the first question and its answer
+  // the card is not drawn: a blank row, then the first question
+  expect(rows[about + 1]).toBe('')
+  expect(rows[about + 2]).toBe(' ❯ why is events.jsonl so much bigger?')
+  expect(rows.join('\n')).not.toContain('The export holds 4579')
+  // v: the card right under it, in its frame, its takeaway inside; then a blank row, the first question and its answer
+  await pane.press({ key: 'hk-subject' })
+  await w.clock.settle()
+  await pane.unmount()
+  pane = await look($)
+  rows = await screen(pane, 96)
+  print('the same thread with its card shown', rows)
+  about = at(rows, 'about card "What does the export hold per wiki?"')
   expect(rows[about + 1]).toMatch(/^ {3}╭─+╮$/)
   expect(rows[about + 2]).toMatch(/^ {3}│ What does the export hold per wiki\? +│$/)
   const end = rows.findIndex((r, i) => i > about && /^ {3}╰─+╯$/.test(r))
   expect(rows.slice(about, end).join('\n')).toContain('The export holds 4579')
-  expect(rows[end + 1]).toBe('   "why is events.jsonl so much bigger?"')
-  expect(rows.slice(end + 2).join('\n')).toContain('one per event.')
+  expect(rows[end + 1]).toBe('')
+  expect(rows[end + 2]).toBe(' ❯ why is events.jsonl so much bigger?')
+  expect(rows.slice(end + 3).join('\n')).toContain('one per event.')
   await pane.unmount()
 })
 
-test("a thread about a file's line shows that line lit, with two lines on each side; one about a passage, its words", async ($, on) => {
+test("a thread about a file's line shows on v that line lit, with two lines on each side; one about a passage, its words", async ($, on) => {
   const w = world(on)
   w.states.threads.push(
     { id: 't4', kind: 'thread', role: 'thread', title: 'four wikis?', anchor: 'README.md#L3', anchor_text: 'The corpus is an export of four wikis.', parent: 'main', created_at: '2026-10-06T10:05:00+00:00', running: false, answers: 1, seen: 1 } as never,
@@ -489,6 +501,11 @@ test("a thread about a file's line shows that line lit, with two lines on each s
   await pane.unmount()
   await w.clock.advance(1100)
   pane = await look($)
+  expect(shown(await pane.find({ key: 'h-hints' }))).toContain('v to show the lines')
+  await pane.press({ key: 'hk-subject' })
+  await w.clock.settle()
+  await pane.unmount()
+  pane = await look($)
   let rows = await screen(pane, 96)
   print("a thread about README.md line 3", rows.slice(rows.findIndex(r => r.includes('about '))))
   const about = at(rows, 'about ')
@@ -496,20 +513,31 @@ test("a thread about a file's line shows that line lit, with two lines on each s
   expect(rows[about + 1]).toBe('     2')
   expect(rows[about + 2]).toBe('     3  An export of 4,579 wiki pages and their revisions.')
   expect(rows[about + 3]).toBe('     4  Four wikis.')
-  expect(rows[about + 4]).toBe('   "four wikis?"')
+  expect(rows[about + 4]).toBe('')
+  expect(rows[about + 5]).toBe(' ❯ four wikis?')
   expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["An export of 4,579 wiki pages and their revisions."]}')
   await pane.press({ key: 'thread-open-t5' })
   await w.clock.settle()
   await pane.unmount()
   await w.clock.advance(1100)
   pane = await look($)
+  // the passage on its `about` row, cut at a word, then a blank row; v shows it whole under that row
+  rows = await screen(pane, 96)
+  const cutRow = at(rows, 'about "Most saves')
+  expect(rows[cutRow]).toMatch(/^ {3}about "Most saves came in June, when the agents [^"]*…"$/)
+  expect(rows[cutRow + 1]).toBe('')
+  await pane.press({ key: 'hk-subject' })
+  await w.clock.settle()
+  await pane.unmount()
+  pane = await look($)
   rows = await screen(pane, 96)
   print('a thread about a passage', rows.slice(rows.findIndex(r => r.includes('about '))))
   const a5 = at(rows, 'about "Most saves')
-  // the passage whole under its name, wrapped at the type area, then the question
+  // the passage whole under its name, wrapped at the type area, then a blank row and the question
   expect(rows[a5 + 1]).toBe('   Most saves came in June, when the agents were busiest on the dse wiki and its board. Few')
   expect(rows[a5 + 2]).toBe('   came later, and none after the export.')
-  expect(rows[a5 + 3]).toBe('   "why June?"')
+  expect(rows[a5 + 3]).toBe('')
+  expect(rows[a5 + 4]).toBe(' ❯ why June?')
   await pane.unmount()
 })
 
@@ -537,5 +565,171 @@ test("a long passage is cut to six rows and `… N more`, which shows it whole",
   expect(rows.join('\n')).toContain('Line 9 of the section')
   expect(rows.join('\n')).not.toContain('… 4 more')
   expect(await pane.find({ type: 'Input', key: 'ask-new' })).toBeDefined()
+  await pane.unmount()
+})
+
+// ------------------------------------------------------------------------------------------------ a side thread's chat
+
+// A side thread in terminal mode: a passage of main's reply asked about, one question, an answer that cites the card
+// it made by a chip alone.
+const PASSAGE = 'The files show 7 participants, P1 to P7. Each one has a screen recording and a transcript. P6 and P7 also have a return/ folder of thimble session logs, which hold events, telemetry, hooks and a report. The corpus has 1,303 files in all, 3.6 GB.'
+const ASKED = "what's the breakdown of file size? 3.6gb is mostly video?"
+const SIZES = "How much of the corpus's 3.6 GB is video, and how much is logs and transcripts?"
+const ANSWERED = 'Yes. The 7 screen recordings are about 3.7 GB, 95 of every 100 bytes. The thimble session logs are 174 MB and the 7 transcripts are under 1 MB [[card:s1zes000]].'
+
+/** The screenshot's thread (`tz`) and its card in world `w`, beside main and the threads `others`; `more`, a later
+ *  turn's records after its first answer. */
+function sizeThread(w: World, others: Record<string, unknown>[] = [], more: Record<string, unknown>[] = []): void {
+  w.cells.s1zes000 = {
+    id: 's1zes000',
+    notebook: 'g1',
+    kind: 'plot',
+    title: SIZES,
+    takeaway: 'Yes, it is mostly video. The 7 recordings take 3,695.5 MB, 95.5% of the 3,870.2 MB total.',
+    labels: [],
+    created_by: 'chat:tz',
+    ts: '2026-10-06T10:06:00+00:00',
+    status: 'ok',
+    outputs: [{ 'application/vnd.vegalite.v6.json': { mark: { type: 'bar' }, encoding: { y: { field: 'part', type: 'nominal', sort: null }, x: { field: 'MB', type: 'quantitative' } }, data: { name: 'd1' }, datasets: { d1: [{ part: 'video (.mp4)', MB: 3695.5 }, { part: 'session logs', MB: 174.4 }, { part: 'transcripts (.md)', MB: 0.3 }] } }, 'text/plain': '<VegaLite 6 object>' }],
+  }
+  const meta = { id: 'tz', kind: 'thread', role: 'thread', title: 'the-files-show-7', anchor: null, anchor_text: PASSAGE, anchor_surface: 'terminal', parent: 'main', created_at: '2026-10-06T10:05:00+00:00', running: false, answers: 1 + more.filter(x => x.type === 'done').length, seen: 9, question: ASKED, turn: 'answered' }
+  w.states.threads = [w.states.threads[0]!, meta, ...others] as never
+  const events = [
+    { type: 'user', text: ASKED, by: 'terminal' },
+    { type: 'tool_use', id: 'u1', name: 'mcp__plugin_thimble_thimble__add_card', input: { question: SIZES } },
+    { type: 'tool_result', id: 'u1', summary: 'card:s1zes000', cell_id: 's1zes000' },
+    { type: 'text', delta: ANSWERED, reply: true, by: 'terminal' },
+    { type: 'done', result: ANSWERED },
+    ...more,
+  ]
+  // the whole chat, as the route answers with `total` (the fixtures' route gives every event, past `--after` or not)
+  w.chats.tz = { meta, events, total: events.length }
+}
+
+/** The thread `id` opened from the threads panel, drawn once its chat and its cards are read. */
+async function openedThread($: E, w: World, id: string): Promise<M> {
+  await $.command.run({ command: 'thimble:thimble', args: 'threads' } as never)
+  await w.clock.settle()
+  let pane = await look($)
+  await pane.press({ key: `thread-open-${id}` })
+  await w.clock.settle()
+  for (let i = 0; i < 3; i++) {
+    await pane.unmount()
+    await w.clock.advance(1100)
+    pane = await look($)
+    if (!JSON.stringify(await pane.drawn()).includes('reading the card')) break
+  }
+  return pane
+}
+
+const ruled = (r: string | undefined) => /^ {3}─+$/.test(r ?? '')
+
+test("a side thread alone: its question the title, one dim `about` row under it, then the chat as Claude Code draws one; no thread list", async ($, on) => {
+  const w = world(on)
+  sizeThread(w)
+  await start($, w)
+  let pane = await openedThread($, w, 'tz')
+  let rows = await screen(pane, 96)
+  print("the side thread, alone", rows)
+  const text = rows.join('\n')
+  // the title row names the thread by its question; under it what it is about, dim, on one row, cut at a word
+  expect(rows[0]).toBe(`   home › threads › "${ASKED}"`)
+  expect(rows[1]).toBe('   about "The files show 7 participants, P1 to P7. Each one has a…"')
+  expect(ruled(rows[2])).toBe(true)
+  expect(JSON.stringify(await pane.find({ key: 'thread-about' }))).toContain('"dimColor":true')
+  // one thread: no list of threads above it, and the passage is not drawn again in full
+  expect(await pane.find({ key: 'm:threads-tree' })).toBeUndefined()
+  expect(text).not.toContain('1 thread')
+  expect(text).not.toContain('hold events, telemetry')
+  // the question as Claude Code draws a prompt: `❯` in the margin, the words on the prompt's background, unquoted
+  expect(rows[3]).toBe(` ❯ ${ASKED}`)
+  const band = JSON.stringify(await pane.find({ key: 'm:thread-q-1' }))
+  expect(band).toContain(`"backgroundColor":"${COLORS.prompt}"`)
+  // a blank row, then the answer after Claude Code's ⏺, on the type area's edge
+  expect(rows[4]).toBe('')
+  expect(rows[5]).toMatch(/^ ⏺ Yes\. The 7 screen recordings are about 3\.7 GB/)
+  // the card the answer cites alone is drawn where it is cited, once, a blank row above it; no `[ card ]`
+  const top = rows.findIndex(r => /^ {3}╭─+╮$/.test(r))
+  expect(top).toBeGreaterThan(5)
+  expect(rows[top - 1]).toBe('')
+  expect(rows[top - 2]).toMatch(/are under 1 MB\.$/)
+  expect(rows[top + 1]).toContain(SIZES.slice(0, 40))
+  expect(text).not.toContain('[ card ]')
+  expect(text).not.toContain('[[card')
+  expect(text.split(SIZES.slice(0, 40)).length - 1).toBe(1)
+  // the field under the second rule; the keys in one dim row, `v` naming what it shows
+  const bottom = rows.findIndex((r, i) => i > top && /^ {3}╰─+╯$/.test(r))
+  expect(ruled(rows[bottom + 1])).toBe(true)
+  expect(rows[bottom + 2]).toBe('   ask a follow-up question▏')
+  const hint = shown(await pane.find({ key: 'h-hints' })).trim()
+  expect(hint).toBe('a to ask · v to show the passage · b to go back · x to close')
+  // v shows the passage whole, under the rule and above the question; v again hides it
+  await pane.press({ key: 'hk-subject' })
+  await w.clock.settle()
+  await pane.unmount()
+  pane = await look($)
+  rows = await screen(pane, 96)
+  print('the same thread with its passage shown', rows.slice(0, 9))
+  expect(rows[1]).toBe('   about "The files show 7 participants, P1 to P7. Each one has a…"')
+  expect(ruled(rows[2])).toBe(true)
+  expect(rows[3]).toBe('   The files show 7 participants, P1 to P7. Each one has a screen recording and a transcript.')
+  const end = at(rows, 'The corpus has 1,303 files in all, 3.6 GB.')
+  expect(rows[end + 1]).toBe('')
+  expect(rows[end + 2]).toBe(` ❯ ${ASKED}`)
+  expect(shown(await pane.find({ key: 'h-hints' })).trim()).toContain('v to hide the passage')
+  await pane.press({ key: 'hk-subject' })
+  await w.clock.settle()
+  await pane.unmount()
+  pane = await look($)
+  rows = await screen(pane, 96)
+  expect(rows[3]).toBe(` ❯ ${ASKED}`)
+  await pane.unmount()
+})
+
+test("several threads: the list one row a thread, then a rule, then the open thread's `about` row and its chat", async ($, on) => {
+  const w = world(on)
+  const other = { id: 'ty', kind: 'thread', role: 'thread', title: 'which-took-longest', anchor: null, anchor_text: 'P3 took the longest session.', parent: 'main', created_at: '2026-10-06T10:07:00+00:00', running: false, answers: 1, seen: 1, question: 'Which participant took longest?', turn: 'answered' }
+  sizeThread(w, [other])
+  w.chats.ty = { meta: other, events: [{ type: 'user', text: 'Which participant took longest?' }, { type: 'text', delta: 'P3, at 48 minutes.', reply: true }, { type: 'done', result: 'P3, at 48 minutes.' }], total: 3 }
+  await start($, w)
+  const pane = await openedThread($, w, 'tz')
+  const rows = await screen(pane, 96)
+  print('two threads, the first open', rows)
+  expect(rows[1]).toBe('   2 threads')
+  expect(ruled(rows[2])).toBe(true)
+  // the list: each thread its question alone while one is open; no line of an answer competes with the open thread's
+  const first = rows.findIndex((r, i) => i > 2 && r.includes(`"${ASKED}"`))
+  const second = rows.findIndex((r, i) => i > 2 && r.includes('"Which participant took longest?"'))
+  expect(rows[first]!.startsWith(' ❯ ')).toBe(true)
+  expect(Math.abs(second - first)).toBe(1)
+  expect(rows.join('\n')).not.toContain('P3, at 48 minutes.')
+  expect(rows.join('\n').split('Yes. The 7 screen recordings').length - 1).toBe(1)
+  // then a rule, the open thread's `about` row, a blank row and its question on the prompt's background
+  const rule = rows.findIndex((r, i) => i > Math.max(first, second) && ruled(r))
+  expect(rule).toBe(Math.max(first, second) + 1)
+  expect(rows[rule + 1]).toBe('   about "The files show 7 participants, P1 to P7. Each one has a…"')
+  expect(rows[rule + 2]).toBe('')
+  expect(rows[rule + 3]).toBe(` ❯ ${ASKED}`)
+  await pane.unmount()
+})
+
+test("a thread's turns keep a rhythm: a blank row between a question and its answer, around a card and between turns", async ($, on) => {
+  const w = world(on)
+  sizeThread(w, [], [
+    { type: 'user', text: 'And the logs, by participant?' },
+    { type: 'text', delta: 'P6 has 120 MB of them and P7 54 MB.', reply: true },
+    { type: 'done', result: 'P6 has 120 MB of them and P7 54 MB.' },
+  ])
+  await start($, w)
+  const pane = await openedThread($, w, 'tz')
+  const rows = await screen(pane, 96)
+  print('a thread of two turns', rows)
+  const bottom = rows.findIndex(r => /^ {3}╰─+╯$/.test(r))
+  // the card's takeaway inside its border, then a blank row, then the next question and, after a blank row, its answer
+  expect(rows[bottom + 1]).toBe('')
+  expect(rows[bottom + 2]).toBe(' ❯ And the logs, by participant?')
+  expect(rows[bottom + 3]).toBe('')
+  expect(rows[bottom + 4]).toBe(' ⏺ P6 has 120 MB of them and P7 54 MB.')
+  expect(JSON.stringify(await pane.find({ key: 'm:thread-q-2' }))).toContain(`"backgroundColor":"${COLORS.prompt}"`)
   await pane.unmount()
 })

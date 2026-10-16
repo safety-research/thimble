@@ -10,10 +10,14 @@ from fastapi.testclient import TestClient
 from app import config, main
 
 
-def _health(c: TestClient) -> dict:
-    """/api/health without `home` and `app`, the install it names (test_cli covers those), which must be there."""
-    body = c.get("/api/health").json()
-    assert body.pop("home") and body.pop("app")
+def _health(c: TestClient, headers: dict | None = None) -> dict:
+    """/api/health without `home` and `app`, the install it names (test_cli covers those), which must be there to a
+    caller that proves the token (`headers`), and nowhere else."""
+    body = c.get("/api/health", headers=headers or {}).json()
+    if headers:
+        assert body.pop("home") and body.pop("app")
+    else:
+        assert "home" not in body and "app" not in body
     return body
 
 @pytest.fixture()
@@ -31,7 +35,7 @@ def dist(tmp_path, monkeypatch):
     return d
 
 
-def test_pages_assets_and_spa_fallback_are_served_when_a_build_exists(dist):
+def test_pages_assets_and_spa_fallback_are_served_when_a_build_exists(dist, plugin_headers):
     c = TestClient(main.create_app())
     for path, title in (("/", "thimble"), ("/?ws=mini", "thimble"), ("/prompts.html", "thimble · prompts"),
                         ("/explain.html", "thimble · explain")):
@@ -50,8 +54,10 @@ def test_pages_assets_and_spa_fallback_are_served_when_a_build_exists(dist):
     assert c.get("/assets/missing-000.js").status_code == 404
     # the API is unaffected: its routes answer, its unknown paths are JSON 404s, never index.html
     # `boot` is new for each start of the server's code, `ui` names the build it serves so an open tab sees a new one
-    assert _health(c) == {"ok": True, "leader": os.getsid(0), "boot": config.BOOT_ID,
-                                           "ui": main.ui_build()} and main.ui_build()
+    assert _health(c, plugin_headers()) == {"ok": True, "leader": os.getsid(0), "boot": config.BOOT_ID,
+                                            "ui": main.ui_build()} and main.ui_build()
+    # to a caller without the proof (the page, another account on the computer), no path and no pid
+    assert _health(c) == {"ok": True, "boot": config.BOOT_ID, "ui": main.ui_build()}
     r = c.get("/api/no-such-route")
     assert r.status_code == 404 and "<div id=root>" not in r.text
     assert r.headers["content-type"].startswith("application/json")

@@ -103,8 +103,8 @@ def test_a_view_an_extension_installed_is_not_the_workspace_s_own(corpora, tmp_p
     (src / "view.json").write_text(json.dumps({"name": "Tally", "claims": ["board.jsonl"], "unit": "file"}))
     (src / "reader.py").write_text(READER)
     (src / "view.html").write_text("<p>tally</p>")
-    views.install_viewer(CORPUS, "tally", src, ["board.jsonl"], why="", proposed_by="analyst", orientation=False,
-                         extension="tally")
+    views.install_viewer(CORPUS, "tally", src, ["board.jsonl"], description="", proposed_by="analyst",
+                         orientation=False, extension="tally")
     assert views.read_built(CORPUS, "tally")["unit"] == "file"
     assert views.local_extension(CORPUS)["views"] == []
 

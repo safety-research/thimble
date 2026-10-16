@@ -3,6 +3,7 @@
 // failed". A chunk is fetched again once before its failure is shown, and when the server serves a different build, the
 // tab reloads itself: never twice within RELOAD_GUARD_MS (a sessionStorage flag, so it cannot loop), and never while
 // typed text would be lost, when it shows the "thimble was updated" line with Reload instead.
+import { apiUrl } from './browserKey'
 import { bus } from './bus'
 
 export const RELOAD_KEY = 'thimble:chunk-reload'
@@ -98,7 +99,7 @@ let loadedBuild: Promise<string | null> | null = null
 /** The build the server serves, or null (dev mode, no build, or no answer). */
 export async function servedBuild(): Promise<string | null> {
   try {
-    const res = await fetch('/api/health', { cache: 'no-store' })
+    const res = await fetch(apiUrl('/api/health'), { cache: 'no-store' })
     if (!res.ok) return null
     const body = (await res.json()) as { ui?: unknown }
     return typeof body.ui === 'string' ? body.ui : null

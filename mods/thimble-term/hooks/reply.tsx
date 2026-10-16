@@ -334,6 +334,8 @@ export type ReplyOpts = {
   in?: 'reply' | 'report'
   /** the mark to light on a card, by its id (a story beat's step) */
   focus?: Record<string, Focus>
+  /** a blank row before each card and after it (a side thread's answer), where elsewhere the border stands in for one */
+  cardGaps?: boolean
 }
 
 /** A reply's blocks as rows: Markdown as the engine draws it, a paragraph or table that holds citations as links, a card
@@ -401,10 +403,12 @@ export async function drawReply(cx: Ctx, e: ResolveInput, text: string, width: n
     )
   }
   // a blank row before a block that had a blank line before it; none under a heading (it belongs to what follows it),
-  // and none next to a card, whose border stands in for one (SPEC.md, rule 11), unless a caption stands under the card
+  // and none next to a card, whose border stands in for one (SPEC.md, rule 11), unless a caption stands under the card;
+  // in a side thread's answer (cardGaps) a blank row before each card and after it, as between its turns
   const gapBefore = (i: number): boolean => {
     const b = blocks[i]!
     const before = blocks[i - 1]
+    if (opts.cardGaps && i > 0 && (b.type === 'card' || before?.type === 'card')) return true
     if (i === 0 || !b.gap || b.type === 'card' || (before?.type === 'card' && !before.caption)) return false
     const underHead = (before?.type === 'rich' && before.heading > 0) || (before?.type === 'md' && /^#{1,6}\s/.test(before.text.split('\n').at(-1)!.trim()))
     return !underHead
@@ -440,7 +444,7 @@ export async function drawReply(cx: Ctx, e: ResolveInput, text: string, width: n
       const focus = opts.focus?.[block.id] ?? (block.caption ? await captionFocus(cx, block.id, block.caption) : undefined)
       const card = await cardBlock(cx, e, block.id, cols, key, { order, in: opts.in ?? 'reply', ...(focus ? { focus } : {}) })
       const ask: Ask = { key, words: `card:${block.id}`, top: 1, ...(opts.ask ? { press: () => opts.ask!({ kind: 'card', ref: `card:${block.id}`, cardId: block.id }) } : {}) }
-      push(await row(card, ask), false)
+      push(await row(card, ask), gapBefore(i))
       // a figure's caption: dim, right under the card's border
       if (block.caption) push(await row(<Text dimColor wrap="wrap">{plainCites(block.caption)}</Text>), false)
       continue

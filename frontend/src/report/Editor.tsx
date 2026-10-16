@@ -342,7 +342,8 @@ const ACTS_FLOATING = {
 /** The hovered block's actions in the gutter at the right of its first line: its kind menu, then chat, delete and the
  * lock (a locked block is changed by no model, report_types.set_block_lock). BlockNote's side menu carries them, so
  * they follow the pointer's block. The title has no kind and no delete; a figure and a prompt have no kind; unstored
- * blocks have no chat and no lock. A drag on the actions moves the block (⌘⇧↑ and ⌘⇧↓ from the keyboard). */
+ * blocks have no chat and no lock. A drag on the actions moves the block (⌘⇧↑ and ⌘⇧↓ from the keyboard); a figure
+ * also moves by its question line (FigureBlock figureDrag). */
 function BlockActions() {
   const editor = useBlockNoteEditor() as AnyEditor
   const sideMenu = useExtension(SideMenuExtension)
@@ -850,6 +851,23 @@ export function ReportEditor({ ws, slug, doc, flags, filter, client, onSaved, on
   )
 
   const items = useCallback(async (query: string) => filterSuggestionItems(slashItems(editor, ws, slug, (id) => void chatAbout(id), turnInto), query), [editor, ws, slug, chatAbout, turnInto])
+
+  // while anything is dragged (a block by its actions or a figure by its question line, a card from the sidebar), the
+  // page takes the drag over a figure's frame too (report.css `.wu-zone[data-dragging]`, an attribute React leaves
+  // alone): a frame's page, such as a custom card's, would otherwise take the drag events, so no drop line shows over it
+  // and a drop there does nothing
+  useEffect(() => {
+    const on = () => zone.current?.setAttribute('data-dragging', '')
+    const off = () => zone.current?.removeAttribute('data-dragging')
+    document.addEventListener('dragstart', on, true)
+    document.addEventListener('dragend', off, true)
+    document.addEventListener('drop', off, true)
+    return () => {
+      document.removeEventListener('dragstart', on, true)
+      document.removeEventListener('dragend', off, true)
+      document.removeEventListener('drop', off, true)
+    }
+  }, [])
 
   // after a drop from the actions' drag, ProseMirror leaves the editor blurred with the node selection standing, so
   // the selection collapses to the drop point and the editor takes focus, with the dropped block's start as a fallback

@@ -1,5 +1,5 @@
 #!/bin/sh
-''''[ -n "${THIMBLE_SESSION:-}" ] && [ -n "${THIMBLE_SESSION_TOKEN:-}" ] && exit 0; exec "$(dirname "$0")/thimble-python" -S "$0" "$@" # '''
+''''[ -n "${THIMBLE_SESSION:-}" ] && [ -n "${THIMBLE_SESSION_TOKEN:-}" ] && exit 0; case "${1:-}" in --stream|--scratch|--work-budget) ;; *) [ -n "${THIMBLE_WS:-}" ] || [ -z "${CLAUDE_PROJECT_DIR:-}" ] || [ ${#CLAUDE_PROJECT_DIR} -gt 200 ] || [ -e "${THIMBLE_HOME:-$HOME/.thimble}/active/$(printf %s "$CLAUDE_PROJECT_DIR" | tr / %)" ] || exit 0;; esac; exec "$(dirname "$0")/thimble-python" -S "$0" "$@" # '''
 """thimble's watcher: how browser events reach the analyst's Claude Code session. The plugin's hooks
 (plugin/hooks/hooks.json) run it, and where those hooks are off (the Monitor route) main's Monitor does.
 
@@ -7,6 +7,15 @@ The first two lines make this file both a shell script and a Python program, as 
 exits at once in a session thimble starts itself, which has THIMBLE_SESSION and the THIMBLE_SESSION_TOKEN that proves it
 (app/hook_auth.py), since Claude Code's background service can hand the name alone on to the user's own sessions.
 Python runs with -S, since the file uses only the standard library and runs on every tool call.
+
+The shell line is also a gate, since the plugin's hooks run in every Claude Code session on the machine: in a folder
+neither /thimble nor the `thimble` command has opened, a hook exits before Python starts. A folder is open when
+<thimble home>/active holds its marker, an empty file named for the folder's path (CLAUDE_PROJECT_DIR) with each `/`
+made `%`, which /thimble and the `thimble` command write for the folder and for its real path (app/cli.py mark_active)
+and `thimble rm` takes away (app/runs.py purge). A hook passes the gate without a marker in terminal mode (THIMBLE_WS),
+when Claude Code names no folder, and for a folder path over 200 characters, for which no marker is written;
+--stream, --scratch and --work-budget never meet the gate, since only main's Monitor and the sessions of an extension's
+program run them, where thimble put them.
 
     .thimble-watch                      the asyncRewake hook (SessionStart, Stop, PreToolUse, UserPromptSubmit)
     .thimble-watch --permission         the PermissionRequest hook
@@ -44,7 +53,9 @@ subagent, when another watcher holds the session's lock, when no server listens 
 `claude` process has moved to another session (/clear), and when that process has exited. A server that has answered
 once is waited for across restarts.
 
-The permission hook relays the prompt to the server, which shows it in main's chat and answers when the analyst does.
+The permission hook relays the prompt to the server, with Claude Code's permission_suggestions, which shows it in main's
+chat and answers when the analyst does. An answer from the card's "Always allow" names the suggestions it adds, which
+the hook passes on as the decision's updatedPermissions, as Claude Code's own "Yes, and don't ask again" applies them.
 
 The held hook runs as each of main's turns begins, on a prompt the analyst typed and on an event the watcher woke it
 with: it takes the events the server holds for main (app/events.py QUIET_KINDS) and prints them as the prompt's added
@@ -56,9 +67,13 @@ main replies in one line (prompts/main.md).
 
 The mode hook tells the server (POST /api/events/mode) the permission mode Claude Code reports for the session as each
 of its turns begins and ends, which is the mode the agents thimble starts follow by default. It sends nothing in a
-subagent. As a turn ends it also shows, once, as its systemMessage, the dashboard link /thimble left for the session
-(app/cli.py leave_link): the link carries the key that lets the browser answer permission requests and change
-permission modes, and a systemMessage reaches the analyst's terminal but not the model's context.
+subagent. The first time main reports Manual mode in a session, the server answers with a line that says so and how to
+switch to auto mode (app/modes.py manual_line), which the hook shows as its systemMessage. As a turn ends it also shows,
+once, the dashboard link /thimble left for the session (app/cli.py leave_link): the link carries a sign-in code the
+server makes as the hook shows it, which works once, for 5 minutes, until a newer one for the workspace is made
+(app/hook_auth.py); a systemMessage reaches the analyst's terminal but not the model's context, and Claude Code also
+records it in the session's transcript. The server also leaves notes here with no link, such as the line for a new
+sign-in (app/session.py tell_terminal). Both go in one systemMessage, the link first.
 
 The agents hook tells one of thimble's agents, or a descendant of one, the ref of each call it made (POST
 /api/ws/<c>/calls/ref, for the orientation and its descendants, whose calls its thread numbers) and, after a Bash call,
@@ -85,10 +100,11 @@ thread's fork too. --agent-check also refuses a second fork of a thread from sub
 fork_check), and records each fork it lets through by its tool_use id, by which the mirror knows the fork's thread.
 The waker polls the workspace's events/queue.jsonl (app/event_files.py) for an event main's watcher has not taken,
 takes it, writes it to stderr and exits 2. --held prints the held events from held-events.json and the lines of
-the events the waker wrote out. --mode records main's permission mode in subagents.json, and on main's Stop starts the
-backend's `main-stop` call. Plan mode stops none of thimble's running agents, as in browser mode (Claude Code's own
-subagents go on in plan mode). --permission exits at once with no decision, so Claude Code asks in its own dialog.
---agents numbers an orientation's calls in its sequence (app/calls_file.py) and gives the ref as the server would.
+the events the waker wrote out. --mode records main's permission mode in subagents.json, and when it turns into or out
+of Manual mode starts the backend's `mode-notice` call, which shows or clears the `manual-mode` notice in thimble-term's
+band (app/notices.py); on main's Stop it starts the backend's `main-stop` call. Plan mode stops none of thimble's running agents, as in browser mode (Claude
+Code's own subagents go on in plan mode). --permission exits at once with no decision, so Claude Code asks in its own
+dialog. --agents numbers an orientation's calls in its sequence (app/calls_file.py) and gives the ref as the server would.
 
 The stream writes each event as one block of lines. Claude Code truncates Monitor output at 500 characters per line and
 about 3,000 per event, so lines are wrapped under LINE_CHARS and a longer event is cut and saved whole under
@@ -125,6 +141,10 @@ DENIED = "The analyst denied this in thimble's browser."
 END_TAG = "</thimble-event>"  # closes an event as the server renders it (app/events.py render)
 HELD_WAIT_S = 3.0
 AGENTS_WAIT_S = 3.0
+PAIR_WAIT_S = 3.0  # how long the Stop hook waits for the link's sign-in code (link_lines)
+NO_CODE_LINE = "thimble: to sign this browser in, run `thimble up` in a shell and open the link it prints."
+# every request goes to thimble's own server on 127.0.0.1, never through a proxy the shell names
+LOOPBACK = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 def home() -> Path:
@@ -156,8 +176,17 @@ class NoServer(urllib.error.URLError):
 
 
 def sign(token: str, role: str, nonce: str) -> str:
-    """app/hook_auth.py's sign: the proof `role` gives for `nonce`."""
+    """app/hook_auth.py's sign: the proof `role` gives for `nonce` (the server's, on an answer)."""
     return hmac.new(token.encode("utf-8"), f"{role}:{nonce}".encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def proof_headers(token: str, base: str) -> dict[str, str]:
+    """app/hook_auth.py's headers: a fresh nonce (its new_nonce) and the request's proof for the port `base` names (its
+    request_proof), good on that port alone, for a few minutes, once."""
+    nonce = f"{int(time.time())}.{secrets.token_hex(16)}"
+    port = urllib.parse.urlsplit(base).port or 80
+    auth = hmac.new(token.encode("utf-8"), f"hook@{port}:{nonce}".encode("utf-8"), hashlib.sha256).hexdigest()
+    return {"X-Thimble-Nonce": nonce, "X-Thimble-Auth": auth}
 
 
 def request(method: str, path: str, body: dict | None = None, timeout: float | None = 10.0,
@@ -170,13 +199,13 @@ def request(method: str, path: str, body: dict | None = None, timeout: float | N
     if found is None:
         raise NoServer("no server.json with a token")
     base, token = found
-    nonce = secrets.token_hex(16)
+    proof_of = proof_headers(token, base)
+    nonce = proof_of["X-Thimble-Nonce"]
     data = json.dumps(body).encode("utf-8") if body is not None else None
-    headers = {"X-Thimble-Nonce": nonce, "X-Thimble-Auth": sign(token, "hook", nonce),
-               **({"Content-Type": "application/json"} if data else {})}
+    headers = {**proof_of, **({"Content-Type": "application/json"} if data else {})}
     req = urllib.request.Request(base + path, data=data, method=method, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 — loopback, thimble's own server
+        with LOOPBACK.open(req, timeout=timeout) as resp:  # noqa: S310 — loopback, thimble's own server
             raw = resp.read()
             status = resp.status
             proof = resp.headers.get("X-Thimble-Proof") or ""
@@ -353,7 +382,7 @@ def permission(inp: dict) -> int:
     """The PermissionRequest hook (module note)."""
     body = {"cwd": folder(inp), "session": str(inp.get("session_id") or "") or None,
             "tool_name": str(inp.get("tool_name") or ""), "tool_input": inp.get("tool_input"),
-            "agent_id": inp.get("agent_id") or None}
+            "agent_id": inp.get("agent_id") or None, "suggestions": inp.get("permission_suggestions")}
     try:
         status, answer = request("POST", "/api/events/permission", body, timeout=None)
     except (OSError, http.client.HTTPException):
@@ -364,6 +393,8 @@ def permission(inp: dict) -> int:
     decision: dict = {"behavior": behavior}
     if behavior == "deny":
         decision["message"] = DENIED
+    elif isinstance(answer.get("updatedPermissions"), list) and answer["updatedPermissions"]:
+        decision["updatedPermissions"] = answer["updatedPermissions"]
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}}))
     return 0
 
@@ -391,33 +422,63 @@ def mode(inp: dict) -> int:
     ws = term_ws()
     if ws is not None:
         return mode_files(inp, ws)
-    if inp.get("hook_event_name") == "Stop" and not inp.get("agent_id"):
-        show_link(str(inp.get("session_id") or ""))
-    if inp.get("agent_id") or not inp.get("permission_mode"):
+    if inp.get("agent_id"):
         return 0
-    body = {"cwd": folder(inp), "session": str(inp.get("session_id") or "") or None,
-            "permission_mode": str(inp["permission_mode"])}
-    try:
-        request("POST", "/api/events/mode", body, timeout=AGENTS_WAIT_S)
-    except (OSError, http.client.HTTPException):
-        pass
+    said = [link_lines(str(inp.get("session_id") or ""))] if inp.get("hook_event_name") == "Stop" else []
+    if inp.get("permission_mode"):
+        body = {"cwd": folder(inp), "session": str(inp.get("session_id") or "") or None,
+                "permission_mode": str(inp["permission_mode"])}
+        try:
+            status, answer = request("POST", "/api/events/mode", body, timeout=AGENTS_WAIT_S)
+        except (OSError, http.client.HTTPException):
+            status, answer = 0, {}
+        if status == 200:
+            said.append(str(answer.get("terminal") or ""))
+    show(said)
     return 0
 
 
-def show_link(session: str) -> None:
-    """The link /thimble left for `session`, and the lines left after it, printed as the hook's systemMessage and then
-    deleted (module note)."""
+def show(lines: list) -> None:
+    """`lines`, those not empty, printed as the hook's systemMessage, one per line."""
+    text = "\n".join(x for x in lines if x)
+    if text:
+        print(json.dumps({"systemMessage": text}))
+
+
+def ws_name(url: str) -> str:
+    """The workspace a dashboard link names (`?ws=`), '' for the start page."""
+    return (urllib.parse.parse_qs(urllib.parse.urlsplit(url).query).get("ws") or [""])[0]
+
+
+def link_lines(session: str) -> str:
+    """The link /thimble left for `session`, with a sign-in code the server makes now (POST /api/ui/pair), and the lines
+    left after it, which the file then no longer holds (module note). The file's first line is the link, and empty when
+    the server left only notes (app/session.py tell_terminal). Without a code, the line that says how to sign a browser
+    in comes first in the notes. '' when nothing was left."""
     name = "".join(ch for ch in session if ch.isalnum() or ch in "-_")
     if not name:
-        return
+        return ""
     path = home() / "links" / name
     try:
-        url, _, notes = path.read_text("utf-8").strip().partition("\n")
+        text = path.read_text("utf-8")
         path.unlink()
     except OSError:
-        return
+        return ""
+    first, _, rest = text.partition("\n")
+    url = first.strip()
+    notes = [x for x in rest.splitlines() if x.strip()]
     if url:
-        print(json.dumps({"systemMessage": f"thimble: {url}" + (f"\n{notes}" if notes else "")}))
+        ws = ws_name(url)
+        try:
+            status, answer = request("POST", "/api/ui/pair", {"ws": ws}, timeout=PAIR_WAIT_S)
+        except (OSError, http.client.HTTPException):
+            status, answer = 0, {}
+        code = answer.get("code") if status == 200 else None
+        if isinstance(code, str) and code:
+            url += "#p=" + code
+        else:
+            notes.insert(0, NO_CODE_LINE)
+    return "\n".join(([f"thimble: {url}"] if url else []) + notes)
 
 
 # --------------------------------------------------------------------------- terminal mode
@@ -523,7 +584,9 @@ def held_files(inp: dict, ws: Path) -> int:
 
 def mode_files(inp: dict, ws: Path) -> int:
     """The mode hook in terminal mode: main's permission mode recorded in subagents.json (app/subagent_files.py
-    record_mode), and on main's Stop the backend's `main-stop` call."""
+    record_mode); when it turns into or out of Manual mode (MANUAL_MODES), the backend's `mode-notice` call, which shows
+    or clears the `manual-mode` notice in thimble-term's band (app/local_hooks.py); and on main's Stop the backend's
+    `main-stop` call. It prints nothing."""
     session = str(inp.get("session_id") or "")
     if inp.get("agent_id") or not session or not is_main(ws, session):
         return 0
@@ -531,7 +594,10 @@ def mode_files(inp: dict, ws: Path) -> int:
     mode = str(inp.get("permission_mode") or "")
     if mode:
         with sf.update(ws) as state:
-            sf.record_mode(state, session, mode)
+            before = str((state.get("main") or {}).get("permission_mode") or "")
+            changed = sf.record_mode(state, session, mode)
+        if changed and (mode in sf.MANUAL_MODES) != (before in sf.MANUAL_MODES):
+            spawn_local("mode-notice", inp)
     if inp.get("hook_event_name") == "Stop":
         spawn_local("main-stop", inp)
     return 0

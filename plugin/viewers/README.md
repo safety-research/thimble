@@ -4,7 +4,7 @@ The dev agent reads these when it builds a view (prompts/dev-view.md); thimble n
 workspace. Each folder holds a view (view.json, reader.py, view.html and view.term.js), invented files under sample/
 and the sample labels `thimble demo --examples` defines over them (labels.json).
 
-- `timeline`: events on a time axis, the base layout. An overview of lanes on the time range, the events in the kit's
+- `timeline`: events on a time axis in lanes. An overview of lanes on the time range, the events in the kit's
   table under it, the search, Filter by, Rows and Color by in the top row, and an event in the side panel, its words
   drawn by `thimble.text` and its record by `thimble.record`.
 - `repository`: records from a system the analyst knows, drawn the way that system draws them. A code forge's pull

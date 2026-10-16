@@ -143,7 +143,7 @@ describe("the Comments pane's rows", () => {
 
   test("on the canvas each row counts the check's open comments on the cards, and its square switches it", async () => {
     const toggled: string[] = []
-    const checks: Checks = { list: LIST, on: new Set(['important']), look: { colour: () => '', name: (id) => id ?? '', rank: () => 0 }, toggle: (id) => void toggled.push(id), create: async () => true, editPrompt: async () => true }
+    const checks: Checks = { list: LIST, ready: true, on: new Set(['important']), look: { colour: () => '', name: (id) => id ?? '', rank: () => 0 }, toggle: (id) => void toggled.push(id), create: async () => true, editPrompt: async () => true }
     const el = await mount(<CheckRows ws="w" surface={CANVAS} checks={checks} comments={[comment('a', 'p'), comment('b', 'p'), comment('c', 't', { check: null })]} adding={null} onAdding={() => {}} />)
     const rows = [...el.querySelectorAll<HTMLElement>('.wu-check')]
     expect(rows.map((r) => r.dataset.check)).toEqual(['important', 'risks'])

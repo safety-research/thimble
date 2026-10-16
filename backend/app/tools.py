@@ -31,7 +31,7 @@ from urllib.parse import urlsplit, urlunsplit
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from . import cardrun, cite, config, frames, headless, prompts
+from . import cardrun, cite, config, frames, headless, prompts, read_parts
 from .kernel_thimble import CARD_MIME  # a card type's graphic, which counts as a chart and is read through its listing
 
 log = logging.getLogger("thimble.tools")
@@ -73,11 +73,19 @@ RESULT_LINES = 40
 RESULT_CHARS_PER_LINE = 50
 RESULT_OUTPUTS = 4
 RESULT_LINES_KEY = "run_cell_result_lines"  # settings.json; a persisted key, not renamed with the tool
-# chars of outputs read_ref returns for a card, a ceiling against a runaway print
+# chars of a data card's html or dataset that edit_card's result shows, a ceiling against a runaway payload; read_ref
+# fits a whole card within READ_REF_UNITS instead (_read_cell, _fitted)
 CELL_READ_LIMIT = 40_000
 WARM_REFS_MAX = 20  # an example's quoted refs a view reads, resolved off the loop before add_card or edit_card reads them
 LINE_LIMIT = 160  # chars of a takeaway / md text on a `cells` line
 CALL_ARG_CHARS = 80  # chars of one argument on a result's `$` line (call_line)
+# of one read_ref result, in UTF-16 code units (read_parts.units), so that it stays whole in the session that reads it:
+# Claude Code (2.1.300) saves a tool result of more than 50,000 characters to a file and shows the model a 2KB preview
+# of it, and an MCP result its estimate (4 characters a token) puts past 12,500 tokens is counted, and past 25,000
+# tokens (MAX_MCP_OUTPUT_TOKENS) saved to a file in its place. read_parts.READ_UNITS is under the first and never
+# counted, whatever the text; this leaves room in it for the call line (call_line, `$ read_ref ref="…"`) that comes
+# first.
+READ_REF_UNITS = read_parts.READ_UNITS - 2 * CALL_ARG_CHARS - 40
 TAKEAWAY_AUTHOR = "model"  # cell.takeaway_author for a takeaway written with edit_card (the analyst's is `analyst`)
 TAKEAWAY_WORDS = 40  # the words a takeaway may run to, which the `## takeaway-long` line of prompts/tools.md states
 ERROR_MIME = "application/vnd.thimble.error+json"
@@ -1991,8 +1999,9 @@ def takeaway_words(text: str) -> int:
     return sum(1 for w in re.sub(r"\[\[[^\[\]]*\]\]", " ", plain).split() if re.search(r"\w", w))
 
 
-def _payload_lines(kind: str, payload: dict) -> "builtins.list[str]":
-    """A data card's payload as the model reads it."""
+def _payload_lines(kind: str, payload: dict, limit: int | None = CELL_READ_LIMIT) -> "builtins.list[str]":
+    """A data card's payload as the model reads it, a custom card's html or a dataset cut at `limit` characters (None:
+    whole, for a caller that fits the lines itself)."""
     if kind == "note":
         return ["text:", str(payload.get("text") or "")]
     if kind == "example":
@@ -2004,8 +2013,8 @@ def _payload_lines(kind: str, payload: dict) -> "builtins.list[str]":
         return [f"label: concept:{payload.get('concept') or '?'}"]
     if kind == "custom":
         html = str(payload.get("html") or "")
-        if len(html) > CELL_READ_LIMIT:
-            html = html[:CELL_READ_LIMIT] + f"\n... [truncated, {len(html) - CELL_READ_LIMIT} more chars]"
+        if limit is not None and len(html) > limit:
+            html = html[:limit] + f"\n... [truncated, {len(html) - limit} more chars]"
         from . import view_libs  # noqa: PLC0415
 
         libs = view_libs.entries(payload.get("libs"))
@@ -2016,8 +2025,8 @@ def _payload_lines(kind: str, payload: dict) -> "builtins.list[str]":
         follows = [f"follows: card:{payload['follows']}"] if payload.get("follows") else []
         return [*follows, "steps:", *notebook.plan_lines({"kind": kind, "payload": payload})]
     body = json.dumps(payload.get("dataset"), ensure_ascii=False, default=str)
-    if len(body) > CELL_READ_LIMIT:
-        body = body[:CELL_READ_LIMIT] + f"\n... [truncated, {len(body) - CELL_READ_LIMIT} more chars]"
+    if limit is not None and len(body) > limit:
+        body = body[:limit] + f"\n... [truncated, {len(body) - limit} more chars]"
     return ["dataset:", body]
 
 
@@ -2043,7 +2052,7 @@ async def _h_read_ref(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     if ref.startswith("call:"):
         from . import calls  # noqa: PLC0415
 
-        text, bad = calls.tool_read_ref(ctx.c, ref)
+        text, bad = calls.tool_read_ref(ctx.c, ref, READ_REF_UNITS)
         return err(text) if bad else ok(text)
     return await _read_excerpt(ctx, ref)
 
@@ -2066,10 +2075,37 @@ def _outputs_lines(cell: dict, body: str) -> builtins.list[str]:
     return ["outputs, from before the code above, which has not run yet:", body or "(no text output)"]
 
 
+def _fitted(entries: "builtins.list[str]", limit: int) -> str:
+    """`entries` (the lines of a read, an entry such as a card's code holding several) as one text of at most `limit`
+    UTF-16 code units (read_parts.units): whole when they fit, else the shorter entries whole and each longer one cut to
+    an equal share of what those leave, with a line that says how many characters it leaves out."""
+    sizes = [read_parts.units(e) for e in entries]
+    room = limit - max(0, len(entries) - 1)  # the line breaks between the entries
+    if sum(sizes) <= room:
+        return "\n".join(entries)
+    longer = sorted(range(len(entries)), key=sizes.__getitem__)
+    while longer and sizes[longer[0]] <= room // len(longer):
+        room -= sizes[longer.pop(0)]
+    share = room // max(1, len(longer))
+    out = builtins.list(entries)
+    for i in longer:
+        text = entries[i]
+        mark = read_parts.units(f"\n... [truncated, {len(text)} more chars]")
+        k = read_parts._head(text, share - mark) if share > mark else 0
+        out[i] = f"{text[:k]}\n... [truncated, {len(text) - k} more chars]"
+    whole = "\n".join(out)
+    if read_parts.units(whole) <= limit:
+        return whole
+    # so many longer entries that a share holds less than the line that says what it leaves out: the text itself cut
+    mark = read_parts.units(f"\n... [truncated, {len(whole)} more chars]")
+    k = read_parts._head(whole, max(1, limit - mark))
+    return f"{whole[:k]}\n... [truncated, {len(whole) - k} more chars]"
+
+
 def _read_cell(ctx: Ctx, ref: str) -> ToolResult:
-    """A card whole: its group, kind, status, question, code, every addressed output up to CELL_READ_LIMIT chars (or a
-    data
-    card's payload), then its takeaway and labels; a span ref adds the value the span names."""
+    """A card whole: its group, kind, status, question, code, every addressed output (or a data card's payload), then
+    its takeaway and labels; a span ref adds the value the span names. The text stays within READ_REF_UNITS: when it
+    would pass them, its longest parts, such as its code and its outputs, share what the rest leaves (_fitted)."""
     from . import notebook, refs
 
     cid = _cell_id_of(ref)
@@ -2085,14 +2121,11 @@ def _read_cell(ctx: Ctx, ref: str) -> ToolResult:
     if run:
         lines += ["code:", str(cell.get("code") or "").rstrip()]
         texts, extras = _outputs_text(cell, addressed=True)
-        body = "\n".join(t for t in texts if t)
-        if len(body) > CELL_READ_LIMIT:
-            body = body[:CELL_READ_LIMIT] + f"\n... [truncated, {len(body) - CELL_READ_LIMIT} more chars]"
-        lines += _outputs_lines(cell, body)
+        lines += _outputs_lines(cell, "\n".join(t for t in texts if t))
         if extras:
             lines.append(f"({', '.join(sorted(extras))} output rendered; thimble shows it)")
     else:
-        lines += _payload_lines(kind, cell.get("payload") or {})
+        lines += _payload_lines(kind, cell.get("payload") or {}, limit=None)
         if kind == notebook.PLAN_KIND and (after := notebook.plans_following(ctx.ws, cid)):
             lines.append("followed by: " + ", ".join(f"card:{x}" for x in after))
     if str(cell.get("takeaway") or "").strip():
@@ -2109,7 +2142,7 @@ def _read_cell(ctx: Ctx, ref: str) -> ToolResult:
             lines.append(f"span {ref}: {span.get('value', span.get('text'))}" if span else f"span {ref}: not in the current output")
         except refs.RefError as e:
             lines.append(f"span {ref}: {e.detail}")
-    return ok(cite.canon_text("\n".join(lines)))
+    return ok(cite.canon_text(_fitted(lines, READ_REF_UNITS)))
 
 
 async def _read_excerpt(ctx: Ctx, ref: str) -> ToolResult:
@@ -2337,12 +2370,17 @@ async def _shot_page(url: str, selector: str | None) -> ToolResult:
     run_shot = _optional("dev", "run_shot")
     if run_shot is None:
         return _not_available("screenshot", "dev", "run_shot")
+    from . import hook_auth  # noqa: PLC0415
+
     with tempfile.TemporaryDirectory(prefix="thimble-shot-") as d:
         out = Path(d) / "shot.png"
+        tok = hook_auth.mint_shot()  # the headless page holds no cookie: its reads of this server carry this token
         try:
-            code = await _maybe_await(run_shot(url, out, selector))
+            code = await _maybe_await(run_shot(url, out, selector, read_token=tok))
         except headless.Missing:
             return err(headless.NO_SCREENSHOTS)
+        finally:
+            hook_auth.drop_shot(tok)
         if not out.is_file():
             return err(f"screenshot failed (exit {code}): no image was written for {url}")
         data = base64.b64encode(out.read_bytes()).decode("ascii")
@@ -2465,16 +2503,22 @@ async def _shot_card_in_ui(c: str, cid: str, ui: str) -> ToolResult | None:
     url = f"{ui}/?{urlencode({'ws': c, 'ref': f'card:{cid}'})}"
     storage = {f"thimble:{c}:layout": json.dumps({"tab": "canvas", "chatOpen": False}),
                f"thimble:{c}:canvas-view": json.dumps({"x": 0, "y": 0, "scale": 1})}
+    from . import hook_auth  # noqa: PLC0415
+
     with tempfile.TemporaryDirectory(prefix="thimble-shot-") as d:
         png = Path(d) / "card.png"
+        tok = hook_auth.mint_shot()  # the headless page holds no cookie: its reads of this server carry this token
         try:
             code = await _maybe_await(run_shot(url, png, f'article.canvas-card[data-cell="{cid}"]', viewport=CARD_SHOT_VIEWPORT,
-                                               scale=CARD_SHOT_SCALE, storage=storage, settle=True, wait_ms=0))
+                                               scale=CARD_SHOT_SCALE, storage=storage, settle=True, wait_ms=0,
+                                               read_token=tok))
         except headless.Missing:
             return None
         except Exception:  # noqa: BLE001 — a missing node is the fallback's case, not an error to the model
             log.warning("card shot in the interface failed for card:%s", cid, exc_info=True)
             return None
+        finally:
+            hook_auth.drop_shot(tok)
         if code != 0 or not png.is_file():
             return None
         data = base64.b64encode(png.read_bytes()).decode("ascii")
@@ -2781,13 +2825,12 @@ async def _h_delete_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
 
 
 async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
-    """A proposal for a view written for how the corpus arranges its records, which a `thimble:view-builder` builds at
-    once (views.propose, dev.start_build) from its fields (views.SPEC_FIELDS), on the model and effort the call names,
-    else Settings' dev row. The orientation's proposals are built as follow-on starts of its own start, and held until
-    their views pass their checks, so each reaches the analyst as soon as it works. A viewer of unusual file types the
-    orientation proposes (views.offered_type_viewer) is stored `suggested`, offered in the File browser and built once
-    the analyst accepts it. A claim that matches no corpus file is refused, naming real paths near it; where views
-    cannot be built the proposal fails at once. A proposal from main's shim is one the analyst asked for: its result is
+    """A proposal for a view: what the analyst sees in it (`description`), what they do with it (`task`) and the files
+    it reads (`claims`), which a `thimble:view-builder` builds at once (views.propose, dev.start_build), reading those
+    files itself for the fields, keys and counts, on the model and effort the call names, else Settings' dev row. Since
+    0.8.0 the orientation proposes no views (it does not have this tool); thimble's own view proposals wait for the
+    analyst's Accept (views.offer). A claim that matches no corpus file is refused, naming real paths near it; where
+    views cannot be built the proposal fails at once. A proposal from main's shim is one the analyst asked for: its result is
     the exact Agent call that starts its builder, which main makes (`## start_job-subagent`), and the browser opens the
     view once built. A thread's fork's proposal is built the same way, by main's Agent call on a `start_agent` event
     (_ask_main), since the fork may not make it."""
@@ -2796,9 +2839,9 @@ async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     claims = args.get("claims")
     if isinstance(claims, str):
         claims = views._fold(claims)
-    spec = views.clean_spec(args)
-    given = {"name": args.get("name"), "why": args.get("why"), "claims": claims, **spec}
-    for k in ("name", "why", "claims", *(k for k, _ in views.SPEC_FIELDS)):
+    given = {"name": args.get("name"), "description": args.get("description"), "task": args.get("task"),
+             "claims": claims}
+    for k in ("name", "description", "task", "claims"):
         v = given.get(k)
         if not v or (isinstance(v, str) and not v.strip()):
             return err(f"propose_view: `{k}` is required")
@@ -2806,7 +2849,6 @@ async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     if unmatched:
         near = " ".join(hint("propose_view-near", claim=g, paths=", ".join(p)) for g, p in unmatched.items() if p)
         return err(" ".join(hint("propose_view-unmatched", claims=", ".join(unmatched), near=near).split()))
-    orient = session_kind(ctx.session) == ORIENT_SESSION
     typed = ctx.session is None  # main's own call: the build is main's Agent call
     fork = await _fork_of(ctx) if typed else None  # a thread's fork's call: main makes that Agent call (_ask_main)
     values = {k: str(args[k]) for k in ("model", "effort") if args.get(k)}
@@ -2815,17 +2857,13 @@ async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
 
         if (before := subagents.refusal_before(ctx.c)) is not None:
             return err(before.reason or f"propose_view: {before.kind}")
-    prop = await _maybe_await(views.propose(ctx.c, name=str(args["name"]).strip(), why=str(args["why"]).strip(),
-                                            claims=claims, arrangement="", proposed_by=ctx.created_by,
-                                            orientation=orient, asked=typed,
-                                            suggested=orient and views.offered_type_viewer(claims), spec=spec,
-                                            route=views.TYPED if typed else None, values=values or None))
+    prop = await _maybe_await(views.propose(ctx.c, name=str(args["name"]).strip(),
+                                            description=str(args["description"]).strip(), claims=claims,
+                                            task=str(args["task"]).strip(), proposed_by=ctx.created_by,
+                                            asked=typed, route=views.TYPED if typed else None, values=values or None))
     status = str(prop.get("status") or "queued")
-    if not prop.get("held"):
-        _chip(ctx.c, "view", str(prop.get("name") or prop.get("slug")), ref=f"view:{prop.get('slug')}", status=status)
+    _chip(ctx.c, "view", str(prop.get("name") or prop.get("slug")), ref=f"view:{prop.get('slug')}", status=status)
     claimed = ", ".join(prop.get("claims") or [])
-    if status == "suggested":
-        return ok(hint("propose_view-suggested", view=prop.get("name"), slug=prop.get("slug"), claims=claimed))
     # without Node 20+ or the frontend's packages the build fails at once (dev.start_build), and main is told why
     if why := await asyncio.to_thread(views.build_problem_for, ctx.c):
         if typed:
@@ -2836,7 +2874,7 @@ async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         return await _fork_build(ctx, str(prop["slug"]), what, fork, values)
     if typed:
         return await _typed_build(ctx, str(prop["slug"]), values)
-    if prop.get("revised") and not prop.get("held"):  # a view built under this name is changed in place (views.revise)
+    if prop.get("revised"):  # a view built under this name is changed in place (views.revise)
         return ok(hint("view-changing", view=prop.get("name"), slug=prop.get("slug")))
     return ok(hint("propose_view-proposed", view=prop.get("name"), slug=prop.get("slug"), claims=claimed))
 
@@ -3114,9 +3152,8 @@ async def _as_caller(c: str, name: str, tool_use_id: str | None) -> tuple[str, s
     """(why the call is refused, '' when it runs; the session it runs as) for a call through main's shim: the key of the
     agent of thimble's that made it (subagents.caller, from the caller hook's line, else the transcript that holds the
     call), or None for main's own. A call its caller may not make is refused (subagents.allowed): main's `critique`, the
-    critic's `add_card`, a tool of a part the orientation's run has off (orientation.part_on). A thread's fork's call
-    runs as main's own (_fork_of)."""
-    from . import orientation, orient_session, subagents  # noqa: PLC0415 — each imports this module
+    critic's `add_card`. A thread's fork's call runs as main's own (_fork_of)."""
+    from . import subagents  # noqa: PLC0415 — it imports this module
 
     canon = canonical(name)
     who = await subagents.caller(c, tool_use_id) if tool_use_id else None
@@ -3127,10 +3164,6 @@ async def _as_caller(c: str, name: str, tool_use_id: str | None) -> tuple[str, s
         return "", None
     if not subagents.allowed(who, canon):
         return f"{canon} is not available to {who.agent_type or 'this agent'}", None
-    if session_kind(who.key) == ORIENT_SESSION:
-        part = next((p for p, names in orient_session.PART_TOOLS.items() if canon in names), None)
-        if part is not None and not orientation.part_on(c, part):
-            return f"{canon} is not available in this run of the orientation, whose {part} output is off", None
     return "", who.key
 
 

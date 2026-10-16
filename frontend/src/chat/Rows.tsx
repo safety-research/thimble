@@ -3,7 +3,8 @@
 // in a row fold into one chip that names each tool and count (Bash 2 · Grep 1). In the orientation's thread every call
 // is such a line carrying its `call:` ref, so it can be cited and, open, shows its whole stored output with numbered
 // lines. Other runs of one kind of call are one card (Cards · 2 steps · 31s). Everything else is a quiet note with the
-// chips of what it points at. Label runs in a row are one Label card, a step per label.
+// chips of what it points at. Label runs in a row are one Label card, a step per label. A notice (a failure with its
+// fix, which the strip above the composer offers) is one warning line, quiet once it is closed (Notice.tsx).
 import { createContext, useContext, useEffect, useRef, useState, type DragEvent } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -22,13 +23,14 @@ import { callRef, parseRef } from '../lib/refs'
 import { CITED } from '../lib/tableCell'
 import { teleport } from '../lib/teleport'
 import { track } from '../lib/telemetry'
-import { chipIcon, chipPending, docSave, settleChip, settledWord, type Settled } from './chips'
+import { chipIcon, chipPending, docSave, sameDocRun, settleChip, settledWord, type Settled } from './chips'
 import { ChatMarkdown, ChipContext, RefText } from './markdown'
-import { API_ERROR_KIND, callLineText, callPieces, capacityNote, corpusRelative, durationText, groupState, groupTools, isRawCall, labelRunName, leadText, madeBy, QUIET_RE, runTools, stripHarness, toolDisplayName, toolMeta, toolSteps, toolSummary, underCorpus, type AgentRow as AgentRowT, type BranchRow, type CallsRow, type ChipRow as ChipRowT, type ErrorRow as ErrorRowT, type Row, type ToolGroup, type ToolRow as ToolRowT, waitText } from './model'
+import { API_ERROR_KIND, callLineText, callPieces, callToolName, capacityNote, corpusRelative, durationText, groupState, groupTools, isRawCall, labelRunName, leadText, madeBy, QUIET_RE, runTools, stripHarness, toolDisplayName, toolMeta, toolSteps, toolSummary, underCorpus, type AgentRow as AgentRowT, type BranchRow, type CallsRow, type ChipRow as ChipRowT, type ErrorRow as ErrorRowT, type Row, type ToolGroup, type ToolRow as ToolRowT, waitText } from './model'
 import { Note, ShotCard, ThreadChip, ThreadsContext } from './Notes'
 import { AgentCard, OrientLanding, openLabel } from './AgentCard'
 import { ApiErrorCard } from './ApiError'
 import { HandedBack } from './HandBack'
+import { NoticeRow } from './Notice'
 import { DocChip, GroupChip, LabelChip } from './SurfaceChips'
 import { ViewChip } from './ViewChip'
 import { autoModeRefusal } from './permissions'
@@ -64,8 +66,8 @@ export type ShownRow = Exclude<Row, ToolRowT> | ToolGroup | CallsRow | BranchRow
 const isLabelRun = (r: { kind: string; role?: string }): r is AgentRowT => r.kind === 'agent' && r.role === 'labels'
 
 /** The rows as the transcript shows them: consecutive raw calls (model.isRawCall) as one run of chip lines, other calls
- * of one kind folded into one card, consecutive view chips into one note (duplicates dropped), and consecutive label
- * runs into one card. A view build's capacity wait joins the error row before it. A line saying the session shows no
+ * of one kind folded into one card, consecutive view chips into one note (duplicates dropped), consecutive saves of one
+ * document by one writer as one row, the latest (chips.sameDocRun), and consecutive label runs into one card. A view build's capacity wait joins the error row before it. A line saying the session shows no
  * activity holds only until the next row. With `each`, every call is a chip line of its own. Pure. */
 export function shownRows(rows: readonly (Row | BranchRow)[], each = false): ShownRow[] {
   const out: ShownRow[] = []
@@ -84,6 +86,14 @@ export function shownRows(rows: readonly (Row | BranchRow)[], each = false): Sho
       if (last && last.kind === 'calls') last.tools.push(...r.tools)
       else out.push({ kind: 'calls', index: r.index, tools: [...r.tools] })
       continue
+    }
+    if (r.kind === 'chip') {
+      // a run's saves of one document in a row are one row, the latest
+      const last = out[out.length - 1]
+      if (last?.kind === 'chip' && sameDocRun(last, r)) {
+        out[out.length - 1] = r
+        continue
+      }
     }
     if (r.kind === 'chip' && r.chip === 'view') {
       const key = r.ref || r.text
@@ -203,6 +213,8 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
             return <HandedBack key={r.index} text={r.text} anchor={anchorOf(r.index)} />
           case 'error':
             return <ErrorRow key={r.index} item={r} retry={retry && retry.index === r.index ? retry : undefined} />
+          case 'notice':
+            return <NoticeRow key={r.index} item={r} ws={ws} />
         }
       })}
       {streaming && !toolPending && <Working />}
@@ -542,7 +554,7 @@ export function CallLine({ tool, ws, running, calls, startOpen = false }: { tool
   const focused = ref && focus?.ref === ref ? focus : null
   const [open, setOpen] = useState(startOpen)
   const rowEl = useRef<HTMLDivElement>(null)
-  const name = toolDisplayName(tool.name)
+  const name = callToolName(tool.name)
   const summary = toolSummary(tool.name, tool.input, ws)
   const refs = targetRefs(tool.name, summary)
   const target = refs ? '' : underCorpus(summary, ws)
@@ -591,7 +603,7 @@ export function CallLine({ tool, ws, running, calls, startOpen = false }: { tool
     </>
   )
   return (
-    <div ref={rowEl} className={`chat-call${open && opens ? ' open' : ''}`} data-tool={name} data-state={state} data-call={tool.n} data-anchor={ref ?? undefined} data-anchor-text={ref ? lineText : undefined}>
+    <div ref={rowEl} className={`chat-call${open && opens ? ' open' : ''}`} data-tool={toolDisplayName(tool.name)} data-state={state} data-call={tool.n} data-anchor={ref ?? undefined} data-anchor-text={ref ? lineText : undefined}>
       <span className="chat-call-head">
         <span className="chat-call-state" aria-hidden={running || failed ? undefined : true}>
           {running ? <Spinner size={10} label="running" /> : failed ? <Mark kind="failed" label="failed" className="chat-call-mark" /> : state === 'skipped' ? '–' : <span className="chat-call-dot" />}
@@ -715,7 +727,7 @@ export function ChipRow({ item, ws }: { item: ChipRowT; ws: string }) {
   }
   if (item.chip === 'follow_up_ran_on') return <Note className="chat-chip-row chat-ran-on" data-chip="follow_up_ran_on" text={item.text} />
   if (item.chip === 'view_failed') {
-    // an orientation's proposal that failed through its repairs: the line, and the view's chip with ✕ and Retry
+    // a proposal nobody asked for that failed through its repairs: the line, and the view's chip with ✕ and Retry
     const target = item.ref ? parseRef(item.ref) : null
     const slug = target?.kind === 'view' ? target.slug : null
     return <Note className="chat-chip-row" data-chip="view_failed" text={item.text} chips={<ViewChip ws={ws} slug={slug} name={item.view || slug || ''} />} />
@@ -956,7 +968,7 @@ export function ErrorRow({ item, retry }: { item: ErrorRowT; retry?: ErrorRetry 
       : undefined
     return (
       <div className="chat-msg chat-api-error" data-error-kind={item.errorKind}>
-        <ApiErrorCard line={item.message} retrying={item.wait != null ? buildWaitNote(item.wait) : retry?.note} waits={item.wait != null} onRetry={onRetry} />
+        <ApiErrorCard line={item.message} failure={item.failure} retrying={item.wait != null ? buildWaitNote(item.wait) : retry?.note} waits={item.wait != null} onRetry={onRetry} />
       </div>
     )
   }

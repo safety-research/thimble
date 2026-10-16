@@ -1,14 +1,16 @@
-// What a thread shows of its work that its own log does not say: where its question is while nothing of the run shows
-// yet (with main, which has not forked the thread, or with the fork of main that answers it), and the edits main made
-// itself to the cards the thread is anchored on, which land in main's log rather than the thread's.
+// What a thread shows of its work that its own log does not say: its strip's line, in the thread's own words (starting
+// while its question waits for its fork, which a short turn of main starts, then working while the fork answers it),
+// whether main's open turn is only that start (mainRelays), and the edits main made itself to the cards the thread is
+// anchored on, which land in main's log rather than the thread's.
 import type { ChatMeta, ChatRecord } from '../lib/types'
 import { toolDisplayName, type Row, type ToolRow } from './model'
 
 /** `sent`: the question waits for main to fork the thread; `working`: a fork of main answers it. */
 export type ThreadStage = 'sent' | 'working'
 
-/** What a working thread's line says at each stage. */
-export const STAGE_TEXT: Record<ThreadStage, string> = { sent: 'Sent to main', working: 'Main is working on it' }
+/** What a working thread's line says at each stage, from the thread's own point of view: main's short turn that starts
+ * the fork is the thread's start, and the fork's work is the thread's. */
+export const STAGE_TEXT: Record<ThreadStage, string> = { sent: 'Starting this thread…', working: 'Working' }
 
 /** Where a running thread's question is (ThreadStage); null while the thread does not run. Pure. */
 export function threadStage(meta: Pick<ChatMeta, 'fork'> | null | undefined, running: boolean): ThreadStage | null {
@@ -28,6 +30,32 @@ export function editedCard(row: Pick<ToolRow, 'input'>): string | null {
 }
 
 const time = (ts: string | undefined): number => (ts ? Date.parse(ts) : NaN)
+
+/**
+ * Whether main's open turn only takes the thread's latest question to its fork (it forks the thread, or passes the
+ * question on): main and the thread run, main's last turn ended before the question came, and since then main has had
+ * no message from the analyst and done nothing before the question. That turn is the thread's own start, so the thread
+ * does not show it as main's work. Pure.
+ */
+export function mainRelays(mainRecords: readonly ChatRecord[], mainRunning: boolean, threadRecords: readonly ChatRecord[], threadRunning: boolean): boolean {
+  if (!mainRunning || !threadRunning) return false
+  let at = NaN
+  for (let i = threadRecords.length - 1; i >= 0; i--) {
+    const r = threadRecords[i]
+    if (r.type === 'user' && !r.tray) {
+      at = time(r.ts)
+      break
+    }
+  }
+  if (Number.isNaN(at)) return false
+  for (let i = mainRecords.length - 1; i >= 0; i--) {
+    const r = mainRecords[i]
+    if (r.type === 'done' || r.type === 'error') return time(r.ts) <= at
+    if (r.type === 'user') return false
+    if ('ts' in r && r.ts && time(r.ts) < at) return false
+  }
+  return true
+}
 
 /**
  * Main's own edits of the cards the thread is anchored on (`anchors`), keyed by the index of the question each answered:

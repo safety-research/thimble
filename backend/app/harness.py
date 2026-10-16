@@ -17,7 +17,8 @@ server.json or Claude Code's credentials file (userconf.private_paths, CREDENTIA
 writes only its work folder and its temp folder, and the corpus too when the role's `data` is "allow"; with the
 sandbox off it writes anywhere. With the role's network off it reaches no host, and talks to thimble only on its
 stdin and stdout. Where the runtime can't run, a role whose sandbox is on does not start while `sandbox.enforce` is
-on; otherwise the program runs unboxed, and its thread says so.
+on; otherwise the program runs unboxed, its thread says so, and a notice says so (NO_BOX_NOTICE, which the analyst
+dismisses for the workspace).
 
 The token. Each run gets a token of its own (hook_auth.grant), THIMBLE_AGENT_TOKEN, valid until it ends, on the
 tool routes of the role's own tools and on the session route; a tool call made with it runs as the role's session.
@@ -87,7 +88,12 @@ STOP_WAIT_S = 5.0
 NO_BOX = ("The role's sandbox could not run here, so its program runs without one and can read what you can, "
           "thimble's token among it.")
 NO_BOX_ENFORCED = ("thimble runs an agent's program only in its sandbox (sandbox.enforce), and the sandbox can't run on "
-                   "this machine, so the {role} agent did not start. `thimble doctor` says what is missing.")
+                   "this machine, so the {role} agent did not start. `thimble doctor --verbose` says why.")
+# the notice an extension's program that runs without a sandbox posts once per extension (`no-box:<extension>`), whose
+# dismissal holds for the workspace (notices.py)
+NO_BOX_NOTICE = ("The {name} extension's program runs without a sandbox here, so it can read and change what you can, "
+                 "thimble's token among it. In a shell, `thimble doctor --verbose` names what the sandbox needs; "
+                 "Settings turns the extension off.")
 NO_DEFAULT = ("thimble lends no implementation of the {role} role to a program. Run the role's work in your program, "
               "or add to thimble's prompt for it with the prompt way.")
 TASK_WORK = ("tasks", "work")  # under the workspace: each task run's work folder, removed when the run ends
@@ -649,7 +655,7 @@ def own_line(raw: bytes) -> bytes | None:
 def claude_argv(run: Run, argv: list[str]) -> tuple[list[str], Path, dict[str, str]]:
     """(the session's argv, the folder it runs in, its environment) for a session a program asked for with `argv`
     (module note, sessions)."""
-    from . import agent_session  # noqa: PLC0415 — agent_session imports this module's callers
+    from . import agent_session, cc_settings  # noqa: PLC0415 — agent_session imports this module's callers
 
     job, conf = run.job, run.conf
     corpus = conf.corpus() or config.corpus_dir(job.c)
@@ -737,6 +743,9 @@ def claude_argv(run: Run, argv: list[str]) -> tuple[list[str], Path, dict[str, s
     settings["env"] = agent_session.settings_env(job.c, job.key, {**agent_session.fence_env(work),
                                                                   **agent_session.skill_prompts_env(corpus, work)})
     settings = agent_session.with_home_shell(settings)
+    # the session loads thimble's plugin from --plugin-dir alone: a thimble@* the analyst's settings enable would load a
+    # second MCP server and a second set of hooks (a plugin their org's managed settings force on stays)
+    settings["enabledPlugins"] = {k: False for k in cc_settings.enabled_thimbles(corpus)}
     final = [agent_session.CLAUDE_BIN, *kept, "--plugin-dir", str(agent_session.PLUGIN_DIR), "--add-dir", str(corpus), *added,
              "--settings", json.dumps(settings), "--append-system-prompt", append, "--permission-mode", permission_mode,
              "--allowedTools", ",".join(agent_session.own_rules()), "--disallowedTools", ",".join(deny)]
@@ -962,14 +971,18 @@ async def run_task(c: str, task: str, part: roles.Part, input: dict[str, Any]) -
 
 
 async def _run(run: Run, argv: list[str]) -> Any:
-    from . import agent_session  # noqa: PLC0415
+    from . import agent_session, notices  # noqa: PLC0415
 
     job = run.job
     for sub in (job.work, job.work / TMP_DIR, job.work / CACHE_DIR):
         sub.mkdir(parents=True, exist_ok=True)
     (job.work / INPUT_FILE).write_text(json.dumps(job.input, ensure_ascii=False, indent=1), "utf-8")
-    if not run.boxed and run.rec is not None:
-        run.rec.text(NO_BOX + "\n")
+    if not run.boxed:
+        if run.rec is not None:
+            run.rec.text(NO_BOX + "\n")
+        name = run.part.extension or job.task or job.role
+        notices.post(job.c, kind="sandbox", key=f"no-box:{name}", agent=f"Extension: {name}", chat=run.chat or None,
+                     text=NO_BOX_NOTICE.format(name=name), action=notices.SETTINGS)
     hook_auth.grant(run.token_id, run.token, run.allows)
     if run.chat:
         corpus = run.conf.corpus() or config.corpus_dir(job.c)
@@ -1063,7 +1076,7 @@ def mark_left() -> list[str]:
                 agents.finish_agent(c, chat, "stopped", LEFT_LINE)
                 rec = orientation.read_run(c) or {}
                 if rec.get("status") == "running" and (rec.get("chats") or {}).get(orientation.ROLE) == chat:
-                    orientation.finished(c, chat, "stopped", LEFT_LINE, report=False)
+                    orientation.finished(c, chat, "stopped", LEFT_LINE)
                 closed.append(f"{c}/{chat}")
             except Exception:  # noqa: BLE001 — never fails the start
                 log.exception("%s: program chat %s, left running, was not closed", c, chat)

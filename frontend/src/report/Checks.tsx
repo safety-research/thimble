@@ -1,9 +1,12 @@
 // The Comments pane, shared by every document type and the canvas: one row per check that covers the surface (GET
 // /ws/{c}/checks, built-ins first; CheckRows), each with its colour square to show or hide its tints and comments, its
-// count of open comments (or a spinner while it runs, ✕ when it failed), and ⋯ to open its card (CheckCard). + opens the
+// count of open comments (or a spinner while it runs, the still warning dot and a line saying so while its agent waits
+// on a permission prompt in the terminal, ✕ when it failed), and ⋯ to open its card (CheckCard). + opens the
 // new-check card. Whether a check is on is kept on the server (`shown`), so one switch covers a check's comments in the
 // documents and on the cards, and the server runs what the pane asks for (backend checks.py); `check` stream records
-// say when a run starts and ends, and `checks` records when a check changes, so both panes follow one switch.
+// say when a run starts and ends, and `checks` records when a check changes, so both panes follow one switch. The
+// pane's head carries the accent dot while a check's run left comments on its surface that the analyst has not looked
+// at (newComments.ts); opening the pane looks at them.
 // `useChecks` holds the list; `useSidebar` is the sidebar's state (shown or hidden, beside the document or over it).
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import { Button } from '../components/Button'
@@ -13,15 +16,18 @@ import { Mark } from '../components/Marks'
 import { Popover } from '../components/Menu'
 import { Spinner } from '../components/Spinner'
 import { openThread } from '../chat/Notes'
+import { TERMINAL_WAIT, useTerminalWaits } from '../chat/waiting'
 import { colourVar } from '../files/labels'
 import { checksApi } from '../lib/api'
 import { bus } from '../lib/bus'
+import { demoStop } from '../lib/demo'
 import { track } from '../lib/telemetry'
 import type { Check, CheckCover, CheckRun } from '../lib/types'
 import { refusalLine } from '../chat/Refused'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { useDock, useFoldingSide, type FoldingSide } from '../shell/dock'
 import { sideKey } from './cards'
+import { useNewComments } from './newComments'
 import { CANVAS, checkColour, checkLook, checksFor, countsByCheck, freeColour, nameTaken, rowCount, runLine, runOf, shownIds, withCheck, withRun, withShown, type CheckLook } from './checkComments'
 import { Chevron, Glyph, IconButton } from './icons'
 
@@ -30,6 +36,8 @@ const REFETCH_DEBOUNCE_MS = 150
 export interface Checks {
   /** every check, the built-ins first, as the server lists them */
   list: readonly Check[]
+  /** the server answered the list for this workspace at least once */
+  ready: boolean
   /** the ids of the checks that are on */
   on: ReadonlySet<string>
   /** how the page draws a check's comments: colour, name, place in the pane */
@@ -48,6 +56,7 @@ const toast = (what: string, e: unknown) => bus.emit('toast', { text: `${what} $
 /** The workspace's checks, read again when the stream says a run started or ended or a check changed. */
 export function useChecks(ws: string): Checks {
   const [list, setList] = useState<Check[]>([])
+  const [ready, setReady] = useState(false)
   const current = useRef<Check[]>(list)
   const put = useCallback((next: Check[]) => {
     current.current = next
@@ -60,7 +69,12 @@ export function useChecks(ws: string): Checks {
     const read = () =>
       checksApi
         .list(ws)
-        .then((l) => live && put(l))
+        .then((l) => {
+          if (!live) return
+          // the new comments' dot reads the list too (newComments.ts): an odd answer reads as no checks
+          put(Array.isArray(l) ? l : [])
+          setReady(true)
+        })
         .catch(() => {
           /* the pane stands empty; the page still shows the analyst's own comments */
         })
@@ -69,6 +83,7 @@ export function useChecks(ws: string): Checks {
       timer = window.setTimeout(() => void read(), REFETCH_DEBOUNCE_MS)
     }
     put([])
+    setReady(false)
     void read()
     const offs = [
       // the run's state at once, then the list for what the run changed (its count, its line, a check main made)
@@ -108,6 +123,7 @@ export function useChecks(ws: string): Checks {
 
   const create = useCallback(
     async (name: string, prompt: string, covers?: CheckCover[]) => {
+      if (demoStop()) return false
       try {
         const made = await checksApi.create(ws, { name: name.trim(), prompt: prompt.trim(), ...(covers ? { covers } : {}) })
         put(withCheck(current.current, made))
@@ -138,7 +154,7 @@ export function useChecks(ws: string): Checks {
 
   const on = useMemo(() => shownIds(list), [list])
   const look = useMemo(() => checkLook(list), [list])
-  return { list, on, look, toggle, create, editPrompt }
+  return { list, ready, on, look, toggle, create, editPrompt }
 }
 
 /** The passages that changed since a run checked them (the analyst's own edits), while it does not run. Pure. */
@@ -149,8 +165,10 @@ export function staleOf(run: Pick<CheckRun, 'stale' | 'status'> | null | undefin
 /** A stale row's words: how many passages changed since the check last ran on them. Pure. */
 export const staleText = (n: number): string => `${n} passage${n === 1 ? '' : 's'} changed since checked`
 
-/** The tip of a running check's spinner: open its run, or what it waits for, since it has no chat yet. Pure. */
-export function checkRunLabel(name: string, run: { chat?: string | null; waiting?: string | null }): string {
+/** The tip of a running check's spinner: open its run, or what it waits for, since it has no chat yet; with
+ * `inTerminal`, that its agent waits on a permission prompt in the terminal. Pure. */
+export function checkRunLabel(name: string, run: { chat?: string | null; waiting?: string | null }, inTerminal = false): string {
+  if (run.chat && inTerminal) return `${name} is waiting for your answer in the terminal: open its run`
   if (run.chat) return `${name} is running: open its run`
   if (run.waiting === 'writer') return `${name} runs once the writer has finished`
   if (run.waiting === 'plan') return `${name} runs once your session leaves plan mode (shift+tab in your terminal)`
@@ -235,11 +253,19 @@ export interface CommentsPaneProps {
   onHide?: () => void
 }
 
-/** The Comments pane beside a document: its head (the count of comments shown, + for a new check, the sidebar's hide
- * toggle) and the rows of the checks that cover the documents. */
+/** The accent dot on a Comments pane's control (its head beside a document, the toolbar's Comments button on the
+ * canvas) while a check's run left comments there that the analyst has not looked at (newComments.ts). */
+export function NewCommentsDot() {
+  return <span className="dot wu-new-dot" role="img" aria-label="New comments" title="New comments" />
+}
+
+/** The Comments pane beside a document: its head (the count of comments shown, the new comments' dot, + for a new
+ * check, the sidebar's hide toggle) and the rows of the checks that cover the documents. A click on the head opens or
+ * folds the pane, and looks at the document's new comments. */
 export function CommentsPane({ ws, doc, checks, comments, onHide }: CommentsPaneProps) {
   const key = storageKey(ws, 'report-checks-pane')
   const [open, setOpen] = useState<boolean>(() => readStorage<boolean>(key, true) !== false)
+  const news = useNewComments(ws, checks, doc)
   const [adding, setAdding] = useState<HTMLElement | null>(null)
   const head = useRef<HTMLDivElement | null>(null)
   const list = useMemo(() => checksFor(checks.list, doc), [checks.list, doc])
@@ -250,6 +276,7 @@ export function CommentsPane({ ws, doc, checks, comments, onHide }: CommentsPane
   const setPane = (next: boolean) => {
     setOpen(next)
     writeStorage(key, next)
+    news.look()
   }
   return (
     <div className="wu-checks" aria-label="Comments">
@@ -258,6 +285,7 @@ export function CommentsPane({ ws, doc, checks, comments, onHide }: CommentsPane
           <Chevron open={open} />
           <span className="wu-sec-name">Comments</span>
           {anyResult && <span className="wu-count wu-count-inline">{shownCount}</span>}
+          {news.runs.length > 0 && <NewCommentsDot />}
         </button>
         <IconButton label="New check" className="wu-checks-add" aria-expanded={!!adding} onClick={() => setAdding((a) => (a ? null : head.current))}>
           <Icon name="plus" size={14} />
@@ -307,6 +335,9 @@ export function CheckRows({ ws, surface, checks, comments, adding, onAdding, lis
     onAdding(null)
   }, [onAdding])
   const editCheck = editing ? (list.find((c) => c.id === editing.id) ?? null) : null
+  // the runs whose agent waits on a permission prompt in the terminal (chat/waiting.ts), read while one runs
+  const terminal = useTerminalWaits(ws, list.some((c) => !!runOf(c, surface)?.chat && runOf(c, surface)?.status === 'running'))
+  const inTerminal = (run: CheckRun | null | undefined) => run?.status === 'running' && !!run.chat && terminal.has(run.chat)
   return (
     <>
       {listed && (
@@ -330,14 +361,15 @@ export function CheckRows({ ws, surface, checks, comments, adding, onAdding, lis
                   </button>
                   {run?.status === 'running' && (
                     // a run waiting for a free session, queued until the document's writer ends, or held while main is
-                    // in plan mode has no chat yet: the tip says which, and a click does nothing
+                    // in plan mode has no chat yet: the tip says which, and a click does nothing; one whose agent waits
+                    // in the terminal shows the still warning dot
                     <IconButton
-                      label={checkRunLabel(c.name, run)}
+                      label={checkRunLabel(c.name, run, inTerminal(run))}
                       className="wu-check-run"
                       aria-disabled={!run.chat || undefined}
                       onClick={() => run.chat && openThread(run.chat, 'report-check')}
                     >
-                      <Spinner size={10} />
+                      {inTerminal(run) ? <span className="dot tt-waiting" aria-hidden="true" /> : <Spinner size={10} />}
                     </IconButton>
                   )}
                   {run?.status === 'failed' && (
@@ -355,6 +387,11 @@ export function CheckRows({ ws, surface, checks, comments, adding, onAdding, lis
                     <Icon name="more-horizontal" size={14} />
                   </IconButton>
                 </div>
+                {inTerminal(run) && (
+                  <p className="wu-check-wait" role="status">
+                    {TERMINAL_WAIT}
+                  </p>
+                )}
                 {staleOf(run) > 0 && <StaleRow ws={ws} check={c} doc={surface} n={staleOf(run)} />}
                 {run?.refused && run.status !== 'running' && <p className="wu-check-refused" role="status">{`Didn't start: ${refusalLine(run.refused)}`}</p>}
               </div>
@@ -380,6 +417,7 @@ export function CheckRows({ ws, surface, checks, comments, adding, onAdding, lis
             check={editCheck}
             on={checks.on.has(editCheck.id)}
             comments={counts.get(editCheck.id) ?? 0}
+            inTerminal={inTerminal(runOf(editCheck, surface))}
             onSave={(prompt) => checks.editPrompt(editCheck.id, prompt)}
             onClose={close}
           />
@@ -406,13 +444,15 @@ const keepKeys = (onClose: () => void) => (e: KeyboardEvent) => {
  * prompt edited in place, and its comment count. Re-run saves a new prompt and runs it (checks.edit_route) or runs it
  * as it is (checks.run_route); Save, for a check that is off, saves the prompt alone. A prompt stored meanwhile
  * replaces a field nobody is editing. */
-function CheckCard({ ws, doc, check, on, comments, onSave, onClose }: {
+function CheckCard({ ws, doc, check, on, comments, inTerminal = false, onSave, onClose }: {
   ws: string
   doc: string
   check: Check
   on: boolean
   /** how many open comments the check has on the document */
   comments: number
+  /** its run's agent waits on a permission prompt in the terminal */
+  inTerminal?: boolean
   onSave: (prompt: string) => Promise<boolean>
   onClose: () => void
 }) {
@@ -424,11 +464,12 @@ function CheckCard({ ws, doc, check, on, comments, onSave, onClose }: {
   }, [check.prompt])
   const run = runOf(check, doc)
   const running = run?.status === 'running'
-  const line = runLine(run)
+  const line = running && inTerminal ? TERMINAL_WAIT : runLine(run)
   const dirty = text.trim() !== check.prompt.trim()
   const ready = !!text.trim() && !busy && (dirty || (on && !running))
   const submit = async () => {
-    if (!ready) return
+    // a run, or a new prompt on a check that is on, which runs it again, needs Claude
+    if (!ready || ((!dirty || on) && demoStop())) return
     setBusy(true)
     let ok = false
     if (dirty) ok = await onSave(text.trim())

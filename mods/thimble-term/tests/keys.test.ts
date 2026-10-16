@@ -33,6 +33,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
+import { KEPT_FILE, parseKept, resetKept } from '../hooks/kept'
 import { width } from '../hooks/lib'
 import { RELAY, UNFOCUSED_HINT } from '../hooks/panel'
 import { CWD, WS, shown, takesKeys, viewFrame, world } from './fixtures'
@@ -1324,4 +1325,166 @@ test('keys · back after a line chosen in a file, and after a thread asked: wher
   expect(s.text).toContain('What does the export hold per wiki?')
   expect(s.text).not.toContain('New thread')
   expect(s.text).toContain('c for its code')
+})
+
+// ------------------------------------------------------------------------------------------------ the view proposal
+
+const OFFER = { slug: 'edit-bursts', name: 'Edit Bursts', description: 'Each wiki page as a strip of its saves.', task: 'Find out when the agents edited together.', claims: ['revisions.jsonl'] }
+
+async function above($: E): Promise<M> {
+  return (await $.ui.mount(ABOVE)) as unknown as M
+}
+
+test('the view proposal row · accept and reject hand the answer to thimble (`thimble act view-accept|view-reject {slug}`); the row says so until home is read again; one thimble refuses is a toast and the controls come back', async ($, on) => {
+  const w = world(on)
+  w.states.home = { ...w.states.home, offer: OFFER }
+  await start($, w)
+  let row = await above($)
+  await row.press({ key: 'above-offer-accept' })
+  await w.clock.settle()
+  expect(w.acts.at(-1)).toEqual({ kind: 'view-accept', payload: { slug: 'edit-bursts' } })
+  await row.unmount()
+  row = await above($)
+  expect(shown(await row.find({ type: 'Box', key: 'above-offer' }))).toContain('◌ accepting')
+  expect(await row.find({ type: 'Button', key: 'above-offer-accept' })).toBeUndefined()
+  await row.unmount()
+  // thimble wrote the answer: the proposal no longer waits, and home's state read again has none
+  w.states.home = { ...w.states.home, offer: null }
+  w.stamps.set(`${WS}/views/proposals.json`, 2)
+  await w.clock.advance(1100)
+  row = await above($)
+  expect(await row.find({ type: 'Box', key: 'above-offer' })).toBeUndefined()
+  await row.unmount()
+  // a new proposal, rejected; one thimble refuses (it no longer waits) is a toast, and the controls come back
+  w.states.home = { ...w.states.home, offer: { ...OFFER, slug: 'board-threads', name: 'Board Threads' } }
+  w.stamps.set(`${WS}/views/proposals.json`, 3)
+  await w.clock.advance(1100)
+  w.refuse = { 'view-reject': "the view proposal 'Board Threads' no longer waits" }
+  row = await above($)
+  await row.press({ key: 'above-offer-reject' })
+  await w.clock.settle()
+  expect(w.acts.at(-1)).toEqual({ kind: 'view-reject', payload: { slug: 'board-threads' } })
+  expect(w.toasts.at(-1)).toBe("thimble: the view proposal 'Board Threads' no longer waits")
+  await row.unmount()
+  row = await above($)
+  expect(await row.find({ type: 'Button', key: 'above-offer-reject' })).toBeDefined()
+  await row.unmount()
+})
+
+test('the view proposal row · don\'t ask again turns view proposals off (`thimble act view-proposals-off`): the row goes at once, and a toast says how to turn them back on', async ($, on) => {
+  const w = world(on)
+  w.states.home = { ...w.states.home, offer: OFFER }
+  await start($, w)
+  let row = await above($)
+  await row.press({ key: 'above-offer-off' })
+  await w.clock.settle()
+  expect(w.acts.at(-1)).toEqual({ kind: 'view-proposals-off', payload: {} })
+  expect(w.toasts.at(-1)).toContain('view proposals are off. To turn them back on, set "views": {"propose": true} in')
+  await row.unmount()
+  row = await above($)
+  expect(await row.find({ type: 'Box', key: 'above-offer' })).toBeUndefined()
+  await row.unmount()
+})
+
+test('a notice\'s acts · try again (`view-propose-now`) and retry (`view-retry {slug}`) name the notice, which thimble dismisses before the act runs, and it goes at once; turn off view proposals turns them off and dismisses it; one thimble refuses stays, with why in a toast', async ($, on) => {
+  const w = world(on)
+  const tryAgain = { id: 'n2', key: 'proposals', kind: 'proposals', text: "Couldn't check for a view proposal: the request timed out.", agent: 'View proposals', chat: '', at: '2026-10-14T11:00:00Z', acts: [{ label: 'Try again', act: 'view-propose-now' }, { label: 'Turn off view proposals', act: 'view-proposals-off' }], open: '' }
+  const retry = { id: 'n3', key: 'agent:view:edit-bursts', kind: 'view', text: 'The build of the view Edit Bursts failed: its check found no rows.', agent: 'View build: Edit Bursts', chat: 'b1', at: '2026-10-14T11:05:00Z', acts: [{ label: 'Retry', act: 'view-retry', slug: 'edit-bursts' }], open: 'agent' }
+  w.states.home = { ...w.states.home, notices: [retry, tryAgain] }
+  await start($, w)
+  let row = await above($)
+  await row.press({ key: 'above-notice-n2-act-0' })
+  await w.clock.settle()
+  expect(w.acts.at(-1)).toEqual({ kind: 'view-propose-now', payload: { notice: 'n2' } })
+  expect(w.toasts.at(-1)).toBe('thimble: checking for a view proposal')
+  await row.unmount()
+  row = await above($)
+  expect(await row.find({ type: 'Box', key: 'above-notice-n2' })).toBeUndefined()
+  // a retry thimble refuses (the view builds already): the notice stays, and the toast says why
+  w.refuse = { 'view-retry': "the view 'Edit Bursts' is building, not failed" }
+  await row.press({ key: 'above-notice-n3-act-0' })
+  await w.clock.settle()
+  expect(w.acts.at(-1)).toEqual({ kind: 'view-retry', payload: { slug: 'edit-bursts', notice: 'n3' } })
+  expect(w.toasts.at(-1)).toBe("thimble: the view 'Edit Bursts' is building, not failed")
+  await row.unmount()
+  row = await above($)
+  expect(await row.find({ type: 'Box', key: 'above-notice-n3' })).toBeDefined()
+  await row.unmount()
+  // a new notice of the proposer's failure: turn off view proposals, as don't ask again, dismisses it
+  w.states.home = { ...w.states.home, notices: [{ ...tryAgain, id: 'n4', at: '2026-10-14T11:10:00Z' }] }
+  w.stamps.set(`${WS}/notices.json`, 5)
+  await w.clock.advance(1100)
+  row = await above($)
+  await row.press({ key: 'above-notice-n4-act-1' })
+  await w.clock.settle()
+  expect(w.acts.slice(-2)).toEqual([{ kind: 'notice-dismiss', payload: { id: 'n4' } }, { kind: 'view-proposals-off', payload: {} }])
+  expect(w.toasts.at(-1)).toContain('view proposals are off. To turn them back on')
+  await row.unmount()
+})
+
+test('a notice\'s open settings says where thimble\'s config is, since the terminal has no Settings pane, and leaves the notice', async ($, on) => {
+  const w = world(on)
+  const config = '/home/a/.thimble/config.json'
+  w.states.home = { ...w.states.home, notices: [{ id: 'n6', key: 'agent:check:c1:report', kind: 'agent', text: "The report check Unverified failed: its model isn't available to your account; pick another model in Settings.", agent: 'Report check: Unverified', chat: '', at: '2026-10-14T10:00:00Z', acts: [{ label: 'Open Settings', act: 'settings', config }], open: '' }] }
+  await start($, w)
+  let row = await above($)
+  const acts = w.acts.length
+  await row.press({ key: 'above-notice-n6-act-0' })
+  await w.clock.settle()
+  expect(w.acts.length).toBe(acts)
+  expect(w.toasts.at(-1)).toBe(`thimble: in terminal mode, Settings is thimble's config: ${config} (its keys: docs/config.md)`)
+  await row.unmount()
+  row = await above($)
+  expect(shown(await row.find({ type: 'Box', key: 'above-notice-n6' }))).toContain('open settingsdismiss')
+  await row.unmount()
+})
+
+test('a notice\'s open › goes to the thread of the agent it names: an agent\'s chat in its own panel, a side thread in the threads panel', async ($, on) => {
+  const w = world(on)
+  w.states.home = { ...w.states.home, notices: [
+    { id: 'n1', key: 'safeguards:o1', kind: 'safeguards', text: "Claude's safeguards switched the orientation's reply from Opus 5.5 to Opus 4.8.", agent: 'Orientation', chat: 'o1', at: '2026-10-14T10:00:00Z', acts: [], open: 'agent' },
+    { id: 'n5', key: 'thread:t1', kind: 'agent', text: 'The side thread why is events.jsonl bigger? stopped: the connection to Anthropic\'s API failed; check the network and try again.', agent: 'Side thread: why is events.jsonl bigger?', chat: 't1', at: '2026-10-14T09:00:00Z', acts: [], open: 'thread' },
+  ] }
+  await start($, w)
+  let row = await above($)
+  await row.press({ key: 'above-notice-n1-open' })
+  await w.clock.settle()
+  await row.unmount()
+  let s = await seen($, SHORT)
+  expect(s.text).toContain('orientation: the whole corpus')
+  expect(s.text).toContain('s to stop')
+  row = await above($)
+  await row.press({ key: 'above-notice-n5-open' })
+  await w.clock.settle()
+  await row.unmount()
+  s = await seen($, SHORT)
+  expect(s.text).toContain('why is events.jsonl so much bigger?')
+})
+
+test("keys · home · toast: `dismiss` marks what is new as seen, as opening home does, and opens no panel", async ($, on) => {
+  resetKept()
+  const w = world(on)
+  await start($, w)
+  w.states.home = { ...w.states.home, cards: 14 }
+  w.stamps.set(`${WS}/notebooks`, 2)
+  await w.clock.advance(1100)
+  let above = (await $.ui.mount(ABOVE)) as unknown as M
+  expect(shown(await above.drawn())).toContain('2 new cards')
+  await above.press({ key: 'above-home-dismiss' })
+  await above.unmount()
+  await w.clock.settle()
+  expect(w.opened).not.toContain(PANEL)
+  // seen: the row is gone, after a relaunch too (kept.ts)
+  above = (await $.ui.mount(ABOVE)) as unknown as M
+  expect(shown(await above.drawn())).not.toContain('new card')
+  await above.unmount()
+  expect(parseKept(w.files.get(`${WS}/${KEPT_FILE}`) ?? '').seen?.cards).toBe(14)
+  // what arrives after shows again
+  w.states.home = { ...w.states.home, cards: 15 }
+  w.stamps.set(`${WS}/notebooks`, 3)
+  await w.clock.advance(1100)
+  above = (await $.ui.mount(ABOVE)) as unknown as M
+  expect(shown(await above.drawn())).toContain('1 new card')
+  await above.unmount()
+  expect(w.opened).not.toContain(PANEL)
 })

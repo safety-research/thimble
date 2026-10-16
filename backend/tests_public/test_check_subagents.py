@@ -12,7 +12,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from app import agents, checks, config, investigation, report_types, subagents, tools
+from app import agents, checks, config, investigation, read_parts, report_types, subagents, tools
 from app import subagent_files as sf
 from subagent_fakes import bridge  # noqa: F401 — a fixture
 
@@ -27,7 +27,7 @@ def doc(workspaces_tmp, monkeypatch):
     _checks_row(monkeypatch)
     for cid in ("unverified", "judgment"):
         checks.edit(CORPUS, cid, shown=True)
-    checks.edit(CORPUS, "important-details", shown=False)  # the built-ins start on: these two are the shown checks
+    checks.edit(CORPUS, "important-details", shown=False)  # Important details starts on: these two are the shown checks
 
 
 def _checks_row(monkeypatch) -> None:
@@ -93,30 +93,68 @@ async def test_a_writer_s_end_starts_each_shown_check_through_the_module_with_it
     assert _run(cid)["stale"] == 0
 
 
-async def test_in_a_new_workspace_a_writer_s_end_starts_each_built_in_and_a_check_turned_off_stays_off(
+async def test_a_large_workspace_s_task_is_written_in_files_a_read_call_returns_whole(doc, bridge):
+    """A task past what one Read call returns, here one with a long report, which the task never cuts, is written as
+    task.md, task-2.md… of at most read_parts.READ_UNITS code units each, under the Read tool's file-size cap, and the
+    run's prompt names every one in order."""
+    paras = "\n\n".join(f"Account a{i:04d} deleted {i % 97} files on night {i % 7} from host h{i % 13}, as line {i} of "
+                         f"the log shows." for i in range(900))
+    await _write("# A long report\n\n## Findings\n\n" + paras + "\n")
+    await _started("unverified")
+    [spawn] = bridge.ops("spawn")
+    work = checks.work_dir(CORPUS, "unverified", "report")
+    paths = read_parts.paths(work / checks.TASK_FILE, len(list(work.glob("task*.md"))))
+    text = "".join(p.read_text() for p in paths)
+    assert len(text) > 100_000, "one file would fail a Read call whole"
+    assert len(paths) >= 3 and all(p.is_file() for p in paths)
+    assert all(read_parts.units(p.read_text()) <= read_parts.READ_UNITS and p.stat().st_size < 256 * 1024
+               for p in paths)
+    assert "Account a0000 deleted" in text and "Account a0899 deleted" in text, "the document whole"
+    assert f"READ {len(paths)} FILES {', '.join(str(p) for p in paths)} FIRST" in spawn["prompt"]
+
+
+async def test_a_check_on_a_report_in_chinese_gets_task_files_one_read_call_returns_whole(doc, bridge):
+    """A report written in Chinese, as a corpus of Chinese tickets gives, runs to more than a token a character: each
+    task file is still one Read call returns whole (test_read_parts.read_returns_whole), and the prompt names each."""
+    from test_read_parts import ZH, read_returns_whole
+
+    await _write("# 报告\n\n## 发现\n\n" + "\n\n".join(f"第{i}条：{ZH}" for i in range(900)) + "\n")
+    await _started("unverified")
+    [spawn] = bridge.ops("spawn")
+    work = checks.work_dir(CORPUS, "unverified", "report")
+    paths = read_parts.paths(work / checks.TASK_FILE, len(list(work.glob("task*.md"))))
+    assert len(paths) >= 2 and all(str(p) in spawn["prompt"] for p in paths)
+    over = [(p.name, len(p.read_text("utf-8"))) for p in paths if not read_returns_whole(p.read_text("utf-8"), "zh")]
+    assert not over, f"task files past Read's token cap: {over}"
+
+
+async def test_in_a_new_workspace_a_writer_s_end_starts_important_details_alone_and_each_switch_the_analyst_sets_stays(
         workspaces_tmp, bridge, monkeypatch):
-    """The built-ins are on in a workspace that stored none of them: a writer's end starts Judgment calls, Unverifiable
-    and Important details on its document. One the analyst turned off is stored so and starts no run."""
+    """Of the built-ins only Important details is on in a workspace that stored none of them: a writer's end starts it
+    alone on its document, and Judgment calls and Unverifiable stay off. One the analyst turns on runs at the next
+    writer's end, and one they turn off is stored so and starts no run."""
     _checks_row(monkeypatch)
     await _write()
     assert not bridge.ops("spawn"), "a save starts nothing"
     assert [(x["id"], x["shown"]) for x in checks.list_checks(CORPUS)] == [
-        ("judgment", True), ("unverified", True), ("important-details", True)]
+        ("judgment", False), ("unverified", False), ("important-details", True)]
     _writer_done()
-    await _until(lambda: len(bridge.ops("spawn")) == 3, "the built-ins never started at the writer's end")
-    assert sorted(s["what"] for s in bridge.ops("spawn")) == [f"{cid} on report" for cid in
-                                                             ("important-details", "judgment", "unverified")]
-    for cid in ("judgment", "unverified", "important-details"):
-        subagents.run_ended(CORPUS, _run(cid)["agent_id"], "done", "Done.", source="handback")
-    await _until(lambda: all(_run(c)["status"] == "done" for c in ("judgment", "unverified", "important-details")),
-                 "the runs never ended")
-    checks.edit(CORPUS, "judgment", shown=False)
-    assert checks.read(CORPUS, "judgment")["shown"] is False, "the analyst's choice is stored and wins"
+    await _until(lambda: len(bridge.ops("spawn")) == 1, "Important details never started at the writer's end")
+    await asyncio.sleep(0.05)
+    assert [s["what"] for s in bridge.ops("spawn")] == ["important-details on report"]
+    subagents.run_ended(CORPUS, _run("important-details")["agent_id"], "done", "Done.", source="handback")
+    await _until(lambda: _run("important-details")["status"] == "done", "the run never ended")
+    assert [(x["id"], x["shown"]) for x in checks.list_checks(CORPUS)] == [
+        ("judgment", False), ("unverified", False), ("important-details", True)], "a run's save keeps the defaults"
+    checks.edit(CORPUS, "judgment", shown=True)
+    checks.edit(CORPUS, "important-details", shown=False)
+    assert checks.read(CORPUS, "judgment")["shown"] is True, "the analyst's choice is stored and wins"
+    assert checks.read(CORPUS, "important-details")["shown"] is False, "the analyst's choice is stored and wins"
     await _write(TEXT.replace("It ran at night.", "It ran in the morning."))
     _writer_done()
-    await _until(lambda: len(bridge.ops("spawn")) == 5, "the checks on never started again")
+    await _until(lambda: len(bridge.ops("spawn")) == 2, "the check turned on never started")
     await asyncio.sleep(0.05)
-    assert sorted(s["what"] for s in bridge.ops("spawn")[3:]) == ["important-details on report", "unverified on report"]
+    assert [s["what"] for s in bridge.ops("spawn")[1:]] == ["judgment on report"]
 
 
 async def test_in_plan_mode_a_writer_s_end_holds_its_checks_which_say_so_and_start_after(doc, bridge, monkeypatch):
@@ -192,10 +230,20 @@ async def test_a_run_s_end_supersedes_its_covered_comments_and_records_what_it_s
     subagents.run_ended(CORPUS, first.agent, "done", "Commented on 1 passage.", source="handback")
     assert _run("judgment")["comments"] == 1 and len(_run("judgment")["seen"]) == len(first.fps)
     second = await _started("judgment")
+    told = _commented()
     subagents.run_ended(CORPUS, second.agent, "done", "Commented on 0 passages.", source="handback")
     d = report_types.read_doc(CORPUS, investigation.MAIN, "report")
     [cm] = [c for c in d.get("comments") or [] if c.get("check") == "judgment"]
     assert cm["status"] != "open" and cm["superseded_by"] == second.run
+    assert _commented() == told + 1, "the open pages hear that the report's comments changed, and drop the replaced one"
+
+
+def _commented() -> int:
+    """How many records on the stream said that the report's comments changed (a page reads the report again)."""
+    path = investigation.inv_dir(CORPUS, investigation.MAIN) / "events.jsonl"
+    rows = investigation._read_jsonl(path) if path.exists() else []
+    return sum(1 for e in rows
+               if e.get("type") == "report" and e.get("slug") == "report" and e.get("status") == "commented")
 
 
 async def test_a_run_s_task_lists_its_check_s_open_comments_its_end_replaces(doc, bridge):

@@ -114,7 +114,7 @@ window.repoMs = performance.now() - t1`)
     const { page, frame, errors } = await framed(
       `${REPO}
 files.push({ key: 'pkg0/mod0/a_module_whose_name_runs_on_far_past_the_width_of_the_tree.py', n: 123456 })
-window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind' }] })
+window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind' }], initial: 'kind' })
 window.tree = thimble.tree({ mount: '#tree', split: '/', items: files, mix: (n) => n.children ? null : { a: n.item.n, b: 10 - n.item.n } })
 tree.reveal('pkg0/mod0/a_module_whose_name_runs_on_far_past_the_width_of_the_tree.py')`,
       200,
@@ -343,7 +343,7 @@ const PARENT = { lead: null, explore: 'lead', grep: 'explore', test: 'lead', sol
 const tools = ['Bash', 'Read', 'Grep']
 window.calls = []
 Object.keys(PARENT).forEach((s, si) => { if (s !== 'explore') for (let i = 0; i < 10 + si; i++) calls.push({ session: s, tool: tools[(i + si) % 3] }) })
-window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'tool', title: 'Tool' }] })
+window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'tool', title: 'Tool' }], initial: 'tool' })
 window.rows = thimble.rows({ fields: [{ name: 'session', title: 'Session', parentOf: (k) => PARENT[k] }, { name: 'tool', title: 'Tool' }], onChange: () => tree.draw() })
 window.tree = thimble.tree({ mount: '#tree', rows, items: calls, mix: true })`)
     const compare = () =>

@@ -107,6 +107,39 @@ describe('a call of a tool thimble does not know', () => {
   })
 })
 
+describe("a writer's saves of its document in main", () => {
+  test('consecutive saves of one document by one run are one row, the latest; other documents, runs and rows between stay apart', () => {
+    // live check: a writer's first save and its eleven edit_document calls were "wrote Report" and eleven "revised Report"
+    const save = (ts: string, text: string, ref: string, extra: Record<string, unknown> = {}) => ({ type: 'chip', ts, kind: 'artifact', text, ref, status: 'done', ...extra })
+    const rows = foldRecords(records([
+      { type: 'agent', ts: '2026-10-15T05:08:44Z', chat: 'w1', role: 'writer', title: 'Write report' },
+      save('2026-10-15T05:15:59Z', 'wrote', 'report:report', { status: 'generated', generation: 1, writer: 'w1' }),
+      save('2026-10-15T05:16:52Z', 'revised', 'report:report#95cf0dd8', { what: 'edited a passage', writer: 'w1' }),
+      save('2026-10-15T05:16:53Z', 'revised', 'report:report#2b9f13b0', { what: 'edited a passage', writer: 'w1' }),
+      save('2026-10-15T05:17:41Z', 'revised', 'report:report#b1cd2b76', { what: 'edited a passage', writer: 'w1' }),
+      save('2026-10-15T05:18:00Z', 'wrote', 'report:slides', { generation: 1, writer: 'w1' }),
+      save('2026-10-15T05:18:10Z', 'revised', 'report:report#5b25217d', { writer: 'w1' }),
+      { type: 'user', ts: '2026-10-15T05:19:00Z', text: 'Shorten the second paragraph.', by: 'browser' },
+      save('2026-10-15T05:19:30Z', 'revised', 'report:report#6c6895ac', { writer: 'w1' }),
+      save('2026-10-15T05:19:40Z', 'revised', 'report:report#9cf20f9b', { writer: 'w2' }),
+      save('2026-10-15T05:19:50Z', 'revised', 'report:report#e1312a3e'),
+      save('2026-10-15T05:19:55Z', 'revised', 'report:report#5ed451d9'),
+    ]))
+    const shown = shownRows(rows) as any[]
+    expect(shown.map((r) => (r.kind === 'chip' ? `${r.text} ${r.ref}` : r.kind))).toEqual([
+      'agent',
+      'revised report:report#b1cd2b76',
+      'wrote report:slides',
+      'revised report:report#5b25217d',
+      'user',
+      'revised report:report#6c6895ac',
+      'revised report:report#9cf20f9b',
+      'revised report:report#e1312a3e',
+      'revised report:report#5ed451d9',
+    ])
+  })
+})
+
 describe("main's look at the agent tray", () => {
   test('a list_agents call and its result are left out of main, and a call with no input never reads as {}', () => {
     const log = records([

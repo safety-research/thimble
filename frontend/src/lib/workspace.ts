@@ -39,12 +39,17 @@ export function renamedTo(rows: readonly Pick<WorkspaceRow, 'name' | 'renamed_fr
   return rows.find((r) => r.name !== name && r.renamed_from?.includes(name))?.name ?? null
 }
 
-/** The address `search` and `hash` at `pathname` with its workspace `to` in place of the one it names, the rest kept.
- * Pure. */
+/** The address `search` and `hash` at `pathname` with its workspace `to` in place of the one it names, the rest kept
+ * but a sign-in code (`p`, lib/api claimKey, which takes it out of the address itself) and an earlier version's key
+ * (`k`). Pure. */
 export function withWorkspace(to: string, pathname: string, search: string, hash: string): string {
   const q = new URLSearchParams(search)
   q.set('ws', to)
-  return `${pathname}?${q.toString()}${hash}`
+  const h = new URLSearchParams(hash.replace(/^#/, ''))
+  h.delete('p')
+  h.delete('k')
+  const rest = h.toString()
+  return `${pathname}?${q.toString()}${rest ? `#${rest}` : ''}`
 }
 
 /** The ref a workspace opens at, from the server's rows: the view its row names (a demo dataset's pre-cache's main view,
@@ -55,14 +60,12 @@ export function openingRef(rows: readonly Pick<WorkspaceRow, 'name' | 'kind' | '
 }
 
 /** Where a row of the start page goes: the page at `pathname` with its workspace, a demo dataset or an example opened at
- * its view (openingRef), and the page key when the address still holds one (`hash`: a claim the server has not answered
- * yet). Pure. */
-export function workspaceHref(row: Pick<WorkspaceRow, 'name' | 'kind' | 'view'>, pathname = '/', hash = ''): string {
+ * its view (openingRef). It carries no sign-in code: a code works once, and the start page has spent it. Pure. */
+export function workspaceHref(row: Pick<WorkspaceRow, 'name' | 'kind' | 'view'>, pathname = '/'): string {
   const q = new URLSearchParams({ ws: row.name })
   const ref = openingRef([row], row.name)
   if (ref) q.set('ref', ref)
-  const key = new URLSearchParams(hash.replace(/^#/, '')).get('k')
-  return `${pathname}?${q.toString()}${key ? `#k=${encodeURIComponent(key)}` : ''}`
+  return `${pathname}?${q.toString()}`
 }
 
 /** A key in browser storage, per workspace. */

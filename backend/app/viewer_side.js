@@ -7,6 +7,9 @@
 //   side.open({ title, sub, ref, html })      or render(body) in place of html; `ref` names the record it shows
 //   side.close()
 //
+// The panel is closed until the page opens a record in it. With `empty` (one short line, such as 'Click a session') it
+// shows as the view opens, that line in place of a title and nothing under it, until the page opens a record; the
+// page's close() brings the line back, and Reset too.
 // The panel opens wide enough to read a record, `width` of the mount (0.4 by default), never narrower than `min` px. A
 // drag of its left edge resizes it, a double click on the edge puts it back, and thimble keeps its width per view (as a
 // share of the mount, viewer_colour.js `parts`). Escape in the panel or its × closes it. A newer version of the view,
@@ -29,6 +32,9 @@
     this.min = Number(opts.min) > 0 ? Number(opts.min) : 280
     this.onClose = typeof opts.onClose === 'function' ? opts.onClose : null
     this.onResize = typeof opts.onResize === 'function' ? opts.onResize : null
+    // the line the panel shows until a record opens in it, or null: the panel is closed until then
+    this.empty = typeof opts.empty === 'string' && opts.empty.trim() ? opts.empty.replace(/\s+/g, ' ').trim() : null
+    this.blank = false // whether the panel shows its `empty` line
     this.ref = null
     if (!this.mount) return
     this.mount.classList.add('thimble-side-host')
@@ -85,13 +91,18 @@
       self.setWidth(self.el.getBoundingClientRect().width + (e.key === 'ArrowLeft' ? 1 : -1) * (e.shiftKey ? 80 : 20))
       self.keep()
     })
-    // Reset puts the view back as it opens, with no panel open
-    shared.part({
+    // Reset puts the view back as it opens: no panel open, or the panel with its `empty` line; check() asks again
+    // whether Reset shows, after the page opens or closes the panel with no click or key
+    this.check = shared.part({
       changed: function () {
-        return !self.el.hidden
+        return self.empty ? self.el.hidden || !self.blank : !self.el.hidden
       },
       reset: function () {
-        self.close(true)
+        if (!self.empty) return self.close(true)
+        var ref = self.ref
+        var had = !self.el.hidden && !self.blank
+        self.showEmpty()
+        if (had && self.onClose) ctl.safe(function () { self.onClose(ref) })
       },
     })
     if (typeof ResizeObserver === 'function') {
@@ -127,6 +138,8 @@
     if (!this.mount) return
     o = o || {}
     var was = this.el.hidden
+    this.blank = false
+    this.el.removeAttribute('data-empty')
     this.ref = o.ref != null ? String(o.ref) : null
     this.titleEl.textContent = o.title == null ? '' : String(o.title)
     this.subEl.textContent = o.sub == null ? '' : String(o.sub)
@@ -141,21 +154,52 @@
     this.el.hidden = false
     this.mount.classList.add('thimble-side-open')
     if (was) this.fit()
+    if (this.check) this.check()
   }
+  // the panel with its `empty` line in place of a title and nothing under it, as the view opens
+  Side.prototype.showEmpty = function () {
+    if (!this.mount || !this.empty) return
+    var was = this.el.hidden
+    var had = this.ref != null
+    this.blank = true
+    this.ref = null
+    this.el.setAttribute('data-empty', '')
+    this.titleEl.textContent = this.empty
+    this.subEl.textContent = ''
+    this.subEl.hidden = true
+    this.body.innerHTML = ''
+    this.el.hidden = false
+    this.mount.classList.add('thimble-side-open')
+    if (had && kit.shows) kit.shows(null)
+    if (was) this.fit()
+    if (this.check) this.check()
+  }
+  // the panel closed: by the analyst (× or Escape) it closes, its `empty` line too; by the page it shows its `empty`
+  // line again where it has one
   Side.prototype.close = function (byHand) {
     if (!this.mount || this.el.hidden) return
+    if (!byHand && this.empty) {
+      if (!this.blank) this.showEmpty()
+      return
+    }
+    var blank = this.blank
     this.el.hidden = true
+    this.blank = false
+    this.el.removeAttribute('data-empty')
     this.mount.classList.remove('thimble-side-open')
     var ref = this.ref
     this.ref = null
     this.body.innerHTML = ''
-    if (kit.shows) kit.shows(null)
+    if (!blank && kit.shows) kit.shows(null)
+    if (this.check) this.check()
     var self = this
-    if (byHand && this.onClose) ctl.safe(function () { self.onClose(ref) })
+    // the page hears of a record closed, not of the `empty` line closed
+    if (byHand && !blank && this.onClose) ctl.safe(function () { self.onClose(ref) })
   }
   /** a wide side panel beside the list, for a record or a row's children (see the top of this file) */
   thimble.side = function (opts) {
     var s = new Side(opts || {})
+    if (s.el && s.empty) s.showEmpty()
     return {
       open: function (o) {
         s.open(o)
@@ -163,9 +207,13 @@
       close: function () {
         s.close(false)
       },
-      /** whether the panel shows */
+      /** whether the panel shows a record (not while it shows its `empty` line) */
       get isOpen() {
-        return !!(s.el && !s.el.hidden)
+        return !!(s.el && !s.el.hidden && !s.blank)
+      },
+      /** whether the panel shows its `empty` line */
+      get isEmpty() {
+        return !!(s.el && !s.el.hidden && s.blank)
       },
       /** the ref of the record the panel shows, or null */
       get ref() {

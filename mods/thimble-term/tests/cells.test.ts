@@ -4,7 +4,7 @@ import { expect, test } from 'claude-code/testing'
 
 import { busyWords, cardOfCell, htmlTable, labelCard, linksOf, sortedBars } from '../hooks/cell'
 import type { ThimbleCell } from '../hooks/cell'
-import { cardLayout, cut, placeWords, share } from '../hooks/draw'
+import { cardLayout, cut, labelHead, placeWords, share } from '../hooks/draw'
 import { CHIP_MAX, chipLabel, citations, clip, cutLine, cutMiddle, dateIn, dateSpans, formatted, itemsRow, labelState, labelStateWords, noteLabelName, noteQuestion, quoted, recordFields, valueIn, width, windowAt } from '../hooks/lib'
 import { chipName, plainCites } from '../hooks/cite'
 import { targetLabel } from '../hooks/gestures'
@@ -110,6 +110,21 @@ test("a label card: its counts as bars in the label's order; the records it carr
   // kept the label's own counts after a verdict)
   const set = labelCard(of('l0label0'), { ...LABEL, verdicts: { counts: { none: 9401, 'proxy-link': 5190 }, set: 1 } } as never)
   expect((set.rows as BarRow[]).map(r => [r.label, r.value])).toEqual([['proxy-link', 5190], ['none', 9401]])
+})
+
+test("a label card's label row says how the label is defined and what it ran on, as the browser's does; its bars give every value a share of all", () => {
+  const card = labelCard(of('l0label0'), LABEL as never)
+  const row = (c: typeof card) => labelHead(c, 90).lines.map(l => l.map(s => s.s).join(''))
+  expect(row(card)).toEqual(['label  links through a fetch proxy ↗  regex · revisions.jsonl'])
+  // the words after the ↗ are dim, read after the label's name
+  expect(labelHead(card, 90).lines[0]!.at(-1)).toMatchObject({ s: '  regex · revisions.jsonl', fg: 'inactive' })
+  // a trial says it ran on a sample
+  expect(row(labelCard(of('l0label0'), { ...LABEL, trial: true } as never))[0]).toBe('label  links through a fetch proxy ↗  regex · revisions.jsonl · a sample')
+  // every value, the negative too, with its share of the same total, and the total once
+  const lines = text('l0label0', 90)
+  expect(lines.some(l => /proxy-link .*5,191 +36%$/.test(l))).toBe(true)
+  expect(lines.some(l => /none .*9,400 +64%$/.test(l))).toBe(true)
+  expect(lines.filter(l => l.includes('14,591'))).toEqual(['all  14,591'])
 })
 
 test('no card drawing shows a hex id', () => {

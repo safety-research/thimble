@@ -444,7 +444,7 @@ async def test_the_host_serves_thimble_term_over_its_socket_with_its_token(board
 
 LABEL_PROGRAM = r"""
 import { colorBy, draw, labels } from 'thimble-term'
-const colour = colorBy({ fields: [{ name: 'body', title: 'Body' }] })
+const colour = colorBy({ fields: [{ name: 'body', title: 'Body' }], initial: 'body' })
 draw((d) => {
   colour.draw(d)
   d.line(labels().map((l) => `${l.name} is ${l.on ? 'on' : 'off'}`).join(', '))
@@ -550,7 +550,7 @@ def timeline(workspaces_tmp, tmp_path, monkeypatch, inproc) -> str:
 @pytest.mark.parametrize("cols", [120, 200])
 async def test_timeline_draws_what_its_browser_page_shows(timeline, cols):
     """The worked example at 120 and 200 columns: the search and Filter by on Incident with its values as toggles; Rows
-    on Source, then Color by with its chips; the time range's readout and strip, a lane per source, and the axis alone
+    on Source, then Color by, Off as the view opens, and with Service chosen its chips; the time range's readout and strip, a lane per source, and the axis alone
     (no key of failed events, no incidents' flags); then what the list shows and how many, its columns' headings, and
     the events with no day's heading between them, each with its time (a day's first with its date), source, kind,
     actor, incident and text; its hint row names
@@ -561,7 +561,7 @@ async def test_timeline_draws_what_its_browser_page_shows(timeline, cols):
     body, hints = _split(lines, 2, 36)
     assert all(len(x) <= cols + 2 for x in body)
     assert body[0].startswith("  / search events  Filter by  Incident  ● INC-312 100  ● INC-313 23  ● INC-311 11  ● no incident 64")
-    assert body[1].startswith("  Rows  Source  Color by  Service  ● payments 79  ● web 45")
+    assert body[1] == "  Rows  Source  Color by  Off"
     assert body[2] == "  May 16 01:14 – May 19 14:25 · 3d 13h"
     assert [x[2:12].strip() for x in body[4:9]] == ["alert", "deploy", "agent", "chat", "ticket"]
     assert body[9].startswith(" " * 12) and "May 17 00:00" in body[9] and "May 18 00:00" in body[9]
@@ -576,6 +576,9 @@ async def test_timeline_draws_what_its_browser_page_shows(timeline, cols):
     if cols == 200:
         assert "Tonight's release train: web 2.31.0 and payments 4.12.0. deploybot starts at 02:00." in body[13]
     assert hints == "↑↓ to choose · Enter to open · ? for all keys · b to go back · x to close"
+    out = await term_views.draw_text(timeline, "timeline", cols=cols, rows=36, wrap=DRAW_WRAP, keys=["c", "click:Service"])
+    body, _ = _split(out.splitlines(), 2, 36)
+    assert body[1].startswith("  Rows  Source  Color by  Service  ● payments 79  ● web 45")
     out = await term_views.draw_text(timeline, "timeline", cols=cols, rows=36, wrap=DRAW_WRAP, keys=["?"], panel=False)
     assert out.splitlines()[0].startswith("  ╭─ keys ─")
     assert _key_list(out) == [["↑↓", "to choose"], ["Enter", "to open"], ["c", "to color by"], ["/", "to search"],
@@ -677,7 +680,9 @@ async def test_linked_sessions_draws_what_its_browser_page_shows(linked, cols):
     assert lines[:2] == ["  Linked sessions", "  3 runs · 17 sessions · 352 turns"]
     body, hints = _split(lines, 3, 40)
     assert all(len(x) <= cols + 2 for x in body)
-    assert body[0].startswith("  / search  Filter by  none  Rows  Session  Color by  Speaker  ● client-port 100  ● lead 63")
+    assert body[0].startswith("  / search  Filter by  none  Rows  Session  Color by  Off")
+    chosen = await term_views.draw_text(linked, "linked-sessions", cols=cols, rows=40, wrap=DRAW_WRAP, keys=["c", "click:Speaker"])
+    assert _split(chosen.splitlines(), 3, 40)[0][0].startswith("  / search  Filter by  none  Rows  Session  Color by  Speaker  ● client-port 100  ● lead 63")
     assert body[1] == "  Sep 12 14:02 – Sep 13 09:53 · 19h 51m"
     assert body[2].count(" // ") == 2
     assert _tree(body) == [
@@ -819,7 +824,8 @@ HUE = re.compile(r"\x1b\[38;2;")  # a palette hue in ANSI text: only Color by dr
 async def test_repository_draws_what_its_browser_page_shows(repository, cols):
     """The worked example at 120 and 200 columns, one run's repository as a code forge's command line draws it: the
     repository's head (the run switcher with the run's name, and the run's facts), the tabs with the run's counts, the
-    top row (search, Filter by, Color by with its chips), no time range, the columns' names, then a row per pull request
+    top row (search, Filter by, Color by, Off as the view opens, with its chips once State is chosen), no time range, the
+    columns' names, then a row per pull request
     of that run alone: its number, its title, its area, state, comments and lines, and under it the dim line a forge
     writes there."""
     out = await term_views.draw_text(repository, "repository", cols=cols, rows=16, wrap=DRAW_WRAP)
@@ -829,7 +835,7 @@ async def test_repository_draws_what_its_browser_page_shows(repository, cols):
     assert all(len(x) <= cols + 2 for x in body)
     assert body[0] == "  run  r1  3 agents · 1 approval to merge · Mon, May 11, 2026"
     assert body[1].split() == ["pull", "requests", "8", "issues", "9", "discussions", "3", "agents", "3"]
-    assert body[2].startswith("  / search  Filter by  none  Color by  State  ● merged 7  ● closed 1")
+    assert body[2].startswith("  / search  Filter by  none  Color by  Off")
     assert body[3] == ""
     assert body[4].split() == ["pull", "request", "area", "state", "comments", "lines"]
     assert re.match(r"❯ ● #9   Treat 'next <weekday>' as never today +parser +merged +0 +\+1 -1", body[5])
@@ -839,6 +845,8 @@ async def test_repository_draws_what_its_browser_page_shows(repository, cols):
     assert not any(" // " in x or re.search(r"\d May \d\d:\d\d –", x) for x in body), "no time range"
     assert hints.startswith("↑↓ to choose · Enter to open") and hints.endswith("b to go back · x to close"), hints
     assert "? for all keys" in hints and "to pan" not in hints and "to zoom" not in hints, hints
+    chosen = await term_views.draw_text(repository, "repository", cols=cols, rows=16, wrap=DRAW_WRAP, keys=["c", "click:State"])
+    assert _split(chosen.splitlines(), 2, 16)[0][2].startswith("  / search  Filter by  none  Color by  State  ● merged 7  ● closed 1")
 
 
 @needs_node
@@ -932,16 +940,16 @@ async def test_repository_switches_runs_and_follows_its_citations_its_filter_and
     rows = out.splitlines()
     assert "Filter by  Area  ○ parser 3" in rows[2] and rows[1].split()[:3] == ["pull", "requests", "5"]
     assert not any(re.match(r"(❯| ) ● #\d+ .* parser ", x) for x in rows)
-    out = await term_views.draw_text(repository, "repository", cols=120, rows=40, wrap=DRAW_WRAP, keys=["click:closed 1"],
-                                     panel=False)
+    out = await term_views.draw_text(repository, "repository", cols=120, rows=40, wrap=DRAW_WRAP,
+                                     keys=["c", "click:State", "click:closed 1"], panel=False)
     rows = out.splitlines()
     assert "○ closed 1" in rows[2]
     states = {m[1] for x in rows if re.match(r"(❯| ) ● #\d+", x) and (m := re.search(r" (merged|closed|open) ", x))}
     assert states == {"merged", "closed"}, "Color by only colors: the closed pull request stays"
     assert rows[1].split()[:3] == ["pull", "requests", "8"]
     # its mark drawn with no hue, the merged ones' in theirs
-    out = await term_views.draw_text(repository, "repository", cols=120, rows=40, wrap=DRAW_WRAP, keys=["click:closed 1"],
-                                     ansi=True, panel=False)
+    out = await term_views.draw_text(repository, "repository", cols=120, rows=40, wrap=DRAW_WRAP,
+                                     keys=["c", "click:State", "click:closed 1"], ansi=True, panel=False)
     plain = lambda x: re.sub(r"\x1b\[[0-9;]*m", "", x)  # noqa: E731
     marks = {m[1]: x[:x.index("#")] for x in out.splitlines()
              if re.match(r"(❯| ) ● #\d+", plain(x)) and (m := re.search(r" (merged|closed) ", plain(x)))}
@@ -951,14 +959,17 @@ async def test_repository_switches_runs_and_follows_its_citations_its_filter_and
 
 @needs_node
 async def test_repository_colors_the_unit_its_value_belongs_to(repository):
-    """A field of the items (State) colors each row's mark and the track beside the list; Color by Off colors nothing,
-    the track included; a label marks records, so a row, which stands for its records, takes no mark of its own and
+    """A field of the items (State), once chosen, colors each row's mark and the track beside the list; Color by Off, as
+    the view opens, colors nothing, the track included; a label marks records, so a row, which stands for its records, takes no mark of its own and
     shows their mix in a bar, the label's hue on the part its marked records take, and the track is plain."""
     out = await term_views.draw_text(repository, "repository", cols=100, rows=12, wrap=DRAW_WRAP, ansi=True, panel=False)
+    assert not HUE.search(out), "no hue anywhere as the view opens, Off"
+    out = await term_views.draw_text(repository, "repository", cols=100, rows=12, wrap=DRAW_WRAP, ansi=True, panel=False,
+                                     keys=["c", "click:State"])
     rows = out.splitlines()[5:]
     assert all(HUE.search(x) for x in rows), "each row and its part of the track in its state's hue"
     out = await term_views.draw_text(repository, "repository", cols=100, rows=12, wrap=DRAW_WRAP, ansi=True, panel=False,
-                                     keys=["c", "click:Off"])
+                                     keys=["c", "click:State", "c", "click:Off"])
     assert not HUE.search(out), "no hue anywhere with Color by Off"
     await _labels_on(repository, "repository")
     out = await term_views.draw_text(repository, "repository", cols=100, rows=12, wrap=DRAW_WRAP, panel=False)

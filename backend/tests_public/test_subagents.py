@@ -58,17 +58,21 @@ def test_each_role_is_registered_with_a_full_model_id_an_explicit_effort_and_a_f
     assert roles["writer"]["skills"][0] == roles["critic"]["skills"][0] == "thimble:shared"
 
 
-def test_the_orientation_s_registration_holds_every_part_and_takes_main_s_tools_away(models, hints):
+def test_the_orientation_s_registration_holds_its_prompt_and_takes_main_s_tools_and_propose_view_away(models, hints):
+    """The orientation's registration holds orient.md's deck and its critique, and no views or report part, since 0.8.0
+    leaves view proposals to thimble's proposer and a report to the analyst's request; propose_view is taken away."""
     d = subagents.roles(CORPUS)["orientation"]
     denied = set(d["disallowedTools"])
     assert "mcp__plugin_thimble_thimble__start_orientation" in denied
     assert "mcp__plugin_thimble_thimble__message_orientation" in denied
+    assert "mcp__plugin_thimble_thimble__propose_view" in denied
     assert "mcp__plugin_thimble_thimble__add_card" not in denied and "mcp__plugin_thimble_thimble__critique" not in denied
     from app import tools  # noqa: PLC0415
 
     assert tools.hint("orient-no-request") not in d["prompt"], "a run's request is in its own prompt"
-    for heading in ("The deck", "Views", "The report"):
-        assert heading in d["prompt"], heading
+    assert "#### The deck" in d["prompt"] and "`critique`" in d["prompt"]
+    for heading in ("#### Views", "#### The report"):
+        assert heading not in d["prompt"], heading
     critic = set(subagents.roles(CORPUS)["critic"]["disallowedTools"])
     assert "mcp__plugin_thimble_thimble__add_card" in critic and "mcp__plugin_thimble_thimble__read_ref" not in critic
 
@@ -202,17 +206,49 @@ async def test_without_a_live_module_a_start_is_refused_before_any_request(bridg
     assert not bridge.calls and not sf.requests(subagents.read(CORPUS))
 
 
-async def test_in_a_plain_claude_or_in_plan_mode_nothing_starts(bridge, models, monkeypatch):
-    from app import cc_plugin, session
+async def test_in_plan_mode_nothing_starts_and_a_plain_claude_is_no_refusal(bridge, models, monkeypatch):
+    """With the module live, a session thimble's launcher did not start starts agents as the launcher's does: no
+    refusal before the request. Plan mode still refuses a typed start."""
+    from app import session
 
-    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: False, raising=False)
-    assert (await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)).kind == \
-        "not-launched"
-    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: True, raising=False)
+    assert subagents.refusal_before(CORPUS) is None and subagents.refusal_before(CORPUS, click=True) is None
     monkeypatch.setattr(session, "main_mode", lambda c: "plan")
     ans = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.TYPED)
     assert ans.kind == "hook" and ans.reason == HINTS["start-plan-mode"]
     assert not bridge.calls
+
+
+async def test_a_start_in_the_first_seconds_after_slash_thimble_says_the_plugin_is_still_connecting(bridge, models,
+                                                                                                     monkeypatch):
+    """Right after /thimble opened a plain `claude`, Claude Code has not loaded the module's hello yet: within
+    CONNECT_GRACE_S of main attaching (session.current's `since`), a start with the module not loaded is refused as
+    start-refused-connecting, not as no module. Later, or for any other reason, or with a `since` that does not parse,
+    it gets the no-module refusal."""
+    import sys
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
+
+    from app import session
+
+    monkeypatch.setitem(HINTS, "start-refused-connecting", "CONNECTING")
+    not_loaded = "Claude Code did not load thimble's hooks module"
+    monkeypatch.setattr(sys.modules["app.module_bridge"], "NOT_LOADED", not_loaded, raising=False)
+    bridge.is_live, bridge.reason = False, not_loaded
+    attached = {"since": datetime.now(timezone.utc).isoformat(timespec="milliseconds")}
+    monkeypatch.setattr(session, "current", lambda c: SimpleNamespace(since=attached["since"]))
+    ans = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)
+    assert ans.kind == "no-module" and ans.reason == "CONNECTING"
+    attached["since"] = (datetime.now(timezone.utc) - timedelta(seconds=subagents.CONNECT_GRACE_S + 5)).isoformat()
+    ans = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)
+    assert ans.kind == "no-module" and ans.reason == f"NO MODULE: {not_loaded}"
+    attached["since"] = "not a time"
+    assert subagents.refusal_before(CORPUS).reason == f"NO MODULE: {not_loaded}", "a since that does not parse is old"
+    attached["since"] = datetime.now(timezone.utc).isoformat()
+    bridge.reason = "THIMBLE_NO_MODULE is set"
+    assert subagents.refusal_before(CORPUS).reason == "NO MODULE: THIMBLE_NO_MODULE is set", "another reason"
+    bridge.is_live = True
+    assert subagents.refusal_before(CORPUS) is None
+    assert not bridge.calls and not sf.requests(subagents.read(CORPUS))
 
 
 async def test_a_typed_start_answers_the_exact_agent_call_with_the_request_id_on_its_first_line(bridge, models):
@@ -325,6 +361,24 @@ async def test_a_browser_follow_up_sends_through_the_module_with_the_run_s_value
     bridge.is_live = False
     refused = await subagents.send(CORPUS, started.agent_id, "again")
     assert refused.kind == "no-module"
+
+
+async def test_a_follow_up_to_an_agent_the_registry_lacks_names_its_chat_s_session_or_none_at_all(bridge, models,
+                                                                                                hints):
+    """An agent that is not in the registry gets no SendMessage. The refusal gives the earlier-session text with the
+    session its chat last ran under, and never that text with an empty session ("thimble -r  ..."): with no session
+    known it gives the earlier-version text."""
+    sid = "11111111-1111-4111-8111-111111111111"
+    agents.new_agent(CORPUS, "orient", "orientation", route="subagent", agent_id="a-gone", session="s0",
+                     sessions=["s0", sid])
+    named = await subagents.send(CORPUS, "a-gone", "and April?")
+    assert (named.kind, named.reason) == (subagents.EARLIER, f"EARLIER SESSION: {sid}")
+    agents.new_agent(CORPUS, "orient", "orientation", route="subagent", agent_id="a-nosession", session="",
+                     sessions=[])
+    for agent_id in ("a-nosession", "a-unknown", ""):
+        none = await subagents.send(CORPUS, agent_id, "and May?")
+        assert (none.kind, none.reason) == (subagents.EARLIER, "EARLIER VERSION"), agent_id
+    assert not bridge.ops("send"), "nothing reaches the module"
 
 
 async def test_a_typed_follow_up_is_a_pending_message_request_and_its_exact_send_message(bridge, models):
@@ -654,21 +708,28 @@ CLICKS = [("post", "/api/ws/mini/start", {"text": ""}),
           ("post", "/api/ws/mini/write", {"doc": "report"}),
           ("post", "/api/ws/mini/orientation/message", {"text": "hi"}),
           ("post", "/api/ws/mini/subagents/start-it", {"request": "req_0000000000"}),
-          ("post", "/api/ws/mini/subagents/again", {"request": "req_0000000000"})]
+          ("post", "/api/ws/mini/subagents/again", {"request": "req_0000000000"}),
+          ("post", "/api/ws/mini/chats/main/interrupt", {})]
 
 
 @pytest.mark.real_write_guard
-def test_every_click_route_refuses_the_server_s_token_without_the_analyst_s_cookie(bridge, plugin_headers):
-    from app import main
+def test_every_click_route_refuses_the_server_s_token_without_the_analyst_s_cookie(bridge, plugin_headers,
+                                                                                    monkeypatch):
+    from app import hook_auth, main
 
     client = TestClient(main.create_app())
     for method, path, body in CLICKS:
         r = getattr(client, method)(path, json=body, headers=plugin_headers())
-        assert r.status_code == 403, (path, r.status_code, r.text)
-        # it names the clicks it guards, not only permission answers (live check L32)
-        assert "start, message or stop thimble's agents" in r.json()["detail"], path
+        assert r.status_code == 403 and r.json()["detail"] == hook_auth.WRITE_REFUSED, (path, r.status_code, r.text)
         r = getattr(client, method)(path, json=body)
         assert r.status_code == 403, ("neither cookie nor token, as a kernel cell posts it", path)
+    # behind the write guard each route refuses the token itself too, naming the clicks it guards, not only permission
+    # answers (live check L32)
+    monkeypatch.setattr(hook_auth, "write_guarded", lambda method, path: False)
+    for method, path, body in CLICKS:
+        r = getattr(client, method)(path, json=body, headers=plugin_headers())
+        assert r.status_code == 403, (path, r.status_code, r.text)
+        assert "start, message or stop thimble's agents" in r.json()["detail"], path
     meta = agents.new_agent(CORPUS, "writer", "Write report", route="subagent", agent_id="a1", status="running")
     r = client.post(f"/api/ws/mini/chats/{meta['id']}/interrupt", headers=plugin_headers())
     assert r.status_code == 403

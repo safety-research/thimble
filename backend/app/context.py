@@ -37,6 +37,7 @@ ORIENT_LINE_CHARS = 300  # of one line of the orientation's digest, in its secon
 CARD_CALLS = ("add_card", "edit_card", "add_cell", "edit_cell")  # the calls whose result names the card they made
 COMMENT_CHARS = 300  # of an open comment's text in the documents part
 INDENT = "    "
+PASTED = "(pasted)"  # the line over what the analyst pasted into a message, which is indented under it (_said)
 # the cut steps, (part, level) in order, then the parts whose oldest entries go, in order
 STEPS = (("orientation", 1), ("orientation", 2), ("threads", 1), ("threads", 2), ("conversation", 1),
          ("conversation", 2), ("conversation", 3), ("session", 1), ("session", 2), ("session", 3))
@@ -133,6 +134,19 @@ def _event(raw: str, forks: bool = True) -> _Entry | None:
     return _Entry(f"[event {kind}{' ' + tags if tags else ''}]", body)
 
 
+def _said(text: str) -> str | None:
+    """The analyst's prompt as the agent reads it: what they typed, and each paste (session.pastes) as a PASTED line
+    with the pasted text indented under it. None for an interrupt's line and for a text that starts with a tag other
+    than a paste's, which is Claude Code's own record and no message of the analyst's (`<local-command-stdout>`,
+    `<bash-input>`, `<system-reminder>`, …)."""
+    text = text.strip()
+    if not text or session.INTERRUPT_RE.match(text) or (text.startswith("<") and not session.PASTE_RE.match(text)):
+        return None
+    pieces = [f"{PASTED}\n{_indent(piece)}".rstrip() if pasted else piece.strip()
+              for pasted, piece in session.pastes(text)]
+    return "\n".join(p for p in pieces if p) or None
+
+
 def _fork_entries(path: Path, thread: str, start: int) -> tuple[list[_Entry], int]:
     """A thread's fork's calls from its transcript, from record `start` on (a follow-up resumes the same file), and
     the number of records read. Its text is left out: the analyst reads a fork's reply_in_thread, never its text."""
@@ -186,19 +200,19 @@ def _entries(path: Path, forks: bool = True) -> list[_Entry]:
         if found:
             entries.extend(e for e in (_event(x, forks) for x in found) if e is not None)
             return
-        fields = dict(session.TASK_FIELD_RE.findall(text or ""))
-        agent_id = str(fields.get("task-id") or "").strip()
-        thread = fork_calls.get(str(fields.get("tool-use-id") or "").strip()) or fork_agents.get(agent_id)
-        if thread and agent_id:
-            fork_agents[agent_id] = thread
-            if forks:
-                got, read = _fork_entries(subagents / f"agent-{agent_id}.jsonl", thread, fork_read.get(agent_id, 0))
-                fork_read[agent_id] = read
-                entries.extend(got)
-            return
-        result, status = str(fields.get("result") or "").strip(), str(fields.get("status") or "").strip()
-        if result:
-            entries.append(_Entry(f"[notification {status}]" if status else "[notification]", result))
+        for fields in session.task_notices(text):
+            agent_id = str(fields.get("task-id") or "").strip()
+            thread = fork_calls.get(str(fields.get("tool-use-id") or "").strip()) or fork_agents.get(agent_id)
+            if thread and agent_id:
+                fork_agents[agent_id] = thread
+                if forks:
+                    got, read = _fork_entries(subagents / f"agent-{agent_id}.jsonl", thread, fork_read.get(agent_id, 0))
+                    fork_read[agent_id] = read
+                    entries.extend(got)
+                continue
+            result, status = str(fields.get("result") or "").strip(), str(fields.get("status") or "").strip()
+            if result:
+                entries.append(_Entry(f"[notification {status}]" if status else "[notification]", result))
 
     def prompt(text: str, origin: str | None) -> None:
         if origin == session.OLD_ORIGIN:  # an event in a transcript thimble 0.5.0 wrote
@@ -208,11 +222,11 @@ def _entries(path: Path, forks: bool = True) -> list[_Entry]:
         elif origin == "task-notification":
             notification(text)
         elif origin in (None, "human"):
-            command = session._command_line(text)
-            if command is not None:
-                entries.append(_Entry("[analyst]", command))
-            elif text.strip() and not text.lstrip().startswith("<") and not session.INTERRUPT_RE.match(text.strip()):
-                entries.append(_Entry("[analyst]", text.strip()))
+            # a command's tags in what the analyst typed, not in a paste, which may quote a transcript's record of one
+            command = session._command_line("".join(piece for pasted, piece in session.pastes(text) if not pasted))
+            said = _said(text) if command is None else command
+            if said:
+                entries.append(_Entry("[analyst]", said))
 
     for rec in _records(path):
         if rec.get("isSidechain"):
@@ -446,11 +460,13 @@ def _orientation_chat(c: str) -> str:
 def orientation_part(c: str, focus: tuple[str, ...] = ()) -> _Part | None:
     """The latest orientation's digest as a part, an entry for each line that is not indented with the lines indented
     under it (a call and its result), at three levels: whole, without the indented lines, with each line shortened to
-    ORIENT_LINE_CHARS; None when no orientation ran or its transcript is gone."""
+    ORIENT_LINE_CHARS; None when no orientation ran or its transcript is gone. The digest is read with an agent's long
+    lines whole, not wrapped as the critic reads it, so a paragraph is one entry, kept whole when it touches a focus
+    ref."""
     from . import critique_session  # noqa: PLC0415
 
     chat = _orientation_chat(c)
-    text = critique_session.chat_digest(c, chat) if chat else ""
+    text = critique_session.chat_digest(c, chat, wrap=False) if chat else ""
     if not text:
         return None
     groups: list[list[str]] = []
@@ -553,23 +569,30 @@ def canvas(c: str) -> str:
 
 def views(c: str) -> str:
     """The corpus's own views, each with the files it claims and what it is for, then the proposals not built yet (one
-    the orientation dropped is not among them)."""
+    an orientation from before 0.8.0 dropped, or a view proposal the analyst rejected, is not among them). The view proposal that waits
+    for the analyst's answer (views.open_offer) is listed as thimble's, so main leaves it to the analyst rather than
+    building it; a `suggested` row without `offered`, a 0.7.x orientation's viewer for a file type, is left out, and so
+    is the waiting view proposal while view proposals are off (views.propose_enabled), since the analyst then sees
+    none."""
     from . import views as views_mod  # noqa: PLC0415
 
     lines: list[str] = []
     try:
         listed = [v for v in views_mod.list_views(c) if v.get("origin") != "builtin" and v.get("ok")]
-        proposed = [p for p in views_mod.list_proposals(c) if p.get("status") not in ("built", "dropped")]
+        proposed = [p for p in views_mod.list_proposals(c) if p.get("status") not in ("built", "dropped", "suggested")]
+        offered = views_mod.open_offer(c) if views_mod.propose_enabled(c) else None
     except (OSError, ValueError):
         return ""
     for v in listed:
         lines.append(f"- view:{v['slug']} · {v['name']} · claims {', '.join(v.get('claims') or [])}")
         if v.get("description"):
             lines.append(f"  {v['description']}")
-    for p in proposed:
-        lines.append(f"- proposed, {p.get('status')}: {p.get('name') or p.get('slug')} · claims {', '.join(p.get('claims') or [])}")
-        if p.get("why"):
-            lines.append(f"  {' '.join(str(p['why']).split())}")
+    for p in [*proposed, *([offered] if offered else [])]:
+        what = (f"proposed, {p.get('status')}" if p is not offered
+                else "thimble's view proposal, waiting for the analyst's Accept or Reject")
+        lines.append(f"- {what}: {p.get('name') or p.get('slug')} · claims {', '.join(p.get('claims') or [])}")
+        if p.get("description"):
+            lines.append(f"  {' '.join(str(p['description']).split())}")
     return "\n".join(lines)
 
 

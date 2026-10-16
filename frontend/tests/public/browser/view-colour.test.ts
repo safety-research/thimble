@@ -30,7 +30,7 @@ const ROWS = Array.from({ length: 60 }, (_, i) => `<div class="msg" data-anchor=
 const view = (kept?: unknown) => `<!doctype html><html><head><style>${TOKENS} body{margin:0;font:12px sans-serif} .top{display:flex;align-items:center;gap:8px;padding:8px} #list{height:300px;overflow:auto} .msg{box-sizing:border-box;height:30px;padding:6px 8px 0 12px}</style>
 ${kept ? `<script>window.__thimbleColour = ${JSON.stringify(kept)}</script>` : ''}<script>${BRIDGE}</script><script>${COLOUR}</script><style>${KIT}</style></head><body>
 <div class="top"><input style="width:120px"><span id="colour"></span></div><div id="list">${ROWS}</div>
-<script>window.colour = thimble.colourBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }], strip: '#list' })</script>
+<script>window.colour = thimble.colourBy({ mount: '#colour', initial: 'kind', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }], strip: '#list' })</script>
 </body></html>`
 
 let browser: Browser
@@ -492,7 +492,7 @@ ${kept ? `<script>window.__thimbleColour = ${JSON.stringify(kept)}</script>` : '
 describe("the key's chips", () => {
   test('the chip of the records with no value has the grey the marks draw them in, and an outline only when turned off', async () => {
     const rows = Array.from({ length: 12 }, (_, i) => `<div class="msg" data-anchor="m.jsonl#L${i + 1}" data-colour="${i < 8 ? 'Text only' : ''}">message ${i + 1}</div>`).join('')
-    const { page, frame } = await own(rows, `window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind' }] })`)
+    const { page, frame } = await own(rows, `window.colour = thimble.colorBy({ mount: '#colour', initial: 'kind', fields: [{ name: 'kind', title: 'Kind' }] })`)
     await frame().waitForFunction(() => document.querySelectorAll('.thimble-colour-chip').length === 2)
     const sw = () =>
       frame().evaluate(() => {
@@ -515,7 +515,7 @@ describe("the key's chips", () => {
   test('Reset keeps its place unseen while hidden, so the chips fit one box and showing it moves no chip behind "N more", even after its text changes width', async () => {
     const vals = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot']
     const rows = Array.from({ length: 30 }, (_, i) => `<div class="msg" data-anchor="m.jsonl#L${i + 1}" data-colour="${vals[i % vals.length]}">message ${i + 1}</div>`).join('')
-    const { page, frame } = await own(rows, `window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', values: ${JSON.stringify(vals)} }] })`, 640)
+    const { page, frame } = await own(rows, `window.colour = thimble.colorBy({ mount: '#colour', initial: 'kind', fields: [{ name: 'kind', title: 'Kind', values: ${JSON.stringify(vals)} }] })`, 640)
     await frame().waitForFunction(() => document.querySelectorAll('.thimble-colour-chip').length === 6)
     await page.waitForTimeout(100)
     // a web font arriving after the first fit: Reset's text a little wider than when the row was first laid out
@@ -551,7 +551,7 @@ describe("the key's chips", () => {
 
   test("hovering a field's value says what it means, as the page declares it, else what the field is", async () => {
     const rows = Array.from({ length: 6 }, (_, i) => `<div class="msg" data-anchor="m.jsonl#L${i + 1}" data-colour="${i < 3 ? 'Text only' : 'With links'}">message ${i + 1}</div>`).join('')
-    const { page, frame } = await own(rows, `window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', description: 'what the message holds besides text', values: ['Text only', { name: 'With links', meaning: 'links to a page of the wiki' }] }] })`)
+    const { page, frame } = await own(rows, `window.colour = thimble.colorBy({ mount: '#colour', initial: 'kind', fields: [{ name: 'kind', title: 'Kind', description: 'what the message holds besides text', values: ['Text only', { name: 'With links', meaning: 'links to a page of the wiki' }] }] })`)
     await frame().waitForFunction(() => document.querySelectorAll('.thimble-colour-chip').length === 2)
     const hover = async (name: string) => {
       await frame().locator('.thimble-colour-chip', { hasText: name }).locator('.chip-text').hover()
@@ -570,7 +570,7 @@ describe("the key's chips", () => {
   test("a field's `meanings` say what its values mean without declaring them, so the values keep the records' order and colors", async () => {
     // With links on four records, Text only on two: undeclared, the commoner comes first, in the first color
     const rows = Array.from({ length: 6 }, (_, i) => `<div class="msg" data-anchor="m.jsonl#L${i + 1}" data-colour="${i < 2 ? 'Text only' : 'With links'}">message ${i + 1}</div>`).join('')
-    const field = (extra: string) => `window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', description: 'what the message holds besides text'${extra} }] })`
+    const field = (extra: string) => `window.colour = thimble.colorBy({ mount: '#colour', initial: 'kind', fields: [{ name: 'kind', title: 'Kind', description: 'what the message holds besides text'${extra} }] })`
     const chips = async (frame: () => Frame) => {
       await frame().waitForFunction(() => document.querySelectorAll('.thimble-colour-chip').length === 2)
       return frame().evaluate(() => [...document.querySelectorAll('.thimble-colour-chip')].map((c) => [c.querySelector('.chip-text')!.textContent, getComputedStyle(c.querySelector('.chip-sw')!).backgroundColor]))
@@ -595,7 +595,7 @@ describe("the key's chips", () => {
     // fourteen kinds, kind k on 15 - k records, so the last two go under "Other"
     const kinds = Array.from({ length: 14 }, (_, k) => `kind ${String.fromCharCode(97 + k)}`)
     const rows = kinds.flatMap((n, k) => Array.from({ length: 15 - k }, () => n)).map((n, i) => `<div class="msg" data-anchor="m.jsonl#L${i + 1}" data-colour="${n}">message ${i + 1}</div>`).join('')
-    const script = `window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind' }] })`
+    const script = `window.colour = thimble.colorBy({ mount: '#colour', initial: 'kind', fields: [{ name: 'kind', title: 'Kind' }] })`
     const tipText = (frame: () => Frame) =>
       frame().evaluate(() => {
         const t = document.querySelector('.thimble-tip') as HTMLElement | null
@@ -656,7 +656,7 @@ describe("a label's texts", () => {
     })
 
   test('only the chosen label takes its colours; the other labels that are on, a field and Off highlight in grey', async () => {
-    const { page, frame } = await own(ROWS2, `window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind' }] })`, 700, { v: 1, by: 'l:k1', seen: ['k1', 'k2'] })
+    const { page, frame } = await own(ROWS2, `window.colour = thimble.colorBy({ mount: '#colour', initial: 'kind', fields: [{ name: 'kind', title: 'Kind' }] })`, 700, { v: 1, by: 'l:k1', seen: ['k1', 'k2'] })
     await page.evaluate((m) => (document.getElementById('f') as HTMLIFrameElement).contentWindow!.postMessage(m, '*'), MSG)
     await frame().waitForFunction(() => [...CSS.highlights.keys()].some((k) => k.startsWith('thimble-label-')))
     await page.waitForTimeout(150)
@@ -705,7 +705,7 @@ describe("a lane of the tracks for each of Color by's choices past the first", (
 
   test('two labels chosen are two lanes, each in its own colours and named on hover; one turned off leaves one lane', async () => {
     const rows = Array.from({ length: 60 }, (_, i) => `<div class="msg" data-anchor="m.jsonl#L${i + 1}">message ${i + 1}</div>`).join('')
-    const { page, frame } = await own(rows, `window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind' }], strip: '#list' })`, 700, { v: 1, by: 'l:k1', picks: ['l:k1', 'l:k2'], seen: ['k1', 'k2'] })
+    const { page, frame } = await own(rows, `window.colour = thimble.colorBy({ mount: '#colour', initial: 'kind', fields: [{ name: 'kind', title: 'Kind' }], strip: '#list' })`, 700, { v: 1, by: 'l:k1', picks: ['l:k1', 'l:k2'], seen: ['k1', 'k2'] })
     const post = (m: unknown) => page.evaluate((x) => (document.getElementById('f') as HTMLIFrameElement).contentWindow!.postMessage(x, '*'), m)
     await post(msg(both))
     await frame().waitForFunction(() => document.querySelectorAll('.thimble-colour-lane').length === 2)
@@ -728,7 +728,7 @@ describe("a lane of the tracks for each of Color by's choices past the first", (
   })
   test('a label on that is no choice has no lane, and with Off no lane, no bar and no color show anywhere', async () => {
     const rows = Array.from({ length: 60 }, (_, i) => `<div class="msg" data-anchor="m.jsonl#L${i + 1}" data-colour="${i < 30 ? 'Text only' : 'With links'}">message ${i + 1}</div>`).join('')
-    const script = `window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }], strip: '#list' })`
+    const script = `window.colour = thimble.colorBy({ mount: '#colour', initial: 'kind', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }], strip: '#list' })`
     // Kind the one choice, both labels on: one lane, Kind's
     const a = await own(rows, script, 700, { v: 1, by: 'f:kind', picks: ['f:kind'], field: 'kind', seen: ['k1', 'k2'] })
     const postA = (m: unknown) => a.page.evaluate((x) => (document.getElementById('f') as HTMLIFrameElement).contentWindow!.postMessage(x, '*'), m)
@@ -756,7 +756,7 @@ describe("a lane of the tracks for each of Color by's choices past the first", (
 
   test("a field chosen second is a lane in its values' colors, read from the records the page drew", async () => {
     const rows = Array.from({ length: 60 }, (_, i) => ({ ref: `m.jsonl#L${i + 1}`, kind: i < 30 ? 'Text only' : 'With links', who: i % 2 ? 'ana' : 'bo' }))
-    const script = `const recs = ${JSON.stringify(rows)}; window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }, { name: 'who', title: 'Who' }], strip: '#list', onChange: draw }); function draw() { document.getElementById('list').innerHTML = recs.map((r) => '<div class="msg" data-anchor="' + r.ref + '"' + colour.attr(r) + '>' + r.ref + '</div>').join('') } draw()`
+    const script = `const recs = ${JSON.stringify(rows)}; window.colour = thimble.colorBy({ mount: '#colour', initial: 'kind', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }, { name: 'who', title: 'Who' }], strip: '#list', onChange: draw }); function draw() { document.getElementById('list').innerHTML = recs.map((r) => '<div class="msg" data-anchor="' + r.ref + '"' + colour.attr(r) + '>' + r.ref + '</div>').join('') } draw()`
     const { page, frame } = await own('', script, 700, { v: 1, by: 'f:kind', picks: ['f:kind', 'f:who'], field: 'kind', seen: [] })
     await frame().waitForFunction(() => document.querySelectorAll('.thimble-colour-lane').length === 2)
     await page.waitForTimeout(250)
@@ -807,7 +807,7 @@ describe('what the loupe writes of a record', () => {
     // 3,000 rows at lines 1,000,001 on, three choices of Color by (a lane each), the first sixty drawn on the page
     const drawn = Array.from({ length: 60 }, (_, i) => `<div class="msg" data-anchor="m.jsonl#L${1000001 + i}">row ${i + 1}</div>`).join('')
     const script = `const recs = Array.from({ length: 3000 }, (_, i) => ({ ref: 'm.jsonl#L' + (1000001 + i), kind: i % 2 ? 'Text only' : 'With links', size: ['s', 'm', 'l'][i % 3], mood: i % 5 ? 'calm' : 'gale' }))
-window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }, { name: 'size', title: 'Size' }, { name: 'mood', title: 'Mood' }] })
+window.colour = thimble.colorBy({ mount: '#colour', initial: 'kind', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }, { name: 'size', title: 'Size' }, { name: 'mood', title: 'Mood' }] })
 colour.strip('#list', { rows: recs.map((r) => r.kind), refs: recs.map((r) => r.ref), records: recs,
   preview: (i) => ({ meta: ['10:' + String(i % 60).padStart(2, '0') + ':05', 'agent-0' + (i % 8)], text: 'row ' + (i + 1) + ' ' + 'lorem ipsum dolor sit amet '.repeat(8) }) })`
     const { page, frame } = await own(drawn, script, 260, { v: 1, by: 'f:kind', picks: ['f:kind', 'f:size', 'f:mood'], field: 'kind', seen: [] })
@@ -837,7 +837,7 @@ colour.strip('#list', { rows: recs.map((r) => r.kind), refs: recs.map((r) => r.r
 
   test("a list of elements and no preview: each one's <time> is its metadata, in the gray, and the rest its text", async () => {
     const rows = Array.from({ length: 200 }, (_, i) => `<div class="msg" data-anchor="m.jsonl#L${i + 1}" data-colour="${i < 100 ? 'Text only' : 'With links'}"><time>09:${String(i % 60).padStart(2, '0')}</time> message ${i + 1}</div>`).join('')
-    const { page, frame } = await own(rows, `window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }], strip: '#list' })`)
+    const { page, frame } = await own(rows, `window.colour = thimble.colorBy({ mount: '#colour', initial: 'kind', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }], strip: '#list' })`)
     await frame().waitForFunction(() => document.querySelector('.thimble-colour-strip') != null)
     await page.waitForTimeout(250)
     const box = (await frame().locator('.thimble-colour-track').boundingBox())!
@@ -855,7 +855,7 @@ colour.strip('#list', { rows: recs.map((r) => r.kind), refs: recs.map((r) => r.r
 
   test('a row that names its author before its <time>: the time once, as metadata, and the rest its text', async () => {
     const rows = Array.from({ length: 200 }, (_, i) => `<div class="msg" data-anchor="m.jsonl#L${i + 1}" data-colour="${i < 100 ? 'Text only' : 'With links'}"><b>agent-0${i % 8}</b> <time>09:${String(i % 60).padStart(2, '0')}\n</time> message ${i + 1}</div>`).join('')
-    const { page, frame } = await own(rows, `window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }], strip: '#list' })`)
+    const { page, frame } = await own(rows, `window.colour = thimble.colorBy({ mount: '#colour', initial: 'kind', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }], strip: '#list' })`)
     await frame().waitForFunction(() => document.querySelector('.thimble-colour-strip') != null)
     await page.waitForTimeout(250)
     const box = (await frame().locator('.thimble-colour-track').boundingBox())!
@@ -872,7 +872,7 @@ colour.strip('#list', { rows: recs.map((r) => r.kind), refs: recs.map((r) => r.r
 
   test("a row's data-preview-meta (its author) is metadata after its time, in the gray, and out of the start of its text", async () => {
     const rows = Array.from({ length: 200 }, (_, i) => `<div class="msg" data-anchor="m.jsonl#L${i + 1}" data-colour="${i < 100 ? 'Text only' : 'With links'}" data-preview-meta="agent-0${i % 8}"><b>agent-0${i % 8}</b> <time>09:${String(i % 60).padStart(2, '0')}</time> message ${i + 1}</div>`).join('')
-    const { page, frame } = await own(rows, `window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }], strip: '#list' })`)
+    const { page, frame } = await own(rows, `window.colour = thimble.colorBy({ mount: '#colour', initial: 'kind', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }], strip: '#list' })`)
     await frame().waitForFunction(() => document.querySelector('.thimble-colour-strip') != null)
     await page.waitForTimeout(250)
     const box = (await frame().locator('.thimble-colour-track').boundingBox())!
@@ -893,7 +893,7 @@ describe('popovers beside the tracks', () => {
   test("Color by's menu and a chip's tip stand left of the tracks, never over them", async () => {
     const rows = Array.from({ length: 60 }, (_, i) => `<div class="msg" data-anchor="m.jsonl#L${i + 1}" data-colour="${i < 30 ? 'Text only' : 'With links'}">message ${i + 1}</div>`).join('')
     // Color by at the row's right end, its menu would open over the list's tracks
-    const script = `document.querySelector('.top input').style.width = '300px'; window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', { name: 'With links', meaning: 'links to a page of the wiki' }] }], strip: '#list' })`
+    const script = `document.querySelector('.top input').style.width = '300px'; window.colour = thimble.colorBy({ mount: '#colour', initial: 'kind', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', { name: 'With links', meaning: 'links to a page of the wiki' }] }], strip: '#list' })`
     const { page, frame } = await own(rows, script, 520)
     await frame().waitForFunction(() => document.querySelector('.thimble-colour-strip') != null)
     await page.waitForTimeout(250)
@@ -907,7 +907,7 @@ describe('popovers beside the tracks', () => {
 describe('where the strip shows colours, and one strip at every length', () => {
   // n messages, the first half Text only, the second With links
   const msgs = (n: number, id = 'm') => Array.from({ length: n }, (_, i) => `<div class="msg" data-anchor="${id}.jsonl#L${i + 1}" data-colour="${i < n / 2 ? 'Text only' : 'With links'}">message ${i + 1}</div>`).join('')
-  const SCRIPT = `window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }], strip: '#list' })`
+  const SCRIPT = `window.colour = thimble.colorBy({ mount: '#colour', initial: 'kind', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }], strip: '#list' })`
   /** each strip on the page: whether plain, whether a zoomed track shows, its width and the colours it draws */
   const strips = (frame: () => Frame) =>
     frame().evaluate(() =>
@@ -937,7 +937,7 @@ describe('where the strip shows colours, and one strip at every length', () => {
   test('a plain pane that has drawn only some of its records names one near the pointer, never one far from it', async () => {
     // twenty records at the list's top, then 6,000 px it has not drawn
     const body = `${msgs(20)}<div style="height:6000px"></div>`
-    const { page, frame } = await own(body, `window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }] }); colour.strip('#list')`)
+    const { page, frame } = await own(body, `window.colour = thimble.colorBy({ mount: '#colour', initial: 'kind', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }] }); colour.strip('#list')`)
     await frame().waitForFunction(() => document.querySelector('.thimble-colour-strip') != null)
     await page.waitForTimeout(250)
     const box = (await frame().locator('.thimble-colour-strip').boundingBox())!

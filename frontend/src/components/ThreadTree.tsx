@@ -11,7 +11,10 @@ import { Icon } from './Icon'
 import { Mark } from './Marks'
 import { Popover } from './Menu'
 import { Spinner } from './Spinner'
-import { useTooltip } from './Tooltip'
+import { Tipped, useTooltip } from './Tooltip'
+
+/** What a row's waiting dot says, unless the row names its own wait (ThreadNode.waitText). */
+export const WAITING_TEXT = 'Waiting for you'
 
 export interface ThreadNode {
   id: string
@@ -28,6 +31,8 @@ export interface ThreadNode {
   unread?: boolean
   /** a permission prompt of its session or its fork waits for the analyst */
   waiting?: boolean
+  /** what the waiting dot says on hover, when not "Waiting for you" (Claude Code asks its agent in the terminal) */
+  waitText?: string
   /** mono at the row's right edge: when an agent's run ended (13:40) */
   time?: string
   /** how an agent's run ended: the green check for done, ✕ for a failed or stopped run */
@@ -50,6 +55,10 @@ export interface ThreadTreeProps {
    * card's first row */
   aside?: ReactNode
   className?: string
+  /** a chat whose run the tree does not show while it starts the current thread: main, whose short turn that takes the
+   * thread's question to its fork is the thread's start, not work elsewhere (no spinner on its row, no count in the
+   * folded card) */
+  starter?: string | null
 }
 
 /** A typed name as the thread keeps it: one line, trimmed, never empty. Pure. */
@@ -147,11 +156,12 @@ const GUIDE_X = 10
 const INDENT = 14
 
 /** What wants attention elsewhere: the threads that run, those holding a reply the analyst has not read (the current
- * one is being read), and those a prompt waits on. Pure. */
-export function attention(nodes: readonly ThreadNode[], current: string): { running: number; unread: number; waiting: number } {
+ * one is being read), and those a prompt waits on. The run of `starter`, the chat that starts the current thread, is
+ * not counted. Pure. */
+export function attention(nodes: readonly ThreadNode[], current: string, starter: string | null = null): { running: number; unread: number; waiting: number } {
   const others = nodes.filter((n) => n.id !== current)
   return {
-    running: others.filter((n) => n.running).length,
+    running: others.filter((n) => n.running && n.id !== starter).length,
     unread: others.filter((n) => n.unread).length,
     waiting: nodes.filter((n) => n.waiting).length,
   }
@@ -172,12 +182,13 @@ export function inKeptOrder(nodes: readonly ThreadNode[], kept: readonly string[
     .map((x) => x.n)
 }
 
-export function ThreadTree({ nodes: live, current, onPick, collapsed, onCollapsedChange, onRename, onDelete, aside, className }: ThreadTreeProps) {
+export function ThreadTree({ nodes: live, current, onPick, collapsed, onCollapsedChange, onRename, onDelete, aside, className, starter = null }: ThreadTreeProps) {
   // the order the rows had when the tree opened, held while it stays open; a new thread goes after them (inKeptOrder)
   const kept = useRef<string[] | null>(null)
   if (collapsed) kept.current = null
   else if (!kept.current) kept.current = live.map((n) => n.id)
-  const nodes = useMemo(() => inKeptOrder(live, kept.current), [live, collapsed])
+  // the starter's run is the current thread's start: its row shows no spinner, and the folded card does not count it
+  const nodes = useMemo(() => inKeptOrder(starter ? live.map((n) => (n.id === starter && n.running ? { ...n, running: false } : n)) : live, kept.current), [live, collapsed, starter])
   const [editing, setEditing] = useState<{ id: string; draft: string } | null>(null)
   const [menu, setMenu] = useState<{ id: string; el: HTMLElement } | null>(null)
   const [confirming, setConfirming] = useState<string | null>(null)
@@ -198,7 +209,7 @@ export function ThreadTree({ nodes: live, current, onPick, collapsed, onCollapse
   }, [above])
 
   const cur = nodes.find((n) => n.id === current)
-  const att = attention(nodes, current)
+  const att = attention(nodes, current, starter)
   const filtering = query.trim() !== ''
   const rows = filtering ? filterRows(nodes, query) : treeRows(nodes, folded)
   const toggleFold = (id: string) =>
@@ -316,7 +327,11 @@ export function ThreadTree({ nodes: live, current, onPick, collapsed, onCollapse
           {(n.running || hidden?.running) && <Spinner size={10} label="running" />}
           {!n.running && n.ended === 'done' && <Mark kind="verified" label="done" className="tt-mark" />}
           {!n.running && n.ended === 'failed' && <Mark kind="failed" label="failed" className="tt-mark" />}
-          {(n.waiting || hidden?.waiting) && <span className="dot tt-dot tt-waiting" role="img" aria-label="Waiting for you" />}
+          {(n.waiting || hidden?.waiting) && (
+            <Tipped text={(n.waiting && n.waitText) || WAITING_TEXT} className="tt-wait-tip">
+              <span className="dot tt-dot tt-waiting" role="img" aria-label={(n.waiting && n.waitText) || WAITING_TEXT} />
+            </Tipped>
+          )}
           {((n.unread && !isCur) || hidden?.unread) && <span className="dot tt-dot" role="img" aria-label="Unread" />}
           {hasActions(n) && (
             <MoreButton

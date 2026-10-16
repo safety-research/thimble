@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import time
 
-from conftest import UI_KEY
 from fastapi.testclient import TestClient
 from test_shim import INITIALIZE, INITIALIZED, _read, _send, _Server, _start, _stop
 
@@ -21,7 +20,7 @@ def test_the_server_answers_the_shim_s_routes_only_to_a_request_that_proves_the_
     asks = [("POST", "/api/tools/read_ref", {"json": tool}), ("GET", "/api/events", {"params": {"cwd": "/nowhere"}}),
             ("POST", f"/api/ws/{CORPUS}/sessions/permission", {"json": {"session": "orient", "tool_name": "Bash"}})]
     with TestClient(create_app(), base_url="http://127.0.0.1") as client:
-        wrong = hook_auth.headers("another-token", "n0nce")
+        wrong = hook_auth.headers("another-token", 80)
         for method, path, kw in asks:
             assert client.request(method, path, **kw).status_code == 401, path
             assert client.request(method, path, headers=wrong, **kw).status_code == 401, path
@@ -60,11 +59,24 @@ def test_the_shim_believes_no_answer_without_the_server_s_proof(tmp_path):
     assert answer["isError"] and "ok" not in [c.get("text") for c in answer["content"]]
 
 
-def test_the_analyst_s_cookie_goes_only_to_thimble_s_api_routes(analyst):
-    """The page's key is traded for a cookie scoped to /api/, the path of every route the page calls, and the trade
-    clears one set for every path, since a browser sends a cookie to every port of its host; another key gets none."""
-    r = hook_auth.claim(UI_KEY)
+def test_the_analyst_s_cookie_goes_only_to_thimble_s_api_routes_under_the_browser_s_own_path():
+    """The link's code is traded for a cookie scoped to the browser's own path, /b/<key>/api/, whose key the answer
+    gives that page alone, HttpOnly and SameSite=Strict: a browser sends a cookie to every port of its host, so a cookie
+    scoped to /api/ would reach another server's page that asks for its own /api/ paths. The answer also deletes a
+    cookie an earlier build scoped to /api/, and sets no other; a code that is not alive gets none."""
+    import json
+
+    from starlette.requests import Request
+
+    fresh = Request({"type": "http", "headers": []})
+    r, browser = hook_auth.claim({"code": hook_auth.mint()}, fresh)
+    key = json.loads(r.body)["key"]
     cookies = [v.decode() for k, v in r.raw_headers if k == b"set-cookie"]
-    assert any(c.startswith(f"{hook_auth.ui_cookie()}={UI_KEY};") and "Path=/api/;" in c for c in cookies), cookies
-    assert any(c.startswith(f'{hook_auth.UI_COOKIE}="";') and "Path=/;" in c for c in cookies), cookies
-    assert hook_auth.claim("another-key").status_code == 403
+    assert r.status_code == 200 and len(cookies) == 2 and browser, cookies
+    [mine] = [c for c in cookies if "Max-Age=0" not in c]
+    [old] = [c for c in cookies if "Max-Age=0" in c]
+    assert mine.startswith(f"{hook_auth.ui_cookie()}=") and f"Path=/b/{key}/api/;" in mine, mine
+    assert "HttpOnly" in mine and "SameSite=strict" in mine, mine
+    assert old.startswith(f'{hook_auth.ui_cookie()}=""') and "Path=/api/;" in old, old
+    gone, none = hook_auth.claim({"code": "another-code"}, fresh)
+    assert gone.status_code == 410 and none == "" and not [k for k, _ in gone.raw_headers if k == b"set-cookie"]
