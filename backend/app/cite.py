@@ -1309,7 +1309,8 @@ class _Sources:
             if word and not clocks_in(display, hit[0]):
                 return None
             if not word and not (_norm(hit[0]) in wants or shown_matches(display, hit[0], negative_ok=negative_ok)
-                                 or date_in(display, hit[0]) or in_words(display, hit[0])):
+                                 or date_in(display, hit[0]) or in_words(display, hit[0])
+                                 or self._cell_holds(hit[0], display, negative_ok)):
                 return None
             return td_ref(self.cell_id, decode_label(m[1]), decode_label(m[2]))
         if m := self.line_span.match(ref):
@@ -1336,6 +1337,17 @@ class _Sources:
         return None
 
     @staticmethod
+    def _cell_holds(value: str, display: str, negative_ok: bool) -> bool:
+        """Whether a table cell that writes several values shows a display's numbers among them (the false × of 10-16): a
+        single number as a whole number token (value_in), a 6 at a cell that reads "2026, 6, 2026" but never at one that
+        reads "1,206" or "2026"; a display of several numbers when the cell writes each of them (numbers_held)."""
+        if len(_NUM_RE.findall(value)) < 2:
+            return False
+        if _num_parts(display) is not None:
+            return value_in(display, value, decrease=negative_ok)
+        return numbers_held(display, value, negative_ok=negative_ok)
+
+    @staticmethod
     def _line_holds(line: str, display: str, wants: set[str], negative_ok: bool) -> bool:
         """Whether a line of text output shows a value-ref's display: a number as a whole token (value_in), a day and a
         month in words as a date the line writes in digits (date_in; live check term-fix7, new quirk 4: edit_card
@@ -1344,7 +1356,19 @@ class _Sources:
             return value_in(display, line, decrease=negative_ok)
         if date_in(display, line):
             return True
-        return display.strip() in line or bool(wants & {_norm(x) for x in _NUM_RE.findall(line)})
+        return (display.strip() in line or bool(wants & {_norm(x) for x in _NUM_RE.findall(line)})
+                or numbers_held(display, line, negative_ok=negative_ok))
+
+
+def numbers_held(display: str, text: str, *, negative_ok: bool = False) -> bool:
+    """Whether a display of two or more numbers ("6 of 2026") has each of them at the place `text` as a whole number
+    token (shown_matches), as a line that prints "(2026, 6, 2026)" has (the false × of 10-16); False for a display of
+    fewer than two numbers, which value_in decides."""
+    nums = _NUM_RE.findall(display or "")
+    if len(nums) < 2:
+        return False
+    toks = _NUM_RE.findall(text or "")
+    return all(any(shown_matches(n, t, negative_ok=negative_ok) for t in toks) for n in nums)
 
 
 def _specific(tok: str) -> bool:
