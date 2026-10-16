@@ -125,8 +125,6 @@ export interface ReportEditorProps {
   client: string
   /** the stored document after a save landed */
   onSaved: (doc: Writeup) => void
-  /** the cells the blocks show as figures, after every change */
-  onFigures?: (cells: string[]) => void
   /** the toolbar's Comment on a selection inside a stored sentence (or section heading) */
   onComment?: (sid: string) => void
   /** the caption a card dropped from the sidebar starts with: its takeaway, else its question */
@@ -217,19 +215,6 @@ function slashItems(editor: AnyEditor, ws: string, slug: string, chat: (blockId:
       onItemClick: () => askAbout(editor, chat),
     },
   ]
-}
-
-/** The figure blocks' cells, in document order. */
-function figureCells(blocks: readonly EditorBlockLike[]): string[] {
-  const out: string[] = []
-  const walk = (list: readonly EditorBlockLike[]) => {
-    for (const b of list) {
-      if (b.type === 'figure' && b.props?.cell) out.push(String(b.props.cell))
-      if (b.children?.length) walk(b.children)
-    }
-  }
-  walk(blocks)
-  return out
 }
 
 /** The stored sentence (or section heading) a selection comments on, from the decorations' `data-sid`: the one under
@@ -427,7 +412,7 @@ const pointerPressExtension = () =>
     prosemirrorPlugins: [new Plugin({ props: { handleDOMEvents: { mousedown: (_view, e) => e.button === 0 && pointKeyHeld(e) } } })],
   })
 
-export function ReportEditor({ ws, slug, doc, flags, filter, client, onSaved, onFigures, onComment, captionOf, ref }: ReportEditorProps) {
+export function ReportEditor({ ws, slug, doc, flags, filter, client, onSaved, onComment, captionOf, ref }: ReportEditorProps) {
   const { resolved } = useTheme()
   const docRef = useRef<Writeup | null>(doc)
   const ctx = useRef<MarksCtx>({ slug, doc, flags, filter: filter?.sets ?? null, locked: lockedBlocks(doc), agent: null })
@@ -693,18 +678,12 @@ export function ReportEditor({ ws, slug, doc, flags, filter, client, onSaved, on
   // an empty report is one empty block after the title, drawn as an empty cell (report.css `.wu-zone-empty`) until
   // something is written
   const [empty, setEmpty] = useState(() => isEmptyDoc(initial as EditorBlockLike[]))
-  const figuresCb = useRef(onFigures)
-  figuresCb.current = onFigures
   useEditorChange(() => {
     setEmpty(isEmptyDoc(editor.document as EditorBlockLike[]))
-    figuresCb.current?.(figureCells(editor.document as EditorBlockLike[]))
     if (muted.current) return
     dirty.current = true
     schedule()
   }, editor)
-  useEffect(() => {
-    figuresCb.current?.(figureCells(editor.document as EditorBlockLike[]))
-  }, [editor])
 
   // an empty report opens with the caret in its one block, ready to type in (in a hidden tab, once the tab is shown)
   useEffect(() => {

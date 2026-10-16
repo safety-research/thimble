@@ -717,13 +717,6 @@
   font: 400 var(--text-ui-sm) / 1.35 var(--font-body);
   color: var(--text-secondary);
 }
-.wu-card-used {
-  flex: none;
-  margin-left: auto;
-  padding-top: 3px;
-  font-size: 10px;
-  color: var(--status-positive);
-}
 
 /* the Checks pane, pinned to the sidebar's foot on the pane's paper */
 .wu-checks {
