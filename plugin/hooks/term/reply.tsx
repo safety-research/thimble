@@ -12,9 +12,11 @@
 // the reply's first row the mark takes the ⏺'s cell (Matt, 2026-10-07: "indent 2 chars and replace the dot with ? when
 // they overlap"), so a mark never adds indent.
 //
-// A citation's state after it: ◌ while thimble's links check runs on a card's takeaway, ✓ once the check recomputed it,
-// a red × when the check found another value. The citation under the pointer shows its status in plain words (where it
-// was found, or why not) on a quiet box. With "Citation marks" off a citation is a plain link: no mark, no check.
+// A citation's state after it (cite.ts chipLook): a dim ◌ while its place is resolved or thimble's links check runs on
+// a card's takeaway, nothing once it is found (never a ✓), a red × when it is not there or the check found another
+// value. A citation the check rewrote (another value, another place) reads as rewritten, with no mark; its panel shows
+// what Claude wrote. The citation under the pointer shows its status in plain words (where it was found, or why not)
+// on a quiet box. With "Citation marks" off a citation is a plain link: no mark, no check.
 //
 // A passage of main's answer a check commented on (SPEC-v2 3.12) is tinted in the check's color (16%, 30% while its
 // comment is open in the panel) and carries a flag ⚑ in that color in the margin on its first row; its paragraph is
@@ -147,18 +149,21 @@ export function whereWords(ref: string): string {
 
 /** What thimble's links check of a card's takeaway says of one of its citations (backend verify.py): `running` while
  *  it runs, `verified` once it found the value at its place, `refuted` with why and the value the place shows when it
- *  found another, `typed` with why when the card's code types the value in rather than computes it. */
-export function linkCheck(l: TermLinks | undefined, c: Citation): { state?: string; why?: string; source?: string } {
+ *  found another, `typed` with why when the card's code types the value in rather than computes it. `fixed`: what
+ *  Claude wrote, where the check rewrote the citation in place (its value `was`, its place `from`), and why. */
+export function linkCheck(l: TermLinks | undefined, c: Citation): { state?: string; why?: string; source?: string; fixed?: { was: string; from: string; why: string } } {
   if (!l) return {}
   const key = `${c.display ?? ''}|${c.ref}`
   const mine = (k: string) => k === key || k.endsWith(`|${c.ref}`)
+  const f = (l.fixed ?? []).find(x => x.key === key)
+  const fixed = f ? { fixed: { was: f.was, from: f.from, why: f.why } } : {}
   const b = l.broken.find(x => x.key === key) ?? l.broken.find(x => mine(x.key))
   if (b) return { state: 'refuted', why: b.why, source: b.source }
   const t = (l.typed ?? []).find(x => x.key === key) ?? (l.typed ?? []).find(x => mine(x.key))
   if (t) return { state: 'typed', why: t.why }
-  if (l.pending) return { state: 'running' }
-  if (l.checked && l.ok.some(mine)) return { state: 'verified' }
-  return {}
+  if (l.pending) return { state: 'running', ...fixed }
+  if (l.checked && l.ok.some(mine)) return { state: 'verified', ...fixed }
+  return fixed
 }
 
 /** A citation's status in plain words (SPEC.md, section 5, "Words that recur"): `◌ checking`, `found on the

@@ -204,6 +204,37 @@ test("a citation is purple and underlined, a dim ◌ right after it while it is 
   expect(chipLook('ok', undefined, 'refuted')).toEqual({ state: 'failed', mark: '×', spin: false })
 })
 
+test("a takeaway's value the check corrected in place reads as corrected with no mark; its panel shows what Claude wrote, what the check made it, and why", async ($, on) => {
+  const w = world(on)
+  // the links check put 14591 in place of the 14592 Claude wrote (backend heal.py `corrected`)
+  Object.assign(w.cells.ff73e071!, {
+    takeaway: 'The export holds [[14591|card:ff73e071#revisions/TOTAL]] revisions.',
+    verification: { status: 'ok', links: { status: 'ok', checked: true, resolved: [], broken: [{ value: '14591', ref: 'card:ff73e071#revisions/TOTAL', why: 'the cited place shows 14591', source: '14591', was: '14592', corrected: true }] } },
+  })
+  w.resolve['card:ff73e071#revisions/TOTAL'] = { ref: 'card:ff73e071#revisions/TOTAL', kind: 'cell', cell_id: 'ff73e071', excerpt: 'revisions × TOTAL = 14591', meta: { span: { col: 'revisions', row: 'TOTAL', value: '14591' } } }
+  await start($, w)
+  await turn($, w, [['r1', 'Here.']])
+  let ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
+  await w.clock.advance(300)
+  await ui.unmount()
+  ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
+  const chips = await chipsOf(ui, 'para-tk-t0-1')
+  expect(chips[0]).toMatchObject({ label: '14591', state: 'link', mark: '', spin: false })
+  expect(chips[0]!.tip).not.toContain('correct')
+  // `The export holds 14591 revisions.`: the value at column 17
+  await ui.pointer({ type: 'down', x: 18, y: 0, button: 'left', in: 'para-tk-t0-1' } as never)
+  await ui.pointer({ type: 'up', x: 18, y: 0, button: 'left', in: 'para-tk-t0-1' } as never)
+  await ui.unmount()
+  await w.clock.settle()
+  const pane = (await $.ui.mount(PANE)) as unknown as M
+  const text = shown(await pane.drawn())
+  expect(text).toMatch(/Claude wrote *14592/)
+  expect(text).toMatch(/check made it *14591/)
+  expect(text).toMatch(/why *the cited place shows 14591/)
+  expect(text).not.toContain('×')
+  await pane.unmount()
+})
+
 test("a prompt thimble-term gave main itself gets no footer", async ($, on) => {
   const w = world(on)
   await start($, w)

@@ -1700,10 +1700,11 @@ async function followUpField(cx: Ctx, e: PaneEvent, about: string): Promise<Rend
   )
 }
 
-/** The citation panel (SPEC.md, section 7, "The citation panel"): the title is the cited value, bold, blue and
- *  underlined (a link to its place; red when the value is not there), ◌ after it while it is checked and a red × for a
- *  problem; the subtitle its status in plain words; under the rule `from` and `source` (the sentence it stands in, the
- *  value in it a link), then the cited lines nested at A2 with the value (or the passage an example quotes) on the
+/** The citation panel (SPEC.md, section 7, "The citation panel"): the title is the cited value, bold, purple and
+ *  underlined (a link to its place; red when the value is not there), a dim ◌ after it while it is checked and a red ×
+ *  for a problem, nothing once found; the subtitle its status in plain words; under the rule `from` and `source` (the
+ *  sentence it stands in, the value in it a link), and where a check rewrote the citation its history (`Claude wrote`
+ *  the value or place as written, `check made it` the one it reads now, `why`), then the cited lines nested at A2 with the value (or the passage an example quotes) on the
  *  selection background, or the cited card in its border with the cited mark lit; at the bottom `ask about it` and, for
  *  a citation opened from a side thread, the `follow-up` field. */
 async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElement> {
@@ -1745,6 +1746,12 @@ async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   if (sub) body.push(lineEl(els, [{ s: sub, fg: bad ? COLORS.problem : COLORS.dim }], 'cite-sub', true))
   body.push(ruleEl(els, cols, 'cite-rule'))
   if (p.sentence) rows.push(['source', lineEl(els, sourceSegs(p.sentence, c), 'cite-source', true)])
+  // its revision history: what Claude wrote, what the check made it, and why
+  if (check.fixed) {
+    const now = c.display !== null && check.fixed.was ? c.display : await placeName(cx, c.ref)
+    const wrote = check.fixed.was || (await placeName(cx, check.fixed.from))
+    rows.push(['Claude wrote', wrote], ['check made it', now], ...(check.fixed.why ? [['why', await plainWhy(cx, check.fixed.why)] as [string, string]] : []))
+  }
   if (rows.length) body.push(fieldEls(els, rows, 'cite')!)
   const quote = p.quote || quotedWords(c.display)
   // a card's cell as the card draws it, the cell lit; lines the card printed as lines, the cited ones lit
