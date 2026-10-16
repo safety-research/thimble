@@ -38,10 +38,8 @@ import { cardsOfCall, docsOf, forkDescription, labelsOf, namedForks, namedThread
 import { HOME_UI_EMPTY } from './home'
 import { keepLast, keepRow, loadKept, resetKept } from './kept'
 import { linesMessage, onListClick } from './lines'
-import { ANSWER_ELEMENT, RELAY, docEditMessage, drawPanel, fieldMessage, focusedField, hasList, homeViews, onGesture, openAsk, openCard, openCite, openFile, openLabel, openThread, openView, relayKey, relayMove, scrollPending, viewWheelAt, wheelWindow } from './panel'
+import { ANSWER_ELEMENT, RELAY, drawPanel, fieldMessage, focusedField, hasList, homeViews, onGesture, openAsk, openCard, openCite, openFile, openLabel, openThread, openView, relayKey, relayMove, scrollPending, viewWheelAt, wheelWindow } from './panel'
 import type { PaneEvent } from './panel'
-// the file browser and a file, drawn by a module of their own (panel.tsx drawsView, term.ts loadsView)
-import './filesview'
 import { MARGIN, chipOf, drawCards, drawReply, placeUrl, toolWords } from './reply'
 import { COLORS } from './paint'
 import { isAnchor, signalEnd, signalQuestion } from './signal'
@@ -106,6 +104,18 @@ const labelUiRef = { plugin: 'thimble', key: 'labelUi' } as const
 const filesUiRef = { plugin: 'thimble', key: 'filesUi' } as const
 const panelTickRef = { plugin: 'thimble', key: 'panelTick' } as const
 const panelTickA = atom(panelTickRef, 0)
+// 0.9.0 (C13): the transcript's values the panel reads, and the panel's own
+const activatedRef = { plugin: 'thimble', key: 'activated' } as const
+const settingsRef = { plugin: 'thimble', key: 'settings' } as const
+const coverageSummaryRef = { plugin: 'thimble', key: 'coverageSummary' } as const
+const citeIndexRef = { plugin: 'thimble', key: 'citeIndex' } as const
+const answerCommentsRef = { plugin: 'thimble', key: 'answerComments' } as const
+const checksRunningRef = { plugin: 'thimble', key: 'checksRunning' } as const
+const checksOpenRef = { plugin: 'thimble', key: 'checksOpen' } as const
+const labelUnsureRef = { plugin: 'thimble', key: 'labelUnsure' } as const
+const seenRef = { plugin: 'thimble', key: 'seen' } as const
+const pressingRef = { plugin: 'thimble', key: 'pressing' } as const
+const linksRef = { plugin: 'thimble', key: 'links' } as const
 
 /** The context the other files take, bound to this hook's `$` (band.tsx imports it too). */
 export function cxOf($: Dollar): Ctx {
@@ -253,6 +263,27 @@ export function cxOf($: Dollar): Ctx {
     setFilesUi: async u => void (await $.state.set(filesUiRef, u)),
     panelTick: async () => (await $.state.get(panelTickRef)).value ?? 0,
     bumpPanel: async () => void (await update($, panelTickA, n => (n ?? 0) + 1)),
+    sessionId: () => $.session.id().catch(() => ''),
+    copy: async text => {
+      const r = await $.ui.copy({ text }).catch(err => ({ isCopied: false as const, reason: String(err).slice(0, 120) }))
+      return r.isCopied ? { isCopied: true } : { isCopied: false, reason: String((r as { reason?: unknown }).reason ?? 'not copied') }
+    },
+    activated: async () => (await $.state.get(activatedRef)).value ?? null,
+    settings: async () => (await $.state.get(settingsRef)).value ?? null,
+    coverageSummary: async () => (await $.state.get(coverageSummaryRef)).value ?? null,
+    citeIndex: async () => (await $.state.get(citeIndexRef)).value ?? [],
+    answerComments: async () => (await $.state.get(answerCommentsRef)).value ?? [],
+    checksRunning: async () => (await $.state.get(checksRunningRef)).value ?? 0,
+    checksOpen: async () => (await $.state.get(checksOpenRef)).value ?? null,
+    setChecksOpen: async id => void (await $.state.set(checksOpenRef, id)),
+    labelUnsure: async () => (await $.state.get(labelUnsureRef)).value ?? [],
+    setLabelUnsure: async rows => void (await $.state.set(labelUnsureRef, rows)),
+    seen: async () => (await $.state.get(seenRef)).value ?? null,
+    setSeen: async s => void (await $.state.set(seenRef, s)),
+    pressing: async () => (await $.state.get(pressingRef)).value ?? null,
+    setPressing: async p => void (await $.state.set(pressingRef, p)),
+    links: async () => (await $.state.get(linksRef)).value ?? null,
+    setLinks: async l => void (await $.state.set(linksRef, l)),
   }
 }
 
@@ -1129,9 +1160,6 @@ export const register: Register = on => {
     } else if (d.type === 'field' && typeof d.name === 'string' && typeof d.text === 'string') {
       // a field's words (field.tsx): a draft, or a save
       await fieldMessage(cx, d.name, d.text.slice(0, 20000), d.save === true)
-    } else if (d.type === 'doc-edit' && typeof d.slug === 'string' && typeof d.text === 'string') {
-      // a document's editor (docedit.tsx): what was typed, or a save
-      await docEditMessage(cx, d.slug, d.text, d.save === true)
     } else if (d.type === 'files-open' && typeof d.path === 'string') {
       await openFile(cx, d.path)
     }

@@ -218,16 +218,17 @@ test('the one row above the prompt is a toast: what is new since home was opened
   above = (await $.ui.mount(ABOVE)) as unknown as M
   const drawn = await above.drawn()
   const text = shown(drawn)
-  expect(text).toContain('2 new cards')
+  // 0.9.0 (SPEC-v2 3.8): the summary line's `cards 2 new` in place of the toast's `2 new cards`
+  expect(text).toContain('cards 2 new')
   expect(text).toContain('open ›')
   expect(JSON.stringify(drawn)).toContain('{"type":"Text","props":{"color":"success"},"children":["new"]}')
-  await above.press({ key: 'above-home-open' })
+  await above.press({ key: 'above-summary-open' })
   expect(w.opened).toContain('thimble')
   await above.unmount()
   await w.clock.settle()
-  // once home is open, the row is gone until something new arrives
+  // 0.9.0 (SPEC-v2 3.8): `open ›` opens home and marks nothing seen, so the line stays
   above = (await $.ui.mount(ABOVE)) as unknown as M
-  expect(shown(await above.drawn())).not.toContain('new card')
+  expect(shown(await above.drawn())).toContain('cards 2 new')
   await above.unmount()
 })
 
@@ -241,7 +242,8 @@ test("home opened from the toast without the keys asks for them once more, and n
   await w.clock.advance(1100)
   w.paneFocused = false
   const above = (await $.ui.mount(ABOVE)) as unknown as M
-  await above.press({ key: 'above-home-open' })
+  // 0.9.0 (SPEC-v2 3.8): the summary line's `open ›`
+  await above.press({ key: 'above-summary-open' })
   await above.unmount()
   await w.clock.settle()
   // the pane's props say nothing of the keys (or say it has them); the engine's record says it has not: no key named
@@ -298,13 +300,14 @@ test("home's list takes ↑, ↓ and Enter from the pane's own keys; a click on 
   await $.ui.focus({ requestId: PANEL, component: 'Pane', element: RELAY.up, origin: { kind: 'person' } } as never)
   await w.clock.settle()
   expect(await picked()).toBe(first)
-  // Enter submits the relay's field: the chosen row opens (the first row is a document)
+  // Enter submits the relay's field: the chosen row opens (0.9.0, SPEC-v2 J4: the first row is the Labels section's
+  // label)
   let pane = (await $.ui.mount(PANE)) as unknown as M
   await pane.input({ key: RELAY.pick, text: relayValue() })
   await w.clock.settle()
   await pane.unmount()
   pane = (await $.ui.mount(PANE)) as unknown as M
-  expect(shown(await pane.drawn())).toMatch(/^home › documents › "Agents used the dse wiki as a relay"/)
+  expect(shown(await pane.drawn())).toMatch(/^home › labels › links through a fetch proxy/)
   await pane.unmount()
   // a click on an empty row of a list gives its Client the keys; the panel asks for them back, as an open with `focus`
   await $.command.run({ command: 'thimble:thimble', args: '' } as never)
@@ -611,7 +614,9 @@ test('a deck opens with its slides: each heading, its sentences as a list, its f
   await pane.redraw()
   // one slide at a time: the first, its sentences as a list, its figure; the page row says where it is
   let text = shown(await pane.drawn())
-  for (const s of [SLIDES.title, 'The export is large', 'Most are agents', 'The export per wiki.', 'next', 'notes', 'p n to step · o for notes · y story · l for all documents · b to go back · x to close']) expect(text).toContain(s)
+  // 0.9.0 (SPEC-v2 J4, 3.14): `o` opens every view's object in the browser, where documents are edited, so a deck's
+  // notes are `t`
+  for (const s of [SLIDES.title, 'The export is large', 'Most are agents', 'The export per wiki.', 'next', 'notes', 'p n to step · t for notes · o to edit in the browser · y story · l for all documents', 'b to go back · x to close']) expect(text).toContain(s)
   expect(shown(await pane.drawn({ in: 'doc-page' }))).toBe('‹  1 of 2  ›')
   expect(text).not.toContain('- - ')
   expect(text).not.toContain('What it leaves open')

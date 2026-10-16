@@ -7,6 +7,7 @@ import type { Engine, Mounted } from 'claude-code/testing'
 
 import { pendingOf } from '../term'
 import { CWD, WS, placing, shown, world } from './fixtures'
+import { words } from './fixtures-panel'
 import type { World } from './fixtures'
 
 type M = Mounted<'terminal'>
@@ -147,7 +148,7 @@ test('a view proposal waits above the prompt until it is answered: `view proposa
   await start($, w)
   const above = (await $.ui.mount(aboveAt(140))) as unknown as M
   const drawn = await above.drawn()
-  expect(shown(await above.find({ type: 'Box', key: 'above-offer' }))).toBe("  view proposalEdit Burstsacceptrejectdon't ask again")
+  expect(shown(await above.find({ type: 'Box', key: 'above-offer' }))).toBe("  view proposalEdit Burstsacceptrejectdon't ask againdismiss")
   expect(shown(await above.find({ type: 'Box', key: 'above-offer-description' }))).toContain(OFFER.description)
   expect(await above.find({ type: 'Box', key: 'above-offer-task' })).toBeUndefined()
   expect(await above.find({ type: 'Box', key: 'above-offer-files' })).toBeUndefined()
@@ -271,14 +272,14 @@ test('a dismissed notice goes at once and stays gone when home is read again; a 
   await above.unmount()
 })
 
-test('the toast row above the prompt: `thimble` dim, what is new, then `open ›` and `dismiss`', async ($, on) => {
+test('the summary line above the prompt: `thimble` dim, what is new, then `open ›` and `dismiss`', async ($, on) => {
   const w = world(on)
   await start($, w)
   w.states.home = { ...w.states.home, cards: 14 }
   w.stamps.set(`${WS}/notebooks`, 2)
   await w.clock.advance(1100)
   const above = (await $.ui.mount(aboveAt(140))) as unknown as M
-  expect(shown(await above.find({ type: 'Box', key: 'above-home' }))).toBe('  thimble2 new cardsopen ›dismiss')
-  expect(await above.find({ type: 'Button', key: 'above-home-dismiss' })).toBeTruthy()
+  expect(words(await above.find({ type: 'Box', key: 'above-summary' }))).toBe('  thimblecards 2 newopen ›dismiss')
+  expect(await above.find({ type: 'Button', key: 'above-summary-dismiss' })).toBeTruthy()
   await above.unmount()
 })

@@ -3,7 +3,7 @@
 // A drawing builds its own (its reads subscribe it); a timer or a handler uses the one its hook built.
 import type { Elements, FsEntry, FsStat, HttpInit, HttpResponse, PaneOpenArgs, ProcessRunInit, ProcessRunResult, RenderElement, ResolveInput, UiOpenResult } from 'claude-code'
 
-import type { ChatHomeUi, ChatNav, ChatNews, ChatSignal, TermAgent, TermAnswer, TermCard, TermFilesUi, TermHome, TermLabelUi, TermPanel, TermPending, TermThread, TermThreadRow, TermVerdict } from './types'
+import type { Activated, AnswerComment, ChatHomeUi, ChatNav, ChatNews, ChatSignal, CiteRow, CoverageSummary, FeatureSettings, LabelUnsure, Links, Pressing, SummarySeen, TermAgent, TermAnswer, TermCard, TermFilesUi, TermHome, TermLabelUi, TermPanel, TermPending, TermThread, TermThreadRow, TermVerdict } from './types'
 
 /** What `thimble state` printed for a surface the panel shows, or why it failed. */
 export type SurfaceGot = { ok: true; value: unknown } | { ok: false; error: string }
@@ -98,6 +98,27 @@ export type Ctx = {
   /** a count a drawing of the panel reads, so a bump draws it again */
   panelTick: () => Promise<number>
   bumpPanel: () => Promise<void>
+  // ---- 0.9.0 (C13)
+  /** this session's id, read per call ($.session.id) */
+  sessionId: () => Promise<string>
+  /** text on the clipboard of the surface the person uses: whether it was copied, else why not */
+  copy: (text: string) => Promise<{ isCopied: boolean; reason?: string }>
+  activated: () => Promise<Activated | null>
+  settings: () => Promise<FeatureSettings | null>
+  coverageSummary: () => Promise<CoverageSummary | null>
+  citeIndex: () => Promise<CiteRow[]>
+  answerComments: () => Promise<AnswerComment[]>
+  checksRunning: () => Promise<number>
+  checksOpen: () => Promise<string | null>
+  setChecksOpen: (id: string | null) => Promise<void>
+  labelUnsure: () => Promise<LabelUnsure[]>
+  setLabelUnsure: (rows: LabelUnsure[]) => Promise<void>
+  seen: () => Promise<SummarySeen | null>
+  setSeen: (s: SummarySeen | null) => Promise<void>
+  pressing: () => Promise<Pressing | null>
+  setPressing: (p: Pressing | null) => Promise<void>
+  links: () => Promise<Links | null>
+  setLinks: (l: Links | null) => Promise<void>
 }
 
 export type { RenderElement }
