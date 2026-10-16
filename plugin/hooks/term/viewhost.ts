@@ -1,4 +1,4 @@
-// Terminal views (docs/terminal-views.md): a view built in terminal mode has a program, view.term.js, that draws it in
+// Terminal views (docs/terminal-views.md): a view with a terminal page has a program, view.term.js, that draws it in
 // the panel. thimble's view host (backend/app/term_views.py, `thimble view host`) runs it sandboxed, one process per
 // open view, and answers its reader queries; this file starts the host the first time a view opens (one per session,
 // beside it, `$.process.spawn`), talks to it over the Unix socket it names (`$.http.fetch`), keeps the open view's last

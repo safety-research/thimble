@@ -39,7 +39,8 @@ test("the label panel's header reads `name:`, `type:`, `scope:`, and its pattern
   // each label in a column 11 cells wide (a label over files' `in files:` and a gutter), the field after it
   expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Box","props":{"key":"lf-pattern:","flexDirection":"row"},"children":[{"type":"Box","props":{"width":11,"flexShrink":0}')
   // each folded part's key by what it opens (live check New 11)
-  expect(text).toContain('r to run a sample · n to rename · k to delete · o to show in files')
+  // 0.9.0 (SPEC-v2 J4): the label's Files switch is `f`; `o` opens it in the browser
+  expect(text).toContain('r to run a sample · n to rename · k to delete · f to show in files')
   expect(text).toContain('c counts, e examples, d cards · l for labels')
   await pane.unmount()
 })

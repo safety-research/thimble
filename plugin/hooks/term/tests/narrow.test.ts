@@ -85,9 +85,10 @@ test('the path row fits a pane 40 columns wide: home\'s `show all threads` short
     expect(await pane.find({ type: 'Button', key: 'hk-threads' })).toBeUndefined()
     const way = words(await pane.find({ type: 'Box', key: 'way' }))
     expect(width(way)).toBeLessThanOrEqual(body - 4)
-    if (body === 96) expect(way).toMatch(/show all threads {2}1 new$/)
+    // 0.9.0 (SPEC-v2 3.8): the title row ends with its `↗`
+    if (body === 96) expect(way).toMatch(/show all threads {2}1 new {2}↗$/)
     else {
-      expect(way).toMatch(/threads {2}1 new$/)
+      expect(way).toMatch(/threads {2}1 new {2}↗$/)
       expect(way).not.toContain('show all threads')
     }
     await pane.press({ key: 'threads' })

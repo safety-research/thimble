@@ -1,16 +1,13 @@
-// The report in terminal mode (hooks/report.ts, panel.tsx drawDoc and drawDocEdit, hooks/docedit.tsx): a written
-// document read as Markdown with its cards in their frames, its comments (a check's, Claude's note, the analyst's) under
-// the passages they are on, ↑↓ to choose one, r to resolve it or open it again, Enter or a to ask about it, v to show the
-// resolved ones; `e` edits the report as Markdown, and a save goes through the browser editor's route with the ids of the
-// blocks the edit kept. Each panel is also drawn as rows of text (`screen`), as a terminal shows it.
+// The report in the terminal, read only (report.ts, panel.tsx drawDoc): a written document read as Markdown with its
+// cards in their frames, its comments (a check's, Claude's note, the analyst's) under the passages they are on, ↑↓ to
+// choose one, r to resolve it or open it again, Enter or a to ask about it, v to show the resolved ones. Each panel is
+// also drawn as rows of text (`screen`), as a terminal shows it.
 // `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
 import { RELAY } from '../panel'
-import { alignBlocks, checksOf, commentsOf, docBlocks, docMarkdown, parseMarkdown, unitParts } from '../report'
-import type { DocBlock } from '../report'
-import { editTop, editWindow } from '../docedit'
+import { checksOf, commentsOf, unitParts } from '../report'
 import { CWD, DOC, SLIDES, STATES, shown, takesKeys, world } from './fixtures'
 import type { World } from './fixtures'
 
@@ -208,56 +205,6 @@ test('a comment shows its statement and then its details, the citations in both 
   expect(c!.text).toBe('The count covers all four wikis. - The card counts 4579 pages. - Say so.')
 })
 
-test('a report as Markdown and back: headings, lists, figures as their card\'s line, citations as written; the title apart', () => {
-  const doc = {
-    title: 'Agents used the dse wiki',
-    sections: [
-      { id: 's1', heading: 'The data', paragraphs: [{ id: 'p1', sentences: [{ id: 'x1', text: 'It holds [[4579|card:ff73e071#pages/TOTAL]] pages.' }] }], figures: [{ id: 'f1', cell: 'card:ff73e071', caption: 'Pages per wiki.', after_paragraph: 'p1' }] },
-      { id: 's2', heading: 'Caveats', level: 3, paragraphs: [{ id: 'p2', sentences: [{ id: 'b1', text: 'One week only.', bullet: '-' }, { id: 'b2', text: 'No deletions.', bullet: '-' }] }], figures: [] },
-    ],
-  }
-  const blocks = docBlocks(doc)
-  const md = docMarkdown(doc.title, blocks)
-  expect(md).toBe('# Agents used the dse wiki\n\n## The data\n\nIt holds [[4579|card:ff73e071#pages/TOTAL]] pages.\n\n![Pages per wiki.](card:ff73e071)\n\n### Caveats\n\n- One week only.\n- No deletions.\n')
-  const back = parseMarkdown(md)
-  expect(back.title).toBe('Agents used the dse wiki')
-  expect(alignBlocks(blocks, back.blocks)).toEqual(blocks)
-  // a chip alone on its line is a figure too, an italic line under it its caption; `1.` a numbered item
-  expect(parseMarkdown('## A\n\n[[card:abc12345]]\n*Its caption.*\n\n1. first\n   more of it\n2. second\n').blocks).toEqual([
-    { id: '', type: 'heading', text: 'A', level: 2 },
-    { id: '', type: 'figure', cell: 'card:abc12345', caption: 'Its caption.' },
-    { id: '', type: 'bullet', text: 'first more of it', marker: '1.' },
-    { id: '', type: 'bullet', text: 'second', marker: '1.' },
-  ])
-})
-
-test('an edited block keeps the id of the block it was built from: kept words, then changed ones in their place, new ones none', () => {
-  const before: DocBlock[] = [
-    { id: 's1', type: 'heading', text: 'The data', level: 2 },
-    { id: 'p1', type: 'paragraph', text: 'One. Two.' },
-    { id: 'f1', type: 'figure', cell: 'card:ff73e071', caption: 'Pages.' },
-    { id: 's2', type: 'heading', text: 'Caveats', level: 2 },
-    { id: 'p2', type: 'paragraph', text: 'Only a week.' },
-  ]
-  const after = parseMarkdown('# T\n\n## The data at a glance\n\nOne. Two, and three.\n\nA new paragraph.\n\n![Pages.](card:ff73e071)\n\n## Caveats\n\nOnly a week.\n\n## Next\n').blocks
-  expect(alignBlocks(before, after).map(b => b.id)).toEqual(['s1', 'p1', '', 'f1', 's2', 'p2', ''])
-  // blocks moved past each other: the longest run in order keeps its ids, each id taken once (the save keeps a moved
-  // sentence's record by its words, backend apply_blocks)
-  const moved = alignBlocks(before, parseMarkdown('## Caveats\n\nOnly a week.\n\n## The data\n\n![Pages.](card:ff73e071)\n').blocks).map(b => b.id)
-  expect(moved.filter(Boolean).length).toBe(2)
-  expect(new Set(moved.filter(Boolean)).size).toBe(2)
-})
-
-test("the editor's window keeps the cursor in view, a row each for `↑ N more` and `↓ N more`", () => {
-  expect(editWindow(0, 5, 10)).toEqual({ up: 0, down: 0, n: 5 })
-  expect(editWindow(0, 50, 10)).toEqual({ up: 0, down: 1, n: 9 })
-  expect(editWindow(20, 50, 10)).toEqual({ up: 1, down: 1, n: 8 })
-  expect(editWindow(42, 50, 10)).toEqual({ up: 1, down: 0, n: 9 })
-  expect(editTop(0, 9, 50, 10)).toBe(2)
-  expect(editTop(20, 5, 50, 10)).toBe(5)
-  expect(editTop(5, 49, 50, 10)).toBe(41)
-})
-
 // ------------------------------------------------------------------------------------------------ the panel
 
 test('comments stand under the passages they are on: the check\'s name and hue, what it is at the right; a note dim; the title\'s under the header', async ($, on) => {
@@ -404,114 +351,7 @@ test('while a check runs on the document its subtitle says so', async ($, on) =>
   await pane.unmount()
 })
 
-const EDITED = '# Agents used the dse wiki as a relay\n\n## The data\n\nThe corpus is an export of four wikis [[README.md#L3]]. It holds [[4579|card:ff73e071#pages/TOTAL]] pages in all four.\n\n![The export per wiki.](card:ff73e071)\n\n## The main claim\n\nOne week of June holds most saves.\n\n## What it leaves open\n\nWhy June.\n'
-
-test('e edits the report as Markdown, its cards as their lines; a save sends the blocks with the ids they were built from, then shows the report', async ($, on) => {
-  const w = world(on)
-  w.docs.report = COMMENTED
-  await start($, w)
-  await openReport($, w)
-  await hotkey($, w, 'edit')
-  let pane = await look($)
-  let rows = await screen(pane)
-  expect(rows[0]).toMatch(/home › documents › "Agents used the dse wiki[^"]*" · edit$/)
-  expect(rows[1]).toBe('   editing as Markdown · a card is its line ![caption](card:<id>)')
-  const editor = rowOf(rows, '# Agents used the dse wiki as a relay')
-  expect(rows[editor - 1]).toMatch(/^ {3}╭─+╮$/)
-  expect(rows.slice(editor, editor + 9).map(r => r.replace(/^ {3}│ /, '').replace(/ *│$/, ''))).toEqual([
-    '# Agents used the dse wiki as a relay',
-    '',
-    '## The data',
-    '',
-    'The corpus is an export of four wikis [[README.md#L3]]. It holds',
-    '[[4579|card:ff73e071#pages/TOTAL]] pages.',
-    '',
-    '![The export per wiki.](card:ff73e071)',
-    '',
-  ])
-  expect(shown(await pane.find({ key: 'h-hints' }))).toBe('ctrl+s or s to save · b to go back · x to close')
-  // what the editor holds once typed: its post, as docedit.tsx sends each change
-  await pane.post({ type: 'doc-edit', slug: 'report', text: EDITED, save: false }, { in: 'doc-editor-report' } as never)
-  await w.clock.settle()
-  await pane.unmount()
-  pane = await look($)
-  rows = await screen(pane)
-  expect(rows[1]).toContain('unsaved edits')
-  expect(shown(await pane.find({ key: 'h-hints' }))).toBe('ctrl+s or s to save · d to discard · b to go back · x to close')
-  await pane.unmount()
-  await hotkey($, w, 'save')
-  const save = w.acts.find(a => a.kind === 'doc-save')!
-  expect(save.payload.doc).toBe('report')
-  expect(save.payload.title).toBe('Agents used the dse wiki as a relay')
-  expect((save.payload.blocks as DocBlock[]).map(b => [b.id, b.type])).toEqual([
-    ['s1', 'heading'],
-    ['p1', 'paragraph'],
-    ['f1', 'figure'],
-    ['s2', 'heading'],
-    ['p2', 'paragraph'],
-    ['', 'heading'],
-    ['', 'paragraph'],
-  ])
-  expect((save.payload.blocks as DocBlock[])[1]!.text).toContain('pages in all four.')
-  // saved, the panel shows the report again
-  await w.clock.settle()
-  pane = await look($)
-  rows = await screen(pane)
-  expect(rows[0]).toMatch(/home › documents › "Agents used the dse wiki[^"]*"$/)
-  expect(rows.join('\n')).toContain('e to edit')
-  await pane.unmount()
-})
-
-test('the editor takes the keys after a click: typing goes in at the cursor, Enter breaks the line, ctrl+s saves', async ($, on) => {
-  const w = world(on)
-  w.docs.report = COMMENTED
-  await start($, w)
-  await openReport($, w)
-  await hotkey($, w, 'edit')
-  const pane = await look($)
-  // a click on the title's row after `# `, then a word typed there and a line broken after it
-  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'doc-editor-report' } as never)
-  await pane.key({ key: 'Our ', in: 'doc-editor-report' } as never)
-  await pane.key({ key: 'end', in: 'doc-editor-report' } as never)
-  await pane.key({ key: 'return', in: 'doc-editor-report' } as never)
-  await pane.key({ key: 'backspace', in: 'doc-editor-report' } as never)
-  const drawn = shown(await pane.drawn({ in: 'doc-editor-report' }))
-  expect(drawn).toContain('# Our Agents used the dse wiki as a relay')
-  await pane.key({ key: 's', ctrl: true, in: 'doc-editor-report' } as never)
-  await w.clock.settle()
-  await pane.unmount()
-  const save = w.acts.find(a => a.kind === 'doc-save')!
-  expect(save.payload.title).toBe('Our Agents used the dse wiki as a relay')
-  expect((save.payload.blocks as DocBlock[]).map(b => b.id)).toEqual(['s1', 'p1', 'f1', 's2', 'p2'])
-})
-
-test('a save after the document changed meanwhile stops and says so; s again saves over it, d discards the edit', async ($, on) => {
-  const w = world(on)
-  w.docs.report = COMMENTED
-  await start($, w)
-  await openReport($, w)
-  await hotkey($, w, 'edit')
-  let pane = await look($)
-  await pane.post({ type: 'doc-edit', slug: 'report', text: EDITED, save: false }, { in: 'doc-editor-report' } as never)
-  await w.clock.settle()
-  await pane.unmount()
-  // the writer saved the report meanwhile
-  w.docs.report = { ...COMMENTED, title: 'A newer title' }
-  await hotkey($, w, 'save')
-  expect(w.acts.some(a => a.kind === 'doc-save')).toBe(false)
-  pane = await look($)
-  let rows = await screen(pane)
-  expect(rows.join(' ')).toContain('! the document changed since you began editing it: s again saves yours over it')
-  await pane.unmount()
-  await hotkey($, w, 'discard')
-  pane = await look($)
-  rows = await screen(pane)
-  expect(rows.join('\n')).not.toContain('unsaved edits')
-  expect(rows.join('\n')).toContain('# A newer title')
-  await pane.unmount()
-})
-
-test('the report with its comments at 120 columns, a comment chosen, and its edit, as rows of text', async ($, on) => {
+test('the report with its comments at 120 columns and a comment chosen, as rows of text', async ($, on) => {
   const w = world(on)
   w.docs.report = COMMENTED
   await start($, w)
@@ -525,16 +365,10 @@ test('the report with its comments at 120 columns, a comment chosen, and its edi
   pane = await look($, 116, 70)
   const chosen = await screen(pane, 116)
   await pane.unmount()
-  await hotkey($, w, 'edit')
-  pane = await look($, 116, 30)
-  const edit = await screen(pane, 116)
-  await pane.unmount()
   // every row within the pane's 120 columns; the type area's edge, A0, at column 3 after the pane's padding and the
-  // margin; the chosen comment's `❯` in the margin; the editor's border as wide as the rules
-  for (const rows of [read, chosen, edit]) expect(rows.every(r => wide(r) <= 120)).toBe(true)
-  // one title row: the path, the document last in the accent and bold
-  expect(read[0]).toBe('   home › documents › "Agents used the dse wiki as a relay"')
+  // margin; the chosen comment's `❯` in the margin
+  for (const rows of [read, chosen]) expect(rows.every(r => wide(r) <= 120)).toBe(true)
+  // one title row: the path, the document last in the accent and bold, then the `↗` that opens it in the browser
+  expect(read[0]).toMatch(/^ {3}home › documents › "Agents used the dse wiki as a relay" +↗$/)
   expect(chosen.filter(r => r.startsWith(' ❯'))).toEqual([expect.stringMatching(/^ ❯ {3}● Judgment calls {80,}check$/)])
-  const rule = edit.find(r => /^ {3}─+$/.test(r))!
-  expect(edit.find(r => /^ {3}╭─+╮$/.test(r))!.length).toBe(rule.length)
 })

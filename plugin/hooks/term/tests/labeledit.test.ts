@@ -145,20 +145,21 @@ async function drawing(pane: M, what: string, columns = 120): Promise<string> {
 
 // ------------------------------------------------------------------------------------------------ the tests
 
-test('a label over files is turned on or off in Files from its panel: `in files:` lit on the one in use; o and a click send `label-show`', async ($, on) => {
+test('a label over files is turned on or off in Files from its panel: `in files:` lit on the one in use; f and a click send `label-show`', async ($, on) => {
+  // 0.9.0 (SPEC-v2 J4): `o` opens every view's object in the browser, so the label's Files switch is `f`
   const w = world(on)
   let pane = await labelPanel($, w)
   let text = shown(await pane.drawn())
   expect(text).toContain('in files:onoff')
   expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["off"]}')
-  expect(text).toContain('o to show in files')
+  expect(text).toContain('f to show in files')
   // thimble answers the act with the label on
   label(w).shown = true
   pane = await press($, w, pane, 'hk-files-on')
   expect(w.acts).toContainEqual({ kind: 'label-show', payload: { label: LABEL.id, on: true } })
   text = shown(await pane.drawn())
   expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["on"]}')
-  expect(text).toContain('o to hide in files')
+  expect(text).toContain('f to hide in files')
   label(w).shown = false
   pane = await press($, w, pane, 'lo-off')
   expect(w.acts).toContainEqual({ kind: 'label-show', payload: { label: LABEL.id, on: false } })

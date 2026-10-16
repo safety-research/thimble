@@ -1,28 +1,29 @@
-// The panel's new views and the summary line's counts (term-panel lane, build spec 3.8): registerPanelViews adds the
-// Coverage, Citations and Checks views through panel.tsx drawsView and term.ts loadsView, so panel.tsx's own switch
-// does not change for them; refreshSummary recomputes the summary line's counts when term.ts tick sees the labels,
-// coverage, answers, cards or docs areas change.
-//
-// SCAFFOLD STUB (C13): the three views draw one line each, "not built yet", and read nothing; refreshSummary does
-// nothing. register.tsx calls registerPanelViews once; nothing here runs at import.
+// The panel's views drawn by modules of their own, registered once (register.tsx calls registerPanelViews): the file
+// browser and a file (filesview.tsx), coverage (coverageview.tsx), the citations (citesview.tsx) and the checks on
+// answers (checksview.tsx), each through panel.tsx drawsView and term.ts loadsView; and what a terminal view's acts do.
+// refreshSummary counts again what the summary line above the prompt shows (term.ts tick calls it when the workspace
+// changes). The other files of the panel's lane are reached through this one.
 import type { On } from 'claude-code'
 
-import { drawChecks } from './checksview'
-import { drawCitations } from './citesview'
-import { drawCoverage } from './coverageview'
-import type { Ctx } from './ctx'
-import { drawsView } from './panel'
-import { loadsView } from './term'
+import { registerChecksView } from './checksview'
+import { registerCitationsView } from './citesview'
+import { registerCoverageView } from './coverageview'
+import { registerFilesView } from './filesview'
+import { registerViewActs } from './panel'
 
-/** The Coverage, Citations and Checks views, drawn and read by their own files. */
-export function registerPanelViews(_on: On): void {
-  drawsView('coverage', drawCoverage)
-  drawsView('citations', drawCitations)
-  drawsView('checks', drawChecks)
-  for (const view of ['coverage', 'citations', 'checks']) loadsView(view, async () => undefined)
-}
+export { refreshSummary, registerBand } from './band'
+export { openCoverage } from './coverageview'
+export { openCitations } from './citesview'
+export { openChecks } from './checksview'
+export { openInBrowser } from './offramp'
+export { postNotice } from './notices'
 
-/** The summary line's counts read again (term.ts tick, on the C13 area changes). The stub reads nothing. */
-export async function refreshSummary(_cx: Ctx): Promise<void> {
-  return undefined
+/** The panel's views and acts registered with the panel; called once, from register.tsx's register. */
+export function registerPanelViews(on: On): void {
+  void on
+  registerFilesView()
+  registerCoverageView()
+  registerCitationsView()
+  registerChecksView()
+  registerViewActs()
 }

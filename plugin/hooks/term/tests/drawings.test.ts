@@ -17,6 +17,10 @@ import type { World } from './fixtures'
 // the test's own output: its drawings, for a reader
 declare const console: { log: (...args: unknown[]) => void }
 
+
+/** A title row's words with the `↗` at its right end (SPEC-v2 3.8: every view's title row opens its object in the
+ *  browser). */
+const titled = (words: string) => new RegExp(`^${words.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} +↗$`)
 type M = Mounted<'terminal'>
 type E = Engine
 type Node = { type?: string; props?: Record<string, unknown>; hover?: Record<string, unknown>; children?: unknown[] }
@@ -329,7 +333,7 @@ test("every panel's header is one title row: the path, earlier steps dim and a c
   let pane = await look($)
   let rows = await screen(pane, 96)
   print('home, 96 columns (the first rows)', rows.slice(0, 4))
-  expect(rows[0]).toMatch(/^ {3}Home +show all threads {2}1 new$/)
+  expect(rows[0]).toMatch(/^ {3}Home +show all threads {2}1 new {2}↗$/)
   expect(rows[1]!.trim()).toMatch(/^─+$/)
   await pane.press({ key: 'threads' })
   await w.clock.settle()
@@ -337,7 +341,7 @@ test("every panel's header is one title row: the path, earlier steps dim and a c
   pane = await look($)
   rows = await screen(pane, 96)
   print('the threads panel', rows.slice(0, 4))
-  expect(rows[0]).toBe('   home › Threads')
+  expect(rows[0]).toMatch(titled('   home › Threads'))
   expect(rows[1]).toBe('   2 threads · 1 new')
   expect(rows[2]!.trim()).toMatch(/^─+$/)
   expect(rows.join('\n')).not.toContain('‹ back')
@@ -364,14 +368,14 @@ test("every panel's header is one title row: the path, earlier steps dim and a c
   pane = await look($)
   rows = await screen(pane, 96)
   print('a document', rows.slice(0, 3))
-  expect(rows[0]).toBe('   home › documents › "Agents used the dse wiki as a relay"')
+  expect(rows[0]).toMatch(titled('   home › documents › "Agents used the dse wiki as a relay"'))
   expect(rows[1]!.trim()).toMatch(/^─+$/)
   await pane.unmount()
   // in a narrow pane the earlier steps shorten first, then the current one is cut with `…`
   pane = await look($, 40)
   rows = await screen(pane, 40)
   print('the document in a pane 40 columns wide', rows.slice(0, 2))
-  expect(rows[0]).toBe('   home › … › "Agents used the dse…"')
+  expect(rows[0]).toMatch(titled('   home › … › "Agents used the dse…"'))
   await pane.unmount()
 })
 
@@ -420,7 +424,7 @@ test('a new thread about a card shows the card in its frame above the field: its
   let pane = await look($)
   let rows = await screen(pane, 96)
   print('a new thread about a tall card', rows)
-  expect(rows[0]).toBe('   home › New thread')
+  expect(rows[0]).toMatch(titled('   home › New thread'))
   expect(rows[1]).toBe('   about card "How many revisions did each label make?"')
   expect(rows[2]!.trim()).toMatch(/^─+$/)
   // the card in its frame on the type area's edge: its title, a blank row, the first six rows of its table, then
@@ -467,7 +471,7 @@ test("a thread's subject: one dim `about` row above its chat; v shows the card i
   let rows = await screen(pane, 96)
   print('a thread about a card', rows)
   // the thread named by its first question
-  expect(rows[0]).toBe('   home › threads › "why is events.jsonl so much bigger?"')
+  expect(rows[0]).toMatch(titled('   home › threads › "why is events.jsonl so much bigger?"'))
   let about = at(rows, 'about card "What does the export hold per wiki?"')
   expect(about).toBeGreaterThan(0)
   // the card is not drawn: a blank row, then the first question
@@ -641,7 +645,7 @@ test("a side thread alone: its question the title, one dim `about` row under it,
   print("Matt's side thread, alone", rows)
   const text = rows.join('\n')
   // the title row names the thread by its question; under it what it is about, dim, on one row, cut at a word
-  expect(rows[0]).toBe(`   home › threads › "${ASKED}"`)
+  expect(rows[0]).toMatch(titled(`   home › threads › "${ASKED}"`))
   expect(rows[1]).toBe('   about "The files show 7 participants, P1 to P7. Each one has a…"')
   expect(ruled(rows[2])).toBe(true)
   expect(JSON.stringify(await pane.find({ key: 'thread-about' }))).toContain('"dimColor":true')
