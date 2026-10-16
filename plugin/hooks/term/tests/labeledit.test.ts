@@ -1,13 +1,15 @@
-// The label panel's parity with the browser's label editor and Labels pane: a label's marks shown or hidden in Files
-// and the views (`marks: shown on records in Files and views  hide`), its definition's `edit`, a value's color chosen
-// by the names show_label takes, a filter by a value, the held-out agreement and `… N more` records in the examples,
-// rename, and the undo of a delete in the labels list. Each change goes through `thimble act` (label-show,
-// label-filter, label, label-undelete). `claude plugin test plugin`.
+// The label panel's parity with the browser's label editor and Labels pane (mockup labelpanel2): every field exposed
+// and editable for each kind of label, a label's records marked in Files and the views or not (`mark records in Files
+// and views:  on  off`), a code label's colored code, a value's color chosen by the names show_label takes, a filter by
+// a value, the held-out agreement and `… N more` records in the examples, rename in the name's field, and the undo of a
+// delete in the labels list. Each change goes through `thimble act` (label-show, label-filter, label,
+// label-undelete). `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
 import { LABEL_HUES, PICKED_HUES, setTheme } from '../paint'
-import { COLOR_NAMES, LABEL_WHEEL, colorName, hueOf } from '../labels'
+import { COLOR_NAMES, LABEL_WHEEL, colorName, hueOf, regexNote } from '../labels'
+import { codeParts } from '../field'
 import { CWD, LABEL, shown, world } from './fixtures'
 import type { World } from './fixtures'
 
@@ -138,6 +140,9 @@ function flat(n: unknown): string {
   return flat(o.children ?? o.props?.children)
 }
 
+/** A drawing's rows without the panel's margin of 3 cells. */
+const bare = (t: string) => t.split('\n').map(r => r.replace(/^ {3}/, '')).join('\n')
+
 /** The panel at 120 columns (or `columns`) as rows of text, printed for a reader of the test's output. */
 async function drawing(pane: M, what: string, columns = 120): Promise<string> {
   const text = rows(await pane.drawn(), columns - 2).map(r => r.replace(/\s+$/, '')).join('\n')
@@ -147,71 +152,164 @@ async function drawing(pane: M, what: string, columns = 120): Promise<string> {
 
 // ------------------------------------------------------------------------------------------------ the tests
 
-test("a label over files shows or hides its marks in Files and the views from its panel: `marks:` says which in words, its action changes it; f and a click send `label-show`", async ($, on) => {
+// the four kinds of label the mockup draws (labelpanel2): a prompt label over a file, a regex label over many files, a
+// code label over a database table, a prompt label over the canvas's cards
+const MODELS = { model_id: 'claude-haiku-5-5', model_role: 'claude-haiku-5-5', model_choices: ['claude-haiku-5-5', 'claude-opus-5-5', 'claude-sonnet-5'], model: '' }
+const ran = (n: number) => ({ total: n, matched_total: n, labeled: n, status: 'done', limit: null })
+const CODE = 'def label(pr):\n    if not pr["merged_at"]:\n        return "never merged", 1.0\n    hours = (pr["merged_at"] - pr["opened_at"]) / 3600\n    return ("fast" if hours < 2 else "slow"), 1.0'
+const KINDS_SHOWN = [
+  {
+    what: 'a prompt label over a file',
+    label: { ...LABEL, ...MODELS, name: 'message to agents', kind: 'prompt', description: 'Is this post a message addressed to one or more other agents, rather than a status note to no one in particular?', spec: '', glob: 'board.jsonl', scope_files: 1, scope_unit: 'lines', labels: ['yes', 'no', 'unsure'], label_stats: { n_labeled: 44, counts: { yes: 17, no: 25, unsure: 2 } }, last_run: ran(44), shown: true, run_model: 'Haiku 5.5' },
+    rows: [
+      /^name: {6}● message to agents▏$/,
+      /^kind: {6}prompt {3}regex {3}code$/,
+      /^model: {5}claude-haiku-5-5 ▾$/,
+      /^unit: {6}records of files {3}cards {3}sentences$/,
+      /^scope: {5}board\.jsonl▏ {24}· 1 file matches · 44 lines$/,
+      /^mark records in Files and views: {3}on {3}off$/,
+      /^─+$/,
+      /^ {10}╭─+╮$/,
+      /^prompt: {3}│ Is this post a message addressed to one or more other agents, rather than/,
+      /^values:$/,
+      /^ {10}● yes {5}━{20} {12}17$/,
+      /^ {10}● no {6}━{30} {2}25$/,
+      /^ {10}● unsure {2}━{2} {31}2$/,
+      /^last run on all 44 lines$/,
+      /^run on a sample {3}run on all {3}rename {3}delete$/,
+      /^↑↓ to choose · Enter to press or edit/,
+    ],
+    chosen: [' prompt ', ' records of files ', ' on '],
+  },
+  {
+    what: 'a regex label over many files',
+    label: { ...LABEL, ...MODELS, name: 'mentions force-push', kind: 'regex', spec: 'force[- ]push|--force', glob: 'agents/*.jsonl', scope_files: 48, scope_unit: 'lines', labels: ['yes', 'no'], label_stats: { n_labeled: 840, counts: { yes: 9, no: 831 } }, last_run: ran(840), shown: false },
+    rows: [
+      /^kind: {6}prompt {3}regex {3}code$/,
+      /^unit: {6}records of files {3}cards {3}sentences$/,
+      /^scope: {5}agents\/\*\.jsonl▏ +· 48 files match · 840 lines$/,
+      /^mark records in Files and views: {3}on {3}off$/,
+      /^pattern: {2}│ force\[- \]push\|--force +│$/,
+      /^ {10}│ a match is yes, the rest no · case-sensitive +│$/,
+      /^ {10}● yes {2}━ {32}9$/,
+      /^ {10}● no {3}━{30} 831$/,
+      /^last run on all 840 lines$/,
+    ],
+    chosen: [' regex ', ' records of files ', ' off '],
+  },
+  {
+    what: 'a code label over a database table',
+    label: { ...LABEL, ...MODELS, name: 'merge delay', kind: 'code', spec: CODE, glob: 'forge.db#prs', scope_files: 1, scope_unit: 'rows', labels: ['fast', 'slow', 'never merged'], label_stats: { n_labeled: 36, counts: { fast: 20, slow: 12, 'never merged': 4 } }, last_run: ran(36), shown: true },
+    rows: [
+      /^kind: {6}prompt {3}regex {3}code$/,
+      /^scope: {5}forge\.db#prs▏ +· 1 file matches · 36 rows$/,
+      /^code: {5}│ def label\(pr\): +│$/,
+      /^ {10}│ {5}return \("fast" if hours < 2 else "slow"\), 1\.0 +│$/,
+      /^ {10}● never merged {2}━{6} {27}4$/,
+      /^last run on all 36 rows$/,
+    ],
+    chosen: [' code ', ' records of files ', ' on '],
+  },
+  {
+    what: "a prompt label over the canvas's cards",
+    label: { ...LABEL, ...MODELS, name: 'claims a number', kind: 'prompt', description: "Does the card's takeaway state a number as a finding?", spec: '', unit: 'cell', glob: '', labels: ['yes', 'no'], label_stats: { n_labeled: 9, counts: { yes: 6, no: 3 } }, last_run: ran(9) },
+    rows: [
+      /^model: {5}claude-haiku-5-5 ▾$/,
+      /^unit: {6}records of files {3}cards {3}sentences$/,
+      /^scope: {4}the canvas's cards · 9 cards$/,
+      /^prompt: {3}│ Does the card's takeaway state a number as a finding\? +│$/,
+      /^ {10}● yes {2}━{30} {3}6$/,
+      /^last run on all 9 cards$/,
+    ],
+    chosen: [' prompt ', ' cards '],
+  },
+]
+
+for (const c of KINDS_SHOWN)
+  test(`the label panel shows every field as the browser's editor does, each editable where the browser's is: ${c.what}`, async ($, on) => {
+    // Matt (mockup feedback, 21:20): kind, scope and the rest exposed and editable like the browser, the model among
+    // them, the actions clickable, "in files" clear (mockup labelpanel2)
+    const w = world(on)
+    w.states.labels = [c.label] as never
+    const pane = await labelPanel($, w)
+    const text = bare(await drawing(pane, `the label panel: ${c.what}`)).split('\n')
+    for (const re of c.rows) expect(text.find(r => re.test(r)), String(re)).toBeDefined()
+    // the choices in use on the selection background, one cell around their words
+    const json = JSON.stringify(await pane.drawn())
+    for (const words of c.chosen) expect(json).toContain(`{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["${words}"]}`)
+    // the name in a field on the selection background, its ● in the label's color
+    expect((await pane.find({ type: 'Input', key: `lb-name-${LABEL.id}` }))?.props).toMatchObject({ value: c.label.name, submitLabel: 'rename' })
+    expect(json).toContain('{"type":"Box","props":{"width":40,"backgroundColor":"selectionBg","paddingLeft":1,"flexDirection":"row"}')
+    // the definition in its field, from the label column to the pane's edge
+    expect(await pane.find({ type: 'Client', key: `lb-def-${LABEL.id}-${c.label.kind}` })).toBeDefined()
+    // the unit is the one it was made with, as in the browser: the others cannot be picked
+    for (const u of ['records of files', 'cards', 'sentences']) expect(await pane.find({ type: 'Button', key: `lu-${u === 'records of files' ? 'files' : u}` })).toBeUndefined()
+    await pane.unmount()
+  })
+
+test("a label over files marks its records in Files and the views or not: `mark records in Files and views:  on  off`, the one in use lit; f and a click send `label-show`", async ($, on) => {
   // 0.9.0 (SPEC-v2 J4): `o` opens every view's object in the browser, so the label's marks switch is `f`; (Matt, v9
-  // review, item l) `in files: on off` did not say what it turns on
+  // review, item l) `in files: on off` did not say what it turns on; mockup labelpanel2 says it in the row's label
   const w = world(on)
   let pane = await labelPanel($, w)
   let text = shown(await pane.drawn())
-  expect(text).toContain('marks:hidden in Files and viewsshow')
-  expect(text).not.toContain('in files')
-  expect((await pane.find({ type: 'Button', key: 'lo-on' }))?.children[0]).toMatchObject({ type: 'Text', props: { color: 'suggestion' } })
-  expect(text).toContain('f to show marks')
+  expect(text).toContain('mark records in Files and views:   on  off ')
+  expect(text).not.toContain('in files:')
+  expect(text).not.toContain('marks:')
+  expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":[" off "]}')
+  expect((await pane.find({ type: 'Button', key: 'lo-on' }))?.props).toMatchObject({ label: ' on ', dimColor: true })
   // thimble answers the act with the label on
   label(w).shown = true
   pane = await press($, w, pane, 'hk-files-on')
   expect(w.acts).toContainEqual({ kind: 'label-show', payload: { label: LABEL.id, on: true } })
-  text = shown(await pane.drawn())
-  expect(text).toContain('marks:shown on records in Files and viewshide')
-  expect(text).toContain('f to hide marks')
+  text = JSON.stringify(await pane.drawn())
+  expect(text).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":[" on "]}')
+  expect(await pane.find({ type: 'Button', key: 'lo-off' })).toBeDefined()
   label(w).shown = false
   pane = await press($, w, pane, 'lo-off')
   expect(w.acts).toContainEqual({ kind: 'label-show', payload: { label: LABEL.id, on: false } })
-  expect(shown(await pane.drawn())).toContain('marks:hidden in Files and viewsshow')
+  expect(await pane.find({ type: 'Button', key: 'lo-on' })).toBeDefined()
   await pane.unmount()
 })
 
-test("the label's definition reads as editable: `edit` in the accent at its last row's end while it rests, gone once a click gives it the keyboard", async ($, on) => {
-  // Matt (v9 review, item m): the definition did not look editable
+test("a code label's code has its keywords and strings colored in its field, its comments dim, as the mockup draws it", async ($, on) => {
   const w = world(on)
+  w.states.labels = [{ ...KINDS_SHOWN[2]!.label, spec: `${CODE}  # by the hour` }] as never
   const pane = await labelPanel($, w)
-  const field = `lb-def-${LABEL.id}-regex`
-  expect((await pane.find({ type: 'Client', key: field }))?.props).toMatchObject({ props: { edit: 'edit', editColor: 'suggestion' } })
-  // the field's own drawing: its one row, then `edit` against its right edge
-  const before = JSON.stringify(await pane.drawn({ in: field }))
-  expect(before).toContain('{"type":"Text","props":{"color":"suggestion"},"children":["edit"]}')
-  expect(shown(await pane.drawn({ in: field }))).toMatch(/^r\\\.jina\\\.ai\|proxy\\\. +edit$/)
-  // a click on it, as anywhere in the field, gives the field the keyboard: the cursor, and no `edit`
+  const field = `lb-def-${LABEL.id}-code`
+  expect((await pane.find({ type: 'Client', key: field }))?.props).toMatchObject({ props: { multiline: true, code: { keyword: 'merged', string: 'success' } } })
+  const drawn = JSON.stringify(await pane.drawn({ in: field }))
+  expect(drawn).toContain('{"type":"Text","props":{"color":"merged"},"children":["def"]}')
+  expect(drawn).toContain('{"type":"Text","props":{"color":"merged"},"children":["not"]}')
+  expect(drawn).toContain('{"type":"Text","props":{"color":"success"},"children":["\\"never merged\\""]}')
+  expect(drawn).toContain('{"type":"Text","props":{"dimColor":true},"children":["# by the hour"]}')
+  // a name that holds a keyword is no keyword; a click gives the field the keyboard, its row with the cursor plain
+  expect(drawn).not.toContain('"children":["if"]},"_merged')
   await pane.pointer({ type: 'down', x: 3, y: 0, button: 'left', in: field } as never)
-  const after = JSON.stringify(await pane.drawn({ in: field }))
-  expect(after).not.toContain('"edit"')
-  expect(after).toContain('"inverse":true')
+  const after = (((await pane.drawn({ in: field })) as { children?: unknown[] }).children ?? []) as unknown[]
+  expect(JSON.stringify(after[0])).toContain('"inverse":true')
+  expect(JSON.stringify(after[0])).not.toContain('"color":"merged"')
+  expect(JSON.stringify(after[1])).toContain('"color":"merged"')
   await pane.unmount()
 })
 
-test("a definition whose last row leaves no room for `edit` takes it on a row of its own, against the right edge", async ($, on) => {
-  const w = world(on)
-  // the field is 102 cells wide in this pane (116 less the label column, the border and its padding), a row 101 cells
-  label(w).spec = 'x'.repeat(101)
-  const pane = await labelPanel($, w)
-  const field = `lb-def-${LABEL.id}-regex`
-  // the region as the terminal lays it out (the kit gives a Client the viewport's columns until told)
-  await pane.resize({ columns: 102, rows: 3, in: field })
-  const rowsDrawn = (((await pane.drawn({ in: field })) as { children?: unknown[] }).children ?? []).map(r => shown(r))
-  expect(rowsDrawn).toHaveLength(2)
-  expect(rowsDrawn[0]).toBe('x'.repeat(101))
-  expect(rowsDrawn[1]).toMatch(/^ +edit$/)
-  expect(rowsDrawn[1]!.length).toBe(rowsDrawn[0]!.length + 1)
-  await pane.unmount()
+test('a pattern says under it what a match gives, case-insensitive only where it turns case off', () => {
+  expect(regexNote(['proxy-link', 'none'], 'r\\.jina\\.ai')).toBe('a match is proxy-link, the rest none · case-sensitive')
+  expect(regexNote(['yes', 'no'], '(?i)force[- ]push')).toBe('a match is yes, the rest no · case-insensitive')
+  expect(regexNote(['yes', 'no'], '(?ai)x')).toBe('a match is yes, the rest no · case-insensitive')
+  expect(regexNote([], '(?:i)')).toBe('a match is yes, the rest no · case-sensitive')
+  expect(codeParts('x = "a # b"  # c', { keyword: 'k', string: 's' })).toEqual([{ s: 'x = ' }, { s: '"a # b"', color: 's' }, { s: '  ' }, { s: '# c', dim: true }])
+  expect(codeParts('ifx = notable', { keyword: 'k', string: 's' })).toEqual([{ s: 'ifx = notable' }])
 })
 
 test("a value's `color` shows the eighteen label colors by name under it around the color wheel, the one it has lit; a pick sends `label-show` with the name and its marks take the hue", async ($, on) => {
   const w = world(on)
   label(w).classes = [{ name: 'proxy-link', color: 2, highlight: true }, { name: 'none', color: 0, highlight: false }]
   let pane = await labelPanel($, w)
-  // the label's ● in its first value's color: orange, the browser's label color 2
-  expect(JSON.stringify(await pane.drawn())).toContain(`{"type":"Text","props":{"color":"${LABEL_HUES[1]}"},"children":["●"]}`)
-  pane = await press($, w, pane, 'hk-counts')
+  // the label's ● in its name's field in its first value's color: orange, the browser's label color 2
+  expect(JSON.stringify(await pane.find({ type: 'Box', key: 'lf-name:' }))).toContain(`{"type":"Text","props":{"color":"${LABEL_HUES[1]}"},"children":["● "]}`)
+  // a click on the value shows its controls under it
+  pane = await press($, w, pane, 'lb-value-proxy-link')
   pane = await press($, w, pane, 'lb-color-proxy-link')
   const text = shown(await pane.drawn())
   for (const c of ['blue', 'orange', 'green', 'sky blue', 'olive', 'teal', 'brown', 'navy', 'grass green', 'cerulean', 'chestnut', 'cyan', 'red', 'dark red', 'purple', 'dark purple', 'pink', 'dark pink']) expect(text).toContain(c)
@@ -223,7 +321,7 @@ test("a value's `color` shows the eighteen label colors by name under it around 
   expect(tree).toContain(`{"type":"Text","props":{"color":"${LABEL_HUES[5]}"},"children":["● "]}`)
   expect(tree).toContain(`{"type":"Text","props":{"color":"${PICKED_HUES[3]}"},"children":["● "]}`)
   // as the browser's pickers: a column per hue, red to pink, its light place above its dark, each column one width
-  const drawn = (await drawing(pane, "the label panel, its counts open and proxy-link's colors shown")).split('\n')
+  const drawn = (await drawing(pane, "the label panel, proxy-link's colors shown")).split('\n')
   const top = drawn.findIndex(r => /● red {2}/.test(r))
   expect(drawn[top]).toMatch(/^ +● red +● orange +● olive +● grass green +● cyan +● sky blue +● blue +● purple +● pink$/)
   expect(drawn[top + 1]).toMatch(/^ +● dark red +● chestnut +● brown +● green +● teal +● cerulean +● navy +● dark purple +● dark pink$/)
@@ -236,14 +334,14 @@ test("a value's `color` shows the eighteen label colors by name under it around 
   // the colors gone from under it, its ● and bar teal; none, with no color, dim
   expect(shown(await pane.drawn())).not.toContain('grass green')
   expect(after).toContain(`{"type":"Text","props":{"color":"${LABEL_HUES[5]}"},"children":["● "]}`)
-  expect(after).toMatch(new RegExp(`"color":"${LABEL_HUES[5]}"\\},"children":\\["█+"\\]`))
+  expect(after).toMatch(new RegExp(`"color":"${LABEL_HUES[5]}"\\},"children":\\["━+"\\]`))
   expect(after).toContain('{"type":"Text","props":{"dimColor":true},"children":["● "]}')
   // a color only the analyst picks, by the name show_label takes: dark purple, color 16
   pane = await press($, w, pane, 'lb-color-proxy-link')
   label(w).classes = [{ name: 'proxy-link', color: 16, highlight: true }, { name: 'none', color: 0, highlight: false }]
   pane = await press($, w, pane, 'lb-pick-proxy-link-16')
   expect(w.acts).toContainEqual({ kind: 'label-show', payload: { label: LABEL.id, colors: { 'proxy-link': 'dark purple' } } })
-  expect(JSON.stringify(await pane.drawn())).toMatch(new RegExp(`"color":"${PICKED_HUES[3]}"\\},"children":\\["█+"\\]`))
+  expect(JSON.stringify(await pane.drawn())).toMatch(new RegExp(`"color":"${PICKED_HUES[3]}"\\},"children":\\["━+"\\]`))
   await pane.unmount()
 })
 
@@ -251,7 +349,7 @@ test("in a narrow pane a value's colors wrap by hue, each hue's light place stil
   const w = world(on)
   label(w).classes = [{ name: 'proxy-link', color: 2, highlight: true }, { name: 'none', color: 0, highlight: false }]
   let pane = await labelPanel($, w)
-  pane = await press($, w, pane, 'hk-counts')
+  pane = await press($, w, pane, 'lb-value-proxy-link')
   pane = await press($, w, pane, 'lb-color-proxy-link')
   await pane.unmount()
   const NARROW = { ...(PANE as unknown as Record<string, unknown>), viewport: { columns: 54, rows: 60 }, props: { title: 'thimble', isFocused: true, bodyColumns: 50, placement: 'dock', scroll: { bodyRows: 56 }, view: {} } } as never
@@ -265,19 +363,21 @@ test("in a narrow pane a value's colors wrap by hue, each hue's light place stil
   await pane.unmount()
 })
 
-test('`filter` keeps the units of one value (`label-filter`): that value lit, its control `clear filter`, the counts row says so; clearing sends no value', async ($, on) => {
+test('`filter` keeps the units of one value (`label-filter`): that value lit, its control `clear filter`, the values row says so; clearing sends no value', async ($, on) => {
   const w = world(on)
   let pane = await labelPanel($, w)
-  pane = await press($, w, pane, 'hk-counts')
-  expect(await pane.find({ type: 'Button', key: 'lb-filter-none' })).toMatchObject({ props: { label: 'filter' } })
+  // no controls until a click on a value shows its own
+  expect(await pane.find({ type: 'Button', key: 'lb-filter-none' })).toBeUndefined()
+  pane = await press($, w, pane, 'lb-value-none')
+  expect(await pane.find({ type: 'Button', key: 'lb-filter-none' })).toMatchObject({ text: 'filter' })
+  expect(await pane.find({ type: 'Button', key: 'lb-filter-proxy-link' })).toBeUndefined()
   label(w).filter = 'none'
   label(w).shown = true
   pane = await press($, w, pane, 'lb-filter-none')
   expect(w.acts).toContainEqual({ kind: 'label-filter', payload: { label: LABEL.id, value: 'none' } })
   const text = shown(await pane.drawn())
-  expect(text).toContain('counts  14,591 · filtered to none')
-  expect(await pane.find({ type: 'Button', key: 'lb-filter-none' })).toMatchObject({ props: { label: 'clear filter' } })
-  expect(await pane.find({ type: 'Button', key: 'lb-filter-proxy-link' })).toMatchObject({ props: { label: 'filter' } })
+  expect(text).toContain('values:filtered to none')
+  expect(await pane.find({ type: 'Button', key: 'lb-filter-none' })).toMatchObject({ text: 'clear filter' })
   expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["none      ')
   await drawing(pane, 'the label panel filtered to none')
   label(w).filter = null
@@ -304,28 +404,32 @@ test("the examples' row gives the label's held-out agreement; `… N more` under
   await pane.unmount()
 })
 
-test('`rename` (n) puts the name in a field in the run row\'s place; Enter sends `label {name}`, `keep the name` leaves it', async ($, on) => {
+test("the name is a field: Enter sends `label {name}`; `rename` (n) gives it the keyboard", async ($, on) => {
+  // mockup labelpanel2: the name exposed and editable like the browser's, `rename` among the actions
   const w = world(on)
   let pane = await labelPanel($, w)
-  pane = await press($, w, pane, 'hk-rename')
   const field = (await pane.find({ type: 'Input', key: `lb-name-${LABEL.id}` })) as Node | undefined
   expect(field?.props).toMatchObject({ value: LABEL.name, submitLabel: 'rename' })
-  // the run row gives way to the field, and its keys with it
-  expect(await pane.find({ type: 'Button', key: 'lb-sample' })).toBeUndefined()
+  // n asks Claude Code to move the ring onto the name's field (played here as Claude Code moves it, keys.test.ts)
+  await pane.press({ key: 'hk-rename' })
+  await w.clock.settle()
+  await $.ui.focus({ requestId: 'thimble', component: 'Pane', element: `lb-name-${LABEL.id}`, origin: { kind: 'plugin', name: 'thimble' } } as never)
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
   expect(shown(await pane.drawn())).toContain('Enter to rename · Esc to leave the field')
-  await drawing(pane, 'the label panel renaming the label')
-  pane = await press($, w, pane, 'lb-rename-keep')
-  expect(await pane.find({ type: 'Input', key: `lb-name-${LABEL.id}` })).toBeUndefined()
+  // the actions stay where they are
+  expect(await pane.find({ type: 'Button', key: 'lb-sample' })).toBeDefined()
+  // the same name, or none, saves nothing
+  await pane.input({ key: `lb-name-${LABEL.id}`, text: `  ${LABEL.name} ` })
+  await w.clock.settle()
   expect(w.acts.some(a => a.kind === 'label')).toBe(false)
-  pane = await press($, w, pane, 'lb-rename')
   label(w).name = 'fetch proxy links'
   await pane.input({ key: `lb-name-${LABEL.id}`, text: '  fetch   proxy links ' })
   await w.clock.settle()
   expect(w.acts).toContainEqual({ kind: 'label', payload: { label: LABEL.id, name: 'fetch proxy links' } })
   await pane.unmount()
   pane = (await $.ui.mount(PANE)) as unknown as M
-  expect(shown(await pane.drawn())).toContain('fetch proxy links')
-  expect(await pane.find({ type: 'Input', key: `lb-name-${LABEL.id}` })).toBeUndefined()
+  expect((await pane.find({ type: 'Input', key: `lb-name-${LABEL.id}` }))?.props).toMatchObject({ value: 'fetch proxy links' })
   await pane.unmount()
 })
 
@@ -375,24 +479,34 @@ test('the label panel at 120 columns, every part open', async ($, on) => {
   })
   let pane = await labelPanel($, w)
   await drawing(pane, 'the label panel as it opens')
-  for (const k of ['hk-counts', 'hk-examples', 'hk-cards']) pane = await press($, w, pane, k)
-  const text = await drawing(pane, 'the label panel, counts, examples and cards open')
-  expect(text).toContain('marks:    shown on records in Files and views  hide')
-  expect(text).toMatch(/proxy-link\s+█+─*\s+5,191\s+36%\s+color\s+clear filter/)
+  for (const k of ['lb-value-proxy-link', 'hk-examples', 'hk-cards']) pane = await press($, w, pane, k)
+  const text = bare(await drawing(pane, 'the label panel, a value, the examples and the cards open'))
+  expect(text).toMatch(/^mark records in Files and views: {3}on {3}off$/m)
+  expect(text).toMatch(/^values: {3}filtered to proxy-link$/m)
+  expect(text).toMatch(/^ {10}● proxy-link {2}━+ +5,191\n {12}color {2}clear filter\n {12}values {2}proxy-link · none▏$/m)
+  // the examples and the cards under the actions
+  const rowsNow = text.split('\n')
+  const at = (re: RegExp) => rowsNow.findIndex(r => re.test(r))
+  expect(at(/^run on a sample/)).toBeLessThan(at(/^▾ examples/))
+  expect(at(/^▾ examples/)).toBeLessThan(at(/^▾ cards/))
   await pane.unmount()
 })
 
-test("in a narrow pane each value's `color` and `filter` stand on a row of their own under it, so its bar keeps its cells", async ($, on) => {
+test("in a narrow pane a value's bar shrinks to the room left, its count still at the row's end", async ($, on) => {
   const w = world(on)
   let pane = await labelPanel($, w)
-  pane = await press($, w, pane, 'hk-counts')
   await pane.unmount()
   const NARROW = { ...(PANE as unknown as Record<string, unknown>), viewport: { columns: 54, rows: 60 }, props: { title: 'thimble', isFocused: true, bodyColumns: 50, placement: 'dock', scroll: { bodyRows: 56 }, view: {} } } as never
   pane = (await $.ui.mount(NARROW)) as unknown as M
-  const row = (await pane.find({ type: 'Box', key: 'lb-c-proxy-link-controls' })) as Node | undefined
-  expect(row).toBeDefined()
-  expect(shown(row)).toBe('color  filter')
-  expect(shown(await pane.find({ type: 'Box', key: 'lb-c-proxy-link' }))).toMatch(/proxy-link {2}█+─+ {2}5,191 {4}36%$/)
+  // the label column, the ●, the value's 10 cells, a gutter, the bar, a cell, the count's 5: the bar takes the rest
+  const none = shown(await pane.find({ type: 'Box', key: 'lb-c-none' }))
+  const link = shown(await pane.find({ type: 'Box', key: 'lb-c-proxy-link' }))
+  const bar = none.match(/^● none {8}(━+) 9,400$/)?.[1] ?? ''
+  expect(bar.length).toBeGreaterThan(8)
+  expect(bar.length).toBeLessThan(30)
+  expect(link).toMatch(/^● proxy-link {2}━+ +5,191$/)
+  expect(link.length).toBe(none.length)
+  await drawing(pane, 'the label panel in a narrow pane', 54)
   await pane.unmount()
 })
 

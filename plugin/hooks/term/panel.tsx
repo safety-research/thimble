@@ -53,7 +53,7 @@ import { NAV_EMPTY, backTarget, crumbSteps, fitPath, pathWidth, threadBehind, th
 import { COLORS, citeHighlight, paintLines } from './paint'
 import { PANEL_MARGIN, cardBlock, cardName, claimCard, claimSentence, drawReply, linkCheck, placeName, plainWhy, scrubIds } from './reply'
 import { PANEL, citePage, closePanel, deleteLabel, filterLabel, inPanelNow, loadCards, navBack, navGo, openHome, openList, openPanel, panelOfStep, queueCitations, readDoc, readFilePage, readSurface, rt, runLabel, saveLabel, showLabel, startThread, stepOf, stopLabel, subjectFile, surfaceValue, threadMessage, undeleteLabel } from './term'
-import { COLOR_NAMES, LABEL_WHEEL, MORE_ROWS, UNSURE_PAGE, agreementLine, classColors, hueOf, labelArgs, labelGone, labelRows, setLabelGone, unsureArgs, unsureKey, unsureOf, unsureShown, unsureWords } from './labels'
+import { COLOR_NAMES, LABEL_WHEEL, MORE_ROWS, UNSURE_PAGE, agreementLine, classColors, hueOf, labelArgs, labelGone, labelRows, oneOf, regexNote, setLabelGone, unsureArgs, unsureKey, unsureOf, unsureShown, unsureWords } from './labels'
 import { featuresOf, openComments, openSection } from './band'
 import { openChecks } from './checksview'
 import { citeItems, citePlace, openCitations } from './citesview'
@@ -404,7 +404,7 @@ export async function openLabel(cx: Ctx, id: string, name: string, value = ''): 
   const ui = await cx.labelUi()
   const said = { ...ui.said }
   if (ui.said[id] && !ui.runs[id]) delete said[id]
-  const open = value ? [...new Set([...ui.open, `${id}:counts`, `${id}:examples`])] : ui.open
+  const open = value ? [...new Set([...ui.open, `${id}:examples`])] : ui.open
   if (said[id] !== ui.said[id] || open !== ui.open) await cx.setLabelUi({ ...ui, said, open })
   await openPanel(cx, { view: 'label', title: name, label: id, ...(value ? { value } : {}) })
 }
@@ -1004,6 +1004,10 @@ function listKeysHeld(): boolean {
 const LIST_HINT = /^(?:↑↓|←|→|Enter |Space |Backspace |PgUp|PgDn)/
 const UNRELAYED_HINT = /^(?:←|→|PgUp|PgDn)/
 
+/** The hint of a view whose keys are Claude Code's own ring over its fields and buttons, with no list (the label
+ *  panel): with it, `↑↓ to choose` and it are named while the ring rests anywhere in the view. */
+const RING_HINT = 'Enter to press or edit'
+
 // the text fields the drawing being made draws, by their keys (rt.fields once it is shown)
 let fieldsDrawing = new Set<string>()
 
@@ -1046,9 +1050,11 @@ function endHints(hints: readonly string[], autoFocus = ''): string[] {
   // a list's keys only while the ring rests on them (listKeysHeld): until a ui.focus says so, ↑↓ walk the panel's
   // buttons and Enter presses the one the ring is on
   const held = listKeysHeld()
+  // a view with no list whose ↑↓ walk its fields and buttons (the label panel) names them while the ring is anywhere
+  const walks = hints.includes(RING_HINT)
   const own = hints
     .map(h => (h === 'Enter or a to ask' && !held ? 'a to ask' : h))
-    .filter(h => h !== 'b to go back' && h !== 'x to close' && !(held ? UNRELAYED_HINT : LIST_HINT).test(h))
+    .filter(h => h !== 'b to go back' && h !== 'x to close' && ((walks && /^(?:↑↓ |Enter )/.test(h)) || !(held ? UNRELAYED_HINT : LIST_HINT).test(h)))
   return [...own, ...wayHints]
 }
 
@@ -2662,6 +2668,15 @@ function unitWords(unit: string | undefined): string {
   return unit === 'agent' ? 'files' : unit === 'run' ? 'run folders' : unit === 'cell' ? 'cards' : unit === 'span' ? 'sentences' : 'records'
 }
 
+// the label panel's columns (mockup labelpanel2): its labels' column, the name's and the glob's fields, a value's bar
+const LABEL_COL = 'pattern:'.length + 2
+const NAME_W = 40
+const GLOB_W = 36
+const BAR_W = 30
+const KINDS = ['prompt', 'regex', 'code'] as const
+const UNIT_CHOICES = [['files', 'records of files'], ['cards', 'cards'], ['sentences', 'sentences']] as const
+const ON_OFF = [['on', 'on'], ['off', 'off']] as const
+
 /** A label's definition as its panel edits it: a prompt label's prompt, else its pattern or code. */
 function definitionOf(l: LabelFull): string {
   return l.kind === 'prompt' ? str(l.spec).trim() || str(l.description).trim() : str(l.spec).trim()
@@ -2679,15 +2694,20 @@ async function cardsUsing(cx: Ctx, id: string): Promise<{ id: string; question: 
 // the text typed in a label's fields and not saved yet, by `<label>:<field>` (the run controls save it first)
 const drafts = new Map<string, string>()
 
-/** What the label panel holds unsaved for a label: the kind picked, the words typed in its fields. */
+/** What the label panel holds unsaved for a label: the kind and the model picked, the words typed in its fields (its
+ *  name, its definition, its glob). */
 async function pendingEdits(cx: Ctx, l: LabelFull): Promise<LabelPatch> {
   const kind = (await cx.labelUi()).kind[l.id] ?? l.kind ?? 'prompt'
   const patch: LabelPatch = {}
   const body = drafts.get(`${l.id}:body`)?.trim()
   const glob = drafts.get(`${l.id}:glob`)?.trim()
+  const model = drafts.get(`${l.id}:model`)
+  const name = drafts.get(`${l.id}:name`)?.replace(/\s+/g, ' ').trim()
+  if (name && name !== (l.name ?? l.id)) patch.name = name
   if (kind !== l.kind) patch.kind = kind
   if (body && (body !== definitionOf(l) || patch.kind)) patch.body = body
   if (glob && glob !== (l.glob ?? '')) patch.glob = glob
+  if (kind === 'prompt' && model !== undefined && model !== (l.model ?? '')) patch.model = model
   return patch
 }
 
@@ -2704,9 +2724,12 @@ async function saveLabelEdits(cx: Ctx, id: string, extra: LabelPatch = {}): Prom
     await cx.bumpPanel()
     return false
   }
-  if (!Object.keys(patch).length) return true
+  if (!Object.keys(patch).length) {
+    drafts.delete(`${id}:model`)
+    return true
+  }
   const err = await saveLabel(cx, id, patch)
-  if (!err) for (const k of ['body', 'glob']) drafts.delete(`${id}:${k}`)
+  if (!err) for (const k of ['body', 'glob', 'model', 'name']) drafts.delete(`${id}:${k}`)
   return !err
 }
 
@@ -2720,22 +2743,24 @@ export async function fieldMessage(cx: Ctx, name: string, text: string, save: bo
 
 // the label whose delete the label panel asks about (`delete label "…"? … y to delete · n to keep`), '' for none
 let labelDeleting = ''
-// the label whose name the label panel's `rename` field edits, '' for none
-let labelRenaming = ''
+// the label whose `model:` shows the models to choose from, '' for none
+let labelModelPicking = ''
+// the value whose controls the label panel shows under it (`<label>\n<value>`), '' for none
+let labelValueOpen = ''
 // the value whose colors the label panel's counts show under it (`<label>\n<value>`), '' for none
 let labelPainting = ''
 
-/** The label panel, after the browser's label editor (SPEC.md, section 7, "The label panel"): its header block,
- *  the label's name in the accent and bold after a ● in its colour, its type (prompt, regex or code: the one in use on
- *  the selection background), its scope (the files, editable, and how many files match), and for a label over files
- *  whether Files and the views mark its records with its values (`marks: shown on records in Files and views  hide`,
- *  `thimble act label-show`); then the rule and the definition: a prompt label's model, then the prompt (or pattern or
- *  code) in a field to edit, `edit` in it at rest, Enter saving it (`thimble act label`); `run on a sample` and `run on
- *  all N`, which save what was typed first and run it (`thimble act label-run`), `rename` (`thimble act label`) and
- *  `delete`, which asks once in the panel (y deletes, n keeps; `thimble act label-delete`), each action in the accent
- *  so it reads as a button (Matt, deck/video v9 review, items k to m). Then `▸ counts`, `▸ examples` and `▸ cards`,
- *  folded, nothing of them shown until one is opened: each value's `color` (the label colors by name) and `filter`
- *  (`thimble act label-filter`) in the counts, the held-out agreement and `… N more` records in the examples. */
+/** The label panel, every field exposed and editable as in the browser's label editor (SPEC.md, section 7, "The label
+ *  panel"; Matt's mockup labelpanel2): `name:` in a field, `kind:` (prompt, regex or code, the one in use on the
+ *  selection background), a prompt label's `model:` (a choice, `thimble act label {model}`), `unit:`, `scope:` (the
+ *  glob in a field, the files it matches and the records they hold), for a label over files `mark records in Files and
+ *  views:  on  off` (`thimble act label-show`); then the rule and the prompt (or pattern or code) in a bordered field
+ *  to edit, Enter saving it (`thimble act label`); `values:` with each value's bar and count, a click on a value showing
+ *  its `color`, `filter` (`thimble act label-filter`) and the values to edit; the last run, then the actions underlined
+ *  in the accent, `delete` in red: `run on a sample` and `run on all`, which save what was typed first and run it
+ *  (`thimble act label-run`), `rename` (the name's field) and `delete`, which asks once in the panel (y deletes, n
+ *  keeps; `thimble act label-delete`). Then `▸ examples` and `▸ cards`, folded: the held-out agreement and `… N more`
+ *  records in the examples. */
 async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElement> {
   const els = cx.els(e) as El
   const { Box, Text, Button, Input } = cx.els(e)
@@ -2747,9 +2772,10 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   if (!l) return none(cx, e)
   const id = l.id
   const name = l.name ?? id
-  // a delete asked about another label is not asked here, nor a rename or a value's colors
+  // a delete asked about another label is not asked here, nor its models, a value's controls or its colors
   if (labelDeleting !== id) labelDeleting = ''
-  if (labelRenaming !== id) labelRenaming = ''
+  if (labelModelPicking !== id) labelModelPicking = ''
+  if (!labelValueOpen.startsWith(`${id}\n`)) labelValueOpen = ''
   if (!labelPainting.startsWith(`${id}\n`)) labelPainting = ''
   const ui = await cx.labelUi()
   const running = ui.runs[id]
@@ -2801,29 +2827,40 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   }
   const rows: RenderElement[] = []
   const keys: Key[] = []
-  // rename: a field in the run row's place, Enter saving the name (`thimble act label`)
+  // rename: the name's field takes the keyboard (`lb-name-<id>`, in the header), Enter saving the name (`thimble act
+  // label`)
   const askRename = async () => {
-    labelRenaming = id
     labelDeleting = ''
-    await cx.bumpPanel()
-  }
-  const keepName = async () => {
-    labelRenaming = ''
+    const key = `lb-name-${id}`
+    if (!(await cx.focus(key))) return
+    rt.panelFocus = key
     await cx.bumpPanel()
   }
   const rename = async (v: string) => {
     const next = v.replace(/\s+/g, ' ').trim()
-    if (!next || next === name) return keepName()
-    labelRenaming = ''
-    await saveLabel(cx, id, { name: next })
+    drafts.delete(`${id}:name`)
+    if (!next || next === name) return
+    await save({ name: next })
   }
   // on or off in Files and the views, as the Labels pane's toggle (`thimble act label-show`)
   const turn = (on: boolean) => async () => {
     if (on !== shownOn) await showLabel(cx, id, { on })
   }
-  // the header block: name, type, scope, each on the label column, as Matt wrote them (`name:`), and for a label over
-  // files whether its marks show in Files; then the definition: the model and the prompt it runs
-  const L = 'pattern:'.length + 2
+  // the model's choice: a click on it shows the models, a pick saves it with what else was typed ('' for the labels
+  // role's, as the browser's label editor saves it)
+  const pickModel = async (m?: string) => {
+    if (m === undefined) labelModelPicking = labelModelPicking === id ? '' : id
+    else {
+      labelModelPicking = ''
+      drafts.set(`${id}:model`, m === l.model_role ? '' : m)
+      await save()
+    }
+    await cx.bumpPanel()
+  }
+  // the header block, every field exposed and editable as in the browser's label editor (Matt, mockup labelpanel2):
+  // `name:`, `kind:`, a prompt label's `model:`, `unit:`, `scope:`, each on the label column, and for a label over files
+  // `mark records in Files and views:`; then the rule and the definition
+  const L = LABEL_COL
   const fieldLine = (label: string, el: RenderElement) => (
     <Box key={`lf-${label}`} flexDirection="row">
       <Box width={L} flexShrink={0}>
@@ -2834,279 +2871,337 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
       </Box>
     </Box>
   )
-  rows.push(fieldLine('name:', lineEl(els, [{ s: '●', fg: labelHue(values, colors) }, { s: ' ' }, { s: name, fg: ACCENT, b: true }], undefined, true)))
+  // a choice among a few: the one in use on the selection background, the others dim and a click away (`press`), or
+  // dim and plain where they cannot be chosen; one cell around each word, one between them
+  const choices = (prefix: string, opts: readonly (readonly [string, string])[], chosen: string, press?: (v: string) => void) => (
+    <Box flexDirection="row" columnGap={1} flexWrap="wrap">
+      {opts.map(([v, words]) =>
+        v === chosen ? (
+          <Text key={`${prefix}-${v}`} backgroundColor={COLORS.selected}>{` ${words} `}</Text>
+        ) : press ? (
+          <Button key={`${prefix}-${v}`} label={` ${words} `} plain dimColor onPress={() => press(v)} />
+        ) : (
+          <Text key={`${prefix}-${v}`} dimColor>{` ${words} `}</Text>
+        ),
+      )}
+    </Box>
+  )
+  const editable = !running && e.surface !== 'mobile'
+  // name: a field on the selection background, the label's ● in its color before the name; Enter renames
   rows.push(
     fieldLine(
-      'type:',
-      <Box flexDirection="row" columnGap={2}>
-        {(['prompt', 'regex', 'code'] as const).map(k =>
-          running ? (
-            // while a run goes, the type is plain text, as the fields are
-            <Text key={`lk-${k}`} {...(k === kind ? { backgroundColor: COLORS.selected } : { dimColor: true })}>{k}</Text>
-          ) : k === kind ? (
-            <Text key={`lk-${k}`} backgroundColor={COLORS.selected}>{k}</Text>
-          ) : (
-            <Button
-              key={`lk-${k}`}
-              label={k}
-              plain
-              onPress={() =>
-                void (async () => {
-                  const cur = await cx.labelUi()
-                  const next = { ...cur.kind }
-                  if (k === l.kind) delete next[id]
-                  else next[id] = k
-                  await cx.setLabelUi({ ...cur, kind: next })
-                  await cx.bumpPanel()
-                })()
-              }
-            />
-          ),
+      'name:',
+      <Box width={Math.min(NAME_W, cols - L)} backgroundColor={COLORS.selected} paddingLeft={1} flexDirection="row">
+        <Text color={labelHue(values, colors)}>{'● '}</Text>
+        {editable ? (
+          <Box flexGrow={1} flexShrink={1}>
+            <Input key={fieldKey(`lb-name-${id}`)} value={drafts.get(`${id}:name`) ?? name} submitLabel="rename" onInput={v => void drafts.set(`${id}:name`, v)} onSubmit={v => void rename(v)} />
+          </Box>
+        ) : (
+          <Text wrap="truncate-end">{name}</Text>
         )}
       </Box>,
     ),
   )
-  // a label over files: how many files its glob matches (`1 file matches`), so the count does not read as a link; the
-  // records stand in `run on all N`. A label over cards or sentences: how many it holds
-  const scopeCount = files ? (typeof l.scope_files === 'number' ? (l.scope_files === 1 ? '1 file matches' : `${num(l.scope_files)} files match`) : '') : scopeN !== null ? `${num(scopeN)} ${unit}` : ''
+  // kind: prompt, regex or code; while a run goes, plain text, as the fields are
   rows.push(
     fieldLine(
-      'scope:',
-      files && !running && e.surface !== 'mobile' ? (
-        <Box flexDirection="row">
-          <Box flexGrow={1} flexShrink={1}>
-            <Input key={fieldKey(`lb-glob-${id}`)} value={drafts.get(`${id}:glob`) ?? l.glob ?? ''} submitLabel="save" onInput={v => void drafts.set(`${id}:glob`, v)} onSubmit={v => void (v.trim() ? save({ glob: v.trim() }) : undefined)} />
-          </Box>
-          {scopeCount ? <Text dimColor>{` · ${scopeCount}`}</Text> : null}
-        </Box>
-      ) : (
-        <Text wrap="wrap">
-          <Text>{files ? l.glob ?? '' : l.unit === 'cell' ? "the canvas's cards" : "the report's sentences"}</Text>
-          {scopeCount ? <Text dimColor>{` · ${scopeCount}`}</Text> : null}
-        </Text>
+      'kind:',
+      choices(
+        'lk',
+        KINDS.map(k => [k, k] as const),
+        kind,
+        running
+          ? undefined
+          : k =>
+              void (async () => {
+                const cur = await cx.labelUi()
+                const next = { ...cur.kind }
+                if (k === l.kind) delete next[id]
+                else next[id] = k
+                await cx.setLabelUi({ ...cur, kind: next })
+                await cx.bumpPanel()
+              })(),
       ),
     ),
   )
-  // whether Files and the views mark its records with its values, in words, and the action that changes it (Matt, v9
-  // review, item l: `in files: on off` did not say what it turns on)
-  if (files)
+  // model (a prompt label): the model its calls run on by its id, the label's own or the labels role's (Settings' row
+  // for labels), a choice: a click shows the models under it, a pick saves it ('' for the role's, as the browser does)
+  const modelDraft = drafts.get(`${id}:model`)
+  const modelShown = modelDraft !== undefined ? modelDraft || l.model_role || '' : l.model_id || l.run_model || ''
+  const modelChoices = l.model_choices ?? []
+  if (kind === 'prompt' && modelShown) {
+    const picking = labelModelPicking === id && !running && modelChoices.length > 1
+    const look = [<Text key="lm-name" backgroundColor={COLORS.selected}>{` ${modelShown} `}</Text>, <Text key="lm-mark" backgroundColor={COLORS.selected} dimColor>{'▾'}</Text>, <Text key="lm-end" backgroundColor={COLORS.selected}>{' '}</Text>]
     rows.push(
       fieldLine(
-        'marks:',
-        <Box flexDirection="row" columnGap={2} flexWrap="wrap">
-          <Text key="lo-state">{shownOn ? 'shown on records in Files and views' : 'hidden in Files and views'}</Text>
-          {actionEl(els, shownOn ? 'lo-off' : 'lo-on', shownOn ? 'hide' : 'show', () => void turn(!shownOn)())}
-        </Box>,
-      ),
-    )
-  rows.push(ruleEl(els, cols, 'lb-rule'))
-  // the definition: a prompt label's model first, the model its calls run on (the label's own, else the labels row of
-  // Settings), as the analyst reads its name; then the prompt it runs (Matt, v9 review, item k)
-  if (kind === 'prompt' && l.run_model) rows.push(fieldLine('model:', <Text wrap="truncate-end">{l.run_model}</Text>))
-  // the definition, whole, in a field to edit (field.tsx, in a border as the search box is): `edit` in the accent at
-  // its last row's end while it rests, so it reads as editable (Matt, v9 review, item m); a click gives it the
-  // keyboard, Enter saves it (in code, ctrl+s)
-  const defName = kind === 'prompt' ? 'prompt' : kind === 'regex' ? 'pattern' : 'code'
-  const shownDef = kind === l.kind ? definitionOf(l) : ''
-  // the definition starts on L like the rows above it
-  const defW = Math.max(10, cols - L - 4)
-  if (running || (e.surface !== 'terminal' && e.surface !== 'desktop')) rows.push(fieldLine(`${defName}:`, kind === 'code' ? <Box key="lb-def">{codeRows(cx, e, shownDef, 30)}</Box> : <Text key="lb-def" wrap="wrap">{shownDef}</Text>))
-  else {
-    const { Client } = cx.els(e)
-    rows.push(
-      fieldLine(
-        `${defName}:`,
-        <Box key="lb-def" flexDirection="column" borderStyle="round" borderColor={COLORS.rule} paddingX={1}>
-          <Client key={`lb-def-${id}-${kind}`} module="./field.tsx" width={defW} props={JSON.parse(JSON.stringify({ name: `label-body:${id}`, text: shownDef, cols: defW, placeholder: `the ${defName}: click to write it`, multiline: kind === 'code', edit: 'edit', editColor: ACCENT }))} />
+        'model:',
+        <Box flexDirection="column">
+          <Box flexDirection="row">
+            {running || modelChoices.length < 2 ? (
+              look
+            ) : (
+              <Button key="lb-model" plain onPress={() => void pickModel()}>
+                {look}
+              </Button>
+            )}
+          </Box>
+          {picking
+            ? choices(
+                'lb-model',
+                modelChoices.map(m => [m, m] as const),
+                modelShown,
+                m => void pickModel(m),
+              )
+            : null}
         </Box>,
       ),
     )
   }
-  // run it: on a sample, or on every record; they save what was typed first. Its state as home, the list and its card
-  // say it (lib.ts labelState): a run main's chat follows is `◌ labeling 3,000 of 4,579` here too, and a first run
-  // stopped part way `stopped at 3,150 of 4,579`, never `not run yet` beside its counts (live check term-fix9, quirk 4)
-  const agents = (await cx.agents()) ?? []
-  const st = labelState(l, agents)
-  const lastWords = last ? (l.trial || last.limit ? `last run on a sample of ${num(last.labeled ?? 0)}` : `last run on all ${num(last.labeled ?? 0)}`) : labelStateWords(st)
-  // the run main's chat follows, which a stop of that chat stops (as the agent panel's stop)
-  const follower = !running && st.running ? agents.find(a => a.role === 'labels' && a.state === 'running' && a.label === `label ${name}`) : undefined
-  const stop = follower && rt.sc ? () => void act(cx, rt.sc!, 'stop', { agent: follower.chat || follower.name, name: follower.name }) : () => void stopLabel(cx, id)
-  if (running)
+  // unit: what it labels; only the one it has, since its rows are of that unit (the browser's `Over`, fixed once made)
+  const over = files ? 'files' : l.unit === 'cell' ? 'cards' : 'sentences'
+  rows.push(fieldLine('unit:', choices('lu', UNIT_CHOICES, over)))
+  // scope: a label over files, its glob in a field and how many files it matches and records they hold (Matt, 19:05: a
+  // bare count read as a link); a label over cards or sentences, what it holds and how many
+  const noun = files ? l.scope_unit || unit : unit
+  const holds = scopeN !== null && l.unit !== 'agent' ? `${num(scopeN)} ${scopeN === 1 ? oneOf(noun) : noun}` : ''
+  const matches = files && typeof l.scope_files === 'number' ? (l.scope_files === 1 ? '1 file matches' : `${num(l.scope_files)} files match`) : ''
+  const counted = [matches, holds].filter(Boolean).join(' · ')
+  if (files) {
+    const globW = Math.max(12, Math.min(GLOB_W, cols - L - (counted ? width(counted) + 3 : 0)))
     rows.push(
-      <Box key="lb-running" flexDirection="row" columnGap={2} flexWrap="wrap">
-        <Text>{`◌ labeling ${running.limit ? `a sample of ${num(running.limit)}` : `all ${scopeN !== null ? num(scopeN) : ''} ${unit}`.replace(/\s+/g, ' ')}`}</Text>
-        {actionEl(els, 'lb-stop', 'stop', stop)}
-      </Box>,
-    )
-  else if (st.running)
-    rows.push(
-      <Box key="lb-running" flexDirection="row" columnGap={2} flexWrap="wrap">
-        <Text>{labelStateWords(st)}</Text>
-        {follower ? actionEl(els, 'lb-stop', 'stop', stop) : null}
-      </Box>,
-    )
-  else if (labelRenaming === id && e.surface !== 'mobile')
-    // the name in a field, in the run row's place: Enter renames, `keep the name` leaves it
-    rows.push(
-      <Box key="lb-rename" flexDirection="row">
-        <Text dimColor>{'new name  '}</Text>
-        <Box flexGrow={1} flexShrink={1}>
-          <Input key={fieldKey(`lb-name-${id}`)} value={name} autoFocus submitLabel="rename" onSubmit={v => void rename(v)} />
-        </Box>
-        <Text>{'  '}</Text>
-        {actionEl(els, 'lb-rename-keep', 'keep the name', () => void keepName())}
-      </Box>,
-    )
-  else if (labelDeleting === id)
-    // the delete asks once, in the run row's place: y deletes, n keeps
-    rows.push(
-      <Box key="lb-delete" flexDirection="row" flexWrap="wrap">
-        <Text>{`delete label "${name}"? its marks and card go too · `}</Text>
-        {actionEl(els, 'lb-delete-yes', 'y to delete', () => void deleteIt())}
-        <Text>{' · '}</Text>
-        {actionEl(els, 'lb-delete-no', 'n to keep', () => void keepIt())}
-      </Box>,
-    )
-  else
-    rows.push(
-      <Box key="lb-runs" flexDirection="row" columnGap={2} flexWrap="wrap">
-        {actionEl(els, 'lb-sample', 'run on a sample', () => void run(sample)())}
-        {actionEl(els, 'lb-all', scopeN !== null ? `run on all ${num(scopeN)}` : 'run on all', () => void run(0)())}
-        {actionEl(els, 'lb-rename', 'rename', () => void askRename())}
-        {actionEl(els, 'lb-delete', 'delete', () => void askDelete())}
-        <Text dimColor>{lastWords}</Text>
-      </Box>,
-    )
-  // what the last save or run said: `×` and `!` rows in red
-  said.split('\n').filter(Boolean).forEach((line, i) => rows.push(<Text key={`lb-said-${i}`} wrap="wrap" {...(/^[×!]/.test(line) ? { color: COLORS.problem } : { dimColor: true })}>{line}</Text>))
-  const asking = labelDeleting === id && !running && !st.running
-  const renaming = labelRenaming === id && !running && !st.running
-  if (asking) keys.push({ key: 'delete-yes', hotkey: 'y', onPress: () => void deleteIt() }, { key: 'delete-no', hotkey: 'n', onPress: () => void keepIt() })
-  else if (renaming) {
-    // the field takes the letters; its Enter renames
-  } else if (!running && !st.running) keys.push({ key: 'sample', hotkey: 'r', onPress: () => void run(sample)() }, { key: 'rename', hotkey: 'n', onPress: () => void askRename() }, { key: 'delete', hotkey: 'k', onPress: () => void askDelete() })
-  else if (running || follower) keys.push({ key: 'stop', hotkey: 's', onPress: stop })
-  // f shows or hides the marks of a label over files in Files and the views (o opens the label in the browser, as in
-  // every view)
-  if (files && !asking && !renaming) keys.push({ key: 'files-on', hotkey: 'f', onPress: () => void turn(!shownOn)() })
-  // the counts, the examples and the cards, folded
-  const toggle = (part: string, words: string, n: number | null, note = '') => (
-    <Box key={`lb-t-${part}`} flexDirection="row">
-      <Button key={`lb-open-${part}`} label={`${opened(part) ? '▾' : '▸'} ${words}`} plain onPress={() => void flip(part)()} />
-      {n !== null ? <Text dimColor>{`  ${num(n)}${note ? ` · ${note}` : ''}`}</Text> : null}
-    </Box>
-  )
-  const total = values.reduce((a, v) => a + (counts[v] ?? 0), 0)
-  rows.push(<Text key="lb-gap"> </Text>)
-  rows.push(toggle('counts', 'counts', total, [setByYou ? `${num(setByYou)} set by you` : '', filtered ? `filtered to ${filtered}` : ''].filter(Boolean).join(' · ')))
-  keys.push({ key: 'counts', hotkey: 'c', onPress: () => void flip('counts')() })
-  // the whole files or runs its last run read only in part, one dim line under the counts as the browser's Labels pane
-  // has it, until a run cuts none (backend concepts.read_cut)
-  if (!running && last?.cut?.line) rows.push(<Text key="lb-cut" wrap="wrap" dimColor>{`  ${last.cut.line}`}</Text>)
-  if (opened('counts')) {
-    const vw = Math.min(Math.max(12, Math.floor(cols / 3)), Math.max(4, ...values.map(v => width(v))))
-    const cs = values.map(v => num(counts[v] ?? 0))
-    const pcts = shares(values.map(v => counts[v] ?? 0), total)
-    const cw = Math.max(1, ...cs.map(c => c.length))
-    // each value's controls after its share: its colors (a label over files, whose colors Files and the views show) and
-    // the filter that keeps its units, `clear filter` on the value the filter keeps, a gutter apart, as wide on every row
-    const ctlW = (files ? 'color'.length + 2 : 0) + 'clear filter'.length
-    // in a pane too narrow for them beside a bar of 8 cells, the controls stand on a row of their own under each value
-    const below = cols - 2 - 2 - vw - 2 - 2 - cw - 7 - 2 - ctlW < 8
-    const barW = Math.max(8, cols - 2 - 2 - vw - 2 - 2 - cw - 7 - (below ? 0 : 2 + ctlW))
-    const paint = (v: string) => async () => {
-      labelPainting = labelPainting === `${id}\n${v}` ? '' : `${id}\n${v}`
-      await cx.bumpPanel()
-    }
-    const pick = (v: string, colorName: string) => async () => {
-      labelPainting = ''
-      await showLabel(cx, id, { colors: { [v]: colorName } })
-    }
-    values.forEach((v, i) => {
-      const n = counts[v] ?? 0
-      const w = total ? Math.round((barW * n) / total) : 0
-      const colour = valueColour(values, v, colors)
-      const tone = colour && colour !== COLORS.dim ? { color: colour } : { dimColor: true }
-      const on = filtered === v
-      const controls = [
-        files ? <Button key={`lb-color-${v}`} label="color" plain onPress={() => void paint(v)()} /> : null,
-        files ? <Text key={`lb-gap-${v}`}>{'  '}</Text> : null,
-        <Button key={`lb-filter-${v}`} label={on ? 'clear filter' : 'filter'} plain onPress={() => void filterLabel(cx, id, on ? null : v)} />,
-      ]
-      rows.push(
-        <Box key={`lb-c-${v}`} flexDirection="row">
-          <Text wrap="truncate-end">
-            <Text>{'  '}</Text>
-            <Text {...tone}>{'● '}</Text>
-            {/* the value a link to the label named, or the one the filter keeps, on the selection background */}
-            <Text {...(v === p.value || on ? { backgroundColor: COLORS.selected } : {})}>{clip(v, vw).padEnd(vw)}</Text>
-            <Text>{'  '}</Text>
-            <Text {...tone}>{'█'.repeat(w)}</Text>
-            <Text color={COLORS.rule}>{'─'.repeat(Math.max(0, barW - w))}</Text>
-            <Text>{`  ${cs[i]!.padStart(cw)}`}</Text>
-            <Text dimColor>{total ? `  ${pcts[i]!.padStart(5)}` : '       '}</Text>
-            {below ? null : <Text>{'  '}</Text>}
-          </Text>
-          {below ? null : controls}
+      fieldLine(
+        'scope:',
+        <Box flexDirection="row">
+          <Box width={globW} flexShrink={0} backgroundColor={COLORS.selected} paddingLeft={1}>
+            {editable ? (
+              <Input key={fieldKey(`lb-glob-${id}`)} value={drafts.get(`${id}:glob`) ?? l.glob ?? ''} submitLabel="save" onInput={v => void drafts.set(`${id}:glob`, v)} onSubmit={v => void (v.trim() ? save({ glob: v.trim() }) : undefined)} />
+            ) : (
+              <Text wrap="truncate-end">{l.glob ?? ''}</Text>
+            )}
+          </Box>
+          {counted ? <Text dimColor wrap="truncate-end">{` · ${counted}`}</Text> : null}
         </Box>,
-      )
-      if (below)
-        rows.push(
-          <Box key={`lb-c-${v}-controls`} flexDirection="row" marginLeft={4}>
-            {controls}
-          </Box>,
-        )
-      // the eighteen label colors under the value whose `color` was pressed, around the color wheel as the browser's
-      // pickers show them: a column per hue, its light place above its dark (LABEL_WHEEL), each `●` in its hue and its
-      // name as show_label names it, the one it has on the selection background; a narrow pane wraps the columns, a
-      // blank row between their rows
-      if (files && labelPainting === `${id}\n${v}`) {
-        const now = colors?.[v]
-        const swatch = (n: number) => {
-          const c = COLOR_NAMES[n - 1]!
-          return (
-            <Box key={`lb-pick-${v}-${c}`} flexDirection="row">
-              <Text color={hueOf(n)}>{'● '}</Text>
-              {now === n ? <Text backgroundColor={COLORS.selected}>{c}</Text> : <Button key={`lb-pick-${v}-${n}`} label={c} plain onPress={() => void pick(v, c)()} />}
-            </Box>
-          )
-        }
-        rows.push(
-          <Box key={`lb-colors-${v}`} flexDirection="row" flexWrap="wrap" columnGap={2} rowGap={1} marginLeft={4}>
-            {LABEL_WHEEL.map(([light, dark]) => (
-              <Box key={`lb-hue-${v}-${light}`} flexDirection="column">
-                {swatch(light)}
-                {swatch(dark)}
-              </Box>
-            ))}
-          </Box>,
+      ),
+    )
+  } else
+    rows.push(
+      fieldLine(
+        'scope:',
+        <Text wrap="wrap">
+          <Text>{l.unit === 'cell' ? "the canvas's cards" : "the report's sentences"}</Text>
+          {counted ? <Text dimColor>{` · ${counted}`}</Text> : null}
+        </Text>,
+      ),
+    )
+  // a label over files: whether Files and the views mark its records with its values, `on  off` after words that say
+  // what it turns on (Matt, v9 review, item l); f flips it
+  if (files)
+    rows.push(
+      <Box key="lb-marks" flexDirection="row" flexWrap="wrap">
+        <Text dimColor>{'mark records in Files and views:  '}</Text>
+        {choices('lo', ON_OFF, shownOn ? 'on' : 'off', running ? undefined : v => void turn(v === 'on')())}
+      </Box>,
+    )
+  rows.push(ruleEl(els, cols, 'lb-rule'))
+  // the definition, whole, in a field to edit (field.tsx) in a round border from the label column to the pane's edge,
+  // its name (`prompt`, `pattern` or `code`) on its first row; a click gives it the keyboard, Enter saves it (in code,
+  // ctrl+s); code has its keywords and strings colored; a pattern says under it what a match gives
+  const defName = kind === 'prompt' ? 'prompt' : kind === 'regex' ? 'pattern' : 'code'
+  const shownDef = kind === l.kind ? definitionOf(l) : ''
+  const defW = Math.max(10, cols - L - 4)
+  const { Client } = cx.els(e)
+  const defBody =
+    !running && (e.surface === 'terminal' || e.surface === 'desktop') ? (
+      <Client key={`lb-def-${id}-${kind}`} module="./field.tsx" width={defW} props={JSON.parse(JSON.stringify({ name: `label-body:${id}`, text: shownDef, cols: defW, placeholder: `the ${defName}: click to write it`, multiline: kind === 'code', ...(kind === 'code' ? { code: { keyword: COLORS.cite, string: COLORS.fresh } } : {}) }))} />
+    ) : kind === 'code' ? (
+      <Box key="lb-def">{codeRows(cx, e, shownDef, 30)}</Box>
+    ) : (
+      <Text key="lb-def" wrap="wrap">{shownDef || ' '}</Text>
+    )
+  rows.push(
+    <Box key={`lf-${defName}:`} flexDirection="row">
+      <Box width={L} flexShrink={0} flexDirection="column">
+        <Text> </Text>
+        <Text dimColor>{`${defName}:`}</Text>
+      </Box>
+      <Box flexGrow={1} flexShrink={1} flexDirection="column" borderStyle="round" borderColor={COLORS.rule} paddingX={1}>
+        {defBody}
+        {kind === 'regex' ? <Text key="lb-def-note" dimColor wrap="wrap">{regexNote(values, shownDef || definitionOf(l))}</Text> : null}
+      </Box>
+    </Box>,
+  )
+  // values: each value's ● and bar in its color, the bar to the largest count, its count bold (the browser's classes);
+  // a click on a value shows its controls under it: `color` (a label over files), `filter`, and the values to edit.
+  // The counts apply the analyst's verdicts, as thimble.labels() reads the rows, and `values:` says how many they set
+  rows.push(<Text key="lb-gap-values"> </Text>)
+  const notes = [setByYou ? `${num(setByYou)} set by you` : '', filtered ? `filtered to ${filtered}` : ''].filter(Boolean).join(' · ')
+  rows.push(fieldLine('values:', <Text dimColor wrap="truncate-end">{notes}</Text>))
+  const most = Math.max(0, ...values.map(v => counts[v] ?? 0))
+  const vw = Math.min(Math.max(12, Math.floor(cols / 3)), Math.max(1, ...values.map(v => width(v))))
+  const cs = values.map(v => num(counts[v] ?? 0))
+  const cw = Math.max(3, ...cs.map(c => c.length))
+  const barW = Math.max(4, Math.min(BAR_W, cols - L - 2 - vw - 2 - 1 - cw))
+  const openValue = (v: string) => async () => {
+    labelValueOpen = labelValueOpen === `${id}\n${v}` ? '' : `${id}\n${v}`
+    if (!labelValueOpen) labelPainting = ''
+    await cx.bumpPanel()
+  }
+  const paint = (v: string) => async () => {
+    labelPainting = labelPainting === `${id}\n${v}` ? '' : `${id}\n${v}`
+    await cx.bumpPanel()
+  }
+  const pick = (v: string, colorName: string) => async () => {
+    labelPainting = ''
+    await showLabel(cx, id, { colors: { [v]: colorName } })
+  }
+  values.forEach((v, i) => {
+    const n = counts[v] ?? 0
+    const cells = n > 0 && most > 0 ? Math.max(1, Math.round((barW * n) / most)) : 0
+    const colour = valueColour(values, v, colors)
+    const tone = colour && colour !== COLORS.dim ? { color: colour } : { dimColor: true }
+    const on = filtered === v
+    rows.push(
+      <Box key={`lb-c-${v}`} flexDirection="row" marginLeft={L}>
+        <Text {...tone}>{'● '}</Text>
+        {/* the value a link to the label named, or the one the filter keeps, on the selection background */}
+        <Button key={`lb-value-${v}`} plain onPress={() => void openValue(v)()}>
+          <Text {...(v === p.value || on ? { backgroundColor: COLORS.selected } : {})}>{clip(v, vw).padEnd(vw)}</Text>
+        </Button>
+        <Text wrap="truncate-end">
+          <Text>{'  '}</Text>
+          <Text {...tone}>{'━'.repeat(cells)}</Text>
+          <Text>{' '.repeat(barW + 1 - cells)}</Text>
+          <Text bold>{cs[i]!.padStart(cw)}</Text>
+        </Text>
+      </Box>,
+    )
+    if (labelValueOpen !== `${id}\n${v}`) return
+    // its controls: its colors (a label over files, whose colors Files and the views show) and the filter that keeps
+    // its units, `clear filter` on the value the filter keeps; then the values, to edit
+    rows.push(
+      <Box key={`lb-c-${v}-controls`} flexDirection="row" columnGap={2} marginLeft={L + 2}>
+        {files ? actionEl(els, `lb-color-${v}`, 'color', () => void paint(v)()) : null}
+        {actionEl(els, `lb-filter-${v}`, on ? 'clear filter' : 'filter', () => void filterLabel(cx, id, on ? null : v))}
+      </Box>,
+    )
+    // the eighteen label colors under the value whose `color` was pressed, around the color wheel as the browser's
+    // pickers show them: a column per hue, its light place above its dark (LABEL_WHEEL), each `●` in its hue and its
+    // name as show_label names it, the one it has on the selection background; a narrow pane wraps the columns, a
+    // blank row between their rows
+    if (files && labelPainting === `${id}\n${v}`) {
+      const now = colors?.[v]
+      const swatch = (k: number) => {
+        const c = COLOR_NAMES[k - 1]!
+        return (
+          <Box key={`lb-pick-${v}-${c}`} flexDirection="row">
+            <Text color={hueOf(k)}>{'● '}</Text>
+            {now === k ? <Text backgroundColor={COLORS.selected}>{c}</Text> : <Button key={`lb-pick-${v}-${k}`} label={c} plain onPress={() => void pick(v, c)()} />}
+          </Box>
         )
       }
-    })
-    if (!values.length) rows.push(<Text key="lb-c-none" dimColor>{'  none'}</Text>)
-    // its values, editable here: Enter saves them
-    if (!running && e.surface !== 'mobile')
       rows.push(
-        <Box key="lb-values" flexDirection="row" marginLeft={2}>
+        <Box key={`lb-colors-${v}`} flexDirection="row" flexWrap="wrap" columnGap={2} rowGap={1} marginLeft={L + 2}>
+          {LABEL_WHEEL.map(([light, dark]) => (
+            <Box key={`lb-hue-${v}-${light}`} flexDirection="column">
+              {swatch(light)}
+              {swatch(dark)}
+            </Box>
+          ))}
+        </Box>,
+      )
+    }
+    // its values, editable here: Enter saves them
+    if (editable)
+      rows.push(
+        <Box key="lb-values" flexDirection="row" marginLeft={L + 2}>
           <Text dimColor>{'values  '}</Text>
           <Box flexGrow={1} flexShrink={1}>
             <Input
               key={fieldKey(`lb-values-${id}`)}
               value={values.join(' · ')}
               submitLabel="save"
-              onSubmit={v => {
-                const vs = [...new Set(v.split(/\s*[·,]\s*/).map(x => x.trim()).filter(Boolean))]
+              onSubmit={x => {
+                const vs = [...new Set(x.split(/\s*[·,]\s*/).map(y => y.trim()).filter(Boolean))]
                 if (vs.length >= 2) void save({ values: vs })
               }}
             />
           </Box>
         </Box>,
       )
+  })
+  if (!values.length) rows.push(<Box key="lb-no-values" marginLeft={L}><Text dimColor>none</Text></Box>)
+  // the whole files or runs its last run read only in part, one dim line under the values as the browser's Labels pane
+  // has it, until a run cuts none (backend concepts.read_cut)
+  if (!running && last?.cut?.line) rows.push(<Box key="lb-cut" marginLeft={L}><Text wrap="wrap" dimColor>{last.cut.line}</Text></Box>)
+  // run it: on a sample, or on every record; they save what was typed first. Its state as home, the list and its card
+  // say it (lib.ts labelState): a run main's chat follows is `◌ labeling 3,000 of 4,579` here too, and a first run
+  // stopped part way `stopped at 3,150 of 4,579`, never `not run yet` beside its counts (live check term-fix9, quirk 4)
+  const agents = (await cx.agents()) ?? []
+  const st = labelState(l, agents)
+  const ranOn = (n: number) => `${num(n)} ${n === 1 ? oneOf(noun) : noun}`
+  const lastWords = last ? (l.trial || last.limit ? `last run on a sample of ${ranOn(last.labeled ?? 0)}` : `last run on all ${ranOn(last.labeled ?? 0)}`) : labelStateWords(st)
+  // the run main's chat follows, which a stop of that chat stops (as the agent panel's stop)
+  const follower = !running && st.running ? agents.find(a => a.role === 'labels' && a.state === 'running' && a.label === `label ${name}`) : undefined
+  const stop = follower && rt.sc ? () => void act(cx, rt.sc!, 'stop', { agent: follower.chat || follower.name, name: follower.name }) : () => void stopLabel(cx, id)
+  rows.push(<Text key="lb-gap-runs"> </Text>)
+  if (running)
+    rows.push(
+      <Box key="lb-running" flexDirection="row" columnGap={3} flexWrap="wrap">
+        <Text>{`◌ labeling ${running.limit ? `a sample of ${num(running.limit)}` : `all ${scopeN !== null ? num(scopeN) : ''} ${noun}`.replace(/\s+/g, ' ')}`}</Text>
+        {actionEl(els, 'lb-stop', 'stop', stop)}
+      </Box>,
+    )
+  else if (st.running)
+    rows.push(
+      <Box key="lb-running" flexDirection="row" columnGap={3} flexWrap="wrap">
+        <Text>{labelStateWords(st)}</Text>
+        {follower ? actionEl(els, 'lb-stop', 'stop', stop) : null}
+      </Box>,
+    )
+  else {
+    // the last run dim on its own row, the actions under it, underlined in the accent, `delete` in red (Matt, v9
+    // review, item m; mockup labelpanel2)
+    rows.push(<Text key="lb-last" dimColor wrap="wrap">{lastWords}</Text>)
+    if (labelDeleting === id)
+      // the delete asks once, in the actions' place: y deletes, n keeps
+      rows.push(
+        <Box key="lb-delete" flexDirection="row" flexWrap="wrap">
+          <Text>{`delete label "${name}"? its marks and card go too · `}</Text>
+          {actionEl(els, 'lb-delete-yes', 'y to delete', () => void deleteIt(), COLORS.problem)}
+          <Text>{' · '}</Text>
+          {actionEl(els, 'lb-delete-no', 'n to keep', () => void keepIt())}
+        </Box>,
+      )
+    else
+      rows.push(
+        <Box key="lb-runs" flexDirection="row" columnGap={3} flexWrap="wrap">
+          {actionEl(els, 'lb-sample', 'run on a sample', () => void run(sample)())}
+          {actionEl(els, 'lb-all', 'run on all', () => void run(0)())}
+          {actionEl(els, 'lb-rename', 'rename', () => void askRename())}
+          {actionEl(els, 'lb-delete', 'delete', () => void askDelete(), COLORS.problem)}
+        </Box>,
+      )
   }
+  // what the last save or run said: `×` and `!` rows in red
+  said.split('\n').filter(Boolean).forEach((line, i) => rows.push(<Text key={`lb-said-${i}`} wrap="wrap" {...(/^[×!]/.test(line) ? { color: COLORS.problem } : { dimColor: true })}>{line}</Text>))
+  const asking = labelDeleting === id && !running && !st.running
+  if (asking) keys.push({ key: 'delete-yes', hotkey: 'y', onPress: () => void deleteIt() }, { key: 'delete-no', hotkey: 'n', onPress: () => void keepIt() })
+  else if (!running && !st.running) keys.push({ key: 'sample', hotkey: 'r', onPress: () => void run(sample)() }, { key: 'rename', hotkey: 'n', onPress: () => void askRename() }, { key: 'delete', hotkey: 'k', onPress: () => void askDelete() })
+  else if (running || follower) keys.push({ key: 'stop', hotkey: 's', onPress: stop })
+  // f shows or hides the marks of a label over files in Files and the views (o opens the label in the browser, as in
+  // every view)
+  if (files && !asking && !running) keys.push({ key: 'files-on', hotkey: 'f', onPress: () => void turn(!shownOn)() })
+  // the examples and the cards, folded, under the actions
+  const toggle = (part: string, words: string, n: number | null, note = '') => (
+    <Box key={`lb-t-${part}`} flexDirection="row">
+      <Button key={`lb-open-${part}`} label={`${opened(part) ? '▾' : '▸'} ${words}`} plain onPress={() => void flip(part)()} />
+      {n !== null ? <Text dimColor>{`  ${num(n)}${note ? ` · ${note}` : ''}`}</Text> : null}
+    </Box>
+  )
+  rows.push(<Text key="lb-gap"> </Text>)
   // the examples: the records the label gave each value, with the analyst's agree or another value
   const recs = (l.rows ?? []).filter(r => r.ref)
-  // a blank row between an opened part and the next toggle
-  if (opened('counts')) rows.push(<Text key="lb-gap-examples"> </Text>)
   // the label's agreement with the values the analyst set, those its runs took as examples apart (the browser's
   // agreement line above its examples)
   rows.push(toggle('examples', 'examples', recs.length, agreementLine(l.calibration)))
@@ -3257,20 +3352,10 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
     labelPick = l.id || p.label || labelPick
     void openList(cx, { view: 'labels', title: 'Labels' })
   } })
-  // the keys that fit one row: the field says how to save it (its placeholder); each folded part's key by what it opens
-  rows.push(
-    hintsRow(
-      els,
-      [
-        ...(running || follower ? ['s to stop'] : st.running || asking || renaming ? [] : ['r to run a sample', 'n to rename', 'k to delete']),
-        ...(files && !asking && !renaming ? [shownOn ? 'f to hide marks' : 'f to show marks'] : []),
-        'c counts, e examples, d cards',
-        'l for labels',
-      ],
-      cols,
-      renaming ? `lb-name-${id}` : '',
-    ),
-  )
+  // the keys (mockup labelpanel2): the ring walks every field and action, Enter presses one or gives a field the
+  // keyboard; the letters stay bound (r, n, k, f, e, d, l) unnamed; s while a run goes
+  rows.push(<Text key="lb-gap-hints"> </Text>)
+  rows.push(hintsRow(els, ['↑↓ to choose', RING_HINT, ...(running || follower ? ['s to stop'] : [])], cols))
   const hk = hiddenKeys(cx, e, keys)
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...rows]}</Box>
 }

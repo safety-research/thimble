@@ -4,6 +4,7 @@
 //   PICKED_HUES) by the names show_label takes (backend concepts.COLOUR_NAMES), 0 dim, and the picker's places around
 //   the color wheel (backend/app/label_wheel.json);
 // - the held-out agreement line, in the browser's words (frontend canvas/details.ts agreementLine);
+// - the words of the label panel's scope row and pattern note (oneOf, regexNote);
 // - what the panel asks of `thimble state label` (`--rows`, the records of a value its `… N more` asked for);
 // - the label deleted last, whose delete the labels list offers to undo (`thimble act label-undelete`);
 // - each label's records with no category fit and those it is unsure of (`thimble state label-unsure --label <id> --n
@@ -18,6 +19,20 @@ export const COLOR_NAMES = ['blue', 'orange', 'green', 'sky blue', 'olive', 'tea
 /** The picker's places around the color wheel, as the browser's pickers show them: a column per hue (red, orange, gold,
  *  green, teal, sky, blue, purple, pink), its light place above its dark (backend/app/label_wheel.json). */
 export const LABEL_WHEEL: readonly (readonly [number, number])[] = [[13, 14], [2, 11], [5, 7], [9, 3], [12, 6], [4, 10], [1, 8], [15, 16], [17, 18]]
+
+const ONE: Record<string, string> = { lines: 'line', entries: 'entry', rows: 'row', pages: 'page', records: 'record', files: 'file', 'run folders': 'run folder', cards: 'card', sentences: 'sentence' }
+
+/** A unit's word for one of them (`line` for `lines`), as the label panel counts a label's records. */
+export function oneOf(noun: string): string {
+  return ONE[noun] ?? noun
+}
+
+/** What a pattern gives, under it in the label panel: a match the first value, the rest the second; case-sensitive
+ *  unless the pattern turns that off (`(?i)`), as Python's re reads it (backend concepts._compiled). */
+export function regexNote(values: readonly string[], pattern: string): string {
+  const ci = /\(\?[aiLmsux]*i[aiLmsux]*\)/.test(pattern)
+  return `a match is ${values[0] ?? 'yes'}, the rest ${values[1] ?? 'no'} · ${ci ? 'case-insensitive' : 'case-sensitive'}`
+}
 
 /** A value of a label as the concept keeps it: its name, its color (1 to 18, 0 for none) and whether Files marks it. */
 export type LabelClass = { name?: string; color?: number | null; highlight?: boolean }

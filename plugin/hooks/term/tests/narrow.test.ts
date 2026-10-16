@@ -317,7 +317,7 @@ test("the code view's step keeps ` · code` whole with one `…`; rows beside a 
   await pane.unmount()
 })
 
-test("a label's shares add up to 100%, on its card and in its panel's counts", async ($, on) => {
+test("a label's shares add up to 100% on home; its panel gives its counts, bold, and no shares", async ($, on) => {
   // live check term-fix9, low quirk: 38% + 63%
   const w = world(on)
   w.states.labels = [{ ...LABEL, label_stats: { n_labeled: 8, counts: { 'proxy-link': 3, none: 5 } } }] as never
@@ -333,14 +333,11 @@ test("a label's shares add up to 100%, on its card and in its panel's counts", a
   await w.clock.settle()
   await pane.unmount()
   pane = await look($, 96)
-  await pane.press({ key: 'hk-counts' })
-  await w.clock.settle()
-  await pane.unmount()
-  pane = await look($, 96)
+  // the panel's values as the mockup has them (labelpanel2): counts bold at the end of their bars, no shares
   const drawn = JSON.stringify(await pane.drawn())
-  expect(drawn).toContain('  38%')
-  expect(drawn).toContain('  62%')
-  expect(drawn).not.toContain('63%')
+  expect(drawn).toContain('{"type":"Text","props":{"bold":true},"children":["  3"]}')
+  expect(drawn).toContain('{"type":"Text","props":{"bold":true},"children":["  5"]}')
+  expect(drawn).not.toContain('%')
   await pane.unmount()
 })
 

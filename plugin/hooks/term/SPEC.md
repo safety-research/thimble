@@ -110,7 +110,7 @@ the type area runs from A0 to R.
 5. **Shared axes.** A component works out its columns once for all its groups; the sections of one panel share A0, A2
    and R.
 6. **Label/value rows and fields.** The label is dim and lower case, in the label column; values and fields start on
-   L. It has no colon, except in the label panel's header, which Matt laid out as `name:`, `type:`, `scope:`. A value
+   L. It has no colon, except in the label panel's fields, which Matt laid out as `name:`, `kind:`, `scope:`. A value
    that is a list puts each item on its own row after a `-`.
 7. **No measure.** Prose, a thread's answer, a document, a definition and a detail's text fill the type area (in the
    chat, the terminal's width less the margin). Cards take the same width as the text.
@@ -164,13 +164,13 @@ the type area runs from A0 to R.
 | dim | `inactive` (`dimColor`) | letters (rule 15); the catch-all value's marks | secondary |
 | rule gray | `subtle` | lines only: rules, card borders, a field's border, tracks, axes, tree guides, a diagram's boxes and edges | structure |
 | link | `remember` | links (rule 16); the `?` and `↳` in the margin | opens what it names |
-| accent | `suggestion` | a panel's title; the selected row's `❯` and its text; `view proposal` above the prompt; the label panel's actions and its definition's `edit` | where you are; a view proposal waiting for an answer; a button |
+| accent | `suggestion` | a panel's title; the selected row's `❯` and its text; `view proposal` above the prompt; the label panel's actions, underlined | where you are; a view proposal waiting for an answer; a button |
 | new | `success` | the word `new` and `N new` | new |
 | tip | `userMessageBackground`, a background | the tip of the citation under the pointer | |
 | prompt | `userMessageBackground`, a background | a side thread's question, across the type area, as Claude Code draws a prompt | the analyst's question |
 | inline code | `permission` | inline code in thimble-term's own paragraphs | code |
 | palette | `SERIES`, the browser's seven series hues; `LABEL_HUES` and `PICKED_HUES`, its eighteen label colors (palette.gen.ts, from tokens.css: the light paper's on a light theme, Dark's on any other) | `●`, marks, bars, swatches; a check's tint (its place blended 16% toward the ground, 30% while open) and its `⚑` | a value of the color field; a check's comment |
-| red | `error` | a problem's words and its `×` or `!` | a problem |
+| red | `error` | a problem's words and its `×` or `!`; the label panel's `delete` and `y to delete` | a problem; a delete |
 | diff | `diffAddedWord`, `diffRemovedWord` | the lines a diff added and removed, and their marks | a diff, as Claude Code colors one |
 | selection | `selectionBg`, a background | a choice in use (rule 21) | |
 | panel | `composerSidebarBackground`, a background | the whole panel | |
@@ -272,8 +272,8 @@ and never what a script got. In the citation panel's bar, a citation still check
 
 24. A control is a word or a few, in the text color and plain: no brackets, bold, color or underline at rest, inverse
     under the pointer or the focus. Its words say what it does (`run again`, `put in the prompt`, `run on a sample`,
-    `as slides`, `show all threads`). The label panel's actions are the exception: in the accent, so they read as
-    buttons (Matt, deck/video v9 review; `chrome.tsx` `actionEl`). A question to a side thread is typed into an entry
+    `as slides`, `show all threads`). The label panel's actions are the exception: underlined in the accent (a delete
+    in red), so they read as buttons (Matt, deck/video v9 review and mockup labelpanel2; `chrome.tsx` `actionEl`). A question to a side thread is typed into an entry
     box (rule 27), never asked through a control (Matt, 2026-10-16: an entry box in Claude Code's style in place of
     `ask about it`).
 25. A panel's actions sit at its bottom, after the second rule, at A0, 2 cells apart, with their fields under them: that
@@ -977,76 +977,88 @@ After the browser's Files (`frontend/src/files`: its tree, its search, its reade
   chosen row's place (`↗ forge.db · prs · 7131`) and `?` under the header, Enter opening its citation. Backspace goes
   from a table to its tables, from the tables to the files.
 
-**The label panel**, as Matt laid it out, after the browser's label editor (`frontend/src/files/LabelCard.tsx`):
+**The label panel**, as Matt laid it out (mockup `mock3/labelpanel2`), every field exposed and editable as in the
+browser's label editor (`frontend/src/files/LabelCard.tsx`):
 
 ```
-  home › labels › edit purpose
-  name:     ● edit purpose
-  type:     prompt  regex  code
-  scope:    revisions.jsonl · 1 file matches
-  marks:    shown on records in Files and views  hide
+  home › labels › message to agents
+  name:      ● message to agents
+  kind:      prompt   regex   code
+  model:     claude-haiku-5-5 ▾
+  unit:      records of files   cards   sentences
+  scope:     board.jsonl                         · 1 file matches · 44 lines
+  mark records in Files and views:   on   off
   ──────────────────────────────────────────────────────────────────────────────────────────────
-  model:    Haiku 4.5
-  prompt:   ╭──────────────────────────────────────────────────────────────────────────────────╮
-            │ Decide what the revision's body is mainly for. 'message to agents': the body     │
-            │ speaks to other agents, runs or cohorts.                                    edit │
+            ╭──────────────────────────────────────────────────────────────────────────────────╮
+  prompt:   │ Is this post a message addressed to one or more other agents, rather than a      │
+            │ status note to no one in particular?                                             │
             ╰──────────────────────────────────────────────────────────────────────────────────╯
-  run on a sample  run on all 14,591  rename  delete  last run on a sample of 30
 
-  ▾ counts  30 · filtered to links or data
-    ● links or data       ████████████████████────────────────   15    50%  color  clear filter
-      ● blue  ● orange  ● green  ● sky blue  ● olive  ● teal  ● brown  ● navy  ● grass green
-      ● cerulean  ● chestnut  ● cyan
-    ● message to agents   ██████████──────────────────────────    8    27%  color  filter
-    ● other               █████████───────────────────────────    7    23%  color  filter
-    values  links or data · message to agents · other
+  values:
+            ● yes     ━━━━━━━━━━━━━━━━━━━━            17
+            ● no      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  25
+            ● unsure  ━━                               2
+
+  last run on all 44 lines
+  run on a sample   run on all   rename   delete
 
   ▸ examples  12 · 80% agreed on 10 values you set, not counting the 4 given as examples
   ▸ cards  2
-  r to run a sample · n to rename · k to delete · f to hide marks · c counts, e examples, d cards
-  l for labels · x to close
+
+  ↑↓ to choose · Enter to press or edit · b to go back · x to close
 ```
 
-- The header: `name:` the label's name in the accent and bold after a `●` in its color; `type:` the kinds, the one in
-  use on the selection background, the others a click away; `scope:` its files, a field, and how many files they
-  match (`· 1 file matches`, `· 3 files match`; Matt, 2026-10-16: a bare count read as a link), or for a label over
-  cards or sentences how many it holds; for a label over files, `marks:` whether Files and the views mark its records
-  with its values, in words (`shown on records in Files and views` or `hidden in Files and views`), then the action
-  that changes it (`hide` or `show`, f, `thimble act label-show`); a view opens colored by a label whose marks show,
-  as in the browser (Matt, v9 review: `in files: on off` did not say what it turns on). Then the rule.
-- The definition: for a prompt label, `model:` first, the model its calls run on (the label's own, else Settings' row
-  for labels; Matt, v9 review: the model belongs with the prompt it runs); then the definition whole in a field to
-  edit, under its kind's name (`prompt`, `pattern` or `code`; code through the `Code` element), on the same column as
-  the header's values. At rest the field shows `edit` in the accent at its last row's end (a row of its own when the
-  row is full), so it reads as editable; a click on it, as anywhere in the field, gives the field the keyboard and the
-  word goes; Enter saves it (in code, ctrl+s).
-- The actions (`run on a sample`, `run on all N`, `rename`, `delete`, `stop`, `keep the name`, `y to delete`, `n to
-  keep`, `hide` and `show`) are drawn in the accent, as Claude Code draws the choice to press, so they read as buttons
-  (Matt, v9 review); this overrides rule 24 for the label panel.
-- `run on a sample` and `run on all N`, which save what was typed first and run it, then the last run dim; `stop`
-  while it runs, and the type as plain text. A run's first error is a red `!` row under them. `rename` (n) puts the
-  name in a field in their place (`new name`, Enter renames, `thimble act label`; `keep the name` leaves it). `delete`
-  (k), not offered while a run goes, asks once in their place: `delete label "…"? its marks and card go too · y to
-  delete · n to keep`; y deletes the label with its marks, its card and any filter that uses it (`thimble act
-  label-delete`) and opens the labels list, which offers to undo it until another label opens: `deleted the label
-  "…"  undo` under its second rule (u, `thimble act label-undelete`, the browser's Undo), which puts it back with its
-  marks, card and filters and opens it; once a later change stands above the delete, a red `×` row says why.
-- `▸ counts`, `▸ examples` and `▸ cards` are folded, and nothing of them shows until one is opened. Counts: each
-  value's `●` in its hue, its name, a bar on a track to the whole, its count and its share dim, in whole percent as every
-  share (`7%` beside `93%`; one decimal under 1%); the values to edit. The counts apply the analyst's verdicts, as
-  thimble.labels() reads the rows: a record set to another value counts under that value, and the toggle row says how
-  many (`▸ counts  500 · 1 set by you`). After each value's share, its controls: `color` (a label over files) shows the
-  eighteen label colors under it at A4 around the color wheel, as the browser's pickers show them: a column per hue
-  (red, orange, gold, green, teal, sky, blue, purple, pink), its light place above its dark, each `●` in its hue and
-  its name as show_label names it, the one it has on the selection background, a click giving it that color (`thimble
-  act label-show`, a value that had it taking the old one); a narrow pane wraps the columns, a blank row between their
-  rows; `filter` keeps only the units of that value in the label's scope (Files, the canvas or the report, `thimble
-  act label-filter`, as a label card's value does), the value then on the selection background, its control `clear
-  filter` and the toggle row saying `filtered to <value>`. In a pane too narrow for them beside a bar of 8 cells, the
-  controls stand on a row of their own under each value. A link to the label in a reply (`[33](concept:<id>/yes)`) opens the panel with
-  its counts and examples open and the value on the selection background, its examples first. In a card's takeaway
-  such a link is red once the label counts another number (a verdict or a run changed the counts), its tip the count
-  now (`the label counts 179 now, with your verdicts`).
+- The fields, each label dim in a column of 10 cells, its value after it. A choice (`kind:`, `unit:`, the marks) has
+  one cell around each word and one between them: the one in use on the selection background, the others dim, a
+  click away where the browser lets them change.
+  - `name:` the name in a field (an Input, 40 cells, on the selection background) after a `●` in the label's color;
+    Enter renames it (`thimble act label`).
+  - `kind:` prompt, regex or code; another kind picked is saved with its definition, by Enter in it or a run.
+  - `model:`, a prompt label's: the model its calls run on by its id (the label's own, else Settings' row for labels),
+    on the selection background with a dim `▾`. A click shows the models under it (`model_choices`: the one it runs
+    on, every role's, the aliases' models), the one in use lit; a pick saves it (`thimble act label {model}`, `''`
+    for the labels role's, as the browser saves it). With one model to choose from it is plain.
+  - `unit:` records of files, cards or sentences: only the one the label has, since its rows are of that unit (the
+    browser's `Over`, fixed once a label is made).
+  - `scope:` a label over files: its glob in a field (36 cells, on the selection background; Enter saves it), then dim
+    how many files it matches and how many records they hold, by the word their type gives them (`· 1 file matches ·
+    44 lines`; `rows` of a table or CSV file, `pages` of a PDF, `entries` of a JSON document, `records` for files of
+    several types; backend local._record_noun; Matt, 2026-10-16: a bare count read as a link). A label over cards or
+    sentences: `the canvas's cards · 9 cards`, `the report's sentences · N sentences`.
+  - `mark records in Files and views:  on  off`, a label over files: whether Files and the views mark its records with
+    its values (f, `thimble act label-show`); a view opens colored by a label that is on (Matt, v9 review: `in files:
+    on off` did not say what it turns on).
+- Then the rule and the definition whole in a field to edit (field.tsx), in a round border from the label column to
+  the pane's edge, its name (`prompt:`, `pattern:` or `code:`) on its first row of text. A click gives it the
+  keyboard; Enter saves it (in code, ctrl+s). Code has its keywords in the citation violet and its strings in green,
+  its comments dim, on every row but the one the cursor is on. A pattern says under it, dim, what a match gives and
+  whether case counts (`a match is yes, the rest no · case-sensitive`; `case-insensitive` when it holds `(?i)`).
+- `values:`, then each value at the label column: its `●` and its bar in its color, the bar to the largest count (30
+  cells at most, fewer in a narrow pane), its count bold at the row's end. The counts apply the analyst's verdicts,
+  as thimble.labels() reads the rows, and `values:` says how many the analyst set and the value a filter keeps (`1 set
+  by you · filtered to yes`), that value on the selection background. A click on a value shows under it `color` (a
+  label over files) and `filter` (`clear filter` on the value the filter keeps), then the values to edit (`values  yes
+  · no`, Enter saves them). `color` shows the eighteen label colors under it around the color wheel, as the browser's
+  pickers show them: a column per hue (red, orange, gold, green, teal, sky, blue, purple, pink), its light place above
+  its dark, each `●` in its hue and its name as show_label names it, the one it has on the selection background, a
+  click giving it that color (`thimble act label-show`, a value that had it taking the old one); a narrow pane wraps
+  the columns, a blank row between their rows. `filter` keeps only the units of that value in the label's scope
+  (Files, the canvas or the report, `thimble act label-filter`, as a label card's value does). The whole files or runs
+  a prompt label's last run read only in part, one dim row under the values. A link to the label in a reply
+  (`[33](concept:<id>/yes)`) opens the panel with its examples open and the value on the selection background, its
+  examples first. In a card's takeaway such a link is red once the label counts another number (a verdict or a run
+  changed the counts), its tip the count now (`the label counts 179 now, with your verdicts`).
+- The last run dim on its own row (`last run on all 44 lines`, `last run on a sample of 30 lines`), then the actions,
+  3 cells apart, their words underlined in the accent, `delete` in red (Matt, v9 review: they read as text; this
+  overrides rule 24 for the label panel): `run on a sample` and `run on all`, which save what was typed first and run
+  it; `◌ labeling …  stop` while it runs, and the fields as plain text. A run's first error is a red `!` row under
+  them. `rename` (n) gives the name's field the keyboard. `delete` (k), not offered while a run goes, asks once in
+  their place: `delete label "…"? its marks and card go too · y to delete · n to keep`; y deletes the label with its
+  marks, its card and any filter that uses it (`thimble act label-delete`) and opens the labels list, which offers to
+  undo it until another label opens: `deleted the label "…"  undo` under its second rule (u, `thimble act
+  label-undelete`, the browser's Undo), which puts it back with its marks, card and filters and opens it; once a later
+  change stands above the delete, a red `×` row says why.
+- `▸ examples` and `▸ cards`, folded under the actions (e, d), nothing of them shown until one is opened.
   Examples: its toggle row gives the label's held-out agreement in the browser's words (`80% agreed on 10 values you
   set, not counting the 4 given as examples`); grouped by value (a record the analyst set or agreed with under the
   value they gave), each value's row with how many records have it, then its records, then `… N more`, which reads
@@ -1057,6 +1069,9 @@ After the browser's Files (`frontend/src/files`: its tree, its search, its reade
   JSON inside quotation marks; after a verdict `✓ agreed` or `✓ set by you`; each value's button as wide as
   the longest value, so `agree  it is  …` stands in one place under every value. Cards: the cards that use the label,
   each a click away, at most 8. A blank row stands between an opened part and the next toggle.
+- The hint row: `↑↓ to choose · Enter to press or edit` (Claude Code's ring walks every field, choice and action;
+  Enter presses one or gives a field the keyboard), `s to stop` while a run goes, then the way's. The letters r, n, k,
+  f, e, d and l stay bound, unnamed.
 - The labels list (`home › labels`): one row per label (glyph, name, its kind and last run dim at R), 1-9 the first
   nine, then under the second rule the field `describe a new label`, whose words go to main, which makes the label
   with a trial. `l` in a label's panel opens the list in place of the label's step (`home › labels`), the label it came

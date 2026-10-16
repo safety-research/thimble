@@ -3,15 +3,16 @@
 // the cursor (inverse) on the cell clicked and gives the field the keyboard: typing inserts, Backspace and Delete
 // remove, the arrows, Home and End move. Enter saves (in a `multiline` field, such as code, Enter breaks the line and
 // ctrl+s saves). Each change posts the text to the hooks module as a draft, and a save posts it to be stored, as
-// `{type: 'field', name, text, save}`, so a control beside the field (a run) can store what was typed first. At rest
-// the field shows `edit` (props.edit, in props.editColor) at its last row's end, so it reads as editable; a click on
-// it, as anywhere in the field, gives the field the keyboard, and the word goes while the field has it.
-import type { ClientModule } from 'claude-code'
+// `{type: 'field', name, text, save}`, so a control beside the field (a run) can store what was typed first. Code
+// (props.code, Python) has its keywords and strings in the colors given, its comments dim, on every row but the one the
+// cursor stands on.
+import type { ClientModule, RenderElement } from 'claude-code'
 
 import { width } from './draw'
 import { send } from './gestures'
 
-type Props = { name: string; text: string; cols: number; placeholder?: string; multiline?: boolean; edit?: string; editColor?: string }
+/** `code`: the colors of Python's keywords and strings (theme keys), for a label's code. */
+type Props = { name: string; text: string; cols: number; placeholder?: string; multiline?: boolean; code?: { keyword: string; string: string } }
 /** `base`: the text the hooks module drew it with; `text`: what the field holds now; `at`: the cursor's index; `on`: a
  *  click gave it the keyboard. */
 type S = { base: string; text: string; at: number; on: boolean }
@@ -65,6 +66,22 @@ function indexAt(text: string, row: { start: number; end: number }, x: number): 
     used += w
   }
   return row.end
+}
+
+// a Python row's parts: a comment, a string (one row's: an unclosed quote runs to the row's end), a keyword
+const PY = /(#.*$)|("(?:[^"\\]|\\.)*"?|'(?:[^'\\]|\\.)*'?)|\b(def|if|elif|else|for|while|in|not|and|or|is|return|import|from|as|with|try|except|finally|raise|lambda|None|True|False|class|pass|break|continue|yield|async|await)\b/g
+
+/** One row of Python as Texts: its keywords and strings in `code`'s colors, a comment dim, the rest plain. Pure. */
+export function codeParts(line: string, code: { keyword: string; string: string }): ({ s: string; color?: string; dim?: boolean })[] {
+  const out: { s: string; color?: string; dim?: boolean }[] = []
+  let at = 0
+  for (const m of line.matchAll(PY)) {
+    if (m.index > at) out.push({ s: line.slice(at, m.index) })
+    out.push(m[1] ? { s: m[0], dim: true } : { s: m[0], color: m[2] ? code.string : code.keyword })
+    at = m.index + m[0].length
+  }
+  if (at < line.length) out.push({ s: line.slice(at) })
+  return out
 }
 
 const SPECIAL = new Set(['up', 'down', 'left', 'right', 'return', 'enter', 'tab', 'backspace', 'delete', 'pageup', 'pagedown', 'home', 'end', 'escape'])
@@ -121,20 +138,15 @@ const Field: ClientModule<Props, S> = (props, surface) => {
   const cur = rowOf(rows, st.at)
   const lines = rows.map((r, i) => {
     const line = st.text.slice(r.start, r.end)
-    if (!st.on || i !== cur) return Text({ wrap: 'truncate-end', children: line || ' ' })
+    if (!st.on || i !== cur) {
+      if (!props.code || !line) return Text({ wrap: 'truncate-end', children: line || ' ' })
+      const parts: (string | RenderElement)[] = codeParts(line, props.code).map(p => (p.color ? Text({ color: p.color, children: p.s }) : p.dim ? Text({ dimColor: true, children: p.s }) : p.s))
+      return Text({ wrap: 'truncate-end', children: parts })
+    }
     const k = st.at - r.start
     const under = st.text[st.at] && st.at < r.end ? st.text[st.at]! : ' '
     return Text({ wrap: 'truncate-end', children: [line.slice(0, k), Text({ inverse: true, children: under }), line.slice(k + (under === ' ' && st.at >= r.end ? 0 : 1))] })
   })
-  if (props.edit && !st.on) {
-    // `edit` at the last row's end, two cells after its words; a row of its own when it does not fit there
-    const last = rows[rows.length - 1]!
-    const words = st.text.slice(last.start, last.end).replace(/\s+$/, '')
-    const room = cols - width(props.edit)
-    const mark = Text({ ...(props.editColor ? { color: props.editColor } : {}), children: props.edit })
-    if (width(words) + 2 <= room) lines[lines.length - 1] = Text({ wrap: 'truncate-end', children: [words + ' '.repeat(room - width(words)), mark] })
-    else lines.push(Text({ wrap: 'truncate-end', children: [' '.repeat(Math.max(0, room)), mark] }))
-  }
   return Box({ flexDirection: 'column', width: cols, children: lines })
 }
 

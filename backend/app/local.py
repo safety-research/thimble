@@ -664,23 +664,57 @@ async def _label(c: str, args: list[str], pos: list[str]) -> Any:
 
 def _scope_facts(c: str, label: dict[str, Any]) -> dict[str, Any]:
     """What the label panel's header says beside a label's definition: how many files its glob matches (`scope_files`,
-    for a label over files) and the model a prompt label runs on, by the name the analyst reads (`run_model`,
-    concepts.label_model). A fact that cannot be read is left out. Blocking."""
+    for a label over files) and what its records are called there (`scope_unit`, _record_noun); the model a prompt label
+    runs on, by the name the analyst reads (`run_model`, concepts.label_model); and for the panel's `model:` choice, by
+    their ids, the model it runs on (`model_id`), the labels role's (`model_role`, Settings' row for labels, which a
+    label with no model of its own runs on) and the models to choose from (`model_choices`, as the browser's label
+    editor offers them: the one it runs on, every role's, then the aliases' models). A fact that cannot be read is left
+    out. Blocking."""
     from . import concepts  # noqa: PLC0415
     from .session import model_label  # noqa: PLC0415
 
     out: dict[str, Any] = {}
     if label.get("unit") in concepts.FILE_UNITS:
         try:
-            out["scope_files"] = len(concepts.match_paths(config.corpus_dir(c), concepts.glob_patterns(label.get("glob"))))
+            found = concepts.match_paths(config.corpus_dir(c), concepts.glob_patterns(label.get("glob")))
+            out["scope_files"] = len(found)
+            out["scope_unit"] = _record_noun(str(label.get("unit")), [str(s.get("path") or "") for s in found])
         except Exception:  # noqa: BLE001 — a scope that cannot be matched is said without its count
             log.debug("scope files not counted", exc_info=True)
-    if label.get("kind") == "prompt":
-        try:
-            out["run_model"] = model_label(concepts.label_model(c, label))
-        except Exception:  # noqa: BLE001 — no model row rather than no panel
-            log.debug("label model not read", exc_info=True)
+    try:
+        role = config.base_model(concepts.labels_model(c)["model"])
+        model = config.base_model(concepts.label_model(c, label))
+        roles = (config.base_model(str(r.get("model") or "")) for r in config.models_for(c).values())
+        choices = [model, role, *roles, *config.MODEL_ALIASES.values()]
+        out.update({"model_id": model, "model_role": role, "model_choices": list(dict.fromkeys(m for m in choices if m))})
+        if label.get("kind") == "prompt":
+            out["run_model"] = model_label(model)
+    except Exception:  # noqa: BLE001 — no model row rather than no panel
+        log.debug("label model not read", exc_info=True)
     return out
+
+
+# what one record of a file is called, by the file's type (concepts: a line of text, a row of a database's table or a
+# CSV file, a page of a PDF, a value of a JSON document)
+_RECORD_NOUNS = {**dict.fromkeys(("db", "sqlite", "sqlite3", "duckdb", "csv", "tsv", "xlsx", "parquet", "arrow", "feather"), "rows"),
+                 "pdf": "pages", "json": "entries"}
+
+
+def _record_noun(unit: str, paths: list[str]) -> str:
+    """What a label's records are called in the label panel's scope row (`· 44 lines`): `files` for a label over whole
+    files, `run folders` for one over runs; for one over records, the word its files' type gives them (`lines`, `rows`,
+    `pages`, `entries`), `records` when its files differ or none matched. Pure."""
+    from . import coverage  # noqa: PLC0415
+
+    if unit == "agent":
+        return "files"
+    if unit == "run":
+        return "run folders"
+    nouns = set()
+    for p in paths:
+        ext = coverage.ext_of(p)
+        nouns.add(_RECORD_NOUNS.get(ext) or ("lines" if ext in coverage.LINE_EXTS else "records"))
+    return nouns.pop() if len(nouns) == 1 else "records"
 
 
 def _verdict_rows(c: str, concept_id: str) -> list[dict[str, Any]]:
@@ -1156,7 +1190,8 @@ async def _act_verdict(c: str, payload: dict[str, Any]) -> dict[str, Any]:
 async def _act_label(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     """The analyst's edit of a label in the terminal's label panel, saved as the browser's label editor saves it (PUT
     /concepts/{id}, concepts.update_concept_route; LabelCard's patchOf): `name`, `kind` (prompt, regex or code), `body` (a
-    prompt label's prompt, else its pattern or code), `glob` (the files it applies to) and `values`. A field left out stays
+    prompt label's prompt, else its pattern or code), `glob` (the files it applies to), `values` and `model` (the model a
+    prompt label's calls run on, by its id; '' for the labels role's, Settings' row for labels). A field left out stays
     as it is."""
     from . import concepts  # noqa: PLC0415
 
@@ -1182,8 +1217,10 @@ async def _act_label(c: str, payload: dict[str, Any]) -> dict[str, Any]:
         if len([v for v in values if v]) < 2:
             raise StateError("`values` needs two values or more")
         patch["labels"] = [v for v in values if v]
+    if payload.get("model") is not None:
+        patch["model"] = config.base_model(str(payload["model"]))
     if not patch:
-        raise StateError("nothing to change: give name, kind, body, glob or values")
+        raise StateError("nothing to change: give name, kind, body, glob, values or model")
     out = await asyncio.to_thread(concepts.update_concept_route, c, str(found["id"]), concepts.ConceptPatch(**patch))
     return {"label": found["id"], "concept": out}
 

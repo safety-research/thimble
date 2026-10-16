@@ -17,7 +17,9 @@
 //                                                              wheel, every key while its field takes typing
 //   citation     a file citation in a reply                    ↑↓ and the wheel scroll the whole file, a click on a
 //                                                              count a page, a f b x
-//   card, label, document, ask: no list                      their letters; no ↑↓, Enter, Space or ← named
+//   card, document, ask: no list                             their letters; no ↑↓, Enter, Space or ← named
+//   label: no list                                           ↑↓ and Enter named (the ring walks its fields and
+//                                                              actions); its letters work, unnamed
 //   back from a new thread's form   a card, a file's line, after Esc   the view's own hints, never the field's; the list's
 //                                                              keys where it draws a list
 //   home's `… N more`                ↓ until it is chosen               Space and Enter show the section, the choice on
@@ -430,7 +432,8 @@ for (const rows of [SHORT, TALL]) {
     await hotkey($, w, 'back')
     await takesKeys($)
     await type($, w, rows, '1')
-    expect((await seen($, rows)).text).toMatch(/name:.*links through a fetch proxy/)
+    // the label's panel: its name in its path (its `name:` is a field, mockup labelpanel2)
+    expect((await seen($, rows)).text).toMatch(/labels › links through a fetch proxy.*name:/)
   })
 }
 
@@ -893,7 +896,7 @@ test('keys · citation · a file citation: ↑↓ and the wheel move its window 
 
 // ------------------------------------------------------------------------------------------------ the panels with no list
 
-test('keys · card, label, document and a new thread: no relay; their letters work; no ↑↓, Enter, Space or ← named', async ($, on) => {
+test('keys · card, label, document and a new thread: no relay; their letters work; no ↑↓, Enter, Space or ← named but in a label, whose fields and actions the ring walks', async ($, on) => {
   const w = world(on)
   await start($, w)
   const noList = async (keys: string[], press: string, effect: () => void) => {
@@ -918,8 +921,17 @@ test('keys · card, label, document and a new thread: no relay; their letters wo
   await w.clock.settle()
   await takesKeys($)
   await click($, w, SHORT, 'home', 'links through a fetch proxy', '█')
-  await noList(['r to run a sample', 'c counts, e examples, d cards', 'l for labels'], 'hk-counts', () => undefined)
-  expect((await seen($, SHORT)).text).toContain('proxy-link')
+  // mockup labelpanel2: `↑↓ to choose · Enter to press or edit`, Claude Code's ring over its fields and actions
+  await takesKeys($)
+  const label = await seen($, SHORT)
+  expect(label.relay).toBe(false)
+  named(label.hint, ['↑↓ to choose', 'Enter to press or edit'])
+  expect(label.hint).not.toMatch(/Enter to open|Space|r to run a sample/)
+  const panel = await look($, SHORT)
+  await panel.press({ key: 'hk-examples' })
+  await w.clock.settle()
+  await panel.unmount()
+  expect((await seen($, SHORT)).text).toContain('▾ examples')
   // a document
   await $.command.run({ command: 'thimble:thimble', args: 'documents' } as never)
   await w.clock.settle()

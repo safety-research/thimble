@@ -367,6 +367,33 @@ async def test_state_label_gives_the_files_its_glob_matches_and_a_prompt_label_s
     assert prompt["run_model"] == model_label(concepts.label_model(CORPUS, prompt)) != ""
 
 
+async def test_state_label_names_its_records_and_the_models_its_panel_offers(term):
+    """The label panel's scope row says what the records are (`· 840 lines`), and its `model:` choice offers the models
+    by their ids: the one the label runs on first, the labels role's among them. `act label` with `model` sets the
+    label's own; '' gives it the role's again."""
+    from app import concepts, config as cfg
+
+    await call(term, "apply_label", scope="files", name="bash", predicate={"kind": "regex", "text": "Bash"},
+               paths=["agents/*.jsonl"])
+    label = await local.state(CORPUS, "label", ["bash"])
+    assert label["scope_unit"] == "lines"
+    role = cfg.base_model(concepts.labels_model(CORPUS)["model"])
+    assert label["model_id"] == label["model_role"] == role
+    assert label["model_choices"][0] == role and len(set(label["model_choices"])) == len(label["model_choices"])
+    other = next(m for m in label["model_choices"] if m != role)
+    await local.act(CORPUS, "label", {"label": "bash", "model": other})
+    ws = cfg.workspace_dir(CORPUS)
+    assert concepts.find_concept(ws, "bash")["model"] == other
+    own = await local.state(CORPUS, "label", ["bash"])
+    assert own["model_id"] == other and own["model_role"] == role and own["model_choices"][0] == other
+    await local.act(CORPUS, "label", {"label": "bash", "model": ""})
+    assert concepts.find_concept(ws, "bash")["model"] == ""
+    # the word for a file's records by its type; files of two types are records
+    assert [local._record_noun("record", ps) for ps in (["a.jsonl"], ["forge.db"], ["t.csv"], ["d.pdf"], ["r.json"], ["a.jsonl", "b.csv"], [])] == [
+        "lines", "rows", "rows", "pages", "entries", "records", "records"]
+    assert (local._record_noun("agent", ["a.jsonl"]), local._record_noun("run", [])) == ("files", "run folders")
+
+
 async def test_state_label_keeps_a_record_the_analyst_set_under_the_value_they_gave(term):
     """A record the analyst set to another value in the label panel stays among its examples, under the value they gave,
     with the value the label gave it and its words (live check New 10: its row came past the page each value shows, so it

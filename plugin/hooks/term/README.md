@@ -144,23 +144,25 @@ Claude Code's panel chrome, no right-click menu.
   and the views (a view built in terminal mode drawn by its program, `view.term.js` on the terminal view kit, which
   thimble's view host runs sandboxed while the view shows: docs/terminal-views.md; a view built in browser mode as one
   line that says so).
-- **The label panel**, as Matt laid it out: `name:` its name in the accent and bold after a `●` in its color, `type:`
-  (`prompt  regex  code`, the one in use on the selection background, the others a click away), `scope:` (its files, a
-  field, and how many records), for a label over files `marks:` (whether Files and the views mark its records, in
-  words, then `hide` or `show`, f, `thimble act label-show`), then a rule; a prompt label's `model:`, then the prompt
-  (or pattern, or code) whole in a field to edit, on the same column (`hooks/field.tsx`: `edit` in the accent at
-  rest, a click gives it the keyboard, Enter saves it, `thimble act label`); its actions in the accent: `run on a
-  sample` and `run on all N`, which save what was typed first and run it (`thimble act label-run`), and `stop` (s)
-  while it runs (`thimble act label-stop`), `rename` (n) and `delete` (k), whose undo the labels list then offers (u,
-  `thimble act label-undelete`); then `▸ counts` (with the values to edit, and each value's `color`, the eighteen
-  label colors around the color wheel by the names show_label takes, and `filter`, `thimble act label-show` and
-  `label-filter`),
-  `▸ examples` (the held-out agreement; each record under its value, `agree` or another value, `thimble act verdict`;
-  `… N more` per value, `thimble state label --rows`; a JSON record's other fields on one dim row cut at whole pairs) and
-  `▸ cards` (the cards that use it, each a click away), folded. A label's values take their classes' colors wherever
-  they show (`hooks/labels.ts`, `paint.ts` `LABEL_HUES` and `PICKED_HUES`).
-  Nothing else shows until it is opened. A code label's code runs only in main's Bash: its run asks main to run the
-  `thimble-run label` command it gives.
+- **The label panel**, as Matt laid it out (mockup labelpanel2), every field exposed and editable as in the browser's
+  label editor: `name:` (a field after a `●` in its color, Enter renames it), `kind:` (`prompt  regex  code`, the one
+  in use on the selection background, the others a click away), a prompt label's `model:` (its model by its id, a
+  choice: a click shows the models, a pick saves it, `thimble act label {model}`), `unit:` (records of files, cards or
+  sentences, the one it has), `scope:` (its glob in a field, then how many files match and records they hold, `· 1
+  file matches · 44 lines`), for a label over files `mark records in Files and views:  on  off` (f, `thimble act
+  label-show`); then a rule and the prompt (or pattern, or code) whole in a bordered field to edit (`hooks/field.tsx`:
+  a click gives it the keyboard, Enter saves it, `thimble act label`; code colored; a pattern says what a match
+  gives); then `values:`, each value's `●`, its bar and its count bold, a click on a value showing its `color` (the
+  eighteen label colors around the color wheel by the names show_label takes), `filter` and the values to edit
+  (`thimble act label-show`, `label-filter`, `label`); the last run, then its actions underlined in the accent,
+  `delete` in red: `run on a sample` and `run on all`, which save what was typed first and run it (`thimble act
+  label-run`), and `stop` (s) while it runs (`thimble act label-stop`), `rename` (n, the name's field) and `delete`
+  (k), whose undo the labels list then offers (u, `thimble act label-undelete`); then `▸ examples` (the held-out
+  agreement; each record under its value, `agree` or another value, `thimble act verdict`; `… N more` per value,
+  `thimble state label --rows`; a JSON record's other fields on one dim row cut at whole pairs) and `▸ cards` (the
+  cards that use it, each a click away), folded. A label's values take their classes' colors wherever they show
+  (`hooks/labels.ts`, `paint.ts` `LABEL_HUES` and `PICKED_HUES`). A code label's code runs only in main's Bash: its
+  run asks main to run the `thimble-run label` command it gives.
 - **Side threads.** The `?` beside a passage or a card, a press on a card's title or mark, a selection's "ask", or `ask
   about this answer ›` opens a new thread's entry box, which posts the thread (`thimble act thread`, with the thread it
   was asked from as its parent, and a document's passage as its anchor); main forks `thread:<name>`, as for the

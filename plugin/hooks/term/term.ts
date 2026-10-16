@@ -937,7 +937,7 @@ export async function threadMessage(cx: Ctx, thread: string, message: string): P
 
 /** What the label panel changes of a label (`thimble act label`): its name, its kind, its prompt (or pattern or code),
  *  its files, its values. */
-export type LabelPatch = { name?: string; kind?: string; body?: string; glob?: string; values?: string[] }
+export type LabelPatch = { name?: string; kind?: string; body?: string; glob?: string; values?: string[]; model?: string }
 
 async function labelSaid(cx: Ctx, id: string, words: string, run?: { limit: number; at: number } | null): Promise<void> {
   const ui = await cx.labelUi()
