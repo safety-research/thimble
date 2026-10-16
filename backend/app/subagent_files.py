@@ -1242,7 +1242,7 @@ def fork_call_ref(state: dict[str, Any], tool_use_id: Any) -> str | None:
 
 def fork_check(state: dict[str, Any], tool_input: dict[str, Any], ws: Path | None = None,
                tool_use_id: str | None = None) -> str | None:
-    """Terminal mode's dedupe of a thread's fork (subagents.fork_check in browser mode): main's Agent call that would
+    """Local transport's dedupe of a thread's fork (subagents.fork_check after a press): main's Agent call that would
     start a second fork of the thread it names (`thread:<name>`, fork_ref) while the first starts or runs: why it must
     not run, naming the thread by its first question in workspace `ws`; else None, and the call is recorded, by its
     `tool_use_id` too (note_fork_call)."""

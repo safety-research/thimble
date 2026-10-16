@@ -568,13 +568,13 @@ def test_the_opening_screen_says_whether_card_code_runs_in_bubblewrap(tmp_path):
 
     hint = "; thimble doctor --verbose names the commands that add it"
     out = opening(f"{bin_}:{tools}")
-    assert f"  ✓ card code: runs without a sandbox, and terminal mode shows no views (bubblewrap missing){hint}" in out, out
+    assert f"  ✓ card code: runs without a sandbox, and the terminal shows no views (bubblewrap missing){hint}" in out, out
     bwrap = tmp_path / "bwrap-bin" / "bwrap"
     bwrap.parent.mkdir()
     bwrap.write_text("#!/bin/sh\necho 'bwrap: No permissions to create new namespace' >&2\nexit 1\n")
     bwrap.chmod(0o755)
     out = opening(f"{bin_}:{bwrap.parent}:{tools}")
-    assert "card code: runs without a sandbox, and terminal mode shows no views (bubblewrap can't create a sandbox " \
+    assert "card code: runs without a sandbox, and the terminal shows no views (bubblewrap can't create a sandbox " \
            f"here){hint}" in out, out
     bwrap.write_text("#!/bin/sh\nexit 0\n")
     out = opening(f"{bin_}:{bwrap.parent}:{tools}")

@@ -42,7 +42,7 @@ its own failures there, since a run's status is not its outcome (a build that en
 Attribution. A PreToolUse hook on thimble's tools records which agent makes each call (callers.jsonl); caller() names
 the agent, and its key is the session the call runs as (tools.call_route), a descendant's that of its thimble ancestor.
 
-Terminal mode. No server runs: the starts, follow-ups and stops above reach the module through the trusted folder
+Local transport (before a press). No server runs: the starts, follow-ups and stops above reach the module through the trusted folder
 (module_bridge's file transport), main's permission mode and plan mode come from the files (session.main_mode), and the
 hooks' records are followed by their backend calls (local_hooks.py), which run the same bodies as the routes below
 (hook_started, hook_stopped, hook_denied, hook_end, hook_rekey). Plan mode stops no running agent there either.

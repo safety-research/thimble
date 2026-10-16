@@ -6,7 +6,7 @@
 #                      [--python PATH] [--deps-only] [--require-pinned] [--marketplace-name NAME]
 #
 # It opens with one screen: what it found (Claude Code, Python or uv, Node, a browser, and on Linux whether card code and
-# terminal-mode views can run in bubblewrap), what it installs where and about how big, what it changes in your Claude
+# the terminal's views can run in bubblewrap), what it installs where and about how big, what it changes in your Claude
 # Code setup, and whether a question remains. It asks it, then prints a line per step, and ends with what to run next.
 # Every command it runs, with its output, goes to $THIMBLE_HOME/install.log (~/.thimble/install.log).
 #
@@ -953,7 +953,7 @@ browser_step() {  # after the packages, since it launches the browser with thimb
 }
 
 # ------------------------------------------------------------------------- card code's sandbox (Linux)
-# Card code runs in the notebook kernel, in Anthropic's sandbox runtime or in bubblewrap, and terminal mode draws views
+# Card code runs in the notebook kernel, in Anthropic's sandbox runtime or in bubblewrap, and the terminal draws views
 # only in one of them; on Linux both need bubblewrap to create a sandbox. install.sh installs neither: the opening screen
 # says whether it runs, and `thimble doctor --verbose` names the commands that add it.
 card_found() {  # its line in the opening screen's Found, on Linux
@@ -966,7 +966,7 @@ card_found() {  # its line in the opening screen's Found, on Linux
     found ok "card code and terminal views sandbox: bubblewrap runs here"
     return 0
   fi
-  found ok "card code: runs without a sandbox, and terminal mode shows no views ($why); thimble doctor --verbose names the commands that add it"
+  found ok "card code: runs without a sandbox, and the terminal shows no views ($why); thimble doctor --verbose names the commands that add it"
 }
 
 # -------------------------------------------------------------- the `thimble` command and the plugin

@@ -5,7 +5,7 @@ text, surface, selector, and a PNG under `anchors/`). Each message typed in it i
 (`event`) naming the thread and its card group `thread:<id>`; the first one carries the anchor and what its refs
 hold.
 Main answers by forking with description and prompt `thread:<name>`, the thread's fork name (fork_name: its first
-question as a slug, which Claude Code's agent tray shows; in terminal mode thimble-term gives the call the question as its
+question as a slug, which Claude Code's agent tray shows; the terminal UI gives the call the question as its
 description, so the fork is known by its prompt, fork_ref; the event's line in main's terminal names the thread by its
 first question, line_name);
 the mirror (session.py) matches the fork's transcript, copies its tool calls and its text into the thread's chat, with
@@ -76,7 +76,7 @@ def thread_of(description: Any) -> str | None:
 
 def fork_ref(tool_input: Any) -> str | None:
     """The `thread:<name>` an Agent call for a thread's fork carries: its description, else its prompt, else None. Main
-    writes `thread:<name>` as both (prompts/main.md); in terminal mode thimble-term gives the call the thread's
+    writes `thread:<name>` as both (prompts/main.md); the terminal UI gives the call the thread's
     question as its description before it runs, so that Claude Code's agent tray and exit dialog name the thread by its
     question (subagent_files.fork_ref)."""
     if not isinstance(tool_input, dict):
@@ -649,7 +649,7 @@ def session_ended(c: str, sid: str) -> None:
                 _stop(c, tid, SESSION_ENDED)
             agents.notify(c, tid)
         elif (fork.get("session") in (None, sid) or fork.get("ended")) and not settled(c, tid):
-            # a question that no fork of this session answered or ended (terminal mode, where each pass of the mirror
+            # a question that no fork of this session answered or ended (local transport, where each pass of the mirror
             # runs in its own process and none holds the thread's running mark): it stops and says so, as above
             if meta.get(QUEUED_KEY):
                 agents.update_agent(c, tid, **{QUEUED_KEY: []})

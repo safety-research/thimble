@@ -7,7 +7,7 @@ for everything else (_kernel_for). Oversized stream outputs are bounded to a hea
 file. The in-memory notebook cache is used by the event-loop thread only, and is trusted only while the file is
 unchanged (mtime_ns, size and inode).
 
-More than one process writes the groups: the server or, in terminal mode, the MCP shim, and `thimble-run`, which runs a
+More than one process writes the groups: the server or, before a press, the MCP shim, and `thimble-run`, which runs a
 card's code in main's Bash and writes its outputs (cardrun.py). Every change therefore holds the store's lock (editing:
 ledger.locked on the notebooks folder) from its read to its write, and a run, which cannot hold it while the code runs,
 saves its cell into the group as the file holds it then (_merge_cell).
@@ -1118,9 +1118,9 @@ INTERRUPTED_EVALUE = "thimble stopped while this card ran; run it again"  # the 
 def mark_interrupted_cells(root: Path | None = None, only: "tuple[str, ...] | None" = None) -> list[str]:
     """Server start: a cell stored `running` was mid-run when the previous server went away, and nothing will write its
     result. Mark each such cell errored with one Interrupted output (code, title and place stay), and end a pending card
-    check the same way. Reads every workspace under `root` directly, or only the workspaces `only` names (the terminal
-    mode's shim, which serves one), and writes changed notebooks back atomically under the store's lock. A workspace
-    open in terminal mode in a session that still runs is left alone, since its cards run in that session's Bash
+    check the same way. Reads every workspace under `root` directly, or only the workspaces `only` names (the shim on
+    local transport, which serves one), and writes changed notebooks back atomically under the store's lock. A workspace
+    on local transport in a session that still runs is left alone, since its cards run in that session's Bash
     (local.live_terminal). Returns `<workspace>/<notebook>/<cell>` per cell marked."""
     from . import checkstore, local  # noqa: PLC0415 — checkstore imports this module
 
@@ -2275,7 +2275,7 @@ def _no_kernel_here(workspace: str) -> None:
     from . import local  # noqa: PLC0415
 
     if local.terminal(workspace):
-        raise TerminalRun(f"in terminal mode, card code in {workspace} runs through thimble-run, not in this process")
+        raise TerminalRun(f"on local transport, card code in {workspace} runs through thimble-run, not in this process")
 
 
 def _kernel(workspace: str, kernel: str | None = None) -> _Kernel:
@@ -3473,13 +3473,13 @@ def _keep_takeaway(workspace: str, cell: dict, changed: bool) -> tuple[str, str]
     return kept, before
 
 
-RUN_KEY = "run"  # a card whose code runs through `thimble-run` (terminal mode): {state, by, script, ...} (cardrun.py)
+RUN_KEY = "run"  # a card whose code runs through `thimble-run` in main's Bash: {state, by, script, ...} (cardrun.py)
 
 
 @_changes
 def stage_edit(workspace: str, nb_id: str, cell_id: str, code: str, run: dict, *, by: str, title: str | None = None,
                kind: str | None = None, from_dataset: bool = False) -> dict:
-    """edit_and_run's change to a card stored to run later through `thimble-run` (terminal mode), with its RUN_KEY
+    """edit_and_run's change to a card stored to run later through `thimble-run` in main's Bash, with its RUN_KEY
     record. A kept takeaway's outputs text goes in the record as `kept`, so the run marks it stale when its outputs
     differ. Returns a copy of the stored cell."""
     ws = _ws(workspace)

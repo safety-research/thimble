@@ -104,7 +104,7 @@ def write_meta(c: str, meta: dict) -> None:
 
 def change_meta(c: str, chat_id: str, change: Callable[[dict], Any]) -> dict:
     """Read the chat's meta, pass it to `change`, which changes it in place, and write it, all under the meta's lock:
-    the mirror, the tools and `thimble act` change metas from more than one process in terminal mode. 404 for a chat
+    the mirror, the tools and `thimble act` change metas from more than one process before a press. 404 for a chat
     that does not exist."""
     meta_path, _ = paths(c, chat_id)
     with ledger.locked(meta_path):
@@ -141,7 +141,7 @@ def _defaults(meta: dict) -> dict:
 
 def append(log_path: Path, record: dict) -> None:
     """Append one record to a chat's log under the log's lock, since a record's line index is its id and more than one
-    process appends in terminal mode (the mirror, the tools)."""
+    process appends before a press (the mirror, the tools)."""
     with ledger.locked(log_path):
         ledger.heal_tail(log_path)
         with log_path.open("a", encoding="utf-8") as f:
@@ -1030,7 +1030,7 @@ def discard_chat(c: str, chat_id: str, role: str = "") -> None:
     log.info("%s: chat %s (%s) deleted", c, chat_id, role or "?")
     try:
         investigation.emit(c, investigation.MAIN, {"type": "chat", "chat": chat_id, "deleted": True})
-    except Exception:  # noqa: BLE001 — off the event loop (a pass of terminal mode's mirror), no page listens
+    except Exception:  # noqa: BLE001 — off the event loop (a pass of the local transport's mirror), no page listens
         log.debug("chat deletion for %s/%s not emitted", c, chat_id, exc_info=True)
 
 
