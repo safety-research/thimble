@@ -12,6 +12,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -22,6 +23,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 # new for every start of the server's code, an execv restart and a reload among them: /api/health carries it, so the
 # watch over a restart (restart_watch.py) tells the restarted server from the one before it
 BOOT_ID = os.urandom(4).hex()
+# opens thimble's requests to its own server on 127.0.0.1 without any proxy the shell sets (HTTP_PROXY and the like):
+# urllib would send them to that proxy unless no_proxy names the host
+LOOPBACK = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 def default_data_dir() -> Path:
@@ -199,12 +203,47 @@ def _skip() -> bool:
     return os.environ.get("THIMBLE_SKIP_KEY") == "1"
 
 
+def keep_local_off_proxy(env: dict[str, str] | None = None) -> None:
+    """Add 127.0.0.1 and localhost to NO_PROXY / no_proxy in `env` (default os.environ), so that thimble's calls to its
+    own server on 127.0.0.1 never go through an HTTP proxy the shell sets. urllib and httpx read these variables, and
+    every process thimble starts inherits them. The launcher does the same for the Claude Code session it starts."""
+    env = os.environ if env is None else env
+    for name in ("NO_PROXY", "no_proxy"):
+        cur = env.get(name, "")
+        if "127.0.0.1" not in [x.strip() for x in cur.split(",")]:
+            env[name] = f"{cur},127.0.0.1,localhost" if cur else "127.0.0.1,localhost"
+
+
+# NO_PROXY and no_proxy as this process got them, before keep_local_off_proxy adds 127.0.0.1 and localhost: what the
+# session that ran this command sets, which /thimble's proxy line and `setup` notice read (cli.proxy_unsafe)
+GIVEN_NO_PROXY = {name: os.environ.get(name, "") for name in ("NO_PROXY", "no_proxy")}
+keep_local_off_proxy()
+
+
 # The CLAUDE_* variables a `claude` thimble starts takes from this process: those naming the config dir, a provider, a
-# login or a network setting. Every other one (CLAUDECODE, CLAUDE_CODE_SESSION_ID, CLAUDE_CODE_ENTRYPOINT and the rest of
-# the calling session's identity) stays out. A variable naming a file descriptor stays out too, since the server
-# starts with its descriptors closed.
-_CLAUDE_PASS = re.compile(r"CLAUDE_CONFIG_DIR|CLAUDE_CODE_(USE_\w+|SKIP_\w+_AUTH|OAUTH_(TOKEN|REFRESH_TOKEN|SCOPES)|"
-                          r"CLIENT_\w+|API_KEY_HELPER_TTL_MS|DISABLE_NONESSENTIAL_TRAFFIC)")
+# network setting (a proxy, a certificate, the client certificate's CLIENT_* among them, or an LLM gateway) and every
+# one Claude Code reads to sign in, so the child signs in as the analyst's session does and keeps its tokens where
+# that session keeps them: the federation token cache, the credential store (its folder, the Windows credential
+# manager, the refresh lock), OAuth (its endpoints, client ids and timing), the account, organization and plan of a
+# token given in the environment, the cloud providers' credential settings, a host's credentials file and provider,
+# and the managed settings files, which can choose the login. Every other one (CLAUDECODE, CLAUDE_CODE_SESSION_ID,
+# CLAUDE_CODE_ENTRYPOINT and the rest of the calling session's identity) stays out, as do the calling cloud session's
+# own tokens (CLAUDE_CODE_SESSION_ACCESS_TOKEN, CLAUDE_SESSION_INGRESS_TOKEN_FILE) and the variables that say an SDK
+# host refreshes the login (CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH, CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH and its timeout):
+# that host answers main alone, and Claude Code also drops the first from the sessions it starts in the background. A
+# variable naming a file descriptor stays out too, since the server starts with its descriptors closed. Variables
+# that do not start with CLAUDE (ANTHROPIC_*, AWS_*, HTTPS_PROXY, NODE_EXTRA_CA_CERTS, …) pass.
+_CLAUDE_PASS = re.compile(r"CLAUDE_CONFIG_DIR|CLAUDE_SECURESTORAGE_CONFIG_DIR|CLAUDE_TRUSTED_DEVICE_TOKEN|"
+                          r"CLAUDE_LOCAL_OAUTH_(API|APPS|CONSOLE)_BASE|"
+                          r"CLAUDE_CODE_(USE_\w+|SKIP_\w+_AUTH|SKIP_AWS_CRED_CACHE|AWS_CHAIN_RESOLVE_TIMEOUT_MS|"
+                          r"OAUTH_(TOKEN|REFRESH_TOKEN|SCOPES|CLIENT_ID|401_WAIT_MS)|CUSTOM_OAUTH_URL|"
+                          r"DESIGN_OAUTH_CLIENT_ID|AUTH_FAIL_EXIT_MS|FEDERATION_CACHE_DIR|FORCE_WINDOWS_CREDMAN|"
+                          r"DISABLE_AUTH_REFRESH_LOCK|ACCOUNT_UUID|ACCOUNT_TAGGED_ID|ORGANIZATION_UUID|USER_EMAIL|"
+                          r"SUBSCRIPTION_TYPE|RATE_LIMIT_TIER|HFI_BEARER_TOKEN|PROVIDER_MANAGED_BY_HOST|HOST_CREDS_FILE|"
+                          r"HOST_AUTH_ENV_VAR|HOST_GATEWAY_LINEAGE|MANAGED_SETTINGS_PATH|REMOTE_SETTINGS_PATH|"
+                          r"CLIENT_\w+|API_KEY_HELPER_TTL_MS|DISABLE_NONESSENTIAL_TRAFFIC|"
+                          r"HTTPS?_PROXY|PROXY_(URL|AUTHENTICATE|AUTH_HELPER_TTL_MS|RESOLVES_HOSTS)|ENABLE_PROXY_AUTH_HELPER|"
+                          r"CERT_STORE|GATEWAY_TOKEN|API_BASE_URL|ASSUME_FIRST_PARTY_BASE_URL|DISABLE_EXPERIMENTAL_BETAS)")
 
 
 def passes(name: str) -> bool:
@@ -240,6 +279,11 @@ def auth_status(env: Mapping[str, str] | None = None, cwd: str | Path | None = N
     return d if isinstance(d, dict) else None
 
 
+# how to give Claude Code a login, for every "not logged in" message: the login, and where the other ways are
+# (INSTALL.md's Authentication section: an API key, a cloud provider)
+AUTH_HELP = "log in with `claude auth login` (INSTALL.md, Authentication, has more ways)"
+
+
 def auth_problem(status: dict[str, Any] | None = None) -> str:
     """The alert when a model call cannot run: no `claude`, or `claude auth status` reporting no login; '' otherwise,
     when the status cannot be read (the call itself then says what failed), and under THIMBLE_SKIP_KEY."""
@@ -249,7 +293,7 @@ def auth_problem(status: dict[str, Any] | None = None) -> str:
         return NO_CLAUDE
     st = auth_status() if status is None else status
     if st is not None and st.get("loggedIn") is False:
-        return "Claude Code is not logged in (`claude auth status`): log in with `claude`, then try again"
+        return f"Claude Code is not logged in (`claude auth status`): {AUTH_HELP}, then try again"
     return ""
 
 
@@ -338,7 +382,7 @@ STACK_VARS = ("THIMBLE_HOME", "THIMBLE_PORT", "THIMBLE_UI_PORT", "THIMBLE_WORKSP
               "THIMBLE_FRONTEND_DIST", "THIMBLE_DEV", "THIMBLE_SUPERVISED", "THIMBLE_STACK_PORT",
               "THIMBLE_STACK_UI_PORT", "THIMBLE_CLAUDE_BIN", "THIMBLE_SKIP_KEY", "THIMBLE_PROMPTS_DIR",
               "THIMBLE_PROMPT_CAPTURE", "THIMBLE_KERNEL_WRAP", "THIMBLE_MODEL_SPEED", "THIMBLE_MCP_PROGRESS_S",
-              "THIMBLE_MCP_RETRY_S", "THIMBLE_BROWSER_PATH", "THIMBLE_INDEX_CACHE_MB")
+              "THIMBLE_MCP_RETRY_S", "THIMBLE_BROWSER_PATH", "THIMBLE_INDEX_CACHE_MB", "THIMBLE_BIN_DIR")
 OWN_PREFIX = "THIMBLE_"
 
 
@@ -917,7 +961,7 @@ def safe_corpus_path(corpus: Path, rel: str) -> Path:
 #              (thimble:dev-ticket) and `thimble fix`'s session (dev.py)
 #   verify     the card check's reading of a card's picture (card_check), a classifier
 #   labels     the labels classifier (concepts), the label draft and the view fit
-#   suggest    the viewer suggestion (views._suggest_call), a classifier
+#   suggest    the view proposals after a turn (proposer.py) and for a file type (views.suggest), a classifier
 #   refusal    the model and effort a classifier's call runs on again once its model refused it (model.structured);
 #              `off` turns the rerun off
 # Layered: the role's default (ROLE_MODELS_DEFAULT; an agent file's frontmatter where it names one, ROLE_AGENTS; for the
@@ -938,7 +982,7 @@ ROLE_MODELS_DEFAULT: dict[str, dict[str, Any]] = {
     "labels": {"model": "claude-opus-5-5", "effort": "low", "fast": False},
     "dev": {"model": "claude-opus-5-5", "effort": "high", "fast": True},  # fast mode for `thimble fix` alone
     "verify": {"model": "claude-opus-5-5", "effort": "high", "fast": True},
-    "suggest": {"model": "claude-opus-5-5", "effort": "low", "fast": False},
+    "suggest": {"model": "claude-opus-5-5", "effort": "medium", "fast": False},
     "refusal": {"model": FALLBACK_MODEL, "effort": FALLBACK_EFFORT, "fast": False, "off": not FALLBACK_MODEL},
 }
 ORIENT_DEFAULT_MODEL = "claude-opus-5-5"  # the orientation's model when the analyst's own settings name none

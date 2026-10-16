@@ -3,8 +3,8 @@
 // drawer's helpers (value order, coverage groups, unit words, example counts).
 import { ERROR_MIME, asText, isStream, isVegaLite, pickMime, stripAnsi } from '../components/Outputs'
 import { FRAME_MIME } from '../lib/dataFrame'
-import { matchedCount, unmatchedValues } from '../files/labels'
-import type { Cell, ConceptCoverage, CoverageFile, LabelRow, MimeBundle, OutputTruncation } from '../lib/types'
+import { isFilesLabel } from '../files/labels'
+import type { Cell, Concept, ConceptCoverage, CoverageFile, LabelRow, MimeBundle, OutputTruncation } from '../lib/types'
 
 /** What a bundle is, by the representation the card would pick from it. */
 export type BundleKind = 'stdout' | 'stderr' | 'error' | 'chart' | 'image' | 'table' | 'html' | 'markdown' | 'json' | 'text' | 'unknown'
@@ -219,35 +219,40 @@ export function unitWord(unit: string | undefined, n: number): string {
   return n === 1 ? s : p
 }
 
-/** A value's share of the labeled units as the table shows it: whole percents, one decimal at the ends (0.3%, 99.7%); '' with no total. */
+/** A value's share of all the units a label labeled, as a label card's table writes it: whole percents, so shares side by
+ * side read alike (`7%` beside `93%`), one decimal under 1%, `<0.1%` below that, and `>99%` for a part that rounds to
+ * the whole; '' with no total. The terminal's label card writes it so too (mods/thimble-term draw.share). */
 export function labelShare(count: number, total: number): string {
   if (!(total > 0) || !(count >= 0)) return ''
+  if (!count) return '0%'
   const p = (count / total) * 100
-  const s = p > 0 && (p < 10 || p > 90) && p !== 100 ? p.toFixed(1) : Math.round(p).toString()
-  return `${s.endsWith('.0') ? s.slice(0, -2) : s}%`
+  if (p < 0.1) return '<0.1%'
+  if (p < 1) return `${p.toFixed(1)}%`
+  const r = Math.round(p)
+  return r >= 100 && count < total ? '>99%' : `${r}%`
 }
 
-/** Each value's share as a label card's table shows it: among the matched units (those whose value is not one of the
- * label's negatives, files/labels unmatchedValues), so the values of interest don't read near 0% beside a huge
- * negative. `matched` is that subset's size; a negative's share is ''. A label with one non-negative value, or with no
- * negatives, shows shares of the whole. */
-export interface LabelShares {
-  share: Record<string, string>
-  matched: number
-  total: number
-  negatives: Set<string>
+/** Each value's share as a label card's table shows it: every value's share of the same total, the units the label
+ * labeled (labelShare), those in whole percents rounded so that they add up to 100% when the values' counts make the
+ * total (largest remainders, as the terminal's label card does, mods/thimble-term draw.shares). Pure. */
+export function labelShares(values: readonly string[], counts: Readonly<Record<string, number>> | null | undefined, total: number): Record<string, string> {
+  const parts = values.map((v) => counts?.[v] ?? 0)
+  const out: Record<string, string> = Object.fromEntries(values.map((v, i) => [v, labelShare(parts[i], total)]))
+  if (!(total > 0) || parts.reduce((a, b) => a + b, 0) !== total) return out
+  // only when every share is in whole percents: one under 1% or over 99% keeps its own words (`0.4%`, `>99%`)
+  const ps = parts.map((n) => (n / total) * 100)
+  if (ps.some((p) => p > 0 && (p < 1 || p >= 99.5))) return out
+  const whole = ps.map((p) => Math.floor(p))
+  const order = ps.map((p, i) => ({ i, rest: p - Math.floor(p) })).filter((x) => x.rest > 0).sort((a, b) => b.rest - a.rest)
+  for (let k = 0, left = 100 - whole.reduce((a, b) => a + b, 0); k < order.length && left > 0; k++, left--) whole[order[k].i]++
+  values.forEach((v, i) => {
+    if (ps[i] > 0) out[v] = `${whole[i]}%`
+  })
+  return out
 }
 
-export function labelShares(labels: readonly string[], counts: Readonly<Record<string, number>> | null | undefined, total: number): LabelShares {
-  const values = labelValues(labels, counts)
-  const negatives = unmatchedValues(labels)
-  const positive = values.filter((v) => !negatives.has(v))
-  const matched = matchedCount(labels, counts, total)
-  const share: Record<string, string> = {}
-  const base = positive.length > 1 ? matched : total
-  for (const v of values) share[v] = negatives.has(v) ? '' : labelShare(counts?.[v] ?? 0, base)
-  return { share, matched, total, negatives }
-}
+/** The units a label card's shares are of: those the label labeled, else the sum of its counts. */
+export const labeledTotal = (k: Pick<Concept, 'n_labeled' | 'counts'>): number => k.n_labeled ?? Object.values(k.counts ?? {}).reduce((a, b) => a + b, 0)
 
 /** `12,480 records`: the count of labeled units with the unit's word. */
 export const unitTotal = (n: number | null | undefined, unit: string | undefined): string => `${(n ?? 0).toLocaleString()} ${unitWord(unit, n ?? 0)}`
@@ -288,7 +293,7 @@ export function agreementLine(cal: { n: number; agreed: number; taught?: number 
   return taught ? `Your ${taught} ${taught === 1 ? 'value was' : 'values were'} given as examples, so none tests the label yet` : ''
 }
 
-// ---- the label card's face (canvas/bodies.tsx LabelBody): its values, glob and examples ----
+// ---- the label card's face (canvas/bodies.tsx LabelBody, LabelMeta): its values and what it says of its label ----
 
 /** The values a label card's table lists: those some unit got. While a run goes on, or when no value has a unit yet,
  * every value is listed. */
@@ -297,94 +302,28 @@ export function shownValues(values: readonly string[], counts: Readonly<Record<s
   return running || !some.length ? [...values] : some
 }
 
-/** the characters of a glob pattern the line under a label card's question shows whole */
+/** the characters of a glob pattern a label card's label row shows whole */
 const GLOB_SHORT = 28
 
-/** A label's file glob as the line under a card's question shows it: each pattern whole when short, else its file name
- * after `…/`; `full` is every pattern whole, for the hover. */
+/** A label's file glob as a label card's label row shows it: each pattern whole when short, else its file name after
+ * `…/`; `full` is every pattern whole, for the hover. */
 export function shortGlob(glob: string | null | undefined): { short: string; full: string } {
   const patterns = (glob ?? '').split(',').map((p) => p.trim()).filter(Boolean)
   const short = patterns.map((p) => (p.length <= GLOB_SHORT || !p.includes('/') ? p : `…/${p.slice(p.lastIndexOf('/') + 1)}`))
   return { short: short.join(', '), full: patterns.join(', ') }
 }
 
-/** Text with its percent-encoded words decoded (`%2F` as `/`), twice at most for double encoding (`%252C`); a word
- * that does not decode is left as it is. */
-export function decodePercents(text: string): string {
-  return text.replace(/\S*%[0-9A-Fa-f]{2}\S*/g, (word) => {
-    let out = word
-    for (let i = 0; i < 2 && /%[0-9A-Fa-f]{2}/.test(out); i++) {
-      try {
-        out = decodeURIComponent(out)
-      } catch {
-        break
-      }
-    }
-    return out
-  })
-}
-
-/** One example of a label value: the words it shows and, when the server found them, the words that earned the unit
- * its value (a regex's match, a span label's quote; GET /concepts/{id}/rows `match`). */
-export interface ValueExample {
-  text: string
-  match?: string
-}
-
-const shownText = (t: string): string => decodePercents(t.replace(/\s+/g, ' ').trim())
-
-/** A label row's example when the server found no match: its own words, or null where they would only show how the
- * unit begins (a whole file, a record of a `.json` document, a record cut short with `…`, words with no letter or
- * digit). */
-export function unmatchedExample(unit: string | undefined, text: string, ref?: string): ValueExample | null {
-  const t = text.trim()
-  if (wholeUnit(unit, ref) || !t || t.endsWith('…') || !/[\p{L}\p{N}]/u.test(t)) return null
-  return { text: t }
-}
-
-/** The values of a label that say nothing matched: one that begins with a negating word (`no flag`, `not a merge`,
- * `none`, `n/a`), or the second of two values. An `other …` value is not one of them. */
-export function noMatchValues(labels: readonly string[]): Set<string> {
-  return new Set(labels.filter((v, i) => /^(no|not|none|neither|n\/a)\b/i.test(v.trim()) || (labels.length === 2 && i === 1)))
-}
-
-/** A value's example candidates: a no-match value (noMatchValues) keeps only examples with the words that earned it. */
-export function exampleCandidates(value: string, noMatch: ReadonlySet<string>, xs: readonly ValueExample[]): ValueExample[] {
-  return noMatch.has(value) ? xs.filter((x) => !!x.match) : [...xs]
-}
-
-/** Whether a label's unit is a whole file or a record of a `.json` document, whose own words begin the file. */
-export const wholeUnit = (unit: string | undefined, ref?: string): boolean => unit === 'agent' || unit === 'run' || (!!ref && /\.json#/i.test(ref))
-
-/** A label card's example as it shows: whitespace collapsed, percent-encoding decoded, cut to `max` characters, and the
- * matched words split out. `match` is '' when there is none. */
-export function exampleParts(ex: ValueExample, max: number): { before: string; match: string; after: string } {
-  const text = shownText(ex.text)
-  const match = ex.match ? shownText(ex.match) : ''
-  const at = match ? text.indexOf(match) : -1
-  const cut = (t: string, n: number) => (t.length > n ? `${t.slice(0, Math.max(0, n)).trimEnd()}…` : t)
-  if (at < 0) return { before: cut(text, max), match: '', after: '' }
-  const before = text.slice(0, at)
-  const shown = cut(match, Math.max(0, max - before.length))
-  const room = max - before.length - shown.length
-  const after = shown.length < match.length ? '' : cut(text.slice(at + match.length), room)
-  return { before, match: shown, after }
-}
-
-/** One example per value for a label card: for each value, the first candidate whose words no earlier value already
- * shows. A value whose every candidate repeats another's gets none. */
-export function pickExamples(values: readonly string[], candidates: Readonly<Record<string, readonly ValueExample[]>>): Record<string, ValueExample> {
-  const out: Record<string, ValueExample> = {}
-  const seen: string[] = []
-  const words = (t: string) => shownText(t).replace(/^…|…$/g, '').trim()
-  const repeats = (t: string) => seen.some((s) => s.includes(t) || t.includes(s))
-  for (const v of values) {
-    const ex = (candidates[v] ?? []).find((c) => words(c.text) && !repeats(words(c.text)))
-    if (!ex) continue
-    out[v] = ex
-    seen.push(words(ex.text))
-  }
-  return out
+/** What a label card says of its label after its name: how the label is defined (`code`, `regex`, or `prompt` with the
+ * model it judges with, `model` as the card names it), what it ran on (its files as shortGlob writes them, else the
+ * canvas or the report; `full`, every pattern whole, for the hover) and how many units its shares are of (a trial's
+ * as `a sample of`; '' before any is labeled). Pure. */
+export function labelIdentity(k: Pick<Concept, 'kind' | 'unit' | 'glob' | 'n_labeled' | 'counts' | 'trial'>, model = ''): { how: string; where: string; full: string; units: string } {
+  const how = [k.kind, k.kind === 'prompt' && model ? model : ''].filter(Boolean).join(' · ')
+  const glob = isFilesLabel(k) ? shortGlob(k.glob) : null
+  const where = glob?.short || scopeWord(k.unit)
+  const n = labeledTotal(k)
+  const units = n > 0 ? `${k.trial ? 'a sample of ' : ''}${unitTotal(n, k.unit)}` : ''
+  return { how, where, full: glob?.full || where, units }
 }
 
 // ---- the card's history (backend notebook.stamp_edit) ----

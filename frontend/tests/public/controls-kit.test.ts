@@ -168,7 +168,7 @@ describe('Rows', () => {
     w.PARENT = PARENT
     w.CALLS = CALLS
     w.eval(`
-      window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'tool', title: 'Tool' }] })
+      window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'tool', title: 'Tool' }], initial: 'tool' })
       window.range = thimble.timeRange({ mount: '#range', times: window.CALLS.map((c) => c.t) })
       window.redraws = 0
       window.rows = thimble.rows({ mount: '#rows', fields: [{ name: 'session', title: 'Session', parentOf: (k) => window.PARENT[k] }, { name: 'tool', title: 'Tool' }], onChange: () => { window.redraws++; window.lanes.draw(window.CALLS) } })
@@ -293,7 +293,7 @@ describe('the lanes and their key', () => {
     const w = win()
     w.CALLS = CALLS
     w.eval(`
-      window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'outcome', title: 'Outcome', values: ['ok', 'error', 'denied'] }] })
+      window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'outcome', title: 'Outcome', values: ['ok', 'error', 'denied'] }], initial: 'outcome' })
       window.range = thimble.timeRange({ mount: '#range', times: window.CALLS.map((c) => c.t) })
       window.rows = thimble.rows({ mount: '#rows', fields: [{ name: 'session', title: 'Session' }] })
       window.dense = false
@@ -402,7 +402,7 @@ describe("the page's own marks in the lanes", () => {
     const w = win()
     w.CALLS = CALLS
     w.eval(`
-      window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'tool', title: 'Tool' }] })
+      window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'tool', title: 'Tool' }], initial: 'tool' })
       window.range = thimble.timeRange({ mount: '#range', times: window.CALLS.map((c) => c.t) })
       window.rows = thimble.rows({ mount: '#rows', fields: [{ name: 'session', title: 'Session' }] })
       window.heard = []
@@ -534,7 +534,8 @@ describe('the timeline on its own', () => {
     expect(doc().querySelectorAll('#lanes .thimble-lane')).toHaveLength(1)
     expect(doc().querySelector('#lanes .thimble-lane-name')).toBe(null)
     expect(doc().querySelector('#lanes')!.classList.contains('is-nameless')).toBe(true)
-    // an ISO time, seconds since 1970 and a Date each placed, in order, a few px in from the axis's edges, in gray
+    // an ISO time, seconds since 1970 and a Date each placed, in order, a few px in from the axis's edges, in the one
+    // series color (jsdom resolves no CSS variable), as a chart of one series
     const marks = [...doc().querySelectorAll('#lanes .thimble-lane-mark[data-i]')] as HTMLElement[]
     const xs = marks.map((m) => Number(m.getAttribute('x')))
     expect(w.tl.lanes[0].items.map((e: any) => e.ref)).toEqual(['a#L1', 'a#L2', 'a#L3'])
@@ -542,7 +543,7 @@ describe('the timeline on its own', () => {
     expect(xs[0]).toBeGreaterThan(2)
     expect(xs[1] - xs[0]).toBeCloseTo(xs[2] - xs[1], 0)
     expect(xs[2]).toBeLessThan(798)
-    expect(marks.every((m) => !m.style.fill)).toBe(true)
+    expect(marks.map((m) => m.style.fill)).toEqual(['var(--viz-1)', 'var(--viz-1)', 'var(--viz-1)'])
     // its axis over the lane, in hours
     const labels = texts('#lanes .thimble-lanes-axis .thimble-axis-lab')
     expect(labels.length).toBeGreaterThan(2)
@@ -755,6 +756,54 @@ describe('the side panel and the transcript', () => {
     ;(doc().querySelector('.thimble-reset') as HTMLElement).click()
     await wait()
     expect(w.side.isOpen).toBe(false)
+  })
+
+  test("with `empty`, the panel shows as the view opens with that one line until a record opens; the page's close() brings the line back, × closes it, and Reset puts the line back", async () => {
+    await load()
+    const w = win()
+    w.eval(`
+      window.colour = thimble.colorBy({ mount: '#colour', fields: [] })
+      window.closed = []
+      window.side = thimble.side({ mount: '#body', empty: 'Click a session', onClose: (ref) => window.closed.push(ref) })
+    `)
+    const panel = doc().querySelector<HTMLElement>('#body > .thimble-side')!
+    const reset = () => doc().querySelector<HTMLButtonElement>('.thimble-reset')!
+    const title = () => panel.querySelector('.thimble-side-title')!.textContent
+    await wait(60)
+    // the line, no record, nothing under it, and the view as it opens: no Reset
+    expect([panel.hidden, w.side.isOpen, w.side.isEmpty, w.side.ref, title()]).toEqual([false, false, true, null, 'Click a session'])
+    expect(panel.hasAttribute('data-empty')).toBe(true)
+    expect(panel.querySelector('.thimble-side-body')!.innerHTML).toBe('')
+    expect(doc().getElementById('body')!.classList.contains('thimble-side-open')).toBe(true)
+    expect(reset().hidden).toBe(true)
+    // a record opens in it, then the page's close() shows the line again
+    w.side.open({ title: 'Session r1', ref: 'r1/lead.jsonl#L1', html: '<p>turns</p>' })
+    expect([w.side.isOpen, w.side.isEmpty, title(), panel.hasAttribute('data-empty')]).toEqual([true, false, 'Session r1', false])
+    w.side.close()
+    expect([panel.hidden, w.side.isOpen, w.side.isEmpty, w.side.ref, title()]).toEqual([false, false, true, null, 'Click a session'])
+    expect(w.closed).toEqual([])
+    // a record open: Reset shows, and puts the line back, the page told the record closed
+    w.side.open({ title: 'Session r2', ref: 'r2/lead.jsonl#L1', html: '' })
+    await wait(60)
+    expect(reset().hidden).toBe(false)
+    reset().click()
+    await wait(60)
+    expect([w.side.isEmpty, title(), w.closed]).toEqual([true, 'Click a session', ['r2/lead.jsonl#L1']])
+    expect(reset().hidden).toBe(true)
+    // × closes the panel, its line too: a change from how the view opens, which Reset puts back; no record closed, so
+    // the page hears nothing
+    ;(panel.querySelector('.thimble-side-close') as HTMLElement).click()
+    expect([panel.hidden, w.side.isOpen, w.side.isEmpty]).toEqual([true, false, false])
+    expect(w.closed).toEqual(['r2/lead.jsonl#L1'])
+    await wait(60)
+    expect(reset().hidden).toBe(false)
+    reset().click()
+    await wait(60)
+    expect([panel.hidden, w.side.isEmpty, title()]).toEqual([false, true, 'Click a session'])
+    // without `empty` the panel is closed until a record opens
+    await load()
+    win().eval(`window.side2 = thimble.side({ mount: '#body' })`)
+    expect([doc().querySelector<HTMLElement>('#body > .thimble-side')!.hidden, win().side2.isOpen, win().side2.isEmpty]).toEqual([true, false, false])
   })
 
   test("what Reload opens on follows the side panel: the record it opened, by a click or not, and none once it closed, by hand or by the page", async () => {

@@ -224,7 +224,7 @@ describe('Color by', () => {
 
   test('the top row: Color by, the choice, its values as chips with their counts; a click turns a value\'s hue off and its records stay', async () => {
     let heard = 0
-    const colour = kit.colorBy({ fields: FIELDS, onChange: () => heard++ })
+    const colour = kit.colorBy({ fields: FIELDS, onChange: () => heard++, initial: 'kind' })
     kit.draw((d: any) => colour.draw(d))
     colour.counts({ fired: 12, resolved: 10, '': 2 })
     await tick()
@@ -255,7 +255,7 @@ describe('Color by', () => {
   })
 
   test('colorOf, a chip\'s color and a declared value\'s color beside their British names; a strip takes `color`, or a Color by of the program\'s own with colorOf', async () => {
-    const colour = kit.colorBy({ fields: [{ name: 'kind', title: 'Kind', values: [{ name: 'fired', color: 3 }, { name: 'resolved', colour: 4 }] }] })
+    const colour = kit.colorBy({ fields: [{ name: 'kind', title: 'Kind', values: [{ name: 'fired', color: 3 }, { name: 'resolved', colour: 4 }] }], initial: 'kind' })
     kit.draw((d: any) => colour.draw(d))
     colour.counts({ fired: 2, resolved: 1 })
     await tick()
@@ -269,10 +269,10 @@ describe('Color by', () => {
   })
 
   test('a chip\'s tip says what its value means; values past six share one chip, `other`, with no hue of their own', async () => {
-    const colour = kit.colorBy({ fields: FIELDS })
+    const colour = kit.colorBy({ fields: FIELDS, initial: 'kind' })
     kit.draw((d: any) => colour.draw(d))
     init({ cols: 200 })
-    const c2 = kit.colorBy({ fields: FIELDS })
+    const c2 = kit.colorBy({ fields: FIELDS, initial: 'kind' })
     kit.draw((d: any) => c2.draw(d))
     c2.counts(Object.fromEntries(['fired', 'b', 'c', 'd', 'e', 'f', 'g', 'h'].map((v, i) => [v, 20 - i])))
     await tick()
@@ -287,7 +287,7 @@ describe('Color by', () => {
 
   test('`other` with no records once the counts are in is left out, as a value with none is, unless one of its values is off', async () => {
     init({ cols: 200 })
-    const colour = kit.colorBy({ fields: FIELDS })
+    const colour = kit.colorBy({ fields: FIELDS, initial: 'kind' })
     kit.draw((d: any) => colour.draw(d))
     colour.counts(Object.fromEntries(['fired', 'b', 'c', 'd', 'e', 'f', 'g', 'h'].map((v, i) => [v, 20 - i])))
     await tick()
@@ -303,7 +303,7 @@ describe('Color by', () => {
   })
 
   test('c opens the menu: Off, the fields, then the labels; under the chosen label its definition and a link to its panel; Enter colors by it', async () => {
-    const colour = kit.colorBy({ fields: FIELDS })
+    const colour = kit.colorBy({ fields: FIELDS, initial: 'kind' })
     kit.draw((d: any) => colour.draw(d))
     await tick()
     // the top row shows Color by as a control, so the hint row leaves its key to ?
@@ -339,9 +339,75 @@ describe('Color by', () => {
     expect(sent.filter((m) => m.t === 'query').at(-1)!.labels).toEqual(['k1'])
   })
 
-  test('a label the workspace no longer has gives way to the first field', async () => {
-    init({ state: { colour: { by: 'label:gone', off: ['x'] } } })
+  test('the view opens Off without `initial`: no chips, no hue, no Reset; a field in `initial` that is none of its fields opens Off too', async () => {
     const colour = kit.colorBy({ fields: FIELDS })
+    const list = kit.list({ key: (e: any) => e.id })
+    kit.draw((d: any) => {
+      colour.draw(d)
+      list.draw(d, { items: [{ id: 1, kind: 'fired' }, { id: 2, kind: 'resolved' }], colour, row: (e: any, r: any) => r.add(e.kind) })
+    })
+    colour.counts({ fired: 12, resolved: 10 })
+    await tick()
+    expect(text()[0]).toBe('  Color by  Off')
+    expect([colour.off, colour.by, colour.picks, colour.values, colour.query(), colour.colorOf('fired')]).toEqual([true, null, [], [], null, null])
+    expect(last().lines.flat().some((s: any) => kit.SERIES.includes(s.fg))).toBe(false)
+    expect(kit.changed()).toBe(false)
+    await key('c')
+    expect(menu().map((r: string) => r.trim().split(/\s{2,}/)[0]).slice(0, 3)).toEqual(['❯ ● Off', 'fields', '○ Kind'])
+    init()
+    expect(kit.colorBy({ fields: FIELDS, initial: 'speaker' }).off).toBe(true)
+  })
+
+  test('a choice kept before the analyst ever chose one (an older thimble kept it at each opening) is not kept: the view opens as it says', async () => {
+    init({ state: { colour: { by: 'field:kind', picks: ['field:kind'], off: ['fired'], seen: [] } } })
+    expect(kit.colorBy({ fields: FIELDS }).off).toBe(true)
+    init({ state: { colour: { by: 'field:kind', picks: ['field:kind'], off: ['fired'], seen: [] } } })
+    const c2 = kit.colorBy({ fields: FIELDS, initial: 'source' })
+    expect([c2.by, c2.isOn('alert')]).toEqual([{ field: 'source', title: 'Source' }, true])
+    // a choice the analyst made is kept, and Reset gives the view its own again, kept as not chosen
+    init({ state: { colour: { by: 'field:kind', picks: ['field:kind'], off: ['fired'], seen: [], chosen: true } } })
+    const c3 = kit.colorBy({ fields: FIELDS })
+    expect([c3.by, c3.isOn('fired')]).toEqual([{ field: 'kind', title: 'Kind' }, false])
+    kit.reset()
+    expect(c3.off).toBe(true)
+    expect(kit.__driver.state.kept.colour).toEqual({ by: 'off', picks: [], off: [], seen: [] })
+  })
+
+  test('`initial` as {field, on}: only those values take a hue, the others dim as values turned off; a chip turns one on, and Reset puts back the view as it opens', async () => {
+    init({ cols: 120 })
+    let heard = 0
+    const colour = kit.colorBy({ fields: FIELDS, initial: { field: 'kind', on: ['fired'] }, onChange: () => heard++ })
+    kit.draw((d: any) => colour.draw(d))
+    colour.counts({ fired: 12, resolved: 10, '': 2 })
+    await tick()
+    expect(text()[0]).toMatch(/^ {2}Color by {2}Kind {2}● fired 12 {2}○ resolved 10 {2}○ no kind 2$/)
+    expect([colour.isOn('fired'), colour.isOn('resolved'), colour.isOn('timeout'), colour.colorOf('fired'), colour.colorOf('resolved')]).toEqual([true, false, false, kit.SERIES[0], null])
+    expect(colour.dot('resolved')).toEqual({ s: '●', d: true })
+    expect(colour.query()).toEqual({ field: 'kind' })
+    expect(kit.changed()).toBe(false)
+    // resolved turned on: a change from how the view opens
+    await click('resolved')
+    expect([colour.isOn('resolved'), colour.isOn('fired'), heard]).toEqual([true, true, 1])
+    expect(text()[0]).toMatch(/reset$/)
+    // off again: as the view opens
+    await click('resolved')
+    expect(kit.changed()).toBe(false)
+    // another field chosen colors every value of it; Reset puts back Kind with fired alone
+    colour.choose('source')
+    colour.counts({ alert: 3, deploy: 1 })
+    await tick()
+    expect(colour.values.every((v: any) => v.on)).toBe(true)
+    expect(kit.changed()).toBe(true)
+    await key('r')
+    colour.counts({ fired: 12, resolved: 10, '': 2 })
+    await tick()
+    expect(colour.by).toEqual({ field: 'kind', title: 'Kind' })
+    expect(colour.values.map((v: any) => [v.name, v.on])).toEqual([['fired', true], ['resolved', false], ['no kind', false]])
+  })
+
+  test('a label the workspace no longer has gives way to how the view opens', async () => {
+    init({ state: { colour: { by: 'label:gone', off: ['x'], chosen: true } } })
+    const colour = kit.colorBy({ fields: FIELDS, initial: 'kind' })
     expect(colour.by).toEqual({ field: 'kind', title: 'Kind' })
     expect(colour.query()).toEqual({ field: 'kind' })
     expect(colour.values.every((v: any) => v.on)).toBe(true)
@@ -368,8 +434,12 @@ describe('Color by', () => {
     await tick()
     expect(colour.by).toEqual({ label: 'k2', title: 'Charged twice' })
     expect(heard).toBe(1)
+    // opened again on what thimble kept, the view keeps the label turned on last, as the browser's does
+    const keptNow = JSON.parse(JSON.stringify(kit.__driver.state.kept))
+    init({ labels: ON.map((l) => ({ ...l, on: true })), state: keptNow })
+    expect(kit.colorBy({ fields: FIELDS }).by).toEqual({ label: 'k2', title: 'Charged twice' })
     // another view opening keeps what it saw: nothing new is on, so its choice stays
-    init({ labels: ON.map((l) => ({ ...l, on: true })), state: { colour: { by: 'field:kind', off: [], seen: ['k1', 'k2'] } } })
+    init({ labels: ON.map((l) => ({ ...l, on: true })), state: { colour: { by: 'field:kind', off: [], seen: ['k1', 'k2'], chosen: true } } })
     expect(kit.colorBy({ fields: FIELDS }).by).toEqual({ field: 'kind', title: 'Kind' })
   })
 
@@ -411,7 +481,7 @@ describe('Color by', () => {
   test('the menu: in a frame, the chosen field\'s values with their dots, the others\' in words, those of a field with none declared from the records the list drew; what it is said once', async () => {
     init({ cols: 90, rows: 24 })
     const fields = [{ name: 'kind', title: 'Kind', description: 'What happened' }, { name: 'service', title: 'Service', description: 'The service it is about' }]
-    const colour = kit.colorBy({ fields })
+    const colour = kit.colorBy({ fields, initial: 'kind' })
     const list = kit.list({ key: (e: any) => e.id })
     const items = [{ id: 1, kind: 'fired', service: 'web' }, { id: 2, kind: 'resolved', service: 'payments' }, { id: 3, kind: 'fired', service: 'payments' }]
     kit.draw((d: any) => {
@@ -456,7 +526,7 @@ describe('Color by takes several choices', () => {
 
   test('Space checks a second choice, a track beside the list\'s in its own hues; Enter takes one alone', async () => {
     init({ cols: 80, rows: 16 })
-    const colour = kit.colorBy({ fields: FIELDS })
+    const colour = kit.colorBy({ fields: FIELDS, initial: 'kind' })
     const list = kit.list({ key: (e: any) => e.id })
     kit.draw((d: any) => {
       colour.draw(d)
@@ -489,7 +559,7 @@ describe('Color by takes several choices', () => {
   })
 
   test("each row has a mark per choice, as the browser's bands on its edge: its value's `●` of the first, then of each past it, a space where it has none; Off has one dim mark", async () => {
-    init({ cols: 80, rows: 16, state: { colour: { by: 'field:kind', picks: ['field:kind', 'field:service'], off: [], seen: [] } } })
+    init({ cols: 80, rows: 16, state: { colour: { by: 'field:kind', picks: ['field:kind', 'field:service'], off: [], seen: [], chosen: true } } })
     const colour = kit.colorBy({ fields: FIELDS })
     const list = kit.list({ key: (e: any) => e.id })
     const items = [{ id: 1, kind: 'fired', service: 'db' }, { id: 2, kind: 'fired', service: 'web' }, { id: 3, kind: 'resolved' }, { id: 4, service: 'web' }]
@@ -524,7 +594,7 @@ describe('Color by takes several choices', () => {
   })
 
   test('with Off, the track and every mark the kit draws carry no hue, a label on or not', async () => {
-    init({ cols: 80, rows: 16, labels: [{ id: 'k1', name: 'Asks', kind: 'regex', values: [{ name: 'yes', highlight: true }], here: true, on: true }], state: { colour: { by: 'off', picks: [], off: [], seen: ['k1'] } } })
+    init({ cols: 80, rows: 16, labels: [{ id: 'k1', name: 'Asks', kind: 'regex', values: [{ name: 'yes', highlight: true }], here: true, on: true }], state: { colour: { by: 'off', picks: [], off: [], seen: ['k1'], chosen: true } } })
     const colour = kit.colorBy({ fields: FIELDS })
     const list = kit.list({ key: (e: any) => e.id })
     kit.draw((d: any) => {
@@ -541,7 +611,7 @@ describe('Color by takes several choices', () => {
 
   test("a group's mix: its records' share of each value in the value's hue, a value turned off dim, none for Off", async () => {
     init({ cols: 80 })
-    const colour = kit.colorBy({ fields: FIELDS })
+    const colour = kit.colorBy({ fields: FIELDS, initial: 'kind' })
     colour.counts({ fired: 3, resolved: 1 })
     const runs = colour.mix({ fired: 3, resolved: 1, '': 4 }, 8)
     expect(runs.map((r: any) => r.s.length)).toEqual([3, 1, 4])
@@ -560,7 +630,7 @@ describe('Color by takes several choices', () => {
   test('"+N" opens the values the row has no room for, each with its dot, its toggle and what it means', async () => {
     init({ cols: 46, rows: 20 })
     const fields = [{ name: 'kind', title: 'Kind', meanings: { 'paged someone': 'the alert paged the on-call' } }]
-    const colour = kit.colorBy({ fields })
+    const colour = kit.colorBy({ fields, initial: 'kind' })
     kit.draw((d: any) => colour.draw(d))
     colour.counts({ fired: 9, resolved: 8, 'paged someone': 7, acknowledged: 6 })
     await tick()
@@ -860,7 +930,7 @@ describe('the list', () => {
   })
 
   test('the chosen row is in the accent across its whole width, its dim columns too; a value\'s hue keeps its own', async () => {
-    const colour = kit.colorBy({ fields: [{ name: 'kind', title: 'Kind' }] })
+    const colour = kit.colorBy({ fields: [{ name: 'kind', title: 'Kind' }], initial: 'kind' })
     const list = kit.list({ key: (e: any) => e.id })
     kit.draw((d: any) => list.draw(d, { items, colour, row: (e: any, r: any) => r.add(String(e.id), { d: true }).gap().add(e.text) }))
     colour.counts({ fired: 26, resolved: 14 })
@@ -870,7 +940,7 @@ describe('the list', () => {
     for (const s of chosen.filter((x: any) => x.s.trim() && x.s !== '●' && x.s !== '❯ ' && x.s !== '▌')) expect([s.s, s.fg, s.d]).toEqual([s.s, 'suggestion', undefined])
     // a strip's cell whose value has no hue of its own (past six) is dim, never the text's color
     const sc = { cols: 3, binOf: (t: number) => t, step: 1 }
-    const c2 = kit.colorBy({ fields: [{ name: 'k', title: 'K' }] })
+    const c2 = kit.colorBy({ fields: [{ name: 'k', title: 'K' }], initial: 'k' })
     c2.counts(Object.fromEntries(['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((v, i) => [v, 10 - i])))
     expect(kit.strip(sc, [{ t: 0, k: 'g' }], { value: (it: any) => it.k, colour: c2 })[0]).toMatchObject({ d: true })
   })
@@ -899,7 +969,7 @@ describe('the list', () => {
 
   test("a list many times taller than its rows keeps one track column at its right edge, as the browser's one strip, with no zoomed column beside it", async () => {
     init({ rows: 10 })
-    const colour = kit.colorBy({ fields: [{ name: 'kind', title: 'Kind' }] })
+    const colour = kit.colorBy({ fields: [{ name: 'kind', title: 'Kind' }], initial: 'kind' })
     const list = kit.list({ key: (e: any) => e.id })
     const many = Array.from({ length: 400 }, (_, i) => ({ id: i, kind: i < 200 ? 'fired' : 'resolved', text: `event ${i}` }))
     kit.draw((d: any) => list.draw(d, { items: many, colour, row: (e: any, r: any) => r.add(e.text) }))

@@ -11,7 +11,7 @@ and answers the exact Agent call, which main makes and auto mode judges (start_t
 is prepared the same way, and main gets the call in a `start_agent` event (tools._ask_main), since a fork may not start
 subagents. While another ticket runs, main's ticket waits for the analyst's Start (`held`), since no ticket starts
 without a click or main's call. Preparing cuts a git worktree off the live branch (worktree_path, under worktrees_dir,
-the one folder of thimble's home that main's fence lets main's Bash and its subagents write), takes the before shot, and
+in thimble's home), takes the before shot, and
 opens the ticket's thread, which the agent's chat takes over (subagents.ensure_chat, `adopt`). The agent edits the
 worktree, checks its change with the `ticket_checks` tool as often as it wants, and calls `finish_ticket`, where the
 server commits every change in the worktree to the ticket's branch and runs the gates of record, counting the attempts
@@ -36,32 +36,40 @@ short, ends stopped with Retry.
 
 View builds. A view proposal is built at once by a `thimble:view-builder`, a subagent of the analyst's Claude Code
 session (subagents.py), at most VIEW_POOL at once (queue_view); the others wait queued, and a start Claude Code refuses
-at its subagent limit goes back to the queue. A build is part of the start that asked for it: an orientation's proposal
-a follow-on start of the orientation's, Build, Retry and a change asked for in the browser clicks, each started through
-thimble's plugin module; main's propose_view gives main the exact Agent call (start_build), and a thread's fork's
-propose_view or file_dev_ticket on a view gives it to main in a `start_agent` event (tools._ask_main). The builder
-writes the view's three files in the view's folder, checks its draft with the `view_check` tool as often as it wants,
-and calls `finish_view`, where the server runs the gates of record and counts its attempts (view_tools.py). Its end
-(build_ended, _settle) is the backstop: a builder that ended without a pass gets the gate once; an orientation's
-proposal that still fails gets up to VIEW_REPAIRS new builders started with what failed, and then fails with Retry,
-which the orientation's thread says (_repairs_failed); a view the analyst asked for fails with Retry at once. A change to a built view goes to the view's last builder as a message when
-it can still be reached in main's session, so it keeps its context, else to a new builder; a change that fails leaves
-the view as it was (views.end_revision). A pass starts the view's review (view_review.py). The orientation's Stop stops
-the builds of the views it proposed (stop_orientation_views); the Stop in a build's thread, or on its builder, ends the
-build failed with Retry (views.stop_build, _view_stopped). Main's quit ends every builder with main, and their views
-fail with MAIN_ENDED and Retry; nothing starts again by itself. Where an active extension runs the dev agent with a
-program (roles.py), that program builds the view instead, turn by turn (program_build), checked the same way.
+at its subagent limit goes back to the queue. A build is part of the start that asked for it: Build, Retry and a change
+asked for in the browser are clicks, and a repair, or the build of a proposal an orientation from before 0.8.0 left, is
+a follow-on start, each started through thimble's plugin module; main's propose_view gives main the exact Agent call
+(start_build), and a thread's fork's propose_view or file_dev_ticket on a view gives it to main in a `start_agent` event
+(tools._ask_main). The builder writes the view's three files in the view's folder, checks its draft with the
+`view_check` tool as often as it wants, and calls `finish_view`, where the server runs the gates of record and counts
+its attempts (view_tools.py). Its end (build_ended, _settle) is the backstop: a builder that ended without a pass gets
+the gate once; a proposal the analyst did not ask for, such as an orientation's from before 0.8.0, that still fails gets
+up to VIEW_REPAIRS new builders started with what failed, and then fails with Retry, which the orientation's thread says
+(_repairs_failed); a view the analyst asked for fails with Retry at once. A change to a built view goes to the view's
+last builder as a message when it can still be reached in main's session, so it keeps its context, else to a new
+builder; a change that fails leaves the view as it was (views.end_revision). A pass starts the view's review
+(view_review.py). The orientation's Stop stops the builds of the views an orientation from before 0.8.0 proposed
+(stop_orientation_views); the Stop in a build's thread, or on its builder, ends the build failed with Retry
+(views.stop_build, _view_stopped). Main's quit ends every builder with main, and their views fail with MAIN_ENDED and
+Retry; nothing starts again by itself. Where an active extension runs the dev agent with a program (roles.py), that
+program builds the view instead, turn by turn (program_build), checked the same way.
 
-Permissions. A ticket's agent and a view builder are subagents of main: they run in main's permission mode and fence,
-and ask as main does, in the analyst's terminal. thimble's own questions about its code stay on the ticket's card, in
+Notices. A view whose build failed after the repairs it gets, a change to a view that failed, a build that did not
+start, and a code ticket that failed are told in the foreground with their fix (notices.post, under the agent's key
+notices.agent_key: Retry on a view), since the analyst may be in another chat; a build that starts or passes, and a
+ticket that starts or is applied, clear it (_view_notice, _ticket_notice). Main's quit and the analyst's Stop tell
+nothing.
+
+Permissions. A ticket's agent and a view builder are subagents of main: they run in main's permission mode, Bypass
+included, and ask as main does, in the analyst's terminal. thimble's own questions about its code stay on the ticket's card, in
 every mode, Bypass included (CODE_TOOL): its chat hosts the ticket's key (agent_session.host) for them alone, and a
 question nobody answers within the card's wait (userconf.card_wait_s) is a no.
 
 Containment. A ticket is contained where thimble's sandbox runtime works (ticket_box): its gates, and the server that
 shows its before and after shots, run in the ticket's box, with no network, no home folder and writes only to the
 worktree and the ticket's cache folder, and the server's git commands in the worktree run hardened (WORKTREE_GIT). The
-agent's own Bash runs in main's sandbox, which writes the worktrees and not the live checkout or its git folder, so only
-the server commits to the ticket's branch (commit_worktree) and moves it. Its code first runs outside a sandbox once
+agent's own Bash runs as main's does; its prompt tells it to change only the worktree, and the server commits to the
+ticket's branch (commit_worktree) and moves it. Its code first runs outside a sandbox once
 merged, so thimble asks the analyst, in every mode, just before the merge (APPLY_QUESTION, on the card; `thimble fix` in
 the terminal). The merge takes the commit that passed, by its id (the ticket's `change`). Anything but an Allow ends
 the ticket stopped with its branch kept. Where the box can't run, the ticket runs its gates on the validation stack,
@@ -70,7 +78,7 @@ outside the sandbox, so thimble also asks before it starts (CODE_QUESTION); a no
 thimble's config. `thimble fix`'s session runs with the dev agent's `agents.dev` settings (userconf.py, dev_config) and
 the dev row's fast mode; agent_session's module note says what the config adds. Its Bash runs in the sandbox where it
 can run, and its sandbox also writes what a commit in its worktree writes into the checkout's git folder (ticket_fence).
-A ticket's agent and a view builder run inside main's fence, on the dev agent's model and effort unless their run names
+A ticket's agent and a view builder run as main's subagents, on the dev agent's model and effort unless their run names
 its own, and without web tools while the dev agent's `web` is off (subagents.roles); Claude Code gives a subagent no
 fast mode of its own.
 """
@@ -79,6 +87,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import fcntl
+import hmac
 import json
 import logging
 import os
@@ -92,7 +101,6 @@ import sys
 import tempfile
 import threading
 import time
-import urllib.request
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -123,6 +131,7 @@ STACK_UI_PORT = int(os.environ.get("THIMBLE_STACK_UI_PORT") or "5301")
 STACK_ENABLED = os.environ.get("THIMBLE_DEV_STACK", "1").strip().lower() not in ("0", "false", "no", "off")
 STACK_WAIT_S = 90
 SHOT_TIMEOUT_S = 90
+SHOT_TOKEN_ENV = "THIMBLE_SHOT_TOKEN"  # the shot token scripts/ui_shot.mjs sends with the page's reads (run_shot)
 GATE_TIMEOUT_S = 900
 # The tools `thimble fix`'s session uses without a permission request, since nobody can answer one: its file tools,
 # Bash, skills and workflows (module note, `thimble fix`). The session has every tool of a default Claude Code session
@@ -137,7 +146,8 @@ POLL_S = float(os.environ.get("THIMBLE_DEV_POLL_S", "3") or "3")  # between two 
 UNLISTED_POLLS = 10  # polls a session's state may be unknown before the run gives up on it
 LOOPBACK = {"127.0.0.1", "::1", "localhost", "testclient"}
 MAX_ATTEMPTS = max(1, int(os.environ.get("THIMBLE_DEV_MAX_ATTEMPTS", "3") or "3"))
-# the new builders an orientation's view gets after a builder's attempts ran out, each told what failed (_settle)
+# the new builders a view the analyst did not ask for gets after a builder's attempts ran out, each told what failed
+# (_settle)
 VIEW_REPAIRS = max(0, int(os.environ.get("THIMBLE_VIEW_REPAIRS", "2") or "2"))
 # A turn runs until its session ends it or the analyst stops it: once the session has shown no activity for
 # QUIET_NOTE_S (nothing new in its transcript or its subagents'), its thread says so (QUIET_LINE), and again each time
@@ -537,6 +547,7 @@ def _fail_now(t: dict[str, Any], why: str) -> dict[str, Any]:
     _close_chat(rec, "failed", why)
     _chip(rec, f"{_label(rec)} failed: {why}", "failed")
     _ticket_event(rec, "failed")
+    _ticket_notice(rec)
     return rec
 
 
@@ -605,7 +616,7 @@ class GitError(RuntimeError):
     pass
 
 
-# A ticket's agent writes its worktree (main's fence), and `thimble fix`'s session also the worktree's own git folder
+# A ticket's agent writes its worktree, and `thimble fix`'s session also the worktree's own git folder
 # (ticket_fence), so the server's git commands there run with no fsmonitor command and no hooks, with the git folders named from the live checkout's side
 # (GIT_DIR, GIT_COMMON_DIR, GIT_WORK_TREE) so that no `.git` file or commondir the session wrote is read, and only while
 # the worktree still points where it should (_check_worktree).
@@ -615,8 +626,8 @@ WORKTREE_MOVED = ("the ticket's worktree no longer points at the live checkout's
 
 
 def _in_worktrees(cwd: Path) -> bool:
-    """Whether `cwd` is in the folder of the tickets' worktrees, by its name or by where it leads. Main's fence lets
-    main's Bash and its subagents write that folder, so a link there in place of a worktree is in it too: its git
+    """Whether `cwd` is in the folder of the tickets' worktrees, by its name or by where it leads. Main's Bash and its
+    subagents may write that folder, so a link there in place of a worktree is in it too: its git
     commands are checked (_check_worktree), and never run in the folder the link leads to, such as the live checkout."""
     trees = worktrees_dir()
     try:
@@ -703,8 +714,7 @@ def dev_home() -> Path:
 
 
 def worktrees_dir() -> Path:
-    """The tickets' worktrees and nothing else, so main's fence lets main's Bash and its subagents write this folder
-    (cli.main_fence) and never the boxes beside it."""
+    """The tickets' worktrees and nothing else, apart from the boxes beside them, which no agent writes."""
     return dev_home() / "trees"
 
 
@@ -1056,7 +1066,7 @@ def _free_port() -> int:
 def _health(url: str, timeout: float = 1.0) -> dict[str, Any] | None:
     """/api/health's body at `url` when it answers ok, else None. Blocking."""
     try:
-        with urllib.request.urlopen(f"{url}/api/health", timeout=timeout) as r:
+        with config.LOOPBACK.open(f"{url}/api/health", timeout=timeout) as r:
             body = json.loads(r.read() or b"{}")
     except Exception:  # noqa: BLE001
         return None
@@ -1190,6 +1200,11 @@ def stack_script() -> Path:
     return REPO / "scripts" / "dev" / "dev_stack.sh"
 
 
+def stack_home() -> Path:
+    """The validation stack's own thimble home, where dev_stack.sh writes its server.json with its token."""
+    return dev_home() / "stack.home"
+
+
 async def start_stack(tid: str, wt: Path, workspace: str | None) -> dict[str, str] | None:
     """`scripts/dev/dev_stack.sh start` on the worktree (8301/5301, a snapshot copy of the workspace). None when disabled
     or unavailable. Seam for tests."""
@@ -1227,10 +1242,12 @@ def shot_script() -> Path:
 async def run_shot(url: str, out: Path, selector: str | None = None, *, info_out: Path | None = None,
                    viewport: str | None = None, scale: float | None = None, storage: dict[str, str] | None = None,
                    press: list[str] | None = None, wait_ms: int | None = None, settle: bool = False,
-                   offline: bool = False, own_origin: bool = False) -> int:
+                   offline: bool = False, own_origin: bool = False, read_token: str | None = None) -> int:
     """`node scripts/ui_shot.mjs`: 0 ok, 2 selector not found (the viewport is written instead), 1 error, -1 timeout.
-    Options map to the script's options of the same names. headless.Missing when the browser is missing, which stays so
-    for the rest of the server run."""
+    Options map to the script's options of the same names. `read_token` is a shot token (hook_auth.mint_shot) of the
+    server the page reads from, which the script sends with the page's reads of that server's API; it goes in the
+    script's environment (SHOT_TOKEN_ENV), never on its command line, which other accounts can see. headless.Missing
+    when the browser is missing, which stays so for the rest of the server run."""
     path = headless.launch(headless.PAGES)
     if path is None or headless.missing(headless.PAGES):
         raise headless.Missing(headless.missing(headless.PAGES))
@@ -1251,6 +1268,9 @@ async def run_shot(url: str, out: Path, selector: str | None = None, *, info_out
     if wait_ms is not None:
         cmd += ["--wait", str(int(wait_ms))]
     env = {**os.environ, **({userconf.BROWSER_ENV: path} if path else {})}
+    env.pop(SHOT_TOKEN_ENV, None)
+    if read_token:
+        env[SHOT_TOKEN_ENV] = read_token
     proc = await asyncio.create_subprocess_exec(*cmd, cwd=str(REPO), stdout=asyncio.subprocess.PIPE,
                                                 stderr=asyncio.subprocess.PIPE, env=env)
     try:
@@ -1284,10 +1304,42 @@ def target_selector(target: dict[str, Any] | None) -> str | None:
     return str(t.get("stable_selector") or t.get("selector") or "") or None
 
 
+def shot_token(api: str, home: Path) -> str:
+    """A shot token (hook_auth.mint_shot) from the server at `api`, which a page shot of that server's UI needs for its
+    reads (LocalReadGuard): its POST /api/ui/shot, proven with the token in `home`/server.json as the CLI proves one,
+    and its answer's proof checked. '' when there is no token, the server answers otherwise (a 404 from a tree older
+    than the route) or proves nothing back, so the shot goes without one."""
+    import urllib.request  # noqa: PLC0415
+
+    try:
+        state = json.loads((home / "server.json").read_text("utf-8"))
+    except (OSError, ValueError):
+        return ""
+    tok = state.get("token") if isinstance(state, dict) else None
+    if not isinstance(tok, str) or not tok:
+        return ""
+    nonce = hook_auth.new_nonce()
+    url = f"{api.rstrip('/')}/api/ui/shot"
+    req = urllib.request.Request(url, data=b"{}", method="POST",
+                                 headers={"Content-Type": "application/json",
+                                          **hook_auth.headers(tok, hook_auth.port_of(url), nonce)})
+    try:
+        with config.LOOPBACK.open(req, timeout=5.0) as r:
+            proof = r.headers.get(hook_auth.PROOF_HEADER, "")
+            body = json.loads(r.read() or b"{}")
+    except Exception:  # noqa: BLE001 — an HTTP error (a 404 from an older tree) or no answer: no token
+        return ""
+    if not hmac.compare_digest(proof.encode(), hook_auth.sign(tok, "server", nonce).encode()):
+        return ""
+    got = body.get("token") if isinstance(body, dict) else None
+    return got if isinstance(got, str) else ""
+
+
 async def _take_shot(t: dict[str, Any], run_log: Log, phase: str, base_url: str | None, *,
-                     own_origin: bool = False) -> str | None:
+                     own_origin: bool = False, api: str | None = None, home: Path | None = None) -> str | None:
     """The before or after shot of the ticket's target on the stack (`own_origin` for a server in the ticket's box,
-    whose page then reaches nothing but that server); the file name stored on the ticket, or None."""
+    whose page then reaches nothing but that server); the file name stored on the ticket, or None. `api` and `home`
+    name the server the page reads from and its thimble home, whose shot token (shot_token) the page's reads carry."""
     if not base_url:
         return None
     selector = target_selector(t.get("target"))
@@ -1296,7 +1348,10 @@ async def _take_shot(t: dict[str, Any], run_log: Log, phase: str, base_url: str 
     d.mkdir(parents=True, exist_ok=True)
     out = d / f"{phase}.png"
     try:
-        code = await run_shot(url, out, selector, own_origin=own_origin)
+        tok = await asyncio.to_thread(shot_token, api, home) if api and home is not None else ""
+        if api and not tok:
+            log.info("%s shot of ticket %s: the server at %s gave no shot token; shot without one", phase, t["id"], api)
+        code = await run_shot(url, out, selector, own_origin=own_origin, read_token=tok or None)
     except Exception as e:  # noqa: BLE001
         run_log.stage(f"{phase} shot failed: {type(e).__name__}: {e}")
         return None
@@ -1942,6 +1997,9 @@ APPLY_UNANSWERED = "not applied because nobody answered within {wait}. The chang
 # where the ticket's checks can't run in a box (ticket_box.problem), the question comes before the ticket starts too
 CODE_QUESTION = ("This edits thimble's own code, which then runs outside the sandbox (its test server, its checks and "
                  "git). Allow?")
+# what `thimble fix` asks in the terminal before it starts where its session has no sandbox (cli.fix_refusal)
+FIX_QUESTION = ("thimble fix runs a Claude Code session that runs commands and edits thimble's code without asking you, "
+                "and here it has no sandbox. Allow?")
 CODE_WHY = ("The ticket's checks can't run in a sandbox here ({why}), so thimble asks this before every code ticket, in "
             "every permission mode. Unanswered, the ticket is canceled after {wait}.")
 CODE_NOT_ALLOWED = "the analyst did not allow it to edit thimble's own code, so it did not start"
@@ -2070,7 +2128,7 @@ async def _preview_shot(t: dict[str, Any], run_log: Log, phase: str, box: ticket
         run_log.stage(f"no {phase} shot: the ticket's server did not start in the sandbox ({last_error_line(str(e))})")
         return None
     try:
-        return await _take_shot(t, run_log, phase, url, own_origin=True)
+        return await _take_shot(t, run_log, phase, url, own_origin=True, api=url, home=Path(env["THIMBLE_HOME"]))
     finally:
         await preview.stop()
 
@@ -2231,7 +2289,8 @@ async def _prepare_and_start(run: Run, t: dict[str, Any], route: str, call: str 
         stack = await start_stack(tid, wt, c)
         run_log.stage(f"validation stack {'up at ' + stack['ui'] if stack else 'not available'}")
         rec = _update(tid, stack=stack) or rec
-        before_shot = await _take_shot(rec, run_log, "before", stack["ui"] if stack else None)
+        before_shot = await _take_shot(rec, run_log, "before", stack["ui"] if stack else None,
+                                       api=(stack or {}).get("api"), home=stack_home())
     values = subagents.values_for(c, TICKET_ROLE, rec.get("values") or None)
     rec = _update(tid, values=values) or rec
     task = build_ticket_task(rec, worktree=wt, work=work, before_shot=before_shot, in_box=in_box, stack=stack)
@@ -2324,6 +2383,9 @@ def ticket_started(c: str, run: Any, req: dict[str, Any]) -> None:
     rec = _update(tid, agent_id=run.agent_id, chat=run.chat or t.get("chat"), request=None,
                   values=run.values or t.get("values")) or t
     _ticket_event(rec, "running")
+    from . import notices  # noqa: PLC0415
+
+    notices.cleared(c, run.key)
 
 
 def ticket_refused(c: str, req: dict[str, Any]) -> None:
@@ -2459,7 +2521,8 @@ async def _settle_ticket(run: Run, t: dict[str, Any], agent_id: str, status: str
         if box is not None:
             after = await _preview_shot(t, run_log, "after", box, touched)
         else:
-            after = await _take_shot(t, run_log, "after", (t.get("stack") or {}).get("ui"))
+            after = await _take_shot(t, run_log, "after", (t.get("stack") or {}).get("ui"),
+                                     api=(t.get("stack") or {}).get("api"), home=stack_home())
         before = (_get(tid) or t).get("before_shot")
         if before and after:
             differ = (shots_dir(tid) / before).read_bytes() != (shots_dir(tid) / after).read_bytes()
@@ -2653,6 +2716,34 @@ def _finish(rec: dict[str, Any], summary: str | None) -> None:
         why = str(rec.get("error") or "no reason given")
         _chip(rec, f"{_label(rec)}: {why}" if why.startswith(status) else f"{_label(rec)} {status}: {why}", status)
     _ticket_event(rec, status)
+    _ticket_notice(rec)
+
+
+# a code ticket's end the notices tell (module note, notices), by its status: {subject} the ticket, {why} the reason
+TICKET_TEXTS = {"failed": "{subject} failed: {why}.", "needs manual merge": "{subject} needs a manual merge: {why}.",
+                "rolled back": "{subject} was rolled back: {why}."}
+
+
+def _ticket_notice(rec: dict[str, Any]) -> None:
+    """A code ticket ended: a failure is told in the foreground, with Open on its thread, and an apply clears the
+    ticket's notice. A ticket with no workspace (`thimble fix`) tells the terminal itself. Never raises."""
+    from . import notices  # noqa: PLC0415
+
+    c, status = rec.get("workspace"), str(rec.get("status") or "")
+    if not c:
+        return
+    key = ticket_key(str(rec["id"]))
+    try:
+        if status == "applied":
+            notices.cleared(str(c), key)
+        elif status in TICKET_TEXTS:
+            title = str(rec.get("title") or "untitled")
+            name, subject = notices.who("dev-ticket", f"#{rec['n']} ({title})" if rec.get("n") else title)
+            words, fix = notices.reason(rec.get("error") or "no reason was given")
+            notices.post(str(c), kind="agent", text=TICKET_TEXTS[status].format(subject=subject, why=words), agent=name,
+                         chat=str(rec.get("chat") or "") or None, action=fix, key=notices.agent_key(key))
+    except Exception:  # noqa: BLE001 — the ticket has ended either way
+        log.exception("the end of ticket %s was not told", rec.get("id"))
 
 
 async def _roll_back(tid: str, why: str, run_log: Log) -> str | None:
@@ -2831,11 +2922,12 @@ _no_module_looks: dict[str, int] = {}
 # (workspace, slug) that recover_views queued again after a restart: it starts only in the main session that queued it
 _recovered: set[tuple[str, str]] = set()
 VIEW_STOPPED = "The build was stopped."  # a build the analyst stopped: its chat's end and its proposal's error
-ORIENTATION_STOPPED = "the orientation was stopped"  # the builds of the views an orientation proposed (stop_orientation_views)
+# the builds of the views an orientation from before 0.8.0 proposed (stop_orientation_views)
+ORIENTATION_STOPPED = "the orientation was stopped"
 WORKSPACE_CLOSED = "the workspace was archived"  # the builds of a workspace that is archived or reset (stop_views)
 # why a view's build stopped that is no failure of it: a change, a replacement or a deletion that takes over
 TAKEN_OVER = ("revised", "replaced", "deleted", WORKSPACE_CLOSED)
-# the stage line of a repair: an orientation's build that ran out of attempts starts again with a new builder
+# the stage line of a repair: a build nobody asked for that ran out of attempts starts again with a new builder
 REPAIR_LINE = "the view did not pass, so a new builder builds it again from what failed (repair {n} of {of})"
 UNCHANGED_LINE = "the builder changed none of the view's files"
 ORPHANED_LINE = "the build ended while thimble's server was not running"
@@ -3023,9 +3115,7 @@ def change_text(c: str, prop: dict[str, Any]) -> str:
     request = str(prop.get("change") or "").strip()
     return prompts.render("dev-view-change", {
         "name": str(prop.get("name") or prop["slug"]),
-        "description": str(prop.get("why") or ""),
-        "claims": ", ".join(prop.get("claims") or []),
-        "spec": views.spec_lines(prop),
+        "proposal": views.proposal_lines(prop),
         "request": fenced("the analyst's request", request) if request else "",
         "folder": str(views.views_dir(c) / prop["slug"]),
     })
@@ -3169,6 +3259,7 @@ def build_started(c: str, run: Any, req: dict[str, Any]) -> None:
                                  session=None, session_id=None, values=run.values or None)
     if prop is not None:
         views._emit(c, slug, "building", chat=run.chat)
+    _view_cleared(c, slug)
 
 
 def build_refused(c: str, req: dict[str, Any]) -> None:
@@ -3203,6 +3294,7 @@ def build_refused(c: str, req: dict[str, Any]) -> None:
     else:
         views.update_proposal(c, slug, status="failed", error=reason[:ERROR_CHARS], refused=refused)
         views._emit(c, slug, "failed", chat=prop.get("chat"), refused=refused)
+        _view_notice(c, prop or {"slug": slug}, BUILD_REFUSED_TEXT, reason, chat=prop.get("chat"))
     _start_views()
 
 
@@ -3229,6 +3321,7 @@ def register_pass(c: str, slug: str, agent_id: str | None) -> dict[str, Any]:
     views.update_proposal(c, slug, changed=None, change=None, revision=None, failed_change=None, last_report=None,
                           finish={"agent": agent_id, "result": "pass", "version": view.get("version")})
     views.drop_built_copy(c, slug)
+    _view_cleared(c, slug)
     try:
         session.push_event(c, "view", views.built_line(view), view=slug)
     except Exception:  # noqa: BLE001 — the view is built; main learns its forms at its next prompt render
@@ -3280,9 +3373,9 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
     - it ended without a pass and never called finish_view: the gate runs once, and a pass registers the view;
     - still not built while main's plan mode held it at its end, where it could only read and plan: the view fails
       with Retry and that reason (subagents.plan_failed_line), and no repair starts;
-    - still not built: a change to a built view leaves the view as it was, an orientation's proposal gets up to
-      VIEW_REPAIRS new builders started with what failed, and then fails with Retry (_repairs_failed), and a view the
-      analyst asked for fails with Retry."""
+    - still not built: a change to a built view leaves the view as it was, a proposal the analyst did not ask for gets
+      up to VIEW_REPAIRS new builders started with what failed, and then fails with Retry (_repairs_failed), and a view
+      the analyst asked for fails with Retry."""
     from . import subagents, view_review, view_tools, views  # noqa: PLC0415
 
     prop = views.read_proposal(c, slug)
@@ -3323,7 +3416,7 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
             prop = views.update_proposal(c, slug, last_report="\n".join(views.gate_lines(rep))[:ERROR_CHARS]) or prop
     if status == "done" and finish.get("result") != "stop" and subagents.ended_in_plan(c, run.agent_id, run.k):
         if not prop.get("revision"):
-            views.update_proposal(c, slug, held=None)  # an orientation's proposal shows in the views list, failed
+            views.update_proposal(c, slug, held=None)  # a held proposal shows in the views list, failed
         _view_failed(c, slug, subagents.plan_failed_line(view_tools.BUILDER), run.chat)
         return
     failure = (str(finish.get("report") or prop.get("last_report") or "")
@@ -3391,9 +3484,10 @@ async def stop_views(c: str) -> None:
 
 
 def stop_orientation_views(c: str) -> list[str]:
-    """The analyst stopped the orientation: the builds of the views it proposed stop, queued or running, and so do the
-    reviews of its views, so none of its builds starts after the Stop. A new view is dropped, and a change to a built
-    view leaves the view as it was. Views and changes the analyst asked for go on. The slugs stopped."""
+    """The analyst stopped the orientation: the builds of the views an orientation from before 0.8.0 proposed stop,
+    queued or running, and so do the reviews of those views, so none of their builds starts after the Stop. A new view
+    is dropped, and a change to a built view leaves the view as it was. Views and changes the analyst asked for go on.
+    The slugs stopped."""
     from . import view_review, views  # noqa: PLC0415
 
     stopped: list[str] = []
@@ -3486,6 +3580,8 @@ def _change_failed_chip(c: str, prop: dict[str, Any], why: str) -> None:
                     status="stopped" if quit_ else "failed")
     except Exception:  # noqa: BLE001
         log.exception("could not chip the failed change to %s/%s", c, prop.get("slug"))
+    if not quit_:
+        _view_notice(c, prop, CHANGE_FAILED_TEXT, why, chat=prop.get("chat"))
 
 
 def _view_failed(c: str, slug: str, error: str, chat: str | None = None) -> None:
@@ -3510,6 +3606,38 @@ def _view_failed(c: str, slug: str, error: str, chat: str | None = None) -> None
     views._emit(c, slug, "failed", chat=chat)
     if chat:
         _close_chat({"workspace": c, "chat": chat}, "failed", error)
+    if error != MAIN_ENDED:
+        _view_notice(c, current, BUILD_FAILED_TEXT, error, chat=chat)
+
+
+# the notices of a view's build (module note, notices): {name} the view's, {why} the failure in plain words
+BUILD_FAILED_TEXT = "The view {name} failed to build: {why}."
+BUILD_REFUSED_TEXT = "The build of the view {name} didn't start: {why}."
+CHANGE_FAILED_TEXT = "The change to the view {name} failed, so the view is as it was: {why}."
+
+
+def _view_notice(c: str, prop: dict[str, Any], text: str, why: Any, chat: Any = None) -> None:
+    """A view's build or change failed, or its build did not start: the notice in the foreground with Retry, under the
+    build's key, with Open on its thread. Never raises."""
+    from . import notices  # noqa: PLC0415
+
+    try:
+        slug = str(prop.get("slug") or "")
+        name = str(prop.get("name") or slug)
+        words, fix = notices.reason(why)
+        retry_ = {"label": "Retry", "do": "view-retry", "slug": slug}
+        notices.post(c, kind="view", text=text.format(name=name, why=words), agent=notices.who("view-builder", name)[0],
+                     chat=str(chat) if chat else None, action=[retry_, fix] if fix else retry_,
+                     key=notices.agent_key(view_key(slug)))
+    except Exception:  # noqa: BLE001 — the view has failed either way
+        log.exception("%s: the failure of the view %s was not told", c, prop.get("slug"))
+
+
+def _view_cleared(c: str, slug: str) -> None:
+    """A view's build started or passed: a notice of its earlier failure goes."""
+    from . import notices  # noqa: PLC0415
+
+    notices.cleared(c, view_key(slug))
 
 
 def _view_stopped(c: str, slug: str, chat: str | None = None) -> None:
@@ -3536,10 +3664,11 @@ FAILED_WHY_CHARS = 240
 
 
 def _repairs_failed(c: str, slug: str, why: str, chat: str | None = None) -> None:
-    """An orientation's proposal whose build failed through its VIEW_REPAIRS repairs fails as a view the analyst asked
-    for does (_view_failed), no longer held: its chip, in the views list and in the orientation's thread, shows ✕ with
-    why and Retry, which builds it again with its repairs. The orientation's thread also gets one line that says so,
-    with the view's chip. Nothing is chipped in main, since the analyst never asked for it."""
+    """A proposal the analyst did not ask for, such as an orientation's from before 0.8.0, whose build failed through
+    its VIEW_REPAIRS repairs fails as a view the analyst asked for does (_view_failed), no longer held: its chip, in the
+    views list and in the orientation's thread, shows ✕ with why and Retry, which builds it again with its repairs. The
+    orientation's thread also gets one line that says so, with the view's chip. Nothing is chipped in main, since the
+    analyst never asked for it."""
     from . import orientation, views  # noqa: PLC0415
 
     views.update_proposal(c, slug, held=None)  # no longer held back from the views list (views.held_slugs)
@@ -3591,8 +3720,9 @@ async def program_view_turn(c: str, slug: str, message: str, folders: list[Path]
     prop = views.read_proposal(c, slug) or {"slug": slug}
     folder = folders[0] if folders else views.views_dir(c) / slug
     job = harness.Job(c, "dev", view_key(slug), f"view: {prop.get('name') or slug}", {
-        "task": "view", "slug": slug, "name": str(prop.get("name") or slug), "description": str(prop.get("why") or ""),
-        "scope": list(prop.get("claims") or []), "spec": views.spec_lines(prop), "change": str(prop.get("change") or ""),
+        "task": "view", "slug": slug, "name": str(prop.get("name") or slug),
+        "description": str(prop.get("description") or ""), "analyst_task": str(prop.get("task") or ""),
+        "scope": list(prop.get("claims") or []), "spec": views.layout_lines(prop), "change": str(prop.get("change") or ""),
         "folder": str(folder), "corpus": str(config.corpus_dir(c)), "examples": str(views.EXAMPLES_DIR),
         "message": message,
     }, VIEW_PROGRAM_TOOLS, view_work_dir(c, slug), writes=(folder,))
@@ -3632,7 +3762,7 @@ async def _program_task(c: str, slug: str, part: Any) -> None:
 async def program_build(c: str, slug: str, part: Any) -> None:
     """A build an extension's program runs in place of thimble's builder: up to MAX_ATTEMPTS turns of the program
     (program_view_turn), the gates of record after each and what failed sent back, then the view registered and its
-    review started, or the build's failure (VIEW_REPAIRS more tries for an orientation's proposal)."""
+    review started, or the build's failure (VIEW_REPAIRS more tries for a proposal the analyst did not ask for)."""
     from . import view_review, views  # noqa: PLC0415
 
     prop = views.read_proposal(c, slug)

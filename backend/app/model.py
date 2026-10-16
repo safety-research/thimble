@@ -484,7 +484,7 @@ def _classify(turn: _Turn, state: CallState) -> tuple[Status, str]:
         return "ok", ""  # a valid capture is ok even when prose accompanied it
     a, r = turn.assistant, turn.result
     if a is not None and a.stop_reason == "refusal":
-        return "refused", "the model refused the request (stop_reason refusal)"
+        return "refused", "Claude's safeguards refused the request (stop_reason refusal)"
     if turn.rate_limited or (a is not None and a.error == "rate_limit") or (
         r is not None and r.is_error and r.api_error_status == 429
     ):

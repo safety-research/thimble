@@ -527,19 +527,13 @@ def theme(c: str) -> dict[str, str]:
     return {"paper": paper, "accent": accent}
 
 
-LABEL_ROWS = 3  # the rows of each value a label card's face picks its example from (canvas/bodies.tsx EXAMPLE_ROWS)
-
-
 def label_data(c: str, cell: dict[str, Any]) -> dict[str, Any] | None:
-    """What a label card's face reads from the API: the label, the first LABEL_ROWS rows of each value, and the
-    workspace
-    settings. None for any other card or a label that is gone."""
+    """What a label card's face reads from the API: the label and the workspace settings. The face shows none of the
+    label's records (canvas/bodies.tsx LabelBody), so none is read. None for any other card or a label that is gone."""
     payload = cell.get("payload") if cell.get("kind") == "label" else None
     concept_id = str(payload.get("concept") or "") if isinstance(payload, dict) else ""
     if not concept_id:
         return None
-    from functools import partial  # noqa: PLC0415
-
     from . import concepts, ledger  # noqa: PLC0415 — both import the notebook machinery
 
     try:
@@ -547,15 +541,11 @@ def label_data(c: str, cell: dict[str, Any]) -> dict[str, Any] | None:
     except Exception:  # noqa: BLE001 — a label that is gone draws as the canvas draws it, without its label
         return None
     detail = concepts.with_stats(ws, concepts.coloured(ws, concept))
-    values = list(dict.fromkeys([*(str(v) for v in detail.get("labels") or [] if v),
-                                 *(str(v) for v in (detail.get("counts") or {}) if v)]))
-    texts = partial(concepts.unit_texts, c, concept)
-    rows = {v: concepts.concept_rows(ws, concept_id, v, LABEL_ROWS, 0, texts).get("rows") or [] for v in values}
     try:
         settings = ledger.get_settings(c)
     except Exception:  # noqa: BLE001 — without the settings a prompt label's model goes unnamed
         settings = {}
-    return json.loads(json.dumps({"concept": detail, "rows": rows, "settings": settings}, default=str))
+    return json.loads(json.dumps({"concept": detail, "settings": settings}, default=str))
 
 
 def type_frames(c: str, cell: dict[str, Any]) -> dict[str, Any]:
@@ -585,17 +575,11 @@ def card_libs_part(c: str, cell: dict[str, Any]) -> dict[str, Any]:
 
 def request_for(c: str, cell: dict[str, Any], *, width: int | None = None) -> dict[str, Any]:
     """The render request for one card as it stands (module note, the page): the card as the canvas reads it, its refs
-    resolved, the cards they name, the theme and the width, for a label card its label (label_data), whose rows
-    without their own text are quoted from the records their refs resolve to, for a card of a card type the type's
-    page (type_frames) and at least TYPE_W of width, since the type's page lays its whole graphic out in the width it
-    gets, and for a custom card the libraries it names (card_libs_part)."""
+    resolved, the cards they name, the theme and the width, for a label card its label (label_data), for a card of a
+    card type the type's page (type_frames) and at least TYPE_W of width, since the type's page lays its whole graphic
+    out in the width it gets, and for a custom card the libraries it names (card_libs_part)."""
     refs = cited_refs(cell)
     label = label_data(c, cell)
-    for rows in (label or {}).get("rows", {}).values():
-        for r in rows:
-            ref = str(r.get("ref") or "") if isinstance(r, dict) else ""
-            if ref and not str(r.get("text") or "").strip() and ref not in refs:
-                refs.append(ref)
     w = width or cell.get("width") or CARD_W
     frames = type_frames(c, cell)
     if frames and not width and isinstance(w, (int, float)):

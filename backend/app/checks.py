@@ -2,25 +2,31 @@
 the context, can do work, and can be created and run from the chat. A check runs again after a writer saves the
 document, but is cached: a passage whose text did not change, or that is locked, is not checked again.
 
-A check is `workspaces/<c>/checks/<id>.json` = {id, name, prompt, colour, shown, builtin, created_by, ts, version,
-runs: {doc: Run}}. The built-ins (`judgment`, `unverified`, `important-details`: Judgment calls, Unverifiable and
-Important details) are prompts/checks/<id>.md, read from the prompt file until first changed: each covers the documents
-and the cards and is on until the analyst turns it off. A stored copy still holding a name, a prompt or covers its
-built-in had before reads as the built-in is now (FORMER_NAMES, FORMER_PROMPTS, FORMER_COVERS), since thimble stores a
-built-in whole when it is turned on or off or runs; its `shown` stays as stored. A stored copy under an id its built-in
-had before (FORMER_IDS) is renamed to the id now when the checks are read (_migrate), and a comment that names a former
-id reads as naming the id now, written so on the store's next write. `verified`, a built-in before 0.7.0
-(RETIRED), is listed only where the workspace stored it, as any stored check is, so its comments stay readable there;
-no new check takes its id. An active extension's report checks, checks/<slug>/check.json (its name and colour)
+A check is `workspaces/<c>/checks/<id>.json` = {id, name, prompt, colour, shown, shown_set, builtin, created_by, ts,
+version, runs: {doc: Run}}. The built-ins (`judgment`, `unverified`, `important-details`: Judgment calls, Unverifiable
+and Important details) are prompts/checks/<id>.md, read from the prompt file until first changed: each covers the
+documents and the cards, and its front matter's `shown` says whether it is on until the analyst turns it on or off
+(Important details on, the other two off). A stored copy still holding a name, a prompt or covers its built-in had
+before reads as the built-in is now (FORMER_NAMES, FORMER_PROMPTS, FORMER_COVERS), since thimble stores a built-in
+whole when it is turned on or off or runs. Its `shown` stays as stored once the analyst set it (`shown_set`, which edit
+records for the analyst's switch and for main's run_check and stop_check) or when it is off; one stored on without
+`shown_set` reads as its built-in is now (_shown_now), since 0.7.0 and 0.8.0 turned every built-in on and stored it on
+when it ran or a save marked it stale. A stored copy under an id its built-in had before (FORMER_IDS) is renamed to
+the id now when the checks are read (_migrate), and a comment that names a former id reads as naming the id now,
+written so on the store's next write. `verified`, a built-in before 0.7.0 (RETIRED), is listed only where the
+workspace stored it, as any stored check is, so its comments stay readable there; no new check takes its id. An active
+extension's report checks, checks/<slug>/check.json (its name and colour)
 and check.md (its prompt) in its folder, follow the built-ins as `<extension>-<slug>`, read from the extension until
 first changed as the built-ins are, and off. A run is a `thimble:check`, a subagent of the analyst's Claude Code session
 (subagents.py), registered from prompts/check.md (definition) on Settings' checks row, with the corpus read-only and a
 work folder of its own, check-work/<id>-<doc>/. Its task file there, task.md, holds the context engine's part
-(context.render) and then the document, the check's prompt and the passages it covers; its prompt names that file
-(`## check-task-file`). It comments with add_comment and hands back one line, its run's summary. At most MAX_SESSIONS
-run at once; the others wait queued. A run has no time limit, and the analyst's Stop ends it (through thimble's plugin
-module, subagents.stop). A check made or changed (its name, prompt, colour, shown or covers) emits `checks` on the
-stream, so every Comments pane, the Report's and the canvas's in any tab, reads the checks again.
+(context.render) and then the document, the check's prompt and the passages it covers; a task too large for one Read
+call is written as task.md, task-2.md… (read_parts), each small enough that Read returns it whole. Its prompt names that
+file or those files in order (`## check-task-file`, `## check-task-files`). It comments with add_comment and hands back
+one line, its run's summary. At most MAX_SESSIONS run at once; the others wait queued. A run has no time limit, and the
+analyst's Stop ends it (through thimble's plugin module, subagents.stop). A check made or changed (its name, prompt,
+colour, shown or covers) emits `checks` on the stream, so every Comments pane, the Report's and the canvas's in any tab,
+reads the checks again.
 
 How a run starts: a writer's end starts each shown check on its document, a follow-on start of the writer's own start
 (_writer_ended); Run on a check's row, or turning a check on, is the analyst's click; main's run_check gives main the
@@ -42,6 +48,10 @@ each step of a plan card. Its comments are canvas_comments' store, and Done reso
 shown check that covers the cards, a follow-on start (main_turn_ended), on the cards that changed since its last run
 there and that it has not seen; Run on its row in the canvas's Comments pane and main's run_check with `on: cards` start
 one too.
+
+Notices. A run that ends failed (its agent's API error, a start that did not happen, a program's error) is told in the
+foreground with Open on its chat, since the analyst may be in another chat (notices.post, under the run's key); its
+next start and a run that ends done clear it (_notice).
 """
 from __future__ import annotations
 
@@ -59,9 +69,9 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from . import canvas_comments, config, investigation, prompts, tools, userconf, work_files
+from . import canvas_comments, config, investigation, prompts, read_parts, tools, userconf, work_files
 from .kernel_thimble import LABEL_ORDER
-from .ledger import read_json, write_json, write_under
+from .ledger import read_json, write_json
 
 log = logging.getLogger("thimble.checks")
 router = APIRouter()
@@ -72,7 +82,7 @@ WRITER_ROLE = "writer"  # the chat role of a writer, whose end starts the shown 
 AUTHOR = "check"  # a check's comment's author (report.CHECK_AUTHOR)
 DIR = "checks"  # workspaces/<c>/checks/<id>.json
 WORK_DIR = "check-work"  # workspaces/<c>/check-work/<id>-<doc>/, a run's own folder, where its Bash may write
-TASK_FILE = "task.md"  # in a run's own folder: what its agent reads first
+TASK_FILE = "task.md"  # in a run's own folder: what its agent reads first, with task-2.md… when one file is too large
 OWN_TOOLS = ("read_ref", "list_cards", "add_comment")  # a check's thimble tools
 BUILTINS = ("judgment", "unverified", "important-details")  # prompts/checks/<id>.md, listed first in this order
 RETIRED = ("verified",)  # a former built-in: listed only where the workspace stored it, and no new check takes its id
@@ -195,13 +205,24 @@ def _words_key(text: Any) -> str:
     return hashlib.sha1(_collapse(text).encode("utf-8")).hexdigest()
 
 
-def _as_now(stored: dict[str, Any]) -> dict[str, Any]:
+def _shown_now(stored: dict[str, Any], now: dict[str, Any], *, before_cards: bool) -> bool:
+    """Whether a stored built-in is on: as stored when the analyst set it (`shown_set`) or it is off, and when it was
+    stored before checks covered the cards (`before_cards`: before 0.7.0, when the built-ins started off, so on was the
+    analyst's choice); else, stored on by 0.7.0 or 0.8.0, which turned every built-in on, as its built-in is now."""
+    if stored.get("shown_set") or stored.get("shown") is not True or before_cards:
+        return bool(stored.get("shown"))
+    return bool(now.get("shown"))
+
+
+def _as_now(stored: dict[str, Any], *, before_cards: bool = False) -> dict[str, Any]:
     """A stored built-in with the name, the prompt and the covers its built-in has now in place of a former one it still
-    holds (FORMER_NAMES, FORMER_PROMPTS, FORMER_COVERS); one the analyst changed stays, and so does `shown`."""
+    holds (FORMER_NAMES, FORMER_PROMPTS, FORMER_COVERS), and `shown` as _shown_now reads it; one the analyst changed
+    stays."""
     cid = str(stored.get("id") or "")
     now = builtin(cid) if cid in BUILTINS else None
     if now is None:
         return stored
+    stored["shown"] = _shown_now(stored, now, before_cards=before_cards)
     if _collapse(stored.get("name")) in FORMER_NAMES.get(cid, ()):
         stored["name"] = now["name"]
     if _words_key(stored.get("prompt")) in FORMER_PROMPTS.get(cid, ()):
@@ -261,10 +282,11 @@ def read(c: str, cid: str) -> dict[str, Any] | None:
     stored = read_json(_path(c, cid), None)
     if isinstance(stored, dict):
         stored.setdefault("runs", {})
+        before_cards = "covers" not in stored or covers_of(stored["covers"]) in FORMER_COVERS.get(cid, ())
         if "covers" not in stored:  # a check stored before checks covered the cards covers what its built-in says
             stored["covers"] = (builtin(cid) or {}).get("covers") or list(DEFAULT_COVERS)
         stored["covers"] = covers_of(stored["covers"])
-        return _as_now(stored)
+        return _as_now(stored, before_cards=before_cards)
     return builtin(cid) or from_extensions(c).get(cid)
 
 
@@ -378,8 +400,8 @@ def edit(c: str, cid: str, *, name: str | None = None, prompt: str | None = None
         if colour not in COLOURS:
             raise HTTPException(400, f"a color is one of {COLOURS[0]} to {COLOURS[-1]}")
         check["colour"] = colour
-    if shown is not None:
-        check["shown"] = bool(shown)
+    if shown is not None:  # the analyst's switch, or main's run_check or stop_check: a choice that stays (_shown_now)
+        check["shown"], check["shown_set"] = bool(shown), True
     if covers is not None:
         check["covers"] = covers_of(covers)
     saved = save(c, check)
@@ -667,7 +689,7 @@ def definition(c: str) -> dict[str, Any]:
 
 
 def work_dir(c: str, cid: str, doc: str) -> Path:
-    """A run's own folder, check-work/<id>-<doc>, which main's fence lets its agent write (subagents.write_dirs)."""
+    """A run's own folder, check-work/<id>-<doc>, among the agents' work folders (subagents.write_dirs)."""
     return config.workspace_dir(c) / WORK_DIR / f"{cid}-{doc}"
 
 
@@ -894,14 +916,13 @@ async def _launch(act: _Active) -> None:
         await _program(act, check, cover, text, part)
         return
     work = work_dir(c, act.check, act.doc)
-    path = work / TASK_FILE
-    await asyncio.to_thread(_write_task, c, path, text)
+    paths = await asyncio.to_thread(_write_task, c, work / TASK_FILE, text)
     if act.route == subagents.FOLLOW_ON:
         await _wait_out_of_plan(act)
     if act.ended:
         return
     ans = await subagents.start_job(
-        c, ROLE, session_key(act.check, act.doc), tools.hint("check-task-file", path=str(path)),
+        c, ROLE, session_key(act.check, act.doc), read_parts.named(paths, "check-task-file", "check-task-files"),
         subagents.values_for(c, ROLE), act.route,
         description=f"check: {check['name']} · {CANVAS_NAME if act.doc == CANVAS else act.doc}",
         chat={"title": str(check["name"]), "check": act.check, "doc": act.doc, "run_id": act.run, "announce": False,
@@ -917,9 +938,11 @@ async def _launch(act: _Active) -> None:
         act.request = str(ans.get("request") or "") or None
 
 
-def _write_task(c: str, path: Path, text: str) -> None:
-    """The run's task file, in a folder its agent and main's Bash can write, so never through a link (write_under)."""
-    write_under(config.workspace_dir(c), path, text + "\n")
+def _write_task(c: str, path: Path, text: str) -> list[Path]:
+    """The run's task file, `path`, and the files after it when the task outgrows what one Read call returns
+    (read_parts.write), in a folder its agent and main's Bash can write, so never through a link. The paths, in
+    order."""
+    return read_parts.write(config.workspace_dir(c), path, text + "\n")
 
 
 def subagent_started(c: str, run: Any, req: dict[str, Any]) -> None:
@@ -936,6 +959,7 @@ def subagent_started(c: str, run: Any, req: dict[str, Any]) -> None:
         rec.pop("waiting", None)
         save(c, check)
     _stream(c, act.check, act.doc, "running", act.run, run.chat)
+    _notice(act, None, "running", "", run.chat)
 
 
 def subagent_ended(c: str, run: Any, status: str, report: str) -> None:
@@ -1107,11 +1131,14 @@ def _finish(act: _Active, status: str, summary: str) -> None:
                     from . import report_types  # noqa: PLC0415
 
                     report_types.write_doc(c, investigation.MAIN, act.doc, doc)
+                    # the open pages read the document again, so the comments this run replaced leave its margin
+                    report_types._emit(c, {"type": "report", "slug": act.doc, "status": "commented"})
             now = {p["fp"] for p in ps}
             rec["seen"] = sorted({fp for fp in rec.get("seen") or [] if fp in now} | set(act.fps))
         rec["stale"] = len(to_cover(check, act.doc, doc)) if doc is not None and check.get("shown") else 0
         save(c, check)
         _stream(c, act.check, act.doc, status, act.run, str(rec.get("chat") or ""), stale=rec["stale"])
+        _notice(act, check, status, str(summary or ""), str(rec.get("chat") or ""))
         if act.notify and not act.agent:  # main's subagent hands back itself: one line in main's chat, not two
             try:
                 events.post(c, CHECKED_KIND, {"text": rec["summary"] or status, "check": act.check,
@@ -1122,6 +1149,30 @@ def _finish(act: _Active, status: str, summary: str) -> None:
                          e.status_code, e.detail)
     finally:
         _pump()
+
+
+# the notice of a run that failed (module note, notices): {subject} the check, {target} what it ran on, {why} why
+FAILED_TEXT = "{subject} on {target} failed: {why}."
+
+
+def _notice(act: _Active, check: dict[str, Any] | None, status: str, summary: str, chat: str) -> None:
+    """A run started or ended: a failed one is told in the foreground with Open on its chat, under the run's key, and
+    a start or a run that ended done clears it. Never raises."""
+    from . import notices  # noqa: PLC0415
+
+    key = session_key(act.check, act.doc)
+    try:
+        if status != "failed":
+            if status in ("running", "done"):
+                notices.cleared(act.c, key)
+            return
+        name, subject = notices.who(ROLE, str((check or {}).get("name") or act.check))
+        target = f"the {CANVAS_NAME}" if act.doc == CANVAS else f"the document {act.doc}"
+        why, fix = notices.reason(summary or "it ended with no summary")
+        notices.post(act.c, kind="agent", text=FAILED_TEXT.format(subject=subject, target=target, why=why), agent=name,
+                     chat=chat or None, action=fix, key=notices.agent_key(key))
+    except Exception:  # noqa: BLE001 — the run has ended either way
+        log.exception("%s: the end of check %s on %s was not told", act.c, act.check, act.doc)
 
 
 async def stop(act: _Active) -> None:

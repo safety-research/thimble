@@ -96,8 +96,9 @@ body[data-cmd-drag] ::selection {
   top: 50%;
   margin-top: -5px;
 }
-/* while the box is open it is the only thing over the text: a ⌘-drag in the report editor selects text, and the
-   editor's own formatting toolbar would otherwise open over the same selection */
+/* while the box shows it is the only thing over the text: a ⌘-drag in the report editor selects text, and the
+   editor's own formatting toolbar would otherwise open over the same selection. A box whose element is off screen (on
+   another tab) is not drawn, so the toolbar shows again (CmdPointer onScreen). */
 body:has(.pointer-box) .bn-formatting-toolbar {
   display: none;
 }

@@ -10,7 +10,7 @@
 //
 // Examples are the tour's own markup (./examples.json, ./steps), laid over the page under the dim and removed when
 // their step ends. Nothing the tour shows reaches the server.
-import { isMacPlatform, isPointKey, pointKeyHeld } from '../lib/platform'
+import { askKeyLabel, isMacPlatform, isPointKey, pointKeyHeld } from '../lib/platform'
 import { setGuard } from './freeze'
 import './tour.css'
 
@@ -122,6 +122,8 @@ export interface StartOptions {
   at?: number
   /** the first launch: a small card asks first whether to take the tour */
   welcome?: boolean
+  /** what the welcome says above its buttons, a paragraph of markup each (./steps welcomeTexts) */
+  says?: string[]
   /** the tour was asked for again (Settings) */
   replay?: boolean
   /** shows a surface (the shell's own tab switch) */
@@ -452,8 +454,9 @@ export function createTour(snaps: Snaps): Tour {
     block.style.clipPath = ''
     open = null
     pop.classList.add('tour-welcome')
+    const says = (opts.says || []).map((p) => `<p class="tour-body">${p}</p>`).join('')
     const html = `<div class="tour-head"><div class="tour-title">Welcome to thimble</div></div>
-      <p class="tour-body">Would you like a short tour?</p>
+      ${says}
       <div class="tour-foot">${btn('skip', 'btn-ghost tour-skip', 'Skip')}<span class="tour-spacer"></span>${btn('begin', 'btn-primary', 'Take the tour')}</div>`
     if (pop.dataset.html !== html) {
       setMarkup(pop, html)
@@ -676,7 +679,7 @@ export function createTour(snaps: Snaps): Tour {
           key = document.createElement('div')
           key.className = 'tour-key tour-in'
           key.dataset.demo = '1'
-          setMarkup(key, `<b>${MAC ? '⌘' : 'Ctrl'}</b><span>held down</span>`)
+          setMarkup(key, `<b>${askKeyLabel(MAC)}</b><span>held down</span>`)
           fx.append(key)
         }
         if (!on && key) {
@@ -1281,6 +1284,7 @@ export function createTour(snaps: Snaps): Tour {
     open = null
     drawn = null
     welcome = false
+    last = ''
     const done = opts.onEnd
     opts = {}
     done?.()

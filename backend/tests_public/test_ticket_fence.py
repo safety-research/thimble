@@ -1,6 +1,6 @@
 """`thimble fix`'s session (app/dev.py), the one `claude -p` job thimble still starts, runs in the sandbox, writing only
-its worktree and its commits. A code ticket's agent and view builds are subagents of main inside main's fence
-(test_code_tickets.py, test_view_subagents.py, test_main_fence.py)."""
+its worktree and its commits. A code ticket's agent and view builds are subagents of main, in main's permission mode
+(test_code_tickets.py, test_view_subagents.py)."""
 from __future__ import annotations
 
 import json

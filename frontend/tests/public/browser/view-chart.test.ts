@@ -161,7 +161,7 @@ test("a chart is drawn by the canvas's code in the page's own theme", async () =
 test("its groups take Color by's colours, as its records' bars do, and a label's classes the label's colours", async () => {
   const frame = await framed()
   await frame.evaluate(() => {
-    ;(window as any).colour = (window as any).thimble.colorBy({ mount: '#colour', fields: [{ name: 'tool', title: 'Tool', values: ['Read', 'Bash'] }] })
+    ;(window as any).colour = (window as any).thimble.colorBy({ mount: '#colour', fields: [{ name: 'tool', title: 'Tool', values: ['Read', 'Bash'] }], initial: 'tool' })
   })
   assert.equal(await chart(frame, '#b', 'grouped', { colour: true }), true)
   const want = await frame.evaluate(() => {
@@ -187,7 +187,7 @@ test("its groups take Color by's colours, as its records' bars do, and a label's
 test("a group with no value takes Color by's gray, and a chart left with no rows keeps its height", async () => {
   const frame = await framed()
   await frame.evaluate(() => {
-    ;(window as any).colour = (window as any).thimble.colorBy({ mount: '#colour', fields: [{ name: 'tool', title: 'Tool', values: ['Read', 'Bash'] }] })
+    ;(window as any).colour = (window as any).thimble.colorBy({ mount: '#colour', fields: [{ name: 'tool', title: 'Tool', values: ['Read', 'Bash'] }], initial: 'tool' })
   })
   assert.equal(await chart(frame, '#b', 'nulls', { colour: true }), true)
   const readColour = await frame.evaluate(() => (window as any).colour.colourOf('Read'))

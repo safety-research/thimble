@@ -710,7 +710,8 @@
   Range.prototype.colour = function () {
     return shared ? shared.colour() : null
   }
-  // the overview: the records per column, each column's values stacked in the chips' order, grey with Color by Off
+  // the overview: the records per column, each column's values stacked in the chips' order, the one series color with
+  // Color by Off
   Range.prototype.draw = function () {
     if (!this.strip) return
     if (this.strip.clientWidth <= 0) return
@@ -799,7 +800,9 @@
     var colours = order.map(function (v) {
       return colour.colourOf(v) || kit.realColour('var(--label-none)')
     })
-    var grey = kit.realColour('rgba(var(--ink-rgb), 0.32)')
+    // with Off every record is one variable, in the one series color as a chart of one series; else the records with no
+    // value (or a value turned off) in gray
+    var grey = kit.realColour(plain ? 'var(--viz-1)' : 'rgba(var(--ink-rgb), 0.32)')
     var dpr = window.devicePixelRatio || 1
     return { counts: counts, cols: cols, none: none, colours: colours, grey: grey, key: JSON.stringify([W, dpr, this.h, grey, colours, counts, sc.gaps()]) }
   }

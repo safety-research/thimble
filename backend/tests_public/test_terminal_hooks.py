@@ -165,6 +165,32 @@ def test_the_mode_hook_records_main_s_mode_and_starts_the_backend_s_call_on_main
     assert len(spawned) == 1 and sf.read(ws)["main"]["permission_mode"] == "plan"
 
 
+def test_the_mode_hook_starts_the_mode_notice_call_only_as_main_turns_into_or_out_of_manual_mode(
+        tmp_path, ws, monkeypatch, capsys):
+    """In terminal mode thimble-term's band shows the Manual-mode notice (app/notices.py `manual-mode`): the mode hook
+    prints nothing, and starts the backend's `mode-notice` call (app/local_hooks.py) only when main's reported mode
+    turns into Manual mode (MANUAL_MODES) or out of it; another mode, another session or a subagent starts none."""
+    watcher, spawned = loaded(monkeypatch, tmp_path, ws)
+
+    def report(mode: str, event: str = "UserPromptSubmit", session: str = MAIN, **more: str) -> list[str]:
+        watcher.mode_files({"session_id": session, "hook_event_name": event, "permission_mode": mode, **more}, ws)
+        assert capsys.readouterr().out == "", "no systemMessage: the band shows the notice"
+        kinds = [k for k, _ in spawned if k == "mode-notice"]
+        spawned.clear()
+        return kinds
+
+    assert report("auto") == [] and report("plan") == [] and report("acceptEdits") == []
+    assert report("default", session="not-main") == [] and report("default", agent_id=AGENT) == []
+    assert report("default") == ["mode-notice"], "into Manual mode"
+    assert report("default") == [] and report("manual") == [], "still Manual mode"
+    assert report("default", "Stop") == []
+    assert report("auto") == ["mode-notice"], "out of Manual mode"
+    assert report("plan") == []
+    assert report("manual") == ["mode-notice"]
+    watcher.mode_files({"session_id": MAIN, "hook_event_name": "Stop", "permission_mode": "auto"}, ws)
+    assert [k for k, _ in spawned] == ["mode-notice", "main-stop"] and spawned[0][1]["permission_mode"] == "auto"
+
+
 def test_no_hook_opens_a_socket_in_terminal_mode_and_each_file_first_hook_starts_the_backend_s_call(
         tmp_path, ws, monkeypatch, capsys):
     watcher, spawned = loaded(monkeypatch, tmp_path, ws)

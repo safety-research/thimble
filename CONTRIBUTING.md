@@ -15,11 +15,12 @@ bash scripts/install.sh   # backend/.venv with the test extras, frontend/dist, ~
 ## Run it
 
 ```
-thimble server up                  # the server on port 8300, detached; prints the URL
+thimble server up                  # the server on port 8300, detached; prints the URL. Where 8300 is taken, a free
+                                   # port, which server.json records; THIMBLE_PORT names the one port to use
 THIMBLE_DEV=1 thimble server up    # plus Vite on 5300 with hot reload; the URL is Vite's
 thimble server status | stop | restart
 thimble status                     # one line: the server, the orientation, the queue
-thimble doctor                     # the install state, versions, port and the log's recent errors, with the lines
+thimble doctor --verbose           # the install state, versions, port and the log's recent errors, with the lines
                                    # only a development install prints: the turn endings, the source changed since
                                    # the server started, the validation stack, the last apply and the dev tickets
 thimble fix                        # the server will not start: the dev agent repairs it in the checkout, asking first
@@ -57,6 +58,7 @@ what you changed:
 cd backend && THIMBLE_SKIP_KEY=1 .venv/bin/python -m pytest tests_public/test_<module>.py -q
 cd frontend && npm run typecheck && npx vitest run tests/public/<name>
 cd frontend && npx vitest run --config vitest.browser.config.ts tests/public/browser/<name>   # headless Chromium
+cd plugin && claude plugin validate . && claude plugin test .   # the hooks module; the frontend's vitest runs it too
 ```
 
 The backend's tests run on a small synthetic corpus (`backend/tests_public/mini_corpus.py`) and fake every model call
@@ -68,6 +70,11 @@ Before a release, `bash scripts/e2e_release.sh --ref <branch>` installs a fresh 
 THIMBLE_HOME and walks the UI in headless Chromium on a copy of a synthetic corpus. It writes a report with a screenshot
 of each step (`--help` lists its options). It uses your own Claude login for its one model call, a one-turn `claude -p`,
 and it leaves your Claude Code settings and your `thimble` command as they were.
+
+`node scripts/e2e/cookie_path.mjs` checks, in Chromium, Firefox and WebKit, that the browser's sign-in reaches thimble
+and no other server on 127.0.0.1 or localhost: it starts this checkout's server with the built UI in a temporary home,
+signs a browser in with a link, and opens another server's page that asks for thimble's API paths. It needs
+`frontend/dist` and Playwright's three browsers (`cd frontend && npx playwright install chromium firefox webkit`).
 
 ## Layout
 

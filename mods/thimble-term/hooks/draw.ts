@@ -337,8 +337,10 @@ export function cutRef(ref: string, n: number): string {
 /**
  * The card's label rows, under its title, one per label: "label" dim, the label's name in blue and underlined, then a
  * blue ↗ (a press on either opens the label in the panel), then its values each after a ● in its hue. A label card's
- * row stops after the ↗, since its bars name the values. `hover`: the slug of the label under the pointer, its name and
- * ↗ in inverse. `hots`: where each row's name and ↗ stand, the cells a press opens the label from.
+ * row says after the ↗, dim, how its label is defined and what it ran on (`code · revisions.jsonl`, `· a sample` for a
+ * trial), as the browser's label row does; its bars name the values and its `all` row the total. `hover`: the slug of
+ * the label under the pointer, its name and ↗ in inverse. `hots`: where each row's name and ↗ stand, the cells a press
+ * opens the label from.
  */
 export function labelHead(card: CardData, cols: number, hover = ''): { lines: Line[]; slugs: string[]; hots: { x0: number; x1: number }[] } {
   const lines: Line[] = []
@@ -352,7 +354,10 @@ export function labelHead(card: CardData, cols: number, hover = ''): { lines: Li
     head.push({ s: cut(l.name, nameW), fg: COLORS.link, u: true, ...(on ? { inv: true } : {}) }, { s: ' ' }, { s: '↗', fg: COLORS.link, ...(on ? { inv: true } : {}) })
     hots.push({ x0, x1: lineWidth(head) })
     const tail: Line = []
-    if (!(card.kind === 'label' && card.label)) {
+    if (card.kind === 'label' && card.label) {
+      const what = [card.label.kind, (card.label.paths ?? []).join(', '), card.label.trial ? 'a sample' : ''].filter(Boolean).join(' · ')
+      if (what) tail.push({ s: `  ${what}`, fg: COLORS.dim })
+    } else {
       const room = cols - lineWidth(head) - (l.stale ? 16 : 0)
       let w = 0
       l.values.forEach((v, i) => {

@@ -14,7 +14,14 @@ once no workspace has a main session the server stops itself (cli.stop_self).
 The tail translates transcript records into main's log (`by: terminal`): the analyst's lines (not /thimble's own turn
 or local commands such as /model), browser events, task notifications, peer messages, tool calls and results, text,
 and `done` at turn_duration; any record shape it does not cover disables it with one `error` record. Safety stops,
-fallbacks, interrupts and long waits (read from `<claude config>/sessions/<pid>.json`) become one note each.
+interrupts and long waits (read from `<claude config>/sessions/<pid>.json`) become one note each, and so does the
+analyst's Stop of main in the browser, which leaves no record in the transcript and ends the turn (turn_stopped); a
+reply Claude's safeguards switched to another model becomes a notice (notices.py, FALLBACK_TEXT), shown in the
+foreground and kept in its chat, main's or an agent's, and so does an API error that stops a side thread's fork or a
+helper of one of thimble's agents (_sub_error; thimble's agents' own failures are told where their runs end,
+subagents.run_ended).
+At the end of each turn of main the view proposer hears whether the turn answered the analyst (proposer.turn_ended),
+and when a side thread answers (proposer.trigger).
 
 Each subagent transcript becomes an agent chat, except `thread:<id>` subagents, which are that thread's fork
 (threads.py), and thimble's own agents (subagents.py): an agent of one of thimble's roles goes to its role's chat (made
@@ -102,6 +109,9 @@ SID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 # a transcript thimble 0.5.0 wrote holds its events as `<channel source="plugin:thimble:thimble" …>`: as records of
 # origin OLD_ORIGIN on the channel route, inside task notifications on the hook and Monitor routes
 OLD_TAG, OLD_ORIGIN, OLD_SOURCE = "channel", "channel", "plugin:thimble:thimble"
+# the origin of a line a plugin's module adds to the session, such as the notes thimble's module appends to main
+# ($.session.append, which Claude Code records as a meta user record): no chat shows it as the analyst's
+PLUGIN_ORIGIN = "plugin"
 # one event, as events.render writes it or 0.5.0's channel did
 EVENT_RE = re.compile(rf"^\s*<(?:{EVENT_TAG}|{OLD_TAG})\s([^>]*)>\n?(.*?)\n?</(?:{EVENT_TAG}|{OLD_TAG})>\s*$", re.S)
 ATTR_RE = re.compile(r'([A-Za-z_][A-Za-z0-9_]*)="([^"]*)"')
@@ -118,9 +128,19 @@ TYPED_RE = re.compile(r"^[^\n]*while you were working:\n(.*?)(?:\n\nThis is how 
 RELAYED_BY = agents.MAIN_ID  # `by` of a message main sent a thread's fork or a subagent, which its chat shows as from main
 COMMAND_RE = re.compile(r"<command-name>(.*?)</command-name>", re.S)
 COMMAND_ARGS_RE = re.compile(r"<command-args>(.*?)</command-args>", re.S)
+# what the analyst pasted into a prompt, as Claude Code 2.1.300 writes it into the prompt's text: the pasted text
+# between a `<pasted_content id="…">` line and a `</pasted_content id="…">` line (one id of 4 hex digits for every paste
+# of the prompt), with up to 2 line breaks around it, before, after or between what they typed. A prompt that is a paste
+# alone starts with the tag, as Claude Code's own records do (pastes).
+PASTE_RE = re.compile(r'\n{0,2}<pasted_content id="([0-9a-f]{4})">\n(.*?)\n</pasted_content id="\1">\n{0,2}', re.S)
 LOCAL_CAVEAT = "<local-command-caveat>"  # the meta record before a local command's line (module note, the table)
 CONNECT_COMMANDS = ("/thimble", "/thimble:thimble")  # /thimble's command line, whose turn is not mirrored (module note)
+# /thimble:ask's command line: a message for a thread, the orientation or a view's build, as that chat's composer in the
+# browser sends it, so its turn is no analyst's turn of main (Live.turn_analyst)
+ASK_COMMANDS = ("/thimble:ask",)
 TASK_FIELD_RE = re.compile(r"<(task-id|tool-use-id|status|result|summary)>(.*?)</\1>", re.S)
+# one task's notification: Claude Code puts the notifications of tasks that end together in one message
+TASK_NOTICE_RE = re.compile(r"<task-notification>(.*?)</task-notification>", re.S)
 DIDNT_FINISH = "didn't finish"  # a task notification's summary after `thimble --continue`: the agent was cut off by the quit
 # the attachments Claude Code adds to a running subagent's transcript when main goes into plan mode (again), which the
 # agent then follows: it may only read and write a plan (live check L21); and the one it adds when main leaves plan mode
@@ -151,6 +171,7 @@ INTERRUPT_RE = re.compile(r"^\[Request interrupted by user[^\]]*\]$")
 SAFETY_TEXT = "Claude's safety check stopped a response, and the session is trying it once more"
 SAFETY_STOP_TEXT = "The session stopped: Claude's safety check ended this turn"
 INTERRUPTED_TEXT = "The turn was interrupted in the terminal"
+STOPPED_TEXT = "The turn was stopped in the browser"
 WAITING_TEXT = "The session is waiting for you in the terminal"
 WAITING_FOR = {"permission prompt": "a permission prompt", "dialog open": "a dialog is open",
                "input needed": "a request for input", "sandbox request": "a sandboxed command asks for network access"}
@@ -162,8 +183,22 @@ WAIT_NOTE_S = 2.0  # a wait shorter than this (a prompt the analyst answered at 
 ASK_RELEASE_S = 10.0
 SAFETY_ALERT = ("Claude Code is waiting in your terminal: Claude's safety check stopped this answer. Choose there whether "
                 "to switch to another model and go on, or to stay on this one and stop the answer.")
+# Claude's safeguards and a reply (module note, stops and waits). A downgrade: Claude Code answers on another model
+# after the requested one refused, which it records in main's transcript as a FALLBACK_SUBTYPE system record (scope
+# `session`, or `local` for one reply). A subagent's transcript may carry that record, but mostly it only shows the
+# replies going on on another model: after a reply with stop_reason refusal (at once, or after more replies on the
+# same model), after Claude Code's meta line that a safety classifier stopped the reply (no refusal record), or as a
+# reply whose first block is a `fallback` block (workflow agents; 2.1.295-2.1.300, the view builder experiment's runs).
+# So a subagent's reply on a model other than the one its run replies on is a downgrade (_sub_safeguards). Each
+# downgrade becomes a notice (notices.post) that names the chat it happened in. A block: the request ends with Claude Code's API error line (isApiErrorMessage, stop_reason
+# refusal), which the chat shows as its API error card; its text record carries `refusal: true`, and the failure of an
+# agent it stopped is told as any API error's (_sub_error, subagents.run_ended).
 FALLBACK_SUBTYPE = "model_refusal_fallback"
-FALLBACK_TEXT = "Claude's safety check stopped this answer, so {model} answers instead"
+FALLBACK_TEXT = "Claude's safeguards switched this reply from {model} to {fallback}."
+AGENT_FALLBACK_TEXT = "Claude's safeguards switched a reply of {subject} from {model} to {fallback}."
+FALLBACK_KEY = "safeguards:{chat}"  # the notices' key: a later switch in the same chat updates the notice
+SUB_ERROR_TEXT = "{subject} stopped with an error: {why}."  # a side thread's fork or a helper an API error stopped
+REFUSAL = "refusal"  # the stop_reason of a reply the model's safeguards stopped
 
 
 def _now() -> str:
@@ -208,6 +243,11 @@ class Sub:
         # Claude Code's error line when the latest reply of its current run is an API error (isApiErrorMessage: a
         # refusal by the model's safeguards, retries run out), else None (agent_error)
         self.api_error: str | None = None
+        self.api_error_class: str | None = None  # its class (api_error_class), with api_error
+        # the model its current run replies on (its first reply's, without a `[1m]` tag), and the other model Claude
+        # Code switched its replies to since, while they stay there (a downgrade, _sub_safeguards)
+        self.run_model: str | None = None
+        self.switched_to: str | None = None
         self.ran = False  # the model of its current run is recorded (subagents.ran_on)
         self.quiet_since = time.monotonic()
         self.done = False
@@ -242,6 +282,13 @@ class Live:
         self.hidden: set[str] = set()  # tool_use ids that are not rows in main (threads' Agent and SendMessage calls)
         self.turn_open = False
         self.fresh = False  # the turn has had no assistant record yet: another opening record still counts
+        # the open turn answers the analyst: opened by a line they typed or their message from the browser, not by a
+        # thread question from the browser or the terminal's /thimble:ask (the thread's fork answers it), a task
+        # notification, a Monitor's re-arm or a start_agent event (proposer.turn_ended)
+        self.turn_analyst = False
+        self.last_cut: str | None = None  # the uuid of main's last turn_duration record, where a fork of it resumes
+        self.context_tokens = 0  # the tokens main's last reply read: input, cache read and cache written (_note_model)
+        self.api_failed = False  # a request of the open turn ended in Claude Code's API error line (_main_api_error)
         self.turn_threads: list[str] = []  # the threads whose events reached the turn (_release_threads)
         self.handed: list[str] = []  # the threads whose events main got in a tool's result (handed)
         self.forked: set[str] = set()  # the threads the turn forked or sent a follow-up to
@@ -392,7 +439,9 @@ def _sub_places(lv: Live) -> dict[str, dict]:
         names = dict(list(sub.names.items())[-CURSOR_CALLS:])
         seen = sorted(k for k in sub.seen if k.startswith("skip:") or k.split(":", 1)[-1] in names)[-2 * CURSOR_CALLS:]
         out[str(sub.path)] = {"offset": at, "done": sub.done, "names": names, "seen": seen,
-                              **({"report": sub.report} if sub.report else {})}
+                              **({"report": sub.report} if sub.report else {}),
+                              **({"run_model": sub.run_model} if sub.run_model else {}),
+                              **({"switched_to": sub.switched_to} if sub.switched_to else {})}
     return out
 
 
@@ -420,7 +469,10 @@ def _turn_state(lv: Live) -> dict:
             "thimble_calls": lv.thimble_calls, "turn_calls": sorted(lv.turn_calls)[-CURSOR_CALLS:],
             "turn_text": lv.turn_text[-TURN_TEXT_KEPT:], "after_start": lv.after_start, "last_tool": lv.last_tool,
             "last_failed": lv.last_failed,
-            "relays": {k: [sub.agent_id, inp] for k, (sub, inp) in lv.relays.items() if sub.agent_id}}
+            "relays": {k: [sub.agent_id, inp] for k, (sub, inp) in lv.relays.items() if sub.agent_id},
+            # the proposer's (proposer.turn_ended): a turn's first line and its end are often read by different passes
+            "turn_analyst": lv.turn_analyst, "last_cut": lv.last_cut, "context_tokens": lv.context_tokens,
+            "api_failed": lv.api_failed}
 
 
 def _take_turn(lv: Live, cur: dict) -> None:
@@ -440,6 +492,11 @@ def _take_turn(lv: Live, cur: dict) -> None:
     lv.after_start = bool(cur.get("after_start"))
     lv.last_tool = str(cur.get("last_tool") or "") or None
     lv.last_failed = bool(cur.get("last_failed"))
+    lv.turn_analyst = bool(cur.get("turn_analyst"))
+    lv.api_failed = bool(cur.get("api_failed"))
+    lv.last_cut = str(cur.get("last_cut") or "") or None
+    tokens = cur.get("context_tokens")
+    lv.context_tokens = tokens if isinstance(tokens, int) and not isinstance(tokens, bool) and tokens > 0 else 0
     relays = cur.get("relays") if isinstance(cur.get("relays"), dict) else {}
     lv.pending_relays = {str(k): v for k, v in relays.items() if isinstance(v, list) and len(v) == 2}
     if lv.turn_open:
@@ -494,6 +551,38 @@ def _terminal_ws(c: str) -> Path | None:
     except ValueError:
         return None
     return ws if sfiles.terminal(ws) else None
+
+
+def attached_workspaces() -> list[str]:
+    """The workspaces whose main this server follows now."""
+    return list(_live)
+
+
+def tell_terminal(c: str, line: str) -> bool:
+    """`line` for main's terminal in workspace `c`: appended to <home>/links/<main's session>, which main's Stop hook shows
+    under main's next reply (plugin/bin/.thimble-watch link_lines), as a note after the link /thimble left there, or after
+    an empty first line in a file this makes (readable by its owner alone). False when no main is attached or the line
+    was not written."""
+    lv = _live.get(c)
+    name = "".join(ch for ch in (lv.sid if lv is not None else "") if ch.isalnum() or ch in "-_")
+    if not name or not line.strip():
+        return False
+    d = userconf.global_file().parent / userconf.LINKS_DIR
+    try:
+        config.private_dir(d)
+        path = d / name
+        try:
+            held = path.read_bytes()
+        except FileNotFoundError:
+            held = None
+        lead = "\n" if held is None or (held and not held.endswith(b"\n")) else ""
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with os.fdopen(fd, "a", encoding="utf-8") as f:
+            f.write(lead + " ".join(line.split()))
+    except OSError as e:
+        log.warning("%s: a line for main's terminal was not left: %s", c, e)
+        return False
+    return True
 
 
 def current(c: str) -> Live | None:
@@ -587,16 +676,20 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
         meta["ended"] = None
         agents.write_meta(c, meta)
         agents.notify(c, agents.MAIN_ID)
+        if held.get(MANUAL_KEY):  # the new session reports its own mode
+            _clear_manual(c)
     elif _modes.get(c, ("",))[0] != sid:  # this server restarted under the session: main's last report, as kept
         kept = _kept_mode(c, sid)
         if kept:
             _modes[c] = (sid, kept)
-        if held.get("permission_mode") != kept:
-            if kept:
-                held["permission_mode"] = kept
-            else:
-                held.pop("permission_mode", None)
+        # the notice stays as main's meta has it, since the kept mode may be one note_plan only guessed
+        now = ({**held, "permission_mode": kept} if kept else
+               {k: v for k, v in held.items() if k not in ("permission_mode", MANUAL_KEY)})
+        if now != held:
+            meta["attached"] = now
             agents.write_meta(c, meta)
+        if held.get(MANUAL_KEY) and not now.get(MANUAL_KEY):
+            _clear_manual(c)
     _persist(lv, keep_subs=restored or bool(lv.subs))
     _cancel_grace(c)
     _ensure_tail(lv)
@@ -638,22 +731,68 @@ def _keep_mode(c: str, sid: str, mode: str) -> None:
         log.warning("%s: main's permission mode was not kept in %s: %s", c, userconf.main_modes_file(), e)
 
 
-def note_mode(c: str, sid: str | None, mode: str) -> None:
+MANUAL_KEY = "manual"  # in main's meta's `attached`: what kind of Manual-mode notice shows (modes.manual_hint)
+TOLD_KEY = "manual_told"  # in main's meta's `attached`: main's terminal said once that the session runs in Manual mode
+MANUAL_NOTICE_KEY = "manual-mode"  # the notices' key and kind of the Manual-mode notice (notices.py)
+
+
+def _post_manual(c: str, mode: str) -> None:
+    from . import notices  # noqa: PLC0415
+
+    notices.post(c, kind=MANUAL_NOTICE_KEY, key=MANUAL_NOTICE_KEY, text=modes.manual_notice(mode))
+
+
+def _clear_manual(c: str) -> None:
+    from . import notices  # noqa: PLC0415
+
+    notices.clear(c, MANUAL_NOTICE_KEY)
+
+
+def _with_mode(held: dict[str, Any], mode: str, guessed: bool = False) -> dict[str, Any]:
+    """Main's meta's `attached` with `mode` as main's permission mode and MANUAL_KEY as modes.manual_hint gives it for
+    that mode (none outside Manual mode); a `guessed` mode leaves MANUAL_KEY as it was."""
+    out = {**held, "permission_mode": mode}
+    if guessed:
+        return out
+    out.pop(MANUAL_KEY, None)
+    hint = modes.manual_hint(mode)
+    return {**out, MANUAL_KEY: hint} if hint else out
+
+
+def note_mode(c: str, sid: str | None, mode: str, *, tell: bool = False, guessed: bool = False) -> str:
     """Main's hooks report the permission mode Claude Code runs the session `sid` in: when `sid` is main, this server
     keeps it (main_mode), in thimble's home too (userconf.main_modes_file) so that a restarted server under the same
     session follows it until main reports again, the mode each agent's row follows until the analyst sets it
-    (modes.py), and main's meta shows it (`attached.permission_mode`)."""
+    (modes.py), and main's meta shows it (`attached.permission_mode`), with what the Manual-mode notice says while it is
+    Manual mode (`attached.manual`, modes.manual_hint), unless the mode is only `guessed` (note_plan). The notice
+    `manual-mode` (notices.py, modes.manual_notice) shows when that hint comes or changes, and goes when it goes.
+
+    With `tell` (a report of main's hooks, events.mode_route), the first report of Manual mode in the session returns
+    the line main's terminal then shows (modes.manual_line), and `attached.manual_told` records that it showed, so it
+    shows once per session; '' otherwise."""
     lv = _live.get(c)
     if lv is None or not sid or lv.sid != sid or mode not in modes.CLAUDE_MODES:
-        return
+        return ""
     _modes[c] = (sid, mode)
     _keep_mode(c, sid, mode)
     meta = agents.meta_or_none(c, agents.MAIN_ID) or {}
     held = meta.get("attached") or {}
-    if held.get("session") == sid and held.get("permission_mode") != mode:
-        meta["attached"] = {**held, "permission_mode": mode}
+    if held.get("session") != sid:
+        return ""
+    now = _with_mode(held, mode, guessed)
+    line = modes.manual_line(mode) if tell and not guessed and not held.get(TOLD_KEY) else ""
+    if line:
+        now[TOLD_KEY] = True
+    if now != held:
+        meta["attached"] = now
         agents.write_meta(c, meta)
         agents.notify(c, agents.MAIN_ID)
+    before, after = held.get(MANUAL_KEY), now.get(MANUAL_KEY)
+    if after and after != before:
+        _post_manual(c, mode)
+    elif before and not after and not guessed:
+        _clear_manual(c)
+    return line
 
 
 _before_plan: dict[str, str] = {}  # workspace -> main's mode before thimble's module saw it go into plan mode
@@ -663,15 +802,16 @@ def note_plan(c: str, sid: str | None, plan: bool) -> None:
     """thimble's module saw main's session go into plan mode, or out of it, while main was idle (it asks Claude Code's
     permission decision every few seconds, module_bridge.mode_route): the mode becomes plan, or goes back to the one
     before (default when none was known), until main's hooks report the mode at its next turn (live check L21: a
-    shift+tab while main was idle reached thimble only at main's next turn, so held checks waited and the Start line
-    was stale)."""
+    shift+tab while main was idle reached thimble only at main's next turn, so held checks waited and the browser showed
+    the old mode). The mode it goes back to is a guess, since a shift+tab out of plan mode, or the plan's approval, may
+    pick another, so it shows no Manual-mode notice."""
     cur = main_mode(c)
     if plan and cur != "plan":
         if cur:
             _before_plan[c] = cur
         note_mode(c, sid, "plan")
     elif not plan and cur == "plan":
-        note_mode(c, sid, _before_plan.pop(c, "") or "default")
+        note_mode(c, sid, _before_plan.pop(c, "") or "default", guessed=True)
 
 
 def main_mode(c: str) -> str | None:
@@ -767,14 +907,18 @@ def _take_place(sub: Sub, path: Path, place: Any, at_end: bool) -> None:
         sub.seen.update(str(k) for k in place.get("seen") or [])
         if place.get("report") and not sub.report:
             sub.report = str(place["report"])
+        if place.get("run_model") and not sub.run_model:
+            sub.run_model = str(place["run_model"])
+        if place.get("switched_to") and not sub.switched_to:
+            sub.switched_to = str(place["switched_to"])
     elif at_end:
         sub.offset = _size(path)
 
 
 def detach(c: str, sid: str, reason: str | None = None) -> bool:
-    """The session is no longer main: the tail stops, a running subagent is stopped, and main's meta drops `attached`
-    and
-    names the session in `ended` ({session, cwd, at}). True when this session was main."""
+    """The session is no longer main: the tail stops, a running subagent is stopped, main's meta drops `attached` and
+    names the session in `ended` ({session, cwd, at}), and the Manual-mode notice of the session goes. True when this
+    session was main."""
     lv = _live.get(c)
     if lv is not None and lv.sid == sid:
         _live.pop(c, None)
@@ -799,6 +943,8 @@ def detach(c: str, sid: str, reason: str | None = None) -> bool:
     meta["ended"] = {"session": sid, "cwd": str(held.get("cwd") or ""), "at": _now()}
     agents.write_meta(c, meta)
     agents.notify(c, agents.MAIN_ID)
+    if held.get(MANUAL_KEY):  # the Manual-mode notice was this session's; the next main reports its own mode
+        _clear_manual(c)
     log.info("%s: session %s detached (%s)", c, sid, reason or "ended")
     return True
 
@@ -1161,6 +1307,7 @@ def _open_turn(lv: Live) -> None:
         lv.turn_open, lv.fresh, lv.wrote, lv.turn_threads, lv.forked = True, True, False, list(lv.handed), set()
         lv.flagged, lv.answered, lv.held_by_check, lv.stop_noted = False, True, False, False
         lv.turn_calls, lv.turn_text, lv.turn_since = set(), "", _now()
+        lv.turn_analyst = lv.api_failed = False
     agents.set_running(lv.c, agents.MAIN_ID, True)
 
 
@@ -1174,7 +1321,9 @@ def _release_threads(lv: Live) -> None:
     lv.turn_threads, lv.forked, lv.handed = [], set(), []
 
 
-def _end_turn(lv: Live) -> None:
+def _end_turn(lv: Live, cut: str | None = None) -> None:
+    """Main's turn ended: at its turn_duration record, whose uuid is `cut`, or (no cut) when a later record shows that a
+    turn never got one."""
     _release_threads(lv)
     again = _no_call(lv)
     _asked(lv, False)  # a relayed prompt the terminal answered before the tail saw the wait
@@ -1188,6 +1337,9 @@ def _end_turn(lv: Live) -> None:
     _ask_again(lv, again)
     if was_open:
         _cards_checked(lv)
+        if not lv.api_failed:  # the turn answered: an earlier failure of main's requests is over
+            _main_api_cleared(lv)
+        _proposer_turn(lv, cut)
 
 
 def _cards_checked(lv: Live) -> None:
@@ -1198,6 +1350,17 @@ def _cards_checked(lv: Live) -> None:
         checks.main_turn_ended(lv.c, lv.turn_since or lv.since)
     except Exception:  # noqa: BLE001 — a check that does not run is no reason to fail the mirror
         log.exception("%s: the checks over the cards did not start at main's turn end", lv.c)
+
+
+def _proposer_turn(lv: Live, cut: str | None) -> None:
+    """The view proposer hears of the turn's end (proposer.turn_ended): after a turn that answered the analyst it looks
+    for a view proposal at `cut`."""
+    from . import proposer  # noqa: PLC0415 — proposer imports context, which imports this module
+
+    try:  # a turn that ended in an API error answered nothing
+        proposer.turn_ended(lv.c, sid=lv.sid, analyst=lv.turn_analyst and not lv.api_failed, cut=cut)
+    except Exception:  # noqa: BLE001 — a proposal not looked for is no reason to fail the mirror
+        log.exception("%s: the view proposer did not hear of main's turn end", lv.c)
 
 
 def _no_call(lv: Live) -> list[tuple[str, str, str]]:
@@ -1265,9 +1428,36 @@ def _interrupted(lv: Live) -> None:
         _stopped(lv, SAFETY_STOP_TEXT if lv.held_by_check or (lv.flagged and not lv.answered) else INTERRUPTED_TEXT)
 
 
-def _user_line(lv: Live, text: str, by: str = TERMINAL, **extra: Any) -> None:
+def turn_stopped(c: str, *, stopped: bool = True) -> None:
+    """The analyst's Stop ended main's turn (subagents.stop_main: `$.turn.abort`, which writes neither an interrupt's
+    line nor a turn_duration record into the transcript): what the transcript holds of the turn is read first, then the
+    turn ends with its note, as an interrupt in the terminal ends it (a start it missed is not asked for again), and the
+    cursor keeps it ended. A prompt the read finds after the stopped turn (one that waited, which Claude Code takes up
+    at once) opened the next turn, which goes on. With `stopped` false, Claude Code ran no turn of main's when the Stop
+    came: only a turn an interrupt or a safety stop ended (its note is in) and that the mirror still holds open ends,
+    with no note of its own; any other is one whose end the mirror has yet to read."""
+    lv = _live.get(c)
+    if lv is None:
+        return
+    was, since = lv.turn_open, lv.turn_since
+    _read_now(lv)
+    if not lv.turn_open or (was and lv.turn_since != since):
+        return
+    if not stopped and not lv.stop_noted:
+        return
+    if stopped:
+        _stopped(lv, STOPPED_TEXT)
+    _end_turn(lv)
+    lv.saved = -1  # _save_cursor writes the ended turn even when the transcript did not grow
+    _save_cursor(lv)
+
+
+def _user_line(lv: Live, text: str, by: str = TERMINAL, *, analyst: bool = True, **extra: Any) -> None:
+    """A line the analyst typed in main's terminal; `analyst` False for one whose message another chat answers
+    (ASK_COMMANDS), which leaves the turn as it was for the proposer (Live.turn_analyst)."""
     _open_turn(lv)
     lv.fresh = True
+    lv.turn_analyst = lv.turn_analyst or analyst
     _rec(lv, "user", text=text, by=by, **extra)
 
 
@@ -1279,6 +1469,10 @@ def _browser_event(lv: Live, raw: str, *, mid_turn: bool) -> None:
     kind, event_id, thread = attrs.get("kind", ""), attrs.get("event", ""), attrs.get("thread")
     if not mid_turn:
         _open_turn(lv)
+    # the analyst's message to main (proposer.turn_ended); a thread question main only hands to the thread's fork, whose
+    # answer runs the proposer (_proposer_after_thread)
+    if kind == "main" or not kind:
+        lv.turn_analyst = True
     if kind == "thread" and thread:
         lv.turn_threads.append(thread)
     if event_id:  # a start_agent event's start is refused when this turn ends without its Agent call (R3, _no_call)
@@ -1316,6 +1510,22 @@ def _command_line(text: str) -> str | None:
     return " ".join(p for p in (m.group(1).strip(), (args.group(1).strip() if args else "")) if p)
 
 
+def pastes(text: str) -> list[tuple[bool, str]]:
+    """A prompt's text in pieces, in order: (True, the pasted text) for each paste (PASTE_RE) and (False, the text) for
+    what the analyst typed before, after or between them, without the line breaks Claude Code put around a paste. A
+    prompt without a paste is one typed piece."""
+    out: list[tuple[bool, str]] = []
+    at = 0
+    for m in PASTE_RE.finditer(text):
+        if m.start() > at:
+            out.append((False, text[at:m.start()]))
+        out.append((True, m.group(2)))
+        at = m.end()
+    if at < len(text) or not out:
+        out.append((False, text[at:]))
+    return out
+
+
 def browser_events(text: str) -> list[str]:
     """The browser events a task notification carries, each as its `<thimble-event …>…</thimble-event>` text (or
     0.5.0's, OLD_TAG); a Monitor event's `<event>` block is escaped, so it is unescaped once."""
@@ -1325,8 +1535,19 @@ def browser_events(text: str) -> list[str]:
     return EVENT_TAG_RE.findall(text or "")
 
 
+def task_notices(text: str) -> list[dict]:
+    """The fields of each task notification a message holds, one dict per task: Claude Code puts the notifications of
+    tasks that end together in one message, and read as one notification it ends only the last of them, so the others
+    keep their steps running. A text without the wrapper is one notification."""
+    return [dict(TASK_FIELD_RE.findall(b)) for b in (TASK_NOTICE_RE.findall(text or "") or [text or ""])]
+
+
 def _task_notification(lv: Live, text: str, at: float = 0.0) -> None:
-    fields = dict(TASK_FIELD_RE.findall(text or ""))
+    for fields in task_notices(text):
+        _task_notice(lv, fields, at)
+
+
+def _task_notice(lv: Live, fields: dict, at: float = 0.0) -> None:
     if fields.get("task-id") in lv.watch_tasks:
         _open_turn(lv)  # thimble's Monitor expired or ended: main arms it again, a call that is no row in main
         return
@@ -1383,15 +1604,15 @@ def _child_finished(lv: Live, text: str) -> None:
     """A task notification in a subagent's own transcript: a subagent it started (the writer's verifier, the
     orientation's critic) has stopped. Main never sees that notification, so the child's chat is finished here, and
     main's turn is left alone."""
-    fields = dict(TASK_FIELD_RE.findall(text or ""))
-    sub = _sub_by(lv, agent_id=fields.get("task-id")) or _sub_by(lv, tool_use_id=fields.get("tool-use-id"))
-    if sub is None or sub.done:
-        return
-    _tail_sub(lv, sub)
-    if sub.thimble:
-        _thimble_notice(lv, fields, 0.0, sub)
-        return
-    _finish_sub(lv, sub, _task_status(fields.get("status")), str(fields.get("result") or "").strip() or None)
+    for fields in task_notices(text):
+        sub = _sub_by(lv, agent_id=fields.get("task-id")) or _sub_by(lv, tool_use_id=fields.get("tool-use-id"))
+        if sub is None or sub.done:
+            continue
+        _tail_sub(lv, sub)
+        if sub.thimble:
+            _thimble_notice(lv, fields, 0.0, sub)
+            continue
+        _finish_sub(lv, sub, _task_status(fields.get("status")), str(fields.get("result") or "").strip() or None)
 
 
 def _peer(lv: Live, *, mid_turn: bool, origin: Any = None) -> None:
@@ -1436,12 +1657,12 @@ def visible(text: str) -> str:
     return "\n".join(ln for ln in text.split("\n") if not ln.lstrip().startswith(TERMINAL_ONLY)).strip()
 
 
-def _text(lv: Live, text: str) -> None:
+def _text(lv: Live, text: str, **extra: Any) -> None:
     text = visible(text)
     if not text.strip():
         return
     lv.turn_text = text
-    _rec(lv, "text", delta=text)
+    _rec(lv, "text", delta=text, **extra)
 
 
 def _tool_use(lv: Live, tool_use_id: str, name: str, tool_input: Any) -> None:
@@ -1785,6 +2006,151 @@ def api_error_of(rec: dict) -> str | None:
     return text or str(rec.get("error") or "") or "API Error"
 
 
+def api_error_class(rec: dict) -> str | None:
+    """The class of the failure an API error record says (notices.API_WORDS' keys: refused, auth, forbidden,
+    not_found, overloaded, …), read from the record's own fields before its words (stop_reason refusal, apiErrorStatus,
+    `error`; notices.failure_class), since Claude Code's wording changes between versions. None for another record, or
+    a failure of no known class."""
+    from . import notices  # noqa: PLC0415
+
+    text = api_error_of(rec)
+    if text is None:
+        return None
+    if _blocked(rec):
+        return "refused"
+    return notices.failure_class(text, status=rec.get("apiErrorStatus"), error=rec.get("error"))
+
+
+def _api_fields(rec: dict) -> dict[str, Any]:
+    """The fields a text record of an API error line carries: `api_error`, its class ("other" for a failure of no
+    known class), which the browser's error card shows with its fix, and `refusal` for a request the safeguards
+    blocked. {} for another record."""
+    if api_error_of(rec) is None:
+        return {}
+    return {"api_error": api_error_class(rec) or "other", **({"refusal": True} if _blocked(rec) else {})}
+
+
+MAIN_API_KEY = "main:api"  # the notices' key of a failure of main's own request (_main_api_error)
+MAIN_API_TEXT = "Claude's reply in main failed: {why}."
+MAIN_API_AGENT = "Main"
+
+
+def _main_api_error(lv: Live, rec: dict) -> None:
+    """A request of main's ended in Claude Code's API error line: main's chat shows it as its API error card, and a
+    notice tells the analyst wherever else they look, with Open on main (notices.API: no row, and the strip leaves it
+    out while main is open). A turn that answers clears it (_main_api_cleared). Never raises."""
+    from . import notices  # noqa: PLC0415
+
+    lv.api_failed = True
+    try:
+        cls = api_error_class(rec)
+        why, fix = notices.reason(api_error_of(rec), cls=cls, main_model=True)
+        notices.post(lv.c, kind=notices.API, text=MAIN_API_TEXT.format(why=why), agent=MAIN_API_AGENT,
+                     chat=agents.MAIN_ID, action=fix, key=MAIN_API_KEY, row=False)
+    except Exception:  # noqa: BLE001 — main's chat shows the error all the same
+        log.exception("%s: main's API error was not told", lv.c)
+
+
+def _main_api_cleared(lv: Live) -> None:
+    from . import notices  # noqa: PLC0415
+
+    with contextlib.suppress(Exception):
+        notices.clear(lv.c, MAIN_API_KEY)
+
+
+def _blocked(rec: dict) -> bool:
+    """Whether an assistant record is Claude Code's API error line for a request the model's safeguards blocked."""
+    msg = rec.get("message") if isinstance(rec.get("message"), dict) else {}
+    return rec.get("isApiErrorMessage") is True and msg.get("stop_reason") == REFUSAL
+
+
+def _reply_model(rec: dict) -> str | None:
+    """The model of a reply the model wrote (no API error line, no record of Claude Code's own), else None."""
+    msg = rec.get("message") if isinstance(rec.get("message"), dict) else {}
+    model = msg.get("model")
+    if rec.get("isApiErrorMessage") or not isinstance(model, str) or not model or model.startswith("<"):
+        return None
+    return model
+
+
+def _sub_safeguards(lv: Live, sub: Sub, rec: dict) -> None:
+    """A subagent's reply on a model other than the one its run replies on: Claude's safeguards switched its replies to
+    that model (module note, FALLBACK_TEXT), which its chat's notice says once per switch; a reply back on the run's
+    own model ends the switch, so a later one is told again."""
+    model = _reply_model(rec)
+    if model is None:
+        return
+    model = config.base_model(model)
+    if sub.run_model is None:
+        sub.run_model = model
+    elif model == sub.run_model:
+        sub.switched_to = None
+    elif model != sub.switched_to:
+        sub.switched_to = model
+        _switched(lv.c, sub.chat, sub.run_model, model, sub=sub)
+
+
+def _sub_who(c: str, sub: Sub) -> tuple[str, str]:
+    """(the name on a notice, the subject of a sentence) of a subagent: one of thimble's agents by its role, a side
+    thread's fork, a helper of one of thimble's agents, or one of main's own subagents, by its chat's title."""
+    from . import notices, subagents  # noqa: PLC0415
+
+    title = notices.chat_title(c, sub.chat)
+    if sub.thimble:
+        return notices.who(sub.thimble, title)
+    if sub.thread:
+        return notices.who("thread", title)
+    if sub.root:
+        root = subagents.agent(c, sub.root) or {}
+        if root.get("role") == "orientation":
+            return notices.who(subagents.HELPER)
+        name, subject = notices.who(root.get("role"), notices.chat_title(c, root.get("chat")))
+        return name, f"A subagent of {subject[0].lower()}{subject[1:]}"
+    return notices.who("", title)
+
+
+def _switched(c: str, chat: str, model: Any, fallback: Any, *, sub: Sub | None = None) -> None:
+    """Claude's safeguards switched a reply in chat `chat` (main's, or subagent `sub`'s) from `model` to `fallback`: a
+    notice that says so (FALLBACK_TEXT), one per chat however often it happens (FALLBACK_KEY). Never raises."""
+    from . import notices  # noqa: PLC0415
+
+    was = model_label(str(model or "")) if model else "the model it was asked for"
+    now = model_label(str(fallback or ""))
+    try:
+        if sub is None:
+            name, text = None, FALLBACK_TEXT.format(model=was, fallback=now)
+        else:
+            name, subject = _sub_who(c, sub)
+            text = AGENT_FALLBACK_TEXT.format(subject=subject[0].lower() + subject[1:], model=was, fallback=now)
+        notices.post(c, chat=chat, kind="safeguards", text=text, agent=name, key=FALLBACK_KEY.format(chat=chat))
+    except Exception:  # noqa: BLE001 — a notice not told is no reason to fail the mirror
+        log.exception("%s: the safeguards' switch in %s was not told", c, chat)
+
+
+def _sub_error(lv: Live, sub: Sub) -> None:
+    """An API error stopped a side thread's fork or a helper of one of thimble's agents (sub.api_error): a notice with
+    its fix (notices.reason), under the thread's key, or for a helper the key of the agent it helps, so helpers that
+    fail alike update one notice (cleared when that agent's run ends done, subagents.run_ended). Thimble's own agents'
+    failures are told where their runs end (subagents.run_ended); main's own subagents report to main."""
+    from . import notices  # noqa: PLC0415
+
+    if not sub.api_error or sub.thimble or not (sub.thread or sub.root):
+        return
+    try:
+        name, subject = _sub_who(lv.c, sub)
+        why, fix = notices.reason(sub.api_error, cls=sub.api_error_class, main_model=sub.thread)
+        key = f"thread:{sub.chat}" if sub.thread else helper_key(sub.root or sub.agent_id or sub.chat)
+        notices.post(lv.c, chat=sub.chat, kind="agent", text=SUB_ERROR_TEXT.format(subject=subject, why=why),
+                     agent=name, action=fix, key=key)
+    except Exception:  # noqa: BLE001
+        log.exception("%s: the API error in %s was not told", lv.c, sub.chat)
+
+
+def helper_key(agent_id: Any) -> str:
+    """The notices' key of the API errors of the helpers of one of thimble's agents (_sub_error), by that agent's id."""
+    return f"helper:{agent_id}"
+
+
 def agent_error(c: str, agent_id: str) -> str | None:
     """Claude Code's error line when the latest reply of the current run of one of thimble's agents is an API error
     (api_error_of): why the run failed. None when the mirror does not follow the agent, or its latest reply is not one."""
@@ -1799,6 +2165,13 @@ def agent_error(c: str, agent_id: str) -> str | None:
         return None
     _tail_sub(lv, sub)
     return sub.api_error
+
+
+def agent_error_class(c: str, agent_id: str) -> str | None:
+    """The class of agent_error's failure (api_error_class), as the mirror read it with the line; None for none."""
+    lv = _live.get(c)
+    sub = _sub_by(lv, agent_id=agent_id) if lv is not None else None
+    return sub.api_error_class if sub is not None and sub.api_error else None
 
 
 def agent_answer(c: str, agent_id: str) -> str | None:
@@ -2114,6 +2487,27 @@ def _finish_sub(lv: Live, sub: Sub, status: str, result: str | None, *, kind: st
             agents.finish_agent(lv.c, sub.chat, status, (sub.report or result or "")[:RESULT_LIMIT] or None)
     except Exception:  # noqa: BLE001 — a chat deleted under the mirror
         log.debug("%s: subagent chat %s could not be finished", lv.c, sub.chat, exc_info=True)
+    if sub.thread and kind is None and status in ("done", "completed") and not sub.api_error:
+        _thread_answered(lv, sub.chat)
+        _proposer_after_thread(lv, sub.chat)
+
+
+def _thread_answered(lv: Live, chat: str) -> None:
+    """A side thread's fork answered: a notice of an earlier API error of the thread's is over (_sub_error)."""
+    from . import notices  # noqa: PLC0415
+
+    with contextlib.suppress(Exception):
+        notices.clear(lv.c, f"thread:{chat}")
+
+
+def _proposer_after_thread(lv: Live, chat: str) -> None:
+    """A side thread answered the analyst: the view proposer looks for a view proposal (proposer.trigger)."""
+    from . import proposer  # noqa: PLC0415 — proposer imports context, which imports this module
+
+    try:
+        proposer.trigger(lv.c, f"thread:{chat}")
+    except Exception:  # noqa: BLE001 — a proposal not looked for is no reason to fail the mirror
+        log.exception("%s: the view proposer did not hear of thread %s's answer", lv.c, chat)
 
 
 def _agent_dir(lv: Live) -> Path | None:
@@ -2633,7 +3027,8 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
         if prompt and prompt.strip() and not prompt.lstrip().startswith("<"):
             if INTERRUPT_RE.match(prompt.strip()):
                 return 0  # the stop's own line: the chat's end says it was stopped
-            sub.api_error = None  # a new run's prompt
+            sub.api_error = sub.api_error_class = None  # a new run's prompt, which may run on another model
+            sub.run_model = sub.switched_to = None
             if sub.skip_prompt:
                 sub.skip_prompt = False
                 return 0
@@ -2664,9 +3059,19 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
                 agents.claim_cell(lv.c, data["cell_id"], sub.chat, edit=_short(sub.names.get(tid, "")) in ("edit_card", "edit_cell"))
             n += 1
         return n
+    if rec.get("type") == "system" and rec.get("subtype") == FALLBACK_SUBTYPE:
+        # told here, so the replies on the fallback model that follow are no second notice (_sub_safeguards)
+        sub.run_model = sub.run_model or config.base_model(str(rec.get("originalModel") or "")) or None
+        sub.switched_to = config.base_model(str(rec.get("fallbackModel") or "")) or None
+        _switched(lv.c, sub.chat, rec.get("originalModel"), rec.get("fallbackModel"), sub=sub)
+        return 0
     if rec.get("type") != "assistant":
         return 0
     sub.api_error = api_error_of(rec)
+    sub.api_error_class = api_error_class(rec) if sub.api_error else None
+    _sub_error(lv, sub)
+    _sub_safeguards(lv, sub, rec)
+    api = _api_fields(rec)
     if sub.thimble and not sub.ran:
         msg = rec.get("message") if isinstance(rec.get("message"), dict) else {}
         if isinstance(msg.get("model"), str):
@@ -2684,7 +3089,7 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
             if text.strip():
                 sub.last_text = text.strip()
                 sub.note = None
-                sub.rec.text(text, by=TERMINAL, **({"reply": True} if sub.thread else {}))
+                sub.rec.text(text, by=TERMINAL, **({"reply": True} if sub.thread else {}), **api)
                 n += 1
             elif sub.thread:
                 sub.note = _note_words(b["text"]) or sub.note
@@ -2815,7 +3220,7 @@ def translate(lv: Live, line: bytes | str) -> None:
                 # /thimble's own turn is not mirrored (module note, the table): turn_open stays False, so its reply
                 # is skipped too
             elif command is not None:
-                _user_line(lv, command)
+                _user_line(lv, command, analyst=command.split()[0] not in ASK_COMMANDS)
             elif not text.lstrip().startswith("<"):
                 _user_line(lv, text.strip())
         return
@@ -2832,34 +3237,47 @@ def translate(lv: Live, line: bytes | str) -> None:
                     _browser_event(lv, tag, mid_turn=True)
             elif aorigin == "task-notification" or att.get("commandMode") == "task-notification":
                 # a subagent that ended while main's turn went on
-                fields = dict(TASK_FIELD_RE.findall(prompt))
-                sub = _sub_by(lv, agent_id=fields.get("task-id")) or _sub_by(lv, tool_use_id=fields.get("tool-use-id"))
-                if sub is not None and sub.thimble:
-                    _tail_sub(lv, sub)
-                    _thimble_notice(lv, fields, _stamp(rec), sub)
-                elif sub is not None:
-                    _tail_sub(lv, sub)
-                    _finish_sub(lv, sub, _task_status(fields.get("status")), str(fields.get("result") or "").strip() or None)
-                else:
-                    _thimble_notice(lv, fields, _stamp(rec))
+                for fields in task_notices(prompt):
+                    sub = _sub_by(lv, agent_id=fields.get("task-id")) or _sub_by(lv, tool_use_id=fields.get("tool-use-id"))
+                    if sub is not None and sub.thimble:
+                        _tail_sub(lv, sub)
+                        _thimble_notice(lv, fields, _stamp(rec), sub)
+                    elif sub is not None:
+                        _tail_sub(lv, sub)
+                        _finish_sub(lv, sub, _task_status(fields.get("status")),
+                                    str(fields.get("result") or "").strip() or None)
+                    else:
+                        _thimble_notice(lv, fields, _stamp(rec))
             elif aorigin == "peer":
                 _peer(lv, mid_turn=True, origin=att.get("origin"))
+            elif aorigin == PLUGIN_ORIGIN:
+                pass  # a plugin's line, such as thimble's note to main after a Stop: never the analyst's
             elif prompt.strip() and not prompt.lstrip().startswith("<"):
                 _rec(lv, "user", text=prompt.strip(), by=TERMINAL)
         return
     if t == "system":
         if rec.get("subtype") == "turn_duration":
-            _end_turn(lv)
+            cut = str(rec.get("uuid") or "") or None
+            lv.last_cut = cut or lv.last_cut
+            _end_turn(lv, cut=cut)
         elif rec.get("subtype") == "informational" and SAFETY_RE.search(str(rec.get("content") or "")):
             _safety_stop(lv)
-        elif rec.get("subtype") == FALLBACK_SUBTYPE and rec.get("scope", "session") == "session" and rec.get("direction", "retry") == "retry":
-            _note(lv, FALLBACK_TEXT.format(model=model_label(str(rec.get("fallbackModel") or ""))))
+        elif rec.get("subtype") == FALLBACK_SUBTYPE and rec.get("direction", "retry") == "retry":
+            lv.wrote = True
+            _switched(lv.c, agents.MAIN_ID, rec.get("originalModel"), rec.get("fallbackModel"))
         return
     if t != "assistant":
         return
     _note_model(lv, rec)
+    api = _api_fields(rec)
+    if api:
+        _main_api_error(lv, rec)
     if not lv.turn_open:
-        return  # /thimble's own turn, or one the tail joined in the middle of: mirroring starts at the next
+        # /thimble's own turn, or one the tail joined in the middle of: mirroring starts at the next. Its request that
+        # failed is main's API error card all the same, since the browser shows nothing else of it (Matt, 10-14)
+        if api:
+            _text(lv, str(api_error_of(rec)), **api)
+        return
     lv.fresh = False
     # the retry after a stop, if there was one, is writing; after the dialog, the analyst chose to go on
     lv.answered, lv.held_by_check = True, False
@@ -2867,7 +3285,7 @@ def translate(lv: Live, line: bytes | str) -> None:
         if b["type"] == "text":
             if not isinstance(b.get("text"), str):
                 raise Unreadable("a text block without text")
-            _text(lv, b["text"])
+            _text(lv, b["text"], **api)
         elif b["type"] == "tool_use":
             if not isinstance(b.get("id"), str) or not isinstance(b.get("name"), str):
                 raise Unreadable("a tool_use block without id or name")
@@ -2894,6 +3312,10 @@ def _note_model(lv: Live, rec: dict) -> None:
     usage = msg.get("usage") if isinstance(msg, dict) and isinstance(msg.get("usage"), dict) else {}
     speed = usage.get("speed")
     fast = speed == "fast" if speed in ("fast", "standard") else None
+    read = sum(n for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+               if isinstance(n := usage.get(k), int) and not isinstance(n, bool))
+    if read > 0:  # an API error line Claude Code wrote itself reads nothing
+        lv.context_tokens = read
     if not isinstance(model, str) or not model or model.startswith("<"):
         model = None
     if (model is None or model == lv.model) and (effort is None or effort == lv.effort) and (fast is None or fast == lv.fast):
@@ -2986,9 +3408,13 @@ def session_state(lv: Live) -> dict:
 def _watch_wait(lv: Live) -> None:
     """While a turn is open or a subagent runs, a dialog or prompt that holds the session for WAIT_NOTE_S gets one note.
     The
-    model-switch dialog after a safety stop sets the alert on main's meta instead, cleared when the session moves on."""
+    model-switch dialog after a safety stop sets the alert on main's meta instead, cleared when the session moves on.
+    Whether any dialog is open also tells which prompts of thimble's agents the analyst has answered in the terminal
+    (events.terminal_dialogs)."""
     state = session_state(lv) if lv.busy else {}
     what = str(state.get("waitingFor") or DIALOG_WAIT) if state.get("status") == "waiting" else None
+    if state:
+        _events().terminal_dialogs(lv.c, what is not None)
     if what != PERMISSION_WAIT and lv.wait is not None and lv.wait[0] == PERMISSION_WAIT:
         _asked(lv, False)
     if state and what != PERMISSION_WAIT:
@@ -3277,3 +3703,6 @@ async def shutdown() -> None:
         with contextlib.suppress(asyncio.CancelledError):
             await _sweep_task
         _sweep_task = None
+    from . import proposer  # noqa: PLC0415 — proposer imports context, which imports this module
+
+    await proposer.shutdown()

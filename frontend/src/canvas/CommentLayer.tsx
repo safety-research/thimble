@@ -12,7 +12,8 @@
 // (report/CommentCard.tsx): its check's name and its statement, its details on request and ✓ (Done), and, while it is
 // active, a field that opens a thread anchored to its card or step. A comment hides with its check, when its card is
 // not drawn (a collapsed frame) or when the filters leave its card out. The box the comments cover goes to the canvas,
-// whose Fit and minimap take it in.
+// whose Fit and minimap take it in. A comment opened is looked at, so its run no longer marks the toolbar's Comments
+// button with the new comments' dot (report/newComments.ts).
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
@@ -20,6 +21,7 @@ import type { CanvasComment } from '../lib/types'
 import { evidenceRefs, type CheckLook } from '../report/checkComments'
 import { CommentCard } from '../report/CommentCard'
 import { canvasCommentsApi } from '../report/commentsApi'
+import { useLookedAt } from '../report/newComments'
 import { COMMENT_LIFT, COMMENT_STEP_LIFT, COMMENT_W, commentPlaces, extentOf, type Board, type CommentPlace, type CommentSpot, type Layout, type Rect } from './layout'
 
 const REFETCH_DEBOUNCE_MS = 200
@@ -132,6 +134,8 @@ export function CommentLayer({ ws, board, lay, comments, look, cardEl, onResolve
   useEffect(() => {
     if (active && !comments.some((c) => c.id === active)) setActive(null)
   }, [active, comments])
+  // the comment open is looked at, so the new comments' dot leaves its run out
+  useLookedAt(ws, comments.find((c) => c.id === active)?.run)
   // a field that held the focus goes when its comment is let go, with no blur to say so
   useEffect(() => {
     if (focused && !els.current.get(focused)?.contains(document.activeElement)) setFocused(null)

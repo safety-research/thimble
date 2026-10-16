@@ -1,4 +1,4 @@
-import { defineConfig, type Plugin } from 'vite'
+import { defineConfig, type Plugin, type ProxyOptions } from 'vite'
 import react from '@vitejs/plugin-react'
 import { build, context, type BuildOptions } from 'esbuild'
 
@@ -29,6 +29,15 @@ export function ownOriginToTarget(req: ProxyReq, incoming: Incoming, target: str
 }
 
 const target = `http://127.0.0.1:${backend}`
+
+/** The dev server's proxy of the API to the backend, with the page's own origin renamed (ownOriginToTarget). */
+function toBackend(): ProxyOptions {
+  return {
+    target,
+    changeOrigin: true,
+    configure: (proxy) => proxy.on('proxyReq', (req, incoming) => ownOriginToTarget(req, incoming, target)),
+  }
+}
 
 /** A module of src/lib as one script a view's page inlines for the view kit, written beside the app on every build:
  * kitChart, the canvas's chart drawing for thimble.chart, as kit/chart.js (backend views.KIT_CHART_JS), so a view's
@@ -74,13 +83,8 @@ export default defineConfig({
   cacheDir,
   server: {
     port: 5300,
-    proxy: {
-      '/api': {
-        target,
-        changeOrigin: true,
-        configure: (proxy) => proxy.on('proxyReq', (req, incoming) => ownOriginToTarget(req, incoming, target)),
-      },
-    },
+    // /api, and the same routes under a signed-in browser's own path, /b/<key>/api (src/lib/browserKey)
+    proxy: { '/api': toBackend(), '^/b/[A-Za-z0-9_-]+/api(/|$)': toBackend() },
   },
   // render.html is the card harness's page (src/render.tsx, backend/app/render.py): shipped beside the app in dist
   build: { rollupOptions: { input: { main: 'index.html', render: 'render.html' } } },

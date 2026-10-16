@@ -4,10 +4,10 @@ from __future__ import annotations
 import json
 
 import pytest
-from conftest import UI_KEY
 from fastapi.testclient import TestClient
 
-from app import userconf
+from app import hook_auth, userconf
+from conftest import sign_in
 
 CORPUS = "mini"
 
@@ -23,12 +23,12 @@ def client(workspaces_tmp):
 def test_the_settings_route_changes_only_the_browser_s_settings(client, workspaces_tmp, analyst):
     """A kernel cell or a session's command can reach the route on loopback, so the wrapper's switch and the
     orientation's instructions are not among the keys it takes, and a permission mode changes only with the cookie the
-    page gets for the key in thimble's link (app/hook_auth.py), and must be one."""
+    page gets for the sign-in code in thimble's link (app/hook_auth.py), and must be one."""
     path = workspaces_tmp / CORPUS / "settings.json"
     bypass = {"run_cell_result_lines": 20, "permission_modes": {"dev": "bypass"}}
     assert client.put(f"/api/ws/{CORPUS}/settings", json=bypass).status_code == 403
-    assert client.post("/api/ui/key", json={"key": "a guess"}).status_code == 403
-    assert client.post("/api/ui/key", json={"key": UI_KEY}).status_code == 204
+    assert client.post("/api/ui/key", json={"code": "a guess"}).status_code == 410
+    sign_in(client, hook_auth.mint(CORPUS))
     for key, value in (("kernel_wrap", "none"), ("orient_instructions", "x"), ("card_check", False), ("anything", 1),
                        ("permission_modes", {"dev": "yolo"}), ("permission_modes", {"main": "bypass"})):
         r = client.put(f"/api/ws/{CORPUS}/settings", json={"run_cell_result_lines": 20, key: value})
@@ -67,7 +67,7 @@ def test_a_subagent_s_web_switch_takes_the_analyst_s_cookie_and_goes_to_thimble_
     how long a code ticket's request waits."""
     off = {"web": {"critic": "off"}}
     assert client.put(f"/api/ws/{CORPUS}/settings", json=off).status_code == 403
-    assert client.post("/api/ui/key", json={"key": UI_KEY}).status_code == 204
+    sign_in(client, hook_auth.mint(CORPUS))
     for bad in ({"orient": "off"}, {"critic": "allow"}, ["critic"]):
         assert client.put(f"/api/ws/{CORPUS}/settings", json={"web": bad}).status_code == 400, bad
     got = client.put(f"/api/ws/{CORPUS}/settings", json=off).json()

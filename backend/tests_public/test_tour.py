@@ -37,18 +37,18 @@ def test_an_unreadable_state_file_offers_the_tour_again():
 
 
 @pytest.mark.real_write_guard
-def test_only_the_browser_or_a_local_tool_records_the_offer(monkeypatch):
-    """Recording the offer is a write like any other: a page or a notebook kernel that proves neither the browser's
-    cookie nor the token records nothing."""
-    from conftest import UI_KEY, _record
+def test_only_a_signed_in_browser_records_the_offer(monkeypatch):
+    """Recording the offer is a write like any other: a page or a notebook kernel without a signed-in browser's cookie
+    records nothing."""
+    from conftest import UI_COOKIE_VALUE, UI_KEY_VALUE, _record_paired
 
     from app import hook_auth
 
     monkeypatch.delenv("THIMBLE_DEV", raising=False)
     monkeypatch.setenv("THIMBLE_PORT", "8300")
-    _record(ui_key=UI_KEY)
+    _record_paired(UI_COOKIE_VALUE)
     c = TestClient(main.create_app(), base_url="http://testserver")
     assert c.post("/api/tour/seen").status_code == 403
     assert c.get("/api/tour").json() == {"seen": False}
-    c.cookies.set(hook_auth.ui_cookie(), UI_KEY)
-    assert c.post("/api/tour/seen").json() == {"seen": True}
+    c.cookies.set(hook_auth.ui_cookie(), UI_COOKIE_VALUE)
+    assert c.post(f"/b/{UI_KEY_VALUE}/api/tour/seen").json() == {"seen": True}  # under the page's key (hook_auth)

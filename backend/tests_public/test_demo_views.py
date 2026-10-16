@@ -1,5 +1,5 @@
 """scripts/dev/demo_views.py, which scripts/sync_demo_views.sh runs: reviewed views go into a demo pre-cache in place of
-the orientation's own, each as the server serves it, renamed, and stamped with the digest of the files written, so
+the pre-cache's own, each as the server serves it, renamed, and stamped with the digest of the files written, so
 install keeps that version and the view shows at once."""
 from __future__ import annotations
 
@@ -190,3 +190,23 @@ def test_every_demo_view_is_stamped_with_the_digest_of_its_files_and_listed_as_i
             if p.is_file():
                 body = p.read_bytes()
                 assert (f["bytes"], f["sha256"]) == (len(body), hashlib.sha256(body).hexdigest()), f"{man.parent.name}: {f['path']}"
+
+
+# the kit's parts that draw a view's records, which the view builder's prompt asks a view to use rather than parts of
+# its own (prompts/dev-view.md)
+KIT_RECORD_PARTS = ("thimble.table(", "thimble.tree(", "thimble.transcript(", "thimble.messages(", "thimble.record(",
+                    "thimble.text(", "thimble.diff(")
+
+
+def test_every_demo_view_finds_and_draws_its_records_with_the_kit_s_parts():
+    """`thimble demo` shows the lists, strips, search and record panels the analyst's own workspace shows: each demo view
+    finds with the kit's search and draws its records with the kit's parts, as a view this version's builder makes does.
+    A view made before those parts drew its own list, search and record panel, which looked and scrolled unlike the rest
+    of thimble (scripts/sync_demo_views.sh puts views built again in their place)."""
+    pages = sorted((ROOT / "demos").glob("*/workspace/extension/views/*/view.html"))
+    assert pages
+    for page in pages:
+        text = page.read_text()
+        name = f"{page.parents[4].name}/{page.parent.name}"
+        assert "thimble.search(" in text, f"{name} finds with a search of its own, not the kit's"
+        assert any(p in text for p in KIT_RECORD_PARTS), f"{name} draws its records with no part of the kit"

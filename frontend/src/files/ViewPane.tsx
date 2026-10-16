@@ -7,8 +7,8 @@
 // At the head's right end, the mark of the review of the view's pictures (ReviewMark). The head offers no other view and
 // no Raw: a file's own modes (Transcript, Table, Raw, its viewers) are the File browser's. The view's label controls
 // open the label editor in a popover over the view, beside the control that asked (LabelEditor), so nothing moves.
-// The pane keeps the version of the view it opened (usePinnedView): a newer one, from a change, the review or the
-// orientation, never reloads under the analyst. The head says Updated with Reload, which loads it where they were: the
+// The pane keeps the version of the view it opened (usePinnedView): a newer one, from a change or the review, never
+// reloads under the analyst. The head says Updated with Reload, which loads it where they were: the
 // element they picked or the record the side panel shows (none once they closed it), the scroll positions, the fields
 // and the label filter. Undo in the review's mark loads at once.
 import { useEffect, useMemo, useState } from 'react'
@@ -16,6 +16,7 @@ import { Button } from '../components/Button'
 import { CheckMark } from '../components/CheckMark'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
+import { demoStop } from '../lib/demo'
 import { refreshProposals } from '../lib/proposals'
 import { refPath } from '../lib/refs'
 import { track } from '../lib/telemetry'
@@ -101,7 +102,7 @@ export function ViewPane({ ws, view, path, picked, targetRef, quote, onQuoteMiss
           <span className="view-pane-name">{view.name}</span>
           <ViewHeadLine ws={ws} name={view.name} notes={notes} shownLabels={shownLabels} residueOpen={residueOpen} onResidue={toggleResidue} files={{ list: files, n: view.n_files ?? files.length, onPick: openFile }} libs={view.libs} />
         </div>
-        {pin.stale && <ViewUpdated onReload={reload} className="view-pane-updated" />}
+        {pin.stale && <ViewUpdated onReload={reload} onDismiss={pin.dismiss} className="view-pane-updated" />}
         {filter && filterLabel && <ViewFilter ws={ws} filter={filter} name={filterLabel.name} hidden={hidden} className="view-pane-filter" />}
         {view.review && <ReviewMark ws={ws} slug={view.slug} review={view.review} onUndo={pin.follow} />}
       </div>
@@ -114,13 +115,10 @@ export function ViewPane({ ws, view, path, picked, targetRef, quote, onQuoteMiss
   )
 }
 
-/** The rounds a view's reviewer looks at its pictures, at most (backend view_review.ROUNDS, counted by finish_review). */
-export const REVIEW_ROUNDS = 2
-
 /** What the review's mark says of its state, in one line. */
 export function reviewLine(r: ViewReview): string {
   const at = hhmm(r.ts)
-  if (r.state === 'running') return r.round ? `Reviewing the view's pictures, round ${r.round} of ${REVIEW_ROUNDS}` : "Reviewing the view's pictures"
+  if (r.state === 'running') return "Reviewing the view's pictures"
   if (r.state === 'queued') return r.note || 'Waits for a free subagent'
   if (r.state === 'failed') return r.note || 'The review did not finish'
   if (r.state === 'stopped') return (at ? `Stopped at ${at}` : 'Stopped') + (r.note ? `: ${r.note.replace(/\.$/, '')}` : '')
@@ -177,7 +175,8 @@ export function ReviewMark({ ws, slug, review: r, onUndo }: { ws: string; slug: 
     void call()
       .then(() => refreshProposals(ws))
       .catch((e: Error) => bus.emit('toast', { text: `Could not ${what}. ${e.message}`, kind: 'error' }))
-  const again = act(() => api.viewReviewAgain(ws, slug), 'review the view again')
+  const reviewAgain = act(() => api.viewReviewAgain(ws, slug), 'review the view again')
+  const again = () => demoStop() || reviewAgain()
   const stop = act(() => api.viewReviewStop(ws, slug), 'stop the review')
   const undo = act(() => (onUndo?.(), api.viewReviewUndo(ws, slug)), 'undo the revision')
   const line = reviewLine(r)

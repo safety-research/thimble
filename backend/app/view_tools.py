@@ -38,8 +38,8 @@ FINISH_GRACE_S = 120.0  # after a pass or the last attempt, how long the agent m
 # the fixed descriptions main's agent list shows (V5: main keeps the first description it sees)
 BUILDER_DESCRIPTION = ("thimble's builder of one view of the analyst's corpus. thimble starts it, or gives the exact "
                        "Agent call that starts it.")
-REVIEWER_DESCRIPTION = ("thimble's reviewer of one view it built: it looks at pictures of the view and fixes what it "
-                        "finds. thimble starts it.")
+REVIEWER_DESCRIPTION = ("thimble's reviewer of one view it built: it looks at pictures of the view and fixes clear "
+                        "problems in how it draws. thimble starts it.")
 UNCHANGED_REPORT = "the view's files are as they were before the change, so the change is not made yet"
 NOT_YOURS = "{tool} is the tool of the agent thimble started for this view, and this call is not that agent's"
 
@@ -83,7 +83,8 @@ def reviewer_definition(c: str) -> dict[str, Any]:
 
     with prompts.custom(tasks.files(c, view_review.PROMPT)):
         prompt = view_review.reviewer_prompt(c)
-    return {"description": REVIEWER_DESCRIPTION, "prompt": prompt, "disallowedTools": tools.not_own(REVIEWER_TOOLS)}
+    return {"description": REVIEWER_DESCRIPTION, "prompt": prompt,
+            "disallowedTools": [*tools.not_own(REVIEWER_TOOLS), "Monitor"]}  # a review ends with its turn
 
 
 # --------------------------------------------------------------------------- the caller
@@ -301,13 +302,11 @@ async def tool_finish_review(ctx: Any, args: dict[str, Any]) -> Any:
 
 
 def fenced_proposal(prop: dict[str, Any]) -> str:
-    """The proposal's fields (what the analyst sees, the files, its spec) fenced as data, since an agent wrote them."""
+    """The proposal's fields (what the analyst sees, what they do with it, the files, any layout it gave:
+    views.proposal_lines) fenced as data, since an agent wrote them."""
     from . import dev, views  # noqa: PLC0415
 
-    text = "\n".join(x for x in (f"- What the analyst sees in it and why that helps: {prop.get('why') or ''}",
-                                 f"- The files it reads: {', '.join(prop.get('claims') or [])}",
-                                 views.spec_lines(prop)) if x)
-    return dev.fenced("the proposal", text)
+    return dev.fenced("the proposal", views.proposal_lines(prop))
 
 
 async def shutdown() -> None:

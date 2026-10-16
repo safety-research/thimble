@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 // thimble's start page (src/shell/StartPage.tsx) and the top bar's switcher (TopBar WorkspaceSwitcher), which draw the
-// server's workspaces (GET /workspaces) in the groups Demo, Examples and Your folders, an empty group left out, each row
+// server's workspaces (GET /workspaces) in the groups Demo, Examples and Your folders, an empty group left out, under one
+// line that says the demo datasets are example data while one is listed, each row
 // a link to its workspace, a demo shown by its dataset's name rather than its workspace's demo-<dataset>, and a demo or an
 // example opened at the view its row names. A URL with no workspace, or with one the server does not hold, is the start
 // page (App), and one naming a workspace renamed since goes to its new name; a workspace opened the first time without a
@@ -9,6 +10,8 @@ import { act } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import App from '../../src/App.tsx'
 import { bus } from '../../src/lib/bus.ts'
+import { DEMO_START_LINE } from '../../src/lib/demo.ts'
+import { CODE_GONE_TEXT, showCodeGone } from '../../src/lib/notices.ts'
 import type { CorpusInfo, WorkspaceRow } from '../../src/lib/types.ts'
 import { groupWorkspaces, openingRef, renamedTo, storageKey, withWorkspace, workspaceHref, workspaceLabel } from '../../src/lib/workspace.ts'
 import { WorkspaceSwitcher } from '../../src/shell/TopBar.tsx'
@@ -38,6 +41,7 @@ beforeEach(() => {
     fetched.push(url)
     const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
     if (url === '/api/workspaces') return json(served)
+    if (url === '/api/ui/key') return new Response(null, { status: 204 })
     if (url === '/api/corpora') return json(served.map((r) => ({ name: r.name, manifest: {}, path: r.path })) satisfies CorpusInfo[])
     return new Response('{}', { status: 404, headers: { 'content-type': 'application/json' } })
   })
@@ -59,12 +63,21 @@ test('the groups come in order, each with its rows, and an empty group is left o
   expect(groupWorkspaces([])).toEqual([])
 })
 
-test('a row opens its workspace, a demo or an example at its view, and keeps a page key the server has not taken yet', () => {
+test('a row opens its workspace, a demo or an example at its view, and carries no sign-in code, which works once', async () => {
   expect(workspaceHref(ROWS[0])).toBe('/?ws=demo-collusion-wiki&ref=view%3Awiki-page-history')
   expect(workspaceHref(ROWS[1])).toBe('/?ws=demo-mythos-5') // no view: Files
   expect(workspaceHref(ROWS[2])).toBe('/?ws=example-timeline&ref=view%3Atimeline')
-  expect(workspaceHref(ROWS[3], '/', '#k=abc')).toBe('/?ws=logs#k=abc')
-  expect(workspaceHref(ROWS[3], '/', '#other=1')).toBe('/?ws=logs')
+  expect(workspaceHref(ROWS[3], '/')).toBe('/?ws=logs')
+  // a start page opened from a link with a code (`thimble up`, `thimble demo`)
+  window.history.replaceState(null, '', '/#p=abc')
+  const el = await mount(<App />)
+  await settle()
+  expect([...el.querySelectorAll<HTMLAnchorElement>('a.ws-row')].map((a) => a.getAttribute('href'))).toEqual([
+    '/?ws=demo-collusion-wiki&ref=view%3Awiki-page-history',
+    '/?ws=demo-mythos-5',
+    '/?ws=example-timeline&ref=view%3Atimeline',
+    '/?ws=logs',
+  ])
 })
 
 test('a URL with no workspace is the start page: a title and the rows, each a link to its workspace', async () => {
@@ -90,8 +103,38 @@ test('a URL with no workspace is the start page: a title and the rows, each a li
   expect(logs.textContent).toContain('~/data/logs')
   expect(el.querySelector('[aria-current]')).toBeNull()
   expect(el.querySelector('.start-missing')).toBeNull()
-  // no paragraph explains anything: the title, the group titles and the rows
-  expect(el.querySelectorAll('p').length).toBe(0)
+  // no paragraph explains anything: the title, the line that says the demo datasets are example data, the group titles
+  // and the rows
+  expect([...el.querySelectorAll('p')].map((p) => p.className)).toEqual(['start-demo'])
+})
+
+test('while a demo dataset is listed, the line under the title says it is example data, not your files, and how to open your own folder', async () => {
+  const el = await mount(<App />)
+  await settle()
+  const line = el.querySelector('.start-title + .start-demo') as HTMLElement
+  expect(DEMO_START_LINE).toBe('The demo datasets are example data, not your files. To open your own folder, run `thimble` in it.')
+  expect(line.textContent).toBe('The demo datasets are example data, not your files. To open your own folder, run thimble in it.')
+  expect([...line.querySelectorAll('code')].map((c) => c.textContent)).toEqual(['thimble'])
+  // with no demo dataset, no line, and no other paragraph
+  unmountAll()
+  served = ROWS.filter((r) => r.kind !== 'demo')
+  const mine = await mount(<App />)
+  await settle()
+  expect(mine.querySelectorAll('a.ws-row').length).toBe(2)
+  expect(mine.querySelector('.start-demo')).toBeNull()
+  expect(mine.querySelectorAll('p').length).toBe(0)
+})
+
+test("a link's sign-in code that is gone shows under the title, and its × takes it away with no request", async () => {
+  const el = await mount(<App />)
+  await settle()
+  expect(el.querySelector('.start-notices')).toBeNull()
+  await act(async () => showCodeGone())
+  expect(el.querySelector('.start-notices .chat-notice-text')?.textContent).toBe(CODE_GONE_TEXT.replace(/`/g, ''))
+  const before = fetched.length
+  await act(async () => el.querySelector<HTMLButtonElement>('.start-notices .chat-notice-x')!.click())
+  expect(el.querySelector('.start-notices')).toBeNull()
+  expect(fetched.slice(before)).toEqual([])
 })
 
 test('a row shows the server\'s label, else a folder\'s name, a demo\'s dataset or the workspace\'s name', () => {
@@ -99,7 +142,8 @@ test('a row shows the server\'s label, else a folder\'s name, a demo\'s dataset 
   expect(workspaceLabel({ name: 'demo-x', kind: 'demo', folder: 'x' })).toBe('demo-x')
   expect(renamedTo(ROWS, 'collusion-wiki-2')).toBe('demo-collusion-wiki')
   expect(renamedTo(ROWS, 'gone-folder')).toBeNull()
-  expect(withWorkspace('demo-collusion-wiki', '/', '?ws=collusion-wiki-2&ref=card%3Ac1', '#k=abc')).toBe('/?ws=demo-collusion-wiki&ref=card%3Ac1#k=abc')
+  expect(withWorkspace('demo-collusion-wiki', '/', '?ws=collusion-wiki-2&ref=card%3Ac1', '#p=abc')).toBe('/?ws=demo-collusion-wiki&ref=card%3Ac1')
+  expect(withWorkspace('demo-collusion-wiki', '/', '?ws=collusion-wiki-2', '#k=abc&x=1')).toBe('/?ws=demo-collusion-wiki#x=1')
 })
 
 test('a URL naming a workspace renamed since goes to its new name, and the workspace\'s browser state goes with it', async () => {

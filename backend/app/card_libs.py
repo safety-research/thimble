@@ -1,14 +1,13 @@
 """The libraries a custom card's page loads, inlined into its frame, so the card draws charts by hand in any library
 while the frame still loads nothing from the network (its policy is the app's, http_guard.APP_CSP).
 
-A custom card names them in its payload's `libs`, in view.json's words (view_libs): `vega`, `vega-lite` and
-`vega-embed` are thimble's own builds (views.LIBS, which every install ships), each with what it needs ahead of it, and
-any other entry is an npm package as name@version. Main installs a package with its own Bash call, `npm install
---ignore-scripts --cache .npm-cache <name>@<version>` in the workspace's card-libs folder (FOLDER, which main's fence
-lets its Bash write), and Claude Code's permission mode decides it, as any install. add_card then bundles it into that
-folder's lib/ (ensure: view_libs.ensure, which keeps the other cards' packages), recorded in lib/libs.json with its
-version and SHA-256; the frame takes it from there (head), so the card draws offline, and a bundle whose bytes no longer
-match its hash is not loaded.
+A custom card names them in its payload's `libs`, in view.json's words (view_libs): `vega`, `vega-lite` and `vega-embed`
+are thimble's own builds (views.LIBS, which every install ships), each with what it needs ahead of it, and any other
+entry is an npm package as name@version. Main installs a package with its own Bash call, `npm install --ignore-scripts
+--cache .npm-cache <name>@<version>` in the workspace's card-libs folder (FOLDER), and Claude Code's permission mode
+decides it, as any install. add_card then bundles it into that folder's lib/ (ensure: view_libs.ensure, which keeps the
+other cards' packages), recorded in lib/libs.json with its version and SHA-256; the frame takes it from there (head), so
+the card draws offline, and a bundle whose bytes no longer match its hash is not loaded.
 
 The browser asks GET /api/ws/{c}/card-libs?libs=<entries, comma-separated> for the page's head (frontend
 lib/frame.ts useCardLibs); the card harness carries the same answer in its request (render.request_for)."""

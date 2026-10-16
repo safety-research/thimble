@@ -22,14 +22,16 @@ stdin, `{"input": {...}}`, and in the file `$THIMBLE_INPUT`:
 
 | role | input | its thimble tools | what it returns |
 |---|---|---|---|
-| orientation | `request`, `outputs`, `follow_up`, `choices`, `cards`, `corpus`, `tools` | `read_ref`, `list_cards`, `add_card`, `edit_card`, `delete_card`, `apply_label`, `propose_view`, `screenshot` (as `outputs` allows) | the line main hears |
+| orientation | `request`, `outputs` (always `["final"]`, the deck), `follow_up`, `choices` (`effort`), `cards`, `corpus`, `tools` | `read_ref`, `list_cards`, `add_card`, `edit_card`, `delete_card`, `apply_label`, `screenshot` | the line main hears |
 | critic | `digest` (what thimble's critic reads), `transcript`, `context` | `read_ref`, `list_cards` | the report the orientation's `critique` call returns |
 | writer | `doc`, `type`, `request`, `after`, `context` | `read_ref`, `list_cards`, `add_card`, `edit_card`, `delete_card`, `screenshot`, `write_document`, `edit_document` | the line main hears |
-| dev | one turn of a view build: `slug`, `name`, `description`, `scope`, `spec`, `change`, `folder`, `corpus`, `examples`, `message` | `read_ref` | the turn's reply; thimble then checks the view's files in `folder` and runs the program again with what failed in `message` |
+| dev | one turn of a view build: `slug`, `name`, `description` (what the analyst sees), `analyst_task` (what they do with the view), `scope`, `spec` (the layout an older proposal or a file type's viewer gave, else empty), `change`, `folder`, `corpus`, `examples`, `message` | `read_ref` | the turn's reply; thimble then checks the view's files in `folder` and runs the program again with what failed in `message` |
 
 An orientation program runs again for a follow-up: a message to the orientation arrives as `request`, with
 `follow_up` true and the cards as they stand in `cards`, so it adds to them. Switching the extension on where an
 orientation already ran makes Settings offer Run now, which runs the program the same way with the earlier `request`.
+When an orientation program fails, a notice that names the orientation and gives the end of its stderr shows above the
+reply box of the chat the analyst has open, or above the prompt in terminal mode.
 
 ## Tasks
 
@@ -44,7 +46,7 @@ answers or check one.
 | labels | `label` (`name`, `unit`, `definition`, `values`, `marks`, `examples`, `comment`, `model`?), `items` (`i`, `ref`, `text`) | `read_ref` | `{labels: [{i, label, confidence, rationale?, quote?}]}`, one entry per item |
 | label-draft | `description`, `paths`, `records` (`paths`, `path`, `cut`, `lines`) | `read_ref` | a label: `{name, scope, kind, text, values, marks?}` |
 | card-check | `card` (`id`, `kind`, `question`, `takeaway`, `citations`, `code`, `context`, `typed`, `kept`), `picture` (a PNG's path, or null), `effort` | `read_ref` | `{assessment: [{problem}] × 5, question, code, takeaway}`, the replacement card |
-| view-review | `view` (`slug`, `name`, `description`, `claims`, `spec`, `checks`), `pictures` (`path`, `about`), `controls`, `records`, `ask` (false) | `read_ref` | `{problems: [...]}`, which thimble's reviewer then fixes; it asks for more pictures itself, and `thimble.default` has no reading to lend |
+| view-review | `view` (`slug`, `name`, `description`, `task`, `claims`, `spec`, `checks`), `pictures` (`path`, `about`), `controls`, `records`, `ask` (false) | `read_ref` | `{problems: [...]}`, which thimble's reviewer then fixes; it asks for more pictures itself, and `thimble.default` has no reading to lend |
 | view-fit | `view` (`name`, `description`), `files`, `samples` | `read_ref` | `{fits, reason}` |
 | file-viewer | `path`, `size`, `count`, `suffix`, `what`, `head` | `read_ref` | `{help, name, why, arrangement}`, the words empty when a viewer would not help |
 | checks | `check` (`id`, `name`, `prompt`), `doc`, `passages` (`ref`, `kind`, `anchor`), `context` | `read_ref`, `list_cards`, `add_comment` | the run's summary line; its comments go through `add_comment` |
@@ -135,8 +137,8 @@ its own included.
 - **Your data** (`data`, `ask` by default): an edit of a file in the corpus goes to you first in every permission mode.
   `allow` leaves it to the permission mode, and `off` refuses it. The program itself can't ask, so in its sandbox it
   writes the corpus only with `allow`. Its sessions' edits are asked.
-- **thimble's key**: no agent, program or session can read `server.json`, which holds the local API's token, or
-  `session.key`, which proves which session a call comes from. A program uses its own token instead, and can't read
-  Claude Code's credentials file either.
+- **thimble's token**: a program gets a token of its own, valid only for its role's tools and only while it runs. In its
+  sandbox it can't read `server.json`, which holds the local API's token, `session.key`, `paired.json` or Claude Code's
+  credentials file. Where its sandbox can't run, it can, and thimble shows a notice the first time it runs.
 - A program's sessions run in your Claude Code session's permission mode and ask for permission on the agent's card in
   the browser.

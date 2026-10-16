@@ -42,7 +42,7 @@ const MESSAGES = [
 ]
 const CHAT = page(`<div class="top"><span id="search"></span><span id="colour"></span></div><div id="msgs"></div>
 <script>
-window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'author', title: 'Author' }, { name: 'room', title: 'Room' }], strip: '#msgs' })
+window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'author', title: 'Author' }, { name: 'room', title: 'Room' }], initial: 'author', strip: '#msgs' })
 window.search = thimble.search({ mount: '#search', in: '#msgs' })
 window.conv = thimble.messages({ mount: '#msgs' })
 conv.draw(${JSON.stringify(MESSAGES)}, { title: '# review-swaps' })

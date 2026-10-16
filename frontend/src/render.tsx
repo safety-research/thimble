@@ -11,6 +11,7 @@ import { CardFace } from './canvas/CardFace'
 import { CARD_PAD_X } from './canvas/Cell'
 import { CanvasContext, type CanvasCtx } from './canvas/context'
 import { kindOf } from './canvas/layout'
+import { apiPath } from './lib/browserKey'
 import { registerCells, registerConcepts } from './lib/cellName'
 import { setAccent, setPaper, type Accent, type Paper } from './lib/theme'
 import type { Cell, Concept, ConceptDetail } from './lib/types'
@@ -29,8 +30,7 @@ export interface RenderRequest {
   calls?: Record<string, unknown>
   theme: { paper: Paper; accent: Accent }
   width: number
-  /** a label card's label as the API returns it: GET /concepts/{id}, the first rows of each value as GET
-   * /concepts/{id}/rows?text=1 returns them, and the workspace's settings */
+  /** a label card's label as the API returns it: GET /concepts/{id}, and the workspace's settings */
   label?: LabelData | null
   /** a card type's page by type, as GET /ws/{c}/cardtypes/{type}/frame returns it, for a card of a card type */
   frames?: Record<string, string>
@@ -40,7 +40,6 @@ export interface RenderRequest {
 
 export interface LabelData {
   concept: ConceptDetail
-  rows: Record<string, unknown[]>
   settings?: Record<string, unknown>
 }
 
@@ -73,6 +72,7 @@ let n = 0
 const realFetch = window.fetch.bind(window)
 window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
   const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, location.href)
+  url.pathname = apiPath(url.pathname) // a path under a browser's key (lib/browserKey) stands for its API path
   if (!url.pathname.startsWith('/api/')) return realFetch(input, init)
   const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
   if (/^\/api\/corpora\/[^/]+\/ref$/.test(url.pathname)) {
@@ -90,10 +90,6 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
     return json(200, current?.labels ?? [])
   } else if (current?.label && /^\/api\/ws\/[^/]+\/concepts\/[^/]+$/.test(url.pathname)) {
     return json(200, current.label.concept)
-  } else if (current?.label && /^\/api\/ws\/[^/]+\/concepts\/[^/]+\/rows$/.test(url.pathname)) {
-    const all = current.label.rows[url.searchParams.get('value') ?? ''] ?? []
-    const rows = all.slice(0, Number(url.searchParams.get('limit') ?? all.length) || all.length)
-    return json(200, { rows, total: all.length, next: null })
   } else if (current?.label && /^\/api\/ws\/[^/]+\/settings$/.test(url.pathname)) {
     return json(200, current.label.settings ?? {})
   } else if (/^\/api\/ws\/[^/]+\/card-libs$/.test(url.pathname)) {

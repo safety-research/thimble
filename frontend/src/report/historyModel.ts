@@ -45,6 +45,8 @@ export interface HistoryRow {
   writer: string | null
   /** the earlier saves of its run, oldest first */
   revisions: RevisionRow[]
+  /** the draft or save a Restore made current again as this draft */
+  restored: DraftRef | null
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -79,10 +81,10 @@ export function changesOf(v: Pick<DocVersion, 'n' | 'summary'>): string[] {
 
 const wordsLabel = (w: number | null | undefined) => (w != null ? `${w.toLocaleString('en-US')} ${w === 1 ? 'word' : 'words'}` : '')
 
-/** The rows of a history, newest first as the server lists them. */
+/** The rows of a history, newest first as the server lists them. A restored draft says which draft it restored. */
 export function historyRows(h: DocHistory | null | undefined, now: Date = new Date()): HistoryRow[] {
   const sorted = [...(h?.versions ?? [])].sort((a, b) => b.n - a.n)
-  return sorted.map((v, k) => ({
+  const rows: HistoryRow[] = sorted.map((v, k) => ({
     n: v.n,
     label: `Draft ${sorted.length - k}`,
     when: whenLabel(v.ts, now),
@@ -97,7 +99,10 @@ export function historyRows(h: DocHistory | null | undefined, now: Date = new Da
     revisions: [...(v.revisions ?? [])]
       .sort((a, b) => a.i - b.i)
       .map((r) => ({ i: r.i, label: `Save ${r.i}`, when: whenLabel(r.ts, now), ts: r.ts, words: wordsLabel(r.words), available: r.available })),
+    restored: v.restored ? { n: v.restored.n, rev: v.restored.rev ?? null } : null,
   }))
+  for (const r of rows) if (r.restored) r.changes = [`Restored ${draftName(rows, r.restored)}`, ...r.changes]
+  return rows
 }
 
 /** Whether two refs name the same save. */

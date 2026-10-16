@@ -3,8 +3,8 @@
 // agent, says why on one line in the words of whoever refused (Claude Code's auto mode, main's own reply, Claude Code's
 // subagent limit, thimble's own check, or no hooks module), shows the request in full (the text the agent would get,
 // its role, model and effort) since main may have written it, and offers the kind's buttons (refusalActions): Start it
-// (a click through thimble's plugin: the analyst's own approval, which auto mode does not judge), Edit request, Try
-// again and Dismiss. Every button is a click, which the server takes only with the analyst's cookie (403 otherwise).
+// (a click through thimble's plugin: the analyst's own approval, which auto mode does not judge), Try again and
+// Dismiss. Every button is a click, which the server takes only with the analyst's cookie (403 otherwise).
 import { useEffect, useState } from 'react'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
@@ -17,13 +17,13 @@ import type { ChatMeta, Refusal, RefusalKind, StartAnswer, SubagentRequest } fro
 import { useChatMetas } from './waiting'
 
 /** The buttons a refused start offers, by its kind (plan section 2, "A start that does not happen"). */
-export type RefusedAction = 'start-it' | 'edit' | 'try-again' | 'dismiss'
+export type RefusedAction = 'start-it' | 'try-again' | 'dismiss'
 
-/** The kind's buttons: Start it and Edit request for a typed start auto mode refused or main did not make; Try again
+/** The kind's buttons: Start it for a typed start auto mode refused or main did not make; Try again
  * at Claude Code's subagent limit and for a click thimble's module did not answer in time; Dismiss always. Never Try
  * again on an auto-mode refusal, whose text tells main not to pursue it again. Pure. */
 export function refusalActions(kind: RefusalKind | null | undefined, expired = false): RefusedAction[] {
-  if (kind === 'auto-mode' || kind === 'no-call') return ['start-it', 'edit', 'dismiss']
+  if (kind === 'auto-mode' || kind === 'no-call') return ['start-it', 'dismiss']
   if (kind === 'limit') return ['try-again', 'dismiss']
   if (kind === 'no-module' && expired) return ['try-again', 'dismiss']
   return ['dismiss']
@@ -116,7 +116,7 @@ function answered(what: string, a: StartAnswer): boolean {
   return false
 }
 
-export function RefusedCard({ ws, what, refusal, text, onDismiss, onEdit, onStarted, className = '' }: {
+export function RefusedCard({ ws, what, refusal, text, onDismiss, onStarted, className = '' }: {
   ws: string
   /** the agent, as the head names it: "the orientation", "the report's writer", "the view Posts" */
   what: string
@@ -124,15 +124,13 @@ export function RefusedCard({ ws, what, refusal, text, onDismiss, onEdit, onStar
   /** the request as the analyst or main wrote it, when the record keeps it apart from the full task */
   text?: string | null
   onDismiss?: () => void
-  /** Edit request: the start's own form, filled in (the Start gate) */
-  onEdit?: () => void
   onStarted?: (a: StartAnswer) => void
   className?: string
 }) {
   const rid = refusal.request ?? null
   const [req, setReq] = useState<SubagentRequest | null>(null)
   const [busy, setBusy] = useState<RefusedAction | null>(null)
-  const actions = refusalActions(refusal.kind, !!refusal.expired).filter((a) => (a === 'edit' ? !!onEdit : a === 'dismiss' ? !!onDismiss : !!rid))
+  const actions = refusalActions(refusal.kind, !!refusal.expired).filter((a) => (a === 'dismiss' ? !!onDismiss : !!rid))
   // at Claude Code's subagent limit, Try again waits until the chats count a free slot
   const limited = refusal.kind === 'limit'
   const metas = useChatMetas(ws, limited)
@@ -151,7 +149,6 @@ export function RefusedCard({ ws, what, refusal, text, onDismiss, onEdit, onStar
   }, [ws, rid])
   const act = (a: RefusedAction) => {
     if (a === 'dismiss') return onDismiss?.()
-    if (a === 'edit') return onEdit?.()
     if (!rid) return
     setBusy(a)
     track('ui-click', { target: `request:${rid}`, detail: { action: a, kind: refusal.kind } })
@@ -190,10 +187,6 @@ export function RefusedCard({ ws, what, refusal, text, onDismiss, onEdit, onStar
             ) : a === 'try-again' ? (
               <Button key={a} variant="secondary" size="sm" className="chat-refused-again" busy={busy === a} disabled={!!busy || !free} title={free ? undefined : WAIT_SLOT_LINE} onClick={() => act(a)}>
                 Try again
-              </Button>
-            ) : a === 'edit' ? (
-              <Button key={a} variant="secondary" size="sm" className="chat-refused-edit" disabled={!!busy} onClick={() => act(a)}>
-                Edit request
               </Button>
             ) : (
               <Button key={a} variant="ghost" size="sm" className="chat-refused-dismiss" disabled={!!busy} onClick={() => act(a)}>

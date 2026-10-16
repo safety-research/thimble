@@ -24,6 +24,8 @@ os.environ.setdefault("THIMBLE_RENDER", "off")
 os.environ.setdefault("THIMBLE_CARD_CHECK", "off")
 os.environ.setdefault("THIMBLE_VIEW_REVIEW", "off")
 os.environ.setdefault("THIMBLE_EXTENSION_VIEW_CHECKS", "off")
+# No view proposer run after a turn of main (proposer.py): the tests that need it turn it on.
+os.environ.setdefault("THIMBLE_PROPOSE_VIEWS", "off")
 # The suite's corpora are the synthetic ones, always: an inherited THIMBLE_DATA_DIR would point config.DATA_DIR at
 # real corpora. conftest is imported before any app module, so config reads this value.
 DATA = Path(tempfile.mkdtemp(prefix="thimble-tests-data-")).resolve()
@@ -198,7 +200,8 @@ def _thimble_home_off_the_user(tmp_path, monkeypatch):
 
 
 PLUGIN_TOKEN = "t0ken-of-the-test-server"
-UI_KEY = "ui-key-of-the-test-server"
+UI_COOKIE_VALUE = "cookie-of-the-test-browser"  # the cookie of a browser signed in to the test server (_record_paired)
+UI_KEY_VALUE = "key-of-the-test-browser"  # the key of that browser's path, /b/<key>/api/ (hook_auth.browser_path)
 
 
 def card_wait(minutes: float | None) -> float:
@@ -224,44 +227,137 @@ def _record(**values: str) -> None:
     p.write_text(json.dumps({**(json.loads(p.read_text()) if p.exists() else {}), **values}))
 
 
+def mark_open(home: Path, folder: Path | str) -> None:
+    """The marker /thimble and the `thimble` command leave in thimble's home `home` for a folder they opened
+    (<home>/active/<the path with each / made %>, for the path and its real path), which lets the plugin's hooks start
+    Python there (the shell gate of plugin/bin/.thimble-watch)."""
+    d = Path(home) / "active"
+    d.mkdir(parents=True, exist_ok=True)
+    for path in dict.fromkeys((str(folder), os.path.realpath(folder))):
+        (d / path.replace("/", "%")).touch()
+
+
+def earlier_orientation_proposal(c: str, name: str, description: str, claims: list[str], arrangement: str = "") -> str:
+    """A proposal as an orientation from before 0.8.0 stored it (views.propose with `orientation`, which 0.8.0 took out),
+    for the tests of what thimble still does with such a row: `orientation` and `held`, a follow-on start, announced as
+    queued (views._emit marks it held) and its build queued. Its slug."""
+    from app import views  # noqa: PLC0415
+
+    name = views.title_case(name)
+    with views._proposals_lock:
+        slug = views._unique_slug(c, name)
+        row = {"slug": slug, "name": name, "description": description, "task": "", "claims": list(claims),
+               "arrangement": arrangement, "proposed_by": "analyst", "status": "queued", "ts": views._now(),
+               "orientation": True, "held": True, "route": views.FOLLOW_ON}
+        views._save_proposals(c, [*views.list_proposals(c), row])
+    views._emit(c, slug, "queued")
+    views._queue(c, slug)
+    return slug
+
+
 @pytest.fixture()
 def plugin_headers():
     """A function giving the headers thimble's plugin sends to the routes only it may call (app/hook_auth.py), for a
-    fresh nonce each time, proving the token this fixture records in the test's server.json."""
+    fresh nonce each time, proving the token this fixture records in the test's server.json to the server at `url`: by
+    default TestClient's and httpx.ASGITransport's, on port 80; a live server's base URL for one."""
     from app import hook_auth
 
     _record(token=PLUGIN_TOKEN)
-    return lambda: hook_auth.headers(PLUGIN_TOKEN, os.urandom(8).hex())
+    return lambda url="http://testserver": hook_auth.headers(PLUGIN_TOKEN, hook_auth.port_of(url))
 
 
-@pytest.fixture()
-def analyst():
-    """A request from the analyst's browser as the routes that change permission modes take it: it carries the cookie of
-    the ui_key this fixture records in the test's server.json (app/hook_auth.py)."""
+def _record_paired(cookie: str = UI_COOKIE_VALUE, key: str = UI_KEY_VALUE) -> None:
+    """A browser signed in to the test server with the cookie `cookie` and the key `key`: the sha256 of both among
+    hook_auth's signed-in browsers and in the test's paired.json, as a claim of a link's code leaves them."""
+    from app import hook_auth
+
+    with hook_auth._pair_lock:
+        held = [e for e in hook_auth._entries() if e["hash"] != hook_auth._sha(cookie)]
+        hook_auth._save([*held, {"hash": hook_auth._sha(cookie), "key": hook_auth._sha(key),
+                                 "at": "2026-10-15T00:00:00+00:00"}])
+
+
+def browser_base(base_url: str = "http://testserver", key: str = UI_KEY_VALUE) -> str:
+    """A TestClient's base_url under the path of the browser key `key` (hook_auth.browser_path), so that
+    `client.get("/api/x")` asks /b/<key>/api/x, as the page of a browser signed in with that key asks it."""
+    return f"{base_url.rstrip('/')}/b/{key}/"
+
+
+def sign_in(client, code: str, ws: str | None = None) -> str:
+    """Trade the link's code `code` at POST /api/ui/key as the page does (200 {key}), then send `client`'s later
+    requests under the path of that key (browser_base), as the page sends them: the cookie the claim set, scoped to
+    that path, goes with them. The key."""
+    r = client.post("/api/ui/key", json={"code": code, **({"ws": ws} if ws else {})})
+    assert r.status_code == 200 and r.json().get("key"), (r.status_code, r.text)
+    key = r.json()["key"]
+    client.base_url = browser_base(str(client.base_url), key)
+    return key
+
+
+def browser_request(cookie: str = UI_COOKIE_VALUE, key: str = UI_KEY_VALUE):
+    """A request as an analyst route takes it from the page of a browser holding `cookie` and `key`: the cookie, and
+    the key hook_auth.BrowserPath took off its path."""
     from starlette.requests import Request
 
     from app import hook_auth
 
-    _record(ui_key=UI_KEY)
-    return Request({"type": "http", "headers": [(b"cookie", f"{hook_auth.ui_cookie()}={UI_KEY}".encode())]})
+    return Request({"type": "http", "headers": [(b"cookie", f"{hook_auth.ui_cookie()}={cookie}".encode())],
+                    "state": {hook_auth.BROWSER_KEY_SCOPE: key}})
+
+
+@pytest.fixture()
+def analyst():
+    """A request from the analyst's browser as the analyst routes take it: it carries the cookie of a browser this
+    fixture signs in, under that browser's path (_record_paired, browser_request; app/hook_auth.py)."""
+    _record_paired(UI_COOKIE_VALUE)
+    return browser_request()
+
+
+@pytest.fixture(autouse=True)
+def _pairing_fresh():
+    """Every test starts with no sign-in code and reads the signed-in browsers from its own home, as a server does at
+    its start (hook_auth keeps both in memory)."""
+    from app import hook_auth
+
+    hook_auth._codes.clear()
+    hook_auth._shots.clear()
+    hook_auth._paired = None
+    yield
+    hook_auth._codes.clear()
+    hook_auth._shots.clear()
+    hook_auth._paired = None
 
 
 def pytest_configure(config):
     config.addinivalue_line(
         "markers", "real_write_guard: keep hook_auth.LocalWriteGuard on for a test (the suite bypasses it by default)")
+    config.addinivalue_line(
+        "markers", "real_read_guard: keep hook_auth.LocalReadGuard on for a test (the suite bypasses it by default)")
 
 
 @pytest.fixture(autouse=True)
 def _write_guard_off(request, monkeypatch):
-    """A test's TestClient stands in for thimble's own browser and plugin, which prove themselves to
-    hook_auth.LocalWriteGuard (the ui_key cookie or the token); the guard would otherwise refuse their writes as it
-    refuses a notebook kernel. Off by default so a route test needs no credential; a test marked `real_write_guard`
-    keeps the real guard."""
+    """A test's TestClient stands in for thimble's own browser, which proves itself to hook_auth.LocalWriteGuard with a
+    signed-in browser's cookie; the guard would otherwise refuse its writes as it refuses a notebook kernel. Off by
+    default so a route test of an analyst route needs no credential (a token route still needs plugin_headers); a test
+    marked `real_write_guard` keeps the real guard."""
     if "real_write_guard" in request.keywords:
         return
     from app import hook_auth
 
     monkeypatch.setattr(hook_auth, "write_guarded", lambda method, path: False)
+
+
+@pytest.fixture(autouse=True)
+def _read_guard_off(request, monkeypatch):
+    """As _write_guard_off, for reads: a test's TestClient stands in for the signed-in browser, which proves itself to
+    hook_auth.LocalReadGuard with its cookie, so a route test reads with no credential; a test marked
+    `real_read_guard` keeps the real guard."""
+    if "real_read_guard" in request.keywords:
+        return
+    from app import hook_auth
+
+    monkeypatch.setattr(hook_auth, "read_guarded", lambda method, path: False)
 
 
 @pytest.fixture(autouse=True)
@@ -483,6 +579,7 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setenv(cli.LAUNCHED_ENV, "1")
     monkeypatch.setattr(cli, "health_leader", lambda url=None: None)
     monkeypatch.setattr(cli, "foreign_home", lambda url=None: None)  # nor refuses one: another test covers that
+    monkeypatch.setattr(cli, "port_free", lambda p: True)  # nor passes over a live server's port (test_port.py does)
     monkeypatch.delenv(cli.SANDBOX_ENV, raising=False)
     return tmp_path / "home"
 
@@ -535,7 +632,8 @@ def named_sessions(monkeypatch) -> list[tuple]:
     from app import cli
 
     named: list[tuple] = []
-    monkeypatch.setattr(cli, "name_session", lambda url, name, session, cwd: named.append((name, session, str(cwd))))
+    monkeypatch.setattr(cli, "name_session",
+                        lambda url, name, session, cwd, **kw: named.append((name, session, str(cwd))))
     return named
 
 

@@ -4,9 +4,15 @@ Every view page has thimble's Color by control, `thimble.colorBy`, in its view k
 function, as is each British spelling of a name below, such as `colourOf`, a part's `colour` or `data-colour`). The
 page mounts it in its top row and draws its records with the color it chooses. Use it in place of a
 color control of your own, so that every view colors the same way. Color is one encoding at a time: only the Color by
-choice is drawn in colors, on the chips, the records' bars, the tracks and the chart marks. Show any other category of
-the view as text, a glyph or a gray pattern, never in a second palette. Filter by and Rows stand beside it in the top row
-([rows-and-filters.md](rows-and-filters.md)): they read a field or a label the way Color by does, and draw no color.
+choice is drawn in colors, on the chips, the records' bars, the tracks and the chart marks, apart from the status
+colors below. Show any other category of
+the view as text or a glyph, never in a second palette or in shades of gray, which read as an order. Values with a
+meaning people know may draw their glyph or word in thimble's status colors, as the diff's + and − and the timeline's
+problem ✕ do: an addition or a success in `var(--status-positive)`, a deletion or a failure in
+`var(--status-negative)`. Color by gives such a value its color when the page declares it (`values`, below: 3 green,
+13 red). Filter by and Rows
+stand beside it in the top row ([rows-and-filters.md](rows-and-filters.md)): they read a field or a label the way
+Color by does, and draw no color.
 
 - One menu, which takes several choices: Off, then the fields the view can color by under "Fields" and every label
   over files under "Labels", each with how many values it colors by and those values as chips on a line under its
@@ -26,8 +32,14 @@ the view as text, a glyph or a gray pattern, never in a second palette. Filter b
   or Filter by holds it. Checking a field or Off opens nothing.
 - Color by is thimble's small secondary button, with the first choice in it and how many more there are: "Color by:
   Kind", "Color by: Kind +1".
-- Off colors nothing anywhere: no chips, no bars, no lanes, the tracks a plain scrollbar, the lanes and the time range's
-  overview every record in gray, and the labels' texts highlighted in gray, a label on or not.
+- The view opens Off unless the page gives `initial`. Give it for the field the task depends on: the field when it has a
+  handful of values, such as an outcome or a source, and a few of its values when it has many. `initial` opens the view on a
+  field, or on a few values of a field: `initial: {field: 'outcome', on: ['error']}`
+  colors only the errors, and the records of the other values stay in gray, as values turned off. A label that is on
+  in thimble takes the color as the view opens (below).
+- Off colors by nothing: no chips, no bars, no lanes, the tracks a plain scrollbar, and the labels' texts highlighted
+  in gray, a label on or not. The marks then show one variable, so the timeline's marks, the time range's overview and
+  a chart's groups take the one series color, `var(--viz-1)`, as a chart of one series does.
 - The values of the chosen field show as key chips in the top row (`chip chip-key` in the view kit): a square of the
   value's color, its name and its count. The chip of the records with no value ("Not marked", "No kind") has the gray
   square the marks draw those records in. A click turns a value's color off or on. An Alt-click, or a double click,
@@ -47,7 +59,8 @@ the view as text, a glyph or a gray pattern, never in a second palette. Filter b
   records' bars, the tracks, and what the page draws through `colorOf`. A label's value keeps it as the label's color,
   in Files and every view; a field's value keeps it for this view, and Reset colors in the picker gives the field's
   values their own colors back. Red, purple and pink (places 13 to 18) are the analyst's to pick: no value takes them by
-  itself, so the problem red and the agents' purple keep their meaning, and a failed mark keeps a shape (✕) beside
+  itself, unless the page declares one for a value whose meaning it carries, such as red for a failure, so the problem
+  red and the agents' purple keep their meaning, and a failed mark keeps a shape (✕) beside
   its red so that it stays apart from a value picked red.
 - Color marks the unit its value belongs to: the records, the elements the page anchors (`data-anchor`). On a record,
   color is a 3 px bar on the left edge of its row or card; with several choices, a band per choice there, side by side
@@ -109,8 +122,8 @@ load()
 | option | what it is |
 |---|---|
 | `mount` | an element or a selector in the view's top row. The control fills it and takes the row's free width. |
-| `fields` | the view's own fields it can color by, in menu order: `{name, title, description?, values?, meanings?, value?}`. `name` is the field as the records hold it. `description` says what the field is, on its chips' hover and its menu row. `values` fixes the order of the values and their colors. A value given as `{name, color}` takes the label palette's color `color` (1 to 12: 1 blue, 2 orange, 3 green, 4 sky, 5 gold, 6 teal, 7 brown, 8 navy, 9 grass, 10 cerulean, 11 chestnut, 12 cyan), for example so that two values that often sit side by side do not take two blues; `{name, meaning}` says what the value means, on its chip's hover. `meanings`, `{value: meaning}`, says what values mean without declaring them, so they keep the order and colors the records give them. `value(record)` gives a record's value when it is not `record[name]`. |
-| `initial` | the field chosen before the analyst picks one; the first field by default |
+| `fields` | the view's own fields it can color by, in menu order: `{name, title, description?, values?, meanings?, value?}`. `name` is the field as the records hold it. `description` says what the field is, on its chips' hover and its menu row. `values` fixes the order of the values and their colors. A value given as `{name, color}` takes the picker's color `color` (1 to 18: 1 blue, 2 orange, 3 green, 4 sky, 5 gold, 6 teal, 7 brown, 8 navy, 9 grass, 10 cerulean, 11 chestnut, 12 cyan, then 13 red and 14 light red, 15 and 16 purple, 17 and 18 pink, which no value takes by itself), for example so that two values that often sit side by side do not take two blues, or so that a failure is red and a success green; purple stays thimble's color for agents' work; `{name, meaning}` says what the value means, on its chip's hover. `meanings`, `{value: meaning}`, says what values mean without declaring them, so they keep the order and colors the records give them. `value(record)` gives a record's value when it is not `record[name]`. |
+| `initial` | how the view opens until the analyst picks: a field's name, or `{field, on: [values]}`, that field with only those values colored and the others' records in gray. Without it, or with a name that is none of the fields, the view opens Off. Reset puts it back |
 | `chips` | does nothing: a value turned off keeps its records, in gray, whatever it says (`'filter'` hid them once). Filter by hides records ([rows-and-filters.md](rows-and-filters.md)) |
 | `strip` | the list that gets the tracks: an element, a selector, or `true` for the page |
 | `onChange(color)` | runs when the choice changes (Off among them), when a value is turned off or on, and when the values or colors of the label colored by change. Fetch and draw again here. |
@@ -138,9 +151,10 @@ load()
   shows, so a tab out of view counts nothing: `color.counts(map, el)` gives the counts of the records in `el`, such as
   a tab's list, as the kit's table gives those of its rows.
 - Draw charts in `color.colorOf(value)`, a color a canvas can draw. `colorOf` gives `null` for no value, for a value
-  turned off and for Off: draw those marks in one gray, and keep them.
+  turned off and for Off: with Off draw every mark in the series color, `var(--viz-1)`, and otherwise draw those marks
+  in one gray, `var(--viz-ink-3)`, and keep them.
 - A chart's key gives every series a mark drawn as the series is: a series in the Color by colors shows the chips'
-  colors (or the field's name), one in a single color its swatch, and with Off a gray swatch.
+  colors (or the field's name), one in a single color its swatch, and with Off a swatch in the series color.
 - Draw no color control, legend or label list of your own. The control is the page's label control: a view that
   mounts it passes the check that a view draws its labels' controls.
 - Where the page shows a value with its color outside the control, such as in a row's details, use the same key chip:
@@ -215,10 +229,11 @@ elements with the class `thimble-details`) grow into place. A new view uses the 
 
 ## Reset
 
-Reset shows at the end of the row while the view is not as it opens: a value turned off (Color by's or Filter by's), a
-series of a key turned off, a time range zoomed in, the side panel open, or a search field or select in Color by's row
-changed. It puts them back and keeps the choices of Color by, Filter by and Rows. Tell it the
-page's own state, such as a menu's choice or the row opened, with `thimble.onReset`:
+Reset shows at the end of the row while the view is not as it opens: another Color by choice, a value turned off
+(Color by's or Filter by's) or a value that `initial` leaves uncolored turned on, a series of a key turned off, a time
+range zoomed in, the side panel not as it opens, or a search field or select in Color by's row changed. It puts them
+back: Color by as `initial` says (Off without it, or the label that is on). It keeps the choices of Filter by and Rows.
+Tell it the page's own state, such as a menu's choice or the row opened, with `thimble.onReset`:
 
 ```js
 thimble.onReset({
@@ -227,9 +242,10 @@ thimble.onReset({
 })
 ```
 
-`reset()` runs after the kit has put back its chips, its time ranges and the row's fields (each field hears its own
-`input` and `change` events), and Color by's and the ranges' `onChange` are not called then: draw the page once there.
-A page that gives no `reset` hears those `onChange` calls instead. `onReset` returns `{check}`: call `check()` after
+`reset()` runs after the kit has put back Color by, its time ranges and the row's fields (each field hears its own
+`input` and `change` events), and the ranges' `onChange` are not called then: draw the page once there. Color by's
+`onChange` is called after it only when Reset changed Color by's choice, so the page fetches by the new choice. A page
+that gives no `reset` hears those `onChange` calls instead. `onReset` returns `{check}`: call `check()` after
 the page changes its state without a click or a key, so Reset shows or hides.
 
 ## In the reader
@@ -267,7 +283,7 @@ for a record the label does not mark.
 - A label the analyst turns on, in the menu or anywhere in thimble, takes the first place, the color, unless Rows groups
   the lanes by it ([rows-and-filters.md](rows-and-filters.md)): a field that was the color gives way, and a label that
   was keeps its lane. When it is turned off again it leaves the choices, and the next is the color; with none left, the
-  field chosen last.
+  field chosen last, else the view as it opens.
 - Every choice of Color by, Rows and Filter by the page mounts must draw the view, Off and None among them: the view
   checks try each in turn, and each control's first choice again after the others, and fail the view on the choice
   whose drawing gives a script error, naming it. Guard what the page reads of a choice that can be null (`rows.by`,
@@ -295,7 +311,7 @@ for a record the label does not mark.
 |---|---|
 | `by` | the first choice: `{field, title}` or `{label, title}` (the label's id and name), or `null` (Off, or nothing to color by) |
 | `picks` | every choice in order, the first the color and each other a lane of the tracks: `[{field, title}]` or `[{label, title}]`; none for Off |
-| `off` | whether the analyst chose Off |
+| `off` | whether the color is Off: as the view opens without `initial`, or when the analyst chose Off |
 | `field`, `label` | the field colored by, or the label's id; `null` for the other and for Off |
 | `values` | the chips' values: `[{value, name, color, on, n}]`, `value` `null` for no value, each value under "Other" in its place; none for Off |
 | `valueOf(record)` | a record's value: its field's, or for a label the label's value on `record.ref` (or on a ref given as a string); `null` for Off |

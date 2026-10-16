@@ -220,9 +220,8 @@ def test_every_variable_a_session_s_own_code_reads_is_set_for_it():
                                                               "work_budget", "hook_auth", "cc_plugin",
                                                               "prompts", "config", "tools"))]
     names = {n for f in files if f.is_file() for n in re.findall(r"\bTHIMBLE_[A-Z][A-Z0-9_]*", f.read_text("utf-8"))}
-    # a constant's name, the server's fallback model, which no session's code uses, and the mark of main's fence, which
-    # main's own --settings set (cc_plugin.FENCE_MARK)
-    names -= {"THIMBLE_PREFIXES", "THIMBLE_FALLBACK_MODEL", "THIMBLE_MAIN_FENCE"}
+    # a constant's name, and the server's fallback model, which no session's code uses
+    names -= {"THIMBLE_PREFIXES", "THIMBLE_FALLBACK_MODEL"}
     assert names <= set(config.SESSION_VARS) | set(config.STACK_VARS), \
         sorted(names - set(config.SESSION_VARS) - set(config.STACK_VARS))
 

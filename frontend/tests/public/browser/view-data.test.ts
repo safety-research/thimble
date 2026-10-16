@@ -42,7 +42,7 @@ const INBOX = page(`<div class="top"><span id="search"></span><span id="colour">
 <script>
 const T0 = Date.UTC(2026, 3, 1) / 1000
 window.mails = Array.from({ length: 20000 }, (_, i) => ({ ref: 'mail.jsonl#L' + (i + 1), from: ['ana', 'bo', 'cy', 'dee'][i % 4], subject: (i % 997 === 5 ? 'Gale warning ' : 'Note ') + i, t: T0 + i * 60, folder: ['Inbox', 'Ops', 'Billing'][i % 3] }))
-window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'folder', title: 'Folder' }] })
+window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'folder', title: 'Folder' }], initial: 'folder' })
 window.side = thimble.side({ mount: '#body' })
 window.search = thimble.search({ mount: '#search' })
 const t0 = performance.now()
@@ -832,7 +832,7 @@ describe('the search over every part on screen', () => {
   })
 
   test("`in` holding the table and the thread, the thread with a strip of its own (Color by's): the thread's matches tick on its strip, the table's on the table's", async () => {
-    const doc = SIDE_BY_SIDE.replace("in: '#thread' })", "in: '#body' })\nwindow.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'author', title: 'Author' }], strip: '#thread' })")
+    const doc = SIDE_BY_SIDE.replace("in: '#thread' })", "in: '#body' })\nwindow.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'author', title: 'Author' }], initial: 'author', strip: '#thread' })")
       .replace('<div style="display:flex;height:560px">', '<div id="body" style="display:flex;height:560px">')
       .replace('<span id="search"></span></div>', '<span id="search"></span><span id="colour"></span></div>')
     assert.ok(doc.includes("in: '#body'") && doc.includes('id="body"') && doc.includes('id="colour"'))

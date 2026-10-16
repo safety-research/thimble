@@ -115,7 +115,9 @@ export const AREAS = {
   // a document, and a report check made, changed or run on one (report.ts reads its name and its runs)
   docs: [{ dir: 'investigations/main' }, { dir: 'checks' }],
   chats: [{ dir: 'chats' }],
-  agents: [{ dir: 'trusted', names: ['subagents.json', 'module.json'] }, { dir: 'orient', names: ['run.json'] }],
+  // thimble's agents, and their failures: the open notices (notices.json), which home's state gives the rows above the
+  // prompt
+  agents: [{ dir: 'trusted', names: ['subagents.json', 'module.json'] }, { dir: 'orient', names: ['run.json'] }, { dir: '', names: ['notices.json'] }],
   // a view built (its folder in the local extension) or proposed (proposals.json)
   views: [{ dir: 'extension/views' }, { dir: 'views', names: ['proposals.json'] }],
   ui: [{ dir: '', names: ['ui.jsonl'] }],
@@ -124,30 +126,37 @@ export const AREAS = {
 export type Area = keyof typeof AREAS
 export type Signature = Record<Area, string>
 
-async function stamp(cx: Ctx, path: string, names?: readonly string[]): Promise<string> {
+type Listing = Awaited<ReturnType<Ctx['list']>> | null
+
+/** A folder's entries, null when it cannot be listed (not there yet). */
+async function listing(cx: Ctx, path: string): Promise<Listing> {
   try {
-    const entries = await cx.list(path)
-    // a file's size and time, a folder's name: what an edit, an add or a remove changes
-    return entries
-      .filter(e => !names || names.includes(e.name))
-      .map(e => `${e.name}:${e.kind === 'file' ? `${e.size}:${e.mtimeMs}` : e.kind}`)
-      .sort()
-      .join('|')
+    return await cx.list(path)
   } catch {
-    return '-'
+    return null
   }
 }
 
-/** One stamp per area: a change of any file it reads changes it. Each folder is listed once a pass. */
+function stamp(entries: Listing, names?: readonly string[]): string {
+  if (!entries) return '-'
+  // a file's size and time, a folder's name: what an edit, an add or a remove changes
+  return entries
+    .filter(e => !names || names.includes(e.name))
+    .map(e => `${e.name}:${e.kind === 'file' ? `${e.size}:${e.mtimeMs}` : e.kind}`)
+    .sort()
+    .join('|')
+}
+
+/** One stamp per area: a change of any file it reads changes it. Each folder is listed once a pass, whatever number of
+ *  areas read it. */
 export async function signature(cx: Ctx, sc: Scope): Promise<Signature> {
   const out = {} as Signature
-  const listed = new Map<string, Promise<string>>()
+  const listed = new Map<string, Promise<Listing>>()
   for (const area of Object.keys(AREAS) as Area[]) {
     const parts: string[] = []
     for (const spec of AREAS[area] as readonly { dir: string; names?: readonly string[] }[]) {
-      const key = `${spec.dir}|${(spec.names ?? []).join(',')}`
-      if (!listed.has(key)) listed.set(key, stamp(cx, spec.dir ? `${sc.ws}/${spec.dir}` : sc.ws, spec.names))
-      parts.push(await listed.get(key)!)
+      if (!listed.has(spec.dir)) listed.set(spec.dir, listing(cx, spec.dir ? `${sc.ws}/${spec.dir}` : sc.ws))
+      parts.push(stamp(await listed.get(spec.dir)!, spec.names))
     }
     out[area] = parts.join('#')
   }

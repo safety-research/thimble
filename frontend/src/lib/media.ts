@@ -3,6 +3,8 @@
 // views.card_media_route), which answers range requests so a player can seek. The suffixes are backend
 // views.MEDIA_TYPES, less the ones no browser plays. Pure but for the URL.
 
+import { apiBase } from './browserKey'
+
 const KINDS: Record<string, 'image' | 'audio' | 'video'> = {
   png: 'image',
   jpg: 'image',
@@ -61,7 +63,7 @@ export function mediaOf(ref: string): MediaRef | null {
 
 /** The URL an <img>, <audio> or <video> loads the file from, with the media fragment that starts it at its moment. */
 export function mediaUrl(ws: string, m: MediaRef): string {
-  const url = `/api/ws/${encodeURIComponent(ws)}/media?path=${encodeURIComponent(m.path)}`
+  const url = `${apiBase()}/ws/${encodeURIComponent(ws)}/media?path=${encodeURIComponent(m.path)}`
   if (m.start == null) return url
   return `${url}#t=${m.start}${m.end != null ? `,${m.end}` : ''}`
 }

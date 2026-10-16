@@ -1,5 +1,8 @@
 """The revision history of a document: one record per generation at investigations/<inv>/versions/<slug>/<n>.json with
-who asked, the instruction, a summary of what changed and the previous generation, and the list a reader sees.
+who asked, the instruction, a summary of what changed and the previous generation, and the list a reader sees. When the
+analyst laid out notes or figures before the first write, their version is generation 1, by the analyst
+(record_analyst_draft), and the writer's first save is generation 2. Restore (report_types.restore_draft) makes a past
+draft the newest generation again, by the analyst, its record naming the draft it restored.
 
 One writer run is one generation: each later save of the run updates it in place, the replaced save kept as a
 revision at versions/<slug>/<n>.revisions.json. In a legacy workspace with a generation per save, consecutive
@@ -30,6 +33,7 @@ FIRST_SOURCE = "first"
 LEAN_KEYS = ("snapshot", "source")
 REVISIONS_SUFFIX = ".revisions"
 SOURCE_BUTTON, SOURCE_CHAT, SOURCE_THREAD = "button", "chat", "thread"
+ANALYST_SOURCE = "analyst"  # a generation the analyst made: their version before the first write, or a Restore
 
 _BULLET_RE = re.compile(r"^\s*(?:[-*+•]|\d{1,2}[.)])\s+")
 _HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+\S")
@@ -200,9 +204,10 @@ def _generation(doc: dict[str, Any] | None) -> int:
 
 
 def record(c: str, inv_id: str, slug: str, prev: dict[str, Any] | None, doc: Any, *, source: str | None,
-           instructions: str | None, run: str | None = None) -> dict[str, Any] | None:
+           instructions: str | None, run: str | None = None, restored: dict[str, Any] | None = None) -> dict[str, Any] | None:
     """Write the version record of a revision that landed; None for a first generation, a failed one or anything that
-    is not a document. Never raises."""
+    is not a document. `restored` ({n, rev}) names the draft a Restore made current again, which stands for its
+    summary. Never raises."""
     try:
         if not isinstance(doc, dict) or prev is None or doc.get("generation_failed") or doc.get("status") == "rate_limited":
             return None
@@ -220,6 +225,8 @@ def record(c: str, inv_id: str, slug: str, prev: dict[str, Any] | None, doc: Any
             "previous_generation": before, "previous": _lean(prev),
             "model": doc.get("model"), "model_requested": doc.get("model_requested"), "effort": doc.get("effort"),
         }
+        if restored is not None:
+            rec.update(summary=[], summary_from=None, restored=restored)
         path_ = _path(c, inv_id, slug, n)
         path_.parent.mkdir(parents=True, exist_ok=True)
         write_json(path_, rec)
@@ -227,6 +234,20 @@ def record(c: str, inv_id: str, slug: str, prev: dict[str, Any] | None, doc: Any
     except Exception:  # noqa: BLE001
         log.exception("%s/%s: the version record could not be written", c, slug)
         return None
+
+
+def record_analyst_draft(c: str, inv_id: str, slug: str, doc: dict[str, Any]) -> None:
+    """The record of generation 1 when it is the analyst's own version, kept before the first write replaced it
+    (report_types.keep_analyst_draft): History lists it as theirs. Its text is the next generation's `previous`. Never
+    raises."""
+    try:
+        rec = {"n": 1, "ts": str(doc.get("generated_at") or _now()), "run": None, "source": ANALYST_SOURCE,
+               "instructions": None, "summary": [], "summary_from": None, "previous_generation": 0, "previous": None}
+        path_ = _path(c, inv_id, slug, 1)
+        path_.parent.mkdir(parents=True, exist_ok=True)
+        write_json(path_, rec)
+    except Exception:  # noqa: BLE001
+        log.exception("%s/%s: the record of the analyst's draft could not be written", c, slug)
 
 
 def revisions_path(c: str, inv_id: str, slug: str, n: int) -> Path:
@@ -287,10 +308,18 @@ def _records(c: str, inv_id: str, slug: str) -> dict[int, dict[str, Any]]:
 
 
 def _entry(n: int, *, ts: Any, source: Any, instructions: Any, summary: Any, current: bool, available: bool,
-           summary_from: Any = None, run: Any = None) -> dict[str, Any]:
+           summary_from: Any = None, run: Any = None, restored: Any = None) -> dict[str, Any]:
     return {"n": n, "ts": str(ts or ""), "source": str(source or ""), "instructions": instructions if isinstance(instructions, str) and instructions.strip() else None,
             "summary": [str(x) for x in (summary or []) if str(x).strip()], "summary_from": summary_from, "run": run,
-            "current": current, "available": available, "words": None, "writer": None, "revisions": []}
+            "current": current, "available": available, "words": None, "writer": None, "revisions": [],
+            "restored": _restored(restored)}
+
+
+def _restored(x: Any) -> dict[str, Any] | None:
+    """A record's `restored`, {n, rev}, or None."""
+    if not isinstance(x, dict) or not isinstance(x.get("n"), int):
+        return None
+    return {"n": x["n"], "rev": x["rev"] if isinstance(x.get("rev"), int) else None}
 
 
 def _when(ts: Any) -> datetime | None:
@@ -339,7 +368,8 @@ def history(c: str, inv_id: str, slug: str, doc: dict[str, Any]) -> dict[str, An
         available = k == current or isinstance((recs.get(k + 1) or {}).get("previous"), dict)
         if rec is not None:
             out.append(_entry(k, ts=rec.get("ts"), source=rec.get("source"), instructions=rec.get("instructions"), summary=rec.get("summary"),
-                              summary_from=rec.get("summary_from"), run=rec.get("run"), current=k == current, available=available))
+                              summary_from=rec.get("summary_from"), run=rec.get("run"), current=k == current, available=available,
+                              restored=rec.get("restored")))
         elif k == current:
             out.append(_entry(k, ts=doc.get("generated_at"), source=FIRST_SOURCE if k == 1 else "", instructions=doc.get("instructions"),
                               summary=doc.get("what_changed"), summary_from="writer" if doc.get("what_changed") else None,
@@ -363,7 +393,7 @@ def history(c: str, inv_id: str, slug: str, doc: dict[str, Any]) -> dict[str, An
         if isinstance(text, dict):
             words = text.get("words")
             e["words"] = int(words) if isinstance(words, (int, float)) else report_types.doc_words(text)
-        if e["source"] != "analyst":
+        if e["source"] != ANALYST_SOURCE:
             e["writer"] = _writer_of(spans, e["ts"])
         rev = _revision_file(c, inv_id, slug, k)
         if rev is not None:
@@ -392,7 +422,7 @@ def legacy_revisions(out: list[dict[str, Any]], recs: dict[int, dict[str, Any]],
     for e in out:  # newest first
         top = folded[-1] if folded else None
         if (top is not None and e["writer"] and top["writer"] == e["writer"] and not e["revisions"]
-                and e["source"] != "analyst" and not any(r["generation"] is None for r in top["revisions"])):
+                and e["source"] != ANALYST_SOURCE and not any(r["generation"] is None for r in top["revisions"])):
             top["revisions"].insert(0, {"i": 0, "ts": e["ts"], "words": e["words"], "available": e["available"],
                                         "generation": e["n"]})
             top["_first"] = e

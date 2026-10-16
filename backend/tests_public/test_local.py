@@ -82,8 +82,7 @@ def _args(c: str, corpus: Path) -> dict[str, dict]:
         "clear_filter": {"scope": "files"},
         "set_layout": {"layout": "one", "surfaces": ["files"]},
         "open_view": {"view": "nope"},
-        "propose_view": {"name": "Board", "why": "w", "claims": ["board.jsonl"], "unit": "a post", "overview": "o",
-                         "zoom": "z", "filter": "f", "details": "d"},
+        "propose_view": {"name": "Board", "description": "d", "task": "t", "claims": ["board.jsonl"]},
         "write_document": {"doc": "report", "text": "# Report\n\n## What this data is and what we analyzed\n\nPosts."},
         "edit_document": {"span": "report:report#nope", "text": "x"},
         "add_comment": {"ref": "report:report#nope", "text": "a note"},
@@ -755,6 +754,234 @@ async def test_a_label_run_stops_when_another_process_deletes_its_label(term, mo
     assert seen == [True]
 
 
+# ------------------------------------------------------------------------------------------------ view proposals
+
+OFFER = {"slug": "edit-bursts", "name": "Edit Bursts", "description": "Each page as a strip of its saves.",
+         "task": "Find out when the agents edited together.", "claims": ["agents/*.jsonl"], "proposed_by": "proposer",
+         "status": "suggested", "route": "click", "ts": "2026-10-14T10:00:00Z",
+         "offered": {"at": "2026-10-14T10:00:00Z", "after": "main", "why": "a recurring comparison"}}
+
+
+@pytest.fixture()
+def proposals(term, monkeypatch):
+    """View proposals on (views.propose_enabled, by its PROPOSE_ENV, which the suite sets off). Returns a switch:
+    proposals(False) turns them off."""
+    from app import views
+
+    monkeypatch.setenv(views.PROPOSE_ENV, "on")
+    return lambda v: monkeypatch.setenv(views.PROPOSE_ENV, "on" if v else "off")
+
+
+@pytest.fixture()
+def popen(monkeypatch):
+    """subprocess.Popen recorded: each start's argv, cwd and what it was given on stdin; nothing runs."""
+    started: list[dict[str, Any]] = []
+
+    class Pipe:
+        def __init__(self, rec):
+            self.rec = rec
+
+        def write(self, data):
+            self.rec["stdin"] = json.loads(data.decode("utf-8"))
+
+        def close(self):
+            pass
+
+    class Fake:
+        def __init__(self, argv, **kw):
+            self.rec = {"argv": list(argv), "cwd": kw.get("cwd"), "new_session": kw.get("start_new_session")}
+            started.append(self.rec)
+            self.stdin = Pipe(self.rec)
+
+    monkeypatch.setattr(subprocess, "Popen", Fake)
+    return started
+
+
+async def test_state_home_gives_the_waiting_view_proposal_and_none_while_view_proposals_are_off(proposals):
+    from app import views
+
+    assert (await local.state(CORPUS, "home"))["offer"] is None, "none waits"
+    views._save_proposals(CORPUS, [OFFER, {**OFFER, "slug": "old", "name": "Old", "offered": None},
+                                   {**OFFER, "slug": "built", "name": "Built", "status": "built"}])
+    home = await local.state(CORPUS, "home")
+    assert home["offer"] == {"slug": "edit-bursts", "name": "Edit Bursts", "description": OFFER["description"],
+                             "task": OFFER["task"], "claims": ["agents/*.jsonl"]}
+    assert [v["slug"] for v in home["views"]] == ["built"], "a view proposal is not among the views until accepted"
+    # an accept that could not start the build: its reason, with the fix, until the next press
+    views.update_proposal(CORPUS, "edit-bursts", refused={"kind": "no-session", "reason": "Start thimble again, then accept."})
+    assert (await local.state(CORPUS, "home"))["offer"]["refused"] == "Start thimble again, then accept."
+    proposals(False)
+    assert (await local.state(CORPUS, "home"))["offer"] is None
+
+
+@pytest.fixture()
+def open_notices(term, monkeypatch):
+    """notices.open_notices giving the list this returns (the open ones, oldest first, as GET /api/ws/{c}/notices gives
+    them)."""
+    from app import notices
+
+    held: list[dict] = []
+    monkeypatch.setattr(notices, "open_notices", lambda c: list(held))
+    return held
+
+
+def _notice(**fields: Any) -> dict:
+    return {"ts": "2026-10-14T10:00:00Z", "kind": "warning", **fields}
+
+
+async def test_state_home_gives_every_agent_s_open_notices_newest_first_with_the_acts_that_fix_them(open_notices,
+                                                                                                     monkeypatch):
+    """Every agent's open notices reach the rows above the prompt, since Claude Code's own terminal shows only main's
+    requests: the orientation's, a view build's, a writer's, the view proposer's. Each says how its own thread opens. A
+    notice of Claude's safeguards on main's own reply, or of its API error, is left out: Claude Code shows those."""
+    from app import agents
+
+    assert (await local.state(CORPUS, "home"))["notices"] == []
+    orient = agents.new_agent(CORPUS, "orientation", title="orientation")["id"]
+    thread = agents.new_thread(CORPUS, "board.jsonl#L2", "the second post", title="second-post")["id"]
+    switched = "Claude's safeguards switched the orientation's reply from Opus 5.5 to Opus 4.8."
+    blocked = "Couldn't check for a view proposal: Claude's safeguards blocked the request."
+    failed = "The view Agent Network failed to build: its check found no rows."
+    open_notices.extend([
+        _notice(id="n1", key="safeguards-fallback", kind="safeguards", text=switched, agent="Orientation", chat=orient,
+                ts="2026-10-14T10:00:00Z"),
+        _notice(id="n2", key="proposer", kind="proposals", text=blocked, agent="View proposals", chat=None,
+                action=[{"label": "Try again", "do": "proposals-retry"},
+                        {"label": "Turn off view proposals", "do": "proposals-off"}], ts="2026-10-14T10:05:00Z"),
+        _notice(id="n3", key="view:agent-network", kind="view", text=failed, agent="View build: Agent Network",
+                chat=thread, action={"label": "Retry", "do": "view-retry", "slug": "agent-network"},
+                ts="2026-10-14T10:10:00Z"),
+        # Open Settings, which the terminal answers with where thimble's config is
+        _notice(id="n4", key="writer", kind="agent", text="The writer of report failed: Claude Code isn't signed in.",
+                agent="Writer: report", chat="gone1", action={"label": "Open Settings", "do": "settings"},
+                ts="2026-10-14T10:10:00Z"),
+        _notice(id="n5", key="empty", text="  ", ts="2026-10-14T11:00:00Z"),
+        _notice(id="n6", key="safeguards:main", kind="safeguards", text="Claude's safeguards switched this reply.",
+                agent=None, chat="main", ts="2026-10-14T11:00:00Z"),
+        _notice(id="n7", key="main:api", kind="api", text="Claude's reply in main failed: Claude Code isn't signed in.",
+                agent="Main", chat="main", ts="2026-10-14T11:00:00Z"),
+    ])
+    got = (await local.state(CORPUS, "home"))["notices"]
+    assert [n["id"] for n in got] == ["n4", "n3", "n2", "n1"], "newest first; a tie keeps the later one first"
+    assert got[3] == {"id": "n1", "key": "safeguards-fallback", "kind": "safeguards", "text": switched,
+                      "agent": "Orientation", "chat": orient, "at": "2026-10-14T10:00:00Z", "acts": [],
+                      "open": "agent"}
+    assert got[2]["acts"] == [{"label": "Try again", "act": "view-propose-now"},
+                              {"label": "Turn off view proposals", "act": "view-proposals-off"}]
+    assert (got[2]["chat"], got[2]["open"]) == ("", ""), "the proposer has no thread of its own"
+    assert got[1]["acts"] == [{"label": "Retry", "act": "view-retry", "slug": "agent-network"}]
+    assert got[1]["open"] == "thread"
+    from app import userconf
+
+    assert got[0]["acts"] == [{"label": "Open Settings", "act": "settings", "config": str(userconf.global_file())}], \
+        "the terminal has no Settings pane: the press says where thimble's config is"
+    assert got[0]["open"] == "", "a chat that is gone opens nothing"
+    # a notices module that fails leaves the rest of home's state as it was
+    from app import notices
+
+    monkeypatch.setattr(notices, "open_notices", lambda c: 1 / 0)
+    home = await local.state(CORPUS, "home")
+    assert home["notices"] == [] and "views" in home
+
+
+async def test_notice_dismiss_hands_the_dismissal_to_the_holder(open_notices, popen):
+    assert await local.act(CORPUS, "notice-dismiss", {"id": "n3"}) == {"ok": True, "queued": True}
+    assert [(r["argv"][-1], r["stdin"]) for r in popen] == [
+        ("notice-dismiss", {"cwd": str(config.corpus_dir(CORPUS)), "id": "n3"})]
+    with pytest.raises(local.StateError, match="id"):
+        await local.act(CORPUS, "notice-dismiss", {})
+
+
+async def test_state_home_lists_a_notice_notices_post_wrote_for_an_agent(term):
+    """With the real notices module: a notice posted for an agent's chat is open in home's state, and gone once
+    cleared or dismissed."""
+    from app import agents, notices
+
+    orient = agents.new_agent(CORPUS, "orientation", title="orientation")["id"]
+    notices.post(CORPUS, kind="safeguards", text="Claude's safeguards switched the orientation's reply.",
+                 agent="Orientation", chat=orient, key="t-fallback")
+    got = (await local.state(CORPUS, "home"))["notices"]
+    assert [(n["agent"], n["chat"], n["open"]) for n in got] == [("Orientation", orient, "agent")]
+    notices.clear(CORPUS, "t-fallback")
+    assert (await local.state(CORPUS, "home"))["notices"] == []
+    posted = notices.post(CORPUS, kind="proposals", text="Couldn't check for a view proposal: it timed out.",
+                          agent="View proposals", action={"label": "Try again", "do": "proposals-retry"})
+    got = (await local.state(CORPUS, "home"))["notices"]
+    assert [(n["id"], n["acts"], n["open"]) for n in got] == [(posted["id"], [{"label": "Try again",
+                                                                                "act": "view-propose-now"}], "")]
+    notices.dismiss(CORPUS, posted["id"])
+    assert (await local.state(CORPUS, "home"))["notices"] == []
+
+
+async def test_view_accept_and_reject_hand_the_answer_to_the_holder_and_write_nothing_themselves(proposals, popen):
+    from app import views
+
+    views._save_proposals(CORPUS, [OFFER, {**OFFER, "slug": "board", "name": "Board", "status": "queued"}])
+    before = views.proposals_path(CORPUS).read_bytes()
+    assert await local.act(CORPUS, "view-accept", {"slug": "edit-bursts"}) == {"ok": True, "queued": True}
+    assert await local.act(CORPUS, "view-reject", {"slug": "edit-bursts"}) == {"ok": True, "queued": True}
+    assert [r["argv"][1:] for r in popen] == [["-m", "app.local_hooks", "view-accept"],
+                                              ["-m", "app.local_hooks", "view-reject"]]
+    assert all(r["cwd"] == str(local.BACKEND_DIR) and r["new_session"] for r in popen)
+    assert popen[0]["stdin"] == {"cwd": str(config.corpus_dir(CORPUS)), "slug": "edit-bursts"}
+    assert views.proposals_path(CORPUS).read_bytes() == before, "the act wrote nothing: the holder does"
+    # a proposal that no longer waits, or none of that name, starts nothing
+    got = await local.act(CORPUS, "view-accept", {"slug": "board"})
+    assert got == {"ok": True, "queued": False, "reason": "the view proposal 'Board' no longer waits"}
+    assert (await local.act(CORPUS, "view-reject", {"slug": "nope"}))["queued"] is False
+    proposals(False)
+    assert (await local.act(CORPUS, "view-accept", {"slug": "edit-bursts"}))["queued"] is False
+    assert len(popen) == 2
+    with pytest.raises(local.StateError, match="slug"):
+        await local.act(CORPUS, "view-accept", {})
+
+
+async def test_view_proposals_off_writes_views_propose_false_in_thimble_s_config(proposals, monkeypatch):
+    from app import userconf
+
+    saved: list = []
+    monkeypatch.setattr(userconf, "save", lambda c, patch: saved.append((c, patch)))
+    got = await local.act(CORPUS, "view-proposals-off", {})
+    assert saved == [(CORPUS, {"views": {"propose": False}})]
+    assert got == {"ok": True, "off": True, "config": str(userconf.global_file())}
+    # set in the workspace's config, it is written there, and the answer names that file
+    userconf.workspace_file(CORPUS).write_text(json.dumps({"views": {"propose": None}}))
+    assert (await local.act(CORPUS, "view-proposals-off", {}))["config"] == str(userconf.workspace_file(CORPUS))
+
+    def broken(c, patch):
+        raise userconf.ConfigError("thimble's config: agents.nope is unknown")
+
+    monkeypatch.setattr(userconf, "save", broken)
+    with pytest.raises(local.StateError, match="agents.nope"):
+        await local.act(CORPUS, "view-proposals-off", {})
+
+
+async def test_a_notice_s_try_again_and_retry_hand_their_call_to_the_holder(proposals, popen):
+    from app import views
+
+    views._save_proposals(CORPUS, [{**OFFER, "slug": "broken", "name": "Broken", "status": "failed"},
+                                   {**OFFER, "slug": "fine", "name": "Fine", "status": "building"}])
+    assert await local.act(CORPUS, "view-propose-now", {}) == {"ok": True, "queued": True}
+    assert await local.act(CORPUS, "view-retry", {"slug": "broken"}) == {"ok": True, "queued": True}
+    assert [(r["argv"][-1], r["stdin"].get("slug")) for r in popen] == [("view-propose-now", None),
+                                                                       ("view-retry", "broken")]
+    # pressed on a notice, the act names it, so the holder dismisses it before it runs the act
+    assert (await local.act(CORPUS, "view-retry", {"slug": "broken", "notice": "n3"}))["queued"] is True
+    assert (await local.act(CORPUS, "view-propose-now", {"notice": "n2"}))["queued"] is True
+    assert [r["stdin"].get("notice") for r in popen[2:]] == ["n3", "n2"]
+    del popen[2:]
+    got = await local.act(CORPUS, "view-retry", {"slug": "fine"})
+    assert got == {"ok": True, "queued": False, "reason": "the view 'Fine' is building, not failed"}
+    assert len(popen) == 2
+    # Try again while a view proposal waits, or with view proposals off, says why at once and starts nothing
+    views._save_proposals(CORPUS, [OFFER])
+    got = await local.act(CORPUS, "view-propose-now", {})
+    assert got == {"ok": True, "queued": False, "reason": "a view proposal waits for your answer above the prompt"}
+    proposals(False)
+    assert "view proposals are off" in (await local.act(CORPUS, "view-propose-now", {}))["reason"]
+    assert len(popen) == 2
+
+
 def _cli(*argv: str, env: dict | None = None, cwd: Path | None = None) -> subprocess.CompletedProcess:
     return subprocess.run([sys.executable, "-m", "app.local", *argv], cwd=cwd or BACKEND, env=env or dict(os.environ),
                           capture_output=True, text=True, timeout=120)
@@ -816,8 +1043,9 @@ async def test_the_shim_in_terminal_mode_runs_calls_itself_keeps_fd_1_and_subscr
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), H)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     _record(token=PLUGIN_TOKEN, port=httpd.server_address[1])
+    # THIMBLE_MODE as the launcher sets it for a session it starts in terminal mode (launch_mode.ENV)
     env = {**os.environ, "THIMBLE_CARD_CHECK": "off", "THIMBLE_CWD": str(term),
-           "THIMBLE_WORKSPACES_DIR": str(config.WORKSPACES_DIR)}
+           "THIMBLE_WORKSPACES_DIR": str(config.WORKSPACES_DIR), "THIMBLE_MODE": "terminal"}
     params = StdioServerParameters(command=str(config.REPO_ROOT / "plugin" / "bin" / "thimble-mcp"), args=[], env=env,
                                    cwd=str(term))
     fds: dict[str, str] = {}

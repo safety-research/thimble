@@ -505,6 +505,29 @@
 .wu-bar .btn-primary {
   margin-left: 6px;
 }
+/* Stop beside Writing while a writer runs */
+.wu-bar .wu-stop {
+  flex: none;
+}
+/* in Writing's place while Claude Code asks the writer a permission prompt in the terminal (WriteAction): words, not a
+   button, with the still warning dot that marks a wait for the analyst everywhere */
+.wu-wait {
+  flex: 0 1 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-left: 6px;
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wu-wait-dot {
+  width: 8px;
+  height: 8px;
+}
 .wu-bar > .chip {
   margin-right: 4px;
 }
@@ -656,6 +679,10 @@
 }
 .wu-count-inline {
   margin-left: 4px;
+}
+/* the new comments' dot after the count (Checks.tsx NewCommentsDot), as far from it as on the canvas's Comments button */
+.wu-sec-head .wu-new-dot {
+  margin-left: 2px;
 }
 /* a check with no result on the document shown */
 .wu-count-none {
@@ -935,6 +962,10 @@
 .wu-root .prosemirror-dropcursor-inline {
   border-radius: 2px;
   background: var(--accent);
+}
+/* while something is dragged, a figure's frame (a custom card's page) lets the drag through to the page */
+.wu-zone[data-dragging] iframe {
+  pointer-events: none;
 }
 /* -------- the editor: BlockNote's variables mapped to the tokens. Its menus and toolbar take the opaque overlay; the
    editor itself draws nothing -------- */
@@ -1516,6 +1547,13 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
   min-width: 0;
   font: var(--type-question);
   color: var(--text-primary);
+}
+/* in the editor the question line moves the figure, as the block's actions do */
+.wu-fig-q[draggable='true'] {
+  cursor: grab;
+}
+.wu-fig-q[draggable='true']:active {
+  cursor: grabbing;
 }
 .wu-fig-from {
   flex: none;
@@ -3025,8 +3063,10 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
   }
 }
 
-/* a check whose passages the analyst changed since it ran: how many, then Run (Checks.StaleRow) */
+/* a check whose passages the analyst changed since it ran: how many, then Run (Checks.StaleRow); a run whose agent
+   waits on a permission prompt in the terminal says so the same way */
 .wu-check-stale,
+.wu-check-wait,
 .wu-check-refused {
   display: flex;
   flex-wrap: wrap;

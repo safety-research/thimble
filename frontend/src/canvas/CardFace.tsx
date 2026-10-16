@@ -1,9 +1,9 @@
-// A card as the analyst sees it at rest: its question, the Labels row, its body by kind (bodies.tsx) and its takeaway,
-// in the card's own box. The board's CellCard (Cell.tsx) adds hover chrome around it, and the card harness
-// (render.tsx) mounts it alone, so the image a check reads is the card the canvas draws. The face also shows the card
-// check, only as far as the analyst needs it at rest: a shimmer while it runs, its replacement faded in once confirmed,
-// and a red ✕ at the takeaway's corner only for a real problem it found (lib/cardCheck checkProblem). The rest of the
-// check, the fix's Undo among it, is in the card's details (CheckDetails).
+// A card as the analyst sees it at rest: its question, the Labels row (a label card's label row), its body by kind
+// (bodies.tsx) and its takeaway, in the card's own box. The board's CellCard (Cell.tsx) adds hover chrome around it,
+// and the card harness (render.tsx) mounts it alone, so the image a check reads is the card the canvas draws. The face
+// also shows the card check, only as far as the analyst needs it at rest: a shimmer while it runs, its replacement
+// faded in once confirmed, and a red ✕ at the takeaway's corner only for a real problem it found (lib/cardCheck
+// checkProblem). The rest of the check, the fix's Undo among it, is in the card's details (CheckDetails).
 // The body shimmers the same way while the card's code runs, as when an edit_card call is changing it, and the card
 // shimmers as in a check while thimble runs it again because a label it read changed.
 import { useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
@@ -26,7 +26,7 @@ import { checkOf, checkProblem } from '../lib/cardCheck'
 import { conceptLabel, ensureConceptName, hasConceptName, onCellNames } from '../lib/cellName'
 import { teleport } from '../lib/teleport'
 import type { Cell, Concept } from '../lib/types'
-import { CardBody, LabelHead, asksQuestion } from './bodies'
+import { CardBody, LabelHead, LabelKindTag, LabelMeta, asksQuestion } from './bodies'
 import { conceptName, labelsShown, staleLabels, type ConceptDetailState } from './concepts'
 import { CanvasContext } from './context'
 import { editedLabels, labelDraft, setLabelDraft, useLabelDrafts } from './labelDrafts'
@@ -44,8 +44,6 @@ export interface CardFaceProps {
   chrome?: ReactNode
   /** last in the card: the grip and the unread dot */
   after?: ReactNode
-  /** the stop control on the running line */
-  stop?: ReactNode
   /** the field edited in place, and where the click that opened it landed, for the caret */
   editing?: CardField | null
   editAt?: { x: number; y: number } | null
@@ -107,7 +105,7 @@ function Face(p: CardFaceProps) {
       {p.chrome}
       <div className="bcell-head">
         {kind === 'label' && concept && !(ctx.concepts.has(concept) && asksQuestion(cell.title, conceptName(ctx.concepts, concept))) ? (
-          <LabelHead conceptId={concept} />
+          <LabelHead conceptId={concept} detail={p.label.concept} />
         ) : p.editing === 'title' ? (
           <InlineField className="bcell-q" value={cell.title} onDone={(v) => p.onEdited?.('title', v)} onAsk={p.onAsk ? (v) => p.onAsk?.('title', v) : undefined} />
         ) : (
@@ -117,7 +115,7 @@ function Face(p: CardFaceProps) {
           </span>
         )}
       </div>
-      <CardLabels cell={cell} />
+      <CardLabels cell={cell} detail={p.label.concept} />
       <div className="bcell-body">
         <CardBody cell={cell} width={p.width} label={p.label} />
       </div>
@@ -125,8 +123,6 @@ function Face(p: CardFaceProps) {
         <div className="bcell-run" role="status">
           <Spinner size={10} label="running" />
           <span>running</span>
-          <span className="bcell-spacer" />
-          {p.stop}
         </div>
       )}
       {p.asking && !running && (
@@ -191,8 +187,10 @@ export function labelTagTip(id: string, regenerating: ReadonlySet<string>, edite
 
 /** The labels the card uses (concepts.labelsShown), in a row under its question, each a tag in the label's colour. A
  * click opens the label's edit card in a popover. thimble runs a card again by itself once a label it read changes; a
- * label that changed and is not being run again for shows its tag in ink. */
-export function CardLabels({ cell }: { cell: Cell }) {
+ * label that changed and is not being run again for shows its tag in ink. A label card whose head holds a question of
+ * its own names its label on a row of its own instead: the Label tag, the label's tag, then how the label is defined
+ * and what it ran on (bodies LabelMeta, from `detail`, the card's own copy of the label, else the board's list's). */
+export function CardLabels({ cell, detail }: { cell: Cell; detail?: Concept | null }) {
   const ctx = useContext(CanvasContext)
   const ids = labelsShown(cell, ctx.concepts)
   const stale = staleLabels(cell, ctx.concepts)
@@ -206,13 +204,29 @@ export function CardLabels({ cell }: { cell: Cell }) {
     for (const id of key.split(' ').filter(Boolean)) if (!ctx.concepts.get(id)?.name && !hasConceptName(id)) void ensureConceptName(ctx.ws, id)
   }, [ctx.ws, ctx.concepts, key])
   if (!ids.length) return null
+  const tag = (id: string) => <LabelTag key={id} id={id} label={ctx.concepts.get(id) ?? null} ws={ctx.ws} why={labelTagTip(id, regenerating, edited, stale)} ink={stale.has(id) && !regenerating.has(id)} />
+  const own = cell.kind === 'label' ? String(((cell.payload ?? {}) as Record<string, unknown>).concept ?? '') : ''
+  const named = !!own && ids.includes(own)
+  const self = named ? (detail?.id === own ? detail : null) ?? ctx.concepts.get(own) ?? null : null
+  const rest = named ? ids.filter((id) => id !== own) : ids
   return (
-    <div className="bcell-labels">
-      <span className="bcell-labels-key">Labels:</span>
-      {ids.map((id) => (
-        <LabelTag key={id} id={id} label={ctx.concepts.get(id) ?? null} ws={ctx.ws} why={labelTagTip(id, regenerating, edited, stale)} ink={stale.has(id) && !regenerating.has(id)} />
-      ))}
-    </div>
+    <>
+      {named && (
+        <div className="bcell-labels bcell-label-row">
+          <span className="bcell-label-who">
+            <LabelKindTag />
+            {tag(own)}
+          </span>
+          {self && <LabelMeta label={self} />}
+        </div>
+      )}
+      {rest.length > 0 && (
+        <div className="bcell-labels">
+          <span className="bcell-labels-key">Labels:</span>
+          {rest.map(tag)}
+        </div>
+      )}
+    </>
   )
 }
 

@@ -400,7 +400,7 @@ async def test_an_added_extension_runs_in_every_workspace_and_its_view_where_it_
     assert "tally/a.jsonl  " in fit["asked"][0] and '"who": "ana"' in fit["asked"][0]
 
     prop = views.read_proposal(CORPUS, "tally")
-    assert prop["extension"] == "ext-min" and prop["orientation"] is False, "outside the orientation's four"
+    assert prop["extension"] == "ext-min" and prop["orientation"] is False, "never an orientation's proposal"
     assert views.read_built(CORPUS, "tally")["ok"]
     row = extensions.public(CORPUS)["extensions"][0]
     assert row["views"] == [{"slug": "tally", "name": "Tally", "shown": True, "note": "Each record says who did a task.",
@@ -466,7 +466,8 @@ async def test_an_extension_view_that_fails_the_view_checks_is_hidden_and_settin
     _add()
     await extensions.refresh(CORPUS, wait=10)
     assert views.read_built(CORPUS, "tally")["ok"], "installed while its checks run"
-    for _ in range(600):
+    # the view checks drive a headless browser, which a busy CI runner can keep past half a minute
+    for _ in range(2400):
         if "ext-min/tally" in extensions.read_gates(CORPUS) and not any(not t.done() for t in extensions._gating.values()):
             break
         await asyncio.sleep(0.05)

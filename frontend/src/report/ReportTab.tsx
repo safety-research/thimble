@@ -2,7 +2,8 @@
 // drawn as the Files views bar draws its views (Segmented), + New
 // (DocMenus.tsx), Export (ExportMenu.tsx), the story's Read, the lock note (LockNote.tsx), History (History.tsx) and the primary action,
 // Write or Revise (WriteAction.tsx, where Revise asks first), which asks the analyst's session for the document (a
-// `write` browser event; `report` stream events follow it). A failed write stays on its document (writeFailures.ts) with Retry until dismissed or written. A document
+// `write` browser event; `report` stream events follow it). While a writer of the document runs, Stop stands beside
+// Writing (WriteAction.tsx StopWriter), and while Claude Code asks that writer in the terminal the bar says so. A failed write stays on its document (writeFailures.ts) with Retry until dismissed or written. A document
 // not written yet is its frame (GET …/frame). The views' module (Documents.tsx) is imported once in an effect rather than
 // with React.lazy, whose Suspense retry can stall; documents are kept by slug so a switch never shows an empty body.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -14,6 +15,7 @@ import { Spinner } from '../components/Spinner'
 import { Tipped } from '../components/Tooltip'
 import { api, docsApi, isNotFound } from '../lib/api'
 import { bus } from '../lib/bus'
+import { demoStop } from '../lib/demo'
 import { parseRef } from '../lib/refs'
 import { track } from '../lib/telemetry'
 import { revealAnchor } from '../lib/teleport'
@@ -21,7 +23,7 @@ import type { AnyDoc, TypesState, Writeup } from '../lib/types'
 import { readStorage, writeStorage } from '../lib/workspace'
 import { ReportProblemButton } from '../shell/ProblemReport'
 import { writerDoc } from '../chat/threads'
-import { useChatMetas } from '../chat/waiting'
+import { terminalWaits, useChatMetas } from '../chat/waiting'
 import { NewDocMenu, TypeActions } from './DocMenus'
 import type { DocFilter } from './Editor'
 import { DraftDiff, HistoryMenu, PastDraft } from './History'
@@ -29,7 +31,7 @@ import type { HistoryRow, HistoryView } from './historyModel'
 import { LockNote } from './LockNote'
 import { ExportMenu } from './ExportMenu'
 import { docKey, docLabel, labelReadDocument, ownType, rendererOf, reportFilterSets, SLUG, switcherItems } from './model'
-import { WriteAction } from './WriteAction'
+import { StopWriter, WriteAction } from './WriteAction'
 import { failedDetail, failedReport, failedText, noteRefusal, useWriteFailures, useWriteRefusals, WRITE_RETRY_NOTE, writingAfter } from './writeFailures'
 import { RefusedCard } from '../chat/Refused'
 import { ApiErrorCard } from '../chat/ApiError'
@@ -290,6 +292,8 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
   // a writer's session of this document that runs: the write goes on after its first save (the stream says
   // `generated` then), so the primary action stays Writing, never Revise, until the session ends
   const writer = chats.find((m) => m.role === 'writer' && m.status === 'running' && writerDoc(m) === slug) ?? null
+  // that writer waits on a permission prompt Claude Code asks in the terminal: the bar says so in place of Writing
+  const writerWaits = !!writer && terminalWaits(null, chats).has(writer.id)
   // a document is being written while its write is pending or a writer of it runs (which goes on after its first save)
   const writingOf = (s: string) => !!generating[s] || types?.[s]?.status === 'generating' || chats.some((m) => m.role === 'writer' && m.status === 'running' && writerDoc(m) === s)
   const busy = writingSlug === slug || !!generating[slug] || types?.[slug]?.status === 'generating' || !!writer
@@ -297,7 +301,7 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
   // `report` events (generating, then generated or failed) carry the write from there, so the button stays busy while
   // the writer works. A start that did not happen shows its card under the bar
   const write = async () => {
-    if (busy) return
+    if (busy || demoStop()) return
     const s = slug
     setWritingSlug(s)
     track('ui-click', { target: `ui:report-write`, detail: { slug: s } })
@@ -334,12 +338,20 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
     </div>
   )
   const closePast = useCallback(() => setPast(null), [])
+  // Restore in History: the restored draft is the current one, shown in the editor
+  const onRestored = useCallback(
+    (saved: AnyDoc) => {
+      onSaved(saved)
+      setPast(null)
+    },
+    [onSaved],
+  )
   const pastShown = past != null && written && !isPage && !isVideo
   const view = pastShown ? (
     past.view.kind === 'diff' ? (
       <DraftDiff ws={ws} slug={slug} from={past.view.from} to={past.view.to} rows={past.rows} onClose={closePast} />
     ) : (
-      <PastDraft ws={ws} slug={slug} target={past.view.target} rows={past.rows} onClose={closePast} />
+      <PastDraft ws={ws} slug={slug} target={past.view.target} rows={past.rows} onClose={closePast} onRestored={onRestored} />
     )
   ) : shown && (bodyDoc || (isPage && load.state === 'none')) ? (
       views ? (
@@ -383,10 +395,12 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
         {written && <ExportMenu ws={ws} slug={slug} page={isPage} />}
         {isPage && load.state !== 'loading' && <Button variant="icon" icon="code" title="Code" aria-label="Code" active={drawer || load.state === 'none'} disabled={load.state === 'none'} onClick={() => setDrawer((d) => !d)} />}
         {written && <LockNote doc={bodyDoc} root={root} />}
+        {writer && <StopWriter key={writer.id} ws={ws} chat={writer.id} />}
         <WriteAction
           name={ownType(slug) ? docLabel(slug, types) : docLabel(slug, types).toLowerCase()}
           written={written}
           busy={busy}
+          waiting={writerWaits}
           disabled={(load.state === 'loading' && !held) || load.state === 'error'}
           history={!isPage && !isVideo}
           onWrite={() => void write()}

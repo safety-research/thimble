@@ -1487,7 +1487,8 @@
       var hit = vals.filter(function (x) { return String(x.value) === v })[0]
       return hit && hit.name ? hit.name : v
     }).concat([(blank && blank.name) || 'No value'])
-    var colours = order.map(function (v) { return (colour && colour.colourOf(v)) || '' }).concat([''])
+    var plain = !colour || colour.off === true || (colour.field === null && colour.label === null)
+    var colours = order.map(function (v) { return (colour && colour.colourOf(v)) || '' }).concat([plain ? kit.realColour('var(--viz-1)') : ''])
     var max = 1
     var per = this.nodes.map(function (node) {
       var m = new Map()
@@ -1521,6 +1522,11 @@
     this.sc = sc
     var W = sc.width
     var colour = this.bars.colour()
+    // with Color by Off (or color: false) the marks show one variable, so they take the one series color, --viz-1, as a
+    // chart of one series does; with a choice, a value turned off or none keeps the marks' gray (a Color by the page
+    // made, which names no field, keeps its own colors)
+    var plain = !colour || colour.off === true || (colour.field === null && colour.label === null)
+    var one = plain ? kit.realColour('var(--viz-1)') : null
     var bands = 0
     var dense = this.dense()
     var H = dense ? DENSE_H : LANE_H
@@ -1594,7 +1600,7 @@
           var mk = marks[j]
           // a record the page draws itself (`marks`) takes no mark of the kit's, and still answers the tip and a click
           if (!self.marks || safe(function () { return !!self.marks(mk.it) }, true)) {
-            var c = colour ? colour.colourOf(colour.valueOf(mk.it)) : null
+            var c = plain ? one : colour.colourOf(colour.valueOf(mk.it))
             svg += '<rect class="thimble-lane-mark" data-i="' + mk.i + '" x="' + mk.x.toFixed(1) + '" y="3" width="' + mk.w.toFixed(1) + '" height="' + (LANE_H - 6) + '"' + (c ? ' style="fill:' + esc(c) + '"' : '') + '/>'
           }
           if (self.problem && safe(function () { return self.problem(mk.it) }, false)) bad += badX(mk.x + mk.w / 2, LANE_H - 3)
@@ -1692,6 +1698,12 @@
       },
       colorOf: function (record) {
         return (colour && colour.colourOf(colour.valueOf(record))) || null
+      },
+      // the colour the kit draws a record's mark in: Color by's, the one series color with Off, else the marks' gray
+      fill: function (record) {
+        var off = !colour || colour.off === true || (colour.field === null && colour.label === null)
+        if (off) return kit.realColour('var(--viz-1)')
+        return colour.colourOf(colour.valueOf(record)) || kit.realColour('var(--viz-ink-3)')
       },
       on: function (id) {
         drew[String(id)] = true

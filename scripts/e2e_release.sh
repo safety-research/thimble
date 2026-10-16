@@ -21,7 +21,7 @@
 #   --keep-install   leave the clone and THIMBLE_HOME in --out (the report, shots and logs always stay)
 #
 # Steps: clone REF into <out>/clone; install it (or the zip) with install.sh's flags, non-interactive, into a fresh
-# THIMBLE_HOME (<out>/thimble-home) with --no-plugin; `thimble doctor`; copy the corpus to
+# THIMBLE_HOME (<out>/thimble-home) with --no-plugin; `thimble doctor --verbose`; copy the corpus to
 # <out>/corpus, add a few files the UI steps open (chat logs in Markdown, CSV and SQLite, a PDF) and a fixture view;
 # start the server and a stand-in for the analyst's Claude Code session (scripts/e2e/standin_session.py: no model runs);
 # walk the UI (scripts/e2e/release.mjs): the first-launch welcome and the tour, the File browser, a transcript, a PDF, the
@@ -50,10 +50,11 @@
 #
 # The run keeps the caller's HOME, so thimble and claude use the caller's own Claude login and config, and it leaves
 # them as they were: it puts the `thimble` link in <out>/bin (THIMBLE_BIN_DIR) in place of ~/.local/bin, passes
-# --no-modify-path so that no shell startup file gets a line, and installs only when install.sh --dry-run plans no
-# `claude plugin` command, no write to ~/.local/bin/thimble and no line in a startup file. The last step checks that
-# Claude Code's plugins and marketplaces, its trusted folders, ~/.local/bin/thimble and the lines thimble's installer
-# added to the startup files are as they were before the run.
+# --no-plugin so that Claude Code's plugins stay as they are (install.sh writes no shell startup file), and installs
+# only when install.sh --dry-run plans no `claude plugin` command and no write to ~/.local/bin/thimble. The last step
+# checks that Claude Code's plugins and marketplaces, its trusted folders, ~/.local/bin/thimble and the lines an earlier
+# thimble installer added to the startup files are as they were before the run (scripts/e2e/claude_files.py), less
+# the official marketplace Claude Code adds on its own at its first interactive start in a config folder.
 #
 # A step marked pending waits for work that is not merged yet: its failure is reported as expected and does not fail the
 # run (unless --strict), and once it passes the report says so. Exit 0 when no step failed, 1 otherwise.
@@ -140,7 +141,7 @@ if [ "$own_caches" = 1 ]; then
   caches=("UV_CACHE_DIR=$out/caches/uv" "npm_config_cache=$out/caches/npm" "PLAYWRIGHT_BROWSERS_PATH=$out/caches/ms-playwright")
 fi
 envs=(env ${unset_vars[@]+"${unset_vars[@]}"} "PATH=$bin:$PATH" "THIMBLE_HOME=$thome" "THIMBLE_BIN_DIR=$bin"
-      "THIMBLE_PORT=$port" "THIMBLE_UI_PORT=$((port + 1))" ${caches[@]+"${caches[@]}"})
+      "THIMBLE_PORT=$port" "THIMBLE_UI_PORT=$((port + 1))" "THIMBLE_PROPOSE_VIEWS=off" ${caches[@]+"${caches[@]}"})
 in_env() { "${envs[@]}" "$@"; }
 
 ours() {  # the processes this run started that may still run: the server's session (it starts as its own session
@@ -234,14 +235,13 @@ if ! claude_files > "$logs/claude-files-before.json" 2>&1; then
   record claude-files fail "could not read Claude Code's files: $(tail -n 1 "$logs/claude-files-before.json")"; exit 1
 fi
 files_before="$logs/claude-files-before.json"
-flags=(--browser bundled --no-sandbox-deps --no-plugin --no-modify-path)
+flags=(--browser bundled --no-plugin)
 # --verbose: the dry run then prints every step's commands, which the check below reads
 if ! (cd "$src_tree" && in_env bash scripts/install.sh "${flags[@]}" --dry-run --verbose) < /dev/null > "$logs/install-plan.log" 2>&1; then
   record install fail "install.sh --dry-run exited non-zero; see logs/install-plan.log"; exit 1
 fi
 planned="$(grep -E '^\+ claude plugin ' "$logs/install-plan.log" || true)"
 planned="$planned$(grep -F -- "$HOME/.local/bin/thimble" "$logs/install-plan.log" | grep -E '^\+ ' || true)"
-planned="$planned$(grep -E '^\+ append to ' "$logs/install-plan.log" || true)"
 if [ -n "$planned" ]; then
   record install fail "not installed: install.sh's dry run plans changes to the caller's files: $(printf '%s' "$planned" | head -n 3 | tr '\n' ';')"; exit 1
 fi
@@ -255,8 +255,8 @@ else
   record install fail "install.sh exited non-zero; see logs/install.log"; exit 1
 fi
 
-# 3. thimble doctor
-if (cd "$out" && in_env thimble doctor) > "$logs/doctor.txt" 2>&1; then
+# 3. thimble doctor --verbose, whose lines name the paths
+if (cd "$out" && in_env thimble doctor --verbose) > "$logs/doctor.txt" 2>&1; then
   missing=""
   grep -q "^  versions: thimble " "$logs/doctor.txt" || missing="$missing versions"
   grep -q "^  ui: .*the built UI at $tree/frontend/dist" "$logs/doctor.txt" || missing="$missing ui"

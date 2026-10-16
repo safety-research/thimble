@@ -222,6 +222,7 @@ async def test_a_refused_call_runs_again_on_the_refusal_row_and_not_at_all_when_
     made = install(monkeypatch, [[refused]])
     r = await call(refusal=None)
     assert r.status == "refused" and len(made) == 1, "the row is off: no rerun"
+    assert r.detail == "Claude's safeguards refused the request (stop_reason refusal)", "the detail names the safeguards"
     made = install(monkeypatch, [[refused]])
     r = await call(model="claude-opus-4-8", refusal={"model": "claude-opus-4-8", "effort": "high"})
     assert r.status == "refused" and len(made) == 1

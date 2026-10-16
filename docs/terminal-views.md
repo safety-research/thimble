@@ -155,7 +155,7 @@ the hint row names it. A view that binds `?` itself keeps it, and the kit then b
 with `color.draw(d, before)` (`before(r)` adds the row's other controls first) or `color.add(r)`.
 
 - The view opens colored by a label that is on in Files and marks its files (not one Rows groups by), as the browser's
-  view does, else by its `initial` field; a label turned on while the view is away or open takes the color, the one turned on last.
+  view does, else as its `initial` says, else Off; a label turned on while the view is away or open takes the color, the one turned on last.
 - The row reads `Color by  Kind` and the chosen field's values as chips: `●` in the value's hue, its name, its count
   dim. A click on a chip turns the value's hue off (`○`, dim) or on: its records stay, dim as those with no value.
   Values past the sixth share one chip, `other`, with no
@@ -193,7 +193,7 @@ with `color.draw(d, before)` (`before(r)` adds the row's other controls first) o
 | option | what it is |
 |---|---|
 | `fields` | `[{name, title, description?, values?, meanings?, value?(record)}]`, as the browser's |
-| `initial` | the field chosen first; the first field by default |
+| `initial` | how the view opens, as the browser's: a field's name, or `{field, on: [values]}`, that field with only those values in a hue and the others dim; Off without it |
 | `chips` | does nothing: a value turned off keeps its records, dim (`'filter'` hid them once); `filterBy` hides records |
 | `onChange(color)` | the choice changed, or a value was turned off or on: fetch and draw again |
 
@@ -342,8 +342,10 @@ draw((d) => tl.draw(d, { items: commits }))
 there. Where the panel holds both, the pane stands beside the list, `width` of the panel (0.42), a `│` in the rule gray
 between them; in a narrower panel it stands under the list, a rule between them. Its first row names the record, bold,
 with `close` against R. `<` `>` narrow and widen it (thimble keeps its width per view), Backspace or `close` closes it,
-and Reset closes it too. `isOpen`, `key`, `show(key)` and `hide()` read and change it; `side.draw(d, left, right,
-{title})` lays out any two parts the same way.
+and Reset closes it too. It is closed until a row opens in it. With `empty`, one short line such as `'click a
+session'`, it shows that line, dim, in place of a record's name until a row opens, and again after `hide()` and Reset.
+`isOpen` (a row shows), `isEmpty` (the `empty` line shows), `key`, `show(key)` and `hide()` read and change it;
+`side.draw(d, left, right, {title})` lays out any two parts the same way.
 
 ## The divider
 

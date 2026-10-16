@@ -7,13 +7,9 @@ or in the `--settings` the session's `claude` was started with (the launcher pas
 org's managed tier (`disableAllHooks`, or `allowManagedHooksOnly` without this plugin enabled there), main
 arms a Monitor on the watcher instead: the MONITOR route (`route`). The managed tier is the org's server-managed
 settings (remote-settings.json in Claude Code's config dir) when they exist, else managed-settings.json with its
-managed-settings.d drop-ins in the platform's managed folder (`managed`).
-
-Main started by the `thimble` launcher runs inside thimble's fence (cli.main_fence): the last `--settings` on its
-command line turns Claude Code's sandbox on and carries FENCE_MARK in its `env` (`main_fenced`). The server reads that
-from main's command line rather than from anything main reports, since a session that was not started fenced must not
-be able to claim it. Whether the launcher started main at all (`main_launched`) is read from main's environment, which
-holds LAUNCHED_ENV, where it can be read.
+managed-settings.d drop-ins in the platform's managed folder (`managed`). Where an organization manages Claude Code, its
+built-in security plugin (SEC_DEFAULT) also refuses the hooks module, though not the hooks, of every plugin a person
+installs when the managed tier sets its option `allowManagedModsOnly` (`managed_mods_only`).
 
 A plugin copy names its marketplace (`marketplace`): `inline` for a `--plugin-dir` copy, `<marketplace>` for an
 installed one, which is a copy in Claude Code's plugin cache or, for a directory marketplace, the plugin folder in that
@@ -42,10 +38,14 @@ REMOTE_SETTINGS = "remote-settings.json"  # the org's server-managed settings, i
 MANAGED_DIRS = {"darwin": Path("/Library/Application Support/ClaudeCode"), "linux": Path("/etc/claude-code")}
 MANAGED_FILE = "managed-settings.json"
 MANAGED_DROPINS = "managed-settings.d"
+# Claude Code's built-in security plugin, seated outermost where an organization manages Claude Code (managed settings
+# on the machine, or a Team or Enterprise account) unless managed prependPlugins leaves it out; its options are the
+# managed tier's pluginConfigs -> SEC_DEFAULT -> options (module note)
+SEC_DEFAULT = "cc-plugin-sec-default@builtin"
+MODS_ONLY = "allowManagedModsOnly"  # its option that keeps out the hooks modules of the plugins a person installs
 USER_SETTINGS = "settings.json"
 PROJECT_SETTINGS = (Path(".claude") / "settings.json", Path(".claude") / "settings.local.json")
 HOOK, MONITOR = "hook", "monitor"  # the routes (module note)
-FENCE_MARK = "THIMBLE_MAIN_FENCE"  # "1" in the --settings `env` of a main thimble's launcher fenced (cli.main_fence)
 LAUNCHED_ENV = "THIMBLE_LAUNCHED"  # set in the environment of every `claude` the launcher starts (cli.LAUNCHED_ENV)
 ROUTES = (HOOK, MONITOR)
 
@@ -160,46 +160,6 @@ def settings_arg(args: list[str], cwd: Path) -> dict[str, Any] | None:
     return d if isinstance(d, dict) else None
 
 
-def fenced_argv(args: list[str], cwd: Path) -> bool:
-    """Whether a `claude` command line `args` (run in `cwd`) is a main thimble's launcher fenced (module note): its last
-    `--settings` turns the sandbox on and carries FENCE_MARK in its `env`. The analyst's own sandbox, without the mark,
-    is not thimble's fence."""
-    d = settings_arg(args, cwd) or {}
-    box, env = d.get("sandbox"), d.get("env")
-    return bool(isinstance(box, dict) and box.get("enabled") is True and isinstance(env, dict)
-                and str(env.get(FENCE_MARK) or "") == "1")
-
-
-def main_fenced(c: str) -> bool:
-    """Whether main's `claude` process in workspace `c` (session.main_pid) runs inside thimble's fence, read from its
-    command line (`/proc/<pid>/cmdline`, `ps` without /proc; module note). False without a main, or when its command line
-    cannot be read."""
-    from . import session  # noqa: PLC0415 — session imports far more than the launcher's checks need
-
-    pid = session.main_pid(c)
-    if not pid:
-        return False
-    return fenced_argv(procs.argv(pid), procs.cwd(pid) or Path.cwd())
-
-
-def main_launched(c: str) -> bool:
-    """Whether the `thimble` launcher started main's `claude` process in workspace `c` (session.main_pid): its
-    environment, as the process started (`/proc/<pid>/environ`), holds LAUNCHED_ENV. Where that cannot be read (no
-    /proc), main's session is the one launch.json names, followed through /clear and /resume (module_bridge
-    .launch_session), or main runs inside thimble's fence, which only the launcher adds. False without a main."""
-    from . import module_bridge, session  # noqa: PLC0415 — both import far more than the launcher's checks need
-
-    pid = session.main_pid(c)
-    if not pid:
-        return False
-    env = procs.environ(pid)
-    if env is not None:
-        return bool(str(env.get(LAUNCHED_ENV) or "").strip())
-    lv = session.current(c)
-    launch = module_bridge.launch_session(c)
-    return bool(lv is not None and launch and lv.sid == launch) or main_fenced(c)
-
-
 def managed_blocks(root: Path, environ: Mapping[str, str] | None = None) -> bool:
     """Whether the org's managed tier keeps the plugin's hooks off, whatever the analyst's settings say:
     `disableAllHooks`, or `allowManagedHooksOnly` without thimble enabled there."""
@@ -211,6 +171,30 @@ def managed_blocks(root: Path, environ: Mapping[str, str] | None = None) -> bool
         if not (isinstance(enabled, dict) and enabled.get(f"{PLUGIN}@{marketplace(root, environ)}") is True):
             return True
     return False
+
+
+def managed_mods_only(environ: Mapping[str, str] | None = None) -> bool:
+    """Whether the org's managed tier keeps thimble's hooks module from loading (module note): the security plugin's
+    MODS_ONLY set to anything but false, with that plugin seated (managed prependPlugins, when it is a list, names it),
+    and thimble in neither of the organization's own seats (managed prependPlugins and appendPlugins)."""
+    tier = managed(environ) or {}
+
+    def get(d: Any, key: str) -> Any:
+        return d.get(key) if isinstance(d, dict) else None
+
+    options = get(get(get(tier, "pluginConfigs"), SEC_DEFAULT), "options")
+    if not isinstance(options, dict) or MODS_ONLY not in options or options[MODS_ONLY] is False:
+        return False
+    prepend, append = tier.get("prependPlugins"), tier.get("appendPlugins")
+    seats = [str(p) for seat in (prepend, append) if isinstance(seat, list) for p in seat]
+    seated = not isinstance(prepend, list) or SEC_DEFAULT in (str(p) for p in prepend)
+    return seated and not any(p.split("@", 1)[0] == PLUGIN for p in seats)
+
+
+def managed_rules_only(environ: Mapping[str, str] | None = None) -> bool:
+    """Whether the org's managed tier sets `allowManagedPermissionRulesOnly`, under which Claude Code ignores every
+    permission rule a session saves, so its dialog offers no "don't ask again"."""
+    return (managed(environ) or {}).get("allowManagedPermissionRulesOnly") is True
 
 
 def hooks_blocked(cwd: Path, root: Path, environ: Mapping[str, str] | None = None) -> bool:

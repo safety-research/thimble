@@ -26,7 +26,9 @@ const TOKENS =
   '--ink-rgb:27,26,24;--surface-card:#fffdf8;--bg-sunken:#f3f0e8;--text-primary:#000;--text-secondary:#4a4844;--text-tertiary:#726f69;' +
   '--accent:#5135ff;--radius-chip:4px;--radius-ui:6px;--radius-hl:3px;--h-row:28px;--control-sm:28px;--h-control:24px;--h-chip:20px;' +
   '--text-xs:12px;--text-ui-sm:12px;--text-sm:13px;--text-mono-sm:11px;--border-subtle:rgba(27,26,24,0.12);--border-hairline:rgba(27,26,24,0.08);' +
-  '--border-strong:rgba(27,26,24,0.3);--status-negative:#c93a28;--font-body:sans-serif;--font-mono:monospace}'
+  '--border-strong:rgba(27,26,24,0.3);--status-negative:#c93a28;--font-body:sans-serif;--font-mono:monospace;--viz-1:#5e4bd6}'
+// the one series color, which the timeline's marks take with no Color by, as a chart of one series does
+const ONE = 'rgb(94, 75, 214)'
 const T0 = Date.UTC(2026, 4, 16, 9) / 1000
 // six posts of a thread: who wrote each and whether it opens a thread or replies; the third is a tool call, folded
 const RECS = [
@@ -63,7 +65,7 @@ const view = (mount: Mount) => `<!doctype html><html><head><style>${TOKENS} html
 <script>
 const RECS = ${JSON.stringify(RECS)}
 window.__changes = 0
-const mountColour = () => (window.colour = thimble.colorBy({ mount: '#colour', fields: ${JSON.stringify(FIELDS)}, onChange: () => window.__changes++ }))
+const mountColour = () => (window.colour = thimble.colorBy({ mount: '#colour', fields: ${JSON.stringify(FIELDS)}, initial: 'author', onChange: () => window.__changes++ }))
 ${mount === 'first' ? 'mountColour()' : ''}
 const rows = (p) => RECS.map((r) => ({ ...r, ref: p + '.jsonl#L' + r.n }))
 const turns = (p) => rows(p).map((r) => (r.n === 3 ? { ...r, speaker: r.author, kind: 'tool', tool: 'Bash', input: 'ls', output: 'a\\nb' } : { ...r, speaker: r.author, kind: 'text' }))
@@ -190,14 +192,14 @@ function follows(got: Look, field: 'author' | 'role', colourOf: Record<string, s
   }
   assert.deepEqual(got.tl, RECS.map((r) => (off.includes(r[field]) ? null : colourOf[r[field]])), "the timeline's marks in the same colours")
 }
-/** No part given colour: false stamps a value or shows a bar, and its timeline's marks are gray; the timeline given its
- *  own Color by keeps to it. */
+/** No part given colour: false stamps a value or shows a bar, and its timeline's marks take the one series color; the
+ *  timeline given its own Color by keeps to it. */
 function plain(got: Look) {
   for (const part of OFF) {
     assert.equal(got.seen[part].length, recsOf(part).length, `${part} drew its records`)
     for (const s of got.seen[part]) assert.deepEqual([s.value, s.bar, s.tracks, s.edge], [null, null, null, null], `${part}: no stamp and no bar`)
   }
-  assert.deepEqual(got.offTl, RECS.map(() => null), "the timeline given colour: false draws its marks gray")
+  assert.deepEqual(got.offTl, RECS.map(() => ONE), "the timeline given colour: false draws its marks in the one series color")
   assert.deepEqual(got.ownTl, RECS.map(() => 'rgb(1, 2, 3)'), 'the timeline given a Color by of its own draws in its colours')
 }
 /** opens the Color by menu and clicks a field in it */
@@ -287,7 +289,7 @@ test('each part draws alone with no Color by, its records with no bar, and takes
     assert.equal(got0.seen[part].length, recsOf(part).length, `${part} drew its records`)
     for (const s of got0.seen[part]) assert.deepEqual([s.value, s.bar], [null, null], `${part}: no stamp and no bar with no Color by`)
   }
-  assert.deepEqual(got0.tl, RECS.map(() => null), "the timeline's marks gray with no Color by")
+  assert.deepEqual(got0.tl, RECS.map(() => ONE), "the timeline's marks in the one series color with no Color by")
   assert.deepEqual(got0.ownTl, RECS.map(() => 'rgb(1, 2, 3)'), 'the timeline given a Color by of its own draws in its colours')
   assert.deepEqual(await errors(alone.page), [], 'the kit reported no error')
   await alone.page.close()
@@ -316,7 +318,7 @@ const POSTS = Array.from({ length: 40 }, (_, i) => ({ n: i + 1, kind: ['review',
 window.__reads = 0
 // a read of a turn's record, which the transcripts alone hand Color by (the tables' rows are copies)
 const count = (name) => (r) => (POSTS.includes(r) && window.__reads++, r[name])
-thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', value: count('kind') }, { name: 'author', title: 'Author', value: count('author') }], onChange: () => {} })
+thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', value: count('kind') }, { name: 'author', title: 'Author', value: count('author') }], initial: 'kind', onChange: () => {} })
 const turns = (p) => POSTS.slice(0, 4).map((r) => ({ ref: p + '#L' + r.n, speaker: r.author, kind: 'text', text: r.text, record: r }))
 for (let k = 0; k < 20; k++) thimble.transcript({ mount: '#again' }).draw(turns('again'))
 thimble.transcript({ mount: '#quiet' }).draw(turns('quiet'))
@@ -387,7 +389,7 @@ test("a part whose records the page's Color by cannot read draws them with no ba
 <span id="colour"></span><ul id="list"></ul><div id="tr"></div><div id="rec"></div><div id="cards"></div><div id="given"></div>
 <script>
 const ROWS = [{ kind: 'a', text: 'one' }, { kind: 'b', text: 'two' }]
-const colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', value: (i) => ROWS[i].kind }], onChange: () => {} })
+const colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', value: (i) => ROWS[i].kind }], initial: 'kind', onChange: () => {} })
 document.getElementById('list').innerHTML = ROWS.map((r, i) => '<li data-anchor="l#L' + (i + 1) + '"' + colour.attr(i) + '>' + r.text + '</li>').join('')
 const turns = (p) => ROWS.map((r, i) => ({ ref: p + '#L' + (i + 1), speaker: 'x', kind: 'text', text: r.text }))
 thimble.transcript({ mount: '#tr' }).draw(turns('t'))

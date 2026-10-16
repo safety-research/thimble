@@ -4,7 +4,8 @@
 import { useState } from 'react'
 import { Menu, type MenuItem } from '../components/Menu'
 import { Spinner } from '../components/Spinner'
-import { describeDetail } from '../lib/api'
+import { describeDetail, signInNeeded } from '../lib/api'
+import { apiBase } from '../lib/browserKey'
 import { frameFonts } from '../lib/frame'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
@@ -20,7 +21,7 @@ export interface ExportFormat {
   why?: string
 }
 
-const base = (ws: string, slug: string) => `/api/ws/${encodeURIComponent(ws)}/investigations/main/types/${encodeURIComponent(slug)}`
+const base = (ws: string, slug: string) => `${apiBase()}/ws/${encodeURIComponent(ws)}/investigations/main/types/${encodeURIComponent(slug)}`
 
 function save(blob: Blob, name: string) {
   const url = URL.createObjectURL(blob)
@@ -32,6 +33,7 @@ function save(blob: Blob, name: string) {
 }
 
 async function fail(res: Response): Promise<never> {
+  await signInNeeded(res)
   let detail = res.statusText
   try {
     const body = await res.json()

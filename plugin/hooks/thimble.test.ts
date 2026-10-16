@@ -1,12 +1,113 @@
 // thimble.ts, the plugin's hooks module, against a fake engine `$` and a fake thimble server that proves the token as
-// app/hook_auth.py does. The server's side is backend/tests_public/test_module_bridge.py. Run with the frontend's
-// vitest (frontend/vitest.config.ts includes this file): cd frontend && npx vitest run ../plugin/hooks
-import { createHmac } from 'node:crypto'
-import { describe, expect, it, vi } from 'vitest'
+// app/hook_auth.py does. The server's side is backend/tests_public/test_module_bridge.py, which also checks that the
+// module's PRIVATE_FALLBACK says what prompts/tools.md says, a file this test cannot read.
+//
+// Run with Claude Code's test kit, in plugin/: claude plugin test . It runs this file as the module's hooks run: it
+// imports only its own files and 'claude-code/testing', and has no file system and no Node. The frontend's vitest runs
+// it too, with that kit's describe, test and expect mapped to its own (frontend/vitest.config.ts,
+// frontend/tests/public/claude-code-testing.ts): cd frontend && npx vitest run ../plugin/hooks
+// The kit has no mock functions and no Node crypto, so the file has its own: `vi.fn`, the checks of their calls
+// (`expect`), and the HMAC-SHA256 the fake server signs with (hmacSha256).
+import { describe, expect as check, test as it } from 'claude-code/testing'
 
-import { hmac, register } from './thimble'
+import { ABORT_WAIT_MS, ACTIVATE_WAIT_MS, PRIVATE_FALLBACK, RETRY_MS, hmac, register } from './thimble'
 
 type Json = Record<string, any>
+
+type MockFn<F extends (...args: any[]) => any> = F & {
+  mock: { calls: Parameters<F>[] }
+  mockImplementation: (impl: F) => MockFn<F>
+  mockClear: () => MockFn<F>
+}
+
+/** A mock function, as vitest's vi.fn: it runs `impl`, or the one mockImplementation gave it later, on each call and
+ *  keeps the call's arguments in `mock.calls`, which mockClear empties. */
+function fn<F extends (...args: any[]) => any>(impl: F): MockFn<F> {
+  const calls: Parameters<F>[] = []
+  let run = impl
+  const spy = Object.assign((...args: Parameters<F>) => { calls.push(args); return run(...args) }, {
+    mock: { calls },
+    mockImplementation: (next: F) => { run = next; return spy },
+    mockClear: () => { calls.length = 0; return spy },
+  }) as unknown as MockFn<F>
+  return spy
+}
+const vi = { fn }
+
+type Spy = ((...args: any[]) => unknown) & { mock: { calls: unknown[][] } }
+const isSpy = (v: unknown): v is Spy => typeof v === 'function' && Array.isArray((v as Partial<Spy>).mock?.calls)
+
+/** vitest's checks of a mock function's calls, made with the kit's checks of its `mock.calls`; `not` negates each. */
+function callChecks(spy: Spy, not: boolean) {
+  const calls = spy.mock.calls
+  const of = (v: unknown) => (not ? check(v).not : check(v))
+  return {
+    toHaveBeenCalled: () => (not ? check(calls).toEqual([]) : check(calls.length).toBeGreaterThan(0)),
+    toHaveBeenCalledTimes: (n: number) => of(calls).toHaveLength(n),
+    toHaveBeenCalledWith: (...args: unknown[]) => of(calls).toContainEqual(args),
+    toHaveBeenLastCalledWith: (...args: unknown[]) => of(calls.at(-1)).toEqual(args),
+  }
+}
+
+/** The kit's expect, which also checks the calls of a mock function (vi.fn) as vitest's does (callChecks). */
+const expect = Object.assign(
+  (received: unknown, message?: string): any =>
+    isSpy(received) ? { ...callChecks(received, false), not: callChecks(received, true) } : check(received, message),
+  { any: check.any, anything: check.anything, objectContaining: check.objectContaining, arrayContaining: check.arrayContaining,
+    stringContaining: check.stringContaining, stringMatching: check.stringMatching },
+)
+
+const K256 = [
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01,
+  0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+  0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
+  0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08,
+  0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+  0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+]
+const rotr = (x: number, n: number) => (x >>> n) | (x << (32 - n))
+
+/** SHA-256 (FIPS 180-4) in plain code, apart from the crypto.subtle digest the module's hmac uses. */
+function sha256(data: Uint8Array): Uint8Array {
+  const padded = new Uint8Array((((data.length + 8) >> 6) + 1) << 6)
+  padded.set(data)
+  padded[data.length] = 0x80
+  const view = new DataView(padded.buffer)
+  view.setUint32(padded.length - 8, Math.floor(data.length / 0x20000000))
+  view.setUint32(padded.length - 4, (data.length * 8) >>> 0)
+  const h = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]
+  const w = new Array<number>(64)
+  for (let at = 0; at < padded.length; at += 64) {
+    for (let i = 0; i < 16; i++) w[i] = view.getUint32(at + 4 * i)
+    for (let i = 16; i < 64; i++) {
+      const s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >>> 3)
+      const s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >>> 10)
+      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0
+    }
+    let [a, b, c, d, e, f, g, k] = h
+    for (let i = 0; i < 64; i++) {
+      const t1 = (k + (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)) + ((e & f) ^ (~e & g)) + K256[i] + w[i]) >>> 0
+      const t2 = ((rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))) >>> 0
+      k = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0
+    }
+    ;[a, b, c, d, e, f, g, k].forEach((v, i) => { h[i] = (h[i] + v) >>> 0 })
+  }
+  const out = new DataView(new ArrayBuffer(32))
+  h.forEach((v, i) => out.setUint32(4 * i, v))
+  return new Uint8Array(out.buffer)
+}
+
+/** HMAC-SHA256 (RFC 2104) as hex, on sha256: what Node's createHmac('sha256', key).update(message).digest('hex') gives. */
+function hmacSha256(key: string, message: string): string {
+  const utf8 = new TextEncoder()
+  let k = utf8.encode(key)
+  if (k.length > 64) k = sha256(k)
+  const block = (pad: number) => Uint8Array.from({ length: 64 }, (_, i) => (k[i] ?? 0) ^ pad)
+  const cat = (x: Uint8Array, y: Uint8Array) => { const z = new Uint8Array(x.length + y.length); z.set(x); z.set(y, x.length); return z }
+  const mac = sha256(cat(block(0x5c), sha256(cat(block(0x36), utf8.encode(message)))))
+  return Array.from(mac, v => v.toString(16).padStart(2, '0')).join('')
+}
 
 const TOKEN = 'token-of-the-test-server'
 const HOME = '/home/analyst'
@@ -21,7 +122,7 @@ const ROLES: Json = Object.fromEntries(ROLE_NAMES.map((name, i) => [name, {
 }]))
 const NOTE = 'The analyst started the writer {agent} (report) in thimble; leave it unless they ask.'
 
-const sign = (role: string, nonce: string, token = TOKEN) => createHmac('sha256', token).update(`${role}:${nonce}`).digest('hex')
+const sign = (role: string, nonce: string, token = TOKEN) => hmacSha256(token, `${role}:${nonce}`)
 const until = async (ok: () => boolean, ms = 2000) => {
   const end = Date.now() + ms
   while (!ok()) {
@@ -43,6 +144,8 @@ class Server {
   results: Json[] = []
   ended: Json[] = []
   modes: Json[] = [] // what the module posted of main's plan mode
+  rules: Json | undefined = undefined // the rules GET /api/module/roles carries beside the roles (userconf.module_rules)
+  rolesStatus = 200
   nextStatus: number | null = null // one forced answer to the next poll
   waiters: (() => void)[] = []
 
@@ -64,7 +167,10 @@ class Server {
     const reply = (status: number, body: unknown = {}) => ({
       status, ok: status < 300, headers: { 'x-thimble-proof': sign('server', nonce, this.proofToken) }, text: JSON.stringify(body),
     })
-    if (!nonce || init.headers?.['x-thimble-auth'] !== sign('hook', nonce)) return { status: 401, ok: false, headers: {}, text: '{}' }
+    // app/hook_auth.py's check: a nonce `<unix time>.<hex>` near the server's clock, proven for the port it was sent to
+    const sent = Number(/^(\d+)\.[0-9a-f]+$/.exec(nonce)?.[1] ?? NaN)
+    const fresh = Math.abs(Date.now() / 1000 - sent) <= 300
+    if (!nonce || !fresh || init.headers?.['x-thimble-auth'] !== sign(`hook@${u.port}`, nonce)) return { status: 401, ok: false, headers: {}, text: '{}' }
     const body = init.body ? JSON.parse(init.body) : {}
     const route = `${init.method ?? 'GET'} ${u.pathname}`
     this.calls.push(route)
@@ -75,7 +181,7 @@ class Server {
         return reply(status, status === 200 ? { ok: true } : { detail: 'no' })
       }
       case 'GET /api/module/roles':
-        return reply(200, { roles: this.roles })
+        return this.rolesStatus === 200 ? reply(200, { roles: this.roles, ...(this.rules ? { rules: this.rules } : {}) }) : reply(this.rolesStatus)
       case 'GET /api/module/state':
         return reply(200, this.state)
       case 'GET /api/module/next': {
@@ -103,7 +209,7 @@ class Server {
   }
 }
 
-type Options = { env?: Json; interactive?: boolean; server?: Server; serverUp?: boolean }
+type Options = { env?: Json; interactive?: boolean; server?: Server; serverUp?: boolean; fakeClock?: boolean }
 
 /** A fake engine: the module's hooks, `$`, and a record of what the module asked Claude Code for. */
 function engine(opts: Options = {}) {
@@ -114,6 +220,8 @@ function engine(opts: Options = {}) {
     ...(opts.serverUp === false ? {} : { [`${HOME}/.thimble/server.json`]: JSON.stringify({ port: 21125, token: TOKEN }) }),
   }
   const mtimes: Json = {} // each file's mtime, which a write moves on
+  const links: Json = {} // symbolic links: path -> where it points
+  let clock = Date.now() // the fake clock's time (fakeClock), which each sleep moves on
   let tick = 1
   const writeFile = (path: string, data: unknown) => { files[path] = typeof data === 'string' ? data : JSON.stringify(data); mtimes[path] = ++tick }
   const hooks: Json = {}
@@ -123,15 +231,30 @@ function engine(opts: Options = {}) {
   let sid = MAIN
   let spawnAnswer = (args: Json): Json => ({ agentId: `agent-${log.length}`, model: now[args.subagentType]?.model })
   let toolAnswer = (input: Json): Json => ({ result: { success: true }, text: `Resuming agent ${input.to}` })
+  let abortAnswer = async (_input: Json): Promise<void> => undefined
+  let messages: Json[] = [] // main's transcript as $.session.messages() returns it
   let checkReason = 'Claude requested permissions to write, but you haven\'t granted it yet.' // Claude Code's decision for a write
+  /** where a path lands, every link followed; undefined when it leads nowhere (no file, and no folder of one) */
+  const land = (path: string): string | undefined => {
+    let p = path
+    for (let hops = 0; hops < 16; hops++) {
+      const link = Object.keys(links).find(l => p === l || p.startsWith(`${l}/`))
+      if (!link) break
+      p = `${links[link]}${p.slice(link.length)}`
+    }
+    return p in files || Object.keys(files).some(f => f.startsWith(`${p}/`)) ? p : undefined
+  }
   const $ = {
     env: { get: vi.fn(async (name: string) => env[name]), set: async () => undefined },
     fs: {
       read: vi.fn(async (path: string) => { if (path in files) return files[path]; throw new Error(`ENOENT ${path}`) }),
       write: vi.fn(async (path: string, data: string) => { writeFile(path, data) }),
-      stat: vi.fn(async (path: string) => {
-        if (!(path in files)) throw new Error(`ENOENT ${path}`)
-        return { kind: 'file', size: String(files[path]).length, mtimeMs: mtimes[path] ?? 1, isLink: false }
+      stat: vi.fn(async (path: string, options?: { resolve: boolean }) => {
+        const real = land(path)
+        if (real === undefined) throw new Error(`ENOENT ${path}`)
+        const isLink = path in links
+        if (!(real in files)) return { kind: 'dir', size: 0, mtimeMs: 1, isLink, ...(options?.resolve ? { realPath: real } : {}) }
+        return { kind: 'file', size: String(files[real]).length, mtimeMs: mtimes[real] ?? 1, isLink, ...(options?.resolve ? { realPath: real } : {}) }
       }),
     },
     http: { fetch: vi.fn((url: string, init?: Json) => server.fetch(url, init)) },
@@ -149,22 +272,44 @@ function engine(opts: Options = {}) {
       }),
     },
     tool: { call: vi.fn(async (input: Json) => toolAnswer(input)), check: vi.fn(async (_input: Json) => ({ decision: 'ask', reason: checkReason })) },
+    turn: { abort: vi.fn(async (input: Json) => abortAnswer(input)) },
     session: {
       id: vi.fn(async () => sid),
       append: vi.fn(async (args: Json) => ({ uuid: 'u1', message: args.message })),
+      messages: vi.fn(async () => messages),
     },
-    clock: { sleep: (ms: number) => new Promise(r => setTimeout(r, Math.min(ms, 5))), now: async () => Date.now() },
+    clock: opts.fakeClock
+      ? { sleep: (ms: number) => { clock += ms; return new Promise(r => setTimeout(r, 0)) }, now: async () => clock }
+      : { sleep: (ms: number) => new Promise(r => setTimeout(r, Math.min(ms, 5))), now: async () => Date.now() },
     plugin: { name: 'thimble', root: '/plugin' },
   }
   const notes = () => $.session.append.mock.calls.map(([a]) => a.message.content[0].text as string)
   return {
-    $, server, env, files, now, log, notes, writeFile,
+    $, server, env, files, links, now, log, notes, writeFile,
     setSession: (s: string) => { sid = s },
     onSpawn: (f: (args: Json) => Json) => { spawnAnswer = f },
     onTool: (f: (input: Json) => Json) => { toolAnswer = f },
+    /** what $.turn.abort does: resolves, or rejects with Claude Code's reason */
+    onAbort: (f: (input: Json) => Promise<void>) => { abortAnswer = f },
+    /** main's transcript from now on, as $.session.messages() returns it */
+    setMessages: (rows: Json[]) => { messages = rows },
+    /** a model turn's start through the turn.start hook: main's (no agentId) or an agent's */
+    turnStart: (agentId: string | undefined, turnId: string) => hooks['turn.start']($, { text: '', turnId, ...(agentId === undefined ? {} : { agentId }) }, async () => ({ turnId })),
     /** the reason Claude Code's permission decision gives for a write now: in plan mode it says so */
     onCheck: (reason: string) => { checkReason = reason },
     start: () => hooks['session.start']($, { cwd: CWD, surface: opts.interactive === false ? null : 'terminal', isInteractive: opts.interactive ?? true }, async () => ({ cwd: CWD })),
+    /** a skill's prompt expanding: /thimble is `thimble:thimble` */
+    skill: (name: string) => hooks['skill.prompt']($, { skill: name, text: 'the skill', frontmatter: {}, source: 'plugin', pluginName: 'thimble' }, async () => ({ text: 'the skill' })),
+    /** one tool call through the tool.call hook: `ran` when it went on to Claude Code, else what the hook answered */
+    tool: async (input: Json): Promise<Json> => {
+      const next = vi.fn(async () => ({ ran: true }))
+      return hooks['tool.call']($, { tool_use_id: 'toolu_9', ...input }, next)
+    },
+    /** the guard's catch, as Claude Code runs it when the hook failed: before its `next` or after it */
+    toolCaught: (input: Json, called: boolean): Promise<Json> => {
+      const next = Object.assign(vi.fn(async () => ({ ran: true })), { called })
+      return hooks['tool.call.catch']($, { tool_use_id: 'toolu_9', ...input }, next)
+    },
     end: (reason: string, sessionId = MAIN) => hooks['session.end']($, { reason, sessionId, resume: {} }, async () => ({ sessionId })),
     /** main's (or an agent's) Agent call through the agent.spawn hook: the input Claude Code went on with, and its answer */
     agentCall: async (e: Json, agentId: string) => {
@@ -217,7 +362,7 @@ describe('the scope check', () => {
     expect(e.$.env.get).not.toHaveBeenCalled()
   })
 
-  it('stays idle when the server refuses its hello (not main, or main unfenced)', async () => {
+  it('stays idle when the server refuses its hello (not main)', async () => {
     const server = new Server()
     server.helloStatus = () => 403
     const e = engine({ server })
@@ -225,6 +370,241 @@ describe('the scope check', () => {
     await new Promise(r => setTimeout(r, 30))
     expect(server.calls).toEqual(['POST /api/module/hello'])
     expect(e.$.agent.register).not.toHaveBeenCalled()
+  })
+})
+
+describe('turning on with /thimble, in a session the launcher did not start', () => {
+  const plain = (opts: Options = {}) => engine({ ...opts, env: { THIMBLE_LAUNCHED: undefined, ...(opts.env ?? {}) } })
+  /** the number of hellos once one came and no other came for 20 ms (the fake clock moves only as the module sleeps) */
+  const settled = async (server: Server): Promise<number> => {
+    await until(() => server.hellos.length > 0)
+    let n = -1
+    for (let i = 0; i < 400 && server.hellos.length !== n; i++) {
+      n = server.hellos.length
+      await new Promise(r => setTimeout(r, 20))
+    }
+    return n
+  }
+
+  it('says hello and registers the roles once /thimble expands, and only then', async () => {
+    const e = plain()
+    await e.start()
+    await e.complete(undefined)
+    expect(e.$.http.fetch).not.toHaveBeenCalled()
+    expect(e.$.fs.read).not.toHaveBeenCalled()
+    await e.skill('thimble:thimble')
+    await until(() => e.server.polls.length > 0)
+    expect(e.server.hellos[0]).toEqual({ cwd: CWD, session: MAIN, version: '0.6.0', problem: '' })
+    expect(e.$.agent.register).toHaveBeenCalledTimes(7)
+    expect(e.server.calls.slice(0, 3)).toEqual(['POST /api/module/hello', 'GET /api/module/state', 'GET /api/module/roles'])
+  })
+
+  for (const [why, opts, name] of [
+    ['for another skill', {}, 'thimble:orient'],
+    ['with THIMBLE_NO_MODULE', { env: { THIMBLE_NO_MODULE: '1' } }, 'thimble:thimble'],
+    ['in claude -p (isInteractive false)', { interactive: false }, 'thimble:thimble'],
+  ] as [string, Options, string][]) {
+    it(`does nothing ${why}`, async () => {
+      const e = plain(opts)
+      await e.start()
+      await e.skill(name)
+      await new Promise(r => setTimeout(r, 30))
+      await e.complete(undefined)
+      await new Promise(r => setTimeout(r, 30))
+      expect(e.$.http.fetch).not.toHaveBeenCalled()
+      expect(e.$.agent.register).not.toHaveBeenCalled()
+    })
+  }
+
+  it('waits ACTIVATE_WAIT_MS for a server that accepts it, then says hello once at the end of each of main’s turns', async () => {
+    const server = new Server()
+    server.helloStatus = () => 409 // no main known yet
+    const e = plain({ server, fakeClock: true })
+    await e.start()
+    await e.skill('thimble:thimble')
+    const n = await settled(server)
+    expect(n).toBe(ACTIVATE_WAIT_MS / RETRY_MS + 1) // one at once, then one every RETRY_MS until the wait is over
+    await e.complete('agent-1') // an agent's turn: nothing
+    await e.complete(undefined) // main's turn
+    await until(() => server.hellos.length === n + 1)
+    await new Promise(r => setTimeout(r, 30))
+    expect(server.hellos.length).toBe(n + 1)
+    server.helloStatus = () => 200
+    await e.complete(undefined)
+    await until(() => server.polls.length > 0)
+    expect(e.$.agent.register).toHaveBeenCalledTimes(7)
+  })
+
+  it('stays idle after a refused hello until the next /thimble', async () => {
+    const server = new Server()
+    server.helloStatus = () => 409
+    const e = plain({ server, fakeClock: true })
+    await e.start()
+    await e.skill('thimble:thimble')
+    const n = await settled(server)
+    server.helloStatus = () => 403 // another session is main
+    await e.complete(undefined)
+    await until(() => server.hellos.length === n + 1)
+    await e.complete(undefined)
+    await new Promise(r => setTimeout(r, 30))
+    expect(server.hellos.length).toBe(n + 1)
+    server.helloStatus = () => 200
+    await e.skill('thimble:thimble')
+    await until(() => server.polls.length > 0)
+  })
+
+  it('takes a 404 after /thimble (a folder /thimble did not open) as refused: one hello, none at later turn ends', async () => {
+    const server = new Server()
+    server.helloStatus = () => 404
+    const e = plain({ server })
+    await e.start()
+    await e.skill('thimble:thimble')
+    await until(() => server.hellos.length === 1)
+    await new Promise(r => setTimeout(r, 30))
+    await e.complete(undefined)
+    await e.complete(undefined)
+    await new Promise(r => setTimeout(r, 30))
+    expect(server.calls).toEqual(['POST /api/module/hello'])
+  })
+
+  it('keeps asking on a 404 in the launcher’s session, whose server may be starting', async () => {
+    const server = new Server()
+    server.helloStatus = () => 404
+    const e = engine({ server })
+    await e.start()
+    await until(() => server.hellos.length >= 3)
+  })
+
+  it('does not turn on again in the launcher’s session, whose own hello is refused', async () => {
+    const server = new Server()
+    server.helloStatus = () => 403
+    const e = engine({ server })
+    await e.start()
+    await e.skill('thimble:thimble')
+    await e.complete(undefined)
+    await new Promise(r => setTimeout(r, 30))
+    expect(server.calls).toEqual(['POST /api/module/hello'])
+  })
+})
+
+// Where an organization manages Claude Code (managed settings on the machine, or a Team or Enterprise account), Claude
+// Code seats its built-in security plugin, and skill.prompt passes over the plugins a person installs: /thimble never
+// reaches the module's hook. /thimble's own hook still runs and leaves <home>/up/<session>.active (app/cli.py hook_up),
+// written anew at each /thimble, which the module looks at when main's turn ends.
+describe('turning on with /thimble where skill.prompt passes over the plugin (a managed organization)', () => {
+  const plain = (opts: Options = {}) => engine({ ...opts, env: { THIMBLE_LAUNCHED: undefined, ...(opts.env ?? {}) } })
+  const MARKER = `${HOME}/.thimble/up/${MAIN}.active`
+  /** what /thimble's hook writes (app/cli.py hook_up); each write moves the file's mtime on */
+  const marked = (e: ReturnType<typeof engine>, path = MARKER) => e.writeFile(path, { cwd: CWD, action: '', at: Date.now() / 1000 })
+
+  it('turns on at the end of main’s turn after /thimble’s hook left the session’s marker, with no skill.prompt', async () => {
+    const e = plain()
+    await e.start()
+    await e.complete(undefined)
+    expect(e.$.http.fetch).not.toHaveBeenCalled()
+    marked(e)
+    await e.complete('agent-1') // an agent's turn: nothing
+    await new Promise(r => setTimeout(r, 30))
+    expect(e.$.http.fetch).not.toHaveBeenCalled()
+    await e.complete(undefined)
+    await until(() => e.server.polls.length > 0)
+    expect(e.server.hellos[0]).toEqual({ cwd: CWD, session: MAIN, version: '0.6.0', problem: '' })
+    expect(e.$.agent.register).toHaveBeenCalledTimes(7)
+    expect(await e.tool({ tool: 'Read', file_path: `${HOME}/.thimble/server.json` })).toEqual({ deny: PRIVATE_FALLBACK })
+  })
+
+  it('waits ACTIVATE_WAIT_MS for a server that accepts it, as after skill.prompt', async () => {
+    const server = new Server()
+    server.helloStatus = () => 409 // no main known yet
+    const e = plain({ server, fakeClock: true })
+    await e.start()
+    marked(e)
+    await e.complete(undefined)
+    await until(() => server.hellos.length > 0)
+    for (let n = -1, i = 0; i < 400 && server.hellos.length !== n; i++) {
+      n = server.hellos.length
+      await new Promise(r => setTimeout(r, 20))
+    }
+    expect(server.hellos.length).toBe(ACTIVATE_WAIT_MS / RETRY_MS + 1)
+  })
+
+  it('acts on a marker once: after a refused hello it stays idle until /thimble writes the marker again', async () => {
+    const server = new Server()
+    server.helloStatus = () => 403 // another session is main
+    const e = plain({ server })
+    await e.start()
+    marked(e)
+    await e.complete(undefined)
+    await until(() => server.hellos.length === 1)
+    await e.complete(undefined)
+    await e.complete(undefined)
+    await new Promise(r => setTimeout(r, 30))
+    expect(server.hellos.length).toBe(1)
+    server.helloStatus = () => 200
+    marked(e)
+    await e.complete(undefined)
+    await until(() => server.polls.length > 0)
+    expect(server.hellos.length).toBe(2)
+  })
+
+  it('takes a marker the session had when it started (claude -c, --resume) as an earlier /thimble: only a new one turns it on', async () => {
+    const e = plain()
+    marked(e) // /thimble ran in an earlier run of this session
+    await e.start()
+    await e.complete(undefined)
+    await e.complete(undefined)
+    await new Promise(r => setTimeout(r, 30))
+    expect(e.$.http.fetch).not.toHaveBeenCalled()
+    marked(e)
+    await e.complete(undefined)
+    await until(() => e.server.polls.length > 0)
+    expect(e.server.hellos.length).toBe(1)
+  })
+
+  it('says hello once for a /thimble that skill.prompt and the marker both report (no managed organization)', async () => {
+    const server = new Server()
+    server.helloStatus = () => 404 // a folder /thimble did not open
+    const e = plain({ server })
+    await e.start()
+    marked(e) // the hook runs before the skill expands
+    await e.skill('thimble:thimble')
+    await until(() => server.hellos.length === 1)
+    await e.complete(undefined)
+    await e.complete(undefined)
+    await new Promise(r => setTimeout(r, 30))
+    expect(server.calls).toEqual(['POST /api/module/hello'])
+  })
+
+  for (const [why, opts, path] of [
+    ['for another session’s marker', {}, `${HOME}/.thimble/up/${NEW}.active`],
+    ['for a marker in another thimble home', {}, '/elsewhere/up/11111111-1111-4111-8111-111111111111.active'],
+    ['with THIMBLE_NO_MODULE', { env: { THIMBLE_NO_MODULE: '1' } }, MARKER],
+    ['in claude -p (isInteractive false)', { interactive: false }, MARKER],
+  ] as [string, Options, string][]) {
+    it(`does nothing ${why}`, async () => {
+      const e = plain(opts)
+      await e.start()
+      marked(e, path)
+      await e.complete(undefined)
+      await new Promise(r => setTimeout(r, 30))
+      expect(e.$.http.fetch).not.toHaveBeenCalled()
+      expect(e.$.agent.register).not.toHaveBeenCalled()
+    })
+  }
+
+  it('looks only at the marker’s file system entry, at session.start and once per turn of main’s, in a session the launcher did not start', async () => {
+    const e = plain()
+    await e.start()
+    await e.complete(undefined)
+    await e.complete('agent-1')
+    expect(e.$.fs.read).not.toHaveBeenCalled()
+    expect(e.$.fs.stat.mock.calls.map(([p]) => p)).toEqual([MARKER, MARKER])
+    const launched = engine({ serverUp: false })
+    await launched.start()
+    launched.$.fs.stat.mockClear()
+    await launched.complete(undefined)
+    expect(launched.$.fs.stat).not.toHaveBeenCalledWith(MARKER, expect.anything())
+    expect(launched.$.fs.stat).not.toHaveBeenCalledWith(MARKER)
   })
 })
 
@@ -373,10 +753,88 @@ describe('requests', () => {
     e.onCheck("Claude requested permissions to write, but you haven't granted it yet.")
     await until(3)
     expect(e.server.modes.map((b) => b.plan)).toEqual([false, true, false])
-    // a path no rule of thimble's fence names, so that plan mode is what decides it (main's corpus is an ask rule)
+    // a path no rule of thimble's names, so that plan mode is what decides it
     expect(e.$.tool.check).toHaveBeenLastCalledWith({ tool: 'Write', input: { file_path: '/tmp/.thimble-plan-probe', content: '' } })
     expect(e.$.tool.call).not.toHaveBeenCalledWith(expect.objectContaining({ tool: 'Write' })) // never written
     await e.end('other')
+  })
+
+  it("stops main's running turn with $.turn.abort, by the id main's turn.start carried, and answers once that turn completed", async () => {
+    const e = await started()
+    // the wait for the turn's end is long enough here that only the turn's end ends it
+    const sleep = e.$.clock.sleep
+    e.$.clock.sleep = (ms: number) => (ms === ABORT_WAIT_MS ? new Promise(r => setTimeout(r, 5000)) : sleep(ms))
+    await e.turnStart(undefined, 'turn-7')
+    await e.turnStart('a1', 'turn-8') // an agent's turn is not main's
+    const said: string[] = []
+    e.onAbort(async () => {
+      said.push('abort')
+      setTimeout(() => void e.complete(undefined, '', { turnId: 'turn-7', reason: 'aborted', isAborted: true }).then(() => said.push('completed')), 20)
+    })
+    expect(await e.server.answer(e.server.push('abort'))).toEqual({ ok: true })
+    expect(e.$.turn.abort).toHaveBeenCalledTimes(1)
+    expect(e.$.turn.abort).toHaveBeenCalledWith({ turnId: 'turn-7' })
+    expect(said).toEqual(['abort', 'completed'])
+    // once it completed, no turn of main's runs: a second Stop has nothing to end
+    expect(await e.server.answer(e.server.push('abort'))).toMatchObject({ error: expect.any(String), gone: true })
+    expect(e.$.turn.abort).toHaveBeenCalledTimes(1)
+  })
+
+  it("stops the command that the Stop of main's turn moved to the background, once the turn ended, and no other", async () => {
+    // Claude Code's $.turn.abort moves a foreground command that runs to the background (backgroundedByTurnAbort on the
+    // call's stored result) where Esc would end it; left running, its end starts a new turn of main's (live check L4-12l)
+    const e = await started()
+    const moved = (id: string) => ({ stdout: '', stderr: '', interrupted: false, backgroundTaskId: id, backgroundedByTurnAbort: true })
+    const said = (id: string) => `Command running in background with ID: ${id}. Output is being written to: /tmp/${id}.output.`
+    const call = (id: string, command: string, result: Json) => [
+      { role: 'assistant', text: '', toolUses: [{ tool_use_id: id, tool: 'Bash', input: { command }, result, text: said(String(result.backgroundTaskId)) }] },
+      { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: id, text: said(String(result.backgroundTaskId)), result }] },
+    ]
+    const transcript = [
+      { role: 'user', text: 'An earlier prompt.', toolUses: [] },
+      ...call('toolu_0', 'sleep 60', moved('bearlier1')), // an earlier turn's, which no Stop of this turn moved
+      { role: 'assistant', text: 'Done.', toolUses: [] },
+      { role: 'user', text: 'Run it.', toolUses: [] }, // the stopped turn's prompt
+      ...call('toolu_1', 'serve', { stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'bkeep1' }), // in the background on purpose
+      ...call('toolu_2', 'sleep 45; echo one', moved('b8g9p4611')),
+    ]
+    const stops = () => e.$.tool.call.mock.calls.map(([a]) => a).filter((a: Json) => a.tool === 'TaskStop')
+    // the wait for the turn's end is long enough here that only the turn's end ends it
+    const sleep = e.$.clock.sleep
+    e.$.clock.sleep = (ms: number) => (ms === ABORT_WAIT_MS ? new Promise(r => setTimeout(r, 5000)) : sleep(ms))
+    await e.turnStart(undefined, 'turn-7')
+    e.setMessages(transcript.slice(0, 7)) // while the command runs, its call has no result yet
+    e.onAbort(async () => {
+      setTimeout(() => {
+        e.setMessages(transcript) // the abort moved the command to the background, and the turn ends
+        void e.complete(undefined, '', { turnId: 'turn-7', reason: 'aborted', isAborted: true })
+      }, 20)
+    })
+    expect(await e.server.answer(e.server.push('abort'))).toEqual({ ok: true })
+    expect(stops()).toEqual([{ tool: 'TaskStop', task_id: 'b8g9p4611' }])
+    // a Stop Claude Code refused moved nothing, so nothing is stopped
+    await e.turnStart(undefined, 'turn-8')
+    e.onAbort(async () => { throw new Error('something else') })
+    expect(await e.server.answer(e.server.push('abort'))).toEqual({ error: 'Error: something else' })
+    expect(stops()).toEqual([{ tool: 'TaskStop', task_id: 'b8g9p4611' }])
+  })
+
+  it("says main's turn had ended when none runs, or when Claude Code says so; any other refusal is an error", async () => {
+    const e = await started()
+    expect(await e.server.answer(e.server.push('abort'))).toMatchObject({ error: expect.any(String), gone: true })
+    await e.turnStart(undefined, 'turn-1')
+    await e.complete(undefined, 'Done.', { turnId: 'turn-1' })
+    expect(await e.server.answer(e.server.push('abort'))).toMatchObject({ error: expect.any(String), gone: true })
+    expect(e.$.turn.abort).not.toHaveBeenCalled()
+    await e.turnStart(undefined, 'turn-2')
+    e.onAbort(async () => { throw new Error('thimble: $.turn.abort: turn-2 is already ending') })
+    expect(await e.server.answer(e.server.push('abort'))).toMatchObject({ error: expect.stringContaining('already ending'), gone: true })
+    e.onAbort(async () => { throw new Error('something else') })
+    const other = await e.server.answer(e.server.push('abort'))
+    expect(other).toEqual({ error: 'Error: something else' })
+    // a turn whose end does not come is still answered, after ABORT_WAIT_MS
+    e.onAbort(async () => undefined)
+    expect(await e.server.answer(e.server.push('abort'))).toEqual({ ok: true })
   })
 
   it('appends a note on a note request', async () => {
@@ -528,11 +986,119 @@ describe('ends and sessions', () => {
   })
 })
 
+describe('the file guard', () => {
+  const T = `${HOME}/.thimble`
+  const WS = `${T}/workspaces/wiki`
+  const RULES = {
+    private: [`${T}/server.json`, `${T}/session.key`, `${T}/paired.json`, `${T}/links`],
+    records: [`${WS}/trusted`, `${WS}/chats`, `${WS}/notices.json`, `${WS}/notices-dismissed.json`, `${T}/main-modes.json`, `${T}/bypass.json`],
+    corpus: null, web_off: false,
+    reasons: { private: 'NO TOKEN FILES', records: 'NO RECORDS', data: 'NO CORPUS EDITS', web: 'NO WEB' },
+  }
+  const ran = { ran: true }
+
+  async function guarded(rules: Json | undefined = RULES, opts: Options = {}) {
+    const server = opts.server ?? new Server()
+    server.rules = rules
+    const e = await started({ ...opts, server })
+    e.writeFile(`${T}/paired.json`, '{}')
+    return e
+  }
+
+  it('refuses a file tool its read of the token files while active, and lets it through while idle', async () => {
+    const e = await guarded()
+    expect(await e.tool({ tool: 'Read', file_path: `${T}/server.json` })).toEqual({ deny: 'NO TOKEN FILES' })
+    expect(await e.tool({ tool: 'Read', file_path: `${T}/paired.json` })).toEqual({ deny: 'NO TOKEN FILES' })
+    expect(await e.tool({ tool: 'Read', file_path: `${T}/links/s-1` })).toEqual({ deny: 'NO TOKEN FILES' })
+    expect(await e.tool({ tool: 'Read', file_path: '~/.thimble/./workspaces/../server.json' })).toEqual({ deny: 'NO TOKEN FILES' })
+    expect(await e.tool({ tool: 'Read', file_path: `${CWD}/board.jsonl` })).toEqual(ran)
+    const idle = engine({ env: { THIMBLE_LAUNCHED: undefined } })
+    await idle.start()
+    const marker = [`${T}/up/${MAIN}.active`] // session.start looks at /thimble's marker, and at nothing else
+    expect(idle.$.fs.stat.mock.calls.map(([p]) => p)).toEqual(marker)
+    expect(await idle.tool({ tool: 'Read', file_path: `${T}/server.json` })).toEqual(ran)
+    expect(idle.$.fs.stat.mock.calls.map(([p]) => p)).toEqual(marker)
+  })
+
+  it('refuses a link to a token file, comparing where the path lands', async () => {
+    const e = await guarded()
+    e.links['/tmp/innocent.json'] = `${T}/server.json`
+    e.links['/tmp/home-link'] = T
+    expect(await e.tool({ tool: 'Read', file_path: '/tmp/innocent.json' })).toEqual({ deny: 'NO TOKEN FILES' })
+    expect(await e.tool({ tool: 'Edit', file_path: '/tmp/home-link/session.key', old_string: 'a', new_string: 'b' })).toEqual({ deny: 'NO TOKEN FILES' })
+  })
+
+  it('refuses an edit of thimble’s records, a file not there yet included, and lets a read of one through', async () => {
+    const e = await guarded()
+    e.writeFile(`${WS}/trusted/launch.json`, '{}')
+    expect(await e.tool({ tool: 'Edit', file_path: `${WS}/trusted/launch.json`, old_string: 'a', new_string: 'b' })).toEqual({ deny: 'NO RECORDS' })
+    expect(await e.tool({ tool: 'Write', file_path: `${WS}/notices.json`, content: '[]' })).toEqual({ deny: 'NO RECORDS' })
+    expect(await e.tool({ tool: 'Write', file_path: `${T}/bypass.json`, content: '{"rows": ["dev"]}' })).toEqual({ deny: 'NO RECORDS' })
+    expect(await e.tool({ tool: 'NotebookEdit', notebook_path: `${WS}/chats/main.ipynb`, new_source: 'x' })).toEqual({ deny: 'NO RECORDS' })
+    e.links['/tmp/ws-link'] = WS
+    expect(await e.tool({ tool: 'Write', file_path: '/tmp/ws-link/notices-dismissed.json', content: '[]' })).toEqual({ deny: 'NO RECORDS' })
+    expect(await e.tool({ tool: 'Read', file_path: `${WS}/trusted/launch.json` })).toEqual(ran)
+    expect(await e.tool({ tool: 'Write', file_path: `${WS}/notes.md`, content: 'x' })).toEqual(ran)
+  })
+
+  it('refuses an edit of the corpus only when the rules name it, and the web tools only when they are off', async () => {
+    const open = await guarded()
+    expect(await open.tool({ tool: 'Edit', file_path: `${CWD}/board.jsonl`, old_string: 'a', new_string: 'b' })).toEqual(ran)
+    expect(await open.tool({ tool: 'WebFetch', url: 'https://example.com', prompt: 'p' })).toEqual(ran)
+    const off = await guarded({ ...RULES, corpus: CWD, web_off: true })
+    expect(await off.tool({ tool: 'Edit', file_path: `${CWD}/board.jsonl`, old_string: 'a', new_string: 'b' })).toEqual({ deny: 'NO CORPUS EDITS' })
+    expect(await off.tool({ tool: 'Read', file_path: `${CWD}/board.jsonl` })).toEqual(ran)
+    expect(await off.tool({ tool: 'WebSearch', query: 'q' })).toEqual({ deny: 'NO WEB' })
+    expect(await off.tool({ tool: 'WebFetch', url: 'https://example.com', prompt: 'p' })).toEqual({ deny: 'NO WEB' })
+  })
+
+  it('leaves Bash to the permission mode', async () => {
+    const e = await guarded()
+    expect(await e.tool({ tool: 'Bash', command: `cat ${T}/server.json` })).toEqual(ran)
+  })
+
+  it('refuses Grep and Glob at thimble’s home or a token file, and lets them through at $HOME', async () => {
+    const e = await guarded()
+    expect(await e.tool({ tool: 'Grep', pattern: 'token', path: T })).toEqual({ deny: 'NO TOKEN FILES' })
+    expect(await e.tool({ tool: 'Glob', pattern: '*.json', path: `${T}/` })).toEqual({ deny: 'NO TOKEN FILES' })
+    expect(await e.tool({ tool: 'Grep', pattern: 'token', path: `${T}/server.json` })).toEqual({ deny: 'NO TOKEN FILES' })
+    expect(await e.tool({ tool: 'Grep', pattern: 'token', path: HOME })).toEqual(ran)
+    expect(await e.tool({ tool: 'Grep', pattern: 'token' })).toEqual(ran) // the working directory
+  })
+
+  it('refuses only the token files, in its own words, when the rules could not be fetched', async () => {
+    const server = new Server()
+    server.rolesStatus = 500
+    const e = await guarded(RULES, { server })
+    expect(await e.tool({ tool: 'Read', file_path: `${T}/server.json` })).toEqual({ deny: PRIVATE_FALLBACK })
+    expect(await e.tool({ tool: 'Write', file_path: `${T}/bypass.json`, content: '{}' })).toEqual(ran)
+    expect(await e.tool({ tool: 'Write', file_path: `${WS}/notices.json`, content: '[]' })).toEqual(ran)
+  })
+
+  it('refuses a token file in its catch only when the hook failed before its next, with no file system call', async () => {
+    const e = await guarded()
+    const stats = e.$.fs.stat.mock.calls.length
+    expect(await e.toolCaught({ tool: 'Read', file_path: `${T}/server.json` }, false)).toEqual({ deny: 'NO TOKEN FILES' })
+    expect(await e.toolCaught({ tool: 'Read', file_path: `${T}/server.json` }, true)).toEqual(ran)
+    expect(await e.toolCaught({ tool: 'Read', file_path: `${CWD}/board.jsonl` }, false)).toEqual(ran)
+    expect(e.$.fs.stat.mock.calls.length).toBe(stats)
+  })
+})
+
 describe('the proof', () => {
   it("is app/hook_auth.py's HMAC-SHA256, short and long keys alike", async () => {
-    for (const key of [TOKEN, 'k'.repeat(64), 'long-'.repeat(40)]) {
-      expect(await hmac(key, 'hook:abc123')).toBe(createHmac('sha256', key).update('hook:abc123').digest('hex'))
+    // hmac.new(key.encode(), b'hook:abc123', hashlib.sha256).hexdigest(), as app/hook_auth.py signs
+    const proofs: [string, string][] = [
+      [TOKEN, 'b3034a19a9d45af99002a6aa0066868888c4b8858bfadf9e8957b8f7507bb7de'], // gitleaks:allow  the test token's proof, not a key
+      ['k'.repeat(64), 'c725b8497add2bc1fe195f4357a2698c72d2a7525d995c65c760785fbd7ade3c'],
+      ['long-'.repeat(40), 'a3d9cf09189641b0ec9c3016ba36330c1ba61ed0e5b1ae0a25b4f73ebfd7b5e6'],
+    ]
+    for (const [key, proof] of proofs) {
+      expect(await hmac(key, 'hook:abc123')).toBe(hmacSha256(key, 'hook:abc123'))
+      expect(hmacSha256(key, 'hook:abc123')).toBe(proof)
     }
+    // RFC 4231, test case 2
+    expect(hmacSha256('Jefe', 'what do ya want for nothing?')).toBe('5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843')
   })
 })
 
@@ -540,7 +1106,7 @@ describe('terminal mode', () => {
   const WS = '/workspaces/wiki'
   const T = `${WS}/trusted`
   const out = (e: { files: Json }): Json => JSON.parse(e.files[`${T}/module.json`])
-  const launch = (more: Json = {}) => ({ session: MAIN, mode: 'terminal', fenced: true, at: '2026-10-06T10:00:00+00:00', pid: 4242, ...more })
+  const launch = (more: Json = {}) => ({ session: MAIN, mode: 'terminal', at: '2026-10-06T10:00:00+00:00', pid: 4242, ...more })
 
   /** an engine in terminal mode: THIMBLE_WS, launch.json, roles.json and subagents.json as the launcher and the backend
    *  write them, and server.json naming a live server, which the module must never ask */
@@ -586,7 +1152,6 @@ describe('terminal mode', () => {
 
   for (const [why, more] of [
     ['a session launch.json does not name', { session: NEW }],
-    ['main outside thimble’s fence', { fenced: false }],
   ] as [string, Json][]) {
     it(`stays idle for ${why}: no registration, no module.json, no fetch`, async () => {
       const e = terminal({ launch: launch(more) })

@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 
 import pytest
+from conftest import mark_open
 
 from app import agents, config, session, subagents, tools, view_tools, views
 from app import subagent_files as sf
@@ -241,6 +242,7 @@ def _hook(tmp_path: Path, flag: str, stdin: dict) -> subprocess.CompletedProcess
     env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE", "THIMBLE_SESSION"))}
     env.update(THIMBLE_HOME=str(tmp_path / "hook-home"), THIMBLE_WORKSPACES_DIR=str(config.WORKSPACES_DIR),
                THIMBLE_DATA_DIR=str(config.DATA_DIR), CLAUDE_PROJECT_DIR=str(config.corpus_dir(CORPUS)))
+    mark_open(tmp_path / "hook-home", config.corpus_dir(CORPUS))  # /thimble opened the folder
     out = subprocess.run([str(WATCHER), flag], input=json.dumps({"cwd": str(config.corpus_dir(CORPUS)), **stdin}),
                          capture_output=True, text=True, env=env, timeout=30, cwd=str(config.corpus_dir(CORPUS)))
     assert out.returncode == 0, out.stderr
@@ -499,9 +501,8 @@ async def test_two_view_builds_of_one_turn_each_build_their_own_view(board, brid
     main = tmp_path / "proj" / f"{SID}.jsonl"
     builds = []
     for i, name in enumerate(("Posts", "Authors")):
-        res = await tools.call(c, "propose_view", {"name": name, "why": "to read the board", "claims": ["board.jsonl"],
-                                                   "unit": "a post", "overview": "a list", "zoom": "a post",
-                                                   "filter": "labels", "details": "the body"},
+        res = await tools.call(c, "propose_view", {"name": name, "description": "The board's posts as a list.",
+                                                   "task": "Read the board.", "claims": ["board.jsonl"]},
                                tool_use_id=f"toolu_main{i}")
         assert not res.is_error, res.text
         inp = json.loads(res.text.split("AGENT CALL ", 1)[1].splitlines()[0])

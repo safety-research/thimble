@@ -11,6 +11,11 @@ call-ref hook (hook_route, or in terminal mode the hook itself through calls_fil
 sees a call first numbers it, under the store's lock (calls_file). Each read goes on from where this process last read
 the file, so a number another process gave is seen. A chat without a store is backfilled from its transcripts on first
 read.
+
+read_ref reads a call in pages of at most READ_UNITS (tool_read_ref): its line, its input up to INPUT_UNITS, then the
+lines of its output, numbered, as many as fit, and a line with the ref that reads on. A line too long for a page alone
+is read in pieces: the ref that reads on names the code unit of that line where the next page starts,
+`call:<chat>/<n>#L<a>:c<k>[-L<b>]` (PIECE_RE), a ref read_ref takes and no citation holds.
 """
 from __future__ import annotations
 
@@ -26,7 +31,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from . import calls_file, config, ledger
+from . import calls_file, config, ledger, read_parts
 
 log = logging.getLogger("thimble.calls")
 router = APIRouter()
@@ -35,10 +40,16 @@ CALLS_DIR = "calls"  # workspaces/<c>/calls/<chat>.jsonl
 RESULT_CHARS = 2_000_000  # of one call's output kept
 LINE_CHARS = 300  # of a call's one-line summary (chip_line)
 EXCERPT_LINES = 40  # of a whole call's output in its excerpt
-READ_CHARS = 40_000  # of a call's output read_ref shows at once; a line range reads the rest
+# of one read_ref result for a call, in UTF-16 code units (read_parts.units), what Claude Code returns to the model
+# whole (tools.READ_REF_UNITS, which read_ref passes, leaves room for the call line it puts first)
+READ_UNITS = read_parts.READ_UNITS
+INPUT_UNITS = 8_000  # of a call's input in that result, which leaves the rest to its output
+STOP_UNITS = 300  # of that result, kept for the line that names the ref that reads on
 TOOL_RESULTS = "tool-results"  # Claude Code saves a long output as <projects>/<slug>/<session>/tool-results/<file>
 SESSION_ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 REF_RE = re.compile(r"^call:([A-Za-z0-9_-]+)/(\d+)(?:#L(\d+)(?:-L(\d+))?)?$")
+# a page of a call's output from code unit <k> of line <a> on, to line <b> or the end of line <a> (module note)
+PIECE_RE = re.compile(r"^call:([A-Za-z0-9_-]+)/(\d+)#L(\d+):c(\d+)(?:-L(\d+))?$")
 # the prefixes of thimble's own tools, whose calls the hook skips
 THIMBLE_PREFIXES = ("mcp__plugin_thimble_thimble__", "mcp__thimble__")
 CHAT_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -400,34 +411,71 @@ def resolve(c: str, p: dict[str, Any], text: str) -> dict[str, Any]:
     return out
 
 
-def tool_read_ref(c: str, text: str) -> tuple[str, bool]:
-    """(text, is_error) of read_ref for a call ref: the call's line, then its output numbered, the cited lines of a
-    line ref, up to READ_CHARS, with the ref of the next lines when it stops early."""
-    p = parse_ref(text)
+def _piece_ref(text: str) -> dict[str, Any] | None:
+    """{chat_id, n, line, unit, end_line?} of a ref to a page that starts inside a line (PIECE_RE), or None."""
+    m = PIECE_RE.match(str(text or "").strip())
+    if not m:
+        return None
+    out: dict[str, Any] = {"kind": "call", "chat_id": m[1], "n": int(m[2]), "line": int(m[3]), "unit": int(m[4])}
+    if m[5]:
+        out["end_line"] = int(m[5])
+    return out
+
+
+def _input_line(inp: Any) -> str:
+    """read_ref's line of a call's input: its JSON, cut at INPUT_UNITS code units with a line that says how many
+    characters it leaves out."""
+    s = json.dumps(inp, ensure_ascii=False, default=str)
+    if read_parts.units(s) <= INPUT_UNITS:
+        return f"input: {s}"
+    k = read_parts._head(s, INPUT_UNITS)
+    return f"input: {s[:k]}\n... [truncated, {len(s) - k} more chars]"
+
+
+def tool_read_ref(c: str, text: str, limit: int = READ_UNITS) -> tuple[str, bool]:
+    """(text, is_error) of read_ref for a call ref: the call's line, its input (_input_line), then its output numbered,
+    the cited lines of a line ref, as many as keep the text within `limit` code units, with the ref that reads on when
+    it stops early. A page whose first line does not fit holds as much of it as fits, and its ref that reads on names
+    the code unit of that line where the next page starts (PIECE_RE), so that every page reads on past what it shows."""
+    p = parse_ref(text) or _piece_ref(text)
     if p is None:
         return f"read_ref: {text} is not a call ref (call:<chat>/<n>, or call:<chat>/<n>#L<a>-L<b> for lines)", True
-    row = get(c, str(p["chat_id"]), int(p["n"]))
+    chat, n = str(p["chat_id"]), int(p["n"])
+    row = get(c, chat, n)
     if row is None:
-        return f"read_ref: there is no call {ref(str(p['chat_id']), int(p['n']))}", True
+        return f"read_ref: there is no call {ref(chat, n)}", True
     lines = lines_of(row.get("result"))
     start = int(p.get("line") or 1)
     stop = min(int(p.get("end_line") or p.get("line") or len(lines)), len(lines))
     if p.get("line") and not p.get("end_line"):
-        stop = start
-    head = f"{ref(str(p['chat_id']), int(p['n']))} {_short(str(row.get('name') or ''))}" + (" (failed)" if row.get("is_error") else "")
-    out = [head, "input: " + json.dumps(row.get("input"), ensure_ascii=False, default=str)]
+        stop = min(start, len(lines))
+    head = f"{ref(chat, n)} {_short(str(row.get('name') or ''))}" + (" (failed)" if row.get("is_error") else "")
+    out = [head, _input_line(row.get("input"))]
     if "result" not in row:
         out.append("output: (not returned yet)")
         return "\n".join(out), False
-    out.append(f"output, {len(lines):,} lines:")
-    used = 0
+    skip = read_parts._head(lines[start - 1], int(p["unit"])) if p.get("unit") and start <= stop else 0
+    after = f", line {start} from character {read_parts.units(lines[start - 1][:skip]):,}" if skip else ""
+    out.append(f"output, {len(lines):,} lines{after}:")
+    room = limit - STOP_UNITS - read_parts.units("\n".join(out))
     for i in range(start, stop + 1):
-        s = f"{i}\t{lines[i - 1]}"
-        if used + len(s) > READ_CHARS:
-            out.append(f"[stopped at line {i - 1}; read_ref {ref(str(p['chat_id']), int(p['n']), i, stop)} reads on]")
+        line = lines[i - 1][skip:] if i == start else lines[i - 1]
+        s = f"{i}\t{line}"
+        size = read_parts.units(s) + 1
+        if size <= room:
+            out.append(s)
+            room -= size
+            continue
+        if i > start:
+            out.append(f"[stopped at line {i - 1}; read_ref {ref(chat, n, i, stop)} reads on]")
             break
-        out.append(s)
-        used += len(s) + 1
+        # the page's first line alone is too long for it: as much of it as fits, and the next page from there on
+        k = read_parts._head(line, max(1, room - read_parts.units(f"{i}\t") - 1))
+        at, total = read_parts.units(lines[i - 1][:skip + k]), read_parts.units(lines[i - 1])
+        piece = f"call:{chat}/{n}#L{i}:c{at}" + (f"-L{stop}" if stop != i else "")
+        out += [f"{i}\t{line[:k]}",
+                f"[stopped at character {at:,} of {total:,} in line {i}; read_ref {piece} reads on]"]
+        break
     return "\n".join(out), False
 
 

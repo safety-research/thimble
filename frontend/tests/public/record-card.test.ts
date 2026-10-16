@@ -70,7 +70,7 @@ test("a card's colour comes from Color by: its field's value while a field is th
   await load()
   const pr = { number: 66599, claimant: 'agent-08' }
   expect(card({ ref: 'forge.db#prs/66599', record: pr, title: 't' }).hasAttribute('data-color')).toBe(false)
-  const colour = win().thimble.colourBy({ mount: '#colour', fields: [{ name: 'claimant', title: 'Claimant' }] })
+  const colour = win().thimble.colourBy({ mount: '#colour', fields: [{ name: 'claimant', title: 'Claimant' }], initial: 'claimant' })
   await wait()
   expect(card({ ref: 'forge.db#prs/66599', record: pr, title: 't' }).getAttribute('data-color')).toBe('agent-08')
   expect(card({ ref: 'forge.db#prs/66191', record: { claimant: 'a "q" <b>' }, title: 't' }).getAttribute('data-color')).toBe('a "q" <b>')

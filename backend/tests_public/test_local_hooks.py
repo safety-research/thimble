@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from terminal_fakes import FileModule, write_launch
 
-from app import agents, cc_plugin, config, event_files, events, local_hooks, orient_session, orientation, session
+from app import agents, config, event_files, events, local_hooks, orient_session, orientation, session
 from app import subagent_files as sf
 from app import subagents
 
@@ -30,7 +30,6 @@ COVERAGE = "It opened 3 of 7 files · 12% of records."
 @pytest.fixture(autouse=True)
 def _fresh(workspaces_tmp, tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-config"))
-    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: True)
     monkeypatch.setattr(local_hooks, "SETTLE_S", 0.3)
     monkeypatch.setattr(local_hooks, "TICK_S", 0.05)
     monkeypatch.setattr(subagents, "HANDBACK_WAIT_S", 0.2)
@@ -121,10 +120,10 @@ def _process_restart() -> None:
     session._shadows.clear()
 
 
-async def _typed_orientation(project: Path, passes=("final", "report")) -> str:
+async def _typed_orientation(project: Path) -> str:
     """A typed orientation as main starts it in terminal mode: the start tool's request, main's exact Agent call
     claimed by --agent-check, and the agent registered by SubagentStart, whose backend call makes its chat."""
-    ans = await orient_session.start(CORPUS, "", list(passes), route=subagents.TYPED, call="toolu_start1")
+    ans = await orient_session.start(CORPUS, "", route=subagents.TYPED, call="toolu_start1")
     assert ans.typed, ans
     inp = ans["input"]
     main = _main(project)
@@ -192,7 +191,7 @@ def test_in_terminal_mode_every_process_knows_main_from_the_files(ws, project):
 async def test_r3_holds_across_passes_of_separate_processes(ws, project, module):
     """The turn in which main called a start tool ends without main's Agent call: the request is refused no-call,
     though one pass read the call and another, in a new process, the turn's end."""
-    ans = await orient_session.start(CORPUS, "", ["final"], route=subagents.TYPED, call="toolu_s1")
+    ans = await orient_session.start(CORPUS, "", route=subagents.TYPED, call="toolu_s1")
     rid = ans["request"]
     main = _main(project)
     _write(main, _human("/thimble:orient"), _assistant(_use("toolu_s1", "mcp__plugin_thimble_thimble__start_orientation", {})),
@@ -206,11 +205,11 @@ async def test_r3_holds_across_passes_of_separate_processes(ws, project, module)
     assert (r["state"], r["refused_kind"], r["reason"]) == ("refused", "no-call", "I won't start it now.\nAsk again later.")
 
 
-async def test_a_finished_orientation_s_hand_back_ends_it_with_its_coverage_line_and_the_report_s_writer(
+async def test_a_finished_orientation_s_hand_back_ends_it_with_its_coverage_line_and_no_report_s_writer(
         ws, project, module):
     """The plan's case: the orientation hands back; main's Stop hook's backend call ends its run, so its chat ends, the
-    coverage line is measured and kept, main's `orient` event waits in held-events.json for main's next prompt, and the
-    report pass asks the module for the writer, with no turn of main."""
+    coverage line is measured and kept, and main's `orient` event waits in held-events.json for main's next prompt. No
+    report's writer starts: since 0.8.0 a report is written only when the analyst asks for one."""
     chat = await _typed_orientation(project)
     assert orientation.read_run(CORPUS)["status"] == "running"
     _write(_main(project), _peer(AGENT, "Seven cards on the moderators."))
@@ -223,8 +222,7 @@ async def test_a_finished_orientation_s_hand_back_ends_it_with_its_coverage_line
     assert orientation.read_run(CORPUS)["coverage"] == COVERAGE
     [held] = event_files.held(ws)
     assert held["meta"]["kind"] == orientation.ORIENT_KIND and COVERAGE in held["content"]
-    [spawn] = module.ops("spawn")
-    assert spawn["role"] == "writer" and spawn["request"]
+    assert module.ops("spawn") == [], "no report pass"
 
 
 def test_two_calls_at_once_run_the_passes_one_at_a_time_and_lose_neither(ws, project, monkeypatch):
@@ -257,7 +255,7 @@ def test_two_calls_at_once_run_the_passes_one_at_a_time_and_lose_neither(ws, pro
 
 
 async def test_main_s_quit_ends_its_running_agents_chats_and_the_orientation_s_record(ws, project, module):
-    chat = await _typed_orientation(project, passes=("final",))
+    chat = await _typed_orientation(project)
     await _call("end", {"session_id": SID, "reason": "prompt_input_exit"})
     meta = agents.meta_or_none(CORPUS, chat)
     assert (meta["status"], meta["stopped_by"], meta["continue"]) == ("stopped", subagents.STOPPED_QUIT, "here")
@@ -267,13 +265,13 @@ async def test_main_s_quit_ends_its_running_agents_chats_and_the_orientation_s_r
 
 
 async def test_another_session_s_quit_ends_nothing(ws, project, module):
-    chat = await _typed_orientation(project, passes=("final",))
+    chat = await _typed_orientation(project)
     await _call("end", {"session_id": "some-other-session", "reason": "prompt_input_exit"})
     assert agents.meta_or_none(CORPUS, chat)["status"] == "running"
 
 
 async def test_the_end_the_module_writes_for_an_agent_it_started_ends_its_run(ws, project, module, monkeypatch):
-    chat = await _typed_orientation(project, passes=("final",))
+    chat = await _typed_orientation(project)
     with sf.update(ws) as state:
         sf.registry(state)[AGENT]["plugin_started"] = True
     module.ended(AGENT, "", reason="refusal", refusal={"category": "cyber", "explanation": "flagged"})
@@ -289,7 +287,7 @@ async def test_the_end_the_module_writes_for_an_agent_it_started_ends_its_run(ws
 async def test_plan_mode_stops_none_of_thimble_s_running_agents(ws, project, module):
     """Plan mode stops no running agent in terminal mode, as in browser mode: Claude Code's own subagents go on in plan
     mode, and so do thimble's. Main's Stop in plan mode runs the pass and asks the module to stop nothing."""
-    chat = await _typed_orientation(project, passes=("final",))
+    chat = await _typed_orientation(project)
     module.plan(True)
     with sf.update(ws) as state:
         sf.record_mode(state, SID, "plan")
@@ -314,7 +312,7 @@ def test_a_call_for_a_workspace_in_browser_mode_does_nothing(workspaces_tmp, mon
 async def test_a_subagent_stop_of_a_finished_orientation_ends_its_run_after_the_hand_back_s_wait(ws, project, module):
     """The plan's case by the SubagentStop hook: no hand-back comes within the wait, so the run ends with the turn's
     answer, in the same process, which waits for it; the coverage line and the `orient` event follow."""
-    chat = await _typed_orientation(project, passes=("final",))
+    chat = await _typed_orientation(project)
     with sf.update(ws) as state:
         sf.record_stop(state, {"agent_id": AGENT, "agent_type": "thimble:orientation"})
     await _call("stopped", {"agent_id": AGENT, "agent_type": "thimble:orientation", "session_id": SID, "refused": []})
@@ -354,6 +352,8 @@ def test_the_holder_hears_every_agent_end_the_server_hears(workspaces_tmp, tmp_p
     seen = json.loads(out.stdout.strip().splitlines()[-1])
     assert seen["before"] == list(local_hooks.END_LISTENERS)
     assert "app.checks._writer_ended" in seen["hooks"]
+    listening = {h.rsplit(".", 1)[0] for h in seen["hooks"]}
+    assert all(f"app.{n}" in listening for n in local_hooks.END_LISTENERS), "each module named registers a handler"
 
 
 async def test_while_an_agent_runs_its_thread_shows_each_step_with_no_other_hook(ws, project, module, monkeypatch):
@@ -361,7 +361,7 @@ async def test_while_an_agent_runs_its_thread_shows_each_step_with_no_other_hook
     reaches its thread with no further hook, and the follower stops once no agent of thimble's runs (live check T5: an
     orientation's pane showed one step after a minute's work)."""
     monkeypatch.setattr(local_hooks, "FOLLOW_S", 0.05)
-    chat = await _typed_orientation(project, passes=("final",))
+    chat = await _typed_orientation(project)
     done = threading.Event()
     out: list[int] = []
     t = threading.Thread(target=lambda: (out.append(local_hooks.follow(CORPUS)), done.set()), daemon=True)
@@ -380,3 +380,108 @@ async def test_while_an_agent_runs_its_thread_shows_each_step_with_no_other_hook
         sf.registry(state)[AGENT]["status"] = "done"
     assert await asyncio.to_thread(done.wait, 30), "the follower went on after the orientation ended"
     assert out and out[0] >= 1
+
+
+async def test_the_analyst_s_answers_to_a_view_proposal_reach_the_views_through_the_holder(ws, project, monkeypatch):
+    """`thimble act view-accept|view-reject|view-retry` hand their call to the holder (local.py), which makes it: the
+    accept (views.accept, whose build it then follows), the reject (views.answer_offer) and the retry (views.retry). A
+    press the view no longer takes (a second press: 409) is one line in the log, and the passes go on."""
+    from fastapi import HTTPException
+
+    from app import dev, views
+
+    made: list[tuple] = []
+    views._save_proposals(CORPUS, [{"slug": "edit-bursts", "name": "Edit Bursts", "description": "d", "task": "t",
+                                    "claims": ["board.jsonl"], "status": "suggested", "proposed_by": "proposer",
+                                    "offered": {"at": "2026-10-14T10:00:00Z", "after": "main"}}])
+    monkeypatch.setattr(views, "click_refused", lambda c, slug: None)
+    monkeypatch.setattr(dev, "queue_view", lambda c, slug: made.append(("accept", c, slug)))
+    monkeypatch.setattr(views, "answer_offer", lambda c, slug, answer, **kw: made.append((answer, c, slug)) or {})
+
+    def retry(c, slug):
+        made.append(("retry", c, slug))
+        raise HTTPException(409, "the view 'Edit Bursts' is building, not failed")
+
+    monkeypatch.setattr(views, "retry", retry)
+    _main(project)
+    for kind in ("view-accept", "view-reject", "view-retry"):
+        assert await _call(kind, {"cwd": str(config.corpus_dir(CORPUS)), "slug": "edit-bursts"}) >= 1
+    assert made == [("accept", CORPUS, "edit-bursts"), ("rejected", CORPUS, "edit-bursts"),
+                    ("retry", CORPUS, "edit-bursts")]
+    row = views.read_proposal(CORPUS, "edit-bursts")
+    assert (row["status"], row["asked"], row["accepted"]) == ("queued", True, True), "accepted: queued as asked for"
+
+
+async def test_a_notice_s_try_again_checks_for_a_view_proposal_and_the_holder_waits_for_the_check(ws, project,
+                                                                                                    monkeypatch):
+    """`view-propose-now` (a notice's Try again) runs proposer.run_now in the holder; a check that runs on its loop keeps
+    it busy until it ends, so what the check writes is written before the process exits."""
+    from app import proposer
+
+    done: list[str] = []
+
+    async def check(c):
+        await asyncio.sleep(0.4)
+        done.append(c)
+
+    # proposer.run_now starts its run as a task of the running loop and answers at once
+    def run_now(c):
+        asyncio.get_running_loop().create_task(check(c))
+        return {"started": True}
+
+    monkeypatch.setattr(proposer, "run_now", run_now)
+    _main(project)
+    assert await _call("view-propose-now", {"cwd": str(config.corpus_dir(CORPUS))}) >= 1
+    assert done == [CORPUS], "the holder waited for the run's task"
+    assert "view-propose-now" in local_hooks.KINDS and "view-retry" in local_hooks.KINDS
+
+
+async def test_a_notice_dismissed_in_the_terminal_is_dismissed_by_the_holder(ws, project, monkeypatch):
+    """`thimble act notice-dismiss {id}` hands the dismissal to the holder, which calls notices.dismiss; a notice that is
+    gone is one line in the log."""
+    from app import notices
+
+    calls: list[tuple] = []
+    monkeypatch.setattr(notices, "dismiss", lambda c, notice_id: calls.append((c, notice_id)) or notice_id != "gone")
+    _main(project)
+    cwd = str(config.corpus_dir(CORPUS))
+    for notice_id in ("n3", "gone"):
+        assert await _call("notice-dismiss", {"cwd": cwd, "id": notice_id}) >= 1
+    assert calls == [(CORPUS, "n3"), (CORPUS, "gone")]
+    assert "notice-dismiss" in local_hooks.KINDS
+    # a notice's Retry: the notice it was pressed on is dismissed before the view is built again
+    from app import views
+
+    monkeypatch.setattr(views, "retry", lambda c, slug: calls.append(("retry", c, slug)))
+    del calls[:]
+    assert await _call("view-retry", {"cwd": cwd, "slug": "edit-bursts", "notice": "n4"}) >= 1
+    assert calls == [(CORPUS, "n4"), ("retry", CORPUS, "edit-bursts")]
+
+
+async def test_mode_notice_shows_the_manual_mode_notice_and_clears_it_and_a_dismissal_holds(ws, project, tmp_path):
+    """`mode-notice` (the mode hook, as main turns into or out of Manual mode) posts the `manual-mode` notice in the words
+    of modes.manual_notice, which thimble-term's band shows above the prompt, and clears it for another mode; once the
+    analyst dismissed it in the band (`notice-dismiss`), a later Manual report posts none in this workspace."""
+    from app import modes, notices
+
+    _main(project)
+    cwd = str(config.corpus_dir(CORPUS))
+
+    def manual() -> list[dict]:
+        return [n for n in notices.open_notices(CORPUS) if n.get("key") == "manual-mode"]
+
+    assert "mode-notice" in local_hooks.KINDS
+    assert await _call("mode-notice", {"cwd": cwd, "permission_mode": "default"}) >= 1
+    assert [(n["kind"], n["text"]) for n in manual()] == [("manual-mode", modes.manual_notice("default"))]
+    assert modes.manual_notice("default") == modes.MANUAL_NOTICES["switch"]
+    assert await _call("mode-notice", {"cwd": cwd, "permission_mode": "auto"}) >= 1
+    assert manual() == []
+    user = tmp_path / "claude-config" / "settings.json"
+    user.parent.mkdir(parents=True, exist_ok=True)
+    user.write_text(json.dumps({"disableAutoMode": "disable"}))
+    assert await _call("mode-notice", {"cwd": cwd, "permission_mode": "manual"}) >= 1
+    assert [n["text"] for n in manual()] == [modes.MANUAL_NOTICES["settings"]]
+    assert await _call("notice-dismiss", {"cwd": cwd, "id": manual()[0]["id"]}) >= 1
+    assert manual() == [] and notices.dismissed(CORPUS, "manual-mode")
+    assert await _call("mode-notice", {"cwd": cwd, "permission_mode": "default"}) >= 1
+    assert manual() == [], "the dismissal holds for the workspace"

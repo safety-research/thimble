@@ -303,6 +303,9 @@
 .tour-welcome .tour-title {
   font: var(--type-heading, var(--type-subheading));
 }
+.tour-welcome .tour-body + .tour-body {
+  margin-top: 8px;
+}
 .tour-welcome .tour-foot {
   border-top: 0;
   padding-top: 0;

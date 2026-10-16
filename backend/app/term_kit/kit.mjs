@@ -1358,42 +1358,58 @@ function frameMenu(d, box, [a, b], title, y = d.y) {
  * Color by: the one control for the view's color, in its top row (docs/terminal-views.md, "Color by"). It lists Off,
  * the view's fields and every label over files; the chosen field's or label's values are chips with their counts, which
  * a click turns off and on; a label's definition is one step away (its name's `↗` opens the label's panel, and the menu
- * shows it under the label's row). As in the browser, the view opens colored by a label that is on in Files and marks
- * its files, and a label turned on while the view is away or open takes the color.
+ * shows it under the label's row). As in the browser, the view opens Off, or as `initial` says, unless a label is on in
+ * Files and marks its files: then it opens colored by that label, and a label turned on while the view is away or open
+ * takes the color.
  *
- * opts: fields [{name, title, description?, values?, meanings?, value?(record)}], initial (a field's name), onChange.
+ * opts: fields [{name, title, description?, values?, meanings?, value?(record)}], initial (a field's name, or {field,
+ * on: [values]}, that field with only those values colored; Off without it), onChange.
  * Color by only colors: a value turned off takes its hue off its records, which stay, dim as the records with no value
  * are; filterBy is what hides records. `chips` ('filter' once hid them) is still taken and does nothing.
  */
 export function colorBy(opts = {}) {
   const fields = (opts.fields || []).map((f) => ({ ...f, title: f.title || f.name }))
   const keptBy = kept('colour')
-  const startKey = fields.length ? `field:${opts.initial || fields[0].name}` : 'off'
   const byKey = fieldsByKey(fields)
+  // how the view opens (`initial`): Off, a field, or a field with only the values of `on` colored; a name that is none
+  // of its fields opens Off, as Filter by and Rows open on their default
+  const init = opts.initial
+  const initName = typeof init === 'string' ? init : init && typeof init === 'object' && typeof init.field === 'string' ? init.field : ''
+  const startKey = initName && byKey.has(`field:${initName}`) ? `field:${initName}` : 'off'
+  const valueKey = (v) => (v === null || v === undefined ? '' : String(v))
+  const startOn = startKey !== 'off' && init && typeof init === 'object' && Array.isArray(init.on) ? init.on.map(valueKey) : null
   const fieldOf = (key) => byKey.get(key)
   const labelOf = (key) => labelByKey(key) || undefined
   // the labels on in Files (or filtering) that mark the view's files
   const onIds = () => state.labels.filter((l) => l.on && l.here !== false).map((l) => String(l.id))
   // the labels another part holds (the one Rows groups the lanes by), which take no color
   const held = () => new Set(state.holds.flatMap((f) => f() || []).map(String))
-  // how the view opens: colored by a label that is on and no part holds, as the browser's view opens, else by its first
-  // field
+  // how the view opens: colored by a label that is on and no part holds, as the browser's view opens, else as `initial`
+  // says (Off without it)
   const home = () => {
     const h = held()
     const on = onIds().filter((id) => !h.has(id))
     return on.length ? `label:${on[0]}` : startKey
   }
+  // what thimble kept of the choices and the values turned off holds once the analyst, the page or a label turned on in
+  // thimble changed them; until then, and after Reset, the view opens as it says (home), so a newer version of the view
+  // opens as that one says
+  const chosen = Boolean(keptBy && keptBy.chosen)
   const c = {
     // the choices in order, as the browser's Color by keeps them: the first is the color, each other a track beside
     // the list's; none is Off. `choice` is the first ('off' for none), and setting it makes it the one choice
-    picks: keptBy && Array.isArray(keptBy.picks) ? keptBy.picks.map(String) : keptBy && typeof keptBy.by === 'string' ? (keptBy.by === 'off' ? [] : [keptBy.by]) : [home()].filter((k) => k !== 'off'),
+    picks: chosen && Array.isArray(keptBy.picks) ? keptBy.picks.map(String) : chosen && typeof keptBy.by === 'string' ? (keptBy.by === 'off' ? [] : [keptBy.by]) : [home()].filter((k) => k !== 'off'),
+    chosen,
     get choice() {
       return this.picks[0] || 'off'
     },
     set choice(key) {
       this.picks = key === 'off' ? [] : [key]
     },
-    off: new Set(keptBy && Array.isArray(keptBy.off) ? keptBy.off.map((v) => (v === null ? '' : String(v))) : []),
+    off: new Set(chosen && Array.isArray(keptBy.off) ? keptBy.off.map((v) => (v === null ? '' : String(v))) : []),
+    // the values alone colored, as `initial`'s `on` gives them while its field is the choice, until the analyst turns a
+    // value off or on (then `off` holds those turned off); null for every value
+    only: null,
     // the labels on when the view last looked: one turned on since takes the color
     seen: keptBy && Array.isArray(keptBy.seen) ? keptBy.seen.map(String) : onIds(),
     counts: null,
@@ -1408,6 +1424,25 @@ export function colorBy(opts = {}) {
     // each field's values in hue order, until the counts or the choice change: name -> {counts, choice, out}
     ordered: new Map(),
   }
+  // the values of a new choice turned off: none, or for the field `initial` names every value but those of `on`
+  const freshOff = () => {
+    c.off.clear()
+    c.only = c.choice === startKey && startOn ? new Set(startOn) : null
+  }
+  c.only = chosen ? (Array.isArray(keptBy.only) && c.choice === startKey ? new Set(keptBy.only.map(valueKey)) : null) : c.choice === startKey && startOn ? new Set(startOn) : null
+  // the chosen field's values the view knows, '' for no value, and of them those turned off now and as the view opens
+  const knownValues = () => {
+    const f = fieldOf(c.choice)
+    return f ? [...fieldValues(f), ''] : []
+  }
+  const offNow = () => (c.only ? knownValues().filter((v) => !c.only.has(v)) : [...c.off])
+  const offHome = () => (c.choice === startKey && startOn ? knownValues().filter((v) => !startOn.includes(v)) : [])
+  // a value turned off or on while `initial`'s `on` colors the field: from now on `off` holds the values turned off
+  const ownOff = () => {
+    if (!c.only) return
+    c.off = new Set(offNow())
+    c.only = null
+  }
   const onChange = typeof opts.onChange === 'function' ? opts.onChange : () => {}
   // a label turned on since the view last looked takes the color, the one turned on last
   const notice = () => {
@@ -1420,7 +1455,9 @@ export function colorBy(opts = {}) {
     // the label takes the first place, the color; a field it takes it from gives way, a label there keeps its track
     const rest = c.picks.filter((k) => k !== key)
     c.picks = [key, ...(rest[0] && rest[0].startsWith('field:') ? rest.slice(1) : rest)]
-    c.off.clear()
+    // a label turned on in thimble is a choice, kept as the analyst's are, as the browser keeps it
+    c.chosen = true
+    freshOff()
     c.counts = null
     return true
   }
@@ -1431,9 +1468,9 @@ export function colorBy(opts = {}) {
     const first = c.choice
     c.picks = c.picks.filter((k, i, all) => (fieldOf(k) || labelOf(k)) && all.indexOf(k) === i)
     if (had && !c.picks.length) c.choice = home()
-    if (c.choice !== first) c.off.clear()
+    if (c.choice !== first) freshOff()
   }
-  const save = () => keep('colour', { by: c.choice, picks: c.picks, off: [...c.off].map((v) => (v === '' ? null : v)), seen: c.seen })
+  const save = () => keep('colour', { by: c.choice, picks: c.picks, off: [...c.off].map((v) => (v === '' ? null : v)), ...(c.only ? { only: [...c.only] } : {}), seen: c.seen, ...(c.chosen ? { chosen: true } : {}) })
   if (keptBy) notice()
   settle()
   state.colorBys.push(() => {
@@ -1446,9 +1483,10 @@ export function colorBy(opts = {}) {
   // a part that holds a label now: a view that opened colored by it, and was never given a color, opens again
   state.rehome.push(() => {
     const l = labelOf(c.choice)
-    if (kept('colour') || !l || !held().has(String(l.id))) return
+    if ((kept('colour') && kept('colour').chosen) || !l || !held().has(String(l.id))) return
     c.choice = home()
-    c.off.clear()
+    c.chosen = false
+    freshOff()
     c.counts = null
   })
 
@@ -1514,9 +1552,10 @@ export function colorBy(opts = {}) {
       return
     }
     const first = c.choice
+    c.chosen = true
     c.picks = c.picks.includes(key) ? c.picks.filter((k) => k !== key) : [...c.picks, key]
     if (c.choice !== first) {
-      c.off.clear()
+      freshOff()
       c.counts = null
     }
     save()
@@ -1649,7 +1688,8 @@ export function colorBy(opts = {}) {
     /** Whether a value's chip is on, its hue drawn (null standing for no value). */
     isOn(value) {
       if (c.choice === 'off') return true
-      return !c.off.has(value === null || value === undefined ? '' : String(value))
+      const k = valueKey(value)
+      return c.only ? c.only.has(k) : !c.off.has(k)
     },
     /** Always true: Color by only colors, and a value turned off keeps its records (filterBy's keeps hides them). */
     keeps(record) {
@@ -1690,9 +1730,10 @@ export function colorBy(opts = {}) {
     /** Choose a field by name, a label by id (`{label}`), or Off (null). */
     choose(to) {
       const key = to === null ? 'off' : typeof to === 'object' ? `label:${to.label}` : `field:${to}`
+      c.chosen = true
       if (key !== c.choice) {
         c.choice = key
-        c.off.clear()
+        freshOff()
         c.counts = null
         settle()
         save()
@@ -1707,7 +1748,9 @@ export function colorBy(opts = {}) {
     },
     /** Turn a value's chip off or on. */
     toggle(value) {
-      const k = value === null || value === undefined ? '' : String(value)
+      const k = valueKey(value)
+      c.chosen = true
+      ownOff()
       if (c.off.has(k)) c.off.delete(k)
       else c.off.add(k)
       save()
@@ -1785,6 +1828,8 @@ export function colorBy(opts = {}) {
   function toggleChip(ch) {
     if (ch.value === '\u0000other') {
       const on = ch.members.some((v) => api.isOn(v))
+      c.chosen = true
+      ownOff()
       for (const v of ch.members) (on ? c.off.add(v) : c.off.delete(v))
       save()
       onChange(api)
@@ -1995,12 +2040,18 @@ export function colorBy(opts = {}) {
     return out
   }
   state.resets.push({
-    // the view as it opens: colored as it opens, every value on
-    changed: () => c.off.size > 0 || c.choice !== home(),
+    // the view as it opens: colored as it opens, every value on but those `initial`'s `on` leaves out
+    changed: () => {
+      if (c.choice !== home()) return true
+      const now = offNow()
+      const was = offHome()
+      return now.length !== was.length || now.some((v) => !was.includes(v))
+    },
     reset: () => {
       if (c.choice !== home()) c.counts = null
       c.choice = home()
-      c.off.clear()
+      c.chosen = false
+      freshOff()
       save()
     },
     after: () => onChange(api),
@@ -2776,18 +2827,16 @@ export function list(opts = {}) {
         tr.end()
       }
       // a side pane open on one of the items: the list at the left, the item's details beside it (or under it in a
-      // narrow panel)
-      if (o.side && o.side.isOpen) {
-        const open = items.find((it) => !it.heading && keyOf(it) === o.side.key)
-        if (open) {
-          const rest = { ...o, title: null, side: null, sideOpen: o.side }
-          const yRows = d.y
-          o.side.draw(d, (dl) => api.draw(dl, rest), (ds) => (o.detail ? o.detail(open, ds) : null), { title: o.sideTitle ? o.sideTitle(open) : open.ref ? placeWords(open.ref) : '' })
-          // the title over the list and the pane is the list's, for the wheel
-          if (!state.lists.includes(me)) return
-          for (let y = yTop; y < yRows; y++) d.hits.push({ y, x0: 0, x1: d.cols, wheel: me })
-          return
-        }
+      // narrow panel); with no item open there, the pane's `empty` line while it waits
+      const open = o.side && o.side.isOpen ? items.find((it) => !it.heading && keyOf(it) === o.side.key) : null
+      if (o.side && (open || o.side.waits)) {
+        const rest = { ...o, title: null, side: null, sideOpen: o.side }
+        const yRows = d.y
+        o.side.draw(d, (dl) => api.draw(dl, rest), (ds) => (open && o.detail ? o.detail(open, ds) : null), { blank: !open, title: !open ? '' : o.sideTitle ? o.sideTitle(open) : open.ref ? placeWords(open.ref) : '' })
+        // the title over the list and the pane is the list's, for the wheel
+        if (!state.lists.includes(me)) return
+        for (let y = yTop; y < yRows; y++) d.hits.push({ y, x0: 0, x1: d.cols, wheel: me })
+        return
       }
       const pane = o.side || o.sideOpen || null
       const colour = colorOption(o)
@@ -3299,20 +3348,39 @@ export function choice(opts = {}) {
  * A side pane for a record or a row's children (docs/terminal-views.md, "The side pane"): beside the list where the
  * panel is wide enough for both, a `│` in the rule gray between them, else under the list. A list drawn with `side`
  * opens its items here, never under the row. `<` `>` narrow and widen it (thimble keeps its width per view), Backspace
- * or `close` closes it.
+ * or `close` closes it. It is closed until an item opens in it; with `empty` it shows that one line, dim, until then,
+ * and again after the program's hide() and Reset.
  *
- * opts: key (the name it is kept under), width (its share of the panel's width, 0.42 by default), min (its least cells).
+ * opts: key (the name it is kept under), width (its share of the panel's width, 0.42 by default), min (its least
+ * cells), empty (the line it shows while no item is open in it, such as 'click a session').
  */
 export function side(opts = {}) {
   const name = opts.key || 'side'
   const keptShare = (kept('side') || {})[name]
-  const st = { open: null, share: typeof keptShare === 'number' ? keptShare : Number(opts.width) > 0 && Number(opts.width) < 1 ? Number(opts.width) : 0.42 }
+  const empty = typeof opts.empty === 'string' && oneLine(opts.empty) ? oneLine(opts.empty) : null
+  // open: the key of the item it shows; shut: the analyst closed it while it showed its `empty` line or an item
+  const st = { open: null, shut: false, share: typeof keptShare === 'number' ? keptShare : Number(opts.width) > 0 && Number(opts.width) < 1 ? Number(opts.width) : 0.42 }
+  // the analyst's close (Backspace, `close`): the pane closes, its `empty` line too
+  const shut = () => {
+    st.open = null
+    st.shut = true
+    redraw()
+  }
   const min = Math.max(24, Number(opts.min) || 34)
   const LIST_MIN = 40 // the list keeps this many cells beside the pane, else the pane goes under it
   const api = {
-    /** Whether the pane shows. */
+    /** Whether the pane shows an item (not while it shows its `empty` line). */
     get isOpen() {
       return st.open !== null
+    },
+    /** Whether the pane shows its `empty` line where no item is open: from the start until the analyst closes it. */
+    get isEmpty() {
+      return Boolean(empty) && st.open === null && !st.shut
+    },
+    /** Whether a list drawn with the pane draws it beside or under itself where it has no open item: with `empty`,
+     *  until the analyst closes it. */
+    get waits() {
+      return Boolean(empty) && !st.shut
     },
     /** The key of the item it shows, or null. */
     get key() {
@@ -3320,22 +3388,27 @@ export function side(opts = {}) {
     },
     show(key) {
       st.open = key === undefined ? null : key
+      if (st.open !== null) st.shut = false
       redraw()
     },
+    /** Close the item: the pane closes, or shows its `empty` line again. */
     hide() {
       st.open = null
       redraw()
     },
     /** The rows left laid out: `left(dl)` draws the list, `right(ds)` the item's details under the pane's title row
-     *  (`o.title`, bold, and `close` against R). */
+     *  (`o.title`, bold, and `close` against R). With no item open (or `o.blank`, the item open not among those the list
+     *  shows), the pane's one row is its `empty` line, dim, while it waits, and the list alone draws otherwise. */
     draw(d, left, right, o = {}) {
-      if (st.open === null) return left(d)
+      const blank = st.open === null || Boolean(o.blank)
+      if (blank && !api.waits) return left(d)
       const rows = d.left
       const w = Math.max(min, Math.min(d.cols - LIST_MIN - 3, Math.round(d.cols * st.share)))
       const head = (dr) => {
         const hr = dr.row()
-        hr.add(cut(String(o.title || 'details'), Math.max(4, dr.cols - 7)), { b: true })
-        hr.right('close', {}, { on: () => api.hide(), tip: 'close the details' })
+        if (blank) hr.add(cut(empty, Math.max(4, dr.cols - 7)), { d: true })
+        else hr.add(cut(String(o.title || 'details'), Math.max(4, dr.cols - 7)), { b: true })
+        hr.right('close', {}, { on: shut, tip: 'close the details' })
         hr.end()
       }
       // the pane's rows, drawn by `right`: where it draws a list, the wheel over the pane's other rows (its title, its
@@ -3344,7 +3417,7 @@ export function side(opts = {}) {
       const pane = (R) => {
         const before = state.lists.length
         head(R)
-        right(R)
+        if (!blank) right(R)
         const own = state.lists[before]
         if (own) for (let y = 0; y < R.lines.length; y++) R.hits.push({ y, x0: 0, x1: R.cols, wheel: own })
       }
@@ -3379,10 +3452,11 @@ export function side(opts = {}) {
         pane(R)
         d.put(R, 0, Math.min(R.rows, R.lines.length))
       }
-      kitKey(d, 'backspace', 'to close the details', () => api.hide())
+      kitKey(d, 'backspace', 'to close the details', shut)
     },
   }
-  state.resets.push({ changed: () => st.open !== null, reset: () => { st.open = null } })
+  // Reset: the pane as the view opens, closed or with its `empty` line
+  state.resets.push({ changed: () => st.open !== null || (Boolean(empty) && st.shut), reset: () => { st.open = null; st.shut = false } })
   return api
 }
 

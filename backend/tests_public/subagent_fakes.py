@@ -1,6 +1,6 @@
 """Stand-ins for what other lanes of the subagent change own, for the tests of thimble's agents as subagents
-(subagents.py): the plugin module's bridge (app.module_bridge), main's fence check (cc_plugin.main_fenced) and the hint
-sections prompts/tools.md gains for them. Each is a fixture a test asks for by name."""
+(subagents.py): the plugin module's bridge (app.module_bridge) and the hint sections prompts/tools.md gains for them.
+Each is a fixture a test asks for by name."""
 from __future__ import annotations
 
 import sys
@@ -15,21 +15,25 @@ HINTS = {
     "start_writing-subagent": "AGENT CALL {input}",
     "start_job-subagent": "AGENT CALL {input}",
     "critique-subagent": "AGENT CALL {input}",
-    "orient-subagent-prompt": "{request_id}\nREQUEST {request}\nOUTPUTS {outputs}\nOFF {off}\nCRITIQUE {critique}",
+    "orient-subagent-prompt": "{request_id}\nREQUEST {request}",
     "orient-subagent-message": "SEND TO {agent}\n{text}",
     "agent-check-exact": "MAKE THE CALL EXACTLY",
     "agent-check-message": "ONLY WHEN THE ANALYST ASKS",
     "start-plan-mode": "PLAN MODE",
     "writer-context-file": "READ {path} FIRST",
+    "writer-context-files": "READ {n} FILES {paths} FIRST",
     "critic-brief-file": "READ {path} FIRST",
-    "start-refused-not-launched": "NOT LAUNCHED",
+    "critic-brief-files": "READ {n} FILES {paths} FIRST",
+    "check-task-files": "READ {n} FILES {paths} FIRST",
     "start-refused-no-module": "NO MODULE: {reason}",
-    "orient-continue-earlier-session": "EARLIER SESSION: {resume}",
+    "orient-continue-earlier-session": "EARLIER SESSION: {session}",
     "orient-continue-earlier-version": "EARLIER VERSION",
     "module-started-note": "STARTED {role} {agent} {what}",
+    "main-stopped-note": "MAIN STOPPED",
+    "thread-stopped-note": "THREAD STOPPED {thread} {agent_id}",
     "follow-up-ran-on": "RAN ON {model} {effort}",
     "orient-continuation-prompt": "{request_id}\nSUMMARY {summary}\nCARDS {cards}\nTRANSCRIPTS {transcripts}\n"
-                                  "OUTPUTS {outputs}\nOFF {off}\nCRITIQUE {critique}\nMESSAGE {message}",
+                                  "MESSAGE {message}",
     "message_orientation-continues": "CONTINUE WITH AGENT CALL {input}",
 }
 
@@ -80,9 +84,9 @@ class FakeBridge:
 
 @pytest.fixture()
 def bridge(monkeypatch) -> FakeBridge:
-    """A FakeBridge installed as app.module_bridge, with main fenced (cc_plugin.main_fenced) and the hints of HINTS."""
+    """A FakeBridge installed as app.module_bridge, with the hints of HINTS."""
     import app
-    from app import cc_plugin, tools
+    from app import tools
 
     fake = FakeBridge()
     mod = types.ModuleType("app.module_bridge")
@@ -92,7 +96,6 @@ def bridge(monkeypatch) -> FakeBridge:
     # `from . import module_bridge` reads the package's attribute first, which the real bridge sets once any test has
     # imported it, so the fake replaces that too
     monkeypatch.setattr(app, "module_bridge", mod, raising=False)
-    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: True, raising=False)
     real = tools.descriptions
     monkeypatch.setattr(tools, "descriptions", lambda: {**real(), **HINTS})
     return fake

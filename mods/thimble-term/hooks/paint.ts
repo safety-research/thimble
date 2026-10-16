@@ -50,6 +50,8 @@ export const COLORS = {
   fresh: 'success',
   /** the background of the tip of the citation under the pointer */
   tip: 'userMessageBackground',
+  /** the background of the analyst's question in a side thread, as Claude Code draws a prompt in its chat */
+  prompt: 'userMessageBackground',
   /** inline code in the mod's own paragraphs */
   code: 'permission',
 }

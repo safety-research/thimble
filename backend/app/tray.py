@@ -70,7 +70,7 @@ def subagent_rows(c: str) -> list[dict[str, Any]]:
             t = dev._get(what)
             what = f"#{t.get('n')} {t.get('title') or ''}".strip() if t else what
         word = ROLE_WORDS.get(role, role)
-        # waiting for a child: its critic, or the subagents it started (helpers), which critique off never names
+        # waiting for a child: its critic, or the subagents it started (helpers)
         kids = [k for k in every.values() if k.get("parent") == agent_id and k.get("status") in ("running", "waiting")]
         waits = "waiting for its critique" if any(k.get("role") == "critic" for k in kids) else "waiting for its subagents"
         state = "waiting for a permission" if agent_id in asking else (
