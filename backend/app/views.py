@@ -3490,10 +3490,14 @@ def _node_version(node: str, mtime_ns: int) -> str:
 
 def local_transport(c: str) -> bool:
     """Whether workspace `c`'s session runs on the local transport, before the analyst opened the browser
-    (local.transport, C11)."""
+    (local.transport, C11). A workspace whose launch.json names no transport (no session turned thimble on there) is
+    the server's side, as prompts reads it (session_target)."""
     from . import local  # noqa: PLC0415
 
     try:
+        rec = json.loads((config.workspace_path(c) / local.LAUNCH_FILE).read_text("utf-8"))
+        if not isinstance(rec, dict) or not (rec.get("transport") or rec.get("mode")):
+            return False  # no session recorded how it reaches thimble: the server's side (prompts.session_target)
         return local.transport(c) == "local"
     except (OSError, ValueError):
         return False
