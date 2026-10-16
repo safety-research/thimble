@@ -1,20 +1,50 @@
-# thimble-term
+# thimble's terminal UI
 
-thimble's terminal-mode renderer: a Claude Code plugin of function hooks that draws thimble's work in the terminal.
-`thimble mode terminal` once in a folder, then `thimble`, starts Claude Code with thimble's plugin and this one
-(`--plugin-dir <tree>/mods/thimble-term`), with no server, no port and no browser. Browser mode does not load it.
+thimble's terminal UI: the function hooks of thimble's plugin that draw thimble's work in Claude Code (the files of
+`plugin/hooks/term/`, loaded with the agent bridge and file guard `plugin/hooks/thimble.ts` as one hooks module,
+`plugin/hooks/register.ts`). It loads in every Claude Code session and stays quiet until thimble is on in it: before
+that every hook passes through, except the path test of Read and Bash calls and `/thimble`, and it writes, spawns,
+fetches and draws nothing.
 
-It only draws. It registers no model tools, agents, guidance or commands, and it keeps no data except what is on
-screen; the one call it changes is main's Agent call for a side thread's fork, which runs with the thread's question as
-its description, so that Claude Code's agent tray and exit dialog name the thread by it (its prompt keeps
-`thread:<name>`, by which thimble knows the fork): what it draws comes from `thimble state`, and every change it makes goes through `thimble act`. The one file it
-writes is the workspace's `terminal/chat.json` (`hooks/kept.ts`): what main's chat drew under each of its rows (the
-turn's cards, the answer's footer, the `↳` rows), by the row's uuid, which Claude Code keeps across `--continue` and
-`--resume`, so a resumed session draws it again. It writes to
-main only when the analyst asks it to: a code label's run and a card's `run again` (code runs only in main's Bash) and a
-new label described in the labels list go to main as the analyst's prompt, and a document's `as slides` or `as a story`
-runs `/thimble:write`. It is idle in any session whose `THIMBLE_WS` does not name a workspace with `mode: "terminal"` in
-its `trusted/launch.json`.
+**Turning on** (`activate.ts`). thimble turns on at the first data-file read of a person at the terminal (the data rule
+of SPEC-v2 3.3: data extensions outside a code tree; inside one, a data folder's files or big data files; never tests,
+samples, tools' folders or thimble's home), unless "Turn on when Claude reads data" is off (`/config` → thimble, or the
+browser's Settings, read from thimble's `config.json`); at `/thimble`; when Claude calls `load_thimble`; with the
+`thimble` command (`THIMBLE_OPEN=1`). Activation runs `thimble activate --mod --json` once (parallel calls share it
+within their hook budget; a refused folder is asked once per session), pushes `load_thimble` to the shim with
+`$.mcp.call` so thimble's tools are listed, tells `thimble.ts` (`bridgeActivated`) and hands thimble's guide to Claude
+as the Read's context. The guide goes again when it is owed: with a prompt, with `/thimble`, after a compaction (a
+hidden user row) and after `/clear`; it is marked sent only once the row that carries it is stored. A module reload
+and a resumed session restore from the session's marker, `<home>/up/<session>.active`.
+
+What it draws comes from `thimble state`, and every change it makes goes through `thimble act`. It registers no model
+tools or agents; the one call it changes is main's Agent call for a side thread's fork, which runs with the thread's
+question as its description, so that Claude Code's agent tray and exit dialog name the thread by it (its prompt keeps
+`thread:<name>`, by which thimble knows the fork). The one file it writes is the workspace's `terminal/chat.json`
+(`kept.ts`): what main's chat drew under each of its rows (the turn's cards, the answer's footer and coverage line, the
+`↳` rows), by the row's uuid, which Claude Code keeps across `--continue` and `--resume`, so a resumed session draws it
+again. It writes to main only when the analyst asks it to: a code label's run and a card's `run again` (code runs only
+in main's Bash) and a new label described in the labels list go to main as the analyst's prompt, and a document's `as
+slides` or `as a story` runs `/thimble:write`.
+
+**Coverage** (`tracker.ts`). What Claude's tool calls read of the data files (a Read by its result: whole, part, a
+PDF's pages; Bash readers; searches, which touch a file's contents without showing them; a recursive grep over a
+folder), data files only and never the command's text, goes once per turn to `thimble act coverage --stdin`; the
+answer's last row then carries one dim line, `▸ saw 2% of records (3 of 13 files)`, which in fullscreen opens the
+panel's Coverage view.
+
+**Checks on answers.** A check's comment on a passage of Claude's answer tints the passage in the check's color (the
+browser's label color of its place) with a flag `⚑` in that color in the margin on the passage's first row; a click on
+either opens the panel at Checks. On the main screen (classic) an answer taller than the screen keeps no tint (Claude
+Code reprints the transcript when such a row changes): its comments show in the panel.
+
+**Settings** (`settings.ts`). The seven switches (`/config` → thimble: Turn on when Claude reads data, View
+proposals, Labels, Checks, Citation marks, Coverage, Card check) stay in step with thimble's config, which the
+browser's Settings writes. Coverage off draws no line and keeps no facts; Citation marks off draws citations as plain
+links and checks none; Checks off draws no tint.
+
+**Colors** (`palette.gen.ts`). The cards' series and the label colors are the browser's tokens (light paper on a light
+Claude Code theme, Dark on any other), written by `scripts/dev/sync_palette.py`.
 
 ## What it draws
 
@@ -125,14 +155,28 @@ Claude Code's panel chrome, no right-click menu.
 - **Side threads.** The `?` beside a passage or a card, a press on a card's title or mark, a selection's "ask", or `ask
   about this answer ›` opens the ask field, which posts the thread (`thimble act thread`, with the thread it was asked
   from as its parent, and a document's passage as its anchor); main forks `thread:<name>`, as for the browser's.
-- **`/thimble`** opens the home panel, with no model turn; `/thimble threads`, `/thimble cite [n]` (the n-th citation of
-  the last reply), `/thimble card [n|id]`, `/thimble files [path[:line]]` and `/thimble documents` open those.
+- **`/thimble`** turns thimble on in the folder and opens the home panel, with no model turn; `/thimble open` opens the
+  browser workbench; `/thimble coverage`, `citations`, `checks`, `threads`, `cite [n]` (the n-th citation of the last
+  reply), `card [n|id]`, `files [path[:line]]` and `documents` open those; `fresh`, `restore`, `status`, `fix` and
+  `feedback` are the skill's.
+- **A card's ↗.** In fullscreen a card's border row ends with a `↗` that opens the card in the browser; a custom card
+  reads `a custom card · the browser draws it ↗`.
 
 ## What it reads and changes
 
-`hooks/data.ts` runs the `thimble` command beside the plugin in thimble's tree (`<tree>/plugin/bin/thimble`;
-`THIMBLE_TERM_CLI` names a stand-in for tests and the live check). Each surface prints the JSON of the server's GET
-route for it:
+`data.ts` runs the plugin's own `thimble` command (`<plugin>/bin/thimble`; `THIMBLE_TERM_CLI` names a stand-in for tests
+and the live check). Each surface prints the JSON of the server's GET route for it; activation, the guide, the
+switches and coverage have their own:
+
+| Call | What for |
+| --- | --- |
+| `thimble activate --cwd <dir> --session <sid> --via data\|command\|launcher [--rekey-from <old>] --mod --json` | thimble on in the folder for this session (C2): the workspace, or a refusal with its fix |
+| `thimble guide --cwd <dir> --session <sid> [--if-owed] [--mark\|--unmark]` | the guide (C3), only when owed with `--if-owed`; marked sent, or owed again |
+| `thimble features --cwd <dir> --json [--set <key>=on\|off …]` | the seven switches thimble holds (C6), after any change |
+| `thimble act coverage --cwd <dir> --stdin` | a turn's coverage facts on standard input (C7): the session's summary and its line |
+| `thimble state coverage --cwd <dir> --session <sid> --summary` | the session's coverage summary, read again when the coverage folder changes |
+| `thimble state answer-comments --cwd <dir> --session <sid> --status open` | the checks' comments on this session's answers and the checks reading one now (C9) |
+
 
 | Call | Read as |
 | --- | --- |
@@ -170,13 +214,16 @@ route for it:
 
 It sees a change without starting Python: once a second it lists the workspace's folders (`notebooks`, `concepts`,
 `labels`, `investigations/main`, `checks`, `chats`, `trusted/subagents.json`, `orient/run.json`, `extension/views`,
-`views/proposals.json`, `ui.jsonl`) and reads again only the surfaces a drawing shows.
+`views/proposals.json`, `ui.jsonl`, `coverage`, `answer-comments.json`) and thimble's `config.json`, and reads again only
+the surfaces a drawing shows.
 
 ## Files
 
-`hooks/register.tsx` holds the hooks and the one place `$` is used (Claude Code follows `$` into no import);
-`hooks/ctx.ts` is what it shares with the rest (the answer footer, the `↳` rows, the stream and `/thimble`'s words are
-in register.tsx too). `hooks/term.ts` keeps what it read and the panel's moves, `hooks/reply.tsx` draws main's chat,
+`register.tsx` holds the hooks (the answer footer, the coverage line, the `↳` rows, the stream and `/thimble`'s words
+too); `ctx.ts` builds from each hook's `$` the context the other files take (`cxOf`: a hooks module passes `$` only to
+a function of its own file or one imported from the module's files); `contracts.ts` the contracts with the panel's files;
+`activate.ts` turning on and the guide, `tracker.ts` coverage facts, `settings.ts` the switches, `band.tsx` the rows above
+the prompt. `hooks/term.ts` keeps what it read and the panel's moves, `hooks/reply.tsx` draws main's chat,
 `hooks/panel.tsx` the panel, `hooks/filesview.tsx` its file browser and a file, `hooks/lines.tsx` the parts drawn from styled lines (homeview.tsx), `hooks/cell.ts` turns a
 thimble cell into the drawing's card form, `hooks/model.ts` reads the other surfaces, `hooks/data.ts` runs the command.
 The drawing itself: `draw.ts` lays out cards and charts as styled lines, `card.tsx` draws a card (its border the
@@ -191,12 +238,15 @@ chat drew under its rows, kept for a resume, `viewhost.ts` thimble's view host a
 
 ## Tests
 
-From `mods/thimble-term`:
+From `plugin`:
 
     claude plugin validate .
     claude plugin test .
-    npx -p typescript tsc -p . --noEmit
+    npx -p typescript tsc -p hooks/term --noEmit
 
-`tsc` needs the types Claude Code writes into `.claude-plugin/types/` when it loads the plugin, for example in a session
-started with `claude --plugin-dir .`. The tests answer `thimble state` and `thimble act` from fixture states
-(`tests/fixtures.ts`).
+`tsc` needs the types Claude Code writes into `plugin/.claude-plugin/types/` when it loads the plugin, for example in a
+session started with `claude --plugin-dir plugin`. The tests answer `thimble state`, `thimble act`, `thimble
+activate|guide|features` and the shim's `load_thimble` from fixture states (`tests/fixtures.ts`); thimble is on in the
+fixtures' session from its start (its marker is there) unless a test starts it off. `tests/data-file-cases.ts` is the one
+case list of the data rule, which the backend's coverage tests read too. `python3 scripts/dev/sync_palette.py --check`
+says whether `palette.gen.ts` is stale.
