@@ -1242,8 +1242,14 @@ export interface Settings {
   /** the key held with a click to ask in the browser (thimble's config `askKey`, lib/platform): "meta" (⌘, Ctrl off a
    * Mac) or "alt" (⌥, Alt) */
   ask_key?: 'meta' | 'alt'
+  /** thimble's feature switches, as thimble's config `features` resolves them (backend features.settings, ledger
+   * FEATURES_KEY): true or false each; a key it leaves out is on */
+  features?: Partial<Record<FeatureKey, boolean>>
   [k: string]: unknown
 }
+
+/** thimble's feature switches (backend features.py; /config → thimble in the terminal shows the same). */
+export type FeatureKey = 'autoActivate' | 'labels' | 'checks' | 'citationMarks' | 'coverage' | 'cardCheck'
 
 /** The agent rows of the settings: thimble's subagents, the code tickets' dev agent and the two classifiers. */
 export type AgentRowKey = 'orient' | 'writer' | 'critic' | 'checks' | 'dev' | CallAgent
@@ -1302,6 +1308,8 @@ export interface SettingsPatch {
   propose_views?: boolean | null
   /** the ask key: "alt", or null to put back the default ("meta") */
   ask_key?: 'meta' | 'alt' | null
+  /** the feature switches: false turns one off, null puts back the default (on) */
+  features?: Partial<Record<FeatureKey, false | null>>
   [k: string]: unknown
 }
 

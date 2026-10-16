@@ -9,16 +9,19 @@
 // Claude Code's levels, and a model that runs with no effort shows none. An agent's row applies to its next start. A
 // save sends only the changed fields so defaults stay defaults (thimble's config, backend userconf.py). Choices that
 // cannot take effect are dimmed with the reason in a tooltip. Every row names its model exactly, never `default`.
-// Under the table, the View proposals switch (PROPOSE_NOTE), which a view proposal's Don't ask again turns off; the
-// Ask key choice, ⌘-click or ⌥-click (Ctrl-click or Alt-click off a Mac), whose other key places a card freely on the
+// Under the table, thimble's feature switches (FEATURE_ROWS: Turn on when Claude reads data, View proposals, Labels,
+// Checks, Citation marks, Coverage, Card check), the same switches as /config → thimble in the terminal, kept in
+// thimble's config (`features`, backend features.py; View proposals as `views.propose`, which a view proposal's Don't ask
+// again turns off); the Ask key choice, ⌘-click or ⌥-click (Ctrl-click or Alt-click off a Mac), whose other key places a card freely on the
 // canvas (thimble's config `askKey`, lib/platform); then thimble's rules for main and its agents, the subagents of the
 // analyst's Claude Code session (web, edits of the data, and whether the session's shell runs in Claude Code's
 // sandbox), with the CLAUDE.md files each agent reads;
 // then the one agent with a permission mode of its own, an extension's program that runs the dev agent, shown only
-// where one does, and its own fence; then labels and the card check, which have no mode; then how long a code
+// where one does, with Manual or Auto (no Bypass: thimble 0.9.0 sets no agent to skip its permission prompts), and its
+// own fence; then labels and the card check, which have no mode; then how long a code
 // ticket's question about thimble's code waits on its card (cardWait); then the extensions added to thimble, each with
 // its switch for this workspace (ExtensionsSettings).
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { Button, Segmented } from '../components/Button'
 import { Chip } from '../components/Chip'
 import { TextInput } from '../components/Field'
@@ -30,7 +33,7 @@ import { useTooltip } from '../components/Tooltip'
 import { api } from '../lib/api'
 import { ExtensionsSettings, answeredRuns, changedLocalViews, changedViews, extensionCalls, viewKey } from './ExtensionsSettings'
 import { hasEffort, hasFastMode, invalidateSettings, loadSettings, modelChoices, modelLabel, sameModel } from '../lib/models'
-import { EFFORTS, ROLES, type AgentRow, type Attached, type CallAgent, type Extensions, type MainEffort, type MainFence, type ModeAgent, type ModelConf, type OrientPermissions, type Settings, type SettingsPatch, type TaskRow } from '../lib/types'
+import { EFFORTS, ROLES, type AgentRow, type Attached, type CallAgent, type Extensions, type FeatureKey, type MainEffort, type MainFence, type ModeAgent, type ModelConf, type OrientPermissions, type Settings, type SettingsPatch, type TaskRow } from '../lib/types'
 import { bus } from '../lib/bus'
 import { askKeyLabel, isMacPlatform, setAskKey, type AskKey } from '../lib/platform'
 import { EFFORT_CHOICES, FastBolt, MODEL_TIP, NEXT_LAUNCH, effortWord, mainEffort, mainFast, noFastTip } from '../chat/ModelLine'
@@ -44,15 +47,12 @@ export const MODE_ROWS: { agent: ModeAgent; label: string }[] = [{ agent: 'dev',
 const PROGRAM_WAYS = ['sdk', 'command']
 /** Whether a MODE_ROWS row applies: an extension runs that agent with a program of its own. Pure. */
 export const modeRowShown = (row: Pick<AgentRow, 'way'> | undefined): boolean => !!row && PROGRAM_WAYS.includes(row.way)
-const MODE_NAME: Record<OrientPermissions, string> = { manual: 'Manual', auto: 'Auto', bypass: 'Bypass' }
-/** The modes of the dev agent's program, by the names the menu shows. */
+const MODE_NAME: Record<OrientPermissions, string> = { manual: 'Manual', auto: 'Auto', bypass: 'Manual' }
+/** The modes of the dev agent's program, by the names the menu shows: no Bypass (backend modes.choose refuses it). */
 export const MODE_OPTIONS: { value: OrientPermissions; label: string }[] = [
   { value: 'manual', label: 'Manual' },
   { value: 'auto', label: 'Auto' },
-  { value: 'bypass', label: 'Bypass' },
 ]
-/** The warning Claude Code shows before a session runs in Bypass Permissions mode, its first sentence. */
-export const BYPASS_LINE = 'In Bypass Permissions mode, Claude Code will not ask for your approval before running potentially dangerous commands.'
 /** The one line on the modes of every other agent. */
 export const MAIN_MODE_LINE = "thimble's agents, code tickets' among them, run in your Claude Code session's permission mode."
 
@@ -61,16 +61,13 @@ export const MAIN_MODE_LINE = "thimble's agents, code tickets' among them, run i
 export const permissionChoice = (mode: string | null | undefined): OrientPermissions =>
   mode === 'auto' ? 'auto' : mode === 'bypassPermissions' ? 'bypass' : 'manual'
 
-/** The mode the dev agent's program starts in: its row as the server answers it (a Bypass the analyst did not choose
- * here answers as Manual), else the mode of the analyst's Claude Code session with Bypass as Manual, else Manual,
- * whichever their Claude Code settings do not turn off (backend modes.mode_for). Pure. */
+/** The mode the dev agent's program starts in: its row as the server answers it, else the mode of the analyst's Claude
+ * Code session, else Manual, whichever their Claude Code settings do not turn off (backend modes.mode_for); Bypass,
+ * from a row an earlier version wrote or from the session, counts as Manual. Pure. */
 export function agentMode(rows: Settings['permission_modes'], agent: ModeAgent, sessionMode: string | null | undefined, off: readonly string[] = []): OrientPermissions {
-  const session = permissionChoice(sessionMode)
-  return [rows?.[agent], session === 'bypass' ? ('manual' as const) : session, 'manual' as const].find((m): m is OrientPermissions => !!m && !off.includes(m))!
+  const manual = (m: OrientPermissions | undefined): OrientPermissions | undefined => (m === 'bypass' ? 'manual' : m)
+  return [manual(rows?.[agent]), manual(permissionChoice(sessionMode)), 'manual' as const].find((m): m is OrientPermissions => !!m && !off.includes(m))!
 }
-/** The note of the menu's "Your session's" item while the analyst's Claude Code session runs in Bypass, which reaches
- * the dev agent's program only when chosen here. */
-export const SESSION_BYPASS_NOTE = 'Manual (Bypass only when chosen here)'
 
 /** The agents of thimble's config that are one model call each, listed after the dev agent's program; their settings
  * reach an extension's program that runs their tasks (backend userconf.CALLS). */
@@ -252,6 +249,32 @@ export const NEXT_START_LINE = "An agent's row applies to its next start; a run 
 export const PROPOSE_LABEL = 'View proposals'
 export const PROPOSE_NOTE = 'thimble may propose a view for your task above the reply box. Nothing builds until you accept it.'
 
+/** thimble's feature switches in Settings, the same rows as /config → thimble in the terminal, in that order (View
+ * proposals between the first two, as PROPOSE_LABEL): each key as thimble's config `features` names it (backend
+ * features.py), its name and what it does. Off, a feature runs nothing in the background. */
+export const FEATURE_ROWS: { key: FeatureKey; label: string; note: string }[] = [
+  { key: 'autoActivate', label: 'Turn on when Claude reads data', note: "thimble turns on in a folder when Claude reads a data file there. Off, only /thimble, a thimble tool or /thimble open turns it on." },
+  { key: 'labels', label: 'Labels', note: 'Claude can label every record of a file with a model.' },
+  { key: 'checks', label: 'Checks', note: 'The checks that are on comment on answers that read data, and on documents.' },
+  { key: 'citationMarks', label: 'Citation marks', note: 'The terminal marks each citation in an answer ✓ or ×.' },
+  { key: 'coverage', label: 'Coverage', note: "A line under answers that read data says how much of the data Claude's tool calls saw." },
+  { key: 'cardCheck', label: 'Card check', note: "thimble checks each new card's chart and citations." },
+]
+
+/** The feature switches as Settings loaded them: on unless thimble's config turns a feature off. Pure. */
+export function featureRows(s: Settings | null): Record<FeatureKey, boolean> {
+  return Object.fromEntries(FEATURE_ROWS.map(({ key }) => [key, s?.features?.[key] !== false])) as Record<FeatureKey, boolean>
+}
+
+/** What a save sends for the feature switches: false for one turned off, null for one put back on (the default), only
+ * those that changed. Pure. */
+export function changedFeatures(loaded: Settings | null, now: Record<FeatureKey, boolean>): Partial<Record<FeatureKey, false | null>> {
+  const was = featureRows(loaded)
+  const out: Partial<Record<FeatureKey, false | null>> = {}
+  for (const { key } of FEATURE_ROWS) if (was[key] !== now[key]) out[key] = now[key] ? null : false
+  return out
+}
+
 /** The Ask key choice's name, its options as the platform writes them (⌘-click and ⌥-click on a Mac, Ctrl-click and
  * Alt-click elsewhere), and its note: what the other key does. */
 export const ASK_KEY_LABEL = 'Ask key'
@@ -389,6 +412,8 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
   const [runAnswers, setRunAnswers] = useState<Record<string, boolean>>({})
   // View proposals (thimble's config `views.propose`)
   const [propose, setPropose] = useState(true)
+  // the feature switches (thimble's config `features`)
+  const [features, setFeatures] = useState<Record<FeatureKey, boolean>>(featureRows(null))
   // the ask key (thimble's config `askKey`)
   const [ask, setAsk] = useState<AskKey>('meta')
   const mac = isMacPlatform()
@@ -411,6 +436,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
         setModeRows(s.permission_modes ?? {})
         setWeb(webRows(s))
         setPropose(s.propose_views !== false)
+        setFeatures(featureRows(s))
         setAsk(s.ask_key === 'alt' ? 'alt' : 'meta')
         setAttached(a)
         const fast = mainFast(a)
@@ -433,13 +459,16 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
       const webs = changedWeb(webRows(settings), web)
       const proposeNow = changedPropose(settings, propose)
       const askNow = changedAskKey(settings, ask)
-      if (Object.keys(changed).length || Object.keys(modes).length || Object.keys(webs).length || 'propose_views' in proposeNow || 'ask_key' in askNow)
+      const featuresNow = changedFeatures(settings, features)
+      const anyFeature = Object.keys(featuresNow).length > 0
+      if (Object.keys(changed).length || Object.keys(modes).length || Object.keys(webs).length || 'propose_views' in proposeNow || 'ask_key' in askNow || anyFeature)
         await api.putSettings(ws, {
           ...(Object.keys(changed).length ? { models: changed } : {}),
           ...(Object.keys(modes).length ? { permission_modes: modes } : {}),
           ...(Object.keys(webs).length ? { web: webs } : {}),
           ...proposeNow,
           ...askNow,
+          ...(anyFeature ? { features: featuresNow } : {}),
         })
       // the pointer, the canvas, the tour and the views' frames take the key at once
       if ('ask_key' in askNow) setAskKey(ask)
@@ -606,17 +635,30 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
           </div>
         )}
         {settings && (
-          <div className="settings-grid settings-modes settings-auto" role="table" aria-label={PROPOSE_LABEL}>
+          <div className="settings-grid settings-modes settings-auto settings-features" role="table" aria-label="Features">
             <div className="settings-row settings-headrow" role="row">
-              <span className="label">views</span>
+              <span className="label">features</span>
             </div>
-            <div className="settings-row" role="row" data-auto="propose-views">
-              <span className="settings-role">{PROPOSE_LABEL}</span>
-              <span className="settings-web" data-on={propose}>
-                <Switch checked={propose} onChange={() => setPropose(!propose)} aria-label={PROPOSE_LABEL} />
-              </span>
-              <span className="settings-agent-line">{PROPOSE_NOTE}</span>
-            </div>
+            {FEATURE_ROWS.map(({ key, label, note }, i) => (
+              <Fragment key={key}>
+                <div className="settings-row" role="row" data-feature={key}>
+                  <span className="settings-role">{label}</span>
+                  <span className="settings-web" data-on={features[key]}>
+                    <Switch checked={features[key]} onChange={() => setFeatures((f) => ({ ...f, [key]: !f[key] }))} aria-label={label} />
+                  </span>
+                  <span className="settings-agent-line">{note}</span>
+                </div>
+                {i === 0 && (
+                  <div className="settings-row" role="row" data-auto="propose-views">
+                    <span className="settings-role">{PROPOSE_LABEL}</span>
+                    <span className="settings-web" data-on={propose}>
+                      <Switch checked={propose} onChange={() => setPropose(!propose)} aria-label={PROPOSE_LABEL} />
+                    </span>
+                    <span className="settings-agent-line">{PROPOSE_NOTE}</span>
+                  </div>
+                )}
+              </Fragment>
+            ))}
           </div>
         )}
         {settings && (
@@ -664,7 +706,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
               const mode = agentMode(modeRows, agent, attached?.permission_mode, off)
               const pick = (m: OrientPermissions | undefined) => setModeRows((r) => ({ ...r, [agent]: m }))
               const items: MenuItem[] = [
-                { id: 'session', label: "Your session's", note: own === 'bypass' ? SESSION_BYPASS_NOTE : MODE_NAME[off.includes(own) ? 'manual' : own], checked: !picked, onSelect: () => pick(undefined) },
+                { id: 'session', label: "Your session's", note: MODE_NAME[off.includes(own) ? 'manual' : own], checked: !picked, onSelect: () => pick(undefined) },
                 ...MODE_OPTIONS.filter((o) => !off.includes(o.value)).map((o) => ({ id: o.value, label: o.label, checked: picked === o.value, onSelect: () => pick(o.value) })),
               ]
               const row = settings.agents?.[agent]
@@ -676,8 +718,8 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
                       label={`${label} permission mode`}
                       items={items}
                       trigger={
-                        <Chip kind="plain" face="sans" as="button" trailingIcon="chevron-down" className="settings-cell settings-mode" aria-label={`${label} permission mode`} data-mode={mode} data-picked={picked ?? undefined}>
-                          {picked ? MODE_NAME[mode] : `${MODE_NAME[mode]} (your session's)`}
+                        <Chip kind="plain" face="sans" as="button" trailingIcon="chevron-down" className="settings-cell settings-mode" aria-label={`${label} permission mode`} data-mode={mode} data-picked={picked && picked !== 'bypass' ? picked : undefined}>
+                          {picked && picked !== 'bypass' ? MODE_NAME[mode] : `${MODE_NAME[mode]} (your session's)`}
                         </Chip>
                       }
                     />
@@ -712,11 +754,6 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
             {!!tasksLine(settings.tasks) && (
               <p className="settings-agent-main settings-agent-tasks" role="note">
                 Tasks: {tasksLine(settings.tasks)}
-              </p>
-            )}
-            {MODE_ROWS.some(({ agent }) => modeRowShown(settings.agents?.[agent]) && agentMode(modeRows, agent, attached?.permission_mode, off) === 'bypass') && (
-              <p className="settings-modes-warn" role="note">
-                {BYPASS_LINE}
               </p>
             )}
             {ignored.length > 0 && (

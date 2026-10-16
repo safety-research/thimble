@@ -1919,8 +1919,12 @@ button.model-line-part[aria-expanded='true'] {
   flex: none;
   margin-top: 2px;
 }
-/* a request of one of thimble's agents, which the terminal answers: no buttons, the line says where */
+/* every request is answered in the terminal (0.9.0): no buttons, the line says where */
 .chat-perm-terminal .chat-perm-why {
+  color: var(--text-primary);
+}
+.chat-perm-answer-there {
+  margin: 0;
   color: var(--text-primary);
 }
 /* a follow-up that was not passed on: the reason, Send again, and the message */
