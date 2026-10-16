@@ -4,7 +4,9 @@
 // on a permission prompt in the terminal, ✕ when it failed), and ⋯ to open its card (CheckCard). + opens the
 // new-check card. Whether a check is on is kept on the server (`shown`), so one switch covers a check's comments in the
 // documents and on the cards, and the server runs what the pane asks for (backend checks.py); `check` stream records
-// say when a run starts and ends, and `checks` records when a check changes, so both panes follow one switch.
+// say when a run starts and ends, and `checks` records when a check changes, so both panes follow one switch. The
+// pane's head carries the accent dot while a check's run left comments on its surface that the analyst has not looked
+// at (newComments.ts); opening the pane looks at them.
 // `useChecks` holds the list; `useSidebar` is the sidebar's state (shown or hidden, beside the document or over it).
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import { Button } from '../components/Button'
@@ -25,7 +27,7 @@ import { refusalLine } from '../chat/Refused'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { useDock, useFoldingSide, type FoldingSide } from '../shell/dock'
 import { sideKey } from './cards'
-import { PANE_KEY, useReveal } from './newComments'
+import { useNewComments } from './newComments'
 import { CANVAS, checkColour, checkLook, checksFor, countsByCheck, freeColour, nameTaken, rowCount, runLine, runOf, shownIds, withCheck, withRun, withShown, type CheckLook } from './checkComments'
 import { Chevron, Glyph, IconButton } from './icons'
 
@@ -69,7 +71,7 @@ export function useChecks(ws: string): Checks {
         .list(ws)
         .then((l) => {
           if (!live) return
-          // the chat's notice strip reads the checks too: an odd answer leaves it standing
+          // the new comments' dot reads the list too (newComments.ts): an odd answer reads as no checks
           put(Array.isArray(l) ? l : [])
           setReady(true)
         })
@@ -251,16 +253,19 @@ export interface CommentsPaneProps {
   onHide?: () => void
 }
 
-/** The Comments pane beside a document: its head (the count of comments shown, + for a new check, the sidebar's hide
- * toggle) and the rows of the checks that cover the documents. */
+/** The accent dot on a Comments pane's control (its head beside a document, the toolbar's Comments button on the
+ * canvas) while a check's run left comments there that the analyst has not looked at (newComments.ts). */
+export function NewCommentsDot() {
+  return <span className="dot wu-new-dot" role="img" aria-label="New comments" title="New comments" />
+}
+
+/** The Comments pane beside a document: its head (the count of comments shown, the new comments' dot, + for a new
+ * check, the sidebar's hide toggle) and the rows of the checks that cover the documents. A click on the head opens or
+ * folds the pane, and looks at the document's new comments. */
 export function CommentsPane({ ws, doc, checks, comments, onHide }: CommentsPaneProps) {
-  const key = storageKey(ws, PANE_KEY)
+  const key = storageKey(ws, 'report-checks-pane')
   const [open, setOpen] = useState<boolean>(() => readStorage<boolean>(key, true) !== false)
-  // the new comments notice's Show opens the pane (newComments.revealComments)
-  const reveal = useReveal(ws, doc)
-  useEffect(() => {
-    if (reveal) setOpen(true)
-  }, [reveal])
+  const news = useNewComments(ws, checks, doc)
   const [adding, setAdding] = useState<HTMLElement | null>(null)
   const head = useRef<HTMLDivElement | null>(null)
   const list = useMemo(() => checksFor(checks.list, doc), [checks.list, doc])
@@ -271,6 +276,7 @@ export function CommentsPane({ ws, doc, checks, comments, onHide }: CommentsPane
   const setPane = (next: boolean) => {
     setOpen(next)
     writeStorage(key, next)
+    news.look()
   }
   return (
     <div className="wu-checks" aria-label="Comments">
@@ -279,6 +285,7 @@ export function CommentsPane({ ws, doc, checks, comments, onHide }: CommentsPane
           <Chevron open={open} />
           <span className="wu-sec-name">Comments</span>
           {anyResult && <span className="wu-count wu-count-inline">{shownCount}</span>}
+          {news.runs.length > 0 && <NewCommentsDot />}
         </button>
         <IconButton label="New check" className="wu-checks-add" aria-expanded={!!adding} onClick={() => setAdding((a) => (a ? null : head.current))}>
           <Icon name="plus" size={14} />

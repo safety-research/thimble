@@ -12,23 +12,19 @@
 // (report/CommentCard.tsx): its check's name and its statement, its details on request and ✓ (Done), and, while it is
 // active, a field that opens a thread anchored to its card or step. A comment hides with its check, when its card is
 // not drawn (a collapsed frame) or when the filters leave its card out. The box the comments cover goes to the canvas,
-// whose Fit and minimap take it in. The new comments notice's Show opens the first new comment and pans the board to it
-// and its card (report/newComments.ts); a comment opened is looked at, so the notice leaves its run out.
+// whose Fit and minimap take it in. A comment opened is looked at, so its run no longer marks the toolbar's Comments
+// button with the new comments' dot (report/newComments.ts).
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
 import type { CanvasComment } from '../lib/types'
-import { CANVAS, evidenceRefs, type CheckLook } from '../report/checkComments'
+import { evidenceRefs, type CheckLook } from '../report/checkComments'
 import { CommentCard } from '../report/CommentCard'
 import { canvasCommentsApi } from '../report/commentsApi'
-import { useLookedAt, useTakeReveal } from '../report/newComments'
+import { useLookedAt } from '../report/newComments'
 import { COMMENT_LIFT, COMMENT_STEP_LIFT, COMMENT_W, commentPlaces, extentOf, type Board, type CommentPlace, type CommentSpot, type Layout, type Rect } from './layout'
 
 const REFETCH_DEBOUNCE_MS = 200
-// Show's pan to a comment waits for the board to show and the comment to stand at its place: tried this often, this
-// far apart
-const REVEAL_TRIES = 10
-const REVEAL_STEP_MS = 120
 
 /** The workspace's open comments on the cards, read again when the stream says they or the cards changed. */
 export function useCanvasComments(ws: string): { comments: CanvasComment[]; resolve: (c: CanvasComment) => Promise<void> } {
@@ -138,31 +134,8 @@ export function CommentLayer({ ws, board, lay, comments, look, cardEl, onResolve
   useEffect(() => {
     if (active && !comments.some((c) => c.id === active)) setActive(null)
   }, [active, comments])
-  // the comment open is looked at, so the new comments notice leaves its run out; the notice's Show opens the first new
-  // comment, with its card brought into view
+  // the comment open is looked at, so the new comments' dot leaves its run out
   useLookedAt(ws, comments.find((c) => c.id === active)?.run)
-  useTakeReveal(ws, CANVAS, comments, true, (first) => {
-    if (!first) return
-    setActive(first.id)
-    // once the board shows and the comment stands level with its place, the board pans to the comment and its card
-    let tries = 0
-    const pan = () => {
-      const a = cardEl(first.card)?.getBoundingClientRect()
-      const el = els.current.get(first.id)
-      const b = el?.getBoundingClientRect()
-      if (!a || !b || !el || !a.width || !b.width) {
-        if (tries++ < REVEAL_TRIES) window.setTimeout(pan, REVEAL_STEP_MS)
-        return
-      }
-      const left = Math.min(a.left, b.left)
-      const top = Math.min(a.top, b.top)
-      const right = Math.max(a.right, b.right)
-      const bottom = Math.max(a.bottom, b.bottom)
-      const rect = { left, top, right, bottom, x: left, y: top, width: right - left, height: bottom - top } as DOMRect
-      bus.emit('revealBox', { rect, frame: el })
-    }
-    window.setTimeout(pan, REVEAL_STEP_MS)
-  })
   // a field that held the focus goes when its comment is let go, with no blur to say so
   useEffect(() => {
     if (focused && !els.current.get(focused)?.contains(document.activeElement)) setFocused(null)
