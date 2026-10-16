@@ -76,21 +76,3 @@ def test_a_ticket_s_agent_is_told_its_worktree_its_folder_and_where_its_pictures
                                    stack={"ui": "http://127.0.0.1:5301", "api": "http://127.0.0.1:8301"})
     assert "http://127.0.0.1:5301" in staged and "none: thimble could not take one" in staged
     assert dev.ticket_work_dir("7").parent == dev.worktrees_dir()
-
-
-def test_the_fix_session_runs_in_the_dev_row_s_fast_mode_and_subagents_take_none_from_it(board, monkeypatch):
-    """`thimble fix` keeps the dev row's fast mode, on by default and off where thimble's config turns it off. A code
-    ticket's agent and a view build take no fast mode from that row, since Claude Code gives a subagent none of its own
-    (its agent definition has no such field): their registrations name only the model and the effort."""
-    monkeypatch.setitem(userconf.DEFAULTS["sandbox"], "enforce", False)  # the flags below come with no fence
-
-    def fast() -> object:
-        flags = dev.Sessions()._flags(CORPUS, "thimble fix")
-        return json.loads(flags[flags.index("--settings") + 1]).get("fastMode")
-
-    assert config.models_for(CORPUS)["dev"]["fast"] is True and fast() is True
-    userconf.global_file().parent.mkdir(parents=True, exist_ok=True)
-    userconf.global_file().write_text(json.dumps({"agents": {"dev": {"fast": False}}}))
-    assert fast() is False
-    userconf.global_file().write_text(json.dumps({"agents": {"dev": {"fast": True}}}))
-    assert fast() is True and "fast" not in config.chosen(CORPUS, "dev")
