@@ -91,7 +91,7 @@ test("a card value its code types in: the literal lit on the citation's purple i
   await ui.unmount()
   await w.clock.settle()
   let pane = (await $.ui.mount(PANE)) as unknown as M
-  expect(shown(await pane.find({ key: 'cite-bar' }))).toBe('failed × ›repair ›history 0')
+  expect(shown(await pane.find({ key: 'cite-bar' }))).toBe('failed × ›history 0')
   pane = await pressBar($, w, pane, 'cite-state')
   expect(shown(await pane.find({ key: 'cite-how' }))).toBe("the card's code types it in rather than computes it")
   expect(shown(await pane.find({ key: 'cite-why' }))).toBe('typed in the code, line 3, not computed')
@@ -110,7 +110,7 @@ test("a citation whose place does not exist: its title red, `failed ×` red in t
   // no mark after the title: the bar says its state (MATT-NOTES "Mockup feedback", panel C)
   expect(json).not.toContain('×')
   const bar = await pane.find({ key: 'cite-bar' })
-  expect(shown(bar)).toBe('failed × ›repair ›history 0')
+  expect(shown(bar)).toBe('failed × ›history 0')
   expect(JSON.stringify(bar)).toContain('{"type":"Text","props":{"color":"error","underline":true},"children":["failed"]}')
   pane = await pressBar($, w, pane, 'cite-state')
   expect(shown(await pane.find({ key: 'cite-how' }))).toBe('thimble looked for its place and found none')

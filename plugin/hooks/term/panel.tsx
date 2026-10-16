@@ -2005,18 +2005,6 @@ async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
       if ('error' in got) return cx.toast(`thimble: ${got.error}`)
       await openThread(cx, got.id, scriptQuestion(c))
     })()
-  // repair: a failed citation asks Claude, in a side thread about it, to fix the claim (the owner, 10-16: "only red if
-  // it fails, with an option to repair"); a takeaway's is fixed on its card with edit_card, a sentence's restated
-  const repairQuestion = () =>
-    `This citation failed thimble's check${why ? ` (${why})` : ''}: ${citeLabel(c)} → ${c.ref}. Find what the cited place actually shows, then fix the claim: ` +
-    (p.of ? `rewrite the takeaway of card:${p.of} with edit_card so its value and citation are right.` : 'give the corrected sentence with its citation.')
-  const repair = () =>
-    void (async () => {
-      const q = repairQuestion()
-      const got = await startThread(cx, c.ref, p.sentence ? plainCites(p.sentence) : citeLabel(c), q, { title: targetLabel(target, 60) })
-      if ('error' in got) return cx.toast(`thimble: ${got.error}`)
-      await openThread(cx, got.id, q)
-    })()
   const canAsk = !pending && !kept && !scriptT && c.display !== null && v?.status !== 'missing' && e.surface !== 'mobile'
   // its revisions: one where a check rewrote it in place (what Claude wrote, what the check made it, and why)
   const revisions = check.fixed ? 1 : 0
@@ -2110,14 +2098,6 @@ async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
       <Text key="cite-bar-rule" color={COLORS.rule}>{'┄'.repeat(cols)}</Text>
       <Box key="cite-bar" flexDirection="row" columnGap={3}>
         {stateEl}
-        {bad && e.surface !== 'mobile' ? (
-          <Button key="cite-repair" plain onPress={repair}>
-            <Text>
-              <Text color={ACCENT} underline>repair</Text>
-              <Text dimColor> ›</Text>
-            </Text>
-          </Button>
-        ) : null}
         {historyEl}
       </Box>
     </Box>
@@ -2131,7 +2111,7 @@ async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
     body.push(framedCard(cx, e, lit.card, w, lit.lines, 'cite-card'))
   }
   const entry = await citeEntry(cx, e, c, target, p.sentence ?? '', cols)
-  let hints = [...(entry.el ? ['a to ask'] : []), ...(f ? ['f for its file'] : []), ...(cardId ? ['c for the card'] : []), ...(checking ? [] : ['v for how it was verified']), ...(revisions ? ['h for its history'] : []), ...(canAsk ? ['s for a script'] : []), ...(bad && e.surface !== 'mobile' ? ['r to repair'] : [])]
+  let hints = [...(entry.el ? ['a to ask'] : []), ...(f ? ['f for its file'] : []), ...(cardId ? ['c for the card'] : []), ...(checking ? [] : ['v for how it was verified']), ...(revisions ? ['h for its history'] : []), ...(canAsk ? ['s for a script'] : [])]
   if (!(v?.card && !v.lines.length) && v?.lines.length) {
     // the passage an example quotes, when the cited lines do not hold it
     const quotedRow = quote && status !== 'differs' && !v.lines.some(l => l.hit && quoteSpan(demojibake(l.text).replace(/\t/g, '  '), quote))
@@ -2151,7 +2131,6 @@ async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
     ...(checking ? [] : [{ key: 'how', hotkey: 'v', onPress: toggle('how') }]),
     ...(revisions ? [{ key: 'history', hotkey: 'h', onPress: toggle('history') }] : []),
     ...(canAsk ? [{ key: 'script', hotkey: 's', onPress: askScript }] : []),
-    ...(bad && e.surface !== 'mobile' ? [{ key: 'repair', hotkey: 'r', onPress: repair }] : []),
   ]
   body.push(...bottomRows(cx, e, cols, [], [entry.el], hints, !entry.el))
   const hk = hiddenKeys(cx, e, keys)
