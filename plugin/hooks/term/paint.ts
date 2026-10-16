@@ -64,7 +64,7 @@ export function tintOf(hex: string, theme: Theme, share: number): string {
 
 /** Where a citation's value stands in its place (its cited lines, a card's cited cell or row, the code that types it):
  *  Claude Code's violet (COLORS.cite: rgb(175,135,255) on dark themes, rgb(135,0,255) on light) blended toward the
- *  theme's background, so the text on it keeps its own colour (v9 review: "the cited value highlighted in purple in the
+ *  theme's background, so the text on it keeps its own color (v9 review: "the cited value highlighted in purple in the
  *  source text"). */
 export function citeHighlight(theme: Theme = painted.theme): string {
   return theme === 'light' ? tintOf('#8700ff', 'light', 0.18) : tintOf('#af87ff', 'dark', 0.35)

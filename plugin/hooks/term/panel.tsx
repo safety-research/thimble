@@ -1800,7 +1800,7 @@ export function citedRow(card: CardData, v: Pick<TermVerdict, 'column' | 'row' |
 }
 
 /** A card's cited data row as a small table (a card's table, laid out short): the column names bold with a rule in the
- *  rule grey under each, then the row, numbers right-aligned, the cited cell on the citation's purple. Where the columns
+ *  rule gray under each, then the row, numbers right-aligned, the cited cell on the citation's purple. Where the columns
  *  do not fit in `room`, the row's name and the cited column stay and the others follow while they fit. */
 export function dataLines(r: { head: string[]; cells: string[]; at: number; num: boolean[] }, room: number): Line[] {
   const GAP = 2
@@ -1899,7 +1899,7 @@ function howWords(c: Citation, v: TermVerdict | undefined, check: { state?: stri
  *  as they change, so it says when the check ends. */
 async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElement> {
   const els = cx.els(e) as El
-  const { Box, Text } = cx.els(e)
+  const { Box, Text, Button } = cx.els(e)
   const cols = Math.max(30, e.props.bodyColumns)
   if (!p.ref) return none(cx, e)
   const c = { raw: p.display === null || p.display === undefined ? `[[${p.ref}]]` : `[[${p.display}|${p.ref}]]`, ref: p.ref, display: p.display ?? null }

@@ -620,7 +620,7 @@ async function withQuotes(cx: Ctx, data: CardData): Promise<CardData> {
 export type CardOpts = { pane?: boolean; takeaway?: boolean; order?: number; in?: 'reply' | 'report'; focus?: Focus; clip?: { rows: number; more: () => void } }
 
 /** A card in a stream (a reply, a document, the panel), as Matt laid cards out (2026-10-07): a full round border in the
- *  rule grey with a cell of padding; inside, its title in bold, wrapped and never cut, with its id as its chips read it
+ *  rule gray with a cell of padding; inside, its title in bold, wrapped and never cut, with its id as its chips read it
  *  (`card:<name>`) dim at the right of the first row, one blank row, then its plot or body directly, and below the plot
  *  everything else it shows: the readout and its state words, its label rows, its params (card.tsx draws these), then
  *  after a blank row its takeaway, its citations as links. In the card pane the question is the panel's title. A card
