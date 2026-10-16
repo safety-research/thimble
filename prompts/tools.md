@@ -1138,6 +1138,10 @@ Fields of the records the reader answered hold values that the lines they cite d
 
 {n} of {total} files were opened by no card and no Read call, {files}.
 
+## check-unread-coverage
+
+{n} of {total} files were neither read nor searched by the orientation, {files}.
+
 ## check-unused
 
 In {file}, no card names the field `{field}`, filled in {filled} of {sampled} sampled records.
@@ -1152,27 +1156,11 @@ No check found anything.
 
 ## orient-coverage
 
-Coverage: viewed only {viewed} · {shares}
-
-## orient-coverage-every
-
-Coverage: viewed every file · {shares}
-
-## orient-coverage-nothing
-
-Coverage: viewed no file · {shares}
-
-## orient-coverage-shares
-
-{files} of files · {share} of {measure}
-
-## orient-coverage-files
-
-{files} of files
+Coverage: {line}
 
 ## orient-coverage-lead
 
-When your first run ended, thimble measured how much of the corpus it saw, from the lines and records its tool outputs showed (Read ranges, and lines or records that commands and cards printed), and showed the analyst this line in your thread.
+When your first run ended, thimble measured how much of the corpus your tool calls read or searched, as a share of its size, and showed the analyst this line in your thread. Read means the content came into your context (Read, cat, head, sed). Searched means grep, a script, a card's code or a label went over it and only a narrow result came back.
 
 {coverage}
 

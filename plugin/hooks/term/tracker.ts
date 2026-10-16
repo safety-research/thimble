@@ -11,6 +11,9 @@
 //
 // Before thimble is on the facts stay in memory (a coding session keeps none: its files are not data); they go with
 // the first turn end after it is on.
+//
+// The backend's call_facts.py is the twin of factsOf and bashReads for the calls thimble stored (the orientation's
+// coverage line); a change to a reader here changes it there, and both read the case list tests/bash-read-cases.ts.
 import type { CoverageSummary } from './contracts'
 import type { Ctx } from './ctx'
 import { actStdin } from './data'

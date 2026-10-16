@@ -1,12 +1,14 @@
 // The data rule that turns thimble on (SPEC-v2 3.3) and its coverage twin (3.9), over the one case list
 // (data-file-cases.ts, which the backend's coverage.is_data reads too): code trees, never-folders and never-names, the
 // size rule, json/sqlite/db never by size, a realpath outside the folder; and the files a Bash command reads (readers,
-// searches, never an output argument, no fact for ls/find/fd). `claude plugin test plugin`.
+// searches, never an output argument, no fact for ls/find/fd), also over the case list the backend's twin reads
+// (bash-read-cases.ts). `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
 import { candidatePaths, isDataFile, isDataRead, relInside } from '../activate'
 import { bashReads, shellWords } from '../tracker'
 import { CASES } from './data-file-cases'
+import { CASES as BASH_CASES } from './bash-read-cases'
 
 const ROOT = '/corpus/wiki'
 
@@ -55,6 +57,12 @@ test("a Bash command's readers name the files it reads, never an output argument
   expect(paths(`python3 -c "import pandas as pd; pd.read_csv('prs.csv')"`)).toContain('prs.csv')
   expect(paths(`python3 - <<'EOF'\nimport json\nrows = open('events.jsonl').read()\nEOF`)).toContain('events.jsonl')
   expect(shellWords('a "b c" \'d e\' f\\ g | h; i && j')).toEqual([['a', 'b c', 'd e', 'f g'], ['h'], ['i'], ['j']])
+})
+
+test("the Bash case list: each command gives the reads it lists, which the backend's twin (call_facts.bash_reads) gives too", () => {
+  for (const [command, reads] of BASH_CASES) {
+    expect(bashReads(command).map(r => [r.reader, r.path, r.how, r.lines ?? null, r.recursive === true]), command).toEqual(reads)
+  }
 })
 
 test('candidates: a Read names its file; a Bash command its readers; no other call names one', () => {

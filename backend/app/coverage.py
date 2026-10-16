@@ -54,7 +54,9 @@ bytes of its line ranges where a line index of the file is at hand (read_bytes: 
 disk, never built here), else its size times the share of its lines read (of the index's lines for a line-based file,
 else of the line total the read reported); a part without a line range counts none. Searched: a searched file's size,
 and the rest of a file read in part that a search also touched. The summary line says the read and searched shares of
-it: `read 2% · searched 41% of the data`, searched only when not 0; with no index yet, the files the facts name.
+it: `read 2% · searched 41% of the data`, searched only when not 0; with no index yet, the files the facts name. The
+orientation's coverage line is this line for its own calls: summary_of takes the facts call_facts.py gives of its
+stored calls, and what its cards and labels searched, in place of a session's.
 
 Rows (level): at a level with FILE_ROWS files or fewer, one row per file (seen, then searched, then the others, by
 name). Otherwise one row per (folder right under the level, extension), which drills into that folder (a folder that
@@ -96,6 +98,7 @@ LOCK = "index.lock"
 SCHEMA = "4"  # the index's form: files with their name pattern and count (lines or entries), totals, folders' mtimes
 STALE_S = 60.0  # a request starts the job when the index was walked longer ago than this
 START_DEBOUNCE_S = 5.0  # a process starts the job at most once in this long
+WALK_POLL_S = 0.2  # how often wait_walked looks whether the job's walk is in the index
 FILE_ROWS = 20  # at a level with this many files or fewer, the rows are files
 PATTERN_MIN = 5  # siblings that share a name pattern, this many or more, are one row by their glob
 LIST_MAX = 500  # rows one level lists at most; `more` says how many it leaves out
@@ -505,28 +508,56 @@ def _glob_area(pattern: str) -> tuple[str, str | None] | None:
     return (folder, m.group(1).lower()) if m else None
 
 
-def _derived(c: str, since: float | None) -> tuple[set[str], list[tuple[str, str | None]], list[str]]:
-    """(files, areas, patterns) searched by the cards made and the labels run since `since`: the cards' recorded reads
-    (a card whose reads were capped searched the folders they fall in), the labels' file patterns (a plain path is a
-    file, `<folder>/**` or `<folder>/**/*.ext` an area, anything else a pattern matched over the index)."""
+Derived = tuple[set[str], list[tuple[str, str | None]], list[str]]  # (files, areas, patterns) searched (_derived)
+
+
+def card_searches(cells: Iterable[dict[str, Any]]) -> tuple[set[str], list[tuple[str, str | None]]]:
+    """(files, areas) the cards' code searched: their recorded reads, and for a card whose reads were capped the
+    folders they fall in, but never the whole corpus."""
     files: set[str] = set()
     areas: list[tuple[str, str | None]] = []
-    patterns: list[str] = []
+    for cell in cells:
+        reads = [str(r).removeprefix("./") for r in cell.get("reads") or [] if isinstance(r, str)]
+        files.update(reads)
+        if cell.get("reads_more"):
+            areas.extend((d, None) for d in {os.path.dirname(r) for r in reads} if d)
+    return files, areas
+
+
+def label_searches(root: Path, pats: Any, into: Derived) -> None:
+    """Add to `into` what a label's run over the file patterns `pats` searched: a plain path is a file (a folder an
+    area), `<folder>/**` or `<folder>/**/*.ext` an area, anything else a pattern matched over the index."""
+    files, areas, patterns = into
+    for pat in [pats] if isinstance(pats, str) else pats or []:
+        pat = str(pat or "").partition("#")[0].strip().removeprefix("./").strip("/")
+        if not pat:
+            continue
+        if not any(ch in pat for ch in "*?["):
+            if (root / pat).is_dir():
+                areas.append((pat, None))
+            else:
+                files.add(pat)
+        elif (area := _glob_area(pat)) is not None:
+            areas.append(area)
+        else:
+            patterns.append(pat)
+
+
+def _derived(c: str, since: float | None) -> Derived:
+    """(files, areas, patterns) searched by the cards made and the labels run since `since` (card_searches,
+    label_searches)."""
+    out: Derived = (set(), [], [])
     if since is None:
-        return files, areas, patterns
+        return out
     ws = config.workspace_dir(c)
     root = config.corpus_dir(c)
     try:
         from . import notebook  # noqa: PLC0415 — notebook imports the kernel machinery
 
-        for _, nb in notebook._stored(ws):
-            for cell in nb.get("cells") or []:
-                if not isinstance(cell, dict) or (_epoch(cell.get("ts")) or 0) < since:
-                    continue
-                reads = [str(r).removeprefix("./") for r in cell.get("reads") or [] if isinstance(r, str)]
-                files.update(reads)
-                if cell.get("reads_more"):  # its reads were capped: the folders they fall in, but never the whole corpus
-                    areas.extend((d, None) for d in {os.path.dirname(r) for r in reads} if d)
+        files, areas = card_searches(cell for _, nb in notebook._stored(ws) for cell in nb.get("cells") or []
+                                     if isinstance(cell, dict) and (_epoch(cell.get("ts")) or 0) >= since)
+        out[0].update(files)
+        out[1].extend(areas)
     except Exception:  # noqa: BLE001 — coverage without the cards' reads still answers
         log.debug("%s: the cards' reads were not read for coverage", c, exc_info=True)
     try:
@@ -534,25 +565,11 @@ def _derived(c: str, since: float | None) -> tuple[set[str], list[tuple[str, str
 
         for concept in concepts.list_concepts(ws):
             for app in concept.get("applications") or []:
-                if not isinstance(app, dict) or (_epoch(app.get("ts")) or 0) < since:
-                    continue
-                pats = app.get("paths") or concept.get("glob") or []
-                for pat in [pats] if isinstance(pats, str) else pats:
-                    pat = str(pat or "").partition("#")[0].strip().removeprefix("./").strip("/")
-                    if not pat:
-                        continue
-                    if not any(ch in pat for ch in "*?["):
-                        if (root / pat).is_dir():
-                            areas.append((pat, None))
-                        else:
-                            files.add(pat)
-                    elif (area := _glob_area(pat)) is not None:
-                        areas.append(area)
-                    else:
-                        patterns.append(pat)
+                if isinstance(app, dict) and (_epoch(app.get("ts")) or 0) >= since:
+                    label_searches(root, app.get("paths") or concept.get("glob") or [], out)
     except Exception:  # noqa: BLE001
         log.debug("%s: the labels' runs were not read for coverage", c, exc_info=True)
-    return files, areas, patterns
+    return out
 
 
 # --------------------------------------------------------------------------- the index
@@ -689,6 +706,38 @@ def _fresh_or_start(c: str, conn: sqlite3.Connection | None) -> bool:
     if walked is None or time.time() - walked > STALE_S:
         start_index(c)
     return conn is not None and walked is not None
+
+
+def _walked(c: str) -> bool:
+    """Whether the index holds a walk: every file of the universe with its size."""
+    conn = _connect_ro(index_path(c))
+    if conn is None:
+        return False
+    try:
+        return bool(_meta(conn, "walked_at"))
+    except sqlite3.Error:
+        return False
+    finally:
+        conn.close()
+
+
+def wait_walked(c: str, wait_s: float) -> bool:
+    """Whether the index holds a walk, once this returns: with none yet, start the job and wait up to `wait_s` for its
+    walk, so a summary made next has the corpus's size (orient_checks.coverage). It waits only while a job runs. False
+    with the Coverage switch off."""
+    if not feature_on(c):
+        return False
+    if _walked(c):
+        return True
+    started = start_index(c, force=True)
+    deadline = time.monotonic() + wait_s
+    while time.monotonic() < deadline:
+        if _walked(c):
+            return True
+        if not started and _lock_free(coverage_dir(c) / LOCK):  # no job runs, and none was started
+            break
+        time.sleep(WALK_POLL_S)
+    return _walked(c)
 
 
 def _file_row(root: Path, path: str, folder: str, name: str) -> tuple | None:
@@ -1067,12 +1116,16 @@ class _Index:
         return [str(p) for (p,) in self._q("SELECT path FROM files WHERE path GLOB ?", (pattern,))]
 
 
-def _merge(c: str, sid: str, conn: sqlite3.Connection | None) -> tuple[_Facts, _Index, dict[str, tuple]]:
+def _merge(c: str, sid: str, conn: sqlite3.Connection | None,
+           given: tuple[list[dict[str, Any]], Derived] | None = None) -> tuple[_Facts, _Index, dict[str, tuple]]:
     """The merged facts, the index, and the files the facts name: {path: (folder, ext, size, records, reader)} for
     every one that exists, from the index or, for one the index does not hold yet, from the disk (records unknown, a
-    sixth field True)."""
-    facts = read_facts(c, sid)
-    derived = _derived(c, _since(sid, facts))
+    sixth field True). `given` (facts as stored, derived searches) stands in for the session's own (summary_of)."""
+    if given is None:
+        facts = read_facts(c, sid)
+        derived = _derived(c, _since(sid, facts))
+    else:
+        facts, derived = given
     idx = _Index(conn)
     if derived[2] and conn is not None:
         found = set()
@@ -1288,9 +1341,21 @@ def summary(c: str, sid: str) -> dict[str, Any]:
     {unit, seen, searched, total, counted} (the earlier form's field; never two units added up), size: the whole
     corpus's {read, searched, total} in bytes (None with no index yet), line, counting}. `seen` is read. Reads the index
     only."""
+    return _summary(c, sid)
+
+
+def summary_of(c: str, facts: list[dict[str, Any]], derived: Derived, *, never: bool = False) -> dict[str, Any]:
+    """summary for the facts and derived searches given in place of a session's (the orientation's coverage line,
+    orient_checks.coverage): the facts in add_facts's form (clean_facts keeps those that count). With `never`, also
+    `never`: the indexed files neither read nor searched, by path."""
+    return _summary(c, "", (clean_facts(c, facts), derived), never=never)
+
+
+def _summary(c: str, sid: str, given: tuple[list[dict[str, Any]], Derived] | None = None, *,
+             never: bool = False) -> dict[str, Any]:
     conn, indexed = _open(c)
     try:
-        m, idx, known = _merge(c, sid, conn)
+        m, idx, known = _merge(c, sid, conn, given)
         by_unit = {u: _Tally() for u in UNITS}
         if indexed:
             for (_, ext), t in _coarse(m, idx, known, "").items():
@@ -1316,10 +1381,14 @@ def summary(c: str, sid: str) -> dict[str, Any]:
         records = {k: first[k] for k in ("unit", "seen", "searched", "total", "counted")} if first else \
             {"unit": "lines", "seen": 0, "searched": 0, "total": 0, "counted": False}
         size = {"read": g.bytes_seen, "searched": g.bytes_searched, "total": g.bytes} if indexed else None
-        return {"files": {"seen": g.seen, "searched": g.searched, "never": max(0, g.files - g.seen - g.searched),
-                          "total": g.files},
-                "records": records, "totals": totals, "size": size, "line": line_of(size, indexed, g.seen, g.searched),
-                "counting": not indexed or any(not t["counted"] for t in totals if t["unit"] in COUNTED)}
+        out = {"files": {"seen": g.seen, "searched": g.searched, "never": max(0, g.files - g.seen - g.searched),
+                         "total": g.files},
+               "records": records, "totals": totals, "size": size, "line": line_of(size, indexed, g.seen, g.searched),
+               "counting": not indexed or any(not t["counted"] for t in totals if t["unit"] in COUNTED)}
+        if never:
+            out["never"] = sorted(p for p, folder, ext, *_ in idx.files_under("")
+                                  if _status(m, p, folder, ext) == "never") if indexed else []
+        return out
     finally:
         if conn is not None:
             conn.close()
