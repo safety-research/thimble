@@ -84,11 +84,32 @@ def session_mode(ws: Path) -> str:
 
 
 def terminal(c: str) -> bool:
-    """Whether workspace `c`'s session runs in terminal mode (session_mode). False for a workspace that is not there."""
+    """Whether workspace `c`'s session runs in terminal mode (session_mode), or 0.9.0's activation wrote launch.json with
+    `transport: "local"` (transport). False for a workspace that is not there, and, until 0.9.0's runtime lane removes
+    the modes, for a workspace with no launch.json (0.8.0's browser default)."""
     try:
-        return session_mode(config.workspace_path(c)) == TERMINAL
+        ws = config.workspace_path(c)
+        if session_mode(ws) == TERMINAL:
+            return True
+        rec = json.loads((ws / LAUNCH_FILE).read_text("utf-8"))
     except (ValueError, OSError):
         return False
+    return isinstance(rec, dict) and rec.get("transport") == "local"
+
+
+def transport(c: str, sid: str | None = None) -> str:
+    """How session `sid` (None: main's) of workspace `c` reaches thimble's backend (0.9.0, C11): `server` once a press
+    started the server for main (launch.json `transport: "server"`, or a legacy `mode: "browser"`), else `local`; a peer
+    or a session moved off main (launch.json `peers`, `moved`) is always local. SCAFFOLD STUB of the runtime lane's."""
+    try:
+        rec = json.loads((config.workspace_path(c) / LAUNCH_FILE).read_text("utf-8"))
+    except (ValueError, OSError):
+        return "local"
+    if not isinstance(rec, dict):
+        return "local"
+    if sid and (sid != rec.get("session") or sid in (rec.get("peers") or []) or sid in (rec.get("moved") or [])):
+        return "local"
+    return "server" if rec.get("transport") == "server" or rec.get("mode") == BROWSER else "local"
 
 
 def _pid_alive(pid: Any) -> bool:
@@ -1416,8 +1437,8 @@ def main(argv: list[str]) -> int:
             if not terminal(c):
                 return _fail("this workspace's session runs in browser mode, where the browser makes this change")
             raw = _positional(rest)
-            try:
-                payload = json.loads(raw[0]) if raw else {}
+            try:  # --stdin: the act's JSON on standard input (an act whose argument can pass argv's limit: coverage)
+                payload = json.loads(sys.stdin.read() or "{}") if "--stdin" in rest else json.loads(raw[0]) if raw else {}
             except ValueError as e:
                 return _fail(f"the act's argument is not JSON: {e}")
             out = asyncio.run(act(c, what, payload))
@@ -1438,6 +1459,14 @@ _SURFACES.update(_term_report.SURFACES)
 _ACTS.update(_term_report.ACTS)
 STATE_USAGE += _term_report.STATE_USAGE
 ACT_USAGE += _term_report.ACT_USAGE
+
+# 0.9.0's surfaces and acts (state_more.py): coverage, the labels' unsure records, the checks' comments on answers
+from . import state_more as _state_more  # noqa: E402 — it joins the surfaces and acts above
+
+_SURFACES.update(_state_more.SURFACES)
+_ACTS.update(_state_more.ACTS)
+STATE_USAGE += _state_more.STATE_USAGE
+ACT_USAGE += _state_more.ACT_USAGE
 
 
 if __name__ == "__main__":

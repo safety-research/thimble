@@ -287,7 +287,8 @@ def test_outside_a_workspace_the_shim_lists_nothing_and_asks_nothing_until_the_f
         init = next(m for m in out if m.get("id") == 0)
         assert "instructions" not in init["result"] or not init["result"]["instructions"]
         assert init["result"]["capabilities"]["tools"]["listChanged"] is True
-        assert next(m for m in out if m.get("id") == 5)["result"]["tools"] == []
+        # 0.9.0: load_thimble alone (the scaffold's stub of C5), no instructions
+        assert [t["name"] for t in next(m for m in out if m.get("id") == 5)["result"]["tools"]] == ["load_thimble"]
         assert not [m for m in out if "method" in m], "no list_changed while the folder is no workspace"
         assert not server.queries and not server.calls and not server.refused, "no request to the server"
         (folder / "manifest.json").write_text("{}")
@@ -295,7 +296,8 @@ def test_outside_a_workspace_the_shim_lists_nothing_and_asks_nothing_until_the_f
         assert [m["method"] for m in out if "method" in m] == ["notifications/tools/list_changed"]
         _send(p, [{**LIST, "id": 6}])
         out = _read(p, lambda: False, 1.0)
-        assert next(m for m in out if m.get("id") == 6)["result"]["tools"], "the tools are listed now"
+        listed = [t["name"] for t in next(m for m in out if m.get("id") == 6)["result"]["tools"]]
+        assert listed and "load_thimble" not in listed, "the tools are listed now, in load_thimble's place"
         assert not [m for m in out if "method" in m], "said once"
         end = time.monotonic() + 15
         while not server.queries and time.monotonic() < end:
