@@ -4,7 +4,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { wrapAround } from '../cite'
+import { firstCode, literalAt, wrapAround } from '../cite'
 import { CITED_BG, CWD, DOC, WS, citedText, shown, world } from './fixtures'
 import type { World } from './fixtures'
 
@@ -380,6 +380,19 @@ test('a cited line too long for the panel wraps at its spaces, never inside a wo
   expect(hit.text.slice(hit.hi![0], hit.hi![1])).toBe('event log')
   // a word wider than the row breaks where the row ends
   expect(wrapAround('x'.repeat(50), null, 20, 4).map(r => r.text.length)).toEqual([20, 20, 10])
+})
+
+test("a cited value's literal is found in code as code types it, never inside a longer number or a name; a script is an answer's first code block", () => {
+  expect(literalAt('counts = [3908, 601]', '3908')).toEqual([10, 14])
+  expect(literalAt('x = 3_908', '3,908')).toEqual([4, 9])
+  expect(literalAt('s = "3,908 pages"', '3,908')).toEqual([5, 10])
+  expect(literalAt('v = 3908.0', '3908')).toEqual([4, 10])
+  expect(literalAt('rate = 12.55', '12.5')).toEqual([7, 12])
+  expect(literalAt('pct = 45', '45%')).toEqual([6, 8])
+  expect(literalAt('print("dse")', 'dse')).toEqual([7, 10])
+  for (const line of ['n = 13908', 'v = 39080', 'a = x3908', 'df']) expect(literalAt(line, '3908')).toBeNull()
+  expect(firstCode('The script:\n\n```python\nimport json\nprint(1)\n```\n\nRESULT: 3')).toEqual({ lang: 'python', code: 'import json\nprint(1)' })
+  expect(firstCode('no code here, only `inline`')).toBeNull()
 })
 
 test("a context line wider than the panel is cut with `…` right against its words, never after a space", async ($, on) => {
