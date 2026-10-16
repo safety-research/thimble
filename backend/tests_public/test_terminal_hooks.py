@@ -1,8 +1,9 @@
-"""thimble's hooks in terminal mode (plugin/bin/.thimble-watch with THIMBLE_WS naming a workspace whose launch.json says
-terminal mode): no hook makes an HTTP request; the waker takes main's events from the workspace's queue and wakes main
-with exit 2; the held hook prints what waited; the mode hook records main's permission mode and starts the backend's
-call on main's Stop; the file-first hooks start the backend's call (app/local_hooks.py) in place of a post; the
-statusline reads the files. A process that lost the launcher's environment finds no workspace and makes nothing."""
+"""thimble's hooks on local transport (plugin/bin/.thimble-watch in a session whose workspace's launch.json names a local
+transport, before a press of the browser workbench): no hook makes an HTTP request; the waker takes the session's events
+from the workspace's queue and wakes main with exit 2; the held hook prints what waited; the mode hook records main's
+permission mode and starts the backend's call on main's Stop; the file-first hooks start the backend's call
+(app/local_hooks.py) in place of a post; the statusline reads the files. A process that lost its environment finds no
+workspace and makes nothing. Every hook exits in its shell line unless thimble is on in the session (its marker)."""
 from __future__ import annotations
 
 import importlib.util
@@ -53,15 +54,19 @@ def _claude_pid(claude):
 
 
 def env_for(tmp_path: Path, ws: Path, **more: str) -> dict:
-    """The hooks' environment in a terminal-mode session: the launcher's THIMBLE_HOME, THIMBLE_MODE and THIMBLE_WS, and a
-    server.json naming a server, which no hook of terminal mode may ask."""
+    """The hooks' environment in a session thimble is on in, on local transport: THIMBLE_HOME with the session's marker
+    (up/<session>.active, which activation writes and the watcher's shell line gates on, CLAUDE_CODE_SESSION_ID), the
+    data and workspaces folders, and a server.json naming a server, which no hook on local transport may ask."""
     home = tmp_path / "hook-home"
-    home.mkdir(exist_ok=True)
+    (home / "up").mkdir(parents=True, exist_ok=True)
     (home / "server.json").write_text(json.dumps({"port": 9, "token": "t0ken"}))
+    session = more.get("CLAUDE_CODE_SESSION_ID", MAIN)
+    (home / "up" / f"{session}.active").write_text(json.dumps({"cwd": str(config.corpus_dir(CORPUS)), "ws": CORPUS}))
     env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE", "THIMBLE_"))}
-    env.update(THIMBLE_HOME=str(home), THIMBLE_MODE="terminal", THIMBLE_WS=str(ws),
+    env.update(THIMBLE_HOME=str(home), THIMBLE_WORKSPACES_DIR=str(config.WORKSPACES_DIR),
                THIMBLE_DATA_DIR=str(config.DATA_DIR), CLAUDE_PROJECT_DIR=str(config.corpus_dir(CORPUS)),
-               CLAUDE_CONFIG_DIR=str(tmp_path / "claude-config"), CLAUDE_PID=str(_CLAUDE[0]))
+               CLAUDE_CONFIG_DIR=str(tmp_path / "claude-config"), CLAUDE_PID=str(_CLAUDE[0]),
+               CLAUDE_CODE_SESSION_ID=MAIN)
     env.update(more)
     return env
 
@@ -72,7 +77,7 @@ def run_hook(env: dict, flag: str | None, stdin: dict, timeout: float = 30) -> s
 
 
 def loaded(monkeypatch, tmp_path: Path, ws: Path):
-    """The watcher as a module, in a terminal-mode environment, with spawn_local recording its calls and every socket
+    """The watcher as a module, in a session on local transport, with spawn_local recording its calls and every socket
     refused."""
     for k, v in env_for(tmp_path, ws).items():
         monkeypatch.setenv(k, v)
@@ -292,7 +297,7 @@ def test_the_agents_hook_numbers_an_orientation_s_call_and_tells_it_its_ref(tmp_
     assert spawned == [], "an agent's call in plan mode starts no backend call: plan mode stops no running agent"
 
 
-def test_the_statusline_reads_the_files_in_terminal_mode(tmp_path, ws):
+def test_the_statusline_reads_the_files_on_local_transport(tmp_path, ws):
     with sf.update(ws) as state:
         sf.registry(state)[AGENT] = {"role": "orientation", "key": "orient", "status": "running"}
     (ws / "orient").mkdir(exist_ok=True)
@@ -301,8 +306,8 @@ def test_the_statusline_reads_the_files_in_terminal_mode(tmp_path, ws):
     (ws / "notebooks" / "orientation.json").write_text(json.dumps({"cells": [{"id": "a"}, {"id": "b"}]}))
     event_files.append(ws, {"content": "Which bot?", "meta": {"kind": "thread", "event": "e1"},
                             "terminal": "› thread bots: Which bot?"}, events.render)
-    out = subprocess.run([str(AGENTS), "--statusline"], input=json.dumps({"session_id": MAIN}), capture_output=True,
-                         text=True, env=env_for(tmp_path, ws), timeout=30)
+    out = subprocess.run([str(AGENTS), "--statusline"], capture_output=True, text=True, env=env_for(tmp_path, ws),
+                         input=json.dumps({"session_id": MAIN, "cwd": str(config.corpus_dir(CORPUS))}), timeout=30)
     assert out.stdout.strip().splitlines() == ["thimble · orientation working · 2 cards",
                                               "thimble · queued: thread bots: Which bot?"]
 

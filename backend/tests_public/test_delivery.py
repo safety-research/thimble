@@ -1,8 +1,9 @@
 """Delivery through the plugin's hooks. The server side (events.py): an event for the session that is main is taken by
 one watcher, in flight until acknowledged, a message main has not got yet shows on its statusline, and the
-PermissionRequest hook's prompt waits on main's meta until the browser answers. The server answers a hook route only to
-a request that proves the token, and the hooks, run against a stand-in server, do nothing without server.json or with a
-server that cannot prove the token."""
+PermissionRequest hook's note is answered at once with no decision while its prompt shows on main's card, which the
+browser cannot answer (0.9.0: Claude Code asks in the terminal). The server answers a hook route only to a request that
+proves the token, and the hooks, run against a stand-in server, do nothing without server.json or with a server that
+cannot prove the token, and never print a permission decision."""
 from __future__ import annotations
 
 import asyncio
@@ -188,53 +189,36 @@ def test_a_queued_message_leaves_the_statusline_on_the_monitor_route_and_when_an
     assert (CORPUS, SID) not in events._notices
 
 
-def test_the_permission_hook_waits_on_main_s_meta_until_the_browser_answers(monkeypatch, tmp_path):
+def test_the_permission_hook_s_note_is_answered_at_once_and_the_browser_cannot_answer_the_prompt(monkeypatch, tmp_path):
+    """D47: the hook only tells the server a prompt waits; the answer is `behavior: null` at once, the prompt shows on
+    main's card without buttons, and the browser's answer is refused, with the cookie or without it. Answered in the
+    terminal, the card goes; each request is in the permission log a problem report carries."""
     monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "thome"))
     _record_token(tmp_path / "thome")
     client = TestClient(__import__("app.main", fromlist=["app"]).app, base_url="http://127.0.0.1")
     session.attach(CORPUS, SID, _cwd(), None)
     body = {"cwd": _cwd(), "session": SID, "tool_name": "Bash",
             "tool_input": {"command": "touch x", "description": "Create x"}}
-    answers: list = []
     with client:
-        t = threading.Thread(target=lambda: answers.append(client.post("/api/events/permission", json=body,
-                                                                       headers=_signed()[0])))
-        t.start()
-        for _ in range(100):
-            held = (agents.meta_or_none(CORPUS, agents.MAIN_ID) or {}).get("permissions") or []
-            if held:
-                break
-            time.sleep(0.05)
+        answer = client.post("/api/events/permission", json=body, headers=_signed()[0])
+        assert answer.status_code == 200 and answer.json()["behavior"] is None
+        held = (agents.meta_or_none(CORPUS, agents.MAIN_ID) or {}).get("permissions") or []
         assert held and held[0]["tool"] == "Bash" and held[0]["what"] == "Create x" and '"touch x"' in held[0]["input"]
-        # an answer is the analyst's browser's alone: without the cookie the page gets for the link's code it is refused,
-        # the hook's proof notwithstanding
+        assert held[0]["terminal"] is True and "always" not in held[0]
         r = client.post(f"/api/ws/{CORPUS}/permission", json={"id": held[0]["id"], "allow": True})
         assert r.status_code == 403
-        t.join(0.2)
-        assert t.is_alive(), "the hook still waits"
         claimed = client.post("/api/ui/key", json={"code": hook_auth.mint(CORPUS)})
         assert claimed.status_code == 200
         page = f"/b/{claimed.json()['key']}"  # the page asks under its key's path, where its cookie goes (hook_auth)
         r = client.post(f"{page}/api/ws/{CORPUS}/permission", json={"id": held[0]["id"], "allow": True})
-        assert r.status_code == 200
-        t.join(10)
-        assert answers[0].status_code == 200 and answers[0].json() == {"id": held[0]["id"], "behavior": "allow"}
-        assert not agents.meta_or_none(CORPUS, agents.MAIN_ID).get("permissions")
-        # answered in the terminal: the session moved on, and the hook's wait ends with no decision
-        t = threading.Thread(target=lambda: answers.append(client.post("/api/events/permission", json=body,
-                                                                       headers=_signed()[0])))
-        t.start()
-        for _ in range(100):  # the server's loop registers the ask and then puts it on main's meta, apart from this thread
-            if events._asks and (agents.meta_or_none(CORPUS, agents.MAIN_ID) or {}).get("permissions"):
-                break
-            time.sleep(0.05)
+        assert r.status_code == 409 and r.json()["detail"] == events.ANSWER_IN_TERMINAL
+        assert (agents.meta_or_none(CORPUS, agents.MAIN_ID) or {}).get("permissions") == held, "the card stays"
+        # answered in the terminal: the session moved on, and the card goes
         events.clear_permissions(CORPUS)
-        t.join(10)
-        assert answers[1].json()["behavior"] is None and not agents.meta_or_none(CORPUS, agents.MAIN_ID).get("permissions")
-        # each request and its answer are in the permission log a problem report carries
+        assert not agents.meta_or_none(CORPUS, agents.MAIN_ID).get("permissions")
         log = [json.loads(ln) for ln in (config.workspace_dir(CORPUS) / agents.PERMISSIONS_LOG).read_text().splitlines()]
         assert [(r["event"], r.get("tool"), r.get("answer")) for r in log] == [
-            ("asked", "Bash", None), ("answered", None, "allow"), ("asked", "Bash", None), ("answered", None, events.GONE_ANSWER)]
+            ("asked", "Bash", None), ("answered", None, events.GONE_ANSWER)]
         assert log[0]["what"] == "Create x" and log[0]["chat"] == "main" and log[1]["id"] == log[0]["id"]
         assert client.post("/api/events/permission", json={**body, "session": "not-main"},
                            headers=_signed()[0]).status_code == 409
@@ -336,7 +320,8 @@ def _watch(tmp_path: Path, port: int | None, stdin: dict, *args: str, extra: dic
     if port:
         _record_token(home, api=f"http://127.0.0.1:{port}")
     # CLAUDE_PID too: a test run from a Claude Code session inherits that session's; a test names one when it wants it
-    env = {k: v for k, v in os.environ.items() if k not in ("THIMBLE_SESSION", "CLAUDE_PROJECT_DIR", "CLAUDE_PID")}
+    env = {k: v for k, v in os.environ.items() if k not in ("THIMBLE_SESSION", "CLAUDE_PROJECT_DIR", "CLAUDE_PID",
+                                                            "CLAUDE_CODE_SESSION_ID")}
     env.update({"THIMBLE_HOME": str(home), "THIMBLE_PORT": "1", **(extra or {})})
     return subprocess.run([str(WATCHER), *args], input=json.dumps(stdin), capture_output=True, text=True, env=env,
                           timeout=timeout)
@@ -487,36 +472,50 @@ def _gated(tmp_path: Path, args: tuple[str, ...] = (), **env: str) -> bool:
     return ran.exists()
 
 
-def test_the_watcher_starts_python_only_in_a_folder_thimble_opened(tmp_path):
-    """The plugin's hooks run in every Claude Code session: in a folder with no marker in <thimble home>/active (the
-    path with each / made %, cli.mark_active) the watcher exits in its shell line, before Python starts. The marker lets
-    it through, and so do terminal mode (THIMBLE_WS), a session that names no folder and a path over 200 characters,
-    which gets no marker; --stream, --scratch and --work-budget are never gated. A session thimble starts itself
-    exits there as before."""
+def test_the_watcher_starts_python_only_in_a_session_thimble_is_on_in(tmp_path):
+    """The plugin's hooks run in every Claude Code session: in a session with no marker in <thimble home>/up (the
+    session id Claude Code gives a hook, CLAUDE_CODE_SESSION_ID; activation writes up/<sid>.active) the watcher exits in
+    its shell line, before Python starts. Where Claude Code gives no session id, the folder's marker in <thimble
+    home>/active decides (the path with each / made %, cli.mark_active), and a session that names no folder and a path
+    over 200 characters pass; --rekey, whose new session has no marker yet, meets the folder's gate; --stream, --scratch
+    and --work-budget are never gated. A session thimble starts itself exits there as before."""
     folder = "/data/some project/mini"
+    sid = "5e55a000-0000-4000-8000-0000000000aa"
+    assert not _gated(tmp_path, CLAUDE_CODE_SESSION_ID=sid, CLAUDE_PROJECT_DIR=folder)
+    assert not _gated(tmp_path, ("--mode",), CLAUDE_CODE_SESSION_ID=sid)
+    up = tmp_path / "th" / "up"
+    up.mkdir(parents=True)
+    (up / f"{sid}.active").write_text("{}")
+    assert _gated(tmp_path, CLAUDE_CODE_SESSION_ID=sid, CLAUDE_PROJECT_DIR=folder)
+    assert _gated(tmp_path, ("--mode",), CLAUDE_CODE_SESSION_ID=sid)
+    assert not _gated(tmp_path, CLAUDE_CODE_SESSION_ID="5e55a000-0000-4000-8000-0000000000bb"), "a marker is its session's"
+    # no session id: the folder's marker
     assert not _gated(tmp_path, CLAUDE_PROJECT_DIR=folder)
-    assert not _gated(tmp_path, ("--mode",), CLAUDE_PROJECT_DIR=folder)
     active = tmp_path / "th" / "active"
     active.mkdir(parents=True)
     (active / folder.replace("/", "%")).touch()
     assert _gated(tmp_path, CLAUDE_PROJECT_DIR=folder)
-    assert _gated(tmp_path, ("--mode",), CLAUDE_PROJECT_DIR=folder)
     assert not _gated(tmp_path, CLAUDE_PROJECT_DIR=folder + "/sub"), "a marker is for its folder alone"
-    assert _gated(tmp_path, CLAUDE_PROJECT_DIR="/elsewhere", THIMBLE_WS="/w")
     assert _gated(tmp_path)
     assert _gated(tmp_path, CLAUDE_PROJECT_DIR="/" + "x" * 200)
+    # a coding session's folder thimble opened once: its new sessions start no Python
+    assert not _gated(tmp_path, CLAUDE_CODE_SESSION_ID="5e55a000-0000-4000-8000-0000000000cc", CLAUDE_PROJECT_DIR=folder)
+    # --rekey: the folder's marker, whatever the new session's id
+    assert _gated(tmp_path, ("--rekey",), CLAUDE_CODE_SESSION_ID="5e55a000-0000-4000-8000-0000000000dd",
+                  CLAUDE_PROJECT_DIR=folder)
+    assert not _gated(tmp_path, ("--rekey",), CLAUDE_CODE_SESSION_ID=sid, CLAUDE_PROJECT_DIR="/elsewhere")
     for flag in ("--stream", "--scratch", "--work-budget"):
         assert _gated(tmp_path, (flag,), CLAUDE_PROJECT_DIR="/elsewhere"), flag
-    assert not _gated(tmp_path, CLAUDE_PROJECT_DIR=folder, THIMBLE_SESSION="s", THIMBLE_SESSION_TOKEN="t")
-    home_default = tmp_path / ".thimble" / "active"
+    assert not _gated(tmp_path, CLAUDE_CODE_SESSION_ID=sid, THIMBLE_SESSION="s", THIMBLE_SESSION_TOKEN="t")
+    home_default = tmp_path / ".thimble" / "up"
     home_default.mkdir(parents=True)
-    (home_default / "%other").touch()
+    (home_default / "other-sid.active").touch()
     base = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(tmp_path)}
     bin_dir = tmp_path / "gate-bin"
     ran = tmp_path / "python-ran"
     ran.unlink(missing_ok=True)
     subprocess.run([str(bin_dir / ".thimble-watch")], input="{}", capture_output=True, text=True, timeout=10,
-                   env={**base, "CLAUDE_PROJECT_DIR": "/other"}, check=False)
+                   env={**base, "CLAUDE_CODE_SESSION_ID": "other-sid"}, check=False)
     assert ran.exists(), "without THIMBLE_HOME the marker is in ~/.thimble"
 
 
@@ -565,7 +564,7 @@ def test_the_mode_hook_shows_the_line_the_server_answers_after_the_link_in_one_s
 def test_the_hooks_do_nothing_without_server_json_or_with_a_server_that_cannot_prove_the_token(tmp_path):
     """The hooks run in every Claude Code session with the plugin: with no server.json, or one without a token, they
     reach no port at all (not THIMBLE_PORT, not 8300); a process that answers on the recorded port without the
-    server's proof is not believed, so its allow is never printed."""
+    server's proof is not believed. The permission hook prints no decision even from thimble's own server."""
     inp = {"session_id": SID, "cwd": "/data/mini", "tool_name": "Bash", "tool_input": {"command": "rm -rf x"},
            "hook_event_name": "PermissionRequest"}
     rogue = _Stand([(200, {"id": "e1", "text": EVENT_TEXT})], permission=(200, {"id": "h1", "behavior": "allow"}),
@@ -588,32 +587,28 @@ def test_the_hooks_do_nothing_without_server_json_or_with_a_server_that_cannot_p
         r = _watch(tmp_path, stand.port, inp, "--permission")
     finally:
         stand.close()
-    assert json.loads(r.stdout)["hookSpecificOutput"]["decision"] == {"behavior": "allow"} and stand.unproven == 0
+    assert r.returncode == 0 and r.stdout == "" and stand.unproven == 0, "no decision, whatever the server says"
 
 
-def test_the_permission_hook_sends_claude_code_s_suggestions_and_passes_on_what_always_allow_names(tmp_path):
-    """The permission hook relays the request's permission_suggestions, and an answer from the card's "Always allow"
-    names them as updatedPermissions, which the hook passes on in its decision, as Claude Code's own "Yes, and don't ask
-    again" applies them; a plain allow and a deny carry none."""
+def test_the_permission_hook_tells_the_server_and_decides_nothing(tmp_path):
+    """D47: after a press the permission hook tells the server that a prompt waits (with no suggestions, which no card
+    offers any more) and prints nothing, so Claude Code asks in its own dialog; it gives the server PERMISSION_WAIT_S
+    and no more; on local transport it tells no one."""
     rules = [{"type": "addRules", "rules": [{"toolName": "mcp__plugin_thimble_thimble__add_card"}], "behavior": "allow",
               "destination": "localSettings"}]
     inp = {"session_id": SID, "cwd": "/data/mini", "tool_name": "mcp__plugin_thimble_thimble__add_card",
            "tool_input": {"question": "How many files?"}, "hook_event_name": "PermissionRequest",
            "permission_suggestions": rules}
-
-    def decision() -> dict:
-        return json.loads(_watch(tmp_path, stand.port, inp, "--permission").stdout)["hookSpecificOutput"]["decision"]
-
     stand = _Stand([], permission=(200, {"id": "h1", "behavior": "allow", "updatedPermissions": rules}))
     try:
-        assert decision() == {"behavior": "allow", "updatedPermissions": rules}
-        assert [b["suggestions"] for _, p, b in stand.seen if p == "/api/events/permission"] == [rules]
-        stand.permission = (200, {"id": "h2", "behavior": "allow"})
-        assert decision() == {"behavior": "allow"}
-        stand.permission = (200, {"id": "h3", "behavior": "deny", "updatedPermissions": rules})
-        assert "updatedPermissions" not in decision()
+        r = _watch(tmp_path, stand.port, inp, "--permission")
+        assert r.returncode == 0 and r.stdout == "" and r.stderr == ""
+        [sent] = [b for _, p, b in stand.seen if p == "/api/events/permission"]
+        assert sent["tool_name"] == inp["tool_name"] and "suggestions" not in sent
     finally:
         stand.close()
+    watcher = _module()
+    assert watcher.PERMISSION_WAIT_S <= 2.0 and not hasattr(watcher, "DENIED")
 
 
 def test_the_held_hook_lets_each_hand_back_through_and_still_delivers_the_held_events(tmp_path):
