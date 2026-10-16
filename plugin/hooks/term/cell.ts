@@ -16,6 +16,8 @@ export type ThimbleCell = {
   id: string
   kind?: string
   title?: string
+  /** its name, a slug of its question (backend notebook.slug_of), which its chip shows: `[ card:prs-merged-week ]` */
+  slug?: string
   takeaway?: string
   status?: string
   text?: string

@@ -5,7 +5,7 @@ import { expect, test } from 'claude-code/testing'
 import { busyWords, cardOfCell, htmlTable, labelCard, linksOf, sortedBars } from '../cell'
 import type { ThimbleCell } from '../cell'
 import { cardLayout, cut, labelHead, placeWords, share } from '../draw'
-import { CHIP_MAX, chipLabel, citations, clip, cutLine, cutMiddle, dateIn, dateSpans, formatted, itemsRow, labelState, labelStateWords, noteLabelName, noteQuestion, quoted, recordFields, valueIn, width, windowAt } from '../lib'
+import { CHIP_MAX, chipLabel, citations, clip, cutLine, cutMiddle, dateIn, dateSpans, formatted, itemsRow, labelState, labelStateWords, noteLabelName, noteName, noteQuestion, quoted, recordFields, valueIn, width, windowAt } from '../lib'
 import { chipName, plainCites } from '../cite'
 import { targetLabel } from '../gestures'
 import { fitPath, pathWidth } from '../nav'
@@ -421,7 +421,7 @@ test("a label example's fields cut at whole pairs, never `·…` or a key withou
   expect(cutLine('Words of a Markdown file run on past the room they have here', 30)).toBe(cut('Words of a Markdown file run on past the room they have here', 30))
 })
 
-test("a place cited with a passage of its line reads as its line; a chip names its place short, a card `card`, a file's line by the file's name and the line", () => {
+test("a place cited with a passage of its line reads as its line; a chip names its place short, a card `card:<name>`, a file's line by the file's name and the line", () => {
   // live check term-fix5, new quirks 3 and 4: `↗ agent-chat.jsonl#L2.b0:c0-120`, and `card L1`
   expect(placeWords('collusion-wiki/agent-chat.jsonl#L2.b0:c0-120')).toBe('collusion-wiki/agent-chat.jsonl line 2')
   expect(placeWords('collusion-wiki/agent-chat.jsonl#L2.b1')).toBe('collusion-wiki/agent-chat.jsonl line 2')
@@ -437,8 +437,15 @@ test("a place cited with a passage of its line reads as its line; a chip names i
   const long = chip('a/collusion-wiki-revisions-of-every-page.jsonl#L10879')
   expect(long).toMatch(/^\[ collus\S*…\S*-page\.jsonl line 10879 \]$/)
   expect(width(long)).toBeLessThanOrEqual(CHIP_MAX + 4)
+  // a card by its name (Matt, 2026-10-16): its id, which is the name of its question, or an older card's name once read;
+  // `card` while an older card's random id is all there is, never the id
   expect(chip('card:c0ffee00')).toBe('[ card ]')
   expect(chip('card:c0ffee00#wiki/dse')).toBe('[ card ]')
+  expect(chip('card:how-many-prs')).toBe('[ card:how-many-prs ]')
+  expect(chip('card:how-many-prs#wiki/dse')).toBe('[ card:how-many-prs ]')
+  expect(chip('cell:prs-merged-week-12')).toBe('[ card:prs-merged-week-12 ]')
+  noteName('c0ffee00', 'wikis-most-revisions')
+  expect(chip('card:c0ffee00')).toBe('[ card:wikis-most-revisions ]')
   expect(chip('card:c0ffee00@out0#L1')).toBe('[ card output line 1 ]')
   expect(chip('card:c0ffee00@out0#L1-L3')).toBe('[ card output lines 1-3 ]')
   expect(chip('call:a1b2c3#L4')).toBe('[ output line 4 ]')

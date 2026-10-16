@@ -11,7 +11,7 @@ import type { CardData, CardLabel } from './draw'
 import type { Ctx, SurfaceGot } from './ctx'
 import { act, actLong, changed, readState, signature } from './data'
 import type { Area, Scope, Signature } from './data'
-import { cid, citations, clean, clip, embeddedCards, labelRef, noteDocPlace, noteLabelName, noteQuestion, questionOf, quoted } from './lib'
+import { cid, citations, clean, clip, embeddedCards, labelRef, noteDocPlace, noteLabelName, noteName, noteQuestion, questionOf, quoted } from './lib'
 import type { Citation } from './lib'
 import { agentsOf, cellOf, cellsOf, chatOf, docUnits, docsOf, homeOf, labelIdOf, labelOf, labelsOf, resolutionOf, threadOf, threadRowsOf, uiRecordsOf, verdictOf } from './model'
 import { classColors, labelArgs, setLabelGone } from './labels'
@@ -244,6 +244,7 @@ async function putCard(cx: Ctx, cell: ThimbleCell): Promise<void> {
   await cx.setCard(cell.id, next)
   // its question, which names it where a reply cites it without words
   noteQuestion(cell.id, (next.data as CardData | null)?.question ?? cell.title)
+  noteName(cell.id, cell.slug)
   queueCitations(citations(next.takeaway))
   if (cell.kind === 'example') queueCitations(((cell.payload?.refs as unknown[]) ?? []).map(r => ({ raw: `[[${String(r)}]]`, ref: String(r), display: null })))
 }
@@ -841,7 +842,10 @@ async function nameCards(cx: Ctx, ids: readonly string[]): Promise<void> {
     rt.named.add(id)
     const got = await readState(cx, rt.sc, 'card', [id])
     const cell = got.ok ? cellOf(got.value) : null
-    if (cell) noteQuestion(cell.id, cell.title)
+    if (cell) {
+      noteQuestion(cell.id, cell.title)
+      noteName(cell.id, cell.slug)
+    }
   }
 }
 

@@ -190,7 +190,7 @@ test("a document's sentence that cites a card whole keeps its chip, one of its f
   const para = shown(await pane.drawn({ in: 'para-d0-2' }))
   // Matt, 2026-10-07: a chip, `[ card ]`, alike for a figure of the document and another card (live check New 1: `the
   // check was done card.`)
-  expect(para).toContain('The export holds four wikis [ card ]. The check was done [ card ].')
+  expect(para).toContain('The export holds four wikis [ card ]. The check was done [ card:a0frame0 ].')
   // the figure itself is drawn as a card
   expect(JSON.stringify(await pane.drawn())).toContain('"question":"What does the export hold per wiki?"')
   await pane.unmount()

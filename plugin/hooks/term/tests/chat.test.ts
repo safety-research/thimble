@@ -464,7 +464,7 @@ test("a card whose takeaway holds the passage a thread was asked about (a citati
   await ui.unmount()
 })
 
-test('a sentence that cites a card whole keeps its chip, `[ card ]`, whether the card stands under the reply or not; its tip names the card by its question', async ($, on) => {
+test('a sentence that cites a card whole keeps its chip, `[ card:<name> ]`, whether the card stands under the reply or not; its tip names the card by its question', async ($, on) => {
   // Matt, 2026-10-07: a chip is its own kind of citation and looks like one everywhere (it was left out where the card
   // stood under the reply, and read ` (card "…")` elsewhere)
   const w = world(on)
@@ -479,10 +479,11 @@ test('a sentence that cites a card whole keeps its chip, `[ card ]`, whether the
   ui = (await $.ui.mount(MESSAGE('r1', text))) as unknown as M
   const para = shown(await ui.drawn({ in: 'para-1' }))
   // both chips where main wrote them, the brackets main put around the second left out
-  expect(para).toContain('four wikis [ card ]. The files hold more records [ card ].')
+  // a card by its name (Matt, 2026-10-16), here its id; `[ card ]` for an older card's random id whose name is not read
+  expect(para).toContain('four wikis [ card ]. The files hold more records [ card:a0frame0 ].')
   expect(para).not.toContain('(card')
   const chips = await chipsOf(ui, 'para-1')
-  expect(chips.map(c => c.label)).toEqual(['[ card ]', '[ card ]'])
+  expect(chips.map(c => c.label)).toEqual(['[ card ]', '[ card:a0frame0 ]'])
   expect(chips.every(c => (c as { chip?: boolean }).chip)).toBe(true)
   expect(chips[0]!.tip).toMatch(/^card "What does the export hold per wiki\?" · found$/)
   expect(chips.every(c => c.state === 'link')).toBe(true)
