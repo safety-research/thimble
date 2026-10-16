@@ -141,7 +141,9 @@ def test_local_transport_reads_launch_json(workspaces_tmp):
     from terminal_fakes import CORPUS, write_launch
 
     ws = config.workspace_dir(CORPUS)
-    assert local.transport(CORPUS) == "local"  # no launch.json yet
+    # no launch.json yet: a workspace no session turned thimble on in (a demo's, one a shell opened) is the server's, as
+    # 0.8.0's browser default was (subagent_files.transport); activation writes `transport: local` first
+    assert local.transport(CORPUS) == "server"
     write_launch(ws, session="s1", mode="terminal")
     assert local.transport(CORPUS) == "local" and local.terminal(CORPUS)
     write_launch(ws, session="s1", mode="browser")
