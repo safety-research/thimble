@@ -15,7 +15,7 @@ import { pageStopped } from '../lib/stale'
 import { StoppedPage } from './ServerDown'
 
 /** The way in, which ends the line; a span in backticks is drawn as code. */
-export const WAY_IN = "Type `/thimble open` in your Claude Code terminal, or press o in thimble's panel."
+export const WAY_IN = "Type `/thimble browser` in your Claude Code terminal, or press o in thimble's panel."
 /** The line a browser that is not signed in sees. */
 export const SIGN_IN_LINE = `This browser isn't signed in. ${WAY_IN}`
 /** The line when the server refused the link's code with 410 (used, replaced by a newer one, or expired). */

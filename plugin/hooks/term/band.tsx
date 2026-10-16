@@ -175,7 +175,7 @@ async function noteWriters(cx: Ctx): Promise<void> {
     const docs = await surfaceValue(cx, 'docs')
     const writing = docs?.ok ? docsOf(docs.value).find(d => d.status === 'generating') : undefined
     const title = noControls(writing?.title || a.label.replace(/^writer:\s*/i, '') || 'the report')
-    cx.toast(`thimble: the report "${title}" is in the browser workbench · /thimble open`)
+    cx.toast(`thimble: the report "${title}" is in the browser workbench · /thimble browser`)
   }
 }
 

@@ -4,7 +4,7 @@
 #   thimble [claude flags…]              `claude` in this folder with thimble's browser workbench opened at its start:
 #                                        THIMBLE_OPEN=1, which the terminal UI presses home at session.start with, the
 #                                        plugin loaded with --plugin-dir when Claude Code has not installed it, and
-#                                        `/thimble open` as the first prompt where Claude Code will not load thimble's
+#                                        `/thimble browser` as the first prompt where Claude Code will not load thimble's
 #                                        hooks module (below); every flag goes to `claude` as it is
 #   thimble activate | guide | features [args]
 #                                        turn thimble on in a session (app/activate.py), print or mark its guidance,
@@ -535,7 +535,7 @@ case "${1:-}" in
   mode | cc-mod)
     # 0.8.0's `thimble mode` and 0.5.0's `thimble cc-mod` chose where thimble showed its work; 0.9.0 has no modes, so
     # each says how to open the browser, and changes nothing
-    printf '%s\n' "thimble has no modes now. Type /thimble open, or press o in thimble's panel, to open the browser."
+    printf '%s\n' "thimble has no modes now. Type /thimble browser, or press o in thimble's panel, to open the browser."
     exit 0;;
   activate | guide | features)
     # 0.9.0: thimble turned on in a session, its guide, the feature switches (backend/app/activate.py, guide.py,
@@ -616,7 +616,7 @@ esac
 # its first data read; this command also opens the browser workbench at the session's start. It exports THIMBLE_OPEN=1,
 # which the terminal UI reads at session.start: it turns thimble on there (via launcher) and presses home, which starts
 # thimble's server and opens the browser signed in (`thimble open`). Where Claude Code will not load thimble's hooks
-# module (managed settings, disableAllHooks), no terminal UI runs, so the first prompt is `/thimble open` instead, whose
+# module (managed settings, disableAllHooks), no terminal UI runs, so the first prompt is `/thimble browser` instead, whose
 # skill hook opens the browser. The plugin is loaded with --plugin-dir only when Claude Code has not installed this
 # install's copy. CLAUDE_CODE_TERMINAL_MCP_TOOLS names the tools after which a turn needs no closing words
 # (backend/app/terminal_tools.py), when this `claude` reads it.
@@ -715,7 +715,7 @@ fi
 pre=()
 [ -z "$load" ] || pre=(--plugin-dir "$load")
 first=()
-[ -z "$modules_off" ] || first=(-- /thimble open)
+[ -z "$modules_off" ] || first=(-- /thimble browser)
 export THIMBLE_OPEN=1
 [ -z "$turn_tools" ] || export CLAUDE_CODE_TERMINAL_MCP_TOOLS="$turn_tools"
 exec claude ${pre[@]+"${pre[@]}"} ${args[@]+"${args[@]}"} ${first[@]+"${first[@]}"}

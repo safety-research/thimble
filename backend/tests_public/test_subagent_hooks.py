@@ -56,7 +56,7 @@ def run_hook(tmp_path: Path, flag: str, stdin: dict) -> subprocess.CompletedProc
     env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE", "THIMBLE_SESSION"))}
     env.update(THIMBLE_HOME=str(tmp_path / "hook-home"), THIMBLE_WORKSPACES_DIR=str(config.WORKSPACES_DIR),
                THIMBLE_DATA_DIR=str(config.DATA_DIR), CLAUDE_PROJECT_DIR=str(config.corpus_dir(CORPUS)))
-    mark_open(tmp_path / "hook-home", config.corpus_dir(CORPUS))  # /thimble opened the folder
+    mark_open(tmp_path / "hook-home", config.corpus_dir(CORPUS))  # /thimble browsered the folder
     return subprocess.run([str(WATCHER), flag], input=json.dumps(stdin), capture_output=True, text=True, env=env,
                           timeout=30, cwd=str(config.corpus_dir(CORPUS)))
 

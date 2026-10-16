@@ -1,7 +1,7 @@
 """thimble's backend without its server: the local transport.
 
 A session reaches thimble one of two ways (transport): locally, from the session's own processes, until the analyst's
-first press of the browser workbench (`thimble open`, `/thimble open`, a ↗ or `o` in the terminal panel), and through
+first press of the browser workbench (`thimble open`, `/thimble browser`, a ↗ or `o` in the terminal panel), and through
 thimble's server for the rest of that session after it. The switch is one way. Peers (a second session that turned
 thimble on beside a live main) and sessions another took main from always stay local.
 

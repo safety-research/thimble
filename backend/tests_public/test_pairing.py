@@ -79,8 +79,8 @@ def test_a_code_works_once():
     assert re.fullmatch(r"[A-Za-z0-9_-]{32}", key), "a random key of 24 bytes"
     again, none = _claim(code)
     assert _gone(again) and none == ""
-    # 0.9.0: no `thimble up` link; the way to a new code is /thimble open or the panel's o
-    assert hook_auth.CODE_GONE == ("This sign-in link was already used or has expired. Type `/thimble open` in your"
+    # 0.9.0: no `thimble up` link; the way to a new code is /thimble browser or the panel's o
+    assert hook_auth.CODE_GONE == ("This sign-in link was already used or has expired. Type `/thimble browser` in your"
                                    " Claude Code terminal for a new one, or press o in thimble's panel.")
 
 

@@ -168,7 +168,7 @@ Claude Code's panel chrome, no right-click menu.
   their panel's bottom (`entry.tsx`, Claude Code's prompt box: a rule above and below, `❯`, two rows that grow with the
   text), where a question typed and Enter start the thread about them, opened over them; while a box has the keys the
   panel draws no key-hint row.
-- **`/thimble`** turns thimble on in the folder and opens the home panel, with no model turn; `/thimble open` opens the
+- **`/thimble`** turns thimble on in the folder and opens the home panel, with no model turn; `/thimble browser` opens the
   browser workbench; `/thimble coverage`, `citations`, `checks`, `threads`, `cite [n]` (the n-th citation of the last
   reply), `card [n|id]`, `files <path[:line]>` and `documents` open those; `fresh`, `restore`, `status`, `fix` and
   `feedback` are the skill's.

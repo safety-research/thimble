@@ -37,7 +37,7 @@ Claude uses a thimble tool (a plan card or a label in a coding session).
 
 Once it is on, thimble draws its work in the terminal: cards and checked citations under Claude's replies, a dim line
 that says how much of the data Claude saw, a one-line summary above the prompt, and a panel with Coverage, Citations,
-Labels, Threads, Views and Checks. Type `/thimble open`, or press `o` in the panel, to open the browser workbench on the
+Labels, Threads, Views and Checks. Type `/thimble browser`, or press `o` in the panel, to open the browser workbench on the
 same session, signed in, for the chat, the canvas, the File browser, views and reports. Over SSH the panel shows the
 tunnel command and a one-time link instead.
 
@@ -54,7 +54,7 @@ marks, Coverage and Card check.
 | Command | What it does |
 |---|---|
 | `/thimble` | turn thimble on in this folder and open its panel |
-| `/thimble open` | open the browser workbench on this session, signed in |
+| `/thimble browser` | open the browser workbench on this session, signed in |
 | `/thimble coverage`, `/thimble citations`, `/thimble checks` | open the panel at that section |
 | `/thimble fresh` | archive this workspace and open an empty one |
 | `/thimble restore [<name>]` | bring an archived workspace back |

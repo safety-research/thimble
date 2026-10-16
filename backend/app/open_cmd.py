@@ -19,7 +19,7 @@ tunnel, et, link_file, claim_file, proxy}, or {ok: false, error: {code, message,
 300 s link (no opener runs), as the panel's `copy link` asks; --hook reads the session and the folder from the hook's
 input on stdin and prints nothing.
 
-One tab per press. The mod's press and the UserPromptExpansion hook can both run for one `/thimble open`: a press of the
+One tab per press. The mod's press and the UserPromptExpansion hook can both run for one `/thimble browser`: a press of the
 same session at the same ref within DEBOUNCE_S answers the first press's status and runs no second opener (a lock
 serializes presses; the record is <home>/open/<hash>.last, opener.press_record).
 """
@@ -53,9 +53,9 @@ ERRORS: dict[str, tuple[str, str]] = {  # code -> (message, fix)
     "REFUSED_HOME": ("thimble does not open this folder (your home folder, /, a folder above them or a mount root).",
                      "cd into the data folder and start claude there."),
     "REFUSED_SESSION": ("This command may open thimble's page only for its own Claude Code session.",
-                        "Type /thimble open in that session's terminal."),
-    "REFUSED_REF": ("thimble's page cannot open this ref.", "Open the page with /thimble open and find it there."),
-    "NO_SESSION": (NO_SESSION_LINE, "Start claude (or thimble) in this folder, then type /thimble open."),
+                        "Type /thimble browser in that session's terminal."),
+    "REFUSED_REF": ("thimble's page cannot open this ref.", "Open the page with /thimble browser and find it there."),
+    "NO_SESSION": (NO_SESSION_LINE, "Start claude (or thimble) in this folder, then type /thimble browser."),
     "PORT": ("Another program uses thimble's port.", "Set THIMBLE_PORT to a free port, or stop that program."),
     "START": ("thimble's page did not start.", "Run `thimble doctor` in a shell."),
     "NO_OPENER": ("No browser opener found.", "Copy the one-time link from thimble's panel."),
@@ -229,7 +229,7 @@ def _press(sid: str, cwd: Path, ref: str, link: bool, env: Mapping[str, str]) ->
 
     if cli.in_sandbox():
         return _error("START", "thimble's page cannot start inside Claude Code's Bash sandbox.",
-                      "Type /thimble open in the terminal (the press runs outside the sandbox).")
+                      "Type /thimble browser in the terminal (the press runs outside the sandbox).")
     act = activate_here(cwd, sid)
     if act is not None and not act.get("ok"):
         err = act.get("error") if isinstance(act.get("error"), dict) else {}

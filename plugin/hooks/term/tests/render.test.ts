@@ -33,11 +33,12 @@ async function turn($: E, w: World, rows: [string, string][], call = { tool: 'mc
   await w.clock.advance(300)
 }
 
-// 0.9.0 (SPEC-v2 5.5): the gate is activation, not terminal mode. Was "outside terminal mode thimble-term draws nothing
-// and runs nothing": before activation it draws nothing and runs nothing; /thimble turns it on
-test('before activation it draws nothing and runs nothing; /thimble turns it on', { timeoutMs: 30000 }, async ($, on) => {
+// 0.9.0: thimble is on from the start of every session with a person at the terminal (a regular plugin). Where it is
+// off (here a session with no person at the terminal) it draws nothing and runs nothing; /thimble turns it on
+test('where thimble is off it draws nothing and runs nothing; /thimble turns it on', { timeoutMs: 30000 }, async ($, on) => {
   const w = world(on, { active: false })
-  await start($, w)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: false } as never)
+  await w.clock.settle()
   const ui = await $.ui.mount(MESSAGE('m1', 'The export holds [4579](card:ff73e071#pages/TOTAL) pages. (shown in the dashboard)'))
   expect(shown(await ui.drawn())).toBe('(the engine row)')
   await ui.unmount()

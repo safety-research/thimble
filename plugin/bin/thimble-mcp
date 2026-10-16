@@ -110,7 +110,7 @@ LIVE_POLL_S = 1.0  # once thimble is on: between looks at the session id and the
 LIST_WAIT_S = 2.0  # how long load_thimble waits for Claude Code's tools/list after its list_changed
 STOPPED_GAP_S = 2.0  # between the two looks that find the server down after the press (call_server_or_stopped)
 # after the press, a call when the server answers neither look (module note); the shim also posts PAGE_STOPPED_KEY
-PAGE_STOPPED = "thimble's page stopped. Ask the analyst to type /thimble open to start it again."
+PAGE_STOPPED = "thimble's page stopped. Ask the analyst to type /thimble browser to start it again."
 PAGE_STOPPED_KEY = "page:stopped"
 PAGE_STOPPED_NOTICE = "thimble's page stopped. thimble's tools wait for it."
 # load_thimble when Claude Code's record of this process names no session

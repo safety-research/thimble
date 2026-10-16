@@ -1,6 +1,6 @@
 """The `thimble` command (0.9.0): `claude` with thimble's browser workbench opened at its start. It exports exactly
 THIMBLE_OPEN, NO_PROXY, no_proxy and CLAUDE_CODE_TERMINAL_MCP_TOOLS, loads the plugin with --plugin-dir only when Claude
-Code has not installed it, gives `/thimble open` as the first prompt only where the hooks module will not load, and
+Code has not installed it, gives `/thimble browser` as the first prompt only where the hooks module will not load, and
 nothing else: no --append-system-prompt, no --settings, no --name, no switches. launch_args finds those values and keeps
 them in <home>/launcher.json under the launcher's key, so a launch whose files did not change starts `claude` without
 the backend's Python; it registers no folder and starts no server. `thimble mode` and `thimble cc-mod` say there are no
@@ -139,5 +139,5 @@ def test_the_launcher_adds_no_plugin_dir_for_an_installed_plugin_and_opens_throu
     (tmp_path / "launch-args.txt").write_text("\n".join(["", "", "THIMBLE_NO_MODULE is set", ""]))
     (tmp_path / "home" / "launcher.json").unlink()
     argv, env, _ = _run(launcher, path, tmp_path, "--model", "opus")
-    assert argv == ["--model", "opus", "--", "/thimble", "open"], "without the hooks module the skill opens it"
+    assert argv == ["--model", "opus", "--", "/thimble", "browser"], "without the hooks module the skill opens it"
     assert env["THIMBLE_OPEN"] == "1"

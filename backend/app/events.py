@@ -840,7 +840,7 @@ async def subscribe(request: Request, cwd: str, session: str | None = None, pid:
 
     c = config.workspace_for_cwd(cwd)
     if not c:
-        raise HTTPException(404, f"{cwd} is not a thimble workspace yet; /thimble opens it")
+        raise HTTPException(404, f"{cwd} is not a thimble workspace yet; /thimble browsers it")
     sub = Sub(session or None, delivery if delivery in cc_plugin.ROUTES else cc_plugin.HOOK)
     _subs.setdefault(c, set()).add(sub)
     session_mod.connected(c, session, cwd, pid, config_dir)

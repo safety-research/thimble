@@ -225,7 +225,7 @@ export const NOT_LISTED_LINE = "thimble's tools did not load in this session; do
 export const REFUSED_TEXT = 'thimble does not open this folder (your home folder, `/`, a folder above them or a mount root). cd into the data folder and start `claude` there.'
 export const NOT_LISTED_TEXT = "thimble's tools did not load in this session."
 /** The toast of the first activation in a folder, which names the switch that stops it. */
-export const FIRST_TOAST = 'thimble is on in this folder · /thimble opens its panel · to turn it off, /plugin'
+export const FIRST_TOAST = 'thimble is on in this folder · /thimble browsers its panel · to turn it off, /plugin'
 /** The shim, as /mcp lists the plugin's server, and the tool the push calls. */
 export const SHIM = 'plugin:thimble:thimble'
 export const LOAD_TOOL = 'load_thimble'

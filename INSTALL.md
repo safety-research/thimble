@@ -123,12 +123,12 @@ thimble's token files too, turn on Claude Code's sandbox (`/sandbox`, or in your
 }
 ```
 
-The `allowWrite` entry lets thimble's agents write their notes. `/thimble open` starts thimble's server outside the
+The `allowWrite` entry lets thimble's agents write their notes. `/thimble browser` starts thimble's server outside the
 sandbox. `thimble doctor` says whether the sandbox is on.
 
 ### Signing in
 
-thimble's browser page opens on a press: `/thimble open` in Claude Code, `o` or `↗` in thimble's terminal panel, `↗` on a
+thimble's browser page opens on a press: `/thimble browser` in Claude Code, `o` or `↗` in thimble's terminal panel, `↗` on a
 card, or the `thimble` command. The press starts thimble's server if none runs, makes this session the one the page
 follows, and opens the page on what you pressed, signed in. The terminal keeps working, and closing the tab changes
 nothing.
@@ -158,7 +158,7 @@ holds a random key, which only thimble's page in this browser knows. A web page 
 serves, such as a project's development server, never gets the cookie. The cookie lasts 30 days and each use renews it;
 a browser not used for 30 days signs in again. If this browser loses the page's stored data (you clear the site's data,
 use a private window, or the browser removes data it has not used for some days), the page shows the sign-in line:
-type `/thimble open` in your Claude Code terminal, or press `o` in thimble's panel.
+type `/thimble browser` in your Claude Code terminal, or press `o` in thimble's panel.
 
 When the Claude Code session ends, the page stops: it shows that it stopped and how to open it again, and it sends
 nothing more. A tab whose server went away first asks the address it reconnects to to prove, without any credential,
@@ -185,7 +185,7 @@ What thimble needs from a managed Claude Code setup:
   Manual mode and no "don't ask again" is offered. Add `mcp__plugin_thimble_thimble` to managed `permissions.allow`.
 - **`disableSideloadFlags`** makes Claude Code reject `--plugin-dir`. Sessions that load the installed plugin are not
   affected. Extension programs can't start.
-- **`allowManagedModsOnly`** keeps thimble's terminal UI from loading. `/thimble` and `/thimble open` still work, through
+- **`allowManagedModsOnly`** keeps thimble's terminal UI from loading. `/thimble` and `/thimble browser` still work, through
   the skill, but Claude's first read of a data file does not turn thimble on, and the terminal draws no cards or panel.
 - **`forceLoginMethod`** blocks API keys and `apiKeyHelper` ([Authentication](#authentication)).
 - **`disableAutoMode`** turns auto mode off, so users answer many more prompts ([Permissions](#permissions)).
@@ -263,7 +263,7 @@ answer that read data says how much of the data Claude's tool calls saw (Coverag
 what is new; a press on an item opens thimble's panel at that section: Coverage, Citations, Labels, Threads, Views and
 Checks, then Cards, Documents and Files. The panel opens on the right from 144 columns, and above the prompt below that.
 
-`/thimble open`, or `o` in the panel, opens the browser workbench on the same session ([Signing in](#signing-in)): the
+`/thimble browser`, or `o` in the panel, opens the browser workbench on the same session ([Signing in](#signing-in)): the
 chat, the canvas, the File browser, labels, views and report writing. The report is written and edited in the browser;
 the terminal panel shows documents read-only. In a session open before the install, run `/reload-plugins` first.
 
@@ -608,7 +608,7 @@ which reinstall the frontend's packages when `package-lock.json` changed and reb
 `thimble update --from <zip>` installs a zip you downloaded, checked against the release's `SHA256SUMS` when that
 file is beside it. A zip whose digest does not match is refused. Workspaces are kept. A running server keeps the old code
 until `thimble server restart`. It also updates thimble's plugin in Claude Code when its version changed. After an update
-from 0.7, every browser signs in again: type `/thimble open` in each session.
+from 0.7, every browser signs in again: type `/thimble browser` in each session.
 
 ## Uninstall
 
@@ -650,11 +650,11 @@ that one and prints each path it deleted. The folder it read and your Claude Cod
   line in [Permissions](#permissions), or use auto mode.
 - thimble's agents never start in a session you started with `claude`, and your shell sets a proxy: start claude with
   127.0.0.1 and localhost in `NO_PROXY` ([Start thimble](#start-thimble)).
-- The browser says it isn't signed in: type `/thimble open` in your Claude Code terminal, or press `o` in thimble's
+- The browser says it isn't signed in: type `/thimble browser` in your Claude Code terminal, or press `o` in thimble's
   panel. A code works once, for 60 seconds (a link you copy, for 5 minutes).
-- The browser did not open on `/thimble open`: the panel shows a notice with **copy link**; open the link in the browser
+- The browser did not open on `/thimble browser`: the panel shows a notice with **copy link**; open the link in the browser
   of your choice. Over SSH, run the tunnel command the panel shows on your own computer first.
-- The page says it stopped: its Claude Code session ended, or the server stopped. Type `/thimble open` in the terminal
+- The page says it stopped: its Claude Code session ended, or the server stopped. Type `/thimble browser` in the terminal
   to open it again.
 - To report a problem, run `thimble feedback "<what went wrong>"`. It writes a zip of the logs, chats and Claude
   Code transcripts, with keys removed, and says where to send it. The chats and transcripts quote your corpus.

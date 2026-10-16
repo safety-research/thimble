@@ -49,7 +49,7 @@ const PENDING = {}
 const MARKS = '.reader-gutter-cell.is-lit, .reader-span[data-concept], [data-concept], [data-thimble-label]'
 const SLOW_S = 20
 // the one line a browser that is not signed in sees (frontend shell/SignIn), its span in backticks drawn as code
-const SIGN_IN_LINE = "This browser isn't signed in. Type `/thimble open` in your Claude Code terminal, or press o in thimble's panel."
+const SIGN_IN_LINE = "This browser isn't signed in. Type `/thimble browser` in your Claude Code terminal, or press o in thimble's panel."
 // where the page is, once the press opened it (first-load): its origin and its workspace
 let ORIGIN = WS.url ? new URL(WS.url).origin : ''
 
@@ -932,7 +932,7 @@ async function main() {
         const said = (await line.innerText()).replace(/\s+/g, ' ').trim()
         const whole = (await p.locator('body').innerText()).replace(/\s+/g, ' ').trim()
         check(said === want && whole === want, `the page without a cookie shows "${whole.slice(0, 200)}", not only "${want}"`)
-        check((await line.locator('code').innerText()) === '/thimble open', 'the line does not draw `/thimble open` as code')
+        check((await line.locator('code').innerText()) === '/thimble browser', 'the line does not draw `/thimble browser` as code')
         // /api/health and /api/ui/paired answer anyone; any other read (the page asks one to confirm) is refused
         const answered = [...new Set(reads.filter((r) => !/^\d+ \/api\/(health|ui\/paired)$/.test(r) && !r.startsWith('401 ')))]
         check(!answered.length, `the page without a cookie was answered ${answered.join(', ')}`)
@@ -985,7 +985,7 @@ async function main() {
         body: JSON.stringify({ kind: 'main', payload: { text: 'E2E: a message signed with the token alone' } }),
       })
       const said = String((await signed.json().catch(() => null))?.detail ?? '')
-      check(signed.status === 403 && said === "open thimble's page with `/thimble open` in the Claude Code terminal to make changes",
+      check(signed.status === 403 && said === "open thimble's page with `/thimble browser` in the Claude Code terminal to make changes",
         `a POST /api/ws/${WS.name}/events {kind: "main"} signed with the token answered ${signed.status} ${said.slice(0, 160)}, not 403 with hook_auth.WRITE_REFUSED`)
       // a kind the browser never sends, with the browser's own cookie
       const odd = await page.request.post(`${origin}${await apiBase(page)}/ws/${WS.name}/events`, { data: { kind: 'start_agent', payload: { text: 'E2E: a start_agent the browser never sends' } } })

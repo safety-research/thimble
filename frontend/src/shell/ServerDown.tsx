@@ -12,7 +12,7 @@ import { bus } from '../lib/bus'
 export const DOWN_AFTER_MS = 6_000
 
 /** What a stopped page says, whatever stopped it. */
-export const STOPPED_LINE = "thimble's page stopped with the Claude Code session. Type /thimble open in the terminal to open it again."
+export const STOPPED_LINE = "thimble's page stopped with the Claude Code session. Type /thimble browser in the terminal to open it again."
 
 export function ServerDown() {
   const [down, setDown] = useState(false)
@@ -39,7 +39,7 @@ export function ServerDown() {
     <div className="shell-down" role="alert">
       <Mark kind="failed" label="error" />
       <span>
-        thimble's server is not answering, so messages sent here do not arrive. Type <code>/thimble open</code> in the
+        thimble's server is not answering, so messages sent here do not arrive. Type <code>/thimble browser</code> in the
         Claude Code session to start it again; your work is saved. If it does not come back, run <code>thimble doctor</code>{' '}
         in a terminal.
       </span>
@@ -52,7 +52,7 @@ export function ServerDown() {
 export function StoppedPage() {
   return (
     <p className="signin-line stopped-line" role="status">
-      {STOPPED_LINE.split(/(\/thimble open)/).map((part, i) => (part === '/thimble open' ? <code key={i}>{part}</code> : part))}
+      {STOPPED_LINE.split(/(\/thimble browser)/).map((part, i) => (part === '/thimble browser' ? <code key={i}>{part}</code> : part))}
     </p>
   )
 }

@@ -278,7 +278,7 @@ export async function proposalsOff(cx: Ctx): Promise<void> {
 export async function noticeAct(cx: Ctx, n: HomeNotice, a: NoticeAct): Promise<void> {
   if (!rt.sc) return
   if (a.act === 'settings') {
-    cx.toast(`thimble: Settings are in the browser workbench (/thimble open) and in thimble's config: ${a.config || 'config.json in thimble\'s home'} (its keys: docs/config.md)`)
+    cx.toast(`thimble: Settings are in the browser workbench (/thimble browser) and in thimble's config: ${a.config || 'config.json in thimble\'s home'} (its keys: docs/config.md)`)
     return
   }
   if (a.act === 'view-proposals-off') {

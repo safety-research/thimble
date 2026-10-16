@@ -6,7 +6,7 @@
 // the one row above the prompt with the tunnel command (band.tsx), whose `copy link` copies a one-time link that the
 // open wrote to a file only the person can read. A failure posts its notice (notices.tsx) with the acts that fix it.
 //
-// Callers: `/thimble open`, `o` and the title row's `↗` in every panel view (panel.tsx wayRow), a card's `↗`, the
+// Callers: `/thimble browser`, `o` and the title row's `↗` in every panel view (panel.tsx wayRow), a card's `↗`, the
 // checks' `open in the browser`, a notice's `open ›` for a code ticket.
 import type { Ctx } from './ctx'
 import { noControls } from './lib'

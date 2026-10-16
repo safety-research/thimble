@@ -21,7 +21,7 @@ status, fix, feedback): `GET /api/health`, then under `flock <home>/server.lock`
 (port) as its own session leader (plus Vite on 5300 when THIMBLE_DEV is on), wait for health, map the cwd to a
 workspace, print `thimble: <url>` (LINK_LINE in a session), and name the session to the server. /thimble alone starts
 no server: its hook and the skill's own commands turn thimble on in the session (app/activate.py), and `up` prints the
-line that says so (on_here). A press of the browser workbench (`thimble open`, app/open_cmd.py; /thimble open, run_open)
+line that says so (on_here). A press of the browser workbench (`thimble open`, app/open_cmd.py; /thimble browser, run_open)
 is the session's way to start the server; it makes the session main on the server (made_main), which switches its
 transport to the server for the rest of the session (subagent_files.transport). It always exits 0, since a skill fails
 whole when its command exits non-zero. `--action fresh` moves the workspace aside into <workspaces>/.archive/;
@@ -48,7 +48,7 @@ UI port in dev mode follows the same rule with THIMBLE_UI_PORT (DEFAULT_UI_PORT,
 Claude Code's Bash sandbox gives each command its own network and pid namespace, where a server would die with the
 command and the host's cannot be reached. So /thimble's work runs in the plugin's UserPromptExpansion hook, which Claude
 Code runs outside the sandbox just before the skill's commands (`server up --hook`, hook_up): `/thimble` alone turns
-thimble on in the session (app/activate.py, no server), `/thimble open` opens the browser workbench (app/open_cmd.py),
+thimble on in the session (app/activate.py, no server), `/thimble browser` opens the browser workbench (app/open_cmd.py),
 and an action that needs the server runs `up` and keeps what it printed in <home>/up/<session>.json, which the skill's
 `up` prints (take_hook_result), or does the work itself when the hook left nothing. In the sandbox without the hook's
 result `up` starts nothing and prints the `sandbox.excludedCommands` entries that would run it outside (sandbox_line).
@@ -144,8 +144,8 @@ MONITOR_MARK = "thimble-monitor:"  # then the command main's Monitor runs (plugi
 WATCHER = "bin/.thimble-watch"  # the plugin's hidden watcher, under its root
 FRESH = "fresh"  # /thimble fresh: the folder's workspace moved aside, an empty one opened
 RESUME = "restore"  # /thimble restore [<archive>]: an archive restored in its place, or the archives listed
-OPEN = "open"  # /thimble open: the browser workbench (app/open_cmd.py), which hook_up runs outside the Bash sandbox
-ALIASES = {"resume": RESUME}  # another name the action takes
+OPEN = "open"  # /thimble browser: the browser workbench (app/open_cmd.py), which hook_up runs outside the Bash sandbox
+ALIASES = {"resume": RESUME, "browser": OPEN}  # other names the actions take (`/thimble browser` is the name shown)
 OPENING = ("", "on", FRESH, RESUME)  # the actions that open the workspace (and arm the Monitor where hooks are off)
 RESUME_LINE = "thimble: resuming the dashboard from your last run; `/thimble fresh` starts over"
 # /thimble in a session new to a workspace `thimble demo` installed from a pre-cache, which then gives the session what
@@ -1921,7 +1921,7 @@ def skill_rules(root: Path | None = None) -> list[str]:
 #
 # The `thimble` command is `claude` itself (plugin/bin/thimble): it exports THIMBLE_OPEN=1, which presses home at the
 # session's start, NO_PROXY for 127.0.0.1, and the tools that end a turn without text (terminal_tools.ENV), loads this
-# install's plugin with --plugin-dir when Claude Code has not installed it, and gives `/thimble open` as the first prompt
+# install's plugin with --plugin-dir when Claude Code has not installed it, and gives `/thimble browser` as the first prompt
 # where Claude Code will not load the hooks module (modules_off). launch_args finds those values; the launcher keeps
 # them in <home>/launcher.json under a key of the files they depend on, so a launch whose files did not change starts
 # `claude` without starting this Python.
@@ -3319,7 +3319,7 @@ def _server_check() -> Check:
     if listening(p) and explicit_port() is not None:  # without THIMBLE_PORT the next start passes over it (pick_port)
         return Check(False, f"Port {p} is taken by another program",
                      "In a shell: stop that program, then thimble server restart")
-    return Check(True, "Server not running (it starts when you press ↗ or type /thimble open)")
+    return Check(True, "Server not running (it starts when you press ↗ or type /thimble browser)")
 
 
 def _plugin_check(cwd: Path) -> Check:
@@ -3682,7 +3682,7 @@ def _write_private(path: Path, data: dict[str, Any]) -> None:
 def hook_up(raw: str) -> int:
     """`server up --hook`, /thimble's UserPromptExpansion hook (module note, the Bash sandbox), which runs outside the
     sandbox for the hook's session and folder: `/thimble` alone turns thimble on in the session (activate.main, no
-    server); `/thimble open` opens the browser workbench (run_open), which starts the server; any other action runs
+    server); `/thimble browser` opens the browser workbench (run_open), which starts the server; any other action runs
     `up`. What `open` and `up` print is kept for the skill's `up` (take_hook_result). It prints nothing, since a hook's
     output would reach the model beside the skill's."""
     try:
@@ -3742,7 +3742,7 @@ def run_open(session: str, cwd: str, *, hook: bool = False) -> dict[str, Any]:
         except SystemExit:
             pass
         except Exception as e:  # noqa: BLE001 — the skill says what is wrong, never a traceback
-            _log(f"/thimble open: session {session}: {type(e).__name__}: {e}\n{traceback.format_exc()}")
+            _log(f"/thimble browser: session {session}: {type(e).__name__}: {e}\n{traceback.format_exc()}")
             return {"ok": False, "error": {"code": "START", "message": f"thimble open failed ({type(e).__name__})",
                                            "fix": f"see {log_path()}"}}
     for line in reversed(out.getvalue().splitlines()):
@@ -3761,7 +3761,7 @@ REMOTE_LINE = ("thimble: thimble's page runs on this machine at 127.0.0.1:{port}
 
 
 def open_lines(result: dict[str, Any]) -> list[str]:
-    """What /thimble open prints of `thimble open`'s JSON (C12): status only, never a code."""
+    """What /thimble browser prints of `thimble open`'s JSON (C12): status only, never a code."""
     if not result.get("ok"):
         err = result.get("error") if isinstance(result.get("error"), dict) else {}
         return [" ".join(x for x in ("thimble:", str(err.get("message") or "thimble open failed."),
@@ -3942,7 +3942,7 @@ def cmd_ensure(args: argparse.Namespace) -> int:
     return 0
 
 
-ON_LINE = "thimble: thimble is on in this folder. /thimble open opens the browser workbench."
+ON_LINE = "thimble: thimble is on in this folder. /thimble browser opens the browser workbench."
 
 
 def on_here(cwd: Path, session: str) -> int:
