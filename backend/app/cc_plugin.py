@@ -46,7 +46,6 @@ MODS_ONLY = "allowManagedModsOnly"  # its option that keeps out the hooks module
 USER_SETTINGS = "settings.json"
 PROJECT_SETTINGS = (Path(".claude") / "settings.json", Path(".claude") / "settings.local.json")
 HOOK, MONITOR = "hook", "monitor"  # the routes (module note)
-LAUNCHED_ENV = "THIMBLE_LAUNCHED"  # set in the environment of every `claude` the launcher starts (cli.LAUNCHED_ENV)
 ROUTES = (HOOK, MONITOR)
 
 

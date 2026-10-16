@@ -779,8 +779,14 @@ def terminal(monkeypatch):
     return ws
 
 
-def test_the_transport_is_the_file_in_terminal_mode_and_http_otherwise(terminal):
+def test_the_transport_is_the_file_until_the_press_and_http_after(terminal):
+    """launch.json's `transport` decides, read at each call: local (activation's) is the file, server (the press's)
+    HTTP; a 0.8.0 record's `mode` is read as its transport, and one with neither is 0.8.0's browser default."""
+    assert module_bridge.transport(CORPUS) == module_bridge.FILE  # a 0.8.0 terminal-mode record
+    write_launch(terminal, session=MAIN, transport="local")
     assert module_bridge.transport(CORPUS) == module_bridge.FILE
+    write_launch(terminal, session=MAIN, transport="server")
+    assert module_bridge.transport(CORPUS) == module_bridge.HTTP
     write_launch(terminal, session=MAIN, mode="browser")
     assert module_bridge.transport(CORPUS) == module_bridge.HTTP
     _launch()  # an older launcher's launch.json, with no mode
@@ -922,22 +928,23 @@ def test_push_roles_writes_roles_json_in_terminal_mode_and_sync_writes_it_only_w
     assert json.loads(path.read_text())["rules"]["corpus"] == os.path.realpath(config.corpus_dir(CORPUS))
 
 
-def test_roles_json_is_rendered_in_the_sessions_mode_from_any_folder(monkeypatch, tmp_path):
-    """The launcher writes roles.json before main starts, from a folder that is no corpus and with no THIMBLE_WS: the
-    agents' prompts are still rendered in the mode launch.json names (preamble.md's terminal text), and in browser
-    mode in browser mode."""
+def test_roles_json_is_rendered_the_same_for_every_transport_from_any_folder(monkeypatch, tmp_path):
+    """Activation writes roles.json from the session's process, whatever folder it runs in: the agents' prompts render
+    the same before and after a press (0.9.0 has no modes; launch.json's transport changes how they are reached, not
+    what they say)."""
     ws = config.workspace_dir(CORPUS)
     monkeypatch.delenv("THIMBLE_WS", raising=False)
-    monkeypatch.delenv("THIMBLE_MODE", raising=False)
     monkeypatch.chdir(tmp_path)
     # 0.9.0 (SPEC-v2 3.18): preamble.md's mode branches are merged, so both renderings carry the terminal's text and
     # name the browser workbench, and 0.8.0's browser-only sentence is gone
-    for mode, has, lacks in (("terminal", "the terminal, where thimble shows", "a browser interface"),
-                             ("browser", "the terminal, where thimble shows", "a browser interface")):
-        write_launch(ws, session=MAIN, mode=mode)
+    seen = []
+    for transport in ("local", "server"):
+        write_launch(ws, session=MAIN, transport=transport)
         roles = json.loads(module_bridge.roles_file(CORPUS).read_text())["roles"]
-        text = json.dumps(roles, ensure_ascii=False)
-        assert roles and has in text and lacks not in text, mode
+        assert roles, transport
+        seen.append(json.dumps(roles, ensure_ascii=False, sort_keys=True))
+    assert seen[0] == seen[1]
+    assert "the terminal, where thimble shows" in seen[0] and "a browser interface" not in seen[0]
 
 
 def test_rekey_in_terminal_mode_leaves_the_record_the_hook_wrote(terminal):

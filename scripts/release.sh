@@ -263,7 +263,7 @@ $bad"
 for top in "$stage"/* "$stage"/.[!.]*; do
   [ -e "$top" ] || continue
   case "$(basename "$top")" in
-    plugin | mods | extensions | backend | prompts | demos | frontend | scripts | .claude-plugin | README.md | INSTALL.md | docs | LICENSE | \
+    plugin | extensions | backend | prompts | demos | frontend | scripts | .claude-plugin | README.md | INSTALL.md | docs | LICENSE | \
       THIRD_PARTY_NOTICES | RELEASE.json) ;;
     *) die "unexpected top-level entry in the staged tree: $(basename "$top")";;
   esac

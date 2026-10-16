@@ -31,7 +31,7 @@ An orientation program runs again for a follow-up: a message to the orientation 
 `follow_up` true and the cards as they stand in `cards`, so it adds to them. Switching the extension on where an
 orientation already ran makes Settings offer Run now, which runs the program the same way with the earlier `request`.
 When an orientation program fails, a notice that names the orientation and gives the end of its stderr shows above the
-reply box of the chat the analyst has open, or above the prompt in terminal mode.
+reply box of the chat the analyst has open in the browser, and as a notice in the terminal.
 
 ## Tasks
 

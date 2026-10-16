@@ -39,7 +39,7 @@ def _fresh(workspaces_tmp, tmp_path, monkeypatch):
         return COVERAGE
 
     monkeypatch.setattr(orient_session, "measure", measured)
-    for table in (session._live, session._shadows, session._expected, events._held, subagents._waits):
+    for table in (session._live, session._shadows, session._expected, subagents._waits):
         table.clear()
     yield
     for table in (session._live, session._shadows, subagents._waits):

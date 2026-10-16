@@ -19,8 +19,9 @@ trusts, under which e2e_release.sh copies the corpus for this check.
 The assertions (each one line of results.jsonl, {step, title, status, detail}; see ASSERTIONS), in order:
   hello            the module's hello is accepted for main's session as launch.json names it;
   initial-listing  each of thimble's types the install registers (subagents.TYPES, `thimble:<name>`; Type.when) is in
-                   main's first agent listing (agent_listing_delta with isInitial true), and the terminal printed no
-                   "agent types available" line;
+                   main's agent listing once thimble is on (the agent_listing_delta attachments of main's transcript
+                   together: the types register at activation, which the launcher's session makes at its start, not
+                   before it), and the terminal printed no "agent types available" line;
   spawn            a spawn through the bridge of thimble:check (thimble:writer while the check role is not in
                    subagents.TYPES), as a click makes it (subagents.start_job), with a full model id and an explicit
                    effort answers an agent id, and the agent transcript's message.model and effort equal them;
@@ -87,7 +88,7 @@ GP_DONE, HELPER_DONE, SPAWN_DONE, RESUMED_DONE = "GP-OK", "HELPER-OK", "SPAWN-OK
 
 ASSERTIONS = {
     "hello": "The module's hello is accepted for main's session",
-    "initial-listing": "thimble's types are in main's first agent listing, with no terminal line for them",
+    "initial-listing": "thimble's types are in main's agent listing once thimble is on, with no terminal line for them",
     "spawn": "A spawn through the bridge with a full model id and an explicit effort runs on exactly them",
     "plugin-id": "The spawn's PreToolUse input has a toolu_plugin_ id",
     "deny": "A spawn with no pending request comes back as {deny} from --agent-check",
@@ -135,6 +136,17 @@ def first_listing(rows: list[dict]) -> dict | None:
     return None
 
 
+def activation_listing(rows: list[dict]) -> dict | None:
+    """Main's agent listing once thimble is on: every agent_listing_delta attachment of main's transcript together (its
+    types register at activation, so they may come in a delta after the first listing). None without any."""
+    deltas = [r["attachment"] for r in rows if r.get("type") == "attachment" and isinstance(r.get("attachment"), dict)
+              and r["attachment"].get("type") == "agent_listing_delta"]
+    if not deltas:
+        return None
+    added = [t for d in deltas for t in d.get("addedTypes") or [] if isinstance(t, str)]
+    return {"type": "agent_listing_delta", "addedTypes": list(dict.fromkeys(added)), "deltas": len(deltas)}
+
+
 def check_listing(listing: dict | None, expected: list[str], roles: list[str], screen: str) -> tuple[bool, str]:
     added = set((listing or {}).get("addedTypes") or [])
     missing = [t for t in expected if t not in added]
@@ -142,7 +154,7 @@ def check_listing(listing: dict | None, expected: list[str], roles: list[str], s
     lines = sorted(set(m.group(0) for m in TYPES_LINE.finditer(screen)))
     ok = listing is not None and not missing and not lines
     present = sorted(t for t in added if t.startswith("thimble:"))
-    return ok, (f"{'no isInitial listing' if listing is None else 'isInitial listing'}: thimble types {present}; "
+    return ok, (f"{'no listing' if listing is None else 'listing'}: thimble types {present}; "
                 f"expected (subagents.TYPES) {expected}" + (f"; missing {missing}" if missing else "")
                 + (f"; roles not in subagents.TYPES on this head: {pending}" if pending else "")
                 + f"; terminal line {lines or 'none'}")
@@ -455,13 +467,13 @@ class Check:
         self.wait("main's transcript", lambda: self.main_path() is not None, REPLY_WAIT_S, 0.5)
         self.info["first_main"] = str(self.main_path() or "")
 
-        # main's first agent listing (its first request, the /thimble turn)
+        # main's agent listing once thimble is on (the launcher's session activates at its start)
         self.wait("main's first turn", lambda: first_listing(self.main_rows()) is not None, REPLY_WAIT_S)
         self.wait("main idle", lambda: self.idle(), REPLY_WAIT_S)
         # the types the module registers here: every one of subagents.TYPES that this install registers (Type.when:
         # `thimble:dev-ticket` only in a development install)
         expected = [subagents.type_name(t) for t in subagents.roles(self.c) if t in subagents.TYPES]
-        ok, detail = check_listing(first_listing(self.main_rows()), expected,
+        ok, detail = check_listing(activation_listing(self.main_rows()), expected,
                                    [r for r in subagents.ROLES if r in subagents.roles(self.c)],
                                    self.term.screen(history=True))
         first = next((r for r in self.main_rows() if r.get("attachment", {}).get("type") == "agent_listing_delta"), {})

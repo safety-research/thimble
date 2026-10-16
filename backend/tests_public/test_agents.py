@@ -23,22 +23,24 @@ def client(workspaces_tmp):
 def test_the_settings_route_changes_only_the_browser_s_settings(client, workspaces_tmp, analyst):
     """A kernel cell or a session's command can reach the route on loopback, so the wrapper's switch and the
     orientation's instructions are not among the keys it takes, and a permission mode changes only with the cookie the
-    page gets for the sign-in code in thimble's link (app/hook_auth.py), and must be one."""
+    page gets for the sign-in code in thimble's link (app/hook_auth.py), and must be one; Bypass is none (D47,
+    0.9.0)."""
     path = workspaces_tmp / CORPUS / "settings.json"
-    bypass = {"run_cell_result_lines": 20, "permission_modes": {"dev": "bypass"}}
-    assert client.put(f"/api/ws/{CORPUS}/settings", json=bypass).status_code == 403
+    auto = {"run_cell_result_lines": 20, "permission_modes": {"dev": "auto"}}
+    assert client.put(f"/api/ws/{CORPUS}/settings", json=auto).status_code == 403
     assert client.post("/api/ui/key", json={"code": "a guess"}).status_code == 410
     sign_in(client, hook_auth.mint(CORPUS))
     for key, value in (("kernel_wrap", "none"), ("orient_instructions", "x"), ("card_check", False), ("anything", 1),
-                       ("permission_modes", {"dev": "yolo"}), ("permission_modes", {"main": "bypass"})):
+                       ("permission_modes", {"dev": "yolo"}), ("permission_modes", {"main": "bypass"}),
+                       ("permission_modes", {"dev": "bypass"})):
         r = client.put(f"/api/ws/{CORPUS}/settings", json={"run_cell_result_lines": 20, key: value})
         assert r.status_code == 400, (key, value)
     assert not path.exists() or not json.loads(path.read_text()), "a refused PUT changes nothing"
-    assert client.put(f"/api/ws/{CORPUS}/settings", json=bypass).json()["permission_modes"] == {"dev": "bypass"}
+    assert client.put(f"/api/ws/{CORPUS}/settings", json=auto).json()["permission_modes"] == {"dev": "auto"}
     r = client.put(f"/api/ws/{CORPUS}/settings", json={"run_cell_result_lines": 30})
     assert r.status_code == 200 and r.json()["run_cell_result_lines"] == 30
     assert json.loads(path.read_text()) == {"run_cell_result_lines": 30}
-    assert json.loads(userconf.global_file().read_text()) == {"agents": {"dev": {"permissionMode": "bypass"}}}, \
+    assert json.loads(userconf.global_file().read_text()) == {"agents": {"dev": {"permissionMode": "auto"}}}, \
         "the permission modes are thimble's config's"
 
 

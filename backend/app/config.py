@@ -370,10 +370,11 @@ def claude_env(env: dict[str, str]) -> dict[str, str]:
 # below that the session does not set is given this server's value or "", so a value meant for another session or
 # another thimble never reaches it.
 # The names thimble sets for one session: a THIMBLE_* one is "" unless the session sets it; another is the server's
-# own value, else "". THIMBLE_MODE and THIMBLE_WS name a terminal-mode session and its workspace (launch_mode), which
-# no session the server starts is.
+# own value, else "". THIMBLE_OPEN asks the terminal UI to press the browser workbench at the session's start (the
+# `thimble` command exports it), and THIMBLE_WS names a workspace to the card runner's trial, neither of which a session
+# the server starts gets.
 SESSION_VARS = ("THIMBLE_SESSION", "THIMBLE_SESSION_TOKEN", "THIMBLE_RENDERED_PROMPTS", "THIMBLE_AGENT_TOKEN",
-                "THIMBLE_API", "THIMBLE_LAUNCHED", "THIMBLE_CALLER_CWD", "THIMBLE_CWD", "THIMBLE_MODE", "THIMBLE_WS",
+                "THIMBLE_API", "THIMBLE_OPEN", "THIMBLE_CALLER_CWD", "THIMBLE_CWD", "THIMBLE_WS",
                 "XDG_CACHE_HOME", "MPLCONFIGDIR", "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD")
 # The names that place a stack and tune its plugin and hooks, which the code a session runs reads: the server's value
 # in a session that talks to this server (session_env's `stack`), else "". Every reader takes "" as unset.
@@ -382,7 +383,8 @@ STACK_VARS = ("THIMBLE_HOME", "THIMBLE_PORT", "THIMBLE_UI_PORT", "THIMBLE_WORKSP
               "THIMBLE_FRONTEND_DIST", "THIMBLE_DEV", "THIMBLE_SUPERVISED", "THIMBLE_STACK_PORT",
               "THIMBLE_STACK_UI_PORT", "THIMBLE_CLAUDE_BIN", "THIMBLE_SKIP_KEY", "THIMBLE_PROMPTS_DIR",
               "THIMBLE_PROMPT_CAPTURE", "THIMBLE_KERNEL_WRAP", "THIMBLE_MODEL_SPEED", "THIMBLE_MCP_PROGRESS_S",
-              "THIMBLE_MCP_RETRY_S", "THIMBLE_BROWSER_PATH", "THIMBLE_INDEX_CACHE_MB", "THIMBLE_BIN_DIR")
+              "THIMBLE_MCP_RETRY_S", "THIMBLE_BROWSER_PATH", "THIMBLE_INDEX_CACHE_MB", "THIMBLE_BIN_DIR",
+              "THIMBLE_NO_MODULE")
 OWN_PREFIX = "THIMBLE_"
 
 

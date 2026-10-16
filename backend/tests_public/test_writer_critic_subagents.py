@@ -507,11 +507,11 @@ async def test_a_thimble_agent_s_request_is_answered_at_once_and_its_card_has_no
         main = asyncio.ensure_future(events.hook_permission_route(Hook(), events.HookPermission(
             cwd=str(config.corpus_dir(CORPUS)), session=sid, tool_name="Edit", tool_input={"file_path": "/c/x"})))
         await asyncio.sleep(0.2)
-        assert not main.done(), "main's own request waits for the analyst, as before"
+        # D47 (0.9.0): main's own request is answered at once too, and the terminal asks it
+        assert main.done() and main.result()["behavior"] is None
         [card] = agents.read_meta(CORPUS, agents.MAIN_ID)["permissions"]
-        assert "terminal" not in card
+        assert card["terminal"] is True
         events.calls_done(CORPUS, None, [(events.call_key("Edit", {"file_path": "/c/x"}), time.time() + 1)])
-        assert (await asyncio.wait_for(main, 2))["behavior"] is None, "answered in the terminal: the hook lets go"
         assert agents.read_meta(CORPUS, agents.MAIN_ID)["permissions"] == [], "the tool's PostToolUse closed the card"
     finally:
         session._live.pop(CORPUS, None)

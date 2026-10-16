@@ -1,7 +1,7 @@
-"""Stand-ins for terminal mode (the two-modes build, lane agents): a workspace whose launch.json says terminal mode, as the
-launcher writes it (lane mode), and thimble's hooks module as it answers in terminal mode (plugin/hooks/thimble.ts), a
-thread that takes the requests subagents.json addresses to it and writes module.json, as the module does. Each is a
-fixture or a helper a test asks for by name."""
+"""Stand-ins for local transport (a session before its press of the browser workbench): a workspace whose launch.json
+names main and its transport, as activation writes it (app/activate.py write_launch), and thimble's hooks module as it
+answers on local transport (plugin/hooks/thimble.ts), a thread that takes the requests subagents.json addresses to it
+and writes module.json, as the module does. Each is a fixture or a helper a test asks for by name."""
 from __future__ import annotations
 
 import json
@@ -21,13 +21,20 @@ CORPUS = "mini"
 MAIN = "7e000000-0000-4000-8000-00000000000a"
 
 
-def write_launch(ws: Path, session: str = MAIN, mode: str = "terminal", pid: int | None = None, **more: Any) -> None:
-    """launch.json as the launcher writes it in terminal mode, with the test process standing in for main's `claude`.
-    `transport` beside `mode` (0.9.0's launch.json, local.transport): local for terminal mode, server for browser mode."""
+def write_launch(ws: Path, session: str = MAIN, mode: str | None = None, pid: int | None = None,
+                 transport: str | None = None, **more: Any) -> None:
+    """launch.json naming main `session`, with the test process standing in for main's `claude`: `transport` (local or
+    server) as activation writes it, and `mode` when given, as a 0.8.0 launcher wrote it. With neither, a 0.8.0
+    terminal-mode record, which reads as local transport."""
     sf.ensure(ws)
     rec = {"session": session, "at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "fenced": True,
-           "switches": {}, "unset": [], "pid": os.getpid() if pid is None else pid, "mode": mode,
-           "transport": "local" if mode == "terminal" else "server", **more}
+           "switches": {}, "unset": [], "pid": os.getpid() if pid is None else pid, **more}
+    if transport is None and mode is None:
+        mode = "terminal"
+    if transport is not None:
+        rec["transport"] = transport
+    if mode is not None:
+        rec["mode"] = mode
     sf.launch_path(ws).write_text(json.dumps(rec), "utf-8")
 
 

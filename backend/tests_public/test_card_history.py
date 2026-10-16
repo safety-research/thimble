@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 from fastapi import HTTPException
 
-from app import card_check, checkstore, config, filters, notebook, plans, render, tools
+from app import card_check, cardrun, checkstore, config, filters, notebook, plans, render, tools
 
 CORPUS = "mini"
 STEPS = [
@@ -54,6 +54,8 @@ def ran(monkeypatch) -> list[str]:
 
     monkeypatch.setattr(notebook, "_ensure_started", started)
     monkeypatch.setattr(notebook, "_run_card_code", run)
+    # this process stands in for the card runner (`thimble-run`, where card code runs in every transport, R8)
+    monkeypatch.setattr(cardrun, "defers", lambda c: False)
     return codes
 
 
@@ -216,6 +218,7 @@ def sums(monkeypatch) -> None:
 
     monkeypatch.setattr(notebook, "_ensure_started", started)
     monkeypatch.setattr(notebook, "_run_card_code", run)
+    monkeypatch.setattr(cardrun, "defers", lambda c: False)  # this process stands in for the card runner (R8)
 
 
 def _check_gives(monkeypatch, revision: dict) -> None:

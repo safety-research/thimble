@@ -6,7 +6,7 @@ import re
 
 import pytest
 
-from app import config, notebook, tools
+from app import cardrun, config, notebook, tools
 
 CORPUS = "mini"
 
@@ -16,6 +16,8 @@ async def _stack(workspaces_tmp, monkeypatch):
     for name in ("THIMBLE_DEV", "THIMBLE_FRONTEND_URL", "THIMBLE_PORT"):  # no interface to shoot a card in, unless a test says
         monkeypatch.delenv(name, raising=False)
     tools._last_cell.clear()
+    # this process stands in for the card runner (`thimble-run`, where card code runs in every transport, R8)
+    monkeypatch.setattr(cardrun, "defers", lambda c: False)
     yield
     await notebook.shutdown_all()
 

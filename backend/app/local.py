@@ -1,26 +1,32 @@
-"""thimble's backend without its server, for terminal mode.
+"""thimble's backend without its server: the local transport.
 
-In browser mode the plugin's MCP shim (plugin/bin/thimble-mcp) posts each tool call to the server, and the browser reads
-the workspace through the server's routes. In terminal mode no server runs. The shim, one process per Claude Code
-session that main and every subagent share, runs the same `tools.call` in its own process (call); the renderer reads the
-same JSON the server's GET routes give the browser with `thimble state <surface>` (state), and makes the changes the
-browser's POST routes make with `thimble act <kind>` (act). Each of these writes the same workspace files the server
-writes, so a workspace made in one mode opens in the other.
+A session reaches thimble one of two ways (transport): locally, from the session's own processes, until the analyst's
+first press of the browser workbench (`thimble open`, `/thimble open`, a ↗ or `o` in the terminal panel), and through
+thimble's server for the rest of that session after it. The switch is one way. Peers (a second session that turned
+thimble on beside a live main) and sessions another took main from always stay local.
 
-Which mode a workspace runs in is the session's, recorded by the launcher as `mode` in the workspace's
-`trusted/launch.json` (session_mode). A tool call here refuses a folder that holds no workspace (no tool call registers
-a corpus: only the launcher, /thimble, `thimble demo` and the browser do) and a workspace whose session runs in browser
-mode, whose server owns it. A process that lost its environment (THIMBLE_HOME) finds no workspace under the default
-home and does nothing.
+On local transport no server runs for the session. The plugin's MCP shim, one process per Claude Code session that main
+and every subagent share, runs the same `tools.call` in its own process (call); the terminal UI reads the same JSON the
+server's GET routes give the browser with `thimble state <surface>` (state), and makes the changes the browser's POST
+routes make with `thimble act <kind>` (act). Each of these writes the same workspace files the server writes, so a
+workspace opens the same way in either transport. After the press, an act whose state the server holds in memory (a
+comment dismissed or opened again) goes to the server's route (SERVER_ACTS), and the others run here.
+
+The transport is read from the workspace's `trusted/launch.json` (subagent_files.transport), which only activation
+writes (app/activate.py write_launch). A tool call here refuses a folder that holds no workspace (no tool call
+registers a corpus: activation, `thimble demo` and the browser do), and a session another took main from
+(TAKEOVER_LINE). A process that lost its environment (THIMBLE_HOME) finds no workspace under the default home and does
+nothing.
 
 Code a model wrote never runs in the shim: card code, code labels and the rerun of cards after a label changed run
-through `thimble-run` in the caller's Bash, with the caller's permission mode (cardrun.py). The shim runs the jobs a
-tool leaves running (a prompt label's run, the card check of a card `thimble-run` wrote) on its event loop, and they end
-with the session, as browser-mode jobs end with it.
+through `thimble-run` in the caller's Bash, with the caller's permission mode (cardrun.py), before and after the press.
+The shim runs the jobs a tool leaves running (a prompt label's run, the card check of a card `thimble-run` wrote) on
+its event loop, and they end with the session; one that ends after the press writes its files under their locks and
+posts its event, which the server takes from the event queue (events.py, event_files.py).
 
-    python -m app.local state <surface> --cwd <dir> [args]    prints JSON (STATE_USAGE)
-    python -m app.local act <kind> --cwd <dir> '<json>'        prints {ok, ...} (ACT_USAGE)
-    python -m app.local view host|text …                      terminal views (term_views.py)
+    python -m app.local state <surface> --cwd <dir> [args]          prints JSON (STATE_USAGE)
+    python -m app.local act <kind> --cwd <dir> ('<json>' | --stdin)  prints {ok, ...} (ACT_USAGE)
+    python -m app.local view host|text …                            terminal views (term_views.py)
 
 Both print `{error}` and exit 1 when they fail, and open no port.
 """
@@ -42,16 +48,16 @@ from . import config
 
 log = logging.getLogger("thimble.local")
 
-BROWSER, TERMINAL = "browser", "terminal"
-MODES = (BROWSER, TERMINAL)
-LAUNCH_FILE = "trusted/launch.json"  # cli.LAUNCH_FILE: the launcher's record of the session, with its `mode`
-WS_ENV = "THIMBLE_WS"  # the workspace folder, which the launcher exports in terminal mode
+LOCAL, SERVER = "local", "server"  # a session's transport (subagent_files.transport)
+LAUNCH_FILE = "trusted/launch.json"  # activation's record of the session (activate.write_launch), with its `transport`
+WS_ENV = "THIMBLE_WS"  # a workspace folder a process is told to use (the card runner's trial, cardrun.trial_env)
 UI_LOG = "ui.jsonl"  # the UI tools' records for the renderer: {n, at, kind, args}
 # the refusals of call(), in the tool route's words where it has them (tools.call_route)
 NO_WORKSPACE = ("{cwd} is not inside a corpus thimble knows, so `{name}` was not run. Start thimble in that folder with "
                 "`thimble`.")
-NOT_TERMINAL = ("`{name}` was not run: this workspace's session runs in browser mode, where the thimble server runs "
-                "the tools. Start it again with `thimble`.")
+# a call from a session that another session in the folder took main from (activate.take_main)
+TAKEOVER_LINE = ("`{name}` was not run: another Claude Code session in this folder took over thimble. Ask the analyst "
+                 "to type /thimble in this terminal to take it back.")
 
 _started: set[str] = set()  # the workspaces this process has served a call for (_start)
 # The plugin copy this session loaded, which the shim names from its own path (plugin/bin/thimble-mcp), so the commands
@@ -63,53 +69,29 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 
-# --------------------------------------------------------------------------- the session's mode
-
-
-def session_mode(ws: Path) -> str:
-    """The mode the workspace folder `ws`'s session runs in: `mode` in its launch.json, else browser. The mode lane's
-    launch_mode.session_mode when it is installed, which reads the same field."""
-    try:
-        from . import launch_mode  # noqa: PLC0415 — the mode lane's module
-
-        return str(launch_mode.session_mode(Path(ws)))
-    except ImportError:
-        pass
-    try:
-        rec = json.loads((Path(ws) / LAUNCH_FILE).read_text("utf-8"))
-    except (OSError, ValueError):
-        return BROWSER
-    mode = rec.get("mode") if isinstance(rec, dict) else None
-    return TERMINAL if mode == TERMINAL else BROWSER
-
-
-def terminal(c: str) -> bool:
-    """Whether workspace `c`'s session runs in terminal mode (session_mode), or 0.9.0's activation wrote launch.json with
-    `transport: "local"` (transport). False for a workspace that is not there, and, until 0.9.0's runtime lane removes
-    the modes, for a workspace with no launch.json (0.8.0's browser default)."""
-    try:
-        ws = config.workspace_path(c)
-        if session_mode(ws) == TERMINAL:
-            return True
-        rec = json.loads((ws / LAUNCH_FILE).read_text("utf-8"))
-    except (ValueError, OSError):
-        return False
-    return isinstance(rec, dict) and rec.get("transport") == "local"
+# --------------------------------------------------------------------------- the session's transport
 
 
 def transport(c: str, sid: str | None = None) -> str:
-    """How session `sid` (None: main's) of workspace `c` reaches thimble's backend (0.9.0, C11): `server` once a press
-    started the server for main (launch.json `transport: "server"`, or a legacy `mode: "browser"`), else `local`; a peer
-    or a session moved off main (launch.json `peers`, `moved`) is always local. SCAFFOLD STUB of the runtime lane's."""
+    """How session `sid` of workspace `c` reaches thimble (module note): "server" only when `sid` (or, with no `sid`,
+    main) is main's session and a press made its transport the server; "local" for peers, for sessions in `moved`, for
+    any other session, and for a workspace that is not there. Read from launch.json at each call."""
+    from . import subagent_files  # noqa: PLC0415 — standard library only
+
     try:
-        rec = json.loads((config.workspace_path(c) / LAUNCH_FILE).read_text("utf-8"))
+        return subagent_files.transport(config.workspace_path(c), sid)
     except (ValueError, OSError):
-        return "local"
-    if not isinstance(rec, dict):
-        return "local"
-    if sid and (sid != rec.get("session") or sid in (rec.get("peers") or []) or sid in (rec.get("moved") or [])):
-        return "local"
-    return "server" if rec.get("transport") == "server" or rec.get("mode") == BROWSER else "local"
+        return LOCAL
+
+
+def terminal(c: str) -> bool:
+    """Whether workspace `c`'s main runs on local transport (transport), kept for the callers that still ask in 0.8.0's
+    words. False for a workspace that is not there."""
+    try:
+        config.workspace_path(c)
+    except (ValueError, OSError):
+        return False
+    return transport(c) == LOCAL
 
 
 def _pid_alive(pid: Any) -> bool:
@@ -125,15 +107,32 @@ def _pid_alive(pid: Any) -> bool:
 
 
 def live_terminal(ws: Path) -> bool:
-    """Whether the workspace folder `ws` is open in terminal mode in a session that still runs (launch.json's `pid`).
-    A server that starts leaves such a workspace's running cards alone (notebook.mark_interrupted_cells)."""
-    if session_mode(ws) != TERMINAL:
+    """Whether the workspace folder `ws`'s main runs on local transport in a session that still runs (launch.json's
+    `pid`). A server that starts leaves such a workspace's running cards alone (notebook.mark_interrupted_cells)."""
+    from . import subagent_files  # noqa: PLC0415
+
+    if subagent_files.transport(Path(ws)) != LOCAL:
         return False
-    try:
-        rec = json.loads((Path(ws) / LAUNCH_FILE).read_text("utf-8"))
-    except (OSError, ValueError):
-        return False
-    return _pid_alive(rec.get("pid") if isinstance(rec, dict) else None)
+    rec = subagent_files.launch(Path(ws))
+    return _pid_alive(rec.get("pid"))
+
+
+def session_here() -> str | None:
+    """The Claude Code session this process runs under: Claude Code's record of the `claude` process above it
+    (`<config dir>/sessions/<pid>.json`, which /clear rewrites), else CLAUDE_CODE_SESSION_ID; None for neither (the
+    server, a shell)."""
+    from . import cc_plugin  # noqa: PLC0415
+
+    pid = cc_plugin.claude_pid()
+    if pid:
+        try:
+            rec = json.loads((cc_plugin.config_dir() / cc_plugin.SESSIONS / f"{pid}.json").read_text("utf-8"))
+            sid = rec.get("sessionId") if isinstance(rec, dict) else None
+            if isinstance(sid, str) and sid:
+                return sid
+        except (OSError, ValueError):
+            pass
+    return os.environ.get("CLAUDE_CODE_SESSION_ID") or None
 
 
 def settle_dirs() -> None:
@@ -172,19 +171,24 @@ def workspace(cwd: str | None) -> str | None:
 
 
 async def call(name: str, args: dict[str, Any], *, cwd: str, session: str | None = None,
-               session_token: str | None = None, tool_use_id: str | None = None) -> dict[str, Any]:
+               session_token: str | None = None, tool_use_id: str | None = None,
+               caller: str | None = None) -> dict[str, Any]:
     """One tool call in this process: {content, is_error}, the shape the server's tool route answers with
     (tools.call_route). The session is believed as the route believes it: with a token that proves it, else the call
-    runs as main's, attributed to the agent of thimble's that made it (tools._as_caller)."""
-    from . import hook_auth, tools  # noqa: PLC0415
+    runs as main's, attributed to the agent of thimble's that made it (tools._as_caller). The analyst's session that
+    makes the call (`caller`, else session_here) is refused with TAKEOVER_LINE when another session took main from it
+    (launch.json `moved`)."""
+    from . import hook_auth, subagent_files, tools  # noqa: PLC0415
 
     if not tools.known(name):
         return tools.err(f"no such tool: {name}").as_dict()
     c = workspace(cwd)
     if not c:
         return tools.err(NO_WORKSPACE.format(cwd=cwd or "(no folder)", name=name)).as_dict()
-    if not terminal(c):
-        return tools.err(NOT_TERMINAL.format(name=name)).as_dict()
+    if not session:
+        who = caller or session_here()
+        if who and who in subagent_files.moved(config.workspace_path(c)):
+            return tools.err(TAKEOVER_LINE.format(name=name)).as_dict()
     _start(c)
     session = session or None
     if session and not hook_auth.session_proven(c, session, session_token or ""):
@@ -200,12 +204,12 @@ async def call(name: str, args: dict[str, Any], *, cwd: str, session: str | None
 
 
 def begin(cwd: str | None) -> str | None:
-    """The shim's start in terminal mode, on its event loop: _start for the workspace of `cwd`, before any tool call.
-    A session resumed with `--continue` may run cards with `thimble-run` before it calls a tool, and their card checks
-    wait for the card watch, which would otherwise start only with the first call. The workspace, or None for a folder
-    of no terminal-mode workspace."""
+    """The shim's start on local transport, on its event loop, once the session's thimble is on: _start for the
+    workspace of `cwd`, before any tool call. A session resumed with `--continue` may run cards with `thimble-run`
+    before it calls a tool, and their card checks wait for the card watch, which would otherwise start only with the
+    first call. The workspace, or None for a folder of no workspace."""
     c = workspace(cwd)
-    if not c or not terminal(c):
+    if not c:
         return None
     _start(c)
     return c
@@ -247,8 +251,7 @@ def _end_left_agents(c: str) -> list[str]:
 
 
 async def close() -> None:
-    """The end of the shim's session in terminal mode: the jobs it ran end with it, as browser-mode jobs end with the
-    session (the card checks, a label's run, the card watch), and the browser and kernels it started stop. Never
+    """The end of the shim's session: the jobs it ran end with it, as the server's jobs end with the session (the card checks, a label's run, the card watch), and the browser and kernels it started stop. Never
     raises."""
     from . import cardrun  # noqa: PLC0415
 
@@ -293,8 +296,8 @@ async def close() -> None:
 
 def ui_append(c: str, kind: str, args: dict[str, Any]) -> dict[str, Any]:
     """Append one record to the workspace's ui.jsonl under its lock: {n, at, kind, args}, `n` one past the last. The UI
-    tools (set_layout, open_view, set_filter, clear_filter, show_label) write it in terminal mode, where the renderer
-    follows it (`thimble state ui --after <n>`)."""
+    tools (set_layout, open_view, set_filter, clear_filter, show_label) write it on local transport, where the terminal
+    UI follows it (`thimble state ui --after <n>`)."""
     from . import ledger  # noqa: PLC0415
 
     path = config.workspace_dir(c) / UI_LOG
@@ -309,8 +312,8 @@ UI_KINDS = ("layout", "open_view", "filter", "label")
 
 
 def ui_note(c: str, kind: str, args: dict[str, Any]) -> None:
-    """ui_append in terminal mode, where a UI tool's change reaches the renderer through ui.jsonl alone; nothing in
-    browser mode, whose page hears the stream. Never raises: the tool's change is made either way."""
+    """ui_append on local transport, where a UI tool's change reaches the terminal UI through ui.jsonl alone; nothing on
+    the server, whose page hears the stream. Never raises: the tool's change is made either way."""
     try:
         if terminal(c):
             ui_append(c, kind, args)
@@ -432,7 +435,7 @@ async def _home(c: str, args: list[str], pos: list[str]) -> Any:
     run = orientation.read_run(c) or {}
     out["orientation"] = run.get("status")
     out["coverage"] = run.get("coverage")  # run 0's coverage line (orient_session.measure), which home shows under Files
-    out["mode"] = session_mode(config.workspace_path(c))
+    out["transport"] = transport(c)
     return out
 
 
@@ -489,14 +492,17 @@ def _offer(c: str) -> dict[str, Any] | None:
 # of main's own request (kind "safeguards" or notices.API in main's chat: a reply the safeguards switched, an API error)
 # is left out, as Claude Code shows it there. Each action maps to the act that takes it in the terminal: a `thimble act` kind, or for `settings` (Open
 # Settings: the terminal has no Settings pane) "settings", which says where thimble's config is, since Settings writes it.
+# "ticket-open" is no `thimble act` kind: the terminal UI opens the ticket in the browser workbench (its `ref`), where
+# the analyst allows its change.
 NOTICE_ACTS = {"proposals-retry": "view-propose-now", "proposals-off": "view-proposals-off", "view-retry": "view-retry",
-               "settings": "settings"}
+               "settings": "settings", "ticket-open": "ticket-open"}
 
 
 def _notice_acts(action: Any) -> list[dict[str, str]]:
     """A notice's `action` (one {label, do, slug?} or a list of them) as the terminal takes it: {label, act, slug?,
-    config?} each, in its order, `config` the file of thimble's config for "settings"; a Retry with no view is left
-    out."""
+    config?, ref?} each, in its order, `config` the file of thimble's config for "settings" and `ref` the ticket to open
+    in the browser (`ticket:<slug>`) for "ticket-open"; a Retry with no view, and a ticket's open with no ticket, are
+    left out."""
     from . import userconf  # noqa: PLC0415
 
     out: list[dict[str, str]] = []
@@ -506,8 +512,13 @@ def _notice_acts(action: Any) -> list[dict[str, str]]:
         slug = str(a.get("slug") or "")
         if act == "view-retry" and not slug:
             continue
-        out.append({"label": str(a.get("label") or "") or act, "act": act, **({"slug": slug} if slug else {}),
-                    **({"config": str(userconf.global_file())} if act == "settings" else {})})
+        ticket = " ".join(str(a.get("slug") or a.get("ticket") or "").split()).removeprefix("ticket:")
+        if act == "ticket-open" and not ticket:
+            continue
+        out.append({"label": str(a.get("label") or "") or act, "act": act,
+                    **({"slug": slug} if slug and act != "ticket-open" else {}),
+                    **({"config": str(userconf.global_file())} if act == "settings" else {}),
+                    **({"ref": f"ticket:{ticket}"} if act == "ticket-open" else {})})
     return out
 
 
@@ -692,7 +703,7 @@ def _unread(c: str, meta: dict[str, Any]) -> bool:
 def answered(events: list[dict[str, Any]]) -> int:
     """How many of a thread's questions have an answer: each question (a `user` record and the records after it) counts
     once, at its first `done` record or its first reply (the `text` record `reply_in_thread` writes, threads.reply). In
-    terminal mode main often answers with `reply_in_thread` alone, and no `done` record follows."""
+    the terminal main often answers with `reply_in_thread` alone, and no `done` record follows."""
     n, got = 0, False
     for r in events:
         kind = r.get("type")
@@ -998,22 +1009,78 @@ _SURFACES = {"home": _home, "cards": _cards, "card": _card, "labels": _labels, "
 # --------------------------------------------------------------------------- thimble act
 
 
-ACT_USAGE = ("thimble act <kind> --cwd <dir> '<json>'; kinds: thread {anchor | anchor_text, message}, thread-message {thread, message}, "
+ACT_USAGE = ("thimble act <kind> --cwd <dir> ('<json>' | --stdin) [--session <id>]; kinds: thread {anchor | anchor_text, message}, thread-message {thread, message}, "
              "verdict {label, ref, value}, label {label, name?, kind?, body?, glob?, values?}, label-run {label, limit?}, label-stop {label}, "
              "label-delete {label}, label-undelete {label}, label-show {label, on?, values?, colors?}, label-filter {label, value?}, seen {thread}, "
              "stop {agent}, view-accept {slug}, view-reject {slug}, view-proposals-off {}, "
              "view-propose-now {notice?}, view-retry {slug, notice?}, notice-dismiss {id}")
 
 
-async def act(c: str, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """The change the browser's POST route for `kind` makes (ACT_USAGE): {ok: true, ...}."""
+# The acts whose state thimble's server holds in memory once main's transport is server: the comments of a document and
+# of Claude's answers, which its routes change and announce to the browser, and the view proposals, builds and notices,
+# whose queue and writer then live in the server (H6). After the press each goes to the server's route,
+# `kind -> the route's path`, with {c} and the payload's fields filled; every other act runs here.
+SERVER_ACTS = {
+    "comment-resolve": "/api/ws/{c}/investigations/main/types/{doc}/comments/{comment}/dismiss",
+    "comment-reopen": "/api/ws/{c}/investigations/main/types/{doc}/comments/{comment}/reopen",
+    "answer-comment-resolve": "/api/ws/{c}/answer-comments/{comment}/{how}",
+    "view-accept": "/api/ws/{c}/views/proposals/{slug}/accept",
+    "view-reject": "/api/ws/{c}/views/proposals/{slug}/reject",
+    "view-retry": "/api/ws/{c}/views/proposals/{slug}/retry",
+    "view-propose-now": "/api/ws/{c}/views/propose-now",
+    "notice-dismiss": "/api/ws/{c}/notices/{id}/dismiss",
+}
+SERVER_ACT_TIMEOUT_S = 10.0
+
+
+def server_route(c: str, kind: str, payload: dict[str, Any]) -> str | None:
+    """The server's route that an act of SERVER_ACTS takes (its path), or None for an act that runs here. StateError
+    when the payload lacks a field the route names."""
+    import string  # noqa: PLC0415
+    from urllib.parse import quote  # noqa: PLC0415
+
+    path = SERVER_ACTS.get(kind)
+    if path is None:
+        return None
+    values = {"c": c, "how": "reopen" if payload.get("reopen") is True else "dismiss",
+              "doc": str(payload.get("doc") or "").strip().removeprefix("report:")}
+    for name in ("comment", "slug", "id"):
+        values[name] = " ".join(str(payload.get(name) or "").split())
+    names = [f for _, f, _, _ in string.Formatter().parse(path) if f]
+    missing = [f for f in names if not values.get(f)]
+    if missing:
+        raise StateError(f"`{missing[0]}` is empty")
+    return path.format(**{k: quote(v, safe="") for k, v in values.items()})
+
+
+def _post_to_server(path: str) -> dict[str, Any]:
+    """POST `path` to thimble's server with the token's proof (cli._request): its JSON answer, or StateError with why."""
+    from . import cli  # noqa: PLC0415
+
+    status, body = cli._request("POST", f"{cli.api_url()}{path}", {}, timeout=SERVER_ACT_TIMEOUT_S)
+    if status != 200:
+        why = body.get("detail") if isinstance(body, dict) else body
+        raise StateError(f"thimble's server did not take this change ({status or 'no answer'}: {why})")
+    return body if isinstance(body, dict) else {}
+
+
+async def act(c: str, kind: str, payload: dict[str, Any], session: str | None = None) -> dict[str, Any]:
+    """The change the browser's POST route for `kind` makes (ACT_USAGE): {ok: true, ...}. After the press, an act of
+    SERVER_ACTS made for a session whose transport is the server goes to the server's route (module note)."""
     from fastapi import HTTPException  # noqa: PLC0415
 
     fn = _ACTS.get(kind)
-    if fn is None:
+    if fn is None and kind not in SERVER_ACTS:
         raise StateError(f"no act {kind!r}; {ACT_USAGE}")
     if not isinstance(payload, dict):
         raise StateError("the act's argument must be a JSON object")
+    if kind in SERVER_ACTS and transport(c, session) == SERVER:
+        path = server_route(c, kind, payload)
+        if path is not None:
+            got = await asyncio.to_thread(_post_to_server, path)
+            return {"ok": True, **{k: v for k, v in got.items() if k != "ok"}, "via": "server"}
+    if fn is None:
+        raise StateError(f"no act {kind!r}; {ACT_USAGE}")
     try:
         return {"ok": True, **(await fn(c, payload))}
     except HTTPException as e:
@@ -1434,14 +1501,17 @@ def main(argv: list[str]) -> int:
         if verb == "state":
             out: Any = asyncio.run(state(c, what, [a for a in rest]))
         else:
-            if not terminal(c):
-                return _fail("this workspace's session runs in browser mode, where the browser makes this change")
+            # --stdin: the act's JSON on standard input, for a payload past what one argument may hold (coverage facts
+            # that name 100,000 paths)
+            stdin = "--stdin" in rest
+            rest = [a for a in rest if a != "--stdin"]
             raw = _positional(rest)
-            try:  # --stdin: the act's JSON on standard input (an act whose argument can pass argv's limit: coverage)
-                payload = json.loads(sys.stdin.read() or "{}") if "--stdin" in rest else json.loads(raw[0]) if raw else {}
+            try:
+                text = sys.stdin.read() if stdin else (raw[0] if raw else "")
+                payload = json.loads(text) if text.strip() else {}
             except ValueError as e:
                 return _fail(f"the act's argument is not JSON: {e}")
-            out = asyncio.run(act(c, what, payload))
+            out = asyncio.run(act(c, what, payload, session=_flag(rest, "--session") or session_here()))
     except StateError as e:
         return _fail(str(e))
     except Exception as e:  # noqa: BLE001 — the renderer reads {error} rather than a traceback
@@ -1451,8 +1521,7 @@ def main(argv: list[str]) -> int:
     return 0
 
 
-# the report in terminal mode (term_report.py): the checks its comments name, a comment resolved or opened again, and
-# the document saved from the panel's edit
+# the report in the terminal (term_report.py): the checks its comments name, and a comment resolved or opened again
 from . import term_report as _term_report  # noqa: E402 — it joins the surfaces and acts above
 
 _SURFACES.update(_term_report.SURFACES)

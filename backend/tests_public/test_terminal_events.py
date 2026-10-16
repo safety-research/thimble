@@ -18,7 +18,6 @@ from app import subagent_files as sf
 
 @pytest.fixture(autouse=True)
 def _fresh(workspaces_tmp):
-    events._held.clear()
     session._live.clear()
     session._shadows.clear()
     session._expected.clear()

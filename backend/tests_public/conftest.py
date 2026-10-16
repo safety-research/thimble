@@ -389,16 +389,27 @@ def _view_tickets_held(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _no_held_events():
-    """The quiet events events.post holds for the next event and the modes main's hooks reported are module state:
-    none carries over from another test."""
-    from app import events, session
+def _serving():
+    """The backend's code runs here as thimble's server runs it (events.SERVING, which the server's lifespan sets): an
+    event for main whose transport is the server goes to the server's own queue. A test of another process of the
+    session (the MCP shim, a hook, `thimble act`) sets it False."""
+    from app import events
 
-    for held in (events._held, session._modes):
-        held.clear()
+    events.SERVING = True
     yield
-    for held in (events._held, session._modes):
-        held.clear()
+    events.SERVING = True
+
+
+@pytest.fixture(autouse=True)
+def _no_held_events():
+    """The modes main's hooks reported are module state: none carries over from another test. (The quiet events
+    events.post holds for the next event live in the workspace's held-events.json, which each test's workspace has
+    its own of.)"""
+    from app import session
+
+    session._modes.clear()
+    yield
+    session._modes.clear()
 
 
 LISTENER_SID = "5e55a000-0000-4000-8000-0000000000aa"
@@ -474,7 +485,8 @@ def _no_backoff_wait(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _no_plugin_list(monkeypatch):
-    """launch_args asks `claude plugin list` which plugin copy main loads (cli.installed_copy). Tests load plugin/."""
+    """launch_args asks `claude plugin list` which plugin copy the session loads (cli.installed_copy). Tests load
+    plugin/."""
     from app import cli
 
     monkeypatch.setattr(cli, "installed_copy", lambda cwd: None)
@@ -482,15 +494,11 @@ def _no_plugin_list(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _launch_writes_nothing_shared(monkeypatch):
-    """launch_args registers its folder (cli.register_here), starts thimble's server (cli.server_for_launch) and finds
-    the workspace's extensions again through it (cli.refresh_extensions). In a test it registers nothing, so the suite's
-    shared data folder gains no corpus, and starts and reaches no server: the default port may be a live server's. A
-    test of any of them replaces it again."""
+    """Activation registers its folder (cli.register_here). In a test it registers nothing, so the suite's shared data
+    folder gains no corpus. A test of it replaces it again."""
     from app import cli, config
 
     monkeypatch.setattr(cli, "register_here", lambda cwd: config.workspace_for_cwd(str(cwd)))
-    monkeypatch.setattr(cli, "server_for_launch", lambda c: [])
-    monkeypatch.setattr(cli, "refresh_extensions", lambda c: None)
 
 
 def _port_of(url: str | None, default: int) -> int:
@@ -564,7 +572,7 @@ def data_tmp(tmp_path, monkeypatch):
 @pytest.fixture()
 def home(tmp_path, monkeypatch):
     """A scratch THIMBLE_HOME and Claude Code config dir, a stand-in UI build, and no adoption of a real server: the
-    default port may be a live server's. `up` runs as in a session the launcher started."""
+    default port may be a live server's."""
     from app import cli, config
 
     monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "home"))
@@ -576,7 +584,6 @@ def home(tmp_path, monkeypatch):
     (tmp_path / "ui-dist" / "index.html").write_text("<html></html>")
     monkeypatch.setenv("THIMBLE_FRONTEND_DIST", str(tmp_path / "ui-dist"))
     monkeypatch.setattr(config, "FRONTEND_DIST", tmp_path / "ui-dist")
-    monkeypatch.setenv(cli.LAUNCHED_ENV, "1")
     monkeypatch.setattr(cli, "health_leader", lambda url=None: None)
     monkeypatch.setattr(cli, "foreign_home", lambda url=None: None)  # nor refuses one: another test covers that
     monkeypatch.setattr(cli, "port_free", lambda p: True)  # nor passes over a live server's port (test_port.py does)

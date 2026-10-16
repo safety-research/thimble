@@ -15,7 +15,7 @@ from types import SimpleNamespace
 import pytest
 from conftest import Listener
 
-from app import concepts, config, notebook
+from app import cardrun, concepts, config, notebook
 
 CORPUS = "relay"
 
@@ -46,6 +46,7 @@ def kernel(workspaces_tmp, tmp_path, monkeypatch) -> SimpleNamespace:
     gate.set()
     monkeypatch.setattr(notebook, "_ensure_started", started)
     monkeypatch.setattr(notebook, "_run_card_code", run)
+    monkeypatch.setattr(cardrun, "defers", lambda c: False)  # this process stands in for the card runner (R8)
     return SimpleNamespace(ran=ran, gate=gate)
 
 

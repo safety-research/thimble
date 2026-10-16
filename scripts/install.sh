@@ -6,7 +6,7 @@
 #                      [--python PATH] [--deps-only] [--require-pinned] [--marketplace-name NAME]
 #
 # It opens with one screen: what it found (Claude Code, Python or uv, Node, a browser, and on Linux whether card code and
-# terminal-mode views can run in bubblewrap), what it installs where and about how big, what it changes in your Claude
+# the terminal's views can run in bubblewrap), what it installs where and about how big, what it changes in your Claude
 # Code setup, and whether a question remains. It asks it, then prints a line per step, and ends with what to run next.
 # Every command it runs, with its output, goes to $THIMBLE_HOME/install.log (~/.thimble/install.log).
 #
@@ -42,7 +42,8 @@
 set -euo pipefail
 # How it works (not printed by --help).
 # Steps: what it finds (check_prerequisites) and plans (plan: the question's plan, the plugin, the link, the lines a new
-# terminal needs) · the opening screen · the question · copy the release into --dir · backend/.venv · the frontend's
+# terminal needs) · the opening screen · the question · copy the release into --dir, and commit it as the install's git
+# baseline (git_baseline), so code tickets run in a release install too · backend/.venv · the frontend's
 # packages and frontend/dist · the browser · the app-dir pointer and `thimble` on PATH (~/.local/bin/thimble → the
 # tree's plugin/bin/thimble) · the plugin, unless --no-plugin (scripts/plugin.sh) · doctor · what to run next, with the
 # line for a shell startup file when a new terminal needs one. Nothing is left in a list for the user: a step that needs
@@ -196,13 +197,14 @@ parse_args() {
 
 locate_tree() {  # checkout or release, in place or copied, and the version
   [ -f "$src/backend/pyproject.toml" ] && [ -d "$src/plugin/bin" ] || die "$src is not a thimble tree (no backend/pyproject.toml + plugin/bin)"
-  checkout=0; [ -e "$src/.git" ] && checkout=1
+  # a release install is a git repository too (git_baseline) and carries RELEASE.json; a clone carries none
+  checkout=0; [ -e "$src/.git" ] && [ ! -f "$src/RELEASE.json" ] && checkout=1
   if [ "$checkout" = 1 ]; then dev=1; fi  # a Dev install gets the backend's test extras
   if [ -z "$dir" ]; then if [ "$checkout" = 1 ]; then dir="$src"; else dir="$home/app"; fi; fi
   in_place=0
   if [ -d "$dir" ] && [ "$(cd "$dir" && pwd -P)" = "$src" ]; then in_place=1; dir="$src"; fi  # the resolved spelling, however --dir wrote it
   # copying a release over a clone would mix the release's files into the clone's tracked ones
-  if [ "$in_place" = 0 ] && [ -e "$dir/.git" ]; then
+  if [ "$in_place" = 0 ] && [ -e "$dir/.git" ] && [ ! -f "$dir/RELEASE.json" ]; then
     die "$dir is a git checkout (a dev install), and install.sh copies no tree over one. Update it with git pull (thimble update does it), or install the release elsewhere with THIMBLE_HOME=<dir> or --dir <dir>"
   fi
   # copying replaces entries of $dir with `rm -rf`, so it goes only into an empty folder or an earlier install
@@ -353,18 +355,19 @@ check_prerequisites() {  # uv or python >= pyproject's requires-python, or --pyt
   say "auth: thimble uses whichever auth path you have configured for claude"
 }
 
-copy_tree() {  # a release install: the release's entries replace the install's; .venv, node_modules, workspaces/, data/ and dev/ stay
+copy_tree() {  # a release install: the release's entries replace the install's; .venv, node_modules, workspaces/, data/, dev/ and .git stay
   if [ "$in_place" = 1 ]; then say "the tree: in place, nothing to copy"; return 0; fi
   if [ -f "$src/RELEASE.json" ] && cmp -s "$src/RELEASE.json" "$dir/RELEASE.json"; then
     say "this release is installed there already (RELEASE.json matches, and it is copied last): nothing to copy"
     dir="$(cd "$dir" && pwd -P)"
     ok "thimble $version is in $(tilde "$dir") already"
+    [ -d "$dir/.git" ] || git_baseline  # an install from before the baselines
     return 0
   fi
   busy "Copying thimble $version to $(tilde "$dir")"
   say "copying the release into $dir (kept there if present: backend/.venv, frontend/node_modules, workspaces/, data/, dev/)"
   run mkdir -p "$dir"
-  for entry in plugin mods extensions backend prompts demos frontend .claude-plugin scripts README.md INSTALL.md docs LICENSE THIRD_PARTY_NOTICES RELEASE.json; do
+  for entry in plugin extensions backend prompts demos frontend .claude-plugin scripts README.md INSTALL.md docs LICENSE THIRD_PARTY_NOTICES RELEASE.json; do
     [ -e "$src/$entry" ] || continue
     keep=""; case "$entry" in backend) keep=.venv;; frontend) keep=node_modules;; esac
     say "+ replace $dir/$entry${keep:+/* except $keep}"
@@ -375,8 +378,33 @@ copy_tree() {  # a release install: the release's entries replace the install's;
       if [ -e "$e" ] && [ "$(basename "$e")" != "$keep" ]; then cp -R "$e" "$dir/$entry/"; fi
     done
   done
+  # 0.8.0's terminal-mode renderer (mods/thimble-term), which the hooks module carries now (plugin/hooks/term)
+  if [ -d "$dir/mods" ] && [ ! -e "$src/mods" ]; then say "+ remove $dir/mods (0.8.0's terminal renderer)"; [ "$dry" = 1 ] || rm -rf "$dir/mods"; fi
   if [ -d "$dir" ]; then dir="$(cd "$dir" && pwd -P)"; fi
   ok "Copied thimble $version to $(tilde "$dir")"
+  git_baseline
+}
+
+BASELINE_REF=refs/thimble/baseline  # the release's own commit in a release install (scripts/update.sh reads it)
+git_baseline() {  # a release install as a git repository whose last commit is the release as copied, so a code ticket's
+  # change is a commit on top of it and `thimble update` can keep it on a branch (scripts/update.sh). Needs git; the
+  # identity is the repository's own config, so nothing of the user's git setup is read or changed
+  # RELEASE.json (release.sh writes it into every release) is what tells this repository from a clone later
+  [ -f "$dir/RELEASE.json" ] || [ "$dry" = 1 ] || { say "no RELEASE.json in the copy: no git baseline"; return 0; }
+  command -v git >/dev/null 2>&1 || { say "git not found: no git baseline, so code tickets do not run in this install"; return 0; }
+  say "+ git baseline: commit the tree as \"thimble $version\" (kept out: backend/.venv frontend/node_modules workspaces/ data/ dev/ and Python's caches)"
+  [ "$dry" = 1 ] && return 0
+  local g=(git -C "$dir" -c commit.gpgsign=false -c core.hooksPath=/dev/null)
+  if [ ! -d "$dir/.git" ]; then "${g[@]}" init -q || { warn "git init failed in $(tilde "$dir"): code tickets do not run in this install"; return 0; }; fi
+  mkdir -p "$dir/.git/info"
+  printf '%s\n' backend/.venv frontend/node_modules workspaces/ data/ dev/ __pycache__/ '*.pyc' > "$dir/.git/info/exclude"
+  "${g[@]}" config user.name thimble && "${g[@]}" config user.email thimble@localhost
+  if "${g[@]}" add --all . >/dev/null && "${g[@]}" commit -q --allow-empty --no-verify -m "thimble $version" >/dev/null \
+      && "${g[@]}" update-ref "$BASELINE_REF" HEAD; then
+    ok "git baseline: thimble $version committed in $(tilde "$dir")"
+  else
+    warn "the git baseline was not committed in $(tilde "$dir"): code tickets may not run in this install"
+  fi
 }
 
 make_venv() {  # --python's environment linked; a linked one kept and checked; a checkout's from uv.lock (uv sync, else
@@ -925,7 +953,7 @@ browser_step() {  # after the packages, since it launches the browser with thimb
 }
 
 # ------------------------------------------------------------------------- card code's sandbox (Linux)
-# Card code runs in the notebook kernel, in Anthropic's sandbox runtime or in bubblewrap, and terminal mode draws views
+# Card code runs in the notebook kernel, in Anthropic's sandbox runtime or in bubblewrap, and the terminal draws views
 # only in one of them; on Linux both need bubblewrap to create a sandbox. install.sh installs neither: the opening screen
 # says whether it runs, and `thimble doctor --verbose` names the commands that add it.
 card_found() {  # its line in the opening screen's Found, on Linux
@@ -938,7 +966,7 @@ card_found() {  # its line in the opening screen's Found, on Linux
     found ok "card code and terminal views sandbox: bubblewrap runs here"
     return 0
   fi
-  found ok "card code: runs without a sandbox, and terminal mode shows no views ($why); thimble doctor --verbose names the commands that add it"
+  found ok "card code: runs without a sandbox, and the terminal shows no views ($why); thimble doctor --verbose names the commands that add it"
 }
 
 # -------------------------------------------------------------- the `thimble` command and the plugin

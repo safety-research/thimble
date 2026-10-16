@@ -87,10 +87,13 @@ async def test_each_agent_runs_in_its_row_else_in_main_s_mode_and_nothing_else_p
     await report("sid-main", "auto")
     assert [modes.mode_for(CORPUS, a) for a in modes.AGENTS] == ["auto"] * len(modes.AGENTS)
     assert modes.AGENTS == ("dev",)
-    ledger.put_settings_route(CORPUS, analyst, {modes.SETTING: {"checks": "bypass", "writer": "manual", "dev": "bypass"}})
+    with pytest.raises(HTTPException) as refused:
+        ledger.put_settings_route(CORPUS, analyst, {modes.SETTING: {"dev": "bypass"}})
+    assert refused.value.status_code == 400 and modes.BYPASS_REFUSED in str(refused.value.detail), "D47: no Bypass"
+    ledger.put_settings_route(CORPUS, analyst, {modes.SETTING: {"checks": "bypass", "writer": "manual", "dev": "auto"}})
     assert (modes.mode_for(CORPUS, "checks"), modes.mode_for(CORPUS, "writer"), modes.mode_for(CORPUS, "dev")) == \
-        ("auto", "auto", "bypass"), "an earlier build's rows are taken and ignored"
-    assert ledger.get_settings(CORPUS)[modes.SETTING] == {"dev": "bypass"}
+        ("auto", "auto", "auto"), "an earlier build's rows are taken and ignored"
+    assert ledger.get_settings(CORPUS)[modes.SETTING] == {"dev": "auto"}
     ledger.put_settings_route(CORPUS, analyst, {modes.SETTING: {"views": "manual"}})
     assert modes.mode_for(CORPUS, "dev") == modes.mode_for(CORPUS, "views") == "manual", "view builds' old row is the dev agent's"
     ledger.put_settings_route(CORPUS, analyst, {modes.SETTING: {"dev": None}})
@@ -324,37 +327,30 @@ async def test_the_hook_s_route_answers_for_the_session_its_shim_names(fake):
         "Bypass grants the hosted session's requests, never another session's"
 
 
-def test_bypass_runs_a_job_only_when_the_analyst_chose_it_in_settings(fake, analyst):
-    """Bypass for the dev row's jobs only by the analyst's choice in Settings, which bypass.json records (modes.choose,
-    from the settings PUT, a write only the analyst's browser makes): "bypass" written into thimble's config alone
-    counts as Manual, and a main that reports Bypass gives the rows that follow it Manual."""
+def test_bypass_is_refused_and_an_earlier_bypass_row_runs_as_manual(fake, analyst):
+    """D47 (0.9.0): thimble makes no allow decision, so Bypass is not offered: the settings PUT refuses it, `refused`
+    says why, modes.choose records no Bypass row, and a Bypass row an earlier build left (in thimble's config, or in
+    Settings' record, bypass.json) runs as Manual. A main that reports Bypass gives the rows that follow it Manual."""
     cwd = str(config.corpus_dir(CORPUS))
     session.attach(CORPUS, "sid-main", cwd)
     session.note_mode(CORPUS, "sid-main", "bypassPermissions")
     assert modes.mode_for(CORPUS, "dev") == "manual", "main in Bypass: the row that follows it runs in Manual"
     session.note_mode(CORPUS, "sid-main", "auto")
     assert modes.mode_for(CORPUS, "dev") == "auto"
+    assert modes.refused("bypass") == modes.BYPASS_REFUSED and modes.refused("auto") is None
     userconf.global_file().parent.mkdir(parents=True, exist_ok=True)
     userconf.global_file().write_text(json.dumps({"agents": {"dev": {"permissionMode": "bypass"}}}))
-    assert userconf.mode_rows(CORPUS) == {"dev": "bypass"} and modes.chosen() == set()
-    assert modes.mode_for(CORPUS, "dev") == "manual" and modes.rows(CORPUS) == {"dev": "manual"}, \
-        "written into the config by hand: Manual"
-    modes.choose({"dev": "bypass"})
-    assert modes.chosen() == {"dev"} and modes.mode_for(CORPUS, "dev") == "bypass"
     record = userconf.bypass_file()
-    assert json.loads(record.read_text())["rows"] == ["dev"] and record.stat().st_mode & 0o777 == 0o600
-    modes.choose({"dev": "manual"})
+    record.write_text(json.dumps({"rows": ["dev"]}))  # Settings' record of an earlier build
+    assert userconf.mode_rows(CORPUS) == {"dev": "bypass"} and modes.chosen() == set()
+    assert modes.mode_for(CORPUS, "dev") == "manual" and modes.rows(CORPUS) == {"dev": "manual"}
+    modes.choose({"dev": "bypass"})
+    assert json.loads(record.read_text())["rows"] == [] and record.stat().st_mode & 0o777 == 0o600, \
+        "the record refuses the row: none runs in Bypass"
     assert modes.chosen() == set() and modes.mode_for(CORPUS, "dev") == "manual"
-    modes.choose({"views": "bypass", "writer": "bypass"})
-    assert modes.chosen() == {"dev"}, "an earlier build's row is the dev agent's; a row of no job is no choice"
-    modes.choose({"dev": None})
-    assert modes.chosen() == set()
-    record.unlink()
-    ledger.put_settings_route(CORPUS, analyst, {modes.SETTING: {"dev": "bypass"}})
-    assert json.loads(record.read_text())["rows"] == ["dev"], "the analyst's PUT records the choice"
-    assert modes.mode_for(CORPUS, "dev") == "bypass"
-    ledger.put_settings_route(CORPUS, analyst, {modes.SETTING: {"dev": None}})
-    assert json.loads(record.read_text())["rows"] == [] and modes.mode_for(CORPUS, "dev") == "auto"
+    with pytest.raises(HTTPException):
+        ledger.put_settings_route(CORPUS, analyst, {modes.SETTING: {"dev": "bypass"}})
+    assert modes.mode_for(CORPUS, "dev") == "manual"
 
 
 def test_the_manual_mode_notice_says_how_to_switch_or_who_turned_auto_mode_off(fake, monkeypatch):

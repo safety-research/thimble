@@ -2,35 +2,37 @@
 // the analyst's Claude Code session with no turn of main, and how a typed start runs on exactly the model and effort
 // its request names. The server's side is backend/app/module_bridge.py; the tests are thimble.test.ts beside this file.
 //
-// Scope. It acts only in thimble's main and checks that before its first fetch or registration: `isInteractive` first
-// (an open long poll would hold every `claude -p` run open), THIMBLE_NO_MODULE unset, then either THIMBLE_LAUNCHED at
-// session.start (the `thimble` command starts the server first, so the types are in main's first agent listing) or
-// /thimble expanding in this session; then a server named by server.json that accepts its hello for this folder and
-// session (only main's). The module hears of /thimble from skill.prompt for thimble:thimble, or at the end of main's
-// turn from the marker /thimble's own hook leaves, <home>/up/<session>.active (app/cli.py hook_up), written anew at
-// each /thimble: where an organization manages Claude Code (managed settings on the machine, or a Team or Enterprise
-// account), Claude Code seats its built-in security plugin, and skill.prompt passes over the plugins a person installs,
-// while turn.complete still reaches them. Whichever of the two comes first stands for that /thimble; a marker the
-// module has seen (its mtime and size) never turns it on again, and neither does one the session already had when it
-// started, from a /thimble of an earlier run of the session (`claude -c` or --resume, then /thimble again, as the
-// skill.prompt route needs). In a session the launcher did not start, it waits for that server at most
-// ACTIVATE_WAIT_MS after /thimble, then says hello once at the end of each of main's turns; a refused hello, or a folder
-// the server does not know, leaves it idle until the next /thimble. Anywhere else it registers nothing and fetches
-// nothing, and looks at nothing but that marker's file system entry at session.start and once per turn of main's. It
-// starts no process: $.http.fetch only, every request proving the token of server.json and every answer proving it
-// back (app/hook_auth.py), so a process on the port can neither hand it requests nor read them. The terminal UI, which
-// register.ts registers after this file in the plugin's one hooks module, also turns it on when it turns thimble on in
-// the session (bridgeActivated).
+// Scope. It acts only in a session thimble is on in, and checks that before its first fetch or registration:
+// `isInteractive` (an open long poll would hold every `claude -p` run open), THIMBLE_NO_MODULE unset, then the session's
+// marker, <home>/up/<session>.active, which activation writes (app/activate.py). The terminal UI, which register.ts
+// registers after this file in the plugin's one hooks module, tells it of an activation at once (bridgeActivated: right
+// after the activation answer, and after a load_thimble call it saw), so thimble's agent types are registered in that
+// turn. For an activation made outside the terminal UI (the /thimble skill where the terminal UI does not run, a shell),
+// it looks for the marker at session.start and once at the end of each of main's turns. Anywhere else it registers
+// nothing and fetches nothing. It starts no process: $.fs and $.http.fetch only.
 //
-// The file guard (tool.call), from the moment the scope check passes: it refuses a call of a file tool (Read, Edit,
-// Write, MultiEdit, NotebookEdit, Grep, Glob) on thimble's token files, a call of an edit tool on thimble's records or,
+// Transport. The workspace's trusted/launch.json says how the session reaches thimble (app/subagent_files.py
+// transport): through the workspace's files until a press of the browser workbench (`transport: local`, below), and
+// through thimble's server for the rest of the session once the press made main's transport the server's. A peer (a
+// session turned on beside a live main) and a session another took main from always use the files, and as a peer it
+// registers the agent types but takes no requests and writes no module.json. It reads launch.json again whenever the
+// file changes and at the end of each of main's turns; at the switch it takes the requests still waiting in
+// subagents.json, then goes on over HTTP, and nothing switches back. Over HTTP every request proves the token of
+// server.json and every answer proves it back (app/hook_auth.py), so a process on the port can neither hand it requests
+// nor read them.
+//
+// The file guard (tool.call), in every session from session.start, thimble on in it or not: it refuses a call of a file
+// tool (Read, Edit, Write, MultiEdit, NotebookEdit, Grep, Glob) on thimble's token files, a call of an edit tool on
+// thimble's records or,
 // when the analyst turned corpus edits off, on the corpus, and WebFetch and WebSearch when the analyst turned the web
 // off, with the reason each rule names. The rules come with the roles (GET /api/module/roles, or roles.json in terminal
 // mode: app/userconf.py module_rules); until they come, or when they cannot be fetched, only the token files in
 // thimble's home are refused. The path is compared as spelled and as resolved ($.fs.stat with resolve), so a link to a
-// token file is refused too; Grep and Glob are refused at thimble's home itself. Bash it leaves to the permission mode.
+// token file is refused too; Grep and Glob are refused at thimble's home itself. Bash it leaves to the permission mode,
+// except that once thimble is on in the session it refuses a Bash command that names a token file under thimble's home
+// literally (BASH_PRIVATE).
 //
-// What it does once the server accepts it:
+// What it does once it is on (over HTTP; through the files the same, below):
 // - registers thimble's roles and thimble:orient-helper from GET /api/module/roles (each with a full model id and an
 //   explicit effort, from Settings); when the server is up at session start this happens inside session.start, so the
 //   types are in main's first agent listing;
@@ -59,16 +61,16 @@
 // Its state lives in this module's memory, which /clear and /resume keep, with subagents.json as the record it
 // refetches at session start and after a change of session; never in $.state, which both commands reset.
 //
-// Terminal mode (THIMBLE_WS names the workspace folder and its trusted/launch.json says `mode: terminal`) has no
-// server, and the module makes no HTTP request there, even when server.json names a live server. Its scope check reads
-// launch.json: terminal mode, and a session that is $.session.id() or one --rekey moved it to (the moves
-// subagents.json records). It reads the roles from trusted/roles.json and registers them again whenever that
-// file changes; it takes the requests addressed to it from subagents.json (entries of `requests` of kind `module`
-// whose `module` is pending, for its session, not past `expires_at`), polling every FILE_POLL_MS, and handles them one
-// at a time as it handles the long poll's; and it writes everything it says to trusted/module.json, which only it
-// writes: its heartbeat every FILE_BEAT_MS, the requests it took, its answers, the ends of the runs it started, main's
-// plan mode as its poll sees it, and what it could not register (backend/app/module_bridge.py has the file's form).
-// After /clear it appends the notes --rekey left for the new main in subagents.json (`module.notes`).
+// Local transport (launch.json `transport: local`, module note) has no server, and the module makes no HTTP request
+// there, even when server.json names a live server. It is main's when launch.json names its session, or one --rekey
+// moved it to (the moves subagents.json records). It reads the roles from trusted/roles.json and registers them again
+// whenever that file changes; as main it takes the requests addressed to it from subagents.json (entries of `requests`
+// of kind `module` whose `module` is pending, for its session, not past `expires_at`), polling every FILE_POLL_MS, and
+// handles them one at a time as it handles the long poll's; and it writes everything it says to trusted/module.json,
+// which only main's module writes: its heartbeat every FILE_BEAT_MS, the requests it took, its answers, the ends of the
+// runs it started, main's plan mode as its poll sees it, and what it could not register (backend/app/module_bridge.py
+// has the file's form). After /clear it appends the notes --rekey left for the new main in subagents.json
+// (`module.notes`).
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Activated } from './term/types'
@@ -92,9 +94,6 @@ export const ROLES = ['orientation', 'critic', 'writer', 'view-builder', 'view-r
 export const RETRY_MS = 2000 // between hellos while no server accepts one, and after a failed poll
 export const SESSION_WAIT_MS = 10000 // how long /clear's new session id is waited for
 export const SESSION_TICK_MS = 25
-// how long the module waits for a server that accepts its hello after /thimble in a session the launcher did not start:
-// the timeout of /thimble's own hook, which starts the server (hooks.json, UserPromptExpansion)
-export const ACTIVATE_WAIT_MS = 600_000
 const QUICK_MS = 1000 // a poll answered sooner than this with nothing is a server that is stopping
 // how long abort waits for main's turn to complete after $.turn.abort, so that its answer comes once Claude Code has
 // ended the turn
@@ -119,7 +118,7 @@ export const PLAN_POLL_MS = 2000
 const PLAN_PROBE = '/tmp/.thimble-plan-probe'
 const PLAN_REASON = /\bplan mode\b/i
 
-// terminal mode (module note)
+// local transport (module note)
 export const FILE_POLL_MS = 500 // how often subagents.json and roles.json are looked at
 export const FILE_BEAT_MS = 2000 // the heartbeat in module.json; module_bridge counts a module live while it is fresh
 const KEPT = 64 // the requests taken, the answers and the ends module.json keeps, the newest
@@ -132,7 +131,11 @@ const FILE_TOOLS = new Set(['Read', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit'
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
 const SEARCH_TOOLS = new Set(['Grep', 'Glob'])
 const WEB_TOOLS = new Set(['WebFetch', 'WebSearch'])
-const PRIVATE_NAMES = ['server.json', 'session.key', 'paired.json', 'links'] // in thimble's home (userconf.module_rules)
+// in thimble's home (userconf.private_paths): the token files, the press's sign-in files and one-time links, and the
+// sessions' activation files with their guide markers
+const PRIVATE_NAMES = ['server.json', 'session.key', 'paired.json', 'open', 'links', 'up']
+// what a Bash command may not name under thimble's home once thimble is on in the session (build spec S5)
+const BASH_PRIVATE = ['server.json', 'session.key', 'paired.json', 'links', 'open']
 // what a refusal of a token file says before the server's rules came: prompts/tools.md's module-deny-private
 export const PRIVATE_FALLBACK = "thimble refused this call, since it keeps its token files (server.json, session.key, paired.json and the links folder in thimble's home) out of reach of the file tools of its sessions. Do the task without them."
 const REFUSED = 'thimble refused this call.' // a refusal whose reason the rules lack
@@ -203,22 +206,20 @@ type Out = {
 }
 
 type State = {
-  active: boolean // in thimble's interactive main (the scope check passed) and not ended
+  active: boolean // thimble is on in this interactive session (the scope check passed) and it has not ended
   interactive: boolean // session.start said the session is interactive
-  launched: boolean // the launcher started this session (THIMBLE_LAUNCHED at session.start)
-  armed: boolean // /thimble expanded in this session the launcher did not start, and no hello was refused since
-  expanded: boolean // skill.prompt reported /thimble in main's turn now running, so its marker is not a new /thimble
-  marker: string // the stamp of the last marker /thimble's hook left that the module saw ('' for none)
   user: string // $HOME, for a path that starts with ~
   home: string // thimble's home, as spelled
   homeReal: string // and resolved, '' when it does not resolve
   rules: Rules | null // what the file guard refuses (null until the scope check passed)
-  file: boolean // terminal mode: the trusted folder, not the server (module note)
-  ws: string // the workspace folder, in terminal mode
-  out: Out // what module.json holds, in terminal mode
+  file: boolean // local transport: the trusted folder, not the server (module note)
+  peer: boolean // on local transport, a session that is not main: it registers the types, takes no requests, writes nothing
+  rechecking: Promise<boolean> | null // launch.json read again (recheck), one look at a time
+  ws: string // the workspace folder
+  out: Out // what module.json holds, on local transport
   writing: Promise<void> // module.json's writes, one at a time
-  stamps: Record<string, string> // the files' stamps (mtime and size) as last read, in terminal mode
-  n: number // the ends written to module.json, in terminal mode
+  stamps: Record<string, string> // the files' stamps (mtime and size) as last read, on local transport
+  n: number // the ends written to module.json, on local transport
   cwd: string
   session: string // main's session id, as the server accepted it
   version: string
@@ -239,11 +240,10 @@ type State = {
 
 function fresh(): State {
   return {
-    active: false, interactive: false, launched: false, armed: false, expanded: false, marker: '', user: '', home: '',
-    homeReal: '', rules: null,
+    active: false, interactive: false, user: '', home: '', homeReal: '', rules: null,
     cwd: '', session: '', version: '', gen: 0, server: null, roles: {}, registered: {}, efforts: {},
     requests: {}, started: new Set(), queue: Promise.resolve(), helloing: null, leaving: '', plan: null, turn: '', turnEnded: [],
-    file: false, ws: '', writing: Promise.resolve(), stamps: {}, n: 0,
+    file: false, peer: false, rechecking: null, ws: '', writing: Promise.resolve(), stamps: {}, n: 0,
     out: { session: '', version: '', load: '', beat: 0, plan: null, plan_at: 0, problem: '', taken: [], answers: {}, ended: [] },
   }
 }
@@ -255,10 +255,9 @@ function stop(m: State): void {
   m.gen += 1
 }
 
-/** A refused hello: idle, and in a session the launcher did not start, until the next /thimble. */
+/** A refused hello (the server follows another session as main): idle; the end of main's next turn looks again. */
 function refuse(m: State): void {
   stop(m)
-  m.armed = false
 }
 
 // ------------------------------------------------------------------------------------------------ the server
@@ -306,9 +305,7 @@ function hello($: Engine, m: State, problem = ''): Promise<Hello> {
     if (m.session !== sid || !r) return 'wait'
     if (r.status === 200 && r.data.ok === true) return 'ok'
     if (r.status === 403) return sid === m.leaving ? 'wait' : 'refused' // the server moved main first
-    // 404, a folder that is no workspace: /thimble registers the folder before it expands, so after /thimble it did not
-    // open this folder; for the launcher's session, a server that is starting
-    if (r.status === 404) return m.launched ? 'wait' : 'refused'
+    // 404, a folder the server does not know yet: a server that is starting
     return 'wait'
   })().finally(() => {
     if (m.helloing?.said === said) m.helloing = null
@@ -370,7 +367,7 @@ async function registerAll($: Engine, m: State): Promise<void> {
   if (problems.length) await say($, m, `Claude Code did not register ${problems.join('; ')}`)
 }
 
-/** What the module could not do: in the hello's `problem` (browser mode), or module.json's (terminal mode). */
+/** What the module could not do: in the hello's `problem` (over HTTP), or module.json's (local transport). */
 async function say($: Engine, m: State, problem: string): Promise<void> {
   if (!m.file) {
     await hello($, m, problem)
@@ -392,10 +389,9 @@ async function prepare($: Engine, m: State): Promise<void> {
   if (!m.rules) m.rules = fallbackRules(m)
 }
 
-/** The scope check passed (session.start, /thimble, or the end of main's turn after /thimble): hello, roles and
- *  registrations, then the long poll. A session the launcher did not start waits at most `patience` for a server that
- *  accepts its hello, then stays idle, armed, until the end of main's next turn. */
-async function begin($: Engine, m: State, cwd: string, patience: number): Promise<void> {
+/** Main on the server's transport (start, or recheck at the switch): hello, roles and registrations, then the long poll.
+ *  While no server accepts the hello it says it again every RETRY_MS: a server that died stays the transport (H7). */
+async function begin($: Engine, m: State, cwd: string): Promise<void> {
   await prepare($, m)
   m.cwd = cwd
   m.session = await $.session.id()
@@ -405,15 +401,14 @@ async function begin($: Engine, m: State, cwd: string, patience: number): Promis
   } catch {
     m.version = ''
   }
-  // a server that is up now: hello, roles and registrations inside session.start, for main's first agent listing
+  // a server that is up now: hello, roles and registrations before this returns, so the types are registered in the
+  // turn that turned thimble on
   const first = await connect($, m)
   if (first === 'refused') return refuse(m)
   const gen = m.gen
-  const since = await $.clock.now()
   void (async () => {
     let state: Hello = first
     while (state === 'wait' && m.active && gen === m.gen) {
-      if (!m.launched && (await $.clock.now()) - since >= patience) break
       await $.clock.sleep(RETRY_MS)
       state = await connect($, m)
     }
@@ -422,7 +417,6 @@ async function begin($: Engine, m: State, cwd: string, patience: number): Promis
       void watchPlan($, m, gen)
       await poll($, m, gen)
     } else if (state === 'refused') refuse(m)
-    else stop(m) // waited `patience` after /thimble: the end of main's next turn says hello again (still armed)
   })()
 }
 
@@ -687,7 +681,7 @@ async function spawning($: Engine, m: State, e: { subagentType?: string; parentA
   return {}
 }
 
-// ------------------------------------------------------------------------------------------------ terminal mode
+// ------------------------------------------------------------------------------------------------ local transport
 
 async function readJson($: Engine, path: string): Promise<Json | null> {
   try {
@@ -721,8 +715,9 @@ function movedTo(state: Json, sid: string): string {
   return sid
 }
 
-/** module.json written whole, one write at a time, with a fresh heartbeat (module note). */
+/** module.json written whole, one write at a time, with a fresh heartbeat (module note); never by a peer. */
 function writeOut($: Engine, m: State): Promise<void> {
+  if (m.peer) return m.writing
   m.writing = m.writing
     .then(async () => {
       m.out.beat = Date.now()
@@ -758,7 +753,7 @@ function effortsOf(state: Json): Record<string, Effort> {
     for (const [id, e] of agents) {
       const parent = text(e.parent)
       if (!(id in out) && parent in out && !text(e.type).startsWith(`${PLUGIN}:`)) {
-        out[id] = out[parent]
+        out[id] = out[parent] as Effort
         changed = true
       }
     }
@@ -767,8 +762,8 @@ function effortsOf(state: Json): Record<string, Effort> {
   return out
 }
 
-/** What fetchState fetches in browser mode, from subagents.json: the per-run efforts, the typed starts waiting for an
- *  Agent call (module_bridge._typed), the agents this module started. */
+/** What fetchState fetches over HTTP, from subagents.json: the per-run efforts, the typed starts waiting for an Agent
+ *  call (module_bridge._typed), the agents this module started. */
 async function fetchStateFile($: Engine, m: State): Promise<Json> {
   const state = (await readJson($, trusted(m, 'subagents.json'))) ?? {}
   Object.assign(m.efforts, effortsOf(state))
@@ -785,8 +780,8 @@ async function fetchStateFile($: Engine, m: State): Promise<Json> {
   return state
 }
 
-/** Terminal mode's start (module note): the scope check against launch.json, the roles from roles.json, the record,
- *  module.json, then the poll of the files and the plan poll. */
+/** The local transport's start (module note): main or a peer by launch.json, the roles from roles.json, the record,
+ *  module.json (main's), then the poll of the files and, for main, the plan poll. */
 async function fileBegin($: Engine, m: State, cwd: string, ws: string, launch: Json): Promise<void> {
   m.file = true
   m.ws = ws.replace(/\/+$/, '')
@@ -794,7 +789,8 @@ async function fileBegin($: Engine, m: State, cwd: string, ws: string, launch: J
   await prepare($, m)
   m.session = await $.session.id()
   const state = (await readJson($, trusted(m, 'subagents.json'))) ?? {}
-  if (!text(launch.session) || movedTo(state, text(launch.session)) !== m.session) return stop(m)
+  m.peer = !isMain(launch, state, m.session)
+  m.stamps.launch = await stamp($, trusted(m, 'launch.json'))
   try {
     const manifest = JSON.parse(await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`))
     m.version = isObj(manifest) ? text(manifest.version) : ''
@@ -808,16 +804,75 @@ async function fileBegin($: Engine, m: State, cwd: string, ws: string, launch: J
   else m.out.problem = 'thimble’s module could not read the roles it registers (trusted/roles.json)'
   await writeOut($, m)
   const gen = m.gen
-  void watchPlan($, m, gen)
+  if (!m.peer) void watchPlan($, m, gen)
   void pollFiles($, m, gen)
 }
 
-/** Every FILE_POLL_MS: roles.json registered again when it changed, the requests subagents.json addresses to this
- *  module taken when it changed, and the heartbeat every FILE_BEAT_MS (module note). */
+const sids = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x !== '') : [])
+
+/** Whether session `sid` is main's by launch.json (its `session`, through the moves --rekey recorded), and neither a
+ *  peer nor a session another took main from. */
+function isMain(launch: Json, state: Json, sid: string): boolean {
+  if (sids(launch.peers).includes(sid) || sids(launch.moved).includes(sid)) return false
+  return text(launch.session) !== '' && movedTo(state, text(launch.session)) === sid
+}
+
+/** Whether launch.json makes main's transport the server's (app/subagent_files.py transport): `transport: server`, or
+ *  0.8.0's `mode: browser`, or a record with neither. */
+function serverOf(launch: Json): boolean {
+  const kind = text(launch.transport)
+  if (kind === 'local' || kind === 'server') return kind === 'server'
+  return launch.mode !== 'terminal'
+}
+
+/** launch.json read again (module note): a peer that became main starts taking main's requests and writing
+ *  module.json, main another took main from stops; main whose transport a press made the server's takes the requests
+ *  still waiting in subagents.json (H5), then goes on over HTTP for the rest of the session. True when it switched. One
+ *  look at a time. */
+function recheck($: Engine, m: State): Promise<boolean> {
+  if (!m.rechecking) m.rechecking = recheckNow($, m).finally(() => { m.rechecking = null })
+  return m.rechecking
+}
+
+async function recheckNow($: Engine, m: State): Promise<boolean> {
+  if (!m.active || !m.file) return false
+  const launch = await readJson($, trusted(m, 'launch.json'))
+  if (!launch) return false
+  const state = (await readJson($, trusted(m, 'subagents.json'))) ?? {}
+  const main = isMain(launch, state, m.session)
+  if (main && serverOf(launch)) {
+    if (m.peer) m.peer = false
+    else await takeFile($, m)
+    await m.queue
+    m.gen += 1 // the files' polls stop
+    m.file = false
+    void begin($, m, m.cwd)
+    return true
+  }
+  if (main && m.peer) {
+    m.peer = false
+    m.out = { ...m.out, session: m.session, version: m.version, load: hex(crypto.getRandomValues(new Uint8Array(8))), gone: false }
+    await writeOut($, m)
+    void watchPlan($, m, m.gen)
+    await takeFile($, m)
+  } else if (!main && !m.peer) {
+    m.peer = true
+  }
+  return false
+}
+
+/** Every FILE_POLL_MS: launch.json read again when it changed (recheck), roles.json registered again when it changed,
+ *  the requests subagents.json addresses to this module taken when it changed, and the heartbeat every FILE_BEAT_MS
+ *  (module note). */
 async function pollFiles($: Engine, m: State, gen: number): Promise<void> {
   let beat = Date.now()
   while (m.active && gen === m.gen) {
     try {
+      const launch = await stamp($, trusted(m, 'launch.json'))
+      if (launch !== m.stamps.launch) {
+        m.stamps.launch = launch
+        if (await recheck($, m)) return
+      }
       const roles = await stamp($, trusted(m, 'roles.json'))
       if (roles && roles !== m.stamps.roles) {
         m.stamps.roles = roles
@@ -845,6 +900,7 @@ async function pollFiles($: Engine, m: State, gen: number): Promise<void> {
 /** The requests subagents.json addresses to this module that it has not taken, oldest first, each taken (module.json
  *  `taken`) and handled in turn, its answer written under its id. */
 async function takeFile($: Engine, m: State): Promise<void> {
+  if (m.peer) return
   const state = await readJson($, trusted(m, 'subagents.json'))
   if (!state || !isObj(state.requests)) return
   const now = Date.now()
@@ -869,8 +925,8 @@ async function takeFile($: Engine, m: State): Promise<void> {
   }
 }
 
-/** After /clear or /resume in terminal mode: the new session id, the move --rekey recorded to it, module.json under it,
- *  the record again, and the notes --rekey left for the new main (subagents.json `module.notes`). */
+/** After /clear or /resume on local transport: the new session id, the move --rekey recorded to it, module.json under
+ *  it, the record again, and the notes --rekey left for the new main (subagents.json `module.notes`). */
 async function followFile($: Engine, m: State, old: string): Promise<void> {
   let sid = old
   for (let waited = 0; waited < SESSION_WAIT_MS && sid === old; waited += SESSION_TICK_MS) {
@@ -969,6 +1025,11 @@ const reason = (rules: Rules, kind: string): string => rules.reasons[kind] || (k
 /** Why the file guard refuses the call (module note), '' when it does not. */
 async function refusal($: Engine, m: State, e: Json): Promise<string> {
   const tool = text(e.tool)
+  if (tool === 'Bash') {
+    if (!m.active || !text(e.command)) return ''
+    if (!m.rules) await prepare($, m)
+    return bashNamesPrivate(m, text(e.command)) ? reason(m.rules ?? fallbackRules(m), 'private') : ''
+  }
   if (WEB_TOOLS.has(tool)) {
     if (!m.rules) await prepare($, m)
     const rules = m.rules ?? fallbackRules(m)
@@ -989,9 +1050,20 @@ async function refusal($: Engine, m: State, e: Json): Promise<string> {
   return ''
 }
 
+const escaped = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/** Whether a Bash command names one of BASH_PRIVATE under thimble's home literally: the home as spelled, as resolved,
+ *  as $THIMBLE_HOME, and for the default home as ~/.thimble and $HOME/.thimble (module note). */
+function bashNamesPrivate(m: State, command: string): boolean {
+  const homes = new Set([m.home, m.homeReal, '$THIMBLE_HOME', '${THIMBLE_HOME}'].filter(Boolean))
+  if (m.user && m.home === `${m.user}/.thimble`) for (const h of ['~/.thimble', '$HOME/.thimble', '${HOME}/.thimble']) homes.add(h)
+  const names = BASH_PRIVATE.map(escaped).join('|')
+  return [...homes].some(h => new RegExp(`${escaped(h)}/+(?:${names})(?![A-Za-z0-9_.-])`).test(command))
+}
+
 /** For the guard's catch, with no file system call: whether the call names a token file as spelled. */
 function namesPrivate(m: State, e: Json): boolean {
-  const raw = m.active ? pathOf(m, e) : ''
+  const raw = pathOf(m, e)
   if (!raw) return false
   const p = normal(m, raw)
   const rules = m.rules ?? fallbackRules(m)
@@ -1000,39 +1072,41 @@ function namesPrivate(m: State, e: Json): boolean {
 
 const moduleOn = async ($: Engine): Promise<boolean> => OFF.has(((await $.env.get('THIMBLE_NO_MODULE')) ?? '').trim().toLowerCase())
 
-/** The stamp of this session's marker, <home>/up/<session>.active as app/cli.py hook_marker_path names it; '' for none. */
-async function markerStamp($: Engine): Promise<string> {
+/** This session's marker, <home>/up/<session>.active (activation writes it, app/activate.py): the workspace it names,
+ *  null when thimble is not on in the session. */
+async function readMarker($: Engine): Promise<Activated | null> {
   const name = (await $.session.id()).replace(/[^A-Za-z0-9_-]/g, '')
-  return name ? await stamp($, `${await thimbleHome($)}/up/${name}.active`) : ''
+  const got = name ? await readJson($, `${await thimbleHome($)}/up/${name}.active`) : null
+  if (!got || !text(got.path)) return null
+  return { ws: text(got.ws), path: text(got.path), cwd: text(got.cwd), via: text(got.via), role: got.role === 'peer' ? 'peer' : 'main', at: Number(got.at) || 0 }
 }
 
-/** At the end of main's turn: whether /thimble's hook left a marker for this session that the module has not seen
- *  (module note), and no skill.prompt reported the same /thimble in this turn. With THIMBLE_NO_MODULE it looks at
- *  nothing. */
-async function expanded($: Engine, m: State): Promise<boolean> {
-  const reported = m.expanded
-  m.expanded = false
-  if (!(await moduleOn($))) return false
-  const seen = await markerStamp($)
-  if (!seen || seen === m.marker) return false
-  m.marker = seen
-  return !reported
+/** Thimble on in this session (bridgeActivated, or the marker): over HTTP when launch.json makes this session's
+ *  transport the server's, else through the files; the agent types are registered before it returns. Nothing in a
+ *  session that is not interactive, with THIMBLE_NO_MODULE, when it is on already, or when the workspace has no
+ *  launch.json to follow (the end of main's next turn looks again). */
+async function start($: Engine, m: State, a: Activated): Promise<void> {
+  if (m.active || !m.interactive || !(await moduleOn($))) return
+  const ws = a.path.replace(/\/+$/, '')
+  const launch = ws ? await readJson($, `${ws}/trusted/launch.json`) : null
+  if (!launch || m.active) return
+  m.active = true
+  m.ws = ws
+  const cwd = a.cwd || m.cwd
+  const state = (await readJson($, `${ws}/trusted/subagents.json`)) ?? {}
+  if (serverOf(launch) && isMain(launch, state, await $.session.id())) await begin($, m, cwd)
+  else await fileBegin($, m, cwd, ws, launch)
 }
 
 // the module memory of the latest register (one per load of the module), for bridgeActivated
 const live: { m: State | null } = { m: null }
 
 /** thimble turned on in this session by the terminal UI (term/activate.ts, C13 of the 0.9.0 build): register thimble's
- *  agent types and turn the bridge on in this turn. Idempotent. SCAFFOLD STUB: 0.8.0's start, once, as session.start
- *  does for a session the launcher started: terminal mode's files unless the workspace's launch.json says
- *  `transport: "server"` or `mode: "browser"`. */
+ *  agent types and turn the bridge on in this turn (start). A second call, or a call once the marker turned it on,
+ *  changes nothing. */
 export async function bridgeActivated($: Engine, a: Activated): Promise<void> {
   const m = live.m
-  if (!m || m.active || !(await moduleOn($))) return
-  const launch = await readJson($, `${a.path.replace(/\/+$/, '')}/trusted/launch.json`)
-  m.active = true
-  if (launch !== null && launch.transport !== 'server' && launch.mode !== 'browser') await fileBegin($, m, a.cwd, a.path, launch)
-  else await begin($, m, a.cwd, 0)
+  if (m) await start($, m, a)
 }
 
 export const register: Register = on => {
@@ -1043,42 +1117,15 @@ export const register: Register = on => {
     const r = await next(e)
     m.cwd = e.cwd
     m.interactive = e.isInteractive === true
-    // the scope check, before any fetch or registration: interactive first, then launched by thimble (else idle until
-    // /thimble, skill.prompt), module not off
-    if (!e.isInteractive) return r
-    if (!(await $.env.get('THIMBLE_LAUNCHED'))) {
-      // a marker the session already has is a /thimble of an earlier run of it (claude -c, --resume), which a resumed
-      // session types again, as for skill.prompt: it counts as seen (module note)
-      if (await moduleOn($)) m.marker = await markerStamp($)
-      return r
-    }
-    if (!(await moduleOn($))) return r
-    m.launched = true
-    // terminal mode: THIMBLE_WS's launch.json says so (module note); browser mode otherwise
-    const ws = (await $.env.get('THIMBLE_WS')) ?? ''
-    const launch = ws ? await readJson($, `${ws}/trusted/launch.json`) : null
-    if (ws && launch === null) return r // a workspace the launcher named whose launch.json cannot be read: idle
-    m.active = true
-    if (launch !== null && launch.mode === 'terminal') await fileBegin($, m, e.cwd, ws, launch)
-    else await begin($, m, e.cwd, 0)
+    // the scope check, before any fetch or registration (module note): a session thimble is on in already (a resumed
+    // one, or an activation before this load of the module)
+    const marker = m.interactive && (await moduleOn($)) ? await readMarker($) : null
+    if (marker) await start($, m, marker)
     return r
   })
 
-  // /thimble in a session the launcher did not start turns the module on, in that session only (module note)
-  on('skill.prompt', async ($, e, next) => {
-    const r = await next(e)
-    if (e.skill !== `${PLUGIN}:thimble`) return r
-    m.expanded = true // its marker, at the end of this turn, is this /thimble
-    if (m.interactive && !m.launched && !m.active && (await moduleOn($))) {
-      m.active = true
-      m.armed = true
-      void begin($, m, m.cwd, ACTIVATE_WAIT_MS)
-    }
-    return r
-  })
-
+  // the file guard, in every session (module note)
   on('tool.call', async ($, e, next) => {
-    if (!m.active) return next(e)
     const why = await refusal($, m, e as unknown as Json)
     return why ? { deny: why } : next(e)
   }).catch(($, e, next) => (next.called ? next(e) : namesPrivate(m, e as unknown as Json) ? { deny: reason(m.rules ?? fallbackRules(m), 'private') } : next(e)))
@@ -1121,16 +1168,12 @@ export const register: Register = on => {
       } else {
         void call($, m, 'POST', '/api/module/ended', { cwd: m.cwd, session: m.session, agentId: e.agentId, answer: e.answer, reason: e.reason, ...refusal })
       }
-    } else if (e.agentId === undefined && m.interactive && !m.launched) {
-      if ((await expanded($, m)) && !m.active) {
-        // /thimble's marker, where skill.prompt passed over this plugin: what skill.prompt does (module note)
-        m.active = true
-        m.armed = true
-        void begin($, m, m.cwd, ACTIVATE_WAIT_MS)
-      } else if (m.armed && !m.active) {
-        // after /thimble, once the wait for the server ended: one hello at the end of each of main's turns (module note)
-        m.active = true
-        void begin($, m, m.cwd, 0)
+    } else if (e.agentId === undefined && m.interactive) {
+      if (m.active && m.file) void recheck($, m) // launch.json at each of main's turns (module note)
+      else if (!m.active && (await moduleOn($))) {
+        // an activation made outside the terminal UI, which tells no one but the marker (module note)
+        const marker = await readMarker($)
+        if (marker) void start($, m, marker)
       }
     }
     return r
@@ -1138,7 +1181,6 @@ export const register: Register = on => {
 
   on('session.end', async ($, e, next) => {
     const r = await next(e)
-    if (e.reason !== 'clear' && e.reason !== 'resume') m.armed = false
     if (!m.active) return r
     if (e.reason === 'clear' || e.reason === 'resume') void (m.file ? followFile($, m, e.sessionId) : follow($, m, e.sessionId))
     else {

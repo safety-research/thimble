@@ -87,7 +87,7 @@ async def test_each_stack_s_session_sees_its_own_values_and_no_claude_process_ca
     first = (await _ticket_session(service))["env"]
     a_home = a["THIMBLE_HOME"]
     assert first["THIMBLE_SESSION"] == dev.SESSION_KEY and _proven(monkeypatch, first, a_home)
-    assert first["THIMBLE_CALLER_CWD"] == "" and first["THIMBLE_LAUNCHED"] == ""
+    assert first["THIMBLE_CALLER_CWD"] == "" and first["THIMBLE_OPEN"] == "", "the `thimble` command's press is main's"
 
     b = _stack(monkeypatch, tmp_path / "b", 9722)
     view = (await _ticket_session(service))["env"]

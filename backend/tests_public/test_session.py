@@ -121,6 +121,49 @@ def test_the_tail_translates_a_turn_and_skips_every_other_record(cwd, tmp_path):
     assert len(_log(agents.MAIN_ID)) == n  # nothing new
 
 
+def test_the_checks_over_claude_s_answer_hear_each_turn_with_its_raw_rows_their_uuids_and_its_calls(cwd, tmp_path,
+                                                                                                     monkeypatch):
+    """C10: at main's turn end, after the checks over the cards, checks.answer_ended gets the turn's text rows as Claude
+    wrote them (before session.visible: citations as written, the end token kept), each with its record's uuid, the
+    first row's uuid as the turn's, and the turn's tool calls; main's text records carry that uuid. A turn with no text
+    tells nothing; a check that raises fails nothing."""
+    from app import checks
+
+    heard: list[tuple[str, dict]] = []
+    order: list[str] = []
+    monkeypatch.setattr(checks, "main_turn_ended", lambda c, since: order.append("cards"))
+    monkeypatch.setattr(checks, "answer_ended", lambda c, turn: (order.append("answers"), heard.append((c, turn))),
+                        raising=False)
+    p = tmp_path / f"{SID}.jsonl"
+    p.write_text("")
+    lv = _attach(cwd, p)
+    session.tail_once(lv)
+    first = "Agent-02 merged [6](card:cd34ef56#out/merged) PRs."
+    _append(p, lv, [
+        _human("How many PRs did agent-02 merge?"),
+        {**_assistant(_use("toolu_rd", "Read", {"file_path": "agents/agent-02.jsonl"})), "uuid": "u-read"},
+        _result("toolu_rd", "…"),
+        {**_assistant(_say(first)), "uuid": "u-1"},
+        {**_assistant(_say("The board agrees.")), "uuid": "u-2"},
+        END,
+    ])
+    assert order == ["cards", "answers"]
+    [(c, turn)] = heard
+    assert c == CORPUS and turn["sid"] == SID and turn["turn"] == "u-1"
+    assert turn["rows"] == [{"uuid": "u-1", "text": first}, {"uuid": "u-2", "text": "The board agrees."}]
+    assert turn["tools"] == [{"name": "Read", "input": {"file_path": "agents/agent-02.jsonl"}}]
+    assert isinstance(turn["at"], float)
+    texts = [r for r in _mirror() if r["type"] == "text"]
+    assert [r.get("uuid") for r in texts] == ["u-1", "u-2"]
+    # a turn of tool calls alone tells nothing, and a check that raises leaves the mirror as it is
+    _append(p, lv, [_human("Again"), {**_assistant(_use("toolu_x", "Bash", {"command": "ls"})), "uuid": "u-3"},
+                    _result("toolu_x", "a"), END])
+    assert len(heard) == 1
+    monkeypatch.setattr(checks, "answer_ended", lambda c, turn: 1 / 0, raising=False)
+    _append(p, lv, [_human("And?"), {**_assistant(_say("Nothing new.")), "uuid": "u-4"}, END])
+    assert not lv.degraded and _mirror()[-1]["type"] == "done"
+
+
 def test_a_feedback_draft_for_claude_code_writes_nothing_and_another_tool_of_its_writes_its_call(cwd, tmp_path):
     """Live QA 2: main drafted a Claude Code feedback report, and thimble's chat showed the call as `SendFeedback
     {"type":"bug",…`. Claude Code draws no row for that call, so neither does any chat of thimble's; a call of another of
@@ -730,7 +773,7 @@ def test_a_fork_that_ends_with_its_session_may_be_forked_again_at_once(cwd, monk
     from app import subagent_files as files
     from app import subagents
 
-    monkeypatch.setattr(files, "terminal", lambda ws: True)
+    monkeypatch.setattr(files, "transport", lambda ws, sid=None: files.LOCAL)
     thread = agents.new_thread(CORPUS, None, None, "Days")
     tid = thread["id"]
     agents.update_agent(CORPUS, tid, **{threads.FORK_NAME_KEY: "which-days"})

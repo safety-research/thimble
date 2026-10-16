@@ -1,10 +1,11 @@
-"""The hooks' backend calls in terminal mode, where no server runs: what the server's routes do with a hook's record in
-browser mode, run in a process the hook starts and does not wait for.
+"""The hooks' backend calls on local transport, where no server runs for the session: what the server's routes do with
+a hook's record, run in a process the hook starts and does not wait for.
 
     thimble-python -m app.local_hooks <kind>     the hook's input on stdin
 
-The file-first hooks of plugin/bin/.thimble-watch write their record to the workspace's files as in browser mode
-(subagent_files.py); in terminal mode, instead of a post, each starts this module detached with its input:
+The file-first hooks of plugin/bin/.thimble-watch write their record to the workspace's files whatever the transport
+(subagent_files.py); on local transport (subagent_files.transport), instead of a post, each starts this module detached
+with its input:
 
     started     SubagentStart of one of thimble's agents (subagents.hook_started: its chat, its role's start handler)
     stopped     SubagentStop of any subagent (subagents.hook_stopped: a turn's end; the typed starts a fork never made)
@@ -13,8 +14,8 @@ The file-first hooks of plugin/bin/.thimble-watch write their record to the work
     rekey       SessionStart of main for clear and resume (subagents.hook_rekey: the chats and the mirror follow)
     main-stop   Stop of main's turn (only the pass below: the mirror, R3, the hand-backs, the task notifications)
     mode-notice main's permission mode turned into or out of Manual mode (the mode hook): the `manual-mode` notice
-                shown with modes.manual_notice's words, or cleared (notices.py), as session.note_mode does in browser
-                mode
+                shown with modes.manual_notice's words, or cleared (notices.py), as session.note_mode does on the
+                server
 
 and `thimble act` (local.py) starts it with the analyst's answer to a view proposal or to a notice, since only this
 process writes proposals.json and the chats' logs, and follows to its end a build it queues (dev's queue lives in its
@@ -31,16 +32,20 @@ exits, and the holder takes it. The holder runs passes until nothing is left to 
 says (the ends of the runs the module started, module_bridge.new_ended; a late spawn's stop, module_bridge.reconcile),
 runs the mirror to the end of main's and every subagent's transcript (session.catch_up: chats, thread forks, hand-backs,
 task notifications, R2 and R3, so subagents.run_ended and each role's end handler run as on the server), and runs each
-kind's body. Plan mode stops no running agent, as in browser mode. Between passes it waits TICK_S while work it started
-goes on: the tasks the end handlers started (the coverage line, at most 120 s; a follow-on start through the module), a
-hand-back's wait (subagents.stopped), and the view builds and report checks it started, whose ends its own passes must
-see, since their queues live in its memory (dev, checks). It exits SETTLE_S after the last of these, or once main's
-`claude` process has gone, and after MAX_S at the latest. Nothing runs in browser mode: a call for a workspace whose
-session is not in terminal mode exits at once.
+kind's body. Plan mode stops no running agent. Between passes it waits TICK_S while work it started goes on: the tasks
+the end handlers started (the coverage line, at most 120 s; a follow-on start through the module), a hand-back's wait
+(subagents.stopped), and the view builds and report checks it started, whose ends its own passes must see, since their
+queues live in its memory (dev, checks). It exits SETTLE_S after the last of these, or once main's `claude` process has
+gone, and after MAX_S at the latest. A call for a workspace whose main runs on the server exits at once.
 
-The SubagentStart hook's process then follows the running agents (follow): while one of thimble's agents runs, it makes
-a call with no kind every FOLLOW_S, so an agent's thread shows its steps while it works, as the server's resident mirror
-shows them in browser mode, and not only at the next hook.
+The press hands the session over to thimble's server: the work this process started (a view build it queued, a check
+it runs) finishes here (H6), while its passes stop reading main's transcript (session.catch_up reads nothing once main's
+transport is the server), and it starts no new pass for a call (TODO) and exits once that work is done; the server's
+mirror reads on from the cursor the last pass saved (session.attach waits for a pass under way, H4).
+
+The SubagentStart hook's process then follows the running agents (follow): while one of thimble's agents runs and
+main's transport is local, it makes a call with no kind every FOLLOW_S, so an agent's thread shows its steps while it
+works, as the server's resident mirror shows them, and not only at the next hook.
 """
 from __future__ import annotations
 
@@ -152,8 +157,13 @@ def run(c: str, kind: str, body: dict[str, Any]) -> int:
             passes += asyncio.run(_hold(c, ws))
         finally:
             os.close(fd)
-        if not _todo_path(ws).exists():  # a call that came while the lock was being let go
+        if not _todo_path(ws).exists() or _served(ws):  # a call that came while the lock was being let go
             return passes
+
+
+def _served(ws: Path) -> bool:
+    """Whether a press handed main over to thimble's server (subagent_files.transport)."""
+    return sf.transport(ws) == sf.SERVER
 
 
 def _agents_run(c: str) -> bool:
@@ -167,7 +177,7 @@ def _agents_run(c: str) -> bool:
 def follow(c: str) -> int:
     """The SubagentStart hook's process, once its call is done: while one of thimble's agents runs and main's `claude`
     lives, a call with no kind every FOLLOW_S, so the mirror reads the agents' transcripts as they grow and their threads
-    show their steps as they take them, as the server's mirror shows them in browser mode. One process follows at a
+    show their steps as they take them, as the server's mirror shows them. One process follows at a
     time (FOLLOW_LOCK). Returns the number of passes it ran."""
     from . import config  # noqa: PLC0415
 
@@ -176,7 +186,8 @@ def follow(c: str) -> int:
     passes = 0
 
     def going() -> bool:
-        return _agents_run(c) and sf.main_pid(ws) is not None and time.monotonic() - start < MAX_S
+        return (_agents_run(c) and sf.main_pid(ws) is not None and not _served(ws)
+                and time.monotonic() - start < MAX_S)
 
     while going():
         fd = _try_lock(ws, FOLLOW_LOCK)
@@ -207,8 +218,8 @@ async def _hold(c: str, ws: Path) -> int:
             break
         if _busy(c):
             quiet = time.monotonic()
-        elif time.monotonic() - quiet >= SETTLE_S and not _todo_path(ws).exists():
-            break
+        elif _served(ws) or (time.monotonic() - quiet >= SETTLE_S and not _todo_path(ws).exists()):
+            break  # after the press only the work it started kept it here (H6)
         await asyncio.sleep(TICK_S)
     from . import subagents  # noqa: PLC0415
 
@@ -392,7 +403,7 @@ def main(argv: list[str] | None = None) -> int:
     from . import config  # noqa: PLC0415
 
     ws = config.workspace_path(c)
-    if not sf.terminal(ws):
+    if _served(ws):
         return 0
     _logging(ws)
     try:

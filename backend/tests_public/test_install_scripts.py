@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.metadata
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -198,6 +199,93 @@ def test_install_sh_copies_only_into_an_empty_folder_or_an_earlier_install(tmp_p
     r = install(tree, empty, tmp_path)
     assert r.returncode == 0, "an earlier install is installed over: " + r.stdout + r.stderr
     assert (empty / "workspaces").is_dir()
+
+
+def git(cwd: Path, *args: str) -> str:
+    """git in `cwd` with no global or system config, as a test's throwaway HOME gives it."""
+    env = {"PATH": "/usr/bin:/bin", "HOME": str(cwd), "GIT_CONFIG_NOSYSTEM": "1"}
+    return subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True, env=env, check=True,
+                          timeout=60).stdout.strip()
+
+
+@pytest.mark.skipif(not shutil.which("git"), reason="the baseline is a git commit")
+def test_a_release_install_becomes_a_git_repository_with_one_commit_and_installs_over_itself(tmp_path):
+    """3.16: install.sh commits a copied release as `thimble <version>` by thimble <thimble@localhost> (the repository's
+    own config), keeping the environment, the frontend's packages, the workspaces, data, dev and Python's caches out,
+    and records it as refs/thimble/baseline. A later install copies over it (a git repository that carries RELEASE.json
+    is a release install, not a clone) and commits the next baseline on top."""
+    tree = fake_tree(tmp_path / "release")
+    (tree / "RELEASE.json").write_text(json.dumps({"version": "0.0.1", "commit": "abc"}))
+    dest = tmp_path / "home" / ".thimble" / "app"
+    r = install(tree, dest, tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert git(dest, "log", "--format=%an <%ae> %s") == "thimble <thimble@localhost> thimble 0.0.1"
+    assert git(dest, "rev-parse", "refs/thimble/baseline") == git(dest, "rev-parse", "HEAD")
+    assert (dest / ".git" / "info" / "exclude").read_text().split() == [
+        "backend/.venv", "frontend/node_modules", "workspaces/", "data/", "dev/", "__pycache__/", "*.pyc"]
+    for rel in ("workspaces/w/notebook.json", "data/x.corpus.json", "dev/t.json", "backend/app/__pycache__/a.pyc"):
+        (dest / rel).parent.mkdir(parents=True, exist_ok=True)
+        (dest / rel).write_text("{}")
+    assert git(dest, "status", "--porcelain") == "", "what the install writes later is no change to the tree"
+    assert "scripts/install.sh" in git(dest, "ls-files")
+    (tree / "plugin" / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "thimble", "version": "0.0.2"}))
+    (tree / "RELEASE.json").write_text(json.dumps({"version": "0.0.2", "commit": "def"}))
+    r = install(tree, dest, tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert git(dest, "log", "--format=%s").splitlines() == ["thimble 0.0.2", "thimble 0.0.1"]
+    assert (dest / "workspaces" / "w" / "notebook.json").is_file()
+
+
+@pytest.mark.skipif(not (shutil.which("git") and shutil.which("unzip")), reason="a git baseline, and update.sh unzips")
+def test_update_keeps_the_changes_since_the_release_on_a_branch_and_resets_to_the_release(tmp_path):
+    """3.16: before a release install takes the next release, update.sh puts its commits after the baseline (a code
+    ticket's), its edits not committed and its new files on a branch local-fixes-<date>, says so in one line naming the
+    branch and the folder, and resets the tree to the baseline."""
+    inst = fake_tree(tmp_path / "inst")
+    (inst / "RELEASE.json").write_text(json.dumps({"version": "0.0.1"}))
+    git(inst, "init", "-q")
+    git(inst, "config", "user.name", "thimble")
+    git(inst, "config", "user.email", "thimble@localhost")
+    git(inst, "add", "--all", ".")
+    git(inst, "commit", "-q", "-m", "thimble 0.0.1")
+    git(inst, "update-ref", "refs/thimble/baseline", "HEAD")
+    base = git(inst, "rev-parse", "HEAD")
+    (inst / "backend" / "pyproject.toml").write_text('[project]\nrequires-python = ">=3.13"\n')
+    git(inst, "commit", "-q", "-am", "a code ticket's change")
+    (inst / "README.md").write_text("an edit\n")
+    (inst / "backend" / "fix.py").write_text("x = 1\n")
+    zp = release_zip(tmp_path)
+    r = update(tmp_path, "--from", str(zp))
+    assert r.returncode == 0, r.stdout + r.stderr
+    [line] = [ln for ln in r.stdout.splitlines() if "local-fixes-" in ln]
+    branch = re.search(r"local-fixes-[0-9-]+", line).group(0)
+    assert line.endswith(f"on the branch {branch} in {inst}")
+    assert git(inst, "rev-parse", "HEAD") == base and not (inst / "backend" / "fix.py").exists()
+    assert ">=3.13" in git(inst, "show", f"{branch}:backend/pyproject.toml")
+    assert git(inst, "show", f"{branch}:README.md") == "an edit" and git(inst, "show", f"{branch}:backend/fix.py") == "x = 1"
+    assert git(inst, "log", "--format=%s", branch).splitlines()[1:] == ["a code ticket's change", "thimble 0.0.1"]
+    r = update(tmp_path, "--from", str(zp))
+    assert r.returncode == 0 and "local-fixes-" not in r.stdout, "nothing since the release: no branch"
+
+
+def test_uninstall_with_keep_home_still_removes_the_sign_in_files_and_the_session_markers(tmp_path):
+    """3.15 and 3.21: a kept home keeps its server state and workspaces, but not the press's sign-in files and one-time
+    links (open/, links/), the sessions' markers with their guide markers (up/) or the folders' markers (active/)."""
+    tree = fake_tree(tmp_path / "app")
+    env = env_for(tmp_path)
+    home = Path(env["THIMBLE_HOME"])
+    home.mkdir()
+    (home / "app-dir").write_text(f"{tree}\n")
+    (home / "plugin.json").write_text(json.dumps({"registered": ""}))  # install.sh registered no plugin
+    for rel in ("open/a1.html", "links/s1.json", "up/s1.active", "up/s1/guide-marker", "active/%w%corpus",
+                "workspaces/w/notebook.json"):
+        (home / rel).parent.mkdir(parents=True, exist_ok=True)
+        (home / rel).write_text("x")
+    r = subprocess.run(["bash", str(tree / "plugin" / "bin" / "thimble"), "uninstall", "--yes", "--keep-home"],
+                       capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert sorted(p.name for p in home.iterdir()) == ["app-dir", "workspaces"]
+    assert "the browser's sign-in files and one-time links, and the markers of the sessions and folders" in r.stdout
 
 
 def pinned_release(tmp_path: Path) -> Path:
@@ -480,13 +568,13 @@ def test_the_opening_screen_says_whether_card_code_runs_in_bubblewrap(tmp_path):
 
     hint = "; thimble doctor --verbose names the commands that add it"
     out = opening(f"{bin_}:{tools}")
-    assert f"  ✓ card code: runs without a sandbox, and terminal mode shows no views (bubblewrap missing){hint}" in out, out
+    assert f"  ✓ card code: runs without a sandbox, and the terminal shows no views (bubblewrap missing){hint}" in out, out
     bwrap = tmp_path / "bwrap-bin" / "bwrap"
     bwrap.parent.mkdir()
     bwrap.write_text("#!/bin/sh\necho 'bwrap: No permissions to create new namespace' >&2\nexit 1\n")
     bwrap.chmod(0o755)
     out = opening(f"{bin_}:{bwrap.parent}:{tools}")
-    assert "card code: runs without a sandbox, and terminal mode shows no views (bubblewrap can't create a sandbox " \
+    assert "card code: runs without a sandbox, and the terminal shows no views (bubblewrap can't create a sandbox " \
            f"here){hint}" in out, out
     bwrap.write_text("#!/bin/sh\nexit 0\n")
     out = opening(f"{bin_}:{bwrap.parent}:{tools}")
@@ -1069,13 +1157,13 @@ def test_the_lines_install_sh_prints_let_a_new_login_shell_find_thimble_and_its_
 
 def test_help_lists_the_commands_an_analyst_uses_and_fix_and_revert_only_in_a_clone(tmp_path):
     """`thimble help` lists the commands an analyst uses. server, status, launch-args and prompt still run when typed but
-    are not listed, nor are state and act, terminal mode's renderer's; fix and revert change thimble's own code, so only
-    a development install (a git clone) lists them."""
-    listed = ("thimble [claude flags...]", "thimble demo", "thimble list", "thimble purge", "thimble extension",
-              "thimble plugin", "thimble mode", "thimble doctor", "thimble feedback", "thimble update",
+    are not listed, nor are state and act, the terminal UI's, nor mode, which 0.9.0 keeps only to say there are no modes
+    now; fix and revert change thimble's own code, so only a development install (a git clone) lists them."""
+    listed = ("thimble [claude flags...]", "thimble open", "thimble demo", "thimble list", "thimble purge",
+              "thimble extension", "thimble plugin", "thimble doctor", "thimble feedback", "thimble update",
               "thimble uninstall")
     unlisted = ("thimble server", "thimble status", "thimble launch-args", "thimble prompt", "thimble state",
-                "thimble act")
+                "thimble act", "thimble mode")
     for checkout in (False, True):
         tree = fake_tree(tmp_path / f"tree-{checkout}", checkout=checkout)
         thimble = ["bash", str(tree / "plugin" / "bin" / "thimble")]
@@ -1084,12 +1172,13 @@ def test_help_lists_the_commands_an_analyst_uses_and_fix_and_revert_only_in_a_cl
         assert all(c in r.stdout for c in listed), r.stdout
         assert not [c for c in unlisted if c in r.stdout], r.stdout
         assert ("thimble fix" in r.stdout and "thimble revert" in r.stdout) is checkout, r.stdout
-        # 0.5.0's `thimble cc-mod on` says how to start terminal mode instead, and changes nothing
-        for args in (["cc-mod", "on"], ["cc-mod"]):
+        # `thimble mode` and 0.5.0's `thimble cc-mod` say there are no modes now and how to open the browser, and
+        # change nothing
+        for args in (["cc-mod", "on"], ["cc-mod"], ["mode", "terminal"], ["mode"]):
             cc = subprocess.run([*thimble, *args], capture_output=True, text=True, env=env_for(tmp_path),
                                 stdin=subprocess.DEVNULL, timeout=30)
-            assert cc.returncode == 0 and "deprecated in version 0.6.0" in cc.stdout, (args, cc.stdout, cc.stderr)
-            assert "run `thimble mode terminal`, then `thimble`" in cc.stdout, cc.stdout
+            assert cc.returncode == 0 and cc.stdout == ("thimble has no modes now. Type /thimble open, or press o in "
+                                                        "thimble's panel, to open the browser.\n"), (args, cc.stdout)
         assert not (tmp_path / "home" / ".thimble" / "launch-modes.json").exists()
         for word in ("status", "server", "launch-args", "prompt"):
             typed = subprocess.run([*thimble, word], capture_output=True, text=True, env=env_for(tmp_path),

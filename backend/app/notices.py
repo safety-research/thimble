@@ -3,7 +3,7 @@ looking, with an easy fix.
 
 A notice is one short line in a warning style, an optional action button, and x to dismiss it. It shows in the
 foreground: in the browser in a strip above the composer of whichever chat the analyst has open, until they dismiss it
-or the failure is fixed; in terminal mode in the band above the prompt. A notice of an agent with a chat of its own (a
+or the failure is fixed; in the terminal in the band above the prompt, with one toast. A notice of an agent with a chat of its own (a
 thread, an agent chat; `chat`) is also written into that chat as a row, for its history.
 
 The open notices are the workspace's NOTICES_FILE, oldest first, each {id, key, kind, text, agent, chat, action, ts}:
@@ -17,6 +17,8 @@ a list of them, `do` one of ACTIONS:
   settings         open Settings
   view-retry       the failed view's Retry (its slug in `slug`)
   sign-out         POST /api/ui/signout (the browser's id in slug)
+  ticket-open      a code ticket that passed its checks opened in the browser workbench, where the analyst allows its
+                   change (the ticket's id in `slug`)
 
 A notice with the same `key` replaces the earlier one in place, so a failure that repeats updates one notice. clear
 (a later success under the key) and dismiss (the analyst's x) take a notice away. A dismissal of a REMEMBERED key holds
@@ -32,8 +34,8 @@ view builds and code tickets, checks.py for report checks), `proposals` for the 
 
 Kinds that tell of the setup rather than a failure:
 
-  manual-mode  key `manual-mode`: main runs in Claude Code's Manual mode (modes.manual_notice; session.note_mode in
-               browser mode, local_hooks' mode-notice in terminal mode), shown in red; it goes when main reports
+  manual-mode  key `manual-mode`: main runs in Claude Code's Manual mode (modes.manual_notice; session.note_mode on
+               the server, local_hooks' mode-notice on local transport), shown in red; it goes when main reports
                another mode
   sandbox      key `no-box:<extension>`: an extension's program runs without a sandbox (harness.py)
   setup        keys `env:<NAME>` and `proxy`: what /thimble found in the shell (events.session_route), in words this
@@ -77,7 +79,7 @@ _loop: asyncio.AbstractEventLoop | None = None
 TYPE = "notice"  # the event's type on the workspace stream, and the row's type in a chat's log
 API = "api"  # the kind of a notice of main's own request that Anthropic's API failed (session.py), which main's chat
 # shows as its API error card: no row, and the foreground strip leaves it out while main is open
-ACTIONS = ("proposals-retry", "proposals-off", "settings", "view-retry", "sign-out")
+ACTIONS = ("proposals-retry", "proposals-off", "settings", "view-retry", "sign-out", "ticket-open")
 NOTICES_FILE = "notices.json"  # in the workspace folder: the open notices, oldest first
 DISMISSED_FILE = "notices-dismissed.json"  # in the workspace folder: the REMEMBERED keys the analyst dismissed
 # keys whose dismissal holds for the workspace: a key equal to one, or starting with one that ends in ":"
@@ -130,7 +132,7 @@ def _actions(action: Any) -> dict[str, str] | list[dict[str, str]] | None:
 
 def _emit(c: str, event: dict[str, Any]) -> None:
     """The event on the workspace stream, from the loop or scheduled onto the server's loop from a worker thread; off
-    any loop (terminal mode's passes) the notices file alone tells."""
+    any loop (the passes of local transport) the notices file alone tells."""
 
     def send() -> None:
         try:

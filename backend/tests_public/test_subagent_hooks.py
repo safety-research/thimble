@@ -614,7 +614,9 @@ def test_the_hooks_json_runs_each_new_mode():
     assert any(c.endswith("--denied") for _, c in commands("PermissionDenied"))
     assert any(c.endswith("--end") for _, c in commands("SessionEnd"))
     assert [e["hooks"][0]["timeout"] for e in hooks["SessionEnd"]] == [5]
-    assert any(m == "clear|resume" and c.endswith("--rekey") for m, c in commands("SessionStart"))
+    # 0.9.0: --rekey runs before the guide is printed again, in one command, since Claude Code runs the hooks of one
+    # event at once
+    assert any({"clear", "resume"} <= set(m.split("|")) and '.thimble-watch" --rekey;' in c for m, c in commands("SessionStart"))
 
 
 def test_a_write_waits_for_the_lock_module_bridge_takes(tmp_path):
