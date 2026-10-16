@@ -280,7 +280,7 @@ test("the label colours' copies are the light paper's: the charts' fallbacks and
 
 test("thimble-term's copies: its picker's places around the wheel, show_label's names, and each place's hue the light paper's", () => {
   // the mod imports nothing outside its folder, so it keeps its own copies, each an array on one line
-  const mod = (file: string) => readFileSync(new URL(`../../../mods/thimble-term/hooks/${file}`, import.meta.url), 'utf8')
+  const mod = (file: string) => readFileSync(new URL(`../../../plugin/hooks/term/${file}`, import.meta.url), 'utf8')
   const list = (src: string, name: string): unknown[] => JSON.parse(new RegExp(`^export const ${name}\\b[^=]*= (\\[.*\\])(?: as const)?$`, 'm').exec(src)![1].replace(/'/g, '"'))
   const labels = mod('labels.ts')
   expect(list(labels, 'LABEL_WHEEL')).toEqual(LABEL_WHEEL)

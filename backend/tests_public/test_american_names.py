@@ -72,8 +72,8 @@ def test_the_prompts_and_docs_are_written_in_american_english():
     an inline code span may still name a British alias. A short date puts its month first, as thimble writes dates."""
     root = Path(__file__).resolve().parents[2]
     files = [*root.glob("prompts/**/*.md"), *root.glob("docs/*.md"), *root.glob("plugin/skills/**/*.md"),
-             *root.glob("extensions/*/cards/*/card.md"), root / "mods/thimble-term/README.md",
-             root / "mods/thimble-term/SPEC.md", root / "README.md", root / "INSTALL.md", root / "CONTRIBUTING.md"]
+             *root.glob("extensions/*/cards/*/card.md"), root / "plugin/hooks/term/README.md",
+             root / "plugin/hooks/term/SPEC.md", root / "README.md", root / "INSTALL.md", root / "CONTRIBUTING.md"]
     found = [f"{p.relative_to(root)}:{n}: {m.group(0)}" for p in files for n, line in enumerate(p.read_text().splitlines(), 1)
              for m in [*BRITISH.finditer(CODE.sub(" ", line)), *DAY_FIRST.finditer(line)]]
     assert not found, found

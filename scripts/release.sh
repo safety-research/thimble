@@ -5,9 +5,9 @@
 #
 # What it produces: <out>/thimble-<version>-<shortsha>.zip (default out: <repo>/release/, gitignored) whose single
 # top-level folder thimble-<version>-<shortsha>/ holds exactly what an install needs and nothing else:
-#   plugin/               the Claude Code plugin (skill, .mcp.json, bin/) — what the marketplace installs
-#   mods/thimble-term/    the terminal-mode renderer, which the `thimble` command loads with --plugin-dir in terminal
-#                         mode (`thimble mode terminal`); no marketplace lists it; never its tests/
+#   plugin/               the Claude Code plugin (skills, .mcp.json, bin/, and hooks/: the one hooks module, register.ts,
+#                         with thimble.ts and the terminal UI in hooks/term/) — what the marketplace installs; never the
+#                         hooks' tests (hooks/tests/, hooks/term/tests/ with its fake_thimble.py, any *.test.ts)
 #   extensions/           the extensions thimble ships, which `thimble extension add <name>` copies into ~/.thimble/extensions
 #   backend/              the server (app/, tests_public/, pyproject.toml, uv.lock); never .venv or __pycache__
 #   backend/requirements.txt  uv.lock's runtime packages with the hashes of their files (uv export), which install.sh
@@ -90,14 +90,15 @@ version="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["v
 [ -n "$version" ] || die "plugin/.claude-plugin/plugin.json has no version"
 sha="$(git -C "$repo" rev-parse --short HEAD)"
 full_sha="$(git -C "$repo" rev-parse HEAD)"
-allow=(plugin mods/thimble-term extensions backend prompts demos .claude-plugin README.md INSTALL.md docs/config.md docs/assets/thimble-banner.svg LICENSE
+allow=(plugin extensions backend prompts demos .claude-plugin README.md INSTALL.md docs/config.md docs/assets/thimble-banner.svg LICENSE
        docs/color.md docs/time-range.md docs/rows-and-filters.md docs/search-table-diff.md docs/terminal-views.md
        scripts/install.sh scripts/plugin.sh scripts/update.sh scripts/rebuild_ui.sh scripts/view_shot.mjs scripts/ui_shot.mjs
        frontend/src frontend/public frontend/index.html frontend/package.json
        frontend/package-lock.json frontend/vite.config.ts frontend/tsconfig.json frontend/tsconfig.app.json frontend/tsconfig.node.json)
 dirty=false
-# what an install does not run: the backend's tests, the mods' and the hooks module's
-not_shipped=(':(exclude)backend/tests' ':(exclude)mods/thimble-term/tests' ':(exclude,glob)plugin/hooks/*.test.ts')
+# what an install does not run: the backend's tests and the hooks module's (the terminal UI's with their fake thimble)
+not_shipped=(':(exclude)backend/tests' ':(exclude)plugin/hooks/term/tests' ':(exclude)plugin/hooks/tests'
+             ':(exclude,glob)plugin/hooks/**/*.test.ts')
 if [ -n "$(git -C "$repo" status --porcelain --untracked-files=no -- "${allow[@]}" "${not_shipped[@]}")" ]; then
   dirty=true
   echo "release.sh: tracked files the zip carries have uncommitted changes, which ship (RELEASE.json says dirty)" >&2
