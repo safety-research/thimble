@@ -3748,13 +3748,16 @@ def take_hook_result(session: str, cwd: Path, action: str, archive: str) -> str 
 
 def made_main(name: str, session: str, cwd: Path, via: str = "press") -> None:
     """After a press (`thimble open`, H1) or /thimble's `up` made `session` main of workspace `name` on the server: the
-    folder marked active for the plugin's hooks (mark_active), and launch.json written for it through activation's one
-    writer (activate.take_main, then activate.write_launch with transport `server`): from now on the session runs on the
-    server, one way (subagent_files.transport). Never raises."""
+    folder marked active for the plugin's hooks (mark_active), thimble on in the session if it was not (activation, so
+    that a later one finds the session marked and keeps its transport), and launch.json written for it through
+    activation's one writer (activate.take_main, then activate.write_launch with transport `server`): from now on the
+    session runs on the server, one way (subagent_files.transport). Never raises."""
     mark_active(cwd)
     try:
         from . import activate  # noqa: PLC0415 — activation's, needed here alone
 
+        if session_marker(session) is None:
+            activate.activate(str(cwd), session, via)
         with server_dirs():
             activate.take_main(name, session, via)
             activate.write_launch(name, session, role="main", transport="server", via=via)
