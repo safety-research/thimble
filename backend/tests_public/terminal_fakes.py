@@ -22,10 +22,12 @@ MAIN = "7e000000-0000-4000-8000-00000000000a"
 
 
 def write_launch(ws: Path, session: str = MAIN, mode: str = "terminal", pid: int | None = None, **more: Any) -> None:
-    """launch.json as the launcher writes it in terminal mode, with the test process standing in for main's `claude`."""
+    """launch.json as the launcher writes it in terminal mode, with the test process standing in for main's `claude`.
+    `transport` beside `mode` (0.9.0's launch.json, local.transport): local for terminal mode, server for browser mode."""
     sf.ensure(ws)
     rec = {"session": session, "at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "fenced": True,
-           "switches": {}, "unset": [], "pid": os.getpid() if pid is None else pid, "mode": mode, **more}
+           "switches": {}, "unset": [], "pid": os.getpid() if pid is None else pid, "mode": mode,
+           "transport": "local" if mode == "terminal" else "server", **more}
     sf.launch_path(ws).write_text(json.dumps(rec), "utf-8")
 
 

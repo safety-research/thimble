@@ -18,7 +18,9 @@
 // the server does not know, leaves it idle until the next /thimble. Anywhere else it registers nothing and fetches
 // nothing, and looks at nothing but that marker's file system entry at session.start and once per turn of main's. It
 // starts no process: $.http.fetch only, every request proving the token of server.json and every answer proving it
-// back (app/hook_auth.py), so a process on the port can neither hand it requests nor read them.
+// back (app/hook_auth.py), so a process on the port can neither hand it requests nor read them. The terminal UI, which
+// register.ts registers after this file in the plugin's one hooks module, also turns it on when it turns thimble on in
+// the session (bridgeActivated).
 //
 // The file guard (tool.call), from the moment the scope check passes: it refuses a call of a file tool (Read, Edit,
 // Write, MultiEdit, NotebookEdit, Grep, Glob) on thimble's token files, a call of an edit tool on thimble's records or,
@@ -68,6 +70,8 @@
 // plan mode as its poll sees it, and what it could not register (backend/app/module_bridge.py has the file's form).
 // After /clear it appends the notes --rekey left for the new main in subagents.json (`module.notes`).
 import type { EngineInterface, Register } from 'claude-code'
+
+import type { Activated } from './term/types'
 
 type Engine = EngineInterface
 type Json = Record<string, unknown>
@@ -1015,8 +1019,25 @@ async function expanded($: Engine, m: State): Promise<boolean> {
   return !reported
 }
 
+// the module memory of the latest register (one per load of the module), for bridgeActivated
+const live: { m: State | null } = { m: null }
+
+/** thimble turned on in this session by the terminal UI (term/activate.ts, C13 of the 0.9.0 build): register thimble's
+ *  agent types and turn the bridge on in this turn. Idempotent. SCAFFOLD STUB: 0.8.0's start, once, as session.start
+ *  does for a session the launcher started: terminal mode's files unless the workspace's launch.json says
+ *  `transport: "server"` or `mode: "browser"`. */
+export async function bridgeActivated($: Engine, a: Activated): Promise<void> {
+  const m = live.m
+  if (!m || m.active || !(await moduleOn($))) return
+  const launch = await readJson($, `${a.path.replace(/\/+$/, '')}/trusted/launch.json`)
+  m.active = true
+  if (launch !== null && launch.transport !== 'server' && launch.mode !== 'browser') await fileBegin($, m, a.cwd, a.path, launch)
+  else await begin($, m, a.cwd, 0)
+}
+
 export const register: Register = on => {
   const m = fresh()
+  live.m = m
 
   on('session.start', async ($, e, next) => {
     const r = await next(e)

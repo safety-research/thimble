@@ -1319,6 +1319,13 @@ async def _run_on_cards(c: str, ids: list[str], since: str | None) -> None:
             log.exception("%s: check %s did not run on the cards after main's turn", c, cid)
 
 
+def answer_ended(c: str, turn: dict[str, Any]) -> None:
+    """Main's turn ended with an answer (0.9.0 contract C10, called by the mirror after _cards_checked): `turn` is
+    {sid, turn, rows: [{uuid, text}], tools: [{name, input}], at}. Each shown check that covers answers would read a data
+    turn's answer, never waking main. SCAFFOLD STUB (features lane): it does nothing."""
+    return None
+
+
 def on_report(c: str, event: dict[str, Any]) -> None:
     """report_types._emit's record: a save that changed text marks the shown checks stale on that document (mark_stale);
     a writer's end starts them (_writer_ended)."""

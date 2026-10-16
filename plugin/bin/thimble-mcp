@@ -7,9 +7,11 @@ the file under backend/.venv's Python through bin/thimble-python; Python reads t
 
 Tools are listed from disk (app.tools.list, schemas from prompts/tools.md), so the list is the same whether the server
 is up or down. In the analyst's session in a folder that is no workspace yet (in_workspace), outside terminal mode, the
-shim lists no tools and sends no instructions, so a session that never opens thimble carries none of them; it looks
-every RETRY_S whether the folder has become one (/thimble registers it), then lists the tools and tells Claude Code once
-that the list changed (notifications/tools/list_changed; watch_workspace). A call is POST {server}/api/tools/<name> with
+shim lists one deferred tool, load_thimble (0.9.0; a call turns thimble on in the folder and answers its guide), and
+sends no instructions, so a session that never opens thimble carries only that tool's name; it looks every RETRY_S
+whether the folder has become one (/thimble or load_thimble registers it), then lists the tools and tells Claude Code
+once that the list changed (notifications/tools/list_changed; watch_workspace). Each listing is recorded for the session
+in <home>/up/<sid>/listed.json (app/activate.py write_listed). A call is POST {server}/api/tools/<name> with
 {args, actor, cwd, session, session_token, tool_use_id}; calls run concurrently and report MCP progress every
 PROGRESS_S, since Claude Code aborts a call that is silent for its idle timeout. The server's address and token are read
 per call from $THIMBLE_HOME/server.json. Every request to a tool route or the subscription proves the shim holds the
@@ -72,7 +74,7 @@ from mcp.server.stdio import stdio_server  # noqa: E402
 from mcp.shared.jsonrpc_dispatcher import JSONRPCDispatcher  # noqa: E402
 from pydantic import Field  # noqa: E402
 
-from app import cc_plugin, hook_auth, launch_mode, local, subagent_files, tools  # noqa: E402  (imports app.config, app.prompts, app.procs and starlette only)
+from app import activate, cc_plugin, hook_auth, launch_mode, local, subagent_files, tools  # noqa: E402  (imports app.config, app.prompts, app.procs and starlette only)
 
 logging.basicConfig(level=logging.WARNING, stream=sys.stderr, format="thimble-mcp %(levelname)s: %(message)s")
 log = logging.getLogger("thimble-mcp")
@@ -448,14 +450,34 @@ async def subscription(route: str) -> None:
 
 
 def _set_tools(server: MCPServer, entries: list[dict[str, Any]]) -> None:
-    """The tools `server` lists replaced by `entries`."""
+    """The tools `server` lists replaced by `entries`, recorded for this session (listed.json, C4)."""
     server._tool_manager._tools = {t.name: t for t in (_tool(e) for e in entries)}
+    activate.write_listed(session_id() or "", [e["name"] for e in entries])
+
+
+def _load_tool() -> Tool:
+    """load_thimble (0.9.0, C5), the one tool listed while the folder is no workspace (deferred: no `_meta`): a call
+    turns thimble on here (activate.tool_load, in this process) and answers its guide; watch_workspace lists the tools
+    once the folder is a workspace. SCAFFOLD STUB of the core lane's: the guide is 0.8.0's main prompt."""
+    entry = activate.LOAD_TOOL
+
+    async def fn(**kwargs: Any) -> mcp_types.CallToolResult:
+        try:
+            text = await anyio.to_thread.run_sync(activate.tool_load, cwd(), session_id() or "")
+        except Exception as e:  # noqa: BLE001 — the shim answers every call
+            return _error(str(e) or f"load_thimble failed: {type(e).__name__}")
+        return _result([{"type": "text", "text": text}], False)
+
+    fn.__name__ = entry["name"]
+    tool = Tool.from_function(fn, name=entry["name"], description=entry["description"])
+    tool.parameters = entry["input_schema"]
+    return tool
 
 
 async def watch_workspace(server: MCPServer, connection: Connection) -> None:
-    """While the shim lists no tools (listed): once Claude Code finished the handshake, look every RETRY_S whether
-    the folder is a workspace; when it is, list the tools and tell Claude Code once that the list changed (module
-    note)."""
+    """While the shim lists load_thimble alone (listed): once Claude Code finished the handshake, look every RETRY_S
+    whether the folder is a workspace; when it is, list the tools in its place and tell Claude Code once that the list
+    changed (module note)."""
     await connection.initialized.wait()
     while not in_workspace():
         await anyio.sleep(RETRY_S)
@@ -485,7 +507,7 @@ async def serve(server: MCPServer) -> None:
                 # connection, built here so watch_workspace can tell Claude Code the list changed
                 dispatcher = JSONRPCDispatcher(read_stream, write_stream, inline_methods=frozenset({"initialize"}))
                 connection = Connection.for_loop(dispatcher)
-                if not server._tool_manager.list_tools():  # build_server listed none (listed)
+                if [t.name for t in server._tool_manager.list_tools()] == [activate.LOAD_TOOL["name"]]:  # (listed)
                     tg.start_soon(watch_workspace, server, connection)
                 async with low.lifespan(low) as lifespan_context:
                     await serve_connection(low, dispatcher, connection=connection, lifespan_state=lifespan_context,
@@ -509,11 +531,14 @@ def tool_entries() -> list[dict[str, Any]]:
 
 
 def build_server() -> MCPServer:
-    """The MCP server, with the tools and the instructions, or with neither in a folder that is no workspace yet
-    (listed)."""
+    """The MCP server, with the tools and the instructions, or in a folder that is no workspace yet with no
+    instructions and load_thimble alone (listed). Each listing is recorded for the session (listed.json, C4)."""
     if not listed():
-        return MCPServer(tools.SERVER_NAME, instructions=None, tools=[])
-    return MCPServer(tools.SERVER_NAME, instructions=instructions() or None, tools=[_tool(e) for e in tool_entries()])
+        activate.write_listed(session_id() or "", [activate.LOAD_TOOL["name"]])
+        return MCPServer(tools.SERVER_NAME, instructions=None, tools=[_load_tool()])
+    entries = tool_entries()
+    activate.write_listed(session_id() or "", [e["name"] for e in entries])
+    return MCPServer(tools.SERVER_NAME, instructions=instructions() or None, tools=[_tool(e) for e in entries])
 
 
 if __name__ == "__main__":

@@ -1648,8 +1648,10 @@ def plugin_root() -> Path:
 PLUGIN_LIST_TIMEOUT_S = 10.0
 COPY_IGNORED = ("__pycache__", ".DS_Store")  # what running or browsing a plugin copy adds to it
 # files of plugin/ a release leaves out of the plugin's copy, or Claude Code's cache does not keep, which say nothing of
-# whether two copies run the same code: the module's tests, its type declarations and their TypeScript config
-COPY_LEFT_OUT = ("hooks/thimble.test.ts", ".claude-plugin/types", "tsconfig.json")
+# whether two copies run the same code: the module's tests (the terminal UI's with their fixtures), its type
+# declarations and their TypeScript config
+COPY_LEFT_OUT = ("hooks/thimble.test.ts", "hooks/tests", "hooks/term/tests", "hooks/term/types", "hooks/term/tsconfig.json",
+                 ".claude-plugin/types", "tsconfig.json")
 PLUGIN_DIFFERS_LINE = ("thimble: Claude Code's thimble plugin (thimble@{name} {version}) differs from this install's, so "
                        "this session also loads this install's copy. To update it: claude plugin marketplace update "
                        "{name} && claude plugin update thimble@{name}")
