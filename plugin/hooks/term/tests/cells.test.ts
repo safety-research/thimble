@@ -57,13 +57,20 @@ test('a diagram from its payload (from and to) and a timeline from its output dr
   expect(text('e0time00').join('\n')).toContain('peak afternoon')
 })
 
-test('an example card lists its records; a note is prose; a custom card its words; a code card what it printed', () => {
+test('an example card lists its records; a note is prose; a custom card its words or its table; a code card what it printed', () => {
   const ex = cardOfCell(of('a20ecb55')).card
   expect(ex.kind).toBe('example')
   expect(ex.examples!.map(x => x.ref)).toEqual(['README.md#L3', 'README.md#L5'])
   expect(text('a20ecb55').join('\n')).toContain('README.md line 3')
   expect(text('n0note00')).toEqual(['The dse wiki was used as a relay and as a message board.'])
   expect(text('c0cust00')).toEqual(['45%', 'of all saves landed in one afternoon'])
+  // a custom card's table is a table card; one with no words draws nothing of its own (its link opens the browser)
+  const table = '<h2>Saves</h2><table><tr><th>wiki</th><th>saves</th></tr><tr><td>dse</td><td>1,204</td></tr><tr><td>probier</td><td>88</td></tr></table>'
+  const custom = cardOfCell({ ...of('c0cust00'), payload: { html: table } } as ThimbleCell).card
+  expect(custom.kind).toBe('table')
+  expect(custom.columns).toEqual(['wiki', 'saves'])
+  expect(custom.rows).toEqual([['dse', 1204], ['probier', 88]])
+  expect(cardOfCell({ ...of('c0cust00'), payload: { html: '<canvas></canvas>' } } as ThimbleCell).card.note).toBe('')
   expect(text('k0code00')).toEqual(['revisions.jsonl 14591', 'events.jsonl 19913'])
 })
 

@@ -19,8 +19,8 @@
 // A passage of main's answer a check commented on (SPEC-v2 3.12) is tinted in the check's color (16%, 30% while its
 // comment is open in the panel) and carries a flag ⚑ in that color in the margin on its first row; its paragraph is
 // drawn by the mod's own layout (para.tsx, cite.ts), which knows where it wraps. A click on either opens the panel at
-// Checks. In fullscreen a card's border row ends with a ↗ that opens the card in the browser; a custom card says the
-// browser draws it.
+// Checks. In fullscreen a card's border row ends with a ↗ that opens the card in the browser; a custom card draws its
+// table or its words and a `view in browser ↗` link.
 import type { RenderElement, ResolveInput } from 'claude-code'
 
 import type { TermCard, TermLinks, TermVerdict } from './types'
@@ -647,19 +647,7 @@ export async function cardBlock(cx: Ctx, e: ResolveInput, id: string, w: number,
       hidden = left
     }
   }
-  if (tc.kind === 'custom') {
-    // a custom card is HTML: the browser draws it (its ↗ opens it there)
-    rows.push(
-      <Box key={`custom-${key}-${id}`} flexDirection="column">
-        {opts.pane ? null : <Text bold wrap="truncate-end">{cut(data.question, inner)}</Text>}
-        {opts.pane ? null : <Text> </Text>}
-        <Box flexDirection="row">
-          <Text dimColor>{fullscreen ? 'a custom card · the browser draws it' : 'a custom card · the browser draws it ↗'}</Text>
-          {fullscreen ? <Button key={`custom-open-${key}-${id}`} label=" ↗" plain onPress={() => openInBrowser(cx, `card:${id}`)} /> : null}
-        </Box>
-      </Box>,
-    )
-  } else if (live) {
+  if (live) {
     const { Client } = cx.els(e)
     rows.push(<Client key={`card-${key}-${id}`} module="./card.tsx" width={inner} props={JSON.parse(JSON.stringify({ card: data, cols: inner, meta, ...(opts.pane ? { pane: true, plotRows: 16 } : {}), ...(opts.focus ? { focus: opts.focus } : {}), ...(clip !== undefined ? { clip } : {}) }))} />)
   } else {
@@ -669,11 +657,22 @@ export async function cardBlock(cx: Ctx, e: ResolveInput, id: string, w: number,
     const body = lit >= 0 ? cardLayout(data, inner, lit).lines : first.lines
     rows.push(<Box flexDirection="column">{paintLines(Box, Text, [...(opts.pane ? [] : [[{ s: cut(data.question, inner), b: true }], []]), ...(clip !== undefined ? body.slice(0, clip) : body), ...state, ...(clip !== undefined ? [] : labelHead(data, inner).lines)])}</Box>)
   }
+  // a custom card is HTML: the terminal draws its table or its words (cell.ts cardOfCell), and its link opens the whole
+  // card in the browser (Matt, 2026-10-16: the link text is "view in browser")
+  const custom = tc.kind === 'custom'
+  if (custom && clip === undefined) {
+    rows.push(fullscreen
+      ? <Box key={`custom-row-${key}-${id}`} flexDirection="row"><Button key={`custom-open-${key}-${id}`} plain onPress={() => openInBrowser(cx, `card:${id}`)}><Text color={COLORS.link}>view in browser ↗</Text></Button></Box>
+      : <Text key={`custom-row-${key}-${id}`} color={COLORS.link}>view in browser ↗</Text>)
+  }
   if (clip !== undefined) {
     const { Button } = cx.els(e)
     rows.push(<Box key={`more-row-${key}`} flexDirection="row"><Button key={`more-${key}`} label={`… ${hidden.toLocaleString('en-US')} more`} plain dimColor onPress={opts.clip!.more} /></Box>)
-  } else {
-    if (opts.takeaway !== false && tc.takeaway.trim()) rows.push(<Box flexDirection="column" width={inner}>{await drawReply(cx, e, tc.takeaway, inner, { margin: 0, prefix: `tk-${key}-`, card: id })}</Box>)
+  } else if (opts.takeaway !== false && tc.takeaway.trim()) {
+    // a blank row between the label rows (or the custom card's link) and the takeaway, which would otherwise read as
+    // the takeaway's first line (Matt, 2026-10-16)
+    if (custom || labelHead(data, inner).lines.length) rows.push(<Text key={`gap-${key}-${id}`}> </Text>)
+    rows.push(<Box flexDirection="column" width={inner}>{await drawReply(cx, e, tc.takeaway, inner, { margin: 0, prefix: `tk-${key}-`, card: id })}</Box>)
   }
   const framed = (
     <Box flexDirection="column" width={w} borderStyle="round" borderColor={COLORS.rule} paddingX={1}>

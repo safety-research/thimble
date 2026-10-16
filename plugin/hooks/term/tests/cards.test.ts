@@ -118,6 +118,35 @@ test("a card whose script read a label shows the label's row, its values in thei
   await ui.unmount()
 })
 
+// the card's region (a Client), a blank row, then the takeaway
+const GAP = /"client":\{"plugin":"thimble"\}\},\{"type":"Text","children":\[" "\]\},\{"type":"Box".*The dse wiki has the most revisions\./
+
+test('a card with a label: a blank row between the label row and the takeaway', async ($, on) => {
+  const w = world(on)
+  Object.assign(w.cells.b0bar000!, { labels: ['d9b51617'], takeaway: 'The dse wiki has the most revisions.' })
+  await start($, w)
+  await turn($, w, 'b0bar000')
+  const ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
+  const json = JSON.stringify(await ui.drawn())
+  // the card's region ends with its label row; then the blank row; then the takeaway
+  expect(json).toMatch(GAP)
+  await ui.resize({ columns: 110, rows: 20, in: 'card-t0-b0bar000' })
+  expect(shown(await ui.drawn({ in: 'card-t0-b0bar000' }))).toMatch(/label {2}links through a fetch proxy ↗ {2}● proxy-link {2}● none$/)
+  await ui.unmount()
+})
+
+test('a card with no label: its takeaway right under the card', async ($, on) => {
+  const w = world(on)
+  w.cells.b0bar000!.takeaway = 'The dse wiki has the most revisions.'
+  await start($, w)
+  await turn($, w, 'b0bar000')
+  const ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
+  const json = JSON.stringify(await ui.drawn())
+  expect(json).toContain('The dse wiki has the most revisions.')
+  expect(json).not.toMatch(GAP)
+  await ui.unmount()
+})
+
 test("a timeline's axis names both its ends or neither: neither when the list under it starts and ends with them", () => {
   const { card } = cardOfCell(CELLS.e0time00 as unknown as ThimbleCell)
   const lines = cardLayout(card, 60, -1).lines.map(l => l.map(s => s.s).join(''))

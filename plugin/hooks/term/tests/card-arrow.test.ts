@@ -1,5 +1,5 @@
 // A card's ↗ (SPEC-v2 J3, 5.5 item 5): in fullscreen its border row ends with a ↗ that opens the card in the browser;
-// a custom card says the browser draws it, with the same ↗; the main screen (no clicks) draws no Button.
+// a custom card draws its words or table and a `view in browser ↗` link; the main screen (no clicks) draws no Button.
 // `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
@@ -39,19 +39,27 @@ test("in fullscreen a card's border row ends with a ↗ that opens the card in t
   await classic.unmount()
 })
 
-test('a custom card says the browser draws it, with the same ↗', SLOW, async ($, on) => {
+test('a custom card draws its words and a `view in browser` link that opens it there', SLOW, async ($, on) => {
   const w = panelWorld(on)
+  w.cells.c0cust00!.takeaway = 'Most saves came at once.'
   await withCard($, w, 'c0cust00')
   const ui = (await $.ui.mount(MESSAGE('r1', true))) as unknown as M
+  // the card's region: its question, then its words
+  const card = shown(await ui.drawn({ in: 'card-t0-c0cust00' }))
+  expect(card).toContain('How concentrated were the saves?')
+  expect(card).toContain('45%')
+  expect(card).toContain('of all saves landed in one afternoon')
   const text = shown(await ui.drawn())
-  expect(text).toContain('How concentrated were the saves?')
-  expect(text).toContain('a custom card · the browser draws it')
-  expect(text).not.toContain('45%')
+  expect(text).not.toContain('the browser draws it')
+  // under it the link, then a blank row, then the takeaway
+  expect(text).toMatch(/view in browser ↗ +Most saves came at once\./)
   await ui.press({ key: 'custom-open-t0-c0cust00' })
   await w.clock.settle()
   expect(w.pressed.at(-1)).toEqual(expect.arrayContaining(['--ref', 'card:c0cust00']))
   await ui.unmount()
   const classic = (await $.ui.mount(MESSAGE('r1', false))) as unknown as M
-  expect(shown(await classic.drawn())).toContain('a custom card · the browser draws it ↗')
+  expect(shown(await classic.drawn({ in: 'card-t0-c0cust00' }))).toContain('45%')
+  expect(shown(await classic.drawn())).toContain('view in browser ↗')
+  expect(JSON.stringify(await classic.drawn())).not.toContain('custom-open-t0-c0cust00')
   await classic.unmount()
 })
