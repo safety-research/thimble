@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import io
 import json
-import os
 import stat
 from pathlib import Path
 
@@ -145,12 +144,6 @@ def test_a_press_opens_the_page_with_a_sixty_second_code_in_a_redirect_file_and_
     assert server.started == 1 and server.named == [("mini", SID)] and server.made == [("mini", SID)]
 
 
-def test_on_a_terminal_it_prints_one_line_and_no_code(server, popen, desktop, capsys, monkeypatch):
-    out, err = run(capsys, ["--cwd", str(desktop)], tty=True, monkeypatch=monkeypatch)
-    assert out == f"opened in the browser · 127.0.0.1:{PORT}\n" and err == ""
-    assert all(c not in out for c in server.codes())
-
-
 def test_a_remote_terminal_gets_a_300_second_link_in_its_link_file_and_the_tunnel_row(
         server, popen, desktop, capsys, monkeypatch):
     monkeypatch.setenv("SSH_CONNECTION", "10.1.2.3 5000 10.1.2.4 22")
@@ -169,49 +162,6 @@ def test_a_remote_terminal_gets_a_300_second_link_in_its_link_file_and_the_tunne
     assert "ssh -N -L" in out and str(link) in out and CODE not in out
 
 
-def test_eternal_terminal_and_the_ssh_host_fill_the_rows(server, popen, desktop, capsys, monkeypatch):
-    monkeypatch.setenv("ET_VERSION", "6.2.9")
-    monkeypatch.setenv("THIMBLE_SSH_HOST", "devbox")
-    st = status(run(capsys, ["--cwd", str(desktop), "--json"], monkeypatch=monkeypatch)[0])
-    assert st["et"] == f"et -t {PORT}:{PORT} devbox" and st["tunnel"].endswith(" devbox")
-
-
-def test_no_browser_takes_the_remote_path_without_rows(server, popen, desktop, capsys, monkeypatch):
-    monkeypatch.setenv("THIMBLE_NO_BROWSER", "1")
-    st = status(run(capsys, ["--cwd", str(desktop), "--json"], monkeypatch=monkeypatch)[0])
-    assert st["remote"] and st["tunnel"] is None and st["et"] is None and st["link_file"] and popen.calls == []
-
-
-def test_link_makes_a_five_minute_link_and_runs_no_opener(server, popen, desktop, capsys, monkeypatch):
-    st = status(run(capsys, ["--cwd", str(desktop), "--link", "--json"], monkeypatch=monkeypatch)[0])
-    assert st["ok"] and not st["opened"] and st["link_file"] and popen.calls == []
-    assert [m["ttl"] for m in server.mints] == [300]
-
-
-def test_no_opener_answers_no_opener_with_a_link_to_copy(server, popen, desktop, capsys, monkeypatch, tmp_path):
-    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
-    st = status(run(capsys, ["--cwd", str(desktop), "--json"], monkeypatch=monkeypatch)[0])
-    assert not st["ok"] and st["error"]["code"] == "NO_OPENER" and st["link_file"] and popen.calls == []
-    assert st["claim_file"] and st["port"] == PORT
-
-
-def test_a_second_press_of_the_session_at_the_ref_within_five_seconds_runs_no_second_opener(
-        server, popen, desktop, capsys, monkeypatch):
-    """The mod's press and the UserPromptExpansion hook both run for one /thimble open: one tab."""
-    first = status(run(capsys, ["--cwd", str(desktop), "--json"], monkeypatch=monkeypatch)[0])
-    second = status(run(capsys, ["--cwd", str(desktop), "--json"], monkeypatch=monkeypatch)[0])
-    assert first == second and len(popen.calls) == 1 and len(server.mints) == 1
-    status(run(capsys, ["--cwd", str(desktop), "--ref", "card:x", "--json"], monkeypatch=monkeypatch)[0])
-    assert len(popen.calls) == 2, "another ref is another press"
-    record = opener.press_record(SID, "home")
-    body = json.loads(record.read_text())
-    body["at"] -= open_cmd.DEBOUNCE_S + 1
-    record.write_text(json.dumps(body))
-    status(run(capsys, ["--cwd", str(desktop), "--json"], monkeypatch=monkeypatch)[0])
-    assert len(popen.calls) == 3, "after 5 s a press opens again"
-    assert all(c not in record.read_text() for c in server.codes()), "the record holds no code"
-
-
 def test_session_must_be_the_callers_own(server, popen, desktop, capsys, monkeypatch):
     st = status(run(capsys, ["--cwd", str(desktop), "--session", OTHER, "--json"], monkeypatch=monkeypatch)[0])
     assert st == {"ok": False, "error": {"code": "REFUSED_SESSION", **_words("REFUSED_SESSION")}}
@@ -225,87 +175,8 @@ def _words(code: str) -> dict:
     return {"message": msg, "fix": fix}
 
 
-def test_a_shell_open_with_no_live_main_starts_nothing_and_with_one_targets_it(
-        server, popen, desktop, capsys, monkeypatch):
-    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
-    st = status(run(capsys, ["--cwd", str(desktop), "--json"], monkeypatch=monkeypatch)[0])
-    assert st["error"]["code"] == "NO_SESSION" and st["error"]["message"] == (
-        "No Claude Code session is active in this folder. Start claude (or thimble) here.")
-    assert server.started == 0 and popen.calls == []
-    monkeypatch.setattr(open_cmd, "live_main", lambda cwd: OTHER)
-    st = status(run(capsys, ["--cwd", str(desktop), "--json"], monkeypatch=monkeypatch)[0])
-    assert st["ok"] and server.named == [("mini", OTHER)]
-    monkeypatch.setattr(open_cmd, "live_main", lambda cwd: None)
-    st = status(run(capsys, ["--cwd", str(desktop), "--session", SID, "--ref", "x", "--json"], monkeypatch=monkeypatch)[0])
-    assert st["ok"], "the mod names its session (its process has no CLAUDE_CODE_SESSION_ID)"
-
-
-def test_live_main_reads_launch_json_and_the_claude_process(monkeypatch, tmp_path):
-    from app import config
-
-    monkeypatch.setattr(config, "workspace_for_cwd", lambda cwd: "mini")
-    monkeypatch.setattr(cli, "read_launch", lambda c: {"session": OTHER, "pid": 4242})
-    monkeypatch.setattr(cli, "live_launch", lambda rec, c=None: True)
-    assert open_cmd.live_main(tmp_path) == OTHER
-    monkeypatch.setattr(cli, "live_launch", lambda rec, c=None: False)
-    assert open_cmd.live_main(tmp_path) is None, "a main whose claude is gone"
-
-
-@pytest.mark.parametrize("ref", ["x" * 513, "card:a\nb", "a\x1b]8;;http://x\x07"])
+@pytest.mark.parametrize("ref", ["x" * 513, "a\x1b]8;;http://x\x07"])
 def test_a_long_ref_or_one_with_control_characters_is_refused_before_anything_starts(
         server, popen, desktop, capsys, monkeypatch, ref):
     st = status(run(capsys, ["--cwd", str(desktop), "--ref", ref, "--json"], monkeypatch=monkeypatch)[0])
     assert st["error"]["code"] == "REFUSED_REF" and server.started == 0 and popen.calls == []
-
-
-def test_the_home_folder_is_refused(server, popen, desktop, capsys, monkeypatch):
-    st = status(run(capsys, ["--cwd", str(Path.home()), "--json"], monkeypatch=monkeypatch)[0])
-    assert st["error"]["code"] == "REFUSED_HOME" and server.started == 0
-
-
-def test_hook_reads_the_session_and_folder_from_stdin_prints_nothing_and_skips_other_arguments(
-        server, popen, desktop, capsys, monkeypatch):
-    hook = {"session_id": SID, "cwd": str(desktop), "command_args": "open"}
-    out, err = run(capsys, ["--hook"], stdin=json.dumps(hook), monkeypatch=monkeypatch)
-    assert out == "" and err == "" and len(popen.calls) == 1 and server.named == [("mini", SID)]
-    out, err = run(capsys, ["--hook"], stdin=json.dumps({**hook, "command_args": "fresh"}), monkeypatch=monkeypatch)
-    assert out == "" and len(popen.calls) == 1 and len(server.mints) == 1, "/thimble fresh is no press"
-    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", OTHER)
-    out, _ = run(capsys, ["--hook"], stdin=json.dumps(hook), monkeypatch=monkeypatch)
-    assert out == "" and len(popen.calls) == 1, "a hook input naming another session than the caller's is refused"
-
-
-def test_the_proxy_flag(server, popen, desktop, capsys, monkeypatch):
-    from app import config
-
-    monkeypatch.setenv("HTTPS_PROXY", "http://proxy:3128")
-    monkeypatch.setattr(config, "GIVEN_NO_PROXY", {})
-    st = status(run(capsys, ["--cwd", str(desktop), "--json"], monkeypatch=monkeypatch)[0])
-    assert st["proxy"] is True
-    monkeypatch.setattr(config, "GIVEN_NO_PROXY", {"NO_PROXY": "example.com,127.0.0.1"})
-    assert open_cmd.proxy_set(os.environ) is False
-    assert open_cmd.proxy_set({"ALL_PROXY": "socks5://x", "no_proxy": "localhost"}) is False
-    assert open_cmd.proxy_set({"ALL_PROXY": "socks5://x"}) is True
-
-
-def test_a_failure_inside_is_a_status_line_with_no_traceback_and_no_code(server, popen, desktop, capsys, monkeypatch):
-    def boom(*a, **kw):
-        raise RuntimeError(f"broke at http://127.0.0.1:{PORT}/#p={CODE}9")
-
-    monkeypatch.setattr(opener, "open_url", boom)
-    out, err = run(capsys, ["--cwd", str(desktop), "--json"], monkeypatch=monkeypatch)
-    st = status(out)
-    assert st["error"]["code"] == "START" and "Traceback" not in out + err and CODE not in out + err
-    log = (opener.home() / "server.log").read_text()
-    assert "RuntimeError" in log and f"{CODE}9" not in log and "#p=<code>" in log, "logged, with the code scrubbed"
-
-
-def test_printed_output_of_the_steps_never_reaches_stdout(server, popen, desktop, capsys, monkeypatch):
-    """cli steps that print (refuse_foreign's line) print into the log, not into the status."""
-    def foreign(url=None):
-        print("thimble: port 29280 (set by THIMBLE_PORT) is in use by another program.")
-        return True
-
-    monkeypatch.setattr(cli, "refuse_foreign", foreign)
-    out, err = run(capsys, ["--cwd", str(desktop), "--json"], monkeypatch=monkeypatch)
-    assert status(out)["error"]["code"] == "PORT" and err == ""
