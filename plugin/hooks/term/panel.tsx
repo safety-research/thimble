@@ -30,7 +30,7 @@ import type { BoxProps, ButtonProps, ElementConstructor, MatchedEvent, RenderEle
 
 import type { ChatNavStep, ChatThread, TermPanel, TermThread, TermThreadRow, TermVerdict } from './types'
 import type { ThimbleLabel } from './cell'
-import { ACCENT, FRESH, LINK, MARGIN_W, controlsEl, fieldEls, fitHints, fitTo, freshSeg, hasMargin, headerEls, hintLines, hintsEl, lineEl, linkSeg, marginKey, pointed, ruleEl, setBrowser, setHead, spread, subLine, takeBrowser, takeHead } from './chrome'
+import { ACCENT, FRESH, LINK, MARGIN_W, actionEl, controlsEl, fieldEls, fitHints, fitTo, freshSeg, hasMargin, headerEls, hintLines, hintsEl, lineEl, linkSeg, marginKey, pointed, ruleEl, setBrowser, setHead, spread, subLine, takeBrowser, takeHead } from './chrome'
 import { chipLook, chipName, citeLabel, plainCites, quoteSpan, quotedWords, wrapAround } from './cite'
 import { MAX_BARS, MAX_NODES, MAX_TABLE_ROWS, amount, cardLayout, cut, cutRef, demojibake, labelHead, lineWidth, placeWords, shade, share, shares, turnTimes, valueColour, width, wrapRows } from './draw'
 import type { BarRow, CardData, Cell, Item, Layout, Line, Seg } from './draw'
@@ -2567,14 +2567,14 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
     rows.push(
       <Box key="lb-running" flexDirection="row" columnGap={2} flexWrap="wrap">
         <Text>{`◌ labeling ${running.limit ? `a sample of ${num(running.limit)}` : `all ${scopeN !== null ? num(scopeN) : ''} ${unit}`.replace(/\s+/g, ' ')}`}</Text>
-        <Button key="lb-stop" label="stop" plain onPress={stop} />
+        {actionEl(els, 'lb-stop', 'stop', stop)}
       </Box>,
     )
   else if (st.running)
     rows.push(
       <Box key="lb-running" flexDirection="row" columnGap={2} flexWrap="wrap">
         <Text>{labelStateWords(st)}</Text>
-        {follower ? <Button key="lb-stop" label="stop" plain onPress={stop} /> : null}
+        {follower ? actionEl(els, 'lb-stop', 'stop', stop) : null}
       </Box>,
     )
   else if (labelRenaming === id && e.surface !== 'mobile')
@@ -2586,7 +2586,7 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
           <Input key={fieldKey(`lb-name-${id}`)} value={name} autoFocus submitLabel="rename" onSubmit={v => void rename(v)} />
         </Box>
         <Text>{'  '}</Text>
-        <Button key="lb-rename-keep" label="keep the name" plain onPress={() => void keepName()} />
+        {actionEl(els, 'lb-rename-keep', 'keep the name', () => void keepName())}
       </Box>,
     )
   else if (labelDeleting === id)
@@ -2594,18 +2594,18 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
     rows.push(
       <Box key="lb-delete" flexDirection="row" flexWrap="wrap">
         <Text>{`delete label "${name}"? its marks and card go too · `}</Text>
-        <Button key="lb-delete-yes" label="y to delete" plain onPress={() => void deleteIt()} />
+        {actionEl(els, 'lb-delete-yes', 'y to delete', () => void deleteIt())}
         <Text>{' · '}</Text>
-        <Button key="lb-delete-no" label="n to keep" plain onPress={() => void keepIt()} />
+        {actionEl(els, 'lb-delete-no', 'n to keep', () => void keepIt())}
       </Box>,
     )
   else
     rows.push(
       <Box key="lb-runs" flexDirection="row" columnGap={2} flexWrap="wrap">
-        <Button key="lb-sample" label="run on a sample" plain onPress={() => void run(sample)()} />
-        <Button key="lb-all" label={scopeN !== null ? `run on all ${num(scopeN)}` : 'run on all'} plain onPress={() => void run(0)()} />
-        <Button key="lb-rename" label="rename" plain onPress={() => void askRename()} />
-        <Button key="lb-delete" label="delete" plain onPress={() => void askDelete()} />
+        {actionEl(els, 'lb-sample', 'run on a sample', () => void run(sample)())}
+        {actionEl(els, 'lb-all', scopeN !== null ? `run on all ${num(scopeN)}` : 'run on all', () => void run(0)())}
+        {actionEl(els, 'lb-rename', 'rename', () => void askRename())}
+        {actionEl(els, 'lb-delete', 'delete', () => void askDelete())}
         <Text dimColor>{lastWords}</Text>
       </Box>,
     )

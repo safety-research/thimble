@@ -253,6 +253,28 @@ test("a prompt label's panel has a `model:` row, the model its calls run on; its
   await pane.unmount()
 })
 
+test("the label panel's actions read as buttons: `run on a sample`, `run on all N`, `rename` and `delete` in the accent", async ($, on) => {
+  // Matt (v9 review, item m): they read as text; Claude Code draws the choice to press in its accent
+  const w = world(on)
+  let pane = await labelPanel($, w)
+  // an action: a Button whose words are one Text in the accent
+  const action = async (key: string) => {
+    const b = await pane.find({ type: 'Button', key })
+    const t = b?.children[0] as { type?: string; props?: { color?: string }; text?: string } | undefined
+    return { words: b?.text, tag: t?.type, color: t?.props?.color }
+  }
+  for (const [key, words] of [['lb-sample', 'run on a sample'], ['lb-all', 'run on all 14,591'], ['lb-rename', 'rename'], ['lb-delete', 'delete']] as const) expect(await action(key)).toEqual({ words, tag: 'Text', color: 'suggestion' })
+  // the last run stays dim beside them, no button
+  expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Text","props":{"dimColor":true},"children":["last run on all 14,591"]}')
+  // the question a delete asks: its answers are actions too
+  await pane.press({ key: 'lb-delete' })
+  await w.clock.settle()
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  for (const [key, words] of [['lb-delete-yes', 'y to delete'], ['lb-delete-no', 'n to keep']] as const) expect(await action(key)).toEqual({ words, tag: 'Text', color: 'suggestion' })
+  await pane.unmount()
+})
+
 test("a prompt label whose last run read some whole files only in part says so under its counts, in tokens", async ($, on) => {
   // the browser's Labels pane has the same line (backend concepts.read_cut), until a run of the label cuts none
   const w = world(on)
