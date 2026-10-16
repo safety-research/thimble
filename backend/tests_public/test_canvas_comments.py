@@ -3,7 +3,8 @@ main's turn end on the cards it has not seen, as a follow-on start through thimb
 lists the cards and a plan card's steps; its add_comment takes a covered card or step and stores the comment's
 statement (`text`) and its `details`; Done hides a comment, and one resolved as known before 0.7.0 reads as resolved; a
 run's end supersedes its check's earlier comments on what it covered; main's run_check with `on: cards` gives the exact
-Agent call. A workspace that stored Important details under its former id keeps its check and its comments. The
+Agent call. main's add_comment on a document keeps its details, and the analyst's own comment beside it stays whole
+(the only test left of a comment on a document). A workspace that stored Important details under its former id keeps its check and its comments. The
 built-ins, Judgment calls, Unverifiable and Important details, each cover the documents and the cards; only Important
 details is on until the analyst turns a check on or off, and these tests turn the other two off as the analyst would.
 The module is the fake bridge (subagent_fakes); an agent's end is subagents.run_ended. A plan card is the plan kind,
@@ -283,6 +284,29 @@ async def test_run_check_on_the_cards_gives_the_exact_agent_call(board, bridge):
     assert risks["covers"] == ["cards"] and risks["shown"]
     res = await tools.call(CORPUS, "run_check", {"name": "Risks", "on": "pages"})
     assert res.is_error and "`on` is one of documents, cards" in res.text
+
+
+async def test_main_s_add_comment_on_a_document_keeps_its_details_and_the_analyst_s_own_comment_stays_whole(board):
+    r = await tools.call(CORPUS, "write_document", {"doc": "report", "text": "# One\n\n## A\n\nAll the deletions came "
+                                                    "from one account. Most were in March.\n"}, actor="analyst")
+    assert not r.is_error, r.text
+    d = report_types.read_doc(CORPUS, investigation.MAIN, "report")
+    first, second = (x["id"] for x in report_types.all_sentences(d))
+    cid = _card("Who deleted pages?")
+    res = await tools.call(CORPUS, "add_comment", {"ref": f"report:report#{first}", "text": "Two accounts deleted "
+                                                   f"pages, not one [[card:{cid}]].", "details": f"- The table counts "
+                                                   f"two accounts [[2|card:{cid}]].\n- The second made 3 of 40."})
+    assert not res.is_error, res.text
+    await report_types.post_comment(CORPUS, investigation.MAIN, "report",
+                                    report_types.CommentBody(sentence_id=second, text="Check this. And March too."))
+    mine, yours = report_types.read_doc(CORPUS, investigation.MAIN, "report")["comments"]
+    assert (mine["author"], mine["text"]) == ("claude", "Two accounts deleted pages, not one.")
+    assert mine["details"] == f"- The table counts two accounts [[2|card:{cid}]].\n- The second made 3 of 40."
+    assert mine["evidence"] == f"card:{cid}"
+    assert (yours["author"], yours["text"], yours["details"]) == ("analyst", "Check this. And March too.", "")
+    lines = report_types.document_text(CORPUS, report_types.read_type(CORPUS, "report"),
+                                       report_types.read_doc(CORPUS, investigation.MAIN, "report"), True)
+    assert f"#{first} · claude · Two accounts deleted pages, not one. — - The table counts two accounts" in lines
 
 
 def test_main_s_turn_end_in_the_mirror_asks_the_checks_over_the_cards(board, monkeypatch):
