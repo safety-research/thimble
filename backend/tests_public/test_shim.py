@@ -1,14 +1,17 @@
-"""plugin/bin/thimble-mcp: in the analyst's session in a workspace it subscribes to the server's `GET /api/events` with
-its folder, its session id, its parent's pid and the route its session hears events by (`hook`, or `monitor` where
-Claude Code's settings turn hooks off, app.cc_plugin.route), declares no experimental capability and writes nothing but
-its answers. In a folder that is no workspace yet it lists no tools, sends no instructions and makes no request, until
-/thimble registers the folder: then it lists the tools and says once that the list changed. It passes each tool call
-on to the server with the id Claude Code gave it. Every request proves the token in server.json and the shim believes
-only an answer that proves it too (app/hook_auth.py). The server here is a stand-in."""
+"""plugin/bin/thimble-mcp: before thimble is on in a session it lists load_thimble alone, deferred, with its search
+hint, gives no instructions in any session and makes no request; a call of load_thimble turns thimble on, lists main's
+tools in its place with one list_changed, records the tools/list that follows (listed.json) and answers thimble's
+guidance, marked sent only when no mod runs in the session. Once thimble is on, each call runs by the session's
+transport, read per call: in the shim's own process before the press, posted to the server after it, where the shim
+also subscribes to the server's `GET /api/events` with its folder, its session id, its parent's pid and the route its
+session hears events by (`hook`, or `monitor` where Claude Code's settings turn hooks off, app.cc_plugin.route). It
+passes each tool call on with the id Claude Code gave it. Every request proves the token in server.json and the shim
+believes only an answer that proves it too (app/hook_auth.py). The server here is a stand-in."""
 from __future__ import annotations
 
 import json
 import os
+import re
 import select
 import signal
 import subprocess
@@ -137,18 +140,40 @@ def _run(tmp_path: Path, port: int, wait_s: float, until: Any, send: list[dict] 
         _stop(p)
 
 
+SID = "s-123"  # the session the shims below serve (CLAUDE_CODE_SESSION_ID)
+
+
+def _on(tmp_path: Path, transport: str | None, sid: str = SID, mod: bool = False) -> Path:
+    """Thimble on for session `sid` in the workspace of MINI, as activate.activate leaves it: the session marker in the
+    test's home and launch.json naming the session main on `transport` (local or server); with None, thimble is off.
+    The workspaces folder, which the shim's environment names (THIMBLE_WORKSPACES_DIR)."""
+    ws = tmp_path / "ws"
+    (ws / "mini" / "trusted").mkdir(parents=True, exist_ok=True)
+    if transport is None:
+        return ws
+    up = tmp_path / "home" / "up"
+    up.mkdir(parents=True, exist_ok=True)
+    (up / f"{sid}.active").write_text(json.dumps({"cwd": str(MINI), "ws": "mini", "path": str(ws / "mini"),
+                                                   "via": "command", "role": "main", "mod": mod, "at": time.time()}))
+    (ws / "mini" / "trusted" / "launch.json").write_text(json.dumps(
+        {"session": sid, "transport": transport, "mode": "terminal" if transport == "local" else "browser"}))
+    return ws
+
+
 def _start(tmp_path: Path, port: int | None, parent: list[str] | None = None,
-           extra: dict | None = None) -> subprocess.Popen:
+           extra: dict | None = None, on: str | None = "server") -> subprocess.Popen:
     """The shim as a child process (of a stand-in `claude` with `parent`), its server the stand-in on `port`, recorded
-    in server.json with TOKEN; with `port` None there is no server.json."""
+    in server.json with TOKEN; with `port` None there is no server.json. `on` is the transport of the session thimble is
+    on in (_on): the server's by default, as after a press; None for a session thimble is off in."""
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
+    ws = _on(tmp_path, on)
     if port is not None:
         (home / "server.json").write_text(json.dumps({"port": port, "api": f"http://127.0.0.1:{port}", "token": TOKEN}))
     claude = fake_claude_bin(home, {"loggedIn": True, "authMethod": "claude.ai"})
     (tmp_path / "cc").mkdir(exist_ok=True)
     env = {**os.environ, "THIMBLE_HOME": str(home), "THIMBLE_CWD": str(MINI), "CLAUDE_CONFIG_DIR": str(tmp_path / "cc"),
-           "CLAUDE_CODE_SESSION_ID": "s-123", "THIMBLE_CLAUDE_BIN": str(claude)}
+           "CLAUDE_CODE_SESSION_ID": SID, "THIMBLE_CLAUDE_BIN": str(claude), "THIMBLE_WORKSPACES_DIR": str(ws)}
     env.pop("THIMBLE_SKIP_KEY", None)
     env.pop("THIMBLE_MODE", None)
     for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_PROFILE"):
@@ -212,7 +237,7 @@ def test_the_shim_subscribes_with_its_route_and_writes_only_its_answers(tmp_path
         _stop(p)
     init = next(m for m in out if m.get("id") == 0)
     assert not init["result"]["capabilities"].get("experimental")
-    assert "/thimble" in init["result"]["instructions"] and len(init["result"]["instructions"].encode()) < 2048
+    assert not init["result"].get("instructions"), "no instructions in any session"
     assert init["result"]["capabilities"]["tools"]["listChanged"] is True
     assert not [m for m in out if "method" in m], "no notification of its own"
     q = server.queries[0]
@@ -271,49 +296,200 @@ def test_a_session_name_counts_only_with_its_token(tmp_path, server):
 
 
 LIST = {"jsonrpc": "2.0", "id": 5, "method": "tools/list", "params": {}}
+LOAD = {"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": "load_thimble", "arguments": {}}}
 
 
-def test_outside_a_workspace_the_shim_lists_nothing_and_asks_nothing_until_the_folder_becomes_one(tmp_path, server):
-    """A plain `claude` session in a folder thimble never opened: no tools, no instructions and no request to the
-    server, so the session carries none of thimble's tools. Once /thimble registers the folder (here: it becomes a
-    corpus folder), the shim says once that its tool list changed, lists the tools and subscribes."""
-    data = tmp_path / "data"
-    folder = data / "late"
-    folder.mkdir(parents=True)
-    p = _start(tmp_path, server.port, extra={"THIMBLE_DATA_DIR": str(data), "THIMBLE_CWD": str(folder)})
+def _read_id(p: subprocess.Popen, rid: int, wait_s: float) -> list[dict]:
+    """The messages the shim writes until its answer to the request `rid`, or `wait_s`."""
+    out: list[dict] = []
+    end = time.monotonic() + wait_s
+    while time.monotonic() < end and not any(m.get("id") == rid for m in out):
+        out += _read(p, lambda: False, 0.3)
+    return out
+
+
+def _listed(out: list[dict], rid: int) -> list[dict]:
+    return next(m for m in out if m.get("id") == rid)["result"]["tools"]
+
+
+def _shim_module():
+    """plugin/bin/thimble-mcp loaded as a module, for its functions."""
+    import importlib.machinery
+    import importlib.util
+
+    loader = importlib.machinery.SourceFileLoader("thimble_mcp_under_test", str(SHIM))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
+def test_the_placement_follows_the_server_s_always_load_in_mcp_json(tmp_path, monkeypatch):
+    """plugin/.mcp.json sets no server alwaysLoad (live check LC12's main path), so load_thimble is deferred with its
+    search hint and thimble's tools carry alwaysLoad true; with 0.8.0's `alwaysLoad: true` there, the fallback:
+    load_thimble's alwaysLoad false and nothing on the others."""
+    conf = json.loads((SHIM.parents[1] / ".mcp.json").read_text())
+    assert "alwaysLoad" not in conf["mcpServers"]["thimble"]
+    mod = _shim_module()
+    hint = {"anthropic/searchHint": "card plan chart table label classify records thimble"}
+    assert mod.placement() == "lc12"
+    assert mod.tool_meta(True) == hint and mod.tool_meta(False) == {"anthropic/alwaysLoad": True}
+    (tmp_path / "plugin" / "bin").mkdir(parents=True)
+    (tmp_path / "plugin" / ".mcp.json").write_text(json.dumps(
+        {"mcpServers": {"thimble": {**conf["mcpServers"]["thimble"], "alwaysLoad": True}}}))
+    monkeypatch.setattr(mod, "HERE", tmp_path / "plugin" / "bin" / "thimble-mcp")
+    assert mod.placement() == "fallback"
+    assert mod.tool_meta(True) == {**hint, "anthropic/alwaysLoad": False} and mod.tool_meta(False) is None
+
+
+def test_before_thimble_is_on_the_shim_lists_load_thimble_alone_and_asks_nothing(tmp_path, server):
+    """A plain `claude` session, here in a registered workspace (MINI) whose session marker is not there: load_thimble
+    alone, deferred, with its search hint (placement of live check LC12); no instructions, no notification and no
+    request to the server."""
+    p = _start(tmp_path, server.port, on=None)
     try:
         _send(p, [INITIALIZE, INITIALIZED, LIST])
-        out = _read(p, lambda: False, 3.0)  # more than one look (RETRY_S)
-        init = next(m for m in out if m.get("id") == 0)
-        assert "instructions" not in init["result"] or not init["result"]["instructions"]
-        assert init["result"]["capabilities"]["tools"]["listChanged"] is True
-        # 0.9.0: load_thimble alone (the scaffold's stub of C5), no instructions
-        assert [t["name"] for t in next(m for m in out if m.get("id") == 5)["result"]["tools"]] == ["load_thimble"]
-        assert not [m for m in out if "method" in m], "no list_changed while the folder is no workspace"
-        assert not server.queries and not server.calls and not server.refused, "no request to the server"
-        (folder / "manifest.json").write_text("{}")
-        out = _read(p, "notifications/tools/list_changed", 15)
-        assert [m["method"] for m in out if "method" in m] == ["notifications/tools/list_changed"]
+        out = _read(p, lambda: False, 3.0)  # more than one look for the marker (RETRY_S)
+    finally:
+        _stop(p)
+    init = next(m for m in out if m.get("id") == 0)
+    assert not init["result"].get("instructions")
+    assert init["result"]["capabilities"]["tools"]["listChanged"] is True
+    [tool] = _listed(out, 5)
+    assert tool["name"] == "load_thimble" and tool["inputSchema"] == {"type": "object", "properties": {}}
+    assert tool["_meta"] == {"anthropic/searchHint": "card plan chart table label classify records thimble"}
+    assert tool["description"].startswith("Turn on thimble in this session.")
+    assert not [m for m in out if "method" in m], "no list_changed while thimble is off"
+    assert not server.queries and not server.calls and not server.refused, "no request to the server"
+    assert not (tmp_path / "home" / "up").exists(), "nothing written"
+
+
+def test_the_shim_looks_for_the_marker_every_2_s_and_lists_the_tools_once_it_appears(tmp_path, server):
+    """An activation made outside the shim (the /thimble skill, a shell): the shim sees the session marker at its next
+    look, not sooner than RETRY_S (2 s) between looks, lists the tools with one list_changed and records the tools/list
+    that follows in listed.json."""
+    assert re.search(r"^RETRY_S = 2\.0\b", SHIM.read_text("utf-8"), re.M), "a look every 2 s, not faster"
+    p = _start(tmp_path, server.port, on=None)
+    try:
+        _send(p, [INITIALIZE, INITIALIZED, LIST])
+        out = _read_id(p, 5, 20)
+        assert [t["name"] for t in _listed(out, 5)] == ["load_thimble"]
+        _on(tmp_path, "local")
+        seen = time.monotonic()
+        out = _read(p, "notifications/tools/list_changed", 10)
+        assert time.monotonic() - seen < 3.5 and [m["method"] for m in out if "method" in m] == [
+            "notifications/tools/list_changed"]
         _send(p, [{**LIST, "id": 6}])
-        out = _read(p, lambda: False, 1.0)
-        listed = [t["name"] for t in next(m for m in out if m.get("id") == 6)["result"]["tools"]]
-        assert listed and "load_thimble" not in listed, "the tools are listed now, in load_thimble's place"
-        assert not [m for m in out if "method" in m], "said once"
-        end = time.monotonic() + 15
-        while not server.queries and time.monotonic() < end:
-            time.sleep(0.05)
-        assert server.queries and server.queries[0]["cwd"] == str(folder)
+        out = _read(p, lambda: False, 1.5)
+        names = [t["name"] for t in _listed(out, 6)]
+        assert "load_thimble" not in names and "add_card" in names and len(names) == 36
+        assert all(t["_meta"] == {"anthropic/alwaysLoad": True} for t in _listed(out, 6))
+        rec = json.loads((tmp_path / "home" / "up" / SID / "listed.json").read_text())
+        assert rec["names"] == sorted(names) and rec["count"] == 36 and rec["at"] > seen
+    finally:
+        _stop(p)
+    assert not server.queries, "the local transport subscribes to nothing"
+
+
+def _corpus(tmp_path: Path) -> Path:
+    d = tmp_path / "corpus"
+    d.mkdir()
+    (d / "events.jsonl").write_text('{"a": 1}\n')
+    return d
+
+
+@pytest.mark.parametrize("mod", [False, True])
+def test_load_thimble_turns_thimble_on_lists_the_tools_and_answers_the_guide(tmp_path, server, mod):
+    """A call of load_thimble in a data folder thimble never opened: the session is activated (via `tool`), main's
+    tools are listed in load_thimble's place with one list_changed, Claude Code's tools/list that follows is recorded
+    (listed.json, with `at`), and the answer is thimble's guidance with the session's lead line. With no mod the shim
+    marks the guide sent; where `thimble activate --mod` ran first, the mod marks it once the row is stored, so the
+    guide stays owed here."""
+    folder = _corpus(tmp_path)
+    p = _start(tmp_path, server.port, on=None, extra={"THIMBLE_CWD": str(folder)})
+    env_home = tmp_path / "home"
+    try:
+        _send(p, [INITIALIZE, INITIALIZED])
+        _read(p, lambda: False, 0.5)
+        if mod:
+            subprocess.run([sys.executable, "-m", "app.activate", "activate", "--cwd", str(folder), "--session", SID,
+                            "--via", "data", "--mod", "--json"], cwd=str(config.REPO_ROOT / "backend"), check=True,
+                           env={**os.environ, "THIMBLE_HOME": str(env_home),
+                                "THIMBLE_WORKSPACES_DIR": str(tmp_path / "ws")}, capture_output=True, timeout=60)
+        started = time.time()
+        _send(p, [LOAD])
+        out = _read(p, "notifications/tools/list_changed", 60)
+        assert [m["method"] for m in out if "method" in m] == ["notifications/tools/list_changed"]
+        _send(p, [{**LIST, "id": 8}])
+        out += _read_id(p, 7, 30)
+        out += _read(p, lambda: False, 0.5)
+    finally:
+        _stop(p)
+    names = [t["name"] for t in _listed(out, 8)]
+    assert "load_thimble" not in names and len(names) == 36
+    answer = next(m for m in out if m.get("id") == 7)["result"]
+    assert not answer["isError"], answer
+    text = answer["content"][0]["text"]
+    marker = (env_home / "up" / SID / "guide-marker").read_text().strip()
+    assert text.startswith(f"thimble guidance {marker}: thimble is on in this folder.") and "# thimble" in text
+    rec = json.loads((env_home / "up" / SID / "listed.json").read_text())
+    assert rec["count"] == 36 and rec["at"] >= started
+    marker_rec = json.loads((env_home / "up" / f"{SID}.active").read_text())
+    assert marker_rec["mod"] is mod and marker_rec["via"] == ("data" if mod else "tool")
+    sent = json.loads((env_home / "up" / SID / "guide.json").read_text()) if (env_home / "up" / SID / "guide.json").exists() else {}
+    assert bool(sent.get("digest")) is (not mod)
+    assert len([m for m in out if m.get("method") == "notifications/tools/list_changed"]) == 1, "one list_changed"
+
+
+def test_load_thimble_in_a_refused_folder_answers_the_refusal(tmp_path, server):
+    p = _start(tmp_path, server.port, on=None, extra={"THIMBLE_CWD": "/"})
+    try:
+        _send(p, [INITIALIZE, INITIALIZED, LOAD])
+        out = _read(p, lambda: False, 5.0)
+    finally:
+        _stop(p)
+    answer = next(m for m in out if m.get("id") == 7)["result"]
+    assert answer["isError"] and "thimble does not open this folder" in answer["content"][0]["text"]
+    assert not [m for m in out if "method" in m]
+
+
+def test_listed_json_is_written_again_for_a_new_session_id(tmp_path, server):
+    """/clear and /resume give the session a new id, which the shim reads from Claude Code's record of its parent:
+    it keeps its tools listed and writes listed.json for the new id."""
+    p = _start(tmp_path, server.port, parent=["--stand-in"], on="local")
+    sessions = tmp_path / "cc" / "sessions"
+    sessions.mkdir(parents=True, exist_ok=True)
+    try:
+        _send(p, [INITIALIZE, INITIALIZED, LIST])
+        out = _read_id(p, 5, 20)
+        assert len(_listed(out, 5)) == 36, "thimble is on in the session"
+        (sessions / f"{p.pid}.json").write_text(json.dumps({"sessionId": "s-new"}))
+        path = tmp_path / "home" / "up" / "s-new" / "listed.json"
+        end = time.monotonic() + 10
+        while not path.exists() and time.monotonic() < end:
+            time.sleep(0.1)
+        assert path.exists() and json.loads(path.read_text())["count"] == 36
     finally:
         _stop(p)
 
 
-def test_a_folder_whose_last_launch_was_in_terminal_mode_is_in_browser_mode_without_thimble_mode(tmp_path, server):
-    """The launcher sets THIMBLE_MODE for a session it starts in terminal mode. A plain `claude` session in a folder
-    whose launch.json still says terminal mode is in browser mode (/thimble opens the folder so), so the shim
-    subscribes to the server, which a terminal-mode shim never does."""
-    ws = tmp_path / "ws"
-    (ws / "mini" / "trusted").mkdir(parents=True)
-    (ws / "mini" / "trusted" / "launch.json").write_text(json.dumps({"session": "s-123", "mode": "terminal"}))
-    _run(tmp_path, server.port, wait_s=15, until=lambda: bool(server.queries),
-         extra={"THIMBLE_WORKSPACES_DIR": str(ws)})
-    assert server.queries and server.queries[0]["cwd"] == str(MINI)
+def test_the_transport_is_read_per_call(tmp_path, server):
+    """A session on the server's transport posts its calls to the server; once launch.json names the local transport
+    a call runs in the shim's process and reaches no server, with no restart of the shim."""
+    call = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "message_orientation", "arguments": {"message": "first"}}}
+    p = _start(tmp_path, server.port, on="server")
+    try:
+        _send(p, [INITIALIZE, INITIALIZED, call])
+        _read(p, lambda: bool(server.calls), 15)
+        assert [body["args"]["message"] for _, body in server.calls] == ["first"]
+        _on(tmp_path, "local")
+        _send(p, [{**call, "id": 2, "params": {**call["params"], "arguments": {"message": "second"}}}])
+        out = _read(p, lambda: False, 0.1)
+        end = time.monotonic() + 60
+        while not any(m.get("id") == 2 for m in out) and time.monotonic() < end:
+            out += _read(p, lambda: False, 0.5)
+        assert any(m.get("id") == 2 for m in out), "the local call answered"
+    finally:
+        _stop(p)
+    assert [body["args"]["message"] for _, body in server.calls] == ["first"], "the second never reached the server"

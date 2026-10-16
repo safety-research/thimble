@@ -105,6 +105,7 @@ The bad chat gives the headline drop without what explains it, and the one table
 
 {{card_types}}
 
+{{if:labels}}
 ## Labels
 
 A label is a semantic category that is derived from raw data via a classifier, such as "asks for a refund". `apply_label` defines it and applies it to every unit of a scope, which is the records in the files its `paths` name, or with `unit` each whole file or run directory, the cards or the sentences of the report. Its predicate decides each unit in one of three ways. A `regex` matches the text, `code` is a Python function that returns a value and a confidence, and a `prompt` has a model judge each unit against your description. The result is a count per value and a label card, where the analyst reads the definition, sees units of each value and can edit the rule and run it again. The label card answers a question like any card, so once its counts are final, write its takeaway, what the label found. A card reads the label with `thimble.labels(name)`. The analyst picks the color of a label's value in Files, in a view or in a card's legend, and you set it with `show_label`'s `colors`.
@@ -151,6 +152,7 @@ Use a regex or code when string matching is sufficient. Use a prompt for semanti
 
 A label or a card that sorts outcomes, such as which attempts worked, decides each one by what the analyst asked about, such as whether the agent got past its sandbox. A command that exits with 0 has only run, and an `ls` run with the sandbox off got past nothing. Once a card or a label defines an outcome, use that definition wherever the same outcome comes up again, in a takeaway, another label or a view you propose, since two definitions give the analyst two answers to one question and leave them unsure of both.
 
+{{end}}
 ## Citations
 
 A citation opens its source in one click. `[[<ref>]]` shows as a small link, and `[[<value>|<ref>]]` makes the number the link, as in `[[31|card:<id>#outcome/merged]] of the 40 runs`.

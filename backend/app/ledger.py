@@ -382,7 +382,8 @@ def with_features(stored: dict[str, Any], c: str | None = None) -> dict[str, Any
     `config_error`, the config's error or ''; `config_ignored`, the keys its files hold that this build reads and ignores
     (userconf.ignored); `agents`, agent_rows; `tasks`, task_rows; `card_wait`, the minutes a code ticket's question on its
     card waits (userconf.card_wait_s); PROPOSE_KEY, whether thimble shows view proposals (userconf.propose_views);
-    ASK_KEY, the key held with a click to ask in the browser (userconf.ask_key)."""
+    ASK_KEY, the key held with a click to ask in the browser (userconf.ask_key); FEATURES_KEY, the feature switches that
+    have no Settings row of their own (features.BLOCK_KEYS), each on or off."""
     from . import extensions, modes, userconf  # noqa: PLC0415 — they import this module
 
     kept = {k: v for k, v in stored.items() if k not in RETIRED_KEYS and k != modes.SETTING}
@@ -391,7 +392,15 @@ def with_features(stored: dict[str, Any], c: str | None = None) -> dict[str, Any
             "disabled_modes": sorted(modes.disabled()), "config_error": userconf.problem(c),
             "config_ignored": userconf.ignored(c), "agents": agent_rows(c), "tasks": task_rows(c),
             "card_wait": round(userconf.card_wait_s() / 60, 2), PROPOSE_KEY: userconf.propose_views(c),
-            ASK_KEY: userconf.ask_key()}
+            ASK_KEY: userconf.ask_key(), FEATURES_KEY: features_payload(c)}
+
+
+def features_payload(c: str | None) -> dict[str, bool]:
+    """FEATURES_KEY of the effective settings: each switch of features.BLOCK_KEYS, on or off."""
+    from . import features  # noqa: PLC0415
+
+    got = features.settings(c)
+    return {k: got[k] for k in features.BLOCK_KEYS}
 
 
 def agent_rows(c: str | None) -> dict[str, Any]:
@@ -459,10 +468,10 @@ def get_settings(c: str) -> dict[str, Any]:
 
 
 # The keys PUT /settings may change: SETTINGS_DEFAULTS, the models the browser's settings panel saves, the rows of
-# the permission modes, the subagents' web switches (WEB_KEY), the View proposals switch (PROPOSE_KEY) and the ask key
-# (ASK_KEY), which only the analyst's browser may change (hook_auth.analyst). The models, the permission modes, the web
-# switches, the View proposals switch and the ask key are written to thimble's config (userconf.save), the rest to the
-# workspace's settings.json.
+# the permission modes, the subagents' web switches (WEB_KEY), the View proposals switch (PROPOSE_KEY), the ask key
+# (ASK_KEY) and the feature switches (FEATURES_KEY), which only the analyst's browser may change (hook_auth.analyst). The
+# models, the permission modes, the web switches, the View proposals switch, the ask key and the feature switches are
+# written to thimble's config (userconf.save), the rest to the workspace's settings.json.
 # Every other key is the server's own or the analyst's to edit in the file (kernel_wrap, orient_instructions), since a
 # kernel cell or a session's command can reach the route on loopback. RETIRED_KEYS are taken too, and dropped.
 WEB_KEY = "web"  # {row: "off" | None}: a subagent of main kept off WebFetch and WebSearch, or back on main's rule
@@ -474,8 +483,26 @@ PROPOSE_KEY = "propose_views"
 # "meta", "alt" or null: thimble's config's `askKey`, the key held with a click to ask in the browser
 # (userconf.ask_key); null takes the key out, which is "meta". Settings' Ask key choice changes it
 ASK_KEY = "ask_key"
+# {switch: true | false | null}: the feature switches of features.BLOCK_KEYS (thimble's config's `features`), which
+# /config → thimble also sets; null takes a key out, which is on. Settings' feature switches change it
+FEATURES_KEY = "features"
 PUT_KEYS = frozenset({*SETTINGS_DEFAULTS, config.MODELS_KEY, "permission_modes", WEB_KEY, PROPOSE_KEY, ASK_KEY,
-                      *RETIRED_KEYS})
+                      FEATURES_KEY, *RETIRED_KEYS})
+
+
+def features_patch(value: Any) -> dict[str, Any]:
+    """The Settings pane's feature switches as a patch of thimble's config (features.patch_of). ValueError for a value
+    that is not a map of features.BLOCK_KEYS to true, false or null."""
+    from . import features  # noqa: PLC0415
+
+    if not isinstance(value, dict):
+        raise ValueError(f"{FEATURES_KEY}: a map of {', '.join(features.BLOCK_KEYS)} to true, false or null")
+    for k, v in value.items():
+        if k not in features.BLOCK_KEYS:
+            raise ValueError(f"{FEATURES_KEY}: no switch {k!r}; one of {', '.join(features.BLOCK_KEYS)}")
+        if not isinstance(v, (bool, type(None))):
+            raise ValueError(f"{FEATURES_KEY}: {k} takes true, false or null")
+    return features.patch_of(value)
 
 
 def web_patch(rows: Any) -> dict[str, Any]:
@@ -497,9 +524,9 @@ def web_patch(rows: Any) -> dict[str, Any]:
 @router.put("/ws/{c}/settings")
 def put_settings_route(c: str, request: Request, settings: dict[str, Any] = Body(...)) -> dict[str, Any]:
     """put_settings for the browser, which may change PUT_KEYS only (RETIRED_KEYS among them are dropped); 400 names any
-    other key, why a permission mode cannot be chosen, a PROPOSE_KEY that is not true, false or null, or an ASK_KEY that
-    is not one of userconf.ASK_KEYS or null, and 403 refuses a change of permission modes, web switches, PROPOSE_KEY or
-    ASK_KEY from anything but the analyst's browser."""
+    other key, why a permission mode cannot be chosen, a PROPOSE_KEY that is not true, false or null, an ASK_KEY that
+    is not one of userconf.ASK_KEYS or null, or a FEATURES_KEY features_patch refuses, and 403 refuses a change of
+    permission modes, web switches, PROPOSE_KEY, ASK_KEY or FEATURES_KEY from anything but the analyst's browser."""
     from . import hook_auth, modes  # noqa: PLC0415 — modes imports this module
 
     refused = sorted(set(settings) - PUT_KEYS)
@@ -529,6 +556,13 @@ def put_settings_route(c: str, request: Request, settings: dict[str, Any] = Body
             raise HTTPException(403, hook_auth.ANALYST_ONLY)
         if settings[ASK_KEY] is not None and settings[ASK_KEY] not in userconf.ASK_KEYS:
             raise HTTPException(400, f"{ASK_KEY} takes {', '.join(json.dumps(k) for k in userconf.ASK_KEYS)} or null")
+    if FEATURES_KEY in settings:
+        if not hook_auth.analyst(request):
+            raise HTTPException(403, hook_auth.ANALYST_ONLY)
+        try:
+            features_patch(settings[FEATURES_KEY])
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
     try:
         return put_settings(c, {k: v for k, v in settings.items() if k not in RETIRED_KEYS})
     except userconf.ConfigError as e:
@@ -537,8 +571,8 @@ def put_settings_route(c: str, request: Request, settings: dict[str, Any] = Body
 
 def put_settings(c: str, settings: dict[str, Any]) -> dict[str, Any]:
     """Merges into the stored settings, so a partial PUT keeps the rest. The models of the agents, the permission
-    modes, the web switches, PROPOSE_KEY (as `views.propose`, null taking it out) and ASK_KEY (as `askKey`, null taking
-    it out) go to thimble's config
+    modes, the web switches, PROPOSE_KEY (as `views.propose`, null taking it out), ASK_KEY (as `askKey`, null taking
+    it out) and FEATURES_KEY (as `features`, features_patch) go to thimble's config
     (userconf.save), which raises userconf.ConfigError for a value it does not take;
     main's model settings and everything else to settings.json, where only what was stored plus the patch is written,
     never SETTINGS_DEFAULTS, so a changed default takes effect, and RETIRED_KEYS are left out. Returns the effective
@@ -555,13 +589,20 @@ def put_settings(c: str, settings: dict[str, Any]) -> dict[str, Any]:
         patch.setdefault("views", {})["propose"] = settings[PROPOSE_KEY]
     if ASK_KEY in settings:
         patch["askKey"] = settings[ASK_KEY]
+    if FEATURES_KEY in settings:
+        try:
+            for k, v in features_patch(settings[FEATURES_KEY]).get("features", {}).items():
+                patch.setdefault("features", {})[k] = v
+        except ValueError as e:
+            raise userconf.ConfigError(str(e)) from e
     if patch:
         userconf.save(c, patch)
         if roles_changed:
             push_roles(c)
     if isinstance(settings.get(modes.SETTING), dict):  # a Bypass row takes effect only as the analyst's choice here
         modes.choose(settings[modes.SETTING])
-    settings = {k: v for k, v in settings.items() if k not in (modes.SETTING, WEB_KEY, PROPOSE_KEY, ASK_KEY)}
+    settings = {k: v for k, v in settings.items() if k not in (modes.SETTING, WEB_KEY, PROPOSE_KEY, ASK_KEY,
+                                                                 FEATURES_KEY)}
     if config.MODELS_KEY in settings:
         settings[config.MODELS_KEY] = {k: v for k, v in models.items() if k == "main"}
         if not settings[config.MODELS_KEY]:

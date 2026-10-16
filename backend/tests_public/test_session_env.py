@@ -144,8 +144,9 @@ def test_the_shim_believes_a_session_name_only_with_its_token(tmp_path):
     shim = subprocess.run([str(config.REPO_ROOT / "plugin" / "bin" / "thimble-mcp"), "--list"], env=env,
                           capture_output=True, text=True, timeout=60)
     listed = {t["name"] for t in json.loads(shim.stdout)}
-    analysts, orientations = ({t["name"] for t in tools.list(tools.ANALYST, session=s)} for s in (None, tools.ORIENT_SESSION))
-    assert listed == analysts != orientations, "the analyst's tools, not the orientation's"
+    orientations = {t["name"] for t in tools.list(tools.ANALYST, session=tools.ORIENT_SESSION)}
+    # 0.9.0 (SPEC-v2 3.5): the analyst's session lists load_thimble alone until thimble is on in it
+    assert listed == {tools.ENTRY_TOOL} != orientations, "the analyst's tools, not the orientation's"
 
 
 def test_the_session_key_is_private_to_thimble_and_outlives_a_restart(monkeypatch, tmp_path):
@@ -233,8 +234,8 @@ def test_the_plugin_runs_in_the_environment_a_session_gets(tmp_path, stack):
     env = {"PATH": os.environ["PATH"], "HOME": str(tmp_path),
            **config.session_env({"THIMBLE_SESSION": "orient", "THIMBLE_SESSION_TOKEN": "n.m"}, stack=stack, environ={})}
     bin_ = config.REPO_ROOT / "plugin" / "bin"
-    for argv in ([bin_ / "thimble-mcp", "--list"], [bin_ / "thimble-mcp", "--instructions"],
-                 [bin_ / "thimble", "prompt", "preamble", "--cwd", str(tmp_path)]):
+    # 0.9.0 (SPEC-v2 3.5): the shim gives no instructions, so it has no --instructions
+    for argv in ([bin_ / "thimble-mcp", "--list"], [bin_ / "thimble", "prompt", "preamble", "--cwd", str(tmp_path)]):
         done = subprocess.run([str(a) for a in argv], env=env, cwd=tmp_path, capture_output=True, text=True, timeout=120)
         assert done.returncode == 0 and done.stdout.strip(), (argv, done.stderr[-2000:])
 

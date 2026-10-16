@@ -28,8 +28,9 @@ log = logging.getLogger("thimble.terminal_tools")
 ENV = "CLAUDE_CODE_TERMINAL_MCP_TOOLS"
 BIN_ENV = "THIMBLE_CLAUDE_BIN"  # the `claude` executable to use instead of the one on PATH (cli.claude_code_version)
 BUILTIN = ("Agent", "SendMessage", "TaskStop")  # main starts, continues and stops thimble's subagents with these
-# thimble tools whose result the model reads rather than the browser shows, so a turn that ends on one still needs words
-READS = ("read_ref", "list_cards", "screenshot", "list_agents", "wait_session")
+# thimble tools whose result the model reads rather than the browser shows, so a turn that ends on one still needs words;
+# load_thimble's result is thimble's guidance, which the model reads before it goes on
+READS = ("read_ref", "list_cards", "screenshot", "list_agents", "wait_session", "load_thimble")
 CACHE = "terminal-tools.json"
 # main.md's two endings of a turn with nothing for the analyst, by a phrase only that line holds: with ENV read, and
 # without it

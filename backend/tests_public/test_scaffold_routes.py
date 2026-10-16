@@ -52,7 +52,8 @@ def test_activate_registers_the_folder_and_writes_the_session_files(setup):
     assert rec["mod"] is True and rec["via"] == "command" and rec["role"] == "main" and rec["ws"] == got["ws"]
     assert oct(marker.stat().st_mode & 0o777) == oct(0o600)
     launch = json.loads((Path(got["path"]) / "trusted" / "launch.json").read_text())
-    assert launch["session"] == SID and launch["transport"] == "local" and "mode" not in launch
+    # core's write_launch mirrors the transport as 0.8.0's `mode` until runtime moves the readers (core lane report)
+    assert launch["session"] == SID and launch["transport"] == "local" and launch.get("mode", "terminal") == "terminal"
     assert len((tmp / "home" / "up" / SID / "guide-marker").read_text().strip()) == 8
     assert list((tmp / "home" / "active").iterdir()), "the folder marker the hooks' gate reads"
     # again, without --mod: idempotent, and `mod` stays true
@@ -129,11 +130,10 @@ def test_the_shim_lists_load_thimble_alone_in_a_folder_that_is_no_workspace(setu
     corpus, env, _ = setup
     r = subprocess.run([str(config.REPO_ROOT / "plugin" / "bin" / "thimble-mcp"), "--list"], cwd=corpus, env=env,
                        capture_output=True, text=True, timeout=60)
-    assert r.returncode == 0  # --list prints the full set, as before; build_server's S0 listing is test_shim.py's
-    from app import activate
-
-    assert activate.LOAD_TOOL["name"] == "load_thimble" and activate.LOAD_TOOL["input_schema"] == {
-        "type": "object", "properties": {}}
+    assert r.returncode == 0, r.stderr
+    listed = json.loads(r.stdout)
+    assert [t["name"] for t in listed] == ["load_thimble"]
+    assert listed[0]["input_schema"].get("properties") in ({}, None)
 
 
 def test_local_transport_reads_launch_json(workspaces_tmp):
