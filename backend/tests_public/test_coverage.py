@@ -297,6 +297,7 @@ def test_percent_forms():
     assert coverage.percent(3, 1_000) == "0.3%"
     assert coverage.percent(99, 10_000) == "0.9%" and coverage.percent(99, 100_000) == "0.09%"
     assert coverage.percent(17, 100) == "17%"
+    assert coverage.percent(25, 1_000) == "3%"  # half up, as coverageview.tsx rounds
     assert coverage.percent(995, 1_000) == "99%"  # rounds to 100 but not all of it
     assert coverage.percent(1_000, 1_000) == "100%"
 

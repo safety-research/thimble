@@ -1082,7 +1082,7 @@ def percent(part: int, total: int) -> str:
         return f"{math.floor(p * 100) / 100:.2f}%"
     if p < 1:
         return f"{math.floor(p * 10) / 10:.1f}%"
-    return f"{min(99, round(p))}%"
+    return f"{min(99, math.floor(p + 0.5))}%"  # half up, as the terminal UI's percent rounds
 
 
 def line_of(totals: list[dict[str, Any]], indexed: bool = True, seen: int = 0, searched: int = 0) -> str:
