@@ -1,7 +1,8 @@
 // The panels' chrome, after Claude Code's own panels (its Artifacts and Background panels): a title in the accent
 // colour and bold with a dim subtitle under it, tabs with the selected one inverse, a bordered search box, bold section
 // headings with a dim count, `❯` and the accent on the selected row, metadata dim against the right edge, and a dim
-// italic row of key hints at the end (SPEC.md, "The visual system", rules 5 to 9 and section 7).
+// italic row of key hints at the end (SPEC.md, "The visual system", rules 5 to 9 and section 7). A view names the
+// object its title row's `↗` (and `o`) opens in the browser with setBrowser (SPEC-v2 3.8; panel.tsx wayRow draws it).
 //
 // Two forms of each part: as styled lines (Line), for the panels a Client draws from lines and hits (home.ts, the
 // threads tree, the lists), and as elements, for the panels register.tsx, harness.tsx and reports.tsx draw with Box and
@@ -191,6 +192,22 @@ export function takeHead(): Head {
   const h = head
   head = {}
   return h
+}
+
+// the object the view drawn last opens in the browser (the title row's `↗` and `o`), when the view names one itself
+let browser: string | null = null
+
+/** What the view being drawn opens in the browser (C12 refs: `card:<id>`, `files:<folder>`, `answer:<turn>#s<n>` …);
+ *  a view that names none gets panel.tsx's default for its view. */
+export function setBrowser(ref: string | null): void {
+  browser = ref
+}
+
+/** The object the view drawn last named for the browser, once. */
+export function takeBrowser(): string | null {
+  const b = browser
+  browser = null
+  return b
 }
 
 /** A panel's header under its title row (Matt, 2026-10-07: one row for the path and the title, `home › Threads`): the

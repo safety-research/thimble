@@ -1,24 +1,29 @@
-// Stand-in for the panel lane's views.ts (SPEC-v2 C13): the panel's Coverage, Citations and Checks views registered as
-// one-line views, and the summary line's refresh, which does nothing yet.
+// The panel's views drawn by modules of their own, registered once (register.tsx calls registerPanelViews): the file
+// browser and a file (filesview.tsx), coverage (coverageview.tsx), the citations (citesview.tsx) and the checks on
+// answers (checksview.tsx), each through panel.tsx drawsView and term.ts loadsView; and what a terminal view's acts do.
+// refreshSummary counts again what the summary line above the prompt shows (term.ts tick calls it when the workspace
+// changes). The other files of the panel's lane are reached through this one.
 import type { On } from 'claude-code'
 
-import type { Ctx } from './ctx'
-import { drawsView } from './panel'
+import { registerChecksView } from './checksview'
+import { registerCitationsView } from './citesview'
+import { registerCoverageView } from './coverageview'
+import { registerFilesView } from './filesview'
+import { registerViewActs } from './panel'
 
-const NOT_BUILT: Record<string, string> = { coverage: 'Coverage', citations: 'Citations', checks: 'Checks' }
+export { refreshSummary, registerBand } from './band'
+export { openCoverage } from './coverageview'
+export { openCitations } from './citesview'
+export { openChecks } from './checksview'
+export { openInBrowser } from './offramp'
+export { postNotice } from './notices'
 
-/** The panel's new views, through panel.tsx drawsView; called once from register.tsx. */
+/** The panel's views and acts registered with the panel; called once, from register.tsx's register. */
 export function registerPanelViews(on: On): void {
   void on
-  for (const [view, title] of Object.entries(NOT_BUILT)) {
-    drawsView(view, async (cx, e) => {
-      const { Text } = cx.els(e)
-      return Text({ dimColor: true, children: [`${title}: not built yet`] })
-    })
-  }
-}
-
-/** The summary line's counts, recomputed when an area it counts changed (term.ts tick). */
-export async function refreshSummary(cx: Ctx): Promise<void> {
-  void cx
+  registerFilesView()
+  registerCoverageView()
+  registerCitationsView()
+  registerChecksView()
+  registerViewActs()
 }

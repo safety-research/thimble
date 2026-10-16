@@ -1,16 +1,15 @@
-// The report in terminal mode: a written document read as Markdown with its cards drawn where it places them, the
-// comments on it (a check's, Claude's note from add_comment, the analyst's) at the passages they are on, and the document
-// edited as Markdown, saved through the route the browser's editor saves through (PUT …/blocks), so every passage the
-// edit kept keeps its id and its comments as the browser keeps them.
+// The report in the terminal, read only (SPEC-v2 3.14): a written document read as Markdown with its cards drawn where
+// it places them, and the comments on it (a check's, Claude's note from add_comment, the analyst's) at the passages they
+// are on. Documents are written and edited in the browser workbench.
 //
-// Pure, but for the acts at the end (`thimble act comment-resolve | comment-reopen | doc-save`, backend term_report.py).
-// panel.tsx draws (drawDoc, drawDocEdit) and docedit.tsx is the editor's field.
+// Pure, but for the act at the end (`thimble act comment-resolve | comment-reopen`, backend term_report.py). panel.tsx
+// draws (drawDoc).
 import type { Ctx } from './ctx'
 import type { Line, Seg } from './draw'
 import { width, wrapRows } from './draw'
 import { MARGIN_W, pointed, spread } from './chrome'
 import { plainCites } from './cite'
-import { act, readState } from './data'
+import { act } from './data'
 import type { Scope } from './data'
 import { chipText } from './lib'
 import type { DocSection, DocSentence } from './model'
@@ -209,180 +208,6 @@ export function unitParts(s: DocSection, comments: readonly DocComment[] = []): 
   return parts.map(p => ({ md: p.md.join('\n'), after: p.after }))
 }
 
-// ------------------------------------------------------------------------------------------------ editing as Markdown
-
-/** One of the browser editor's blocks (backend report_types.BlockIn), with the id of the unit it was built from; '' for a
- *  new one, which the save gives an id. */
-export type DocBlock = { id: string; type: 'heading' | 'paragraph' | 'bullet' | 'figure'; text?: string; level?: number; marker?: '-' | '1.'; cell?: string; caption?: string }
-
-type RawSection = { id?: string; heading?: string; level?: number; paragraphs?: { id?: string; sentences?: (DocSentence & { id?: string })[] }[]; figures?: { id?: string; cell?: string; caption?: string; after_paragraph?: string | null; lead?: boolean }[] }
-
-/** A document's blocks as the browser's editor builds them (frontend/src/report/model.ts blocksFromDoc, backend
- *  editor_blocks): per section its heading, its lead figures, its paragraphs (a block per item for a list) with the
- *  figures after each, then its other figures. */
-export function docBlocks(doc: Obj): DocBlock[] {
-  const out: DocBlock[] = []
-  const figure = (f: NonNullable<RawSection['figures']>[number]): DocBlock => ({ id: str(f.id), type: 'figure', cell: str(f.cell), caption: str(f.caption) })
-  for (const sec of (Array.isArray(doc.sections) ? doc.sections : []).filter(isObj) as RawSection[]) {
-    if (str(sec.heading).trim()) out.push({ id: str(sec.id), type: 'heading', text: str(sec.heading), level: Math.max(typeof sec.level === 'number' ? sec.level : 2, 2) })
-    const figs = (sec.figures ?? []).filter(f => isObj(f))
-    const paras = (sec.paragraphs ?? []).filter(p => isObj(p))
-    out.push(...figs.filter(f => f.lead).map(figure))
-    for (const p of paras) {
-      const items = (p.sentences ?? []).filter(x => isObj(x))
-      if (items.length && items.every(x => x.bullet)) for (const x of items) out.push({ id: str(x.id), type: 'bullet', text: str(x.text).trim(), marker: x.bullet === '1.' ? '1.' : '-' })
-      else out.push({ id: str(p.id), type: 'paragraph', text: items.map(x => str(x.text).trim()).filter(Boolean).join(' ') })
-      out.push(...figs.filter(f => str(f.after_paragraph) === str(p.id) && str(p.id)).map(figure))
-    }
-    const known = new Set(paras.map(p => str(p.id)))
-    out.push(...figs.filter(f => !f.lead && !known.has(str(f.after_paragraph))).map(figure))
-  }
-  return out
-}
-
-/** A figure's line: `![caption](card:<id>)`, as write_document's Markdown places a card. */
-function figureLine(b: DocBlock): string {
-  const id = str(b.cell).replace(/^(?:card|cell):/, '').replace(/#.*$/, '')
-  return `![${flat(str(b.caption)).replace(/\]\(/g, '] (')}](card:${id})`
-}
-
-/** A document as the Markdown the panel edits: `# title`, then its blocks, a blank line between them and none between
- *  the items of one list; a heading `##` (`###` and deeper for a subheading), a list item `- ` or `1. `, a figure its
- *  card's line `![caption](card:<id>)`. Citations stay as written (`[[4579|card:<id>#pages/TOTAL]]`). */
-export function docMarkdown(title: string, blocks: readonly DocBlock[]): string {
-  const out: string[] = [`# ${flat(title)}`]
-  let prev: DocBlock | null = null
-  for (const b of blocks) {
-    const line = b.type === 'heading' ? `${'#'.repeat(Math.min(6, Math.max(2, b.level ?? 2)))} ${flat(str(b.text))}` : b.type === 'bullet' ? `${b.marker === '1.' ? '1.' : '-'} ${flat(str(b.text))}` : b.type === 'figure' ? figureLine(b) : flat(str(b.text))
-    const sameList = prev?.type === 'bullet' && b.type === 'bullet' && prev.marker === b.marker
-    out.push(...(sameList ? [] : ['']), line)
-    prev = b
-  }
-  return `${out.join('\n')}\n`
-}
-
-const FIGURE_RE = /^!\[(.*)\]\((?:card|cell):([A-Za-z0-9_-]+)(?:#[^)\s]*)?(?:\s+"[^"]*")?\)$/
-const CHIP_FIGURE_RE = /^\[\[(?:card|cell):([A-Za-z0-9_-]+)\]\]$/
-const HEADING_RE = /^(#{1,6})\s+(.*)$/
-const BULLET_RE = /^\s{0,3}[-*+]\s+(.*)$/
-const NUMBER_RE = /^\s{0,3}\d{1,3}[.)]\s+(.*)$/
-
-/** The Markdown the panel edited, as the title (null when its first line names none) and blocks with no ids yet: a
- *  `# ` line first is the title; `##` and deeper a heading (`#` later on is one too); a card's line alone,
- *  `![caption](card:<id>)` or `[[card:<id>]]`, a figure, an italic line right under it its caption; `- `, `* `, `+ ` a
- *  list item, `1. ` a numbered one, an indented line under an item more of its words; other lines a paragraph, a blank
- *  line ending it. */
-export function parseMarkdown(text: string): { title: string | null; blocks: DocBlock[] } {
-  const lines = text.replace(/\r\n?/g, '\n').split('\n')
-  const blocks: DocBlock[] = []
-  let title: string | null = null
-  let para: string[] = []
-  let seen = false
-  const flush = () => {
-    if (para.length) blocks.push({ id: '', type: 'paragraph', text: flat(para.join(' ')) })
-    para = []
-  }
-  for (const raw of lines) {
-    const line = raw.replace(/\s+$/, '')
-    if (!line.trim()) {
-      flush()
-      continue
-    }
-    const first = !seen
-    seen = true
-    const h = HEADING_RE.exec(line.trim())
-    if (h) {
-      flush()
-      if (first && h[1] === '#') title = flat(h[2]!)
-      else blocks.push({ id: '', type: 'heading', text: flat(h[2]!), level: Math.max(2, h[1]!.length) })
-      continue
-    }
-    const fig = FIGURE_RE.exec(line.trim())
-    const chip = CHIP_FIGURE_RE.exec(line.trim())
-    if (fig || chip) {
-      flush()
-      blocks.push({ id: '', type: 'figure', cell: `card:${fig ? fig[2] : chip![1]}`, caption: fig ? flat(fig[1]!) : '' })
-      continue
-    }
-    // a caption written under a card's line, as the viewer draws it
-    const last = blocks.at(-1)
-    const italic = /^\*([^*].*)\*$|^_([^_].*)_$/.exec(line.trim())
-    if (!para.length && last?.type === 'figure' && !last.caption && italic) {
-      last.caption = flat(italic[1] ?? italic[2] ?? '')
-      continue
-    }
-    const b = BULLET_RE.exec(line)
-    const n = b ? null : NUMBER_RE.exec(line)
-    if (b || n) {
-      flush()
-      blocks.push({ id: '', type: 'bullet', text: flat((b ?? n)![1]!), marker: b ? '-' : '1.' })
-      continue
-    }
-    // an indented line under a list item is more of its words
-    if (!para.length && last?.type === 'bullet' && /^\s+\S/.test(raw)) {
-      last.text = flat(`${last.text ?? ''} ${line}`)
-      continue
-    }
-    para.push(line.trim())
-  }
-  flush()
-  return { title, blocks }
-}
-
-/** What two spellings of a block share, for matching an edited block to the one it was built from. */
-function blockKey(b: DocBlock): string {
-  if (b.type === 'figure') return `figure|${str(b.cell).replace(/^(?:card|cell):/, '').replace(/#.*$/, '')}|${flat(str(b.caption))}`
-  return `${b.type}|${b.type === 'heading' ? (b.level ?? 2) : b.type === 'bullet' ? b.marker : ''}|${flat(str(b.text))}`
-}
-
-/** The edited blocks with the ids of the blocks they were built from, as the browser's editor keeps a block's id while
- *  it is edited in place: a block whose words the edit left as they were keeps its id (the longest run of such blocks
- *  in order); between two kept ones, each changed block takes the id of the next unkept block of its type there, in
- *  order; any other block is new (''). The save reconciles them (backend report_types.apply_blocks): a kept paragraph
- *  keeps the sentences whose words stayed, with their comments. */
-export function alignBlocks(before: readonly DocBlock[], after: readonly DocBlock[]): DocBlock[] {
-  const a = before.map(blockKey)
-  const b = after.map(blockKey)
-  // the longest common run, by dynamic programming over the two lists' keys
-  const n = a.length
-  const m = b.length
-  const L: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0))
-  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) L[i]![j] = a[i] === b[j] ? L[i + 1]![j + 1]! + 1 : Math.max(L[i + 1]![j]!, L[i]![j + 1]!)
-  const pairs: [number, number][] = []
-  for (let i = 0, j = 0; i < n && j < m; ) {
-    if (a[i] === b[j]) {
-      pairs.push([i, j])
-      i++
-      j++
-    } else if (L[i + 1]![j]! >= L[i]![j + 1]!) i++
-    else j++
-  }
-  const out = after.map(x => ({ ...x, id: '' }))
-  for (const [i, j] of pairs) out[j]!.id = before[i]!.id
-  // the gaps between kept blocks: a changed block takes the id of an unkept one of its type, in order
-  const bounds: [number, number][] = [[-1, -1], ...pairs, [n, m]]
-  for (let k = 0; k + 1 < bounds.length; k++) {
-    const [i0, j0] = bounds[k]!
-    const [i1, j1] = bounds[k + 1]!
-    let from = i0 + 1
-    for (let j = j0 + 1; j < j1; j++) {
-      for (let i = from; i < i1; i++) {
-        if (before[i]!.type !== out[j]!.type || !before[i]!.id) continue
-        out[j]!.id = before[i]!.id
-        from = i + 1
-        break
-      }
-    }
-  }
-  // an id is taken once
-  const taken = new Set<string>()
-  for (const x of out) {
-    if (x.id && taken.has(x.id)) x.id = ''
-    if (x.id) taken.add(x.id)
-  }
-  return out
-}
-
 // ------------------------------------------------------------------------------------------------ what the panel keeps
 
 // each document's chosen comment, and the documents whose resolved comments show
@@ -431,80 +256,6 @@ export function passageWords(doc: Obj, sid: string): string {
 /** Who left a comment, as a thread asked about it is told (the browser's Margin.tsx Reply). */
 export function commentWho(c: DocComment): string {
   return c.check !== null ? `The comment of the check “${c.name}”` : c.name === 'Claude' ? 'Claude’s note' : 'The analyst’s comment'
-}
-
-/** A document being edited: the Markdown it was opened with (`base`, which tells a change made meanwhile), the blocks
- *  it was built from, the text as typed, and what the last save said (a refusal, red). `force`: the next save writes
- *  over a change made meanwhile, as the analyst asked. */
-export type DocEdit = { slug: string; base: string; blocks: DocBlock[]; title: string; text: string; said: string; force: boolean }
-
-const edits = new Map<string, DocEdit>()
-
-/** The edit of document `slug`, if one is open. */
-export function editOf(slug: string): DocEdit | undefined {
-  return edits.get(slug)
-}
-
-/** An edit of the document as it stands, or the one already open with what was typed in it. */
-export function beginEdit(slug: string, doc: Obj): DocEdit {
-  const had = edits.get(slug)
-  if (had) return had
-  const title = str(doc.title)
-  const blocks = docBlocks(doc)
-  const base = docMarkdown(title, blocks)
-  const e: DocEdit = { slug, base, blocks, title, text: base, said: '', force: false }
-  edits.set(slug, e)
-  return e
-}
-
-/** What the analyst typed, kept as they type it. */
-export function draftEdit(slug: string, text: string): void {
-  const e = edits.get(slug)
-  if (e && e.text !== text) edits.set(slug, { ...e, text, said: '', force: false })
-}
-
-/** The edit dropped: the document opens as it stands next time. */
-export function discardEdit(slug: string): void {
-  edits.delete(slug)
-}
-
-/** Whether the edit holds words the document does not. */
-export function editChanged(e: DocEdit): boolean {
-  return e.text.replace(/\s+$/, '') !== e.base.replace(/\s+$/, '')
-}
-
-/** The blocks and title a save sends for an edit (alignBlocks): the edited title, else the title as it was. */
-export function savedBlocks(e: DocEdit): { title: string; blocks: DocBlock[] } {
-  const got = parseMarkdown(e.text)
-  return { title: got.title ?? e.title, blocks: alignBlocks(e.blocks, got.blocks) }
-}
-
-/** Save an edit through the browser editor's route (`thimble act doc-save`). The document as it stands is read first:
- *  when it changed since the edit began (a writer or main saved it), the save stops and says so, and the next save
- *  writes over it. Returns '' once saved (the edit is closed), else why not. */
-export async function saveEdit(cx: Ctx, sc: Scope, slug: string): Promise<string> {
-  const e = edits.get(slug)
-  if (!e) return 'nothing is being edited'
-  if (!editChanged(e)) {
-    edits.delete(slug)
-    return ''
-  }
-  const now = await readState<Obj>(cx, sc, 'doc', [slug])
-  if (!now.ok) return keep(e, `could not read the document: ${now.error}`)
-  if (!e.force && docMarkdown(str(now.value.title), docBlocks(now.value)) !== e.base) {
-    edits.set(slug, { ...e, force: true, said: 'the document changed since you began editing it: s again saves yours over it, d discards yours' })
-    return edits.get(slug)!.said
-  }
-  const { title, blocks } = savedBlocks(e)
-  const got = await act(cx, sc, 'doc-save', { doc: slug, title, blocks })
-  if (!got.ok) return keep(e, `not saved: ${got.error}`)
-  edits.delete(slug)
-  return ''
-}
-
-function keep(e: DocEdit, said: string): string {
-  edits.set(e.slug, { ...e, said })
-  return said
 }
 
 /** A comment resolved (the margin's ✓) or opened again. Returns '' once done, else why not. */

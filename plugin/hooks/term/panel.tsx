@@ -2,12 +2,14 @@
 // ("The visual system": rules 1 to 15, sections 2 and 7). A cell of padding at each side,
 // then the 2-cell margin where `❯`, `?` and `↳` hang, then the type area. Every view opens with its title row, the path
 // from home with the current step last in the accent colour and bold (`home › Threads`; on home `show all threads` and
-// `N new` in green at R), a dim subtitle, a rule; its actions sit at its bottom after a second rule; a dim italic row of
-// key hints ends it.
+// `N new` in green at R) and a `↗` at its right end that opens the view's object in the browser, as `o` does (SPEC-v2
+// 3.8); a dim subtitle, a rule; its actions sit at its bottom after a second rule; a dim italic row of key hints ends
+// it.
 // A right-click does what a click does: there is no menu.
 //
-//   home      everything the workspace holds (home.ts laid out, homeview.tsx drawn): views, documents, threads, cards by
-//             group (the newest open, the others folded), labels, files by folder
+//   home      everything the session read and the workspace holds (home.ts laid out, homeview.tsx drawn): coverage,
+//             citations, labels, threads, views, the checks' comments, cards by group (the newest open, the others
+//             folded), documents, files by folder
 //   card      a card in its border, its takeaway; its code (`mode: code`)
 //   cite      a citation: its value as a link, its status in plain words, its lines with the value marked, or the card
 //             it names in its border with the cited mark lit; red when its place does not hold it
@@ -15,17 +17,19 @@
 //   threads   the threads as a tree under main, the selected one (`thread`) under the second rule (alone, with no tree,
 //             when it is the only one), its chat drawn as Claude Code draws one, the ask field
 //   label     a label after the browser's label editor: its name, type and scope; its prompt (or pattern or code) to edit;
-//             run on a sample or on all; counts, examples and cards folded. labels: every label
+//             run on a sample or on all; counts, examples (its records of no fit and unsure first) and cards folded.
+//             labels: every label, its records of no category fit and those it is unsure of under it
 //   docs      the documents; doc, one document drawn as main's chat draws a reply, its figures as cards, its comments
-//             under the passages they are on (report.ts); its edit as Markdown (`mode: edit`, docedit.tsx)
+//             under the passages they are on (report.ts), read only: the browser workbench edits documents
 //   files     the file browser and a file: filesview.tsx, through drawsView
+//   coverage, citations, checks   coverageview.tsx, citesview.tsx, checksview.tsx, through drawsView (views.ts)
 //   agent     one of thimble's agents: what it is doing and its latest steps
 //   views     the views, one row each; view, one view as one line (the browser draws views)
 import type { BoxProps, ButtonProps, ElementConstructor, MatchedEvent, RenderElement, TextProps } from 'claude-code'
 
 import type { ChatNavStep, ChatThread, TermPanel, TermThread, TermThreadRow, TermVerdict } from './types'
 import type { ThimbleLabel } from './cell'
-import { ACCENT, FRESH, LINK, MARGIN_W, controlsEl, fieldEls, fitHints, fitTo, freshSeg, hasMargin, headerEls, hintLines, hintsEl, lineEl, linkSeg, marginKey, pointed, ruleEl, setHead, spread, subLine, takeHead } from './chrome'
+import { ACCENT, FRESH, LINK, MARGIN_W, controlsEl, fieldEls, fitHints, fitTo, freshSeg, hasMargin, headerEls, hintLines, hintsEl, lineEl, linkSeg, marginKey, pointed, ruleEl, setBrowser, setHead, spread, subLine, takeBrowser, takeHead } from './chrome'
 import { chipLook, chipName, citeLabel, plainCites, quoteSpan, quotedWords, wrapAround } from './cite'
 import { MAX_BARS, MAX_NODES, MAX_TABLE_ROWS, amount, cardLayout, cut, cutRef, demojibake, labelHead, lineWidth, placeWords, shade, share, shares, turnTimes, valueColour, width, wrapRows } from './draw'
 import type { BarRow, CardData, Cell, Item, Layout, Line, Seg } from './draw'
@@ -33,14 +37,14 @@ import { fileRef, fileType, filesOf } from './files'
 import { citationOf, placeOf, targetLabel } from './gestures'
 import type { Gesture, Target } from './gestures'
 import { FIRST as HOME_FIRST, HOME_HINTS, groupCards, homeLayout, homePick, homeReduce, labelHue, NAME_WHOLE } from './home'
-import type { HomeAct, HomeCardGroup, HomeData, HomeFile, HomeLabel, HomeLayout, HomeOpen, HomeReport, HomeThread, HomeUi, HomeView } from './home'
+import type { HomeAct, HomeCardGroup, HomeCite, HomeComment, HomeData, HomeFile, HomeLabel, HomeLayout, HomeOpen, HomeReport, HomeThread, HomeUi, HomeView } from './home'
 import { cardsInline, chipLabel, chipWords, cid, clip, cutLine, fmt, itemsRow, labelRef, middleCut, labelState, labelStateWords, noControls, outputLine, quoted, recordFields, reportRef, stoppedTurn, windowAt } from './lib'
 import type { Citation } from './lib'
 import { linesEl, setListKeys, takeListKeys } from './lines'
 import type { LineHit } from './lines'
 import { aroundLine, docUnits, docsOf, labelOf, labelsOf, threadOf } from './model'
 import type { DocFigure, DocSection } from './model'
-import { TITLE_ID, beginEdit, checksOf, commentFacts, commentLines, commentWho, commentsOf, discardEdit, draftEdit, editChanged, editOf, flipResolved, passageWords, pickOf, resolvedShown, saveEdit, setComment, setPick, shownComments, stepPick, unitOf, unitParts } from './report'
+import { TITLE_ID, checksOf, commentFacts, commentLines, commentWho, commentsOf, flipResolved, passageWords, pickOf, resolvedShown, setComment, setPick, shownComments, stepPick, unitOf, unitParts } from './report'
 import type { DocComment } from './report'
 import { focusFromRef } from './anim'
 import type { Focus } from './anim'
@@ -48,11 +52,16 @@ import { NAV_EMPTY, backTarget, crumbSteps, fitPath, pathWidth, threadBehind, th
 import { COLORS, paintLines } from './paint'
 import { PANEL_MARGIN, cardBlock, cardName, citeStatus, claimCard, claimSentence, drawReply, linkCheck, placeName, plainWhy, scrubIds } from './reply'
 import { PANEL, citePage, closePanel, deleteLabel, filterLabel, inPanelNow, loadCards, navBack, navGo, openHome, openList, openPanel, panelOfStep, queueCitations, readDoc, readFilePage, readSurface, rt, runLabel, saveLabel, showLabel, startThread, stepOf, stopLabel, subjectFile, surfaceValue, threadMessage, undeleteLabel } from './term'
-import { COLOR_NAMES, LABEL_WHEEL, MORE_ROWS, agreementLine, classColors, hueOf, labelArgs, labelGone, labelRows, setLabelGone } from './labels'
+import { COLOR_NAMES, LABEL_WHEEL, MORE_ROWS, UNSURE_PAGE, agreementLine, classColors, hueOf, labelArgs, labelGone, labelRows, setLabelGone, unsureArgs, unsureKey, unsureOf, unsureShown, unsureWords } from './labels'
+import { featuresOf, openComments, openSection } from './band'
+import { openChecks } from './checksview'
+import { citeItems, citePlace, openCitations } from './citesview'
+import { openCoverage } from './coverageview'
 import type { LabelPatch } from './term'
 import type { Ctx } from './ctx'
 import { act } from './data'
 import { closeView, onViewAct, openViewState, retryView, sendEvent, viewFaultOf, viewFor } from './viewhost'
+import { openInBrowser } from './offramp'
 import type { ViewFrame } from './viewhost'
 
 export type PaneEvent = MatchedEvent<'ui.render', { component: 'Pane'; requestId: string }>
@@ -212,13 +221,15 @@ export async function proposalsOff(cx: Ctx): Promise<void> {
 export async function noticeAct(cx: Ctx, n: HomeNotice, a: NoticeAct): Promise<void> {
   if (!rt.sc) return
   if (a.act === 'settings') {
-    cx.toast(`thimble: in terminal mode, Settings is thimble's config: ${a.config || 'config.json in thimble\'s home'} (its keys: docs/config.md)`)
+    cx.toast(`thimble: Settings are in the browser workbench (/thimble open) and in thimble's config: ${a.config || 'config.json in thimble\'s home'} (its keys: docs/config.md)`)
     return
   }
   if (a.act === 'view-proposals-off') {
     await dismissNotice(cx, n)
     return proposalsOff(cx)
   }
+  // a code ticket that passed its checks waits for the analyst's Allow, which the browser's card asks (SPEC-v2 3.16)
+  if (a.act === 'ticket-open') return openInBrowser(cx, `ticket:${a.slug || n.id.replace(/^ticket:/, '')}`)
   const got = await act<{ queued?: boolean; reason?: string }>(cx, rt.sc, a.act, { ...(a.slug ? { slug: a.slug } : {}), notice: n.id })
   if (!got.ok || got.value.queued === false) {
     cx.toast(`thimble: ${got.ok ? got.value.reason || 'it could not start' : got.error}`)
@@ -417,12 +428,18 @@ function crumbText(s: ChatNavStep): string {
     case 'view':
       return s.title
     case 'doc':
-      // its edit takes the document's step, as a card's code view takes the card's
-      return panelOfStep(s)?.mode === 'edit' ? `${quoted(s.title)} · edit` : quoted(s.title)
+      return quoted(s.title)
     case 'docs':
       return 'documents'
     case 'ask':
       return 'new thread'
+    case 'coverage': {
+      // a folder drilled into by its path; the corpus's top as the view's name
+      const path = panelOfStep(s)?.path
+      return path ? `${path}/` : 'coverage'
+    }
+    case 'checks':
+      return panelOfStep(s)?.mode ? `checks › ${s.title}` : 'checks'
     default:
       return s.view
   }
@@ -439,19 +456,55 @@ function upOf(s: ChatNavStep, earlier: readonly ChatNavStep[]): TermPanel | null
   return null
 }
 
-// the cells of the title row's separator (` › `)
+// the cells of the title row's separator (` › `), and of its `↗` with the gap before it
 const SEP_W = 3
+const BROWSER_W = 3
 
 // a list's step as the title names it where it is the current step (`home › Threads`); earlier on the path it reads as
 // its lower-case kind word (`home › threads › "…"`)
-const LIST_TITLES: Record<string, string> = { home: 'Home', threads: 'Threads', labels: 'Labels', docs: 'Documents', files: 'Files', views: 'Views', ask: 'New thread' }
+const LIST_TITLES: Record<string, string> = { home: 'Home', threads: 'Threads', labels: 'Labels', docs: 'Documents', files: 'Files', views: 'Views', ask: 'New thread', citations: 'Citations' }
 
 /** The current step's words: a list's title; a thread by its question; else the step as the path names it, with the
  *  subject's name as the view gave it (a card's whole question). */
 function hereText(s: ChatNavStep, title: string | undefined): string {
   const list = LIST_TITLES[s.view]
   if (list) return list
+  // the Coverage view by the folder it shows; the Checks view by the check of the comment it shows
+  if (s.view === 'coverage') return panelOfStep(s)?.path ? `${panelOfStep(s)!.path}/` : 'Coverage'
+  if (s.view === 'checks') return title && title !== 'Checks' ? `checks › ${title}` : 'Checks'
   return s.view === 'thread' || !title ? crumbText(s) : crumbText({ ...s, title })
+}
+
+/** What a view opens in the browser where it names nothing itself (chrome.tsx setBrowser): the object it shows, as
+ *  thimble open's refs name them (C12), else home. */
+export function browserRef(p: TermPanel | null): string {
+  if (!p) return 'home'
+  switch (p.view) {
+    case 'card':
+      return p.card ? `card:${p.card}` : 'home'
+    case 'cite':
+      return p.ref || 'home'
+    case 'thread':
+      return p.thread ? `thread:${p.thread}` : 'home'
+    case 'agent':
+      return p.thread ? `thread:${p.thread}` : 'home'
+    case 'label':
+      return p.label ? `concept:${p.label}` : 'home'
+    case 'doc':
+      return p.slug ? `report:${p.slug}` : 'home'
+    case 'view':
+      return p.slug ? `view:${p.slug}` : 'home'
+    case 'files':
+      return 'files:'
+    case 'file':
+      return p.path ? `files:${p.path}` : 'files:'
+    case 'coverage':
+      return `files:${p.path ?? ''}`
+    case 'checks':
+      return 'checks'
+    default:
+      return 'home'
+  }
 }
 
 /** The title row (SPEC.md, "A panel's header"; Matt, 2026-10-07: "can just be one line for title"): the path from
@@ -503,7 +556,10 @@ async function wayRow(cx: Ctx, e: PaneEvent, view: string): Promise<RenderElemen
   // opened the threads and lost its first letter (live check term-fix10, new quirk 4)
   const labels = [home ? LIST_TITLES.home! : 'home', ...crumbs.map(c => c.text)]
   const rightW = head.right ? 2 + 12 : 0
-  const room = cols - marksW - rightW
+  // the `↗` at the row's right end, which opens the view's object in the browser, as `o` does (SPEC-v2 3.8)
+  const ref = takeBrowser() ?? browserRef(await cx.panel())
+  const toBrowser = () => openInBrowser(cx, ref)
+  const room = cols - marksW - rightW - BROWSER_W
   const newW = fresh ? `${fresh} new`.length : 0
   type Tail = { all: string; fresh: boolean; w: number }
   const tail0 = (all: string, withNew: boolean): Tail => ({ all, fresh: withNew, w: (all ? 2 + all.length : 0) + (withNew ? 2 + newW : 0) })
@@ -546,7 +602,9 @@ async function wayRow(cx: Ctx, e: PaneEvent, view: string): Promise<RenderElemen
       {head.right ? <Box flexShrink={0}>{head.right}</Box> : null}
       {tail.all ? <Button key="threads" label={tail.all} plain onPress={showAll} /> : null}
       {tail.fresh ? <Text color={FRESH}>{`${tail.all ? '  ' : ''}${fresh} new`}</Text> : null}
-      {hiddenKeys(cx, e, [...(back ? [{ key: 'back', hotkey: 'b', onPress: () => void navBack(cx) }] : []), { key: 'close', hotkey: 'x', onPress: () => void closePanel(cx) }])}
+      <Text>{'  '}</Text>
+      <Button key="way-browser" label="↗" plain onPress={toBrowser} />
+      {hiddenKeys(cx, e, [...(back ? [{ key: 'back', hotkey: 'b', onPress: () => void navBack(cx) }] : []), { key: 'close', hotkey: 'x', onPress: () => void closePanel(cx) }, { key: 'browser', hotkey: 'o', onPress: () => void toBrowser() }])}
       {listKeysEl(cx, e)}
     </Box>
   )
@@ -982,7 +1040,6 @@ function fieldRow(cx: Ctx, e: PaneEvent, label: string, field: RenderElement, ke
 
 /** What the home panel lists, from what `thimble state` printed for its surfaces. */
 export async function homeData(cx: Ctx): Promise<HomeData> {
-  const homeRaw = await surfaceValue<Obj>(cx, 'home-full')
   const views: HomeView[] = await homeViews(cx)
   const docs = await surfaceValue(cx, 'docs')
   const first = docs?.ok ? !rt.docsRead : false
@@ -1056,7 +1113,18 @@ export async function homeData(cx: Ctx): Promise<HomeData> {
     : []
   const files: HomeFile[] = filesOf(await surfaceValue(cx, 'files')).map(f => ({ file: f.path, records: null, size: f.size, seen: 0, state: 'listed', ranges: [], kind: fileType(f.path, f.kind, rt.opens.get(f.path)?.as) }))
   const root = (await cx.root().catch(() => '')).split('/').filter(Boolean).at(-1) ?? 'folder'
-  return { views, reports, threads, cardGroups, labels, files, coverage: homeRaw?.ok ? str(homeRaw.value.coverage) : '', root }
+  // 0.9.0 (SPEC-v2 J4): this session's coverage, its citations, the checks' comments on answers, each while its feature
+  // is on; the labels' records of no fit and unsure
+  const f = await featuresOf(cx)
+  const unsure = new Map((await cx.labelUnsure()).map(u => [u.id, u]))
+  for (const l of labels) {
+    const u = f.labels ? unsure.get(l.slug) : undefined
+    if (u) Object.assign(l, { noFit: u.noFit, unsure: u.unsure })
+  }
+  const coverage = f.coverage ? noControls((await cx.coverageSummary())?.line ?? '') : null
+  const cites: HomeCite[] | null = f.citationMarks ? (await citeItems(cx)).map(c => ({ key: c.key, value: noControls(c.value), place: noControls(citePlace(c.ref)), verdict: c.verdict, why: c.why, ref: c.ref, ...(c.card ? { card: c.card, n: c.n } : {}) })) : null
+  const comments: HomeComment[] | null = f.checks ? (await openComments(cx)).map(c => ({ id: c.id, check: noControls(c.checkName), colour: hueOf(c.color || 2), quote: noControls(c.quote) })) : null
+  return { views, reports, threads, cardGroups, labels, files, coverage, cites, comments, noLabels: !f.labels, root }
 }
 
 /** When a card was made (ms), as the canvas lists it. */
@@ -1171,23 +1239,26 @@ async function homeOpen(cx: Ctx, o: HomeOpen): Promise<void> {
     }
     case 'file':
       return openFile(cx, o.path)
+    case 'cite':
+      return o.card ? openCard(cx, o.card) : openCite(cx, o.ref, o.display)
+    case 'comment':
+      return openChecks(cx, o.id)
     case 'pane': {
       // a folder's `… N more`: the file browser with that folder whole
-      if (o.view === 'coverage' && o.folder) {
+      if (o.view === 'files' && o.folder) {
         const root = `${(await cx.root().catch(() => '')).split('/').filter(Boolean).at(-1) ?? 'folder'}/`
         // home names a folder as the file browser does: its path, the corpus's own files by the corpus folder's name
         const dir = o.folder === root ? '' : o.folder
         const ui = await cx.filesUi()
         await cx.setFilesUi({ ...ui, whole: [...(ui.whole ?? []).filter(x => x !== dir), dir], unfolded: [...ui.unfolded.filter(x => x !== `dir:${dir}`), `dir:${dir}`], folded: ui.folded.filter(x => x !== `dir:${dir}`) })
       }
-      const to: Record<string, TermPanel> = {
-        reports: { view: 'docs', title: 'Documents' },
-        threads: { view: 'threads', title: 'Threads' },
-        labels: { view: 'labels', title: 'Labels' },
-        coverage: { view: 'files', title: 'Files' },
-        views: { view: 'views', title: 'Views' },
-      }
-      return openPanel(cx, to[o.view] ?? { view: 'home', title: 'Home' })
+      // a section's list: its `new` on the summary line cleared (band.tsx)
+      if (o.view === 'reports') return openSection(cx, 'docs')
+      if (o.view === 'threads' || o.view === 'labels' || o.view === 'views') return openSection(cx, o.view)
+      if (o.view === 'coverage') return openCoverage(cx)
+      if (o.view === 'citations') return openCitations(cx)
+      if (o.view === 'checks') return openChecks(cx)
+      return openPanel(cx, o.view === 'files' ? { view: 'files', title: 'Files' } : { view: 'home', title: 'Home' })
     }
   }
 }
@@ -2537,8 +2608,8 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
     // the field takes the letters; its Enter renames
   } else if (!running && !st.running) keys.push({ key: 'sample', hotkey: 'r', onPress: () => void run(sample)() }, { key: 'rename', hotkey: 'n', onPress: () => void askRename() }, { key: 'delete', hotkey: 'k', onPress: () => void askDelete() })
   else if (running || follower) keys.push({ key: 'stop', hotkey: 's', onPress: stop })
-  // o turns a label over files on or off in Files
-  if (files && !asking && !renaming) keys.push({ key: 'files-on', hotkey: 'o', onPress: () => void turn(!shownOn)() })
+  // f turns a label over files on or off in Files (o opens the label in the browser, as in every view)
+  if (files && !asking && !renaming) keys.push({ key: 'files-on', hotkey: 'f', onPress: () => void turn(!shownOn)() })
   // the counts, the examples and the cards, folded
   const toggle = (part: string, words: string, n: number | null, note = '') => (
     <Box key={`lb-t-${part}`} flexDirection="row">
@@ -2678,6 +2749,52 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
     )
   }
   if (opened('examples')) {
+    // first, the records with no category fit and those the label is unsure of (SPEC-v2 J6), UNSURE_PAGE at a time
+    const u = (await featuresOf(cx)).labels ? (await cx.labelUnsure()).find(x => x.id === id) : undefined
+    const gotU = u && u.noFit + u.unsure ? await surfaceValue(cx, unsureKey(id)) : undefined
+    if (u && u.noFit + u.unsure && !gotU) wantUnsure(cx, id)
+    const un = gotU?.ok ? unsureOf(gotU.value) : null
+    if (un?.rows.length) {
+      rows.push(
+        <Text key="lb-u-h" wrap="truncate-end">
+          <Text>{'  '}</Text>
+          <Text color={COLORS.problem}>{'● '}</Text>
+          <Text>no category fit or unsure</Text>
+          <Text dimColor>{`  ${num(un.total)}`}</Text>
+        </Text>,
+      )
+      for (const r of un.rows) {
+        const place = placeWords(r.ref)
+        const verdict = (value: string) => async () => {
+          if (!rt.sc) return
+          const got2 = await act(cx, rt.sc, 'verdict', { label: id, ref: r.ref, value })
+          if (!got2.ok) cx.toast(`thimble: the verdict was not kept: ${got2.error}`)
+          await readUnsure(cx, id)
+          await readSurface(cx, `label:${id}`, 'label', labelArgs(id))
+          await cx.bumpPanel()
+        }
+        rows.push(
+          <Box key={`lb-u-${r.ref}`} flexDirection="column" marginLeft={4}>
+            <Box flexDirection="row" columnGap={2}>
+              <Box flexShrink={0}>{linesEl(cx, e, `lu-${cid(r.ref)}`, [[{ s: '↗', fg: LINK }, { s: ' ' }, linkSeg(cut(place, Math.max(8, cols - 40)))]], [{ y: 0, x0: 0, x1: 2 + width(cut(place, Math.max(8, cols - 40))), row: false, run: () => openCite(cx, r.ref, null) }], Math.min(cols - 4, 2 + width(cut(place, Math.max(8, cols - 40)))))}</Box>
+              <Box flexShrink={1}>
+                <Text dimColor wrap="truncate-end">{`${unsureWords(r)}${r.value ? ` · ${clip(r.value, 24)}` : ''}`}</Text>
+              </Box>
+              <Box flexGrow={1} />
+              <Box flexDirection="row" columnGap={2} flexWrap="wrap">
+                <Text dimColor>it is</Text>
+                {values.map(o => (
+                  <Button key={`lb-u-set-${r.ref}-${o}`} label={clip(o, 24)} plain onPress={() => void verdict(o)()} />
+                ))}
+              </Box>
+            </Box>
+            {recordRows(r.ref, r.text, '')}
+          </Box>,
+        )
+      }
+      const leftU = un.total - un.rows.length
+      if (leftU > 0) rows.push(<Box key="lb-u-more" flexDirection="row" marginLeft={4}><Button key="lb-u-more" label={`… ${num(leftU)} more`} plain onPress={() => void moreUnsure(cx, id)} /></Box>)
+    }
     // the value a link to the label named first, lit
     for (const v of p.value && values.includes(p.value) ? [p.value, ...values.filter(x => x !== p.value)] : values) {
       const xs = recs.filter(r => (typeof r.analyst === 'string' && r.analyst ? r.analyst : str(r.label)) === v)
@@ -2767,7 +2884,7 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
       els,
       [
         ...(running || follower ? ['s to stop'] : st.running || asking || renaming ? [] : ['r to run a sample', 'n to rename', 'k to delete']),
-        ...(files && !asking && !renaming ? [shownOn ? 'o to hide in files' : 'o to show in files'] : []),
+        ...(files && !asking && !renaming ? [shownOn ? 'f to hide in files' : 'f to show in files'] : []),
         'c counts, e examples, d cards',
         'l for labels',
       ],
@@ -2782,6 +2899,37 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
 // the labels list's chosen row
 let labelPick = ''
 
+// the labels whose unsure records a drawing asked for and no read gave yet (a drawing writes no state: a timer reads them)
+const unsureAsked = new Set<string>()
+
+/** A label's records with no category fit and its unsure ones, read (`thimble state label-unsure --label`). */
+async function readUnsure(cx: Ctx, id: string): Promise<void> {
+  await readSurface(cx, unsureKey(id), 'label-unsure', unsureArgs(id))
+}
+
+/** A label's unsure records read from a timer, once, for a drawing that found none read yet. */
+function wantUnsure(cx: Ctx, id: string): void {
+  if (unsureAsked.has(id)) return
+  unsureAsked.add(id)
+  cx.later(0, () => void readUnsure(cx, id).then(() => cx.bumpPanel()).finally(() => unsureAsked.delete(id)))
+}
+
+/** `↓ more` under a label: UNSURE_PAGE more of its unsure records. */
+async function moreUnsure(cx: Ctx, id: string): Promise<void> {
+  unsureShown.set(id, (unsureShown.get(id) ?? UNSURE_PAGE) + UNSURE_PAGE)
+  await readUnsure(cx, id)
+  await cx.bumpPanel()
+}
+
+/** The unsure records the panel shows read again (the labels changed): every label's on the labels list, the one
+ *  label's in its editor (band.tsx refreshSummary calls it). */
+export async function refreshUnsure(cx: Ctx): Promise<void> {
+  const p = await cx.panel()
+  const ids = p?.view === 'labels' ? (await cx.labelUnsure()).map(u => u.id) : p?.view === 'label' && p.label ? [p.label] : []
+  for (const id of ids) await readUnsure(cx, id)
+  if (ids.length) await cx.bumpPanel()
+}
+
 /** The labels (SPEC.md, "The label panel", the labels list): one row per label, its kind and last run dim at R,
  *  `❯` on the chosen one; under the second rule `describe a new label`, whose words go to main. */
 async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
@@ -2793,18 +2941,46 @@ async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   const body: RenderElement[] = [...headerEls(els, { title: 'Labels', cols, sub: subLine([plural(ls.length, 'label')]) })]
   const pick = ls.find(x => x.id === labelPick)?.id ?? ls[0]?.id ?? ''
   const agents = (await cx.agents()) ?? []
-  const { lines, hits } = listLines(
-    ls.map(l => {
-      const n = Object.values(l.label_stats?.counts ?? {}).reduce((a, b) => a + b, 0)
-      // its runs as home, its panel and its card say them (lib.ts labelState): `◌ labeling 3,000 of 4,579` while a run
-      // goes, `stopped at 3,150 of 4,579`, `not run yet`, else what its last run covered (live check term-fix9, quirk 4)
-      const st = labelState(l, agents)
-      const run = labelStateWords(st).replace(/^◌ /, '') || (l.trial ? `a sample of ${num(n)}` : `all ${num(n)}`)
-      return { key: l.id, glyph: st.running ? { s: '◌' } : st.ran || st.stopped ? { s: '●' } : dim('○'), name: l.name ?? l.id, right: [dim(`${l.kind ?? ''} · ${run}`)], run: () => openLabel(cx, l.id, l.name ?? l.id) }
-    }),
-    pick,
-    cols,
-  )
+  // under each label, its records with no category fit, then those it is unsure of (SPEC-v2 J6): UNSURE_PAGE at first,
+  // `↓ N more` for the next; a click on one opens its place
+  const unsureOn = (await featuresOf(cx)).labels
+  const counts = new Map((await cx.labelUnsure()).map(u => [u.id, u]))
+  const lines: Line[] = []
+  const hits: LineHit[] = []
+  let pickAt = -1
+  for (const l of ls) {
+    const n = Object.values(l.label_stats?.counts ?? {}).reduce((a, b) => a + b, 0)
+    // its runs as home, its panel and its card say them (lib.ts labelState): `◌ labeling 3,000 of 4,579` while a run
+    // goes, `stopped at 3,150 of 4,579`, `not run yet`, else what its last run covered (live check term-fix9, quirk 4)
+    const st = labelState(l, agents)
+    const run = labelStateWords(st).replace(/^◌ /, '') || (l.trial ? `a sample of ${num(n)}` : `all ${num(n)}`)
+    const u = unsureOn ? counts.get(l.id) : undefined
+    // the facts that leave the name its first 20 cells (or all of a shorter one): every fact, then the unsure counts
+    // alone (the rows under it say them too), then none
+    const tally = [...(u?.noFit ? [`${num(u.noFit)} no fit`] : []), ...(u?.unsure ? [`${num(u.unsure)} unsure`] : [])].join(' · ')
+    const keep = Math.min(20, width(l.name ?? l.id))
+    const facts = [[`${l.kind ?? ''} · ${run}`, tally].filter(Boolean).join(' · '), `${l.kind ?? ''} · ${run}`, ''].find(f => !f || cols - 4 - width(f) - 2 >= keep) ?? ''
+    if (l.id === pick) pickAt = lines.length
+    hits.push({ y: lines.length, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: () => openLabel(cx, l.id, l.name ?? l.id) })
+    lines.push(pointed(spread([st.running ? { s: '◌' } : st.ran || st.stopped ? { s: '●' } : dim('○'), { s: ' ' }, { s: l.name ?? l.id }], [dim(facts)], cols), l.id === pick))
+    if (!u || !(u.noFit + u.unsure)) continue
+    const got = await surfaceValue(cx, unsureKey(l.id))
+    if (!got) wantUnsure(cx, l.id)
+    const un = got?.ok ? unsureOf(got.value) : null
+    const vw = Math.min(16, Math.max(0, ...(un?.rows ?? []).map(r => width(r.value ?? ''))))
+    for (const r of un?.rows ?? []) {
+      const lead = `  ${unsureWords(r).padEnd(13)}${vw ? `${clip(r.value ?? '', vw).padEnd(vw)}  ` : ''}`
+      hits.push({ y: lines.length, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: () => openCite(cx, r.ref, null) })
+      lines.push(pointed([dim(lead), { s: clip(demojibake(noControls(r.text)).replace(/\s+/g, ' '), Math.max(10, cols - width(lead))) }], false))
+    }
+    const left = (un?.total ?? 0) - (un?.rows.length ?? 0)
+    if (un && left > 0) {
+      const words = `↓ ${num(left)} more`
+      hits.push({ y: lines.length, x0: MARGIN_W + 4, x1: MARGIN_W + 4 + width(words), row: false, run: () => moreUnsure(cx, l.id) })
+      lines.push(pointed([{ s: '    ' }, dim(words)], false))
+    }
+  }
+  if (!ls.length) lines.push(pointed([{ s: '  ' }, dim('none')], false))
   const step = (d: number) => {
     const at = ls.findIndex(x => x.id === pick)
     labelPick = ls[Math.max(0, Math.min(ls.length - 1, at + d))]?.id ?? ''
@@ -2826,7 +3002,7 @@ async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   ) : null
   const listHints = ['↑↓ to choose', 'Enter to open', ...(undo ? ['u to undo'] : []), 'b to go back', 'x to close']
   // the title row, the header, the rule under the list, the field and the hint rows aside
-  const win = windowList('labels-list', lines, hits, ls.findIndex(x => x.id === pick), bodyRows - 3 - (goneRow ? 1 : 0) - hintHeight(listHints, cols) - body.length, () => cx.bumpPanel())
+  const win = windowList('labels-list', lines, hits, pickAt, bodyRows - 3 - (goneRow ? 1 : 0) - hintHeight(listHints, cols) - body.length, () => cx.bumpPanel())
   body.push(linesEl(cx, e, marginKey('labels-list'), win.lines, win.hits, cols + MARGIN_W, k => (k === 'up' || k === 'k' ? step(-1) : k === 'down' || k === 'j' ? step(1) : (k === 'return' || k === 'enter') && pick ? openLabel(cx, pick, ls.find(x => x.id === pick)?.name ?? pick) : undefined)))
   body.unshift(
     <Box key="label-presses" width={0} height={0} flexShrink={0} overflow="hidden" flexDirection="row">
@@ -2858,6 +3034,7 @@ async function drawDocs(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   const docs = (got?.ok ? docsOf(got.value) : []).sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0)).slice(0, 40)
   const body: RenderElement[] = [...headerEls(els, { title: 'Documents', cols, sub: subLine([plural(docs.length, 'document')]) })]
   const pick = docs.find(d => d.slug === docPick)?.slug ?? docs[0]?.slug ?? ''
+  if (pick) setBrowser(`report:${pick}`)
   const open = (d: (typeof docs)[number]) => openDoc(cx, d.slug, d.title)
   const { lines, hits } = listLines(
     docs.map(d => ({ key: d.slug, glyph: { s: d.status === 'generating' ? '◌' : '●' }, name: d.title, right: [dim(d.status === 'generating' ? `${d.renderer} · writing` : d.renderer)], run: () => open(d) })),
@@ -2912,16 +3089,17 @@ function stepFocus(s: DocSection): Record<string, Focus> {
   return out
 }
 
-/** One document (SPEC.md, section 7, "A document"): the title in the accent and bold, wrapped; while its writer
- *  writes, `◌ writing · N tool calls · <its latest words>` (and the request until anything is written), else its
- *  comments' facts (`2 open comments · 1 resolved`, `◌ <check> checking` while a check runs on it). A report:
+/** One document, read only (SPEC.md, section 7, "A document"; SPEC-v2 3.14): the title in the accent and bold, wrapped;
+ *  while its writer writes, `◌ writing · N tool calls · <its latest words>` (and the request until anything is written),
+ *  else its comments' facts (`2 open comments · 1 resolved`, `◌ <check> checking` while a check runs on it). A report:
  *  `Contents` from three headings, each a click (or 1-9) away; each section drawn as main's chat draws a reply, its
  *  cards in their frames. A deck or a story steps one slide or beat at a time: `‹ 3 of 9 ›`, `previous  next` (p, n), a
- *  deck's `notes` (o), a story's `read as a page` (a), its figure lit at the beat's step. The comments (report.ts) stand
+ *  deck's `notes` (t), a story's `read as a page` (a), its figure lit at the beat's step. The comments (report.ts) stand
  *  under the passages they are on, as the browser's margin shows them: ↑↓ choose one (`❯`), r resolves it or opens it
- *  again, Enter or a asks a side thread about it, v shows the resolved ones too. At the bottom `edit` (e, a report),
- *  `all documents ›` (l) and the retell controls, `as slides` (s) and `as a story` (y), which ask main to write it again
- *  in that form. A passage's "?" asks a side thread told the document, its section and the passage. */
+ *  again, Enter or a asks a side thread about it, v shows the resolved ones too. At the bottom `edit in the browser ↗`
+ *  (o, and the title row's `↗`: documents are written and edited in the browser workbench), `all documents ›` (l) and
+ *  the retell controls, `as slides` (s) and `as a story` (y), which ask main to write it again in that form. A
+ *  passage's "?" asks a side thread told the document, its section and the passage. */
 async function drawDoc(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElement> {
   const els = cx.els(e) as El
   const { Box, Text, Button } = cx.els(e)
@@ -2936,7 +3114,6 @@ async function drawDoc(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEleme
   const title = str(doc.title) || entry?.title || p.title
   const slug = p.slug ?? ''
   const form = str(doc.renderer) || str(doc.type) || entry?.renderer || 'document'
-  if (p.mode === 'edit' && got?.ok && form === 'document' && !writing) return drawDocEdit(cx, e, p, doc, title)
   const { units } = docUnits(doc)
   // the comments as the browser's margin shows them, the resolved ones too when asked
   const checksGot = await surfaceValue(cx, 'checks')
@@ -3017,8 +3194,8 @@ async function drawDoc(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEleme
     if (form === 'slides' && units.some(x => str((x as { notes?: unknown }).notes))) {
       const flip = () => void openPanel(cx, { ...p, mode: p.mode === 'notes' ? '' : 'notes' }, { replace: true })
       controls.push(<Button key="doc-notes-flip" label={p.mode === 'notes' ? 'hide notes' : 'notes'} plain onPress={flip} />)
-      keys.push({ key: 'notes', hotkey: 'o', onPress: flip })
-      hints.push('o for notes')
+      keys.push({ key: 'notes', hotkey: 't', onPress: flip })
+      hints.push('t for notes')
     }
     if (form === 'story') {
       const page = () => void openPanel(cx, { ...p, mode: 'page', start: 0 }, { replace: true })
@@ -3084,12 +3261,11 @@ async function drawDoc(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEleme
     keys.push({ key: 'cm-resolved', hotkey: 'v', onPress: flip })
     hints.push(resolvedShown(slug) ? 'v to hide resolved' : 'v to show resolved')
   }
-  // edit: the report as Markdown in the panel's editor (drawDocEdit)
-  if (form === 'document' && got?.ok && units.length && !writing) {
-    const edit = () => void openPanel(cx, { ...p, mode: 'edit' })
-    controls.push(<Button key="doc-edit" label={editOf(slug) ? 'edit (unsaved)' : 'edit'} plain onPress={edit} />)
-    keys.push({ key: 'edit', hotkey: 'e', onPress: edit })
-    hints.push('e to edit')
+  // the terminal reads documents only: they are written and edited in the browser workbench (SPEC-v2 3.14), which `↗`
+  // and `o` open on the document
+  if (got?.ok && !writing) {
+    controls.push(<Button key="doc-browser" label="edit in the browser ↗" plain onPress={() => void openInBrowser(cx, `report:${slug}`)} />)
+    hints.push('o to edit in the browser')
   }
   // retell: main writes the document again in another form (thimble's writer)
   const retell = (to: 'slides' | 'story') => () => void cx.command('thimble:write', `${to} Retell the document "${title}" as ${to === 'slides' ? 'slides' : 'a story'}.`).catch(err => cx.toast(`thimble: could not start the writer: ${String(err).slice(0, 200)}`))
@@ -3158,67 +3334,6 @@ async function askComment(cx: Ctx, doc: Obj, slug: string, c: DocComment): Promi
   const words = passageWords(doc, c.sid)
   const anchor = `report:${slug}#${c.sid}`
   await openAsk(cx, { kind: 'sentence', text: words }, { anchor, anchorText: `${words}\n\n${commentWho(c)}: ${c.text}`, element: anchor, about: `comment ${quoted(clip(c.text, 50))}` })
-}
-
-/** A report edited as Markdown (SPEC.md, section 7, "Documents"; report.ts): the title, `editing as Markdown` and
- *  `unsaved edits` dim under it; the document's Markdown whole in the editor (docedit.tsx), a window over it the pane's
- *  height, in a border; at the bottom `save` (ctrl+s in the editor, s outside it) and `discard` (d), then why a save
- *  did not go through, in red. A save goes through the browser editor's route, so each passage the edit kept keeps its
- *  id and its comments; back keeps what was typed for the next edit. */
-async function drawDocEdit(cx: Ctx, e: PaneEvent, p: TermPanel, doc: Obj, title: string): Promise<RenderElement> {
-  const els = cx.els(e) as El
-  const { Box, Text, Button } = cx.els(e)
-  const cols = Math.max(30, e.props.bodyColumns)
-  const slug = p.slug ?? ''
-  const ed = beginEdit(slug, doc)
-  const changed = editChanged(ed)
-  const body: RenderElement[] = [...headerEls(els, { title, cols, sub: subLine(['editing as Markdown', 'a card is its line ![caption](card:<id>)', changed ? 'unsaved edits' : null]) })]
-  const save = () => void saveDocEdit(cx, slug)
-  // the edit dropped: the editor holds the document as it stands now
-  const discard = () => {
-    discardEdit(slug)
-    void readDoc(cx, slug).then(() => cx.bumpPanel())
-  }
-  const hints = ['ctrl+s or s to save', ...(changed ? ['d to discard'] : [])]
-  const controls = [<Button key="doc-save" label="save" plain onPress={save} />, changed ? <Button key="doc-discard" label="discard" plain onPress={discard} /> : null]
-  const said = ed.said ? [<Text key="doc-edit-said" color={COLORS.problem} wrap="wrap">{`! ${ed.said}`}</Text>] : []
-  // the editor's rows: what the pane leaves under the header (its title row, which holds the path) and above the
-  // bottom part
-  const rows = Math.max(6, (bodyRows || 30) - 9 - said.length - (hintHeight(hints, cols) - 1))
-  if (e.surface === 'terminal' || e.surface === 'desktop') {
-    const { Client } = cx.els(e)
-    body.push(
-      <Box key="doc-editor" flexDirection="column" borderStyle="round" borderColor={COLORS.rule} paddingX={1}>
-        <Client key={`doc-editor-${slug}`} module="./docedit.tsx" width={cols - 4} props={JSON.parse(JSON.stringify({ slug, text: ed.text, cols: cols - 4, rows }))} />
-      </Box>,
-    )
-  } else body.push(<Text key="doc-editor" wrap="wrap">{ed.text}</Text>)
-  body.push(...bottomRows(cx, e, cols, controls, said, hints))
-  const hk = hiddenKeys(cx, e, [{ key: 'save', hotkey: 's', onPress: save }, ...(changed ? [{ key: 'discard', hotkey: 'd', onPress: discard }] : [])])
-  return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>
-}
-
-/** Save a document's edit (report.ts saveEdit); once saved, the document read again and shown as it now stands. */
-async function saveDocEdit(cx: Ctx, slug: string): Promise<void> {
-  if (!rt.sc) return
-  const why = await saveEdit(cx, rt.sc, slug)
-  if (why) return cx.bumpPanel()
-  await readDoc(cx, slug)
-  const p = await cx.panel()
-  if (p?.view === 'doc' && p.slug === slug && p.mode === 'edit') await navBack(cx)
-  else await cx.bumpPanel()
-}
-
-/** A post of docedit.tsx: what was typed (a draft), or a save (ctrl+s). */
-export async function docEditMessage(cx: Ctx, slug: string, text: string, save: boolean): Promise<void> {
-  const ed = editOf(slug)
-  if (!ed) return
-  const was = editChanged(ed)
-  draftEdit(slug, text)
-  if (save) return saveDocEdit(cx, slug)
-  // the subtitle's `unsaved edits` and the `discard` control follow the first change and its undoing
-  const now = editOf(slug)
-  if (now && editChanged(now) !== was) await cx.bumpPanel()
 }
 
 // ------------------------------------------------------------------------------------------------ agents and views
@@ -3305,11 +3420,12 @@ const VIEW_CHROME = 3
 // the panel's own keys, which a view never takes (term_kit/kit.mjs PANEL_KEYS): back, the threads, close
 const PANEL_KEYS = ['b', 't', 'x']
 
-/** One view (docs/terminal-views.md): a view built in terminal mode is drawn by its program (hooks/viewhost.ts) under
+/** One view (docs/terminal-views.md): a view with a terminal page is drawn by its program (hooks/viewhost.ts) under
  *  the panel's header, its subtitle the facts the program gives, its hint row the keys it binds; its keys reach it
  *  through the list's relay (↑↓, Enter, Space, Backspace) and as hotkeys (a letter, a digit, a sign), every key while a
- *  field of it takes typing, and its clicks and drags through hooks/viewclient.tsx. A view built in browser mode is one
- *  line that says so. */
+ *  field of it takes typing, and its clicks and drags through hooks/viewclient.tsx. A view built from the browser has no
+ *  terminal page until its first open here builds one (SPEC-v2 3.13): one line says so while it builds, and `↗` opens the
+ *  view in the browser. */
 async function drawView(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElement> {
   const els = cx.els(e) as El
   const { Box, Text, Button, Client } = cx.els(e)
@@ -3321,8 +3437,8 @@ async function drawView(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
       <Box flexDirection="column">
         {[
           ...headerEls(els, { title: p.title || slug || 'view', cols, sub: subLine(['view']) }),
-          <Text key="view-words" wrap="wrap">{v && !v.term && v.state === 'built' ? 'This view was built in browser mode, so only the browser draws it. To see it, quit, run `thimble mode browser`, and start `thimble` again in this folder.' : 'The view is not built yet. Its row on home says when it is.'}</Text>,
-          hintsRow(els, ['b to go back', 'x to close'], cols),
+          <Text key="view-words" wrap="wrap">{v && !v.term && v.state === 'built' ? 'building the terminal page… The browser draws this view now: o or ↗ opens it there.' : 'The view is not built yet. Its row on home says when it is.'}</Text>,
+          hintsRow(els, ['o to open it in the browser', 'b to go back', 'x to close'], cols),
         ]}
       </Box>
     )
@@ -3395,13 +3511,15 @@ async function drawView(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>
 }
 
-// what the view's acts do in the panel: a record's place in the citation panel, a side thread about a row, a label's
-// panel
-onViewAct(async (cx, a) => {
-  if (a.kind === 'open' && a.ref) return openCite(cx, a.ref, null)
-  if (a.kind === 'ask' && a.ref) return openAsk(cx, { kind: 'record', ref: a.ref, text: a.text ?? '' }, { anchor: a.ref, anchorText: a.text ?? '' })
-  if (a.kind === 'label' && a.id) return openLabel(cx, a.id, a.name || a.id)
-})
+/** What the view's acts do in the panel: a record's place in the citation panel, a side thread about a row, a label's
+ *  panel (views.ts registerPanelViews calls it once). */
+export function registerViewActs(): void {
+  onViewAct(async (cx, a) => {
+    if (a.kind === 'open' && a.ref) return openCite(cx, a.ref, null)
+    if (a.kind === 'ask' && a.ref) return openAsk(cx, { kind: 'record', ref: a.ref, text: a.text ?? '' }, { anchor: a.ref, anchorText: a.text ?? '' })
+    if (a.kind === 'label' && a.id) return openLabel(cx, a.id, a.name || a.id)
+  })
+}
 
 // ------------------------------------------------------------------------------------------------ the panel
 
@@ -3422,6 +3540,7 @@ export async function drawPanel(cx: Ctx, pe: PaneEvent): Promise<RenderElement> 
   // the list this drawing draws, read off its drawing (lines.tsx), for the relay in its title row (listKeysEl)
   takeListKeys()
   setHead({})
+  setBrowser(null)
   hotkeysDrawing = new Map()
   listExtraDrawing = { space: false, backspace: false }
   fieldsDrawing = new Set()

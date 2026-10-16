@@ -144,8 +144,10 @@ test('after a relaunch the toast counts what came before the quit and was never 
   w.states.home = { ...w.states.home, cards: 14, docs: { ...w.states.home.docs, slides: { exists: true, title: 'The relay in two slides' } } } as never
   await start($, w)
   const above = (await $.ui.mount(ABOVE)) as unknown as M
-  expect(shown(await above.drawn())).toContain('2 new cards · 1 new document')
-  await above.press({ key: 'above-home-open' })
+  // 0.9.0 (SPEC-v2 3.8): the summary line's items and `open ›` in place of the toast's
+  expect(shown(await above.drawn())).toContain('cards 2 new')
+  expect(shown(await above.drawn())).toContain('documents 1 new')
+  await above.press({ key: 'above-summary-open' })
   await above.unmount()
   await w.clock.settle()
   expect(parseKept(w.files.get(`${WS}/${KEPT_FILE}`) ?? '').seen?.cards).toBe(14)

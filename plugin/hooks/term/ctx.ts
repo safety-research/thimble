@@ -5,14 +5,14 @@
 import { atom, update } from 'claude-code'
 import type { Elements, EngineInterface, FsEntry, FsStat, HttpInit, HttpResponse, McpToolResult, PaneOpenArgs, ProcessRunInit, ProcessRunResult, RenderElement, ResolveInput, UiOpenResult } from 'claude-code'
 
-import type { ChatHomeUi, ChatNav, ChatNews, ChatSignal, TermAgent, TermAnswer, TermCard, TermFilesUi, TermHome, TermLabelUi, TermPanel, TermPending, TermThread, TermThreadRow, TermVerdict } from './types'
+import type { ChatHomeUi, ChatNav, ChatNews, ChatSignal, LabelUnsure, Links, Pressing, SummarySeen, TermAgent, TermAnswer, TermCard, TermFilesUi, TermHome, TermLabelUi, TermPanel, TermPending, TermThread, TermThreadRow, TermVerdict } from './types'
 import { HOME_UI_EMPTY } from './home'
 import { keepRow } from './kept'
 import type { KeptRow } from './kept'
 import { NAV_EMPTY } from './nav'
 import { FILES_UI_EMPTY, LABEL_UI_EMPTY, PANEL, rt } from './term'
 import type { Activated, AnswerComment, CiteRow, CoverageSummary, FeatureSettings } from './contracts'
-import { bridgeActivated } from '../thimble.ts'
+import { bridgeActivated } from '../thimble'
 
 type Dollar = EngineInterface
 
@@ -147,6 +147,19 @@ export type Ctx = {
   setChecksRunning: (n: number) => Promise<void>
   /** the comment the panel's Checks view shows (the panel lane writes it) */
   checksOpen: () => Promise<string | null>
+  // ---- 0.9.0, the panel's (C13): the comment open in the Checks view, the labels' unsure counts, the summary line's
+  // seen counts, a press while it runs, the remote rows' commands, and the clipboard
+  setChecksOpen: (id: string | null) => Promise<void>
+  labelUnsure: () => Promise<LabelUnsure[]>
+  setLabelUnsure: (rows: LabelUnsure[]) => Promise<void>
+  seen: () => Promise<SummarySeen | null>
+  setSeen: (s: SummarySeen | null) => Promise<void>
+  pressing: () => Promise<Pressing | null>
+  setPressing: (p: Pressing | null) => Promise<void>
+  links: () => Promise<Links | null>
+  setLinks: (l: Links | null) => Promise<void>
+  /** text on the clipboard of the surface the person uses: whether it was copied, else why not */
+  copy: (text: string) => Promise<{ isCopied: boolean; reason?: string }>
   /** what kept.ts kept under a row put back in the state where the state holds none (no write of the file) */
   restoreRow: (row: string, r: KeptRow) => Promise<void>
 }
@@ -183,6 +196,10 @@ const citeIndexRef = { plugin: 'thimble', key: 'citeIndex' } as const
 const answerCommentsRef = { plugin: 'thimble', key: 'answerComments' } as const
 const checksRunningRef = { plugin: 'thimble', key: 'checksRunning' } as const
 const checksOpenRef = { plugin: 'thimble', key: 'checksOpen' } as const
+const labelUnsureRef = { plugin: 'thimble', key: 'labelUnsure' } as const
+const seenRef = { plugin: 'thimble', key: 'seen' } as const
+const pressingRef = { plugin: 'thimble', key: 'pressing' } as const
+const linksRef = { plugin: 'thimble', key: 'links' } as const
 
 /** The context the other files take, bound to a hook's `$`: every file that registers hooks builds it here, since a
  *  hooks module passes `$` only to a function declared in its own file or imported from one of the module's files. */
@@ -373,6 +390,19 @@ export function cxOf($: Dollar): Ctx {
     checksRunning: async () => (await $.state.get(checksRunningRef)).value ?? 0,
     setChecksRunning: async n => void (await $.state.set(checksRunningRef, n)),
     checksOpen: async () => (await $.state.get(checksOpenRef)).value ?? null,
+    setChecksOpen: async id => void (await $.state.set(checksOpenRef, id)),
+    labelUnsure: async () => (await $.state.get(labelUnsureRef)).value ?? [],
+    setLabelUnsure: async rows => void (await $.state.set(labelUnsureRef, rows)),
+    seen: async () => (await $.state.get(seenRef)).value ?? null,
+    setSeen: async v => void (await $.state.set(seenRef, v)),
+    pressing: async () => (await $.state.get(pressingRef)).value ?? null,
+    setPressing: async v => void (await $.state.set(pressingRef, v)),
+    links: async () => (await $.state.get(linksRef)).value ?? null,
+    setLinks: async v => void (await $.state.set(linksRef, v)),
+    copy: async text => {
+      const r = await $.ui.copy({ text }).catch(err => ({ isCopied: false as const, reason: String(err).slice(0, 120) }))
+      return r.isCopied ? { isCopied: true } : { isCopied: false, reason: String((r as { reason?: unknown }).reason ?? 'not copied') }
+    },
     restoreRow: async (row, r) => {
       if (r.cards?.length && !(await $.state.get({ ...TURN_CARDS, id: row })).value?.length) await $.state.set({ ...TURN_CARDS, id: row }, r.cards)
       if (r.answer && !(await $.state.get({ ...ANSWERS, id: row })).value) await $.state.set({ ...ANSWERS, id: row }, r.answer)

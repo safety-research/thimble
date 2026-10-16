@@ -5,7 +5,10 @@
 //   the color wheel (backend/app/label_wheel.json);
 // - the held-out agreement line, in the browser's words (frontend canvas/details.ts agreementLine);
 // - what the panel asks of `thimble state label` (`--rows`, the records of a value its `… N more` asked for);
-// - the label deleted last, whose delete the labels list offers to undo (`thimble act label-undelete`).
+// - the label deleted last, whose delete the labels list offers to undo (`thimble act label-undelete`);
+// - each label's records with no category fit and those it is unsure of (`thimble state label-unsure --label <id> --n
+//   <n>`, SPEC-v2 C8), no-fit first, then unsure by confidence, which the labels list and the label editor show first,
+//   UNSURE_PAGE more at each `↓ more`.
 import { COLORS, LABEL_HUES, PICKED_HUES } from './paint'
 
 /** The label colors by the names show_label takes, in the palette's order: `blue` is color 1, `cyan` 12, then red,
@@ -75,4 +78,41 @@ export let labelGone: { id: string; name: string; error?: string } | null = null
 
 export function setLabelGone(gone: { id: string; name: string; error?: string } | null): void {
   labelGone = gone
+}
+
+/** A label's record with no category fit (value none, off its list, or failed) or one it is unsure of (C8). */
+export type UnsureRow = { ref: string; value: string | null; confidence: number | null; kind: 'no-fit' | 'unsure'; text: string }
+
+/** The records a label's unsure list shows at first, and how many more each `↓ more` asks for. */
+export const UNSURE_PAGE = 3
+
+/** How many of each label's unsure records the panel shows (UNSURE_PAGE until a `↓ more`). */
+export const unsureShown = new Map<string, number>()
+
+/** The surface key a label's unsure records are kept under. */
+export function unsureKey(id: string): string {
+  return `label-unsure:${id}`
+}
+
+/** The arguments of `thimble state label-unsure` for label `id`: the records shown so far. */
+export function unsureArgs(id: string): string[] {
+  return ['--label', id, '--n', String(unsureShown.get(id) ?? UNSURE_PAGE)]
+}
+
+/** A label's counts and its records as `thimble state label-unsure --label` printed them. */
+export function unsureOf(v: unknown): { noFit: number; unsure: number; total: number; rows: UnsureRow[] } {
+  const l = Array.isArray((v as { labels?: unknown })?.labels) ? ((v as { labels: Record<string, unknown>[] }).labels[0] ?? {}) : {}
+  const rows = (Array.isArray(l.rows) ? (l.rows as Record<string, unknown>[]) : []).filter(r => r && typeof r.ref === 'string').map(r => ({
+    ref: String(r.ref),
+    value: typeof r.value === 'string' ? r.value : null,
+    confidence: typeof r.confidence === 'number' ? r.confidence : null,
+    kind: r.kind === 'no-fit' ? ('no-fit' as const) : ('unsure' as const),
+    text: typeof r.text === 'string' ? r.text : '',
+  }))
+  return { noFit: Number(l.noFit) || 0, unsure: Number(l.unsure) || 0, total: Number(l.total) || rows.length, rows }
+}
+
+/** A record's state in words: `no fit`, or `unsure 0.31`. */
+export function unsureWords(r: UnsureRow): string {
+  return r.kind === 'no-fit' ? 'no fit' : `unsure${r.confidence !== null ? ` ${r.confidence.toFixed(2)}` : ''}`
 }

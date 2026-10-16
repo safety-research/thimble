@@ -7,6 +7,8 @@ import type { Engine, Mounted } from 'claude-code/testing'
 
 import { labelHue } from '../home'
 import { CWD, THREAD_T1, WS, shown, takesKeys, world } from './fixtures'
+import { SUMMARY, comment, featuresOff, panelWorld } from './fixtures-panel'
+import { cid } from '../lib'
 import type { World } from './fixtures'
 
 type M = Mounted<'terminal'>
@@ -27,6 +29,11 @@ async function home($: E, w: World): Promise<M> {
   await w.clock.settle()
   await takesKeys($)
   return (await $.ui.mount(PANE)) as unknown as M
+}
+
+/** The home panel's rows as words. */
+async function homeLines(pane: M): Promise<string[]> {
+  return (((await pane.drawn({ in: 'm:home' })) as { children?: unknown[] }).children ?? []).map(r => shown(r))
 }
 
 /** A click on the home panel's row that shows `text`; the panel drawn again. */
@@ -210,10 +217,13 @@ test("home: views by state, the glyph alone saying it; documents under that word
   expect(at('wiki/')).toMatch(/▾ wiki\/ {2}2 +52\.0 MB$/)
   expect(lines.find(l => /▸ data\//.test(l))).toMatch(/^\s*▸ data\/ {2}1 +2\.1 MB$/)
   expect(lines.some(l => l.includes('wiki/data/'))).toBe(false)
-  expect(lines.some(l => l.includes('Coverage: 2 of 3 files opened; data/ never.'))).toBe(true)
+  // 0.9.0 (SPEC-v2 J4): the Coverage section replaces the line under the Files heading
+  expect(lines.some(l => l.includes('Coverage: 2 of 3 files opened; data/ never.'))).toBe(false)
   // a label's ● in the label's color, as the label panel draws it beside its name
   const homeTree = JSON.stringify(await pane.drawn({ in: 'm:home' }))
-  expect(homeTree).toContain(`{"type":"Text","props":{"color":"${labelHue(['proxy-link', 'none'])}"},"children":["●"]},{"type":"Text","children":[" links through a fetch proxy`)
+  // 0.9.0 (SPEC-v2 J4): Labels is home's first section, so its first row is the one the keys chose (its title in the
+  // accent)
+  expect(homeTree).toContain(`{"type":"Text","props":{"color":"${labelHue(['proxy-link', 'none'])}"},"children":["●"]},{"type":"Text","props":{"color":"suggestion"},"children":[" links through a fetch proxy`)
   await pane.unmount()
 })
 
@@ -419,5 +429,35 @@ test("home shows `not run yet` for a label with no run, as its panel does, with 
   expect(rows.join('\n')).not.toContain('yes 0')
   // the section's summary counts it apart
   expect(rows.find(r => r.startsWith('Labels') || r.includes('Labels (2)'))).toBeTruthy()
+  await pane.unmount()
+})
+
+test("home's sections in SPEC-v2 J4's order: Coverage, Citations, Labels, Threads, Views, Checks, Cards, Documents, Files; each heading opens its view; a feature that is off leaves its section out", { timeoutMs: 30_000 }, async ($, on) => {
+  const w = panelWorld(on)
+  w.t.coverageSummary = SUMMARY
+  w.t.citeIndex = [{ id: 'c1', raw: '[[99|README.md#L99]]', display: '99', ref: 'README.md#L99', row: 'r1', at: 1 }]
+  w.t.verdicts = { [cid('[[99|README.md#L99]]')]: { ref: 'README.md#L99', display: '99', status: 'missing', why: 'line 99 out of range', kind: 'record', lines: [], at: 1 } }
+  w.t.answerComments = [comment('c1')]
+  await start($, w)
+  let pane = await home($, w)
+  const heads = (await homeLines(pane)).filter(l => /^ {2}[A-Z][a-z]+ \(\d+\)/.test(l)).map(l => l.trim().split(' (')[0])
+  expect(heads).toEqual(['Coverage', 'Citations', 'Labels', 'Threads', 'Views', 'Checks', 'Cards', 'Documents', 'Files'])
+  const lines = await homeLines(pane)
+  expect(lines.find(l => l.includes('saw 3% of records'))).toBeDefined()
+  expect(lines.find(l => l.includes('99') && l.includes('README.md line 99'))).toMatch(/× 99/)
+  expect(lines.find(l => l.includes('After 19 June'))).toMatch(/⚑ "After 19 June.*Important details/)
+  // the Coverage heading opens the Coverage view; the Checks heading the Checks view
+  pane = await homeClick($, w, pane, 'Coverage (1)')
+  expect(w.panes.at(-1)!.title).toBe('Coverage')
+  await pane.unmount()
+  pane = await home($, w)
+  pane = await homeClick($, w, pane, 'Checks (1)')
+  expect(w.panes.at(-1)!.title).toBe('Important details')
+  await pane.unmount()
+  // coverage, citation marks, labels and checks off: no section of theirs
+  w.t.settings = featuresOff('coverage', 'citationMarks', 'labels', 'checks')
+  pane = await home($, w)
+  const off = (await homeLines(pane)).filter(l => /^ {2}[A-Z][a-z]+ \(\d+\)/.test(l)).map(l => l.trim().split(' (')[0])
+  expect(off).toEqual(['Threads', 'Views', 'Cards', 'Documents', 'Files'])
   await pane.unmount()
 })

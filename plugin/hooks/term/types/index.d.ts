@@ -212,6 +212,15 @@ export type AnswerComment = { id: string; check: string; checkName: string; colo
 /** The panel's per-section counts last seen (as 0.8.0's homeSeen). */
 export type SummarySeen = { cards: number; labels: number; docs: number; views: number; threads: number; checks: number; at: number }
 
+/** A label's records with no category fit and its unsure records, counted, for the summary line (term-panel). */
+export type LabelUnsure = { id: string; name: string; noFit: number; unsure: number }
+
+/** A press that opens the browser, while it runs (term-panel). */
+export type Pressing = { at: number; ref: string }
+
+/** The remote rows' commands: the SSH tunnel, the ET form, and the page's address, never a sign-in code (term-panel). */
+export type Links = { tunnel: string; et: string | null; url: string }
+
 declare module 'claude-code' {
   interface PluginState {
     'thimble': {

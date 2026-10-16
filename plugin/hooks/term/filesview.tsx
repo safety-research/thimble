@@ -96,52 +96,6 @@ async function readPreview(cx: Ctx, path: string, start = 1): Promise<void> {
   }
 }
 
-loadsView('files', async cx => {
-  lastPage = ''
-  await readSurface(cx, 'files', 'files')
-  await readOpens(cx)
-  await readLabels(cx)
-  // the row chosen: the analyst's, else the first file the tree shows (live check term-fix9, quirk 7: no row was chosen
-  // as the browser opened); the chosen file's preview under the list
-  let ui = await cx.filesUi()
-  if (!ui.pick) {
-    const first = firstChoice(filesOf(await surfaceValue(cx, 'files')), ui)
-    if (first) {
-      ui = { ...ui, pick: first }
-      await cx.setFilesUi(ui)
-    }
-  }
-  const at = ui.query ? foundPlace(ui.found ?? '') : null
-  if (at && (ui.found ?? '').startsWith('named:') && queryLine(ui.query ?? '').line) at.line = queryLine(ui.query ?? '').line
-  if (at) await readPreview(cx, at.path, at.line ? Math.max(1, at.line - 2) : 1)
-  else if (ui.pick && !ui.pick.startsWith('dir:') && !ui.pick.startsWith('more:')) await readPreview(cx, ui.pick)
-})
-
-loadsView('file', async (cx, p) => {
-  if (!p.path) return
-  await readLabels(cx)
-  if (isDatabase(p.path)) {
-    await readSurface(cx, `tables:${p.path}`, 'tables', [p.path])
-    if (p.table) await readSurface(cx, rowsKey(p), 'rows', rowsArgs(p))
-    return
-  }
-  const start = p.start ?? 1
-  const key = `file:${p.path}:${start}`
-  if (lastPage !== key || !(await cx.surface(key))) await readFilePage(cx, p.path, start)
-  lastPage = key
-  const page = await surfaceValue<Obj>(cx, key)
-  // a whole-file JSON transcript: a page of the turns thimble parses from the whole file, for its Transcript tab
-  if (page?.ok && wholeJson(page.value)) {
-    const { key: tkey, args } = turnsRead(p)
-    await readSurface(cx, tkey, 'turns', args)
-  }
-  // a delimited file's later page: its first, whose first line names the columns
-  if (page?.ok && delimiterOf(p.path) && start > 1 && !(await cx.surface(`file:${p.path}:1`))) await readFilePage(cx, p.path, 1)
-  if (page?.ok) {
-    const ls = pageLines(page.value)
-    if (ls.length) await readMarks(cx, p.path, ls[0]!.n, ls.at(-1)!.n)
-  }
-})
 
 // ------------------------------------------------------------------------------------------------ a page's records
 
@@ -1344,6 +1298,56 @@ async function drawDatabase(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<Render
   return <Box flexDirection="column">{body}</Box>
 }
 
-drawsView('files', (cx, e) => drawFiles(cx, e))
-drawsView('file', drawFile)
+/** The file browser and a file registered with the panel (views.ts registerPanelViews calls it once): their reads
+ *  (term.ts loadsView) and their drawings (panel.tsx drawsView). */
+export function registerFilesView(): void {
+  loadsView('files', async cx => {
+    lastPage = ''
+    await readSurface(cx, 'files', 'files')
+    await readOpens(cx)
+    await readLabels(cx)
+    // the row chosen: the analyst's, else the first file the tree shows (live check term-fix9, quirk 7: no row was chosen
+    // as the browser opened); the chosen file's preview under the list
+    let ui = await cx.filesUi()
+    if (!ui.pick) {
+      const first = firstChoice(filesOf(await surfaceValue(cx, 'files')), ui)
+      if (first) {
+        ui = { ...ui, pick: first }
+        await cx.setFilesUi(ui)
+      }
+    }
+    const at = ui.query ? foundPlace(ui.found ?? '') : null
+    if (at && (ui.found ?? '').startsWith('named:') && queryLine(ui.query ?? '').line) at.line = queryLine(ui.query ?? '').line
+    if (at) await readPreview(cx, at.path, at.line ? Math.max(1, at.line - 2) : 1)
+    else if (ui.pick && !ui.pick.startsWith('dir:') && !ui.pick.startsWith('more:')) await readPreview(cx, ui.pick)
+  })
+
+  loadsView('file', async (cx, p) => {
+    if (!p.path) return
+    await readLabels(cx)
+    if (isDatabase(p.path)) {
+      await readSurface(cx, `tables:${p.path}`, 'tables', [p.path])
+      if (p.table) await readSurface(cx, rowsKey(p), 'rows', rowsArgs(p))
+      return
+    }
+    const start = p.start ?? 1
+    const key = `file:${p.path}:${start}`
+    if (lastPage !== key || !(await cx.surface(key))) await readFilePage(cx, p.path, start)
+    lastPage = key
+    const page = await surfaceValue<Obj>(cx, key)
+    // a whole-file JSON transcript: a page of the turns thimble parses from the whole file, for its Transcript tab
+    if (page?.ok && wholeJson(page.value)) {
+      const { key: tkey, args } = turnsRead(p)
+      await readSurface(cx, tkey, 'turns', args)
+    }
+    // a delimited file's later page: its first, whose first line names the columns
+    if (page?.ok && delimiterOf(p.path) && start > 1 && !(await cx.surface(`file:${p.path}:1`))) await readFilePage(cx, p.path, 1)
+    if (page?.ok) {
+      const ls = pageLines(page.value)
+      if (ls.length) await readMarks(cx, p.path, ls[0]!.n, ls.at(-1)!.n)
+    }
+  })
+  drawsView('files', (cx, e) => drawFiles(cx, e))
+  drawsView('file', drawFile)
+}
 

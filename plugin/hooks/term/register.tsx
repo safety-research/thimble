@@ -40,10 +40,9 @@ import { lineWidth } from './draw'
 import { cardsOfCall, docsOf, forkDescription, labelsOf, namedForks, namedThreads, noteLines, reportOf, runIds, runShown, saysWriter, threadOf, withoutEnd, withoutLines, withoutNotes, withoutToldThreads, withoutWriterLines } from './model'
 import { keepLast, keepRow } from './kept'
 import { linesMessage, onListClick } from './lines'
-import { ANSWER_ELEMENT, RELAY, docEditMessage, drawPanel, fieldMessage, focusedField, hasList, homeViews, onGesture, openAsk, openCard, openCite, openFile, openLabel, openThread, openView, relayKey, relayMove, scrollPending, viewWheelAt, wheelWindow } from './panel'
+import { ANSWER_ELEMENT, RELAY, drawPanel, fieldMessage, focusedField, hasList, homeViews, onGesture, openAsk, openCard, openCite, openFile, openLabel, openThread, openView, relayKey, relayMove, scrollPending, viewWheelAt, wheelWindow } from './panel'
 import type { PaneEvent } from './panel'
 // the file browser and a file, drawn by a module of their own (panel.tsx drawsView, term.ts loadsView)
-import './filesview'
 import { MARGIN, chipOf, drawCards, drawReply, placeUrl, toolWords } from './reply'
 import { COLORS } from './paint'
 import { isAnchor, signalEnd, signalQuestion } from './signal'
@@ -1092,9 +1091,6 @@ export const register: Register = (on, options) => {
     } else if (d.type === 'field' && typeof d.name === 'string' && typeof d.text === 'string') {
       // a field's words (field.tsx): a draft, or a save
       await fieldMessage(cx, d.name, d.text.slice(0, 20000), d.save === true)
-    } else if (d.type === 'doc-edit' && typeof d.slug === 'string' && typeof d.text === 'string') {
-      // a document's editor (docedit.tsx): what was typed, or a save
-      await docEditMessage(cx, d.slug, d.text, d.save === true)
     } else if (d.type === 'files-open' && typeof d.path === 'string') {
       await openFile(cx, d.path)
     }

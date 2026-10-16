@@ -198,7 +198,8 @@ for (const rows of [SHORT, TALL]) {
     let s = await seen($, rows, 'home')
     named(s.hint, ['↑↓ to choose', 'Enter to open', 'Space to fold', 'x to close'])
     expect(s.relay && s.hotkeys).toBe(true)
-    expect(s.chosen).toContain('Agents used the dse wiki as a relay')
+    // 0.9.0 (SPEC-v2 J4): Labels is home's first section here, so its label is the first row chosen
+    expect(s.chosen).toContain('links through a fetch proxy')
     if (rows === TALL) {
       // cut to the pane: the hint row is the last, a count row says what is below
       expect(s.rows.length).toBeLessThanOrEqual(rows - 1)
@@ -207,12 +208,12 @@ for (const rows of [SHORT, TALL]) {
     // ↓ eleven times: past the first rows of a tall pane, the choice still shows, as does the hint row
     await down($, w, 11)
     s = await seen($, rows, 'home')
-    expect(s.chosen).not.toContain('Agents used the dse wiki')
+    expect(s.chosen).not.toContain('links through a fetch proxy')
     expect(s.chosen).not.toBe('')
     expect(s.hint).toContain('↑↓ to choose')
     if (rows === TALL) expect(s.rows.some(r => /↑ \d+ more/.test(r))).toBe(true)
     await up($, w, 11)
-    expect((await seen($, rows, 'home')).chosen).toContain('Agents used the dse wiki as a relay')
+    expect((await seen($, rows, 'home')).chosen).toContain('links through a fetch proxy')
     // Space on the card group's row folds it
     await down($, w, 3)
     expect((await seen($, rows, 'home')).chosen).toContain('Your work')
@@ -237,7 +238,7 @@ for (const rows of [SHORT, TALL]) {
     expect(w.closed).toContain(PANEL)
   })
 
-  test(`keys · home · toast · ${size}: open › gives the panel the keys, the new card's group unfolded and the card chosen; the toast hides while home shows`, async ($, on) => {
+  test(`keys · home · summary line · ${size}: open › gives the panel the keys, the new card's group unfolded and the card chosen; open › marks nothing seen`, async ($, on) => {
     // live check term-fix8, quirk 6
     const w = world(on)
     await start($, w)
@@ -253,8 +254,8 @@ for (const rows of [SHORT, TALL]) {
     w.paneFocused = false
     w.grantOnReopen = true
     let above = (await $.ui.mount(ABOVE)) as unknown as M
-    expect(shown(await above.drawn())).toContain('2 new cards')
-    await above.press({ key: 'above-home-open' })
+    expect(shown(await above.drawn())).toContain('cards 2 new')
+    await above.press({ key: 'above-summary-open' })
     await above.unmount()
     await w.clock.advance(300)
     expect(w.paneFocused).toBe(true)
@@ -263,12 +264,13 @@ for (const rows of [SHORT, TALL]) {
     named(s.hint, ['↑↓ to choose', 'Enter to open', 'Space to fold'])
     expect(s.chosen).toContain('When were pages deleted?')
     expect(s.rows.find(r => r.includes('When were pages deleted?'))).toMatch(/new$/)
-    // the toast hides while home shows, and what arrives meanwhile is seen
+    // 0.9.0 (SPEC-v2 3.8): the summary line stays while home shows, and `open ›` marks nothing seen: what arrives
+    // meanwhile adds to the cards' `new`
     w.states.home = { ...w.states.home, cards: 15 }
     w.stamps.set(`${WS}/notebooks`, 3)
     await w.clock.advance(1100)
     above = (await $.ui.mount(ABOVE)) as unknown as M
-    expect(shown(await above.drawn())).not.toContain('new card')
+    expect(shown(await above.drawn())).toContain('cards 3 new')
     await above.unmount()
     await down($, w)
     expect((await seen($, rows, 'home')).chosen).toContain('Who deleted them?')
@@ -483,8 +485,9 @@ test('keys · views · a heading click: ↑↓ choose, Enter and 1-9 open, b bac
   await hotkey($, w, 'back')
   await takesKeys($)
   await type($, w, SHORT, '1')
-  // a view built in browser mode has no terminal program: one line says so, and no view host starts
-  expect((await seen($, SHORT)).text).toMatch(/Board[\s\S]*built in browser mode, so only the browser draws it/)
+  // a view built from the browser has no terminal page until its first open here builds one (SPEC-v2 3.13): one line
+  // says so, and no view host starts
+  expect((await seen($, SHORT)).text).toMatch(/Board[\s\S]*building the terminal page… The browser draws this view now/)
   expect(w.viewHost.started).toBe(0)
 })
 
@@ -1161,7 +1164,10 @@ test('the path row: `show all threads` and `N new` on home alone; the threads pa
     const pane = await look($, SHORT)
     // the row's words, without the labels of the hidden keys (their Boxes no row tall)
     const box = (await pane.find({ type: 'Box', key: 'way' })) as { children?: { props?: { height?: unknown } }[] } | undefined
-    const out = { text: shown((box?.children ?? []).filter(k => k?.props?.height !== 0)), threads: Boolean(await pane.find({ type: 'Button', key: 'threads' })) }
+    // every view's title row ends with its `↗` (SPEC-v2 3.8), which the steps' words are read without
+    const all = shown((box?.children ?? []).filter(k => k?.props?.height !== 0))
+    expect(all.endsWith('  ↗')).toBe(true)
+    const out = { text: all.replace(/ {2}↗$/, ''), threads: Boolean(await pane.find({ type: 'Button', key: 'threads' })) }
     await pane.unmount()
     return out
   }
@@ -1266,9 +1272,10 @@ test('keys · home · tall, scrolled: ↑ back to a section\'s first row shows i
   const back = await seen($, TALL, 'home')
   expect(back.chosen).toBe(first.chosen)
   expect(back.rows.some(r => /↑ \d+ more/.test(r))).toBe(false)
-  // the rule under the title row, then the Views heading over the first row
+  // the rule under the title row, then the first section's heading over the first row (0.9.0, SPEC-v2 J4: Labels is
+  // home's first section here)
   expect(back.text.startsWith('Home')).toBe(true)
-  expect(back.rows.slice(0, 3).map(r => r.trim())).toEqual([expect.stringMatching(/^─+$/), expect.stringMatching(/^Views \(1\)/), expect.stringMatching(/Board/)])
+  expect(back.rows.slice(0, 3).map(r => r.trim())).toEqual([expect.stringMatching(/^─+$/), expect.stringMatching(/^Labels \(1\)/), expect.stringMatching(/links through a fetch proxy/)])
 })
 
 test('keys · home · a word typed while home holds the keys reaches the prompt whole: `t` opens no threads', async ($, on) => {
@@ -1434,7 +1441,8 @@ test('a notice\'s open settings says where thimble\'s config is, since the termi
   await row.press({ key: 'above-notice-n6-act-0' })
   await w.clock.settle()
   expect(w.acts.length).toBe(acts)
-  expect(w.toasts.at(-1)).toBe(`thimble: in terminal mode, Settings is thimble's config: ${config} (its keys: docs/config.md)`)
+  // 0.9.0 (SPEC-v2 3.17): no modes; Settings are the browser's and thimble's config
+  expect(w.toasts.at(-1)).toBe(`thimble: Settings are in the browser workbench (/thimble open) and in thimble's config: ${config} (its keys: docs/config.md)`)
   await row.unmount()
   row = await above($)
   expect(shown(await row.find({ type: 'Box', key: 'above-notice-n6' }))).toContain('open settingsdismiss')
@@ -1463,7 +1471,7 @@ test('a notice\'s open › goes to the thread of the agent it names: an agent\'s
   expect(s.text).toContain('why is events.jsonl so much bigger?')
 })
 
-test("keys · home · toast: `dismiss` marks what is new as seen, as opening home does, and opens no panel", async ($, on) => {
+test("keys · home · summary line: `dismiss` marks what is new as seen and opens no panel", async ($, on) => {
   resetKept()
   const w = world(on)
   await start($, w)
@@ -1471,14 +1479,14 @@ test("keys · home · toast: `dismiss` marks what is new as seen, as opening hom
   w.stamps.set(`${WS}/notebooks`, 2)
   await w.clock.advance(1100)
   let above = (await $.ui.mount(ABOVE)) as unknown as M
-  expect(shown(await above.drawn())).toContain('2 new cards')
-  await above.press({ key: 'above-home-dismiss' })
+  expect(shown(await above.drawn())).toContain('cards 2 new')
+  await above.press({ key: 'above-summary-dismiss' })
   await above.unmount()
   await w.clock.settle()
   expect(w.opened).not.toContain(PANEL)
-  // seen: the row is gone, after a relaunch too (kept.ts)
+  // seen: the `new` is gone, after a relaunch too (kept.ts)
   above = (await $.ui.mount(ABOVE)) as unknown as M
-  expect(shown(await above.drawn())).not.toContain('new card')
+  expect(shown(await above.drawn())).not.toContain(' new')
   await above.unmount()
   expect(parseKept(w.files.get(`${WS}/${KEPT_FILE}`) ?? '').seen?.cards).toBe(14)
   // what arrives after shows again
@@ -1486,7 +1494,7 @@ test("keys · home · toast: `dismiss` marks what is new as seen, as opening hom
   w.stamps.set(`${WS}/notebooks`, 3)
   await w.clock.advance(1100)
   above = (await $.ui.mount(ABOVE)) as unknown as M
-  expect(shown(await above.drawn())).toContain('1 new card')
+  expect(shown(await above.drawn())).toContain('cards 1 new')
   await above.unmount()
   expect(w.opened).not.toContain(PANEL)
 })
