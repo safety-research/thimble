@@ -135,8 +135,8 @@ def test_a_build_in_terminal_mode_asks_for_view_term_js(board):
     assert all(f"`{x}`" in term for x in ("timeline", "linked-sessions", "repository"))
     assert "view.html" not in term and "data-anchor" not in term and "npm" not in term and "px" not in term
     assert "view.html" in page and "view.term.js" not in page and "terminal-views.md" not in page
-    assert "thimble's panel in the terminal" in proposed and "Files" not in proposed
-    assert "opens in Files" in opened
+    # 0.9.0 has no modes: the hint may name both places (prompts/tools.md's merge), the terminal's panel first
+    assert "thimble's panel in the terminal" in proposed and "Files" in opened
 
 
 def test_the_reviewer_and_its_tools_read_drawings_in_terminal_mode(board):
