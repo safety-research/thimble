@@ -674,6 +674,22 @@ def line_offsets(path: Path) -> LineIndex:
         return idx
 
 
+def known_index(path: Path) -> LineIndex | None:
+    """The file's line index when one is at hand without a pass over the file: in this process's LRU, or kept on disk
+    (a big file's, save_index), at the file's present (size, mtime_ns); else None. Never builds one."""
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    key = (st.st_size, st.st_mtime_ns)
+    with _index_lock:
+        hit = _INDEX.get(path)
+        if hit is not None and hit.key == key:
+            _INDEX.move_to_end(path)
+            return hit
+    return load_index(path, key)
+
+
 def forget_index(path: Path) -> None:
     with _index_lock:
         _INDEX.pop(path, None)

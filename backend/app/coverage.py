@@ -40,13 +40,21 @@ Requests never walk or count: summary and level read the index alone, and start 
 index is missing or was walked more than STALE_S ago. With no index yet the summary counts files from the facts only and
 says `counting`.
 
-Per file: read (`seen` in the rows and totals) when a `whole` or `part` fact names it: it entered Claude's context;
-else `searched` when a `searched` fact names it or a folder fact is above it: a search ran over it and only its matches
-came back; else neither. Lines or entries read: all of a `whole` file's, the union of a `part` file's line ranges within
-its lines (a line-based file), else none. Searched: all of a searched file's, and those of a file read in part that a
-search also touched, less those read. The reads of cards made since the session was turned on (`cell.reads`, the
-notebook's audit) and the files of labels run since then count as searched. The rows' and totals' `records_*` fields and
-the index's `records` column hold a count in the row's unit, lines or entries.
+Per file: read (`seen` in the rows and totals) when a `whole` or `part` fact names it: it was pulled into Claude's
+context; else `searched` when a `searched` fact names it or a folder fact is above it: grep, a script or a label went
+over it and only a narrow result came back; else neither. Lines or entries read: all of a `whole` file's, the union of a
+`part` file's line ranges within its lines (a line-based file), else none. Searched: all of a searched file's, and those
+of a file read in part that a search also touched, less those read. The reads of cards made since the session was turned
+on (`cell.reads`, the notebook's audit) and the files of labels run since then count as searched. The rows' and totals'
+`records_*` fields and the index's `records` column hold a count in the row's unit, lines or entries.
+
+The size (summary `size`): one total for the whole corpus in bytes, whatever the units of its rows. Read: a `whole`
+file's size, and a file of the `files` unit read in part counts whole too; a `part` file of lines or entries counts the
+bytes of its line ranges where a line index of the file is at hand (read_bytes: corpus.known_index, in memory or kept on
+disk, never built here), else its size times the share of its lines read (of the index's lines for a line-based file,
+else of the line total the read reported); a part without a line range counts none. Searched: a searched file's size,
+and the rest of a file read in part that a search also touched. The summary line says the read and searched shares of
+it: `read 2% · searched 41% of the data`, searched only when not 0; with no index yet, the files the facts name.
 
 Rows (level): at a level with FILE_ROWS files or fewer, one row per file (seen, then searched, then the others, by
 name). Otherwise one row per (folder right under the level, extension), which drills into that folder (a folder that
@@ -55,7 +63,7 @@ name pattern (PATTERN_MIN or more) are one row by their glob (`agent-*.jsonl`), 
 fewer, else one row per type (a type of one file is its file's row). A pattern's or a type's row drills into its files.
 Every group is listed, the one of the most files first (then by size); a list of more than LIST_MAX rows says how many
 it leaves out (`more`). The totals (summary `totals`) hold the corpus's denominators, one entry per unit it has: lines,
-entries, files.
+entries, files; the size (summary `size`) is the whole corpus's at every level.
 """
 from __future__ import annotations
 
@@ -878,6 +886,8 @@ class _Facts:
         self.part: set[str] = set()
         self.searched: set[str] = set()
         self.areas: list[tuple[str, str | None]] = []
+        self.line_totals: dict[str, int] = {}  # a part file's lines, as its reads reported them
+        self.read_bytes: dict[str, int] = {}  # the bytes read of each file read (_merge, read_bytes)
         for f in facts:
             path, how = str(f["path"]), f["how"]
             if f.get("folder"):
@@ -886,6 +896,8 @@ class _Facts:
                 self.whole.add(path)
             elif how == "part":
                 self.part.add(path)
+                if isinstance(f.get("total"), int) and f["total"] > 0 and not f.get("pages"):
+                    self.line_totals[path] = max(self.line_totals.get(path, 0), int(f["total"]))
                 if (r := _range(f.get("lines"))) is not None:
                     self.lines.setdefault(path, []).append((r[0], r[1]))
                 elif (r := _range(f.get("pages"))) is not None:
@@ -927,6 +939,44 @@ def _records_seen(m: _Facts, path: str, ext: str, records: int | None) -> int:
     if unit_of(ext) == "lines" and path in m.lines:
         return _union(m.lines[path], records)
     return 0
+
+
+def _span_bytes(idx: Any, full: Path, ranges: list[tuple[int, int]]) -> int | None:
+    """The bytes of a file's line ranges, once each, by its line index; None when the index does not fit the file."""
+    n, out, end = len(idx), 0, 0
+    try:
+        for a, b in sorted(ranges):
+            a, b = max(a, end + 1, 1), min(b, n)
+            if b < a:
+                continue
+            out += (idx.offset(full, b + 1) if b < n else idx.size) - idx.offset(full, a)
+            end = b
+    except (OSError, IndexError):
+        return None
+    return out
+
+
+def read_bytes(m: _Facts, root: Path, path: str, ext: str, size: int, records: int | None) -> int:
+    """The bytes read of a file read (module note, the size): all of a whole file's or of a file of the files unit; the
+    bytes of a part's line ranges by the file's line index where one is at hand, else its size times the share of its
+    lines read; none for a part without a line range."""
+    if path not in m.seen:
+        return 0
+    unit = unit_of(ext)
+    if path in m.whole or unit == "files":
+        return size
+    ranges = m.lines.get(path)
+    if not ranges:
+        return 0
+    from . import corpus  # noqa: PLC0415
+
+    idx = corpus.known_index(root / path)
+    if idx is not None and (got := _span_bytes(idx, root / path, ranges)) is not None:
+        return max(0, min(size, got))
+    total = records if unit == "lines" and records else m.line_totals.get(path)
+    if not total:
+        return 0
+    return min(size, round(size * _union(ranges, total) / total))
 
 
 Totals = tuple[int, int, int, int]  # (files, bytes, records, files counted)
@@ -1046,6 +1096,9 @@ def _merge(c: str, sid: str, conn: sqlite3.Connection | None) -> tuple[_Facts, _
     m.seen &= set(known)
     m.searched &= set(known)
     m.hit &= set(known)
+    for p in m.seen:
+        row = known[p]
+        m.read_bytes[p] = read_bytes(m, root, p, row[1], int(row[2]), row[3])
     return m, idx, known
 
 
@@ -1057,31 +1110,37 @@ def _status(m: _Facts, path: str, folder: str, ext: str) -> str:
     return "never"
 
 
-def _covered(m: _Facts, idx: _Index, prefix: str, ext: str) -> tuple[int, int]:
-    """How many indexed files of `ext` under `prefix` the searched areas hold, and their lines or entries."""
+Covered = tuple[int, int, int]  # what searched areas hold of a row: (files, lines or entries, bytes)
+
+
+def _covered(m: _Facts, idx: _Index, prefix: str, ext: str) -> Covered:
+    """How many indexed files of `ext` under `prefix` the searched areas hold, their lines or entries, their bytes."""
     rel = [a for a, x in m.areas if x is None or x == ext]
     if any(a == "" or _inside(prefix, a) for a in rel):
         t = idx.totals(prefix, ext)
-        return t[0], t[2]
+        return t[0], t[2], t[1]
     inner = sorted({a for a in rel if prefix == "" or a.startswith(prefix + "/")})
     top = [a for a in inner if not any(b != a and _inside(a, b) for b in inner)]
-    files = records = 0
+    files = records = size = 0
     for a in top:
         t = idx.totals(a, ext)
         files += t[0]
         records += t[2]
-    return files, records
+        size += t[1]
+    return files, records, size
 
 
 class _Tally:
     """One row's counts as they add up: files, files read (`seen`) and searched; its count in its unit (lines or
-    entries: `records`), read and searched."""
+    entries: `records`), read and searched; its bytes, read and searched."""
 
-    KEYS = ("files", "seen", "searched", "records_seen", "records_searched", "records", "counted", "bytes")
+    KEYS = ("files", "seen", "searched", "records_seen", "records_searched", "records", "counted", "bytes",
+            "bytes_seen", "bytes_searched")
 
     def __init__(self) -> None:
         self.files = self.seen = self.searched = 0
         self.records_seen = self.records_searched = self.records = self.counted = self.bytes = 0
+        self.bytes_seen = self.bytes_searched = 0
 
     def add_totals(self, t: Totals) -> None:
         self.files += t[0]
@@ -1094,39 +1153,47 @@ class _Tally:
             setattr(self, k, getattr(self, k) + getattr(o, k))
 
 
-def _count(m: _Facts, base: Totals, covered: tuple[int, int], members: Iterable[tuple[str, tuple]]) -> _Tally:
-    """A row's counts: its index totals (`base`), what searched areas hold of it (`covered`: files, records), and the
-    files the facts name that fall in it (`members`: (path, index row), a sixth field True for a file the index does not
-    hold yet). A file seen wins over a search; the records of a file seen in part that a search touched too, less those
-    seen, count as searched."""
+def _count(m: _Facts, base: Totals, covered: Covered, members: Iterable[tuple[str, tuple]]) -> _Tally:
+    """A row's counts: its index totals (`base`), what searched areas hold of it (`covered`: files, records, bytes), and
+    the files the facts name that fall in it (`members`: (path, index row), a sixth field True for a file the index does
+    not hold yet). A file seen wins over a search; the records and bytes of a file seen in part that a search touched
+    too, less those seen, count as searched."""
     g = _Tally()
     g.add_totals(base)
-    cov_files, cov_records = covered
+    cov_files, cov_records, cov_bytes = covered
     for path, row in members:
         folder, ext, size, records = row[:4]
+        size = int(size)
         extra = len(row) > 5
         if extra:
             g.files += 1
-            g.bytes += int(size)
+            g.bytes += size
         rec = int(records or 0)
         area = m.covers(path, folder, ext)
         if path in m.seen:
             g.seen += 1
             rs = _records_seen(m, path, ext, records)
+            rb = m.read_bytes.get(path, 0)
             g.records_seen += rs
+            g.bytes_seen += rb
             if area and not extra:
                 cov_files -= 1
                 cov_records -= rec
+                cov_bytes -= size
             if area or path in m.hit:
                 g.records_searched += max(0, rec - rs)
+                g.bytes_searched += max(0, size - rb)
         elif area:
             if extra:
                 g.searched += 1
+                g.bytes_searched += size
         elif path in m.searched:
             g.searched += 1
             g.records_searched += rec
+            g.bytes_searched += size
     g.searched += max(0, cov_files)
     g.records_searched += max(0, cov_records)
+    g.bytes_searched += max(0, cov_bytes)
     return g
 
 
@@ -1142,7 +1209,7 @@ def _coarse(m: _Facts, idx: _Index, known: dict[str, tuple], prefix: str) -> dic
     """The counts of each (segment, ext) at the level of `prefix`: each folder right under it, and `.` for the files
     right in it."""
     base: dict[tuple[str, str], Totals] = {}
-    cov: dict[tuple[str, str], tuple[int, int]] = {}
+    cov: dict[tuple[str, str], Covered] = {}
     child_sums: dict[str, list[int]] = {}
     for child, ext, t, _ in idx.children(prefix):
         key = (child.rsplit("/", 1)[-1], ext)
@@ -1155,13 +1222,13 @@ def _coarse(m: _Facts, idx: _Index, known: dict[str, tuple], prefix: str) -> dic
         direct = tuple(t[i] - child_sums.get(ext, [0, 0, 0, 0])[i] for i in range(4))
         if direct[0] > 0:
             base[(".", ext)] = direct  # type: ignore[assignment]
-            cov[(".", ext)] = (direct[0], direct[2]) if m.covers_level(prefix, ext) else (0, 0)
+            cov[(".", ext)] = (direct[0], direct[2], direct[1]) if m.covers_level(prefix, ext) else (0, 0, 0)
     members: dict[tuple[str, str], list[tuple[str, tuple]]] = {}
     for path, row in known.items():
         if prefix and not _inside(row[0], prefix):
             continue
         members.setdefault((_group_of(row[0], prefix), row[1]), []).append((path, row))
-    return {k: _count(m, base.get(k, ZERO), cov.get(k, (0, 0)), members.get(k, [])) for k in {*base, *members}}
+    return {k: _count(m, base.get(k, ZERO), cov.get(k, (0, 0, 0)), members.get(k, [])) for k in {*base, *members}}
 
 
 def _dot(ext: str) -> str:
@@ -1194,24 +1261,19 @@ def percent(part: int, total: int) -> str:
     return f"{min(99, math.floor(p + 0.5))}%"  # half up, as the terminal UI's percent rounds
 
 
-def line_of(totals: list[dict[str, Any]], indexed: bool = True, seen: int = 0, searched: int = 0) -> str:
-    """The summary line (module note): the read and searched shares of the totals' first unit (lines where the corpus
-    has any, else entries, else files), the searched share only when not 0; while that unit is counted, its files; with
-    no index yet, the files the facts name."""
+def line_of(size: dict[str, int] | None, indexed: bool = True, seen: int = 0, searched: int = 0) -> str:
+    """The summary line (module note, the size): the read and searched shares of the corpus by size, the searched share
+    only when not 0; with no index yet (or an empty corpus), the files the facts name."""
     def files(n: int) -> str:
         return "file" if n == 1 else "files"
 
-    if not indexed or not totals:
+    if not indexed or not size or size.get("total", 0) <= 0:
         return f"read {seen:,} · searched {searched:,} {files(seen + searched)}" if searched else \
             f"read {seen:,} {files(seen)}"
-    t = totals[0]
-    if t["unit"] in COUNTED and not (t.get("counted") and t["total"] > 0):
-        n, s, x = int(t.get("files") or 0), int(t.get("files_seen") or 0), int(t.get("files_searched") or 0)
-        return f"read {s:,} · searched {x:,} of {n:,} {files(n)}" if x else f"read {s:,} of {n:,} {files(n)}"
-    words = f"read {percent(t['seen'], t['total'])}"
-    if t["searched"]:
-        words += f" · searched {percent(t['searched'], t['total'])}"
-    return f"{words} of {t['unit']}"
+    words = f"read {percent(size['read'], size['total'])}"
+    if size["searched"]:
+        words += f" · searched {percent(size['searched'], size['total'])}"
+    return f"{words} of the data"
 
 
 def _open(c: str) -> tuple[sqlite3.Connection | None, bool]:
@@ -1223,8 +1285,9 @@ def summary(c: str, sid: str) -> dict[str, Any]:
     """The session's coverage over the corpus: {files: {seen, searched, never, total} over every file, totals: one entry
     per unit the corpus has, in UNITS' order (lines and entries: {unit, seen, searched, total, counted, files,
     files_seen, files_searched}; files: {unit, seen, searched, total}), records: the first entry of lines or entries as
-    {unit, seen, searched, total, counted} (the earlier form's field; never two units added up), line, counting}. `seen`
-    is read. Reads the index only."""
+    {unit, seen, searched, total, counted} (the earlier form's field; never two units added up), size: the whole
+    corpus's {read, searched, total} in bytes (None with no index yet), line, counting}. `seen` is read. Reads the index
+    only."""
     conn, indexed = _open(c)
     try:
         m, idx, known = _merge(c, sid, conn)
@@ -1252,9 +1315,10 @@ def summary(c: str, sid: str) -> dict[str, Any]:
         first = next((t for t in totals if t["unit"] in COUNTED), None)
         records = {k: first[k] for k in ("unit", "seen", "searched", "total", "counted")} if first else \
             {"unit": "lines", "seen": 0, "searched": 0, "total": 0, "counted": False}
+        size = {"read": g.bytes_seen, "searched": g.bytes_searched, "total": g.bytes} if indexed else None
         return {"files": {"seen": g.seen, "searched": g.searched, "never": max(0, g.files - g.seen - g.searched),
                           "total": g.files},
-                "records": records, "totals": totals, "line": line_of(totals, indexed, g.seen, g.searched),
+                "records": records, "totals": totals, "size": size, "line": line_of(size, indexed, g.seen, g.searched),
                 "counting": not indexed or any(not t["counted"] for t in totals if t["unit"] in COUNTED)}
     finally:
         if conn is not None:
@@ -1269,7 +1333,7 @@ def _file_rows(m: _Facts, files: dict[str, tuple], known: dict[str, tuple]) -> l
         folder, ext, size, records = row[0], row[1], row[2], row[3]
         extra = len(row) > 5
         base = ZERO if extra else (1, int(size), int(records or 0), int(records is not None))
-        cov = (1, int(records or 0)) if m.covers(p, folder, ext) and not extra else (0, 0)
+        cov = (1, int(records or 0), int(size)) if m.covers(p, folder, ext) and not extra else (0, 0, 0)
         g = _count(m, base, cov, [(p, known.get(p, row))] if p in known else [])
         out.append(_row(p, folder, ext, p, p.rsplit("/", 1)[-1], g))
     order = {"seen": 0, "searched": 1, "never": 2}
@@ -1371,7 +1435,7 @@ def _level_rows(m: _Facts, idx: _Index, known: dict[str, tuple], folder: str) ->
         rest_exts = {e for _, e, _ in rest}
         for pat, ext in sorted(big):
             t = next(t for p, e, t in groups if (p, e) == (pat, ext))
-            cov = (t[0], t[2]) if m.covers_level(folder, ext) else (0, 0)
+            cov = (t[0], t[2], t[1]) if m.covers_level(folder, ext) else (0, 0, 0)
             g = _count(m, t, cov, member.get((pat, ext), []))
             # a pattern of any name of its type reads as the type, unless a row of that type's other files stands by it
             label = pat if ext in rest_exts else _group_label(pat, ext)
@@ -1401,7 +1465,7 @@ def _level_rows(m: _Facts, idx: _Index, known: dict[str, tuple], folder: str) ->
                         files.setdefault(p, r)
                     out.extend(_file_rows(m, files, known))
                     continue
-                cov = (t[0], t[2]) if m.covers_level(folder, ext) else (0, 0)
+                cov = (t[0], t[2], t[1]) if m.covers_level(folder, ext) else (0, 0, 0)
                 g = _count(m, tuple(t), cov, ms)  # type: ignore[arg-type]
                 out.append(_row(f"grp:{folder}|.{ext}", folder, ext, None, _dot(ext), g, drill=True, match=_dot(ext)))
     out.sort(key=lambda r: (-r["files"], -r["bytes"], r["key"]))  # the largest group first, then the largest file
@@ -1452,9 +1516,10 @@ def rows(c: str, sid: str, folder: str = "", match: str | None = None) -> list[d
 
 
 def state(c: str, sid: str, folder: str = "", *, summary_only: bool = False, match: str | None = None) -> dict[str, Any]:
-    """`thimble state coverage`: {summary, folder, match, rows?, more?, counting}."""
+    """`thimble state coverage`: {summary, folder, match, rows?, more?, counting}; the summary is the whole corpus's at
+    every level."""
     s = summary(c, sid)
-    out: dict[str, Any] = {"summary": {k: s[k] for k in ("files", "records", "totals", "line")}, "folder": folder,
+    out: dict[str, Any] = {"summary": {k: s[k] for k in ("files", "records", "totals", "size", "line")}, "folder": folder,
                            "match": match or None, "counting": s["counting"]}
     if not summary_only:
         got = level(c, sid, folder, match)

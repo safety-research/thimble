@@ -165,6 +165,118 @@ def test_a_part_of_a_csv_counts_the_lines_read(corpus):
     assert (row["unit"], row["records_seen"], row["records_total"]) == ("lines", 3, 6)
 
 
+def _head_bytes(p: Path, n: int) -> int:
+    """The bytes of a file's first n lines, their newlines too."""
+    return len(b"".join(p.read_bytes().splitlines(keepends=True)[:n]))
+
+
+@pytest.fixture()
+def no_line_index(monkeypatch):
+    """The corpus's line indexes as a fresh process has them: none in memory."""
+    from collections import OrderedDict
+
+    from app import corpus as corpus_mod
+
+    monkeypatch.setattr(corpus_mod, "_INDEX", OrderedDict())
+    return corpus_mod
+
+
+def test_a_part_of_a_line_file_counts_the_bytes_of_the_lines_read(corpus, no_line_index, monkeypatch):
+    """The size a part of a line-based file counts: the bytes of the lines read where a line index of the file is at
+    hand (in memory, or kept on disk for a big file), else the file's size times the share of its lines read. Ranges
+    that overlap count once."""
+    c, root = corpus["c"], corpus["root"]
+    _index(c, root)
+    ev = root / "events.jsonl"
+    size = ev.stat().st_size
+    s = _facts(c, [{"path": "events.jsonl", "how": "part", "lines": [1, 50], "total": 140, "by": "Read"},
+                   {"path": "events.jsonl", "how": "part", "lines": [41, 70], "by": "Read"}])
+    exact = _head_bytes(ev, 70)
+    share = round(size * 70 / 140)
+    assert exact != share  # the lines grow longer as they go: the two ways differ
+    assert (s["size"]["read"], s["size"]["searched"]) == (share, 0)
+    # a line index in memory: the bytes of lines 1-70 exactly, and of the lines of a middle part
+    no_line_index.line_offsets(config.corpus_dir(c) / "events.jsonl")
+    assert coverage.summary(c, SID)["size"]["read"] == exact
+    board = root / "board.jsonl"
+    s = _facts(c, [{"path": "board.jsonl", "how": "part", "lines": [5, 8], "total": 20, "by": "Read"}], sid="sess-b")
+    assert s["size"]["read"] == round(board.stat().st_size * 4 / 20)
+    no_line_index.line_offsets(config.corpus_dir(c) / "board.jsonl")
+    assert coverage.summary(c, "sess-b")["size"]["read"] == _head_bytes(board, 8) - _head_bytes(board, 4)
+    # a big file's index, which counting its lines kept on disk, serves a later process
+    monkeypatch.setattr(no_line_index, "INDEX_BIG", 1)
+    with open(ev, "a") as f:
+        f.write('{"e": 140}\n')
+    corpus_walk.forget()
+    _index(c, root)
+    no_line_index._INDEX.clear()
+    assert coverage.summary(c, SID)["size"]["read"] == exact
+    assert list((Path(os.environ["THIMBLE_HOME"]) / no_line_index.INDEX_DIR).glob("*.idx"))
+
+
+def test_a_part_of_a_json_document_counts_the_bytes_of_the_lines_read(corpus, no_line_index):
+    """A JSON document read in part counts the bytes of its lines read with a line index at hand, else its size times
+    the share of its lines read (the read's own line total); its entries read stay as they were."""
+    c, root = corpus["c"], corpus["root"]
+    doc = root / "runs.json"
+    doc.write_text(json.dumps([{"id": i, "title": "t" * i} for i in range(30)], indent=2))
+    n = _lines(doc)
+    _index(c, root)
+    size = doc.stat().st_size
+    s = _facts(c, [{"path": "runs.json", "how": "part", "lines": [1, 40], "total": n, "by": "Read"}])
+    assert s["size"]["read"] == round(size * 40 / n)
+    no_line_index.line_offsets(config.corpus_dir(c) / "runs.json")
+    assert coverage.summary(c, SID)["size"]["read"] == _head_bytes(doc, 40) != round(size * 40 / n)
+    row = next(r for r in coverage.rows(c, SID) if r["name"] == "runs.json")
+    assert (row["unit"], row["records_total"], row["seen"]) == ("entries", 30, 1)
+
+
+def _universe_bytes(root: Path) -> int:
+    return sum(p.stat().st_size for p in root.rglob("*") if p.is_file()
+               and coverage.in_universe(p.relative_to(root).as_posix(), False))
+
+
+def test_the_total_measures_the_corpus_by_size(corpus, no_line_index):
+    """One total for the whole corpus, by size: read, the bytes of what Claude read; searched, the bytes of what was
+    searched and not read; the corpus's bytes. A file of the files unit read in part counts whole; a file read in part
+    and searched counts its rest as searched; a folder searched counts every file under it."""
+    c, root = corpus["c"], corpus["root"]
+    (root / "postmortem.pdf").write_bytes(b"%PDF-1.4 " + bytes(500))
+    _index(c, root)
+    size = {p.relative_to(root).as_posix(): p.stat().st_size for p in root.rglob("*") if p.is_file()}
+    s = _facts(c, [{"path": "board.jsonl", "how": "whole", "by": "Bash"},
+                   {"path": "postmortem.pdf", "how": "part", "pages": [2, 3], "total": 12, "by": "Read"},
+                   {"path": "pull_requests.csv", "how": "searched", "by": "search"},
+                   {"path": "agents", "how": "searched", "folder": True, "by": "search"},
+                   {"path": "agents/agent-03.jsonl", "how": "part", "lines": [1, 5], "total": 10, "by": "Read"}])
+    part = round(size["agents/agent-03.jsonl"] * 5 / 10)
+    read = size["board.jsonl"] + size["postmortem.pdf"] + part
+    agents = sum(v for k, v in size.items() if k.startswith("agents/"))
+    searched = size["pull_requests.csv"] + agents - part
+    total = _universe_bytes(root)
+    assert total == sum(v for k, v in size.items() if k != "notes.py")  # a code file is no part of it
+    assert s["size"] == {"read": read, "searched": searched, "total": total}
+    assert s["line"] == f"read {coverage.percent(read, total)} · searched {coverage.percent(searched, total)} of the data"
+    # the rows keep their own units
+    rows = {r["name"]: r for r in coverage.rows(c, SID)}
+    assert (rows["agent-*.jsonl"]["unit"], rows["agent-*.jsonl"]["records_seen"]) == ("lines", 5)
+    assert (rows["postmortem.pdf"]["unit"], rows["postmortem.pdf"]["seen"]) == ("files", 1)
+    # nothing searched: the line leaves searched out
+    s = coverage.add_facts(c, "sess-2", "t1", [{"path": "README.md", "how": "whole", "by": "Read"}])
+    assert s["size"] == {"read": size["README.md"], "searched": 0, "total": total}
+    assert s["line"] == f"read {coverage.percent(size['README.md'], total)} of the data"
+
+
+def test_the_total_is_the_whole_corpus_s_in_a_folder_and_a_group(corpus):
+    c, root = corpus["c"], corpus["root"]
+    _index(c, root)
+    _facts(c, [{"path": "agents/agent-01.jsonl", "how": "whole"}, {"path": "events.jsonl", "how": "whole"}])
+    top = coverage.state(c, SID)["summary"]
+    assert top["size"]["total"] == _universe_bytes(root) and top["size"]["read"] > 0
+    assert coverage.state(c, SID, "agents")["summary"]["size"] == top["size"]
+    assert coverage.state(c, SID, "prompts", match=".md")["summary"]["size"] == top["size"]
+
+
 def test_the_totals_hold_one_entry_per_unit_the_corpus_has(corpus):
     """A corpus of lines and entries only has no files line; the units come lines, entries, files."""
     c, root = corpus["c"], corpus["root"]
@@ -203,7 +315,11 @@ def test_facts_merge_whole_part_lines_pages_and_searched(corpus):
     assert lines["searched"] == 6 + 7
     # `records` holds the first unit's numbers, never two units added up
     assert s["records"] == {"unit": "lines", "seen": 93, "searched": 13, "total": total, "counted": True}
-    assert s["line"] == f"read {coverage.percent(93, total)} · searched {coverage.percent(13, total)} of lines"
+    # the line: the read and searched shares of the corpus by size
+    size = s["size"]
+    assert size["total"] == sum(p.stat().st_size for p in root.rglob("*") if p.is_file() and p.name != "notes.py")
+    assert s["line"] == \
+        f"read {coverage.percent(size['read'], size['total'])} · searched {coverage.percent(size['searched'], size['total'])} of the data"
     stored = coverage.read_facts(c, SID)
     assert len(stored) == 6 and all(f["turn"] == "t1" for f in stored)
     assert stored[2]["path"] == "board.jsonl"  # stored relative to the corpus
@@ -391,7 +507,13 @@ def test_each_row_counts_one_unit_and_the_totals_hold_each_unit(mixed):
     assert files == {"unit": "files", "seen": 1, "searched": 1, "total": 30 + 1 + 1 + 5}
     n = line_files + 2 + 37
     assert s["files"] == {"seen": 2, "searched": 2, "never": n - 4, "total": n}
-    assert s["line"] == f"read {coverage.percent(40, total)} of lines"
+    # the line by size: the screenshot and 40 of events.jsonl's 140 lines read; README.md and forge.db searched
+    ev = (root / "events.jsonl").stat().st_size
+    read = (root / "images" / "day-1" / png).stat().st_size + round(ev * 40 / 140)
+    searched = (root / "README.md").stat().st_size + (root / "forge.db").stat().st_size
+    assert (s["size"]["read"], s["size"]["searched"]) == (read, searched)
+    assert s["line"] == f"read {coverage.percent(read, s['size']['total'])} · searched " \
+        f"{coverage.percent(searched, s['size']['total'])} of the data"
     # a file row of a file the index does not hold yet keeps its unit
     (root / "late.png").write_bytes(b"\x89PNG")
     _facts(c, [{"path": "late.png", "how": "whole", "by": "Read"}])
@@ -424,27 +546,23 @@ def test_percent_forms():
     assert coverage.percent(1_000, 1_000) == "100%"
 
 
-def test_the_summary_line_is_the_totals_read_and_searched_shares():
-    lines = {"unit": "lines", "seen": 1_204, "searched": 0, "total": 48_310, "counted": True, "files": 13,
-             "files_seen": 3, "files_searched": 0}
-    assert coverage.line_of([lines]) == "read 2% of lines"
-    assert coverage.line_of([{**lines, "searched": 20_000}]) == "read 2% · searched 41% of lines"
-    assert coverage.line_of([{**lines, "seen": 0}]) == "read 0% of lines"
-    entries = {**lines, "unit": "entries", "seen": 1, "total": 1}
-    files = {"unit": "files", "seen": 3, "searched": 0, "total": 1_032_000}
-    # the line names one unit, the totals' first: lines where the corpus has any, else entries; images are in the table
-    assert coverage.line_of([{**lines, "seen": 4_401, "total": 13_200_000}, entries, files]) == "read 0.03% of lines"
-    assert coverage.line_of([entries, files]) == "read 100% of entries"
-    assert coverage.line_of([files]) == "read <0.01% of files"
-    counting = {**lines, "counted": False, "total": 0}
-    assert coverage.line_of([counting]) == "read 3 of 13 files"
-    assert coverage.line_of([{**counting, "files": 1, "files_seen": 1}]) == "read 1 of 1 file"
-    assert coverage.line_of([{**counting, "files_searched": 2}]) == "read 3 · searched 2 of 13 files"
-    assert coverage.line_of([], indexed=False, seen=3) == "read 3 files"
-    assert coverage.line_of([], indexed=False, seen=1) == "read 1 file"
-    assert coverage.line_of([], indexed=False, seen=0, searched=2) == "read 0 · searched 2 files"
-    every = [coverage.line_of([lines]), coverage.line_of([counting]), coverage.line_of([], indexed=False, seen=1)]
-    assert not any("seen" in w or "record" in w for w in every)
+def test_the_summary_line_is_the_read_and_searched_shares_of_the_data():
+    """The line under answers and in home: the read and searched shares of the corpus by size, searched only when not
+    zero, a decimal under 1%; the files the facts name while there is no index."""
+    size = {"read": 2_000, "searched": 0, "total": 100_000}
+    assert coverage.line_of(size) == "read 2% of the data"
+    assert coverage.line_of({**size, "searched": 41_000}) == "read 2% · searched 41% of the data"
+    assert coverage.line_of({**size, "read": 0}) == "read 0% of the data"
+    assert coverage.line_of({**size, "read": 300}) == "read 0.3% of the data"
+    assert coverage.line_of({**size, "read": 30, "searched": 1}) == "read 0.03% · searched <0.01% of the data"
+    assert coverage.line_of({**size, "read": 100_000}) == "read 100% of the data"
+    assert coverage.line_of(None, indexed=False, seen=3) == "read 3 files"
+    assert coverage.line_of(None, indexed=False, seen=1) == "read 1 file"
+    assert coverage.line_of(None, indexed=False, seen=0, searched=2) == "read 0 · searched 2 files"
+    # an empty corpus has no share
+    assert coverage.line_of({"read": 0, "searched": 0, "total": 0}, seen=0) == "read 0 files"
+    every = [coverage.line_of(size), coverage.line_of(None, indexed=False, seen=1)]
+    assert not any("seen" in w or "record" in w or "lines" in w for w in every)
 
 
 def _letters(n: int) -> str:
@@ -554,22 +672,25 @@ def test_a_folder_that_holds_only_one_folder_shows_the_deeper_folder(corpus):
     assert [(r["name"], r["files"], r["match"]) for r in day] == [(".png", 34, "*.png")]
 
 
-def test_files_only_while_counting_and_without_an_index(corpus):
+def test_files_without_an_index_and_the_size_while_counting(corpus):
     c, root = corpus["c"], corpus["root"]
     s = _facts(c, [{"path": "events.jsonl", "how": "whole"}])
-    assert s["line"] == "read 1 file" and s["counting"] is True and corpus["started"] == [c]
-    # walked but not counted: the files of the first unit (the 15 line-based files), in files
+    assert s["line"] == "read 1 file" and s["counting"] is True and corpus["started"] == [c] and s["size"] is None
+    # walked but not counted: the sizes are known, so the line has its share of the data
     conn = coverage._connect_rw(coverage.index_path(c))
     coverage.refresh(c, root, conn)
     conn.close()
     s = coverage.summary(c, SID)
-    assert s["line"] == "read 1 of 15 files" and s["counting"] is True and s["records"]["counted"] is False
+    ev = (root / "events.jsonl").stat().st_size
+    assert s["size"] == {"read": ev, "searched": 0, "total": _universe_bytes(root)}
+    assert s["line"] == f"read {coverage.percent(ev, s['size']['total'])} of the data"
+    assert s["counting"] is True and s["records"]["counted"] is False
     assert [(t["unit"], t.get("counted")) for t in s["totals"]] == \
         [("lines", False), ("entries", False), ("files", None)]
     assert s["totals"][2] == {"unit": "files", "seen": 0, "searched": 0, "total": 5}  # the .md files need no count
     _index(c, root)
     line = coverage.summary(c, SID)["line"]
-    assert line.startswith("read ") and line.endswith(" of lines")
+    assert line.startswith("read ") and line.endswith(" of the data")
 
 
 async def test_state_and_act_surfaces(corpus):
@@ -580,7 +701,8 @@ async def test_state_and_act_surfaces(corpus):
     assert got["ok"] is True and got["summary"]["files"]["seen"] == 1 and "line" in got["summary"]
     state = await local.state(c, "coverage", ["--session", SID])
     assert set(state) == {"summary", "folder", "match", "rows", "more", "counting"} and state["folder"] == ""
-    assert set(state["summary"]) == {"files", "records", "totals", "line"}
+    assert set(state["summary"]) == {"files", "records", "totals", "size", "line"}
+    assert set(state["summary"]["size"]) == {"read", "searched", "total"}
     assert set(state["rows"][0]) == {"key", "folder", "ext", "path", "files", "seen", "searched", "never",
                                      "records_seen", "records_searched", "records_total", "bytes", "drill", "unit",
                                      "name", "match"}
@@ -657,7 +779,9 @@ async def test_a_seeded_index_of_a_million_files_answers_in_under_a_second(corpu
     assert s["records"] == {"unit": "lines", "seen": 14, "searched": 344_000, "total": total * 10, "counted": True}
     assert s["totals"] == [{"unit": "lines", "seen": 14, "searched": 344_000, "total": total * 10, "counted": True,
                             "files": total, "files_seen": 2, "files_searched": 34_400}]
-    assert s["line"] == f"read <0.01% · searched {coverage.percent(344_000, total * 10)} of lines"
+    # by size: x0001's 100 bytes and 4 of x0002's 10 lines (40 bytes) read; f03's 34,400 files of 100 bytes searched
+    assert s["size"] == {"read": 140, "searched": 3_440_000, "total": total * 100}
+    assert s["line"] == f"read <0.01% · searched {coverage.percent(3_440_000, total * 100)} of the data"
     t0 = time.monotonic()
     got = coverage.level(c, SID)
     assert time.monotonic() - t0 < 1.0

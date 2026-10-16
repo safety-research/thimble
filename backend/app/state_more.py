@@ -89,7 +89,7 @@ async def _act_coverage(c: str, payload: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(400, "`facts` must be a list")
     cwd = payload.get("cwd") if isinstance(payload.get("cwd"), str) else None
     s = await asyncio.to_thread(coverage.add_facts, c, sid, str(payload.get("turn") or ""), facts, cwd)
-    return {"summary": {k: s[k] for k in ("files", "records", "totals", "line")}, "counting": s["counting"]}
+    return {"summary": {k: s[k] for k in ("files", "records", "totals", "size", "line")}, "counting": s["counting"]}
 
 
 async def _act_coverage_retry(c: str, payload: dict[str, Any]) -> dict[str, Any]:
