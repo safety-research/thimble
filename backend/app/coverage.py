@@ -48,7 +48,7 @@ name). Otherwise one row per (folder right under the level, extension), which dr
 holds only one folder and no file names the deeper folder); and the files right in the level: siblings that share a
 name pattern (PATTERN_MIN or more) are one row by their glob (`agent-*.jsonl`), the rest one row each when FILE_ROWS or
 fewer, else one row per type (a type of one file is its file's row). A pattern's or a type's row drills into its files.
-Every group is listed, largest first; a list of more than LIST_MAX rows says how many it leaves out (`more`). The totals
+Every group is listed, the one of the most files first (then by size); a list of more than LIST_MAX rows says how many it leaves out (`more`). The totals
 (summary `totals`) hold the corpus's denominators per unit.
 """
 from __future__ import annotations
@@ -79,7 +79,7 @@ log = logging.getLogger("thimble.coverage")
 DIR = "coverage"  # under the workspace
 INDEX = "index.sqlite"
 LOCK = "index.lock"
-SCHEMA = "2"  # the index's form: files with their name pattern, totals with their shared pattern, folders' mtimes
+SCHEMA = "3"  # the index's form: files with their name pattern (a uuid one part), totals with their shared pattern, folders' mtimes
 STALE_S = 60.0  # a request starts the job when the index was walked longer ago than this
 START_DEBOUNCE_S = 5.0  # a process starts the job at most once in this long
 FILE_ROWS = 20  # at a level with this many files or fewer, the rows are files
@@ -185,22 +185,25 @@ def unit_of(rel_or_ext: str) -> str:
 
 
 _NAME_PART = re.compile(r"([^A-Za-z0-9]+)")
+_UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 _HEXISH = re.compile(r"[0-9a-fA-F]+")
 _STARS = re.compile(r"\*(?:[^A-Za-z0-9*]+\*)+")
 
 
 def name_pattern(name: str) -> str:
-    """A file name's pattern: its digit runs and its hex ids made `*` (`agent-07.jsonl` -> `agent-*.jsonl`, a uuid
+    """A file name's pattern: its uuids, digit runs and hex ids made `*` (`agent-07.jsonl` -> `agent-*.jsonl`, a uuid
     name -> `*.png`, `2025-04-02` -> `*`); siblings with one pattern group by it."""
     base = name.rsplit("/", 1)[-1]
     stem, dot, ext = base.rpartition(".")
     if not dot or not stem:
         stem, ext = base, ""
+    stem = _UUID.sub("0", stem)  # a uuid is one varying part, whether or not its groups hold digits
     out = []
     for part in _NAME_PART.split(stem):
         if not part or not part[0].isalnum():
             out.append(part)
-        elif _HEXISH.fullmatch(part) and any(ch.isdigit() for ch in part) and (len(part) >= 4 or part.isdigit()):
+        elif _HEXISH.fullmatch(part) and ((any(ch.isdigit() for ch in part) and (len(part) >= 4 or part.isdigit()))
+                                          or len(part) >= 12):
             out.append("*")
         else:
             out.append(re.sub(r"\d+", "*", part))
@@ -1252,13 +1255,15 @@ def _level_rows(m: _Facts, idx: _Index, known: dict[str, tuple], folder: str) ->
         member: dict[tuple[str, str], list[tuple[str, tuple]]] = {}
         for p, r in direct_known.items():
             member.setdefault((name_pattern(p.rsplit("/", 1)[-1]), r[1]), []).append((p, r))
+        rest = [(p, e, t) for p, e, t in groups if (p, e) not in big]
+        rest_exts = {e for _, e, _ in rest}
         for pat, ext in sorted(big):
             t = next(t for p, e, t in groups if (p, e) == (pat, ext))
             cov = (t[0], t[2]) if m.covers_level(folder, ext) else (0, 0)
             g = _count(m, t, cov, member.get((pat, ext), []))
-            label = _group_label(pat, ext)
+            # a pattern of any name of its type reads as the type, unless a row of that type's other files stands by it
+            label = pat if ext in rest_exts else _group_label(pat, ext)
             out.append(_row(f"grp:{folder}|{pat}", folder, ext, None, label, g, drill=True, match=pat))
-        rest = [(p, e, t) for p, e, t in groups if (p, e) not in big]
         n_rest = sum(t[0] for _, _, t in rest) + sum(1 for (p, e), ms in member.items() if (p, e) not in big
                                                       for _, r in ms if len(r) > 5)
         if n_rest <= FILE_ROWS:
@@ -1287,7 +1292,7 @@ def _level_rows(m: _Facts, idx: _Index, known: dict[str, tuple], folder: str) ->
                 cov = (t[0], t[2]) if m.covers_level(folder, ext) else (0, 0)
                 g = _count(m, tuple(t), cov, ms)  # type: ignore[arg-type]
                 out.append(_row(f"grp:{folder}|.{ext}", folder, ext, None, _dot(ext), g, drill=True, match=_dot(ext)))
-    out.sort(key=lambda r: (-r["bytes"], r["key"]))
+    out.sort(key=lambda r: (-r["files"], -r["bytes"], r["key"]))  # the largest group first, then the largest file
     return _cap(out)
 
 

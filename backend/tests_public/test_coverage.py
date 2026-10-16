@@ -226,7 +226,9 @@ def test_rows_keep_the_hierarchy_and_say_where_each_file_is(corpus):
         ("", "events.jsonl", False, 140, 140)
     assert by["README.md"]["unit"] == "files" and by["README.md"]["folder"] == ""
     assert all(r["folder"] != "." and r["key"] != "other" for r in rows)
-    assert [r["bytes"] for r in rows] == sorted((r["bytes"] for r in rows), reverse=True)
+    # the group of the most files first, then by size
+    assert [(r["files"], r["bytes"]) for r in rows] == sorted(((r["files"], r["bytes"]) for r in rows), reverse=True)
+    assert [r["name"] for r in rows[:2]] == ["agent-*.jsonl", ".md"]
     # a level of 20 files or fewer lists files: seen first, then by name
     files = coverage.rows(c, SID, "agents")
     assert [r["path"] for r in files][:2] == ["agents/agent-01.jsonl", "agents/agent-02.jsonl"]
@@ -287,6 +289,18 @@ def test_each_row_counts_one_unit_and_the_totals_hold_each_unit(mixed):
     _facts(c, [{"path": "late.png", "how": "whole", "by": "Read"}])
     late = next(r for r in coverage.rows(c, SID) if r["name"] == "late.png")
     assert (late["unit"], late["files"], late["seen"]) == ("files", 1, 1)
+
+
+def test_name_patterns():
+    assert coverage.name_pattern("agent-07.jsonl") == "agent-*.jsonl"
+    assert coverage.name_pattern("run_2024_01_03.log") == "run_*.log"
+    assert coverage.name_pattern("00096407-9529-43fe-be10-934bab47bc4f.png") == "*.png"
+    # a uuid whose groups are letters only is still one varying part
+    assert coverage.name_pattern("97420d9e-c7bb-459d-abfb-52fc95230abb.png") == "*.png"
+    assert coverage.name_pattern("trace-0000000a-1a2b-4c3d-8e9f-00000000000a.json") == "trace-*.json"
+    assert coverage.name_pattern("2025-04-02") == "*"
+    assert coverage.name_pattern("events.jsonl") == "events.jsonl"
+    assert coverage.name_pattern("notes-bad.md") == "notes-bad.md"
 
 
 def test_percent_forms():
@@ -403,18 +417,25 @@ def test_a_folder_that_holds_only_one_folder_shows_the_deeper_folder(corpus):
         day.mkdir(parents=True)
         for i in range(4):
             (day / f"{d:02d}{i:06x}-9529-43fe-be10-934bab47bc4f.png").write_bytes(b"\x89PNG")
+    # a day of 30 screenshots right in it: one row of their type, even where a uuid's groups hold no digit
+    for i in range(29):
+        (days / "2025-04-01" / f"{i:08x}-1111-43fe-be10-934bab47bc4f.png").write_bytes(b"\x89PNG")
+    (days / "2025-04-01" / "97420d9e-c7bb-459d-abfb-52fc95230abb.png").write_bytes(b"\x89PNG")
     (days / "2025-04-01" / "turns.json").write_text('[{"a": 1}]')
     _index(c, root)
     top = next(r for r in coverage.rows(c, SID) if r["ext"] == ".png")
     assert (top["folder"], top["name"], top["unit"], top["files"], top["drill"]) == \
-        ("images/computer-use-turns", ".png", "files", 24, True)
+        ("images/computer-use-turns", ".png", "files", 54, True)
     turns = next(r for r in coverage.rows(c, SID) if r["ext"] == ".json" and r["folder"].startswith("images"))
     assert (turns["path"], turns["name"], turns["folder"]) == \
         ("images/computer-use-turns/2025-04-01/turns.json", "turns.json", "images/computer-use-turns/2025-04-01")
     down = coverage.rows(c, SID, "images/computer-use-turns")
     assert sorted(r["folder"] for r in down if r["ext"] == ".png") == [f"images/computer-use-turns/2025-04-0{d + 1}"
                                                                        for d in range(6)]
-    assert all(r["files"] == 4 and r["drill"] for r in down if r["ext"] == ".png")
+    assert sorted(r["files"] for r in down if r["ext"] == ".png") == [4, 4, 4, 4, 4, 34]
+    assert all(r["drill"] for r in down if r["ext"] == ".png")
+    day = [r for r in coverage.rows(c, SID, "images/computer-use-turns/2025-04-01") if r["ext"] == ".png"]
+    assert [(r["name"], r["files"], r["match"]) for r in day] == [(".png", 34, "*.png")]
 
 
 def test_files_only_while_counting_and_without_an_index(corpus):
