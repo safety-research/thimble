@@ -65,7 +65,7 @@ test('candidates: a Read names its file; a Bash command its readers; no other ca
   expect(candidatePaths('Edit', { file_path: '/corpus/wiki/events.jsonl' })).toEqual([])
 })
 
-test('how each reader reads: cat whole, head the first lines, sed -n a range, wc and grep search, a recursive search over a folder', () => {
+test('how each reader reads: cat whole, head the first lines, sed -n a range, jq whole only for `.`, wc and grep search, a recursive search over a folder', () => {
   expect(bashReads('cat a.csv')[0]).toMatchObject({ how: 'whole' })
   expect(bashReads('head a.csv')[0]).toMatchObject({ how: 'part', lines: [1, 10] })
   expect(bashReads('head -n 5 a.csv')[0]).toMatchObject({ how: 'part', lines: [1, 5] })
@@ -77,7 +77,14 @@ test('how each reader reads: cat whole, head the first lines, sed -n a range, wc
   expect(bashReads("sed 's/a/b/' a.csv")[0]).toMatchObject({ how: 'whole' })
   expect(bashReads("sed -i 's/a/b/' a.csv")).toEqual([])
   expect(bashReads('less a.csv')[0]).toMatchObject({ how: 'whole' })
+  // jq prints the whole file only with the bare filter `.`; any other filter searches it
   expect(bashReads('jq . a.json')[0]).toMatchObject({ how: 'whole' })
+  expect(bashReads("jq -c ' . ' a.json")[0]).toMatchObject({ path: 'a.json', how: 'whole' })
+  expect(bashReads('jq --arg k v . a.json').map(r => [r.path, r.how])).toEqual([['a.json', 'whole']])
+  expect(bashReads('jq .id a.json')[0]).toMatchObject({ path: 'a.json', how: 'searched' })
+  expect(bashReads("jq -r '.[] | .name' a.json b.json").map(r => [r.path, r.how])).toEqual([['a.json', 'searched'], ['b.json', 'searched']])
+  expect(bashReads('jq -s length a.jsonl')[0]).toMatchObject({ how: 'searched' })
+  expect(bashReads('jq -f q.jq a.json').map(r => [r.path, r.how])).toEqual([['a.json', 'searched']])
   expect(bashReads('wc -l a.csv')[0]).toMatchObject({ how: 'searched' })
   expect(bashReads('awk -F, \'{print $1}\' a.csv')[0]).toMatchObject({ how: 'searched' })
   expect(bashReads('grep -c x a.csv')[0]).toMatchObject({ how: 'searched' })

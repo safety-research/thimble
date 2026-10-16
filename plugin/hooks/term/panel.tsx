@@ -2034,17 +2034,22 @@ function subjectWord(row: TermThreadRow, about: string): string {
   return row.element === ANSWER_ELEMENT ? 'answer' : 'passage'
 }
 
-/** The analyst's question in a side thread, as Claude Code draws a prompt in its chat: `❯` dim in the margin, the words
- *  wrapped at the type area, on the prompt's background across it. */
+/** The analyst's question in a side thread, as Claude Code draws a prompt in its chat: `❯` in the inactive color in the
+ *  margin, the words wrapped at the type area, on the prompt's background across it, the blank lines between its
+ *  paragraphs kept on that background as Claude Code keeps them. */
 function promptEl(els: El, q: string, cols: number, key: string): RenderElement | null {
   const { Box, Text } = els
-  const rows = plainCites(q).split('\n').flatMap(l => (l.trim() ? wrapRows(l, cols, 999) : []))
-  if (!rows.length) return null
+  const lines = plainCites(q).split('\n')
+  const from = lines.findIndex(l => l.trim())
+  if (from < 0) return null
+  let to = lines.length - 1
+  while (!lines[to]!.trim()) to--
+  const rows = lines.slice(from, to + 1).flatMap(l => (l.trim() ? wrapRows(l, cols, 999) : ['']))
   return (
     <Box key={marginKey(key)} flexDirection="column">
       {rows.map((r, i) => (
         <Text key={`${key}-${i}`} backgroundColor={COLORS.prompt} wrap="truncate-end">
-          <Text dimColor backgroundColor={COLORS.prompt}>{i ? '  ' : '❯ '}</Text>
+          <Text color={COLORS.dim} backgroundColor={COLORS.prompt}>{i ? '  ' : '❯ '}</Text>
           <Text backgroundColor={COLORS.prompt}>{`${r}${' '.repeat(Math.max(0, cols - width(r)))}`}</Text>
         </Text>
       ))}

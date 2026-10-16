@@ -9,8 +9,10 @@ import type { Engine, Mounted } from 'claude-code/testing'
 import { cardOfCell } from '../cell'
 import type { ThimbleCell } from '../cell'
 import { cardLayout } from '../draw'
+import type { Seg } from '../draw'
 import { fitPath, pathWidth } from '../nav'
-import { COLORS } from '../paint'
+import { COLORS, setTheme } from '../paint'
+import { SERIES_DARK, SERIES_LIGHT } from '../palette.gen'
 import { CWD, shown, takesKeys, world } from './fixtures'
 import type { World } from './fixtures'
 
@@ -216,6 +218,23 @@ test("main's reply and its card stand on Claude Code's own indent, column 2; the
   await ui.unmount()
 })
 
+test("the person's message stays Claude Code's own row, and the reply under it keeps the engine's blank row above it", async ($, on) => {
+  // Matt, 2026-10-16: in the build's shots the reply sat right under the person's message, with no blank row between
+  const w = world(on)
+  await start($, w)
+  await turn($, w, 'r1', 'The export holds most of its pages in one wiki, dse.')
+  const you = await $.ui.mount({ plugin: PANEL, component: 'UserMessage', requestId: 'u1', surface: 'terminal', viewport: { columns: 100, rows: 40 }, props: { text: 'What does the export hold?\n\nOne line.', origin: { kind: 'composer' }, isExpanded: false } } as never)
+  expect(shown(await you.drawn())).toBe('(the engine row)')
+  await you.unmount()
+  // the engine draws its reply row with `marginTop: 1`; thimble's tree takes that row's place, so it carries the margin
+  const ui = (await $.ui.mount(MESSAGE('r1', 'The export holds most of its pages in one wiki, dse.'))) as unknown as M
+  await w.clock.advance(300)
+  const root = (await ui.drawn()) as Node
+  expect(root.props).toMatchObject({ flexDirection: 'column', marginTop: 1 })
+  expect((await screen(ui, 100))[0]).toBe('⏺ The export holds most of its pages in one wiki, dse.')
+  await ui.unmount()
+})
+
 test("a passage a side thread was asked about keeps its `↳` in the ⏺'s cell on the reply's first row", async ($, on) => {
   // the fixtures' thread t2 was asked about the words `the deletions`
   const w = world(on)
@@ -289,6 +308,49 @@ test('a bar chart of two series by date: one row per date in words, its series s
   // a time that is not midnight keeps its clock
   const noon = cardOfCell({ ...BY_DATE, outputs: [{ 'application/vnd.vegalite.v6.json': { mark: 'bar', encoding: { x: { field: 't', type: 'temporal' }, y: { field: 'n', type: 'quantitative' } }, data: { values: [{ t: '2026-05-24T00:00:00Z', n: 3 }, { t: '2026-05-24T12:30:00Z', n: 5 }] } } }] }).card
   expect(cardLayout(noon, 60, -1).lines.map(l => l.map(s => s.s).join('').split('  ')[0])).toEqual(['May 24 00:00', 'May 24 12:30'])
+})
+
+test('the bar under the pointer: its name in inverse and its bar in the text color, nothing else on its row or any other lit; the same in the light theme', () => {
+  const single = cardOfCell({
+    ...BY_DATE,
+    outputs: [{ 'application/vnd.vegalite.v6.json': { mark: 'bar', encoding: { x: { field: 'wiki', type: 'nominal' }, y: { field: 'pages', type: 'quantitative' } }, data: { values: [{ wiki: 'dse', pages: 3200 }, { wiki: 'probier', pages: 900 }, { wiki: 'sandbox', pages: 479 }] } } }],
+  }).card
+  const stacked = cardOfCell(BY_DATE).card
+  const lit = (s: Seg) => Boolean(s.inv || s.bg || s.b || s.u || s.fg === COLORS.text)
+  const litOf = (lines: Seg[][]) => lines.flatMap((l, y) => l.filter(lit).map(s => ({ y, s: s.s, how: s.inv ? 'inverse' : s.fg === COLORS.text ? 'text' : 'other' })))
+  const BAR = /^[█▏▎▍▌▋▊▉]+$/
+  try {
+    for (const theme of ['light', 'dark'] as const) {
+      setTheme(theme)
+      // at rest nothing is lit
+      expect(litOf(cardLayout(single, 96, -1).lines)).toEqual([])
+      // one series: the row of `probier` (item 1) lights its name and its bar, not its gap, its value or another row
+      const hot = cardLayout(single, 96, 1).lines
+      const got = litOf(hot)
+      expect(got.map(g => [g.y, g.how])).toEqual([
+        [1, 'inverse'],
+        [1, 'text'],
+      ])
+      expect(got[0]!.s).toBe('probier')
+      expect(got[1]!.s).toMatch(BAR)
+      expect(hot[1]!.filter(s => !lit(s)).every(s => !s.s.trim() || /^[\d,]+$/.test(s.s.trim()))).toBe(true)
+      // the other rows' bars keep the theme's first series hue (the light theme's own, not the dark one's)
+      expect(hot[0]!.find(s => BAR.test(s.s))!.fg).toBe(COLORS.series[0])
+      expect(COLORS.series[0]).toBe(theme === 'light' ? SERIES_LIGHT[0] : SERIES_DARK[0])
+      // stacked: only the part under the pointer turns the text color; the row's other part keeps its hue
+      const lay = cardLayout(stacked, 96, -1)
+      const x0 = lay.lines[0]!.map(s => s.s).join('').indexOf('█')
+      const deleted = lay.hit(x0 + lay.lines[0]!.find(s => BAR.test(s.s))!.s.length, 0)
+      const part = cardLayout(stacked, 96, deleted).lines
+      expect(litOf(part).map(g => [g.y, g.how, g.how === 'inverse' ? g.s : 'bar'])).toEqual([
+        [0, 'inverse', 'May 24'],
+        [0, 'text', 'bar'],
+      ])
+      expect(part[0]!.filter(s => BAR.test(s.s)).map(s => s.fg)).toEqual([COLORS.series[0], COLORS.text])
+    }
+  } finally {
+    setTheme('dark')
+  }
 })
 
 test("a line chart over dates names its x in words, as a bar chart's labels read; its citations keep the rows' stamps", async () => {
@@ -743,5 +805,26 @@ test("a thread's turns keep a rhythm: a blank row between a question and its ans
   expect(rows[bottom + 3]).toBe('')
   expect(rows[bottom + 4]).toBe(' ⏺ P6 has 120 MB of them and P7 54 MB.')
   expect(JSON.stringify(await pane.find({ key: 'm:thread-q-2' }))).toContain(`"backgroundColor":"${COLORS.prompt}"`)
+  await pane.unmount()
+})
+
+test("a side thread's question as Claude Code draws a prompt: its blank lines kept on the prompt's background, `❯` in the inactive color", async ($, on) => {
+  const w = world(on)
+  sizeThread(w, [], [
+    { type: 'user', text: 'And the logs?\n\nBy participant, please.\n' },
+    { type: 'text', delta: 'P6 has 120 MB of them.', reply: true },
+    { type: 'done', result: 'P6 has 120 MB of them.' },
+  ])
+  await start($, w)
+  const pane = await openedThread($, w, 'tz')
+  const rows = await screen(pane, 96)
+  const q = rows.indexOf(' ❯ And the logs?')
+  expect(q).toBeGreaterThan(0)
+  expect(rows.slice(q, q + 5)).toEqual([' ❯ And the logs?', '', '   By participant, please.', '', ' ⏺ P6 has 120 MB of them.'])
+  const band = JSON.stringify(await pane.find({ key: 'm:thread-q-2' }))
+  // three rows on the prompt's background, the blank one between the paragraphs too; none for the trailing newline
+  expect(band.split(`"backgroundColor":"${COLORS.prompt}","wrap":"truncate-end"`).length - 1).toBe(3)
+  expect(band).toContain(`"color":"${COLORS.dim}","backgroundColor":"${COLORS.prompt}"`)
+  expect(band).not.toContain('"dimColor":true')
   await pane.unmount()
 })

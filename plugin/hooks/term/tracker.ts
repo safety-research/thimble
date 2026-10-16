@@ -3,7 +3,8 @@
 // and the line under the turn's answer. Programmatic only: a fact is what a call did to a file, never what a model wrote.
 //
 // A fact: a file seen whole or in part (its lines, or a PDF's pages), or searched (its contents touched by a search or a
-// program without being shown: grep, rg, wc, awk, a script, a database shell, a binary Read), or a folder searched by a
+// program without being shown: grep, rg, wc, awk, jq with a filter other than `.`, a script, a database shell, a binary
+// Read), or a folder searched by a
 // recursive grep or rg. Listing names (ls, find, fd) reads no contents and gives none; neither does an output argument.
 // Only data files count (activate.ts isDataFile, the twin of the backend's rule), only paths inside the session folder,
 // stored relative to it, and never the command's text. A refused or failed call gives none.
@@ -23,10 +24,11 @@ export type Fact = { path: string; how: 'whole' | 'part' | 'searched'; lines?: [
  *  rg whether the search recurses (a folder there means every data file under it) or prints file names. */
 export type BashRead = { reader: string; path: string; how: Fact['how']; lines?: [number, number]; recursive?: boolean }
 
-/** The readers whose file arguments the tracker counts, and how each reads. */
-const WHOLE = new Set(['cat', 'less', 'jq'])
+/** The readers whose file arguments the tracker counts, and how each reads. jq searches, except with the bare filter
+ *  `.`, which prints the whole file. */
+const WHOLE = new Set(['cat', 'less'])
 const PART = new Set(['head', 'tail', 'sed'])
-const SEARCH = new Set(['wc', 'grep', 'egrep', 'fgrep', 'rg', 'awk', 'gawk'])
+const SEARCH = new Set(['wc', 'grep', 'egrep', 'fgrep', 'rg', 'awk', 'gawk', 'jq'])
 const PROGRAMS = new Set(['python', 'python3', 'duckdb', 'sqlite3', 'csvcut', 'mlr'])
 /** Words before a command that run it (`sudo cat x`), skipped. */
 const PREFIXES = new Set(['sudo', 'time', 'command', 'nice', 'nohup', 'env', 'exec'])
@@ -136,6 +138,7 @@ export function bashReads(command: string): BashRead[] {
     let lines: [number, number] | undefined
     let scriptGiven = false
     let quiet = false
+    let filter: string | undefined
     for (let i = 1; i < words.length; i++) {
       const w = words[i]!
       // redirections: what follows a `>` is written; what follows a `<` is read
@@ -202,6 +205,17 @@ export function bashReads(command: string): BashRead[] {
           continue
         }
       }
+      if (name === 'jq') {
+        // options that take a name and a value: neither is the filter or a file
+        if (/^--(?:arg|argjson|slurpfile|rawfile)$/.test(w)) {
+          i += 2
+          continue
+        }
+        if (w === '--indent') {
+          i++
+          continue
+        }
+      }
       if (name === 'grep' || name === 'egrep' || name === 'fgrep' || name === 'rg') {
         const e = optionValue(words, i, '-e', ['--regexp'])
         const f = e ? null : optionValue(words, i, '-f', ['--file'])
@@ -233,6 +247,7 @@ export function bashReads(command: string): BashRead[] {
       // the first plain word is the script, the filter or the pattern, unless an option gave it
       if (!scriptGiven && files.length) {
         if (name === 'sed') lines = sedLines(files[0]!) ?? lines
+        filter = files[0]
         files = files.slice(1)
       }
     }
@@ -240,7 +255,7 @@ export function bashReads(command: string): BashRead[] {
     const recursive = name === 'rg' ? !opts.some(o => o === '--files') : isGrep && opts.some(o => /^-[A-Za-z]*[rR]/.test(o) || o === '--recursive' || o === '--dereference-recursive')
     if (name === 'rg' && opts.includes('--files')) continue
     if ((name === 'rg' || (isGrep && recursive)) && !files.length) files = ['.']
-    const how: Fact['how'] = WHOLE.has(name) ? 'whole' : PART.has(name) ? (name === 'sed' && !quiet ? 'whole' : 'part') : 'searched'
+    const how: Fact['how'] = WHOLE.has(name) || (name === 'jq' && filter?.trim() === '.') ? 'whole' : PART.has(name) ? (name === 'sed' && !quiet ? 'whole' : 'part') : 'searched'
     if (name === 'head') {
       const n = Number((nArg ?? '10').replace(/^\+/, ''))
       if (Number.isInteger(n) && n > 0) lines = [1, n]
