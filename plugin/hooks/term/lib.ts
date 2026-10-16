@@ -11,11 +11,12 @@ export type Citation = { raw: string; ref: string; display: string | null }
 
 export type Run = { text: string; b?: boolean; i?: boolean; code?: boolean; u?: boolean; cite?: Citation }
 
-/** `gap`: a blank line stood before the block in the reply, so it is drawn one row below the one before it. */
+/** `gap`: a blank line stood before the block in the reply, so it is drawn one row below the one before it. `at` and
+ *  `end`: where the block stands in the reply's text (from its first line's start to its last line's end). */
 export type Block =
-  | { type: 'md'; text: string; gap: boolean }
-  | { type: 'card'; id: string; gap: boolean; caption?: string }
-  | { type: 'rich'; prefix: string; heading: number; quote: boolean; runs: Run[]; gap: boolean; table?: TableRuns }
+  | { type: 'md'; text: string; gap: boolean; at?: number; end?: number }
+  | { type: 'card'; id: string; gap: boolean; caption?: string; at?: number; end?: number }
+  | { type: 'rich'; prefix: string; heading: number; quote: boolean; runs: Run[]; gap: boolean; table?: TableRuns; at?: number; end?: number }
 
 /** A Markdown table that holds citations, drawn by thimble-term (the `|` inside `[[value|ref]]` breaks a GFM table):
  *  its rows of cells of runs, the first row the header, and each column's alignment. A table block's `runs` are its
@@ -521,11 +522,23 @@ function unclosed(s: string): string {
 const ESCAPES = /\u001b(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007\u001b]*(?:\u0007|\u001b\\)?|[@-_])?/g
 const CONTROLS = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g
 
+// the characters that reorder or hide what a row shows: the bidi controls and marks (U+061C, U+200E-200F, U+202A-202E,
+// U+2066-2069), the zero-width characters (U+200B-200D, U+2060-2064) and the byte order mark (U+FEFF)
+const INVISIBLE = /[\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/
+const INVISIBLES = new RegExp(INVISIBLE.source, 'g')
+
 /** Text as a drawing may hold it: a terminal's escape sequences (a tool's colored output kept in a transcript) and
  *  other control characters left out, a tab or a newline as a space, since a drawing whose text holds one does not
- *  validate. Pure. */
+ *  validate; and the bidi, zero-width and byte order mark characters left out, which could make a row show other words
+ *  than it holds. Pure. */
 export function noControls(s: string): string {
-  return /[\u0000-\u001f\u007f-\u009f]/.test(s) ? s.replace(ESCAPES, '').replace(/[\t\n]/g, ' ').replace(CONTROLS, '') : s
+  const plain = /[\u0000-\u001f\u007f-\u009f]/.test(s) ? s.replace(ESCAPES, '').replace(/[\t\n]/g, ' ').replace(CONTROLS, '') : s
+  return INVISIBLE.test(plain) ? plain.replace(INVISIBLES, '') : plain
+}
+
+/** Every data-derived string the terminal draws (file names, quotes, comments, toasts) goes through this: noControls. */
+export function clean(s: string): string {
+  return noControls(s)
 }
 
 /** A file's line in at most `n` cells: a line of code or data (JSON, a tag) cut at the cell edge, so the rows of a file
@@ -724,21 +737,34 @@ export function tableRuns(lines: string[]): TableRuns {
 }
 
 /** A reply block cut into what the engine draws as Markdown (no citation in it), the cards it embeds, and the rich
- *  blocks thimble-term draws itself so their citations can be chips. Fences and tables stay Markdown whole. */
-export function parseReply(text: string): Block[] {
+ *  blocks the terminal UI draws itself so their citations can be chips. Fences and tables stay Markdown whole. `all`:
+ *  every paragraph, list item, heading and quote is a rich block, citations or not (a passage a check commented on is
+ *  drawn by the terminal UI, which knows where it wraps). */
+export function parseReply(text: string, opts: { all?: boolean } = {}): Block[] {
   const lines = text.split('\n')
+  const lineAt: number[] = []
+  for (let i = 0, at = 0; i < lines.length; i++) {
+    lineAt.push(at)
+    at += lines[i]!.length + 1
+  }
+  const span = (first: number, last: number) => ({ at: lineAt[first] ?? 0, end: (lineAt[last] ?? 0) + (lines[last]?.length ?? 0) })
   const out: Block[] = []
   let md: string[] = []
+  let mdAt = 0 // the line the Markdown kept so far starts at
   let blank = false // the line before the next block was blank
   const flush = () => {
     const first = md.findIndex(l => l.trim() !== '')
     if (first >= 0) {
       let last = md.length - 1
       while (!md[last]!.trim()) last--
-      out.push({ type: 'md', text: md.slice(first, last + 1).join('\n'), gap: blank || first > 0 })
+      out.push({ type: 'md', text: md.slice(first, last + 1).join('\n'), gap: blank || first > 0, ...span(mdAt + first, mdAt + last) })
       blank = last < md.length - 1
     } else if (md.length) blank = true
     md = []
+  }
+  const keep = (from: number, rows: string[]) => {
+    if (!md.length) mdAt = from
+    md.push(...rows)
   }
   let i = 0
   while (i < lines.length) {
@@ -748,7 +774,7 @@ export function parseReply(text: string): Block[] {
       flush()
       // a figure's caption (report.ts normalizeDoc) is the italic line right under its embed
       const cap = /^\s*\*([^*\n].*?)\*\s*$/.exec(lines[i + 1] ?? '')
-      out.push({ type: 'card', id: (embed[1] ?? embed[2])!, gap: blank, ...(cap ? { caption: cap[1]!.trim() } : {}) })
+      out.push({ type: 'card', id: (embed[1] ?? embed[2])!, gap: blank, ...(cap ? { caption: cap[1]!.trim() } : {}), ...span(i, cap ? i + 1 : i) })
       blank = false
       i += cap ? 2 : 1
       continue
@@ -757,7 +783,7 @@ export function parseReply(text: string): Block[] {
       const start = i
       i++
       while (i < lines.length && !/^\s*```/.test(lines[i]!)) i++
-      md.push(...lines.slice(start, Math.min(i + 1, lines.length)))
+      keep(start, lines.slice(start, Math.min(i + 1, lines.length)))
       i++
       continue
     }
@@ -766,17 +792,17 @@ export function parseReply(text: string): Block[] {
       while (i < lines.length && /^\s*\|/.test(lines[i]!)) i++
       const rows = lines.slice(start, i)
       if (citations(rows.join('\n')).length === 0) {
-        md.push(...rows)
+        keep(start, rows)
         continue
       }
       flush()
       const table = tableRuns(rows)
-      out.push({ type: 'rich', prefix: '', heading: 0, quote: false, runs: table.rows.flat(2), gap: blank, table })
+      out.push({ type: 'rich', prefix: '', heading: 0, quote: false, runs: table.rows.flat(2), gap: blank, table, ...span(start, i - 1) })
       blank = false
       continue
     }
     if (!line.trim()) {
-      md.push(line)
+      keep(i, [line])
       i++
       continue
     }
@@ -810,12 +836,12 @@ export function parseReply(text: string): Block[] {
       ) body.push(lines[i++]!)
     }
     const joined = body.join(' ')
-    if (citations(joined).length === 0) {
-      md.push(...lines.slice(start, i))
+    if (!opts.all && citations(joined).length === 0) {
+      keep(start, lines.slice(start, i))
       continue
     }
     flush()
-    out.push({ type: 'rich', prefix, heading, quote: isQuote, runs: inlineRuns(joined), gap: blank })
+    out.push({ type: 'rich', prefix, heading, quote: isQuote, runs: inlineRuns(joined), gap: blank, ...span(start, i - 1) })
     blank = false
   }
   flush()
