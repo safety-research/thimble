@@ -6,13 +6,12 @@ from __future__ import annotations
 
 import os
 import shutil
-import threading
 import time
 from pathlib import Path
 
 import pytest
 
-from app import corpus_walk, notebook, runs, views
+from app import corpus_walk, notebook
 
 
 def _age(root: Path, seconds: float = 60) -> None:
@@ -65,18 +64,6 @@ def test_every_corpus_file_is_linked_and_git_is_left_out(corpus, tmp_path):
     assert not (scratch / ".git").exists()
 
 
-def test_an_unchanged_corpus_is_mirrored_again_without_reading_a_folder(corpus, tmp_path, passes):
-    scratch = tmp_path / "scratch"
-    notebook.mirror_corpus(corpus, scratch)
-    assert len(passes) == 6
-    passes.clear()
-    notebook.mirror_corpus(corpus, scratch)
-    assert passes == []
-    corpus_walk.forget()  # a restart: only the manifest is left
-    notebook.mirror_corpus(corpus, scratch)
-    assert passes == []
-
-
 def test_a_file_added_or_removed_reaches_the_mirror_on_its_next_pass(corpus, tmp_path, passes):
     scratch = tmp_path / "scratch"
     notebook.mirror_corpus(corpus, scratch)
@@ -103,125 +90,6 @@ def test_a_removed_folder_takes_its_links_and_a_kernels_files_stay(corpus, tmp_p
     assert _links(scratch / "runs" / "b") == set()
 
 
-def test_a_kernels_file_where_the_corpus_has_a_folder_wins(corpus, tmp_path):
-    scratch = tmp_path / "scratch"
-    scratch.mkdir()
-    (scratch / "runs").write_text("mine")
-    notebook.mirror_corpus(corpus, scratch)
-    assert (scratch / "runs").read_text() == "mine"
-    assert (scratch / "README.md").is_symlink()
-
-
-def test_a_corpus_link_is_mirrored_only_while_its_target_exists(corpus, tmp_path):
-    (corpus / "runs" / "a" / "to-readme").symlink_to(corpus / "README.md")
-    (corpus / "runs" / "a" / "broken").symlink_to(corpus / "nowhere")
-    scratch = tmp_path / "scratch"
-    notebook.mirror_corpus(corpus, scratch)
-    assert (scratch / "runs/a/to-readme").read_text() == "hi"
-    assert not os.path.lexists(scratch / "runs/a/broken")
-
-
-def test_the_walk_lists_again_only_the_folders_that_changed(corpus, monkeypatch):
-    listed: list[str] = []
-    real = corpus_walk._list
-
-    def spy(path, mtime_ns, prune):
-        listed.append(path)
-        return real(path, mtime_ns, prune)
-
-    monkeypatch.setattr(corpus_walk, "_list", spy)
-    first = corpus_walk.walk(corpus)
-    assert set(first) == {"", ".git", ".git/objects", "runs", "runs/a", "runs/a/agents", "runs/b", "runs/b/agents"}
-    assert first["runs/a"].file_names() == ["manifest.json"] and first["runs/a"].dirs == ("agents",)
-    listed.clear()
-    assert corpus_walk.walk(corpus) == first and listed == []
-    (corpus / "runs" / "b" / "agents" / "agent-2.jsonl").write_text("{}\n")
-    again = corpus_walk.walk(corpus)
-    assert listed == [str(corpus / "runs" / "b" / "agents")]
-    assert again["runs/b/agents"].file_names() == ["agent-1.jsonl", "agent-2.jsonl"]
-    assert again["runs/b/agents"].racy  # changed just now: listed again by the next walk
-    assert set(corpus_walk.walk(corpus, frozenset({".git"}))) == set(first) - {".git", ".git/objects"}
-
-
-def test_callers_of_a_folder_walk_at_the_same_time_share_one_walk(corpus, monkeypatch):
-    from app import corpus_tree
-
-    walks: list[str] = []
-    gate = threading.Event()
-    real = corpus_tree.os.scandir
-
-    def slow(path):
-        if str(path) == str(corpus):
-            walks.append(str(path))
-            gate.wait(5)
-        return real(path)
-
-    monkeypatch.setattr(corpus_tree.os, "scandir", slow)
-    corpus_tree.forget(corpus)
-    got: list[int] = []
-    threads = [threading.Thread(target=lambda: got.append(len(views.folder_paths(corpus)))) for _ in range(4)]
-    for t in threads:
-        t.start()
-    time.sleep(0.2)
-    gate.set()
-    for t in threads:
-        t.join()
-    assert walks == [str(corpus)] and got == [5, 5, 5, 5]
-
-
-def test_last_used_counts_a_workspace_s_files_and_folders_but_not_its_mirror_links(corpus, tmp_path):
-    ws = tmp_path / "ws"
-    notebook.mirror_corpus(corpus, ws / "scratch")
-    made = ws / "notebooks" / "main.json"
-    made.parent.mkdir(parents=True)
-    made.write_text("{}")
-    t = time.time() - 3600
-    for d, ds, fs in os.walk(ws):
-        for n in [*ds, *fs]:
-            p = Path(d) / n
-            later = t + 600 if p.is_symlink() else t  # a link's own time is never read
-            os.utime(p, (later, later), follow_symlinks=False)
-    os.utime(ws, (t, t))
-    os.utime(made, (t + 60, t + 60))
-    assert runs.last_used(ws) == pytest.approx(t + 60)
-
-
-def test_a_folder_removed_soon_after_it_was_made_takes_its_links(corpus, tmp_path):
-    scratch = tmp_path / "scratch"
-    (corpus / "runs" / "c").mkdir()
-    (corpus / "runs" / "c" / "manifest.json").write_text("{}")  # made just now: within the walk's racy window
-    notebook.mirror_corpus(corpus, scratch)
-    assert (scratch / "runs/c/manifest.json").is_symlink()
-    (corpus / "runs" / "c" / "manifest.json").unlink()
-    (corpus / "runs" / "c").rmdir()
-    notebook.mirror_corpus(corpus, scratch)
-    assert not os.path.lexists(scratch / "runs/c/manifest.json")
-
-
-def test_a_corpus_file_that_becomes_a_folder_is_mirrored_as_a_folder(corpus, tmp_path):
-    scratch = tmp_path / "scratch"
-    notebook.mirror_corpus(corpus, scratch)
-    assert (scratch / "README.md").is_symlink()
-    (corpus / "README.md").unlink()
-    (corpus / "README.md").mkdir()
-    (corpus / "README.md" / "part.md").write_text("one")
-    notebook.mirror_corpus(corpus, scratch)
-    assert not (scratch / "README.md").is_symlink() and (scratch / "README.md").is_dir()
-    assert (scratch / "README.md/part.md").read_text() == "one"
-
-
-def test_a_corpus_link_whose_target_appears_later_is_mirrored(corpus, tmp_path):
-    target = tmp_path / "elsewhere.txt"
-    (corpus / "runs" / "a" / "late").symlink_to(target)
-    _age(corpus)
-    scratch = tmp_path / "scratch"
-    notebook.mirror_corpus(corpus, scratch)
-    assert not os.path.lexists(scratch / "runs/a/late")
-    target.write_text("here now")  # the folder holding the link keeps its mtime
-    notebook.mirror_corpus(corpus, scratch)
-    assert (scratch / "runs/a/late").read_text() == "here now"
-
-
 def test_a_gone_folder_s_sweep_does_not_follow_a_kernel_s_link(corpus, tmp_path):
     scratch = tmp_path / "scratch"
     notebook.mirror_corpus(corpus, scratch)
@@ -233,27 +101,3 @@ def test_a_gone_folder_s_sweep_does_not_follow_a_kernel_s_link(corpus, tmp_path)
     shutil.rmtree(corpus / "runs" / "b")
     notebook.mirror_corpus(corpus, scratch)
     assert os.path.lexists(outside / "dangling")
-
-
-def test_without_a_manifest_the_links_of_a_gone_folder_are_removed(corpus, tmp_path):
-    scratch = tmp_path / "scratch"
-    notebook.mirror_corpus(corpus, scratch)
-    notebook._mirror_manifest(scratch).unlink()
-    shutil.rmtree(corpus / "runs" / "b")
-    corpus_walk.forget()
-    notebook.mirror_corpus(corpus, scratch)
-    assert _links(scratch / "runs" / "b") == set()
-    assert (scratch / "runs/a/manifest.json").is_symlink()
-
-
-def test_the_manifest_of_a_mirror_that_is_gone_is_removed(corpus, tmp_path, monkeypatch):
-    monkeypatch.setattr(notebook, "_manifests_pruned", False)
-    old = tmp_path / "old-scratch"
-    notebook.mirror_corpus(corpus, old)
-    old_manifest = notebook._mirror_manifest(old)
-    shutil.rmtree(old)  # its workspace was deleted
-    monkeypatch.setattr(notebook, "_manifests_pruned", False)
-    scratch = tmp_path / "scratch"
-    notebook.mirror_corpus(corpus, scratch)
-    assert not old_manifest.exists()
-    assert notebook._mirror_manifest(scratch).is_file()

@@ -1,5 +1,6 @@
 """app.view_calls: the kernels that answer view readers. A slow call holds up only itself and has no time limit, a
-page's call reports its progress and can be cancelled, and an index pickled by one version of a reader loads with that
+page's call reports its progress and can be cancelled, a cancelled call's kernel settles before its next call, a
+workspace that is gone gets no spare kernel, and an index pickled by one version of a reader loads with that
 version's classes.
 
 The kernels are faked: view_calls._exec runs the reader's code in a thread of this process, as the `inproc` runner of
@@ -10,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import shutil
 import sys
 import threading
 import time
@@ -228,6 +230,50 @@ async def test_a_page_names_its_call_reads_its_progress_and_cancels_it(ws, kerne
         assert (await client.post(f"{base}/calls/page-2/cancel")).json() == {"cancelled": False}
         progress = view_calls.progress_path(views.indexes_dir(CORPUS), "page-2")
         assert not progress.exists(), "a call's progress file goes when it ends"
+
+
+async def _settle() -> None:
+    """Let the spare kernel's task run to its end."""
+    for _ in range(10):
+        await asyncio.sleep(0)
+
+
+async def test_a_workspace_that_is_gone_gets_no_spare_kernel_and_its_kernels_are_shut_down(ws, data, kernels, monkeypatch):
+    """When the workspace's corpus is gone (its folder or its registration), a slow call starts no spare kernel: the
+    workspace's kernels are shut down and its pool and failures forgotten, so nothing retries for it."""
+    from app import notebook  # noqa: PLC0415
+
+    shut: list[str] = []
+
+    async def shutdown_workspace(c: str) -> None:
+        shut.append(c)
+        view_calls.forget_workspace(c)
+
+    monkeypatch.setattr(notebook, "shutdown_workspace", shutdown_workspace)
+    view_calls._pool(CORPUS).append(view_calls.Worker(CORPUS, "views", busy=True))
+    view_calls._spare_failed[CORPUS] = view_calls.Failing(1, 0.0, "RuntimeError: x")
+    shutil.rmtree(data / CORPUS)
+    view_calls._spare(CORPUS)
+    await _settle()
+    assert kernels.started == [] and shut == [CORPUS]
+    assert CORPUS not in view_calls._pools and CORPUS not in view_calls._spare_failed
+
+
+async def test_cancelling_a_call_interrupts_its_kernel_which_settles_before_its_next_call(ws, kernels):
+    slow = asyncio.create_task(views.reader_call(CORPUS, "count", "records", {"steps": 200}))
+    await asyncio.sleep(0.3)
+    slow.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await slow
+    assert kernels.interrupted == ["views"]
+    for _ in range(50):
+        if not any(w.busy for w in view_calls._pools[CORPUS]):
+            break
+        await asyncio.sleep(0.05)
+    assert [w.busy for w in view_calls._pools[CORPUS]] == [False], "the kernel is free once its interrupted call stopped"
+    assert kernels.ran[-1] == ("views", view_calls.DRAIN_S), "the drain waits at most DRAIN_S"
+    assert kernels.stopped == [], "a kernel that stopped at the interrupt is kept"
+    assert await views.reader_call(CORPUS, "count", "records", {}) == {"n": 5, "steps": 0}
 
 
 def test_an_index_pickled_by_one_reader_version_loads_with_that_versions_classes(tmp_path):

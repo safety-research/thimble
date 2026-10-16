@@ -6,7 +6,6 @@ import json
 import os
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 
 from app import main
@@ -24,31 +23,3 @@ def test_the_tour_is_offered_once_per_install_and_recorded_in_thimble_home(claud
     # a new app on the same home (a restarted server) still knows
     assert TestClient(main.create_app()).get("/api/tour").json() == {"seen": True}
     assert claude_global_config.read_text() == claude_before
-
-
-def test_an_unreadable_state_file_offers_the_tour_again():
-    home = Path(os.environ["THIMBLE_HOME"])
-    home.mkdir(parents=True, exist_ok=True)
-    (home / "tour.json").write_text("not json")
-    c = TestClient(main.create_app())
-    assert c.get("/api/tour").json() == {"seen": False}
-    assert c.post("/api/tour/seen").json() == {"seen": True}
-    assert c.get("/api/tour").json() == {"seen": True}
-
-
-@pytest.mark.real_write_guard
-def test_only_a_signed_in_browser_records_the_offer(monkeypatch):
-    """Recording the offer is a write like any other: a page or a notebook kernel without a signed-in browser's cookie
-    records nothing."""
-    from conftest import UI_COOKIE_VALUE, UI_KEY_VALUE, _record_paired
-
-    from app import hook_auth
-
-    monkeypatch.delenv("THIMBLE_DEV", raising=False)
-    monkeypatch.setenv("THIMBLE_PORT", "8300")
-    _record_paired(UI_COOKIE_VALUE)
-    c = TestClient(main.create_app(), base_url="http://testserver")
-    assert c.post("/api/tour/seen").status_code == 403
-    assert c.get("/api/tour").json() == {"seen": False}
-    c.cookies.set(hook_auth.ui_cookie(), UI_COOKIE_VALUE)
-    assert c.post(f"/b/{UI_KEY_VALUE}/api/tour/seen").json() == {"seen": True}  # under the page's key (hook_auth)

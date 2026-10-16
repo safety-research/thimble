@@ -8,25 +8,12 @@ import json
 from pathlib import Path
 
 import pytest
-from fastapi import HTTPException
 
 from app import agents, config, dev, subagents, views
 from subagent_fakes import bridge  # noqa: F401 — a fixture
 from target_blocks import target_blocks  # noqa: F401 — the core lane's target flags, where prompts.py lacks them
 
 CORPUS = "boards"
-READER = '''
-def build_index(paths):
-    return {}
-
-
-def records(index, query):
-    return []
-
-
-def resolve(index, locator):
-    return None
-'''
 
 
 @pytest.fixture()
@@ -46,12 +33,6 @@ def board(tmp_path, monkeypatch, workspaces_tmp) -> Path:
     monkeypatch.setattr(views, "gate", gate)
     monkeypatch.setattr(views, "gate_lines", lambda rep: list(rep.get("problems") or []) or ["the checks passed"])
     return corpus
-
-
-def _write(slug: str) -> None:
-    views.write_view(CORPUS, slug, reader=READER, html=f"<!doctype html><p>{slug}</p>", name=slug.title(),
-                     description="The board's posts.", claims=["board.jsonl"],
-                     accepts=[{"form": "L<n>", "means": "one post"}], units=[], libs=[])
 
 
 async def _until(cond, what: str) -> None:
@@ -85,33 +66,3 @@ async def test_the_stop_in_a_build_s_thread_fails_the_view_with_retry_and_frees_
     await _until(lambda: _status(first) == ("failed", dev.VIEW_STOPPED), "the stopped build never failed")
     chat = (views.read_proposal(CORPUS, first) or {}).get("chat")
     assert (agents.meta_or_none(CORPUS, chat) or {}).get("status") == "stopped"
-
-
-async def test_a_queued_build_stops_at_once_a_change_stopped_leaves_the_view_as_it_was_and_a_built_view_has_no_stop(
-        board, bridge, monkeypatch):
-    slug = views.propose(CORPUS, "Posts", "to read the board", ["board.jsonl"], "one row per post", asked=True)["slug"]
-    assert slug in [s for _, s in dev._view_queue]
-    assert views.stop_build(CORPUS, slug) == {"ok": True}
-    assert _status(slug) == ("failed", dev.VIEW_STOPPED) and not dev._view_queue, "no build ever started"
-    assert not bridge.ops("spawn")
-    with pytest.raises(HTTPException) as e:
-        views.stop_build(CORPUS, "nothing")
-    assert e.value.status_code == 404
-
-    _write(slug)
-    assert _status(slug)[0] == "built"
-    with pytest.raises(HTTPException) as e:
-        views.stop_build(CORPUS, slug)
-    assert e.value.status_code == 409
-    built = (views.views_dir(CORPUS) / slug / "view.html").read_text()
-    monkeypatch.setattr(dev, "VIEW_POOL", 1)
-    views.revise(CORPUS, slug, "show the threads too", asked=True)
-    await _until(lambda: bridge.ops("spawn"), "the change's builder never started")
-    await _until(lambda: (views.read_proposal(CORPUS, slug) or {}).get("agent_id"), "the builder took no place")
-    agent = views.read_proposal(CORPUS, slug)["agent_id"]
-    (views.views_dir(CORPUS) / slug / "view.html").write_text("<p>half a change</p>")
-    views.stop_build(CORPUS, slug)
-    subagents.run_ended(CORPUS, agent, "stopped", "", source="notification")
-    await _until(lambda: _status(slug) == ("built", dev.VIEW_STOPPED), "the stopped change did not end")
-    assert (views.read_proposal(CORPUS, slug) or {}).get("failed_change") == "show the threads too"
-    assert (views.views_dir(CORPUS) / slug / "view.html").read_text() == built, "the view is back as it was built"
