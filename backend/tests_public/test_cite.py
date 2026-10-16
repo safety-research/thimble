@@ -169,6 +169,23 @@ def test_a_date_in_words_is_found_where_a_cell_a_row_name_or_a_line_writes_it_in
     assert "27 June" in r.unresolved
 
 
+def test_a_clock_time_is_a_value_found_where_its_place_writes_that_time():
+    """A time such as `14:52:11` showed no value, so the terminal said "its value is not checked, and a script got the
+    same number" and a wrong time at its place was never red. A clock time alone is a value: it is at a place that writes
+    the same hour and minute (and second, when it gives one), never inside another time."""
+    from app import report, verify
+
+    line = '{"id": 197, "ts": "2026-08-30T14:52:11.325+00:00", "agent": "agent-07", "action": "git.ref"}'
+    for display in ["14:52", "14:52:11", "14:52:11.325", "09:38 UTC"]:
+        assert cite.is_clock(display) and cite.shows_value(display), display
+    assert not cite.is_clock("14:52 and 14:58") and not cite.is_clock("at 14:52")
+    for display in ["14:52", "14:52:11", "14:52:11.325"]:
+        assert cite.value_in(display, line) and verify._value_matches(display, line) and report._value_matches(display, line), display
+    for display in ["14:58", "14:52:12", "4:52"]:
+        assert not cite.value_in(display, line), display
+    assert cite.value_in("09:38", "at 9:38:00 the run began")
+
+
 def test_a_number_an_output_writes_in_words_is_found_and_words_match_in_any_case():
     """Live check term-fix10, quirk 9: edit_card said "NOT found in this card's outputs, 12, 7" for an output whose lines
     read "Twelve pages are up" and "seven of the twelve pages are gone", as the dates in words were before term-fix9;
