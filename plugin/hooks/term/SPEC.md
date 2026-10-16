@@ -396,9 +396,11 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   subject (`about card "How many pages…"`) name a chip's place in words (`events.jsonl line 12`; a card by its
   question). A label's link with a value
   (`[33](concept:<id>/yes)`) is neither a chip nor a problem in the footer.
-- A citation is its value in blue, underlined; a value not at its place is red. In a card's takeaway, one cell after
-  the value, `◌` while thimble's links check runs, `✓` once it found the value, a red `×` when it found another. The
-  citation under the pointer is inverse, and its tip (its place and status in plain words, and why for a problem) sits
+- A citation is its value in purple, underlined (MATT-NOTES "Citation behavior"). While it is checked (its place not
+  resolved yet; in a card's takeaway, while thimble's links check runs) ` ◌` is part of it, one cell after the value,
+  purple and underlined as the value (`3,934 ◌`, v9 review), and inverse with it under the pointer; nothing once it is
+  found, never `✓`; red, with a red `×` one cell after it, when its value is not at its place or the check found
+  another. The citation under the pointer is inverse, and its tip (its place and status in plain words, and why for a problem) sits
   on the tip background on the row below it, or above it on a paragraph's last row. While main streams, a citation
   shows as a link and a card's line as `◌ <its question>`, never `[[…]]`.
 - The cards a turn added or changed stand under the turn's last reply, each once, in its last state: those a
@@ -706,8 +708,9 @@ With several threads, one open:
 ```
 
 - The title, the title row's current step after `citation` (in the accent and bold), is the cited value, bold, in blue
-  and underlined (a link to its place, in place of the accent), `◌` after it while it is checked; red, with a red `×`, when it is not at its place. A citation in a card's takeaway takes the
-  card's links check as the chat does: `◌` while it runs, `✓` and `, and a script got the same number` once it ran, a
+  and underlined (a link to its place, in place of the accent), ` ◌` part of it while it is checked (bold, purple and
+  underlined as the value: `3,934 ◌`); red, with a red `×`, when it is not at its place. A citation in a card's takeaway takes the
+  card's links check as the chat does: ` ◌` while it runs, no mark and `, and a script got the same number` once it ran, a
   red `×` when it got another value, or when the card's code types the value in (`, but typed in the code, line 4, not
   computed`). A citation with no value is titled by its place in words, and then has no `from`
   row and no subtitle while its place is there (`not found` and why when it is not), so the place is named once; its

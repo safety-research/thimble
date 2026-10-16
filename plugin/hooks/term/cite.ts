@@ -1,7 +1,8 @@
 // Citations as the analyst sees them (no `$`), shared by the hooks module, para.tsx and the tests.
 //
-// - Display (MATT-NOTES "Citation behavior"): every citation is purple and underlined, a `[ card ]` chip too. A dim ◌
-//   follows it while it is checked (its place not resolved yet, a fix round or the card's links check working on it);
+// - Display (MATT-NOTES "Citation behavior"): every citation is purple and underlined, a `[ card ]` chip too. While it
+//   is checked (its place not resolved yet, a fix round or the card's links check working on it) a ◌ one space after its
+//   value is part of it, purple and underlined as the value (`3,934 ◌`, v9 review);
 //   on success the ◌ goes and nothing takes its place (never a ✓); a check that rewrote it leaves it as rewritten, with
 //   no mark; a permanent failure (the value is not at its place, the place does not exist, the links check got another
 //   value) turns it red with × right after it. The model's Markdown is drawn as Claude Code draws it: bold bold, italic
@@ -25,7 +26,8 @@ import { COLORS } from './paint'
  *  not at the place or the place does not exist; `fixing` while a fix round runs on it; `failed` when the fix round
  *  could not correct it or its verification failed (another value, a crash, no script). */
 export type ChipState = 'link' | 'problem' | 'fixing' | 'failed'
-/** `mark` is × (failed) or nothing, never ✓; `spin` while the citation is checked, drawn as a dim ◌. `chip`: a citation
+/** `mark` is × (failed) or nothing, never ✓; `spin` while the citation is checked, drawn as ` ◌` in the link's own
+ *  style. `chip`: a citation
  *  with no words of its own, drawn as `[ card ]` (its label holds the brackets), whole on one row. */
 export type ChipView = { label: string; state: ChipState; mark: string; spin: boolean; tip: string; chip?: boolean }
 
@@ -79,15 +81,14 @@ export function chipLook(status: string | undefined, fix: string | undefined, ve
 }
 
 /** A citation as styled segments: its label purple and underlined (red when it failed), a chip (`[ card ]`) too, in
- *  inverse under the pointer, so its color becomes the background; then a dim ◌ while it is checked, or a red × once it
- *  failed, a cell apart from the label. */
+ *  inverse under the pointer, so its color becomes the background; then, while it is checked, ` ◌` as part of the link
+ *  (purple, underlined, inverse under the pointer with it: `3,934 ◌`), or a red × a cell apart once it failed. */
 export function chipSegs(c: ChipView, hover: boolean, _frame = 0): Seg[] {
   const bad = !c.spin && (c.state === 'problem' || c.state === 'failed')
-  const segs: Seg[] = [{ s: c.label, fg: bad ? COLORS.problem : COLORS.cite, u: true, ...(hover ? { inv: true } : {}) }]
-  // the mark a cell apart from the value: `19,931 ◌`, not `19,931◌`
-  if (c.spin) segs.push({ s: ` ${SPIN}`, fg: COLORS.dim })
-  else if (bad) segs.push({ s: ' ×', fg: COLORS.problem })
-  return segs
+  const label: Seg = { s: c.label, fg: bad ? COLORS.problem : COLORS.cite, u: true, ...(hover ? { inv: true } : {}) }
+  // the mark a cell apart from the value: `19,931 ◌`, not `19,931◌`; the spinner in the link's own style, the space too
+  if (c.spin) return [label, { ...label, s: ` ${SPIN}` }]
+  return bad ? [label, { s: ' ×', fg: COLORS.problem }] : [label]
 }
 
 // ---------------------------------------------------------------------------------------- what a verification compares

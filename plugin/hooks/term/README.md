@@ -54,9 +54,10 @@ Claude Code's panel chrome, no right-click menu.
 - **Main's replies.** The model's Markdown as Claude Code draws it (bold bold, headings bold, inline code colored). The
   prose and the cards share one left edge, column 2, Claude Code's own (the ⏺ row's text), and one width: the
   terminal's, less 2 and the margin, with no measure; the cards follow the text and each other border to border. Each citation, `[[value|ref]]` or
-  the Markdown link main writes for the terminal, is a link, blue and underlined; red when its place does not exist or
-  does not hold its value (`thimble state resolve`); in a card's takeaway, `◌` after it while thimble's links check
-  runs, `✓` once it found the value, a red `×` when it found another. The citation under the pointer shows its status in
+  the Markdown link main writes for the terminal, is a link, purple and underlined; while it is checked (its place
+  resolved by `thimble state resolve`, and in a card's takeaway thimble's links check) ` ◌` is part of it, purple and
+  underlined too (`3,934 ◌`); nothing once it is found (never `✓`); red with a red `×` when its place does not exist or
+  does not hold its value, or the links check found another. The citation under the pointer shows its status in
   plain words on a quiet box (`found in README.md line 3`, `found on the card; its value is not checked`, `not found: …
   does not exist`, and why). The blue `?` beside a passage, in the ⏺'s column (over the ⏺ on the reply's first row),
   asks a side thread about it (a heading's about its whole section, a card's about the card); once one was asked, a

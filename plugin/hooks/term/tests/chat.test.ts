@@ -212,13 +212,19 @@ test("the footer says `◌ checking N` while its citations are checked, no `fail
   await pane.unmount()
 })
 
-test("a citation is purple and underlined, a dim ◌ right after it while it is checked, nothing once found, red with × once it failed for good", () => {
+test("a citation is purple and underlined, ` ◌` part of it while it is checked (`4,579 ◌`, purple and underlined too), nothing once found, red with × once it failed for good", () => {
   const runs = [{ text: 'It holds ' }, { text: '4,579', cite: { raw: '[[4,579|README.md#L3]]', ref: 'README.md#L3', display: '4,579' } }, { text: ' pages.' }]
-  const draw = (look: { state: 'link' | 'failed'; mark: string; spin: boolean }) => paraLayout({ prefix: '', heading: 0, quote: false, runs }, [{ label: '4,579', tip: '', ...look }], 80, -1).lines.flat()
-  // checking: purple, then a dim ◌ a cell after it
+  const lay = (look: { state: 'link' | 'failed'; mark: string; spin: boolean }, hover = -1) => paraLayout({ prefix: '', heading: 0, quote: false, runs }, [{ label: '4,579', tip: '', ...look }], 80, hover)
+  const draw = (look: { state: 'link' | 'failed'; mark: string; spin: boolean }) => lay(look).lines.flat()
+  // checking: purple and underlined, then ` ◌` in the same style, one space apart: one link (v9 review)
   let segs = draw(chipLook('pending', undefined, undefined) as never)
   expect(segs.find(g => g.s === '4,579')).toMatchObject({ fg: COLORS.cite, u: true })
-  expect(segs.find(g => g.s.includes('◌'))).toMatchObject({ s: ' ◌', fg: COLORS.dim })
+  expect(segs.find(g => g.s.includes('◌'))).toEqual({ s: ' ◌', fg: COLORS.cite, u: true })
+  expect(segs.map(g => g.s).join('')).toBe('It holds 4,579 ◌ pages.')
+  // the spinner's cells are the citation's: a pointer over the ◌ is over the link, and under it both are inverse
+  const checking = lay(chipLook('pending', undefined, undefined) as never)
+  expect(checking.spans[0]).toMatchObject({ x0: 9, x1: 16 })
+  expect(lay(chipLook('pending', undefined, undefined) as never, 0).lines.flat().filter(g => g.inv).map(g => g.s).join('')).toBe('4,579 ◌')
   // found, and a script got the same number: no mark at all
   expect(chipLook('ok', undefined, 'verified')).toEqual({ state: 'link', mark: '', spin: false })
   segs = draw(chipLook('ok', undefined, 'verified') as never)
@@ -390,11 +396,13 @@ test("while main's reply streams, Claude Code is handed links and a card's place
   expect(stored.at(-1)).toBe(reply)
 })
 
-test('off the terminal a cited paragraph is Markdown, each citation a link to its file and a problem marked ×', async ($, on) => {
+test('off the terminal a cited paragraph is Markdown, each citation a link to its file (its ◌ inside the link while it is checked) and a problem marked ×', async ($, on) => {
   const w = world(on)
   await start($, w)
   const text = 'It says [4,579](README.md#L3) pages and [12](README.md#L99) wikis.'
   let ui = await $.ui.mount(MESSAGE('m1', text, 'mobile'))
+  // not checked yet: the spinner is part of the link's words
+  expect(JSON.stringify(await ui.drawn())).toContain(`It says [4,579 ◌](file://${CWD}/README.md) pages`)
   await w.clock.advance(300)
   await ui.unmount()
   ui = await $.ui.mount(MESSAGE('m1', text, 'mobile'))

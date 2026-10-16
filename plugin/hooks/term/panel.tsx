@@ -31,7 +31,7 @@ import type { BoxProps, ButtonProps, ElementConstructor, MatchedEvent, RenderEle
 import type { ChatNavStep, ChatThread, TermPanel, TermThread, TermThreadRow, TermVerdict } from './types'
 import type { ThimbleLabel } from './cell'
 import { ACCENT, FRESH, LINK, MARGIN_W, controlsEl, fieldEls, fitHints, fitTo, freshSeg, hasMargin, headerEls, hintLines, hintsEl, lineEl, linkSeg, marginKey, pointed, ruleEl, setBrowser, setHead, spread, subLine, takeBrowser, takeHead } from './chrome'
-import { chipLook, chipName, citeLabel, plainCites, quoteSpan, quotedWords, wrapAround } from './cite'
+import { SPIN, chipLook, chipName, citeLabel, plainCites, quoteSpan, quotedWords, wrapAround } from './cite'
 import { MAX_BARS, MAX_NODES, MAX_TABLE_ROWS, amount, cardLayout, cut, cutRef, demojibake, labelHead, lineWidth, placeWords, shade, share, shares, turnTimes, valueColour, width, wrapRows } from './draw'
 import type { BarRow, CardData, Cell, Item, Layout, Line, Seg } from './draw'
 import { fileRef } from './files'
@@ -1687,7 +1687,7 @@ async function followUpField(cx: Ctx, e: PaneEvent, about: string): Promise<Rend
 }
 
 /** The citation panel (SPEC.md, section 7, "The citation panel"): the title is the cited value, bold, purple and
- *  underlined (a link to its place; red when the value is not there), a dim ◌ after it while it is checked and a red ×
+ *  underlined (a link to its place; red when the value is not there), ` ◌` as part of it while it is checked and a red ×
  *  for a problem, nothing once found; the subtitle its status in plain words; under the rule `from` and `source` (the
  *  sentence it stands in, the value in it a link), and where a check rewrote the citation its history (`Claude wrote`
  *  the value or place as written, `check made it` the one it reads now, `why`), then the cited lines nested at A2 with the value (or the passage an example quotes) on the
@@ -1707,13 +1707,15 @@ async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   const cardId = /^(?:card|cell):([A-Za-z0-9_-]+)/.exec(c.ref)?.[1]
   // a place cited with no words keeps its line where its path is cut (`…/agent-ad502eca.jsonl line 20`)
   const label = c.display === null && fileRef(c.ref) ? cutRef(c.ref, Math.max(8, cols - 6)) : cut(await citeTitle(cx, c), Math.max(8, cols - 6))
-  // the takeaway's card's links check, as the chat marks the citation: a dim ◌ while it runs, nothing once a script got
+  // the takeaway's card's links check, as the chat marks the citation: ◌ while it runs, nothing once a script got
   // the value, a red × when it got another
   const check = p.of ? linkCheck((await cx.card(p.of))?.links, c) : {}
   const look = chipLook(status, undefined, check.state)
   const bad = !look.spin && (red || look.state === 'failed')
-  const mark: Seg | null = !v || look.spin ? { s: ' ◌', fg: COLORS.dim } : bad ? { s: ' ×', fg: COLORS.problem } : null
-  const titleSegs: Line = [{ s: label, b: true, fg: bad ? COLORS.problem : COLORS.cite, u: true }, ...(mark ? [mark] : [])]
+  const titleSeg: Seg = { s: label, b: true, fg: bad ? COLORS.problem : COLORS.cite, u: true }
+  // while it is checked the spinner is part of the citation, in its style (`3,934 ◌`); a red × a cell apart once it failed
+  const mark: Seg | null = !v || look.spin ? { ...titleSeg, s: ` ${SPIN}` } : bad ? { s: ' ×', fg: COLORS.problem } : null
+  const titleSegs: Line = [titleSeg, ...(mark ? [mark] : [])]
   const opens = f ? () => openFile(cx, f.path, Math.max(1, (f.line ?? 1) - 5), f.line) : cardId ? () => openCard(cx, cardId) : null
   const body: RenderElement[] = []
   // the title row's current step: the value as its link, a click on it opening its place
