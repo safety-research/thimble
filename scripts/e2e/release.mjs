@@ -508,7 +508,8 @@ async function main() {
       check(paired?.paired === true, `the page did not sign in with the link's code: GET /api/ui/paired gave ${JSON.stringify(paired)}`)
       // the cookie is scoped to this browser's own path, so the browser sends it to no other server's /api/ paths
       const base = await apiBase(page)
-      const jar = (await page.context().cookies(origin)).filter((c) => c.name.startsWith('thimble-ui-'))
+      // every cookie of the page's host: one filtered by the origin's URL would leave out a cookie scoped to /b/<key>/api/
+      const jar = (await page.context().cookies()).filter((c) => c.name.startsWith('thimble-ui-') && c.domain === new URL(origin).hostname)
       check(base !== '/api' && jar.length === 1 && `${jar[0].path.replace(/\/$/, '')}` === base,
         `the browser's cookie is scoped to ${jar.map((c) => c.path).join(', ') || 'no path'}, not to its own ${base}/`)
       const plain = await (await page.request.get(`${origin}/api/ui/paired`)).json().catch(() => null)
