@@ -15,6 +15,7 @@ import pytest
 
 from app import config, local, prompts, term_views, tools, view_tools, views
 from test_term_views import DRAW_WRAP, inproc, needs_node  # noqa: F401 — the fixture, used by name
+from target_blocks import target_blocks  # noqa: F401 — the core lane's target flags, where prompts.py lacks them
 
 EXAMPLE = views.EXAMPLES_DIR / "timeline"
 BOARD_READER = '''
@@ -136,8 +137,8 @@ def test_a_build_in_terminal_mode_asks_for_view_term_js(board):
     assert all(f"`{x}`" in term for x in ("timeline", "linked-sessions", "repository"))
     assert "view.html" not in term and "data-anchor" not in term and "npm" not in term and "px" not in term
     assert "view.html" in page and "view.term.js" not in page and "terminal-views.md" not in page
-    # 0.9.0 has no modes: the hint may name both places (prompts/tools.md's merge), the terminal's panel first
-    assert "thimble's panel in the terminal" in proposed and "Files" in opened
+    assert "thimble's panel in the terminal" in proposed and "Files" not in proposed
+    assert "opens in Files" in opened
 
 
 def test_the_reviewer_and_its_tools_read_drawings_in_terminal_mode(board):

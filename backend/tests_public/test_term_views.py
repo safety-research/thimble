@@ -22,6 +22,7 @@ from pathlib import Path
 import pytest
 
 from app import config, kernel_wrap, local, srt, term_views, views
+from target_blocks import target_blocks  # noqa: F401 — the core lane's target flags, where prompts.py lacks them
 
 NODE = srt.node()
 SRT = srt.package(config.REPO_ROOT)

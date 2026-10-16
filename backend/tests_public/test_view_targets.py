@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from app import config, dev, prompts, proposer, term_views, userconf, view_tools, views
+from target_blocks import target_blocks  # noqa: F401 — the core lane's target flags, where prompts.py lacks them
 
 HERE = Path(__file__).resolve().parent
 READER = '''
