@@ -5,7 +5,7 @@
 // when the session starts. The file is the renderer's own: browser mode does not read it.
 //
 // No `$` here: register.tsx reads and writes through the context (hooks/ctx.ts).
-import type { ChatSignal, TermAnswer, TermHome } from '../types'
+import type { ChatSignal, TermAnswer, TermHome } from './types'
 import type { Ctx } from './ctx'
 
 /** What the file is read and written with. */

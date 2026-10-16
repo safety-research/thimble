@@ -1,12 +1,12 @@
 // A terminal view's frame as its Client paints it (hooks/viewclient.tsx): a line's runs as few as look the same, so a
 // chart or a row of columns is a few Texts rather than one a cell; a frame whose text holds a control character draws
-// without it. `claude plugin test mods/thimble-term`.
+// without it. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import type { Line } from '../hooks/draw'
-import { RELAY } from '../hooks/panel'
-import { fewer } from '../hooks/viewclient'
+import type { Line } from '../draw'
+import { RELAY } from '../panel'
+import { fewer } from '../viewclient'
 import { CWD, shown, takesKeys, viewFrame, world } from './fixtures'
 import type { World } from './fixtures'
 
@@ -32,7 +32,7 @@ test("a view's line paints as few runs as look the same: spaces join the run bes
 
 // ------------------------------------------------------------------------------------------------ a view opened
 
-const PANEL = 'thimble-term'
+const PANEL = 'thimble'
 const ROWS = 120
 const paneOf = { plugin: PANEL, component: 'Pane', requestId: PANEL, surface: 'terminal', viewport: { columns: 120, rows: ROWS + 4 }, props: { title: 'thimble', isFocused: true, bodyColumns: 96, placement: 'dock', scroll: { bodyRows: ROWS }, view: {} } } as never
 const VIEWS = [{ slug: 'wiki-page-history', name: 'Wiki Page History', status: 'built', ts: '2026-10-08T00:14:48Z', files: ['revisions.jsonl'], term: true }]

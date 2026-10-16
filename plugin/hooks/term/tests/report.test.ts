@@ -3,14 +3,14 @@
 // the passages they are on, ↑↓ to choose one, r to resolve it or open it again, Enter or a to ask about it, v to show the
 // resolved ones; `e` edits the report as Markdown, and a save goes through the browser editor's route with the ids of the
 // blocks the edit kept. Each panel is also drawn as rows of text (`screen`), as a terminal shows it.
-// `claude plugin test mods/thimble-term`.
+// `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { RELAY } from '../hooks/panel'
-import { alignBlocks, checksOf, commentsOf, docBlocks, docMarkdown, parseMarkdown, unitParts } from '../hooks/report'
-import type { DocBlock } from '../hooks/report'
-import { editTop, editWindow } from '../hooks/docedit'
+import { RELAY } from '../panel'
+import { alignBlocks, checksOf, commentsOf, docBlocks, docMarkdown, parseMarkdown, unitParts } from '../report'
+import type { DocBlock } from '../report'
+import { editTop, editWindow } from '../docedit'
 import { CWD, DOC, SLIDES, STATES, shown, takesKeys, world } from './fixtures'
 import type { World } from './fixtures'
 
@@ -18,7 +18,7 @@ type M = Mounted<'terminal'>
 type E = Engine
 type Node = { type?: string; props?: Record<string, unknown>; children?: unknown[] }
 
-const PANEL = 'thimble-term'
+const PANEL = 'thimble'
 const paneOf = (cols = 96, rows = 60) => ({ plugin: PANEL, component: 'Pane', requestId: PANEL, surface: 'terminal', viewport: { columns: cols + 24, rows: rows + 4 }, props: { title: 'thimble', isFocused: true, bodyColumns: cols, placement: 'dock', scroll: { bodyRows: rows }, view: {} } }) as never
 
 // a report with a check's comment on a sentence, Claude's note on a heading, a check's comment on the title, a resolved

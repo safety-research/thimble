@@ -17,7 +17,7 @@
 // was found, or why not) on a quiet box.
 import type { RenderElement, ResolveInput } from 'claude-code'
 
-import type { TermCard, TermLinks, TermVerdict } from '../types'
+import type { TermCard, TermLinks, TermVerdict } from './types'
 import { blockClaims, chipLook, citeLabel, plainCites, richMarkdown, showsValue, streamLink } from './cite'
 import type { ChipView } from './cite'
 import { LINK } from './chrome'

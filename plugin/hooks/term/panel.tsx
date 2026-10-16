@@ -23,7 +23,7 @@
 //   views     the views, one row each; view, one view as one line (the browser draws views)
 import type { BoxProps, ButtonProps, ElementConstructor, MatchedEvent, RenderElement, TextProps } from 'claude-code'
 
-import type { ChatNavStep, ChatThread, TermPanel, TermThread, TermThreadRow, TermVerdict } from '../types'
+import type { ChatNavStep, ChatThread, TermPanel, TermThread, TermThreadRow, TermVerdict } from './types'
 import type { ThimbleLabel } from './cell'
 import { ACCENT, FRESH, LINK, MARGIN_W, controlsEl, fieldEls, fitHints, fitTo, freshSeg, hasMargin, headerEls, hintLines, hintsEl, lineEl, linkSeg, marginKey, pointed, ruleEl, setHead, spread, subLine, takeHead } from './chrome'
 import { chipLook, chipName, citeLabel, plainCites, quoteSpan, quotedWords, wrapAround } from './cite'

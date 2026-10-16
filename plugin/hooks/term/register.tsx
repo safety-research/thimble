@@ -1,26 +1,29 @@
-// thimble-term: thimble's terminal-mode renderer. The `thimble` command loads this plugin in terminal mode only
-// (`thimble mode terminal`), so browser mode loads nothing new. It registers no model tools, agents, guidance or
-// commands, and keeps no data except what is on screen: what it draws comes from `thimble state`, and every change it
-// makes goes through `thimble act` (hooks/data.ts). What main's chat drew under its rows is kept in the workspace's
-// terminal/chat.json for a resumed session (hooks/kept.ts). Its scope check: THIMBLE_WS names a workspace whose
-// trusted/launch.json has `mode: "terminal"`; anywhere else every hook passes through.
+// thimble-term: thimble's terminal UI, part of the plugin's one hooks module (plugin/hooks/register.ts registers it
+// after thimble.ts). Until 0.9.0's activation lands it draws only in terminal mode (`thimble mode terminal`), so browser
+// mode draws nothing new. It registers no model tools, agents, guidance or commands, and keeps no data except what is
+// on screen: what it draws comes from `thimble state`, and every change it makes goes through `thimble act`
+// (hooks/data.ts). What main's chat drew under its rows is kept in the workspace's terminal/chat.json for a resumed
+// session (hooks/kept.ts). Its scope check: THIMBLE_WS names a workspace whose trusted/launch.json has
+// `mode: "terminal"`; anywhere else every hook passes through.
 //
 // What it draws (its look is SPEC.md's "The visual system"):
 //   - main's replies on the mod's grid, each citation a link, red when its place does not hold its value (reply.tsx)
 //   - each card a turn of main added or changed, once, under the turn's last reply, in its last state, its takeaway
 //     under it; no hex id, and Claude Code's tool groups left folded
 //   - one row above the prompt, a toast: what is new in the workspace since home was last opened (`open ›` opens home
-//     and the row goes, `dismiss` marks it seen); Claude Code's agent tray shows thimble's agents, and side threads
-//     have `↳` rows
-//   - one panel (panel.tsx): home, a card, a citation's place, the threads, a label, a document, the files, an agent
+//     and the row goes, `dismiss` marks it seen; band.tsx); Claude Code's agent tray shows thimble's agents, and side
+//     threads have `↳` rows
+//   - one panel (panel.tsx): home, a card, a citation's place, the threads, a label, a document, the files, an agent,
+//     and the views views.ts adds (coverage, citations, checks: `/thimble coverage|citations|checks`)
 //   - side threads: the blue "?" beside a passage or a card, or a selection's "ask"; a `↳ thread` row under main's
 //     latest row when an answer comes in while the panel shows something else, and a blue ↳ beside the passage asked
 //     about. A right-click does what a click does: there is no menu
 //   - `/thimble` opens the home panel, with no model turn
 // It hides main's end token, `(shown in the dashboard)`, as the browser does.
 //
-// `$` stays in this file (Claude Code follows it into no import): each hook builds the context the other files take
-// (cxOf, hooks/ctx.ts).
+// Each hook builds the context the other files take from its own `$` (cxOf, hooks/ctx.ts); a file that registers hooks
+// of its own (band.tsx) imports cxOf from here, since Claude Code follows `$` only into functions called by their
+// declared or imported name. Its hooks on an event thimble.ts also hooks carry a matcher (ANY).
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, ResolveInput } from 'claude-code'
 
@@ -35,7 +38,7 @@ import { cardsOfCall, docsOf, forkDescription, labelsOf, namedForks, namedThread
 import { HOME_UI_EMPTY } from './home'
 import { keepLast, keepRow, loadKept, resetKept } from './kept'
 import { linesMessage, onListClick } from './lines'
-import { ANSWER_ELEMENT, RELAY, answerOffer, dismissNotice, docEditMessage, drawPanel, fieldMessage, focusedField, hasList, homeNotices, homeOffer, homeViews, noticeAct, onGesture, openAsk, openCard, openCite, openFile, openHomeNew, openLabel, openNoticeChat, openThread, openView, proposalsOff, relayKey, relayMove, scrollPending, viewWheelAt, wheelWindow } from './panel'
+import { ANSWER_ELEMENT, RELAY, docEditMessage, drawPanel, fieldMessage, focusedField, hasList, homeViews, onGesture, openAsk, openCard, openCite, openFile, openLabel, openThread, openView, relayKey, relayMove, scrollPending, viewWheelAt, wheelWindow } from './panel'
 import type { PaneEvent } from './panel'
 // the file browser and a file, drawn by a module of their own (panel.tsx drawsView, term.ts loadsView)
 import './filesview'
@@ -44,9 +47,14 @@ import { COLORS } from './paint'
 import { isAnchor, signalEnd, signalQuestion } from './signal'
 import type { AppendedRow } from './signal'
 import { NAV_EMPTY } from './nav'
-import { FILES_UI_EMPTY, LABEL_UI_EMPTY, PANEL, checkQueued, closePanel, loadCards, loadCardsBatch, navOrigin, openHome, openPanel, openPending, paneTitle, panelColumns, placedLater, readSurface, readThread, retryPending, rt, seeHome, surfaceValue, takeKeys, threadsNow, tick } from './term'
+import { FILES_UI_EMPTY, LABEL_UI_EMPTY, PANEL, checkQueued, loadCards, loadCardsBatch, navOrigin, openHome, openPanel, paneTitle, panelColumns, placedLater, readSurface, readThread, rt, surfaceValue, takeKeys, threadsNow, tick } from './term'
 import type { UiApply } from './term'
 import { turns } from './turns'
+import { registerBand } from './band'
+import { openChecks } from './checksview'
+import { openCitations } from './citesview'
+import { openCoverage } from './coverageview'
+import { registerPanelViews } from './views'
 import { PUMP_MS, closeView, openViewState, sendEvent, viewFault, viewMessage, viewPump } from './viewhost'
 
 type Dollar = EngineInterface
@@ -70,34 +78,37 @@ function resultText(output: unknown): string {
   const blocks = Array.isArray(output) ? output : (output as { content?: unknown } | undefined)?.content
   return Array.isArray(blocks) ? blocks.map(b => (b && typeof b === 'object' && 'text' in b ? String((b as { text: unknown }).text) : '')).join('\n') : ''
 }
-const ABOVE_LABEL = 16
+// Claude Code refuses a second registration of an event without a matcher in one hooks module, and thimble.ts registers
+// first (plugin/hooks/register.ts): the hooks of this file on an event thimble.ts also hooks carry a matcher that every
+// event matches (an empty RegExp tests true on any string)
+const ANY = /(?:)/
 const paneTurns = turns()
 
 // the state the drawings read (types/index.d.ts)
-const CARDS = { plugin: 'thimble-term', key: 'cards' } as const
-const TURN_CARDS = { plugin: 'thimble-term', key: 'turnCards' } as const
-const VERDICTS = { plugin: 'thimble-term', key: 'verdicts' } as const
-const THREAD = { plugin: 'thimble-term', key: 'thread' } as const
-const THREAD_ROWS = { plugin: 'thimble-term', key: 'threadRows' } as const
-const ANSWERS = { plugin: 'thimble-term', key: 'answers' } as const
-const VIEW_ROWS = { plugin: 'thimble-term', key: 'viewRows' } as const
-const SURFACE = { plugin: 'thimble-term', key: 'surface' } as const
-const panelA = { plugin: 'thimble-term', key: 'panel' } as const
-const navRef = { plugin: 'thimble-term', key: 'nav' } as const
-const pendingRef = { plugin: 'thimble-term', key: 'pending' } as const
-const homeRef = { plugin: 'thimble-term', key: 'home' } as const
-const homeSeenRef = { plugin: 'thimble-term', key: 'homeSeen' } as const
-const agentsRef = { plugin: 'thimble-term', key: 'agents' } as const
-const threadsRef = { plugin: 'thimble-term', key: 'threads' } as const
-const newsRef = { plugin: 'thimble-term', key: 'threadNews' } as const
-const homeUiRef = { plugin: 'thimble-term', key: 'homeUi' } as const
-const labelUiRef = { plugin: 'thimble-term', key: 'labelUi' } as const
-const filesUiRef = { plugin: 'thimble-term', key: 'filesUi' } as const
-const panelTickRef = { plugin: 'thimble-term', key: 'panelTick' } as const
+const CARDS = { plugin: 'thimble', key: 'cards' } as const
+const TURN_CARDS = { plugin: 'thimble', key: 'turnCards' } as const
+const VERDICTS = { plugin: 'thimble', key: 'verdicts' } as const
+const THREAD = { plugin: 'thimble', key: 'thread' } as const
+const THREAD_ROWS = { plugin: 'thimble', key: 'threadRows' } as const
+const ANSWERS = { plugin: 'thimble', key: 'answers' } as const
+const VIEW_ROWS = { plugin: 'thimble', key: 'viewRows' } as const
+const SURFACE = { plugin: 'thimble', key: 'surface' } as const
+const panelA = { plugin: 'thimble', key: 'panel' } as const
+const navRef = { plugin: 'thimble', key: 'nav' } as const
+const pendingRef = { plugin: 'thimble', key: 'pending' } as const
+const homeRef = { plugin: 'thimble', key: 'home' } as const
+const homeSeenRef = { plugin: 'thimble', key: 'homeSeen' } as const
+const agentsRef = { plugin: 'thimble', key: 'agents' } as const
+const threadsRef = { plugin: 'thimble', key: 'threads' } as const
+const newsRef = { plugin: 'thimble', key: 'threadNews' } as const
+const homeUiRef = { plugin: 'thimble', key: 'homeUi' } as const
+const labelUiRef = { plugin: 'thimble', key: 'labelUi' } as const
+const filesUiRef = { plugin: 'thimble', key: 'filesUi' } as const
+const panelTickRef = { plugin: 'thimble', key: 'panelTick' } as const
 const panelTickA = atom(panelTickRef, 0)
 
-/** The context the other files take, bound to this hook's `$`. */
-function cxOf($: Dollar): Ctx {
+/** The context the other files take, bound to this hook's `$` (band.tsx imports it too). */
+export function cxOf($: Dollar): Ctx {
   // what main's chat draws under a row is kept in the workspace too, so a resumed session draws it again (kept.ts)
   const io = { read: (path: string) => $.fs.read(path), write: (path: string, text: string) => $.fs.write(path, text) }
   const keep = async (row: string, part: Parameters<typeof keepRow>[3]) => (rt.sc ? keepRow(io, rt.sc.ws, row, part) : undefined)
@@ -322,6 +333,18 @@ async function thimbleCommand(cx: Ctx, args: string): Promise<string | null> {
       const line = m?.[2] ? Number(m[2]) : undefined
       await openFile(cx, path, line ? Math.max(1, line - 5) : 1, line)
       return `thimble: ${path}${line ? ` line ${line}` : ''} is open`
+    }
+    case 'coverage': {
+      await openCoverage(cx, arg || undefined)
+      return 'thimble: the coverage view is open'
+    }
+    case 'citations': {
+      await openCitations(cx)
+      return 'thimble: the citations view is open'
+    }
+    case 'checks': {
+      await openChecks(cx)
+      return 'thimble: the checks view is open'
     }
     default:
       return `thimble: \`/thimble\` opens home; \`/thimble threads\`, \`cite [n]\`, \`card [n]\`, \`files [path[:line]]\` and \`documents\` open those`
@@ -585,7 +608,9 @@ async function restoreKept($: Dollar, cx: Ctx): Promise<void> {
 export const register: Register = on => {
   // a click on an empty part of a list hands the keys back to the pane (term.ts takeKeys)
   onListClick(takeKeys)
-  on('session.start', async ($, e, next) => {
+  // the panel's Coverage, Citations and Checks views (views.ts)
+  registerPanelViews(on)
+  on('session.start', { cwd: ANY }, async ($, e, next) => {
     const started = await next(e)
     const cx = cxOf($)
     rt.sc = await scopeOf(cx)
@@ -636,7 +661,7 @@ export const register: Register = on => {
     return next({ ...e, description: THIMBLE_DESCRIPTION, argumentHint: THIMBLE_ARGS })
   })
   // where Claude Code routes the skill past command.run, its prompt opens the panel and main says the skill's line
-  on('skill.prompt', async ($, e, next) => {
+  on('skill.prompt', { skill: ANY }, async ($, e, next) => {
     if (rt.sc && (e.skill === 'thimble:thimble' || e.skill === 'thimble')) await openHome(cxOf($))
     return next(e)
   })
@@ -651,7 +676,7 @@ export const register: Register = on => {
 
   // ---------------------------------------------------------------------------------------------- main's turn
 
-  on('turn.start', async ($, e, next) => {
+  on('turn.start', { turnId: ANY }, async ($, e, next) => {
     if (rt.sc) {
       const own = rt.own.has(e.text)
       rt.own.delete(e.text)
@@ -663,7 +688,7 @@ export const register: Register = on => {
   // main's fork of a side thread runs with the thread's question as its description, which Claude Code's agent tray and
   // its exit dialog show beside the fork's name (never `thread:<slug>`); the prompt keeps `thread:<name>`, by which
   // thimble knows the fork (backend threads.fork_ref)
-  on('tool.call', async ($, e, next) => {
+  on('tool.call', { tool: ANY }, async ($, e, next) => {
     let call = e
     try {
       if (rt.sc && e.agentId === undefined && e.tool === 'Agent') {
@@ -698,7 +723,7 @@ export const register: Register = on => {
   // main's reply as it streams: each citation handed to Claude Code as a Markdown link (never its raw spelling) and a
   // card's line as a placeholder naming the card; a citation, code span or card line not yet closed waits. The row is
   // stored as the model wrote it (session.append), and drawn by AssistantMessage once it is whole.
-  on('turn.step', async function* ($, e, next) {
+  on('turn.step', { turnId: ANY }, async function* ($, e, next) {
     if (!rt.sc || e.agentId !== undefined) return yield* next(e)
     const cx = cxOf($)
     const blocks = new Map<number, Streaming>()
@@ -772,7 +797,7 @@ export const register: Register = on => {
     return next(msg === e.message ? e : { ...e, message: msg })
   }).catch(($, e, next) => next(e))
 
-  on('turn.complete', async ($, e, next) => {
+  on('turn.complete', { turnId: ANY }, async ($, e, next) => {
     const done = await next(e)
     if (rt.sc && e.agentId === undefined && rt.turn) {
       const t = rt.turn
@@ -853,8 +878,8 @@ export const register: Register = on => {
   on('ui.render', { component: 'CommandOutput' }, async ($, e, next) => {
     if (!rt.sc) return next(e)
     // `/thimble …` answers as thimble, not under the plugin's name, which Claude Code puts before a hook's answer
-    const own = (e.props.command === 'thimble:thimble' || e.props.command === 'thimble') && /^\s*(?:thimble-term:\s*)?thimble:/.test(e.props.text)
-    const shown = own ? { ...e, props: { ...e.props, text: e.props.text.replace(/^\s*thimble-term:\s*/, '') } } : e
+    const own = (e.props.command === 'thimble:thimble' || e.props.command === 'thimble') && /^\s*(?:thimble:\s*)?thimble:/.test(e.props.text)
+    const shown = own ? { ...e, props: { ...e.props, text: e.props.text.replace(/^\s*thimble:\s*(?=thimble:)/, '') } } : e
     return underRow(cxOf($), e, () => next(shown))
   })
 
@@ -926,136 +951,8 @@ export const register: Register = on => {
 
   // ---------------------------------------------------------------------------------------------- above the prompt
 
-  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (!rt.sc || e.props.hasSurvey || e.props.view.agentId) return next(e)
-    const cx = cxOf($)
-    const panes = await cx.panes()
-    if (e.surface === 'terminal' && e.viewport?.columns && !panes.some(p => p.isPlaced)) rt.termColumns = e.viewport.columns
-    const { Box, Text, Button } = $.ui.resolve(e)
-    const rows: RenderElement[] = []
-    const label = (s: string, color?: string) => (
-      <Box width={ABOVE_LABEL} flexShrink={0}>
-        {color ? <Text color={color}>{`  ${s}`}</Text> : <Text dimColor>{`  ${s}`}</Text>}
-      </Box>
-    )
-    // a row under a row's label: the label's width left empty
-    const under = (key: string, child: RenderElement) => (
-      <Box key={key} flexDirection="row">
-        {label('')}
-        <Box flexShrink={1}>{child}</Box>
-      </Box>
-    )
-    // a panel Claude Code left undrawn (an open it was not asked for, on a terminal narrower than it places those at),
-    // and why; `open panel` opens it as `/thimble` does, from the press, which Claude Code places at any width. Gone
-    // once the pane is drawn (Claude Code places it when the terminal is widened to that width)
-    const pending = await cx.pending()
-    const placed = panes.some(p => p.id === PANEL && p.isPlaced)
-    if (pending && placed) $.clock.after(0, () => void placedLater(cx))
-    if (pending && !placed) {
-      const columns = (e.surface === 'terminal' ? e.viewport?.columns : 0) || pending.columns || 0
-      const more = pending.floor && columns ? pending.floor - columns : 0
-      if (pending.floor && columns && more <= 0) $.clock.after(0, () => void retryPending(cx, columns))
-      rows.push(
-        <Box key="above-panel" flexDirection="row">
-          {label('panel')}
-          <Box flexDirection="row" columnGap={2} flexShrink={1}>
-            <Box flexShrink={1}>
-              <Text wrap="truncate-end">{`${pending.title} is ready`}</Text>
-            </Box>
-            <Box flexDirection="row" columnGap={2} flexShrink={0}>
-              <Button key="above-panel-open" label="open panel" plain onPress={() => openPending(cx)} />
-              <Button key="above-panel-dismiss" label="dismiss" plain onPress={() => closePanel(cx)} />
-            </Box>
-          </Box>
-        </Box>,
-      )
-    }
-    // the view proposal waiting for the analyst's answer (proposer.py, or a viewer for a file type), until it is answered
-    // and whatever the panel shows: `view proposal` in the accent, its name in bold, what it would show (for a viewer of
-    // a file type, then its files) wrapped whole, never behind a press, and not the task it names; `accept`, `reject` and
-    // `don't ask again`, which turns view proposals off; why accept could not start its build, in red, under them
-    // (SPEC.md, "Main's chat")
-    const offer = await homeOffer(cx)
-    if (offer) {
-      const accept = () => answerOffer(cx, offer.slug, 'accept')
-      const reject = () => answerOffer(cx, offer.slug, 'reject')
-      rows.push(
-        <Box key="above-offer" flexDirection="row">
-          {label('view proposal', COLORS.accent)}
-          <Box flexDirection="row" columnGap={2} flexShrink={1}>
-            <Box flexShrink={1}>
-              <Text bold wrap="wrap">{offer.name}</Text>
-            </Box>
-            <Box flexDirection="row" columnGap={2} flexShrink={0}>
-              {offer.pressed
-                ? [<Text key="above-offer-pressed" dimColor>{offer.pressed === 'accept' ? '◌ accepting' : '◌ rejecting'}</Text>]
-                : [
-                    <Button key="above-offer-accept" label="accept" plain onPress={accept} />,
-                    <Button key="above-offer-reject" label="reject" plain onPress={reject} />,
-                    <Button key="above-offer-off" label="don't ask again" plain onPress={() => proposalsOff(cx)} />,
-                  ]}
-            </Box>
-          </Box>
-        </Box>,
-      )
-      if (offer.description) rows.push(under('above-offer-description', <Text wrap="wrap">{offer.description}</Text>))
-      if (!offer.task && offer.claims.length) rows.push(under('above-offer-files', <Text wrap="wrap"><Text dimColor>{'files  '}</Text>{offer.claims.join(', ')}</Text>))
-      if (offer.refused && !offer.pressed) rows.push(under('above-offer-refused', <Text color={COLORS.problem} wrap="wrap">{offer.refused}</Text>))
-    }
-    // every agent's open notices, newest first, under the view proposal's place: a failure with its fix (a safeguard's
-    // block or switch of model, an API error, an agent that ended failed or was refused, a view build, a check or label
-    // run, the view proposer), since Claude Code's own output shows only main's requests. `notice` dim, then its words
-    // in red, which name the agent and the failure, wrapped whole; then the acts that fix it, `open ›` to the agent's
-    // thread, `dismiss` (SPEC.md, "Main's chat")
-    for (const n of await homeNotices(cx)) {
-      rows.push(
-        <Box key={`above-notice-${n.id}`} flexDirection="row">
-          {label('notice')}
-          <Box flexDirection="row" columnGap={2} flexShrink={1}>
-            <Box flexShrink={1}>
-              <Text color={COLORS.problem} wrap="wrap">{n.text}</Text>
-            </Box>
-            <Box flexDirection="row" columnGap={2} flexShrink={0}>
-              {n.acts.map((a, i) => (
-                <Button key={`above-notice-${n.id}-act-${i}`} label={a.label} plain onPress={() => noticeAct(cx, n, a)} />
-              ))}
-              {n.open ? <Button key={`above-notice-${n.id}-open`} label="open ›" plain onPress={() => openNoticeChat(cx, n)} /> : null}
-              <Button key={`above-notice-${n.id}-dismiss`} label="dismiss" plain onPress={() => dismissNotice(cx, n)} />
-            </Box>
-          </Box>
-        </Box>,
-      )
-    }
-    // what is new in the workspace since home was last opened, like a toast: open › opens home on the first new item
-    // and the row goes; dismiss marks what is there seen, as opening home does, and opens nothing; none while home
-    // shows (live check term-fix8, quirk 6: it stayed beside home, which showed them)
-    const home = await cx.home()
-    const homeShown = (await cx.panel())?.view === 'home' && panes.some(p => p.id === PANEL && p.isPlaced)
-    if (home && !homeShown) {
-      // the first count of a session (refreshHome keeps it) is what was there already, so nothing is new yet
-      const seen = (await cx.homeSeen()) ?? home
-      const fresh = (k: 'cards' | 'labels' | 'docs' | 'views') => Math.max(0, home[k] - (seen as typeof home)[k])
-      const plural = (n: number, w: string) => `${n.toLocaleString('en-US')} new ${w}${n === 1 ? '' : 's'}`
-      const words = [fresh('cards') ? plural(fresh('cards'), 'card') : '', fresh('labels') ? plural(fresh('labels'), 'label') : '', fresh('docs') ? plural(fresh('docs'), 'document') : '', fresh('views') ? plural(fresh('views'), 'view') : ''].filter(Boolean).join(' · ')
-      if (words) {
-        rows.push(
-          <Box key="above-home" flexDirection="row">
-            {label('thimble')}
-            <Box flexDirection="row" columnGap={2} flexShrink={1}>
-              {/* the word `new` in green, as wherever it shows (SPEC.md, rule 8) */}
-              <Text wrap="truncate-end">{words.split(/( new )/).map((w, i) => (w === ' new ' ? <Text key={`new-${i}`}>{' '}<Text color={COLORS.fresh}>new</Text>{' '}</Text> : w))}</Text>
-              <Button key="above-home-open" label="open ›" plain onPress={() => openHomeNew(cx)} />
-              <Button key="above-home-dismiss" label="dismiss" plain onPress={() => seeHome(cx, home)} />
-            </Box>
-          </Box>,
-        )
-      }
-    }
-    // side threads show as `↳ thread` rows under main's latest row and as `N new` on the panel's title row (SPEC.md,
-    // "Main's chat"): no row of their own here
-    if (!rows.length) return next(e)
-    return <Box flexDirection="column">{rows}</Box>
-  })
+  // the band above the prompt: the pending panel, the view proposal, the notices and what is new (band.tsx)
+  registerBand(on)
 
   // ---------------------------------------------------------------------------------------------- the panel
 

@@ -1,5 +1,5 @@
-// thimble-term's state contract: every value the hooks module keeps in $.state, and the types the drawing files name
-// (the Chat* types).
+// The terminal UI's state contract (thimble-term, under the plugin key 'thimble'): every value the hooks module keeps in
+// $.state, and the types the drawing files name (the Chat* types).
 //
 // thimble-term keeps no data of its own: each value is what one `thimble state` call printed (hooks/data.ts) and what
 // the screen shows now, and it is read again when the workspace changes.
@@ -195,9 +195,38 @@ export type TermLabelUi = { open: string[]; kind: Record<string, string>; runs: 
  *  chose; the words of its find (`query`) and the row of what it found that the keys chose (`found`). */
 export type TermFilesUi = { folded: string[]; unfolded: string[]; pick: string; whole?: string[]; query?: string; found?: string }
 
+// ------------------------------------------------------------------------------- 0.9.0's contracts (contracts.ts, C13)
+
+/** The feature switches (thimble's config file and /config's rows; backend features.settings). */
+export type FeatureSettings = { autoActivate: boolean; viewProposals: boolean; labels: boolean; checks: boolean; citationMarks: boolean; coverage: boolean; cardCheck: boolean }
+
+/** thimble turned on in this session (`thimble activate`): the workspace, the folder, what turned it on and the role. */
+export type Activated = { ws: string; path: string; cwd: string; via: string; role: 'main' | 'peer'; at: number }
+
+/** What this session's tool calls saw of the data files (`thimble state coverage --summary`). */
+export type CoverageSummary = { files: { seen: number; searched: number; never: number; total: number }; records: { seen: number; total: number; counted: boolean }; line: string }
+
+/** A citation main's chat drew: its id (lib.ts cid), its raw spelling, its shown value, its ref, its row and when. */
+export type CiteRow = { id: string; raw: string; display: string | null; ref: string; row: string; at: number }
+
+/** A check's comment on a passage of one of Claude's answers (`thimble state answer-comments`). */
+export type AnswerComment = { id: string; check: string; checkName: string; color: number; about: string; turn: string; row: string; ref: string; start: number; end: number; quote: string; text: string; details: string; status: 'open' | 'dismissed'; at: string }
+
+/** The per-section counts the summary line last showed as seen (as homeSeen is for home). */
+export type SummarySeen = { cards: number; labels: number; docs: number; views: number; threads: number; checks: number; at: number }
+
+/** A label's records with no category fit and its unsure records, counted, for the summary line. */
+export type LabelUnsure = { id: string; name: string; noFit: number; unsure: number }
+
+/** A press that opens the browser, while it runs. */
+export type Pressing = { at: number; ref: string }
+
+/** The remote rows' commands: the SSH tunnel, the ET form, and the page's address (never a sign-in code). */
+export type Links = { tunnel: string; et: string | null; url: string }
+
 declare module 'claude-code' {
   interface PluginState {
-    'thimble-term': {
+    'thimble': {
       // the cards by id, and the cards each row of main's chat carries under it (by the row's uuid)
       cards: StateFamily<TermCard>
       turnCards: StateFamily<string[]>
@@ -233,6 +262,23 @@ declare module 'claude-code' {
       filesUi: TermFilesUi
       // what `thimble state` said last for a surface the panel shows, by the surface and its arguments
       surface: StateFamily<unknown>
+      // 0.9.0 (contracts.ts, C13). Set by term-transcript: thimble turned on in this session, the feature switches,
+      // the coverage line by the row it stands under and the session's summary, the chat's citations, the checks'
+      // comments on answers and the checks that read an answer now
+      activated: Activated | null
+      settings: FeatureSettings
+      coverageLine: StateFamily<string>
+      coverageSummary: CoverageSummary | null
+      citeIndex: CiteRow[]
+      answerComments: AnswerComment[]
+      checksRunning: number
+      // set by term-panel: the comment open in the panel, the labels' unsure counts, the summary line's seen counts, a
+      // press while it runs and the remote rows' commands
+      checksOpen: string | null
+      labelUnsure: LabelUnsure[]
+      seen: SummarySeen | null
+      pressing: Pressing | null
+      links: Links | null
     }
   }
 }

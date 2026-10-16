@@ -1,13 +1,13 @@
 // thimble-term in a session, against the fixture states (tests/fixtures.ts): its scope, a turn's cards drawn once under
 // the turn's last reply, citations as links (red when they do not hold), main's end token hidden, the rows above the
 // prompt, /thimble, the panel's views, a label verdict, a side thread asked and answered.
-// `claude plugin test mods/thimble-term`.
+// `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { HOME_LINE } from '../hooks/register'
-import { RELAY, relayValue } from '../hooks/panel'
-import { PANEL } from '../hooks/term'
+import { HOME_LINE } from '../register'
+import { RELAY, relayValue } from '../panel'
+import { PANEL } from '../term'
 import { CLI, CWD, LABEL, SLIDES, WS, shown, takesKeys, world } from './fixtures'
 import type { World } from './fixtures'
 
@@ -15,10 +15,10 @@ type M = Mounted<'terminal'>
 type E = Engine
 
 const MESSAGE = (requestId: string, text: string, first = true) =>
-  ({ plugin: 'thimble-term', component: 'AssistantMessage', requestId, surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: first } }) as never
+  ({ plugin: 'thimble', component: 'AssistantMessage', requestId, surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: first } }) as never
 // a pane tall enough for home whole: keys.test.ts draws the lists in a pane shorter than they are
-const PANE = { plugin: 'thimble-term', component: 'Pane', requestId: 'thimble-term', surface: 'terminal', viewport: { columns: 120, rows: 124 }, props: { title: 'thimble', isFocused: true, bodyColumns: 96, placement: 'dock', scroll: { bodyRows: 120 }, view: {} } } as never
-const ABOVE = { plugin: 'thimble-term', component: 'AbovePrompt', requestId: 'above', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 130, scroll: { bodyRows: 10 }, view: {} } } as never
+const PANE = { plugin: 'thimble', component: 'Pane', requestId: 'thimble', surface: 'terminal', viewport: { columns: 120, rows: 124 }, props: { title: 'thimble', isFocused: true, bodyColumns: 96, placement: 'dock', scroll: { bodyRows: 120 }, view: {} } } as never
+const ABOVE = { plugin: 'thimble', component: 'AbovePrompt', requestId: 'above', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 130, scroll: { bodyRows: 10 }, view: {} } } as never
 
 async function start($: E, w: World): Promise<void> {
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
@@ -91,12 +91,12 @@ test("a card tool's result row names the card by its question, never its id", as
   const w = world(on)
   await start($, w)
   await turn($, w, [['r1', 'Here.']])
-  const row = await $.ui.mount({ plugin: 'thimble-term', component: 'ToolResult', requestId: 'u1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { tool_use_id: 'u1', tool: 'mcp__plugin_thimble_thimble__add_card', output: [{ type: 'text', text: 'card:ff73e071\n[out0: table]' }], isErrored: false } } as never)
+  const row = await $.ui.mount({ plugin: 'thimble', component: 'ToolResult', requestId: 'u1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { tool_use_id: 'u1', tool: 'mcp__plugin_thimble_thimble__add_card', output: [{ type: 'text', text: 'card:ff73e071\n[out0: table]' }], isErrored: false } } as never)
   const text = shown(await row.drawn())
   expect(text).toBe('  ⎿  card "What does the export hold per wiki?"')
   await row.unmount()
   // another tool's row is Claude Code's own
-  const other = await $.ui.mount({ plugin: 'thimble-term', component: 'ToolResult', requestId: 'u2', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { tool_use_id: 'u2', tool: 'mcp__plugin_thimble_thimble__read_ref', output: 'card:ff73e071', isErrored: false } } as never)
+  const other = await $.ui.mount({ plugin: 'thimble', component: 'ToolResult', requestId: 'u2', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { tool_use_id: 'u2', tool: 'mcp__plugin_thimble_thimble__read_ref', output: 'card:ff73e071', isErrored: false } } as never)
   expect(shown(await other.drawn())).toBe('(the engine row)')
   await other.unmount()
   void w
@@ -158,7 +158,7 @@ test("a reply's citation is a link, blue and underlined; a click opens the citat
   await ui.pointer({ type: 'down', x: 18, y: 0, button: 'left', in: 'para-1' } as never)
   await ui.pointer({ type: 'up', x: 18, y: 0, button: 'left', in: 'para-1' } as never)
   await ui.unmount()
-  expect(w.opened).toContain('thimble-term')
+  expect(w.opened).toContain('thimble')
   await w.clock.settle()
   const pane = (await $.ui.mount(PANE)) as unknown as M
   const text = shown(await pane.drawn())
@@ -193,7 +193,7 @@ test('a click or a right-click on plain words opens nothing; the "?" beside a pa
   expect(w.opened).toEqual([])
   await ui.press({ key: 'ask-1' })
   await ui.unmount()
-  expect(w.opened).toEqual(['thimble-term'])
+  expect(w.opened).toEqual(['thimble'])
   const pane = (await $.ui.mount(PANE)) as unknown as M
   const text = shown(await pane.drawn())
   expect(text).toContain('New thread')
@@ -222,7 +222,7 @@ test('the one row above the prompt is a toast: what is new since home was opened
   expect(text).toContain('open ›')
   expect(JSON.stringify(drawn)).toContain('{"type":"Text","props":{"color":"success"},"children":["new"]}')
   await above.press({ key: 'above-home-open' })
-  expect(w.opened).toContain('thimble-term')
+  expect(w.opened).toContain('thimble')
   await above.unmount()
   await w.clock.settle()
   // once home is open, the row is gone until something new arrives
@@ -337,10 +337,10 @@ test('/thimble opens the home panel with no model turn: one column, the title Ho
   const r = (await $.command.run({ command: 'thimble:thimble', args: '' } as never)) as { text?: string }
   expect(r.text).toBe(HOME_LINE)
   // its row says the line as thimble's, not under the plugin's name
-  const row = await $.ui.mount({ plugin: 'thimble-term', component: 'CommandOutput', requestId: 'c1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { command: 'thimble:thimble', args: '', text: `thimble-term: ${HOME_LINE}`, isErrored: false } } as never)
+  const row = await $.ui.mount({ plugin: 'thimble', component: 'CommandOutput', requestId: 'c1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { command: 'thimble:thimble', args: '', text: `thimble: ${HOME_LINE}`, isErrored: false } } as never)
   expect(shown(await row.drawn())).toBe(HOME_LINE)
   await row.unmount()
-  expect(w.opened).toEqual(['thimble-term'])
+  expect(w.opened).toEqual(['thimble'])
   await w.clock.settle()
   // its ring rests on its list's keys as it takes the keys, so the hint row names them
   await takesKeys($)
@@ -375,7 +375,7 @@ test("a right-click on a card's cell does what a click does: a side thread about
   await ui.pointer({ type: 'down', x: 12, y, button: 'right', in: key } as never)
   await ui.pointer({ type: 'up', x: 12, y, button: 'right', in: key } as never)
   await ui.unmount()
-  expect(w.opened).toEqual(['thimble-term'])
+  expect(w.opened).toEqual(['thimble'])
   const pane = (await $.ui.mount(PANE)) as unknown as M
   const text = shown(await pane.drawn())
   expect(text).toContain('New thread')
@@ -410,7 +410,7 @@ test("a label card is a bar card of its counts with the label's row; a press on 
   await ui.pointer({ type: 'up', x: 7 + 3, y, button: 'left', in: key } as never)
   await ui.unmount()
   await w.clock.settle()
-  expect(w.opened).toEqual(['thimble-term'])
+  expect(w.opened).toEqual(['thimble'])
   const pane = (await $.ui.mount(PANE)) as unknown as M
   expect(shown(await pane.drawn())).toContain('labels › links through a fetch proxy')
   await pane.unmount()
@@ -504,7 +504,7 @@ test("a tool's layout record opens the file browser: folders that fold, a file c
   w.states.ui = [{ n: 1, kind: 'layout', args: { layout: 'one', surfaces: ['files'] } }]
   w.stamps.set(`${WS}/ui.jsonl`, 7)
   await w.clock.advance(1100)
-  expect(w.opened).toEqual(['thimble-term'])
+  expect(w.opened).toEqual(['thimble'])
   const pane = (await $.ui.mount(PANE)) as unknown as M
   const tree = shown(await pane.drawn({ in: 'm:files-tree' }))
   for (const s of ['▾ wiki/', 'README.md', '▸ data/', 'markdown', '52.0 MB']) expect(tree).toContain(s)

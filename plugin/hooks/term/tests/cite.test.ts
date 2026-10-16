@@ -1,10 +1,10 @@
 // The citation panel as thimble-term draws it: the cited mark lit on a
 // card (a cited row past the drawn rows too), the passage an example's record quotes, a tab before the value, a problem's
-// mark and reason, the follow-up field of a citation opened from a side thread. `claude plugin test mods/thimble-term`.
+// mark and reason, the follow-up field of a citation opened from a side thread. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { wrapAround } from '../hooks/cite'
+import { wrapAround } from '../cite'
 import { CWD, DOC, shown, world } from './fixtures'
 import type { World } from './fixtures'
 
@@ -12,8 +12,8 @@ type M = Mounted<'terminal'>
 type E = Engine
 
 const MESSAGE = (requestId: string, text: string) =>
-  ({ plugin: 'thimble-term', component: 'AssistantMessage', requestId, surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as never
-const PANE = { plugin: 'thimble-term', component: 'Pane', requestId: 'thimble-term', surface: 'terminal', viewport: { columns: 120, rows: 40 }, props: { title: 'thimble', isFocused: true, bodyColumns: 96, placement: 'dock', scroll: { bodyRows: 36 }, view: {} } } as never
+  ({ plugin: 'thimble', component: 'AssistantMessage', requestId, surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as never
+const PANE = { plugin: 'thimble', component: 'Pane', requestId: 'thimble', surface: 'terminal', viewport: { columns: 120, rows: 40 }, props: { title: 'thimble', isFocused: true, bodyColumns: 96, placement: 'dock', scroll: { bodyRows: 36 }, view: {} } } as never
 
 async function start($: E, w: World): Promise<void> {
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)

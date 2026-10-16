@@ -1,16 +1,16 @@
 // What thimble-term reads from `thimble state` (hooks/model.ts, hooks/data.ts): a citation's check, a thread's chat as
 // turns, the lists, the cards a call of main's names, main's end token, the command and the scope.
-// `claude plugin test mods/thimble-term`.
+// `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
-import { changed, cliOf, launchMode, parsePrinted } from '../hooks/data'
-import { citations, dateIn, dateSpans, stoppedTurn, valueIn } from '../hooks/lib'
-import { showsValue } from '../hooks/cite'
-import { signalEnd } from '../hooks/signal'
-import { threadState } from '../hooks/nav'
-import { labelCard } from '../hooks/cell'
-import { agentsOf, aroundLine, cardsOfCall, cellsOf, docsOf, forkDescription, homeOf, jsonLine, labelCountNow, labelIdOf, labelLinkStale, labelOf, labelsOf, namedForks, namedThreads, recordLine, reportOf, resolutionOf, runShown, saysWriter, threadOf, threadRowsOf, verdictOf, withoutEnd, withoutNotes, withoutToldThreads, withoutWriterLines } from '../hooks/model'
-import { turnTimes, wrapRows } from '../hooks/draw'
+import { changed, cliOf, launchMode, parsePrinted } from '../data'
+import { citations, dateIn, dateSpans, stoppedTurn, valueIn } from '../lib'
+import { showsValue } from '../cite'
+import { signalEnd } from '../signal'
+import { threadState } from '../nav'
+import { labelCard } from '../cell'
+import { agentsOf, aroundLine, cardsOfCall, cellsOf, docsOf, forkDescription, homeOf, jsonLine, labelCountNow, labelIdOf, labelLinkStale, labelOf, labelsOf, namedForks, namedThreads, recordLine, reportOf, resolutionOf, runShown, saysWriter, threadOf, threadRowsOf, verdictOf, withoutEnd, withoutNotes, withoutToldThreads, withoutWriterLines } from '../model'
+import { turnTimes, wrapRows } from '../draw'
 import { AGENTS, CELLS, RESOLVE, STATES, THREAD_T1, THREADS } from './fixtures'
 
 const check = (raw: string) => {
@@ -231,9 +231,9 @@ test("main's end token is never shown", () => {
 })
 
 test('the thimble command beside the plugin, the session mode, what a run printed, what changed', () => {
-  expect(cliOf('/home/a/.thimble/app/mods/thimble-term', undefined)).toBe('/home/a/.thimble/app/plugin/bin/thimble')
-  expect(cliOf('/repo/mods/thimble-term/.claude-plugin', undefined)).toBe('/repo/plugin/bin/thimble')
-  expect(cliOf('/repo/mods/thimble-term', '/x/fake')).toBe('/x/fake')
+  expect(cliOf('/home/a/.thimble/app/plugin', undefined)).toBe('/home/a/.thimble/app/plugin/bin/thimble')
+  expect(cliOf('/repo/plugin/.claude-plugin', undefined)).toBe('/repo/plugin/bin/thimble')
+  expect(cliOf('/repo/plugin', '/x/fake')).toBe('/x/fake')
   expect(launchMode('{"mode": "terminal"}')).toBe('terminal')
   expect(launchMode('{"session": "s"}')).toBe('')
   expect(launchMode('not json')).toBe('')

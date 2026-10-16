@@ -4,7 +4,7 @@
 //
 // Each reader takes the shape the server's GET route for that surface answers, and is lenient: a field it cannot read
 // is left out rather than failing the drawing.
-import type { ChatThread, ChatThreadTurn, TermAgent, TermHome, TermThreadRow, TermVerdict } from '../types'
+import type { ChatThread, ChatThreadTurn, TermAgent, TermHome, TermThreadRow, TermVerdict } from './types'
 import type { ThimbleCell, ThimbleLabel } from './cell'
 import { STOP_KINDS, clip, curlyQuotes, dateSpans, quoted, shownMatches, valueIn } from './lib'
 import type { Citation } from './lib'

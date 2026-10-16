@@ -21,12 +21,12 @@ export type Got<T = unknown> = { ok: true; value: T } | { ok: false; error: stri
 const STATE_TIMEOUT_MS = 60_000
 const ACT_TIMEOUT_MS = 60_000
 
-/** The `thimble` command beside this plugin in thimble's tree (`<tree>/mods/thimble-term` → `<tree>/plugin/bin/thimble`),
- *  or the one THIMBLE_TERM_CLI names (the tests' and the live check's stand-in). */
+/** The `thimble` command of this plugin (`<plugin root>/bin/thimble`), or the one THIMBLE_TERM_CLI names (the tests'
+ *  and the live check's stand-in). */
 export function cliOf(root: string, override: string | undefined): string {
   if (override) return override
   const dir = root.replace(/\/+$/, '').replace(/\/\.claude-plugin$/, '')
-  return `${dir.replace(/\/mods\/[^/]+$/, '')}/plugin/bin/thimble`
+  return `${dir}/bin/thimble`
 }
 
 /** launch.json's mode, or '' when it names none or cannot be read. */

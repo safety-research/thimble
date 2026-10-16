@@ -1,14 +1,14 @@
 // A chart's axes in the terminal (hooks/axis.ts, draw.ts lineLayout): round ticks for numbers, whole ones for whole
 // data, and times named as the browser's date axis names their span, with the year where the span crosses one; for a
 // line, an area and a scatter, which draw as a line card, and the times of bars over time and of a timeline.
-// `claude plugin test mods/thimble-term`.
+// `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
-import { numberTicks, timeTicks, wallClock } from '../hooks/axis'
-import { cardOfCell } from '../hooks/cell'
-import type { ThimbleCell } from '../hooks/cell'
-import { cardLayout } from '../hooks/draw'
-import type { CardData } from '../hooks/draw'
+import { numberTicks, timeTicks, wallClock } from '../axis'
+import { cardOfCell } from '../cell'
+import type { ThimbleCell } from '../cell'
+import { cardLayout } from '../draw'
+import type { CardData } from '../draw'
 
 // the test's own output: its drawings, for a reader
 declare const console: { log: (...args: unknown[]) => void }

@@ -12,7 +12,7 @@
 // files`, `turns`, `find`, `grep`, `marks`, `tables`, `rows` and `labels`, the routes the browser's Files reads.
 import type { RenderElement } from 'claude-code'
 
-import type { TermFilesUi, TermPanel } from '../types'
+import type { TermFilesUi, TermPanel } from './types'
 import { LINK, MARGIN_W, headerEls, lineEl, linkSeg, marginKey, pointed, ruleEl, spread, subLine } from './chrome'
 import type { Ctx } from './ctx'
 import { amount, cut, demojibake, lineWidth, placeWords, turnTimes, valueColour, width, wrapRows } from './draw'

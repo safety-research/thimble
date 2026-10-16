@@ -2,13 +2,13 @@
 // thimble's links check (◌, ✓, a red ×) and its tip in plain words, a heading's "?" asking about its section, the `↳`
 // beside a card a thread was asked about, the footer under a turn's answer, the `↳ thread` and `↳ view` rows, a citation
 // typed in the prompt, a reply as it streams, a card that cannot be read, a card's value checked again when the card
-// changes. `claude plugin test mods/thimble-term`.
+// changes. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { paraLayout } from '../hooks/cite'
-import { KEPT_FILE, parseKept } from '../hooks/kept'
-import { COLORS } from '../hooks/paint'
+import { paraLayout } from '../cite'
+import { KEPT_FILE, parseKept } from '../kept'
+import { COLORS } from '../paint'
 import { CWD, WS, shown, world } from './fixtures'
 import type { World } from './fixtures'
 
@@ -17,8 +17,8 @@ type E = Engine
 type ChipProps = { props: { props: { chips: { label: string; state: string; mark: string; spin: boolean; tip: string }[] } } }
 
 const MESSAGE = (requestId: string, text: string, surface = 'terminal') =>
-  ({ plugin: 'thimble-term', component: 'AssistantMessage', requestId, surface, viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as never
-const PANE = { plugin: 'thimble-term', component: 'Pane', requestId: 'thimble-term', surface: 'terminal', viewport: { columns: 120, rows: 40 }, props: { title: 'thimble', isFocused: true, bodyColumns: 96, placement: 'dock', scroll: { bodyRows: 36 }, view: {} } } as never
+  ({ plugin: 'thimble', component: 'AssistantMessage', requestId, surface, viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as never
+const PANE = { plugin: 'thimble', component: 'Pane', requestId: 'thimble', surface: 'terminal', viewport: { columns: 120, rows: 40 }, props: { title: 'thimble', isFocused: true, bodyColumns: 96, placement: 'dock', scroll: { bodyRows: 36 }, view: {} } } as never
 
 async function start($: E, w: World): Promise<void> {
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
@@ -322,7 +322,7 @@ test("a label tool's result row names the label and each value's count", async (
   const w = world(on)
   await start($, w)
   await turn($, w, [['r1', 'Labelled.']], { tool: 'mcp__plugin_thimble_thimble__apply_label', text: "The label's card is [[card:l0label0]].", input: {} })
-  const row = await $.ui.mount({ plugin: 'thimble-term', component: 'ToolResult', requestId: 'u1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { tool_use_id: 'u1', tool: 'mcp__plugin_thimble_thimble__apply_label', output: "applied label links [[concept:d9b51617]] over 14591 record(s). The label's card is [[card:l0label0]].", isErrored: false } } as never)
+  const row = await $.ui.mount({ plugin: 'thimble', component: 'ToolResult', requestId: 'u1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { tool_use_id: 'u1', tool: 'mcp__plugin_thimble_thimble__apply_label', output: "applied label links [[concept:d9b51617]] over 14591 record(s). The label's card is [[card:l0label0]].", isErrored: false } } as never)
   expect(shown(await row.drawn())).toBe('  ⎿  label "links through a fetch proxy" · proxy-link 5,191 · none 9,400')
   await row.unmount()
 })
@@ -387,7 +387,7 @@ test("main's fork of a thread runs with the thread's question as its description
 })
 
 const ROW = (tool: string, input: Record<string, unknown>) =>
-  ({ plugin: 'thimble-term', component: 'ToolUse', requestId: 'u9', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { tool_use_id: 'u9', tool, input, isRunning: false, isErrored: false, isInterrupted: false } }) as never
+  ({ plugin: 'thimble', component: 'ToolUse', requestId: 'u9', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { tool_use_id: 'u9', tool, input, isRunning: false, isErrored: false, isInterrupted: false } }) as never
 
 test("a side thread's fork is named by the thread's first question in its Agent row and in the notice that it finished, never by its slug", async ($, on) => {
   const w = world(on)
@@ -399,7 +399,7 @@ test("a side thread's fork is named by the thread's first question in its Agent 
   expect(drawn).not.toContain('agent-chat-2')
   await row.unmount()
   // the notice the fork's end leaves in main's chat
-  const notice = await $.ui.mount({ plugin: 'thimble-term', component: 'UserMessage', requestId: 'n1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text: 'Agent "thread:agent-chat-2" finished', origin: { kind: 'task-notification' }, isExpanded: false, task: { status: 'completed', durationMs: 29000 } } } as never)
+  const notice = await $.ui.mount({ plugin: 'thimble', component: 'UserMessage', requestId: 'n1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text: 'Agent "thread:agent-chat-2" finished', origin: { kind: 'task-notification' }, isExpanded: false, task: { status: 'completed', durationMs: 29000 } } } as never)
   expect(shown(await notice.drawn())).toBe('Agent thread "Is the 3,898 deletions figure supported…" finished')
   await notice.unmount()
   // any other subagent's row stays as Claude Code draws it
@@ -654,7 +654,7 @@ test("a fork's prompt (ctrl+o's `Prompt:`) and its result name the thread by its
   expect(drawn).toContain('"prompt":"thread \\"Is the 3,898 deletions figure supported…\\""')
   expect(drawn).not.toContain('agent-chat-2')
   await row.unmount()
-  const result = await $.ui.mount({ plugin: 'thimble-term', component: 'ToolResult', requestId: 'u9', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { tool_use_id: 'u9', tool: 'Agent', output: { status: 'async_launched', agentId: 'a1', description: 'thread:agent-chat-2', prompt: 'thread:agent-chat-2' }, isErrored: false } } as never)
+  const result = await $.ui.mount({ plugin: 'thimble', component: 'ToolResult', requestId: 'u9', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { tool_use_id: 'u9', tool: 'Agent', output: { status: 'async_launched', agentId: 'a1', description: 'thread:agent-chat-2', prompt: 'thread:agent-chat-2' }, isErrored: false } } as never)
   expect(shown(await result.drawn())).not.toContain('agent-chat-2')
   await result.unmount()
 })

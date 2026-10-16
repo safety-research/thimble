@@ -1,16 +1,16 @@
 // Each kind of thimble card in its drawing form (hooks/cell.ts), and how it draws: the map of card kinds.
-// `claude plugin test mods/thimble-term`.
+// `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
-import { busyWords, cardOfCell, htmlTable, labelCard, linksOf, sortedBars } from '../hooks/cell'
-import type { ThimbleCell } from '../hooks/cell'
-import { cardLayout, cut, labelHead, placeWords, share } from '../hooks/draw'
-import { CHIP_MAX, chipLabel, citations, clip, cutLine, cutMiddle, dateIn, dateSpans, formatted, itemsRow, labelState, labelStateWords, noteLabelName, noteQuestion, quoted, recordFields, valueIn, width, windowAt } from '../hooks/lib'
-import { chipName, plainCites } from '../hooks/cite'
-import { targetLabel } from '../hooks/gestures'
-import { fitPath, pathWidth } from '../hooks/nav'
-import { hintLines } from '../hooks/chrome'
-import type { BarRow, Cell } from '../hooks/draw'
+import { busyWords, cardOfCell, htmlTable, labelCard, linksOf, sortedBars } from '../cell'
+import type { ThimbleCell } from '../cell'
+import { cardLayout, cut, labelHead, placeWords, share } from '../draw'
+import { CHIP_MAX, chipLabel, citations, clip, cutLine, cutMiddle, dateIn, dateSpans, formatted, itemsRow, labelState, labelStateWords, noteLabelName, noteQuestion, quoted, recordFields, valueIn, width, windowAt } from '../lib'
+import { chipName, plainCites } from '../cite'
+import { targetLabel } from '../gestures'
+import { fitPath, pathWidth } from '../nav'
+import { hintLines } from '../chrome'
+import type { BarRow, Cell } from '../draw'
 import { CELLS, LABEL } from './fixtures'
 
 const of = (id: string) => CELLS[id] as unknown as ThimbleCell

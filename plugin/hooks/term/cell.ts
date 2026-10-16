@@ -5,7 +5,7 @@
 // simple bar or line chart (one Altair layer, x and y fields) draws as text; any other chart draws as a table of its
 // rows; a note is prose; a code card, a card type's card and a matplotlib figure draw as their printed text; a custom
 // HTML card draws as its text. A label card's counts and records come from the label (`thimble state label`).
-import type { TermLinks } from '../types'
+import type { TermLinks } from './types'
 import type { BarRow, CardData, CardExample, Cell, DiagramEdge, DiagramNode } from './draw'
 import { labelState, labelStateWords } from './lib'
 import { classColors } from './labels'

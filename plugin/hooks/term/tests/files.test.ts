@@ -1,7 +1,7 @@
 // The file browser and a file as thimble-term draws them: a name cut in
 // its middle, a folder of one type's dim dots, what a file opens as, Space to fold; a file opened at a cited record with
 // that record lit and its place and `?` under the view; a transcript by thimble's sniff, its tool calls folded; a table
-// of records sorted by a column; ← back to the files; a file that cannot be read. `claude plugin test mods/thimble-term`.
+// of records sorted by a column; ← back to the files; a file that cannot be read. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
@@ -12,9 +12,9 @@ type M = Mounted<'terminal'>
 type E = Engine
 
 const MESSAGE = (requestId: string, text: string) =>
-  ({ plugin: 'thimble-term', component: 'AssistantMessage', requestId, surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as never
+  ({ plugin: 'thimble', component: 'AssistantMessage', requestId, surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as never
 // a pane tall enough for home whole: keys.test.ts draws the lists in a pane shorter than they are
-const PANE = { plugin: 'thimble-term', component: 'Pane', requestId: 'thimble-term', surface: 'terminal', viewport: { columns: 120, rows: 124 }, props: { title: 'thimble', isFocused: true, bodyColumns: 96, placement: 'dock', scroll: { bodyRows: 120 }, view: {} } } as never
+const PANE = { plugin: 'thimble', component: 'Pane', requestId: 'thimble', surface: 'terminal', viewport: { columns: 120, rows: 124 }, props: { title: 'thimble', isFocused: true, bodyColumns: 96, placement: 'dock', scroll: { bodyRows: 120 }, view: {} } } as never
 
 const CHAT = {
   path: 'chat.jsonl',

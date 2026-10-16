@@ -2,19 +2,19 @@
 // (quirk 3), key hints that wrap and are never cut (5), card rows that share their first words cut in their middle (8),
 // one state for a label whose run goes on or stopped part way (4), a document's cards named on its first drawing (9),
 // Claude Code's synthetic reply not drawn (13), and the low ones (14): the code view's step, `new` and the columns
-// beside it, the Labels heading's `new`, a label card's shares. `claude plugin test mods/thimble-term`.
+// beside it, the Labels heading's `new`, a label card's shares. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { shares } from '../hooks/draw'
-import { width } from '../hooks/lib'
+import { shares } from '../draw'
+import { width } from '../lib'
 import { CWD, DOC, LABEL, WS, shown, takesKeys, world } from './fixtures'
 import type { World } from './fixtures'
 
 type M = Mounted<'terminal'>
 type E = Engine
 
-const PANEL = 'thimble-term'
+const PANEL = 'thimble'
 const paneOf = (body: number, rows = 40) => ({ plugin: PANEL, component: 'Pane', requestId: PANEL, surface: 'terminal', viewport: { columns: 110 - body, rows: rows + 4 }, props: { title: 'thimble', isFocused: true, bodyColumns: body, placement: 'dock', scroll: { bodyRows: rows }, view: {} } }) as never
 const MESSAGE = (requestId: string, text: string) =>
   ({ plugin: PANEL, component: 'AssistantMessage', requestId, surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as never

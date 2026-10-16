@@ -12,7 +12,7 @@
 // hooks module (register.tsx), which acts on it.
 import type { ClientModule, ClientPointerEvent, JsonValue } from 'claude-code'
 
-import type { ChatTarget } from '../types'
+import type { ChatTarget } from './types'
 import { chipName, citeLabel, plainCites } from './cite'
 import { citations, cut, isChip, quoted } from './lib'
 import type { Citation } from './lib'

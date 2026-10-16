@@ -1,10 +1,10 @@
 // A resumed session (`thimble --continue`, `--resume`): Claude Code keeps each row's uuid, and what main's chat drew under
 // its rows (the turn's cards, the answer's footer, the `↳ thread` and `↳ view` rows) is kept in the workspace's
-// terminal/chat.json, so the next process draws it again. `claude plugin test mods/thimble-term`.
+// terminal/chat.json, so the next process draws it again. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { KEPT_FILE, parseKept, resetKept } from '../hooks/kept'
+import { KEPT_FILE, parseKept, resetKept } from '../kept'
 import { CWD, WS, shown, world } from './fixtures'
 import type { World } from './fixtures'
 
@@ -12,7 +12,7 @@ type M = Mounted<'terminal'>
 type E = Engine
 
 const MESSAGE = (requestId: string, text: string) =>
-  ({ plugin: 'thimble-term', component: 'AssistantMessage', requestId, surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as never
+  ({ plugin: 'thimble', component: 'AssistantMessage', requestId, surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as never
 
 const KEPT = `${WS}/${KEPT_FILE}`
 const ANSWER = 'The export holds [[4579|card:ff73e071#pages/TOTAL]] pages.'

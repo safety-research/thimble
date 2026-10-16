@@ -1,6 +1,6 @@
 // The label panel as thimble-term draws it: its header as Matt wrote
 // it (`name:`, `type:`, `scope:`, the definition on the same column), `stop` while a run goes, a run's first error in
-// red, the labels list's digits. `claude plugin test mods/thimble-term`.
+// red, the labels list's digits. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
@@ -11,8 +11,8 @@ type M = Mounted<'terminal'>
 type E = Engine
 
 const MESSAGE = (requestId: string, text: string) =>
-  ({ plugin: 'thimble-term', component: 'AssistantMessage', requestId, surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as never
-const PANE = { plugin: 'thimble-term', component: 'Pane', requestId: 'thimble-term', surface: 'terminal', viewport: { columns: 120, rows: 40 }, props: { title: 'thimble', isFocused: true, bodyColumns: 96, placement: 'dock', scroll: { bodyRows: 36 }, view: {} } } as never
+  ({ plugin: 'thimble', component: 'AssistantMessage', requestId, surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as never
+const PANE = { plugin: 'thimble', component: 'Pane', requestId: 'thimble', surface: 'terminal', viewport: { columns: 120, rows: 40 }, props: { title: 'thimble', isFocused: true, bodyColumns: 96, placement: 'dock', scroll: { bodyRows: 36 }, view: {} } } as never
 
 /** The session, a turn that made the label's card, and its label panel opened from the card's label row. */
 async function labelPanel($: E, w: World): Promise<M> {

@@ -1,7 +1,7 @@
 // Documents as thimble-term draws them: a report's contents a click
 // away, a passage's thread told the document and its section, the writer's state while it writes, the retell controls,
 // the documents list's keys, a story stepped beat by beat with its figure lit at the beat's step.
-// `claude plugin test mods/thimble-term`.
+// `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
@@ -11,7 +11,7 @@ import type { World } from './fixtures'
 type M = Mounted<'terminal'>
 type E = Engine
 
-const PANE = { plugin: 'thimble-term', component: 'Pane', requestId: 'thimble-term', surface: 'terminal', viewport: { columns: 120, rows: 40 }, props: { title: 'thimble', isFocused: true, bodyColumns: 96, placement: 'dock', scroll: { bodyRows: 36 }, view: {} } } as never
+const PANE = { plugin: 'thimble', component: 'Pane', requestId: 'thimble', surface: 'terminal', viewport: { columns: 120, rows: 40 }, props: { title: 'thimble', isFocused: true, bodyColumns: 96, placement: 'dock', scroll: { bodyRows: 36 }, view: {} } } as never
 
 const LONG = {
   ...DOC,

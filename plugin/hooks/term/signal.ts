@@ -10,7 +10,7 @@
 // of main's reply, the analyst's prompt, the line saying how long a turn took, or a command's output. They are drawn by
 // the uuid they were stored under (their `requestId`), which a resumed session keeps. register.tsx keeps the rows by
 // that uuid in the plugin's state (`threadRows`) and draws; this file holds the rules, without `$`.
-import type { ChatSignal, ChatThread } from '../types'
+import type { ChatSignal, ChatThread } from './types'
 import { plainCites } from './cite'
 import { clip, quoted, stoppedTurn } from './lib'
 

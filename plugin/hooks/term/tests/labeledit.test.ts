@@ -1,12 +1,12 @@
 // The label panel's parity with the browser's label editor and Labels pane: a label over files turned on or off in Files
 // (`in files: on off`), a value's color chosen by the names show_label takes, a filter by a value, the held-out
 // agreement and `… N more` records in the examples, rename, and the undo of a delete in the labels list. Each change
-// goes through `thimble act` (label-show, label-filter, label, label-undelete). `claude plugin test mods/thimble-term`.
+// goes through `thimble act` (label-show, label-filter, label, label-undelete). `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { LABEL_HUES, PICKED_HUES } from '../hooks/paint'
-import { COLOR_NAMES, LABEL_WHEEL, colorName, hueOf } from '../hooks/labels'
+import { LABEL_HUES, PICKED_HUES } from '../paint'
+import { COLOR_NAMES, LABEL_WHEEL, colorName, hueOf } from '../labels'
 import { CWD, LABEL, shown, world } from './fixtures'
 import type { World } from './fixtures'
 
@@ -15,8 +15,8 @@ type E = Engine
 type Node = { type?: string; props?: Record<string, unknown>; children?: unknown[]; label?: string }
 
 const MESSAGE = (requestId: string, text: string) =>
-  ({ plugin: 'thimble-term', component: 'AssistantMessage', requestId, surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as never
-const PANE = { plugin: 'thimble-term', component: 'Pane', requestId: 'thimble-term', surface: 'terminal', viewport: { columns: 120, rows: 60 }, props: { title: 'thimble', isFocused: true, bodyColumns: 116, placement: 'dock', scroll: { bodyRows: 56 }, view: {} } } as never
+  ({ plugin: 'thimble', component: 'AssistantMessage', requestId, surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as never
+const PANE = { plugin: 'thimble', component: 'Pane', requestId: 'thimble', surface: 'terminal', viewport: { columns: 120, rows: 60 }, props: { title: 'thimble', isFocused: true, bodyColumns: 116, placement: 'dock', scroll: { bodyRows: 56 }, view: {} } } as never
 
 /** The session, a turn that made the label's card, and its label panel opened from the card's label row. */
 async function labelPanel($: E, w: World): Promise<M> {

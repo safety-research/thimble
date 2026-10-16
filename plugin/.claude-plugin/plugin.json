@@ -2,9 +2,56 @@
   "name": "thimble",
   "displayName": "thimble",
   "description": "A browser workspace beside a Claude Code session for making sense of a corpus of files: chat, files, a canvas of cards and a report. Start it with /thimble in a Claude Code session, or with the `thimble` command, a shortcut that runs Claude Code with this plugin and /thimble: the session is the main thread, the browser mirrors it, and what the analyst asks in the browser reaches the session through the plugin's hooks (hooks/hooks.json). One MCP server (the thimble tools), the /thimble and /thimble:orient skills, and the shared skill, which loads thimble's shared guidance for subagents that are not forks, since those get none of their parent's prompt. The orientation, its critic, a writer, the builder and the reviewer of a view, each run of a report check and the agent of a code ticket are subagents of the session, of the types the plugin's hooks module registers (hooks/thimble.ts).",
-  "version": "0.8.0",
-  "author": { "name": "Matthew Joerke" },
+  "version": "0.9.0",
+  "author": {
+    "name": "Matthew Joerke"
+  },
   "repository": "https://github.com/safety-research/thimble",
   "license": "Apache-2.0",
-  "mcpServers": "./.mcp.json"
+  "mcpServers": "./.mcp.json",
+  "types": "./hooks/term/types/index.d.ts",
+  "userConfig": {
+    "autoActivate": {
+      "type": "boolean",
+      "title": "Turn on when Claude reads data",
+      "description": "Turn thimble on in a session the first time Claude reads a data file in the session's folder. /thimble turns it on either way.",
+      "default": true
+    },
+    "viewProposals": {
+      "type": "boolean",
+      "title": "View proposals",
+      "description": "After a turn, thimble may propose a view of the files: a page that shows their records in a form the files hide.",
+      "default": true
+    },
+    "labels": {
+      "type": "boolean",
+      "title": "Labels",
+      "description": "Labels that a model applies to every record of a file, and their lists of records no category fit.",
+      "default": true
+    },
+    "checks": {
+      "type": "boolean",
+      "title": "Checks",
+      "description": "Checks that read Claude's answers and documents and comment on passages, which the terminal highlights.",
+      "default": true
+    },
+    "citationMarks": {
+      "type": "boolean",
+      "title": "Citation marks",
+      "description": "A check mark or a red cross on each citation, after thimble checks that the cited place holds the value.",
+      "default": true
+    },
+    "coverage": {
+      "type": "boolean",
+      "title": "Coverage",
+      "description": "What Claude's tool calls read, searched or never opened of the data files, under answers and in the panel.",
+      "default": true
+    },
+    "cardCheck": {
+      "type": "boolean",
+      "title": "Card check",
+      "description": "After a card is made or changed, a check of its takeaway and its citations against its output.",
+      "default": true
+    }
+  }
 }

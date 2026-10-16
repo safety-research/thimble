@@ -2,15 +2,15 @@
 // (column 2) with the `?` taking the ⏺'s cell; a side thread's panel showing what the thread is about above its chat (a
 // card in its frame, a file's lines, a passage), clipped with `… N more`; a bar chart of two series by date, one row per
 // date with the series stacked in their hues and its key below; every panel's one title row (`home › Threads`).
-// `claude plugin test mods/thimble-term`.
+// `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { cardOfCell } from '../hooks/cell'
-import type { ThimbleCell } from '../hooks/cell'
-import { cardLayout } from '../hooks/draw'
-import { fitPath, pathWidth } from '../hooks/nav'
-import { COLORS } from '../hooks/paint'
+import { cardOfCell } from '../cell'
+import type { ThimbleCell } from '../cell'
+import { cardLayout } from '../draw'
+import { fitPath, pathWidth } from '../nav'
+import { COLORS } from '../paint'
 import { CWD, shown, takesKeys, world } from './fixtures'
 import type { World } from './fixtures'
 
@@ -21,7 +21,7 @@ type M = Mounted<'terminal'>
 type E = Engine
 type Node = { type?: string; props?: Record<string, unknown>; hover?: Record<string, unknown>; children?: unknown[] }
 
-const PANEL = 'thimble-term'
+const PANEL = 'thimble'
 const MESSAGE = (requestId: string, text: string) =>
   ({ plugin: PANEL, component: 'AssistantMessage', requestId, surface: 'terminal', viewport: { columns: 100, rows: 40 }, props: { text, isFirstOfReply: true } }) as never
 const paneOf = (cols = 96, rows = 60) => ({ plugin: PANEL, component: 'Pane', requestId: PANEL, surface: 'terminal', viewport: { columns: cols + 24, rows: rows + 4 }, props: { title: 'thimble', isFocused: true, bodyColumns: cols, placement: 'dock', scroll: { bodyRows: rows }, view: {} } }) as never

@@ -13,7 +13,7 @@
 //   resume.
 // - Streaming: a reply's text as the engine shows it while it streams, citations as links and card lines as
 //   placeholders, before the mod draws the finished block.
-import type { ChatCorrection, ChatEnd, ChatFix, ChatFixItem, ChatVerify } from '../types'
+import type { ChatCorrection, ChatEnd, ChatFix, ChatFixItem, ChatVerify } from './types'
 import { lineWidth, placeWords, width } from './draw'
 import type { Line, Seg } from './draw'
 import { EMBED_RE, bareCard, cardWords, chipLabel, chipPlace, chipText, chipWords, cid, citations, citeEnd, citeSpans, dayMonth, isChip, labelRef, linksAsSpans, outputLine, parseReply, plainLinks, prefix, questionOf, reportRef, shownMatches, valueIn, windowAt, withoutOwnParens } from './lib'

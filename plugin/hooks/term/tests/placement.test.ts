@@ -1,18 +1,18 @@
 // Where Claude Code places thimble's panel (fixtures.ts placing plays its rule): an open it was asked for (the hook of
 // `/thimble`, the handler of a Button pressed) at any width, any other only from 144 columns (110 for a pane opened
 // before). The row above the prompt offers a panel that waits and says why; its `open panel` opens it from the press,
-// as `/thimble` does; the row goes once Claude Code draws the pane. `claude plugin test mods/thimble-term`.
+// as `/thimble` does; the row goes once Claude Code draws the pane. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { pendingOf } from '../hooks/term'
+import { pendingOf } from '../term'
 import { CWD, WS, placing, shown, world } from './fixtures'
 import type { World } from './fixtures'
 
 type M = Mounted<'terminal'>
 type E = Engine
 
-const PANEL = 'thimble-term'
+const PANEL = 'thimble'
 const aboveAt = (columns: number) => ({ plugin: PANEL, component: 'AbovePrompt', requestId: 'above', surface: 'terminal', viewport: { columns, rows: 40 }, props: { hasSurvey: false, isWorking: false, view: {} } }) as never
 const paneAt = (columns: number) => ({ plugin: PANEL, component: 'Pane', requestId: PANEL, surface: 'terminal', viewport: { columns, rows: 40 }, props: { title: 'Home', isFocused: false, bodyColumns: columns - 4, placement: 'inline', scroll: { bodyRows: 36 }, view: {} } }) as never
 const MESSAGE = (requestId: string, text: string) => ({ plugin: PANEL, component: 'AssistantMessage', requestId, surface: 'terminal', viewport: { columns: 100, rows: 40 }, props: { text, isFirstOfReply: true } }) as never

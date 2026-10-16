@@ -1,9 +1,9 @@
 // A side thread's answer with the cards it cites drawn where it cites them (lib.ts cardsInline): a card cited by a chip
 // alone (`[[card:<id>]]`) leaves its sentence and stands after the sentence's paragraph, once; the turn's other cards
-// after the answer. `claude plugin test mods/thimble-term`.
+// after the answer. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
-import { cardsInline } from '../hooks/lib'
+import { cardsInline } from '../lib'
 
 test('a card cited by a chip alone stands after the paragraph that cites it, its chip taken out of the sentence', () => {
   const md = 'Yes. The transcripts are under 1 MB [[card:a1b2c3d4]].\nThe logs are the rest.\n\nThat is all.'

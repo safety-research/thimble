@@ -1,5 +1,5 @@
 // `/thimble <what>` in terminal mode: keyboard ways to what the chat and the panel draw (`/thimble threads`, `cite`,
-// `card`, `files` and `documents`). `claude plugin test mods/thimble-term`.
+// `card`, `files` and `documents`). `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
@@ -9,7 +9,7 @@ import type { World } from './fixtures'
 type M = Mounted<'terminal'>
 type E = Engine
 
-const PANE = { plugin: 'thimble-term', component: 'Pane', requestId: 'thimble-term', surface: 'terminal', viewport: { columns: 120, rows: 40 }, props: { title: 'thimble', isFocused: true, bodyColumns: 96, placement: 'dock', scroll: { bodyRows: 36 }, view: {} } } as never
+const PANE = { plugin: 'thimble', component: 'Pane', requestId: 'thimble', surface: 'terminal', viewport: { columns: 120, rows: 40 }, props: { title: 'thimble', isFocused: true, bodyColumns: 96, placement: 'dock', scroll: { bodyRows: 36 }, view: {} } } as never
 
 async function start($: E, w: World): Promise<void> {
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
@@ -38,7 +38,7 @@ test('`/thimble threads` opens the threads panel and says how many there are; `/
   expect(await run($, 'documents')).toBe('thimble: 1 document')
   expect(w.panes.at(-1)!.title).toBe('Documents')
   // the line shows as thimble's, not under the plugin's name
-  const row = await $.ui.mount({ plugin: 'thimble-term', component: 'CommandOutput', requestId: 'c1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { command: 'thimble:thimble', args: 'threads', text: 'thimble-term: thimble: 2 side threads', isErrored: false } } as never)
+  const row = await $.ui.mount({ plugin: 'thimble', component: 'CommandOutput', requestId: 'c1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { command: 'thimble:thimble', args: 'threads', text: 'thimble: thimble: 2 side threads', isErrored: false } } as never)
   expect(shown(await row.drawn())).toBe('thimble: 2 side threads')
   await row.unmount()
 })

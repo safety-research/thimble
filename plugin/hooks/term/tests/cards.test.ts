@@ -1,12 +1,12 @@
 // Cards as thimble-term draws them: the title a hot spot, the card
 // pane's last run, `run again` and its code's output, a card's label rows and colours from the labels it read, a
-// timeline's start time said once, a label that is not in the workspace. `claude plugin test mods/thimble-term`.
+// timeline's start time said once, a label that is not in the workspace. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { cardOfCell } from '../hooks/cell'
-import type { ThimbleCell } from '../hooks/cell'
-import { cardLayout } from '../hooks/draw'
+import { cardOfCell } from '../cell'
+import type { ThimbleCell } from '../cell'
+import { cardLayout } from '../draw'
 import { CELLS, CWD, WS, shown, world } from './fixtures'
 import type { World } from './fixtures'
 
@@ -14,8 +14,8 @@ type M = Mounted<'terminal'>
 type E = Engine
 
 const MESSAGE = (requestId: string, text: string) =>
-  ({ plugin: 'thimble-term', component: 'AssistantMessage', requestId, surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as never
-const PANE = { plugin: 'thimble-term', component: 'Pane', requestId: 'thimble-term', surface: 'terminal', viewport: { columns: 120, rows: 40 }, props: { title: 'thimble', isFocused: true, bodyColumns: 96, placement: 'dock', scroll: { bodyRows: 36 }, view: {} } } as never
+  ({ plugin: 'thimble', component: 'AssistantMessage', requestId, surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as never
+const PANE = { plugin: 'thimble', component: 'Pane', requestId: 'thimble', surface: 'terminal', viewport: { columns: 120, rows: 40 }, props: { title: 'thimble', isFocused: true, bodyColumns: 96, placement: 'dock', scroll: { bodyRows: 36 }, view: {} } } as never
 
 async function start($: E, w: World): Promise<void> {
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)

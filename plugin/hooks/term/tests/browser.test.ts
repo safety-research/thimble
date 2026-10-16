@@ -3,13 +3,13 @@
 // header taking typing, what it found in place of the tree, Enter opening a matching line chosen; the labels that are
 // on marking the files they labeled in the tree and the records they labeled in a file, in their values' hues; a file in
 // the mode that fits it (a CSV file's rows as a table, Markdown as text, one record as JSON, a database's tables and
-// rows); the chosen file's preview in that mode. `claude plugin test mods/thimble-term`.
+// rows); the chosen file's preview in that mode. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { csvCells, fileTree, fileType, firstChoice, globTest, grepOf, isDatabase, jsonOf, labelCovers, litValues, onLabels, recordMarks, tableScore, treeRows, unfoldTo } from '../hooks/files'
+import { csvCells, fileTree, fileType, firstChoice, globTest, grepOf, isDatabase, jsonOf, labelCovers, litValues, onLabels, recordMarks, tableScore, treeRows, unfoldTo } from '../files'
 import { CWD, LABEL, WS, takesKeys, world } from './fixtures'
-import { LABEL_HUES } from '../hooks/paint'
+import { LABEL_HUES } from '../paint'
 import type { World } from './fixtures'
 
 type M = Mounted<'terminal'>
@@ -17,7 +17,7 @@ type N = { type?: string; props?: Record<string, unknown>; children?: unknown }
 
 // a pane of 120 columns of type area (the pane's 126 less its padding and margin), tall enough for every list
 const COLS = 120
-const PANE = (rows = 60) => ({ plugin: 'thimble-term', component: 'Pane', requestId: 'thimble-term', surface: 'terminal', viewport: { columns: 200, rows: rows + 4 }, props: { title: 'thimble', isFocused: true, bodyColumns: COLS + 4, placement: 'dock', scroll: { bodyRows: rows }, view: {} } }) as never
+const PANE = (rows = 60) => ({ plugin: 'thimble', component: 'Pane', requestId: 'thimble', surface: 'terminal', viewport: { columns: 200, rows: rows + 4 }, props: { title: 'thimble', isFocused: true, bodyColumns: COLS + 4, placement: 'dock', scroll: { bodyRows: rows }, view: {} } }) as never
 
 const textOf = (n: unknown): string => {
   if (typeof n === 'string' || typeof n === 'number') return String(n)

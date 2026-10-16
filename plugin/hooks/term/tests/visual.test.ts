@@ -2,18 +2,18 @@
 // bold only on a card's title, a table's column names and the model's Markdown; green only on `new`; blue only on links,
 // `↗`, `?` and `↳`; no letters in a palette hue; one blank row under each card's title; every card in a full round border
 // in the rule grey; non-ASCII glyphs only from the symbol table; no centred row; no inverse at rest.
-// `claude plugin test mods/thimble-term`.
+// `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Mounted } from 'claude-code/testing'
 
-import { LABEL_HUES } from '../hooks/paint'
+import { LABEL_HUES } from '../paint'
 import { CWD, world } from './fixtures'
 
 type M = Mounted<'terminal'>
 type Node = { type?: string; props?: Record<string, unknown>; children?: unknown[] }
 
 const MESSAGE = (requestId: string, text: string) =>
-  ({ plugin: 'thimble-term', component: 'AssistantMessage', requestId, surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as never
+  ({ plugin: 'thimble', component: 'AssistantMessage', requestId, surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as never
 
 // SPEC.md, section 5: the glyphs thimble-term draws besides the corpus's and the model's words (braille apart)
 const SYMBOLS = new Set([...'○◌●!×✓❯?↳›‹↗▸▾⌕◆█▏▎▍▌▋▊▉▁▂▃▄▅▆▇─│├└┤┬┴╭╮╰╯→←↓↑┊▼▲…·'])

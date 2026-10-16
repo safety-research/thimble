@@ -3,7 +3,7 @@
 // panel.tsx draw.
 //
 // Nothing here writes the workspace: a read is `thimble state`, a change is `thimble act` (hooks/data.ts).
-import type { ChatNav, ChatNavStep, ChatSignal, TermCard, TermFilesUi, TermHome, TermLabelUi, TermPanel, TermPending, TermThreadRow } from '../types'
+import type { ChatNav, ChatNavStep, ChatSignal, TermCard, TermFilesUi, TermHome, TermLabelUi, TermPanel, TermPending, TermThreadRow } from './types'
 import { busyWords, cardOfCell, checkOf, fixOf, linksOf, printed } from './cell'
 import type { ThimbleCell, ThimbleLabel } from './cell'
 import type { CardData, CardLabel } from './draw'
@@ -18,12 +18,13 @@ import { fileRef } from './files'
 import { keepSeen, keptSeen } from './kept'
 import { NAV_EMPTY, backTarget, moved, nextTrail, withBack } from './nav'
 import { signalEnd, withSignal } from './signal'
+import { refreshSummary } from './views'
 
-export const P = 'thimble-term'
+export const P = 'thimble'
 export const LABEL_UI_EMPTY: TermLabelUi = { open: [], kind: {}, runs: {}, said: {} }
 export const FILES_UI_EMPTY: TermFilesUi = { folded: [], unfolded: [], pick: '' }
 /** The one pane thimble-term opens: home, a card, a citation, a thread, a label, a document, the files, an agent. */
-export const PANEL = 'thimble-term'
+export const PANEL = 'thimble'
 
 /** The threads whose chats the threads panel reads, the newest. */
 const THREADS_READ = 30
@@ -1124,6 +1125,8 @@ async function followUi(cx: Ctx, apply: UiApply): Promise<void> {
 }
 
 /** The areas a panel view reads. */
+// the areas the summary line counts (views.ts refreshSummary); coverage and answers join data.ts AREAS with 0.9.0
+const SUMMARY_AREAS = ['labels', 'coverage', 'answers', 'cards', 'docs']
 const PANEL_AREAS: Record<string, Area[]> = { home: ['cards', 'labels', 'docs', 'chats', 'views', 'agents'], files: ['labels'], file: ['labels'], views: ['views'], labels: ['labels'], label: ['labels', 'cards'], docs: ['docs', 'agents'], doc: ['docs', 'cards', 'agents', 'chats'], card: ['cards', 'labels'], cite: ['cards'], threads: ['chats'], thread: ['chats'] }
 
 /** One pass: what changed in the workspace since the last pass, read again where some drawing shows it. */
@@ -1173,6 +1176,8 @@ export async function tick(cx: Ctx, ui: UiApply): Promise<void> {
         if ((PANEL_AREAS[panel.view] ?? []).some(a => areas.has(a))) await loadPanel(cx, panel)
         await cx.bumpPanel()
       }
+      // the summary line's counts (views.ts), when an area they count changed
+      if (SUMMARY_AREAS.some(a => (areas as Set<string>).has(a))) await refreshSummary(cx)
     } while (rt.again)
   } finally {
     rt.busy = false

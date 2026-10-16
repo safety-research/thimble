@@ -29,20 +29,20 @@
 //   back                            a line chosen in a file, a thread   where the file or the form was opened from
 //                                   just asked
 //
-// `claude plugin test mods/thimble-term`.
+// `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { KEPT_FILE, parseKept, resetKept } from '../hooks/kept'
-import { width } from '../hooks/lib'
-import { RELAY, UNFOCUSED_HINT } from '../hooks/panel'
+import { KEPT_FILE, parseKept, resetKept } from '../kept'
+import { width } from '../lib'
+import { RELAY, UNFOCUSED_HINT } from '../panel'
 import { CWD, WS, shown, takesKeys, viewFrame, world } from './fixtures'
 import type { World } from './fixtures'
 
 type M = Mounted<'terminal'>
 type E = Engine
 
-const PANEL = 'thimble-term'
+const PANEL = 'thimble'
 // a pane that shows every list whole, and one shorter than home, the file browser and a file's lines
 const SHORT = 120
 const TALL = 14

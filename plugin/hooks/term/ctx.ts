@@ -3,7 +3,7 @@
 // A drawing builds its own (its reads subscribe it); a timer or a handler uses the one its hook built.
 import type { Elements, FsEntry, FsStat, HttpInit, HttpResponse, PaneOpenArgs, ProcessRunInit, ProcessRunResult, RenderElement, ResolveInput, UiOpenResult } from 'claude-code'
 
-import type { ChatHomeUi, ChatNav, ChatNews, ChatSignal, TermAgent, TermAnswer, TermCard, TermFilesUi, TermHome, TermLabelUi, TermPanel, TermPending, TermThread, TermThreadRow, TermVerdict } from '../types'
+import type { ChatHomeUi, ChatNav, ChatNews, ChatSignal, TermAgent, TermAnswer, TermCard, TermFilesUi, TermHome, TermLabelUi, TermPanel, TermPending, TermThread, TermThreadRow, TermVerdict } from './types'
 
 /** What `thimble state` printed for a surface the panel shows, or why it failed. */
 export type SurfaceGot = { ok: true; value: unknown } | { ok: false; error: string }

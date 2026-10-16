@@ -274,7 +274,7 @@ export function viewFrame(n: number, over: Record<string, unknown> = {}): Record
 }
 
 /** `thimble state` and `thimble act` answered from the fixtures; the workspace's files as `fs` sees them. */
-export function world(on: On, opts: { mode?: string; ws?: string | null } = {}): World {
+export function world(on: On, opts: { mode?: string; ws?: string | null; module?: boolean } = {}): World {
   const w: World = {
     calls: [],
     acts: [],
@@ -312,7 +312,11 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
     viewHost: { requests: [], frame: n => viewFrame(n), acts: () => [], started: 0 },
   }
   const ws = opts.ws === undefined ? WS : opts.ws
-  mock.env(on, { ...(ws ? { THIMBLE_WS: ws } : {}), THIMBLE_HOME: '/home/a/.thimble', THIMBLE_TERM_CLI: CLI })
+  // THIMBLE_NO_MODULE keeps thimble.ts, which the plugin's one hooks module registers first, idle: these tests are the
+  // terminal UI's (plugin/hooks/register.ts). `module`: thimble.ts runs too, as in a session the launcher started
+  // (plugin/hooks/tests/one-module.test.ts)
+  const module: Record<string, string> = opts.module ? { THIMBLE_LAUNCHED: '1' } : { THIMBLE_NO_MODULE: '1' }
+  mock.env(on, { ...(ws ? { THIMBLE_WS: ws } : {}), THIMBLE_HOME: '/home/a/.thimble', THIMBLE_TERM_CLI: CLI, ...module })
   w.clock = mock.clock(on, { now: 1_790_000_000_000 })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.root', () => ({ value: CWD }))
@@ -578,5 +582,5 @@ export function shown(tree: unknown): string {
 /** The panel taking the keys as Claude Code gives them to a pane opened with `focus`: the relay's `autoFocus` Button
  *  (panel.tsx RELAY) takes the focus ring, which raises `ui.focus` with origin the plugin. */
 export async function takesKeys($: Engine): Promise<void> {
-  await $.ui.focus({ requestId: 'thimble-term', component: 'Pane', element: 'keys-pick', origin: { kind: 'plugin', name: 'thimble-term' } } as never)
+  await $.ui.focus({ requestId: 'thimble', component: 'Pane', element: 'keys-pick', origin: { kind: 'plugin', name: 'thimble' } } as never)
 }

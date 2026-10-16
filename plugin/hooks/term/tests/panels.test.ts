@@ -1,11 +1,11 @@
 // The panel as thimble-term draws it: the threads panel (roots per
 // place, what a thread is about, stop, its keys, a question that waits), a new thread's passage, the trail of a thread
 // asked from a thread, the pane's titles, a draft in the prompt, home (views, documents, threads, files, coverage) and
-// the views pane. `claude plugin test mods/thimble-term`.
+// the views pane. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { labelHue } from '../hooks/home'
+import { labelHue } from '../home'
 import { CWD, THREAD_T1, WS, shown, takesKeys, world } from './fixtures'
 import type { World } from './fixtures'
 
@@ -13,9 +13,9 @@ type M = Mounted<'terminal'>
 type E = Engine
 
 const MESSAGE = (requestId: string, text: string) =>
-  ({ plugin: 'thimble-term', component: 'AssistantMessage', requestId, surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as never
+  ({ plugin: 'thimble', component: 'AssistantMessage', requestId, surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as never
 // a pane tall enough for home whole: keys.test.ts draws the lists in a pane shorter than they are
-const PANE = { plugin: 'thimble-term', component: 'Pane', requestId: 'thimble-term', surface: 'terminal', viewport: { columns: 120, rows: 124 }, props: { title: 'thimble', isFocused: true, bodyColumns: 96, placement: 'dock', scroll: { bodyRows: 120 }, view: {} } } as never
+const PANE = { plugin: 'thimble', component: 'Pane', requestId: 'thimble', surface: 'terminal', viewport: { columns: 120, rows: 124 }, props: { title: 'thimble', isFocused: true, bodyColumns: 96, placement: 'dock', scroll: { bodyRows: 120 }, view: {} } } as never
 
 async function start($: E, w: World): Promise<void> {
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
@@ -169,7 +169,7 @@ test("the pane's title says what the panel shows; a draft in the prompt keeps th
   await ui.pointer({ type: 'up', x: 18, y: 0, button: 'left', in: 'para-1' } as never)
   await ui.unmount()
   await w.clock.settle()
-  expect(w.panes.at(-1)).toMatchObject({ id: 'thimble-term', title: 'Citation' })
+  expect(w.panes.at(-1)).toMatchObject({ id: 'thimble', title: 'Citation' })
   expect(w.toasts).toContain('the prompt holds a draft, so it keeps the keys: click the panel to use its keys')
   await $.command.run({ command: 'thimble:thimble', args: '' } as never)
   await w.clock.settle()
@@ -340,7 +340,7 @@ test("a thread's answer is its first reply, in paragraphs, without the fork's wo
   expect(text).not.toContain('Making the card.')
   // the thread's card, which its answer does not cite, under its answer, in its frame (its body a card Client)
   const json = JSON.stringify(await pane.drawn())
-  expect(json).toMatch(/"key":"m:thread-answer-1"[^]*Two test pages, both on 4 June\.[^]*"borderStyle":"round"[^]*"module":"hooks\/card\.tsx"[^]*How many records does each file hold\?/)
+  expect(json).toMatch(/"key":"m:thread-answer-1"[^]*Two test pages, both on 4 June\.[^]*"borderStyle":"round"[^]*"module":"hooks\/term\/card\.tsx"[^]*How many records does each file hold\?/)
   await pane.unmount()
 })
 

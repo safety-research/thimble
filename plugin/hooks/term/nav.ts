@@ -8,7 +8,7 @@
 // command starts the trail over; a thread then stands under the threads it was asked from. The home panel is the
 // breadcrumb's first step: opened, it starts the trail over, and what it opens stands after it. Every move keeps the
 // trail it left in `back`.
-import type { ChatNav, ChatNavStep, ChatThread } from '../types'
+import type { ChatNav, ChatNavStep, ChatThread } from './types'
 import { plainCites } from './cite'
 import { clip, cut, quoted, stoppedTurn, width } from './lib'
 
