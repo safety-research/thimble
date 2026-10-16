@@ -117,13 +117,14 @@ Claude Code's panel chrome, no right-click menu.
   orientation's coverage line); a card with how its last run ended, `run again` (main runs `thimble-run card`), and its
   code with what it printed; a citation (its value as a link with `◌` or a red `×`, its status in plain words, the
   sentence it stands in, its lines with the value marked (the whole line where it shows none), a file's as a window
-  that ↑↓ and the wheel scroll through the whole file, or the card it names with the cited mark lit, a `follow-up`
-  field when opened from a side thread); the threads (a tree with a root per place, `main` or `report "…"`, one row a
+  that ↑↓ and the wheel scroll through the whole file, or the card it names with the cited mark lit, its entry box going
+  on in the side thread it was opened from); the threads (a tree with a root per place, `main` or `report "…"`, one row a
   thread while one is open; the selected thread under it, or alone with no tree when it is the only one: what it is
   about on one dim row, `v` showing it whole (a card in its frame, a file's cited lines, a passage's words), then its
   chat as Claude Code draws one, each question after `❯` on the prompt's background and each answer after `⏺`, its
-  cards where it cites them; a new thread shows its subject above its field, cut to 6 rows and `… N more`; `stop` while
-  it answers, the ask field); a label; the documents and one document (a report with its
+  cards where it cites them, a turn at work as `⏺ ◌ N tool calls` with its latest words after `⎿`, a stop or a failure
+  on a `⎿` row under its question; a new thread shows its subject above its entry box, cut to 6 rows and `… N more`;
+  `stop` while it answers, the entry box); a label; the documents and one document (a report with its
   contents, a deck or a story one slide or beat at a time, the retell controls; its comments, a check's, Claude's or the
   analyst's, under the passages they are on, ↑↓ to choose one, `r` to resolve it, `v` to show the resolved ones; read
   only: `o` or `↗` opens it in the browser workbench, which edits it); no file browser (0.9.0:
@@ -151,8 +152,12 @@ Claude Code's panel chrome, no right-click menu.
   Nothing else shows until it is opened. A code label's code runs only in main's Bash: its run asks main to run the
   `thimble-run label` command it gives.
 - **Side threads.** The `?` beside a passage or a card, a press on a card's title or mark, a selection's "ask", or `ask
-  about this answer ›` opens the ask field, which posts the thread (`thimble act thread`, with the thread it was asked
-  from as its parent, and a document's passage as its anchor); main forks `thread:<name>`, as for the browser's.
+  about this answer ›` opens a new thread's entry box, which posts the thread (`thimble act thread`, with the thread it
+  was asked from as its parent, and a document's passage as its anchor); main forks `thread:<name>`, as for the
+  browser's. A citation, a card, a check's comment and a document's chosen comment have an entry box of their own at
+  their panel's bottom (`entry.tsx`, Claude Code's prompt box: a rule above and below, `❯`, two rows that grow with the
+  text), where a question typed and Enter start the thread about them, opened over them; while a box has the keys the
+  panel draws no key-hint row.
 - **`/thimble`** turns thimble on in the folder and opens the home panel, with no model turn; `/thimble open` opens the
   browser workbench; `/thimble coverage`, `citations`, `checks`, `threads`, `cite [n]` (the n-th citation of the last
   reply), `card [n|id]`, `files <path[:line]>` and `documents` open those; `fresh`, `restore`, `status`, `fix` and
