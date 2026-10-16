@@ -8,7 +8,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { coverageLines, coverageTitle, cutPath, drillFolder, folderWords, measure, percent, sizeWords } from '../coverageview'
+import { coverageLines, coverageTitle, cutPath, drillFolder, folderWords, measure, percent, sizeWords, unitWord } from '../coverageview'
 import type { CoverageRow } from '../coverageview'
 import { coverageWords } from '../band'
 import { COVERAGE_TOP, CWD, PANEL, SUMMARY, covRow, paneAt, panelWorld, takesKeys, words } from './fixtures-panel'
@@ -66,7 +66,7 @@ test('the coverage view: folder, files, seen and searched as counts and percents
   expect(top[3]).toMatch(/^ {4}\(top level\) +events\.jsonl +140 +100% +0 +0% +140 records +40 KB$/)
   expect(top[4]).toMatch(/^ {2}▸ \(top level\) +run_\*\.jsonl +0 +0% +0 +0% +600 records +30 KB$/)
   // every row names its unit in its total, one unit a row
-  for (const l of top) expect(l).toMatch(/ (records|files) +\S+ [KMG]?B$/)
+  for (const l of top) expect(l).toMatch(/ (records?|files?) +\S+ [KMG]?B$/)
   const totals = await listText(m, 'm:coverage-totals')
   expect(totals[0]).toMatch(/^ {4}─+$/)
   expect(totals[1]).toMatch(/^ {4}total +1,344 +3% +400 +0\.8% +48,450 records$/)
@@ -190,6 +190,7 @@ test("the rows' parts: units by row, percents as coverage.py says them, folders 
   // the same forms as coverage.py percent (test_percent_forms)
   expect([percent(0, 100), percent(5, 0), percent(1, 3_000_000), percent(4_401, 13_200_000), percent(3, 1_000), percent(99, 10_000), percent(99, 100_000), percent(17, 100), percent(25, 1_000), percent(995, 1_000), percent(1_000, 1_000)])
     .toEqual(['0%', '0%', '<0.01%', '0.03%', '0.3%', '0.9%', '0.09%', '17%', '3%', '99%', '100%'])
+  expect([unitWord('records', 1), unitWord('files', 1), unitWord('files', 0), unitWord('records', 2)]).toEqual(['record', 'file', 'files', 'records'])
   expect(folderWords('')).toBe('(top level)')
   expect(folderWords('.')).toBe('(top level)')
   expect(folderWords('agents')).toBe('agents/')
@@ -199,6 +200,7 @@ test("the rows' parts: units by row, percents as coverage.py says them, folders 
   expect(coverageTitle('agents', null)).toBe('agents/')
   expect(coverageTitle('', 'run_*.jsonl')).toBe('run_*.jsonl')
   expect(coverageTitle('logs', '.txt')).toBe('logs/.txt')
+  expect(coverageTitle('images/computer-use-turns/2025-04-02', '*.png')).toBe('2025-04-02/*.png')
   // a row's one unit: records for a data file (null while counted), files for the others
   const db = COVERAGE_TOP[0]!
   expect(measure(db)).toEqual({ unit: 'records', seen: 0, searched: 587, total: 587 })

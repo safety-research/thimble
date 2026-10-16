@@ -115,6 +115,11 @@ export function cutPath(p: string, w: number): string {
   return width(last) <= w ? last : cut(p, w)
 }
 
+/** A unit's word for a count: `records` and `files`, `record` and `file` for one. */
+export function unitWord(unit: CoverageUnit, n: number): string {
+  return n === 1 ? unit.replace(/s$/, '') : unit
+}
+
 /** A row's name: its file's name, its pattern, or its type. */
 function nameOf(r: CoverageRow): string {
   return noControls(r.name ?? (r.path ? r.path.split('/').at(-1) ?? r.path : r.ext || '(none)'))
@@ -139,7 +144,9 @@ const TWO_INDENT = 4
  *  and searched in their colors, which the numbers keep), one line a row (`▸` on one that drills in), and under the list
  *  a rule and one totals line per unit. Where the columns do not fit the size goes first, then folder and files share a
  *  column, then each row takes two lines so its names stay whole, and last the counts go (the percents stay). */
-export function coverageLines(rows: readonly CoverageRow[], pick: string, cols: number, o: { totals?: readonly CoverageTotal[]; drilled?: boolean; more?: number } = {}): { head: Line[]; lines: Line[]; totals: Line[]; hits: { y: number; key: string }[]; picks: string[] } {
+export function coverageLines(rows: readonly CoverageRow[], pick: string, cols: number, o: { totals?: readonly CoverageTotal[]; drilled?: boolean; more?: number; level?: string } = {}): { head: Line[]; lines: Line[]; totals: Line[]; hits: { y: number; key: string }[]; picks: string[] } {
+  // the folder the view shows names the files right in it dim, as `(top level)` is: the title already says where
+  const here = folderWords(o.level ?? '')
   const cells: Cells[] = rows.map(r => {
     const m = measure(r)
     return { mark: r.drill ? '▸ ' : '  ', folder: folderWords(r.folder), name: nameOf(r), unit: m.unit, seen: m.seen, searched: m.searched, total: m.total, counting: m.total === null, size: sizeWords(r.bytes) }
@@ -164,7 +171,7 @@ export function coverageLines(rows: readonly CoverageRow[], pick: string, cols: 
   }
   const fixed = (t: Tier) => 2 + (t.split ? folderW + GAP : 0) + GAP + numbersW(t)
   // the first layout in which every name is whole (a name up to 24 cells; folder and name up to 28 in one column)
-  const both = (c: Cells) => (c.folder === '(top level)' ? c.name : `${c.folder} ${c.name}`)
+  const both = (c: Cells) => (c.folder === '(top level)' || c.folder === here ? c.name : `${c.folder} ${c.name}`)
   const nameNeed = Math.min(24, Math.max(...cells.map(c => width(c.name)), 'files'.length))
   const bothNeed = Math.min(28, Math.max(...cells.map(c => width(both(c))), 'folder · files'.length))
   const fits = (t: Tier) => (t.two ? 2 + TWO_INDENT + numbersW(t) <= cols : cols - fixed(t) >= (t.split ? nameNeed : bothNeed))
@@ -181,7 +188,7 @@ export function coverageLines(rows: readonly CoverageRow[], pick: string, cols: 
   const totalCell = (c: Cells): Seg[] => {
     if (c.counting) return [dim('counting'.padStart(totalW))]
     if (c.total === null || c.unit === null) return [{ s: ' '.repeat(totalW) }]
-    return [{ s: num(c.total).padStart(totalW - UNIT_W - 1) }, dim(` ${c.unit.padEnd(UNIT_W)}`)]
+    return [{ s: num(c.total).padStart(totalW - UNIT_W - 1) }, dim(` ${unitWord(c.unit, c.total).padEnd(UNIT_W)}`)]
   }
   const numbers = (c: Cells): Line => [
     ...numCell(c, 'seen', COLORS.series[0]!),
@@ -191,18 +198,19 @@ export function coverageLines(rows: readonly CoverageRow[], pick: string, cols: 
     ...totalCell(c),
     ...(tier.size ? [{ s: ' '.repeat(GAP) }, dim(c.size.padStart(sizeW))] : []),
   ]
-  /** The folder and the files' name in `room` cells: the folder cut in its middle before the name is cut. */
+  /** The folder and the files' name in `room` cells: the folder dim and cut in its middle before the name is cut; the
+   *  files at the top, and those right in the folder the view shows (its title names it), by their names alone. */
   const where = (c: Cells, room: number): Seg[] => {
     if (c.label) return [{ s: cut(c.folder, room).padEnd(room), b: true }]
-    if (c.folder === '(top level)') return [{ s: cut(c.name, room).padEnd(room) }]
+    if (c.folder === '(top level)' || c.folder === here) return [{ s: cut(c.name, room).padEnd(room) }]
     const keep = Math.min(width(c.name), Math.max(8, room - width(c.folder) - 1))
     const f = cutPath(c.folder, Math.max(4, room - keep - 1))
     const rest = Math.max(1, room - width(f) - 1)
-    return [{ s: f }, { s: ' ' }, { s: cut(c.name, rest).padEnd(rest) }]
+    return [dim(f), { s: ' ' }, { s: cut(c.name, rest).padEnd(rest) }]
   }
   const firstCells = (c: Cells): Seg[] => {
     if (!tier.split) return where(c, nameW)
-    const folder = c.label ? { s: cut(c.folder, folderW).padEnd(folderW), b: true } : c.folder === '(top level)' ? dim(c.folder.padEnd(folderW)) : { s: cutPath(c.folder, folderW).padEnd(folderW) }
+    const folder = c.label ? { s: cut(c.folder, folderW).padEnd(folderW), b: true } : c.folder === '(top level)' || c.folder === here ? dim(cutPath(c.folder, folderW).padEnd(folderW)) : { s: cutPath(c.folder, folderW).padEnd(folderW) }
     return [folder, { s: ' '.repeat(GAP) }, { s: cut(c.name, nameW).padEnd(nameW) }]
   }
   /** A row's lines: one, or in the narrowest panes its names then its numbers under them. */
@@ -253,7 +261,8 @@ async function loadCoverage(cx: Ctx, p: TermPanel): Promise<void> {
 
 /** The view's title: the folder shown, and the group of its files when one is shown. */
 export function coverageTitle(folder: string, match?: string | null): string {
-  if (match) return folder ? `${folder}/${match}` : match
+  // a group by its folder's last name (the step before it names the whole folder) and its pattern or type
+  if (match) return folder ? `${folder.split('/').at(-1)}/${match}` : match
   return folder ? `${folder}/` : 'Coverage'
 }
 
@@ -274,7 +283,7 @@ async function drawCoverage(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<Render
   const rows = (st?.rows ?? []).filter(r => r && typeof r.key === 'string')
   const pickKey = keyOf(folder, match)
   const pick = rows.find(r => r.key === picks.get(pickKey))?.key ?? rows[0]?.key ?? ''
-  const lay = coverageLines(rows, pick, cols, { totals, drilled: Boolean(folder || match), more: st?.more ?? 0 })
+  const lay = coverageLines(rows, pick, cols, { totals, drilled: Boolean(folder || match), more: st?.more ?? 0, level: folder })
   // an open from the view stands on the panel's trail after it (home › coverage › agents/), as a press in the panel does
   const open = async (r: CoverageRow) => {
     if (!r.path && !r.drill) return
