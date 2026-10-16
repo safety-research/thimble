@@ -1,42 +1,44 @@
-// thimble-term: thimble's terminal UI, part of the plugin's one hooks module (plugin/hooks/register.ts registers it
-// after thimble.ts). Until 0.9.0's activation lands it draws only in terminal mode (`thimble mode terminal`), so browser
-// mode draws nothing new. It registers no model tools, agents, guidance or commands, and keeps no data except what is
-// on screen: what it draws comes from `thimble state`, and every change it makes goes through `thimble act`
-// (hooks/data.ts). What main's chat drew under its rows is kept in the workspace's terminal/chat.json for a resumed
-// session (hooks/kept.ts). Its scope check: THIMBLE_WS names a workspace whose trusted/launch.json has
-// `mode: "terminal"`; anywhere else every hook passes through.
+// thimble's terminal UI: every hook of the term/ files (thimble.ts, the agent bridge and file guard, is the other half
+// of the one hooks module, plugin/hooks/register.ts). It loads in every Claude Code session and stays quiet until
+// thimble is on in it (activate.ts): before that every hook passes through, except the path test of Read and Bash calls
+// that turns thimble on at the first data-file read, and `/thimble`. It registers no model tools or agents; what it
+// draws comes from `thimble state`, and every change it makes goes through `thimble act` (hooks/data.ts). What main's
+// chat drew under its rows is kept in the workspace's terminal/chat.json for a resumed session (hooks/kept.ts).
 //
-// What it draws (its look is SPEC.md's "The visual system"):
-//   - main's replies on the mod's grid, each citation a link, red when its place does not hold its value (reply.tsx)
+// What it does once thimble is on (its look is SPEC.md's "The visual system"):
+//   - delivers thimble's guide to Claude once per need: with the call that turned thimble on, with a prompt, with
+//     `/thimble`, after a compaction and after /clear, and marks it sent once the row that carries it is stored
+//   - tracks what Claude's tool calls read of the data files and sends it at each turn's end (tracker.ts)
+//   - main's replies on the mod's grid, each citation a link, red when its place does not hold its value (reply.tsx);
+//     a passage a check commented on tinted in the check's color, with a flag in the margin
 //   - each card a turn of main added or changed, once, under the turn's last reply, in its last state, its takeaway
-//     under it; no hex id, and Claude Code's tool groups left folded
-//   - one row above the prompt, a toast: what is new in the workspace since home was last opened (`open ›` opens home
-//     and the row goes, `dismiss` marks it seen; band.tsx); Claude Code's agent tray shows thimble's agents, and side
-//     threads have `↳` rows
-//   - one panel (panel.tsx): home, a card, a citation's place, the threads, a label, a document, the files, an agent,
-//     and the views views.ts adds (coverage, citations, checks: `/thimble coverage|citations|checks`)
+//     under it, a ↗ on its border row in fullscreen; no hex id, and Claude Code's tool groups left folded
+//   - under an answer that read data, one dim coverage line (`▸ saw 2% of records (3 of 13 files)`)
+//   - the rows above the prompt (band.tsx) and one panel (panel.tsx): home, a card, a citation's place, the threads, a
+//     label, a document, the files, an agent, and the views views.ts registers
 //   - side threads: the blue "?" beside a passage or a card, or a selection's "ask"; a `↳ thread` row under main's
 //     latest row when an answer comes in while the panel shows something else, and a blue ↳ beside the passage asked
 //     about. A right-click does what a click does: there is no menu
-//   - `/thimble` opens the home panel, with no model turn
+//   - `/thimble` turns thimble on and opens the home panel, with no model turn
+//   - keeps the feature switches in step between /config and thimble's config (settings.ts)
 // It hides main's end token, `(shown in the dashboard)`, as the browser does.
 //
-// Each hook builds the context the other files take from its own `$` (cxOf, hooks/ctx.ts); a file that registers hooks
-// of its own (band.tsx) imports cxOf from here, since Claude Code follows `$` only into functions called by their
-// declared or imported name. Its hooks on an event thimble.ts also hooks carry a matcher (ANY).
+// `$` goes only into cxOf (ctx.ts), which builds the context the other files take.
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, RenderElement, ResolveInput } from 'claude-code'
+import type { Register, RenderElement, ResolveInput } from 'claude-code'
 
 import type { Ctx } from './ctx'
-import { act, scopeOf } from './data'
+import { cxOf } from './ctx'
+import { act as actOn } from './data'
 import type { Sent } from './gestures'
 import { chipState, claimsIn, streamLink, streamStep, streaming } from './cite'
 import type { StreamLook, Streaming } from './cite'
 import type { CardData } from './draw'
-import { bareCard, cardWords, cid, citeSpans, citations, clip, cut, embeddedCards, labelRef, needsDrawing, quoted } from './lib'
+import { bareCard, cardWords, cid, citeSpans, citations, clean, clip, cut, embeddedCards, labelRef, needsDrawing, quoted } from './lib'
+import type { AnswerComment, CiteRow } from './contracts'
+import { lineWidth } from './draw'
 import { cardsOfCall, docsOf, forkDescription, labelsOf, namedForks, namedThreads, noteLines, reportOf, runIds, runShown, saysWriter, threadOf, withoutEnd, withoutLines, withoutNotes, withoutToldThreads, withoutWriterLines } from './model'
-import { HOME_UI_EMPTY } from './home'
-import { keepLast, keepRow, loadKept, resetKept } from './kept'
+import { keepLast, keepRow } from './kept'
 import { linesMessage, onListClick } from './lines'
 import { ANSWER_ELEMENT, RELAY, docEditMessage, drawPanel, fieldMessage, focusedField, hasList, homeViews, onGesture, openAsk, openCard, openCite, openFile, openLabel, openThread, openView, relayKey, relayMove, scrollPending, viewWheelAt, wheelWindow } from './panel'
 import type { PaneEvent } from './panel'
@@ -46,25 +48,31 @@ import { MARGIN, chipOf, drawCards, drawReply, placeUrl, toolWords } from './rep
 import { COLORS } from './paint'
 import { isAnchor, signalEnd, signalQuestion } from './signal'
 import type { AppendedRow } from './signal'
-import { NAV_EMPTY } from './nav'
-import { FILES_UI_EMPTY, LABEL_UI_EMPTY, PANEL, checkQueued, loadCards, loadCardsBatch, navOrigin, openHome, openPanel, paneTitle, panelColumns, placedLater, readSurface, readThread, rt, surfaceValue, takeKeys, threadsNow, tick } from './term'
-import type { UiApply } from './term'
+import { PANEL, loadCards, navOrigin, openHome, openPanel, paneTitle, panelColumns, placedLater, readSurface, rt, surfaceValue, takeKeys, threadsNow } from './term'
 import { turns } from './turns'
 import { registerBand } from './band'
+import { registerPanelViews } from './views'
+import { closeView, openViewState, sendEvent, viewFault, viewMessage } from './viewhost'
+import { LOAD_TOOL, act, activateNow, activateOnce, anyDataRead, appendGuide, candidatePaths, conversationEnded, deliverStarts, deliveryLost, followConversation, guideAfterCompact, isActive, mayActivate, owedGuide, preScope, resetActivation, restoreFromMarker, rowStored, sawLoadThimble } from './activate'
+import { onFlip, pushChange, resetSettings, setOptions, syncSoon } from './settings'
+import { factsHeld, factsOf, flushFacts, keepFacts, resetTracker } from './tracker'
+import { openInBrowser } from './offramp'
 import { openChecks } from './checksview'
 import { openCitations } from './citesview'
 import { openCoverage } from './coverageview'
-import { registerPanelViews } from './views'
-import { PUMP_MS, closeView, openViewState, sendEvent, viewFault, viewMessage, viewPump } from './viewhost'
+import { featureOn } from './settings'
+import { setTheme } from './paint'
 
-type Dollar = EngineInterface
 
-/** /thimble's description and argument hint in terminal mode (the command.describe hook). */
+/** /thimble's description and argument hint (the command.describe hook). */
 export const THIMBLE_DESCRIPTION =
-  "Opens thimble's home panel in this terminal: documents, side threads, cards, labels and files. `/thimble threads`, `cite <n>`, `card <n>`, `files [path[:line]]` and `documents` open those."
-export const THIMBLE_ARGS = '[threads | cite <n> | card <n> | files [path[:line]] | documents]'
-/** What `/thimble` says in terminal mode: the home panel is open, and how to reach the browser instead. */
-export const HOME_LINE = 'thimble: terminal mode. The home panel is open. For the browser workspace, quit, run `thimble mode browser`, and start `thimble` again.'
+  "Turns thimble on in this folder and opens its panel in this terminal. `/thimble open` opens the browser workbench; `coverage`, `citations`, `checks`, `threads`, `cite <n>`, `card <n>`, `files [path[:line]]` and `documents` open those."
+export const THIMBLE_ARGS = '[open | coverage | citations | checks | threads | cite <n> | card <n> | files [path[:line]] | documents]'
+/** What `/thimble` says (the model reads it too; logged in PROMPT-CHANGES.md): thimble is on, its panel is open, and how
+ *  to reach the browser workbench. */
+export const HOME_LINE = 'thimble is on in this folder. Its panel is open in the terminal; /thimble open opens the browser workbench.'
+/** The /thimble arguments the skill answers (fresh, restore, status, fix, feedback): the mod passes them on. */
+const SKILL_ARGS = new Set(['fresh', 'restore', 'status', 'fix', 'feedback'])
 
 // the text Claude Code stores as the reply of a turn that ended with none (its `<synthetic>` model's)
 const SYNTHETIC_RE = /^\s*No response requested\.\s*$/
@@ -78,208 +86,23 @@ function resultText(output: unknown): string {
   const blocks = Array.isArray(output) ? output : (output as { content?: unknown } | undefined)?.content
   return Array.isArray(blocks) ? blocks.map(b => (b && typeof b === 'object' && 'text' in b ? String((b as { text: unknown }).text) : '')).join('\n') : ''
 }
-// Claude Code refuses a second registration of an event without a matcher in one hooks module, and thimble.ts registers
-// first (plugin/hooks/register.ts): the hooks of this file on an event thimble.ts also hooks carry a matcher that every
-// event matches (an empty RegExp tests true on any string)
-const ANY = /(?:)/
 const paneTurns = turns()
 
-// the state the drawings read (types/index.d.ts)
-const CARDS = { plugin: 'thimble', key: 'cards' } as const
+// the state values this file reads and writes itself (types/index.d.ts; ctx.ts cxOf has the rest): a module names a
+// value by literals in the file that reads it
 const TURN_CARDS = { plugin: 'thimble', key: 'turnCards' } as const
-const VERDICTS = { plugin: 'thimble', key: 'verdicts' } as const
-const THREAD = { plugin: 'thimble', key: 'thread' } as const
 const THREAD_ROWS = { plugin: 'thimble', key: 'threadRows' } as const
 const ANSWERS = { plugin: 'thimble', key: 'answers' } as const
 const VIEW_ROWS = { plugin: 'thimble', key: 'viewRows' } as const
-const SURFACE = { plugin: 'thimble', key: 'surface' } as const
 const panelA = { plugin: 'thimble', key: 'panel' } as const
-const navRef = { plugin: 'thimble', key: 'nav' } as const
 const pendingRef = { plugin: 'thimble', key: 'pending' } as const
-const homeRef = { plugin: 'thimble', key: 'home' } as const
-const homeSeenRef = { plugin: 'thimble', key: 'homeSeen' } as const
-const agentsRef = { plugin: 'thimble', key: 'agents' } as const
-const threadsRef = { plugin: 'thimble', key: 'threads' } as const
-const newsRef = { plugin: 'thimble', key: 'threadNews' } as const
-const homeUiRef = { plugin: 'thimble', key: 'homeUi' } as const
-const labelUiRef = { plugin: 'thimble', key: 'labelUi' } as const
-const filesUiRef = { plugin: 'thimble', key: 'filesUi' } as const
 const panelTickRef = { plugin: 'thimble', key: 'panelTick' } as const
 const panelTickA = atom(panelTickRef, 0)
 
-/** The context the other files take, bound to this hook's `$` (band.tsx imports it too). */
-export function cxOf($: Dollar): Ctx {
-  // what main's chat draws under a row is kept in the workspace too, so a resumed session draws it again (kept.ts)
-  const io = { read: (path: string) => $.fs.read(path), write: (path: string, text: string) => $.fs.write(path, text) }
-  const keep = async (row: string, part: Parameters<typeof keepRow>[3]) => (rt.sc ? keepRow(io, rt.sc.ws, row, part) : undefined)
-  return {
-    now: () => $.clock.now().catch(() => Date.now()),
-    theme: async () => {
-      try {
-        const v = (await $.config.list()).find(r => r.key === 'theme')?.value
-        return /light/i.test(String(v ?? '')) ? 'light' : 'dark'
-      } catch {
-        return 'dark'
-      }
-    },
-    run: (argv, init) => $.process.run(argv, init),
-    runLong: async (argv, init) => {
-      const child = $.process.spawn({ argv, ...(init?.cwd ? { cwd: init.cwd } : {}), ...(init?.env ? { env: init.env } : {}) })
-      let stdout = ''
-      let stderr = ''
-      for await (const piece of child) {
-        if (piece.stream === 'stdout') stdout += piece.text
-        else stderr += piece.text
-      }
-      const end = await child.result
-      return { exitCode: end.code ?? 1, stdout, stderr }
-    },
-    spawnLines: (argv, init, onLine, onErr) => {
-      const child = $.process.spawn({ argv, ...(init.cwd ? { cwd: init.cwd } : {}), ...(init.env ? { env: init.env } : {}) })
-      const done = (async () => {
-        let buf = ''
-        try {
-          for await (const piece of child) {
-            if (piece.stream !== 'stdout') {
-              onErr?.(piece.text.slice(-500))
-              continue
-            }
-            buf += piece.text
-            let i = buf.indexOf('\n')
-            while (i >= 0) {
-              onLine(buf.slice(0, i))
-              buf = buf.slice(i + 1)
-              i = buf.indexOf('\n')
-            }
-          }
-        } catch (err) {
-          onErr?.(String(err).slice(0, 300))
-        }
-      })()
-      return { stop: () => void child.return(undefined as never).catch(() => undefined), done }
-    },
-    fetch: (url, init) => $.http.fetch(url, init),
-    read: path => $.fs.read(path),
-    write: (path, text) => $.fs.write(path, text),
-    stat: path => $.fs.stat(path),
-    list: path => $.fs.list(path),
-    // each variable by its literal name, so `claude plugin validate` lists what the module reads
-    env: async name => {
-      switch (name) {
-        case 'THIMBLE_WS':
-          return $.env.get('THIMBLE_WS')
-        case 'THIMBLE_TERM_CLI':
-          return $.env.get('THIMBLE_TERM_CLI')
-        case 'THIMBLE_HOME':
-          return $.env.get('THIMBLE_HOME')
-        case 'THIMBLE_PORT':
-          return $.env.get('THIMBLE_PORT')
-        case 'THIMBLE_UI_PORT':
-          return $.env.get('THIMBLE_UI_PORT')
-        default:
-          return undefined
-      }
-    },
-    root: () => $.session.root().catch(() => $.session.cwd()),
-    pluginRoot: $.plugin.root,
-    open: args => $.ui.open(args),
-    close: id => $.ui.close({ id }),
-    panes: () => $.ui.panes().catch(() => []),
-    later: (ms, fn) => void $.clock.after(ms, fn),
-    log: text => $.ui.log(text),
-    toast: text => $.ui.toast(text),
-    submit: async text => {
-      rt.own.add(text)
-      await $.prompt.submit({ text, asUser: true })
-    },
-    command: async (name, args) => void (await $.command.run({ command: name, args })),
-    promptText: async () => (await $.prompt.read().catch(() => ({ text: '' }))).text,
-    fill: async text => void (await $.prompt.fill({ text, mode: 'insert' }).catch(() => undefined)),
-    focus: async key => {
-      const r = await $.ui.focus({ requestId: PANEL, key }).catch(() => ({ deny: 'failed' }))
-      return !r.deny
-    },
-    scroll: async (key, block) => void (await $.ui.scroll({ to: { key }, in: PANEL, block: block ?? 'nearest' }).catch(() => undefined)),
-    els: e => $.ui.resolve(e as ResolveInput<'Pane', 'terminal'>),
-    card: async id => (await $.state.get({ ...CARDS, id })).value,
-    setCard: async (id, v) => void (await $.state.set({ ...CARDS, id }, v)),
-    turnCards: async row => (await $.state.get({ ...TURN_CARDS, id: row })).value ?? [],
-    setTurnCards: async (row, ids) => {
-      await $.state.set({ ...TURN_CARDS, id: row }, ids)
-      await keep(row, { cards: ids })
-    },
-    verdict: async id => (await $.state.get({ ...VERDICTS, id })).value,
-    setVerdict: async (id, v) => void (await $.state.set({ ...VERDICTS, id }, v)),
-    thread: async id => (await $.state.get({ ...THREAD, id })).value,
-    setThread: async (id, v) => void (await $.state.set({ ...THREAD, id }, v)),
-    threadRows: async row => (await $.state.get({ ...THREAD_ROWS, id: row })).value ?? [],
-    setThreadRows: async (row, rows) => {
-      await $.state.set({ ...THREAD_ROWS, id: row }, rows)
-      await keep(row, { threads: rows })
-    },
-    answer: async row => (await $.state.get({ ...ANSWERS, id: row })).value,
-    setAnswer: async (row, a) => {
-      await $.state.set({ ...ANSWERS, id: row }, a)
-      await keep(row, { answer: a })
-    },
-    viewRows: async row => (await $.state.get({ ...VIEW_ROWS, id: row })).value ?? [],
-    setViewRows: async (row, slugs) => {
-      await $.state.set({ ...VIEW_ROWS, id: row }, slugs)
-      await keep(row, { views: slugs })
-    },
-    surface: async key => (await $.state.get({ ...SURFACE, id: key })).value as never,
-    setSurface: async (key, v) => void (await $.state.set({ ...SURFACE, id: key }, v)),
-    panel: async () => (await $.state.get(panelA)).value ?? null,
-    setPanel: async p => void (await $.state.set(panelA, p)),
-    nav: async () => (await $.state.get(navRef)).value ?? NAV_EMPTY,
-    setNav: async n => void (await $.state.set(navRef, n)),
-    pending: async () => (await $.state.get(pendingRef)).value ?? null,
-    setPending: async p => void (await $.state.set(pendingRef, p)),
-    home: async () => (await $.state.get(homeRef)).value ?? null,
-    setHome: async h => void (await $.state.set(homeRef, h)),
-    homeSeen: async () => (await $.state.get(homeSeenRef)).value ?? null,
-    setHomeSeen: async h => void (await $.state.set(homeSeenRef, h)),
-    agents: async () => (await $.state.get(agentsRef)).value ?? [],
-    setAgents: async a => void (await $.state.set(agentsRef, a)),
-    threads: async () => (await $.state.get(threadsRef)).value ?? [],
-    setThreads: async t => void (await $.state.set(threadsRef, t)),
-    news: async () => (await $.state.get(newsRef)).value ?? { n: 0, one: '' },
-    setNews: async n => void (await $.state.set(newsRef, n)),
-    homeUi: async () => ({ ...HOME_UI_EMPTY, ...((await $.state.get(homeUiRef)).value ?? {}) }),
-    setHomeUi: async u => void (await $.state.set(homeUiRef, u)),
-    labelUi: async () => ({ ...LABEL_UI_EMPTY, ...((await $.state.get(labelUiRef)).value ?? {}) }),
-    setLabelUi: async u => void (await $.state.set(labelUiRef, u)),
-    filesUi: async () => ({ ...FILES_UI_EMPTY, ...((await $.state.get(filesUiRef)).value ?? {}) }),
-    setFilesUi: async u => void (await $.state.set(filesUiRef, u)),
-    panelTick: async () => (await $.state.get(panelTickRef)).value ?? 0,
-    bumpPanel: async () => void (await update($, panelTickA, n => (n ?? 0) + 1)),
-  }
-}
-
-/** A ui.jsonl record a tool wrote for the renderer (set_layout, open_view, set_filter, show_label): the panel shows the
- *  surface it names. */
-const applyUi: UiApply = async (cx, kind, args) => {
-  const surfaces = Array.isArray(args.surfaces) ? args.surfaces.map(String) : typeof args.surface === 'string' ? [args.surface] : []
-  const view = String(args.view ?? args.slug ?? '')
-  if (kind === 'open_view' || (kind === 'layout' && surfaces.some(s => s.startsWith('view:')))) {
-    const slug = view || (surfaces.find(s => s.startsWith('view:')) ?? '').slice(5)
-    if (slug) await openPanel(cx, { view: 'view', title: String(args.name ?? slug), slug })
-    return
-  }
-  if (kind === 'layout') {
-    const first = surfaces.find(s => s !== 'canvas') ?? surfaces[0] ?? ''
-    if (first === 'files') await openPanel(cx, { view: 'files', title: 'Files' })
-    else if (first === 'report') await openPanel(cx, { view: 'docs', title: 'Documents' })
-    else if (first) await openHome(cx)
-    return
-  }
-  const p = await cx.panel()
-  if ((kind === 'filter' || kind === 'label') && p?.view.startsWith('file')) await openPanel(cx, p)
-}
-
-/** `/thimble <what>` in terminal mode, a keyboard way to what the chat and the panel draw: `threads`, `cite [n]` (the
- *  n-th citation of the last reply), `card [n|id]` (the n-th card of the last turn, or a card by its id), `files
- *  [path[:line]]`, `documents`. What it says, or null for plain `/thimble` (home). */
+/** `/thimble <what>`, a keyboard way to what the chat and the panel draw: `open` (the browser workbench), `coverage`,
+ *  `citations`, `checks`, `threads`, `cite [n]` (the n-th citation of the last reply), `card [n|id]` (the n-th card of
+ *  the last turn, or a card by its id), `files [path[:line]]`, `documents`. What it says, or null for plain `/thimble`
+ *  (home). */
 async function thimbleCommand(cx: Ctx, args: string): Promise<string | null> {
   const [what = '', ...rest] = args.trim().split(/\s+/)
   const arg = rest.join(' ')
@@ -287,6 +110,18 @@ async function thimbleCommand(cx: Ctx, args: string): Promise<string | null> {
   switch (what.toLowerCase()) {
     case '':
       return null
+    case 'open':
+      await openInBrowser(cx, 'home')
+      return "thimble: opening thimble's page in the browser"
+    case 'coverage':
+      await openCoverage(cx, arg || undefined)
+      return 'thimble: the Coverage view is open'
+    case 'citations':
+      await openCitations(cx)
+      return 'thimble: the Citations view is open'
+    case 'checks':
+      await openChecks(cx)
+      return 'thimble: the Checks view is open'
     case 'threads': {
       await openPanel(cx, { view: 'threads', title: 'Threads' })
       return `thimble: ${plural((await cx.threads()).length, 'side thread')}`
@@ -334,20 +169,8 @@ async function thimbleCommand(cx: Ctx, args: string): Promise<string | null> {
       await openFile(cx, path, line ? Math.max(1, line - 5) : 1, line)
       return `thimble: ${path}${line ? ` line ${line}` : ''} is open`
     }
-    case 'coverage': {
-      await openCoverage(cx, arg || undefined)
-      return 'thimble: the coverage view is open'
-    }
-    case 'citations': {
-      await openCitations(cx)
-      return 'thimble: the citations view is open'
-    }
-    case 'checks': {
-      await openChecks(cx)
-      return 'thimble: the checks view is open'
-    }
     default:
-      return `thimble: \`/thimble\` opens home; \`/thimble threads\`, \`cite [n]\`, \`card [n]\`, \`files [path[:line]]\` and \`documents\` open those`
+      return `thimble: \`/thimble\` opens home; \`/thimble open\` opens the browser; \`coverage\`, \`citations\`, \`checks\`, \`threads\`, \`cite [n]\`, \`card [n]\`, \`files [path[:line]]\` and \`documents\` open those`
   }
 }
 
@@ -573,96 +396,169 @@ async function underRow(cx: Ctx, e: ResolveInput & { requestId: string; viewport
   )
 }
 
-/** What main's chat drew under its rows in earlier processes of this conversation (kept.ts), put in the state where
- *  it holds none (a file read, awaited at the session's start); then, beside the session, the cards those rows draw,
- *  read in one call, and the threads their `↳ thread` rows name. */
-async function restoreKept($: Dollar, cx: Ctx): Promise<void> {
-  if (!rt.sc) return
-  resetKept()
-  const k = await loadKept(cx, rt.sc.ws)
-  const ids = new Set<string>()
-  for (const [row, r] of Object.entries(k.rows)) {
-    if (r.cards?.length && !(await $.state.get({ ...TURN_CARDS, id: row })).value?.length) await $.state.set({ ...TURN_CARDS, id: row }, r.cards)
-    if (r.answer && !(await $.state.get({ ...ANSWERS, id: row })).value) await $.state.set({ ...ANSWERS, id: row }, r.answer)
-    if (r.threads?.length && !(await $.state.get({ ...THREAD_ROWS, id: row })).value?.length) await $.state.set({ ...THREAD_ROWS, id: row }, r.threads)
-    if (r.views?.length && !(await $.state.get({ ...VIEW_ROWS, id: row })).value?.length) await $.state.set({ ...VIEW_ROWS, id: row }, r.views)
-    for (const id of [...(r.cards ?? []), ...(r.answer?.cards ?? []), ...embeddedCards(r.answer?.text ?? '')]) ids.add(id)
-    for (const v of r.views ?? []) rt.viewsTold.add(v)
-    for (const t of r.threads ?? []) rt.told.add(t.thread)
-    if (r.repeat?.length) rt.repeats.set(row, r.repeat)
-    if (r.writer) {
-      if (!rt.writerOf.has(row)) rt.writerOf.set(row, r.writer.chat)
-      if (r.writer.first && !rt.writerSaid.has(r.writer.chat)) rt.writerSaid.set(r.writer.chat, row)
-    }
-  }
-  if (!rt.lastReply && k.last.reply) rt.lastReply = k.last.reply
-  if (!rt.lastCards.length && k.last.cards.length) rt.lastCards = k.last.cards
-  const threads = new Set(Object.values(k.rows).flatMap(r => (r.threads ?? []).map(t => t.thread)))
-  void (async () => {
-    await loadCardsBatch(cx, [...ids])
-    // each `↳ thread` row names its turn's question, from the thread's chat
-    for (const id of threads) await readThread(cx, id)
-  })().catch(err => $.ui.log(`thimble-term: the cards main's chat drew before could not be read: ${String(err).slice(0, 200)}`))
+/** The text a stored row holds: its text blocks, and a tool result's text. */
+function rowText(message: { content?: unknown } | undefined): string {
+  const blocks = Array.isArray(message?.content) ? (message.content as { type?: unknown; text?: unknown; content?: unknown }[]) : []
+  return blocks.map(b => (typeof b?.text === 'string' ? b.text : b?.type === 'tool_result' ? resultText(b.content) : '')).join('\n')
 }
 
-export const register: Register = on => {
+/** The coverage line under a turn's answer (SPEC-v2 3.9): one dim row, `▸ saw 2% of records (3 of 13 files)`, after the
+ *  footer (one blank row above it where no footer stands); in fullscreen a press opens the panel's Coverage view. None
+ *  for a turn whose calls read no data, and none with "Coverage" off. */
+async function coverageEl(cx: Ctx, e: ResolveInput & { requestId: string; viewport?: { isFullscreen?: boolean } }, afterFooter: boolean): Promise<RenderElement | null> {
+  if (!featureOn('coverage')) return null
+  const line = await cx.coverageLine(e.requestId)
+  if (!line) return null
+  const { Box, Text, Button } = cx.els(e)
+  const words = `▸ ${clean(line)}`
+  return (
+    <Box key={`coverage-${e.requestId}`} marginLeft={MARGIN} {...(afterFooter ? {} : { marginTop: 1 })} flexDirection="row">
+      {e.viewport?.isFullscreen ? <Button key={`coverage-open-${e.requestId}`} label={words} plain dimColor onPress={() => openCoverage(cx)} /> : <Text dimColor wrap="truncate-end">{words}</Text>}
+    </Box>
+  )
+}
+
+/** Whether a classic (main screen) answer tints late comments (LC9): Claude Code reprinted the whole transcript when a
+ *  row taller than the screen changed, so a tall answer keeps no tint on the main screen and its comments show in the
+ *  panel and the summary line only. */
+const TALL_TINT_CLASSIC = false
+
+/** The open comments of the checks on this row (`requestId`), each located in the text drawn; none with "Checks" off,
+ *  and none on the main screen for an answer taller than the screen (TALL_TINT_CLASSIC). */
+async function commentsFor(cx: Ctx, e: ResolveInput & { requestId: string; viewport?: { columns?: number; rows?: number; isFullscreen?: boolean } }, text: string, cols: number, cards: number): Promise<AnswerComment[]> {
+  if (!featureOn('checks') || !text.trim()) return []
+  const mine = (await cx.answerComments()).filter(c => c.row === e.requestId && c.status === 'open')
+  if (!mine.length) return []
+  if (!TALL_TINT_CLASSIC && e.viewport && e.viewport.isFullscreen === false && answerRows(text, cols) + cards * 12 > (e.viewport.rows ?? Infinity)) return []
+  return mine
+}
+
+/** About how many rows a reply's text takes at `cols` columns. */
+function answerRows(text: string, cols: number): number {
+  return text.split('\n').reduce((n, l) => n + Math.max(1, Math.ceil(lineWidth([{ s: l }]) / Math.max(10, cols))), 0)
+}
+
+/** The chat citations of an answer kept for the panel's Citations view, by their row (C13 citeIndex), the newest 2000. */
+async function indexCitations(cx: Ctx, text: string, row: string): Promise<void> {
+  if (!row) return
+  const at = await cx.now()
+  const have = await cx.citeIndex()
+  const known = new Set(have.map(r => `${r.id}|${r.row}`))
+  const add: CiteRow[] = citations(text)
+    .filter(c => !labelRef(c.ref))
+    .map(c => ({ id: cid(c.raw), raw: c.raw, display: c.display, ref: c.ref, row, at }))
+    .filter(r => !known.has(`${r.id}|${r.row}`))
+  if (add.length) await cx.setCiteIndex([...have, ...add].slice(-2000))
+}
+
+export const register: Register = (on, options) => {
+  // the /config values of the seven switches (settings.ts): a /config change reloads the module with new ones; a flip of
+  // labels or checks changes the guide, which is then owed if thimble says so
+  setOptions(options)
+  onFlip.run = (before, after) => {
+    if (before && (before.labels !== after.labels || before.checks !== after.checks) && act.owed === false) act.owed = null
+  }
   // a click on an empty part of a list hands the keys back to the pane (term.ts takeKeys)
   onListClick(takeKeys)
-  // the panel's Coverage, Citations and Checks views (views.ts)
-  registerPanelViews(on)
-  on('session.start', { cwd: ANY }, async ($, e, next) => {
+  on('session.start', { cwd: /^/ }, async ($, e, next) => {
     const started = await next(e)
     const cx = cxOf($)
-    rt.sc = await scopeOf(cx)
-    if (!rt.sc) return started
-    rt.sig = null
-    rt.uiN = -1
-    // a pane that waited undrawn before the module loaded again (its state is the session's)
-    rt.waiting = (await cx.pending()) !== null
+    // a fresh session, or a fresh copy of the module: nothing on, nothing held
+    resetActivation(e)
+    resetSettings()
+    resetTracker()
+    rt.sc = null
+    rt.timers = false
+    rt.turn = null
     // when this conversation began: its first launch, so a thread asked before a `--continue` is not an earlier one's
     rt.startedAt = await $.session
       .usage()
       .then(u => u.startedAt)
       .catch(() => $.clock.now())
       .catch(() => Date.now())
-    // what main's chat drew under its rows before a resume, and the cards it drew
-    await restoreKept($, cx).catch(err => $.ui.log(`thimble-term: what main's chat drew before could not be read: ${String(err).slice(0, 200)}`))
-    $.clock.every(1000, () => void tick(cx, applyUi))
-    $.clock.every(250, () => void checkQueued(cx))
-    // the open view matched to what the panel draws, and thimble's view host started the first time a view opens, from
-    // a timer of the session's, which lives as long as it (viewhost.ts)
-    $.clock.every(PUMP_MS, () => void viewPump(cx))
-    void tick(cx, applyUi)
-    // what drew before the scope was known (the band above the prompt) draws again, now reading thimble-term's state;
-    // the typeahead lists /thimble again with its terminal description
-    $.ui.invalidate('ui.render')
-    $.ui.invalidate('command.describe')
+    // a module reload (a /config change) or a resumed session where thimble is on: restored quietly from the
+    // session's marker, with no push and the guide only if it is owed
+    if (await restoreFromMarker(cx)) {
+      // a pane that waited undrawn before the module loaded again (its state is the session's)
+      rt.waiting = (await cx.pending()) !== null
+      return started
+    }
+    // the `thimble` command: thimble on at once, and the browser opened on home
+    if ((await cx.env('THIMBLE_OPEN').catch(() => undefined)) === '1') {
+      const turned = await activateNow(cx, 'launcher')
+      if (turned.ok) await openInBrowser(cx, 'home')
+    }
     return started
   })
 
-  // /thimble in terminal mode: the home panel, with no model turn
+  // /thimble: thimble on in this folder (a refused folder is asked again: the person asked), the home panel or the view
+  // its argument names, with no model turn; the guide goes with its answer when it is owed. The skill's own arguments
+  // (fresh, restore, status, fix, feedback) go to the skill.
   on('command.run', async ($, e, next) => {
-    if (!rt.sc) return next(e)
+    if (e.command !== 'thimble:thimble' && e.command !== 'thimble') return next(e)
+    const args = String(e.args ?? '').trim()
+    if (SKILL_ARGS.has((args.split(/\s+/)[0] ?? '').toLowerCase())) return next(e)
     const cx = cxOf($)
     if (e.presentation?.columns > 0) rt.termColumns = e.presentation.columns
-    await navOrigin(cx, false)
-    if (e.command === 'thimble:thimble' || e.command === 'thimble') {
-      const said = await thimbleCommand(cx, String(e.args ?? ''))
-      if (said !== null) return { text: said }
-      await openHome(cx)
-      return { text: HOME_LINE }
+    if (!isActive()) {
+      const turned = await activateNow(cx, 'command')
+      if (!turned.ok) return { text: `thimble: ${turned.error ?? 'thimble could not turn on in this folder'}` }
     }
-    return next(e)
+    await followConversation(cx)
+    await navOrigin(cx, false)
+    const said = await thimbleCommand(cx, args)
+    const guide = await owedGuide(cx)
+    if (guide) deliverStarts(guide)
+    const context = guide ? { context: [guide] } : {}
+    if (said !== null) return { text: said, ...context }
+    await openHome(cx)
+    return { text: HOME_LINE, ...context }
   })
-  // /thimble as the typeahead and /help describe it in terminal mode: what it does here, never the browser's server and
-  // URL (live check term-fix7, quirk 8: the skill's description, written for both modes, named those first)
+  // /thimble as the typeahead and /help describe it once thimble is on: what it does here
   on('command.describe', async ($, e, next) => {
     if (!rt.sc || (e.command !== 'thimble:thimble' && e.command !== 'thimble')) return next(e)
     return next({ ...e, description: THIMBLE_DESCRIPTION, argumentHint: THIMBLE_ARGS })
   })
-  // where Claude Code routes the skill past command.run, its prompt opens the panel and main says the skill's line
-  on('skill.prompt', { skill: ANY }, async ($, e, next) => {
-    if (rt.sc && (e.skill === 'thimble:thimble' || e.skill === 'thimble')) await openHome(cxOf($))
+
+  // the feature switches: a person's /config change of a thimble row reaches thimble's config at once (settings.ts),
+  // from `e.value` (this fires before the write, while `options` holds the old value); before thimble is on it waits
+  // for the sync at activation. A theme change repaints the cards in that theme's palette.
+  on('config.set', { key: /^thimble\.|^theme$/ }, async ($, e, next) => {
+    if (e.key === 'theme') {
+      const r = await next(e)
+      setTheme(/light/i.test(String(e.value ?? '')) ? 'light' : 'dark')
+      return r
+    }
+    if (e.origin.kind === 'composer' && isActive()) await pushChange(cxOf($), e.key, e.value)
+    return next(e)
+  })
+
+  // a prompt carries thimble's guide when it is owed (after /clear, a switch that changed it, a resumed session)
+  on('prompt.submit', async ($, e, next) => {
+    if (!isActive()) return next(e)
+    const cx = cxOf($)
+    await followConversation(cx)
+    const guide = await owedGuide(cx)
+    if (!guide) return next(e)
+    deliverStarts(guide)
+    const r = await next({ ...e, context: [...(e.context ?? []), guide] })
+    if (r.drop !== undefined) deliveryLost()
+    return r
+  }).catch(($, e, next) => next(e))
+
+  // after a compaction of main's conversation: the guide appended whole as a hidden row, once the compaction is in
+  on('session.compact', async ($, e, next) => {
+    const r = await next(e)
+    if (!isActive() || e.agentId !== undefined || r.skip !== undefined) return r
+    const cx = cxOf($)
+    cx.later(0, () => void guideAfterCompact(cx).catch(err => cx.log(`thimble: the guide was not given again after the compaction: ${String(err).slice(0, 200)}`)))
+    return r
+  })
+
+  // /clear and /resume end this conversation (no session.start follows): the next call of the new one rekeys thimble,
+  // and after /clear its next prompt carries the guide
+  on('session.end', { reason: /^/ }, async ($, e, next) => {
+    conversationEnded(e.sessionId, e.reason)
     return next(e)
   })
 
@@ -676,7 +572,7 @@ export const register: Register = on => {
 
   // ---------------------------------------------------------------------------------------------- main's turn
 
-  on('turn.start', { turnId: ANY }, async ($, e, next) => {
+  on('turn.start', { turnId: /^/ }, async ($, e, next) => {
     if (rt.sc) {
       const own = rt.own.has(e.text)
       rt.own.delete(e.text)
@@ -685,10 +581,48 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // thimble on at the first data-file read, and what Claude's calls read of the data files (activate.ts, tracker.ts).
+  // Registered with `.catch` replaying `next`: a hook that throws or outruns its budget still leaves the call's own
+  // result, and the call never runs twice.
+  on('tool.call', { tool: /^(?:Read|Bash|Grep|Glob|mcp__plugin_thimble_thimble__load_thimble)$/ }, async ($, e, next) => {
+    const tool = String(e.tool)
+    const input = e as unknown as Record<string, unknown>
+    if (tool.endsWith(`__${LOAD_TOOL}`)) {
+      const res = await next(e)
+      if (res.deny === undefined && !res.isError) await sawLoadThimble(cxOf($), String(res.text ?? ''))
+      return res
+    }
+    if (isActive()) {
+      const res = await next(e)
+      const cx = cxOf($)
+      if (featureOn('coverage')) keepFacts(await factsOf(cx, await preScope(cx), { tool, input, ...(e.agentId !== undefined ? { agentId: e.agentId } : {}), result: res.result, ...(res.text !== undefined ? { text: res.text } : {}), ...(res.deny !== undefined ? { deny: res.deny } : {}), ...(res.isError ? { isError: true } : {}) }))
+      if (e.agentId !== undefined || res.deny !== undefined) return res
+      await followConversation(cx)
+      const guide = await owedGuide(cx)
+      if (!guide) return res
+      deliverStarts(guide)
+      return { ...res, context: [...(res.context ?? []), guide] } as typeof res
+    }
+    // before thimble is on: a call that names no file passes as it is
+    const paths = candidatePaths(tool, input)
+    if (!paths.length && tool !== 'Grep') return next(e)
+    const res = await next(e)
+    if (res.deny !== undefined || res.isError) return res
+    const cx = cxOf($)
+    const pre = await preScope(cx)
+    // the data files it read, kept in memory for the first turn end once thimble is on (a coding session keeps none)
+    if (featureOn('coverage')) keepFacts(await factsOf(cx, pre, { tool, input, ...(e.agentId !== undefined ? { agentId: e.agentId } : {}), result: res.result, ...(res.text !== undefined ? { text: res.text } : {}) }))
+    if (!paths.length || !(await mayActivate(cx, pre)) || !(await anyDataRead(cx, pre, paths))) return res
+    const main = e.agentId === undefined
+    const { out, mine } = await activateOnce(cx, 'data', main ? 'context' : 'append', next.budget.remainingMs)
+    if (!out?.ok || !mine || !main || !out.context) return res
+    return { ...res, context: [...(res.context ?? []), out.context] } as typeof res
+  }).catch(($, e, next) => next(e))
+
   // main's fork of a side thread runs with the thread's question as its description, which Claude Code's agent tray and
   // its exit dialog show beside the fork's name (never `thread:<slug>`); the prompt keeps `thread:<name>`, by which
   // thimble knows the fork (backend threads.fork_ref)
-  on('tool.call', { tool: ANY }, async ($, e, next) => {
+  on('tool.call', { tool: /^/ }, async ($, e, next) => {
     let call = e
     try {
       if (rt.sc && e.agentId === undefined && e.tool === 'Agent') {
@@ -723,7 +657,7 @@ export const register: Register = on => {
   // main's reply as it streams: each citation handed to Claude Code as a Markdown link (never its raw spelling) and a
   // card's line as a placeholder naming the card; a citation, code span or card line not yet closed waits. The row is
   // stored as the model wrote it (session.append), and drawn by AssistantMessage once it is whole.
-  on('turn.step', { turnId: ANY }, async function* ($, e, next) {
+  on('turn.step', { turnId: /^/ }, async function* ($, e, next) {
     if (!rt.sc || e.agentId !== undefined) return yield* next(e)
     const cx = cxOf($)
     const blocks = new Map<number, Streaming>()
@@ -792,18 +726,23 @@ export const register: Register = on => {
         if (e.door === 'response' && rt.turn && hasText(msg.content)) rt.turn.row = e.uuid
       }
     } catch {
-      // the row is stored whatever thimble-term makes of it
+      // the row is stored whatever the terminal UI makes of it
     }
-    return next(msg === e.message ? e : { ...e, message: msg })
+    const stored = await next(msg === e.message ? e : { ...e, message: msg })
+    // the guide a delivery sent is marked sent once the row that carries it is stored in main's conversation
+    if (act.pending && e.agentId === undefined && stored.deny === undefined) await rowStored(cxOf($), { text: rowText(stored.message ?? msg) })
+    return stored
   }).catch(($, e, next) => next(e))
 
-  on('turn.complete', { turnId: ANY }, async ($, e, next) => {
+  on('turn.complete', { turnId: /^/ }, async ($, e, next) => {
     const done = await next(e)
+    let lineRow = ''
     if (rt.sc && e.agentId === undefined && rt.turn) {
       const t = rt.turn
       rt.turn = null
       const row = t.row || rt.anchor
       const cx = cxOf($)
+      lineRow = row
       if (t.cards.length && row) {
         const cur = await cx.turnCards(row)
         await cx.setTurnCards(row, [...cur, ...t.cards.filter(id => !cur.includes(id))])
@@ -828,6 +767,20 @@ export const register: Register = on => {
         await cx.setViewRows(vrow, [...cur, ...t.views.filter(v => !cur.includes(v))])
         for (const v of t.views) rt.viewsTold.add(v)
       }
+      lineRow = vrow
+      // the chat citations the answer drew, for the panel's Citations view (C13 citeIndex)
+      if (featureOn('citationMarks') && all.trim() && !t.own) await indexCitations(cx, all, last || row)
+    }
+    // what the turn's calls saw of the data, sent once (awaited, so the main screen draws the line at its first paint):
+    // the line under the turn's answer and the session's summary
+    if (isActive() && e.agentId === undefined && featureOn('coverage') && factsHeld()) {
+      const cx = cxOf($)
+      const row = lineRow || rt.anchor
+      const summary = await flushFacts(cx, await cx.sessionId(), row)
+      if (summary) {
+        if (row) await cx.setCoverageLine(row, summary.line)
+        await cx.setCoverageSummary(summary)
+      }
     }
     return done
   })
@@ -841,8 +794,9 @@ export const register: Register = on => {
     const told = await signalRows(cx, e)
     const views = await viewRowsEl(cx, e)
     const footer = await footerEl(cx, e)
+    const coverage = await coverageEl(cx, e, footer !== null)
     // without main's end token, and a `↳ thread` line naming its thread by its first question, not its fork's slug; no
-    // such line for a thread whose `↳ thread` row thimble-term drew, which says the same
+    // such line for a thread whose `↳ thread` row the terminal UI drew, which says the same
     const rows = await cx.threads()
     // Claude Code's own stand-in for a reply that never came (its `<synthetic>` text, as after a quit stopped a thread),
     // which main never wrote: not drawn (live check term-fix9, quirk 13)
@@ -851,21 +805,24 @@ export const register: Register = on => {
     const repeats = rt.repeats.get(e.requestId)
     const text = await withoutSaidWriter(cx, e.requestId, namedThreads(withoutToldThreads(withoutEnd(repeats ? withoutLines(said, repeats) : said), rows, rt.told), rows))
     const live = e.surface === 'terminal' || e.surface === 'desktop'
-    if (!ids.length && !told && !views && !footer && text === e.props.text && !live && !needsDrawing(text)) return next(e)
+    if (!ids.length && !told && !views && !footer && !coverage && text === e.props.text && !live && !needsDrawing(text)) return next(e)
     const { Box } = $.ui.resolve(e)
     // the reply fills the terminal's width, less 2, its cards as wide as its prose
     const cols = (e.viewport?.columns ?? 100) - 2
+    // the checks' comments on this row's passages: each passage tinted in its check's color, a flag in the margin
+    const checked = await commentsFor(cx, e, text, cols - MARGIN, ids.length)
     // a sentence that cites a card whole keeps its chip (`[ card ]`) though the card is drawn under the reply
-    const body = text.trim() ? await drawReply(cx, e, text, cols - MARGIN, { first: Boolean(e.props.isFirstOfReply), skipCards: new Set(ids), ask: t => openAsk(cx, t), open: id => openThread(cx, id) }) : []
+    const body = text.trim() ? await drawReply(cx, e, text, cols - MARGIN, { first: Boolean(e.props.isFirstOfReply), skipCards: new Set(ids), ask: t => openAsk(cx, t), open: id => openThread(cx, id), ...(checked.length ? { comments: checked, lit: await cx.checksOpen(), check: id => openChecks(cx, id) } : {}) }) : []
     const cards = await drawCards(cx, e, ids, cols, t => openAsk(cx, t), id => openThread(cx, id))
-    // a block that held only a line thimble-term hides: nothing (ctrl+o's view still draws the reply's time and model
+    // a block that held only a line the terminal UI hides: nothing (ctrl+o's view still draws the reply's time and model
     // above it, which no hook reaches; the engine's own block with no text draws the same)
-    if (!body.length && !cards && !told && !views && !footer) return <Box />
+    if (!body.length && !cards && !told && !views && !footer && !coverage) return <Box />
     return (
       <Box flexDirection="column">
         {body}
         {cards}
         {footer}
+        {coverage}
         {told}
         {views}
       </Box>
@@ -878,8 +835,8 @@ export const register: Register = on => {
   on('ui.render', { component: 'CommandOutput' }, async ($, e, next) => {
     if (!rt.sc) return next(e)
     // `/thimble …` answers as thimble, not under the plugin's name, which Claude Code puts before a hook's answer
-    const own = (e.props.command === 'thimble:thimble' || e.props.command === 'thimble') && /^\s*(?:thimble:\s*)?thimble:/.test(e.props.text)
-    const shown = own ? { ...e, props: { ...e.props, text: e.props.text.replace(/^\s*thimble:\s*(?=thimble:)/, '') } } : e
+    const own = (e.props.command === 'thimble:thimble' || e.props.command === 'thimble') && /^\s*thimble:\s*thimble\b/.test(e.props.text)
+    const shown = own ? { ...e, props: { ...e.props, text: e.props.text.replace(/^\s*thimble:\s*(?=thimble\b)/, '') } } : e
     return underRow(cxOf($), e, () => next(shown))
   })
 
@@ -951,8 +908,9 @@ export const register: Register = on => {
 
   // ---------------------------------------------------------------------------------------------- above the prompt
 
-  // the band above the prompt: the pending panel, the view proposal, the notices and what is new (band.tsx)
+  // the rows above the prompt (band.tsx), and the panel's views drawn by modules of their own (views.ts)
   registerBand(on)
+  registerPanelViews(on)
 
   // ---------------------------------------------------------------------------------------------- the panel
 
@@ -1091,6 +1049,11 @@ export const register: Register = on => {
       if (fresh.length) rt.seenGestures.set(d.origin, Math.max(...fresh.map(g => g.seq)))
       for (const g of fresh) {
         if (!g.gesture || !g.target) continue
+        // a click on a passage a check commented on: the panel at Checks on that comment (the ref is its id)
+        if (g.target.kind === 'check') {
+          await openChecks(cx, g.target.ref ?? '')
+          continue
+        }
         await navOrigin(cx, inPanel)
         try {
           await onGesture(cx, g.gesture, g.target)

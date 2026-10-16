@@ -1,28 +1,24 @@
-// The panel's new views and the summary line's counts (term-panel lane, build spec 3.8): registerPanelViews adds the
-// Coverage, Citations and Checks views through panel.tsx drawsView and term.ts loadsView, so panel.tsx's own switch
-// does not change for them; refreshSummary recomputes the summary line's counts when term.ts tick sees the labels,
-// coverage, answers, cards or docs areas change.
-//
-// SCAFFOLD STUB (C13): the three views draw one line each, "not built yet", and read nothing; refreshSummary does
-// nothing. register.tsx calls registerPanelViews once; nothing here runs at import.
+// Stand-in for the panel lane's views.ts (SPEC-v2 C13): the panel's Coverage, Citations and Checks views registered as
+// one-line views, and the summary line's refresh, which does nothing yet.
 import type { On } from 'claude-code'
 
-import { drawChecks } from './checksview'
-import { drawCitations } from './citesview'
-import { drawCoverage } from './coverageview'
 import type { Ctx } from './ctx'
 import { drawsView } from './panel'
-import { loadsView } from './term'
 
-/** The Coverage, Citations and Checks views, drawn and read by their own files. */
-export function registerPanelViews(_on: On): void {
-  drawsView('coverage', drawCoverage)
-  drawsView('citations', drawCitations)
-  drawsView('checks', drawChecks)
-  for (const view of ['coverage', 'citations', 'checks']) loadsView(view, async () => undefined)
+const NOT_BUILT: Record<string, string> = { coverage: 'Coverage', citations: 'Citations', checks: 'Checks' }
+
+/** The panel's new views, through panel.tsx drawsView; called once from register.tsx. */
+export function registerPanelViews(on: On): void {
+  void on
+  for (const [view, title] of Object.entries(NOT_BUILT)) {
+    drawsView(view, async (cx, e) => {
+      const { Text } = cx.els(e)
+      return Text({ dimColor: true, children: [`${title}: not built yet`] })
+    })
+  }
 }
 
-/** The summary line's counts read again (term.ts tick, on the C13 area changes). The stub reads nothing. */
-export async function refreshSummary(_cx: Ctx): Promise<void> {
-  return undefined
+/** The summary line's counts, recomputed when an area it counts changed (term.ts tick). */
+export async function refreshSummary(cx: Ctx): Promise<void> {
+  void cx
 }

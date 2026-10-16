@@ -1,10 +1,9 @@
-// Failure notices in the terminal UI (term-panel lane, build spec 3.20): each new failure is a red row in the band with
-// the acts that fix it, and one toast.
-//
-// SCAFFOLD STUB (C13): postNotice shows the toast only. Nothing here runs at import.
+// Stand-in for the panel lane's notices.tsx (SPEC-v2 3.20): a failure notice with the acts that fix it, and one toast.
 import type { Ctx } from './ctx'
 
-/** A notice `key` with its `text` and `acts`: a band row and one toast (the stub: the toast). */
-export function postNotice(cx: Ctx, _key: string, text: string, _acts: string[]): void {
-  cx.toast(`thimble: ${text}`)
+/** Posts the notice `key` (a band row once the panel lane builds it) and one toast with its text. */
+export function postNotice(cx: Ctx, key: string, text: string, acts: string[]): void {
+  void key
+  void acts
+  cx.toast(text)
 }

@@ -1,4 +1,4 @@
-// `/thimble <what>` in terminal mode: keyboard ways to what the chat and the panel draw (`/thimble threads`, `cite`,
+// `/thimble <what>`: keyboard ways to what the chat and the panel draw (`/thimble threads`, `cite`,
 // `card`, `files` and `documents`). `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
@@ -78,10 +78,12 @@ test('`/thimble files [path[:line]]` opens the file browser, or a file at a reco
   const pane = (await $.ui.mount(PANE)) as unknown as M
   expect(shown(await pane.drawn({ in: 'file-detail' }))).toBe('↗ README.md line 3  ?')
   await pane.unmount()
-  expect(await run($, 'what')).toContain('`/thimble threads`')
+  // 0.9.0: the help names `/thimble open` and the views' routes (SPEC-v2 5.5 item 3)
+  expect(await run($, 'what')).toContain('`/thimble open`')
+  expect(await run($, 'what')).toContain('`threads`')
 })
 
-test("/thimble's description in terminal mode says what it does here: home in this terminal, never the browser's server", async ($, on) => {
+test("/thimble's description once thimble is on says what it does here: on in this folder, its panel in this terminal, never the browser's server", async ($, on) => {
   // live check term-fix7, quirk 8: the typeahead read "In browser mode `/thimble` starts the server…"
   const w = world(on)
   // beneath the plugins, the command as it declares itself
@@ -91,9 +93,10 @@ test("/thimble's description in terminal mode says what it does here: home in th
   })
   await start($, w)
   const said = (await $.command.describe({ command: 'thimble:thimble', description: 'thimble gives a human analyst a workspace… In browser mode `/thimble` starts the server…', isHidden: false, immediate: false, provider: { plugin: 'thimble', tier: 'plugin' } } as never)) as { description: string; argumentHint?: string }
-  expect(said.description).toMatch(/^Opens thimble's home panel in this terminal/)
+  // 0.9.0: /thimble turns thimble on and names the new routes (SPEC-v2 5.5 item 3)
+  expect(said.description).toMatch(/^Turns thimble on in this folder and opens its panel in this terminal/)
   expect(said.description).not.toContain('server')
-  expect(said.argumentHint).toBe('[threads | cite <n> | card <n> | files [path[:line]] | documents]')
+  expect(said.argumentHint).toBe('[open | coverage | citations | checks | threads | cite <n> | card <n> | files [path[:line]] | documents]')
   // another command is described as it declares itself
   const other = (await $.command.describe({ command: 'thimble:orient', description: 'Orient the analyst.', isHidden: false, immediate: false, provider: { plugin: 'thimble', tier: 'plugin' } } as never)) as { description: string }
   expect(other.description).toBe('Orient the analyst.')

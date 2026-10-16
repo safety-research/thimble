@@ -3,7 +3,7 @@
 // `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
-import { changed, cliOf, launchMode, parsePrinted } from '../data'
+import { changed, cliOf, parsePrinted } from '../data'
 import { citations, dateIn, dateSpans, stoppedTurn, valueIn } from '../lib'
 import { showsValue } from '../cite'
 import { signalEnd } from '../signal'
@@ -230,18 +230,15 @@ test("main's end token is never shown", () => {
   expect(withoutEnd('The dashboard shows it.')).toBe('The dashboard shows it.')
 })
 
-test('the thimble command beside the plugin, the session mode, what a run printed, what changed', () => {
+test('the thimble command beside the plugin, what a run printed, what changed', () => {
   expect(cliOf('/home/a/.thimble/app/plugin', undefined)).toBe('/home/a/.thimble/app/plugin/bin/thimble')
   expect(cliOf('/repo/plugin/.claude-plugin', undefined)).toBe('/repo/plugin/bin/thimble')
   expect(cliOf('/repo/plugin', '/x/fake')).toBe('/x/fake')
-  expect(launchMode('{"mode": "terminal"}')).toBe('terminal')
-  expect(launchMode('{"session": "s"}')).toBe('')
-  expect(launchMode('not json')).toBe('')
   expect(parsePrinted({ exitCode: 0, stdout: '{"a":1}', stderr: '' })).toEqual({ ok: true, value: { a: 1 } })
   expect(parsePrinted({ exitCode: 1, stdout: '{"error":"no workspace for /x"}', stderr: '' })).toEqual({ ok: false, error: 'no workspace for /x' })
   expect(parsePrinted({ exitCode: 2, stdout: '', stderr: 'Traceback\nValueError: bad' })).toEqual({ ok: false, error: 'ValueError: bad' })
-  const a = { cards: '1', labels: '', docs: '', chats: '', agents: '', views: '', ui: '' }
-  expect(changed(null, a).length).toBe(7)
+  const a = { cards: '1', labels: '', docs: '', chats: '', agents: '', views: '', ui: '', coverage: '', answers: '' }
+  expect(changed(null, a).length).toBe(9)
   expect(changed(a, { ...a, cards: '2' })).toEqual(['cards'])
 })
 

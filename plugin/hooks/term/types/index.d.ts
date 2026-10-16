@@ -1,7 +1,8 @@
-// The terminal UI's state contract (thimble-term, under the plugin key 'thimble'): every value the hooks module keeps in
-// $.state, and the types the drawing files name (the Chat* types).
+// The terminal UI's state contract: every value the hooks module keeps in $.state, and the types the drawing files name
+// (the Chat* types, and the 0.9.0 contract types that contracts.ts re-exports). The file stands alone: Claude Code reads
+// it as the plugin's state contract, which may import nothing.
 //
-// thimble-term keeps no data of its own: each value is what one `thimble state` call printed (hooks/data.ts) and what
+// The terminal UI keeps no data of its own: each value is what one `thimble state` call printed (hooks/data.ts) and what
 // the screen shows now, and it is read again when the workspace changes.
 
 // ------------------------------------------------------------------------------------- the drawing files' types
@@ -50,7 +51,7 @@ export type ChatEnd = { rows: ChatRow[]; cards: string[]; file: string; head: st
 /** What a gesture acts on (hooks/gestures.tsx): `ref` the place it cites (bare, or a whole `[[value|ref]]`), `text` its
  *  shown value or its words, `cardId` the card it is on, `claim` the key of a reply citation's claim, `label` what a
  *  card's mark is called besides its value. */
-export type ChatTarget = { kind: 'card' | 'mark' | 'sentence' | 'citation' | 'row' | 'record' | 'node'; ref?: string; text?: string; cardId?: string; script?: string; claim?: string; label?: string }
+export type ChatTarget = { kind: 'card' | 'mark' | 'sentence' | 'citation' | 'row' | 'record' | 'node' | 'check'; ref?: string; text?: string; cardId?: string; script?: string; claim?: string; label?: string }
 
 /** One step of the panel's way: its view, its pane's title, and what names it in that view. */
 export type ChatNavStep = { view: string; title: string; thread?: string; open?: string; card?: string; mode?: string; slug?: string }
@@ -195,34 +196,21 @@ export type TermLabelUi = { open: string[]; kind: Record<string, string>; runs: 
  *  chose; the words of its find (`query`) and the row of what it found that the keys chose (`found`). */
 export type TermFilesUi = { folded: string[]; unfolded: string[]; pick: string; whole?: string[]; query?: string; found?: string }
 
-// ------------------------------------------------------------------------------- 0.9.0's contracts (contracts.ts, C13)
+// ------------------------------------------------------------------------------------------------- 0.9.0 (SPEC-v2 C13)
 
-/** The feature switches (thimble's config file and /config's rows; backend features.settings). */
+/** The per-feature switches (`/config` → thimble, the browser's Settings; `thimble features`, C6). */
 export type FeatureSettings = { autoActivate: boolean; viewProposals: boolean; labels: boolean; checks: boolean; citationMarks: boolean; coverage: boolean; cardCheck: boolean }
-
-/** thimble turned on in this session (`thimble activate`): the workspace, the folder, what turned it on and the role. */
+/** thimble on in this session (C2's answer): the workspace, the folder, how it turned on and the session's role. */
 export type Activated = { ws: string; path: string; cwd: string; via: string; role: 'main' | 'peer'; at: number }
-
-/** What this session's tool calls saw of the data files (`thimble state coverage --summary`). */
+/** What a session's tool calls saw of the data files (C7 `Summary`). */
 export type CoverageSummary = { files: { seen: number; searched: number; never: number; total: number }; records: { seen: number; total: number; counted: boolean }; line: string }
-
-/** A citation main's chat drew: its id (lib.ts cid), its raw spelling, its shown value, its ref, its row and when. */
+/** One chat citation the transcript drew. */
 export type CiteRow = { id: string; raw: string; display: string | null; ref: string; row: string; at: number }
-
-/** A check's comment on a passage of one of Claude's answers (`thimble state answer-comments`). */
+/** A check's comment on a passage of one of Claude's answers (C9, in the terminal's spelling); `color` is the check's
+ *  label palette place, 1-8. */
 export type AnswerComment = { id: string; check: string; checkName: string; color: number; about: string; turn: string; row: string; ref: string; start: number; end: number; quote: string; text: string; details: string; status: 'open' | 'dismissed'; at: string }
-
-/** The per-section counts the summary line last showed as seen (as homeSeen is for home). */
+/** The panel's per-section counts last seen (as 0.8.0's homeSeen). */
 export type SummarySeen = { cards: number; labels: number; docs: number; views: number; threads: number; checks: number; at: number }
-
-/** A label's records with no category fit and its unsure records, counted, for the summary line. */
-export type LabelUnsure = { id: string; name: string; noFit: number; unsure: number }
-
-/** A press that opens the browser, while it runs. */
-export type Pressing = { at: number; ref: string }
-
-/** The remote rows' commands: the SSH tunnel, the ET form, and the page's address (never a sign-in code). */
-export type Links = { tunnel: string; et: string | null; url: string }
 
 declare module 'claude-code' {
   interface PluginState {
@@ -262,9 +250,9 @@ declare module 'claude-code' {
       filesUi: TermFilesUi
       // what `thimble state` said last for a surface the panel shows, by the surface and its arguments
       surface: StateFamily<unknown>
-      // 0.9.0 (contracts.ts, C13). Set by term-transcript: thimble turned on in this session, the feature switches,
-      // the coverage line by the row it stands under and the session's summary, the chat's citations, the checks'
-      // comments on answers and the checks that read an answer now
+      // 0.9.0 (SPEC-v2 C13; contracts.ts has the shapes). The transcript's: thimble on in this session (null before
+      // activation), the feature switches, each turn's coverage line by the row it stands under, the session's
+      // coverage, the chat citations drawn, the checks' comments on answers and how many checks read an answer now
       activated: Activated | null
       settings: FeatureSettings
       coverageLine: StateFamily<string>
@@ -272,13 +260,13 @@ declare module 'claude-code' {
       citeIndex: CiteRow[]
       answerComments: AnswerComment[]
       checksRunning: number
-      // set by term-panel: the comment open in the panel, the labels' unsure counts, the summary line's seen counts, a
-      // press while it runs and the remote rows' commands
+      // the panel's: the comment open in its Checks view (the transcript lights its passage), the labels' unsure
+      // counts, the sections' counts last seen, a press in flight and the remote links
       checksOpen: string | null
-      labelUnsure: LabelUnsure[]
+      labelUnsure: { id: string; name: string; noFit: number; unsure: number }[]
       seen: SummarySeen | null
-      pressing: Pressing | null
-      links: Links | null
+      pressing: { at: number; ref: string } | null
+      links: { tunnel: string; et: string | null; url: string } | null
     }
   }
 }

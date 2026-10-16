@@ -1,6 +1,7 @@
-// thimble-term's runtime: what it read last and the moves that read thimble again or change what the panel shows.
+// The terminal UI's runtime: what it read last and the moves that read thimble again or change what the panel shows.
 // register.tsx wires these to Claude Code's events and hands each the context of its hook (hooks/ctx.ts); reply.tsx and
-// panel.tsx draw.
+// panel.tsx draw. Nothing runs before thimble is on in the session (activate.ts sets the scope, `rt.sc`, and starts
+// the timers here).
 //
 // Nothing here writes the workspace: a read is `thimble state`, a change is `thimble act` (hooks/data.ts).
 import type { ChatNav, ChatNavStep, ChatSignal, TermCard, TermFilesUi, TermHome, TermLabelUi, TermPanel, TermPending, TermThreadRow } from './types'
@@ -10,14 +11,18 @@ import type { CardData, CardLabel } from './draw'
 import type { Ctx, SurfaceGot } from './ctx'
 import { act, actLong, changed, readState, signature } from './data'
 import type { Area, Scope, Signature } from './data'
-import { cid, citations, clip, labelRef, noteDocPlace, noteLabelName, noteQuestion, questionOf, quoted } from './lib'
+import { cid, citations, clean, clip, embeddedCards, labelRef, noteDocPlace, noteLabelName, noteQuestion, questionOf, quoted } from './lib'
 import type { Citation } from './lib'
 import { agentsOf, cellOf, cellsOf, chatOf, docUnits, docsOf, homeOf, labelIdOf, labelOf, labelsOf, resolutionOf, threadOf, threadRowsOf, uiRecordsOf, verdictOf } from './model'
 import { classColors, labelArgs, setLabelGone } from './labels'
 import { fileRef } from './files'
-import { keepSeen, keptSeen } from './kept'
+import { keepSeen, keptSeen, loadKept, resetKept } from './kept'
 import { NAV_EMPTY, backTarget, moved, nextTrail, withBack } from './nav'
 import { signalEnd, withSignal } from './signal'
+import type { AnswerComment } from './contracts'
+import { featureOn, watchConfig } from './settings'
+import { summaryOf } from './tracker'
+import { PUMP_MS, viewPump } from './viewhost'
 import { refreshSummary } from './views'
 
 export const P = 'thimble'
@@ -136,6 +141,8 @@ export const rt = {
   repeats: new Map<string, string[]>(),
   // the cards read only for their questions (nameCards), each once
   named: new Set<string>(),
+  // the refresh loop, the citation queue and the view pump run (started once thimble is on: startTimers)
+  timers: false,
 }
 
 /** The most files one `thimble state opens` reads the head of (backend local.py OPENS_MAX). */
@@ -305,6 +312,8 @@ async function refreshCards(cx: Ctx, labels: boolean): Promise<void> {
 /** Ask for these citations' checks: each is checked once, in a batch the session's timer sends (checkQueued). A
  *  drawing may call it: it only notes them. */
 export function queueCitations(cs: readonly Citation[]): void {
+  // "Citation marks" off: citations are plain links, and nothing checks them
+  if (!featureOn('citationMarks')) return
   for (const c of cs) {
     if (labelRef(c.ref)) continue // a label's link names no place to check
     const id = cid(c.raw)
@@ -587,7 +596,7 @@ export async function openPanel(cx: Ctx, p: TermPanel, opts: { replace?: boolean
   if (rt.panelFocus !== RELAY_PICK || p.view === 'ask') rt.panelFocus = ''
   await cx.setNav(nav)
   await cx.setPanel(p)
-  void loadPanel(cx, p).then(() => cx.bumpPanel())
+  void loadPanel(cx, p).then(() => cx.bumpPanel()).catch(() => undefined)
   await placePanel(cx, p)
 }
 
@@ -633,7 +642,7 @@ export async function openPending(cx: Ctx): Promise<void> {
   // still not placed after the press: the terminal is too narrow for the panel (Matt, 10-08: just the button, and
   // feedback when it is too narrow)
   if (rt.waiting) cx.toast('the terminal is too narrow for thimble\'s panel: widen it, then press open panel')
-  void loadPanel(cx, p).then(() => cx.bumpPanel())
+  void loadPanel(cx, p).then(() => cx.bumpPanel()).catch(() => undefined)
 }
 
 /** The row above the prompt gone once the panel is drawn: Claude Code placed a pane that waited (the terminal widened
@@ -683,16 +692,17 @@ function giveKeys(cx: Ctx, title: string, ringOn = RELAY_PICK): void {
           rt.panelFocus = ringOn
           await cx.bumpPanel()
         }
-      } else if (left > 0) cx.later(KEYS_AGAIN_MS, () => void ask(left - 1, reopened))
+      } else if (left > 0) cx.later(KEYS_AGAIN_MS, () => void ask(left - 1, reopened).catch(() => undefined))
       return
     }
     if (reopened || (await cx.promptText().catch(() => '')).trim()) return
     const p = await cx.panel()
     await cx.open({ id: PANEL, title: p ? paneTitle(p) : title, focus: true, columns: panelColumns() }).catch(() => undefined)
     await cx.bumpPanel()
-    cx.later(KEYS_AGAIN_MS, () => void ask(left, true))
+    cx.later(KEYS_AGAIN_MS, () => void ask(left, true).catch(() => undefined))
   }
-  cx.later(KEYS_AGAIN_MS, () => void ask(KEYS_TRIES - 1, false))
+  // a step of the session's after it ended rejects: nothing waits for it
+  cx.later(KEYS_AGAIN_MS, () => void ask(KEYS_TRIES - 1, false).catch(() => undefined))
 }
 
 /** The keys back to the panel after a click on an empty part of a list, which gave them to the list's Client: its keys
@@ -819,7 +829,7 @@ export async function readThread(cx: Ctx, id: string): Promise<void> {
       if (card && !questionOf(card) && !rt.named.has(card)) cited.add(card)
     }
   }
-  if (cited.size) void nameCards(cx, [...cited]).then(() => cx.bumpPanel())
+  if (cited.size) void nameCards(cx, [...cited]).then(() => cx.bumpPanel()).catch(() => undefined)
 }
 
 /** The questions of these cards noted (noteQuestion), each read once, so that a citation of one names it: a card a
@@ -912,7 +922,7 @@ export async function signalsAt(cx: Ctx, row: string): Promise<ChatSignal[]> {
 /** A new side thread about `anchor` (a ref) or `anchorText` (words on screen), with its first question: main forks
  *  `thread:<name>` for it, as for the browser's. Its id, or why it was refused. */
 export async function startThread(cx: Ctx, anchor: string | null, anchorText: string, message: string, more: { parent?: string; element?: string; title?: string } = {}): Promise<{ id: string } | { error: string }> {
-  if (!rt.sc) return { error: 'thimble is not in terminal mode in this session' }
+  if (!rt.sc) return { error: 'thimble is not on in this session' }
   const got = await act(cx, rt.sc, 'thread', { anchor, message, ...(anchorText ? { anchor_text: anchorText } : {}), ...(more.parent ? { parent: more.parent } : {}), ...(more.element ? { element: more.element } : {}), ...(more.title ? { title: more.title } : {}) })
   if (!got.ok) return { error: got.error }
   const v = got.value as { thread?: unknown; id?: unknown; meta?: { id?: unknown } }
@@ -926,7 +936,7 @@ export async function startThread(cx: Ctx, anchor: string | null, anchorText: st
 /** A question in a thread that exists: why it was refused (''), and whether thimble queued it because the thread
  *  still answers. */
 export async function threadMessage(cx: Ctx, thread: string, message: string): Promise<{ error: string; queued: boolean }> {
-  if (!rt.sc) return { error: 'thimble is not in terminal mode in this session', queued: false }
+  if (!rt.sc) return { error: 'thimble is not on in this session', queued: false }
   const got = await act(cx, rt.sc, 'thread-message', { thread, message })
   if (!got.ok) return { error: got.error, queued: false }
   await readThread(cx, thread)
@@ -950,7 +960,7 @@ async function labelSaid(cx: Ctx, id: string, words: string, run?: { limit: numb
 
 /** Save the label panel's edits (`thimble act label`), then read the label again. '' when saved, else why not. */
 export async function saveLabel(cx: Ctx, id: string, patch: LabelPatch): Promise<string> {
-  if (!rt.sc) return 'thimble is not in terminal mode in this session'
+  if (!rt.sc) return 'thimble is not on in this session'
   const got = await act(cx, rt.sc, 'label', { label: id, ...patch })
   await readSurface(cx, `label:${id}`, 'label', labelArgs(id))
   if (!got.ok) {
@@ -1007,7 +1017,7 @@ export async function stopLabel(cx: Ctx, id: string): Promise<void> {
  *  it, as the browser's Delete label does. Then the labels and home are read again and the labels list opens. '' when
  *  deleted, else why not, which the panel says on a `×` row. */
 export async function deleteLabel(cx: Ctx, id: string, name: string): Promise<string> {
-  if (!rt.sc) return 'thimble is not in terminal mode in this session'
+  if (!rt.sc) return 'thimble is not on in this session'
   const got = await act(cx, rt.sc, 'label-delete', { label: id })
   if (!got.ok) {
     await labelSaid(cx, id, `× not deleted: ${got.error}`)
@@ -1039,7 +1049,7 @@ async function relabel(cx: Ctx, id: string): Promise<void> {
  *  label-show`, as the Labels pane's toggle and palette do). '' when done, else why not, which the panel says on a `×`
  *  row. */
 export async function showLabel(cx: Ctx, id: string, change: { on?: boolean; colors?: Record<string, string> }): Promise<string> {
-  if (!rt.sc) return 'thimble is not in terminal mode in this session'
+  if (!rt.sc) return 'thimble is not on in this session'
   const got = await act(cx, rt.sc, 'label-show', { label: id, ...(change.on !== undefined ? { on: change.on } : {}), ...(change.colors ? { colors: change.colors } : {}) })
   if (!got.ok) {
     await labelSaid(cx, id, `× not changed: ${got.error}`)
@@ -1052,7 +1062,7 @@ export async function showLabel(cx: Ctx, id: string, change: { on?: boolean; col
 /** Keep only the units a label gives `value` in its scope (Files, the canvas or the report), or with null clear that
  *  filter (`thimble act label-filter`, as a label card's value does). '' when done, else why not. */
 export async function filterLabel(cx: Ctx, id: string, value: string | null): Promise<string> {
-  if (!rt.sc) return 'thimble is not in terminal mode in this session'
+  if (!rt.sc) return 'thimble is not on in this session'
   const got = await act(cx, rt.sc, 'label-filter', { label: id, ...(value ? { value } : {}) })
   if (!got.ok) {
     await labelSaid(cx, id, `× the filter was not set: ${got.error}`)
@@ -1065,7 +1075,7 @@ export async function filterLabel(cx: Ctx, id: string, value: string | null): Pr
 /** Undo the delete of the label deleted last (`thimble act label-undelete`): the label back with its marks, its card
  *  and its filters, its panel open. '' when done, else why not. */
 export async function undeleteLabel(cx: Ctx, id: string, name: string): Promise<string> {
-  if (!rt.sc) return 'thimble is not in terminal mode in this session'
+  if (!rt.sc) return 'thimble is not on in this session'
   const got = await act<{ name?: string }>(cx, rt.sc, 'label-undelete', { label: id })
   if (!got.ok) {
     // the labels list says why on a red `×` row in place of `undo`
@@ -1125,8 +1135,6 @@ async function followUi(cx: Ctx, apply: UiApply): Promise<void> {
 }
 
 /** The areas a panel view reads. */
-// the areas the summary line counts (views.ts refreshSummary); coverage and answers join data.ts AREAS with 0.9.0
-const SUMMARY_AREAS = ['labels', 'coverage', 'answers', 'cards', 'docs']
 const PANEL_AREAS: Record<string, Area[]> = { home: ['cards', 'labels', 'docs', 'chats', 'views', 'agents'], files: ['labels'], file: ['labels'], views: ['views'], labels: ['labels'], label: ['labels', 'cards'], docs: ['docs', 'agents'], doc: ['docs', 'cards', 'agents', 'chats'], card: ['cards', 'labels'], cite: ['cards'], threads: ['chats'], thread: ['chats'] }
 
 /** One pass: what changed in the workspace since the last pass, read again where some drawing shows it. */
@@ -1171,15 +1179,136 @@ export async function tick(cx: Ctx, ui: UiApply): Promise<void> {
         if (panel?.thread && (panel.view === 'thread' || panel.view === 'agent')) await readThread(cx, panel.thread)
       }
       if (areas.has('ui')) await followUi(cx, ui)
+      // a record count that ended (coverage.py touches the folder): the summary line says the percent at once
+      if (areas.has('coverage') && featureOn('coverage')) await readCoverage(cx)
+      // the checks' comments on Claude's answers, and the checks reading one now
+      if (areas.has('answers') && featureOn('checks')) await readAnswerComments(cx)
       if (first || areas.has('cards') || areas.has('labels') || areas.has('docs') || areas.has('chats') || areas.has('views') || areas.has('agents')) await refreshHome(cx)
+      // the summary line above the prompt counts these (the panel lane's band.tsx)
+      if (SUMMARY_AREAS.some(a => areas.has(a))) await refreshSummary(cx)
       if (panel && !first) {
         if ((PANEL_AREAS[panel.view] ?? []).some(a => areas.has(a))) await loadPanel(cx, panel)
         await cx.bumpPanel()
       }
-      // the summary line's counts (views.ts), when an area they count changed
-      if (SUMMARY_AREAS.some(a => (areas as Set<string>).has(a))) await refreshSummary(cx)
     } while (rt.again)
+    // the browser's Settings changed thimble's config: the switches follow (settings.ts)
+    await watchConfig(cx)
   } finally {
     rt.busy = false
   }
+}
+
+/** The areas whose change the summary line above the prompt counts. */
+const SUMMARY_AREAS: Area[] = ['labels', 'coverage', 'answers', 'cards', 'docs']
+
+/** The session's coverage summary read again (`thimble state coverage --summary`, C7). */
+export async function readCoverage(cx: Ctx): Promise<void> {
+  if (!rt.sc) return
+  const got = await readState(cx, rt.sc, 'coverage', ['--session', await cx.sessionId(), '--summary'])
+  if (!got.ok) return
+  const summary = summaryOf((got.value as { summary?: unknown })?.summary)
+  if (summary) await cx.setCoverageSummary(summary)
+}
+
+/** A comment as C9 prints it, in the terminal's spelling; null for one that names no passage. */
+export function answerCommentOf(v: unknown): AnswerComment | null {
+  const o = (v ?? {}) as Record<string, unknown>
+  const str = (x: unknown) => (typeof x === 'string' ? x : '')
+  const num = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? x : -1)
+  if (!str(o.id) || !str(o.row) || !str(o.quote)) return null
+  const color = Math.max(1, Math.min(8, Math.round(num(o.color) > 0 ? num(o.color) : 1)))
+  return {
+    id: str(o.id),
+    check: str(o.check),
+    checkName: clean(str(o.check_name) || str(o.checkName) || str(o.check)),
+    color,
+    about: clean(str(o.about)),
+    turn: str(o.turn),
+    row: str(o.row),
+    ref: str(o.ref),
+    start: num(o.start),
+    end: num(o.end),
+    quote: str(o.quote),
+    text: clean(str(o.text)),
+    details: clean(str(o.details)),
+    status: o.status === 'dismissed' ? 'dismissed' : 'open',
+    at: str(o.at),
+  }
+}
+
+/** The checks' open comments on this session's answers and the checks reading an answer now (`thimble state
+ *  answer-comments`, C9). */
+export async function readAnswerComments(cx: Ctx): Promise<void> {
+  if (!rt.sc) return
+  const got = await readState(cx, rt.sc, 'answer-comments', ['--session', await cx.sessionId(), '--status', 'open'])
+  if (!got.ok) return
+  const v = (got.value ?? {}) as { comments?: unknown; running?: unknown }
+  const comments = (Array.isArray(v.comments) ? v.comments : []).map(answerCommentOf).filter((c): c is AnswerComment => c !== null && c.status === 'open')
+  await cx.setAnswerComments(comments)
+  await cx.setChecksRunning(Array.isArray(v.running) ? v.running.length : 0)
+}
+
+/** A ui.jsonl record a tool wrote for the panel (set_layout, open_view, set_filter, show_label): the panel shows the
+ *  surface it names. */
+export const applyUi: UiApply = async (cx, kind, args) => {
+  const surfaces = Array.isArray(args.surfaces) ? args.surfaces.map(String) : typeof args.surface === 'string' ? [args.surface] : []
+  const view = String(args.view ?? args.slug ?? '')
+  if (kind === 'open_view' || (kind === 'layout' && surfaces.some(s => s.startsWith('view:')))) {
+    const slug = view || (surfaces.find(s => s.startsWith('view:')) ?? '').slice(5)
+    if (slug) await openPanel(cx, { view: 'view', title: String(args.name ?? slug), slug })
+    return
+  }
+  if (kind === 'layout') {
+    const first = surfaces.find(s => s !== 'canvas') ?? surfaces[0] ?? ''
+    if (first === 'files') await openPanel(cx, { view: 'files', title: 'Files' })
+    else if (first === 'report') await openPanel(cx, { view: 'docs', title: 'Documents' })
+    else if (first) await openHome(cx)
+    return
+  }
+  const p = await cx.panel()
+  if ((kind === 'filter' || kind === 'label') && p?.view.startsWith('file')) await openPanel(cx, p)
+}
+
+/** The refresh loop (every second), the citation queue (every 250 ms) and the view pump, once per module copy, from the
+ *  moment thimble is on. */
+export function startTimers(cx: Ctx): void {
+  if (rt.timers) return
+  rt.timers = true
+  // a pass that a session's end cut short rejects: nothing waits for it
+  const quiet = () => undefined
+  cx.every(1000, () => void tick(cx, applyUi).catch(quiet))
+  cx.every(250, () => void checkQueued(cx).catch(quiet))
+  // the open view matched to what the panel draws, and thimble's view host started the first time a view opens, from a
+  // timer of the session's, which lives as long as it (viewhost.ts)
+  cx.every(PUMP_MS, () => void viewPump(cx).catch(quiet))
+  void tick(cx, applyUi).catch(quiet)
+}
+
+/** What main's chat drew under its rows in earlier processes of this conversation (kept.ts), put in the state where it
+ *  holds none; then, beside the session, the cards those rows draw, read in one call, and the threads their `↳ thread`
+ *  rows name. */
+export async function restoreKept(cx: Ctx): Promise<void> {
+  if (!rt.sc) return
+  resetKept()
+  const k = await loadKept(cx, rt.sc.ws)
+  const ids = new Set<string>()
+  for (const [row, r] of Object.entries(k.rows)) {
+    await cx.restoreRow(row, r)
+    for (const id of [...(r.cards ?? []), ...(r.answer?.cards ?? []), ...embeddedCards(r.answer?.text ?? '')]) ids.add(id)
+    for (const v of r.views ?? []) rt.viewsTold.add(v)
+    for (const t of r.threads ?? []) rt.told.add(t.thread)
+    if (r.repeat?.length) rt.repeats.set(row, r.repeat)
+    if (r.writer) {
+      if (!rt.writerOf.has(row)) rt.writerOf.set(row, r.writer.chat)
+      if (r.writer.first && !rt.writerSaid.has(r.writer.chat)) rt.writerSaid.set(r.writer.chat, row)
+    }
+  }
+  if (!rt.lastReply && k.last.reply) rt.lastReply = k.last.reply
+  if (!rt.lastCards.length && k.last.cards.length) rt.lastCards = k.last.cards
+  const threads = new Set(Object.values(k.rows).flatMap(r => (r.threads ?? []).map(t => t.thread)))
+  void (async () => {
+    await loadCardsBatch(cx, [...ids])
+    // each `↳ thread` row names its turn's question, from the thread's chat
+    for (const id of threads) await readThread(cx, id)
+  })().catch(err => cx.log(`thimble: the cards main's chat drew before could not be read: ${String(err).slice(0, 200)}`))
 }

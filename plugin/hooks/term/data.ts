@@ -1,19 +1,21 @@
-// thimble-term's one way to thimble's data: the `thimble` command, with no server and no port.
+// The terminal UI's one way to thimble's data: the `thimble` command, with no server and no port.
 //
 //   readState(surface, args)   `thimble state <surface> --cwd <dir> [args]`, which prints the JSON the server's GET route
 //                              for that surface gives the browser; `{error}` and exit 1 when it fails
 //   act(kind, payload)         `thimble act <kind> --cwd <dir> <json>`, which calls what the browser's POST route calls
-//                              and prints `{ok, …}`; actLong the same for an act that runs until a label's run ends
+//                              and prints `{ok, …}`; actLong the same for an act that runs until a label's run ends;
+//                              actStdin the same with the payload on standard input (coverage facts can name 100,000
+//                              paths, past one argument's limit)
 //
-// The renderer keeps no data of its own: what these print is drawn, and read again when the workspace changes. To see
-// that it changed without starting Python, `signature` lists the workspace's folders (names, sizes and times only).
+// The terminal UI keeps no data of its own: what these print is drawn, and read again when the workspace changes. To
+// see that it changed without starting Python, `signature` lists the workspace's folders (names, sizes and times only).
 //
-// The scope: thimble-term draws only in a session the `thimble` command started in terminal mode, which puts the
-// workspace folder in THIMBLE_WS and writes `mode: "terminal"` in its trusted/launch.json. Anywhere else it is idle.
+// The scope: none until thimble is on in this session (activate.ts); then the workspace that `thimble activate` named.
+// Before that every hook passes through and nothing here runs.
 import type { Ctx } from './ctx'
 
-/** Where this session's thimble lives: its workspace folder, the corpus folder, the command and the environment each
- *  call carries. */
+/** Where this session's thimble lives once it is on: its workspace folder, the corpus folder, the command and the
+ *  environment each call carries. */
 export type Scope = { ws: string; cwd: string; bin: string; env: Record<string, string> }
 
 export type Got<T = unknown> = { ok: true; value: T } | { ok: false; error: string }
@@ -21,38 +23,40 @@ export type Got<T = unknown> = { ok: true; value: T } | { ok: false; error: stri
 const STATE_TIMEOUT_MS = 60_000
 const ACT_TIMEOUT_MS = 60_000
 
-/** The `thimble` command of this plugin (`<plugin root>/bin/thimble`), or the one THIMBLE_TERM_CLI names (the tests'
- *  and the live check's stand-in). */
+/** The `thimble` command in this plugin's folder (`<plugin>/bin/thimble`), or the one THIMBLE_TERM_CLI names (the
+ *  tests' and the live check's stand-in). */
 export function cliOf(root: string, override: string | undefined): string {
   if (override) return override
   const dir = root.replace(/\/+$/, '').replace(/\/\.claude-plugin$/, '')
   return `${dir}/bin/thimble`
 }
 
-/** launch.json's mode, or '' when it names none or cannot be read. */
-export function launchMode(raw: string): string {
-  try {
-    const v = JSON.parse(raw) as { mode?: unknown }
-    return typeof v?.mode === 'string' ? v.mode : ''
-  } catch {
-    return ''
-  }
+/** The `thimble` command this session's calls run: THIMBLE_TERM_CLI's stand-in, else the plugin's own. */
+export async function binOf(cx: Ctx): Promise<string> {
+  return cliOf(cx.pluginRoot, (await cx.env('THIMBLE_TERM_CLI').catch(() => undefined)) || undefined)
 }
 
-/** This session's scope when it runs in terminal mode, else null (thimble-term stays idle). */
-export async function scopeOf(cx: Ctx): Promise<Scope | null> {
-  const ws = ((await cx.env('THIMBLE_WS').catch(() => undefined)) ?? '').replace(/\/+$/, '')
-  if (!ws) return null
-  const raw = await cx.read(`${ws}/trusted/launch.json`).catch(() => '')
-  if (launchMode(raw) !== 'terminal') return null
-  const cwd = await cx.root()
-  const bin = cliOf(cx.pluginRoot, (await cx.env('THIMBLE_TERM_CLI').catch(() => undefined)) || undefined)
-  const env: Record<string, string> = { THIMBLE_WS: ws, THIMBLE_MODE: 'terminal' }
+/** thimble's home: THIMBLE_HOME, else ~/.thimble. */
+export async function homeOf(cx: Ctx): Promise<string> {
+  const set = ((await cx.env('THIMBLE_HOME').catch(() => undefined)) ?? '').replace(/\/+$/, '')
+  if (set) return set
+  const home = ((await cx.env('HOME').catch(() => undefined)) ?? '').replace(/\/+$/, '')
+  return `${home}/.thimble`
+}
+
+/** The environment every `thimble` call of this session carries (the ports and home the person set). */
+export async function envOf(cx: Ctx): Promise<Record<string, string>> {
+  const env: Record<string, string> = {}
   for (const k of ['THIMBLE_HOME', 'THIMBLE_PORT', 'THIMBLE_UI_PORT']) {
     const v = await cx.env(k).catch(() => undefined)
     if (v) env[k] = v
   }
-  return { ws, cwd, bin, env }
+  return env
+}
+
+/** The scope once `thimble activate` named the workspace folder `ws` for the corpus folder `cwd`. */
+export async function scopeOf(cx: Ctx, ws: string, cwd: string): Promise<Scope> {
+  return { ws: ws.replace(/\/+$/, ''), cwd, bin: await binOf(cx), env: await envOf(cx) }
 }
 
 /** What a run printed, as JSON: its value when it exited 0 and printed JSON without an `error` key, else why not. */
@@ -92,6 +96,19 @@ export async function act<T = Record<string, unknown>>(cx: Ctx, sc: Scope, kind:
   }
 }
 
+/** An act whose payload goes on standard input (`thimble act <kind> --cwd <dir> --stdin`): the coverage facts of a turn,
+ *  which may name more paths than one argument holds. */
+export async function actStdin<T = Record<string, unknown>>(cx: Ctx, sc: Scope, kind: string, payload: Record<string, unknown>): Promise<Got<T>> {
+  try {
+    const r = await cx.run([sc.bin, 'act', kind, '--cwd', sc.cwd, '--stdin'], { cwd: sc.cwd, env: sc.env, stdin: JSON.stringify(payload), timeoutMs: ACT_TIMEOUT_MS })
+    const got = parsePrinted(r)
+    if (got.ok && (got.value as { ok?: unknown })?.ok === false) return { ok: false, error: String((got.value as { error?: unknown }).error ?? 'refused') }
+    return got as Got<T>
+  } catch (err) {
+    return { ok: false, error: String(err).slice(0, 300) }
+  }
+}
+
 /** An act that may run longer than a run allows (`label-run` on every record): started beside the session, which it ends
  *  with, its answer read once it exits. */
 export async function actLong<T = Record<string, unknown>>(cx: Ctx, sc: Scope, kind: string, payload: Record<string, unknown>): Promise<Got<T>> {
@@ -121,6 +138,10 @@ export const AREAS = {
   // a view built (its folder in the local extension) or proposed (proposals.json)
   views: [{ dir: 'extension/views' }, { dir: 'views', names: ['proposals.json'] }],
   ui: [{ dir: '', names: ['ui.jsonl'] }],
+  // what the session's tool calls saw of the data (coverage.py touches the folder when a record count ends) and the
+  // checks' comments on Claude's answers
+  coverage: [{ dir: 'coverage' }],
+  answers: [{ dir: '', names: ['answer-comments.json'] }],
 } as const satisfies Record<string, readonly { dir: string; names?: readonly string[] }[]>
 
 export type Area = keyof typeof AREAS

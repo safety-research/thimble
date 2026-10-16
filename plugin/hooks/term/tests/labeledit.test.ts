@@ -5,7 +5,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { LABEL_HUES, PICKED_HUES } from '../paint'
+import { LABEL_HUES, PICKED_HUES, setTheme } from '../paint'
 import { COLOR_NAMES, LABEL_WHEEL, colorName, hueOf } from '../labels'
 import { CWD, LABEL, shown, world } from './fixtures'
 import type { World } from './fixtures'
@@ -356,19 +356,28 @@ test("in a narrow pane each value's `color` and `filter` stand on a row of their
   await pane.unmount()
 })
 
-test('each label color keeps 3:1 against white, a light panel, black and a dark panel, as the series do', () => {
+test("each label color keeps 3:1 against its theme's grounds (the browser's light paper on a light theme, Dark's on a dark one), as the series do", () => {
   const lum = (hex: string) => {
     const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255).map(c => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4))
     return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!
   }
   const ratio = (a: string, b: string) => (Math.max(lum(a), lum(b)) + 0.05) / (Math.min(lum(a), lum(b)) + 0.05)
-  expect(LABEL_HUES.length).toBe(12)
-  for (const hue of LABEL_HUES) for (const bg of ['#ffffff', '#f0f0f0', '#000000', '#1e1e1e']) expect(ratio(hue, bg)).toBeGreaterThanOrEqual(3)
-  // red, purple and pink, which a value holds only as the analyst picked them, are colors 13 to 18 of their own
-  expect(PICKED_HUES.length).toBe(6)
-  for (const hue of PICKED_HUES) for (const bg of ['#ffffff', '#f0f0f0', '#000000', '#1e1e1e']) expect(ratio(hue, bg)).toBeGreaterThanOrEqual(3)
-  expect([13, 18].map(hueOf)).toEqual([PICKED_HUES[0], PICKED_HUES[5]])
-  expect(hueOf(1)).toBe(LABEL_HUES[0])
+  // 0.9.0: the label colors are the browser's tokens per theme (SPEC-v2 3.19, paint.ts setTheme), not one hue for both
+  // the light theme's grounds: white and the browser's light pane (--paper-1); the dark theme's: black and a dark panel
+  try {
+    for (const [theme, grounds] of [['light', ['#ffffff', '#f5f3ee']], ['dark', ['#000000', '#1e1e1e']]] as const) {
+      setTheme(theme)
+      expect(LABEL_HUES.length).toBe(12)
+      for (const hue of LABEL_HUES) for (const bg of grounds) expect(ratio(hue, bg), `${theme} ${hue} on ${bg}`).toBeGreaterThanOrEqual(3)
+      // red, purple and pink, which a value holds only as the analyst picked them, are colors 13 to 18 of their own
+      expect(PICKED_HUES.length).toBe(6)
+      for (const hue of PICKED_HUES) for (const bg of grounds) expect(ratio(hue, bg), `${theme} ${hue} on ${bg}`).toBeGreaterThanOrEqual(3)
+      expect([13, 18].map(hueOf)).toEqual([PICKED_HUES[0], PICKED_HUES[5]])
+      expect(hueOf(1)).toBe(LABEL_HUES[0])
+    }
+  } finally {
+    setTheme('dark')
+  }
 })
 
 test('each label color has the name show_label takes for it, and the wheel holds each of the eighteen once', () => {

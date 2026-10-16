@@ -1,6 +1,11 @@
 // Fixture states: what `thimble state <surface>` prints for a small wiki corpus, in the shapes of the server's GET
 // routes (hooks/data.ts), and a fake `thimble` command that answers them in a test (`process.run` beneath the plugin).
 // The cells and the label are cut from a real workspace (collusion-wiki); the rest is made to fit them.
+//
+// thimble is on in the world's session from its start: the session's marker (`<home>/up/<sid>.active`, C1) is there,
+// so session.start restores it as after a module reload. `world(on, { active: false })` starts with no marker, for
+// the tests of activation; the fake also answers `thimble activate`, `guide`, `features`, `act coverage --stdin`,
+// `state coverage` and `state answer-comments`, and the shim's `load_thimble` (`mcp.call`).
 import type { On } from 'claude-code'
 import { mock } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
@@ -8,6 +13,11 @@ import type { Engine } from 'claude-code/testing'
 export const WS = '/home/a/.thimble/app/workspaces/wiki'
 export const CWD = '/corpus/wiki'
 export const CLI = '/tree/plugin/bin/thimble'
+export const HOME = '/home/a/.thimble'
+export const SID = 's1'
+/** The session's guide marker and the guide the fake prints (its lead line names the marker, SPEC-v2 3.4). */
+export const MARKER = 'a1b2c3d4'
+export const GUIDE = `thimble guidance ${MARKER}: thimble is on in this folder. The text below is thimble's guidance for this session.\n\nMake cards with add_card. Cite with [[value|ref]].`
 
 const html = `<div><table border="1" class="dataframe">
   <thead>
@@ -225,6 +235,54 @@ export type World = {
   viewHost: { requests: { path: string; body: Record<string, unknown> }[]; frame: (n: number, ev?: Record<string, unknown>) => Record<string, unknown>; acts: (ev: Record<string, unknown>) => Record<string, unknown>[]; started: number }
   /** Claude Code's placement of panes (placing), when a test plays it; left out, every open is placed */
   place?: Placement
+  // ---- 0.9.0
+  /** this conversation's id ($.session.id()) */
+  sid: string
+  /** what `thimble activate` answers (C2), the calls it got, and a promise it waits for before it answers */
+  activate: Record<string, unknown>
+  activations: string[][]
+  holdActivate: Promise<void> | null
+  /** the guide: owed or not, how many times it was marked sent and unmarked */
+  guide: string
+  guideOwed: boolean
+  marked: number
+  unmarked: number
+  /** the shim: each `$.mcp.call`, whether it writes listed.json, and the error it answers ('' for none) */
+  mcp: { server: string; tool: string }[]
+  listed: boolean
+  mcpError: string
+  /** thimble's feature settings (`thimble features`) and each `--set` */
+  features: Record<string, boolean>
+  sets: string[]
+  /** what `act coverage --stdin` answers as the summary line, and each payload it got */
+  coverageLine: string
+  coverage: Record<string, unknown>[]
+  /** `state answer-comments` */
+  comments: Record<string, unknown>[]
+  running: Record<string, unknown>[]
+  /** file sizes and folders `fs.stat` answers (paths of `files` and `stamps` are files of size 1) */
+  sizes: Map<string, number>
+  dirs: Set<string>
+  /** the /config rows `$.config.set` changed, each with the store's synced settings when it came */
+  configSets: { key: string; value: unknown; synced?: unknown }[]
+  /** the plugin's store */
+  store: Map<string, unknown>
+  /** what main's next tool call answers, by its input, over `toolText` */
+  toolAnswer?: (e: Record<string, unknown>) => Record<string, unknown>
+  /** $.session.root() and cwd() fail, or $.session.id() (a hook that throws) */
+  rootFails?: boolean
+  sidFails?: boolean
+  /** a compaction's answer: skipped with this reason, else done */
+  compactSkip?: string
+  /** each line of the log, the debug log's too */
+  logs: string[]
+  /** each file written, each state value set (by key), each interval started, each sleep */
+  writes: string[]
+  stateSets: string[]
+  /** the last value the plugin set under each state key (`key:id` for a family member) */
+  state: Map<string, unknown>
+  timers: number
+  sleeps: number
 }
 
 /** How Claude Code places a pane (UiOpenResult): an open it was asked for (`asking`: a Button's handler still runs, or
@@ -274,7 +332,7 @@ export function viewFrame(n: number, over: Record<string, unknown> = {}): Record
 }
 
 /** `thimble state` and `thimble act` answered from the fixtures; the workspace's files as `fs` sees them. */
-export function world(on: On, opts: { mode?: string; ws?: string | null; module?: boolean } = {}): World {
+export function world(on: On, opts: { mode?: string; ws?: string | null; active?: boolean; store?: Record<string, unknown> } = {}): World {
   const w: World = {
     calls: [],
     acts: [],
@@ -310,17 +368,81 @@ export function world(on: On, opts: { mode?: string; ws?: string | null; module?
     focusAsked: [],
     filled: [],
     viewHost: { requests: [], frame: n => viewFrame(n), acts: () => [], started: 0 },
+    sid: SID,
+    activate: { ok: true, session: SID, ws: 'wiki', path: WS, role: 'main', took_over: null, first_in_folder: true },
+    activations: [],
+    holdActivate: null,
+    guide: GUIDE,
+    guideOwed: true,
+    marked: 0,
+    unmarked: 0,
+    mcp: [],
+    listed: true,
+    mcpError: '',
+    features: { autoActivate: true, viewProposals: true, labels: true, checks: true, citationMarks: true, coverage: true, cardCheck: true },
+    sets: [],
+    coverageLine: 'saw 1 of 3 files',
+    coverage: [],
+    comments: [],
+    running: [],
+    sizes: new Map(),
+    dirs: new Set(),
+    configSets: [],
+    store: new Map(),
+    writes: [],
+    logs: [],
+    stateSets: [],
+    state: new Map(),
+    timers: 0,
+    sleeps: 0,
   }
+  // thimble on in this session from its start (the marker a module reload restores from), unless a test starts it off
+  const active = opts.active ?? (opts.ws !== null && (opts.mode ?? 'terminal') === 'terminal')
+  const markerOf = (sid: string) => `${HOME}/up/${sid}.active`
+  const writeMarker = (sid: string, via: string) => w.files.set(markerOf(sid), JSON.stringify({ cwd: CWD, ws: 'wiki', path: WS, via, role: 'main', mod: true, at: 1_790_000_000 }))
+  if (active) {
+    writeMarker(SID, 'command')
+    w.guideOwed = false
+  }
+  // the plugin's store ($.store), in memory, which a test reads (w.store)
+  for (const [k, v] of Object.entries(opts.store ?? {})) w.store.set(k, JSON.parse(JSON.stringify(v)))
+  on('store.get', ($, e) => ({ value: w.store.has(e.key) ? JSON.parse(JSON.stringify(w.store.get(e.key))) : undefined }) as never)
+  on('store.set', ($, e) => {
+    w.store.set(e.key, JSON.parse(JSON.stringify(e.value)))
+    return { value: undefined } as never
+  })
+  on('store.delete', ($, e) => {
+    w.store.delete(e.key)
+    return { value: undefined } as never
+  })
+  on('store.keys', () => ({ value: [...w.store.keys()] }) as never)
+  on('session.id', () => {
+    if (w.sidFails) throw new Error('no session id')
+    return { value: w.sid } as never
+  })
+  on('mcp.call', async ($, e) => {
+    w.mcp.push({ server: String(e.server), tool: String(e.tool) })
+    if (w.mcpError) return { value: { content: [{ type: 'text', text: w.mcpError }], isError: true } } as never
+    if (w.listed) w.files.set(`${HOME}/up/${w.sid}/listed.json`, JSON.stringify({ digest: 'd', count: 36, names: [], at: w.clock.now() / 1000 + 1 }))
+    return { value: { content: [{ type: 'text', text: w.guide }] } } as never
+  })
+  on('config.set', ($, e) => {
+    w.configSets.push({ key: e.key, value: e.value, synced: w.store.get('settings.synced') })
+    return { value: e.value } as never
+  })
   const ws = opts.ws === undefined ? WS : opts.ws
-  // THIMBLE_NO_MODULE keeps thimble.ts, which the plugin's one hooks module registers first, idle: these tests are the
-  // terminal UI's (plugin/hooks/register.ts). `module`: thimble.ts runs too, as in a session the launcher started
-  // (plugin/hooks/tests/one-module.test.ts)
-  const module: Record<string, string> = opts.module ? { THIMBLE_LAUNCHED: '1' } : { THIMBLE_NO_MODULE: '1' }
-  mock.env(on, { ...(ws ? { THIMBLE_WS: ws } : {}), THIMBLE_HOME: '/home/a/.thimble', THIMBLE_TERM_CLI: CLI, ...module })
+  // THIMBLE_NO_MODULE: thimble.ts, in the same hooks module, starts no bridge in these tests
+  mock.env(on, { ...(ws ? { THIMBLE_WS: ws } : {}), THIMBLE_HOME: '/home/a/.thimble', THIMBLE_TERM_CLI: CLI, THIMBLE_NO_MODULE: '1' })
   w.clock = mock.clock(on, { now: 1_790_000_000_000 })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
-  on('session.root', () => ({ value: CWD }))
-  on('session.cwd', () => ({ value: CWD }))
+  on('session.root', () => {
+    if (w.rootFails) throw new Error('no root')
+    return { value: CWD }
+  })
+  on('session.cwd', () => {
+    if (w.rootFails) throw new Error('no cwd')
+    return { value: CWD }
+  })
   on('fs.read', ($, e) => {
     if (e.path === `${WS}/trusted/launch.json`) return { value: w.launch }
     const t = w.files.get(e.path)
@@ -329,15 +451,35 @@ export function world(on: On, opts: { mode?: string; ws?: string | null; module?
   })
   // a file the renderer writes (the workspace's terminal/chat.json) is kept, and read back
   on('fs.write', ($, e) => {
+    w.writes.push(e.path)
     w.files.set(e.path, e.text)
     return { value: undefined } as never
+  })
+  // what the plugin set in its state, and the timers it started (the kit answers both beneath this)
+  on('state.set', ($, e, next) => {
+    const key = String((e as { key?: unknown }).key ?? '')
+    const id = (e as { id?: unknown }).id
+    w.stateSets.push(key)
+    w.state.set(typeof id === 'string' ? `${key}:${id}` : key, (e as { value?: unknown }).value)
+    return next(e)
+  })
+  on('clock.every', { ms: /^/ }, ($, e, next) => {
+    w.timers++
+    return next(e)
+  })
+  on('clock.sleep', { ms: /^/ }, ($, e, next) => {
+    w.sleeps++
+    return next(e)
   })
   // the session's figures: it began when the test's clock starts, unless a test says it began earlier (a resume)
   on('session.usage', () => ({ value: { startedAt: w.startedAt ?? 1_790_000_000_000, context: {}, rateLimits: [] } }) as never)
   on('fs.stat', ($, e) => {
-    const t = w.stamps.get(e.path)
-    if (t === undefined) return { deny: `ENOENT: ${e.path}` } as never
-    return { value: { kind: 'file', size: 1, mtimeMs: t, isLink: false } }
+    const path = e.path.replace(/\/+$/, '') || '/'
+    if (w.dirs.has(path) || path === CWD) return { value: { kind: 'dir', size: 0, mtimeMs: 1, isLink: false, ...(e.resolve ? { realPath: path } : {}) } } as never
+    const size = w.sizes.get(path)
+    const t = w.stamps.get(path)
+    if (t === undefined && size === undefined && !w.files.has(path)) return { deny: `ENOENT: ${path}` } as never
+    return { value: { kind: 'file', size: size ?? 1, mtimeMs: t ?? 1, isLink: false, ...(e.resolve ? { realPath: path } : {}) } } as never
   })
   // a folder's listing: one entry per stamp under it, its time the stamp (`ui.jsonl` sits in the workspace itself)
   on('fs.list', ($, e) => {
@@ -345,10 +487,50 @@ export function world(on: On, opts: { mode?: string; ws?: string | null; module?
     return { value: out } as never
   })
   const out = (v: unknown, code = 0) => ({ value: { exitCode: code, stdout: JSON.stringify(v), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
-  on('process.run', ($, e) => {
+  const said = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  on('process.run', async ($, e) => {
     const argv = [...e.argv]
     w.calls.push(argv)
     if (argv[0] !== CLI) return out({ error: `not thimble: ${argv[0]}` }, 1)
+    const opt = (name: string) => (argv.includes(name) ? argv[argv.indexOf(name) + 1] ?? '' : '')
+    if (argv[1] === 'activate') {
+      w.activations.push(argv)
+      if (w.holdActivate) await w.holdActivate
+      const sid = opt('--session')
+      if (w.activate.ok === true) writeMarker(sid, opt('--via'))
+      return out({ ...w.activate, session: sid })
+    }
+    if (argv[1] === 'guide') {
+      if (argv.includes('--unmark')) {
+        w.unmarked++
+        w.guideOwed = true
+        return said('')
+      }
+      if (argv.includes('--if-owed') && !w.guideOwed) return said('')
+      if (argv.includes('--mark')) {
+        w.marked++
+        w.guideOwed = false
+      }
+      return said(w.guide)
+    }
+    if (argv[1] === 'features') {
+      for (let i = 0; i < argv.length; i++) {
+        if (argv[i] !== '--set') continue
+        const [k, v] = (argv[i + 1] ?? '').split('=')
+        w.sets.push(argv[i + 1] ?? '')
+        if (k) w.features[k] = v === 'on'
+      }
+      return out({ settings: w.features, at: 1 })
+    }
+    if (argv[1] === 'act' && argv.includes('--stdin')) {
+      const payload = JSON.parse(String((e as { init?: { stdin?: unknown } }).init?.stdin ?? '{}')) as Record<string, unknown>
+      w.acts.push({ kind: argv[2]!, payload })
+      if (argv[2] === 'coverage') {
+        w.coverage.push(payload)
+        return out({ ok: true, summary: { files: { seen: 1, searched: 0, never: 2, total: 3 }, records: { seen: 0, total: 0, counted: false }, line: w.coverageLine } })
+      }
+      return out({ ok: true })
+    }
     const [, verb, what, flag, , ...rest] = argv
     if (flag !== '--cwd') return out({ error: 'no --cwd' }, 1)
     if (verb === 'act') {
@@ -432,6 +614,10 @@ export function world(on: On, opts: { mode?: string; ws?: string | null; module?
         return out(w.states.ui)
       case 'checks':
         return out(w.states.checks)
+      case 'coverage':
+        return out({ summary: { files: { seen: 1, searched: 0, never: 2, total: 3 }, records: { seen: 10, total: 100, counted: true }, line: 'saw 10% of records (1 of 3 files)' }, folder: '', counting: false })
+      case 'answer-comments':
+        return out({ comments: w.comments, running: w.running })
       default:
         return out({ error: `no surface ${what}` }, 1)
     }
@@ -520,21 +706,29 @@ export function world(on: On, opts: { mode?: string; ws?: string | null; module?
     w.toasts.push(String((e as { text?: unknown }).text ?? ''))
     return { value: undefined } as never
   })
-  on('ui.log', () => ({ value: undefined }) as never)
+  on('ui.log', ($, e) => {
+    w.logs.push(String((e as { text?: unknown }).text ?? ''))
+    return { value: undefined } as never
+  })
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
+  on('session.end', ($, e) => ({ sessionId: e.sessionId }) as never)
+  on('session.compact', ($, e) => (w.compactSkip ? { skip: w.compactSkip } : { messages: e.messages }) as never)
   on('command.run', ($, e) => {
     w.commands.push(`/${e.command} ${e.args}`.trim())
     return { text: '(the engine command)' }
   })
   on('tool.call', ($, e) => {
     w.toolCalls.push({ ...(e as unknown as Record<string, unknown>) })
+    if (w.toolAnswer) return w.toolAnswer(e as unknown as Record<string, unknown>) as never
     return { result: w.toolText, text: w.toolText } as never
   })
   on('ui.copy', () => ({ value: { isCopied: true } }) as never)
   on('prompt.submit', ($, e) => {
     w.submitted.push(String((e as { text?: unknown }).text ?? ''))
-    return { text: String((e as { text?: unknown }).text ?? '') } as never
+    // the engine answers with the context that arrived beside the prompt (e.context)
+    const context = (e as { context?: unknown }).context
+    return { text: String((e as { text?: unknown }).text ?? ''), ...(Array.isArray(context) && context.length ? { context } : {}) } as never
   })
   on('ui.focus', ($, e) => {
     w.focused.push(String((e as { key?: unknown }).key ?? ''))
@@ -583,4 +777,51 @@ export function shown(tree: unknown): string {
  *  (panel.tsx RELAY) takes the focus ring, which raises `ui.focus` with origin the plugin. */
 export async function takesKeys($: Engine): Promise<void> {
   await $.ui.focus({ requestId: 'thimble', component: 'Pane', element: 'keys-pick', origin: { kind: 'plugin', name: 'thimble' } } as never)
+}
+
+// ------------------------------------------------------------------------------------------------ 0.9.0 helpers
+
+/** A session start as Claude Code raises it: a person at the terminal unless a test says otherwise. */
+export async function startSession($: Engine, w: World, opts: { surface?: string | null; isInteractive?: boolean } = {}): Promise<void> {
+  await $.session.start({ cwd: CWD, surface: opts.surface === undefined ? 'terminal' : opts.surface, isInteractive: opts.isInteractive ?? true } as never)
+  await w.clock.settle()
+}
+
+/** Claude Code's Read answering each call with the whole file (`lines` lines), or as `as` says (a part, a PDF, …). */
+export function reads(w: World, as: (path: string) => Record<string, unknown> = path => ({ type: 'text', file: { filePath: path, content: 'x', numLines: 3, startLine: 1, totalLines: 3 } })): void {
+  w.toolAnswer = e => {
+    if (e.tool === 'Read') {
+      const result = as(String(e.file_path ?? ''))
+      return { result, text: 'the file' }
+    }
+    if (e.tool === 'Bash') return { result: { stdout: w.toolText, stderr: '', interrupted: false }, text: w.toolText }
+    return { result: w.toolText, text: w.toolText }
+  }
+}
+
+/** Files of the session folder, by their paths relative to it, with their sizes (1 KB unless given). */
+/** The steps of activation the debug log said (activate.ts trail), in order. */
+export function trailOf(w: World): string[] {
+  return w.logs.filter(l => l.startsWith('thimble: activation ')).map(l => l.slice('thimble: activation '.length))
+}
+
+export function corpus(w: World, files: Record<string, number> | string[]): void {
+  const entries = Array.isArray(files) ? files.map(f => [f, 1024] as const) : Object.entries(files)
+  for (const [f, size] of entries) w.sizes.set(`${CWD}/${f}`, size)
+}
+
+let callN = 0
+/** A tool call of main's (or of the subagent `agentId`). */
+export async function call($: Engine, tool: string, input: Record<string, unknown>, agentId?: string): Promise<Record<string, unknown>> {
+  callN++
+  return (await $.tool.call({ tool, tool_use_id: `u${callN}`, ...input, ...(agentId ? { agentId } : {}) } as never)) as unknown as Record<string, unknown>
+}
+
+/** A turn of main's around `body`: its prompt, `body`'s calls, a text row (`row`, `text`), its end. */
+export async function aTurn($: Engine, w: World, row: string, text: string, body: () => Promise<void> = async () => undefined): Promise<void> {
+  await $.turn.start({ text: 'What is in this folder?', turnId: `t-${row}` } as never)
+  await body()
+  await $.session.append({ door: 'response', origin: { kind: 'model', model: 'm' }, uuid: row, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text }] } } as never).catch(() => undefined)
+  await $.turn.complete({ turnId: `t-${row}`, answer: text, durationMs: 5, reason: 'answer', isAborted: false } as never)
+  await w.clock.settle()
 }

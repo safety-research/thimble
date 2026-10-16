@@ -1,20 +1,15 @@
-// The band above the prompt (term-panel lane, build spec 3.8): a panel Claude Code left undrawn and its `open panel`,
-// the view proposal waiting for the analyst's answer, every agent's open notices, and what is new in the workspace
-// since home was last opened (`open ›`, `dismiss`). 0.9.0's summary line replaces that last row here.
-//
-// The AbovePrompt hook as 0.8.0's register.tsx had it, moved here unchanged; register.tsx calls registerBand once. The
-// hook builds its context from its own `$` with register.tsx's cxOf, imported by name (Claude Code follows `$` only into
-// functions declared in or imported into the file). Nothing here runs at import.
+// The rows above the prompt (the AbovePrompt hook): the pending pane, the view proposal, the notices and what is new
+// in the workspace. Moved out of register.tsx unchanged; the panel lane owns it (SPEC-v2 3.8, the summary line).
 import type { On, RenderElement } from 'claude-code'
 
-import { COLORS } from './paint'
+import { cxOf } from './ctx'
 import { answerOffer, dismissNotice, homeNotices, homeOffer, noticeAct, openHomeNew, openNoticeChat, proposalsOff } from './panel'
-import { cxOf } from './register'
+import { COLORS } from './paint'
 import { PANEL, closePanel, openPending, placedLater, retryPending, rt, seeHome } from './term'
 
 const ABOVE_LABEL = 16
 
-/** The band's hook (ui.render, AbovePrompt). */
+/** The AbovePrompt hook; called once from register.tsx. */
 export function registerBand(on: On): void {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (!rt.sc || e.props.hasSurvey || e.props.view.agentId) return next(e)

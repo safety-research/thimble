@@ -1,4 +1,4 @@
-# thimble-term's visual system
+# The terminal UI's visual system
 
 How every surface of terminal mode draws on Claude Code's character grid: main's chat, cards and the panel. The
 hooks' comments cite its rules and sections by number ("SPEC.md rule 7", "SPEC.md, section 7, "Home""). A view built
@@ -165,7 +165,7 @@ the type area runs from A0 to R.
 | tip | `userMessageBackground`, a background | the tip of the citation under the pointer | |
 | prompt | `userMessageBackground`, a background | a side thread's question, across the type area, as Claude Code draws a prompt | the analyst's question |
 | inline code | `permission` | inline code in thimble-term's own paragraphs | code |
-| palette | `SERIES`, seven hues that keep 3:1 on both panels; `LABEL_HUES` and `PICKED_HUES`, the browser's eighteen label colors moved to keep it too | `●`, marks, bars, swatches | a value of the color field |
+| palette | `SERIES`, the browser's seven series hues; `LABEL_HUES` and `PICKED_HUES`, its eighteen label colors (palette.gen.ts, from tokens.css: the light paper's on a light theme, Dark's on any other) | `●`, marks, bars, swatches; a check's tint (its place blended 16% toward the ground, 30% while open) and its `⚑` | a value of the color field; a check's comment |
 | red | `error` | a problem's words and its `×` or `!` | a problem |
 | diff | `diffAddedWord`, `diffRemovedWord` | the lines a diff added and removed, and their marks | a diff, as Claude Code colors one |
 | selection | `selectionBg`, a background | a choice in use (rule 21) | |
@@ -197,7 +197,7 @@ and, given `startLine`, its dim gutter of line numbers.
 ### 5. Symbols
 
 One glyph, one meaning, everywhere. A glyph and a word that say the same thing are never drawn together (`○ Edit Bursts`,
-not `○ Edit Bursts proposed`). Besides the words of the corpus and the model, thimble-term draws no non-ASCII character
+not `○ Edit Bursts proposed`). Besides the words of the corpus and the model, the terminal UI draws no non-ASCII character
 outside this table.
 
 | glyph | its one meaning | color |
@@ -213,6 +213,8 @@ outside this table.
 | `❯` | the selected row | accent |
 | `❯` on the prompt background | the analyst's question in a side thread, as Claude Code marks a prompt | dim |
 | `⏺` | an answer: main's reply (Claude Code's own) and a side thread's answer | text |
+| `⚑` | a check commented on the passage that starts on this row (it wins over `↳` and `?` there) | the check's color |
+| `▸` | the coverage line under an answer: what the turn's calls saw of the data | dim |
 | `?` | ask a side thread about this passage (shown under the pointer; under the header for a file's chosen record) | link |
 | `↳` | a side thread was asked here (in a reply's margin, a click opens it); the start of a `↳` row | link in the margin; dim on a row |
 | **navigation** | | |

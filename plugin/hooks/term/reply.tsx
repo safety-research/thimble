@@ -14,12 +14,18 @@
 //
 // A citation's state after it: ◌ while thimble's links check runs on a card's takeaway, ✓ once the check recomputed it,
 // a red × when the check found another value. The citation under the pointer shows its status in plain words (where it
-// was found, or why not) on a quiet box.
+// was found, or why not) on a quiet box. With "Citation marks" off a citation is a plain link: no mark, no check.
+//
+// A passage of main's answer a check commented on (SPEC-v2 3.12) is tinted in the check's color (16%, 30% while its
+// comment is open in the panel) and carries a flag ⚑ in that color in the margin on its first row; its paragraph is
+// drawn by the mod's own layout (para.tsx, cite.ts), which knows where it wraps. A click on either opens the panel at
+// Checks. In fullscreen a card's border row ends with a ↗ that opens the card in the browser; a custom card says the
+// browser draws it.
 import type { RenderElement, ResolveInput } from 'claude-code'
 
 import type { TermCard, TermLinks, TermVerdict } from './types'
-import { blockClaims, chipLook, citeLabel, plainCites, richMarkdown, showsValue, streamLink } from './cite'
-import type { ChipView } from './cite'
+import { blockClaims, blockLayout, chipLook, citeLabel, passageIn, plainCites, richMarkdown, showsValue, streamLink, tintCells } from './cite'
+import type { ChipView, Tint } from './cite'
 import { LINK } from './chrome'
 import { cardLayout, cut, labelHead, placeWords, wrapRows } from './draw'
 import type { CardData, CardExample } from './draw'
@@ -29,9 +35,12 @@ import type { Target } from './gestures'
 import { bareCard, cardWords, chipPlace, cid, questionOf, citations, clip, curlyQuotes, isChip, labelRef, labelRunning, mdPieces, noteLabelName, noteQuestion, outputLine, parseReply, quoted, sectionsOf } from './lib'
 import { linesEl } from './lines'
 import type { Block, Citation, Run } from './lib'
-import { COLORS, paintLines } from './paint'
+import { COLORS, FLAG, labelHex, paintLines, themeNow, tintOf } from './paint'
 import { labelLinkStale, labelsOf } from './model'
 import { loadCards, queueCitations, rt } from './term'
+import type { AnswerComment } from './contracts'
+import { openInBrowser } from './offramp'
+import { featureOn } from './settings'
 import type { Ctx } from './ctx'
 import type { ThimbleLabel } from './cell'
 
@@ -182,6 +191,8 @@ export async function citeStatus(cx: Ctx, c: Citation, v: TermVerdict | undefine
  *  · found`), since its brackets name it short. */
 export async function chipOf(cx: Ctx, c: Citation, card?: string): Promise<ChipView> {
   const chip = isChip(c) ? { chip: true } : {}
+  // "Citation marks" off: a plain link, unchecked
+  if (!featureOn('citationMarks')) return { label: citeLabel(c), state: 'link', mark: '', spin: false, tip: '', ...chip }
   // a label's link (`[33](concept:<id>/yes)`): blue, no check, a click opens the label at its value; in a card's
   // takeaway, red once the label counts another number (a verdict changed the counts), its tip the count now
   const lr = labelRef(c.ref)
@@ -337,6 +348,39 @@ export type ReplyOpts = {
   focus?: Record<string, Focus>
   /** a blank row before each card and after it (a side thread's answer), where elsewhere the border stands in for one */
   cardGaps?: boolean
+  /** the checks' open comments on this row's passages: tinted, flagged; `lit` the one open in the panel; `check` opens
+   *  the panel on one */
+  comments?: AnswerComment[]
+  lit?: string | null
+  check?: (id: string) => void
+}
+
+/** Where a comment's passage stands in the text drawn: its offsets when the text there is its quote, else where its
+ *  quote is found, else null (no tint; the panel still holds the comment). */
+export function locate(text: string, c: Pick<AnswerComment, 'start' | 'end' | 'quote'>): [number, number] | null {
+  if (!c.quote) return null
+  if (c.start >= 0 && c.end > c.start && text.slice(c.start, c.end) === c.quote) return [c.start, c.end]
+  const at = text.indexOf(c.quote)
+  return at >= 0 ? [at, at + c.quote.length] : null
+}
+
+/** A reply's blocks with each Markdown chunk that holds a commented passage read again as rich blocks (paragraphs,
+ *  items, headings, quotes), so the mod's layout draws it; the places stay the reply's. */
+function withPassages(blocks: Block[], spans: readonly [number, number][]): Block[] {
+  if (!spans.length) return blocks
+  const out: Block[] = []
+  for (const b of blocks) {
+    const at = b.at ?? -1
+    const end = b.end ?? -1
+    if (b.type !== 'md' || !spans.some(([x, y]) => x < end && y > at)) {
+      out.push(b)
+      continue
+    }
+    const sub = parseReply(b.text, { all: true }).map(x => ({ ...x, at: (x.at ?? 0) + at, end: (x.end ?? 0) + at }))
+    if (sub[0]) sub[0].gap = b.gap
+    out.push(...sub)
+  }
+  return out
 }
 
 /** A reply's blocks as rows: Markdown as the engine draws it, a paragraph or table that holds citations as links, a card
@@ -349,7 +393,12 @@ export async function drawReply(cx: Ctx, e: ResolveInput, text: string, width: n
   const cols = Math.max(24, width)
   const prefix = opts.prefix ?? ''
   const out: RenderElement[] = []
-  const blocks = parseReply(text)
+  // the checks' passages, where the text drawn holds them
+  const located = (opts.comments ?? []).flatMap(c => {
+    const at = locate(text, c)
+    return at ? [{ c, at }] : []
+  })
+  const blocks = withPassages(parseReply(text), located.map(l => l.at))
   const secs = sectionsOf(text)
   let lead = opts.first ? '⏺' : ' '
   let n = 0
@@ -381,8 +430,9 @@ export async function drawReply(cx: Ctx, e: ResolveInput, text: string, width: n
       ),
     }
   }
-  // a block's row: its margin (⏺ on the reply's first, a passage's mark in its cell), then the block, filling the column
-  const row = async (el: RenderElement, ask?: Ask): Promise<RenderElement> => {
+  // a block's row: its margin (⏺ on the reply's first, a passage's mark in its cell), then the block, filling the column.
+  // A flag stands on the row of the block it names (`flag.row`), in its check's color, over a ↳ or a "?" on that row
+  const row = async (el: RenderElement, ask?: Ask, flag?: { row: number; color: string; id: string }): Promise<RenderElement> => {
     const mark = lead
     lead = ' '
     const dot = mark.trim() !== ''
@@ -392,13 +442,27 @@ export async function drawReply(cx: Ctx, e: ResolveInput, text: string, width: n
         {el}
       </Box>
     )
+    const flagEl = flag ? linesEl(cx, e, `flag-${ask?.key ?? `${prefix}${n}`}`, [[{ s: FLAG, fg: flag.color }]], [{ y: 0, x0: 0, x1: 1, row: false, run: () => opts.check?.(flag.id) }], 1) : null
     // a ↳ takes the ⏺'s cell; a "?" lies over it, shown only under the pointer
+    const first = (
+      <Box key="m0" flexDirection="row">
+        {dot && !q?.asked ? <Text>{mark}</Text> : null}
+        {q?.el ?? (dot ? null : <Text> </Text>)}
+      </Box>
+    )
+    const margin = !flagEl ? (
+      <Box width={M} flexShrink={0} flexDirection="row" marginTop={ask?.top ?? 0}>
+        {dot && !q?.asked ? <Text>{mark}</Text> : null}
+        {q?.el ?? (dot ? null : <Text> </Text>)}
+      </Box>
+    ) : (
+      <Box width={M} flexShrink={0} flexDirection="column" marginTop={ask?.top ?? 0}>
+        {flag!.row === 0 ? flagEl : [first, ...Array.from({ length: flag!.row - 1 }, (_, i) => <Text key={`m${i + 1}`}> </Text>), <Box key="flag">{flagEl}</Box>]}
+      </Box>
+    )
     return (
       <Box key={`row-${ask?.key ?? `${prefix}${n}`}`} flexDirection="row">
-        <Box width={M} flexShrink={0} flexDirection="row" marginTop={ask?.top ?? 0}>
-          {dot && !q?.asked ? <Text>{mark}</Text> : null}
-          {q?.el ?? (dot ? null : <Text> </Text>)}
-        </Box>
+        {margin}
         {content}
       </Box>
     )
@@ -469,9 +533,26 @@ export async function drawReply(cx: Ctx, e: ResolveInput, text: string, width: n
     const ask: Ask = { key, words, ...(press ? { press } : {}) }
     if (live) {
       const { Client } = cx.els(e)
+      // the checks' passages in this block: tinted in each check's color, a flag on the first row of the first passage
+      // (two starting on one row share its flag, in the first's color)
+      const tints: Tint[] = []
+      let flag: { row: number; color: string; id: string } | undefined
+      const { at: _at, end: _end, ...plain } = block
+      if (!block.table) {
+        const lay = located.length ? blockLayout(plain, chips, cols, -1) : null
+        for (const { c, at } of [...located].sort((x, y) => x.at[0] - y.at[0])) {
+          if (block.at === undefined || block.end === undefined || at[0] >= block.end || at[1] <= block.at) continue
+          const where = passageIn(plain, text.slice(at[0], at[1]))
+          if (!where || !lay) continue
+          const color = labelHex(c.color)
+          tints.push({ ...where, bg: tintOf(color, themeNow(), opts.lit === c.id ? 0.3 : 0.16), id: c.id })
+          const cells = tintCells(lay, where)
+          if (cells.length && (!flag || cells[0]!.line < flag.row)) flag = { row: cells[0]!.line, color, id: c.id }
+        }
+      }
       // the paragraph fills the column: each citation a link, a click on it the panel; a drag selects and copies
-      const para = <Client key={`para-${key}`} module="./para.tsx" width={cols} props={JSON.parse(JSON.stringify({ cols, block, chips, ids, raws }))} />
-      push(await row(para, ask), gapBefore(i))
+      const para = <Client key={`para-${key}`} module="./para.tsx" width={cols} props={JSON.parse(JSON.stringify({ cols, block: plain, chips, ids, raws, ...(tints.length ? { tints } : {}) }))} />
+      push(await row(para, ask, flag), gapBefore(i))
     } else {
       // elsewhere, Markdown with each citation a link to its file; Markdown has no red, so a problem is marked × too
       const urls: string[] = []
@@ -527,8 +608,11 @@ export type CardOpts = { pane?: boolean; takeaway?: boolean; order?: number; in?
  *  these), then its takeaway, its citations as links. In the card pane the question is the panel's title. A card that
  *  cannot be read is one red line naming it by its place (`× card 2 cannot be drawn: …`), never by its id. */
 export async function cardBlock(cx: Ctx, e: ResolveInput, id: string, w: number, key: string, opts: CardOpts = {}): Promise<RenderElement> {
-  const { Box, Text } = cx.els(e)
+  const { Box, Text, Button } = cx.els(e)
   const live = e.surface === 'terminal' || e.surface === 'desktop'
+  // in fullscreen (the only screen that takes clicks) a ↗ on the card's border row opens it in the browser
+  const fullscreen = (e as { viewport?: { isFullscreen?: boolean } }).viewport?.isFullscreen === true
+  const arrow = fullscreen && !opts.pane ? <Button key={`open-${key}-${id}`} label=" ↗ " plain onPress={() => openInBrowser(cx, `card:${id}`)} /> : null
   const tc: TermCard | undefined = await cx.card(id)
   if (!tc) {
     // a card a reply embeds that no turn of this session made: read it now
@@ -563,7 +647,19 @@ export async function cardBlock(cx: Ctx, e: ResolveInput, id: string, w: number,
       hidden = left
     }
   }
-  if (live) {
+  if (tc.kind === 'custom') {
+    // a custom card is HTML: the browser draws it (its ↗ opens it there)
+    rows.push(
+      <Box key={`custom-${key}-${id}`} flexDirection="column">
+        {opts.pane ? null : <Text bold wrap="truncate-end">{cut(data.question, inner)}</Text>}
+        {opts.pane ? null : <Text> </Text>}
+        <Box flexDirection="row">
+          <Text dimColor>{fullscreen ? 'a custom card · the browser draws it' : 'a custom card · the browser draws it ↗'}</Text>
+          {fullscreen ? <Button key={`custom-open-${key}-${id}`} label=" ↗" plain onPress={() => openInBrowser(cx, `card:${id}`)} /> : null}
+        </Box>
+      </Box>,
+    )
+  } else if (live) {
     const { Client } = cx.els(e)
     rows.push(<Client key={`card-${key}-${id}`} module="./card.tsx" width={inner} props={JSON.parse(JSON.stringify({ card: data, cols: inner, meta, ...(opts.pane ? { pane: true, plotRows: 16 } : {}), ...(opts.focus ? { focus: opts.focus } : {}), ...(clip !== undefined ? { clip } : {}) }))} />)
   } else {
@@ -579,9 +675,20 @@ export async function cardBlock(cx: Ctx, e: ResolveInput, id: string, w: number,
   } else {
     if (opts.takeaway !== false && tc.takeaway.trim()) rows.push(<Box flexDirection="column" width={inner}>{await drawReply(cx, e, tc.takeaway, inner, { margin: 0, prefix: `tk-${key}-`, card: id })}</Box>)
   }
-  return (
+  const framed = (
     <Box flexDirection="column" width={w} borderStyle="round" borderColor={COLORS.rule} paddingX={1}>
       {rows}
+    </Box>
+  )
+  if (!arrow) return framed
+  // the ↗ over the end of the border row: a box laid over the frame from outside it (a box inside a border paints
+  // only within it)
+  return (
+    <Box flexDirection="column" width={w}>
+      {framed}
+      <Box key={`arrow-${key}-${id}`} position="absolute" top={0} left={Math.max(0, w - 6)}>
+        {arrow}
+      </Box>
     </Box>
   )
 }

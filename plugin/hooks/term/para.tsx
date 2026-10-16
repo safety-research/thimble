@@ -12,10 +12,14 @@
 // A hovered citation is lit and tipped only while the pointer moves over it: a press, a move off the region, a
 // reflow of the transcript (a pane opening beside it) or a hover in another paragraph clears it, since the engine does
 // not always report the pointer leaving.
+//
+// A passage a check commented on (`tints`, each its place in the block's source, its background and its comment) is
+// drawn on that background, from its first word to its last on each row; a click on it opens the panel at Checks on
+// that comment (a citation inside it keeps its own click).
 import type { ClientModule, ClientSurface, RenderElement } from 'claude-code'
 
-import { blockLayout, passageAt } from './cite'
-import type { ChipView } from './cite'
+import { blockLayout, passageAt, tintCells } from './cite'
+import type { ChipView, Tint } from './cite'
 import { cut, lineWidth, shade, width } from './draw'
 import { onPointer, send } from './gestures'
 import type { Target } from './gestures'
@@ -29,6 +33,7 @@ type Props = {
   /** each citation's claim key (cite.ts claimKey) */
   ids: string[]
   raws: string[]
+  tints?: Tint[]
 }
 /** A selection, from the cell pressed to the cell the drag is on (either order). */
 type Sel = { y0: number; x0: number; y1: number; x1: number }
@@ -78,6 +83,8 @@ const Para: ClientModule<Props, S> = (props, surface) => {
   const st = surface.state ?? { hover: -1, frame: 0, cols }
   const hover = st.cols === cols ? st.hover : -1
   const lay = blockLayout(props.block, props.chips, cols, hover, st.frame)
+  const tinted = (props.tints ?? []).map(t => ({ t, cells: tintCells(lay, t) }))
+  const tintAt = (x: number, y: number) => tinted.find(({ cells }) => cells.some(c => c.line === y && x >= c.x0 && x < c.x1))?.t
 
   // set on every call, so the listener reads this call's layout
   surface.onPointer(ev => {
@@ -85,7 +92,9 @@ const Para: ClientModule<Props, S> = (props, surface) => {
     const k = lay.spans.find(s => s.line === ev.y && ev.x >= s.x0 && ev.x < s.x1)?.chip ?? -1
     const targetAt = (x: number, y: number): Target | null => {
       const c = lay.spans.find(s => s.line === y && x >= s.x0 && x < s.x1)?.chip ?? -1
-      return c >= 0 ? { kind: 'citation', ref: props.raws[c] ?? '', text: props.chips[c]?.label ?? '', claim: props.ids[c] ?? '' } : passageAt(lay, x, y)
+      if (c >= 0) return { kind: 'citation', ref: props.raws[c] ?? '', text: props.chips[c]?.label ?? '', claim: props.ids[c] ?? '' }
+      const t = tintAt(x, y)
+      return t ? { kind: 'check', ref: t.id } : passageAt(lay, x, y)
     }
     const mods = { shift: Boolean(ev.shift), ctrl: Boolean(ev.ctrl), alt: Boolean(ev.alt) }
     // a left press starts a click or a selection; the release tells which
@@ -143,7 +152,8 @@ const Para: ClientModule<Props, S> = (props, surface) => {
   if (surface.state === undefined) surface.setState(st)
 
   const sel = st.cols === cols ? st.sel : null
-  const lit = sel ? shade(lay.lines, selCells(sel, lay.lines.length), COLORS.selected) : lay.lines
+  const toned = tinted.reduce((lines, { t, cells }) => shade(lines, cells, t.bg), lay.lines)
+  const lit = sel ? shade(toned, selCells(sel, lay.lines.length), COLORS.selected) : toned
   const rows: RenderElement[] = lit.map(l => paintLine(Text, l))
   const span = hover >= 0 ? lay.spans.find(s => s.chip === hover) : undefined
   const tip = hover >= 0 ? props.chips[hover]?.tip : undefined

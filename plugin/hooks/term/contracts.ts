@@ -1,57 +1,39 @@
-// The terminal UI's contracts between the 0.9.0 lanes (C13 of the build spec): the types the term files share, and the
-// functions each owner exports, with the file that holds each. Types only: nothing here runs, so importing this file
-// has no effect. A function is imported from the file named beside it, never from here.
-//
-//   term-transcript   activate.ts   isActive, activateNow, isDataFile
-//                     settings.ts   settingsNow
-//                     lib.ts        clean (noControls with bidi, zero-width and U+FEFF)
-//   term-panel        band.tsx      registerBand
-//                     views.ts      registerPanelViews, refreshSummary
-//                     offramp.ts    openInBrowser
-//                     coverageview.tsx  openCoverage;  citesview.tsx  openCitations;  checksview.tsx  openChecks
-//                     notices.tsx   postNotice
-//   runtime           ../thimble.ts bridgeActivated
-//
-// Register-time functions take only `on`: register gets no `$`, and a hook a term file registers builds its own Ctx from
-// its own `$` with register.tsx's cxOf, imported by name (Claude Code refuses a module that passes `$` to a function it
-// cannot find declared in or imported into the file, such as a parameter). Every other function takes the Ctx of the
-// hook or handler that calls it.
-//
-// The $.state keys these values live under (plugin 'thimble') are declared in types/index.d.ts.
-import type { EngineInterface, On } from 'claude-code'
+// The terminal UI's contracts between its two lanes' files (SPEC-v2 C13): the shapes of the $.state values one file
+// writes and another reads (declared with their keys in types/index.d.ts, which may import nothing, and re-exported
+// here), the feature switches' names and defaults, and what each side exports. The transcript's side lives in
+// activate.ts, settings.ts, tracker.ts and lib.ts; the panel's in band.tsx, views.ts, offramp.ts, coverageview.tsx,
+// citesview.tsx, checksview.tsx and notices.tsx. Types and constants only: nothing here runs.
+import type { EngineInterface } from 'claude-code'
 
-import type { Ctx } from './ctx'
-import type { Activated, FeatureSettings } from './types'
+/** The hooks' `$`. */
+export type Dollar = EngineInterface
 
-export type { Activated, AnswerComment, CiteRow, CoverageSummary, FeatureSettings, LabelUnsure, Links, Pressing, SummarySeen } from './types'
+export type { Activated, AnswerComment, CiteRow, CoverageSummary, FeatureSettings, SummarySeen } from './types'
+import type { FeatureSettings } from './types'
 
-/** What turned thimble on (C2 `--via`). */
-export type Via = 'data' | 'command' | 'tool' | 'launcher' | 'press'
+export const FEATURE_KEYS = ['autoActivate', 'viewProposals', 'labels', 'checks', 'citationMarks', 'coverage', 'cardCheck'] as const
+export type FeatureKey = (typeof FEATURE_KEYS)[number]
+/** 0.8.0's behavior: every feature on. */
+export const FEATURES_ON: FeatureSettings = { autoActivate: true, viewProposals: true, labels: true, checks: true, citationMarks: true, coverage: true, cardCheck: true }
 
-/** A hook's context from its own `$` (register.tsx cxOf, which a term file imports by name). */
-export type CxOf = (dollar: EngineInterface) => Ctx
+// $.state keys under plugin 'thimble' (types/index.d.ts):
+//   activated: Activated | null            set by the transcript at activation
+//   settings: FeatureSettings              the transcript (settings.ts)
+//   coverageLine: StateFamily<string>      by row uuid; the transcript
+//   coverageSummary: CoverageSummary|null  the transcript
+//   citeIndex: CiteRow[]                   the transcript
+//   answerComments: AnswerComment[]        the transcript (read on tick when <ws>/answer-comments.json changes)
+//   checksRunning: number                  the transcript (from C9 `running`)
+//   checksOpen: string | null              the panel (the comment open in the panel; the transcript lights it 30%)
+//   labelUnsure, seen, pressing, links     the panel
 
-// ---- term-transcript (activate.ts, settings.ts, lib.ts)
-export type IsActive = () => boolean
-export type ActivateNow = (cx: Ctx, via: Via) => Promise<{ ok: boolean; error?: string }>
-export type SettingsNow = (cx: Ctx) => Promise<FeatureSettings>
-/** The twin of backend coverage.is_data: whether `path` (inside `cwd`) is a data file. */
-export type IsDataFile = (cwd: string, path: string, codeTree: boolean) => boolean
-export type Clean = (s: string) => string
-
-// ---- term-panel (band.tsx, views.ts, offramp.ts, coverageview.tsx, citesview.tsx, checksview.tsx, notices.tsx)
-export type RegisterBand = (on: On) => void
-/** drawsView/loadsView for the new panel views; called once from register.tsx. */
-export type RegisterPanelViews = (on: On) => void
-/** term-transcript's tick calls it when the labels, coverage, answers, cards or docs areas change (data.ts AREAS). */
-export type RefreshSummary = (cx: Ctx) => Promise<void>
-export type OpenInBrowser = (cx: Ctx, ref: string) => Promise<void>
-export type OpenCoverage = (cx: Ctx, folder?: string) => Promise<void>
-export type OpenCitations = (cx: Ctx, pick?: string) => Promise<void>
-export type OpenChecks = (cx: Ctx, commentId?: string) => Promise<void>
-/** A notice row in the band, and one toast. */
-export type PostNotice = (cx: Ctx, key: string, text: string, acts: string[]) => void
-
-// ---- runtime (plugin/hooks/thimble.ts)
-/** Registers the thimble:* agent types and turns the bridge on; idempotent. */
-export type BridgeActivated = (dollar: EngineInterface, a: Activated) => Promise<void>
+// The transcript's exports, for the panel:
+//   isActive(): boolean                                                activate.ts
+//   activateNow(cx, via): Promise<{ ok: boolean; error?: string }>     activate.ts
+//   settingsNow(cx): Promise<FeatureSettings>                          settings.ts
+//   isDataFile(cwd, path, codeTree): boolean                           activate.ts, the twin of coverage.is_data
+//   clean(s): string                                                   lib.ts
+// The panel's exports, for the transcript:
+//   registerBand(on), registerPanelViews(on) (each builds its hooks' context with ctx.ts cxOf: a hooks module passes `$`
+//   only to a function of its own file or one imported from the module's files), refreshSummary(cx), openInBrowser(cx, ref),
+//   openCoverage(cx, folder?), openCitations(cx, pick?), openChecks(cx, commentId?), postNotice(cx, key, text, acts)

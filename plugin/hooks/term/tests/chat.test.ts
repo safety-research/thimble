@@ -707,3 +707,32 @@ test("a date in words in main's reply is checked: one its place does not write i
   expect(chips[1]!.tip).toBe('found on the card')
   await ui.unmount()
 })
+
+// ------------------------------------------------------------------------------------------------ 0.9.0
+
+test("an answer's chat citations are kept for the panel's Citations view (citeIndex), each once per row", { timeoutMs: 30000 }, async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  const answer = 'The export holds [[4579|card:ff73e071#pages/TOTAL]] pages and [[14592|card:ff73e071#revisions/TOTAL]] revisions [[README.md#L3]].'
+  await turn($, w, [['r1', answer]])
+  await turn($, w, [['r1', answer]])
+  const index = w.state.get('citeIndex') as { raw: string; ref: string; row: string; display: string | null }[]
+  expect(index.map(r => [r.ref, r.display, r.row])).toEqual([
+    ['card:ff73e071#pages/TOTAL', '4579', 'r1'],
+    ['card:ff73e071#revisions/TOTAL', '14592', 'r1'],
+    ['README.md#L3', null, 'r1'],
+  ])
+})
+
+test('"Citation marks" off: a citation is a plain link, with no mark and no check of its place', { timeoutMs: 30000, options: { citationMarks: false } }, async ($, on) => {
+  const w = world(on)
+  w.features.citationMarks = false
+  await start($, w)
+  await turn($, w, [['r1', 'The export holds [[14592|card:ff73e071#revisions/TOTAL]] revisions.']])
+  const ui = (await $.ui.mount(MESSAGE('r1', 'The export holds [[14592|card:ff73e071#revisions/TOTAL]] revisions.'))) as unknown as M
+  const chips = await chipsOf(ui, 'para-1')
+  expect(chips[0]).toMatchObject({ label: '14592', state: 'link', mark: '', spin: false, tip: '' })
+  await ui.unmount()
+  await w.clock.advance(1000)
+  expect(w.calls.filter(c => c[2] === 'resolve')).toEqual([])
+})

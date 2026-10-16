@@ -292,7 +292,7 @@ test('comments stand under the passages they are on: the check\'s name and hue, 
   // the hues: the check's on its ●, a note's dim, every name in the text color
   const block = (await pane.drawn({ in: 'm:doc-cm-0-0' })) as Node
   const marks = JSON.stringify(block)
-  expect(marks).toContain('"color":"#b96895"},"children":["●"]')
+  expect(marks).toContain('"color":"#8ad969"},"children":["●"]')
   expect(JSON.stringify(await pane.drawn({ in: 'm:doc-cm-1-0' }))).toContain('"color":"inactive"},"children":["●"]')
   await pane.unmount()
 })

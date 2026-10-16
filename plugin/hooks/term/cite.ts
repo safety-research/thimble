@@ -16,7 +16,7 @@
 import type { ChatCorrection, ChatEnd, ChatFix, ChatFixItem, ChatVerify } from './types'
 import { lineWidth, placeWords, width } from './draw'
 import type { Line, Seg } from './draw'
-import { EMBED_RE, bareCard, cardWords, chipLabel, chipPlace, chipText, chipWords, cid, citations, citeEnd, citeSpans, dayMonth, isChip, labelRef, linksAsSpans, outputLine, parseReply, plainLinks, prefix, questionOf, reportRef, shownMatches, valueIn, windowAt, withoutOwnParens } from './lib'
+import { EMBED_RE, bareCard, cardWords, chipLabel, chipPlace, chipText, chipWords, cid, citations, citeEnd, citeSpans, dayMonth, inlineRuns, isChip, labelRef, linksAsSpans, outputLine, parseReply, plainLinks, prefix, questionOf, reportRef, shownMatches, valueIn, windowAt, withoutOwnParens } from './lib'
 import type { Citation, Run, TableRuns } from './lib'
 import { COLORS } from './paint'
 
@@ -153,14 +153,18 @@ export function scriptAim(display: string, ref: string): string {
 export type ChipSpan = { line: number; x0: number; x1: number; chip: number }
 /** A word as laid out, and where it starts in the block's source (its text with each citation as written). */
 export type WordSpan = { line: number; x0: number; x1: number; at: number }
-/** `rows`: for a table, each line's row as source text ('' for the rule). */
-export type ParaLayout = { lines: Line[]; spans: ChipSpan[]; words: WordSpan[]; source: string; rows?: string[] }
+/** Any word's cells, a citation's too, with where it stands in the block's source (`at` to `end`): what a check's tint
+ *  covers. */
+export type MarkSpan = { line: number; x0: number; x1: number; at: number; end: number }
+/** `rows`: for a table, each line's row as source text ('' for the rule). `marks`: every word's cells and source place
+ *  (none for a table). */
+export type ParaLayout = { lines: Line[]; spans: ChipSpan[]; words: WordSpan[]; source: string; rows?: string[]; marks?: MarkSpan[] }
 
 const segsWidth = (segs: Seg[]) => segs.reduce((n, s) => n + width(s.s), 0)
 
 /** A word or a space of a flowing text. `chip` is the citation it belongs to (-1 for none); a citation's words wrap like
  *  any others, its mark or spinner stays with its last word. `at` is where a plain word starts in the source. */
-type Tok = { segs: Seg[]; space: boolean; chip: number; at: number }
+type Tok = { segs: Seg[]; space: boolean; chip: number; at: number; end: number }
 
 /** Runs as words and spaces, their citations numbered from `k0`; `bold` for a table's column names and a heading's
  *  words. The model's Markdown as Claude Code draws it: its bold bold, its italic italic, its inline code in the code
@@ -179,7 +183,7 @@ function tokens(runs: Run[], chips: ChipView[], k0: number, hover: number, frame
         const space = /^\s+$/.test(part)
         const segs: Seg[] = [{ ...label!, s: space ? ' ' : part }]
         if (i === parts.length - 1) segs.push(...after)
-        toks.push({ segs, space, chip: k, at: source.length })
+        toks.push({ segs, space, chip: k, at: source.length, end: source.length + r.cite!.raw.length })
       })
       source += r.cite.raw
       k++
@@ -197,7 +201,7 @@ function tokens(runs: Run[], chips: ChipView[], k0: number, hover: number, frame
         style.fg = COLORS.link
         style.u = true
       }
-      toks.push({ segs: [style], space, chip: -1, at })
+      toks.push({ segs: [style], space, chip: -1, at, end: at + part.length })
       at += part.length
     }
     source += r.text
@@ -207,10 +211,11 @@ function tokens(runs: Run[], chips: ChipView[], k0: number, hover: number, frame
 
 /** Words and spaces wrapped to `room` columns, x from 0: each citation's cells as spans, each plain word's place. A word
  *  longer than the line is cut into pieces. */
-function flow(toks: Tok[], room: number): { lines: Line[]; spans: ChipSpan[]; words: WordSpan[] } {
+function flow(toks: Tok[], room: number): { lines: Line[]; spans: ChipSpan[]; words: WordSpan[]; marks: MarkSpan[] } {
   const lines: Line[] = []
   const spans: ChipSpan[] = []
   const words: WordSpan[] = []
+  const marks: MarkSpan[] = []
   let cur: Line = []
   let used = 0
   const span = (x0: number, x1: number, chip: number) => {
@@ -254,6 +259,7 @@ function flow(toks: Tok[], room: number): { lines: Line[]; spans: ChipSpan[]; wo
       const head = prefix(s, room) || [...s][0]!
       if (t.chip >= 0) span(used, used + width(head), t.chip)
       else words.push({ line: lines.length, x0: used, x1: used + width(head), at })
+      marks.push({ line: lines.length, x0: used, x1: used + width(head), at: t.at, end: t.end })
       cur.push({ ...seg!, s: head })
       newLine()
       s = s.slice(head.length)
@@ -263,11 +269,12 @@ function flow(toks: Tok[], room: number): { lines: Line[]; spans: ChipSpan[]; wo
     const pw = segsWidth(piece)
     if (t.chip >= 0) span(used, used + pw, t.chip)
     else words.push({ line: lines.length, x0: used, x1: used + width(s), at })
+    marks.push({ line: lines.length, x0: used, x1: used + pw, at: t.at, end: t.end })
     cur.push(...piece)
     used += pw
   })
   if (cur.length || lines.length === 0) newLine()
-  return { lines, spans, words }
+  return { lines, spans, words, marks }
 }
 
 /** A rich block wrapped to `cols`: words flow, a citation's words with them, each citation one link. */
@@ -290,8 +297,63 @@ export function paraLayout(
     lines: f.lines.map((l, i) => [{ s: i === 0 ? lead : indent }, ...l]),
     spans: f.spans.map(s => ({ ...s, x0: s.x0 + x0, x1: s.x1 + x0 })),
     words: f.words.map(w => ({ ...w, x0: w.x0 + x0, x1: w.x1 + x0 })),
+    marks: f.marks.map(m => ({ ...m, x0: m.x0 + x0, x1: m.x1 + x0 })),
     source,
   }
+}
+
+/** A check's tint on a block: the passage's place in the block's source (`a` to `b`), its background and its comment. */
+export type Tint = { a: number; b: number; bg: string; id: string }
+
+/** The cells a tint covers, line by line (from its first word's left edge to its last word's right edge on each line);
+ *  none for a table, whose layout keeps no word places. */
+export function tintCells(lay: ParaLayout, t: Pick<Tint, 'a' | 'b'>): { line: number; x0: number; x1: number }[] {
+  const by = new Map<number, { x0: number; x1: number }>()
+  for (const m of lay.marks ?? []) {
+    if (m.end <= t.a || m.at >= t.b) continue
+    const cur = by.get(m.line)
+    by.set(m.line, cur ? { x0: Math.min(cur.x0, m.x0), x1: Math.max(cur.x1, m.x1) } : { x0: m.x0, x1: m.x1 })
+  }
+  return [...by.entries()].sort((p, q) => p[0] - q[0]).map(([line, r]) => ({ line, ...r }))
+}
+
+/** A block's source text as its layout reads it: each citation as written, every other run's words. */
+export function blockSource(block: { runs: Run[] }): string {
+  return block.runs.map(r => (r.cite ? r.cite.raw : r.text)).join('')
+}
+
+/** Where a passage of the reply's raw text stands in a block's source, whitespace aside, or null when the block does not
+ *  hold it whole: its Markdown read as the block's was (a list item's marker, a heading's hashes and a quote's `>` left
+ *  out). */
+export function passageIn(block: { runs: Run[] }, passage: string): { a: number; b: number } | null {
+  const body = passage.replace(/^\s*(?:#{1,6}\s+|>\s?|(?:[-*+]|\d+[.)])\s+)/, '')
+  const want = collapse(blockSource({ runs: inlineRuns(body.replace(/\n\s*/g, ' ')) }))
+  if (!want.text.trim()) return null
+  const have = collapse(blockSource(block))
+  const at = have.text.indexOf(want.text.trim())
+  if (at < 0) return null
+  return { a: have.map[at]!, b: have.map[at + want.text.trim().length - 1]! + 1 }
+}
+
+/** A text with each run of whitespace one space, and each kept character's place in the text. */
+function collapse(text: string): { text: string; map: number[] } {
+  let out = ''
+  const map: number[] = []
+  let space = false
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!
+    if (/\s/.test(ch)) {
+      if (space) continue
+      space = true
+      out += ' '
+      map.push(i)
+      continue
+    }
+    space = false
+    out += ch
+    map.push(i)
+  }
+  return { text: out, map }
 }
 
 /** A table block in aligned columns, each citation one link: the column names bold, a rule in the rule grey under each as

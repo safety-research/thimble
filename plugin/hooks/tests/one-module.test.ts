@@ -48,10 +48,11 @@ test('register.ts registers thimble.ts first, then the terminal UI, whose hooks 
 
 // a session start reads a dozen fixture states: more than the default 5 s when the machine is busy
 test("in one session both parts' tool.call hooks fire: the file guard refuses a token file, the terminal UI reads the card a call made", { timeoutMs: 30_000 }, async ($, on) => {
-  // a session the launcher started in terminal mode (fixtures: THIMBLE_WS, launch.json `mode: terminal` for s1)
-  const w = world(on, { module: true })
-  on('session.id', () => ({ value: 's1' }) as never)
-  on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+  // thimble on in this session from its start (the fixtures' session marker), with thimble.ts not held off: the
+  // fixtures set THIMBLE_NO_MODULE for the terminal UI's own tests, so this matched hook, registered first and so
+  // outermost, answers that one variable as unset
+  on('env.get', { name: 'THIMBLE_NO_MODULE' }, () => ({ value: undefined }) as never)
+  const w = world(on)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   await w.clock.settle()
   const denied = await $.tool.call({ tool: 'Read', file_path: '/home/a/.thimble/server.json', tool_use_id: 'r1' } as never)
