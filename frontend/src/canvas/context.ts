@@ -1,5 +1,5 @@
 // What every card on the board reads without prop drilling: the workspace, the filter, the concept names, the thread
-// a card came from, and the hooks back into the board (measure, refresh, open a thread).
+// a card came from, and the hooks back into the board (measure, refresh, open a thread, open a card's details).
 import { createContext } from 'react'
 import type { Cell, Concept, Filters } from '../lib/types'
 import type { CellThread } from './layout'
@@ -18,6 +18,9 @@ export interface CanvasCtx {
   refresh: () => void
   /** open the chat a card came from */
   openThread: (cell: Cell) => void
+  /** open a card's details in the panel at the board's right (a label card's Definition and records); none where no
+   * board holds the card, as in a report's figure and the card harness, where a label card offers no such button */
+  openDetail?: (cellId: string) => void
 }
 
 export const CanvasContext = createContext<CanvasCtx>({

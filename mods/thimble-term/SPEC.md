@@ -510,8 +510,9 @@ The same reply's first row under the pointer, and a passage a thread was asked a
 - A label row, when the card read a label: `label` dim, the label's name in blue and underlined, then `↗`, then each
   value after its `●` in its hue (`label  edit purpose ↗  ● links or data  ● message to agents  ● other`), and
   `changed since` once the label changed after the card ran. A click on the name or the `↗` opens the label panel. A
-  label card (the label tool's) is a bar card of the label's counts with this row; its records live in the label
-  panel.
+  label card (the label tool's) is a bar card of the label's counts, each with its share of all, with this row, which
+  says after the `↗`, dim, how the label is defined and what it ran on (`label  edit kind ↗  code · revisions.jsonl`);
+  its records live in the label panel.
 - A params row: the param's name dim, its choices 2 cells apart, the one in use on the selection background.
 - Bars: labels in a column at the content's edge, bars after a gutter, numbers against the right edge; in the order the
   chart's label axis sorts them (its `sort`: `-y` by the value high to low, a list, `descending`), A to Z with none, as

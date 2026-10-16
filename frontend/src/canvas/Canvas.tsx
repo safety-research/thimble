@@ -553,7 +553,15 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
       fail(e)
     }
   }
-  const ctx: CanvasCtx = useMemo(() => ({ ws, filters, keep: kept, concepts, threadOf, unread, refresh, openThread }), [ws, filters, kept, concepts, threadOf, unread, refresh, openThread])
+  // a card's details opened from inside the card (a label card's Definition and records), out of focus mode
+  const openDetail = useCallback((id: string) => {
+    setFocus(null)
+    setSel([id])
+    setLabelPanel(null)
+    setHistoryOf(null)
+    setDetail(id)
+  }, [])
+  const ctx: CanvasCtx = useMemo(() => ({ ws, filters, keep: kept, concepts, threadOf, unread, refresh, openThread, openDetail }), [ws, filters, kept, concepts, threadOf, unread, refresh, openThread, openDetail])
   // the comments beside the cards: a check's while it is on, on a card that is drawn and that the filters keep
   const shownNotes = useMemo(() => (lay ? shownCanvasComments(notes.comments, checks.on, (id) => lay.rects.has(id), kept) : []), [notes.comments, checks.on, lay, kept])
   const cardEl = useCallback((id: string) => cardEls.current.get(id), [])

@@ -30,8 +30,7 @@ export interface RenderRequest {
   calls?: Record<string, unknown>
   theme: { paper: Paper; accent: Accent }
   width: number
-  /** a label card's label as the API returns it: GET /concepts/{id}, the first rows of each value as GET
-   * /concepts/{id}/rows?text=1 returns them, and the workspace's settings */
+  /** a label card's label as the API returns it: GET /concepts/{id}, and the workspace's settings */
   label?: LabelData | null
   /** a card type's page by type, as GET /ws/{c}/cardtypes/{type}/frame returns it, for a card of a card type */
   frames?: Record<string, string>
@@ -41,7 +40,6 @@ export interface RenderRequest {
 
 export interface LabelData {
   concept: ConceptDetail
-  rows: Record<string, unknown[]>
   settings?: Record<string, unknown>
 }
 
@@ -92,10 +90,6 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
     return json(200, current?.labels ?? [])
   } else if (current?.label && /^\/api\/ws\/[^/]+\/concepts\/[^/]+$/.test(url.pathname)) {
     return json(200, current.label.concept)
-  } else if (current?.label && /^\/api\/ws\/[^/]+\/concepts\/[^/]+\/rows$/.test(url.pathname)) {
-    const all = current.label.rows[url.searchParams.get('value') ?? ''] ?? []
-    const rows = all.slice(0, Number(url.searchParams.get('limit') ?? all.length) || all.length)
-    return json(200, { rows, total: all.length, next: null })
   } else if (current?.label && /^\/api\/ws\/[^/]+\/settings$/.test(url.pathname)) {
     return json(200, current.label.settings ?? {})
   } else if (/^\/api\/ws\/[^/]+\/card-libs$/.test(url.pathname)) {

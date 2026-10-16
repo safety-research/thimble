@@ -96,8 +96,8 @@ export function Focus({ cell, list, frame, onPick, onClose, onAskNew }: FocusPro
             <span className="bfocus-meta">{[thread.name, hhmm(cell.created_ts ?? cell.ts)].filter(Boolean).join(' · ')}</span>
             <GlyphCites.Provider value={true}>
               <article className="bfocus-card" data-anchor={`card:${cell.id}`} data-anchor-text={cell.title} data-anchor-parts="" data-cite-home={cell.id}>
-                <div className="bfocus-q">{kind === 'label' && concept && !(ctx.concepts.has(concept) && asksQuestion(cell.title, conceptName(ctx.concepts, concept))) ? <LabelHead conceptId={concept} /> : cell.title}</div>
-                <CardLabels cell={cell} />
+                <div className="bfocus-q">{kind === 'label' && concept && !(ctx.concepts.has(concept) && asksQuestion(cell.title, conceptName(ctx.concepts, concept))) ? <LabelHead conceptId={concept} detail={label.concept} /> : cell.title}</div>
+                <CardLabels cell={cell} detail={label.concept} />
                 <CardBody cell={cell} width={(wide ? colW : FOCUS_W) - FOCUS_PAD_X} label={label} big />
                 {cell.takeaway ? (
                   <div className="bfocus-take">

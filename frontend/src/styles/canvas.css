@@ -1357,8 +1357,9 @@ audio.bcell-media {
   line-height: 1.5;
   color: var(--text-secondary);
 }
-/* a label: its head (the square and the name in mono, where it applies), the value table, one example per value, and
-   the line that opens how it is computed on the inset paper */
+/* a label: its label row (the Label tag, the label's square and name or its tag, then how it is defined and what it ran
+   on), the value table, and the foot: the Rule disclosure, which opens how it is computed on the inset paper, and
+   Definition and records */
 .bcell-label-head {
   flex: 1;
   min-width: 0;
@@ -1385,8 +1386,46 @@ audio.bcell-media {
 .bcell-label-tag {
   flex: none;
 }
-.bcell-label-where {
+.bcell-label-head .bcell-label-meta {
   flex: 0 1 auto;
+}
+/* the small tag that says the card is a label's, first on its label row */
+.bcell-kind-tag {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--radius-chip);
+  box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.16);
+  font: var(--type-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.bcell-label-head .bcell-kind-tag {
+  align-self: center;
+}
+/* a label card's label row under its question: the Label tag and the label's tag together, then what it says of the
+   label, which goes to a line of its own where the row is too narrow for it */
+.bcell-label-row {
+  gap: 2px 8px;
+}
+.bcell-label-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+.bcell-label-who .bcell-tag {
+  min-width: 0;
+}
+.bcell-label-row .bcell-label-meta {
+  max-width: 100%;
+}
+/* how the label is defined, what it ran on and how many units: one quiet line, cut at its end where it does not fit */
+.bcell-label-meta {
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
@@ -1473,13 +1512,6 @@ audio.bcell-media {
 .bcell-values .num {
   text-align: right;
 }
-/* how many units matched, of all the label read: the base of the shares, which are among the matches */
-.bcell-values-total {
-  margin-top: -4px;
-  font: 400 var(--text-xs) / 1.5 var(--font-body);
-  color: var(--text-tertiary);
-  font-variant-numeric: tabular-nums;
-}
 /* the whole files or runs the label read only in part, under the counts (ReadCutLine, styled in files.css) */
 .bcell-label-cut {
   font: 400 var(--text-xs) / 1.5 var(--font-body);
@@ -1497,57 +1529,34 @@ audio.bcell-media {
 .bcell-value-square.is-lit {
   background: var(--c);
 }
-/* one example per value, one to a line across the card: the value in mono, then the record's own words */
-.bcell-label-examples {
-  display: grid;
-  grid-template-columns: fit-content(34%) minmax(0, 1fr);
-  gap: 6px 14px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.bcell-label-example {
-  display: contents;
-}
-.bcell-label-example-value {
-  font: 400 var(--text-xs) / 1.5 var(--font-body);
-  color: var(--text-tertiary);
-  overflow-wrap: anywhere;
-}
-.bcell-label-example-text {
-  min-width: 0;
-  font: 400 var(--text-xs) / 1.5 var(--font-body);
-  color: var(--text-secondary);
-  overflow-wrap: anywhere;
-}
-/* the files a label applies to, under a card whose head holds its question; the name is in the details */
-.bcell-label-glob {
-  margin-top: -4px;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font: 400 10.5px / 1.4 var(--font-mono);
-  color: var(--text-tertiary);
-}
-/* how the label is computed: one quiet line that opens the rule */
-.bcell-label-how {
+/* the foot under the counts: the Rule disclosure at the left, Definition and records at the right */
+.bcell-label-foot {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   min-width: 0;
+  margin-top: -4px;
 }
 .bcell-label-rule-toggle {
-  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   padding: 0;
   border: 0;
   background: none;
-  font: 400 10.5px / 1.5 var(--font-mono);
+  font: var(--type-body-sm);
   color: var(--text-tertiary);
   cursor: pointer;
+  transition: var(--transition-color);
 }
-.bcell-label-rule-toggle:hover {
-  color: var(--text-secondary);
-  text-decoration: underline;
+.bcell-label-rule-toggle:hover,
+.bcell-label-rule-toggle[aria-expanded='true'] {
+  color: var(--text-primary);
+}
+.bcell-label-records.btn {
+  margin-left: auto;
+  margin-right: -8px;
 }
 .bcell-label-run {
   display: flex;
