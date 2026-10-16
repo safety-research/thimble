@@ -14,7 +14,7 @@ new change to the card cancels a running check and starts the next. At most READ
 3. Replace: the parts that differ and that the check may change (checkstore.fixable) are tried on a copy of the card
    and kept only when the code runs clean and the card draws, as one undo step with actor `check`. A card that fails no
    criterion stays as it is, unless its links check found a value its code types in and the replacement's code
-   changes (_problems). New code runs on the card's kernel, and in terminal mode, where the check runs in the shim,
+   changes (_problems). New code runs on the card's kernel, and on the local transport, where the check runs in the shim,
    through `thimble-run trial` in main's sandbox, as a card run would (cardrun.trial). A replacement that left all the
    card shows as it was (checkstore.shows_same) is one more version in the card's history, and the check ends `ok`.
 A check past check_timeout(effort) ends `error`; waits for API capacity are left out of that time. A trial run on the
@@ -58,7 +58,7 @@ CRITERIA = 5
 # How long a check's own work may run (its reading and its revision's draft), by the effort it reads the card at
 # (read_effort). A check past its time ends `error` with no mark. Its clock stands while the card draws and while a
 # revision's code runs, which keep their own limits (render.RENDER_TIMEOUT_S, the card's timeout_s): a big corpus, or
-# terminal mode's fresh `thimble-run trial` process, would use the check's time otherwise.
+# a fresh `thimble-run trial` process on the local transport, would use the check's time otherwise.
 CHECK_TIMEOUT_S = {"low": 90.0, "medium": 120.0, "high": 180.0, "xhigh": 300.0, "max": 420.0}
 # How many readings run at once; a check waiting for one is `queued`, its clock stopped (_slot). The drawing and the
 # revision run outside the slots.
@@ -852,8 +852,8 @@ async def _replace(run: _Run, cell: dict[str, Any], patch: dict[str, Any], faile
                    timing: dict[str, Any]) -> None:
     """Apply the replacement once, kept only when its code runs clean and the replaced card draws; otherwise the card stays,
     the replacement is recorded as a rejected fix and the check ends `error`. The fix's reason is the problem of the first
-    criterion the card failed. A replacement whose code could not be tried at all (terminal mode's card runner gave no
-    result: notebook.TrialUnavailable) is no rejected fix: the check ends `error` saying so (UNTRIED).
+    criterion the card failed. A replacement whose code could not be tried at all (the card runner on the local transport gave
+    no result: notebook.TrialUnavailable) is no rejected fix: the check ends `error` saying so (UNTRIED).
 
     The trial on the card's kernel is settled however the check ends: a check stopped or past its time mid-trial leaves it
     running to its end in a task of its own, which then puts back the names it bound."""

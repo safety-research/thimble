@@ -631,7 +631,7 @@ def _normalize_view(slug: str, raw: Any, *, where: Path | None = None, origin: s
         # checks read (module note); a file-type viewer thimble ships is never one
         "draft": origin == "workspace" and not raw.get("built"),
         # a view whose reader or page is missing is listed so it can be deleted, and never opens a citation; the page is
-        # view.html, or view.term.js for a view built in terminal mode
+        # view.html, or view.term.js for a view built for the terminal
         "ok": bool(d is not None and (d / READER_PY).is_file()
                    and ((d / VIEW_HTML).is_file() or (d / VIEW_TERM).is_file()) and claims),
         "dir": str(d) if d else None,
@@ -955,7 +955,7 @@ def _check_slug(slug: str) -> str:
 
 def source_problems(claims: Any, reader: str, html: str, libs: Any, page: str = VIEW_HTML) -> list[str]:
     """What makes a view's files unable to run, as lines for whoever wrote them: no claims, an empty reader or page (the
-    file `page` names: view.html, or view.term.js in terminal mode), a reader that does not parse or lacks one of its
+    file `page` names: view.html, or view.term.js for a term-page build), a reader that does not parse or lacks one of its
     three functions, a library that is no package."""
     out: list[str] = []
     if not _str_list(claims):
@@ -3955,7 +3955,7 @@ async def _check(c: str, slug: str, locators: list[str] | None = None, *, shot_d
     Fields of the fetched records that the lines they cite do not hold and `derived` does not list are noted
     (unlisted_derived). Without the headless browser the page is not loaded (its `page` is `unavailable`) and the other
     checks decide. With `picture` the page as it opens is pictured. Without `need_locators`, a view that no locator
-    or sampled line opens passes the rest. With `term`, a view built in terminal mode: its program is drawn as text
+    or sampled line opens passes the rest. With `term`, a term-page build: its program is drawn as text
     (term_draws) in place of the page's loads, which fails on a program error, a timeout or a draw past the panel, and
     the page's label, layout and damaged-copy checks are left out (the reader's run on the damaged copy is not). Returns
     {ok, view, index, checks, page, shots, coverage, unread, problems, notes}, and with `term` `draws` in place of
@@ -4112,7 +4112,7 @@ async def _derived_check(c: str, view: dict[str, Any], shots: list[dict[str, Any
 
 async def _term_check(c: str, slug: str, view: dict[str, Any], files: list[tuple[str, int, int]],
                       report: dict[str, Any], picture: bool) -> dict[str, Any]:
-    """The rest of _check for a view built in terminal mode, after its reader's checks: its program drawn as text
+    """The rest of _check for a term-page build, after its reader's checks: its program drawn as text
     (term_draws), each failed draw a problem (draw_problems), as each choice of the kit's parts that gave an error
     (choice_problems), the reader run on a damaged copy of the files (robust_check without the page), and the fields of
     the answers its draws got that are not listed as derived."""
@@ -4132,7 +4132,7 @@ async def _term_check(c: str, slug: str, view: dict[str, Any], files: list[tuple
 
 
 async def term_draws(c: str, slug: str, checks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """The draws of a view's program that its checks run in terminal mode (term_views.draw_check): as it opens at each
+    """The draws of a view's program that its checks run for a term-page build (term_views.draw_check): as it opens at each
     columns and theme of term_views.CHECK_DRAWS, then opened at the first place that resolved, at the first of them,
     then, where the first drew, as it opens there with the test label on and every choice of the kit's parts it drew
     tried in turn (`choices`, choice_problems), as the browser's checks' `choices` state tries a page's. Each carries
@@ -4518,8 +4518,8 @@ async def robust_check(c: str, slug: str, view: dict[str, Any], files: list[tupl
     real corpus may be: build_index and problems() must not fail, problems() must report the torn line, and the page
     must load without errors and, when `shown` (what the overview showed over the whole corpus) anchored records or
     units and the copy left nothing else out, show some too. The torn line goes in a file the reader reads to the end
-    and does not hide, since one it leaves out has no line to report. Without `page` (a view built in terminal mode)
-    only the reader runs on the copy."""
+    and does not hide, since one it leaves out has no line to report. Without `page` (a term-page build) only the
+    reader runs on the copy."""
     try:
         _, req = await asyncio.to_thread(_prepare, c, slug)
         ans = await _call(c, req, "shown")
@@ -5939,8 +5939,8 @@ async def resolve_route(c: str, slug: str, ref: str, v: str | None = None) -> di
 async def check_answer(c: str, slug: str, locators: list[str], picture: bool) -> dict[str, Any]:
     """A builder's or reviewer's check of its draft (view_tools.tool_view_check): the gate with `locators` beside the
     sampled lines, the locators kept on the proposal for the gates of record (finish_view). {ok, lines, png, drawing},
-    `png` the path of a picture of the page as it opens when `picture` asks for one, or in terminal mode `drawing` the
-    view drawn as text as it opens."""
+    `png` the path of a picture of the page as it opens when `picture` asks for one, or for a term-page build
+    `drawing` the view drawn as text as it opens."""
     if locators and read_proposal(c, slug) is not None:
         update_proposal(c, slug, locators=locators)
     report = await gate(c, slug, locators or _kept_locators(c, slug), picture=picture)

@@ -186,8 +186,8 @@ def _check_text(answer: dict[str, Any]) -> str:
 
 async def tool_view_check(ctx: Any, args: dict[str, Any]) -> Any:
     """`view_check`: the checks of the view the caller builds or reviews, with the `locators` it names beside the
-    sampled lines, and with `picture` a picture of the page as it opens, or in terminal mode the view drawn as text
-    (views.check_answer)."""
+    sampled lines, and with `picture` a picture of the page as it opens, or for a term-page build the view drawn as
+    text (views.check_answer)."""
     from . import views  # noqa: PLC0415
 
     slug = _program_call(ctx)

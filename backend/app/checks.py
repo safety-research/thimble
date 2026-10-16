@@ -640,8 +640,8 @@ def _auto(c: str) -> bool:
 
 
 def _current(c: str, cid: str, doc: str) -> _Active | None:
-    """The run of check `cid` on `doc` that goes. In browser mode the server holds every run (_active). In terminal mode
-    the process that starts a run (the shim for main's run_check, a hook's process for a writer's follow-on) is not the
+    """The run of check `cid` on `doc` that goes. After the press the server holds every run (_active). On the local
+    transport the process that starts a run (the shim for main's run_check, a hook's process for a writer's follow-on) is not the
     one that hears its agent start and end (a hook's process) or takes its comments (the shim), so the check's file
     decides: a run it records `running` that this process does not hold is taken up from the record, as recover takes
     up a previous server's, and a run this process holds that the file records ended, or replaced, is let go."""
@@ -667,7 +667,7 @@ def _current(c: str, cid: str, doc: str) -> _Active | None:
 
 
 def _prune(c: str | None = None) -> None:
-    """In terminal mode, let go of the runs this process holds that another process ended (_current)."""
+    """On the local transport, let go of the runs this process holds that another process ended (_current)."""
     for (cc, cid, doc) in list(_active):
         if c is None or cc == c:
             _current(cc, cid, doc)
@@ -885,7 +885,7 @@ async def start_run(c: str, cid: str, doc: str, *, passages_: list[str] | None =
 
 
 def _places() -> int:
-    """The runs holding a place: started, or starting; in terminal mode not one another process ended (_prune)."""
+    """The runs holding a place: started, or starting; on the local transport not one another process ended (_prune)."""
     _prune()
     return sum(1 for a in _active.values() if not a.ended and a not in _queue
                and (a.agent or a.request or (a.task is not None and not a.task.done()) or a.program))
@@ -1178,8 +1178,8 @@ def _finish(act: _Active, status: str, summary: str) -> None:
         doc = _doc(c, act.doc)
         canvas = act.doc == CANVAS
         answers = act.doc == ANSWERS
-        # the run's comments as the document (or the cards' or the answers' store) holds them: in terminal mode the shim
-        # takes them, in another process
+        # the run's comments as the document (or the cards' or the answers' store) holds them: on the local transport the
+        # shim takes them, in another process
         act.comments = max(act.comments, canvas_comments.count(c, act.check, act.run) if canvas else
                            answer_comments.count(c, act.check, act.run) if answers else
                            sum(1 for cm in (doc or {}).get("comments") or []
