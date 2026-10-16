@@ -21,6 +21,13 @@ the server), looked up only for a file that has a target block or section.
 error, except in LEGACY_TARGET_FILES, the view prompts, where those names stand for `html-page` and `term-page` until
 their blocks are renamed. A caller that still passes a mode name ("browser", "terminal") as its flags gets every
 feature on and that mode's target (LEGACY_MODES).
+
+Later parts. `{{later:<name>}}…{{/later}}` marks a part of main's guidance that the guide leaves out until Claude first
+uses its feature (guide.py, disclose.py). Every rendering keeps the part's text and drops its markers (KEEP), so each
+other prompt that includes the file reads it as before; inside `later_parts(DROP)` the parts are left out, but those
+named in `keep`, and inside `later_parts(MARK)` each part is kept between the sentinels of LATER_PART_RE, which
+later_texts reads (without_marks and without_parts give KEEP's and DROP's text from it). A part stays inside one file, holds no other part, and is read after the flag blocks, so a part may
+sit inside a flag block or hold one whole. A marker alone on its line takes the line with it, as a flag block's does.
 """
 from __future__ import annotations
 
@@ -96,6 +103,16 @@ _HAS_FLAG_PART_RE = re.compile(rf"^## .+@(?:{'|'.join(map(re.escape, _FLAG_NAMES
 # new name: section() finds them under either name. events.EVENTS_SECTION names main.md's events section by its 0.8.0
 # browser-mode heading.
 _RENAMED = {("main.md", "Events from the browser"): "Events from thimble"}
+# A later part's markers, {{later:<name>}} and {{/later}} (module note, later parts). They are read after the flag blocks
+# and before includes and slots.
+_LATER_RE = re.compile(r"\{\{(?:later:([a-z][a-z0-9_-]*)|(/later))\}\}")
+KEEP, DROP, MARK = "keep", "drop", "mark"
+# MARK's sentinels: an opening one names its part and whether its opening marker stood alone on its line (L) or in a
+# line (I). An L part's sentinels each stand on a line of their own, so a heading the part opens with still starts a
+# line; an I part's stand in the line.
+_LATER_RES = r"[a-z][a-z0-9_-]*"
+LATER_PART_RE = re.compile(f"\x1eL({_LATER_RES})\x1f\n(.*?)\x1d\n|\x1eI({_LATER_RES})\x1f(.*?)\x1c", re.S)
+_LATER_MARK_RE = re.compile(f"\x1eL{_LATER_RES}\x1f\n|\x1eI{_LATER_RES}\x1f|\x1d\n|\x1c")
 
 
 class PromptError(ValueError):
@@ -105,6 +122,9 @@ class PromptError(ValueError):
 
 # The flags of the calls made inside `rendering` that name none.
 _rendering: contextvars.ContextVar[frozenset[str] | None] = contextvars.ContextVar("prompt_flags", default=None)
+# How the calls made inside `later_parts` render the later parts: (KEEP, DROP or MARK, the parts DROP keeps)
+_later: contextvars.ContextVar[tuple[str, frozenset[str]]] = contextvars.ContextVar("later_parts",
+                                                                                    default=(KEEP, frozenset()))
 
 Flags = "str | Iterable[str] | None"
 
@@ -133,6 +153,93 @@ def rendering(flags: "str | Iterable[str]") -> Iterator[None]:
         yield
     finally:
         _rendering.reset(token)
+
+
+@contextlib.contextmanager
+def later_parts(mode: str, keep: Iterable[str] = ()) -> Iterator[None]:
+    """Within the block, prompts render their later parts by `mode` (module note, later parts): KEEP, DROP (but the
+    parts named in `keep`) or MARK."""
+    if mode not in (KEEP, DROP, MARK):
+        raise PromptError(f"later_parts: {mode!r} is none of {KEEP}, {DROP}, {MARK}")
+    token = _later.set((mode, frozenset(keep)))
+    try:
+        yield
+    finally:
+        _later.reset(token)
+
+
+def later_texts(marked: str) -> list[tuple[str, str, str]]:
+    """The later parts of a text rendered inside `later_parts(MARK)`, in order: (the part's name, the last `## ` or
+    `### ` heading above it, its text as KEEP renders it, without the blank lines around it; a part in a line also
+    without the spaces around it)."""
+    out: list[tuple[str, str, str]] = []
+    heading = ""
+    last = 0
+    for m in LATER_PART_RE.finditer(marked):
+        for line in marked[last:m.start()].splitlines():
+            if re.match(r"#{2,3} \S", line):
+                heading = line.strip()
+        line_part = m.group(1) is not None
+        inner = m.group(2) if line_part else m.group(4)
+        text = inner.strip("\n").rstrip()
+        out.append((m.group(1) or m.group(3), heading, text if line_part else text.strip()))
+        for line in inner.splitlines():
+            if re.match(r"#{2,3} \S", line):
+                heading = line.strip()
+        last = m.end()
+    return out
+
+
+def without_marks(text: str) -> str:
+    """A text rendered inside `later_parts(MARK)` as KEEP renders it: each part's text kept, its sentinels taken out."""
+    return _LATER_MARK_RE.sub("", text)
+
+
+def without_parts(text: str) -> str:
+    """A text rendered inside `later_parts(MARK)` as DROP renders it: each part left out with its sentinels."""
+    return LATER_PART_RE.sub("", text)
+
+
+def _later_out(text: str, rel: str) -> str:
+    """`text` with each later part rendered by the current `later_parts` mode (module note, later parts). PromptError
+    for a part inside a part, a {{/later}} with no part open, or a part left open."""
+    marks = [*_LATER_RE.finditer(text)]
+    if not marks:
+        return text
+    mode, keep = _later.get()
+    out: list[str] = []
+    last = 0
+    opened: str | None = None
+    opened_alone = False
+    for m in marks:
+        start, end = m.start(), m.end()
+        line_start = text.rfind("\n", 0, start) + 1
+        line_end = text.find("\n", end)
+        line_end = len(text) if line_end == -1 else line_end
+        alone = not text[line_start:start].strip() and not text[end:line_end].strip()
+        if alone:
+            start, end = line_start, min(line_end + 1, len(text))
+        if m.group(2):
+            if opened is None:
+                raise PromptError(f"{rel}: {{{{/later}}}} with no {{{{later:<name>}}}} part open")
+            if mode != DROP or opened in keep:
+                out.append(text[last:start])
+            if mode == MARK:
+                out.append("\x1d\n" if opened_alone else "\x1c")
+            opened = None
+        else:
+            if opened is not None:
+                raise PromptError(f"{rel}: {{{{later:{m.group(1)}}}}} inside the {{{{later:{opened}}}}} part; close "
+                                  "each part with {{/later}} before the next one opens")
+            out.append(text[last:start])
+            opened, opened_alone = m.group(1), alone
+            if mode == MARK:
+                out.append(f"\x1eL{opened}\x1f\n" if alone else f"\x1eI{opened}\x1f")
+        last = end
+    if opened is not None:
+        raise PromptError(f"{rel}: the {{{{later:{opened}}}}} part is not closed with {{{{/later}}}}")
+    out.append(text[last:])
+    return "".join(out)
 
 
 def current_flags(flags: Flags = None) -> frozenset[str]:
@@ -355,7 +462,7 @@ def _directive(body: str, rel: str) -> str | None:
 def _read(rel: str, stack: tuple[str, ...], flags: _Flags) -> str:
     """One file with its flag blocks resolved, its includes pasted in and its slots left in place. `stack` is the chain
     being expanded."""
-    text = _blocks_out(_path(rel, stack).read_text("utf-8"), rel, flags)
+    text = _later_out(_blocks_out(_path(rel, stack).read_text("utf-8"), rel, flags), rel)
     stack = (*stack, rel)
     out: list[str] = []
     last = 0
@@ -425,7 +532,7 @@ def files(name: str, flags: Flags = None) -> list[str]:
     of = _Flags(flags)
 
     def walk(rel: str, stack: tuple[str, ...]) -> None:
-        text = _blocks_out(_path(rel, stack).read_text("utf-8"), rel, of)
+        text = _later_out(_blocks_out(_path(rel, stack).read_text("utf-8"), rel, of), rel)
         if rel not in out:
             out.append(rel)
         for m in _DIRECTIVE_RE.finditer(text):

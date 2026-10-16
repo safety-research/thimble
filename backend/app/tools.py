@@ -694,6 +694,10 @@ async def call(c: str, name: str, args: dict[str, Any] | None, *, actor: str = A
     with undo.batching(batch), undo.acting_session(session):
         with canvas_history.acting(Ctx(c, actor, notebook, terminal, anchor, chat, session).cell_author):  # who changed a card
             res = await _run(spec, c, name, args, actor, notebook, terminal, anchor, chat, session, tool_use_id)
+        # the later parts of main's guidance that this call's feature uses, on its first use (disclose.py)
+        from . import disclose  # noqa: PLC0415
+
+        res = disclose.after_call(c, name, args, res, session, tool_use_id)
         # the card check (card_check.py): a card add_card or edit_card wrote is drawn and read once it has its
         # takeaway; nothing of the check joins this result
         from . import card_check  # noqa: PLC0415 — card_check imports the harness
