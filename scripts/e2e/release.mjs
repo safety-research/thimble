@@ -12,8 +12,9 @@
 // The page opens as thimble 0.9.0 opens it, by the press (the first-load step): `thimble open --json` (backend
 // app/open_cmd.py) for the stand-in session, with a stand-in $BROWSER that records the redirect file it is given, which
 // this browser then opens; the code is in that file alone, never in the press's output.
-// THIMBLE_E2E_BROWSER picks the browser (chromium, the default, firefox or webkit) and THIMBLE_E2E_ONLY, a comma list of
-// steps, runs only those (the others are recorded as skipped): the sign-in steps run in each browser this way.
+// E2E_BROWSER picks the browser (chromium, the default, firefox or webkit) and E2E_ONLY, a comma list of steps, runs only
+// those (the others are recorded as skipped): the sign-in steps run in each browser this way. (scripts/e2e_release.sh
+// passes the caller's environment on but thimble's own variables, THIMBLE_*, so these names carry no THIMBLE_.)
 import { spawnSync } from 'node:child_process'
 import { createHmac, randomUUID } from 'node:crypto'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
@@ -31,8 +32,8 @@ const FIXTURE = env.THIMBLE_E2E_FIXTURE
 const OUT = join(SHOTS, '..')
 const require = createRequire(join(TREE, 'frontend', 'package.json'))
 const playwright = require('playwright')
-const ENGINE = env.THIMBLE_E2E_BROWSER || 'chromium'
-const ONLY = new Set((env.THIMBLE_E2E_ONLY || '').split(',').map((x) => x.trim()).filter(Boolean))
+const ENGINE = env.E2E_BROWSER || 'chromium'
+const ONLY = new Set((env.E2E_ONLY || '').split(',').map((x) => x.trim()).filter(Boolean))
 
 const SIZES = [
   { width: 1440, height: 900 },
@@ -120,7 +121,7 @@ let currentPage = null
  * screenshot of its own gets one of the page as the failure left it. */
 async function step(name, title, fn, ms = STEP_MS) {
   if (ONLY.size && !ONLY.has(name)) {
-    record(name, title, 'skip', `not among THIMBLE_E2E_ONLY (${[...ONLY].join(', ')})`)
+    record(name, title, 'skip', `not among E2E_ONLY (${[...ONLY].join(', ')})`)
     return false
   }
   let timer
@@ -464,7 +465,7 @@ async function unlockStep(page, st) {
 async function main() {
   // the full Chromium shows a PDF in a page when headless; the headless shell install.sh fetches does not
   const engine = playwright[ENGINE]
-  if (!engine) throw new Error(`THIMBLE_E2E_BROWSER names no browser Playwright drives: ${ENGINE}`)
+  if (!engine) throw new Error(`E2E_BROWSER names no browser Playwright drives: ${ENGINE}`)
   let browser = ENGINE === 'chromium' ? await engine.launch({ channel: 'chromium' }).catch(() => null) : null
   const full = !!browser
   if (!browser) browser = await engine.launch()
