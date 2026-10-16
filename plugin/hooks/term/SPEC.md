@@ -162,7 +162,7 @@ the type area runs from A0 to R.
 | dim | `inactive` (`dimColor`) | letters (rule 15); the catch-all value's marks | secondary |
 | rule gray | `subtle` | lines only: rules, card borders, a field's border, tracks, axes, tree guides, a diagram's boxes and edges | structure |
 | link | `remember` | links (rule 16); the `?` and `↳` in the margin | opens what it names |
-| accent | `suggestion` | a panel's title; the selected row's `❯` and its text; `view proposal` above the prompt | where you are; a view proposal waiting for an answer |
+| accent | `suggestion` | a panel's title; the selected row's `❯` and its text; `view proposal` above the prompt; the label panel's actions and its definition's `edit` | where you are; a view proposal waiting for an answer; a button |
 | new | `success` | the word `new` and `N new` | new |
 | tip | `userMessageBackground`, a background | the tip of the citation under the pointer | |
 | prompt | `userMessageBackground`, a background | a side thread's question, across the type area, as Claude Code draws a prompt | the analyst's question |
@@ -265,7 +265,8 @@ while thimble's links check runs.
 
 24. A control is a word or a few, in the text color and plain: no brackets, bold, color or underline at rest, inverse
     under the pointer or the focus. Its words say what it does (`run again`, `ask about it`, `run on a sample`,
-    `as slides`, `show all threads`).
+    `as slides`, `show all threads`). The label panel's actions are the exception: in the accent, so they read as
+    buttons (Matt, deck/video v9 review; `chrome.tsx` `actionEl`).
 25. A panel's actions sit at its bottom, after the second rule, at A0, 2 cells apart, with their fields under them: that
     is where a reply, a run's counts or a writer's state appear. The title row holds only navigation, against R
     (`earlier  later`). A reply's footer has its facts, then its controls after a gutter.
@@ -859,16 +860,16 @@ After the browser's Files (`frontend/src/files`: its tree, its search, its reade
 
 ```
   home › labels › edit purpose
-  name:      ● edit purpose
-  type:      prompt  regex  code
-  model:     Haiku 4.5
-  scope:     revisions.jsonl · 1 file matches
-  in files:  on  off
+  name:     ● edit purpose
+  type:     prompt  regex  code
+  scope:    revisions.jsonl · 1 file matches
+  marks:    shown on records in Files and views  hide
   ──────────────────────────────────────────────────────────────────────────────────────────────
-  prompt:    ╭─────────────────────────────────────────────────────────────────────────────────╮
-             │ Decide what the revision's body is mainly for. 'message to agents': the body    │
-             │ speaks to other agents, runs or cohorts, such as asking them to post, relay,…   │
-             ╰─────────────────────────────────────────────────────────────────────────────────╯
+  model:    Haiku 4.5
+  prompt:   ╭──────────────────────────────────────────────────────────────────────────────────╮
+            │ Decide what the revision's body is mainly for. 'message to agents': the body     │
+            │ speaks to other agents, runs or cohorts.                                    edit │
+            ╰──────────────────────────────────────────────────────────────────────────────────╯
   run on a sample  run on all 14,591  rename  delete  last run on a sample of 30
 
   ▾ counts  30 · filtered to links or data
@@ -881,19 +882,26 @@ After the browser's Files (`frontend/src/files`: its tree, its search, its reade
 
   ▸ examples  12 · 80% agreed on 10 values you set, not counting the 4 given as examples
   ▸ cards  2
-  r to run a sample · n to rename · k to delete · o to show in files · c counts, e examples, d cards
+  r to run a sample · n to rename · k to delete · f to hide marks · c counts, e examples, d cards
   l for labels · x to close
 ```
 
 - The header: `name:` the label's name in the accent and bold after a `●` in its color; `type:` the kinds, the one in
-  use on the selection background, the others a click away; for a prompt label, `model:` the model its calls run on
-  (the label's own, else Settings' row for labels); `scope:` its files, a field, and how many files they match (`· 1
-  file matches`, `· 3 files match`; Matt, 2026-10-16: a bare count read as a link), or for a label over cards or
-  sentences how many it holds; for a label over files, `in files:` whether it is on in Files and the views (`on  off`, the one in use on the
-  selection background, the other a click or `o` away, `thimble act label-show`), which a view opens colored by, as in
-  the browser. Then the rule.
-- The definition whole in a field to edit, under its kind's name (`prompt`, `pattern` or `code`; code through the
-  `Code` element), on the same column as the header's values. A click gives it the keyboard; Enter saves it.
+  use on the selection background, the others a click away; `scope:` its files, a field, and how many files they
+  match (`· 1 file matches`, `· 3 files match`; Matt, 2026-10-16: a bare count read as a link), or for a label over
+  cards or sentences how many it holds; for a label over files, `marks:` whether Files and the views mark its records
+  with its values, in words (`shown on records in Files and views` or `hidden in Files and views`), then the action
+  that changes it (`hide` or `show`, f, `thimble act label-show`); a view opens colored by a label whose marks show,
+  as in the browser (Matt, v9 review: `in files: on off` did not say what it turns on). Then the rule.
+- The definition: for a prompt label, `model:` first, the model its calls run on (the label's own, else Settings' row
+  for labels; Matt, v9 review: the model belongs with the prompt it runs); then the definition whole in a field to
+  edit, under its kind's name (`prompt`, `pattern` or `code`; code through the `Code` element), on the same column as
+  the header's values. At rest the field shows `edit` in the accent at its last row's end (a row of its own when the
+  row is full), so it reads as editable; a click on it, as anywhere in the field, gives the field the keyboard and the
+  word goes; Enter saves it (in code, ctrl+s).
+- The actions (`run on a sample`, `run on all N`, `rename`, `delete`, `stop`, `keep the name`, `y to delete`, `n to
+  keep`, `hide` and `show`) are drawn in the accent, as Claude Code draws the choice to press, so they read as buttons
+  (Matt, v9 review); this overrides rule 24 for the label panel.
 - `run on a sample` and `run on all N`, which save what was typed first and run it, then the last run dim; `stop`
   while it runs, and the type as plain text. A run's first error is a red `!` row under them. `rename` (n) puts the
   name in a field in their place (`new name`, Enter renames, `thimble act label`; `keep the name` leaves it). `delete`

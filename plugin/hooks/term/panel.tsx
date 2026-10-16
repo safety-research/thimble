@@ -30,7 +30,7 @@ import type { BoxProps, ButtonProps, ElementConstructor, MatchedEvent, RenderEle
 
 import type { ChatNavStep, ChatThread, TermPanel, TermThread, TermThreadRow, TermVerdict } from './types'
 import type { ThimbleLabel } from './cell'
-import { ACCENT, FRESH, LINK, MARGIN_W, controlsEl, fieldEls, fitHints, fitTo, freshSeg, hasMargin, headerEls, hintLines, hintsEl, lineEl, linkSeg, marginKey, pointed, ruleEl, setBrowser, setHead, spread, subLine, takeBrowser, takeHead } from './chrome'
+import { ACCENT, FRESH, LINK, MARGIN_W, actionEl, controlsEl, fieldEls, fitHints, fitTo, freshSeg, hasMargin, headerEls, hintLines, hintsEl, lineEl, linkSeg, marginKey, pointed, ruleEl, setBrowser, setHead, spread, subLine, takeBrowser, takeHead } from './chrome'
 import { chipLook, chipName, citeLabel, plainCites, quoteSpan, quotedWords, wrapAround } from './cite'
 import { MAX_BARS, MAX_NODES, MAX_TABLE_ROWS, amount, cardLayout, cut, cutRef, demojibake, labelHead, lineWidth, placeWords, shade, share, shares, titleLines, turnTimes, valueColour, width, wrapRows } from './draw'
 import type { BarRow, CardData, Cell, Item, Layout, Line, Seg } from './draw'
@@ -2358,12 +2358,13 @@ let labelPainting = ''
 
 /** The label panel, after the browser's label editor (SPEC.md, section 7, "The label panel"): its header block,
  *  the label's name in the accent and bold after a ● in its colour, its type (prompt, regex or code: the one in use on
- *  the selection background), a prompt label's model, and its scope (the files, editable, and how many files match),
- *  then the rule; the prompt (or
- *  pattern or code) in a field to edit, Enter saving it (`thimble act label`); `run on a sample` and `run on all N`,
- *  which save what was typed first and run it (`thimble act label-run`), `rename` (`thimble act label`) and `delete`,
- *  which asks once in the panel (y deletes, n keeps; `thimble act label-delete`); a label over files is turned on or off
- *  in Files and the views (`in files: on off`, `thimble act label-show`). Then `▸ counts`, `▸ examples` and `▸ cards`,
+ *  the selection background), its scope (the files, editable, and how many files match), and for a label over files
+ *  whether Files and the views mark its records with its values (`marks: shown on records in Files and views  hide`,
+ *  `thimble act label-show`); then the rule and the definition: a prompt label's model, then the prompt (or pattern or
+ *  code) in a field to edit, `edit` in it at rest, Enter saving it (`thimble act label`); `run on a sample` and `run on
+ *  all N`, which save what was typed first and run it (`thimble act label-run`), `rename` (`thimble act label`) and
+ *  `delete`, which asks once in the panel (y deletes, n keeps; `thimble act label-delete`), each action in the accent
+ *  so it reads as a button (Matt, deck/video v9 review, items k to m). Then `▸ counts`, `▸ examples` and `▸ cards`,
  *  folded, nothing of them shown until one is opened: each value's `color` (the label colors by name) and `filter`
  *  (`thimble act label-filter`) in the counts, the held-out agreement and `… N more` records in the examples. */
 async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElement> {
@@ -2452,8 +2453,8 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
     if (on !== shownOn) await showLabel(cx, id, { on })
   }
   // the header block: name, type, scope, each on the label column, as Matt wrote them (`name:`), and for a label over
-  // files whether it is on in Files; then the definition
-  const L = (files ? 'in files:' : 'pattern:').length + 2
+  // files whether its marks show in Files; then the definition: the model and the prompt it runs
+  const L = 'pattern:'.length + 2
   const fieldLine = (label: string, el: RenderElement) => (
     <Box key={`lf-${label}`} flexDirection="row">
       <Box width={L} flexShrink={0}>
@@ -2496,9 +2497,6 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
       </Box>,
     ),
   )
-  // a prompt label: the model its calls run on (the label's own, else the labels row of Settings), as the analyst reads
-  // its name
-  if (kind === 'prompt' && l.run_model) rows.push(fieldLine('model:', <Text wrap="truncate-end">{l.run_model}</Text>))
   // a label over files: how many files its glob matches (`1 file matches`), so the count does not read as a link; the
   // records stand in `run on all N`. A label over cards or sentences: how many it holds
   const scopeCount = files ? (typeof l.scope_files === 'number' ? (l.scope_files === 1 ? '1 file matches' : `${num(l.scope_files)} files match`) : '') : scopeN !== null ? `${num(scopeN)} ${unit}` : ''
@@ -2520,24 +2518,24 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
       ),
     ),
   )
-  // on or off in Files and the views: the one in use on the selection background, the other a click away
+  // whether Files and the views mark its records with its values, in words, and the action that changes it (Matt, v9
+  // review, item l: `in files: on off` did not say what it turns on)
   if (files)
     rows.push(
       fieldLine(
-        'in files:',
-        <Box flexDirection="row" columnGap={2}>
-          {([true, false] as const).map(on =>
-            on === shownOn ? (
-              <Text key={`lo-${on ? 'on' : 'off'}`} backgroundColor={COLORS.selected}>{on ? 'on' : 'off'}</Text>
-            ) : (
-              <Button key={`lo-${on ? 'on' : 'off'}`} label={on ? 'on' : 'off'} plain onPress={() => void turn(on)()} />
-            ),
-          )}
+        'marks:',
+        <Box flexDirection="row" columnGap={2} flexWrap="wrap">
+          <Text key="lo-state">{shownOn ? 'shown on records in Files and views' : 'hidden in Files and views'}</Text>
+          {actionEl(els, shownOn ? 'lo-off' : 'lo-on', shownOn ? 'hide' : 'show', () => void turn(!shownOn)())}
         </Box>,
       ),
     )
   rows.push(ruleEl(els, cols, 'lb-rule'))
-  // the definition, whole, in a field to edit (field.tsx, in a border as the search box is): a click gives it the
+  // the definition: a prompt label's model first, the model its calls run on (the label's own, else the labels row of
+  // Settings), as the analyst reads its name; then the prompt it runs (Matt, v9 review, item k)
+  if (kind === 'prompt' && l.run_model) rows.push(fieldLine('model:', <Text wrap="truncate-end">{l.run_model}</Text>))
+  // the definition, whole, in a field to edit (field.tsx, in a border as the search box is): `edit` in the accent at
+  // its last row's end while it rests, so it reads as editable (Matt, v9 review, item m); a click gives it the
   // keyboard, Enter saves it (in code, ctrl+s)
   const defName = kind === 'prompt' ? 'prompt' : kind === 'regex' ? 'pattern' : 'code'
   const shownDef = kind === l.kind ? definitionOf(l) : ''
@@ -2550,7 +2548,7 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
       fieldLine(
         `${defName}:`,
         <Box key="lb-def" flexDirection="column" borderStyle="round" borderColor={COLORS.rule} paddingX={1}>
-          <Client key={`lb-def-${id}-${kind}`} module="./field.tsx" width={defW} props={JSON.parse(JSON.stringify({ name: `label-body:${id}`, text: shownDef, cols: defW, placeholder: `the ${defName}: click to write it`, multiline: kind === 'code' }))} />
+          <Client key={`lb-def-${id}-${kind}`} module="./field.tsx" width={defW} props={JSON.parse(JSON.stringify({ name: `label-body:${id}`, text: shownDef, cols: defW, placeholder: `the ${defName}: click to write it`, multiline: kind === 'code', edit: 'edit', editColor: ACCENT }))} />
         </Box>,
       ),
     )
@@ -2568,14 +2566,14 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
     rows.push(
       <Box key="lb-running" flexDirection="row" columnGap={2} flexWrap="wrap">
         <Text>{`◌ labeling ${running.limit ? `a sample of ${num(running.limit)}` : `all ${scopeN !== null ? num(scopeN) : ''} ${unit}`.replace(/\s+/g, ' ')}`}</Text>
-        <Button key="lb-stop" label="stop" plain onPress={stop} />
+        {actionEl(els, 'lb-stop', 'stop', stop)}
       </Box>,
     )
   else if (st.running)
     rows.push(
       <Box key="lb-running" flexDirection="row" columnGap={2} flexWrap="wrap">
         <Text>{labelStateWords(st)}</Text>
-        {follower ? <Button key="lb-stop" label="stop" plain onPress={stop} /> : null}
+        {follower ? actionEl(els, 'lb-stop', 'stop', stop) : null}
       </Box>,
     )
   else if (labelRenaming === id && e.surface !== 'mobile')
@@ -2587,7 +2585,7 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
           <Input key={fieldKey(`lb-name-${id}`)} value={name} autoFocus submitLabel="rename" onSubmit={v => void rename(v)} />
         </Box>
         <Text>{'  '}</Text>
-        <Button key="lb-rename-keep" label="keep the name" plain onPress={() => void keepName()} />
+        {actionEl(els, 'lb-rename-keep', 'keep the name', () => void keepName())}
       </Box>,
     )
   else if (labelDeleting === id)
@@ -2595,18 +2593,18 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
     rows.push(
       <Box key="lb-delete" flexDirection="row" flexWrap="wrap">
         <Text>{`delete label "${name}"? its marks and card go too · `}</Text>
-        <Button key="lb-delete-yes" label="y to delete" plain onPress={() => void deleteIt()} />
+        {actionEl(els, 'lb-delete-yes', 'y to delete', () => void deleteIt())}
         <Text>{' · '}</Text>
-        <Button key="lb-delete-no" label="n to keep" plain onPress={() => void keepIt()} />
+        {actionEl(els, 'lb-delete-no', 'n to keep', () => void keepIt())}
       </Box>,
     )
   else
     rows.push(
       <Box key="lb-runs" flexDirection="row" columnGap={2} flexWrap="wrap">
-        <Button key="lb-sample" label="run on a sample" plain onPress={() => void run(sample)()} />
-        <Button key="lb-all" label={scopeN !== null ? `run on all ${num(scopeN)}` : 'run on all'} plain onPress={() => void run(0)()} />
-        <Button key="lb-rename" label="rename" plain onPress={() => void askRename()} />
-        <Button key="lb-delete" label="delete" plain onPress={() => void askDelete()} />
+        {actionEl(els, 'lb-sample', 'run on a sample', () => void run(sample)())}
+        {actionEl(els, 'lb-all', scopeN !== null ? `run on all ${num(scopeN)}` : 'run on all', () => void run(0)())}
+        {actionEl(els, 'lb-rename', 'rename', () => void askRename())}
+        {actionEl(els, 'lb-delete', 'delete', () => void askDelete())}
         <Text dimColor>{lastWords}</Text>
       </Box>,
     )
@@ -2619,7 +2617,8 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
     // the field takes the letters; its Enter renames
   } else if (!running && !st.running) keys.push({ key: 'sample', hotkey: 'r', onPress: () => void run(sample)() }, { key: 'rename', hotkey: 'n', onPress: () => void askRename() }, { key: 'delete', hotkey: 'k', onPress: () => void askDelete() })
   else if (running || follower) keys.push({ key: 'stop', hotkey: 's', onPress: stop })
-  // f turns a label over files on or off in Files (o opens the label in the browser, as in every view)
+  // f shows or hides the marks of a label over files in Files and the views (o opens the label in the browser, as in
+  // every view)
   if (files && !asking && !renaming) keys.push({ key: 'files-on', hotkey: 'f', onPress: () => void turn(!shownOn)() })
   // the counts, the examples and the cards, folded
   const toggle = (part: string, words: string, n: number | null, note = '') => (
@@ -2895,7 +2894,7 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
       els,
       [
         ...(running || follower ? ['s to stop'] : st.running || asking || renaming ? [] : ['r to run a sample', 'n to rename', 'k to delete']),
-        ...(files && !asking && !renaming ? [shownOn ? 'f to hide in files' : 'f to show in files'] : []),
+        ...(files && !asking && !renaming ? [shownOn ? 'f to hide marks' : 'f to show marks'] : []),
         'c counts, e examples, d cards',
         'l for labels',
       ],

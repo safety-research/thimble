@@ -755,7 +755,8 @@ export function world(on: On, opts: { mode?: string; ws?: string | null; active?
   return w
 }
 
-/** Every string a drawn tree shows (a Button's label too), joined. */
+/** Every string a drawn tree shows (a Button's label too), joined. A Button drawn from its children shows them: its
+ *  label then only names it (the engine fills it from them), so it is not counted twice. */
 export function shown(tree: unknown): string {
   const out: string[] = []
   const walk = (n: unknown) => {
@@ -764,7 +765,8 @@ export function shown(tree: unknown): string {
     else if (n && typeof n === 'object') {
       const o = n as { label?: unknown; text?: unknown; children?: unknown; props?: { label?: unknown; text?: unknown; children?: unknown } }
       const label = o.label ?? o.props?.label
-      if (typeof label === 'string') out.push(label)
+      const kids = o.children ?? o.props?.children
+      if (typeof label === 'string' && !(Array.isArray(kids) ? kids.length : kids)) out.push(label)
       const text = o.props?.text
       if (typeof text === 'string') out.push(text)
       walk(o.children ?? o.props?.children)

@@ -1,6 +1,6 @@
 // The label panel as thimble-term draws it: its header as Matt wrote
-// it (`name:`, `type:`, `scope:`, the definition on the same column), `stop` while a run goes, a run's first error in
-// red, the labels list's digits. `claude plugin test plugin`.
+// it (`name:`, `type:`, `scope:`, the definition on the same column, a prompt label's model in it), its actions in the
+// accent, `stop` while a run goes, a run's first error in red, the labels list's digits. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
@@ -36,11 +36,11 @@ test("the label panel's header reads `name:`, `type:`, `scope:`, and its pattern
   const pane = await labelPanel($, w)
   const text = shown(await pane.drawn())
   for (const s of ['name:', 'type:', 'scope:', 'pattern:']) expect(text).toContain(s)
-  // each label in a column 11 cells wide (a label over files' `in files:` and a gutter), the field after it
-  expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Box","props":{"key":"lf-pattern:","flexDirection":"row"},"children":[{"type":"Box","props":{"width":11,"flexShrink":0}')
+  // each label in a column 10 cells wide (the longest, `pattern:`, and a gutter), the field after it
+  expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Box","props":{"key":"lf-pattern:","flexDirection":"row"},"children":[{"type":"Box","props":{"width":10,"flexShrink":0}')
   // each folded part's key by what it opens (live check New 11)
-  // 0.9.0 (SPEC-v2 J4): the label's Files switch is `f`; `o` opens it in the browser
-  expect(text).toContain('r to run a sample · n to rename · k to delete · f to show in files')
+  // 0.9.0 (SPEC-v2 J4): the label's marks switch is `f`; `o` opens it in the browser
+  expect(text).toContain('r to run a sample · n to rename · k to delete · f to show marks')
   expect(text).toContain('c counts, e examples, d cards · l for labels')
   await pane.unmount()
 })
@@ -240,16 +240,47 @@ test("a label whose first run stopped part way counts its scope in its panel: `r
   await pane.unmount()
 })
 
-test("a prompt label's panel has a `model:` row, the model its calls run on; its scope says how many files match", async ($, on) => {
-  // Matt (19:05): the label panel shows the model a prompt label uses, and the scope's count says what it is
+test("a prompt label's panel has a `model:` row in its definition, right above the prompt it runs; its scope says how many files match", async ($, on) => {
+  // Matt (19:05): the label panel shows the model a prompt label uses, and the scope's count says what it is; (v9
+  // review, item k) the model row stands in the definition, under the rule, with the prompt
   const w = world(on)
-  w.states.labels = [{ ...LABEL, kind: 'prompt', glob: 'agents/*.jsonl', scope_files: 3, run_model: 'Haiku 4.5' }] as never
+  w.states.labels = [{ ...LABEL, kind: 'prompt', spec: 'Does the text link through a proxy?', glob: 'agents/*.jsonl', scope_files: 3, run_model: 'Haiku 4.5' }] as never
   const pane = await labelPanel($, w)
-  const text = shown(await pane.drawn())
+  const tree = (await pane.drawn()) as { children?: unknown[] }
+  const text = shown(tree)
   expect(text).toMatch(/model:\s*Haiku 4\.5/)
   expect(text).toMatch(/scope:\s*· 3 files match/)
-  expect(text.indexOf('type:')).toBeLessThan(text.indexOf('model:'))
-  expect(text.indexOf('model:')).toBeLessThan(text.indexOf('scope:'))
+  // the panel's rows in order: the header (type, scope, marks), the rule, then the model and the prompt
+  const rows = (tree.children ?? []).map(r => shown(r))
+  const at = (s: string) => rows.findIndex(r => r.startsWith(s))
+  for (const s of ['type:', 'scope:', 'marks:', '──', 'model:', 'prompt:']) expect(at(s)).toBeGreaterThanOrEqual(0)
+  expect(at('type:')).toBeLessThan(at('scope:'))
+  expect(at('scope:')).toBeLessThan(at('marks:'))
+  expect(at('marks:')).toBeLessThan(at('──'))
+  expect(at('model:')).toBe(at('──') + 1)
+  expect(at('prompt:')).toBe(at('model:') + 1)
+  await pane.unmount()
+})
+
+test("the label panel's actions read as buttons: `run on a sample`, `run on all N`, `rename` and `delete` in the accent", async ($, on) => {
+  // Matt (v9 review, item m): they read as text; Claude Code draws the choice to press in its accent
+  const w = world(on)
+  let pane = await labelPanel($, w)
+  // an action: a Button whose words are one Text in the accent
+  const action = async (key: string) => {
+    const b = await pane.find({ type: 'Button', key })
+    const t = b?.children[0] as { type?: string; props?: { color?: string }; text?: string } | undefined
+    return { words: b?.text, tag: t?.type, color: t?.props?.color }
+  }
+  for (const [key, words] of [['lb-sample', 'run on a sample'], ['lb-all', 'run on all 14,591'], ['lb-rename', 'rename'], ['lb-delete', 'delete']] as const) expect(await action(key)).toEqual({ words, tag: 'Text', color: 'suggestion' })
+  // the last run stays dim beside them, no button
+  expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Text","props":{"dimColor":true},"children":["last run on all 14,591"]}')
+  // the question a delete asks: its answers are actions too
+  await pane.press({ key: 'lb-delete' })
+  await w.clock.settle()
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  for (const [key, words] of [['lb-delete-yes', 'y to delete'], ['lb-delete-no', 'n to keep']] as const) expect(await action(key)).toEqual({ words, tag: 'Text', color: 'suggestion' })
   await pane.unmount()
 })
 
