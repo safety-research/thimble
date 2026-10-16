@@ -296,7 +296,8 @@ def test_slash_thimble_makes_its_session_main_with_a_launch_record_and_marks_the
         rec = cli.read_launch("mini")
     assert {k: rec[k] for k in ("session", "pid", "via", "transport", "config_dir")} == {
         "session": "s5", "pid": 4242, "via": "press", "transport": "server", "config_dir": str(tmp_path / "claude-home")}
-    assert "fenced" not in rec and "mode" not in rec
+    # activation's writer may still write 0.8.0's `mode` beside `transport` (activate.LEGACY_MODE); it agrees with it
+    assert "fenced" not in rec and rec.get("mode") in (None, "browser")
     marks = {p.name for p in (home / cli.ACTIVE_DIR).iterdir()}
     assert marks == {str(link).replace("/", "%"), str((data / "mini").resolve()).replace("/", "%")}
     assert cli.main(["up", "--cwd", str(link), "--session", "s5"]) == 0  # /thimble alone: activation keeps it
