@@ -143,7 +143,7 @@ test('a module reload (session.start where the session is on) restores quietly: 
   await startSession($, w)
   expect(w.activations).toEqual([])
   expect(w.mcp).toEqual([])
-  expect(trailOf(w).slice(0, 1)).toEqual(['restore'])
+  expect(trailOf(w).slice(0, 2)).toEqual(['restore', 'bridge'])
   // the guide only if owed: it is not, so a prompt carries none
   const p = (await $.prompt.submit({ text: 'hello', origin: { kind: 'composer' }, wait: false } as never)) as { context?: string[] }
   expect(p.context ?? []).toEqual([])
@@ -159,6 +159,7 @@ test('/clear: the next prompt of the new conversation rekeys thimble and carries
   expect(w.activations.length).toBe(1)
   expect(w.activations[0]).toEqual([CLI, 'activate', '--cwd', CWD, '--session', 's2', '--via', 'command', '--rekey-from', SID, '--mod', '--json'])
   expect(p.context).toEqual([GUIDE])
+  expect(trailOf(w)).toEqual(expect.arrayContaining(['rekey:clear', 'bridge']))
   // /resume to a conversation whose guide was sent: rekeyed, no guide
   await $.session.end({ reason: 'resume', sessionId: 's2', resume: { id: 's2' } } as never)
   w.sid = 's3'

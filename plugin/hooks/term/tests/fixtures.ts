@@ -263,8 +263,10 @@ export type World = {
   /** file sizes and folders `fs.stat` answers (paths of `files` and `stamps` are files of size 1) */
   sizes: Map<string, number>
   dirs: Set<string>
-  /** the /config rows `$.config.set` changed */
-  configSets: { key: string; value: unknown }[]
+  /** the /config rows `$.config.set` changed, each with the store's synced settings when it came */
+  configSets: { key: string; value: unknown; synced?: unknown }[]
+  /** the plugin's store */
+  store: Map<string, unknown>
   /** what main's next tool call answers, by its input, over `toolText` */
   toolAnswer?: (e: Record<string, unknown>) => Record<string, unknown>
   /** $.session.root() and cwd() fail, or $.session.id() (a hook that throws) */
@@ -277,6 +279,8 @@ export type World = {
   /** each file written, each state value set (by key), each interval started, each sleep */
   writes: string[]
   stateSets: string[]
+  /** the last value the plugin set under each state key (`key:id` for a family member) */
+  state: Map<string, unknown>
   timers: number
   sleeps: number
 }
@@ -384,9 +388,11 @@ export function world(on: On, opts: { mode?: string; ws?: string | null; active?
     sizes: new Map(),
     dirs: new Set(),
     configSets: [],
+    store: new Map(),
     writes: [],
     logs: [],
     stateSets: [],
+    state: new Map(),
     timers: 0,
     sleeps: 0,
   }
@@ -398,7 +404,18 @@ export function world(on: On, opts: { mode?: string; ws?: string | null; active?
     writeMarker(SID, 'command')
     w.guideOwed = false
   }
-  mock.store(on, opts.store ?? {})
+  // the plugin's store ($.store), in memory, which a test reads (w.store)
+  for (const [k, v] of Object.entries(opts.store ?? {})) w.store.set(k, JSON.parse(JSON.stringify(v)))
+  on('store.get', ($, e) => ({ value: w.store.has(e.key) ? JSON.parse(JSON.stringify(w.store.get(e.key))) : undefined }) as never)
+  on('store.set', ($, e) => {
+    w.store.set(e.key, JSON.parse(JSON.stringify(e.value)))
+    return { value: undefined } as never
+  })
+  on('store.delete', ($, e) => {
+    w.store.delete(e.key)
+    return { value: undefined } as never
+  })
+  on('store.keys', () => ({ value: [...w.store.keys()] }) as never)
   on('session.id', () => {
     if (w.sidFails) throw new Error('no session id')
     return { value: w.sid } as never
@@ -410,7 +427,7 @@ export function world(on: On, opts: { mode?: string; ws?: string | null; active?
     return { value: { content: [{ type: 'text', text: w.guide }] } } as never
   })
   on('config.set', ($, e) => {
-    w.configSets.push({ key: e.key, value: e.value })
+    w.configSets.push({ key: e.key, value: e.value, synced: w.store.get('settings.synced') })
     return { value: e.value } as never
   })
   const ws = opts.ws === undefined ? WS : opts.ws
@@ -440,7 +457,10 @@ export function world(on: On, opts: { mode?: string; ws?: string | null; active?
   })
   // what the plugin set in its state, and the timers it started (the kit answers both beneath this)
   on('state.set', ($, e, next) => {
-    w.stateSets.push(String((e as { key?: unknown }).key ?? ''))
+    const key = String((e as { key?: unknown }).key ?? '')
+    const id = (e as { id?: unknown }).id
+    w.stateSets.push(key)
+    w.state.set(typeof id === 'string' ? `${key}:${id}` : key, (e as { value?: unknown }).value)
     return next(e)
   })
   on('clock.every', { ms: /^/ }, ($, e, next) => {
@@ -503,7 +523,7 @@ export function world(on: On, opts: { mode?: string; ws?: string | null; active?
       return out({ settings: w.features, at: 1 })
     }
     if (argv[1] === 'act' && argv.includes('--stdin')) {
-      const payload = JSON.parse(String((e as { stdin?: unknown }).stdin ?? '{}')) as Record<string, unknown>
+      const payload = JSON.parse(String((e as { init?: { stdin?: unknown } }).init?.stdin ?? '{}')) as Record<string, unknown>
       w.acts.push({ kind: argv[2]!, payload })
       if (argv[2] === 'coverage') {
         w.coverage.push(payload)

@@ -541,6 +541,7 @@ export async function followConversation(cx: Ctx): Promise<void> {
   act.owed = k.reason === 'clear' ? true : null
   trail(cx, `rekey:${k.reason}`)
   await cx.bridge(act.active).catch(() => undefined)
+  trail(cx, 'bridge')
 }
 
 /** This session's marker (`<home>/up/<sid>.active`, C1) when it says thimble is on in this folder: a module reload or a
@@ -561,7 +562,9 @@ export async function restoreFromMarker(cx: Ctx): Promise<boolean> {
   const a: Activated = { ws: String(m.ws ?? ''), path: m.path, cwd: pre.cwd, via: String(m.via ?? 'command'), role: m.role === 'peer' ? 'peer' : 'main', at: typeof m.at === 'number' ? m.at : 0 }
   act.flight = Promise.resolve({ ok: true, activated: a, context: null })
   trail(cx, 'restore')
+  // thimble.ts told again, so a reloaded module keeps thimble's agent types registered
   await cx.bridge(a).catch(() => undefined)
+  trail(cx, 'bridge')
   await turnOn(cx, a)
   act.owed = null
   return true
