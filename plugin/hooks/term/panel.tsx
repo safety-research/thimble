@@ -50,7 +50,7 @@ import type { DocComment } from './report'
 import { focusFromRef } from './anim'
 import type { Focus } from './anim'
 import { NAV_EMPTY, backTarget, crumbSteps, fitPath, pathWidth, threadBehind, threadOnTrail, threadTitle, threadTree, withBack } from './nav'
-import { COLORS, paintLines } from './paint'
+import { COLORS, citeHighlight, paintLines } from './paint'
 import { PANEL_MARGIN, cardBlock, cardName, citeStatus, claimCard, claimSentence, drawReply, linkCheck, placeName, plainWhy, scrubIds } from './reply'
 import { PANEL, citePage, closePanel, deleteLabel, filterLabel, inPanelNow, loadCards, navBack, navGo, openHome, openList, openPanel, panelOfStep, queueCitations, readDoc, readFilePage, readSurface, rt, runLabel, saveLabel, showLabel, startThread, stepOf, stopLabel, subjectFile, surfaceValue, threadMessage, undeleteLabel } from './term'
 import { COLOR_NAMES, LABEL_WHEEL, MORE_ROWS, UNSURE_PAGE, agreementLine, classColors, hueOf, labelArgs, labelGone, labelRows, setLabelGone, unsureArgs, unsureKey, unsureOf, unsureShown, unsureWords } from './labels'
@@ -1333,7 +1333,7 @@ function wholeLit(hits: readonly TermVerdict['lines'][number][], quote: string):
 
 /** The cited lines nested at A2 (SPEC.md, section 7, "The citation panel"): each line's number right-aligned in
  *  a dim column (the cited one's in the text colour), its text after a gutter; a cited line wrapped over 3 to 8 rows
- *  (by the pane's rows) around the value or the quoted passage on the selection background; two lines of context
+ *  (by the pane's rows) around the value or the quoted passage on the citation's purple (citeHighlight); two lines of context
  *  around the cited ones when a cited line wraps; a long context line cut with `…` around its value. */
 function lineRows(cx: Ctx, e: PaneEvent, v: TermVerdict, cols: number, quote: string): RenderElement[] {
   const { Text } = cx.els(e)
@@ -1383,7 +1383,7 @@ function lineRows(cx: Ctx, e: PaneEvent, v: TermVerdict, cols: number, quote: st
         <Text wrap="truncate-end">
           <Text>{`  ${i === 0 ? n : ' '.repeat(gutter)}  `}</Text>
           <Text>{r.hi ? r.text.slice(0, r.hi[0]) : r.text || ' '}</Text>
-          {r.hi ? <Text backgroundColor={COLORS.selected}>{r.text.slice(r.hi[0], r.hi[1])}</Text> : null}
+          {r.hi ? <Text backgroundColor={citeHighlight()}>{r.text.slice(r.hi[0], r.hi[1])}</Text> : null}
           {r.hi ? <Text>{r.text.slice(r.hi[1])}</Text> : null}
         </Text>,
       ),
@@ -1408,7 +1408,7 @@ type WinRow = { at: number; line: number; n: number; text: string; hit: boolean;
 /** A file citation's lines as a window over the whole file (Matt, 2026-10-07: "you can't see beyond the few lines it
  *  picks and the part it cited isn't highlighted"): the lines nested at A2 as lineRows draws them, the cited ones in
  *  the text colour with the value (the passage an example quotes, or the whole line for a citation that marks none) on
- *  the selection background, the lines around them dim, one row each; `room` rows tall, opening with the cited lines
+ *  the citation's purple (citeHighlight), the lines around them dim, one row each; `room` rows tall, opening with the cited lines
  *  a third of the way down, `↑ N more` and `↓ N more` dim on a row each for the file's lines above and below, a click on
  *  one a page. ↑↓ (the list's keys, through the relay) and the wheel (wheelWindow) move it a line; as it nears a page's
  *  end the next page of the file is read (term.ts citePage). Null until a page of the file is read, or when the file
@@ -1492,7 +1492,7 @@ async function citeWindow(cx: Ctx, e: PaneEvent, key: string, v: TermVerdict, co
     const spans = r.spans.map(([a, b]) => [shifted(r.text, a!), shifted(r.text, b!)] as [number, number])
     const span: [number, number] | null = quote ? quoteSpan(text, quote) : (spans[0] ?? (whole ? [0, text.length] : null))
     return wrapAround(text, span, textRoom, hitRows).map((w, i) =>
-      pointed([{ s: `  ${i === 0 ? n : ' '.repeat(gutter)}  ` }, ...(w.hi ? [{ s: w.text.slice(0, w.hi[0]) }, { s: w.text.slice(w.hi[0], w.hi[1]), bg: COLORS.selected }, { s: w.text.slice(w.hi[1]) }] : [{ s: w.text || ' ' }])].filter(x => x.s !== ''), false),
+      pointed([{ s: `  ${i === 0 ? n : ' '.repeat(gutter)}  ` }, ...(w.hi ? [{ s: w.text.slice(0, w.hi[0]) }, { s: w.text.slice(w.hi[0], w.hi[1]), bg: citeHighlight() }, { s: w.text.slice(w.hi[1]) }] : [{ s: w.text || ' ' }])].filter(x => x.s !== ''), false),
     )
   }
   const height = rows.map(r => linesOf(r).length)
@@ -1586,7 +1586,7 @@ function withCitedRow(card: CardData, v: TermVerdict): CardData {
   return r < cap ? card : { ...card, rows: [...all.slice(0, cap - 1), all[r]!] as CardData['rows'] }
 }
 
-/** The cells of a layout that hit item `k`, on the selection background. */
+/** The cells of a layout that hit item `k`, on `bg`. */
 function litItem(lay: Layout, k: number, bg: string): Line[] {
   if (k < 0) return lay.lines
   const spans: { line: number; x0: number; x1: number }[] = []
@@ -1605,21 +1605,22 @@ function litItem(lay: Layout, k: number, bg: string): Line[] {
   return shade(lay.lines, spans, bg)
 }
 
-/** A card with the cited mark on the selection background, kept in view: a cited row past the drawn rows in place of
+/** A card with the cited mark on the citation's purple (citeHighlight), kept in view: a cited row past the drawn rows in place of
  *  the last; a table's column names, then the rows around the cited one when the card is taller than the pane's room;
  *  a total's `all` lit. */
 function citedLines(card: CardData, v: TermVerdict, w: number, room: number): { card: CardData; lines: Line[] } {
   const shown = withCitedRow(card, v)
   const base = cardLayout(shown, w, -1, 8)
   const k = citedItem(shown, base.items, v)
-  let lines = k >= 0 ? litItem(base, k, COLORS.selected) : base.lines
+  const hi = citeHighlight()
+  let lines = k >= 0 ? litItem(base, k, hi) : base.lines
   if (k < 0 && (shown.kind === 'bar' || shown.kind === 'label') && v.row === 'all') {
     lines = lines.map(l => {
       const at = l.findIndex(x => x.s === 'all  ')
-      return at < 0 ? l : l.map((x, j) => (j === at + 1 ? { ...x, bg: COLORS.selected } : x))
+      return at < 0 ? l : l.map((x, j) => (j === at + 1 ? { ...x, bg: hi } : x))
     })
   }
-  const ys = lines.flatMap((l, y) => (l.some(x => x.bg === COLORS.selected) ? [y] : []))
+  const ys = lines.flatMap((l, y) => (l.some(x => x.bg === hi) ? [y] : []))
   if (lines.length > room && ys.length && ys.at(-1)! >= room) {
     // a table's column names are the lines before its first row
     let head = 0
@@ -1773,7 +1774,7 @@ async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
     const win = v.path && typeof v.line === 'number' ? await citeWindow(cx, e, c.ref, v, cols, quote, Math.max(5, (bodyRows || 30) - used)) : null
     if (win?.scrolls) hints = ['↑↓ to scroll', ...hints]
     body.push(win?.el ?? <Box key="cite-lines" flexDirection="column">{lineRows(cx, e, v, cols, quote)}</Box>)
-    if (quotedRow) body.push(fieldEls(els, [['quoted', <Text wrap="wrap" backgroundColor={COLORS.selected}>{clip(demojibake(quote), 600)}</Text>]], 'cite-quoted')!)
+    if (quotedRow) body.push(fieldEls(els, [['quoted', <Text wrap="wrap" backgroundColor={citeHighlight()}>{clip(demojibake(quote), 600)}</Text>]], 'cite-quoted')!)
   } else if (!v) body.push(<Text key="cite-wait" dimColor>◌ checking</Text>)
   const ask = () => void openAsk(cx, target, p.sentence ? { anchorText: plainCites(p.sentence) } : {})
   const keys: Key[] = [{ key: 'ask', hotkey: 'a', onPress: ask }, ...(f ? [{ key: 'files', hotkey: 'f', onPress: () => void opens?.() }] : [])]

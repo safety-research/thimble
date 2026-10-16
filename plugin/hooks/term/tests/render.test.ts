@@ -8,7 +8,7 @@ import type { Engine, Mounted } from 'claude-code/testing'
 import { HOME_LINE } from '../register'
 import { RELAY, relayValue } from '../panel'
 import { PANEL } from '../term'
-import { CLI, CWD, LABEL, SLIDES, WS, shown, takesKeys, world } from './fixtures'
+import { CLI, CWD, LABEL, SLIDES, WS, citedText, shown, takesKeys, world } from './fixtures'
 import type { World } from './fixtures'
 
 type M = Mounted<'terminal'>
@@ -181,8 +181,8 @@ test("a reply's citation is a link, purple and underlined; a click opens the cit
   expect(text).toContain('"The README says 4,579 pages."')
   expect(text).toContain('a to ask · f for its file · x to close')
   expect(text).not.toContain('in files')
-  // the cited value on the selection background; no right-click menu anywhere
-  expect(JSON.stringify(lines)).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["4,579"]}')
+  // the cited value on the citation's purple; no right-click menu anywhere
+  expect(JSON.stringify(lines)).toMatch(citedText('4,579'))
   expect(text).not.toContain('open its lines')
   await pane.unmount()
 })

@@ -5,7 +5,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
 import { wrapAround } from '../cite'
-import { CWD, DOC, shown, world } from './fixtures'
+import { CITED_BG, CWD, DOC, citedText, shown, world } from './fixtures'
 import type { World } from './fixtures'
 
 type M = Mounted<'terminal'>
@@ -33,7 +33,7 @@ async function clickCite($: E, w: World, text: string, x: number): Promise<M> {
   return (await $.ui.mount(PANE)) as unknown as M
 }
 
-test("a card value's citation draws the card in its border with the cited cell on the selection background", async ($, on) => {
+test("a card value's citation draws the card in its border with the cited cell on the citation's purple", async ($, on) => {
   const w = world(on)
   await start($, w)
   const pane = await clickCite($, w, 'dse has [[3908|card:ff73e071#pages/dse]] pages.', 9)
@@ -41,7 +41,7 @@ test("a card value's citation draws the card in its border with the cited cell o
   // the `from` row names the place, so the subtitle says `found` alone (live check New 7)
   expect(shown(await pane.find({ key: 'cite-sub' }))).toBe('found')
   expect(text).toContain('card "What does the export hold per wiki?"')
-  expect(JSON.stringify(await pane.drawn())).toMatch(/"backgroundColor":"selectionBg"\},"children":\["\s*3,?908\s*"\]/)
+  expect(JSON.stringify(await pane.drawn())).toMatch(new RegExp(`"backgroundColor":"${CITED_BG}"\\},"children":\\["\\s*3,?908\\s*"\\]`))
   await pane.unmount()
 })
 
@@ -57,7 +57,7 @@ test('a cited table row past the rows a card draws takes the place of the last o
   const text = shown(await pane.drawn())
   expect(text).toContain('w19')
   expect(text).not.toContain('w15')
-  expect(JSON.stringify(await pane.drawn())).toMatch(/"backgroundColor":"selectionBg"\},"children":\["\s*118\s*"\]/)
+  expect(JSON.stringify(await pane.drawn())).toMatch(new RegExp(`"backgroundColor":"${CITED_BG}"\\},"children":\\["\\s*118\\s*"\\]`))
   await pane.unmount()
 })
 
@@ -77,7 +77,7 @@ test('a value after a tab is lit where it stands', async ($, on) => {
   w.pages['data.tsv'] = { path: 'data.tsv', kind: 'text', total_lines: 2, start: 1, records: [{ line: 1, record: { text: 'wiki\tpages' } }, { line: 2, record: { text: 'dse\t3908\tpages' } }] }
   await start($, w)
   const pane = await clickCite($, w, 'dse has [3908](data.tsv#L2) pages.', 9)
-  expect(JSON.stringify(await pane.drawn({ in: 'm:cite-lines' }))).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["3908"]}')
+  expect(JSON.stringify(await pane.drawn({ in: 'm:cite-lines' }))).toMatch(citedText('3908'))
   await pane.unmount()
 })
 
@@ -104,12 +104,12 @@ test("a click on an example's record opens its place with the passage the card q
     return (await $.ui.mount(PANE)) as unknown as M
   }
   let pane = await open(0)
-  expect(JSON.stringify(await pane.drawn({ in: 'm:cite-lines' }))).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["4,579 wiki pages"]}')
+  expect(JSON.stringify(await pane.drawn({ in: 'm:cite-lines' }))).toMatch(citedText('4,579 wiki pages'))
   await pane.unmount()
   pane = await open(1)
   const text = shown(await pane.drawn())
   expect(text).toContain('quoted')
-  expect(JSON.stringify(await pane.drawn())).toContain('"backgroundColor":"selectionBg"},"children":["not in the line"]')
+  expect(JSON.stringify(await pane.drawn())).toMatch(new RegExp(`"backgroundColor":"${CITED_BG}"\\},"children":\\["not in the line"\\]`))
   await pane.unmount()
 })
 
@@ -320,7 +320,7 @@ test("a file citation opens on its whole file: the cited line lit whole for a pl
   expect(at).toBeGreaterThan(3)
   expect(at).toBeLessThan(rows.length / 2)
   // the cited line lit whole (it names no value), its number in the text colour; the lines around it dim
-  expect(json).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["line 450 of the log"]}')
+  expect(json).toMatch(citedText('line 450 of the log'))
   expect(json).toMatch(/"color":"inactive"\},"children":\["\s*449 {2}line 449 of the log"\]/)
   expect(json).toMatch(/"color":"inactive"\},"children":\["\s*460 {2}line 460 of the log"\]/)
   await pane.unmount()
@@ -333,7 +333,7 @@ test('a value cited in a file is lit where it stands, not its whole line; the pa
   await start($, w)
   const pane = await clickCite($, w, 'It names [line 450](log.txt#L450) once.', 10)
   const { json } = await windowRows(pane)
-  expect(json).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["line 450"]}')
+  expect(json).toMatch(citedText('line 450'))
   expect(json).not.toContain('"children":["line 450 of the log"]}')
   // the page that holds the cited line's lines was read from its start (term.ts citePage), never the file's first page
   const reads = w.calls.filter(c => c[2] === 'files' && c[5] === 'log.txt').map(c => c.slice(6).join(' '))
@@ -354,7 +354,7 @@ test('every file citation opens in the window over its file: from a reply, a car
     const { rows, json } = await windowRows(pane)
     expect(rows.some(r => /^\s+450 {2}line 450 of the log$/.test(r))).toBe(true)
     expect(rows.at(-1)).toMatch(/↓ \d+ more$/)
-    expect(json).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["line 450"]}')
+    expect(json).toMatch(citedText('line 450'))
     await pane.unmount()
   }
   // a reply

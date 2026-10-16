@@ -63,7 +63,8 @@ Each channel has one meaning. A run the table does not cover is regular, in the 
 | accent | a panel's title, the selected row, `view proposal` above the prompt | anything else |
 | italic | a record's own words (in quotation marks); the key-hint row | emphasis, captions |
 | inverse | the selected tab; the control, citation, mark or bar label under the pointer; a card's title under the pointer | anything at rest |
-| selection background | a choice in use: a card's parameter, a label's type, the cited value in its lines, the chosen record of a file, the words a find matched, text being dragged | rows, hover |
+| selection background | a choice in use: a card's parameter, a label's type, the chosen record of a file, the words a find matched, text being dragged | rows, hover |
+| citation purple background | the cited value where it stands in its place: its lines, a card's data row or code (paint.ts citeHighlight) | anything else |
 | tip background | the tip of the citation under the pointer | anything else |
 | palette hue | a value of the region's one color field | letters, headings, backgrounds |
 | red | a problem | negative numbers, hover |
@@ -185,8 +186,10 @@ and, given `startLine`, its dim gutter of line numbers.
     classes takes the series in its values' order. A label's catch-all value ("other", a class with no color) takes dim
     marks. A field with one value draws dim marks.
 21. **The selection background** marks a choice in use among choices shown together: a card's parameter, a label's
-    type (`prompt  regex  code`), the cited value in the citation panel, the chosen record of a file, the words a find
-    matched in a line, text being dragged. Selected rows use `❯` and the accent instead (rule 13 of "The rules"), and the selected tab uses inverse.
+    type (`prompt  regex  code`), the chosen record of a file, the words a find matched in a line, text being dragged.
+    The cited value where it stands in its place (the citation panel's lines, a card's data row or code, a thread's
+    subject lines) is on the citation's purple instead (v9 review: "the cited value highlighted in purple"): Claude
+    Code's violet blended toward the theme's background, the words on it in their own color. Selected rows use `❯` and the accent instead (rule 13 of "The rules"), and the selected tab uses inverse.
 22. **Red** marks a problem and only a problem: a failure, a citation whose value is not at its place, a card that
     cannot be drawn, a run's error, a document's warning or caution. `×` is a failure and `!` something usable with a
     problem. Negative numbers are drawn as positive ones are.
@@ -686,7 +689,7 @@ With several threads, one open:
   first question (`v`, or a press on the `about` row; the hint row names what it shows: `v to show the card`, `the
   lines`, `the passage`, `the answer`): a card in its frame (section 2, rule 11), a value the thread was asked about lit
   on it; a file's cited line with up to two lines on each side, as the citation panel draws lines (the cited one in the
-  text color, the value or the whole line on the selection background, the others dim, their numbers in a dim column at
+  text color, the value or the whole line on the citation's purple, the others dim, their numbers in a dim column at
   A2); a passage or a quote as its words, wrapped, a heading bold, unless `about` holds them whole (then there is no
   `v`). Above a new thread's field at most 6 rows of it (a card's plot or body, the rows under it then left out), then
   `… N more` dim, which shows it whole; never `… 1 more`.

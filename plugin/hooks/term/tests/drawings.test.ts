@@ -13,7 +13,7 @@ import type { Seg } from '../draw'
 import { fitPath, pathWidth } from '../nav'
 import { COLORS, setTheme } from '../paint'
 import { SERIES_DARK, SERIES_LIGHT } from '../palette.gen'
-import { CWD, shown, takesKeys, world } from './fixtures'
+import { CWD, citedText, shown, takesKeys, world } from './fixtures'
 import type { World } from './fixtures'
 
 // the test's own output: its drawings, for a reader
@@ -590,7 +590,7 @@ test("a thread about a file's line shows on v that line lit, with two lines on e
   expect(rows[about + 3]).toBe('     4  Four wikis.')
   expect(rows[about + 4]).toBe('')
   expect(rows[about + 5]).toBe(' ❯ four wikis?')
-  expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["An export of 4,579 wiki pages and their revisions."]}')
+  expect(JSON.stringify(await pane.drawn())).toMatch(citedText('An export of 4,579 wiki pages and their revisions.'))
   await pane.press({ key: 'thread-open-t5' })
   await w.clock.settle()
   await pane.unmount()

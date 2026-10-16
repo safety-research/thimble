@@ -10,6 +10,8 @@ import type { On } from 'claude-code'
 import { mock } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
+import { citeHighlight } from '../paint'
+
 export const WS = '/home/a/.thimble/app/workspaces/wiki'
 export const CWD = '/corpus/wiki'
 export const CLI = '/tree/plugin/bin/thimble'
@@ -825,4 +827,14 @@ export async function aTurn($: Engine, w: World, row: string, text: string, body
   await $.session.append({ door: 'response', origin: { kind: 'model', model: 'm' }, uuid: row, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text }] } } as never).catch(() => undefined)
   await $.turn.complete({ turnId: `t-${row}`, answer: text, durationMs: 5, reason: 'answer', isAborted: false } as never)
   await w.clock.settle()
+}
+
+/** The background a cited value stands on in its place (paint.ts citeHighlight: the citation's purple), in either
+ *  theme, as a pattern. */
+export const CITED_BG = `(?:${citeHighlight('dark')}|${citeHighlight('light')})`
+
+/** A drawing's JSON holds a Text of exactly `words` on the cited value's purple. */
+export function citedText(words: string): RegExp {
+  const lit = JSON.stringify(words).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`\\{"type":"Text","props":\\{"backgroundColor":"${CITED_BG}"\\},"children":\\[${lit}\\]\\}`)
 }
