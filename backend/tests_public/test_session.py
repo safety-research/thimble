@@ -613,6 +613,32 @@ def test_a_message_the_analyst_pasted_is_theirs_in_the_context_and_claude_code_s
     ]
 
 
+def test_a_paste_that_quotes_a_command_s_record_stays_the_analyst_s_message(tmp_path):
+    """An analyst of agents' transcripts may paste a record of one, which can hold Claude Code's `<command-name>` tag.
+    The context took any prompt with that tag for a command and showed only its name, so the paste and the words typed
+    with it were lost. A command is now read from what the analyst typed alone; Claude Code's own record of a command
+    still reads as its command line."""
+    from app import context
+
+    def human(content: str) -> dict:
+        return {"type": "user", "origin": {"kind": "human"}, "message": {"role": "user", "content": content}}
+
+    record = json.dumps({"type": "user", "message": {"content": "<command-name>/clear</command-name>\n<command-args>"
+                                                                "</command-args>"}})
+    pasted = f'\n\n<pasted_content id="a1b2">\n{record}\n</pasted_content id="a1b2">\n'
+    path = tmp_path / f"{SID}.jsonl"
+    path.write_text("\n".join(json.dumps(r) for r in [
+        human(pasted),
+        human("why did this run clear its context?" + pasted),
+        human("<command-name>/model</command-name>\n<command-args>opus</command-args>"),
+    ]) + "\n")
+    assert [(e.head, e.body) for e in context._entries(path)] == [
+        ("[analyst]", f"(pasted)\n    {record}"),
+        ("[analyst]", f"why did this run clear its context?\n(pasted)\n    {record}"),
+        ("[analyst]", "/model opus"),
+    ]
+
+
 def test_the_module_s_plan_mode_report_moves_main_s_mode_and_back(workspaces_tmp, monkeypatch):
     """Live check L21: a shift+tab while main is idle reaches thimble through the module (session.note_plan): plan mode,
     then on leaving it the mode main's hooks last reported, or default."""

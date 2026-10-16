@@ -222,7 +222,8 @@ def _entries(path: Path, forks: bool = True) -> list[_Entry]:
         elif origin == "task-notification":
             notification(text)
         elif origin in (None, "human"):
-            command = session._command_line(text)
+            # a command's tags in what the analyst typed, not in a paste, which may quote a transcript's record of one
+            command = session._command_line("".join(piece for pasted, piece in session.pastes(text) if not pasted))
             said = _said(text) if command is None else command
             if said:
                 entries.append(_Entry("[analyst]", said))
