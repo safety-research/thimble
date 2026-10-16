@@ -134,6 +134,8 @@ export type TermPanel = {
   label?: string
   slug?: string
   path?: string
+  /** the Coverage view's group of a folder's files: a name pattern (`agent-*.jsonl`) or a type (`.md`) */
+  match?: string
   start?: number
   /** a file's record chosen (a citation's line), lit; a file's table sorted by a column (`<column>:asc|desc`) */
   line?: number
@@ -202,8 +204,16 @@ export type TermFilesUi = { folded: string[]; unfolded: string[]; pick: string; 
 export type FeatureSettings = { autoActivate: boolean; viewProposals: boolean; labels: boolean; checks: boolean; citationMarks: boolean; coverage: boolean; cardCheck: boolean }
 /** thimble on in this session (C2's answer): the workspace, the folder, how it turned on and the session's role. */
 export type Activated = { ws: string; path: string; cwd: string; via: string; role: 'main' | 'peer'; at: number }
-/** What a session's tool calls saw of the data files (C7 `Summary`). */
-export type CoverageSummary = { files: { seen: number; searched: number; never: number; total: number }; records: { seen: number; total: number; counted: boolean }; line: string }
+/** What Claude read (`seen`) or searched of the corpus in this session (`thimble state coverage --summary`): `totals` one
+ *  entry per unit the corpus has, lines (line-based text), then entries (a JSON document's values, a database's rows),
+ *  then files (everything else); `records` the first of lines or entries, with its unit; `size` the whole corpus's
+ *  total by size (null with no index yet); `line` the line under answers (`read 2% · searched 41% of the data`). */
+export type CoverageSummary = { files: { seen: number; searched: number; never: number; total: number }; records: { unit?: 'lines' | 'entries'; seen: number; searched?: number; total: number; counted: boolean }; totals?: CoverageTotal[]; size?: CoverageSize | null; line: string }
+/** The corpus's total by size, in bytes: what Claude read, what was searched and not read, and the corpus's size. */
+export type CoverageSize = { read: number; searched: number; total: number }
+/** One unit's totals over the corpus: read (`seen`), searched and the total in that unit; for lines and entries, whether
+ *  they are counted yet and the files that hold them. */
+export type CoverageTotal = { unit: 'lines' | 'entries' | 'files'; seen: number; searched: number; total: number; counted?: boolean; files?: number; files_seen?: number; files_searched?: number }
 /** One chat citation the transcript drew. */
 export type CiteRow = { id: string; raw: string; display: string | null; ref: string; row: string; at: number }
 /** A check's comment on a passage of one of Claude's answers (C9, in the terminal's spelling); `color` is the check's

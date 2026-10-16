@@ -9,6 +9,7 @@
 import type { On } from 'claude-code'
 
 import type { AnswerComment, CiteRow, CoverageSummary, FeatureSettings } from '../types'
+import type { CoverageRow } from '../coverageview'
 import { CLI, world } from './fixtures'
 import type { World } from './fixtures'
 
@@ -20,12 +21,12 @@ export const PANEL = 'thimble'
 export type Transcript = { citeIndex: CiteRow[]; answerComments: AnswerComment[]; coverageSummary: CoverageSummary | null; settings: FeatureSettings | null; checksRunning: number; verdicts: Record<string, Record<string, unknown>> }
 
 /** A row of `thimble state coverage` (C7). */
-export type CoverageRow = { key: string; folder: string; ext: string; path: string | null; files: number; seen: number; searched: number; never: number; records_seen: number; records_total: number | null; bytes: number; drill: boolean }
+export type { CoverageRow }
 
 export type PanelWorld = World & {
   t: Transcript
-  /** `thimble state coverage` by `--folder` ('' for the top) */
-  coverageRows: Record<string, { rows: CoverageRow[]; counting?: boolean }>
+  /** `thimble state coverage` by `--folder` ('' for the top), or `<folder>|<match>` for a group of a folder's files */
+  coverageRows: Record<string, { rows: CoverageRow[]; counting?: boolean; more?: number }>
   /** `thimble state label-unsure`: each label's counts, and its rows by kind (no-fit first, then unsure) */
   unsure: { id: string; name: string; noFit: number; unsure: number; total: number; rows: { ref: string; value: string | null; confidence: number | null; kind: 'no-fit' | 'unsure'; text: string }[] }[]
   /** what `thimble open` prints (C12), and each open's argv */
@@ -37,19 +38,38 @@ export type PanelWorld = World & {
   copied: string[]
 }
 
-export const SUMMARY: CoverageSummary = { files: { seen: 3, searched: 1, never: 9, total: 13 }, records: { seen: 1344, total: 48_450, counted: true }, line: 'saw 3% of records (3 of 13 files)' }
+export const SUMMARY: CoverageSummary = {
+  files: { seen: 3, searched: 1, never: 9, total: 13 },
+  records: { unit: 'lines', seen: 1344, searched: 400, total: 48_450, counted: true },
+  totals: [
+    { unit: 'lines', seen: 1344, searched: 400, total: 48_450, counted: true, files: 11, files_seen: 3, files_searched: 0 },
+    { unit: 'entries', seen: 0, searched: 587, total: 587, counted: true, files: 1, files_seen: 0, files_searched: 1 },
+    { unit: 'files', seen: 1, searched: 0, total: 31 },
+  ],
+  size: { read: 2_100_000, searched: 340_000, total: 14_000_000 },
+  line: 'read 15% · searched 2% of the data',
+}
+
+/** A row of `thimble state coverage` with the fields a test leaves out at their empty values. */
+export function covRow(o: Partial<CoverageRow> & Pick<CoverageRow, 'key'>): CoverageRow {
+  return { folder: '', ext: '', path: null, files: 1, seen: 0, searched: 0, never: 0, records_seen: 0, records_searched: 0, records_total: null, bytes: 0, drill: false, unit: 'lines', name: '', match: null, ...o }
+}
 
 export const COVERAGE_TOP: CoverageRow[] = [
-  { key: 'agents/|.jsonl', folder: 'agents/', ext: '.jsonl', path: null, files: 12, seen: 2, searched: 1, never: 9, records_seen: 1204, records_total: 48_310, bytes: 1_200_000, drill: true },
-  { key: '.|.jsonl', folder: '.', ext: '.jsonl', path: null, files: 1, seen: 1, searched: 0, never: 0, records_seen: 140, records_total: 140, bytes: 40_000, drill: false },
-  { key: '.|.db', folder: '.', ext: '.db', path: null, files: 1, seen: 0, searched: 0, never: 1, records_seen: 0, records_total: null, bytes: 2_100_000, drill: false },
+  covRow({ key: 'forge.db', path: 'forge.db', ext: '.db', name: 'forge.db', unit: 'entries', searched: 1, records_searched: 587, records_total: 587, bytes: 2_100_000 }),
+  covRow({ key: 'dir:agents|.jsonl', folder: 'agents', ext: '.jsonl', name: 'agent-*.jsonl', files: 12, seen: 2, searched: 1, never: 9, records_seen: 1204, records_searched: 400, records_total: 48_310, bytes: 1_200_000, drill: true }),
+  covRow({ key: 'dir:images/day-1|.png', folder: 'images/day-1', ext: '.png', name: '.png', unit: 'files', files: 30, seen: 1, never: 29, bytes: 900_000, drill: true }),
+  covRow({ key: 'events.jsonl', path: 'events.jsonl', ext: '.jsonl', name: 'events.jsonl', seen: 1, records_seen: 140, records_total: 140, bytes: 40_000 }),
+  covRow({ key: 'grp:|run_*.jsonl', ext: '.jsonl', name: 'run_*.jsonl', files: 300, never: 300, records_total: 600, bytes: 30_000, drill: true, match: 'run_*.jsonl' }),
 ]
 
 export const COVERAGE_AGENTS: CoverageRow[] = [
-  { key: 'agents/agent-01.jsonl', folder: 'agents/', ext: '.jsonl', path: 'agents/agent-01.jsonl', files: 1, seen: 1, searched: 0, never: 0, records_seen: 900, records_total: 4000, bytes: 100_000, drill: false },
-  { key: 'agents/agent-02.jsonl', folder: 'agents/', ext: '.jsonl', path: 'agents/agent-02.jsonl', files: 1, seen: 1, searched: 0, never: 0, records_seen: 304, records_total: 4000, bytes: 100_000, drill: false },
-  { key: 'agents/agent-03.jsonl', folder: 'agents/', ext: '.jsonl', path: 'agents/agent-03.jsonl', files: 1, seen: 0, searched: 1, never: 0, records_seen: 0, records_total: 4000, bytes: 100_000, drill: false },
+  covRow({ key: 'agents/agent-01.jsonl', folder: 'agents', ext: '.jsonl', path: 'agents/agent-01.jsonl', name: 'agent-01.jsonl', seen: 1, records_seen: 900, records_total: 4000, bytes: 100_000 }),
+  covRow({ key: 'agents/agent-02.jsonl', folder: 'agents', ext: '.jsonl', path: 'agents/agent-02.jsonl', name: 'agent-02.jsonl', seen: 1, records_seen: 304, records_total: 4000, bytes: 100_000 }),
+  covRow({ key: 'agents/agent-03.jsonl', folder: 'agents', ext: '.jsonl', path: 'agents/agent-03.jsonl', name: 'agent-03.jsonl', searched: 1, records_searched: 4000, records_total: 4000, bytes: 100_000 }),
 ]
+
+export const COVERAGE_RUNS: CoverageRow[] = Array.from({ length: 3 }, (_, i) => covRow({ key: `run_000${i}.jsonl`, ext: '.jsonl', path: `run_000${i}.jsonl`, name: `run_000${i}.jsonl`, records_total: 2, bytes: 100 }))
 
 /** A comment of the Important details check on a passage of an answer (C9, as the transcript's lane keeps it). */
 export function comment(id: string, over: Partial<AnswerComment> = {}): AnswerComment {
@@ -77,7 +97,7 @@ export function comment(id: string, over: Partial<AnswerComment> = {}): AnswerCo
 export function panelWorld(on: On, opts: { mode?: string; ws?: string | null } = {}): PanelWorld {
   const extra = {
     t: { citeIndex: [], answerComments: [], coverageSummary: null, settings: null, checksRunning: 0, verdicts: {} } as Transcript,
-    coverageRows: { '': { rows: COVERAGE_TOP }, agents: { rows: COVERAGE_AGENTS } } as PanelWorld['coverageRows'],
+    coverageRows: { '': { rows: COVERAGE_TOP }, agents: { rows: COVERAGE_AGENTS }, '|run_*.jsonl': { rows: COVERAGE_RUNS, more: 297 } } as PanelWorld['coverageRows'],
     unsure: [] as PanelWorld['unsure'],
     open: { ok: true, port: 29321, url: 'http://127.0.0.1:29321/?ws=wiki&ref=home', opened: true, remote: false, tunnel: null, et: null, link_file: null, claim_file: '/home/a/.thimble/open/x.claimed', proxy: false } as Record<string, unknown>,
     pressed: [] as string[][],
@@ -103,8 +123,9 @@ export function panelWorld(on: On, opts: { mode?: string; ws?: string | null } =
     if (what === 'coverage') {
       w?.calls.push(argv)
       const folder = arg('--folder')
-      const got = x().coverageRows[folder] ?? { rows: [] }
-      return out({ summary: x().t.coverageSummary ?? SUMMARY, folder, rows: got.rows, counting: Boolean(got.counting) })
+      const match = arg('--match')
+      const got = x().coverageRows[match ? `${folder}|${match}` : folder] ?? { rows: [] }
+      return out({ summary: x().t.coverageSummary ?? SUMMARY, folder, match: match || null, rows: got.rows, more: got.more ?? 0, counting: Boolean(got.counting) })
     }
     if (what === 'label-unsure') {
       w?.calls.push(argv)

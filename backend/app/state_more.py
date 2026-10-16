@@ -1,9 +1,10 @@
 """The surfaces and changes of coverage, the labels' unsure records and the checks' comments on Claude's answers, beside
 local.py's (`thimble state` and `thimble act`), which registers them:
 
-  thimble state coverage --session SID [--folder REL] [--summary]
-        {summary, folder, rows?, counting}: what the session's tool calls read, searched or never opened in the
-        corpus's data files (coverage.py); no rows with --summary
+  thimble state coverage --session SID [--folder REL] [--match GROUP] [--summary]
+        {summary, folder, match, rows?, more?, counting}: what Claude read or searched in the corpus in the session,
+        one level of it, or with --match the files of one group of that level (a name pattern or a type); no rows with
+        --summary (coverage.py)
   thimble state label-unsure [--label ID] [--n 20] [--offset 0] [--counts]
         {labels: [{id, name, noFit, unsure, total, rows?}]}: each label's records that no category fit, then those its
         model was unsure of (concepts.unsure); rows only with --label
@@ -55,7 +56,10 @@ async def _coverage(c: str, args: list[str], pos: list[str]) -> Any:
 
     sid = _session(_flag(args, "--session"))
     folder = str(_flag(args, "--folder") or "").strip().strip("/")
-    return await asyncio.to_thread(coverage.state, c, sid, folder, summary_only="--summary" in args)
+    match = str(_flag(args, "--match") or "").strip() or None
+    if match is not None and ("/" in match or len(match) > 256):
+        raise HTTPException(400, "--match is a name pattern or a type of the folder's files")
+    return await asyncio.to_thread(coverage.state, c, sid, folder, summary_only="--summary" in args, match=match)
 
 
 async def _label_unsure(c: str, args: list[str], pos: list[str]) -> Any:
@@ -85,7 +89,7 @@ async def _act_coverage(c: str, payload: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(400, "`facts` must be a list")
     cwd = payload.get("cwd") if isinstance(payload.get("cwd"), str) else None
     s = await asyncio.to_thread(coverage.add_facts, c, sid, str(payload.get("turn") or ""), facts, cwd)
-    return {"summary": {k: s[k] for k in ("files", "records", "line")}, "counting": s["counting"]}
+    return {"summary": {k: s[k] for k in ("files", "records", "totals", "size", "line")}, "counting": s["counting"]}
 
 
 async def _act_coverage_retry(c: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -109,6 +113,6 @@ async def _act_answer_comment_resolve(c: str, payload: dict[str, Any]) -> dict[s
 SURFACES = {"coverage": _coverage, "label-unsure": _label_unsure, "answer-comments": _answer_comments}
 ACTS = {"coverage": _act_coverage, "coverage-retry": _act_coverage_retry,
         "answer-comment-resolve": _act_answer_comment_resolve}
-STATE_USAGE = ", coverage --session SID [--folder REL] [--summary], label-unsure [--label ID] [--n N] [--offset K] " \
+STATE_USAGE = ", coverage --session SID [--folder REL] [--match GROUP] [--summary], label-unsure [--label ID] [--n N] [--offset K] " \
               "[--counts], answer-comments [--session SID] [--status open|all]"
 ACT_USAGE = ", coverage {session, turn, facts, cwd?}, coverage-retry {}, answer-comment-resolve {comment, reopen?}"

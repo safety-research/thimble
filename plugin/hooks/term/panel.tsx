@@ -56,7 +56,7 @@ import { COLOR_NAMES, LABEL_WHEEL, MORE_ROWS, UNSURE_PAGE, agreementLine, classC
 import { featuresOf, openComments, openSection } from './band'
 import { openChecks } from './checksview'
 import { citeItems, citePlace, openCitations } from './citesview'
-import { openCoverage } from './coverageview'
+import { coverageTitle, openCoverage } from './coverageview'
 import type { LabelPatch } from './term'
 import type { Ctx } from './ctx'
 import { act } from './data'
@@ -434,9 +434,10 @@ function crumbText(s: ChatNavStep): string {
     case 'ask':
       return 'new thread'
     case 'coverage': {
-      // a folder drilled into by its path; the corpus's top as the view's name
-      const path = panelOfStep(s)?.path
-      return path ? `${path}/` : 'coverage'
+      // a folder drilled into by its path, a group of its files by its pattern or type; the corpus's top as the view's
+      // name
+      const p = panelOfStep(s)
+      return p?.path || p?.match ? coverageTitle(p.path ?? '', p.match) : 'coverage'
     }
     case 'checks':
       return panelOfStep(s)?.mode ? `checks › ${s.title}` : 'checks'
@@ -470,7 +471,7 @@ function hereText(s: ChatNavStep, title: string | undefined): string {
   const list = LIST_TITLES[s.view]
   if (list) return list
   // the Coverage view by the folder it shows; the Checks view by the check of the comment it shows
-  if (s.view === 'coverage') return panelOfStep(s)?.path ? `${panelOfStep(s)!.path}/` : 'Coverage'
+  if (s.view === 'coverage') return coverageTitle(panelOfStep(s)?.path ?? '', panelOfStep(s)?.match)
   if (s.view === 'checks') return title && title !== 'Checks' ? `checks › ${title}` : 'Checks'
   return s.view === 'thread' || !title ? crumbText(s) : crumbText({ ...s, title })
 }

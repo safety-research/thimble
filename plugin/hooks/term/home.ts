@@ -1,5 +1,5 @@
 // The home panel (/thimble, and the title row's first step): one panel listing what this session read and what this
-// folder's sessions made, in SPEC-v2 J4's order: coverage (what this session's tool calls read of the data files),
+// folder's sessions made, in SPEC-v2 J4's order: coverage (what Claude read or searched of the data files),
 // citations (the problems first), labels with their counts and their records of no fit or unsure, side threads (those
 // with answers not yet read first), views (built, building, proposed), the checks' open comments on answers, cards
 // grouped by the question that made them, documents, and the files by folder. Each heading opens its section's view,
@@ -69,7 +69,7 @@ export type HomeData = {
   cardGroups: HomeCardGroup[]
   labels: HomeLabel[]
   files: HomeFile[]
-  /** this session's coverage line (`saw 2% of records (3 of 13 files)`), '' while it read no data file; null when
+  /** this session's coverage line (`read 2% · searched 41% of the data`), '' while it read no data file; null when
    *  coverage is off */
   coverage: string | null
   /** the session's citations, the problems first; null when citation marks are off */

@@ -530,7 +530,8 @@ export function stepOf(p: TermPanel): ChatNavStep {
     ...(p.thread ? { thread: p.thread } : {}),
     ...(p.ref ? { open: p.display ? `${p.display}|${p.ref}` : p.ref } : {}),
     ...(p.card ? { card: p.card } : {}),
-    ...(p.slug || p.label || p.path || p.agent ? { slug: String(p.slug || p.label || (p.path ? `${p.path}:${p.start ?? 1}` : '') || p.agent) } : {}),
+    // the Coverage view's group of a folder's files (`match`) is a step of its own after its folder's
+    ...(p.slug || p.label || p.path || p.agent || p.match ? { slug: String(p.slug || p.label || (p.path || p.match ? `${p.path ?? ''}:${p.start ?? 1}${p.match ? `|${p.match}` : ''}` : '') || p.agent) } : {}),
     mode: JSON.stringify(p),
   }
 }

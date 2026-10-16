@@ -19,7 +19,7 @@
 // the workspace's, and toasts a writer's start and end while no browser shows thimble's page.
 import type { On, RenderElement } from 'claude-code'
 
-import type { AnswerComment, FeatureSettings, SummarySeen, TermPanel } from './types'
+import type { AnswerComment, CoverageSummary, FeatureSettings, SummarySeen, TermPanel } from './types'
 import type { Ctx } from './ctx'
 import { cid, noControls } from './lib'
 import { docsOf } from './model'
@@ -33,7 +33,7 @@ import { PANEL, closePanel, openPanel, openPending, placedLater, retryPending, r
 import { keepSeen, keptSeen } from './kept'
 import { openChecks } from './checksview'
 import { openCitations } from './citesview'
-import { openCoverage } from './coverageview'
+import { openCoverage, percent } from './coverageview'
 
 const ABOVE_LABEL = 16
 /** The label column in a band narrower than this many columns. */
@@ -166,11 +166,16 @@ async function noteWriters(cx: Ctx): Promise<void> {
 
 // ------------------------------------------------------------------------------------------------ the summary line
 
-/** A share of records in the summary line's words: `0%`, `<1%` or a whole percent (coverage.py summary). */
-export function percent(seen: number, total: number): string {
-  if (!total || seen <= 0) return '0%'
-  const p = (100 * seen) / total
-  return p < 1 ? '<1%' : `${Math.min(100, Math.round(p))}%`
+/** A share in the summary line's words, as the Coverage view and coverage.py say it (coverageview.tsx percent). */
+export { percent }
+
+/** The summary line's coverage words: the read share of the data by size (`coverage 15%`, a decimal kept under 1%), as
+ *  the Coverage view's total and the line under answers measure it; with no index yet (no size), the files read. One
+ *  short item, no new words: the Coverage view holds searched and the rows' units. */
+export function coverageWords(s: CoverageSummary): string | null {
+  if (s.size && s.size.total > 0) return percent(s.size.read, s.size.total)
+  if (!(s.files.total > 0 || s.files.seen > 0)) return null
+  return `${num(s.files.seen)} of ${num(s.files.total)} ${s.files.total === 1 ? 'file' : 'files'}`
 }
 
 const num = (n: number) => Math.round(n).toLocaleString('en-US')
@@ -231,10 +236,8 @@ export async function summaryItems(cx: Ctx): Promise<{ items: SummaryItem[]; fre
   }
   if (f.coverage) {
     const s = await cx.coverageSummary()
-    if (s && (s.files.total > 0 || s.files.seen > 0)) {
-      const words = s.records.counted && s.records.total > 0 ? percent(s.records.seen, s.records.total) : `${num(s.files.seen)} of ${num(s.files.total)} files`
-      add('coverage', 'coverage', [{ s: words }], () => openCoverage(cx))
-    }
+    const words = s ? coverageWords(s) : null
+    if (words) add('coverage', 'coverage', [{ s: words }], () => openCoverage(cx))
   }
   if (f.labels) {
     const labels = newOf('labels')

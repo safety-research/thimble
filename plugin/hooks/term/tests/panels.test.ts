@@ -443,7 +443,9 @@ test("home's sections in SPEC-v2 J4's order: Coverage, Citations, Labels, Thread
   const heads = (await homeLines(pane)).filter(l => /^ {2}[A-Z][a-z]+ \(\d+\)/.test(l)).map(l => l.trim().split(' (')[0])
   expect(heads).toEqual(['Coverage', 'Citations', 'Labels', 'Threads', 'Views', 'Checks', 'Cards', 'Documents', 'Files'])
   const lines = await homeLines(pane)
-  expect(lines.find(l => l.includes('saw 3% of records'))).toBeDefined()
+  expect(lines.find(l => l.includes(SUMMARY.line))).toBeDefined()
+  // the line in the owner's words: read and searched shares of the data by size (never seen, never records)
+  expect(lines.find(l => l.includes('read 15% · searched 2% of the data'))).toBeDefined()
   expect(lines.find(l => l.includes('99') && l.includes('README.md line 99'))).toMatch(/× 99/)
   expect(lines.find(l => l.includes('After 19 June'))).toMatch(/⚑ "After 19 June.*Important details/)
   // the Coverage heading opens the Coverage view; the Checks heading the Checks view
