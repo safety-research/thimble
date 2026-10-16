@@ -525,7 +525,7 @@ test("a tool's layout record for Files opens Coverage: the terminal has no file 
   expect(w.panes.at(-1)!.title).toBe('Coverage')
 })
 
-test("a label's panel: its name, type and scope, a rule, its pattern to edit; run on a sample or on all; counts, examples and cards folded", async ($, on) => {
+test("a label's panel: its name, kind, unit and scope, a rule, its pattern to edit, its values; run on a sample or on all; examples and cards folded", async ($, on) => {
   const w = world(on)
   await start($, w)
   await turn($, w, [['r1', 'Labelled.']], { tool: 'mcp__plugin_thimble_thimble__apply_label', text: "The label's card is [[card:l0label0]]." })
@@ -536,29 +536,28 @@ test("a label's panel: its name, type and scope, a rule, its pattern to edit; ru
   let pane = (await $.ui.mount(PANE)) as unknown as M
   let drawn = await pane.drawn()
   let text = shown(drawn)
-  // the header block: the name in the accent and bold after a ● in its colour, the type in use on the selection
-  // background, the scope (its files, a field, and how many records); then the rule and the pattern, a field
-  for (const s of ['name', 'links through a fetch proxy', 'type', 'prompt', 'regex', 'code', 'scope', '──', 'pattern', 'run on a sample', 'run on all 14,591', '▸ counts', '▸ examples', '▸ cards']) expect(text).toContain(s)
-  // the scope's count with no leading dot
-  expect(text).not.toContain('· 14,591')
+  // the header block (mockup labelpanel2): the name in a field after a ● in its colour, the kind in use on the
+  // selection background, the unit, the scope (its files, a field, how many files and records); then the rule, the
+  // pattern in a field, the values with their counts
+  for (const s of ['name:', 'kind:', 'prompt', 'regex', 'code', 'unit:', 'scope:', '· 14,591 records', '──', 'pattern:', 'values:', '9,400', '5,191', 'run on a sample', 'run on all', '▸ examples', '▸ cards']) expect(text).toContain(s)
+  expect(text).not.toContain('▸ counts')
   const json = JSON.stringify(drawn)
-  expect(json).toMatch(/"color":"suggestion","bold":true\},"children":\["links through a fetch proxy"\]/)
-  expect(json).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["regex"]}')
+  expect((await pane.find({ type: 'Input', key: `lb-name-${LABEL.id}` }))?.props).toMatchObject({ value: 'links through a fetch proxy' })
+  expect(json).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":[" regex "]}')
   // the pattern whole in its field (field.tsx), in a border
   const field = (await pane.find({ type: 'Client', key: `lb-def-${LABEL.id}-regex` })) as unknown as { props: { module: string; props: { name: string; text: string } } }
   expect(field.props.module).toMatch(/field\.tsx$/)
   expect(field.props.props).toMatchObject({ name: 'label-body:d9b51617', text: 'r\\.jina\\.ai|proxy\\.' })
   expect((await pane.find({ type: 'Input', key: `lb-glob-${LABEL.id}` }))?.props).toMatchObject({ value: 'revisions.jsonl' })
-  // nothing else until it is opened: no counts' bars, no records, no cards
-  for (const s of ['SEC download', 'agree', 'r.jina.ai link', 'links through a fetch proxy ›', '9,400']) expect(text).not.toContain(s)
+  // nothing else until it is opened: no records, no cards
+  for (const s of ['SEC download', 'agree', 'r.jina.ai link', 'links through a fetch proxy ›']) expect(text).not.toContain(s)
   // the examples open: each record under its value, its place a link, agree or another value, its words, why
   await pane.press({ key: 'lb-open-examples' })
-  await pane.press({ key: 'lb-open-counts' })
   await pane.press({ key: 'lb-open-cards' })
   await pane.unmount()
   pane = (await $.ui.mount(PANE)) as unknown as M
   text = shown(await pane.drawn())
-  for (const s of ['▾ examples', 'SEC download', 'agree', 'it is', '✓ agreed', 'why  r.jina.ai link', '▾ counts', '9,400', '5,191', '▾ cards', 'links through a fetch proxy ›']) expect(text).toContain(s)
+  for (const s of ['▾ examples', 'SEC download', 'agree', 'it is', '✓ agreed', 'why  r.jina.ai link', '▾ cards', 'links through a fetch proxy ›']) expect(text).toContain(s)
   // a value's button as wide as the longest value, so `agree  it is  …` stands in one place under every value
   expect((await pane.find({ type: 'Button', key: 'lb-set-revisions.jsonl#L10566-none' }))?.props).toMatchObject({ label: 'none      ' })
   // a blank row between an opened part and the next toggle
@@ -575,7 +574,7 @@ test("a label's panel: its name, type and scope, a rule, its pattern to edit; ru
   await pane.press({ key: 'lk-prompt' })
   await pane.unmount()
   pane = (await $.ui.mount(PANE)) as unknown as M
-  expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["prompt"]}')
+  expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":[" prompt "]}')
   expect(shown(await pane.drawn())).toContain('prompt')
   await pane.post({ type: 'field', name: 'label-body:d9b51617', text: 'Does the text link through a proxy?', save: false, origin: 'f2', gestures: [] }, { in: `lb-def-${LABEL.id}-prompt` })
   await pane.press({ key: 'lb-sample' })

@@ -67,8 +67,18 @@ export type ThimbleLabel = {
   scope_total?: number
   /** how many files its glob matches, for a label over files (`thimble state label`, local._scope_facts) */
   scope_files?: number
+  /** what its records are called in its scope's files (`lines`, `rows`, `pages`, `entries`, `records`; `files` for a
+   *  label over whole files), for a label over files (`thimble state label`, local._record_noun) */
+  scope_unit?: string
   /** the model a prompt label's calls run on, by the name the analyst reads (`thimble state label`) */
   run_model?: string
+  /** the model its calls run on, by its id: its own, else the labels role's (`model_role`); and the models the panel's
+   *  `model:` offers, by their ids (`thimble state label`, local._scope_facts) */
+  model_id?: string
+  model_role?: string
+  /** the model of its own, by its id, '' for none (the concept's `model`) */
+  model?: string
+  model_choices?: string[]
   /** its values in order with their color (1 to 12, 0 for none) and whether Files marks them while it is on */
   classes?: LabelClass[]
   /** on in Files and the views (a label over files) */

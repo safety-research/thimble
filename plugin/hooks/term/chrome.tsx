@@ -262,11 +262,12 @@ export function controlsEl(els: El, controls: readonly (RenderElement | null | f
   return els.Box({ key, flexDirection: 'row', columnGap: 2, flexWrap: 'wrap', children: kept })
 }
 
-/** An action that reads as a button (Matt, deck/video v9 review, item m): its words in the accent, as Claude Code draws
- *  the choice to press; inverse under the pointer or the focus, as every Button. The words are the Button's child, so a
- *  test finds it by `key` and reads its words in the tree. */
-export function actionEl(els: El, key: string, words: string, onPress: () => void): RenderElement {
-  return els.Button({ key, plain: true, onPress, children: els.Text({ color: ACCENT, children: words }) })
+/** An action that reads as a button (Matt, deck/video v9 review, item m; the label panel mockup of batch 3): its words
+ *  underlined in the accent, as Claude Code draws the choice to press, or in `color` (a delete in red); inverse under
+ *  the pointer or the focus, as every Button. The words are the Button's child, so a test finds it by `key` and reads
+ *  its words in the tree. */
+export function actionEl(els: El, key: string, words: string, onPress: () => void, color: string = ACCENT): RenderElement {
+  return els.Button({ key, plain: true, onPress, children: els.Text({ color, underline: true, children: words }) })
 }
 
 /** A row that brings its own margin (`❯`, a passage's `?` or `↳`): the panel draws it as it is, where every other row
