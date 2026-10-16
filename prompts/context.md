@@ -2,7 +2,7 @@ The parts of the workspace that thimble's context engine (backend/app/context.py
 
 ## The conversation
 
-The analyst's whole conversation with their Claude Code session, in order, where `[analyst]` is a message they typed, `[event …]` something they did in thimble or a notice from thimble, `[session]` a reply, `[session calls …]` or `[thread … calls …]` a call of the session or of a side thread followed by its `[result]` or `[error]`, which the analyst saw only if they opened the call, and `[notification]` what a background agent returned.
+The analyst's whole conversation with their Claude Code session, in order, where `[analyst]` is a message they typed or pasted, a paste indented under a `(pasted)` line, `[event …]` something they did in thimble or a notice from thimble, `[session]` a reply, `[session calls …]` or `[thread … calls …]` a call of the session or of a side thread followed by its `[result]` or `[error]`, which the analyst saw only if they opened the call, and `[notification]` what a background agent returned.
 
 {{conversation}}
 
