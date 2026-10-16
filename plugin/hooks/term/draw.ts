@@ -62,8 +62,8 @@ export type Item = { label: string; value: string; cite: string; open: string; k
 export type Layout = { lines: Line[]; items: Item[]; hit: (x: number, y: number) => number }
 
 /** The first palette hue: the marks of a chart with no colour field, which is one series (SPEC.md, "The visual
- *  system", rule 12). */
-export const ONE = COLORS.series[0]!
+ *  system", rule 12). Read at each drawing, since setTheme swaps the series for the light theme's. */
+export const one = (): string => COLORS.series[0]!
 
 // ---------------------------------------------------------------------------------------- text width
 
@@ -444,7 +444,7 @@ function barLayout(card: CardData, cols: number, hover: number): Layout {
     const on = ids.includes(hover)
     // a hue for a value of the card's colour field (its groups, or a label it read); with no colour field the bars are
     // one series, in the first hue (rule 20); the bar under the pointer turns the text colour
-    const hueOf = (r: BarRow) => classColour(card, r.group || r.label) ?? (groups.length ? COLORS.series[Math.max(0, groups.indexOf(r.group)) % COLORS.series.length]! : ONE)
+    const hueOf = (r: BarRow) => classColour(card, r.group || r.label) ?? (groups.length ? COLORS.series[Math.max(0, groups.indexOf(r.group)) % COLORS.series.length]! : one())
     const segs: Seg[] = []
     const mine: { x0: number; x1: number; i: number }[] = []
     let x = labelW + 2
@@ -615,7 +615,7 @@ function lineLayout(card: CardData, cols: number, hover: number, plotRows = 10):
   }
   const hot = hover >= 0 ? at[hover] : undefined
   // a chart with no colour field is one series, in the first hue (rule 12); with several, each its hue
-  const seriesColour = (si: number) => classColour(card, series[si]?.name) ?? (series.length > 1 ? COLORS.series[si % COLORS.series.length]! : ONE)
+  const seriesColour = (si: number) => classColour(card, series[si]?.name) ?? (series.length > 1 ? COLORS.series[si % COLORS.series.length]! : one())
   const lines: Line[] = []
   for (let r = 0; r < plotRows; r++) {
     const yl = yTicks.get(r)
@@ -731,7 +731,7 @@ function timelineLayout(card: CardData, cols: number, hover: number): Layout {
   // with a label read, each event's value as a dot in its colour, and an event the label does not mark dim; with none,
   // every event's dot in the first hue
   const valued = cardLabels(card).length > 0
-  const mark = (e: { label: string; ref: string }) => classColour(card, e.label, e.ref) ?? (valued ? COLORS.dim : ONE)
+  const mark = (e: { label: string; ref: string }) => classColour(card, e.label, e.ref) ?? (valued ? COLORS.dim : one())
   if (isTime && evs.length > 1) {
     const t0 = Math.min(...times)
     const t1 = Math.max(...times)
@@ -1173,7 +1173,7 @@ function exampleLayout(card: CardData, cols: number, hover: number): Layout {
       lines.push([])
       owner.push(-1)
     }
-    const glyph: Seg = { s: '● ', fg: classColour(card, e.value, e.ref) ?? (valued ? COLORS.dim : ONE) }
+    const glyph: Seg = { s: '● ', fg: classColour(card, e.value, e.ref) ?? (valued ? COLORS.dim : one()) }
     const rows: Line[] = []
     const lead = () => (rows.length ? { s: '  ' } : glyph)
     const note = e.note ? wrapCell(e.note.replace(/\s+/g, ' ').trim(), room, 3).filter(Boolean) : []
