@@ -3,8 +3,11 @@
 prompts/tools.md holds each tool's description and JSON input schema (one `## <tool>` section each, read fresh on
 every listing); REGISTRY holds the roles that get a tool and its handler as an import path resolved at call time. This
 module imports only config, prompts, cite and frames, so the stdio shim (plugin/bin/thimble-mcp) builds its tool list
-without loading the notebook or a kernel. The shim lists the tools (`list("analyst")`) and posts each call to
-`POST /api/tools/{name}`; its THIMBLE_SESSION (Ctx.session) says which session called: none for main, `orient`,
+without loading the notebook or a kernel. Before thimble is on in a session the shim lists ENTRY_TOOL alone
+(entry_listing); once it is on, the tools (`list("analyst")`, ENTRY_TOOL left out), and it runs each call in its own
+process (local transport) or posts it to `POST /api/tools/{name}` after the press (server transport). A tool whose
+feature the analyst turned off (FEATURE_TOOLS) stays listed and refuses with one line (call). Its THIMBLE_SESSION
+(Ctx.session) says which session called: none for main, `orient`,
 `writer:<doc>`, `critique:orient` or `check:<id>:<doc>`. Tools whose machinery lives elsewhere run `tool_<name>(ctx,
 args)` in that module. Every result starts with the call as run (call_line); a card's result shows the first lines of
 each output, a chart as the rows it draws, and hint lines from prompts/tools.md. The card tools also answer to the
@@ -104,7 +107,15 @@ CELL_KINDS = ("plot", "table", "code", "example", "note", "diagram", "timeline",
 ADD_CELL_KINDS = ("example", "table", "code", "diagram", "plot", "timeline", "note", "custom", "plan")
 EDIT_CELL_KINDS = ADD_CELL_KINDS
 RUN_KINDS = ("plot", "table", "code", "timeline", "diagram")  # notebook.RUNNABLE_KINDS: the kinds that run `code`
-INSTRUCTIONS_HINT = "instructions"  # prompts/tools.md `## instructions`: the shim's MCP server instructions (instructions)
+# The tool the shim lists alone before thimble is on in a session (contract C5): its call turns thimble on (activate.py)
+# and answers with the guide. Claude Code defers it, and ToolSearch finds it by SEARCH_HINT.
+ENTRY_TOOL = "load_thimble"
+SEARCH_HINT = "card plan chart table label classify records thimble"
+META_ALWAYS_LOAD = "anthropic/alwaysLoad"  # a listed tool's `_meta` key: loaded (true) or deferred (false or absent)
+META_SEARCH_HINT = "anthropic/searchHint"  # a listed tool's `_meta` key: the words ToolSearch matches
+# the tools a feature switch turns off (features.py), by the switch: they stay listed, since thimble's agents share
+# main's listing, and a call refuses with the tool's `## <tool>-off` hint (call)
+FEATURE_TOOLS = {"apply_label": "labels", "run_check": "checks"}
 SCREENSHOT_HOSTS = ("127.0.0.1", "localhost", "::1")  # a page screenshot is of thimble's own interface on this machine
 # a figure's own page (_shot_page_file): no network, inline script and style only, images from data: URLs; the figure
 # runs in a frame sandboxed to scripts alone, which reports its size to the page
@@ -236,6 +247,8 @@ REGISTRY: dict[str, Spec] = {
              drop_stops=True),
         Spec("finish_ticket", (ANALYST,), "app.ticket_tools:tool_finish_ticket", sessions=(TICKET_SESSION,),
              drop_stops=True),
+        # thimble turned on in this session (ENTRY_TOOL); the shim answers it itself, and lists it alone (entry_listing)
+        Spec(ENTRY_TOOL, (ANALYST,), "app.activate:tool_load_handler", sessions=MAIN_ONLY),
     )
 }
 
@@ -366,14 +379,38 @@ def session_kind(session: str | None) -> str | None:
 
 def list(role: str = ANALYST, session: str | None = None) -> "builtins.list[dict[str, Any]]":  # noqa: A001 — the contract names it `tools.list`
     """[{name, description, input_schema}] for the tools the role may use in the session `session` (a THIMBLE_SESSION),
-    in registry order. A tool with `sessions` of its own is listed in those alone, but main's shim (no session) lists
-    them all, since thimble's agents are main's subagents and call through it: each agent's registration takes away
-    the tools that are not its own, and a call is refused when its caller may not make it (call_route)."""
+    in registry order, ENTRY_TOOL left out (entry_listing). A tool with `sessions` of its own is listed in those alone,
+    but main's shim (no session) lists them all, since thimble's agents are main's subagents and call through it: each
+    agent's registration takes away the tools that are not its own, and a call is refused when its caller may not make
+    it (call_route)."""
     role_of(role)
     kind = session_kind(session)
-    names = [s.name for s in REGISTRY.values() if role in s.roles and (kind is None or not s.sessions or kind in s.sessions)]
+    names = [s.name for s in REGISTRY.values() if role in s.roles and s.name != ENTRY_TOOL
+             and (kind is None or not s.sessions or kind in s.sessions)]
     secs = tool_sections(names)
     return [{"name": n, "description": secs[n][0], "input_schema": secs[n][1]} for n in names]
+
+
+def entry_listing() -> "builtins.list[dict[str, Any]]":
+    """[{name, description, input_schema}] of ENTRY_TOOL alone, as the shim lists it before thimble is on."""
+    desc, schema = tool_sections((ENTRY_TOOL,))[ENTRY_TOOL]
+    return [{"name": ENTRY_TOOL, "description": desc, "input_schema": schema}]
+
+
+def feature_refusal(c: str | None, name: str) -> str | None:
+    """The line a call of `name` refuses with because the analyst turned its feature off (FEATURE_TOOLS); None when the
+    tool has no switch or its switch is on."""
+    key = FEATURE_TOOLS.get(canonical(name))
+    if key is None:
+        return None
+    from . import features  # noqa: PLC0415
+
+    try:
+        if features.on(c, key):
+            return None
+    except Exception:  # noqa: BLE001 — a switch that cannot be read is on, as a fresh config has it
+        return None
+    return hint(f"{canonical(name)}-off") or f"{canonical(name)}: {key} are off in thimble's Settings"
 
 
 PLUGIN_NAME = "thimble"  # the plugin's name (orientation.PLUGIN), the scope of its MCP server's tools
@@ -645,6 +682,8 @@ async def call(c: str, name: str, args: dict[str, Any] | None, *, actor: str = A
 
     name = canonical(name)
     spec = REGISTRY[name]
+    if (off := feature_refusal(c, name)) is not None:  # a feature the analyst turned off (FEATURE_TOOLS)
+        return with_call_line(name, args, err(off))
     # a follow-up of the orientation is one change the analyst asked for, so its steps are one undo (undo.batching)
     batch = None
     if session_kind(session) == ORIENT_SESSION:
@@ -1475,7 +1514,7 @@ async def _h_add_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
             # otherwise nothing reminds the caller when no add_card follows
             line = hint("takeaway-missing-shown", cid=new)
         return ok(warn + res.text + (f"\n\n{line}" if line else ""))
-    if cardrun.defers(ctx.c):  # terminal mode: the code runs through `thimble-run` in the caller's Bash
+    if cardrun.defers(ctx.c):  # the card runner: the code runs through `thimble-run` in the caller's Bash
         await cardrun.ready_types(ctx.c, code)
         cell = notebook.new_cell(kind, ctx.cell_author, title, nb_id, code=code)
         cell[notebook.RUN_KEY] = cardrun.run_record(str(cell["id"]), takeaway=takeaway,
@@ -1781,7 +1820,7 @@ async def _h_edit_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     only_code = (notebook.runnable(cell) and code != cell.get("code") and (kind or old_kind) == old_kind != "code"
                  and title in (None, cell.get("title")) and takeaway is None)
     was = notebook.outputs_key(ctx.ws, cell.get("outputs")) if only_code else ""
-    if cardrun.defers(ctx.c):  # terminal mode: the code runs through `thimble-run` in the caller's Bash
+    if cardrun.defers(ctx.c):  # the card runner: the code runs through `thimble-run` in the caller's Bash
         await cardrun.ready_types(ctx.c, code)
         run = cardrun.run_record(cid, takeaway=takeaway, default_timeout_s=_default_timeout(ctx), session=ctx.session)
         if was:
@@ -2059,7 +2098,7 @@ async def _h_read_ref(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
 
 def _outputs_lines(cell: dict, body: str) -> builtins.list[str]:
     """read_ref's lines of a card's outputs (`body`, their text), headed by a line that says plainly whether the code it
-    shows made them: a card whose edit waits for `thimble-run` (terminal mode), or whose run goes on, still shows what
+    shows made them: a card whose edit waits for `thimble-run` (the card runner), or whose run goes on, still shows what
     it showed before, and a card that never ran shows nothing. Live QA 2: main read a card the card check had changed
     and run, whose outputs came out as before, and told the analyst that the card had not run since the edit."""
     from . import notebook  # noqa: PLC0415
@@ -2268,12 +2307,6 @@ def _docs_phrase(docs: "builtins.list[str]") -> str:
     return "documents " + ", ".join(docs[:-1]) + f" and {docs[-1]}"
 
 
-def instructions() -> str:
-    """The MCP server instructions the shim carries: the `## instructions` section of prompts/tools.md, a short pointer
-    (Claude Code cuts server instructions at 2 KB)."""
-    return hint(INSTRUCTIONS_HINT).strip()
-
-
 # --------------------------------------------------------------------------- handlers: labels
 
 
@@ -2307,6 +2340,14 @@ async def _delegate(path: str, ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     return _as_result(await _maybe_await(_resolve(path)(ctx, args)))
 
 
+def _paged(c: str) -> bool:
+    """Whether workspace `c`'s session has the browser workbench (server transport, after the press), so screenshot can
+    open a page of it; before the press a card is drawn offscreen alone (activate.transport)."""
+    from . import activate  # noqa: PLC0415
+
+    return activate.transport(c) == activate.SERVER
+
+
 def _image(data: str, mime: str, caption: str) -> ToolResult:
     return ToolResult([{"type": "text", "text": caption}, {"type": "image", "data": data, "mimeType": mime}])
 
@@ -2317,10 +2358,8 @@ async def _h_screenshot(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     ref = str(args.get("ref") or "").strip().strip("[]").strip()
     if not ref:
         return err("screenshot: `ref` is empty")
-    from . import local  # noqa: PLC0415
-
-    if local.terminal(ctx.c) and not cite.is_card_ref(ref):  # terminal mode has no page to shoot: a card alone
-        return err(hint("screenshot-terminal") or f"screenshot: {headless.NO_SCREENSHOTS} in terminal mode")
+    if not _paged(ctx.c) and not cite.is_card_ref(ref):  # no page to shoot before the press: a card alone
+        return err(hint("screenshot-terminal") or f"screenshot: {headless.NO_SCREENSHOTS} before the browser opens")
     if urlsplit(ref).scheme in ("http", "https"):
         return await _shot_page(ref, str(args.get("selector") or "").strip() or None)
     if cite.is_card_ref(ref):
@@ -2399,9 +2438,7 @@ async def _shot_card(ctx: Ctx, ref: str) -> ToolResult:
     cell = notebook.get_cell(ctx.c, cid, full_outputs=True) if cid else None
     if cell is None:
         return err(f"screenshot: there is no card {cid or ref}")
-    from . import local  # noqa: PLC0415 — imported above too: _shot_card is also reached on its own
-
-    if local.terminal(ctx.c):  # no page to open in terminal mode: the card harness draws the card offscreen
+    if not _paged(ctx.c):  # no page to open before the press: the card harness draws the card offscreen
         return await _shot_card_offscreen(ctx, cid, cell)
     if any(CARD_MIME in b for _, b in cite.iter_outputs(cell.get("outputs"))):
         return await _shot_type_card(ctx, cid, cell)
@@ -2444,13 +2481,13 @@ async def _shot_card(ctx: Ctx, ref: str) -> ToolResult:
 
 async def _shot_card_offscreen(ctx: Ctx, cid: str, cell: dict) -> ToolResult:
     """A card drawn by the card harness (render.py, the card check's drawing) in headless Chromium with the built page,
-    as terminal mode's screenshot; the `## screenshot-terminal` line when the harness cannot draw here."""
+    as the screenshot before the press; the `## screenshot-terminal` line when the harness cannot draw here."""
     from . import render  # noqa: PLC0415
 
     try:
         shot = await render.render_card(ctx.c, cell)
     except render.Unavailable as e:
-        log.info("screenshot: card:%s not drawn in terminal mode: %s", cid, e)
+        log.info("screenshot: card:%s not drawn offscreen: %s", cid, e)
         return err(hint("screenshot-terminal") or f"screenshot: {headless.NO_SCREENSHOTS} ({e})")
     if not shot.ok or shot.png is None:
         return err(hint("screenshot-terminal") or f"screenshot: card:{cid} was not drawn ({shot.error or 'no picture'})")
@@ -2681,7 +2718,7 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     within = args.get("within") or None
     if isinstance(within, str):
         within = {"label": within}
-    defer = kind == "code" and cardrun.defers(ctx.c)  # terminal mode: the code runs through `thimble-run label`
+    defer = kind == "code" and cardrun.defers(ctx.c)  # the card runner: the code runs through `thimble-run label`
     s = await concepts.apply_scoped(ctx.c, scope=scope, name=name, kind=kind, text=text, values=values, paths=paths, limit=limit,
                                     comment=bool(args.get("comment")), filter=bool(args.get("filter")),
                                     created_by=ctx.created_by, chat=ctx.chat, group=target, question=question,
@@ -2739,7 +2776,7 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
                  " The run goes on in the background; the counts are final when its card stops spinning.")
     if s.get("cell"):
         line += f" The label's card is [[card:{s['cell']}]]."
-    if s.get("stale") and cardrun.defers(ctx.c):  # terminal mode: those cards run again through `thimble-run stale`
+    if s.get("stale") and cardrun.defers(ctx.c):  # the card runner: those cards run again through `thimble-run stale`
         line += " " + concepts.stale_note(ctx.c, [{"id": x} for x in s["stale"]])
     elif s.get("stale"):
         line += " " + hint("apply_label-stale", cards=", ".join(f"[[card:{x}]]" for x in s["stale"]))
@@ -2999,12 +3036,8 @@ def ask_main_again(c: str, rid: str, call: str) -> bool:
 
 
 async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
-    from . import local  # noqa: PLC0415
-
-    # a code ticket's Allow card is in the browser, which terminal mode does not open; a change to a view is a view
-    # build, which runs in both modes
-    if local.terminal(ctx.c) and not " ".join(str(args.get("view") or "").split()):
-        return err(hint("ticket-terminal") or "file_dev_ticket: code tickets are filed in browser mode")
+    # a code ticket is filed in any transport: the analyst allows it on its card in the browser workbench, which a
+    # notice in the terminal opens (dev tickets in every install)
     title = " ".join(str(args.get("title") or "").split())
     body = str(args.get("body") or "").strip()
     if not title:
