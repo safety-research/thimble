@@ -123,11 +123,12 @@ in a development install (a git clone of thimble):
 EOF
 }
 
-# dev_install: true when this copy's tree (bin/thimble-app-dir) is a development install, a git clone of thimble
+# dev_install: true when this copy's tree (bin/thimble-app-dir) is a development install, a git clone of thimble (a
+# release install is a git repository too, for code tickets, and carries RELEASE.json)
 dev_install() {
   local repo
   repo="$("$here/thimble-app-dir" 2>/dev/null)" || return 1
-  [ -e "$repo/.git" ]
+  [ -e "$repo/.git" ] && [ ! -f "$repo/RELEASE.json" ]
 }
 
 # rendered_prompts NAME… [--cwd P]: `prompt` in a session thimble started in a work folder of its own. The server has
@@ -195,7 +196,7 @@ uninstall() {
       -h | --help)
         printf 'usage: thimble uninstall [--yes] [--keep-home]\n'
         printf '  --yes        remove without asking\n'
-        printf '  --keep-home  keep ~/.thimble (server state; after a release install also the app copy and its workspaces); remove only the plugin registration, the link and the lines install.sh added to shell startup files\n'
+        printf '  --keep-home  keep ~/.thimble (server state; after a release install also the app copy and its workspaces); remove only the plugin registration, the link, the lines install.sh added to shell startup files, and the sign-in files and session markers in it\n'
         exit 0;;
       *) printf 'thimble uninstall: unknown argument %s\n' "$arg" >&2; exit 2;;
     esac
@@ -204,7 +205,7 @@ uninstall() {
   local home_raw="${THIMBLE_HOME:-}" home home_note="" home_state=0 link="${THIMBLE_BIN_DIR:-$HOME/.local/bin}/thimble" tree="" kind="" name="" name_note=""
   local inside=0 pid="" port="" pid_note="" conf="" planned="" pport="" link_ours=0 link_why="" stop_how="" have_claude=0 ans cwd rc
   local nsteps=0 ndone=0 nleft=0 left="" id_ok=0 id_conf="" id_note="" changed=0 undo=0 undo_py="" undo_cmd="" undone=1
-  local reg="" reg_ok=1 reg_from="" reg_other="" mkt="" sh_record="" sh_files=() sh_ok=1 kind_ f_ line_
+  local reg="" reg_ok=1 reg_from="" reg_other="" mkt="" sh_record="" sh_files=() sh_ok=1 kind_ f_ line_ sess=() s_
   case "$home_raw" in *[![:space:]]*) ;; *) home_raw="$HOME/.thimble";; esac   # unset or blank: the default
   home="${home_raw%/}"; [ -n "$home" ] || home=/
   enable -n kill 2>/dev/null || true   # `kill` is the program on PATH, not the builtin: the `+ kill …` line names what ran, and a test can stand a failing one in for it
@@ -307,7 +308,7 @@ uninstall() {
   if [ -f "$home/app-dir" ] && is_tree "$(head -n 1 "$home/app-dir")"; then tree="$(cd "$(head -n 1 "$home/app-dir")" && pwd -P)"
   elif is_tree "$plugin/.."; then tree="$(cd "$plugin/.." && pwd -P)"; fi
   if [ -n "$tree" ]; then
-    if [ -e "$tree/.git" ]; then kind="git checkout"; else kind="release copy"; fi
+    if [ -e "$tree/.git" ] && [ ! -f "$tree/RELEASE.json" ]; then kind="git checkout"; else kind="release copy"; fi
     case "$tree/" in "$home"/*) inside=1;; esac
     if [ -f "$tree/.claude-plugin/marketplace.json" ]; then
       if ! name="$(json_get "$tree/.claude-plugin/marketplace.json" name)"; then name=""; name_note="$tree/.claude-plugin/marketplace.json is unreadable; guessing the marketplace name"; fi
@@ -417,6 +418,12 @@ for m in rows if isinstance(rows, list) else []:
   # only when the tree is inside it
   local holds="the registry of folders you opened with /thimble (data/) and server state (app-dir, server.json, server.log)"
   [ "$inside" = 0 ] || holds="workspaces (your notebooks, labels and reports), the registry of folders you opened with /thimble (data/), server state and the release copy at $tree"
+  # what a kept home must not keep: the press's sign-in files and one-time links (open/, links/), and the markers of the
+  # sessions (up/, with their guide markers) and folders (active/) thimble was on in, which the plugin's hooks look for
+  for s_ in open links up active; do [ ! -e "$home/$s_" ] || sess+=("$home/$s_"); done
+  if [ "$keep_home" = 1 ] && [ ${#sess[@]} -gt 0 ]; then
+    step "rm -rf ${sess[*]}: the browser's sign-in files and one-time links, and the markers of the sessions and folders thimble was on in"
+  fi
   if [ "$keep_home" = 1 ]; then printf '  %s is kept (--keep-home): %s\n' "$home" "$holds"
   elif [ "$home_state" = 1 ]; then step "rm -rf $home$home_note: $holds (--keep-home keeps it)"
   elif [ -e "$home" ]; then printf '  %s holds no thimble state; left alone\n' "$home"; fi
@@ -491,6 +498,10 @@ for m in rows if isinstance(rows, list) else []:
   done
   # the record goes with what it records, --keep-home or not
   [ -z "$sh_record" ] || [ "$sh_ok" = 0 ] || rm -f "$sh_record"
+  if [ ${#sess[@]} -gt 0 ] && { [ "$keep_home" = 1 ] || { [ "$home_state" = 1 ] && [ "$undone" = 0 ]; }; }; then
+    if run rm -rf "${sess[@]}"; then [ "$keep_home" != 1 ] || ndone=$((ndone + 1))
+    else add_left "the sign-in files and session markers in $home were not removed" "rm -rf ${sess[*]}"; fi
+  fi
   if [ "$keep_home" != 1 ] && [ "$home_state" = 1 ] && [ "$undone" = 0 ]; then
     add_left "$home was kept: it records what the command above puts back" "rm -rf $home   # once that has run"
   elif [ "$keep_home" != 1 ] && [ "$home_state" = 1 ]; then

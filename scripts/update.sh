@@ -9,6 +9,9 @@
 # The install: --dir, else the one $THIMBLE_HOME/app-dir names, else the tree this script is in. A git checkout gets
 # `git pull --ff-only` + install.sh in place; a release install needs --from (a release zip, path or https URL), which is
 # unpacked and installed over it with ITS install.sh (backend/.venv, frontend/node_modules, workspaces/ and data/ kept).
+# A release install is a git repository whose last commit is the release (install.sh git_baseline, refs/thimble/baseline):
+# commits after it, such as a code ticket's change, and edits not committed, are kept on a branch local-fixes-<date>
+# first (keep_local_fixes), and install.sh commits the new release as the new baseline.
 # Before that the zip's SHA-256 is checked against the release's SHA256SUMS: for a URL the one beside it, which must
 # exist; for a path --sums FILE, else a SHA256SUMS in the zip's folder when there is one. A mismatch refuses the update.
 # Either way install.sh runs npm ci again when package-lock.json changed and Node 20+ is present, since custom views need
@@ -85,7 +88,33 @@ installed_args=()
 installed_args+=(${install_flags[@]+"${install_flags[@]}"})
 [ "$dry" = 1 ] && say "update.sh --dry-run: printing the steps; nothing changes"
 
-if [ -e "$dir/.git" ]; then
+# keep_local_fixes: on a release install, the commits after its baseline and the edits not committed, on a new branch
+# local-fixes-<date>, and the install's branch back at the baseline, so install.sh replaces only the release's files
+keep_local_fixes() {
+  local base ahead dirty branch n=1 commit idx
+  command -v git >/dev/null 2>&1 && [ -d "$dir/.git" ] || return 0
+  base="$(git -C "$dir" rev-parse -q --verify refs/thimble/baseline 2>/dev/null)" || return 0
+  ahead="$(git -C "$dir" rev-list --count "$base..HEAD" 2>/dev/null || echo 0)"
+  dirty="$(git -C "$dir" status --porcelain 2>/dev/null || true)"
+  [ "$ahead" != 0 ] || [ -n "$dirty" ] || return 0
+  branch="local-fixes-$(date +%Y-%m-%d)"
+  while git -C "$dir" rev-parse -q --verify "refs/heads/$branch" >/dev/null; do n=$((n + 1)); branch="local-fixes-$(date +%Y-%m-%d)-$n"; done
+  if [ "$dry" = 1 ]; then say "+ keep the changes since the release on the branch $branch, then reset to the release"; return 0; fi
+  commit="$(git -C "$dir" rev-parse HEAD)"
+  if [ -n "$dirty" ]; then  # the edits not committed, as one commit on top, made in an index of its own
+    idx="$(mktemp)"; rm -f "$idx"
+    commit="$(GIT_INDEX_FILE="$idx" git -C "$dir" -c core.hooksPath=/dev/null add --all . >/dev/null \
+      && tree="$(GIT_INDEX_FILE="$idx" git -C "$dir" write-tree)" \
+      && git -C "$dir" -c commit.gpgsign=false commit-tree "$tree" -p HEAD -m "edits not committed before the update from thimble $old_version")" \
+      || die "could not keep the edits made in $dir since the release; nothing was changed (commit or remove them, then update again)"
+    rm -f "$idx"
+  fi
+  git -C "$dir" branch "$branch" "$commit" || die "could not keep the changes made in $dir on a branch; nothing was changed"
+  git -C "$dir" reset -q --hard "$base" && git -C "$dir" clean -fdq  # what was not ignored is on the branch now
+  say "your changes to thimble since $old_version are kept on the branch $branch in $dir"
+}
+
+if [ -e "$dir/.git" ] && [ ! -f "$dir/RELEASE.json" ]; then
   say "thimble $old_version at $dir (git checkout)"
   run git -C "$dir" pull --ff-only
   new_version="$(json_get "$dir/plugin/.claude-plugin/plugin.json" version)"
@@ -140,6 +169,7 @@ else
   [ -n "$root" ] || die "the zip holds no thimble tree (expected thimble-<version>-<sha>/ with backend/ and plugin/)"
   new_version="$(json_get "$root/plugin/.claude-plugin/plugin.json" version)"
   say "release $new_version ($(json_get "$root/RELEASE.json" commit 2>/dev/null || echo '?')) → $dir"
+  keep_local_fixes
   run bash "$root/scripts/install.sh" --dir "$dir" ${installed_args[@]+"${installed_args[@]}"}
 fi
 

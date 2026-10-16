@@ -2250,7 +2250,9 @@ def status_line(name: str | None) -> str:
 
 
 def is_git_checkout() -> bool:
-    return (config.REPO_ROOT / ".git").exists()
+    """Whether this tree is a development install, a git clone of thimble. A release install is a git repository too
+    (install.sh's baseline, so code tickets run in it) and carries RELEASE.json."""
+    return (config.REPO_ROOT / ".git").exists() and not (config.REPO_ROOT / "RELEASE.json").is_file()
 
 
 def git_branch() -> str:
