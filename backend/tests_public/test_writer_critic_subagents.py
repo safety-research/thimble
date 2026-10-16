@@ -182,6 +182,29 @@ async def test_a_writer_that_saved_before_plan_mode_held_it_or_ran_on_after_it_e
     assert subagents.agent(CORPUS, notes.agent_id)["status"] == "done"
 
 
+async def test_a_writer_the_analyst_stopped_ends_its_write_as_stopped_and_not_as_a_failure(bridge, models,
+                                                                                           workspaces_tmp, monkeypatch):
+    """Live check L4-04d: after the analyst stopped the writer on purpose, the Report showed the failure card "The
+    report was not written. the writer ended without saving the document" with Retry, and a ✕ on its tab. A stopped
+    writer's write ends `stopped`, with no failure, and its document stays as it was. A writer that ended without
+    saving for another reason still fails, and the line that says so starts with a capital."""
+    seen: list[dict] = []
+    monkeypatch.setattr(report_types, "_emit", lambda c, rec: seen.append(rec))
+    monkeypatch.setattr(subagents, "tell_main", lambda c, kind, payload: None)
+    ans = await write_session.start(CORPUS, "report", route=subagents.CLICK)
+    seen.clear()
+    subagents.run_ended(CORPUS, ans.agent_id, "stopped", None, source="stop", interrupted=True)
+    assert agents.read_meta(CORPUS, subagents.agent(CORPUS, ans.agent_id)["chat"])["status"] == "stopped"
+    assert seen == [{"type": "report", "slug": "report", "status": "stopped", "run": None}]
+    assert report_types.write_pending(CORPUS, "report") is None
+    report_types.create_document_type(CORPUS, "casefile", name="Cases", slug="cases")
+    unsaved = await write_session.start(CORPUS, "cases", route=subagents.CLICK)
+    seen.clear()
+    subagents.run_ended(CORPUS, unsaved.agent_id, "done", None, source="turn")
+    [end] = seen
+    assert (end["status"], end["note"]) == ("failed", "The writer ended without saving the document.")
+
+
 # --------------------------------------------------------------------------- the critic
 
 

@@ -2366,10 +2366,14 @@ def _write_saved(c: str, slug: str, *, whole: bool) -> dict[str, Any] | None:
     return w
 
 
+UNSAVED_LINE = "The writer ended without saving the document."  # a failed write's note when the writer said nothing
+
+
 def writer_finished(c: str, meta: dict[str, Any]) -> None:
     """An agent chat ended: when it was a writer's, the write of its own document ends (found by the chat's `doc`, its
     title,
-    or the last word of a title naming a pending write). Another document's write is never ended here."""
+    or the last word of a title naming a pending write), `stopped` for a writer that was stopped before it saved.
+    Another document's write is never ended here."""
     kind = str(meta.get("agent_type") or "").rsplit(":", 1)[-1]
     title = _collapse(meta.get("title")).lower()
     if kind != WRITER_AGENT and not title.startswith(WRITE_EVENT + " "):
@@ -2386,6 +2390,10 @@ def writer_finished(c: str, meta: dict[str, Any]) -> None:
             continue
         if w["saved"]:
             _emit(c, {"type": "report", "slug": slug, "status": "generated", "run": w.get("event")})
+        elif meta.get("status") == "stopped":
+            # stopped (the analyst's Stop, or main's session quit) before it saved: no failure, and the document stays
+            # as it was (live check L4-04d)
+            _emit(c, {"type": "report", "slug": slug, "status": "stopped", "run": w.get("event")})
         elif meta.get("plan_mode"):
             # main went into plan mode while it wrote, and the writer with it, so it could only write a plan (live check
             # L21): a failure the analyst can write again, never a document found to need no change
@@ -2400,7 +2408,7 @@ def writer_finished(c: str, meta: dict[str, Any]) -> None:
         else:
             # the writer's chat goes with it, so the browser's Report a problem can take that chat first
             _emit(c, {"type": "report", "slug": slug, "status": "failed", "run": w.get("event"), "chat": meta.get("id"),
-                      "note": _cut(meta.get("result") or "the writer ended without saving the document", 300)})
+                      "note": _cut(meta.get("result") or UNSAVED_LINE, 300)})
 
 
 def write_refused(c: str, slug: str, reason: str, kind: str, **fields: Any) -> None:

@@ -982,10 +982,15 @@ async def stop(c: str, agent_id: str) -> Answer:
     return Answer({**ans, "request": rid})
 
 
+MAIN_STOPPED_HINT = "main-stopped-note"  # prompts/tools.md: main's turn was stopped in the browser
+THREAD_STOPPED_HINT = "thread-stopped-note"  # prompts/tools.md: {thread}, {agent_id}: a side thread's fork was stopped
+
+
 async def stop_main(c: str) -> Answer:
     """The analyst's Stop of main: main's running turn ended through the module (`$.turn.abort`), as Esc ends it in the
-    terminal. Refused when the module is not live: the browser then says to press Esc in the terminal. A turn that had
-    ended already counts as done."""
+    terminal, and main told so (MAIN_STOPPED_HINT, note_main), so that a later turn, such as one a subagent's report
+    starts, leaves the stopped work alone (live check L4-12). Refused when the module is not live: the browser then says
+    to press Esc in the terminal. A turn that had ended already counts as done, and main is told nothing."""
     from . import module_bridge  # noqa: PLC0415
 
     if not module_bridge.live(c):
@@ -993,6 +998,32 @@ async def stop_main(c: str) -> Answer:
     ans = await _bridge(c, "abort")
     if ans.refused and ans.get("gone"):
         return Answer({"done": True})
+    if not ans.refused:
+        await note_main(c, tools.hint(MAIN_STOPPED_HINT))
+    return ans
+
+
+async def stop_fork(c: str, agent_id: str, thread: str) -> Answer:
+    """The analyst's Stop of a side thread: its fork `agent_id` stopped as an agent is (stop), and main told so
+    (THREAD_STOPPED_HINT, with `thread`, the thread's name as the thread list shows it), so that it does not take the
+    thread's work up again (live check L4-12h). A fork that had ended already counts as stopped, and main is told
+    nothing."""
+    ans = await stop(c, agent_id)
+    if not ans.refused and not ans.get("done"):
+        await note_main(c, tools.hint(THREAD_STOPPED_HINT, thread=thread, agent_id=agent_id))
+    return ans
+
+
+async def note_main(c: str, text: str) -> Answer:
+    """`text` appended to main's conversation through the module (`note`: `$.session.append`), which Claude Code records
+    as a meta record of the plugin's: main reads it with its next turn, and no chat shows it (session.translate). Nothing
+    is sent for an empty text (a hint prompts/tools.md lacks). A note that does not go through is logged, and the Stop
+    it follows stands."""
+    if not text:
+        return refusal(ERROR, "an empty note")
+    ans = await _bridge(c, "note", text=text)
+    if ans.refused:
+        log.warning("%s: main was not told of the analyst's Stop: %s", c, ans.reason or ans.kind)
     return ans
 
 

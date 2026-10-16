@@ -3,7 +3,11 @@ through thimble's hooks module (subagents.stop_main, the module's `abort`: `$.tu
 terminal, and the mirror ends the turn with its note (session.turn_stopped), since the abort leaves no record in the
 transcript; without the module the browser says to press Esc. A side thread's Stop stops the fork that answers it, as
 an agent's Stop does. Both are clicks, which take the analyst's cookie. Every transcript here is written by the test in
-Claude Code's record shapes."""
+Claude Code's record shapes.
+
+Main is told of each Stop that stopped something (live check L4-12: a stopped turn's work, and a stopped thread's,
+were taken up again by main's next turn): a line appended to main through the module (`note`), main-stopped-note or
+thread-stopped-note, which no chat shows as the analyst's."""
 from __future__ import annotations
 
 import json
@@ -72,7 +76,7 @@ async def test_main_s_stop_aborts_its_turn_through_the_module_and_the_mirror_end
     _write(p, [_say("Agent 3 ran most of them.")])
     bridge.answers = [{"ok": True}]
     assert await agents.interrupt_route(CORPUS, agents.MAIN_ID, analyst) == {"stopped": True}
-    assert [op for op, _ in bridge.calls] == ["abort"]
+    assert [op for op, _ in bridge.calls] == ["abort", "note"]
     assert not lv.turn_open and not agents.running(CORPUS, agents.MAIN_ID)
     said = [r.get("delta") for r in _main_log() if r.get("type") == "text"]
     assert said == ["Counting the runs.", "Agent 3 ran most of them."], "what the transcript held is read before the end"
@@ -137,7 +141,7 @@ async def test_a_side_thread_s_stop_stops_its_fork_through_the_module_and_one_wi
     assert bridge.calls == []
     agents.update_agent(CORPUS, tid, fork={"agent_id": "afork1"})
     assert await agents.interrupt_route(CORPUS, tid, analyst) == {"stopped": True}
-    assert [(op, args["agent"]) for op, args in bridge.calls] == [("stop", "afork1")]
+    assert [(op, args.get("agent")) for op, args in bridge.calls] == [("stop", "afork1"), ("note", None)]
     # a fork that had ended already counts as stopped
     bridge.answers = [{"error": "Task afork1 is not running", "gone": True}]
     assert await agents.interrupt_route(CORPUS, tid, analyst) == {"stopped": True, "done": True}
@@ -154,3 +158,57 @@ async def test_main_s_stop_and_a_thread_s_take_the_analyst_s_cookie(bridge, plug
             await agents.interrupt_route(CORPUS, chat, bare)
         assert no.value.status_code == 403 and "start, message or stop thimble's agents" in no.value.detail
     assert bridge.calls == [], "the module is never asked"
+
+
+async def test_a_stop_of_main_tells_main_so_its_next_turn_leaves_the_stopped_work_alone(bridge, turn, analyst):
+    """Live check L4-12: Stop ended main's turn, but nothing told main so, and a check's report back to main started a
+    new turn in which main ran the stopped work again. A Stop that ended a turn appends main-stopped-note to main
+    through the module after the abort; one that found no turn running, or that the module refused, appends none."""
+    bridge.answers = [{"ok": True}]
+    assert await agents.interrupt_route(CORPUS, agents.MAIN_ID, analyst) == {"stopped": True}
+    assert bridge.calls == [("abort", {}), ("note", {"text": "MAIN STOPPED"})]
+    for answer, said in (({"error": "main is not running a turn", "gone": True}, {"stopped": True, "done": True}),
+                         ({"error": "the abort failed"},
+                          {"stopped": False, "kind": "error", "reason": "the abort failed"})):
+        bridge.calls.clear()
+        bridge.answers = [answer]
+        assert await agents.interrupt_route(CORPUS, agents.MAIN_ID, analyst) == said
+        assert [op for op, _ in bridge.calls] == ["abort"], answer
+
+
+async def test_a_stop_of_a_side_thread_tells_main_so_it_leaves_the_thread_s_work_alone(bridge, analyst):
+    """Live check L4-12h: the Stop of a side thread stopped its fork, and main then took the thread's work up again.
+    A Stop that stopped the fork appends thread-stopped-note to main through the module after the stop, naming the
+    thread as the thread list shows it and the fork; one whose fork had ended already, or that the module refused,
+    appends none."""
+    tid = agents.new_thread(CORPUS, "card:abc123", "Runs per agent", "runs-per-agent")["id"]
+    agents.update_agent(CORPUS, tid, fork={"agent_id": "afork1"})
+    assert await agents.interrupt_route(CORPUS, tid, analyst) == {"stopped": True}
+    assert [op for op, _ in bridge.calls] == ["stop", "note"]
+    assert bridge.calls[1][1] == {"text": "THREAD STOPPED main/runs-per-agent afork1"}
+    agents.rename_chat(CORPUS, tid, "agent runs")
+    bridge.calls.clear()
+    assert await agents.interrupt_route(CORPUS, tid, analyst) == {"stopped": True}
+    assert bridge.calls[-1] == ("note", {"text": "THREAD STOPPED main/agent runs afork1"}), "its name as renamed"
+    for answer in ({"error": "Task afork1 is not running", "gone": True}, {"deny": "thimble refused this call"}):
+        bridge.calls.clear()
+        bridge.answers = [answer]
+        await agents.interrupt_route(CORPUS, tid, analyst)
+        assert [op for op, _ in bridge.calls] == ["stop"], answer
+
+
+def test_the_note_main_gets_never_shows_as_a_line_of_the_analyst_s(turn):
+    """The note reaches main as Claude Code 2.1.300 records a plugin's `$.session.append` (live check L4's transcript):
+    a user record marked isMeta with the plugin's origin. Neither that record nor a queued prompt of the plugin's with
+    the same text is a line of the analyst's in main's chat, and the turn goes on."""
+    p, lv = turn
+    note = "thimble: the analyst pressed Stop in thimble and ended your turn."
+    origin = {"kind": "plugin", "name": "thimble"}
+    _write(p, [{"type": "user", "isMeta": True, "origin": origin, "promptId": "p1",
+                "message": {"role": "user", "content": [{"type": "text", "text": note}]}},
+               {"type": "user", "origin": origin, "message": {"role": "user", "content": [{"type": "text", "text": note}]}},
+               {"type": "attachment", "attachment": {"type": "queued_command", "prompt": note, "origin": origin}}])
+    session.tail_once(lv)
+    assert [r for r in _main_log() if note in str(r.get("text") or "")] == []
+    assert [r.get("text") for r in _main_log() if r.get("type") == "user"] == ["Count the runs per agent."]
+    assert lv.turn_open

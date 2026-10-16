@@ -109,6 +109,9 @@ SID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 # a transcript thimble 0.5.0 wrote holds its events as `<channel source="plugin:thimble:thimble" …>`: as records of
 # origin OLD_ORIGIN on the channel route, inside task notifications on the hook and Monitor routes
 OLD_TAG, OLD_ORIGIN, OLD_SOURCE = "channel", "channel", "plugin:thimble:thimble"
+# the origin of a line a plugin's module adds to the session, such as the notes thimble's module appends to main
+# ($.session.append, which Claude Code records as a meta user record): no chat shows it as the analyst's
+PLUGIN_ORIGIN = "plugin"
 # one event, as events.render writes it or 0.5.0's channel did
 EVENT_RE = re.compile(rf"^\s*<(?:{EVENT_TAG}|{OLD_TAG})\s([^>]*)>\n?(.*?)\n?</(?:{EVENT_TAG}|{OLD_TAG})>\s*$", re.S)
 ATTR_RE = re.compile(r'([A-Za-z_][A-Za-z0-9_]*)="([^"]*)"')
@@ -3247,6 +3250,8 @@ def translate(lv: Live, line: bytes | str) -> None:
                         _thimble_notice(lv, fields, _stamp(rec))
             elif aorigin == "peer":
                 _peer(lv, mid_turn=True, origin=att.get("origin"))
+            elif aorigin == PLUGIN_ORIGIN:
+                pass  # a plugin's line, such as thimble's note to main after a Stop: never the analyst's
             elif prompt.strip() and not prompt.lstrip().startswith("<"):
                 _rec(lv, "user", text=prompt.strip(), by=TERMINAL)
         return

@@ -30,6 +30,7 @@ EDIT_MODE_WORDS = "accept edits (auto-approve file edits and common file command
 # Claude Code suggests: its Bash dialog offers only rules and folders, and its other dialogs only rules, so their
 # "don't ask again" never switches the mode, though the request's suggestions may hold that switch (main_offer)
 MODE_DIALOG_TOOLS = ("Edit", "MultiEdit", "Write", "NotebookEdit")
+DONT = "don\u2019t ask again for"  # as Claude Code 2.1.300's Bash rows spell it, with the curly apostrophe (_clauses)
 
 
 def allowing(suggestions: Any, keep: bool) -> list[dict[str, Any]]:
@@ -140,7 +141,10 @@ def _clauses(u: dict[str, Any], cwd: str) -> list[tuple[str, str, bool]]:
     """What one update adds, as Claude Code 2.1.300's permission dialog words it after its "Yes, and" (or "Yes,"):
     (the button's words, the tooltip's, whether it needs the card's "Allow, and" before it to say it allows). The
     tooltip's words carry what Claude Code's row adds after them: the folder of a whole tool's rule saved in a folder's
-    settings, and `for this session` (`during this session` for reading) for an update kept for the session alone."""
+    settings, and `for this session` (`during this session` for reading) for an update kept for the session alone.
+    Every row has the curly apostrophe of Claude Code's Bash rows (DONT), where its rows for a whole tool and a site
+    have a straight one, so that the rows on one card match (live check L4); a colon follows only Bash's rule, as in
+    Claude Code's rows."""
     session = u["destination"] in SESSION_ONLY
     tail = " for this session" if session else ""
     if u["type"] == "setMode":
@@ -159,22 +163,21 @@ def _clauses(u: dict[str, Any], cwd: str) -> list[tuple[str, str, bool]]:
              and not (r["toolName"] == "WebFetch" and r["ruleContent"].startswith("domain:"))]
     out: list[tuple[str, str, bool]] = []
     if whole:
-        words = f"don't ask again for {listed([tool_words(t) for t in whole])} commands"
+        words = f"{DONT} {listed([tool_words(t) for t in whole])} commands"
         here = f" in {cwd}" if cwd and u["destination"] in ("localSettings", "projectSettings") else ""
         # the button: MCP tools by their titles, with neither the server nor `commands` (tool_title)
-        short = (f"don't ask again for {listed([tool_title(t) for t in whole])}"
+        short = (f"{DONT} {listed([tool_title(t) for t in whole])}"
                  if all(_mcp_parts(t) for t in whole) else words)
         out.append((short, f"{words}{here}{tail}", True))
     if bash:
-        words = ("don\u2019t ask again for any Bash command" if bash == ["*"]
-                 else f"don\u2019t ask again for: {listed(bash)}")
+        words = f"{DONT} any Bash command" if bash == ["*"] else f"{DONT}: {listed(bash)}"
         out.append((words, f"{words}{tail}", True))
     if reads:
         out.append((f"allow reading from {listed([_short(d) for d in reads])}",
                     f"allow reading from {listed(reads)}{' during this session' if session else ''}", False))
     for named in (sites, other):
         if named:
-            words = f"don't ask again for {listed(named)}"
+            words = f"{DONT} {listed(named)}"
             out.append((words, f"{words}{tail}", True))
     return out
 

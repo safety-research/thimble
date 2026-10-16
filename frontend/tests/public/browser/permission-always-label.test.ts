@@ -8,7 +8,7 @@ import { afterAll, beforeAll, test } from 'vitest'
 import type { Browser, Page } from 'playwright'
 import { bundle, cleanup, launch, ORIGIN, src } from './page.ts'
 
-const ADD_CARD = "Allow, and don't ask again for Add Card"
+const ADD_CARD = 'Allow, and don\u2019t ask again for Add Card'
 const OUTSIDE = 'Allow, and switch to accept edits; always allow access to notes/'
 let browser: Browser
 let page: Page
