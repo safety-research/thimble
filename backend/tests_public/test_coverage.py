@@ -1,9 +1,12 @@
-"""Coverage (app/coverage.py, `thimble state coverage`, `thimble act coverage`): what a session's tool calls read,
-searched or never opened in the corpus's data files. Facts merge per file (whole, a part's line or page ranges,
-searched), facts outside the corpus or on code files are dropped, a recursive search over a folder is one fact for every
-data file under it, the cards' reads and the labels' runs count as searched, rows group by folder and extension, the
-summary line has its four forms, and an index of 1,032,019 files answers both requests in under 1 s without walking or
-counting. The index job starts once under its lock, under nice and ionice, and keys its rows by size and mtime."""
+"""Coverage (app/coverage.py, `thimble state coverage`, `thimble act coverage`): what a session's tool calls saw or
+searched in the corpus. Facts merge per file (whole, a part's line or page ranges, searched), facts outside the corpus or
+on code files are dropped, a recursive search over a folder is one fact for every file under it, the cards' reads and the
+labels' runs count as searched. Each row counts one unit: records (rows or lines) for files thimble reads as records,
+files for images, binaries and documents, never both in one number. Rows group by folder and type, siblings that share a
+name pattern (5 or more) by their glob, and every group is listed (no `other`); a group drills in to its files. The
+totals hold the corpus's denominators per unit. An index of 1,032,019 files answers both requests in under 1 s without
+walking or counting. The index job starts once under its lock, under nice and ionice, and keys its rows by size and
+mtime."""
 from __future__ import annotations
 
 import fcntl
@@ -66,6 +69,17 @@ def test_is_data_follows_the_shared_case_list():
     assert len(cases) >= 50
 
 
+def test_the_universe_and_each_file_s_unit_follow_the_shared_case_list():
+    got = json.loads((HERE / "fixtures" / "data_files.json").read_text())
+    cases = got["universe"]
+    wrong = [c for c in cases if coverage.in_universe(c["path"], c["codeTree"]) is not c["counts"]
+             or (c["counts"] and coverage.unit_of(c["path"]) != c["unit"])]
+    assert not wrong, wrong
+    assert len(cases) >= 40
+    # every data file of the activation rule is in the universe
+    assert all(coverage.in_universe(c["path"], c["codeTree"]) for c in got["cases"] if c["data"])
+
+
 def test_facts_merge_whole_part_lines_pages_and_searched(corpus):
     c, root = corpus["c"], corpus["root"]
     _index(c, root)
@@ -81,25 +95,32 @@ def test_facts_merge_whole_part_lines_pages_and_searched(corpus):
     # events: lines 1-70 of 140; board: all 20; agent-01: 3 of 10
     assert s["records"]["counted"] is True
     assert s["records"]["seen"] == 70 + 20 + 3
+    # the records of the files read as records: the five .md files count as files, not lines
     total = sum(records.count(p, p.relative_to(root).as_posix()) for p in root.rglob("*")
-                if p.is_file() and coverage.is_data(p.relative_to(root).as_posix(), False))
+                if p.is_file() and coverage.in_universe(p.relative_to(root).as_posix(), False)
+                and coverage.unit_of(p.name) == "records")
     assert s["records"]["total"] == total
-    assert s["line"] == f"saw {round(100 * 93 / total)}% of records (3 of 21 files)"
+    # searched: all 5 rows of pull_requests.csv, and agent-01's 7 lines not seen (it was searched and read in part)
+    assert s["records"]["searched"] == 5 + 7
+    assert s["line"] == f"seen {coverage.percent(93, total)} · searched {coverage.percent(12, total)} of records"
     stored = coverage.read_facts(c, SID)
     assert len(stored) == 6 and all(f["turn"] == "t1" for f in stored)
     assert stored[2]["path"] == "board.jsonl"  # stored relative to the corpus
 
 
-def test_part_with_pdf_pages_counts_the_pages(corpus, monkeypatch):
+def test_a_document_read_in_part_counts_as_one_file_seen(corpus, monkeypatch):
+    """Documents count files, not pages: a PDF read in part is one file seen, and the job counts no records of it."""
     c, root = corpus["c"], corpus["root"]
     (root / "postmortem.pdf").write_bytes(b"%PDF-1.4 not really")
-    monkeypatch.setattr(records, "count", lambda path, rel, under=None: 12 if rel.endswith(".pdf") else
-                        sum(1 for _ in open(path, "rb")))
+    counted: list[str] = []
+    real = records.count
+    monkeypatch.setattr(records, "count", lambda path, rel, under=None: counted.append(rel) or real(path, rel, under))
     _index(c, root)
+    assert "postmortem.pdf" not in counted and not any(r.endswith(".md") for r in counted)
     _facts(c, [{"path": "postmortem.pdf", "how": "part", "pages": [2, 5], "total": 12, "by": "Read"},
                {"path": "postmortem.pdf", "how": "part", "pages": [4, 6], "by": "Read"}])
     row = next(r for r in coverage.rows(c, SID) if r["ext"] == ".pdf")
-    assert (row["seen"], row["records_seen"], row["records_total"]) == (1, 5, 12)
+    assert (row["unit"], row["name"], row["files"], row["seen"], row["searched"]) == ("files", "postmortem.pdf", 1, 1, 0)
 
 
 def test_paths_outside_the_corpus_and_code_files_are_dropped(corpus, tmp_path):
@@ -144,6 +165,9 @@ def test_a_recursive_search_over_a_folder_is_one_fact_for_every_data_file_under_
     assert s["files"]["seen"] == 1 and s["files"]["searched"] == 11
     agents = next(r for r in coverage.rows(c, SID) if r["folder"] == "agents")
     assert (agents["files"], agents["seen"], agents["searched"], agents["never"]) == (12, 1, 11, 0)
+    # in records: agent-03's 10 lines seen, the other 11 files' 110 lines searched
+    assert (agents["unit"], agents["records_seen"], agents["records_searched"], agents["records_total"]) == \
+        ("records", 10, 110, 120)
     # the whole corpus searched (grep -r with no folder): every other data file is searched
     s = _facts(c, [{"path": ".", "how": "searched", "folder": True, "by": "search"}])
     assert s["files"] == {"seen": 1, "searched": 20, "never": 0, "total": 21}
@@ -174,77 +198,238 @@ def test_card_reads_and_label_runs_since_activation_count_as_searched(corpus, mo
     concepts.write_concept(ws, concept)
     s = coverage.summary(c, SID)
     assert s["files"]["searched"] == 2 + 12 and s["files"]["seen"] == 0
-    rows = {r["key"]: r for r in coverage.rows(c, SID)}
-    assert rows["agents|.jsonl"]["searched"] == 12
-    assert rows[".|.jsonl"]["searched"] == 1  # events.jsonl; board.jsonl was read by a card made before
+    rows = {r["name"]: r for r in coverage.rows(c, SID)}
+    assert rows["agent-*.jsonl"]["searched"] == 12
+    assert rows["events.jsonl"]["searched"] == 1
+    assert rows["board.jsonl"]["searched"] == 0  # read by a card made before the session was turned on
 
 
-def test_rows_group_by_folder_and_extension_and_drill(corpus):
+def test_rows_keep_the_hierarchy_and_say_where_each_file_is(corpus):
+    """Folder, then type or pattern, then file: agents/ is one row (its files share agent-*.jsonl), prompts/ another
+    (four .md files with no shared pattern); the five files at the top are file rows whose folder is '' (the top level,
+    never `.`); a level of 20 files or fewer lists its files."""
     c, root = corpus["c"], corpus["root"]
     _index(c, root)
     _facts(c, [{"path": "agents/agent-01.jsonl", "how": "whole"}, {"path": "events.jsonl", "how": "whole"}])
     rows = coverage.rows(c, SID)
-    assert len(rows) <= coverage.ROWS_MAX
-    first = rows[0]
-    assert first == {"key": "agents|.jsonl", "folder": "agents", "ext": ".jsonl", "path": None, "files": 12, "seen": 1,
-                     "searched": 0, "never": 11, "records_seen": 10, "records_total": 120,
-                     "bytes": first["bytes"], "drill": True}
-    top = next(r for r in rows if r["key"] == ".|.jsonl")
-    assert (top["folder"], top["files"], top["seen"], top["records_seen"], top["drill"]) == ("", 2, 1, 140, False)
-    # a level of 20 files or fewer lists files: seen first, then never, then by name
+    by = {r["name"]: r for r in rows}
+    assert set(by) == {"agent-*.jsonl", ".md", "events.jsonl", "board.jsonl", "pull_requests.csv", "manifest.json",
+                       "README.md"}
+    a = by["agent-*.jsonl"]
+    assert (a["folder"], a["ext"], a["path"], a["match"], a["drill"], a["unit"]) == \
+        ("agents", ".jsonl", None, None, True, "records")
+    assert (a["files"], a["seen"], a["records_seen"], a["records_searched"], a["records_total"]) == (12, 1, 10, 0, 120)
+    p = by[".md"]
+    assert (p["folder"], p["unit"], p["files"], p["seen"], p["drill"]) == ("prompts", "files", 4, 0, True)
+    e = by["events.jsonl"]
+    assert (e["folder"], e["path"], e["drill"], e["records_seen"], e["records_total"]) == \
+        ("", "events.jsonl", False, 140, 140)
+    assert by["README.md"]["unit"] == "files" and by["README.md"]["folder"] == ""
+    assert all(r["folder"] != "." and r["key"] != "other" for r in rows)
+    assert [r["bytes"] for r in rows] == sorted((r["bytes"] for r in rows), reverse=True)
+    # a level of 20 files or fewer lists files: seen first, then by name
     files = coverage.rows(c, SID, "agents")
     assert [r["path"] for r in files][:2] == ["agents/agent-01.jsonl", "agents/agent-02.jsonl"]
-    assert files[0]["seen"] == 1 and all(r["files"] == 1 and not r["drill"] for r in files) and len(files) == 12
+    assert files[0]["seen"] == 1 and len(files) == 12
+    assert all(r["files"] == 1 and not r["drill"] and r["folder"] == "agents" and r["name"] == r["path"].split("/")[-1]
+               for r in files)
 
 
-def test_more_than_ten_groups_keep_nine_and_other(corpus):
+@pytest.fixture()
+def mixed(corpus):
+    """The toy corpus plus files that count as files: 30 screenshots in images/day-1/, a PDF, a video; and a database
+    of 7 rows."""
+    root = corpus["root"]
+    (root / "images" / "day-1").mkdir(parents=True)
+    for i in range(30):
+        (root / "images" / "day-1" / f"{i:08x}-9529-43fe-be10-934bab47bc4f.png").write_bytes(b"\x89PNG\r\n\x1a\n" + bytes(40))
+    (root / "docs").mkdir()
+    (root / "docs" / "report.pdf").write_bytes(b"%PDF-1.4 not really")
+    (root / "video.mp4").write_bytes(bytes(100))
+    con = sqlite3.connect(root / "forge.db")
+    con.execute("CREATE TABLE prs (id INTEGER PRIMARY KEY, title TEXT)")
+    con.executemany("INSERT INTO prs (title) VALUES (?)", [(f"t{i}",) for i in range(7)])
+    con.commit()
+    con.close()
+    return corpus
+
+
+def test_each_row_counts_one_unit_and_the_totals_hold_each_unit(mixed):
+    """Data files count records (rows or lines), images, video and documents count files; one number never mixes the
+    two. The totals hold the corpus's denominators, one entry per unit."""
+    c, root = mixed["c"], mixed["root"]
+    _index(c, root)
+    png = sorted(p.name for p in (root / "images" / "day-1").iterdir())[0]
+    s = _facts(c, [{"path": f"images/day-1/{png}", "how": "whole", "by": "Read"},
+                   {"path": "events.jsonl", "how": "part", "lines": [1, 40], "by": "Read"},
+                   {"path": "README.md", "how": "searched", "by": "search"},
+                   {"path": "forge.db", "how": "searched", "by": "Bash"}])
+    rows = {r["name"]: r for r in coverage.rows(c, SID)}
+    img = rows[".png"]
+    assert (img["folder"], img["unit"], img["files"], img["seen"], img["searched"], img["drill"]) == \
+        ("images/day-1", "files", 30, 1, 0, True)
+    db = rows["forge.db"]
+    assert (db["unit"], db["records_total"], db["records_seen"], db["records_searched"]) == ("records", 7, 0, 7)
+    assert rows["video.mp4"]["unit"] == "files" and rows["report.pdf"]["unit"] == "files"
+    assert rows["report.pdf"]["folder"] == "docs"
+    recs, files = s["totals"]
+    record_files = 12 + 4 + 1  # agents, events, board, csv, manifest; forge.db
+    rels = [p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()]
+    total = sum(records.count(root / r, r) for r in rels if coverage.in_universe(r, False)
+                and coverage.unit_of(r) == "records")
+    assert recs == {"unit": "records", "seen": 40, "searched": 7, "total": total, "counted": True,
+                    "files": record_files, "files_seen": 1, "files_searched": 1}
+    assert files == {"unit": "files", "seen": 1, "searched": 1, "total": 30 + 1 + 1 + 5}
+    assert s["files"] == {"seen": 2, "searched": 2, "never": record_files + 37 - 4, "total": record_files + 37}
+    assert s["line"] == f"seen {coverage.percent(40, total)} · searched {coverage.percent(7, total)} of records"
+    # a file row of a file the index does not hold yet keeps its unit
+    (root / "late.png").write_bytes(b"\x89PNG")
+    _facts(c, [{"path": "late.png", "how": "whole", "by": "Read"}])
+    late = next(r for r in coverage.rows(c, SID) if r["name"] == "late.png")
+    assert (late["unit"], late["files"], late["seen"]) == ("files", 1, 1)
+
+
+def test_percent_forms():
+    assert coverage.percent(0, 100) == "0%"
+    assert coverage.percent(5, 0) == "0%"
+    assert coverage.percent(1, 3_000_000) == "<0.01%"
+    assert coverage.percent(4_401, 13_200_000) == "0.03%"
+    assert coverage.percent(3, 1_000) == "0.3%"
+    assert coverage.percent(99, 10_000) == "0.9%" and coverage.percent(99, 100_000) == "0.09%"
+    assert coverage.percent(17, 100) == "17%"
+    assert coverage.percent(995, 1_000) == "99%"  # rounds to 100 but not all of it
+    assert coverage.percent(1_000, 1_000) == "100%"
+
+
+def test_the_summary_line_is_the_totals_seen_and_searched_shares():
+    rec = {"unit": "records", "seen": 1_204, "searched": 0, "total": 48_310, "counted": True, "files": 13,
+           "files_seen": 3, "files_searched": 0}
+    assert coverage.line_of([rec]) == "seen 2% of records"
+    assert coverage.line_of([{**rec, "searched": 20_000}]) == "seen 2% · searched 41% of records"
+    assert coverage.line_of([{**rec, "seen": 0}]) == "seen 0% of records"
+    files = {"unit": "files", "seen": 3, "searched": 0, "total": 1_032_000}
+    # the line names one unit: records where the corpus has any; images are in the table
+    assert coverage.line_of([{**rec, "seen": 4_401, "total": 13_200_000}, files]) == "seen 0.03% of records"
+    assert coverage.line_of([files]) == "seen <0.01% of files"
+    counting = {**rec, "counted": False, "total": 0}
+    assert coverage.line_of([counting]) == "seen 3 of 13 files"
+    assert coverage.line_of([{**counting, "files_searched": 2}]) == "seen 3 · searched 2 of 13 files"
+    assert coverage.line_of([], indexed=False, seen=3) == "seen 3 files"
+    assert coverage.line_of([], indexed=False, seen=1) == "seen 1 file"
+    assert coverage.line_of([], indexed=False, seen=0, searched=2) == "seen 0 · searched 2 files"
+
+
+def _letters(n: int) -> str:
+    """A name without digits for the number n (aa, ab, ...), so no two share a name pattern."""
+    out = ""
+    for _ in range(3):
+        n, r = divmod(n, 26)
+        out = "abcdefghijklmnopqrstuvwxyz"[r] + out
+    return out
+
+
+def test_a_top_folder_of_1000_files_of_many_kinds_lists_every_group_by_pattern_or_type(corpus, monkeypatch):
+    """1,000 files of many kinds at the top: siblings that share a name pattern (5 or more) are one glob row, the rest
+    one row per type (a type of one file is its file's row); no `other`; every file is in exactly one row; a group
+    drills in to its files, seen ones first, and a long list says how many it leaves out."""
     c, root = corpus["c"], corpus["root"]
-    for i in range(12):
-        d = root / f"g{i:02d}"
-        d.mkdir()
-        for k in range(i + 1):
-            (d / f"f{k}.jsonl").write_text("{}\n")
+    made = 0
+
+    def put(name: str, data: bytes = b"x\n") -> None:
+        nonlocal made
+        (root / name).write_bytes(data)
+        made += 1
+
+    for i in range(300):
+        put(f"run_{i:04d}.jsonl", b'{"a": 1}\n{"a": 2}\n')
+    for i in range(200):
+        put(f"img_{i:04d}.png", b"\x89PNG\r\n\x1a\n" + bytes(8))
+    for i in range(150):
+        put(f"trace-{i:08x}-1a2b-4c3d-8e9f-{i:012x}.json", b'[{"t": 1}]')
+    for i in range(100):
+        put(f"notes-{_letters(i)}.md")
+    for i in range(50):
+        put(f"table-{_letters(i)}.csv", b"a,b\n1,2\n")
+    kinds = {"txt": 60, "pdf": 40, "xml": 30, "html": 30, "wav": 20, "parquet": 18}
+    for ext, n in kinds.items():
+        for i in range(n):
+            put(f"{ext}-{_letters(i)}.{ext}")
+    put("solo.tsv", b"a\tb\n1\t2\n")
+    put("lonely.mp4", bytes(10))
+    assert made == 1000
     _index(c, root)
-    rows = coverage.rows(c, SID)
-    assert len(rows) == 10 and rows[-1]["key"] == coverage.OTHER and not rows[-1]["drill"]
-    assert sum(r["files"] for r in rows) == coverage.summary(c, SID)["files"]["total"]
-    assert [r["files"] for r in rows[:9]] == sorted((r["files"] for r in rows[:9]), reverse=True)
-    # drill into one folder of more than 20 files groups again, one level down
-    for k in range(25):
-        (root / "agents" / "more").mkdir(exist_ok=True)
-        (root / "agents" / "more" / f"m{k}.log").write_text("x\n")
-    corpus_walk.forget()
-    _index(c, root)
-    down = coverage.rows(c, SID, "agents")
-    assert {r["key"] for r in down} == {"more|.log", ".|.jsonl"}
-    assert next(r for r in down if r["key"] == "more|.log")["folder"] == "agents/more"
+    run = "run_0250.jsonl"
+    _facts(c, [{"path": run, "how": "whole", "by": "Read"}, {"path": "img_0003.png", "how": "whole", "by": "Read"}])
+    t0 = time.monotonic()
+    got = coverage.level(c, SID, "")
+    assert time.monotonic() - t0 < 1.0
+    rows = got["rows"]
+    by = {r["name"]: r for r in rows if r["folder"] == ""}  # the rows of the files at the top
+    assert {(r["folder"], r["name"]) for r in rows if r["folder"]} == {("agents", "agent-*.jsonl"), ("prompts", ".md")}
+    assert got["more"] == 0 and all(r["key"] != "other" and "other" not in r["name"] for r in rows)
+    assert sum(r["files"] for r in rows) == coverage.summary(c, SID)["files"]["total"] == 1000 + 21
+    runs = by["run_*.jsonl"]
+    assert (runs["unit"], runs["files"], runs["records_total"], runs["records_seen"], runs["match"], runs["drill"]) == \
+        ("records", 300, 600, 2, "run_*.jsonl", True)
+    assert (by["img_*.png"]["unit"], by["img_*.png"]["files"], by["img_*.png"]["seen"]) == ("files", 200, 1)
+    assert by["trace-*.json"]["files"] == 150 and by["trace-*.json"]["unit"] == "records"
+    # the rest by type: the toy corpus's README.md and pull_requests.csv join their type's row
+    assert (by[".md"]["files"], by[".md"]["unit"], by[".md"]["match"]) == (101, "files", ".md")
+    assert (by[".csv"]["files"], by[".csv"]["unit"]) == (51, "records")
+    assert by[".jsonl"]["files"] == 2  # events.jsonl and board.jsonl, which share no pattern with run_*.jsonl
+    for ext, n in kinds.items():
+        assert by[f".{ext}"]["files"] == n
+    for name in ("solo.tsv", "lonely.mp4", "manifest.json"):
+        assert by[name]["path"] == name and by[name]["files"] == 1 and not by[name]["drill"]
+    # drill in: a type's files, then a pattern's, seen first; a list longer than LIST_MAX says how many are left out
+    md = coverage.level(c, SID, "", ".md")
+    assert len(md["rows"]) == 101 and md["more"] == 0 and md["match"] == ".md"
+    assert all(r["path"] and r["folder"] == "" and r["unit"] == "files" for r in md["rows"])
+    monkeypatch.setattr(coverage, "LIST_MAX", 100)
+    down = coverage.level(c, SID, "", "run_*.jsonl")
+    assert len(down["rows"]) == 100 and down["more"] == 200
+    assert down["rows"][0]["path"] == run and down["rows"][0]["records_seen"] == 2
+    assert [r["path"] for r in down["rows"][1:3]] == ["run_0000.jsonl", "run_0001.jsonl"]
 
 
-def test_summary_line_forms():
-    assert coverage.line_of(0, 13, 0, 48_000, True) == "saw 0% of records (0 of 13 files)"
-    assert coverage.line_of(1, 13, 3, 48_000, True) == "saw <1% of records (1 of 13 files)"
-    assert coverage.line_of(3, 13, 1_204, 48_310, True) == "saw 2% of records (3 of 13 files)"
-    assert coverage.line_of(13, 13, 48_309, 48_310, True) == "saw 99% of records (13 of 13 files)"
-    assert coverage.line_of(3, 1_032_019, 0, 0, False) == "saw 3 of 1,032,019 files"
-    assert coverage.line_of(3, 13, 9, 9, False) == "saw 3 of 13 files"
-    assert coverage.line_of(3, 3, 0, 0, False, indexed=False) == "saw 3 files"
-    assert coverage.line_of(1, 1, 0, 0, False, indexed=False) == "saw 1 file"
-    assert coverage.line_of(1, 1, 5, 10, True) == "saw 50% of records (1 of 1 file)"
+def test_a_folder_that_holds_only_one_folder_shows_the_deeper_folder(corpus):
+    """images/ holds only computer-use-turns/, which holds the days: the top row names images/computer-use-turns
+    and drills in there, where each day is a row."""
+    c, root = corpus["c"], corpus["root"]
+    days = root / "images" / "computer-use-turns"
+    for d in range(6):
+        day = days / f"2025-04-0{d + 1}"
+        day.mkdir(parents=True)
+        for i in range(4):
+            (day / f"{d:02d}{i:06x}-9529-43fe-be10-934bab47bc4f.png").write_bytes(b"\x89PNG")
+    (days / "2025-04-01" / "turns.json").write_text('[{"a": 1}]')
+    _index(c, root)
+    top = next(r for r in coverage.rows(c, SID) if r["ext"] == ".png")
+    assert (top["folder"], top["name"], top["unit"], top["files"], top["drill"]) == \
+        ("images/computer-use-turns", ".png", "files", 24, True)
+    turns = next(r for r in coverage.rows(c, SID) if r["ext"] == ".json" and r["folder"].startswith("images"))
+    assert (turns["path"], turns["name"], turns["folder"]) == \
+        ("images/computer-use-turns/2025-04-01/turns.json", "turns.json", "images/computer-use-turns/2025-04-01")
+    down = coverage.rows(c, SID, "images/computer-use-turns")
+    assert sorted(r["folder"] for r in down if r["ext"] == ".png") == [f"images/computer-use-turns/2025-04-0{d + 1}"
+                                                                       for d in range(6)]
+    assert all(r["files"] == 4 and r["drill"] for r in down if r["ext"] == ".png")
 
 
 def test_files_only_while_counting_and_without_an_index(corpus):
     c, root = corpus["c"], corpus["root"]
     s = _facts(c, [{"path": "events.jsonl", "how": "whole"}])
-    assert s["line"] == "saw 1 file" and s["counting"] is True and corpus["started"] == [c]
-    # walked but not counted: files only
+    assert s["line"] == "seen 1 file" and s["counting"] is True and corpus["started"] == [c]
+    # walked but not counted: the files that hold records, in files
     conn = coverage._connect_rw(coverage.index_path(c))
     coverage.refresh(c, root, conn)
     conn.close()
     s = coverage.summary(c, SID)
-    assert s["line"] == "saw 1 of 21 files" and s["counting"] is True and s["records"]["counted"] is False
+    assert s["line"] == "seen 1 of 16 files" and s["counting"] is True and s["records"]["counted"] is False
+    assert s["totals"][1] == {"unit": "files", "seen": 0, "searched": 0, "total": 5}  # the .md files need no count
     _index(c, root)
-    assert coverage.summary(c, SID)["line"].startswith("saw ") and "% of records (1 of 21 files)" in \
-        coverage.summary(c, SID)["line"]
+    line = coverage.summary(c, SID)["line"]
+    assert line.startswith("seen ") and line.endswith(" of records")
 
 
 async def test_state_and_act_surfaces(corpus):
@@ -254,14 +439,17 @@ async def test_state_and_act_surfaces(corpus):
         {"path": "agents/agent-02.jsonl", "how": "whole", "by": "Read", "at": 1.0}]})
     assert got["ok"] is True and got["summary"]["files"]["seen"] == 1 and "line" in got["summary"]
     state = await local.state(c, "coverage", ["--session", SID])
-    assert set(state) == {"summary", "folder", "rows", "counting"} and state["folder"] == ""
-    assert set(state["summary"]) == {"files", "records", "line"}
+    assert set(state) == {"summary", "folder", "match", "rows", "more", "counting"} and state["folder"] == ""
+    assert set(state["summary"]) == {"files", "records", "totals", "line"}
     assert set(state["rows"][0]) == {"key", "folder", "ext", "path", "files", "seen", "searched", "never",
-                                     "records_seen", "records_total", "bytes", "drill"}
+                                     "records_seen", "records_searched", "records_total", "bytes", "drill", "unit",
+                                     "name", "match"}
     only = await local.state(c, "coverage", ["--session", SID, "--summary"])
     assert "rows" not in only
     down = await local.state(c, "coverage", ["--session", SID, "--folder", "agents"])
     assert down["folder"] == "agents" and len(down["rows"]) == 12
+    group = await local.state(c, "coverage", ["--session", SID, "--folder", "prompts", "--match", ".md"])
+    assert group["match"] == ".md" and len(group["rows"]) == 4
     with pytest.raises(local.StateError):
         await local.state(c, "coverage", ["--session", "../x"])
     with pytest.raises(local.StateError):
@@ -280,23 +468,23 @@ def _seed(c: str, root: Path, n_top=30, n_sub=40, per=860, extra=19) -> int:
             for j in range(n_sub):
                 folder = f"f{i:02d}/d{j:02d}"
                 for k in range(per):
-                    yield (f"{folder}/x{k:04d}.jsonl", folder, "jsonl", 100, 1, 10, "lines")
+                    yield (f"{folder}/x{k:04d}.jsonl", folder, "jsonl", 100, 1, 10, "lines", "x*.jsonl")
         for k in range(extra):
-            yield (f"top{k:02d}.jsonl", "", "jsonl", 100, 1, 10, "lines")
+            yield (f"top{k:02d}.jsonl", "", "jsonl", 100, 1, 10, "lines", "top*.jsonl")
 
     with conn:
-        conn.executemany("INSERT INTO files (path, folder, ext, size, mtime, records, reader) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                         files())
+        conn.executemany("INSERT INTO files (path, folder, ext, size, mtime, records, reader, pattern) "
+                         "VALUES (?, ?, ?, ?, ?, ?, ?, ?)", files())
         rows = []
         for i in range(n_top):
             top = f"f{i:02d}"
-            rows.append((top, "jsonl", "", n_sub * per, n_sub * per * 100, n_sub * per * 10, n_sub * per))
+            rows.append((top, "jsonl", "", n_sub * per, n_sub * per * 100, n_sub * per * 10, n_sub * per, "x*.jsonl"))
             for j in range(n_sub):
-                rows.append((f"{top}/d{j:02d}", "jsonl", top, per, per * 100, per * 10, per))
+                rows.append((f"{top}/d{j:02d}", "jsonl", top, per, per * 100, per * 10, per, "x*.jsonl"))
         total = n_top * n_sub * per + extra
-        rows.append(("", "jsonl", None, total, total * 100, total * 10, total))
-        conn.executemany("INSERT INTO totals (prefix, ext, parent, files, bytes, records, counted) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                         rows)
+        rows.append(("", "jsonl", None, total, total * 100, total * 10, total, ""))
+        conn.executemany("INSERT INTO totals (prefix, ext, parent, files, bytes, records, counted, pattern) "
+                         "VALUES (?, ?, ?, ?, ?, ?, ?, ?)", rows)
         coverage._set_meta(conn, "walked_at", time.time())
     conn.close()
     return total
@@ -325,12 +513,45 @@ async def test_a_seeded_index_of_a_million_files_answers_in_under_a_second(corpu
     assert took < 1.0, took
     s = got["summary"]
     assert s["files"] == {"seen": 2, "searched": 34_400, "never": total - 2 - 34_400, "total": total}
-    assert s["records"] == {"seen": 14, "total": total * 10, "counted": True}
-    assert s["line"] == "saw <1% of records (2 of 1,032,019 files)"
+    assert s["records"] == {"seen": 14, "searched": 344_000, "total": total * 10, "counted": True}
+    assert s["totals"] == [{"unit": "records", "seen": 14, "searched": 344_000, "total": total * 10, "counted": True,
+                            "files": total, "files_seen": 2, "files_searched": 34_400}]
+    assert s["line"] == f"seen <0.01% · searched {coverage.percent(344_000, total * 10)} of records"
     t0 = time.monotonic()
-    rows = coverage.rows(c, SID)
+    got = coverage.level(c, SID)
     assert time.monotonic() - t0 < 1.0
-    assert len(rows) == 10 and rows[-1]["key"] == "other" and corpus["started"] == []
+    rows = got["rows"]
+    # 30 folders and the 19 files at the top, which share top*.jsonl: every group listed, no `other`
+    assert len(rows) == 31 and all(r["key"] != "other" for r in rows) and got["more"] == 0
+    assert next(r for r in rows if r["name"] == "top*.jsonl")["files"] == 19
+    assert sum(r["files"] for r in rows) == total and corpus["started"] == []
+    t0 = time.monotonic()
+    down = coverage.level(c, SID, "f00")
+    assert time.monotonic() - t0 < 1.0 and len(down["rows"]) == 40
+
+
+def test_an_index_of_the_earlier_form_is_built_again(corpus):
+    """An index written before rows had units and patterns (no `pattern` column) counts as missing: a request starts
+    the job, and the job builds it again."""
+    c, root = corpus["c"], corpus["root"]
+    p = coverage.index_path(c)
+    conn = sqlite3.connect(p)
+    conn.executescript("""
+        CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+        CREATE TABLE files (path TEXT PRIMARY KEY, folder TEXT NOT NULL, ext TEXT NOT NULL, size INTEGER NOT NULL,
+            mtime INTEGER NOT NULL, records INTEGER, reader TEXT, error TEXT);
+        CREATE TABLE totals (prefix TEXT NOT NULL, ext TEXT NOT NULL, parent TEXT, files INTEGER NOT NULL,
+            bytes INTEGER NOT NULL, records INTEGER NOT NULL, counted INTEGER NOT NULL, PRIMARY KEY (prefix, ext));
+    """)
+    conn.execute("INSERT INTO meta VALUES ('walked_at', ?)", (str(time.time()),))
+    conn.commit()
+    conn.close()
+    s = coverage.summary(c, SID)
+    assert s["counting"] is True and corpus["started"] == [c]
+    _index(c, root)
+    s = coverage.summary(c, SID)
+    assert s["files"]["total"] == 21 and s["records"]["counted"] is True
+    assert {r["name"] for r in coverage.rows(c, SID)} >= {"agent-*.jsonl", ".md"}
 
 
 def test_the_job_starts_once_under_its_lock_with_nice_and_ionice(corpus, monkeypatch):
@@ -371,7 +592,7 @@ def test_the_job_keys_rows_by_size_and_mtime(corpus, monkeypatch):
     real = records.count
     monkeypatch.setattr(records, "count", lambda path, rel, under=None: counted.append(rel) or real(path, rel, under))
     _index(c, root)
-    assert len(counted) == 21
+    assert len(counted) == 16  # the files read as records; the five .md files count as files and need no count
     counted.clear()
     _index(c, root)
     assert counted == []
@@ -384,6 +605,32 @@ def test_the_job_keys_rows_by_size_and_mtime(corpus, monkeypatch):
     assert conn.execute("SELECT records FROM files WHERE path = 'events.jsonl'").fetchone()[0] == 141
     assert conn.execute("SELECT records FROM totals WHERE prefix = '' AND ext = 'jsonl'").fetchone()[0] == 141 + 20 + 120
     conn.close()
+
+
+def test_a_folder_whose_listing_did_not_change_stats_only_the_files_that_hold_records(corpus, monkeypatch):
+    """A refresh stats a file that counts files (an image) only when its folder's listing changed; a file that holds
+    records is stat'ed every time, since lines are added to it in place."""
+    c, root = corpus["c"], corpus["root"]
+    (root / "images").mkdir()
+    for i in range(6):
+        (root / "images" / f"shot-{i}.png").write_bytes(b"\x89PNG")
+    (root / "images" / "turns.jsonl").write_text('{"a": 1}\n')
+    past = time.time() - 3600
+    for d in [root, *[p for p in root.rglob("*") if p.is_dir()]]:
+        os.utime(d, (past, past))
+    _index(c, root)
+    statted: list[str] = []
+    real = coverage._stat
+    monkeypatch.setattr(coverage, "_stat", lambda p: statted.append(os.path.relpath(p, root)) or real(p))
+    corpus_walk.forget()
+    _index(c, root)
+    assert not any(p.endswith(".png") for p in statted) and "images/turns.jsonl" in statted
+    (root / "images" / "shot-new.png").write_bytes(b"\x89PNG")
+    statted.clear()
+    corpus_walk.forget()
+    _index(c, root)
+    assert "images/shot-new.png" in statted
+    assert next(r for r in coverage.rows(c, SID) if r["folder"] == "images" and r["ext"] == ".png")["files"] == 7
 
 
 def test_a_file_that_cannot_be_counted_posts_the_count_notice(corpus, monkeypatch):
