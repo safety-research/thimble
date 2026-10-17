@@ -8,6 +8,7 @@ import asyncio
 import json
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -229,6 +230,22 @@ async def test_the_ui_tools_leave_records_for_the_renderer(term):
     _mode("browser")
     local.ui_note(CORPUS, "layout", {"layout": "one"})
     assert len(local.ui_records(CORPUS)) == 2, "browser mode's page hears the stream instead"
+
+
+async def test_home_names_which_folder_the_workspace_is(term):
+    """Bug hunt 7, H11: the terminal UI tells that another run took the workspace's place by home's `instance`: the same
+    after the folder moves away and back (/thimble fresh, then /thimble restore), another for the new folder."""
+    await call(term, "add_card", question="Posts?", kind="note", text="Eight.", group="G")
+    first = (await local.state(CORPUS, "home"))["instance"]
+    ws = config.workspace_path(CORPUS)
+    away = ws.with_name("archived-run")
+    ws.rename(away)
+    ws.mkdir()
+    fresh = (await local.state(CORPUS, "home"))["instance"]
+    shutil.rmtree(ws)
+    away.rename(ws)
+    assert first and fresh and fresh != first
+    assert (await local.state(CORPUS, "home"))["instance"] == first
 
 
 async def test_state_gives_what_the_routes_give(term):
