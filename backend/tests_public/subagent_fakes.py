@@ -39,9 +39,10 @@ HINTS = {
 
 
 class FakeBridge:
-    """app.module_bridge as lane M names it: live, why_not, request (async, answering each op), push_roles, main_session
-    (`main`) and moved_to (through `moved`). `answers` are what the next requests answer, in order; without one a spawn
-    answers a new agent id and a send or stop {agentId}. Each request is kept in `calls` as (op, args)."""
+    """app.module_bridge as lane M names it: live, why_not, request (async, answering each op), model (a model call,
+    answered by `respond`), push_roles, main_session (`main`) and moved_to (through `moved`). `answers` are what the next
+    requests answer, in order; without one a spawn answers a new agent id and a send or stop {agentId}. Each request is
+    kept in `calls` as (op, args), a model call as (complete or fork, args)."""
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
@@ -51,6 +52,10 @@ class FakeBridge:
         self.n = 0
         self.main = "main-session"
         self.moved: dict[str, str] = {}
+        # a model call's answer, from its op and args (module_bridge.model): the reply's text, or why there is none
+        self.respond: Any = lambda op, args: {"error": "the fake bridge has no answer for this model call"}
+        self.running = 0  # model calls that run now
+        self.most = 0  # model calls that ran at once, at most
 
     def main_session(self, c: str) -> str:
         return self.main
@@ -75,6 +80,18 @@ class FakeBridge:
             return {"agentId": f"a{self.n:016x}"}
         return {"agentId": args.get("agent")}
 
+    async def model(self, c: str, op: str, args: dict[str, Any], *, timeout_s: float) -> Any:
+        self.calls.append((op, {**args, "timeout_s": timeout_s}))
+        if not self.is_live:
+            return {"no-module": self.reason or "no module"}
+        self.running += 1
+        self.most = max(self.most, self.running)
+        try:
+            got = self.respond(op, args)
+            return await got if hasattr(got, "__await__") else got
+        finally:
+            self.running -= 1
+
     def push_roles(self, c: str) -> None:
         self.calls.append(("push_roles", {}))
 
@@ -90,8 +107,9 @@ def bridge(monkeypatch) -> FakeBridge:
 
     fake = FakeBridge()
     mod = types.ModuleType("app.module_bridge")
-    for name in ("live", "why_not", "request", "push_roles", "main_session", "moved_to"):
+    for name in ("live", "why_not", "request", "model", "push_roles", "main_session", "moved_to"):
         setattr(mod, name, getattr(fake, name))
+    mod.NO_MODULE = "no-module"  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "app.module_bridge", mod)
     # `from . import module_bridge` reads the package's attribute first, which the real bridge sets once any test has
     # imported it, so the fake replaces that too

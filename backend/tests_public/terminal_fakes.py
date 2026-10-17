@@ -49,8 +49,9 @@ def terminal_ws(workspaces_tmp) -> Path:
 class FileModule:
     """The hooks module in terminal mode: a heartbeat in module.json, and an answer there to each pending request of
     kind module for its session (`answer(op, args)`, by default a new agent for a spawn and {agentId} for a send or a
-    stop, {ok} for a note or a register). `ended` adds a run's end as the module writes it. Start with start(), end
-    with stop()."""
+    stop, {ok} for a note or a register); a model call's arguments are read from its file and its answer written to
+    its own file, as the module does. `ended` adds a run's end as the module writes it. Start with start(), end with
+    stop()."""
 
     def __init__(self, ws: Path, session: str = MAIN, answer: Callable[[str, dict], dict | None] | None = None,
                  delay_s: float = 0.0) -> None:
@@ -96,11 +97,18 @@ class FileModule:
                     or float(r.get("expires_at") or 0) <= now):
                 continue
             self.out["taken"].append(rid)
-            self.seen.append((rid, str(r.get("op")), dict(r.get("args") or {})))
+            op, args = str(r.get("op")), dict(r.get("args") or {})
+            call = str(args.get("call") or "") if op in ("complete", "fork") else ""
+            folder = sf.trusted_dir(self.ws) / "completions"
+            if call:  # a model call: its arguments and its answer are files of their own (module_bridge.COMPLETIONS)
+                args = json.loads((folder / f"{call}.json").read_text("utf-8"))
+            self.seen.append((rid, op, args))
             if self.delay_s:
                 time.sleep(self.delay_s)
-            got = self.answer(str(r.get("op")), dict(r.get("args") or {}))
-            if got is not None:
+            got = self.answer(op, args)
+            if got is not None and call:
+                (folder / f"{call}.answer.json").write_text(json.dumps(got), "utf-8")
+            elif got is not None:
                 self.out["answers"][rid] = got
         self.write()
 

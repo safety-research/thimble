@@ -1,6 +1,7 @@
 // thimble's hooks module: how a click in thimble's browser starts, messages and stops one of thimble's subagents in
-// the analyst's Claude Code session with no turn of main, and how a typed start runs on exactly the model and effort
-// its request names. The server's side is backend/app/module_bridge.py; the tests are thimble.test.ts beside this file.
+// the analyst's Claude Code session with no turn of main, how a typed start runs on exactly the model and effort its
+// request names, and how thimble's model calls run through the session's own API client. The server's side is
+// backend/app/module_bridge.py; the tests are thimble.test.ts beside this file.
 //
 // Scope. It acts only in a session thimble is on in, and checks that before its first fetch or registration:
 // `isInteractive` (an open long poll would hold every `claude -p` run open), THIMBLE_NO_MODULE unset, then the session's
@@ -53,6 +54,13 @@
 //   module started), so the module lists each running fork in <home>/up/<session>/forks (forksFile), one agent id a
 //   line, written again at each start and end, and the plugin's fork guard (bin/.thimble-watch --fork-guard, a
 //   PreToolUse hook) refuses every tool call of an agent the file lists;
+// - model calls (backend/app/model_call.py), which run at once, beside that queue, so many run together (BESIDE):
+//   complete, one tool-less completion through the session's own API client and sign-in ($.model.complete, with an
+//   AbortController that a later cancel aborts), and fork, one tool-less completion over main's own transcript
+//   ($.model.fork). Neither is a subagent: no row in main, no tools, no permission asks. Each answers with the reply's
+//   text and usage, or why there is none (modelAnswer); a request Claude Code refuses to send is an error. On local
+//   transport the request's arguments and the answer are files of their own in the trusted folder (completions/<id>.json
+//   and <id>.answer.json), so neither subagents.json nor module.json carries a prompt;
 // - agent.offer and tool.call: thimble's types stay out of every model's agent listing, whose line for each spelled its
 //   "All tools except …" list, until an agent of the type has started in the session. A type is offered while an Agent
 //   call that names it runs, so main's typed starts and the orientation's own starts of its critic and helpers run as
@@ -112,6 +120,10 @@ export const CALL_DONE = 'thimble finished a task'
 const FORK = 'fork'
 /** The running forks of main's session, one agent id a line, which the fork guard reads (module note). */
 export const forksFile = (home: string, session: string): string => `${home}/up/${session}/forks`
+/** The requests that run at once, beside the queue of the others: thimble's model calls and their cancel (module note). */
+export const BESIDE = new Set(['complete', 'fork', 'cancel'])
+// a model call's id on local transport, which names its files in the trusted folder (module_bridge.COMPLETIONS)
+const CALL_ID = /^[0-9a-f]{8,64}$/
 export const RETRY_MS = 2000 // between hellos while no server accepts one, and after a failed poll
 export const SESSION_WAIT_MS = 10000 // how long /clear's new session id is waited for
 export const SESSION_TICK_MS = 25
@@ -254,6 +266,7 @@ type State = {
   checks: Map<string, string> // agents of thimble's check role, this module's spawns and main's Agent calls: each one's check (checkName)
   calls: Map<string, string> // agents of the call role this module spawned: the reason their dropped hand-back gives (callDone)
   forks: Set<string> // the forks of main this module spawned that run now, which forksFile lists for the fork guard
+  completions: Map<string, AbortController> // the completions that run now, by their request's id (a cancel aborts one)
   queue: Promise<void> // the requests, one at a time
   helloing: { sid: string; said: Promise<Hello> } | null
   leaving: string // the session /clear or /resume is taking main away from, until the new one is known
@@ -268,7 +281,7 @@ function fresh(): State {
   return {
     active: false, interactive: false, user: '', home: '', homeReal: '', rules: null,
     cwd: '', session: '', version: '', gen: 0, server: null, roles: {}, registered: {}, efforts: {},
-    requests: {}, started: new Set(), checks: new Map(), calls: new Map(), forks: new Set(), queue: Promise.resolve(), helloing: null, leaving: '', plan: null, turn: '', turnEnded: [],
+    requests: {}, started: new Set(), checks: new Map(), calls: new Map(), forks: new Set(), completions: new Map(), queue: Promise.resolve(), helloing: null, leaving: '', plan: null, turn: '', turnEnded: [],
     dispatching: new Map(), used: new Set(),
     file: false, peer: false, rechecking: null, ws: '', writing: Promise.resolve(), stamps: {}, n: 0,
     out: { session: '', version: '', load: '', beat: 0, plan: null, plan_at: 0, problem: '', taken: [], answers: {}, ended: [] },
@@ -541,6 +554,13 @@ async function poll($: Engine, m: State, gen: number): Promise<void> {
 }
 
 function take($: Engine, m: State, req: Request): void {
+  if (BESIDE.has(req.op)) {
+    void (async () => {
+      const answer = await modelCall($, m, req.id, req.op, isObj(req.args) ? req.args : {})
+      if (req.op !== 'cancel') await call($, m, 'POST', '/api/module/result', { cwd: m.cwd, session: m.session, id: req.id, answer })
+    })().catch(() => undefined)
+    return
+  }
   const received = Date.now()
   m.queue = m.queue
     .then(async () => {
@@ -637,6 +657,62 @@ async function staleForks($: Engine, m: State): Promise<void> {
   if (m.forks.size > 0 || !m.home || !m.session) return
   const st = await $.fs.stat(forksFile(m.home, m.session)).catch(() => undefined)
   if (st && st.size > 0) await writeForks($, m)
+}
+
+/** A model call's text blocks as $.model.complete takes them, from the server's (a string is one block); undefined for
+ *  none. */
+function blocks(v: unknown): { text: string; cache?: true }[] | undefined {
+  const all = typeof v === 'string' ? [{ text: v }] : Array.isArray(v) ? v.filter(isObj) : []
+  const out = all.filter(b => text(b.text) !== '').map(b => (b.cache === true ? { text: text(b.text), cache: true as const } : { text: text(b.text) }))
+  return out.length ? out : undefined
+}
+
+/** What a model call resolved to, as the server reads it (module_bridge._model_answer): the reply's text and usage, or
+ *  why there is none, with the HTTP status and the error's kind for an API error. */
+export function modelAnswer(r: Json): Answer {
+  if (r.isAnswered === true) return { text: text(r.text), usage: r.usage }
+  const reason = text(r.reason) || 'empty-reply'
+  const api = reason === 'api-error' ? { status: typeof r.status === 'number' ? r.status : null, kind: text(r.error) || 'unknown' } : {}
+  return { failed: reason, ...api, ...(isObj(r.usage) ? { usage: r.usage } : {}) }
+}
+
+/** A model call's arguments on local transport: its request file in the trusted folder (module note). */
+async function callArgs($: Engine, m: State, id: string): Promise<Json> {
+  if (!CALL_ID.test(id)) throw new Error('the model call names no request file of its own')
+  const got = await readJson($, trusted(m, `completions/${id}.json`))
+  if (!got) throw new Error('the model call’s request file could not be read')
+  return got
+}
+
+/** One model call (module note): `complete` through $.model.complete with an AbortController that a `cancel` naming the
+ *  request aborts, `fork` through $.model.fork (which nothing aborts), `cancel` itself. Never throws: a request Claude
+ *  Code refuses to send (a model the organization does not allow, a bad cap) is an `error`. */
+async function modelCall($: Engine, m: State, id: string, op: string, a: Json): Promise<Answer> {
+  if (op === 'cancel') {
+    m.completions.get(text(a.request))?.abort()
+    return { ok: true }
+  }
+  const stop = new AbortController()
+  if (op === 'complete') m.completions.set(id, stop) // before any wait, so a cancel taken next finds it
+  try {
+    const args = text(a.call) ? await callArgs($, m, text(a.call)) : a
+    if (stop.signal.aborted) return { failed: 'aborted' }
+    if (op === 'fork') return modelAnswer((await $.model.fork({ prompt: text(args.prompt) })) as unknown as Json)
+    const prompt = blocks(args.prompt)
+    if (!prompt || !text(args.model)) return { error: 'a model call with no model or no prompt' }
+    const system = blocks(args.system)
+    const request = {
+      model: text(args.model), prompt, ...(system ? { system } : {}),
+      ...(typeof args.maxTokens === 'number' ? { maxTokens: args.maxTokens } : {}),
+      ...(text(args.effort) ? { effort: text(args.effort) } : {}),
+      ...(typeof args.timeoutMs === 'number' ? { timeoutMs: args.timeoutMs } : {}),
+    }
+    return modelAnswer((await $.model.complete(request as Parameters<Engine['model']['complete']>[0], { signal: stop.signal })) as unknown as Json)
+  } catch (err) {
+    return { error: String(err) }
+  } finally {
+    if (m.completions.get(id) === stop) m.completions.delete(id)
+  }
 }
 
 async function send($: Engine, m: State, agent: string, message: string, role: string, values: Values | undefined): Promise<Answer> {
@@ -1004,6 +1080,15 @@ async function takeFile($: Engine, m: State): Promise<void> {
   await writeOut($, m)
   for (const [id, r] of mine) {
     const req: Request = { id, op: text(r.op), args: isObj(r.args) ? r.args : {} }
+    if (BESIDE.has(req.op)) {
+      // a model call's answer is a file of its own beside its request's (module note)
+      void (async () => {
+        const answer = await modelCall($, m, id, req.op, req.args)
+        const call = text(req.args.call)
+        if (req.op !== 'cancel' && CALL_ID.test(call)) await $.fs.write(trusted(m, `completions/${call}.answer.json`), JSON.stringify(answer))
+      })().catch(() => undefined)
+      continue
+    }
     const due = Number(r.expires_at) * 1000
     m.queue = m.queue
       .then(async () => {

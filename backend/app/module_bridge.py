@@ -1,5 +1,6 @@
 """The server's side of thimble's hooks module (plugin/hooks/thimble.ts): how a click in the browser reaches Claude Code's
-`$.agent.spawn`, `SendMessage` and `TaskStop` in main's session with no turn of main.
+`$.agent.spawn`, `SendMessage` and `TaskStop` in main's session with no turn of main, and how thimble's model calls
+reach `$.model.complete` and `$.model.fork` there (model, below).
 
 The module runs inside main's `claude` process, once thimble is on in the session (the session marker activation
 writes, which the terminal UI tells it of at once: bridgeActivated), and starts no process. Until a press of the browser
@@ -49,6 +50,22 @@ Ops and their arguments:
                                           background is stopped too (TaskStop)
     note   text                           `$.session.append` to main
 `request` is a coroutine for the server's loop; request_blocking is the same call from a worker thread.
+
+Model calls (`model(c, op, args)`, model_call.py's only way to the module). `complete` is one tool-less completion
+through main's own API client and sign-in ($.model.complete: {model, prompt, system, maxTokens, effort, timeoutMs},
+prompt and system as text blocks); `fork` is one tool-less completion over main's own transcript ($.model.fork:
+{prompt}). Neither is a subagent: Claude Code shows no row for one and asks nothing. The module runs each at once,
+beside the queue of the other requests, so many run together, and answers when the model did:
+    text, usage                 the reply's text and what it cost
+    failed, usage               no text: `api-error` (with the HTTP `status`, null for no response, and the error's
+                                `kind`), `empty-reply`, `aborted` (cancelled, or past its timeoutMs), `nothing-to-fork`
+    error                       Claude Code refused to send it (a model the organization does not allow, a bad cap)
+The module must take the request within REQUEST_TIMEOUT_S; once taken, `model` waits for the answer as long as the
+module stays live, up to the call's own time. A caller cancelled (asyncio) sends `cancel {request}`, which aborts the
+completion (its AbortSignal); a fork cannot be aborted, and its late answer goes nowhere. On local transport the
+request's arguments and the answer are files in the trusted folder (COMPLETIONS: <id>.json and <id>.answer.json), so
+neither subagents.json nor module.json carries a prompt; the entry in subagents.json names the file (`call`) and goes
+once the call ended.
 
 The workspace's subagents.json (in its trusted folder) holds, under `module`, the last hello `{session, version, at}`,
 or the reason the module stays idle (`idle`), what it could not register (`problem`), and the session moves rekey
@@ -129,6 +146,12 @@ ROLES_CHECK_S = 2.0  # how often a held long poll looks whether the files the ro
 EXPIRED_KEPT = 64  # expired requests remembered for their late answers
 REKEYS_KEPT = 32
 OPS = ("register", "spawn", "send", "stop", "abort", "note")
+MODEL_OPS = ("complete", "fork")  # model calls (module note): run beside the queue, answered when the model did
+CANCEL = "cancel"  # aborts a model call the module runs: {request: its id}
+COMPLETIONS = "completions"  # in the trusted folder: a model call's request and answer on local transport
+MODEL_GRACE_S = 10.0  # past a model call's own time, how long its answer is waited for before it is cancelled
+MODEL_LIVE_S = 2.0  # how often a model call's wait looks whether the module is still live
+NOT_LIVE = "main's Claude Code session stopped answering while thimble's model call ran"
 ANSWER_KEYS = ("agentId", "deny", "limit", "error", "ok")
 NO_MODULE = "no-module"
 REGISTRY = "trusted/subagents.json"  # lane B's record of thimble's agents, in the workspace (module note; subagent_files)
@@ -589,7 +612,10 @@ def _note(role: str, what: str, route: str = "click") -> str:
 
 
 def _answer(op: str, raw: Any) -> Answer:
-    """The module's answer as module note's Answer: one main key, and only the extras named there."""
+    """The module's answer as module note's Answer: one main key, and only the extras named there; a model call's in its
+    own shape (_model_answer)."""
+    if op in MODEL_OPS:
+        return _model_answer(raw)
     if not isinstance(raw, dict):
         return {"error": f"the module's answer to {op} was not an object"}
     key = next((k for k in ANSWER_KEYS if raw.get(k) not in (None, "", False)), None)
@@ -688,6 +714,180 @@ def _expire(c: str, req: _Request) -> None:
         b.expired.pop(next(iter(b.expired)))
     if req.future is not None and not req.future.done():
         req.future.set_result({NO_MODULE: NOT_ANSWERING, "expired": True})
+
+
+# ---------------------------------------------------------------------------------------------------- model calls
+
+COMPLETIONS_KEEP_S = 3600.0  # a model call's files left behind (a cancel, a crash) go after this long
+
+
+def _model_answer(raw: Any) -> Answer:
+    """A model call's answer (module note): {text, usage}, {failed, status, kind, usage} or {error}."""
+    if not isinstance(raw, dict):
+        return {"error": "the module's answer to a model call was not an object"}
+    usage = raw.get("usage") if isinstance(raw.get("usage"), dict) else None
+    extra: dict[str, Any] = {"usage": usage} if usage is not None else {}
+    if isinstance(raw.get("text"), str):
+        return {"text": raw["text"], **extra}
+    if isinstance(raw.get("failed"), str) and raw["failed"]:
+        out: dict[str, Any] = {"failed": raw["failed"], **extra}
+        if raw["failed"] == "api-error":
+            st = raw.get("status")
+            out["status"] = st if isinstance(st, int) and not isinstance(st, bool) else None
+            out["kind"] = str(raw.get("kind") or "unknown")
+        return out
+    if isinstance(raw.get("error"), str) and raw["error"]:
+        return {"error": raw["error"]}
+    return {"error": "the module gave no answer to a model call"}
+
+
+async def model(c: str, op: str, args: dict[str, Any], *, timeout_s: float) -> Answer:
+    """One model call `op` (MODEL_OPS) in main's session of workspace `c` (module note): the module's answer
+    (_model_answer); {no-module: why} when no module is live, or none took the request in time (`expired`); {error:
+    NOT_LIVE} when the module stopped being live while it ran; {failed: aborted, timeout: true} when no answer came
+    within `timeout_s` and MODEL_GRACE_S. Never raises for the module's sake; a cancel of the caller cancels the call in
+    the module (`cancel`) and is raised."""
+    if op not in MODEL_OPS:
+        raise ValueError(f"unknown model op {op!r}")
+    if transport(c) == FILE:
+        return await _file_model(c, op, args, timeout_s)
+    _remember_loop()
+    if not live(c):
+        return {NO_MODULE: why_not(c) or NOT_LOADED}
+    b = _bridge(c)
+    req = _enqueue(c, op, dict(args), b.session, REQUEST_TIMEOUT_S)
+    end = time.monotonic() + timeout_s + MODEL_GRACE_S
+    try:
+        while True:
+            left = end - time.monotonic()
+            if left <= 0:
+                _cancel_http(c, req)
+                return {"failed": "aborted", "timeout": True}
+            try:
+                # shielded: the wait's own timeout leaves the request as it is
+                return await asyncio.wait_for(asyncio.shield(req.future), min(left, MODEL_LIVE_S))  # type: ignore[arg-type]
+            except asyncio.TimeoutError:
+                pass
+            if not req.taken and time.monotonic() >= req.deadline:
+                _cancel_http(c, req)
+                return {NO_MODULE: NOT_ANSWERING, "expired": True} if live(c) else {NO_MODULE: why_not(c) or NOT_LOADED}
+            if req.taken and not live(c):
+                _cancel_http(c, req)
+                return {"error": NOT_LIVE}
+    except asyncio.CancelledError:
+        _cancel_http(c, req)
+        raise
+
+
+def _cancel_http(c: str, req: _Request) -> None:
+    """A model call nobody waits for any more: out of the queue when the module has not taken it, else aborted in the
+    module (`cancel`, which a fork ignores); a late answer goes nowhere."""
+    b = _bridge(c)
+    b.by_id.pop(req.id, None)
+    if not req.taken:
+        with contextlib.suppress(ValueError):
+            b.queue.remove(req)
+    elif live(c):
+        _enqueue(c, CANCEL, {"request": req.id}, b.session, None)
+    if req.future is not None and not req.future.done():
+        req.future.set_result({"failed": "aborted"})
+
+
+def _completions(c: str) -> Path:
+    return sf.trusted_dir(config.workspace_dir(c)) / COMPLETIONS
+
+
+def _write_call(folder: Path, path: Path, args: dict[str, Any]) -> None:
+    """A model call's request file on local transport (module note), and the files of calls older than
+    COMPLETIONS_KEEP_S gone."""
+    folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+    cut = time.time() - COMPLETIONS_KEEP_S
+    for old in folder.iterdir():
+        with contextlib.suppress(OSError):
+            if old.stat().st_mtime < cut:
+                old.unlink()
+    sf._replace(path, args)
+
+
+def _read_answer(path: Path) -> dict[str, Any] | None:
+    """A model call's answer file, None while it is not there or not whole (the module writes it in place)."""
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return None
+    try:
+        got = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return None
+    return got if isinstance(got, dict) else {}
+
+
+def _end_call(c: str, rid: str, *paths: Path) -> None:
+    """A model call on local transport ended: its entry leaves subagents.json, and its files go."""
+    ws = config.workspace_dir(c)
+    with _file_lock, sf.update(ws) as state:
+        sf.requests(state).pop(rid, None)
+    for p in paths:
+        with contextlib.suppress(OSError):
+            p.unlink()
+
+
+def _file_cancel(c: str, rid: str, *paths: Path) -> None:
+    """model() on local transport for a call nobody waits for any more: `cancel` for the module, and the call ended."""
+    ws = config.workspace_dir(c)
+    with contextlib.suppress(Exception), _file_lock, sf.update(ws) as state:
+        sf.add_module_request(state, CANCEL, {"request": rid}, sf.main_session(ws, state), REQUEST_TIMEOUT_S)
+    _end_call(c, rid, *paths)
+
+
+async def _file_model(c: str, op: str, args: dict[str, Any], timeout_s: float) -> Answer:
+    """model() on local transport (module note): the request's file, its entry in subagents.json naming the file, then
+    the answer's file, read every FILE_POLL_S; the entry is taken (module.json `taken`) within REQUEST_TIMEOUT_S or the
+    call expires."""
+    if not _file_live(c):
+        return {NO_MODULE: why_not(c) or NOT_LOADED}
+    ws = config.workspace_dir(c)
+    folder = _completions(c)
+    cid = secrets.token_hex(8)
+    ask, answer = folder / f"{cid}.json", folder / f"{cid}.answer.json"
+    await asyncio.to_thread(_write_call, folder, ask, dict(args))
+    with _file_lock, sf.update(ws) as state:
+        rid = sf.add_module_request(state, op, {"call": cid}, sf.main_session(ws, state), REQUEST_TIMEOUT_S)
+    take_by = time.monotonic() + REQUEST_TIMEOUT_S
+    end = time.monotonic() + timeout_s + MODEL_GRACE_S
+    out_path, seen, taken, looked = sf.module_path(ws), None, False, time.monotonic()
+    try:
+        while True:
+            got = _read_answer(answer)
+            if got is not None:
+                _end_call(c, rid, ask, answer)
+                return _model_answer(got)
+            now = time.monotonic()
+            if not taken:
+                try:
+                    st = out_path.stat()
+                    stamp = (st.st_mtime_ns, st.st_size)
+                except OSError:
+                    stamp = None
+                if stamp is not None and stamp != seen:
+                    seen = stamp
+                    taken = rid in (sf.read_module(ws).get("taken") or [])
+                if not taken and now >= take_by:
+                    _end_call(c, rid, ask, answer)
+                    return ({NO_MODULE: NOT_ANSWERING, "expired": True} if _file_live(c)
+                            else {NO_MODULE: why_not(c) or NOT_LOADED})
+            elif now - looked >= MODEL_LIVE_S:
+                looked = now
+                if not _file_live(c):
+                    _end_call(c, rid, ask, answer)
+                    return {"error": NOT_LIVE}
+            if now >= end:
+                _file_cancel(c, rid, ask, answer)
+                return {"failed": "aborted", "timeout": True}
+            await asyncio.sleep(FILE_POLL_S)
+    except asyncio.CancelledError:
+        _file_cancel(c, rid, ask, answer)
+        raise
 
 
 def push_roles(c: str) -> None:
