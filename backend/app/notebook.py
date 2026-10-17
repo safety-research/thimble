@@ -3832,9 +3832,13 @@ class NotebookMeta(BaseModel):
 @router.get("/ws/{c}/canvas")
 async def canvas_route(c: str) -> dict:
     """The canvas as the browser shows it, the orientation's cards among them as it adds them. A Scratch group is marked
-    first (migrate_scratch), so canvas() leaves it out."""
+    first (migrate_scratch), so canvas() leaves it out. A thread's group named by the first words of what it was asked
+    about takes the thread's first question (agents.retitle_threads)."""
+    from . import agents  # noqa: PLC0415 — agents imports this module
+
     migrate_scratch(c)
     migrate_writer_groups(c)
+    agents.retitle_threads(c)
     return canvas(_ws(c))
 
 

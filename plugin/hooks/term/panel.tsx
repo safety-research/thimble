@@ -2444,7 +2444,14 @@ function slugOf(text: string): string {
   return (text.slice(0, 80).match(/[A-Za-z0-9]+/g) ?? []).slice(0, 4).join('-').toLowerCase()
 }
 
-type AboutRow = { anchor: string; anchorText: string; title?: string; element?: string }
+type AboutRow = { anchor: string; anchorText: string; title?: string; element?: string; question?: string }
+
+/** Whether a thread's title is its first question, as thimble names a thread asked with no title of its own
+ *  (agents.question_title: one line, cut at a word with `…`), rather than the words of what it was asked about. */
+function askedTitle(title: string, question: string | undefined): boolean {
+  const q = (question ?? '').replace(/\[\[([^|\]]*)\|[^\]]*\]\]/g, '$1').replace(/\s+/g, ' ').trim()
+  return Boolean(q) && (title === q || (title.endsWith('…') && q.startsWith(title.slice(0, -1))))
+}
 
 /** A citation's words as a thread's subject: in quotation marks, as someone's words are; a value alone (`4579`) as it
  *  is written. */
@@ -2468,7 +2475,7 @@ export async function anchorName(cx: Ctx, row: AboutRow | undefined): Promise<st
   // a citation's words in quotation marks; a chip by its place in words (`agent-chat.jsonl line 2`), as its thread was
   // titled (gestures.tsx targetLabel)
   const chip = { raw: `[[${a}]]`, ref: a, display: null }
-  if (t && t !== slug && !t.startsWith(`${slug}-`)) return t === chipName(chip) || t === chipLabel(chip) ? t : subjectWords(t)
+  if (t && t !== slug && !t.startsWith(`${slug}-`) && !askedTitle(t, row.question)) return t === chipName(chip) || t === chipLabel(chip) ? t : subjectWords(t)
   return /^(?:card|cell):/.test(a) ? placeName(cx, a) : placeWords(a)
 }
 

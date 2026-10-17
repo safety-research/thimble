@@ -61,6 +61,20 @@ test("a thread that answers: what it is about, dim, before its first question; `
   await pane.unmount()
 })
 
+test('home names what a side thread is about by its place when thimble named the thread by its question', async ($, on) => {
+  // bug hunt D7: a thread asked with no title of its own is named by its question (agents.question_title), which is no
+  // citation's words to show as its subject
+  const w = world(on)
+  const question = 'what did bot-07 write on the welcome page?'
+  w.states.threads = [...w.states.threads, { id: 't3', kind: 'thread', role: 'thread', title: question, question, anchor: 'pages.jsonl#L3', anchor_text: 'Bot-07 wrote it in June.', parent: 'main', created_at: '2026-10-06T10:05:00+00:00', running: false, answers: 1, seen: 1 }] as never
+  await start($, w)
+  const pane = await home($, w)
+  const rows = (((await pane.drawn({ in: 'm:home' })) as { children?: unknown[] }).children ?? []).map(r => shown(r))
+  const row = rows.find(r => r.includes('what did bot-07 write'))
+  expect(row).toContain('about pages.jsonl line 3')
+  await pane.unmount()
+})
+
 test("home lists no files and `/thimble files` opens Coverage: the terminal has no file browser", async ($, on) => {
   // Matt (10-16): a file viewer in the terminal reinvents the wheel; files show only to verify a place, and the Files
   // section folds into Coverage
