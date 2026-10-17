@@ -57,7 +57,7 @@ export function ViewPane({ ws, view, path, picked, targetRef, quote, onQuoteMiss
   const [failure, setFailure] = useState<string | null>(null)
   const filter = useFilesFilter(ws)
   const filterLabel = filter ? labels.byId.get(filter.concept) : undefined
-  const pin = usePinnedView(ws, view.slug, view.version)
+  const pin = usePinnedView(ws, view.slug, view.version, view.browser_page === false)
   const { byId, toggle, setFocus, setColour } = labels
   // what a new label made in the editor applies to: the files the view claims
   const claims = view.claims

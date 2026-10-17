@@ -280,6 +280,69 @@ async def test_r3_holds_across_passes_of_separate_processes(ws, project, module)
     assert (r["state"], r["refused_kind"], r["reason"]) == ("refused", "no-call", "I won't start it now.\nAsk again later.")
 
 
+async def test_a_helper_of_the_orientation_has_one_chat_while_two_processes_take_turns_at_the_passes(ws, project, module):
+    """Bug hunt round 9, J4: the holder of the lock changes while a process that held it before lives on (the follower),
+    and each process kept its own memory of the subagents it follows. A helper's file that one process found was new
+    to the other, which gave it a second chat: the thread switcher listed each helper twice, and the copy no process
+    followed to its end stayed running for good. A process whose memory is stale attaches main again from what the
+    other's pass kept, so the helper has one chat, with each of its steps once, which ends with its result."""
+    chat = await _typed_orientation(project)
+    orient = project / SID / "subagents" / f"agent-{AGENT}.jsonl"
+    session.catch_up(CORPUS)
+    one = session._live[CORPUS]
+    _process_restart()  # another process takes the lock and attaches main from the files
+    session.catch_up(CORPUS)
+    other = session._live[CORPUS]
+    with sf.update(ws) as state:
+        sf.registry(state)["h1"] = {"type": "thimble:orient-helper", "role": "orient-helper", "parent": AGENT,
+                                    "root": AGENT, "status": "running", "descendant": True}
+    _write(orient, _assistant(_use("toolu_h", "Agent", {"description": "Read the moderators' pages",
+                                                        "subagent_type": "thimble:orient-helper", "prompt": "Read.",
+                                                        "run_in_background": True})),
+           _result("toolu_h", "Async agent launched successfully.\nagentId: h1"))
+    helper = project / SID / "subagents" / "agent-h1.jsonl"
+    _write(helper, {"type": "user", "message": {"content": "Read the moderators' pages."}},
+           _assistant(_use("toolu_h1", "Read", {"file_path": "/c/board.jsonl"})), _result("toolu_h1", "1\tx"))
+    helper.with_name("agent-h1.meta.json").write_text(json.dumps({"agentType": "thimble:orient-helper",
+                                                                  "description": "Read the moderators' pages",
+                                                                  "parentAgentId": AGENT, "toolUseId": "toolu_h"}))
+    session._live[CORPUS] = one  # the first process holds the lock again and finds the helper
+    session.catch_up(CORPUS)
+    _write(helper, _assistant(_use("toolu_h2", "Bash", {"command": "wc -l board.jsonl"})), _result("toolu_h2", "7"))
+    session._live[CORPUS] = other  # then the other, which found nothing before
+    session.catch_up(CORPUS)
+    steps = [m for m in agents.list_chats(CORPUS) if m.get("role") == agents.STEP_ROLE and m.get("agent_id") == "h1"]
+    assert len(steps) == 1 and steps[0]["parent"] == chat, [m["id"] for m in steps]
+    uses = [e["id"] for e in _log(steps[0]["id"]) if e.get("type") == "tool_use"]
+    assert uses == ["toolu_h1", "toolu_h2"], "each step once"
+    _write(helper, _assistant({"type": "text", "text": "The moderators reverted 28 saves."}))
+    # a background helper's end: its task notification in the orientation's own transcript, which a pass of the first
+    # process reads
+    _write(orient, {"type": "user", "origin": {"kind": "task-notification"}, "message": {"content": (
+        "<task-notification>\n<task-id>h1</task-id>\n<status>completed</status>\n<summary>done</summary>\n"
+        "<result>The moderators reverted 28 saves.</result>\n</task-notification>")}})
+    session._live[CORPUS] = one
+    session.catch_up(CORPUS)
+    assert [m.get("status") for m in agents.list_chats(CORPUS)
+            if m.get("role") == agents.STEP_ROLE and m.get("agent_id") == "h1"] == ["done"]
+
+
+def test_a_server_started_for_another_workspace_leaves_a_terminal_session_to_its_passes(ws, project, monkeypatch):
+    """Live check of J4: the server another workspace's press started swept this terminal session as stale, which no shim
+    of its own follows on local transport, and the next pass attached it as new and read its subagents' files as new.
+    The sweep leaves a workspace on local transport alone."""
+    main = _main(project)
+    _write(main, _human("How many runs are there?"), _assistant({"type": "text", "text": "Sixteen."}), END)
+    session.catch_up(CORPUS)
+    held = session._live.pop(CORPUS)  # the server's process holds no Live of this workspace
+    monkeypatch.setattr(session, "_shutting_down", lambda: False)
+    assert session.sweep() == []
+    assert not session.sessions(CORPUS)[SID].get("ended")
+    assert (agents.meta_or_none(CORPUS, agents.MAIN_ID) or {})["attached"]["session"] == SID
+    session._live[CORPUS] = held
+    assert session.catch_up(CORPUS) is held, "the pass reads on with what it holds"
+
+
 async def test_a_finished_orientation_s_hand_back_ends_it_with_its_coverage_line_and_no_report_s_writer(
         ws, project, module):
     """The plan's case: the orientation hands back; main's Stop hook's backend call ends its run, so its chat ends, the

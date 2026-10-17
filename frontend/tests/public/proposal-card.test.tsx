@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 // The view proposal above the chat's composer (src/chat/ProposalCard.tsx): the oldest open proposal (a `suggested` row
-// with `offered`), with its name and what it shows in view, never behind a click, and not the task it names; Accept and
-// Reject are clicks of their own routes, each tracked; Don't ask again turns view proposals off and says where to turn them on
-// again; nothing shows while view proposals are off; a click in the first ARM_MS does nothing; an Accept that cannot
+// with `offered`), with its name and what it shows in view, never behind a click, and not the task it names, in the
+// terminal row's words; Build it and Don't build it are clicks of their own routes, each tracked; Stop suggesting pages
+// turns view proposals off and says where to turn them on again; nothing shows while view proposals are off; a click in the first ARM_MS does nothing; an Accept that cannot
 // start says why under the buttons.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
@@ -83,6 +83,19 @@ describe('the card', () => {
     await settle()
     expect(sent.map((s) => `${s.method} ${s.url}`)).toEqual(['POST /api/ws/pc-reject/views/proposals/agent-timeline/reject'])
     expect(track).toHaveBeenCalledWith('view-dismiss', { target: 'view:agent-timeline', detail: { offer: true } })
+  })
+
+  test('the card says what the terminal row says: what thimble can build, Build it, Don\'t build it, Stop suggesting pages', async () => {
+    // bug hunt round 9, friction 7: the browser said "View proposal · Accept · Reject · Don't ask again" for the row the
+    // terminal shows as "thimble can build a page for these records: … · build it · don't build it · stop suggesting pages"
+    const el = await card('pc-words')
+    const text = (sel: string) => el.querySelector(sel)?.textContent?.trim()
+    expect(text('.chat-offer-head')).toBe('thimble can build a page for these records:')
+    expect(text('.chat-offer-name')).toBe('agent timeline')
+    expect([text('.chat-offer-accept'), text('.chat-offer-reject'), text('.chat-offer-off')]).toEqual(['Build it', "Don't build it", 'Stop suggesting pages'])
+    await click(el, '.chat-offer-off')
+    await settle()
+    expect(toasts).toEqual(['thimble will suggest no more pages. Settings turns suggestions back on.'])
   })
 
   test('a click in the first ARM_MS after the proposal shows does nothing', async () => {

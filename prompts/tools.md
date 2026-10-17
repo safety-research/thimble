@@ -1914,6 +1914,22 @@ thimble: the analyst pressed Stop in thimble and ended your turn, and any comman
 
 thimble: the analyst pressed Stop in thimble on the side thread {thread}, which stopped its fork `{agent_id}`. Leave it stopped: do not message, continue or restart it unless the analyst asks.
 
+## thread-stopped-no-card
+
+Since the analyst's last message in that thread, the fork made no card.
+
+## thread-stopped-made
+
+Before the Stop, the fork made these cards: {cards}.
+
+## thread-stopped-unfinished
+
+It had no takeaway yet for {cards}, which the canvas shows marked unfinished.
+
+## thread-stopped-changed
+
+It changed {cards}.
+
 ## message_orientation-empty
 
 The message is empty. Pass what the analyst asks the orientation as `message`.

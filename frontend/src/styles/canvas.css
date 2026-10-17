@@ -520,6 +520,17 @@ body[data-cmd] .board-stage * {
   line-height: 1.55;
   text-wrap: pretty;
 }
+/* in the takeaway's place, a card whose side thread was stopped before it wrote one: quiet, its bar dashed */
+.bcell-take-unfinished::before {
+  background: none;
+  border-left: 2px dashed rgba(var(--ink-rgb), 0.3);
+  width: 0;
+}
+.bcell-take-unfinished .bcell-take-text {
+  margin: 0;
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+}
 /* a takeaway written before the card's last run changed its outputs, until it is written again */
 .bcell-take-text.is-stale,
 .bfocus-take .is-stale {
@@ -1515,6 +1526,36 @@ audio.bcell-media {
 }
 .bcell-values .num {
   text-align: right;
+}
+/* under the counts: what a click on a value does, and while the card's filter is on, what the scope shows, with Show all */
+.bcell-label-hint {
+  margin: -4px 0 0;
+  min-width: 0;
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+  overflow-wrap: anywhere;
+}
+.bcell-label-hint.is-on {
+  color: var(--text-secondary);
+}
+.bcell-label-hint-act {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  text-decoration: underline;
+  text-decoration-color: rgba(var(--ink-rgb), 0.3);
+  text-underline-offset: 2px;
+  cursor: pointer;
+  transition: var(--transition-color);
+}
+.bcell-label-hint-act:hover:not(:disabled) {
+  color: var(--text-primary);
+  text-decoration-color: currentColor;
+}
+.bcell-label-hint-act:disabled {
+  cursor: default;
 }
 /* where a stopped run stopped, under the counts, with Run again on the board */
 .bcell-label-stopped {

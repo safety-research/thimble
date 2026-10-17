@@ -1092,15 +1092,44 @@ async def stop_main(c: str) -> Answer:
     return ans
 
 
-async def stop_fork(c: str, agent_id: str, thread: str) -> Answer:
+async def stop_fork(c: str, agent_id: str, thread: str, thread_id: str = "") -> Answer:
     """The analyst's Stop of a side thread: its fork `agent_id` stopped as an agent is (stop), and main told so
     (THREAD_STOPPED_HINT, with `thread`, the thread's name as the thread list shows it), so that it does not take the
-    thread's work up again (live check L4-12h). A fork that had ended already counts as stopped, and main is told
-    nothing."""
+    thread's work up again (live check L4-12h), with the cards the fork made since the analyst's last message in the
+    thread `thread_id`, a card with no takeaway marked unfinished on the canvas (threads.stopped_cards), so that what
+    main says of the Stop matches the canvas (bug hunt round 9, J5). A fork that had ended already counts as stopped,
+    and main is told nothing."""
     ans = await stop(c, agent_id)
     if not ans.refused and not ans.get("done"):
-        await note_main(c, tools.hint(THREAD_STOPPED_HINT, thread=thread, agent_id=agent_id))
+        cards = ""
+        if thread_id:
+            from . import threads  # noqa: PLC0415
+
+            try:
+                cards = stopped_cards_line(*threads.stopped_cards(c, thread_id))
+            except Exception:  # noqa: BLE001 — the Stop stands, and main hears of it without the cards
+                log.exception("%s: the cards of the stopped thread %s were not read", c, thread_id)
+        await note_main(c, " ".join(x for x in (tools.hint(THREAD_STOPPED_HINT, thread=thread, agent_id=agent_id),
+                                                cards) if x))
     return ans
+
+
+def stopped_cards_line(finished: list[str], unfinished: list[str], changed: list[str]) -> str:
+    """What main hears, after THREAD_STOPPED_HINT, of the cards a stopped fork made (prompts/tools.md
+    thread-stopped-made, -unfinished, -changed, -no-card): each named `card:<id>`, a card with no takeaway as
+    unfinished, and the cards of others it changed."""
+    def names(ids: list[str]) -> str:
+        refs = [f"card:{x}" for x in ids]
+        return refs[0] if len(refs) == 1 else ", ".join(refs[:-1]) + " and " + refs[-1]
+
+    parts = []
+    if finished or unfinished:
+        parts.append(tools.hint("thread-stopped-made", cards=names([*finished, *unfinished])))
+    if unfinished:
+        parts.append(tools.hint("thread-stopped-unfinished", cards=names(unfinished)))
+    if changed:
+        parts.append(tools.hint("thread-stopped-changed", cards=names(changed)))
+    return " ".join(x for x in parts if x) or tools.hint("thread-stopped-no-card")
 
 
 async def note_main(c: str, text: str) -> Answer:

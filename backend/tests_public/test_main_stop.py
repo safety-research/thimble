@@ -108,6 +108,45 @@ async def test_main_s_stop_and_a_thread_s_take_the_analyst_s_cookie(bridge, plug
     assert bridge.calls == [], "the module is never asked"
 
 
+async def test_a_thread_s_stop_tells_main_the_cards_its_fork_made_and_its_half_made_card_says_it_is_unfinished(
+        bridge, analyst):
+    """Bug hunt round 9, J5: after Stop on a side thread, main said "it was stopped before it made any card or chart",
+    while the thread's half-made chart, with no takeaway, sat on the canvas with no word of it. The note main gets names
+    the cards the fork made since the analyst's last message in the thread; one with no takeaway stays, marked
+    unfinished, until a takeaway is written."""
+    from app import notebook, tools
+
+    tid = agents.new_thread(CORPUS, "card:abc123", "What did the admin revert?", "what-did-the-admin")["id"]
+    agents.update_agent(CORPUS, tid, fork={"agent_id": "afork1"})
+    nb = notebook.active_notebook_id(CORPUS)
+
+    def card(title: str, takeaway: str = "") -> str:
+        cell = notebook.new_cell("note", f"chat:{tid}", title, notebook.MAIN, payload={"text": "x"}, workspace=CORPUS)
+        cell["takeaway"] = takeaway
+        return str(notebook.insert_cell(CORPUS, nb, cell)["id"])
+
+    earlier = card("Who reverted first?", "The admin, on Jun 18.")  # an answer to the thread's first question
+    import time
+
+    time.sleep(1.1)
+    agents.Recorder(CORPUS, tid).record("user", text="go through every revert, with a chart", by="browser")
+    time.sleep(1.1)
+    done = card("How many reverts per page?", "Most pages had one.")
+    half = card("What kinds of saves did the reverts undo?")
+    bridge.answers = [{"ok": True}, {"ok": True}]
+    assert await agents.interrupt_route(CORPUS, tid, analyst) == {"stopped": True}
+    assert [op for op, _ in bridge.calls] == ["stop", "note"]
+    note = str(bridge.calls[-1][1].get("text") or "")
+    stopped = tools.hint("thread-stopped-note", thread=agents.thread_name(agents.read_meta(CORPUS, tid)), agent_id="afork1")
+    assert note == " ".join([stopped, tools.hint("thread-stopped-made", cards=f"card:{done} and card:{half}"),
+                             tools.hint("thread-stopped-unfinished", cards=f"card:{half}")])
+    assert f"card:{earlier}" not in note, "a card of the thread's earlier question is no part of the stopped work"
+    cells = {c["id"]: c for c in notebook.load_notebook(CORPUS, nb)["cells"]}
+    assert cells[half].get("unfinished") == "stopped" and not cells[done].get("unfinished")
+    notebook.append_takeaway(CORPUS, half, "Mostly link lists.")
+    assert not {c["id"]: c for c in notebook.load_notebook(CORPUS, nb)["cells"]}[half].get("unfinished")
+
+
 class _Req:
     async def is_disconnected(self) -> bool:
         return False

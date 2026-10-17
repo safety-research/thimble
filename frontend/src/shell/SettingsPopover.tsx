@@ -12,7 +12,7 @@
 // dimmed with the reason in a tooltip. Every row names its model exactly, never `default`. Under the table, thimble's
 // feature switches (FEATURE_ROWS: View proposals, Labels, Checks, Citation marks, Coverage, Card check), the same
 // switches as /config → thimble in the terminal, kept in thimble's config (`features`, backend features.py; View
-// proposals as `views.propose`, which a view proposal's Don't ask again turns off); the Ask key choice, ⌘-click or
+// proposals as `views.propose`, which a view proposal's Stop suggesting pages turns off); the Ask key choice, ⌘-click or
 // ⌥-click (Ctrl-click or Alt-click off a Mac), whose other key places a card freely on the canvas (thimble's config
 // `askKey`, lib/platform); then thimble's rules for main and its agents, the subagents of the analyst's Claude Code
 // session (web, edits of the data, and whether the session's shell runs in Claude Code's sandbox), with the CLAUDE.md

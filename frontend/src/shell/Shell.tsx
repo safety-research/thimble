@@ -22,6 +22,7 @@ import { bus, type Tab } from '../lib/bus'
 import { onDemoNote, useDemo } from '../lib/demo'
 import { loadSettings, onSettingsChange } from '../lib/models'
 import { setAskKey } from '../lib/platform'
+import { answerTabs } from '../lib/tabs'
 import { isReplay, useWorkspaceEvents } from '../lib/events'
 import { track } from '../lib/telemetry'
 import { notePress, pressedPane, renewPress, setShownSurfaces, setSurfaceDrag } from '../lib/surfaces'
@@ -107,6 +108,8 @@ function useSize(el: HTMLElement | null, guess: () => { w: number; h: number }) 
 
 export function Shell({ ws }: { ws: string }) {
   useWorkspaceEvents(ws)
+  // a tab stopped with its server asks before it reloads whether this one runs the page (lib/tabs)
+  useEffect(() => answerTabs(ws), [ws])
   useEffect(() => bus.on('wsReset', (e) => e.workspace === ws && window.location.reload()), [ws])
   // the ask key Settings picks (thimble's config `askKey`, lib/platform), read with the settings and again whenever
   // they change, for the pointer, the canvas, the tour and the views' frames

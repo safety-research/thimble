@@ -4,7 +4,8 @@
 //
 // The page stops (stopPage) on the server's `stopping` event (it stops for good: backend main.CompleteStreams), on
 // `session-ended` for its workspace (backend main.session_ended), after MAX_FAILURES failed reconnects in a row
-// (lib/sse), and when the challenge below fails. A stopped page closes its streams, sends no request under its key
+// (lib/sse), when the challenge below fails, and when it came back by itself as another tab started the page on its
+// workspace (`elsewhere`, lib/tabs). A stopped page closes its streams, sends no request under its key
 // (guardFetch), and shows the stopped line in place of the app (shell/ServerDown StoppedPage). The stopped line asks
 // now and then, with no credentials, whether the server answers again as itself (serverBack, the challenge below), and
 // reloads the page once it does (bug hunt H6: after `claude -c` and `/thimble browser` the old tab stayed stopped).
@@ -22,7 +23,7 @@
 import { browserKey, clearBrowserKey, plainApiPath, serverPort } from './browserKey'
 import { bus } from './bus'
 
-export type StopReason = 'stopping' | 'session-ended' | 'failures' | 'challenge'
+export type StopReason = 'stopping' | 'session-ended' | 'failures' | 'challenge' | 'elsewhere'
 
 /** Failed reconnects in a row after which the page stops. */
 export const MAX_FAILURES = 6

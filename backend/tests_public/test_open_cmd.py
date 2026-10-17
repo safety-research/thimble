@@ -1,8 +1,9 @@
 """`thimble open` (app/open_cmd.py, contract C12): the press opens the page on one object for one session, signed in,
 with status only on stdout and stderr (never a code, TTY or not), a 60 s code in a redirect file the opener gets (a
 300 s link for a remote terminal or --link), one opener per session and ref within 5 s, --session bound to the caller's
-CLAUDE_CODE_SESSION_ID, and a shell open with no live main starting nothing. The server's own steps (start, register,
-name the session, make it main) are the cli's, stood in for here; test_opener.py covers the opener and the files."""
+CLAUDE_CODE_SESSION_ID, and a shell open with no live main starting nothing; a signed-in tab of the page that is live
+takes the press, and no other opens. The server's own steps (start, register, name the session, make it main) are the
+cli's, stood in for here; test_opener.py covers the opener and the files."""
 from __future__ import annotations
 
 import io
@@ -29,8 +30,13 @@ class Server:
         self.named: list[tuple] = []
         self.made: list[tuple] = []
         self.steps: list[str] = []  # name_session and made_main, in the order the press ran them
+        self.tab = False  # a signed-in tab of the page is live and takes a press handed to it
+        self.presses: list[dict] = []
 
     def request(self, method, url, body=None, timeout=5.0, **kw):
+        if url.endswith("/api/ui/press"):
+            self.presses.append(dict(body))
+            return 200, {"reused": self.tab}
         assert url.endswith("/api/ui/pair"), url
         self.mints.append(dict(body))
         return 200, {"code": f"{CODE}{len(self.mints)}", "expires_s": body["ttl"]}
@@ -184,3 +190,44 @@ def test_a_long_ref_or_one_with_control_characters_is_refused_before_anything_st
         server, popen, desktop, capsys, monkeypatch, ref):
     st = status(run(capsys, ["--cwd", str(desktop), "--ref", ref, "--json"], monkeypatch=monkeypatch)[0])
     assert st["error"]["code"] == "REFUSED_REF" and server.started == 0 and popen.calls == []
+
+
+def test_a_live_tab_of_the_page_takes_the_press_and_no_other_tab_opens(server, popen, desktop, capsys, monkeypatch):
+    """Bug hunt round 9, J8: every press opened one more tab, though a signed-in tab of the same page was open and live
+    (after a quit, `claude -c`, `/thimble browser`, `thimble -c` and two ↗, five tabs). The press hands its ref to that
+    tab: no opener runs and no code is made, and the status says so; with no live tab, the press opens one."""
+    server.tab = True
+    out, err = run(capsys, ["--cwd", str(desktop), "--ref", "card:abc", "--json"], monkeypatch=monkeypatch)
+    st = status(out)
+    assert st["ok"] and st["opened"] and st["reused"] and not st["remote"]
+    assert popen.calls == [] and server.mints == [], "no other tab, no code"
+    [press] = server.presses
+    assert (press["ws"], press["ref"]) == ("mini", "card:abc")
+    assert st["claim_file"] == str(opener.claim_path(press["open"]))
+    assert open_cmd.status_line(st) == f"shown in the thimble tab already open in your browser · 127.0.0.1:{PORT}"
+    # no live tab: the press opens one
+    server.tab = False
+    st = status(run(capsys, ["--cwd", str(desktop), "--ref", "card:def", "--json"], monkeypatch=monkeypatch)[0])
+    assert st["ok"] and st["opened"] and not st.get("reused") and len(popen.calls) == 1 and len(server.mints) == 1
+
+
+async def test_the_server_hands_a_press_to_a_signed_in_tab_and_waits_for_it_to_take_it():
+    """investigation.press: a press goes to the signed-in tabs' streams alone, as an event in no log, and counts once a
+    tab says it took it; with no tab, or none that answers, it does not."""
+    import asyncio
+
+    from app import investigation
+
+    assert await investigation.press("mini", "card:abc", "open0000aa") is False, "no tab open"
+    q: asyncio.Queue = asyncio.Queue()
+    investigation._tabs.setdefault("mini", set()).add(q)
+    try:
+        waiting = asyncio.create_task(investigation.press("mini", "card:abc", "open0000ab"))
+        told = await asyncio.wait_for(q.get(), 1)
+        assert (told.event, told.data) == ("press", {"ref": "card:abc", "open": "open0000ab"})
+        assert investigation.took("open0000ab") is True
+        assert await waiting is True
+        assert investigation.took("open0000ab") is False, "taken once"
+        assert await investigation.press("mini", "home", "open0000ac", wait_s=0.05) is False, "a tab that does not answer"
+    finally:
+        investigation._tabs["mini"].discard(q)

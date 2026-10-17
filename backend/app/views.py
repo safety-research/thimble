@@ -34,12 +34,16 @@ the view's folder after its pass reaches them only once a gate passes it. A chan
 files aside and restores them if the change fails. Progress is `view {slug, status, chat?}` on the workspace stream.
 
 Pages. A view has the pages it has: view.html, which the browser workbench draws, and view.term.js, a program on the
-terminal view kit (term_views.py) that the terminal panel draws. Each build makes one, its target (TARGETS, a build
-target flag of the view prompts, prompts.rendering): `term-page` for a build started while the session's transport is
-local (before the analyst opens the browser), `html-page` after the press (default_target), kept on its proposal
-(target_of). The first open of a view in the place whose page it lacks builds that page as a revision that reuses the
-reader.py that passed (ensure_page): the browser shows "building the page for the browser…", the terminal "building the
-terminal page…". The gate of a `term-page` build runs the same reader checks, then draws the program as text at 120
+terminal view kit (term_views.py) that the terminal panel draws. A build makes the page of its target first (TARGETS, a
+build target flag of the view prompts, prompts.rendering): `term-page` for a build started while the session's transport
+is local (before the analyst opens the browser), `html-page` after the press (default_target), kept on its proposal
+(target_of). Once that page passes, the view opens there, and the same build goes on to the page of the other place,
+as a revision that reuses the reader.py that passed (build_other_page; bug hunt round 9, J13: a view built in the
+terminal was built again when the browser first opened it, 7 minutes more, then a second review); the review, of the
+page the build began with (`first_page`), starts when the build ends. A view that still lacks a page, such as one this
+machine could not build, builds it on its first open in that place (ensure_page): the browser shows "building the page
+for the browser…", and loads the page by itself once it is built (the views list's `browser_page`), the terminal
+"building the terminal page…". The gate of a `term-page` build runs the same reader checks, then draws the program as text at 120
 and 200 columns, in light and dark, and opened at the first place that resolved, then with the test label on and every
 choice of its Color by, Filter by and Rows tried (term_draws), with no browser: it fails on a program error, a timeout,
 a draw past the panel's rows or columns, or a choice that gives an error. The page's checks (the label marks, the
@@ -3038,10 +3042,13 @@ def end_revision(c: str, slug: str, error: str | None = None, *, failed_change: 
     """A change to a built view that failed (`error`), was dismissed or was stopped by main's quit (`stopped_by`
     "quit", which its chip shows as stopped): the view as it was, its proposal built again with the error kept, and
     `view {built}` on the stream. `failed_change`, the request of a change that failed, stays on the proposal for
-    retry."""
+    retry. The build of the other place's page that ends so leaves the view's target the page the build began with
+    (end_other_page)."""
     restore_built(c, slug)
+    first = (read_proposal(c, slug) or {}).get("first_page")
     update_proposal(c, slug, status="built", change=None, changed=None, revision=None, error=error,
-                    failed_change=failed_change, stopped_by=stopped_by)
+                    failed_change=failed_change, stopped_by=stopped_by,
+                    **({"target": first, "first_page": None} if first in TARGETS else {}))
     _emit(c, slug, "built")
 
 
@@ -3624,6 +3631,46 @@ def ensure_page(c: str, slug: str, target: str) -> bool:
         update_proposal(c, slug, page_wanted=None)  # it ended meanwhile, before its end could see the mark
     revise(c, slug, request, proposed_by="thimble", route=FOLLOW_ON, target=target)
     return True
+
+
+def other_page(target: str) -> str:
+    """The page of the place a build of `target` does not make."""
+    return HTML_PAGE if target == TERM_PAGE else TERM_PAGE
+
+
+def build_other_page(c: str, slug: str) -> bool:
+    """A build of the view `slug` that just passed goes on to the page of the view's other place (module note, Pages):
+    the change ensure_page asks for, queued at once as a follow-on of the same build, which a builder that main's session
+    can still reach takes with its context (dev.queue_view), the page the build began with kept as `first_page`, whose
+    review waits for the build's end (end_other_page). Nothing for a view that has both pages or lacks the page its build
+    made, a view thimble ships, a page whose last build failed (Retry builds it), or a page this machine cannot build
+    and check (its first open there says why). Whether it was queued."""
+    view = read_built(c, slug)
+    prop = read_proposal(c, slug)
+    if view is None or view.get("origin") != "workspace" or prop is None:
+        return False
+    made = target_of(c, slug)
+    other = other_page(made)
+    if not has_page(view, made) or has_page(view, other):
+        return False
+    request = MISSING_PAGE_REQUEST.format(page=PAGE_OF[other], place=MISSING_PAGE_PLACE[other])
+    if prop.get("failed_change") == request:
+        return False
+    if build_problem_for(c, other) or (other == HTML_PAGE and headless.missing(headless.PAGES)):
+        return False
+    revise(c, slug, request, proposed_by="thimble", route=FOLLOW_ON, target=other)
+    update_proposal(c, slug, first_page=made)
+    log.info("%s: the view %s passed with its %s, and its build goes on to its %s", c, slug, PAGE_OF[made],
+             PAGE_OF[other])
+    return True
+
+
+def end_other_page(c: str, slug: str) -> None:
+    """The build of the other place's page (build_other_page) ended, passed or not: the view's target is the page the
+    build began with again, which its review looks at (target_of)."""
+    first = (read_proposal(c, slug) or {}).get("first_page")
+    if first in TARGETS:
+        update_proposal(c, slug, target=first, first_page=None)
 
 
 def page_state(c: str, slug: str, target: str, *, view: dict[str, Any] | None = None,
@@ -5663,6 +5710,10 @@ def _public(v: dict[str, Any], c: str | None = None, *, wait: bool = True) -> di
     out["forms"] = [{"form": f, "means": m} for f, m in view_forms(v)]
     out["file_type"] = file_type_viewer(v)
     out["label_controls"] = label_controls(v)
+    # a view of the workspace's that has no page for the browser yet, whose frame says it is being built: the pane loads
+    # the version that brings it by itself (frontend ViewPane)
+    out["browser_page"] = v.get("origin") != "workspace" or not v.get("dir") or has_page(v, HTML_PAGE) \
+        or not has_page(v, TERM_PAGE)
     if c is not None:
         try:
             files = claimed_paths(c, v, wait=wait) if v["ok"] else []

@@ -215,6 +215,9 @@ export interface Cell {
   takeaway_author?: string
   /** the takeaway was written before the card's last run changed its outputs (backend notebook.TAKEAWAY_STALE) */
   takeaway_stale?: boolean
+  /** `stopped`: the side thread that made the card was stopped before it wrote its takeaway (backend
+   * notebook.UNFINISHED), until one is written */
+  unfinished?: string
   created_by: string
   created_at_event?: number | null
   created_ts?: string
@@ -614,6 +617,9 @@ export interface View {
   /** its page draws label controls of its own (elements with data-label) */
   label_controls?: boolean
   file_type?: boolean
+  /** false for a view of the workspace's with a page for the terminal and none for the browser yet, whose frame says
+   * the page is being built (backend views._public) */
+  browser_page?: boolean
 }
 
 /** A diagram card's dataset (canvas/DataViz.tsx). */

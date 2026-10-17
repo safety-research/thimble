@@ -1176,7 +1176,7 @@ async def interrupt_route(c: str, chat_id: str, request: Request) -> dict:
         fork = meta.get("fork") if isinstance(meta.get("fork"), dict) else {}
         if not fork.get("agent_id") or fork.get("ended"):
             return {"stopped": False, "kind": NO_FORK, "reason": "its fork has not started yet"}
-        ans = await subagents.stop_fork(c, str(fork["agent_id"]), thread_name(meta))
+        ans = await subagents.stop_fork(c, str(fork["agent_id"]), thread_name(meta), chat_id)
         if ans.refused:
             return {"stopped": False, "kind": ans.kind, "reason": ans.reason}
         return {"stopped": True, **({"done": True} if ans.get("done") else {})}

@@ -140,6 +140,7 @@ async function thimbleCommand(cx: Ctx, args: string): Promise<string | null> {
       const links = await cx.links()
       if ((how === 'remote' || how === 'again') && links) return remoteReply(links, classicScreen())
       if (how === 'failed') return "thimble: thimble's page did not open: the notice above the prompt says why and how to fix it"
+      if (how === 'shown') return "thimble: thimble's page is already open in a tab of your browser"
       return "thimble: opening thimble's page in the browser"
     }
     case 'coverage':

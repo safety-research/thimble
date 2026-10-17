@@ -2748,7 +2748,7 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
             gate_step(c, slug, regated, chat=run.chat)
         work_files.after_run(c, work, "done")
         log.info("the view %s/%s was built", c, slug)
-        view_review.after_built(c, slug)
+        _passed(c, slug)
         return
     a = subagents.agent(c, run.agent_id) or {}
     if status == "stopped" and finish.get("result") != "stop":
@@ -2769,7 +2769,7 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
         if rep.get("ok") and not (prop.get("revision") and views.unchanged_since_built(c, slug)):
             register_pass(c, slug, run.agent_id)
             work_files.after_run(c, work, "done")
-            view_review.after_built(c, slug)
+            _passed(c, slug)
             return
         if not rep.get("ok"):
             prop = views.update_proposal(c, slug, last_report="\n".join(views.gate_lines(rep))[:ERROR_CHARS]) or prop
@@ -2787,6 +2787,8 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
     if prop.get("revision"):
         views.end_revision(c, slug, shown, failed_change=str(prop.get("change") or ""))
         _change_failed_chip(c, prop, shown)
+        if prop.get("first_page"):  # the other place's page failed: the page the build began with is reviewed
+            view_review.after_built(c, slug)
         return
     done = int(prop.get("repairs") or 0)
     if not prop.get("asked") and done < VIEW_REPAIRS:
@@ -2802,6 +2804,17 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
         _repairs_failed(c, slug, shown, run.chat)
         return
     _view_failed(c, slug, shown, run.chat)
+
+
+def _passed(c: str, slug: str) -> None:
+    """A build of the view `slug` passed: it goes on to the page of the view's other place (views.build_other_page), else
+    it has ended, and the review starts, of the page the build began with (views.end_other_page)."""
+    from . import view_review, views  # noqa: PLC0415
+
+    if views.build_other_page(c, slug):
+        return
+    views.end_other_page(c, slug)
+    view_review.after_built(c, slug)
 
 
 def stop_view(c: str, slug: str, why: str) -> bool:
