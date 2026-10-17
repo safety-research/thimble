@@ -4,12 +4,15 @@
 // credential of its own). Every read of the server's data needs one of them (backend hook_auth), so a browser that is
 // not signed in sees one line that says so and names the way in, and neither the start page nor the shell mounts, so nothing polls. A read refused later for want of sign-in
 // (`thimble unpair`, a sign-in notice's Sign it out: bus `signedOut`) brings the line back. A link opened in this tab
-// (bus `newLink`), or the tab shown again while it shows the line, checks once more. Nothing shows while the first check
+// (bus `newLink`), the tab shown again while it shows the line, or a sign-in or sign-out in another tab (the browser's
+// key changed: lib/browserKey), checks once more, so a tab signed out comes back once the browser signs in again (bug
+// hunt G4). A tab the server signed out learns it from the stale-tab challenge too (lib/stale). Nothing shows while the first check
 // is under way; when the server does not answer it, the app mounts and says so itself. Once the page stopped (lib/stale:
 // the server stopped for good, the session ended, or the server could not be reached or prove itself), the stopped page
 // (shell/ServerDown StoppedPage) takes the app's place for good, so nothing polls and nothing is sent.
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { claimRefused, signedIn } from '../lib/api'
+import { KEY_ITEM } from '../lib/browserKey'
 import { bus } from '../lib/bus'
 import { isDemo } from '../lib/demo'
 import { pageStopped } from '../lib/stale'
@@ -50,6 +53,10 @@ export function SignInGate({ children }: { children: ReactNode }) {
     const visible = () => {
       if (document.visibilityState === 'visible' && shown.current === 'out') void check(true)
     }
+    // another tab signed this browser in (a new key) or out (no key): ask again
+    const keyChanged = (e: StorageEvent) => {
+      if ((e.key === KEY_ITEM || e.key === null) && shown.current !== 'stopped' && shown.current !== 'wait') void check(true)
+    }
     const offOut = bus.on('signedOut', () => {
       if (shown.current === 'stopped') return
       setGone(false)
@@ -61,12 +68,14 @@ export function SignInGate({ children }: { children: ReactNode }) {
     })
     const offLink = bus.on('newLink', () => void check())
     document.addEventListener('visibilitychange', visible)
+    window.addEventListener('storage', keyChanged)
     return () => {
       alive = false
       offOut()
       offStopped()
       offLink()
       document.removeEventListener('visibilitychange', visible)
+      window.removeEventListener('storage', keyChanged)
     }
   }, [])
   if (state === 'wait') return null

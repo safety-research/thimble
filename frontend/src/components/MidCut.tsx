@@ -73,9 +73,10 @@ function fitStart(box: HTMLElement, end: HTMLElement | null, start: string): num
 }
 
 /** A name in a row that may be too narrow for it, cut in its middle (midSplit), the whole name in its tooltip. It takes
- *  the room its row leaves it. */
-export function MidCut({ text, className }: { text: string; className?: string }) {
-  const { props, tip } = useTooltip(text, undefined, 'start')
+ *  the room its row leaves it. `tip`: what its tooltip says in place of the name, null for none (a row whose own
+ *  tooltip names it whole). */
+export function MidCut({ text, className, tip: tipText = text }: { text: string; className?: string; tip?: string | null }) {
+  const { props, tip } = useTooltip(tipText, undefined, 'start')
   const [start, end] = midSplit(text)
   const box = useRef<HTMLSpanElement>(null)
   const endEl = useRef<HTMLSpanElement>(null)

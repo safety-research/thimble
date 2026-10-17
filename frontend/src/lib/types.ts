@@ -1789,6 +1789,8 @@ export interface ConceptApplication {
   matches?: number
   /** the whole files or runs a prompt label's run read only in part; absent when it read every one whole */
   cut?: ReadCut | null
+  /** a trial's sample: the most units the run read; null or absent for a run on everything */
+  limit?: number | null
 }
 
 /** The whole files or runs a prompt label's run read only in part, since they were longer than its model's context

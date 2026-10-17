@@ -222,6 +222,47 @@ describe('a view whose rows are its own units (bug hunt C13)', () => {
   })
 })
 
+describe("a view whose page shows some of its records (bug hunt G5)", () => {
+  // the page draws every run but hands the kit the records of the one run open in its side panel; its reader reads
+  // every run's records, and the fetch's answer brings the values of their fields (`fields`, from thimble.color_value)
+  test("a field lists its values over every record the reader read, not only those the page handed it, whatever is open", async () => {
+    await load()
+    const c = win().thimble.colorBy({ mount: '#colour', fields: [{ name: 'model', title: 'Model' }, { name: 'tier', title: 'Tier' }, { name: 'phase', title: 'Phase' }] })
+    c.attr({ model: 'heron', tier: 'gold' })
+    const asked = win().thimble.fetch({ op: 'overview' })
+    await wait()
+    const fetch = sent.find((m) => m.type === 'thimble:fetch')!
+    fromPage({ type: 'thimble:result', id: fetch.id, data: { runs: 16 }, fields: { model: { heron: 30, kestrel: 20, wren: 10 }, tier: { gold: 40, silver: 20 } } })
+    expect(await asked).toEqual({ runs: 16 })
+    await wait()
+    ;(doc().querySelector('.thimble-colour-by') as HTMLElement).click()
+    await wait()
+    const row = (name: string) => doc().querySelector(`.thimble-colour-menu [data-by="f:${name}"]`)!
+    const shown = (name: string) => [...row(name).querySelectorAll('.thimble-colour-pchip')].map((x) => x.textContent)
+    expect(shown('model')).toEqual(['heron', 'kestrel', 'wren'])
+    expect(row('model').querySelector('.thimble-colour-n')!.textContent).toBe('3 values')
+    expect(shown('tier')).toEqual(['gold', 'silver'])
+    // a field no record takes a value of colors nothing here: grayed, with why
+    expect(row('phase').hasAttribute('data-cant-color')).toBe(true)
+    expect(row('phase').querySelector('.thimble-colour-why')!.textContent).toBe('No record here takes a value of it, so it colors nothing.')
+    expect(row('model').hasAttribute('data-cant-color')).toBe(false)
+  })
+
+  test("a label that marks none of the view's records is grayed in the menu, with why", async () => {
+    await load()
+    mount()
+    const posts = { id: 'k9', name: 'tests failed', on: false, here: false, marking: false, colour: '#08632f', values: [{ name: 'failed', colour: '#08632f', highlight: true }], count: 1262 }
+    fromPage({ type: 'thimble:labels', marks: {}, on: [], filter: null, all: [{ ...LABEL, on: false, marking: true }, posts], palette: ['#025ac3'] })
+    await wait()
+    ;(doc().querySelector('.thimble-colour-by') as HTMLElement).click()
+    await wait()
+    const row = (id: string) => doc().querySelector(`.thimble-colour-menu [data-by="l:${id}"]`)!
+    expect(row('k9').hasAttribute('data-cant-color')).toBe(true)
+    expect(row('k9').querySelector('.thimble-colour-why')!.textContent).toBe('It marks none of the records here, so it colors nothing.')
+    expect(row('k1').hasAttribute('data-cant-color')).toBe(false)
+  })
+})
+
 describe('the choice thimble keeps for a view', () => {
   test("reaches its page whole, and nothing in it can end the page's script", () => {
     const html = colourScript({ by: 'f:a</script><script>alert(1)</script>', off: {} })

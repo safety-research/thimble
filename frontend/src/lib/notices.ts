@@ -94,6 +94,10 @@ function touchAll(): void {
   stores.forEach((s) => s.subs.forEach((fn) => fn()))
 }
 
+/** This browser's id, as GET /ui/paired answered it after the claim; '' while unknown. Settings' Sign out this browser
+ * signs out this id. */
+export const ownBrowserId = (): string => browserId
+
 /** This browser's id, as GET /ui/paired answers it after the claim: its own sign-in notice is left out. */
 export function setBrowserId(id: string): void {
   if (id === browserId) return

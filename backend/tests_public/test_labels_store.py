@@ -5,6 +5,8 @@ of; and a code label labels every record of a corpus of many files (the kernel's
 JSON string, since a one-line list of thousands of paths takes gigabytes to tokenize)."""
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import sqlite3
@@ -135,3 +137,36 @@ def test_the_wrapper_labels_every_record_of_every_file(tmp_path):
     assert len(rows) == 120 and errors == 0 and message is None
     assert sum(r["label"] == "yes" for r in rows) == 40
     assert rows[4]["ref"] == f"{groups[1]['paths'][0]}#L2" and rows[4]["label"] == "yes"
+
+
+def test_a_code_label_that_returns_none_gives_that_line_no_value_and_counts_it_skipped(tmp_path):
+    """label(unit) returning None means no value (bug hunt G7: the blank lines of a transcript became a class "None",
+    counted with the matches): the line gets no row, no cover of the quiet value takes it in, and the run counts it as
+    skipped, as a prompt label skips a line with no words."""
+    root = tmp_path / "corpus"
+    (root / "talk").mkdir(parents=True)
+    (root / "talk" / "t.md").write_text("**Host** hi\n\n**Guest** hello\n\n**Host** bye\n")
+    spec = ("def label(unit):\n    t = unit.get('text', '')\n    if not t.strip():\n        return None\n"
+            "    return ('match' if t.startswith('**Host') else 'no match', 1.0)\n")
+    groups = [{"ref": "talk/t.md", "paths": ["talk/t.md"]}]
+    for quiet in (None, "no match"):
+        rows_file = tmp_path / f"rows-{quiet}.tmp"
+        code = concepts.build_code_wrapper({"name": "host line", "unit": "record", "spec": spec}, groups, None, rows_file,
+                                           quiet=quiet)
+        out = io.StringIO()
+        cwd = os.getcwd()
+        os.chdir(root)
+        try:
+            with contextlib.redirect_stdout(out):
+                exec(compile(code, "wrapper", "exec"), {"__name__": "wrapper"})
+        finally:
+            os.chdir(cwd)
+        rows, errors, _message = concepts.parse_code_output([], rows_file)
+        values = {r["ref"]: r["label"] for r in rows if not labels_store.is_marker(r)}
+        covered = {f"talk/t.md#L{n}" for r in rows if labels_store.is_marker(r) and r.get("cover")
+                   for n in range(int(r["from"]), int(r["to"]) + 1)}
+        assert errors == 0 and "None" not in values.values(), (quiet, rows)
+        assert not {"talk/t.md#L2", "talk/t.md#L4"} & (set(values) | covered), (quiet, rows)
+        assert values.get("talk/t.md#L1") == "match" and values.get("talk/t.md#L5") == "match"
+        assert values.get("talk/t.md#L3") == "no match" or "talk/t.md#L3" in covered
+        assert concepts.code_skipped([{"text/plain": out.getvalue(), "_stream": "stdout"}]) == 2

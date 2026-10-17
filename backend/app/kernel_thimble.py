@@ -532,6 +532,13 @@ _view_paths: list = []  # the claimed files of the view whose reader call is run
 # During a view's records call (view_host) a set of the refs kept() and kept_unit() refused, which thimble counts above
 # the view as hidden by the filter; None outside one.
 _left_out = None
+# During a view's records call (view_host) the values of the fields of the records the reader hands color_value, each
+# with how many records take it ({field: {value: n}}): the page's Color by lists them for a field its page has not shown
+# all of (bug hunt G5: a run's fields listed only the runs opened so far); None outside one. At most FIELDS_SEEN fields,
+# each with at most FIELD_VALUES_SEEN values.
+_fields_seen = None
+FIELDS_SEEN = 40
+FIELD_VALUES_SEEN = 200
 PROBE_NAME = "test label"
 PROBE_ID = "test-label"
 # the colour the analyst's first label takes (--label-1, the first of LABEL_ORDER), so the pictures show a view's own
@@ -837,10 +844,34 @@ def marked(ref):
     return [_both(m) for m in _marked(_view_ctx, ref)]
 
 
+def _see_fields(record) -> None:
+    """Count the values of `record`'s fields (a dict) into _fields_seen during a records call: each value as
+    color_value would give it, the fields and values past the caps left out."""
+    seen = _fields_seen
+    if seen is None or not isinstance(record, dict):
+        return
+    for k, v in record.items():
+        if _missing(v) or v == "" or isinstance(v, (dict, list, tuple, set)):
+            continue
+        k = str(k)
+        values = seen.get(k)
+        if values is None:
+            if len(seen) >= FIELDS_SEEN:
+                continue
+            values = seen[k] = {}
+        v = str(v)
+        if v in values:
+            values[v] += 1
+        elif len(values) < FIELD_VALUES_SEEN:
+            values[v] = 1
+
+
 def color_value(choice, ref=None, record=None):
     """The value a record takes under the view's Color by, `choice` being what the page's color.query() sent with its
     fetch (viewer_colour.js): for a label, {label: id, name}, the label's highlighted value on the record `ref`, else
-    None; for a field of the view, {field}, record[field] (record a dict), else None. None for no choice."""
+    None; for a field of the view, {field}, record[field] (record a dict), else None. None for no choice. Every field of
+    a record it is given is counted for the page's Color by (_fields_seen), whatever the choice."""
+    _see_fields(record)
     if not isinstance(choice, dict):
         return None
     if choice.get("label") is not None:

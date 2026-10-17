@@ -305,3 +305,31 @@ def test_an_index_pickled_by_one_reader_version_loads_with_that_versions_classes
     finally:
         for k in ("_indexes", "_sizes", "_readers", "_reader_of"):
             getattr(view_host, k).clear()
+
+
+def test_a_records_call_answers_the_values_of_every_field_of_the_records_its_reader_hands_color_value(tmp_path):
+    """A records call counts the values of the fields of each record its reader hands thimble.color_value, whatever
+    Color by's choice, and answers them as `fields`, which the page's Color by lists for a field whose values the page
+    has not shown all of (bug hunt G5: a run's fields listed only the values of the runs opened so far)."""
+    reader = tmp_path / "reader.py"
+    reader.write_text(
+        "import thimble\n"
+        "def build_index(paths):\n"
+        "    return [{'model': 'heron', 'tier': 'gold', 'n': 3}, {'model': 'kestrel', 'tier': 'gold', 'n': 4},\n"
+        "            {'model': 'heron', 'tier': None, 'n': 3, 'tags': ['a']}]\n"
+        "def records(index, query):\n"
+        "    return [thimble.color_value(query.get('color'), None, r) for r in index]\n"
+        "def resolve(index, locator):\n"
+        "    return None\n")
+    for k in ("_indexes", "_sizes", "_readers", "_reader_of"):
+        getattr(view_host, k).clear()
+    try:
+        out = view_host.answer({"slug": "g5", "reader": str(reader), "fp": "a", "paths": [], "op": "records",
+                                "arg": {"color": {"field": "tier"}}, "thimble": str(views.KERNEL_THIMBLE)})
+        assert out["ok"] and out["result"] == ["gold", "gold", None], out
+        assert out["fields"] == {"model": {"heron": 2, "kestrel": 1}, "tier": {"gold": 2}, "n": {"3": 2, "4": 1}}
+        # outside a records call nothing is counted
+        assert sys.modules["thimble"]._fields_seen is None
+    finally:
+        for k in ("_indexes", "_sizes", "_readers", "_reader_of"):
+            getattr(view_host, k).clear()

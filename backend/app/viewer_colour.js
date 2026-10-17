@@ -30,7 +30,10 @@
 // Off. The view opens Off, or as its `initial` says, unless a label is on and marks some of its records (below). Each field and label says how many
 // values it colors by and shows them as chips on a line under its name, cut off with … where they do not fit; a field
 // that declares no values shows those its records take on the page (the records the page hands valueOf, attr and
-// keeps), the commonest first. Checking a label turns it on in Files and every view and
+// keeps) and those the records its reader read take (the fetches' `fields`, from thimble.color_value: so a run's fields
+// list every run's values, not only those of the runs the page opened, bug hunt G5), the commonest first. A label that
+// marks none of the view's records, and a field no record takes a value of, is grayed in the menu with a line that says
+// so, since it colors nothing here. Checking a label turns it on in Files and every view and
 // opens thimble's label editor beside the menu (thimble.editLabel), which stays open; unchecking it turns it off unless
 // Rows or Filter by holds it. Escape in the editor closes it and puts the focus back on the label's row, and a click in
 // the view closes it too. A field colors by the values its records take, each in a palette colour of its own (the label
@@ -246,6 +249,9 @@
   var labelState = null
   var labelsVer = 0 // bumps whenever the labels or their marks change, so that a strip measures its colours again
   var control = null // the one Color by control of the page
+  // the values of the fields of the records the fetches' readers read ({field: {value: n}}, the bridge's kit.fields),
+  // null until a fetch's answer brought some
+  var heard = null
   // The strips a part of the kit gives a list while the page has no Color by (kit.shared.strip), such as the search's
   // ticks on the list it finds in: plain scrollbars, owned by a stand-in for the control that colours nothing, and
   // handed to Color by when the page mounts it
@@ -341,6 +347,12 @@
     })
     save()
   }
+
+  if (typeof kit.fields === 'function')
+    kit.fields(function (fields) {
+      heard = fields
+      if (control) control.fieldsHeard()
+    })
 
   kit.labels(function (state, labelsChanged) {
     var before = labelState
@@ -1625,7 +1637,7 @@
     var out = names.concat(seen).map(function (n) {
       return { name: n, colour: self.fieldColour(f.name, n) }
     })
-    var t = this.tallies[f.name] || {}
+    var t = this.tallyOf(f)
     var fresh = Object.keys(t).filter(function (k) {
       return names.indexOf(k) < 0 && !(k in map)
     })
@@ -1654,6 +1666,21 @@
       .map(function (v) {
         return { name: v.name, colour: v.colour }
       })
+  }
+  // The values a field that declares none takes, each with how many records take it: those of the records the page
+  // handed the kit (tally) and those of the records the fetches' readers read (heard), the most of either for each. A
+  // field with its own value(record) takes the first alone.
+  Control.prototype.tallyOf = function (f) {
+    var out = {}
+    var mine = this.tallies[f.name] || {}
+    for (var k in mine) out[k] = mine[k]
+    var read = !f.values && !f.value && heard && heard[f.name]
+    if (read) for (var v in read) if (Object.prototype.hasOwnProperty.call(read, v)) out[v] = Math.max(out[v] || 0, read[v])
+    return out
+  }
+  // A fetch's answer brought the values of its records' fields: the menu, open, lists them
+  Control.prototype.fieldsHeard = function () {
+    if (this.menu && !this.menu.values && this.menu.palette == null) this.redrawMenu()
   }
   // a field's or a label's row: its name and how many values it has, then its values as chips on one line, cut off with
   // … where they do not fit; nothing of its values when none is known; `why`, a line under them that says why it colors
@@ -1743,17 +1770,23 @@
       .map(function (f) {
         var by = 'f:' + f.name
         var on = keys.indexOf(by) >= 0
-        return '<button type="button" class="thimble-colour-item thimble-colour-choice" role="menuitemcheckbox" aria-checked="' + on + '" data-by="' + esc(by) + '"' + (f.description ? ' title="' + esc(f.description) + '"' : '') + '>' + box(on) + choiceBody('', f.title, self.fieldValues(f), track(by)) + '</button>'
+        var values = self.fieldValues(f)
+        // a field that declares no values and that no record takes a value of, once the reader's records are known
+        var none = !values.length && !f.values && !f.value && !!heard
+        var why = none ? 'No record here takes a value of it, so it colors nothing.' : ''
+        return '<button type="button" class="thimble-colour-item thimble-colour-choice" role="menuitemcheckbox" aria-checked="' + on + '" data-by="' + esc(by) + '"' + (none ? ' data-cant-color' : '') + (f.description ? ' title="' + esc(f.description) + '"' : '') + '>' + box(on) + choiceBody('', f.title, values, track(by), why) + '</button>'
       })
       .join('')
     var all = allLabels()
     var row = function (l) {
       var by = 'l:' + l.id
       var on = keys.indexOf(by) >= 0
-      // a label checked that colors none of the view's units, though it marks records in the view's files (cantColor)
-      var cant = on ? self.cantColor(l.id) : 0
-      var why = cant ? "Can't color these rows: none of them stands for any of the " + num(cant) + (cant === 1 ? ' record' : ' records') + ' it marks.' : ''
-      return '<button type="button" class="thimble-colour-item thimble-colour-label thimble-colour-choice" role="menuitemcheckbox" aria-checked="' + on + '" data-by="' + esc(by) + '" data-label="' + esc(l.id) + '"' + (cant ? ' data-cant-color' : '') + '>' + box(on) + choiceBody(l.colour || '', l.name, labelValues(l), track(by), why) + '</button>'
+      // a label that marks none of the view's records (`marking`, as Color by opens: E9), or one checked that colors none
+      // of the view's units though it marks records in the view's files (cantColor)
+      var unmarked = l.marking === false
+      var cant = on && !unmarked ? self.cantColor(l.id) : 0
+      var why = unmarked ? 'It marks none of the records here, so it colors nothing.' : cant ? "Can't color these rows: none of them stands for any of the " + num(cant) + (cant === 1 ? ' record' : ' records') + ' it marks.' : ''
+      return '<button type="button" class="thimble-colour-item thimble-colour-label thimble-colour-choice" role="menuitemcheckbox" aria-checked="' + on + '" data-by="' + esc(by) + '" data-label="' + esc(l.id) + '"' + (cant || unmarked ? ' data-cant-color' : '') + '>' + box(on) + choiceBody(l.colour || '', l.name, labelValues(l), track(by), why) + '</button>'
     }
     // the labels that mark the view's files first
     var here = all.filter(function (l) { return l.here })

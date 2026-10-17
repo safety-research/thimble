@@ -12,8 +12,12 @@
 // it, for an HMAC of a fresh nonce under the sha256 of its key, bound to the port the server listens on (backend
 // hook_auth.hello; the port is the one the claim answered, else the page's own). A program that is not this server
 // cannot answer, and a relay to a thimble server on another port answers for that port: the page stops. A server that
-// does not answer at all leaves the page suspect, and lib/sse counts a failed reconnect.
-import { browserKey, plainApiPath, serverPort } from './browserKey'
+// does not answer at all leaves the page suspect, and lib/sse counts a failed reconnect. A browser the server signed
+// out (`thimble unpair`, Sign it out, Settings' Sign out this browser) gets an answer of its own under the same key
+// (backend hook_auth.hello_out_mac): the page does not stop but forgets the spent key, shows the sign-in line (bus
+// `signedOut`), and goes on once a sign-in here or in another tab gives the browser a new key (bug hunt G4: a
+// signed-out tab showed that thimble stopped, for good).
+import { browserKey, clearBrowserKey, plainApiPath, serverPort } from './browserKey'
 import { bus } from './bus'
 
 export type StopReason = 'stopping' | 'session-ended' | 'failures' | 'challenge'
@@ -25,7 +29,8 @@ export const HELLO_PATH = plainApiPath('/hello')
 
 let stopped: StopReason | null = null
 let suspect = false
-let checking: Promise<Verdict> | null = null
+// the challenge under way, with the key it was asked for
+let checking: Promise<{ v: Verdict; key: string }> | null = null
 
 /** Why the page stopped, null while it runs. */
 export const pageStopped = (): StopReason | null => stopped
@@ -52,9 +57,9 @@ export function resetStale(): void {
   checking = null
 }
 
-/** The challenge's outcome: `ok` the server proved itself, `down` nothing answered, `refused` an answer that is not
- * the server's (or the server does not know the key). */
-export type Verdict = 'ok' | 'down' | 'refused'
+/** The challenge's outcome: `ok` the server proved itself, `out` it proved itself and signed this browser out,
+ * `down` nothing answered, `refused` an answer that is not the server's (or the server does not know the key). */
+export type Verdict = 'ok' | 'out' | 'down' | 'refused'
 
 const enc = new TextEncoder()
 const hex = (buf: ArrayBuffer): string => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('')
@@ -79,6 +84,11 @@ export async function expectedAnswer(key: string, port: number, nonce: string): 
   return hmac(await sha256(key), `hello:${port}:${nonce}`)
 }
 
+/** The answer this page expects for `nonce` once the server signed this browser out (backend hook_auth.hello_out_mac). */
+export async function expectedOutAnswer(key: string, port: number, nonce: string): Promise<string> {
+  return hmac(await sha256(key), `signed-out:${port}:${nonce}`)
+}
+
 /** The port the server this page signed in with listens on: the claim's answer, else the page's own. */
 export function challengePort(): number {
   const kept = serverPort()
@@ -101,23 +111,29 @@ export async function hello(key: string = browserKey()): Promise<Verdict> {
   }
   if (res.status !== 200) return 'refused'
   try {
-    const body = (await res.json()) as { mac?: unknown } | null
-    return body?.mac === (await expectedAnswer(key, challengePort(), nonce)) ? 'ok' : 'refused'
+    const body = (await res.json()) as { mac?: unknown; out?: unknown } | null
+    if (typeof body?.mac === 'string' && body.mac === (await expectedAnswer(key, challengePort(), nonce))) return 'ok'
+    if (typeof body?.out === 'string' && body.out === (await expectedOutAnswer(key, challengePort(), nonce))) return 'out'
+    return 'refused'
   } catch {
     return 'refused'
   }
 }
 
 /** Before a request under the key: `ok` when the page is not suspect or the challenge passed (then it is not suspect
- * any more), `down` when nothing answered (it stays suspect), `stopped` when the page stopped or the challenge failed
- * (which stops it). One challenge at a time. */
-export async function verified(): Promise<'ok' | 'down' | 'stopped'> {
+ * any more), `down` when nothing answered (it stays suspect), `out` when the server signed this browser out (it stays
+ * suspect, and the page shows the sign-in line: bus `signedOut`), `stopped` when the page stopped or the challenge
+ * failed (which stops it). One challenge at a time. */
+export async function verified(): Promise<'ok' | 'out' | 'down' | 'stopped'> {
   if (stopped) return 'stopped'
   if (!suspect) return 'ok'
-  checking ??= hello().finally(() => {
+  checking ??= (async () => {
+    const key = browserKey()
+    return { v: await hello(key), key }
+  })().finally(() => {
     checking = null
   })
-  const v = await checking
+  const { v, key } = await checking
   if (stopped) return 'stopped'
   if (v === 'ok') {
     suspect = false
@@ -126,6 +142,13 @@ export async function verified(): Promise<'ok' | 'down' | 'stopped'> {
   if (v === 'refused') {
     stopPage('challenge')
     return 'stopped'
+  }
+  if (v === 'out') {
+    // the key is spent: forget it, unless a sign-in meanwhile gave a new one, so the next sign-in's claim goes out and
+    // every tab asks again whether it is signed in (shell/SignIn)
+    if (browserKey() === key) clearBrowserKey()
+    bus.emit('signedOut', {})
+    return 'out'
   }
   return 'down'
 }
@@ -150,7 +173,11 @@ export function guardFetch(): void {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
     if (underKey(url)) {
       if (stopped) throw new TypeError("thimble's page stopped")
-      if (suspect && (await verified()) !== 'ok') throw new TypeError("thimble's server is not answering")
+      if (suspect) {
+        const v = await verified()
+        if (v === 'out') throw new TypeError("this browser isn't signed in")
+        if (v !== 'ok') throw new TypeError("thimble's server is not answering")
+      }
     }
     return original(input, init)
   }

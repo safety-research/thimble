@@ -1291,7 +1291,8 @@ async def _act_label_run(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     whose last run already covers this one (the same version over the same files and sample, concepts.covered) runs
     nothing and waits for nothing, and the answer says so (`unchanged`), so main is not asked to run what apply_label
     would answer with the old rows (bug hunt B31). With `again`, a prompt label runs only over the units its last run
-    could not label (a label notice's act, concepts.start_again), and main hears of it once it ends (`label_done`)."""
+    could not label (a label notice's act, concepts.start_again), and main hears of it once it ends (`label_done`), as it
+    does of a trial run on everything."""
     from . import cardrun, concepts  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
@@ -1328,6 +1329,8 @@ async def _act_label_run(c: str, payload: dict[str, Any]) -> dict[str, Any]:
         if card is None and not ran_before:
             card = await asyncio.to_thread(concepts.label_card, c, found, None, "user")
         concepts.tell_main(c, found, card)
+        if found["trial"] and not limit:  # a trial run on everything: main hears when it ends (bug hunt G3)
+            told = concepts.tell_when_done(c, cid, whole_trial=True)
     # `label-stop` from another process asks this run to stop after its current unit, as the browser's Stop does; so does
     # `label-delete` from another process, which removes the label's file
     ended = threading.Event()
@@ -1352,7 +1355,7 @@ async def _act_label_run(c: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 LABEL_STOP_POLL_S = 0.5
-LABEL_DONE_WAIT_S = 30.0  # how long a `label-run` with `again` waits for its `label_done` to go out
+LABEL_DONE_WAIT_S = 30.0  # how long a `label-run` with `again`, or of a trial on everything, waits for its `label_done`
 
 
 def _label_stop_file(c: str, cid: str) -> Path:

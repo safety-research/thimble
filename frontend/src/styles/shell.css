@@ -673,7 +673,11 @@ button.settings-ext-name:hover .settings-ext-caret {
   background: var(--overlay-bg);
   border-top: 1px solid var(--border-subtle);
 }
-.settings-foot .settings-tour {
+/* Take the tour and Sign out this browser at the left, Cancel and Save at the right */
+.settings-foot-start {
+  display: flex;
+  align-items: center;
+  gap: 2px;
   margin-right: auto;
   margin-left: -6px;
 }

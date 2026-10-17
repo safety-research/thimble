@@ -558,11 +558,12 @@ export const api = {
   /** reader.records(index, query), for the page's thimble.fetch, with no time limit, through the gate of slow calls
    * (lib/limit.ts heavy): `call` names it for viewCall and viewCancel, and `signal` drops the request; with a label
    * filter on, `hidden` is how many records the reader left out for it in what the frame shows (the page's fetch `key`,
-   * the `frame` and its `turn`), null when that cannot be counted exactly */
+   * the `frame` and its `turn`), null when that cannot be counted exactly; `fields`, the values of the fields of the
+   * records the reader handed thimble.color_value, each with how many take it, which the page's Color by lists */
   viewRecords: (c: string, slug: string, query: unknown, version?: string, opts?: { call?: string; signal?: AbortSignal; key?: string; frame?: string; turn?: number }) =>
     heavy(
       () =>
-        j<{ data: unknown; hidden?: number | null }>(`${ws(c)}/views/${enc(slug)}/records${q({ v: version })}`, {
+        j<{ data: unknown; hidden?: number | null; fields?: Record<string, Record<string, number>> }>(`${ws(c)}/views/${enc(slug)}/records${q({ v: version })}`, {
           method: 'POST',
           body: JSON.stringify({ query, call: opts?.call, key: opts?.key, frame: opts?.frame, turn: opts?.turn }),
           signal: opts?.signal,

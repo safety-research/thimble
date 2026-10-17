@@ -426,10 +426,8 @@
   flex: none;
   max-width: 70%;
 }
+/* a result's folder (find.ts foundFolder), cut in its middle (components/MidCut) in the room its name leaves */
 .files-found-dir {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
   color: var(--text-tertiary);
   font: var(--type-ui-sm);
 }
@@ -485,11 +483,14 @@
 .files-found-head:first-child {
   padding-top: 4px;
 }
+/* the part's name stays on one line; its count wraps under itself rather than lose its end */
+.files-found-head > :first-child {
+  flex: none;
+  white-space: nowrap;
+}
 .files-found-note {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  text-align: right;
   font: var(--type-ui-sm);
   color: var(--text-tertiary);
   font-variant-numeric: tabular-nums;
@@ -1163,6 +1164,13 @@
   color: var(--text-secondary);
   font: var(--type-body-sm);
 }
+/* a trial's edit offers three buttons (Cancel, Run on all, Re-run): the note takes a row of its own above them */
+.label-card-foot.has-three {
+  flex-wrap: wrap;
+}
+.label-card-foot.has-three .label-card-note {
+  flex-basis: 100%;
+}
 
 /* the same card in the popover beside the control that opened it (LabelEditor): the popover is its paper, its place
    and its scroll, at the card's own width */
@@ -1201,6 +1209,10 @@
   display: flex;
   align-items: center;
   gap: 12px;
+}
+/* a trial's Run on all at the right, the links at the left */
+.label-sheet-links:not(:last-child) {
+  margin-right: auto;
 }
 
 /* -------- the reader: the cell's paper behind a hairline, square tabs on the sidebar's step -------- */
