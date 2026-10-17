@@ -1318,6 +1318,10 @@ thimble starts its agents, and passes messages on to them, only with the call it
 
 thimble's agents continue only when the analyst asks. If they asked, call message_orientation and send what it gives; otherwise ask them first.
 
+## agent-check-to-parent
+
+Main is the analyst's chat, so thimble does not send your message there. Send it to the agent that started you: SendMessage with `to` "{parent}" and the same message.
+
 ## handback-taken
 
 thimble already has your report. Stop now and write nothing more.
