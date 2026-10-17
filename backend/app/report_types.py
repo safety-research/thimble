@@ -4424,6 +4424,14 @@ def _any_doc(c: str, inv_id: str, slug: str) -> tuple[str, dict[str, Any]]:
     return slug, _load(c, inv_id, slug)
 
 
+def _commented(c: str, inv_id: str, slug: str, sid: object) -> None:
+    """The analyst's comment added, resolved or opened again: `report {slug, status: commented}` on the stream, as a
+    check's or main's comment sends, so every other tab on the document reads it again (bug hunt G6: a comment resolved
+    in one tab stayed in another until a reload)."""
+    if inv_id == investigation.MAIN:
+        _emit(c, {"type": "report", "slug": slug, "status": "commented", **({"span": f"report:{slug}#{sid}"} if sid else {})})
+
+
 @router.post("/ws/{c}/investigations/{inv_id}/types/{slug}/comments", status_code=201)
 async def post_comment(c: str, inv_id: str, slug: str, body: CommentBody) -> dict[str, Any]:
     """Store the analyst's comment on a sentence or a unit heading; returns the comment."""
@@ -4440,6 +4448,7 @@ async def post_comment(c: str, inv_id: str, slug: str, body: CommentBody) -> dic
         comment["kind"] = kind
     doc["comments"].append(comment)
     write_doc(c, inv_id, slug, doc)
+    _commented(c, inv_id, slug, sid)
     return comment
 
 
@@ -4453,6 +4462,7 @@ async def dismiss(c: str, inv_id: str, slug: str, cid: str) -> dict[str, Any]:
     cm = _find_comment(doc, cid)
     cm.update(status="dismissed", resolution=canvas_comments.RESOLUTION_DONE, resolved_ts=_now())
     write_doc(c, inv_id, slug, doc)
+    _commented(c, inv_id, slug, cm.get("sentence_id"))
     return doc
 
 
@@ -4460,8 +4470,10 @@ async def dismiss(c: str, inv_id: str, slug: str, cid: str) -> dict[str, Any]:
 async def reopen(c: str, inv_id: str, slug: str, cid: str) -> dict[str, Any]:
     investigation.inv_dir(c, inv_id)
     slug, doc = _any_doc(c, inv_id, slug)
-    if reopen_comment(_find_comment(doc, cid)):
+    cm = _find_comment(doc, cid)
+    if reopen_comment(cm):
         write_doc(c, inv_id, slug, doc)
+        _commented(c, inv_id, slug, cm.get("sentence_id"))
     return doc
 
 
