@@ -1412,6 +1412,18 @@ a.card:hover {
   flex: none;
   margin-left: auto;
 }
+/* the open file's path, cut in its middle where the strip is narrow (components/MidCut), then its mode */
+.pane-status-file {
+  display: flex;
+  min-width: 0;
+}
+.pane-status-path {
+  flex: 0 1 auto;
+}
+.pane-status-mode {
+  flex: none;
+  white-space: pre;
+}
 /* a name cut in its middle (components/MidCut): it takes the room its row leaves it, which MidCut measures; its start
    gives way first and ends in an ellipsis, its end stays whole; both keep their spaces, so a space where the two meet
    stays */

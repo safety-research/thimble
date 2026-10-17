@@ -426,10 +426,8 @@
   flex: none;
   max-width: 70%;
 }
+/* a result's folder (find.ts foundFolder), cut in its middle (components/MidCut) in the room its name leaves */
 .files-found-dir {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
   color: var(--text-tertiary);
   font: var(--type-ui-sm);
 }
@@ -485,11 +483,14 @@
 .files-found-head:first-child {
   padding-top: 4px;
 }
+/* the part's name stays on one line; its count wraps under itself rather than lose its end */
+.files-found-head > :first-child {
+  flex: none;
+  white-space: nowrap;
+}
 .files-found-note {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  text-align: right;
   font: var(--type-ui-sm);
   color: var(--text-tertiary);
   font-variant-numeric: tabular-nums;
