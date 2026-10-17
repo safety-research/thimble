@@ -520,6 +520,17 @@ body[data-cmd] .board-stage * {
   line-height: 1.55;
   text-wrap: pretty;
 }
+/* in the takeaway's place, a card whose side thread was stopped before it wrote one: quiet, its bar dashed */
+.bcell-take-unfinished::before {
+  background: none;
+  border-left: 2px dashed rgba(var(--ink-rgb), 0.3);
+  width: 0;
+}
+.bcell-take-unfinished .bcell-take-text {
+  margin: 0;
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+}
 /* a takeaway written before the card's last run changed its outputs, until it is written again */
 .bcell-take-text.is-stale,
 .bfocus-take .is-stale {

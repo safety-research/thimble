@@ -561,6 +561,21 @@ def settled(c: str, thread_id: str) -> bool:
                                 for r in records[last_user + 1:])
 
 
+def stopped_cards(c: str, thread_id: str) -> tuple[list[str], list[str], list[str]]:
+    """The analyst stopped the thread's fork: the cards it made since the analyst's last message in the thread, those of
+    them with no takeaway yet marked unfinished on the canvas (notebook.mark_unfinished), and the cards it changed since
+    then. (finished, unfinished, changed) card ids, so that what main tells the analyst matches the canvas (bug hunt
+    round 9, J5: main said the thread "was stopped before it made any card or chart" beside its half-made chart)."""
+    from . import notebook  # noqa: PLC0415
+
+    records = agents.read_events(agents.paths(c, thread_id)[1])
+    since = next((str(r.get("ts") or "") for r in reversed(records) if r.get("type") == "user"), "")
+    made, changed = notebook.cards_since(notebook._ws(c), f"chat:{thread_id}", since)
+    open_ = [str(x["id"]) for x in made if not str(x.get("takeaway") or "").strip() and x.get("kind") != notebook.PLAN_KIND]
+    notebook.mark_unfinished(c, open_)
+    return ([str(x["id"]) for x in made if str(x["id"]) not in open_], open_, [str(x["id"]) for x in changed])
+
+
 def replied_since_question(c: str, thread_id: str) -> bool:
     """Whether a reply follows the analyst's last question in the thread's chat."""
     _, log_path = agents.paths(c, thread_id)

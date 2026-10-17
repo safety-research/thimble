@@ -36,6 +36,10 @@ import { RefEditor } from './RefEditor'
 
 export type CardField = 'title' | 'takeaway'
 
+/** What a card says in its takeaway's place when the side thread that made it was stopped before it wrote one (backend
+ * notebook.UNFINISHED; bug hunt round 9, J5: the half-made chart showed no word of it, and main said no card was made). */
+export const UNFINISHED_LINE = 'Unfinished: its side thread was stopped before it wrote a takeaway.'
+
 export interface CardFaceProps {
   cell: Cell
   /** the room the body has, px */
@@ -156,6 +160,10 @@ function Face(p: CardFaceProps) {
         <div className="bcell-take bcell-take-none">
           <div className="chat-text bcell-take-text" />
           <ProblemMark text={problem} onAgain={p.onCheckAgain} />
+        </div>
+      ) : cell.unfinished && kind !== 'plan' ? (
+        <div className="bcell-take bcell-take-unfinished" role="note">
+          <p className="bcell-take-text">{UNFINISHED_LINE}</p>
         </div>
       ) : null}
       {p.after}

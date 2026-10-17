@@ -345,6 +345,9 @@ DATA_KINDS = ("example", "note", "label", "custom", "plan")  # carry a payload
 DEFAULT_KIND = "code"
 KEPT_ARGS = "kept_args"  # a card type's call arguments Keep set, which the card check gives back as they are
 TAKEAWAY_STALE = "takeaway_stale"  # the takeaway was written before the card's last run changed its outputs
+# the side thread that made the card was stopped before it wrote the card's takeaway (mark_unfinished); a takeaway
+# written later clears it
+UNFINISHED = "unfinished"
 # while thimble runs a card again because labels it read changed (rerun_on_labels), those label ids; gone when the
 # run ends
 REGENERATING_FOR = "regenerating_for"
@@ -1571,6 +1574,8 @@ def edit_cell(workspace: str, cell_id: str, *, code: str | None = None, title: s
         cell["takeaway"] = takeaway
         cell["takeaway_author"] = "analyst" if takeaway.strip() else None
         cell.pop(TAKEAWAY_STALE, None)
+        if takeaway.strip():
+            cell.pop(UNFINISHED, None)
         if takeaway.strip() and run:
             _verify_hook("takeaway", workspace, nb, cell)
     stamp_edit(ws, cell, before, by, shown=shown)
@@ -1610,6 +1615,50 @@ def drop_payload_key(workspace: str, cell_id: str, key: str) -> bool:
     write_notebook(ws, nb)
     _emit(workspace, cell)
     return True
+
+
+def cards_since(ws: Path, maker: str, since: str) -> tuple[list[dict], list[dict]]:
+    """The cards `maker` (`chat:<id>`) made since the ISO time `since`, and those of others it changed since then (an
+    entry of their `edited` list by it), each list in the groups' order."""
+    def at(ts: Any) -> float:
+        try:
+            got = datetime.fromisoformat(str(ts or "").replace("Z", "+00:00"))
+        except ValueError:
+            return float("-inf")
+        return (got if got.tzinfo else got.replace(tzinfo=timezone.utc)).timestamp()
+
+    start = at(since) if since else float("-inf")
+    made: list[dict] = []
+    changed: list[dict] = []
+    for _, nb in _stored(ws):
+        for cell in nb["cells"]:
+            if cell.get("created_by") == maker and at(cell.get("created_ts")) >= start - 1:
+                made.append(cell)
+            elif any(isinstance(e, dict) and e.get("by") == maker and at(e.get("ts")) >= start - 1
+                     for e in cell.get("edited") or []):
+                changed.append(cell)
+    return made, changed
+
+
+@_changes
+def mark_unfinished(workspace: str, cell_ids: list[str]) -> list[str]:
+    """Mark each card of `cell_ids` that has no takeaway unfinished (UNFINISHED): the side thread that made it was stopped
+    before it wrote one, and the card stays on the canvas saying so (agents.interrupt_route; bug hunt round 9, J5). No
+    edit is stamped, as for a run. The ids marked."""
+    ws = _ws(workspace)
+    marked: list[str] = []
+    for cid in cell_ids:
+        hit = _locate(ws, cid)
+        if hit is None:
+            continue
+        nb, cell = hit
+        if str(cell.get("takeaway") or "").strip() or cell.get("kind") == PLAN_KIND or cell.get(UNFINISHED):
+            continue
+        cell[UNFINISHED] = "stopped"
+        write_notebook(ws, nb)
+        _emit(workspace, cell)
+        marked.append(cid)
+    return marked
 
 
 # --- the card's history ---
@@ -3712,6 +3761,7 @@ def append_takeaway(workspace: str, cell_id: str, text: str, *, only_if_empty: b
     before = content_of(cell)
     cell["takeaway"] = text if overwrite or not existing else (existing + "\n\n" + text).strip()
     cell.pop(TAKEAWAY_STALE, None)
+    cell.pop(UNFINISHED, None)
     if author:
         cell["takeaway_author"] = author
     if runnable(cell):
