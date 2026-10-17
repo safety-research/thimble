@@ -235,6 +235,17 @@ def test_the_builder_and_the_reviewer_are_registered_to_keep_a_design_the_propos
     assert ask in reviewer and "keep that design" in reviewer
 
 
+def test_bug_hunt_i12_only_a_code_ticket_s_prompt_names_where_thimble_s_code_is(board):
+    """The builder's preamble, shared with code tickets, named thimble's code folders, which it then searched for what
+    its docs did not say (about 20 of one build's 63 permission asks in Manual mode). Only a code ticket's prompt names
+    them now."""
+    from app import ticket_tools
+
+    builder = subagents.roles(CORPUS)["view-builder"]["prompt"]
+    code = "thimble's own code is the server `backend/app/`"
+    assert code not in builder and code in ticket_tools.definition(CORPUS)["prompt"]
+
+
 # --------------------------------------------------------------------------- the gate tools
 
 
@@ -254,6 +265,29 @@ async def test_finish_view_registers_a_passing_view_once_and_tells_main(board, b
     again = await _call("finish_view", {}, agent, key)
     assert again.text.endswith(tools.hint("finish-view-pass")) and len(heard) == 1 and gates.count(slug) == 2, \
         "a second finish runs no gate and tells main nothing more"
+
+
+async def test_bug_hunt_i12_view_reference_gives_the_builder_the_docs_and_examples_it_names_in_one_call(
+        board, bridge, gates):
+    """In Manual mode the builder's Reads of thimble's docs and examples were one permission ask each (and it went on
+    into thimble's code). view_reference gives the docs and worked examples it names, whole, for the page its build
+    makes, in one call; a name it does not know lists the names; it is the builder's alone."""
+    slug = _propose(asked=True)
+    agent = await _started(slug)
+    key = view_tools.build_key(slug)
+    res = await _call("view_reference", {"docs": ["color", "charts.md"], "examples": ["repository"]}, agent, key)
+    assert not res.is_error
+    color = (config.REPO_ROOT / "docs" / "color.md").read_text().strip()
+    reader = (views.EXAMPLES_DIR / "repository" / "reader.py").read_text().strip()
+    assert f'<doc name="color">\n{color}\n</doc>' in res.text and '<doc name="charts">' in res.text
+    assert f'<example view="repository" file="reader.py">\n{reader}\n</example>' in res.text
+    page = "view.term.js" if views.target_of(CORPUS, slug) == views.HTML_PAGE else "view.html"
+    assert 'file="view.json"' in res.text and f'file="{page}"' not in res.text
+    assert '<doc name="time-range">' not in res.text and 'view="timeline"' not in res.text, "only what it named"
+    res = await _call("view_reference", {"docs": ["kernel_thimble"]}, agent, key)
+    assert res.is_error and "rows-and-filters" in res.text and "kernel_thimble" in res.text
+    res = await tools.call(CORPUS, "view_reference", {"docs": ["color"]}, session=None, tool_use_id="toolu_main")
+    assert res.is_error, "main's own call"
 
 
 async def test_the_gate_tools_refuse_main_another_view_s_builder_and_a_builder_s_own_subagent(board, bridge, gates):
@@ -385,6 +419,41 @@ async def _reviewed(slug: str) -> tuple[str, str]:
     ans = await view_review.begin(CORPUS, slug, route=subagents.FOLLOW_ON)
     assert ans.started, dict(ans)
     return str(ans.agent_id), view_tools.review_key(slug)
+
+
+async def test_bug_hunt_i12_the_check_s_and_the_review_s_pictures_come_in_the_tool_s_result(
+        board, bridge, gates, pictures, hints, tmp_path, monkeypatch):
+    """In Manual mode each picture the builder or the reviewer looked at was a Read of its path outside the analyst's
+    folder, so one more permission ask each (6 in one build and review). view_check's picture and view_pictures'
+    pictures are image blocks of the tool's result, so no Read is needed; a check without a picture has none."""
+    import base64
+
+    slug = _propose(asked=True)
+    agent = await _started(slug)
+    key = view_tools.build_key(slug)
+    _draft(slug)
+    png = tmp_path / "check.png"
+    png.write_bytes(b"\x89PNG\r\n\x1a\nthe page")
+
+    async def answer(c, s, locators, picture):
+        return {"ok": True, "lines": ["the checks passed"], "png": str(png) if picture else None, "drawing": None}
+
+    real = views.check_answer
+    monkeypatch.setattr(views, "check_answer", answer)
+    res = await _call("view_check", {"picture": True}, agent, key)
+    images = [b for b in res.content if b["type"] == "image"]
+    assert not res.is_error and len(images) == 1 and images[0]["mimeType"] == "image/png"
+    assert base64.b64decode(images[0]["data"]) == png.read_bytes()
+    res = await _call("view_check", {}, agent, key)
+    assert [b["type"] for b in res.content] == ["text"], "no picture asked, none given"
+    monkeypatch.setattr(views, "check_answer", real)
+
+    other = _propose("Threads", asked=True)
+    reviewer, rkey = await _reviewed(other)
+    res = await _call("view_pictures", {"states": [{"state": "narrow", "why": "fit"}]}, reviewer, rkey)
+    images = [b for b in res.content if b["type"] == "image"]
+    assert not res.is_error and len(images) == 2, "the overview and the narrow page"
+    assert all(base64.b64decode(b["data"]).startswith(b"\x89PNG") for b in images)
 
 
 async def test_finish_review_restores_a_failing_revision_and_ends_the_review(board, bridge, gates, pictures, hints):

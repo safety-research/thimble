@@ -1500,7 +1500,8 @@ def _efforts(reg: dict[str, Any], agents: dict[str, dict[str, Any]]) -> dict[str
 
 
 def _typed(reg: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """The typed starts still waiting for main's Agent call, by request id: {role, values, key}."""
+    """The typed starts still waiting for main's Agent call, by request id: {role, values, key, inline}, `inline` true
+    when the trusted folder holds the whole prompt its agent gets (subagent_files.INLINE)."""
     out: dict[str, dict[str, Any]] = {}
     for table in ("pending", "requests"):
         rows = reg.get(table)
@@ -1512,7 +1513,8 @@ def _typed(reg: dict[str, Any]) -> dict[str, dict[str, Any]]:
             if str(r.get("state") or "") not in TYPED_LIVE:
                 continue
             out[str(r.get("id") or rid)] = {"role": _role_of(r.get("role")) or str(r.get("role") or ""),
-                                            "values": dict(r.get("values") or {}), "key": str(r.get("key") or "")}
+                                            "values": dict(r.get("values") or {}), "key": str(r.get("key") or ""),
+                                            "inline": bool(r.get("inline"))}
     return out
 
 

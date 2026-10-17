@@ -561,11 +561,12 @@ def _wanted(states: Any, left: int, term: bool = False) -> list[dict[str, Any]]:
     return more[:max(0, left)]
 
 
-async def pictures(c: str, slug: str, agent_id: str, states: Any) -> tuple[str, str, str]:
+async def pictures(c: str, slug: str, agent_id: str, states: Any) -> tuple[str, str, str, list[str]]:
     """view_pictures for the reviewer `agent_id`: in a round's first call the overview, then the states asked for, up
     to EXTRA_SHOTS a round, into views-work/<slug>/review/<round>/. (The pictures' lines, each its number, path and
     what it shows, then what the checks found; the records the pages fetched; what an extension's program that replaces
-    the view-review task found in them, program_reading.) NoPictures for none, or for a program that failed."""
+    the view-review task found in them, program_reading; the pictures' paths in order, which the tool's result
+    carries, none for a terminal page's drawings.) NoPictures for none, or for a program that failed."""
     prop = views.read_proposal(c, slug)
     view = views.read_view(c, slug)
     if prop is None or view is None:
@@ -593,6 +594,7 @@ async def pictures(c: str, slug: str, agent_id: str, states: Any) -> tuple[str, 
         raise NoPictures(why)
     extra = sum(1 for w in wanted if w["state"] != "overview")
     _set(c, slug, pictured=rnd, extra_left=left - extra, shots=done + sum(1 for s in shots if s.get("png")))
+    pngs = [str(s["png"]) for s in shots if s.get("png")]
     lines = [f"{i}: {s['png']} ({_about(s)})" for i, s in enumerate(shots, done + 1) if s.get("png")]
     if shots and shots[0].get("controls") and shots[0].get("state") == "overview":
         lines.append(f"The controls picture {done + 1} shows, by their text: "
@@ -600,7 +602,8 @@ async def pictures(c: str, slug: str, agent_id: str, states: Any) -> tuple[str, 
     checks = views.gate_notes(c, slug)
     if checks:
         lines += ["", "What the view's checks found:", *checks]
-    return "\n".join(lines), records_text(shots) or "-", await program_reading(c, slug, agent_id, prop, view, shots)
+    return ("\n".join(lines), records_text(shots) or "-", await program_reading(c, slug, agent_id, prop, view, shots),
+            pngs)
 
 
 async def draw(c: str, slug: str, wanted: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -625,7 +628,7 @@ async def draw(c: str, slug: str, wanted: list[dict[str, Any]]) -> list[dict[str
 
 
 async def _drawn(c: str, slug: str, agent_id: str, prop: dict[str, Any], view: dict[str, Any],
-                 wanted: list[dict[str, Any]], rnd: int, left: int, done: int) -> tuple[str, str, str]:
+                 wanted: list[dict[str, Any]], rnd: int, left: int, done: int) -> tuple[str, str, str, list[str]]:
     """pictures of a terminal page: the drawings of the states `wanted` (draw), each with what it shows and the text
     itself, then what the checks found; the records the programs fetched; what an extension's program found."""
     shots = await draw(c, slug, wanted)
@@ -640,7 +643,7 @@ async def _drawn(c: str, slug: str, agent_id: str, prop: dict[str, Any], view: d
     checks = views.gate_notes(c, slug)
     if checks:
         lines += ["", "What the view's checks found:", *checks]
-    return "\n".join(lines), records_text(shots) or "-", await program_reading(c, slug, agent_id, prop, view, shots)
+    return "\n".join(lines), records_text(shots) or "-", await program_reading(c, slug, agent_id, prop, view, shots), []
 
 
 def _drawn_about(s: dict[str, Any]) -> str:

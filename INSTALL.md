@@ -63,8 +63,10 @@ call, so thimble's agents keep working while you watch the browser. Start with `
 `~/.claude/settings.json` (a project's settings can't choose auto). The first time Claude reads a file outside the folder
 you opened, such as an agent's notes in thimble's workspaces folder, Claude Code asks once whether to allow such reads.
 
-In Manual mode Claude Code asks before the first call of each thimble tool, before each edit thimble's agents make in
-their work folders (which are outside the folder you opened), and before most commands. Every permission request shows
+In Manual mode Claude Code asks before the first call of each of main's thimble tools, before every call of the tools
+thimble's agents have of their own (a view's builder and reviewer, a card check, the orientation's critique and a code
+ticket's agent), for which it offers no "don't ask again", before each edit thimble's agents make in their work folders
+(which are outside the folder you opened), and before most commands. Every permission request shows
 in the terminal, and you answer it there: the browser shows a waiting request read-only, with a line that says to answer
 it in the terminal. A card check runs as a subagent with two tools of its own, and Claude Code asks before it reads its
 task and before it sends its answer. A model call of thimble's (a prompt label, a label draft, a viewer suggestion, a
@@ -85,11 +87,14 @@ To be asked less, add this to `~/.claude/settings.json`, with the path from the 
 {
   "permissions": {
     "allow": ["mcp__plugin_thimble_thimble", "mcp__thimble-orientation", "mcp__thimble-view-builder",
-              "mcp__thimble-view-reviewer", "mcp__thimble-dev-ticket", "Bash(thimble-run:*)"],
+              "mcp__thimble-view-reviewer", "mcp__thimble-call", "mcp__thimble-dev-ticket", "Bash(thimble-run:*)"],
     "additionalDirectories": ["/home/you/.thimble/app/workspaces"]
   }
 }
 ```
+
+The `mcp__thimble-…` rules other than `mcp__plugin_thimble_thimble` are the only way to stop the asks of the agents'
+own tools. `additionalDirectories` lets Claude read thimble's workspaces without asking; edits there still ask.
 
 `Bash(thimble-run:*)` lets Claude run a card's code, or a code label, with `thimble-run` without asking. That code runs
 with your access, as any command Claude runs does, so leave this rule out if you want to see each run first.
@@ -198,8 +203,8 @@ What thimble needs from a managed Claude Code setup:
   extension programs beside the copy thimble gives them.
 - **`allowManagedPermissionRulesOnly`** makes Claude Code ignore the rules users save, so each thimble tool call asks in
   Manual mode and no "don't ask again" is offered. Add `mcp__plugin_thimble_thimble` and the agents' own servers
-  (`mcp__thimble-orientation`, `mcp__thimble-view-builder`, `mcp__thimble-view-reviewer`, `mcp__thimble-dev-ticket`) to
-  managed `permissions.allow`.
+  (`mcp__thimble-orientation`, `mcp__thimble-view-builder`, `mcp__thimble-view-reviewer`, `mcp__thimble-call`,
+  `mcp__thimble-dev-ticket`) to managed `permissions.allow`.
 - **`disableSideloadFlags`** makes Claude Code reject `--plugin-dir`. Sessions that load the installed plugin are not
   affected. Extension programs can't start.
 - **`allowManagedModsOnly`** keeps thimble's terminal UI from loading. `/thimble` and `/thimble browser` still work, through
@@ -694,8 +699,9 @@ that one and prints each path it deleted. The folder it read and your Claude Cod
 - `/thimble` is not recognized in a `claude` session: Claude Code doesn't have thimble's plugin, or it is off. `thimble
   doctor` says which. `bash <install folder>/scripts/install.sh` adds it, `/plugin` turns it on, and a session open
   since before then needs `/reload-plugins`.
-- Each thimble tool call asks you: answer "Yes, and don't ask again" once for each tool in the terminal, add the allow
-  line in [Permissions](#permissions), or use auto mode.
+- Each thimble tool call asks you: answer "Yes, and don't ask again" once for each of main's tools in the terminal, add
+  the allow line in [Permissions](#permissions), which is the only way for the tools of thimble's agents, or use auto
+  mode.
 - thimble's agents never start in a session you started with `claude`, and your shell sets a proxy: start claude with
   127.0.0.1 and localhost in `NO_PROXY` ([Start thimble](#start-thimble)).
 - The browser says it isn't signed in: type `/thimble browser` in your Claude Code terminal, or press `o` in thimble's

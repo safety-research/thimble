@@ -23,10 +23,12 @@ work folder of its own, check-work/<id>-<doc>/. Its task holds the context engin
 document, the check's prompt and the passages it covers. A run thimble's module starts (a click or a follow-on start)
 gets its task whole in its prompt (`## check-task-inline`), so it makes no Read call for it: in Manual mode each Read
 outside the analyst's folder is a permission ask (bug hunt F2: 42 of 87 asks were checks reading their task files).
-A typed start (main's run_check) gets a prompt main types out whole, so its task is a file there, task.md, written as
-task.md, task-2.md… when too large for one Read call (read_parts), each small enough that Read returns it whole, and its
-prompt names that file or those files in order (`## check-task-file`, `## check-task-files`). Every run writes the task
-file, its record. A check comments with add_comment and hands back one line, its run's summary. At most MAX_SESSIONS run at once; the others wait queued. A run has no time limit, and the
+A typed start (main's run_check) gets a prompt main types out whole, so main's Agent call names the task's file there,
+task.md, written as task.md, task-2.md… when too large for one Read call (read_parts), each small enough that Read
+returns it whole, in order (`## check-task-file`, `## check-task-files`); thimble's module gives its agent the task
+whole in place of that prompt (`## check-task-inline`, subagents.start_job's `inline`), so it reads no file either (bug
+hunt I12: Manual mode asked before each task file's Read), and only where the module cannot does the agent read the
+files. Every run writes the task file, its record. A check comments with add_comment and hands back one line, its run's summary. At most MAX_SESSIONS run at once; the others wait queued. A run has no time limit, and the
 analyst's Stop ends it (through thimble's plugin module, subagents.stop). A check made or changed (its name, prompt,
 colour, shown or covers) emits `checks` on the stream, so every Comments pane, the Report's and the canvas's in any tab,
 reads the checks again.
@@ -1001,7 +1003,7 @@ async def _launch(act: _Active) -> None:
         return
     ans = await subagents.start_job(
         c, ROLE, session_key(act.check, act.doc), task_prompt(act.route, work, text, paths),
-        subagents.values_for(c, ROLE), act.route,
+        subagents.values_for(c, ROLE), act.route, inline=task_prompt(subagents.FOLLOW_ON, work, text, paths),
         description=f"check: {check['name']} · "
                     f"{CANVAS_NAME if act.doc == CANVAS else ANSWERS_NAME if act.doc == ANSWERS else act.doc}",
         chat={"title": str(check["name"]), "check": act.check, "doc": act.doc, "run_id": act.run, "announce": False,

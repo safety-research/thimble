@@ -68,7 +68,8 @@
 // - agent.spawn: an Agent call for one of thimble's roles whose prompt's first line names a typed request, main's or a
 //   subagent's (a subagent of main's own may start thimble's agents, as Claude Code lets a subagent start subagents;
 //   a thread's fork makes none: main makes the call for it, tools._ask_main), gets that request's full model id, and
-//   the agent it starts that request's effort, which turn.step sets on its every request;
+//   the agent it starts that request's effort, which turn.step sets on its every request, and, when the request keeps
+//   one in the trusted folder (inline/<id>.md), the whole prompt its agent gets in place of the short one main typed;
 //   a child of such an agent whose type is not thimble's gets the same effort (its model it inherits already). These
 //   hooks never see a run of an agent this module started, which is why clicks register instead;
 // - prompt.attachment: Claude Code's `task_status` rows that name a check's or the card check's agent this module knows
@@ -273,7 +274,7 @@ type State = {
   roles: Record<string, Spec> // the roles as Settings name them (GET /api/module/roles)
   registered: Record<string, Spec> // what each role is registered with now
   efforts: Record<string, Effort> // agent id -> the effort turn.step sets (typed runs and their children)
-  requests: Record<string, { role: string; values: Values }> // typed starts waiting for main's Agent call
+  requests: Record<string, { role: string; values: Values; inline: boolean }> // typed starts waiting for main's Agent call; `inline`: trusted/inline/<id>.md holds its agent's whole prompt
   started: Set<string> // agents this module spawned: their turn.complete is posted
   checks: Map<string, string> // agents of thimble's check role, this module's spawns and main's Agent calls: each one's check (checkName)
   ours: Set<string> // agents of thimble's types this session started, this module's spawns and main's Agent calls (ownPointer)
@@ -442,7 +443,7 @@ async function fetchState($: Engine, m: State): Promise<string[]> {
   if (isObj(r.data.requests)) {
     const requests: State['requests'] = {}
     for (const [id, req] of Object.entries(r.data.requests)) {
-      if (isObj(req) && text(req.role)) requests[id] = { role: text(req.role), values: isObj(req.values) ? (req.values as Values) : {} }
+      if (isObj(req) && text(req.role)) requests[id] = { role: text(req.role), values: isObj(req.values) ? (req.values as Values) : {}, inline: req.inline === true }
     }
     m.requests = requests
   }
@@ -792,13 +793,13 @@ async function note($: Engine, line: string): Promise<Answer> {
 }
 
 /** The typed start a prompt's first line names, for `role`: from memory, else from the record fetched again. */
-async function typedStart($: Engine, m: State, prompt: string, role: string): Promise<{ id: string; values: Values } | null> {
+async function typedStart($: Engine, m: State, prompt: string, role: string): Promise<{ id: string; values: Values; inline: boolean } | null> {
   const words = (prompt.split('\n', 1)[0] ?? '').match(REQUEST_WORD) ?? []
   if (!words.length) return null
   const find = () => {
     for (const id of words) {
       const req = m.requests[id]
-      if (req && req.role === role) return { id, values: req.values }
+      if (req && req.role === role) return { id, values: req.values, inline: req.inline }
     }
     return null
   }
@@ -829,11 +830,25 @@ async function follow($: Engine, m: State, old: string): Promise<void> {
   for (const line of await fetchState($, m)) await note($, line)
 }
 
-/** What main's (or an agent's) Agent call starts with: a typed start's model, and the effort its agent and that
- *  agent's children of no thimble type run at. A typed start is found by the request its prompt's first line names,
- *  whoever makes the call: main, a subagent of main's own whose start tool call made the request, or the
- *  orientation for its critic. Never fails the call: a lookup that fails changes nothing. */
-async function spawning($: Engine, m: State, e: { subagentType?: string; parentAgentId?: string; prompt?: string }): Promise<{ model?: string; effort?: Effort; typed?: string }> {
+/** The whole prompt the typed start `id` keeps for its agent (trusted/inline/<id>.md, app/subagent_files.py INLINE),
+ *  which its agent gets in place of the short one main typed (bug hunt I12: a check main started read its task from
+ *  files, a permission ask each in Manual mode). Only a file whose first line names the same request; '' without. */
+async function inlinePrompt($: Engine, m: State, id: string): Promise<string> {
+  if (!m.ws || !/^[A-Za-z0-9_-]+$/.test(id)) return ''
+  try {
+    const got = await $.fs.read(trusted(m, `inline/${id}.md`))
+    return (got.split('\n', 1)[0] ?? '').includes(id) ? got : ''
+  } catch {
+    return ''
+  }
+}
+
+/** What main's (or an agent's) Agent call starts with: a typed start's model, its whole prompt when the request keeps
+ *  one (inlinePrompt), and the effort its agent and that agent's children of no thimble type run at. A typed start is
+ *  found by the request its prompt's first line names, whoever makes the call: main, a subagent of main's own whose
+ *  start tool call made the request, or the orientation for its critic. Never fails the call: a lookup that fails
+ *  changes nothing. */
+async function spawning($: Engine, m: State, e: { subagentType?: string; parentAgentId?: string; prompt?: string }): Promise<{ model?: string; effort?: Effort; typed?: string; prompt?: string }> {
   try {
     const type = e.subagentType ?? ''
     const role = roleOf(type)
@@ -841,8 +856,10 @@ async function spawning($: Engine, m: State, e: { subagentType?: string; parentA
       const typed = await typedStart($, m, e.prompt ?? '', role)
       if (!typed) return {}
       const effort = typed.values.effort
+      const prompt = typed.inline ? await inlinePrompt($, m, typed.id) : ''
       return {
         typed: typed.id,
+        ...(prompt ? { prompt } : {}),
         ...(text(typed.values.model) ? { model: text(typed.values.model) } : {}),
         ...(effort !== null && effort !== undefined && effort !== '' ? { effort } : {}),
       }
@@ -945,7 +962,7 @@ async function fetchStateFile($: Engine, m: State): Promise<Json> {
     if (!isObj(state[table])) continue
     for (const [id, r] of Object.entries(state[table] as Json)) {
       if (!isObj(r) || r.route !== 'typed' || (text(r.kind) || 'start') !== 'start' || !TYPED_LIVE.has(text(r.state))) continue
-      requests[text(r.id) || id] = { role: text(r.role).replace(/^thimble:/, ''), values: isObj(r.values) ? (r.values as Values) : {} }
+      requests[text(r.id) || id] = { role: text(r.role).replace(/^thimble:/, ''), values: isObj(r.values) ? (r.values as Values) : {}, inline: r.inline === true }
     }
   }
   m.requests = requests
@@ -1417,7 +1434,7 @@ export const register: Register = on => {
   on('agent.spawn', async ($, e, next) => {
     if (!m.active) return next(e)
     const got = await spawning($, m, e)
-    const r = await next(got.model ? { ...e, model: got.model } : e)
+    const r = await next(got.model || got.prompt ? { ...e, ...(got.model ? { model: got.model } : {}), ...(got.prompt ? { prompt: got.prompt } : {}) } : e)
     if (r.agentId && ours(m, e.subagentType ?? '')) {
       m.used.add(e.subagentType ?? '') // offered from now on (module note)
       m.ours.add(r.agentId)

@@ -6,6 +6,8 @@ Change only the worktree and your own folder. Never change the live checkout or 
 
 ## How to work
 
+thimble's own code is the server `backend/app/`, the web interface `frontend/src/`, the plugin `plugin/`, the prompts `prompts/`, and the design notes `docs/`.
+
 Your goal is the smallest change that does the job. Change nothing around the task, because every extra line is one more thing to break or review.
 
 Read the file the target points at and its neighbors first. Check what you touched.

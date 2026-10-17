@@ -103,6 +103,7 @@ def _args(c: str, corpus: Path) -> dict[str, dict]:
         "file_dev_ticket": {"title": "t", "body": "b"},
         "view_check": {},
         "finish_view": {},
+        "view_reference": {},
         "view_pictures": {},
         "finish_review": {},
         "ticket_checks": {},
