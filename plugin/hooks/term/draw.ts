@@ -3,7 +3,7 @@
 // returns its lines and a hit test from a cell to an item. The `note` and `text` kinds (noteLayout, textLayout) are the
 // cards drawn as their words.
 import { axisTicks, numberTicks, ownTicks, placeLabels, wallClock } from './axis'
-import { cut, cw, fmt, formatted, itemsRow, middleCut, quoted, viewRef, width } from './lib'
+import { cut, cw, fmt, formatted, itemsRow, middleCut, prefix, quoted, viewRef, width } from './lib'
 import type { Run, TableRuns } from './lib'
 import { COLORS } from './paint'
 import { hueOf } from './labels'
@@ -1181,6 +1181,26 @@ function wrapped(s: string, w: number, max: number): Wrapped {
   return out
 }
 
+/** `s` whole in lines of `w` columns, as a table's text cell shows it (live feedback, 10-17: a reason cut to two lines
+ *  could not be read): broken as wrapCell breaks it, and a run with no break that is wider than `w`, such as a long
+ *  link, broken where the row ends; nothing is cut. */
+export function wholeCell(s: string, w: number): string[] {
+  const n = Math.max(1, w)
+  const got = wrapped(s, n, Number.MAX_SAFE_INTEGER)
+  if (!got.cut) return got.lines
+  const out: string[] = []
+  for (const line of fill(pieces(s), n, Number.MAX_SAFE_INTEGER).lines) {
+    let rest = line
+    while (width(rest) > n) {
+      const head = prefix(rest, n)
+      out.push(head)
+      rest = rest.slice(head.length).trimStart()
+    }
+    if (rest) out.push(rest)
+  }
+  return out
+}
+
 /** The fewest columns that hold `s` in at most `max` lines with nothing cut and no break costing more than `most`. */
 function fitWidth(s: string, max: number, most = 1): number {
   const us = units(pieces(s), most)
@@ -1330,6 +1350,7 @@ export function boldCell(cell: string): Seg[] {
  * narrower than its widest number, its header in three lines or its other cells in two, broken between words; the first
  * column, which names the rows, then takes all it can, and the others widen with what is left. Columns that do not fit
  * beside each other go into blocks one under another, each led by the first column, as R prints a wide data frame.
+ * Each text cell shows whole, in as many rows as it takes (wholeCell).
  */
 function tableLayout(card: CardData, cols: number, hover: number): Layout {
   const heads = card.columns ?? []
@@ -1373,7 +1394,8 @@ function tableLayout(card: CardData, cols: number, hover: number): Layout {
     for (let j = 0; j < hl; j++) push(join(cs, (c, i) => boldCell(pad(head[i]![j - hl + head[i]!.length] ?? '', ws[c]!, numeric[c]))), -1, bi)
     push(join(cs, c => [{ s: '─'.repeat(ws[c]!), fg: COLORS.rule }]), -1, bi)
     cells.forEach((r, ri) => {
-      const p = cs.map(c => (numeric[c] ? [r[c]!] : wrapCell(r[c]!, ws[c]!, 2)))
+      // a text cell whole, in as many rows as it takes, as the browser's table shows it
+      const p = cs.map(c => (numeric[c] ? [r[c]!] : wholeCell(r[c]!, ws[c]!)))
       for (let j = 0; j < Math.max(...p.map(q => q.length)); j++) {
         push(
           join(cs, (c, i) => {
