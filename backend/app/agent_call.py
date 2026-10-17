@@ -15,9 +15,11 @@ subagent's. The agent's first message (prompts/call-task.md) holds the instructi
 part, the part's text. It takes parts with read_call, which gives a part's text and its pictures, and answers each with
 send_answer, whose answer is checked against the schema here; an answer that does not fit gets the errors back, and the
 agent sends it again. Both tools come from the agent's own shim (`thimble-mcp --private call`, subagents.private_server)
-and are the only tools its registration gives it (definition). Its hand-back reaches no one: the terminal UI drops it as
-it enters main (plugin/hooks/term/register.tsx), with the call's `done` line as the reason Claude Code prints in the row
-of the drop, and the module appends no note of its start to main (module_bridge._note).
+and are the only tools its registration gives it (definition). Its hand-back reaches no one: in auto mode thimble's
+hand-back hook takes it and refuses the call (plugin/bin/.thimble-watch --handback), which ends the agent's turn; one
+that still reaches main is dropped by the terminal UI as it enters (plugin/hooks/term/register.tsx), with the call's
+`done` line as the reason Claude Code prints in the row of the drop; and the module appends no note of its start to
+main (module_bridge._note).
 
 Files, not memory, carry a call, since on local transport the caller (main's MCP shim, where a card check runs), the
 agent's own shim (which serves read_call and send_answer) and the hooks' backend process (local_hooks, which hears the

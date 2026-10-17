@@ -47,8 +47,8 @@
 //   that turn completed or ABORT_WAIT_MS passed, after a TaskStop of each command of that turn the abort moved to the
 //   background, where Esc would have ended it), note ($.session.append). It never starts, sends or stops anything the
 //   server did not ask for. A spawn of the call role, the card check's agent (backend/app/agent_call.py), carries
-//   `drop`, the reason the terminal UI gives when it drops the agent's hand-back (callDone), and its type is never
-//   offered;
+//   `drop`, the reason the terminal UI gives when it drops a hand-back of the agent's that the hand-back hook did not
+//   take (callDone; plugin/bin/.thimble-watch --handback), and its type is never offered;
 // - model calls (backend/app/model_call.py), which run at once, beside that queue, so many run together (BESIDE):
 //   complete, one tool-less completion through the session's own API client and sign-in ($.model.complete, with an
 //   AbortController that a later cancel aborts), and fork, one tool-less completion over main's own transcript

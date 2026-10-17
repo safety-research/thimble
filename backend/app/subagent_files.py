@@ -757,6 +757,40 @@ def record_stop(state: dict[str, Any], hook: dict[str, Any]) -> dict[str, Any] |
     return entry
 
 
+HANDBACK_TOOL = "SubagentHandback"  # auto mode's tool for a subagent's report to its caller (session.HANDBACK_TOOL)
+# the roles whose hand-back thimble takes itself (record_handback): a check's and the card check's agents, whose reports
+# are thimble's alone; every other agent's hand-back reaches main as Claude Code sends it
+QUIET_ROLES = ("check", "call")
+
+
+def record_handback(state: dict[str, Any], hook: dict[str, Any]) -> dict[str, Any] | None:
+    """The hand-back hook's record (PreToolUse of SubagentHandback): for an agent of a QUIET_ROLES role that thimble's
+    module started, the report and the run it ends, `handback` {run, report, at} on its registry entry, which it
+    returns; the hook then refuses the call, so the report never enters main's queue. None for any other agent, and for
+    a check that main's own Agent call started (run_check), since Claude Code tells main of that agent's end, and an end
+    with no report would ask main to ask the agent for it."""
+    if str(hook.get("tool_name") or "") != HANDBACK_TOOL or role_of(hook.get("agent_type")) not in QUIET_ROLES:
+        return None
+    agent = str(hook.get("agent_id") or "")
+    entry = registry(state).get(agent) if agent else None
+    if not isinstance(entry, dict) or entry.get("role") not in QUIET_ROLES:
+        return None
+    if not entry.get("plugin_started") and not str(spawn_call(hook, agent) or "").startswith(PLUGIN_CALL):
+        return None
+    inp = hook.get("tool_input") if isinstance(hook.get("tool_input"), dict) else {}
+    entry["handback"] = {"run": int(entry.get("run") or 0), "report": str(inp.get("message") or "").strip(), "at": now()}
+    return entry
+
+
+def taken_handback(entry: Any) -> str | None:
+    """The report of the hand-back the hook took in the agent's current run (record_handback), '' for an empty one; None
+    when it took none in that run."""
+    if not isinstance(entry, dict) or not isinstance(entry.get("handback"), dict):
+        return None
+    got = entry["handback"]
+    return str(got.get("report") or "") if int(got.get("run") or 0) == int(entry.get("run") or 0) else None
+
+
 NO_CALL = "no-call"  # subagents.NO_CALL: a typed start whose caller's turn ended without its Agent call
 
 

@@ -9,6 +9,8 @@ with its input:
 
     started     SubagentStart of one of thimble's agents (subagents.hook_started: its chat, its role's start handler)
     stopped     SubagentStop of any subagent (subagents.hook_stopped: a turn's end; the typed starts a fork never made)
+    handback    PreToolUse of a hand-back the hook took from a check's or the card check's agent (subagents.hook_handback:
+                the run's end with its report)
     denied      PermissionDenied of a start or a message (subagents.hook_denied: R1)
     end         SessionEnd of main (subagents.hook_end: the running agents' chats end, "Stopped when Claude Code quit.")
     rekey       SessionStart of main for clear and resume (subagents.hook_rekey: the chats and the mirror follow)
@@ -66,8 +68,8 @@ from . import subagent_files as sf
 
 log = logging.getLogger("thimble.local_hooks")
 
-KINDS = ("started", "stopped", "denied", "end", "rekey", "main-stop", "mode-notice", "view-accept", "view-reject",
-         "view-retry", "view-propose-now", "view-term-page", "notice-dismiss")
+KINDS = ("started", "stopped", "handback", "denied", "end", "rekey", "main-stop", "mode-notice", "view-accept",
+         "view-reject", "view-retry", "view-propose-now", "view-term-page", "notice-dismiss")
 MIRROR_LOCK = "mirror.lock"  # in the workspace folder: held by the one process that runs passes
 TODO = "mirror.todo.jsonl"  # in the workspace folder: the calls that found the lock held, for the holder
 TICK_S = 1.0
@@ -244,6 +246,8 @@ async def _pass(c: str, items: list[tuple[str, dict[str, Any]]]) -> None:
             _step(kind, subagents.hook_started, c, hook)
         elif kind == "stopped":
             _step(kind, subagents.hook_stopped, c, hook)
+        elif kind == "handback":
+            _step(kind, subagents.hook_handback, c, hook)
         elif kind == "denied":
             _step(kind, subagents.hook_denied, c, hook)
         elif kind == "end":

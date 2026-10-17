@@ -114,6 +114,81 @@ def test_a_check_that_fails_denies_a_start_of_a_role_and_lets_any_other_call_go(
         state.rmdir()
 
 
+def handback_call(agent: str, agent_type: str, message: str = "Judgment calls: 2 comments.") -> dict:
+    return {"hook_event_name": "PreToolUse", "tool_name": "SubagentHandback", "session_id": MAIN_SID,
+            "tool_use_id": "toolu_hb1", "permission_mode": "auto", "agent_id": agent, "agent_type": agent_type,
+            "tool_input": {"message": message}}
+
+
+HANDBACK_AGENTS = {  # the module started each but chk-main, which main's run_check started with its own Agent call
+    "chk-mod": {"role": "check", "type": "thimble:check", "plugin_started": True},
+    "call-mod": {"role": "call", "type": "thimble:call", "plugin_started": True},
+    "chk-main": {"role": "check", "type": "thimble:check", "plugin_started": False},
+    "orient-mod": {"role": "orientation", "type": "thimble:orientation", "plugin_started": True},
+}
+
+
+def _handback_agents(ws: Path) -> None:
+    with sf.update(ws) as state:
+        sf.registry(state).update({a: {**e, "status": "running", "run": 0} for a, e in HANDBACK_AGENTS.items()})
+
+
+def test_the_handback_hook_takes_the_report_of_a_check_or_call_agent_the_module_started(tmp_path, ws):
+    """In auto mode an agent reports through SubagentHandback, which puts the report in main's queue. For a check's or
+    the card check's agent that thimble's module started, the hook keeps the report on the agent's entry and refuses
+    the call, `continue` false, which ends the agent's turn; every other agent's hand-back goes on as Claude Code made
+    it."""
+    _handback_agents(ws)
+    for agent in ("chk-mod", "call-mod"):
+        out = run_hook(tmp_path, "--handback", handback_call(agent, HANDBACK_AGENTS[agent]["type"], f"{agent} done"))
+        got = json.loads(out.stdout)
+        assert got["hookSpecificOutput"]["permissionDecision"] == "deny" and got["continue"] is False, agent
+        assert "report" in got["hookSpecificOutput"]["permissionDecisionReason"]
+        assert sf.taken_handback(sf.registry(sf.read(ws))[agent]) == f"{agent} done"
+    for agent, agent_type in (("chk-main", "thimble:check"), ("orient-mod", "thimble:orientation"),
+                              ("gp1", "general-purpose")):
+        out = run_hook(tmp_path, "--handback", handback_call(agent, agent_type))
+        assert out.returncode == 0 and out.stdout.strip() == "", agent
+        assert sf.taken_handback(sf.registry(sf.read(ws)).get(agent)) is None
+
+
+def test_the_handback_hook_refuses_nothing_when_it_cannot_keep_the_report(tmp_path, ws):
+    """A refused hand-back whose report thimble did not keep would be lost, so with subagents.json unreadable the call
+    goes on, and the terminal UI drops it as it enters main."""
+    _handback_agents(ws)
+    state = sf.state_path(ws)
+    state.unlink()
+    state.mkdir()
+    try:
+        out = run_hook(tmp_path, "--handback", handback_call("chk-mod", "thimble:check"))
+        assert out.returncode == 0 and out.stdout.strip() == ""
+    finally:
+        state.rmdir()
+
+
+def test_hooks_json_starts_python_for_a_hand_back_only_of_a_check_or_call_agent(tmp_path, ws):
+    """The SubagentHandback hook's command matches the agent's type in the shell, so a hand-back of any other agent
+    (the orientation's, a writer's) starts no Python."""
+    hooks = json.loads((WATCHER.parent.parent / "hooks" / "hooks.json").read_text())["hooks"]
+    [command] = [h["command"] for e in hooks["PreToolUse"] if e.get("matcher") == "SubagentHandback" for h in e["hooks"]]
+    _handback_agents(ws)
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE", "THIMBLE_SESSION"))}
+    env.update(THIMBLE_HOME=str(tmp_path / "hook-home"), THIMBLE_WORKSPACES_DIR=str(config.WORKSPACES_DIR),
+               THIMBLE_DATA_DIR=str(config.DATA_DIR), CLAUDE_PROJECT_DIR=str(config.corpus_dir(CORPUS)),
+               CLAUDE_PLUGIN_ROOT=str(WATCHER.parent.parent))
+    mark_open(tmp_path / "hook-home", config.corpus_dir(CORPUS))
+
+    def run(inp: dict) -> str:
+        done = subprocess.run(["/bin/sh", "-c", command], input=json.dumps(inp), capture_output=True, text=True,
+                              env=env, timeout=30, cwd=str(config.corpus_dir(CORPUS)))
+        assert done.returncode == 0, done.stderr
+        return done.stdout.strip()
+
+    assert json.loads(run(handback_call("chk-mod", "thimble:check")))["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert run(handback_call("orient-mod", "thimble:orientation", 'it said "thimble:check"')) == ""
+    assert sf.taken_handback(sf.registry(sf.read(ws))["orient-mod"]) is None
+
+
 def test_a_folder_of_no_workspace_writes_nothing(tmp_path):
     env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE")}
     env.update(THIMBLE_HOME=str(tmp_path / "h"), CLAUDE_PROJECT_DIR=str(tmp_path))

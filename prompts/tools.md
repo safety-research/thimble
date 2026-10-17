@@ -1306,6 +1306,10 @@ thimble starts its agents, and passes messages on to them, only with the call it
 
 thimble's agents continue only when the analyst asks. If they asked, call message_orientation and send what it gives; otherwise ask them first.
 
+## handback-taken
+
+thimble already has your report. Stop now and write nothing more.
+
 ## start-plan-mode
 
 Your Claude Code session is in plan mode, where thimble's agents would have to ask you before every card and every edit, so none of them starts or takes a message there. Switch out of plan mode first (shift+tab in your terminal).

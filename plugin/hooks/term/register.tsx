@@ -589,9 +589,12 @@ export const register: Register = (on, options) => {
 
   // a prompt carries thimble's guide when it is owed (after /clear, a switch that changed it, a resumed session).
   // A check's hand-back never reaches main: thimble shows its comments as the passage's tint and flag (SPEC-v2 J7).
-  // Claude Code queues a hand-back for main with no session.receive, so it is dropped here, as it enters, the reason saying
-  // what the check did (the owner, 10-17). So is a model call's agent's: its answer went to thimble through its tools, and
-  // the reason is the line the server gave its start (`thimble checked the card "…"`, backend/app/agent_call.py)
+  // thimble's hand-back hook (plugin/bin/.thimble-watch --handback) takes the report of a check's or a model call's agent
+  // that thimble's module started and refuses the call, so it never enters main's queue and Claude Code prints no row.
+  // One that still arrives (the hook failed, or main's own Agent call started the check) is dropped here, as it enters,
+  // since Claude Code queues a hand-back for main with no session.receive: the reason says what the check did (the owner,
+  // 10-17), or for a model call's agent, whose answer went to thimble through its tools, the line the server gave its
+  // start (`thimble checked the card "…"`, backend/app/agent_call.py)
   on('prompt.submit', async ($, e, next) => {
     const from = e.origin.kind === 'peer' ? AGENT_MESSAGE.exec(e.text)?.[1] : undefined
     const done = from === undefined ? undefined : callDone(from)
