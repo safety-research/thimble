@@ -278,16 +278,10 @@ async def _stream(c: str, inv_id: str, request: Request, after: int | None = Non
             last = max(last, _top(stored))
             while True:
                 try:
-                    ev = await asyncio.wait_for(q.get(), timeout=EVENTS_POLL_S)
+                    got = await asyncio.wait_for(q.get(), timeout=EVENTS_POLL_S)
                 except asyncio.TimeoutError:
-                    # nothing from this process: tail the file for events another process wrote
-                    fresh, pos = _read_jsonl_after(d / "events.jsonl", pos)
-                    for ev in fresh:
-                        if isinstance(ev.get("seq"), int) and ev["seq"] > last:
-                            last = ev["seq"]
-                            yield {"data": json.dumps(ev, ensure_ascii=False), "id": str(ev["seq"])}
-                    continue
-                if ev is _RESET:  # the log was replaced under this stream: start over on the new one
+                    got = None  # nothing from this process: the tail below finds what another process wrote
+                if got is _RESET:  # the log was replaced under this stream: start over on the new one
                     pos = _size(d / "events.jsonl")
                     fresh = _read_jsonl(d / "events.jsonl")
                     yield {"event": "reset", "data": "{}"}
@@ -295,9 +289,16 @@ async def _stream(c: str, inv_id: str, request: Request, after: int | None = Non
                         yield rec
                     last = _top(fresh)
                     continue
-                if isinstance(ev.get("seq"), int) and ev["seq"] > last:  # already replayed events are skipped
-                    last = ev["seq"]
-                    yield {"data": json.dumps(ev, ensure_ascii=False), "id": str(ev["seq"])}
+                # Tail the file before this process's event: another process (a `thimble-run label`, the shim) may have
+                # written a record with a lower seq that the tail has not read yet, and once this event raised `last`
+                # that record would be skipped as already sent (bug hunt C8: a label run's `concepts applied` was lost,
+                # so its canvas card kept 0 per value). This process's event is in the file too, and sent once.
+                fresh, pos = _read_jsonl_after(d / "events.jsonl", pos)
+                batch = [*fresh, *([got] if isinstance(got, dict) else [])]
+                for ev in sorted((e for e in batch if isinstance(e.get("seq"), int)), key=lambda e: e["seq"]):
+                    if ev["seq"] > last:  # already replayed or sent events are skipped
+                        last = ev["seq"]
+                        yield {"data": json.dumps(ev, ensure_ascii=False), "id": str(ev["seq"])}
         finally:
             _subscribers.get(key, set()).discard(q)
 

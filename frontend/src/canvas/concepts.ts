@@ -68,7 +68,17 @@ export interface ConceptDetailState {
   set: (k: ConceptDetail) => void
 }
 
-/** One concept in full for a label card: null until read, refreshed on its `concepts` events and polled while it runs. */
+/** What of a label a run or an edit changes, as the workspace's list of labels carries it; '' for none. Pure. */
+export function listedState(k: Concept | undefined): string {
+  if (!k) return ''
+  return JSON.stringify([k.version ?? 0, k.rev ?? 0, k.n_labeled ?? 0, k.counts ?? {}, k.last_run?.ts ?? '', k.run?.status ?? ''])
+}
+
+/**
+ * One concept in full for a label card: null until read, refreshed on its `concepts` events, polled while it runs, and
+ * read again when the workspace's list of labels (useConcepts) shows the label changed, so a card whose own event did
+ * not arrive still shows the run that ended (bug hunt C8: the card kept 0 per value while the Labels pane had them).
+ */
 export function useConceptDetail(ws: string, conceptId: string | null): ConceptDetailState {
   const [concept, setConcept] = useState<ConceptDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -92,9 +102,18 @@ export function useConceptDetail(ws: string, conceptId: string | null): ConceptD
     if (!conceptId) return
     void reload()
     const off = bus.on('concepts', (e) => e.concept === conceptId && void reload())
+    let listed = listedState(cache.get(ws)?.get(conceptId))
+    const onList = () => {
+      const now = listedState(cache.get(ws)?.get(conceptId))
+      if (now === listed) return
+      listed = now
+      void reload()
+    }
+    listeners.add(onList)
     return () => {
       alive.current = false
       off()
+      listeners.delete(onList)
     }
   }, [ws, conceptId, reload])
   const running = concept?.run?.status === 'running'
