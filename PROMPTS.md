@@ -172,3 +172,145 @@ New:
 > thimble's agents and its card checks run as subagents of your Claude Code session, under its permission mode; its
 > other single model calls (labels, view proposals) and `thimble fix` run as `claude -p` jobs in folders of their own,
 > so auth set only in a project's `.claude/` settings does not reach them.
+
+# Phase 2a: labels, the label draft, view fit, the viewer suggestion and a program's ask (branch 090/noclaude-2a)
+
+The same form: old text first, then new text. These callers now make their model call as a subagent of main
+(`thimble:call`), so the texts they sent as an Agent SDK session's system prompt and first message now fill the slots
+of the agent's first message (call-task.md, section 2 above): `{{instructions}}`, `{{tool}}` and the part.
+
+## 9. A call of many parts (prompts/call-task.md `## many-parts`)
+
+Old:
+
+> Call read_call to get the first part. Answer each part with send_answer, then call read_call again for the next
+> part. Do this until a result tells you to end your turn.
+
+New (send_answer's result now gives the next part, which saves the agent one request per part):
+
+> Call read_call to get the first part. Answer each part with send_answer. The result of send_answer gives your next
+> part, or it tells you to call read_call or to stop. Do this until a result tells you to stop.
+
+## 10. send_answer (prompts/tools.md `## send_answer`)
+
+Old:
+
+> Send your answer to a part of your task. The answer must agree with the schema in your task. When it does not agree,
+> the result gives the errors. Then correct the answer and send it again.
+
+New:
+
+> Send your answer to a part of your task. The answer must agree with the schema in your task. When it does not agree,
+> the result gives the errors. Then correct the answer and send it again. When it agrees, the result gives your next
+> part, if there is one.
+
+## 11. New tool results (prompts/tools.md hints)
+
+Old: none.
+
+| Hint | When | Text |
+|---|---|---|
+| send_answer-next | an answer was recorded, and the next part follows in the same result | thimble has your answer to part {part}. Your next part follows. |
+| read_call-page | a page of a part longer than 40,000 characters (agent_call.PAGE_CHARS) | `# Part {part}, page {page} of {pages}` then a blank line, then `{text}` |
+| read_call-page-next | after a page that is not the last | Part {part} continues. Call read_call to get page {page}. Do not answer part {part} before you read all its pages. |
+| read_call-page-last | after the last page | This is the last page of part {part}. Answer part {part} now. |
+
+A part is paged because Claude Code (2.1.301) saves a tool result of more than 50,000 characters to a file and shows
+the agent a 2KB preview, and the call's agent has no tool to read that file. A prompt label's batch stays under one
+page (concepts.BATCH_CHARS is now 36,000, was 40,000); only a whole file or run, read as far as the model's context
+holds, takes more than one page.
+
+## 12. The prompt label's classifier (prompts/labels.md, head)
+
+Text unchanged. Where it goes changed. Before: labels.md's head (the label's name, unit, definition, values, the
+rationale line and the analyst's examples) was the system prompt of one Agent SDK session per batch of 50 records, the
+batch's items (`### item {i} [{ref}]` and the text) were its first message, and "Return one entry per numbered item:
+its value against the category's definition." was the description of the `labels` output tool. Now one call holds the
+whole run: labels.md's head is `{{instructions}}` of the first message of each of its agents, the tool's description is
+`{{tool}}`, with the `labels` JSON schema after it, and each batch's items are one part, which the agent gets from
+read_call or from send_answer's result. A run of one batch puts its items in the first message itself
+(`## one-part`).
+
+## 13. The label draft (prompts/labels.md `## draft`), view fit (prompts/view-fit.md) and the viewer suggestion (prompts/file-viewer.md)
+
+Text unchanged. Before, each was the first message of an Agent SDK session (the viewer suggestion's `## suggest` its
+system prompt and `## file` its first message), and the output tool's description was the tool's. Now the first
+message of a `thimble:call` agent holds them: the draft's and view fit's whole prompt as the part, with empty
+`{{instructions}}`; the viewer suggestion's `## suggest` as `{{instructions}}` and `## file` as the part; and the tool
+descriptions as `{{tool}}` (draft: "Define the label the analyst described."; view fit: "Your decision on whether the
+view fits this corpus."; viewer suggestion: file-viewer.md `## proposal`).
+
+## 14. A program's ask (harness.ask)
+
+Text unchanged: the program's prompt is the part, "Give your answer with this tool." is `{{tool}}`, and its pictures
+come from read_call. Before, they were an Agent SDK session's first message, its output tool's description and image
+blocks in the first message.
+
+## 15. What the analyst sees in main's terminal
+
+Old (each was a `claude` session of the server's own): nothing in main's terminal.
+
+New, the agent's line in Claude Code's agent list while it runs, and the row of its dropped hand-back
+(`● Prompt dropped by a hook: <reason>`), per caller:
+
+| Caller | Agent line | Row of the dropped hand-back |
+|---|---|---|
+| prompt label (concepts.LABEL_TITLE, LABEL_DONE) | thimble label: {name} | thimble labeled {noun}s for the label "{name}" |
+| label draft (DRAFT_TITLE, DRAFT_DONE) | thimble label draft | thimble drafted a label |
+| view fit (view_fit.TITLE, DONE) | thimble view fit: {name} | thimble decided whether the view "{name}" fits |
+| viewer suggestion (views.SUGGEST_TITLE, SUGGEST_DONE) | thimble viewer suggestion: {files} | thimble checked whether {files} need a viewer |
+| a program's ask (harness.ASK_TITLE, ASK_DONE) | thimble {who}: ask | thimble answered {who} |
+
+`{noun}` is record, file, run, card or sentence; `{files}` is ".cast files" or "files without a suffix"; `{who}` is
+"{extension}'s program". A prompt label shows one agent line and one row per agent it started (the smoke in
+section 4 of NOCLAUDE.md gives the counts).
+
+## 16. Failure text
+
+A prompt label with no Claude Code session running thimble in the folder. Old (`claude` missing or not signed in,
+config.auth_problem, which still applies to a run an extension's program makes):
+
+> prompt labels cannot run: {problem}
+
+New, the same lead with agent_call.NO_SESSION as the detail (the run's error and its notice):
+
+> prompt labels cannot run: no Claude Code session runs thimble in this folder. Run `thimble` in the corpus folder, or
+> open Claude Code there and type /thimble
+
+Label from prompt with no session. Old (any failed draft):
+
+> the labels model gave no label ({status}): {detail}
+
+New, for no session only (other failures keep the old text):
+
+> Label from prompt needs Claude Code: no Claude Code session runs thimble in this folder. Run `thimble` in the corpus
+> folder, or open Claude Code there and type /thimble
+
+View fit and the viewer suggestion keep their own words; with no session their detail is agent_call.NO_SESSION, so
+Settings shows "thimble could not tell whether it fits here: no Claude Code session runs thimble in this folder. …",
+and a view fit that failed so is asked again as soon as a session runs thimble there (before: after 5 minutes).
+
+## 17. The docs
+
+INSTALL.md. Old:
+
+> thimble's agents and its card checks run as subagents of your Claude Code session, under its permission mode; its
+> other single model calls (labels, view proposals) and `thimble fix` run as `claude -p` jobs in folders of their own,
+> so auth set only in a project's `.claude/` settings does not reach them.
+
+New:
+
+> thimble's agents and its single model calls (card checks, prompt labels, label drafts, whether an extension's view
+> fits, viewer suggestions) run as subagents of your Claude Code session, under its permission mode; its view proposals
+> and `thimble fix` run as `claude -p` jobs in folders of their own, so auth set only in a project's `.claude/`
+> settings does not reach them.
+
+docs/agents.md, a program's `ask`. Old: "one model call on your own Claude, at the model, effort and fast mode Settings
+shows for the role or the task's agent". New: "one model call as a subagent of your Claude Code session (it fails when
+no session runs thimble in the folder), at the model and effort Settings shows for the role or the task's agent".
+
+docs/config.md, the classifier rows. Added after "so they take only `model`, `effort`, `fast` and `prompt`.": "A prompt
+label's batches, a label draft, whether an extension's view fits, a card check and a viewer suggestion run as subagents
+of your Claude Code session, at its speed, so `fast` changes only the check for a view proposal after a turn." Old
+"Each runs at exactly the model, effort and fast mode Settings shows for its row", new "Each runs at exactly the model
+and effort Settings shows for its row".
