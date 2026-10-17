@@ -165,7 +165,7 @@ const KINDS_SHOWN = [
       /^name: {6}● message to agents▏$/,
       /^kind: {6}prompt {3}regex {3}code$/,
       /^model: {5}claude-haiku-5-5 ▾$/,
-      /^unit: {6}records of files {3}cards {3}sentences$/,
+      /^unit: {6}records of files {3}whole files {3}runs {3}cards {3}sentences$/,
       /^scope: {5}board\.jsonl▏ {24}· 1 file matches · 44 lines$/,
       /^highlight: on {3}off$/,
       /^─+$/,
@@ -186,7 +186,7 @@ const KINDS_SHOWN = [
     label: { ...LABEL, ...MODELS, name: 'mentions force-push', kind: 'regex', spec: 'force[- ]push|--force', glob: 'agents/*.jsonl', scope_files: 48, scope_unit: 'lines', labels: ['yes', 'no'], label_stats: { n_labeled: 840, counts: { yes: 9, no: 831 } }, last_run: ran(840), shown: false },
     rows: [
       /^kind: {6}prompt {3}regex {3}code$/,
-      /^unit: {6}records of files {3}cards {3}sentences$/,
+      /^unit: {6}records of files {3}whole files {3}runs {3}cards {3}sentences$/,
       /^scope: {5}agents\/\*\.jsonl▏ +· 48 files match · 840 lines$/,
       /^highlight: on {3}off$/,
       /^pattern: {2}│ force\[- \]push\|--force +│$/,
@@ -215,7 +215,7 @@ const KINDS_SHOWN = [
     label: { ...LABEL, ...MODELS, name: 'claims a number', kind: 'prompt', description: "Does the card's takeaway state a number as a finding?", spec: '', unit: 'cell', glob: '', labels: ['yes', 'no'], label_stats: { n_labeled: 9, counts: { yes: 6, no: 3 } }, last_run: ran(9) },
     rows: [
       /^model: {5}claude-haiku-5-5 ▾$/,
-      /^unit: {6}records of files {3}cards {3}sentences$/,
+      /^unit: {6}records of files {3}whole files {3}runs {3}cards {3}sentences$/,
       /^scope: {4}the canvas's cards · 9 cards$/,
       /^prompt: {3}│ Does the card's takeaway state a number as a finding\? +│$/,
       /^ {10}● yes {2}━{30} {3}6$/,
@@ -243,7 +243,7 @@ for (const c of KINDS_SHOWN)
     // the definition in its field, from the label column to the pane's edge
     expect(await pane.find({ type: 'Client', key: `lb-def-${LABEL.id}-${c.label.kind}` })).toBeDefined()
     // the unit is the one it was made with, as in the browser: the others cannot be picked
-    for (const u of ['records of files', 'cards', 'sentences']) expect(await pane.find({ type: 'Button', key: `lu-${u === 'records of files' ? 'files' : u}` })).toBeUndefined()
+    for (const u of ['record', 'agent', 'run', 'cell', 'span']) expect(await pane.find({ type: 'Button', key: `lu-${u}` })).toBeUndefined()
     await pane.unmount()
   })
 

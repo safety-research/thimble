@@ -38,7 +38,7 @@ import type { BarRow, CardData, Cell, Item, Layout, Line, Seg } from './draw'
 import { fileRef } from './files'
 import { citationOf, placeOf, targetLabel } from './gestures'
 import type { Gesture, Target } from './gestures'
-import { FIRST as HOME_FIRST, HOME_HINTS, groupCards, homeLayout, homePick, homeReduce, labelBlocks, labelHue } from './home'
+import { FIRST as HOME_FIRST, HOME_HINTS, NO_FIT_MARK, UNSURE_MARK, groupCards, homeLayout, homePick, homeReduce, labelBlocks, labelHue, labelParts } from './home'
 import type { HomeAct, HomeCardGroup, HomeCite, HomeComment, HomeData, HomeLabel, HomeLayout, HomeOpen, HomeReport, HomeThread, HomeUi, HomeView } from './home'
 import { cardTag, cardsInline, chipLabel, chipWords, cid, clip, cutLine, fmt, formatted, itemsRow, labelRef, middleCut, labelState, labelStateWords, noControls, outputLine, plainMarks, quoted, recordFields, reportRef, stoppedTurn, viewRef, windowAt } from './lib'
 import type { Citation } from './lib'
@@ -2765,7 +2765,9 @@ const NAME_W = 40
 const GLOB_W = 36
 const BAR_W = 30
 const KINDS = ['prompt', 'regex', 'code'] as const
-const UNIT_CHOICES = [['files', 'records of files'], ['cards', 'cards'], ['sentences', 'sentences']] as const
+// what a label labels, by its unit, as the browser's label editor offers it: a file's records, whole files, runs (each
+// run's folder), the canvas's cards, the report's sentences
+const UNIT_CHOICES = [['record', 'records of files'], ['agent', 'whole files'], ['run', 'runs'], ['cell', 'cards'], ['span', 'sentences']] as const
 const ON_OFF = [['on', 'on'], ['off', 'off']] as const
 
 /** A label's definition as its panel edits it: a prompt label's prompt, else its pattern or code. */
@@ -3057,9 +3059,9 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
       ),
     )
   }
-  // unit: what it labels; only the one it has, since its rows are of that unit (the browser's `Over`, fixed once made)
-  const over = files ? 'files' : l.unit === 'cell' ? 'cards' : 'sentences'
-  rows.push(fieldLine('unit:', choices('lu', UNIT_CHOICES, over)))
+  // unit: what it labels, the one it has lit (a whole-file label's `whole files`, a run label's `runs`: bug hunt C14);
+  // only that one, since its rows are of that unit (the browser's `Over`, fixed once made)
+  rows.push(fieldLine('unit:', choices('lu', UNIT_CHOICES, UNIT_CHOICES.some(([u]) => u === l.unit) ? l.unit! : 'record')))
   // scope: a label over files, its glob in a field and how many files it matches and records they hold (Matt, 19:05: a
   // bare count read as a link); a label over cards or sentences, what it holds and how many
   const noun = files ? l.scope_unit || unit : unit
@@ -3129,10 +3131,14 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   rows.push(<Text key="lb-gap-values"> </Text>)
   const notes = [setByYou ? `${num(setByYou)} set by you` : '', filtered ? `filtered to ${filtered}` : ''].filter(Boolean).join(' · ')
   rows.push(fieldLine('values:', <Text dimColor wrap="truncate-end">{notes}</Text>))
-  const most = Math.max(0, ...values.map(v => counts[v] ?? 0))
-  const vw = Math.min(Math.max(12, Math.floor(cols / 3)), Math.max(1, ...values.map(v => width(v))))
+  // its records of no fit and unsure, counted as home counts them (labelParts), while labels are on
+  const u = (await featuresOf(cx)).labels ? (await cx.labelUnsure()).find(x => x.id === id) : undefined
+  const parts = labelParts({ slug: id, name, kind, trial: Boolean(l.trial), counts, values: l.labels ?? Object.keys(counts), paths: [], running: Boolean(running), ...(u ? { noFit: u.noFit, unsure: u.unsure } : {}) })
+  const extraNs = [parts.unsure, ...parts.parts.filter(x => x.mark === NO_FIT_MARK).map(x => x.n)].filter(n => n > 0)
+  const most = Math.max(0, ...values.map(v => counts[v] ?? 0), ...extraNs)
+  const vw = Math.min(Math.max(12, Math.floor(cols / 3)), Math.max(1, ...values.map(v => width(v)), ...(extraNs.length ? [width('unsure')] : [])))
   const cs = values.map(v => num(counts[v] ?? 0))
-  const cw = Math.max(3, ...cs.map(c => c.length))
+  const cw = Math.max(3, ...cs.map(c => c.length), ...extraNs.map(n => num(n).length))
   const barW = Math.max(4, Math.min(BAR_W, cols - L - 2 - vw - 2 - 1 - cw))
   const openValue = (v: string) => async () => {
     labelValueOpen = labelValueOpen === `${id}\n${v}` ? '' : `${id}\n${v}`
@@ -3223,6 +3229,27 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
       )
   })
   if (!values.length) rows.push(<Box key="lb-no-values" marginLeft={L}><Text dimColor>none</Text></Box>)
+  // then the records it is unsure of (among its values' counts) and those no category fit that no value names, as home
+  // and the Labels view count them (home.ts labelParts: bug hunt C14, home's `▒ unsure 18` missing here)
+  const extra: [string, string, number][] = [
+    ...(parts.unsure ? [[UNSURE_MARK, 'unsure', parts.unsure] as [string, string, number]] : []),
+    ...parts.parts.filter(x => x.mark === NO_FIT_MARK).map((x): [string, string, number] => [NO_FIT_MARK, x.name, x.n]),
+  ]
+  for (const [mark, what, n] of extra) {
+    const cells = most > 0 ? Math.max(1, Math.round((barW * n) / most)) : 0
+    rows.push(
+      <Box key={`lb-x-${what}`} flexDirection="row" marginLeft={L}>
+        <Text dimColor>{`${mark} `}</Text>
+        <Text dimColor>{clip(what, vw).padEnd(vw)}</Text>
+        <Text wrap="truncate-end">
+          <Text>{'  '}</Text>
+          <Text dimColor>{mark.repeat(cells)}</Text>
+          <Text>{' '.repeat(Math.max(0, barW + 1 - cells))}</Text>
+          <Text dimColor>{num(n).padStart(cw)}</Text>
+        </Text>
+      </Box>,
+    )
+  }
   // the whole files or runs its last run read only in part, one dim line under the values as the browser's Labels pane
   // has it, until a run cuts none (backend concepts.read_cut)
   if (!running && last?.cut?.line) rows.push(<Box key="lb-cut" marginLeft={L}><Text wrap="wrap" dimColor>{last.cut.line}</Text></Box>)
