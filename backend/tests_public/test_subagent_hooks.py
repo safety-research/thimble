@@ -208,6 +208,44 @@ def test_hooks_json_starts_python_for_a_hand_back_only_of_a_check_or_call_agent(
     assert sf.taken_handback(sf.registry(sf.read(ws))["orient-mod"]) is None
 
 
+def test_a_check_starts_no_work_in_the_background_so_its_run_ends_with_its_turn(tmp_path, ws):
+    """Bug hunt E10: a check that ended its turn with a background shell and a Monitor running ended it before its
+    hand-back, and each later end sent main a task notification. hooks.json's PreToolUse hook on Bash, Agent and Task
+    refuses a check's start in the background, with a reason that says to run it in the foreground; the same calls in
+    the foreground, and any other agent's in the background, go on. The check's registration has no Monitor."""
+    from app import checks
+
+    hooks = json.loads((WATCHER.parent.parent / "hooks" / "hooks.json").read_text())["hooks"]
+    [(matcher, command)] = [(e["matcher"], h["command"]) for e in hooks["PreToolUse"] for h in e["hooks"]
+                            if "--foreground" in h["command"]]
+    assert set(matcher.split("|")) == {"Bash", "Agent", "Task"}
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE", "THIMBLE_SESSION"))}
+    env.update(THIMBLE_HOME=str(tmp_path / "hook-home"), THIMBLE_WORKSPACES_DIR=str(config.WORKSPACES_DIR),
+               THIMBLE_DATA_DIR=str(config.DATA_DIR), CLAUDE_PROJECT_DIR=str(config.corpus_dir(CORPUS)),
+               CLAUDE_PLUGIN_ROOT=str(WATCHER.parent.parent))
+    mark_open(tmp_path / "hook-home", config.corpus_dir(CORPUS))
+
+    def run(agent_type: str, tool: str, **tool_input) -> str:
+        inp = {"hook_event_name": "PreToolUse", "tool_name": tool, "session_id": MAIN_SID, "tool_use_id": "toolu_fg1",
+               "permission_mode": "auto", "agent_id": "a-otter-17", "agent_type": agent_type, "tool_input": tool_input}
+        done = subprocess.run(["/bin/sh", "-c", command], input=json.dumps(inp), capture_output=True, text=True,
+                              env=env, timeout=30, cwd=str(config.corpus_dir(CORPUS)))
+        assert done.returncode == 0, done.stderr
+        return done.stdout.strip()
+
+    wait = "until [ -s quarry.log ]; do sleep 5; done"
+    for tool, args in (("Bash", {"command": wait, "run_in_background": True}),
+                       ("Agent", {"subagent_type": "general-purpose", "prompt": "Count the lines.", "description": "x"}),
+                       ("Task", {"subagent_type": "general-purpose", "prompt": "x", "run_in_background": True})):
+        out = json.loads(run("thimble:check", tool, **args))["hookSpecificOutput"]
+        assert out["permissionDecision"] == "deny", (tool, args)
+        assert "run_in_background set to false" in out["permissionDecisionReason"]
+    assert run("thimble:check", "Bash", command=wait) == ""
+    assert run("thimble:check", "Agent", subagent_type="Explore", prompt="x", run_in_background=False) == ""
+    assert run("thimble:orientation", "Bash", command='echo "thimble:check"', run_in_background=True) == ""
+    assert "Monitor" in checks.definition(CORPUS)["disallowedTools"]
+
+
 def test_a_folder_of_no_workspace_writes_nothing(tmp_path):
     env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE")}
     env.update(THIMBLE_HOME=str(tmp_path / "h"), CLAUDE_PROJECT_DIR=str(tmp_path))

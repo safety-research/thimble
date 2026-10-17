@@ -614,7 +614,7 @@ def browser_request(url: str, cookie: str) -> tuple[str, str]:
     return url, pair.strip()
 
 
-def _request(method: str, url: str, body: dict | None = None, timeout: float = 5.0,
+def _request(method: str, url: str, body: dict | None = None, timeout: float | None = 5.0,
              cookie: str | None = None) -> tuple[int, Any]:
     """(status, parsed json | text). Transport failures are (0, message); an HTTP error is (status, its body). The
     request proves the server's token (hook_auth), which the routes of hooks, the plugin and this CLI need; a write the

@@ -11,7 +11,8 @@ server's GET routes give the browser with `thimble state <surface>` (state), and
 routes make with `thimble act <kind>` (act). Each of these writes the same workspace files the server writes, so a
 workspace opens the same way in either transport. After the press, an act whose state the server holds in memory (a
 comment dismissed or opened again, a view proposal's answer, a notice's dismissal: SERVER_ACTS) goes to the server's
-route for `thimble act`, POST /api/ws/{c}/act (app/term_acts.py), a token route of this command's own, and the others
+route for `thimble act`, POST /api/ws/{c}/act (app/term_acts.py), a token route of this command's own, and so does a
+label's run (SERVER_RUNS), whose model calls only the server can hand to main's session after the press; the others
 run here. The browser's routes for those changes take only the browser's cookie, never the token this command proves.
 
 The transport is read from the workspace's `trusted/launch.json` (subagent_files.transport), which only activation
@@ -1127,6 +1128,12 @@ SERVER_ACTS = {
     "notice-dismiss": "/api/ws/{c}/notices/{id}/dismiss",
 }
 SERVER_ACT_TIMEOUT_S = 10.0
+# The acts that run in thimble's server once main's transport is the server, whose answer is the run's end: a label's
+# run, since a prompt label's model calls go through main's session's hooks module (model_call.py), which only the server
+# reaches after the press (module_bridge.model). Run here, it ended at once with "no Claude Code session runs thimble in
+# this folder" (bug hunt E8: a notice's Run again on these 2). The server runs the same act (term_acts.py), and holds the
+# request until the run ends; `label-stop`, a file this process writes, reaches it there as here.
+SERVER_RUNS = ("label-run",)
 
 
 def server_route(c: str, kind: str, payload: dict[str, Any]) -> str | None:
@@ -1149,15 +1156,16 @@ def server_route(c: str, kind: str, payload: dict[str, Any]) -> str | None:
     return path.format(**{k: quote(v, safe="") for k, v in values.items()})
 
 
-def _post_to_server(c: str, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+def _post_to_server(c: str, kind: str, payload: dict[str, Any],
+                    timeout: float | None = SERVER_ACT_TIMEOUT_S) -> dict[str, Any]:
     """The act `kind` posted to thimble's server (ACT_ROUTE) with the token's proof (cli._request): its JSON answer, or
-    StateError with why."""
+    StateError with why. `timeout` None waits for the answer as long as it takes (SERVER_RUNS)."""
     from urllib.parse import quote  # noqa: PLC0415
 
     from . import cli  # noqa: PLC0415
 
     status, body = cli._request("POST", f"{cli.api_url()}/api/ws/{quote(c, safe='')}/act",
-                                {"kind": kind, "payload": payload}, timeout=SERVER_ACT_TIMEOUT_S)
+                                {"kind": kind, "payload": payload}, timeout=timeout)
     if status != 200:
         why = body.get("detail") if isinstance(body, dict) else body
         raise StateError(f"thimble's server did not take this change ({status or 'no answer'}: {why})")
@@ -1166,7 +1174,8 @@ def _post_to_server(c: str, kind: str, payload: dict[str, Any]) -> dict[str, Any
 
 async def act(c: str, kind: str, payload: dict[str, Any], session: str | None = None) -> dict[str, Any]:
     """The change the browser's POST route for `kind` makes (ACT_USAGE): {ok: true, ...}. After the press, an act of
-    SERVER_ACTS made for a session whose transport is the server goes to the server's route (module note)."""
+    SERVER_ACTS or SERVER_RUNS made for a session whose transport is the server goes to the server's route (module
+    note)."""
     from fastapi import HTTPException  # noqa: PLC0415
 
     fn = _ACTS.get(kind)
@@ -1174,6 +1183,11 @@ async def act(c: str, kind: str, payload: dict[str, Any], session: str | None = 
         raise StateError(f"no act {kind!r}; {ACT_USAGE}")
     if not isinstance(payload, dict):
         raise StateError("the act's argument must be a JSON object")
+    if kind in SERVER_RUNS and transport(c, session) == SERVER:
+        got = await asyncio.to_thread(_post_to_server, c, kind, payload, None)
+        if got.get("ok") is False:
+            raise StateError(str(got.get("error") or f"thimble's server did not run {kind}"))
+        return {"ok": True, **{k: v for k, v in got.items() if k != "ok"}, "via": "server"}
     if kind in SERVER_ACTS and transport(c, session) == SERVER:
         if server_route(c, kind, payload) is not None:
             got = await asyncio.to_thread(_post_to_server, c, kind, payload)

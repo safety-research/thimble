@@ -53,7 +53,7 @@ import { registerPanelViews } from './views'
 import { closeView, openViewState, sendEvent, viewFault, viewMessage } from './viewhost'
 import { LOAD_TOOL, act, activateNow, appendGuide, bounded, conversationEnded, deliverStarts, deliveryLost, followConversation, guideAfterCompact, isActive, owedGuide, preScope, resetActivation, restoreFromMarker, rowStored, sawLoadThimble } from './activate'
 import { onFlip, pushChange, resetSettings, setOptions, syncSoon } from './settings'
-import { callDone, checkName } from '../thimble'
+import { callDone, checkName, ownNotice } from '../thimble'
 import { factsHeld, factsOf, flushFacts, keepFacts, resetTracker } from './tracker'
 import { openInBrowser } from './offramp'
 import { openChecks } from './checksview'
@@ -594,9 +594,12 @@ export const register: Register = (on, options) => {
   // One that still arrives (the hook failed, or main's own Agent call started the check) is dropped here, as it enters,
   // since Claude Code queues a hand-back for main with no session.receive: the reason says what the check did (the owner,
   // 10-17), or for a model call's agent, whose answer went to thimble through its tools, the line the server gave its
-  // start (`thimble checked the card "…"`, backend/app/agent_call.py)
+  // start (`thimble checked the card "…"`, backend/app/agent_call.py). Claude Code's task notification of such an agent
+  // is dropped the same way (ownNotice): it too is queued with no session.receive (enqueueAgentNotification), and a
+  // check's notice that it waits on its own background work, or ended with no report, is about thimble's plumbing (bug
+  // hunt E10); .thimble-watch --foreground keeps a check from starting such work, so none is sent
   on('prompt.submit', async ($, e, next) => {
-    const from = e.origin.kind === 'peer' ? AGENT_MESSAGE.exec(e.text)?.[1] : undefined
+    const from = e.origin.kind === 'peer' ? AGENT_MESSAGE.exec(e.text)?.[1] : e.origin.kind === 'task-notification' ? ownNotice(e.text) : undefined
     const done = from === undefined ? undefined : callDone(from)
     if (done !== undefined) return { drop: done }
     const check = from === undefined ? undefined : checkName(from)

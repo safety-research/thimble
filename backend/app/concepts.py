@@ -3624,15 +3624,21 @@ def _record_application(ws: Path, concept_id: str, app: dict, calibration: dict 
     run, store the recomputed calibration, the rows it wrote for its examples (`taught`, which ends its `teaching`) and
     the labels file's stats with its key and step its revision, since the run changed its rows (note_change). With
     `merge`, a run again over the units the last run could not label (start_again): the last run's record takes in what
-    it labeled and how many units are still without a value, with the run itself under `again`."""
+    it labeled and how many units are still without a value, with the run itself under `again`. A run again that failed
+    changed no row: the last run stays as it was, the failure under its `again` (`status` error and its `message`), so
+    the label shows no failed run of its own and a later run again still takes its values into that run (bug hunt E8)."""
     concept = read_concept(ws, concept_id)
     if concept is None:
         return None
     last = concept["applications"][-1] if concept["applications"] else None
-    merge = merge and isinstance(last, dict) and last.get("status") == "done" and app.get("status") == "done"
+    merge = merge and isinstance(last, dict) and last.get("status") == "done"
     if app.get("status") == "done":
         note_change(concept, "ran", ran_text(concept["unit"], app.get("total"), again=merge))
-    if merge:
+    if merge and app.get("status") != "done":
+        assert isinstance(last, dict)
+        tried = {k: app.get(k) for k in ("ts", "total", "labeled", "failed", "created_by", "status", "message")}
+        concept["applications"] = [*concept["applications"][:-1], {**last, "again": tried}]
+    elif merge:
         assert isinstance(last, dict)
         merged = {**last, "labeled": int(last.get("labeled") or 0) + int(app.get("labeled") or 0),
                   "failed": int(app.get("failed") or 0),
@@ -3654,6 +3660,15 @@ def _record_application(ws: Path, concept_id: str, app: dict, calibration: dict 
         concept["label_stats"] = label_stats
     write_concept(ws, concept)
     return concept
+
+
+def _again_scope(concept: dict, whole: int | None) -> int | None:
+    """The scope of a run again (start_again): the size of the scope the last run that ended read (its `matched_total`,
+    which `within` or a sample narrowed), else `whole`, the scope its files hold."""
+    last = next((a for a in reversed(concept.get("applications") or [])
+                 if isinstance(a, dict) and a.get("status") == "done"), {})
+    n = last.get("matched_total")
+    return n if isinstance(n, int) and not isinstance(n, bool) else whole
 
 
 def _stored_stats(key: tuple[int, int] | None, stats: dict) -> dict | None:
@@ -3738,7 +3753,9 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
                 matched = index["total"]
                 if again_refs is not None:
                     # the units the last run could not label: a record's read by its ref, a whole file or run picked
-                    # from the stream below
+                    # from the stream below; the scope is that run's, as `within` or its sample narrowed it (bug hunt
+                    # E8: a run again within a label counted the whole glob, 71,298 records for 669)
+                    matched = _again_scope(concept, matched)
                     if unit == "record":
                         units = await asyncio.to_thread(_ref_units_of, corpus_dir, sources, again_refs)
                         total = len(units)
@@ -3841,7 +3858,8 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
             _progress(c, concept_id, status="error", message=str(e.detail), eta_s=None, phase=None)
             _record_application(ws, concept_id, {"ts": started, "paths": patterns, "total": total, "matched_total": matched,
                                                  "labeled": 0, "failed": total or 0, "status": "error", "message": str(e.detail),
-                                                 "created_by": created_by, "version": version})
+                                                 "created_by": created_by, "version": version, "within": within,
+                                                 "within_rev": within_rev}, merge=again_refs is not None)
             _label_notice(c, concept, error=str(e.detail))
             raise
         except asyncio.CancelledError:
@@ -3856,7 +3874,8 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
             _progress(c, concept_id, status="error", message=msg, eta_s=None, phase=None)
             _record_application(ws, concept_id, {"ts": started, "paths": patterns, "total": total, "matched_total": matched,
                                                  "labeled": 0, "failed": total or 0, "status": "error", "message": msg,
-                                                 "created_by": created_by, "version": version})
+                                                 "created_by": created_by, "version": version, "within": within,
+                                                 "within_rev": within_rev}, merge=again_refs is not None)
             _label_notice(c, concept, error=msg)
             raise HTTPException(502, f"apply failed: {msg}") from e
         try:
