@@ -78,7 +78,7 @@ const SYNTHETIC_RE = /^\s*No response requested\.\s*$/
 const THIMBLE_TOOL = /^mcp__plugin_thimble_thimble__/
 // a message of another agent's as main reads it (a subagent's hand-back), and why one of a check's is dropped
 const AGENT_MESSAGE = /<agent-message from="([^"]+)"/
-const CHECK_DROPPED = "thimble shows a check's comments where they apply"
+const CHECK_DROPPED = 'a thimble check finished; its comments are marked in the answer'
 const CARD_TOOL = /^mcp__plugin_thimble_thimble__(add_card|edit_card|apply_label)$/
 const VIEW_TOOL = /^mcp__plugin_thimble_thimble__propose_view$/
 
