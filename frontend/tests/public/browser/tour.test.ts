@@ -6,8 +6,8 @@
 // offers nothing; and the page the screenshot tool opens at a card (backend tools._shot_card_in_ui) shows no welcome
 // over the card and records no offer. The tour never lays an example over the analyst's files: Take the tour opens the
 // demo workspace in a frame under a banner that says it is example data, the steps run in that frame, and Exit tour (or
-// the tour's own end) leaves the analyst's page exactly as it was. With no demo installed, the card says so and offers
-// only to skip.
+// the tour's own end) leaves the analyst's page exactly as it was. With no demo installed, the frame first sets up the
+// tour's example workspace (POST /api/tour/workspace), and the tour runs there all the same.
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -171,6 +171,11 @@ function answer(route: Route, server: Server) {
     if (p === '/api/tour/seen' && method === 'POST') {
       server.seen = true
       return json({ seen: true })
+    }
+    if (p === '/api/tour/workspace' && method === 'POST') {
+      // the server sets up the worked example from the sample it ships (backend tour.py)
+      for (const list of [server.names, server.rows]) if (!list.includes(DEMO)) list.push(DEMO)
+      return json({ name: DEMO })
     }
     if (p === '/api/ui/key') return route.fulfill({ status: 204, body: '' })
     if (p === '/api/ui/paired') return json({ paired: true, id: 'x' })
@@ -390,25 +395,22 @@ test('a frame whose tour does not start closes, and the page says so', async () 
   }
 }, 60_000)
 
-test('with no demo installed the tour says so, names the command, and offers only to skip: no example is shown', async () => {
-  const { page, close } = await open({ W: 1440, H: 900, demo: false })
+test('with no demo installed, Take the tour sets up the example workspace and runs the tour there', async () => {
+  const { page, server, close } = await open({ W: 1440, H: 900, demo: false })
   try {
     await page.waitForSelector('.tour-pop.tour-welcome', { timeout: 20000 })
-    const w = await page.evaluate(() => ({
-      title: document.querySelector('.tour-title')?.textContent,
-      text: [...document.querySelectorAll('.tour-body')].map((p) => p.textContent),
-      buttons: [...document.querySelectorAll('.tour-pop button')].map((b) => b.textContent?.trim()),
-    }))
-    assert.deepEqual(w, {
-      title: 'Welcome to thimble',
-      text: ["The tour runs in thimble's demo workspace, on example data, and the demo isn't installed here.", 'To install it, run thimble demo in a terminal. Then take the tour from Settings.'],
-      buttons: ['Skip tour'],
-    })
-    await page.click('.tour-pop [data-tour="skip"]')
+    assert.equal(await page.evaluate(() => document.querySelector('.tour-body')?.textContent), 'Would you like a short tour? The demo tour uses example data.')
+    const before = await pageState(page)
+    await page.click('.tour-pop [data-tour="begin"]')
+    const frame = await tourFrame(page)
+    assert.deepEqual(await stepIn(frame, 1), { title: 'The chat', count: '1 of 9' })
+    assert.ok(server.writes.includes('POST /api/tour/workspace'), 'the workspace was set up')
+    await page.click('.tour-banner-exit')
+    await page.waitForFunction(() => !document.querySelector('.tour-frame'), null, { timeout: 5000 })
     await sleep(300)
-    assert.equal(await page.$('.tour-root'), null, 'Skip tour closes it')
-    assert.equal(await page.$('.tour-frame'), null, 'no frame')
-    assert.equal((await pageState(page)).examples, 0, 'no example')
+    const after = await pageState(page)
+    assert.equal(after.files, before.files, 'the analyst’s folder as it was')
+    assert.equal(after.examples, 0, 'no example on it')
   } finally {
     await close()
   }

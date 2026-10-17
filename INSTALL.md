@@ -577,8 +577,8 @@ needs Claude shows the same note in the chat.
 
 The product tour (offered on the first launch, and under Settings, Take the tour) runs in a demo dataset's workspace,
 never over your own files: it opens that workspace in a frame over the page, under a banner that says it is example
-data, with Exit tour, and when it ends your folder is as you left it. Without a demo dataset installed, the tour says so
-and names `thimble demo`.
+data, with Exit tour, and when it ends your folder is as you left it. Without a demo dataset installed, the tour sets
+up a small example workspace from files every install ships (`example-timeline`, with no download) and runs there.
 
 The demo is static: it starts no Claude Code session and asks nothing about one. `--attach` starts one in the
 dataset's folder, once `claude auth status` says you are logged in (when you are not, it says how to log in). Without

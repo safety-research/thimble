@@ -295,6 +295,8 @@ export const api = {
   // ---- the product tour's first-launch state, one for the install (backend tour.py) ----
   tour: () => j<{ seen: boolean }>(`${apiBase()}/tour`),
   tourSeen: () => j<{ seen: boolean }>(`${apiBase()}/tour/seen`, { method: 'POST' }),
+  /** the tour's example workspace, set up on the spot from a sample every install ships when no demo is installed */
+  tourWorkspace: () => j<{ name: string }>(`${apiBase()}/tour/workspace`, { method: 'POST' }),
   // ---- corpora and files ----
   corpora: () => j<CorpusInfo[]>(`${apiBase()}/corpora`),
   /** `GET /workspaces`: every workspace this server knows, as the start page lists them (backend start_page.py). */

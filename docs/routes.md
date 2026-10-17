@@ -25,7 +25,7 @@ for `/api/ws/...`), the server takes the prefix off, and the cookie counts only 
 never sends the cookie to another server on 127.0.0.1 or localhost, whatever its port, since no other page
 knows the key.
 
-269 routes, 156 of them writes: 37 token, 1 code, 1 agent token, 123 cookie, 103 cookie or token, 1 media key, 3 none.
+270 routes, 157 of them writes: 37 token, 1 code, 1 agent token, 124 cookie, 103 cookie or token, 1 media key, 3 none.
 
 | Method | Path | Module | Credential |
 |---|---|---|---|
@@ -101,6 +101,7 @@ knows the key.
 | POST | `/api/tools/{name}` | tools | token |
 | GET | `/api/tour` | tour | cookie or token |
 | POST | `/api/tour/seen` | tour | cookie |
+| POST | `/api/tour/workspace` | tour | cookie |
 | POST | `/api/ui/key` | main | code |
 | POST | `/api/ui/pair` | main | token |
 | GET | `/api/ui/paired` | main | none |

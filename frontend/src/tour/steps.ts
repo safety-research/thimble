@@ -3,7 +3,7 @@
 // (examples.json, captured from real thimble markup; all but the views step's are marked Example); a step that asks the
 // analyst to act acts only on that example, so nothing reaches the server. The steps run only in the tour's frame on
 // thimble's demo workspace (lib/tourFrame), so they speak as a demo page does; the analyst's own page shows only the
-// welcome, or a card that says the demo isn't installed (offerTexts).
+// welcome, or a card that says the tour didn't open (offerTexts).
 import { DEMO_LINE } from '../lib/demo'
 import { setMarkup, type Api, type Example, type Step } from './engine'
 import reportFigs from './report-figs.json'
@@ -500,11 +500,6 @@ export function welcomeTexts(demo: boolean): string[] {
   return [`${ask} The demo tour uses <b>example data</b>.`]
 }
 
-/** What the tour says that the demo it runs in isn't installed, and how to install it. */
-export const MISSING_TEXTS = [
-  "The tour runs in thimble's demo workspace, on example data, and the demo isn't installed here.",
-  'To install it, run <code>thimble demo</code> in a terminal. Then take the tour from Settings.',
-]
 /** What the tour says when its frame on the demo workspace did not open. */
 export const FAILED_TEXTS = ["thimble's demo workspace didn't open, so the tour stopped. Your folder is as it was.", 'To try again, take the tour from Settings.']
 
@@ -517,11 +512,9 @@ export interface OfferTexts {
 }
 
 /** The card on the analyst's page (run offerTour): `offer`, the welcome that asks whether to take the tour
- * (welcomeTexts); `missing`, that the demo workspace the tour runs in isn't installed, with only Skip tour; `failed`,
- * that its frame did not open, with only Close. `first`: the first launch, which welcomes. */
-export function offerTexts(state: 'offer' | 'missing' | 'failed', demo: boolean, first: boolean): OfferTexts {
+ * (welcomeTexts); `failed`, that its frame did not open, with only Close. */
+export function offerTexts(state: 'offer' | 'failed', demo: boolean): OfferTexts {
   if (state === 'offer') return { title: 'Welcome to thimble', says: welcomeTexts(demo), begin: 'Take the tour', skip: 'Skip' }
-  if (state === 'missing') return { title: first ? 'Welcome to thimble' : "The demo isn't installed", says: MISSING_TEXTS, begin: null, skip: 'Skip tour' }
   return { title: "The tour didn't open", says: FAILED_TEXTS, begin: null, skip: 'Close' }
 }
 
