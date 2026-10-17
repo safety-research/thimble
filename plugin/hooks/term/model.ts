@@ -118,6 +118,29 @@ export function cardsOfCall(tool: string, input: unknown, text: string): string[
   return []
 }
 
+/** A shell command without the variable settings and `cd`s it opens with (`W=/long/work/folder; python3 …`,
+ *  `cd "$W" && …`), which are the same in every step of an agent's run: what is left tells its steps apart. */
+export function bareCommand(command: string): string {
+  const lead = /^(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*=(?:'[^']*'|"[^"]*"|[^\s;&]*)\s*(?:;|&&|\n)?\s*|^cd\s+(?:'[^']*'|"[^"]*"|[^\s;&]+)\s*(?:;|&&|\n)\s*/
+  let s = command.trim()
+  for (let m = lead.exec(s); m && m[0].length && m[0].length < s.length; m = lead.exec(s)) s = s.slice(m[0].length)
+  return s
+}
+
+/** What a step of an agent's run did, as the agent page lists it (panel.tsx drawAgent), after the tool's name: its
+ *  question; a Bash call's description, else its command with no leading settings (bareCommand); a file by its folder
+ *  and its name; a pattern, a name or a description. Bug hunt J2: a helper's 26 Bash steps all read `Bash ·
+ *  W=/mnt/…/workspaces/…`, the description each call carried left out. */
+export function stepWords(tool: string, input: unknown): string {
+  const inp = isObj(input) ? input : {}
+  const name = tool.replace(/^mcp__.*__/, '')
+  const path = str(inp.file_path ?? inp.notebook_path)
+  const file = path.split('/').length > 3 ? `…/${path.split('/').slice(-2).join('/')}` : path
+  const what = str(inp.question) || (name === 'Bash' ? str(inp.description) || bareCommand(str(inp.command)) : str(inp.command)) || file || str(inp.pattern) || str(inp.name) || str(inp.description)
+  const words = what.replace(/\s+/g, ' ').trim()
+  return words ? `${name} · ${words}` : name
+}
+
 /** The card ids a Bash command that runs `thimble-run card` names: after `card` or `card:`, or in a shell loop's list
  *  (`for c in prs-merged 9b4bb0cb; do $B card $c; done`); a name such as `prs-merged` or an older card's random id. */
 export function runIds(command: string): string[] {

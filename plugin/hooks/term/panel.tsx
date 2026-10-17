@@ -44,7 +44,7 @@ import { cardTag, cardsInline, chipLabel, chipWords, cid, clip, cutLine, fmt, fo
 import type { Citation } from './lib'
 import { linesEl, setListKeys, takeListKeys } from './lines'
 import type { LineHit } from './lines'
-import { aroundLine, docUnits, docsOf, labelOf, labelsOf, threadOf } from './model'
+import { aroundLine, docUnits, docsOf, labelOf, labelsOf, stepWords, threadOf } from './model'
 import type { DocFigure, DocSection } from './model'
 import { TITLE_ID, checksOf, commentFacts, commentLines, commentWho, commentsOf, flipResolved, passageWords, pickOf, resolvedShown, setComment, setPick, shownComments, stepPick, unitOf, unitParts } from './report'
 import type { DocComment } from './report'
@@ -4158,9 +4158,7 @@ async function drawAgent(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   let why = ''
   for (const ev of tt?.events ?? []) {
     if (ev.type === 'tool_use') {
-      const inp = isObj(ev.input) ? ev.input : {}
-      const what = str(inp.question ?? inp.command ?? inp.file_path ?? inp.pattern ?? inp.name ?? inp.description ?? '')
-      steps.push(await scrubIds(cx, `${str(ev.name).replace(/^mcp__.*__/, '')}${what ? ` · ${what.replace(/\s+/g, ' ')}` : ''}`))
+      steps.push(await scrubIds(cx, stepWords(str(ev.name), ev.input)))
       text = ''
     } else if (ev.type === 'text' && ev.api_error) raw = str(ev.delta ?? ev.text)
     else if (ev.type === 'text') text += str(ev.delta ?? ev.text)
