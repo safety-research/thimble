@@ -7,9 +7,10 @@
 // which stays as a quiet line once the notice is closed.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { NoticeStrip } from '../../src/chat/Notice.tsx'
+import { NoticeStrip, sameNotices } from '../../src/chat/Notice.tsx'
 import { bus } from '../../src/lib/bus.ts'
 import { noticeActions, parseNotice, setBrowserId } from '../../src/lib/notices.ts'
+import type { Notice } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 const BLOCKED = "Couldn't check for a view proposal: Claude's safeguards blocked the request."
 const BUILD = 'The view Agent Network failed to build: the page did not load.'
@@ -22,6 +23,22 @@ describe('a notice as the server sends it', () => {
     expect(parseNotice({ id: 'n2', text: BUILD, chat: 'dev-1', action: { label: 'Retry', do: 'view-retry', slug: 'agent-network' } })).toEqual({ id: 'n2', text: BUILD, chat: 'dev-1', action: { label: 'Retry', do: 'view-retry', slug: 'agent-network' } })
     expect(parseNotice({ id: 'n3', text: ' ' })).toBeNull()
     expect(noticeActions(null)).toEqual([])
+  })
+})
+
+describe('notices in the same words', () => {
+  test('are one card with all of them, oldest first, at the first one’s place; another agent, words or fix, or a Try again of its own, keeps one apart', () => {
+    const SWITCHED = "Claude's safeguards switched a reply of a helper of the orientation from Opus 5.5 to Opus 4.8."
+    const h = (i: number, extra: object = {}) => ({ id: `h${i}`, key: `safeguards:orient-h${i}`, kind: 'safeguards', agent: 'Orientation helper', text: SWITCHED, ...extra })
+    const open = [h(1), { id: 'p1', key: 'proposals:a', text: BLOCKED, action: TRY }, h(2), h(3, { agent: 'Writer' }), h(4), { id: 'p2', key: 'proposals:b', text: BLOCKED, action: TRY }, h(5, { action: OFF })]
+    const cards = sameNotices<Notice>(open, (n) => n.agent ?? '')
+    expect(cards.map((c) => [c.agent, c.all.map((n) => n.id)])).toEqual([
+      ['Orientation helper', ['h1', 'h2', 'h4']],
+      ['', ['p1']],
+      ['Writer', ['h3']],
+      ['', ['p2']],
+      ['Orientation helper', ['h5']],
+    ])
   })
 })
 
