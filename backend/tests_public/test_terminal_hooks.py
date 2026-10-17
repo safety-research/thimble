@@ -186,6 +186,54 @@ def test_with_plain_claude_a_side_thread_asked_after_the_press_wakes_idle_main_t
     assert ("POST", "/api/events/ack") in [(m, p) for m, p, _ in stand.seen]
 
 
+def _start_waker(env: dict) -> subprocess.Popen:
+    """SessionStart's waker as Claude Code runs it: hooks.json's asyncRewake command for the event, in a shell, with the
+    hook's input on its stdin."""
+    hooks = json.loads((BIN.parent / "hooks" / "hooks.json").read_text())["hooks"]["SessionStart"]
+    command = next(h["command"] for e in hooks if "matcher" not in e for h in e["hooks"] if h.get("asyncRewake"))
+    proc = subprocess.Popen(["/bin/sh", "-c", command], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True, env={**env, "CLAUDE_PLUGIN_ROOT": str(BIN.parent)},
+                            cwd=str(config.corpus_dir(CORPUS)))
+    proc.stdin.write(json.dumps({"session_id": MAIN, "hook_event_name": "SessionStart", "source": "startup"}))
+    proc.stdin.close()
+    return proc
+
+
+def test_session_start_s_waker_waits_for_the_marker_activation_writes_so_the_first_browser_question_wakes_idle_main(
+        tmp_path, ws):
+    """Bug hunt G1: Claude Code runs SessionStart's hooks as the session starts, and the terminal UI's activation writes
+    the session's marker a few seconds later. SessionStart's waker left at the gate, and no other hook runs while main is
+    idle, so the analyst's first question from the browser waited for a prompt typed in the terminal. In an interactive
+    session the waker now waits for the marker; under `claude -p`, which waits for this hook, it still leaves at once."""
+    env = env_for(tmp_path, ws, CLAUDE_CODE_ENTRYPOINT="cli")
+    marker = Path(env["THIMBLE_HOME"], "up", f"{MAIN}.active")
+    body = marker.read_text()
+    marker.unlink()
+    printing = _start_waker({**env, "CLAUDE_CODE_ENTRYPOINT": "sdk-cli"})
+    try:
+        assert printing.wait(timeout=1.5) == 0, "under claude -p it waits for no marker"
+    finally:
+        if printing.poll() is None:
+            printing.kill()
+    waker = _start_waker(env)
+    try:
+        time.sleep(1.5)
+        assert waker.poll() is None, "it waits for the marker rather than leaving at the gate"
+        marker.write_text(body)  # the terminal UI's activation
+        time.sleep(1.0)
+        out = events.post(CORPUS, "main", {"text": "What are these runs?"})
+        try:
+            code = waker.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            code = None
+    finally:
+        if waker.poll() is None:
+            waker.kill()
+    err = waker.stderr.read()
+    assert code == 2 and f'event="{out["id"]}"' in err and "What are these runs?" in err
+    assert event_files.waiting(ws) == []
+
+
 def test_no_hook_opens_a_socket_in_terminal_mode_and_each_file_first_hook_starts_the_backend_s_call(
         tmp_path, ws, monkeypatch, capsys):
     watcher, spawned = loaded(monkeypatch, tmp_path, ws)

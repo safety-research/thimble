@@ -1,5 +1,5 @@
 #!/bin/sh
-''''[ -n "${THIMBLE_SESSION:-}" ] && [ -n "${THIMBLE_SESSION_TOKEN:-}" ] && exit 0; h="${THIMBLE_HOME:-$HOME/.thimble}"; case "${1:-}" in --stream|--scratch|--work-budget) ;; --rekey) [ -z "${CLAUDE_PROJECT_DIR:-}" ] || [ ${#CLAUDE_PROJECT_DIR} -gt 200 ] || [ -e "$h/active/$(printf %s "$CLAUDE_PROJECT_DIR" | tr / %)" ] || exit 0;; *) if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ]; then [ -e "$h/up/$CLAUDE_CODE_SESSION_ID.active" ] || exit 0; else [ -z "${CLAUDE_PROJECT_DIR:-}" ] || [ ${#CLAUDE_PROJECT_DIR} -gt 200 ] || [ -e "$h/active/$(printf %s "$CLAUDE_PROJECT_DIR" | tr / %)" ] || exit 0; fi;; esac; exec "$(dirname "$0")/thimble-python" -S "$0" "$@" # '''
+''''[ -n "${THIMBLE_SESSION:-}" ] && [ -n "${THIMBLE_SESSION_TOKEN:-}" ] && exit 0; h="${THIMBLE_HOME:-$HOME/.thimble}"; case "${1:-}" in --stream|--scratch|--work-budget) ;; --rekey) [ -z "${CLAUDE_PROJECT_DIR:-}" ] || [ ${#CLAUDE_PROJECT_DIR} -gt 200 ] || [ -e "$h/active/$(printf %s "$CLAUDE_PROJECT_DIR" | tr / %)" ] || exit 0;; *) if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ]; then m="$h/up/$CLAUDE_CODE_SESSION_ID.active"; [ "${1:-}" != --start ] || [ "${CLAUDE_CODE_ENTRYPOINT:-}" != cli ] || { n=0; while [ ! -e "$m" ] && [ $n -lt 120 ]; do sleep 0.5; n=$((n+1)); done; }; [ -e "$m" ] || exit 0; else [ -z "${CLAUDE_PROJECT_DIR:-}" ] || [ ${#CLAUDE_PROJECT_DIR} -gt 200 ] || [ -e "$h/active/$(printf %s "$CLAUDE_PROJECT_DIR" | tr / %)" ] || exit 0; fi;; esac; exec "$(dirname "$0")/thimble-python" -S "$0" "$@" # '''
 """thimble's watcher: how thimble's events reach the analyst's Claude Code session, and how its hooks follow the
 session. The plugin's hooks (plugin/hooks/hooks.json) run it, and where those hooks are off (the Monitor route) main's
 Monitor does.
@@ -15,11 +15,18 @@ id>.active exists, the session marker activation writes (app/activate.py), named
 Claude Code gives its hooks. Where it gives none, the gate falls back to the folder's marker: an empty file in <thimble
 home>/active named for the folder's path (CLAUDE_PROJECT_DIR) with each `/` made `%`, which activation writes for the
 folder and for its real path (app/cli.py mark_active) and `thimble rm` takes away (app/runs.py purge); a hook passes it
-when Claude Code names no folder, and for a folder path over 200 characters, for which no marker is written. --rekey,
-whose session is new and has no marker yet, meets the folder's gate; --stream, --scratch and --work-budget never meet
-the gate, since only main's Monitor and the sessions of an extension's program run them, where thimble put them.
+when Claude Code names no folder, and for a folder path over 200 characters, for which no marker is written.
+SessionStart's waker (--start) comes before the marker: the terminal UI writes it as it activates, a few seconds into the
+session, and --rekey writes it after /clear or /resume, while Claude Code runs a session's SessionStart hooks at once.
+Since no other hook runs while main is idle, a waker that left at the gate would leave the analyst's first question from
+the browser waiting for a prompt typed in the terminal (bug hunt G1). So in an interactive session (CLAUDE_CODE_ENTRYPOINT
+cli) the gate of --start waits up to a minute for the session's marker; `claude -p` (sdk-cli) waits for this hook before
+it calls the model, so there it waits for nothing. --rekey, whose session is new and has no marker yet, meets the
+folder's gate; --stream, --scratch and --work-budget never meet the gate, since only main's Monitor and the sessions of
+an extension's program run them, where thimble put them.
 
-    .thimble-watch                      the asyncRewake hook (SessionStart, Stop, PreToolUse, UserPromptSubmit)
+    .thimble-watch                      the asyncRewake hook (Stop, PreToolUse, UserPromptSubmit)
+    .thimble-watch --start              the same for SessionStart, whose gate waits for the session's marker
     .thimble-watch --permission         the PermissionRequest hook: tells the server a prompt waits, decides nothing
     .thimble-watch --held               the UserPromptSubmit hook that adds the events held for main to the prompt
                                         and prints the lines of the events the watcher wrote out

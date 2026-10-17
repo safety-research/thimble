@@ -12,8 +12,9 @@ the session's guide marker:
   and so does a call of one of thimble's agents (its own prompt holds every part), a call without a tool_use_id (a
   program's) or one thimble's module made, and a thread's fork's start of an agent, whose Agent call main makes;
 - with main's first event of a kind that uses it (EVENT_SECTIONS, with_event): after the event's text, or for a quiet
-  event, which rides along on one line under `meanwhile:`, after those lines (events.meanwhile); a quiet event that
-  goes before it reaches main (events.drop_held) gives its parts back (untold).
+  event, which rides along on one line under `meanwhile:`, after those lines (events.meanwhile); an event that goes
+  before it reaches main (a quiet one, events.drop_held; a message the analyst's Stop took back, events.cancel_waiting)
+  gives its parts back (untold).
 Each part reaches each conversation once. A conversation is main's (its Claude Code session, launch.json's session
 followed through the moves --rekey records, so /clear starts a new one), or a subagent's, by its agent id from the
 caller hook's line of the call (callers.jsonl). A thread's fork starts from main's context, so it is not given a part
@@ -336,8 +337,9 @@ def after_call(c: str, name: str, args: dict[str, Any] | None, res: Any, session
 
 def with_event(c: str, kind: str, note: dict[str, Any], quiet: bool) -> dict[str, Any]:
     """`note`, main's event of `kind`, with the later parts of its kind's first event that main has not had: after its
-    text, or for a `quiet` event, which rides along on one line, as its `told` (and their names, `told_parts`), which
-    events.meanwhile puts after the lines (module note)."""
+    text, or for a `quiet` event, which rides along on one line, as its `told`, which events.meanwhile puts after the
+    lines (module note); their names as its `told_parts` either way, which untold gives back should the event go before
+    it reaches main."""
     names = EVENT_SECTIONS.get(kind)
     if not names:
         return note
@@ -354,12 +356,12 @@ def with_event(c: str, kind: str, note: dict[str, Any], quiet: bool) -> dict[str
     if quiet:
         return {**note, "told": text, "told_parts": parts}
     body = str(note.get("content") or "")
-    return {**note, "content": f"{body}\n\n{text}" if body else text}
+    return {**note, "content": f"{body}\n\n{text}" if body else text, "told_parts": parts}
 
 
 def untold(ws: Path, notes: "list[dict[str, Any]]") -> None:
-    """Quiet events that went before they reached main (events.drop_held): main has not had the later parts they carried
-    (`told_parts`), which go with the next event that uses them. Never raises."""
+    """Events that went before they reached main (events.drop_held, events.cancel_waiting): main has not had the later
+    parts they carried (`told_parts`), which go with the next event that uses them. Never raises."""
     parts = [str(p) for n in notes if isinstance(n, dict) for p in n.get("told_parts") or []]
     if not parts:
         return

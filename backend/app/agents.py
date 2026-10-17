@@ -1134,15 +1134,22 @@ async def interrupt_route(c: str, chat_id: str, request: Request) -> dict:
     """Stop: one of thimble's agents, any role's chat (route subagent), through the module (subagents.stop, TaskStop),
     which is a click, so the analyst's cookie (403 without it); a stop of an agent that had ended counts as done
     ({stopped, done}); without the module {stopped: false, kind: no-module}, and the card says to press Esc in the
-    agent's view. Main's running turn ends through the module as Esc ends it (subagents.stop_main, `$.turn.abort`), and
-    the mirror ends the turn (session.turn_stopped); a side thread's fork stops as an agent does (subagents.stop_fork,
+    agent's view. Main's Stop first takes back the messages main has not got yet (events.cancel_waiting,
+    session.cancelled: {stopped, cancelled} when no turn of main's runs, with or without the module); main's running
+    turn ends through the module as Esc ends it (subagents.stop_main, `$.turn.abort`), and the mirror ends the turn
+    (session.turn_stopped); a side thread's fork stops as an agent does (subagents.stop_fork,
     TaskStop of the fork that answers it), {stopped: false, kind: no-fork} while it has none. Both are clicks too, and
     each that stopped something tells main so, in a line no chat shows. A server task stops as before; the analyst's
     own subagent of main is main's to stop, so main is asked to."""
     if chat_id == MAIN_ID:
-        from . import session, subagents  # noqa: PLC0415 — each imports this module
+        from . import events, session, subagents  # noqa: PLC0415 — each imports this module
 
         subagents.analyst_only(request)
+        # a message main has not got yet is taken back (bug hunt G1: it ran minutes later); with no turn of main's
+        # running, that was all there was to stop
+        taken_back = events.cancel_waiting(c)
+        if taken_back and not session.cancelled(c, taken_back):
+            return {"stopped": True, "cancelled": len(taken_back)}
         ans = await subagents.stop_main(c)
         if ans.refused:
             return {"stopped": False, "kind": ans.kind, "reason": ans.reason}
