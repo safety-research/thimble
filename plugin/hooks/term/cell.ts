@@ -373,6 +373,37 @@ export function chartCard(cell: ThimbleCell, spec: VegaLite): CardData | null {
   return null
 }
 
+/** A chart of bars from a start to an end (Altair's `mark_bar` with `x` and `x2` along times or numbers and its rows'
+ *  names down `y`, a Gantt chart; or the same on its side, `y` and `y2`) as a dots card whose rows hold spans: each row's
+ *  bars on the start-to-end axis, colored by the chart's color field, in the order the names' axis sorts them (bug hunt
+ *  C9: it drew as a table of raw ISO times). A time written as a number is the instant it counts in ms, as Vega-Lite
+ *  reads one. Null for any other chart. */
+export function spansCard(cell: ThimbleCell, spec: VegaLite): CardData | null {
+  if (spec.layer || spec.facet || spec.hconcat || spec.vconcat || spec.concat || spec.spec || markOf(spec) !== 'bar') return null
+  const enc = spec.encoding ?? {}
+  const along = (e: Enc | undefined) => Boolean(e?.field) && !e!.aggregate && (e!.type === 'temporal' || e!.type === 'quantitative')
+  const discrete = (e: Enc | undefined) => Boolean(e?.field) && (e!.type === 'nominal' || e!.type === 'ordinal')
+  const ch = enc.x2?.field && along(enc.x) && discrete(enc.y) ? (['x', 'x2', 'y'] as const) : enc.y2?.field && along(enc.y) && discrete(enc.x) ? (['y', 'y2', 'x'] as const) : null
+  if (!ch) return null
+  const [a, a2, d] = ch
+  const from = enc[a]!.field!
+  const to = enc[a2]!.field!
+  const name = enc[d]!.field!
+  const time = enc[a]!.type === 'temporal'
+  const gf = enc.color?.field && enc.color.field !== name ? enc.color.field : ''
+  // a value along the axis: a time as written, or a number (a time's ms as its ISO time); '' for none
+  const at = (v: unknown): string | number => (typeof v === 'number' && Number.isFinite(v) ? (time ? new Date(v).toISOString() : v) : typeof v === 'string' && v.trim() ? v : '')
+  const rows = sortedBars(vegaRows(spec, spec).filter(r => at(r[from]) !== '' && at(r[to]) !== ''), enc, d, name)
+  if (!rows.length) return null
+  const strips = new Map<string, DotRow>()
+  for (const r of rows) {
+    const key = String(r[name] ?? '')
+    const row = strips.get(key) ?? strips.set(key, { name: key, dots: [], notes: [] }).get(key)!
+    row.dots.push({ x: at(r[from]), x2: at(r[to]), group: gf ? String(r[gf] ?? '') : '' })
+  }
+  return { ...blank(cell, 'dots'), x: from, y: name, strips: [...strips.values()] }
+}
+
 // the marks a dots chart draws its dots with
 const DOT_MARKS = new Set(['point', 'circle', 'square', 'tick'])
 
@@ -564,7 +595,7 @@ export function cardOfCell(cell: ThimbleCell, label?: ThimbleLabel | null): Draw
   const spec = first(cell, k => k.startsWith('application/vnd.vegalite')) as VegaLite | undefined
   if (spec && typeof spec === 'object') {
     const vl = plainFields(spec)
-    const chart = chartCard(cell, vl) ?? dotsCard(cell, vl)
+    const chart = spansCard(cell, vl) ?? chartCard(cell, vl) ?? dotsCard(cell, vl)
     if (chart) return { card: chart, error }
     const table = rowsTable(cell, axisOrder(anyRows(vl), vl))
     if (table) return { card: table, error }
