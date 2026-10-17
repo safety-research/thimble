@@ -3,7 +3,10 @@ in memory (local.SERVER_ACTS: the comments of a document and of Claude's answers
 the notices) posts here, POST /api/ws/{c}/act {kind, payload}. It is a token route that only thimble's command posts to
 (hook_auth.CLI_WS_PATHS), as the terminal UI's every change goes through `thimble act` (plugin/hooks/term/data.ts), and
 it makes the change that command makes on local transport before the press (local_hooks.ANSWERS), with the same answer:
-{queued: true}, or {queued: false, reason} for an answer to a view that thimble refused.
+{queued: true}, or {queued: false, reason} for an answer to a view that thimble refused. A label's run (`label-run`,
+local.SERVER_RUNS) runs here as that command runs it before the press (local._act_label_run), since only this server
+hands a prompt label's model calls to main's session after it; the answer comes once the run ends: the act's own, or
+{ok: false, error} for a run that could not start or failed.
 
 The browser's routes for the same changes keep refusing the token: a click there needs the browser's cookie
 (subagents.analyst_only). The token proves only what thimble's hooks, plugin and command change (hook_auth module note),
@@ -131,6 +134,19 @@ async def _notice_dismiss(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     return {"dismissed": notices.dismiss(c, _field(payload, "id")), "queued": True}
 
 
+async def _label_run(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """`thimble act label-run` after the press (module note): the run as that command makes it before the press, here,
+    where main's session's module takes its model calls (bug hunt E8); its refusal or failure as {ok: false, error}."""
+    from . import local  # noqa: PLC0415
+
+    try:
+        return await local._act_label_run(c, payload)
+    except local.StateError as e:
+        return {"ok": False, "error": str(e)}
+    except HTTPException as e:
+        return {"ok": False, "error": str(e.detail)}
+
+
 class ActBody(BaseModel):
     kind: str
     payload: dict[str, Any] = {}
@@ -153,4 +169,6 @@ async def act_route(c: str, body: ActBody) -> dict[str, Any]:
         return await _propose_now(c, payload)
     if kind == "notice-dismiss":
         return await _notice_dismiss(c, payload)
+    if kind == "label-run":
+        return await _label_run(c, payload)
     raise HTTPException(400, f"this route takes no act {kind!r}")

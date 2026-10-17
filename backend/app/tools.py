@@ -2759,9 +2759,12 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
                       if s.get("concept") and given else (given, 0))
     counts = ", ".join(f"{k} {v}" for k, v in sorted(applied.items()))
     unit = UNIT_WORDS.get(str(s.get("unit") or ""), s.get("unit") or "unit")
+    # a run that goes on is told by its rows so far, an earlier run's among them, and by its own failures so far, so its
+    # numbers need not add up to its size yet (bug hunt E8: 68 + 599 + 1 of 669, where the run ended 667 + 2)
+    sofar = " so far" if s.get("partial") else ""
     line = (f"applied label {s.get('name', name)} [[concept:{s.get('concept')}]] over {s.get('total', 0)} {unit}(s)"
             f"{' in ' + ', '.join(paths) if scope == 'files' else ''}{' within ' + within['label'] if within else ''}: "
-            f"{counts or ('no values' if s.get('none') else 'no values yet')}.")
+            f"{counts + sofar if counts else ('no values' if s.get('none') else 'no values yet')}.")
     if moved:
         before = ", ".join(f"{k} {v}" for k, v in sorted(given.items()))
         line += (f" These counts apply the analyst's verdicts, as thimble.labels() does: {moved} {unit}(s) the analyst set"
@@ -2769,7 +2772,7 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     if s.get("none"):  # files that keep no unit to label (concepts.none_why)
         line += f" {s['none']}" + (" Its counts from earlier runs are cleared." if s.get("dropped") else "")
     if s.get("failed"):
-        line += f" {s['failed']} {unit}(s) failed: {s.get('message') or 'no reason given'}."
+        line += f" {s['failed']} {unit}(s) failed{sofar}: {s.get('message') or 'no reason given'}."
     if s.get("skipped"):  # units with no words (a transcript's blank lines), which a prompt label does not ask about
         line += f" It skipped {s['skipped']:,} blank {unit}(s)."
     if (s.get("cut") or {}).get("line"):
