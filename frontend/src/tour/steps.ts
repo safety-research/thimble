@@ -1,7 +1,9 @@
 // The tour's steps (the shape engine.ts takes): which surface each needs, what it points at, where its popover sits,
 // what it says and what it brings; and what the welcome before them says. Every example is the tour's own
 // (examples.json, captured from real thimble markup; all but the views step's are marked Example); a step that asks the
-// analyst to act acts only on that example, so nothing reaches the server.
+// analyst to act acts only on that example, so nothing reaches the server. The steps run only in the tour's frame on
+// thimble's demo workspace (lib/tourFrame), so they speak as a demo page does; the analyst's own page shows only the
+// welcome, or a card that says the demo isn't installed (offerTexts).
 import { DEMO_LINE } from '../lib/demo'
 import { setMarkup, type Api, type Example, type Step } from './engine'
 import reportFigs from './report-figs.json'
@@ -257,9 +259,13 @@ const labelsExample = (api: Api): Example => {
   const lab = api.snap('txLabels', 'tour-ex-labels')
   lab.style.background = api.groundOf(api.q('.files-labels'))
   Object.assign(api.tag(lab).style, { right: '40px' })
+  // the workspace's own Labels pane, where it stands taller than the example's, is covered above it, so none of its
+  // labels show beside the example's
+  const cover = document.createElement('div')
+  cover.style.background = lab.style.background
   holdBrowser(api)
   const status = statusExample(api, 'agent-05.jsonl · Transcript')
-  api.ex.append(rd, lab, status.wrap)
+  api.ex.append(rd, cover, lab, status.wrap)
   // the transcript opens at line 22 and stays there while the panel's size changes, until anything else scrolls it
   let pinned = true,
     setTo: number | null = null
@@ -280,6 +286,8 @@ const labelsExample = (api: Api): Example => {
     if (!r) return false
     Object.assign(rd.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.width}px`, height: `${r.height}px` })
     if (L) Object.assign(lab.style, { left: `${L.x}px`, width: `${L.width}px`, top: `${L.y + L.height - lab.offsetHeight}px` })
+    const over = L ? L.height - lab.offsetHeight : 0
+    Object.assign(cover.style, L && over > 0 ? { display: '', left: `${L.x}px`, top: `${L.y}px`, width: `${L.width}px`, height: `${over}px` } : { display: 'none' })
     const sc = rd.querySelector<HTMLElement>('.reader-body')
     if (!sc || !sc.clientHeight) return
     if (pinned && setTo != null && Math.abs(sc.scrollTop - setTo) > 1) pinned = false
@@ -299,7 +307,7 @@ const labelsExample = (api: Api): Example => {
       Object.assign(thumb.style, { height: `${h}px`, transform: `translateY(${span > 0 ? ((bar.clientHeight - h) * sc.scrollTop) / span : 0}px)` })
     }
   }
-  return { els: { reader: rd, labels: lab, status: status.wrap }, layout }
+  return { els: { reader: rd, labels: lab, cover, status: status.wrap }, layout }
 }
 
 // ---------- the Report and its checks: the example (a captured report with its figures and the comments of its check
@@ -472,17 +480,10 @@ const scrollTo = (api: Api, el: Element | null | undefined, above = 120, smooth 
 }
 const inReport = (api: Api, sel: string) => (api.els.root as HTMLElement | undefined)?.querySelector<HTMLElement>(sel) ?? null
 
-/** What the steps about the chat and the ⌘-click box say: on a demo page (`demo`, lib/demo), that thimble isn't
- * connected to a live Claude Code session there, so the chat takes no typing, and what the chat is in a live
- * session. */
-export function sessionTexts(demo: boolean): { chat: [string, string]; terminal: [string, string]; ask: string } {
-  if (!demo) {
-    return {
-      chat: ['Your Claude Code session', 'This chat is your Claude Code session: ask it anything about the files.'],
-      terminal: ['Your terminal', 'The session also runs in the terminal where you started thimble. It shows the same conversation, and you can type in either.'],
-      ask: 'Type a question and press Enter. On a real card, the answer comes in a new thread in the chat.',
-    }
-  }
+/** What the steps about the chat and the ⌘-click box say. The tour runs on thimble's demo workspace (lib/tourFrame),
+ * where thimble isn't connected to a live Claude Code session, so the chat takes no typing; each says what the chat
+ * is in a live session. */
+export function sessionTexts(): { chat: [string, string]; terminal: [string, string]; ask: string } {
   return {
     chat: ['The chat', "This is a demo and thimble isn't connected to a live Claude Code session, so you can't type here. In a live session, this chat is your Claude Code session: ask it anything about the files."],
     terminal: ['Your terminal', 'When you run thimble yourself, the session also runs in the terminal where you started it. It shows the same conversation, and you can type in either.'],
@@ -499,11 +500,36 @@ export function welcomeTexts(demo: boolean): string[] {
   return [`${ask} The demo tour uses <b>example data</b>.`]
 }
 
+/** What the tour says that the demo it runs in isn't installed, and how to install it. */
+export const MISSING_TEXTS = [
+  "The tour runs in thimble's demo workspace, on example data, and the demo isn't installed here.",
+  'To install it, run <code>thimble demo</code> in a terminal. Then take the tour from Settings.',
+]
+/** What the tour says when its frame on the demo workspace did not open. */
+export const FAILED_TEXTS = ["thimble's demo workspace didn't open, so the tour stopped. Your folder is as it was.", 'To try again, take the tour from Settings.']
+
+export interface OfferTexts {
+  title: string
+  says: string[]
+  /** the button that starts the tour, or null when the card only informs */
+  begin: string | null
+  skip: string
+}
+
+/** The card on the analyst's page (run offerTour): `offer`, the welcome that asks whether to take the tour
+ * (welcomeTexts); `missing`, that the demo workspace the tour runs in isn't installed, with only Skip tour; `failed`,
+ * that its frame did not open, with only Close. `first`: the first launch, which welcomes. */
+export function offerTexts(state: 'offer' | 'missing' | 'failed', demo: boolean, first: boolean): OfferTexts {
+  if (state === 'offer') return { title: 'Welcome to thimble', says: welcomeTexts(demo), begin: 'Take the tour', skip: 'Skip' }
+  if (state === 'missing') return { title: first ? 'Welcome to thimble' : "The demo isn't installed", says: MISSING_TEXTS, begin: null, skip: 'Skip tour' }
+  return { title: "The tour didn't open", says: FAILED_TEXTS, begin: null, skip: 'Close' }
+}
+
 /** The tour, for the ask key written `key` (⌘ or ⌥ on a Mac, Ctrl or Alt elsewhere, as Settings picks). With the chat
- * column folded (`chat` false) the steps about the chat are left out; on a demo page (`demo`) they say it is a demo
+ * column folded (`chat` false) the steps about the chat are left out; the steps about the chat say it is a demo
  * (sessionTexts). */
-export function tourSteps(key: string, chat = true, demo = false): Step[] {
-  const said = sessionTexts(demo)
+export function tourSteps(key: string, chat = true): Step[] {
+  const said = sessionTexts()
   const steps: Step[] = [
     {
       tab: 'files', needsChat: true, example: sessionExample, anchor: chatContent, place: 'right', align: 'start', pad: 0, radius: 12,

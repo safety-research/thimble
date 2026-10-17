@@ -575,6 +575,11 @@ without Claude works, and the orientation's thread says it ran in advance. The c
 hovering it says "This is a demo and thimble isn't connected to a live Claude Code session." Any other action that
 needs Claude shows the same note in the chat.
 
+The product tour (offered on the first launch, and under Settings, Take the tour) runs in a demo dataset's workspace,
+never over your own files: it opens that workspace in a frame over the page, under a banner that says it is example
+data, with Exit tour, and when it ends your folder is as you left it. Without a demo dataset installed, the tour says so
+and names `thimble demo`.
+
 The demo is static: it starts no Claude Code session and asks nothing about one. `--attach` starts one in the
 dataset's folder, once `claude auth status` says you are logged in (when you are not, it says how to log in). Without
 it, it prints for each dataset the command that starts a live session there; `thimble -c` in the same folder
