@@ -628,6 +628,10 @@ and its on or off. When Claude Code reads the plugin from the install folder its
 the update says what it did, and a `claude` session open since before uses the new plugin after `/reload-plugins`.
 After an update from 0.7, every browser signs in again: type `/thimble browser` in each session.
 
+`thimble update --dry-run` shows what the update would do and changes nothing: the `git pull` it would run, or the
+release zip's check, then the install's own dry run (what it would install where, and the question it would ask). In a
+Dev install that dry run reads the files as they are before the pull.
+
 ## Uninstall
 
 `thimble uninstall` asks, then removes the trust entry an install before 0.6.0 added, thimble's plugin and marketplace

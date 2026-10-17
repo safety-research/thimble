@@ -26,7 +26,8 @@
 # terminal install.sh stops while the question remains without its flag, and says so.
 #
 #   --dry-run              print the opening screen and the question if it remains, with its flags; change nothing.
-#                          An agent installing thimble for someone asks exactly that question (CLAUDE.md, Installing)
+#                          An agent installing thimble for someone asks exactly that question (CLAUDE.md, Installing).
+#                          `thimble update --dry-run` runs it too (scripts/update.sh, which sets THIMBLE_INSTALL_VIA)
 #   --verbose              also print each command it runs and its output; with --dry-run, every step's commands
 #   --no-plugin            for thimble's own release tests only: add nothing to Claude Code (no marketplace, no
 #                          plugin). An install adds the plugin the way claude plugin install does; turn it off with /plugin
@@ -1349,7 +1350,9 @@ prompt() {  # prompt TEXT DEFAULT: TEXT with [Y/n] or [y/N], on the terminal, th
 ask() {  # the questions that remain, before anything is installed (QUESTIONS, each NAME_pending). --dry-run lists them
   # with their flags; on a terminal each is asked; without one install.sh stops while one has no flag. Then, on a
   # terminal only, whether to switch another install's `thimble` command to this one
-  local q pending=() need=() i=0 n again
+  local q pending=() need=() i=0 n again how
+  how="bash $(tilde "$src")/scripts/install.sh"
+  [ "${THIMBLE_INSTALL_VIA:-}" != update ] || how="thimble update"  # scripts/update.sh runs it: thimble update installs
   tty=0
   for q in ${QUESTIONS[@]+"${QUESTIONS[@]}"}; do if "${q}_pending"; then pending+=("$q"); fi; done
   n="${#pending[@]}"
@@ -1357,7 +1360,7 @@ ask() {  # the questions that remain, before anything is installed (QUESTIONS, e
     if [ "$n" = 0 ] && nothing_planned; then
       showf "Nothing to ask, and nothing to install: thimble $version is in $(tilde "$dir") and up to date."
     elif [ "$n" = 0 ]; then
-      showf "Nothing to ask: install with  bash $(tilde "$src")/scripts/install.sh"
+      showf "Nothing to ask: install with  $how"
     else
       showf "(An agent installing thimble for someone asks them each question below, in its words, and passes the flag of their answer; it answers none itself.)"
       for q in "${pending[@]}"; do
@@ -1368,7 +1371,7 @@ ask() {  # the questions that remain, before anything is installed (QUESTIONS, e
         "${q}_choices" | sed 's/^/   - /' | while IFS= read -r l; do show "$l"; done
       done
       show ""
-      showf "Then install with  bash $(tilde "$src")/scripts/install.sh  and one flag per answer."
+      showf "Then install with  $how  and one flag per answer."
     fi
     [ "$cli_state" != other ] || showf "Not asked here, only on a terminal: $(cli_switch_line)"
     return 0
@@ -1380,6 +1383,8 @@ ask() {  # the questions that remain, before anything is installed (QUESTIONS, e
     again="bash $src/scripts/install.sh --dry-run prints the questions; ask them (an agent asks the person it installs for, and answers none itself), then run install.sh again with a flag for each."
     if [ "$src" != "$dir" ] && earlier_install; then
       again="Ask them, then run \`thimble update\` again with a flag for each, which it passes on to install.sh. An install older than 0.3.0 has a \`thimble update\` that takes no flags: unzip the release and run its scripts/install.sh --dir $dir with the flags."
+    elif [ "$how" = "thimble update" ]; then
+      again="Ask them, then run \`thimble update\` again with a flag for each, which it passes on to install.sh."
     fi
     die "there is no terminal to ask on, so each question that remains needs its answer as a flag. Not answered:
 $(printf '  %s\n' "${need[@]}")

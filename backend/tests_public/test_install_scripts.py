@@ -350,6 +350,32 @@ esac
     assert r.returncode == 1 and "no SHA256SUMS beside the zip" in r.stderr and "install.sh ran" not in r.stdout
 
 
+@pytest.mark.skipif(not shutil.which("unzip"), reason="update.sh unpacks with unzip")
+def test_update_dry_run_shows_the_install_s_own_dry_run_and_thimble_help_lists_it(tmp_path):
+    """`thimble update --dry-run` changes nothing. From a zip it checks it, unpacks it into a temporary folder and runs
+    that release's install.sh with --dry-run; in a checkout it prints the pull and runs install.sh's dry run, which
+    names `thimble update` as the command that installs. `thimble help` lists --dry-run."""
+    zp = release_zip(tmp_path / "rel")
+    inst = fake_tree(tmp_path / "rel" / "inst")
+    before = sorted(p.relative_to(inst).as_posix() for p in inst.rglob("*"))
+    r = update(tmp_path / "rel", "--from", str(zp), "--dry-run")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "thimble update --dry-run: what the update would do; nothing changes" in r.stdout and "update.sh" not in r.stdout
+    assert f"the release install.sh ran: --dir {inst} --dry-run" in r.stdout, r.stdout
+    assert sorted(p.relative_to(inst).as_posix() for p in inst.rglob("*")) == before, "nothing changed"
+
+    clone = fake_tree(tmp_path / "dev" / "inst", checkout=True)
+    r = update(tmp_path / "dev", "--dry-run", "--browser", "off", path=f"{stub_bin(tmp_path / 'dev')}:/usr/bin:/bin",
+               STUB_NODE="v22.13.0")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert f"+ git -C {clone} pull --ff-only" in r.stdout and "installer · Dev install" in r.stdout, r.stdout
+    assert "Nothing to ask: install with  thimble update" in r.stdout and not (clone / "backend" / ".venv").exists()
+
+    usage = subprocess.run(["bash", str(inst / "plugin" / "bin" / "thimble"), "help"], capture_output=True, text=True,
+                           env=env_for(tmp_path / "rel"), timeout=60)
+    assert "thimble update [--from <zip>] [--dry-run]" in usage.stdout, usage.stdout
+
+
 def test_install_sh_adds_the_plugin_with_claude_code_s_commands_and_uninstall_removes_what_it_added(tmp_path):
     """install.sh adds this install's folder as a marketplace and installs thimble from it at user scope, with Claude
     Code's own commands, and says so on its opening screen; it removes the record 0.7's plugin question left. --no-plugin

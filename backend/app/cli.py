@@ -4455,7 +4455,8 @@ def build_parser() -> argparse.ArgumentParser:
     ex.set_defaults(fn=cmd_extension)
     u = sub.add_parser("update", help="bring the install up to date: the latest GitHub release via gh, or --from <zip>")
     u.add_argument("--from", dest="from_", metavar="ZIP", help="a downloaded release zip (thimble-<version>-<sha>.zip)")
-    u.add_argument("--dry-run", action="store_true", help="print update.sh's steps; change nothing")
+    u.add_argument("--dry-run", action="store_true",
+                   help="show what the update would do, with the install's own dry run; change nothing")
     u.add_argument("--browser", choices=("bundled", "system", "off"), help="passed on to install.sh")
     for flag in INSTALL_FLAGS:
         u.add_argument(flag, dest="install_flags", action="append_const", const=flag, help="passed on to install.sh")

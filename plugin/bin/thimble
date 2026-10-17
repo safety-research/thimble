@@ -15,7 +15,9 @@
 #   thimble server up [--cwd <p>] [--session <sid>] [--action <a>]
 #                                        start the server if needed, open this directory as a workspace, print the URL
 #   thimble server status | repair | stop [--yes] | restart [--keep-vite] [--yes]
-#   thimble update [--from <zip>]        bring the install up to date (the latest GitHub release via gh, or a zip)
+#   thimble update [--from <zip>] [--dry-run]
+#                                        bring the install up to date (the latest GitHub release via gh, or a zip);
+#                                        --dry-run shows what it would do, with install.sh's own dry run
 #   thimble feedback ["description"] [--no-logs]
 #                                        write a problem report (a zip) to send the developer, and say how to send it
 #                                        (bash, below: it needs no server and no working supervisor)
@@ -110,7 +112,9 @@ usage: thimble [claude flags...]          start Claude Code in this folder with 
        thimble unpair                     sign out every browser
        thimble feedback ["what went wrong"] [--no-logs]
                                           write a problem report to send the developer
-       thimble update [--from <zip>]      bring the install up to date
+       thimble update [--from <zip>] [--dry-run]
+                                          bring the install up to date; --dry-run shows what it would do
+                                          and changes nothing
        thimble uninstall [--yes] [--keep-home]
                                           remove thimble from this machine
 EOF
