@@ -29,6 +29,7 @@
 import type { BoxProps, ButtonProps, ElementConstructor, MatchedEvent, RenderElement, TextProps } from 'claude-code'
 
 import type { ChatNavStep, ChatThread, LabelUnsure, TermPanel, TermThread, TermThreadRow, TermVerdict } from './types'
+import { CHECK_WAITS } from './cell'
 import type { ThimbleLabel } from './cell'
 import { ACCENT, FRESH, LINK, MARGIN_W, actionEl, controlsEl, fieldEls, fitHints, fitTo, freshSeg, hasMargin, headerEls, hintLines, hintsEl, lineEl, linkSeg, marginKey, pointed, ruleEl, setBrowser, setHead, spread, subLine, takeBrowser, takeHead } from './chrome'
 import { SCRIPT_ASK, SPIN, chipLook, chipName, citeLabel, firstCode, literalAt, plainCites, quoteSpan, quotedWords, scriptQuestion, showsValue, wrapAround } from './cite'
@@ -1437,7 +1438,8 @@ async function drawCard(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   const checked: Seg | null = tc.check?.state === 'error' ? dim(tc.check.unrun ? CHECK_UNRUN : CHECK_UNFINISHED) : null
   const askKey0 = `ask-card-${id}`
   const entry = e.surface === 'mobile' ? null : askEntry(cx, e, { key: askKey0, placeholder: 'ask about this card', cols, target: { kind: 'card', ref: `card:${id}`, cardId: id, text: data.question } })
-  const busy = Boolean(tc.busy)
+  // its run waits or runs; a card check that waits to start once the run ended is no run (bug hunt B19)
+  const busy = Boolean(tc.busy) && tc.busy !== CHECK_WAITS
   const again = () => {
     if (busy) return
     void cx.submit(`Run this card again with Bash: thimble-run card ${id}`)

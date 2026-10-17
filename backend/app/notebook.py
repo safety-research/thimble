@@ -56,8 +56,11 @@ log = logging.getLogger("thimble.notebook")
 async def _lifespan(app: Any):
     """The router's lifespan: first mark the cells the previous server left `running`, then reconnect the recorded
     kernels in the background, so /api/health answers at once. `_reconnect_done` tells wait_reconnect a reconnect is
-    under way."""
+    under way. The server's card watch runs for as long as the server (cardrun.CardWatch.serve): after the press it
+    records the runs main's `thimble-run` ends and starts their card checks, a mark a run left before this start too."""
     global _reconnect_done
+    from . import cardrun  # noqa: PLC0415
+
     try:
         marked = await asyncio.to_thread(mark_interrupted_cells)
         if marked:
@@ -66,11 +69,13 @@ async def _lifespan(app: Any):
         log.exception("marking interrupted cells failed")
     _reconnect_done = asyncio.Event()
     task = asyncio.create_task(_reconnect_on_start())
+    watch = asyncio.create_task(cardrun.CardWatch.serve(), name="thimble-cardwatch-server")
     try:
         yield
     finally:
-        if not task.done():
-            task.cancel()
+        for t in (task, watch):
+            if not t.done():
+                t.cancel()
 
 
 router = APIRouter(lifespan=_lifespan)

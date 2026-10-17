@@ -209,10 +209,11 @@ async def call(name: str, args: dict[str, Any], *, cwd: str, session: str | None
 
 
 def begin(cwd: str | None) -> str | None:
-    """The shim's start on local transport, on its event loop, once the session's thimble is on: _start for the
-    workspace of `cwd`, before any tool call. A session resumed with `--continue` may run cards with `thimble-run`
-    before it calls a tool, and their card checks wait for the card watch, which would otherwise start only with the
-    first call. The workspace, or None for a folder of no workspace."""
+    """The shim's start on local transport, once the session's thimble is on: _start for the workspace of `cwd`, before
+    any tool call. A session resumed with `--continue` may run cards with `thimble-run` before it calls a tool, and
+    their card checks wait for the card watch, which would otherwise start only with the first call. The shim runs this
+    in a worker thread, which has no event loop, and then starts the watch on its loop (watch). The workspace, or None
+    for a folder of no workspace."""
     c = workspace(cwd)
     if not c:
         return None
@@ -221,30 +222,39 @@ def begin(cwd: str | None) -> str | None:
 
 
 def _start(c: str) -> None:
-    """The shim's start (begin), or the first call for workspace `c` in this process: the cards an earlier session left
-    `running` are marked interrupted, and the watch that starts the card check of each card `thimble-run` writes begins
-    (cardrun.CardWatch)."""
-    if c in _started:
-        return
-    _started.add(c)
-    from . import cardrun, notebook  # noqa: PLC0415
+    """The shim's start (begin), or a call for workspace `c` in this process: the first marks the cards an earlier session
+    left `running` interrupted, and each starts the watch that starts the card check of each card `thimble-run` writes
+    (watch) until one on the loop has started it."""
+    from . import notebook  # noqa: PLC0415
+
+    if c not in _started:
+        _started.add(c)
+        try:
+            marked = notebook.mark_interrupted_cells(only=(c,))
+            if marked:
+                log.info("cards left running by an earlier session, marked interrupted: %s", ", ".join(marked))
+        except Exception:  # noqa: BLE001 — never fails the call
+            log.exception("%s: marking interrupted cards failed", c)
+        try:
+            stopped = _end_left_agents(c)
+            if stopped:
+                log.info("label runs' chats left running by an earlier session, marked stopped: %s", ", ".join(stopped))
+        except Exception:  # noqa: BLE001 — never fails the call
+            log.exception("%s: marking left label chats stopped failed", c)
+    watch(c)
+
+
+def watch(c: str) -> bool:
+    """Start the card watch of workspace `c` on this thread's running loop, once per process (cardrun.CardWatch.start).
+    False with no running loop: a worker thread, such as the one the shim runs begin in, or a one-call process (tests,
+    the CLI), which checks no cards."""
+    from . import cardrun  # noqa: PLC0415
 
     try:
-        marked = notebook.mark_interrupted_cells(only=(c,))
-        if marked:
-            log.info("cards left running by an earlier session, marked interrupted: %s", ", ".join(marked))
-    except Exception:  # noqa: BLE001 — never fails the call
-        log.exception("%s: marking interrupted cards failed", c)
-    try:
-        stopped = _end_left_agents(c)
-        if stopped:
-            log.info("label runs' chats left running by an earlier session, marked stopped: %s", ", ".join(stopped))
-    except Exception:  # noqa: BLE001 — never fails the call
-        log.exception("%s: marking left label chats stopped failed", c)
-    try:
         cardrun.CardWatch.start(c)
-    except RuntimeError:  # no running loop: a one-call process (tests, the CLI) checks no cards
-        pass
+    except RuntimeError:
+        return False
+    return True
 
 
 def _end_left_agents(c: str) -> list[str]:

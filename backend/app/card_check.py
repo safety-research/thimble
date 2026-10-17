@@ -174,14 +174,19 @@ def card_of(name: str, args: dict[str, Any] | None, text: str, anchor: str | Non
 def wants_check(cell: dict[str, Any] | None) -> bool:
     """Whether a card is read now: it has a takeaway, it is not a label card (thimble draws those from their label), a
     replacement could change it (it is not locked or made by the analyst: checkstore.fixable), and a card of code ran
-    clean (an errored card goes back to its author through its own result)."""
-    from . import checkstore, notebook  # noqa: PLC0415
+    clean (an errored card goes back to its author through its own result) with no run of `thimble-run` waiting or
+    under way: edit_card's new code waits for its run beside the old outputs, and the run's end asks for the check
+    (cardrun._finish)."""
+    from . import cardrun, checkstore, notebook  # noqa: PLC0415
 
     if not cell or cell.get("kind") == "label" or not str(cell.get("takeaway") or "").strip():
         return False
     if not checkstore.fixable(cell, checkstore.FIX_FIELDS):
         return False
-    return cell.get("status") == "ok" if notebook.runnable(cell) else True
+    if not notebook.runnable(cell):
+        return True
+    run = cell.get(notebook.RUN_KEY) if isinstance(cell.get(notebook.RUN_KEY), dict) else {}
+    return cell.get("status") == "ok" and run.get("state") not in (cardrun.WAITING, cardrun.RUNNING)
 
 
 def _feature_on(c: str) -> bool:
@@ -1352,7 +1357,8 @@ async def again_route(c: str, cid: str) -> dict[str, Any]:
     if render.down():
         raise HTTPException(409, f"no card can be drawn here: {render.why()}")
     if not wants_check(cell):
-        raise HTTPException(409, "this card gets no check: it has no takeaway, is a label card, or is the analyst's or locked")
+        raise HTTPException(409, "this card gets no check: it has no takeaway, is a label card, is the analyst's or "
+                                 "locked, or its run has not ended")
     rec = checkstore.current(c, cid) or {}
     run = start(c, cid, str(rec.get("author") or MAIN), again=True)
     if run is None:

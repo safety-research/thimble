@@ -645,15 +645,19 @@ export function linksOf(cell: ThimbleCell): TermLinks | undefined {
   }
 }
 
+/** busyWords' words for a card whose run ended and whose card check waits to start: no run, so the card pane offers
+ *  `run again` beside them. */
+export const CHECK_WAITS = '◌ checking'
+
 /** The words the card's title row says about it while it is not done: its run waits or runs, or it runs again because
- *  a label it read changed. */
+ *  a label it read changed, or its card check waits to start (CHECK_WAITS). */
 export function busyWords(cell: ThimbleCell): string {
   const st = cell.run?.state
   if (st === 'waiting') return 'waiting for its run'
   if (st === 'running' || cell.status === 'running' || cell.status === 'queued') return '◌ running'
   if (cell.regenerating_for?.length) return '◌ running again'
   // cardrun's mark that the card's check waits to start (a running check's record is the check's own business)
-  if (cell.check === 'pending') return '◌ checking'
+  if (cell.check === 'pending') return CHECK_WAITS
   return ''
 }
 
