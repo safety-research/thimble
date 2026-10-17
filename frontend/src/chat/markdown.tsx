@@ -13,7 +13,7 @@ import { plainQuote, type AnswerMark } from './answerComments'
 import { MdImage } from '../components/MdImage'
 import { GlyphCites, RefChip } from '../components/RefChip'
 import { rehypeNumericCells } from '../lib/markdownCells'
-import { splitValueRef } from '../lib/refs'
+import { mixedLinks, splitValueRef } from '../lib/refs'
 
 export interface ChipCtx {
   workspace: string
@@ -42,9 +42,10 @@ const utf8d = new TextDecoder()
 const toHex = (s: string) => Array.from(utf8.encode(s), (b) => b.toString(16).padStart(2, '0')).join('')
 const fromHex = (h: string) => (h ? utf8d.decode(new Uint8Array((h.match(/../g) ?? []).map((x) => parseInt(x, 16)))) : '')
 
-/** `text` with every `[[…]]` token replaced by a private-use marker the markdown parser leaves alone. */
+/** `text` with every `[[…]]` token replaced by a private-use marker the markdown parser leaves alone; a citation written
+ * as a link whose words are in double brackets (`[[↗]](card:<id>)`) first as the citation it means (mixedLinks). */
 export function protectTokens(text: string): string {
-  return text.includes('[[') ? text.replace(BRACKET_RE, (_m, inner: string) => PH_OPEN + toHex(inner) + PH_CLOSE) : text
+  return text.includes('[[') ? mixedLinks(text).replace(BRACKET_RE, (_m, inner: string) => PH_OPEN + toHex(inner) + PH_CLOSE) : text
 }
 const restoreTokens = (text: string) => text.replace(PH_RE, (_m, hex: string) => `[[${fromHex(hex)}]]`)
 const SPLIT_RE = new RegExp(`${PH_SRC}|${BRACKET_SRC}|${BARE_SRC}`, 'g')
@@ -321,13 +322,14 @@ export function RefText({ text, workspace, cite = false }: { text: string; works
   const ctx = useContext(ChipContext)
   const parts: (string | { ref: string; value?: string })[] = []
   let last = 0
-  for (const m of text.matchAll(TOKEN_RE)) {
+  const src = mixedLinks(text)
+  for (const m of src.matchAll(TOKEN_RE)) {
     const at = m.index ?? 0
-    if (at > last) parts.push(text.slice(last, at))
+    if (at > last) parts.push(src.slice(last, at))
     parts.push(m[1] != null ? splitValueRef(m[1].trim()) : { ref: m[2] })
     last = at + m[0].length
   }
-  if (last < text.length) parts.push(text.slice(last))
+  if (last < src.length) parts.push(src.slice(last))
   const shown = parts.map((p, i) =>
     typeof p === 'string' ? <Fragment key={i}>{p}</Fragment> : <RefChip key={i} ref={p.ref} value={p.value} compact anchor={ctx.anchor} workspace={workspace} cite={cite} />,
   )

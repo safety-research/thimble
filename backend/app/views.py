@@ -1196,18 +1196,16 @@ def folder_paths(corpus: Path, rel: str = "") -> list[str]:
 def glob_matches(rel_file: str, pattern: str | None) -> bool:
     """`pattern` against the file's corpus-relative path and its basename, so a claim may name a file type anywhere
     (`*.jsonl`) or a path from the corpus root (`boards/*.jsonl`); a `**/` may also stand for no folder, so `**/*.vtt`
-    names the files at the corpus root too; '' or '*' matches everything."""
+    names the files at the corpus root too, as a label's paths read (corpus_tree.glob_match); '' or '*' matches
+    everything."""
     if not pattern or pattern == "*":
         return True
     name = rel_file.rsplit("/", 1)[-1]
-    return any(fnmatch.fnmatch(rel_file, p) or fnmatch.fnmatch(name, p) for p in _glob_forms(pattern))
+    return corpus_tree.glob_match(rel_file, pattern) or corpus_tree.glob_match(name, pattern)
 
 
-@functools.lru_cache(maxsize=512)
-def _glob_forms(pattern: str) -> tuple[str, ...]:
-    """`pattern`, and it with each `**/` taken out when it has one."""
-    bare = re.sub(r"(^|/)\*\*/", r"\1", pattern)
-    return (pattern,) if bare == pattern else (pattern, bare)
+# a pattern as the fnmatch patterns that together name what it names, by the rule labels follow too (corpus_tree)
+_glob_forms = corpus_tree.glob_forms
 
 
 def records_text(c: str, slug: str) -> str:
@@ -3067,6 +3065,8 @@ def revise(c: str, slug: str, request: str, *, description: str | None = None, t
                                   "change": change or None, "changed": True, "revision": revision or None,
                                   "asked": True if asked else None, "failed_change": None, "ts": _now(),
                                   "route": route, "refused": None, "stopped_by": None,
+                                  # the page an open asked for while a review ran (ensure_page) is built now
+                                  **({"page_wanted": None} if target == prop.get("page_wanted") else {}),
                                   # a change to a build that goes keeps its page; another builds where it starts
                                   "target": target if target in TARGETS else prop.get("target") if pending else None}
         if values:
@@ -3591,8 +3591,12 @@ def has_page(view: dict[str, Any] | None, target: str) -> bool:
 def ensure_page(c: str, slug: str, target: str) -> bool:
     """The first open of a built view in the place whose page it lacks (module note): a revision that builds that page,
     reusing its reader.py, queued as a follow-on start (revise); nothing when the view has the page, is no workspace
-    view, never passed, has a build queued or running, or that page's build failed (it waits for Retry). Whether one
-    was queued."""
+    view, never passed, has a build queued or running, or that page's build failed (it waits for Retry). While the
+    review of the page the view has runs, the page waits for its end (`page_wanted` on the proposal, which
+    view_review._ended builds): a page for the other place is no change to the view, so it never stops the review (bug
+    hunt E4). Whether one was queued or waits."""
+    from . import view_review  # noqa: PLC0415 — view_review imports this module
+
     view = read_built(c, slug)
     if view is None or view.get("origin") != "workspace" or has_page(view, target):
         return False
@@ -3602,6 +3606,11 @@ def ensure_page(c: str, slug: str, target: str) -> bool:
     request = MISSING_PAGE_REQUEST.format(page=PAGE_OF[target], place=MISSING_PAGE_PLACE[target])
     if prop is not None and prop.get("failed_change") == request:
         return False  # its page's build failed: it waits for the analyst's Retry, not for the next open
+    if prop is not None and view_review.running(c, slug):
+        update_proposal(c, slug, page_wanted=target)
+        if view_review.running(c, slug):
+            return True
+        update_proposal(c, slug, page_wanted=None)  # it ended meanwhile, before its end could see the mark
     revise(c, slug, request, proposed_by="thimble", route=FOLLOW_ON, target=target)
     return True
 
@@ -3611,7 +3620,8 @@ def page_state(c: str, slug: str, target: str, *, view: dict[str, Any] | None = 
     """Where the page the built view `slug` lacks for `target` stands: ('ready', '') when it has it, ('building', '')
     while a build of the view is queued or runs, ('failed', why) when the last build of that page failed (it waits for
     Retry), ('missing', '') when ensure_page would build it, and ('none', why) for no built view of the workspace's.
-    `view` and `prop`, the built view and its proposal when the caller read them already."""
+    `view` and `prop`, the built view and its proposal when the caller read them already. A page that waits for the
+    review of the view's other page to end (ensure_page) is 'building'."""
     view = view if view is not None else read_built(c, slug)
     if view is None:
         return "none", f"there is no built view {slug!r}"
@@ -3623,6 +3633,11 @@ def page_state(c: str, slug: str, target: str, *, view: dict[str, Any] | None = 
     prop = prop if prop is not None else read_proposal(c, slug) or {}
     if prop.get("status") in PENDING:
         return "building", ""
+    if prop.get("page_wanted") == target:
+        from . import view_review  # noqa: PLC0415
+
+        if view_review.running(c, slug):
+            return "building", ""  # it is built once the review of the view's other page ends (ensure_page)
     if prop.get("failed_change") == MISSING_PAGE_REQUEST.format(page=PAGE_OF[target], place=MISSING_PAGE_PLACE[target]):
         return "failed", " ".join(str(prop.get("error") or "").split())
     return "missing", ""

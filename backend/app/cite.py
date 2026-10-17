@@ -910,27 +910,42 @@ def quote_refs(cell: dict | None, text: str) -> str:
 _LINK_RE = re.compile(r"(?<![\[!])\[([^\[\]\n]*)\]\(\s*(?:<([^<>\n]+)>|((?:[^()\s<>]|\([^()\s]*\))+))\s*\)")
 _WEB_SCHEME_RE = re.compile(r"^(?:[a-z][a-z0-9+.-]*://|mailto:|tel:)", re.I)
 BARE_LINK_TEXTS = ("", "↗")  # the link texts of a citation without a value, `[↗](card:<id>)`
+# A citation written as a link whose words are in double brackets, `[[↗]](card:<id>)` or `[[31]](card:<id>#a/b)` (bug
+# hunt E2: main mixed the chat form `[↗](ref)` with the takeaway form `[[…]]`), Markdown's link with the words `[↗]`.
+# Words that are a ref themselves (`[[card:x]](above)`) are a citation followed by words in parentheses.
+_MIXED_LINK_RE = re.compile(r"\[\[([^\[\]|\n]*)\]\]\(\s*(?:<([^<>\n]+)>|((?:[^()\s<>]|\([^()\s]*\))+))\s*\)")
+
+
+def _link_citation(m: "re.Match[str]") -> str:
+    """A link match (_LINK_RE, _MIXED_LINK_RE) as the citation it stands for, or as written when its target is no ref."""
+    from . import refs  # noqa: PLC0415 — refs imports this module
+
+    shown, target = m.group(1).strip(), (m.group(2) or m.group(3) or "").strip()
+    if not target or _WEB_SCHEME_RE.match(target) or "|" in shown:
+        return m.group()
+    try:
+        refs.parse_ref(target)
+    except ValueError:
+        return m.group()
+    return f"[[{target}]]" if shown in BARE_LINK_TEXTS else f"[[{shown}|{target}]]"
+
+
+def mixed_links(text: str) -> str:
+    """`text` with each citation written as a link whose words are in double brackets as the citation it means:
+    `[[↗]](card:<id>)` becomes `[[card:<id>]]` and `[[31]](card:<id>#a/b)` becomes `[[31|card:<id>#a/b]]`. Idempotent."""
+    if "]](" not in text:
+        return text
+    return _MIXED_LINK_RE.sub(lambda m: m.group() if _REF_SHAPE.match(m.group(1).strip()) else _link_citation(m), text)
 
 
 def from_links(text: str) -> str:
     """`text` with each Markdown link whose target is a ref of the grammar written as the citation it stands for:
-    `[31](card:<id>#a/b)` becomes `[[31|card:<id>#a/b]]` and `[↗](card:<id>)` becomes `[[card:<id>]]`. Web links and
-    targets that are no ref are left as written. Idempotent."""
+    `[31](card:<id>#a/b)` becomes `[[31|card:<id>#a/b]]` and `[↗](card:<id>)` becomes `[[card:<id>]]`, and so does such a
+    link with its words in double brackets (mixed_links). Web links and targets that are no ref are left as written.
+    Idempotent."""
     if "](" not in text:
         return text
-    from . import refs  # noqa: PLC0415 — refs imports this module
-
-    def one(m: "re.Match[str]") -> str:
-        shown, target = m.group(1).strip(), (m.group(2) or m.group(3) or "").strip()
-        if not target or _WEB_SCHEME_RE.match(target) or "|" in shown:
-            return m.group()
-        try:
-            refs.parse_ref(target)
-        except ValueError:
-            return m.group()
-        return f"[[{target}]]" if shown in BARE_LINK_TEXTS else f"[[{shown}|{target}]]"
-
-    return _LINK_RE.sub(one, text)
+    return _LINK_RE.sub(_link_citation, mixed_links(text))
 
 
 def to_links(text: str) -> str:

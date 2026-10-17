@@ -400,3 +400,34 @@ async def test_finish_review_restores_a_failing_revision_and_ends_the_review(boa
     assert review["note"] == view_review.REVISION_FAILED_NOTE and review["finished"] and review["state"] == "done"
     res = await _call("finish_review", {}, reviewer, key)
     assert res.text.endswith(tools.hint("finish-review-done")), "a call after the review ended runs nothing"
+
+
+async def test_bug_hunt_e4_a_page_for_the_other_place_waits_for_the_review_and_a_change_that_stops_one_says_so(
+        board, bridge, gates, pictures, hints, monkeypatch):
+    """The terminal's first open of a browser-built view while its reviewer ran stopped the review for good, with no
+    word: building the page the view lacks is no change to it. The page waits for the review's end, then builds; a
+    change that does stop a review tells so in a notice."""
+    from app import notices
+
+    slug = _propose("Run Board", asked=True)
+    reviewer, key = await _reviewed(slug)
+    queued: list[str] = []
+    monkeypatch.setattr(dev, "queue_view", lambda c, s: queued.append(s))
+    assert views.ensure_page(CORPUS, slug, views.TERM_PAGE) is True
+    assert view_review.running(CORPUS, slug) and not bridge.ops("stop") and queued == []
+    assert _prop(slug)["page_wanted"] == views.TERM_PAGE
+    assert views.page_state(CORPUS, slug, views.TERM_PAGE)[0] == "building"
+    subagents.run_ended(CORPUS, reviewer, "done", "Reviewed.", source="handback")
+    await _until(lambda: queued == [slug], "the terminal page was never built after the review")
+    prop = _prop(slug)
+    assert (prop["status"], prop["target"], prop.get("page_wanted")) == ("queued", views.TERM_PAGE, None)
+    assert prop["review"]["state"] == "done"
+    # an analyst's change stops a review that runs, and a notice says so
+    other = _propose("Thread Board", asked=True)
+    reviewer, key = await _reviewed(other)
+    views.revise(CORPUS, other, "Add a legend.")
+    await _until(lambda: bridge.ops("stop"), "the review was never stopped")
+    subagents.run_ended(CORPUS, reviewer, "stopped", "")
+    await _until(lambda: _prop(other)["review"]["state"] == "stopped", "the review's stop was never settled")
+    [notice] = [n for n in notices.open_notices(CORPUS) if n["key"] == notices.agent_key(key)]
+    assert notice["text"].startswith("The review of the view Thread Board stopped because the view changed")

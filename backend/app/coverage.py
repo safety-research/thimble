@@ -491,9 +491,10 @@ def _epoch(ts: Any) -> float | None:
 
 
 def _glob_area(pattern: str) -> tuple[str, str | None] | None:
-    """A label's file pattern (fnmatch, `*` spans `/`, as concepts.match_paths reads it) as a searched area: (folder,
-    extension or None) for `agents/*`, `agents/**/*`, `agents/*.jsonl`, `**/*.jsonl` and the like; None for a pattern
-    of another form, such as a wildcard inside a name (`agents/agent-*.jsonl`)."""
+    """A label's file pattern (fnmatch, `*` spans `/`, a `**/` may stand for no folder: corpus_tree.glob_match, as
+    concepts.match_paths reads it) as a searched area: (folder, extension or None) for `agents/*`, `agents/**/*`,
+    `agents/*.jsonl`, `**/*.jsonl` and the like; None for a pattern of another form, such as a wildcard inside a name
+    (`agents/agent-*.jsonl`)."""
     p = pattern.strip().strip("/")
     at = [i for i in (p.find(ch) for ch in "*?[") if i >= 0]
     if not at:

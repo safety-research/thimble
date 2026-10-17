@@ -308,14 +308,45 @@ export function onLabels(labels: readonly Obj[]): OnLabel[] {
     })
 }
 
-/** A glob of a label's scope (comma-separated patterns: `*` within a folder, `**` across folders) as a test of a path. */
+/** A glob of a label's scope (comma-separated patterns) as a test of a path, by the one rule the backend reads a label's
+ *  paths and a view's claims with (backend corpus_tree.glob_match, concepts.match_paths): fnmatch's, where `*` and `?`
+ *  may span `/` and a `**` + `/` at the start or after a `/` may also stand for no folder (bug hunt E3); a pattern with no
+ *  wildcard names a file or the folder it lies in; a record place after `#` (`forge.db#prs`) is left out. */
 export function globTest(glob: string): (path: string) => boolean {
-  const res = glob
+  const tests = glob
     .split(',')
-    .map(p => p.trim())
+    .map(p => p.split('#', 1)[0]!.trim().replace(/^\/+|\/+$/g, ''))
     .filter(Boolean)
-    .map(p => new RegExp(`^${p.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*\*\/?/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]').replace(/\u0000/g, '.*')}$`))
-  return path => res.some(r => r.test(path))
+    .map(globPathTest)
+  return path => tests.some(t => t(path))
+}
+
+function globPathTest(p: string): (path: string) => boolean {
+  if (!/[*?[]/.test(p)) return path => path === p || path.startsWith(`${p}/`)
+  let re = ''
+  for (let i = 0; i < p.length; i++) {
+    const ch = p[i]!
+    if (ch === '*' && p[i + 1] === '*' && p[i + 2] === '/' && (i === 0 || p[i - 1] === '/')) {
+      re += '(?:.*/)?'
+      i += 2
+    } else if (ch === '*') re += '.*'
+    else if (ch === '?') re += '.'
+    else if (ch === '[') {
+      // a set as fnmatch reads it: `[!…]` for none of them, a `]` first in it as itself; an open `[` as itself
+      let j = i + 1
+      if (p[j] === '!') j++
+      if (p[j] === ']') j++
+      const end = p.indexOf(']', j)
+      if (end < 0) re += '\\['
+      else {
+        const inner = p.slice(i + 1, end).replace(/[\\\]]/g, '\\$&')
+        re += `[${inner.startsWith('!') ? `^${inner.slice(1)}` : inner.replace(/^\^/, '\\^')}]`
+        i = end
+      }
+    } else re += ch.replace(/[.+^${}()|[\]\\/]/g, '\\$&')
+  }
+  const rx = new RegExp(`^${re}$`, 's')
+  return path => rx.test(path)
 }
 
 /** Whether a label that is on marks a file: its last run read it, or its scope's glob names it. */

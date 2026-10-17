@@ -46,7 +46,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import fnmatch
 import itertools
 import json
 import logging
@@ -74,7 +73,7 @@ from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
-from . import cite, concept_scan, config, corpus, labels_store, ledger, records, refs
+from . import cite, concept_scan, config, corpus, corpus_tree, labels_store, ledger, records, refs
 from .kernel_thimble import LABEL_ORDER, palette_from
 from .ledger import append_jsonl, append_jsonl_many, atomic_write_text, read_json
 
@@ -1223,8 +1222,9 @@ def with_stats(ws: Path, concept: dict) -> dict:
 
 
 def match_paths(corpus_dir: Path, patterns: list[str]) -> list[dict]:
-    """Sources whose corpus-relative path matches any pattern (fnmatch, `*` may span `/`), equals it, or lies under it
-    when the pattern names a directory. A pattern with a fragment, such as `forge.db#prs` or `runs.json#/runs`, matches
+    """Sources whose corpus-relative path matches any pattern (corpus_tree.glob_match, the rule a view's claims follow:
+    fnmatch's, `*` may span `/`, a `**/` may stand for no folder), equals it, or lies under it when the pattern names a
+    directory. A pattern with a fragment, such as `forge.db#prs` or `runs.json#/runs`, matches
     its files and keeps only the records under the fragment (records.iter_records `under`), which the source carries as
     `under`, the list of every such pattern's fragment that matches it. Sorted by path."""
     pats: list[tuple[str, str | None]] = []
@@ -1253,7 +1253,7 @@ def match_paths(corpus_dir: Path, patterns: list[str]) -> list[dict]:
             return out
     for src in corpus.list_sources(corpus_dir):
         rel = src["path"]
-        hits = [frag for p, frag in pats if rel == p or fnmatch.fnmatchcase(rel, p) or rel.startswith(p + "/")]
+        hits = [frag for p, frag in pats if rel == p or corpus_tree.glob_match(rel, p) or rel.startswith(p + "/")]
         if not hits:
             continue
         under = None if None in hits else list(dict.fromkeys(hits))

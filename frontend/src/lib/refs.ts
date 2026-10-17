@@ -432,6 +432,26 @@ export function splitValueRef(token: string): { value?: string; ref: string } {
   return { value, ref: token.slice(i + 1).trim() }
 }
 
+// a citation written as a link whose words are in double brackets, `[[↗]](card:<id>)` or `[[31]](card:<id>#a/b)` (bug
+// hunt E2: main mixed the chat form `[↗](ref)` with the takeaway form `[[…]]`), as backend cite.mixed_links reads it;
+// words that are a ref themselves (`[[card:x]](above)`) are a citation followed by words in parentheses
+const MIXED_LINK_RE = /\[\[([^[\]|\n]*)\]\]\(\s*(?:<([^<>\n]+)>|((?:[^()\s<>]|\([^()\s]*\))+))\s*\)/g
+const REF_SHAPE_RE = /^(?:call:[A-Za-z0-9_-]+\/\d+(?:#L\d+(?:-L\d+)?)?|(?:card|cell|concept|chat):[A-Za-z0-9_-]+(?:[@#/].*)?|[^\s:#]+#\S+|[^\s:#()]+\.[A-Za-z][A-Za-z0-9]{0,7}|(?:#|@out\d)\S*)$/
+const WEB_RE = /^(?:[a-z][a-z0-9+.-]*:\/\/|mailto:|tel:)/i
+
+/** `text` with each citation written as a link whose words are in double brackets as the citation it means:
+ * `[[↗]](card:<id>)` reads `[[card:<id>]]` and `[[31]](card:<id>#a/b)` reads `[[31|card:<id>#a/b]]` (backend
+ * cite.mixed_links). */
+export function mixedLinks(text: string): string {
+  if (!text.includes(']](')) return text
+  return text.replace(MIXED_LINK_RE, (m, words: string, a?: string, b?: string) => {
+    const shown = words.trim()
+    const ref = (a ?? b ?? '').trim()
+    if (!ref || WEB_RE.test(ref) || REF_SHAPE_RE.test(shown) || !parseRef(ref)) return m
+    return shown === '' || shown === '↗' ? `[[${ref}]]` : `[[${shown}|${ref}]]`
+  })
+}
+
 /** A citation's text as the analyst reads it: a whole number of five digits or more, or of four outside the years 1800
  * to 2199, takes thousands separators (`6355` reads `6,355`), sign and decimals kept; numbers with a leading zero, ids
  * and other text are left as written. */
