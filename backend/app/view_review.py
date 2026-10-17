@@ -679,11 +679,16 @@ def _about(s: dict[str, Any]) -> str:
 
 
 def records_text(shots: list[dict[str, Any]]) -> str:
-    """The first reader answers of each picture's page, as JSON, RECORDS_CHARS at most in all."""
-    parts = []
+    """The first reader answers of each picture's page, as JSON, RECORDS_CHARS at most in all: each answer read
+    (views.answer_value) only while the text is shorter."""
+    parts: list[str] = []
+    length = 0  # of the parts joined
     for i, s in enumerate(shots, 1):
         for a in (s.get("answers") or [])[:ANSWERS_PER_STATE]:
-            parts.append(f"picture {i}: {json.dumps(a, ensure_ascii=False, default=str)}")
+            if length > RECORDS_CHARS:  # cut where it would be cut with every answer
+                break
+            parts.append(f"picture {i}: {json.dumps(views.answer_value(a), ensure_ascii=False, default=str)}")
+            length += len(parts[-1]) + (len(parts) > 1)
     text = "\n".join(parts)
     return text if len(text) <= RECORDS_CHARS else text[: RECORDS_CHARS - 1] + "…"
 

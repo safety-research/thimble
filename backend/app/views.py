@@ -3670,16 +3670,17 @@ async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width
     file media_file names, and write a picture of it to `out`, when it names one, at its `size` (width, height) or at
     `width` by `height`. Returns one result per state, {ok, errors, fetches, height, refs, records, units, marked, hidden,
     shown, layout, controls, actions, fonts, fetched_records, png?}, and with `answers` the first that many reader answers each
-    state's page got; without Node or the frontend's packages each has build_problem's line as its one error. With
-    `prepared`, a reader request of its own (robust_check's), the page's fetches are answered from it. The page is the
-    view as it last passed, or its live folder inside live_reads (_current)."""
+    state's page got, as the kernel's JSON text in UTF-8 (answer_value reads one); without Node or the frontend's
+    packages each has build_problem's line as its one error. With `prepared`, a reader request of its own
+    (robust_check's), the page's fetches are answered from it. The page is the view as it last passed, or its live
+    folder inside live_reads (_current)."""
     view = _current(c, slug)
     if view is None:
         return [{"ok": False, "errors": [f"no view {slug!r}"], "fetches": 0} for _ in states]
     media = media_url(SHOT_MEDIA_ORIGIN, c, slug)
     ctxs = [s.get("labels") if s.get("labels") is not None else dict(NO_LABELS) for s in states]
     fetched: list[set[str]] = [set() for _ in states]  # the record refs each state's reader answers handed its page
-    kept: list[list[Any]] = [[] for _ in states]  # the first `answers` reader answers of each state
+    kept: list[list[Any]] = [[] for _ in states]  # the first `answers` reader answers of each state, unread (bytes)
 
     async def answer(kind: str, i: int, msg: dict[str, Any]) -> dict[str, Any]:
         if kind == "fetch":
@@ -3693,11 +3694,9 @@ async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width
                     data = await reader_call(c, slug, "records", msg.get("query"), labels=ctxs[i], raw=True)
             except ReaderError as e:
                 return {"error": e.message}
-            keep = len(kept[i]) < answers
-            got, value = await asyncio.to_thread(_answer_refs, data)
-            fetched[i].update(got)
-            if keep:
-                kept[i].append(value)
+            fetched[i].update(await asyncio.to_thread(_answer_refs, data))
+            if len(kept[i]) < answers:
+                kept[i].append(data.text.encode("utf-8") if isinstance(data, RawJSON) else data)
             return {"data": data}
         if kind == "marks":
             refs_in = [str(r) for r in msg.get("refs") or []][:5000]
@@ -3891,13 +3890,21 @@ def _shot_line(obj: dict[str, Any]) -> str:
     return "{" + ",".join([*rest, *(f"{json.dumps(k)}:{v.text}" for k, v in raw.items())]) + "}"
 
 
-def _answer_refs(data: Any) -> tuple[set[str], Any]:
-    """(the record refs among the first FETCHED_SCAN_MAX values of a reader's answer, in the order _strings lists
-    them, the answer read), the answer as the kernel's JSON text (RawJSON) or read already. Blocking."""
-    value = json.loads(data.text) if isinstance(data, RawJSON) else data
+def answer_value(data: Any) -> Any:
+    """A reader's answer read: the value of the kernel's JSON text (RawJSON, or its UTF-8 bytes), or the answer as it
+    is. The checks keep their pages' answers as the bytes (shoot_states `answers`), a third of the memory the value
+    takes, in one block rather than hundreds of thousands of objects, and read one when they need it."""
+    if isinstance(data, RawJSON):
+        return json.loads(data.text)
+    return json.loads(data) if isinstance(data, bytes) else data
+
+
+def _answer_refs(data: Any) -> set[str]:
+    """The record refs among the first FETCHED_SCAN_MAX values of a reader's answer (answer_value), in the order
+    _strings lists them. Blocking."""
     out: set[str] = set()
     n = 0
-    stack = [value]
+    stack = [answer_value(data)]
     while stack and n < FETCHED_SCAN_MAX:
         x = stack.pop()
         if isinstance(x, str):
@@ -3910,7 +3917,7 @@ def _answer_refs(data: Any) -> tuple[set[str], Any]:
             stack.extend(reversed(x))
         elif x is not None:
             n += 1
-    return out, value
+    return out
 
 
 def _strings(v: Any, out: list[str]) -> None:
@@ -4754,7 +4761,9 @@ def unlisted_derived(c: str, shots: list[dict[str, Any]], declared: set[str]) ->
     recs: dict[str, dict[str, Any]] = {}
     for s in shots:
         for a in s.get("answers") or []:
-            _answer_records(a, recs)
+            if len(recs) >= DERIVED_SAMPLE:
+                break
+            _answer_records(answer_value(a), recs)
     seen: dict[str, int] = {}
     missed: dict[str, list[tuple[Any, str]]] = {}
     for ref, rec in recs.items():

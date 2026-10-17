@@ -620,7 +620,8 @@ async def test_a_long_answer_reaches_the_checks_page_as_the_reader_made_it(ws, i
     (state,) = await views.shoot_states(CORPUS, "many", [{"open": {}}], answers=1)
     assert state["ok"], state["errors"]
     assert state["records"] == MANY and state["fetched_records"] == MANY
-    assert state["answers"][0][0] == {"ref": "board.jsonl#L1", "n": 1, "text": TRICKY}, "the answer is kept as read"
+    assert isinstance(state["answers"][0], bytes), "the answer is kept as the kernel's text"
+    assert views.answer_value(state["answers"][0])[0] == {"ref": "board.jsonl#L1", "n": 1, "text": TRICKY}
 
 
 def test_a_reader_answer_goes_to_the_checks_page_as_the_kernel_wrote_it():
@@ -637,10 +638,29 @@ def test_the_refs_an_answer_hands_the_page_are_those_among_its_first_values(monk
               "more": ["b.jsonl#L7", 2.5, "not a ref"]}
     strings: list[str] = []
     views._strings(answer, strings)
-    assert views._answer_refs(views.RawJSON(json.dumps(answer))) == ({s for s in strings if views.is_record(s)}, answer)
-    assert views._answer_refs(answer)[0] == {"a.jsonl#L1", "a.jsonl#L2", "b.jsonl#L7"}
+    assert views._answer_refs(views.RawJSON(json.dumps(answer))) == {s for s in strings if views.is_record(s)}
+    assert views._answer_refs(answer) == {"a.jsonl#L1", "a.jsonl#L2", "b.jsonl#L7"}
     monkeypatch.setattr(views, "FETCHED_SCAN_MAX", 4)  # a ref, 1, True, a ref: the third ref is past the scan
-    assert views._answer_refs(answer)[0] == {"a.jsonl#L1", "a.jsonl#L2"}
+    assert views._answer_refs(answer) == {"a.jsonl#L1", "a.jsonl#L2"}
+
+
+def test_the_answers_the_checks_keep_are_read_only_as_far_as_their_readers_need():
+    """Bug hunt D15: the checks keep their pages' first answers as the kernel's JSON text in UTF-8, a third of the memory
+    the read answers took, and the review's records text reads them only until it is long enough, which cuts it where
+    reading them all cut it."""
+    from app import view_review
+
+    def every(shots):  # records_text as it was: every answer read and written, then cut
+        text = "\n".join(f"picture {i}: {json.dumps(a, ensure_ascii=False, default=str)}" for i, s in enumerate(shots, 1)
+                         for a in s["answers"][:view_review.ANSWERS_PER_STATE])
+        return text if len(text) <= view_review.RECORDS_CHARS else text[: view_review.RECORDS_CHARS - 1] + "…"
+
+    # answers of about half RECORDS_CHARS and of about all of it, the first alone exactly as long at n = 5957
+    for n in [*range(2900, 3100, 7), *range(5946, 5967)]:
+        values = [[{"ref": f"a.jsonl#L{i}", "x": "y" * n}] for i in range(4)]
+        shots = [{"answers": values[:2]}, {"answers": values[2:]}]
+        kept = [{"answers": [json.dumps(v).encode() for v in s["answers"]]} for s in shots]
+        assert view_review.records_text(kept) == view_review.records_text(shots) == every(shots), n
 
 
 def test_the_records_an_answer_cites_in_one_document_share_its_strings(data):
