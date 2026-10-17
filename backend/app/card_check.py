@@ -10,7 +10,9 @@ new change to the card cancels a running check and starts the next. At most READ
 1. Draw: render.render_card shoots the card with the app's own card face; a card that did not draw ends the check
    `error`. Where no card can be drawn (render.down), no check begins, and one that began is taken off the card.
 2. Critique: the `verify` role's model reads the question, takeaway, resolved links, code, the work that led to the
-   card (context.render) and the picture, names what fails each criterion, and gives the replacement card.
+   card (context.render) and the picture, names what fails each criterion, and gives the replacement card. The reading
+   is an agent of the analyst's Claude Code session (agent_call.py: thimble starts no `claude` of its own), so a
+   check needs that session: with none running thimble in the folder it ends `error`, and its notice gives the fix.
 3. Replace: the parts that differ and that the check may change (checkstore.fixable) are tried on a copy of the card
    and kept only when the code runs clean and the card draws, as one undo step with actor `check`. A card that fails no
    criterion stays as it is, unless its links check found a value its code types in and the replacement's code
@@ -63,7 +65,7 @@ CHECK_TIMEOUT_S = {"low": 90.0, "medium": 120.0, "high": 180.0, "xhigh": 300.0, 
 # How many readings run at once; a check waiting for one is `queued`, its clock stopped (_slot). The drawing and the
 # revision run outside the slots.
 READ_CONCURRENCY = max(1, int(os.environ.get("THIMBLE_CARD_CHECK_CONCURRENCY", "4") or "4"))
-# After model.structured has spent its own retries on a capacity failure, the check waits these many seconds outside
+# After Claude Code has spent its own retries on a capacity failure, the check waits these many seconds outside
 # its slot and reads the card again; with the waits spent it ends `error`, saying the API was at capacity.
 CAPACITY_WAITS_S = (30.0, 60.0, 120.0)
 CAPACITY = ("overloaded", "rate_limited")  # the classes of retry.transient_class that mean the API is at capacity
@@ -82,8 +84,12 @@ AGENT = "Card check"  # the check's name on its notices
 FAILED_TEXT = "The card check of the card \"{card}\" failed: {why}."
 FALLBACK_TEXT = "Claude's safeguards switched the card check's reading of \"{card}\" from {model} to {fallback}."
 CARD_WORDS = 80  # of the card's question or title a notice quotes
+TASK_WORDS = 60  # of the card's question the reading's agent's task line and its dropped hand-back's row quote
+# the reading's agent in Claude Code (agent_call.py): its line in Claude Code's task list, and the reason Claude Code
+# prints in main's terminal when the terminal UI drops its hand-back
+TITLE = "thimble card check: {card}"
+DONE = 'thimble checked the card "{card}"'
 UNTRIED = "its revision could not be tried"  # an `error` whose card runner gave no result (notebook.TrialUnavailable)
-READ_IDLE_S = 60.0  # a reading with no sign of life this long is stalled (model.structured's idle clock)
 PAUSE_POLL_S = 0.05  # how often a check waiting for a reading slot looks at its clock again (_within)
 MAX_EDGE = 2576  # the longest edge of an image the model reads at full resolution
 CONTEXT_CHARS = 30_000  # of the author's work before the card: enough for the request and the work behind the card
@@ -135,7 +141,7 @@ class _Run:
     effort: str = ""  # the effort the card is read at (read_effort), resolved once when the check starts
     timing: dict[str, Any] = field(default_factory=dict)  # the check's times, for status_route
     phase: str = "queued"  # checkstore.PHASES, as the record says
-    deadline: float = 0.0  # loop time the check's slot runs out at; model.structured's retry waits push it back
+    deadline: float = 0.0  # loop time the check's slot runs out at; a wait for a reading slot pushes it back
     outcome: str = ""  # how the check ended, for its timing: its record's status, or why it was cancelled
     reason: str = ""  # why it ended `error` or `stopped`
     waited: float = 0.0  # seconds spent waiting for API capacity, left out of the check's time
@@ -238,7 +244,7 @@ def check_timeout(effort: str) -> float:
 
 
 class _Capacity(Exception):
-    """The reading failed because the API is at capacity after model.structured's own retries: the check waits and
+    """The reading failed because the API is at capacity after Claude Code's own retries: the check waits and
     reads again (CAPACITY_WAITS_S)."""
 
 
@@ -318,8 +324,8 @@ def _gone(run: _Run) -> None:
 
 
 async def _within(run: _Run, coro: Any, limit: float) -> Any:
-    """Await `coro` until the check's deadline, `limit` seconds from now and pushed back by each retry wait
-    model.structured reports (_on_retry); _PastTime past it, the work cancelled."""
+    """Await `coro` until the check's deadline, `limit` seconds from now and pushed back while the clock stands (a wait
+    for a reading slot, _slot; a drawing, _clock_stands); _PastTime past it, the work cancelled."""
     loop = asyncio.get_running_loop()
     run.deadline = loop.time() + limit
     task = asyncio.ensure_future(coro)
@@ -354,29 +360,6 @@ async def _clock_stands(run: _Run | None) -> Any:
     finally:
         run.deadline += loop.time() - run.paused_at
         run.paused_at = None
-
-
-def _on_retry(run: _Run) -> Any:
-    """model.structured's on_retry for the check's reading: the wait is added to the check's deadline, and the record
-    says the check waits for capacity until then, back to `checking` once the wait is over."""
-
-    def heard(n: int, wait: float, cls: str, exc: BaseException | None) -> None:
-        run.deadline += wait
-        run.waited += wait
-        if _phase(run, "waiting", until=_iso_in(wait), note=CAPACITY_WORDS.get(cls, f"the API answered {cls}")):
-            asyncio.get_running_loop().call_later(wait, lambda: run.phase == "waiting" and _phase(run, "checking"))
-
-    return heard
-
-
-def _on_fallback(run: _Run) -> Any:
-    """model.structured's on_fallback for the check's reading: the time the refused reading took is added to the
-    check's deadline, so the reading on the fallback model gets the check's whole time."""
-
-    def heard(spent: float) -> None:
-        run.deadline += spent
-
-    return heard
 
 
 async def _guarded(run: _Run) -> None:
@@ -997,10 +980,11 @@ def _fill(template: str, values: dict[str, str]) -> str:
 
 
 def _tool(secs: dict[str, str], name: str) -> Any:
-    from . import model, tools  # noqa: PLC0415
+    from . import tools  # noqa: PLC0415
+    from .call_result import ToolSpec  # noqa: PLC0415
 
     desc, schema = tools.split_section(secs[name])
-    return model.ToolSpec(name=name.replace("-", "_"), description=desc, input_schema=schema)
+    return ToolSpec(name=name.replace("-", "_"), description=desc, input_schema=schema)
 
 
 def fit_image(png: bytes, max_edge: int = MAX_EDGE) -> bytes:
@@ -1141,20 +1125,18 @@ def read_effort(c: str) -> str:
 
 
 async def _call(c: str, system: str, user: str, tool: Any, images: list[tuple[bytes, str]], *, effort: str,
-                model: str | None = None) -> Any:
-    """The reading: one model.structured call on `model`, else the `verify` role's model, at that role's speed and
-    `effort`, else the role's. Retry waits and a refused reading before the fallback are left out of the check's time
-    (_on_retry, _on_fallback)."""
-    from . import model as model_mod  # noqa: PLC0415
+                model: str | None = None, words: str = "") -> Any:
+    """The reading: one call as a subagent of the analyst's Claude Code session (agent_call.structured) on `model`, else
+    the `verify` role's model, at `effort`, else the role's; again on the refusal row's model when the model refuses.
+    `words` are the card's question as its agent's task line and its dropped hand-back's row name it (TITLE, DONE)."""
+    from . import agent_call  # noqa: PLC0415
 
     role = _role(c)
-    run = _current.get()
-    return await model_mod.structured(
-        user, tool=tool, model=model or role["model"], effort=effort or role["effort"],
-        system=system, cwd=config.corpus_dir(c), refusal=role["refusal"],
-        speed=role["speed"], images=images, idle_timeout_s=READ_IDLE_S,
-        on_retry=_on_retry(run) if run is not None else None,
-        on_fallback=_on_fallback(run) if run is not None else None)
+    words = words or "a card"
+    return await agent_call.structured(
+        c, user, tool=tool, model=model or role["model"], effort=effort or role["effort"], system=system,
+        images=images, refusal=role["refusal"], what="card check", title=TITLE.format(card=words),
+        done=DONE.format(card=words))
 
 
 def _assessment(raw: Any) -> list[dict[str, Any]] | None:
@@ -1213,14 +1195,17 @@ async def check_task(c: str, inp: dict[str, Any], *, model: str | None = None) -
         except OSError:
             log.warning("card check: the picture %s could not be read", inp["picture"])
     effort = str(inp.get("effort") or "") or await asyncio.to_thread(read_effort, c)
-    return await _call(c, _fill(secs["check"], {}), user, _tool(secs, "critique"), images, effort=effort, model=model)
+    words = " ".join(str(card.get("question") or card.get("id") or "").split())
+    words = words if len(words) <= TASK_WORDS else words[: TASK_WORDS - 1].rsplit(" ", 1)[0] + "…"
+    return await _call(c, _fill(secs["check"], {}), user, _tool(secs, "critique"), images, effort=effort, model=model,
+                       words=words)
 
 
 async def _read(c: str, cell: dict[str, Any], png: bytes | None, run: _Run,
                 picture: str | None = None) -> tuple[list[dict[str, Any]], dict[str, str], str] | str:
     """(assessment, the replacement card {question, code, takeaway}, model) from the card-check task's reading of the
     card's picture (tasks.call: an extension's program, else check_task); why not, as a sentence, when the call failed
-    or its output lacks a part. _Capacity when the API is at capacity after model.structured's own retries. `picture`
+    or its output lacks a part. _Capacity when the API is at capacity after Claude Code's own retries. `picture`
     is where `png` is kept."""
     from . import prompts, tasks, userconf  # noqa: PLC0415
 
@@ -1294,8 +1279,8 @@ def _kept_text(c: str, cell: dict[str, Any], secs: dict[str, str]) -> str:
 def _read_failure(status: str, detail: str) -> str:
     """Why a reading failed, in the words the card's details show."""
     lead = {"refused": "the model declined to read the card", "truncated": "the model's reading was cut off",
-            "no_tool_call": "the model gave no assessment", "timeout": "the model stopped answering"}.get(
-        status, "the model's reading failed")
+            "no_tool_call": "the model gave no assessment", "timeout": "the model stopped answering",
+            "no_session": "the check could not start"}.get(status, "the model's reading failed")
     return f"{lead} ({detail})" if detail else lead
 
 
