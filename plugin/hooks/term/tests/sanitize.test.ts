@@ -1,11 +1,11 @@
 // Every data-derived string the terminal draws goes through clean() (SPEC-v2 S8): a terminal's escape sequences (an OSC
 // 8 link, a color), C0 and C1 controls, the bidi controls and marks, the zero-width characters and U+FEFF are left out:
-// in a check's name and comment, and in the coverage line as drawn. `claude plugin test plugin`.
+// in a check's name and comment, and in a notice's row above the prompt. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
 import { clean } from '../lib'
 import { answerCommentOf } from '../term'
-import { CWD, aTurn, call, corpus, reads, shown, startSession, world } from './fixtures'
+import { shown, startSession, world } from './fixtures'
 
 const SLOW = { timeoutMs: 30000 }
 const BAD = 'a\u001b]8;;https://x.example\u0007link\u001b]8;;\u0007 \u001b[31mred\u001b[0m\u0007\u0085 b‮evil‬ c⁦d⁩ z​w‍j﻿k؜.'
@@ -25,18 +25,18 @@ test("a check's name, about and comment are cleaned as read", () => {
   expect(c.color).toBe(8)
 })
 
-test('the coverage line and a failure toast draw no control, bidi or zero-width character', SLOW, async ($, on) => {
+test("a notice's words and a view proposal's name and description above the prompt draw no control, bidi or zero-width character", SLOW, async ($, on) => {
   const w = world(on)
-  w.coverageLine = `saw 1 of 3 files‮​\u001b[31m`
-  corpus(w, ['events.jsonl'])
-  reads(w)
+  w.states.home = {
+    ...w.states.home,
+    notices: [{ id: 'n1', key: 'agent:view:x', kind: 'agent', text: `The build failed: ${BAD}`, agent: 'View build: x', chat: '', at: '2026-10-17T00:00:00Z', acts: [] }],
+    offer: { slug: 'pages', name: 'Pa\u202ege\u200bs', description: BAD, task: 'Find the pages.', claims: [] },
+  } as never
   await startSession($, w)
-  await aTurn($, w, 'r1', 'It holds events.', async () => {
-    await call($, 'Read', { file_path: `${CWD}/events.jsonl` })
-  })
-  const ui = await $.ui.mount({ plugin: 'thimble', component: 'AssistantMessage', requestId: 'r1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text: 'It holds events.', isFirstOfReply: true } } as never)
+  const ui = await $.ui.mount({ plugin: 'thimble', component: 'AbovePrompt', requestId: 'above', surface: 'terminal', viewport: { columns: 150, rows: 40 }, props: { hasSurvey: false, isWorking: false, view: {}, bodyColumns: 150 } } as never)
   const text = shown(await ui.drawn())
-  expect(text).toContain('▸ saw 1 of 3 files')
-  expect(text).not.toMatch(/[\u001b‮​]/)
+  expect(text).toContain('The build failed: alink red bevil cd zwjk.')
+  expect(text).toContain('Pages  alink red bevil cd zwjk.')
+  expect(text).not.toMatch(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u200b-\u200f\u2066-\u2069\ufeff]/)
   await ui.unmount()
 })

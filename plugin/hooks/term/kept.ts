@@ -1,7 +1,7 @@
 // What main's chat draws under its rows, kept in the workspace so a resumed session draws it again. Claude Code keeps a
 // row's uuid across `--continue` and `--resume`, and the drawings stand under rows by that uuid (their `requestId`), but
 // the plugin's state lives only as long as its process. So each row's cards, its answer's footer, its `↳ thread` rows
-// its `↳ view` rows and its coverage line are written to `<workspace>/terminal/chat.json` as they are set, and read back
+// and its `↳ view` rows are written to `<workspace>/terminal/chat.json` as they are set, and read back
 // into the state when thimble turns on or the session starts again. The file is the terminal UI's own: the browser
 // does not read it.
 //
@@ -14,8 +14,8 @@ type Io = Pick<Ctx, 'read' | 'write'>
 
 /** What one row of main's chat carries under it; `writer`, the writer run its `↳ The writer …` line reports (its chat)
  *  and whether it said that run's end first; `repeat`, its `↳` lines that answer a subagent run's second report after
- *  an earlier row answered the first, which are hidden; `coverage`, the coverage line under the turn's answer. */
-export type KeptRow = { cards?: string[]; answer?: TermAnswer; threads?: ChatSignal[]; views?: string[]; writer?: { chat: string; first: boolean }; repeat?: string[]; coverage?: string }
+ *  an earlier row answered the first, which are hidden. */
+export type KeptRow = { cards?: string[]; answer?: TermAnswer; threads?: ChatSignal[]; views?: string[]; writer?: { chat: string; first: boolean }; repeat?: string[] }
 
 /** The file: each row's drawings by its uuid, oldest first, the last turn's text and cards (`/thimble cite` and
  *  `/thimble card` open them by number), and what the workspace held when home was last seen (`seen`), so the row above
@@ -62,7 +62,6 @@ export function parseKept(raw: string): Kept {
     if (writer && typeof writer === 'object' && typeof writer.chat === 'string' && writer.chat) row.writer = { chat: writer.chat, first: writer.first === true }
     const repeat = strings(x.repeat)
     if (repeat.length) row.repeat = repeat
-    if (typeof x.coverage === 'string' && x.coverage) row.coverage = x.coverage
     if (cards.length) row.cards = cards
     if (threads.length) row.threads = threads
     if (views.length) row.views = views

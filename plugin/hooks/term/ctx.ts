@@ -135,8 +135,6 @@ export type Ctx = {
   setActivated: (a: Activated | null) => Promise<void>
   settings: () => Promise<FeatureSettings | undefined>
   setSettings: (s: FeatureSettings) => Promise<void>
-  coverageLine: (row: string) => Promise<string | undefined>
-  setCoverageLine: (row: string, line: string) => Promise<void>
   coverageSummary: () => Promise<CoverageSummary | null>
   setCoverageSummary: (s: CoverageSummary | null) => Promise<void>
   citeIndex: () => Promise<CiteRow[]>
@@ -190,7 +188,6 @@ const panelTickRef = { plugin: 'thimble', key: 'panelTick' } as const
 const panelTickA = atom(panelTickRef, 0)
 const activatedRef = { plugin: 'thimble', key: 'activated' } as const
 const settingsRef = { plugin: 'thimble', key: 'settings' } as const
-const COVERAGE_LINE = { plugin: 'thimble', key: 'coverageLine' } as const
 const coverageSummaryRef = { plugin: 'thimble', key: 'coverageSummary' } as const
 const citeIndexRef = { plugin: 'thimble', key: 'citeIndex' } as const
 const answerCommentsRef = { plugin: 'thimble', key: 'answerComments' } as const
@@ -376,11 +373,6 @@ export function cxOf($: Dollar): Ctx {
     setActivated: async a => void (await $.state.set(activatedRef, a)),
     settings: async () => (await $.state.get(settingsRef)).value,
     setSettings: async v => void (await $.state.set(settingsRef, v)),
-    coverageLine: async row => (await $.state.get({ ...COVERAGE_LINE, id: row })).value,
-    setCoverageLine: async (row, line) => {
-      await $.state.set({ ...COVERAGE_LINE, id: row }, line)
-      await keep(row, { coverage: line })
-    },
     coverageSummary: async () => (await $.state.get(coverageSummaryRef)).value ?? null,
     setCoverageSummary: async v => void (await $.state.set(coverageSummaryRef, v)),
     citeIndex: async () => (await $.state.get(citeIndexRef)).value ?? [],
@@ -408,7 +400,6 @@ export function cxOf($: Dollar): Ctx {
       if (r.answer && !(await $.state.get({ ...ANSWERS, id: row })).value) await $.state.set({ ...ANSWERS, id: row }, r.answer)
       if (r.threads?.length && !(await $.state.get({ ...THREAD_ROWS, id: row })).value?.length) await $.state.set({ ...THREAD_ROWS, id: row }, r.threads)
       if (r.views?.length && !(await $.state.get({ ...VIEW_ROWS, id: row })).value?.length) await $.state.set({ ...VIEW_ROWS, id: row }, r.views)
-      if (r.coverage && !(await $.state.get({ ...COVERAGE_LINE, id: row })).value) await $.state.set({ ...COVERAGE_LINE, id: row }, r.coverage)
     },
   }
 }
