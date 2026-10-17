@@ -214,8 +214,8 @@ class Server {
 }
 
 // `marker`: the session's marker (default on); `launch`: the workspace's launch.json (default main on the server's
-// transport after a press; null for none)
-type Options = { env?: Json; interactive?: boolean; server?: Server; serverUp?: boolean; marker?: boolean; launch?: Json | null }
+// transport after a press; null for none); `files`: more files there at the start
+type Options = { env?: Json; interactive?: boolean; server?: Server; serverUp?: boolean; marker?: boolean; launch?: Json | null; files?: Json }
 
 /** A fake engine: the module's hooks, `$`, and a record of what the module asked Claude Code for. */
 function engine(opts: Options = {}) {
@@ -227,6 +227,7 @@ function engine(opts: Options = {}) {
     ...(opts.serverUp === false ? {} : { [`${HOME}/.thimble/server.json`]: JSON.stringify({ port: 21125, token: TOKEN }) }),
     ...(opts.marker === false ? {} : { [MARKER]: JSON.stringify(MARKED) }),
     ...(launch === null ? {} : { [`${WSD}/trusted/launch.json`]: JSON.stringify(launch) }),
+    ...(opts.files ?? {}),
   }
   const mtimes: Json = {} // each file's mtime, which a write moves on
   const links: Json = {} // symbolic links: path -> where it points
@@ -621,6 +622,14 @@ describe('model calls', () => {
     await until(() => e.server.ended.length === 1)
     expect(e.server.ended[0]).toMatchObject({ agentId: fork.agentId, answer: '{"show": false, "why": "Nothing new.", "proposal": null}' })
     expect(e.files[list]).toBe('') // it ended: the guard has nothing to refuse
+  })
+
+  it('empties a list of forks an earlier load left, and makes none where there is none', async () => {
+    const list = forksFile(`${HOME}/.thimble`, MAIN)
+    const e = await started({ files: { [list]: 'aGone\n' } })
+    expect(e.files[list]).toBe('')
+    const fresh = await started()
+    expect(list in fresh.files).toBe(false)
   })
 })
 

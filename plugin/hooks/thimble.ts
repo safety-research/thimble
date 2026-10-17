@@ -451,6 +451,7 @@ async function begin($: Engine, m: State, cwd: string): Promise<void> {
   await prepare($, m)
   m.cwd = cwd
   m.session = await $.session.id()
+  await staleForks($, m)
   try {
     const manifest = JSON.parse(await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`))
     m.version = isObj(manifest) ? text(manifest.version) : ''
@@ -628,6 +629,14 @@ async function spawnFork($: Engine, m: State, prompt: string, description: strin
 async function writeForks($: Engine, m: State): Promise<void> {
   if (!m.home || !m.session) return
   await $.fs.write(forksFile(m.home, m.session), [...m.forks].map(id => `${id}\n`).join('')).catch(() => undefined)
+}
+
+/** A list of forks an earlier load left (Claude Code quit while one ran, then this session was resumed) emptied, so the
+ *  guard's first shell line exits again; no file is made where there is none. */
+async function staleForks($: Engine, m: State): Promise<void> {
+  if (m.forks.size > 0 || !m.home || !m.session) return
+  const st = await $.fs.stat(forksFile(m.home, m.session)).catch(() => undefined)
+  if (st && st.size > 0) await writeForks($, m)
 }
 
 async function send($: Engine, m: State, agent: string, message: string, role: string, values: Values | undefined): Promise<Answer> {
@@ -869,6 +878,7 @@ async function fileBegin($: Engine, m: State, cwd: string, ws: string, launch: J
   m.cwd = cwd
   await prepare($, m)
   m.session = await $.session.id()
+  await staleForks($, m)
   const state = (await readJson($, trusted(m, 'subagents.json'))) ?? {}
   m.peer = !isMain(launch, state, m.session)
   m.stamps.launch = await stamp($, trusted(m, 'launch.json'))
