@@ -17,7 +17,7 @@ import type { Citation } from './lib'
 import { agentsOf, cellOf, cellsOf, chatOf, docUnits, docsOf, homeOf, labelIdOf, labelOf, labelsOf, resolutionOf, threadOf, threadRowsOf, uiRecordsOf, verdictOf } from './model'
 import { classColors, labelArgs, setLabelGone } from './labels'
 import { fileRef } from './files'
-import { keepSeen, keptSeen, loadKept, resetKept } from './kept'
+import { keepSeen, keepSession, keptSeen, keptSession, loadKept, resetKept } from './kept'
 import { NAV_EMPTY, backTarget, moved, nextTrail, withBack } from './nav'
 import { signalEnd, withSignal } from './signal'
 import type { AnswerComment } from './contracts'
@@ -294,8 +294,8 @@ async function putCard(cx: Ctx, cell: ThimbleCell): Promise<void> {
  *  citations the thimble line counts (citesview.tsx citeItems). */
 export async function loadCards(cx: Ctx, ids: readonly string[], opts: { named?: boolean } = {}): Promise<void> {
   if (!rt.sc) return
+  if (!opts.named) drew(cx, ids)
   for (const id of ids) {
-    if (!opts.named) rt.shown.add(id)
     const got = await readState(cx, rt.sc, 'card', [id])
     const cell = got.ok ? cellOf(got.value) : null
     if (cell) await putCard(cx, cell)
@@ -316,14 +316,29 @@ export async function loadCardsBatch(cx: Ctx, ids: readonly string[]): Promise<v
   const got = await readState(cx, rt.sc, 'cards', ['--since', iso(0)])
   const read = new Set<string>()
   if (got.ok) {
-    for (const cell of cellsOf(got.value)) {
-      if (!want.has(cell.id)) continue
-      rt.shown.add(cell.id)
+    const cells = cellsOf(got.value).filter(cell => want.has(cell.id))
+    drew(cx, cells.map(cell => cell.id))
+    for (const cell of cells) {
       read.add(cell.id)
       await putCard(cx, cell)
     }
   }
   await loadCards(cx, ids.filter(id => !read.has(id)))
+}
+
+/** These cards are among those the session drew (`rt.shown`), whose takeaways' citations the thimble line counts
+ *  (citesview.tsx citeItems): kept by the session's id when the set grew, beside the drawing, so a resumed session
+ *  counts them still (kept.ts; bug hunt H7). */
+function drew(cx: Ctx, ids: readonly string[]): void {
+  const grew = ids.filter(id => !rt.shown.has(id))
+  if (!grew.length) return
+  for (const id of grew) rt.shown.add(id)
+  const sc = rt.sc
+  if (!sc) return
+  void cx
+    .sessionId()
+    .then(sid => (sid ? keepSession(cx, sc.ws, sid, { shown: [...rt.shown] }) : undefined))
+    .catch(() => undefined)
 }
 
 /** The cards some drawing shows, read again: those the notebooks changed since the last read, and the label cards
@@ -1479,13 +1494,26 @@ export function startTimers(cx: Ctx): void {
 }
 
 /** What main's chat drew under its rows in earlier processes of this conversation (kept.ts), put in the state where it
- *  holds none; then, beside the session, the cards those rows draw, read in one call, and the threads their `↳ thread`
- *  rows name. */
+ *  holds none, and what the thimble line counted as this session's citations there (its answers' chat citations and
+ *  the cards it drew: bug hunt H7); then, beside the session, the cards those rows draw and the session drew, read in
+ *  one call, and the threads their `↳ thread` rows name. */
 export async function restoreKept(cx: Ctx): Promise<void> {
   if (!rt.sc) return
   resetKept()
   const k = await loadKept(cx, rt.sc.ws)
   const ids = new Set<string>()
+  const mine = keptSession(await cx.sessionId().catch(() => ''))
+  if (mine) {
+    for (const id of mine.shown) {
+      if (rt.deleted.has(id)) continue
+      rt.shown.add(id)
+      ids.add(id)
+    }
+    const have = await cx.citeIndex()
+    const known = new Set(have.map(r => `${r.id}|${r.row}`))
+    const add = mine.cites.filter(r => !known.has(`${r.id}|${r.row}`))
+    if (add.length) await cx.setCiteIndex([...add, ...have].slice(-2000))
+  }
   for (const [row, r] of Object.entries(k.rows)) {
     await cx.restoreRow(row, r)
     for (const id of [...(r.cards ?? []), ...(r.answer?.cards ?? []), ...embeddedCards(r.answer?.text ?? '')]) ids.add(id)

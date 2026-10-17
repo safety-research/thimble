@@ -2,11 +2,13 @@
 // row's uuid across `--continue` and `--resume`, and the drawings stand under rows by that uuid (their `requestId`), but
 // the plugin's state lives only as long as its process. So each row's cards, its answer's footer, its `↳ thread` rows
 // and its `↳ view` rows are written to `<workspace>/terminal/chat.json` as they are set, and read back
-// into the state when thimble turns on or the session starts again. The file is the terminal UI's own: the browser
-// does not read it.
+// into the state when thimble turns on or the session starts again. So is what the thimble line counts as the session's
+// citations, by the session's id (`sessions`): its answers' chat citations (C13 citeIndex) and the cards the session
+// drew (term.ts rt.shown), so a resumed session counts the same ones (bug hunt H7: 14 before `claude -c`, 9 after). The
+// file is the terminal UI's own: the browser does not read it.
 //
 // No `$` here: register.tsx reads and writes through the context (hooks/ctx.ts).
-import type { ChatSignal, TermAnswer, TermHome } from './types'
+import type { ChatSignal, CiteRow, TermAnswer, TermHome } from './types'
 import type { Ctx } from './ctx'
 
 /** What the file is read and written with. */
@@ -17,15 +19,24 @@ type Io = Pick<Ctx, 'read' | 'write'>
  *  an earlier row answered the first, which are hidden. */
 export type KeptRow = { cards?: string[]; answer?: TermAnswer; threads?: ChatSignal[]; views?: string[]; writer?: { chat: string; first: boolean }; repeat?: string[] }
 
+/** What a session's citations are counted over (citesview.tsx citeItems): its answers' chat citations and the cards it
+ *  drew, in the order it drew them. */
+export type KeptSession = { cites: CiteRow[]; shown: string[] }
+
 /** The file: each row's drawings by its uuid, oldest first, the last turn's text and cards (`/thimble cite` and
- *  `/thimble card` open them by number), and what the workspace held when home was last seen (`seen`), so the row above
- *  the prompt counts what came after across a relaunch. */
-export type Kept = { rows: Record<string, KeptRow>; last: { reply: string; cards: string[] }; seen?: TermHome }
+ *  `/thimble card` open them by number), what the workspace held when home was last seen (`seen`), so the row above
+ *  the prompt counts what came after across a relaunch, and each session's citations by its id, oldest first. */
+export type Kept = { rows: Record<string, KeptRow>; last: { reply: string; cards: string[] }; seen?: TermHome; sessions?: Record<string, KeptSession> }
 
 /** The workspace file, under the workspace folder. */
 export const KEPT_FILE = 'terminal/chat.json'
 /** The rows kept, the newest. */
 const ROWS_MAX = 400
+/** The sessions whose citations are kept, the newest; and of each, the chat citations (citeIndex keeps as many) and the
+ *  cards. */
+const SESSIONS_MAX = 8
+const CITES_MAX = 2000
+const SHOWN_MAX = 2000
 
 export const keptEmpty = (): Kept => ({ rows: {}, last: { reply: '', cards: [] } })
 
@@ -69,7 +80,27 @@ export function parseKept(raw: string): Kept {
     if (Object.keys(row).length) rows[k] = row
   }
   const seen = seenOf((o as { seen?: unknown }).seen)
-  return { rows, last: { reply: typeof o.last?.reply === 'string' ? o.last.reply : '', cards: strings(o.last?.cards) }, ...(seen ? { seen } : {}) }
+  const sessions = sessionsOf((o as { sessions?: unknown }).sessions)
+  return { rows, last: { reply: typeof o.last?.reply === 'string' ? o.last.reply : '', cards: strings(o.last?.cards) }, ...(seen ? { seen } : {}), ...(sessions ? { sessions } : {}) }
+}
+
+function citeRowsOf(v: unknown): CiteRow[] {
+  if (!Array.isArray(v)) return []
+  return v.flatMap((x): CiteRow[] => {
+    const r = (x ?? {}) as Partial<Record<keyof CiteRow, unknown>>
+    if (typeof r.id !== 'string' || typeof r.raw !== 'string' || typeof r.ref !== 'string' || typeof r.row !== 'string') return []
+    return [{ id: r.id, raw: r.raw, display: typeof r.display === 'string' ? r.display : null, ref: r.ref, row: r.row, at: typeof r.at === 'number' ? r.at : 0 }]
+  })
+}
+
+function sessionsOf(v: unknown): Record<string, KeptSession> | undefined {
+  if (!v || typeof v !== 'object') return undefined
+  const out: Record<string, KeptSession> = {}
+  for (const [sid, x] of Object.entries(v as Record<string, unknown>)) {
+    const o = (x ?? {}) as { cites?: unknown; shown?: unknown }
+    if (sid) out[sid] = { cites: citeRowsOf(o.cites), shown: strings(o.shown) }
+  }
+  return Object.keys(out).length ? out : undefined
 }
 
 function seenOf(v: unknown): TermHome | undefined {
@@ -83,7 +114,9 @@ function seenOf(v: unknown): TermHome | undefined {
 export function keptJson(k: Kept): string {
   const keys = Object.keys(k.rows)
   const rows = Object.fromEntries(keys.slice(Math.max(0, keys.length - ROWS_MAX)).map(key => [key, k.rows[key]!]))
-  return JSON.stringify({ rows, last: k.last, ...(k.seen ? { seen: k.seen } : {}) })
+  const sids = Object.keys(k.sessions ?? {})
+  const sessions = Object.fromEntries(sids.slice(Math.max(0, sids.length - SESSIONS_MAX)).map(sid => [sid, k.sessions![sid]!]))
+  return JSON.stringify({ rows, last: k.last, ...(k.seen ? { seen: k.seen } : {}), ...(sids.length ? { sessions } : {}) })
 }
 
 /** `kept` with one row's part set (a row moves to the end, the newest). */
@@ -107,8 +140,26 @@ function pathOf(ws: string): string {
 export async function loadKept(cx: Io, ws: string): Promise<Kept> {
   const got = parseKept(await cx.read(pathOf(ws)).catch(() => ''))
   const seen = kept.seen ?? got.seen
-  kept = { rows: { ...got.rows, ...kept.rows }, last: kept.last.reply || kept.last.cards.length ? kept.last : got.last, ...(seen ? { seen } : {}) }
+  const sessions = { ...got.sessions, ...kept.sessions }
+  kept = { rows: { ...got.rows, ...kept.rows }, last: kept.last.reply || kept.last.cards.length ? kept.last : got.last, ...(seen ? { seen } : {}), ...(Object.keys(sessions).length ? { sessions } : {}) }
   return kept
+}
+
+/** What session `sid`'s citations are counted over, kept (the newest of each), and the file written. */
+export async function keepSession(cx: Io, ws: string, sid: string, part: Partial<KeptSession>): Promise<void> {
+  if (!sid) return
+  const sessions = { ...kept.sessions }
+  const cur = sessions[sid] ?? { cites: [], shown: [] }
+  delete sessions[sid]
+  sessions[sid] = { cites: (part.cites ?? cur.cites).slice(-CITES_MAX), shown: (part.shown ?? cur.shown).slice(-SHOWN_MAX) }
+  kept = { ...kept, sessions }
+  await save(cx, ws)
+}
+
+/** What session `sid`'s citations were counted over, as the file read at the session's start (or this process) keeps
+ *  it; null for a session it holds nothing of. */
+export function keptSession(sid: string): KeptSession | null {
+  return (sid && kept.sessions?.[sid]) || null
 }
 
 /** What the workspace held when home was last seen, kept. */

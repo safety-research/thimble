@@ -5,8 +5,10 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
 import { KEPT_FILE, resetKept } from '../kept'
-import { CWD, WS, shown, world } from './fixtures'
+import { cid } from '../lib'
+import { CWD, SID, WS, shown, world } from './fixtures'
 import type { World } from './fixtures'
+import { aboveAt, words } from './fixtures-panel'
 
 type M = Mounted<'terminal'>
 type E = Engine
@@ -40,4 +42,30 @@ test('after a resume the row draws its cards and its footer again, and `/thimble
   await ui.unmount()
   const said = await $.command.run({ command: 'thimble:thimble', args: 'card 1' } as never)
   expect(String((said as { text?: unknown }).text)).toBe('thimble: card 1 of 1')
+})
+
+test('after a resume the thimble line counts the citations it counted before: the answers\' and the takeaways\' of the cards the session drew (bug hunt H7)', { timeoutMs: 30_000 }, async ($, on) => {
+  // the line said `citations 14` before `claude -c` and 9 after, for the same answers: the answers' citations and the
+  // cards the session drew lived only in the process
+  resetKept()
+  const w = world(on)
+  const CARD_CITE = '[[4579|card:ff73e071#pages/TOTAL]]'
+  const FILE_CITE = '[[3|README.md#L3]]'
+  const cites = [
+    { id: cid(CARD_CITE), raw: CARD_CITE, display: '4579', ref: 'card:ff73e071#pages/TOTAL', row: 'r1', at: 1 },
+    { id: cid(FILE_CITE), raw: FILE_CITE, display: '3', ref: 'README.md#L3', row: 'r2', at: 2 },
+  ]
+  // what the earlier process of this conversation left: two answers' citations, and the card the session drew
+  w.files.set(KEPT, JSON.stringify({ rows: { r1: { cards: ['ff73e071'], answer: { rows: ['r1'], text: ANSWER, cards: ['ff73e071'] } } }, last: { reply: ANSWER, cards: ['ff73e071'] }, sessions: { [SID]: { cites, shown: ['ff73e071'] } } }))
+  await start($, w)
+  const m = (await $.ui.mount(aboveAt(184))) as unknown as M
+  // the answers' two, and the other one of the card's takeaway (its first is the first answer's): three
+  expect(words(await m.find({ type: 'Box', key: 'above-summary' }))).toContain('citations 3')
+  await m.unmount()
+  // a card the session draws from now on is kept for the next resume, beside what was kept
+  await $.command.run({ command: 'thimble:thimble', args: 'card a0frame0' } as never)
+  await w.clock.settle()
+  const kept = (JSON.parse(w.files.get(KEPT)!) as { sessions: Record<string, { cites: { raw: string }[]; shown: string[] }> }).sessions[SID]!
+  expect(kept.shown).toEqual(['ff73e071', 'a0frame0'])
+  expect(kept.cites.map(c => c.raw)).toEqual([CARD_CITE, FILE_CITE])
 })
