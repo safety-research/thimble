@@ -91,6 +91,46 @@ def test_h2_h3_main_s_events_written_to_the_file_after_the_press_reach_main_thro
     events._pending.clear()
 
 
+# ----------------------------------------------------------------------------- the browser's event stream
+
+
+async def test_another_process_s_event_reaches_the_browser_s_stream_when_one_of_the_server_s_follows_at_once(ws, monkeypatch):
+    """A label run in `thimble-run` (another process) writes `concepts applied` to the workspace's log, and the server
+    writes its next record a moment later, before the stream's idle tail read the file: the browser's stream sends both,
+    in order, rather than skipping the other process's lower seq as already sent (bug hunt C8: the label card on the
+    canvas kept 0 per value)."""
+    import json  # noqa: PLC0415
+    from types import SimpleNamespace  # noqa: PLC0415
+
+    import asyncio  # noqa: PLC0415
+
+    from app import investigation  # noqa: PLC0415
+
+    monkeypatch.setattr(investigation, "EVENTS_POLL_S", 60.0)  # the idle tail does not run within the test
+    log = investigation.ensure_main(CORPUS) / "events.jsonl"
+    stream = (await investigation._stream(CORPUS, investigation.MAIN, SimpleNamespace(headers={}))).body_iterator
+
+    async def record() -> dict:
+        while True:
+            rec = await asyncio.wait_for(anext(stream), 2.0)
+            if "id" in rec:
+                return json.loads(rec["data"])
+
+    try:
+        while (await asyncio.wait_for(anext(stream), 2.0)).get("event") != "live":
+            pass
+        investigation.emit(CORPUS, investigation.MAIN, {"type": "chat", "chat": "main"})
+        first = (await record())["seq"]
+        with log.open("a", encoding="utf-8") as f:  # the other process's record
+            f.write(json.dumps({"type": "concepts", "concept": "lbl-one", "what": "applied", "rows": True,
+                                "seq": first + 1}) + "\n")
+        investigation.emit(CORPUS, investigation.MAIN, {"type": "chat", "chat": "main"})
+        got = [await record(), await record()]
+        assert [(r["type"], r["seq"]) for r in got] == [("concepts", first + 1), ("chat", first + 2)]
+    finally:
+        await stream.aclose()
+
+
 # ----------------------------------------------------------------------------- thimble act
 
 

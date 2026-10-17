@@ -24,6 +24,11 @@ Color by does, and draw no color.
   chips, the records' bars and the first lane of the tracks. Each one checked after it is a lane of its own in the
   tracks (below), and the menu says "track" after its name. Unchecking the first gives the color to the next; unchecking
   the last is Off. Off unchecks them all and closes the menu.
+- A label checked that colors none of the rows, while the rows are the view's own units (`view:<slug>/<key>`, such as
+  a run) and the label marks records in the view's files, says under its name in the menu: "Can't color these rows:
+  none of them stands for any of the N records it marks." A unit takes a label's value from the records it stands for
+  (its reader's `resolve()` refs), so a label over records a unit does not stand for, such as a run's transcript lines,
+  colors no unit.
 - Checking a label turns it on in Files and every view and opens thimble's label editor beside the menu: the same
   editor as Files' (what it labels and marks, the files it applies to, its classifier, its prompt, pattern or code,
   and its classes with their colors and highlights), drawn by thimble over the view, so the view stays where it is. A
@@ -41,7 +46,8 @@ Color by does, and draw no color.
   in gray, a label on or not. The marks then show one variable, so the timeline's marks, the time range's overview and
   a chart's groups take the one series color, `var(--viz-1)`, as a chart of one series does.
 - The values of the chosen field show as key chips in the top row (`chip chip-key` in the view kit): a square of the
-  value's color, its name and its count. The chip of the records with no value ("Not marked", "No kind") has the gray
+  value's color, its name and its count. Each choice past the first follows as its own legend: its name, then its
+  values as key chips with their counts on the page, which turn nothing off. The chip of the records with no value ("Not marked", "No kind") has the gray
   square the marks draw those records in. A click turns a value's color off or on. An Alt-click, or a double click,
   keeps that value's color alone. A value turned off keeps its records, drawn in gray as the records with no value are
   (Filter by is what hides records), and its chip goes quiet with an empty square.

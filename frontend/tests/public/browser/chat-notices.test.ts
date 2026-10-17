@@ -3,8 +3,9 @@
 // answer of main's, a view proposal and the notices of three orientation helpers that Claude's safeguards switched to
 // another model (bug hunt B7). The cards above the composer take their own space: the transcript ends above them, so no
 // line of it shows between the cards or under the composer, however it is scrolled; the three notices in the same
-// words are one card that counts them, whose × dismisses all three. With no card above it, the composer is still glass
-// floating over the transcript.
+// words are one card that counts them, whose × dismisses all three. With no card above it, the transcript ends above
+// the composer too (bug hunt C10). A transcript at its end stays there while rows fill in, and sending a question takes
+// it to its end.
 // THIMBLE_CHAT_NOTICES_SHOT=<path.png> saves a picture of the column with the cards.
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
@@ -71,6 +72,7 @@ async function open(opts: { notices: unknown[]; proposal: boolean }): Promise<{ 
     const json = (body: unknown, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
     if (p.startsWith('/api/')) {
       if (req.method() !== 'GET') writes.push(`${req.method()} ${p}`)
+      if (p === `/api/ws/${WS}/events` && req.method() === 'POST') return json({ queued: true })
       if (p === `/api/ws/${WS}/events`) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: ': open\n\n' })
       if (p === `/api/ws/${WS}/chats`) return json([{ ...MAIN, n_messages: 2, last_ts: T }])
       if (p === `/api/ws/${WS}/chats/main`) return json({ meta: { ...MAIN, orientation: 'done' }, events: EVENTS })
@@ -149,11 +151,51 @@ test('the cards above the composer take their own space, and notices in the same
   }
 }, 60_000)
 
-test('with no card above it, the composer is glass floating over the transcript', async () => {
+test('with no card above it, no line of the transcript shows under the composer', async () => {
   const { page, close } = await open({ notices: [], proposal: false })
   try {
     await toTop(page)
-    assert.deepEqual(await throughFoot(page), ['composer 0.25', 'composer 0.5', 'composer 0.75'], 'the transcript runs under the composer')
+    assert.deepEqual(await throughFoot(page), [], 'the transcript ends above the composer')
+  } finally {
+    await close()
+  }
+}, 60_000)
+
+/** How far the transcript is from its end, in px, after a few frames. */
+const fromEnd = (page: Page) =>
+  page.evaluate(async () => {
+    const frames = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(r))))
+    await frames()
+    await frames()
+    const list = document.querySelector('.chat-list')!
+    return list.scrollHeight - list.scrollTop - list.clientHeight
+  })
+
+test('a transcript at its end stays there while rows fill in, and sending a question takes it to its end', async () => {
+  const { page, writes, close } = await open({ notices: [], proposal: false })
+  try {
+    assert.ok((await fromEnd(page)) < 2, 'the transcript opens at its end')
+    // the list follows a row that grew with a scroll of its own, and in the same frame a row under it fills in (a card
+    // reading its agent's log), as when the browser is busy in Files
+    await page.evaluate(() => {
+      const list = document.querySelector('.chat-list')!
+      const flow = document.querySelector('.chat-flow')!
+      const row = (h: number) => Object.assign(flow.appendChild(document.createElement('div')), { className: 'test-row' }).style.setProperty('height', `${h}px`)
+      row(40)
+      list.scrollTop = list.scrollHeight
+      row(400)
+    })
+    assert.ok((await fromEnd(page)) < 2, 'the transcript is still at its end')
+    // the analyst scrolls up to read; the list stays where they put it
+    await page.evaluate(() => {
+      document.querySelector('.chat-list')!.scrollTop = 0
+    })
+    assert.ok((await fromEnd(page)) > 400, 'the transcript stays where the analyst scrolled it')
+    await page.fill('.chat-foot .composer-text', 'which run failed first?')
+    await page.press('.chat-foot .composer-text', 'Enter')
+    await page.waitForFunction(() => !(document.querySelector('.chat-foot .composer-text') as HTMLTextAreaElement).value)
+    assert.ok(writes.includes(`POST /api/ws/${WS}/events`), writes.join(', '))
+    assert.ok((await fromEnd(page)) < 2, 'sending a question takes the transcript to its end, where the question shows')
   } finally {
     await close()
   }
