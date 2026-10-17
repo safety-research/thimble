@@ -243,7 +243,8 @@ no system package and never runs sudo.
 install.sh opens with one screen: what it found (Claude Code, Python or uv, Node, a browser, and on Linux whether card
 code and terminal-mode views can run in bubblewrap), what it installs where and about how big, what it changes in your
 Claude Code setup, and whether a question remains. Then it prints a line per step: ✓ when the step is done, ! when it
-needs you, with what fixes it under it. Every command it runs, with its output, goes to `~/.thimble/install.log`.
+needs you, with what fixes it under it. Every command it runs, with its output, goes to `~/.thimble/install.log`. A
+re-run that finds nothing to do says so in one line, and one that changes something shows only what changed.
 
 It asks one question, and only when it finds no Chrome or Edge that starts under automation: **a browser for
 screenshots**. thimble takes screenshots of the cards and views it draws, to check how they look. It offers Playwright's

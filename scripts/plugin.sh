@@ -17,7 +17,7 @@ set -euo pipefail
 # at its next start or /reload-plugins; or its own copy (installPath), which `claude plugin update` makes again only for
 # a new version. So while the version stays the same (a checkout between releases), install.sh compares the copy's files
 # with plugin/'s and, when they differ, uninstalls and installs the plugin again, keeping its options and its on or off.
-# When sourced, the caller defines the output functions (say, run, ok, warn, note) and the variables dir, home, tmp, dry,
+# When sourced, the caller defines the output functions (say, run, ok, same, warn, note) and the variables dir, home, tmp, dry,
 # have_claude, mp_name and version, and src when the plugin to install is not yet in dir (a release before its copy);
 # run as a script, plugin_main sets them up.
 
@@ -195,8 +195,8 @@ plugin_apply() {  # thimble's plugin from this install's folder in Claude Code, 
   [ "$plugin_on" != off ] || off="; it is off in Claude Code, and /plugin turns it on"
   if [ "$plugin_reg" = "$mp_name" ] && [ "$plugin_version" = "$version" ]; then
     case "$plugin_files" in
-      inplace) ok "thimble's plugin in Claude Code is this install's (thimble@$mp_name $version), read from $(tilde "$dir")/plugin itself: nothing to update. A claude session open since before uses any changed files after /reload-plugins$off";;
-      same) ok "thimble's plugin in Claude Code is this install's, unchanged (thimble@$mp_name $version): nothing to update$off";;
+      inplace) same "thimble's plugin in Claude Code is this install's (thimble@$mp_name $version), read from $(tilde "$dir")/plugin itself: nothing to update. A claude session open since before uses any changed files after /reload-plugins$off";;
+      same) same "thimble's plugin in Claude Code is this install's, unchanged (thimble@$mp_name $version): nothing to update$off";;
       differs)
         plugin_reinstall || return 1
         if [ "$dry" = 0 ] && plugin_record && [ "$plugin_files" = differs ]; then
@@ -206,7 +206,7 @@ plugin_apply() {  # thimble's plugin from this install's folder in Claude Code, 
         fi
         ok "Installed thimble's plugin in Claude Code again (thimble@$mp_name $version), since its files had changed: a claude session uses it from its next start, or after /reload-plugins$off";;
       *) say "Claude Code has thimble@$mp_name $version from this install already (claude plugin list --json names no folder or copy to compare)"
-         ok "thimble's plugin in Claude Code is this install's (thimble@$mp_name $version)$off";;
+         same "thimble's plugin in Claude Code is this install's (thimble@$mp_name $version)$off";;
     esac
     plugin_done
     return 0

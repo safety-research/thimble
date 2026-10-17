@@ -48,12 +48,17 @@ def env_for(tmp_path: Path, **extra: str) -> dict[str, str]:
 
 # uv's stand-in: `uv venv DIR` makes DIR/bin/python the base interpreter without site-packages, so it holds no package
 # (and install.sh fetches no browser for one); `uv pip …` is written to $STUB_LOG, and `uv pip sync` of a
-# requirements.txt prints $STUB_SYNC_OUT and exits with $STUB_SYNC_RC
+# requirements.txt prints $STUB_SYNC_OUT and exits with $STUB_SYNC_RC. `uv sync` makes .venv the same way and says, as
+# uv does, that it checked the packages, or with $STUB_UV_SYNC set that it installed those
 UV_STUB = f"""#!/bin/sh
 case "$1" in
   --version) echo "uv 0.0.0";;
   venv) for a; do d="$a"; done; mkdir -p "$d/bin"
         printf '#!/bin/sh\\nexec %s -S "$@"\\n' {os.path.realpath(sys.executable)} > "$d/bin/python"; chmod +x "$d/bin/python";;
+  sync) mkdir -p .venv/bin
+        printf '#!/bin/sh\\nexec %s -S "$@"\\n' {os.path.realpath(sys.executable)} > .venv/bin/python; chmod +x .venv/bin/python
+        if [ -n "${{STUB_UV_SYNC:-}}" ]; then echo "Installed 1 package in 1ms"; echo "$STUB_UV_SYNC"
+        else echo "Checked 3 packages in 1ms"; fi;;
   pip) echo "uv $*" >> "${{STUB_LOG:-/dev/null}}"
        case "$2 $*" in sync*requirements.txt*) printf '%s\\n' "${{STUB_SYNC_OUT:-}}"; exit "${{STUB_SYNC_RC:-0}}";; esac;;
 esac
@@ -451,6 +456,46 @@ def test_a_re_run_installs_the_plugin_again_when_its_files_changed_at_the_same_v
     (tree / "plugin" / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "thimble", "version": "0.0.2"}))
     out, changes = install()
     assert changes == ["plugin marketplace update thimble-local", f"plugin update --scope user {pid}"], out
+
+
+def test_a_re_run_with_nothing_to_do_says_so_in_one_line_and_one_that_changes_something_shows_only_that(tmp_path):
+    """A re-run of a Dev install that finds every step done prints no opening screen and no step lines: one line that
+    nothing needed doing, and how to start. When a step does change something, the title and that step's line show,
+    and the last line says the rest was up to date."""
+    tree = fake_tree(tmp_path / "thimble", checkout=True)
+    (tree / "backend" / "uv.lock").write_text("version = 1\n")
+    fe = tree / "frontend"
+    (fe / "dist").mkdir(parents=True)
+    (fe / "package-lock.json").write_text("{}\n")
+    (fe / "dist" / "index.html").write_text("<html></html>")
+    os.utime(fe / "package-lock.json", (1, 1))  # older than the build, which is then current
+    bin_ = stub_bin(tmp_path)
+    claude_stub(bin_)
+    (bin_ / "npm").write_text('#!/bin/sh\nwhile [ $# -gt 1 ]; do [ "$1" = --prefix ] && mkdir -p "$2/node_modules"; '
+                              'shift; done\n')  # npm ci makes node_modules
+    # the lines of `thimble doctor --verbose` that install.sh reads
+    (tree / "plugin" / "bin" / "thimble").write_text('#!/bin/sh\necho "  auth: logged in (stub)"\n'
+                                                     'echo "  network: api.anthropic.com answers"\n')
+    env = env_for(tmp_path, PATH=f"{tmp_path / 'home' / '.local' / 'bin'}:{bin_}:/usr/bin:/bin", STUB_NODE="v22.13.0",
+                  CLAUDE_STATE=str(tmp_path / "claude.json"))
+
+    def install(**extra: str) -> str:
+        r = subprocess.run(["bash", str(tree / "scripts" / "install.sh"), *ANSWERS], capture_output=True, text=True,
+                           env={**env, **extra}, stdin=subprocess.DEVNULL, timeout=60)
+        assert r.returncode == 0, r.stdout + r.stderr
+        return r.stdout
+
+    where = tree.resolve()
+    first = install()
+    assert "\nInstalling\n" in first and f"\nDone: thimble 0.0.1 is installed in {where}\n" in first, first
+    assert install().strip() == (f"thimble 0.0.1 is installed in {where} and up to date: nothing needed doing.\n"
+                                 "Next: run claude in a folder with your files. thimble is on in every session.\n"
+                                 "  /thimble browser opens the same session in the browser workbench.\n"
+                                 "  /plugin turns thimble on or off.")
+    lines = install(STUB_UV_SYNC=" + idna==3.10").strip().splitlines()
+    assert lines[0].startswith("thimble 0.0.1 installer · ") and lines[1:4] == [
+        f"✓ Python packages installed in {where}/backend/.venv (the versions backend/uv.lock pins)", "",
+        f"Done: thimble 0.0.1 is installed in {where}; the rest was up to date."], lines
 
 
 def test_install_sh_leaves_out_what_thimble_doctor_leaves_out_when_it_compares_plugin_copies():
