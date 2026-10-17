@@ -628,10 +628,10 @@ def test_under_rosetta_without_uv_a_native_python_is_used_and_without_one_instal
     r = mac_install(tmp_path, bin_)
     assert r.returncode == 1 and not (tmp_path / "app").exists(), r.stdout + r.stderr
     [line] = [ln for ln in r.stderr.splitlines() if ln.startswith("install.sh: ")]
-    assert line == (f"install.sh: this Mac has Apple silicon, and no native arm64 Python 3.12+ was found ({bin_}/python3 "
-                    "is an Intel build, which would need Xcode to build thimble's packages). Install uv "
-                    "(https://docs.astral.sh/uv/getting-started/installation/), which gets a native Python, then run "
-                    "this again"), r.stderr
+    assert line.startswith(f"install.sh: this Mac has Apple silicon, and no native arm64 Python 3.12+ was found "
+                           f"({bin_}/python3 is an Intel build, which would need Xcode to build thimble's packages). "
+                           "Install uv (https://docs.astral.sh/uv/getting-started/installation/), which gets a native "
+                           "Python, then run this again. Node as well: Node v18.0.0"), r.stderr
 
 
 # ----------------------------------------------------------------------------- a re-run after a failed install
@@ -755,3 +755,76 @@ def test_on_a_terminal_a_chrome_that_starts_is_used_and_one_that_does_not_gives_
         in r.stdout, r.stdout
     assert "--browser system tries Google Chrome anyway; --browser off skips it\n" in r.stdout, r.stdout
     assert json.loads(conf.read_text()) == {"browser": "bundled"}
+
+
+# ----------------------------------------------------------------------------- Node
+
+
+def node_install(tmp_path: Path, node: str, *flags: str, checkout: bool = False, nvm: str = "", tools: tuple = (),
+                 python: bool = True) -> subprocess.CompletedProcess:
+    """install.sh --deps-only --dry-run of a release (or a checkout) with `node` as the node on PATH (a version it
+    prints, or `broken` for one that does not start); `nvm` installs nvm with that version of Node in ~/.nvm; `tools`
+    are stand-ins on PATH (brew); without `python` no uv, and every python on PATH is too old."""
+    tree = fake_tree(tmp_path / ("thimble" if checkout else "release"), checkout=checkout)
+    bin_ = tmp_path / "nodebin"
+    bin_.mkdir(exist_ok=True)
+    (bin_ / "node").write_text('#!/bin/sh\necho "Segmentation fault: 11" >&2; exit 139\n' if node == "broken"
+                               else f"#!/bin/sh\necho {node}\n")
+    for name in tools:
+        (bin_ / name).write_text("#!/bin/sh\n")
+    real = os.path.realpath(sys.executable)
+    if python:
+        (bin_ / "uv").write_text(UV_STUB)
+    else:  # json_get still reads JSON with python3; py_ok's check of the version fails
+        for name in ("python3", "python3.12", "python3.13", "python3.14"):
+            (bin_ / name).write_text(f'#!/bin/sh\ncase "$*" in *version_info*) exit 1;; esac\nexec {real} "$@"\n')
+    for f in bin_.iterdir():
+        f.chmod(0o755)
+    home = tmp_path / "home"
+    if nvm:
+        (home / ".nvm" / "versions" / "node" / nvm / "bin").mkdir(parents=True)
+        (home / ".nvm" / "nvm.sh").write_text("# nvm\n")
+        (home / ".nvm" / "versions" / "node" / nvm / "bin" / "node").write_text(f"#!/bin/sh\necho {nvm}\n")
+        (home / ".nvm" / "versions" / "node" / nvm / "bin" / "node").chmod(0o755)
+    env = env_for(tmp_path, PATH=f"{bin_}:/usr/bin:/bin")
+    return subprocess.run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(tmp_path / "app"), "--deps-only",
+                           *ANSWERS, *flags], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL,
+                          timeout=60)
+
+
+def test_an_old_node_is_named_first_with_the_version_thimble_needs_and_one_command_that_gets_it(tmp_path):
+    """The feedback's Node 0.12: the opening screen says it is too old, what needs Node 20, and the one command that
+    gets Node 22 with the tool that manages Node here (nvm), or Homebrew's."""
+    r = node_install(tmp_path / "a", "v0.12.18", "--dry-run", nvm="v18.20.0")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert (f"  ! Node v0.12.18 at {tmp_path / 'a' / 'nodebin' / 'node'} is too old: the web interface needs a build, "
+            "which needs Node 20 or newer; everything else installs. To get Node 22: nvm install 22\n") in r.stdout, r.stdout
+    r = node_install(tmp_path / "b", "broken", "--dry-run", tools=("brew",))
+    assert (f"  ! Node at {tmp_path / 'b' / 'nodebin' / 'node'} does not start (Segmentation fault: 11): the web "
+            "interface needs a build, which needs Node 20 or newer; everything else installs. To get a current Node: "
+            "brew install node\n") in r.stdout, r.stdout
+
+
+def test_a_newer_node_installed_but_later_on_path_is_named_with_its_folder(tmp_path):
+    """A Node 22 that nvm installed while an old one comes first on PATH (the feedback's fish config): the line names
+    the folder to put first, not a command that installs Node again."""
+    r = node_install(tmp_path, "v0.12.18", "--dry-run", nvm="v22.13.0")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert ("To get" not in r.stdout and "Node v22.13.0 is installed at ~/.nvm/versions/node/v22.13.0/bin/node, but "
+            "not first on PATH: put ~/.nvm/versions/node/v22.13.0/bin first on PATH, in your shell's startup file "
+            "too\n") in r.stdout, r.stdout
+
+
+def test_node_is_checked_before_anything_else_can_fail(tmp_path):
+    """A checkout whose Node is too old for its tests stops on that first, with the command; when Python is missing
+    too, the stop for Python names Node's problem as well, so one run says both."""
+    r = node_install(tmp_path / "a", "v20.1.0", checkout=True, tools=("brew",), python=False)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert (f"install.sh: Node v20.1.0 at {tmp_path / 'a' / 'nodebin' / 'node'} is too old: a checkout's frontend "
+            "tests, which a code ticket's checks run, need Node 20.19+, 22.13+ or 24+. To get a current Node: brew "
+            "install node, then run this script again\n") in r.stderr, r.stderr
+    r = node_install(tmp_path / "b", "v0.12.18", python=False, tools=("brew",))
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert ("install.sh: neither uv nor Python 3.12+ was found. Install uv "
+            "(https://docs.astral.sh/uv/getting-started/installation/) or Python 3.12+, then run this again. Node as "
+            f"well: Node v0.12.18 at {tmp_path / 'b' / 'nodebin' / 'node'} is too old") in r.stderr, r.stderr

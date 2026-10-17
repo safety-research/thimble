@@ -319,8 +319,92 @@ $lacking"
   fi
 }
 
+# Node: a release needs Node 20+ for custom views and the sandbox card code and code tickets run in (everything else
+# installs without it); a checkout needs 20.19+, 22.13+ or 24+, whose frontend tests a code ticket's checks run (jsdom and
+# the packages it loads require() ES modules; their engines: ^20.19.0 || ^22.13.0 || >=24; cli.NODE_TESTS_FLOOR). It is
+# checked first, and a Node that is missing, too old or does not start is named with the one command that gets one here
+# (node_fix), or the folder of one installed but later on PATH.
+node_meets() {  # node_meets vMAJOR.MINOR…: that version is what this tree needs
+  local major minor
+  major="$(printf '%s' "$1" | sed -n 's/^v\([0-9]*\)\..*/\1/p')"; minor="$(printf '%s' "$1" | sed -n 's/^v[0-9]*\.\([0-9]*\).*/\1/p')"
+  [ -n "$major" ] && [ "$major" -ge 20 ] || return 1
+  [ "$checkout" = 0 ] || [ "$major" -ge 24 ] || { [ "$major" = 22 ] && [ "${minor:-0}" -ge 13 ]; } \
+    || { [ "$major" = 20 ] && [ "${minor:-0}" -ge 19 ]; }
+}
+
+node_fix() {  # how to get the Node this tree needs: the folder of one installed where a Node manager or Homebrew keeps it
+  # but not first on PATH, else the one command of the tool that manages Node here, else nodejs.org's download page
+  local n v on_path
+  on_path="$(command -v node 2>/dev/null || true)"
+  local dirs=("${NVM_DIR:-$HOME/.nvm}"/versions/node/*/bin/node "$HOME"/.local/share/fnm/node-versions/*/installation/bin/node
+              "$HOME/.volta/bin/node")
+  [ "$(uname -s)" != Darwin ] || dirs+=(/opt/homebrew/bin/node /opt/homebrew/opt/node@*/bin/node /usr/local/bin/node
+                                       /usr/local/opt/node@*/bin/node)
+  for n in "${dirs[@]}"; do
+    [ -x "$n" ] || continue
+    [ -z "$on_path" ] || [ ! "$n" -ef "$on_path" ] || continue
+    v="$("$n" -v 2>/dev/null | head -n 1)" || continue
+    if node_meets "$v"; then
+      printf '%s\n' "Node $v is installed at $(tilde "$n"), but not first on PATH: put $(tilde "${n%/node}") first on PATH, in your shell's startup file too"
+      return 0
+    fi
+  done
+  if [ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]; then echo "To get Node 22: nvm install 22"
+  elif command -v fnm >/dev/null 2>&1; then echo "To get Node 22: fnm install 22"
+  elif command -v volta >/dev/null 2>&1; then echo "To get Node 22: volta install node@22"
+  elif command -v brew >/dev/null 2>&1; then echo "To get a current Node: brew install node"
+  else echo "To get Node 22: https://nodejs.org/en/download gives the command for this system"; fi
+}
+
+node_too() {  # what a stop for another reason adds when Node is missing or too old as well
+  [ "$found_node" = ok ] || printf '%s' ". Node as well: $found_node_text"
+}
+
+node_check() {  # node_found (a version, or none), node_ok, and the opening screen's Node line (found_node, found_node_text);
+  # a checkout that needs a newer Node, or has no frontend/dist to fall back on, stops here
+  local where="" ran="" fix
+  has_dist=0; [ -f "$src/frontend/dist/index.html" ] && has_dist=1
+  stale=""; if [ "$has_dist" = 1 ] && [ "$checkout" = 1 ] && [ "$in_place" = 1 ]; then stale="$(dist_stale "$src/frontend")"; fi
+  node_found=none node_ok=0
+  if where="$(command -v node 2>/dev/null)"; then
+    ran="$( (node -v 2>&1 || true) | head -n 1)"
+    case "$ran" in v[0-9]*.[0-9]*) node_found="$ran";; esac
+  fi
+  ! node_meets "$node_found" || node_ok=1
+  found_node=ok found_node_text="Node $node_found"
+  if [ "$node_ok" = 1 ]; then say "node: $found_node_text"; return 0; fi
+  fix="$(node_fix)"
+  local no_node="Node not found"
+  if [ "$node_found" != none ]; then no_node="Node $node_found at $(tilde "$where") is too old"
+  elif [ -n "$where" ]; then no_node="Node at $(tilde "$where") does not start (${ran:-it printed nothing})"; fi
+  if [ "$checkout" = 1 ] && [ "$node_found" != none ] && [ "$(printf '%s' "$node_found" | sed -n 's/^v\([0-9]*\).*/\1/p')" -ge 20 ]; then
+    local old_node="$no_node: a checkout's frontend tests, which a code ticket's checks run, need Node 20.19+, 22.13+ or 24+. $fix, then run this script again"
+    if [ "$dry" = 1 ]; then show "install.sh stops here: $old_node"; else die "$old_node"; fi
+    node_ok=1  # a dry run goes on as the install would after the upgrade
+  elif [ -n "$stale" ]; then
+    found_node=warn found_node_text="$no_node, so the web interface stays at its last build, older than its sources, until this runs again with Node 20+. $fix"
+  elif [ "$has_dist" = 1 ]; then
+    found_node=warn found_node_text="$no_node: custom views, and the sandbox card code and code tickets run in, need Node 20 or newer; everything else installs. $fix"
+  elif [ "$checkout" = 1 ]; then
+    slug="$(json_get "$src/plugin/.claude-plugin/plugin.json" repository | sed -e 's#^https\{0,1\}://github\.com/##' -e 's#\.git$##')"
+    die "$no_node, and this checkout has no frontend/dist, whose build needs Node 20.19+, 22.13+ or 24+. $fix, then run this script again, or install from the release zip, which carries the built UI: gh release download --repo $slug --pattern 'thimble-*.zip' --dir ~/Downloads"
+  else
+    found_node=warn found_node_text="$no_node: the web interface needs a build, which needs Node 20 or newer; everything else installs. $fix"
+  fi
+  say "node: $found_node_text"
+  if [ "$node_ok" != 1 ]; then
+    if [ "$(uname -s)" = Darwin ]; then
+      say "without node >= 20 card code gets no sandbox: the notebook kernel runs with your user's access"
+    else
+      say "without node >= 20 card code gets no sandbox runtime: the notebook kernel runs in bubblewrap where that works, else with your user's access"
+    fi
+    say "without node >= 20 a code ticket's checks run outside the sandbox, so thimble asks you before each code ticket starts"
+  fi
+}
+
 check_prerequisites() {  # uv or python >= pyproject's requires-python, or --python's environment; node >= 20 unless
   # frontend/dist is built; the claude CLI. Each sets its line of the opening screen (found_*: a mark and a text)
+  node_check  # first, so a missing or old Node is named, with how to get one, before anything else can fail on it
   req_py="$(sed -n 's/^requires-python *= *">=\([0-9][0-9.]*\)".*/\1/p' "$src/backend/pyproject.toml")"; req_py="${req_py:-3.12}"
   have_uv=0 py="" pytool=pip intel_py=""
   ! command -v uv >/dev/null 2>&1 || have_uv=1
@@ -343,11 +427,11 @@ check_prerequisites() {  # uv or python >= pyproject's requires-python, or --pyt
     check_byo
     found_py_text="Python $byo_v: your environment $(tilde "$byo_prefix"), which holds what thimble needs; nothing is installed into it"
   elif [ "$apple_silicon" = 1 ] && [ "$have_uv" = 0 ] && [ -z "$py" ]; then
-    die "this Mac has Apple silicon, and no native arm64 Python $req_py+ was found$( [ -z "$intel_py" ] || echo " ($(tilde "$intel_py") is an Intel build, which would need Xcode to build thimble's packages)"). Install uv (https://docs.astral.sh/uv/getting-started/installation/), which gets a native Python, then run this again"
+    die "this Mac has Apple silicon, and no native arm64 Python $req_py+ was found$( [ -z "$intel_py" ] || echo " ($(tilde "$intel_py") is an Intel build, which would need Xcode to build thimble's packages)"). Install uv (https://docs.astral.sh/uv/getting-started/installation/), which gets a native Python, then run this again$(node_too)"
   elif [ "$checkout" = 1 ] && [ "$have_uv" = 1 ]; then
     found_py_text="$uv_v: installs thimble's Python packages at their tested versions, and $get_py$intel"
   elif [ "$have_uv" = 0 ] && [ -z "$py" ]; then
-    die "neither uv nor Python $req_py+ was found. Install uv (https://docs.astral.sh/uv/getting-started/installation/) or Python $req_py+, then run this again"
+    die "neither uv nor Python $req_py+ was found. Install uv (https://docs.astral.sh/uv/getting-started/installation/) or Python $req_py+, then run this again$(node_too)"
   elif [ "$checkout" = 1 ]; then
     found_py=warn
     found_py_text="$py_v at $(tilde "$py"), and no uv: thimble's Python packages get the lowest versions it allows, not the tested ones (uv installs those: https://docs.astral.sh/uv/getting-started/installation/)$intel"
@@ -360,45 +444,15 @@ check_prerequisites() {  # uv or python >= pyproject's requires-python, or --pyt
   fi
   say "python: $found_py_text"
   venv_plan
-  has_dist=0; [ -f "$src/frontend/dist/index.html" ] && has_dist=1
-  stale=""; if [ "$has_dist" = 1 ] && [ "$checkout" = 1 ] && [ "$in_place" = 1 ]; then stale="$(dist_stale "$src/frontend")"; fi
-  node_found="$(command -v node >/dev/null 2>&1 && node -v || echo none)"
-  major="$(printf '%s' "$node_found" | sed -n 's/^v\([0-9]*\).*/\1/p')"
-  node_ok=0; [ "${major:-0}" -ge 20 ] && node_ok=1
-  # a checkout's frontend tests, which a code ticket's checks run, need more: jsdom and the packages it loads require()
-  # ES modules (their engines: ^20.19.0 || ^22.13.0 || >=24; cli.NODE_TESTS_FLOOR)
-  minor="$(printf '%s' "$node_found" | sed -n 's/^v[0-9]*\.\([0-9]*\).*/\1/p')"
-  if [ "$checkout" = 1 ] && [ "$node_ok" = 1 ] && ! { [ "$major" -ge 24 ] || { [ "$major" = 22 ] && [ "${minor:-0}" -ge 13 ]; } || { [ "$major" = 20 ] && [ "${minor:-0}" -ge 19 ]; }; }; then
-    old_node="node $node_found at $(command -v node) is older than a checkout needs: the frontend's tests, which a code ticket's checks run, need Node 20.19+, 22.13+ or 24+. Upgrade Node and run this script again"
-    if [ "$dry" = 1 ]; then show "install.sh stops here: $old_node"; else die "$old_node"; fi
-  fi
-  local no_node="Node 20+ not found"
-  [ "$node_found" = none ] || no_node="Node $node_found is older than the 20 thimble needs"
-  found_node=ok found_node_text="Node $node_found"
-  if [ "$node_ok" = 1 ]; then :
-  elif [ -n "$stale" ]; then
-    found_node=warn found_node_text="$no_node, so the web interface stays at its last build, older than its sources, until Node 20+ (https://nodejs.org) is installed and this runs again"
-  elif [ "$has_dist" = 1 ]; then
-    found_node=warn found_node_text="$no_node: custom views, and the sandbox card code and code tickets run in, need it (https://nodejs.org); everything else installs"
-  elif [ "$checkout" = 1 ]; then
-    slug="$(json_get "$src/plugin/.claude-plugin/plugin.json" repository | sed -e 's#^https\{0,1\}://github\.com/##' -e 's#\.git$##')"
-    die "no frontend/dist and no node >= 20 (found: $node_found). Install Node 20+ (https://nodejs.org) and re-run this script, or install from the release zip, which carries the built UI: gh release download --repo $slug --pattern 'thimble-*.zip' --dir ~/Downloads"
-  else
-    found_node=warn found_node_text="$no_node: the web interface needs a build, which needs it (https://nodejs.org); everything else installs"
-  fi
-  say "node: $found_node_text"
-  if [ "$node_ok" != 1 ]; then
-    if [ "$(uname -s)" = Darwin ]; then
-      say "without node >= 20 card code gets no sandbox: the notebook kernel runs with your user's access"
-    else
-      say "without node >= 20 card code gets no sandbox runtime: the notebook kernel runs in bubblewrap where that works, else with your user's access"
-    fi
-    say "without node >= 20 a code ticket's checks run outside the sandbox, so thimble asks you before each code ticket starts"
-  fi
   have_claude=0 found_claude=warn
   found_claude_text="Claude Code not found: thimble runs inside it, so install it before you run thimble (https://docs.anthropic.com/en/docs/claude-code)"
   if command -v claude >/dev/null 2>&1; then
-    have_claude=1 found_claude=ok found_claude_text="Claude Code $(claude --version 2>/dev/null | head -n 1 | sed 's/ (Claude Code)$//')"
+    local cc_v; cc_v="$( (claude --version 2>/dev/null || true) | head -n 1 | sed 's/ (Claude Code)$//')"
+    have_claude=1 found_claude=ok found_claude_text="Claude Code $cc_v"
+    case "$cc_v" in
+      [0-9]*) ;;
+      *) found_claude=warn found_claude_text="Claude Code at $(tilde "$(command -v claude)") did not start (\`claude --version\` printed no version): thimble runs inside it, so fix that before you run thimble";;
+    esac
   fi
   say "claude: $found_claude_text"
   say "auth: thimble uses whichever auth path you have configured for claude"
@@ -794,7 +848,7 @@ build_ui() {  # with node >= 20 the frontend's packages, which custom views need
     else
       warn "Node packages not installed and the web interface not built, since both need Node 20+"
     fi
-    note "Install Node 20+ (https://nodejs.org), then run bash $(tilde "$dir")/scripts/install.sh again."
+    note "$(node_fix), then run bash $(tilde "$dir")/scripts/install.sh again."
     return 0
   fi
   busy "Installing thimble's Node packages"

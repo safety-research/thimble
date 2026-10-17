@@ -28,6 +28,8 @@ bubblewrap can create a sandbox, and otherwise with your user's access; `thimble
 - macOS or Linux, and Python 3.12+. [uv](https://docs.astral.sh/uv/getting-started/installation/) is recommended: it
   installs the pinned versions and fetches Python when the machine has none.
 - Node 20+ for custom views and for the sandbox card code and code tickets run in; a Dev install needs 20.19+, 22.13+ or 24+, which the frontend's tests need.
+  install.sh checks Node first: when it is missing or too old, it says so with the command that gets Node 22 on your
+  machine (nvm, fnm, Volta or Homebrew), or the folder to put first on PATH when a newer Node is installed already.
 
 ## Authentication
 
