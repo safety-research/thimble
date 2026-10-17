@@ -55,6 +55,9 @@ export const rt = {
   // draws that field (live check term-fix9, quirk 1: back from a new thread's form, the citation panel's hint still said
   // `Enter to ask · Esc to leave the field`)
   fields: new Set<string>(),
+  // the field the view shown last starts its ring on in place of the list's keys, '' for those: the labels list's entry
+  // box while the list holds no label (bug hunt C2), which giveKeys gives the ring after an open
+  startRing: '',
   // a key the panel does not bind went to the prompt (panel.tsx typeThrough): until the prompt has the keys the panel
   // draws neither its list's keys nor its hotkeys, so the next key reaches the prompt
   typeThrough: false,
@@ -669,13 +672,15 @@ export async function retryPending(cx: Ctx, columns: number): Promise<void> {
  *  `ui.focus` that lets its hint row name them (live check term-fix7, quirk 2: ↓ moved the ring to `show all threads`
  *  while the hint named ↑↓). Asked again while the prompt holds them over an empty composer, Claude Code gives them;
  *  else the panel's hint row says how to give them (panel.tsx endHints). */
-function giveKeys(cx: Ctx, title: string, ringOn = RELAY_PICK): void {
+function giveKeys(cx: Ctx, title: string, ringAsked = RELAY_PICK): void {
   // `left`: how many more times the ring is asked onto the keys while the view that draws them may not be drawn yet;
   // `reopened`: the pane was opened again to take the keys from the prompt
   const ask = async (left: number, reopened: boolean) => {
     const pane = (await cx.panes()).find(p => p.id === PANEL)
     if (!pane?.isPlaced) return
     if (pane.isFocused !== false) {
+      // a view with no list whose keys a field takes in their place (the empty labels list's entry box)
+      const ringOn = ringAsked === RELAY_PICK && rt.startRing ? rt.startRing : ringAsked
       // the ring onto the list's keys (a ring there already stays, and the call says so); a view that draws none leaves
       // the ring where it is, off them. Neither raises a ui.focus (live check term-fix8, quirk 7)
       // a new thread's field likewise: an open of a pane that holds the keys already is no take, so its `autoFocus` puts

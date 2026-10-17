@@ -311,9 +311,11 @@ test('the labels list ends with the entry box `describe a new label`: ↓ past t
   expect(moved.deny).toBeUndefined()
   await w.clock.settle()
   await pane.unmount()
-  // the box holds the keys: no hint row, as Claude Code's prompt box has none
+  // the box holds the keys: no hint row, as Claude Code's prompt box has none; one row shows the cursor, the box's `❯`
+  // and not the chosen label's (bug hunt C2)
   pane = (await $.ui.mount(PANE)) as unknown as M
   expect(shown(await pane.find({ key: 'h-hints' })).trim()).toBe('')
+  expect(shown(await pane.drawn({ in: 'm:labels-list' }))).not.toContain('❯')
   await pane.unmount()
   // a click on the box (Claude Code's ui.focus onto it) keeps it holding the keys, not the prompt
   await takesKeys($)
@@ -325,6 +327,42 @@ test('the labels list ends with the entry box `describe a new label`: ↓ past t
   await pane.input({ key: 'make-label', text: '  edits that add a link  ' })
   await w.clock.settle()
   expect(w.submitted).toContain('Make a label with apply_label and try it on a sample of 30: edits that add a link')
+  await pane.unmount()
+})
+
+test('with no label the labels list has no keys of its own: its entry box takes them as the list opens, the words typed go into it, and one row shows the cursor (bug hunt C2)', { timeoutMs: 30_000 }, async ($, on) => {
+  // bug hunt C2: with no label, `labels 0` opened the list with `❯ describe a new label` and the hint `↑↓ to choose ·
+  // Enter to open`; the description went to main's prompt as a bare question, its `o` taken as a panel key
+  const w = world(on)
+  w.states.labels = []
+  w.states.home = { ...w.states.home, labels: 0 }
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  await w.clock.settle()
+  const ABOVE = { plugin: 'thimble', component: 'AbovePrompt', requestId: 'above', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { hasSurvey: false, isWorking: false, view: {} } } as never
+  const row = (await $.ui.mount(ABOVE)) as unknown as M
+  await row.press({ key: 'above-summary-labels' })
+  await w.clock.settle()
+  await row.unmount()
+  let pane = (await $.ui.mount(PANE)) as unknown as M
+  await w.clock.advance(600)
+  expect(shown(await pane.drawn())).toContain('0 labels')
+  // no list keys: no relay, and the box takes the ring as the pane takes the keys
+  expect(await pane.find({ type: 'Input', key: RELAY.pick })).toBeUndefined()
+  expect((await pane.find({ type: 'Input', key: 'make-label' }))?.props).toMatchObject({ autoFocus: true })
+  await pane.unmount()
+  // played as Claude Code gives a pane opened with `focus` its keys: the box's `autoFocus` takes the ring
+  await $.ui.focus({ requestId: 'thimble', component: 'Pane', element: 'make-label', origin: { kind: 'plugin', name: 'thimble' } } as never)
+  await w.clock.settle()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  // no hint row (the box says what it takes, as Claude Code's prompt box does), and the box's `❯` is the one cursor
+  expect(shown(await pane.find({ key: 'h-hints' })).trim()).toBe('')
+  expect(shown(await pane.drawn({ in: 'm:labels-list' }))).not.toContain('❯')
+  expect(JSON.stringify(await pane.find({ type: 'Box', key: 'entry-row-make-label' }))).not.toContain('dimColor')
+  // the words go into the box, whole, and Enter sends main the instruction
+  await pane.input({ key: 'make-label', text: 'posts that link outside the wiki' })
+  await w.clock.settle()
+  expect(w.filled).toEqual([])
+  expect(w.submitted).toContain('Make a label with apply_label and try it on a sample of 30: posts that link outside the wiki')
   await pane.unmount()
 })
 

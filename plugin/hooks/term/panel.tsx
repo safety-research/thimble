@@ -1088,6 +1088,8 @@ const RING_HINT = 'Enter to press or edit'
 
 // the text fields the drawing being made draws, by their keys (rt.fields once it is shown)
 let fieldsDrawing = new Set<string>()
+// the field the drawing being made starts the ring on in place of a list's keys (rt.startRing once it is shown)
+let startRingDrawing = ''
 
 /** A text field's key, noted as drawn by the drawing being made: its ring's hint is named only while it is drawn. */
 function fieldKey(key: string): string {
@@ -1161,13 +1163,13 @@ export function bottomRows(cx: Ctx, e: PaneEvent, cols: number, controls: (Rende
 
 /** The bottom of a panel with an entry box (entry.tsx, rule 25): its actions 2 cells apart after a blank row, then the
  *  box, whose top rule is the panel's second rule, then the key-hint row; without a box, bottomRows. */
-export function entryBottom(cx: Ctx, e: PaneEvent, cols: number, controls: (RenderElement | null | false)[], entry: RenderElement | null, hints: string[], fields: RenderElement[] = []): RenderElement[] {
+export function entryBottom(cx: Ctx, e: PaneEvent, cols: number, controls: (RenderElement | null | false)[], entry: RenderElement | null, hints: string[], fields: RenderElement[] = [], autoFocus = ''): RenderElement[] {
   if (!entry) return bottomRows(cx, e, cols, controls, fields, hints)
   const els = cx.els(e) as El
   const { Box } = els
   const ctl = controlsEl(els, controls, 'bottom-controls')
   const above = [...(ctl ? [ctl] : []), ...fields]
-  return [...(above.length ? [<Box key="bottom-controls-row" marginTop={1} flexDirection="column">{above}</Box>] : []), entry, hintsRow(els, hints, cols)]
+  return [...(above.length ? [<Box key="bottom-controls-row" marginTop={1} flexDirection="column">{above}</Box>] : []), entry, hintsRow(els, hints, cols, autoFocus)]
 }
 
 /** An empty region (rule 28): dim words at A2. */
@@ -3484,7 +3486,9 @@ const LIST_LEGEND_ROWS = 4
 const NEW_LABEL = 'make-label'
 
 /** The labels (SPEC.md, "The label panel", the labels list): each label as home draws it, its name, its bar and total
- *  and its legend, `❯` on the chosen one; under them the entry box `describe a new label`, whose words go to main. */
+ *  and its legend, `❯` on the chosen one while the entry box does not hold the keys; under them the entry box `describe
+ *  a new label`, whose words go to main. With no label the list has no keys: the box takes them (bug hunt C2: the
+ *  list's keys took a letter of the description and sent the rest to main's prompt). */
 async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   const els = cx.els(e) as El
   const { Box, Button, Text } = cx.els(e)
@@ -3493,6 +3497,16 @@ async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   const ls = (got?.ok ? labelsOf(got.value) : []) as LabelFull[]
   const body: RenderElement[] = [...headerEls(els, { title: 'Labels', cols, sub: subLine([plural(ls.length, 'label')]) })]
   const pick = ls.find(x => x.id === labelPick)?.id ?? ls[0]?.id ?? ''
+  // one row shows the cursor: the chosen label's `❯` while the box does not hold the keys, the box's `❯` while it does
+  const boxHeld = rt.panelFocus === NEW_LABEL && panelHasKeys()
+  // the label deleted last from its panel: `undo` puts it back with its marks, its card and its filters, as the
+  // browser's top bar's Undo (`thimble act label-undelete`); a refusal says why in red
+  const gone = labelGone && !ls.some(x => x.id === labelGone!.id) ? labelGone : null
+  const undo = gone && !gone.error ? () => void undeleteLabel(cx, gone.id, gone.name) : null
+  // a list read and empty: its entry box takes the ring as the view opens (term.ts giveKeys), but where it offers to
+  // undo a delete, whose `u` the box would take
+  const empty = Boolean(got?.ok) && !ls.length && e.surface !== 'mobile' && !undo
+  if (empty) startRingDrawing = NEW_LABEL
   // each label as home draws it (home.ts labelBlocks): its name row, its bar in the column every bar takes, its total,
   // then its legend, each value with its count, then the records it is unsure of and those no category fit; those
   // records are in its panel, a press away (SPEC-v2 J6)
@@ -3507,7 +3521,7 @@ async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
     if (l.id === pick) pickAt = lines.length
     for (const [k, line] of [b.name, ...b.legend].entries()) {
       hits.push({ y: lines.length, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: () => openLabel(cx, l.id, l.name ?? l.id) })
-      lines.push(pointed(line, k === 0 && l.id === pick))
+      lines.push(pointed(line, k === 0 && l.id === pick && !boxHeld))
     }
   })
   if (!ls.length) lines.push(pointed([{ s: '  ' }, dim('none')], false))
@@ -3516,17 +3530,13 @@ async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   const entry =
     e.surface === 'mobile'
       ? null
-      : entryEl(cx, e, { key: fieldKey(NEW_LABEL), placeholder: 'describe a new label', submit: 'make it', cols, onSubmit: v => void cx.submit(`Make a label with apply_label and try it on a sample of 30: ${v}`) })
+      : entryEl(cx, e, { key: fieldKey(NEW_LABEL), placeholder: 'describe a new label', submit: 'make it', cols, held: boxHeld || (empty && !rt.panelFocus && panelHasKeys()), ...(empty ? { autoFocus: true } : {}), onSubmit: v => void cx.submit(`Make a label with apply_label and try it on a sample of 30: ${v}`) })
   const step = (d: number) => {
     const at = ls.findIndex(x => x.id === pick)
     if (d > 0 && at >= ls.length - 1) return entry ? ringOnto(cx, NEW_LABEL) : undefined
     labelPick = ls[Math.max(0, Math.min(ls.length - 1, at + d))]?.id ?? ''
     return cx.bumpPanel()
   }
-  // the label deleted last from its panel: `undo` puts it back with its marks, its card and its filters, as the
-  // browser's top bar's Undo (`thimble act label-undelete`); a refusal says why in red
-  const gone = labelGone && !ls.some(x => x.id === labelGone!.id) ? labelGone : null
-  const undo = gone && !gone.error ? () => void undeleteLabel(cx, gone.id, gone.name) : null
   const goneRow = gone ? (
     gone.error ? (
       <Text key="lbs-gone" color={COLORS.problem} wrap="wrap">{`× the label "${gone.name}" was not restored: ${gone.error}`}</Text>
@@ -3537,12 +3547,13 @@ async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
       </Box>
     )
   ) : null
-  const listHints = ['↑↓ to choose', 'Enter to open', ...(undo ? ['u to undo'] : []), 'b to go back', 'x to close']
+  const listHints = [...(ls.length ? ['↑↓ to choose', 'Enter to open'] : []), ...(undo ? ['u to undo'] : []), 'b to go back', 'x to close']
   // the title row, the header, the entry box (else the rule under the list), the undo row and the blank row above it,
   // and the hint rows aside
   const bottom = entry ? entryHeight(NEW_LABEL, cols, true, 'make it') + (goneRow ? 2 : 0) : 1 + (goneRow ? 1 : 0)
   const win = windowList('labels-list', lines, hits, pickAt, bodyRows - 1 - bottom - hintHeight(listHints, cols) - body.length, () => cx.bumpPanel())
-  body.push(linesEl(cx, e, marginKey('labels-list'), win.lines, win.hits, cols + MARGIN_W, k => (k === 'up' || k === 'k' ? step(-1) : k === 'down' || k === 'j' ? step(1) : (k === 'return' || k === 'enter') && pick ? openLabel(cx, pick, ls.find(x => x.id === pick)?.name ?? pick) : undefined)))
+  const listKeys = (k: string) => (k === 'up' || k === 'k' ? step(-1) : k === 'down' || k === 'j' ? step(1) : (k === 'return' || k === 'enter') && pick ? openLabel(cx, pick, ls.find(x => x.id === pick)?.name ?? pick) : undefined)
+  body.push(linesEl(cx, e, marginKey('labels-list'), win.lines, win.hits, cols + MARGIN_W, ls.length ? listKeys : undefined))
   body.unshift(
     <Box key="label-presses" width={0} height={0} flexShrink={0} overflow="hidden" flexDirection="row">
       {ls.map((l, i) => {
@@ -3551,7 +3562,7 @@ async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
       })}
     </Box>,
   )
-  body.push(...entryBottom(cx, e, cols, [], entry, listHints, goneRow ? [goneRow] : []))
+  body.push(...entryBottom(cx, e, cols, [], entry, listHints, goneRow ? [goneRow] : [], empty ? NEW_LABEL : ''))
   const hk = undo ? hiddenKeys(cx, e, [{ key: 'undo', hotkey: 'u', onPress: undo }]) : null
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>
 }
@@ -4092,6 +4103,7 @@ export async function drawPanel(cx: Ctx, pe: PaneEvent): Promise<RenderElement> 
   hotkeysDrawing = new Map()
   listExtraDrawing = { space: false, backspace: false }
   fieldsDrawing = new Set()
+  startRingDrawing = ''
   windowed = ''
   scrollDrawing = null
   panelField = null
@@ -4141,6 +4153,7 @@ export async function drawPanel(cx: Ctx, pe: PaneEvent): Promise<RenderElement> 
   scrollShown = scrollDrawing
   viewAt = viewAtDrawing
   rt.fields = fieldsDrawing
+  rt.startRing = startRingDrawing
   return tree
 }
 

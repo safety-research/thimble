@@ -1117,7 +1117,10 @@ browser's label editor (`frontend/src/files/LabelCard.tsx`):
   f, e, d and l stay bound, unnamed.
 - The labels list (`home › labels`): each label as home draws it (its name row with its bar and total, its legend,
   four rows of it at most), 1-9 the first nine, then the entry box `describe a new label` (rule 27), whose words go to
-  main, which makes the label with a trial; ↓ past the last label or a click gives it the keys. `l` in a label's panel
+  main, which makes the label with a trial; ↓ past the last label or a click gives it the keys. One row shows the
+  cursor: the chosen label's `❯` while the box does not hold the keys, else the box's (its `❯` dim while it does not).
+  With no label the list has no keys of its own: the box takes them as the list opens, and the hint row names none
+  (bug hunt C2); with no label and a delete to undo, `u` keeps its key and a click gives the box the keys. `l` in a label's panel
   opens the list in place of the label's step (`home › labels`), the label it came from chosen; b then goes where the path shows, home. A document's `l` does the same for the documents list.
 - The scope's records (`14,591 records`, `run on all 14,591`): the last full run's count, else the scope's size thimble
   counts for a label whose first run never ended.
