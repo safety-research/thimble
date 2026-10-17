@@ -6,7 +6,7 @@
 // stopped says so on its row, with the records it read rather than all it would have read.
 import { act, useState } from 'react'
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
-import { labelStatus, outcomeText } from '../../src/files/labels.ts'
+import { labelStatus, outcomeText, stoppedText } from '../../src/files/labels.ts'
 import type { FilesLabels } from '../../src/files/useLabels.ts'
 import { useLabelRuns, useLabelSide } from '../../src/files/ViewSide.tsx'
 import type { Concept, ConceptRun } from '../../src/lib/types.ts'
@@ -72,6 +72,7 @@ beforeEach(() => {
     calls.push({ method, path })
     const answer = (status: number, json: unknown) => new Response(JSON.stringify(json), { status, headers: { 'content-type': 'application/json' } })
     if (path.endsWith('/apply/cancel')) return answer(200, { ok: true, cancelling: true })
+    if (path.endsWith('/apply') && method === 'POST') return answer(202, { status: 'running', run_id: 'r3' })
     if (path.endsWith('/concepts') && method === 'POST') return answer(200, { ...label('n1', 'Asks for help'), run: { status: 'running', run_id: 'r2' } })
     if (path.endsWith('/labels/glob')) return answer(200, { files: ['pages.jsonl'], total: 1 })
     return answer(404, {})
@@ -166,5 +167,23 @@ describe('a stopped run', () => {
     const s = labelStatus(label('g1', 'German page title'), live)!
     expect(s).toMatchObject({ state: 'done', stopped: true, total: 1700 })
     expect(outcomeText(s as Extract<typeof s, { state: 'done' }>)).toBe('120 of 1,700 records')
+  })
+})
+
+describe('a run that quitting Claude Code stopped (bug hunt H3)', () => {
+  // the server keeps such a run as stopped by the quit, with the units it read of those it would have read
+  const QUIT = { ts: '2026-10-17T16:45:02Z', paths: ['revisions.jsonl'], total: 14591, matched_total: 14591, labeled: 8447, failed: 0, matches: 4296, status: 'done', stopped: true, stopped_by: 'quit' }
+  const halfway = { ...label('q1', 'adds outside link'), last_run: QUIT, counts: { match: 4296, 'no match': 4151 }, n_labeled: 8447 } as unknown as Concept
+
+  test('its row says where it stopped, and Run again runs it', async () => {
+    const s = labelStatus(halfway)!
+    expect(s).toMatchObject({ state: 'done', stopped: true, total: 8447, stoppedAt: { read: 8447, of: 14591, quit: true } })
+    expect(stoppedText((s as Extract<typeof s, { state: 'done' }>).stoppedAt!, 'record')).toBe('stopped at 8,447 of 14,591 records when Claude Code quit')
+    const el = await mount(<Side start={labelsOf([halfway])} />)
+    const row = el.querySelector('[data-anchor="concept:q1"]')!
+    expect(row.querySelector('.files-label-stopped')?.textContent).toBe('stopped at 8,447 of 14,591 records when Claude Code quitRun again')
+    await act(async () => button(row, 'Run again')!.click())
+    await settle()
+    expect(calls.filter((c) => c.method === 'POST' && c.path.endsWith('/concepts/q1/apply'))).toHaveLength(1)
   })
 })

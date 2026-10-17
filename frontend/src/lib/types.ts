@@ -1791,8 +1791,10 @@ export interface ConceptApplication {
   cut?: ReadCut | null
   /** a trial's sample: the most units the run read; null or absent for a run on everything */
   limit?: number | null
-  /** the analyst stopped the run (Stop run): it read `labeled` + `failed` + `skipped` units */
+  /** the analyst stopped the run (Stop run), or quitting Claude Code did (`stopped_by` quit): it read `labeled` +
+   * `failed` + `skipped` units of `total` */
   stopped?: boolean
+  stopped_by?: 'quit' | string | null
   /** the units with no words, which need no label (a prompt label's) */
   skipped?: number
 }

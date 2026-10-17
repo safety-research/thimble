@@ -136,6 +136,19 @@ test("a label whose first run stopped part way counts its scope in its panel: th
   await pane.unmount()
 })
 
+test("a label whose run Claude Code's quit stopped part way, which the server keeps as a stopped run, says where it stopped (bug hunt H3)", async ($, on) => {
+  // the server keeps the run with the records it read of those it would have read; the panel said `last run on all
+  // 1,900 records`, as if the run had ended
+  const w = world(on)
+  const quit = { ts: '2026-10-17T16:45:02Z', paths: ['pages.jsonl'], total: 4579, matched_total: 4579, labeled: 1900, failed: 0, status: 'done', stopped: true, stopped_by: 'quit' }
+  w.states.labels = [{ ...LABEL, glob: 'pages.jsonl', last_run: quit, applications: [quit], label_stats: { n_labeled: 1900, counts: { none: 1800, 'proxy-link': 100 } } }] as never
+  const pane = await labelPanel($, w)
+  const text = shown(await pane.drawn())
+  expect(text).toContain('stopped at 1,900 of 4,579')
+  expect(text).not.toContain('last run on all')
+  await pane.unmount()
+})
+
 test("a prompt label's panel has a `model:` row among its fields, after `kind:`: the model by its id, a choice; a pick sends `label {model}`, the labels role's as ''", async ($, on) => {
   // Matt (19:05): the label panel shows the model a prompt label uses; (mockup labelpanel2) every field exposed and
   // editable like the browser, the model an editable choice in the header

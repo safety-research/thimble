@@ -74,12 +74,14 @@ export function labelRunning(agents: readonly { label: string; state: string; ro
 
 /** How a label's runs stand, as every place that names it says it (home, the labels list, its panel, its card; live
  *  check term-fix9, quirk 4: the list and the panel said `not run yet` while home said `◌ labeling`): `running` while a
- *  run goes on (thimble's, or main's that a chat follows: labelRunning), `ran` once a run ended, `stopped` for records
- *  labeled with no run that ended (a quit stopped its first run part way), `labeled` the records labeled so far, and
- *  `total` its run's size (the run's own, else the scope's size `thimble state` counted). */
+ *  run goes on (thimble's, or main's that a chat follows: labelRunning), `ran` once a run ended whole, `stopped` for a
+ *  last run stopped part way (the analyst's stop, or Claude Code's quit, which the server keeps as a stopped run: bug
+ *  hunt H3) or records labeled with no run that ended (a quit stopped its first run in main's process), `labeled` the
+ *  records labeled so far (a stopped run's, those it read), and `total` its run's size (the run's own, else the scope's
+ *  size `thimble state` counted). */
 export type LabelState = { running: boolean; ran: boolean; stopped: boolean; labeled: number; total: number | null }
 
-type LabelRunLike = { status?: string; total?: number; matched_total?: number | null; stopped?: boolean; labeled?: number } | null | undefined
+type LabelRunLike = { status?: string; total?: number; matched_total?: number | null; stopped?: boolean; labeled?: number; failed?: number; skipped?: number } | null | undefined
 
 export function labelState(
   l: { name?: string; last_run?: LabelRunLike; applications?: LabelRunLike[]; label_stats?: { counts?: Record<string, number>; n_labeled?: number } | null; scope_total?: number },
@@ -89,6 +91,9 @@ export function labelState(
   const running = (l.last_run?.status ?? '') === 'running' || labelRunning(agents, l.name ?? '')
   const labeled = l.label_stats?.n_labeled ?? Object.values(l.label_stats?.counts ?? {}).reduce((a, b) => a + b, 0)
   const total = typeof last?.matched_total === 'number' ? last.matched_total : typeof last?.total === 'number' ? last.total : typeof l.scope_total === 'number' ? l.scope_total : null
+  // a last run that stopped before it read all it would have read: where it stopped, of its own size
+  const read = (last?.labeled ?? 0) + (last?.failed ?? 0) + (last?.skipped ?? 0)
+  if (!running && last?.stopped && typeof last.total === 'number' && read < last.total) return { running, ran: false, stopped: true, labeled: read, total: last.total }
   return { running, ran: Boolean(last) && last?.status !== 'running', stopped: !running && !last && labeled > 0, labeled, total }
 }
 

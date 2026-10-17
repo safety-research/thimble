@@ -1516,6 +1516,16 @@ audio.bcell-media {
 .bcell-values .num {
   text-align: right;
 }
+/* where a stopped run stopped, under the counts, with Run again on the board */
+.bcell-label-stopped {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+}
 /* the whole files or runs the label read only in part, under the counts (ReadCutLine, styled in files.css) */
 .bcell-label-cut {
   font: 400 var(--text-xs) / 1.5 var(--font-body);

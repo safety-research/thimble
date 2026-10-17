@@ -731,7 +731,7 @@
 }
 /* how many records the apply could not label ("230 failed") and how many the analyst marked by hand, each on a line of
    its own under the outcome, so neither is cut */
-.files-label-status:has(.files-label-marked, .files-label-failed, .files-label-cut) {
+.files-label-status:has(.files-label-marked, .files-label-failed, .files-label-cut, .files-label-stopped) {
   flex-wrap: wrap;
   row-gap: 0;
 }
@@ -739,6 +739,19 @@
 .files-label-failed,
 .files-label-cut {
   flex: 1 0 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* where a stopped run stopped ("stopped at 8,447 of 14,591 records when Claude Code quit"), with Run again after it */
+.files-label-stopped {
+  display: flex;
+  flex: 1 0 100%;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.files-label-stopped-text {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

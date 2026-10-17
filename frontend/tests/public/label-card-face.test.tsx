@@ -5,6 +5,7 @@
 // and what it ran on, with the total its shares are of); every value has its share of that one total, so the shares add
 // up to 100%; there is no line of matched units; the card shows no record of the corpus; its rule opens from a closed
 // Rule disclosure; and Definition and records opens the card's details, where the label's records under each value are.
+import { act } from 'react'
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest'
 import { CardFace } from '../../src/canvas/CardFace.tsx'
 import { CanvasContext, type CanvasCtx } from '../../src/canvas/context.ts'
@@ -84,4 +85,18 @@ test('the card shows no record of the corpus, and reads none', async () => {
   const { el, rows } = await card()
   expect(el.textContent).not.toContain('Beschreibe')
   expect(rows).not.toHaveBeenCalled()
+})
+
+test('a run that quitting Claude Code stopped says where it stopped under its counts, and Run again runs it (bug hunt H3)', async () => {
+  const quit = { ...RUN, labeled: 8447, matches: 4124, stopped: true, stopped_by: 'quit' }
+  const k = { ...DETAIL, n_labeled: 8447, last_run: quit, applications: [quit] } as unknown as ConceptDetail
+  const apply = vi.spyOn(labelApi, 'apply').mockResolvedValue({ status: 'running' } as never)
+  const { el } = await card(QUESTION, k, { openDetail: () => undefined })
+  const line = el.querySelector('.bcell-label-stopped')!
+  expect(line.textContent).toBe('Stopped at 8,447 of 14,591 records when Claude Code quit.Run again')
+  await act(async () => [...line.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Run again')!.click())
+  expect(apply).toHaveBeenCalledWith('ws', 'k1', {})
+  // a run that ended whole says nothing of the kind
+  unmountAll()
+  expect((await card()).el.querySelector('.bcell-label-stopped')).toBeNull()
 })
