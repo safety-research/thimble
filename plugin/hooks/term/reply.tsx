@@ -710,12 +710,14 @@ export async function cardBlock(cx: Ctx, e: ResolveInput, id: string, w: number,
     </Box>
   )
   if (!arrow) return framed
-  // the ↗ over the end of the border row: a box laid over the frame from outside it (a box inside a border paints
-  // only within it)
+  // the ↗ over the end of the border row: a row laid over the frame from outside it (a box inside a border paints only
+  // within it), in the flow, so it scrolls with the card. The frame comes first, so the ↗ paints over its border; the
+  // column runs bottom-up, so the ↗'s row stands on top and its -1 margin lays it on the border row. An absolute box
+  // would not do: the engine draws one whose top is above the screen on the screen's top row (README capture 10-17).
   return (
-    <Box flexDirection="column" width={w}>
+    <Box flexDirection="column-reverse" width={w}>
       {framed}
-      <Box key={`arrow-${key}-${id}`} position="absolute" top={0} left={Math.max(0, w - 6)}>
+      <Box key={`arrow-${key}-${id}`} flexDirection="row" marginBottom={-1} paddingLeft={Math.max(0, w - 6)}>
         {arrow}
       </Box>
     </Box>

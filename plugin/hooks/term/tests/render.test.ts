@@ -98,6 +98,20 @@ test("a list item has no dot of its own in the margin, as Claude Code draws a li
   await ui.unmount()
 })
 
+test("in fullscreen a card's ↗ lies on its border row in the flow, so it scrolls with the card, never laid out of it", { timeoutMs: 30_000 }, async ($, on) => {
+  // README capture 10-17: an absolute ↗ drew on the screen's top row once its card scrolled partway off it
+  const w = world(on)
+  await start($, w)
+  await turn($, w, [['r1', 'Here is the count.']])
+  const full = { plugin: 'thimble', component: 'AssistantMessage', requestId: 'r1', surface: 'terminal', viewport: { columns: 140, rows: 40, isFullscreen: true }, props: { text: 'Here is the count.', isFirstOfReply: true } } as never
+  const ui = (await $.ui.mount(full)) as unknown as M
+  const json = JSON.stringify(await ui.drawn())
+  expect(json).toMatch(/"key":"arrow-t0-ff73e071","flexDirection":"row","marginBottom":-1/)
+  expect(json).not.toContain('"position":"absolute","top":0,"left":130')
+  expect(await ui.find({ key: 'open-t0-ff73e071' })).toBeDefined()
+  await ui.unmount()
+})
+
 test("a card made by add_card waits for its run, then shows what `thimble-run` wrote, though its stamp did not move", { timeoutMs: 30_000 }, async ($, on) => {
   const w = world(on)
   await start($, w)
