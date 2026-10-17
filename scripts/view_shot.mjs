@@ -577,6 +577,7 @@ async function mediaAnswer(file, type, size, rangeHeader) {
 }
 
 const answers = new Map()
+const raw = new Set() // the requests whose answer is the line's text
 let seq = 0
 createInterface({ input: process.stdin }).on('line', (line) => {
   let msg
@@ -588,14 +589,16 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   const fn = answers.get(msg.id)
   if (fn) {
     answers.delete(msg.id)
-    fn(msg)
+    fn(raw.has(msg.id) ? line : msg)
+    raw.delete(msg.id)
   }
 })
-/** One request to the server and its answer. */
-function ask(kind, body) {
+/** One request to the server and its answer: parsed, or with `text` the line as the server wrote it. */
+function ask(kind, body, text = false) {
   const id = `${kind[0]}${++seq}`
   return new Promise((resolve) => {
     answers.set(id, resolve)
+    if (text) raw.add(id)
     say({ [kind]: id, ...body })
   })
 }
@@ -636,12 +639,14 @@ async function shootState(browser, opt, doc, state, i) {
       if (m.type() === 'error' && !isMedia(m.location()?.url || '')) errors.push(`console: ${m.text()}`.slice(0, 400))
     })
     page.on('pageerror', (e) => errors.push(`page: ${e.message}`.slice(0, 400)))
-    // a fetch or a marks request keeps the page from being shot until it is answered
+    // a fetch or a marks request keeps the page from being shot until it is answered. Its answer goes to the page as
+    // the server's JSON text, which the page parses: Playwright checks every value an exposed function returns
+    // against its protocol, which for a view whose answers were 3 MB each took a minute of each check (bug hunt D15)
     const tracked = async (kind, body) => {
       inflight++
       lastActivity = Date.now()
       try {
-        return await ask(kind, { state: i, ...body })
+        return await ask(kind, { state: i, ...body }, true)
       } finally {
         inflight--
         lastActivity = Date.now()
@@ -688,7 +693,7 @@ async function shootState(browser, opt, doc, state, i) {
         const post = (msg) => f.contentWindow.postMessage(msg, '*')
         const labels = () => post({ type: 'thimble:labels', marks, on: state.on, filter: state.filter, all: state.all, palette: state.palette })
         const ask = async (refs) => {
-          const got = await window.thimbleMarks(refs)
+          const got = JSON.parse(await window.thimbleMarks(refs))
           marks = { ...marks, ...(got.marks || {}) }
           window.__marks = marks
           state = { on: got.on || [], filter: got.filter || null, all: got.all || [], palette: got.palette || [] }
@@ -708,7 +713,7 @@ async function shootState(browser, opt, doc, state, i) {
             await ask([])
             post({ type: 'thimble:open', open: place })
           } else if (d.type === 'thimble:fetch') {
-            const msg = await window.thimbleFetch(d.query)
+            const msg = JSON.parse(await window.thimbleFetch(d.query))
             post({ type: 'thimble:result', id: d.id, data: msg.data, error: msg.error })
           } else if (d.type === 'thimble:error') {
             window.thimbleNote('error', d.message)

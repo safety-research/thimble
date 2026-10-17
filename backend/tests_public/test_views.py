@@ -589,6 +589,111 @@ async def test_a_page_that_loads_a_script_by_its_path_fails_the_checks_as_the_br
     assert any("lib/marked/marked.min.js, which a view may not do" in e for e in state["errors"]), state["errors"]
 
 
+TRICKY = 'a "quote", a back\\slash, a\ttab, a snowman \u2603 and a line separator \u2028 in one value'
+MANY = 3000
+MANY_READER = THREADS_READER.replace("def records(index, query):", f'''def records(index, query):
+    if (query or {{}}).get("many"):
+        return [{{"ref": f"board.jsonl#L{{n}}", "n": n, "text": json.loads({json.dumps(json.dumps(TRICKY))})}}
+                for n in range(1, {MANY} + 1)]
+    return _records(index, query)
+
+
+def _records(index, query):''')
+MANY_HTML = f"""<!doctype html><html><body><div id="out"></div><script>
+thimble.onOpen(async () => {{
+  const rows = await thimble.fetch({{ many: true }})
+  if (rows.length !== {MANY} || rows.some((r) => r.text !== {json.dumps(TRICKY)})) return
+  document.getElementById('out').innerHTML = rows.map((r) => `<div data-anchor="${{r.ref}}">${{r.n}}</div>`).join('')
+}})
+</script></body></html>"""
+
+
+async def test_a_long_answer_reaches_the_checks_page_as_the_reader_made_it(ws, inproc, bound):
+    """Bug hunt D15: the checks' page gets each reader answer as JSON text, which the page parses itself, since
+    Playwright's check of a value an exposed function returns took a minute of each check of a view whose answers were
+    3 MB. The answer's values arrive intact, quotes, a line separator and all, and every record it holds counts."""
+    if why := views.build_problem():
+        if os.environ.get("CI") == "true":
+            pytest.fail(why)
+        pytest.skip(why)
+    views.write_view(CORPUS, "many", reader=MANY_READER, html=MANY_HTML, **{**VIEW, "name": "Many"})
+    (state,) = await views.shoot_states(CORPUS, "many", [{"open": {}}], answers=1)
+    assert state["ok"], state["errors"]
+    assert state["records"] == MANY and state["fetched_records"] == MANY
+    assert isinstance(state["answers"][0], bytes), "the answer is kept as the kernel's text"
+    assert views.answer_value(state["answers"][0])[0] == {"ref": "board.jsonl#L1", "n": 1, "text": TRICKY}
+
+
+def test_a_reader_answer_goes_to_the_checks_page_as_the_kernel_wrote_it():
+    """Bug hunt D15: the server no longer reads each 3 MB answer and writes it again for the checks' page."""
+    raw = views.RawJSON('{"rows":[{"ref":"board.jsonl#L2","x":null}],"note":"\u2603"}')
+    line = views._shot_line({"id": "f1", "data": raw})
+    assert json.loads(line) == {"id": "f1", "data": {"rows": [{"ref": "board.jsonl#L2", "x": None}], "note": "\u2603"}}
+    assert '"data":' + raw.text in line
+    assert views._shot_line({"id": "m2", "marks": {}}) == json.dumps({"id": "m2", "marks": {}})
+
+
+def test_the_refs_an_answer_hands_the_page_are_those_among_its_first_values(monkeypatch):
+    answer = {"rows": [{"ref": "a.jsonl#L1", "n": 1, "ok": True}, {"ref": "a.jsonl#L2", "n": None}],
+              "more": ["b.jsonl#L7", 2.5, "not a ref"]}
+    strings: list[str] = []
+    views._strings(answer, strings)
+    assert views._answer_refs(views.RawJSON(json.dumps(answer))) == {s for s in strings if views.is_record(s)}
+    assert views._answer_refs(answer) == {"a.jsonl#L1", "a.jsonl#L2", "b.jsonl#L7"}
+    monkeypatch.setattr(views, "FETCHED_SCAN_MAX", 4)  # a ref, 1, True, a ref: the third ref is past the scan
+    assert views._answer_refs(answer) == {"a.jsonl#L1", "a.jsonl#L2"}
+
+
+def test_the_answers_the_checks_keep_are_read_only_as_far_as_their_readers_need():
+    """Bug hunt D15: the checks keep their pages' first answers as the kernel's JSON text in UTF-8, a third of the memory
+    the read answers took, and the review's records text reads them only until it is long enough, which cuts it where
+    reading them all cut it."""
+    from app import view_review
+
+    def every(shots):  # records_text as it was: every answer read and written, then cut
+        text = "\n".join(f"picture {i}: {json.dumps(a, ensure_ascii=False, default=str)}" for i, s in enumerate(shots, 1)
+                         for a in s["answers"][:view_review.ANSWERS_PER_STATE])
+        return text if len(text) <= view_review.RECORDS_CHARS else text[: view_review.RECORDS_CHARS - 1] + "…"
+
+    # answers of about half RECORDS_CHARS and of about all of it, the first alone exactly as long at n = 5957
+    for n in [*range(2900, 3100, 7), *range(5946, 5967)]:
+        values = [[{"ref": f"a.jsonl#L{i}", "x": "y" * n}] for i in range(4)]
+        shots = [{"answers": values[:2]}, {"answers": values[2:]}]
+        kept = [{"answers": [json.dumps(v).encode() for v in s["answers"]]} for s in shots]
+        assert view_review.records_text(kept) == view_review.records_text(shots) == every(shots), n
+
+
+def test_the_records_an_answer_cites_in_one_document_share_its_strings(data):
+    """Bug hunt D15: a key whose answer cites 30 messages of one transcript had each excerpt line looked for in 30
+    copies of the transcript's strings; each record's own strings are one part and the document's another, the same
+    string for every ref into it, so the check reads it once."""
+    talk = {"agent": "u1", "messages": [{"role": "user", "text": "hello there"}, {"role": "bot", "text": "general kenobi"}]}
+    (data / CORPUS / "talk.json").write_text(json.dumps(talk))
+    first, second = (views.source_parts(CORPUS, f"talk.json#/messages/{i}") for i in (0, 1))
+    assert first[0] == "user\nhello there" and second[0] == "bot\ngeneral kenobi"
+    assert first[1] is second[1] and "u1" in first[1], "the document's strings are one string"
+    assert views.missing_lines("general kenobi\nu1\nnot said", "\n".join(dict.fromkeys([*first, *second]))) == ["not said"]
+    assert views.source_parts(CORPUS, "board.jsonl#L2")[0] == "t2\nbo\n2026-06-01T10:05:00Z\nAnyone have the build number?"
+    assert views.source_parts(CORPUS, "gone.json#/x") == []
+
+
+def test_an_excerpt_line_is_found_in_its_source_as_when_both_were_squeezed():
+    """missing_lines looks for each line's words with any whitespace between them in place of squeezing the whole
+    source into one line, and finds what the squeezing found."""
+    import random
+
+    def squeezed(excerpt: str, source: str) -> list[str]:
+        src = " ".join(source.split())
+        return [ln.strip() for ln in excerpt.splitlines() if ln.strip() and " ".join(ln.split()) not in src]
+
+    rnd = random.Random(15)
+    pieces = ["ab", "b", "a.b", "(a", "*", " ", "  ", "\t", "\n", "\u2028", "\xa0", "\x1f", "\xe9"]
+    for _ in range(3000):
+        source = "".join(rnd.choice(pieces) for _ in range(rnd.randint(0, 24)))
+        excerpt = "".join(rnd.choice(pieces) for _ in range(rnd.randint(0, 10)))
+        assert views.missing_lines(excerpt, source) == squeezed(excerpt, source), (excerpt, source)
+
+
 # what Playwright's own error says to run, which never reaches a model
 INSTALL_WORDS = re.compile(r"playwright install|npx|download new browsers|Executable doesn't exist|install\.sh", re.I)
 

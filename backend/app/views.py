@@ -3712,33 +3712,33 @@ async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width
     file media_file names, and write a picture of it to `out`, when it names one, at its `size` (width, height) or at
     `width` by `height`. Returns one result per state, {ok, errors, fetches, height, refs, records, units, marked, hidden,
     shown, layout, controls, actions, fonts, fetched_records, png?}, and with `answers` the first that many reader answers each
-    state's page got; without Node or the frontend's packages each has build_problem's line as its one error. With
-    `prepared`, a reader request of its own (robust_check's), the page's fetches are answered from it. The page is the
-    view as it last passed, or its live folder inside live_reads (_current)."""
+    state's page got, as the kernel's JSON text in UTF-8 (answer_value reads one); without Node or the frontend's
+    packages each has build_problem's line as its one error. With `prepared`, a reader request of its own
+    (robust_check's), the page's fetches are answered from it. The page is the view as it last passed, or its live
+    folder inside live_reads (_current)."""
     view = _current(c, slug)
     if view is None:
         return [{"ok": False, "errors": [f"no view {slug!r}"], "fetches": 0} for _ in states]
     media = media_url(SHOT_MEDIA_ORIGIN, c, slug)
     ctxs = [s.get("labels") if s.get("labels") is not None else dict(NO_LABELS) for s in states]
     fetched: list[set[str]] = [set() for _ in states]  # the record refs each state's reader answers handed its page
-    kept: list[list[Any]] = [[] for _ in states]  # the first `answers` reader answers of each state
+    kept: list[list[Any]] = [[] for _ in states]  # the first `answers` reader answers of each state, unread (bytes)
 
     async def answer(kind: str, i: int, msg: dict[str, Any]) -> dict[str, Any]:
         if kind == "fetch":
             if isinstance(msg.get("query"), dict) and KIT_QUERY in msg["query"]:  # the kit's own fetch, off the loop
                 return {"data": (await asyncio.to_thread(kit_answer, c, msg["query"]))[1]}
+            # the kernel's JSON text goes to the page as it is, as the records route sends it to the browser
             try:
                 if prepared is not None:
-                    data = await _call(c, {**prepared, "labels": _wire(ctxs[i])}, "records", msg.get("query"))
+                    data = await _call(c, {**prepared, "labels": _wire(ctxs[i])}, "records", msg.get("query"), raw=True)
                 else:
-                    data = await reader_call(c, slug, "records", msg.get("query"), labels=ctxs[i])
+                    data = await reader_call(c, slug, "records", msg.get("query"), labels=ctxs[i], raw=True)
             except ReaderError as e:
                 return {"error": e.message}
-            strings: list[str] = []
-            _strings(data, strings)
-            fetched[i].update(s for s in strings[:FETCHED_SCAN_MAX] if is_record(s))
+            fetched[i].update(await asyncio.to_thread(_answer_refs, data))
             if len(kept[i]) < answers:
-                kept[i].append(data)
+                kept[i].append(data.text.encode("utf-8") if isinstance(data, RawJSON) else data)
             return {"data": data}
         if kind == "marks":
             refs_in = [str(r) for r in msg.get("refs") or []][:5000]
@@ -3825,7 +3825,7 @@ async def _shoot_in(work: Path, doc: str, states: list[dict[str, Any]], answer: 
 
     async def reply(obj: dict[str, Any]) -> None:
         assert proc.stdin is not None
-        proc.stdin.write((json.dumps(obj, ensure_ascii=False, default=str) + "\n").encode("utf-8"))
+        proc.stdin.write((_shot_line(obj) + "\n").encode("utf-8"))
         await proc.stdin.drain()
 
     def state_of(msg: dict[str, Any]) -> int:
@@ -3922,6 +3922,46 @@ def _state_labels(ctx: dict[str, Any]) -> dict[str, Any]:
     return {"on": st["labels"], "filter": st["filter"], "all": every, "palette": [*LABEL_COLOURS[1:], LABEL_COLOURS[0]]}
 
 
+def _shot_line(obj: dict[str, Any]) -> str:
+    """One answer to view_shot.mjs as a line of JSON, a RawJSON value (a reader's answer as the kernel wrote it) put in
+    as its text, unread."""
+    raw = {k: v for k, v in obj.items() if isinstance(v, RawJSON)}
+    if not raw:
+        return json.dumps(obj, ensure_ascii=False, default=str)
+    rest = [json.dumps({k: v}, ensure_ascii=False, default=str)[1:-1] for k, v in obj.items() if k not in raw]
+    return "{" + ",".join([*rest, *(f"{json.dumps(k)}:{v.text}" for k, v in raw.items())]) + "}"
+
+
+def answer_value(data: Any) -> Any:
+    """A reader's answer read: the value of the kernel's JSON text (RawJSON, or its UTF-8 bytes), or the answer as it
+    is. The checks keep their pages' answers as the bytes (shoot_states `answers`), a third of the memory the value
+    takes, in one block rather than hundreds of thousands of objects, and read one when they need it."""
+    if isinstance(data, RawJSON):
+        return json.loads(data.text)
+    return json.loads(data) if isinstance(data, bytes) else data
+
+
+def _answer_refs(data: Any) -> set[str]:
+    """The record refs among the first FETCHED_SCAN_MAX values of a reader's answer (answer_value), in the order
+    _strings lists them. Blocking."""
+    out: set[str] = set()
+    n = 0
+    stack = [answer_value(data)]
+    while stack and n < FETCHED_SCAN_MAX:
+        x = stack.pop()
+        if isinstance(x, str):
+            n += 1
+            if is_record(x):
+                out.add(x)
+        elif isinstance(x, dict):
+            stack.extend(reversed(list(x.values())))
+        elif isinstance(x, list):
+            stack.extend(reversed(x))
+        elif x is not None:
+            n += 1
+    return out
+
+
 def _strings(v: Any, out: list[str]) -> None:
     if isinstance(v, str):
         out.append(v)
@@ -3961,20 +4001,21 @@ def _json_strings(path: str, mtime_ns: int, size: int) -> str:
     return "\n".join(parts)
 
 
-def source_text(c: str, file_ref: str) -> str | None:
-    """Every string of the records a file ref cites, joined: what an excerpt's lines must appear in to count as literal
-    source. A .json document's decoded string values count too. '' when the ref does not resolve, None for a binary
-    file."""
+def source_parts(c: str, file_ref: str) -> list[str] | None:
+    """What an excerpt's lines must appear in to count as literal source of a file ref: every string of the records it
+    cites, joined, and for a .json document its decoded string values, joined, as one more part (the same string for
+    every ref into that document, _json_strings). [] when the ref does not resolve, None for a binary file."""
     try:
         res = refs.resolve_base(config.corpus_dir(c), file_ref)
     except refs.RefError:
-        return ""
+        return []
     suffix = Path(str(res.get("path") or "")).suffix.lower()
     if (res.get("meta") or {}).get("binary") or suffix in BINARY_SUFFIXES:
         return None
-    parts: list[str] = []
+    strings: list[str] = []
     for r in res.get("records") or ([{"record": res.get("record")}] if res.get("record") is not None else []):
-        _strings(r.get("record"), parts)
+        _strings(r.get("record"), strings)
+    parts = ["\n".join(strings)]
     if suffix == ".json":
         try:
             path = config.safe_corpus_path(config.corpus_dir(c), str(res["path"]))
@@ -3983,13 +4024,19 @@ def source_text(c: str, file_ref: str) -> str | None:
                 parts.append(_json_strings(str(path), st.st_mtime_ns, st.st_size))
         except (OSError, ValueError, KeyError):
             pass
-    return "\n".join(parts)
+    return parts
 
 
 def missing_lines(excerpt: str, source: str) -> list[str]:
-    """The excerpt's non-blank lines that are not in the source text (whitespace runs compared as one space)."""
-    src = _squeeze(source)
-    return [ln.strip() for ln in excerpt.splitlines() if ln.strip() and _squeeze(ln) not in src]
+    """The excerpt's non-blank lines that are not in the source text (whitespace runs compared as one space). Each
+    line's words are looked for with any whitespace between them, so the source is never split into its words: a
+    transcript's strings made millions of them, a gigabyte at once, for each key checked (bug hunt D15)."""
+    out = []
+    for ln in excerpt.splitlines():
+        words = ln.split()
+        if words and re.search(r"\s+".join(map(re.escape, words)), source) is None:
+            out.append(ln.strip())
+    return out
 
 
 def _covers(ref_list: list[str], path: str, line: int) -> bool:
@@ -4146,11 +4193,14 @@ async def _check(c: str, slug: str, locators: list[str] | None = None, *, shot_d
         if p["kind"] != "view" and "line" in p and not _covers(res["refs"], p["path"], p["line"]):
             row["why"] = f"the answer does not cite {loc} back (its refs: {', '.join(res['refs'][:3])})"
             return row
-        texts = await asyncio.to_thread(lambda: [source_text(c, r) for r in res["refs"][:CHECK_KEY_REFS]])
+        texts = await asyncio.to_thread(lambda: [source_parts(c, r) for r in res["refs"][:CHECK_KEY_REFS]])
         if all(t is None for t in texts):
             row["unchecked"] = "the cited file is binary, so the excerpt was not compared with it"
         else:
-            gone = missing_lines(res["excerpt"], "\n".join(t for t in texts if t))
+            # a document's strings once, however many of its records the answer cites: 30 refs into one transcript
+            # joined 30 copies of its strings, 200 MB, for each key checked
+            source = "\n".join(dict.fromkeys(x for t in texts if t for x in t if x))
+            gone = await asyncio.to_thread(missing_lines, res["excerpt"], source)
             if gone:
                 row["why"] = f"the excerpt is not literal text of the records it cites: {gone[0][:160]!r}"
                 return row
@@ -4753,7 +4803,9 @@ def unlisted_derived(c: str, shots: list[dict[str, Any]], declared: set[str]) ->
     recs: dict[str, dict[str, Any]] = {}
     for s in shots:
         for a in s.get("answers") or []:
-            _answer_records(a, recs)
+            if len(recs) >= DERIVED_SAMPLE:
+                break
+            _answer_records(answer_value(a), recs)
     seen: dict[str, int] = {}
     missed: dict[str, list[tuple[Any, str]]] = {}
     for ref, rec in recs.items():
