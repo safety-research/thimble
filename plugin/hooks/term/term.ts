@@ -10,7 +10,7 @@ import type { ThimbleCell, ThimbleLabel } from './cell'
 import { SCRIPT_ASK } from './cite'
 import type { CardData, CardLabel } from './draw'
 import type { Ctx, SurfaceGot } from './ctx'
-import { act, actLong, changed, readState, signature } from './data'
+import { act, actLong, changed, dirStamp, readState, signature } from './data'
 import type { Area, Scope, Signature } from './data'
 import { cid, citations, clean, clip, embeddedCards, labelRef, noteDocPlace, noteLabelName, noteName, noteQuestion, questionOf, quoted } from './lib'
 import type { Citation } from './lib'
@@ -69,6 +69,14 @@ export const rt = {
   sig: null as Signature | null,
   busy: false,
   again: false,
+  // the labels' lane (labelsLane): the label definitions' folder as last listed (null before the first listing), and
+  // whether a pass of the lane runs
+  labelsStamp: null as string | null,
+  labelsBusy: false,
+  // the reads of a surface asked so far, and by key the one whose answer the surface holds: an answer of a read asked
+  // before it never replaces it (two lanes read the labels and home)
+  reads: 0,
+  landed: new Map<string, number>(),
   turn: null as Turn | null,
   // the cards a drawing named and no drawing read yet, which the session's timer reads (tick) to name them
   wanted: new Set<string>(),
@@ -421,11 +429,21 @@ async function recheckCards(cx: Ctx, ids: readonly string[]): Promise<void> {
 /** A surface the panel reads, under the key the panel names it by. */
 export async function readSurface(cx: Ctx, key: string, surface: string, args: readonly string[] = []): Promise<void> {
   if (!rt.sc) return
+  const asked = ++rt.reads
   const got = await readState(cx, rt.sc, surface, args)
+  if (!lands(key, asked)) return
   // the labels' names and the documents' titles, for a link to one that has no words (lib.ts chipLabel)
   if (got.ok && key === 'labels') for (const l of labelsOf(got.value)) noteLabelName(l.id, l.name)
   if (got.ok && key === 'docs') for (const d of docsOf(got.value)) noteDocPlace(`report:${d.slug}`, d.title)
   await cx.setSurface(key, got.ok ? { ok: true, value: got.value } : { ok: false, error: got.error })
+}
+
+/** Whether the answer of the read of `key` asked as `asked` (rt.reads) is the newest asked to land: a slow read asked
+ *  before one that landed already is dropped, so it never puts back what was there before a change. */
+function lands(key: string, asked: number): boolean {
+  if ((rt.landed.get(key) ?? 0) > asked) return false
+  rt.landed.set(key, asked)
+  return true
 }
 
 export async function surfaceValue<T = unknown>(cx: Ctx, key: string): Promise<{ ok: true; value: T } | { ok: false; error: string } | undefined> {
@@ -1194,10 +1212,11 @@ async function refreshAgents(cx: Ctx): Promise<void> {
 
 async function refreshHome(cx: Ctx): Promise<void> {
   if (!rt.sc) return
+  const asked = ++rt.reads
   const got = await readState(cx, rt.sc, 'home')
-  if (!got.ok) return
+  if (!got.ok || !lands('home', asked)) return
   // the views and the rest home draws, which the `↳ view` rows read too
-  await cx.setSurface('home-full', { ok: true, value: got.value })
+  if (lands('home-full', asked)) await cx.setSurface('home-full', { ok: true, value: got.value })
   const views = Array.isArray((got.value as { views?: unknown })?.views) ? ((got.value as { views: { slug?: unknown; status?: unknown }[] }).views) : []
   if (rt.viewsBuiltBefore === null) rt.viewsBuiltBefore = new Set(views.filter(v => v?.status === 'built').map(v => String(v.slug)))
   const home = homeOf(got.value, await cx.now())
@@ -1293,6 +1312,31 @@ export async function tick(cx: Ctx, ui: UiApply): Promise<void> {
   }
 }
 
+/** The labels' lane (bug hunt D4: a sub-label and labels made in the browser reached the labels list and the thimble
+ *  line minutes late, three places giving three counts): each second, the folder of the label definitions (concepts/,
+ *  a file per label, written as a label is made, changed or deleted, not as its run marks records) listed; once it
+ *  changed, the labels list's labels and home's counts, which the thimble line's `labels N` reads, read again at once,
+ *  beside the refresh loop (tick), whose pass may take minutes while labels run, as it reads again every card that
+ *  shows a label whose records grew. */
+export async function labelsLane(cx: Ctx): Promise<void> {
+  if (!rt.sc || rt.labelsBusy) return
+  rt.labelsBusy = true
+  try {
+    const stamp = await dirStamp(cx, rt.sc, LABEL_DEFS)
+    if (stamp === rt.labelsStamp) return
+    const first = rt.labelsStamp === null
+    rt.labelsStamp = stamp
+    if (first) return
+    await Promise.all([readSurface(cx, 'labels', 'labels'), refreshHome(cx)])
+    await cx.bumpPanel()
+  } finally {
+    rt.labelsBusy = false
+  }
+}
+
+/** The folder of the label definitions, in the workspace (data.ts AREAS `labels`). */
+const LABEL_DEFS = 'concepts'
+
 /** The areas whose change the summary line above the prompt counts. */
 const SUMMARY_AREAS: Area[] = ['labels', 'coverage', 'answers', 'cards', 'docs']
 
@@ -1365,14 +1409,15 @@ export const applyUi: UiApply = async (cx, kind, args) => {
   if ((kind === 'filter' || kind === 'label') && p?.view.startsWith('file')) await openPanel(cx, p)
 }
 
-/** The refresh loop (every second), the citation queue (every 250 ms) and the view pump, once per module copy, from the
- *  moment thimble is on. */
+/** The refresh loop (every second), the labels' lane (every second), the citation queue (every 250 ms) and the view
+ *  pump, once per module copy, from the moment thimble is on. */
 export function startTimers(cx: Ctx): void {
   if (rt.timers) return
   rt.timers = true
   // a pass that a session's end cut short rejects: nothing waits for it
   const quiet = () => undefined
   cx.every(1000, () => void tick(cx, applyUi).catch(quiet))
+  cx.every(1000, () => void labelsLane(cx).catch(quiet))
   cx.every(250, () => void checkQueued(cx).catch(quiet))
   // the open view matched to what the panel draws, and thimble's view host started the first time a view opens, from a
   // timer of the session's, which lives as long as it (viewhost.ts)

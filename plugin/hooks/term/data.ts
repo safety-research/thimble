@@ -187,6 +187,12 @@ export async function signature(cx: Ctx, sc: Scope): Promise<Signature> {
   return out
 }
 
+/** One folder's stamp, as `signature` takes it for an area: its entries' names, and each file's size and time; '-' when
+ *  it cannot be listed (not there yet). */
+export async function dirStamp(cx: Ctx, sc: Scope, dir: string): Promise<string> {
+  return stamp(await listing(cx, dir ? `${sc.ws}/${dir}` : sc.ws))
+}
+
 /** The areas whose stamp differs between two signatures (every area when there was none before). */
 export function changed(before: Signature | null, now: Signature): Area[] {
   return (Object.keys(now) as Area[]).filter(a => !before || before[a] !== now[a])
