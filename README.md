@@ -31,21 +31,14 @@ For a development build, clone the repo and run `bash scripts/install.sh`. See [
 
 ## Usage
 
-Run `claude` in a folder with files you'd like to analyze. thimble's plugin loads in every session and stays out of the
-way until you use it: it turns on at Claude's first read of a data file in the folder, when you type `/thimble`, or when
-Claude uses a thimble tool (a plan card or a label in a coding session).
+Run `claude` in a folder with files you'd like to analyze. By default, thimble is enabled in every session. You can toggle
+thimble on and off using `/plugin`.
 
-Once it is on, thimble draws its work in the terminal: cards and checked citations under Claude's replies, a dim line
-that says how much of the data Claude saw, a one-line summary above the prompt, and a panel with Coverage, Citations,
-Labels, Threads, Views and Checks. Type `/thimble browser`, or press `o` in the panel, to open the browser workbench on the
-same session, signed in, for the chat, the canvas, the File browser, views and reports. Over SSH the panel shows the
-tunnel command and a one-time link instead.
+![thimble in the terminal: cards under Claude's reply, and the citation panel beside the chat](docs/assets/thimble-term.png)
 
-![thimble in the terminal: cards under a reply, and the citation panel beside the chat](docs/assets/thimble-term.png)
+Type `/thimble browser` to open the same session in the browser workbench.
 
-thimble is a regular Claude Code plugin: once installed it is on in every session (turn it off with `/plugin`). Each
-feature has a switch in `/config` → thimble and in the browser's Settings: View proposals, Labels, Checks, Citation
-marks, Coverage and Card check.
+![the same session in the browser workbench](docs/assets/thimble-browser.png)
 
 ## Commands
 
@@ -53,7 +46,7 @@ marks, Coverage and Card check.
 
 | Command | What it does |
 |---|---|
-| `/thimble` | turn thimble on in this folder and open its panel |
+| `/thimble` | open thimble's panel in the terminal |
 | `/thimble browser` | open the browser workbench on this session, signed in |
 | `/thimble coverage`, `/thimble citations`, `/thimble checks` | open the panel at that section |
 | `/thimble fresh` | archive this workspace and open an empty one |
@@ -61,6 +54,7 @@ marks, Coverage and Card check.
 | `/thimble:orient [focus]` | start an orientation |
 | `/thimble:label <name> [definition]` | define a label and apply it to the records |
 | `/thimble:write [report\|slides\|story] [request]` | start a writer on a document (in the browser workbench) |
+| `/config` → thimble | turn single features on or off: view proposals, labels, checks, citation marks, coverage, card check |
 
 **From a shell** (`thimble help` lists every command)
 
@@ -77,7 +71,7 @@ marks, Coverage and Card check.
 
 ## Requirements
 
-Claude Code (tested with 2.1.300), with its hooks modules on, macOS or Linux, and Python 3.12+ ([uv](https://docs.astral.sh/uv/) recommended). Node 20+ is needed for custom views (the viewers the dev agent builds for your data), for the sandbox card code and code tickets run in, and for a development build. 
+Claude Code (tested with 2.1.301), with its hooks modules on, macOS or Linux, and Python 3.12+ ([uv](https://docs.astral.sh/uv/) recommended). Node 20+ is needed for custom views (the viewers the dev agent builds for your data), for the sandbox card code and code tickets run in, and for a development build. 
 
 ## Security & Privacy
 
