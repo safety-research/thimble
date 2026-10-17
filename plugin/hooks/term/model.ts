@@ -87,7 +87,8 @@ const RUN_RE = /(?:^|[\s/'"])thimble-run['"]?\s+(card|label|stale)\b\s*['"]?([A-
 /** The cards a call of main's names as its own: add_card's and edit_card's card, apply_label's label card; for a Bash
  *  command that runs `thimble-run` (`thimble-run card <id>`, or several in a shell loop), each card it names and each
  *  card its output names on a line of its own (`card:<id>`, as add_card prints it), the label card of a code label's
- *  `thimble-run label`. */
+ *  `thimble-run label`; never a card the run says the workspace does not have (`thimble-run: there is no card:<id>`, an
+ *  id main guessed: bug hunt J11, where it drew `× card 4 cannot be drawn` and counted in the footer). */
 export function cardsOfCall(tool: string, input: unknown, text: string): string[] {
   const inp = isObj(input) ? input : {}
   if (CARD_TOOLS.test(tool)) {
@@ -111,6 +112,7 @@ export function cardsOfCall(tool: string, input: unknown, text: string): string[
     for (const m of text.matchAll(/^card:([A-Za-z0-9_-]+)\s*$/gm)) out.add(m[1]!)
     const card = /The label's card is \[\[card:([A-Za-z0-9_-]+)\]\]/.exec(text)?.[1]
     if (card) out.add(card)
+    for (const m of text.matchAll(/\bthere is no card:([A-Za-z0-9_-]+)/g)) out.delete(m[1]!)
     return [...out]
   }
   return []

@@ -76,8 +76,8 @@ Claude Code's panel chrome, no right-click menu.
   · N cards` dim, `· N problems` in red, `ask about this answer ›`. None for the prompts thimble-term gives main itself.
   There is no `open as report`: thimble keeps one document per type, so an answer would replace the report; main's
   `/thimble:write` writes one.
-- **Cards.** Each card a turn of main added or changed (`add_card`, `edit_card`, `apply_label`, `thimble-run card`) is
-  drawn once, under the turn's last reply, in its last state. Every card, wherever it is drawn (under a reply, the card
+- **Cards.** Each card a turn of main added or changed (`add_card`, `edit_card`, `apply_label`, `thimble-run card`; not
+  a run of an id the workspace does not have, which main guessed) is drawn once, under the turn's last reply, in its last state. Every card, wherever it is drawn (under a reply, the card
   pane, the citation panel, a document), has a full round border; inside it, the title in bold, wrapped and never cut (in
   inverse under the pointer, a press asks a side thread), with the card's id dim at the right of its first row
   (`card:<name>`, as its chips read it), one blank row, then the plot or body directly; below the plot the readout (the
