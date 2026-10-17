@@ -7,6 +7,7 @@ import type { Engine, Mounted } from 'claude-code/testing'
 
 import { modActWords, moreNotices, noticeActWords, seeWords } from '../notices'
 import { COLORS } from '../paint'
+import { focusedBrief } from '../panel'
 import { CWD, LABEL, WS, aboveAt, paneAt, panelWorld, pressBrowser, words } from './fixtures-panel'
 import type { PanelWorld } from './fixtures-panel'
 
@@ -244,21 +245,50 @@ test("bug hunt C18: a failed orientation's notice runs it again; its panel offer
   await pane.unmount()
   pane = (await $.ui.mount(paneAt(120, 60))) as unknown as M
   expect(words(await pane.drawn())).toContain('Request ID: req_011CgFAKE')
-  // `run again` asks main to start it with its last request; a focus typed in the field starts it with that
+  // `run again` asks main to start it with its last request; a focus typed in the field is added to it (bug hunt E11)
   await pane.press({ key: 'agent-again' })
   await w.clock.settle()
-  expect(w.submitted.at(-1)).toBe('Run the orientation again: call start_orientation with the brief "what stands out in the transcript?".')
+  expect(w.submitted.at(-1)).toBe('Run the orientation again: call start_orientation with this brief, word for word: "what stands out in the transcript?".')
   await pane.input({ key: 'make-orient-again-c-orient', text: 'only the registry steps' })
   await w.clock.settle()
-  expect(w.submitted.at(-1)).toBe('Run the orientation again: call start_orientation with the brief "only the registry steps".')
+  expect(w.submitted.at(-1)).toBe('Run the orientation again: call start_orientation with this brief, word for word: "what stands out in the transcript? Narrower focus for this run: only the registry steps".')
   await pane.unmount()
   // the notice's own act does what `run again` does, and the notice goes
   const again = (await $.ui.mount(aboveAt(220))) as unknown as M
   await again.press({ key: 'above-notice-n5-act-0' })
   await w.clock.settle()
-  expect(w.submitted.at(-1)).toBe('Run the orientation again: call start_orientation with the brief "what stands out in the transcript?".')
+  expect(w.submitted.at(-1)).toBe('Run the orientation again: call start_orientation with this brief, word for word: "what stands out in the transcript?".')
   expect(w.acts.filter(a => a.kind === 'notice-dismiss').map(a => a.payload.id)).toEqual(['n5'])
   await again.unmount()
+})
+
+// bug hunt E11: a focus narrows the failed orientation's question, it does not replace it
+test("bug hunt E11: run again with a focus keeps the last run's brief and adds the focus; a later focus replaces the earlier one", T, async ($, on) => {
+  const w = panelWorld(on)
+  w.states.home.notices = [{ ...ORIENT_FAILED, id: 'n7', chat: 'c-zorb' }]
+  w.states.agents = { rows: [{ name: 'thimble:orient', label: 'Orientation', state: 'failed', kind: 'subagent', chat: 'c-zorb', role: 'orient' }], line: '', text: '' }
+  w.chats['c-zorb'] = {
+    meta: { id: 'c-zorb', kind: 'agent', role: 'orient', key: 'orient', title: 'Orientation', status: 'failed', brief: 'Which zorbs trade with the quillans, and how did the trade change?' },
+    events: [{ type: 'notice', key: 'agent:orient', kind: 'agent', text: ORIENT_FAILED.text }, { type: 'error', message: RAW, kind: 'failed' }],
+  }
+  await start($, w)
+  await $.command.run({ command: 'thimble:thimble', args: '' } as never)
+  await w.clock.settle()
+  const band = (await $.ui.mount(aboveAt(220))) as unknown as M
+  await band.press({ key: 'above-notice-n7-open' })
+  await w.clock.settle()
+  await band.unmount()
+  const pane = (await $.ui.mount(paneAt(120, 60))) as unknown as M
+  await pane.input({ key: 'make-orient-again-c-zorb', text: '  only the blimfen ledgers, no code ' })
+  await w.clock.settle()
+  expect(w.submitted.at(-1)).toBe('Run the orientation again: call start_orientation with this brief, word for word: "Which zorbs trade with the quillans, and how did the trade change? Narrower focus for this run: only the blimfen ledgers, no code".')
+  await pane.unmount()
+  // a second focus replaces the first; a brief without an end stop gets one; no brief: the focus is the brief
+  const once = 'Which zorbs trade with the quillans? Narrower focus for this run: only the blimfen ledgers'
+  expect(focusedBrief(once, 'the grelk dates')).toBe('Which zorbs trade with the quillans? Narrower focus for this run: the grelk dates')
+  expect(focusedBrief(once, ' ')).toBe(once)
+  expect(focusedBrief('zorb trade routes', 'the grelk dates')).toBe('zorb trade routes. Narrower focus for this run: the grelk dates')
+  expect(focusedBrief('', 'the grelk dates')).toBe('the grelk dates')
 })
 
 // bug hunt C17: a label whose records Claude's safeguards refused in part
