@@ -799,7 +799,9 @@ export function ChipRow({ item, ws }: { item: ChipRowT; ws: string }) {
     const text = ticketChipText(item)
     return <Note className="chat-chip-row" data-chip="ticket" data-status={item.status} text={text} chips={<ThreadChip id={item.chat} />} />
   }
-  if (item.chip === 'thread' && item.chat) return <Note className="chat-chip-row" data-chip="thread" text={item.text} chips={<ThreadChip id={item.chat} />} />
+  // a view builder's or reviewer's hand-back to main (backend session.HANDBACK_ROWS): `View builder finished` and its
+  // chat, with main's reply to it under it
+  if ((item.chip === 'thread' || item.chip === 'handback') && item.chat) return <Note className="chat-chip-row" data-chip={item.chip} text={item.text} chips={<ThreadChip id={item.chat} />} />
   const pending = chipPending(item.status) && settled == null
   const opens = !!item.ref && item.chip !== 'ticket'
   const status = pending ? 'pending' : settled ?? item.status

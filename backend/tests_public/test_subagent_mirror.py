@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from app import agents, config, events, orient_session, session, subagents
+from app import agents, cite, config, events, orient_session, session, subagents
 from app import subagent_files as sf
 from subagent_fakes import bridge  # noqa: F401 — a fixture
 
@@ -106,12 +106,11 @@ def _result(tid: str, content, error: bool = False) -> dict:
         {"type": "tool_result", "tool_use_id": tid, "content": content, **({"is_error": True} if error else {})}]}}
 
 
-def _peer(agent: str, report: str) -> dict:
+def _peer(agent: str, report: str, name: str = "thimble:orientation") -> dict:
     body = HANDBACK.format(report=report)
     return {"type": "user", "isMeta": True, "message": {"role": "user", "content": f"Another Claude session sent a "
             f"message:\n<agent-message from=\"{agent}\">\n{body}</agent-message>"},
-            "origin": {"kind": "peer", "from": agent, "senderTaskId": agent, "name": "thimble:orientation",
-                       "body": body}}
+            "origin": {"kind": "peer", "from": agent, "senderTaskId": agent, "name": name, "body": body}}
 
 
 def _notice(agent: str, status: str, summary: str = "", result: str = "", at: str | None = None) -> dict:
@@ -146,6 +145,57 @@ async def test_a_click_started_orientation_is_followed_and_its_run_ends_once_at_
     _write(Path(lv.transcript_path), _peer(AGENT, "S1-DONE 04:58:45"), END)
     session.tail_once(lv)
     assert [e for e in ended if e[0] == "ended"] == [("ended", "orientation", 0, "done", "S1-DONE 04:58:45")], "once"
+
+
+def _registered(role: str, agent: str, title: str) -> str:
+    """An agent of one of thimble's roles as its start leaves it in the registry, with its chat: the chat's id."""
+    meta = agents.new_agent(CORPUS, "dev", title, announce=False)
+    with subagents.update(CORPUS) as state:
+        sf.registry(state)[agent] = {"type": f"thimble:{role}", "role": role, "chat": meta["id"], "run": 0,
+                                     "status": "running", "started": sf.now(), "last_start": sf.now(), "starts": 1}
+    return str(meta["id"])
+
+
+def test_main_s_reply_to_a_view_builder_s_hand_back_shows_in_main_s_chat_under_a_short_row(project, ended):
+    """Bug hunt 3, D2: main answers a view builder's or reviewer's hand-back in one `↳` line, which the terminal shows
+    and the browser never did, citations and the answer check's comments with it: the mirror read the hand-back and the
+    reply but hid every `↳` line, so the turn wrote no row. The hand-back is one short row naming the agent's chat, never
+    its report, and main's reply shows whole, whether the hand-back came idle or while main worked. A check's agent,
+    which hands back to no one now, stays out of main's chat."""
+    lv = _attach(project)
+    builder = _registered("view-builder", "a5e1d0c0ffee00001", "view: Lantern Links")
+    reviewer = _registered("view-reviewer", "a5e1d0c0ffee00002", "review: Lantern Links")
+    _registered("check", "a5e1d0c0ffee00003", "check: Plain words")
+    built = "↳ The view builder finished Lantern Links; thimble shows it. Most saves came from new names [↗](view:lantern-links/Wren)."
+    reviewed = "↳ The view reviewer finished Lantern Links and fixed one thing: long names were cut off."
+    queued = {"type": "attachment", "attachment": {"type": "queued_command", "prompt": "<agent-message>",
+                                                   "origin": _peer("a5e1d0c0ffee00002", "Fixed the cut names.",
+                                                                   "thimble:view-reviewer")["origin"]}}
+    _write(Path(lv.transcript_path),
+           _peer("a5e1d0c0ffee00001", "I built Lantern Links.", "thimble:view-builder"),
+           {"type": "user", "isMeta": True, "origin": {"kind": "plugin", "name": "thimble"},
+            "message": {"content": [{"type": "text", "text": "thimble: the analyst started thimble's view-reviewer"}]}},
+           _assistant({"type": "text", "text": built}), END,
+           {"type": "user", "origin": {"kind": "human"}, "message": {"content": "How many names are there?"}},
+           _assistant({"type": "text", "text": "There are 12 names."}), queued,
+           _assistant({"type": "text", "text": reviewed}), END,
+           _peer("a5e1d0c0ffee00003", "Two comments.", "thimble:check"),
+           _assistant({"type": "text", "text": "↳ The check finished; thimble shows its comments."}), END)
+    session.tail_once(lv)
+    rows = [(r["type"], r.get("kind"), r.get("text") or r.get("delta"), r.get("chat"))
+            for r in agents.read_events(agents.paths(CORPUS, agents.MAIN_ID)[1]) if r.get("by") == "terminal"]
+    assert rows == [
+        ("chip", "handback", "View builder finished", builder),
+        ("text", None, cite.from_links(built), None),
+        ("done", None, None, None),
+        ("user", None, "How many names are there?", None),
+        ("text", None, "There are 12 names.", None),
+        ("chip", "handback", "View reviewer finished", reviewer),
+        ("text", None, reviewed, None),
+        ("done", None, None, None),
+    ], rows
+    assert "view:lantern-links/Wren" in rows[1][2] and "I built" not in json.dumps(rows), "the reply, never the report"
+    assert not lv.degraded
 
 
 async def test_a_message_to_the_finished_agent_starts_its_next_run_and_the_short_turn_after_does_not(bridge, project,
