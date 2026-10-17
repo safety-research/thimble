@@ -40,7 +40,7 @@ import { citationOf, placeOf, targetLabel } from './gestures'
 import type { Gesture, Target } from './gestures'
 import { FIRST as HOME_FIRST, HOME_HINTS, groupCards, homeLayout, homePick, homeReduce, labelBlocks, labelHue } from './home'
 import type { HomeAct, HomeCardGroup, HomeCite, HomeComment, HomeData, HomeLabel, HomeLayout, HomeOpen, HomeReport, HomeThread, HomeUi, HomeView } from './home'
-import { cardTag, cardsInline, chipLabel, chipWords, cid, clip, cutLine, fmt, formatted, itemsRow, labelRef, middleCut, labelState, labelStateWords, noControls, outputLine, quoted, recordFields, reportRef, stoppedTurn, viewRef, windowAt } from './lib'
+import { cardTag, cardsInline, chipLabel, chipWords, cid, clip, cutLine, fmt, formatted, itemsRow, labelRef, middleCut, labelState, labelStateWords, noControls, outputLine, plainMarks, quoted, recordFields, reportRef, stoppedTurn, viewRef, windowAt } from './lib'
 import type { Citation } from './lib'
 import { linesEl, setListKeys, takeListKeys } from './lines'
 import type { LineHit } from './lines'
@@ -2251,7 +2251,7 @@ function passageRows(text: string, cols: number): Line[] {
   const out: Line[] = []
   for (const raw of plainCites(text).replace(/\[([^\[\]\n]*)\]\([^()\s]*\)/g, '$1').split('\n')) {
     const head = /^#{1,6}\s+/.test(raw)
-    const words = raw.replace(/^#{1,6}\s+/, '').replace(/\*\*|__|`/g, '').replace(/\s+/g, ' ').trim()
+    const words = plainMarks(raw.replace(/^#{1,6}\s+/, '')).replace(/\s+/g, ' ').trim()
     if (!words) continue
     for (const r of wrapRows(words, Math.max(10, cols), 999)) out.push([{ s: r, ...(head ? { b: true } : {}) }])
   }
@@ -2443,7 +2443,7 @@ function threadLine(t: ChatThread): Seg {
   const done = [...t.turns].reverse().find(x => x.state === 'done' && x.a.trim())
   const first = plainCites(done?.a ?? '').replace(/^#+\s*/gm, '').split('\n').find(l => l.trim()) ?? ''
   // an answer not read yet shows nothing until it is
-  return dim(first.replace(/\*\*|__|`/g, '').trim() || (t.loading ? '' : 'answered'))
+  return dim(plainMarks(first).trim() || (t.loading ? '' : 'answered'))
 }
 
 // the threads whose subject shows whole under their `about` row, by the thread's id: v, or a press on the row
@@ -2496,7 +2496,7 @@ function workingEl(els: El, turn: { tools: number; partial: string }, cols: numb
       </Text>
       {latest ? (
         <Text key={`${key}-latest`} dimColor wrap="truncate-end">
-          {cut(`  ⎿  ${plainCites(latest).replace(/\*\*|__|`/g, '')}`, cols + MARGIN_W)}
+          {cut(`  ⎿  ${plainMarks(plainCites(latest))}`, cols + MARGIN_W)}
         </Text>
       ) : null}
     </Box>
