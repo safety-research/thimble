@@ -108,6 +108,26 @@ async def test_a_run_that_does_not_start_takes_the_new_label_away_again_with_no_
     assert undo.labels(CORPUS)["undo"] is None, "taking back a label nobody saw is no step to undo"
 
 
+async def test_the_glob_route_counts_the_units_a_run_reads_for_the_new_label_card_s_run(api, monkeypatch):
+    """The new-label card's Run names how many units it reads ("Run on 8 records"), so a draft from Label from prompt is
+    checked before anything runs (0.9.0 bug hunt G12: a prompt label started over 42,205 records with no count)."""
+    r = await api.get(f"/api/ws/{CORPUS}/labels/glob", params={"pattern": "board.jsonl", "unit": "record"})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"files": ["board.jsonl"], "total": 1, "units": 8, "units_more": False}
+    r = await api.get(f"/api/ws/{CORPUS}/labels/glob", params={"pattern": "agents/*.jsonl", "unit": "agent"})
+    assert (r.json()["total"], r.json()["units"]) == (3, 3), "a label that marks files reads each file once"
+    both = {"pattern": "agents/*.jsonl, board.jsonl", "unit": "record"}
+    r = await api.get(f"/api/ws/{CORPUS}/labels/glob", params=both)
+    assert r.json()["units"] == 3 * 20 + 8
+    # past the most it counts, it says there are more
+    monkeypatch.setattr(concepts, "GLOB_COUNTED", 10)
+    r = await api.get(f"/api/ws/{CORPUS}/labels/glob", params={"pattern": "agents/*.jsonl", "unit": "record"})
+    assert (r.json()["units"], r.json()["units_more"]) == (10, True)
+    # without a unit, the files alone, as before
+    r = await api.get(f"/api/ws/{CORPUS}/labels/glob", params={"pattern": "board.jsonl"})
+    assert r.json() == {"files": ["board.jsonl"], "total": 1}
+
+
 async def test_a_new_label_without_run_is_created_as_before(api):
     r = await api.post(f"/api/ws/{CORPUS}/concepts", json={"name": "Claims a fix", "kind": "regex", "spec": PATTERN})
     assert r.status_code == 200 and r.json()["glob"] == "" and not r.json().get("run")

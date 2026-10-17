@@ -69,7 +69,7 @@ describe("the Labels pane's ⋯", () => {
   test('offers Edit label and Delete label; Delete label asks first, naming the label and what goes with it', async () => {
     const labels = labelsOf()
     const onEdit = vi.fn()
-    const el = await mount(<LabelsPane labels={labels} open onToggleOpen={() => undefined} editing={null} onEdit={onEdit} runs={new Map()} onRetry={async () => undefined} />)
+    const el = await mount(<LabelsPane labels={labels} open onToggleOpen={() => undefined} editing={null} onEdit={onEdit} runs={new Map()} onRetry={async () => undefined} onStop={async () => undefined} />)
     await act(async () => el.querySelector<HTMLButtonElement>('button[aria-label="Edit or delete activity type"]')!.click())
     const items = [...document.querySelectorAll<HTMLButtonElement>('.menu-item')]
     expect(items.map((b) => b.textContent)).toEqual(['Edit label', 'Delete label'])

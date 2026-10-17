@@ -10,9 +10,11 @@
 // classifier, the model, the highlights, + class, Delete label), open or folded for the page's session; Cancel and Re-run show once
 // something changed, until then only ×. A trial (a label run on a sample, backend concepts.py Trials) offers Run on all N
 // at all times, and its Re-run runs the sample again (bug hunt G3: Re-run quietly ran all 9,921 records, and nothing
-// offered the run on all that the terminal's label panel offers). A new label shows every field. LabelSheet is the same
-// card in a popover on a canvas card (LabelFields, with each class's count); its draft outlasts the popover
-// (canvas/labelDrafts) and its foot offers Discard and Re-run, and Run on all N for a trial.
+// offered the run on all that the terminal's label panel offers). A new label shows every field, and its Run names how
+// many units it reads ("Run on 42,205 records", the glob route's count for its Applies to), so a draft from Label from
+// prompt is checked before anything runs (bug hunt G12). While a label runs, its card offers Stop run. LabelSheet is the
+// same card in a popover on a canvas card (LabelFields, with each class's count); its draft outlasts the popover
+// (canvas/labelDrafts) and its foot offers Discard and Re-run, and Run on all N for a trial, or Stop run while it runs.
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent, type ReactNode } from 'react'
 import { Button, Segmented } from '../components/Button'
 import { CodeArea } from '../components/Code'
@@ -31,7 +33,7 @@ import type { Concept, ConceptKind, ConceptPatch, ConceptRun, LabelClass, LabelD
 import { examplesNote } from '../canvas/details'
 import { DeleteLabelConfirm, type DeleteLabelAsk } from './DeleteLabelConfirm'
 import { classesOf, colourVar, draftClasses, freeColour, globPatterns, isFilesLabel, isMultiClass, LABEL_COLOURS, LABEL_ORDER, MULTI_COLOUR, labelStatus, marksOf, outcomeText, overOf, ownColour, paletteFrom, progressText, unitOfOver, unitWord, usedColours, type LabelOver } from './labels'
-import { useFilesLabels, type FilesLabels } from './useLabels'
+import { stopLabelRun, useFilesLabels, type FilesLabels } from './useLabels'
 import { ValuePalette } from './ValuePalette'
 
 interface Props {
@@ -51,6 +53,8 @@ interface Props {
   onClose: () => void
   /** an apply started for this label, with the run record the server answered (the Labels pane shows its progress) */
   onRun: (id: string, run: ConceptRun) => void
+  /** the label's run as the Labels pane follows it, else the labels' read says whether it runs */
+  run?: ConceptRun | null
 }
 
 /** A label's definition as its edit card holds it while the analyst edits it. */
@@ -222,6 +226,35 @@ export function trialOf(k: Pick<Concept, 'trial' | 'last_run'> | null): { sample
   return { sample: n(last?.limit) ?? n(last?.total), all: n(last?.matched_total) }
 }
 
+/** How many units a new label's run reads: the glob route's count for the card's Applies to and what the label marks. */
+export interface ScopeUnits {
+  n: number
+  /** more than `n`, the most the server counts */
+  more: boolean
+  unit: string
+  glob: string
+}
+
+/** A new label's Run, naming how many units it reads once they are counted: "Run on 42,205 records". Pure. */
+export const runText = (u: ScopeUnits | null): string => (u ? `Run on ${u.n.toLocaleString()}${u.more ? '+' : ''} ${unitWord(u.unit, u.n)}` : 'Run')
+
+/** Stop run, while a label's run goes on (stopLabelRun); busy until the server has answered. */
+function StopRun({ ws, label }: { ws: string; label: Concept }) {
+  const [stopping, setStopping] = useState(false)
+  return (
+    <Button
+      icon="stop"
+      busy={stopping}
+      onClick={() => {
+        setStopping(true)
+        void stopLabelRun(ws, label.id, label.name).finally(() => setStopping(false))
+      }}
+    >
+      Stop run
+    </Button>
+  )
+}
+
 /** The button that runs a trial on everything, with the count of its scope where known: "Run on all 9,921". */
 export const runAllText = (t: { all: number | null }): string => (t.all ? `Run on all ${t.all.toLocaleString()}` : 'Run on all')
 
@@ -243,7 +276,7 @@ export function codeHint(unit: string): string {
 /** The accessible name of a label's edit card. */
 export const labelCardName = (label: Concept | null): string => (label ? `Edit ${label.name}` : 'New label')
 
-export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null, lead, inPopover, onClose, onRun }: Props) {
+export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null, lead, inPopover, onClose, onRun, run: live = null }: Props) {
   const [draft, setDraft] = useState<Draft>(() => draftOf(label, appliesTo, nextFreeColour(labels.all), drafted, usedColours(labels.all)))
   // the run being started: Re-run's (`sample`, a new label's Run too) or Run on all's
   const [saving, setSaving] = useState<'sample' | 'all' | null>(null)
@@ -257,6 +290,12 @@ export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null,
   const multi = isMultiClass(classes)
   // a trial offers Run on all at all times, and its Re-run runs its sample again
   const trial = trialOf(label)
+  // a label whose run goes on offers Stop run
+  const running = !!label && labelStatus(label, live)?.state === 'running'
+  // a new label's Run names how many units it reads, once they are counted for what the card says now
+  const [units, setUnits] = useState<ScopeUnits | null>(null)
+  const counted = isNew && draft.over === 'files' && units?.glob === draft.glob && units.unit === unitOfOver(draft.over, draft.marks) ? units : null
+  const buttons = (changed ? 2 : 0) + (trial ? 1 : 0) + (running ? 1 : 0)
 
   useEffect(() => {
     setDraft(draftOf(label, appliesTo, nextFreeColour(labels.all), drafted, usedColours(labels.all)))
@@ -316,7 +355,7 @@ export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null,
         <TextInput bare value={draft.name} onChange={(v) => set({ name: v })} aria-label="Name" className="label-card-name" autoFocus={isNew && !lead} style={compact && !multi ? { color: colourVar(classes[0]?.color) } : undefined} />
         {!lead && <Button variant="icon" size="sm" icon="x" title="Close" aria-label="Close" onClick={onClose} />}
       </div>
-      <LabelFields ws={ws} label={label} labels={labels} draft={draft} classes={classes} set={set} compact={compact} onDelete={label ? (at) => setDeleting({ id: label.id, name: label.name, at }) : undefined} />
+      <LabelFields ws={ws} label={label} labels={labels} draft={draft} classes={classes} set={set} compact={compact} onDelete={label ? (at) => setDeleting({ id: label.id, name: label.name, at }) : undefined} onUnits={isNew ? setUnits : undefined} />
       <DeleteLabelConfirm
         asked={deleting}
         align="start"
@@ -327,9 +366,10 @@ export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null,
           void labels.remove(id)
         }}
       />
-      {(changed || trial) && (
-        <div className={'label-card-foot' + (changed && trial ? ' has-three' : '')}>
+      {buttons > 0 && (
+        <div className={'label-card-foot' + (buttons >= 3 ? ' has-three' : '')}>
           {!isNew && changed && examplesNote(draft.kind, label?.n_marked) && <span className="label-card-note">{examplesNote(draft.kind, label?.n_marked)}</span>}
+          {running && <StopRun ws={ws} label={label!} />}
           {changed && <Button onClick={onClose}>Cancel</Button>}
           {trial && (
             <Button variant={changed ? 'secondary' : 'primary'} busy={saving === 'all'} disabled={saving === 'sample'} onClick={() => void run('all')}>
@@ -338,7 +378,7 @@ export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null,
           )}
           {changed && (
             <Button variant="primary" busy={saving === 'sample'} disabled={saving === 'all'} onClick={() => void run('sample')}>
-              {isNew ? 'Run' : 'Re-run'}
+              {isNew ? runText(counted) : 'Re-run'}
             </Button>
           )}
         </div>
@@ -351,7 +391,7 @@ export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null,
  * switches are saved at once for an existing label. `counts` puts each class's count before its switch. A class's
  * swatch opens the palette Color by's chips open (ValuePalette), with the grey too. `compact`: the type and scope as
  * plain rows, a rule, the body clamped until it has the focus, the classes one line each, and More over the rest. */
-function LabelFields({ ws, label, labels, draft, classes, set, counts, compact, onDelete }: { ws: string; label: Concept | null; labels: FilesLabels; draft: Draft; classes: LabelClass[]; set: (patch: Partial<Draft>) => void; counts?: Record<string, number>; compact?: boolean; onDelete?: (at: HTMLElement) => void }) {
+function LabelFields({ ws, label, labels, draft, classes, set, counts, compact, onDelete, onUnits }: { ws: string; label: Concept | null; labels: FilesLabels; draft: Draft; classes: LabelClass[]; set: (patch: Partial<Draft>) => void; counts?: Record<string, number>; compact?: boolean; onDelete?: (at: HTMLElement) => void; onUnits?: (u: ScopeUnits) => void }) {
   const [more, setMore] = useState(moreShown)
   const [bodyFocus, setBodyFocus] = useState(false)
   // whether the clamped body holds more than it shows, which fades its last line
@@ -363,8 +403,8 @@ function LabelFields({ ws, label, labels, draft, classes, set, counts, compact, 
     setCut(clamped && !!el && el.scrollHeight > el.clientHeight + 1)
   }, [clamped, draft.body, draft.kind])
   const [scopeOpen, setScopeOpen] = useState(false)
-  // the files the glob applies to, and the glob they were read for
-  const [scope, setScope] = useState<{ files: string[]; total: number; glob: string } | null>(null)
+  // the files the glob applies to, and the glob (and the unit counted) they were read for
+  const [scope, setScope] = useState<{ files: string[]; total: number; glob: string; unit?: string } | null>(null)
   const [models, setModels] = useState<{ choices: string[]; role: string }>({ choices: [], role: '' })
   // the class whose palette is open, and its swatch
   const [painting, setPainting] = useState<number | null>(null)
@@ -388,23 +428,29 @@ function LabelFields({ ws, label, labels, draft, classes, set, counts, compact, 
   }, [ws])
 
   // the files the glob applies to, read as the glob changes, once the typing pauses, whether the list is open or not, and
-  // again when the list is opened
+  // again when the list is opened; with `onUnits` (a new label's card), with how many units a run over them reads
+  const countUnit = onUnits && draft.over === 'files' ? unitOfOver(draft.over, draft.marks) : undefined
   useEffect(() => {
-    if (!scopeOpen && scope?.glob === draft.glob) return
+    if (!scopeOpen && scope?.glob === draft.glob && scope.unit === countUnit) return
     let alive = true
     const glob = draft.glob
+    const unit = countUnit
     const t = window.setTimeout(() => {
       labelApi
-        .glob(ws, glob)
-        .then((r) => alive && setScope({ ...r, glob }))
-        .catch(() => alive && setScope({ files: [], total: 0, glob }))
+        .glob(ws, glob, unit)
+        .then((r) => {
+          if (!alive) return
+          setScope({ files: r.files, total: r.total, glob, unit })
+          if (unit && r.units != null) onUnits?.({ n: r.units, more: !!r.units_more, unit, glob })
+        })
+        .catch(() => alive && setScope({ files: [], total: 0, glob, unit }))
     }, 200)
     return () => {
       alive = false
       window.clearTimeout(t)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ws, draft.glob, scopeOpen])
+  }, [ws, draft.glob, scopeOpen, countUnit])
 
   const covered = label ? labels.presence.get(label.id) : undefined
   const setClass = (i: number, patch: Partial<LabelClass>) => {
@@ -752,6 +798,7 @@ export function LabelSheet({ ws, label, draft, onDraft, onClose, onOpen, onRevie
                 <Icon name="arrow-up-right" size={12} />
               </button>
             </span>
+            {status?.state === 'running' && <StopRun ws={ws} label={k} />}
             {trial && (
               <Button variant="primary" busy={saving === 'all'} onClick={() => void rerun('all')}>
                 {runAllText(trial)}

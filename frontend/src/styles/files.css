@@ -706,7 +706,7 @@
   height: 22px;
   color: var(--text-tertiary);
 }
-/* the ⋯'s menu (Edit label, Delete label) wraps it in its trigger's span */
+/* the ⋯'s menu (Stop run while the label runs, Edit label, Delete label) wraps it in its trigger's span */
 .files-label-menu {
   display: inline-flex;
   flex: none;

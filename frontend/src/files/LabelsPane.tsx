@@ -7,8 +7,9 @@
 // on hover that changes its colours (LabelPalette). Beside a view, a label's row (and each value's) has a funnel on
 // hover that sets the Files label filter, which the view keeps its records by; the funnel of the filter set stays
 // pressed, and a click on it clears the filter. A row's ⋯ menu edits the label or deletes it, once confirmed
-// (DeleteLabelConfirm); a demo page's rows have none, and its New label is off.
-import { useRef, useState, type CSSProperties, type ReactNode } from 'react'
+// (DeleteLabelConfirm), and while the label runs, stops its run; a demo page's rows have none, and its New label is off.
+// The row of a run the analyst just started comes into view in the list (`reveal`), which scrolls with no bar.
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { DemoOff } from '../components/DemoOff'
 import { Icon } from '../components/Icon'
@@ -37,6 +38,11 @@ interface Props {
   runs: ReadonlyMap<string, ConceptRun>
   /** apply a label again after a failed run; resolves once the server has answered */
   onRetry: (id: string) => Promise<void>
+  /** stop a label's run; resolves once the server has answered */
+  onStop: (id: string) => Promise<void>
+  /** the label whose row comes into view once the list holds it (a run the analyst just started), then `onRevealed` */
+  reveal?: string | null
+  onRevealed?: () => void
   /** beside a view, where the pane is the whole sidebar: hide that sidebar */
   onHide?: () => void
   /** beside a view: the labels that mark its files, listed first */
@@ -49,7 +55,7 @@ interface Props {
   note?: ReactNode
 }
 
-export function LabelsPane({ labels, open, onToggleOpen, editing, onEdit, runs, onRetry, onHide, first, onFilter, filter = null, note }: Props) {
+export function LabelsPane({ labels, open, onToggleOpen, editing, onEdit, runs, onRetry, onStop, reveal = null, onRevealed, onHide, first, onFilter, filter = null, note }: Props) {
   const files = labels.all.filter(isFilesLabel)
   const ordered = first ? [...files.filter((k) => first.has(k.id)), ...files.filter((k) => !first.has(k.id))] : files
   const [deleting, setDeleting] = useState<DeleteLabelAsk | null>(null)
@@ -58,6 +64,15 @@ export function LabelsPane({ labels, open, onToggleOpen, editing, onEdit, runs, 
     if (editing === id) onEdit(null)
     void labels.remove(id)
   }
+  // the row of a run just started comes into view in the list, once the list holds it
+  const list = useRef<HTMLDivElement>(null)
+  const shown = open && !!reveal && labels.byId.has(reveal)
+  useEffect(() => {
+    if (!shown || !reveal) return
+    const row = [...(list.current?.querySelectorAll<HTMLElement>('.files-label') ?? [])].find((e) => e.dataset.anchor === `concept:${reveal}`)
+    if (list.current && row) revealIn(list.current, row)
+    onRevealed?.()
+  }, [shown, reveal, onRevealed])
   return (
     <section className="files-labels" aria-label="Labels">
       <div className="files-side-head">
@@ -72,7 +87,7 @@ export function LabelsPane({ labels, open, onToggleOpen, editing, onEdit, runs, 
       </div>
       {open && note}
       {open && labels.all.length > 0 && (
-        <div className="files-labels-list">
+        <div ref={list} className="files-labels-list">
           {[...ordered, ...labels.all.filter((k) => !isFilesLabel(k))].map((k) => (
             <LabelRow
               key={k.id}
@@ -85,6 +100,7 @@ export function LabelsPane({ labels, open, onToggleOpen, editing, onEdit, runs, 
               labels={labels}
               onEdit={onEdit}
               onRetry={onRetry}
+              onStop={onStop}
               onFilter={isFilesLabel(k) ? onFilter : undefined}
               filter={filter?.concept === k.id ? filter.value : null}
               onDelete={(at) => setDeleting({ id: k.id, name: k.name, at })}
@@ -109,6 +125,7 @@ interface RowProps {
   labels: FilesLabels
   onEdit: Props['onEdit']
   onRetry: Props['onRetry']
+  onStop: Props['onStop']
   onFilter?: Props['onFilter']
   /** the value the Files label filter keeps of this label, null when the filter is not this label's */
   filter: string | null
@@ -116,7 +133,7 @@ interface RowProps {
   onDelete: (at: HTMLElement) => void
 }
 
-function LabelRow({ label: k, on, focused, marked, editing, status, labels, onEdit, onRetry, onFilter, filter, onDelete }: RowProps) {
+function LabelRow({ label: k, on, focused, marked, editing, status, labels, onEdit, onRetry, onStop, onFilter, filter, onDelete }: RowProps) {
   const classes = classesOf(k)
   const running = status?.state === 'running'
   const files = isFilesLabel(k)
@@ -172,10 +189,11 @@ function LabelRow({ label: k, on, focused, marked, editing, status, labels, onEd
             align="end"
             className="files-label-menu"
             items={[
+              ...(running ? [{ id: 'stop', label: 'Stop run', icon: 'stop' as const, onSelect: () => void onStop(k.id) }] : []),
               { id: 'edit', label: 'Edit label', icon: 'edit', onSelect: () => onEdit(k.id) },
               { id: 'delete', label: 'Delete label', icon: 'trash', danger: true, onSelect: () => moreAt.current && onDelete(moreAt.current) },
             ]}
-            trigger={<Button ref={moreAt} variant="icon" size="sm" icon="more-horizontal" title="Edit or delete" aria-label={`Edit or delete ${k.name}`} className="files-label-edit" active={editing} />}
+            trigger={<Button ref={moreAt} variant="icon" size="sm" icon="more-horizontal" title={running ? 'Stop, edit or delete' : 'Edit or delete'} aria-label={`${running ? 'Stop, edit or delete' : 'Edit or delete'} ${k.name}`} className="files-label-edit" active={editing} />}
           />
         )}
       </div>
@@ -212,6 +230,15 @@ function LabelRow({ label: k, on, focused, marked, editing, status, labels, onEd
       )}
     </div>
   )
+}
+
+/** Scroll the list so that `row` shows whole in it, by the list's own scroll alone (scrollIntoView would scroll the
+ * sidebar and the page around it too). */
+function revealIn(list: HTMLElement, row: HTMLElement): void {
+  const l = list.getBoundingClientRect()
+  const r = row.getBoundingClientRect()
+  if (r.bottom > l.bottom) list.scrollTop += r.bottom - l.bottom
+  else if (r.top < l.top) list.scrollTop -= l.top - r.top
 }
 
 /** The funnel that keeps a view to a label's records: pressed while the filter is its own, when a click clears it. */
@@ -260,6 +287,12 @@ function LabelStatusLine({ status: s, name, marked, onRetry }: { status: LabelSt
   return (
     <div className="files-label-status">
       <span className="files-label-count">{outcomeText(s)}</span>
+      {s.stopped && (
+        <>
+          <span className="files-label-sep">·</span>
+          <span className="files-label-stopped">stopped</span>
+        </>
+      )}
       {s.ts && (
         <>
           <span className="files-label-sep">·</span>

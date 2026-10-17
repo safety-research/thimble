@@ -4,7 +4,7 @@
 // its own label controls and thimble draws none in its head; they open the label editor in a popover over the view
 // (ViewPane), never this sidebar, which opens beside a view built without label controls while a label is on or a label
 // marks the view's files, with the offer to add them (AddLabelControls). useLabelRuns keeps the runs of the labels'
-// applies, polled while they run, and Retry.
+// applies, polled while they run, Retry and Stop run, and brings the row of a run the analyst starts into view.
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Spinner } from '../components/Spinner'
@@ -20,7 +20,7 @@ import { LabelEditor } from './LabelEditor'
 import { viewLabels } from './labels'
 import { LabelsPane } from './LabelsPane'
 import { TREE } from './params'
-import { useFilesFilter, type FilesLabels } from './useLabels'
+import { stopLabelRun, useFilesFilter, type FilesLabels } from './useLabels'
 import type { BuiltView } from './ViewsBar'
 
 /** How often a label whose apply runs is read again, until the run ends. */
@@ -32,6 +32,14 @@ export interface LabelRuns {
   setRun: (id: string, run: ConceptRun | null) => void
   /** apply a label again after a failed run */
   retry: (id: string) => Promise<void>
+  /** a run the analyst started here (an edit card's Run or Re-run): followed as setRun follows a run, and its label's
+   * row brought into view in the Labels pane (bug hunt G12: a new label ran at the bottom of a scrolled list) */
+  start: (id: string, run: ConceptRun) => void
+  /** the label whose row the Labels pane brings into view once it lists it, null once it has (`revealed`) */
+  reveal: string | null
+  revealed: () => void
+  /** stop a label's run: it ends after the batch it is on, and the poll then reads its end */
+  stop: (id: string) => Promise<void>
 }
 
 /** The runs of the labels' applies: a run the labels say is running is polled every RUN_POLL_MS until it ends, and its
@@ -86,7 +94,19 @@ export function useLabelRuns(ws: string, labels: FilesLabels): LabelRuns {
     },
     [ws, setRun],
   )
-  return useMemo(() => ({ runs, setRun, retry }), [runs, setRun, retry])
+  const [reveal, setReveal] = useState<string | null>(null)
+  const start = useCallback(
+    (id: string, run: ConceptRun) => {
+      setRun(id, run)
+      setReveal(id)
+    },
+    [setRun],
+  )
+  const revealed = useCallback(() => setReveal(null), [])
+  const names = useRef(labels.byId)
+  names.current = labels.byId
+  const stop = useCallback((id: string) => stopLabelRun(ws, id, names.current.get(id)?.name ?? 'the label'), [ws])
+  return useMemo(() => ({ runs, setRun, retry, start, reveal, revealed, stop }), [runs, setRun, retry, start, reveal, revealed, stop])
 }
 
 export interface LabelSideProps {
@@ -135,6 +155,9 @@ export function useLabelSide(p: LabelSideProps): { pane: ReactNode; card: ReactN
       onEdit={onEdit}
       runs={runs.runs}
       onRetry={runs.retry}
+      onStop={runs.stop}
+      reveal={runs.reveal}
+      onRevealed={runs.revealed}
       onHide={p.onHide}
       first={p.first}
       onFilter={p.filterable ? onFilter : undefined}
@@ -149,7 +172,7 @@ export function useLabelSide(p: LabelSideProps): { pane: ReactNode; card: ReactN
   const card =
     editing && p.open && (editing === 'new' || labels.byId.has(editing)) ? (
       <div className="label-card-slot" style={{ '--side-w': `${width}px` } as CSSProperties}>
-        <LabelEditor ws={ws} labels={labels} editing={editing} drafted={drafted} appliesTo={appliesTo} onEdit={onEdit} onDraft={onDraft} onRun={runs.setRun} />
+        <LabelEditor ws={ws} labels={labels} editing={editing} drafted={drafted} appliesTo={appliesTo} onEdit={onEdit} onDraft={onDraft} onRun={runs.start} run={editing === 'new' ? null : runs.runs.get(editing)} />
       </div>
     ) : null
   const resizer = <Resizer side="left" width={width} min={TREE.min} max={Math.max(TREE.min, Math.min(TREE.max, Math.floor(p.maxWidth)))} defaultWidth={TREE.def} onResize={p.onWidth} onEnd={p.onWidthEnd} />

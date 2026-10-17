@@ -746,8 +746,13 @@ export const labelApi = {
   /** `POST /concepts/draft`: the labels model defines a label from the analyst's description, reading the first records
    * of the files it would apply to; nothing is stored. */
   draft: (c: string, text: string, paths: string[]) => j<LabelDraft>(`${ws(c)}/concepts/draft`, { method: 'POST', body: JSON.stringify({ text, paths }) }),
-  /** `GET /labels/glob?pattern=`: the files a glob applies to. */
-  glob: (c: string, pattern: string) => j<{ files: string[]; total: number }>(`${ws(c)}/labels/glob${q({ pattern })}`),
+  /** `GET /labels/glob?pattern=&unit=`: the files a glob applies to; with a file `unit`, how many units a run over them
+   * reads (`units`, and `units_more` past the most the server counts). */
+  glob: (c: string, pattern: string, unit?: ConceptUnit) =>
+    j<{ files: string[]; total: number; units?: number; units_more?: boolean }>(`${ws(c)}/labels/glob${q({ pattern, unit })}`),
+  /** `POST /concepts/{id}/apply/cancel`: stop the label's run after the batch it is on; the rows written so far stay.
+   * `cancelling` is false when no run was going on. */
+  cancel: (c: string, id: string) => j<{ ok: boolean; cancelling: boolean }>(`${ws(c)}/concepts/${enc(id)}/apply/cancel`, { method: 'POST' }),
   /** `GET /concepts/{id}/rows?text=1`: one page of rows with the effective value, each with the unit's own text. */
   rows: (c: string, id: string, opts: { value?: string; limit?: number; offset?: number }) =>
     j<{ rows: LabelRowText[]; total: number }>(`${ws(c)}/concepts/${enc(id)}/rows${q({ ...opts, text: 1 })}`),
