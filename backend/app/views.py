@@ -1649,8 +1649,8 @@ async def _call(c: str, req: dict[str, Any], op: str, arg: Any = None, *, call: 
     """One reader operation, with no time limit but within the checks (_call_limit); ReaderError when it raised, ran
     past that limit or the kernel did not answer. `call` is the id of a call the page named (view_calls.begin), whose
     progress the kernel writes to its file. Cancelling the awaiting task interrupts the call. `sink` gets the refs a
-    records call's thimble.kept refused (`left_out`, `left_out_n`). With `raw` the result is the kernel's JSON text
-    (RawJSON)."""
+    records call's thimble.kept refused (`left_out`, `left_out_n`), and the values of the fields of the records its
+    thimble.color_value was handed (`fields`). With `raw` the result is the kernel's JSON text (RawJSON)."""
     _bind_loop()
     key = (c, req["slug"], req["fp"])
     by_built = bool(req.get("built"))  # a built view's request (_prepared): pruning keeps its index longest
@@ -1692,6 +1692,8 @@ async def _call(c: str, req: dict[str, Any], op: str, arg: Any = None, *, call: 
         sink["left_out"] = refused if isinstance(refused, list) else []
         n = ans.get("left_out_n")
         sink["left_out_n"] = n if isinstance(n, int) and not isinstance(n, bool) else len(sink["left_out"])
+        if isinstance(ans.get("fields"), dict):
+            sink["fields"] = ans["fields"]
     return ans.get("result")
 
 
@@ -5984,7 +5986,8 @@ class RecordsBody(BaseModel):
 async def records_route(c: str, slug: str, body: RecordsBody, request: Request,
                         v: str | None = None) -> dict[str, Any] | Response:
     """reader.records(index, query): what the view's page, loaded at version `v`, asked for with thimble.fetch, with no
-    time limit, as {data, hidden?}, `data` the kernel's JSON text sent as it is (RawJSON). `call` names the call, so the
+    time limit, as {data, hidden?, fields?}, `data` the kernel's JSON text sent as it is (RawJSON), `fields` the values
+    of the fields of the records the reader handed thimble.color_value, for the page's Color by. `call` names the call, so the
     page can cancel it (cancel_route) and read its progress (call_route); a request the page drops (a reload, a closed
     tab) cancels it too. 502 with the reader's error, 409 {cancelled} when it was cancelled."""
     from .tools import until_dropped  # noqa: PLC0415 — tools imports this module
@@ -6006,6 +6009,8 @@ async def records_route(c: str, slug: str, body: RecordsBody, request: Request,
         out = {"data": work.result()}
         if sink.get("filter_key") is not None:
             out["hidden"] = note_left_out(c, slug, v, sink, frame=body.frame, turn=body.turn, part=body.key)
+        if sink.get("fields"):
+            out["fields"] = sink["fields"]
         if not isinstance(out["data"], RawJSON):
             return out
         rest = "".join(f",{json.dumps(k)}:{json.dumps(x)}" for k, x in out.items() if k != "data")

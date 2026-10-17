@@ -629,7 +629,9 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
           try {
             const key = typeof d.key === 'string' ? d.key : undefined
             const res = own ? { data: await own.records(d.query, f.ctrl.signal) } : c ? await api.cardTypeRecords(ws, c.type, c.id, d.query) : await api.viewRecords(ws, slug, d.query, version, { call: f.call, signal: f.ctrl.signal, key, frame: frameId, turn: askedTurn })
-            if (calls.current.get(id) === f) post({ type: P + 'result', id: d.id, data: res.data })
+            // with the values of the fields of the records the reader read, which the page's Color by lists (bug hunt G5)
+            const fields = 'fields' in res && res.fields && typeof res.fields === 'object' ? res.fields : undefined
+            if (calls.current.get(id) === f) post({ type: P + 'result', id: d.id, data: res.data, ...(fields ? { fields } : {}) })
             const left = 'hidden' in res ? res.hidden : undefined
             if (f.view && left !== undefined && askedUnder === filterNow.current && askedTurn === turn.current && left !== hidden.current.reader) {
               hidden.current.reader = typeof left === 'number' ? left : null

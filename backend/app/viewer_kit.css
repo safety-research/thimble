@@ -822,6 +822,11 @@ button.thimble-card {
   padding: 4px 8px 6px 30px;
   color: var(--text-tertiary);
 }
+/* a field or a label that colors nothing here: grayed, with why under it */
+.thimble-colour-item[data-cant-color] .thimble-colour-top,
+.thimble-colour-item[data-cant-color] .thimble-colour-preview {
+  opacity: 0.5;
+}
 /* under a label checked that colors none of the rows, why: in the quiet ink, wrapping */
 .thimble-colour-why {
   color: var(--text-tertiary);
