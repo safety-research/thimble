@@ -769,7 +769,9 @@ A thread at work, and turns that ended with no answer:
   named as home names it, cut at the type area), then its chat as Claude Code draws one: each question after `❯` (dim)
   in the margin, its words in the text color on Claude Code's prompt background across the type area, unquoted; a
   blank row; the answer after Claude Code's `⏺` in the margin, drawn as main's chat draws a reply; a blank row between
-  turns. A turn at work, after a blank row: `⏺ ◌ N tool calls` dim (`◌ answering` before its first), then its latest
+  turns. A turn at work, after a blank row: `⏺ ◌ starting · 12s` dim from the moment its question is asked until its
+  first step, the time counting each second (the list's row under the thread says the same), then `⏺ ◌ N tool calls`
+  (`◌ answering` while it writes before any), then its latest
   words dim on a row after `⎿` at A0, cut at R, as Claude Code draws a call at work. A turn that ended with no answer
   says so on a `⎿` row right under its question, as Claude Code writes an interrupt or an error under a prompt: a
   stop dim (`stopped by the analyst.`), a failure red after `×`. `stop` while it answers, after a blank row, then the

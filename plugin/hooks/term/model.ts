@@ -456,24 +456,25 @@ export function chatOf(v: unknown): { meta: Obj; events: Obj[] } {
  *  stopped) by `error`. In terminal mode main often answers with `reply_in_thread` alone, and no `done` follows. The
  *  answer is that first reply (SPEC.md, "The threads panel"): what the fork writes after it, as it makes a card, is its
  *  working, not the answer. Two texts a tool call or a whole message parts are two paragraphs, never one run of words.
- *  `cards`: the cards the turn made or changed, by its tool results' `cell_id`. */
+ *  `cards`: the cards the turn made or changed, by its tool results' `cell_id`; `at`: when its question was asked. */
 export function threadOf(meta: Obj, events: readonly Obj[]): ChatThread {
   const turns: ChatThreadTurn[] = []
   let cur: ChatThreadTurn | null = null
   // a tool call since the turn's last text: the next text starts a paragraph
   let parted = false
-  const open = (q: string) => {
-    cur = { q, a: '', state: 'running', tools: 0, partial: '', cards: [] }
+  const open = (q: string, ts?: unknown) => {
+    const at = Date.parse(str(ts))
+    cur = { q, a: '', state: 'running', tools: 0, partial: '', cards: [], ...(Number.isFinite(at) ? { at } : {}) }
     turns.push(cur)
     parted = false
   }
   for (const e of events) {
     const t = str(e.type)
     if (t === 'user') {
-      open(str(e.text))
+      open(str(e.text), e.ts)
       continue
     }
-    if (t === 'again' && (!cur || (cur as ChatThreadTurn).state !== 'running')) open(str(e.text))
+    if (t === 'again' && (!cur || (cur as ChatThreadTurn).state !== 'running')) open(str(e.text), e.ts)
     if (!cur) open(str(meta.anchor_text) || str(meta.title))
     const c = cur as unknown as ChatThreadTurn
     if (t === 'text') {

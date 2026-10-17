@@ -149,7 +149,8 @@ Claude Code's panel chrome, no right-click menu.
   thread while one is open; the selected thread under it, or alone with no tree when it is the only one: what it is
   about on one dim row, `v` showing it whole (a card in its frame, a file's cited lines, a passage's words), then its
   chat as Claude Code draws one, each question after `❯` on the prompt's background and each answer after `⏺`, its
-  cards where it cites them, a turn at work as `⏺ ◌ N tool calls` with its latest words after `⎿`, a stop or a failure
+  cards where it cites them, a turn at work as `⏺ ◌ starting · 12s` from the moment it is asked until its first step,
+  then `⏺ ◌ N tool calls` with its latest words after `⎿`, a stop or a failure
   on a `⎿` row under its question; a new thread shows its subject above its entry box, cut to 6 rows and `… N more`;
   `stop` while it answers, the entry box); a label; the documents and one document (a report with its
   contents, a deck or a story one slide or beat at a time, the retell controls; its comments, a check's, Claude's or the

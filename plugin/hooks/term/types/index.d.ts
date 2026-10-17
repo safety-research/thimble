@@ -27,8 +27,9 @@ export type ChatVerify = {
 /** One question of a side thread and its answer, while running its tool calls and latest text; `cards` the cards its
  *  fork made or changed (its tool results' `cell_id`), drawn under the answer. */
 /** A side thread's turn. `stopped`: its run ended as a stop, not a failure (its error record's kind: the analyst's stop, or
- *  the Claude Code session that ended under it). */
-export type ChatThreadTurn = { q: string; a: string; state: string; tools: number; partial: string; cards?: string[]; stopped?: boolean }
+ *  the Claude Code session that ended under it). `at`: when the question was asked (epoch ms), for the time a turn
+ *  that has taken no step yet has waited (panel.tsx workingEl). */
+export type ChatThreadTurn = { q: string; a: string; state: string; tools: number; partial: string; cards?: string[]; stopped?: boolean; at?: number }
 
 /** A side thread: what it is about, its exchange, `parent` the thread it was asked from ('' or absent: main), `at` when
  *  it last changed (epoch ms). thimble-term fills it from a thread's chat (hooks/model.ts threadOf); `loading`: the chat is
