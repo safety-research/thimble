@@ -54,20 +54,21 @@ Each channel has one meaning. A run the table does not cover is regular, in the 
 | a blank row | the end of a group; the gap under a card's title | spacing inside a group |
 | a rule `─` | the end of a region: under a panel's header, above its bottom part | the line under a heading |
 | a border | a card, and a text field | a panel's regions |
-| **bold** | a title or a heading (rule 7) | names in a list, values, the selected row, new |
+| **bold** | a title or a heading (rule 7), a plan step's title; a citation or a card's evidence link under the pointer | names in a list, values, the selected row, new |
 | green | new; a citation panel's `checked` | anything else |
 | diff green and red | the lines a diff added and removed, and their marks | anything else |
 | dim | secondary | a name, a number in a number column, a flagged value, a control |
 | blue, underlined | a link: the place after `↗` outside a card, a label's name on a card | controls, rows a click selects |
-| purple, underlined | a citation's value; in a card, every citation and evidence link (`↗ events.jsonl line 197`), so a card has one underline color | controls |
+| purple, underlined | a citation's value; in a card, every citation and evidence link (`↗ events.jsonl line 197`), so a card has one underline color; an example's `●` is purple too, so a card has one evidence color | controls |
 | blue, in brackets `[ … ]` | a chip: a citation that names only its place (`[ card ]`) | controls, a citation with words |
 | blue | the `?` and `↳` in the margin | |
 | accent | a panel's title, the selected row, `view proposal` above the prompt | anything else |
 | italic | a record's own words (in quotation marks); the key-hint row | emphasis, captions |
-| inverse | the selected tab; the control, citation, mark or bar label under the pointer; a card's title under the pointer | anything at rest |
+| inverse | the selected tab; the control, mark or bar label under the pointer; a card's title under the pointer | anything at rest, a citation |
 | selection background | a choice in use: a card's parameter, a label's type, the chosen record of a file, the words a find matched, text being dragged | rows, hover |
 | citation purple background | the cited value where it stands in its place: its lines, a card's data row or code (paint.ts citeHighlight) | anything else |
-| tip background | the tip of the citation under the pointer | anything else |
+| tip background | the tip of a view's region under the pointer | anything else |
+| check tint | a passage a check commented on: its check's color blended toward the theme's ground (a pale wash on a light theme), its plain words in the theme's text color; a theme key (`userMessageBackground`, `selectionBg` while open) while thimble cannot tell the theme | anything else |
 | palette hue | a value of the region's one color field | letters, headings, backgrounds |
 | red | a problem | negative numbers, hover |
 | code colors | code: a script, a label's code, a command, inline code | prose |
@@ -166,7 +167,7 @@ the type area runs from A0 to R.
 | link | `remember` | links (rule 16); the `?` and `↳` in the margin | opens what it names |
 | accent | `suggestion` | a panel's title; the selected row's `❯` and its text; `view proposal` above the prompt; the label panel's actions, underlined | where you are; a view proposal waiting for an answer; a button |
 | new | `success` | the word `new` and `N new` | new |
-| tip | `userMessageBackground`, a background | the tip of the citation under the pointer | |
+| tip | `userMessageBackground`, a background | the tip of a view's region under the pointer; a check's passage while the theme is not known | |
 | prompt | `userMessageBackground`, a background | a side thread's question, across the type area, as Claude Code draws a prompt | the analyst's question |
 | inline code | `permission` | inline code in thimble-term's own paragraphs | code |
 | palette | `SERIES`, the browser's seven series hues; `LABEL_HUES` and `PICKED_HUES`, its eighteen label colors (palette.gen.ts, from tokens.css: the light paper's on a light theme, Dark's on any other) | `●`, marks, bars, swatches; a check's tint (its place blended 16% toward the ground, 30% while open) and its `⚑` | a value of the color field; a check's comment |
@@ -412,9 +413,8 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   the card it names is drawn under the reply or as a figure. In a side thread's answer a chip of a whole card is the
   card itself, drawn after the paragraph that cites it (section 7, "The threads panel"), never `[ card ]`. Brackets main put around it alone are left out
   (`([[card:<id>]])` reads `[ card ]`). A click opens its place as any citation's does (the card, the file at its line,
-  the label, the document at its passage); under the pointer it is inverse and its tip names the place in full, then
-  its status (`card "How many pages does each wiki have?" · found`, `events.jsonl line 12 · ◌ checking`); a place that
-  does not exist is red. The footer does not count a card's chip. Claude Code's tool rows, which draw no link, and a thread's
+  the label, the document at its passage); under the pointer it turns bold, nothing more; a place that does not exist
+  is red. The footer does not count a card's chip. Claude Code's tool rows, which draw no link, and a thread's
   subject (`about card "How many pages…"`) name a chip's place in words (`events.jsonl line 12`; a card by its
   question). A label's link with a value
   (`[33](concept:<id>/yes)`) is neither a chip nor a problem in the footer.
@@ -424,8 +424,9 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   nothing once it is found, never `✓`; red, with a red `×` one cell after it, when its value is not at its place or the
   check found another. A citation a check rewrote reads as it is now, with no words beside it: its panel's `history`
   says what Claude wrote. A value is a number, quoted words, a date in words or a clock time (`14:52`, `14:52:11`),
-  checked at its place; other words name their place, and only their place is checked. The citation under the pointer is inverse, and its tip (its place and status in plain words, and why for a problem) sits
-  on the tip background on the row below it, or above it on a paragraph's last row. While main streams, a citation
+  checked at its place; other words name their place, and only their place is checked. The citation under the pointer
+  turns bold, still purple and underlined, with no background and nothing beside it (the owner, 10-17: "the citation
+  text on hover is very hard to see"); a press opens its panel, which says where it was found or why not. While main streams, a citation
   shows as a link and a card's line as `◌ <its question>`, never `[[…]]`.
 - The cards a turn added or changed stand under the turn's last reply, each once, in its last state: those a
   `thimble-run` command ran too, a shell loop over several cards included. They, the footer and the `↳` rows are drawn
@@ -568,10 +569,15 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   its ends, both or neither: neither when the list under it starts at the first time and ends at the last; then one
   row per event: its time dim at the content's edge, a `●` in hue, its words, and a `↗` in the citation's purple when
   it has a record (its evidence).
-- An example: per record, a `●` in hue at the content's edge and thimble's note after it, regular; under the note, at
+- An example: per record, a `●` at the content's edge (in the citation's purple, or in hue when a label the card read
+  marks the record) and thimble's note after it, regular; under the note, at
   +2, the record's words in quotation marks and italic, up to three rows, then `↗` and its place in the citation's
   purple, the place underlined (MATT-NOTES "Mockup feedback": no two underline colors in a card; the link blue stays
   for actions), on the quote's last row if it fits, else on the next. A blank row between records.
+- A plan: per step, its number, its state's glyph (`○` not started dim, `◌` running in the accent, `●` done, `!` needs
+  you in red) and its title in bold, the clause before the first colon, its time dim at the right edge; under the
+  title, indented to it, the rest of its words in the text color, then what it makes (`→ 7 participant memos`) and its
+  agent's note, dim. Every step wraps at the same width, and a blank row stands between steps (the owner, 10-17).
 - A diagram: boxes and edges in the rule gray, node text in the text color, edge labels dim; a note's number in a dim
   column and its text dim.
 - A note, a custom card, a code card and a card type's card: their words. A chart that is not a simple bar or line

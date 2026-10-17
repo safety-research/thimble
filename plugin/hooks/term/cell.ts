@@ -6,7 +6,7 @@
 // rows; a note is prose; a code card, a card type's card and a matplotlib figure draw as their printed text; a custom
 // HTML card draws as its text. A label card's counts and records come from the label (`thimble state label`).
 import type { TermLinks } from './types'
-import type { BarRow, CardData, CardExample, Cell, DiagramEdge, DiagramNode } from './draw'
+import type { BarRow, CardData, CardExample, Cell, DiagramEdge, DiagramNode, PlanStep } from './draw'
 import { labelState, labelStateWords } from './lib'
 import { classColors } from './labels'
 import type { LabelClass } from './labels'
@@ -407,9 +407,9 @@ export function htmlText(html: string): string {
     .join('\n')
 }
 
-/** A plan card's steps as the lines of a note (backend notebook.step_line): `2. [running · 40 m] Run it → runs/`, with
- * a step's note under it. The time is the one the agent gave or, for a step that ended, the time it took. */
-export function planText(steps: unknown): string {
+/** A plan card's steps as the card draws them (draw.ts planLayout; backend notebook.plan_step_of): each step's words,
+ *  status, what it makes, its note, and its time, the one the agent gave or, for a step that ended, the time it took. */
+export function planSteps(steps: unknown): PlanStep[] {
   const list = Array.isArray(steps) ? steps.filter((s): s is Record<string, unknown> => Boolean(s) && typeof s === 'object') : []
   const took = (s: Record<string, unknown>): string => {
     if (typeof s.time === 'string' && s.time.trim()) return s.time.trim()
@@ -421,15 +421,13 @@ export function planText(steps: unknown): string {
     const h = Math.floor(sec / 3600), m = Math.floor(sec / 60) % 60
     return m ? `${h} h ${m} m` : `${h} h`
   }
-  return list
-    .flatMap((s, i) => {
-      const t = took(s)
-      const makes = Array.isArray(s.makes) && s.makes.length ? ` → ${s.makes.map(String).join(', ')}` : ''
-      const head = `${i + 1}. [${String(s.status ?? 'not started')}${t ? ` · ${t}` : ''}] ${String(s.text ?? '')}${makes}`
-      const note = typeof s.note === 'string' ? s.note.split('\n').map(l => l.trim()).filter(Boolean).map(l => `   ${l}`) : []
-      return [head, ...note]
-    })
-    .join('\n')
+  return list.map(s => ({
+    text: String(s.text ?? '').replace(/\s+/g, ' ').trim(),
+    status: String(s.status ?? '').trim() || 'not started',
+    makes: (Array.isArray(s.makes) ? s.makes : s.makes ? [s.makes] : []).map(String).filter(m => m.trim()),
+    note: typeof s.note === 'string' ? s.note.trim() : '',
+    time: took(s),
+  }))
 }
 
 /** The card a cell draws as, and the error its last run ended in ('' for none). */
@@ -447,7 +445,7 @@ export function cardOfCell(cell: ThimbleCell, label?: ThimbleLabel | null): Draw
     if (rows.length > 1) return { card: { ...blank(cell, 'table'), columns: rows[0]!, rows: rows.slice(1).map(r => r.map(numberOr)), total: rows.length - 1 }, error }
     return { card: { ...blank(cell, 'note'), note: htmlText(html) }, error }
   }
-  if (kind === 'plan') return { card: { ...blank(cell, 'note'), note: planText(payload?.steps) }, error }
+  if (kind === 'plan') return { card: { ...blank(cell, 'plan'), steps: planSteps(payload?.steps) }, error }
   if (kind === 'example') {
     const refs = Array.isArray(payload?.refs) ? (payload!.refs as unknown[]) : []
     const examples: CardExample[] = refs.map(r =>

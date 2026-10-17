@@ -336,7 +336,8 @@ export function viewFrame(n: number, over: Record<string, unknown> = {}): Record
 }
 
 /** `thimble state` and `thimble act` answered from the fixtures; the workspace's files as `fs` sees them. */
-export function world(on: On, opts: { mode?: string; ws?: string | null; active?: boolean; store?: Record<string, unknown> } = {}): World {
+/** `theme`: Claude Code's /config `theme` row (`dark` unless given); `env`: more of the environment the mod reads. */
+export function world(on: On, opts: { mode?: string; ws?: string | null; active?: boolean; store?: Record<string, unknown>; theme?: string; env?: Record<string, string> } = {}): World {
   const w: World = {
     calls: [],
     acts: [],
@@ -435,9 +436,10 @@ export function world(on: On, opts: { mode?: string; ws?: string | null; active?
     w.configSets.push({ key: e.key, value: e.value, synced: w.store.get('settings.synced') })
     return { value: e.value } as never
   })
+  on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: opts.theme ?? 'dark', provider: { plugin: 'engine', tier: 'core' }, isLocked: false }] }) as never)
   const ws = opts.ws === undefined ? WS : opts.ws
   // THIMBLE_NO_MODULE: thimble.ts, in the same hooks module, starts no bridge in these tests
-  mock.env(on, { ...(ws ? { THIMBLE_WS: ws } : {}), THIMBLE_HOME: '/home/a/.thimble', THIMBLE_TERM_CLI: CLI, THIMBLE_NO_MODULE: '1' })
+  mock.env(on, { ...(ws ? { THIMBLE_WS: ws } : {}), THIMBLE_HOME: '/home/a/.thimble', THIMBLE_TERM_CLI: CLI, THIMBLE_NO_MODULE: '1', ...opts.env })
   w.clock = mock.clock(on, { now: 1_790_000_000_000 })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.root', () => {

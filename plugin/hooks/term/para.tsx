@@ -1,26 +1,29 @@
 // A paragraph (or a table) of a reply that holds citations: a Client surface module, drawn on Claude Code's drawing
 // thread (no `$`). It wraps the block to its region, draws each citation as a link (cite.ts), a purple ◌ a space
-// after a citation a fix round or a verification is working on (not underlined), draws the citation under the pointer in inverse with its tip on a quiet
-// box beside it, and hands each press to gestures.tsx with what is under the pointer: a citation, a table row, or the
-// sentence of the word there. A right-click does what a click does.
+// after a citation a fix round or a verification is working on (not underlined), draws the citation under the pointer
+// bold, still purple and underlined, with no background and nothing beside it (the owner, 10-17: "the citation text on
+// hover is very hard to see (i would remove)"; a press opens its panel, which says all), and hands each press to
+// gestures.tsx with what is under the pointer: a citation, a table row, or the sentence of the word there. A
+// right-click does what a click does.
 //
 // A Client holds the pointer from press to release, so the terminal cannot select its text: the paragraph selects it
 // itself. A drag lights the cells it covers and, on release, the text goes to the clipboard (register.tsx copies it);
 // a press and release on one cell is a click, acted on at the release. Beside a selection, an "ask about this" Button
 // (its press is the person's own, so register.tsx opens a side thread about the selected text at any width).
 //
-// A hovered citation is lit and tipped only while the pointer moves over it: a press, a move off the region, a
-// reflow of the transcript (a pane opening beside it) or a hover in another paragraph clears it, since the engine does
-// not always report the pointer leaving.
+// A hovered citation is bold only while the pointer moves over it: a press, a move off the region, a reflow of the
+// transcript (a pane opening beside it) or a hover in another paragraph clears it, since the engine does not always
+// report the pointer leaving.
 //
 // A passage a check commented on (`tints`, each its place in the block's source, its background and its comment) is
-// drawn on that background, from its first word to its last on each row; a click on it opens the panel at Checks on
-// that comment (a citation inside it keeps its own click).
+// drawn on that background, from its first word to its last on each row, its words with no color of their own in the
+// theme's text color, so they read on the tint whatever color the terminal gives plain text; a click on it opens the
+// panel at Checks on that comment (a citation inside it keeps its own click).
 import type { ClientModule, ClientSurface, RenderElement } from 'claude-code'
 
 import { blockLayout, passageAt, tintCells } from './cite'
 import type { ChipView, Tint } from './cite'
-import { cut, lineWidth, shade, width } from './draw'
+import { lineWidth, shade, width } from './draw'
 import { onPointer, send } from './gestures'
 import type { Target } from './gestures'
 import type { Run, TableRuns } from './lib'
@@ -71,7 +74,6 @@ function unhover(surface: ClientSurface<S>): void {
   if (!cur || cur.hover === -1) return
   try {
     surface.setState({ ...cur, hover: -1 })
-    send(surface, { type: 'hover', id: '' })
   } catch {
     // an instance that is gone has nothing to clear
   }
@@ -146,33 +148,13 @@ const Para: ClientModule<Props, S> = (props, surface) => {
     if (hovered && hovered !== surface) unhover(hovered)
     hovered = surface
     surface.setState({ ...cur, hover: k, cols })
-    // the band shows the hovered citation's ref and status, whatever room the paragraph has for a tip
-    send(surface, { type: 'hover', id: props.ids[k] ?? '' })
   })
   if (surface.state === undefined) surface.setState(st)
 
   const sel = st.cols === cols ? st.sel : null
-  const toned = tinted.reduce((lines, { t, cells }) => shade(lines, cells, t.bg), lay.lines)
+  const toned = tinted.reduce((lines, { t, cells }) => shade(lines, cells, t.bg, COLORS.text), lay.lines)
   const lit = sel ? shade(toned, selCells(sel, lay.lines.length), COLORS.selected) : toned
   const rows: RenderElement[] = lit.map(l => paintLine(Text, l))
-  const span = hover >= 0 ? lay.spans.find(s => s.chip === hover) : undefined
-  const tip = hover >= 0 ? props.chips[hover]?.tip : undefined
-  // the tip on a quiet box on the row below the citation, or above it on the paragraph's last row; on a one-line
-  // paragraph after its text (an absolute Box is clipped to the region, which is one row tall then)
-  if (span && tip) {
-    const room = Math.max(10, cols - 3)
-    let text = cut(tip, room)
-    let top = span.line < lay.lines.length - 1 ? span.line + 1 : Math.max(0, span.line - 1)
-    let left = Math.max(0, Math.min(span.x0, cols - width(text) - 2))
-    if (lay.lines.length === 1) {
-      const end = lineWidth(lay.lines[0]!) + 2
-      const free = cols - end - 2
-      text = free >= 12 ? cut(tip, free) : ''
-      left = end
-      top = 0
-    }
-    if (text) rows.push(Box({ position: 'absolute', top, left, children: Text({ backgroundColor: COLORS.tip, children: ` ${text} ` }) }))
-  }
   // a released selection: "ask about this" on the line below its end, or at the right of its last line
   askAt.delete(surface)
   if (sel && !pressed.get(surface)) {

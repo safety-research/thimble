@@ -26,6 +26,9 @@ export type LabelInfo = { slug: string; name: string; kind: string; values: stri
 /** An example: its record, its words, and on a label card its value now, why, and whether the analyst set or agreed
  *  with it (`set`; `was` the value the label gave). */
 export type CardExample = { ref: string; quote: string; note: string; value?: string; why?: string; set?: boolean; was?: string }
+/** A plan card's step (cell.ts planSteps, backend notebook.plan_step_of): its words, its status (`not started`,
+ *  `running`, `done`, `needs you`), what it makes, the note its agent left, and its time ('' for none). */
+export type PlanStep = { text: string; status: string; makes: string[]; note: string; time: string }
 export type CardData = {
   id: string
   kind: string
@@ -44,6 +47,7 @@ export type CardData = {
   xTicks?: (string | number)[]
   events?: { time: string; label: string; ref: string; shown?: string }[]
   examples?: CardExample[]
+  steps?: PlanStep[]
   nodes?: DiagramNode[]
   edges?: DiagramEdge[]
   labels?: CardLabel[]
@@ -197,8 +201,9 @@ function flow(entries: readonly Line[], cols: number): Line[] {
   return lines
 }
 
-/** `lines` with a background on the cells [x0, x1) of each span's line, segments split where a span starts or ends. */
-export function shade(lines: readonly Line[], spans: readonly { line: number; x0: number; x1: number }[], bg: string): Line[] {
+/** `lines` with a background on the cells [x0, x1) of each span's line, segments split where a span starts or ends;
+ *  with `fg`, the text there with no color of its own in `fg`. */
+export function shade(lines: readonly Line[], spans: readonly { line: number; x0: number; x1: number }[], bg: string, fg?: string): Line[] {
   return lines.map((l, y) => {
     const mine = spans.filter(s => s.line === y && s.x1 > s.x0)
     if (!mine.length) return l
@@ -209,7 +214,7 @@ export function shade(lines: readonly Line[], spans: readonly { line: number; x0
       let run = ''
       let runOn = false
       const flush = () => {
-        if (run) out.push(runOn ? { ...seg, s: run, bg } : { ...seg, s: run })
+        if (run) out.push(runOn ? { ...seg, s: run, bg, ...(fg && !seg.fg ? { fg } : {}) } : { ...seg, s: run })
         run = ''
       }
       for (const ch of seg.s) {
@@ -1170,9 +1175,10 @@ function tableLayout(card: CardData, cols: number, hover: number): Layout {
 
 /** A record's place as a link, the evidence the card shows: a ↗, then its place in words, underlined, both in the
  *  citation's purple as every citation in the card (MATT-NOTES "Mockup feedback": no two underline colors in a card; the
- *  link color stays for actions), in inverse while the record is under the pointer. */
+ *  link color stays for actions), bold while the record is under the pointer, never on a background (as a citation in
+ *  prose, cite.ts chipSegs). */
 function placeLink(ref: string, n: number, on: boolean): Seg[] {
-  return [{ s: '↗', fg: COLORS.cite }, { s: ' ' }, { s: cutRef(ref, Math.max(4, n - 2)), fg: COLORS.cite, u: true, ...(on ? { inv: true } : {}) }]
+  return [{ s: '↗', fg: COLORS.cite }, { s: ' ' }, { s: cutRef(ref, Math.max(4, n - 2)), fg: COLORS.cite, u: true, ...(on ? { b: true } : {}) }]
 }
 
 /** A record's own words in quotation marks, in at most `max` rows of `room` columns; words that do not fit end in
@@ -1194,9 +1200,10 @@ function quoteLines(words: string, room: number, max: number): string[] {
 
 /**
  * Example records: per record, a ● at the content's edge (in its value's hue when a label the card read marks it, dim
- * when it marks it not, else the first hue) and thimble's note after it, regular; under the note, 2 cells in, the
- * record's words in quotation marks and italic, up to three rows, then ↗ and its place in purple and underlined, on the
- * quote's last row where it fits, else on the row under it. A blank row between records.
+ * when it marks it not, else the citation's purple, as its ↗ and place: one evidence color in a card, the owner 10-17:
+ * "card bullet and citations are different colors") and thimble's note after it, regular; under the note, 2 cells in,
+ * the record's words in quotation marks and italic, up to three rows, then ↗ and its place in purple and underlined, on
+ * the quote's last row where it fits, else on the row under it. A blank row between records.
  */
 function exampleLayout(card: CardData, cols: number, hover: number): Layout {
   const exs = (card.examples ?? []).slice(0, 8)
@@ -1211,7 +1218,7 @@ function exampleLayout(card: CardData, cols: number, hover: number): Layout {
       lines.push([])
       owner.push(-1)
     }
-    const glyph: Seg = { s: '● ', fg: classColour(card, e.value, e.ref) ?? (valued ? COLORS.dim : one()) }
+    const glyph: Seg = { s: '● ', fg: classColour(card, e.value, e.ref) ?? (valued ? COLORS.dim : COLORS.cite) }
     const rows: Line[] = []
     const lead = () => (rows.length ? { s: '  ' } : glyph)
     const note = e.note ? wrapCell(e.note.replace(/\s+/g, ' ').trim(), room, 3).filter(Boolean) : []
@@ -2100,6 +2107,56 @@ function noteLayout(card: CardData, cols: number): Layout {
   return { lines, items: [], hit: () => -1 }
 }
 
+/** A plan step's state as its glyph (SPEC.md, "The visual system", section 5): not started ○ dim, running ◌ in the
+ *  accent, done ●, needs you ! in red; × in red for a step that failed. */
+const STEP_GLYPH: Record<string, Seg> = {
+  'not started': { s: '○', fg: COLORS.dim },
+  running: { s: '◌', fg: COLORS.accent },
+  done: { s: '●' },
+  'needs you': { s: '!', fg: COLORS.problem },
+  failed: { s: '×', fg: COLORS.problem },
+}
+
+/** A step's words as its title, the clause before its first colon (`Read each session closely`), and the rest after
+ *  it; all of them the title when no colon ends a clause (a colon in `10:53` or `https://` does not). */
+export function stepParts(text: string): { title: string; rest: string } {
+  const t = text.replace(/\s+/g, ' ').trim()
+  const m = /^(.+?):\s+(\S.*)$/.exec(t)
+  return m ? { title: m[1]!, rest: m[2]! } : { title: t, rest: '' }
+}
+
+/**
+ * A plan card (the owner, 10-17: "visual hierarchy sucks"): per step, its number, its state's glyph and its title in
+ * bold, its time dim at the right edge; under the title, indented to it, the rest of its words in the text color, then
+ * what it makes (`→ 7 participant memos`) and its agent's note, dim. Every step wraps at the same width, the card's
+ * inner width less the indent, and a blank row stands between steps.
+ */
+function planLayout(card: CardData, cols: number): Layout {
+  const steps = card.steps ?? []
+  const lines: Line[] = []
+  const numW = width(`${steps.length}.`)
+  // the number, a space, the glyph and a space: the title and every row under it start here
+  const indent = numW + 3
+  const room = Math.max(10, cols - indent)
+  const under = (t: string, look: Omit<Seg, 's'> = {}): Line => [{ s: ' '.repeat(indent) }, { s: t, ...look }]
+  steps.forEach((st, i) => {
+    if (i) lines.push([])
+    const { title, rest } = stepParts(st.text)
+    const heads = wrapRows(title || ' ', room, 999)
+    heads.forEach((t, j) => lines.push(j === 0 ? [{ s: `${i + 1}.`.padStart(numW) + ' ' }, STEP_GLYPH[st.status] ?? STEP_GLYPH['not started']!, { s: ' ' }, { s: t, b: true }] : under(t, { b: true })))
+    if (st.time) {
+      const last = lines.at(-1)!
+      const fill = cols - lineWidth(last) - width(st.time)
+      if (fill >= 2) last.push({ s: ' '.repeat(fill) }, { s: st.time, fg: COLORS.dim })
+      else lines.push([{ s: ' '.repeat(Math.max(indent, cols - width(st.time))) }, { s: st.time, fg: COLORS.dim }])
+    }
+    if (rest) for (const t of wrapRows(rest, room, 999)) lines.push(under(t))
+    if (st.makes.length) for (const t of wrapRows(`→ ${st.makes.join(', ')}`, room, 999)) lines.push(under(t, { fg: COLORS.dim }))
+    for (const para of st.note.split('\n').filter(l => l.trim())) for (const t of wrapRows(para, room, 999)) lines.push(under(t, { fg: COLORS.dim }))
+  })
+  return { lines, items: [], hit: () => -1 }
+}
+
 function textLayout(card: CardData, cols: number): Layout {
   const all = card.note.replace(/\s+$/, '').split('\n')
   const lines: Line[] = all.slice(0, MAX_TEXT_ROWS).map(t => [{ s: cut(t.replace(/\t/g, '  '), Math.max(4, cols)) }])
@@ -2113,6 +2170,8 @@ export function cardLayout(card: CardData, cols: number, hover: number, plotRows
       return noteLayout(card, cols)
     case 'text':
       return textLayout(card, cols)
+    case 'plan':
+      return planLayout(card, cols)
     case 'bar':
       return barLayout(card, cols, hover)
     case 'label':

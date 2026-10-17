@@ -80,13 +80,13 @@ export function chipLook(status: string | undefined, fix: string | undefined, ve
   return state === 'link' ? { state, mark: '', spin: false } : { state: 'failed', mark: '×', spin: false }
 }
 
-/** A citation as styled segments: its label purple and underlined (red when it failed), a chip (`[ card ]`) too, in
- *  inverse under the pointer, so its color becomes the background; then, while it is checked, a space and a purple ◌,
- *  neither underlined (`3,934 ◌`, MATT-NOTES "Mockup feedback"), or a red × a cell apart once it failed. The mark's
- *  cells are the citation's: a pointer over them is over the link. */
+/** A citation as styled segments: its label purple and underlined (red when it failed), a chip (`[ card ]`) too, bold
+ *  under the pointer and never on a background there (the owner, 10-17: the inverse was "very hard to see"); then,
+ *  while it is checked, a space and a purple ◌, neither underlined (`3,934 ◌`, MATT-NOTES "Mockup feedback"), or a red
+ *  × a cell apart once it failed. The mark's cells are the citation's: a pointer over them is over the link. */
 export function chipSegs(c: ChipView, hover: boolean, _frame = 0): Seg[] {
   const bad = !c.spin && (c.state === 'problem' || c.state === 'failed')
-  const label: Seg = { s: c.label, fg: bad ? COLORS.problem : COLORS.cite, u: true, ...(hover ? { inv: true } : {}) }
+  const label: Seg = { s: c.label, fg: bad ? COLORS.problem : COLORS.cite, u: true, ...(hover ? { b: true } : {}) }
   // the mark a cell apart from the value: `19,931 ◌`, not `19,931◌`; only the value is underlined
   if (c.spin) return [label, { s: ' ' }, { s: SPIN, fg: COLORS.cite }]
   return bad ? [label, { s: ' ×', fg: COLORS.problem }] : [label]

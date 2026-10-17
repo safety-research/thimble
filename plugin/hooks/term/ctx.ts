@@ -10,6 +10,8 @@ import { HOME_UI_EMPTY } from './home'
 import { keepRow } from './kept'
 import type { KeptRow } from './kept'
 import { NAV_EMPTY } from './nav'
+import { themeFrom } from './paint'
+import type { Theme } from './paint'
 import { FILES_UI_EMPTY, LABEL_UI_EMPTY, PANEL, rt } from './term'
 import type { Activated, AnswerComment, CiteRow, CoverageSummary, FeatureSettings } from './contracts'
 import { bridgeActivated } from '../thimble'
@@ -22,8 +24,9 @@ export type SurfaceGot = { ok: true; value: unknown } | { ok: false; error: stri
 export type Ctx = {
   // ---- the host
   now: () => Promise<number>
-  /** Claude Code's theme as a view's program hears it: `light` for a light theme, else `dark` */
-  theme: () => Promise<'dark' | 'light'>
+  /** The theme Claude Code draws in (paint.ts themeFrom), from its /config `theme` row or `setting` when given (a
+   *  change not written yet); null when thimble cannot tell (`auto` with nothing that says the terminal's background) */
+  theme: (setting?: unknown) => Promise<Theme | null>
   run: (argv: readonly string[], init?: ProcessRunInit) => Promise<ProcessRunResult>
   /** a command that may run longer than `run` allows (a label's run on every record): started beside the session, which
    *  it ends with, its whole output read once it exits */
@@ -209,12 +212,26 @@ export function cxOf($: Dollar): Ctx {
   const keep = async (row: string, part: Parameters<typeof keepRow>[3]) => (rt.sc ? keepRow(io, rt.sc.ws, row, part) : undefined)
   return {
     now: () => $.clock.now().catch(() => Date.now()),
-    theme: async () => {
+    theme: async setting => {
       try {
-        const v = (await $.config.list()).find(r => r.key === 'theme')?.value
-        return /light/i.test(String(v ?? '')) ? 'light' : 'dark'
+        const s = String(setting ?? (await $.config.list()).find(r => r.key === 'theme')?.value ?? '').trim()
+        // `auto` follows the terminal: Claude Code's own fallback when it cannot ask the terminal is COLORFGBG
+        const fgbg = s === 'auto' ? await $.env.get('COLORFGBG').catch(() => undefined) : undefined
+        // a custom theme is its file's base (`<config>/themes/<slug>.json`, as /theme writes it)
+        let base: string | undefined
+        if (s.startsWith('custom:') && !s.endsWith(')')) {
+          const dir = (await $.env.get('CLAUDE_CONFIG_DIR').catch(() => undefined)) || `${(await $.env.get('HOME').catch(() => undefined)) ?? ''}/.claude`
+          const file = await $.fs.read(`${dir.replace(/\/+$/, '')}/themes/${s.slice('custom:'.length)}.json`).catch(() => '')
+          try {
+            const b = (JSON.parse(String(file || '{}')) as { base?: unknown }).base
+            base = typeof b === 'string' ? b : undefined
+          } catch {
+            base = undefined
+          }
+        }
+        return themeFrom(s, fgbg, base)
       } catch {
-        return 'dark'
+        return null
       }
     },
     run: (argv, init) => $.process.run(argv, init),
