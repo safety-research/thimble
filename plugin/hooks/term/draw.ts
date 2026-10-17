@@ -26,7 +26,7 @@ export type DiagramEdge = { source: string; target: string; label?: string }
  *  ref). `stale`: the label changed after the card was made (register.tsx sets it). */
 export type CardLabel = { slug: string; name: string; values: string[]; marks?: Record<string, string>; stale?: boolean; colors?: Record<string, number> }
 /** A label card's own label (cell.ts labelCard, from `thimble state label`): how its records were labeled and how many. */
-export type LabelInfo = { slug: string; name: string; kind: string; values: string[]; labeled: number; total: number; trial: boolean; paths?: string[]; colors?: Record<string, number> }
+export type LabelInfo = { slug: string; name: string; kind: string; values: string[]; labeled: number; total: number; trial: boolean; paths?: string[]; colors?: Record<string, number>; runId?: string }
 /** An example: its record, its words, and on a label card its value now, why, and whether the analyst set or agreed
  *  with it (`set`; `was` the value the label gave). `kept`: the words the card quotes from the record (its payload's
  *  `quotes`); `fields`: a database row's fields (lib.ts claimFields), which it shows in place of its words. */

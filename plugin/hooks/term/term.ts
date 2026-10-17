@@ -4,7 +4,7 @@
 // the timers here).
 //
 // Nothing here writes the workspace: a read is `thimble state`, a change is `thimble act` (hooks/data.ts).
-import type { ChatNav, ChatNavStep, ChatSignal, TermCard, TermFilesUi, TermHome, TermLabelUi, TermPanel, TermPending, TermThreadRow } from './types'
+import type { ChatNav, ChatNavStep, ChatSignal, TermCard, TermFilesUi, TermHome, TermLabelRuns, TermLabelUi, TermPanel, TermPending, TermThreadRow } from './types'
 import { busyWords, cardOfCell, checkOf, fixOf, linksOf, printed } from './cell'
 import type { ThimbleCell, ThimbleLabel } from './cell'
 import { SCRIPT_ASK } from './cite'
@@ -88,6 +88,10 @@ export const rt = {
   // whether a pass of the lane runs
   labelsStamp: null as string | null,
   labelsBusy: false,
+  // the label runs' lane (runsLane): each run file as last read, by label, with the listing's stamp of it; and whether a
+  // pass of the lane runs
+  runFiles: new Map<string, { stamp: string; run: Record<string, unknown> | null }>(),
+  runsBusy: false,
   // the reads of a surface asked so far, and by key the one whose answer the surface holds: an answer of a read asked
   // before it never replaces it (two lanes read the labels and home)
   reads: 0,
@@ -1168,11 +1172,14 @@ export async function runLabel(cx: Ctx, id: string, name: string, limit: number,
   await labelSaid(cx, id, `${how}${counts ? `: ${counts}` : ''}${failed}${err}`, null)
 }
 
-/** Stop a label's run started from its panel, after its current record (`thimble act label-stop`). */
+/** Stop a label's run after its current record, whichever process runs it (`thimble act label-stop`, as the browser's
+ *  Stop run): its panel says so, or on a `×` row why it did not stop (bug hunt I1: a stop of a run main started went
+ *  nowhere, and its answer was not shown). */
 export async function stopLabel(cx: Ctx, id: string): Promise<void> {
   if (!rt.sc) return
-  const got = await act(cx, rt.sc, 'label-stop', { label: id })
-  if (!got.ok) cx.toast(`the label's run was not stopped: ${got.error}`)
+  const got = await act<{ stopping?: boolean; reason?: string }>(cx, rt.sc, 'label-stop', { label: id })
+  if (!got.ok) await labelSaid(cx, id, `× not stopped: ${got.error}`)
+  else if (got.value.stopping === false) await labelSaid(cx, id, `× not stopped: ${got.value.reason || 'no run of this label is going'}`)
   else await labelSaid(cx, id, '◌ stopping after the current record')
 }
 
@@ -1403,10 +1410,70 @@ export async function labelsLane(cx: Ctx): Promise<void> {
     const first = rt.labelsStamp === null
     rt.labelsStamp = stamp
     if (first) return
-    await Promise.all([readSurface(cx, 'labels', 'labels'), refreshHome(cx)])
+    // a label's panel open reads its label again too, so a run that ended or stopped shows there at once (bug hunt I1:
+    // the panel said `◌ labeling … stop` half a minute after the stop)
+    const p = await cx.panel()
+    await Promise.all([readSurface(cx, 'labels', 'labels'), refreshHome(cx), ...(p?.view === 'label' && p.label ? [readSurface(cx, `label:${p.label}`, 'label', labelArgs(p.label))] : [])])
     await cx.bumpPanel()
   } finally {
     rt.labelsBusy = false
+  }
+}
+
+/** A label's run file, in the workspace's labels/ (backend concepts.run_file), and how old its beat may be before its run
+ *  is no run (concepts.RUN_STALE_S). */
+const RUN_FILE = '.run.json'
+const RUN_STALE_MS = 15_000
+
+/** The label runs' lane (bug hunt I1: a label panel's count lagged its card's, as the refresh pass reads every card
+ *  first; I2: the counts differed from place to place): each second, the run files of the labels' runs going on in any
+ *  process (labels/<id>.run.json, which a run writes as it goes and removes as it ends, wherever it runs: backend
+ *  concepts.run_file) listed, and each that changed read; the labels list, home, a label's panel and its card say from
+ *  them how far each run has read and the counts its rows hold, and a run whose file went, or whose beat is old, has
+ *  ended (lib.ts labelState). */
+export async function runsLane(cx: Ctx): Promise<void> {
+  if (!rt.sc || rt.runsBusy) return
+  rt.runsBusy = true
+  try {
+    const dir = `${rt.sc.ws}/labels`
+    const entries = await cx.list(dir).catch(() => [])
+    const now = await cx.now()
+    const live: TermLabelRuns['live'] = {}
+    const seen = new Set<string>()
+    for (const e of entries) {
+      if (e.kind !== 'file' || !e.name.endsWith(RUN_FILE)) continue
+      const id = e.name.slice(0, -RUN_FILE.length)
+      seen.add(id)
+      const stamp = `${e.size}:${e.mtimeMs}`
+      let kept = rt.runFiles.get(id)
+      if (!kept || kept.stamp !== stamp) {
+        let run: Record<string, unknown> | null = null
+        try {
+          const v = JSON.parse(await cx.read(`${dir}/${e.name}`)) as unknown
+          run = v && typeof v === 'object' ? (v as Record<string, unknown>) : null
+        } catch {
+          run = null
+        }
+        kept = { stamp, run }
+        rt.runFiles.set(id, kept)
+      }
+      const r = kept.run
+      const beat = typeof r?.beat === 'number' ? r.beat * 1000 : 0
+      if (!r || r.status !== 'running' || now - beat > RUN_STALE_MS) continue
+      const n = (x: unknown) => (typeof x === 'number' ? x : null)
+      const counts = r.counts && typeof r.counts === 'object' ? Object.fromEntries(Object.entries(r.counts as Record<string, unknown>).filter(([, v]) => typeof v === 'number')) as Record<string, number> : null
+      live[id] = { run_id: String(r.run_id ?? ''), done: n(r.done) ?? 0, total: n(r.total), matched_total: n(r.matched_total), ...(counts ? { counts } : {}) }
+    }
+    for (const id of [...rt.runFiles.keys()]) if (!seen.has(id)) rt.runFiles.delete(id)
+    const before = await cx.labelRuns()
+    // a run that was going and is not now has ended: a read of its label from before its end no longer says it runs
+    const ended = [...before.ended, ...Object.entries(before.live).filter(([id, r]) => live[id]?.run_id !== r.run_id).map(([, r]) => r.run_id)]
+    const next = { live, ended: [...new Set(ended)].slice(-50) }
+    if (JSON.stringify(next) === JSON.stringify(before)) return
+    await cx.setLabelRuns(next)
+    await cx.bumpPanel()
+  } finally {
+    rt.runsBusy = false
   }
 }
 
@@ -1486,7 +1553,8 @@ export const applyUi: UiApply = async (cx, kind, args) => {
   if ((kind === 'filter' || kind === 'label') && p?.view.startsWith('file')) await openPanel(cx, p)
 }
 
-/** The refresh loop (every second), the labels' lane (every second), the citation queue (every 250 ms) and the view
+/** The refresh loop (every second), the labels' lane and their runs' lane (every second), the citation queue (every
+ *  250 ms) and the view
  *  pump, once per module copy, from the moment thimble is on. */
 export function startTimers(cx: Ctx): void {
   if (rt.timers) return
@@ -1495,6 +1563,7 @@ export function startTimers(cx: Ctx): void {
   const quiet = () => undefined
   cx.every(1000, () => void tick(cx, applyUi).catch(quiet))
   cx.every(1000, () => void labelsLane(cx).catch(quiet))
+  cx.every(1000, () => void runsLane(cx).catch(quiet))
   cx.every(250, () => void checkQueued(cx).catch(quiet))
   // the open view matched to what the panel draws, and thimble's view host started the first time a view opens, from a
   // timer of the session's, which lives as long as it (viewhost.ts)

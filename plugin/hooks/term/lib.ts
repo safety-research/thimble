@@ -66,29 +66,39 @@ const labelNames = new Map<string, string>()
 const docTitles = new Map<string, string>()
 const passages = new Map<string, string>()
 
-/** Whether thimble's agents list a running chat that follows a run of the label named `name` (a `labels` agent titled
- *  `label <name>`): a run the session's own process holds, which `thimble state` does not show as the label's run. */
-export function labelRunning(agents: readonly { label: string; state: string; role: string }[], name: string): boolean {
-  return Boolean(name) && agents.some(a => a.role === 'labels' && a.state === 'running' && a.label === `label ${name}`)
-}
-
 /** How a label's runs stand, as every place that names it says it (home, the labels list, its panel, its card; live
  *  check term-fix9, quirk 4: the list and the panel said `not run yet` while home said `◌ labeling`): `running` while a
- *  run goes on (thimble's, or main's that a chat follows: labelRunning), `ran` once a run ended whole, `stopped` for a
- *  last run stopped part way (the analyst's stop, or Claude Code's quit, which the server keeps as a stopped run: bug
- *  hunt H3) or records labeled with no run that ended (a quit stopped its first run in main's process), `labeled` the
- *  records labeled so far (a stopped run's, those it read), and `total` its run's size (the run's own, else the scope's
- *  size `thimble state` counted). */
+ *  run goes on, in whichever process runs it (`thimble state` gives it as the label's `run`: backend
+ *  concepts.current_run; bug hunt I2: a Run again from the browser read `stopped at` here for its whole run), `ran` once
+ *  a run ended whole, `stopped` for a last run stopped part way (the analyst's stop, or Claude Code's quit, which the
+ *  server keeps as a stopped run: bug hunt H3) or records labeled with no run that ended (a quit stopped its first run
+ *  in main's process), `labeled` the records read so far (a running run's, as the browser counts them, of its own size:
+ *  bug hunt I4; a stopped run's, those it read; else those labeled), and `total` its run's size (the running run's
+ *  own, else the last run's, else the scope's size `thimble state` counted). */
 export type LabelState = { running: boolean; ran: boolean; stopped: boolean; labeled: number; total: number | null }
 
-type LabelRunLike = { status?: string; total?: number; matched_total?: number | null; stopped?: boolean; labeled?: number; failed?: number; skipped?: number } | null | undefined
+type LabelRunLike = { status?: string; total?: number | null; matched_total?: number | null; stopped?: boolean; labeled?: number; failed?: number; skipped?: number; done?: number } | null | undefined
+
+/** The labels' runs going on as their run files say them each second (term.ts runsLane): by label, how far each has
+ *  read; and the run ids seen to end. */
+export type LiveRuns = { live: Record<string, { run_id: string; done: number; total: number | null; matched_total: number | null; counts?: Record<string, number> }>; ended: readonly string[] }
 
 export function labelState(
-  l: { name?: string; last_run?: LabelRunLike; applications?: LabelRunLike[]; label_stats?: { counts?: Record<string, number>; n_labeled?: number } | null; scope_total?: number },
-  agents: readonly { label: string; state: string; role: string }[],
+  l: { id?: string; name?: string; run?: (LabelRunLike & { run_id?: string }) | null; last_run?: LabelRunLike; applications?: LabelRunLike[]; label_stats?: { counts?: Record<string, number>; n_labeled?: number } | null; scope_total?: number },
+  runs?: LiveRuns,
 ): LabelState {
   const last = l.last_run ?? l.applications?.at(-1) ?? null
-  const running = (l.last_run?.status ?? '') === 'running' || labelRunning(agents, l.name ?? '')
+  // the run as its run file says it this second, over the label's read (bug hunt I1: the panel's count lagged); a run
+  // the read says goes on that has ended since is no run going on
+  const fresh = l.id ? runs?.live[l.id] : undefined
+  const stated = l.run?.status === 'running' && !(l.run.run_id && runs?.ended.includes(l.run.run_id)) ? l.run : null
+  const live = fresh ? { status: 'running', ...fresh } : stated
+  if (live) {
+    const read = typeof live.done === 'number' ? live.done : (live.labeled ?? 0) + (live.failed ?? 0) + (live.skipped ?? 0)
+    const total = typeof live.total === 'number' ? live.total : typeof l.scope_total === 'number' ? l.scope_total : null
+    return { running: true, ran: Boolean(last), stopped: false, labeled: read, total }
+  }
+  const running = (l.last_run?.status ?? '') === 'running'
   const labeled = l.label_stats?.n_labeled ?? Object.values(l.label_stats?.counts ?? {}).reduce((a, b) => a + b, 0)
   const total = typeof last?.matched_total === 'number' ? last.matched_total : typeof last?.total === 'number' ? last.total : typeof l.scope_total === 'number' ? l.scope_total : null
   // a last run that stopped before it read all it would have read: where it stopped, of its own size

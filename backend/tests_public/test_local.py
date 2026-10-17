@@ -658,7 +658,7 @@ async def test_act_edits_and_runs_a_label_as_the_label_editor_does(term, monkeyp
         stop_seen.append(concepts._cancel_event(c, cid).is_set())
         return await real_wait(c, cid, timeout, enough)
 
-    monkeypatch.setattr(local, "LABEL_STOP_POLL_S", 0.02)
+    monkeypatch.setattr(concepts, "STOP_POLL_S", 0.02)
     monkeypatch.setattr(concepts, "wait_apply", wait_apply)
     stopped = await local.act(CORPUS, "label-run", {"label": "bash"})
     monkeypatch.setattr(concepts, "wait_apply", real_wait)
@@ -834,8 +834,8 @@ async def test_act_label_renames_and_state_label_pages_its_records(term):
 
 
 async def test_a_label_run_stops_when_another_process_deletes_its_label(term, monkeypatch):
-    """`label-run` watches the label's file as it watches its stop file: a `label-delete` in another process removes the
-    file, and the run stops after its current unit."""
+    """A run watches the label's file as it watches its stop file (concepts._watch_runs): a `label-delete` in another
+    process removes the file, and the run stops after its current unit."""
     from app import concepts
 
     await call(term, "apply_label", scope="files", name="bash", predicate={"kind": "regex", "text": "Bash"},
@@ -844,6 +844,14 @@ async def test_a_label_run_stops_when_another_process_deletes_its_label(term, mo
     cid = concepts.find_concept(ws, "bash")["id"]
     seen: list[bool] = []
     real_wait = concepts.wait_apply
+    real_index = concepts._index_sources
+
+    async def slow_index(c, k, corpus_dir, sources, unit, cancel):  # a run long enough to be stopped part way
+        for _ in range(200):
+            if cancel.is_set():
+                break
+            await asyncio.sleep(0.01)
+        return await real_index(c, k, corpus_dir, sources, unit, cancel)
 
     async def wait_apply(c, k, timeout=None, enough=None):
         concepts._concept_file(ws, k).unlink()  # what the other process's delete leaves
@@ -854,8 +862,9 @@ async def test_a_label_run_stops_when_another_process_deletes_its_label(term, mo
         seen.append(concepts._cancel_event(c, k).is_set())
         return await real_wait(c, k, timeout, enough)
 
-    monkeypatch.setattr(local, "LABEL_STOP_POLL_S", 0.02)
+    monkeypatch.setattr(concepts, "STOP_POLL_S", 0.02)
     monkeypatch.setattr(concepts, "wait_apply", wait_apply)
+    monkeypatch.setattr(concepts, "_index_sources", slow_index)
     await local.act(CORPUS, "label-run", {"label": cid})
     assert seen == [True]
 

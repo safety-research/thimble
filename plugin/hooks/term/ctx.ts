@@ -5,7 +5,7 @@
 import { atom, update } from 'claude-code'
 import type { Elements, EngineInterface, FsEntry, FsStat, HttpInit, HttpResponse, McpToolResult, PaneOpenArgs, ProcessRunInit, ProcessRunResult, RenderElement, ResolveInput, UiOpenResult } from 'claude-code'
 
-import type { ChatHomeUi, ChatNav, ChatNews, ChatSignal, LabelUnsure, Links, Pressing, SummarySeen, TermAgent, TermAnswer, TermCard, TermFilesUi, TermHome, TermLabelUi, TermPanel, TermPending, TermThread, TermThreadRow, TermVerdict } from './types'
+import type { ChatHomeUi, ChatNav, ChatNews, ChatSignal, LabelUnsure, Links, Pressing, SummarySeen, TermAgent, TermAnswer, TermCard, TermFilesUi, TermHome, TermLabelRuns, TermLabelUi, TermPanel, TermPending, TermThread, TermThreadRow, TermVerdict } from './types'
 import { HOME_UI_EMPTY } from './home'
 import { keepRow, keepSession } from './kept'
 import type { KeptRow } from './kept'
@@ -109,6 +109,9 @@ export type Ctx = {
   setHomeUi: (u: ChatHomeUi) => Promise<void>
   labelUi: () => Promise<TermLabelUi>
   setLabelUi: (u: TermLabelUi) => Promise<void>
+  /** the labels' runs going on in any process, from their run files (term.ts runsLane) */
+  labelRuns: () => Promise<TermLabelRuns>
+  setLabelRuns: (r: TermLabelRuns) => Promise<void>
   filesUi: () => Promise<TermFilesUi>
   setFilesUi: (u: TermFilesUi) => Promise<void>
   /** a count a drawing of the panel reads, so a bump draws it again */
@@ -186,6 +189,7 @@ const threadsRef = { plugin: 'thimble', key: 'threads' } as const
 const newsRef = { plugin: 'thimble', key: 'threadNews' } as const
 const homeUiRef = { plugin: 'thimble', key: 'homeUi' } as const
 const labelUiRef = { plugin: 'thimble', key: 'labelUi' } as const
+const labelRunsRef = { plugin: 'thimble', key: 'labelRuns' } as const
 const filesUiRef = { plugin: 'thimble', key: 'filesUi' } as const
 const panelTickRef = { plugin: 'thimble', key: 'panelTick' } as const
 const panelTickA = atom(panelTickRef, 0)
@@ -366,6 +370,8 @@ export function cxOf($: Dollar): Ctx {
     setHomeUi: async u => void (await $.state.set(homeUiRef, u)),
     labelUi: async () => ({ ...LABEL_UI_EMPTY, ...((await $.state.get(labelUiRef)).value ?? {}) }),
     setLabelUi: async u => void (await $.state.set(labelUiRef, u)),
+    labelRuns: async () => (await $.state.get(labelRunsRef)).value ?? { live: {}, ended: [] },
+    setLabelRuns: async r => void (await $.state.set(labelRunsRef, r)),
     filesUi: async () => ({ ...FILES_UI_EMPTY, ...((await $.state.get(filesUiRef)).value ?? {}) }),
     setFilesUi: async u => void (await $.state.set(filesUiRef, u)),
     panelTick: async () => (await $.state.get(panelTickRef)).value ?? 0,

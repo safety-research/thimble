@@ -1357,12 +1357,11 @@ export async function homeData(cx: Ctx): Promise<HomeData> {
 /** The labels as home and the labels list draw them (home.ts labelBlocks): each with its values' counts and colors, its
  *  runs in words, and its records of no fit and unsure counted while labels are on. */
 async function homeLabels(cx: Ctx, ls: readonly ThimbleLabel[]): Promise<HomeLabel[]> {
-  // a run the session's own process holds shows only as the chat that follows it (lib.ts labelRunning)
-  const agents = (await cx.agents()) ?? []
   const unsure = (await featuresOf(cx)).labels ? new Map((await cx.labelUnsure()).map(u => [u.id, u])) : new Map<string, LabelUnsure>()
+  const runs = await cx.labelRuns()
   return ls.map(l => {
-    // its runs as the labels list, its panel and its card say them (lib.ts labelState)
-    const st = labelState(l, agents)
+    // its runs as the labels list, its panel and its card say them (lib.ts labelState), a run's count live
+    const st = labelState(l, runs)
     const colors = classColors(l.classes)
     const u = unsure.get(l.id)
     return {
@@ -1370,8 +1369,9 @@ async function homeLabels(cx: Ctx, ls: readonly ThimbleLabel[]): Promise<HomeLab
       name: l.name ?? l.id,
       kind: l.kind ?? '',
       trial: Boolean(l.trial),
-      // as thimble.labels() reads the rows: a record the analyst set to another value under that value
-      counts: l.verdicts?.counts ?? l.label_stats?.counts ?? {},
+      // as thimble.labels() reads the rows: a record the analyst set to another value under that value; while a run
+      // goes on, as its file says them this second (term.ts runsLane)
+      counts: runs.live[l.id]?.counts ?? l.verdicts?.counts ?? l.label_stats?.counts ?? {},
       values: l.labels ?? Object.keys(l.label_stats?.counts ?? {}),
       paths: (l.glob ?? '').split(/,\s*/).filter(Boolean),
       running: st.running,
@@ -2975,8 +2975,11 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   const running = ui.runs[id]
   const said = ui.said[id] ?? ''
   // the counts as thimble.labels() reads the rows, each record the analyst set to another value under that value
-  // (live check term-fix5, new quirk 5: one record set to `no` left the counts at 33/467)
-  const counts = l.verdicts?.counts ?? l.label_stats?.counts ?? {}
+  // (live check term-fix5, new quirk 5: one record set to `no` left the counts at 33/467); while a run goes on, as its
+  // file says them this second (term.ts runsLane; bug hunt I2)
+  const runs = await cx.labelRuns()
+  const fresh = runs.live[id]
+  const counts = fresh?.counts ?? l.verdicts?.counts ?? l.label_stats?.counts ?? {}
   const setByYou = l.verdicts?.set ?? 0
   const values = [...(l.labels ?? []), ...Object.keys(counts).filter(k => !(l.labels ?? []).includes(k))]
   const kind = ui.kind[id] ?? l.kind ?? 'prompt'
@@ -2989,7 +2992,9 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   // the records its scope holds: its last full run's count, else the count `thimble state` gives a label with no run
   // that ended (live check term-fix10, low quirk: `run on all` and `scope: pages.jsonl` showed no number after a first
   // run stopped part way)
-  const scopeN = typeof last?.matched_total === 'number' ? last.matched_total : typeof last?.total === 'number' && !l.trial ? last.total : typeof l.scope_total === 'number' ? l.scope_total : null
+  // (a run going on: its own scope's, as a run within another label counts it: bug hunt I4)
+  const live = fresh?.matched_total ?? (l.run?.status === 'running' && typeof l.run.matched_total === 'number' ? l.run.matched_total : null)
+  const scopeN = live ?? (typeof last?.matched_total === 'number' ? last.matched_total : typeof last?.total === 'number' && !l.trial ? last.total : typeof l.scope_total === 'number' ? l.scope_total : null)
   const sample = l.trial && last?.limit ? last.limit : 30
   // the units a run reads from: the scope's count, or for a label over whole files the files its glob matches; a
   // scope that holds no more units than a sample runs whole, so its sample's button gives way (bug hunt B31: `run on a
@@ -3355,28 +3360,21 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   // has it, until a run cuts none (backend concepts.read_cut)
   if (!running && last?.cut?.line) rows.push(<Box key="lb-cut" marginLeft={L}><Text wrap="wrap" dimColor>{last.cut.line}</Text></Box>)
   // run it: on a sample, or on every record; they save what was typed first. Its state as home, the list and its card
-  // say it (lib.ts labelState): a run main's chat follows is `◌ labeling 3,000 of 4,579` here too, and a first run
-  // stopped part way `stopped at 3,150 of 4,579`, never `not run yet` beside its counts (live check term-fix9, quirk 4)
-  const agents = (await cx.agents()) ?? []
-  const st = labelState(l, agents)
+  // say it (lib.ts labelState): a run going on in any process (this panel's, main's, the browser's Run again) is
+  // `◌ labeling 3,000 of 4,579`, its count live, and a first run stopped part way `stopped at 3,150 of 4,579`, never `not
+  // run yet` beside its counts (live check term-fix9, quirk 4; bug hunt I2)
+  const st = labelState(l, runs)
   const ranOn = (n: number) => `${num(n)} ${n === 1 ? oneOf(noun) : noun}`
   const lastWords = last && !st.stopped ? (l.trial || last.limit ? `last run on a sample of ${ranOn(last.labeled ?? 0)}` : `last run on all ${ranOn(last.labeled ?? 0)}`) : labelStateWords(st)
-  // the run main's chat follows, which a stop of that chat stops (as the agent panel's stop)
-  const follower = !running && st.running ? agents.find(a => a.role === 'labels' && a.state === 'running' && a.label === `label ${name}`) : undefined
-  const stop = follower && rt.sc ? () => void act(cx, rt.sc!, 'stop', { agent: follower.chat || follower.name, name: follower.name }) : () => void stopLabel(cx, id)
+  // a run's stop, wherever it runs, goes as the browser's Stop run goes (`thimble act label-stop`), and the panel says
+  // when it did not stop (bug hunt I1: a run main started ignored it)
+  const stop = () => void stopLabel(cx, id)
   rows.push(<Text key="lb-gap-runs"> </Text>)
-  if (running)
+  if (running || st.running)
     rows.push(
       <Box key="lb-running" flexDirection="row" columnGap={3} flexWrap="wrap">
-        <Text>{`◌ labeling ${running.limit ? `a sample of ${num(running.limit)}` : `all ${scopeN !== null ? num(scopeN) : ''} ${noun}`.replace(/\s+/g, ' ')}`}</Text>
+        <Text>{st.running ? labelStateWords(st) : `◌ labeling ${running!.limit ? `a sample of ${num(running!.limit)}` : `all ${scopeN !== null ? num(scopeN) : ''} ${noun}`.replace(/\s+/g, ' ')}`}</Text>
         {actionEl(els, 'lb-stop', 'stop', stop)}
-      </Box>,
-    )
-  else if (st.running)
-    rows.push(
-      <Box key="lb-running" flexDirection="row" columnGap={3} flexWrap="wrap">
-        <Text>{labelStateWords(st)}</Text>
-        {follower ? actionEl(els, 'lb-stop', 'stop', stop) : null}
       </Box>,
     )
   else {
@@ -3404,11 +3402,13 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
       )
   }
   // what the last save or run said: `×` and `!` rows in red
-  said.split('\n').filter(Boolean).forEach((line, i) => rows.push(<Text key={`lb-said-${i}`} wrap="wrap" {...(/^[×!]/.test(line) ? { color: COLORS.problem } : { dimColor: true })}>{line}</Text>))
+  // `◌ stopping` goes once no run is going
+  const saidNow = !running && !st.running && said.startsWith('◌ stopping') ? '' : said
+  saidNow.split('\n').filter(Boolean).forEach((line, i) => rows.push(<Text key={`lb-said-${i}`} wrap="wrap" {...(/^[×!]/.test(line) ? { color: COLORS.problem } : { dimColor: true })}>{line}</Text>))
   const asking = labelDeleting === id && !running && !st.running
   if (asking) keys.push({ key: 'delete-yes', hotkey: 'y', onPress: () => void deleteIt() }, { key: 'delete-no', hotkey: 'n', onPress: () => void keepIt() })
   else if (!running && !st.running) keys.push({ key: 'sample', hotkey: 'r', onPress: () => void run(sampleWhole ? 0 : sample)() }, { key: 'rename', hotkey: 'n', onPress: () => void askRename() }, { key: 'delete', hotkey: 'k', onPress: () => void askDelete() })
-  else if (running || follower) keys.push({ key: 'stop', hotkey: 's', onPress: stop })
+  else keys.push({ key: 'stop', hotkey: 's', onPress: stop })
   // f shows or hides the marks of a label over files in Files and the views (o opens the label in the browser, as in
   // every view)
   if (files && !asking && !running) keys.push({ key: 'files-on', hotkey: 'f', onPress: () => void turn(!shownOn)() })
@@ -3575,7 +3575,7 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   // the keys (mockup labelpanel2): the ring walks every field and action, Enter presses one or gives a field the
   // keyboard; the letters stay bound (r, n, k, f, e, d, l) unnamed; s while a run goes
   rows.push(<Text key="lb-gap-hints"> </Text>)
-  rows.push(hintsRow(els, ['↑↓ to choose', RING_HINT, ...(running || follower ? ['s to stop'] : [])], cols))
+  rows.push(hintsRow(els, ['↑↓ to choose', RING_HINT, ...(running || st.running ? ['s to stop'] : [])], cols))
   const hk = hiddenKeys(cx, e, keys)
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...rows]}</Box>
 }
@@ -4138,7 +4138,10 @@ async function drawAgent(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
     )
   }
   // `stop` only while the run goes on; an orientation that failed or was stopped runs again, with a focus if one is typed
-  const stop = a && rt.sc && !ENDED.has(state) ? () => void act(cx, rt.sc!, 'stop', { agent: a.chat || a.name, name: a.name }) : null
+  // a stop that did not stop says why (the chat that follows a label's run stops that run: bug hunt I1)
+  const stop = a && rt.sc && !ENDED.has(state)
+    ? () => void act<{ stopped?: boolean; reason?: string }>(cx, rt.sc!, 'stop', { agent: a.chat || a.name, name: a.name }).then(r => (!r.ok ? cx.toast(`not stopped: ${r.error}`) : r.value.stopped === false ? cx.toast(`not stopped: ${r.value.reason || 'it was not running'}`) : undefined))
+    : null
   const orient = ORIENT_ROLES.has(a?.role || str(meta.role) || str(meta.key))
   const again = orient && (failed || state === 'stopped') && rt.sc ? () => void orientAgain(cx, '', chat) : null
   // once main is asked to run it again, until the new run shows here in its place (term.ts followRerun): a line says so,

@@ -1177,6 +1177,13 @@ async def interrupt_route(c: str, chat_id: str, request: Request) -> dict:
         if ans.refused:
             return {"stopped": False, "kind": ans.kind, "reason": ans.reason}
         return {"stopped": True, **({"done": True} if ans.get("done") else {})}
+    if meta.get("role") == "labels":
+        # the chat that follows a label's run runs no agent: the run stops, in whichever process runs it (bug hunt I1)
+        from . import concepts  # noqa: PLC0415 — concepts imports this module
+
+        cid = concepts.label_of_chat(c, meta)
+        if cid is not None and concepts.request_stop(c, cid):
+            return {"stopped": True}
     if await stop_agent(c, chat_id):
         return {"stopped": True}
     if meta.get("agent_id") and meta.get("parent") == MAIN_ID and meta.get("status") == "running":
