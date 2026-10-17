@@ -174,15 +174,15 @@ async def test_the_long_poll_hands_requests_to_main_s_session_alone(client, plug
     assert (await child.next(wait=0)).status_code == 409
     await mod.result(req["id"], {"agentId": "a7", "model": "claude-opus-5-5[1m]", "junk": 1})
     assert await ask == {"agentId": "a7", "model": "claude-opus-5-5[1m]"}
-    # a model call's fork of main (agent_call.py): its drop line and the fork flag, and no note in main
-    fork = asyncio.create_task(module_bridge.request(CORPUS, "spawn", role="call", prompt="Decide.", fork=True,
-                                                     description="thimble: view proposal", values={}, request="r-2",
-                                                     drop="thimble checked for a view proposal"))
+    # the card check's agent (agent_call.py): its drop line, and no note in main; no fork flag reaches the module
+    check = asyncio.create_task(module_bridge.request(CORPUS, "spawn", role="call", prompt="Check.", fork=True,
+                                                      description="thimble card check: Q?", values={}, request="r-2",
+                                                      drop='thimble checked the card "Q?"'))
     req = (await mod.next()).json()["request"]
-    assert req["args"] == {"role": "call", "prompt": "Decide.", "description": "thimble: view proposal", "values": {},
-                           "request": "r-2", "note": "", "drop": "thimble checked for a view proposal", "fork": True}
+    assert req["args"] == {"role": "call", "prompt": "Check.", "description": "thimble card check: Q?", "values": {},
+                           "request": "r-2", "note": "", "drop": 'thimble checked the card "Q?"'}
     await mod.result(req["id"], {"agentId": "a8", "model": "claude-opus-5-5"})
-    assert (await fork)["agentId"] == "a8"
+    assert (await check)["agentId"] == "a8"
 
 
 # ----------------------------------------------------------------------------------------------- model calls

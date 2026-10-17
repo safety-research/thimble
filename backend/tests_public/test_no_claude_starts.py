@@ -1,5 +1,7 @@
-"""thimble starts no Claude Code session of its own (NOCLAUDE.md): every model call runs as a subagent of the analyst's
-Claude Code session. A grep over the source, so a new place that starts `claude` fails here until it is named below.
+"""thimble starts no Claude Code session of its own (NOCLAUDE.md): every model call runs in the analyst's Claude Code
+session, as a completion through its own client (app/model_call.py: the plugin module's $.model.complete and
+$.model.fork) or, for long work and the card check, as a subagent of main. A grep over the source, so a new place that
+starts `claude` fails here until it is named below.
 
 It reads the backend, the plugin and the scripts, and finds every place that starts a process whose program is
 `claude`: a Python call of subprocess, asyncio's subprocess functions or os.exec*/spawn* (read with ast, the program
@@ -155,8 +157,8 @@ def test_thimble_starts_claude_only_where_it_starts_no_model_session():
         "the scan must find the launcher's exec of the analyst's own session"
     new = sorted({(f, w) for f, w, _ in starts} - set(ALLOWED))
     assert not new, ("a new place starts `claude`; thimble starts no Claude Code session of its own (NOCLAUDE.md). "
-                     "Run the model call as a subagent of main (app/agent_call.py), or, for a start with no model "
-                     f"session, add it to ALLOWED with its reason: {new}")
+                     "Run the model call through the session's own client (app/model_call.py), or, for a start "
+                     f"with no model session, add it to ALLOWED with its reason: {new}")
     flagged = [(f, w, src) for f, w, src in starts if (f, w) not in PLAYS_MAIN
                and re.search(r"(?<![\w-])(-p|" + "|".join(map(re.escape, SESSION_FLAGS)) + r")(?![\w-])", src)
                and not (f == "plugin/bin/thimble" and re.search(r"\bexec\b", src))]

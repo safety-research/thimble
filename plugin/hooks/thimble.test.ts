@@ -10,7 +10,7 @@
 // (`expect`), and the HMAC-SHA256 the fake server signs with (hmacSha256).
 import { describe, expect as check, test as it } from 'claude-code/testing'
 
-import { ABORT_WAIT_MS, CALL_DONE, PRIVATE_FALLBACK, callDone, checkName, forksFile, hmac, register } from './thimble'
+import { ABORT_WAIT_MS, CALL_DONE, PRIVATE_FALLBACK, callDone, checkName, hmac, register } from './thimble'
 
 type Json = Record<string, any>
 
@@ -128,7 +128,6 @@ const NOTE = 'The analyst started the writer {agent} (report) in thimble; leave 
 const USAGE = { input_tokens: 40, output_tokens: 12, cache_read_input_tokens: 1800, cache_creation_input_tokens: 0 }
 // a model call as backend/app/model_call.py asks it: the instructions marked for the cache, the part, the caps
 const ASK = { model: 'claude-opus-5-5', effort: 'low', system: [{ text: 'Judge each post.', cache: true }], prompt: [{ text: 'Post 4 by tidal-wren.' }], maxTokens: 16000, timeoutMs: 600000 }
-
 
 const sign = (role: string, nonce: string, token = TOKEN) => hmacSha256(token, `${role}:${nonce}`)
 /** A model call's prompt as text: its blocks' texts, or the fork's string. */
@@ -626,31 +625,6 @@ describe('model calls', () => {
     expect(e.server.ended[0]).toMatchObject({ agentId: call.agentId, answer: 'Done' }) // its end reaches the server
   })
 
-  it("spawns a model call's fork of main with Claude Code's fork type, lists it for the fork guard while it runs, and posts its report", async () => {
-    const e = await started()
-    const list = forksFile(`${HOME}/.thimble`, MAIN)
-    const fork = await e.server.answer(e.server.push('spawn', { role: 'call', fork: true, prompt: 'Decide.', description: 'thimble: view proposal', values: {}, note: '', drop: 'thimble checked for a view proposal' }))
-    expect(e.$.agent.spawn).toHaveBeenCalledWith({ subagentType: 'fork', prompt: 'Decide.', description: 'thimble: view proposal' })
-    expect(e.$.agent.register).not.toHaveBeenCalledWith(expect.objectContaining({ name: 'call' })) // a fork needs no type
-    expect(callDone(String(fork.agentId))).toBe('thimble checked for a view proposal')
-    expect(e.notes()).toEqual([])
-    expect(e.files[list]).toBe(`${fork.agentId}\n`)
-    await e.complete(String(fork.agentId), '{"show": false, "why": "Nothing new.", "proposal": null}')
-    await until(() => e.server.ended.length === 1)
-    expect(e.server.ended[0]).toMatchObject({ agentId: fork.agentId, answer: '{"show": false, "why": "Nothing new.", "proposal": null}' })
-    expect(e.files[list]).toBe('') // it ended: the guard has nothing to refuse
-  })
-
-  it('empties a list of forks an earlier load left, and makes none where there is none', async () => {
-    const list = forksFile(`${HOME}/.thimble`, MAIN)
-    const e = await started({ files: { [list]: 'aGone\n' } })
-    expect(e.files[list]).toBe('')
-    const fresh = await started()
-    expect(list in fresh.files).toBe(false)
-  })
-})
-
-describe('model calls through the session\'s own client', () => {
   it('runs a completion through $.model.complete beside the queue, as the server asked it, and posts its text and usage', async () => {
     const e = await started()
     let release = () => {}

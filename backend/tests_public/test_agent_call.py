@@ -1,8 +1,9 @@
-"""A model call as a subagent of main (agent_call.py): the call starts a `thimble:call` agent through thimble's module
-(the fake bridge, subagent_fakes), the agent answers through send_answer, whose answer is checked against the call's
-schema, and the caller gets it; a call with no Claude Code session gives `no_session` with its fix; an agent that ends
-without an answer gives its part back once; a cancel stops the agent and refuses a late answer; a call of many parts
-starts a fresh agent once one has read its share. The card check reads its card this way."""
+"""A model call that reads pictures, as a subagent of main (agent_call.py): the call starts a `thimble:call` agent
+through thimble's module (the fake bridge, subagent_fakes), the agent answers through send_answer, whose answer is
+checked against the call's schema, and the caller gets it; a call with no Claude Code session gives `no_session` with
+its fix; an agent that ends without an answer gives its part back once; a cancel stops the agent and refuses a late
+answer; a call of many parts starts a fresh agent once one has read its share. The card check reads its card this way;
+every other model call is a completion (test_model_call.py)."""
 from __future__ import annotations
 
 import asyncio
@@ -92,49 +93,6 @@ async def test_an_agent_that_ends_without_its_answer_gives_the_part_back_once(ws
     assert res.status == "no_tool_call" and "Still not sure." in res.detail and len(bridge.ops("spawn")) == 2
 
 
-async def test_a_fork_of_main_answers_with_its_report_which_must_fit_the_schema(ws, bridge):
-    call = asyncio.create_task(agent_call.structured(
-        CORPUS, "Is the analyst's last reply curt?", tool=TOOL, model="", effort="", fork=True,
-        title="thimble: curt check", done="thimble judged a reply"))
-    await _until(lambda: bridge.ops("spawn"), "no fork started")
-    [spawn] = bridge.ops("spawn")
-    assert spawn["fork"] is True and spawn["role"] == "call" and spawn["drop"] == "thimble judged a reply"
-    prompt = spawn["prompt"]
-    assert "You are a fork of the analyst's session" in prompt and "Is the analyst's last reply curt?" in prompt
-    assert '"curt"' in prompt and "read_call" not in prompt and "send_answer" not in prompt
-    await _until(lambda: _agents(), "the fork was not registered")
-    assert _agents()[0][1]["type"] == "fork", "its start names Claude Code's fork type"
-    subagents.run_ended(CORPUS, _agents()[0][0], "done", 'Checking the reply.\n{"curt": "very"}')
-    await _until(lambda: len(_agents()) == 2, "an answer that does not fit gives the part to a second fork")
-    subagents.run_ended(CORPUS, _agents()[1][0], "done", 'One line first.\n```json\n{"curt": true}\n```')
-    res = await asyncio.wait_for(call, 5)
-    assert res.status == "ok" and res.output == {"curt": True} and len(bridge.ops("spawn")) == 2
-
-
-async def test_a_fork_the_safeguards_refused_fails_at_once_and_one_with_pictures_never_starts(ws, bridge):
-    refusal = {"model": "claude-opus-4-8", "effort": "high"}
-    call = asyncio.create_task(agent_call.structured(CORPUS, "Judge it.", tool=TOOL, model="", effort="", fork=True,
-                                                     refusal=refusal))
-    await _until(lambda: _agents(), "no fork started")
-    subagents.run_ended(CORPUS, _agents()[0][0], "failed", "API Error: Claude's safeguards flagged this message.")
-    res = await asyncio.wait_for(call, 5)
-    assert res.status == "refused" and len(bridge.ops("spawn")) == 1, "a fork cannot change its model"
-    pictured = await agent_call.structured(CORPUS, "Judge it.", tool=TOOL, model="", effort="", fork=True,
-                                           images=[(b"png", "image/png")])
-    assert pictured.status == "error" and "no pictures" in pictured.detail and len(bridge.ops("spawn")) == 1
-
-
-def test_a_fork_that_ends_before_its_start_s_answer_named_it_still_answers_its_part(ws):
-    cid = "f0f0f0f0f0f0"
-    with agent_call._locked(CORPUS, cid) as rec:
-        rec.update(id=cid, status="running", fork=True, model="", tool={"schema": TOOL.input_schema},
-                   parts={"1": {"state": "given", "agent": "", "tries": 1, "inline": True}}, agents={})
-    agent_call._agent_ended(CORPUS, cid, "afast", "done", '{"curt": false}')
-    part = agent_call.read(CORPUS, cid)["parts"]["1"]
-    assert part["state"] == "answered" and part["agent"] == "afast"
-    assert json.loads(agent_call._answer_path(CORPUS, cid, 1).read_text()) == {"curt": False}
-
-
 async def test_a_cancelled_call_stops_its_agent_and_takes_no_late_answer(ws, bridge):
     call = asyncio.create_task(agent_call.structured(CORPUS, "The reply: Now.", tool=TOOL, model="claude-opus-5-5",
                                                      effort="low"))
@@ -179,43 +137,6 @@ async def test_a_call_of_many_parts_takes_them_one_at_a_time_and_a_fresh_agent_t
     assert [(o.part, o.status, o.output) for o in outs] == [(1, "ok", {"curt": False}), (2, "ok", {"curt": True}),
                                                            (3, "ok", {"curt": True})]
     assert heard == [1, 2, 3]
-
-
-async def test_a_lazy_source_that_waits_adds_parts_as_it_goes_and_starts_an_agent_only_for_a_part_none_waits_for(
-        ws, bridge):
-    """A source that yields WAIT keeps the call open until it ends; with room for four agents, one part starts one
-    agent, and a part added while that agent holds one starts a second."""
-    queue: list[str] = ["reply one"]
-    closed = False
-
-    async def source():
-        while True:
-            if queue:
-                yield agent_call.Part(queue.pop(0))
-            elif closed:
-                return
-            else:
-                yield agent_call.WAIT
-
-    spec = agent_call.Spec(what="labels", instructions="Judge each reply.", tool=TOOL, model="claude-opus-5-5",
-                           effort="low", agents=4)
-    call = asyncio.create_task(agent_call.run(CORPUS, spec, source()))
-    await _until(lambda: _agents(), "no agent started")
-    await asyncio.sleep(0.1)
-    assert len(bridge.ops("spawn")) == 1, "one part waits, so one agent starts"
-    first = await _send("read_call", {})
-    assert "reply one" in first.text
-    queue.append("reply two")
-    await _until(lambda: len(_agents()) == 2, "a part no agent waits for starts a second agent")
-    second = await _send("read_call", {}, 1, agent=1)
-    assert "reply two" in second.text
-    await _send("send_answer", {"answer": {"curt": True}}, 2, agent=0)
-    await _send("send_answer", {"answer": {"curt": False}}, 3, agent=1)
-    await asyncio.sleep(0.1)
-    assert not call.done(), "a source that waits keeps the call open"
-    closed = True
-    outs = await asyncio.wait_for(call, 5)
-    assert [(o.part, o.output) for o in outs] == [(1, {"curt": True}), (2, {"curt": False})]
 
 
 async def test_a_long_part_reaches_its_agent_in_pages(ws, bridge, monkeypatch):

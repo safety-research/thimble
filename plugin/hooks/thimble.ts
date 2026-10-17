@@ -46,14 +46,9 @@
 //   (the analyst's Stop of main: $.turn.abort of main's running turn, by the id its turn.start carried, answered once
 //   that turn completed or ABORT_WAIT_MS passed, after a TaskStop of each command of that turn the abort moved to the
 //   background, where Esc would have ended it), note ($.session.append). It never starts, sends or stops anything the
-//   server did not ask for. A spawn of the call role, a model call's agent (backend/app/agent_call.py), carries `drop`,
-//   the reason the terminal UI gives when it drops the agent's hand-back (callDone), and its type is never offered. A
-//   spawn with `fork` (a model call that needs main's conversation, the view proposer's) spawns Claude Code's `fork`
-//   type, with no registration and no note: the fork inherits main's context, model and effort, and its report is its
-//   answer. A fork keeps main's tools and this module's hooks never see its calls (they skip the runs of agents this
-//   module started), so the module lists each running fork in <home>/up/<session>/forks (forksFile), one agent id a
-//   line, written again at each start and end, and the plugin's fork guard (bin/.thimble-watch --fork-guard, a
-//   PreToolUse hook) refuses every tool call of an agent the file lists;
+//   server did not ask for. A spawn of the call role, the card check's agent (backend/app/agent_call.py), carries
+//   `drop`, the reason the terminal UI gives when it drops the agent's hand-back (callDone), and its type is never
+//   offered;
 // - model calls (backend/app/model_call.py), which run at once, beside that queue, so many run together (BESIDE):
 //   complete, one tool-less completion through the session's own API client and sign-in ($.model.complete, with an
 //   AbortController that a later cancel aborts), and fork, one tool-less completion over main's own transcript
@@ -112,14 +107,10 @@ type Rules = { private: string[]; records: string[]; corpus: string | null; web_
 export const PLUGIN = 'thimble'
 // thimble's roles: each names its own model and effort, so a typed run's effort never goes to one of them
 export const ROLES = ['orientation', 'critic', 'writer', 'view-builder', 'view-reviewer', 'check', 'dev-ticket', 'call']
-// a model call's agent (backend/app/agent_call.py): never offered to a model, and its hand-back dropped (callDone)
+// the card check's agent (backend/app/agent_call.py): never offered to a model, and its hand-back dropped (callDone)
 const CALL = 'call'
 /** A dropped hand-back's reason when the server named none (agent_call.DONE_DEFAULT). */
 export const CALL_DONE = 'thimble finished a task'
-// Claude Code's type of a fork of the spawning loop, which inherits its context (agent_call.py, a fork)
-const FORK = 'fork'
-/** The running forks of main's session, one agent id a line, which the fork guard reads (module note). */
-export const forksFile = (home: string, session: string): string => `${home}/up/${session}/forks`
 /** The requests that run at once, beside the queue of the others: thimble's model calls and their cancel (module note). */
 export const BESIDE = new Set(['complete', 'fork', 'cancel'])
 // a model call's id on local transport, which names its files in the trusted folder (module_bridge.COMPLETIONS)
@@ -265,7 +256,6 @@ type State = {
   started: Set<string> // agents this module spawned: their turn.complete is posted
   checks: Map<string, string> // agents of thimble's check role, this module's spawns and main's Agent calls: each one's check (checkName)
   calls: Map<string, string> // agents of the call role this module spawned: the reason their dropped hand-back gives (callDone)
-  forks: Set<string> // the forks of main this module spawned that run now, which forksFile lists for the fork guard
   completions: Map<string, AbortController> // the completions that run now, by their request's id (a cancel aborts one)
   queue: Promise<void> // the requests, one at a time
   helloing: { sid: string; said: Promise<Hello> } | null
@@ -281,7 +271,7 @@ function fresh(): State {
   return {
     active: false, interactive: false, user: '', home: '', homeReal: '', rules: null,
     cwd: '', session: '', version: '', gen: 0, server: null, roles: {}, registered: {}, efforts: {},
-    requests: {}, started: new Set(), checks: new Map(), calls: new Map(), forks: new Set(), completions: new Map(), queue: Promise.resolve(), helloing: null, leaving: '', plan: null, turn: '', turnEnded: [],
+    requests: {}, started: new Set(), checks: new Map(), calls: new Map(), completions: new Map(), queue: Promise.resolve(), helloing: null, leaving: '', plan: null, turn: '', turnEnded: [],
     dispatching: new Map(), used: new Set(),
     file: false, peer: false, rechecking: null, ws: '', writing: Promise.resolve(), stamps: {}, n: 0,
     out: { session: '', version: '', load: '', beat: 0, plan: null, plan_at: 0, problem: '', taken: [], answers: {}, ended: [] },
@@ -464,7 +454,6 @@ async function begin($: Engine, m: State, cwd: string): Promise<void> {
   await prepare($, m)
   m.cwd = cwd
   m.session = await $.session.id()
-  await staleForks($, m)
   try {
     const manifest = JSON.parse(await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`))
     m.version = isObj(manifest) ? text(manifest.version) : ''
@@ -581,7 +570,6 @@ async function handle($: Engine, m: State, req: Request): Promise<Answer> {
         await registerAll($, m)
         return { ok: true }
       case 'spawn':
-        if (a.fork === true) return await spawnFork($, m, text(a.prompt), text(a.description), text(a.drop))
         return await spawn($, m, text(a.role), text(a.prompt), text(a.description), values, text(a.note), text(a.drop))
       case 'send':
         return await send($, m, text(a.agent), text(a.text), text(a.role), values)
@@ -624,39 +612,11 @@ async function spawn($: Engine, m: State, role: string, prompt: string, descript
   if (!r.agentId) return { error: 'Claude Code started no agent' }
   m.started.add(r.agentId)
   if (role === 'check') m.checks.set(r.agentId, checkOf(description))
-  // a model call's type stays out of every listing: no model starts one or sends to one (agent.offer)
+  // the card check's type stays out of every listing: no model starts one or sends to one (agent.offer)
   if (role === CALL) m.calls.set(r.agentId, drop || CALL_DONE)
   else m.used.add(`${PLUGIN}:${role}`)
   if (line) await note($, line.split('{agent}').join(r.agentId))
   return { agentId: r.agentId, model: r.model }
-}
-
-/** A model call's fork of main (module note): Claude Code's fork type, no registration, no note; listed for the fork
- *  guard, and its hand-back dropped as a call agent's. */
-async function spawnFork($: Engine, m: State, prompt: string, description: string, drop: string): Promise<Answer> {
-  const r = await $.agent.spawn({ subagentType: FORK, prompt, description })
-  if (r.deny !== undefined) return LIMIT.test(r.deny) ? { limit: r.deny } : { deny: r.deny }
-  if (!r.agentId) return { error: 'Claude Code started no agent' }
-  m.started.add(r.agentId)
-  m.calls.set(r.agentId, drop || CALL_DONE)
-  m.forks.add(r.agentId)
-  await writeForks($, m)
-  return { agentId: r.agentId, model: r.model }
-}
-
-/** forksFile written whole with the forks that run now; empty when none runs, which the guard's first shell line reads
- *  as nothing to guard. */
-async function writeForks($: Engine, m: State): Promise<void> {
-  if (!m.home || !m.session) return
-  await $.fs.write(forksFile(m.home, m.session), [...m.forks].map(id => `${id}\n`).join('')).catch(() => undefined)
-}
-
-/** A list of forks an earlier load left (Claude Code quit while one ran, then this session was resumed) emptied, so the
- *  guard's first shell line exits again; no file is made where there is none. */
-async function staleForks($: Engine, m: State): Promise<void> {
-  if (m.forks.size > 0 || !m.home || !m.session) return
-  const st = await $.fs.stat(forksFile(m.home, m.session)).catch(() => undefined)
-  if (st && st.size > 0) await writeForks($, m)
 }
 
 /** A model call's text blocks as $.model.complete takes them, from the server's (a string is one block); undefined for
@@ -954,7 +914,6 @@ async function fileBegin($: Engine, m: State, cwd: string, ws: string, launch: J
   m.cwd = cwd
   await prepare($, m)
   m.session = await $.session.id()
-  await staleForks($, m)
   const state = (await readJson($, trusted(m, 'subagents.json'))) ?? {}
   m.peer = !isMain(launch, state, m.session)
   m.stamps.launch = await stamp($, trusted(m, 'launch.json'))
@@ -1362,7 +1321,6 @@ export const register: Register = on => {
       for (const ended of m.turnEnded.splice(0)) ended()
     }
     if (m.active && e.agentId !== undefined && m.started.has(e.agentId)) {
-      if (m.forks.delete(e.agentId)) await writeForks($, m) // its run ended: the guard no longer needs it
       const refusal = e.reason === 'refusal' && isObj(e.refusal) ? { refusal: e.refusal } : {}
       if (m.file) {
         m.out.ended = [...m.out.ended, { n: ++m.n, agentId: e.agentId, answer: text(e.answer), reason: text(e.reason), ...refusal, at: Date.now() }].slice(-KEPT)

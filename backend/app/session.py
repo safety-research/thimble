@@ -2718,7 +2718,7 @@ def _scan_subs(lv: Live, replay: bool = True, places: dict[str, dict] | None = N
         lv.pending_paths.pop(key, None)
         lv.sub_paths.add(key)
         if quiet:
-            continue  # an agent of thimble's with no chat: a model call's (agent_call.py), which nobody reads
+            continue  # an agent of thimble's with no chat: the card check's (agent_call.py), which nobody reads
         use = str(meta.get("toolUseId") or "") or None
         followed = _sub_by(lv, tool_use_id=use) or _sub_by(lv, agent_id=agent_id)
         # a fork's file names its thread by its description; when thimble-term gave the call the thread's question as
@@ -2743,7 +2743,7 @@ def _scan_subs(lv: Live, replay: bool = True, places: dict[str, dict] | None = N
 
 def _chatless(lv: Live, agent_id: str, meta: dict) -> bool | None:
     """Whether the transcript of `agent_id` belongs to an agent of thimble's whose role has no chat (subagents.Type's
-    chat_role None: a model call's agent or fork, agent_call.py), which the mirror leaves alone; None while that is not
+    chat_role None: the card check's agent, agent_call.py), which the mirror leaves alone; None while that is not
     known yet: a start thimble's module made (its meta json's toolUseId) that the registry has not taken up, while a
     start of such a role waits for its answer."""
     from . import subagents  # noqa: PLC0415

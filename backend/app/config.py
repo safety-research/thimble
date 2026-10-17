@@ -259,8 +259,8 @@ def auth_problem(status: dict[str, Any] | None = None) -> str:
     return ""
 
 
-# The default model of the `refusal` row (models_for): the model a model call's agent (agent_call) runs on again, once,
-# when a safety classifier stopped its model's response (`stop_reason: refusal`). THIMBLE_FALLBACK_MODEL names another,
+# The default model of the `refusal` row (models_for): the model a model call (model_call, agent_call) runs on again,
+# once, when a safety classifier stopped its model's response (`stop_reason: refusal`). THIMBLE_FALLBACK_MODEL names another,
 # '' turns the rerun off; Settings' refusal row does the same per workspace.
 FALLBACK_MODEL = os.environ.get("THIMBLE_FALLBACK_MODEL", "claude-opus-4-8").strip()
 FALLBACK_EFFORT = "high"  # the refusal row's default effort
@@ -913,8 +913,8 @@ def safe_corpus_path(corpus: Path, rel: str) -> Path:
 # model is the session's, and the composer chip's effort and fast mode for it are kept as settings.json `models.main` and
 # applied at its next launch (cli.launch_args), so main is not a role here. Every other role is set in thimble's config
 # (userconf: `agents.<agent>.model` and `effort`; userconf.ROLES naming each agent's role), applied to the next start.
-# Each runs as a subagent of main, which has no fast mode of its own (Claude Code's agent definition has none), so no
-# role has one:
+# Each runs as a subagent of main, or as a model call through main's own client (model_call), neither of which has a
+# fast mode of its own (Claude Code's agent definition has none), so no role has one:
 #   orient     the orientation, a subagent of main (thimble:orientation)
 #   subagents  the orientation's own subagents, which it starts as thimble:orient-helper; by default the orientation's model
 #              without the 1M tag, at its effort
@@ -923,11 +923,13 @@ def safe_corpus_path(corpus: Path, rel: str) -> Path:
 #   checks     each run of a report check (thimble:check)
 #   dev        a view build or review (thimble:view-builder, thimble:view-reviewer) and a code ticket's agent
 #              (thimble:dev-ticket)
-#   verify     the card check's reading of a card's picture (card_check), a model call (agent_call, thimble:call)
-#   labels     the labels classifier (concepts), the label draft and the view fit, model calls
+#   verify     the card check's reading of a card's picture (card_check), a subagent of main (agent_call, thimble:call)
+#   labels     the labels classifier (concepts), the label draft and the view fit, model calls through main's own client
+#              (model_call)
 #   suggest    the viewer suggestion for a file type (views.suggest), a model call; the check for a view proposal after
-#              a turn is a fork of main (proposer.py), on main's model and effort, and reads no row
-#   refusal    the model and effort a model call's agent runs on again once its model refused it (agent_call);
+#              a turn is a fork of main's conversation (proposer.py, model_call.fork), on main's model and effort, and
+#              reads no row
+#   refusal    the model and effort a model call runs on again once its model refused it (model_call, agent_call);
 #              `off` turns the rerun off
 # Layered: the role's default (ROLE_MODELS_DEFAULT; an agent file's frontmatter where it names one, ROLE_AGENTS; for the
 # orientation the analyst's own model setting, else ORIENT_DEFAULT_MODEL, at ORIENT_DEFAULT_EFFORT), then
@@ -1126,10 +1128,10 @@ def models_for(c: str | None = None) -> dict[str, dict[str, Any]]:
 
 
 def call_settings(c: str | None, role: str) -> dict[str, Any]:
-    """The model and effort of a model call (agent_call) made for `role` in workspace `c`, and the `refusal` row's model
-    and effort its agent runs on again when its model refuses it (None when that row is off): the values models_for
+    """The model and effort of a model call (model_call, agent_call) made for `role` in workspace `c`, and the `refusal`
+    row's model and effort it runs on again when its model refuses it (None when that row is off): the values models_for
     resolves and GET /settings reports, so a call takes none of them from the analyst's Claude Code settings. Every
-    caller passes them all, and agent_call refuses a call without a model or an effort."""
+    caller passes them all, and a call without a model or an effort is refused."""
     models = models_for(c)
     conf, again = models[role], models["refusal"]
     return {"model": str(conf["model"]), "effort": str(conf["effort"]),
