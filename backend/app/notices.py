@@ -28,6 +28,8 @@ text?} or a list of them, `do` one of ACTIONS:
                    Claude Code's prompt in the terminal, to send again in other words
   card-again       `text` sent to main as the analyst's message: it asks main to make again the card a reply the
                    safeguards stopped did not add
+  page-start       thimble's page started again as /thimble browser starts it, in the terminal only (the `page:stopped`
+                   notice's; the browser, whose page stopped, shows no button for it)
 
 A notice with the same `key` replaces the earlier one in place, so a failure that repeats updates one notice. clear
 (a later success under the key) and dismiss (the analyst's x) take a notice away. A dismissal of a REMEMBERED key holds
@@ -93,7 +95,7 @@ TYPE = "notice"  # the event's type on the workspace stream, and the row's type 
 API = "api"  # the kind of a notice of main's own request that Anthropic's API failed (session.py), which main's chat
 # shows as its API error card: no row, and the foreground strip leaves it out while main is open
 ACTIONS = ("proposals-retry", "proposals-off", "settings", "view-retry", "sign-out", "ticket-open", "label-open",
-           "label-again", "orient-again", "ask-again", "card-again")
+           "label-again", "orient-again", "ask-again", "card-again", "page-start")
 NOTICES_FILE = "notices.json"  # in the workspace folder: the open notices, oldest first
 DISMISSED_FILE = "notices-dismissed.json"  # in the workspace folder: the REMEMBERED keys the analyst dismissed
 # keys whose dismissal holds for the workspace: a key equal to one, or starting with one that ends in ":"
