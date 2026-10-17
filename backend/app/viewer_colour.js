@@ -47,7 +47,11 @@
 // Color by is thimble's small secondary button with the choice in it. The chosen field's values are key chips in the
 // top row (viewer_kit.css .chip-key), each a square swatch of its colour, its name and its count; a click turns a
 // value's color off or on, an Alt-click or a double click keeps that value's alone, and hovering a value shows what it
-// means: a label's as the label says, a field's as the page declares it (or what the field is). A click on a chip's swatch opens the picker of thimble's label colours
+// means: a label's as the label says, a field's as the page declares it (or what the field is). Each choice past the
+// first, a track, follows them as its legend: its name, then its values as key chips with their counts on the page,
+// which turn nothing off. A label checked that colors none of the view's own units (rows anchored view:<slug>/<key>)
+// though it marks records in the view's files says under its name in the menu that it can't color these rows: a unit
+// takes a label's value from the records it stands for, and none of those is marked. A click on a chip's swatch opens the picker of thimble's label colours
 // around the colour wheel (label_wheel.json, window.__thimbleLabelWheel); "N more" lists the chips it hides, each with
 // its box, its swatch (the picker under it) and its meaning on hover. The one picked
 // recolours the value everywhere in the view (its chip, the records' bars, the tracks, and what the page draws through
@@ -114,6 +118,18 @@
   var VALUED = '[data-anchor][data-color],[data-anchor][data-colour]'
   function valueAttr(e) {
     return e.hasAttribute('data-color') ? e.getAttribute('data-color') : e.getAttribute('data-colour')
+  }
+  // A record's values of the fields past the first choice, the tracks, as attr writes them: data-color-tracks, a JSON
+  // list in the tracks' order (data-colour-tracks, the British spelling, too)
+  var TRACKED = '[data-anchor][data-color-tracks],[data-anchor][data-colour-tracks]'
+  function trackValue(e, at) {
+    try {
+      var vs = JSON.parse(e.getAttribute(e.hasAttribute('data-color-tracks') ? 'data-color-tracks' : 'data-colour-tracks') || '[]')
+      var v = Array.isArray(vs) ? vs[at] : null
+      return v == null || typeof v === 'object' ? null : String(v)
+    } catch (err) {
+      return null
+    }
   }
   var DEF_FOR = 60000 // ms what a label's values mean is kept before it is asked for again
   var ICON = {
@@ -860,9 +876,11 @@
   // The values of the records the page shows, each record once: those that elements which count their own records gave
   // (held, such as the table of the tab in view), then for a field the other elements with data-color, for a label the
   // other anchored records, or the view's own units when it anchors no record. A record in an element that does not show,
-  // such as a tab not in view, is not counted.
-  Control.prototype.countDom = function () {
-    var c = this.choice()
+  // such as a tab not in view, is not counted. With `c` a choice past the first, a track, at its place `at` among them:
+  // its values, a label's from the marks, a field's from the records' data-color-tracks (attr).
+  Control.prototype.countDom = function (c, at) {
+    var track = c != null && at != null
+    c = c || this.choice()
     var out = {}
     var units = {}
     if (!c || c.off) return out
@@ -871,7 +889,7 @@
     var shown = shownTest()
     var held = []
     var strips = allStrips()
-    for (var h = 0; h < this.held.length; h++) {
+    for (var h = 0; h < (track ? 0 : this.held.length); h++) {
       var x = this.held[h]
       if (x.by !== c.key || !x.el.isConnected || !shown(x.el, true)) continue
       held.push(x.el)
@@ -884,7 +902,7 @@
       for (var si = 0; si < strips.length; si++)
         if (strips[si].box === x.el && strips[si].refs) for (var r = 0; r < strips[si].refs.length; r++) if (strips[si].refs[r] != null) seen[String(strips[si].refs[r])] = true
     }
-    var els = document.querySelectorAll(c.field ? VALUED : '[data-anchor]')
+    var els = document.querySelectorAll(c.field ? (track ? TRACKED : VALUED) : '[data-anchor]')
     for (var i = 0; i < els.length; i++) {
       var e = els[i]
       if (e.closest('.thimble-colour-mount,.thimble-colour-menu') || !shown(e)) continue
@@ -896,12 +914,12 @@
         seen[ref] = true
       }
       if (c.field) {
-        var k = keyOf(valueAttr(e))
+        var k = keyOf(track ? trackValue(e, at) : valueAttr(e))
         out[k] = (out[k] || 0) + 1
         continue
       }
       if (!ref || e.tagName === 'CANVAS') continue
-      var key = keyOf(this.valueOf(ref))
+      var key = keyOf(track ? labelValue(c.label, ref) : this.valueOf(ref))
       var into = /^(view|card|cell):/.test(ref) ? units : out
       if (into === out) records++
       into[key] = (into[key] || 0) + 1
@@ -962,6 +980,70 @@
     out = kept
     if (counts[NONE]) add(null, 'No ' + f.title.toLowerCase())
     return out
+  }
+  // The legend of each choice past the first, a track: its title and its values with their counts on the page (countDom),
+  // a label's highlighted values then Not marked, a field's declared values and those its records take, in the order of
+  // their colors, then the records with none. [{key, title, label, values: [{key, value, name, colour, n}]}]
+  Control.prototype.trackLists = function () {
+    var self = this
+    return this.extra().map(function (x, at) {
+      var counts = self.countDom(x, at)
+      var out = []
+      var have = {}
+      var add = function (value, name, colour) {
+        var key = keyOf(value)
+        if (have[key]) return
+        have[key] = true
+        out.push({ key: key, value: key === NONE ? null : String(value), name: name, colour: key === NONE ? null : colour, n: counts[key] || 0 })
+      }
+      if (x.label) {
+        var l = labelById(x.label)
+        var vs = (l && l.values) || []
+        for (var i = 0; i < vs.length; i++) if (vs[i].highlight !== false) add(vs[i].name, vs[i].name, vs[i].colour || l.colour || null)
+        add(null, 'Not marked', null)
+      } else {
+        var f = self.field(x.field)
+        var declared = (f && f.values) || []
+        var seen = Object.keys(counts).filter(function (k) {
+          return k !== NONE && declared.indexOf(k) < 0
+        })
+        seen.sort(function (a, b) {
+          return rank(self.placeOf(x.field, a)) - rank(self.placeOf(x.field, b)) || (counts[b] || 0) - (counts[a] || 0)
+        })
+        declared.concat(seen).forEach(function (v) {
+          add(v, v, self.fieldColour(x.field, v))
+        })
+        if (counts[NONE]) add(null, 'No ' + x.title.toLowerCase(), null)
+      }
+      return { key: x.key, title: x.title, label: x.label || null, values: out }
+    })
+  }
+  // The values a label colors by on the page now, with their counts: the chips' for the first choice, a track's legend
+  // for another; null for a label that is no choice
+  Control.prototype.valuesOfLabel = function (id) {
+    var c = this.choice()
+    if (c && c.label === id) return this.values
+    for (var i = 0; i < (this.tracks || []).length; i++) if (this.tracks[i].label === id) return this.tracks[i].values
+    return null
+  }
+  // How many records a label checked in the menu marks in the view's files when it colors none of the rows on the page,
+  // which are the view's own units (a run, a session): a unit takes a label's value from the records it stands for
+  // (views.marks_for), and none of those is one the label marks. 0 for a label that colors a row, marks nothing in the
+  // view's files, is not yet counted or is no choice.
+  Control.prototype.cantColor = function (id) {
+    var l = labelById(id)
+    var vs = this.valuesOfLabel(id)
+    if (!l || !l.here || !(typeof l.count === 'number' && l.count > 0) || !vs) return 0
+    var none = 0
+    for (var i = 0; i < vs.length; i++) {
+      if (vs[i].key !== NONE && vs[i].n) return 0
+      if (vs[i].key === NONE) none = vs[i].n
+    }
+    if (!none) return 0
+    var shown = shownTest()
+    var units = document.querySelectorAll('[data-anchor^="view:"]')
+    for (var u = 0; u < units.length; u++) if (!units[u].closest('.thimble-colour-mount,.thimble-colour-menu') && shown(units[u])) return l.count
+    return 0
   }
   // the values a chip stands for: its own, or for "Other" those under it
   function keysOf(v) {
@@ -1028,12 +1110,22 @@
   Control.prototype.refresh = function () {
     this.domCounts = this.countDom()
     this.values = this.list()
-    var key = JSON.stringify([this.choice(), this.values, this.offSet(), this.extra()])
+    this.tracks = this.trackLists()
+    var key = JSON.stringify([this.choice(), this.values, this.offSet(), this.extra(), this.tracks])
     if (key !== this.lastKey) {
       this.lastKey = key
       this.render()
       if (this.menu && this.menu.values) this.redrawMenu()
       tellColour()
+    }
+    // the choices' menu, open while the counts come, says of each label checked whether it can color the rows
+    var self = this
+    var cant = JSON.stringify(this.pickKeys().filter(function (k) {
+      return k.indexOf('l:') === 0 && self.cantColor(k.slice(2)) > 0
+    }))
+    if (cant !== this.cantKey) {
+      this.cantKey = cant
+      if (this.menu && !this.menu.values && this.menu.palette == null) this.redrawMenu()
     }
     if (this.coloursChanged) {
       this.coloursChanged = false
@@ -1179,6 +1271,19 @@
         '<button type="button" class="chip chip-key chip-act thimble-colour-chip" data-i="' + i + '" aria-pressed="' + on + '"' + lab + (v.members ? ' data-other' : '') +
         (v.colour ? ' style="--c:' + esc(v.colour) + '"' : '') + ((c && c.label) || v.members || this.fieldAbout(c, v) ? '' : ' title="' + esc(v.name) + '"') + '><span class="chip-sw"' + (v.colour && !v.members ? ' data-palette title="' + esc('Color of ' + v.name) + '"' : '') + '></span><span class="chip-text">' + esc(v.name) + '</span><span class="chip-count">' + num(v.n) + '</span></button>'
     }
+    // then each track's legend: its name and its values, each a key chip with its count, which turns nothing off
+    var tracks = this.tracks || []
+    for (var t = 0; t < tracks.length; t++) {
+      var tr = tracks[t]
+      chips +=
+        '<span class="thimble-colour-legend" data-t="' + t + '" data-by="' + esc(tr.key) + '"' + (tr.label ? ' data-label="' + esc(tr.label) + '"' : '') + ' title="' + esc(tr.title + ': a track') + '"><span class="thimble-colour-lname">' + esc(tr.title) + '</span>' +
+        tr.values
+          .map(function (v) {
+            return '<span class="chip chip-key thimble-colour-lchip"' + (v.colour ? ' style="--c:' + esc(v.colour) + '"' : '') + '><span class="chip-sw"></span><span class="chip-text">' + esc(v.name) + '</span><span class="chip-count">' + num(v.n) + '</span></span>'
+          })
+          .join('') +
+        '</span>'
+    }
     chips += '<button type="button" class="btn btn-ghost btn-sm thimble-colour-more" hidden></button>'
     var reset = '<button type="button" class="btn btn-secondary btn-sm thimble-reset"' + (this.resetShown ? '' : ' hidden') + '>' + ico('reset') + 'Reset</button>'
     this.root.innerHTML = by + '<span class="thimble-colour-chips">' + chips + '</span>' + reset
@@ -1223,13 +1328,24 @@
     var reset = this.root.querySelector('.thimble-reset')
     if (reset) reset.classList.remove('thimble-reset-gone')
     var chips = box.querySelectorAll('.thimble-colour-chip')
+    var groups = box.querySelectorAll('.thimble-colour-legend')
     for (var i = 0; i < chips.length; i++) chips[i].hidden = false
+    for (var g = 0; g < groups.length; g++) groups[g].hidden = false
     more.hidden = true
-    // the first chip "N more" stands for: none while every chip shows
+    // the first chip "N more" stands for, and the first track's legend: none while every one shows
     this.hiddenFrom = chips.length
+    this.tracksFrom = groups.length
     if (!over()) return
     more.hidden = false
     var hid = 0
+    var tracks = this.tracks || []
+    // the tracks' legends go first, the last first, then the first choice's chips
+    for (var k = groups.length - 1; k >= 0 && over(); k--) {
+      groups[k].hidden = true
+      hid += ((tracks[k] && tracks[k].values) || []).length
+      this.tracksFrom = k
+      more.innerHTML = hid + ' more' + ico('down')
+    }
     for (var j = chips.length - 1; j >= 0 && over(); j--) {
       chips[j].hidden = true
       hid++
@@ -1531,8 +1647,9 @@
       })
   }
   // a field's or a label's row: its name and how many values it has, then its values as chips on one line, cut off with
-  // … where they do not fit; nothing of its values when none is known
-  function choiceBody(colour, name, values, note) {
+  // … where they do not fit; nothing of its values when none is known; `why`, a line under them that says why it colors
+  // nothing here
+  function choiceBody(colour, name, values, note, why) {
     var n = values.length
     return (
       '<span class="thimble-colour-body"><span class="thimble-colour-top">' +
@@ -1549,6 +1666,7 @@
             .join('') +
           '</span>'
         : '') +
+      (why ? '<span class="thimble-colour-why">' + esc(why) + '</span>' : '') +
       '</span>'
     )
   }
@@ -1576,6 +1694,16 @@
         var picked = c && c.field ? S.picked[c.field] : null
         html += '<div class="thimble-colour-inpick">' + this.picksHtml(v) + (picked && Object.keys(picked).length ? '<button type="button" class="btn btn-ghost btn-sm thimble-colour-repick" data-reset-colours>' + ico('reset') + 'Reset colors</button>' : '') + '</div>'
       }
+    }
+    // the tracks' legends that do not fit the row: each its name, then its values with their counts
+    var tracks = this.tracks || []
+    for (var t = Math.max(0, this.tracksFrom == null ? tracks.length : this.tracksFrom); t < tracks.length; t++) {
+      html += '<div class="thimble-colour-head">' + esc(tracks[t].title) + '</div>'
+      html += tracks[t].values
+        .map(function (tv) {
+          return '<div class="thimble-colour-item thimble-colour-lval"><span class="thimble-colour-sw"' + (tv.colour ? ' style="--c:' + esc(tv.colour) + '"' : '') + '></span><span class="thimble-colour-nm">' + esc(tv.name) + '</span><span class="thimble-colour-n">' + num(tv.n) + '</span></div>'
+        })
+        .join('')
     }
     return html
   }
@@ -1613,7 +1741,10 @@
     var row = function (l) {
       var by = 'l:' + l.id
       var on = keys.indexOf(by) >= 0
-      return '<button type="button" class="thimble-colour-item thimble-colour-label thimble-colour-choice" role="menuitemcheckbox" aria-checked="' + on + '" data-by="' + esc(by) + '" data-label="' + esc(l.id) + '">' + box(on) + choiceBody(l.colour || '', l.name, labelValues(l), track(by)) + '</button>'
+      // a label checked that colors none of the view's units, though it marks records in the view's files (cantColor)
+      var cant = on ? self.cantColor(l.id) : 0
+      var why = cant ? "Can't color these rows: none of them stands for any of the " + num(cant) + (cant === 1 ? ' record' : ' records') + ' it marks.' : ''
+      return '<button type="button" class="thimble-colour-item thimble-colour-label thimble-colour-choice" role="menuitemcheckbox" aria-checked="' + on + '" data-by="' + esc(by) + '" data-label="' + esc(l.id) + '"' + (cant ? ' data-cant-color' : '') + '>' + box(on) + choiceBody(l.colour || '', l.name, labelValues(l), track(by), why) + '</button>'
     }
     // the labels that mark the view's files first
     var here = all.filter(function (l) { return l.here })

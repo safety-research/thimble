@@ -655,6 +655,31 @@ button.thimble-card {
   font: 400 var(--text-mono-sm) / 1 var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
+/* a track's legend after the first choice's chips (viewer_colour.js render): its name in the quiet ink, then its values
+   as key chips that turn nothing off, a hairline before it */
+.thimble-colour-legend {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border-subtle);
+}
+.thimble-colour-legend[hidden] {
+  display: none;
+}
+.thimble-colour-lname {
+  max-width: 160px;
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font: 400 var(--text-xs) / 1 var(--font-body);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.thimble-colour-legend > .chip {
+  flex: none;
+}
 .thimble-colour-more.btn {
   flex: none;
   gap: 4px;
@@ -796,6 +821,21 @@ button.thimble-card {
 .thimble-colour-note {
   padding: 4px 8px 6px 30px;
   color: var(--text-tertiary);
+}
+/* under a label checked that colors none of the rows, why: in the quiet ink, wrapping */
+.thimble-colour-why {
+  color: var(--text-tertiary);
+  font: 400 var(--text-xs) / 1.35 var(--font-body);
+  white-space: normal;
+}
+/* a track's value in "N more": its swatch, its name and its count, which turns nothing off, its swatch in line with the
+   swatches of the first choice's values after their boxes */
+.thimble-colour-item.thimble-colour-lval {
+  padding-left: 30px;
+  cursor: default;
+}
+.thimble-colour-item.thimble-colour-lval:hover {
+  background: transparent;
 }
 .thimble-colour-sep {
   height: 1px;

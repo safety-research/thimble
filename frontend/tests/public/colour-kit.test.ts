@@ -154,6 +154,58 @@ describe('Colour by', () => {
   })
 })
 
+describe('a view whose rows are its own units (bug hunt C13)', () => {
+  // three runs, each a row anchored as a unit of the view; a label over the runs' transcript lines marks 780 records in
+  // the view's files but none a run stands for, and a whole-file label marks two of the runs
+  const FAILING = { id: 'k1', name: 'failing test', on: true, here: true, colour: '#7a5c00', values: [{ name: 'failure', colour: '#7a5c00', highlight: true }], count: 780 }
+  const ADMITS = { id: 'k2', name: 'admits a shortcoming', on: true, here: true, colour: '#8a4a12', values: [{ name: 'admits', colour: '#8a4a12', highlight: true }], count: 40 }
+  const mark = { bar: '#8a4a12', names: ['admits a shortcoming'], values: [{ id: 'k2', label: 'admits a shortcoming', value: 'admits', colour: '#8a4a12' }], spans: [] }
+  async function runs() {
+    const rows = ['r1', 'r2', 'r3'].map((k) => `<div class="run" data-anchor="view:runs/${k}">${k}</div>`).join('')
+    const kept = { v: 1, by: 'l:k1', picks: ['l:k1', 'l:k2'], seen: ['k1', 'k2'], off: {} }
+    const page = `<!doctype html><html><head><script>window.__thimbleColour = ${JSON.stringify(kept)}</script>${script(BRIDGE)}${script(COLOUR)}</head><body><div class="top"><span id="colour"></span></div><div id="list">${rows}</div></body></html>`
+    dom = new JSDOM(page, { runScripts: 'dangerously', pretendToBeVisual: true, url: 'http://view.invalid/' })
+    sent = []
+    dom.window.postMessage = ((msg: Msg) => void sent.push(msg)) as typeof dom.window.postMessage
+    await wait()
+    const c = win().thimble.colorBy({ mount: '#colour', fields: [{ name: 'variant', title: 'Variant' }] })
+    const on = [FAILING, ADMITS].map(({ id, name, colour, values }) => ({ id, name, colour, values }))
+    fromPage({ type: 'thimble:labels', marks: { 'view:runs/r1': mark, 'view:runs/r2': mark }, on, filter: null, all: [FAILING, ADMITS], palette: ['#7a5c00'] })
+    await wait()
+    // the reader's counts for the first label: no run takes its value
+    c.counts({ '': 3 })
+    await wait()
+    return c
+  }
+
+  test('each label checked shows in the legend: the first its chips, each other its name and values with their counts', async () => {
+    const c = await runs()
+    expect(c.picks.map((p: { title: string }) => p.title)).toEqual(['failing test', 'admits a shortcoming'])
+    expect(chips()).toEqual([
+      ['failure', '0', 'true'],
+      ['Not marked', '3', 'true'],
+    ])
+    const tracks = [...doc().querySelectorAll('.thimble-colour-legend')]
+    expect(tracks.map((t) => t.querySelector('.thimble-colour-lname')!.textContent)).toEqual(['admits a shortcoming'])
+    expect([...tracks[0].querySelectorAll('.chip')].map((x) => [x.querySelector('.chip-text')!.textContent, x.querySelector('.chip-count')!.textContent])).toEqual([
+      ['admits', '2'],
+      ['Not marked', '1'],
+    ])
+  })
+
+  test("the menu says a label checked can't color these rows when it marks records in the view's files and no row takes its value", async () => {
+    await runs()
+    ;(doc().querySelector('.thimble-colour-by') as HTMLElement).click()
+    await wait()
+    const row = (id: string) => doc().querySelector(`.thimble-colour-menu [data-by="l:${id}"]`)!
+    expect(row('k1').hasAttribute('data-cant-color')).toBe(true)
+    expect(row('k1').querySelector('.thimble-colour-why')!.textContent).toBe("Can't color these rows: none of them stands for any of the 780 records it marks.")
+    // the label that colors two of the runs says nothing of the kind
+    expect(row('k2').hasAttribute('data-cant-color')).toBe(false)
+    expect(row('k2').querySelector('.thimble-colour-why')).toBeNull()
+  })
+})
+
 describe('the choice thimble keeps for a view', () => {
   test("reaches its page whole, and nothing in it can end the page's script", () => {
     const html = colourScript({ by: 'f:a</script><script>alert(1)</script>', off: {} })
