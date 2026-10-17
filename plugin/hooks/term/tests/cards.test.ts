@@ -250,3 +250,25 @@ test("an example of a wiki save draws its edit summary before its page text, and
   expect(v.lines.at(-1)).toMatchObject({ text: 'change_summary: undo the seed shop advert', hit: true, field: true })
   await ui.unmount()
 })
+
+test('an example of a record whose text holds garbled control characters draws, each such character shown as a visible sign, never raw', { timeoutMs: 30_000 }, async ($, on) => {
+  // text decoded twice leaves C1 controls (U+0080-U+009F) where a character's bytes were; a log line can hold an
+  // escape sequence or a bell: a drawing whose text holds one does not validate, and the card did not draw
+  const w = world(on)
+  const ref = 'revisions.jsonl#L3'
+  const body = 'Plant them\u0080 out after the \u001b[31mlast\u001b[0m frost\u0007 â\u0080\u0099s day\u009d.'
+  const record = { rev_id: 'Beans@2', name: 'Beans', label: 'Rowan', body, change_summary: 'tidy\u0085 up' }
+  w.resolve[ref] = { ref, kind: 'record', path: 'revisions.jsonl', line: 3, record, blocks: [{ kind: 'text', text: body }], excerpt: body, meta: {}, fields: [{ key: 'change_summary', text: record.change_summary }] }
+  w.cells.x0ctrl00 = {
+    id: 'x0ctrl00', notebook: 'g1', kind: 'example', title: "What did Rowan's save on the Beans page say?", labels: [], created_by: 'main', ts: '2026-10-06T10:00:00+00:00',
+    takeaway: 'Rowan planted beans.', payload: { refs: [ref] },
+  }
+  await start($, w)
+  await turn($, w, 'x0ctrl00')
+  const ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
+  const drawn = (((await ui.drawn({ in: 'card-t0-x0ctrl00' })) as { children?: unknown[] }).children ?? []).map(r => shown(r)).join('\n')
+  expect(drawn).toContain('Plant them� out after the ␛[31mlast␛[0m frost␇ ’s day�.')
+  expect(drawn).toContain('tidy� up')
+  expect(drawn).not.toMatch(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/)
+  await ui.unmount()
+})

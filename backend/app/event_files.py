@@ -33,7 +33,6 @@ import contextlib
 import fcntl
 import json
 import os
-import re
 import secrets
 import time
 from pathlib import Path
@@ -47,13 +46,12 @@ TRIM_BYTES = 256 * 1024
 KEEP_S = 24 * 3600.0  # a taken event's lines are dropped this long after it was posted, once the file is trimmed
 MEANWHILE = "meanwhile:"  # events.MEANWHILE
 SAID = "› "  # events.SAID: opens the analyst's own words in an event's line
-# the kinds of event whose line main's terminal leaves out (said): Claude Code draws a hook's systemMessage under the
-# hook's name (`UserPromptSubmit says: …`), a row no render hook reaches, and the terminal's own rows already say these:
-# a thread's question in its fork's row and its `↳` row (thimble-term), a writer's end in its hand-back's row. A thread's
-# event wakes main, whose turn Claude Code opens with a `● thimble` row no hook removes, so it keeps one short line under
-# that row (short_line) rather than none
-TOLD_IN_CHAT = ("thread", "written")
-SHORT_CHARS = 60  # of a thread's question, or of a message to it, in its short line
+# the kinds of event whose line main's terminal prints (said): the analyst's own words to main from the browser (`› how
+# many…`), which nothing else in the chat says. Claude Code draws a hook's systemMessage as a row of its own under the
+# hook's name (`UserPromptSubmit says: …`), which no render hook reaches, and every other event's line said again what a
+# row of the chat says (bug hunt 9, friction 5): a thread's question its fork's row and its `↳` row, a writer's, a view
+# build's or the orientation's end main's `↳` line and the thimble line, a label's run main's reply
+SHOWN_KINDS = ("main", "card")
 SERVER_TAKER = "server"  # the `session` of a {taken} record the server wrote as it took the event into its queue (drain)
 CANCELLED = "cancelled"  # the `session` of a {taken} record for an event the analyst's Stop took back (cancel)
 
@@ -262,38 +260,15 @@ def joined(notes: list[dict[str, Any]]) -> str:
 
 
 def said(notes: list[dict[str, Any]]) -> str:
-    """The lines main's held hook prints in the terminal for these events: joined, those of TOLD_IN_CHAT as their short
-    line, or left out."""
+    """The lines main's held hook prints in the terminal for these events: those of SHOWN_KINDS, the analyst's own words,
+    joined; none for any other event."""
     out = []
     for n in notes:
         kind = str((n.get("meta") or {}).get("kind") or "")
-        line = short_line(n) if kind in TOLD_IN_CHAT else str(n.get("terminal") or "")
+        line = str(n.get("terminal") or "") if kind in SHOWN_KINDS else ""
         if line:
             out.append(line)
     return "\n".join(out)
-
-
-def short_line(note: dict[str, Any]) -> str:
-    """The one short line for an event of TOLD_IN_CHAT: a thread's question in quotation marks (`new thread: "Make a
-    small table card…"`), or a message to a thread after its first question (`thread "Make a small…": "And on 19
-    June?"`); '' for a writer's end, whose hand-back's row says it and which opens no `● thimble` row."""
-    if str((note.get("meta") or {}).get("kind") or "") != "thread":
-        return ""
-    line = str(note.get("terminal") or "").removeprefix(SAID)
-    if line.startswith("new thread: "):
-        return f'new thread: "{_cut(line.removeprefix("new thread: "), SHORT_CHARS)}"'
-    m = re.match(r'^thread (\u201c[^\u201d]*\u201d|"[^"]*"): (.+)$', line)
-    return f'thread {m.group(1)}: "{_cut(m.group(2), SHORT_CHARS)}"' if m else _cut(line, SHORT_CHARS)
-
-
-def _cut(text: str, n: int) -> str:
-    """`text` cut to `n` characters at a word, with an ellipsis right after the last word kept."""
-    text = " ".join(text.split())
-    if len(text) <= n:
-        return text
-    head = text[: n - 1]
-    word = head.rsplit(" ", 1)[0]
-    return (word if len(word) > n // 2 else head).rstrip(" ,;:.") + "\u2026"
 
 
 # --------------------------------------------------------------------------- the queue

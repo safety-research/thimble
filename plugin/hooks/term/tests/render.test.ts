@@ -266,3 +266,27 @@ test("bug hunt C16: a card made and deleted in the same turn is neither drawn (n
   expect(footer).not.toContain('2 cards')
   await ui.unmount()
 })
+
+test('bug hunt J11: a `thimble-run card` of an id main guessed, which the run says the workspace does not have, is neither drawn nor counted', { timeoutMs: 30_000 }, async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  await $.turn.start({ text: 'When do the sessions end?', turnId: 't1' } as never)
+  w.toolText = 'card:d0diag00\n[out0: diagram]'
+  await $.tool.call({ tool: 'mcp__plugin_thimble_thimble__add_card', tool_use_id: 'u1', question: 'q', code: 'df' } as never)
+  // in the same step main runs the card by an id it guessed; the run says there is no such card
+  w.toolText = 'thimble-run: there is no card:session-ends-guess in this workspace'
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'u2', command: 'thimble-run card session-ends-guess' } as never)
+  w.toolText = 'card:d0diag00\n[out0: diagram]'
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'u3', command: 'thimble-run card d0diag00' } as never)
+  await $.session.append({ door: 'response', origin: { kind: 'model', model: 'm' }, uuid: 'r1', message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'Most sessions end in the last hour.' }] } } as never).catch(() => undefined)
+  await $.turn.complete({ turnId: 't1', answer: 'Most sessions end in the last hour.', durationMs: 5, reason: 'answer', isAborted: false } as never)
+  await w.clock.advance(300)
+  const ui = (await $.ui.mount(MESSAGE('r1', 'Most sessions end in the last hour.'))) as unknown as M
+  const json = JSON.stringify(await ui.drawn())
+  expect(json).not.toContain('cannot be drawn')
+  expect(json).toContain('d0diag00')
+  const footer = shown(await ui.find({ key: 'footer-r1' }))
+  expect(footer).toContain('1 card')
+  expect(footer).not.toContain('2 cards')
+  await ui.unmount()
+})

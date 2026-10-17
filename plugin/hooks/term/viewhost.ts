@@ -105,6 +105,52 @@ export function cleanFrame(f: ViewFrame): ViewFrame {
   }
 }
 
+/** The most characters a Client's props may take serialized (Claude Code's `ClientProps.props`): past it the engine
+ *  draws no part of the panel, which stood blank while the view's frame held 280,000 (bug hunt J12). */
+export const CLIENT_PROPS_MAX = 100_000
+
+// the shortest a region's words are cut to before they all go
+const TIP_LEAST = 8
+
+/** The props hooks/viewclient.tsx draws a frame from. */
+export type ViewProps = { lines: Line[]; hits: ViewFrame['hits']; seq: number; cols: number }
+
+/**
+ * A frame's props for its Client, within CLIENT_PROPS_MAX, and what had to go for that ('' for nothing): first the
+ * words the pointer shows, each cut at one length, the most that fits, so short words stay whole and every region keeps
+ * the start of its own (`tips`); then all of them (`tips` too); then the regions (`regions`: clicks do nothing there,
+ * the keys still work); then the last rows (`rows`). So the panel draws the view, never nothing (bug hunt J12). Pure.
+ */
+export function viewProps(f: ViewFrame, cols: number): { props: ViewProps; cut: '' | 'tips' | 'regions' | 'rows' } {
+  const props: ViewProps = { lines: f.lines, hits: f.hits, seq: f.seq, cols }
+  const size = (p: ViewProps) => JSON.stringify(p).length
+  const over = size(props) - CLIENT_PROPS_MAX
+  if (over <= 0) return { props, cut: '' }
+  // the longest words' length L whose cut saves enough, by the characters each cut saves (a cut word ends in `…`)
+  const lens = f.hits.flatMap(h => [...(h.tip !== undefined ? [h.tip] : []), ...(h.tips ?? [])]).map(t => [...t].length)
+  const saved = (n: number) => lens.reduce((a, l) => a + Math.max(0, l - n), 0)
+  let hi = Math.max(0, ...lens)
+  let lo = TIP_LEAST
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2)
+    if (saved(mid) >= over) lo = mid
+    else hi = mid - 1
+  }
+  const words = (t: string, n: number) => ([...t].length > n ? `${[...t].slice(0, n - 1).join('').trimEnd()}…` : t)
+  for (let n = lo; n >= TIP_LEAST; n = Math.floor(n * 0.85)) {
+    const hits = f.hits.map(h => ({ ...h, ...(h.tip !== undefined ? { tip: words(h.tip, n) } : {}), ...(h.tips ? { tips: h.tips.map(t => words(t, n)) } : {}) }))
+    if (size({ ...props, hits }) <= CLIENT_PROPS_MAX) return { props: { ...props, hits }, cut: 'tips' }
+    if (n === TIP_LEAST) break
+  }
+  props.hits = f.hits.map(({ tip: _tip, tips: _tips, ...rest }) => rest)
+  if (size(props) <= CLIENT_PROPS_MAX) return { props, cut: 'tips' }
+  props.hits = []
+  if (size(props) <= CLIENT_PROPS_MAX) return { props, cut: 'regions' }
+  const lines = props.lines.slice()
+  while (lines.length && size({ ...props, lines }) > CLIENT_PROPS_MAX) lines.pop()
+  return { props: { ...props, lines }, cut: 'rows' }
+}
+
 /** The open view's Client could not draw its frame (register.tsx, ui.fault): until the next frame the panel draws
  *  `the view could not draw: <reason>` in its place, dim. */
 export function viewFault(reason: string): void {

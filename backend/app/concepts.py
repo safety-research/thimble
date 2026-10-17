@@ -2689,7 +2689,10 @@ FALLBACK_MESSAGE = "Downgrading {model} to {fallback}"
 LABEL_FAILED_TEXT = "The label {name} failed: {why}."
 LABEL_UNITS_FAILED_TEXT = "The label {name} couldn't label {failed} of {total}: {why}."
 LABEL_NONE_TEXT = "The label {name} found nothing to label. {why}"  # a run over files that keep no record (none_why)
-LABEL_FALLBACK_TEXT = "Claude's safeguards switched {n} of the label {name}'s calls from {model} to {fallback}."
+# the label's name in quotation marks, never run into the sentence (bug hunt J3: "switched 15 of the label purpose of
+# the save's calls"), and what it means for the label: the values those calls gave are its own
+LABEL_FALLBACK_TEXT = ('Claude\'s safeguards answered {n} {calls} of the label "{name}" with {fallback} instead of {model}. '
+                       "The label keeps the values {those} gave.")
 # a run main's quit stopped part way (_keep_quit_stop): {read} of {total} as `8,447 of 14,591 records`
 LABEL_QUIT_TEXT = ("Claude Code quit and stopped the label {name} at {read} of {total}. Its counts are of those {noun} "
                    "only. Run the label again to label all of them.")
@@ -2781,10 +2784,17 @@ def _fallback_notice(c: str, concept: dict, fell_back: dict[tuple[str, str], int
         (refused, fallback), n = max(fell_back.items(), key=lambda kv: kv[1])
         name = str(concept.get("name") or concept["id"])
         notices.post(c, kind="safeguards", key=f"safeguards:label:{concept['id']}", agent=f"Label: {name}",
-                     text=LABEL_FALLBACK_TEXT.format(n=f"{sum(fell_back.values()):,}", name=name,
-                                                     model=model_label(refused), fallback=model_label(fallback)))
+                     text=_fallback_text(sum(fell_back.values()), name, model_label(refused), model_label(fallback)))
     except Exception:  # noqa: BLE001
         log.exception("the safeguards' switch of the label %s was not told", concept.get("id"))
+
+
+def _fallback_text(n: int, name: str, model: str, fallback: str) -> str:
+    """The notice of `n` classifier calls of label `name` that Claude's safeguards answered with `fallback` instead of
+    `model` (LABEL_FALLBACK_TEXT)."""
+    one = n == 1
+    return LABEL_FALLBACK_TEXT.format(n=f"{n:,}", calls="call" if one else "calls", name=name, model=model,
+                                      fallback=fallback, those="that call" if one else "those calls")
 
 
 def _fallback_message(n: int, refused: str, fallback: str) -> str:

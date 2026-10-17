@@ -632,7 +632,7 @@ def stream_files(args: list[str], ws: Path) -> int:
 def held_files(inp: dict, ws: Path) -> int:
     """The held hook on local transport: the session's held events as the prompt's added context, and as its
     systemMessage the lines of the events the waker wrote out, the held events' and those that send main no event,
-    less those the terminal's own rows already say (app/event_files.py TOLD_IN_CHAT). Main's held events name no
+    only the analyst's own words (app/event_files.py SHOWN_KINDS): the chat's rows say the rest. Main's held events name no
     session; a peer's name it."""
     session = str(inp.get("session_id") or "")
     if inp.get("agent_id") or not session:

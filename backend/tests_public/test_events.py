@@ -169,3 +169,21 @@ async def test_i5_a_picture_pasted_into_a_terminal_ask_is_kept_shown_in_its_thre
     got = client.get(f"/api/ws/{CORPUS}/pictures/{rec['images'][0]}")
     assert got.status_code == 200 and got.headers["content-type"] == "image/png" and got.content == shot.read_bytes()
     assert client.get(f"/api/ws/{CORPUS}/pictures/..%2Fconfig.json").status_code == 404
+
+
+async def test_main_s_terminal_prints_the_analyst_s_words_from_the_browser_and_no_line_of_thimble_s_own_events(client):
+    """Bug hunt 9, friction 5: after a press (the server's transport) the held hook printed `› new thread: …`, `The
+    orientation has finished: 3 labels, 8 cards.` and a coverage line no one asked for, which main's reply and the
+    chat's rows say. It prints the analyst's own words alone."""
+    q = Listener(CORPUS)
+    events.post(CORPUS, "orient", {"text": "The orientation has finished: 3 labels, 8 cards.\nCoverage: read 0.1%"},
+                check_kind=False)
+    out = client.post(f"/api/ws/{CORPUS}/events", json={"kind": "main", "payload": {"text": "which pages were deleted?"}}).json()
+    note = q.get_nowait()
+    assert "The orientation has finished" in note["content"], "main still reads the orientation's end"
+    assert note["said"] == "› which pages were deleted?"
+    # the watcher took it and wrote it out: the held hook prints that line alone
+    events._taken[out["id"]] = (CORPUS, q.sid, note, 0.0)
+    await events.ack_route(events.AckBody(cwd="", session=q.sid, id=out["id"], terminal=True))
+    assert events._lines.pop((CORPUS, q.sid)) == [(out["id"], "› which pages were deleted?")]
+    q.close()

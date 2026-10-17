@@ -535,12 +535,10 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   several reports, a line each in their order, only that report's line), so `↳ The view builder finished; …` shows
   once, as the browser shows neither.
 - Claude Code draws a hook's `systemMessage` as its own row under the hook's name (`⎿ UserPromptSubmit says: …`), which
-  no render hook reaches. thimble's held hook prints there the lines of the events that reached main, so in terminal
-  mode it shortens or leaves out those the chat's own rows already say: a thread's question (its fork's row and its `↳`
-  row) is one short line, `new thread: "Make a small table…"`, since its wake opens a `● thimble` row (the hook's
-  rewakeSummary) that no hook removes and that would otherwise stand empty; a writer's end (its hand-back's row) none.
-  The other events' lines (a label run finished, a view built, the orientation's coverage line) still show in that
-  row.
+  no render hook reaches. thimble's held hook prints there only the analyst's own words from the browser (`› which
+  pages were deleted?`), which nothing else in the chat says. It prints no line for thimble's own events (bug hunt 9,
+  friction 5): a thread's question is in its fork's row and its `↳` row, and a writer's, a view build's, a label run's
+  or the orientation's end in main's reply or `↳` line and the thimble line.
 - After `claude` exits, the launcher (not thimble-term) prints `Resume with thimble --continue instead; it loads thimble's
   plugin.` under Claude Code's own `Resume this session with: claude --resume …`, which would resume the session without
   thimble; and
@@ -616,16 +614,28 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   first the fields the claim is about (those holding words the card quotes from the row or a value its takeaway cites
   there, else its words, such as its title or body), each its name dim and its value in quotation marks and italic,
   its line ends kept; then its other fields as `name value · name value` on up to two dim rows, those the card's question
-  and takeaway name first (`merged_by` where it says "merged"). A blank row between records.
+  and takeaway name first (`merged_by` where it says "merged"). A blank row between records. A record's words read
+  back where they were decoded twice, and a control character left in them shows as a sign (`␛`, `␇`, `�` for a C1
+  control), never raw, so the card draws.
 - A plan: per step, its number, its state's glyph (`○` not started dim, `◌` running in the accent, `●` done, `!` needs
   you in red) and its title in bold, the clause before the first colon, its time dim at the right edge; under the
   title, indented to it, the rest of its words in the text color, then what it makes (`→ 7 participant memos`) and its
   agent's note, dim. Every step wraps at the same width, and a blank row stands between steps (the owner, 10-17).
 - A diagram: boxes and edges in the rule gray, node text in the text color, edge labels dim; a note's number in a dim
   column and its text dim.
-- A note, a custom card, a code card and a card type's card: their words. A chart that is not a simple bar or line
-  chart (a bar chart with its values written on its bars is one) or a dots chart: a table of its rows, in the order its axes put them
-  where the chart sorts an axis (a heatmap's days in the order of its `sort`), else in its data's order.
+- A stacked area chart: its bands, each cell's two halves in the hue of the band that holds their middle (`█`, `▀`,
+  `▄`), stacked by the chart's `order` field, else by the series' names, the first lowest; the key in the legend's order.
+- A heatmap: a row per y value, its name at the content's edge, then a cell per x value as wide as the room allows,
+  shaded from the least number to the most (`·░▒▓█`, the least a dim dot, in the first hue), the x values' names under
+  their columns, and the key `0 ·░▒▓█ 0.31  share`. A cell's readout names its row, its column and its number.
+- A faceted chart (`.facet(column=…)`, a `row` or `column` channel, thimble.chart's `panels`): each panel's title in
+  bold over its picture as its kind draws, side by side as many to a row as are 40 cells wide, else one under another;
+  the panels share their scales but those the chart keeps to each panel, every panel of bars lists every label, a value
+  has one hue in all of them, and one key stands under them all. A mark's readout names its panel first.
+- A note, a custom card, a code card and a card type's card: their words. Any other chart: a table of its rows while
+  they are 15 or fewer, in the order its axes put them where the chart sorts an axis, else in its data's order; past
+  that, the note `The terminal cannot draw this chart. The browser shows it.` and a `view in browser ↗` link, never a
+  long table (bug hunt J10).
 - A card that cannot be read: one red line named by its place (`× card 2 cannot be drawn: …`).
 - The card pane: the question is the panel's title and the subtitle reads the card's id (`card:<name>`), its kind, who
   made it, `last run ok` or `last run failed` (in red), and, when its card check ended in an error, `its check's revision would not run` or

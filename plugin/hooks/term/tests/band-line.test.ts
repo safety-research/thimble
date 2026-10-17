@@ -146,6 +146,52 @@ test('nothing is new when `/thimble` turns thimble on and opens home before its 
   await m.unmount()
 })
 
+test('bug hunt J9: until the session reads the workspace, the line says `…` for its counts, never 0', { timeoutMs: 30_000 }, async ($, on) => {
+  const w = panelWorld(on)
+  let release = () => {}
+  w.holdState.home = new Promise<void>(r => (release = r))
+  await start($, w)
+  await w.clock.advance(1100)
+  let m = await band($, 184)
+  const before = await line(m)
+  expect(before).toContain('cards …')
+  expect(before).toContain('labels …')
+  expect(before).not.toMatch(/cards 0|labels 0|threads 0/)
+  await m.unmount()
+  release()
+  await w.clock.settle()
+  await w.clock.advance(1100)
+  await w.clock.settle()
+  m = await band($, 184)
+  expect(await line(m)).toContain('cards 12 threads 2')
+  await m.unmount()
+})
+
+test('bug hunt J9: home opened before the cards are read says so, never `Cards (0)  none`', { timeoutMs: 30_000 }, async ($, on) => {
+  const w = panelWorld(on)
+  let release = () => {}
+  w.holdState.cards = new Promise<void>(r => (release = r))
+  await start($, w)
+  await $.command.run({ command: 'thimble:thimble', args: '' } as never)
+  await w.clock.settle()
+  let pane = (await $.ui.mount(paneAt(96, 60))) as unknown as M
+  const rows = (((await pane.drawn({ in: 'm:home' })) as { children?: unknown[] }).children ?? []).map(r => shown(r).trim())
+  const at = rows.indexOf('Cards')
+  expect(at).toBeGreaterThan(0)
+  expect(rows[at + 1]).toBe('◌ reading')
+  expect(rows.join('\n')).not.toContain('Cards (0)')
+  await pane.unmount()
+  release()
+  await w.clock.settle()
+  await w.clock.advance(1100)
+  await w.clock.settle()
+  pane = (await $.ui.mount(paneAt(96, 60))) as unknown as M
+  const after = (((await pane.drawn({ in: 'm:home' })) as { children?: unknown[] }).children ?? []).map(r => shown(r).trim())
+  expect(after.some(r => /^Cards \(\d+\)/.test(r))).toBe(true)
+  expect(after).not.toContain('◌ reading')
+  await pane.unmount()
+})
+
 test("citations count the session's answers' and its cards' takeaways' citations: a purple `◌` while any is checked, no mark for those that checked out", { timeoutMs: 30_000 }, async ($, on) => {
   const w = panelWorld(on)
   w.t.citeIndex = [{ id: 'c1', raw: CHAT, display: '4579', ref: 'README.md#L3', row: 'r1', at: 1 }]

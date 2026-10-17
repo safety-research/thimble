@@ -120,7 +120,11 @@ them as no cells, so the columns after them stay in place.
 A control under the pointer is drawn inverse. A chart's cells never are, which would turn the chart into a band: a hit
 with `cursor`, and any hit over four or more cells that hold only a chart's glyphs (bars, lines, `×`, a break), marks
 only the pointer's column, `┊` in an empty cell and a bar in the text color, on every chart hit over the same columns
-(the lanes and the range's strip), with that cell's tip.
+(the lanes and the range's strip), with that cell's tip. Chart hits side by side on a row (a lane's minutes, each its
+own `add` with its tip and its `on`) go to the panel as one hit, each cell's words in `tips`, and a click on a cell
+reaches that cell's own `on`. The panel draws a frame as one Client, whose data Claude Code caps at 100,000 characters:
+a frame past it keeps its rows and hits but cuts its tips to one length, then drops them, then its hits, then its last
+rows, so keep tips short.
 
 `width`, `charWidth`, `cut`, `clip`, `prefix`, `oneLine`, `pad`, `padStart`, `wrap`, `num`, `plural`, `when`, `hms`,
 `dayOf`, `dayName`, `dur`, `placeWords` and `placeIn` measure, cut and write text the way thimble-term does: a cut at a

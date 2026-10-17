@@ -76,8 +76,8 @@ Claude Code's panel chrome, no right-click menu.
   · N cards` dim, `· N problems` in red, `ask about this answer ›`. None for the prompts thimble-term gives main itself.
   There is no `open as report`: thimble keeps one document per type, so an answer would replace the report; main's
   `/thimble:write` writes one.
-- **Cards.** Each card a turn of main added or changed (`add_card`, `edit_card`, `apply_label`, `thimble-run card`) is
-  drawn once, under the turn's last reply, in its last state. Every card, wherever it is drawn (under a reply, the card
+- **Cards.** Each card a turn of main added or changed (`add_card`, `edit_card`, `apply_label`, `thimble-run card`; not
+  a run of an id the workspace does not have, which main guessed) is drawn once, under the turn's last reply, in its last state. Every card, wherever it is drawn (under a reply, the card
   pane, the citation panel, a document), has a full round border; inside it, the title in bold, wrapped and never cut (in
   inverse under the pointer, a press asks a side thread), with the card's id dim at the right of its first row
   (`card:<name>`, as its chips read it), one blank row, then the plot or body directly; below the plot the readout (the
@@ -91,7 +91,7 @@ Claude Code's panel chrome, no right-click menu.
   notice that it finished the thread by its first question, and so does the fork's prompt in ctrl+o; a tool's words draw
   their straight quotation marks curly, which Claude Code does not escape; thimble's tool results keep their card ids, which main
   cites. A bar card keeps the order its chart's label axis sorts, and a bar chart with its values written on its bars is a bar card too; a bar chart with a color field has one row per label, its series stacked in their hues and its key below, and timestamps as labels read as the browser's axis writes them (`May 24`). A table, a timeline, a diagram, an example and a label draw
-  directly; a simple bar or line chart draws as text, a dots chart as its rows of dots with a text layer's words beside them; any other chart as a table of its rows; a note, a custom card, a
+  directly; a simple bar or line chart draws as text, a stacked area chart as its bands, a dots chart as its rows of dots with a text layer's words beside them, a heatmap as its grid of shaded cells, and a faceted chart as one of these per panel, side by side where they fit, their scales shared and one key under them; any other chart as a table of its rows while they are few, else as a note that the browser draws it with a `view in browser ↗` link; a note, a custom card, a
   code card and a card type's card as their words.
 - **Rows under main's replies.** `↳ thread · "<the turn's question>" · answered` when a side thread's turn ends while the
   panel shows something else (`failed` in red, `new` in green until it is read; a stop, the analyst's or the end of the
@@ -101,8 +101,8 @@ Claude Code's panel chrome, no right-click menu.
   <name> · building|built|proposed` under the answer that proposed a view (`failed` in red, `new` once built until
   opened).
 - **The thimble line above the prompt**, while thimble is on, after one blank row: `thimble` (its press opens home),
-  then `cards`, `threads`, `citations`, `labels`, `checks` and `coverage` with their counts, a purple `•` for what is
-  new; each name's press opens its section (band.tsx). Side threads have their `↳` rows and thimble's agents Claude
+  then `cards`, `threads`, `citations`, `labels`, `checks` and `coverage` with their counts (`…` dim until the session
+  first read the workspace, which it reads before anything else), a purple `•` for what is new; each name's press opens its section (band.tsx). Side threads have their `↳` rows and thimble's agents Claude
   Code's agent tray, so no row repeats them.
 - **Every row above the prompt is one line**: a dim label column, the words cut with `…` where the acts begin (a press
   shows them whole), the acts at the right in the accent, underlined under the pointer, the main one bold.

@@ -1007,8 +1007,8 @@ export const register: Register = (on, options) => {
 
   // the row saying a side thread's fork finished names the thread by its first question, never the fork's slug. A
   // thimble event's wake-up (.thimble-watch's asyncRewake, summary `thimble`, no task) is no row: a bare `● thimble`
-  // says nothing, and what came in shows in the lines the held hook prints with the turn (`› ` the analyst's words,
-  // `new thread: …`; bug hunt B5); ctrl+o's full view still draws it
+  // says nothing, and what came in shows in the line the held hook prints with the turn (`› ` the analyst's words; bug
+  // hunt B5) or in the chat's own rows; ctrl+o's full view still draws it
   on('ui.render', { component: 'UserMessage', props: { origin: { kind: 'task-notification' } } }, async ($, e, next) => {
     // nor is Claude Code's notice that points at the hand-back of one of thimble's agents, kept as the bridge's note
     // (thimble.ts ownPointer, bug hunt I6)

@@ -99,8 +99,9 @@ export async function openComments(cx: Ctx): Promise<AnswerComment[]> {
   return (await cx.answerComments()).filter(c => c.status !== 'dismissed' && !hiddenComments.has(c.id))
 }
 
-/** What the thimble line's `•` compares, now: each section's total, the threads' unread answers, the checks' comments. */
-async function counts(cx: Ctx): Promise<SummarySeen & { unread: number }> {
+/** What the thimble line's `•` compares, now: each section's total, the threads' unread answers, the checks' comments;
+ *  `known` once the session read the workspace's home (activation's first pass reads it first, term.ts tick). */
+async function counts(cx: Ctx): Promise<SummarySeen & { unread: number; known: boolean }> {
   const home = await cx.home()
   const threads = await cx.threads()
   return {
@@ -112,10 +113,13 @@ async function counts(cx: Ctx): Promise<SummarySeen & { unread: number }> {
     unread: threads.reduce((n, t) => n + Math.max(0, t.unread || 0), 0),
     checks: (await openComments(cx)).length,
     at: await cx.now(),
+    known: home !== null,
   }
 }
 
 export type Section = 'cards' | 'labels' | 'docs' | 'views' | 'threads' | 'checks'
+/** A count of the thimble line not read yet. */
+export const UNKNOWN = '…'
 
 /** These sections' `•` cleared: their counts now are what was seen. */
 export async function markSeen(cx: Ctx, sections: readonly Section[]): Promise<void> {
@@ -268,25 +272,26 @@ export async function summaryItems(cx: Ctx): Promise<SummaryItem[]> {
   const items: SummaryItem[] = []
   const newOf = (k: Section) => Math.max(0, now[k] - seen[k])
   // `name value`, then a `•` when something is new and the item's own marks (`N failed` two cells after what is before
-  // it, as the mockups have it); a zero item dim whole, with no marks
-  const add = (key: string, name: string, n: number, value: string, fresh: boolean, marks: ItemSeg[], press: () => Promise<void>) => {
-    const zero = n === 0
-    const segs: ItemSeg[] = zero ? [{ s: name, dim: true, name: true }, { s: ' ' }, { s: value, dim: true }] : [{ s: name, fg: COLORS.accent, name: true }, { s: ' ' }, { s: value, bold: true }]
+  // it, as the mockups have it); a zero item dim whole, with no marks. Until the session read the workspace's home, its
+  // counts say `…`, dim, never 0 (bug hunt J9: `cards 0 … labels 0` for 20 s after `claude -c`)
+  const add = (key: string, name: string, n: number, value: string, fresh: boolean, marks: ItemSeg[], press: () => Promise<void>, known = true) => {
+    const zero = n === 0 || !known
+    const segs: ItemSeg[] = zero ? [{ s: name, dim: true, name: true }, { s: ' ' }, { s: known ? value : UNKNOWN, dim: true }] : [{ s: name, fg: COLORS.accent, name: true }, { s: ' ' }, { s: value, bold: true }]
     if (!zero && fresh) segs.push({ s: ' ' }, { s: '•', fg: COLORS.cite, bold: true })
     if (!zero) for (const m of marks) segs.push({ s: m.fg === COLORS.problem ? '  ' : ' ' }, m)
     items.push({ key, segs, press, zero, keep: !zero && (fresh || marks.some(m => m.fg === COLORS.problem)) })
   }
-  add('cards', 'cards', now.cards, num(now.cards), newOf('cards') > 0, [], () => openHomeSeen(cx))
+  add('cards', 'cards', now.cards, num(now.cards), newOf('cards') > 0, [], () => openHomeSeen(cx), now.known)
   const threads = (await cx.threads()).length
-  add('threads', 'threads', threads, num(threads), Math.min(now.unread, newOf('threads')) > 0, [], () => openSection(cx, 'threads'))
+  add('threads', 'threads', threads, num(threads), Math.min(now.unread, newOf('threads')) > 0, [], () => openSection(cx, 'threads'), now.known)
   if (f.citationMarks) {
     const c = await citationCounts(cx)
     // no mark for citations that checked out: only a `◌` while any is checked and `N failed` in red
     const marks: ItemSeg[] = [...(c.pending ? [{ s: '◌', fg: COLORS.cite }] : []), ...(c.bad ? [{ s: `${num(c.bad)} failed`, fg: COLORS.problem, bold: true }] : [])]
     add('citations', 'citations', c.all, num(c.all), false, marks, () => openCitations(cx))
   }
-  if (f.labels) add('labels', 'labels', now.labels, num(now.labels), newOf('labels') > 0, [], () => openSection(cx, 'labels'))
-  if (f.checks) add('checks', 'checks', now.checks, num(now.checks), newOf('checks') > 0, [], () => openChecks(cx))
+  if (f.labels) add('labels', 'labels', now.labels, num(now.labels), newOf('labels') > 0, [], () => openSection(cx, 'labels'), now.known)
+  if (f.checks) add('checks', 'checks', now.checks, num(now.checks), newOf('checks') > 0, [], () => openChecks(cx), now.known)
   if (f.coverage) {
     const s = await cx.coverageSummary()
     const read = s ? (s.size && s.size.total > 0 ? s.size.read : s.files.seen) : 0

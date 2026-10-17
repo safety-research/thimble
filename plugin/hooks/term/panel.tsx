@@ -39,12 +39,12 @@ import { fileRef } from './files'
 import { citationOf, placeOf, targetLabel } from './gestures'
 import type { Gesture, Target } from './gestures'
 import { FIRST as HOME_FIRST, HOME_HINTS, NO_FIT_MARK, UNSURE_MARK, groupCards, homeLayout, homePick, homeReduce, labelBlocks, labelHue, labelParts } from './home'
-import type { HomeAct, HomeCardGroup, HomeCite, HomeComment, HomeData, HomeLabel, HomeLayout, HomeOpen, HomeReport, HomeThread, HomeUi, HomeView } from './home'
+import type { HomeAct, HomeCardGroup, HomeCite, HomeComment, HomeData, HomeLabel, HomeLayout, HomeOpen, HomeReport, HomeThread, HomeUi, HomeView, SectionId } from './home'
 import { cardTag, cardsInline, chipLabel, chipWords, cid, clip, cutLine, fmt, formatted, itemsRow, labelRef, middleCut, labelState, labelStateWords, noControls, outputLine, plainMarks, quoted, recordFields, reportRef, stoppedTurn, viewRef, windowAt } from './lib'
 import type { Citation } from './lib'
 import { linesEl, setListKeys, takeListKeys } from './lines'
 import type { LineHit } from './lines'
-import { aroundLine, docUnits, docsOf, labelOf, labelsOf, threadOf } from './model'
+import { aroundLine, docUnits, docsOf, labelOf, labelsOf, stepWords, threadOf } from './model'
 import type { DocFigure, DocSection } from './model'
 import { TITLE_ID, checksOf, commentFacts, commentLines, commentWho, commentsOf, flipResolved, passageWords, pickOf, resolvedShown, setComment, setPick, shownComments, stepPick, unitOf, unitParts } from './report'
 import type { DocComment } from './report'
@@ -62,7 +62,7 @@ import { coverageTitle, openCoverage } from './coverageview'
 import type { LabelPatch } from './term'
 import type { Ctx } from './ctx'
 import { act } from './data'
-import { closeView, onViewAct, openViewState, retryView, sendEvent, viewFaultOf, viewFor } from './viewhost'
+import { closeView, onViewAct, openViewState, retryView, sendEvent, viewFaultOf, viewFor, viewProps } from './viewhost'
 import { openInBrowser } from './offramp'
 import type { ViewFrame } from './viewhost'
 import { ENTRY_KEY, entryEl, entryHeight, entryPrompt } from './entry'
@@ -1351,7 +1351,9 @@ export async function homeData(cx: Ctx): Promise<HomeData> {
   // on Claude Code's main screen, which takes no clicks, the rows above the prompt, first, with their acts on keys (bug
   // hunt F1); in fullscreen they take clicks there, and home leaves them out
   const waiting = classicScreen() ? (await waitItems(cx)).map(w => ({ key: w.key, label: w.label, title: w.name || w.words })) : null
-  return { views, reports, threads, cardGroups, labels, coverage, cites, comments, noLabels: !f.labels, waiting }
+  // a list not read yet says so, not `none` (bug hunt J9)
+  const reading: SectionId[] = [...(canvas === undefined ? (['cards'] as const) : []), ...(labelsRaw === undefined ? (['labels'] as const) : [])]
+  return { views, reports, threads, cardGroups, labels, coverage, cites, comments, noLabels: !f.labels, waiting, ...(reading.length ? { reading } : {}) }
 }
 
 /** The labels as home and the labels list draw them (home.ts labelBlocks): each with its values' counts and colors, its
@@ -4158,9 +4160,7 @@ async function drawAgent(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   let why = ''
   for (const ev of tt?.events ?? []) {
     if (ev.type === 'tool_use') {
-      const inp = isObj(ev.input) ? ev.input : {}
-      const what = str(inp.question ?? inp.command ?? inp.file_path ?? inp.pattern ?? inp.name ?? inp.description ?? '')
-      steps.push(await scrubIds(cx, `${str(ev.name).replace(/^mcp__.*__/, '')}${what ? ` · ${what.replace(/\s+/g, ' ')}` : ''}`))
+      steps.push(await scrubIds(cx, stepWords(str(ev.name), ev.input)))
       text = ''
     } else if (ev.type === 'text' && ev.api_error) raw = str(ev.delta ?? ev.text)
     else if (ev.type === 'text') text += str(ev.delta ?? ev.text)
@@ -4311,6 +4311,10 @@ async function retryPage(cx: Ctx, v: HomeView): Promise<void> {
   cx.toast('building the terminal page again')
 }
 
+/** What the view page says under a frame too large for the panel to draw whole (viewhost.ts viewProps). */
+export const VIEW_CUT_REGIONS = 'This page is too large for clicks in the terminal; its keys work. o opens it in the browser.'
+export const VIEW_CUT_ROWS = 'This page is too large to draw whole in the terminal. o opens it in the browser.'
+
 /** One view (docs/terminal-views.md): a view with a terminal page is drawn by its program (hooks/viewhost.ts) under
  *  the panel's header, its subtitle the facts the program gives, its hint row the keys it binds; its keys reach it
  *  through the list's relay (↑↓, Enter, Space, Backspace) and as hotkeys (a letter, a digit, a sign), every key while a
@@ -4387,9 +4391,13 @@ async function drawView(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   // above them in `body` takes, the hotkeys taking none (hiddenKeys); a frame its Client could not draw (register.tsx
   // ui.fault) is one dim row saying why, until the view draws another
   viewAtDrawing = { top: 1 + body.length, offset: e.props.scroll?.offset ?? 0, seq: f.seq }
+  // its props within what a Client takes, or the engine draws no part of the panel (bug hunt J12): a frame too large
+  // leaves out its cells' words first, then its regions, then its last rows, and a dim row says what that costs
   const fault = viewFaultOf(f.seq)
+  const fit = viewProps(f, cols + MARGIN_W)
   if (fault) body.push(<Text key="view-fault" dimColor wrap="truncate-end">{`the view could not draw: ${fault}`}</Text>)
-  else body.push(<Client key={marginKey('view-frame')} module="./viewclient.tsx" width={cols + MARGIN_W} height={Math.max(1, f.lines.length)} props={JSON.parse(JSON.stringify({ lines: f.lines, hits: f.hits, seq: f.seq, cols: cols + MARGIN_W })) as never} />)
+  else body.push(<Client key={marginKey('view-frame')} module="./viewclient.tsx" width={cols + MARGIN_W} height={Math.max(1, fit.props.lines.length)} props={JSON.parse(JSON.stringify(fit.props)) as never} />)
+  if (!fault && (fit.cut === 'regions' || fit.cut === 'rows')) body.push(<Text key="view-cut" dimColor wrap="truncate-end">{fit.cut === 'rows' ? VIEW_CUT_ROWS : VIEW_CUT_REGIONS}</Text>)
   if (ov.error) body.push(<Text key="view-error" color={COLORS.problem} wrap="truncate-end">{`× ${ov.error}`}</Text>)
   // a sign's key works only from the relay's field, so its hint shows only while the ring rests there
   const isSign = (k: string) => [...k].length === 1 && !/[a-z0-9]/.test(k)

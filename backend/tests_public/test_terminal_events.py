@@ -31,18 +31,25 @@ def ws(workspaces_tmp):
     return path
 
 
-def test_the_watcher_takes_each_event_once_in_order_and_the_held_hook_prints_each_line_once(ws):
+def test_the_watcher_takes_each_event_once_in_order_and_the_held_hook_prints_only_the_analyst_s_words_once(ws):
+    """Main's terminal prints the analyst's own words from the browser, each once, and no line of thimble's own events
+    (bug hunt 9, friction 5: `UserPromptSubmit says: new thread …`, `The orientation has finished: … / Coverage: …`):
+    main's reply, a fork's row or a `↳` row says those."""
     a = events.post(CORPUS, "label_done", {"text": "first", "name": "a"}, check_kind=False)
-    b = events.post(CORPUS, "rerun", {"text": "second", "name": "b"}, check_kind=False)
-    assert [r["id"] for r in event_files.waiting(ws)] == [a["id"], b["id"]]
+    events.post(CORPUS, "orient", {"text": "The orientation has finished: 3 labels, 8 cards.\nCoverage: read 0.1%"},
+                check_kind=False)
+    b = events.post(CORPUS, "main", {"text": "what kinds of pages did the admin delete?"}, check_kind=False)
+    c = events.post(CORPUS, "rerun", {"text": "second", "name": "b"}, check_kind=False)
+    assert [r["id"] for r in event_files.waiting(ws)] == [a["id"], b["id"], c["id"]]
     assert event_files.take(ws, MAIN)["id"] == a["id"]
-    assert event_files.unshown(ws, MAIN) == ["label finished: a"]
-    assert event_files.unshown(ws, MAIN) == [], "a line is printed once"
+    assert event_files.unshown(ws, MAIN) == [], "a label's run: main's reply says it"
     events.show(CORPUS, "› follow-up to the orientation: and April?")
     assert event_files.take(ws, MAIN)["id"] == b["id"]
+    assert event_files.take(ws, MAIN)["id"] == c["id"]
     assert event_files.take(ws, MAIN) is None
-    assert event_files.unshown(ws, MAIN) == ["› follow-up to the orientation: and April?", "cards run again: label b changed"]
-    assert event_files.unshown(ws, MAIN) == []
+    assert event_files.unshown(ws, MAIN) == ["› follow-up to the orientation: and April?",
+                                             "› what kinds of pages did the admin delete?"]
+    assert event_files.unshown(ws, MAIN) == [], "a line is printed once"
 
 
 def test_a_take_from_two_processes_at_once_hands_each_event_to_one(ws):

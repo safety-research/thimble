@@ -25,14 +25,14 @@ test("a pandas table's html is a table card: the index named, numbers as numbers
   expect(htmlTable('<p>no table</p>')).toEqual([])
 })
 
-test('a one-layer Altair bar chart draws as text bars; a faceted one as a table of its rows', () => {
+test('a one-layer Altair bar chart draws as text bars; a faceted one as a panel of bars per value (bug hunt J10)', () => {
   const bar = cardOfCell(of('b0bar000')).card
   expect(bar.kind).toBe('bar')
   expect((bar.rows as BarRow[])[0]).toEqual({ label: 'dse', value: 13403, group: '' })
   expect(text('b0bar000').some(l => /dse +█+ +13,403/.test(l))).toBe(true)
   const facet = cardOfCell(of('c5466383')).card
-  expect(facet.kind).toBe('table')
-  expect(facet.columns).toEqual(['day', 'event_type', 'rows'])
+  expect(facet.kind).toBe('panels')
+  expect(facet.panels!.map(p => [p.title, p.card.kind])).toEqual([['probe', 'bar'], ['save', 'bar']])
 })
 
 test('a bar chart whose field names hold a dot draws as bars: its fields escaped as Altair writes them match their columns', () => {
@@ -88,7 +88,7 @@ test("a dots chart draws as its rows of dots on one x axis, the agents a text la
   expect(lines.join('\n')).not.toContain('fable-emergent  2')
 })
 
-test("a heatmap's rows as a table: in its axes' order, its days by the chart's sort, not as text sorts them", () => {
+test("a heatmap's cells in its axes' order, its days by the chart's sort, not as text sorts them", () => {
   // README capture 10-17: days grouped as text ("Jul 01" before "Jun 01" before "May 24") under `sort=days`
   const rows = [
     { day: 'Jul 01', who: 'b', n: 4 },
@@ -98,8 +98,8 @@ test("a heatmap's rows as a table: in its axes' order, its days by the chart's s
   ]
   const heat = { mark: 'rect', encoding: { x: { field: 'day', type: 'ordinal', sort: ['May 24', 'Jun 18', 'Jul 01'] }, y: { field: 'who', type: 'nominal', sort: ['a', 'b'] }, color: { field: 'n', type: 'quantitative' } }, data: { values: rows } }
   const { card } = cardOfCell({ ...of('b0bar000'), id: 'h0heat00', outputs: [{ 'application/vnd.vegalite.v6.json': heat }] } as ThimbleCell)
-  expect(card.kind).toBe('table')
-  expect((card.rows as Cell[][]).map(r => `${r[0]} ${r[1]}`)).toEqual(['May 24 a', 'Jun 18 a', 'Jun 18 b', 'Jul 01 b'])
+  expect(card.kind).toBe('heat')
+  expect(card.grid).toMatchObject({ xs: ['May 24', 'Jun 18', 'Jul 01'], ys: ['a', 'b'], v: [[35, 585, null], [null, 9, 4]] })
 })
 
 test('a diagram from its payload (from and to) and a timeline from its output draw directly', () => {
