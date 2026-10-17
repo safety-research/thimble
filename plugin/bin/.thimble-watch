@@ -31,6 +31,8 @@ the gate, since only main's Monitor and the sessions of an extension's program r
     .thimble-watch --subagent-start     the SubagentStart hook: registers one of thimble's agents or a descendant
     .thimble-watch --subagent-stop      the SubagentStop hook: a registered agent's turn ended
     .thimble-watch --caller             the PreToolUse hook of thimble's tools: which agent makes the call
+    .thimble-watch --handback           the PreToolUse hook of SubagentHandback: takes the report of a check's or the
+                                        card check's agent and refuses the call, so it never reaches main
     .thimble-watch --denied             the PermissionDenied hook: auto mode refused a start or a message (R1)
     .thimble-watch --end                the SessionEnd hook: main's end
     .thimble-watch --rekey              the SessionStart hook for clear and resume: the session marker and the agents
@@ -42,7 +44,8 @@ the gate, since only main's Monitor and the sessions of an extension's program r
     .thimble-watch --stream --cwd <folder> --session <id>
                                         the Monitor route
 
-The hooks of thimble's agents (--agent-check, --subagent-start, --subagent-stop, --caller, --denied, --end, --rekey)
+The hooks of thimble's agents (--agent-check, --subagent-start, --subagent-stop, --caller, --handback, --denied, --end,
+--rekey)
 write their record to the workspace's files first, under a file lock (app/subagent_files.py: subagents.json and
 callers.jsonl), and post to the server only when server.json names one; --agent-check decides from subagents.json alone.
 They find the workspace from the session's folder as the server does, importing app/subagent_files.py from the tree
@@ -57,6 +60,16 @@ The hook long-polls the server for the session's next event (GET /api/events/pul
 subagent, when another watcher holds the session's lock, when no server listens at first, on 404/410 (STOP), when the
 `claude` process has moved to another session (/clear), and when that process has exited. A server that has answered
 once is waited for across restarts.
+
+The hand-back hook runs on auto mode's SubagentHandback calls, and hooks.json starts it only for an agent of type
+thimble:check or thimble:call (a match on the hook's input in the shell, before Python starts). For such an agent that
+thimble's module started, it records the call's report on the agent's registry entry (app/subagent_files.py
+record_handback), refuses the call with `continue` false, which ends the agent's turn at once, without the requests
+Claude Code otherwise spends asking the agent to hand back again, and then tells the server (POST
+/api/subagents/handback), or on local transport starts the backend's call, which ends the run with that report. So the
+report never enters main's queue, where the terminal UI would drop it with a row of its own. It refuses nothing when the
+record cannot be written, and leaves every other agent's hand-back alone: the orientation's, a writer's or the critic's
+reach their caller, and a check that main's own Agent call started (run_check) reports to main.
 
 The permission hook only tells the server, after a press, that a prompt waits (POST /api/events/permission, which shows
 it on main's card without buttons), and prints nothing: thimble makes no allow decision, and Claude Code asks in its own
@@ -869,6 +882,35 @@ def caller(inp: dict) -> int:
     return 0
 
 
+# the reason the hand-back hook gives its refusal when prompts/tools.md has none (`## handback-taken`)
+HANDBACK_TAKEN = "thimble already has your report. Stop now and write nothing more."
+
+
+def handback(inp: dict) -> int:
+    """The hand-back hook (module note)."""
+    try:
+        sf, ws = workspace(inp)
+        if ws is None:
+            return 0
+        with sf.update(ws) as state:
+            entry = sf.record_handback(state, inp)
+        if entry is None:
+            return 0
+        term = on_local(sf, ws, inp)
+    except Exception:  # noqa: BLE001 — the hand-back goes on to main, where the terminal UI drops it
+        return 0
+    reason = sf.hint("handback-taken") or HANDBACK_TAKEN
+    print(json.dumps({"continue": False, "stopReason": reason,
+                      "hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                             "permissionDecisionReason": reason}}))
+    sys.stdout.flush()
+    if term:
+        spawn_local("handback", inp)
+    else:
+        post("/api/subagents/handback", {"cwd": folder(inp), "hook": inp})
+    return 0
+
+
 def parent_of(inp: dict, agent: str) -> str:
     """`parentAgentId` in the agent's meta.json, beside its transcript under main's session folder."""
     main = str(inp.get("transcript_path") or "")
@@ -1265,7 +1307,8 @@ def stream(args: list[str]) -> int:
 
 
 FILE_FIRST = {"--agent-check": agent_check, "--subagent-start": subagent_start, "--subagent-stop": subagent_stop,
-              "--caller": caller, "--denied": denied, "--end": end, "--rekey": rekey, "--agents": agents_hook}
+              "--caller": caller, "--handback": handback, "--denied": denied, "--end": end, "--rekey": rekey,
+              "--agents": agents_hook}
 
 
 def main() -> int:
