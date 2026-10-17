@@ -34,7 +34,7 @@ async def call(name: str, **args):
 
 
 def _body(res) -> str:
-    return res.text.partition("\n")[2]
+    return res.text
 
 
 def _events() -> list[dict]:

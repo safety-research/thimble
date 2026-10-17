@@ -82,7 +82,7 @@ async def test_edit_card_changes_statuses_and_stamps_their_times(group):
     cid = await _plan(group)
     res = await call("edit_card", group, card=f"card:{cid}", steps=_with(1, status="running", runs=["Mirror pandas"]))
     assert not res.is_error, res.text
-    assert res.text.splitlines()[1] == f"card:{cid}"
+    assert res.text.splitlines()[0] == f"card:{cid}"
     s1 = notebook.plan_steps(_cell(cid))[0]
     assert s1["status"] == "running" and s1["started"] and s1["ended"] is None and s1["runs"] == ["Mirror pandas"]
     started = s1["started"]

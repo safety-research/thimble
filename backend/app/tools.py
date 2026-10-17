@@ -9,8 +9,8 @@ process (local transport) or posts it to `POST /api/tools/{name}` after the pres
 feature the analyst turned off (FEATURE_TOOLS) stays listed and refuses with one line (call). Its THIMBLE_SESSION
 (Ctx.session) says which session called: none for main, `orient`,
 `writer:<doc>`, `critique:orient` or `check:<id>:<doc>`. Tools whose machinery lives elsewhere run `tool_<name>(ctx,
-args)` in that module. Every result starts with the call as run (call_line); a card's result shows the first lines of
-each output, a chart as the rows it draws, and hint lines from prompts/tools.md. The card tools also answer to the
+args)` in that module. A result does not echo the call, which the model and the terminal have already; a card's
+result shows the first lines of each output, a chart as the rows it draws, and hint lines from prompts/tools.md. The card tools also answer to the
 alias names of the cell tools and `cell:` refs (Spec.aliases, ARG_ALIASES, cite.CARD_PREFIXES)."""
 from __future__ import annotations
 
@@ -81,13 +81,13 @@ RESULT_LINES_KEY = "run_cell_result_lines"  # settings.json; a persisted key, no
 CELL_READ_LIMIT = 40_000
 WARM_REFS_MAX = 20  # an example's quoted refs a view reads, resolved off the loop before add_card or edit_card reads them
 LINE_LIMIT = 160  # chars of a takeaway / md text on a `cells` line
-CALL_ARG_CHARS = 80  # chars of one argument on a result's `$` line (call_line)
+CALL_ARG_CHARS = 80  # chars of a value _cut keeps
 # of one read_ref result, in UTF-16 code units (read_parts.units), so that it stays whole in the session that reads it:
 # Claude Code (2.1.300) saves a tool result of more than 50,000 characters to a file and shows the model a 2KB preview
 # of it, and an MCP result its estimate (4 characters a token) puts past 12,500 tokens is counted, and past 25,000
 # tokens (MAX_MCP_OUTPUT_TOKENS) saved to a file in its place. read_parts.READ_UNITS is under the first and never
-# counted, whatever the text; this leaves room in it for the call line (call_line, `$ read_ref ref="…"`) that comes
-# first.
+# counted, whatever the text; this keeps the room 0.8.0 left for the call line results no longer start with, so a
+# result is cut where it was.
 READ_REF_UNITS = read_parts.READ_UNITS - 2 * CALL_ARG_CHARS - 40
 TAKEAWAY_AUTHOR = "model"  # cell.takeaway_author for a takeaway written with edit_card (the analyst's is `analyst`)
 TAKEAWAY_WORDS = 40  # the words a takeaway may run to, which the `## takeaway-long` line of prompts/tools.md states
@@ -113,6 +113,20 @@ ENTRY_TOOL = "load_thimble"
 SEARCH_HINT = "card plan chart table label classify records thimble"
 META_ALWAYS_LOAD = "anthropic/alwaysLoad"  # a listed tool's `_meta` key: loaded (true) or deferred (false or absent)
 META_SEARCH_HINT = "anthropic/searchHint"  # a listed tool's `_meta` key: the words ToolSearch matches
+# The tools main's shim lists loaded, with their schemas in every request: those an analysis answer uses (cards, reads,
+# labels) and a thread's reply. Main's shim lists every other tool deferred (alwaysLoad false), so Claude Code shows main
+# its name and loads it through ToolSearch when main first wants it; main.md's `thimble's other tools` says when.
+ALWAYS_LOADED = ("read_ref", "list_cards", "add_card", "edit_card", "apply_label", "reply_in_thread")
+
+
+def deferred_in_main(name: str | None) -> bool:
+    """Whether the analyst's session lists the tool `name` deferred (ALWAYS_LOADED): a tool main may call that is not
+    one of ALWAYS_LOADED. A tool only thimble's agents call stays loaded wherever a shim lists it, since its agent
+    calls it at once."""
+    spec = REGISTRY.get(str(name or ""))
+    return spec is not None and (not spec.sessions or None in spec.sessions) and spec.name not in ALWAYS_LOADED
+
+
 # the tools a feature switch turns off (features.py), by the switch: they stay listed, since thimble's agents share
 # main's listing, and a call refuses with the tool's `## <tool>-off` hint (call)
 FEATURE_TOOLS = {"apply_label": "labels", "run_check": "checks"}
@@ -377,16 +391,35 @@ def session_kind(session: str | None) -> str | None:
     return str(session).split(":", 1)[0] or None if session else None
 
 
+def private(spec: Spec) -> bool:
+    """Whether only thimble's agents call the tool: `sessions` of its own that leave main out (critique, view_check …)."""
+    return bool(spec.sessions) and None not in spec.sessions
+
+
 def list(role: str = ANALYST, session: str | None = None) -> "builtins.list[dict[str, Any]]":  # noqa: A001 — the contract names it `tools.list`
     """[{name, description, input_schema}] for the tools the role may use in the session `session` (a THIMBLE_SESSION),
-    in registry order, ENTRY_TOOL left out (entry_listing). A tool with `sessions` of its own is listed in those alone,
-    but main's shim (no session) lists them all, since thimble's agents are main's subagents and call through it: each
-    agent's registration takes away the tools that are not its own, and a call is refused when its caller may not make
-    it (call_route)."""
+    in registry order, ENTRY_TOOL left out (entry_listing). A tool with `sessions` of its own is listed in those alone.
+    Main's shim (no session) lists every tool but the private ones (private), since thimble's agents are main's
+    subagents and call through it: each agent's registration takes away the tools that are not its own, and a call is
+    refused when its caller may not make it (call_route). An agent's private tools come from a shim of its own that its
+    registration declares (private_list, subagents.private_server)."""
     role_of(role)
     kind = session_kind(session)
     names = [s.name for s in REGISTRY.values() if role in s.roles and s.name != ENTRY_TOOL
-             and (kind is None or not s.sessions or kind in s.sessions)]
+             and (not private(s) if kind is None else (not s.sessions or kind in s.sessions))]
+    secs = tool_sections(names)
+    return [{"name": n, "description": secs[n][0], "input_schema": secs[n][1]} for n in names]
+
+
+def private_names(kind: str | None) -> "builtins.list[str]":
+    """The private tools (private) of the agents of session kind `kind`, in registry order."""
+    return [s.name for s in REGISTRY.values() if kind and private(s) and kind in s.sessions]
+
+
+def private_list(kind: str | None) -> "builtins.list[dict[str, Any]]":
+    """list's entries for the private tools of session kind `kind`: what the shim an agent's registration declares
+    lists (plugin/bin/thimble-mcp --private <kind>)."""
+    names = private_names(kind)
     secs = tool_sections(names)
     return [{"name": n, "description": secs[n][0], "input_schema": secs[n][1]} for n in names]
 
@@ -683,7 +716,7 @@ async def call(c: str, name: str, args: dict[str, Any] | None, *, actor: str = A
     name = canonical(name)
     spec = REGISTRY[name]
     if (off := feature_refusal(c, name)) is not None:  # a feature the analyst turned off (FEATURE_TOOLS)
-        return with_call_line(name, args, err(off))
+        return err(off)
     # a follow-up of the orientation is one change the analyst asked for, so its steps are one undo (undo.batching)
     batch = None
     if session_kind(session) == ORIENT_SESSION:
@@ -694,12 +727,16 @@ async def call(c: str, name: str, args: dict[str, Any] | None, *, actor: str = A
     with undo.batching(batch), undo.acting_session(session):
         with canvas_history.acting(Ctx(c, actor, notebook, terminal, anchor, chat, session).cell_author):  # who changed a card
             res = await _run(spec, c, name, args, actor, notebook, terminal, anchor, chat, session, tool_use_id)
+        # the later parts of main's guidance that this call's feature uses, on its first use (disclose.py)
+        from . import disclose  # noqa: PLC0415
+
+        res = disclose.after_call(c, name, args, res, session, tool_use_id)
         # the card check (card_check.py): a card add_card or edit_card wrote is drawn and read once it has its
         # takeaway; nothing of the check joins this result
         from . import card_check  # noqa: PLC0415 — card_check imports the harness
 
         res = await card_check.after_tool(c, name, args, res, session=session, anchor=anchor)
-    return with_call_line(name, args, res)
+    return res
 
 
 async def _run(spec: Spec, c: str, name: str, args: dict[str, Any] | None, actor: str, notebook: str | None, terminal: bool,
@@ -727,39 +764,8 @@ async def _run(spec: Spec, c: str, name: str, args: dict[str, Any] | None, actor
         return err(f"{name} failed: {type(e).__name__}: {e}")
 
 
-def call_line(name: str, args: dict[str, Any] | None) -> str:
-    """The first line of every result, the call as run, the way a shell echoes a command: `$ add_card kind=plot
-    question="..."`, strings quoted and cut to CALL_ARG_CHARS, other values as compact JSON."""
-    parts = [f"$ {name}"]
-    for k, v in (args or {}).items():
-        if v is None or not isinstance(k, str):
-            continue
-        if isinstance(v, str):
-            body = json.dumps(v, ensure_ascii=False)[1:-1]
-            parts.append(f'{k}="{_cut(body)}"')
-        elif isinstance(v, bool) or isinstance(v, (int, float)):
-            parts.append(f"{k}={json.dumps(v)}")
-        else:
-            try:
-                parts.append(f"{k}={_cut(json.dumps(v, ensure_ascii=False, separators=(',', ':'), default=str))}")
-            except (TypeError, ValueError):
-                parts.append(f"{k}={_cut(str(v))}")
-    return " ".join(parts)
-
-
 def _cut(s: str, n: int = CALL_ARG_CHARS) -> str:
     return s if len(s) <= n else s[: n - 1].rstrip() + "…"
-
-
-def with_call_line(name: str, args: dict[str, Any] | None, res: ToolResult) -> ToolResult:
-    """`res` with call_line(name, args) as its first line, ahead of the first text block (or as a new one)."""
-    line = call_line(name, args)
-    for b in res.content:
-        if b.get("type") == "text":
-            b["text"] = f"{line}\n{b.get('text', '')}" if str(b.get("text", "")) else line
-            return res
-    res.content.insert(0, {"type": "text", "text": line})
-    return res
 
 
 # --------------------------------------------------------------------------- shared helpers

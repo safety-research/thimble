@@ -150,7 +150,8 @@ def test_the_hooks_json_runs_each_new_mode():
     assert any(c.endswith("--subagent-stop") for _, c in commands("SubagentStop"))
     assert not any("--proxy-stop" in c for _, c in commands("SubagentStop"))
     assert ("Agent|Task|SendMessage", '"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch" --agent-check') in commands("PreToolUse")
-    assert any(m == "mcp__plugin_thimble_thimble__.*" and c.endswith("--caller") for m, c in commands("PreToolUse"))
+    assert any(m == "mcp__plugin_thimble_thimble__.*|mcp__thimble-[a-z-]+__.*" and c.endswith("--caller")
+               for m, c in commands("PreToolUse")), "the caller hook runs on main's shim's tools and an agent's own shim's"
     assert any(c.endswith("--denied") for _, c in commands("PermissionDenied"))
     assert any(c.endswith("--end") for _, c in commands("SessionEnd"))
     assert [e["hooks"][0]["timeout"] for e in hooks["SessionEnd"]] == [5]

@@ -1,7 +1,7 @@
 """A writer: `thimble:writer`, a subagent of the analyst's Claude Code session for one document (subagents.py).
 
-Its registration (definition) is prompts/writer.md with thimble's shared guidance (preamble.md and shared.md, rendered
-for the workspace as the shared skill printed them before 0.9.0; shared_guidance) at its end, the `writer` role's model
+Its registration (definition) is prompts/writer.md, whose body opens with preamble.md, with thimble's shared guidance
+(shared.md rendered for the workspace; shared_guidance) at its end, the `writer` role's model
 and effort from Settings, and of thimble's tools OWN_TOOLS. Its run's prompt names its task and its
 context, writers/<doc>/context.md, that holds the whole context (context.render, CONTEXT_CHARS) followed by the task,
 which it reads first; a context too large for one Read call is written as several files (read_parts), each small enough
@@ -59,19 +59,23 @@ def first_message(c: str, t: dict[str, Any], request: str = "", after: str = "")
     return context.render(c, task_text(t, request, after), budget=CONTEXT_CHARS, focus=(f"report:{t['slug']}",))
 
 
+SHARED = ("shared",)  # the shared guidance's prompts (shared_guidance): the body of writer.md and critic.md opens with preamble.md
+
+
 def shared_guidance(c: str) -> str:
     """thimble's shared guidance for an agent of workspace `c` that does not get it from main's prompt (the writer, the
-    critic): preamble.md and shared.md rendered for the corpus folder, with its view citation forms and card types, as
-    `thimble prompt preamble shared` prints them, with the analyst's feature switches (features.flags)."""
+    critic): shared.md rendered for the corpus folder, with its view citation forms and card types, as `thimble prompt
+    shared` prints it, with the analyst's feature switches (features.flags). preamble.md is not repeated: the agent's
+    own body opens with it."""
     from . import events, prompts  # noqa: PLC0415
 
     from . import features  # noqa: PLC0415
 
     folder = str(config.corpus_dir(c))
     if not hasattr(prompts, "TARGETS"):  # STUB(core): 0.8.0's prompts.py renders modes, not the guide's flags
-        return events.render_prompts(("preamble", "shared"), folder)
+        return events.render_prompts(SHARED, folder)
     with prompts.rendering(features.flags(c)):
-        return events.render_prompts(("preamble", "shared"), folder)
+        return events.render_prompts(SHARED, folder)
 
 
 def definition(c: str) -> dict[str, Any]:

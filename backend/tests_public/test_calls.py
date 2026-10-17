@@ -57,10 +57,10 @@ def _store(command: Any, output: str) -> str:
 
 
 async def _read(ref: str) -> str:
-    """read_ref's result for `ref` as the session reads it, its call line first, which stays within what Claude Code
-    returns to the model whole."""
+    """read_ref's result for `ref` as the session reads it, which stays within what Claude Code returns to the model
+    whole."""
     r = await tools.call(CORPUS, "read_ref", {"ref": ref})
-    assert not r.is_error and r.text.startswith('$ read_ref ref="'), r.text[:200]
+    assert not r.is_error and not r.text.startswith("$ "), r.text[:200]
     assert read_parts.units(r.text) <= read_parts.READ_UNITS, f"{ref}: {read_parts.units(r.text):,} code units"
     return r.text
 

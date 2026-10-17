@@ -172,12 +172,14 @@ def workspace(cwd: str | None) -> str | None:
 
 async def call(name: str, args: dict[str, Any], *, cwd: str, session: str | None = None,
                session_token: str | None = None, tool_use_id: str | None = None,
-               caller: str | None = None) -> dict[str, Any]:
+               caller: str | None = None, secondary: bool = False) -> dict[str, Any]:
     """One tool call in this process: {content, is_error}, the shape the server's tool route answers with
     (tools.call_route). The session is believed as the route believes it: with a token that proves it, else the call
     runs as main's, attributed to the agent of thimble's that made it (tools._as_caller). The analyst's session that
     makes the call (`caller`, else session_here) is refused with TAKEOVER_LINE when another session took main from it
-    (launch.json `moved`)."""
+    (launch.json `moved`). A `secondary` process, an agent's own shim (plugin/bin/thimble-mcp --private), never makes
+    the shim's start (_start), whose marks of what an earlier session left running would mark main's shim's running
+    work."""
     from . import hook_auth, subagent_files, tools  # noqa: PLC0415
 
     if not tools.known(name):
@@ -189,7 +191,8 @@ async def call(name: str, args: dict[str, Any], *, cwd: str, session: str | None
         who = caller or session_here()
         if who and who in subagent_files.moved(config.workspace_path(c)):
             return tools.err(TAKEOVER_LINE.format(name=name)).as_dict()
-    _start(c)
+    if not secondary:
+        _start(c)
     session = session or None
     if session and not hook_auth.session_proven(c, session, session_token or ""):
         if session_token:

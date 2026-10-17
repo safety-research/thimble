@@ -359,6 +359,10 @@ def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind
         note = build_note(kind, event_id, words or describe(kind, payload), payload,
                           cap=None if kind == START_AGENT else BODY_CHARS)
     note["terminal"] = terminal_line(kind, words, payload) if line is None else line
+    if to is None:  # the later parts of main's guidance that its first event of this kind uses (disclose.py)
+        from . import disclose  # noqa: PLC0415
+
+        note = disclose.with_event(c, kind, note, kind in QUIET_KINDS)
     if to:
         out["session"] = to
     if kind in QUIET_KINDS:
@@ -465,8 +469,11 @@ def pop_held(c: str) -> list[dict[str, Any]]:
 
 
 def meanwhile(notes: list[dict[str, Any]]) -> str:
-    """Held events as MEANWHILE and one line each; '' for none."""
-    return "\n".join([MEANWHILE, *(held_line(h) for h in notes)]) if notes else ""
+    """Held events as MEANWHILE and one line each, then the later parts of main's guidance they carry
+    (disclose.told); '' for none."""
+    from . import disclose  # noqa: PLC0415
+
+    return "\n".join([MEANWHILE, *(held_line(h) for h in notes)]) + disclose.told(notes) if notes else ""
 
 
 def _joined(notes: list[dict[str, Any]]) -> str:
@@ -486,11 +493,12 @@ def send(c: str, kind: str, text: str, fields: dict[str, Any], *, thread: str | 
          line: str = "") -> dict[str, Any]:
     """Send an event whose body server code built (threads.flush and ask_again), with its `line` in main's terminal:
     {id, kind, delivered}. The caller has logged whatever the chats show, and checked that a session listens."""
-    from . import session  # noqa: PLC0415
+    from . import disclose, session  # noqa: PLC0415
 
     event_id = secrets.token_hex(4)
     session.expect(c, event_id, thread=thread)
-    note = {**build_note(kind, event_id, text, fields), "terminal": line}
+    note = disclose.with_event(c, kind, {**build_note(kind, event_id, text, fields), "terminal": line},
+                               kind in QUIET_KINDS)
     ws = _queue_ws(c)
     if ws is not None:
         event_files.append(ws, note, render)

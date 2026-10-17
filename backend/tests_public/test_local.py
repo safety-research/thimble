@@ -117,7 +117,7 @@ async def test_every_tool_runs_in_process_and_opens_no_socket(term, no_sockets, 
     for name, given in args.items():
         res = await call(term, name, **given)
         assert isinstance(res.get("content"), list) and res["content"], name
-        assert text(res).startswith(f"$ {name}") or res["is_error"], (name, text(res))
+        assert not text(res).startswith("$ "), ("a result does not echo the call", name, text(res))
         assert "server" not in text(res).lower() or name in ("file_dev_ticket",), (name, text(res))
     assert no_sockets == []
     # what the calls made is in the workspace's files, as a server would have written it
@@ -212,8 +212,7 @@ async def test_a_code_ticket_is_refused_and_a_card_screenshot_needs_the_harness(
     res = await call(term, "file_dev_ticket", title="t", body="b")
     # 0.9.0 (SPEC-v2 3.16): code tickets are filed in every transport, so the terminal-mode refusal is gone
     assert "browser mode" not in text(res) and not tools.hint("ticket-terminal")
-    cid = re.search(r"card:([A-Za-z0-9_-]+)", text(await call(term, "add_card", question="q", kind="note", text="x"))
-                    .split("\n", 1)[1]).group(1)
+    cid = re.search(r"card:([A-Za-z0-9_-]+)", text(await call(term, "add_card", question="q", kind="note", text="x"))).group(1)
     res = await call(term, "screenshot", ref=f"card:{cid}")
     assert res["is_error"], "THIMBLE_RENDER is off in the suite: the harness cannot draw"
 
@@ -1134,6 +1133,35 @@ async def test_the_shim_in_terminal_mode_runs_calls_itself_keeps_fd_1_and_subscr
     assert cardrun.command("card", cid) in out, "the card waits for thimble-run: the shim ran no code"
     assert notebook.get_cell(CORPUS, cid)["run"]["state"] == "waiting"
     assert fds["1"] == fds["2"], "fd 1 points at stderr, the stream kept a copy of its own"
+
+
+async def test_an_agent_s_own_shim_lists_its_private_tools_alone_and_makes_no_start_of_main_s(term):
+    """An agent's own shim (thimble-mcp --private <kind>, which its registration declares): only that kind's private
+    tools, loaded, no instructions, no load_thimble, whatever the session's marker says; and its calls run as a second
+    process, which never makes the shim's start (local._start), whose marks of what an earlier session left running
+    would mark main's shim's running work."""
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+
+    env = {**os.environ, "THIMBLE_CARD_CHECK": "off", "THIMBLE_CWD": str(term),
+           "THIMBLE_WORKSPACES_DIR": str(config.WORKSPACES_DIR), "CLAUDE_CODE_SESSION_ID": "s-private"}
+    params = StdioServerParameters(command=str(config.REPO_ROOT / "plugin" / "bin" / "thimble-mcp"),
+                                   args=["--private", tools.REVIEW_SESSION], env=env, cwd=str(term))
+
+    async def run() -> tuple[list[Any], Any]:
+        async with stdio_client(params) as (r, w):
+            async with ClientSession(r, w) as s:
+                init = await s.initialize()
+                return (await s.list_tools()).tools, init.instructions
+
+    listed, instructions = await asyncio.wait_for(run(), 60)
+    assert [t.name for t in listed] == ["view_check", "view_pictures", "finish_review"] and not instructions
+    assert all((t.meta or {}).get(tools.META_ALWAYS_LOAD) is True for t in listed)
+    assert not (Path(os.environ["THIMBLE_HOME"]) / "up" / "s-private").exists(), "it records no listing of main's"
+    res = await local.call("read_ref", {"ref": "board.jsonl#L1"}, cwd=str(term), secondary=True)
+    assert not res["is_error"] and local._started == set()
+    await call(term, "read_ref", ref="board.jsonl#L1")
+    assert local._started == {CORPUS}
 
 
 def _children() -> list[int]:

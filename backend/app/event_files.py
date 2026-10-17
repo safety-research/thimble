@@ -235,8 +235,11 @@ def held_line(note: dict[str, Any]) -> str:
 
 
 def meanwhile(notes: list[dict[str, Any]]) -> str:
-    """Held events as MEANWHILE and one line each; '' for none."""
-    return "\n".join([MEANWHILE, *(held_line(h) for h in notes)]) if notes else ""
+    """Held events as MEANWHILE and one line each, then the later parts of main's guidance they carry
+    (disclose.told); '' for none."""
+    from . import disclose  # noqa: PLC0415 — standard library only at import time
+
+    return "\n".join([MEANWHILE, *(held_line(h) for h in notes)]) + disclose.told(notes) if notes else ""
 
 
 def joined(notes: list[dict[str, Any]]) -> str:

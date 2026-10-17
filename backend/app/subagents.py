@@ -279,8 +279,9 @@ Role = dict  # one type's registration: name, type, description, prompt, model, 
 def roles(c: str) -> dict[str, Role]:
     """Every type's definition for workspace `c`, which the module registers as `thimble:<name>` (GET
     /api/module/roles): each of TYPES's that is registered there (Type.when) with its fixed prompt and description, the full model id and explicit effort of
-    Settings (values_for), `background: true`, `disallowedTools` with the web tools when its agent's `web` is off and
-    `omitClaudeMd` when its `memory` is off; then the extensions' agents (extension_types)."""
+    Settings (values_for), `background: true`, `disallowedTools` with the other types' private tools when its thimble
+    tools are limited (others_private) and the web tools when its agent's `web` is off, `omitClaudeMd` when its `memory`
+    is off, and the shim of its private tools (private_server); then the extensions' agents (extension_types)."""
     out: dict[str, Role] = {}
     for role, t in TYPES.items():
         try:
@@ -294,18 +295,48 @@ def roles(c: str) -> dict[str, Role]:
         d.update(name=role, type=type_name(role), background=True)
         conf = _agent_conf(c, t.agent)
         denied = list(d.get("disallowedTools") or [])
+        if denied:  # a type whose thimble tools are limited: never another type's private tools (others_private)
+            denied += others_private(role)
         if conf.get("web") == "off":
             denied += list(tools.WEB_TOOLS)
         if denied:
             d["disallowedTools"] = list(dict.fromkeys(denied))
         if conf.get("memory") == "off":
             d["omitClaudeMd"] = True
+        server = private_server(c, t)
+        if server:
+            d["mcpServers"] = [server]
         d.pop("hooks", None)  # module note: none, since a definition's hooks miss its nested agents (U3)
         out[role] = d
     for name, d in extension_types(c).items():
         if name not in out:
             out[name] = {**d, "name": name, "type": type_name(name), "background": True}
     return out
+
+
+def others_private(role: str) -> list[str]:
+    """The private tools of every other type, as an agent sees them from that type's own shim
+    (mcp__thimble-<type>__<tool>, private_server). An agent that one of them starts has its parent's shim too (the
+    orientation's critic sees the orientation's), so a type whose thimble tools are limited takes these away as it
+    takes away the tools of main's shim that are not its own (tools.not_own)."""
+    return [f"mcp__thimble-{t.role}__{n}" for t in TYPES.values() if t.kind and t.role != role
+            for n in tools.private_names(t.kind)]
+
+
+PRIVATE_SHIM = config.REPO_ROOT / "plugin" / "bin" / "thimble-mcp"  # an agent's own shim (private_server)
+PRIVATE_TIMEOUT_MS = 3_600_000  # a call's timeout, as plugin/.mcp.json gives main's shim
+
+
+def private_server(c: str, t: Type) -> dict[str, Any] | None:
+    """The MCP server of the tools only agents of type `t` call (tools.private_names: the orientation's critique, a
+    view build's and review's view_check …), declared in the type's registration, so that main's own list leaves them
+    out: `thimble-mcp --private <kind>`, named thimble-<role>, its tools loaded from the agent's first request
+    (`alwaysLoad`), in the corpus folder. None for a type with none."""
+    if not t.kind or not tools.private_names(t.kind):
+        return None
+    return {f"thimble-{t.role}": {"type": "stdio", "command": str(PRIVATE_SHIM), "args": ["--private", t.kind],
+                                  "alwaysLoad": True, "timeout": PRIVATE_TIMEOUT_MS,
+                                  "env": {"THIMBLE_CWD": str(config.corpus_dir(c))}}}
 
 
 def extension_types(c: str) -> dict[str, dict[str, Any]]:

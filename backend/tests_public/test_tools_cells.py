@@ -33,7 +33,7 @@ async def call(name: str, nb: str, anchor: str | None = None, **args):
 
 
 def _cid(result) -> str:
-    """The card a result names on its own line (the call line and the takeaway reminder for the card before come first)."""
+    """The card a result names on its own line (the takeaway reminder for the card before may come first)."""
     assert not result.is_error, result.text
     hit = next((m.group(1) for line in result.text.splitlines() if (m := re.fullmatch(r"card:([A-Za-z0-9_-]+)", line.strip()))), None)
     assert hit, result.text
@@ -41,10 +41,9 @@ def _cid(result) -> str:
 
 
 def _body(result) -> str:
-    """A result's text after its first line, the call as run (`$ add_card kind="note" ...`; tools.call_line)."""
-    first, _, rest = result.text.partition("\n")
-    assert first.startswith("$ "), result.text
-    return rest
+    """A result's text, which does not echo the call (the model and the terminal have it already)."""
+    assert not result.text.startswith("$ "), result.text
+    return result.text
 
 
 SHAPES = ("chart", "image", "table", "text", "none", "error")  # what tools._output_shape can name
@@ -64,7 +63,7 @@ def _mismatch(result, kind: str) -> bool:
 async def test_add_cell_runs_code_and_reports_the_output(group):
     r = await call("add_card", group, kind="code", question="How many?", code="print(3)")
     cid = _cid(r)
-    assert r.text.splitlines()[0] == '$ add_card kind="code" question="How many?" code="print(3)"'
+    assert r.text.splitlines()[0] == f"card:{cid}", "the result names the card first and does not echo the call"
     assert "L1|3" in r.text and not _mismatch(r, "code")
     cell = notebook.get_cell(CORPUS, cid)
     assert cell["kind"] == "code" and cell["title"] == "How many?" and cell["created_by"] == "chat" and cell["notebook"] == group
@@ -147,7 +146,7 @@ async def test_read_ref_of_a_card_with_long_code_or_a_long_payload_stays_under_c
     both = card(printed)
     text = (await call("read_ref", group, ref=f"card:{both}")).text
     assert read_parts.units(text) <= read_parts.READ_UNITS, f"{read_parts.units(text):,} code units"
-    assert text.startswith(f'$ read_ref ref="card:{both}"\ncard:{both} (group {group}, code, status ok)\n'
+    assert text.startswith(f'card:{both} (group {group}, code, status ok)\n'
                            'question: How long are the runs?\ncode:\n')
     assert text.endswith("takeaway:\nEvery run has 42 posts.")
     code_part = text.split("\ncode:\n", 1)[1].split("\noutputs, from running the code above:\n", 1)

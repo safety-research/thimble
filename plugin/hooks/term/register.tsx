@@ -75,7 +75,7 @@ const SKILL_ARGS = new Set(['fresh', 'restore', 'status', 'fix', 'feedback'])
 
 // the text Claude Code stores as the reply of a turn that ended with none (its `<synthetic>` model's)
 const SYNTHETIC_RE = /^\s*No response requested\.\s*$/
-const THIMBLE_TOOL = /^mcp__plugin_thimble_thimble__/
+const THIMBLE_TOOL = /^mcp__(plugin_thimble_thimble|thimble-[a-z-]+)__/ // main's shim's tools, and an agent's own shim's
 // a message of another agent's as main reads it (a subagent's hand-back)
 const AGENT_MESSAGE = /<agent-message from="([^"]+)"/
 // how long a check's dropped hand-back waits for its run's record (checkDone)

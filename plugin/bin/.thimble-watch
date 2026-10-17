@@ -1049,7 +1049,7 @@ def budget_line(work: Path, budget: int, text: str) -> str:
     return text.replace("{size}", _size(size)).replace("{budget}", _size(budget)).replace("{folder}", str(work))
 
 
-THIMBLE_PREFIXES = ("mcp__plugin_thimble_thimble__", "mcp__thimble__")  # app/calls.py THIMBLE_PREFIXES
+THIMBLE_PREFIXES = ("mcp__plugin_thimble_thimble__", "mcp__thimble__", "mcp__thimble-")  # app/calls.py THIMBLE_PREFIXES
 PLUMBING = ("ToolSearch",)  # app/session.py PLUMBING_TOOLS
 
 

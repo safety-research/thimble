@@ -80,7 +80,8 @@ To be asked less, add this to `~/.claude/settings.json`, with the path from the 
 ```json
 {
   "permissions": {
-    "allow": ["mcp__plugin_thimble_thimble"],
+    "allow": ["mcp__plugin_thimble_thimble", "mcp__thimble-orientation", "mcp__thimble-view-builder",
+              "mcp__thimble-view-reviewer", "mcp__thimble-dev-ticket"],
     "additionalDirectories": ["/home/you/.thimble/app/workspaces"]
   }
 }
@@ -182,7 +183,9 @@ What thimble needs from a managed Claude Code setup:
   plugin in managed `enabledPlugins` instead. A plugin that managed settings force on also loads in the sessions of
   extension programs beside the copy thimble gives them.
 - **`allowManagedPermissionRulesOnly`** makes Claude Code ignore the rules users save, so each thimble tool call asks in
-  Manual mode and no "don't ask again" is offered. Add `mcp__plugin_thimble_thimble` to managed `permissions.allow`.
+  Manual mode and no "don't ask again" is offered. Add `mcp__plugin_thimble_thimble` and the agents' own servers
+  (`mcp__thimble-orientation`, `mcp__thimble-view-builder`, `mcp__thimble-view-reviewer`, `mcp__thimble-dev-ticket`) to
+  managed `permissions.allow`.
 - **`disableSideloadFlags`** makes Claude Code reject `--plugin-dir`. Sessions that load the installed plugin are not
   affected. Extension programs can't start.
 - **`allowManagedModsOnly`** keeps thimble's terminal UI from loading. `/thimble` and `/thimble browser` still work, through

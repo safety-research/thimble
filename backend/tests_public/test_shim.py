@@ -267,14 +267,14 @@ def test_load_thimble_turns_thimble_on_in_a_session_it_was_off_in(tmp_path, serv
     finally:
         _stop(p)
     names = [t["name"] for t in _listed(out, 8)]
-    assert "load_thimble" not in names and len(names) == 36
+    assert "load_thimble" not in names and len(names) == 29  # 0.8.0's 36 less the 7 only thimble's agents call
     answer = next(m for m in out if m.get("id") == 7)["result"]
     assert not answer["isError"], answer
     text = answer["content"][0]["text"]
     marker = (env_home / "up" / SID / "guide-marker").read_text().strip()
     assert text.startswith(f"thimble guidance {marker}: thimble is on in this folder.") and "# thimble" in text
     rec = json.loads((env_home / "up" / SID / "listed.json").read_text())
-    assert rec["count"] == 36 and rec["at"] >= started
+    assert rec["count"] == 29 and rec["at"] >= started
     marker_rec = json.loads((env_home / "up" / f"{SID}.active").read_text())
     assert marker_rec["mod"] is False and marker_rec["via"] == "tool"
     assert json.loads((env_home / "up" / SID / "guide.json").read_text())["digest"]

@@ -52,7 +52,7 @@ def text(res: dict) -> str:
 
 def card_id(res: dict) -> str:
     assert not res["is_error"], text(res)
-    return re.search(r"^card:([A-Za-z0-9_-]+)\s*$", text(res).split("\n", 1)[1], re.M).group(1)
+    return re.search(r"^card:([A-Za-z0-9_-]+)\s*$", text(res), re.M).group(1)
 
 
 CHART = ("import thimble, pandas as pd\nn = sum(1 for _ in open('board.jsonl'))\n"

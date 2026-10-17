@@ -304,6 +304,14 @@ function engine(opts: Options = {}) {
       const next = vi.fn(async () => ({ ran: true }))
       return hooks['tool.call']($, { tool_use_id: 'toolu_9', ...input }, next)
     },
+    /** an agent type offered to a model through the agent.offer hook: whether it is offered */
+    offer: async (agent: string): Promise<boolean> => (await hooks['agent.offer']($, { agent, description: 'd', source: 'plugin', provider: {} }, async () => ({ isOffered: true }))).isOffered,
+    /** a SendMessage call through the tool.call hook, with `during` run inside its next */
+    sendTool: (during: () => Promise<unknown>): Promise<Json> =>
+      hooks['tool.call']($, { tool_use_id: 'toolu_s', tool: 'SendMessage', to: 'a1', message: 'm' }, async () => { await during(); return { ran: true } }),
+    /** an Agent call naming `type` through the tool.call hook, with `during` run inside its next (the dispatch) */
+    agentTool: (type: string, during: () => Promise<unknown>): Promise<Json> =>
+      hooks['tool.call']($, { tool_use_id: 'toolu_a', tool: 'Agent', subagent_type: type, prompt: 'p', description: 'd' }, async () => { await during(); return { ran: true } }),
     /** the guard's catch, as Claude Code runs it when the hook failed: before its `next` or after it */
     toolCaught: (input: Json, called: boolean): Promise<Json> => {
       const next = Object.assign(vi.fn(async () => ({ ran: true })), { called })
@@ -434,6 +442,65 @@ describe('registration', () => {
     expect(server.calls.every(c => c === 'POST /api/module/hello')).toBe(true)
   })
 
+})
+
+describe('the agent listing', () => {
+  it('offers none of the registered types to a model, and every other type as Claude Code does', async () => {
+    const e = engine()
+    await e.start()
+    for (const name of ROLE_NAMES) expect(await e.offer(`thimble:${name}`)).toBe(false)
+    expect(await e.offer('Explore')).toBe(true)
+    expect(await e.offer('thimble:not-registered')).toBe(true)
+  })
+
+  it('offers a type while an Agent call that names it runs, counted for calls at once, and no other type', async () => {
+    const e = engine()
+    await e.start()
+    const seen: Json = {}
+    let release = () => {}
+    const held = new Promise<void>(r => { release = r })
+    const first = e.agentTool('thimble:orient-helper', async () => { seen.first = await e.offer('thimble:orient-helper'); await held })
+    await e.agentTool('thimble:orient-helper', async () => { seen.second = await e.offer('thimble:orient-helper') })
+    seen.other = await e.offer('thimble:critic')
+    seen.during = await e.offer('thimble:orient-helper') // the first call still runs
+    release()
+    expect(await first).toEqual({ ran: true })
+    expect(seen).toEqual({ first: true, second: true, other: false, during: true })
+    expect(await e.offer('thimble:orient-helper')).toBe(false)
+  })
+
+  it('keeps a type offered once an agent of it started, since Claude Code checks the offer again to resume one', async () => {
+    const e = engine()
+    await e.start()
+    await e.agentCall({ subagentType: 'thimble:orientation', prompt: 'orient' }, 'a-orient')
+    expect(await e.offer('thimble:orientation')).toBe(true) // its critic's report resumes it
+    expect(await e.offer('thimble:critic')).toBe(false)
+    await e.agentCall({ subagentType: 'thimble:critic', prompt: 'review' }, '') // a start that started nothing
+    expect(await e.offer('thimble:critic')).toBe(false)
+  })
+
+  it('offers every type while a SendMessage call runs, which may resume an agent it names by id', async () => {
+    const e = engine()
+    await e.start()
+    const seen: Json = {}
+    const out = await e.sendTool(async () => { seen.writer = await e.offer('thimble:writer'); seen.orientation = await e.offer('thimble:orientation') })
+    expect(out).toEqual({ ran: true })
+    expect(seen).toEqual({ writer: true, orientation: true })
+    expect(await e.offer('thimble:writer')).toBe(false)
+  })
+
+  it('offers a type the module spawned from then on', async () => {
+    const e = await started()
+    expect(await e.offer('thimble:writer')).toBe(false)
+    await e.server.answer(e.server.push('spawn', { role: 'writer', prompt: 'p', description: 'd', values: {}, note: '' }))
+    expect(await e.offer('thimble:writer')).toBe(true)
+  })
+
+  it('offers every type as Claude Code does in a session thimble is not on in', async () => {
+    const e = engine({ marker: false })
+    await e.start()
+    expect(await e.offer('thimble:writer')).toBe(true)
+  })
 })
 
 describe('requests', () => {
