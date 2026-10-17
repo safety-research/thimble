@@ -188,3 +188,18 @@ def test_a_stopped_reply_main_went_on_from_offers_no_ask_again(cwd, tmp_path):
     (shown,) = _open("stopped:main")
     assert "Main went on" in shown["text"] and question in shown["text"]
     assert shown["action"]["do"] == "card-again", "Make the card again alone, no Ask again"
+
+
+def test_j3_a_label_s_safeguards_notice_sets_its_name_off_and_says_its_values_are_kept():
+    """Bug hunt J3: the label's name ran into the sentence ("switched 15 of the label purpose of the save's calls")."""
+    from app import concepts
+
+    concepts._fallback_notice(CORPUS, {"id": "k-save", "name": "purpose of the save"},
+                              {("claude-opus-5-5", "claude-opus-4-8"): 14, ("claude-opus-5-5", "claude-opus-4-7"): 1})
+    [n] = _open("safeguards:label:k-save")
+    assert n["text"] == ('Claude\'s safeguards answered 15 calls of the label "purpose of the save" with Opus 4.8 instead '
+                         "of Opus 5.5. The label keeps the values those calls gave.")
+    concepts._fallback_notice(CORPUS, {"id": "k-one", "name": "kind of page"}, {("claude-opus-5-5", "claude-opus-4-8"): 1})
+    [one] = _open("safeguards:label:k-one")
+    assert one["text"].startswith('Claude\'s safeguards answered 1 call of the label "kind of page" with Opus 4.8')
+    assert one["text"].endswith("The label keeps the values that call gave.")
