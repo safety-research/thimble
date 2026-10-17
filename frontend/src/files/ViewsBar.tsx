@@ -84,6 +84,8 @@ export interface BuiltView {
   label_controls?: boolean
   /** the npm packages its page loads (view.json's `libs`), which its head names */
   libs?: string[]
+  /** false while it has no page for the browser yet (a view built in the terminal whose page is being built) */
+  browser_page?: boolean
 }
 
 /** Whether a proposal is a view the bar lists: built, or built before and being changed now. Pure. */
@@ -107,11 +109,11 @@ export function barList(list: readonly View[], all: readonly Proposal[]): { view
   const built: BuiltView[] = [
     ...listed.map((p) => {
       const v = known.get(p.slug)
-      return { slug: p.slug, name: p.name, first_file: v?.first_file, files: v?.files, n_files: v?.n_files, claims: v?.claims, built: v?.built, version: v?.version, label_controls: v?.label_controls, libs: v?.libs, review: p.review, ...(p.status !== 'built' ? { updating: true } : {}) }
+      return { slug: p.slug, name: p.name, first_file: v?.first_file, files: v?.files, n_files: v?.n_files, claims: v?.claims, built: v?.built, version: v?.version, label_controls: v?.label_controls, libs: v?.libs, browser_page: v?.browser_page, review: p.review, ...(p.status !== 'built' ? { updating: true } : {}) }
     }),
     ...views
       .filter((v) => !proposals.some((p) => p.slug === v.slug))
-      .map((v) => ({ slug: v.slug, name: v.name, first_file: v.first_file, files: v.files, n_files: v.n_files, claims: v.claims, built: v.built, version: v.version, label_controls: v.label_controls, libs: v.libs, builtin: v.origin === 'builtin' })),
+      .map((v) => ({ slug: v.slug, name: v.name, first_file: v.first_file, files: v.files, n_files: v.n_files, claims: v.claims, built: v.built, version: v.version, label_controls: v.label_controls, libs: v.libs, browser_page: v.browser_page, builtin: v.origin === 'builtin' })),
   ]
   // a view proposal (`suggested`) waits on the chat's card until it is accepted, and a held proposal (an orientation's
   // from before 0.8.0) appears once it is built

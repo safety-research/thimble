@@ -1,7 +1,8 @@
 """Views without modes (views.py's module note, Pages): a view has the pages it has, and each build makes the page of its
-target, `term-page` (view.term.js) on the local transport and `html-page` (view.html) after the press. The first open
-of a view in the place whose page it lacks builds that page as a revision that keeps its reader.py: a terminal-built
-view opened in the browser, and a browser-built view opened in the terminal."""
+target first, `term-page` (view.term.js) on the local transport and `html-page` (view.html) after the press, then goes
+on to the other place's page in the same build. The first open of a view in the place whose page it still lacks builds
+that page as a revision that keeps its reader.py: a terminal-built view opened in the browser, and a browser-built view
+opened in the terminal."""
 from __future__ import annotations
 
 import json
@@ -145,3 +146,48 @@ async def test_a_browser_built_view_opened_in_the_terminal_gets_its_terminal_pag
     assert await term_acts.act_route(c, term_acts.ActBody(kind="view-term-page", payload={"slug": "board"})) == {
         "queued": True}
     assert queued == [(c, "board"), (c, "board")]
+
+
+async def test_a_view_built_in_the_terminal_gets_its_browser_page_in_the_same_build_before_its_review(
+        workspaces_tmp, tmp_path, monkeypatch, queued):
+    """Bug hunt round 9, J13: a view built in the terminal was built again when the browser first opened it (7 minutes
+    more, then a second review), and the tab said "building the page for the browser…" until a Reload. Once the
+    terminal page passes, the same build goes on to the browser's page, which a browser opened meanwhile waits for
+    (the views list says it has no page yet, and the pane loads the version that brings it); the review of the
+    terminal page starts once the build ends."""
+    from types import SimpleNamespace
+
+    from app import headless, view_review, work_files
+
+    c = _corpus(tmp_path, monkeypatch, "board", "local")
+    d = _built(c, "board", term=True, html=False)
+    views._save_proposals(c, [{"slug": "board", "name": "Board", "description": "The posts.", "task": "",
+                               "claims": ["board.jsonl"], "status": "built", "target": views.TERM_PAGE,
+                               "agent_id": "abuilder01", "finish": {"agent": "abuilder01", "result": "pass"}}])
+    reviewed: list[tuple[str, str]] = []
+    monkeypatch.setattr(view_review, "after_built", lambda c, slug: reviewed.append((slug, views.target_of(c, slug))))
+    monkeypatch.setattr(views, "build_problem_for", lambda c, target=None: "")
+    monkeypatch.setattr(headless, "missing", lambda kind: "")
+
+    async def no_regate(c, slug):
+        return None
+
+    monkeypatch.setattr(views, "regate", no_regate)
+    monkeypatch.setattr(work_files, "after_run", lambda *a, **k: None)
+    run = SimpleNamespace(agent_id="abuilder01", chat=None, key="view:board", k=1)
+    await dev._settle(c, "board", run, "done", "", "")
+    assert queued == [(c, "board")], "the same build goes on to the browser's page"
+    assert reviewed == [], "the review waits for the build's end"
+    prop = views.read_proposal(c, "board")
+    assert (prop["status"], prop["target"], prop["first_page"]) == ("queued", views.HTML_PAGE, views.TERM_PAGE)
+    assert prop["change"] == views.MISSING_PAGE_REQUEST.format(page="view.html", place="the browser workbench")
+    # the browser opens it meanwhile: no second build, and the list says it has no page there yet
+    assert views.ensure_page(c, "board", views.HTML_PAGE) is False and len(queued) == 1
+    assert views._public(views.read_built(c, "board"))["browser_page"] is False
+    # the browser's page passes: the build ends, and the review looks at the terminal page it began with
+    (d / views.VIEW_HTML).write_text("<div>board</div>")
+    views.mark_built(c, "board")
+    await dev._settle(c, "board", run, "done", "", "")
+    assert len(queued) == 1 and reviewed == [("board", views.TERM_PAGE)]
+    assert views.read_proposal(c, "board").get("first_page") is None
+    assert views._public(views.read_built(c, "board"))["browser_page"] is True

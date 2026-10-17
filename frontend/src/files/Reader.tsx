@@ -174,7 +174,7 @@ export function ViewFailed({ name, detail, onRaw }: { name: string; detail: stri
 function ReaderViewer({ ws, view, path, targetRef, labels, onRaw }: { ws: string; view: View; path: string; targetRef?: string; labels: FilesLabels; onRaw?: () => void }) {
   const [failure, setFailure] = useState<string | null>(null)
   const filter = useFilesFilter(ws)
-  const pin = usePinnedView(ws, view.slug, view.version || undefined)
+  const pin = usePinnedView(ws, view.slug, view.version || undefined, view.browser_page === false)
   const notes = useViewNotes(ws, view.slug, pin.pinned || undefined, path)
   const shownLabels = useLabelsOfFile(labels, path)
   const [residueOpen, toggleResidue] = useResidueOpen(ws, view.slug)

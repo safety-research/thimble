@@ -54,7 +54,9 @@ def board(tmp_path, monkeypatch, workspaces_tmp) -> Path:
 
 @pytest.fixture()
 def gates(monkeypatch):
-    """views.gate faked: a view passes when its folder holds view.json and its page says no FAIL. The slugs gated."""
+    """views.gate faked: a view passes when its folder holds view.json and its page says no FAIL. The slugs gated. A
+    build here ends with the page of its target: the page of the view's other place, which a build goes on to make
+    where the machine can (views.build_other_page), is test_view_targets.py's."""
     seen: list[str] = []
 
     async def gate(c, slug, locators=None, **_kw):
@@ -67,6 +69,7 @@ def gates(monkeypatch):
     monkeypatch.setattr(views, "gate", gate)
     monkeypatch.setattr(views, "gate_lines", lambda rep: list(rep.get("problems") or []) or ["the checks passed"])
     monkeypatch.setattr(views, "build_problem", lambda: "")
+    monkeypatch.setattr(views, "build_other_page", lambda c, slug: False)
     return seen
 
 

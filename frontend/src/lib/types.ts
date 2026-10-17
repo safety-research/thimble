@@ -614,6 +614,9 @@ export interface View {
   /** its page draws label controls of its own (elements with data-label) */
   label_controls?: boolean
   file_type?: boolean
+  /** false for a view of the workspace's with a page for the terminal and none for the browser yet, whose frame says
+   * the page is being built (backend views._public) */
+  browser_page?: boolean
 }
 
 /** A diagram card's dataset (canvas/DataViz.tsx). */
