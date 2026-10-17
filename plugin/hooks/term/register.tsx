@@ -39,7 +39,7 @@ import { lineWidth } from './draw'
 import { cardsOfCall, docsOf, forkDescription, labelsOf, namedForks, namedThreads, noteLines, reportOf, runIds, runShown, saysWriter, threadOf, withoutEnd, withoutLines, withoutNotes, withoutToldThreads, withoutWriterLines } from './model'
 import { keepLast, keepRow } from './kept'
 import { linesMessage, onListClick } from './lines'
-import { ANSWER_ELEMENT, RELAY, drawPanel, fieldMessage, focusedField, hasList, homeViews, onGesture, openAsk, openCard, openCite, openFile, openLabel, openThread, openView, relayKey, relayMove, scrollPending, viewWheelAt, wheelWindow } from './panel'
+import { ANSWER_ELEMENT, RELAY, drawPanel, fieldMessage, focusedField, hasList, homeViews, onGesture, openAsk, openCard, openCite, openFile, openLabel, openThread, openView, relayMove, relayMoveKey, scrollPending, viewWheelAt, wheelWindow } from './panel'
 import type { PaneEvent } from './panel'
 // the file browser and a file, drawn by a module of their own (panel.tsx drawsView, term.ts loadsView)
 import { MARGIN, chipOf, drawCards, drawReply, placeUrl, toolWords } from './reply'
@@ -1027,15 +1027,22 @@ export const register: Register = (on, options) => {
   // since a letter goes into the field; off every element, NO_FOCUS (not '', which is a view just opened)
   const NO_FOCUS = '-'
   // A list's keys reach it through the relay's three Buttons (panel.tsx RELAY): a move of the ring from the middle one
-  // onto a neighbour (↑, ↓, Tab) is that key for the list, and the ring stays; a move onto a neighbour from elsewhere
-  // lands on the middle one. Every move draws the panel again, so its hint row names the keys where the ring is.
+  // onto a neighbour (↑, ↓, Tab) is that key for the list, and the ring stays unless the key moved it off the list
+  // (relayMoveKey); a move onto a neighbour from elsewhere lands on the middle one. Every move draws the panel again, so its hint row names the keys where the ring is.
   on('ui.focus', { requestId: PANEL }, async ($, e, next) => {
     // the person moving the ring while the panel's typing went to the prompt (panel.tsx typeThrough): the panel has its
     // keys again
     if (rt.sc && rt.typeThrough && e.origin.kind === 'person') rt.typeThrough = false
     const how = rt.sc ? relayMove(rt.panelFocus, e.element) : ''
     if (how === 'up' || how === 'down') {
-      await relayKey(how).catch(() => undefined)
+      const to = await relayMoveKey(how).catch(() => '')
+      // the key moved the ring off the list (↓ past the labels list's last label): the person's move lands there
+      if (to) {
+        const moved = await next({ ...e, element: to })
+        if (!moved.deny) rt.panelFocus = to
+        void cxOf($).bumpPanel()
+        return moved
+      }
       void cxOf($).bumpPanel()
       // a document's comment the key chose, scrolled into view once the panel is drawn again
       scrollPending(cxOf($))
