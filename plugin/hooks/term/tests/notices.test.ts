@@ -5,6 +5,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
+import { ABOVE_LABEL } from '../band'
 import { cut, width } from '../lib'
 import { modActWords, noticeActWords, seeWords } from '../notices'
 import { COLORS } from '../paint'
@@ -68,10 +69,10 @@ test("a notice is one row: `notice` in red on the label column, its words in the
   const w = panelWorld(on)
   w.states.home.notices = [ORIENT]
   await start($, w)
-  // 100 columns: the label column (16), the words, two cells, `see the orientation ›  dismiss` (30) at the right
+  // 100 columns: the label column (17), the words, two cells, `see the orientation ›  dismiss` (30) at the right
   const m = (await $.ui.mount(aboveAt(100))) as unknown as M
   const row = await m.find({ type: 'Box', key: 'above-notice-n2' })
-  const room = 100 - 16 - 30 - 2
+  const room = 100 - ABOVE_LABEL - 30 - 2
   expect(words(row)).toBe(`  notice${cut(SWITCHED, room)}see the orientation ›dismiss`)
   expect(cut(SWITCHED, room).endsWith('…')).toBe(true)
   expect(width(cut(SWITCHED, room))).toBeLessThanOrEqual(room)

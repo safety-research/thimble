@@ -11,7 +11,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { ACT_GAP, LINE_LABEL_W, MIN_WORDS, actsWidth, fitItems, offerWords, percent, wordsRoom } from '../band'
+import { ABOVE_LABEL, ACT_GAP, LINE_LABEL_W, MIN_WORDS, actsWidth, fitItems, offerWords, percent, wordsRoom } from '../band'
 import { cid, cut, width } from '../lib'
 import { COLORS } from '../paint'
 import { CWD, PANEL, SUMMARY, WS, aboveAt, comment, featuresOff, panelWorld, pressBrowser, shown, words } from './fixtures-panel'
@@ -330,8 +330,9 @@ test("the view proposal is one row: `view proposal` dim, the name bold, as much 
   for (const cols of [150, 100]) {
     const m = await band($, cols)
     const row = await m.find({ type: 'Box', key: 'above-offer' })
-    // the label column (16), the name, two cells, the description cut; two cells; the acts (40 cells) at the right
-    const room = cols - 16 - 40 - 2
+    // the label column (17), the name, two cells, the description cut; two cells; the acts (40 cells) at the right
+    expect(ABOVE_LABEL).toBe(17)
+    const room = cols - ABOVE_LABEL - 40 - 2
     const ow = offerWords(OFFER.name, OFFER.description, room)
     expect(ow).toEqual({ name: 'Page Histories', rest: cut(OFFER.description, room - 'Page Histories'.length - 2), cut: true })
     expect(words(row)).toBe(`  view proposalPage Histories  ${ow.rest}${OFFER_ACTS.join('')}`)
@@ -373,7 +374,7 @@ test("a viewer of a file type shows its files on the name's press; why accept co
   const m = await band($, 100)
   expect(await m.find({ type: 'Box', key: 'above-offer-files' })).toBeUndefined()
   const why = await m.find({ type: 'Box', key: 'above-offer-refused' })
-  expect(words(why)).toBe(`  ${cut(refused, 100 - 16)}`)
+  expect(words(why)).toBe(`  ${cut(refused, 100 - ABOVE_LABEL)}`)
   expect(texts(why).at(-1)).toMatchObject({ color: COLORS.problem })
   await m.press({ key: 'above-offer-name' })
   await w.clock.settle()
@@ -386,7 +387,7 @@ test("a viewer of a file type shows its files on the name's press; why accept co
   await open.unmount()
   // 60 columns: the label column is 11 (`proposal` and a cell), and the acts would leave the words under MIN_WORDS cells
   expect(wordsRoom(60, 11, OFFER_ACTS.map(label => ({ label })))).toEqual({ room: 49, own: true })
-  expect(wordsRoom(100, 16, OFFER_ACTS.map(label => ({ label })))).toEqual({ room: 42, own: false })
+  expect(wordsRoom(100, ABOVE_LABEL, OFFER_ACTS.map(label => ({ label })))).toEqual({ room: 41, own: false })
   expect(MIN_WORDS).toBe(12)
   const narrow = await band($, 60)
   const row = await narrow.find({ type: 'Box', key: 'above-offer' })
@@ -405,7 +406,7 @@ test("the SSH row of a remote press is one row: its command cut where its acts b
   expect(actsWidth([{ label: 'copy' }, { label: 'copy link' }, { label: 'dismiss' }])).toBe(4 + ACT_GAP + 9 + ACT_GAP + 7)
   const m = await band($, 120)
   const row = await m.find({ type: 'Box', key: 'above-remote' })
-  const room = 120 - 16 - 24 - ACT_GAP
+  const room = 120 - ABOVE_LABEL - 24 - ACT_GAP
   expect(words(row)).toBe(`  browser${cut(tunnel, room)}copycopy linkdismiss`)
   expect(texts(row).find(l => l.s === 'copy')).toMatchObject({ color: COLORS.accent, bold: true })
   await m.press({ key: 'above-remote-more' })

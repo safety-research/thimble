@@ -8,8 +8,8 @@
 // column (`notice` in red), then its words cut with `…` at the room its acts leave them, then its acts at the right,
 // each in the accent and underlined under the pointer as the thimble line's names are, the row's main act bold:
 //
-//   view proposal   Page Histories  Each wiki page as a strip of its…   accept  reject  don't ask again  dismiss
-//   notice          Claude's safeguards switched a reply of the orientation…   see the orientation ›  dismiss
+//   view proposal  Page Histories  Each wiki page as a strip of its…   accept  reject  don't ask again  dismiss
+//   notice         Claude's safeguards switched a reply of the orientation…    see the orientation ›  dismiss
 //
 // A press on words cut short shows them whole, wrapped, and a second press cuts them again; on the view proposal the
 // press is its name's. Where the acts would leave the words fewer than MIN_WORDS cells, they take a row of their own
@@ -56,7 +56,8 @@ import { openChecks } from './checksview'
 import { citeItems, openCitations } from './citesview'
 import { openCoverage, percent } from './coverageview'
 
-const ABOVE_LABEL = 16
+/** The label column: `  view proposal` and two cells before the words. */
+export const ABOVE_LABEL = 17
 /** The label column in a band narrower than this many columns (`  proposal` and a cell before the words). */
 const NARROW = 80
 const NARROW_LABEL = 11
