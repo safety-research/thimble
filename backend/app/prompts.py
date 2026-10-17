@@ -71,10 +71,9 @@ TYPES_DIR = "types"
 TYPE_FILES = {"document": "report-markdown", "slides": "report-slides", "story": "report-story", "custom": "report-custom",
               "video": "report-video"}
 # The dev calls: dev.md is the preamble every dev call reads, ending in `{{task}}`, filled with the call's own body
-# file: a code ticket's agent's registered prompt (dev-ticket), the server-down fix (dev-fix) or the view builder's
-# registered prompt (dev-view).
+# file: a code ticket's agent's registered prompt (dev-ticket) or the view builder's registered prompt (dev-view).
 DEV_PROMPT = "dev"
-DEV_FILES = ("dev-ticket", "dev-fix", "dev-view")
+DEV_FILES = ("dev-ticket", "dev-view")
 
 # The whole directive grammar: {{include:<relpath>}} or {{<slot>}} with slot = [a-z_][a-z0-9_]*. Anything else inside
 # {{...}}, such as a mistyped slot or stray spaces, fails loudly instead of reaching a model half-filled.

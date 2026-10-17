@@ -1,7 +1,8 @@
 """proposer.py: the view proposer. A turn of main that answered the analyst, a side thread's answer and an orientation's
-end each run one fork of main's session, which may show a view proposal card (views.offer); every failure leaves a
-notice with its fix in the foreground (notices.py). The fork is faked (proposer._fork) with the stream-json Claude Code
-prints; the view proposal storage (views.offer, open_offer, propose_enabled) is faked where a test needs it.
+end each run one fork of main (a subagent of the analyst's Claude Code session, agent_call.structured with `fork`), which
+may show a view proposal card (views.offer); every failure leaves a notice with its fix in the foreground (notices.py).
+The fork is faked (proposer._fork) with the CallResult agent_call gives and, for the model that replied, the fork's
+transcript; the view proposal storage (views.offer, open_offer, propose_enabled) is faked where a test needs it.
 
 session.py's part is here too: which turns answered the analyst, the cut a turn ended at, main's context size, and the
 notices for a reply Claude's safeguards switched to another model."""
@@ -14,7 +15,8 @@ from typing import Any
 
 import pytest
 
-from app import agents, config, notices, proposer, session, views
+from app import agent_call, agents, config, notices, proposer, session, views
+from app.call_result import CallResult
 from target_blocks import target_blocks  # noqa: F401 — the core lane's target flags, where prompts.py lacks them
 
 CORPUS = "mini"
@@ -64,38 +66,30 @@ def cards(monkeypatch) -> list[dict]:
     return rows
 
 
-def stream(text: str | None = None, *, model: str = "claude-opus-5-5", cost: float = 2.5, error: str | None = None,
-           error_text: str = "", stop: str = "end_turn", is_error: bool = False, extra: list | None = None) -> str:
-    """Claude Code's stream-json output of one `claude -p` call: init, the replies, the result."""
-    evs: list[dict] = [{"type": "system", "subtype": "init", "model": model, "tools": [], "mcp_servers": []},
-                       *(extra or [])]
-    if error is not None:
-        evs.append({"type": "assistant", "is_api_error_message": True, "error": error,
-                    "message": {"model": "<synthetic>", "stop_reason": stop,
-                                "content": [{"type": "text", "text": error_text}]}})
-        evs.append({"type": "result", "subtype": "success", "is_error": True, "result": error_text,
-                    "total_cost_usd": cost})
-    else:
-        evs.append({"type": "assistant", "message": {"model": model, "stop_reason": stop,
-                                                     "content": [{"type": "text", "text": text or ""}]}})
-        evs.append({"type": "result", "subtype": "success", "is_error": is_error, "result": text or "",
-                    "total_cost_usd": cost})
-    return "\n".join(json.dumps(e) for e in evs) + "\n"
+def result(output: dict | None = None, *, status: str = "ok", detail: str = "", agent: str = "afork0001",
+           model: str = "claude-opus-5-5") -> CallResult:
+    """What agent_call.structured gives for the fork: its answer, or its status and why."""
+    return CallResult(status=status, output=output if status == "ok" else None, model_requested=model,
+                      model_used=model if status == "ok" else None, duration_s=1.0, session_id=agent, detail=detail)
 
 
 @pytest.fixture()
 def forks(monkeypatch) -> list[dict]:
-    """The fork faked: each call is recorded (cut, prompt, model) and answers with `forks.answer` (a stream, or a dict
-    of _fork's result)."""
+    """The fork faked: each call is recorded (prompt, main's session and model) and answers with `forks.answer` (a
+    CallResult); `forks.replied` is the model of the fork's reply its transcript holds (none: no transcript)."""
     class Forks(list):
-        answer: Any = stream("```json\n" + json.dumps(ANSWER) + "\n```")
+        answer: Any = result(ANSWER)
+        replied: str | None = None
 
     got = Forks()
 
-    async def fake(lv, cut, prompt, model_id, effort, speed):
-        got.append({"cut": cut, "prompt": prompt, "model": model_id, "effort": effort, "sid": lv.sid})
+    async def fake(c, lv, prompt):
+        got.append({"prompt": prompt, "sid": lv.sid, "model": lv.model, "cut": lv.last_cut})
         a = got.answer
-        return a if isinstance(a, dict) else {"code": 0, "stdout": a, "stderr": "", "timed_out": False, "seconds": 1.0}
+        if got.replied and (path := proposer.fork_transcript(lv, a.session_id)) is not None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(_assistant(_say(json.dumps(ANSWER)), model=got.replied)) + "\n")
+        return a
 
     monkeypatch.setattr(proposer, "_fork", fake)
     return got
@@ -166,15 +160,16 @@ def _turn(text: str, cut: str) -> list[dict]:
 # ----------------------------------------------------------------------------- triggers
 
 
-async def test_an_analyst_s_turn_end_runs_one_fork_at_its_cut_and_shows_the_card(cwd, tmp_path, cards, forks):
+async def test_an_analyst_s_turn_end_runs_one_fork_of_main_and_shows_the_card(cwd, tmp_path, cards, forks):
     lv, p = _attach(cwd, tmp_path)
     _append(p, lv, _turn("Who replies to whom on the board?", "cut-1"))
     await _settle()
-    assert [(f["cut"], f["sid"]) for f in forks] == [("cut-1", SID)]
+    assert [(f["cut"], f["sid"], f["model"]) for f in forks] == [("cut-1", SID, "claude-opus-5-5")]
+    assert forks[0]["prompt"].startswith("# View proposals") and "## Now" in forks[0]["prompt"]
     assert [r["name"] for r in cards] == ["Reply Network"] and cards[0]["offered"]["after"] == "main"
     (run,) = _runs()
     assert run["status"] == "ok" and run["offered"] == "reply-network" and run["show"] is True
-    assert run["cost_usd"] == 2.5 and run["after"] == ["main"] and run["cut"] == "cut-1"
+    assert run["after"] == ["main"] and run["cut"] == "cut-1" and run["agent"] == "afork0001"
     assert proposer.pending(CORPUS) is None
     assert _shown_notice() is None
 
@@ -202,10 +197,16 @@ async def _one_turn(cwd, tmp_path, cut: str = "cut-1") -> None:
     await _settle()
 
 
+async def test_main_in_plan_mode_starts_no_fork(cwd, tmp_path, cards, forks, monkeypatch):
+    monkeypatch.setattr(session, "main_mode", lambda c: "plan")
+    await _one_turn(cwd, tmp_path)
+    assert forks == [] and cards == [] and _runs() == [] and _shown_notice() is None
+
+
 async def test_a_request_the_safeguards_blocked_says_so_with_try_again_and_turn_off(cwd, tmp_path, cards, forks):
-    forks.answer = stream(error="invalid_request", stop="refusal",
-                          error_text="API Error: Opus 5.5's safeguards flagged this message (https://www.anthropic.com"
-                                     "/legal/aup). Claude Code can't respond to this message with Opus 5.5.")
+    forks.answer = result(status="refused",
+                          detail="API Error: Opus 5.5's safeguards flagged this message (https://www.anthropic.com"
+                                 "/legal/aup). Claude Code can't respond to this message with Opus 5.5.")
     await _one_turn(cwd, tmp_path)
     assert cards == [] and _runs()[0]["status"] == "refused"
     n = _shown_notice()
@@ -217,10 +218,12 @@ async def test_a_request_the_safeguards_blocked_says_so_with_try_again_and_turn_
 
 
 @pytest.mark.parametrize("answer,status,reason", [
-    ({"code": None, "stdout": "", "stderr": "", "timed_out": True, "seconds": 300.0}, "timeout",
-     "Claude didn't answer within 5 minutes"),
-    (stream(error="server_error", error_text="API Error: Repeated 529 Overloaded errors"), "error",
+    (result(status="timeout", detail="the call ran past 300 s"), "timeout", "Claude didn't answer within 5 minutes"),
+    (result(status="error", detail="API Error: Repeated 529 Overloaded errors"), "error",
      "API Error: Repeated 529 Overloaded errors"),
+    (result(status="no_tool_call", detail="the fork's answer did not fit ($: 'show' is a required property)"),
+     "unparsed", "Claude's answer couldn't be read"),
+    (result(status="no_session", detail=agent_call.NO_SESSION), "no_session", agent_call.NO_SESSION),
 ])
 async def test_any_other_failure_says_why_with_try_again(cwd, tmp_path, cards, forks, answer, status, reason):
     forks.answer = answer
@@ -233,20 +236,21 @@ async def test_any_other_failure_says_why_with_try_again(cwd, tmp_path, cards, f
 
 async def test_a_card_from_a_fallback_model_shows_with_a_notice_and_a_run_that_works_clears_it(cwd, tmp_path, cards,
                                                                                             forks):
-    forks.answer = stream(json.dumps(ANSWER), model="claude-opus-4-8")
+    forks.replied = "claude-opus-4-8"
     lv, p = _attach(cwd, tmp_path)
     _append(p, lv, _turn("Who replies?", "cut-1"))
     await _settle()
     assert [r["name"] for r in cards] == ["Reply Network"] and _runs()[0]["fallback"] == "claude-opus-4-8"
     assert _shown_notice()["text"] == "This view proposal came from Opus 4.8: Claude's safeguards switched models."
     cards.clear()
-    forks.answer = stream(json.dumps({"show": False, "why": "Nothing new.", "proposal": None}))
+    forks.replied = None
+    forks.answer = result({"show": False, "why": "Nothing new.", "proposal": None})
     _append(p, lv, _turn("And now?", "cut-2"))
     await _settle()
     assert _shown_notice() is None and _runs()[-1]["show"] is False
 
 
-# ----------------------------------------------------------------------------- the command and its environment
+# ----------------------------------------------------------------------------- the fork
 
 
 def _lv(**kw: Any) -> session.Live:
@@ -256,28 +260,40 @@ def _lv(**kw: Any) -> session.Live:
     return lv
 
 
-def test_the_fork_command_resumes_main_at_the_cut_with_no_tool(monkeypatch):
-    monkeypatch.setattr(config, "CLI_PATH", "/bin/claude")
-    argv = proposer._argv(_lv(), "cut-1", "claude-opus-5-5", "medium", "standard")
-    assert argv[:-5] == ["/bin/claude", "-p", "--resume", SID, "--resume-session-at", "cut-1", "--fork-session",
-                         "--no-session-persistence", "--model", "claude-opus-5-5", "--effort", "medium", "--tools", "",
-                         "--strict-mcp-config", "--disable-slash-commands", "--safe-mode", "--setting-sources", "user",
-                         "--permission-mode", "dontAsk"]
-    assert argv[-5] == "--settings" and argv[-3:] == ["--output-format", "stream-json", "--verbose"]
-    settings = json.loads(argv[-4])
-    assert settings == {"fastMode": False, "ultracode": False, "env": {"CLAUDE_CODE_EFFORT_LEVEL": "medium"},
-                        "advisorModel": "off"}
-    haiku = proposer._argv(_lv(), "cut-1", "claude-haiku-4-5-20251001", "medium", "standard")
-    assert "--effort" not in haiku
+async def test_the_fork_is_a_model_call_of_agent_call_that_forks_main(monkeypatch):
+    got: dict = {}
+
+    async def structured(c, prompt, **kw):
+        got.update(c=c, prompt=prompt, **kw)
+        return result(ANSWER)
+
+    monkeypatch.setattr(agent_call, "structured", structured)
+    res = await proposer._fork(CORPUS, _lv(model="claude-opus-5-5", effort="high"), "THE PROMPT")
+    assert res.output == ANSWER and got["prompt"] == "THE PROMPT" and got["fork"] is True
+    assert got["title"] == "thimble: view proposal" and got["done"] == "thimble checked for a view proposal"
+    assert got["model"] == "claude-opus-5-5" and got["timeout_s"] == proposer.FORK_TIMEOUT_S
+    assert got["tool"].input_schema["required"] == ["show", "why", "proposal"]
 
 
-def test_the_fork_s_environment_has_main_s_config_dir_and_none_of_thimble_s(monkeypatch):
-    monkeypatch.setenv("THIMBLE_SESSION", "s1")
-    monkeypatch.setenv("ANTHROPIC_MODEL", "claude-sonnet-5")
-    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/served")
-    monkeypatch.setattr(config, "_served_config", None)
-    env = proposer._env(_lv(config_known=True, config="/main-cc"))
-    assert env["CLAUDE_CONFIG_DIR"] == "/main-cc" and env["ANTHROPIC_MODEL"] == "" and env["SHLVL"] == "1"
-    assert not [k for k in env if k.startswith("THIMBLE_")]
-    assert "CLAUDE_CONFIG_DIR" not in proposer._env(_lv(config_known=True, config=None))
-    assert proposer._env(_lv())["CLAUDE_CONFIG_DIR"] == "/served", "unknown: the served config dir"
+def test_the_answer_s_schema_takes_a_proposal_or_none_and_parse_reads_what_fits():
+    for ok in (ANSWER, {"show": False, "why": "Nothing new.", "proposal": None},
+               {**ANSWER, "proposal": {**ANSWER["proposal"], "claims": "board.jsonl"}}):
+        assert agent_call._invalid(proposer.SCHEMA, ok) == "" and proposer.parse(json.dumps(ok))[0] is not None
+    for bad in ({"show": True, "why": "x", "proposal": None}, {"show": "yes", "why": "", "proposal": None},
+                {**ANSWER, "proposal": {**ANSWER["proposal"], "claims": []}}):
+        assert agent_call._invalid(proposer.SCHEMA, bad), bad
+
+
+def test_the_threads_part_takes_the_room_main_s_context_leaves():
+    assert proposer._threads_budget(_lv(context_tokens=10_000), 20_000) == proposer.CONTEXT_CHARS
+    tight = proposer._threads_budget(_lv(context_tokens=150_000), 20_000)
+    assert tight == (200_000 - 150_000 - proposer.RESERVE_TOKENS) * 4 - 20_000
+    assert proposer._threads_budget(_lv(context_tokens=175_000), 20_000) == proposer.MIN_CONTEXT_CHARS
+    assert proposer._threads_budget(_lv(context_tokens=185_000), 20_000) == proposer.CONTEXT_CHARS, "the 1M window"
+    assert proposer._threads_budget(_lv(context_tokens=990_000), 20_000) == proposer.MIN_CONTEXT_CHARS
+
+
+def test_the_fork_s_transcript_is_beside_main_s(tmp_path):
+    lv = _lv(transcript_path=str(tmp_path / f"{SID}.jsonl"))
+    assert proposer.fork_transcript(lv, "a1b2") == tmp_path / SID / "subagents" / "agent-a1b2.jsonl"
+    assert proposer.fork_transcript(lv, "../x") is None and proposer.fork_transcript(lv, None) is None

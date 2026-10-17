@@ -5,11 +5,11 @@
 > person each question it lists (often there are none), and pass the flag for each of their answers. Answer none of
 > them yourself.
 
-thimble uses whichever auth path you have configured for `claude`: every model call runs through your own `claude`, in
-your config dir with your user settings. thimble's agents and its single model calls (card checks, prompt labels,
-label drafts, whether an extension's view fits, viewer suggestions) run as subagents of your Claude Code session, under
-its permission mode; its view proposals and `thimble fix` run as `claude -p` jobs in folders of their own, so auth
-set only in a project's `.claude/` settings does not reach them. thimble tells you when `claude` is missing or not
+thimble uses whichever auth path you have configured for `claude`, and starts no Claude Code session of its own: its
+agents and its single model calls (card checks, prompt labels, label drafts, whether an extension's view fits, viewer
+suggestions) run as subagents of your Claude Code session, under its permission mode and sign-in, and so do view
+proposals, as a fork of your session that reads its conversation and uses no tools. With no Claude Code session running
+thimble in the folder, these features say so and how to start one. thimble tells you when `claude` is missing or not
 logged in.
 
 What thimble's agents may do, and on which models, is set in `~/.thimble/config.json`: [docs/config.md](docs/config.md).
@@ -70,9 +70,8 @@ dismiss it, it stays off for that workspace.
 Code tickets and view builds are subagents of your session, so they run in its mode, Bypass included. thimble's own
 jobs (an extension's program that runs the dev agent, and the sessions thimble's server runs) follow your session's
 mode, but never Bypass: Settings offers Manual and Auto for them, and a session in Bypass, or `"bypass"` in thimble's
-config, counts as Manual. `thimble fix` asks you in the terminal before its change reaches thimble's code, and before it
-starts where its sandbox can't run. Nobody can answer it while it works, so it runs its commands without asking, in its
-sandbox where that can run.
+config, counts as Manual. `thimble fix` starts no Claude Code session: it says what `thimble doctor` finds, and you make
+the repair in your own Claude Code session, opened in thimble's checkout.
 
 To be asked less, add this to `~/.claude/settings.json`, with the path from the `workspaces_dir` line of
 `thimble doctor --verbose` (in a development install, also `~/.thimble/dev/trees`, made first with `mkdir -p`):

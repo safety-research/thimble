@@ -1,5 +1,5 @@
 #!/bin/sh
-''''[ -n "${THIMBLE_SESSION:-}" ] && [ -n "${THIMBLE_SESSION_TOKEN:-}" ] && exit 0; h="${THIMBLE_HOME:-$HOME/.thimble}"; case "${1:-}" in --stream|--scratch|--work-budget) ;; --rekey) [ -z "${CLAUDE_PROJECT_DIR:-}" ] || [ ${#CLAUDE_PROJECT_DIR} -gt 200 ] || [ -e "$h/active/$(printf %s "$CLAUDE_PROJECT_DIR" | tr / %)" ] || exit 0;; *) if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ]; then [ -e "$h/up/$CLAUDE_CODE_SESSION_ID.active" ] || exit 0; else [ -z "${CLAUDE_PROJECT_DIR:-}" ] || [ ${#CLAUDE_PROJECT_DIR} -gt 200 ] || [ -e "$h/active/$(printf %s "$CLAUDE_PROJECT_DIR" | tr / %)" ] || exit 0; fi;; esac; exec "$(dirname "$0")/thimble-python" -S "$0" "$@" # '''
+''''[ -n "${THIMBLE_SESSION:-}" ] && [ -n "${THIMBLE_SESSION_TOKEN:-}" ] && exit 0; h="${THIMBLE_HOME:-$HOME/.thimble}"; case "${1:-}" in --stream|--scratch|--work-budget) ;; --fork-guard) [ -s "$h/up/${CLAUDE_CODE_SESSION_ID:-none}/forks" ] || exit 0;; --rekey) [ -z "${CLAUDE_PROJECT_DIR:-}" ] || [ ${#CLAUDE_PROJECT_DIR} -gt 200 ] || [ -e "$h/active/$(printf %s "$CLAUDE_PROJECT_DIR" | tr / %)" ] || exit 0;; *) if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ]; then [ -e "$h/up/$CLAUDE_CODE_SESSION_ID.active" ] || exit 0; else [ -z "${CLAUDE_PROJECT_DIR:-}" ] || [ ${#CLAUDE_PROJECT_DIR} -gt 200 ] || [ -e "$h/active/$(printf %s "$CLAUDE_PROJECT_DIR" | tr / %)" ] || exit 0; fi;; esac; exec "$(dirname "$0")/thimble-python" -S "$0" "$@" # '''
 """thimble's watcher: how thimble's events reach the analyst's Claude Code session, and how its hooks follow the
 session. The plugin's hooks (plugin/hooks/hooks.json) run it, and where those hooks are off (the Monitor route) main's
 Monitor does.
@@ -18,6 +18,8 @@ folder and for its real path (app/cli.py mark_active) and `thimble rm` takes awa
 when Claude Code names no folder, and for a folder path over 200 characters, for which no marker is written. --rekey,
 whose session is new and has no marker yet, meets the folder's gate; --stream, --scratch and --work-budget never meet
 the gate, since only main's Monitor and the sessions of an extension's program run them, where thimble put them.
+--fork-guard, which runs before every tool call, has a gate of its own: it exits before Python starts unless the
+session's list of running forks (<home>/up/<session id>/forks) holds one.
 
     .thimble-watch                      the asyncRewake hook (SessionStart, Stop, PreToolUse, UserPromptSubmit)
     .thimble-watch --permission         the PermissionRequest hook: tells the server a prompt waits, decides nothing
@@ -31,6 +33,8 @@ the gate, since only main's Monitor and the sessions of an extension's program r
     .thimble-watch --subagent-start     the SubagentStart hook: registers one of thimble's agents or a descendant
     .thimble-watch --subagent-stop      the SubagentStop hook: a registered agent's turn ended
     .thimble-watch --caller             the PreToolUse hook of thimble's tools: which agent makes the call
+    .thimble-watch --fork-guard         the PreToolUse hook of every tool: refuses each call of a fork of main that
+                                        thimble's module started for a model call, such as a view proposal's
     .thimble-watch --denied             the PermissionDenied hook: auto mode refused a start or a message (R1)
     .thimble-watch --end                the SessionEnd hook: main's end
     .thimble-watch --rekey              the SessionStart hook for clear and resume: the session marker and the agents
@@ -709,6 +713,29 @@ def deny(reason: str) -> None:
                                              "permissionDecisionReason": reason}}))
 
 
+# why the fork guard refuses a call: a fork of main that thimble's module started for a model call (plugin/hooks/thimble.ts,
+# backend/app/agent_call.py) answers with its report alone
+FORK_NO_TOOLS = ("You answer for thimble, and you have no tools: thimble refuses every tool call that you make. Give your "
+                 "answer as your report: the JSON object that your task asks for, and no other text.")
+
+
+def fork_guard(inp: dict) -> int:
+    """--fork-guard, the PreToolUse hook of every tool: a call of a fork of main that thimble's module started for a model
+    call, which the module lists in <home>/up/<session>/forks while it runs, is refused (FORK_NO_TOOLS). Any other call
+    goes on, undecided."""
+    agent = str(inp.get("agent_id") or "")
+    session = _safe(str(inp.get("session_id") or os.environ.get("CLAUDE_CODE_SESSION_ID") or ""))
+    if not agent or not session:
+        return 0
+    try:
+        listed = (home() / "up" / session / "forks").read_text("utf-8").split()
+    except OSError:
+        return 0
+    if agent in listed:
+        deny(FORK_NO_TOOLS)
+    return 0
+
+
 # the types of thimble's eight roles (app/subagent_files.py ROLES, which a test holds this to): a start of one is denied
 # when the check itself fails, since a hook that fails lets the call run, and no such start may run unasked
 ROLE_TYPES = tuple(f"thimble:{r}" for r in ("orientation", "critic", "writer", "view-builder", "view-reviewer", "check",
@@ -1259,7 +1286,8 @@ def stream(args: list[str]) -> int:
 
 
 FILE_FIRST = {"--agent-check": agent_check, "--subagent-start": subagent_start, "--subagent-stop": subagent_stop,
-              "--caller": caller, "--denied": denied, "--end": end, "--rekey": rekey, "--agents": agents_hook}
+              "--caller": caller, "--denied": denied, "--end": end, "--rekey": rekey, "--agents": agents_hook,
+              "--fork-guard": fork_guard}
 
 
 def main() -> int:

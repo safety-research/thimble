@@ -35,11 +35,13 @@ starts an agent after its card said it did not. An Answer is a dict with exactly
                 (`expired`: true)
 Ops and their arguments:
     register                              the module registers every role again from GET /api/module/roles
-    spawn  role, prompt, description, values {model, effort}, what, request, drop
+    spawn  role, prompt, description, values {model, effort}, what, request, drop, fork
                                           register the role with `values` if they differ, `$.agent.spawn`, then the
                                           one-line note (hint module-started-note, with `what`, a server-checked name);
                                           `drop`, a model call's, is the reason the terminal UI gives when it drops
-                                          the agent's hand-back (agent_call.py)
+                                          the agent's hand-back (agent_call.py); `fork`, a model call's that needs
+                                          main's conversation, spawns Claude Code's fork type with no registration,
+                                          and the module lists the fork for the fork guard (.thimble-watch)
     send   agent, text, role, values      register the run's values if needed, then SendMessage
     stop   agent                          TaskStop
     abort                                 `$.turn.abort` of main's running turn (the analyst's Stop of main), answered
@@ -623,6 +625,8 @@ def _args(op: str, args: dict[str, Any]) -> dict[str, Any]:
             out["request"] = str(args["request"])
         if args.get("drop"):  # a model call's: the reason the terminal UI gives when it drops the agent's hand-back
             out["drop"] = str(args["drop"])
+        if args.get("fork"):  # a model call's that runs as a fork of main (agent_call.py)
+            out["fork"] = True
         return out
     if op == "send":
         return {"agent": str(args.get("agent") or ""), "text": str(args.get("text") or ""),

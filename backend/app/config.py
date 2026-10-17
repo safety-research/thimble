@@ -959,11 +959,12 @@ def safe_corpus_path(corpus: Path, rel: str) -> Path:
 #   critic     the critic, a subagent of the orientation (thimble:critic)
 #   writer     a writer, a subagent of main (thimble:writer)
 #   checks     each run of a report check (thimble:check)
-#   dev        a view build or review (thimble:view-builder, thimble:view-reviewer), a code ticket's agent
-#              (thimble:dev-ticket) and `thimble fix`'s session (dev.py)
+#   dev        a view build or review (thimble:view-builder, thimble:view-reviewer) and a code ticket's agent
+#              (thimble:dev-ticket)
 #   verify     the card check's reading of a card's picture (card_check), a classifier
 #   labels     the labels classifier (concepts), the label draft and the view fit
-#   suggest    the view proposals after a turn (proposer.py) and for a file type (views.suggest), a classifier
+#   suggest    the viewer proposal for a file type (views.suggest), a classifier; the check for a view proposal after
+#              a turn is a fork of main (proposer.py), on main's model and effort, and reads no row
 #   refusal    the model and effort a classifier's call runs on again once its model refused it (model.structured);
 #              `off` turns the rerun off
 # Layered: the role's default (ROLE_MODELS_DEFAULT; an agent file's frontmatter where it names one, ROLE_AGENTS; for the
@@ -971,8 +972,8 @@ def safe_corpus_path(corpus: Path, rel: str) -> Path:
 # THIMBLE_<ROLE>_MODEL / _EFFORT / _FAST, then thimble's config. Every role resolves to a model id (exact_model) and an
 # effort, never '' (models_for); the orientation's model carries `[1m]` where the model has a 1M-token window
 # (long_context). A stored `ultracode` (LEGACY_EFFORTS) runs at xhigh. `fast` is kept only on a model that has fast mode,
-# and only for ROLES_WITH_FAST: the classifiers, and the dev row for `thimble fix`, the one `claude -p` job of the
-# server (dev.py). thimble's agents are subagents of main, which have no fast mode of their own (Claude Code's agent
+# and only for ROLES_WITH_FAST: the classifiers, and the dev row, whose fast mode was `thimble fix`'s, which starts no
+# Claude Code session now (NOCLAUDE.md), so it reaches nothing. thimble's agents are subagents of main, which have no fast mode of their own (Claude Code's agent
 # definition has none), so a view build, a review and a code ticket's agent run without the dev row's (chosen leaves it
 # out).
 MODEL_ROLES = ("orient", "subagents", "critic", "writer", "checks", "verify", "labels", "dev", "suggest", "refusal")
@@ -982,7 +983,7 @@ ROLE_MODELS_DEFAULT: dict[str, dict[str, Any]] = {
     "writer": {"model": "claude-opus-5-5", "effort": "xhigh", "fast": False},  # under prompts/writer.md's
     "checks": {"model": "claude-opus-5-5", "effort": "high", "fast": False},  # under prompts/check.md's
     "labels": {"model": "claude-opus-5-5", "effort": "low", "fast": False},
-    "dev": {"model": "claude-opus-5-5", "effort": "high", "fast": True},  # fast mode for `thimble fix` alone
+    "dev": {"model": "claude-opus-5-5", "effort": "high", "fast": True},  # fast mode was `thimble fix`'s alone
     "verify": {"model": "claude-opus-5-5", "effort": "high", "fast": True},
     "suggest": {"model": "claude-opus-5-5", "effort": "medium", "fast": False},
     "refusal": {"model": FALLBACK_MODEL, "effort": FALLBACK_EFFORT, "fast": False, "off": not FALLBACK_MODEL},
@@ -995,10 +996,10 @@ MODEL_ALIASES = {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5", "haiku"
 # (plugin/agents/<name>.md) for `plugin:<name>`.
 ROLE_AGENTS: dict[str, str] = {"critic": "critic", "writer": "writer", "checks": "check"}
 PLUGIN_AGENTS_DIR = REPO_ROOT / "plugin" / "agents"
-# the classifiers, each a call the server makes, which runs at its own speed, and the dev row's `thimble fix`, the one
-# `claude -p` job of the server, which keeps the fast mode it had (on by default)
+# the classifiers, each a call the server makes, which runs at its own speed, and the dev row, whose fast mode was
+# `thimble fix`'s (it starts no Claude Code session now, NOCLAUDE.md)
 ROLES_WITH_FAST = ("labels", "verify", "suggest", "dev")
-# the rows whose fast mode reaches only some of their runs: the dev row's, `thimble fix`'s alone (chosen)
+# the rows whose fast mode reaches only some of their runs: the dev row's, which `thimble fix` alone took (chosen)
 FAST_OF_TICKETS = ("dev",)
 ROLE_EFFORTS = ("low", "medium", "high", "xhigh", "max")  # the levels Claude Code takes (cc_settings.EFFORTS)
 # efforts earlier builds stored, read as the level they ran at: Ultracode ran at xhigh (cc_settings.ULTRACODE_EFFORT)

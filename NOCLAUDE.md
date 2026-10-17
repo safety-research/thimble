@@ -19,11 +19,11 @@ check onto it.
 | A1d | `view_fit.ask` ← `fit_task` ← `extensions._decide` | A1 | Whether an extension's view fits the corpus | No | Only with an extension that has views. **Moved in phase 2a.** |
 | A1e | `views._suggest_call` ← `file_viewer_task` ← `POST /ws/{c}/views/suggest` | A1 | The viewer suggestion for a file of an unknown type | No | Normal use. **Moved in phase 2a.** |
 | A1f | `harness.ask` | A1 | An extension program's `ask` | No | Extension programs only. **Moved in phase 2a.** |
-| A2 | `proposer.py` `_fork` (`_argv`) | `claude -p --resume <main> --resume-session-at <cut> --fork-session --no-session-persistence --tools "" --safe-mode …` | View proposals after main's turns, a thread's answer and the first orientation's end; Try again | **Yes** (forks main's transcript) | Normal use while View proposals is on |
-| A3 | `dev.py` `Sessions._spawn` | `claude -p --session-id/--resume … --output-format stream-json` | `thimble fix` | No | Dev install, server down |
-| A4 | `harness.py` `session_route` (WebSocket `/agent/claude`) | `claude <program's flags> --plugin-dir … --settings …` | An extension program's Agent SDK session | No (a program may resume its own) | Extension programs only |
-| A5 | `harness.py` `session_call` | `claude -p --output-format json …` | A program's `session` request; a report check run by a program | No | Extension programs only |
-| A6 | `harness.py` `_run` | the program itself (`run_sdk.py` or its command), whose sessions are A4, A5, A1f | Every role or task an extension's program replaces | No | Extension programs only |
+| A2 | `proposer.py` `_fork` (`_argv`) | `claude -p --resume <main> --resume-session-at <cut> --fork-session --no-session-persistence --tools "" --safe-mode …` | View proposals after main's turns, a thread's answer and the first orientation's end; Try again | **Yes** (forks main's transcript) | Normal use while View proposals is on. **Moved in phase 2b** (a fork of main, §6) |
+| A3 | `dev.py` `Sessions._spawn` | `claude -p --session-id/--resume … --output-format stream-json` | `thimble fix` | No | Dev install, server down. **Gone in phase 2b** (refuses, §6) |
+| A4 | `harness.py` `session_route` (WebSocket `/agent/claude`) | `claude <program's flags> --plugin-dir … --settings …` | An extension program's Agent SDK session | No (a program may resume its own) | Extension programs only. **Gone in phase 2b** (refuses, §6) |
+| A5 | `harness.py` `session_call` | `claude -p --output-format json …` | A program's `session` request; a report check run by a program | No | Extension programs only. **Gone in phase 2b** (refuses, §6) |
+| A6 | `harness.py` `_run` | the program itself (`run_sdk.py` or its command), whose sessions are A4, A5, A1f | Every role or task an extension's program replaces | No | Extension programs only. **Phase 2b**: an `sdk` program no longer starts; a `command` program runs, with no session (§6) |
 
 `model.py`'s docstring also names view review and the checks task as callers: `view_review.review_task` only returns
 an error (the review is a subagent already), and `checks.check_task` runs only under a program (A5).
@@ -219,14 +219,13 @@ of its own (one Agent SDK session per batch, up to 24 at once), same corpus, lab
    user text), `on_answer` writing each batch's labels, and `agents` = 2 to 4 in place of CONCURRENCY 24. A large run's
    speed against 24 SDK sessions needs measuring; the budget per agent and `AHEAD` are the knobs. The label draft is
    one part. `config.auth_problem` (B) before a run can stay or go: a refusal now says what is wrong.
-2. **View proposals (A2)** need main's conversation, which a subagent does not have. Options: give the call the
-   transcript tail as text (the proposer already cuts at a turn), or make the proposal a fork of main started by the
-   module (`Agent` with a fork type, as threads are). The owner's call.
+2. **View proposals (A2)** need main's conversation. Done in phase 2b: a fork of main started by the module (§6).
 3. **View fit, the viewer suggestion (A1d, A1e)**: done in phase 2a, one part each.
-4. **Extension programs (A4 to A6; A1f moved in phase 2a)**: programs that start `claude` contradict the decision. Either programs lose
-   `sdk` (keep `command`, whose model calls go through a thimble endpoint that makes an `agent_call`), or programs run
-   only when the analyst starts them. Then `model.py`, `sdk.py` and `claude_agent_sdk` go.
-5. **`thimble fix` (A3)** is a developer command; it could run as a code ticket (a subagent already).
+4. **Extension programs (A4 to A6; A1f moved in phase 2a)**: programs that start `claude` contradict the decision.
+   Phase 2b: programs lose `sdk` and sessions, and keep `command`, whose model calls go through `ask` (§6).
+   Then `model.py`, `sdk.py` and `claude_agent_sdk` go.
+5. **`thimble fix` (A3)** is a developer command. Phase 2b: it refuses with its fix, the repair in the analyst's own
+   Claude Code (§6).
 6. **Manual mode.** Two asks per card check. Options: accept it (Claude Code's own behavior), keep pictures out of
    the check (one ask), or let the module answer the permission decision for a call agent's own two tools, which only
    read the call and record an answer. The owner's call. Phase 2a makes it weigh more (not checked live): a prompt
@@ -239,3 +238,78 @@ of its own (one Agent SDK session per batch, up to 24 at once), same corpus, lab
 8. **Docs.** docs/agents.md and docs/config.md describe tasks as model calls of thimble's; update them as each caller
    moves. The card check's lines are updated in INSTALL.md. (Phase 2a: INSTALL.md, docs/agents.md's `ask` and
    docs/config.md's classifier rows are updated.)
+
+## 6. Phase 2b (branch 090/noclaude-2b)
+
+### View proposals (A2): a fork of main
+
+The mod API can fork main as a subagent: `$.agent.spawn({ subagentType: "fork", prompt, description })` from thimble's
+module starts Claude Code's fork type, which inherits main's conversation, model and effort (spike, Claude Code
+2.1.301: the fork read main's earlier turns, 23k tokens served from the prompt cache, and answered in 3 s). So the
+proposer forks main, which keeps its input closest to `--resume --fork-session`, at no extra cost for main's context;
+the transcript-text alternative would send main's conversation again, cut, with no cache.
+
+- `agent_call` takes `fork` (Spec.fork, `structured(fork=True)`): one part, no pictures; the module spawns the fork
+  (`spawn` with `fork`, no registration, no note); its first message is the part's text with the answer's schema
+  (call-task.md `fork`); its answer is its report, a JSON object checked against the schema when its run ends
+  (`_agent_ended`). An answer that does not fit gives the part to a second fork once; a refusal or an API error fails at
+  once, since a fork cannot change its model (no refusal-row rerun).
+- **Tools.** A fork has main's tools, and the module's hooks never see the calls of an agent the module started (the
+  recursion skip: a spike fork's Bash ran, unseen by the module's `tool.call` hook). So the module lists each running
+  fork in `<home>/up/<session>/forks`, and the fork guard, a PreToolUse hook on every tool (`.thimble-watch
+  --fork-guard`), refuses every call of a listed agent. Its first shell line exits unless the list holds a fork, so no
+  Python starts on main's calls.
+- **Main.** The fork runs in the background and never interrupts main. Claude Code sends no hand-back of a fork the
+  plugin started (spike and smoke, auto mode), so main's chat shows nothing; were one sent, the terminal UI drops it
+  with `thimble checked for a view proposal`. While it runs, Claude Code's agent list shows `thimble: view proposal`.
+- **The mirror** makes no chat for a model call's agent or fork (a role with no chat role): phase 1's card checks had
+  made a stray agent chat in main for each call agent, which this fixes too.
+- **The proposer**: plan mode holds the job (thimble starts nothing in plan mode); the threads part is cut to the room
+  main's context leaves (`_threads_budget`); the model that replied, for the fallback notice, comes from the fork's
+  transcript; `no_session` is a notice with its fix. Proposals run on main's model and effort: the `suggest` row now
+  reaches only the viewer suggestion (A1e).
+- `$.model.fork` (one tool-less completion over main's transcript, in main's process) would need no guard, but it is
+  no subagent and shows nowhere in Claude Code; the owner's rule asks for a subagent.
+
+### `thimble fix` (A3): refuses with its fix
+
+`thimble fix` runs when the server is down, from a shell or /thimble fix: there is no server, often no Claude Code
+session with thimble on, and its work (a worktree, gates, an apply) is a code ticket's, which needs the server. A
+subagent of main cannot take it. So it refuses: it prints what thimble doctor finds and says to open Claude Code in
+thimble's checkout and ask it for the repair (the analyst's own session makes it), then `thimble server restart`; with the
+server up it asks for a code ticket, a subagent of main, as before. dev.Sessions, run_fix, fix_offline and
+prompts/dev-fix.md are gone.
+
+### Extension programs (A4 to A6): no session from thimble
+
+A program's model calls go through `ask` (A1f, phase 2a's). What needed a Claude Code session refuses:
+
+- an Agent SDK program (`sdk`) does not start (harness.NO_SDK names the extension, Settings and the `command` way),
+  since its whole work is sessions of its own; Settings' line says thimble no longer starts it;
+- a `session` request, the kit's `session()` and `options()`, and the session route (`/agent/claude`, which still
+  answers `claude -v`) answer harness.NO_SESSION;
+- a `command` program runs as before, in its box. claude_shim.py, run_sdk.py, the session flag code (claude_argv,
+  StdinFilter) and docs/examples/orient-sdk are gone; docs/agents.md and docs/extensions.md say so.
+
+### Tests and the live smoke
+
+- Backend: test_agent_call (a fork's answer checked against the schema, a second fork, a refused fork, no pictures),
+  test_proposer (the fork call, plan mode, the schema, the threads budget, the fork's transcript, no_session),
+  test_subagent_mirror (no chat for a call's agent or fork), test_subagent_hooks (the fork guard, its hooks.json entry),
+  test_module_bridge (the `fork` argument), test_cli (`thimble fix`'s refusal), test_agent_programs and
+  test_task_programs (an SDK program does not start; a session request is refused and starts no claude).
+- The module: thimble.test.ts "spawns a model call's fork of main …" (fork type, the forks list, the report posted).
+- Live (Claude Code 2.1.301, local transport, auto mode, toy-incident): main answered a question about the board in
+  71 s with three cards; 3 s after its turn ended the fork ran (6.2 s, no tool call, a JSON answer), and the row `view
+  proposal Board Threads` showed above the prompt. Main's transcript holds nothing of the fork, main had no new turn,
+  the forks list was empty after it, and the workspace has no chat for it.
+
+### Left for later
+
+1. Settings' dev-row fast switch ("thimble fix's fast mode") and `config.FAST_OF_TICKETS` now reach nothing; the
+   doctor's `bash sandbox` line and `sandbox.use` reach only an extension program's box.
+2. The extension schema still accepts `sdk`, so an old extension loads and says why it does not run; a later release
+   can drop the key.
+3. Manual mode with a fork: its tool calls are refused before Claude Code asks, so no prompt should show; not checked
+   live.
+

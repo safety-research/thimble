@@ -2,18 +2,21 @@
 
 An extension can run one of thimble's roles its own way: the orientation, the critic, the writer or the dev agent.
 Main, your own Claude Code session, takes prompt additions only. It can run any of thimble's seven tasks its own way
-too (below). `agents/<role>/agent.json` or `tasks/<task>/task.json` names one of three ways:
+too (below). `agents/<role>/agent.json` or `tasks/<task>/task.json` names one of these ways:
 
 | way | agent.json | what thimble runs |
 |---|---|---|
 | prompt | `"prompt": "prompt.md"` | thimble's own agent with your prompt added, or in place of thimble's with `"replace": true` |
-| Agent SDK | `"sdk": "orient.py"` | your Python program's `run(input)`, written with the Claude Agent SDK |
 | command | `"command": ["node", "orient.mjs"]` | any program, started from the role's folder, speaking the JSON lines below |
+
+thimble starts no Claude Code session of its own: every model call runs as a subagent of your Claude Code session. So a
+program gets no Claude Code session from thimble, and an Agent SDK program (`"sdk": "orient.py"`, a way of earlier
+versions) does not start: the role or task says why, and Settings names the extension, which you turn off there to get
+thimble's own agent back. A program asks a model with `ask` (below).
 
 A program replaces thimble's agent for that role, or thimble's own implementation of that task. When two active
 extensions replace the same role or task, thimble runs its own and Settings names both.
-[examples/orient-sdk](examples/orient-sdk) is a whole orientation written with the Agent SDK, and
-[examples/vote-labels](examples/vote-labels) a labels task that has three models vote.
+[examples/vote-labels](examples/vote-labels) is a labels task that has three models vote.
 
 ## What a program gets
 
@@ -54,10 +57,8 @@ answers or check one.
 A task's program runs under the settings of an agent in thimble's config: `labels` for labels, label-draft and
 view-fit, `cardCheck` for card-check and view-review, `dev` for file-viewer and `checks` for checks. It takes that
 agent's `network`, `data`, `env` and `sandbox` ([config.md](config.md)), with the network and the sandbox on by
-default. `labels` and `cardCheck` have no `sandbox` or `web` of their own, so their programs keep the sandbox on and
-their sessions never use the web. Only the checks task's program has a thread, so nobody can answer what another
-task's program would ask: it never edits the corpus unless that agent's `data` is `allow`, its sessions use the web
-only when its `web` is `allow`, and any other permission request is denied.
+default. `labels` and `cardCheck` have no `sandbox` of their own, so their programs keep the sandbox on. A task's
+program can't ask you anything, so it never edits the corpus unless that agent's `data` is `allow`.
 
 The environment:
 
@@ -68,7 +69,6 @@ The environment:
 | `THIMBLE_ROLE`, `THIMBLE_TASK`, `THIMBLE_WORKSPACE` | the role or the task (the other is empty) and the workspace |
 | `THIMBLE_AGENT_DIR` | the role's or task's folder in the extension |
 | `THIMBLE_API`, `THIMBLE_AGENT_TOKEN` | thimble's local API and a token of the program's own (below) |
-| `THIMBLE_CLAUDE` | the `claude` an Agent SDK program's sessions start with |
 | `THIMBLE_KIT_JS` | thimble's JavaScript module |
 | `THIMBLE_NETWORK` | `on` or `off`, the role's network |
 
@@ -83,42 +83,29 @@ Each line the program writes on stdout is one JSON object. thimble answers each 
 |---|---|
 | `{"id": 1, "tool": {"name": "add_card", "args": {...}}}` | calls one of the role's thimble tools as the role, answers `{"id": 1, "result": {"content", "is_error"}}` |
 | `{"id": 2, "ask": {"prompt": "...", "schema": {...}, "images": [...]}}` | one model call as a subagent of your Claude Code session (it fails when no session runs thimble in the folder), at the model and effort Settings shows for the role or the task's agent (a `model` the request names replaces the model): the object `schema` describes, or text. `images` are paths of PNG, JPEG, GIF or WebP files the model sees, such as a card-check task's `picture` |
-| `{"id": 3, "session": {"prompt": "...", "system": "...", "tools": [...], "model": "..."}}` | runs a Claude Code session as the role or task and answers with its last reply |
+| `{"id": 3, "session": {...}}` | refused with an error: thimble starts no Claude Code session for a program |
 | `{"id": 4, "default": {"input": {...}, "model": "..."}}` | a task only: runs thimble's own implementation of the task on `input` and answers with its output |
 | `{"log": "text"}` | adds a line to the agent's thread, or to thimble's log for a task's program, which has no thread |
 | `{"output": ...}` | what the role or task returns; the last line |
 
 A refused or failed request is answered `{"id": 1, "error": "why"}`. Any other line on stdout, and everything on stderr,
 goes to thimble's log. The run is done when the program exits 0. Any other exit fails it, with the end of stderr as the
-error the thread shows. Stop ends the program and its sessions.
+error the thread shows. Stop ends the program.
 
 In Python, the `thimble` module is on the path: `thimble.serve(run)` reads the input, calls `run`, sends what it returns
-and exits. `thimble.tool`, `thimble.ask`, `thimble.session`, `thimble.log` and `thimble.prompt("file.md", **slots)` make
-the requests, and `thimble.default(input)` a task's. An `sdk` program only defines `run(input)`. In JavaScript or
-TypeScript:
+and exits. `thimble.tool`, `thimble.ask`, `thimble.log` and `thimble.prompt("file.md", **slots)` make the requests, and
+`thimble.default(input)` a task's; `thimble.session` and `thimble.options` raise an error, since thimble starts no Claude
+Code session for a program. In JavaScript or TypeScript:
 
 ```js
-import { query } from '@anthropic-ai/claude-agent-sdk'
 const thimble = await import(process.env.THIMBLE_KIT_JS)
 
 thimble.serve(async (input) => {
-  let survey = ''
-  for await (const m of query({ prompt: 'Survey the corpus.', options: thimble.options({ maxTurns: 40 }) })) {
-    if (m.type === 'result') survey = m.result
-  }
+  const survey = await thimble.ask(`Name the three main kinds of record in ${input.corpus}.`)
   await thimble.tool('add_card', { question: 'What does the corpus hold?', kind: 'note', text: survey })
   return survey.split('\n')[0]
 })
 ```
-
-`thimble.options()` (in both languages) hands the Agent SDK thimble's `claude`. Its sessions then start on your own
-Claude Code login, in the role's work folder with the corpus added, under your Claude Code session's permission mode
-and the role's sandbox and config, with thimble's tools. Your program chooses the prompt, the system prompt, the model, the turns and the
-subagents. thimble keeps the permission mode, the settings, the hooks and the folders. So a subagent's
-`permissionMode`, `hooks` and `memory` are dropped, and so are MCP servers that would run outside the program (only
-the SDK's own `sdk` servers and servers named by their name stay). A request to change the permission mode, the
-settings, the plugins, the login or the environment is answered with an error, and a hook of yours can deny or ask
-but not allow a call.
 
 The local API takes the program's token on `POST $THIMBLE_API/api/tools/<tool>` for the role's own tools, with
 `{"args": {...}}` as the body. The token is valid while the program runs. Each request carries `x-thimble-agent` (the
@@ -133,12 +120,10 @@ its own included.
 - **Sandbox** (`sandbox`, on by default): the program runs in Anthropic's sandbox runtime and writes only its own
   folder (and, for the dev agent, the view's folder). Off, it writes anywhere you can.
 - **Network** (`network`, on by default): off, the program reaches no host and talks to thimble only on
-  stdin and stdout, so `session` and `ask` work and the Agent SDK's own sessions do not.
+  stdin and stdout, where `ask` works.
 - **Your data** (`data`, `ask` by default): an edit of a file in the corpus goes to you first in every permission mode.
   `allow` leaves it to the permission mode, and `off` refuses it. The program itself can't ask, so in its sandbox it
-  writes the corpus only with `allow`. Its sessions' edits are asked.
+  writes the corpus only with `allow`.
 - **thimble's token**: a program gets a token of its own, valid only for its role's tools and only while it runs. In its
   sandbox it can't read `server.json`, which holds the local API's token, `session.key`, `paired.json` or Claude Code's
   credentials file. Where its sandbox can't run, it can, and thimble shows a notice the first time it runs.
-- A program's sessions run in your Claude Code session's permission mode and ask for permission on the agent's card in
-  the browser.

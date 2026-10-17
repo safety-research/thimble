@@ -314,3 +314,106 @@ label's batches, a label draft, whether an extension's view fits, a card check a
 of your Claude Code session, at its speed, so `fast` changes only the check for a view proposal after a turn." Old
 "Each runs at exactly the model, effort and fast mode Settings shows for its row", new "Each runs at exactly the model
 and effort Settings shows for its row".
+
+# Phase 2b (branch 090/noclaude-2b): view proposals, `thimble fix`, extension programs
+
+## 18. The view proposal's message: a fork of main (prompts/call-task.md `fork`)
+
+The proposer's text (prompts/view-propose.md and its sections: the threads, the orientation, the views, Now) is the
+same. Before, it was the first user message of `claude -p --resume <main> --fork-session --tools ""`, after main's
+conversation. Now Claude Code's fork type carries main's conversation, and Claude Code puts its own fork text before
+the message ("You are a worker fork. … Execute ONE directive, then stop." with its rules, then "Your directive:"). thimble
+adds this section after the proposer's text.
+
+Old: none.
+
+New (`{{text}}` is the proposer's text, `{{tool}}` the answer's description below, `{{schema}}` the answer's schema):
+
+> {{text}}
+>
+> # Your answer
+>
+> You are a fork of the analyst's session with Claude, so the conversation above is the session's conversation. You
+> have no tools: thimble refuses each tool call that you make. {{tool}} Your report is your answer. Give one JSON object
+> that agrees with this schema, and no other text:
+>
+> ```json
+> {{schema}}
+> ```
+
+New, the answer's description (proposer.ANSWER):
+
+> Your decision, as the section "Your answer" above describes it.
+
+New, the schema: `show` (boolean), `why` (text), `proposal` (null, or an object with `name`, `description`, `task` and
+`claims`, a text or a list of texts), all three required, and `proposal` an object when `show` is true.
+
+## 19. The fork guard's refusal (plugin/bin/.thimble-watch FORK_NO_TOOLS)
+
+The reason Claude Code gives a fork of main that calls a tool. Before, the fork had no tools (`--tools ""`).
+
+Old: none.
+
+New:
+
+> You answer for thimble, and you have no tools: thimble refuses every tool call that you make. Give your answer as
+> your report: the JSON object that your task asks for, and no other text.
+
+## 20. What main's terminal shows
+
+Old: nothing (the fork ran as a separate `claude -p`).
+
+New: while the fork runs, Claude Code's agent list shows `thimble: view proposal`. When it ends, nothing: Claude Code
+sent no hand-back of a fork that the plugin started (live check, auto mode). If one comes, the terminal UI drops it
+with the row `thimble checked for a view proposal`.
+
+## 21. `thimble fix` with the server down (backend/app/cli.py FIX_IN_SESSION)
+
+Printed after `thimble doctor`'s text by `thimble fix` and by /thimble fix, which main reads.
+
+Old: thimble fix ran a `claude -p` session on prompts/dev-fix.md (removed):
+
+> ## The server is down
+>
+> You bring the server back, as a Claude Code session in a git worktree of the live checkout, at {{worktree}}, with
+> no validation stack. `thimble fix` fast-forwards the live checkout to your branch and restarts the server. …
+
+New:
+
+> thimble fix starts no Claude Code session of its own: thimble's model calls run only as subagents of your Claude
+> Code session. To repair the server, open Claude Code in thimble's checkout ({repo}) and ask it to fix what thimble
+> doctor reports above, then run `thimble server restart`. While the server runs, ask Claude in a thimble session to
+> file a code ticket instead.
+
+The /thimble skill's description, old: "`/thimble fix` repairs a server that will not start". New: "`/thimble fix` says
+how to repair a server that will not start". `thimble --help`, old: "repair a server that will not start, with
+thimble's dev agent". New: "a server that will not start: what doctor finds, and how to repair it".
+
+## 22. Extension programs (backend/app/harness.py, agent_kit)
+
+An Agent SDK program does not start. Old: none (it started). New (NO_SDK, the start's error, which main or the
+browser shows; `{name}` the extension, `{who}` the role or task):
+
+> The {name} extension runs the {who} as an Agent SDK program, which starts Claude Code sessions of its own, and
+> thimble no longer starts any: each model call runs as a subagent of your Claude Code session. Turn the extension off
+> in Settings to run thimble's own {who}, or ask its author for a `command` program, which asks a model with `ask`.
+
+A `session` request, the kit's session() and options(), and the session route. Old: a Claude Code session ran. New
+(NO_SESSION, the error the program reads):
+
+> thimble starts no Claude Code session for a program: each model call runs as a subagent of the analyst's Claude Code
+> session. Ask a model with `ask` instead.
+
+Settings' line for an SDK program, old: "runs {who} as an Agent SDK program". New: "runs {who} as an Agent SDK
+program, which thimble no longer starts".
+
+## 23. INSTALL.md
+
+Old (line 10, after phase 1): "its other single model calls (labels, view proposals) and `thimble fix` run as
+`claude -p` jobs in folders of their own". New: "and so do view proposals, as a fork of your session that reads its
+conversation and uses no tools; its other single model calls (labels) run as `claude -p` jobs in folders of their own".
+
+Old (Permissions): "`thimble fix` asks you in the terminal before its change reaches thimble's code, and before it
+starts where its sandbox can't run. Nobody can answer it while it works, so it runs its commands without asking, in its
+sandbox where that can run." New: "`thimble fix` starts no Claude Code session: it says what `thimble doctor` finds, and
+you make the repair in your own Claude Code session, opened in thimble's checkout."

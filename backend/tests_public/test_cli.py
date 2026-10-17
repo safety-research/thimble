@@ -214,7 +214,7 @@ def test_fix_and_revert_run_only_in_a_development_install(home, monkeypatch, cap
     exits 1 before it asks or touches anything, and /thimble fix says the same to the session."""
     monkeypatch.setattr(cli, "is_git_checkout", lambda: False)
     touched: list[str] = []
-    for name in ("healthy", "fix", "revert", "fix_refusal", "restart"):
+    for name in ("healthy", "revert", "restart"):
         monkeypatch.setattr(cli, name, lambda *a, _n=name, **k: touched.append(_n))
     assert cli.main(["fix"]) == 1
     assert capsys.readouterr().out.strip() == cli.DEV_ONLY_LINES["fix"]
@@ -223,6 +223,23 @@ def test_fix_and_revert_run_only_in_a_development_install(home, monkeypatch, cap
     assert cli._action(type("A", (), {"action": "fix"})(), True, "http://127.0.0.1:1") == 0
     assert capsys.readouterr().out.strip() == cli.DEV_ONLY_LINES["fix"]
     assert touched == []
+
+
+def test_fix_with_the_server_down_starts_no_claude_and_says_how_to_repair_it_in_a_session(home, monkeypatch, capsys):
+    """thimble starts no Claude Code of its own (NOCLAUDE.md): with the server down, `thimble fix` and /thimble fix
+    print what thimble doctor finds and the repair in the analyst's own Claude Code; with it up, the code ticket."""
+    monkeypatch.setattr(cli, "is_git_checkout", lambda: True)
+    monkeypatch.setattr(cli, "doctor_text", lambda **k: "DOCTOR")
+    monkeypatch.setattr(cli, "healthy", lambda *a, **k: False)
+    assert cli.main(["fix"]) == 1
+    out = capsys.readouterr().out
+    assert out.startswith("DOCTOR") and "starts no Claude Code session of its own" in out
+    assert f"open Claude Code in thimble's checkout ({config.REPO_ROOT})" in out
+    assert cli._action(type("A", (), {"action": "fix"})(), False, "http://127.0.0.1:1") == 0
+    assert "starts no Claude Code session of its own" in capsys.readouterr().out
+    monkeypatch.setattr(cli, "healthy", lambda *a, **k: True)
+    assert cli.main(["fix"]) == 0
+    assert cli.FIX_INSTRUCTION in capsys.readouterr().out
 
 
 SERVER_LIKE = [sys.executable, "-c", "import time; time.sleep(60)", "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1",

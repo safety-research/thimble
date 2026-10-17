@@ -1525,7 +1525,8 @@ def _row(kind: str, name: str, about: str) -> str:
 
 
 WAYS = {"prompt": "adds to {who}'s prompt", "replace": "replaces {who}'s prompt",
-        "sdk": "runs {who} as an Agent SDK program", "command": "runs {who} as a program of its own"}
+        "sdk": "runs {who} as an Agent SDK program, which thimble no longer starts",
+        "command": "runs {who} as a program of its own"}
 ROLE_NAMES = {"main": "main", "orientation": "the orientation", "critic": "the critic", "writer": "the writer",
               "dev": "the dev agent"}  # each role as a sentence names it
 
