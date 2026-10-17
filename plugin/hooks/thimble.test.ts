@@ -10,7 +10,7 @@
 // (`expect`), and the HMAC-SHA256 the fake server signs with (hmacSha256).
 import { describe, expect as check, test as it } from 'claude-code/testing'
 
-import { ABORT_WAIT_MS, CALL_DONE, PRIVATE_FALLBACK, callDone, checkName, hmac, register } from './thimble'
+import { ABORT_WAIT_MS, CALL_DONE, PRIVATE_FALLBACK, callDone, checkName, hmac, ownNotice, register } from './thimble'
 
 type Json = Record<string, any>
 
@@ -693,6 +693,22 @@ describe('ends and sessions', () => {
     await e.agentCall({ subagentType: 'thimble:check', prompt: 'Check the answer.', description: 'check: Important details · cards' }, 'aTypedCheck')
     await e.agentCall({ subagentType: 'thimble:orientation', prompt: 'Orient.' }, 'aTypedOrient')
     expect([check.agentId, writer.agentId, 'aTypedCheck', 'aTypedOrient', 'someone-else'].map(checkName)).toEqual(['Judgment calls', undefined, 'Important details', undefined, undefined])
+  })
+
+  it("knows Claude Code's task notification of its own check or call agent, which the terminal UI drops (bug hunt E10)", async () => {
+    const server = new Server()
+    server.roles = { ...structuredClone(ROLES), call: { name: 'call', description: 'Does one task for thimble.', prompt: 'You do one task for thimble.', background: true, model: OPUS, effort: 'low' } }
+    const e = await started({ server })
+    const check = String((await e.server.answer(e.server.push('spawn', { role: 'check', prompt: 'p', description: 'check: Judgment calls · answers', values: {}, note: '' }))).agentId)
+    const call = String((await e.server.answer(e.server.push('spawn', { role: 'call', prompt: 'p', description: 'thimble card check: Q?', values: {}, note: '' }))).agentId)
+    const writer = String((await e.server.answer(e.server.push('spawn', { role: 'writer', prompt: 'p', description: 'writer: report', values: {}, note: '' }))).agentId)
+    const notice = (id: string, summary = 'is waiting on its own background work') =>
+      `<task-notification>\n<task-id>${id}</task-id>\n<output-file>/tmp/tasks/${id}.output</output-file>\n<status>completed</status>\n<summary>Agent "x" ${summary}</summary>\n</task-notification>`
+    expect(ownNotice(notice(check))).toBe(check)
+    expect(ownNotice(notice(call, 'finished'))).toBe(call)
+    expect(ownNotice(`${notice(check)}\n${notice(call)}`)).toBe(check)
+    // the writer's reaches main, and so does a batch that holds it, and any other prompt
+    expect([ownNotice(notice(writer)), ownNotice(`${notice(check)}\n${notice(writer)}`), ownNotice(`<agent-message from="${check}">`)]).toEqual([undefined, undefined, undefined])
   })
 
   it('keeps its poll across /clear: a hello under the new id, polls under it, the record again and a note per running agent', async () => {

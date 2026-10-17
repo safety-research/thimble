@@ -733,11 +733,13 @@ def agent_definition() -> tuple[str, dict[str, Any]]:
 def definition(c: str) -> dict[str, Any]:
     """The registration of `thimble:check` for workspace `c` (subagents.roles adds its model, effort and `background`):
     check.md's body and its frontmatter's description, as the config or the active extensions change it, and the
-    thimble tools that are not a check's taken away."""
+    thimble tools that are not a check's taken away, and Monitor."""
     with prompts.custom(userconf.prompt_files(c, "checks")):
         _, agent = agent_definition()
     out = {k: agent[k] for k in ("description", "prompt") if k in agent}
-    out["disallowedTools"] = tools.not_own(OWN_TOOLS)
+    # a check ends with its turn: no Monitor, and the foreground hook refuses a Bash or Agent call in the background
+    # (plugin/bin/.thimble-watch --foreground)
+    out["disallowedTools"] = [*tools.not_own(OWN_TOOLS), "Monitor"]
     return out
 
 

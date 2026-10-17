@@ -48,7 +48,8 @@
 //   background, where Esc would have ended it), note ($.session.append). It never starts, sends or stops anything the
 //   server did not ask for. A spawn of the call role, the card check's agent (backend/app/agent_call.py), carries
 //   `drop`, the reason the terminal UI gives when it drops a hand-back of the agent's that the hand-back hook did not
-//   take (callDone; plugin/bin/.thimble-watch --handback), and its type is never offered;
+//   take (callDone; plugin/bin/.thimble-watch --handback), or a task notification of it (ownNotice), and its type is
+//   never offered;
 // - model calls (backend/app/model_call.py), which run at once, beside that queue, so many run together (BESIDE):
 //   complete, one tool-less completion through the session's own API client and sign-in ($.model.complete, with an
 //   AbortController that a later cancel aborts), and fork, one tool-less completion over main's own transcript
@@ -1259,6 +1260,18 @@ export function checkName(agentId: string): string | undefined {
  *  this module spawned (the server names it: `thimble checked the card "…"`); undefined for any other agent. */
 export function callDone(agentId: string): string | undefined {
   return live.m?.calls.get(agentId)
+}
+
+/** The agent whose Claude Code task notification `text` is (`<task-notification>…<task-id>{id}</task-id>`), when it is
+ *  an agent of thimble's check or call role that this session started (checkName, callDone), whose end thimble shows
+ *  itself, so the terminal UI drops the notification as it does the agent's hand-back (bug hunt E10: a check that ended
+ *  its turn with work of its own in the background sent main two). Undefined for any other text, and for a batch of
+ *  notifications that names any other agent. */
+export function ownNotice(text: string): string | undefined {
+  const m = live.m
+  const ids = [...text.matchAll(/<task-notification>\s*<task-id>\s*([^<\s]+)\s*<\/task-id>/g)].map(x => x[1] ?? '')
+  if (!m || !ids.length || text.split('<task-notification>').length - 1 !== ids.length) return undefined
+  return ids.every(id => m.checks.has(id) || m.calls.has(id)) ? ids[0] : undefined
 }
 
 export const register: Register = on => {

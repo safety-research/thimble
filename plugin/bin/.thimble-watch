@@ -33,7 +33,9 @@ the gate, since only main's Monitor and the sessions of an extension's program r
     .thimble-watch --caller             the PreToolUse hook of thimble's tools: which agent makes the call
     .thimble-watch --handback           the PreToolUse hook of SubagentHandback: takes the report of a check's or the
                                         card check's agent and refuses the call, so it never reaches main
-    .thimble-watch --denied             the PermissionDenied hook: auto mode refused a start or a message (R1)
+    .thimble-watch --foreground         the PreToolUse hook of a check's Bash and Agent calls: refuses a start of work
+                                        in the background
+    .thimble-watch --denied            the PermissionDenied hook: auto mode refused a start or a message (R1)
     .thimble-watch --end                the SessionEnd hook: main's end
     .thimble-watch --rekey              the SessionStart hook for clear and resume: the session marker and the agents
                                         move to the new session
@@ -70,6 +72,17 @@ Claude Code otherwise spends asking the agent to hand back again, and then tells
 report never enters main's queue, where the terminal UI would drop it with a row of its own. It refuses nothing when the
 record cannot be written, and leaves every other agent's hand-back alone: the orientation's, a writer's or the critic's
 reach their caller, and a check that main's own Agent call started (run_check) reports to main.
+
+The foreground hook keeps a check's run to its turn (hooks.json starts it only for an agent of type thimble:check, as
+the hand-back hook): it refuses a Bash call with `run_in_background` true and an Agent call without `run_in_background`
+false, so the agent makes the call again in the foreground (`## foreground-only` of prompts/tools.md), and the check's
+registration takes Monitor away (app/checks.py definition). A check that ended its turn with work of its own still in
+the background ended it before its hand-back: its module spawn's claim of Claude Code's notification and thimble's run
+went with that first end, and each later end, once that work woke it, sent main a task notification ("is waiting on its
+own background work", then "ended without delivering a report") that main answered in the analyst's chat (bug hunt
+E10), while Claude Code's agent tray kept the agent until that work ended. Neither this hook nor the hand-back hook can
+end that work, or wait for it: a hook has seconds, has no TaskStop, and a shell ended from outside wakes the agent again
+with its notification.
 
 The permission hook only tells the server, after a press, that a prompt waits (POST /api/events/permission, which shows
 it on main's card without buttons), and prints nothing: thimble makes no allow decision, and Claude Code asks in its own
@@ -917,6 +930,33 @@ def handback(inp: dict) -> int:
     return 0
 
 
+# the agent types whose run ends with their turn, so a call of theirs that would start work in the background is refused
+# (module note); the card check's agent has no tool that starts any
+FOREGROUND_TYPES = ("thimble:check",)
+# the reason the foreground hook gives when prompts/tools.md has none (`## foreground-only`)
+FOREGROUND_ONLY = ("A thimble check ends with its turn, so it starts no work in the background. Make this call again "
+                   "with run_in_background set to false.")
+
+
+def foreground(inp: dict) -> int:
+    """The foreground hook (module note): a Bash call with run_in_background true, or an Agent call without
+    run_in_background false, of an agent of FOREGROUND_TYPES is refused; every other call goes on as it is."""
+    if str(inp.get("agent_type") or "") not in FOREGROUND_TYPES:
+        return 0
+    tool = str(inp.get("tool_name") or "")
+    args = inp.get("tool_input") if isinstance(inp.get("tool_input"), dict) else {}
+    background = args.get("run_in_background")
+    if not ((tool == "Bash" and background is True) or (tool in ("Agent", "Task") and background is not False)):
+        return 0
+    try:
+        reason = files().hint("foreground-only") or FOREGROUND_ONLY
+    except Exception:  # noqa: BLE001 — the refusal stands with its own words
+        reason = FOREGROUND_ONLY
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                             "permissionDecisionReason": reason}}))
+    return 0
+
+
 def parent_of(inp: dict, agent: str) -> str:
     """`parentAgentId` in the agent's meta.json, beside its transcript under main's session folder."""
     main = str(inp.get("transcript_path") or "")
@@ -1330,6 +1370,8 @@ def main() -> int:
             return scratch(hook_input(), args)
         if "--work-budget" in args:
             return budget(args)
+        if "--foreground" in args:  # decides from the call alone, on either transport
+            return foreground(hook_input())
         for flag, fn in FILE_FIRST.items():  # these write the workspace's files first, whatever the transport
             if flag in args:
                 return fn(hook_input())

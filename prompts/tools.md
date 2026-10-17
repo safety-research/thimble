@@ -1326,6 +1326,10 @@ Main is the analyst's chat, so thimble does not send your message there. Send it
 
 thimble already has your report. Stop now and write nothing more.
 
+## foreground-only
+
+A thimble check ends with its turn, so it starts no work in the background. Make this call again with run_in_background set to false.
+
 ## start-plan-mode
 
 Your Claude Code session is in plan mode, where thimble's agents would have to ask you before every card and every edit, so none of them starts or takes a message there. Switch out of plan mode first (shift+tab in your terminal).
