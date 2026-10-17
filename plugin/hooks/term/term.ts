@@ -320,18 +320,20 @@ export async function checkQueued(cx: Ctx): Promise<void> {
     const todo: Citation[] = []
     for (const [id, c] of rt.queue) if (!(await cx.verdict(id))) todo.push(c)
     rt.queue.clear()
-    if (todo.length) await resolveCitations(cx, todo)
+    // a call that failed (a timeout, a crash) asks again on the next pass, so its citations do not stay ◌ for good
+    if (todo.length && !(await resolveCitations(cx, todo))) for (const c of todo) if (!rt.queue.has(cid(c.raw))) rt.queue.set(cid(c.raw), c)
   } finally {
     rt.checking = false
   }
 }
 
-/** Check citations against `thimble state resolve` and keep each one's verdict. */
-export async function resolveCitations(cx: Ctx, cs: readonly Citation[]): Promise<void> {
-  if (!rt.sc || !cs.length) return
+/** Check citations against `thimble state resolve` and keep each one's verdict; false when the call failed, so none
+ *  was kept. */
+export async function resolveCitations(cx: Ctx, cs: readonly Citation[]): Promise<boolean> {
+  if (!rt.sc || !cs.length) return true
   const refs = [...new Set(cs.map(c => c.ref))]
   const got = await readState(cx, rt.sc, 'resolve', [JSON.stringify(refs)])
-  if (!got.ok) return
+  if (!got.ok) return false
   const at = await cx.now()
   for (const c of cs) {
     const res = resolutionOf(got.value, c.ref)
@@ -341,6 +343,7 @@ export async function resolveCitations(cx: Ctx, cs: readonly Citation[]): Promis
     if (res?.kind === 'report') noteDocPlace(c.ref, typeof meta.title === 'string' ? meta.title : undefined, typeof res.excerpt === 'string' ? res.excerpt : '')
     await cx.setVerdict(cid(c.raw), verdictOf(c, res, at))
   }
+  return true
 }
 
 /** The verdicts of the cards' takeaways checked again, and of every citation of a card's value seen anywhere (main's
