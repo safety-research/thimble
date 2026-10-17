@@ -200,7 +200,7 @@ uninstall() {
       -h | --help)
         printf 'usage: thimble uninstall [--yes] [--keep-home]\n'
         printf '  --yes        remove without asking\n'
-        printf '  --keep-home  keep ~/.thimble (server state; after a release install also the app copy and its workspaces); remove only the plugin registration, the link, the lines install.sh added to shell startup files, and the sign-in files and session markers in it\n'
+        printf '  --keep-home  keep ~/.thimble: your settings, the demo datasets you downloaded, the logs and thimble'"'"'s own state, and in a Global install thimble itself with your workspaces. The plugin, the link, the lines an older install.sh added to shell startup files, and the browsers'"'"' sign-in files and keys and the session markers in ~/.thimble still go. In a Dev install your workspaces are in the clone, which uninstall leaves in place\n'
         exit 0;;
       *) printf 'thimble uninstall: unknown argument %s\n' "$arg" >&2; exit 2;;
     esac
@@ -209,7 +209,13 @@ uninstall() {
   local home_raw="${THIMBLE_HOME:-}" home home_note="" home_state=0 link="${THIMBLE_BIN_DIR:-$HOME/.local/bin}/thimble" tree="" kind="" name="" name_note=""
   local inside=0 pid="" port="" pid_note="" conf="" planned="" pport="" link_ours=0 link_why="" stop_how="" have_claude=0 ans cwd rc
   local nsteps=0 ndone=0 nleft=0 left="" id_ok=0 id_conf="" id_note="" changed=0 undo=0 undo_py="" undo_cmd="" undone=1
-  local reg="" reg_ok=1 reg_from="" reg_other="" mkt="" sh_record="" sh_files=() sh_ok=1 kind_ f_ line_ sess=() s_
+  local reg="" reg_ok=1 reg_from="" reg_other="" mkt="" sh_record="" sh_files=() sh_ok=1 kind_ f_ line_ sess=() s_ holds pw_dir
+  # Playwright's cache folder, where install.sh downloads the headless Chromium (install.sh pw_cache)
+  pw_dir="${PLAYWRIGHT_BROWSERS_PATH:-}"
+  case "$pw_dir" in
+    0) pw_dir="";;
+    "") if [ "$(uname -s)" = Darwin ]; then pw_dir="$HOME/Library/Caches/ms-playwright"; else pw_dir="${XDG_CACHE_HOME:-$HOME/.cache}/ms-playwright"; fi;;
+  esac
   case "$home_raw" in *[![:space:]]*) ;; *) home_raw="$HOME/.thimble";; esac   # unset or blank: the default
   home="${home_raw%/}"; [ -n "$home" ] || home=/
   enable -n kill 2>/dev/null || true   # `kill` is the program on PATH, not the builtin: the `+ kill …` line names what ran, and a test can stand a failing one in for it
@@ -222,6 +228,34 @@ uninstall() {
     local _i=0; while alive "$1" && [ "$_i" -lt "$2" ]; do sleep 0.1; _i=$((_i + 1)); done
   }
   run() { printf '+'; printf ' %q' "$@"; printf '\n'; "$@"; }
+  joined() { local sep="$1" out="" x; shift; for x in "$@"; do out="${out:+$out$sep}$x"; done; printf '%s' "$out"; }
+  home_holds() {  # home_holds NAME…: what $home holds but the NAMEs, each entry in words with its name, or nothing
+    local e n what=() logs=() keys=() marks=() rest=()
+    for e in "$home"/* "$home"/.[!.]*; do
+      [ -e "$e" ] || [ -L "$e" ] || continue
+      n="${e##*/}"
+      case " $* " in *" $n "*) continue;; esac
+      case "$n" in
+        app) what+=("thimble itself$( [ ! -d "$e/workspaces" ] || echo ', with your workspaces (notebooks, labels, reports)') (app/)");;
+        workspaces) what+=("your workspaces: notebooks, labels, reports (workspaces/)");;
+        config.json) what+=("your settings (config.json)");;
+        data) what+=("the list of folders thimble opened (data/)");;
+        demo) what+=("the demo datasets you downloaded (demo/)");;
+        examples) what+=("the tour's example data (examples/)");;
+        extensions) what+=("the extensions you added (extensions/)");;
+        *.log | *.log.[0-9]) logs+=("$n");;
+        open | links) keys+=("$n/");;
+        paired.json | session.key) keys+=("$n");;
+        up | active) marks+=("$n/");;
+        *) if [ -d "$e" ]; then rest+=("$n/"); else rest+=("$n"); fi;;
+      esac
+    done
+    [ ${#keys[@]} = 0 ] || what+=("the browsers' sign-in files and keys ($(joined ', ' "${keys[@]}"))")
+    [ ${#marks[@]} = 0 ] || what+=("the markers of the sessions and folders thimble was on in ($(joined ', ' "${marks[@]}"))")
+    [ ${#logs[@]} = 0 ] || what+=("logs ($(joined ', ' "${logs[@]}"))")
+    [ ${#rest[@]} = 0 ] || what+=("thimble's own state ($(joined ', ' "${rest[@]}"))")
+    joined '; ' ${what[@]+"${what[@]}"}
+  }
   step() { nsteps=$((nsteps + 1)); printf '  %d. %s\n' "$nsteps" "$1"; }   # a line of the plan that y runs
   add_left() { nleft=$((nleft + 1)); left="$left  $1"$'\n'"    $2"$'\n'; }   # add_left WHAT-WAS-NOT-DONE COMMAND-TO-FINISH
   json_get() {  # json_get FILE KEY — a top-level string value (python3 when present, else a sed for the flat case); 1 when unreadable
@@ -418,22 +452,29 @@ for m in rows if isinstance(rows, list) else []:
       sh_lines_of "$f_" | while IFS= read -r line_; do printf '       %s\n' "$line_"; done
     done
   fi
-  # what $THIMBLE_HOME holds: the registry of folders (data/) and server state; the app copy and its workspaces
-  # only when the tree is inside it
-  local holds="the registry of folders you opened with /thimble (data/) and server state (app-dir, server.json, server.log)"
-  [ "$inside" = 0 ] || holds="workspaces (your notebooks, labels and reports), the registry of folders you opened with /thimble (data/), server state and the release copy at $tree"
-  # what a kept home must not keep: the press's sign-in files and one-time links (open/, links/), and the markers of the
-  # sessions (up/, with their guide markers) and folders (active/) thimble was on in, which the plugin's hooks look for
-  for s_ in open links up active; do [ ! -e "$home/$s_" ] || sess+=("$home/$s_"); done
+  # what a kept home must not keep: the browsers' sign-in keys (paired.json, session.key), the press's sign-in files and
+  # one-time links (open/, links/), and the markers of the sessions (up/, with their guide markers) and folders (active/)
+  # thimble was on in, which the plugin's hooks look for
+  local signin=(open links up active paired.json session.key) gone=(plugin.json shell-startup)
+  for s_ in "${signin[@]}"; do [ ! -e "$home/$s_" ] || sess+=("$home/$s_"); done
+  # the records that go with what they record, --keep-home or not (below): the plugin's, the startup files', and the
+  # changes to Claude Code's files that claude_changes.py puts back
+  [ -z "$undo_py" ] || gone+=(trust.json trusted-folders.json effort-overrides.json fast-overrides.json statusline-overrides.json)
   if [ "$keep_home" = 1 ] && [ ${#sess[@]} -gt 0 ]; then
-    step "rm -rf ${sess[*]}: the browser's sign-in files and one-time links, and the markers of the sessions and folders thimble was on in"
+    step "rm -rf ${sess[*]}: the browsers' sign-in files and keys (every browser signs in again), the one-time links, and the markers of the sessions and folders thimble was on in"
   fi
-  if [ "$keep_home" = 1 ]; then printf '  %s is kept (--keep-home): %s\n' "$home" "$holds"
-  elif [ "$home_state" = 1 ]; then step "rm -rf $home$home_note: $holds (--keep-home keeps it)"
+  if [ "$keep_home" = 1 ]; then
+    holds="$(home_holds "${signin[@]}" "${gone[@]}")"
+    printf '  %s stays (--keep-home), with %s\n' "$home" "${holds:-nothing in it}"
+  elif [ "$home_state" = 1 ]; then step "rm -rf $home$home_note, with everything in it: $(home_holds) (--keep-home keeps it)"
   elif [ -e "$home" ]; then printf '  %s holds no thimble state; left alone\n' "$home"; fi
   if [ -n "$tree" ] && [ "$inside" = 0 ]; then
     if [ "$kind" = "git checkout" ]; then printf '  the clone at %s is left in place, with your workspaces (notebooks, labels, reports) in %s/workspaces (delete the folder yourself if you want it gone)\n' "$tree" "$tree"
     else printf '  the tree at %s is left in place, with your workspaces (notebooks, labels, reports) in %s/workspaces: it is outside %s (delete the folder yourself if you want it gone)\n' "$tree" "$tree" "$home"; fi
+  fi
+  # the headless Chromium install.sh downloads goes into Playwright's own cache folder, which other programs share
+  if [ -n "$pw_dir" ] && ls -d "$pw_dir"/chromium_headless_shell-* >/dev/null 2>&1; then
+    printf "  the headless Chromium for screenshots stays in %s, Playwright's folder, which other programs may use too (delete it yourself if nothing else needs it)\n" "$pw_dir"
   fi
   if [ "$yes" = 1 ]; then printf '%d steps (--yes: running them)\n' "$nsteps"
   else

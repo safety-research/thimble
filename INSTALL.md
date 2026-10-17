@@ -637,8 +637,12 @@ Dev install that dry run reads the files as they are before the pull.
 `thimble uninstall` asks, then removes the trust entry an install before 0.6.0 added, thimble's plugin and marketplace
 when their folder is this install's, `~/.local/bin/thimble`, the lines an install before 0.8.0 added to your shell's
 startup files (and a startup file it created, once nothing else is in it), and `~/.thimble`, which holds a Global
-install's workspaces. `--keep-home` keeps `~/.thimble`. A clone stays where it is, and so does a downloaded headless Chromium, in
-Playwright's cache folder.
+install's workspaces. Before it asks, it lists what it removes and what stays. `--keep-home` keeps `~/.thimble`: your
+settings, the demo datasets you downloaded, the logs and thimble's own state, and in a Global install thimble itself with
+your workspaces. It still removes the browsers' sign-in files and keys in it, so every browser signs in again, and the
+markers of the sessions and folders thimble was on in. A Dev install keeps your workspaces in the clone's `workspaces/`
+folder, and the clone stays where it is. So does a downloaded headless Chromium, in Playwright's cache folder
+(`~/.cache/ms-playwright`; on macOS `~/Library/Caches/ms-playwright`), which other programs may use too.
 
 To delete one workspace and keep the install, `thimble list` shows the workspaces by id and `thimble purge <id>` deletes
 that one and prints each path it deleted. The folder it read and your Claude Code transcripts stay.

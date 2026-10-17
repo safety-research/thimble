@@ -259,23 +259,33 @@ def test_update_keeps_the_changes_since_the_release_on_a_branch_and_resets_to_th
 
 
 def test_uninstall_with_keep_home_still_removes_the_sign_in_files_and_the_session_markers(tmp_path):
-    """3.15 and 3.21: a kept home keeps its server state and workspaces, but not the press's sign-in files and one-time
-    links (open/, links/), the sessions' markers with their guide markers (up/) or the folders' markers (active/)."""
-    tree = fake_tree(tmp_path / "app")
+    """3.15 and 3.21, bug hunt F15: a kept home keeps its settings, server state and the rest, but not the browsers'
+    sign-in keys (paired.json, session.key), the press's sign-in files and one-time links (open/, links/), the sessions'
+    markers with their guide markers (up/) or the folders' markers (active/). The plan names what stays exactly, says
+    that a Dev install's workspaces are in the clone, and that the downloaded headless Chromium stays."""
+    tree = fake_tree(tmp_path / "thimble", checkout=True)
     env = env_for(tmp_path)
     home = Path(env["THIMBLE_HOME"])
     home.mkdir()
     (home / "app-dir").write_text(f"{tree}\n")
     (home / "plugin.json").write_text(json.dumps({"registered": ""}))  # install.sh registered no plugin
-    for rel in ("open/a1.html", "links/s1.json", "up/s1.active", "up/s1/guide-marker", "active/%w%corpus",
-                "workspaces/w/notebook.json"):
+    for rel in ("open/a1.html", "links/s1.json", "up/s1.active", "up/s1/guide-marker", "active/%w%corpus", "paired.json",
+                "session.key", "config.json", "demo/collusion-wiki/f", "server.log", "tour.json"):
         (home / rel).parent.mkdir(parents=True, exist_ok=True)
         (home / rel).write_text("x")
+    browsers = tmp_path / "home" / ".cache" / "ms-playwright"
+    (browsers / "chromium_headless_shell-1200").mkdir(parents=True)
     r = subprocess.run(["bash", str(tree / "plugin" / "bin" / "thimble"), "uninstall", "--yes", "--keep-home"],
                        capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=60)
     assert r.returncode == 0, r.stdout + r.stderr
-    assert sorted(p.name for p in home.iterdir()) == ["app-dir", "workspaces"]
-    assert "the browser's sign-in files and one-time links, and the markers of the sessions and folders" in r.stdout
+    assert sorted(p.name for p in home.iterdir()) == ["app-dir", "config.json", "demo", "server.log", "tour.json"]
+    assert ": the browsers' sign-in files and keys (every browser signs in again), the one-time links, and the markers " \
+           "of the sessions and folders thimble was on in" in r.stdout, r.stdout
+    assert (f"  {home} stays (--keep-home), with your settings (config.json); the demo datasets you downloaded (demo/); "
+            "logs (server.log); thimble's own state (app-dir, tour.json)\n") in r.stdout, r.stdout
+    assert f"the clone at {tree} is left in place, with your workspaces (notebooks, labels, reports) in {tree}/workspaces" \
+           in r.stdout
+    assert f"the headless Chromium for screenshots stays in {browsers}" in r.stdout
 
 
 def release_zip(tmp_path: Path, name: str = "thimble-0.0.2-abc1234") -> Path:
